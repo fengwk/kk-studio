@@ -34,22 +34,13 @@ class ModelInvocationGroupTest {
   private static ModelRequestSpec groupRequest() {
     ModelRequestSpec single = requestSpec();
     ModelGroupMemberExecution first =
-        new ModelGroupMemberExecution(
-            single.providerType(),
-            single.providerConnectionGenerationId(),
-            single.model(),
-            single.variant());
+        new ModelGroupMemberExecution(single.providerType(), single.model(), single.variant());
     ModelGroupMemberExecution second =
-        new ModelGroupMemberExecution(
-            single.providerType(),
-            single.providerConnectionGenerationId(),
-            single.model(),
-            single.variant());
+        new ModelGroupMemberExecution(single.providerType(), single.model(), single.variant());
     ModelGroupExecution group =
         new ModelGroupExecution("group", 7L, List.of(first, second), Set.of(429), 30);
     return spec(
         single.providerType(),
-        single.providerConnectionGenerationId(),
         single.model(),
         single.variant(),
         single.outputTokens(),

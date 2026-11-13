@@ -51,7 +51,7 @@ import java.util.Set;
  *       选项在 durable payload 中仍是结构化的 object，数值不经过二进制浮点数。
  * </ul>
  *
- * <p>durable descriptor 固定六个字段（含 {@code modelId} 与 {@code inputModalities}），variant 固定 {@code id} /
+ * <p>durable descriptor 固定八个字段（含 {@code modelId} 与 {@code inputModalities}），variant 固定 {@code id} /
  * {@code reasoningEffort} / {@code promptCacheRetention} / {@code protocolOptions} 四个字段，codec
  * 严格要求完整且精确的字段集合。
  */
@@ -70,7 +70,8 @@ public final class ModelDescriptorJsonCodec {
           "inputModalities",
           "tools",
           "reasoning",
-          "midConversationSystemMessages");
+          "midConversationSystemMessages",
+          "messageLevelEffort");
 
   /** variant 字段顺序。 */
   private static final Set<String> VARIANT_FIELDS =
@@ -117,6 +118,7 @@ public final class ModelDescriptorJsonCodec {
     node.put("tools", descriptor.tools());
     node.put("reasoning", descriptor.reasoning());
     node.put("midConversationSystemMessages", descriptor.midConversationSystemMessages());
+    node.put("messageLevelEffort", descriptor.messageLevelEffort());
     return node;
   }
 
@@ -129,6 +131,7 @@ public final class ModelDescriptorJsonCodec {
     boolean tools = bool(node, "tools");
     boolean reasoning = bool(node, "reasoning");
     boolean midConversationSystemMessages = bool(node, "midConversationSystemMessages");
+    boolean messageLevelEffort = bool(node, "messageLevelEffort");
     return new ModelDescriptor(
         providerName,
         modelName,
@@ -136,7 +139,8 @@ public final class ModelDescriptorJsonCodec {
         inputModalities,
         tools,
         reasoning,
-        midConversationSystemMessages);
+        midConversationSystemMessages,
+        messageLevelEffort);
   }
 
   private static Set<ModelInputModality> readInputModalities(ObjectNode node) {

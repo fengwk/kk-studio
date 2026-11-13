@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
@@ -52,6 +54,7 @@ import java.util.TreeMap;
  */
 final class AnthropicStreamAccumulator extends ProviderStreamState {
 
+  private static final Logger log = LoggerFactory.getLogger(AnthropicStreamAccumulator.class);
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final String USAGE_INTEGER_FORMAT = "usage %s must be an integer";
@@ -409,6 +412,8 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       this.messageId = messageNode.get("id").stringValue();
     }
 
+    logInputTransformations(messageNode);
+
     if (messageNode.has("usage")) {
       JsonNode usageNode = messageNode.get("usage");
       if (!usageNode.isObject()) {
@@ -444,6 +449,38 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
         }
       }
     }
+  }
+
+  private void logInputTransformations(JsonNode messageNode) {
+    JsonNode transformations = messageNode.get("input_transformations");
+    if (transformations == null || !transformations.isArray()) {
+      return;
+    }
+    for (JsonNode transformation : transformations) {
+      String type = stringField(transformation, "type");
+      String path = transformation.path("path").toString();
+      String reason = stringField(transformation, "reason");
+      if ("prefix_binding_mismatch".equals(reason)) {
+        log.warn(
+            "Anthropic input transformation responseId={} type={} path={} reason={}",
+            messageId,
+            type,
+            path,
+            reason);
+      } else {
+        log.info(
+            "Anthropic input transformation responseId={} type={} path={} reason={}",
+            messageId,
+            type,
+            path,
+            reason);
+      }
+    }
+  }
+
+  private static String stringField(JsonNode node, String field) {
+    JsonNode value = node.get(field);
+    return value != null && value.isString() ? value.stringValue() : null;
   }
 
   private void handleContentBlockStart(JsonNode root) {

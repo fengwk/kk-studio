@@ -39,9 +39,7 @@ class GatewayConfigurationConditionalTest {
   void modelGatewayDefaultBeanIsSuppressedByAnyPortImplementation() {
     runner
         .withUserConfiguration(ModelExecutionConfiguration.class)
-        .withBean(
-            ProviderResolutionService.class,
-            () -> (frozenType, frozenConnectionGenerationId, request) -> null)
+        .withBean(ProviderResolutionService.class, () -> (frozenType, request) -> null)
         .withBean(
             ModelGateway.class,
             () -> SingleModelGateway.of(execution -> new ModelGateway.Busy(Duration.ofSeconds(1))))
@@ -92,9 +90,7 @@ class GatewayConfigurationConditionalTest {
     runner
         .withUserConfiguration(ModelExecutionConfiguration.class)
         .withBean(ModelPricingPlanSource.class, () -> mock(ModelPricingPlanSource.class))
-        .withBean(
-            ProviderResolutionService.class,
-            () -> (frozenType, frozenConnectionGenerationId, request) -> null)
+        .withBean(ProviderResolutionService.class, () -> (frozenType, request) -> null)
         .run(
             context -> {
               assertTrue(context.containsBean("platformModelGateway"));

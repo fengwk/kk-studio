@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 
 import java.time.Instant;
@@ -100,6 +101,19 @@ public record ModelInvocation(
         updatedAt,
         null,
         null);
+  }
+
+  /** 当前成功回复实际声明的 reasoning effort；未声明或关闭时为 null。 */
+  public String actualEffort() {
+    ModelVariant variant = requestSpec.variant();
+    if (requestSpec.groupExecution() != null) {
+      if (groupProgress == null
+          || groupProgress.memberIndex() >= requestSpec.groupExecution().members().size()) {
+        throw new IllegalStateException("group invocation has invalid durable progress");
+      }
+      variant = requestSpec.groupExecution().members().get(groupProgress.memberIndex()).variant();
+    }
+    return variant.reasoningOff() ? null : variant.reasoningEffort();
   }
 
   /** 本次真实执行的逻辑选择：组取 durable 成员游标对应成员，单模型取冻结 descriptor/variant。 */

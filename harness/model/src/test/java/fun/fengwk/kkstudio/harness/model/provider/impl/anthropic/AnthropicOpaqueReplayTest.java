@@ -45,7 +45,6 @@ import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 验证 native-only block 的 opaque replay 与官方字段保真：
@@ -68,8 +67,7 @@ class AnthropicOpaqueReplayTest {
           "test-anthropic",
           ProviderType.ANTHROPIC,
           "https://api.anthropic.com/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
 
   /**
    * 测试意图：server tool use 这类 native block 携带 {@code input_json_delta} 时，partial JSON 依序累积并在终态解析为

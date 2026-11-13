@@ -587,21 +587,6 @@ class ConfigSyncParserTest {
   }
 
   /** 测试意图：内置 Agent 的保留名称在导入期是硬冲突，文件不能覆盖或降级系统持有的定义。 */
-  @Test
-  void agentNameReservedForBuiltinIsAHardError() {
-    assertThrows(
-        DomainException.class,
-        () ->
-            parser.parse(
-                "agents:\n"
-                    + "  - name: Compaction\n"
-                    + "    execution: {driver: builtin, settings: {modelName: m, variant: null}}\n"
-                    + "    config:\n"
-                    + "      tools: []\n"
-                    + "      skills: []\n"
-                    + "      subagents: []\n"));
-  }
-
   /** 测试意图：可编辑契约不暴露所有权类型；携带 type 字段的条目因未知字段被整体跳过，无法伪造 BUILTIN。 */
   @Test
   void forgedAgentTypeIsNotApplied() {

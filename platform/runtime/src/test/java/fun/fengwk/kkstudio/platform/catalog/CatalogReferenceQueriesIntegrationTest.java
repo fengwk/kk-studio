@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchem
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.UUID;
 
 /** 目录仓库的存在性检查直接按 JSONB 引用判断，不依赖 count 查询。 */
 class CatalogReferenceQueriesIntegrationTest {
@@ -63,11 +62,10 @@ class CatalogReferenceQueriesIntegrationTest {
     fixture
         .sql(
             """
-            insert into provider (name, provider_type, config, connection_generation_id)
-            values (:name, 'openai', '{}'::jsonb, :generation)
+            insert into provider (name, provider_type, config)
+            values (:name, 'openai', '{}'::jsonb)
             """)
         .param("name", name)
-        .param("generation", UUID.randomUUID())
         .update();
   }
 

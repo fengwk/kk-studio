@@ -33,10 +33,8 @@ public abstract class OwnerTestSupport extends PostgresSpringTestSupport {
     String modelName = "model-" + suffix;
     String agentName = "agent-" + suffix;
     jdbc.update(
-        "insert into provider (name, provider_type, config, connection_generation_id)"
-            + " values (?, 'openai', '{}'::jsonb, ?::uuid)",
-        providerName,
-        uuid());
+        "insert into provider (name, provider_type, config)" + " values (?, 'openai', '{}'::jsonb)",
+        providerName);
     jdbc.update(
         "insert into model (name, kind, provider_name, model_id, config)"
             + " values (?, 'MODEL', ?, ?, '{}'::jsonb)",

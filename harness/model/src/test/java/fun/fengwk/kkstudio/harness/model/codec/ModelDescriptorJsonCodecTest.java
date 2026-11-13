@@ -192,6 +192,24 @@ class ModelDescriptorJsonCodecTest {
     assertEquals(first, second);
   }
 
+  @Test
+  void roundTripsMessageLevelEffortCapability() {
+    ModelDescriptor descriptor =
+        new ModelDescriptor(
+            "provider",
+            "model",
+            "wire-model",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            true,
+            true);
+
+    ModelDescriptor decoded = codec.decodeDescriptorNode(codec.encodeDescriptorNode(descriptor));
+    assertEquals(descriptor, decoded);
+    assertTrue(decoded.messageLevelEffort());
+  }
+
   /** descriptor 字段顺序固定。 */
   @Test
   void descriptorFieldsAreInFixedOrder() throws Exception {

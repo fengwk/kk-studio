@@ -10,15 +10,13 @@ import fun.fengwk.kkstudio.platform.persistence.PostgresJdbcTypes;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 
 /** {@code provider} 的 JdbcClient 仓库；写入以 (name, version) 做原子 CAS。 */
 @Repository
 public class ProviderRepository {
 
   private static final String COLUMNS =
-      "name, description, provider_type, base_url, credential, config, connection_generation_id, version, "
-          + "created_at, updated_at";
+      "name, description, provider_type, base_url, credential, config, version, created_at, updated_at";
 
   private static final RowMapper<Provider> ROW_MAPPER =
       (rs, rowNum) ->
@@ -29,7 +27,6 @@ public class ProviderRepository {
               rs.getString("base_url"),
               rs.getString("credential"),
               rs.getString("config"),
-              rs.getObject("connection_generation_id", UUID.class),
               rs.getLong("version"),
               PostgresJdbcTypes.toInstant(rs.getObject("created_at", OffsetDateTime.class)),
               PostgresJdbcTypes.toInstant(rs.getObject("updated_at", OffsetDateTime.class)));
@@ -63,10 +60,10 @@ public class ProviderRepository {
                 """
                 insert into provider (
                     name, description, provider_type, base_url, credential, config,
-                    connection_generation_id, created_at, updated_at, version
+                    created_at, updated_at, version
                 ) values (
                     :name, :description, :providerType, :baseUrl, :credential,
-                    cast(:configJson as jsonb), :connectionGenerationId, current_timestamp, current_timestamp, 0
+                    cast(:configJson as jsonb), current_timestamp, current_timestamp, 0
                 )
                 """)
             .param("name", provider.name())
@@ -75,7 +72,6 @@ public class ProviderRepository {
             .param("baseUrl", provider.baseUrl())
             .param("credential", provider.credential())
             .param("configJson", provider.configJson())
-            .param("connectionGenerationId", provider.connectionGenerationId())
             .update()
         == 1;
   }
@@ -89,7 +85,6 @@ public class ProviderRepository {
                 set description = :description, provider_type = :providerType,
                     base_url = :baseUrl,
                     credential = :credential, config = cast(:configJson as jsonb),
-                    connection_generation_id = :connectionGenerationId,
                     updated_at = greatest(updated_at, current_timestamp), version = version + 1
                 where name = :name and version = :expectedVersion
                 """)
@@ -98,7 +93,6 @@ public class ProviderRepository {
             .param("baseUrl", provider.baseUrl())
             .param("credential", provider.credential())
             .param("configJson", provider.configJson())
-            .param("connectionGenerationId", provider.connectionGenerationId())
             .param("name", provider.name())
             .param("expectedVersion", expectedVersion)
             .update()

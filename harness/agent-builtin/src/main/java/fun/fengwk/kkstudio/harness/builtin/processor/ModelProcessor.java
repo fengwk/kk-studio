@@ -299,7 +299,6 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
                   invocationId,
                   Math.addExact(dispatched.attempt(), 1),
                   actualRequest(dispatched).providerType(),
-                  actualRequest(dispatched).providerConnectionGenerationId(),
                   providerRequest));
     } catch (RuntimeException failure) {
       // 契约：admit 抛异常表示尚未占用任何名额也未发出请求，按兜底延迟重排。

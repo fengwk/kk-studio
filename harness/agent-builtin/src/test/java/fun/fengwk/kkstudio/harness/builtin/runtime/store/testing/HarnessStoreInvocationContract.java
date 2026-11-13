@@ -2659,7 +2659,7 @@ public abstract class HarnessStoreInvocationContract {
                       turnEndId,
                       baseline.sessionId(),
                       resultEntryId,
-                      new TurnEndPayload(start, TurnEndOutcome.COMPLETED, false, null, null),
+                      new TurnEndPayload(start, TurnEndOutcome.COMPLETED, true, null, null),
                       T2));
           tx.threads()
               .update(

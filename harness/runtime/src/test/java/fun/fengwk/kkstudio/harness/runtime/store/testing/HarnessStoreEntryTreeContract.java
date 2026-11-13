@@ -1261,7 +1261,7 @@ public abstract class HarnessStoreEntryTreeContract {
                       turnEndId,
                       sessionId,
                       summaryId,
-                      new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, true, null, null),
                       createdAt));
           return turnEndId;
         });
@@ -1295,7 +1295,7 @@ public abstract class HarnessStoreEntryTreeContract {
                       turnEndId,
                       sessionId,
                       assistantId,
-                      new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, false, null, null),
+                      new TurnEndPayload(turnStartId, TurnEndOutcome.COMPLETED, true, null, null),
                       createdAt));
           return turnEndId;
         });

@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** 对齐上游 PartsAndContentsMapper、FunctionMapper 与 FinishReason 契约的测试。 */
 class GeminiRequestMapperTest {
@@ -49,8 +48,7 @@ class GeminiRequestMapperTest {
         "google-test",
         ProviderType.GOOGLE,
         "https://generativelanguage.googleapis.com",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-        new UUID(1L, 2L));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
   }
 
   private static ModelDescriptor model() {

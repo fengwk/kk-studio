@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** Verifies that Responses native items are replayed from their owning ordered assistant blocks. */
 class OpenAiResponsesOpaqueItemReplayTest {
@@ -49,8 +48,7 @@ class OpenAiResponsesOpaqueItemReplayTest {
         "openai_test",
         ProviderType.OPENAI_RESPONSES,
         "https://api.openai.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private static ModelDescriptor createModel() {

@@ -15,26 +15,21 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 一次 Model invocation 的紧凑冻结请求。
  *
- * <p>{@link ProviderType}、{@code providerConnectionGenerationId}、{@link ModelDescriptor}、{@link
- * ModelVariant}、完整 {@code modelVariants}、{@code outputTokens}、{@code systemInstruction}、命名 {@code
- * systemSections} 与 bindings 是本次调用的唯一 durable 契约。connection generation 防止 Provider
- * endpoint、凭据或协议配置轮换后，既有 invocation 静默改用新连接。{@code outputTokens} 是本次请求唯一的输出预算（普通 turn 由 Model 级
- * {@code limit.output} 与剩余上下文计算，压缩 turn 由压缩阶段预算决定），Provider 请求必须原样携带该预算。完整对话历史、可由 {@code
- * toolBindings} 派生的 Provider tools、顶层 Environment、YOLO、contextWindow 与压缩元数据（压缩调用由 basis EntryPath
- * 末尾 owned TURN_START.compaction 识别）都不进入本对象；每次 attempt 由 {@link ModelRequestMaterializer} 从
- * EntryPath 重建内存 {@code ProviderRequest}。
+ * <p>{@link ProviderType}、{@link ModelDescriptor}、所选 {@link ModelVariant}、{@code outputTokens} 与唯一的
+ * {@code systemInstruction} / bindings 是本次调用的唯一 durable 契约。 {@code outputTokens} 是本次请求唯一的输出预算（普通
+ * turn 由 Model 级 {@code limit.output} 与剩余上下文计算，压缩 turn 由压缩阶段预算决定），Provider 请求必须原样携带该预算。完整对话历史、可由
+ * {@code toolBindings} 派生的 Provider tools、顶层 Environment、YOLO、contextWindow 与压缩元数据（压缩调用由 basis
+ * EntryPath 末尾 owned TURN_START.compaction 识别）都不进入本对象；每次 attempt 由 {@link ModelRequestMaterializer}
+ * 从 EntryPath 重建内存 {@code ProviderRequest}。
  */
 public record ModelRequestSpec(
     ProviderType providerType,
-    UUID providerConnectionGenerationId,
     ModelDescriptor model,
     ModelVariant variant,
-    List<ModelVariant> modelVariants,
     int outputTokens,
     String systemInstruction,
     List<ToolBinding> toolBindings,
@@ -44,11 +39,8 @@ public record ModelRequestSpec(
 
   public ModelRequestSpec {
     providerType = Objects.requireNonNull(providerType, "providerType");
-    providerConnectionGenerationId =
-        Objects.requireNonNull(providerConnectionGenerationId, "providerConnectionGenerationId");
     model = Objects.requireNonNull(model, "model");
     variant = Objects.requireNonNull(variant, "variant");
-    modelVariants = ModelGroupMemberExecution.validateVariants(variant, modelVariants);
     if (outputTokens <= 0) {
       throw new IllegalArgumentException("outputTokens must be positive");
     }
@@ -89,10 +81,8 @@ public record ModelRequestSpec(
     ModelGroupMemberExecution member = groupExecution.members().get(memberIndex);
     return new ModelRequestSpec(
         member.providerType(),
-        member.providerConnectionGenerationId(),
         member.model(),
         member.variant(),
-        member.modelVariants(),
         outputTokens,
         systemInstruction,
         toolBindings,

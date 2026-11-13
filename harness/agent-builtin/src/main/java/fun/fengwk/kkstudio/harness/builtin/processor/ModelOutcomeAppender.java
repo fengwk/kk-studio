@@ -89,7 +89,8 @@ public final class ModelOutcomeAppender {
                     response,
                     model.requestSpec().toolBindings(),
                     model.actualSelection(),
-                    model.requestedAt())
+                    model.requestedAt(),
+                    model.actualEffort())
                 : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
             mutationNow);
     tx.entries().insert(resultEntry);

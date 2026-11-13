@@ -498,6 +498,10 @@ export const resourcesCatalog = {
     'en-US': 'Mid-conversation system messages',
     'zh-CN': '对话中的系统消息更新',
   },
+  'ai.catalog.form.messageLevelEffort': {
+    'en-US': 'Per-message reasoning effort',
+    'zh-CN': '消息级推理强度',
+  },
   'ai.catalog.form.inputTypes': {
     'en-US': 'Input types',
     'zh-CN': '输入类型',

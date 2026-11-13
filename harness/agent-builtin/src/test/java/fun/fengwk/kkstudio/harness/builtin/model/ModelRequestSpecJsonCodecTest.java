@@ -24,7 +24,6 @@ import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -37,53 +36,23 @@ class ModelRequestSpecJsonCodecTest {
   private final ModelDescriptorJsonCodec modelCodec = new ModelDescriptorJsonCodec();
   private final ToolBindingJsonCodec bindingCodec = new ToolBindingJsonCodec();
 
-  /** variants 是不可变冻结列表，解码必须拒绝缺失、重复和与选择不一致的值。 */
   @Test
-  void strictlyFreezesAndValidatesVariants() {
-    ModelRequestSpec base = hostModelRequest();
-    ModelVariant extra = new ModelVariant("other", "max", PromptCacheRetention.LONG, null);
-    var variants = new ArrayList<>(List.of(base.variant(), extra));
-    ModelRequestSpec spec =
-        spec(
-            base.providerType(),
-            base.providerConnectionGenerationId(),
-            base.model(),
-            base.variant(),
-            variants,
-            base.outputTokens(),
-            base.systemInstruction(),
-            base.toolBindings(),
-            base.subagentBindings());
-    variants.clear();
-    assertEquals(List.of(base.variant(), extra), codec.decode(codec.encode(spec)).modelVariants());
-    assertThrows(UnsupportedOperationException.class, () -> spec.modelVariants().clear());
-    ObjectNode missing = codec.encodeNode(spec);
-    missing.remove("modelVariants");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(missing));
-    ObjectNode duplicate = codec.encodeNode(spec);
-    duplicate
-        .putArray("modelVariants")
-        .add(modelCodec.encodeVariantNode(base.variant()))
-        .add(modelCodec.encodeVariantNode(base.variant()));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(duplicate));
-    ObjectNode inconsistent = codec.encodeNode(spec);
-    inconsistent.putArray("modelVariants").add(modelCodec.encodeVariantNode(extra));
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(inconsistent));
+  void requestStoresOnlyTheSelectedVariant() {
+    ModelRequestSpec spec = hostModelRequest();
+    ModelRequestSpec decoded = codec.decode(codec.encode(spec));
+
+    assertEquals(spec.variant(), decoded.variant());
+    assertFalse(codec.encodeNode(spec).has("modelVariants"));
   }
 
   @Test
   void roundTripsEnvironmentRequestWithCanonicalJson() {
     ModelRequestSpec requestSpec = environmentModelRequest();
     String expected =
-        "{\"providerType\":\"OPENAI\",\"providerConnectionGenerationId\":\""
-            + requestSpec.providerConnectionGenerationId()
-            + "\",\"model\":"
+        "{\"providerType\":\"OPENAI\",\"model\":"
             + modelCodec.encodeDescriptorNode(requestSpec.model())
             + ",\"variant\":"
             + modelCodec.encodeVariantNode(requestSpec.variant())
-            + ",\"modelVariants\":["
-            + modelCodec.encodeVariantNode(requestSpec.variant())
-            + "]"
             + ",\"outputTokens\":"
             + requestSpec.outputTokens()
             + ",\"systemInstruction\":\""
@@ -102,21 +71,17 @@ class ModelRequestSpecJsonCodecTest {
         () -> codec.decode(expected).toolBindings().add(requestSpec.toolBindings().getFirst()));
   }
 
-  // 测试意图: 组版本与每个成员的 Provider/generation/descriptor/variant 必须完整冻结并严格 round-trip，
+  // 测试意图: 组版本与每个成员的 Provider/descriptor/variant 必须完整冻结并严格 round-trip，
   // 成员切换只派生顶层执行身份，组快照本身不变。
   @Test
   void roundTripsFrozenGroupExecutionAndSelectsMemberWithoutMutatingGroup() {
     ModelRequestSpec single = hostModelRequest();
     ModelGroupMemberExecution first =
-        new ModelGroupMemberExecution(
-            single.providerType(),
-            single.providerConnectionGenerationId(),
-            single.model(),
-            single.variant());
+        new ModelGroupMemberExecution(single.providerType(), single.model(), single.variant());
+    ModelVariant secondVariant = new ModelVariant("v2", null, PromptCacheRetention.SHORT, null);
     ModelGroupMemberExecution second =
         new ModelGroupMemberExecution(
             single.providerType(),
-            single.providerConnectionGenerationId(),
             new ModelDescriptor(
                 single.model().providerName(),
                 "second-model",
@@ -124,16 +89,12 @@ class ModelRequestSpecJsonCodecTest {
                 single.model().inputModalities(),
                 single.model().tools(),
                 single.model().reasoning()),
-            new ModelVariant("v2", null, PromptCacheRetention.SHORT, null),
-            List.of(
-                new ModelVariant("v2", null, PromptCacheRetention.SHORT, null),
-                new ModelVariant("v3", "max", PromptCacheRetention.LONG, null)));
+            secondVariant);
     ModelGroupExecution group =
         new ModelGroupExecution("fallback-group", 9L, List.of(first, second), Set.of(429, 503), 45);
     ModelRequestSpec spec =
         spec(
             first.providerType(),
-            first.providerConnectionGenerationId(),
             first.model(),
             first.variant(),
             single.outputTokens(),
@@ -146,8 +107,10 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec decoded = codec.decode(encoded);
     assertEquals(spec, decoded);
     assertEquals("second-model", decoded.forMember(1).model().modelName());
-    assertEquals("v2", decoded.forMember(1).variant().id());
-    assertEquals(second.modelVariants(), decoded.forMember(1).modelVariants());
+    assertEquals(secondVariant, decoded.forMember(1).variant());
+    assertFalse(
+        ((ObjectNode) codec.encodeNode(spec).path("groupExecution").path("members").get(1))
+            .has("modelVariants"));
     assertEquals(group.groupName(), decoded.groupExecution().groupName());
     assertEquals(group.groupVersion(), decoded.groupExecution().groupVersion());
     assertEquals(group.members(), decoded.groupExecution().members());
@@ -156,9 +119,6 @@ class ModelRequestSpecJsonCodecTest {
         decoded.groupExecution().fallbackStatusCodes().stream().sorted().toList());
     assertEquals(group.cooldownSeconds(), decoded.groupExecution().cooldownSeconds());
     assertSame(decoded.groupExecution(), decoded.forMember(1).groupExecution());
-    ObjectNode malformed = codec.encodeNode(spec);
-    ((ObjectNode) malformed.path("groupExecution").path("members").get(1)).remove("modelVariants");
-    assertThrows(IllegalArgumentException.class, () -> codec.decodeNode(malformed));
   }
 
   @Test
@@ -167,7 +127,6 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec requestSpec =
         spec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             base.variant(),
             base.outputTokens(),
@@ -192,7 +151,6 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec requestSpec =
         spec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             base.variant(),
             base.outputTokens(),
@@ -212,10 +170,8 @@ class ModelRequestSpecJsonCodecTest {
     assertEquals(
         Set.of(
             "providerType",
-            "providerConnectionGenerationId",
             "model",
             "variant",
-            "modelVariants",
             "outputTokens",
             "systemInstruction",
             "systemSections",
@@ -235,7 +191,6 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec requestSpec =
         spec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             base.variant(),
             base.outputTokens(),
@@ -283,10 +238,6 @@ class ModelRequestSpecJsonCodecTest {
     providerType.put("providerType", "UNKNOWN");
     assertInvalid(providerType);
 
-    ObjectNode providerConnectionGenerationId = encodedNode();
-    providerConnectionGenerationId.put("providerConnectionGenerationId", "not-a-uuid");
-    assertInvalid(providerConnectionGenerationId);
-
     ObjectNode toolsType = encodedNode();
     toolsType.putObject("toolBindings");
     assertInvalid(toolsType);
@@ -310,7 +261,6 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec specWithSubagent =
         spec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             base.variant(),
             base.outputTokens(),
@@ -353,7 +303,6 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec requestSpec =
         spec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             new ModelVariant(
                 "v1", "high", PromptCacheRetention.LONG, new ProviderProtocolOptions(rawOptions)),

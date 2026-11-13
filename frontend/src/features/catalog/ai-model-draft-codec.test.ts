@@ -38,6 +38,7 @@ function fullConfig(): ModelConfigDTO {
       tools: false,
       reasoning: true,
       midConversationSystemMessages: false,
+      messageLevelEffort: false,
       inputModalities: ['TEXT', 'IMAGE', 'AUDIO'],
     },
     pricing: {
@@ -95,6 +96,7 @@ describe('ai-model-draft-codec', () => {
       tools: false,
       reasoning: true,
       midConversationSystemMessages: false,
+      messageLevelEffort: false,
       inputModalities: ['TEXT', 'IMAGE', 'AUDIO'],
       defaultVariant: 'quality',
       variants: [
@@ -121,16 +123,28 @@ describe('ai-model-draft-codec', () => {
     expect(extractDefaultVariantFromModel(source)).toBe('quality')
   })
 
-  it('round-trips the mid-conversation system-message capability', () => {
+  it('round-trips mid-conversation system-message and per-message effort capabilities', () => {
     const config = fullConfig()
     const source = model({
       ...config,
-      abilities: { ...config.abilities, midConversationSystemMessages: true },
+      abilities: {
+        ...config.abilities,
+        midConversationSystemMessages: true,
+        messageLevelEffort: true,
+      },
     })
 
-    expect(toModelDraft(source).midConversationSystemMessages).toBe(true)
-    expect(buildModelConfig(draft({ midConversationSystemMessages: true })).abilities)
-      .toHaveProperty('midConversationSystemMessages', true)
+    expect(toModelDraft(source)).toMatchObject({
+      midConversationSystemMessages: true,
+      messageLevelEffort: true,
+    })
+    expect(buildModelConfig(draft({
+      midConversationSystemMessages: true,
+      messageLevelEffort: true,
+    })).abilities).toMatchObject({
+      midConversationSystemMessages: true,
+      messageLevelEffort: true,
+    })
   })
 
   /** 新建 model 草稿默认仅 TEXT（而非包含所有 modality）。 */
@@ -171,6 +185,7 @@ describe('ai-model-draft-codec', () => {
         tools: true,
         reasoning: true,
         midConversationSystemMessages: false,
+      messageLevelEffort: false,
         inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'],
       },
       pricing: {

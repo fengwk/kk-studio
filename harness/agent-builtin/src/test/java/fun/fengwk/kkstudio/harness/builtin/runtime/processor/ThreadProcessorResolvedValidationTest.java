@@ -152,7 +152,6 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
             "dev");
     return spec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         new ModelDescriptor(
             "provider",
             builtinExecution(settings).modelName(),

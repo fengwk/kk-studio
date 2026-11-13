@@ -277,10 +277,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
         new LiveTurnPlan.Planned(
             new ModelRequestSpec(
                 first.providerType(),
-                first.providerConnectionGenerationId(),
                 resolved.descriptor(),
                 first.variant(),
-                first.parsed().variants(),
                 outputTokens,
                 systemInstruction,
                 context.toolBindings(),
@@ -401,12 +399,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
         member.descriptor(), contextWindow(member.parsed()), List.of(member), null);
   }
 
-  /** 冻结组版本、有序成员及其 Provider/连接代际/Descriptor/Variant：组能力取成员输入模态的交集、上下文取最小值，成员切换绝不重新读取 Catalog。 */
+  /** 冻结组版本、有序成员及其 Provider/Descriptor/Variant：组能力取成员输入模态的交集、上下文取最小值，成员切换绝不重新读取 Catalog。 */
   private ResolvedSelection resolveGroup(Model groupModel) {
     ModelGroupConfigDTO group = groupConfigCodec.decode(groupModel.groupConfigJson());
     List<MemberRuntime> members = new ArrayList<>(group.getMembers().size());
     List<ModelGroupMemberExecution> executions = new ArrayList<>(group.getMembers().size());
     Set<ModelInputModality> modalities = null;
+    boolean tools = true;
+    boolean reasoning = true;
+    boolean midConversationSystemMessages = true;
+    boolean messageLevelEffort = true;
     int contextWindow = Integer.MAX_VALUE;
     for (ModelGroupMemberDTO member : group.getMembers()) {
       Model memberModel =
@@ -420,11 +422,11 @@ public final class DatabaseTurnResolver implements TurnResolver {
       members.add(runtime);
       executions.add(
           new ModelGroupMemberExecution(
-              runtime.providerType(),
-              runtime.providerConnectionGenerationId(),
-              runtime.descriptor(),
-              runtime.variant(),
-              runtime.parsed().variants()));
+              runtime.providerType(), runtime.descriptor(), runtime.variant()));
+      tools &= runtime.descriptor().tools();
+      reasoning &= runtime.descriptor().reasoning();
+      midConversationSystemMessages &= runtime.descriptor().midConversationSystemMessages();
+      messageLevelEffort &= runtime.descriptor().messageLevelEffort();
       if (modalities == null) {
         modalities = new LinkedHashSet<>(runtime.descriptor().inputModalities());
       } else {
@@ -442,9 +444,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
             groupModel.name(),
             first.modelId(),
             modalities,
-            first.tools(),
-            first.reasoning(),
-            first.midConversationSystemMessages());
+            tools,
+            reasoning,
+            midConversationSystemMessages,
+            messageLevelEffort);
     ModelGroupExecution execution =
         new ModelGroupExecution(
             groupModel.name(),
@@ -465,10 +468,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (providerType == null) {
       throw rejection("provider type must not be null");
     }
-    UUID providerConnectionGenerationId =
-        require(
-            provider.connectionGenerationId(),
-            "provider connection generation id must not be null");
     require(
         providerFactories.get(providerType),
         "provider factory not found for " + provider.name() + " (" + providerType + ")");
@@ -485,15 +484,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
             parsed.inputModalities(),
             parsed.tools(),
             parsed.reasoning(),
-            parsed.midConversationSystemMessages());
-    return new MemberRuntime(
-        model.name(),
-        provider,
-        providerType,
-        providerConnectionGenerationId,
-        parsed,
-        descriptor,
-        variant);
+            parsed.midConversationSystemMessages(),
+            parsed.messageLevelEffort());
+    return new MemberRuntime(model.name(), provider, providerType, parsed, descriptor, variant);
   }
 
   private static void requireReasoningSupport(MemberRuntime member) {
@@ -566,13 +559,20 @@ public final class DatabaseTurnResolver implements TurnResolver {
             .min()
             .orElseThrow();
     MemberRuntime first = resolved.members().getFirst();
+    // 消息级 effort 模型：压缩分支在摘要指令之后显式声明 low，仍然保持同一具体模型与 variant 身份。
+    ModelVariant requestVariant =
+        resolved.descriptor().reasoning() && resolved.descriptor().messageLevelEffort()
+            ? new ModelVariant(
+                first.variant().id(),
+                "low",
+                first.variant().promptCacheRetention(),
+                first.variant().protocolOptions())
+            : first.variant();
     return new TurnResolver.Resolved(
         new ModelRequestSpec(
             first.providerType(),
-            first.providerConnectionGenerationId(),
             resolved.descriptor(),
-            first.variant(),
-            first.parsed().variants(),
+            requestVariant,
             outputTokens,
             systemInstruction,
             // 分支工具面来自切点 SYSTEM 基线（SystemContext.tools），不需要也不应重新冻结 ToolBinding。
@@ -666,7 +666,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
       String modelName,
       Provider provider,
       ProviderType providerType,
-      UUID providerConnectionGenerationId,
       ParsedAgentModelConfig parsed,
       ModelDescriptor descriptor,
       ModelVariant variant) {}

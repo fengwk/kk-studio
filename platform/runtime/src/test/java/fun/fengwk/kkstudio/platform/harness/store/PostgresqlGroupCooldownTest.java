@@ -286,10 +286,8 @@ class PostgresqlGroupCooldownTest {
     try (Connection connection = PostgresqlHarnessStoreFixture.dataSource().getConnection()) {
       try (PreparedStatement provider =
           connection.prepareStatement(
-              "insert into provider"
-                  + " (name, provider_type, config, connection_generation_id)"
-                  + " values ('provider', 'openai', '{}'::jsonb, ?)")) {
-        provider.setObject(1, UUID.fromString("00000000-0000-0000-0000-000000000001"));
+              "insert into provider (name, provider_type, config)"
+                  + " values ('provider', 'openai', '{}'::jsonb)")) {
         provider.executeUpdate();
       }
       execute(

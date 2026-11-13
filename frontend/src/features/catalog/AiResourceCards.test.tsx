@@ -15,7 +15,7 @@ function model(overrides: Partial<SingleModelDTO> = {}): SingleModelDTO {
     description: 'model description',
     config: {
       limit: { context: 128000, output: 8192 },
-      abilities: { tools: true, reasoning: true, midConversationSystemMessages: false, inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'] },
+      abilities: { tools: true, reasoning: true, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'] },
       pricing: {
       base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
       overrides: [],
@@ -297,7 +297,7 @@ describe('AI resource cards', () => {
       config: {
         ...model().config!,
         limit: { context: 0, output: 0 },
-        abilities: { tools: false, reasoning: false, midConversationSystemMessages: false, inputModalities: [] },
+        abilities: { tools: false, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: [] },
         defaultVariant: '',
         variants: [],
       },

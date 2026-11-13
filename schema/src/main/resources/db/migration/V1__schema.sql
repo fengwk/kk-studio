@@ -851,7 +851,6 @@ create table provider (
     base_url        varchar(512),
     credential      varchar(512),
     config          jsonb         not null,
-    connection_generation_id uuid not null,
     created_at      timestamptz(3) not null default current_timestamp,
     updated_at      timestamptz(3) not null default current_timestamp,
     version         bigint        not null default 0,

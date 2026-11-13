@@ -700,7 +700,6 @@ public final class HarnessRuntimeTestSupport {
     ProviderRequest provider = providerRequest();
     return spec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
         1024,
@@ -1308,7 +1307,6 @@ public final class HarnessRuntimeTestSupport {
     }
     return spec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
@@ -1385,7 +1383,6 @@ public final class HarnessRuntimeTestSupport {
     ProviderRequest provider = providerRequest();
     return spec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
         1024,

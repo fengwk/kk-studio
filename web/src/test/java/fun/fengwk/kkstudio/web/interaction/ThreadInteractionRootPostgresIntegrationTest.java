@@ -1239,10 +1239,8 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
   private static ModelRequestSpec requestSpec(ToolBinding binding) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
-        List.of(new ModelVariant("v1", null, PromptCacheRetention.NONE, null)),
         1024,
         "Test system instruction.",
         List.of(binding),

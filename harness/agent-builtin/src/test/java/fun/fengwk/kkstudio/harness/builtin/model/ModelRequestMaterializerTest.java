@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.sp
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -20,13 +21,17 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.ForkMode;
+import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
@@ -69,6 +74,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -78,6 +84,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -99,25 +106,15 @@ class ModelRequestMaterializerTest {
     ModelVariant none = new ModelVariant("v1", null, PromptCacheRetention.NONE, null);
     ModelVariant shortCache = new ModelVariant("v2", null, PromptCacheRetention.SHORT, null);
     List<ModelGroupMemberExecution> members = new ArrayList<>();
-    members.add(new ModelGroupMemberExecution(ProviderType.OPENAI, id(1L), descriptor(), none));
-    members.add(
-        new ModelGroupMemberExecution(ProviderType.OPENAI, id(1L), descriptor(), shortCache));
+    members.add(new ModelGroupMemberExecution(ProviderType.OPENAI, descriptor(), none));
+    members.add(new ModelGroupMemberExecution(ProviderType.OPENAI, descriptor(), shortCache));
     ModelGroupExecution group = new ModelGroupExecution("group", 1L, members, Set.of(429), 30);
     ModelRequestSpec spec =
-        spec(
-            ProviderType.OPENAI,
-            id(1L),
-            descriptor(),
-            none,
-            1024,
-            "system",
-            List.of(),
-            List.of(),
-            group);
+        spec(ProviderType.OPENAI, descriptor(), none, 1024, "system", List.of(), List.of(), group);
     EntryPath path = new EntryPath(List.of(entry(1, 0, new RootPayload(SETTINGS))));
 
     ProviderRequest first = MATERIALIZER.materialize(path, spec.forMember(0));
-    members.set(1, new ModelGroupMemberExecution(ProviderType.OPENAI, id(1L), descriptor(), none));
+    members.set(1, new ModelGroupMemberExecution(ProviderType.OPENAI, descriptor(), none));
     ProviderRequest second = MATERIALIZER.materialize(path, spec.forMember(1));
     assertEquals(ProviderCacheControl.none(), first.cacheControl());
     assertEquals(
@@ -144,7 +141,6 @@ class ModelRequestMaterializerTest {
             new EntryPath(List.of(root, baseline, change)),
             spec(
                 ProviderType.OPENAI,
-                id(1L),
                 descriptor(),
                 variant(),
                 1024,
@@ -199,11 +195,16 @@ class ModelRequestMaterializerTest {
     ModelRequestSpec spec =
         spec(
             ProviderType.ANTHROPIC,
-            id(1L),
             new ModelDescriptor(
-                "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
+                "anthropic",
+                "model",
+                "model",
+                Set.of(ModelInputModality.TEXT),
+                true,
+                true,
+                true,
+                false),
             variant,
-            List.of(variant),
             1024,
             "[agent]\nnew",
             List.of(bashBinding()),
@@ -271,11 +272,16 @@ class ModelRequestMaterializerTest {
     ModelRequestSpec spec =
         spec(
             ProviderType.ANTHROPIC,
-            id(1L),
             new ModelDescriptor(
-                "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
+                "anthropic",
+                "model",
+                "model",
+                Set.of(ModelInputModality.TEXT),
+                true,
+                true,
+                true,
+                false),
             variant,
-            List.of(variant),
             1024,
             "[agent] current",
             List.of(baselineTool, addedTool),
@@ -297,21 +303,16 @@ class ModelRequestMaterializerTest {
         "search", ((ProviderSystemToolAdditionBlock) system.contents().getFirst()).tool().name());
   }
 
-  /** 只用当前实际模型的冻结 variants 重新解释历史；缺失、外模型和 null effort 均未知。 */
+  /** 历史已保存其实际 effort；外模型回复不参与当前模型的 effort 序列。 */
   @Test
-  void resolvesRetainedAssistantEffortFromFrozenCurrentModelVariants() {
+  void replaysStoredAssistantEffortWithoutVariantLookup() {
     ModelRequestSpec base = liveSpec(bashBinding());
     ModelVariant current = new ModelVariant("v1", "max", PromptCacheRetention.NONE, null);
     ModelRequestSpec spec =
         spec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             current,
-            List.of(
-                current,
-                new ModelVariant("old", "high", PromptCacheRetention.NONE, null),
-                new ModelVariant("unset", null, PromptCacheRetention.NONE, null)),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
@@ -320,9 +321,9 @@ class ModelRequestMaterializerTest {
     entries.add(entry(1, 0, new RootPayload(SETTINGS)));
     List<MessagePayload> replies =
         List.of(
-            assistantWithModel("model", "old"),
-            assistantWithModel("other", "old"),
-            assistantWithModel("model", "missing"),
+            assistantWithModelAndEffort("model", "old", "high"),
+            assistantWithModelAndEffort("other", "old", "high"),
+            assistantWithModelAndEffort("model", "missing", "high"),
             assistantWithModel("model", "unset"),
             assistant("unknown"));
     long previous = 1;
@@ -340,11 +341,20 @@ class ModelRequestMaterializerTest {
     }
     List<ProviderMessage> messages =
         MATERIALIZER.materialize(new EntryPath(entries), spec).messages();
-    assertEquals("high", messages.get(1).reasoningEffort());
-    assertTrue(messages.subList(2, 10).stream().allMatch(m -> m.reasoningEffort() == null));
+    List<String> assistantEfforts =
+        messages.stream()
+            .filter(message -> message.role() == ProviderMessageRole.ASSISTANT)
+            .map(ProviderMessage::reasoningEffort)
+            .toList();
+    assertEquals(Arrays.asList("high", null, "high", null, null), assistantEfforts);
   }
 
   private static MessagePayload assistantWithModel(String model, String variant) {
+    return assistantWithModelAndEffort(model, variant, null);
+  }
+
+  private static MessagePayload assistantWithModelAndEffort(
+      String model, String variant, String effort) {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("answer"))),
         new AssistantMessageMetadata(
@@ -353,7 +363,9 @@ class ModelRequestMaterializerTest {
             null,
             ModelSelection.model(model, variant),
             null,
-            null),
+            null,
+            null,
+            effort),
         null);
   }
 
@@ -365,10 +377,8 @@ class ModelRequestMaterializerTest {
     ModelRequestSpec spec =
         spec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             current,
-            List.of(current, new ModelVariant("old", "high", PromptCacheRetention.NONE, null)),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
@@ -385,7 +395,7 @@ class ModelRequestMaterializerTest {
                     5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)),
                 entry(6, 5, resolvedStart(TurnStartReason.INPUT, null)),
                 entry(7, 6, user("retained")),
-                entry(8, 7, assistantWithModel("model", "v1")),
+                entry(8, 7, assistantWithModelAndEffort("model", "v1", "max")),
                 entry(
                     9, 8, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)),
                 entry(10, 9, resolvedStart(TurnStartReason.COMPACTION, compact)),
@@ -537,18 +547,128 @@ class ModelRequestMaterializerTest {
   }
 
   private static ModelRequestSpec anthropicSpec(ToolBinding binding) {
-    ModelVariant variant = variant();
+    return anthropicSpec(binding, PromptCacheRetention.NONE);
+  }
+
+  private static ModelRequestSpec anthropicSpec(
+      ToolBinding binding, PromptCacheRetention promptCacheRetention) {
+    ModelVariant variant = new ModelVariant("v1", null, promptCacheRetention, null);
     return spec(
         ProviderType.ANTHROPIC,
-        id(1L),
         new ModelDescriptor(
-            "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
+            "anthropic",
+            "model",
+            "model",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            true,
+            false),
         variant,
-        List.of(variant),
         1024,
         "Test system instruction.",
         List.of(binding),
         List.of());
+  }
+
+  /** 压缩分支第一次请求：只读缓存断点落在切点前最后一条 assistant 之前的消息上。 */
+  @Test
+  void compactionBranchUsesSingleReadOnlyBreakpointBeforeLastAssistant() {
+    ProviderRequest request =
+        MATERIALIZER.materialize(
+            new EntryPath(branchPath(T0.plus(Duration.ofMinutes(1)), "model")),
+            anthropicSpec(bashBinding(), PromptCacheRetention.SHORT));
+
+    assertEquals(0, request.cacheControl().messageBreakpoint());
+  }
+
+  /** 压缩模型与产生切点前 assistant 的模型不同时不写只读断点。 */
+  @Test
+  void compactionBranchSkipsBreakpointWhenCompactionModelDiffers() {
+    ProviderRequest request =
+        MATERIALIZER.materialize(
+            new EntryPath(branchPath(T0.plus(Duration.ofMinutes(1)), "other-model")),
+            anthropicSpec(bashBinding(), PromptCacheRetention.SHORT));
+
+    assertNull(request.cacheControl().messageBreakpoint());
+  }
+
+  /** 缓存留存已过期（SHORT 5m）时不写只读断点。 */
+  @Test
+  void compactionBranchSkipsBreakpointWhenCacheEntryExpired() {
+    ProviderRequest request =
+        MATERIALIZER.materialize(
+            new EntryPath(branchPath(T0.plus(Duration.ofMinutes(10)), "model")),
+            anthropicSpec(bashBinding(), PromptCacheRetention.SHORT));
+
+    assertNull(request.cacheControl().messageBreakpoint());
+  }
+
+  /** 切点前 assistant 所在的完整历史 + FORK + 分支 instruction。 */
+  private static List<Entry> branchPath(Instant instructionAt, String assistantModel) {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(3, 2, user("old question")));
+    entries.add(
+        new Entry(
+            id(4L),
+            id(100L),
+            id(3L),
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("old answer"))),
+                new AssistantMessageMetadata(
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
+                    null,
+                    new ModelSelection(assistantModel, "v1"),
+                    null,
+                    null,
+                    null,
+                    null),
+                null),
+            T0));
+    entries.add(
+        entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
+    entries.add(
+        new Entry(
+            id(6L),
+            id(100L),
+            id(5L),
+            new ForkPayload(ForkMode.BRANCH, id(4L), id(99L)),
+            instructionAt));
+    entries.add(
+        new Entry(
+            id(7L),
+            id(100L),
+            id(6L),
+            new SettingsPayload(
+                new BranchSettings(
+                    "agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null),
+                OWNER),
+            instructionAt));
+    entries.add(
+        new Entry(
+            id(8L),
+            id(100L),
+            id(7L),
+            new TurnStartPayload(
+                TurnStartReason.COMPACTION_BRANCH_INPUT, SETTINGS, OWNER, 4096, 1024, null, null),
+            instructionAt));
+    entries.add(
+        new Entry(
+            id(9L),
+            id(100L),
+            id(8L),
+            new CustomMessagePayload(
+                "core",
+                "message",
+                "message",
+                AgentMessage.user(CompactionBranchPrompts.instruction(1024)),
+                "{}"),
+            instructionAt));
+    return entries;
   }
 
   @Test
@@ -742,7 +862,6 @@ class ModelRequestMaterializerTest {
   private static ModelRequestSpec liveSpec(ToolBinding binding) {
     return spec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         descriptor(),
         variant(),
         1024,

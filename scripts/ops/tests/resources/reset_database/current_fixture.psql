@@ -4,10 +4,9 @@
 -- rollback (frozen snapshot / full backup) before the external schema initialization re-creates
 -- an empty database.
 insert into provider (name, description, provider_type, base_url, credential, config,
-    connection_generation_id, created_at, updated_at, version) values
+    created_at, updated_at, version) values
     ('probe-provider', 'probe provider description', 'openai', 'https://probe.invalid/v1',
      'probe-provider-credential', '{"modelCallTimeoutMillis": 600000}'::jsonb,
-     '22222222-2222-4222-8222-222222222222',
      '2024-01-03 00:00:00.001+00', '2024-01-04 00:00:00.002+00', 2);
 
 insert into model (kind, provider_name, name, model_id, description, config, created_at,

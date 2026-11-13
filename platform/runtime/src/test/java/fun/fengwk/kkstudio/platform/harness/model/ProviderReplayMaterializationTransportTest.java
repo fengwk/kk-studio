@@ -232,8 +232,7 @@ class ProviderReplayMaterializationTransportTest {
             "test-provider",
             type,
             "http://127.0.0.1:" + port,
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(10)),
-            new UUID(0L, 3L));
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(10)));
     ModelProvider provider = adapter.create(descriptor);
     byte[] bytes = "%PDF-1.4\nsynthetic".getBytes(StandardCharsets.UTF_8);
     String base64 = Base64.getEncoder().encodeToString(bytes);
@@ -425,8 +424,7 @@ class ProviderReplayMaterializationTransportTest {
         "test-provider",
         ProviderType.OPENAI,
         "http://127.0.0.1:" + port,
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(10)),
-        new UUID(0L, 3L));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(10)));
   }
 
   private static ProviderRequest request(List<ProviderMessage> messages) {

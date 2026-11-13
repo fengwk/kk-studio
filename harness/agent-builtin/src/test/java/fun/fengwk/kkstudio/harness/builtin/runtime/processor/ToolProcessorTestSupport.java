@@ -931,7 +931,6 @@ public final class ToolProcessorTestSupport {
     ProviderRequest provider = providerRequest();
     return spec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
         1024,

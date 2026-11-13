@@ -129,8 +129,8 @@ select pg_temp.rejects('cluster node lease must be after last_seen_at',
             now(), now() + interval '1 minute')$$,
     '23514', 'ck_cluster_node_lease');
 
-insert into provider (name, provider_type, base_url, config, connection_generation_id)
-    values ('fixture', 'openai', 'https://example.invalid', '{}', pg_temp.uid(9999));
+insert into provider (name, provider_type, base_url, config)
+    values ('fixture', 'openai', 'https://example.invalid', '{}');
 insert into model (name, kind, provider_name, model_id, config)
     values ('fixture', 'MODEL', 'fixture', 'fixture', '{}');
 insert into agent (name, execution, config)

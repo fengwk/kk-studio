@@ -27,10 +27,9 @@ import java.util.function.Supplier;
  *
  * <p>{@link #admit} 通过 {@link ProviderResolutionService} 同步解析冻结 {@link
  * fun.fengwk.kkstudio.harness.model.provider.ProviderType} 与内存 {@link
- * fun.fengwk.kkstudio.harness.model.provider.ProviderRequest}（含 connection generation
- * 校验），并无等待取得一个并发名额；不发出任何请求。 确定性解析失败（{@link IllegalArgumentException}）返回携带 {@link
- * ProviderErrorKind#INVALID_REQUEST} 的 {@link Rejected}；其他解析失败原样传播，由 Processor 重新调度；容量耗尽返回携带配置延迟的
- * {@link Busy}。
+ * fun.fengwk.kkstudio.harness.model.provider.ProviderRequest}，并无等待取得一个并发名额；不发出任何请求。 确定性解析失败（{@link
+ * IllegalArgumentException}）返回携带 {@link ProviderErrorKind#INVALID_REQUEST} 的 {@link
+ * Rejected}；其他解析失败原样传播，由 Processor 重新调度；容量耗尽返回携带配置延迟的 {@link Busy}。
  *
  * <p>{@link ModelGateway.Admitted#run} 在调用线程（Processor 的虚拟线程）上阻塞执行 {@link
  * ModelProvider#stream}，本类不拥有任何线程池或回调桥： 增量同步转交 Runtime sink，分类过的 {@link ProviderException} 连同 kind
@@ -91,11 +90,7 @@ public final class PlatformModelGateway implements ModelGateway {
     Objects.requireNonNull(execution, "execution");
     ProviderResolutionService.ResolvedExecution resolved;
     try {
-      resolved =
-          providerResolution.resolve(
-              execution.providerType(),
-              execution.providerConnectionGenerationId(),
-              execution.request());
+      resolved = providerResolution.resolve(execution.providerType(), execution.request());
     } catch (IllegalArgumentException setupFailure) {
       // 发出请求前的确定性装配失败：终止 invocation，绝不重试。
       return new Rejected(

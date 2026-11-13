@@ -181,6 +181,9 @@ final class AcceptCommandsControl {
   /**
    * Creates a ticketed COMPACTION branch sharing its owner's Session and the prefix at a closed
    * cut.
+   *
+   * <p>调用方必须已按锁阶梯持有该 Session 的 KEY SHARE 并锁定父 Thread 行；本方法不再重复获取 Session 锁，避免破坏 Session -&gt;
+   * Thread 的固定锁序。
    */
   static AcceptedCommands createSameSessionBranchWithThread(
       HarnessStore.Transaction tx,
@@ -209,9 +212,7 @@ final class AcceptCommandsControl {
                     .anyMatch(join -> join.delivery() == JoinDelivery.SETTLE_OWNER_TURN))) {
       throw new IllegalArgumentException("a compaction branch is already active for this Thread");
     }
-    tx.sessions()
-        .lockForKeyShare(request.sessionId())
-        .orElseThrow(() -> new IllegalArgumentException("branch Session does not exist"));
+    // Session KEY SHARE 必须由调用方在锁定 Thread 行之前取得；此处再锁会破坏 Session -> Thread 锁阶梯。
     Entry cutEntry =
         tx.entries()
             .find(branch.startEntryId())

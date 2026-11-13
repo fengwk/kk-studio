@@ -55,16 +55,14 @@ import java.util.Set;
  * max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code cache_control}） 冲突显式失败，{@code
  * tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker 与请求体大小均基于最终合并结果。
  *
- * <p>显式 adaptive effort 时，{@code anthropic-beta} 包含消息级 effort 所需的三个 beta。
- *
  * <p>{@code cacheControl} 只表达留存档位：{@code retention != NONE} 时在 tools/system/历史边界写入固定的原生 {@code
  * cache_control} ephemeral 标记，{@code LONG} 额外携带 {@code ttl:"1h"}；会话 {@code key} 不属于 Anthropic
  * 原生选项，因此不下发。
  *
- * <p>assistant replay 与 system/时间前缀无关，只与 replay state 的 affinity（Provider/连接世代/wire 模型）绑定。affinity
- * 不匹配时按 durable 语义回退投影，绝不因为存在 replay 而拒绝；affinity 匹配时先校验真实 payload 形状与 durable 一致性，再原位回放全部原生事实（含
- * {@code thinking} 的 signature、{@code redacted_thinking}、未知 block 与官方附加字段）。 payload 以 {@code
- * compaction} block 开头时代表历史已被摘要，校验通过后清空已编码消息使该消息成为首条消息。
+ * <p>assistant replay 与 system/时间前缀无关，只与 replay state 的 affinity（Provider type/name/wire
+ * model）绑定。affinity 不匹配时按 durable 语义回退投影，绝不因为存在 replay 而拒绝；affinity 匹配时先校验真实 payload 形状与 durable
+ * 一致性，再原位回放全部原生事实（含 {@code thinking} 的 signature、{@code redacted_thinking}、未知 block 与官方附加字段）。
+ * payload 以 {@code compaction} block 开头时代表历史已被摘要，校验通过后清空已编码消息使该消息成为首条消息。
  */
 public final class AnthropicRequestEncoder {
 
@@ -84,9 +82,8 @@ public final class AnthropicRequestEncoder {
       List.of("model", "max_tokens", "stream", "messages", "system", "cache_control");
 
   private static final int MAX_CACHE_BREAKPOINTS = 4;
-  private static final String PER_TURN_BETA = "per-turn-control-2026-07-01";
-  private static final String MID_CONVERSATION_BETA = "mid-conversation-system-2026-04-07";
-  private static final String EFFORT_BETA = "effort-2025-11-24";
+  private static final String OUTPUT_CONFIG_BETA = "mid-conversation-output-config-2026-07-01";
+  private static final String THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
   private static final String INLINE_TOOLS_BETA = "inline-tools-2026-09-15";
   private static final String DEFERRED_PLACEHOLDER_NAME = "__kk_deferred_placeholder__";
 
@@ -114,13 +111,19 @@ public final class AnthropicRequestEncoder {
     root.put("max_tokens", maxTokens);
     root.put("stream", true);
 
-    applyReasoningParameters(root, request);
+    String currentEffort = request.variant() == null ? null : request.variant().reasoningEffort();
+    boolean currentEffortOff = request.variant() != null && request.variant().reasoningOff();
+    String firstStoredEffort = firstStoredEffort(request.messages());
+    boolean messageLevelThinking =
+        request.model().reasoning() && request.model().messageLevelEffort() && !currentEffortOff;
+    boolean messageLevelEffort =
+        messageLevelThinking && (currentEffort != null || firstStoredEffort != null);
+    String topLevelEffort =
+        messageLevelEffort && firstStoredEffort != null ? firstStoredEffort : currentEffort;
+    applyReasoningParameters(root, request, topLevelEffort, messageLevelEffort);
+    boolean hasEffortConfig =
+        request.model().reasoning() && !currentEffortOff && hasEffort(topLevelEffort);
 
-    boolean perTurnEffort =
-        request.model().reasoning()
-            && request.variant() != null
-            && request.variant().reasoningEffort() != null
-            && !request.variant().reasoningOff();
     boolean deferredToolLane =
         request.model().midConversationSystemMessages() && request.baselineHasClientTools();
     if (request.baselineHasClientTools() && !deferredToolLane) {
@@ -130,7 +133,8 @@ public final class AnthropicRequestEncoder {
     }
     boolean hasInlineToolChanges = hasInlineToolChanges(request.messages());
     List<String> betaFeatures =
-        resolveBetaFeatures(perTurnEffort, deferredToolLane || hasInlineToolChanges);
+        resolveBetaFeatures(
+            hasEffortConfig, messageLevelThinking, deferredToolLane || hasInlineToolChanges);
 
     ArrayNode toolsArray = mergeTools(root, request.tools(), deferredToolLane);
 
@@ -183,11 +187,15 @@ public final class AnthropicRequestEncoder {
 
     // 注入 cache marker
     applyCacheMarkers(
-        request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints, deferredToolLane);
-    if (perTurnEffort) {
+        request.cacheControl(),
+        wireMessagesArray,
+        toolsArray,
+        unmarkedSystemArray,
+        cacheEndpoints,
+        deferredToolLane);
+    if (messageLevelEffort) {
       wireMessagesArray =
-          applyPerTurnEffort(
-              wireMessagesArray, messageEfforts, request.variant().reasoningEffort());
+          applyMessageLevelEffort(wireMessagesArray, messageEfforts, currentEffort, topLevelEffort);
     }
 
     if (!toolsArray.isEmpty()) {
@@ -225,13 +233,15 @@ public final class AnthropicRequestEncoder {
     return false;
   }
 
-  /** Add the beta support required by the selected mid-conversation request features. */
-  private static List<String> resolveBetaFeatures(boolean perTurnEffort, boolean inlineTools) {
+  /** Add the beta support required by reasoning settings and inline tool changes. */
+  private static List<String> resolveBetaFeatures(
+      boolean hasEffortConfig, boolean messageLevelThinking, boolean inlineTools) {
     List<String> betaFeatures = new ArrayList<>();
-    if (perTurnEffort) {
-      betaFeatures.add(MID_CONVERSATION_BETA);
-      betaFeatures.add(PER_TURN_BETA);
-      betaFeatures.add(EFFORT_BETA);
+    if (hasEffortConfig || messageLevelThinking) {
+      betaFeatures.add(OUTPUT_CONFIG_BETA);
+    }
+    if (messageLevelThinking) {
+      betaFeatures.add(THINKING_BINDING_BETA);
     }
     if (inlineTools) {
       betaFeatures.add(INLINE_TOOLS_BETA);
@@ -239,95 +249,98 @@ public final class AnthropicRequestEncoder {
     return List.copyOf(betaFeatures);
   }
 
-  /** 从最终保留的消息反向补齐未知等级，再在连续 user/tool 消息之后声明变化。 */
-  static ArrayNode applyPerTurnEffort(
-      ArrayNode messages, List<String> efforts, String currentEffort) {
-    String[] levels = new String[messages.size()];
-    String carry = currentEffort;
-    for (int i = messages.size() - 1; i >= 0; i--) {
-      String effort = efforts.get(i);
-      if ("assistant".equals(messages.get(i).path("role").asString())
-          && effort != null
-          && !effort.equals("off")
-          && !effort.isBlank()) {
-        carry = effort;
+  private static String firstStoredEffort(List<ProviderMessage> messages) {
+    for (ProviderMessage message : messages) {
+      if (message.role() == ProviderMessageRole.ASSISTANT && hasEffort(message.reasoningEffort())) {
+        return message.reasoningEffort();
       }
-      levels[i] = carry;
+    }
+    return null;
+  }
+
+  /** 声明历史中存储的每个 effort 变化，并把当前等级放在请求前缀末尾。 */
+  static ArrayNode applyMessageLevelEffort(
+      ArrayNode messages, List<String> efforts, String currentEffort, String topLevelEffort) {
+    if (messages.size() != efforts.size()) {
+      throw new IllegalArgumentException("message efforts must align with encoded messages");
     }
     ArrayNode result = NODES.arrayNode();
-    String declared = null;
-    String pending = null;
+    String declared = topLevelEffort;
     for (int i = 0; i < messages.size(); i++) {
       ObjectNode message = (ObjectNode) messages.get(i);
-      String role = message.path("role").asString();
-      if (pending != null && !role.equals("user")) {
-        declared = pending;
-        if (role.equals("system")) {
-          JsonNode existing = message.get("output_config");
-          ObjectNode outputConfig =
-              existing instanceof ObjectNode object ? object : message.putObject("output_config");
-          outputConfig.put("effort", pending);
-          result.add(message);
-          pending = null;
-          continue;
-        }
-        result.add(effortControl(pending));
-        pending = null;
+      String effort = efforts.get(i);
+      if ("assistant".equals(message.path("role").asString())
+          && hasEffort(effort)
+          && !Objects.equals(declared, effort)) {
+        addEffortControl(result, effort);
+        declared = effort;
       }
       result.add(message);
-      if (role.equals("user")) {
-        pending = Objects.equals(levels[i], declared) ? null : levels[i];
-      }
     }
-    if (pending != null) {
-      result.add(effortControl(pending));
+    if (hasEffort(currentEffort) && !Objects.equals(declared, currentEffort)) {
+      addEffortControl(result, currentEffort);
     }
     return result;
   }
 
-  private static ObjectNode effortControl(String effort) {
-    ObjectNode node = NODES.objectNode();
-    node.put("role", "system");
-    node.putArray("content");
-    node.putObject("output_config").put("effort", effort);
-    return node;
+  private static boolean hasEffort(String effort) {
+    return effort != null && !effort.isBlank() && !effort.equals("off");
+  }
+
+  private static void addEffortControl(ArrayNode messages, String effort) {
+    if (!messages.isEmpty()
+        && "system".equals(messages.get(messages.size() - 1).path("role").asString())) {
+      JsonNode existing = messages.get(messages.size() - 1).get("output_config");
+      ObjectNode outputConfig =
+          existing instanceof ObjectNode object
+              ? object
+              : ((ObjectNode) messages.get(messages.size() - 1)).putObject("output_config");
+      outputConfig.put("effort", effort);
+    } else {
+      ObjectNode node = NODES.objectNode();
+      node.put("role", "system");
+      node.putArray("content");
+      node.putObject("output_config").put("effort", effort);
+      messages.add(node);
+    }
   }
 
   /**
-   * reasoning effort 编码：{@code off} 显式关闭推理，发送 {@code thinking:{type:"disabled"}}； 非空 effort 默认以
-   * ADAPTIVE 模式发送 {@code thinking:{type:"adaptive",display:"summarized"}} 与 {@code
-   * output_config:{effort:...}}；null 不声明推理字段，由服务端默认决定，此时 native {@code thinking}/{@code
-   * output_config} 原样保留（如预算思考在原生选项中声明 thinking）。
-   *
-   * <p>一旦 runtime 要写入 {@code thinking}，native {@code thinking} 必须显式拒绝；{@code output_config} 只对
-   * runtime 同样要写的 {@code effort} 子字段拒绝，其余官方子字段无损保留。
+   * Encodes effort using the thread's stable top-level level; message-level models additionally
+   * bind thinking blocks to the unchanged prefix.
    */
-  private static void applyReasoningParameters(ObjectNode root, ProviderRequest request) {
-    if (!request.model().reasoning()
-        || request.variant() == null
-        || request.variant().reasoningEffort() == null) {
+  private static void applyReasoningParameters(
+      ObjectNode root, ProviderRequest request, String topLevelEffort, boolean messageLevelEffort) {
+    if (!request.model().reasoning()) {
       return;
     }
-
+    if (request.variant() != null && request.variant().reasoningOff()) {
+      if (root.has("thinking")) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions must not override runtime field: thinking");
+      }
+      root.putObject("thinking").put("type", "disabled");
+      return;
+    }
+    if (!hasEffort(topLevelEffort)) {
+      return;
+    }
     if (root.has("thinking")) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "protocolOptions must not override runtime field: thinking");
     }
 
-    if (request.variant().reasoningOff()) {
-      ObjectNode thinking = root.putObject("thinking");
-      thinking.put("type", "disabled");
-      return;
-    }
-
-    String effort = request.variant().reasoningEffort();
     ObjectNode thinking = root.putObject("thinking");
     thinking.put("type", "adaptive");
     thinking.put("display", "summarized");
+    if (messageLevelEffort) {
+      thinking.putObject("block_binding").put("prefix_mismatch_behavior", "drop_block");
+    }
 
     ObjectNode outputConfig = mergeOutputConfig(root);
-    outputConfig.put("effort", effort);
+    outputConfig.put("effort", topLevelEffort);
   }
 
   /** 以 native {@code output_config} 为起点合并 runtime effort，保留 format 等其余官方子字段。 */
@@ -983,6 +996,7 @@ public final class AnthropicRequestEncoder {
    */
   private static void applyCacheMarkers(
       ProviderCacheControl cacheControl,
+      ArrayNode messagesArray,
       ArrayNode toolsArray,
       ArrayNode systemArray,
       List<ObjectNode> cacheEndpoints,
@@ -995,6 +1009,19 @@ public final class AnthropicRequestEncoder {
     marker.put("type", "ephemeral");
     if (cacheControl.retention() == PromptCacheRetention.LONG) {
       marker.put("ttl", "1h");
+    }
+
+    // 只读模式：压缩分支复用主 Thread 已写入的前缀，只在指定消息上放一个断点，绝不写入 tools/system/尾部新缓存。
+    if (cacheControl.messageBreakpoint() != null) {
+      int index = cacheControl.messageBreakpoint();
+      if (index >= 0 && index < messagesArray.size()) {
+        ObjectNode endpoint =
+            latestEligibleBlock(((ObjectNode) messagesArray.get(index)).path("content"));
+        if (endpoint != null) {
+          endpoint.set("cache_control", marker);
+        }
+      }
+      return;
     }
 
     int markersPlaced = 0;

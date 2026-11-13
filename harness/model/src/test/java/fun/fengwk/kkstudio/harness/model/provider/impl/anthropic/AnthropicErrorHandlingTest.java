@@ -205,8 +205,7 @@ class AnthropicErrorHandlingTest {
             "anthropic-timeout-test",
             ProviderType.ANTHROPIC,
             "http://127.0.0.1:" + port + "/v1",
-            timeoutPolicy,
-            UUID.randomUUID());
+            timeoutPolicy);
 
     AnthropicProviderAdapter adapter = new AnthropicProviderAdapter(transport, "dummy-key");
     AnthropicModelProvider modelProvider = (AnthropicModelProvider) adapter.create(descriptor);
@@ -302,8 +301,7 @@ class AnthropicErrorHandlingTest {
             "anthropic-stream-err",
             ProviderType.ANTHROPIC,
             "http://127.0.0.1:" + port + "/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
-            UUID.randomUUID());
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
 
     AnthropicProviderAdapter adapter = new AnthropicProviderAdapter(transport, "test-key");
     AnthropicModelProvider modelProvider = (AnthropicModelProvider) adapter.create(descriptor);
@@ -379,8 +377,7 @@ class AnthropicErrorHandlingTest {
             "anthropic-http-err",
             ProviderType.ANTHROPIC,
             "http://127.0.0.1:" + port + "/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
-            UUID.randomUUID());
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
 
     AnthropicProviderAdapter adapter = new AnthropicProviderAdapter(transport, "test-key");
     AnthropicModelProvider modelProvider = (AnthropicModelProvider) adapter.create(descriptor);

@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.harness.api.history.ModelAttemptFailurePayload;
 import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
+import fun.fengwk.kkstudio.harness.api.history.SystemContext;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
@@ -87,6 +88,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.JdkHttpSseTransport;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.TokenEstimator;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -96,6 +99,8 @@ import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServer;
@@ -209,7 +214,6 @@ class DatabaseTurnResolverTest {
 
     assertEquals("provider", requestSpec.model().providerName());
     assertEquals("model", requestSpec.model().modelName());
-    assertEquals(new UUID(0L, 42L), requestSpec.providerConnectionGenerationId());
     // 上游 wire 标识来自 Model.modelId，与 catalog 逻辑名相互独立。
     assertEquals("wire-model", requestSpec.model().modelId());
     assertEquals(Set.of(ModelInputModality.TEXT), requestSpec.model().inputModalities());
@@ -271,8 +275,82 @@ class DatabaseTurnResolverTest {
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
+  /** 消息级 effort 模型的压缩分支：在摘要指令之后声明 low，同时保持同一具体模型与 variant 身份。 */
   @Test
-  void modelMidConversationSystemMessageCapabilityReachesRequestDescriptor() {
+  void compactionBranchAddsLowEffortWhenModelSupportsMessageLevelEffort() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    ParsedAgentModelConfig parsed = Fixture.parsedModel();
+    when(fixture.modelConfigParser.parse("model-config"))
+        .thenReturn(
+            new ParsedAgentModelConfig(
+                parsed.contextWindow(),
+                parsed.maxOutputTokens(),
+                parsed.inputModalities(),
+                parsed.tools(),
+                parsed.reasoning(),
+                false,
+                true,
+                parsed.variants(),
+                parsed.defaultVariant(),
+                parsed.pricing()));
+
+    TurnResolver.Resolved resolved =
+        assertInstanceOf(
+            TurnResolver.Resolved.class,
+            fixture.resolver.resolveCompactionBranch(
+                THREAD_ID, SESSION_ID, compactionBranchPath()));
+
+    assertEquals("low", resolved.spec().variant().reasoningEffort());
+    assertEquals("default", resolved.spec().variant().id());
+  }
+
+  /** 没有消息级 effort 能力时不改写分支 variant 的 effort。 */
+  @Test
+  void compactionBranchKeepsVariantEffortWithoutMessageLevelCapability() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+
+    TurnResolver.Resolved resolved =
+        assertInstanceOf(
+            TurnResolver.Resolved.class,
+            fixture.resolver.resolveCompactionBranch(
+                THREAD_ID, SESSION_ID, compactionBranchPath()));
+
+    assertNull(resolved.spec().variant().reasoningEffort());
+  }
+
+  /** ROOT + SYSTEM 基线 + 开放 COMPACTION_BRANCH_INPUT turn + 内部指令。 */
+  private static EntryPath compactionBranchPath() {
+    BranchSettings settings = settings("default");
+    return new EntryPath(
+        List.of(
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            new Entry(
+                id(2),
+                SESSION_ID,
+                id(1),
+                new SystemPayload(Map.of("agent", "[agent] baseline"), List.of(), List.of(), true),
+                NOW.plusSeconds(1)),
+            new Entry(
+                id(3),
+                SESSION_ID,
+                id(2),
+                new TurnStartPayload(TurnStartReason.COMPACTION_BRANCH_INPUT, settings, THREAD_ID),
+                NOW.plusSeconds(2)),
+            new Entry(
+                id(4),
+                SESSION_ID,
+                id(3),
+                new CustomMessagePayload(
+                    "core",
+                    "message",
+                    "message",
+                    AgentMessage.user(CompactionBranchPrompts.instruction(1024)),
+                    "{}"),
+                NOW.plusSeconds(3))));
+  }
+
+  @Test
+  void modelCapabilitiesReachRequestDescriptor() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     ParsedAgentModelConfig parsed = Fixture.parsedModel();
     when(fixture.modelConfigParser.parse("model-config"))
@@ -284,6 +362,7 @@ class DatabaseTurnResolverTest {
                 parsed.tools(),
                 parsed.reasoning(),
                 true,
+                true,
                 parsed.variants(),
                 parsed.defaultVariant(),
                 parsed.pricing()));
@@ -293,6 +372,7 @@ class DatabaseTurnResolverTest {
             .resolved(fixture.path(settings("default")))
             .model()
             .midConversationSystemMessages());
+    assertTrue(fixture.resolved(fixture.path(settings("default"))).model().messageLevelEffort());
   }
 
   @Test
@@ -333,12 +413,6 @@ class DatabaseTurnResolverTest {
     fixture.editProvider(provider -> provider.providerType(null));
     assertEquals(
         "provider type must not be null",
-        fixture.rejected(fixture.path(settings("default"))).error().message());
-
-    fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.editProvider(provider -> provider.connectionGenerationId(null));
-    assertEquals(
-        "provider connection generation id must not be null",
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -958,7 +1032,6 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
     assertEquals("custom", requestSpec.variant().id());
-    assertEquals(Fixture.parsedModel().variants(), requestSpec.modelVariants());
     // 所选 catalog variant 的 reasoningEffort 原样生效，不存在运行时 override。
     assertEquals("medium", requestSpec.variant().reasoningEffort());
     // variant 只承载 reasoning effort：输出预算由 model 级 limit.output 决定。
@@ -1506,8 +1579,7 @@ class DatabaseTurnResolverTest {
             new ProviderConfigurationCodec(JsonMapper.builder().build()),
             Map.of(factory.providerType(), factory),
             new ProviderResourceMaterializer(blobs, content, () -> ImageInputTier.P720));
-    ResolvedExecution execution =
-        resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
+    ResolvedExecution execution = resolution.resolve(spec.providerType(), request);
     assertEquals(request.cacheControl(), execution.effectiveRequest().cacheControl());
     ObjectMapper mapper = JsonMapper.builder().build();
     JsonNode wire = mapper.readTree(execution.encodeRequestBody());
@@ -1539,7 +1611,6 @@ class DatabaseTurnResolverTest {
             resolution
                 .resolve(
                     nextSpec.providerType(),
-                    nextSpec.providerConnectionGenerationId(),
                     new ModelRequestMaterializer().materialize(nextPath, nextSpec))
                 .encodeRequestBody());
     assertEquals(request.cacheControl().key(), nextWire.path("prompt_cache_key").asText());
@@ -1556,8 +1627,7 @@ class DatabaseTurnResolverTest {
             request.messages(),
             request.tools(),
             ProviderCacheControl.none());
-    ResolvedExecution disabledExecution =
-        resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), disabled);
+    ResolvedExecution disabledExecution = resolution.resolve(spec.providerType(), disabled);
     assertEquals(ProviderCacheControl.none(), disabledExecution.effectiveRequest().cacheControl());
     JsonNode disabledWire = mapper.readTree(disabledExecution.encodeRequestBody());
     assertFalse(disabledWire.has("prompt_cache_key"));
@@ -1695,6 +1765,437 @@ class DatabaseTurnResolverTest {
       text.append(((ProviderTextBlock) content).text());
     }
     return text.toString();
+  }
+
+  @Test
+  void normalProjectionUsesLatestSummaryWrapperAndRetainedCutSuffix() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings("default");
+
+    EntryPath path = projectionPath(settings, "summary text", id(4));
+    ModelRequestSpec requestSpec = fixture.resolved(path);
+
+    // 系统指令不再作为 SYSTEM 消息出现在投影首位；summary wrapper 是第一条 USER。
+    assertTrue(requestSpec.systemInstruction().startsWith("[agent]\nagent system prompt"));
+    List<ProviderMessage> messages = materialized(path, requestSpec);
+    assertEquals(4, messages.size());
+    assertEquals(ProviderMessageRole.USER, messages.get(0).role());
+    assertEquals(CompactionPrompts.compactedContext("summary text"), textOf(messages.get(0)));
+    // 从 cut（ASST1）本身开始保留：ASST1、USER2、ASST2 继续投影；COMPACTION 控制 turn 内部不投影。
+    assertEquals("first reply", textOf(messages.get(1)));
+    assertEquals("second user", textOf(messages.get(2)));
+    assertEquals("second reply", textOf(messages.get(3)));
+  }
+
+  @Test
+  void corruptCompactionReferencesFailClosedInProjection() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings("default");
+    // cut 不在当前路径。
+    EntryPath missingCut = projectionPath(settings, "summary", id(999));
+    assertThrows(IllegalStateException.class, () -> fixture.resolved(missingCut));
+  }
+
+  @Test
+  void latestCompleteCompactionWinsOverOlderWrapper() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings("default");
+
+    EntryPath path = twoCompactionProjectionPath(settings);
+    ModelRequestSpec requestSpec = fixture.resolved(path);
+
+    List<ProviderMessage> messages = materialized(path, requestSpec);
+    // 投影里没有 SYSTEM 消息：wrapper summary 是第一条 USER。
+    assertEquals(5, messages.size());
+    assertEquals(CompactionPrompts.compactedContext("latest summary"), textOf(messages.get(0)));
+    // 只有最新压缩的 wrapper；从最新 cut（USER2）起保留。
+    assertEquals("second user", textOf(messages.get(1)));
+    assertEquals("second reply", textOf(messages.get(2)));
+    assertEquals("third user", textOf(messages.get(3)));
+    assertEquals("third reply", textOf(messages.get(4)));
+  }
+
+  @Test
+  void compactionInternalMessagesAreSuppressedInProjection() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    BranchSettings settings = settings("default");
+
+    EntryPath path = stoppedCompactionProjectionPath(settings);
+    ModelRequestSpec requestSpec = fixture.resolved(path);
+
+    List<ProviderMessage> messages = materialized(path, requestSpec);
+    // 投影里没有 SYSTEM 消息：messages 只含对话（被停止压缩 turn 内部的 ABORTED 不投影）。
+    assertEquals(4, messages.size());
+    assertEquals("first user", textOf(messages.get(0)));
+    assertEquals("first reply", textOf(messages.get(1)));
+    assertEquals("second user", textOf(messages.get(2)));
+    assertEquals("second reply", textOf(messages.get(3)));
+  }
+
+  @Test
+  void historicalLivePlanIsIdenticalToLivePlanner() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    EntryPath path = fixture.path(settings("default"));
+
+    LiveTurnPlan.Planned live = fixture.planned(path);
+    LiveTurnPlan.Planned historical =
+        assertInstanceOf(
+            LiveTurnPlan.Planned.class,
+            fixture.resolver.planHistorical(THREAD_ID, SESSION_ID, path));
+
+    assertEquals(live.spec(), historical.spec());
+    assertEquals(live.contextWindow(), historical.contextWindow());
+  }
+
+  @Test
+  void historicalCompactionParentTurnIsRejectedWithoutResolvingCatalog() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    when(fixture.providers.getByName("provider"))
+        .thenThrow(
+            new AssertionError("a COMPACTION parent turn must not resolve the provider catalog"));
+    when(fixture.models.getByName("model"))
+        .thenThrow(
+            new AssertionError("a COMPACTION parent turn must not resolve the model catalog"));
+
+    LiveTurnPlan.Rejected rejected =
+        assertInstanceOf(
+            LiveTurnPlan.Rejected.class,
+            fixture.resolver.planHistorical(
+                THREAD_ID,
+                SESSION_ID,
+                compactionRequestPath(BuiltinExecution.model(settings("default").execution()))));
+
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.errorCode());
+    assertTrue(rejected.detail().contains("compaction child thread"), rejected.detail());
+  }
+
+  @Test
+  void estimatesClaudeBaselineAndSystemChangeMessagesSeparately() {
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of(),
+            List.of(),
+            Set.of(),
+            ProviderType.ANTHROPIC,
+            ProviderType.ANTHROPIC,
+            PromptCacheRetention.NONE,
+            true);
+    fixture.modelSupportsMidConversationSystemMessages(true);
+    EntryPath path = systemHistoryPath(settings("default"));
+
+    LiveTurnPlan.Planned planned = fixture.planned(path);
+    SystemContext existing = path.systemContext().orElseThrow();
+    SystemPayload pending =
+        existing
+            .changesTo(
+                new SystemContext(
+                    planned.spec().systemSections(), existing.tools(), existing.hostedTools()))
+            .orElseThrow();
+    SystemPayload stored = (SystemPayload) path.entries().getLast().payload();
+
+    assertEquals(
+        List.of(
+            SystemContext.baselineSystemInstruction(path.entries()),
+            SystemContext.renderChangeText(stored),
+            SystemContext.renderChangeText(pending)),
+        fixture.estimatedSystemMessages);
+    assertNotEquals(List.of(planned.spec().systemInstruction()), fixture.estimatedSystemMessages);
+  }
+
+  @Test
+  void estimatesCollapsedSystemContextInsteadOfCurrentFlatPrompt() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    EntryPath path = systemHistoryPath(settings("default"));
+
+    LiveTurnPlan.Planned planned = fixture.planned(path);
+    SystemContext existing = path.systemContext().orElseThrow();
+    SystemPayload pending =
+        existing
+            .changesTo(
+                new SystemContext(
+                    planned.spec().systemSections(), existing.tools(), existing.hostedTools()))
+            .orElseThrow();
+    String expected =
+        SystemContext.collapseSystemInstruction(path.entries())
+            + "\n\n"
+            + SystemContext.renderChangeText(pending);
+
+    assertEquals(List.of(expected), fixture.estimatedSystemMessages);
+    assertNotEquals(List.of(planned.spec().systemInstruction()), fixture.estimatedSystemMessages);
+  }
+
+  @Test
+  void groupFreezesOrderedMembersAndMinimumBudgets() {
+    Fixture fixture = groupFixture(Set.of(ModelInputModality.TEXT));
+    EntryPath path =
+        fixture.path(
+            new BranchSettings(
+                "assistant", BuiltinExecution.of(ModelSelection.group("group")), null));
+    TurnResolver.Resolved resolved = fixture.resolvedResult(path, null);
+    LiveTurnPlan.Planned planned = fixture.planned(path);
+    assertEquals(2048, resolved.contextWindow());
+    assertEquals(256, resolved.spec().outputTokens());
+    assertEquals(2048, planned.contextWindow());
+    assertEquals(256, planned.spec().outputTokens());
+    var group = resolved.spec().groupExecution();
+    assertEquals(group, planned.spec().groupExecution());
+    assertEquals("group", group.groupName());
+    assertEquals(7L, group.groupVersion());
+    assertEquals(Set.of(429, 503), group.fallbackStatusCodes());
+    assertEquals(31, group.cooldownSeconds());
+    assertEquals(
+        List.of("model", "second"),
+        group.members().stream().map(member -> member.model().modelName()).toList());
+    assertEquals(
+        List.of("custom", "fast"),
+        group.members().stream().map(member -> member.variant().id()).toList());
+    // Each member freezes only its selected variant; switching uses that member's exact variant
+    // metadata.
+    assertEquals(
+        new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null),
+        group.members().get(0).variant());
+    assertEquals(
+        new ModelVariant("fast", null, PromptCacheRetention.NONE, null),
+        group.members().get(1).variant());
+    assertEquals(group.members().get(1).variant(), resolved.spec().forMember(1).variant());
+    assertEquals(Set.of(ModelInputModality.TEXT), resolved.spec().model().inputModalities());
+    assertFalse(resolved.spec().model().tools());
+    assertFalse(resolved.spec().model().reasoning());
+    assertFalse(resolved.spec().model().midConversationSystemMessages());
+    assertFalse(resolved.spec().model().messageLevelEffort());
+    assertTrue(group.members().getFirst().model().tools());
+    assertTrue(group.members().getFirst().model().reasoning());
+    assertTrue(group.members().getFirst().model().midConversationSystemMessages());
+    assertTrue(group.members().getFirst().model().messageLevelEffort());
+    assertEquals(
+        List.of("provider", "second-provider"),
+        group.members().stream().map(member -> member.model().providerName()).toList());
+    assertEquals(
+        List.of("wire-model", "second"),
+        group.members().stream().map(member -> member.model().modelId()).toList());
+  }
+
+  @Test
+  void rejectsInvalidGroupSelections() {
+    Fixture fixture = groupFixture(Set.of(ModelInputModality.TEXT));
+    assertEquals(
+        "model group must not select a variant: group",
+        fixture
+            .rejected(
+                fixture.path(
+                    new BranchSettings(
+                        "assistant",
+                        BuiltinExecution.of(ModelSelection.model("group", "default")),
+                        null)))
+            .error()
+            .message());
+    EntryPath path =
+        fixture.path(
+            new BranchSettings(
+                "assistant", BuiltinExecution.of(ModelSelection.group("group")), null));
+    when(fixture.models.getByName("second")).thenReturn(null);
+    assertEquals("group member model not found: second", fixture.rejected(path).error().message());
+    Model nested = Model.builder().name("second").kind(ModelKind.GROUP).build();
+    when(fixture.models.getByName("second")).thenReturn(nested);
+    assertEquals(
+        "group member is not a single model: second", fixture.rejected(path).error().message());
+    Fixture disjoint = groupFixture(Set.of(ModelInputModality.AUDIO));
+    assertEquals(
+        "model group members have no common input modality: group",
+        disjoint.rejected(path).error().message());
+  }
+
+  @Test
+  void agentCanExplicitlySelectBusinessTool() {
+    Fixture fixture = new Fixture(List.of("read", BUSINESS_TOOL), List.of(), List.of());
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+    assertEquals(List.of("read", BUSINESS_TOOL), toolNames(spec.toolBindings()));
+    ToolBinding transition = spec.toolBindings().get(1);
+    assertEquals(EnvironmentSupport.NONE, transition.environmentSupport());
+    assertNull(transition.environmentId());
+    assertNull(transition.environmentName());
+  }
+
+  @Test
+  void branchWithoutEnvironmentHasNoImplicitTools() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(unboundSettings("default")));
+
+    assertEquals(List.of(), spec.toolBindings());
+  }
+
+  @Test
+  void ordinaryThreadNeverReceivesBusinessTool() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+    assertEquals(List.of(), spec.toolBindings());
+  }
+
+  @Test
+  void rejectsInternalToolDeclaredByAgent() {
+    // 工具标识符遵循 lowercase dotted/dashed 约定，因此内部工具用 dashed 名声明后仍必须被拒绝。
+    Fixture fixture =
+        new Fixture(
+            List.of("secret-tool"),
+            List.of(),
+            List.of(hostDescriptor("secret-tool")),
+            Set.of("secret-tool"),
+            ProviderType.OPENAI,
+            ProviderType.OPENAI,
+            PromptCacheRetention.NONE,
+            true);
+
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+    assertEquals(
+        "internal tool cannot be selected by an Agent: secret-tool", rejected.error().message());
+  }
+
+  @Test
+  void rejectsWhenCatalogIsMissingDeclaredBusinessTool() {
+    HarnessCatalog catalogWithoutBusinessTools =
+        HarnessCatalog.from(List.of(defaultBuiltinContributor()));
+    Fixture fixture =
+        new Fixture(List.of(BUSINESS_TOOL), List.of(), List.of(), catalogWithoutBusinessTools);
+
+    TurnResolver.Rejected rejected = fixture.rejected(fixture.path(settings("default")));
+    assertEquals(DatabaseTurnResolver.REJECTION_CODE, rejected.error().code());
+    assertEquals("tool not found: " + BUSINESS_TOOL, rejected.error().message());
+  }
+
+  @Test
+  void selectableToolsPreserveOrderAndBindings() {
+    Fixture fixture = new Fixture(List.of("bash", BUSINESS_TOOL, "read"), List.of(), List.of());
+    fixture.readyEnvironment(ENV_A);
+
+    ModelRequestSpec spec = fixture.resolved(fixture.path(settings("default")));
+
+    List<String> names = spec.toolBindings().stream().map(b -> b.descriptor().name()).toList();
+    assertEquals(List.of("bash", BUSINESS_TOOL, "read"), names);
+    assertEquals(
+        List.of(EnvironmentSupport.REQUIRED, EnvironmentSupport.NONE, EnvironmentSupport.ROUTED),
+        spec.toolBindings().stream().map(ToolBinding::environmentSupport).toList());
+    assertEquals(ENV_A, spec.toolBindings().get(0).environmentId());
+    assertNull(spec.toolBindings().get(1).environmentId());
+    assertEquals(ENV_A, spec.toolBindings().get(2).environmentId());
+  }
+
+  @Test
+  void toolBindingEnvironmentNameReflectsBranchEnvironmentSelection() {
+    // 1. branch 选择了环境：REQUIRED 工具冻结环境名，OPTIONAL 工具冻结环境名，NONE 工具冻结 null
+    Fixture fixture = new Fixture(List.of("bash", BUSINESS_TOOL, "read"), List.of(), List.of());
+    fixture.readyEnvironment(ENV_A);
+
+    ModelRequestSpec boundSpec = fixture.resolved(fixture.path(settings("default")));
+    List<ToolBinding> boundTools = boundSpec.toolBindings();
+    assertEquals(3, boundTools.size());
+    // bash (REQUIRED) -> ENV_A_NAME
+    assertEquals(EnvironmentSupport.REQUIRED, boundTools.get(0).environmentSupport());
+    assertEquals(ENV_A_NAME, boundTools.get(0).environmentName());
+    assertEquals(ENV_A, boundTools.get(0).environmentId());
+    // 业务工具 (NONE) -> null
+    assertEquals(EnvironmentSupport.NONE, boundTools.get(1).environmentSupport());
+    assertNull(boundTools.get(1).environmentName());
+    assertNull(boundTools.get(1).environmentId());
+    // read (OPTIONAL) -> ENV_A_NAME
+    assertEquals(EnvironmentSupport.ROUTED, boundTools.get(2).environmentSupport());
+    assertEquals(ENV_A_NAME, boundTools.get(2).environmentName());
+    assertEquals(ENV_A, boundTools.get(2).environmentId());
+
+    // 2. branch 未选择环境：REQUIRED 工具仍声明但不绑定，NONE 与 ROUTED 工具也保留。
+    ModelRequestSpec unboundSpec = fixture.resolved(fixture.path(unboundSettings("default")));
+    List<ToolBinding> unboundTools = unboundSpec.toolBindings();
+    assertEquals(3, unboundTools.size());
+    assertEquals("bash", unboundTools.get(0).descriptor().name());
+    assertEquals(EnvironmentSupport.REQUIRED, unboundTools.get(0).environmentSupport());
+    assertNull(unboundTools.get(0).environmentName());
+    assertNull(unboundTools.get(0).environmentId());
+    assertEquals(BUSINESS_TOOL, unboundTools.get(1).descriptor().name());
+    assertEquals(EnvironmentSupport.NONE, unboundTools.get(1).environmentSupport());
+    assertNull(unboundTools.get(1).environmentName());
+    assertNull(unboundTools.get(1).environmentId());
+    assertEquals("read", unboundTools.get(2).descriptor().name());
+    assertEquals(EnvironmentSupport.ROUTED, unboundTools.get(2).environmentSupport());
+    assertNull(unboundTools.get(2).environmentName());
+    assertNull(unboundTools.get(2).environmentId());
+
+    // 3. 环境已被清除（历史 turn 选择了环境，最新 turn 未选择环境）：REQUIRED 工具仍声明并冻结为 null。
+    ModelRequestSpec clearedSpec =
+        fixture.resolved(multiTurnPath(settings("default"), unboundSettings("default")));
+    List<ToolBinding> clearedTools = clearedSpec.toolBindings();
+    assertEquals(3, clearedTools.size());
+    assertEquals("bash", clearedTools.get(0).descriptor().name());
+    assertEquals(EnvironmentSupport.REQUIRED, clearedTools.get(0).environmentSupport());
+    assertNull(clearedTools.get(0).environmentName());
+    assertNull(clearedTools.get(0).environmentId());
+    assertEquals(BUSINESS_TOOL, clearedTools.get(1).descriptor().name());
+    assertEquals(EnvironmentSupport.NONE, clearedTools.get(1).environmentSupport());
+    assertEquals("read", clearedTools.get(2).descriptor().name());
+    assertEquals(EnvironmentSupport.ROUTED, clearedTools.get(2).environmentSupport());
+    assertNull(clearedTools.get(2).environmentName());
+    assertNull(clearedTools.get(2).environmentId());
+  }
+
+  private static Fixture groupFixture(Set<ModelInputModality> secondModalities) {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    // 第一成员还支持 IMAGE，第二成员只支持 TEXT 时结果必须是交集而非首项或并集。
+    when(fixture.modelConfigParser.parse("model-config"))
+        .thenReturn(
+            new ParsedAgentModelConfig(
+                4096,
+                1024,
+                Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
+                true,
+                true,
+                true,
+                true,
+                List.of(
+                    new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null),
+                    new ModelVariant("deep", "max", PromptCacheRetention.NONE, null)),
+                "custom",
+                pricing()));
+    fixture.addModel(
+        "second-provider",
+        ModelSelection.model("second", "fast"),
+        new ParsedAgentModelConfig(
+            2048,
+            256,
+            secondModalities,
+            false,
+            false,
+            false,
+            false,
+            List.of(
+                new ModelVariant("fast", null, PromptCacheRetention.NONE, null),
+                new ModelVariant("careful", "high", PromptCacheRetention.NONE, null)),
+            "fast",
+            pricing()));
+    Model group =
+        Model.builder()
+            .name("group")
+            .kind(ModelKind.GROUP)
+            .version(7L)
+            .groupConfigJson("group-config")
+            .build();
+    when(fixture.models.getByName("group")).thenReturn(group);
+    var config = new ModelGroupConfigDTO();
+    var first = new ModelGroupMemberDTO();
+    first.setModelName("model");
+    first.setVariant("custom");
+    var second = new ModelGroupMemberDTO();
+    second.setModelName("second");
+    second.setVariant("fast");
+    config.setMembers(List.of(first, second));
+    config.setFallbackStatusCodes(List.of(429, 503));
+    config.setCooldownSeconds(31);
+    when(fixture.groupConfigCodec.decode("group-config")).thenReturn(config);
+    return fixture;
   }
 
   /** 唯一系统指令正文：spec.systemInstruction() 即本次请求唯一的系统指令，不存在 preamble 消息列表。 */
@@ -2127,6 +2628,7 @@ class DatabaseTurnResolverTest {
             true,
             true,
             false,
+            true,
             List.of(new ModelVariant("compact", null, PromptCacheRetention.NONE, null)),
             "compact",
             pricing()));
@@ -2440,7 +2942,6 @@ class DatabaseTurnResolverTest {
           Provider.builder()
               .name("provider")
               .providerType(persistedProviderType)
-              .connectionGenerationId(new UUID(0L, 42L))
               .version(0L)
               .build());
 
@@ -2519,6 +3020,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   parsed.tools(),
                   parsed.reasoning(),
+                  false,
                   false,
                   List.of(
                       new ModelVariant("default", null, promptCacheRetention, null),
@@ -2639,7 +3141,6 @@ class DatabaseTurnResolverTest {
           Provider.builder()
               .name(providerName)
               .providerType(ProviderType.OPENAI)
-              .connectionGenerationId(new UUID(0L, 43L))
               .version(0L)
               .build();
       when(providers.getByName(providerName)).thenReturn(fallbackProvider);
@@ -2713,6 +3214,7 @@ class DatabaseTurnResolverTest {
                   tools,
                   parsed.reasoning(),
                   parsed.midConversationSystemMessages(),
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -2734,6 +3236,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   parsed.reasoning(),
                   parsed.midConversationSystemMessages(),
+                  false,
                   List.of(new ModelVariant("default", null, PromptCacheRetention.NONE, null)),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -2750,6 +3253,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   parsed.reasoning(),
                   supported,
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -2766,6 +3270,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   reasoning,
                   parsed.midConversationSystemMessages(),
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -2782,6 +3287,7 @@ class DatabaseTurnResolverTest {
           Set.of(ModelInputModality.TEXT),
           true,
           true,
+          false,
           false,
           List.of(defaultVariant, customVariant),
           "default",

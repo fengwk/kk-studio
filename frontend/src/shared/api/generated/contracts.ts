@@ -1915,6 +1915,7 @@ export interface ModelAbilitiesDTO {
   tools: boolean
   reasoning: boolean
   midConversationSystemMessages: boolean
+  messageLevelEffort: boolean
   inputModalities: ModelInputModality[]
 }
 

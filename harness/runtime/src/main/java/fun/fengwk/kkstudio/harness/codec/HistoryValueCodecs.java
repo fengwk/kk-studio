@@ -42,7 +42,8 @@ final class HistoryValueCodecs {
           "model",
           "requestedAt",
           "responseServiceTier",
-          "requestBodyPricing");
+          "requestBodyPricing",
+          "effort");
 
   private static final Set<String> USAGE_FIELDS =
       orderedSet(
@@ -148,6 +149,9 @@ final class HistoryValueCodecs {
         pricing.put(entry.getKey(), entry.getValue());
       }
     }
+    if (metadata.effort() != null) {
+      node.put("effort", metadata.effort());
+    }
     return node;
   }
 
@@ -182,6 +186,7 @@ final class HistoryValueCodecs {
     Instant requestedAt = requestedAtText == null ? null : Instant.parse(requestedAtText);
     String responseServiceTier = nullableText(node, "responseServiceTier");
     RequestBodyPricingSnapshot requestBodyPricing = decodeRequestBodyPricing(node);
+    String effort = nullableText(node, "effort");
     return new AssistantMessageMetadata(
         stopReason,
         usage,
@@ -189,7 +194,8 @@ final class HistoryValueCodecs {
         model,
         requestedAt,
         responseServiceTier,
-        requestBodyPricing);
+        requestBodyPricing,
+        effort);
   }
 
   private static RequestBodyPricingSnapshot decodeRequestBodyPricing(ObjectNode node) {

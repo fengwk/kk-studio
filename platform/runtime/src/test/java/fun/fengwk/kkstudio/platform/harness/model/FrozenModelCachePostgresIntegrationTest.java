@@ -41,11 +41,9 @@ class FrozenModelCachePostgresIntegrationTest extends PostgresSpringTestSupport 
     UUID rootId = UUID.randomUUID();
     UUID turnId = UUID.randomUUID();
     UUID invocationId = UUID.randomUUID();
-    UUID generation = UUID.randomUUID();
     jdbc.update(
-        "insert into provider (name, provider_type, base_url, config, connection_generation_id)"
-            + " values ('cache-provider', 'openai', 'https://example.invalid/v1', '{}'::jsonb, ?)",
-        generation);
+        "insert into provider (name, provider_type, base_url, config)"
+            + " values ('cache-provider', 'openai', 'https://example.invalid/v1', '{}'::jsonb)");
     jdbc.update(
         "insert into model (name, kind, provider_name, model_id, config)"
             + " values ('cache-model', 'MODEL', 'cache-provider', 'wire-model', ?::jsonb)",
