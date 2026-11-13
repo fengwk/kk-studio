@@ -90,7 +90,6 @@ class PostgresqlThreadProcessorReplayTest {
             "lookup",
             "{\"key\":\"value\"}",
             null,
-            null,
             blockData(affinity, "tool", null, "tool_use", null, true));
     NativeAssistantBlockContent opaque =
         new NativeAssistantBlockContent(

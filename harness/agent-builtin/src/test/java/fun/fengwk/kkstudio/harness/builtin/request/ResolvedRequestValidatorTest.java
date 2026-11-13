@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.request;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -141,7 +142,7 @@ class ResolvedRequestValidatorTest {
 
   private static ModelRequestSpec normalSpec(
       ModelSelection model, List<ToolBinding> tools, List<SubagentBinding> subagents) {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(

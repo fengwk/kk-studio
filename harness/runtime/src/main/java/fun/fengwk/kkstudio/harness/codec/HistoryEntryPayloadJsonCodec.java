@@ -47,11 +47,11 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Instant;
@@ -105,7 +105,7 @@ public final class HistoryEntryPayloadJsonCodec {
           "capabilities");
   private static final Set<String> SYSTEM_HOSTED_TOOL_FIELDS = orderedSet("name", "definitionJson");
   private static final Set<String> TURN_CAPABILITIES_FIELDS =
-      orderedSet("toolNames", "subagentBindings", "mediaCapabilities");
+      orderedSet("subagentBindings", "mediaCapabilities");
   private static final Set<String> SUBAGENT_BINDING_FIELDS = orderedSet("name", "description");
   private static final Set<String> TURN_MEDIA_CAPABILITIES_FIELDS =
       orderedSet("inputModalities", "userModalities", "toolResultModalities");
@@ -151,7 +151,8 @@ public final class HistoryEntryPayloadJsonCodec {
           "invocationId",
           "toolName");
 
-  private static final ToolBindingJsonCodec TOOL_BINDING_CODEC = new ToolBindingJsonCodec();
+  private static final ProviderToolDefinitionJsonCodec PROVIDER_TOOL_DEFINITION_CODEC =
+      new ProviderToolDefinitionJsonCodec();
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
@@ -241,7 +242,9 @@ public final class HistoryEntryPayloadJsonCodec {
     ArrayNode removedSections = node.putArray("removedSections");
     value.removedSections().forEach(removedSections::add);
     ArrayNode added = node.putArray("addedTools");
-    value.addedTools().forEach(binding -> added.add(TOOL_BINDING_CODEC.encodeNode(binding)));
+    value
+        .addedTools()
+        .forEach(definition -> added.add(PROVIDER_TOOL_DEFINITION_CODEC.encodeNode(definition)));
     ArrayNode removed = node.putArray("removedTools");
     value.removedTools().forEach(removed::add);
     ArrayNode addedHosted = node.putArray("addedHostedTools");
@@ -291,8 +294,6 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ObjectNode encodeTurnCapabilities(TurnCapabilities value) {
     ObjectNode node = NODES.objectNode();
-    var tools = node.putArray("toolNames");
-    value.toolNames().forEach(tools::add);
     var subagents = node.putArray("subagentBindings");
     for (SubagentBinding binding : value.subagentBindings()) {
       ObjectNode item = subagents.addObject();
@@ -539,9 +540,9 @@ public final class HistoryEntryPayloadJsonCodec {
     }
     ArrayNode added =
         HistoryValueCodecs.requireArray(node.get("addedTools"), context + ".addedTools");
-    List<ToolBinding> addedTools = new ArrayList<>(added.size());
+    List<ProviderToolDefinition> addedTools = new ArrayList<>(added.size());
     for (JsonNode item : added) {
-      addedTools.add(TOOL_BINDING_CODEC.decodeNode(item));
+      addedTools.add(PROVIDER_TOOL_DEFINITION_CODEC.decodeNode(item));
     }
     ArrayNode removed =
         HistoryValueCodecs.requireArray(node.get("removedTools"), context + ".removedTools");
@@ -613,15 +614,6 @@ public final class HistoryEntryPayloadJsonCodec {
   private static TurnCapabilities decodeTurnCapabilities(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.capabilities");
     JsonCodecSupport.requireFields(node, TURN_CAPABILITIES_FIELDS, "TURN_START.capabilities");
-    ArrayNode toolValues =
-        HistoryValueCodecs.requireArray(node.get("toolNames"), "TURN_START.capabilities.toolNames");
-    List<String> toolNames = new ArrayList<>(toolValues.size());
-    for (JsonNode toolValue : toolValues) {
-      if (!toolValue.isString()) {
-        throw new IllegalArgumentException("TURN_START.capabilities.toolNames[] must be text");
-      }
-      toolNames.add(toolValue.stringValue());
-    }
     ArrayNode subagentValues =
         HistoryValueCodecs.requireArray(
             node.get("subagentBindings"), "TURN_START.capabilities.subagentBindings");
@@ -636,7 +628,7 @@ public final class HistoryEntryPayloadJsonCodec {
               HistoryValueCodecs.requiredText(subagent, "description", context)));
     }
     return new TurnCapabilities(
-        toolNames, subagentBindings, decodeTurnMediaCapabilities(node.get("mediaCapabilities")));
+        subagentBindings, decodeTurnMediaCapabilities(node.get("mediaCapabilities")));
   }
 
   private static TurnMediaCapabilities decodeTurnMediaCapabilities(JsonNode value) {

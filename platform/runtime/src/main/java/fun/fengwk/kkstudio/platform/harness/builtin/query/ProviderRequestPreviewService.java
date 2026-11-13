@@ -324,7 +324,8 @@ public final class ProviderRequestPreviewService {
         spec.systemInstruction(),
         spec.toolBindings(),
         spec.subagentBindings(),
-        spec.groupExecution());
+        spec.groupExecution(),
+        spec.systemSections());
   }
 
   private static DomainException frozenCompactionUnavailable(String detail) {

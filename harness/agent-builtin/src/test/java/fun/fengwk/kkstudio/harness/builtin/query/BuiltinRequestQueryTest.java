@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.query;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -140,7 +141,7 @@ class BuiltinRequestQueryTest {
   }
 
   private static ModelRequestSpec requestSpec() {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor(

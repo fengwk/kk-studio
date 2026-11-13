@@ -46,7 +46,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 | --- | --- |
 | `ROOT` | 唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/BranchSettings.java)：agent、[`ExecutionSelection`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/ExecutionSelection.java)（`driver` + `settings` JSON 对象）与可空的 Environment name |
 | `TURN_START` | 打开回合，冻结完整 settings、实际执行配置 `executedSelection`、owner Thread、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算 |
-| `SYSTEM` | 回合间的系统上下文基线或增量，保存具名 prompt sections 与完整工具定义 |
+| `SYSTEM` | 回合间的系统上下文基线或增量，保存具名 prompt sections 与模型可见工具定义 |
 | `MESSAGE` | USER / ASSISTANT / TOOL 消息；assistant 原生 Provider 数据保存在各自内容块上 |
 | `CUSTOM_MESSAGE` | 可信调用方注入的消息 |
 | `MODEL_ATTEMPT_FAILURE` | 与 Provider 无关的重试审计 |
@@ -67,7 +67,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 - `INPUT` 回合在 Assistant 结果前至少有一条 USER 或 `CUSTOM_MESSAGE`；`CONTINUATION` 偿还上一回合的 `continueModel=true`，不消费用户消息；`COMPACTION` 不出现 USER 或 `CUSTOM_MESSAGE`，成功结果只能是 `COMPACTION`；`STOP` 是显式停止的持久屏障，只含一条 `ASSISTANT_ERROR(CANCELLED)` 与随后的 `STOPPED` `TURN_END`。
 - `TURN_END` 只能关闭当前 open 的回合，并按结局校验前置条件。路径可以在任意前缀截断，用于恢复未闭合的回合。
 
-`SYSTEM` Entry 是每条 Thread 路径的持久请求上下文：首条记录具名 system prompt sections 与完整 client / vendor-hosted tool definitions，之后只追加变更的 sections / tools；路径规约出的当前上下文用于规划下一回合。首次基线或上下文变化与对应 `TURN_START` 在同一事务提交，未变化时复用现有基线。分支沿用来源路径上的 SYSTEM Entries；完整工具定义只在 SYSTEM 中保存，`TURN_START` 与 tool-result metadata 只保留工具名。压缩回合不重建基线，压缩后的普通回合需要新基线。
+`SYSTEM` Entry 是每条 Thread 路径的持久请求上下文：首条记录具名 system prompt sections、模型可见 client tool definitions（name / description / input schema）与完整 vendor-hosted tool definitions，之后只追加变更的 sections / tools；路径规约出的当前上下文用于规划下一回合。首次基线或上下文变化与对应 `TURN_START` 在同一事务提交，未变化时复用现有基线。分支沿用来源路径上的 SYSTEM Entries；模型可见工具定义只在 SYSTEM 中保存，`TURN_START` 与 tool-result metadata 只保留工具名。压缩回合不重建基线，压缩后的普通回合需要新基线。
 
 ## Thread
 
@@ -112,7 +112,7 @@ WAITING_INPUT    -> SUCCEEDED（已作答或明确拒答）/ CANCELLED
 RUNNING          -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 ```
 
-`attempt` 同样在副作用之前持久化；RUNNING 工具的旧租约恢复绝不重放，只在能够重新挂接在途远端调用时继续等待结果，否则收敛为 `UNKNOWN`（见下文）。`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答，两者都只占 durable 行，不占 Worker。`ToolBinding` 冻结工具定义、Contributor 归属、环境支持级别与 Environment id/name；无环境选择的 `REQUIRED` 工具在规划时已被过滤，网关对已移除或定义已变化的 binding 返回确定性失败。真实工具的所有终态都把原 binding 写入结果元数据，删除临时行或 fork 不会丢失原定义。
+`attempt` 同样在副作用之前持久化；RUNNING 工具的旧租约恢复绝不重放，只在能够重新挂接在途远端调用时继续等待结果，否则收敛为 `UNKNOWN`（见下文）。`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答，两者都只占 durable 行，不占 Worker。`ToolBinding` 冻结执行所需的工具定义、Contributor 归属、环境支持级别与 Environment id/name；branch 未选择 Environment 时 `REQUIRED` binding 仍以空环境身份冻结并保留在模型工具面，调用返回确定性的 needs-Environment 未执行结果。网关对已移除或定义已变化的 binding 返回确定性失败。真实工具的终态在结果 metadata 中保留 `toolName`；模型可见工具定义由 SYSTEM 历史承载，执行路由由调用时的冻结 binding 保留，删除临时行或 fork 不会丢失调用时定义。
 
 [`ToolOutcomeQuery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ToolOutcomeQuery.java) 按 Thread 和 invocation 身份查询稳定终态：调用行仍在时读取 terminal Invocation，物化后从当前路径的 ToolResult Entry 读取，并校验所属 Thread 与 Turn。返回的 [`ToolOutcomeView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ToolOutcomeView.java) 保留调用身份、终态与稳定内容；`resultError` 是模型可见的业务错误标志，与生命周期 `status` 正交，执行 `SUCCEEDED` 也可能携带业务错误。
 
@@ -378,9 +378,9 @@ ToolOutcome execute(ToolExecutionRequest request, Consumer<ToolResult> progress)
 environmentSupport       NONE / ROUTED / REQUIRED
 ```
 
-`ROUTED` 是逐调用路由的文件工具（`read`、`write`、`edit`、`grep`、`find`）：`read` 的 `resource://` URI 由平台读取器处理，本地绝对路径交给绑定的 Environment；其他文件工具的路径始终交给 Environment。`REQUIRED` 表示只能在环境上执行，未选择环境时从模型工具面过滤。
+`ROUTED` 是逐调用路由的文件工具（`read`、`write`、`edit`、`grep`、`find`）：`read` 的 `resource://` URI 由平台读取器处理，本地绝对路径交给绑定的 Environment；其他文件工具的路径始终交给 Environment。`REQUIRED` 表示只能在环境上执行；未选择环境时仍声明给模型并冻结无环境的 binding，调用以确定性的 needs-Environment 未执行结果结束。
 
-`REQUIRED` 工具只在分支已选择 Environment 时进入模型工具面，执行时经 [`BoundEnvironment`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java) 阻塞调用一个能力，发送确定性由异常类型表达（Busy/Unavailable 确定未执行，SendUncertain 可能已被接受）。
+`REQUIRED` 工具始终进入模型工具面；有 Environment 时执行经 [`BoundEnvironment`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/api/BoundEnvironment.java) 阻塞调用一个能力，发送确定性由异常类型表达（Busy/Unavailable 确定未执行，SendUncertain 可能已被接受）。
 
 新增 Contributor：实现 `HarnessContributor`（常用 `HarnessContributor.of`），按实际执行面声明环境支持级别；内置实现注册为 Spring bean，插件实现从配置实例返回（见 [Platform Plugin API](platform-plugin-api.md)）。
 
@@ -397,7 +397,7 @@ environmentSupport       NONE / ROUTED / REQUIRED
 | `ask_user` | 无 | SELECTABLE | 冻结问卷并等待人工回答 |
 | `compact` | 无 | INTERNAL | 请求在批次结束后整理上下文，只返回排队回执 |
 
-每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，未选 Environment 时只过滤 `REQUIRED` 工具（`bash` 与 LSP），文件工具始终可见。五个文件工具由 [`FileTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/FileTool.java) 实现：schema 与默认超时取自同名能力描述符，`read` 的 `resource://` URI 调用 [`ResourceReadGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/ResourceReadGateway.java)，本地绝对路径委托 `BoundEnvironment`，没有绑定环境时本地路径返回明确的 Environment 错误。`bash` 与 LSP 由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定能力执行。
+每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，所有配置的工具都声明给模型，候选与冻结 binding 按 Agent 配置顺序排列；未选 Environment 时 `bash` 与 LSP 仍可见，但调用不会执行。五个文件工具由 [`FileTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/FileTool.java) 实现：schema 与默认超时取自同名能力描述符，`read` 的 `resource://` URI 调用 [`ResourceReadGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/ResourceReadGateway.java)，本地绝对路径委托 `BoundEnvironment`，没有绑定环境时本地路径返回明确的 Environment 错误。`bash` 与 LSP 由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定能力执行；没有绑定时返回同一确定性未执行错误。
 
 [`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/TaskTool.java) 把参数交给 [`SubagentRunner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentRunner.java)，以本次调用为幂等键；模型固定以 `async=false` 等待 Join 冻结结果。等待仅发生在独立工具执行线程：Join 终态事务通过子 Thread version change 唤醒该线程，线程重读固定 Join 并投影 ToolResult，不阻塞事务或调度线程。父 Stop 中断等待并将 task Invocation 持久结算为 CANCELLED。[`SubagentConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentConfig.java) 的深度、单父并发、全局并发与轮数软预算在每个决策点现读。文件窗口读取、LSP 生命周期、同步 task 与保留的异步通知契约见 [内置工具](builtin-tools.md)。
 
@@ -405,7 +405,7 @@ environmentSupport       NONE / ROUTED / REQUIRED
 
 [`PromptRenderer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/prompt/PromptRenderer.java) 从 classpath 读取 UTF-8 Markdown，以 JMustache 编译并缓存模板；变量或条件缺失时失败。双花括号默认执行 XML 转义，三花括号显式插入原文，插入的值不会再次执行。工具 JSON schema 作为资源原样读取，不作为模板执行。Harness 的模板按 system、tools、messages、compaction 分目录；Platform 和 Project 的消息资源由各模块持有。Agent 用户正文不作为模板执行。
 
-System prompt 固定按 `[agent]` → `[harness]` → `[paths]` → `[environment]` → `[skills]` → `[subagents]` 排列，段间空一行。文案只存在于 Markdown 模板中，Platform 的 composer 只准备视图数据：`[agent]` 在 Agent 正文非空时出现；`[harness]` 始终出现；`[paths]`、`[environment]` 与其中的绝对路径、平台资源和宿主字段说明按本轮实际注入的工具生成，无环境时不出现 bash/LSP 说明；`[skills]` 与 `[subagents]` 分别只在有可注入技能或已配置子 Agent 时出现。Prompt 不含日期或上层产品上下文，Issue 等任务内容只进入任务消息。
+System prompt 固定按 `[agent]` → `[harness]` → `[paths]` → `[environment]` → `[skills]` → `[subagents]` 排列，段间空一行。文案只存在于 Markdown 模板中，Platform 的 composer 只准备视图数据：`[agent]` 在 Agent 正文非空时出现；`[harness]` 始终出现；`[paths]`、`[environment]` 与其中的绝对路径、平台资源和宿主字段说明按本轮实际注入的工具生成；未选 Environment 时仍说明 `REQUIRED` 操作不会执行，且 `read` 仍可读取 `resource://` URI。`[skills]` 与 `[subagents]` 分别只在有可注入技能或已配置子 Agent 时出现。Prompt 不含日期或上层产品上下文，Issue 等任务内容只进入任务消息。
 
 
 `[skills]` 按 Agent 配置顺序列出技能名称与描述，不包含文件路径、交付方式、摘要或 Environment 安装状态。
@@ -452,7 +452,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 | `runtime.input` | `ask_user` 问卷与答案的纯值校验和规范化 |
 | `runtime.join` | Join 的持久化推进、历史投影与父通知交付；票据、交付凭据与渲染在 `api.join` |
 | `spi` | 内核对外部设施的窄端口：Tool 网关及其 transient 执行请求 `ToolInvocationRequest`、Tool 结果编码尺寸契约 `ToolResultSizeLimits`、结果物化、历史动作、实时事件与内部 Thread 变更唤醒源；Builtin 的 Model/Turn 端口在 harness/agent-builtin |
-| `spi.compaction` | `CompactionConfigProvider`：Runtime 对部署配置的反向依赖，每个压缩决策点现读 `CompactionConfig`，不缓存快照、不持有订阅；`RequestTokenEstimator`：Turn 解析对请求输入 token 估算的反向依赖，只接收 `EntryPath` 与 system instruction，实现由组合根绑定到 `runtime.compaction.TokenEstimator`，消费方不接触 runtime 实现类型 |
+| `spi.compaction` | `CompactionConfigProvider`：Runtime 对部署配置的反向依赖，每个压缩决策点现读 `CompactionConfig`，不缓存快照、不持有订阅；`RequestTokenEstimator`：Turn 解析对请求输入 token 估算的反向依赖，接收 `EntryPath` 与当前协议实际发送的 system messages，实现由组合根绑定到 `runtime.compaction.TokenEstimator`，消费方不接触 runtime 实现类型 |
 | `spi.driver` | Agent Driver SPI：`AgentDriver`、`DriverCapabilities`、`TurnResolution`、`LockedDriverState`、`DriverStopResult` 等，以及共用工具构件 `ToolDeclarationPlanner` / `ToolOutcomeAppender`；组合根与外部 Driver 依赖此包，Runtime 不读取具体 Driver 私有状态，其投影出的 `GenerationProjection` 在 `api.generation`，见 [Agent Driver](#agent-driver) |
 | `runtime.processor` | Thread / Tool Processor、准入后的阻塞执行与 Processor 配置；共用执行骨架在 `spi.work`，Builtin 的 MODEL Work 在 harness/agent-builtin |
 | `runtime.retry` | 调用重试判定 `InvocationRetryDecision`：把 `api.retry` 策略、错误是否可重试与已消耗 attempt 合成唯一决策，只计算可行性与延迟，不读时钟、不写状态；策略值在 `api.retry`，部署配置以 JDK `Supplier` / `Function` 现读 |

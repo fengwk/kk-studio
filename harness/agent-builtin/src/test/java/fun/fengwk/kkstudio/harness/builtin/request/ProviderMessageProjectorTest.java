@@ -23,7 +23,7 @@ class ProviderMessageProjectorTest {
   @Test
   void preservesHistoricalCallsAndResultsWhenToolIsUnavailableAndEnvironmentChanged() {
     ToolCallMessageContent call =
-        new ToolCallMessageContent("call-1", "removed_tool", "removed", "{}", null, "old-env");
+        new ToolCallMessageContent("call-1", "removed_tool", "removed", "{}");
     ToolResultMessageContent toolResult =
         new ToolResultMessageContent(
             "call-1",

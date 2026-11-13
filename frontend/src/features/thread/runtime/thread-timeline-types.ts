@@ -303,10 +303,7 @@ export interface ThreadModelRequestDebugTool {
   description: string
   inputSchema: unknown
   environmentSupport: 'NONE' | 'ROUTED' | 'REQUIRED'
-  requiredEnvironmentId?: string | null
   provenance: string
-  state: string
-  filterReason: string | null
 }
 
 export interface ThreadModelRequestDebugSkill {

@@ -34,20 +34,6 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
       }
       candidateTools = List.copyOf(Objects.requireNonNull(candidateTools, "candidateTools"));
       skills = List.copyOf(Objects.requireNonNull(skills, "skills"));
-      requireSentCandidatesFirst(candidateTools);
-    }
-
-    /** 发送候选必须整体先于被过滤候选，且与 spec 中冻结的 toolBindings 一一对应。 */
-    private static void requireSentCandidatesFirst(List<CandidateTool> candidateTools) {
-      boolean filteredSeen = false;
-      for (CandidateTool tool : candidateTools) {
-        if (tool.state() == ToolState.FILTERED) {
-          filteredSeen = true;
-        } else if (filteredSeen) {
-          throw new IllegalArgumentException(
-              "SENT candidate " + tool.name() + " must precede FILTERED candidates");
-        }
-      }
     }
   }
 
@@ -65,21 +51,6 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
     }
   }
 
-  /** 单个候选 Tool 的发送状态。 */
-  enum ToolState {
-    /** 进入最终模型工具面。 */
-    SENT,
-
-    /** 只作为候选事实保留，不进入最终模型工具面。 */
-    FILTERED
-  }
-
-  /** 候选 Tool 被过滤的稳定原因；当前唯一取值是「branch 未选择 Environment」。 */
-  enum FilterReason {
-    /** REQUIRED 工具在 branch 未选择 Environment 时被过滤。 */
-    ENVIRONMENT_NOT_SELECTED
-  }
-
   /**
    * 一个候选 Tool 的模型可见事实。
    *
@@ -88,17 +59,13 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
    * @param inputSchemaJson 最终 Provider definition 的 input schema 原文
    * @param environmentSupport 与 Environment 的关系
    * @param provenance Contributor 归属身份（{@code contributorId:localName}）
-   * @param state 是否进入最终模型工具面
-   * @param filterReason 被过滤的稳定原因；{@code SENT} 时为 null
    */
   record CandidateTool(
       String name,
       String description,
       String inputSchemaJson,
       EnvironmentSupport environmentSupport,
-      String provenance,
-      ToolState state,
-      FilterReason filterReason) {
+      String provenance) {
 
     public CandidateTool {
       name = Objects.requireNonNull(name, "name");
@@ -106,13 +73,6 @@ public sealed interface LiveTurnPlan permits LiveTurnPlan.Planned, LiveTurnPlan.
       inputSchemaJson = Objects.requireNonNull(inputSchemaJson, "inputSchemaJson");
       environmentSupport = Objects.requireNonNull(environmentSupport, "environmentSupport");
       provenance = Objects.requireNonNull(provenance, "provenance");
-      state = Objects.requireNonNull(state, "state");
-      if (state == ToolState.SENT && filterReason != null) {
-        throw new IllegalArgumentException("SENT candidate must not carry a filter reason");
-      }
-      if (state == ToolState.FILTERED && filterReason == null) {
-        throw new IllegalArgumentException("FILTERED candidate requires a stable filter reason");
-      }
     }
   }
 

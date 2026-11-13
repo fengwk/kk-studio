@@ -575,7 +575,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             first.parsed().variants(),
             outputTokens,
             systemInstruction,
-            inherited.tools(),
+            // 分支工具面来自切点 SYSTEM 基线（SystemContext.tools），不需要也不应重新冻结 ToolBinding。
+            List.of(),
             List.of(),
             resolved.group(),
             inherited.sections()),

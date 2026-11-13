@@ -125,12 +125,7 @@ class ToolEditReviewModelProjectionWireTest {
             AgentMessageRole.ASSISTANT,
             List.of(
                 new ToolCallMessageContent(
-                    "call-edit-1",
-                    "edit",
-                    "edit",
-                    "{\"path\":\"" + TARGET_PATH + "\"}",
-                    null,
-                    null)));
+                    "call-edit-1", "edit", "edit", "{\"path\":\"" + TARGET_PATH + "\"}")));
     AgentMessage tool =
         new AgentMessage(
             AgentMessageRole.TOOL,
@@ -168,8 +163,7 @@ class ToolEditReviewModelProjectionWireTest {
                     "edit",
                     "edit",
                     "{\"path\":\"" + TARGET_PATH + "\"}",
-                    "edit file",
-                    "dev")));
+                    "edit file")));
     AgentMessage tool =
         new AgentMessage(
             AgentMessageRole.TOOL,

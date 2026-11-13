@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -52,6 +53,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -111,6 +113,29 @@ class HistoryEntryPayloadJsonCodecTest {
 
     assertEquals(List.of(hostedTool), decoded.addedHostedTools());
     assertTrue(decoded.removedHostedTools().isEmpty());
+  }
+
+  @Test
+  void preservesModelVisibleToolDefinitionsInSystemPayload() {
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition(
+            "read_file",
+            "Read a file",
+            new SchemaJsonCodec().encode(new InputSchema("arguments", Map.of(), Set.of(), false)));
+    SystemPayload payload =
+        new SystemPayload(
+            Map.of("agent", "[agent]"),
+            List.of(),
+            List.of(tool),
+            List.of(),
+            List.of(),
+            List.of(),
+            true);
+
+    SystemPayload decoded = (SystemPayload) CODEC.decode(EntryType.SYSTEM, CODEC.encode(payload));
+
+    assertEquals(List.of(tool), decoded.addedTools());
+    assertTrue(decoded.removedTools().isEmpty());
   }
 
   @Test
@@ -542,7 +567,7 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   @Test
-  void turnCapabilitiesStoreToolNamesInsteadOfDefinitions() {
+  void turnCapabilitiesStoreSubagentsAndMediaCapabilities() {
     TurnStartPayload payload =
         new TurnStartPayload(
             TurnStartReason.INPUT,
@@ -552,10 +577,10 @@ class HistoryEntryPayloadJsonCodecTest {
             1024,
             null,
             null,
-            new TurnCapabilities(List.of("bash"), List.of()));
+            new TurnCapabilities(List.of()));
 
     String encoded = CODEC.encode(payload);
-    assertTrue(encoded.contains("\"toolNames\":[\"bash\"]"));
+    assertFalse(encoded.contains("toolNames"));
     assertFalse(encoded.contains("toolBindings"));
     assertEquals(payload, CODEC.decode(EntryType.TURN_START, encoded));
   }

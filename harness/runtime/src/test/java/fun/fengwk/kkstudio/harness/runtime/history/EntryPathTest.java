@@ -185,7 +185,8 @@ class EntryPathTest {
                 true),
             time(id(2L)));
     SystemContext current = SystemContext.reduce(List.of(root, baseline));
-    SystemContext next = new SystemContext(Map.of("agent", "<agent>new</agent>"), List.of());
+    SystemContext next =
+        new SystemContext(Map.of("agent", "<agent>new</agent>"), List.of(), List.of());
     SystemPayload change = current.changesTo(next).orElseThrow();
     assertTrue(current.changesTo(current).isEmpty());
     Entry delta = new Entry(id(3L), SESSION_ID, id(2L), change, time(id(3L)));

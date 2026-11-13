@@ -36,20 +36,19 @@ RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 
 ```text
 providerType / providerConnectionGenerationId / model / variant / modelVariants / outputTokens
-systemInstruction / toolBindings / subagentBindings
+systemInstruction / systemSections / toolBindings / subagentBindings
 groupExecution?
 ```
 
-完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称、描述与稳定路径已写入 `systemInstruction`。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。存在完成压缩时，以摘要 wrapper 替代切点前历史，并从切点原样回放保留段；Claude 保留段的 thinking 因签名绑定旧前缀而被移除。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩沿用压缩执行模型自己的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
+完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称与描述已进入命名 system sections，`systemInstruction` 是这些 sections 的拼接视图。SYSTEM 历史只保存模型可见工具定义；Environment、Contributor 等执行路由保留在冻结的 `ModelRequestSpec` / `ToolBinding` 中。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。存在完成压缩时，以摘要 wrapper 替代切点前历史，并从切点原样回放保留段；Claude 保留段的 thinking 因签名绑定旧前缀而被移除。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩沿用压缩执行模型自己的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
 
 平台在 invocation 创建时冻结当前实际模型的完整 variants；模型组每个成员各自冻结列表，切换成员时一起切换。历史 assistant 的实际模型名匹配当前模型时，按其 variant ID 在该冻结列表中查找可空 effort；缺失或不匹配为未知。新 invocation 使用最新配置重解释历史，重试与重启沿用冻结列表，不新增 Entry 历史字段。
 
 [`ProviderMessageProjector`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/request/ProviderMessageProjector.java) 把语义上下文投影为 `ProviderMessage`，投影只影响本次请求，从不改写 durable 历史：
 
-- 会话角色只有 `USER`、`ASSISTANT`、`TOOL`，系统指令由顶层 `systemInstruction` 承载。
-- native 资格按本次 `toolBindings` 与调用冻结的 Environment name 判断；工具未绑定、未知或环境变化时，调用与结果降级为 USER `Previous context:` 语义上下文。降级项的动作文本取调用成功时冻结的 `historyAction`，没有时用逐字保留 arguments 的中性描述。
-- 需要改写的 assistant 消息只在本次请求中放弃不兼容的 opaque replay；未配对的 native 调用在本次请求中合成 error 结果 `No result provided`，不写历史。
-- assistant 保留时透传内部 effort 元数据，即使工具调用被降级改写；整个 assistant 被移除时元数据也随之移除。
+- 对话历史投影为 `USER`、`ASSISTANT`、`TOOL`；system baseline 由顶层 `systemInstruction` 承载，后续 SYSTEM context changes 由 materializer 作为有序 `SYSTEM` messages 追加。
+- 历史工具调用与结果始终按 durable Entry 投影；当前 `toolBindings`、Environment 或工具定义变化不会把它们降级为 USER 文本。
+- 未配对的历史调用在本次请求中补 error 结果 `No result provided`，不写历史；assistant 保留时透传内部 effort 元数据，整个 assistant 被移除时元数据也随之移除。
 - 编辑类结果的模型可见 diff 从持久化的 `details.editReview` 纯内存派生；投影、压缩预算估算与请求预览共用同一派生内容。
 
 [`ModelRequestSpecJsonCodec`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelRequestSpecJsonCodec.java) 是冻结 Spec 的严格确定性 JSON codec，拒绝重复键、尾随内容与未声明字段。

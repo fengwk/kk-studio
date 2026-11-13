@@ -26,10 +26,7 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
         description: 'Read file',
         inputSchema: { type: 'object', properties: { path: { type: 'string' } } },
         environmentSupport: 'ROUTED',
-        requiredEnvironmentId: null,
         provenance: 'builtin:read',
-        state: 'SENT',
-        filterReason: null,
       },
       {
         name: 'bash',
@@ -37,8 +34,6 @@ function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): Thre
         inputSchema: { type: 'object', properties: { command: { type: 'string' } } },
         environmentSupport: 'REQUIRED',
         provenance: 'builtin:bash',
-        state: 'FILTERED',
-        filterReason: 'ENVIRONMENT_NOT_SELECTED',
       },
     ],
     skills: [
@@ -122,13 +117,12 @@ describe('ThreadModelRequestDebug & Inspector', () => {
       .toHaveClass('ui-code', 'thread-system-prompt-body')
 
     // 工具标题与徽章
-    expect(screen.getByText(/工具 1 纳入规划 · 1 已过滤/)).toBeInTheDocument()
+    expect(screen.getByText(/工具 2 纳入请求/)).toBeInTheDocument()
     expect(screen.getByText('read')).toBeInTheDocument()
     const readBadge = screen.getByTitle('按调用路由 · ROUTED')
     expect(readBadge).toHaveTextContent('P+E')
 
-    // 过滤工具包含 ⊘ 符号与需要环境徽章
-    expect(screen.getByText(/⊘/)).toBeInTheDocument()
+    // 需要 Environment 的工具仍进入模型工具面并保留能力徽章。
     expect(screen.getByText('bash')).toBeInTheDocument()
     const bashBadge = screen.getByTitle('需要环境 · REQUIRED')
     expect(bashBadge).toHaveTextContent('E')
@@ -156,7 +150,7 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(screen.queryByRole('button', { name: 'Copy system prompt' })).not.toBeInTheDocument()
     expect(screen.getByText('Currently planned tool environment')).toBeInTheDocument()
     expect(screen.queryByText(/DEBUG ·/)).not.toBeInTheDocument()
-    expect(screen.getByText(/TOOLS 1 planned · 1 filtered/)).toBeInTheDocument()
+    expect(screen.getByText(/TOOLS 2 included/)).toBeInTheDocument()
     expect(screen.getByTitle('Routed per call · ROUTED')).toBeInTheDocument()
     expect(screen.getByTitle('Environment required · REQUIRED')).toBeInTheDocument()
     expect(screen.getByText('SKILLS 1')).toBeInTheDocument()
@@ -171,7 +165,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(inspector).toHaveAttribute('aria-label', 'read')
     expect(screen.getByRole('heading', { level: 3, name: 'read' })).toBeInTheDocument()
     expect(screen.getByText('Name')).toBeInTheDocument()
-    expect(screen.getByText('Status')).toBeInTheDocument()
     expect(screen.getByText('Environment Support')).toBeInTheDocument()
     expect(screen.getByText('Contributor')).toBeInTheDocument()
     expect(screen.getByText('Description')).toBeInTheDocument()
@@ -197,7 +190,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
     expect(inspector).toHaveAttribute('aria-label', 'read')
     expect(screen.getByRole('heading', { level: 3, name: 'read' })).toBeInTheDocument()
     expect(screen.getByText('名称')).toBeInTheDocument()
-    expect(screen.getByText('纳入当前规划 · SENT')).toBeInTheDocument()
     expect(screen.getByText('按调用路由 · ROUTED')).toBeInTheDocument()
     expect(screen.getByText('builtin:read')).toHaveClass('ui-mono')
     expect(screen.getByText('builtin:read')).toBeInTheDocument()
@@ -495,8 +487,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               inputSchema: { type: 'object', required: ['path'] },
               environmentSupport: 'NONE',
               provenance: 'custom',
-              state: 'SENT',
-              filterReason: null,
             },
           ],
         })}
@@ -518,8 +508,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
               inputSchema: {},
               environmentSupport: 'NONE',
               provenance: 'custom',
-              state: 'SENT',
-              filterReason: null,
             },
           ],
         })}
@@ -558,8 +546,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 inputSchema: {},
                 environmentSupport: 'UNKNOWN_SUPPORT' as unknown as ThreadModelRequestDebugTool['environmentSupport'],
                 provenance: 'custom',
-                state: 'SENT',
-                filterReason: null,
               },
               {
                 name: 'tool_none',
@@ -567,8 +553,6 @@ describe('ThreadModelRequestDebug & Inspector', () => {
                 inputSchema: {},
                 environmentSupport: 'NONE',
                 provenance: 'custom',
-                state: 'FILTERED',
-                filterReason: null,
               },
             ],
             cacheControl: {
