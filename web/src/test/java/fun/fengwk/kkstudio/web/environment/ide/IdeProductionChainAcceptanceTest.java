@@ -648,8 +648,13 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
           openView(environmentId, viewOne, browserSessionId, identity, claimOne, "create", dirOne);
       long oneEpoch = Long.parseLong(one.path("bindingEpoch").asText());
 
+      // 浏览器同时持有两个视图意图；第二个快照必须保留视图一的 epoch，否则关闭视图一会被判为 STALE_BINDING。
       events.registerUsage(
-          browserSessionId, 2L, List.of(new IntentView(environmentId, viewTwo, claimTwo, null)));
+          browserSessionId,
+          2L,
+          List.of(
+              new IntentView(environmentId, viewOne, claimOne, oneEpoch),
+              new IntentView(environmentId, viewTwo, claimTwo, null)));
       JsonNode two =
           openView(environmentId, viewTwo, browserSessionId, identity, claimTwo, "create", dirTwo);
       long twoEpoch = Long.parseLong(two.path("bindingEpoch").asText());
