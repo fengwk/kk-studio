@@ -3,7 +3,6 @@ package transport
 import (
 	"bytes"
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -16,6 +15,7 @@ import (
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	runtimeapi "github.com/fengwk/kk-studio/daemon/internal/runtime"
+	"github.com/fengwk/kk-studio/daemon/internal/uuid"
 )
 
 // UploadControl performs correlated upload-ticket and commit exchanges on the control stream.
@@ -61,10 +61,7 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 	if content.Name != nil && hasUnsafeHeaderCharacter(*content.Name) {
 		return runtimeapi.ResultContent{}, uploadFailure("request", "invalid-input", true, nil)
 	}
-	transferID, err := newTransferID()
-	if err != nil {
-		return runtimeapi.ResultContent{}, uploadFailure("request", "internal", true, err)
-	}
+	transferID := uuid.New()
 	digest := sha256.Sum256(content.Bytes)
 	request := &protocol.ResourceUploadRequest{TransferId: &transferID, MediaType: protoString(content.MediaType), Size: protoInt64(int64(len(content.Bytes))), Sha256: protoString(hex.EncodeToString(digest[:]))}
 	if content.Name != nil {
@@ -277,17 +274,6 @@ func (u *ResourceUploader) put(ctx context.Context, targetURL string, headers ma
 		return fail("response")
 	}
 	return nil
-}
-
-func newTransferID() (string, error) {
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		return "", err
-	}
-	id[6] = (id[6] & 0x0f) | 0x40
-	id[8] = (id[8] & 0x3f) | 0x80
-	encoded := hex.EncodeToString(id[:])
-	return encoded[:8] + "-" + encoded[8:12] + "-" + encoded[12:16] + "-" + encoded[16:20] + "-" + encoded[20:], nil
 }
 
 func protoString(s string) *string { return &s }

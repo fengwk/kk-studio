@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +20,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/skill"
 	"github.com/fengwk/kk-studio/daemon/internal/transport"
 	"github.com/fengwk/kk-studio/daemon/internal/update"
+	"github.com/fengwk/kk-studio/daemon/internal/uuid"
 )
 
 type productionRuntime struct {
@@ -63,10 +63,7 @@ func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig)
 	if !ok {
 		return productionFailure("native descendant tracking is unavailable", errors.New("supervisor does not implement descendant tracking"))
 	}
-	instanceID, err := newInstanceID()
-	if err != nil {
-		return productionFailure("daemon instance identity could not be created", err)
-	}
+	instanceID := uuid.New()
 	lspFacade := lsp.NewFacade(processes, lsp.PoolOptions{})
 	initialLSP, err := lspFacade.Prepare(initial.LSP)
 	if err != nil {
@@ -328,16 +325,6 @@ func proxyPolicy(applied config.DaemonConfig) (*transport.ProxyPolicy, error) {
 		proxyURL = *applied.ProxyURL
 	}
 	return transport.NewProxyPolicy(proxyURL)
-}
-
-func newInstanceID() (string, error) {
-	var id [16]byte
-	if _, err := rand.Read(id[:]); err != nil {
-		return "", err
-	}
-	id[6] = (id[6] & 0x0f) | 0x40
-	id[8] = (id[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", id[0:4], id[4:6], id[6:8], id[8:10], id[10:16]), nil
 }
 
 var _ daemonruntime.ConnectionFactory = connectionFactory(nil)
