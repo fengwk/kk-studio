@@ -130,12 +130,15 @@ func encodeWriteContent(path string, existing *textcodec.Encoding, content strin
 func writeEncoding(path string, existing *textcodec.Encoding, declared textcodec.Encoding, hasDeclaration bool) (textcodec.Encoding, error) {
 	shown := filepath.ToSlash(path)
 	if existing != nil && existing.BOM {
-		if hasDeclaration && declared.Name != existing.Name {
+		if hasDeclaration && !bomMatchesDeclaration(existing.Name, declared.Name) {
 			return textcodec.Encoding{}, failRun(fmt.Sprintf("%s starts with a %s byte order mark, but the new content declares %s.", shown, existing.Name, declared.Name), "CODEC")
 		}
 		return *existing, nil
 	}
 	if hasDeclaration {
+		if wideFamily(declared.Name) {
+			return textcodec.Encoding{}, failRun(fmt.Sprintf("%s: the new content declares %s, but that encoding needs a byte order mark and the file does not have one.", shown, declared.Name), "CODEC")
+		}
 		return declared, nil
 	}
 	if existing != nil && existing.Source == textcodec.SourceDeclaration && !isUnicodeEncoding(existing.Name) {
@@ -165,6 +168,9 @@ func encodeEditContent(path string, existing textcodec.Encoding, content string)
 // checkEditEncoding refuses an edit that would change the effective encoding of a file.
 func checkEditEncoding(path string, existing, declared textcodec.Encoding, hasDeclaration bool) error {
 	if existing.BOM {
+		if hasDeclaration && !bomMatchesDeclaration(existing.Name, declared.Name) {
+			return failRun(changeEncodingMessage(path, existing.Name, declared.Name), "CODEC")
+		}
 		return nil
 	}
 	if !hasDeclaration {
@@ -174,9 +180,38 @@ func checkEditEncoding(path string, existing, declared textcodec.Encoding, hasDe
 		return nil
 	}
 	if declared.Name != existing.Name {
-		return failRun(changeEncodingMessage(path, existing.Name, declared.Name), "CODEC")
+		message := changeEncodingMessage(path, existing.Name, declared.Name)
+		if wideFamily(declared.Name) {
+			message += " That declaration needs a byte order mark."
+		}
+		return failRun(message, "CODEC")
 	}
 	return nil
+}
+
+// bomMatchesDeclaration reports whether a declared encoding is satisfied by a byte order mark:
+// the concrete order matches itself and the family label matches either order.
+func bomMatchesDeclaration(bom, declared string) bool {
+	if bom == declared {
+		return true
+	}
+	switch bom {
+	case "UTF-16LE", "UTF-16BE":
+		return declared == "UTF-16"
+	case "UTF-32LE", "UTF-32BE":
+		return declared == "UTF-32"
+	}
+	return false
+}
+
+// wideFamily reports whether a declaration names the UTF-16 or UTF-32 family, which a file can
+// only use with a byte order mark.
+func wideFamily(name string) bool {
+	switch name {
+	case "UTF-16", "UTF-16LE", "UTF-16BE", "UTF-32", "UTF-32LE", "UTF-32BE":
+		return true
+	}
+	return false
 }
 
 // changeEncodingMessage reports an edit that would silently re-encode a file.

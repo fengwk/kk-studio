@@ -58,3 +58,21 @@ func TestEditRefusesUndecodableFiles(t *testing.T) {
 		t.Fatalf("conflict=%#v", result)
 	}
 }
+
+// COD-T-273: edit keeps a BOM-marked file whose content declares its own UTF-16 family, and
+// refuses a declaration of the other byte order.
+func TestEditKeepsBOMWithFamilyDeclaration(t *testing.T) {
+	content := `<?xml version="1.0" encoding="UTF-16"?><root>旧</root>`
+	path := writeFixture(t, "doc.xml", mustEncode(t, content, "UTF-16LE", 2))
+	if result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("旧", "新")), nil); result.Error {
+		t.Fatalf("edit failed: %#v", result)
+	}
+	want := mustEncode(t, strings.Replace(content, "旧", "新", 1), "UTF-16LE", 2)
+	if written := mustRead(t, path); string(written) != string(want) {
+		t.Fatalf("bytes=%x want=%x", written, want)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace(`encoding="UTF-16"`, `encoding="UTF-16BE"`)), nil)
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "would change the encoding of") || !strings.Contains(result.Contents[0].Text, "UTF-16BE") {
+		t.Fatalf("other order=%#v", result)
+	}
+}

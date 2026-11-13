@@ -2,6 +2,7 @@ package textcodec
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -39,6 +40,12 @@ func Declared(path string, text []byte) (Encoding, bool, error) {
 	}
 	declared, err := resolveLabel(label, where, formatOf(path, where))
 	if err != nil {
+		var conflict *DeclarationConflictError
+		if errors.As(err, &conflict) {
+			// A UTF-16 or UTF-32 label is a valid declaration for new content; only decoding a
+			// file without a byte order mark cannot apply it.
+			return conflict.Declared, true, nil
+		}
 		return Encoding{}, false, err
 	}
 	return declared.enc, true, nil

@@ -23,6 +23,16 @@ func declaredBytes(t *testing.T, name, text string) []byte {
 	return data
 }
 
+// mustEncode encodes text with a named encoding and fails the test when the codec refuses.
+func mustEncode(t *testing.T, text, charset string, bomBytes int) []byte {
+	t.Helper()
+	data, err := encodeFixture(text, charset, bomBytes)
+	if err != nil {
+		t.Fatalf("encode %s: %v", charset, err)
+	}
+	return data
+}
+
 // writeFixture writes data to a fresh file and returns its path.
 func writeFixture(t *testing.T, name string, data []byte) string {
 	t.Helper()
@@ -194,4 +204,33 @@ func decodeFixture(data []byte) (string, textcodec.Encoding, error) {
 // encodeFixture encodes text with a named encoding, restoring a BOM when bomBytes is positive.
 func encodeFixture(text, charset string, bomBytes int) ([]byte, error) {
 	return textcodec.Encode(text, textcodec.Encoding{Name: charset, BOM: bomBytes > 0})
+}
+
+// COD-T-272: write accepts a BOM-marked file whose content declares its own UTF-16 family and
+// keeps its byte order mark and bytes; another order and a new file without a mark are refused.
+func TestWriteKeepsBOMWithFamilyDeclaration(t *testing.T) {
+	content := `<?xml version="1.0" encoding="UTF-16"?><root>中文</root>`
+	path := writeFixture(t, "doc.xml", mustEncode(t, content+"<old/>", "UTF-16LE", 2))
+	if _, err := Write(path, content, nil); err != nil {
+		t.Fatalf("family declaration: %v", err)
+	}
+	if written := mustRead(t, path); string(written) != string(mustEncode(t, content, "UTF-16LE", 2)) {
+		t.Fatalf("bytes=%x", written)
+	}
+	updated := content + "<next/>"
+	if _, err := Write(path, updated, nil); err != nil {
+		t.Fatalf("update: %v", err)
+	}
+	if written := mustRead(t, path); string(written) != string(mustEncode(t, updated, "UTF-16LE", 2)) {
+		t.Fatalf("updated bytes=%x", written)
+	}
+	otherOrder := `<?xml version="1.0" encoding="UTF-16BE"?><root/>`
+	if _, err := Write(path, otherOrder, nil); err == nil || !strings.Contains(err.Error(), "byte order mark") || !strings.Contains(err.Error(), "UTF-16BE") {
+		t.Fatalf("other order err=%v", err)
+	}
+	created := filepath.Join(t.TempDir(), "new.xml")
+	_, err := Write(created, `<?xml version="1.0" encoding="UTF-16"?><root/>`, nil)
+	if err == nil || !strings.Contains(err.Error(), "byte order mark") || !strings.Contains(err.Error(), created) {
+		t.Fatalf("new file err=%v", err)
+	}
 }

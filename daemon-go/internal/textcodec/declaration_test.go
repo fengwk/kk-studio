@@ -320,8 +320,16 @@ func TestDeclaredReportsContentDeclaration(t *testing.T) {
 	if _, _, err := Declared("/repo/page.html", []byte(`<meta charset="klingon">`)); !errors.As(err, &unsupported) {
 		t.Fatalf("err=%v", err)
 	}
+	// COD-T-242: a UTF-16/32 label is a normal declaration for new content; only decoding a file
+	// without a byte order mark refuses it.
+	for label, want := range map[string]string{"utf-16": "UTF-16", "utf-16le": "UTF-16LE", "utf-32be": "UTF-32BE", "utf32": "UTF-32"} {
+		enc, found, err := Declared("/repo/page.html", []byte(`<meta charset="`+label+`">`))
+		if err != nil || !found || enc.Name != want {
+			t.Fatalf("%s: found=%v encoding=%#v err=%v", label, found, enc, err)
+		}
+	}
 	var conflict *DeclarationConflictError
-	if _, _, err := Declared("/repo/page.html", []byte(`<meta charset="utf-16be">`)); !errors.As(err, &conflict) {
-		t.Fatalf("err=%v", err)
+	if _, _, err := Decode("/repo/page.html", []byte(`<meta charset="utf-16be">x`)); !errors.As(err, &conflict) || conflict.Declared.Name != "UTF-16BE" {
+		t.Fatalf("decode err=%v", err)
 	}
 }
