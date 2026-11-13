@@ -51,6 +51,15 @@ public final class BuiltinHistoryPayloadMapper {
       List<ToolBinding> bindings,
       ModelSelection model,
       Instant requestedAt) {
+    return assistantPayload(response, bindings, model, requestedAt, null);
+  }
+
+  public MessagePayload assistantPayload(
+      ProviderResponse response,
+      List<ToolBinding> bindings,
+      ModelSelection model,
+      Instant requestedAt,
+      String effort) {
     Objects.requireNonNull(response, "response");
     Objects.requireNonNull(bindings, "bindings");
     List<AgentMessageContent> contents = new ArrayList<>();
@@ -115,7 +124,8 @@ public final class BuiltinHistoryPayloadMapper {
             model,
             requestedAt,
             response.serviceTier(),
-            response.requestBodyPricing()),
+            response.requestBodyPricing(),
+            effort),
         null);
   }
 

@@ -77,6 +77,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -241,9 +242,9 @@ class ModelRequestMaterializerTest {
         ((ProviderSystemHostedToolAdditionBlock) system.contents().get(4)).definitionJson());
   }
 
-  /** 只用当前实际模型的冻结 variants 重新解释历史；缺失、外模型和 null effort 均未知。 */
+  /** 历史已保存其实际 effort；外模型回复不参与当前模型的 effort 序列。 */
   @Test
-  void resolvesRetainedAssistantEffortFromFrozenCurrentModelVariants() {
+  void replaysStoredAssistantEffortWithoutVariantLookup() {
     ModelRequestSpec base = liveSpec(bashBinding());
     ModelVariant current = new ModelVariant("v1", "max", PromptCacheRetention.NONE, null);
     ModelRequestSpec spec =
@@ -264,9 +265,9 @@ class ModelRequestMaterializerTest {
     entries.add(entry(1, 0, new RootPayload(SETTINGS)));
     List<MessagePayload> replies =
         List.of(
-            assistantWithModel("model", "old"),
-            assistantWithModel("other", "old"),
-            assistantWithModel("model", "missing"),
+            assistantWithModelAndEffort("model", "old", "high"),
+            assistantWithModelAndEffort("other", "old", "high"),
+            assistantWithModelAndEffort("model", "missing", "high"),
             assistantWithModel("model", "unset"),
             assistant("unknown"));
     long previous = 1;
@@ -284,11 +285,20 @@ class ModelRequestMaterializerTest {
     }
     List<ProviderMessage> messages =
         MATERIALIZER.materialize(new EntryPath(entries), spec).messages();
-    assertEquals("high", messages.get(1).reasoningEffort());
-    assertTrue(messages.subList(2, 10).stream().allMatch(m -> m.reasoningEffort() == null));
+    List<String> assistantEfforts =
+        messages.stream()
+            .filter(message -> message.role() == ProviderMessageRole.ASSISTANT)
+            .map(ProviderMessage::reasoningEffort)
+            .toList();
+    assertEquals(Arrays.asList("high", null, "high", null, null), assistantEfforts);
   }
 
   private static MessagePayload assistantWithModel(String model, String variant) {
+    return assistantWithModelAndEffort(model, variant, null);
+  }
+
+  private static MessagePayload assistantWithModelAndEffort(
+      String model, String variant, String effort) {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("answer"))),
         new AssistantMessageMetadata(
@@ -297,7 +307,9 @@ class ModelRequestMaterializerTest {
             null,
             ModelSelection.model(model, variant),
             null,
-            null),
+            null,
+            null,
+            effort),
         null);
   }
 
@@ -331,7 +343,7 @@ class ModelRequestMaterializerTest {
                     5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)),
                 entry(6, 5, resolvedStart(TurnStartReason.INPUT, null)),
                 entry(7, 6, user("retained")),
-                entry(8, 7, assistantWithModel("model", "v1")),
+                entry(8, 7, assistantWithModelAndEffort("model", "v1", "max")),
                 entry(
                     9, 8, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)),
                 entry(10, 9, resolvedStart(TurnStartReason.COMPACTION, compact)),

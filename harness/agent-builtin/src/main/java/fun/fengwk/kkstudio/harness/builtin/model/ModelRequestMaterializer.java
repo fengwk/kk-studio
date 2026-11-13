@@ -235,12 +235,7 @@ public final class ModelRequestMaterializer {
     if (model == null || !spec.model().modelName().equals(model.modelName())) {
       return null;
     }
-    for (ModelVariant variant : spec.modelVariants()) {
-      if (variant.id().equals(model.variant())) {
-        return variant.reasoningEffort();
-      }
-    }
-    return null;
+    return message.assistantMetadata().effort();
   }
 
   private ProviderMessage systemMessage(SystemPayload change) {
