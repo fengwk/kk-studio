@@ -144,18 +144,19 @@ class ToolEditReviewModelProjectionWireTest {
                     EDIT_DETAILS_JSON)));
 
     List<ProviderMessage> messages =
-        ProviderMessageProjector.byNames(Set.of("edit"))
+        new ProviderMessageProjector()
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(user),
                     ProviderMessageProjector.ProjectedMessage.of(assistant),
                     ProviderMessageProjector.ProjectedMessage.of(tool)));
 
-    verifyWireAcrossFourProtocols(messages, true);
+    verifyWireAcrossFourProtocols(messages);
   }
 
   @Test
-  void downgradedToolResultIncludesDiffExactlyOnceAcrossFourProtocols() throws Exception {
+  void historicalToolResultIncludesDiffWhenCurrentBindingIsMissingAcrossFourProtocols()
+      throws Exception {
     AgentMessage user =
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("Replace line1")));
     AgentMessage assistant =
@@ -182,29 +183,24 @@ class ToolEditReviewModelProjectionWireTest {
                     EDIT_DETAILS_JSON)));
 
     List<ProviderMessage> messages =
-        ProviderMessageProjector.byNames(Set.of())
+        new ProviderMessageProjector()
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(user),
                     ProviderMessageProjector.ProjectedMessage.of(assistant),
                     ProviderMessageProjector.ProjectedMessage.of(tool)));
 
-    verifyWireAcrossFourProtocols(messages, false);
+    verifyWireAcrossFourProtocols(messages);
   }
 
-  private void verifyWireAcrossFourProtocols(List<ProviderMessage> messages, boolean isNative)
-      throws Exception {
+  private void verifyWireAcrossFourProtocols(List<ProviderMessage> messages) throws Exception {
     for (Protocol protocol : Protocol.values()) {
       ProviderAdapter adapter = protocol.createAdapter(transport());
       ProviderRequest request = request(protocol.model(), messages);
       JsonNode wire = MAPPER.readTree(adapter.encodeRequestBody(request, protocol.descriptor()));
 
       assertWireRequirements(wire, protocol.name());
-      if (isNative) {
-        assertNativeSpecificStructure(wire, protocol);
-      } else {
-        assertFallbackSpecificStructure(wire, protocol);
-      }
+      assertNativeSpecificStructure(wire, protocol);
     }
   }
 
@@ -283,17 +279,6 @@ class ToolEditReviewModelProjectionWireTest {
         assertTrue(foundFunctionResponse, "Gemini wire must contain functionResponse");
       }
     }
-  }
-
-  private void assertFallbackSpecificStructure(JsonNode wire, Protocol protocol) {
-    String wireText = wire.toString();
-    assertTrue(
-        wireText.contains("Previous context:"),
-        protocol.name() + " wire must contain fallback context header");
-    assertTrue(
-        wireText.contains("File: " + TARGET_PATH),
-        protocol.name() + " fallback wire must contain file path");
-    assertTrue(wireText.contains("-line1"), protocol.name() + " fallback wire must contain diff");
   }
 
   private static int countOccurrences(String haystack, String needle) {

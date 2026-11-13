@@ -506,13 +506,9 @@ class ModelRequestMaterializerTest {
         ((ProviderTextBlock) request.messages().get(3).contents().getFirst()).providerBlockData());
   }
 
-  /**
-   * 意图：ProviderRequest 的 native 资格由 spec 冻结的 binding 决定——冻结 Environment 与当前同名工具一致的调用保持 native tool
-   * adjacency（assistant call block + TOOL 结果）；Environment 切换后旧调用必须从 ASSISTANT wire 移除、其结果不再产生 TOOL
-   * 消息，而与 结果配对后合并为单条 USER {@code Previous context:} 自然语言上下文。
-   */
+  /** A current Environment switch must not rewrite historical tool calls or results. */
   @Test
-  void environmentSwitchDowngradesFrozenToolHistoryInProviderRequest() {
+  void environmentSwitchPreservesFrozenToolHistoryInProviderRequest() {
     EntryPath path = toolHistoryPath();
 
     ProviderRequest sameEnvironment =
@@ -524,12 +520,7 @@ class ModelRequestMaterializerTest {
 
     ProviderRequest switchedEnvironment =
         MATERIALIZER.materialize(path, liveSpec(environmentBinding("prod")));
-    assertEquals(
-        List.of(ProviderMessageRole.USER, ProviderMessageRole.USER),
-        switchedEnvironment.messages().stream().map(ProviderMessage::role).toList());
-    assertEquals(
-        "Previous context:\nread a.txt:\n```\nfile body\n```",
-        textOf(switchedEnvironment.messages().get(1)));
+    assertEquals(sameEnvironment.messages(), switchedEnvironment.messages());
   }
 
   private static EntryPath toolHistoryPath() {

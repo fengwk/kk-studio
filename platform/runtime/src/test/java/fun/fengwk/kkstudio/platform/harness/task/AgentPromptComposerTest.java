@@ -25,15 +25,13 @@ class AgentPromptComposerTest {
       new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, DEFAULT_MAX_TURNS));
 
   @Test
-  void exposesOrderedNamedSectionsWithoutChangingComposedPrompt() {
+  void exposesOrderedNamedSections() {
     AgentPromptInput input =
         input("Agent instructions.", environment(), List.of("read"), List.of(), List.of());
 
     assertEquals(
         List.of("agent", "harness", "paths", "environment"),
         List.copyOf(composer.composeSections(input).keySet()));
-    assertEquals(
-        String.join("\n\n", composer.composeSections(input).values()), composer.compose(input));
   }
 
   /** 有环境且注入 read/edit/grep/bash：Environment 路径说明、环境事实、技能与子 Agent 全部出现。 */
@@ -133,7 +131,7 @@ class AgentPromptComposerTest {
     AgentPromptInput input =
         input(null, none(), List.of(), List.of(), List.of(new SubagentBinding("explorer", "  ")));
 
-    String rendered = composer.compose(input);
+    String rendered = renderSections(input);
 
     assertTrue(rendered.contains("<description>(no description)</description>"), rendered);
   }
@@ -158,7 +156,7 @@ class AgentPromptComposerTest {
   /** 工具名与列表不可为空引用。 */
   @Test
   void rejectsNullInput() {
-    assertThrows(NullPointerException.class, () -> composer.compose(null));
+    assertThrows(NullPointerException.class, () -> composer.composeSections(null));
   }
 
   private static AgentPromptInput input(
@@ -189,8 +187,12 @@ class AgentPromptComposerTest {
     return new SkillPromptEntry(name, description);
   }
 
+  private String renderSections(AgentPromptInput input) {
+    return String.join("\n\n", composer.composeSections(input).values());
+  }
+
   private String assertGolden(String name, AgentPromptInput input) {
-    String rendered = composer.compose(input);
+    String rendered = renderSections(input);
     assertEquals(golden(name), rendered);
     return rendered;
   }
