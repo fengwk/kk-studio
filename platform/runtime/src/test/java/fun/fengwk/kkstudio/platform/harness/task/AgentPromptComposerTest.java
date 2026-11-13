@@ -48,11 +48,11 @@ class AgentPromptComposerTest {
     assertGolden("environment-all-tools.golden", input);
   }
 
-  /** 无 Environment 时读取工具仍可见，本地路径说明明确要求选择 Environment。 */
+  /** 无 Environment 时仍声明 bash，本地路径说明告知其未执行语义并保留 resource URI 读取能力。 */
   @Test
   void rendersWithoutEnvironment() {
     AgentPromptInput input =
-        input(null, none(), List.of("read", "write", "grep"), List.of(), List.of());
+        input(null, none(), List.of("read", "write", "grep", "bash"), List.of(), List.of());
 
     assertGolden("no-environment.golden", input);
   }

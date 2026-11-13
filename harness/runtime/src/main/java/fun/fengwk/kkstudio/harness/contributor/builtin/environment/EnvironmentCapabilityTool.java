@@ -91,9 +91,11 @@ public final class EnvironmentCapabilityTool implements Tool {
               List.of(
                   new TextResultContent(
                       ToolErrorGuidance.message(
-                          "No Environment is bound in the execution context",
+                          "This operation needs an Environment",
                           ExecutionFact.NOT_EXECUTED,
-                          "Select an Environment for the branch, then call the tool again"))),
+                          "Select an Environment for the branch and call "
+                              + descriptor.name()
+                              + " again"))),
               true,
               "{}"));
     }

@@ -495,17 +495,20 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void filtersRequiredToolsAndPreservesOptionalAndSkillsWhenBranchHasNoEnvironment() {
-    // 未选择 Environment 的 branch：REQUIRED 工具在规划期被过滤掉；OPTIONAL（如 read）保持声明但冻结为 null 路由。
+  void declaresRequiredToolsAndPreservesOptionalAndSkillsWhenBranchHasNoEnvironment() {
+    // 未选择 Environment 的 branch：REQUIRED bash 仍声明给模型，调用时由工具返回 needs-Environment 结果。
     Fixture fixture = new Fixture(List.of("bash", "read"), List.of(), List.of());
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(unboundSettings("default")));
 
     assertEquals(
-        List.of("read"),
+        List.of("bash", "read"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
-        EnvironmentSupport.ROUTED, requestSpec.toolBindings().getFirst().environmentSupport());
+        EnvironmentSupport.REQUIRED, requestSpec.toolBindings().getFirst().environmentSupport());
     assertNull(requestSpec.toolBindings().getFirst().environmentId());
+    assertEquals(
+        EnvironmentSupport.ROUTED, requestSpec.toolBindings().getLast().environmentSupport());
+    assertNull(requestSpec.toolBindings().getLast().environmentId());
     assertNull(requestSpec.toolBindings().getFirst().environmentName());
 
     // Platform Skill 与 Environment 解耦：未选择 Environment 仍可解析 skill 并注入 read。
@@ -550,9 +553,9 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_A, requestSpec.toolBindings().getFirst().environmentId());
   }
 
-  /** 只能在环境执行的工具：选定环境时冻结该环境，未选定环境时在规划期被过滤。 */
+  /** 只能在环境执行的工具：始终声明，选定环境时冻结路由，无环境时绑定 null。 */
   @Test
-  void environmentRequiredToolIsFrozenWithTheSelectedEnvironmentOrFiltered() {
+  void environmentRequiredToolIsFrozenWithTheSelectedEnvironmentOrUnbound() {
     HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool");
 
     Fixture bound = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
@@ -560,10 +563,11 @@ class DatabaseTurnResolverTest {
         ENV_A,
         bound.resolved(bound.path(settings("default"))).toolBindings().getFirst().environmentId());
 
-    // branch 未选择环境：REQUIRED 工具在规划期被过滤，toolBindings 为空。
+    // branch 未选择环境：REQUIRED 工具仍在模型工具面，路由保持未绑定。
     Fixture unbound = new Fixture(List.of("fixed_tool"), List.of(), List.of(), fixedCatalog);
     ModelRequestSpec unboundSpec = unbound.resolved(unbound.path(unboundSettings("default")));
-    assertEquals(List.of(), unboundSpec.toolBindings());
+    assertEquals(List.of("fixed_tool"), toolNames(unboundSpec.toolBindings()));
+    assertNull(unboundSpec.toolBindings().getFirst().environmentId());
   }
 
   @Test
@@ -609,7 +613,7 @@ class DatabaseTurnResolverTest {
 
   /**
    * 测试意图：显式 draft settings 与正式入口共用同一 planner——只替换 model / environment，Agent 与 path 本身不变；未选 / 已选 /
-   * 清除 环境会立即改变候选 Tool 的 SENT / FILTERED 状态，且规划绝不写回 path。
+   * 清除 环境只改变路由绑定，候选 Tool 始终声明，且规划绝不写回 path。
    */
   @Test
   void explicitDraftSettingsReuseTheSharedPlannerWithoutTouchingThePath() {
@@ -617,16 +621,14 @@ class DatabaseTurnResolverTest {
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     EntryPath path = fixture.path(unboundSettings("default"));
 
-    // draft 未选环境：REQUIRED bash 只被过滤，OPTIONAL read 与 Agent skill 照常来自 Agent 配置。
+    // draft 未选环境：REQUIRED bash、OPTIONAL read 与 Agent skill 均进入模型工具面。
     LiveTurnPlan.Planned unbound = fixture.plannedWithSettings(path, unboundSettings("default"));
     assertEquals(
-        List.of("read", "load_skill", "bash"),
+        List.of("bash", "read", "load_skill"),
         unbound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::name).toList());
     assertEquals(
         List.of(
-            LiveTurnPlan.ToolState.SENT,
-            LiveTurnPlan.ToolState.SENT,
-            LiveTurnPlan.ToolState.FILTERED),
+            LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT),
         unbound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::state).toList());
     assertTrue(
         unbound.spec().toolBindings().stream()
@@ -1267,11 +1269,11 @@ class DatabaseTurnResolverTest {
   }
 
   /**
-   * 测试意图：候选投影固定为「SENT 在前、FILTERED 在后」；未选择 Environment 时 REQUIRED 候选只被过滤而不拒绝规划， 并携带唯一稳定原因与精确的
-   * descriptor/schema、EnvironmentSupport、固定 requiredEnvironmentId 与 contributor provenance。
+   * 测试意图：无 Environment 时 REQUIRED 候选仍在模型工具面，且每个候选与冻结 binding 保持一致的
+   * descriptor/schema、EnvironmentSupport、 固定 requiredEnvironmentId 与 contributor provenance。
    */
   @Test
-  void previewPlanListsSentCandidatesBeforeFilteredRequiredCandidates() {
+  void previewPlanDeclaresRequiredToolsWithoutEnvironment() {
     HarnessCatalog fixedCatalog = fixedEnvironmentCatalog("fixed_tool");
     Fixture fixture =
         new Fixture(
@@ -1284,27 +1286,26 @@ class DatabaseTurnResolverTest {
 
     List<LiveTurnPlan.CandidateTool> candidates = planned.candidateTools();
     assertEquals(
-        List.of(BUSINESS_TOOL, "read", "bash", "fixed_tool"),
+        List.of("bash", "fixed_tool", BUSINESS_TOOL, "read"),
         candidates.stream().map(LiveTurnPlan.CandidateTool::name).toList());
     assertEquals(
         List.of(
             LiveTurnPlan.ToolState.SENT,
             LiveTurnPlan.ToolState.SENT,
-            LiveTurnPlan.ToolState.FILTERED,
-            LiveTurnPlan.ToolState.FILTERED),
+            LiveTurnPlan.ToolState.SENT,
+            LiveTurnPlan.ToolState.SENT),
         candidates.stream().map(LiveTurnPlan.CandidateTool::state).toList());
-    // 最终模型工具面只含 SENT 候选，顺序与候选投影中的 SENT 段一致。
+    // 最终模型工具面的顺序与 Agent 配置及候选投影一致。
     assertEquals(
-        List.of(BUSINESS_TOOL, "read"),
+        List.of("bash", "fixed_tool", BUSINESS_TOOL, "read"),
         planned.spec().toolBindings().stream()
             .map(binding -> binding.descriptor().name())
             .toList());
 
-    LiveTurnPlan.CandidateTool environmentTool = candidates.getLast();
+    LiveTurnPlan.CandidateTool environmentTool = candidates.get(1);
     assertEquals(EnvironmentSupport.REQUIRED, environmentTool.environmentSupport());
     assertEquals("fixed:fixed.tool", environmentTool.provenance());
-    assertEquals(
-        LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED, environmentTool.filterReason());
+    assertNull(environmentTool.filterReason());
     assertEquals("fixed_tool description", environmentTool.description());
     assertEquals(
         new SchemaJsonCodec().encode(hostDescriptor("fixed_tool").inputSchema()),
@@ -1328,7 +1329,7 @@ class DatabaseTurnResolverTest {
           binding.descriptor().name());
     }
 
-    LiveTurnPlan.CandidateTool optionalTool = candidates.get(1);
+    LiveTurnPlan.CandidateTool optionalTool = candidates.getLast();
     assertEquals(EnvironmentSupport.ROUTED, optionalTool.environmentSupport());
     assertNull(optionalTool.filterReason());
     assertEquals("builtin:read", optionalTool.provenance());
@@ -2440,30 +2441,38 @@ class DatabaseTurnResolverTest {
     assertEquals(ENV_A_NAME, boundTools.get(2).environmentName());
     assertEquals(ENV_A, boundTools.get(2).environmentId());
 
-    // 2. branch 未选择环境：REQUIRED 工具在规划期被过滤掉；NONE 与 OPTIONAL 工具保留，OPTIONAL 的环境名与 ID 冻结为 null
+    // 2. branch 未选择环境：REQUIRED 工具仍声明但不绑定，NONE 与 ROUTED 工具也保留。
     ModelRequestSpec unboundSpec = fixture.resolved(fixture.path(unboundSettings("default")));
     List<ToolBinding> unboundTools = unboundSpec.toolBindings();
-    assertEquals(2, unboundTools.size());
-    assertEquals(BUSINESS_TOOL, unboundTools.get(0).descriptor().name());
-    assertEquals(EnvironmentSupport.NONE, unboundTools.get(0).environmentSupport());
+    assertEquals(3, unboundTools.size());
+    assertEquals("bash", unboundTools.get(0).descriptor().name());
+    assertEquals(EnvironmentSupport.REQUIRED, unboundTools.get(0).environmentSupport());
     assertNull(unboundTools.get(0).environmentName());
     assertNull(unboundTools.get(0).environmentId());
-    assertEquals("read", unboundTools.get(1).descriptor().name());
-    assertEquals(EnvironmentSupport.ROUTED, unboundTools.get(1).environmentSupport());
+    assertEquals(BUSINESS_TOOL, unboundTools.get(1).descriptor().name());
+    assertEquals(EnvironmentSupport.NONE, unboundTools.get(1).environmentSupport());
     assertNull(unboundTools.get(1).environmentName());
     assertNull(unboundTools.get(1).environmentId());
+    assertEquals("read", unboundTools.get(2).descriptor().name());
+    assertEquals(EnvironmentSupport.ROUTED, unboundTools.get(2).environmentSupport());
+    assertNull(unboundTools.get(2).environmentName());
+    assertNull(unboundTools.get(2).environmentId());
 
-    // 3. 环境已被清除（历史 turn 选择了环境，最新 turn 未选择环境）：REQUIRED 工具同样被过滤，OPTIONAL 冻结为 null
+    // 3. 环境已被清除（历史 turn 选择了环境，最新 turn 未选择环境）：REQUIRED 工具仍声明并冻结为 null。
     ModelRequestSpec clearedSpec =
         fixture.resolved(multiTurnPath(settings("default"), unboundSettings("default")));
     List<ToolBinding> clearedTools = clearedSpec.toolBindings();
-    assertEquals(2, clearedTools.size());
-    assertEquals(BUSINESS_TOOL, clearedTools.get(0).descriptor().name());
-    assertEquals(EnvironmentSupport.NONE, clearedTools.get(0).environmentSupport());
-    assertEquals("read", clearedTools.get(1).descriptor().name());
-    assertEquals(EnvironmentSupport.ROUTED, clearedTools.get(1).environmentSupport());
-    assertNull(clearedTools.get(1).environmentName());
-    assertNull(clearedTools.get(1).environmentId());
+    assertEquals(3, clearedTools.size());
+    assertEquals("bash", clearedTools.get(0).descriptor().name());
+    assertEquals(EnvironmentSupport.REQUIRED, clearedTools.get(0).environmentSupport());
+    assertNull(clearedTools.get(0).environmentName());
+    assertNull(clearedTools.get(0).environmentId());
+    assertEquals(BUSINESS_TOOL, clearedTools.get(1).descriptor().name());
+    assertEquals(EnvironmentSupport.NONE, clearedTools.get(1).environmentSupport());
+    assertEquals("read", clearedTools.get(2).descriptor().name());
+    assertEquals(EnvironmentSupport.ROUTED, clearedTools.get(2).environmentSupport());
+    assertNull(clearedTools.get(2).environmentName());
+    assertNull(clearedTools.get(2).environmentId());
   }
 
   /** 测试意图：业务工具不由运行时按 owner 注入；Agent 配置显式声明业务工具即可获得该受控工具。 */
