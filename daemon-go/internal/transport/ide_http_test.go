@@ -49,7 +49,7 @@ func TestHandleIDE_HTTPForwardsAndFiltersHopHeaders(t *testing.T) {
 		if view.ViewID != ideTestID || view.BindingEpoch != 8 || view.Mode != "http" || view.Path != "/api?q=one" {
 			t.Errorf("view request=%+v", view)
 		}
-		return ViewUpstream{Host: "127.0.0.1", Port: mustPort(t, portText), Path: "/base", Headers: http.Header{"X-Upstream": []string{"private"}}, Cookie: "session=private", Release: func() { released.Add(1) }}, nil
+		return ViewUpstream{Host: "127.0.0.1", Port: mustPort(t, portText), Path: "/base/api?q=one", Headers: http.Header{"X-Upstream": []string{"private"}}, Cookie: "session=private", Release: func() { released.Add(1) }}, nil
 	})
 	connection := &ControlConnection{resolver: resolver}
 	req := httptest.NewRequest(http.MethodGet, "http://studio/ide/"+ideTestID+"/8/api?q=one", nil)

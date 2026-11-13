@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # scripts/dev/verify/e2e/lib/daemon-bootstrap.sh
 #
-# 在隔离的 DAEMON_ROOT 下物化唯一 daemon.json 本地缓存与同目录 daemon.token，然后以
-# `--config <绝对路径>` 启动 Node Daemon 编译入口 `$DAEMON_DIST/main.js`。
+# 在隔离的 DAEMON_ROOT 下物化唯一 daemon.json 本地缓存与同目录 daemon.token，然后启动 Go Daemon 二进制。
 #
 # daemon.json 固定为 {environmentId,version:string,daemonConfig:{studioUrl,bashExecutable,lsp,proxyUrl}}：
 # 卡片由 DAEMON_ENVIRONMENT_ID 或 DAEMON_ENVIRONMENT_NAME 定位，Studio 数据库是配置权威；若卡片
@@ -18,8 +17,8 @@ root=${DAEMON_ROOT:?DAEMON_ROOT (absolute daemon root) is required}
 studio_url=${DAEMON_STUDIO_URL:?DAEMON_STUDIO_URL (http(s) origin) is required}
 environment_id=${DAEMON_ENVIRONMENT_ID:-}
 environment_name=${DAEMON_ENVIRONMENT_NAME:-}
-dist=${DAEMON_DIST:?DAEMON_DIST (absolute daemon distribution directory) is required}
-node_bin=${DAEMON_NODE:-}
+daemon_binary=${DAEMON_BINARY:?DAEMON_BINARY (absolute Go daemon executable) is required}
+node_bin=${DAEMON_NODE:-node}
 
 # 凭证先取出再立即从环境移除；daemon 只通过同目录文件读取。
 token=${DAEMON_REGISTRATION_TOKEN:-}
@@ -40,15 +39,12 @@ case "$root" in
     exit 1
     ;;
 esac
-if [ -z "$node_bin" ]; then
-  node_bin=$(command -v node) || {
-    echo "ERROR: DAEMON_NODE is unset and no node is on PATH." >&2
-    exit 1
-  }
-fi
-entry="$dist/main.js"
-if [ ! -f "$entry" ]; then
-  echo "ERROR: daemon entry is missing: $entry (run: npm --prefix daemon run build)." >&2
+command -v "$node_bin" >/dev/null 2>&1 || {
+  echo "ERROR: Node is required for the daemon config selector helper." >&2
+  exit 1
+}
+if [ ! -x "$daemon_binary" ]; then
+  echo "ERROR: Go daemon binary is missing or not executable: $daemon_binary" >&2
   exit 1
 fi
 if [ ! -f "$config_helper" ]; then
@@ -65,7 +61,7 @@ token_file="$root/daemon.token"
 chmod 600 "$token_file"
 unset token
 
-# 卡片 API 与配置序列化都交给唯一的 Node helper：值不参与 shell 拼接，错误信息不包含 token。
+# 卡片 API 与配置序列化由 Node helper 处理：值不参与 shell 拼接，错误信息不包含 token。
 # umask 与显式 mode 保证配置文件创建时即 owner-only，临时文件同目录 rename 后原子替换。
 selector_args=(--config "$config_file" --studio-url "$studio_url")
 if [ -n "$environment_id" ]; then
@@ -78,4 +74,6 @@ chmod 600 "$config_file"
 unset environment_id environment_name studio_url
 unset selector_args
 
-exec "$node_bin" "$entry" --config "$config_file"
+unset GODEBUG
+export TZ=Etc/UTC
+exec "$daemon_binary" --config "$config_file"

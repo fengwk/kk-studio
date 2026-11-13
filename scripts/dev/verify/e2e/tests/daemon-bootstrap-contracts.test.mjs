@@ -30,34 +30,29 @@ async function withTempDir(body) {
   }
 }
 
-/** A minimal Node distribution directory; resolves to `{ dist }`. */
-function nodeDist(temporary) {
+/** A minimal executable Go-daemon fixture. */
+function daemonFixture(temporary) {
   const dist = path.join(temporary, 'dist')
   mkdirSync(dist, { recursive: true })
-  writeFileSync(path.join(dist, 'main.js'), '// daemon entry\n')
-  return { dist }
+  const daemonBinary = path.join(dist, 'kk-studio-daemon')
+  writeFileSync(daemonBinary, '#!/bin/bash\nexit 0\n')
+  chmodSync(daemonBinary, 0o755)
+  return { daemonBinary }
 }
 
-/**
- * Executable Node recorder: configuration helper calls run the real Node, while the final daemon
- * launch is recorded so the test asserts the real exec boundary instead of static text.
- */
-function recorderNode(temporary) {
-  const { dist } = nodeDist(temporary)
-  const probeDir = path.join(temporary, 'bin')
-  mkdirSync(probeDir, { recursive: true })
+/** Executable Go-daemon stand-in: records the real exec boundary without launching a service. */
+function recorderDaemon(temporary) {
+  const daemonBinary = path.join(temporary, 'kk-studio-daemon')
   const argvFile = path.join(temporary, 'argv.txt')
   const environFile = path.join(temporary, 'environ.txt')
-  const probe = path.join(probeDir, 'node-recorder')
   writeFileSync(
-    probe,
+    daemonBinary,
     '#!/bin/bash\n' +
-      `if [ "$1" = "-e" ] || [[ "$1" == *"/daemon-config-cache.mjs" ]]; then exec '${process.execPath}' "$@"; fi\n` +
       'printf \'%s\\n\' "$@" >"$PROBE_ARGV"\n' +
       'env >"$PROBE_ENVIRON"\n',
   )
-  chmodSync(probe, 0o755)
-  return { dist, probe, argvFile, environFile }
+  chmodSync(daemonBinary, 0o755)
+  return { daemonBinary, argvFile, environFile }
 }
 
 const mode = (file) => statSync(file).mode & 0o777
@@ -109,7 +104,7 @@ test('test intent: the E2E seed pre-seeds exactly five disposable Environments a
   assert.ok(!match[0].includes('11111111-1111-1111-1111-111111111111'))
 })
 
-test('test intent: bootstrap materializes the card cache and launches the Node entry with --config only', async () => {
+test('test intent: bootstrap materializes the card cache and launches the Go binary with --config only', async () => {
   const lib = readText(E2E_LIB_SH)
   const bootstrap = readText(BOOTSTRAP)
 
@@ -118,17 +113,17 @@ test('test intent: bootstrap materializes the card cache and launches the Node e
   assert.ok(lib.includes('DAEMON_DIST'))
   assert.ok(lib.includes('DAEMON_ENVIRONMENT_NAME'))
   assert.ok(lib.includes('Daemon 运行数据目录'))
-  // 凭证经 assignment 前缀进入子进程环境，绝不作为 `env` 的 argv 参数出现。
-  assert.ok(lib.includes('DAEMON_REGISTRATION_TOKEN="$DAEMON_REGISTRATION_TOKEN" nohup env'))
-  assert.ok(bootstrap.includes('--config'))
+  // Token is written to a private file; only the Node selector helper remains in the bootstrap.
   assert.ok(bootstrap.includes('daemon-config-cache.mjs'))
-  assert.ok(lib.includes('$DAEMON_DIST/main.js'))
+  assert.ok(bootstrap.includes('exec "$daemon_binary" --config "$config_file"'))
+  assert.ok(lib.includes('Go 1.27.4'))
+  assert.ok(lib.includes('$DAEMON_BINARY'))
 
   const note = 'E2E daemon environment — 日本語'
   const server = await startCardServer({ name: 'tool-e2e', version: '7', note })
   try {
     await withTempDir(async (temporary) => {
-      const { dist, probe, argvFile, environFile } = recorderNode(temporary)
+      const { daemonBinary, argvFile, environFile } = recorderDaemon(temporary)
       const root = path.join(temporary, 'daemon')
       const secret = 'e2e-token-host-tool'
       const result = await runBootstrap(cleanEnv({
@@ -137,14 +132,14 @@ test('test intent: bootstrap materializes the card cache and launches the Node e
         DAEMON_ROOT: root,
         DAEMON_STUDIO_URL: server.url,
         DAEMON_ENVIRONMENT_NAME: 'tool-e2e',
-        DAEMON_DIST: dist,
-        DAEMON_NODE: probe,
+        DAEMON_BINARY: daemonBinary,
+        DAEMON_NODE: process.execPath,
         DAEMON_REGISTRATION_TOKEN: secret,
       }))
       assert.equal(result.status, 0, result.stderr)
 
       const argv = readFileSync(argvFile, 'utf8').split('\n').filter(Boolean)
-      assert.deepEqual(argv.slice(0, 2), [path.join(dist, 'main.js'), '--config'])
+      assert.deepEqual(argv, ['--config', path.join(root, 'daemon.json')])
       const configPath = argv[argv.indexOf('--config') + 1]
       assert.ok(path.isAbsolute(configPath))
       assert.equal(configPath, path.join(root, 'daemon.json'))
@@ -200,13 +195,13 @@ test('test intent: bootstrap selects a card by UUID and does not rewrite an alre
     server.calls.length = 0
 
     await withTempDir(async (temporary) => {
-      const { dist } = nodeDist(temporary)
+      const { daemonBinary } = daemonFixture(temporary)
       const root = path.join(temporary, 'daemon')
       const result = await runBootstrap(cleanEnv({
         DAEMON_ROOT: root,
         DAEMON_STUDIO_URL: server.url,
         DAEMON_ENVIRONMENT_ID: CARD_ID,
-        DAEMON_DIST: dist,
+        DAEMON_BINARY: daemonBinary,
         DAEMON_NODE: process.execPath,
         DAEMON_REGISTRATION_TOKEN: 'e2e-token-host-tool',
       }))
@@ -227,12 +222,12 @@ test('test intent: bootstrap selects a card by UUID and does not rewrite an alre
 
 test('test intent: bootstrap fails closed without a registration token', async () => {
   await withTempDir(async (temporary) => {
-    const { dist } = nodeDist(temporary)
+    const { daemonBinary } = daemonFixture(temporary)
     const result = await runBootstrap(cleanEnv({
       DAEMON_ROOT: path.join(temporary, 'daemon'),
       DAEMON_STUDIO_URL: 'http://127.0.0.1:18081',
       DAEMON_ENVIRONMENT_NAME: 'tool-e2e',
-      DAEMON_DIST: dist,
+      DAEMON_BINARY: daemonBinary,
       DAEMON_NODE: process.execPath,
     }))
     assert.notEqual(result.status, 0)
@@ -242,11 +237,11 @@ test('test intent: bootstrap fails closed without a registration token', async (
 
 test('test intent: bootstrap requires exactly one card selector', async () => {
   await withTempDir(async (temporary) => {
-    const { dist } = nodeDist(temporary)
+    const { daemonBinary } = daemonFixture(temporary)
     const result = await runBootstrap(cleanEnv({
       DAEMON_ROOT: path.join(temporary, 'daemon'),
       DAEMON_STUDIO_URL: 'http://127.0.0.1:18081',
-      DAEMON_DIST: dist,
+      DAEMON_BINARY: daemonBinary,
       DAEMON_NODE: process.execPath,
       DAEMON_REGISTRATION_TOKEN: 'e2e-token-host-tool',
     }))
@@ -257,12 +252,12 @@ test('test intent: bootstrap requires exactly one card selector', async () => {
 
 test('test intent: bootstrap rejects a relative DAEMON_ROOT', async () => {
   await withTempDir(async (temporary) => {
-    const { dist } = nodeDist(temporary)
+    const { daemonBinary } = daemonFixture(temporary)
     const result = await runBootstrap(cleanEnv({
       DAEMON_ROOT: 'relative/daemon',
       DAEMON_STUDIO_URL: 'http://127.0.0.1:18081',
       DAEMON_ENVIRONMENT_NAME: 'tool-e2e',
-      DAEMON_DIST: dist,
+      DAEMON_BINARY: daemonBinary,
       DAEMON_NODE: process.execPath,
       DAEMON_REGISTRATION_TOKEN: 'e2e-token-host-tool',
     }))
@@ -276,15 +271,15 @@ test('test intent: bootstrap does not start the daemon when the card cannot be r
   const server = await startCardServer({ name: 'tool-e2e' })
   try {
     await withTempDir(async (temporary) => {
-      const { dist, probe, argvFile } = recorderNode(temporary)
+      const { daemonBinary, argvFile } = recorderDaemon(temporary)
       const secret = 'e2e-token-host-tool'
       const result = await runBootstrap(cleanEnv({
         PROBE_ARGV: argvFile,
         DAEMON_ROOT: path.join(temporary, 'daemon'),
         DAEMON_STUDIO_URL: server.url,
         DAEMON_ENVIRONMENT_NAME: 'missing-card',
-        DAEMON_DIST: dist,
-        DAEMON_NODE: probe,
+        DAEMON_BINARY: daemonBinary,
+        DAEMON_NODE: process.execPath,
         DAEMON_REGISTRATION_TOKEN: secret,
       }))
       assert.notEqual(result.status, 0)
@@ -306,7 +301,7 @@ test('test intent: bootstrap creates its files owner-only without relying on chm
       // chmod 桩为 no-op：只有写目录的 umask 与写文件的显式 mode 能收敛权限。
       writeFileSync(path.join(binDir, 'chmod'), '#!/bin/bash\nexit 0\n')
       chmodSync(path.join(binDir, 'chmod'), 0o755)
-      const { dist } = nodeDist(temporary)
+      const { daemonBinary } = daemonFixture(temporary)
 
       const root = path.join(temporary, 'daemon')
       const result = await runProcess('bash', ['-c', `umask 000; exec bash '${BOOTSTRAP}'`], {
@@ -315,7 +310,7 @@ test('test intent: bootstrap creates its files owner-only without relying on chm
           DAEMON_ROOT: root,
           DAEMON_STUDIO_URL: server.url,
           DAEMON_ENVIRONMENT_NAME: 'tool-e2e',
-          DAEMON_DIST: dist,
+          DAEMON_BINARY: daemonBinary,
           DAEMON_NODE: process.execPath,
           DAEMON_REGISTRATION_TOKEN: 'e2e-token-host-tool',
         }),
