@@ -84,6 +84,8 @@ public final class ModelRequestMaterializer {
         spec.providerType() == ProviderType.ANTHROPIC
             && spec.model().midConversationSystemMessages()
             && context != null;
+    boolean baselineHasClientTools =
+        incrementalSystem && !SystemContext.baselineTools(path.entries()).isEmpty();
     List<ToolBinding> effectiveBindings = context == null ? spec.toolBindings() : context.tools();
     String systemInstruction =
         context == null
@@ -92,14 +94,18 @@ public final class ModelRequestMaterializer {
                 ? SystemContext.baselineSystemInstruction(path.entries())
                 : SystemContext.collapseSystemInstruction(path.entries());
     List<ToolBinding> requestBindings =
-        incrementalSystem ? SystemContext.baselineTools(path.entries()) : effectiveBindings;
+        baselineHasClientTools ? SystemContext.baselineTools(path.entries()) : effectiveBindings;
     List<ProviderToolDefinition> tools = providerTools(requestBindings);
     List<ProviderMessage> messages = new ArrayList<>();
-    appendHistory(path, spec, incrementalSystem, messages);
+    appendHistory(path, spec, incrementalSystem, baselineHasClientTools, messages);
     ModelVariant variant = spec.variant();
     if (incrementalSystem) {
-      List<ProviderProtocolOptions.ToolDefinition> baselineHostedTools =
-          SystemContext.baselineHostedTools(path.entries()).stream()
+      List<SystemHostedTool> requestHostedTools =
+          baselineHasClientTools
+              ? SystemContext.baselineHostedTools(path.entries())
+              : context.hostedTools();
+      List<ProviderProtocolOptions.ToolDefinition> toolDefinitions =
+          requestHostedTools.stream()
               .map(
                   tool ->
                       new ProviderProtocolOptions.ToolDefinition(
@@ -110,7 +116,7 @@ public final class ModelRequestMaterializer {
               variant.id(),
               variant.reasoningEffort(),
               variant.promptCacheRetention(),
-              variant.protocolOptions().withToolDefinitions(baselineHostedTools));
+              variant.protocolOptions().withToolDefinitions(toolDefinitions));
     }
     return new ProviderRequest(
         spec.model(),
@@ -120,7 +126,8 @@ public final class ModelRequestMaterializer {
         messages,
         tools,
         ProviderCacheControl.session(
-            spec.variant().promptCacheRetention(), path.root().sessionId().toString()));
+            spec.variant().promptCacheRetention(), path.root().sessionId().toString()),
+        baselineHasClientTools);
   }
 
   /**
@@ -132,6 +139,7 @@ public final class ModelRequestMaterializer {
       EntryPath path,
       ModelRequestSpec spec,
       boolean incrementalSystem,
+      boolean inlineToolChanges,
       List<ProviderMessage> messages) {
     List<Entry> entries = path.entries();
     List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
@@ -182,7 +190,7 @@ public final class ModelRequestMaterializer {
           && !system.baseline()) {
         messages.addAll(projector.projectSources(projectedMessages));
         projectedMessages.clear();
-        ProviderMessage change = systemMessage(system);
+        ProviderMessage change = systemMessage(system, inlineToolChanges);
         if (change != null) {
           deferredSystemMessages.add(change);
         }
@@ -233,23 +241,25 @@ public final class ModelRequestMaterializer {
     return null;
   }
 
-  private ProviderMessage systemMessage(SystemPayload change) {
+  private ProviderMessage systemMessage(SystemPayload change, boolean inlineToolChanges) {
     List<ProviderContentBlock> contents = new ArrayList<>();
     String text = SystemContext.renderChangeText(change);
     if (!text.isEmpty()) {
       contents.add(new ProviderTextBlock(text));
     }
-    for (String name : change.removedTools()) {
-      contents.add(new ProviderSystemToolRemovalBlock(name));
-    }
-    for (String name : change.removedHostedTools()) {
-      contents.add(new ProviderSystemToolRemovalBlock(name));
-    }
-    for (ToolBinding binding : change.addedTools()) {
-      contents.add(new ProviderSystemToolAdditionBlock(providerTool(binding)));
-    }
-    for (SystemHostedTool tool : change.addedHostedTools()) {
-      contents.add(new ProviderSystemHostedToolAdditionBlock(tool.definitionJson()));
+    if (inlineToolChanges) {
+      for (String name : change.removedTools()) {
+        contents.add(new ProviderSystemToolRemovalBlock(name));
+      }
+      for (String name : change.removedHostedTools()) {
+        contents.add(new ProviderSystemToolRemovalBlock(name));
+      }
+      for (ToolBinding binding : change.addedTools()) {
+        contents.add(new ProviderSystemToolAdditionBlock(providerTool(binding)));
+      }
+      for (SystemHostedTool tool : change.addedHostedTools()) {
+        contents.add(new ProviderSystemHostedToolAdditionBlock(tool.definitionJson()));
+      }
     }
     return contents.isEmpty() ? null : new ProviderMessage(ProviderMessageRole.SYSTEM, contents);
   }
