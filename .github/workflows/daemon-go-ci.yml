@@ -54,6 +54,8 @@ jobs:
         run: daemon-go/scripts/check-generated.sh
       - name: Verify formatting
         run: test -z "$(gofmt -l $(find daemon-go -name '*.go'))"
+      - name: Test IDE bridge extension
+        run: node --test daemon-go/ide-extension/extension.test.cjs
       - name: Vet
         working-directory: daemon-go
         run: go vet ./...

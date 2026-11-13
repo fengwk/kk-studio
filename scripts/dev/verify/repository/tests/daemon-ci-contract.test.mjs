@@ -33,6 +33,10 @@ test('Go daemon CI builds all six static targets and is reusable by release and 
   assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-go-ci\.yml/)
 })
 
+test('reusable Go CI runs the bundled IDE extension contract tests', () => {
+  assert.match(goCi, /- name: Test IDE bridge extension\n\s+run: node --test daemon-go\/ide-extension\/extension\.test\.cjs/)
+})
+
 test('reusable Go CI exercises Jetty interoperability with the Go daemon binary', () => {
   assert.match(goCi, /jetty-interop:/)
   assert.match(goCi, /actions\/setup-go@/)

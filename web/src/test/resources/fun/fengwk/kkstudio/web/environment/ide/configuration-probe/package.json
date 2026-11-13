@@ -1,0 +1,17 @@
+{
+  "name": "configuration-probe",
+  "displayName": "Configuration probe",
+  "publisher": "kk-studio-acceptance",
+  "version": "1.0.0",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "main": "./extension.cjs",
+  "activationEvents": ["*"],
+  "extensionKind": ["workspace"],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    }
+  }
+}
