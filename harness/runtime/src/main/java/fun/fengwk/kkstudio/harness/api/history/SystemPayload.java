@@ -14,15 +14,26 @@ public record SystemPayload(
     List<String> removedSections,
     List<ToolBinding> addedTools,
     List<String> removedTools,
+    List<SystemHostedTool> addedHostedTools,
+    List<String> removedHostedTools,
     boolean baseline)
     implements EntryPayload {
+
+  public SystemPayload(
+      Map<String, String> sections,
+      List<String> removedSections,
+      List<ToolBinding> addedTools,
+      List<String> removedTools,
+      boolean baseline) {
+    this(sections, removedSections, addedTools, removedTools, List.of(), List.of(), baseline);
+  }
 
   public SystemPayload(
       Map<String, String> sections,
       List<ToolBinding> addedTools,
       List<String> removedTools,
       boolean baseline) {
-    this(sections, List.of(), addedTools, removedTools, baseline);
+    this(sections, List.of(), addedTools, removedTools, List.of(), List.of(), baseline);
   }
 
   public SystemPayload {
@@ -42,14 +53,30 @@ public record SystemPayload(
     }
     addedTools = List.copyOf(Objects.requireNonNull(addedTools, "addedTools"));
     removedTools = List.copyOf(Objects.requireNonNull(removedTools, "removedTools"));
-    if (baseline && (!removedSections.isEmpty() || !removedTools.isEmpty() || sections.isEmpty())) {
+    addedHostedTools = List.copyOf(Objects.requireNonNull(addedHostedTools, "addedHostedTools"));
+    removedHostedTools =
+        List.copyOf(Objects.requireNonNull(removedHostedTools, "removedHostedTools"));
+    if (baseline
+        && (!removedSections.isEmpty()
+            || !removedTools.isEmpty()
+            || !removedHostedTools.isEmpty()
+            || sections.isEmpty())) {
       throw new IllegalArgumentException("baseline SYSTEM must contain sections and no removals");
+    }
+    if (removedHostedTools.stream().anyMatch(name -> name == null || name.isBlank())) {
+      throw new IllegalArgumentException("removedHostedTools must contain non-blank names");
+    }
+    if (addedHostedTools.stream().map(SystemHostedTool::name).distinct().count()
+        != addedHostedTools.size()) {
+      throw new IllegalArgumentException("addedHostedTools must have unique names");
     }
     if (!baseline
         && sections.isEmpty()
         && removedSections.isEmpty()
         && addedTools.isEmpty()
-        && removedTools.isEmpty()) {
+        && removedTools.isEmpty()
+        && addedHostedTools.isEmpty()
+        && removedHostedTools.isEmpty()) {
       throw new IllegalArgumentException("SYSTEM change must change text or tools");
     }
   }

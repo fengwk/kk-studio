@@ -37,6 +37,7 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultReason;
@@ -85,7 +86,14 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static final Set<String> ROOT_FIELDS = orderedSet("settings");
   private static final Set<String> SYSTEM_FIELDS =
-      orderedSet("sections", "removedSections", "addedTools", "removedTools", "baseline");
+      orderedSet(
+          "sections",
+          "removedSections",
+          "addedTools",
+          "removedTools",
+          "addedHostedTools",
+          "removedHostedTools",
+          "baseline");
   private static final Set<String> TURN_START_FIELDS =
       orderedSet(
           "reason",
@@ -96,6 +104,7 @@ public final class HistoryEntryPayloadJsonCodec {
           "compaction",
           "executedSelection",
           "capabilities");
+  private static final Set<String> SYSTEM_HOSTED_TOOL_FIELDS = orderedSet("name", "definitionJson");
   private static final Set<String> TURN_CAPABILITIES_FIELDS =
       orderedSet("toolBindings", "subagentBindings", "mediaCapabilities");
   private static final Set<String> SUBAGENT_BINDING_FIELDS = orderedSet("name", "description");
@@ -236,6 +245,14 @@ public final class HistoryEntryPayloadJsonCodec {
     value.addedTools().forEach(binding -> added.add(TOOL_BINDING_CODEC.encodeNode(binding)));
     ArrayNode removed = node.putArray("removedTools");
     value.removedTools().forEach(removed::add);
+    ArrayNode addedHosted = node.putArray("addedHostedTools");
+    for (SystemHostedTool tool : value.addedHostedTools()) {
+      ObjectNode item = addedHosted.addObject();
+      item.put("name", tool.name());
+      item.put("definitionJson", tool.definitionJson());
+    }
+    ArrayNode removedHosted = node.putArray("removedHostedTools");
+    value.removedHostedTools().forEach(removedHosted::add);
     node.put("baseline", value.baseline());
     return node;
   }
@@ -539,11 +556,42 @@ public final class HistoryEntryPayloadJsonCodec {
       }
       removedTools.add(item.stringValue());
     }
+    ArrayNode addedHostedValues =
+        HistoryValueCodecs.requireArray(
+            node.get("addedHostedTools"), context + ".addedHostedTools");
+    List<SystemHostedTool> addedHostedTools = new ArrayList<>(addedHostedValues.size());
+    for (JsonNode item : addedHostedValues) {
+      ObjectNode hostedTool =
+          HistoryValueCodecs.requireObject(item, context + ".addedHostedTools[]");
+      JsonCodecSupport.requireFields(
+          hostedTool, SYSTEM_HOSTED_TOOL_FIELDS, context + ".addedHostedTools[]");
+      addedHostedTools.add(
+          new SystemHostedTool(
+              HistoryValueCodecs.requiredText(hostedTool, "name", context + ".addedHostedTools[]"),
+              HistoryValueCodecs.requiredText(
+                  hostedTool, "definitionJson", context + ".addedHostedTools[]")));
+    }
+    ArrayNode removedHostedValues =
+        HistoryValueCodecs.requireArray(
+            node.get("removedHostedTools"), context + ".removedHostedTools");
+    List<String> removedHostedTools = new ArrayList<>(removedHostedValues.size());
+    for (JsonNode item : removedHostedValues) {
+      if (!item.isString()) {
+        throw new IllegalArgumentException("SYSTEM.removedHostedTools[] must be text");
+      }
+      removedHostedTools.add(item.stringValue());
+    }
     if (!node.get("baseline").isBoolean()) {
       throw new IllegalArgumentException("SYSTEM.baseline must be boolean");
     }
     return new SystemPayload(
-        sections, removedSections, addedTools, removedTools, node.get("baseline").booleanValue());
+        sections,
+        removedSections,
+        addedTools,
+        removedTools,
+        addedHostedTools,
+        removedHostedTools,
+        node.get("baseline").booleanValue());
   }
 
   private static TurnStartPayload decodeTurnStart(JsonNode value) {

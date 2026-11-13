@@ -3,9 +3,13 @@ package fun.fengwk.kkstudio.harness.model;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Objects;
 
 /**
  * 单个 model variant 携带的厂商原生协议请求选项。
@@ -62,12 +66,68 @@ public record ProviderProtocolOptions(String canonicalJson) {
     canonicalJson = canonicalize(canonicalJson);
   }
 
+  /** A protocol-option tool entry with its original JSON definition. */
+  public record ToolDefinition(String name, String definitionJson) {
+
+    public ToolDefinition {
+      Objects.requireNonNull(name, "name");
+      Objects.requireNonNull(definitionJson, "definitionJson");
+    }
+  }
+
   /** 返回 canonical JSON 的独立可变副本；每次调用互不影响。 */
   public ObjectNode copyOptions() {
     try {
       return (ObjectNode) STRICT_MAPPER.readTree(canonicalJson);
     } catch (JacksonException error) {
       throw new IllegalStateException("variant protocol options are not valid JSON", error);
+    }
+  }
+
+  /** Return named definitions in the native {@code tools} array. */
+  public List<ToolDefinition> toolDefinitions() {
+    JsonNode tools = copyOptions().get("tools");
+    if (tools == null) {
+      return List.of();
+    }
+    if (!tools.isArray()) {
+      throw new IllegalArgumentException("protocolOptions tools must be a JSON array");
+    }
+    List<ToolDefinition> result = new ArrayList<>(tools.size());
+    for (JsonNode tool : tools) {
+      JsonNode name = tool.path("name");
+      if (!tool.isObject() || !name.isString() || name.stringValue().isBlank()) {
+        throw new IllegalArgumentException("protocolOptions tools entries must have a name");
+      }
+      try {
+        result.add(new ToolDefinition(name.stringValue(), STRICT_MAPPER.writeValueAsString(tool)));
+      } catch (JacksonException error) {
+        throw new IllegalStateException("cannot encode protocolOptions tool", error);
+      }
+    }
+    return List.copyOf(result);
+  }
+
+  /** Replace only the native tools array while preserving every other variant option. */
+  public ProviderProtocolOptions withToolDefinitions(List<ToolDefinition> toolDefinitions) {
+    Objects.requireNonNull(toolDefinitions, "toolDefinitions");
+    ObjectNode options = copyOptions();
+    ArrayNode tools = options.putArray("tools");
+    for (ToolDefinition definition : toolDefinitions) {
+      try {
+        JsonNode node = STRICT_MAPPER.readTree(definition.definitionJson());
+        if (!node.isObject() || !definition.name().equals(node.path("name").stringValue())) {
+          throw new IllegalArgumentException("protocol tool definition name does not match");
+        }
+        tools.add(node);
+      } catch (JacksonException error) {
+        throw new IllegalArgumentException("protocol tool definition must be a JSON object", error);
+      }
+    }
+    try {
+      return new ProviderProtocolOptions(STRICT_MAPPER.writeValueAsString(options));
+    } catch (JacksonException error) {
+      throw new IllegalStateException("cannot encode protocol options", error);
     }
   }
 

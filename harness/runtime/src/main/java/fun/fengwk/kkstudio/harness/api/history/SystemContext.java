@@ -11,19 +11,26 @@ import java.util.Objects;
 import java.util.Optional;
 
 /** Current system-prompt sections and tools reduced from SYSTEM entries on an Entry path. */
-public record SystemContext(Map<String, String> sections, List<ToolBinding> tools) {
+public record SystemContext(
+    Map<String, String> sections, List<ToolBinding> tools, List<SystemHostedTool> hostedTools) {
+
+  public SystemContext(Map<String, String> sections, List<ToolBinding> tools) {
+    this(sections, tools, List.of());
+  }
 
   public SystemContext {
     sections =
         Collections.unmodifiableMap(
             new LinkedHashMap<>(Objects.requireNonNull(sections, "sections")));
     tools = List.copyOf(Objects.requireNonNull(tools, "tools"));
+    hostedTools = List.copyOf(Objects.requireNonNull(hostedTools, "hostedTools"));
   }
 
   /** Reduce baseline and all following deltas in path order. */
   public static SystemContext reduce(List<Entry> entries) {
     Map<String, String> sections = new LinkedHashMap<>();
     Map<String, ToolBinding> tools = new LinkedHashMap<>();
+    Map<String, SystemHostedTool> hostedTools = new LinkedHashMap<>();
     boolean baselineSeen = false;
     for (Entry entry : entries) {
       if (!(entry.payload() instanceof SystemPayload change)) {
@@ -32,6 +39,7 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
       if (change.baseline()) {
         sections.clear();
         tools.clear();
+        hostedTools.clear();
         baselineSeen = true;
       } else if (!baselineSeen) {
         throw new IllegalArgumentException("SYSTEM change requires a baseline on the Entry path");
@@ -39,6 +47,12 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
       change.removedSections().forEach(sections::remove);
       sections.putAll(change.sections());
       change.removedTools().forEach(tools::remove);
+      change.removedHostedTools().forEach(hostedTools::remove);
+      for (SystemHostedTool tool : change.addedHostedTools()) {
+        if (hostedTools.putIfAbsent(tool.name(), tool) != null) {
+          throw new IllegalArgumentException("SYSTEM hosted tool already exists: " + tool.name());
+        }
+      }
       for (ToolBinding binding : change.addedTools()) {
         String name = binding.descriptor().name();
         if (tools.putIfAbsent(name, binding) != null) {
@@ -49,7 +63,8 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
     if (!baselineSeen) {
       throw new IllegalArgumentException("Entry path has no SYSTEM baseline");
     }
-    return new SystemContext(sections, new ArrayList<>(tools.values()));
+    return new SystemContext(
+        sections, new ArrayList<>(tools.values()), new ArrayList<>(hostedTools.values()));
   }
 
   /** Compose named sections in insertion order, separated by one blank line. */
@@ -66,6 +81,10 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
   /** Return the tool definitions from the latest baseline. */
   public static List<ToolBinding> baselineTools(List<Entry> entries) {
     return latestBaseline(entries).addedTools();
+  }
+
+  public static List<SystemHostedTool> baselineHostedTools(List<Entry> entries) {
+    return latestBaseline(entries).addedHostedTools();
   }
 
   private static SystemPayload latestBaseline(List<Entry> entries) {
@@ -142,6 +161,10 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
     Map<String, ToolBinding> newTools = byName(next.tools);
     List<ToolBinding> added = new ArrayList<>();
     List<String> removed = new ArrayList<>();
+    Map<String, SystemHostedTool> oldHostedTools = hostedByName(hostedTools);
+    Map<String, SystemHostedTool> newHostedTools = hostedByName(next.hostedTools);
+    List<SystemHostedTool> addedHosted = new ArrayList<>();
+    List<String> removedHosted = new ArrayList<>();
     next.tools.forEach(
         binding -> {
           ToolBinding old = oldTools.get(binding.descriptor().name());
@@ -156,10 +179,40 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
             removed.add(binding.descriptor().name());
           }
         });
-    if (changed.isEmpty() && removedSections.isEmpty() && added.isEmpty() && removed.isEmpty()) {
+    next.hostedTools.forEach(
+        tool -> {
+          if (!tool.equals(oldHostedTools.get(tool.name()))) {
+            addedHosted.add(tool);
+          }
+        });
+    hostedTools.forEach(
+        tool -> {
+          SystemHostedTool replacement = newHostedTools.get(tool.name());
+          if (replacement == null || !replacement.equals(tool)) {
+            removedHosted.add(tool.name());
+          }
+        });
+    if (changed.isEmpty()
+        && removedSections.isEmpty()
+        && added.isEmpty()
+        && removed.isEmpty()
+        && addedHosted.isEmpty()
+        && removedHosted.isEmpty()) {
       return Optional.empty();
     }
-    return Optional.of(new SystemPayload(changed, removedSections, added, removed, false));
+    return Optional.of(
+        new SystemPayload(
+            changed, removedSections, added, removed, addedHosted, removedHosted, false));
+  }
+
+  private static Map<String, SystemHostedTool> hostedByName(List<SystemHostedTool> tools) {
+    Map<String, SystemHostedTool> result = new LinkedHashMap<>();
+    for (SystemHostedTool tool : tools) {
+      if (result.putIfAbsent(tool.name(), tool) != null) {
+        throw new IllegalArgumentException("hosted tool definitions must have unique names");
+      }
+    }
+    return result;
   }
 
   private static Map<String, ToolBinding> byName(List<ToolBinding> bindings) {

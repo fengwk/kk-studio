@@ -31,6 +31,7 @@ import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultReason;
@@ -89,6 +90,27 @@ class HistoryEntryPayloadJsonCodecTest {
             IllegalArgumentException.class,
             () -> new ModelAttemptFailurePayload(attempt, model, null, error, time.plusNanos(1)));
     assertEquals("retryAt must use millisecond precision", retryError.getMessage());
+  }
+
+  @Test
+  void preservesHostedToolDefinitionsInSystemPayload() {
+    SystemHostedTool hostedTool =
+        new SystemHostedTool(
+            "web_search", "{\"type\":\"web_search_20250305\",\"name\":\"web_search\"}");
+    SystemPayload payload =
+        new SystemPayload(
+            Map.of("agent", "[agent]"),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(hostedTool),
+            List.of(),
+            true);
+
+    SystemPayload decoded = (SystemPayload) CODEC.decode(EntryType.SYSTEM, CODEC.encode(payload));
+
+    assertEquals(List.of(hostedTool), decoded.addedHostedTools());
+    assertTrue(decoded.removedHostedTools().isEmpty());
   }
 
   @Test

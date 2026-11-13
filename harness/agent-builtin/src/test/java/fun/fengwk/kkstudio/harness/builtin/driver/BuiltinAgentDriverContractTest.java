@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -48,6 +49,7 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
@@ -144,6 +146,8 @@ class BuiltinAgentDriverContractTest {
     assertEquals(Map.of("agent", "[agent] new"), textChange.sections());
     assertTrue(textChange.addedTools().isEmpty());
     assertTrue(textChange.removedTools().isEmpty());
+    assertTrue(textChange.addedHostedTools().isEmpty());
+    assertTrue(textChange.removedHostedTools().isEmpty());
 
     Entry textEntry = new Entry(new UUID(0L, 7L), sessionId, pausedEnd.id(), textChange, T0);
     Entry continuationStart =
@@ -192,6 +196,9 @@ class BuiltinAgentDriverContractTest {
 
     assertTrue(deferredTools.sections().isEmpty());
     assertEquals(List.of(addedTool), deferredTools.addedTools());
+    assertEquals(
+        List.of("web_search"),
+        deferredTools.addedHostedTools().stream().map(SystemHostedTool::name).toList());
   }
 
   @Test
@@ -517,7 +524,13 @@ class BuiltinAgentDriverContractTest {
   }
 
   private static ModelRequestSpec updatedRequest(ToolBinding tool) {
-    ModelVariant variant = new ModelVariant("v1", null, PromptCacheRetention.NONE, null);
+    ModelVariant variant =
+        new ModelVariant(
+            "v1",
+            null,
+            PromptCacheRetention.NONE,
+            new ProviderProtocolOptions(
+                "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\"}]}"));
     return new ModelRequestSpec(
         ProviderType.ANTHROPIC,
         new UUID(0L, 1L),

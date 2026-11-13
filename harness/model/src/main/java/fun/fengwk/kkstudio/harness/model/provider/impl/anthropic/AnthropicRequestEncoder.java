@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemHostedToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
@@ -365,7 +366,8 @@ public final class AnthropicRequestEncoder {
               ProviderErrorKind.INVALID_REQUEST,
               "protocolOptions tools["
                   + i
-                  + "] must be a supported hosted tool; bind client tools through runtime ProviderToolDefinition");
+                  + "] must be a supported hosted tool; bind client tools through runtime"
+                  + " ProviderToolDefinition");
         }
         if (!names.add(name.stringValue())) {
           throw new ProviderException(
@@ -420,13 +422,9 @@ public final class AnthropicRequestEncoder {
         text.put("text", textBlock.text());
         contents.add(text);
       } else if (block instanceof ProviderSystemToolAdditionBlock addition) {
-        ObjectNode tool = NODES.objectNode();
-        tool.put("type", "tool_definition");
-        tool.set("definition", encodeTool(addition.tool()));
-        ObjectNode node = NODES.objectNode();
-        node.put("type", "tool_addition");
-        node.set("tool", tool);
-        contents.add(node);
+        contents.add(encodeToolAddition(encodeTool(addition.tool())));
+      } else if (block instanceof ProviderSystemHostedToolAdditionBlock addition) {
+        contents.add(encodeToolAddition(parseHostedToolDefinition(addition.definitionJson())));
       } else if (block instanceof ProviderSystemToolRemovalBlock removal) {
         ObjectNode tool = NODES.objectNode();
         tool.put("type", "tool_reference");
@@ -442,6 +440,30 @@ public final class AnthropicRequestEncoder {
       }
     }
     return msgNode;
+  }
+
+  private static ObjectNode encodeToolAddition(ObjectNode definition) {
+    ObjectNode tool = NODES.objectNode();
+    tool.put("type", "tool_definition");
+    tool.set("definition", definition);
+    ObjectNode addition = NODES.objectNode();
+    addition.put("type", "tool_addition");
+    addition.set("tool", tool);
+    return addition;
+  }
+
+  private static ObjectNode parseHostedToolDefinition(String definitionJson) {
+    try {
+      JsonNode definition = OBJECT_MAPPER.readTree(definitionJson);
+      if (definition.isObject() && definition.path("name").isString()) {
+        return (ObjectNode) definition;
+      }
+    } catch (JacksonException ignored) {
+      // The durable source is validated as an object when materialized.
+    }
+    throw new ProviderException(
+        ProviderErrorKind.INVALID_REQUEST,
+        "hosted tool definition must be a JSON object with a name");
   }
 
   private static ObjectNode encodeUserMessage(ProviderMessage message) {

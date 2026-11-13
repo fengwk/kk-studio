@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
@@ -62,6 +63,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemHostedToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
@@ -163,7 +165,20 @@ class ModelRequestMaterializerTest {
   void projectsBaselineToolsAndInlineChangesForCapableAnthropicModel() {
     Entry root = entry(1, 0, new RootPayload(SETTINGS));
     Entry baseline =
-        entry(2, 1, new SystemPayload(Map.of("agent", "[agent]\nold"), List.of(), List.of(), true));
+        entry(
+            2,
+            1,
+            new SystemPayload(
+                Map.of("agent", "[agent]\nold"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(
+                    new SystemHostedTool(
+                        "web_search",
+                        "{\"type\":\"web_search_20250305\",\"name\":\"web_search\"}")),
+                List.of(),
+                true));
     Entry change =
         entry(
             3,
@@ -173,6 +188,11 @@ class ModelRequestMaterializerTest {
                 List.of(),
                 List.of(bashBinding()),
                 List.of("obsolete"),
+                List.of(
+                    new SystemHostedTool(
+                        "code_execution",
+                        "{\"type\":\"code_execution_20250522\",\"name\":\"code_execution\"}")),
+                List.of("web_search"),
                 false));
     ModelVariant variant = variant();
     ModelRequestSpec spec =
@@ -195,16 +215,30 @@ class ModelRequestMaterializerTest {
 
     assertEquals("[agent]\nold", request.systemInstruction());
     assertTrue(request.tools().isEmpty());
+    assertEquals(
+        "web_search_20250305",
+        request
+            .variant()
+            .protocolOptions()
+            .copyOptions()
+            .path("tools")
+            .get(0)
+            .path("type")
+            .asString());
     assertEquals(1, request.messages().size());
     ProviderMessage system = request.messages().getFirst();
     assertEquals(ProviderMessageRole.SYSTEM, system.role());
-    assertEquals(3, system.contents().size());
+    assertEquals(5, system.contents().size());
     assertEquals(
         "This section replaces the earlier [agent] section.\n\n[agent]\nnew",
         ((ProviderTextBlock) system.contents().getFirst()).text());
+    assertEquals("obsolete", ((ProviderSystemToolRemovalBlock) system.contents().get(1)).name());
+    assertEquals("web_search", ((ProviderSystemToolRemovalBlock) system.contents().get(2)).name());
     assertEquals(
-        "bash", ((ProviderSystemToolAdditionBlock) system.contents().get(1)).tool().name());
-    assertEquals("obsolete", ((ProviderSystemToolRemovalBlock) system.contents().get(2)).name());
+        "bash", ((ProviderSystemToolAdditionBlock) system.contents().get(3)).tool().name());
+    assertEquals(
+        "{\"type\":\"code_execution_20250522\",\"name\":\"code_execution\"}",
+        ((ProviderSystemHostedToolAdditionBlock) system.contents().get(4)).definitionJson());
   }
 
   /** 只用当前实际模型的冻结 variants 重新解释历史；缺失、外模型和 null effort 均未知。 */

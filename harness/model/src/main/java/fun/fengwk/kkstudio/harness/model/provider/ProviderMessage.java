@@ -50,6 +50,7 @@ public record ProviderMessage(
                 block ->
                     !(block instanceof ProviderTextBlock)
                         && !(block instanceof ProviderSystemToolAdditionBlock)
+                        && !(block instanceof ProviderSystemHostedToolAdditionBlock)
                         && !(block instanceof ProviderSystemToolRemovalBlock))) {
       throw new IllegalArgumentException("SYSTEM messages may contain text and tool changes only");
     }

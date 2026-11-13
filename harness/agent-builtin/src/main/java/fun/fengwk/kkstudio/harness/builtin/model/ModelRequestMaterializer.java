@@ -12,6 +12,7 @@ import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.SystemContext;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -24,11 +25,13 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemHostedToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
@@ -93,9 +96,25 @@ public final class ModelRequestMaterializer {
     List<ProviderToolDefinition> tools = providerTools(requestBindings);
     List<ProviderMessage> messages = new ArrayList<>();
     appendHistory(path, spec, effectiveBindings, incrementalSystem, messages);
+    ModelVariant variant = spec.variant();
+    if (incrementalSystem) {
+      List<ProviderProtocolOptions.ToolDefinition> baselineHostedTools =
+          SystemContext.baselineHostedTools(path.entries()).stream()
+              .map(
+                  tool ->
+                      new ProviderProtocolOptions.ToolDefinition(
+                          tool.name(), tool.definitionJson()))
+              .toList();
+      variant =
+          new ModelVariant(
+              variant.id(),
+              variant.reasoningEffort(),
+              variant.promptCacheRetention(),
+              variant.protocolOptions().withToolDefinitions(baselineHostedTools));
+    }
     return new ProviderRequest(
         spec.model(),
-        spec.variant(),
+        variant,
         spec.outputTokens(),
         systemInstruction,
         messages,
@@ -230,11 +249,17 @@ public final class ModelRequestMaterializer {
     if (!text.isEmpty()) {
       contents.add(new ProviderTextBlock(text));
     }
+    for (String name : change.removedTools()) {
+      contents.add(new ProviderSystemToolRemovalBlock(name));
+    }
+    for (String name : change.removedHostedTools()) {
+      contents.add(new ProviderSystemToolRemovalBlock(name));
+    }
     for (ToolBinding binding : change.addedTools()) {
       contents.add(new ProviderSystemToolAdditionBlock(providerTool(binding)));
     }
-    for (String name : change.removedTools()) {
-      contents.add(new ProviderSystemToolRemovalBlock(name));
+    for (SystemHostedTool tool : change.addedHostedTools()) {
+      contents.add(new ProviderSystemHostedToolAdditionBlock(tool.definitionJson()));
     }
     return contents.isEmpty() ? null : new ProviderMessage(ProviderMessageRole.SYSTEM, contents);
   }

@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemHostedToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
@@ -516,6 +517,8 @@ class AnthropicRequestEncoderTest {
                 new ProviderTextBlock("system update"),
                 new ProviderSystemToolAdditionBlock(
                     new ProviderToolDefinition("new_tool", "new tool", "{\"type\":\"object\"}")),
+                new ProviderSystemHostedToolAdditionBlock(
+                    "{\"type\":\"web_search_20250305\",\"name\":\"web_search\",\"max_uses\":4}"),
                 new ProviderSystemToolRemovalBlock("old_tool")));
     ProviderRequest request =
         request(
@@ -541,11 +544,17 @@ class AnthropicRequestEncoderTest {
             .path("definition")
             .path("name")
             .asString());
+    JsonNode hostedAddition = systemMessage.path("content").get(2);
+    assertEquals("tool_addition", hostedAddition.path("type").asString());
+    assertEquals(
+        "web_search_20250305",
+        hostedAddition.path("tool").path("definition").path("type").asString());
+    assertEquals(4, hostedAddition.path("tool").path("definition").path("max_uses").intValue());
     assertEquals(
         "tool_reference",
-        systemMessage.path("content").get(2).path("tool").path("type").asString());
+        systemMessage.path("content").get(3).path("tool").path("type").asString());
     assertEquals(
-        "old_tool", systemMessage.path("content").get(2).path("tool").path("name").asString());
+        "old_tool", systemMessage.path("content").get(3).path("tool").path("name").asString());
     assertEquals(List.of("inline-tools-2026-09-15"), encoded.betaFeatures());
   }
 

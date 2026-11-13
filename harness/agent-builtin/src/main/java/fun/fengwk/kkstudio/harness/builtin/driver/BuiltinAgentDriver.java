@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.SystemContext;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
@@ -47,6 +48,7 @@ import fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
@@ -261,7 +263,8 @@ public final class BuiltinAgentDriver implements AgentDriver {
   }
 
   static SystemPayload systemChange(ThreadState thread, EntryPath path, ModelRequestSpec spec) {
-    SystemContext resolved = new SystemContext(spec.systemSections(), spec.toolBindings());
+    SystemContext resolved =
+        new SystemContext(spec.systemSections(), spec.toolBindings(), hostedTools(spec));
     if (thread.kind() == ThreadKind.COMPACTION) {
       return null;
     }
@@ -276,7 +279,22 @@ public final class BuiltinAgentDriver implements AgentDriver {
       return null;
     }
     return new SystemPayload(
-        change.sections(), change.removedSections(), List.of(), List.of(), false);
+        change.sections(),
+        change.removedSections(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        false);
+  }
+
+  private static List<SystemHostedTool> hostedTools(ModelRequestSpec spec) {
+    if (spec.providerType() != ProviderType.ANTHROPIC) {
+      return List.of();
+    }
+    return spec.variant().protocolOptions().toolDefinitions().stream()
+        .map(tool -> new SystemHostedTool(tool.name(), tool.definitionJson()))
+        .toList();
   }
 
   private static boolean latestAssistantPaused(EntryPath path) {
@@ -297,7 +315,13 @@ public final class BuiltinAgentDriver implements AgentDriver {
    */
   private static SystemPayload freshSystemBaseline(ModelRequestSpec spec) {
     return new SystemPayload(
-        spec.systemSections(), List.of(), spec.toolBindings(), List.of(), true);
+        spec.systemSections(),
+        List.of(),
+        spec.toolBindings(),
+        List.of(),
+        hostedTools(spec),
+        List.of(),
+        true);
   }
 
   @Override
