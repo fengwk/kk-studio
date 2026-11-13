@@ -6,7 +6,7 @@
 export interface EditReview {
   path: string
   diff: string
-  sha256: string
+  sha256: string | null
 }
 
 const SHA256_HEX_REGEX = /^[0-9a-f]{64}$/
@@ -17,7 +17,7 @@ const ALLOWED_KEYS = new Set(['path', 'diff', 'sha256'])
  * - Reject extra/unknown fields
  * - path must be non-empty and non-blank (path.trim() !== '') but preserved as raw string without silent trimming
  * - diff must be non-empty string
- * - sha256 must be exact 64 lowercase hex characters without silent trimming
+ * - sha256 is null for a reviewed new file, or exact 64 lowercase hex without silent trimming
  */
 export function parseEditReview(value: unknown): EditReview | null {
   if (value == null || typeof value !== 'object' || Array.isArray(value)) {
@@ -37,7 +37,7 @@ export function parseEditReview(value: unknown): EditReview | null {
     return null
   }
   const sha256 = record.sha256
-  if (typeof sha256 !== 'string' || !SHA256_HEX_REGEX.test(sha256)) {
+  if (sha256 !== null && (typeof sha256 !== 'string' || !SHA256_HEX_REGEX.test(sha256))) {
     return null
   }
   return {

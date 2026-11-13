@@ -401,11 +401,12 @@ public final class EnvironmentDaemonServer
               .setMaxOutputBytes(currentSettings.maxOutputBytes())
               .setImageInputTier(currentSettings.imageInputTier());
       if (request.expectedFile() != null) {
-        invokeBuilder.setExpectedFile(
-            ExpectedFile.newBuilder()
-                .setPath(request.expectedFile().path())
-                .setSha256(request.expectedFile().sha256())
-                .build());
+        ExpectedFile.Builder expectedFileBuilder =
+            ExpectedFile.newBuilder().setPath(request.expectedFile().path());
+        if (request.expectedFile().sha256() != null) {
+          expectedFileBuilder.setSha256(request.expectedFile().sha256());
+        }
+        invokeBuilder.setExpectedFile(expectedFileBuilder.build());
       }
       Envelope invokeEnvelope =
           Envelope.newBuilder()

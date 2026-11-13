@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.codec;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -41,9 +42,19 @@ class ToolEditReviewJsonCodecTest {
   }
 
   @Test
+  void roundTripsNewFileReviewWithoutSha() {
+    ToolEditReview review = new ToolEditReview(new ExpectedFile(VALID_PATH, null), "+1|new line");
+
+    assertEquals(
+        "{\"path\":\"" + VALID_PATH + "\",\"diff\":\"+1|new line\",\"sha256\":null}",
+        InvocationJsonSupport.write(codec.encodeNode(review), "editReview"));
+    assertEquals(review, codec.decode(codec.encodeNode(review).toString()));
+  }
+
+  @Test
   void expectedFileEnforcesPathAndShaFormat() {
     assertThrows(NullPointerException.class, () -> new ExpectedFile(null, VALID_SHA256));
-    assertThrows(NullPointerException.class, () -> new ExpectedFile(VALID_PATH, null));
+    assertNull(new ExpectedFile(VALID_PATH, null).sha256());
     assertThrows(IllegalArgumentException.class, () -> new ExpectedFile("", VALID_SHA256));
     assertThrows(IllegalArgumentException.class, () -> new ExpectedFile("   ", VALID_SHA256));
 
@@ -105,9 +116,6 @@ class ToolEditReviewJsonCodecTest {
         "{\"path\":null,\"diff\":\"" + VALID_DIFF + "\",\"sha256\":\"" + VALID_SHA256 + "\"}");
     assertInvalid(
         "{\"path\":\"" + VALID_PATH + "\",\"diff\":null,\"sha256\":\"" + VALID_SHA256 + "\"}");
-    assertInvalid(
-        "{\"path\":\"" + VALID_PATH + "\",\"diff\":\"" + VALID_DIFF + "\",\"sha256\":null}");
-
     // 非字符串字段
     assertInvalid(
         "{\"path\":123,\"diff\":\"" + VALID_DIFF + "\",\"sha256\":\"" + VALID_SHA256 + "\"}");

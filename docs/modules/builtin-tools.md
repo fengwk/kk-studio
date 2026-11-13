@@ -40,8 +40,8 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 
 同一 Assistant 调用批次中的 Environment `edit` / `write` 按冻结的 Environment 与绝对 `path` 词法身份串行：同一目标文件只允许最早的未结束调用进入预检与执行；前项成功、失败、拒绝或取消后，再派发下一项。不同文件仍可并行。路径只按目标文件系统词法折叠分隔符、`.` 与 `..`，Windows 路径另忽略大小写；不解析符号链接。非 Environment 路径和无法解析的参数不参与此排序。审批逐项请求，因此后续 edit 的预览在前项写入之后生成。
 
-需要人工批准的 edit 先通过内部 `fs.edit.preview` 只读计算真实文件 diff，冻结 canonical 路径、原始字节 SHA-256 与全部变更行。审批后的执行在文件修改锁内校验同一 `expectedFile`，文件变化即拒绝写入。
-diff 使用 `diff@9.0.0` 的 `diffArrays`，保留真实行号、所有变更行、4 行上下文与 EOF 缺失换行标记，由统一的 review 传输预算约束。
+需要人工批准的 `edit` 和 `write` 分别通过内部 `fs.edit.preview`、`fs.write.preview` 只读计算真实文件 diff，并冻结 canonical 路径与全部变更行。`edit` 与覆盖已有文件的 `write` 同时冻结原始字节 SHA-256；创建新文件的 `write` 将 SHA 设为 null，审批后的执行必须确认该路径仍不存在。覆盖文件时则必须与预览时的字节一致，否则拒绝写入。
+diff 使用 `diff@9.0.0` 的 `diffArrays`，保留真实行号、所有变更行、4 行上下文与 EOF 缺失换行标记；新文件 diff 将全部内容显示为新增行。统一的 review 传输预算约束完整变更内容。
 完整 review 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[开发与测试](../operations/development-and-testing.md)。
 
 grep 与 find 默认超时为 15 秒，可由正数 `timeout_seconds` 覆盖。Daemon 检索调用随包提供的 ripgrep（rg）：`fs.find` 解析 `rg --files` 输出，`fs.grep` 解析 `rg --json` 输出。超时或取消时终止 rg 进程并等待 stdio 和进程退出；超时与取消保留已收集的 partial 匹配，并显式标记 error 与 `search.incomplete`。grep 的 `limit` 按匹配数计算；多行匹配会完整输出该匹配展开的所有行，输出总量仍受现有 50 KiB / 2000 行转存保护，截断提示按匹配数说明。

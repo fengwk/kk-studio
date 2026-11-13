@@ -557,8 +557,11 @@ public final class ControlProtocolValidator {
   }
 
   private static void validateExpectedFile(String capabilityId, ExpectedFile expected) {
-    if (!"fs.edit".equals(capabilityId)) {
-      throw new ControlProtocolException("invoke.expectedFile is only valid for fs.edit");
+    boolean edit = "fs.edit".equals(capabilityId);
+    boolean write = "fs.write".equals(capabilityId);
+    if (!edit && !write) {
+      throw new ControlProtocolException(
+          "invoke.expectedFile is only valid for fs.edit or fs.write");
     }
     requireText(
         expected.hasPath(),
@@ -566,11 +569,12 @@ public final class ControlProtocolValidator {
         "invoke.expectedFile.path",
         Integer.MAX_VALUE,
         true);
-    requirePattern(
-        expected.hasSha256(),
-        expected.getSha256(),
-        "invoke.expectedFile.sha256",
-        SHA256_LOWER_PATTERN);
+    if (expected.hasSha256()) {
+      requirePattern(
+          true, expected.getSha256(), "invoke.expectedFile.sha256", SHA256_LOWER_PATTERN);
+    } else if (edit) {
+      throw new ControlProtocolException("invoke.expectedFile.sha256 is required for fs.edit");
+    }
   }
 
   private static void validateStarted(Started started) {

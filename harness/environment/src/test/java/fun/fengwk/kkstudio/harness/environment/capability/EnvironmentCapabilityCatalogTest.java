@@ -34,6 +34,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_WRITE,
             EnvironmentCapabilityIds.FS_EDIT,
             EnvironmentCapabilityIds.FS_EDIT_PREVIEW,
+            EnvironmentCapabilityIds.FS_WRITE_PREVIEW,
             EnvironmentCapabilityIds.PROCESS_EXEC,
             EnvironmentCapabilityIds.FS_GREP,
             EnvironmentCapabilityIds.FS_FIND,
@@ -48,6 +49,7 @@ class EnvironmentCapabilityCatalogTest {
             "fs.write",
             "fs.edit",
             "fs.edit.preview",
+            "fs.write.preview",
             "process.exec",
             "fs.grep",
             "fs.find",
@@ -100,6 +102,13 @@ class EnvironmentCapabilityCatalogTest {
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT).inputSchema(),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT_PREVIEW)
             .inputSchema());
+    assertEquals(
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE)
+            .inputSchema()
+            .required(),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE_PREVIEW)
+            .inputSchema()
+            .required());
     assertEquals(
         Set.of("path", "pattern"),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_GREP)
@@ -202,6 +211,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_WRITE,
             EnvironmentCapabilityIds.FS_EDIT,
             EnvironmentCapabilityIds.FS_EDIT_PREVIEW,
+            EnvironmentCapabilityIds.FS_WRITE_PREVIEW,
             EnvironmentCapabilityIds.FS_GREP,
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
@@ -212,7 +222,8 @@ class EnvironmentCapabilityCatalogTest {
       String validArgs =
           switch (id.value()) {
             case "fs.read" -> "{\"path\":\"/app/file.txt\"}";
-            case "fs.write" -> "{\"path\":\"/app/file.txt\",\"content\":\"hello\"}";
+            case "fs.write",
+                "fs.write.preview" -> "{\"path\":\"/app/file.txt\",\"content\":\"hello\"}";
             case "fs.edit",
                 "fs.edit.preview" -> "{\"path\":\"/app/file.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}";
             case "fs.grep" -> "{\"pattern\":\"foo\",\"path\":\"/app\"}";
@@ -249,6 +260,10 @@ class EnvironmentCapabilityCatalogTest {
     assertEquals(
         Duration.ofSeconds(60),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT_PREVIEW)
+            .defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(60),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE_PREVIEW)
             .defaultTimeout());
     assertEquals(
         Duration.ofSeconds(300),
@@ -300,6 +315,11 @@ class EnvironmentCapabilityCatalogTest {
     Path projectRoot = findProjectRootDir();
     Path daemonCapabilitiesDir = projectRoot.resolve("daemon/resources/capabilities");
     for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
+      // Go-only capabilities do not have schemas in the TypeScript Daemon catalog.
+      if (EnvironmentCapabilityIds.FS_WRITE_PREVIEW.equals(descriptor.id())
+          || EnvironmentCapabilityIds.SKILL_INSTALL.equals(descriptor.id())) {
+        continue;
+      }
       String fileName = descriptor.id().value() + ".schema.json";
       Path daemonSchemaPath = daemonCapabilitiesDir.resolve(fileName);
       assertTrue(Files.exists(daemonSchemaPath), "daemon schema must exist: " + daemonSchemaPath);
@@ -310,10 +330,11 @@ class EnvironmentCapabilityCatalogTest {
       try (InputStream input =
           EnvironmentCapabilityCatalog.class.getResourceAsStream(javaSchemaResource)) {
         assertNotNull(input, "missing java schema resource: " + javaSchemaResource);
-        String javaSchema =
-            new String(input.readAllBytes(), StandardCharsets.UTF_8).stripTrailing();
+        String javaSchemaText = new String(input.readAllBytes(), StandardCharsets.UTF_8);
         assertEquals(
-            daemonSchema, javaSchema, "Java and daemon schemas must match for " + fileName);
+            daemonSchema,
+            javaSchemaText.stripTrailing(),
+            "Java and daemon schemas must match for " + fileName);
       }
     }
   }

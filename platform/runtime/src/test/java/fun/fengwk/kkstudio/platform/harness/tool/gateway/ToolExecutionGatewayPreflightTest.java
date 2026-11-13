@@ -321,6 +321,99 @@ class ToolExecutionGatewayPreflightTest {
     assertTrue(deny.error().message().contains("The tool was not executed."));
   }
 
+  /** write 审批使用 fs.write.preview，并将新文件的 null SHA 冻结到审批审查中。 */
+  @Test
+  void routedEnvironmentWriteApprovalCarriesNewFileReview() {
+    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    ToolContribution write =
+        ToolGatewayTestSupport.defaultCatalog().findTool("write").orElseThrow();
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall("call-write", "write", "{\"path\":\"/repo/new.txt\",\"content\":\"new\"}"),
+            new ToolBinding(
+                write.definition(),
+                new ContributorBinding(write.id().contributorId().value(), write.id().localName()),
+                EnvironmentSupport.ROUTED,
+                environmentId,
+                "test-env"));
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
+    transport.syncResult =
+        new ToolResult(
+            "preview",
+            List.of(
+                new JsonResultContent(
+                    "{\"path\":\"/repo/new.txt\",\"diff\":\"+1|new\",\"sha256\":null}")),
+            false,
+            "{}");
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(),
+            transport,
+            new ToolGatewayTestSupport.FakeResourceStager(),
+            ToolGatewayTestSupport.settings(PermissionAction.ASK));
+
+    ToolGateway.Ask ask =
+        assertInstanceOf(ToolGateway.Ask.class, gateway.preflight(request, SCOPE));
+
+    assertEquals(new ExpectedFile("/repo/new.txt", null), ask.editReview().expectedFile());
+    assertEquals("+1|new", ask.editReview().diff());
+    assertEquals(
+        EnvironmentCapabilityIds.FS_WRITE_PREVIEW,
+        transport.invocations.get(0).request().descriptor().id());
+
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.THROW_UNAVAILABLE;
+    ToolGateway.Deny denied =
+        assertInstanceOf(ToolGateway.Deny.class, gateway.preflight(request, SCOPE));
+    assertEquals("EDIT_REVIEW_FAILED", denied.error().kind());
+  }
+
+  /** write 覆盖预览保留 SHA-256，审批卡片可据此审查现有文件 diff。 */
+  @Test
+  void routedEnvironmentWriteOverwriteApprovalCarriesShaReview() {
+    EnvironmentId environmentId = EnvironmentId.parse("11111111-1111-1111-1111-111111111111");
+    ToolContribution write =
+        ToolGatewayTestSupport.defaultCatalog().findTool("write").orElseThrow();
+    ToolInvocationRequest request =
+        new ToolInvocationRequest(
+            new ToolCall(
+                "call-write-overwrite", "write", "{\"path\":\"/repo/a.txt\",\"content\":\"new\"}"),
+            new ToolBinding(
+                write.definition(),
+                new ContributorBinding(write.id().contributorId().value(), write.id().localName()),
+                EnvironmentSupport.ROUTED,
+                environmentId,
+                "test-env"));
+    String sha = "a".repeat(64);
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
+    transport.syncResult =
+        new ToolResult(
+            "preview",
+            List.of(
+                new JsonResultContent(
+                    "{\"path\":\"/repo/a.txt\",\"diff\":\"-1|old\\n+1|new\",\"sha256\":\""
+                        + sha
+                        + "\"}")),
+            false,
+            "{}");
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            ToolGatewayTestSupport.defaultCatalog(),
+            transport,
+            new ToolGatewayTestSupport.FakeResourceStager(),
+            ToolGatewayTestSupport.settings(PermissionAction.ASK));
+
+    ToolGateway.Ask ask =
+        assertInstanceOf(ToolGateway.Ask.class, gateway.preflight(request, SCOPE));
+
+    assertEquals(new ExpectedFile("/repo/a.txt", sha), ask.editReview().expectedFile());
+    assertEquals("-1|old\n+1|new", ask.editReview().diff());
+    assertEquals(
+        EnvironmentCapabilityIds.FS_WRITE_PREVIEW,
+        transport.invocations.get(0).request().descriptor().id());
+  }
+
   /** path 规则以 filesystem root 为坐标系：命中绝对路径对应规则，不同路径分支不命中。 */
   @Test
   void pathRulesAreGradedAgainstFilesystemRoot() {

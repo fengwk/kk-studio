@@ -70,6 +70,25 @@ export function ToolCallPreview({
   }
 
   if (preview.kind === 'write') {
+    if (variant === 'approval' && preview.review) {
+      return (
+        <div className="thread-tool-call-body">
+          {showTarget && preview.path ? (
+            <div className="thread-tool-preview-target">
+              <span className="thread-tool-preview-target-path">{preview.path}</span>
+            </div>
+          ) : null}
+          <ToolOutputViewport bounded className="thread-tool-preview-body is-edit">
+            {preview.review.diff.split('\n').map((line, index, lines) => (
+              <span key={`diff-${index}`} className={diffLineClass(line)}>
+                {line}
+                {index < lines.length - 1 ? '\n' : ''}
+              </span>
+            ))}
+          </ToolOutputViewport>
+        </div>
+      )
+    }
     if (!preview.hasContent && !preview.content && !preview.path) {
       return null
     }
