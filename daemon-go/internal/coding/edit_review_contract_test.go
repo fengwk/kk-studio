@@ -29,7 +29,7 @@ func TestEditReviewRejectsChangedHashWithoutWriting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "external", "new_string": "modified"}, &runtime.ExpectedFile{Path: resolved, SHA256: hex.EncodeToString(hash[:])})
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("external", "modified")), &runtime.ExpectedFile{Path: resolved, SHA256: hex.EncodeToString(hash[:])})
 	if !result.Error || !strings.Contains(result.Contents[0].Text, staleWriteReviewMessage) {
 		t.Fatalf("result=%#v", result)
 	}
@@ -53,7 +53,7 @@ func TestEditUTF16ReviewPreservesBOMCRLFAndExpectedHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	args := map[string]any{"path": path, "old_string": "第二行", "new_string": "修改行"}
+	args := editArgs(path, replace("第二行", "修改行"))
 	preview := invokeCoding(t, Provider{}, "fs.edit.preview", args, nil)
 	if preview.Error {
 		t.Fatalf("preview=%#v", preview)
@@ -99,7 +99,7 @@ func TestEditMultihunkReviewMatchesCommitDetails(t *testing.T) {
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	args := map[string]any{"path": path, "old_string": "target", "new_string": "replaced", "replace_all": true}
+	args := editArgs(path, replaceAll("target", "replaced"))
 	preview := invokeCoding(t, Provider{}, "fs.edit.preview", args, nil)
 	if preview.Error {
 		t.Fatalf("preview=%#v", preview)
@@ -142,7 +142,7 @@ func TestEditReviewRejectsWrongPathWithoutWriting(t *testing.T) {
 		t.Fatal(err)
 	}
 	hash := sha256.Sum256(original)
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "initial", "new_string": "modified"}, &runtime.ExpectedFile{
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("initial", "modified")), &runtime.ExpectedFile{
 		Path:   filepath.Join(filepath.Dir(path), "other.txt"),
 		SHA256: hex.EncodeToString(hash[:]),
 	})
@@ -168,8 +168,8 @@ func TestEditReviewConcurrentApprovalsCommitOnlyOnce(t *testing.T) {
 	hash := sha256.Sum256(original)
 	expected := &runtime.ExpectedFile{Path: resolved, SHA256: hex.EncodeToString(hash[:])}
 	args := []map[string]any{
-		{"path": path, "old_string": "initial", "new_string": "winner one"},
-		{"path": path, "old_string": "initial", "new_string": "winner two"},
+		editArgs(path, replace("initial", "winner one")),
+		editArgs(path, replace("initial", "winner two")),
 	}
 	results := make([]runtime.CapabilityResult, len(args))
 	var wg sync.WaitGroup
@@ -214,7 +214,7 @@ func TestEditReviewLongChangedLineIsComplete(t *testing.T) {
 		t.Fatal(err)
 	}
 	largeLine := strings.Repeat("x", 30*1024-1) + "😀"
-	result := invokeCoding(t, Provider{}, "fs.edit.preview", map[string]any{"path": path, "old_string": "old", "new_string": largeLine}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit.preview", editArgs(path, replace("old", largeLine)), nil)
 	if result.Error {
 		t.Fatalf("preview=%#v", result)
 	}
@@ -235,9 +235,9 @@ func TestEditReviewTransportLimitRejectsPreviewAndCommit(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	args := map[string]any{"path": path, "old_string": oldLine, "new_string": newLine}
+	args := editArgs(path, replace(oldLine, newLine))
 	preview := invokeCoding(t, Provider{}, "fs.edit.preview", args, nil)
-	const limitMessage = "Complete edit diff exceeds the review transport limit; split this edit into smaller changes."
+	const limitMessage = "Complete edit diff exceeds the review transport limit; split the change into several smaller edit calls."
 	if !preview.Error || !strings.Contains(preview.Contents[0].Text, limitMessage) {
 		t.Fatalf("preview=%#v", preview)
 	}
@@ -262,7 +262,7 @@ func TestEditWithoutExpectedHashReturnsReview(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "before", "new_string": "after"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("before", "after")), nil)
 	if result.Error || result.Contents[0].Text != "Edited successfully.\nReplacements: 1" {
 		t.Fatalf("result=%#v", result)
 	}
@@ -458,8 +458,8 @@ func TestPreviewRejectsNoChangeWithoutEmptyDiff(t *testing.T) {
 	if err := os.WriteFile(path, []byte("a\nb\nc\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit.preview", map[string]any{"path": path, "old_string": "b", "new_string": "b"}, nil)
-	if !result.Error || !strings.Contains(result.Contents[0].Text, "No changes to apply: old_string and new_string must differ after line-ending normalization") {
+	result := invokeCoding(t, Provider{}, "fs.edit.preview", editArgs(path, replace("b", "b")), nil)
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "Edit 1: old_string and new_string must differ after line-ending normalization") {
 		t.Fatalf("result=%#v", result)
 	}
 }

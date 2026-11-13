@@ -95,7 +95,7 @@ class EnvironmentCapabilityCatalogTest {
             .inputSchema()
             .required());
     assertEquals(
-        Set.of("path", "old_string", "new_string"),
+        Set.of("path", "edits"),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT)
             .inputSchema()
             .required());
@@ -226,7 +226,7 @@ class EnvironmentCapabilityCatalogTest {
             case "fs.write",
                 "fs.write.preview" -> "{\"path\":\"/app/file.txt\",\"content\":\"hello\"}";
             case "fs.edit",
-                "fs.edit.preview" -> "{\"path\":\"/app/file.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}";
+                "fs.edit.preview" -> "{\"path\":\"/app/file.txt\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\"}]}";
             case "fs.grep" -> "{\"pattern\":\"foo\",\"path\":\"/app\"}";
             case "fs.find" -> "{\"pattern\":\"*.java\",\"path\":\"/app\"}";
             case "lsp.goto-definition" -> "{\"path\":\"/app/file.ts\",\"line\":1}";

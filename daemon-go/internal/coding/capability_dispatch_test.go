@@ -78,11 +78,11 @@ func TestEditAndWritePreviewRejectCancelledCalls(t *testing.T) {
 	if err != nil || !write.Error || !strings.Contains(write.Contents[0].Text, "Operation cancelled") {
 		t.Fatalf("write preview=%#v err=%v", write, err)
 	}
-	editArgs, err := json.Marshal(map[string]string{"path": t.TempDir() + "/missing.txt", "old_string": "old", "new_string": "new"})
+	cancelledEditArgs, err := json.Marshal(editArgs(t.TempDir()+"/missing.txt", replace("old", "new")))
 	if err != nil {
 		t.Fatal(err)
 	}
-	edit, err := editPreviewCapability(ctx, runtime.CapabilityCall{InvocationID: "cancel-edit", Arguments: editArgs}, runtime.CapabilityContext{})
+	edit, err := editPreviewCapability(ctx, runtime.CapabilityCall{InvocationID: "cancel-edit", Arguments: cancelledEditArgs}, runtime.CapabilityContext{})
 	if err != nil || !edit.Error || !strings.Contains(edit.Contents[0].Text, "Operation cancelled") {
 		t.Fatalf("edit preview=%#v err=%v", edit, err)
 	}

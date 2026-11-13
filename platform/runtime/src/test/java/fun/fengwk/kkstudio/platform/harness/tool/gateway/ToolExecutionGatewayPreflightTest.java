@@ -279,7 +279,7 @@ class ToolExecutionGatewayPreflightTest {
             new ToolCall(
                 "call-edit",
                 "edit",
-                "{\"path\":\"/repo/a.txt\",\"old_string\":\"old\",\"new_string\":\"new\"}"),
+                "{\"path\":\"/repo/a.txt\",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"new\"}]}"),
             new ToolBinding(
                 edit.definition(),
                 new ContributorBinding(edit.id().contributorId().value(), edit.id().localName()),

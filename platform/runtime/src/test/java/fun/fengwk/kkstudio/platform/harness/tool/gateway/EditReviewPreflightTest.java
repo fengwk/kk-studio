@@ -328,7 +328,8 @@ class EditReviewPreflightTest {
     ContributorBinding contributor =
         new ContributorBinding(
             contribution.id().contributorId().value(), contribution.id().localName());
-    String args = "{\"path\":\"/srv/repo/App.java\",\"old_string\":\"old\",\"new_string\":\"new\"}";
+    String args =
+        "{\"path\":\"/srv/repo/App.java\",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"new\"}]}";
     return new ToolInvocationRequest(
         new ToolCall("call-1", "edit", args),
         new ToolBinding(
