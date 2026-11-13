@@ -57,113 +57,36 @@ public final class CompactionPlanner {
     if (contextWindow <= 0) {
       throw new IllegalArgumentException("contextWindow must be positive");
     }
-    List<Entry> entries = path.entries();
-    boolean[] visible = TokenEstimator.visibilityMask(entries);
-
-    // boundary start：最新 complete 压缩的 cutEntryId 之后（无则 ROOT 之后）。引用缺失视为分支损坏，fail closed。
-    int boundaryStart = 0;
-    String previousSummary = null;
-    Optional<CompactionTurns.CompactionTurn> latest = CompactionTurns.latestComplete(path);
-    if (latest.isPresent()) {
-      CompactionTurns.CompactionTurn complete = latest.get();
-      List<Entry> completeEntries = path.entries();
-      Entry completeResult = completeEntries.get(complete.resultIndex());
-      int prevCut = indexOfId(entries, complete.freezing().cutEntryId());
-      int prevResult = indexOfId(entries, completeResult.id());
-      if (prevCut < 0 || prevResult < 0 || prevCut > prevResult) {
-        throw new IllegalStateException(
-            "complete compaction references are corrupt on the current path: cutEntryId="
-                + complete.freezing().cutEntryId());
-      }
-      boundaryStart = prevCut;
-      String stripped =
-          CompactionFileSections.stripReservedSections(complete.result().summaryText());
-      previousSummary = stripped.isBlank() ? null : stripped;
-    }
-
-    List<Integer> cutPoints = validCutPoints(entries, visible, boundaryStart);
-    if (cutPoints.isEmpty()) {
+    Optional<CompactionCutPlanner.Cut> plannedCut =
+        new CompactionCutPlanner(config).plan(path, contextWindow);
+    if (plannedCut.isEmpty()) {
       return Optional.empty();
     }
-    int cutIndex = cutPoints.get(0);
-    long keepRecentTokens = config.effectiveKeep(contextWindow);
-    long accumulated = 0L;
-    for (int i = entries.size() - 1; i >= boundaryStart; i--) {
-      long tokens = visible[i] ? TokenEstimator.estimateTokens(entries.get(i)) : 0L;
-      if (tokens == 0L) {
-        continue;
-      }
-      accumulated = Math.addExact(accumulated, tokens);
-      if (accumulated >= keepRecentTokens) {
-        cutIndex = firstAtOrAfter(cutPoints, i);
-        break;
+    List<Entry> entries = path.entries();
+    boolean[] visible = TokenEstimator.visibilityMask(entries);
+    int boundaryStart = 0;
+    Optional<CompactionTurns.CompactionTurn> latest = CompactionTurns.latestComplete(path);
+    if (latest.isPresent()) {
+      boundaryStart = indexOfId(entries, latest.get().freezing().cutEntryId());
+      if (boundaryStart < 0) {
+        throw new IllegalStateException("complete compaction cut is not on the current path");
       }
     }
-    int unconsumedAssistantIndex =
-        unconsumedToolBatchAssistantIndex(entries, visible, boundaryStart);
-    if (unconsumedAssistantIndex >= 0) {
-      // 可见的普通 assistant 本身就是合法 cut，无需再次搜索或引入备用切点。
-      cutIndex = Math.min(cutIndex, unconsumedAssistantIndex);
+    int cutIndex = plannedCut.get().pathIndex();
+    List<AgentMessage> messages = contextMessages(entries, visible, boundaryStart, cutIndex);
+    if (messages.isEmpty()) {
+      return Optional.empty();
     }
-    UUID cutEntryId = entries.get(cutIndex).id();
-
-    // 切分检测：cut 非 USER 时，从 cut 所属逻辑 Agent segment 的最近 INPUT 起点取第一个
-    // USER/CUSTOM；后续 CONTINUATION durable turns 仍属于同一 segment。
-    boolean cutIsUser = isUserLike(entries.get(cutIndex));
-    int turnPrefixStartIndex =
-        cutIsUser ? -1 : turnPrefixStartIndex(entries, visible, boundaryStart, cutIndex);
-    boolean split =
-        !cutIsUser
-            && turnPrefixStartIndex >= 0
-            && hasContextMessage(entries, visible, turnPrefixStartIndex, cutIndex);
-    if (!split) {
-      List<AgentMessage> messages = contextMessages(entries, visible, boundaryStart, cutIndex);
-      if (messages.isEmpty()) {
-        return Optional.empty();
-      }
-      long removedPrefixTokens = TokenEstimator.estimateMessages(messages);
-      return Optional.of(
-          new CompactionPreparation(
-              CompactionPhase.FULL,
-              trigger,
-              cutEntryId,
-              null,
-              null,
-              previousSummary,
-              messages,
-              removedPrefixTokens));
-    }
-    // 切分：无更早 HISTORY 段时直接摘要当前 turn prefix；有历史时先 HISTORY 再机械 TURN_PREFIX。
-    int historyEndIndex = turnPrefixStartIndex;
-    if (!hasContextMessage(entries, visible, boundaryStart, historyEndIndex)) {
-      List<AgentMessage> prefixMessages =
-          contextMessages(entries, visible, turnPrefixStartIndex, cutIndex);
-      if (prefixMessages.isEmpty()) {
-        return Optional.empty();
-      }
-      return Optional.of(
-          new CompactionPreparation(
-              CompactionPhase.TURN_PREFIX,
-              trigger,
-              cutEntryId,
-              entries.get(turnPrefixStartIndex).id(),
-              null,
-              null,
-              prefixMessages,
-              TokenEstimator.estimateMessages(prefixMessages)));
-    }
-    List<AgentMessage> historyMessages =
-        contextMessages(entries, visible, boundaryStart, historyEndIndex);
-    long removedPrefixTokens = TokenEstimator.estimateMessages(historyMessages);
+    long removedPrefixTokens = TokenEstimator.estimateMessages(messages);
     return Optional.of(
         new CompactionPreparation(
-            CompactionPhase.HISTORY,
+            CompactionPhase.FULL,
             trigger,
-            cutEntryId,
-            entries.get(turnPrefixStartIndex).id(),
+            plannedCut.get().entryId(),
             null,
-            previousSummary,
-            historyMessages,
+            null,
+            previousSummary(entries),
+            messages,
             removedPrefixTokens));
   }
 

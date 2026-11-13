@@ -79,7 +79,7 @@ final class TurnPlanBuilder {
         consumedCommands.add(command);
       }
     }
-    if (reason == TurnStartReason.INPUT
+    if ((reason == TurnStartReason.INPUT || reason == TurnStartReason.COMPACTION_BRANCH_INPUT)
         && !hasInputDemand(consumedCommands)
         && !pendingNotificationInput) {
       throw new IllegalArgumentException(
@@ -120,7 +120,10 @@ final class TurnPlanBuilder {
     parentId = turnStartEntryId;
 
     Map<Long, UUID> appliedEntryIds = new LinkedHashMap<>();
-    if (reason == TurnStartReason.INPUT || reason == TurnStartReason.CONTINUATION) {
+    if (reason == TurnStartReason.INPUT
+        || reason == TurnStartReason.CONTINUATION
+        || reason == TurnStartReason.COMPACTION_BRANCH_INPUT
+        || reason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION) {
       for (ThreadCommand command : consumedCommands) {
         switch (command.payload()) {
           case UserMessageCommandPayload value -> {
@@ -200,7 +203,11 @@ final class TurnPlanBuilder {
     if (reason == TurnStartReason.INPUT) {
       return true;
     }
-    if (reason == TurnStartReason.COMPACTION) {
+    if (reason == TurnStartReason.COMPACTION_BRANCH_INPUT) {
+      return command.type() == ThreadCommandType.CUSTOM_MESSAGE;
+    }
+    if (reason == TurnStartReason.COMPACTION
+        || reason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION) {
       return false;
     }
     return command.type().isSetting();

@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 import fun.fengwk.kkstudio.harness.spi.driver.ToolDeclarationPlanner;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
@@ -35,10 +36,15 @@ public final class ModelResponsePlanner {
   private final ToolDeclarationPlanner declarationPlanner = new ToolDeclarationPlanner();
 
   public ModelResponsePlan plan(ProviderResponse response, List<ToolBinding> frozenBindings) {
+    return plan(response, frozenBindings, false);
+  }
+
+  public ModelResponsePlan plan(
+      ProviderResponse response, List<ToolBinding> frozenBindings, boolean compactionThread) {
     Objects.requireNonNull(response, "response");
     Objects.requireNonNull(frozenBindings, "frozenBindings");
     return switch (response.stopReason()) {
-      case COMPLETE -> planComplete(response, frozenBindings);
+      case COMPLETE -> planComplete(response, frozenBindings, compactionThread);
       case LENGTH -> planLength(response, frozenBindings);
       case FILTERED -> new ModelResponsePlan.Failed(TurnEndReason.CONTENT_FILTERED);
       case CONTINUE -> new ModelResponsePlan.Continue();
@@ -46,7 +52,7 @@ public final class ModelResponsePlanner {
   }
 
   private ModelResponsePlan planComplete(
-      ProviderResponse response, List<ToolBinding> frozenBindings) {
+      ProviderResponse response, List<ToolBinding> frozenBindings, boolean compactionThread) {
     if (response.toolCalls().isEmpty()) {
       return new ModelResponsePlan.Completed();
     }
@@ -55,11 +61,18 @@ public final class ModelResponsePlanner {
       ToolDeclarationPlanner.Declaration declaration =
           declarationPlanner.plan(toToolCall(call), frozenBindings);
       slots.add(
-          new ModelResponsePlan.ToolSlot(
-              declaration.call(),
-              declaration.binding(),
-              declaration.valid() ? ToolInvocationStatus.READY : ToolInvocationStatus.FAILED,
-              declaration.error()));
+          compactionThread
+              ? new ModelResponsePlan.ToolSlot(
+                  declaration.call(),
+                  declaration.binding(),
+                  ToolInvocationStatus.FAILED,
+                  new ToolInvocationError(
+                      "COMPACTION_TOOL_DISABLED", CompactionBranchPrompts.TOOL_ERROR))
+              : new ModelResponsePlan.ToolSlot(
+                  declaration.call(),
+                  declaration.binding(),
+                  declaration.valid() ? ToolInvocationStatus.READY : ToolInvocationStatus.FAILED,
+                  declaration.error()));
     }
     return new ModelResponsePlan.ToolBatch(List.copyOf(slots));
   }

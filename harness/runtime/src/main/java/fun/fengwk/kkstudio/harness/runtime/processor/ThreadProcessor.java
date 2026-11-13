@@ -32,6 +32,7 @@ import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolFileMutationOrder;
@@ -636,7 +637,13 @@ public final class ThreadProcessor {
     EntryPayload resultPayload;
     TurnEndOutcome outcome;
     boolean continueModel = false;
-    if (receipt.outcome() != ThreadJoinOutcome.COMPLETED) {
+    if (receipt.outcome() == ThreadJoinOutcome.CANCELLED) {
+      resultPayload =
+          new AssistantErrorPayload(
+              new AssistantError(AssistantError.CANCELLED_CODE, "compaction branch was stopped"),
+              null);
+      outcome = TurnEndOutcome.STOPPED;
+    } else if (receipt.outcome() != ThreadJoinOutcome.COMPLETED) {
       String errorMessage =
           receipt.error() != null ? receipt.error() : "compaction child thread failed";
       resultPayload =
@@ -685,8 +692,10 @@ public final class ThreadProcessor {
                     openTurn.id(),
                     outcome,
                     continueModel,
-                    outcome == TurnEndOutcome.FAILED ? TurnEndReason.TURN_FAILED : null,
-                    null),
+                    outcome == TurnEndOutcome.FAILED
+                        ? TurnEndReason.TURN_FAILED
+                        : outcome == TurnEndOutcome.STOPPED ? TurnEndReason.USER_STOP : null,
+                    outcome == TurnEndOutcome.STOPPED ? join.invocationId() : null),
                 now));
     ThreadState advanced = thread.advanceHead(turnEndId, now);
     tx.threads().update(advanced);
@@ -696,8 +705,10 @@ public final class ThreadProcessor {
         ThreadInputDemand.hasQueuedDemand(tx.commands().loadQueued(thread.id()));
     EntryPath endPath = tx.entries().loadPath(turnEndId);
     AgentDriver driver = driverRegistry.of(endPath.baseSettings());
+    boolean compactionCancelled = outcome == TurnEndOutcome.STOPPED;
     boolean compactionDue =
         !stopped
+            && !compactionCancelled
             && thread.constraints().allowAutoCompaction()
             && driver.prepareAutomaticCompaction(
                     advanced,
@@ -706,7 +717,8 @@ public final class ThreadProcessor {
                     hasQueuedDemand)
                 != null;
     boolean mechanicalWake = !stopped && outcome == TurnEndOutcome.COMPLETED && continueModel;
-    boolean requestThread = hasQueuedDemand && !stopped || compactionDue || mechanicalWake;
+    boolean requestThread =
+        !compactionCancelled && (hasQueuedDemand && !stopped || compactionDue || mechanicalWake);
     if (mechanicalWake) {
       coordinator.remindSoftBudgetIfDue(tx, advanced, endPath, now);
     }
@@ -828,12 +840,24 @@ public final class ThreadProcessor {
       ThreadState root = tx.threads().find(thread.rootThreadId()).orElseThrow();
       rootEnvironmentName = tx.entries().loadBranchSettings(root.headEntryId()).environmentName();
     }
+    TurnStartReason plannedReason =
+        thread.kind() == ThreadKind.COMPACTION
+            ? switch (reason) {
+              case INPUT -> TurnStartReason.COMPACTION_BRANCH_INPUT;
+              case CONTINUATION -> TurnStartReason.COMPACTION_BRANCH_CONTINUATION;
+              default -> throw new IllegalStateException(
+                  "COMPACTION threads cannot start " + reason + " turns");
+            }
+            : reason;
+    boolean continuation =
+        reason == TurnStartReason.CONTINUATION
+            || reason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION;
     TurnPlan plan =
         planBuilder.build(
             thread.id(),
             path,
-            reason,
-            reason == TurnStartReason.CONTINUATION
+            plannedReason,
+            continuation
                     && !driverRegistry
                         .of(path.baseSettings())
                         .allowsQueuedInputHarvest(tx, thread, path)
@@ -981,9 +1005,10 @@ public final class ThreadProcessor {
     }
   }
 
-  /** 只有普通 INPUT 把输入水位推进到冻结 cutoff；CONTINUATION / COMPACTION 不推进，保留尚待接纳通知的原始尾部。 */
+  /** INPUT 与分支内部指令推进输入水位；CONTINUATION / COMPACTION 不推进。 */
   private static long nextWatermark(TurnPlan plan, ThreadState thread) {
-    if (plan.reason() == TurnStartReason.INPUT) {
+    if (plan.reason() == TurnStartReason.INPUT
+        || plan.reason() == TurnStartReason.COMPACTION_BRANCH_INPUT) {
       return plan.cutoffSequence();
     }
     return thread.inputThroughSequence();

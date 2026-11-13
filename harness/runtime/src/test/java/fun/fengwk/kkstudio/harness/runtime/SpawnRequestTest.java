@@ -135,6 +135,51 @@ class SpawnRequestTest {
   }
 
   @Test
+  void acceptsSameSessionCompactionBranchAndRejectsOtherKinds() {
+    SpawnRequest request =
+        new SpawnRequest(
+            THREAD,
+            SESSION,
+            SETTINGS,
+            List.of(command(15, "instruction")),
+            PARENT,
+            null,
+            null,
+            false,
+            new ThreadConstraints(128, false),
+            ThreadKind.COMPACTION,
+            JoinDelivery.SETTLE_OWNER_TURN,
+            SpawnRequest.Budget.unlimited(),
+            TICKET,
+            HASH,
+            new SpawnRequest.SameSessionBranch(HEAD));
+
+    assertEquals(HEAD, request.sameSessionBranch().startEntryId());
+    assertEquals(SESSION, request.sessionId());
+    assertEquals(PARENT, request.parentThreadId());
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new SpawnRequest(
+                THREAD,
+                SESSION,
+                SETTINGS,
+                List.of(command(16, "instruction")),
+                PARENT,
+                null,
+                null,
+                false,
+                new ThreadConstraints(128, false),
+                ThreadKind.SUBAGENT,
+                JoinDelivery.SETTLE_OWNER_TURN,
+                SpawnRequest.Budget.unlimited(),
+                TICKET,
+                HASH,
+                new SpawnRequest.SameSessionBranch(HEAD)));
+  }
+
+  @Test
   void rejectsUserTrigger() {
     // 用户创建的 Thread 只能走 acceptCommands；spawn 不接受 USER 来源。
     IllegalArgumentException error =

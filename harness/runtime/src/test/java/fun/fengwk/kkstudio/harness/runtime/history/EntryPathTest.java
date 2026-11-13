@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -78,6 +79,71 @@ class EntryPathTest {
     assertEquals(settings("turn"), path.baseSettings());
     assertEquals(start, path.openTurnStart().orElseThrow());
     assertEquals(List.of(root, start, user), path.entries());
+  }
+
+  @Test
+  void compactionBranchAllowsItsInstructionAndOnlyFixedFailedToolResults() {
+    Entry root = root(settings("root"));
+    Entry instructionStart =
+        turnStart(id(2L), id(1L), TurnStartReason.COMPACTION_BRANCH_INPUT, settings("branch"));
+    Entry instruction = compactionInstruction(id(3L), id(2L));
+    Entry toolAssistant = assistantMessage(id(4L), id(3L), "call-1:bash");
+    Entry toolError = compactionToolError(id(5L), id(4L), id(4L), "call-1", "bash", 0);
+    Entry toolTurnEnd = turnEnd(id(6L), id(5L), id(2L), TurnEndOutcome.COMPLETED, true, null, null);
+    Entry continuationStart =
+        turnStart(
+            id(7L), id(6L), TurnStartReason.COMPACTION_BRANCH_CONTINUATION, settings("branch"));
+    Entry finalAnswer = assistantMessage(id(8L), id(7L));
+    Entry continuationEnd =
+        turnEnd(id(9L), id(8L), id(7L), TurnEndOutcome.COMPLETED, false, null, null);
+
+    EntryPath path =
+        new EntryPath(
+            List.of(
+                root,
+                instructionStart,
+                instruction,
+                toolAssistant,
+                toolError,
+                toolTurnEnd,
+                continuationStart,
+                finalAnswer,
+                continuationEnd));
+
+    assertEquals(continuationEnd, path.head());
+  }
+
+  @Test
+  void compactionBranchRejectsExternalUserInputAndExecutedToolResults() {
+    Entry root = root(settings("root"));
+    Entry branchStart =
+        turnStart(id(2L), id(1L), TurnStartReason.COMPACTION_BRANCH_INPUT, settings("branch"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, branchStart, userMessage(id(3L), id(2L)))));
+
+    Entry instruction = compactionInstruction(id(3L), id(2L));
+    Entry assistant = assistantMessage(id(4L), id(3L), "call-1:bash");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    branchStart,
+                    instruction,
+                    assistant,
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-1", "bash"))));
+  }
+
+  @Test
+  void compactionBranchContinuationRequiresTheInstructionFirst() {
+    Entry root = root(settings("root"));
+    Entry continuation =
+        turnStart(
+            id(2L), id(1L), TurnStartReason.COMPACTION_BRANCH_CONTINUATION, settings("branch"));
+
+    assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, continuation)));
   }
 
   @Test
@@ -1326,6 +1392,58 @@ class EntryPathTest {
 
   private static Entry root(BranchSettings settings) {
     return new Entry(id(1L), SESSION_ID, null, new RootPayload(settings), BASE);
+  }
+
+  private static Entry compactionInstruction(UUID entryId, UUID parentId) {
+    return new Entry(
+        entryId,
+        SESSION_ID,
+        parentId,
+        new CustomMessagePayload(
+            CustomMessagePayload.CORE_CONTRIBUTOR_ID,
+            CustomMessagePayload.CORE_CUSTOM_TYPE,
+            CustomMessagePayload.CORE_RENDERER_KEY,
+            new AgentMessage(
+                AgentMessageRole.USER,
+                List.of(new TextMessageContent(CompactionBranchPrompts.instruction(128)))),
+            CustomMessagePayload.CORE_DETAILS_JSON),
+        time(entryId));
+  }
+
+  private static Entry compactionToolError(
+      UUID entryId,
+      UUID parentId,
+      UUID assistantEntryId,
+      String callId,
+      String toolName,
+      int callIndex) {
+    return new Entry(
+        entryId,
+        SESSION_ID,
+        parentId,
+        new MessagePayload(
+            new AgentMessage(
+                AgentMessageRole.TOOL,
+                List.of(
+                    new ToolResultMessageContent(
+                        callId,
+                        toolName,
+                        toolName,
+                        List.of(new TextMessageContent(CompactionBranchPrompts.TOOL_ERROR)),
+                        true,
+                        "{}"))),
+            null,
+            new ToolResultMetadata(
+                id(900L + callIndex),
+                assistantEntryId,
+                callId,
+                callIndex,
+                ToolResultStatus.FAILED,
+                false,
+                null,
+                null,
+                toolName)),
+        time(entryId));
   }
 
   private static Entry turnStart(

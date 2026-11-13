@@ -392,7 +392,8 @@ public final class BuiltinAgentDriver implements AgentDriver {
           "terminal builtin generation preconditions changed under the same transaction");
     }
     ModelOutcomeAppender.Applied applied =
-        appender.appendModel(store.in(tx), path, model, commit.now());
+        appender.appendModel(
+            store.in(tx), path, model, commit.now(), thread.kind() == ThreadKind.COMPACTION);
     return new DriverApplied(
         applied.headEntryId(),
         applied.finalAnswerEntryId(),

@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -59,6 +60,29 @@ class ModelResponsePlannerTest {
             bindings());
 
     assertSame(ModelResponsePlan.Completed.class, plan.getClass());
+  }
+
+  @Test
+  void compactionThreadReturnsFixedErrorForEveryPlatformToolWithoutReadySlots() {
+    ModelResponsePlan plan =
+        PLANNER.plan(
+            response(
+                GenerationStopReason.COMPLETE,
+                List.of(
+                    new ProviderToolCall("call-1", "bash", "{}"),
+                    new ProviderToolCall("call-2", "missing", "{}"))),
+            bindings(toolBinding("bash")),
+            true);
+
+    ModelResponsePlan.ToolBatch batch = (ModelResponsePlan.ToolBatch) plan;
+    assertEquals(2, batch.tools().size());
+    for (int index = 0; index < batch.tools().size(); index++) {
+      ModelResponsePlan.ToolSlot slot = batch.tools().get(index);
+      assertEquals("call-" + (index + 1), slot.call().id());
+      assertEquals(ToolInvocationStatus.FAILED, slot.status());
+      assertEquals("COMPACTION_TOOL_DISABLED", slot.error().kind());
+      assertEquals(CompactionBranchPrompts.TOOL_ERROR, slot.error().message());
+    }
   }
 
   @Test

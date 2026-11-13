@@ -7,9 +7,11 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -51,6 +53,7 @@ final class TurnPathValidator {
   private List<ToolCallMessageContent> toolCalls;
   private int expectedCallIndex;
   private int expectedModelAttemptFailure;
+  private boolean compactionBranchInstructionSeen;
 
   /** 按 root-to-head 顺序访问一个非 ROOT Entry。 */
   void visit(Entry entry) {
@@ -97,6 +100,16 @@ final class TurnPathValidator {
       openReason = start.reason();
       openCompactionStart = start.compaction();
       openOwnerThreadId = start.ownerThreadId();
+      if (openReason == TurnStartReason.COMPACTION_BRANCH_INPUT) {
+        if (compactionBranchInstructionSeen) {
+          throw new IllegalArgumentException(
+              "COMPACTION branch input instruction must occur exactly once");
+        }
+      } else if (openReason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION
+          && !compactionBranchInstructionSeen) {
+        throw new IllegalArgumentException(
+            "COMPACTION branch continuation requires its internal instruction");
+      }
       if (openReason != TurnStartReason.COMPACTION) {
         // INPUT 覆盖旧 obligation；CONTINUATION 在打开时消费前一个 continueModel=true。
         pendingContinuationOwnerThreadId = null;
@@ -228,6 +241,10 @@ final class TurnPathValidator {
       AgentMessageRole role = message.message().role();
       if (!assistantSeen) {
         if (role == AgentMessageRole.USER) {
+          if (isCompactionBranchTurn(openReason)) {
+            throw new IllegalArgumentException(
+                "COMPACTION branches must not consume external USER messages");
+          }
           if (openReason == TurnStartReason.CONTINUATION) {
             throw new IllegalArgumentException("continuation turns must not consume USER messages");
           }
@@ -264,11 +281,27 @@ final class TurnPathValidator {
         throw new IllegalArgumentException("assistant result must not repeat");
       }
       validateToolResult(entry, message);
+      if (isCompactionBranchTurn(openReason)) {
+        requireCompactionToolError(message);
+      }
       return;
     }
     if (payload instanceof CustomMessagePayload custom) {
       if (assistantSeen) {
         throw new IllegalArgumentException("custom messages must not follow an assistant result");
+      }
+      if (openReason == TurnStartReason.COMPACTION_BRANCH_INPUT) {
+        if (compactionBranchInstructionSeen || !isCompactionInstruction(custom)) {
+          throw new IllegalArgumentException(
+              "COMPACTION branch input must be its fixed internal instruction");
+        }
+        compactionBranchInstructionSeen = true;
+        inputSeen = true;
+        return;
+      }
+      if (openReason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION) {
+        throw new IllegalArgumentException(
+            "COMPACTION branch continuations must not consume custom messages");
       }
       if (openReason == TurnStartReason.CONTINUATION) {
         throw new IllegalArgumentException("continuation turns must not consume custom messages");
@@ -382,9 +415,40 @@ final class TurnPathValidator {
   }
 
   private void requireInput(String context) {
-    if (openReason == TurnStartReason.INPUT && !inputSeen) {
+    if ((openReason == TurnStartReason.INPUT
+            || openReason == TurnStartReason.COMPACTION_BRANCH_INPUT)
+        && !inputSeen) {
       throw new IllegalArgumentException(
-          "INPUT turns require a USER or CUSTOM message before " + context);
+          "input turns require a USER or CUSTOM message before " + context);
+    }
+  }
+
+  private static boolean isCompactionBranchTurn(TurnStartReason reason) {
+    return reason == TurnStartReason.COMPACTION_BRANCH_INPUT
+        || reason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION;
+  }
+
+  private static boolean isCompactionInstruction(CustomMessagePayload custom) {
+    if (custom.message().role() != AgentMessageRole.USER
+        || custom.message().contents().size() != 1) {
+      return false;
+    }
+    AgentMessageContent content = custom.message().contents().getFirst();
+    return content instanceof TextMessageContent text
+        && text.text().startsWith("[Compaction mode]\n");
+  }
+
+  private static void requireCompactionToolError(MessagePayload message) {
+    ToolResultMetadata metadata = message.toolResultMetadata();
+    ToolResultMessageContent result =
+        (ToolResultMessageContent) message.message().contents().getFirst();
+    if (metadata.status() != ToolResultStatus.FAILED
+        || !result.error()
+        || result.contents().size() != 1
+        || !(result.contents().getFirst() instanceof TextMessageContent text)
+        || !CompactionBranchPrompts.TOOL_ERROR.equals(text.text())) {
+      throw new IllegalArgumentException(
+          "COMPACTION branches only allow the fixed platform tool error result");
     }
   }
 

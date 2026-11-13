@@ -44,7 +44,41 @@ public record SpawnRequest(
     JoinDelivery delivery,
     Budget budget,
     UUID ticketId,
-    String requestHash) {
+    String requestHash,
+    SameSessionBranch sameSessionBranch) {
+
+  public SpawnRequest(
+      UUID threadId,
+      UUID sessionId,
+      BranchSettings settings,
+      List<NewThreadCommand> commands,
+      UUID parentThreadId,
+      UUID expectedParentHeadEntryId,
+      Continuation continuation,
+      boolean yoloEnabled,
+      ThreadConstraints constraints,
+      ThreadKind kind,
+      JoinDelivery delivery,
+      Budget budget,
+      UUID ticketId,
+      String requestHash) {
+    this(
+        threadId,
+        sessionId,
+        settings,
+        commands,
+        parentThreadId,
+        expectedParentHeadEntryId,
+        continuation,
+        yoloEnabled,
+        constraints,
+        kind,
+        delivery,
+        budget,
+        ticketId,
+        requestHash,
+        null);
+  }
 
   private static final Pattern HASH = Pattern.compile("[0-9a-f]{64}");
 
@@ -67,6 +101,15 @@ public record SpawnRequest(
       throw new IllegalArgumentException(
           "a new thread needs a sessionId and a continued thread must not carry one");
     }
+    if (sameSessionBranch != null
+        && (continuation != null
+            || parentThreadId == null
+            || kind != ThreadKind.COMPACTION
+            || delivery != JoinDelivery.SETTLE_OWNER_TURN
+            || yoloEnabled)) {
+      throw new IllegalArgumentException(
+          "same-session branch spawn requires a COMPACTION child settled on its owner turn");
+    }
     if ((delivery == JoinDelivery.RECEIPT_ONLY) != (parentThreadId == null)) {
       throw new IllegalArgumentException("only a parentless ticket is receipt-only");
     }
@@ -86,6 +129,13 @@ public record SpawnRequest(
           .anyMatch(command -> command.payload().type() == ThreadCommandType.SET_ENVIRONMENT)) {
         throw new IllegalArgumentException("only the execution root can set an environment");
       }
+    }
+  }
+
+  /** Same-Session BRANCH source boundary for a COMPACTION child. */
+  public record SameSessionBranch(UUID startEntryId) {
+    public SameSessionBranch {
+      Objects.requireNonNull(startEntryId, "startEntryId");
     }
   }
 

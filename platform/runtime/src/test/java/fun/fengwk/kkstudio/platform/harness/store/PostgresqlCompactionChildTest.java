@@ -13,6 +13,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
@@ -45,14 +46,18 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
@@ -96,6 +101,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -533,17 +539,31 @@ class PostgresqlCompactionChildTest {
     // 父线程没有 ModelInvocation
     assertTrue(findModelInvocationByTurn(parentId, compactionStartEntry.id()).isEmpty());
 
-    // 新建了子 Session/ROOT Entry/子 Thread（parentThreadId = 父）
+    // 子 Thread 复用主 Session 与共享切点前缀，只追加 FORK / SETTINGS，不创建 ROOT 或复制 Entry。
     store.transaction(
         tx -> {
+          ThreadState parentThread = tx.threads().lock(parentId).orElseThrow();
           ThreadState childThread = tx.threads().lock(childThreadId).orElseThrow();
           assertEquals(parentId, childThread.parentThreadId());
+          assertEquals(parentThread.sessionId(), childThread.sessionId());
+          assertEquals(parentThread.rootThreadId(), childThread.rootThreadId());
           Session childSession = tx.sessions().find(childThread.sessionId()).orElseThrow();
           assertNotNull(childSession);
-          Entry rootEntry = tx.entries().find(childThread.headEntryId()).orElseThrow();
-          assertInstanceOf(RootPayload.class, rootEntry.payload());
+          EntryPath childPath = tx.entries().loadPath(childThread.headEntryId());
+          EntryPath ownerPath = tx.entries().loadPath(parentThread.headEntryId());
+          int cutIndex =
+              ownerPath.entries().stream().map(Entry::id).toList().indexOf(compaction.cutEntryId());
+          assertTrue(cutIndex >= 0);
+          assertEquals(
+              ownerPath.entries().subList(0, cutIndex + 1),
+              childPath.entries().subList(0, cutIndex + 1));
+          assertInstanceOf(ForkPayload.class, childPath.entries().get(cutIndex + 1).payload());
+          ForkPayload fork = (ForkPayload) childPath.entries().get(cutIndex + 1).payload();
+          assertEquals(compaction.cutEntryId(), fork.sourceEntryId());
+          assertEquals(
+              childThreadId, ((SettingsPayload) childPath.head().payload()).ownerThreadId());
 
-          // 子第一条 command 的 payload 是 CustomMessageCommandPayload（摘要 prompt，非空）
+          // 子第一条 command 的 payload 是 CustomMessageCommandPayload（摘要 instruction，非空）
           List<ThreadCommand> childCommands = loadCommandsByThread(tx, childThreadId);
           assertEquals(1, childCommands.size());
           ThreadCommand childFirstCmd = childCommands.getFirst();
@@ -623,6 +643,24 @@ class PostgresqlCompactionChildTest {
     assertNotNull(settledJoin.terminalEntryId());
     assertNotNull(settledJoin.finalAnswerEntryId());
 
+    EntryPath compactionPath = path(childThreadId);
+    assertThrows(
+        DomainException.class,
+        () ->
+            runtime.acceptCommands(
+                new AcceptCommandsCommand(
+                    new AcceptCommandsTarget.NewThread(
+                        compactionPath.root().sessionId(),
+                        compactionPath.head().id(),
+                        UUID.randomUUID(),
+                        "invalid compaction fork",
+                        false),
+                    List.of(
+                        new NewThreadCommand(
+                            new UserMessageCommandPayload(AgentMessage.user("fork")),
+                            UUID.randomUUID()))),
+                AcceptancePreflight.IDENTITY));
+
     // 父 THREAD Work 被重新请求
     assertTrue(hasWork(WorkTargetType.THREAD, parentId));
 
@@ -663,6 +701,33 @@ class PostgresqlCompactionChildTest {
    * 子压缩调用真实经 ModelProcessor 收到不可重试的 OVERFLOW：子执行失败、父压缩 turn FAILED、不递归创建压缩子、不留残留 Work，
    * 且原历史上下文不变。压缩子身份只由 durable COMPACTION Join 事实决定。
    */
+  @Test
+  void directlyStoppingCompactionBranchStopsOwnerTurnUntilNextUserInput() {
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    seedUserCommand(parentId, "queued input");
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    TurnStartPayload start = (TurnStartPayload) path(parentId).head().payload();
+    UUID branchId = start.compaction().childThreadId();
+    runtime.stop(new StopCommand(branchId, UUID.randomUUID(), version(branchId)));
+    processNext(parentId);
+
+    EntryPath stoppedPath = path(parentId);
+    assertInstanceOf(TurnEndPayload.class, stoppedPath.head().payload());
+    TurnEndPayload end = (TurnEndPayload) stoppedPath.head().payload();
+    assertEquals(TurnEndOutcome.STOPPED, end.outcome());
+    assertEquals(TurnEndReason.USER_STOP, end.reason());
+    assertFalse(end.continueModel());
+    Entry result = stoppedPath.entries().get(stoppedPath.entries().size() - 2);
+    assertInstanceOf(AssistantErrorPayload.class, result.payload());
+    assertEquals("CANCELLED", ((AssistantErrorPayload) result.payload()).error().code());
+    assertFalse(snapshot(parentId).thread().executionControl().isStopped());
+    assertEquals(1, queuedCommandCount(parentId));
+    assertFalse(hasWork(WorkTargetType.THREAD, parentId));
+  }
+
   @Test
   void compactionChildOverflowFailsParentWithoutRecursionOrResidualWork() {
     ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
@@ -887,7 +952,7 @@ class PostgresqlCompactionChildTest {
 
     TurnStartPayload continuationStart =
         (TurnStartPayload) path(child.childThreadId()).openTurnStart().orElseThrow().payload();
-    assertEquals(TurnStartReason.CONTINUATION, continuationStart.reason());
+    assertEquals(TurnStartReason.COMPACTION_BRANCH_CONTINUATION, continuationStart.reason());
     ModelRequestSpec spec = findModel(openChildModel(child.childThreadId())).requestSpec();
     assertEquals(1024, spec.outputTokens());
     assertEquals(1024, continuationStart.maxOutputTokens());
@@ -1343,20 +1408,29 @@ class PostgresqlCompactionChildTest {
   }
 
   /**
-   * 在压缩子上种一个已闭合的工具 loop 输入回合：真实工具调用 + 匹配的工具结果 + {@code continueModel=true}，并消费子第一条
-   * CUSTOM_MESSAGE、推进输入水位，使下一次 claim 规划出工具 loop 的 CONTINUATION 模型轮。
+   * Seeds a valid compaction input and its fixed failed tool result before planning continuation.
    */
   private void seedClosedToolLoopTurn(UUID childThreadId) {
     store.transaction(
         tx -> {
           ThreadState child = ThreadLifecycleCoordinator.lockThreadWithParent(tx, childThreadId);
           BranchSettings settings = tx.entries().loadPath(child.headEntryId()).baseSettings();
+          int outputBudget = child.constraints().maxOutputTokens();
           String callId = "call-1";
           UUID startId = tx.nextId();
           UUID inputId = tx.nextId();
           UUID assistantId = tx.nextId();
           UUID toolResultId = tx.nextId();
           UUID endId = tx.nextId();
+          CustomMessagePayload instruction =
+              new CustomMessagePayload(
+                  CustomMessagePayload.CORE_CONTRIBUTOR_ID,
+                  CustomMessagePayload.CORE_CUSTOM_TYPE,
+                  CustomMessagePayload.CORE_RENDERER_KEY,
+                  AgentMessage.user(
+                      CompactionBranchPrompts.instruction(
+                          child.constraints().maxOutputTokens().longValue())),
+                  CustomMessagePayload.CORE_DETAILS_JSON);
           tx.entries()
               .insert(
                   new Entry(
@@ -1364,27 +1438,15 @@ class PostgresqlCompactionChildTest {
                       child.sessionId(),
                       child.headEntryId(),
                       new TurnStartPayload(
-                          TurnStartReason.INPUT,
+                          TurnStartReason.COMPACTION_BRANCH_INPUT,
                           settings,
                           childThreadId,
                           CONTEXT_WINDOW,
-                          MAX_OUTPUT_TOKENS,
+                          outputBudget,
                           null,
                           null),
                       T1));
-          tx.entries()
-              .insert(
-                  new Entry(
-                      inputId,
-                      child.sessionId(),
-                      startId,
-                      new MessagePayload(
-                          new AgentMessage(
-                              AgentMessageRole.USER,
-                              List.of(new TextMessageContent("compaction instruction"))),
-                          null,
-                          null),
-                      T1));
+          tx.entries().insert(new Entry(inputId, child.sessionId(), startId, instruction, T1));
           tx.entries()
               .insert(
                   new Entry(
@@ -1394,9 +1456,7 @@ class PostgresqlCompactionChildTest {
                       new MessagePayload(
                           new AgentMessage(
                               AgentMessageRole.ASSISTANT,
-                              List.of(
-                                  new ToolCallMessageContent(callId, "bash", "bash", "{}"),
-                                  new TextMessageContent("working"))),
+                              List.of(new ToolCallMessageContent(callId, "bash", "bash", "{}"))),
                           new AssistantMessageMetadata(
                               GenerationStopReason.COMPLETE,
                               new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
@@ -1416,8 +1476,10 @@ class PostgresqlCompactionChildTest {
                                       callId,
                                       "bash",
                                       "bash",
-                                      List.of(new TextMessageContent("tool output")),
-                                      false,
+                                      List.of(
+                                          new TextMessageContent(
+                                              CompactionBranchPrompts.TOOL_ERROR)),
+                                      true,
                                       "{}"))),
                           null,
                           new ToolResultMetadata(
@@ -1425,11 +1487,11 @@ class PostgresqlCompactionChildTest {
                               assistantId,
                               callId,
                               0,
-                              ToolResultStatus.SUCCEEDED,
+                              ToolResultStatus.FAILED,
                               false,
                               null,
                               null,
-                              null)),
+                              "bash")),
                       T1));
           tx.entries()
               .insert(

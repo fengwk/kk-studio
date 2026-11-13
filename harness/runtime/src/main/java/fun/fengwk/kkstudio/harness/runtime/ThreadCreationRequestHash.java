@@ -84,6 +84,30 @@ public final class ThreadCreationRequestHash {
     return digest(envelope);
   }
 
+  /** Computes the identity of an internal COMPACTION child forked within its owner's Session. */
+  public static String forSameSessionBranch(
+      UUID sessionId,
+      UUID startEntryId,
+      UUID threadId,
+      UUID parentThreadId,
+      BranchSettings settings,
+      boolean yoloEnabled,
+      ThreadKind kind,
+      ThreadConstraints constraints,
+      List<NewThreadCommand> commands) {
+    ObjectNode envelope = envelope("SAME_SESSION_BRANCH");
+    envelope.put("sessionId", requireId(sessionId, "sessionId").toString());
+    envelope.put("startEntryId", requireId(startEntryId, "startEntryId").toString());
+    envelope.put("threadId", requireId(threadId, "threadId").toString());
+    envelope.put("parentThreadId", requireId(parentThreadId, "parentThreadId").toString());
+    envelope.set("settings", rootNode(settings));
+    envelope.put("yoloEnabled", yoloEnabled);
+    envelope.put("kind", requireNonNull(kind, "kind").name());
+    envelope.set("constraints", constraintsNode(constraints));
+    envelope.set("commands", commandsNode(commands));
+    return digest(envelope);
+  }
+
   /**
    * 计算 NEW_FORKED_SESSION target 的 creation request hash：来源 Thread、切点、新 Session/Thread、YOLO 开关 与
    * ordered 命令对。同一 raw 请求稳定得到同一 hash，内容变化（含切点或命令顺序）得到不同 hash。

@@ -38,7 +38,8 @@ public final class CompactionCutPlanner {
       throw new IllegalArgumentException("compaction cut planning requires a closed turn path");
     }
 
-    List<Turn> turns = closedTurns(entries);
+    int priorCutIndex = latestCompleteCutIndex(path, entries);
+    List<Turn> turns = closedTurns(entries, priorCutIndex);
     boolean[] visible = TokenEstimator.visibilityMask(entries);
     int latestCall = latestModelCallTurn(turns);
     if (latestCall < 0) {
@@ -46,26 +47,43 @@ public final class CompactionCutPlanner {
     }
 
     Entry latestBoundary =
-        latestCall == 0 ? entries.get(0) : entries.get(turns.get(latestCall - 1).endIndex());
+        latestCall == 0
+            ? entries.get(priorCutIndex)
+            : entries.get(turns.get(latestCall - 1).endIndex());
     int keepBoundaryIndex =
-        keepRecentBoundary(entries, visible, turns, config.effectiveKeep(contextWindow));
+        keepRecentBoundary(
+            entries, visible, turns, priorCutIndex, config.effectiveKeep(contextWindow));
     Entry boundary = latestBoundary;
     if (keepBoundaryIndex < indexOf(entries, latestBoundary.id())) {
       boundary = entries.get(keepBoundaryIndex);
     }
     int boundaryIndex = indexOf(entries, boundary.id());
-    if (boundaryIndex == 0) {
+    if (boundaryIndex <= priorCutIndex) {
       return Optional.empty();
     }
     return Optional.of(new Cut(boundary.id(), boundaryIndex));
   }
 
-  private static List<Turn> closedTurns(List<Entry> entries) {
+  private static int latestCompleteCutIndex(EntryPath path, List<Entry> entries) {
+    return CompactionTurns.latestComplete(path)
+        .map(
+            turn -> {
+              for (int i = 0; i < entries.size(); i++) {
+                if (entries.get(i).id().equals(turn.freezing().cutEntryId())) {
+                  return i;
+                }
+              }
+              throw new IllegalStateException("complete compaction cut is not on the current path");
+            })
+        .orElse(0);
+  }
+
+  private static List<Turn> closedTurns(List<Entry> entries, int afterIndex) {
     List<Turn> turns = new ArrayList<>();
     int startIndex = -1;
     TurnStartReason reason = null;
     boolean modelCall = false;
-    for (int i = 1; i < entries.size(); i++) {
+    for (int i = afterIndex + 1; i < entries.size(); i++) {
       Entry entry = entries.get(i);
       if (entry.payload() instanceof TurnStartPayload start) {
         startIndex = i;
@@ -102,7 +120,11 @@ public final class CompactionCutPlanner {
   }
 
   private static int keepRecentBoundary(
-      List<Entry> entries, boolean[] visible, List<Turn> turns, long keepTokens) {
+      List<Entry> entries,
+      boolean[] visible,
+      List<Turn> turns,
+      int lowerBoundIndex,
+      long keepTokens) {
     long accumulated = 0L;
     for (int turnIndex = turns.size() - 1; turnIndex >= 0; turnIndex--) {
       Turn turn = turns.get(turnIndex);
@@ -112,10 +134,10 @@ public final class CompactionCutPlanner {
         }
       }
       if (accumulated > keepTokens) {
-        return turn.endIndex();
+        return turnIndex == 0 ? lowerBoundIndex : turns.get(turnIndex - 1).endIndex();
       }
     }
-    return 0;
+    return lowerBoundIndex;
   }
 
   private static int indexOf(List<Entry> entries, UUID id) {
