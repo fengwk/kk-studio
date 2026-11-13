@@ -332,31 +332,33 @@ distributed.sh 提供受控命令集：`disconnect-db-a` / `reconnect-db-a` 注�
 
 Daemon 不发布宿主端口，只经 `ws://app:8080/ws/daemon` 连接 App。
 
-每个容器只承载一张卡片。容器入口在启动前物化本地缓存与凭证：由冻结 Node 调用
-`daemon-config-cache.mjs`，按 `KK_STUDIO_DAEMON_ENVIRONMENT_ID`（或
+每个容器只承载一张卡片。容器入口先物化本地配置缓存与凭证：由发行归档内的冻结 Node
+调用 `daemon-config-cache.mjs`，按 `KK_STUDIO_DAEMON_ENVIRONMENT_ID`（或
 `KK_STUDIO_DAEMON_ENVIRONMENT_NAME`）从 Studio 读取卡片，必要时把 `studioUrl` 修正为
 `http://app:8080`，写出 `{environmentId, version, daemonConfig}` 形式的
-`/workspace/.kk-studio/daemon.json`；注入的注册凭证单独写为同目录 `daemon.token`
-（目录 0700、文件 0600），随后用唯一的 `--config /workspace/.kk-studio/daemon.json` 启动 Daemon。
-凭证文本既不进入 argv（`ps` 不可见），也不残留在 `/proc/<pid>/environ`；Daemon 由配置的
-`studioUrl` 自行派生上述 gateway。`--config` 是 Daemon 唯一的运行参数：数据目录取配置文件的
-父目录，卡片备注不进入该文件。相关入口环境变量为 `KK_STUDIO_DAEMON_STUDIO_URL`、
-`KK_STUDIO_DAEMON_ENVIRONMENT_ID` / `_NAME`、`KK_STUDIO_DAEMON_REGISTRATION_TOKEN`、
-可选的 `KK_STUDIO_DAEMON_ROOT` 与 `KK_STUDIO_DAEMON_DIST`。
+`/workspace/.kk-studio/daemon.json`；注册凭证单独写入同目录的 `daemon.token`
+（目录 0700、文件 0600），随后直接启动 Go Daemon，并只传入
+`--config /workspace/.kk-studio/daemon.json`。凭证文本既不进入 argv（`ps` 不可见），也不残留在
+`/proc/<pid>/environ`；Go Daemon 从配置的 `studioUrl` 派生 gateway。数据目录取配置文件的父目录。
+相关入口环境变量为 `KK_STUDIO_DAEMON_STUDIO_URL`、`KK_STUDIO_DAEMON_ENVIRONMENT_ID` / `_NAME`、
+`KK_STUDIO_DAEMON_REGISTRATION_TOKEN`、可选的 `KK_STUDIO_DAEMON_ROOT` 与
+`KK_STUDIO_DAEMON_DIST`。
 
-[daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile) 以 Node 24.21.0 builder 编译 Daemon，
-并通过 [`prepare-release.sh`](../../scripts/daemon/prepare-release.sh) 暂存目标架构的真实发行归档，runtime 使用
-`debian:bookworm-slim` 并安装 bash、ca-certificates、git、libstdc++，**不安装系统 Node，也不安装 JRE**。
-镜像中唯一的 Node 二进制是发行归档内置的冻结运行时（`runtime/code-server/lib/node`，链接为 `/usr/local/bin/node`；`npm`/`npx` 是由该运行时执行的包装脚本），程序发行目录位于 `/opt/kk-studio/daemon`，
-入口为 `/opt/kk-studio/daemon/main.js`，运行用户为 uid/gid `10001`。Daemon 只挂载一个 `/workspace` named volume，
-`workspace-init` 完成 owner 初始化（`chown 10001:10001`）后 Daemon 才启动。
+[daemon.Dockerfile](../../deploy/reliability/daemon.Dockerfile) 使用 Go 1.27.4 构建静态 Daemon，
+并通过 [`prepare-release.sh`](../../scripts/daemon/prepare-release.sh) 暂存同一套官方发行归档；Node
+24.21.0 builder 负责归档与 npm CLI 依赖准备。运行镜像基于 `debian:bookworm-slim`，安装 bash、
+ca-certificates、git、libstdc++，**不安装系统 Node 或 JRE**。唯一的 Node 二进制来自归档内冻结的
+code-server 运行时（`runtime/code-server/lib/node`，链接为 `/usr/local/bin/node`）；`npm`/`npx`
+包装脚本也使用该运行时。Go Daemon 位于 `/opt/kk-studio/daemon/kk-studio-daemon`，归档运行时和 IDE
+扩展与二进制并列，容器用户为 uid/gid `10001`。Daemon 只挂载一个 `/workspace` named volume，
+`workspace-init` 完成 owner 初始化（`chown 10001:10001`）后才启动。
 
 `up` 等待 PostgreSQL health、App `/actuator/health` 和公共 `GET /api/platform/environments` 的
 `status=READY`。`inspect` fail closed 检查：
 
 - Daemon uid 不是 root（10001）；
 - mount 只有 `volume -> /workspace` 且可写、没有 bind mount，且恰好只有一个挂载卷；
-- `node`、`npm`、`git`、`bash` 可执行，且 `node` 是冻结运行时，`rg`/`fd` 不存在，且**不含任何 JRE**；
+- Go Daemon 可执行，code-server Node 是归档内的冻结运行时，`rg`/`fd` 不存在，且**不含任何 JRE**；
 - workspace 可写、Environment `READY`；
 - Compose config 不含 provider credential 或 bind mount。
 

@@ -7,6 +7,10 @@ import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const root = repositoryRoot()
 const goCi = readFileSync(path.join(root, '.github/workflows/daemon-go-ci.yml'), 'utf8')
+const javaInterop = readFileSync(
+  path.join(root, 'web/src/test/java/fun/fengwk/kkstudio/web/environment/DaemonCrossLanguageIntegrationTest.java'),
+  'utf8',
+)
 const release = readFileSync(path.join(root, '.github/workflows/daemon-release.yml'), 'utf8')
 const docker = readFileSync(path.join(root, '.github/workflows/docker-publish.yml'), 'utf8')
 const prepare = readFileSync(path.join(root, 'scripts/daemon/prepare-release.sh'), 'utf8')
@@ -31,10 +35,10 @@ test('Go daemon CI builds all six static targets and is reusable by release and 
 
 test('reusable Go CI exercises Jetty interoperability with the Go daemon binary', () => {
   assert.match(goCi, /jetty-interop:/)
-  assert.match(goCi, /Build Go daemon/)
-  assert.match(goCi, /DAEMON_BINARY: \$\{\{ runner\.temp \}\}\/kk-studio-daemon-go/)
+  assert.match(goCi, /actions\/setup-go@/)
   assert.match(goCi, /DaemonCrossLanguageIntegrationTest#dataPlaneRoutingHttpAndExtendedConnectReturn404ForNonexistentView/)
-  assert.doesNotMatch(goCi, /daemon\/package\.json/)
+  assert.match(javaInterop, /GoDaemonBinary\.build\(repoRoot\(\)/)
+  assert.doesNotMatch(goCi, /DAEMON_BINARY/)
 })
 
 test('release dispatch stages Go archives and cannot publish', () => {
@@ -42,7 +46,7 @@ test('release dispatch stages Go archives and cannot publish', () => {
   assert.match(release, /workflow_dispatch:/)
   assert.match(release, /daemon-go\/release/)
   assert.match(release, /github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/'\)/)
-  assert.doesNotMatch(release, /daemon-ci\.yml|npm --prefix daemon/)
+  assert.doesNotMatch(release, /daemon-ci\.yml/)
 })
 
 test('release staging builds the Go executable and packages updater-compatible runtime layout', () => {
@@ -70,7 +74,7 @@ test('Unix and Windows installers execute the Go binary and internal lock helper
   assert.ok(windowsInstall.includes(String.raw`runtime\code-server\lib\node.exe`))
 })
 
-test('archive smoke verifies the Go executable, bundled IDE runtime and absence of Node daemon payload', () => {
+test('archive smoke verifies the Go executable, bundled IDE runtime and excludes legacy payload', () => {
   assert.match(smoke, /kk-studio-daemon/)
   assert.match(smoke, /runtime\/code-server\/out\/node\/entry\.js/)
   assert.match(smoke, /ide-extension\/extension\.cjs/)

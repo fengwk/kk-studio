@@ -71,7 +71,6 @@ test('test intent: the daemon rebuild compiles the Go product and stages its ext
   assert.ok(body.includes('CGO_ENABLED=0'))
   assert.ok(body.includes('"$GO_BIN" build -o "$DAEMON_BINARY" ./cmd/kk-studio-daemon'))
   assert.ok(body.includes('daemon-go/ide-extension'))
-  assert.ok(!body.includes('npm --prefix daemon'))
   assert.ok(!body.includes('mvn'))
 })
 

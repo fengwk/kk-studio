@@ -158,30 +158,21 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 `psql`、`pg_dump`、`pg_restore`、`createdb`、`pg_isready` 必须来自同一主版本且不低于 17；
 测试在创建容器前检查工具链，不兼容时直接失败，不跳过数据库回归。
 
-### Daemon 安装与受管更新回归
+### Daemon 安装与发行归档回归
 
-在仓库根运行 `node --test scripts/daemon/tests/*.test.mjs`，覆盖安装、下载、受管更新与发布脚本契约。
-Unix PTY 用例需要宿主 `python3`：它只用标准库 `pty` 让安装器在真实 TTY stderr 下运行（stdin 仍重定向），属于测试依赖，
-产品运行时不依赖 Python。不要改用 `script` 命令替代，因为各平台的参数与可用性不一致。
-Unix fixtures 替代网络与服务管理命令，真实执行 SHA256 校验、文件替换与暂存输入校验，验证 latest
-解析与发行归档版本匹配、`--check-config` 预检失败保留现有安装、受管身份判定、覆盖安装的备份与替换，
-以及卸载只移除受管服务与程序。安装器没有交互提示；从 checkout
-运行安装脚本只是开发/CI fixture，不是用户安装路径，安装器自身从不构建、真实发行归档由
-[scripts/daemon/prepare-release.sh](../../scripts/daemon/prepare-release.sh) 独立打包，再由
-`daemon-release` 工作流上传 GitHub Release。
-安装器不要求宿主 JDK 或 Node：服务直接运行归档自带的冻结运行时。测试不注册真实 systemd/launchd 服务。
-Windows 原生验收在同一宿主上分别运行 Windows PowerShell 5.1 与 PowerShell 7：
+在仓库根运行 `node --test scripts/daemon/tests/*.test.mjs`，覆盖 Unix/Windows 安装器契约、受管更新、
+下载校验、发布打包和归档验收。Unix PTY 用例需要宿主 `python3`：它只用标准库 `pty` 让安装器在真实
+TTY stderr 下运行（stdin 仍重定向），属于测试依赖，产品运行时不依赖 Python。Fixtures 替代网络与服务管理命令，
+验证 SHA256 校验、文件替换、暂存输入校验、latest 与归档版本匹配、Go daemon `--check-config` 失败时保留现有
+安装、受管身份判定、覆盖安装备份与替换，以及卸载只移除受管服务与程序。安装器不构建 Daemon；真实发行归档由
+[scripts/daemon/prepare-release.sh](../../scripts/daemon/prepare-release.sh) 打包，再由 `daemon-release`
+工作流上传 GitHub Release。安装器不要求宿主 Go、Node 或 JDK；归档包含 Go 可执行文件及供 IDE 使用的冻结
+code-server 运行时。
 
-```powershell
-powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -File scripts/daemon/tests/test_daemon_install_windows.ps1
-pwsh -NoProfile -NonInteractive -File scripts/daemon/tests/test_daemon_install_windows.ps1
-```
-
-该套件检查真实 ScheduledTasks 定义、ACL、Node argv 和进程捕获，但不注册任务。
-Windows 计划任务以发行归档内的冻结运行时直接执行 `main.js`，命令行只承载唯一的
-`--config <绝对 daemon.json>`；daemon 对未知或多余参数 fail closed，studioUrl、bashExecutable、
-lsp 与 proxyUrl 等应用级选项全部来自 JSON 配置，因此不存在参数编码往返。
-套件在非 ASCII 工作目录下真实运行安装器，并覆盖非零退出、双流大输出与选项环境恢复。
+Windows 发行归档在 `windows-latest` smoke job 中运行
+[scripts/daemon/smoke-archive.ps1](../../scripts/daemon/smoke-archive.ps1)：解包归档，检查 Go executable、
+code-server runtime、IDE extension 与法律文件，执行 Go daemon `--version`，并拒绝旧应用入口与
+ripgrep package。Windows 安装器与受管更新的源码契约也由上述 Node 测试覆盖；它们不注册真实 ScheduledTasks。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
 失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中
@@ -589,9 +580,8 @@ XML 检查不是通用语法验证器，不能把这道门禁称为任意畸形 
 
 先把 `<case-id>` 替换为 inventory 中的实际值；`case-reset` 最后一项可选 `pi` 或 `pi-base`。
 `snapshot` 不猜测宿主目录，`PI_ANCHOR` 和 `PI_BASE_ANCHOR` 都必须显式指向 clean Git worktree。
-`tool-smoke` 在 Daemon 容器内运行
-[`NativeToolSmoke.mjs`](../../scripts/dev/verify/reliability/fixtures/NativeToolSmoke.mjs)，
-直接对打包发行目录断言 find/grep 与子进程执行，不经过 Agent、Provider 或 App command batch。
+`tool-smoke` 在 Daemon 容器内用发行的 Go executable 对入口物化的配置运行
+`--check-config`，验证镜像中的可执行文件和运行配置；find/grep 与子进程行为由 Go daemon 单元测试覆盖。
 
 真实 Agent runner 只在显式执行时调用 Provider：
 

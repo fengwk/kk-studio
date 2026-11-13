@@ -82,20 +82,13 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Build Go daemon
-        working-directory: daemon-go
-        env:
-          CGO_ENABLED: '0'
-        run: go build -o "$RUNNER_TEMP/kk-studio-daemon-go" ./cmd/kk-studio-daemon
       - name: Verify RFC 8441 interoperability with Jetty
         env:
           MAVEN_OPTS: -Xmx2g
-          DAEMON_BINARY: ${{ runner.temp }}/kk-studio-daemon-go
         run: |
           mvn -B -ntp -q -pl web -am test \
             -Dtest=DaemonCrossLanguageIntegrationTest#dataPlaneRoutingHttpAndExtendedConnectReturn404ForNonexistentView \
-            -Dsurefire.failIfNoSpecifiedTests=false \
-            -Ddaemon.bin="$DAEMON_BINARY"
+            -Dsurefire.failIfNoSpecifiedTests=false
 
   test:
     strategy:

@@ -13,6 +13,7 @@ const REPOSITORY_ROOT = repositoryRoot()
 const RELIABILITY_COMPOSE = path.join(REPOSITORY_ROOT, 'deploy/test/compose.yaml')
 const RELIABILITY_ENTRYPOINT = path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon-entrypoint.sh')
 const RELIABILITY_DOCKERFILE = path.join(REPOSITORY_ROOT, 'deploy/reliability/daemon.Dockerfile')
+const RELIABILITY_STACK = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/reliability/stack.sh')
 
 const DAEMON_CONFIG = {
   studioUrl: 'http://127.0.0.1:8080',
@@ -106,7 +107,6 @@ test('test intent: the daemon image runs a Go executable with the bundled code-s
   assert.ok(dockerfile.includes('/distribution/kk-studio-daemon'))
   assert.ok(dockerfile.includes('runtime/code-server/lib/node'))
   assert.ok(dockerfile.includes('FROM debian:bookworm-slim'))
-  assert.ok(!dockerfile.includes('/distribution/main.js'))
   // Node is only exposed for the packaged code-server runtime and the config-cache helper.
   assert.ok(
     dockerfile.includes('ln -s /opt/kk-studio/daemon/runtime/code-server/lib/node /usr/local/bin/node'),
@@ -119,6 +119,13 @@ test('test intent: runtime user creation uses absolute system commands', () => {
   const runtime = text(RELIABILITY_DOCKERFILE).split('---------- runtime ----------')[1]
   assert.ok(runtime.includes('/usr/sbin/groupadd --gid 10001 kkdaemon'))
   assert.ok(runtime.includes('/usr/sbin/useradd --uid 10001'))
+})
+
+test('test intent: reliability inspection and smoke validate the Go daemon distribution', () => {
+  const stack = text(RELIABILITY_STACK)
+  assert.ok(stack.includes('/opt/kk-studio/daemon/kk-studio-daemon'))
+  assert.ok(stack.includes('/opt/kk-studio/daemon/runtime/code-server/out/node/entry.js'))
+  assert.ok(stack.includes('--check-config /workspace/.kk-studio/daemon.json'))
 })
 
 test('test intent: the entrypoint launches the Go executable with --config only', async () => {
