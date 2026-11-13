@@ -15,7 +15,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -40,6 +42,8 @@ public final class ModelRequestSpecJsonCodec {
     encodeVariants(node, spec.modelVariants());
     node.put("outputTokens", spec.outputTokens());
     node.put("systemInstruction", spec.systemInstruction());
+    ObjectNode sections = node.putObject("systemSections");
+    spec.systemSections().forEach(sections::put);
     ArrayNode tools = node.putArray("toolBindings");
     for (ToolBinding binding : spec.toolBindings()) {
       tools.add(BINDING_CODEC.encodeNode(binding));
@@ -72,6 +76,7 @@ public final class ModelRequestSpecJsonCodec {
               "modelVariants",
               "outputTokens",
               "systemInstruction",
+              "systemSections",
               "toolBindings",
               "subagentBindings",
               "groupExecution"
@@ -84,6 +89,7 @@ public final class ModelRequestSpecJsonCodec {
               "modelVariants",
               "outputTokens",
               "systemInstruction",
+              "systemSections",
               "toolBindings",
               "subagentBindings"
             });
@@ -101,6 +107,19 @@ public final class ModelRequestSpecJsonCodec {
     for (JsonNode subagentNode : subagentNodes) {
       subagentBindings.add(decodeSubagent(subagentNode));
     }
+    ObjectNode sectionNode =
+        JsonCodecSupport.object(
+            InvocationJsonSupport.required(node, "systemSections", CONTEXT), "systemSections");
+    Map<String, String> systemSections = new LinkedHashMap<>();
+    sectionNode
+        .properties()
+        .forEach(
+            entry -> {
+              if (!entry.getValue().isString() || entry.getValue().stringValue().isBlank()) {
+                throw new IllegalArgumentException("systemSections values must be non-blank text");
+              }
+              systemSections.put(entry.getKey(), entry.getValue().stringValue());
+            });
     return new ModelRequestSpec(
         InvocationJsonSupport.requiredEnum(node, "providerType", ProviderType.class, CONTEXT),
         InvocationJsonSupport.requiredUuid(node, "providerConnectionGenerationId", CONTEXT),
@@ -111,7 +130,8 @@ public final class ModelRequestSpecJsonCodec {
         InvocationJsonSupport.text(node, "systemInstruction", CONTEXT),
         toolBindings,
         subagentBindings,
-        node.has("groupExecution") ? decodeGroup(node.get("groupExecution")) : null);
+        node.has("groupExecution") ? decodeGroup(node.get("groupExecution")) : null,
+        systemSections);
   }
 
   private static ObjectNode encodeGroup(ModelGroupExecution group) {

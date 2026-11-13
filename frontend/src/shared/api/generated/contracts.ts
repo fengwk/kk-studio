@@ -715,6 +715,7 @@ export const DAEMON_OPERATING_SYSTEM_VALUES: readonly DaemonOperatingSystem[] = 
 /** Java：fun.fengwk.kkstudio.harness.api.history.EntryType */
 export type EntryType =
   | 'ROOT'
+  | 'SYSTEM'
   | 'TURN_START'
   | 'MESSAGE'
   | 'MODEL_ATTEMPT_FAILURE'
@@ -730,6 +731,7 @@ export type EntryType =
 
 export const ENTRY_TYPE_VALUES: readonly EntryType[] = [
   'ROOT',
+  'SYSTEM',
   'TURN_START',
   'MESSAGE',
   'MODEL_ATTEMPT_FAILURE',
@@ -1309,8 +1311,6 @@ export interface HarnessModelRequestDebugToolDTO {
   inputSchema: unknown
   environmentSupport: EnvironmentSupport
   provenance: string
-  state: LiveTurnPlanToolState
-  filterReason: LiveTurnPlanFilterReason | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO */
@@ -1851,23 +1851,6 @@ export interface LiveEnvironmentCapabilityDTO {
   id: string
 }
 
-/** Java：fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan.FilterReason */
-export type LiveTurnPlanFilterReason = 'ENVIRONMENT_NOT_SELECTED'
-
-export const LIVE_TURN_PLAN_FILTER_REASON_VALUES: readonly LiveTurnPlanFilterReason[] = [
-  'ENVIRONMENT_NOT_SELECTED',
-]
-
-/** Java：fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan.ToolState */
-export type LiveTurnPlanToolState =
-  | 'SENT'
-  | 'FILTERED'
-
-export const LIVE_TURN_PLAN_TOOL_STATE_VALUES: readonly LiveTurnPlanToolState[] = [
-  'SENT',
-  'FILTERED',
-]
-
 /** Java：fun.fengwk.kkstudio.platform.catalog.mcp.McpDiscoveryStatus */
 export type McpDiscoveryStatus =
   | 'UNVERIFIED'
@@ -1931,6 +1914,7 @@ export interface McpServerUpdateDTO {
 export interface ModelAbilitiesDTO {
   tools: boolean
   reasoning: boolean
+  midConversationSystemMessages: boolean
   inputModalities: ModelInputModality[]
 }
 

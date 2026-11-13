@@ -45,6 +45,7 @@ export function emptyModelDraft(
     maxOutputTokens: '8192',
     tools: true,
     reasoning: false,
+    midConversationSystemMessages: false,
     inputModalities: ['TEXT'],
     pricing: emptyPricingDraft(),
     defaultVariant: 'medium',
@@ -105,6 +106,7 @@ export function toModelDraft(model: ModelDTO): ModelDraft {
     maxOutputTokens: String(config.limit.output),
     tools: config.abilities.tools,
     reasoning: config.abilities.reasoning,
+    midConversationSystemMessages: config.abilities.midConversationSystemMessages,
     inputModalities: [...config.abilities.inputModalities],
     defaultVariant: config.defaultVariant,
     variants: config.variants.map(parseVariant),
@@ -216,6 +218,7 @@ export function buildModelConfig(draft: ModelDraft): ModelConfigDTO {
     abilities: {
       tools: draft.tools,
       reasoning: draft.reasoning,
+      midConversationSystemMessages: draft.midConversationSystemMessages,
       inputModalities: modalities,
     },
     pricing: normalizePricing(draft.pricing),

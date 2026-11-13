@@ -80,7 +80,7 @@ public final class HistoryPayloadMapper {
             false,
             null,
             invocation.inputReceipt(),
-            invocation.binding());
+            invocation.binding() == null ? null : invocation.binding().descriptor().name());
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.TOOL, List.of(content)), null, metadata);
   }

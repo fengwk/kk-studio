@@ -26,6 +26,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemHostedToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -84,6 +87,8 @@ public final class AnthropicRequestEncoder {
   private static final String PER_TURN_BETA = "per-turn-control-2026-07-01";
   private static final String MID_CONVERSATION_BETA = "mid-conversation-system-2026-04-07";
   private static final String EFFORT_BETA = "effort-2025-11-24";
+  private static final String INLINE_TOOLS_BETA = "inline-tools-2026-09-15";
+  private static final String DEFERRED_PLACEHOLDER_NAME = "__kk_deferred_placeholder__";
 
   private final RequestBodySizeGuard bodySizeGuard;
 
@@ -116,9 +121,18 @@ public final class AnthropicRequestEncoder {
             && request.variant() != null
             && request.variant().reasoningEffort() != null
             && !request.variant().reasoningOff();
-    List<String> betaFeatures = resolveBetaFeatures(perTurnEffort);
+    boolean deferredToolLane =
+        request.model().midConversationSystemMessages() && request.baselineHasClientTools();
+    if (request.baselineHasClientTools() && !deferredToolLane) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "client tool baseline requires mid-conversation system-message capability");
+    }
+    boolean hasInlineToolChanges = hasInlineToolChanges(request.messages());
+    List<String> betaFeatures =
+        resolveBetaFeatures(perTurnEffort, deferredToolLane || hasInlineToolChanges);
 
-    ArrayNode toolsArray = mergeTools(root, request.tools());
+    ArrayNode toolsArray = mergeTools(root, request.tools(), deferredToolLane);
 
     // 系统指令是请求唯一的顶层 system；编码为单块数组以便在 SYSTEM 边界打缓存标记。
     ArrayNode unmarkedSystemArray = NODES.arrayNode();
@@ -151,6 +165,9 @@ public final class AnthropicRequestEncoder {
         wireMessagesArray.add(encodeUserMessage(msg));
       } else if (msg.role() == ProviderMessageRole.TOOL) {
         wireMessagesArray.add(encodeToolMessage(msg));
+      } else if (msg.role() == ProviderMessageRole.SYSTEM) {
+        addCacheEndpoint(cacheEndpoints, lastEligible);
+        wireMessagesArray.add(encodeSystemMessage(msg));
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "unexpected message role: " + msg.role());
@@ -165,7 +182,8 @@ public final class AnthropicRequestEncoder {
     addCacheEndpoint(cacheEndpoints, lastEligible);
 
     // 注入 cache marker
-    applyCacheMarkers(request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints);
+    applyCacheMarkers(
+        request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints, deferredToolLane);
     if (perTurnEffort) {
       wireMessagesArray =
           applyPerTurnEffort(
@@ -191,12 +209,34 @@ public final class AnthropicRequestEncoder {
     return new AnthropicEncodedRequest(utf8Bytes, betaFeatures);
   }
 
-  /** 按实际启用的推理模式追加所需 beta。 */
-  private static List<String> resolveBetaFeatures(boolean perTurnEffort) {
-    if (perTurnEffort) {
-      return List.of(MID_CONVERSATION_BETA, PER_TURN_BETA, EFFORT_BETA);
+  private static boolean hasInlineToolChanges(List<ProviderMessage> messages) {
+    for (ProviderMessage message : messages) {
+      if (message.role() != ProviderMessageRole.SYSTEM) {
+        continue;
+      }
+      for (ProviderContentBlock content : message.contents()) {
+        if (content instanceof ProviderSystemToolAdditionBlock
+            || content instanceof ProviderSystemHostedToolAdditionBlock
+            || content instanceof ProviderSystemToolRemovalBlock) {
+          return true;
+        }
+      }
     }
-    return List.of();
+    return false;
+  }
+
+  /** Add the beta support required by the selected mid-conversation request features. */
+  private static List<String> resolveBetaFeatures(boolean perTurnEffort, boolean inlineTools) {
+    List<String> betaFeatures = new ArrayList<>();
+    if (perTurnEffort) {
+      betaFeatures.add(MID_CONVERSATION_BETA);
+      betaFeatures.add(PER_TURN_BETA);
+      betaFeatures.add(EFFORT_BETA);
+    }
+    if (inlineTools) {
+      betaFeatures.add(INLINE_TOOLS_BETA);
+    }
+    return List.copyOf(betaFeatures);
   }
 
   /** 从最终保留的消息反向补齐未知等级，再在连续 user/tool 消息之后声明变化。 */
@@ -323,7 +363,10 @@ public final class AnthropicRequestEncoder {
    * 合并 native tools 与 runtime function tools：先保留 native 条目（server tools 等官方非 function 工具），再追加
    * runtime 工具；合并结果同时是 prefix hash、cache marker 与请求体大小的依据。
    */
-  private static ArrayNode mergeTools(ObjectNode root, List<ProviderToolDefinition> runtimeTools) {
+  private static ArrayNode mergeTools(
+      ObjectNode root,
+      List<ProviderToolDefinition> runtimeTools,
+      boolean appendDeferredPlaceholder) {
     JsonNode nativeTools = root.get("tools");
     if (nativeTools != null && !nativeTools.isArray()) {
       throw new ProviderException(
@@ -331,8 +374,8 @@ public final class AnthropicRequestEncoder {
     }
 
     ArrayNode merged = NODES.arrayNode();
+    Set<String> names = new HashSet<>();
     if (nativeTools != null) {
-      Set<String> names = new HashSet<>();
       for (int i = 0; i < nativeTools.size(); i++) {
         JsonNode nativeTool = nativeTools.get(i);
         if (nativeTool.has("cache_control")) {
@@ -351,7 +394,8 @@ public final class AnthropicRequestEncoder {
               ProviderErrorKind.INVALID_REQUEST,
               "protocolOptions tools["
                   + i
-                  + "] must be a supported hosted tool; bind client tools through runtime ProviderToolDefinition");
+                  + "] must be a supported hosted tool; bind client tools through runtime"
+                  + " ProviderToolDefinition");
         }
         if (!names.add(name.stringValue())) {
           throw new ProviderException(
@@ -369,9 +413,34 @@ public final class AnthropicRequestEncoder {
       }
     }
     for (ProviderToolDefinition tool : runtimeTools) {
+      if (appendDeferredPlaceholder && DEFERRED_PLACEHOLDER_NAME.equals(tool.name())) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "runtime tools must not use the reserved deferred placeholder name");
+      }
       merged.add(encodeTool(tool));
     }
+    if (appendDeferredPlaceholder) {
+      if (!names.add(DEFERRED_PLACEHOLDER_NAME)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "runtime tools must not use the reserved deferred placeholder name");
+      }
+      merged.add(encodeDeferredPlaceholder());
+    }
     return merged;
+  }
+
+  private static ObjectNode encodeDeferredPlaceholder() {
+    ObjectNode placeholder = NODES.objectNode();
+    placeholder.put("name", DEFERRED_PLACEHOLDER_NAME);
+    placeholder.put("description", "Reserved placeholder. Never available. Never call this.");
+    ObjectNode inputSchema = placeholder.putObject("input_schema");
+    inputSchema.put("type", "object");
+    inputSchema.putObject("properties");
+    inputSchema.putArray("required");
+    placeholder.put("defer_loading", true);
+    return placeholder;
   }
 
   private static ObjectNode encodeTool(ProviderToolDefinition tool) {
@@ -393,6 +462,61 @@ public final class AnthropicRequestEncoder {
     }
     toolNode.set("input_schema", schemaNode);
     return toolNode;
+  }
+
+  private static ObjectNode encodeSystemMessage(ProviderMessage message) {
+    ObjectNode msgNode = NODES.objectNode();
+    msgNode.put("role", "system");
+    ArrayNode contents = msgNode.putArray("content");
+    for (ProviderContentBlock block : message.contents()) {
+      if (block instanceof ProviderTextBlock textBlock) {
+        ObjectNode text = NODES.objectNode();
+        text.put("type", "text");
+        text.put("text", textBlock.text());
+        contents.add(text);
+      } else if (block instanceof ProviderSystemToolAdditionBlock addition) {
+        contents.add(encodeToolAddition(encodeTool(addition.tool())));
+      } else if (block instanceof ProviderSystemHostedToolAdditionBlock addition) {
+        contents.add(encodeToolAddition(parseHostedToolDefinition(addition.definitionJson())));
+      } else if (block instanceof ProviderSystemToolRemovalBlock removal) {
+        ObjectNode tool = NODES.objectNode();
+        tool.put("type", "tool_reference");
+        tool.put("name", removal.name());
+        ObjectNode node = NODES.objectNode();
+        node.put("type", "tool_removal");
+        node.set("tool", tool);
+        contents.add(node);
+      } else {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "unsupported content in Anthropic system message: " + block.getClass().getSimpleName());
+      }
+    }
+    return msgNode;
+  }
+
+  private static ObjectNode encodeToolAddition(ObjectNode definition) {
+    ObjectNode tool = NODES.objectNode();
+    tool.put("type", "tool_definition");
+    tool.set("definition", definition);
+    ObjectNode addition = NODES.objectNode();
+    addition.put("type", "tool_addition");
+    addition.set("tool", tool);
+    return addition;
+  }
+
+  private static ObjectNode parseHostedToolDefinition(String definitionJson) {
+    try {
+      JsonNode definition = OBJECT_MAPPER.readTree(definitionJson);
+      if (definition.isObject() && definition.path("name").isString()) {
+        return (ObjectNode) definition;
+      }
+    } catch (JacksonException ignored) {
+      // The durable source is validated as an object when materialized.
+    }
+    throw new ProviderException(
+        ProviderErrorKind.INVALID_REQUEST,
+        "hosted tool definition must be a JSON object with a name");
   }
 
   private static ObjectNode encodeUserMessage(ProviderMessage message) {
@@ -861,7 +985,8 @@ public final class AnthropicRequestEncoder {
       ProviderCacheControl cacheControl,
       ArrayNode toolsArray,
       ArrayNode systemArray,
-      List<ObjectNode> cacheEndpoints) {
+      List<ObjectNode> cacheEndpoints,
+      boolean hasDeferredPlaceholder) {
     if (cacheControl.retention() == PromptCacheRetention.NONE) {
       return;
     }
@@ -874,9 +999,10 @@ public final class AnthropicRequestEncoder {
 
     int markersPlaced = 0;
 
-    // 1. TOOLS: 最后一个合格 tool
-    if (!toolsArray.isEmpty()) {
-      ((ObjectNode) toolsArray.get(toolsArray.size() - 1)).set("cache_control", marker);
+    // 1. TOOLS: 最后一个实际可用 tool，不能标记 encoder-only deferred placeholder。
+    int lastRealToolIndex = toolsArray.size() - (hasDeferredPlaceholder ? 2 : 1);
+    if (lastRealToolIndex >= 0) {
+      ((ObjectNode) toolsArray.get(lastRealToolIndex)).set("cache_control", marker);
       markersPlaced++;
     }
 

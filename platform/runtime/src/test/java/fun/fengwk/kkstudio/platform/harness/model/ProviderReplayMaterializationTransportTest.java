@@ -257,7 +257,7 @@ class ProviderReplayMaterializationTransportTest {
     assertTrue(durableUserJson.contains(BLOB_ID.toString()));
     assertFalse(durableUserJson.contains("base64"));
     AgentMessage durableUser = messages.decode(durableUserJson);
-    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
+    ProviderMessageProjector projector = new ProviderMessageProjector();
     Set<ModelInputModality> modalities =
         Set.of(ModelInputModality.TEXT, ModelInputModality.DOCUMENT);
     ProviderRequest firstRequest =
@@ -368,7 +368,6 @@ class ProviderReplayMaterializationTransportTest {
                 call.name(),
                 call.name(),
                 call.argumentsJson(),
-                null,
                 null,
                 toolCall.providerBlockData()));
       } else if (block instanceof ProviderOpaqueBlock opaque) {

@@ -342,10 +342,10 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
     EntryPath path = path(fixture.store, chain.turn().threadId());
     List<Entry> entries = path.entries();
-    assertEquals(8, entries.size());
-    TurnStartPayload continuation = (TurnStartPayload) entries.get(7).payload();
+    assertEquals(9, entries.size());
+    TurnStartPayload continuation = (TurnStartPayload) entries.get(8).payload();
     assertEquals(TurnStartReason.CONTINUATION, continuation.reason());
-    assertEquals(entries.get(7).id(), thread(fixture.store, chain.turn().threadId()).headEntryId());
+    assertEquals(entries.get(8).id(), thread(fixture.store, chain.turn().threadId()).headEntryId());
     // baseline(0) + seed assistant 推进(1) + batch apply(2) + continuation(3)。
     assertEquals(3L, thread(fixture.store, chain.turn().threadId()).version());
     ModelInvocation continuationModel =
@@ -353,7 +353,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
                 fixture,
                 tx ->
                     builtin(fixture.store, tx)
-                        .findModelInvocationByTurn(chain.turn().threadId(), entries.get(7).id()))
+                        .findModelInvocationByTurn(chain.turn().threadId(), entries.get(8).id()))
             .orElseThrow();
     assertNotNull(
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, continuationModel.id())));
@@ -427,7 +427,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
     fixture.resolver.autoConsistent = true;
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
     TurnStartPayload input =
-        (TurnStartPayload) path(fixture.store, chain.turn().threadId()).entries().get(6).payload();
+        (TurnStartPayload) path(fixture.store, chain.turn().threadId()).entries().get(7).payload();
     assertEquals(TurnStartReason.INPUT, input.reason());
     assertEquals(
         ThreadCommandState.APPLIED,
@@ -645,8 +645,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
       assertTrue(result.detailsJson().contains("\"kind\""));
       ToolResultMetadata metadata = toolPayload.toolResultMetadata();
       assertEquals(expectedStatus[i], metadata.status());
-      assertNotNull(metadata.binding());
-      assertEquals(originals.get(i).binding(), metadata.binding());
+      assertEquals(originals.get(i).binding().descriptor().name(), metadata.toolName());
       assertFalse(metadata.synthetic());
       assertNull(metadata.reason());
       assertEquals("call-" + (i + 1), metadata.toolCallId());
@@ -667,7 +666,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
 
     // claim2：下一 claim 才做 continuation。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(chain.turn().threadId()));
-    assertEquals(9, path(fixture.store, chain.turn().threadId()).entries().size());
+    assertEquals(10, path(fixture.store, chain.turn().threadId()).entries().size());
   }
 
   @Test

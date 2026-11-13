@@ -31,6 +31,9 @@ import fun.fengwk.kkstudio.harness.api.history.NativeCompactionPayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemContext;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
@@ -75,6 +78,100 @@ class EntryPathTest {
     assertEquals(settings("turn"), path.baseSettings());
     assertEquals(start, path.openTurnStart().orElseThrow());
     assertEquals(List.of(root, start, user), path.entries());
+  }
+
+  @Test
+  void systemEntriesAreAllowedOnlyBetweenTurns() {
+    Entry root = root(settings("root"));
+    Entry baseline =
+        new Entry(
+            id(2L),
+            SESSION_ID,
+            id(1L),
+            new SystemPayload(Map.of("agent", "<agent>x</agent>"), List.of(), List.of(), true),
+            time(id(2L)));
+    Entry start = turnStart(id(3L), id(2L), TurnStartReason.INPUT, settings("turn"));
+
+    assertEquals(baseline, new EntryPath(List.of(root, baseline)).head());
+    Entry change =
+        new Entry(
+            id(4L),
+            SESSION_ID,
+            id(3L),
+            new SystemPayload(Map.of("agent", "<agent>y</agent>"), List.of(), List.of(), false),
+            time(id(4L)));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, baseline, start, change)));
+  }
+
+  @Test
+  void reducesSystemBaselineAndOnlyChangedSections() {
+    Entry root = root(settings("root"));
+    Entry baseline =
+        new Entry(
+            id(2L),
+            SESSION_ID,
+            id(1L),
+            new SystemPayload(
+                Map.of("agent", "<agent>old</agent>", "harness", "<harness>stable</harness>"),
+                List.of(),
+                List.of(),
+                true),
+            time(id(2L)));
+    SystemContext current = SystemContext.reduce(List.of(root, baseline));
+    SystemContext next =
+        new SystemContext(Map.of("agent", "<agent>new</agent>"), List.of(), List.of());
+    SystemPayload change = current.changesTo(next).orElseThrow();
+    assertTrue(current.changesTo(current).isEmpty());
+    Entry delta = new Entry(id(3L), SESSION_ID, id(2L), change, time(id(3L)));
+
+    SystemContext effective =
+        new EntryPath(List.of(root, baseline, delta)).systemContext().orElseThrow();
+
+    assertEquals(Map.of("agent", "<agent>new</agent>"), effective.sections());
+    assertEquals("<agent>new</agent>", effective.systemInstruction());
+    assertEquals(List.of("harness"), change.removedSections());
+  }
+
+  @Test
+  void hostedToolDefinitionReplacementIsAnAppendOnlyRemoveThenAddDelta() {
+    SystemHostedTool oldTool =
+        new SystemHostedTool(
+            "web_search", "{\"type\":\"web_search_20250305\",\"name\":\"web_search\"}");
+    SystemHostedTool replacement =
+        new SystemHostedTool(
+            "web_search", "{\"type\":\"web_search_202510\",\"name\":\"web_search\"}");
+    SystemContext current =
+        new SystemContext(Map.of("agent", "[agent]"), List.of(), List.of(oldTool));
+
+    SystemPayload change =
+        current
+            .changesTo(
+                new SystemContext(Map.of("agent", "[agent]"), List.of(), List.of(replacement)))
+            .orElseThrow();
+
+    assertEquals(List.of("web_search"), change.removedHostedTools());
+    assertEquals(List.of(replacement), change.addedHostedTools());
+    Entry baseline =
+        new Entry(
+            id(2L),
+            SESSION_ID,
+            id(1L),
+            new SystemPayload(
+                Map.of("agent", "[agent]"),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(oldTool),
+                List.of(),
+                true),
+            time(id(2L)));
+    Entry delta = new Entry(id(3L), SESSION_ID, baseline.id(), change, time(id(3L)));
+
+    assertEquals(
+        List.of(replacement),
+        SystemContext.reduce(List.of(root(settings("root")), baseline, delta)).hostedTools());
   }
 
   @Test

@@ -37,6 +37,7 @@ function fullConfig(): ModelConfigDTO {
     abilities: {
       tools: false,
       reasoning: true,
+      midConversationSystemMessages: false,
       inputModalities: ['TEXT', 'IMAGE', 'AUDIO'],
     },
     pricing: {
@@ -93,6 +94,7 @@ describe('ai-model-draft-codec', () => {
       maxOutputTokens: '16000',
       tools: false,
       reasoning: true,
+      midConversationSystemMessages: false,
       inputModalities: ['TEXT', 'IMAGE', 'AUDIO'],
       defaultVariant: 'quality',
       variants: [
@@ -117,6 +119,18 @@ describe('ai-model-draft-codec', () => {
     expect(extractContextWindow(source)).toBe(200000)
     expect(extractVariantIdsFromModel(source)).toEqual(['quality'])
     expect(extractDefaultVariantFromModel(source)).toBe('quality')
+  })
+
+  it('round-trips the mid-conversation system-message capability', () => {
+    const config = fullConfig()
+    const source = model({
+      ...config,
+      abilities: { ...config.abilities, midConversationSystemMessages: true },
+    })
+
+    expect(toModelDraft(source).midConversationSystemMessages).toBe(true)
+    expect(buildModelConfig(draft({ midConversationSystemMessages: true })).abilities)
+      .toHaveProperty('midConversationSystemMessages', true)
   })
 
   /** 新建 model 草稿默认仅 TEXT（而非包含所有 modality）。 */
@@ -156,6 +170,7 @@ describe('ai-model-draft-codec', () => {
       abilities: {
         tools: true,
         reasoning: true,
+        midConversationSystemMessages: false,
         inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'],
       },
       pricing: {

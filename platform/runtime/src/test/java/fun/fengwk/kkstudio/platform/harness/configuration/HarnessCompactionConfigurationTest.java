@@ -76,8 +76,9 @@ class HarnessCompactionConfigurationTest {
             context -> {
               RequestTokenEstimator estimator = context.getBean(RequestTokenEstimator.class);
               EntryPath path = rootOnlyPath();
-              long delegated = TokenEstimator.estimateRequestTokens(path, "system");
-              assertEquals(delegated, estimator.estimateRequestTokens(path, "system"));
+              List<String> systemMessages = List.of("system");
+              long delegated = TokenEstimator.estimateRequestTokens(path, systemMessages);
+              assertEquals(delegated, estimator.estimateRequestTokens(path, systemMessages));
               assertEquals(2L, delegated);
             });
   }

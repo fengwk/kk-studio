@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.spi.driver;
 
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
@@ -39,6 +40,9 @@ public sealed interface TurnResolution
     Integer maxOutputTokens();
 
     TurnCapabilities capabilities();
+
+    /** Baseline or append-only context change to insert before this turn's TURN_START. */
+    SystemPayload systemChange();
 
     /** 实际执行的执行选择；与设置一致时 Runtime 不写 executedSelection。 */
     ExecutionSelection executedSelection();

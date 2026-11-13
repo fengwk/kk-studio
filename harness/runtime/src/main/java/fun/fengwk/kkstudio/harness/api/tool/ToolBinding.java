@@ -18,13 +18,12 @@ import java.util.Objects;
  *
  * <p>执行时按工具名在当前目录中取回贡献，并要求完整定义一致；工具已移除或定义已变化时调用以确定性错误失败，绝不按新定义执行旧参数。
  *
- * <p>环境组合规则是封闭的：{@link EnvironmentSupport#NONE} 不得携带环境；{@link EnvironmentSupport#ROUTED}
- * 可以携带当前选择，也可以完全不携带；{@link EnvironmentSupport#REQUIRED} 的正常规划结果必须携带环境——无选择的 {@code REQUIRED} 工具在
- * 请求规划构造之前就已被过滤，因此缺环境的 REQUIRED binding 一定是陈旧或伪造的。
+ * <p>{@link EnvironmentSupport#NONE} 不携带环境；{@link EnvironmentSupport#ROUTED} 与 {@link
+ * EnvironmentSupport#REQUIRED} 均可携带当前选择，也可以完全不携带。缺环境的 REQUIRED 工具仍可声明给模型，其调用会由工具返回
+ * needs-an-Environment 未执行结果。
  *
  * <p>{@code environmentId} 与 {@code environmentName} 同源，必须同时存在或同时缺失。{@code environmentName}
- * 是该分支冻结的用户可见 Environment 名，是历史投影判定 native 资格的 durable 事实：branch 后来切换 Environment 时，既有
- * environment-bound 调用必须降级。
+ * 是当前分支冻结的用户可见 Environment 名，由工具历史动作渲染器用于描述该次操作。
  */
 public record ToolBinding(
     AgentToolDefinition definition,
@@ -53,8 +52,6 @@ public record ToolBinding(
     }
     if (environmentSupport == EnvironmentSupport.NONE) {
       requireWithoutEnvironment(environmentId, environmentName);
-    } else if (environmentSupport == EnvironmentSupport.REQUIRED) {
-      requireWithEnvironment(environmentId, environmentName);
     } else if ((environmentId == null) != (environmentName == null)) {
       throw new IllegalArgumentException(
           "environmentId and environmentName must be present together or absent together");
@@ -72,13 +69,6 @@ public record ToolBinding(
   private static void requireWithoutEnvironment(EnvironmentId environmentId, String name) {
     if (environmentId != null || name != null) {
       throw new IllegalArgumentException("EnvironmentSupport.NONE must not carry an environment");
-    }
-  }
-
-  private static void requireWithEnvironment(EnvironmentId environmentId, String name) {
-    if (environmentId == null || name == null) {
-      throw new IllegalArgumentException(
-          "EnvironmentSupport.REQUIRED must carry both environmentId and environmentName");
     }
   }
 }

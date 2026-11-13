@@ -8,8 +8,6 @@ import tools.jackson.databind.JsonNode;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.platform.catalog.dto.SkillRefDTO;
-import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
-import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan.FilterReason;
 
 import java.time.Instant;
 import java.util.List;
@@ -45,7 +43,7 @@ public class HarnessModelRequestDebugDTO {
   /** 本次请求唯一的 systemInstruction 全文。 */
   private String systemInstruction;
 
-  /** 全部候选 Tool：最终发出的定义在前，被过滤的候选在后。 */
+  /** 本次请求进入模型工具面的 Tool，按 Agent 配置顺序。 */
   private List<ToolDTO> tools;
 
   /** 本次请求的 Skill 元数据，按 Agent 配置顺序。 */
@@ -66,7 +64,7 @@ public class HarnessModelRequestDebugDTO {
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable FrozenInvocationDTO frozenInvocation;
 
-  /** 候选 Tool 的发送状态与最终 definition 事实。 */
+  /** 候选 Tool 的模型可见 definition 事实。 */
   @Data
   public static class ToolDTO {
 
@@ -84,14 +82,6 @@ public class HarnessModelRequestDebugDTO {
 
     /** Contributor 归属身份（{@code contributorId:localName}）。 */
     private String provenance;
-
-    /** 是否进入最终模型工具面：{@code SENT} 或 {@code FILTERED}。 */
-    private LiveTurnPlan.ToolState state;
-
-    /** 被过滤的稳定原因（当前唯一值 {@code ENVIRONMENT_NOT_SELECTED}）；{@code SENT} 时为 null（required-nullable）。 */
-    @JsonInclude(JsonInclude.Include.ALWAYS)
-    @Nullable
-    private FilterReason filterReason;
   }
 
   /** 单个 Skill 的配置事实与实际 Prompt 片段。 */

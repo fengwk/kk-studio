@@ -58,7 +58,6 @@ class AssistantHistoryFallbackWireTest {
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final String JSON_DIAGNOSTIC = "{\"synthetic\":\"tool_call_diagnostic\"}";
   private static final String TEXT = "synthetic assistant answer";
-  private static final String CONTEXT_HEADER = "Previous context:";
   private static final String API_KEY = "synthetic-api-key";
   private static final ModelCallTimeoutPolicy TIMEOUT_POLICY =
       new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10));
@@ -129,19 +128,18 @@ class AssistantHistoryFallbackWireTest {
   }
 
   /**
-   * 意图：assistant 携带 replay，但工具绑定/环境变化导致部分调用降级时，Projector 放弃不兼容 replay 并保留语义投影；
-   * 该语义历史切换到任一协议都必须合法编码：native 调用保留为各协议工具调用，降级上下文以 USER 文本承载。
+   * Historical tool calls remain native on the wire even when absent from the current binding set.
    */
   @Test
-  void projectedBindingFallbackEncodesAcrossFourProtocols() throws Exception {
+  void projectedHistoricalCallEncodesAcrossFourProtocols() throws Exception {
     AgentMessage assistant =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(
                 new TextMessageContent(TEXT),
-                new ToolCallMessageContent("call-native", "lookup", "lookup", "{}", null, null),
+                new ToolCallMessageContent("call-native", "lookup", "lookup", "{}"),
                 new ToolCallMessageContent(
-                    "call-legacy", "bash", "bash", "{\"cmd\":\"ls\"}", "run bash", "dev")));
+                    "call-legacy", "bash", "bash", "{\"cmd\":\"ls\"}", "run bash")));
     AgentMessage nativeResult =
         new AgentMessage(
             AgentMessageRole.TOOL,
@@ -154,9 +152,9 @@ class AssistantHistoryFallbackWireTest {
                     false,
                     "{}")));
 
-    // 当前请求只绑定 lookup：bash 调用失去环境（dev -> 未绑定）而必须降级。
+    // 当前 request 无 bash binding，旧调用及其 arguments 仍须保留为原生调用。
     List<ProviderMessage> projected =
-        ProviderMessageProjector.byNames(Set.of("lookup"))
+        new ProviderMessageProjector()
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(assistant),
@@ -167,27 +165,23 @@ class AssistantHistoryFallbackWireTest {
         "call-native",
         ((ProviderToolCallBlock) projected.get(0).contents().get(1)).toolCall().id());
 
-    assertProjectedWireContainsLookupAndFallback(
+    assertProjectedWireContainsHistoricalCalls(
         encode(chatAdapter(), request(chatModel(), projected), chatDescriptor()));
-    assertProjectedWireContainsLookupAndFallback(
+    assertProjectedWireContainsHistoricalCalls(
         encode(responsesAdapter(), request(responsesModel(), projected), responsesDescriptor()));
-    assertProjectedWireContainsLookupAndFallback(
+    assertProjectedWireContainsHistoricalCalls(
         encode(geminiAdapter(), request(geminiModel(), projected), geminiDescriptor()));
-    assertProjectedWireContainsLookupAndFallback(
+    assertProjectedWireContainsHistoricalCalls(
         encode(anthropicAdapter(), request(anthropicModel(), projected), anthropicDescriptor()));
   }
 
-  private static void assertProjectedWireContainsLookupAndFallback(JsonNode wire) {
+  private static void assertProjectedWireContainsHistoricalCalls(JsonNode wire) {
     String text = wire.toString();
     assertTrue(text.contains("lookup"), "native call must survive into the wire: " + text);
     assertTrue(text.contains(TEXT), "assistant text must survive into the wire");
-    assertTrue(
-        text.contains(CONTEXT_HEADER),
-        "downgraded call must fall back into a USER context, not be dropped");
-    assertTrue(
-        text.contains("run bash"), "frozen action must be preserved for the downgraded call");
-    assertFalse(
-        text.contains("call-legacy"), "downgraded call identity must never leak into the wire");
+    assertTrue(text.contains("call-legacy"), "historical tool-call identity must be preserved");
+    assertTrue(text.contains("bash"), "historical tool name must be preserved");
+    assertTrue(text.contains("ls"), "historical tool arguments must be preserved");
   }
 
   private JdkHttpSseTransport transport() {

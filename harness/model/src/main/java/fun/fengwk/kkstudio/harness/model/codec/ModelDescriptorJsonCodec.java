@@ -63,7 +63,14 @@ public final class ModelDescriptorJsonCodec {
 
   /** descriptor 字段顺序。 */
   private static final Set<String> DESCRIPTOR_FIELDS =
-      orderedSet("providerName", "modelName", "modelId", "inputModalities", "tools", "reasoning");
+      orderedSet(
+          "providerName",
+          "modelName",
+          "modelId",
+          "inputModalities",
+          "tools",
+          "reasoning",
+          "midConversationSystemMessages");
 
   /** variant 字段顺序。 */
   private static final Set<String> VARIANT_FIELDS =
@@ -109,6 +116,7 @@ public final class ModelDescriptorJsonCodec {
     }
     node.put("tools", descriptor.tools());
     node.put("reasoning", descriptor.reasoning());
+    node.put("midConversationSystemMessages", descriptor.midConversationSystemMessages());
     return node;
   }
 
@@ -120,7 +128,15 @@ public final class ModelDescriptorJsonCodec {
     Set<ModelInputModality> inputModalities = readInputModalities(node);
     boolean tools = bool(node, "tools");
     boolean reasoning = bool(node, "reasoning");
-    return new ModelDescriptor(providerName, modelName, modelId, inputModalities, tools, reasoning);
+    boolean midConversationSystemMessages = bool(node, "midConversationSystemMessages");
+    return new ModelDescriptor(
+        providerName,
+        modelName,
+        modelId,
+        inputModalities,
+        tools,
+        reasoning,
+        midConversationSystemMessages);
   }
 
   private static Set<ModelInputModality> readInputModalities(ObjectNode node) {

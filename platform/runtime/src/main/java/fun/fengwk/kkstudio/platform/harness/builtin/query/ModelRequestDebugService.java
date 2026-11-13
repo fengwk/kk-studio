@@ -152,8 +152,6 @@ public final class ModelRequestDebugService {
     dto.setInputSchema(JsonValues.readTree(tool.inputSchemaJson()));
     dto.setEnvironmentSupport(tool.environmentSupport());
     dto.setProvenance(tool.provenance());
-    dto.setState(tool.state());
-    dto.setFilterReason(tool.filterReason());
     return dto;
   }
 

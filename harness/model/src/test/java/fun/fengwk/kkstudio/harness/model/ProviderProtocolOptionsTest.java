@@ -76,6 +76,25 @@ class ProviderProtocolOptionsTest {
         () -> new ProviderProtocolOptions("{\"a\":}"));
   }
 
+  @Test
+  void extractsAndReplacesNamedToolDefinitionsWithoutChangingOtherOptions() {
+    ProviderProtocolOptions source =
+        new ProviderProtocolOptions(
+            "{\"max_tokens\":1000,\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\",\"max_uses\":3}]}"
+                + " ");
+    var originalTool = source.toolDefinitions().getFirst();
+    ProviderProtocolOptions updated =
+        source.withToolDefinitions(
+            List.of(
+                new ProviderProtocolOptions.ToolDefinition(
+                    "code_execution",
+                    "{\"type\":\"code_execution_20250522\",\"name\":\"code_execution\"}")));
+
+    assertEquals("web_search", originalTool.name());
+    assertEquals(1000, updated.copyOptions().path("max_tokens").asInt());
+    assertEquals("code_execution", updated.toolDefinitions().getFirst().name());
+  }
+
   /** 超限 payload 必须在构造期失败，消息只含上限本身，绝不回显超限内容。 */
   @Test
   void rejectsOversizedPayloadWithoutEchoingPayload() {

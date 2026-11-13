@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -41,6 +42,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemHostedToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -54,6 +58,7 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -503,6 +508,176 @@ class AnthropicRequestEncoderTest {
 
     // 会话 key 是 runtime 事实，Anthropic 无原生 cache-key 选项，绝不写入请求体
     assertFalse(root.toString().contains("test-affinity"));
+  }
+
+  @Test
+  void encodesMidConversationSystemTextAndToolChanges() throws IOException {
+    ProviderMessage change =
+        new ProviderMessage(
+            ProviderMessageRole.SYSTEM,
+            List.of(
+                new ProviderTextBlock("system update"),
+                new ProviderSystemToolAdditionBlock(
+                    new ProviderToolDefinition("new_tool", "new tool", "{\"type\":\"object\"}")),
+                new ProviderSystemHostedToolAdditionBlock(
+                    "{\"type\":\"web_search_20250305\",\"name\":\"web_search\",\"max_uses\":4}"),
+                new ProviderSystemToolRemovalBlock("old_tool")));
+    ProviderRequest request =
+        request(
+            defaultVariant(),
+            List.of(userMsg(new ProviderTextBlock("hello")), change),
+            List.of(),
+            ProviderCacheControl.none());
+
+    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
+    JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
+    JsonNode systemMessage = root.path("messages").get(1);
+    assertEquals("system", systemMessage.path("role").asString());
+    assertEquals("system update", systemMessage.path("content").get(0).path("text").asString());
+    assertEquals(
+        "tool_definition",
+        systemMessage.path("content").get(1).path("tool").path("type").asString());
+    assertEquals(
+        "new_tool",
+        systemMessage
+            .path("content")
+            .get(1)
+            .path("tool")
+            .path("definition")
+            .path("name")
+            .asString());
+    JsonNode hostedAddition = systemMessage.path("content").get(2);
+    assertEquals("tool_addition", hostedAddition.path("type").asString());
+    assertEquals(
+        "web_search_20250305",
+        hostedAddition.path("tool").path("definition").path("type").asString());
+    assertEquals(4, hostedAddition.path("tool").path("definition").path("max_uses").intValue());
+    assertEquals(
+        "tool_reference",
+        systemMessage.path("content").get(3).path("tool").path("type").asString());
+    assertEquals(
+        "old_tool", systemMessage.path("content").get(3).path("tool").path("name").asString());
+    assertEquals(List.of("inline-tools-2026-09-15"), encoded.betaFeatures());
+  }
+
+  @Test
+  void textOnlySystemMessagesDoNotRequireInlineToolsBeta() {
+    ProviderRequest request =
+        request(
+            defaultVariant(),
+            List.of(
+                userMsg(new ProviderTextBlock("hello")),
+                new ProviderMessage(
+                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system update")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    assertEquals(List.of(), encoder.encode(request, descriptor).betaFeatures());
+  }
+
+  @Test
+  void baselineClientToolsKeepDeferredPlaceholderAndBetaOnUnchangedRequests() throws IOException {
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition("bash", "run bash", "{\"type\":\"object\"}");
+    ProviderRequest request =
+        requestWithClientToolBaseline(
+            List.of(userMsg(new ProviderTextBlock("hello"))),
+            List.of(tool),
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "deferred-placeholder"));
+
+    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
+    JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
+    JsonNode realTool = root.path("tools").get(0);
+    JsonNode placeholder = root.path("tools").get(1);
+
+    assertEquals(List.of("inline-tools-2026-09-15"), encoded.betaFeatures());
+    assertEquals(2, root.path("tools").size());
+    assertEquals("bash", realTool.path("name").asString());
+    assertTrue(realTool.path("cache_control").has("type"));
+    assertEquals("__kk_deferred_placeholder__", placeholder.path("name").asString());
+    assertEquals(
+        "Reserved placeholder. Never available. Never call this.",
+        placeholder.path("description").asString());
+    assertEquals("object", placeholder.path("input_schema").path("type").asString());
+    assertEquals(0, placeholder.path("input_schema").path("properties").size());
+    assertEquals(0, placeholder.path("input_schema").path("required").size());
+    assertTrue(placeholder.path("defer_loading").asBoolean());
+    assertFalse(placeholder.has("cache_control"));
+    assertEquals(
+        List.of("bash"), request.tools().stream().map(ProviderToolDefinition::name).toList());
+  }
+
+  /** Appending a SYSTEM delta leaves all previously encoded conversation bytes cache-stable. */
+  @Test
+  void keepsEncodedMessagePrefixStableWhenSystemChangeIsAppended() throws IOException {
+    List<ProviderMessage> history =
+        List.of(
+            userMsg(new ProviderTextBlock("question")),
+            asstMsg(List.of(new ProviderTextBlock("answer"))));
+    ProviderCacheControl cacheControl =
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "prefix-test");
+    ProviderRequest before = request(defaultVariant(), history, List.of(), cacheControl);
+    List<ProviderMessage> changedHistory = new ArrayList<>(history);
+    changedHistory.add(
+        new ProviderMessage(
+            ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system update"))));
+    ProviderRequest after = request(defaultVariant(), changedHistory, List.of(), cacheControl);
+
+    byte[] beforeBytes = encoder.encode(before, descriptor).bodyUtf8Bytes();
+    byte[] afterBytes = encoder.encode(after, descriptor).bodyUtf8Bytes();
+    JsonNode beforeWire = MAPPER.readTree(beforeBytes);
+    JsonNode afterWire = MAPPER.readTree(afterBytes);
+
+    assertTrue(afterBytes.length > beforeBytes.length);
+    // The closing messages-array and root braces are replaced when a new element is appended.
+    assertArrayEquals(
+        Arrays.copyOf(beforeBytes, beforeBytes.length - 2),
+        Arrays.copyOf(afterBytes, beforeBytes.length - 2));
+    assertTrue(cacheBlock(beforeWire, 1, 0).has("cache_control"));
+    assertTrue(cacheBlock(afterWire, 1, 0).has("cache_control"));
+  }
+
+  @Test
+  void keepsEncodedPrefixStableWhenFirstClientToolChangeIsAppended() throws IOException {
+    ProviderToolDefinition baselineTool =
+        new ProviderToolDefinition("bash", "run bash", "{\"type\":\"object\"}");
+    ProviderToolDefinition addedTool =
+        new ProviderToolDefinition("search", "search", "{\"type\":\"object\"}");
+    List<ProviderMessage> history =
+        List.of(
+            userMsg(new ProviderTextBlock("question")),
+            asstMsg(List.of(new ProviderTextBlock("answer"))));
+    ProviderCacheControl cacheControl =
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "first-tool-change");
+    ProviderRequest before =
+        requestWithClientToolBaseline(history, List.of(baselineTool), cacheControl);
+    List<ProviderMessage> changedHistory = new ArrayList<>(history);
+    changedHistory.add(
+        new ProviderMessage(
+            ProviderMessageRole.SYSTEM, List.of(new ProviderSystemToolAdditionBlock(addedTool))));
+    ProviderRequest after =
+        requestWithClientToolBaseline(changedHistory, List.of(baselineTool), cacheControl);
+
+    AnthropicEncodedRequest encodedBefore = encoder.encode(before, descriptor);
+    AnthropicEncodedRequest encodedAfter = encoder.encode(after, descriptor);
+    JsonNode beforeWire = MAPPER.readTree(encodedBefore.bodyUtf8Bytes());
+    JsonNode afterWire = MAPPER.readTree(encodedAfter.bodyUtf8Bytes());
+
+    assertEquals(List.of("inline-tools-2026-09-15"), encodedBefore.betaFeatures());
+    assertEquals(encodedBefore.betaFeatures(), encodedAfter.betaFeatures());
+    assertEquals(2, afterWire.path("tools").size());
+    assertEquals("bash", afterWire.path("tools").get(0).path("name").asString());
+    assertEquals(
+        "__kk_deferred_placeholder__", afterWire.path("tools").get(1).path("name").asString());
+    assertEquals(
+        "tool_addition",
+        afterWire.path("messages").get(2).path("content").get(0).path("type").asString());
+    assertArrayEquals(
+        Arrays.copyOf(encodedBefore.bodyUtf8Bytes(), encodedBefore.bodyUtf8Bytes().length - 2),
+        Arrays.copyOf(encodedAfter.bodyUtf8Bytes(), encodedBefore.bodyUtf8Bytes().length - 2));
+    assertTrue(beforeWire.path("tools").get(0).path("cache_control").has("type"));
+    assertTrue(afterWire.path("tools").get(0).path("cache_control").has("type"));
+    assertFalse(afterWire.path("tools").get(1).has("cache_control"));
   }
 
   @Test
@@ -1389,6 +1564,23 @@ class AnthropicRequestEncoderTest {
 
   private static ProviderMessage userMsg(ProviderContentBlock... blocks) {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(blocks));
+  }
+
+  private static ProviderRequest requestWithClientToolBaseline(
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      ProviderCacheControl cacheControl) {
+    ModelDescriptor model =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-5-sonnet",
+            "claude-3-5-sonnet",
+            Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
+            true,
+            false,
+            true);
+    return new ProviderRequest(
+        model, defaultVariant(), 1024, SYSTEM_INSTRUCTION, messages, tools, cacheControl, true);
   }
 
   private static ProviderRequest requestWithSystem(

@@ -24,6 +24,16 @@ class AgentPromptComposerTest {
   private final AgentPromptComposer composer =
       new AgentPromptComposer(() -> new SubagentConfig(2, 10, 0, DEFAULT_MAX_TURNS));
 
+  @Test
+  void exposesOrderedNamedSections() {
+    AgentPromptInput input =
+        input("Agent instructions.", environment(), List.of("read"), List.of(), List.of());
+
+    assertEquals(
+        List.of("agent", "harness", "paths", "environment"),
+        List.copyOf(composer.composeSections(input).keySet()));
+  }
+
   /** 有环境且注入 read/edit/grep/bash：Environment 路径说明、环境事实、技能与子 Agent 全部出现。 */
   @Test
   void rendersEnvironmentWithAllTools() {
@@ -38,11 +48,11 @@ class AgentPromptComposerTest {
     assertGolden("environment-all-tools.golden", input);
   }
 
-  /** 无 Environment 时读取工具仍可见，本地路径说明明确要求选择 Environment。 */
+  /** 无 Environment 时仍声明 bash，本地路径说明告知其未执行语义并保留 resource URI 读取能力。 */
   @Test
   void rendersWithoutEnvironment() {
     AgentPromptInput input =
-        input(null, none(), List.of("read", "write", "grep"), List.of(), List.of());
+        input(null, none(), List.of("read", "write", "grep", "bash"), List.of(), List.of());
 
     assertGolden("no-environment.golden", input);
   }
@@ -121,7 +131,7 @@ class AgentPromptComposerTest {
     AgentPromptInput input =
         input(null, none(), List.of(), List.of(), List.of(new SubagentBinding("explorer", "  ")));
 
-    String rendered = composer.compose(input);
+    String rendered = renderSections(input);
 
     assertTrue(rendered.contains("<description>(no description)</description>"), rendered);
   }
@@ -146,7 +156,7 @@ class AgentPromptComposerTest {
   /** 工具名与列表不可为空引用。 */
   @Test
   void rejectsNullInput() {
-    assertThrows(NullPointerException.class, () -> composer.compose(null));
+    assertThrows(NullPointerException.class, () -> composer.composeSections(null));
   }
 
   private static AgentPromptInput input(
@@ -177,8 +187,12 @@ class AgentPromptComposerTest {
     return new SkillPromptEntry(name, description);
   }
 
+  private String renderSections(AgentPromptInput input) {
+    return String.join("\n\n", composer.composeSections(input).values());
+  }
+
   private String assertGolden(String name, AgentPromptInput input) {
-    String rendered = composer.compose(input);
+    String rendered = renderSections(input);
     assertEquals(golden(name), rendered);
     return rendered;
   }

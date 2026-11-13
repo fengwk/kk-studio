@@ -88,6 +88,28 @@ public record EntryPath(List<Entry> entries) {
     return root();
   }
 
+  /** Whether this path starts a new request-context segment after compaction or has no baseline. */
+  public boolean requiresSystemBaseline() {
+    int baselineIndex = -1;
+    int compactionIndex = -1;
+    for (int i = 0; i < entries.size(); i++) {
+      EntryPayload payload = entries.get(i).payload();
+      if (payload instanceof SystemPayload system && system.baseline()) {
+        baselineIndex = i;
+      } else if (payload instanceof CompactionPayload) {
+        compactionIndex = i;
+      }
+    }
+    return baselineIndex < 0 || compactionIndex > baselineIndex;
+  }
+
+  /** 返回沿路径归约的请求 system context；尚无 SYSTEM 基线时返回空。 */
+  public Optional<SystemContext> systemContext() {
+    boolean hasSystem =
+        entries.stream().anyMatch(entry -> entry.payload() instanceof SystemPayload);
+    return hasSystem ? Optional.of(SystemContext.reduce(entries)) : Optional.empty();
+  }
+
   /** 返回沿路径最近的非 COMPACTION settings snapshot；压缩执行模型绝不污染真实 branch settings。 */
   public BranchSettings baseSettings() {
     BranchSettings settings = ((RootPayload) root().payload()).settings();

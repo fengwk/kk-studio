@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -902,7 +903,12 @@ public final class ThreadProcessor {
       maxOutputTokens = compaction.maxOutputTokens();
       compactionStart = CompactionChildSpawn.start(tx, thread, compaction, plan.preparation());
     }
-    for (Entry entry : plan.candidateEntries()) {
+    List<Entry> candidateEntries = plan.candidateEntries();
+    if (accepted != null && accepted.systemChange() != null) {
+      candidateEntries =
+          insertSystemChange(tx, plan, candidateEntries, accepted.systemChange(), now);
+    }
+    for (Entry entry : candidateEntries) {
       tx.entries()
           .insert(
               withCreatedAt(
@@ -981,6 +987,42 @@ public final class ThreadProcessor {
       return plan.cutoffSequence();
     }
     return thread.inputThroughSequence();
+  }
+
+  private static List<Entry> insertSystemChange(
+      HarnessStore.Transaction tx,
+      TurnPlan plan,
+      List<Entry> candidateEntries,
+      SystemPayload systemChange,
+      Instant now) {
+    int turnStartIndex = -1;
+    for (int i = 0; i < candidateEntries.size(); i++) {
+      if (candidateEntries.get(i).id().equals(plan.turnStartEntryId())) {
+        turnStartIndex = i;
+        break;
+      }
+    }
+    if (turnStartIndex < 0) {
+      throw new IllegalStateException("candidate entries do not contain TURN_START");
+    }
+    Entry turnStart = candidateEntries.get(turnStartIndex);
+    if (!(turnStart.payload() instanceof TurnStartPayload)) {
+      throw new IllegalStateException("turnStartEntryId does not identify a TURN_START");
+    }
+    Entry systemEntry =
+        new Entry(tx.nextId(), plan.sessionId(), turnStart.parentEntryId(), systemChange, now);
+    List<Entry> result = new ArrayList<>(candidateEntries.size() + 1);
+    result.addAll(candidateEntries.subList(0, turnStartIndex));
+    result.add(systemEntry);
+    result.add(
+        new Entry(
+            turnStart.id(),
+            turnStart.sessionId(),
+            systemEntry.id(),
+            turnStart.payload(),
+            turnStart.createdAt()));
+    result.addAll(candidateEntries.subList(turnStartIndex + 1, candidateEntries.size()));
+    return List.copyOf(result);
   }
 
   static Entry withCreatedAt(Entry entry, Instant createdAt) {

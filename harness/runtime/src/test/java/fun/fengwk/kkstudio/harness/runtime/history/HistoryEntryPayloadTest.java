@@ -462,7 +462,7 @@ class HistoryEntryPayloadTest {
             null,
             null);
 
-    // synthetic 结果不允许携带 binding
+    // synthetic 结果不允许携带工具名称
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -475,10 +475,10 @@ class HistoryEntryPayloadTest {
                 true,
                 ToolResultReason.HISTORY_CUT,
                 null,
-                sampleBinding));
+                sampleBinding.descriptor().name()));
 
-    // 真实结果携带 binding 正常读回
-    ToolResultMetadata withBinding =
+    // 真实结果仅携带工具名称引用
+    ToolResultMetadata withName =
         new ToolResultMetadata(
             id(22L),
             id(2L),
@@ -488,14 +488,14 @@ class HistoryEntryPayloadTest {
             false,
             null,
             null,
-            sampleBinding);
-    assertEquals(sampleBinding, withBinding.binding());
+            sampleBinding.descriptor().name());
+    assertEquals(sampleBinding.descriptor().name(), withName.toolName());
 
-    // 真实结果 binding 可空（unknown-tool 槽位）
-    ToolResultMetadata withoutBinding =
+    // 未知工具槽位可以没有名称引用
+    ToolResultMetadata withoutName =
         new ToolResultMetadata(
             id(22L), id(2L), "call-1", 0, ToolResultStatus.SUCCEEDED, false, null, null, null);
-    assertNull(withoutBinding.binding());
+    assertNull(withoutName.toolName());
   }
 
   @Test

@@ -175,6 +175,7 @@ public final class ModelRuntimeConfigParser {
         toRuntimeModalities(abilities.getInputModalities()),
         abilities.getTools(),
         abilities.getReasoning(),
+        abilities.isMidConversationSystemMessages(),
         List.copyOf(variants),
         config.getDefaultVariant(),
         ModelPricingCodec.toModelPricing(config.getPricing()));
@@ -373,6 +374,7 @@ public final class ModelRuntimeConfigParser {
       Set<ModelInputModality> inputModalities,
       boolean tools,
       boolean reasoning,
+      boolean midConversationSystemMessages,
       List<ModelVariant> variants,
       String defaultVariant,
       ModelPricing pricing) {

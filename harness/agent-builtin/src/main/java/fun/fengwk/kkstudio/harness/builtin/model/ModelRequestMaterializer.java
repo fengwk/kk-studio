@@ -11,19 +11,32 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemContext;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemHostedToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -40,8 +53,7 @@ import java.util.UUID;
  * CompactionChildSpawn} 经统一 spawn 创建，首条输入是普通 CUSTOM_MESSAGE； 父 COMPACTION turn 不创建
  * ModelInvocation，也不在请求内复制 compaction facts。
  *
- * <p>历史 native 资格按次判定：toolName 必须在当前 {@code toolBindings} 中，且环境工具冻结的 Environment 名必须与当前 binding
- * 一致；其余调用及结果在投影时降级为 USER 自然语言上下文，durable Entry 永不被改写。
+ * <p>历史工具调用与结果按 durable Entry 投影，不根据当前工具绑定或 Environment 重新分类；没有存储结果的调用由历史正规化补齐 synthetic 结果。
  */
 public final class ModelRequestMaterializer {
 
@@ -66,28 +78,55 @@ public final class ModelRequestMaterializer {
   }
 
   private ProviderRequest materializeLive(EntryPath path, ModelRequestSpec spec) {
-    List<ProviderToolDefinition> tools = providerTools(spec.toolBindings());
-    List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
-    appendHistory(path, spec, projectedMessages);
+    SystemContext context = path.systemContext().orElse(null);
+    boolean incrementalSystem =
+        spec.providerType() == ProviderType.ANTHROPIC
+            && spec.model().midConversationSystemMessages()
+            && context != null;
+    boolean baselineHasClientTools =
+        incrementalSystem && !SystemContext.baselineTools(path.entries()).isEmpty();
+    List<ProviderToolDefinition> effectiveTools =
+        context == null ? providerTools(spec.toolBindings()) : context.tools();
+    String systemInstruction =
+        context == null
+            ? spec.systemInstruction()
+            : incrementalSystem
+                ? SystemContext.baselineSystemInstruction(path.entries())
+                : SystemContext.collapseSystemInstruction(path.entries());
+    List<ProviderToolDefinition> tools =
+        baselineHasClientTools ? SystemContext.baselineTools(path.entries()) : effectiveTools;
+    List<ProviderMessage> messages = new ArrayList<>();
+    appendHistory(path, spec, incrementalSystem, baselineHasClientTools, messages);
+    ModelVariant variant = spec.variant();
+    if (incrementalSystem) {
+      List<SystemHostedTool> requestHostedTools =
+          baselineHasClientTools
+              ? SystemContext.baselineHostedTools(path.entries())
+              : context.hostedTools();
+      List<ProviderProtocolOptions.ToolDefinition> toolDefinitions =
+          requestHostedTools.stream()
+              .map(
+                  tool ->
+                      new ProviderProtocolOptions.ToolDefinition(
+                          tool.name(), tool.definitionJson()))
+              .toList();
+      variant =
+          new ModelVariant(
+              variant.id(),
+              variant.reasoningEffort(),
+              variant.promptCacheRetention(),
+              variant.protocolOptions().withToolDefinitions(toolDefinitions));
+    }
     return new ProviderRequest(
         spec.model(),
-        spec.variant(),
+        variant,
         spec.outputTokens(),
-        spec.systemInstruction(),
-        projector(spec.toolBindings()).projectSources(projectedMessages),
+        systemInstruction,
+        messages,
         tools,
         ProviderCacheControl.session(
-            spec.variant().promptCacheRetention(), path.root().sessionId().toString()));
-  }
-
-  private ProviderMessageProjector projector(List<ToolBinding> toolBindings) {
-    List<ProviderMessageProjector.NativeTool> nativeTools = new ArrayList<>(toolBindings.size());
-    for (ToolBinding binding : toolBindings) {
-      nativeTools.add(
-          new ProviderMessageProjector.NativeTool(
-              binding.descriptor().name(), binding.environmentName()));
-    }
-    return new ProviderMessageProjector(nativeTools);
+            spec.variant().promptCacheRetention(), path.root().sessionId().toString()),
+        baselineHasClientTools);
   }
 
   /**
@@ -95,11 +134,22 @@ public final class ModelRequestMaterializer {
    * 继续投影。COMPACTION 控制 turn 内部、TURN 边界、MODEL_ATTEMPT_FAILURE 与 ASSISTANT_ERROR 不进入 Provider
    * messages。
    */
-  private static void appendHistory(
+  private void appendHistory(
       EntryPath path,
       ModelRequestSpec spec,
-      List<ProviderMessageProjector.ProjectedMessage> projectedMessages) {
+      boolean incrementalSystem,
+      boolean inlineToolChanges,
+      List<ProviderMessage> messages) {
     List<Entry> entries = path.entries();
+    List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
+    List<ProviderMessage> deferredSystemMessages = new ArrayList<>();
+    ProviderMessageProjector projector = new ProviderMessageProjector();
+    int lastBaselineIndex = -1;
+    for (int i = 0; i < entries.size(); i++) {
+      if (entries.get(i).payload() instanceof SystemPayload system && system.baseline()) {
+        lastBaselineIndex = i;
+      }
+    }
     int walkStart = 0;
     var latest = CompactionTurns.latestComplete(path);
     if (latest.isPresent()) {
@@ -133,10 +183,30 @@ public final class ModelRequestMaterializer {
       if (inCompactionTurn) {
         continue;
       }
+      if (incrementalSystem
+          && i > lastBaselineIndex
+          && payload instanceof SystemPayload system
+          && !system.baseline()) {
+        messages.addAll(projector.projectSources(projectedMessages));
+        projectedMessages.clear();
+        ProviderMessage change = systemMessage(system, inlineToolChanges);
+        if (change != null) {
+          deferredSystemMessages.add(change);
+        }
+        continue;
+      }
       if (payload instanceof MessagePayload message) {
         projectedMessages.add(
             new ProviderMessageProjector.ProjectedMessage(
                 message.message(), reasoningEffort(message, spec)));
+        if (incrementalSystem
+            && !deferredSystemMessages.isEmpty()
+            && message.message().role() == AgentMessageRole.USER) {
+          messages.addAll(projector.projectSources(projectedMessages));
+          projectedMessages.clear();
+          messages.addAll(deferredSystemMessages);
+          deferredSystemMessages.clear();
+        }
       } else if (payload instanceof CustomMessagePayload message) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       } else if (payload instanceof NotificationPayload notification) {
@@ -150,6 +220,8 @@ public final class ModelRequestMaterializer {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       }
     }
+    messages.addAll(projector.projectSources(projectedMessages));
+    messages.addAll(deferredSystemMessages);
   }
 
   private static String reasoningEffort(MessagePayload message, ModelRequestSpec spec) {
@@ -168,15 +240,41 @@ public final class ModelRequestMaterializer {
     return null;
   }
 
+  private ProviderMessage systemMessage(SystemPayload change, boolean inlineToolChanges) {
+    List<ProviderContentBlock> contents = new ArrayList<>();
+    String text = SystemContext.renderChangeText(change);
+    if (!text.isEmpty()) {
+      contents.add(new ProviderTextBlock(text));
+    }
+    if (inlineToolChanges) {
+      for (String name : change.removedTools()) {
+        contents.add(new ProviderSystemToolRemovalBlock(name));
+      }
+      for (String name : change.removedHostedTools()) {
+        contents.add(new ProviderSystemToolRemovalBlock(name));
+      }
+      for (ProviderToolDefinition tool : change.addedTools()) {
+        contents.add(new ProviderSystemToolAdditionBlock(tool));
+      }
+      for (SystemHostedTool tool : change.addedHostedTools()) {
+        contents.add(new ProviderSystemHostedToolAdditionBlock(tool.definitionJson()));
+      }
+    }
+    return contents.isEmpty() ? null : new ProviderMessage(ProviderMessageRole.SYSTEM, contents);
+  }
+
   private List<ProviderToolDefinition> providerTools(List<ToolBinding> toolBindings) {
     List<ProviderToolDefinition> tools = new ArrayList<>(toolBindings.size());
     for (ToolBinding binding : toolBindings) {
-      ToolDescriptor tool = binding.descriptor();
-      tools.add(
-          new ProviderToolDefinition(
-              tool.name(), tool.description(), schemaCodec.encode(tool.inputSchema())));
+      tools.add(providerTool(binding));
     }
     return List.copyOf(tools);
+  }
+
+  private ProviderToolDefinition providerTool(ToolBinding binding) {
+    ToolDescriptor tool = binding.descriptor();
+    return new ProviderToolDefinition(
+        tool.name(), tool.description(), schemaCodec.encode(tool.inputSchema()));
   }
 
   private static int indexOfId(List<Entry> entries, UUID entryId) {

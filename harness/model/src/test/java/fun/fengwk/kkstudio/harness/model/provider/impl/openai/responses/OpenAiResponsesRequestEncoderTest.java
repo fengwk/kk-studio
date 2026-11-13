@@ -263,6 +263,28 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("user", plainRoot.get("input").get(0).path("role").asString(""));
   }
 
+  /**
+   * Mid-conversation system messages are encoded only by providers with the declared capability.
+   */
+  @Test
+  void test_midConversationSystemMessageIsRejected() {
+    ProviderException exception =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encodedRoot(
+                    request(
+                        List.of(
+                            new ProviderMessage(
+                                ProviderMessageRole.SYSTEM,
+                                List.of(new ProviderTextBlock("context change")))))));
+
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, exception.kind());
+    assertEquals(
+        "mid-conversation system messages are unsupported by OpenAI Responses",
+        exception.getMessage());
+  }
+
   /** 验证 max_output_tokens 下限：过小的冻结预算明确拒绝，合法预算原样下发。 */
   @Test
   void test_maxOutputTokensMinimumValidation() throws Exception {

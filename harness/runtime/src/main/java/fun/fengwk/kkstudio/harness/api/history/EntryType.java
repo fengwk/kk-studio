@@ -4,6 +4,8 @@ package fun.fengwk.kkstudio.harness.api.history;
 public enum EntryType {
   /** Session 语义根，唯一且无 parent，携带初始 branch settings。 */
   ROOT,
+  /** 请求上下文基线与只追加变化；只允许位于回合边界。 */
+  SYSTEM,
   /** 一次 Model response turn 的完整 branch settings 快照与启动原因。 */
   TURN_START,
   /** 对话消息；具体结构由 payload 子类型决定。 */

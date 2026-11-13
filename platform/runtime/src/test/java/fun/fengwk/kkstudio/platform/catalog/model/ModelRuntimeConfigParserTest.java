@@ -102,6 +102,21 @@ class ModelRuntimeConfigParserTest {
         parsed.variants());
   }
 
+  @Test
+  void defaultsMidConversationSystemMessagesToFalseAndRoundTripsEnabledValue() {
+    assertFalse(parser.parse(configWithoutPricing()).midConversationSystemMessages());
+    String enabled =
+        configWithoutPricing()
+            .replace(
+                "\"reasoning\":true,",
+                "\"reasoning\":true,\"midConversationSystemMessages\":true,");
+
+    var parsed = parser.parse(enabled);
+    assertTrue(parsed.midConversationSystemMessages());
+    assertTrue(
+        parser.encode(parser.decode(enabled)).contains("\"midConversationSystemMessages\":true"));
+  }
+
   /** 条件与规则按顺序解析；日期允许单侧缺省，显式 reasoning:null 与未声明 reasoning 保持不同语义。 */
   @Test
   void parsesOrderedRulesAndPreservesExplicitReasoningNull() {

@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentPrompts;
 import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,30 +36,28 @@ public final class AgentPromptComposer {
     this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
   }
 
-  /**
-   * 按固定顺序组合 {@code [agent] -> [harness] -> [paths] -> [environment] -> [skills] -> [subagents]}。
-   *
-   * <p>段落与句子只由实际注入的工具、Environment、Skills 与子 Agent 决定；空段落整段省略，段间保留一个空行。
-   */
-  public String compose(AgentPromptInput input) {
+  /** Returns each rendered section separately so the history can persist only changed sections. */
+  public Map<String, String> composeSections(AgentPromptInput input) {
     Objects.requireNonNull(input, "input");
     Capabilities capabilities = Capabilities.of(input.toolNames());
-    List<String> sections = new ArrayList<>();
+    Map<String, String> sections = new LinkedHashMap<>();
     if (hasText(input.agentInstructions())) {
-      sections.add(render("agent.md", Map.of("agent", input.agentInstructions())));
+      sections.put("agent", render("agent.md", Map.of("agent", input.agentInstructions())));
     }
-    sections.add(render("harness.md", harnessValues()));
+    sections.put("harness", render("harness.md", harnessValues()));
     if (hasPaths(input.currentEnvironment(), capabilities)) {
-      sections.add(render("paths.md", pathsValues(input.currentEnvironment(), capabilities)));
+      sections.put(
+          "paths", render("paths.md", pathsValues(input.currentEnvironment(), capabilities)));
     }
     if (capabilities.hasEnvironmentTools()) {
-      sections.add(render("environment.md", environmentValues(input, capabilities)));
+      sections.put("environment", render("environment.md", environmentValues(input, capabilities)));
     }
     if (!input.skills().isEmpty()) {
-      sections.add(render("skills.md", Map.of("skills", skillEntries(input.skills()))));
+      sections.put("skills", render("skills.md", Map.of("skills", skillEntries(input.skills()))));
     }
     if (!input.subagents().isEmpty()) {
-      sections.add(
+      sections.put(
+          "subagents",
           render(
               "subagents.md",
               Map.of(
@@ -68,7 +67,7 @@ public final class AgentPromptComposer {
                   "subagents",
                   subagentEntries(input.subagents()))));
     }
-    return String.join("\n\n", sections);
+    return Collections.unmodifiableMap(sections);
   }
 
   /** 渲染单个 Skill 在 {@code <available_skills>} 段中的精确 XML 片段（含段内缩进，不含尾部换行）。 */
@@ -173,7 +172,7 @@ public final class AgentPromptComposer {
     return value != null && !value.isBlank();
   }
 
-  /** 渲染模板并去掉模板尾换行；段间空行由 {@link #compose} 统一控制。 */
+  /** 渲染模板并去掉模板尾换行。 */
   private static String render(String template, Map<String, ?> values) {
     return PromptRenderer.render(SYSTEM + template, values).stripTrailing();
   }

@@ -6,7 +6,10 @@ import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
 /**
@@ -24,7 +27,29 @@ public record AgentTurnContext(
     List<SubagentBinding> subagentBindings,
     List<ToolBinding> toolBindings,
     List<LiveTurnPlan.CandidateTool> candidateTools,
-    String systemInstruction) {
+    String systemInstruction,
+    Map<String, String> systemSections) {
+
+  public AgentTurnContext(
+      Agent agent,
+      AgentConfigDTO agentConfig,
+      CurrentEnvironmentContext currentEnvironment,
+      List<LiveTurnPlan.PlannedSkill> skills,
+      List<SubagentBinding> subagentBindings,
+      List<ToolBinding> toolBindings,
+      List<LiveTurnPlan.CandidateTool> candidateTools,
+      String systemInstruction) {
+    this(
+        agent,
+        agentConfig,
+        currentEnvironment,
+        skills,
+        subagentBindings,
+        toolBindings,
+        candidateTools,
+        systemInstruction,
+        Map.of("system", systemInstruction));
+  }
 
   public AgentTurnContext {
     agent = Objects.requireNonNull(agent, "agent");
@@ -35,5 +60,8 @@ public record AgentTurnContext(
     toolBindings = List.copyOf(Objects.requireNonNull(toolBindings, "toolBindings"));
     candidateTools = List.copyOf(Objects.requireNonNull(candidateTools, "candidateTools"));
     systemInstruction = Objects.requireNonNull(systemInstruction, "systemInstruction");
+    systemSections =
+        Collections.unmodifiableMap(
+            new LinkedHashMap<>(Objects.requireNonNull(systemSections, "systemSections")));
   }
 }

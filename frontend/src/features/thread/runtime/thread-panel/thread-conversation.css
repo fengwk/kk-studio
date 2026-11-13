@@ -265,28 +265,9 @@ pre.thread-system-prompt-body {
   background: var(--surface-hover);
 }
 
-.thread-debug-chip.is-filtered {
-  background: var(--wash-2);
-  border: 1px dashed var(--border-hover);
-  color: var(--fg-muted);
-  opacity: 0.75;
-}
-
-.thread-debug-chip.is-filtered:hover {
-  color: var(--fg-muted);
-  border-color: var(--fg-muted);
-  background: var(--wash-3);
-  opacity: 0.9;
-}
-
 .thread-debug-chip-badge {
   opacity: 0.7;
   font-size: var(--font-size-xs);
-}
-
-.thread-debug-rail-divider {
-  opacity: 0.3;
-  align-self: center;
 }
 
 .thread-debug-empty-text {
@@ -481,7 +462,7 @@ pre.thread-event-detail-payload {
   letter-spacing: 0.04em;
 }
 
-.thread-debug-filter-reason {
+.thread-debug-disclaimer {
   margin-left: 8px;
   color: var(--fg-muted);
   font-size: var(--font-size-xs);

@@ -326,7 +326,7 @@ Provider credential 通过创建请求的可空 `SecretUpdate`（只接受 `SET`
 模型列表（[`ProviderModelDiscovery`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/ProviderModelDiscovery.java)），
 返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，
 上游不可达或非 2xx 返回 502 `upstream_failed`，detail 带上游状态与截断正文。
-MODEL 配置保存 limit、abilities、variants、pricing 和 default variant。
+MODEL 配置保存 limit、abilities、variants、pricing、default variant 与 `midConversationSystemMessages`；该能力默认为 false，Claude model ID 在模型创建或 Catalog 候选应用时按受支持 ID 规则预填 true，仍可由用户编辑。
 `pricing` 固定为 `{base, overrides, multipliers}`：所有价格与倍率在 wire 上都是十进制字符串，
 单位固定为 USD / 每百万 token；普通基础价缺省归一为 0，倍率缺省为 1，`reasoning: null`
 表示继承最终 output 价。`overrides` 与 `multipliers` 按数组顺序应用，规则 id 必须唯一；
@@ -447,9 +447,11 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 本回合改用当前 Agent 的默认模型（variant 优先沿用原值，否则取 Agent 声明的 variant 或模型默认 variant），
 并在 `TURN_START.fallbackModel` 记录实际型号供界面提示与计价；branch 设置本身不被改写，默认模型也不可用时拒绝本回合。
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
-`NONE`、`ROUTED` 工具保留，未选环境时只过滤 `REQUIRED`；配置 Skill 时加入统一 `read`，
+`NONE`、`ROUTED` 与 `REQUIRED` 工具都进入模型工具面；未选 Environment 时 `REQUIRED` 以无环境 binding 声明，
+调用返回确定性的 needs-Environment 未执行结果。配置 Skill 时加入统一 `read`，
 subagent allowlist 非空时加入内部 `task`。System prompt 按实际工具、Environment、Skill 与
-subagent 生成；技能按 Agent 配置顺序列出名称与描述，不依赖 Environment 的连接或安装状态。
+subagent 生成，并保留稳定具名 sections；技能按 Agent 配置顺序列出名称与描述，不依赖 Environment 的连接或安装状态。
+每条 Thread 路径以 `SYSTEM` Entry 保存初始 prompt、模型可见 client-tool 定义与 vendor-hosted-tool baseline，后续 prompt 或工具定义变化作为 append-only delta 与使用该上下文的 `TURN_START` 同事务提交；无变化复用既有基线，分支继承其路径上的上下文。Claude capability 开启且 baseline 含 client tools 时，请求始终启用 deferred-tool lane，在 tools 末尾追加 encoder-only placeholder 并保持此前工具前缀可缓存；其中变化以有序 system messages 表达，其它协议折叠基线和变更文本。历史工具调用与结果始终按已存记录投影，不因当前 Environment 或 binding 变化而改写。
 规划期冻结 variant 的缓存留存档位，执行期以该档位及本次 Session UUID 构造缓存控制；压缩使用 Compaction Agent 的 variant，后续配置更改不影响已冻结调用。
 输出预算所需的请求输入 token 估算只经内核端口 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 注入；[`HarnessCompactionConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessCompactionConfiguration.java)
 作为组合根把端口绑定到内核 `runtime.compaction.TokenEstimator` 的正式实现，因此解析器不 import runtime 实现类型，也不需要 `HarnessRuntime` bean，platform 独立测试上下文与 web 组合根都不会出现装配环或缺失 bean。

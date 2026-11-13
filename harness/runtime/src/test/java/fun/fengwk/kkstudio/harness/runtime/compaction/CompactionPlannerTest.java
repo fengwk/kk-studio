@@ -207,7 +207,16 @@ class CompactionPlannerTest {
     path.assistant("assistant reply"); // ASSISTANT 25
 
     // 13 字符 instruction -> ceil(13 / 4) = 4；投影 25 + 25 = 50，控制条目（ROOT / TURN_START）计 0。
-    assertEquals(54L, TokenEstimator.estimateRequestTokens(path.path(), "system prompt"));
+    assertEquals(54L, TokenEstimator.estimateRequestTokens(path.path(), List.of("system prompt")));
+  }
+
+  /** System messages are estimated separately because each is sent as its own provider message. */
+  @Test
+  void requestEstimateCountsEachSystemMessageSeparately() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+
+    assertEquals(2L, TokenEstimator.estimateRequestTokens(path.path(), List.of("a", "b")));
   }
 
   /** no-gain 判定的 after 侧口径：新 summary wrapper + 从 cut 起（含 cut）的保留段，cut 之前被完全替换。 */

@@ -505,7 +505,8 @@ class ProviderRequestPreviewServiceTest {
             base.systemInstruction(),
             base.toolBindings(),
             base.subagentBindings(),
-            group);
+            group,
+            base.systemSections());
 
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(compactionOutputPath().entries());
     when(runtime.findJoin(COMPACTION_JOIN_ID))
@@ -879,10 +880,13 @@ class ProviderRequestPreviewServiceTest {
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), false, false),
         new ModelVariant("v1", null, cacheControl.retention(), null),
+        List.of(new ModelVariant("v1", null, cacheControl.retention(), null)),
         outputTokens,
         "system instruction",
         List.of(),
-        List.of());
+        List.of(),
+        null,
+        Map.of("system", "system instruction"));
   }
 
   private static ThreadSnapshot snapshot(

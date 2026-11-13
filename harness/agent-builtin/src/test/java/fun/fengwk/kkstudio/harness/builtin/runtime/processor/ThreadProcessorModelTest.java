@@ -211,10 +211,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     // claim2：保留的 wake 可被消费（非丢失）-> queued USER 启动 INPUT turn，命令被 consume。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(7, path.entries().size());
-    TurnStartPayload start = (TurnStartPayload) path.entries().get(5).payload();
+    assertEquals(8, path.entries().size());
+    TurnStartPayload start = (TurnStartPayload) path.entries().get(6).payload();
     assertEquals(TurnStartReason.INPUT, start.reason());
-    MessagePayload user = (MessagePayload) path.entries().get(6).payload();
+    MessagePayload user = (MessagePayload) path.entries().get(7).payload();
     assertEquals(AgentMessageRole.USER, user.message().role());
     assertEquals("follow-up", ((TextMessageContent) user.message().contents().get(0)).text());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
@@ -427,9 +427,9 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, baseline.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath after = path(fixture.store, baseline.threadId());
-    TurnStartPayload nextStart = (TurnStartPayload) after.entries().get(5).payload();
+    TurnStartPayload nextStart = (TurnStartPayload) after.entries().get(6).payload();
     assertEquals(TurnStartReason.INPUT, nextStart.reason());
-    MessagePayload nextUser = (MessagePayload) after.entries().get(6).payload();
+    MessagePayload nextUser = (MessagePayload) after.entries().get(7).payload();
     assertEquals(AgentMessageRole.USER, nextUser.message().role());
   }
 
@@ -491,11 +491,11 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
 
     assertNull(model(fixture.store, modelId).resultEntryId());
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(7, path.entries().size());
+    assertEquals(8, path.entries().size());
     TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
     assertEquals(TurnEndOutcome.CANCELLED, end.outcome());
     assertEquals(TurnEndReason.HISTORY_CUT, end.reason());
-    TurnStartPayload newTurn = (TurnStartPayload) path.entries().get(5).payload();
+    TurnStartPayload newTurn = (TurnStartPayload) path.entries().get(6).payload();
     assertEquals(TurnStartReason.INPUT, newTurn.reason());
     assertEquals(1, fixture.resolver.calls);
   }
@@ -584,15 +584,15 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     // claim3：下一 claim 才创建 continuation Model 并请求 MODEL Work（consumed 本 claim，THREAD 行被清除）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(7, path.entries().size());
-    TurnStartPayload continuation = (TurnStartPayload) path.entries().get(6).payload();
+    assertEquals(8, path.entries().size());
+    TurnStartPayload continuation = (TurnStartPayload) path.entries().get(7).payload();
     assertEquals(TurnStartReason.CONTINUATION, continuation.reason());
     ModelInvocation continuationModel =
         inTx(
                 fixture,
                 tx ->
                     builtin(fixture.store, tx)
-                        .findModelInvocationByTurn(baseline.threadId(), path.entries().get(6).id()))
+                        .findModelInvocationByTurn(baseline.threadId(), path.entries().get(7).id()))
             .orElseThrow();
     assertNotNull(
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, continuationModel.id())));
@@ -631,7 +631,7 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     assertTrue(end.continueModel());
     // claim3：continuation。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
-    assertEquals(7, path(fixture.store, baseline.threadId()).entries().size());
+    assertEquals(8, path(fixture.store, baseline.threadId()).entries().size());
     assertEquals(1, fixture.resolver.calls);
   }
 
@@ -797,17 +797,17 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     // claim2：保留的 wake 偿还 continueModel obligation，启动 continuation 并只请求 MODEL Work。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath continued = path(fixture.store, baseline.threadId());
-    assertEquals(6, continued.entries().size());
+    assertEquals(7, continued.entries().size());
     assertEquals(
         TurnStartReason.CONTINUATION,
-        ((TurnStartPayload) continued.entries().get(5).payload()).reason());
+        ((TurnStartPayload) continued.entries().get(6).payload()).reason());
     ModelInvocation continuationModel =
         inTx(
                 fixture,
                 tx ->
                     builtin(fixture.store, tx)
                         .findModelInvocationByTurn(
-                            baseline.threadId(), continued.entries().get(5).id()))
+                            baseline.threadId(), continued.entries().get(6).id()))
             .orElseThrow();
     assertNotNull(
         work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, continuationModel.id())));
@@ -858,10 +858,10 @@ class ThreadProcessorModelTest extends ThreadProcessorTestBase {
     // claim3：下一 claim 才 start continuation。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(8, path.entries().size());
+    assertEquals(9, path.entries().size());
     assertEquals(
         TurnStartReason.CONTINUATION,
-        ((TurnStartPayload) path.entries().get(7).payload()).reason());
+        ((TurnStartPayload) path.entries().get(8).payload()).reason());
     assertEquals(1, fixture.resolver.calls);
   }
 

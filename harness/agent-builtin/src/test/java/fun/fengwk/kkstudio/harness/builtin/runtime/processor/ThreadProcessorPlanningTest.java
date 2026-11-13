@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -78,6 +79,7 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /** ThreadProcessor continuation / input planning 与同事务 resolve 提交、reschedule：每个 claim 恰执行一个动作。 */
@@ -127,7 +129,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(4, path.entries().size());
+    assertEquals(5, path.entries().size());
     MessagePayload user = (MessagePayload) path.head().payload();
     assertEquals("second", ((TextMessageContent) user.message().contents().getFirst()).text());
     assertEquals(
@@ -167,9 +169,9 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         };
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath committed = path(fixture.store, baseline.threadId());
-    assertEquals(3, committed.entries().size());
+    assertEquals(4, committed.entries().size());
     assertEquals(
-        TurnStartReason.INPUT, ((TurnStartPayload) committed.entries().get(1).payload()).reason());
+        TurnStartReason.INPUT, ((TurnStartPayload) committed.entries().get(2).payload()).reason());
     assertEquals(committed.head().id(), thread(fixture.store, baseline.threadId()).headEntryId());
     assertEquals(1, fixture.resolver.calls);
   }
@@ -188,8 +190,8 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
 
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(7, path.entries().size());
-    TurnStartPayload input = (TurnStartPayload) path.entries().get(5).payload();
+    assertEquals(8, path.entries().size());
+    TurnStartPayload input = (TurnStartPayload) path.entries().get(6).payload();
     assertEquals(TurnStartReason.INPUT, input.reason());
     assertEquals(
         ThreadCommandState.APPLIED,
@@ -229,7 +231,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
 
     EntryPath path = path(fixture.store, baseline.threadId());
     assertEquals(EntryType.SETTINGS, path.entries().get(5).payload().type());
-    TurnStartPayload input = (TurnStartPayload) path.entries().get(6).payload();
+    TurnStartPayload input = (TurnStartPayload) path.entries().get(7).payload();
     assertEquals(TurnStartReason.INPUT, input.reason());
     assertEquals("model-b", builtinExecution(input.settings()).modelName());
     assertEquals(
@@ -258,7 +260,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(
         TurnStartReason.INPUT,
         ((TurnStartPayload)
-                path(customFixture.store, customBaseline.threadId()).entries().get(5).payload())
+                path(customFixture.store, customBaseline.threadId()).entries().get(6).payload())
             .reason());
 
     Fixture plain = fixture();
@@ -267,7 +269,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     plain.resolver.autoConsistent = true;
     assertEquals(ThreadProcessResult.COMPLETED, plain.nextClaim(plainBaseline.threadId()));
     TurnStartPayload continuation =
-        (TurnStartPayload) path(plain.store, plainBaseline.threadId()).entries().get(5).payload();
+        (TurnStartPayload) path(plain.store, plainBaseline.threadId()).entries().get(6).payload();
     assertEquals(TurnStartReason.CONTINUATION, continuation.reason());
   }
 
@@ -316,7 +318,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     // claim2：INPUT 才消费 USER，并继承已应用的 settings。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     TurnStartPayload input =
-        (TurnStartPayload) path(fixture.store, baseline.threadId()).entries().get(2).payload();
+        (TurnStartPayload) path(fixture.store, baseline.threadId()).entries().get(3).payload();
     assertEquals(TurnStartReason.INPUT, input.reason());
     assertEquals("model-b", builtinExecution(input.settings()).modelName());
     assertEquals("after-message", input.settings().environmentName());
@@ -348,7 +350,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(6).payload();
+    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(7).payload();
     assertEquals(TurnStartReason.INPUT, turnStart.reason());
     assertEquals("model-b", builtinExecution(turnStart.settings()).modelName());
     assertEquals("v2", builtinExecution(turnStart.settings()).variant());
@@ -409,9 +411,9 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
 
     EntryPath path = path(fixture.store, baseline.threadId());
     // 关闭的原 turn 5 条 Entry + SETTINGS 快照 + TURN_START(CONTINUATION)。
-    assertEquals(7, path.entries().size());
+    assertEquals(8, path.entries().size());
     assertEquals(EntryType.SETTINGS, path.entries().get(5).payload().type());
-    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(6).payload();
+    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(7).payload();
     assertEquals(TurnStartReason.CONTINUATION, turnStart.reason());
     assertEquals("model-b", builtinExecution(turnStart.settings()).modelName());
     assertEquals("v2", builtinExecution(turnStart.settings()).variant());
@@ -446,13 +448,16 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    // ROOT + SETTINGS 快照 + TURN_START(INPUT) + USER message。
-    assertEquals(4, path.entries().size());
+    // ROOT + SETTINGS snapshot + SYSTEM baseline + TURN_START(INPUT) + USER message.
+    assertEquals(5, path.entries().size());
     assertEquals(EntryType.SETTINGS, path.entries().get(1).payload().type());
-    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(2).payload();
+    SystemPayload system = (SystemPayload) path.entries().get(2).payload();
+    assertTrue(system.baseline());
+    assertEquals(Map.of("system", "Test system instruction."), system.sections());
+    TurnStartPayload turnStart = (TurnStartPayload) path.entries().get(3).payload();
     assertEquals(TurnStartReason.INPUT, turnStart.reason());
     assertEquals("model-b", builtinExecution(turnStart.settings()).modelName());
-    MessagePayload userPayload = (MessagePayload) path.entries().get(3).payload();
+    MessagePayload userPayload = (MessagePayload) path.entries().get(4).payload();
     assertEquals(AgentMessageRole.USER, userPayload.message().role());
     assertEquals("hi", ((TextMessageContent) userPayload.message().contents().get(0)).text());
     assertEquals(
@@ -462,16 +467,16 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
         ThreadCommandState.APPLIED,
         command(fixture.store, baseline.threadId(), userCommand).state());
     assertEquals(
-        path.entries().get(3).id(), thread(fixture.store, baseline.threadId()).headEntryId());
+        path.entries().get(4).id(), thread(fixture.store, baseline.threadId()).headEntryId());
     // ModelInvocation：requestHead == candidate head，turnStart 指向新 TURN_START，MODEL Work 已请求。
     ModelInvocation invocation =
         inTx(
                 fixture,
                 tx ->
                     builtin(fixture.store, tx)
-                        .findModelInvocationByTurn(baseline.threadId(), path.entries().get(2).id()))
+                        .findModelInvocationByTurn(baseline.threadId(), path.entries().get(3).id()))
             .orElseThrow();
-    assertEquals(path.entries().get(3).id(), invocation.requestHeadEntryId());
+    assertEquals(path.entries().get(4).id(), invocation.requestHeadEntryId());
     assertNotNull(work(fixture.store, new WorkTarget(BuiltinWorkType.MODEL, invocation.id())));
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
     assertEquals(1, fixture.resolver.calls);

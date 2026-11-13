@@ -318,12 +318,7 @@ public final class HarnessRuntimeTestSupport {
           tx.entries()
               .insert(
                   turnStartEntry(
-                      turnStartEntryId,
-                      sessionId,
-                      rootEntryId,
-                      T1,
-                      threadId,
-                      capabilities(hostBinding())));
+                      turnStartEntryId, sessionId, rootEntryId, T1, threadId, capabilities()));
           ThreadState thread = thread(threadId, sessionId, turnStartEntryId);
           tx.threads().insert(thread);
           UUID userEntryId = tx.nextId();
@@ -728,8 +723,8 @@ public final class HarnessRuntimeTestSupport {
         createdAt);
   }
 
-  static TurnCapabilities capabilities(ToolBinding... bindings) {
-    return new TurnCapabilities(List.of(bindings), List.of());
+  static TurnCapabilities capabilities() {
+    return new TurnCapabilities(List.of());
   }
 
   static Entry userMessageEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {

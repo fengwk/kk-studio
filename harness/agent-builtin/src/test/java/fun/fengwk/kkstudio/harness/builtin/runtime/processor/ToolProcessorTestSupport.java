@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -440,7 +441,6 @@ public final class ToolProcessorTestSupport {
                           null,
                           null,
                           new TurnCapabilities(
-                              modelRequest.toolBindings(),
                               List.of(),
                               new TurnMediaCapabilities(
                                   Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
@@ -541,7 +541,6 @@ public final class ToolProcessorTestSupport {
                           null,
                           null,
                           new TurnCapabilities(
-                              modelRequest.toolBindings(),
                               List.of(),
                               new TurnMediaCapabilities(
                                   Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
@@ -930,7 +929,7 @@ public final class ToolProcessorTestSupport {
 
   private static ModelRequestSpec modelRequest(Scenario scenario) {
     ProviderRequest provider = providerRequest();
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         provider.model(),

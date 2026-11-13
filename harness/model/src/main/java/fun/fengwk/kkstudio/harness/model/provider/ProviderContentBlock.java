@@ -13,4 +13,7 @@ public sealed interface ProviderContentBlock
         ProviderJsonBlock,
         ProviderToolCallBlock,
         ProviderToolResultBlock,
-        ProviderResourceBlock {}
+        ProviderResourceBlock,
+        ProviderSystemToolAdditionBlock,
+        ProviderSystemHostedToolAdditionBlock,
+        ProviderSystemToolRemovalBlock {}

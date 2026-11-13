@@ -248,7 +248,7 @@ public final class StoreTestSupport {
         MAX_OUTPUT_TOKENS,
         null,
         null,
-        new TurnCapabilities(toolBindings, List.of()));
+        new TurnCapabilities(List.of()));
   }
 
   /** ASSISTANT MESSAGE payload；{@code toolCallIds} 会按顺序变成 ToolCall 内容。 */
@@ -646,7 +646,8 @@ public final class StoreTestSupport {
 
   /** {@code ask_user} 的冻结问卷原文（内置 contributor 贡献，provenance 即身份判据）。 */
   public static final String ASK_USER_QUESTIONNAIRE =
-      "{\"questions\":[{\"question\":\"which plan?\",\"options\":[{\"label\":\"fast\"},{\"label\":\"safe\"}]}]}";
+      "{\"questions\":[{\"question\":\"which"
+          + " plan?\",\"options\":[{\"label\":\"fast\"},{\"label\":\"safe\"}]}]}";
 
   /** 内置 contributor 贡献的 {@code ask_user}：只有该 provenance 才会被运行时视为人工输入等待。 */
   public static ToolBinding askUserBinding() {

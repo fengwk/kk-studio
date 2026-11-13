@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.port;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
+
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -35,7 +37,7 @@ public final class PortTestData {
   private PortTestData() {}
 
   public static ModelRequestSpec modelRequest() {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),

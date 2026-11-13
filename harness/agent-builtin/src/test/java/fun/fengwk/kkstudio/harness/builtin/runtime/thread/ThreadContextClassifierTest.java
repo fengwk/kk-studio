@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.thread;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -1120,7 +1121,7 @@ class ThreadContextClassifierTest {
   }
 
   private static ModelRequestSpec modelRequest() {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),

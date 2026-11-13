@@ -9,8 +9,8 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 
 /**
- * {@link ToolCallMessageContent} 的 durable 边界：调用身份与 arguments 必填，冻结的 {@code historyAction} / {@code
- * environmentName} 可空但不得为空白。
+ * {@link ToolCallMessageContent} 的 durable 边界：调用身份与 arguments 必填，冻结的 {@code historyAction}
+ * 可空但不得为空白。
  */
 class ToolCallMessageContentTest {
 
@@ -21,19 +21,17 @@ class ToolCallMessageContentTest {
         new ToolCallMessageContent("call-1", "fs_read", "fs.read", "{\"path\":\"a.txt\"}");
 
     assertNull(content.historyAction());
-    assertNull(content.environmentName());
     assertEquals("{}", new ToolCallMessageContent("call-1", "bash", "bash", "{}").argumentsJson());
   }
 
-  /** 冻结的 action 与环境名逐字保留，null 表示未冻结或不绑定环境。 */
+  /** 冻结的历史动作逐字保留。 */
   @Test
-  void storesFrozenHistoryFactsVerbatim() {
+  void storesFrozenHistoryActionVerbatim() {
     ToolCallMessageContent content =
         new ToolCallMessageContent(
-            "call-1", "fs_read", "fs.read", "{\"path\":\"a.txt\"}", "read a.txt", "dev");
+            "call-1", "fs_read", "fs.read", "{\"path\":\"a.txt\"}", "read a.txt");
 
     assertEquals("read a.txt", content.historyAction());
-    assertEquals("dev", content.environmentName());
   }
 
   /** 调用身份、arguments 与冻结事实的 non-blank 边界。 */
@@ -53,9 +51,6 @@ class ToolCallMessageContentTest {
         () -> new ToolCallMessageContent("call-1", "fs_read", "fs.read", " "));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ToolCallMessageContent("call-1", "fs_read", "fs.read", "{}", "  ", "dev"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ToolCallMessageContent("call-1", "fs_read", "fs.read", "{}", null, "  "));
+        () -> new ToolCallMessageContent("call-1", "fs_read", "fs.read", "{}", "  "));
   }
 }

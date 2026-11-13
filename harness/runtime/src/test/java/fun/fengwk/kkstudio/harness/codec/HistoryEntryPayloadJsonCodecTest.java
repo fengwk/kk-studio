@@ -10,6 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -31,9 +32,12 @@ import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultReason;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -50,6 +54,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -91,9 +96,55 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   @Test
+  void preservesHostedToolDefinitionsInSystemPayload() {
+    SystemHostedTool hostedTool =
+        new SystemHostedTool(
+            "web_search", "{\"type\":\"web_search_20250305\",\"name\":\"web_search\"}");
+    SystemPayload payload =
+        new SystemPayload(
+            Map.of("agent", "[agent]"),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(hostedTool),
+            List.of(),
+            true);
+
+    SystemPayload decoded = (SystemPayload) CODEC.decode(EntryType.SYSTEM, CODEC.encode(payload));
+
+    assertEquals(List.of(hostedTool), decoded.addedHostedTools());
+    assertTrue(decoded.removedHostedTools().isEmpty());
+  }
+
+  @Test
+  void preservesModelVisibleToolDefinitionsInSystemPayload() {
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition(
+            "read_file",
+            "Read a file",
+            new SchemaJsonCodec().encode(new InputSchema("arguments", Map.of(), Set.of(), false)));
+    SystemPayload payload =
+        new SystemPayload(
+            Map.of("agent", "[agent]"),
+            List.of(),
+            List.of(tool),
+            List.of(),
+            List.of(),
+            List.of(),
+            true);
+
+    SystemPayload decoded = (SystemPayload) CODEC.decode(EntryType.SYSTEM, CODEC.encode(payload));
+
+    assertEquals(List.of(tool), decoded.addedTools());
+    assertTrue(decoded.removedTools().isEmpty());
+  }
+
+  @Test
   void roundTripsAllPayloadTypes() {
     BranchSettings settings = settings();
     EntryPayload root = new RootPayload(settings);
+    EntryPayload system =
+        new SystemPayload(Map.of("agent", "<agent>hello</agent>"), List.of(), List.of(), true);
     EntryPayload turnStart = new TurnStartPayload(TurnStartReason.INPUT, settings, OWNER_THREAD_ID);
     EntryPayload user =
         new MessagePayload(
@@ -149,6 +200,7 @@ class HistoryEntryPayloadJsonCodecTest {
     for (EntryPayload payload :
         List.of(
             root,
+            system,
             turnStart,
             user,
             assistant,
@@ -370,7 +422,7 @@ class HistoryEntryPayloadJsonCodecTest {
             false,
             null,
             null,
-            binding);
+            binding.descriptor().name());
 
     MessagePayload payload =
         new MessagePayload(
@@ -388,11 +440,11 @@ class HistoryEntryPayloadJsonCodecTest {
             metadata);
 
     String encoded = CODEC.encode(payload);
-    assertTrue(encoded.contains("\"binding\":{\"definition\":"));
+    assertTrue(encoded.contains("\"toolName\":\"custom_tool\""));
 
     MessagePayload decoded = (MessagePayload) CODEC.decode(EntryType.MESSAGE, encoded);
     assertEquals(payload, decoded);
-    assertEquals(binding, decoded.toolResultMetadata().binding());
+    assertEquals(binding.descriptor().name(), decoded.toolResultMetadata().toolName());
   }
 
   /** 意图：decodeDurationMillis 的严格边界——非负整数与显式 null 合法，负值、非整数、非数字类型与未知字段一律拒绝。 */
@@ -513,6 +565,25 @@ class HistoryEntryPayloadJsonCodecTest {
             new AssistantErrorPayload(
                 new AssistantError("MODEL_FAILED", "down"),
                 new ModelAttemptSnapshot(2, 9, "final", ""))));
+  }
+
+  @Test
+  void turnCapabilitiesStoreSubagentsAndMediaCapabilities() {
+    TurnStartPayload payload =
+        new TurnStartPayload(
+            TurnStartReason.INPUT,
+            settings(),
+            OWNER_THREAD_ID,
+            4096,
+            1024,
+            null,
+            null,
+            new TurnCapabilities(List.of()));
+
+    String encoded = CODEC.encode(payload);
+    assertFalse(encoded.contains("toolNames"));
+    assertFalse(encoded.contains("toolBindings"));
+    assertEquals(payload, CODEC.decode(EntryType.TURN_START, encoded));
   }
 
   /** 模型回退的 turn 记录实际调用的型号；settings 保持 Thread 自己的设置。 */

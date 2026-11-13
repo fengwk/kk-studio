@@ -211,7 +211,7 @@ final class DispatcherTestSupport {
                           16_384,
                           null,
                           null,
-                          new TurnCapabilities(List.of(toolRequest().binding()), List.of())),
+                          new TurnCapabilities(List.of())),
                       NOW));
           tx.entries().insert(userEntry(userEntryId, sessionId, turnStartEntryId));
           // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）：请求带 bash
@@ -689,10 +689,13 @@ final class DispatcherTestSupport {
         new UUID(0L, 1L),
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
+        List.of(new ModelVariant("v1", null, PromptCacheRetention.NONE, null)),
         1024,
         "Test system instruction.",
         List.of(),
-        List.of());
+        List.of(),
+        null,
+        Map.of("system", "Test system instruction."));
   }
 
   /** 带 bash binding 的机械请求（与 {@link #toolRequest()} 的 binding renderer 全等）。 */
@@ -703,10 +706,13 @@ final class DispatcherTestSupport {
         base.providerConnectionGenerationId(),
         base.model(),
         base.variant(),
+        base.modelVariants(),
         1024,
         "Test system instruction.",
         List.of(toolRequest().binding()),
-        List.of());
+        List.of(),
+        base.groupExecution(),
+        Map.of("system", "Test system instruction."));
   }
 
   private static ProviderResponse toolResponse() {

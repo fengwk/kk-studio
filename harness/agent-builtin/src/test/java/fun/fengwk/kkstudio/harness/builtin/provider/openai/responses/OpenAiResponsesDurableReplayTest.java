@@ -112,10 +112,12 @@ class OpenAiResponsesDurableReplayTest {
     // 私有推理文本草稿：只用于流式草稿，绝不允许进入 durable thinking 或 replay summary。
     accumulator.processEvent(
         MAPPER.readTree(
-            "{\"type\":\"response.reasoning_text.delta\",\"output_index\":0,\"delta\":\"private draft\"}"));
+            "{\"type\":\"response.reasoning_text.delta\",\"output_index\":0,\"delta\":\"private"
+                + " draft\"}"));
     accumulator.processEvent(
         MAPPER.readTree(
-            "{\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"summary_index\":0,\"delta\":\"Check the weather\"}"));
+            "{\"type\":\"response.reasoning_summary_text.delta\",\"output_index\":0,\"summary_index\":0,\"delta\":\"Check"
+                + " the weather\"}"));
     accumulator.processEvent(
         MAPPER.readTree(
             """
@@ -162,7 +164,6 @@ class OpenAiResponsesDurableReplayTest {
                     "query",
                     "{\"q\":\"Paris\"}",
                     null,
-                    null,
                     functionCall.providerBlockData())));
     AgentMessage durableToolResult =
         new AgentMessage(
@@ -177,7 +178,7 @@ class OpenAiResponsesDurableReplayTest {
                     "{}")));
     // 只有当前请求绑定的 native 工具名才保持 provider 原生结构，否则回放与 native tool 结果都会被降级
     List<ProviderMessage> projected =
-        ProviderMessageProjector.byNames(Set.of("query"))
+        new ProviderMessageProjector()
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(
@@ -216,7 +217,7 @@ class OpenAiResponsesDurableReplayTest {
 
     // 只有当前请求绑定的 native 工具名才保持 provider 原生结构，否则回放与 native tool 结果都会被降级
     List<ProviderMessage> projected =
-        ProviderMessageProjector.byNames(Set.of("query"))
+        new ProviderMessageProjector()
             .projectSources(
                 List.of(
                     ProviderMessageProjector.ProjectedMessage.of(

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -40,7 +41,7 @@ class ModelProcessorGroupTest extends ModelProcessorTestSupport {
   /** 两成员模型组冻结请求：成员逻辑名用于断言真实 gateway 身份，而非仅顶层组名。 */
   private static ModelRequestSpec groupSpec(Set<Integer> fallbackStatusCodes, int cooldownSeconds) {
     List<ModelGroupMemberExecution> members = List.of(groupMember("model"), groupMember("model2"));
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         new ModelDescriptor("group", "group", "group", Set.of(ModelInputModality.TEXT), true, true),

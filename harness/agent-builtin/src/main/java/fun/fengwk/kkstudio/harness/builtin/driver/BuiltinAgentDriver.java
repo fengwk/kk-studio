@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.driver;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
@@ -15,6 +16,10 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemContext;
+import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
@@ -22,7 +27,9 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
@@ -41,7 +48,10 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelOutcomeAppender;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
@@ -56,6 +66,7 @@ import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Instant;
@@ -75,6 +86,7 @@ import java.util.UUID;
 public final class BuiltinAgentDriver implements AgentDriver {
 
   private static final String CANCELLED_MESSAGE = "Cancelled by user";
+  private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
 
   private final BuiltinStore store;
   private final TurnResolver resolver;
@@ -229,7 +241,8 @@ public final class BuiltinAgentDriver implements AgentDriver {
               spec.systemInstruction(),
               spec.toolBindings(),
               spec.subagentBindings(),
-              spec.groupExecution());
+              spec.groupExecution(),
+              spec.systemSections());
     }
     // 无 cap 时保留 resolver 的模型上限元数据；有 cap 时不得超过实际请求预算。
     int maxOutputTokens =
@@ -241,7 +254,6 @@ public final class BuiltinAgentDriver implements AgentDriver {
         resolved.contextWindow(),
         maxOutputTokens,
         new TurnCapabilities(
-            spec.toolBindings(),
             spec.subagentBindings(),
             new TurnMediaCapabilities(
                 spec.model().inputModalities(),
@@ -250,7 +262,85 @@ public final class BuiltinAgentDriver implements AgentDriver {
         BuiltinExecution.of(
             spec.groupExecution() == null
                 ? ModelSelection.model(spec.model().modelName(), spec.variant().id())
-                : ModelSelection.group(spec.groupExecution().groupName())));
+                : ModelSelection.group(spec.groupExecution().groupName())),
+        systemChange(thread, candidatePath, spec));
+  }
+
+  static SystemPayload systemChange(ThreadState thread, EntryPath path, ModelRequestSpec spec) {
+    List<ProviderToolDefinition> clientTools = modelToolDefinitions(spec.toolBindings());
+    SystemContext resolved =
+        new SystemContext(spec.systemSections(), clientTools, hostedTools(spec));
+    if (thread.kind() == ThreadKind.COMPACTION) {
+      return null;
+    }
+    if (path.requiresSystemBaseline()) {
+      return freshSystemBaseline(spec, clientTools);
+    }
+    SystemPayload change = path.systemContext().orElseThrow().changesTo(resolved).orElse(null);
+    if (change == null || !latestAssistantPaused(path)) {
+      return change;
+    }
+    if (change.sections().isEmpty() && change.removedSections().isEmpty()) {
+      return null;
+    }
+    return new SystemPayload(
+        change.sections(),
+        change.removedSections(),
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        false);
+  }
+
+  private static List<SystemHostedTool> hostedTools(ModelRequestSpec spec) {
+    if (spec.providerType() != ProviderType.ANTHROPIC) {
+      return List.of();
+    }
+    return spec.variant().protocolOptions().toolDefinitions().stream()
+        .map(tool -> new SystemHostedTool(tool.name(), tool.definitionJson()))
+        .toList();
+  }
+
+  private static boolean latestAssistantPaused(EntryPath path) {
+    List<Entry> entries = path.entries();
+    for (int i = entries.size() - 1; i >= 0; i--) {
+      if (entries.get(i).payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.ASSISTANT
+          && message.assistantMetadata() != null) {
+        return message.assistantMetadata().stopReason() == GenerationStopReason.CONTINUE;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Build a fresh request-context baseline; compaction can reuse this at its future rebuild
+   * boundary.
+   */
+  private static SystemPayload freshSystemBaseline(
+      ModelRequestSpec spec, List<ProviderToolDefinition> clientTools) {
+    return new SystemPayload(
+        spec.systemSections(),
+        List.of(),
+        clientTools,
+        List.of(),
+        hostedTools(spec),
+        List.of(),
+        true);
+  }
+
+  private static List<ProviderToolDefinition> modelToolDefinitions(List<ToolBinding> bindings) {
+    return bindings.stream()
+        .map(
+            binding -> {
+              ToolDescriptor descriptor = binding.descriptor();
+              return new ProviderToolDefinition(
+                  descriptor.name(),
+                  descriptor.description(),
+                  SCHEMA_CODEC.encode(descriptor.inputSchema()));
+            })
+        .toList();
   }
 
   @Override
@@ -575,18 +665,21 @@ public final class BuiltinAgentDriver implements AgentDriver {
     private final Integer maxOutputTokens;
     private final TurnCapabilities capabilities;
     private final ExecutionSelection executedSelection;
+    private final SystemPayload systemChange;
 
     private AcceptedTurn(
         ModelRequestSpec spec,
         int contextWindow,
         int maxOutputTokens,
         TurnCapabilities capabilities,
-        ExecutionSelection executedSelection) {
+        ExecutionSelection executedSelection,
+        SystemPayload systemChange) {
       this.spec = spec;
       this.contextWindow = contextWindow;
       this.maxOutputTokens = maxOutputTokens;
       this.capabilities = capabilities;
       this.executedSelection = executedSelection;
+      this.systemChange = systemChange;
     }
 
     @Override
@@ -602,6 +695,11 @@ public final class BuiltinAgentDriver implements AgentDriver {
     @Override
     public TurnCapabilities capabilities() {
       return capabilities;
+    }
+
+    @Override
+    public SystemPayload systemChange() {
+      return systemChange;
     }
 
     @Override

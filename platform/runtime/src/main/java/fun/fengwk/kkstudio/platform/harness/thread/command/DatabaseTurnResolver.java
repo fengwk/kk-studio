@@ -11,6 +11,8 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.SystemContext;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
@@ -213,8 +215,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
     String systemInstruction = context.systemInstruction();
     int contextWindow = resolved.contextWindow();
+    List<String> requestSystemMessages =
+        requestSystemMessages(path, context, first.providerType(), resolved.descriptor());
     long estimatedInputTokens =
-        requestTokenEstimator.estimateRequestTokens(path, systemInstruction);
+        requestTokenEstimator.estimateRequestTokens(path, requestSystemMessages);
     // 组内每个成员都必须容纳这次请求：输出预算取所有成员可提供预算的最小值。
     int outputTokens =
         resolved.members().stream()
@@ -235,10 +239,52 @@ public final class DatabaseTurnResolver implements TurnResolver {
             systemInstruction,
             context.toolBindings(),
             context.subagentBindings(),
-            resolved.group()),
+            resolved.group(),
+            context.systemSections()),
         contextWindow,
         context.candidateTools(),
         context.skills());
+  }
+
+  private static List<String> requestSystemMessages(
+      EntryPath path, AgentTurnContext context, ProviderType providerType, ModelDescriptor model) {
+    String currentBaseline = String.join("\n\n", context.systemSections().values());
+    if (path.requiresSystemBaseline()) {
+      return List.of(currentBaseline);
+    }
+    SystemContext existing = path.systemContext().orElse(null);
+    if (existing == null) {
+      return List.of(currentBaseline);
+    }
+    SystemContext next =
+        new SystemContext(context.systemSections(), existing.tools(), existing.hostedTools());
+    String pendingChange = existing.changesTo(next).map(SystemContext::renderChangeText).orElse("");
+    boolean incrementalSystemMessages =
+        providerType == ProviderType.ANTHROPIC && model.midConversationSystemMessages();
+    if (!incrementalSystemMessages) {
+      String collapsed = SystemContext.collapseSystemInstruction(path.entries());
+      return List.of(pendingChange.isEmpty() ? collapsed : collapsed + "\n\n" + pendingChange);
+    }
+
+    List<String> messages = new ArrayList<>();
+    for (Entry entry : path.entries()) {
+      if (!(entry.payload() instanceof SystemPayload system)) {
+        continue;
+      }
+      if (system.baseline()) {
+        messages.clear();
+        messages.add(String.join("\n\n", system.sections().values()));
+      } else if (!messages.isEmpty()) {
+        String changeText = SystemContext.renderChangeText(system);
+        if (!changeText.isEmpty()) {
+          messages.add(changeText);
+        }
+      }
+    }
+    if (!pendingChange.isEmpty()) {
+      messages.add(pendingChange);
+    }
+    return List.copyOf(messages);
   }
 
   /**
@@ -348,7 +394,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             first.modelId(),
             modalities,
             first.tools(),
-            first.reasoning());
+            first.reasoning(),
+            first.midConversationSystemMessages());
     ModelGroupExecution execution =
         new ModelGroupExecution(
             groupModel.name(),
@@ -388,7 +435,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             model.modelId(),
             parsed.inputModalities(),
             parsed.tools(),
-            parsed.reasoning());
+            parsed.reasoning(),
+            parsed.midConversationSystemMessages());
     return new MemberRuntime(
         model.name(),
         provider,
