@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.compaction;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -66,6 +67,55 @@ class CompactionPlannerTest {
   private static final ExecutionSelection SETTINGS_EXECUTION = new ExecutionSelection("fake", "{}");
   private static final CompactionConfig CONFIG = new CompactionConfig(20_000);
   private static final Instant BASE = Instant.ofEpochSecond(1000L);
+
+  @Test
+  void cutPlannerUsesAClosedTurnBoundaryAtTheKeepRecentLimit() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("turn 1");
+    path.assistant("reply 1");
+    path.closeTurn();
+    path.turn("turn 2");
+    path.assistant("reply 2");
+    path.closeTurn();
+    path.turn("turn 3");
+    path.assistant("reply 3");
+    path.closeTurn();
+
+    var cut =
+        new CompactionCutPlanner(new CompactionConfig(75)).plan(path.path(), 200).orElseThrow();
+
+    assertEquals(id(9L), cut.entryId());
+    assertInstanceOf(TurnEndPayload.class, path.path().entries().get(cut.pathIndex()).payload());
+  }
+
+  @Test
+  void cutPlannerRetainsLatestModelCallEvenWhenThatTurnExceedsKeepRecent() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("older");
+    path.assistant("older reply");
+    path.closeTurn();
+    path.turn("x".repeat(2_000));
+    path.assistant("large-turn reply");
+    path.closeTurn();
+
+    var cut =
+        new CompactionCutPlanner(new CompactionConfig(20_000)).plan(path.path(), 100).orElseThrow();
+
+    assertEquals(id(5L), cut.entryId());
+  }
+
+  @Test
+  void cutPlannerReportsUnavailableWhenThereIsNothingBeforeTheCut() {
+    PathBuilder path = new PathBuilder();
+    path.root();
+    path.turn("only turn");
+    path.assistant("only reply");
+    path.closeTurn();
+
+    assertTrue(new CompactionCutPlanner(new CompactionConfig(1)).plan(path.path(), 2).isEmpty());
+  }
 
   @Test
   void estimatesVideoWithTheDeterministicMediaPlaceholderBudget() {
