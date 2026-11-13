@@ -829,7 +829,7 @@ class HarnessRuntimeForkTest {
                           tx.nextId(),
                           tx.nextId()),
                       T2,
-                      false)
+                      true)
                   .endId();
           tx.entries().insert(turnStartEntry(ts3, sessionId, compactionEnd, T3, threadId));
           tx.entries().insert(userEntry(u3, sessionId, ts3, T3, "u3"));
