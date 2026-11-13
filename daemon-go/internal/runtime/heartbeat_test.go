@@ -70,6 +70,8 @@ func TestRuntimeHeartbeatsAfterEnvironmentBinding(t *testing.T) {
 }
 
 // RUN-T-045/046 covers READY-only lease rounds, active-view gating, expiry, single-use, and heartbeat start time.
+// Every heartbeat with active views starts a new round, so the loop is paused before a lease is handled:
+// the round of the last heartbeat actually sent is then the runtime's current round.
 func TestRuntimePublishesAndConsumesFreshIDELeaseRounds(t *testing.T) {
 	ide := &leaseTrackingIDE{applied: make(chan time.Time, 2)}
 	options := runtimeOptionsForTest()
@@ -79,46 +81,25 @@ func TestRuntimePublishesAndConsumesFreshIDELeaseRounds(t *testing.T) {
 	r.mu.Lock()
 	r.ready = false
 	r.mu.Unlock()
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan struct{})
-	go r.heartbeatLoop(ctx, done)
-	defer func() {
-		cancel()
-		<-done
-	}()
+	ide.active.Store(true)
 
-	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
-		for _, frame := range frames {
-			if frame.MessageType == protocol.MessageType_HEARTBEAT && frame.GetHeartbeat().IdeLeaseRound == nil {
-				return true
-			}
-		}
-		return false
-	})
+	// Not READY: active views do not start a lease round.
+	if last := heartbeatsUntil(t, r, connection, 1); last.IdeLeaseRound != nil {
+		t.Fatal("heartbeat before READY advertised an IDE lease round")
+	}
 	r.mu.Lock()
 	r.ready = true
 	r.mu.Unlock()
-	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
-		count := 0
-		for _, frame := range frames {
-			if frame.MessageType == protocol.MessageType_HEARTBEAT && frame.GetHeartbeat().IdeLeaseRound == nil {
-				count++
-			}
-		}
-		return count >= 2
-	})
+	// READY without active views: no lease round either.
+	ide.active.Store(false)
+	if last := heartbeatsUntil(t, r, connection, 2); last.IdeLeaseRound != nil {
+		t.Fatal("heartbeat without active IDE views advertised an IDE lease round")
+	}
 	ide.active.Store(true)
-	var firstRound int64
-	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
-		for _, frame := range frames {
-			if frame.MessageType == protocol.MessageType_HEARTBEAT && frame.GetHeartbeat().GetIdeLeaseRound() > 0 {
-				firstRound = frame.GetHeartbeat().GetIdeLeaseRound()
-				return true
-			}
-		}
-		return false
-	})
-	waitForActiveIdeLeaseRound(t, r, firstRound)
+	firstRound := heartbeatsUntil(t, r, connection, 1).GetIdeLeaseRound()
+	if firstRound <= 0 {
+		t.Fatalf("READY heartbeat with active IDE views advertised round %d", firstRound)
+	}
 	if err := r.handle(context.Background(), ideLeaseEnvelope(firstRound)); err != nil {
 		t.Fatalf("fresh lease round rejected: %v", err)
 	}
@@ -131,17 +112,10 @@ func TestRuntimePublishesAndConsumesFreshIDELeaseRounds(t *testing.T) {
 		t.Fatal("fresh IDE lease was not applied")
 	}
 
-	var secondRound int64
-	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
-		for _, frame := range frames {
-			if frame.MessageType == protocol.MessageType_HEARTBEAT && frame.GetHeartbeat().GetIdeLeaseRound() > firstRound {
-				secondRound = frame.GetHeartbeat().GetIdeLeaseRound()
-				return true
-			}
-		}
-		return false
-	})
-	waitForActiveIdeLeaseRound(t, r, secondRound)
+	secondRound := heartbeatsUntil(t, r, connection, 1).GetIdeLeaseRound()
+	if secondRound <= firstRound {
+		t.Fatalf("next heartbeat round = %d, want greater than %d", secondRound, firstRound)
+	}
 	if err := r.handle(context.Background(), ideLeaseEnvelope(firstRound)); err == nil || err.Error() != "IDE_LEASE round is not the current unexpired round" {
 		t.Fatalf("stale IDE lease round error = %v", err)
 	}
@@ -166,17 +140,29 @@ func ideLeaseEnvelope(round int64) *protocol.Envelope {
 	}
 }
 
-func waitForActiveIdeLeaseRound(t *testing.T, runtime *Runtime, round int64) {
+// heartbeatsUntil runs the heartbeat loop until count more heartbeats are sent, stops it, and returns the
+// last heartbeat sent. Once the loop has returned, no later heartbeat can start another round.
+func heartbeatsUntil(t *testing.T, r *Runtime, connection *testConnection, count int) *protocol.Heartbeat {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		runtime.ideLeaseMu.Lock()
-		ready := runtime.ideLeaseRound == round && !runtime.ideLeaseSentAt.IsZero()
-		runtime.ideLeaseMu.Unlock()
-		if ready {
-			return
+	before := len(heartbeats(connection.frames()))
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go r.heartbeatLoop(ctx, done)
+	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
+		return len(heartbeats(frames)) >= before+count
+	})
+	cancel()
+	<-done
+	sent := heartbeats(connection.frames())
+	return sent[len(sent)-1]
+}
+
+func heartbeats(frames []*protocol.Envelope) []*protocol.Heartbeat {
+	var result []*protocol.Heartbeat
+	for _, frame := range frames {
+		if frame.MessageType == protocol.MessageType_HEARTBEAT {
+			result = append(result, frame.GetHeartbeat())
 		}
-		time.Sleep(time.Millisecond)
 	}
-	t.Fatalf("IDE lease round %d was not activated after its heartbeat send", round)
+	return result
 }

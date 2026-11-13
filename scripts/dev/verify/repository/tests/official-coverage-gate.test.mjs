@@ -15,7 +15,7 @@ const REPOSITORY_ROOT = repositoryRoot()
 const RUNTIME_MODULE = 'harness/runtime'
 const BUILTIN_MODULE = 'harness/agent-builtin'
 
-/** 37 个关键类按物理源码归属拆分：runtime 29 项，builtin 8 项。 */
+/** 37 个关键类按物理源码归属拆分：runtime 30 项，builtin 7 项。 */
 const RUNTIME_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.runtime.ManualCompactionControl',
   'fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot',
@@ -34,6 +34,7 @@ const RUNTIME_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.api.SpawnRequest.Budget',
   'fun.fengwk.kkstudio.harness.runtime.SpawnTickets',
   'fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn',
+  'fun.fengwk.kkstudio.harness.runtime.compaction.CompactionCutPlanner',
   'fun.fengwk.kkstudio.harness.api.join.ThreadJoin',
   'fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints',
   'fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl',
@@ -54,7 +55,6 @@ const BUILTIN_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamPublisher',
   'fun.fengwk.kkstudio.harness.builtin.processor.ModelCheckpointCommitter',
   'fun.fengwk.kkstudio.harness.builtin.processor.ModelTerminalCommitter',
-  'fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner',
   'fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator',
   'fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec',
 ]
@@ -251,9 +251,9 @@ function withFixture(options, assertions) {
   }
 }
 
-test('the 37 critical classes are split into runtime 29 and builtin 8 without overlap', () => {
-  assert.equal(RUNTIME_CRITICAL_CLASSES.length, 29)
-  assert.equal(BUILTIN_CRITICAL_CLASSES.length, 8)
+test('the 37 critical classes are split into runtime 30 and builtin 7 without overlap', () => {
+  assert.equal(RUNTIME_CRITICAL_CLASSES.length, 30)
+  assert.equal(BUILTIN_CRITICAL_CLASSES.length, 7)
   const all = [...RUNTIME_CRITICAL_CLASSES, ...BUILTIN_CRITICAL_CLASSES]
   assert.equal(new Set(all).size, 37)
   assert.equal(
@@ -262,7 +262,7 @@ test('the 37 critical classes are split into runtime 29 and builtin 8 without ov
   )
 })
 
-test('runtime native gate owns 29 runtime classes at 0.90', () => {
+test('runtime native gate owns 30 runtime classes at 0.90', () => {
   const pom = readFileSync(path.join(REPOSITORY_ROOT, RUNTIME_MODULE, 'pom.xml'), 'utf8')
   assert.deepEqual(
     analyzeNativeCoverageGate({
@@ -274,7 +274,7 @@ test('runtime native gate owns 29 runtime classes at 0.90', () => {
   )
 })
 
-test('builtin native gate owns 5 builtin classes at 0.90', () => {
+test('builtin native gate owns 7 builtin classes at 0.90', () => {
   const pom = readFileSync(path.join(REPOSITORY_ROOT, BUILTIN_MODULE, 'pom.xml'), 'utf8')
   assert.deepEqual(
     analyzeNativeCoverageGate({

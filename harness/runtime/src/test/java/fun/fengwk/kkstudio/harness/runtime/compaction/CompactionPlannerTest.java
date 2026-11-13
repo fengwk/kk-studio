@@ -10,11 +10,13 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
+import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
@@ -111,6 +113,56 @@ class CompactionPlannerTest {
     assertThrows(
         IllegalArgumentException.class,
         () -> new CompactionCutPlanner(new CompactionConfig(1)).plan(path.path(), CONTEXT_WINDOW));
+  }
+
+  @Test
+  void cutsOnlyHistoryAfterTheLatestCompleteCompaction() {
+    // History before the previous cut is already in the earlier summary: a new cut must come after
+    // it.
+    PathBuilder path = new PathBuilder();
+    path.turn("turn 1");
+    path.turn("turn 2");
+    path.turn("turn 3");
+    path.compaction(id(9L));
+    path.turn("turn 4");
+    path.turn("turn 5");
+
+    assertEquals(
+        id(16L),
+        new CompactionCutPlanner(new CompactionConfig(75))
+            .plan(path.path(), CONTEXT_WINDOW)
+            .orElseThrow()
+            .entryId());
+    // keepRecent = min(20,000, 200 / 2) keeps everything after the previous cut: nothing to
+    // compact.
+    assertTrue(
+        new CompactionCutPlanner(new CompactionConfig(20_000))
+            .plan(path.path(), CONTEXT_WINDOW)
+            .isEmpty());
+  }
+
+  @Test
+  void returnsEmptyWhenNoModelCallFollowsThePreviousCut() {
+    // Right after a compaction that cut at the head there is no new model call to compact.
+    PathBuilder path = new PathBuilder();
+    path.turn("turn 1");
+    path.turn("turn 2");
+    path.compaction(id(9L));
+
+    assertTrue(
+        new CompactionCutPlanner(new CompactionConfig(1))
+            .plan(path.path(), CONTEXT_WINDOW)
+            .isEmpty());
+  }
+
+  @Test
+  void rejectsANonPositiveContextWindow() {
+    PathBuilder path = new PathBuilder();
+    path.turn("turn");
+
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CompactionCutPlanner(new CompactionConfig(1)).plan(path.path(), 0L));
   }
 
   @Test
@@ -249,6 +301,36 @@ class CompactionPlannerTest {
               id(100L),
               parentId(),
               new TurnEndPayload(id(openTurnStart), TurnEndOutcome.COMPLETED, false, null, null),
+              NOW));
+      return this;
+    }
+
+    /** A completed compaction turn whose summary replaces the history up to {@code cutEntryId}. */
+    PathBuilder compaction(UUID cutEntryId) {
+      long start = nextId++;
+      entries.add(
+          new Entry(
+              id(start),
+              id(100L),
+              parentId(),
+              new TurnStartPayload(
+                  TurnStartReason.COMPACTION,
+                  SETTINGS,
+                  id(200L),
+                  null,
+                  null,
+                  CompactionStart.pending(CompactionTrigger.MANUAL, cutEntryId),
+                  null),
+              NOW));
+      entries.add(
+          new Entry(
+              id(nextId++), id(100L), parentId(), new CompactionPayload("summary", null), NOW));
+      entries.add(
+          new Entry(
+              id(nextId++),
+              id(100L),
+              parentId(),
+              new TurnEndPayload(id(start), TurnEndOutcome.COMPLETED, true, null, null),
               NOW));
       return this;
     }

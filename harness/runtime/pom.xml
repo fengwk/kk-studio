@@ -103,6 +103,7 @@
                                         <include>fun.fengwk.kkstudio.harness.api.SpawnRequest.Budget</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.SpawnTickets</include>
                                         <include>fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn</include>
+                                        <include>fun.fengwk.kkstudio.harness.runtime.compaction.CompactionCutPlanner</include>
                                         <include>fun.fengwk.kkstudio.harness.api.join.ThreadJoin</include>
                                         <include>fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints</include>
                                         <include>fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl</include>
