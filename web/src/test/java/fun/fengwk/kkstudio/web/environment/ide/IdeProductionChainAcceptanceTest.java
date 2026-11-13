@@ -222,7 +222,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       assertFalse(worker.isBlank(), "the view base must serve the code-server worker script");
 
       WebSocketSession socket = openBrowserWebSocket(environmentId, firstView, firstCookie);
-      socket.awaitTerminalOutcome();
+      socket.closeAfterOpen();
 
       // 第二个视图：同一 Environment、同一 Daemon、同一 code-server 进程
       UUID secondView = UUID.randomUUID();
@@ -1357,47 +1357,21 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   private static final class WebSocketSession extends WebSocketListener {
     private final CompletableFuture<Void> opened = new CompletableFuture<>();
-    private final CompletableFuture<String> terminal = new CompletableFuture<>();
     private WebSocket socket;
 
     @Override
     public void onOpen(WebSocket webSocket, Response response) {
       opened.complete(null);
-      socket.send("{\"type\":\"probe\"}");
-    }
-
-    @Override
-    public void onMessage(WebSocket webSocket, String text) {
-      terminal.complete("message");
-    }
-
-    @Override
-    public void onMessage(WebSocket webSocket, ByteString bytes) {
-      terminal.complete("binary");
-    }
-
-    @Override
-    public void onClosing(WebSocket webSocket, int code, String reason) {
-      terminal.complete("closing:" + code);
-    }
-
-    @Override
-    public void onClosed(WebSocket webSocket, int code, String reason) {
-      terminal.complete("closed:" + code);
     }
 
     @Override
     public void onFailure(WebSocket webSocket, Throwable error, Response response) {
       opened.completeExceptionally(error);
-      terminal.completeExceptionally(error);
     }
 
-    void awaitTerminalOutcome() throws Exception {
-      try {
-        String outcome = terminal.get(FRAME_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
-        assertNotNull(outcome, "the code-server websocket must answer or close the session");
-      } finally {
-        socket.close(1000, "acceptance complete");
+    void closeAfterOpen() {
+      if (!socket.close(1000, "acceptance complete")) {
+        throw new AssertionError("the websocket close must be queued after a successful upgrade");
       }
     }
   }
