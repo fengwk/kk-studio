@@ -55,13 +55,11 @@ import java.util.Set;
  * max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code cache_control}） 冲突显式失败，{@code
  * tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker 与请求体大小均基于最终合并结果。
  *
- * <p>显式 adaptive effort 时，{@code anthropic-beta} 包含消息级 effort 所需的三个 beta。
- *
  * <p>{@code cacheControl} 只表达留存档位：{@code retention != NONE} 时在 tools/system/历史边界写入固定的原生 {@code
  * cache_control} ephemeral 标记，{@code LONG} 额外携带 {@code ttl:"1h"}；会话 {@code key} 不属于 Anthropic
  * 原生选项，因此不下发。
  *
- * <p>assistant replay 与 system/时间前缀无关，只与 replay state 的 affinity（Provider/连接世代/wire 模型）绑定。affinity
+ * <p>assistant replay 与 system/时间前缀无关，只与 replay state 的 affinity（Provider type/name/wire model）绑定。affinity
  * 不匹配时按 durable 语义回退投影，绝不因为存在 replay 而拒绝；affinity 匹配时先校验真实 payload 形状与 durable 一致性，再原位回放全部原生事实（含
  * {@code thinking} 的 signature、{@code redacted_thinking}、未知 block 与官方附加字段）。 payload 以 {@code
  * compaction} block 开头时代表历史已被摘要，校验通过后清空已编码消息使该消息成为首条消息。
