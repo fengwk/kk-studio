@@ -88,7 +88,6 @@ class AgentRepositoryIntegrationTest {
             store.create(
                 Agent.builder()
                     .name(name)
-                    .type(AgentType.USER)
                     .execution(BuiltinExecution.of(ModelSelection.model(modelName, null)))
                     .configJson(configJson)
                     .build()))

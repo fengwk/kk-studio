@@ -11,7 +11,6 @@ import {
 } from '@/features/catalog/ai-resource-draft-codecs'
 import type { ResourceEditorPlan } from '@/features/catalog/ai-resource-editor-plan-types'
 import type { AgentDTO, ModelDTO, ProviderDTO } from '@/shared/api/generated/contracts'
-import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 
 export function createProviderEditorPlan(): Extract<ResourceEditorPlan, { kind: 'provider' }> {
   return {
@@ -77,7 +76,7 @@ export function createAgentEditorPlan(
 ): Extract<ResourceEditorPlan, { kind: 'agent' }> {
   return {
     kind: 'agent',
-    modal: { kind: 'agent', mode: 'create', type: 'USER' },
+    modal: { kind: 'agent', mode: 'create' },
     agentDraft: normalizeAgentDraftDefaultVariant(emptyAgentDraft(models[0]), models),
   }
 }
@@ -97,8 +96,6 @@ export function editAgentEditorPlan(
       kind: 'agent',
       mode: 'edit',
       name: agent.name,
-      type: agent.type,
-      model: getBuiltinModelSelection(agent.execution)?.modelName ?? null,
       expectedVersion: agent.version,
     },
     agentDraft: normalizeAgentDraftDefaultVariant(toAgentDraft(agent), models),

@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.harness.task.CurrentEnvironmentContext;
 
@@ -79,6 +78,6 @@ class AgentTurnContextTest {
   }
 
   private static Agent agent() {
-    return Agent.builder().name("assistant").type(AgentType.USER).build();
+    return Agent.builder().name("assistant").build();
   }
 }

@@ -90,7 +90,6 @@ const assistantAgent: AgentDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
-  type: 'USER',
   execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
   config: { tools: [], skills: [], subagents: [] },
   version: '0',

@@ -351,7 +351,6 @@ agentService.getSkillPackageArchiveUrl = async (name: string) => {
 agentService.listAgents = async () => [
   {
     name: 'demo-agent',
-    type: 'USER' as const,
     description: null,
     systemPrompt: null,
     execution: null,

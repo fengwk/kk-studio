@@ -91,7 +91,6 @@ describe('ai-agent-draft-codec', () => {
       name: 'assistant',
       description: null,
       systemPrompt: null,
-      type: 'USER',
       execution: { driver: 'builtin', settings: { modelName: 'model', variant: 'quality' } },
       config: {
         tools: [' read ', ''],
@@ -201,32 +200,5 @@ describe('ai-agent-draft-codec', () => {
       skills: [{ packageName: 'core', name: 'dev' }],
       subagents: ['helper'],
     })
-  })
-
-  it('projects an unconfigured built-in model as empty and only BUILTIN may write null without leaking type', () => {
-    const builtin: AgentDTO = {
-      name: 'compaction',
-      description: null,
-      systemPrompt: null,
-      type: 'BUILTIN',
-      execution: null,
-      config: {
-        tools: [],
-        skills: [],
-        subagents: [],
-      },
-      version: '1',
-      createdAt: 0,
-      updatedAt: 0,
-    }
-
-    // 未配置模型投影为空字符串，绝不回退到父/第一个 model。
-    expect(toAgentDraft(builtin).model).toBe('')
-
-    // USER 路径仍要求模型：默认允许空模型导致抛错，且请求体从不包含 type。
-    expect(() => toEditableAgentUpdate(toAgentDraft(builtin))).toThrow(/model/)
-    const builtinUpdate = toEditableAgentUpdate(toAgentDraft(builtin), true)
-    expect(builtinUpdate.execution).toBeNull()
-    expect(builtinUpdate).not.toHaveProperty('type')
   })
 })

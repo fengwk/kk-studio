@@ -41,7 +41,6 @@ function agent(overrides: Partial<AgentDTO> = {}): AgentDTO {
     name: 'assistant',
     description: 'agent description',
     systemPrompt: 'prompt',
-    type: 'USER',
     execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'quality' } },
     config: {
       tools: ['read', 'bash', 'grep'],
@@ -129,45 +128,6 @@ describe('AI resource cards', () => {
     await user.click(screen.getByRole('button', { name: '编辑 assistant' }))
     await user.click(screen.getByRole('button', { name: '删除 assistant' }))
     expect(onEdit).toHaveBeenCalledOnce()
-    expect(onDelete).toHaveBeenCalledOnce()
-  })
-
-  it('shows the built-in type badge, an explicit unconfigured model, and protected identity by type', () => {
-    render(
-      <AgentResourceCard
-        agent={agent({ name: 'summarizer', type: 'BUILTIN', execution: null })}
-        models={[model()]}
-        onEdit={vi.fn()}
-        onDelete={vi.fn()}
-        deletePending={false}
-      />,
-    )
-
-    expect(screen.getByText('内置')).toBeInTheDocument()
-    // 未配置模型明确展示，不回退 catalog 中的第一个 model。
-    expect(screen.getByText('未配置')).toBeInTheDocument()
-    expect(screen.queryByText(/minimax\/MiniMax/)).not.toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '删除 summarizer' })).toBeDisabled()
-    expect(screen.getByRole('button', { name: '编辑 summarizer' })).toBeEnabled()
-  })
-
-  it('protects identity by type only: a USER agent named compaction stays deletable and unbadged', async () => {
-    const user = userEvent.setup()
-    const onDelete = vi.fn()
-    render(
-      <AgentResourceCard
-        agent={agent({ name: 'compaction', type: 'USER' })}
-        models={[model()]}
-        onEdit={vi.fn()}
-        onDelete={onDelete}
-        deletePending={false}
-      />,
-    )
-
-    expect(screen.queryByText('内置')).not.toBeInTheDocument()
-    const deleteButton = screen.getByRole('button', { name: '删除 compaction' })
-    expect(deleteButton).toBeEnabled()
-    await user.click(deleteButton)
     expect(onDelete).toHaveBeenCalledOnce()
   })
 

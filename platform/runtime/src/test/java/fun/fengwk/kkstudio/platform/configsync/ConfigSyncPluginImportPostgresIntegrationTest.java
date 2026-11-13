@@ -27,7 +27,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
 import fun.fengwk.kkstudio.platform.catalog.dto.ProviderCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerService;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
@@ -303,7 +302,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     return new ConfigSyncParser.ProviderSpec(name, properties);
   }
 
-  /** USER 型 Agent 的内置执行选择引用合成 provider 与 model。 */
+  /** Agent 的内置执行选择引用合成 provider 与 model。 */
   private static void seedAgentModel() {
     jdbcClient
         .sql(
@@ -324,7 +323,6 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     Agent agent =
         Agent.builder()
             .name(name)
-            .type(AgentType.USER)
             .systemPrompt("prompt " + name)
             .execution(BuiltinExecution.of(new ModelSelection(MODEL_NAME, null)))
             .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")

@@ -139,8 +139,8 @@ describe('ai-resource-form-validation additional branches', () => {
     { kind: 'provider', mode: 'edit', name: 'provider' },
     { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
     { kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'model' },
-    { kind: 'agent', mode: 'create', type: 'USER' },
-    { kind: 'agent', mode: 'edit', name: 'agent', type: 'USER' },
+    { kind: 'agent', mode: 'create' },
+    { kind: 'agent', mode: 'edit', name: 'agent' },
   ] as ResourceModal[])('accepts a complete $kind $mode body', (modal) => {
     expect(validate(modal)).toEqual({ ok: true, message: '', fields: {} })
   })
@@ -228,7 +228,7 @@ describe('ai-resource-form-validation additional branches', () => {
     [agent({ skills: [{ packageName: 'pkg', name: 'dev' }, { packageName: 'pkg', name: 'dev' }] }), 'skills'],
     [agent({ subagents: ['dev', 'dev'] }), 'subagents'],
   ] as Array<[AgentDraft, string]>)('maps invalid agent body %# to %s', (agentDraft, field) => {
-    const result = validate({ kind: 'agent', mode: 'create', type: 'USER' }, { agentDraft })
+    const result = validate({ kind: 'agent', mode: 'create' }, { agentDraft })
     expect(result.ok).toBe(false)
     expect(result.fields).toHaveProperty(field)
   })
@@ -237,27 +237,20 @@ describe('ai-resource-form-validation additional branches', () => {
     expect(
       validate({ kind: 'provider', mode: 'create' }, { providerDraft: provider({ name: '' }) }).fields,
     ).toHaveProperty('name')
-    expect(validate({ kind: 'agent', mode: 'create', type: 'USER' }, { agentDraft: agent({ name: '' }) }).fields).toHaveProperty(
+    expect(validate({ kind: 'agent', mode: 'create' }, { agentDraft: agent({ name: '' }) }).fields).toHaveProperty(
       'name',
     )
     expect(
-      validate({ kind: 'agent', mode: 'create', type: 'USER' }, { agentDraft: agent({ model: '' }) }).fields,
+      validate({ kind: 'agent', mode: 'create' }, { agentDraft: agent({ model: '' }) }).fields,
     ).toHaveProperty('model')
   })
 
-  it('requires a model for USER but allows an unconfigured BUILTIN save', () => {
-    // USER 无论创建还是编辑都必须有模型。
+  it('requires a configured model on agent edit', () => {
     expect(
       validate(
-        { kind: 'agent', mode: 'edit', name: 'assistant', type: 'USER', model: null, expectedVersion: '1' },
+        { kind: 'agent', mode: 'edit', name: 'assistant', expectedVersion: '1' },
         { agentDraft: agent({ model: '' }) },
       ).fields,
     ).toHaveProperty('model')
-    // BUILTIN 允许未配置模型直接保存（其余字段完整）。
-    const builtin = validate(
-      { kind: 'agent', mode: 'edit', name: 'summarizer', type: 'BUILTIN', model: null, expectedVersion: '1' },
-      { agentDraft: agent({ model: '' }) },
-    )
-    expect(builtin).toEqual({ ok: true, message: '', fields: {} })
   })
 })

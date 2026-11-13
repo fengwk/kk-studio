@@ -34,8 +34,6 @@ import java.util.Set;
  *
  * <p>有向边完全来自现有业务事实：Model → Provider；Agent → Model / Skill Package / Subagent / MCP Service（经 MCP
  * 工具名 归属）；Plugin → 该插件普通配置声明的 Agent。闭包做去重并对互相引用的 Agent 终止。Environment 是独立条目，没有反向扩展。
- *
- * <p>系统内置 Agent 不在可导出条目里，但确实存在：引用它们的依赖视为已由系统满足，因此不产生边、不进入 portable 闭包，也不让导出失败。
  */
 @Component
 public final class ConfigSyncGraph {
@@ -61,8 +59,6 @@ public final class ConfigSyncGraph {
     for (McpTool tool : snapshot.mcpTools()) {
       toolServer.put(tool.name(), tool.serverName());
     }
-    Set<String> builtinAgentNames = snapshot.builtinAgentNames();
-
     Map<ConfigSyncRef, List<ConfigSyncRef>> edges = new LinkedHashMap<>();
     for (Provider provider : snapshot.providers()) {
       edges.put(providerRef(provider), List.of());
@@ -71,7 +67,7 @@ public final class ConfigSyncGraph {
       edges.put(ConfigSyncRefs.model(model.name()), modelDependencies(model));
     }
     for (Agent agent : snapshot.agents()) {
-      edges.put(agentRef(agent), agentDependencies(agent, toolServer, builtinAgentNames));
+      edges.put(agentRef(agent), agentDependencies(agent, toolServer));
     }
     for (SkillPackage pkg : snapshot.skillPackages()) {
       edges.put(skillRef(pkg), List.of());
@@ -83,7 +79,7 @@ public final class ConfigSyncGraph {
       edges.put(mcpRef(server), List.of());
     }
     for (PluginConfigurationRow plugin : snapshot.plugins()) {
-      edges.put(pluginRef(plugin), pluginDependencies(plugin, builtinAgentNames));
+      edges.put(pluginRef(plugin), pluginDependencies(plugin));
     }
     edges.put(ConfigSyncRefs.ref(ConfigSyncKind.SETTINGS, "settings"), List.of());
 
@@ -188,9 +184,8 @@ public final class ConfigSyncGraph {
     return List.copyOf(deps);
   }
 
-  /** Agent 引用的 subagent：系统内置 Agent 已由系统满足，绝不作为 portable 依赖输出。 */
-  private List<ConfigSyncRef> agentDependencies(
-      Agent agent, Map<String, String> toolServer, Set<String> builtinAgentNames) {
+  /** Agent 引用的 subagent 作为 Agent 依赖参与闭包。 */
+  private List<ConfigSyncRef> agentDependencies(Agent agent, Map<String, String> toolServer) {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
     var model = BuiltinConfigSyncAdapter.model(agent.execution());
     if (model != null) {
@@ -204,9 +199,7 @@ public final class ConfigSyncGraph {
     }
     if (config.getSubagents() != null) {
       for (String subagent : config.getSubagents()) {
-        if (!builtinAgentNames.contains(subagent)) {
-          deps.add(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, subagent));
-        }
+        deps.add(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, subagent));
       }
     }
     if (config.getTools() != null) {
@@ -220,20 +213,13 @@ public final class ConfigSyncGraph {
     return List.copyOf(deps);
   }
 
-  /**
-   * 插件对 Agent 的依赖取自插件自身的 {@code requiredAgentNames} 声明；无依赖插件不制造依赖。
-   *
-   * <p>声明的系统内置 Agent 已由系统满足：不产生边、不进闭包，其余依赖仍按普通缺失处理。
-   */
-  private List<ConfigSyncRef> pluginDependencies(
-      PluginConfigurationRow plugin, Set<String> builtinAgentNames) {
+  /** 插件对 Agent 的依赖取自插件自身的 {@code requiredAgentNames} 声明；无依赖插件不制造依赖。 */
+  private List<ConfigSyncRef> pluginDependencies(PluginConfigurationRow plugin) {
     Set<ConfigSyncRef> deps = new LinkedHashSet<>();
     for (String agent :
         pluginAgentDependencies.declaredAgentNames(
             plugin.pluginId(), plugin.version(), plugin.valuesJson())) {
-      if (!builtinAgentNames.contains(agent)) {
-        deps.add(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent));
-      }
+      deps.add(ConfigSyncRefs.ref(ConfigSyncKind.AGENTS, agent));
     }
     return List.copyOf(deps);
   }

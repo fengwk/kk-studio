@@ -193,8 +193,8 @@ class ModelRenameIntegrationTest {
     fixture
         .sql(
             """
-            insert into agent (name, type, execution, config)
-            values (:name, 'BUILTIN',
+            insert into agent (name, execution, config)
+            values (:name,
                     jsonb_build_object('driver', :driver,
                         'settings', jsonb_build_object(
                             'modelName', :modelName, 'variant', 'default')),

@@ -36,7 +36,6 @@ const HARNESS_AGENT: AgentDTO = {
   name: 'assistant',
   description: '通用助手',
   systemPrompt: null,
-  type: 'BUILTIN',
   execution: { driver: 'builtin', settings: { modelName: 'minimax/VeryLongModelName', variant: 'default' } },
   config: { tools: [], skills: [], subagents: [] },
   version: '1',

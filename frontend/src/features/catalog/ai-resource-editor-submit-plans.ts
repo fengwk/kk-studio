@@ -69,8 +69,7 @@ export function buildResourceSubmitPlan(
       mode: 'edit',
       name: modal.name,
       data: {
-        // BUILTIN 允许未配置模型；请求体不携带系统持有的 type。
-        ...toEditableAgentUpdate(drafts.agentDraft, modal.type === 'BUILTIN'),
+        ...toEditableAgentUpdate(drafts.agentDraft),
         expectedVersion: modal.expectedVersion,
       },
     }

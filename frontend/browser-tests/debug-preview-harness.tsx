@@ -42,7 +42,6 @@ const router = createMemoryRouter([{
             name: 'assistant',
             description: '通用助手',
             systemPrompt: 'You are a precise coding assistant.',
-            type: 'BUILTIN',
             execution: { driver: 'builtin', settings: { modelName: 'minimax-m2.7', variant: 'default' } },
             config: {
               tools: ['read', 'bash'],
@@ -57,7 +56,6 @@ const router = createMemoryRouter([{
             name,
             description: name,
             systemPrompt: null,
-            type: 'USER',
             execution: { driver: 'builtin', settings: { modelName: name === 'coder' ? 'anthropic/Claude' : 'missing/model', variant: 'fast' } },
             config: { tools: [], skills: [], subagents: [] },
             version: '1',

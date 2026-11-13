@@ -23,7 +23,6 @@ import { ToolSelectionPanel, SkillSelectionPanel } from '@/features/catalog/Capa
 import { translate, useI18n } from '@/shared/i18n'
 import type {
   AgentDTO,
-  AgentType,
   ModelDTO,
   SkillPackageSummaryDTO,
   ToolCatalogEntryDTO,
@@ -37,7 +36,6 @@ function toggleValue(items: string[], value: string): string[] {
 export function AgentForm({
   draft,
   mode = 'create',
-  agentType = 'USER',
   models,
   toolCatalog = [],
   agents = [],
@@ -49,8 +47,6 @@ export function AgentForm({
 }: {
   draft: AgentDraft
   mode?: 'create' | 'edit'
-  /** 系统持有的 Agent 类型；BUILTIN 允许未配置模型，USER 保持必填。 */
-  agentType?: AgentType
   models: ModelDTO[]
   toolCatalog?: ToolCatalogEntryDTO[]
   agents?: AgentDTO[]
@@ -61,12 +57,10 @@ export function AgentForm({
   onChange: (draft: AgentDraft) => void
 }) {
   const { t } = useI18n()
-  const builtin = agentType === 'BUILTIN'
   const driver = draft.execution?.driver ?? 'builtin'
   const selectedModel = models.find((model) => model.name === draft.model)
   const modelUnavailable =
     mode === 'edit' && Boolean(draft.model) && selectedModel === undefined
-  const modelUnconfigured = builtin && !draft.model.trim()
   const toolCandidates = withSelectedOrphans(
     buildToolCandidates(toolCatalog),
     draft.tools,
@@ -134,7 +128,7 @@ export function AgentForm({
       </label>
       {driver === 'builtin' ? <>
       <label className={`form-group${fieldErrors.model ? ' is-error' : ''}`}>
-        <FieldLabel required={!builtin}>{t('ai.catalog.form.defaultModel')}</FieldLabel>
+        <FieldLabel required>{t('ai.catalog.form.defaultModel')}</FieldLabel>
         <ModelSelectionPicker
           models={models}
           modelName={draft.model}
@@ -144,20 +138,12 @@ export function AgentForm({
           variantFieldLabel={t('ai.catalog.form.defaultVariantOverride')}
           allowModelGroup
           showVariant
-          allowUnsetModel={builtin}
-          unsetModelLabel={t('ai.catalog.form.modelUnconfigured')}
           variantUnsetLabel={t('ai.catalog.form.useModelDefault')}
-          modelRequired={!builtin}
+          modelRequired
           modelUnavailable={modelUnavailable}
           variantUnavailable={modelUnavailable}
           variantDisabled={selectedModel === undefined}
-          modelDescribedBy={
-            modelUnavailable
-              ? 'agent-model-identity-status'
-              : modelUnconfigured
-                ? 'agent-model-unconfigured-status'
-                : undefined
-          }
+          modelDescribedBy={modelUnavailable ? 'agent-model-identity-status' : undefined}
           variantDescribedBy={modelUnavailable ? 'agent-model-variant-status' : undefined}
           onModelChange={(model) => onChange(applyAgentModelSelection(draft, model, models))}
           onVariantChange={(variant) => onChange({ ...draft, variant })}
@@ -165,11 +151,6 @@ export function AgentForm({
         {modelUnavailable ? (
           <span id="agent-model-identity-status" className="inline-hint" role="status">
             {t('ai.catalog.form.unavailableIdentityHint')}
-          </span>
-        ) : null}
-        {modelUnconfigured ? (
-          <span id="agent-model-unconfigured-status" className="inline-hint" role="status">
-            {t('ai.catalog.form.modelUnconfiguredHint')}
           </span>
         ) : null}
         {fieldErrors.model ? <span className="field-error">{fieldErrors.model}</span> : null}
@@ -239,7 +220,7 @@ export function AgentForm({
           {t('ai.catalog.form.needModel')}
         </div>
       )}
-      {driver === 'builtin' && models.length > 0 && !draft.model && !builtin && (
+      {driver === 'builtin' && models.length > 0 && !draft.model && (
         <Button variant="inline" onClick={() => onChange(emptyAgentDraft(models[0]))}>
           {t('ai.catalog.form.fillFirstModel')}
         </Button>

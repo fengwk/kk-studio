@@ -125,7 +125,6 @@ class AgentServiceUnitTest {
                 null));
     AgentConfigDTO stored = objectMapper.readValue(created.configJson(), AgentConfigDTO.class);
     assertEquals(List.of(skillRef("tools", "java"), skillRef("tools", "dev")), stored.getSkills());
-    assertEquals(AgentType.USER, created.type());
     assertEquals(ModelSelection.model("model", null), BuiltinExecution.model(created.execution()));
 
     Agent current = definition();
@@ -343,33 +342,7 @@ class AgentServiceUnitTest {
     verify(repository, never()).deleteByName(any(), anyLong());
   }
 
-  /** 系统持有身份的 Agent：按类型受删除保护、允许未配置 execution 但拒绝无模型的 variant。 */
-  @Test
-  void systemOwnedAgentsKeepIdentityProtection() {
-    Agent builtin = definition().toBuilder().type(AgentType.BUILTIN).execution(null).build();
-    when(resolver.requireAgentForUpdate("agent")).thenReturn(builtin);
-    assertThrows(DomainException.class, () -> service.deleteAgent("agent", 0L));
-    verify(repository, never()).deleteByName(any(), anyLong());
-
-    when(resolver.requireAgent("agent")).thenReturn(builtin);
-    when(resolver.requireAgentAndSubagentsForUpdate("agent", List.of())).thenReturn(builtin);
-    when(repository.updateByName(any(), eq(0L))).thenReturn(true);
-    when(repository.getByName("agent")).thenReturn(builtin);
-    AgentUpdateDTO unconfigured = update(0L);
-    unconfigured.setExecution(null);
-    AgentDTO dto = service.updateAgent("agent", unconfigured);
-    assertNull(dto.getExecution());
-    verify(modelRepository, never()).getByNameForUpdate(any());
-    verify(variants, never()).resolve(any(), any());
-
-    HarnessExecutionSelectionDTO malformed = execution("model", "default");
-    ObjectNode malformedSettings = (ObjectNode) malformed.getSettings();
-    malformedSettings.putNull("modelName");
-    unconfigured.setExecution(malformed);
-    assertThrows(DomainException.class, () -> service.updateAgent("agent", unconfigured));
-  }
-
-  /** 用户 Agent 的更新仍必须有 execution（显式未配置只对内置 Agent 合法）。 */
+  /** 更新必须携带 execution。 */
   @Test
   void userAgentUpdateRequiresModel() {
     when(resolver.requireAgent("agent")).thenReturn(definition());
@@ -468,7 +441,6 @@ class AgentServiceUnitTest {
   private static Agent definition() {
     return Agent.builder()
         .name("agent")
-        .type(AgentType.USER)
         .execution(BuiltinExecution.of(ModelSelection.model("model", null)))
         .configJson(EMPTY_CONFIG)
         .version(0L)

@@ -243,7 +243,7 @@ test.describe('Project Agent Real Browser Wiring & Control Gatekeeping', () => {
         if (path === '/api/platform/agents') {
           await route.fulfill({
             json: [
-                  { name: 'architect', description: '系统架构师', type: 'USER',
+                  { name: 'architect', description: '系统架构师',
                     execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
                     config: { tools: [], skills: [], subagents: [] }, version: '1' },
             ],

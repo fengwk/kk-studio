@@ -75,7 +75,6 @@ function preview(overrides: Partial<SkillPackageStagingDTO> = {}): SkillPackageS
 function agent(name: string, skills: { packageName: string; name: string }[]): AgentDTO {
   return {
     name,
-    type: 'USER',
     description: null,
     systemPrompt: null,
     execution: null,

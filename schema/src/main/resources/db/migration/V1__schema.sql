@@ -917,7 +917,6 @@ comment on column model.group_config is 'GROUP 的有序成员、立即降级 HT
 
 create table agent (
     name            varchar(64)   primary key,
-    type            varchar(16)   not null default 'USER',
     description     text,
     system_prompt   text,
     execution       jsonb,
@@ -931,7 +930,6 @@ create table agent (
         and char_length(name) > 0
         and position('/' in name) = 0
     ),
-    constraint ck_agent_type check (type in ('USER', 'BUILTIN')),
     constraint ck_agent_execution_shape check (
         execution is null or case when jsonb_typeof(execution) = 'object' then coalesce(
             execution ? 'driver' and execution ? 'settings'

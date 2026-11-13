@@ -349,7 +349,7 @@ Agent 定义以 `execution: {driver, settings}` 选择执行后端，格式与 T
 Agent 的 `config` 另保存工具名、`SkillRef(packageName, name)` 和 subagents；工具候选和
 Skill 引用在写入时校验。子 Agent 使用执行根当前 Environment。
 
-Agent 定义另有系统拥有的不可变 `type`（`USER` / `BUILTIN`），只出现在读 DTO，可编辑的创建/PUT 请求不接受它；普通用户不能创建或提升内置定义。首个内置定义是普通目录中可见的 `Compaction`：名称与存在由系统拥有，用户可编辑其 prompt、execution、tools、skills 与普通配置，但不能删除或改名；内置定义允许显式未配置 execution（不继承调用 Thread 的选择，也不静默 fallback），用户创建的 Agent 则必须配置 execution。启动初始化按 add-if-missing 只创建一次（默认 summarization prompt、无 tools/skills/subagents），配置导入导出排除内置定义，既不覆盖用户编辑也不降级。
+Agent 没有系统持有的所有权类型：目录中的每个 Agent 都由用户创建、编辑与删除，`execution` 必须配置。
 
 ### Git Skill Package
 
@@ -730,8 +730,8 @@ MCP 发现由计划阶段执行；Git Skill 在导入执行时解析分支当前
 导入复用现有校验、引用保护和 CAS；循环 Agent 用同事务两阶段写入。
 配置导入具备全文件事务原子性（包含 Git 技能包）：Git 远端网络拉取与归档准备在写事务前执行，发布在同一数据库事务内完成；写入失败时整体回滚。准备阶段生成的暂存归档尽力清理，未清理的暂存对象由存储过期机制回收。
 插件是第八类：条目只含 `pluginId` 与普通值文本，秘密与配置版本都不进入文件。
-导出只覆盖已安装插件，并按插件在代码里声明的所需 Agent 补齐插件→Agent 闭包，缺失 Agent 时拒绝导出，
-内置 Agent 只满足依赖、从不作为条目导出；导入时未安装的 id 按条目级跳过，已安装插件按本插件的
+导出只覆盖已安装插件，并按插件在代码里声明的所需 Agent 补齐插件→Agent 闭包，缺失 Agent 时拒绝导出；
+导入时未安装的 id 按条目级跳过，已安装插件按本插件的
 configurationSchema 归一化普通值，非法值整份拒绝。普通值可随文件往返，秘密与受保护身份不进入文件，
 导入后仍需在 Plugin Secret API 或登录流程录入。
 插件写入复用唯一写入口：计划期的各插件版本作为导入事务内的 CAS 坐标，
@@ -753,7 +753,7 @@ storageMedia、advanced 六个 section。strict codec 与 record 校验完整聚
 `expectedVersion` CAS 后提交通知驱动权威回读，内存快照按 version 替换。设置保存后立即生效；
 每个使用点从内存快照读取当前值，已经开始的调用继续使用启动时取得的值。`SystemSettingsSchemaProvider` 提供 UI 编辑 metadata。
 `tool.maxOutputMib`（默认 16，范围 1–100）是所有工具单次调用输出大小上限，单位 MiB，按 1,048,576 字节换算。
-aiRuntime 包含 `modelHttpRetryStatusCodes`（唯一可重试 HTTP 状态名单，默认 `[408,429,500,502,503,504]`，仅接受 400–599）、调用重试次数与退避、压缩保留量与 subagent 限额；Provider 可用同名字段覆盖该名单（null 继承、数组完全替代、空数组禁用 HTTP 重试），压缩执行使用普通 Agent 目录中的 `Compaction` 定义，不在 settings 里选择。
+aiRuntime 包含 `modelHttpRetryStatusCodes`（唯一可重试 HTTP 状态名单，默认 `[408,429,500,502,503,504]`，仅接受 400–599）、调用重试次数与退避、压缩保留量与 subagent 限额；Provider 可用同名字段覆盖该名单（null 继承、数组完全替代、空数组禁用 HTTP 重试），压缩执行使用 `compactionModel`，null 表示使用对话当前模型。
 storageMedia 持有临时资源保留期与扫描间隔（默认 3 天 / 30 分钟，热更经心跳通道作用于尚未回收的 Daemon workspace）、上传有效期与下载签名默认值。
 
 backendNetwork 只作用于 Backend 自身的 HTTP 请求：`proxyUrl` 为无认证的 `http://host:port`，

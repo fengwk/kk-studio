@@ -25,8 +25,6 @@ import java.util.Objects;
 /**
  * 全局 Agent CRUD：字段与结构化执行配置规范化、Model / Skill / MCP / subagent 引用的有序加锁校验、(name, version) CAS
  * 与删除前的引用检查。
- *
- * <p>内置 Agent 的名称与存在性由系统持有：用户不能同名创建或删除，但可以编辑，且允许显式未配置 execution。
  */
 @Service
 public class AgentService {
@@ -75,8 +73,8 @@ public class AgentService {
   @Transactional
   public AgentDTO createAgent(AgentCreateDTO createDTO) {
     String name = createDTO == null ? null : createDTO.getName();
-    Mutation mutation = mutation(name, createDTO, true);
-    Agent definition = mutation.applyTo(Agent.builder().type(AgentType.USER)).build();
+    Mutation mutation = mutation(name, createDTO);
+    Agent definition = mutation.applyTo(Agent.builder()).build();
     builtinExecutionValidator.validateCatalog(definition.execution());
     AgentConfigDTO config = configCodec.decode(definition.configJson());
     validateConfig(config);
@@ -101,10 +99,7 @@ public class AgentService {
     }
     Agent current = referenceResolver.requireAgent(name);
     ensureExpectedVersion(current, expected);
-    // 内置 Agent 允许显式未配置 execution。
-    boolean executionRequired = current.type() != AgentType.BUILTIN;
-    Agent definition =
-        mutation(current.name(), updateDTO, executionRequired).applyTo(current.toBuilder()).build();
+    Agent definition = mutation(current.name(), updateDTO).applyTo(current.toBuilder()).build();
     builtinExecutionValidator.validateCatalog(definition.execution());
     AgentConfigDTO config = configCodec.decode(definition.configJson());
     validateConfig(config);
@@ -124,10 +119,6 @@ public class AgentService {
   @Transactional
   public void deleteAgent(String name, long expected) {
     Agent definition = referenceResolver.requireAgentForUpdate(name);
-    if (definition.type() == AgentType.BUILTIN) {
-      // 内置 Agent 的名称与存在性由系统持有，用户不能删除。
-      throw DomainException.inUse(RESOURCE, "built-in agent cannot be deleted: " + name);
-    }
     ensureExpectedVersion(definition, expected);
     referenceResolver.ensureNotReferencedAsSubagent(name);
     for (AgentReferenceCheck reference : productReferences) {
@@ -152,14 +143,13 @@ public class AgentService {
 
   /** 与写入共用字段和 execution 形状校验；导入预检不访问尚未导入的模型。 */
   public void validateImport(String name, AgentEditablePropertiesDTO properties) {
-    mutation(name, properties, true);
+    mutation(name, properties);
   }
 
   /** 将 Agent 投影为公开 DTO。 */
   public AgentDTO toDto(Agent definition) {
     AgentDTO dto = new AgentDTO();
     dto.setName(definition.name());
-    dto.setType(definition.type());
     dto.setDescription(definition.description());
     dto.setSystemPrompt(definition.systemPrompt());
     dto.setExecution(toExecutionDto(definition.execution()));
@@ -180,8 +170,7 @@ public class AgentService {
     configValidator.validate(config);
   }
 
-  private Mutation mutation(
-      String name, AgentEditablePropertiesDTO properties, boolean executionRequired) {
+  private Mutation mutation(String name, AgentEditablePropertiesDTO properties) {
     if (properties == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
@@ -199,7 +188,7 @@ public class AgentService {
     if (normalizedName.indexOf('/') >= 0) {
       throw DomainException.validation(RESOURCE, RESOURCE + " name must not contain '/'");
     }
-    ExecutionSelection execution = parseExecution(properties.getExecution(), executionRequired);
+    ExecutionSelection execution = parseExecution(properties.getExecution());
     String description = editableSupport.trimToNull(properties.getDescription());
     String systemPrompt = editableSupport.trimToNull(properties.getSystemPrompt());
     editableSupport.validateMaxLength(RESOURCE, "name", normalizedName, NAME_MAX_LENGTH);
@@ -216,12 +205,9 @@ public class AgentService {
     return new Mutation(normalizedName, description, systemPrompt, execution, configJson);
   }
 
-  private ExecutionSelection parseExecution(HarnessExecutionSelectionDTO dto, boolean required) {
+  private ExecutionSelection parseExecution(HarnessExecutionSelectionDTO dto) {
     if (dto == null) {
-      if (required) {
-        throw DomainException.validation(RESOURCE, "execution is required");
-      }
-      return null;
+      throw DomainException.validation(RESOURCE, "execution is required");
     }
     if (dto.getDriver() == null || dto.getSettings() == null || !dto.getSettings().isObject()) {
       throw DomainException.validation(RESOURCE, "execution driver and settings are required");

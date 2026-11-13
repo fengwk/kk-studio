@@ -24,7 +24,6 @@ const testAgents: AgentDTO[] = [
     name: 'assistant',
     description: null,
     systemPrompt: '',
-    type: 'BUILTIN',
     execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
     config: {
       tools: [],

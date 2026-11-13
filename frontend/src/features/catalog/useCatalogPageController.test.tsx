@@ -234,7 +234,6 @@ function agent(): AgentDTO {
     name: 'default-assistant',
     description: null,
     systemPrompt: null,
-    type: 'USER' as const,
     execution: { driver: 'builtin', settings: { modelName: 'model-1', variant: 'default' } },
     config: {
       tools: [],

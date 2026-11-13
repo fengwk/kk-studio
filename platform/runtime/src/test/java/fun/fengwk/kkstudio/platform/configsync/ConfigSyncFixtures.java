@@ -263,16 +263,12 @@ final class ConfigSyncFixtures {
   }
 
   static Agent agent(String name, String modelName, AgentConfigDTO config) {
-    // 未配置的内置 Agent 没有执行选择；只有绑定了模型的 Agent 才构造 ModelSelection。
-    Agent agent =
-        Agent.builder()
-            .name(name)
-            .execution(
-                modelName == null ? null : BuiltinExecution.of(new ModelSelection(modelName, null)))
-            .configJson(AGENT_CONFIG_CODEC.encode(config))
-            .version(0L)
-            .build();
-    return agent;
+    return Agent.builder()
+        .name(name)
+        .execution(BuiltinExecution.of(new ModelSelection(modelName, null)))
+        .configJson(AGENT_CONFIG_CODEC.encode(config))
+        .version(0L)
+        .build();
   }
 
   static SkillPackage skillPackage(String packageName, String... skillNames) {
@@ -361,22 +357,13 @@ final class ConfigSyncFixtures {
       List<McpServer> mcpServers,
       List<McpTool> mcpTools) {
     return snapshotWithPlugins(
-        providers,
-        models,
-        agents,
-        Set.of(),
-        skillPackages,
-        environments,
-        mcpServers,
-        mcpTools,
-        List.of());
+        providers, models, agents, skillPackages, environments, mcpServers, mcpTools, List.of());
   }
 
   static ConfigSyncSnapshot snapshotWithPlugins(
       List<Provider> providers,
       List<Model> models,
       List<Agent> agents,
-      Set<String> builtinAgentNames,
       List<SkillPackage> skillPackages,
       List<Environment> environments,
       List<McpServer> mcpServers,
@@ -386,7 +373,6 @@ final class ConfigSyncFixtures {
         providers,
         models,
         agents,
-        builtinAgentNames,
         skillPackages,
         environments,
         mcpServers,

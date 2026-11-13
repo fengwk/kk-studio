@@ -51,8 +51,6 @@ describe('ai-resource-editor-submit-plans', () => {
         kind: 'agent',
         mode: 'edit',
         name: 'assistant',
-        type: 'USER',
-        model: 'original-model',
         expectedVersion: '8',
       },
       {
@@ -79,29 +77,4 @@ describe('ai-resource-editor-submit-plans', () => {
     expect(plan.data).not.toHaveProperty('type')
   })
 
-  it('writes a null model for an unconfigured BUILTIN and never sends the system-owned type', () => {
-    const plan = buildResourceSubmitPlan(
-      {
-        kind: 'agent',
-        mode: 'edit',
-        name: 'summarizer',
-        type: 'BUILTIN',
-        model: null,
-        expectedVersion: '3',
-      },
-      {
-        ...drafts(),
-        agentDraft: { ...emptyAgentDraft(), description: 'edited prompt' },
-      },
-    )
-
-    expect(plan).toMatchObject({
-      kind: 'agent',
-      mode: 'edit',
-      name: 'summarizer',
-      data: { expectedVersion: '3', execution: null, description: 'edited prompt' },
-    })
-    if (plan.kind !== 'agent' || plan.mode !== 'edit') return
-    expect(plan.data).not.toHaveProperty('type')
-  })
 })
