@@ -108,7 +108,7 @@ class ProviderRequestPreviewServiceTest {
   private static final int CONTEXT_WINDOW = 100_000;
   private static final int MAX_OUTPUT_TOKENS = 16_384;
 
-  /** 阈值压缩触发事实：90_002 + 可见尾部 token 必然越过 softThreshold(CONTEXT_WINDOW)。 */
+  /** 阈值压缩触发事实：90_002 + 可见尾部 token 必然越过请求前预算（窗口减 reserve）。 */
   private static final ModelUsage OVER_THRESHOLD_USAGE =
       new ModelUsage(90_000L, 2L, 0L, 0L, Map.of(), 0L, 90_002L);
 
