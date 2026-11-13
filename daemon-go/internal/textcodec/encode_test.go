@@ -3,6 +3,9 @@ package textcodec
 import (
 	"errors"
 	"testing"
+
+	"golang.org/x/text/encoding"
+	"golang.org/x/text/transform"
 )
 
 // COD-T-243: Encode restores every byte order mark and never substitutes characters.
@@ -95,4 +98,64 @@ func TestEncodeWideEncodings(t *testing.T) {
 			t.Fatalf("%s: bytes=%x want=%x", test.name, data, test.want)
 		}
 	}
+}
+
+// COD-T-244: U+0080 is outside US-ASCII, so ASCII encoding rejects it instead of emitting bytes.
+func TestEncodeASCIIRejectsU0080(t *testing.T) {
+	var unrepresentable *UnrepresentableError
+	if _, err := Encode("\u0080", Encoding{Name: "US-ASCII"}); !errors.As(err, &unrepresentable) || unrepresentable.Char != 0x80 {
+		t.Fatalf("U+0080 err=%v", err)
+	}
+	if data, err := Encode("\u007f", Encoding{Name: "US-ASCII"}); err != nil || string(data) != "\u007f" {
+		t.Fatalf("U+007F bytes=%x err=%v", data, err)
+	}
+}
+
+// COD-T-244: a legacy encoder that maps several characters to one byte must be refused instead
+// of silently changing the text.
+func TestEncodeRejectsSubstitutingLegacyEncoder(t *testing.T) {
+	var unrepresentable *UnrepresentableError
+	if _, err := encodeLegacy("AB", Encoding{Name: "merging"}, mergingEncoding{}); !errors.As(err, &unrepresentable) || unrepresentable.Char != 'B' || unrepresentable.Line != 1 {
+		t.Fatalf("substituting encoder err=%v", err)
+	}
+	if data, err := encodeLegacy("A", Encoding{Name: "merging"}, mergingEncoding{}); err != nil || string(data) != "\xab" {
+		t.Fatalf("round-tripping encoder bytes=%x err=%v", data, err)
+	}
+}
+
+// mergingEncoding is a fake legacy encoding whose encoder maps both 'A' and 'B' to 0xAB while
+// its decoder maps 0xAB back to 'A'.
+type mergingEncoding struct{}
+
+func (mergingEncoding) NewDecoder() *encoding.Decoder {
+	return &encoding.Decoder{Transformer: mergingTransformer{}}
+}
+
+func (mergingEncoding) NewEncoder() *encoding.Encoder {
+	return &encoding.Encoder{Transformer: mergingTransformer{}}
+}
+
+type mergingTransformer struct{}
+
+func (mergingTransformer) Reset() {}
+
+func (mergingTransformer) Transform(dst, src []byte, _ bool) (int, int, error) {
+	consumed := 0
+	written := 0
+	for consumed < len(src) {
+		if written >= len(dst) {
+			return written, consumed, transform.ErrShortDst
+		}
+		switch src[consumed] {
+		case 'A', 'B':
+			dst[written] = 0xab
+		case 0xab:
+			dst[written] = 'A'
+		default:
+			return written, consumed, errors.New("fake encoding: unsupported byte")
+		}
+		written++
+		consumed++
+	}
+	return written, consumed, nil
 }

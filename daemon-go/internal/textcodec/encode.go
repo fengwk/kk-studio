@@ -4,6 +4,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
 )
 
@@ -32,7 +33,7 @@ func encodeBody(text string, enc Encoding) ([]byte, error) {
 		return []byte(text), nil
 	case strictASCII(enc.Name):
 		for offset, value := range text {
-			if value > utf8.RuneSelf {
+			if value >= utf8.RuneSelf {
 				return nil, &UnrepresentableError{Encoding: enc, Char: value, Line: lineAt(text, offset)}
 			}
 		}
@@ -44,11 +45,36 @@ func encodeBody(text string, enc Encoding) ([]byte, error) {
 	if err != nil || xtext == nil {
 		return nil, &UnsupportedLabelError{Label: enc.Name, Declaration: enc.Declaration}
 	}
+	return encodeLegacy(text, enc, xtext)
+}
+
+// encodeLegacy encodes text with a legacy encoding and verifies that the bytes reproduce it:
+// some encoders map several characters to the same bytes, which would silently change the text.
+func encodeLegacy(text string, enc Encoding, xtext encoding.Encoding) ([]byte, error) {
 	encoded, source, err := transform.Bytes(xtext.NewEncoder(), []byte(text))
 	if err != nil {
 		return nil, unrepresentableAt(text, source, enc)
 	}
+	if err := checkEncoded(text, encoded, xtext, enc); err != nil {
+		return nil, err
+	}
 	return encoded, nil
+}
+
+// checkEncoded reports the first character of text the encoded bytes do not reproduce.
+func checkEncoded(text string, encoded []byte, xtext encoding.Encoding, enc Encoding) error {
+	reproduced, _, decodeErr := transform.Bytes(xtext.NewDecoder(), encoded)
+	if decodeErr == nil && string(reproduced) == text {
+		return nil
+	}
+	for offset, value := range text {
+		decoded, size := utf8.DecodeRune(reproduced)
+		if size == 0 || decoded != value {
+			return &UnrepresentableError{Encoding: enc, Char: value, Line: lineAt(text, offset)}
+		}
+		reproduced = reproduced[size:]
+	}
+	return &UnrepresentableError{Encoding: enc, Char: utf8.RuneError, Line: lineAt(text, len(text))}
 }
 
 // encodeWide encodes text as UTF-16 or UTF-32.
