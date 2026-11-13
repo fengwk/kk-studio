@@ -964,8 +964,8 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 	if capabilityID == "" {
 		return r.rejectCall(id, "capabilityId is required")
 	}
-	if invoke.Invoke.ExpectedFile != nil && capabilityID != "fs.edit" {
-		return r.rejectCall(id, "expectedFile is only valid for fs.edit")
+	if invoke.Invoke.ExpectedFile != nil && capabilityID != "fs.edit" && capabilityID != "fs.write" {
+		return r.rejectCall(id, "expectedFile is only valid for fs.edit and fs.write")
 	}
 	executor, ok := r.options.Capabilities[capabilityID]
 	if !ok {

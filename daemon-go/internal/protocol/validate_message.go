@@ -108,13 +108,18 @@ func validateMessage(e *Envelope) error {
 			return invalid("invoke.maxOutputBytes must be a non-negative safe integer")
 		}
 		if v.ExpectedFile != nil {
-			if v.GetCapabilityId() != "fs.edit" {
-				return invalid("invoke.expectedFile is only valid for fs.edit")
+			capabilityID := v.GetCapabilityId()
+			if capabilityID != "fs.edit" && capabilityID != "fs.write" {
+				return invalid("invoke.expectedFile is only valid for fs.edit and fs.write")
 			}
 			if err := requireString(v.ExpectedFile.Path, "invoke.expectedFile.path", true, 0); err != nil {
 				return err
 			}
-			if err := sha(v.ExpectedFile.GetSha256(), "invoke.expectedFile.sha256"); err != nil {
+			if v.ExpectedFile.Sha256 == nil {
+				if capabilityID == "fs.edit" {
+					return invalid("invoke.expectedFile.sha256 is required")
+				}
+			} else if err := sha(v.ExpectedFile.GetSha256(), "invoke.expectedFile.sha256"); err != nil {
 				return err
 			}
 		}
