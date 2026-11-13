@@ -58,7 +58,55 @@ type RuntimeOptions struct {
 type activeConnection struct {
 	generation uint64
 	connection Connection
+	// goaway records that this generation ended through a control GOAWAY. Its retirement closes the
+	// old connection once and reconnects immediately instead of applying the disconnect backoff.
+	goaway atomic.Bool
 }
+
+// controlAttempt carries transport-level events for one connection attempt back to the runtime. It
+// is bound to the attempt's generation after a successful dial so that late events of an older
+// generation can never act on the current connection.
+type controlAttempt struct {
+	runtime *Runtime
+	active  atomic.Pointer[activeConnection]
+	mu      sync.Mutex
+	pending bool
+}
+
+func newControlAttempt(runtime *Runtime) *controlAttempt {
+	return &controlAttempt{runtime: runtime}
+}
+
+// bind attaches the generation this attempt produced. A GOAWAY that arrived before the generation
+// was known retires it immediately, exactly like a GOAWAY observed on a bound generation.
+func (a *controlAttempt) bind(active *activeConnection) {
+	a.active.Store(active)
+	a.mu.Lock()
+	pending := a.pending
+	a.mu.Unlock()
+	if pending {
+		a.runtime.retireConnection(active)
+	}
+}
+
+// NotifyGoaway retires the generation on a graceful control GOAWAY. Other error codes stay on the
+// ordinary disconnect path.
+func (a *controlAttempt) NotifyGoaway(code uint32) {
+	if code != 0 {
+		return
+	}
+	active := a.active.Load()
+	if active == nil {
+		a.mu.Lock()
+		a.pending = true
+		a.mu.Unlock()
+		return
+	}
+	a.runtime.retireConnection(active)
+}
+
+// NotifyUpgradeFailed is implemented for the transport seam; upgrade policy is added with the 426 path.
+func (a *controlAttempt) NotifyUpgradeFailed(int, *protocol.UpgradeRequired) {}
 
 type runningCall struct {
 	cancel         context.CancelFunc
@@ -293,7 +341,8 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 
 	delay := r.options.InitialReconnectDelay
 	for {
-		connection, err := r.options.Connections.Connect(runCtx)
+		attempt := newControlAttempt(r)
+		connection, err := r.options.Connections.Connect(runCtx, attempt)
 		if err != nil {
 			if runCtx.Err() != nil {
 				return nil
@@ -311,6 +360,7 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 			return errors.New("connection factory returned an empty connection")
 		}
 		active := r.attachConnection(connection)
+		attempt.bind(active)
 		err = r.serveConnection(runCtx, active)
 		if runCtx.Err() == nil && r.options.ReportError != nil {
 			r.options.ReportError(err)
@@ -328,11 +378,23 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 		if errors.Is(err, ErrRegistrationRejected) {
 			return err
 		}
+		if active.goaway.Load() {
+			// A graceful GOAWAY already retired this generation: reconnect immediately and keep the
+			// existing backoff state instead of waiting on it.
+			continue
+		}
 		if !waitReconnect(runCtx, delay) {
 			return nil
 		}
 		delay = doubledDelay(delay, r.options.MaxReconnectDelay)
 	}
+}
+
+// retireConnection closes one generation exactly once, releasing its binding and IDE work, and
+// marks it as GOAWAY-retired so the run loop reconnects immediately.
+func (r *Runtime) retireConnection(active *activeConnection) {
+	active.goaway.Store(true)
+	_ = r.dropConnection(active)
 }
 
 func (r *Runtime) serveConnection(ctx context.Context, active *activeConnection) error {

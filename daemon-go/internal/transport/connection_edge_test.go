@@ -300,7 +300,7 @@ func TestControlConnection_ControlRouteAndGoaway(t *testing.T) {
 	}
 	cc.signalGoaway(0)
 	callback := make(chan uint32, 1)
-	goaway := &ControlConnection{closed: make(chan struct{}), goaway: make(chan uint32, 1), onGoaway: func(code uint32) { callback <- code }}
+	goaway := &ControlConnection{closed: make(chan struct{}), goaway: make(chan uint32, 1), observer: recordingObserver{goaway: func(code uint32) { callback <- code }}}
 	done := make(chan struct{})
 	go func() { defer close(done); goaway.forwardGoaway() }()
 	goaway.signalGoaway(2)

@@ -98,11 +98,11 @@ func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig)
 		return productionFailure("environment configuration runtime could not be initialized", err)
 	}
 
-	connections := connectionFactory(func(ctx context.Context) (daemonruntime.Connection, error) {
+	connections := connectionFactory(func(ctx context.Context, observer daemonruntime.ControlObserver) (daemonruntime.Connection, error) {
 		applied := environmentConfig.Current()
 		return transport.Dial(ctx, transport.DialConfig{
 			Applied: applied, InstanceID: instanceID, Platform: runtime.GOOS,
-			Resolver: ideService,
+			Observer: observer, Resolver: ideService,
 		})
 	})
 	resourceControl := &runtimeResourceControl{}
@@ -181,10 +181,10 @@ func recordCleanupFailure(runErr *error, message string, cause error) {
 	*runErr = errors.Join(*runErr, fmt.Errorf("%s: %w", message, cause))
 }
 
-type connectionFactory func(context.Context) (daemonruntime.Connection, error)
+type connectionFactory func(context.Context, daemonruntime.ControlObserver) (daemonruntime.Connection, error)
 
-func (f connectionFactory) Connect(ctx context.Context) (daemonruntime.Connection, error) {
-	return f(ctx)
+func (f connectionFactory) Connect(ctx context.Context, observer daemonruntime.ControlObserver) (daemonruntime.Connection, error) {
+	return f(ctx, observer)
 }
 
 type preparedEnvironment struct {

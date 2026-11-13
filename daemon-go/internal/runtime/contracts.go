@@ -130,9 +130,17 @@ type Connection interface {
 	Close() error
 }
 
-// ConnectionFactory owns control-channel connection attempts; Runtime applies retry and generation policy.
+// ControlObserver receives transport-level events that are not control frames. Transport reports
+// them for the attempt it was dialed with; the runtime owns generation retirement and upgrade policy.
+type ControlObserver interface {
+	NotifyGoaway(code uint32)
+	NotifyUpgradeFailed(statusCode int, upgradeRequired *protocol.UpgradeRequired)
+}
+
+// ConnectionFactory owns control-channel connection attempts; Runtime applies retry and generation
+// policy and hands each attempt its own observer.
 type ConnectionFactory interface {
-	Connect(context.Context) (Connection, error)
+	Connect(context.Context, ControlObserver) (Connection, error)
 }
 
 var (

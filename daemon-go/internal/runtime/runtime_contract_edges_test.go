@@ -214,7 +214,7 @@ type pausedReconnectFactory struct {
 	allowReconnect   chan struct{}
 }
 
-func (f *pausedReconnectFactory) Connect(ctx context.Context) (Connection, error) {
+func (f *pausedReconnectFactory) Connect(ctx context.Context, _ ControlObserver) (Connection, error) {
 	if f.calls.Add(1) == 1 {
 		return f.first, nil
 	}

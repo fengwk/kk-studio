@@ -25,8 +25,7 @@ type DialConfig struct {
 	Applied              config.DaemonConfig
 	InstanceID, Platform string
 	ReadToken            func(string) (string, error)
-	OnUpgradeFailed      func(int, *protocol.UpgradeRequired)
-	OnGoaway             func(uint32)
+	Observer             runtimeapi.ControlObserver
 	Resolver             ViewResolver
 }
 
@@ -79,8 +78,8 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 					}
 				}
 			}
-			if c.OnUpgradeFailed != nil {
-				c.OnUpgradeFailed(resp.StatusCode, upgrade)
+			if c.Observer != nil {
+				c.Observer.NotifyUpgradeFailed(resp.StatusCode, upgrade)
 			}
 			if resp.StatusCode == http.StatusUnauthorized {
 				return nil, runtimeapi.ErrRegistrationRejected
@@ -91,7 +90,7 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 	}
 	conn := websocket.NetConn(ctx, ws, websocket.MessageBinary)
 	ws.SetReadLimit(1 << 20)
-	cc := newControlConnection(conn, c.Resolver, c.OnGoaway)
+	cc := newControlConnection(conn, c.Resolver, c.Observer)
 	return cc, nil
 }
 
@@ -136,13 +135,13 @@ type ControlConnection struct {
 	controlStream io.ReadWriteCloser
 	resolver      ViewResolver
 	goaway        chan uint32
-	onGoaway      func(uint32)
+	observer      runtimeapi.ControlObserver
 }
 
-func newControlConnection(conn net.Conn, resolver ViewResolver, onGoaway func(uint32)) *ControlConnection {
-	cc := &ControlConnection{closed: make(chan struct{}), stopControl: make(chan struct{}), controlReady: make(chan struct{}), resolver: resolver, onGoaway: onGoaway}
+func newControlConnection(conn net.Conn, resolver ViewResolver, observer runtimeapi.ControlObserver) *ControlConnection {
+	cc := &ControlConnection{closed: make(chan struct{}), stopControl: make(chan struct{}), controlReady: make(chan struct{}), resolver: resolver, observer: observer}
 	cc.conn = &idleConn{Conn: conn, timeout: inboundIdleTimeout, observer: &h2FrameObserver{}, onGoaway: cc.signalGoaway}
-	if onGoaway != nil {
+	if observer != nil {
 		cc.goaway = make(chan uint32, 1)
 		go cc.forwardGoaway()
 	}
@@ -203,7 +202,7 @@ func (c *ControlConnection) forwardGoaway() {
 	for {
 		select {
 		case code := <-c.goaway:
-			c.onGoaway(code)
+			c.observer.NotifyGoaway(code)
 		case <-c.closed:
 			return
 		}
