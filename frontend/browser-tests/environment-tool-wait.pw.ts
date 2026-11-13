@@ -108,8 +108,10 @@ for (const scenario of ['pane-root', 'pane-child']) {
       await expect(source).toBeVisible()
       await expect(source).toHaveAttribute('title', '查看来源')
       await expect(approval.locator('.interaction-deny-btn')).toHaveClass(/btn-primary danger/)
-      await expect(approval.locator('pre')).toHaveCount(1)
-      await expect(approval.locator('pre')).toHaveText('{"command":"deploy --dry-run","workdir":"/srv/approval-workdir"}')
+      // 审批参数按字段逐个可读呈现：bash 的 command 位于首行且保留原文，workdir 只出现一次。
+      await expect(approval.locator('pre')).toHaveCount(2)
+      await expect(approval.locator('pre.is-command')).toHaveText('deploy --dry-run')
+      await expect(approval.getByText('/srv/approval-workdir', { exact: true })).toHaveCount(1)
       expect((await approval.textContent())?.split('/srv/approval-workdir')).toHaveLength(2)
       await expect(approval).toContainText('权限规则要求审批')
       await expect(approval.locator('.interaction-status-tag, time')).toHaveCount(0)

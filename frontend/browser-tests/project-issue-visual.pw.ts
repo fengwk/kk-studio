@@ -46,6 +46,8 @@ async function transport(page: Page, pauseReason: 'USER' | 'ERROR' | null = null
           type: 'connected',
           eventNodeId: 'b0000000-0000-4000-8000-000000000001',
           connectionId: 'b0000000-0000-4000-8000-000000000002',
+          // connected 帧必须携带服务端 heartbeat 间隔，否则客户端判定畸形且永不确认订阅。
+          heartbeatIntervalMillis: '20000',
         }))
       }
       const message = JSON.parse(String(raw))
