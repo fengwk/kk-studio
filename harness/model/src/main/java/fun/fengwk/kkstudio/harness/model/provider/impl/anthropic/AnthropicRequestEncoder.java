@@ -59,10 +59,10 @@ import java.util.Set;
  * cache_control} ephemeral 标记，{@code LONG} 额外携带 {@code ttl:"1h"}；会话 {@code key} 不属于 Anthropic
  * 原生选项，因此不下发。
  *
- * <p>assistant replay 与 system/时间前缀无关，只与 replay state 的 affinity（Provider type/name/wire model）绑定。affinity
- * 不匹配时按 durable 语义回退投影，绝不因为存在 replay 而拒绝；affinity 匹配时先校验真实 payload 形状与 durable 一致性，再原位回放全部原生事实（含
- * {@code thinking} 的 signature、{@code redacted_thinking}、未知 block 与官方附加字段）。 payload 以 {@code
- * compaction} block 开头时代表历史已被摘要，校验通过后清空已编码消息使该消息成为首条消息。
+ * <p>assistant replay 与 system/时间前缀无关，只与 replay state 的 affinity（Provider type/name/wire
+ * model）绑定。affinity 不匹配时按 durable 语义回退投影，绝不因为存在 replay 而拒绝；affinity 匹配时先校验真实 payload 形状与 durable
+ * 一致性，再原位回放全部原生事实（含 {@code thinking} 的 signature、{@code redacted_thinking}、未知 block 与官方附加字段）。
+ * payload 以 {@code compaction} block 开头时代表历史已被摘要，校验通过后清空已编码消息使该消息成为首条消息。
  */
 public final class AnthropicRequestEncoder {
 
