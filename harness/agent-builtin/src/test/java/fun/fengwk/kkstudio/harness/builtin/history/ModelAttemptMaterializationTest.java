@@ -860,7 +860,9 @@ class ModelAttemptMaterializationTest {
         1024,
         "Test system instruction.",
         List.of(),
-        List.of());
+        List.of(),
+        null,
+        Map.of("system", "Test system instruction."));
   }
 
   private static ModelDescriptor modelDescriptor() {

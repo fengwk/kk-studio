@@ -110,7 +110,15 @@ class ModelOutcomeAppenderTest {
   private static ModelInvocation invocation(ModelVariant variant, ModelGroupProgress progress) {
     return invocation(
         new ModelRequestSpec(
-            ProviderType.OPENAI, model("model"), variant, 1024, "system", List.of(), List.of()),
+            ProviderType.OPENAI,
+            model("model"),
+            variant,
+            1024,
+            "system",
+            List.of(),
+            List.of(),
+            null,
+            Map.of("system", "system")),
         progress);
   }
 
