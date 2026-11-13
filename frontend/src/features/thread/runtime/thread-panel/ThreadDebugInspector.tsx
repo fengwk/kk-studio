@@ -34,16 +34,6 @@ function formatJson(raw: unknown): string {
   }
 }
 
-function formatFilterReason(
-  reason: string,
-  t: ReturnType<typeof useI18n>['t'],
-): string {
-  if (reason === 'ENVIRONMENT_NOT_SELECTED') {
-    return t('ai.runtime.debug.filterReason.envNotSelected')
-  }
-  return reason
-}
-
 function formatEnvSupport(
   support: ThreadModelRequestDebugTool['environmentSupport'],
   t: ReturnType<typeof useI18n>['t'],
@@ -141,18 +131,6 @@ export function ThreadDebugInspector({
         <div className="thread-debug-inspector-body">
           <KeyValue>
             <KeyValueRow label={t('ai.runtime.debug.inspector.name')}><Mono>{selection.tool.name}</Mono></KeyValueRow>
-            <KeyValueRow label={t('ai.runtime.debug.inspector.status')}>
-                <Badge tone={selection.tool.state === 'SENT' ? 'neutral' : 'warning'}>
-                  {selection.tool.state === 'SENT'
-                    ? t('ai.runtime.debug.inspector.toolState.sent')
-                    : t('ai.runtime.debug.inspector.toolState.filtered')}
-                </Badge>
-                {selection.tool.filterReason ? (
-                  <span className="thread-debug-filter-reason">
-                    · {formatFilterReason(selection.tool.filterReason, t)}
-                  </span>
-                ) : null}
-              </KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.environmentSupport')}><Mono>{formatEnvSupport(selection.tool.environmentSupport, t)}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.provenance')}><Mono>{selection.tool.provenance}</Mono></KeyValueRow>
             <KeyValueRow label={t('ai.runtime.debug.inspector.description')}>{selection.tool.description}</KeyValueRow>
@@ -251,7 +229,7 @@ export function ThreadDebugInspector({
             <KeyValueRow label={t('ai.runtime.debug.inspector.cacheRetention')}>
                 <Mono>{debug?.cacheControl?.retention ?? 'NONE'}</Mono>
                 {(!debug?.cacheControl || debug.cacheControl.retention === 'NONE') ? (
-                  <span className="thread-debug-filter-reason">
+                  <span className="thread-debug-disclaimer">
                     ({t('ai.runtime.debug.inspector.cacheProviderDisclaimer')})
                   </span>
                 ) : null}

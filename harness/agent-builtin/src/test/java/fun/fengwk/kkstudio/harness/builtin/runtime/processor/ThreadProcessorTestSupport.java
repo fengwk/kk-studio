@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -886,8 +887,7 @@ public final class ThreadProcessorTestSupport {
         MAX_OUTPUT_TOKENS,
         null,
         null,
-        new TurnCapabilities(
-            toolBindings.stream().map(binding -> binding.descriptor().name()).toList(), List.of()));
+        new TurnCapabilities(List.of()));
   }
 
   /** Resolver 成功后的 COMPACTION TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */
@@ -974,7 +974,7 @@ public final class ThreadProcessorTestSupport {
   }
 
   static ModelRequestSpec requestWithBindings(List<ToolBinding> bindings) {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor("provider", "model"),
@@ -987,7 +987,7 @@ public final class ThreadProcessorTestSupport {
 
   /** 按 candidate BranchSettings 构造机械一致的 Resolved spec（model / variant）。 */
   static ModelRequestSpec requestFor(BranchSettings settings) {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor("provider", builtinExecution(settings).modelName()),
@@ -1005,7 +1005,7 @@ public final class ThreadProcessorTestSupport {
 
   /** 按指定模型构造机械一致的压缩 Resolved 请求（零 bindings）。 */
   static ModelRequestSpec compactionRequest(ModelSelection model) {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor("provider", model.modelName()),

@@ -106,7 +106,7 @@ public final class HistoryEntryPayloadJsonCodec {
           "capabilities");
   private static final Set<String> SYSTEM_HOSTED_TOOL_FIELDS = orderedSet("name", "definitionJson");
   private static final Set<String> TURN_CAPABILITIES_FIELDS =
-      orderedSet("toolNames", "subagentBindings", "mediaCapabilities");
+      orderedSet("subagentBindings", "mediaCapabilities");
   private static final Set<String> SUBAGENT_BINDING_FIELDS = orderedSet("name", "description");
   private static final Set<String> TURN_MEDIA_CAPABILITIES_FIELDS =
       orderedSet("inputModalities", "userModalities", "toolResultModalities");
@@ -292,8 +292,6 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ObjectNode encodeTurnCapabilities(TurnCapabilities value) {
     ObjectNode node = NODES.objectNode();
-    var tools = node.putArray("toolNames");
-    value.toolNames().forEach(tools::add);
     var subagents = node.putArray("subagentBindings");
     for (SubagentBinding binding : value.subagentBindings()) {
       ObjectNode item = subagents.addObject();
@@ -614,15 +612,6 @@ public final class HistoryEntryPayloadJsonCodec {
   private static TurnCapabilities decodeTurnCapabilities(JsonNode value) {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.capabilities");
     JsonCodecSupport.requireFields(node, TURN_CAPABILITIES_FIELDS, "TURN_START.capabilities");
-    ArrayNode toolValues =
-        HistoryValueCodecs.requireArray(node.get("toolNames"), "TURN_START.capabilities.toolNames");
-    List<String> toolNames = new ArrayList<>(toolValues.size());
-    for (JsonNode toolValue : toolValues) {
-      if (!toolValue.isString()) {
-        throw new IllegalArgumentException("TURN_START.capabilities.toolNames[] must be text");
-      }
-      toolNames.add(toolValue.stringValue());
-    }
     ArrayNode subagentValues =
         HistoryValueCodecs.requireArray(
             node.get("subagentBindings"), "TURN_START.capabilities.subagentBindings");
@@ -637,7 +626,7 @@ public final class HistoryEntryPayloadJsonCodec {
               HistoryValueCodecs.requiredText(subagent, "description", context)));
     }
     return new TurnCapabilities(
-        toolNames, subagentBindings, decodeTurnMediaCapabilities(node.get("mediaCapabilities")));
+        subagentBindings, decodeTurnMediaCapabilities(node.get("mediaCapabilities")));
   }
 
   private static TurnMediaCapabilities decodeTurnMediaCapabilities(JsonNode value) {

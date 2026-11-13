@@ -369,7 +369,6 @@ class ProviderReplayMaterializationTransportTest {
                 call.name(),
                 call.argumentsJson(),
                 null,
-                null,
                 toolCall.providerBlockData()));
       } else if (block instanceof ProviderOpaqueBlock opaque) {
         contents.add(

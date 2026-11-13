@@ -543,7 +543,7 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   @Test
-  void turnCapabilitiesStoreToolNamesInsteadOfDefinitions() {
+  void turnCapabilitiesStoreSubagentsAndMediaCapabilities() {
     TurnStartPayload payload =
         new TurnStartPayload(
             TurnStartReason.INPUT,
@@ -553,10 +553,10 @@ class HistoryEntryPayloadJsonCodecTest {
             1024,
             null,
             null,
-            new TurnCapabilities(List.of("bash"), List.of()));
+            new TurnCapabilities(List.of()));
 
     String encoded = CODEC.encode(payload);
-    assertTrue(encoded.contains("\"toolNames\":[\"bash\"]"));
+    assertFalse(encoded.contains("toolNames"));
     assertFalse(encoded.contains("toolBindings"));
     assertEquals(payload, CODEC.decode(EntryType.TURN_START, encoded));
   }

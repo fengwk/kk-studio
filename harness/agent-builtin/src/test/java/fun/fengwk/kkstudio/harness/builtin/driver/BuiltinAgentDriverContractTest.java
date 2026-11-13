@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.driver;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -512,7 +513,7 @@ class BuiltinAgentDriverContractTest {
   }
 
   private static ModelRequestSpec modelRequest() {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
@@ -531,7 +532,7 @@ class BuiltinAgentDriverContractTest {
             PromptCacheRetention.NONE,
             new ProviderProtocolOptions(
                 "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\"}]}"));
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.ANTHROPIC,
         new UUID(0L, 1L),
         new ModelDescriptor(

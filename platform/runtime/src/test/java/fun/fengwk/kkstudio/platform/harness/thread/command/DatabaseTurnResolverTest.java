@@ -631,10 +631,6 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of("bash", "read", "load_skill"),
         unbound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::name).toList());
-    assertEquals(
-        List.of(
-            LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT),
-        unbound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::state).toList());
     assertTrue(
         unbound.spec().toolBindings().stream()
             .allMatch(binding -> binding.environmentId() == null));
@@ -646,10 +642,6 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of("bash", "read", "load_skill"),
         bound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::name).toList());
-    assertEquals(
-        List.of(
-            LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT),
-        bound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::state).toList());
     assertEquals(ENV_A, bound.spec().toolBindings().getFirst().environmentId());
 
     // draft 换 model variant：同一 planner 按 draft 现算冻结 spec。
@@ -1267,10 +1259,7 @@ class DatabaseTurnResolverTest {
     assertEquals(fixture.resolved(path), planned.spec());
     assertEquals(
         planned.spec().toolBindings().stream().map(binding -> binding.descriptor().name()).toList(),
-        planned.candidateTools().stream()
-            .filter(tool -> tool.state() == LiveTurnPlan.ToolState.SENT)
-            .map(LiveTurnPlan.CandidateTool::name)
-            .toList());
+        planned.candidateTools().stream().map(LiveTurnPlan.CandidateTool::name).toList());
     assertTrue(planned.contextWindow() > 0);
   }
 
@@ -1294,13 +1283,6 @@ class DatabaseTurnResolverTest {
     assertEquals(
         List.of("bash", "fixed_tool", BUSINESS_TOOL, "read"),
         candidates.stream().map(LiveTurnPlan.CandidateTool::name).toList());
-    assertEquals(
-        List.of(
-            LiveTurnPlan.ToolState.SENT,
-            LiveTurnPlan.ToolState.SENT,
-            LiveTurnPlan.ToolState.SENT,
-            LiveTurnPlan.ToolState.SENT),
-        candidates.stream().map(LiveTurnPlan.CandidateTool::state).toList());
     // 最终模型工具面的顺序与 Agent 配置及候选投影一致。
     assertEquals(
         List.of("bash", "fixed_tool", BUSINESS_TOOL, "read"),
@@ -1311,7 +1293,6 @@ class DatabaseTurnResolverTest {
     LiveTurnPlan.CandidateTool environmentTool = candidates.get(1);
     assertEquals(EnvironmentSupport.REQUIRED, environmentTool.environmentSupport());
     assertEquals("fixed:fixed.tool", environmentTool.provenance());
-    assertNull(environmentTool.filterReason());
     assertEquals("fixed_tool description", environmentTool.description());
     assertEquals(
         new SchemaJsonCodec().encode(hostDescriptor("fixed_tool").inputSchema()),
@@ -1337,7 +1318,6 @@ class DatabaseTurnResolverTest {
 
     LiveTurnPlan.CandidateTool optionalTool = candidates.getLast();
     assertEquals(EnvironmentSupport.ROUTED, optionalTool.environmentSupport());
-    assertNull(optionalTool.filterReason());
     assertEquals("builtin:read", optionalTool.provenance());
   }
 

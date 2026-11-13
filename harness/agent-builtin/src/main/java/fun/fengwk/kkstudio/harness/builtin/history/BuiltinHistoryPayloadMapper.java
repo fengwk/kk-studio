@@ -77,7 +77,6 @@ public final class BuiltinHistoryPayloadMapper {
                     : binding.descriptor().rendererKey(),
                 call.argumentsJson(),
                 call.historyAction(),
-                binding == null ? null : binding.environmentName(),
                 callBlock.providerBlockData()));
         outcomeIndex++;
       } else if (block instanceof ProviderTextBlock textBlock) {

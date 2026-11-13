@@ -172,7 +172,7 @@ public final class AgentPromptComposer {
     return value != null && !value.isBlank();
   }
 
-  /** 渲染模板并去掉模板尾换行；段间空行由 {@link #compose} 统一控制。 */
+  /** 渲染模板并去掉模板尾换行。 */
   private static String render(String template, Map<String, ?> values) {
     return PromptRenderer.render(SYSTEM + template, values).stripTrailing();
   }

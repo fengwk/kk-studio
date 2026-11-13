@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.model;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.model.InvocationTestData.ENV_ID;
 import static fun.fengwk.kkstudio.harness.builtin.model.InvocationTestData.environment;
 import static fun.fengwk.kkstudio.harness.builtin.model.InvocationTestData.host;
@@ -41,7 +42,7 @@ class ModelRequestSpecTest {
   void freezesProviderModelVariantAndOrderedBindings() {
     // 验证 invocation 只冻结实际 Provider 请求契约，不接受 skill 事实，不携带 history/compaction 派生事实。
     ModelRequestSpec spec =
-        spec(
+        specWithBindings(
             List.of(host("bash"), environment("fs")),
             List.of(new SubagentBinding("reviewer", "Review changes")));
 
@@ -61,7 +62,7 @@ class ModelRequestSpecTest {
     List<SubagentBinding> subagents =
         new ArrayList<>(List.of(new SubagentBinding("reviewer", "Review changes")));
     ModelRequestSpec spec =
-        new ModelRequestSpec(
+        spec(
             ProviderType.OPENAI,
             CONNECTION_GENERATION_ID,
             modelDescriptor(),
@@ -85,7 +86,7 @@ class ModelRequestSpecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ModelRequestSpec(
+            spec(
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -97,7 +98,7 @@ class ModelRequestSpecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ModelRequestSpec(
+            spec(
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -109,7 +110,7 @@ class ModelRequestSpecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            new ModelRequestSpec(
+            spec(
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -125,7 +126,7 @@ class ModelRequestSpecTest {
     // 每类 binding 名称都是其调用内身份，重复名称必须在构造时失败。
     assertThrows(
         IllegalArgumentException.class,
-        () -> spec(List.of(host("bash"), environment("bash")), List.of()));
+        () -> specWithBindings(List.of(host("bash"), environment("bash")), List.of()));
     // 不同 contributor 提供的同名工具同样拒绝：模型可见 tool name 唯一。
     ToolBinding tool1 =
         new ToolBinding(
@@ -141,12 +142,13 @@ class ModelRequestSpecTest {
             EnvironmentSupport.NONE,
             null,
             null);
-    assertThrows(IllegalArgumentException.class, () -> spec(List.of(tool1, tool2), List.of()));
+    assertThrows(
+        IllegalArgumentException.class, () -> specWithBindings(List.of(tool1, tool2), List.of()));
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            spec(
+            specWithBindings(
                 List.of(),
                 List.of(
                     new SubagentBinding("reviewer", "first"),
@@ -160,7 +162,9 @@ class ModelRequestSpecTest {
     EnvironmentId other = EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
     assertThrows(
         IllegalArgumentException.class,
-        () -> spec(List.of(environment("fs", ENV_ID), environment("other", other)), List.of()));
+        () ->
+            specWithBindings(
+                List.of(environment("fs", ENV_ID), environment("other", other)), List.of()));
 
     // REQUIRED 与携带不同环境的 OPTIONAL 混用必须被拒绝
     ToolBinding optionalWithDifferentEnv =
@@ -172,7 +176,9 @@ class ModelRequestSpecTest {
             "other-env");
     assertThrows(
         IllegalArgumentException.class,
-        () -> spec(List.of(environment("fs", ENV_ID), optionalWithDifferentEnv), List.of()));
+        () ->
+            specWithBindings(
+                List.of(environment("fs", ENV_ID), optionalWithDifferentEnv), List.of()));
 
     // 两个携带不同环境的 OPTIONAL 混用也必须被拒绝
     ToolBinding optionalWithEnv1 =
@@ -184,7 +190,7 @@ class ModelRequestSpecTest {
             "dev");
     assertThrows(
         IllegalArgumentException.class,
-        () -> spec(List.of(optionalWithEnv1, optionalWithDifferentEnv), List.of()));
+        () -> specWithBindings(List.of(optionalWithEnv1, optionalWithDifferentEnv), List.of()));
   }
 
   /** 测试意图：OPTIONAL 带环境与 REQUIRED 共享同一环境合法，无环境的 NONE 和未带环境的 OPTIONAL 同样可以共存。 */
@@ -208,7 +214,7 @@ class ModelRequestSpecTest {
     // REQUIRED + OPTIONAL(同一环境) + OPTIONAL(无环境) + NONE 全部合法共存
     assertDoesNotThrow(
         () ->
-            spec(
+            specWithBindings(
                 List.of(
                     host("bash"),
                     environment("fs", ENV_ID),
@@ -223,7 +229,7 @@ class ModelRequestSpecTest {
     assertThrows(
         NullPointerException.class,
         () ->
-            new ModelRequestSpec(
+            spec(
                 null,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -235,7 +241,7 @@ class ModelRequestSpecTest {
     assertThrows(
         NullPointerException.class,
         () ->
-            new ModelRequestSpec(
+            spec(
                 ProviderType.OPENAI,
                 null,
                 modelDescriptor(),
@@ -247,7 +253,7 @@ class ModelRequestSpecTest {
     assertThrows(
         NullPointerException.class,
         () ->
-            new ModelRequestSpec(
+            spec(
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 null,
@@ -259,7 +265,7 @@ class ModelRequestSpecTest {
     assertThrows(
         NullPointerException.class,
         () ->
-            new ModelRequestSpec(
+            spec(
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -271,7 +277,7 @@ class ModelRequestSpecTest {
     assertThrows(
         NullPointerException.class,
         () ->
-            new ModelRequestSpec(
+            spec(
                 ProviderType.OPENAI,
                 CONNECTION_GENERATION_ID,
                 modelDescriptor(),
@@ -282,8 +288,9 @@ class ModelRequestSpecTest {
                 null));
   }
 
-  private static ModelRequestSpec spec(List<ToolBinding> tools, List<SubagentBinding> subagents) {
-    return new ModelRequestSpec(
+  private static ModelRequestSpec specWithBindings(
+      List<ToolBinding> tools, List<SubagentBinding> subagents) {
+    return spec(
         ProviderType.OPENAI,
         CONNECTION_GENERATION_ID,
         modelDescriptor(),

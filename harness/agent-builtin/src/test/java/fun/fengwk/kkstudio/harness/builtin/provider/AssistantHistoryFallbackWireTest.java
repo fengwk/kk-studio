@@ -137,9 +137,9 @@ class AssistantHistoryFallbackWireTest {
             AgentMessageRole.ASSISTANT,
             List.of(
                 new TextMessageContent(TEXT),
-                new ToolCallMessageContent("call-native", "lookup", "lookup", "{}", null, null),
+                new ToolCallMessageContent("call-native", "lookup", "lookup", "{}"),
                 new ToolCallMessageContent(
-                    "call-legacy", "bash", "bash", "{\"cmd\":\"ls\"}", "run bash", "dev")));
+                    "call-legacy", "bash", "bash", "{\"cmd\":\"ls\"}", "run bash")));
     AgentMessage nativeResult =
         new AgentMessage(
             AgentMessageRole.TOOL,

@@ -1501,20 +1501,12 @@ export const chatCatalog = {
     'zh-CN': '工具',
   },
   'ai.runtime.debug.toolsSent': {
-    'en-US': 'planned',
-    'zh-CN': '纳入规划',
-  },
-  'ai.runtime.debug.toolsFiltered': {
-    'en-US': 'filtered',
-    'zh-CN': '已过滤',
+    'en-US': 'included',
+    'zh-CN': '纳入请求',
   },
   'ai.runtime.debug.toolAriaPrefix': {
     'en-US': 'Tool',
     'zh-CN': '工具',
-  },
-  'ai.runtime.debug.filteredToolAriaPrefix': {
-    'en-US': 'Filtered tool',
-    'zh-CN': '已过滤工具',
   },
   'ai.runtime.debug.none': {
     'en-US': 'none',
@@ -1607,22 +1599,6 @@ export const chatCatalog = {
   'ai.runtime.debug.inspector.name': {
     'en-US': 'Name',
     'zh-CN': '名称',
-  },
-  'ai.runtime.debug.inspector.status': {
-    'en-US': 'Status',
-    'zh-CN': '状态',
-  },
-  'ai.runtime.debug.inspector.toolState.sent': {
-    'en-US': 'PLANNED · SENT',
-    'zh-CN': '纳入当前规划 · SENT',
-  },
-  'ai.runtime.debug.inspector.toolState.filtered': {
-    'en-US': 'FILTERED',
-    'zh-CN': '已过滤 · FILTERED',
-  },
-  'ai.runtime.debug.filterReason.envNotSelected': {
-    'en-US': 'Environment not selected',
-    'zh-CN': '未选择环境',
   },
   'ai.runtime.debug.inspector.environmentSupport': {
     'en-US': 'Environment Support',

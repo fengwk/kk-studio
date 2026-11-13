@@ -248,8 +248,7 @@ public final class StoreTestSupport {
         MAX_OUTPUT_TOKENS,
         null,
         null,
-        new TurnCapabilities(
-            toolBindings.stream().map(binding -> binding.descriptor().name()).toList(), List.of()));
+        new TurnCapabilities(List.of()));
   }
 
   /** ASSISTANT MESSAGE payload；{@code toolCallIds} 会按顺序变成 ToolCall 内容。 */

@@ -31,8 +31,6 @@ function sampleDebug(): HarnessModelRequestDebugDTO {
         inputSchema: {},
         environmentSupport: 'ROUTED',
         provenance: 'builtin:read',
-        state: 'SENT',
-        filterReason: null,
       },
     ],
     skills: [],

@@ -15,59 +15,22 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
-/**
- * {@link LiveTurnPlan} 型不变量的契约测试。
- *
- * <p>这些不变量就是「预览不可能与真实请求漂移」与「Debug 只回显稳定 code」的形式化表达：候选顺序必须是「SENT 在前、FILTERED
- * 在后」，状态与过滤原因必须一致，拒绝必须自带稳定 code。任何违反都在构造期立即失败，绝不留下半合法的计划。
- */
+/** {@link LiveTurnPlan} invariants are enforced at construction boundaries. */
 class LiveTurnPlanTest {
 
   @Test
-  void candidateStatesMustCarryExactlyMatchingFilterFacts() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            candidate(
-                LiveTurnPlan.ToolState.SENT, LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED));
-    assertThrows(
-        IllegalArgumentException.class, () -> candidate(LiveTurnPlan.ToolState.FILTERED, null));
-
-    LiveTurnPlan.CandidateTool sent = candidate(LiveTurnPlan.ToolState.SENT, null);
-    assertEquals(LiveTurnPlan.ToolState.SENT, sent.state());
-    LiveTurnPlan.CandidateTool filtered =
-        candidate(
-            LiveTurnPlan.ToolState.FILTERED, LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED);
-    assertEquals(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED, filtered.filterReason());
-  }
-
-  /** 测试意图：被过滤的候选只能整体位于发送候选之后，保证投影顺序与「候选事实在前、被过滤在后」的契约一致。 */
-  @Test
-  void sentCandidatesMustPrecedeFilteredCandidates() {
-    LiveTurnPlan.CandidateTool filtered =
-        candidate(
-            LiveTurnPlan.ToolState.FILTERED, LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED);
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new LiveTurnPlan.Planned(
-                spec(),
-                4096,
-                List.of(filtered, candidate(LiveTurnPlan.ToolState.SENT, null)),
-                List.of()));
-    assertEquals(
-        2,
+  void plannedRetainsAgentToolOrder() {
+    LiveTurnPlan.Planned plan =
         new LiveTurnPlan.Planned(
-                spec(),
-                4096,
-                List.of(candidate(LiveTurnPlan.ToolState.SENT, null), filtered),
-                List.of())
-            .candidateTools()
-            .size());
+            spec(), 4096, List.of(candidate("bash"), candidate("read")), List.of());
+
+    assertEquals(
+        List.of("bash", "read"),
+        plan.candidateTools().stream().map(LiveTurnPlan.CandidateTool::name).toList());
   }
 
   /** 测试意图：contextWindow 与 spec 是投影基础事实，缺失或非正立即失败而不是产生无法解释的预览。 */
@@ -110,22 +73,18 @@ class LiveTurnPlanTest {
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
         new ModelVariant("default", null, PromptCacheRetention.SHORT, null),
+        List.of(new ModelVariant("default", null, PromptCacheRetention.SHORT, null)),
         512,
         "system instruction",
         List.of(),
-        List.of());
+        List.of(),
+        null,
+        Map.of("system", "system instruction"));
   }
 
-  private static LiveTurnPlan.CandidateTool candidate(
-      LiveTurnPlan.ToolState state, LiveTurnPlan.FilterReason filterReason) {
+  private static LiveTurnPlan.CandidateTool candidate(String name) {
     return new LiveTurnPlan.CandidateTool(
-        "read",
-        "Read a file.",
-        "{\"type\":\"object\"}",
-        EnvironmentSupport.ROUTED,
-        "builtin:read",
-        state,
-        filterReason);
+        name, "Read a file.", "{\"type\":\"object\"}", EnvironmentSupport.ROUTED, "builtin:read");
   }
 
   private static LiveTurnPlan.PlannedSkill skill() {

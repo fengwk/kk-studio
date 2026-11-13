@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.model;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.model.InvocationTestData.error;
 import static fun.fengwk.kkstudio.harness.builtin.model.InvocationTestData.requestSpec;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
@@ -46,7 +47,7 @@ class ModelInvocationGroupTest {
             single.variant());
     ModelGroupExecution group =
         new ModelGroupExecution("group", 7L, List.of(first, second), Set.of(429), 30);
-    return new ModelRequestSpec(
+    return spec(
         single.providerType(),
         single.providerConnectionGenerationId(),
         single.model(),

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.history;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -741,7 +742,7 @@ class ModelAttemptMaterializationTest {
   }
 
   private static ModelRequestSpec requestSpec() {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),
@@ -801,7 +802,7 @@ class ModelAttemptMaterializationTest {
             EnvironmentSupport.NONE,
             null,
             null);
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new UUID(0L, 1L),
         modelDescriptor(),

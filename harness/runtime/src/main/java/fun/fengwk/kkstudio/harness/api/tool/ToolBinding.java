@@ -23,8 +23,7 @@ import java.util.Objects;
  * needs-an-Environment 未执行结果。
  *
  * <p>{@code environmentId} 与 {@code environmentName} 同源，必须同时存在或同时缺失。{@code environmentName}
- * 是该分支冻结的用户可见 Environment 名，是历史投影判定 native 资格的 durable 事实：branch 后来切换 Environment 时，既有
- * environment-bound 调用必须降级。
+ * 是当前分支冻结的用户可见 Environment 名，由工具历史动作渲染器用于描述该次操作。
  */
 public record ToolBinding(
     AgentToolDefinition definition,
