@@ -20,6 +20,7 @@ const CHECK_SCRIPT = path.join(CAPABILITY_DIR, 'check.sh')
 const WRITE_SCRIPT = path.join(CAPABILITY_DIR, 'write.sh')
 const ARTIFACT_TEST = '-Dtest=TsContractArtifactTest'
 const UPDATE_PROPERTY = '-Dkkstudio.contract.generation.update=true'
+const COMMITTED_PROTOCOL = path.join(REPOSITORY_ROOT, 'daemon-go/internal/protocol/control.pb.go')
 
 /** Write an executable stub script into `dir`. */
 function writeStub(dir, name, body) {
@@ -41,10 +42,20 @@ function withStubMaven(body) {
       'mvn',
       '#!/usr/bin/env bash\n{\n  printf "MAVEN JAVA_HOME=%s\\n" "${JAVA_HOME:-}"\n  printf "MAVEN ARGS=%s\\n" "$*"\n} >> "${KK_STUDIO_GENERATED_CONTRACTS_LOG:?}"\n',
     )
+    // The protoc stub "generates" the committed Go protocol file, so check.sh sees an up-to-date tree.
     writeStub(
       stubDir,
       'protoc',
-      '#!/usr/bin/env bash\nprintf "PROTOC ARGS=%s\\n" "$*" >> "${KK_STUDIO_GENERATED_CONTRACTS_LOG:?}"\n',
+      [
+        '#!/usr/bin/env bash',
+        'printf "PROTOC ARGS=%s\\n" "$*" >> "${KK_STUDIO_GENERATED_CONTRACTS_LOG:?}"',
+        'for arg in "$@"; do case "$arg" in --go_out=*) out="${arg#--go_out=}" ;; esac; done',
+        `committed=${JSON.stringify(COMMITTED_PROTOCOL)}`,
+        'target="${out:?}/internal/protocol/control.pb.go"',
+        'mkdir -p "$(dirname "$target")"',
+        '[ "$committed" -ef "$target" ] || cp "$committed" "$target"',
+        '',
+      ].join('\n'),
     )
     const environment = {
       ...process.env,
@@ -75,6 +86,7 @@ test('test intent: check runs the targeted read-only reactor test', () => {
     assert.equal(result.status, 0, result.stderr)
     const logged = readFileSync(log, 'utf8')
     assert.ok(logged.includes('MAVEN JAVA_HOME=/stub/jdk21'))
+    assert.ok(logged.includes('PROTOC ARGS=') && logged.includes('--go_out='), 'check must compare the Go protocol')
     assert.ok(logged.includes('-pl web -am'))
     assert.ok(logged.includes(ARTIFACT_TEST))
     assert.ok(!logged.includes('control_pb.ts'))
