@@ -75,8 +75,8 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
     ClaimedWork claim = claimThreadWork(fixture.store, baseline.threadId());
 
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
-    // 基线 ROOT + 本轮 TURN_START + USER = 3：environment-required tool 不引入额外目录事实。
-    assertEquals(3, path(fixture.store, baseline.threadId()).entries().size());
+    // SYSTEM baseline 与本轮 TURN_START / USER 同事务落库；environment-required tool 不引入额外目录事实。
+    assertEquals(4, path(fixture.store, baseline.threadId()).entries().size());
   }
 
   @Test

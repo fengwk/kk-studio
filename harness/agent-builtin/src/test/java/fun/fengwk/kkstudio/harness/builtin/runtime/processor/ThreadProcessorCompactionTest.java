@@ -253,8 +253,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, baseline.threadId()); // 入站命令的 enqueue-side wake
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath inputPlanned = path(fixture.store, baseline.threadId());
-    assertEquals(7, inputPlanned.entries().size());
-    Entry inputStartEntry = inputPlanned.entries().get(5);
+    assertEquals(8, inputPlanned.entries().size());
+    Entry inputStartEntry = inputPlanned.entries().get(6);
     TurnStartPayload inputStart = (TurnStartPayload) inputStartEntry.payload();
     assertEquals(TurnStartReason.INPUT, inputStart.reason());
     assertEquals(baseline.threadId(), inputStart.ownerThreadId());
@@ -278,7 +278,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // claim2：closed apply 关闭 turn；没有新的 user demand，threshold 不 self-wake。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath applied = path(fixture.store, baseline.threadId());
-    assertEquals(9, applied.entries().size());
+    assertEquals(10, applied.entries().size());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
 
     // 新 user demand 自行 enqueue wake；claim3 在消费该消息前启动 threshold 压缩。
@@ -289,8 +289,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, baseline.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath planned = path(fixture.store, baseline.threadId());
-    assertEquals(10, planned.entries().size());
-    TurnStartPayload start = (TurnStartPayload) planned.entries().get(9).payload();
+    assertEquals(11, planned.entries().size());
+    TurnStartPayload start = (TurnStartPayload) planned.entries().get(10).payload();
     assertEquals(TurnStartReason.COMPACTION, start.reason());
     assertEquals(baseline.threadId(), start.ownerThreadId());
     assertEquals(CONTEXT_WINDOW, start.contextWindow());
@@ -468,7 +468,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // 完整压缩后的下一个 claim：此前保留的 queued USER 启动 INPUT（不触发压缩）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath inputPlanned = path(fixture.store, baseline.threadId());
-    Entry inputTurnStart = inputPlanned.entries().get(12);
+    Entry inputTurnStart = inputPlanned.entries().get(13);
     ModelInvocation input =
         fixture
             .store
@@ -485,7 +485,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, baseline.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath failed = path(fixture.store, baseline.threadId());
-    assertEquals(16, failed.entries().size());
+    assertEquals(17, failed.entries().size());
     assertTrue(failed.head().payload() instanceof TurnEndPayload);
   }
 
@@ -719,8 +719,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     // claim3：下一 claim 才偿还 CONTINUATION 义务（绝不插队阈值压缩）。
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath continued = path(fixture.store, baseline.threadId());
-    assertEquals(13, continued.entries().size());
-    TurnStartPayload continuation = (TurnStartPayload) continued.entries().get(12).payload();
+    assertEquals(14, continued.entries().size());
+    TurnStartPayload continuation = (TurnStartPayload) continued.entries().get(13).payload();
     assertEquals(TurnStartReason.CONTINUATION, continuation.reason());
   }
 
@@ -773,7 +773,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath failedRetry = path(fixture.store, baseline.threadId());
-    assertEquals(15, failedRetry.entries().size());
+    assertEquals(16, failedRetry.entries().size());
     TurnEndPayload end = (TurnEndPayload) failedRetry.head().payload();
     assertEquals(TurnEndOutcome.FAILED, end.outcome());
     assertNull(work(fixture.store, new WorkTarget(WorkTargetType.THREAD, baseline.threadId())));
@@ -909,7 +909,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
 
     EntryPath path = path(fixture.store, baseline.threadId());
-    TurnStartPayload start = (TurnStartPayload) path.entries().get(9).payload();
+    TurnStartPayload start = (TurnStartPayload) path.entries().get(10).payload();
     assertEquals(TurnStartReason.CONTINUATION, start.reason());
   }
 
@@ -1135,7 +1135,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     requestThreadWork(fixture.store, baseline.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath inputPlanned = path(fixture.store, baseline.threadId());
-    Entry inputTurnStart = inputPlanned.entries().get(12);
+    Entry inputTurnStart = inputPlanned.entries().get(13);
     assertEquals(TurnStartReason.INPUT, ((TurnStartPayload) inputTurnStart.payload()).reason());
     ModelInvocation input =
         fixture

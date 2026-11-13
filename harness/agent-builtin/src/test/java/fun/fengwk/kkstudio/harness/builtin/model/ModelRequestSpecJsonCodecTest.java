@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.harness.model.codec.ModelDescriptorJsonCodec;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** 紧凑 ModelRequestSpec 的严格 wire 与 round-trip 契约。 */
@@ -86,7 +87,9 @@ class ModelRequestSpecJsonCodecTest {
             + requestSpec.outputTokens()
             + ",\"systemInstruction\":\""
             + requestSpec.systemInstruction()
-            + "\",\"toolBindings\":["
+            + "\",\"systemSections\":{\"system\":\""
+            + requestSpec.systemInstruction()
+            + "\"},\"toolBindings\":["
             + bindingCodec.encode(requestSpec.toolBindings().getFirst())
             + "],\"subagentBindings\":[]}";
 
@@ -214,6 +217,7 @@ class ModelRequestSpecJsonCodecTest {
             "modelVariants",
             "outputTokens",
             "systemInstruction",
+            "systemSections",
             "toolBindings",
             "subagentBindings"),
         fieldNames);
@@ -243,6 +247,7 @@ class ModelRequestSpecJsonCodecTest {
 
     ModelRequestSpec decoded = codec.decode(encoded);
     assertEquals(instruction, decoded.systemInstruction());
+    assertEquals(Map.of("system", instruction), decoded.systemSections());
     assertEquals(instruction, codec.decodeNode(codec.encodeNode(requestSpec)).systemInstruction());
     assertEquals(requestSpec, decoded);
   }

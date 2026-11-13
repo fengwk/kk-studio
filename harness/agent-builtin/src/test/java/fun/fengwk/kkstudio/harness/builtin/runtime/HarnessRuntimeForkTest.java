@@ -208,7 +208,9 @@ class HarnessRuntimeForkTest {
   private static String textOf(ProviderMessage message) {
     StringBuilder text = new StringBuilder();
     for (var block : message.contents()) {
-      text.append(((ProviderTextBlock) block).text());
+      if (block instanceof ProviderTextBlock textBlock) {
+        text.append(textBlock.text());
+      }
     }
     return text.toString();
   }

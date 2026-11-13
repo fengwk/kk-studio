@@ -115,7 +115,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
 
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
 
-    // ROOT, TS1, USER1, TURN_END(CANCELLED), TS2, USER2
+    // resolver sees the candidate before the accepted SYSTEM entry is committed.
     EntryPath path = fixture.resolver.lastPath;
     assertEquals(6, path.entries().size());
     TurnEndPayload end = (TurnEndPayload) path.entries().get(3).payload();
@@ -124,7 +124,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     assertEquals(TurnEndReason.HISTORY_CUT, end.reason());
     TurnStartPayload newTurn = (TurnStartPayload) path.entries().get(4).payload();
     assertEquals(TurnStartReason.INPUT, newTurn.reason());
-    assertEquals(6, path(fixture.store, baseline.threadId()).entries().size());
+    assertEquals(7, path(fixture.store, baseline.threadId()).entries().size());
   }
 
   @Test
@@ -306,15 +306,15 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     assertEquals(assistantId, model(fixture.store, modelId).resultEntryId());
     assertTrue(toolsByAssistant(fixture.store, assistantId).isEmpty());
     EntryPath path = path(fixture.store, baseline.threadId());
-    assertEquals(7, path.entries().size());
-    // ROOT, TS, USER, ASSISTANT, TURN_END(CANCELLED), TS2, USER2
+    assertEquals(8, path.entries().size());
+    // ROOT, TS, USER, ASSISTANT, TURN_END(CANCELLED), SYSTEM, TS2, USER2
     TurnEndPayload end = (TurnEndPayload) path.entries().get(4).payload();
     assertEquals(TurnEndOutcome.CANCELLED, end.outcome());
     assertEquals(TurnEndReason.HISTORY_CUT, end.reason());
-    TurnStartPayload newTurn = (TurnStartPayload) path.entries().get(5).payload();
+    TurnStartPayload newTurn = (TurnStartPayload) path.entries().get(6).payload();
     assertEquals(TurnStartReason.INPUT, newTurn.reason());
     assertEquals(
-        AgentMessageRole.USER, ((MessagePayload) path.entries().get(6).payload()).message().role());
+        AgentMessageRole.USER, ((MessagePayload) path.entries().get(7).payload()).message().role());
     assertEquals(1, fixture.resolver.calls);
   }
 
@@ -370,8 +370,8 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
     assertEquals(ThreadProcessResult.COMPLETED, fixture.processor.process(claim));
 
     EntryPath path = path(fixture.store, threadId);
-    assertEquals(9, path.entries().size());
-    // ROOT, TS, USER, ASSISTANT, TOOL0(real), SYNTH1, TURN_END(CANCELLED), TS2, USER2
+    assertEquals(10, path.entries().size());
+    // ROOT, TS, USER, ASSISTANT, TOOL0(real), SYNTH1, TURN_END(CANCELLED), SYSTEM, TS2, USER2
     MessagePayload real0 = (MessagePayload) path.entries().get(4).payload();
     assertFalse(real0.toolResultMetadata().synthetic());
     assertEquals(0, real0.toolResultMetadata().callIndex());
