@@ -85,6 +85,7 @@ public final class AnthropicRequestEncoder {
   private static final String OUTPUT_CONFIG_BETA = "mid-conversation-output-config-2026-07-01";
   private static final String THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
   private static final String INLINE_TOOLS_BETA = "inline-tools-2026-09-15";
+  private static final String DEFERRED_PLACEHOLDER_NAME = "__kk_deferred_placeholder__";
 
   private final RequestBodySizeGuard bodySizeGuard;
 
@@ -113,23 +114,29 @@ public final class AnthropicRequestEncoder {
     String currentEffort = request.variant() == null ? null : request.variant().reasoningEffort();
     boolean currentEffortOff = request.variant() != null && request.variant().reasoningOff();
     String firstStoredEffort = firstStoredEffort(request.messages());
+    boolean messageLevelThinking =
+        request.model().reasoning() && request.model().messageLevelEffort() && !currentEffortOff;
     boolean messageLevelEffort =
-        request.model().reasoning()
-            && request.model().messageLevelEffort()
-            && !currentEffortOff
-            && (currentEffort != null || firstStoredEffort != null);
+        messageLevelThinking && (currentEffort != null || firstStoredEffort != null);
     String topLevelEffort =
         messageLevelEffort && firstStoredEffort != null ? firstStoredEffort : currentEffort;
     applyReasoningParameters(root, request, topLevelEffort, messageLevelEffort);
-    boolean hasSystemChanges =
-        request.messages().stream()
-            .anyMatch(message -> message.role() == ProviderMessageRole.SYSTEM);
     boolean hasEffortConfig =
         request.model().reasoning() && !currentEffortOff && hasEffort(topLevelEffort);
-    List<String> betaFeatures =
-        resolveBetaFeatures(hasEffortConfig, messageLevelEffort, hasSystemChanges);
 
-    ArrayNode toolsArray = mergeTools(root, request.tools());
+    boolean deferredToolLane =
+        request.model().midConversationSystemMessages() && request.baselineHasClientTools();
+    if (request.baselineHasClientTools() && !deferredToolLane) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "client tool baseline requires mid-conversation system-message capability");
+    }
+    boolean hasInlineToolChanges = hasInlineToolChanges(request.messages());
+    List<String> betaFeatures =
+        resolveBetaFeatures(
+            hasEffortConfig, messageLevelThinking, deferredToolLane || hasInlineToolChanges);
+
+    ArrayNode toolsArray = mergeTools(root, request.tools(), deferredToolLane);
 
     // 系统指令是请求唯一的顶层 system；编码为单块数组以便在 SYSTEM 边界打缓存标记。
     ArrayNode unmarkedSystemArray = NODES.arrayNode();
@@ -179,7 +186,8 @@ public final class AnthropicRequestEncoder {
     addCacheEndpoint(cacheEndpoints, lastEligible);
 
     // 注入 cache marker
-    applyCacheMarkers(request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints);
+    applyCacheMarkers(
+        request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints, deferredToolLane);
     if (messageLevelEffort) {
       wireMessagesArray =
           applyMessageLevelEffort(wireMessagesArray, messageEfforts, currentEffort, topLevelEffort);
@@ -204,17 +212,33 @@ public final class AnthropicRequestEncoder {
     return new AnthropicEncodedRequest(utf8Bytes, betaFeatures);
   }
 
-  /** Add the beta support required by the selected mid-conversation request features. */
+  private static boolean hasInlineToolChanges(List<ProviderMessage> messages) {
+    for (ProviderMessage message : messages) {
+      if (message.role() != ProviderMessageRole.SYSTEM) {
+        continue;
+      }
+      for (ProviderContentBlock content : message.contents()) {
+        if (content instanceof ProviderSystemToolAdditionBlock
+            || content instanceof ProviderSystemHostedToolAdditionBlock
+            || content instanceof ProviderSystemToolRemovalBlock) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** Add the beta support required by reasoning settings and inline tool changes. */
   private static List<String> resolveBetaFeatures(
-      boolean hasEffortConfig, boolean messageLevelEffort, boolean hasSystemChanges) {
+      boolean hasEffortConfig, boolean messageLevelThinking, boolean inlineTools) {
     List<String> betaFeatures = new ArrayList<>();
-    if (hasEffortConfig || hasSystemChanges) {
+    if (hasEffortConfig || messageLevelThinking) {
       betaFeatures.add(OUTPUT_CONFIG_BETA);
     }
-    if (messageLevelEffort) {
+    if (messageLevelThinking) {
       betaFeatures.add(THINKING_BINDING_BETA);
     }
-    if (hasSystemChanges) {
+    if (inlineTools) {
       betaFeatures.add(INLINE_TOOLS_BETA);
     }
     return List.copyOf(betaFeatures);
@@ -347,7 +371,10 @@ public final class AnthropicRequestEncoder {
    * 合并 native tools 与 runtime function tools：先保留 native 条目（server tools 等官方非 function 工具），再追加
    * runtime 工具；合并结果同时是 prefix hash、cache marker 与请求体大小的依据。
    */
-  private static ArrayNode mergeTools(ObjectNode root, List<ProviderToolDefinition> runtimeTools) {
+  private static ArrayNode mergeTools(
+      ObjectNode root,
+      List<ProviderToolDefinition> runtimeTools,
+      boolean appendDeferredPlaceholder) {
     JsonNode nativeTools = root.get("tools");
     if (nativeTools != null && !nativeTools.isArray()) {
       throw new ProviderException(
@@ -355,8 +382,8 @@ public final class AnthropicRequestEncoder {
     }
 
     ArrayNode merged = NODES.arrayNode();
+    Set<String> names = new HashSet<>();
     if (nativeTools != null) {
-      Set<String> names = new HashSet<>();
       for (int i = 0; i < nativeTools.size(); i++) {
         JsonNode nativeTool = nativeTools.get(i);
         if (nativeTool.has("cache_control")) {
@@ -394,9 +421,34 @@ public final class AnthropicRequestEncoder {
       }
     }
     for (ProviderToolDefinition tool : runtimeTools) {
+      if (appendDeferredPlaceholder && DEFERRED_PLACEHOLDER_NAME.equals(tool.name())) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "runtime tools must not use the reserved deferred placeholder name");
+      }
       merged.add(encodeTool(tool));
     }
+    if (appendDeferredPlaceholder) {
+      if (!names.add(DEFERRED_PLACEHOLDER_NAME)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "runtime tools must not use the reserved deferred placeholder name");
+      }
+      merged.add(encodeDeferredPlaceholder());
+    }
     return merged;
+  }
+
+  private static ObjectNode encodeDeferredPlaceholder() {
+    ObjectNode placeholder = NODES.objectNode();
+    placeholder.put("name", DEFERRED_PLACEHOLDER_NAME);
+    placeholder.put("description", "Reserved placeholder. Never available. Never call this.");
+    ObjectNode inputSchema = placeholder.putObject("input_schema");
+    inputSchema.put("type", "object");
+    inputSchema.putObject("properties");
+    inputSchema.putArray("required");
+    placeholder.put("defer_loading", true);
+    return placeholder;
   }
 
   private static ObjectNode encodeTool(ProviderToolDefinition tool) {
@@ -941,7 +993,8 @@ public final class AnthropicRequestEncoder {
       ProviderCacheControl cacheControl,
       ArrayNode toolsArray,
       ArrayNode systemArray,
-      List<ObjectNode> cacheEndpoints) {
+      List<ObjectNode> cacheEndpoints,
+      boolean hasDeferredPlaceholder) {
     if (cacheControl.retention() == PromptCacheRetention.NONE) {
       return;
     }
@@ -954,9 +1007,10 @@ public final class AnthropicRequestEncoder {
 
     int markersPlaced = 0;
 
-    // 1. TOOLS: 最后一个合格 tool
-    if (!toolsArray.isEmpty()) {
-      ((ObjectNode) toolsArray.get(toolsArray.size() - 1)).set("cache_control", marker);
+    // 1. TOOLS: 最后一个实际可用 tool，不能标记 encoder-only deferred placeholder。
+    int lastRealToolIndex = toolsArray.size() - (hasDeferredPlaceholder ? 2 : 1);
+    if (lastRealToolIndex >= 0) {
+      ((ObjectNode) toolsArray.get(lastRealToolIndex)).set("cache_control", marker);
       markersPlaced++;
     }
 

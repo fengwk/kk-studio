@@ -555,9 +555,54 @@ class AnthropicRequestEncoderTest {
         systemMessage.path("content").get(3).path("tool").path("type").asString());
     assertEquals(
         "old_tool", systemMessage.path("content").get(3).path("tool").path("name").asString());
+    assertEquals(List.of("inline-tools-2026-09-15"), encoded.betaFeatures());
+  }
+
+  @Test
+  void textOnlySystemMessagesDoNotRequireInlineToolsBeta() {
+    ProviderRequest request =
+        request(
+            defaultVariant(),
+            List.of(
+                userMsg(new ProviderTextBlock("hello")),
+                new ProviderMessage(
+                    ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system update")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    assertEquals(List.of(), encoder.encode(request, descriptor).betaFeatures());
+  }
+
+  @Test
+  void baselineClientToolsKeepDeferredPlaceholderAndBetaOnUnchangedRequests() throws IOException {
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition("bash", "run bash", "{\"type\":\"object\"}");
+    ProviderRequest request =
+        requestWithClientToolBaseline(
+            List.of(userMsg(new ProviderTextBlock("hello"))),
+            List.of(tool),
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "deferred-placeholder"));
+
+    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
+    JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
+    JsonNode realTool = root.path("tools").get(0);
+    JsonNode placeholder = root.path("tools").get(1);
+
+    assertEquals(List.of("inline-tools-2026-09-15"), encoded.betaFeatures());
+    assertEquals(2, root.path("tools").size());
+    assertEquals("bash", realTool.path("name").asString());
+    assertTrue(realTool.path("cache_control").has("type"));
+    assertEquals("__kk_deferred_placeholder__", placeholder.path("name").asString());
     assertEquals(
-        List.of("mid-conversation-output-config-2026-07-01", "inline-tools-2026-09-15"),
-        encoded.betaFeatures());
+        "Reserved placeholder. Never available. Never call this.",
+        placeholder.path("description").asString());
+    assertEquals("object", placeholder.path("input_schema").path("type").asString());
+    assertEquals(0, placeholder.path("input_schema").path("properties").size());
+    assertEquals(0, placeholder.path("input_schema").path("required").size());
+    assertTrue(placeholder.path("defer_loading").asBoolean());
+    assertFalse(placeholder.has("cache_control"));
+    assertEquals(
+        List.of("bash"), request.tools().stream().map(ProviderToolDefinition::name).toList());
   }
 
   /** Appending a SYSTEM delta leaves all previously encoded conversation bytes cache-stable. */
@@ -588,6 +633,49 @@ class AnthropicRequestEncoderTest {
         Arrays.copyOf(afterBytes, beforeBytes.length - 2));
     assertTrue(cacheBlock(beforeWire, 1, 0).has("cache_control"));
     assertTrue(cacheBlock(afterWire, 1, 0).has("cache_control"));
+  }
+
+  @Test
+  void keepsEncodedPrefixStableWhenFirstClientToolChangeIsAppended() throws IOException {
+    ProviderToolDefinition baselineTool =
+        new ProviderToolDefinition("bash", "run bash", "{\"type\":\"object\"}");
+    ProviderToolDefinition addedTool =
+        new ProviderToolDefinition("search", "search", "{\"type\":\"object\"}");
+    List<ProviderMessage> history =
+        List.of(
+            userMsg(new ProviderTextBlock("question")),
+            asstMsg(List.of(new ProviderTextBlock("answer"))));
+    ProviderCacheControl cacheControl =
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "first-tool-change");
+    ProviderRequest before =
+        requestWithClientToolBaseline(history, List.of(baselineTool), cacheControl);
+    List<ProviderMessage> changedHistory = new ArrayList<>(history);
+    changedHistory.add(
+        new ProviderMessage(
+            ProviderMessageRole.SYSTEM, List.of(new ProviderSystemToolAdditionBlock(addedTool))));
+    ProviderRequest after =
+        requestWithClientToolBaseline(changedHistory, List.of(baselineTool), cacheControl);
+
+    AnthropicEncodedRequest encodedBefore = encoder.encode(before, descriptor);
+    AnthropicEncodedRequest encodedAfter = encoder.encode(after, descriptor);
+    JsonNode beforeWire = MAPPER.readTree(encodedBefore.bodyUtf8Bytes());
+    JsonNode afterWire = MAPPER.readTree(encodedAfter.bodyUtf8Bytes());
+
+    assertEquals(List.of("inline-tools-2026-09-15"), encodedBefore.betaFeatures());
+    assertEquals(encodedBefore.betaFeatures(), encodedAfter.betaFeatures());
+    assertEquals(2, afterWire.path("tools").size());
+    assertEquals("bash", afterWire.path("tools").get(0).path("name").asString());
+    assertEquals(
+        "__kk_deferred_placeholder__", afterWire.path("tools").get(1).path("name").asString());
+    assertEquals(
+        "tool_addition",
+        afterWire.path("messages").get(2).path("content").get(0).path("type").asString());
+    assertArrayEquals(
+        Arrays.copyOf(encodedBefore.bodyUtf8Bytes(), encodedBefore.bodyUtf8Bytes().length - 2),
+        Arrays.copyOf(encodedAfter.bodyUtf8Bytes(), encodedBefore.bodyUtf8Bytes().length - 2));
+    assertTrue(beforeWire.path("tools").get(0).path("cache_control").has("type"));
+    assertTrue(afterWire.path("tools").get(0).path("cache_control").has("type"));
+    assertFalse(afterWire.path("tools").get(1).has("cache_control"));
   }
 
   @Test
@@ -1464,6 +1552,24 @@ class AnthropicRequestEncoderTest {
 
   private static ProviderMessage userMsg(ProviderContentBlock... blocks) {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(blocks));
+  }
+
+  private static ProviderRequest requestWithClientToolBaseline(
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      ProviderCacheControl cacheControl) {
+    ModelDescriptor model =
+        new ModelDescriptor(
+            "test-anthropic",
+            "claude-3-5-sonnet",
+            "claude-3-5-sonnet",
+            Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
+            true,
+            false,
+            true,
+            false);
+    return new ProviderRequest(
+        model, defaultVariant(), 1024, SYSTEM_INSTRUCTION, messages, tools, cacheControl, true);
   }
 
   private static ProviderRequest requestWithSystem(
