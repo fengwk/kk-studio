@@ -95,7 +95,6 @@ import fun.fengwk.kkstudio.harness.runtime.AgentSpawner;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionNoGain;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
@@ -1171,7 +1170,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   }
 
   @Test
-  void noGainWritesStableErrorAndKeepsQueuedInput() {
+  void overBudgetSummaryFailsAndKeepsQueuedInput() {
     Fixture fixture = fixture();
     var baseline = seedCompactionReadyClosedTurn(fixture.store, OVER_THRESHOLD_USAGE);
     seedCommand(
@@ -1196,7 +1195,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     EntryPath failed = path(fixture.store, baseline.threadId());
     AssistantErrorPayload error =
         (AssistantErrorPayload) failed.entries().get(failed.entries().size() - 2).payload();
-    assertEquals(CompactionNoGain.NO_GAIN_ERROR_CODE, error.error().code());
+    assertEquals("COMPACTION_BUDGET_EXCEEDED", error.error().code());
     assertEquals(TurnEndOutcome.FAILED, ((TurnEndPayload) failed.head().payload()).outcome());
 
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));

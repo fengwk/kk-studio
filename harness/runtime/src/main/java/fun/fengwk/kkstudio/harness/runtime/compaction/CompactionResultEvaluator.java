@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
@@ -35,14 +34,6 @@ public final class CompactionResultEvaluator {
       } catch (IllegalArgumentException invalidSummary) {
         error = new AssistantError("COMPACTION_INVALID_SUMMARY", invalidSummary.getMessage());
       }
-    }
-    if (error == null
-        && start.phase() != CompactionPhase.HISTORY
-        && !CompactionNoGain.hasGain(parentPath, payload.summaryText(), start.cutEntryId())) {
-      error =
-          new AssistantError(
-              CompactionNoGain.NO_GAIN_ERROR_CODE,
-              "Compaction did not reduce the projected context size");
     }
     if (error == null) {
       long estimatedTokens = TokenEstimator.estimateTextTokens(payload.summaryText());
