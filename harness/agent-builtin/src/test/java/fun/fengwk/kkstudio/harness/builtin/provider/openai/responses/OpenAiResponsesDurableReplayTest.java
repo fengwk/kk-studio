@@ -48,7 +48,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 验证 encrypted reasoning 的完整 durable 链路：Responses 流捕获 → provider replay state 持久化 codec → session
@@ -73,8 +72,7 @@ class OpenAiResponsesDurableReplayTest {
         "openai_test",
         ProviderType.OPENAI_RESPONSES,
         "https://api.openai.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private ProviderRequest request(List<ProviderMessage> messages) {

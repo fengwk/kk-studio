@@ -33,7 +33,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** 模型组：冷却候选选择、fallback 冻结与成员推进、组预算和租约恢复的专用语义。 */
 class ModelProcessorGroupTest extends ModelProcessorTestSupport {
@@ -42,7 +41,6 @@ class ModelProcessorGroupTest extends ModelProcessorTestSupport {
     List<ModelGroupMemberExecution> members = List.of(groupMember("model"), groupMember("model2"));
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         new ModelDescriptor("group", "group", "group", Set.of(ModelInputModality.TEXT), true, true),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
@@ -55,7 +53,6 @@ class ModelProcessorGroupTest extends ModelProcessorTestSupport {
   private static ModelGroupMemberExecution groupMember(String name) {
     return new ModelGroupMemberExecution(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         new ModelDescriptor("provider", name, name, Set.of(ModelInputModality.TEXT), true, true),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null));
   }

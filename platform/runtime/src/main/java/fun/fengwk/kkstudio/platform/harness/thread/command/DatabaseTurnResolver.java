@@ -231,10 +231,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     return new LiveTurnPlan.Planned(
         new ModelRequestSpec(
             first.providerType(),
-            first.providerConnectionGenerationId(),
             resolved.descriptor(),
             first.variant(),
-            first.parsed().variants(),
             outputTokens,
             systemInstruction,
             context.toolBindings(),
@@ -352,7 +350,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
         member.descriptor(), contextWindow(member.parsed()), List.of(member), null);
   }
 
-  /** 冻结组版本、有序成员及其 Provider/连接代际/Descriptor/Variant：组能力取成员输入模态的交集、上下文取最小值，成员切换绝不重新读取 Catalog。 */
+  /** 冻结组版本、有序成员及其 Provider/Descriptor/Variant：组能力取成员输入模态的交集、上下文取最小值，成员切换绝不重新读取 Catalog。 */
   private ResolvedSelection resolveGroup(Model groupModel) {
     ModelGroupConfigDTO group = groupConfigCodec.decode(groupModel.groupConfigJson());
     List<MemberRuntime> members = new ArrayList<>(group.getMembers().size());
@@ -371,11 +369,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       members.add(runtime);
       executions.add(
           new ModelGroupMemberExecution(
-              runtime.providerType(),
-              runtime.providerConnectionGenerationId(),
-              runtime.descriptor(),
-              runtime.variant(),
-              runtime.parsed().variants()));
+              runtime.providerType(), runtime.descriptor(), runtime.variant()));
       if (modalities == null) {
         modalities = new LinkedHashSet<>(runtime.descriptor().inputModalities());
       } else {
@@ -417,10 +411,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
     if (providerType == null) {
       throw rejection("provider type must not be null");
     }
-    UUID providerConnectionGenerationId =
-        require(
-            provider.connectionGenerationId(),
-            "provider connection generation id must not be null");
     require(
         providerFactories.get(providerType),
         "provider factory not found for " + provider.name() + " (" + providerType + ")");
@@ -439,14 +429,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
             parsed.reasoning(),
             parsed.midConversationSystemMessages(),
             parsed.messageLevelEffort());
-    return new MemberRuntime(
-        model.name(),
-        provider,
-        providerType,
-        providerConnectionGenerationId,
-        parsed,
-        descriptor,
-        variant);
+    return new MemberRuntime(model.name(), provider, providerType, parsed, descriptor, variant);
   }
 
   private static void requireReasoningSupport(MemberRuntime member) {
@@ -555,7 +538,6 @@ public final class DatabaseTurnResolver implements TurnResolver {
       String modelName,
       Provider provider,
       ProviderType providerType,
-      UUID providerConnectionGenerationId,
       ParsedAgentModelConfig parsed,
       ModelDescriptor descriptor,
       ModelVariant variant) {}

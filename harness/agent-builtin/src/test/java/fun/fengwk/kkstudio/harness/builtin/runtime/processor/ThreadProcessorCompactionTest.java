@@ -2020,18 +2020,13 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             "test-group",
             7L,
             List.of(
-                new ModelGroupMemberExecution(
-                    base.providerType(),
-                    base.providerConnectionGenerationId(),
-                    base.model(),
-                    base.variant())),
+                new ModelGroupMemberExecution(base.providerType(), base.model(), base.variant())),
             Set.of(429),
             30);
     List<SubagentBinding> subagents = List.of(new SubagentBinding("helper", "delegate"));
     ModelRequestSpec original =
         new ModelRequestSpec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             base.variant(),
             requested,
@@ -2046,7 +2041,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     assertEquals(
         new ModelRequestSpec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             base.variant(),
             expectedOutput,
@@ -2076,7 +2070,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
     ModelRequestSpec base = ThreadProcessorTestSupport.requestFor(settings);
     return new ModelRequestSpec(
         base.providerType(),
-        base.providerConnectionGenerationId(),
         base.model(),
         new ModelVariant(
             base.variant().id(),

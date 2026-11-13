@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 class AnthropicBetaFeaturesTest {
   private static final ProviderDescriptor DESCRIPTOR =
@@ -30,8 +29,7 @@ class AnthropicBetaFeaturesTest {
           "anthropic",
           ProviderType.ANTHROPIC,
           "https://example.invalid/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1, 2));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
   private static final ModelDescriptor MODEL =
       new ModelDescriptor(
           "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true);

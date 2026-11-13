@@ -1122,7 +1122,6 @@ class ThreadContextClassifierTest {
   private static ModelRequestSpec modelRequest() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,

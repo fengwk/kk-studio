@@ -1,17 +1,13 @@
 package fun.fengwk.kkstudio.harness.model.provider;
 
 import java.util.Objects;
-import java.util.UUID;
 
 /** Provider 连接的非敏感描述；凭据由上层安全存储并在创建 adapter 时注入。 */
 public record ProviderDescriptor(
     String providerName,
     ProviderType type,
     String endpoint,
-    ModelCallTimeoutPolicy modelCallTimeoutPolicy,
-    UUID connectionGenerationId) {
-
-  private static final UUID ZERO_UUID = new UUID(0L, 0L);
+    ModelCallTimeoutPolicy modelCallTimeoutPolicy) {
 
   public ProviderDescriptor {
     if (providerName == null || providerName.isBlank()) {
@@ -26,16 +22,6 @@ public record ProviderDescriptor(
     }
     modelCallTimeoutPolicy =
         Objects.requireNonNull(modelCallTimeoutPolicy, "modelCallTimeoutPolicy");
-    connectionGenerationId =
-        Objects.requireNonNull(connectionGenerationId, "connectionGenerationId");
-  }
-
-  public ProviderDescriptor(
-      String providerName,
-      ProviderType type,
-      String endpoint,
-      ModelCallTimeoutPolicy modelCallTimeoutPolicy) {
-    this(providerName, type, endpoint, modelCallTimeoutPolicy, ZERO_UUID);
   }
 
   /** 以真实 wire 模型标识构造回放判定所需的 Provider 身份。 */

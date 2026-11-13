@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchem
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -171,11 +170,10 @@ class ModelRenameIntegrationTest {
     fixture
         .sql(
             """
-            insert into provider (name, provider_type, config, connection_generation_id)
-            values (:name, 'openai', '{}'::jsonb, :generation)
+            insert into provider (name, provider_type, config)
+            values (:name, 'openai', '{}'::jsonb)
             """)
         .param("name", name)
-        .param("generation", UUID.randomUUID())
         .update();
   }
 

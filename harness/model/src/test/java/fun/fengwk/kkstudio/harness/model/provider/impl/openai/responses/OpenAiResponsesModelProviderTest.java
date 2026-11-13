@@ -45,7 +45,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -157,8 +156,7 @@ class OpenAiResponsesModelProviderTest {
         "openai_test",
         ProviderType.OPENAI_RESPONSES,
         "https://api.openai.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private ModelDescriptor createModel() {
@@ -442,8 +440,7 @@ class OpenAiResponsesModelProviderTest {
             "anthropic",
             ProviderType.ANTHROPIC,
             "https://api.anthropic.com",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-            UUID.randomUUID());
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
     assertThrows(IllegalArgumentException.class, () -> adapter.create(anthropicDesc));
   }
 

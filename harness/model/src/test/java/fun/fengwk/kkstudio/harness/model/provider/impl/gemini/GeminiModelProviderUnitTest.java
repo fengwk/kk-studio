@@ -45,7 +45,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -69,8 +68,7 @@ class GeminiModelProviderUnitTest {
             "google-unit",
             ProviderType.GOOGLE,
             "https://generativelanguage.googleapis.com",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
-            UUID.randomUUID());
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
 
     ModelDescriptor model =
         new ModelDescriptor(
@@ -157,8 +155,7 @@ class GeminiModelProviderUnitTest {
             "bad-desc",
             ProviderType.GOOGLE,
             "https://generativelanguage.googleapis.com?query=not_allowed",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
-            UUID.randomUUID());
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
 
     GeminiModelProvider provider = new GeminiModelProvider(transport, badEndpointDesc, "k");
 

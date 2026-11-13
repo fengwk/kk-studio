@@ -99,25 +99,16 @@ class ModelRequestMaterializerTest {
     ModelVariant none = new ModelVariant("v1", null, PromptCacheRetention.NONE, null);
     ModelVariant shortCache = new ModelVariant("v2", null, PromptCacheRetention.SHORT, null);
     List<ModelGroupMemberExecution> members = new ArrayList<>();
-    members.add(new ModelGroupMemberExecution(ProviderType.OPENAI, id(1L), descriptor(), none));
-    members.add(
-        new ModelGroupMemberExecution(ProviderType.OPENAI, id(1L), descriptor(), shortCache));
+    members.add(new ModelGroupMemberExecution(ProviderType.OPENAI, descriptor(), none));
+    members.add(new ModelGroupMemberExecution(ProviderType.OPENAI, descriptor(), shortCache));
     ModelGroupExecution group = new ModelGroupExecution("group", 1L, members, Set.of(429), 30);
     ModelRequestSpec spec =
         new ModelRequestSpec(
-            ProviderType.OPENAI,
-            id(1L),
-            descriptor(),
-            none,
-            1024,
-            "system",
-            List.of(),
-            List.of(),
-            group);
+            ProviderType.OPENAI, descriptor(), none, 1024, "system", List.of(), List.of(), group);
     EntryPath path = new EntryPath(List.of(entry(1, 0, new RootPayload(SETTINGS))));
 
     ProviderRequest first = MATERIALIZER.materialize(path, spec.forMember(0));
-    members.set(1, new ModelGroupMemberExecution(ProviderType.OPENAI, id(1L), descriptor(), none));
+    members.set(1, new ModelGroupMemberExecution(ProviderType.OPENAI, descriptor(), none));
     ProviderRequest second = MATERIALIZER.materialize(path, spec.forMember(1));
     assertEquals(ProviderCacheControl.none(), first.cacheControl());
     assertEquals(
@@ -144,7 +135,6 @@ class ModelRequestMaterializerTest {
             new EntryPath(List.of(root, baseline, change)),
             new ModelRequestSpec(
                 ProviderType.OPENAI,
-                id(1L),
                 descriptor(),
                 variant(),
                 1024,
@@ -199,11 +189,9 @@ class ModelRequestMaterializerTest {
     ModelRequestSpec spec =
         new ModelRequestSpec(
             ProviderType.ANTHROPIC,
-            id(1L),
             new ModelDescriptor(
                 "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
             variant,
-            List.of(variant),
             1024,
             "[agent]\nnew",
             List.of(bashBinding()),
@@ -250,13 +238,8 @@ class ModelRequestMaterializerTest {
     ModelRequestSpec spec =
         new ModelRequestSpec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             current,
-            List.of(
-                current,
-                new ModelVariant("old", "high", PromptCacheRetention.NONE, null),
-                new ModelVariant("unset", null, PromptCacheRetention.NONE, null)),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
@@ -321,10 +304,8 @@ class ModelRequestMaterializerTest {
     ModelRequestSpec spec =
         new ModelRequestSpec(
             base.providerType(),
-            base.providerConnectionGenerationId(),
             base.model(),
             current,
-            List.of(current, new ModelVariant("old", "high", PromptCacheRetention.NONE, null)),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
@@ -648,7 +629,6 @@ class ModelRequestMaterializerTest {
   private static ModelRequestSpec liveSpec(ToolBinding binding) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         descriptor(),
         variant(),
         1024,

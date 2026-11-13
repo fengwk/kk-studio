@@ -743,7 +743,6 @@ class ModelAttemptMaterializationTest {
   private static ModelRequestSpec requestSpec() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
@@ -803,7 +802,6 @@ class ModelAttemptMaterializationTest {
             null);
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,

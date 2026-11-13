@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchem
 
 import java.sql.Connection;
 import java.sql.SQLException;
-import java.util.UUID;
 
 /** {@code agent} 读取路径的真实 SQL 覆盖：listAll 排序、count 与 jsonb 引用检查。 */
 class AgentRepositoryIntegrationTest {
@@ -73,10 +72,8 @@ class AgentRepositoryIntegrationTest {
     String modelName = "mod-" + id;
     jdbcClient
         .sql(
-            "insert into provider (name, provider_type, config, connection_generation_id)"
-                + " values (:name, 'openai', '{}'::jsonb, :generation)")
+            "insert into provider (name, provider_type, config) values (:name, 'openai', '{}'::jsonb)")
         .param("name", providerName)
-        .param("generation", UUID.randomUUID())
         .update();
     jdbcClient
         .sql(

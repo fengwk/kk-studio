@@ -43,7 +43,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 /** Anthropic 请求编码与 Runtime 历史投影的集成契约：历史诊断与缓存端点必须经过真实投影后再编码，不能只在手工 {@link ProviderMessage} 上成立。 */
@@ -58,8 +57,7 @@ class AnthropicRequestProjectionWireTest {
           "test-anthropic",
           ProviderType.ANTHROPIC,
           "https://api.anthropic.com/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
 
   @Test
   void verifiesSemanticChainFromLengthDiagnosticToAssistantTextBlockInNextRound()

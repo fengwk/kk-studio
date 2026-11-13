@@ -39,7 +39,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 验证 Anthropic 续写终止态（{@code pause_turn} / {@code compaction}）到运行时 CONTINUE 的映射，以及 compaction replay
@@ -56,8 +55,7 @@ class AnthropicContinuationReplayTest {
           "test-anthropic",
           ProviderType.ANTHROPIC,
           "https://api.anthropic.com/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
 
   /** 测试意图：{@code pause_turn} 映射为 CONTINUE；assistant blocks 按序保留 server tool 的原生输入与结果，供运行时下一轮回放。 */
   @Test

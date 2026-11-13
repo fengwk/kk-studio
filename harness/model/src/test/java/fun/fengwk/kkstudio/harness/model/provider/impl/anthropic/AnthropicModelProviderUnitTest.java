@@ -44,7 +44,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -67,8 +66,7 @@ class AnthropicModelProviderUnitTest {
             "anthropic-unit",
             ProviderType.ANTHROPIC,
             "https://api.anthropic.com/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
-            UUID.randomUUID());
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
 
     ModelDescriptor model =
         new ModelDescriptor(

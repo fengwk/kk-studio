@@ -70,7 +70,6 @@ public final class StoreTestSupport {
     ProviderRequest provider = providerRequest();
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
         1024,
@@ -84,7 +83,6 @@ public final class StoreTestSupport {
     ModelRequestSpec base = modelRequest();
     return new ModelRequestSpec(
         base.providerType(),
-        base.providerConnectionGenerationId(),
         base.model(),
         base.variant(),
         1024,
@@ -98,7 +96,6 @@ public final class StoreTestSupport {
     ModelRequestSpec base = modelRequest();
     return new ModelRequestSpec(
         base.providerType(),
-        base.providerConnectionGenerationId(),
         base.model(),
         base.variant(),
         1024,

@@ -31,7 +31,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** 验证 OpenAI Responses 思考过程、加密推理保留与带工具回放语义。 */
 class OpenAiResponsesThinkingTest {
@@ -47,8 +46,7 @@ class OpenAiResponsesThinkingTest {
         "openai_test",
         ProviderType.OPENAI_RESPONSES,
         "https://api.openai.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private ModelDescriptor createModel() {

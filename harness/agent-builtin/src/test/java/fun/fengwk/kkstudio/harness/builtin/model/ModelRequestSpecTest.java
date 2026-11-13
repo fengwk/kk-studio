@@ -30,12 +30,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /** ModelRequestSpec 的冻结、唯一名称/ID 与 environment 一致性检查。 */
 class ModelRequestSpecTest {
-
-  private static final UUID CONNECTION_GENERATION_ID = new UUID(0L, 1L);
 
   @Test
   void freezesProviderModelVariantAndOrderedBindings() {
@@ -46,7 +43,6 @@ class ModelRequestSpecTest {
             List.of(new SubagentBinding("reviewer", "Review changes")));
 
     assertEquals(ProviderType.OPENAI, spec.providerType());
-    assertEquals(CONNECTION_GENERATION_ID, spec.providerConnectionGenerationId());
     assertEquals("provider", spec.model().providerName());
     assertEquals("v1", spec.variant().id());
     assertEquals(List.of("bash", "fs"), names(spec.toolBindings()));
@@ -63,7 +59,6 @@ class ModelRequestSpecTest {
     ModelRequestSpec spec =
         new ModelRequestSpec(
             ProviderType.OPENAI,
-            CONNECTION_GENERATION_ID,
             modelDescriptor(),
             variant(),
             1024,
@@ -86,20 +81,12 @@ class ModelRequestSpecTest {
         IllegalArgumentException.class,
         () ->
             new ModelRequestSpec(
-                ProviderType.OPENAI,
-                CONNECTION_GENERATION_ID,
-                modelDescriptor(),
-                variant(),
-                1024,
-                "",
-                List.of(),
-                List.of()));
+                ProviderType.OPENAI, modelDescriptor(), variant(), 1024, "", List.of(), List.of()));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new ModelRequestSpec(
                 ProviderType.OPENAI,
-                CONNECTION_GENERATION_ID,
                 modelDescriptor(),
                 variant(),
                 1024,
@@ -111,7 +98,6 @@ class ModelRequestSpecTest {
         () ->
             new ModelRequestSpec(
                 ProviderType.OPENAI,
-                CONNECTION_GENERATION_ID,
                 modelDescriptor(),
                 variant(),
                 1024,
@@ -225,7 +211,6 @@ class ModelRequestSpecTest {
         () ->
             new ModelRequestSpec(
                 null,
-                CONNECTION_GENERATION_ID,
                 modelDescriptor(),
                 variant(),
                 1024,
@@ -238,7 +223,6 @@ class ModelRequestSpecTest {
             new ModelRequestSpec(
                 ProviderType.OPENAI,
                 null,
-                modelDescriptor(),
                 variant(),
                 1024,
                 "Test system instruction.",
@@ -249,19 +233,6 @@ class ModelRequestSpecTest {
         () ->
             new ModelRequestSpec(
                 ProviderType.OPENAI,
-                CONNECTION_GENERATION_ID,
-                null,
-                variant(),
-                1024,
-                "Test system instruction.",
-                List.of(),
-                List.of()));
-    assertThrows(
-        NullPointerException.class,
-        () ->
-            new ModelRequestSpec(
-                ProviderType.OPENAI,
-                CONNECTION_GENERATION_ID,
                 modelDescriptor(),
                 variant(),
                 1024,
@@ -273,7 +244,6 @@ class ModelRequestSpecTest {
         () ->
             new ModelRequestSpec(
                 ProviderType.OPENAI,
-                CONNECTION_GENERATION_ID,
                 modelDescriptor(),
                 variant(),
                 1024,
@@ -285,7 +255,6 @@ class ModelRequestSpecTest {
   private static ModelRequestSpec spec(List<ToolBinding> tools, List<SubagentBinding> subagents) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        CONNECTION_GENERATION_ID,
         modelDescriptor(),
         variant(),
         1024,

@@ -50,7 +50,6 @@ import java.io.InputStream;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
@@ -75,9 +74,6 @@ class AnthropicThinkingTest {
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final UUID CONNECTION_GEN_ID =
-      UUID.fromString("00000000-0000-0000-0000-000000000001");
-
   private ProviderDescriptor descriptor;
   private AnthropicRequestEncoder encoder;
 
@@ -88,8 +84,7 @@ class AnthropicThinkingTest {
             "anthropic-thinking",
             ProviderType.ANTHROPIC,
             "https://api.anthropic.com/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-            CONNECTION_GEN_ID);
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
     encoder = new AnthropicRequestEncoder();
   }
 

@@ -56,7 +56,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -1764,8 +1763,7 @@ class AnthropicMessagesWireTest {
         "http://127.0.0.1:" + port + "/v1",
         timeoutPolicy != null
             ? timeoutPolicy
-            : new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
-        UUID.randomUUID());
+            : new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
   }
 
   private ModelDescriptor createModelDescriptor(String modelName) {

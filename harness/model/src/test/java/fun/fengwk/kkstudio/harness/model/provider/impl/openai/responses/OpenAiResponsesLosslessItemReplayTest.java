@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 验证 OpenAI Responses stateless replay 对官方已知 output item 的无损回放。
@@ -80,8 +79,7 @@ class OpenAiResponsesLosslessItemReplayTest {
         "openai_test",
         ProviderType.OPENAI_RESPONSES,
         "https://api.openai.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private static ProviderRequest request(List<ProviderMessage> messages) {

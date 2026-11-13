@@ -61,7 +61,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 /** AnthropicRequestEncoder 的纯单元与 Golden 测试。 */
@@ -77,8 +76,7 @@ class AnthropicRequestEncoderTest {
           "test-anthropic",
           ProviderType.ANTHROPIC,
           "https://api.anthropic.com/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
 
   @Test
   void encodesBasicUserMessageWithDefaultMaxTokensAndStream() throws IOException {

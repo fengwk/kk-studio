@@ -142,7 +142,6 @@ class BuiltinRequestQueryTest {
   private static ModelRequestSpec requestSpec() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),

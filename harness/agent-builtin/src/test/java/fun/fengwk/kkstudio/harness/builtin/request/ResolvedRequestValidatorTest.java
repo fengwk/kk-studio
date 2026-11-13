@@ -146,7 +146,6 @@ class ResolvedRequestValidatorTest {
       ModelSelection model, List<ToolBinding> tools, List<SubagentBinding> subagents) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         new ModelDescriptor(
             "provider",
             model.modelName(),

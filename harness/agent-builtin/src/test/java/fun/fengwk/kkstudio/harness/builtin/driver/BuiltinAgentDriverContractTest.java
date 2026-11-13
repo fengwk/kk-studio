@@ -514,7 +514,6 @@ class BuiltinAgentDriverContractTest {
   private static ModelRequestSpec modelRequest() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
@@ -533,11 +532,9 @@ class BuiltinAgentDriverContractTest {
                 "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\"}]}"));
     return new ModelRequestSpec(
         ProviderType.ANTHROPIC,
-        new UUID(0L, 1L),
         new ModelDescriptor(
             "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
         variant,
-        List.of(variant),
         1024,
         "[agent] new",
         List.of(tool),

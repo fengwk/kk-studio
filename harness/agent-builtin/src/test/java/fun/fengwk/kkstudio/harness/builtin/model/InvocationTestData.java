@@ -29,7 +29,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /** ModelInvocation 共享的测试 fixture。 */
 final class InvocationTestData {
@@ -119,7 +118,6 @@ final class InvocationTestData {
     ProviderRequest provider = providerRequest(bindings);
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
         1024,

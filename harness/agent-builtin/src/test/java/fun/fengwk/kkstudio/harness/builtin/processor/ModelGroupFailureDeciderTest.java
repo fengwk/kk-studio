@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** Fill First 失败分类边界：触发码优先、普通耗尽后降级、取消/溢出绝不降级。 */
 class ModelGroupFailureDeciderTest {
@@ -28,7 +27,6 @@ class ModelGroupFailureDeciderTest {
           List.of(
               new ModelGroupMemberExecution(
                   ProviderType.OPENAI,
-                  new UUID(0L, 1L),
                   new ModelDescriptor(
                       "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true),
                   new ModelVariant("v1", null, PromptCacheRetention.NONE, null))),

@@ -976,7 +976,6 @@ public final class ThreadProcessorTestSupport {
   static ModelRequestSpec requestWithBindings(List<ToolBinding> bindings) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor("provider", "model"),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,
@@ -989,7 +988,6 @@ public final class ThreadProcessorTestSupport {
   static ModelRequestSpec requestFor(BranchSettings settings) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor("provider", builtinExecution(settings).modelName()),
         new ModelVariant(
             builtinExecution(settings).variant(), null, PromptCacheRetention.NONE, null),
@@ -1007,7 +1005,6 @@ public final class ThreadProcessorTestSupport {
   static ModelRequestSpec compactionRequest(ModelSelection model) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor("provider", model.modelName()),
         new ModelVariant(model.variant(), null, PromptCacheRetention.NONE, null),
         1024,

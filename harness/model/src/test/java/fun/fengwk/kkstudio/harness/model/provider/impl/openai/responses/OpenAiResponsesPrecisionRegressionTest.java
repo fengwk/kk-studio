@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderTestFixtures;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 测试意图：OpenAI Responses 自由 JSON 数值语义的边界行为——工具 schema 与原生 opaque item 的数值以 {@link
@@ -56,8 +55,7 @@ class OpenAiResponsesPrecisionRegressionTest {
           "openai_test",
           ProviderType.OPENAI_RESPONSES,
           "https://api.openai.com/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   private final ModelDescriptor model =
       new ModelDescriptor(
           "openai_test",

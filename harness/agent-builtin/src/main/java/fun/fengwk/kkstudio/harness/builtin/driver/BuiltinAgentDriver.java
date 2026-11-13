@@ -228,10 +228,8 @@ public final class BuiltinAgentDriver implements AgentDriver {
       spec =
           new ModelRequestSpec(
               spec.providerType(),
-              spec.providerConnectionGenerationId(),
               spec.model(),
               spec.variant(),
-              spec.modelVariants(),
               Math.min(spec.outputTokens(), cap),
               spec.systemInstruction(),
               spec.toolBindings(),

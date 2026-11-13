@@ -316,10 +316,8 @@ public final class ProviderRequestPreviewService {
     }
     return new ModelRequestSpec(
         spec.providerType(),
-        spec.providerConnectionGenerationId(),
         spec.model(),
         spec.variant(),
-        spec.modelVariants(),
         outputTokens,
         spec.systemInstruction(),
         spec.toolBindings(),
@@ -422,13 +420,12 @@ public final class ProviderRequestPreviewService {
     return new EntryPath(chain);
   }
 
-  /** Provider 解析与编码：generation/type 漂移、adapter 缺失一律确定性拒绝；不支持预览的 adapter 绝不伪装成空体。 */
+  /** Provider 解析与编码：type 漂移、adapter 缺失一律确定性拒绝；不支持预览的 adapter 绝不伪装成空体。 */
   private byte[] encodeRequestBody(
       ProviderType providerType, ModelRequestSpec spec, ProviderRequest request) {
     ProviderResolutionService.ResolvedExecution resolved;
     try {
-      resolved =
-          providerResolution.resolve(providerType, spec.providerConnectionGenerationId(), request);
+      resolved = providerResolution.resolve(providerType, request);
     } catch (IllegalArgumentException | IllegalStateException error) {
       throw DomainException.conflict(
           "PREVIEW_PROVIDER_UNAVAILABLE", "cannot resolve the current provider for preview");

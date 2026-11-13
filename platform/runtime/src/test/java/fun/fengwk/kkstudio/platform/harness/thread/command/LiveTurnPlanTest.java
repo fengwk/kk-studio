@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * {@link LiveTurnPlan} 型不变量的契约测试。
@@ -106,7 +105,6 @@ class LiveTurnPlanTest {
   private static ModelRequestSpec spec() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 42L),
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
         new ModelVariant("default", null, PromptCacheRetention.SHORT, null),

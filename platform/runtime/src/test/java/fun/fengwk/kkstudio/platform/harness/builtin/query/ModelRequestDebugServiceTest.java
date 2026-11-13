@@ -797,7 +797,6 @@ class ModelRequestDebugServiceTest {
   private static ModelRequestSpec requestSpec() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 42L),
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
         // 冻结请求只携带 Agent 正文唯一的 systemInstruction 与零 tool binding。

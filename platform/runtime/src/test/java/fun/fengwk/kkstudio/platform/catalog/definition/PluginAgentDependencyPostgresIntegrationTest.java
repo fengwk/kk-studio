@@ -59,7 +59,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -404,10 +403,8 @@ class PluginAgentDependencyPostgresIntegrationTest {
   private void seedAgentModel() {
     jdbcClient
         .sql(
-            "insert into provider (name, provider_type, config, connection_generation_id)"
-                + " values (:name, 'openai', '{}'::jsonb, cast(:generation as uuid))")
+            "insert into provider (name, provider_type, config) values (:name, 'openai', '{}'::jsonb)")
         .param("name", MODEL_PROVIDER)
-        .param("generation", UUID.randomUUID().toString())
         .update();
     jdbcClient
         .sql(

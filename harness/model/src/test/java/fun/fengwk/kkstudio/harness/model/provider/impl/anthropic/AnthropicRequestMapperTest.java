@@ -44,7 +44,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 /**
@@ -71,8 +70,7 @@ class AnthropicRequestMapperTest {
           "test-anthropic",
           ProviderType.ANTHROPIC,
           "https://api.anthropic.com/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
 
   // =========================================================================================
   // 1. 14-case 消息映射矩阵

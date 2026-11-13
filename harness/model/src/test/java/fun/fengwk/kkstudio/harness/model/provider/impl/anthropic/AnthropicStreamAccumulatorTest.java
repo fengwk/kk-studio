@@ -49,7 +49,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** AnthropicStreamAccumulator 的纯状态机与终态解析测试。 */
 class AnthropicStreamAccumulatorTest {
@@ -84,8 +83,7 @@ class AnthropicStreamAccumulatorTest {
             "test-anthropic",
             ProviderType.ANTHROPIC,
             "https://api.anthropic.com/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-            new UUID(1L, 2L));
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
     ModelDescriptor model =
         new ModelDescriptor(
             "test-anthropic",

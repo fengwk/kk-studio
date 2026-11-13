@@ -28,7 +28,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** Anthropic 的消息级 effort 必须重放历史声明并保持早期请求前缀不变。 */
 class AnthropicPerTurnEffortTest {
@@ -40,8 +39,7 @@ class AnthropicPerTurnEffortTest {
           "p",
           ProviderType.ANTHROPIC,
           "https://example.invalid/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1, 2));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
   private static final ModelDescriptor MESSAGE_LEVEL_MODEL =
       new ModelDescriptor(
           "p", "model", "wire", Set.of(ModelInputModality.TEXT), true, true, false, true);

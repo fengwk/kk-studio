@@ -1298,7 +1298,6 @@ class PostgresqlCompactionChildTest {
     }
     return new ModelRequestSpec(
         base.providerType(),
-        base.providerConnectionGenerationId(),
         base.model(),
         new ModelVariant(
             base.variant().id(),
@@ -1892,7 +1891,6 @@ class PostgresqlCompactionChildTest {
     ModelSelection model = BuiltinExecution.model(settings.execution());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         new ModelDescriptor(
             "provider",
             model.modelName(),
