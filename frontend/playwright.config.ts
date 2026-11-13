@@ -77,7 +77,7 @@ export default defineConfig({
     },
     {
       name: 'compaction',
-      testMatch: '**/compaction-card.browser.ts',
+      testMatch: ['**/compaction-card.browser.ts', '**/compaction-lifecycle.browser.ts'],
       outputDir: '../reports/compaction',
       use: {
         screenshot: 'only-on-failure',
