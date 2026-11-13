@@ -84,10 +84,12 @@ func newControlAttempt(runtime *Runtime) *controlAttempt {
 }
 
 // bind attaches the generation this attempt produced. A GOAWAY that arrived before the generation
-// was known retires it immediately, exactly like a GOAWAY observed on a bound generation.
+// was known retires it immediately, exactly like a GOAWAY observed on a bound generation. The
+// generation and the pending flag share the lock so a GOAWAY racing the bind is never dropped;
+// retirement always runs outside it because closing the connection can re-enter the observer.
 func (a *controlAttempt) bind(active *activeConnection) {
-	a.active.Store(active)
 	a.mu.Lock()
+	a.active.Store(active)
 	pending := a.pending
 	a.mu.Unlock()
 	if pending {
@@ -101,13 +103,14 @@ func (a *controlAttempt) NotifyGoaway(code uint32) {
 	if code != 0 {
 		return
 	}
+	a.mu.Lock()
 	active := a.active.Load()
 	if active == nil {
-		a.mu.Lock()
 		a.pending = true
 		a.mu.Unlock()
 		return
 	}
+	a.mu.Unlock()
 	a.runtime.retireConnection(active)
 }
 
