@@ -767,7 +767,7 @@ class DaemonCrossLanguageIntegrationTest {
     Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
     while (current != null) {
       if (Files.isRegularFile(current.resolve("pom.xml"))
-          && Files.isDirectory(current.resolve("daemon-go"))
+          && Files.isRegularFile(current.resolve("daemon-go/go.mod"))
           && Files.isDirectory(current.resolve("web"))) {
         return current;
       }
