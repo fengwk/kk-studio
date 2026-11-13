@@ -8,6 +8,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strconv"
 	"strings"
@@ -128,6 +129,19 @@ func TestTunnel_HTTPBodyFailureAfterHeadersAbortsStream(t *testing.T) {
 		}
 	}()
 	(&ControlConnection{}).proxyIDEHTTP(writer, request, ViewUpstream{Host: host, Port: port, Path: "/"})
+}
+
+func TestResponseBodyWriterFlushesWrittenWebSocketData(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	writer := responseBodyWriter{reader: strings.NewReader(""), writer: recorder}
+	payload := []byte("websocket frame")
+	n, err := writer.Write(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != len(payload) || !recorder.Flushed || recorder.Body.String() != string(payload) {
+		t.Fatalf("write=%d flushed=%t body=%q", n, recorder.Flushed, recorder.Body.String())
+	}
 }
 
 // TRN-T-059

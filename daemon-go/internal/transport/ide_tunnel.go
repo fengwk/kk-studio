@@ -303,8 +303,14 @@ type responseBodyWriter struct {
 	writer io.Writer
 }
 
-func (p *responseBodyWriter) Read(b []byte) (int, error)  { return p.reader.Read(b) }
-func (p *responseBodyWriter) Write(b []byte) (int, error) { return p.writer.Write(b) }
+func (p *responseBodyWriter) Read(b []byte) (int, error) { return p.reader.Read(b) }
+func (p *responseBodyWriter) Write(b []byte) (int, error) {
+	n, err := p.writer.Write(b)
+	if flusher, ok := p.writer.(http.Flusher); ok && n > 0 {
+		flusher.Flush()
+	}
+	return n, err
+}
 func (p *responseBodyWriter) Close() error {
 	if closer, ok := p.reader.(io.Closer); ok {
 		return closer.Close()
