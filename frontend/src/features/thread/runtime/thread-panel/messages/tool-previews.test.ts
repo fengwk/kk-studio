@@ -4,7 +4,16 @@ import {
   formatWritePreview,
   parseToolArguments,
   previewForToolCall,
+  type ToolCallPreview,
 } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
+
+/** 从 edit 预览取出流式输入的条目列表；同时确认当前处于 input 模式。 */
+function inputEntries(preview: ToolCallPreview | null) {
+  if (preview?.kind !== 'edit' || preview.mode !== 'input') {
+    throw new Error(`expected edit input preview, got ${JSON.stringify(preview)}`)
+  }
+  return preview.entries
+}
 
 describe('tool previews', () => {
   const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
@@ -61,43 +70,68 @@ describe('tool previews', () => {
     expect(preview.lines).toEqual(['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'])
   })
 
-  it('renders streamed edit input as explicit input rather than diff', () => {
-    const parsed = parseToolArguments('{"path":"App.java","old_string":"alpha\\nbeta","new_string":"alpha\\nBETA')
+  it('renders one streamed edit entry as explicit input rather than diff', () => {
+    const parsed = parseToolArguments(
+      '{"path":"App.java","edits":[{"old_string":"alpha\\nbeta","new_string":"alpha\\nBETA',
+    )
     const preview = formatEditPreview(parsed, { streaming: true })
 
-    expect(preview?.kind).toBe('edit')
-    if (preview && preview.kind === 'edit') {
-      expect(preview.mode).toBe('input')
-      if (preview.mode === 'input') {
-        expect(preview.path).toBe('App.java')
-        expect(preview.oldText).toBe('alpha\nbeta')
-        expect(preview.newText).toBe('alpha\nBETA')
-      }
-    }
+    expect(inputEntries(preview)).toEqual([
+      { oldText: 'alpha\nbeta', newText: 'alpha\nBETA', replaceAll: false },
+    ])
+    expect(preview).toMatchObject({ kind: 'edit', mode: 'input', path: 'App.java' })
+  })
+
+  it('keeps every parsed entry of a multi-entry edit that is still streaming', () => {
+    const parsed = parseToolArguments(
+      '{"path":"App.java","edits":['
+      + '{"old_string":"one","new_string":"ONE","replace_all":true},'
+      + '{"old_string":"two","new_string":"TWO"},'
+      + '{"old_string":"three","new_',
+    )
+    const preview = formatEditPreview(parsed, { streaming: true })
+
+    expect(parsed.complete).toBe(false)
+    expect(inputEntries(preview)).toEqual([
+      { oldText: 'one', newText: 'ONE', replaceAll: true },
+      { oldText: 'two', newText: 'TWO', replaceAll: false },
+      { oldText: 'three', newText: '', replaceAll: false },
+    ])
+  })
+
+  it('omits entries while edits itself is still an empty or unparsed array', () => {
+    expect(inputEntries(formatEditPreview(
+      parseToolArguments('{"path":"App.java","edits":['),
+      { streaming: true },
+    ))).toEqual([])
+    expect(inputEntries(formatEditPreview(
+      parseToolArguments('{"path":"App.java","edits":'),
+      { streaming: true },
+    ))).toEqual([])
+    // 顶层仍是旧的单替换参数时不伪造输入条目。
+    expect(inputEntries(formatEditPreview(
+      parseToolArguments('{"path":"App.java","old_string":"a","new_string":"b"}'),
+      { streaming: true },
+    ))).toEqual([])
   })
 
   it('renders preparing state after arguments finish while waiting for review', () => {
     const parsed = parseToolArguments(JSON.stringify({
       path: 'App.java',
-      old_string: 'alpha\nbeta',
-      new_string: 'alpha\nBETA',
+      edits: [{ old_string: 'alpha\nbeta', new_string: 'alpha\nBETA' }],
     }))
     const preview = formatEditPreview(parsed, { isWaitingReview: true })
 
-    expect(preview?.kind).toBe('edit')
-    if (preview && preview.kind === 'edit') {
-      expect(preview.mode).toBe('preparing')
-      if (preview.mode === 'preparing') {
-        expect(preview.path).toBe('App.java')
-      }
-    }
+    expect(preview).toMatchObject({ kind: 'edit', mode: 'preparing', path: 'App.java' })
   })
 
-  it('replaces input with real multi-hunk numbered file diff from editReview', () => {
+  it('replaces streamed input with the real multi-hunk diff from editReview', () => {
     const parsed = parseToolArguments(JSON.stringify({
       path: 'App.java',
-      old_string: 'alpha\nbeta',
-      new_string: 'alpha\nBETA',
+      edits: [
+        { old_string: 'alpha\nbeta', new_string: 'alpha\nBETA' },
+        { old_string: 'gamma', new_string: 'GAMMA', replace_all: true },
+      ],
     }))
     const realDiff = '@@ -10,3 +10,3 @@\n 10|context\n-11|alpha\n-12|beta\n+11|alpha\n+12|BETA\n 13|context'
     const preview = formatEditPreview(parsed, {
@@ -109,30 +143,40 @@ describe('tool previews', () => {
     })
 
     expect(preview?.kind).toBe('edit')
-    if (preview && preview.kind === 'edit') {
-      expect(preview.mode).toBe('review')
-      if (preview.mode === 'review') {
-        expect(preview.path).toBe('/canonical/App.java')
-        expect(preview.diff).toBe(realDiff)
-        expect(preview.sha256).toBe(validSha)
-        expect(preview.lines).toEqual([
-          '@@ -10,3 +10,3 @@',
-          ' 10|context',
-          '-11|alpha',
-          '-12|beta',
-          '+11|alpha',
-          '+12|BETA',
-          ' 13|context',
-        ])
-      }
+    if (preview?.kind === 'edit' && preview.mode === 'review') {
+      expect(preview.path).toBe('/canonical/App.java')
+      expect(preview.diff).toBe(realDiff)
+      expect(preview.sha256).toBe(validSha)
+      expect(preview.lines).toEqual([
+        '@@ -10,3 +10,3 @@',
+        ' 10|context',
+        '-11|alpha',
+        '-12|beta',
+        '+11|alpha',
+        '+12|BETA',
+        ' 13|context',
+      ])
+    } else {
+      throw new Error('expected review preview')
     }
+  })
+
+  it('prefers editReview over streamed entries as soon as it exists', () => {
+    const parsed = parseToolArguments(
+      '{"path":"App.java","edits":[{"old_string":"alpha","new_string":"BETA',
+    )
+    const preview = formatEditPreview(parsed, {
+      streaming: true,
+      editReview: { path: '/canonical/App.java', diff: '-1|alpha\n+1|BETA', sha256: validSha },
+    })
+
+    expect(preview).toMatchObject({ kind: 'edit', mode: 'review', path: '/canonical/App.java' })
   })
 
   it('returns null for historical terminal calls without a review instead of eternal spinner', () => {
     const parsed = parseToolArguments(JSON.stringify({
       path: 'App.java',
-      old_string: 'a',
-      new_string: 'b',
+      edits: [{ old_string: 'a', new_string: 'b' }],
     }))
     const preview = formatEditPreview(parsed, { isTerminalWithoutReview: true })
     expect(preview).toBeNull()
@@ -141,11 +185,13 @@ describe('tool previews', () => {
   it('returns null for unknown tools and matches tool names case-insensitively', () => {
     expect(previewForToolCall('unknown_tool', '{"a":1}')).toBeNull()
     expect(previewForToolCall('  WRITE  ', '{"path":"a.txt","content":"x"}')?.kind).toBe('write')
-    expect(previewForToolCall('Edit', '{"path":"a.txt","old_string":"a","new_string":"b"}')?.kind)
-      .toBe('edit')
+    expect(previewForToolCall(
+      'Edit',
+      '{"path":"a.txt","edits":[{"old_string":"a","new_string":"b"}]}',
+    )?.kind).toBe('edit')
   })
 
-  it('treats empty and non-object JSON payloads as incomplete with empty values', () => {
+  it('treats empty and non-object JSON payloads as complete with empty values only when valid', () => {
     expect(parseToolArguments('')).toEqual({ raw: '', complete: false, values: {} })
     expect(parseToolArguments('   ')).toEqual({ raw: '   ', complete: false, values: {} })
     expect(parseToolArguments('"just-a-string"')).toEqual({
@@ -156,8 +202,8 @@ describe('tool previews', () => {
     expect(parseToolArguments('[]')).toEqual({ raw: '[]', complete: true, values: {} })
   })
 
-  it('extracts partial boolean/number/string fields and unescapes string values', () => {
-    // 完整闭合的 JSON 走 complete 路径（JSON.parse 原生解转义）；流式中途的未闭合字符串走 partial 提取。
+  it('extracts partial boolean/number/string fields with escapes decoded', () => {
+    // 完整闭合的 JSON 走 JSON.parse（原生解转义）；流式中途的未闭合值走前缀解析。
     const complete = parseToolArguments(
       '{"path":"App.java","replace_all":true,"offset":12,"content":"one\\ntwo"}',
     )
@@ -175,11 +221,10 @@ describe('tool previews', () => {
     expect(partial.values.path).toBe('App.java')
     expect(partial.values.replace_all).toBe(true)
     expect(partial.values.offset).toBe(12)
-    // 流式提取器的 unescapeJsonString 会展开 \\n 字面量。
     expect(partial.values.content).toBe('one\ntwo')
   })
 
-  it('keeps an unterminated trailing string value but drops unquoted garbage keys', () => {
+  it('keeps an unterminated trailing string value and drops unquoted garbage keys', () => {
     const parsed = parseToolArguments('{"path":"App.java","content":"unclosed')
     expect(parsed.complete).toBe(false)
     expect(parsed.values.path).toBe('App.java')

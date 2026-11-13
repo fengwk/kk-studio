@@ -27,6 +27,21 @@ func invokeCoding(t *testing.T, provider Provider, id string, args any, expected
 	return result
 }
 
+// editArgs builds fs.edit arguments from independent exact replacements.
+func editArgs(path string, edits ...map[string]any) map[string]any {
+	return map[string]any{"path": path, "edits": edits}
+}
+
+// replace is one fs.edit entry that requires a unique match.
+func replace(oldString, newString string) map[string]any {
+	return map[string]any{"old_string": oldString, "new_string": newString}
+}
+
+// replaceAll is one fs.edit entry that changes every exact occurrence.
+func replaceAll(oldString, newString string) map[string]any {
+	return map[string]any{"old_string": oldString, "new_string": newString, "replace_all": true}
+}
+
 // COD-T-055
 func TestEditPreviewDoesNotWriteAndApprovesSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "edit.txt")
@@ -34,7 +49,7 @@ func TestEditPreviewDoesNotWriteAndApprovesSnapshot(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit.preview", map[string]any{"path": path, "old_string": "old", "new_string": "new"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit.preview", editArgs(path, replace("old", "new")), nil)
 	if result.Error {
 		t.Fatalf("preview failed: %#v", result)
 	}
@@ -53,7 +68,7 @@ func TestEditPreviewDoesNotWriteAndApprovesSnapshot(t *testing.T) {
 	if string(after) != string(original) {
 		t.Fatalf("preview modified file: %q", after)
 	}
-	approved := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "old", "new_string": "new"}, &runtime.ExpectedFile{Path: review.Path, SHA256: review.SHA256})
+	approved := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("old", "new")), &runtime.ExpectedFile{Path: review.Path, SHA256: review.SHA256})
 	if approved.Error || !strings.Contains(approved.Contents[0].Text, "Replacements: 1") {
 		t.Fatalf("commit=%#v", approved)
 	}
@@ -82,7 +97,7 @@ func TestEditMultihunkDiffContext(t *testing.T) {
 	if err := os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit.preview", map[string]any{"path": path, "old_string": "old", "new_string": "new", "replace_all": true}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit.preview", editArgs(path, replaceAll("old", "new")), nil)
 	if result.Error {
 		t.Fatal(result.Contents)
 	}
@@ -103,7 +118,7 @@ func TestEditMultilineInsert(t *testing.T) {
 	if err := os.WriteFile(path, []byte("a\r\nc\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "a\nc", "new_string": "a\nb\nc"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("a\nc", "a\nb\nc")), nil)
 	if result.Error || !strings.Contains(result.Contents[0].Text, "Replacements: 1") {
 		t.Fatalf("edit=%#v", result)
 	}
@@ -122,7 +137,7 @@ func TestEditMultilineDelete(t *testing.T) {
 	if err := os.WriteFile(path, []byte("a\r\nb\r\nc\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "a\nb\nc", "new_string": "a\nc"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("a\nb\nc", "a\nc")), nil)
 	if result.Error || !strings.Contains(result.Contents[0].Text, "Replacements: 1") {
 		t.Fatalf("edit=%#v", result)
 	}
@@ -141,7 +156,7 @@ func TestEditPreservesMixedLineEndings(t *testing.T) {
 	if err := os.WriteFile(path, []byte("one\r\nold\nlast\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "old", "new_string": "new"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("old", "new")), nil)
 	if result.Error {
 		t.Fatalf("edit failed: %#v", result)
 	}
@@ -160,7 +175,7 @@ func TestEditNoNewlineEOFReview(t *testing.T) {
 	if err := os.WriteFile(path, []byte("no newline"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "newline", "new_string": "EOF"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("newline", "EOF")), nil)
 	if result.Error || result.Contents[0].Text != "Edited successfully.\nReplacements: 1" {
 		t.Fatalf("result=%#v", result)
 	}
@@ -187,8 +202,8 @@ func TestEditMultipleMatchesAreRejected(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old old"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "old", "new_string": "new"}, nil)
-	if !result.Error || !strings.Contains(result.Contents[0].Text, "use replace_all") {
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("old", "new")), nil)
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "Found 2 exact matches for old_string") || !strings.Contains(result.Contents[0].Text, "at lines 1, 1. Add surrounding context to make it unique, or set replace_all to true.") {
 		t.Fatalf("result=%#v", result)
 	}
 	written, err := os.ReadFile(path)
@@ -210,7 +225,7 @@ func TestEditMissingAndEmptyMatchesAreRejected(t *testing.T) {
 		want string
 	}{{"missing", "absent", "Could not find old_string"}, {"empty", "", "old_string must not be empty"}} {
 		t.Run(test.name, func(t *testing.T) {
-			result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": test.old, "new_string": "new"}, nil)
+			result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace(test.old, "new")), nil)
 			if !result.Error || !strings.Contains(result.Contents[0].Text, test.want) {
 				t.Fatalf("result=%#v", result)
 			}

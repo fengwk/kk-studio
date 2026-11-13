@@ -79,9 +79,9 @@ func TestEditRequiresTypedStrings(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, args := range []map[string]any{
-		{"path": path, "old_string": nil, "new_string": "after"},
-		{"path": path, "old_string": "before", "new_string": nil},
-		{"path": path, "old_string": "before"},
+		editArgs(path, map[string]any{"old_string": nil, "new_string": "after"}),
+		editArgs(path, map[string]any{"old_string": "before", "new_string": nil}),
+		editArgs(path, map[string]any{"old_string": "before"}),
 	} {
 		result := invokeCoding(t, Provider{}, "fs.edit", args, nil)
 		if !result.Error || !strings.Contains(result.Contents[0].Text, "must be a string") {

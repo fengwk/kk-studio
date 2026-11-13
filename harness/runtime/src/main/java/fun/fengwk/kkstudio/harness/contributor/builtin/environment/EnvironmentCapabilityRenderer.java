@@ -54,10 +54,7 @@ final class EnvironmentCapabilityRenderer implements ToolHistoryRenderer {
       if (path == null) {
         return null;
       }
-      // replace_all 改变“替换一处”与“替换全部”的语义差别，必须保留。
-      return ToolArguments.flag(args, "replace_all")
-          ? "replace every occurrence in " + path
-          : "edit " + path;
+      return editAction(path, args);
     }
     if (capabilityId.equals(EnvironmentCapabilityIds.PROCESS_EXEC)) {
       String command = ToolArguments.text(args, "command");
@@ -107,6 +104,28 @@ final class EnvironmentCapabilityRenderer implements ToolHistoryRenderer {
       return target == null ? null : "decompile " + target;
     }
     return null;
+  }
+
+  /** edit 的条目数与 replace_all 改变动作语义，必须保留；old_string/new_string 是文件内容，绝不渲染。 */
+  private static String editAction(String path, JsonNode args) {
+    JsonNode edits = args.get("edits");
+    if (edits == null || !edits.isArray() || edits.isEmpty()) {
+      return null;
+    }
+    boolean replaceAll = false;
+    for (JsonNode edit : edits) {
+      if (ToolArguments.flag(edit, "replace_all")) {
+        replaceAll = true;
+        break;
+      }
+    }
+    if (edits.size() == 1) {
+      return replaceAll ? "replace every occurrence in " + path : "edit " + path;
+    }
+    String changes = edits.size() + " changes";
+    return replaceAll
+        ? "edit " + path + " (" + changes + ", some replacing every occurrence)"
+        : "edit " + path + " (" + changes + ")";
   }
 
   /** workdir 只决定 {@code process.exec} 的实际执行目录，属于动作语义；文件工具不接受 workdir。 */

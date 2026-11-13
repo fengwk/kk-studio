@@ -1069,6 +1069,14 @@ export const chatCatalog = {
     'en-US': 'New text:',
     'zh-CN': '新文本：',
   },
+  'ai.runtime.mutation.changeOf': {
+    'en-US': 'Change {{index}} of {{total}}',
+    'zh-CN': '第 {{index}}/{{total}} 处修改',
+  },
+  'ai.runtime.mutation.replaceAll': {
+    'en-US': 'replace all',
+    'zh-CN': '替换全部',
+  },
   'ai.runtime.mutation.emptyFile': {
     'en-US': 'Empty file',
     'zh-CN': '空文件',

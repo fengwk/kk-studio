@@ -21,7 +21,7 @@ func TestMutationFileChangedHookRunsAfterSuccessfulWriteAndEdit(t *testing.T) {
 			}
 			args := map[string]any{"path": path, "content": "after\n"}
 			if capabilityID == "fs.edit" {
-				args = map[string]any{"path": path, "old_string": "before", "new_string": "after"}
+				args = editArgs(path, replace("before", "after"))
 			}
 			call := runtime.CapabilityCall{InvocationID: "hook", Arguments: mustJSON(args)}
 			calls := 0

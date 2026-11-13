@@ -25,9 +25,6 @@ const (
 )
 
 type arguments struct {
-	OldString    string `json:"old_string"`
-	NewString    string `json:"new_string"`
-	ReplaceAll   bool   `json:"replace_all"`
 	Command      string `json:"command"`
 	Workdir      string `json:"workdir"`
 	Path         string `json:"path"`
@@ -174,13 +171,20 @@ func decodeArguments(call runtime.CapabilityCall) (arguments, error) {
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return args, rejectInput("invalid arguments")
 	}
-	if args.Path == "" {
-		return args, rejectInput("path must be a non-empty string")
-	}
-	if !filepath.IsAbs(args.Path) {
-		return args, rejectInput("path must be an absolute path")
+	if err := validatePathArgument(args.Path); err != nil {
+		return args, err
 	}
 	return args, nil
+}
+
+func validatePathArgument(path string) error {
+	if path == "" {
+		return rejectInput("path must be a non-empty string")
+	}
+	if !filepath.IsAbs(path) {
+		return rejectInput("path must be an absolute path")
+	}
+	return nil
 }
 
 func readCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
