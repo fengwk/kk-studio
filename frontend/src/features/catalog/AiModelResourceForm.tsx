@@ -96,7 +96,13 @@ export function ModelForm({
   /** 新建时 Name 跟随 Model ID，直到用户单独编辑 Name。 */
   function setModelId(modelId: string) {
     const nameFollows = mode === 'create' && (!draft.name.trim() || draft.name === draft.modelId)
-    onChange({ ...draft, modelId, name: nameFollows ? modelId : draft.name })
+    onChange({
+      ...draft,
+      modelId,
+      name: nameFollows ? modelId : draft.name,
+      midConversationSystemMessages:
+        draft.midConversationSystemMessages || (mode === 'create' && /claude/i.test(modelId)),
+    })
   }
 
   function toggleInputModality(value: ModelInputModality) {
@@ -266,6 +272,13 @@ export function ModelForm({
             checked={draft.reasoning}
             onChange={setReasoning}
             label={t('ai.catalog.form.reasoning')}
+          />
+          <Checkbox
+            checked={draft.midConversationSystemMessages}
+            onChange={(midConversationSystemMessages) =>
+              onChange({ ...draft, midConversationSystemMessages })
+            }
+            label={t('ai.catalog.form.midConversationSystemMessages')}
           />
         </div>
       </section>

@@ -21,6 +21,9 @@ public class ModelAbilitiesDTO {
   /** 必填 boolean：模型是否支持 reasoning（直接驱动运行时 reasoning effort 下发行为）。 */
   private Boolean reasoning;
 
+  /** 可选 boolean：模型是否支持在对话中追加 system 消息；缺省为 false。 */
+  private boolean midConversationSystemMessages;
+
   /** 必填非空输入模态列表；元素为 {@link ModelInputModality} 枚举（TEXT/IMAGE/AUDIO/VIDEO/DOCUMENT），不可重复。 */
   private List<ModelInputModality> inputModalities;
 }

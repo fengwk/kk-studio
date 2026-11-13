@@ -494,6 +494,10 @@ export const resourcesCatalog = {
     'en-US': 'Reasoning',
     'zh-CN': 'Reasoning',
   },
+  'ai.catalog.form.midConversationSystemMessages': {
+    'en-US': 'Mid-conversation system messages',
+    'zh-CN': '对话中的系统消息更新',
+  },
   'ai.catalog.form.inputTypes': {
     'en-US': 'Input types',
     'zh-CN': '输入类型',

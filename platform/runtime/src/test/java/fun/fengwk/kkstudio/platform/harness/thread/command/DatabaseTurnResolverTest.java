@@ -276,6 +276,30 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
+  void modelMidConversationSystemMessageCapabilityReachesRequestDescriptor() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    ParsedAgentModelConfig parsed = Fixture.parsedModel();
+    when(fixture.modelConfigParser.parse("model-config"))
+        .thenReturn(
+            new ParsedAgentModelConfig(
+                parsed.contextWindow(),
+                parsed.maxOutputTokens(),
+                parsed.inputModalities(),
+                parsed.tools(),
+                parsed.reasoning(),
+                true,
+                parsed.variants(),
+                parsed.defaultVariant(),
+                parsed.pricing()));
+
+    assertTrue(
+        fixture
+            .resolved(fixture.path(settings("default")))
+            .model()
+            .midConversationSystemMessages());
+  }
+
+  @Test
   void agentToolsComeFromLatestAgentConfig() {
     // 最新 Agent 声明 read，工具选择不再依赖 branch settings。
     Fixture fixture = new Fixture(List.of("read"), List.of(), List.of());
@@ -2151,6 +2175,7 @@ class DatabaseTurnResolverTest {
             Set.of(ModelInputModality.TEXT),
             true,
             true,
+            false,
             List.of(new ModelVariant("fallback", null, PromptCacheRetention.NONE, null)),
             "fallback",
             pricing()));
@@ -2573,6 +2598,7 @@ class DatabaseTurnResolverTest {
                 Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
                 true,
                 true,
+                false,
                 List.of(
                     new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null),
                     new ModelVariant("deep", "max", PromptCacheRetention.NONE, null)),
@@ -2587,6 +2613,7 @@ class DatabaseTurnResolverTest {
             secondModalities,
             true,
             true,
+            false,
             List.of(
                 new ModelVariant("fast", null, PromptCacheRetention.NONE, null),
                 new ModelVariant("careful", "high", PromptCacheRetention.NONE, null)),
@@ -2984,6 +3011,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   parsed.tools(),
                   parsed.reasoning(),
+                  false,
                   List.of(
                       new ModelVariant("default", null, promptCacheRetention, null),
                       new ModelVariant("custom", "medium", promptCacheRetention, null)),
@@ -3172,6 +3200,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   tools,
                   parsed.reasoning(),
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3192,6 +3221,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   parsed.tools(),
                   parsed.reasoning(),
+                  false,
                   List.of(new ModelVariant("default", null, PromptCacheRetention.NONE, null)),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3207,6 +3237,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   parsed.tools(),
                   reasoning,
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3223,6 +3254,7 @@ class DatabaseTurnResolverTest {
           Set.of(ModelInputModality.TEXT),
           true,
           true,
+          false,
           List.of(defaultVariant, customVariant),
           "default",
           pricing());

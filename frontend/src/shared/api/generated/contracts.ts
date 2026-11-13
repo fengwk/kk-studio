@@ -715,6 +715,7 @@ export const DAEMON_OPERATING_SYSTEM_VALUES: readonly DaemonOperatingSystem[] = 
 /** Java：fun.fengwk.kkstudio.harness.api.history.EntryType */
 export type EntryType =
   | 'ROOT'
+  | 'SYSTEM'
   | 'TURN_START'
   | 'MESSAGE'
   | 'MODEL_ATTEMPT_FAILURE'
@@ -730,6 +731,7 @@ export type EntryType =
 
 export const ENTRY_TYPE_VALUES: readonly EntryType[] = [
   'ROOT',
+  'SYSTEM',
   'TURN_START',
   'MESSAGE',
   'MODEL_ATTEMPT_FAILURE',
@@ -1931,6 +1933,7 @@ export interface McpServerUpdateDTO {
 export interface ModelAbilitiesDTO {
   tools: boolean
   reasoning: boolean
+  midConversationSystemMessages: boolean
   inputModalities: ModelInputModality[]
 }
 

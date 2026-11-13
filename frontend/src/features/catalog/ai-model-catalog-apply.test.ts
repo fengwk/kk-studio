@@ -66,6 +66,14 @@ describe('applyCatalogCandidate', () => {
     })
   })
 
+  it('prefills mid-conversation system messages for Claude candidates', () => {
+    const before = draft()
+    const next = applyCatalogCandidate(before, candidate({ modelId: 'claude-sonnet-4-5' }))
+
+    expect(next.midConversationSystemMessages).toBe(true)
+    expect(before.midConversationSystemMessages).toBe(false)
+  })
+
   it('does not replace pricing unless it is supported and complete', () => {
     const before = draft()
     const unsupported = applyCatalogCandidate(before, candidate({

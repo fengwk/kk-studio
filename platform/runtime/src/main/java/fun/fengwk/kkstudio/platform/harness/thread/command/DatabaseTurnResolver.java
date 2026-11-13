@@ -349,7 +349,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             first.modelId(),
             modalities,
             first.tools(),
-            first.reasoning());
+            first.reasoning(),
+            first.midConversationSystemMessages());
     ModelGroupExecution execution =
         new ModelGroupExecution(
             groupModel.name(),
@@ -389,7 +390,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
             model.modelId(),
             parsed.inputModalities(),
             parsed.tools(),
-            parsed.reasoning());
+            parsed.reasoning(),
+            parsed.midConversationSystemMessages());
     return new MemberRuntime(
         model.name(),
         provider,

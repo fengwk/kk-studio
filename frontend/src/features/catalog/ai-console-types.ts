@@ -62,6 +62,7 @@ export interface ModelDraft {
   maxOutputTokens: string
   tools: boolean
   reasoning: boolean
+  midConversationSystemMessages: boolean
   /**
    * 提交时非空。新建 model 默认始终包含 {@code TEXT}；切换时通过不可变数组新增/移除项（不进行原地变更）。
    */

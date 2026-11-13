@@ -33,6 +33,9 @@ export function applyCatalogCandidate(
   if (candidate.abilities?.reasoning != null) {
     next.reasoning = candidate.abilities.reasoning
   }
+  if (/claude/i.test(candidate.modelId)) {
+    next.midConversationSystemMessages = true
+  }
   if (candidate.abilities?.inputModalities?.length) {
     next.inputModalities = [...candidate.abilities.inputModalities]
   }
