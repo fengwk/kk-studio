@@ -13,11 +13,13 @@ function LocationProbe() {
 }
 
 function renderLink(
-  { observe, target, capture }: {
-    observe?: ((threadId: string) => void) | null
+  { observe, target, capture, afterEntryId }: {
+    observe?: ((threadId: string, options?: { afterEntryId?: string }) => void) | null
     target?: string
     /** 在上层捕获阶段取消默认行为，验证 defaultPrevented 时链接保留浏览器语义。 */
     capture?: boolean
+    /** 压缩执行视图的读取游标；随链接地址与 pane 导航一起传递。 */
+    afterEntryId?: string
   } = {},
 ) {
   return render(
@@ -25,10 +27,10 @@ function renderLink(
       <ThreadNavigationContext.Provider value={observe ?? null}>
         {capture ? (
           <div onClickCapture={(event) => event.preventDefault()}>
-            <ThreadLink threadId={CHILD} target={target}>child link</ThreadLink>
+            <ThreadLink threadId={CHILD} target={target} afterEntryId={afterEntryId}>child link</ThreadLink>
           </div>
         ) : (
-          <ThreadLink threadId={CHILD} target={target}>child link</ThreadLink>
+          <ThreadLink threadId={CHILD} target={target} afterEntryId={afterEntryId}>child link</ThreadLink>
         )}
       </ThreadNavigationContext.Provider>
       <Routes>
@@ -65,6 +67,17 @@ describe('ThreadLink', () => {
     expect(observe).toHaveBeenCalledWith(CHILD)
     // 当前 pane 查看子代理：URL 保持在原地址。
     expect(screen.getAllByTestId('location')[0]).toHaveTextContent('/threads/root')
+  })
+
+  it('carries the compaction branch cursor in both the address and the pane navigation', async () => {
+    const user = userEvent.setup()
+    const observe = vi.fn()
+    renderLink({ observe, afterEntryId: 'cut-1' })
+
+    const link = screen.getByRole('link', { name: 'child link' })
+    expect(link).toHaveAttribute('href', `/threads/${CHILD}?afterEntryId=cut-1`)
+    await user.click(link)
+    expect(observe).toHaveBeenCalledWith(CHILD, { afterEntryId: 'cut-1' })
   })
 
   it.each([

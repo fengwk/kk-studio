@@ -1,8 +1,9 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useLayoutEffect, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
-import { Link, useNavigate, useParams } from 'react-router'
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router'
 import { AgentPane } from '@/features/thread/runtime/AgentPane'
+import { CompactionBranchView } from '@/features/thread/runtime/CompactionBranchView'
 import type { ThreadPresentation } from '@/features/thread/runtime/thread-presentation'
 import { ThreadPresentationActions } from '@/features/thread/runtime/ThreadPresentationActions'
 import { Button } from '@/shared/ui/controls/Button'
@@ -23,16 +24,20 @@ import type {
 
 export function ThreadWorkspacePage() {
   const { threadId = '' } = useParams<{ threadId: string }>()
+  const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const { t } = useI18n()
   const queryClient = useQueryClient()
 
   const isValidUuid = Boolean(threadId) && isCanonicalUuid(threadId)
+  // 压缩执行视图的独立地址：`?afterEntryId=<切点 Entry>` 只加载分支自己的 Entry。
+  const cursorParam = searchParams.get('afterEntryId')
+  const branchCursor = cursorParam != null && isCanonicalUuid(cursorParam) ? cursorParam : null
 
   const threadQuery = useQuery({
     queryKey: queryKeys.threads.snapshot(threadId),
     queryFn: ({ signal }) => fetchThreadSnapshot(queryClient, threadId, { signal }),
-    enabled: isValidUuid,
+    enabled: isValidUuid && branchCursor == null,
   })
 
   const agentsQuery = useQuery({
@@ -53,6 +58,16 @@ export function ThreadWorkspacePage() {
           {t('ai.chat.backToList')}
         </Button>
       </div>
+    )
+  }
+
+  if (branchCursor != null) {
+    return (
+      <section className="chat-workspace screen active">
+        <div className="chat-pane-grid layout-single">
+          <CompactionBranchView threadId={threadId} afterEntryId={branchCursor} />
+        </div>
+      </section>
     )
   }
 

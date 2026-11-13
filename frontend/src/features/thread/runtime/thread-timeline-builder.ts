@@ -27,7 +27,14 @@ import {
   projectToolResultContent,
   type EntryProjectionContext,
 } from '@/features/thread/runtime/thread-timeline/entry-projection'
-import { projectCompactionEntry } from '@/features/thread/runtime/thread-timeline/entry-event-projection'
+import {
+  beginCompactionTurn,
+  closeCompactionTurn,
+  latestRetainedAnchor,
+  projectCompactionSeparator,
+  recordCompactionTurnEntry,
+  type CompactionTurnProjection,
+} from '@/features/thread/runtime/thread-timeline/compaction-turn'
 import { contentText } from '@/features/thread/runtime/thread-timeline/content-utils'
 import { createModelAttemptFailureMessage } from '@/features/thread/runtime/thread-timeline/model-attempt-failure'
 import { translate } from '@/shared/i18n'
@@ -38,15 +45,6 @@ import type {
   HarnessThreadCommandDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
-
-/**
- * 压缩回合只有在保存摘要并以 COMPLETED、continueModel=true 关闭时才产生卡片。
- */
-interface CompactionTurnContext {
-  startEntryId: string
-  summaryEntry: HarnessSessionEntryDTO | null
-  summaryText: string
-}
 
 /**
  * Thread transcript 投影：
@@ -73,48 +71,42 @@ export function buildThreadTimeline(
   let hasPendingInputs = false
   let inCompactionTurn = false
   let latestTurnIsCompaction = false
-  // 压缩回合的最小挂起上下文：只在回合内累积，成功关闭时才发射一张摘要卡片。
-  let compactionTurn: CompactionTurnContext | null = null
+  // 压缩回合的生命周期投影：卡片在 TURN_START 立即出现，回合内事实在关闭时定稿。
+  let compactionTurn: CompactionTurnProjection | null = null
+  // 最新成功压缩的保留段起点：分隔线只出现一次，且在首条保留 Entry 之前。
+  const retainedAnchor = latestRetainedAnchor(entries)
+  let separatorPending = retainedAnchor != null
 
   for (const entry of entries) {
+    if (
+      separatorPending
+      && retainedAnchor != null
+      && entry.entryId === retainedAnchor.beforeEntryId
+    ) {
+      messages.push(projectCompactionSeparator(retainedAnchor.cutEntryId, entry.createdAt))
+      separatorPending = false
+    }
     if (entry.entryType === 'TURN_START') {
       const payload = asRecord(entry.payload)
       latestTurnIsCompaction = getString(payload.reason) === 'COMPACTION'
       inCompactionTurn = latestTurnIsCompaction
-      compactionTurn = latestTurnIsCompaction
-        ? {
-            startEntryId: entry.entryId,
-            summaryEntry: null,
-            summaryText: '',
-          }
-        : null
+      compactionTurn = latestTurnIsCompaction ? beginCompactionTurn(entry) : null
+      if (compactionTurn != null) {
+        messages.push(compactionTurn.message)
+      }
       projectDurableEntry(entry, messages, durableToolArguments, projectionContext)
       continue
     }
     if (inCompactionTurn) {
-      if (entry.entryType === 'COMPACTION') {
-        const summaryText = getString(asRecord(entry.payload).summaryText)
-        if (compactionTurn != null && summaryText.trim() !== '') {
-          // 只保留最后一次仍是唯一结果；原回合的内流/思考/usage 继续屏蔽。
-          compactionTurn.summaryEntry = entry
-          compactionTurn.summaryText = summaryText
-        }
-      } else if (entry.entryType === 'TURN_END') {
+      if (compactionTurn != null && entry.entryType === 'TURN_END') {
         const payload = asRecord(entry.payload)
-        if (
-          compactionTurn != null
-          && compactionTurn.summaryEntry != null
-          && getString(payload.turnStartEntryId) === compactionTurn.startEntryId
-          && getString(payload.outcome) === 'COMPLETED'
-          && payload.continueModel === true
-        ) {
-          // 卡片留在原压缩回合的位置（此前对话之后、后续对话之前），与切点无关。
-          messages.push(
-            projectCompactionEntry(compactionTurn.summaryEntry, compactionTurn.summaryText),
-          )
+        if (getString(payload.turnStartEntryId) === compactionTurn.startEntryId) {
+          closeCompactionTurn(compactionTurn, payload)
+          inCompactionTurn = false
+          compactionTurn = null
         }
-        inCompactionTurn = false
-        compactionTurn = null
+      } else if (compactionTurn != null) {
+        recordCompactionTurnEntry(compactionTurn, entry)
       }
       continue
     }

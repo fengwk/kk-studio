@@ -18,6 +18,10 @@ import {
   EntryBranchContext,
   branchRequestFromEndEntry,
 } from '@/features/thread/runtime/thread-panel/entry-branch-context'
+import {
+  CompactionActionsContext,
+  type CompactionActions,
+} from '@/features/thread/runtime/thread-panel/compaction-actions-context'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { NameRenamePanel } from '@/features/thread/runtime/thread-panel/NameRenamePanel'
 import { sessionSelectionItem, threadSelectionItem } from '@/features/thread/runtime/root-thread/session-selection-items'
@@ -272,9 +276,20 @@ export function RootAgentPane({
     && !debugActive
     && pane.target.threadId === pane.controller.thread?.threadId
 
+  // 压缩卡的动作只绑定当前主 Thread 的手动压缩入口；草稿目标没有可压缩的 Thread。
+  const compactionActions: CompactionActions | null = pane.target.kind === 'BOUND_THREAD'
+    ? {
+        compact: () => { void pane.controller.compactThread() },
+        compactPending: pane.controller.compactPending,
+        availability: pane.compaction,
+      }
+    : null
+
   return (
     <EntryBranchContext.Provider value={canBranchFromConversation ? entryBranchRequest : null}>
-      {content}
+      <CompactionActionsContext.Provider value={compactionActions}>
+        {content}
+      </CompactionActionsContext.Provider>
       {pane.pendingAcceptance ? (
         <div className="thread-acceptance-retry" hidden={debugActive} inert={debugActive}>
           {pane.pendingAcceptance.unknownOutcome ? (

@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { ThreadNavigationOptions } from '@/features/thread/runtime/thread-navigation-context'
 
-/** 一层查看路径：Thread ID 与进入前持焦的触发元素（必要视图状态，不复制执行状态）。 */
+/** 一层查看路径：Thread ID、进入前持焦的触发元素与压缩执行游标（必要视图状态）。 */
 export interface ThreadViewLayer {
   threadId: string
   returnFocus: HTMLElement | null
+  /** 压缩执行视图从该 Entry 之后读取；普通子代理层为 null。 */
+  afterEntryId: string | null
 }
 
 interface ThreadPathState {
@@ -58,7 +61,7 @@ export function useThreadNavigation({
     [rootThreadId],
   )
 
-  const openThread = useCallback((threadId: string) => {
+  const openThread = useCallback((threadId: string, options?: ThreadNavigationOptions) => {
     if (!enabled || !threadId) {
       return
     }
@@ -79,7 +82,11 @@ export function useThreadNavigation({
       return
     }
     const active = typeof document === 'undefined' ? null : document.activeElement
-    commit([...layers, { threadId, returnFocus: active instanceof HTMLElement ? active : null }], undefined)
+    commit([...layers, {
+      threadId,
+      returnFocus: active instanceof HTMLElement ? active : null,
+      afterEntryId: options?.afterEntryId ?? null,
+    }], undefined)
   }, [commit, enabled, layers, rootThreadId])
 
   const goBack = useCallback(() => {

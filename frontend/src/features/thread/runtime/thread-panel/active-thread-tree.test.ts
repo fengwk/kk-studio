@@ -39,6 +39,17 @@ describe('projectActiveThreadTree', () => {
     expect(projectThreadTree([]).root).toBeNull()
   })
 
+  it('never exposes COMPACTION branches in the execution tree', () => {
+    // 压缩分支只从压缩卡进入；即便树响应意外带上它，也不得出现在活跃树或历史行中。
+    const tree = projectThreadTree([
+      node('root', null),
+      node('worker', 'root'),
+      node('compaction', 'root', { kind: 'COMPACTION', status: 'RUNNING' }),
+    ])
+    expect(tree.nodesById.has('compaction')).toBe(false)
+    expect(tree.historyRows.map((row) => row.node.threadId)).toEqual(['worker'])
+  })
+
   it('sorts each sibling group by active status, time and ID, retaining real connectors', () => {
     const tree = projectThreadTree([
       node('root', null), node('old', 'root', { updatedAt: 0 }),

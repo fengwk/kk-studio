@@ -9,6 +9,7 @@ import {
   ThreadView,
 } from '@/features/thread/runtime/ChildThreadView'
 import { RootAgentPane } from '@/features/thread/runtime/RootAgentPane'
+import { CompactionBranchView } from '@/features/thread/runtime/CompactionBranchView'
 import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
 import {
   useThreadNavigation,
@@ -324,15 +325,23 @@ export function AgentPane({
             hidden={hidden || index !== topLayerIndex}
             inert={hidden || index !== topLayerIndex}
           >
-            <ConnectedThreadView
-              threadId={layer.threadId}
-              environments={environments}
-              readOnly
-              selected={index === topLayerIndex}
-              active={!hidden && index === topLayerIndex}
-              onPresentation={acceptPresentation}
-              onParent={openParent}
-            />
+            {layer.afterEntryId != null ? (
+              <CompactionBranchView
+                threadId={layer.threadId}
+                afterEntryId={layer.afterEntryId}
+                onBack={navigation.goBack}
+              />
+            ) : (
+              <ConnectedThreadView
+                threadId={layer.threadId}
+                environments={environments}
+                readOnly
+                selected={index === topLayerIndex}
+                active={!hidden && index === topLayerIndex}
+                onPresentation={acceptPresentation}
+                onParent={openParent}
+              />
+            )}
           </div>
         ))}
       </section>

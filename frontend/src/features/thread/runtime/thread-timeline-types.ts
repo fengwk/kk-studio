@@ -20,6 +20,7 @@ export type EntryEventKind =
   | 'notification'
   | 'fork'
   | 'compaction'
+  | 'compaction_separator'
   | 'empty_message'
   | 'unsupported_message'
   | 'unknown_entry'
@@ -216,6 +217,22 @@ export interface EntryFork {
   sourceThreadId: string | null
 }
 
+/** 压缩卡的四个持久状态：只由压缩回合的真实 Entry 事实推导。 */
+export type CompactionCardState = 'running' | 'compacted' | 'failed' | 'stopped'
+
+/**
+ * 主 Thread 压缩回合的持久事实投影。
+ *
+ * childThreadId 与 cutEntryId 来自 TURN_START.compaction；errorCode 来自回合内
+ * ASSISTANT_ERROR 的稳定错误码；成功摘要正文仍是 COMPACTION Entry 的逐字文本。
+ */
+export interface CompactionCardFact {
+  state: CompactionCardState
+  childThreadId: string | null
+  cutEntryId: string | null
+  errorCode: string | null
+}
+
 /**
  * 持久 Entry 的独立投影，其语义并非对话回合。
  *
@@ -230,6 +247,8 @@ export interface EntryEventDialogueMessage extends BaseDialogueMessage {
   notification?: EntryNotification
   /** 仅 FORK Entry 携带的真实来源事实。 */
   fork?: EntryFork
+  /** 仅压缩卡携带的回合事实；缺失表示旧投影，按已压缩摘要渲染。 */
+  compaction?: CompactionCardFact
 }
 
 export type DialogueMessage =

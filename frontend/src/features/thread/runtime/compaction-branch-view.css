@@ -1,0 +1,110 @@
+/*
+ * 压缩执行视图：只读单列内容，外层负责滚动；这里只维护内容节奏与文字样式。
+ */
+.compaction-branch-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  box-sizing: border-box;
+  min-height: 0;
+  height: 100%;
+  padding: var(--space-4);
+  overflow-y: auto;
+}
+
+.compaction-branch-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.compaction-branch-title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+
+.compaction-branch-stop {
+  margin-left: auto;
+}
+
+.compaction-branch-state {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-sm);
+}
+
+.compaction-branch-state.is-error {
+  color: var(--danger);
+}
+
+.compaction-branch-context {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.compaction-branch-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.compaction-branch-section-title {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+
+.compaction-branch-instruction {
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  background: var(--surface);
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.compaction-branch-call {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.compaction-branch-tool-error {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-xs);
+  background: var(--danger-soft);
+}
+
+.compaction-branch-tool-name {
+  color: var(--fg);
+  font-family: var(--mono);
+  font-size: var(--font-size-xs);
+}
+
+.compaction-branch-tool-text {
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* 分支视图的调用行允许换行：窄宽度下也必须看到完整用量与费用，而不是省略号。 */
+.compaction-branch-call .thread-block-meta.kind-turn_usage .thread-meta-text {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+}

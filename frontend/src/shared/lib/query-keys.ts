@@ -48,6 +48,8 @@ export const queryKeys = {
     snapshot: (threadId: string) => ['threads', 'snapshot', threadId] as const,
     compactionAvailability: (threadId: string) =>
       ['threads', 'compaction-availability', threadId] as const,
+    compactionBranch: (threadId: string, afterEntryId: string) =>
+      ['threads', 'compaction-branch', threadId, afterEntryId] as const,
     tree: (threadId: string) => ['threads', 'tree', threadId] as const,
     entries: (threadId: string) => ['threads', 'entries', threadId] as const,
     modelRequestDebug: (threadId: string) => ['threads', 'model-request-debug', threadId] as const,

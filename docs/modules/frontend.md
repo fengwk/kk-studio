@@ -97,9 +97,9 @@ Thread Snapshot 只有一份 query 缓存，所有读取都经
 响应到达时按当时的缓存合并：完整响应替换缓存，增量保留到 `baseEntryId` 的前缀再按 Entry id 幂等接上，
 较旧 version 不覆盖较新缓存，空增量仍更新全部当前状态。增量的基线已不在缓存链上时显式再读一次完整历史，
 增量永远不会被当作完整缓存写入。resync 与重连只重新执行同一查询，服务端对非祖先游标返回完整历史。
-手动压缩可用性不在 Snapshot 内：根控制区只在命令面板显示时按需查询
+手动压缩可用性不在 Snapshot 内：根控制区在命令面板显示时或时间线存在失败/停止压缩卡时按需查询
 `/api/harness/threads/{threadId}/compaction-availability`，检查中与检查失败分别显示不可用原因。
-它只影响命令提示，压缩提交仍由服务端按 `expectedVersion` 判断。
+它只影响命令提示与卡片按钮的可用性，压缩提交仍由服务端按 `expectedVersion` 判断。
 
 执行树按执行根订阅，服务端聚合后代写入后推送 changed，只回读该根，根本地空闲也保持订阅。
 交互待办变化订阅全局 interactions；导航角标读服务端返回的真实 total，不用首页长度伪装计数。
@@ -330,7 +330,18 @@ Thread 处于等待审批时活动条显示“等待审批”；实际工具等�
 工具静态正文从顶部阅读，只有仍在执行的 bash 流式输出默认跟随底部；用户上滚后暂停，回到底部恢复。工具、思考与压缩卡片通过冒泡的阅读意图通知外层暂停跟随；恢复必须来自外层真实滚动回到底部阈值内。外层只对新增记录与显式流式正文更新调度一次布局后贴底，手动展开、样式切换和图片加载不触发外层强制贴底。
 
 `SUBAGENT_RESULT` 和 `TASK_BUDGET` 使用全宽淡色系统卡片，不留图标列缩进。子代理回执展示来源、Thread 链接和结果/错误/partial，信封分段且正文使用安全 Markdown。回执默认折叠，摘要顺序为 agent、真实状态图标、任务预览、执行链接、展开箭头。
-完整成功的压缩在对话时间线留下“上下文已压缩”系统卡片，位于原压缩回合位置（此前对话之后、后续对话之前），默认折叠，展开后完整摘要在有界正文区域滚动。摘要只读取 `COMPACTION.payload.summaryText`，复用 `SystemMessageCard` 外壳与 `SystemMessageBody` 安全 Markdown，不支持的 XML 标签保留为普通文本。
+压缩卡完整呈现压缩回合的生命周期，四态只来自持久事实：打开中的 `TURN_START(COMPACTION)` 为进行中；
+带摘要并以 `COMPLETED`、`continueModel=true` 关闭为已压缩；`TURN_END(FAILED)` 显示回合内 `ASSISTANT_ERROR`
+错误码映射出的一句原因；`TURN_END(STOPPED)` 显示已停止。卡片位于原压缩回合位置（此前对话之后、后续对话之前）。
+已压缩卡片默认折叠，展开后完整摘要复用 `SystemMessageCard` 外壳与 `SystemMessageBody` 安全 Markdown，不支持
+的 XML 标签保留为普通文本，摘要只读取 `COMPACTION.payload.summaryText`。失败与停止卡片在原位置提供“重新压缩”，
+可用性与命令面板同源，Thread 忙或不可压缩时禁用并显示原因。
+
+带分支 Thread id 的卡片提供“查看执行”，用与子代理相同的 pane/route 入口打开只读执行视图：按切点
+`afterEntryId` 只读取分支自己的 Entry，展示继承的上下文量、固定压缩指令、每次模型调用的用量与费用，以及
+被停用的工具调用结果；运行中提供 Stop（`POST /api/harness/threads/{childThreadId}/stop`），视图没有 Composer。
+最新一次成功压缩的切点之后，首条保留 Entry 之前有一条“以上内容已压缩为摘要”分隔线；失败或停止的压缩不移动保留段。
+压缩分支只从压缩卡进入，执行树与 Thread 列表始终排除 `COMPACTION`。
 
 ## Canvas 编辑与上传
 

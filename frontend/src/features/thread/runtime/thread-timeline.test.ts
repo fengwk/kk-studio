@@ -21,8 +21,8 @@ import type { ToolInvocationStatus } from '@/shared/api/generated/contracts'
 import type { GenerationStatus } from '@/shared/api/generated/contracts'
 
 /**
- * 完整成功压缩的健康路径：只以 COMPACTION.payload.summaryText 为源，并要求匹配 TURN_END、COMPLETED 与 continueModel=true。
- * 失败/取消/未关闭与不匹配形状都不产生卡片；成功判定不依赖旧 phase 字段。
+ * 压缩卡的生命周期：卡片随 TURN_START 出现，状态只由 ASSISTANT_ERROR、COMPACTION 与匹配的
+ * TURN_END 决定；失败与停止不再隐藏，而是显示原因并提供重新压缩入口。
  */
 describe('compaction summary projection', () => {
   const buildThreadTimeline = buildCompactionTimeline
@@ -41,14 +41,20 @@ describe('compaction summary projection', () => {
     const cards = compactionCards(timeline.messages)
     expect(cards).toHaveLength(1)
     expect(cards[0]).toMatchObject({
-      id: 'entry:comp1',
+      id: 'entry:cs1',
       role: 'entry',
       kind: 'compaction',
       title: '上下文已压缩',
       // 摘要正文逐字保留。
       text: FULL_COMPACTION_SUMMARY,
-      subjectEntryId: 'comp1',
+      subjectEntryId: 'cs1',
       status: 'done',
+      compaction: {
+        state: 'compacted',
+        childThreadId: 'child-thread-1',
+        cutEntryId: 'cut-1',
+        errorCode: null,
+      },
     })
     expect(cards[0].createdAt).toBe(1767225603)
 
@@ -69,12 +75,17 @@ describe('compaction summary projection', () => {
     )
 
     expect(compactionCards(timeline.messages)).toMatchObject([
-      { kind: 'compaction', text: 'summary', subjectEntryId: 'comp1' },
+      {
+        kind: 'compaction',
+        text: 'summary',
+        subjectEntryId: 'cs1',
+        compaction: { state: 'compacted' },
+      },
     ])
   })
 
-  it.each(['FAILED', 'STOPPED', 'CANCELLED'])(
-    'hides a successful-shaped payload closed as %s',
+  it.each(['FAILED', 'STOPPED'])(
+    'keeps a card closed as %s instead of hiding the turn',
     (outcome) => {
       const timeline = buildThreadTimeline(
         [
@@ -84,11 +95,18 @@ describe('compaction summary projection', () => {
         [],
       )
 
-      expect(compactionCards(timeline.messages)).toEqual([])
+      expect(compactionCards(timeline.messages)).toMatchObject([
+        {
+          id: 'entry:cs1',
+          title: outcome === 'STOPPED' ? '上下文压缩已停止' : '上下文压缩失败',
+          text: '',
+          compaction: { state: outcome === 'STOPPED' ? 'stopped' : 'failed' },
+        },
+      ])
     },
   )
 
-  it('hides a compaction turn that never closed', () => {
+  it('shows a running card for a compaction turn that never closed', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart('cs1', 'COMPACTION'),
@@ -98,10 +116,17 @@ describe('compaction summary projection', () => {
       [],
     )
 
-    expect(compactionCards(timeline.messages)).toEqual([])
+    expect(compactionCards(timeline.messages)).toMatchObject([
+      {
+        id: 'entry:cs1',
+        title: '正在压缩上下文…',
+        text: '',
+        compaction: { state: 'running' },
+      },
+    ])
   })
 
-  it('hides the payload when the TURN_END references another TURN_START', () => {
+  it('keeps the card running when the TURN_END references another TURN_START', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart('cs1', 'COMPACTION'),
@@ -112,10 +137,12 @@ describe('compaction summary projection', () => {
       [],
     )
 
-    expect(compactionCards(timeline.messages)).toEqual([])
+    expect(compactionCards(timeline.messages)).toMatchObject([
+      { compaction: { state: 'running' } },
+    ])
   })
 
-  it('hides a compaction turn that does not resume the owner model', () => {
+  it('reports a compaction that completed without resuming the owner model as failed', () => {
     const timeline = buildThreadTimeline(
       [
         turnStart('cs1', 'COMPACTION'),
@@ -126,10 +153,12 @@ describe('compaction summary projection', () => {
       [],
     )
 
-    expect(compactionCards(timeline.messages)).toEqual([])
+    expect(compactionCards(timeline.messages)).toMatchObject([
+      { title: '上下文压缩失败', compaction: { state: 'failed' } },
+    ])
   })
 
-  it('hides empty or non-string summaryText', () => {
+  it('turns empty or non-string summaryText into a failed card', () => {
     // CompactionPayload 保证非空 summaryText；空/未知形状不能伪装成成功。
     const timeline = buildThreadTimeline(
       [
@@ -143,7 +172,29 @@ describe('compaction summary projection', () => {
       [],
     )
 
-    expect(compactionCards(timeline.messages)).toEqual([])
+    expect(compactionCards(timeline.messages)).toMatchObject([
+      { title: '上下文压缩失败', text: '', compaction: { state: 'failed' } },
+    ])
+  })
+
+  it('uses the ASSISTANT_ERROR code as the failure reason', () => {
+    const timeline = buildThreadTimeline(
+      [
+        turnStart('cs1', 'COMPACTION'),
+        entry('error-1', 'ASSISTANT_ERROR', {
+          error: { code: 'COMPACTION_OUTPUT_TRUNCATED', message: 'summary was truncated' },
+        }),
+        turnEnd('cs1', 'FAILED'),
+      ],
+      [],
+      [],
+    )
+
+    expect(compactionCards(timeline.messages)).toMatchObject([
+      { compaction: { state: 'failed', errorCode: 'COMPACTION_OUTPUT_TRUNCATED' } },
+    ])
+    // 回合内的失败审计只进入卡片事实，不再产生独立的 assistant error 块。
+    expect(timeline.messages.some((message) => message.role === 'assistant')).toBe(false)
   })
 
   it('keeps each complete success as its own card in scan order', () => {
@@ -163,10 +214,67 @@ describe('compaction summary projection', () => {
       'user',
       'compaction:second',
     ])
-    // 卡片以摘要 Entry 的持久身份区分，刷新前后 key 稳定。
+    // 卡片以压缩回合的 TURN_START 身份区分，刷新前后 key 稳定。
     expect(compactionCards(timeline.messages).map((message) => message.id))
-      .toEqual(['entry:comp1', 'entry:comp2'])
+      .toEqual(['entry:cs1', 'entry:cs2'])
   })
+
+  it('places the retained separator before the first entry after the latest completed cut', () => {
+    const timeline = buildThreadTimeline(
+      [
+        userEntry('old', 'entry-user-1'),
+        turnEnd('old-turn', 'COMPLETED', false, 'end'),
+        userEntry('retained', 'entry-user-2'),
+        ...compactionTurn('cs1', [compactionEntry('comp1', 'first')], 'COMPLETED', 'end'),
+        userEntry('after-compaction', 'entry-user-4'),
+      ],
+      [],
+      [],
+    )
+
+    const rendered = timeline.messages.map((message) =>
+      message.role === 'entry' ? `entry:${message.kind}` : message.role)
+    expect(rendered).toEqual([
+      'user',
+      'meta',
+      'entry:compaction_separator',
+      'user',
+      'entry:compaction',
+      'user',
+    ])
+    expect(timeline.messages[2]).toMatchObject({
+      kind: 'compaction_separator',
+      text: '以上内容已压缩为摘要',
+    })
+  })
+
+  it('does not place a separator for failed, stopped or open compactions', () => {
+    for (const outcome of ['FAILED', 'STOPPED']) {
+      const timeline = buildThreadTimeline(
+        [
+          userEntry('old', 'entry-user-1'),
+          turnEnd('old-turn', 'COMPLETED', false, 'end'),
+          ...compactionTurn('cs1', [compactionEntry('comp1', 'x')], outcome, 'end'),
+        ],
+        [],
+        [],
+      )
+      expect(timeline.messages.some((message) =>
+        message.role === 'entry' && message.kind === 'compaction_separator')).toBe(false)
+    }
+    const open = buildThreadTimeline(
+      [
+        userEntry('old', 'entry-user-1'),
+        turnEnd('old-turn', 'COMPLETED', false, 'end'),
+        turnStart('cs1', 'COMPACTION', 'end'),
+      ],
+      [],
+      [],
+    )
+    expect(open.messages.some((message) =>
+      message.role === 'entry' && message.kind === 'compaction_separator')).toBe(false)
+  })
+
 
   it('keeps internal compaction streams, thinking and usage hidden', () => {
     const timeline = buildThreadTimeline(
@@ -217,15 +325,20 @@ describe('compaction summary projection', () => {
     startEntryId: string,
     body: HarnessSessionEntryDTO[],
     outcome = 'COMPLETED',
+    cutEntryId = 'cut-1',
   ): HarnessSessionEntryDTO[] {
     return [
-      turnStart(startEntryId, 'COMPACTION'),
+      turnStart(startEntryId, 'COMPACTION', cutEntryId),
       ...body,
       turnEnd(startEntryId, outcome, outcome === 'COMPLETED'),
     ]
   }
 
-  function turnStart(startEntryId: string, reason: string): HarnessSessionEntryDTO {
+  function turnStart(
+    startEntryId: string,
+    reason: string,
+    cutEntryId = 'cut-1',
+  ): HarnessSessionEntryDTO {
     return entry(startEntryId, 'TURN_START', {
       reason,
       settings: {
@@ -236,6 +349,18 @@ describe('compaction summary projection', () => {
       ownerThreadId: 'thread-1',
       contextWindow: 200000,
       maxOutputTokens: 8192,
+      ...(reason === 'COMPACTION'
+        ? {
+            compaction: {
+              trigger: 'MANUAL',
+              execution: createBuiltinExecution('m', 'high'),
+              outputBudget: 4096,
+              cutEntryId,
+              childThreadId: 'child-thread-1',
+              joinInvocationId: 'join-1',
+            },
+          }
+        : {}),
     })
   }
 
@@ -243,8 +368,9 @@ describe('compaction summary projection', () => {
     startEntryId: string,
     outcome: string,
     continueModel = false,
+    entryId = `${startEntryId}-end`,
   ): HarnessSessionEntryDTO {
-    return entry('end', 'TURN_END', { turnStartEntryId: startEntryId, outcome, continueModel })
+    return entry(entryId, 'TURN_END', { turnStartEntryId: startEntryId, outcome, continueModel })
   }
 
   function compactionEntry(entryId: string, summaryText: string): HarnessSessionEntryDTO {
@@ -347,10 +473,10 @@ describe('thread timeline', () => {
     ]
     const projected = buildThreadTimeline(entries, [], []).messages
     expect(projected.map(({ id }) => id)).toEqual([
-      'entry:root', 'entry:turn:agent', 'entry:turn:model', 'entry:turn:environment',
+      'entry:root', 'entry:compact', 'entry:turn:agent', 'entry:turn:model', 'entry:turn:environment',
       'failed', 'user',
     ])
-    expect(projected.slice(1, 4).map((message) => message.role === 'entry' ? message.title : '')).toEqual([
+    expect(projected.slice(2, 5).map((message) => message.role === 'entry' ? message.title : '')).toEqual([
       'Agent 改为 reviewer', '模型改为 m2 (high)', '环境改为 local',
     ])
     expect(buildThreadTimeline(entries, [], []).messages).toEqual(projected)
@@ -490,7 +616,7 @@ describe('thread timeline', () => {
         settings: { ...settings, execution: createBuiltinExecution('grok-4.7', 'xhigh') },
       }),
     ], [], []).messages
-    expect(messages.map(({ id }) => id)).toEqual(['entry:summary', 'entry:changed:model'])
+    expect(messages.map(({ id }) => id)).toEqual(['entry:compact', 'entry:changed:model'])
     expect(messages[1]).toMatchObject({
       kind: 'settings_change', title: '模型改为 grok-4.7 (xhigh)',
     })

@@ -333,13 +333,27 @@ describe('thread timeline edge branches', () => {
       },
     )
     expect(timeline.messages).toMatchObject([
-      { role: 'entry', kind: 'compaction', text: 'internal summary' },
+      {
+        role: 'entry',
+        kind: 'compaction',
+        title: '上下文压缩已停止',
+        text: '',
+        compaction: { state: 'stopped' },
+      },
+      {
+        role: 'entry',
+        kind: 'compaction',
+        title: '上下文已压缩',
+        text: 'internal summary',
+        compaction: { state: 'compacted' },
+      },
     ])
+    expect(timeline.messages.some((message) => message.role === 'assistant')).toBe(false)
     expect(timeline.queuedMessages).toEqual([])
     expect(timeline.hasPendingInputs).toBe(false)
   })
 
-  it('does not show snapshot failures for a compaction turn', () => {
+  it('shows the failed card without snapshot failure messages for a compaction turn', () => {
     const timeline = buildThreadTimeline(
       [
         entry('compaction-start', 'TURN_START', { reason: 'COMPACTION', settings: {} }),
@@ -370,7 +384,9 @@ describe('thread timeline edge branches', () => {
       ],
     )
 
-    expect(timeline.messages).toEqual([])
+    expect(timeline.messages).toMatchObject([
+      { role: 'entry', kind: 'compaction', compaction: { state: 'failed' } },
+    ])
   })
 
   it('deduplicates realtime streaming tool-call drafts against the durable tool_call message', () => {
