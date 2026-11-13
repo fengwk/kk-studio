@@ -19,8 +19,10 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
@@ -153,6 +155,9 @@ public final class ModelRequestMaterializer {
     }
     int walkStart = 0;
     var latest = CompactionTurns.latestComplete(path);
+    // 压缩重建了 prompt 前缀：保留段里 Claude thinking 的签名绑定的是旧前缀，必须只在该 Provider 重放时丢弃。
+    boolean dropClaudeThinking =
+        latest.isPresent() && spec.providerType() == ProviderType.ANTHROPIC;
     if (latest.isPresent()) {
       var complete = latest.get();
       int cutIndex = indexOfId(entries, complete.freezing().cutEntryId());
@@ -197,9 +202,13 @@ public final class ModelRequestMaterializer {
         continue;
       }
       if (payload instanceof MessagePayload message) {
+        AgentMessage projected = message.message();
+        if (dropClaudeThinking && projected.role() == AgentMessageRole.ASSISTANT) {
+          projected = withoutThinking(projected);
+        }
         projectedMessages.add(
             new ProviderMessageProjector.ProjectedMessage(
-                message.message(), reasoningEffort(message, spec)));
+                projected, reasoningEffort(message, spec)));
         if (incrementalSystem
             && !deferredSystemMessages.isEmpty()
             && message.message().role() == AgentMessageRole.USER) {
@@ -223,6 +232,17 @@ public final class ModelRequestMaterializer {
     }
     messages.addAll(projector.projectSources(projectedMessages));
     messages.addAll(deferredSystemMessages);
+  }
+
+  private static AgentMessage withoutThinking(AgentMessage message) {
+    List<AgentMessageContent> contents = new ArrayList<>(message.contents().size());
+    for (AgentMessageContent content : message.contents()) {
+      if (!(content instanceof ThinkingMessageContent)
+          && !(content instanceof RedactedThinkingMessageContent)) {
+        contents.add(content);
+      }
+    }
+    return new AgentMessage(message.role(), contents);
   }
 
   private static String reasoningEffort(MessagePayload message, ModelRequestSpec spec) {

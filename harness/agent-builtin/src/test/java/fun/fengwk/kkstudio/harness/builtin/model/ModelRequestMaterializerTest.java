@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
@@ -64,6 +65,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -478,6 +480,67 @@ class ModelRequestMaterializerTest {
     assertEquals("old-reply", textOf(request.messages().get(1)));
     assertEquals("kept-user", textOf(request.messages().get(2)));
     assertEquals("latest-user", textOf(request.messages().get(3)));
+  }
+
+  /** 压缩重建 prompt 前缀后，Claude 保留段不再重放旧签名 thinking；其它 Provider 原样保留。 */
+  @Test
+  void compactionDropsClaudeThinkingFromTheRetainedTail() {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(3, 2, user("old user")));
+    entries.add(entry(4, 3, assistantWithThinking("old assistant")));
+    entries.add(
+        entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
+    CompactionStart completed = CompactionStart.pending(CompactionTrigger.THRESHOLD, id(4L));
+    entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
+    entries.add(entry(7, 6, new CompactionPayload("summary", null)));
+    entries.add(
+        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, true, null, null)));
+    entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(10, 9, user("new user")));
+    entries.add(entry(11, 10, assistantWithThinking("new assistant")));
+
+    ProviderRequest anthropic =
+        MATERIALIZER.materialize(new EntryPath(entries), anthropicSpec(bashBinding()));
+    assertEquals(4, anthropic.messages().size());
+    assertNoThinking(anthropic.messages().get(1));
+    assertNoThinking(anthropic.messages().get(3));
+
+    ProviderRequest openai =
+        MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
+    assertTrue(
+        openai.messages().get(1).contents().stream()
+            .anyMatch(ProviderThinkingBlock.class::isInstance));
+  }
+
+  private static void assertNoThinking(ProviderMessage message) {
+    assertFalse(message.contents().stream().anyMatch(ProviderThinkingBlock.class::isInstance));
+  }
+
+  private static MessagePayload assistantWithThinking(String text) {
+    return new MessagePayload(
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new ThinkingMessageContent("thinking-" + text), new TextMessageContent(text))),
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+        null);
+  }
+
+  private static ModelRequestSpec anthropicSpec(ToolBinding binding) {
+    ModelVariant variant = variant();
+    return new ModelRequestSpec(
+        ProviderType.ANTHROPIC,
+        id(1L),
+        new ModelDescriptor(
+            "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
+        variant,
+        List.of(variant),
+        1024,
+        "Test system instruction.",
+        List.of(binding),
+        List.of());
   }
 
   @Test

@@ -40,7 +40,7 @@ systemInstruction / toolBindings / subagentBindings
 groupExecution?
 ```
 
-完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称、描述与稳定路径已写入 `systemInstruction`。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩沿用压缩执行模型自己的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
+完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称、描述与稳定路径已写入 `systemInstruction`。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。存在完成压缩时，以摘要 wrapper 替代切点前历史，并从切点原样回放保留段；Claude 保留段的 thinking 因签名绑定旧前缀而被移除。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩沿用压缩执行模型自己的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
 
 平台在 invocation 创建时冻结当前实际模型的完整 variants；模型组每个成员各自冻结列表，切换成员时一起切换。历史 assistant 的实际模型名匹配当前模型时，按其 variant ID 在该冻结列表中查找可空 effort；缺失或不匹配为未知。新 invocation 使用最新配置重解释历史，重试与重启沿用冻结列表，不新增 Entry 历史字段。
 
