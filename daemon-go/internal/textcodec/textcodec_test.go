@@ -129,3 +129,16 @@ func TestDecodeEmptyAndDoubleBOM(t *testing.T) {
 		t.Fatalf("double BOM: text=%q encoding=%#v err=%v", decoded, enc, err)
 	}
 }
+
+// COD-T-239: the lossy offset points at the first byte the declared encoding cannot reproduce,
+// even after valid mixed ASCII and two-byte text.
+func TestDecodeReportsLossyOffsetAfterValidLegacyText(t *testing.T) {
+	declaration := []byte(`<?xml encoding="gbk"?>`)
+	valid := encodeAs(t, "GBK", "abc中文def")
+	data := append(append(append([]byte(nil), declaration...), valid...), 0x81, 0x20)
+	want := len(declaration) + len(valid)
+	var undecodable *UndecodableError
+	if _, _, err := Decode("/repo/doc.xml", data); !errors.As(err, &undecodable) || undecodable.Offset != want {
+		t.Fatalf("err=%v want offset %d", err, want)
+	}
+}

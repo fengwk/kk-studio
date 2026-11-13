@@ -5,7 +5,6 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
-	"golang.org/x/text/encoding"
 	"golang.org/x/text/transform"
 )
 
@@ -133,36 +132,22 @@ func decodeDeclared(data []byte, declared resolved) ([]byte, Encoding, error) {
 		return nil, Encoding{}, &TooLargeError{Encoding: declared.enc, Size: int64(len(data))}
 	}
 	text, _, err := transform.Bytes(declared.xtext.NewDecoder(), data)
-	if err == nil {
-		reencoded, _, encodeErr := transform.Bytes(declared.xtext.NewEncoder(), text)
-		if encodeErr == nil && bytes.Equal(reencoded, data) {
-			return text, declared.enc, nil
-		}
+	reencoded, _, encodeErr := transform.Bytes(declared.xtext.NewEncoder(), text)
+	if err == nil && encodeErr == nil && bytes.Equal(reencoded, data) {
+		return text, declared.enc, nil
 	}
-	return nil, Encoding{}, &UndecodableError{Encoding: declared.enc, Offset: firstLossyOffset(data, declared.xtext)}
+	return nil, Encoding{}, &UndecodableError{Encoding: declared.enc, Offset: firstLossyOffset(data, reencoded)}
 }
 
-// firstLossyOffset returns the smallest offset at which decoding and re-encoding data stops
-// reproducing the original bytes, so a report points at the first byte that differs.
-func firstLossyOffset(data []byte, xtext encoding.Encoding) int {
-	low, high := 0, len(data)
-	for high-low > 1 {
-		middle := low + (high-low)/2
-		if roundTrips(data[:middle], xtext) {
-			low = middle
-		} else {
-			high = middle
+// firstLossyOffset reports where the re-encoded bytes stop matching the original, so the report
+// points at the first byte the declared encoding cannot reproduce. transform.Bytes keeps the
+// output written before an encoder error, so a partial result still identifies that byte.
+func firstLossyOffset(data, reencoded []byte) int {
+	limit := min(len(data), len(reencoded))
+	for offset := 0; offset < limit; offset++ {
+		if data[offset] != reencoded[offset] {
+			return offset
 		}
 	}
-	return max(high-1, 0)
-}
-
-// roundTrips reports whether a prefix of a file decodes and re-encodes to itself.
-func roundTrips(data []byte, xtext encoding.Encoding) bool {
-	text, _, err := transform.Bytes(xtext.NewDecoder(), data)
-	if err != nil {
-		return false
-	}
-	reencoded, _, err := transform.Bytes(xtext.NewEncoder(), text)
-	return err == nil && bytes.Equal(reencoded, data)
+	return limit
 }
