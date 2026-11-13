@@ -135,6 +135,7 @@ class TsContractGeneratorTest {
         """
           'GET /api/widgets/stream': {
             response: Blob
+            responseType: 'blob'
           }
         """);
     assertTrue(generated.contains("responseType: 'text'"));
