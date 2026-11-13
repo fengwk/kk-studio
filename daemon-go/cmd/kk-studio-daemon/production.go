@@ -106,17 +106,7 @@ func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig)
 		})
 	})
 	resourceControl := &runtimeResourceControl{}
-	capabilities := coding.Provider{LSPStatus: func(file string) (string, bool) {
-		support := lspFacade.Support(file)
-		if support.Language == nil {
-			return "", false
-		}
-		return *support.Language, support.Available && support.Supported
-	}}.Capabilities()
-	for id, handler := range lspFacade.Capabilities() {
-		capabilities[id] = handler
-	}
-	capabilities["skill.install"] = skillCapability(environmentConfig.Current, networks, resourceControl)
+	capabilities := productionCapabilities(lspFacade, environmentConfig.Current, networks, resourceControl)
 	declarations, err := capability.Declare(capabilities)
 	if err != nil {
 		return productionFailure("daemon capability declarations are incomplete", err)
@@ -155,6 +145,24 @@ func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig)
 		return productionFailure("daemon runtime execution failed", err)
 	}
 	return nil
+}
+
+// productionCapabilities is the single registration point for daemon capabilities. The
+// runtime and the production assembly test consume this map so every registered capability
+// carries the same execution-exit obligations.
+func productionCapabilities(lspFacade *lsp.Facade, current func() config.DaemonConfig, networks *networkRuntimeStore, control *runtimeResourceControl) map[string]daemonruntime.CapabilityExecutor {
+	capabilities := coding.Provider{LSPStatus: func(file string) (string, bool) {
+		support := lspFacade.Support(file)
+		if support.Language == nil {
+			return "", false
+		}
+		return *support.Language, support.Available && support.Supported
+	}}.Capabilities()
+	for id, handler := range lspFacade.Capabilities() {
+		capabilities[id] = handler
+	}
+	capabilities["skill.install"] = skillCapability(current, networks, control)
+	return capabilities
 }
 
 func productionFailure(message string, cause error) error {

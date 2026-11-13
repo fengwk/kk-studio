@@ -243,3 +243,50 @@ func TestRuntimeCancelsRunningInvocation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// RUN-T-233: an executor that cleans up and reports a CALLER CANCELLED result yields exactly
+// one CANCELLED terminal (never COMPLETED(error=true)) and one exit confirmation.
+func TestRuntimeCancelledCapabilityResultIsCancelledTerminal(t *testing.T) {
+	c := newTestConnection()
+	queueHandshake(c)
+	c.in <- invocationEnvelope()
+	started := make(chan struct{})
+	r := newInvocationRuntime(t, c, func(ctx context.Context, call CapabilityCall, capability CapabilityContext) (CapabilityResult, error) {
+		close(started)
+		<-ctx.Done()
+		capability.ConfirmExecutionExit()
+		return CapabilityResult{
+			CallID: call.InvocationID, Error: true, Details: []byte(`{"code":"CANCELLED"}`),
+			Contents: []ResultContent{{Type: "text", Text: "[Search cancelled; results are incomplete.]"}},
+		}, nil
+	})
+	runCtx, stopRuntime := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(runCtx) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		stopRuntime()
+		t.Fatal("executor did not start")
+	}
+	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_CANCEL, EnvironmentId: stringPtr("env"), InvocationId: stringPtr(testInvocationID), Payload: &protocol.Envelope_Cancel{Cancel: &protocol.Cancel{}}}
+	frames := c.waitFor(t, func(frames []*protocol.Envelope) bool {
+		return countFrames(frames, protocol.MessageType_CANCELLED) == 1 && countFrames(frames, protocol.MessageType_EXECUTION_EXITED) == 1
+	})
+	if got := countFrames(frames, protocol.MessageType_CANCELLED); got != 1 {
+		stopRuntime()
+		t.Fatalf("CANCELLED terminals=%d, want one", got)
+	}
+	if got := countFrames(frames, protocol.MessageType_COMPLETED); got != 0 {
+		stopRuntime()
+		t.Fatalf("COMPLETED terminals=%d, want none for a cancelled result", got)
+	}
+	if got := countFrames(frames, protocol.MessageType_EXECUTION_EXITED); got != 1 {
+		stopRuntime()
+		t.Fatalf("EXECUTION_EXITED frames=%d, want one", got)
+	}
+	stopRuntime()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
