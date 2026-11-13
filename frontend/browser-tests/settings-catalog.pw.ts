@@ -3,7 +3,8 @@ import { test, expect } from './fixture'
 // 使用真实页面与本地权威 fixture，不访问上游目录。
 test('retry backoff strategy options save and clear dirty state', async ({ page }) => {
   await page.setViewportSize({ width: 1280, height: 900 })
-  await page.route('**/api/**', (route) => route.fulfill({ json: { items: [] } }))
+  // 只读目录端点（如 /api/platform/models）直接返回数组；模型选择字段按数组消费。
+  await page.route('**/api/**', (route) => route.fulfill({ json: [] }))
   await page.goto('/browser-tests/settings-catalog-harness.html')
   await page.getByRole('tab', { name: 'AI 运行时' }).click()
   const select = page.getByLabel('退避策略')

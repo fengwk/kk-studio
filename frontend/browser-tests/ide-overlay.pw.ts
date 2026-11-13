@@ -152,6 +152,8 @@ async function installTransport(page: Page, state: TransportState): Promise<void
           type: 'connected',
           eventNodeId: EVENT_NODE,
           connectionId: currentConnection,
+          // 客户端严格解码 connected：缺省 heartbeat 间隔会被判为畸形帧而永不就绪。
+          heartbeatIntervalMillis: '20000',
         }))
       }
       if (message.type === 'subscribe') {

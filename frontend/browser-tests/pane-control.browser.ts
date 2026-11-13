@@ -650,7 +650,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
   const waitingAnim = await waitingDot.evaluate((el) => getComputedStyle(el).animationName)
   expect(waitingAnim).toBe('none')
 
-  // 2. RUNNING 且无 active model/tool：展示“运行中”，绝不直接显示生成，且无动画
+  // 2. RUNNING 且无 active model/tool：展示“准备下一步”，绝不直接显示生成，且无动画
   await page.route(`/api/harness/threads/${ROOT_ID}`, async (route) => {
     const thread = rootThread({ status: 'RUNNING', executionControl: 'RUNNABLE' })
     await route.fulfill({ json: snapshot(thread) })
@@ -658,7 +658,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
   await page.reload()
   const runningWorking = page.locator('.thread-working')
   await expect(runningWorking).toBeVisible()
-  await expect(runningWorking).toContainText('运行中')
+  await expect(runningWorking).toContainText('准备下一步')
   await expect(runningWorking).not.toContainText('生成')
   await expect(runningWorking).toHaveAttribute('data-animated', 'false')
   const runningDot = runningWorking.locator('.thread-working-dot')
@@ -666,7 +666,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
   const runningAnim = await runningDot.evaluate((el) => getComputedStyle(el).animationName)
   expect(runningAnim).toBe('none')
 
-  // 3. STOPPED 独立控制不可遮蔽在途执行中的 model/tool：优先展示“执行中”，且带生成动画
+  // 3. STOPPED 独立控制不可遮蔽在途执行中的 tool：优先展示具体执行阶段，且带生成动画
   await page.route(`/api/harness/threads/${ROOT_ID}`, async (route) => {
     const thread = rootThread({ status: 'RUNNING', executionControl: 'STOPPED' })
     const data = {
@@ -700,7 +700,7 @@ test('thread status three-state and execution facts in real browser', async ({ p
   await page.reload()
   const activeWorking = page.locator('.thread-working')
   await expect(activeWorking).toBeVisible()
-  await expect(activeWorking).toContainText('执行中')
+  await expect(activeWorking).toContainText('正在执行工具')
   await expect(activeWorking).not.toContainText('已停止')
   await expect(activeWorking).toHaveAttribute('data-animated', 'true')
   const activeDot = activeWorking.locator('.thread-working-dot')

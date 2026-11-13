@@ -28,7 +28,19 @@ function visibleText(text: string | null): string {
   return (text ?? '').replace(/\u200B/g, '')
 }
 
+/** 1x1 PNG：图片上传会先由浏览器解码再按输入档位缩放，非法字节会让整颗 pill 回滚。 */
+const TINY_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+  'base64',
+)
+
 async function openHarness(page: Page) {
+  // 图片档位来自系统默认设置；基座不连后端，先给出可读的默认档位。
+  await page.route('**/api/platform/settings', (route) => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    body: JSON.stringify({ storageMedia: { imageTier: '1080P' } }),
+  }))
   await page.goto('/browser-tests/composer-editor-harness.html')
   await expect(page.locator('[data-testid="root-pane"] .composer-editor')).toBeVisible()
   await expect(page.locator('#submit-count')).toHaveText('0')
@@ -171,7 +183,7 @@ test.describe('ComposerEditor real contenteditable regression', () => {
     await page.setInputFiles('input[type="file"]', {
       name: 'shot.png',
       mimeType: 'image/png',
-      buffer: Buffer.from([1, 2, 3]),
+      buffer: TINY_PNG,
     })
     await expect(page.locator('.composer-pill')).toHaveCount(1)
     await expect.poll(() => partsText(page)).toBe('原文[attachment]')
@@ -218,7 +230,7 @@ test.describe('ComposerEditor real contenteditable regression', () => {
     await page.setInputFiles('input[type="file"]', {
       name: 'shot.png',
       mimeType: 'image/png',
-      buffer: Buffer.from([1, 2, 3]),
+      buffer: TINY_PNG,
     })
     await expect(page.locator('.composer-pill')).toHaveCount(1)
     await expect(page.locator('.composer-pill')).toHaveText('[shot.png]')
