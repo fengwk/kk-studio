@@ -4,6 +4,7 @@ import type {
   PromptCacheRetention,
 } from '@/shared/api/generated/contracts'
 import { clonePricing } from '@/features/catalog/ai-model-pricing-codec'
+import { supportsClaudeMidConvoSystemMessages } from '@/features/catalog/claude-model-capabilities'
 
 /**
  * 目录候选只写入可确认的参数：
@@ -33,7 +34,7 @@ export function applyCatalogCandidate(
   if (candidate.abilities?.reasoning != null) {
     next.reasoning = candidate.abilities.reasoning
   }
-  if (/claude/i.test(candidate.modelId)) {
+  if (supportsClaudeMidConvoSystemMessages(candidate.modelId)) {
     next.midConversationSystemMessages = true
   }
   if (candidate.abilities?.inputModalities?.length) {

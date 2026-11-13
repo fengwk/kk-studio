@@ -312,6 +312,22 @@ describe('AiResourceForms', () => {
     expect(toEditableProviderUpdate(latest)).toMatchObject({ credential: { operation: 'KEEP' } })
   })
 
+  it('prefills mid-conversation system messages only for supported Claude IDs on create', async () => {
+    const user = userEvent.setup()
+    render(<ModelFormHarness />)
+    const modelId = screen.getByLabelText('Model ID')
+    const capability = screen.getByRole('checkbox', {
+      name: /Mid-conversation system messages|对话中的系统消息更新/,
+    })
+
+    await user.type(modelId, 'claude-sonnet-4-5')
+    expect(capability).not.toBeChecked()
+
+    await user.clear(modelId)
+    await user.type(modelId, 'anthropic/claude-opus-4.8')
+    expect(capability).toBeChecked()
+  })
+
   it('edits the new model abilities, pricing, variants, and wire modelId', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)

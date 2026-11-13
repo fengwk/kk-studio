@@ -66,12 +66,12 @@ describe('applyCatalogCandidate', () => {
     })
   })
 
-  it('prefills mid-conversation system messages for Claude candidates', () => {
-    const before = draft()
-    const next = applyCatalogCandidate(before, candidate({ modelId: 'claude-sonnet-4-5' }))
+  it('prefills mid-conversation system messages only for supported Claude candidates', () => {
+    const supported = applyCatalogCandidate(draft(), candidate({ modelId: 'claude-sonnet-5.5' }))
+    const unsupported = applyCatalogCandidate(draft(), candidate({ modelId: 'claude-sonnet-4-5' }))
 
-    expect(next.midConversationSystemMessages).toBe(true)
-    expect(before.midConversationSystemMessages).toBe(false)
+    expect(supported.midConversationSystemMessages).toBe(true)
+    expect(unsupported.midConversationSystemMessages).toBe(false)
   })
 
   it('does not replace pricing unless it is supported and complete', () => {
