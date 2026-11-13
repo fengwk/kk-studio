@@ -11,12 +11,15 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
+import fun.fengwk.kkstudio.harness.codec.AgentMessageJsonCodec;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -24,9 +27,11 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
@@ -40,6 +45,7 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiRe
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesStreamAccumulator;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -88,6 +94,76 @@ class OpenAiResponsesDurableReplayTest {
         messages,
         List.of(TOOL),
         ProviderCacheControl.none());
+  }
+
+  private JsonNode replayDurableReasoningItem(String itemJson) throws Exception {
+    ProviderDescriptor descriptor = createDescriptor();
+    OpenAiResponsesRequestEncoder encoder = new OpenAiResponsesRequestEncoder();
+    ProviderRequest firstRequest =
+        request(
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("first")))));
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(firstRequest, descriptor, event -> {});
+    accumulator.processEvent(
+        MAPPER.readTree("{\"type\":\"response.created\",\"response\":{\"id\":\"resp_summary\"}}"));
+    accumulator.processEvent(
+        MAPPER.readTree(
+            "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_summary\","
+                + "\"status\":\"completed\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1},"
+                + "\"output\":["
+                + itemJson
+                + "]}}"));
+
+    List<AgentMessageContent> durableContents = new ArrayList<>();
+    for (ProviderContentBlock block : accumulator.response().blocks()) {
+      if (block instanceof ProviderThinkingBlock thinking) {
+        durableContents.add(
+            new ThinkingMessageContent(thinking.thinking(), thinking.providerBlockData()));
+      } else if (block instanceof ProviderOpaqueBlock opaque) {
+        durableContents.add(
+            new NativeAssistantBlockContent(opaque.blockType(), opaque.providerBlockData()));
+      } else {
+        throw new AssertionError("unexpected reasoning block type: " + block.getClass());
+      }
+    }
+    AgentMessageJsonCodec codec = new AgentMessageJsonCodec();
+    AgentMessage durableAssistant =
+        codec.decode(codec.encode(new AgentMessage(AgentMessageRole.ASSISTANT, durableContents)));
+    List<ProviderMessage> projected =
+        new ProviderMessageProjector()
+            .projectSources(
+                List.of(
+                    ProviderMessageProjector.ProjectedMessage.of(
+                        new AgentMessage(
+                            AgentMessageRole.USER, List.of(new TextMessageContent("first")))),
+                    ProviderMessageProjector.ProjectedMessage.of(durableAssistant),
+                    ProviderMessageProjector.ProjectedMessage.of(
+                        new AgentMessage(
+                            AgentMessageRole.USER, List.of(new TextMessageContent("next"))))));
+    return MAPPER
+        .readTree(encoder.encode(request(projected), descriptor).bodyUtf8Bytes())
+        .path("input")
+        .get(1);
+  }
+
+  /**
+   * The durable history codec preserves each summary part's boundary and the empty-summary case.
+   */
+  @Test
+  void multiPartAndEmptySummariesSurviveDurableCodecAndReplay() throws Exception {
+    String multiPartItem =
+        "{\"id\":\"rs_multi\",\"type\":\"reasoning\",\"status\":\"completed\","
+            + "\"encrypted_content\":\"enc_multi\",\"summary\":["
+            + "{\"type\":\"summary_text\",\"text\":\"A\",\"channel\":\"analysis\"},"
+            + "{\"type\":\"summary_text\",\"text\":\"B\",\"metadata\":{\"index\":2}}]}";
+    String emptyItem =
+        "{\"id\":\"rs_empty\",\"type\":\"reasoning\",\"status\":\"completed\","
+            + "\"encrypted_content\":\"enc_empty\",\"summary\":[]}";
+
+    assertEquals(MAPPER.readTree(multiPartItem), replayDurableReasoningItem(multiPartItem));
+    assertEquals(MAPPER.readTree(emptyItem), replayDurableReasoningItem(emptyItem));
   }
 
   /**

@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -280,6 +281,47 @@ class OpenAiResponsesLosslessItemReplayTest {
 
     ArrayNode input = encodeNextRequest(completion.response().blocks());
     assertEquals(expectedItem, input.get(1), "block metadata preserves the source reasoning item");
+  }
+
+  /** Same-model replay preserves every summary part and its per-part native fields. */
+  @Test
+  void multiPartReasoningSummaryReplaysExactlyWithoutDuplicatingText() throws Exception {
+    String itemJson =
+        "{\"id\":\"rs_multi\",\"type\":\"reasoning\",\"status\":\"completed\","
+            + "\"encrypted_content\":\"enc_multi\",\"summary\":["
+            + "{\"type\":\"summary_text\",\"text\":\"A\",\"channel\":\"analysis\"},"
+            + "{\"type\":\"summary_text\",\"text\":\"B\",\"metadata\":{\"index\":2}}]}";
+    ProviderCompletion completion = accumulateTerminalItems(itemJson);
+
+    assertEquals(2, completion.response().blocks().size());
+    ProviderThinkingBlock first = (ProviderThinkingBlock) completion.response().blocks().get(0);
+    ProviderThinkingBlock second = (ProviderThinkingBlock) completion.response().blocks().get(1);
+    assertEquals("A", first.thinking());
+    assertEquals("B", second.thinking());
+    assertFalse(first.providerBlockData().nativeFields().path("summaryPartFields").has("text"));
+    assertFalse(second.providerBlockData().nativeFields().path("summaryPartFields").has("text"));
+
+    ArrayNode input = encodeNextRequest(completion.response().blocks());
+    JsonNode expectedItem = MAPPER.readTree(itemJson);
+    assertEquals(expectedItem, input.get(1));
+    assertEquals(2, input.get(1).path("summary").size());
+    assertEquals("A", input.get(1).path("summary").get(0).path("text").asString(""));
+    assertEquals("B", input.get(1).path("summary").get(1).path("text").asString(""));
+  }
+
+  /** Same-model replay retains an encrypted reasoning item with an empty summary. */
+  @Test
+  void emptyReasoningSummaryReplaysAsAnEmptySummary() throws Exception {
+    String itemJson =
+        "{\"id\":\"rs_empty\",\"type\":\"reasoning\",\"status\":\"completed\","
+            + "\"encrypted_content\":\"enc_empty\",\"summary\":[],\"future_member\":true}";
+    ProviderCompletion completion = accumulateTerminalItems(itemJson);
+
+    assertEquals(1, completion.response().blocks().size());
+    assertTrue(completion.response().blocks().getFirst() instanceof ProviderOpaqueBlock);
+    ArrayNode input = encodeNextRequest(completion.response().blocks());
+    assertEquals(MAPPER.readTree(itemJson), input.get(1));
+    assertEquals(0, input.get(1).path("summary").size());
   }
 
   /** 测试意图：终态 function_call 的 id/status/未来成员整体保留，durable 工具调用语义仍被严格比对。 */

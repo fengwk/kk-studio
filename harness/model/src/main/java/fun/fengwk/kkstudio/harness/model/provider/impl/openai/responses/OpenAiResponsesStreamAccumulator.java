@@ -923,34 +923,38 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
 
   private void addReasoningBlocks(List<ProviderContentBlock> blocks, JsonNode item) {
     JsonNode summary = item.path("summary");
-    ObjectNode itemFields = copyFields(item, Set.of("summary"));
-    if (summary.isArray()) {
+    if (summary.isArray() && !summary.isEmpty() && hasOnlyTextSummaryParts(summary)) {
+      ObjectNode itemFields = copyFields(item, Set.of("summary"));
       boolean first = true;
       for (JsonNode summaryPart : summary) {
-        if (!"summary_text".equals(summaryPart.path("type").asString(""))) {
-          ObjectNode fields = NODES.objectNode();
-          fields.set("item", item.deepCopy());
-          blocks.add(new ProviderOpaqueBlock("reasoning", responseBlockData(fields)));
-          continue;
-        }
         ObjectNode fields = NODES.objectNode();
         fields.put("itemType", "reasoning");
         fields.put("contentType", "summary_text");
+        fields.set("summaryPartFields", copyFields(summaryPart, Set.of("type", "text")));
         if (first) {
           fields.set("itemFields", itemFields);
           first = false;
         }
         blocks.add(
             new ProviderThinkingBlock(
-                summaryPart.path("text").asString(""), responseBlockData(fields)));
+                summaryPart.path("text").stringValue(), responseBlockData(fields)));
       }
-      if (!first) {
-        return;
-      }
+      return;
     }
     ObjectNode fields = NODES.objectNode();
     fields.set("item", item.deepCopy());
     blocks.add(new ProviderOpaqueBlock("reasoning", responseBlockData(fields)));
+  }
+
+  private static boolean hasOnlyTextSummaryParts(JsonNode summary) {
+    for (JsonNode summaryPart : summary) {
+      if (!summaryPart.isObject()
+          || !"summary_text".equals(summaryPart.path("type").asString(""))
+          || !summaryPart.path("text").isString()) {
+        return false;
+      }
+    }
+    return true;
   }
 
   private ProviderBlockData responseBlockData(ObjectNode nativeFields) {
