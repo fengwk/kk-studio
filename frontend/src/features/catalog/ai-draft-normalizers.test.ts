@@ -25,7 +25,7 @@ const v = (id: string): ModelVariantDTO => ({ id, promptCacheRetention: 'NONE' }
 function modelConfig(overrides: Partial<ModelConfigDTO> = {}): ModelConfigDTO {
   return {
     limit: { context: 128000, output: 8192 },
-    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
     pricing: {
       base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
       overrides: [],

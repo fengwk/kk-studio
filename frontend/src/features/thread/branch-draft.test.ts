@@ -31,7 +31,7 @@ const model: SingleModelDTO = {
   description: null,
   config: {
     limit: { context: 32_000, output: 4_000 },
-    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
     pricing: {
       base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
       overrides: [],

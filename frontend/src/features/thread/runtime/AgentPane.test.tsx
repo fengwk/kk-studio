@@ -342,7 +342,7 @@ const models: ModelDTO[] = [{
   description: null,
   config: {
     limit: { context: 128000, output: 8192 },
-    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
     pricing: {
       base: { input: '1', output: '1', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
       overrides: [],
@@ -4170,7 +4170,7 @@ function previewResponse(overrides: Partial<HarnessProviderRequestPreviewDTO> = 
       description: null,
       config: {
         limit: { context: 200000, output: 4096 },
-        abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+        abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
         pricing: {
       base: { input: '1', output: '1', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
       overrides: [],

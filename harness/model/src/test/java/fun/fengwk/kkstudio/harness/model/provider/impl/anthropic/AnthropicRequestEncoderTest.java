@@ -557,7 +557,9 @@ class AnthropicRequestEncoderTest {
         systemMessage.path("content").get(3).path("tool").path("type").asString());
     assertEquals(
         "old_tool", systemMessage.path("content").get(3).path("tool").path("name").asString());
-    assertEquals(List.of("inline-tools-2026-09-15"), encoded.betaFeatures());
+    assertEquals(
+        List.of("mid-conversation-output-config-2026-07-01", "inline-tools-2026-09-15"),
+        encoded.betaFeatures());
   }
 
   /** Appending a SYSTEM delta leaves all previously encoded conversation bytes cache-stable. */
@@ -619,12 +621,7 @@ class AnthropicRequestEncoderTest {
     assertEquals("adaptive", root.path("thinking").path("type").asString(""));
     assertEquals("summarized", root.path("thinking").path("display").asString(""));
     assertEquals("high", root.path("output_config").path("effort").asString(""));
-    assertEquals(
-        List.of(
-            "mid-conversation-system-2026-04-07",
-            "per-turn-control-2026-07-01",
-            "effort-2025-11-24"),
-        encoded.betaFeatures());
+    assertEquals(List.of("mid-conversation-output-config-2026-07-01"), encoded.betaFeatures());
   }
 
   @Test
@@ -778,12 +775,7 @@ class AnthropicRequestEncoderTest {
     assertEquals("high", root.path("output_config").path("effort").asString(""));
     assertEquals(512, root.path("max_tokens").asInt(0));
     assertFalse(root.path("thinking").has("budget_tokens"));
-    assertEquals(
-        List.of(
-            "mid-conversation-system-2026-04-07",
-            "per-turn-control-2026-07-01",
-            "effort-2025-11-24"),
-        encoded.betaFeatures());
+    assertEquals(List.of("mid-conversation-output-config-2026-07-01"), encoded.betaFeatures());
   }
 
   @Test

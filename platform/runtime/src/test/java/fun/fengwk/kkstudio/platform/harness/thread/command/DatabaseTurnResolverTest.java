@@ -276,7 +276,7 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void modelMidConversationSystemMessageCapabilityReachesRequestDescriptor() {
+  void modelCapabilitiesReachRequestDescriptor() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     ParsedAgentModelConfig parsed = Fixture.parsedModel();
     when(fixture.modelConfigParser.parse("model-config"))
@@ -288,6 +288,7 @@ class DatabaseTurnResolverTest {
                 parsed.tools(),
                 parsed.reasoning(),
                 true,
+                true,
                 parsed.variants(),
                 parsed.defaultVariant(),
                 parsed.pricing()));
@@ -297,6 +298,7 @@ class DatabaseTurnResolverTest {
             .resolved(fixture.path(settings("default")))
             .model()
             .midConversationSystemMessages());
+    assertTrue(fixture.resolved(fixture.path(settings("default"))).model().messageLevelEffort());
   }
 
   @Test

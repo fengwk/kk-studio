@@ -41,10 +41,7 @@ class AnthropicBetaFeaturesTest {
   void includesEffortBetasOnlyWhenEffortEnabled() {
     AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
     assertEquals(
-        List.of(
-            "mid-conversation-system-2026-04-07",
-            "per-turn-control-2026-07-01",
-            "effort-2025-11-24"),
+        List.of("mid-conversation-output-config-2026-07-01"),
         encoder
             .encode(
                 request(new ModelVariant("v", "high", PromptCacheRetention.NONE, null)), DESCRIPTOR)

@@ -136,6 +136,8 @@ const SAMPLE_MODEL: ModelDTO = {
     abilities: {
       tools: true,
       reasoning: true,
+      midConversationSystemMessages: false,
+      messageLevelEffort: false,
       inputModalities: ['TEXT', 'IMAGE'],
     },
     pricing: {
@@ -156,6 +158,7 @@ const SAMPLE_MODEL: ModelDTO = {
 
 const LONG_MODEL: ModelDTO = {
   ...SAMPLE_MODEL,
+  type: 'MODEL',
   name: 'gpt-4o-extended',
   modelId: 'gpt-4o-extended-wire-long-identifier',
   description:

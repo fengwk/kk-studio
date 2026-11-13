@@ -31,6 +31,7 @@ public final class ModelGroupConfigDerivation {
     boolean anyInputDeclared = false;
     boolean tools = true;
     boolean reasoning = true;
+    boolean messageLevelEffort = true;
     Set<ModelInputModality> modalities = null;
     for (ModelConfigDTO member : members) {
       ModelLimitDTO limit = member.getLimit();
@@ -42,6 +43,7 @@ public final class ModelGroupConfigDerivation {
       }
       tools &= Boolean.TRUE.equals(member.getAbilities().getTools());
       reasoning &= Boolean.TRUE.equals(member.getAbilities().getReasoning());
+      messageLevelEffort &= member.getAbilities().isMessageLevelEffort();
       if (modalities == null) {
         modalities = new LinkedHashSet<>(member.getAbilities().getInputModalities());
       } else {
@@ -61,6 +63,7 @@ public final class ModelGroupConfigDerivation {
     ModelAbilitiesDTO abilities = new ModelAbilitiesDTO();
     abilities.setTools(tools);
     abilities.setReasoning(reasoning);
+    abilities.setMessageLevelEffort(messageLevelEffort);
     abilities.setInputModalities(new ArrayList<>(modalities));
 
     ModelConfigDTO derived = new ModelConfigDTO();

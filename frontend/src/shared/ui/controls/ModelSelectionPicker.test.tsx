@@ -12,7 +12,7 @@ const models: ModelDTO[] = [
     description: null,
     config: {
       limit: { context: 1000, output: 100 },
-      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
       pricing: { base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null }, overrides: [], multipliers: [] },
       variants: [{ id: 'quick', promptCacheRetention: 'NONE' }],
       defaultVariant: 'quick',
@@ -28,7 +28,7 @@ const models: ModelDTO[] = [
     group: { members: [], fallbackStatusCodes: [], cooldownSeconds: 0 },
     config: {
       limit: { context: 1000, output: 100 },
-      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
       pricing: { base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null }, overrides: [], multipliers: [] },
       variants: [],
       defaultVariant: '',

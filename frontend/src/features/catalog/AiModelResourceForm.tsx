@@ -6,7 +6,10 @@ import { VariantListEditor } from '@/features/catalog/AiVariantListEditor'
 import { ModelPricingEditor } from '@/features/catalog/AiModelPricingEditor'
 import { ModelCatalogPicker } from '@/features/catalog/AiModelCatalogPicker'
 import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
-import { supportsClaudeMidConvoSystemMessages } from '@/features/catalog/claude-model-capabilities'
+import {
+  supportsClaudeMessageLevelEffort,
+  supportsClaudeMidConvoSystemMessages,
+} from '@/features/catalog/claude-model-capabilities'
 import {
   defaultPromptCacheRetention,
   resolvePromptCacheRetentions,
@@ -104,6 +107,8 @@ export function ModelForm({
       midConversationSystemMessages:
         draft.midConversationSystemMessages ||
         (mode === 'create' && supportsClaudeMidConvoSystemMessages(modelId)),
+      messageLevelEffort:
+        draft.messageLevelEffort || (mode === 'create' && supportsClaudeMessageLevelEffort(modelId)),
     })
   }
 
@@ -281,6 +286,11 @@ export function ModelForm({
               onChange({ ...draft, midConversationSystemMessages })
             }
             label={t('ai.catalog.form.midConversationSystemMessages')}
+          />
+          <Checkbox
+            checked={draft.messageLevelEffort}
+            onChange={(messageLevelEffort) => onChange({ ...draft, messageLevelEffort })}
+            label={t('ai.catalog.form.messageLevelEffort')}
           />
         </div>
       </section>

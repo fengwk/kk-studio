@@ -84,9 +84,8 @@ public final class AnthropicRequestEncoder {
       List.of("model", "max_tokens", "stream", "messages", "system", "cache_control");
 
   private static final int MAX_CACHE_BREAKPOINTS = 4;
-  private static final String PER_TURN_BETA = "per-turn-control-2026-07-01";
-  private static final String MID_CONVERSATION_BETA = "mid-conversation-system-2026-04-07";
-  private static final String EFFORT_BETA = "effort-2025-11-24";
+  private static final String OUTPUT_CONFIG_BETA = "mid-conversation-output-config-2026-07-01";
+  private static final String THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
   private static final String INLINE_TOOLS_BETA = "inline-tools-2026-09-15";
 
   private final RequestBodySizeGuard bodySizeGuard;
@@ -113,17 +112,24 @@ public final class AnthropicRequestEncoder {
     root.put("max_tokens", maxTokens);
     root.put("stream", true);
 
-    applyReasoningParameters(root, request);
-
-    boolean perTurnEffort =
+    String currentEffort = request.variant() == null ? null : request.variant().reasoningEffort();
+    boolean currentEffortOff = request.variant() != null && request.variant().reasoningOff();
+    String firstStoredEffort = firstStoredEffort(request.messages());
+    boolean messageLevelEffort =
         request.model().reasoning()
-            && request.variant() != null
-            && request.variant().reasoningEffort() != null
-            && !request.variant().reasoningOff();
+            && request.model().messageLevelEffort()
+            && !currentEffortOff
+            && (currentEffort != null || firstStoredEffort != null);
+    String topLevelEffort =
+        messageLevelEffort && firstStoredEffort != null ? firstStoredEffort : currentEffort;
+    applyReasoningParameters(root, request, topLevelEffort, messageLevelEffort);
     boolean hasSystemChanges =
         request.messages().stream()
             .anyMatch(message -> message.role() == ProviderMessageRole.SYSTEM);
-    List<String> betaFeatures = resolveBetaFeatures(perTurnEffort, hasSystemChanges);
+    boolean hasEffortConfig =
+        request.model().reasoning() && !currentEffortOff && hasEffort(topLevelEffort);
+    List<String> betaFeatures =
+        resolveBetaFeatures(hasEffortConfig, messageLevelEffort, hasSystemChanges);
 
     ArrayNode toolsArray = mergeTools(root, request.tools());
 
@@ -176,10 +182,9 @@ public final class AnthropicRequestEncoder {
 
     // 注入 cache marker
     applyCacheMarkers(request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints);
-    if (perTurnEffort) {
+    if (messageLevelEffort) {
       wireMessagesArray =
-          applyPerTurnEffort(
-              wireMessagesArray, messageEfforts, request.variant().reasoningEffort());
+          applyMessageLevelEffort(wireMessagesArray, messageEfforts, currentEffort, topLevelEffort);
     }
 
     if (!toolsArray.isEmpty()) {
@@ -202,12 +207,14 @@ public final class AnthropicRequestEncoder {
   }
 
   /** Add the beta support required by the selected mid-conversation request features. */
-  private static List<String> resolveBetaFeatures(boolean perTurnEffort, boolean hasSystemChanges) {
+  private static List<String> resolveBetaFeatures(
+      boolean hasEffortConfig, boolean messageLevelEffort, boolean hasSystemChanges) {
     List<String> betaFeatures = new ArrayList<>();
-    if (perTurnEffort) {
-      betaFeatures.add(MID_CONVERSATION_BETA);
-      betaFeatures.add(PER_TURN_BETA);
-      betaFeatures.add(EFFORT_BETA);
+    if (hasEffortConfig || hasSystemChanges) {
+      betaFeatures.add(OUTPUT_CONFIG_BETA);
+    }
+    if (messageLevelEffort) {
+      betaFeatures.add(THINKING_BINDING_BETA);
     }
     if (hasSystemChanges) {
       betaFeatures.add(INLINE_TOOLS_BETA);
@@ -215,95 +222,98 @@ public final class AnthropicRequestEncoder {
     return List.copyOf(betaFeatures);
   }
 
-  /** 从最终保留的消息反向补齐未知等级，再在连续 user/tool 消息之后声明变化。 */
-  static ArrayNode applyPerTurnEffort(
-      ArrayNode messages, List<String> efforts, String currentEffort) {
-    String[] levels = new String[messages.size()];
-    String carry = currentEffort;
-    for (int i = messages.size() - 1; i >= 0; i--) {
-      String effort = efforts.get(i);
-      if ("assistant".equals(messages.get(i).path("role").asString())
-          && effort != null
-          && !effort.equals("off")
-          && !effort.isBlank()) {
-        carry = effort;
+  private static String firstStoredEffort(List<ProviderMessage> messages) {
+    for (ProviderMessage message : messages) {
+      if (message.role() == ProviderMessageRole.ASSISTANT && hasEffort(message.reasoningEffort())) {
+        return message.reasoningEffort();
       }
-      levels[i] = carry;
+    }
+    return null;
+  }
+
+  /** 声明历史中存储的每个 effort 变化，并把当前等级放在请求前缀末尾。 */
+  static ArrayNode applyMessageLevelEffort(
+      ArrayNode messages, List<String> efforts, String currentEffort, String topLevelEffort) {
+    if (messages.size() != efforts.size()) {
+      throw new IllegalArgumentException("message efforts must align with encoded messages");
     }
     ArrayNode result = NODES.arrayNode();
-    String declared = null;
-    String pending = null;
+    String declared = topLevelEffort;
     for (int i = 0; i < messages.size(); i++) {
       ObjectNode message = (ObjectNode) messages.get(i);
-      String role = message.path("role").asString();
-      if (pending != null && !role.equals("user")) {
-        declared = pending;
-        if (role.equals("system")) {
-          JsonNode existing = message.get("output_config");
-          ObjectNode outputConfig =
-              existing instanceof ObjectNode object ? object : message.putObject("output_config");
-          outputConfig.put("effort", pending);
-          result.add(message);
-          pending = null;
-          continue;
-        }
-        result.add(effortControl(pending));
-        pending = null;
+      String effort = efforts.get(i);
+      if ("assistant".equals(message.path("role").asString())
+          && hasEffort(effort)
+          && !Objects.equals(declared, effort)) {
+        addEffortControl(result, effort);
+        declared = effort;
       }
       result.add(message);
-      if (role.equals("user")) {
-        pending = Objects.equals(levels[i], declared) ? null : levels[i];
-      }
     }
-    if (pending != null) {
-      result.add(effortControl(pending));
+    if (hasEffort(currentEffort) && !Objects.equals(declared, currentEffort)) {
+      addEffortControl(result, currentEffort);
     }
     return result;
   }
 
-  private static ObjectNode effortControl(String effort) {
-    ObjectNode node = NODES.objectNode();
-    node.put("role", "system");
-    node.putArray("content");
-    node.putObject("output_config").put("effort", effort);
-    return node;
+  private static boolean hasEffort(String effort) {
+    return effort != null && !effort.isBlank() && !effort.equals("off");
+  }
+
+  private static void addEffortControl(ArrayNode messages, String effort) {
+    if (!messages.isEmpty()
+        && "system".equals(messages.get(messages.size() - 1).path("role").asString())) {
+      JsonNode existing = messages.get(messages.size() - 1).get("output_config");
+      ObjectNode outputConfig =
+          existing instanceof ObjectNode object
+              ? object
+              : ((ObjectNode) messages.get(messages.size() - 1)).putObject("output_config");
+      outputConfig.put("effort", effort);
+    } else {
+      ObjectNode node = NODES.objectNode();
+      node.put("role", "system");
+      node.putArray("content");
+      node.putObject("output_config").put("effort", effort);
+      messages.add(node);
+    }
   }
 
   /**
-   * reasoning effort 编码：{@code off} 显式关闭推理，发送 {@code thinking:{type:"disabled"}}； 非空 effort 默认以
-   * ADAPTIVE 模式发送 {@code thinking:{type:"adaptive",display:"summarized"}} 与 {@code
-   * output_config:{effort:...}}；null 不声明推理字段，由服务端默认决定，此时 native {@code thinking}/{@code
-   * output_config} 原样保留（如预算思考在原生选项中声明 thinking）。
-   *
-   * <p>一旦 runtime 要写入 {@code thinking}，native {@code thinking} 必须显式拒绝；{@code output_config} 只对
-   * runtime 同样要写的 {@code effort} 子字段拒绝，其余官方子字段无损保留。
+   * Encodes effort using the thread's stable top-level level; message-level models additionally
+   * bind thinking blocks to the unchanged prefix.
    */
-  private static void applyReasoningParameters(ObjectNode root, ProviderRequest request) {
-    if (!request.model().reasoning()
-        || request.variant() == null
-        || request.variant().reasoningEffort() == null) {
+  private static void applyReasoningParameters(
+      ObjectNode root, ProviderRequest request, String topLevelEffort, boolean messageLevelEffort) {
+    if (!request.model().reasoning()) {
       return;
     }
-
+    if (request.variant() != null && request.variant().reasoningOff()) {
+      if (root.has("thinking")) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "protocolOptions must not override runtime field: thinking");
+      }
+      root.putObject("thinking").put("type", "disabled");
+      return;
+    }
+    if (!hasEffort(topLevelEffort)) {
+      return;
+    }
     if (root.has("thinking")) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "protocolOptions must not override runtime field: thinking");
     }
 
-    if (request.variant().reasoningOff()) {
-      ObjectNode thinking = root.putObject("thinking");
-      thinking.put("type", "disabled");
-      return;
-    }
-
-    String effort = request.variant().reasoningEffort();
     ObjectNode thinking = root.putObject("thinking");
     thinking.put("type", "adaptive");
     thinking.put("display", "summarized");
+    if (messageLevelEffort) {
+      thinking.putObject("block_binding").put("prefix_mismatch_behavior", "drop_block");
+    }
 
     ObjectNode outputConfig = mergeOutputConfig(root);
-    outputConfig.put("effort", effort);
+    outputConfig.put("effort", topLevelEffort);
   }
 
   /** 以 native {@code output_config} 为起点合并 runtime effort，保留 format 等其余官方子字段。 */

@@ -32,7 +32,7 @@ export const FIXTURE_MAIN_MODEL: ModelDTO = {
   modelId: 'acme-main-v1',
   config: {
     limit: { context: 128000, output: 4096 },
-    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
     pricing: {
       base: {
         input: '1',
@@ -61,7 +61,7 @@ export const FIXTURE_BACKUP_MODEL: ModelDTO = {
   modelId: 'acme-backup-v1',
   config: {
     limit: { context: 64000, output: 2048 },
-    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
     pricing: {
       base: {
         input: '0',
@@ -88,7 +88,7 @@ export const FIXTURE_GROUP: ModelDTO = {
   description: 'Ordered coding fallback',
   config: {
     limit: { context: 128000, output: 4096 },
-    abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+    abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
     defaultVariant: 'standard',
     variants: [{ id: 'standard', promptCacheRetention: 'SHORT' }],
   },

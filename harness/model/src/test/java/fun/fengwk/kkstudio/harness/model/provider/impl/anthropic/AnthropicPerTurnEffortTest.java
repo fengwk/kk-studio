@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.JsonNode;
@@ -20,175 +21,138 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
-import java.io.InputStream;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 
-/** 仅通过本地编码器验证 effort 控制，不调用模型。 */
+/** Anthropic 的消息级 effort 必须重放历史声明并保持早期请求前缀不变。 */
 class AnthropicPerTurnEffortTest {
-  private static final String BETA = "per-turn-control-2026-07-01";
-  private static final String MID = "mid-conversation-system-2026-04-07";
-  private static final String EFFORT = "effort-2025-11-24";
-  private static final List<String> AUTOMATIC_BETAS = List.of(MID, BETA, EFFORT);
+  private static final String OUTPUT_CONFIG_BETA = "mid-conversation-output-config-2026-07-01";
+  private static final String BINDING_BETA = "thinking-binding-controls-2026-08-01";
   private static final JsonMapper MAPPER = JsonMapper.builder().build();
-  private static final ProviderDescriptor DESCRIPTOR =
+  private static final ProviderDescriptor PROVIDER =
       new ProviderDescriptor(
           "p",
           ProviderType.ANTHROPIC,
           "https://example.invalid/v1",
           new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
           new UUID(1, 2));
-  private static final ModelDescriptor MODEL =
+  private static final ModelDescriptor MESSAGE_LEVEL_MODEL =
+      new ModelDescriptor(
+          "p", "model", "wire", Set.of(ModelInputModality.TEXT), true, true, false, true);
+  private static final ModelDescriptor MODEL_WITHOUT_MESSAGE_LEVEL_EFFORT =
       new ModelDescriptor("p", "model", "wire", Set.of(ModelInputModality.TEXT), true, true);
 
-  // 如果已有中途 system，复用该节点，不能覆盖它既有的 output_config 子字段。
   @Test
-  void reusesExistingSystemControl() {
-    for (boolean existingConfig : List.of(false, true)) {
-      ArrayNode input = MAPPER.createArrayNode();
-      input.addObject().put("role", "user").putArray("content");
-      ObjectNode system = input.addObject();
-      system.put("role", "system");
-      system.putArray("content");
-      if (existingConfig) {
-        system.putObject("output_config").put("other", 7);
-      }
-      ArrayNode output = AnthropicRequestEncoder.applyPerTurnEffort(input, List.of("", ""), "max");
-      assertEquals(2, output.size());
-      assertEquals("max", output.get(1).path("output_config").path("effort").asString());
-      if (existingConfig) {
-        assertEquals(7, output.get(1).path("output_config").path("other").asInt());
-      }
-    }
-  }
-
-  // 首轮已有 max 声明；后续不变时重传同一前缀，不追加重复声明。
-  @Test
-  void keepsTheFirstDeclarationStableAcrossUnchangedTurns() {
-    JsonNode first = body(encode("max", List.of(user("u1"))));
-    JsonNode second = body(encode("max", List.of(user("u1"), assistant("max"), user("u2"))));
-    assertEquals("max", first.path("output_config").path("effort").asString());
-    assertEquals("max", second.path("output_config").path("effort").asString());
-    assertEquals(List.of("user", "system:max"), describe(first.path("messages")));
-    assertEquals(
-        List.of("user", "system:max", "assistant", "user"), describe(second.path("messages")));
-    assertEquals(first.path("messages").get(0), second.path("messages").get(0));
-    assertEquals(first.path("messages").get(1), second.path("messages").get(1));
-    assertEquals(
-        MAPPER.readTree(
-            "{\"role\":\"system\",\"content\":[],\"output_config\":{\"effort\":\"max\"}}"),
-        first.path("messages").get(1));
-  }
-
-  // 对比官方 .280 样本抽取的 effort 子树，而不是只对照实现生成的角色列表。
-  @Test
-  void firstDeclarationMatchesNormalizedNativeSample() throws Exception {
-    JsonNode wire = body(encode("max", List.of(user("u1"))));
-    ObjectNode normalized = MAPPER.createObjectNode();
-    normalized.set("root_output_config", wire.path("output_config"));
-    ObjectNode control = normalized.putArray("messages_output_config_entries").addObject();
-    control.put("index", 1);
-    control.set("role", wire.path("messages").get(1).path("role"));
-    control.set("output_config_raw", wire.path("messages").get(1).path("output_config"));
-    try (InputStream input =
-        AnthropicPerTurnEffortTest.class.getResourceAsStream(
-            "/fun/fengwk/kkstudio/harness/model/provider/impl/anthropic/effort-max-280-normalized.json")) {
-      assertEquals(MAPPER.readTree(input), normalized);
-    }
-  }
-
-  // 缺失值夹在 max/high 之间时必须继承后面的 high，不能错误地继承前面的 max。
-  @Test
-  void declaresOnlyChangesAndBackfillsUnknown() {
-    var encoded =
-        encode(
-            "max",
-            List.of(
-                user("u1"),
-                assistant("max"),
-                user("u2"),
-                assistant(null),
-                user("u3"),
-                assistant("high"),
-                user("u4")));
-    JsonNode root = body(encoded);
-    assertEquals("max", root.path("output_config").path("effort").asString());
-    assertEquals(
-        List.of(
-            "user",
-            "system:max",
-            "assistant",
-            "user",
-            "system:high",
-            "assistant",
-            "user",
-            "assistant",
-            "user",
-            "system:max"),
-        describe(root.path("messages")));
-    assertFalse(root.toString().contains("reasoningEffort"));
-    assertEquals(0, root.path("messages").get(1).path("content").size());
-    assertEquals(3, root.path("messages").get(1).size());
-    assertEquals(AUTOMATIC_BETAS, encoded.betaFeatures());
-  }
-
-  // 多条 user 与 TOOL 都属于同一连续 user-like 段，不能在工具结果之间插入 system。
-  @Test
-  void keepsToolResultsAdjacentAndSkipsOffHistory() {
-    ProviderMessage tool1 = tool("a");
-    ProviderMessage tool2 = tool("b");
-    JsonNode messages =
-        body(encode(
-                "max",
+  void keepsTheEarlierRequestMessagePrefixAndUsesTheFirstStoredReplyLevel() {
+    JsonNode first = body(encode(MESSAGE_LEVEL_MODEL, "high", List.of(user("first"))));
+    JsonNode next =
+        body(
+            encode(
+                MESSAGE_LEVEL_MODEL,
+                "low",
                 List.of(
-                    user("first"), user("second"), assistant("off"), tool1, tool2, user("tail"))))
-            .path("messages");
+                    user("first"),
+                    assistant("high"),
+                    user("other-model turn"),
+                    assistant(null),
+                    user("second"))));
+
+    assertEquals("high", first.path("output_config").path("effort").asString());
+    assertEquals("high", next.path("output_config").path("effort").asString());
+    assertEquals(first.path("messages").get(0), next.path("messages").get(0));
     assertEquals(
-        List.of("user", "user", "system:max", "assistant", "user", "user", "user"),
-        describe(messages));
+        List.of("user", "assistant", "user", "assistant", "user", "system:low"),
+        describe(next.path("messages")));
+    assertEquals(
+        "low", next.path("messages").get(5).path("output_config").path("effort").asString());
+    assertEquals(
+        List.of(OUTPUT_CONFIG_BETA, BINDING_BETA),
+        encode(MESSAGE_LEVEL_MODEL, "low", List.of(user("u"))).betaFeatures());
+    assertEquals(
+        "drop_block",
+        next.path("thinking").path("block_binding").path("prefix_mismatch_behavior").asString());
   }
 
-  // 关闭或未声明推理以及非推理模型不产生消息级控制。
   @Test
-  void excludesOffUnsetBudgetAndNonReasoning() {
-    List<ProviderMessage> messages = List.of(user("u"), assistant("high"), user("tail"));
-    assertEquals(3, body(encode("off", messages)).path("messages").size());
-    assertEquals(3, body(encode(null, messages)).path("messages").size());
-    ModelDescriptor noReasoning =
-        new ModelDescriptor("p", "model", "wire", Set.of(ModelInputModality.TEXT), true, false);
-    ProviderRequest nonReasoning =
-        new ProviderRequest(
-            noReasoning,
-            new ModelVariant("v", "max", PromptCacheRetention.NONE, null),
-            20000,
-            "system",
-            messages,
-            List.of(),
-            ProviderCacheControl.none());
-    assertEquals(
-        3,
-        body(new AnthropicRequestEncoder().encode(nonReasoning, DESCRIPTOR))
-            .path("messages")
-            .size());
+  void insertsOnlySameModelLevelChangesBeforeTheirRepliesAndMergesSystemAtPosition() {
+    ArrayNode messages = MAPPER.createArrayNode();
+    messages.add(message("user"));
+    ObjectNode system = messages.addObject();
+    system.put("role", "system");
+    system.putArray("content");
+    system.putObject("output_config").put("cache", true);
+    messages.add(message("assistant"));
+    messages.add(message("assistant"));
+    ArrayNode result =
+        AnthropicRequestEncoder.applyMessageLevelEffort(
+            messages, Arrays.asList(null, null, "low", null), "low", "high");
+
+    assertEquals(4, result.size());
+    assertEquals("low", result.get(1).path("output_config").path("effort").asString());
+    assertTrue(result.get(1).path("output_config").path("cache").asBoolean());
+    assertEquals("assistant", result.get(2).path("role").asString());
+    assertEquals("assistant", result.get(3).path("role").asString());
   }
 
-  private static AnthropicEncodedRequest encode(String effort, List<ProviderMessage> messages) {
+  @Test
+  void disablesMessageMarkersAndBindingWhenThinkingIsOff() {
+    AnthropicEncodedRequest encoded =
+        encode(MESSAGE_LEVEL_MODEL, "off", List.of(user("u"), assistant("high"), user("tail")));
+    JsonNode root = body(encoded);
+
+    assertEquals("disabled", root.path("thinking").path("type").asString());
+    assertFalse(root.path("thinking").has("block_binding"));
+    assertFalse(root.toString().contains("output_config"));
+    assertTrue(encoded.betaFeatures().isEmpty());
+  }
+
+  @Test
+  void modelsWithoutCapabilityKeepCurrentTopLevelEffortAndDoNotBindThinking() {
+    JsonNode root =
+        body(
+            encode(
+                MODEL_WITHOUT_MESSAGE_LEVEL_EFFORT,
+                "low",
+                List.of(user("u"), assistant("high"), user("tail"))));
+
+    assertEquals("low", root.path("output_config").path("effort").asString());
+    assertFalse(root.path("thinking").has("block_binding"));
+    assertEquals(List.of("user", "assistant", "user"), describe(root.path("messages")));
+  }
+
+  @Test
+  void declaresHistoricalLevelChangesAndTheTrailingCurrentLevel() {
+    JsonNode root =
+        body(
+            encode(
+                MESSAGE_LEVEL_MODEL,
+                "medium",
+                List.of(user("u1"), assistant("high"), user("u2"), assistant("low"), user("u3"))));
+
+    assertEquals("high", root.path("output_config").path("effort").asString());
+    assertEquals(
+        List.of("user", "assistant", "user", "system:low", "assistant", "user", "system:medium"),
+        describe(root.path("messages")));
+  }
+
+  private static AnthropicEncodedRequest encode(
+      ModelDescriptor model, String effort, List<ProviderMessage> messages) {
     ProviderRequest request =
         new ProviderRequest(
-            MODEL,
+            model,
             new ModelVariant("v", effort, PromptCacheRetention.NONE, null),
             20000,
             "system",
             messages,
             List.of(),
             ProviderCacheControl.none());
-    return new AnthropicRequestEncoder().encode(request, DESCRIPTOR);
+    return new AnthropicRequestEncoder().encode(request, PROVIDER);
   }
 
   private static JsonNode body(AnthropicEncodedRequest encoded) {
@@ -204,12 +168,11 @@ class AnthropicPerTurnEffortTest {
         ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")), effort);
   }
 
-  private static ProviderMessage tool(String id) {
-    return new ProviderMessage(
-        ProviderMessageRole.TOOL,
-        List.of(
-            new ProviderToolResultBlock(
-                id, "tool", List.of(new ProviderTextBlock("ok")), false, null)));
+  private static ObjectNode message(String role) {
+    ObjectNode message = MAPPER.createObjectNode();
+    message.put("role", role);
+    message.putArray("content");
+    return message;
   }
 
   private static List<String> describe(JsonNode messages) {
