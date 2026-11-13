@@ -9,6 +9,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -16,6 +18,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
+	"github.com/fengwk/kk-studio/daemon/internal/update"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -101,6 +104,52 @@ func TestProductionRuntimeReconnectsOnGoaway(t *testing.T) {
 	}
 }
 
+// RUN-T-057 proves the production assembly passes the runtime's observer into the real transport:
+// an HTTP 426 with an UpgradeRequired body makes the assembled daemon run the managed update with
+// that target version instead of treating the rejection as a terminal registration failure.
+func TestProductionRuntimeRunsManagedUpdateOnUpgradeRequired(t *testing.T) {
+	if testing.Short() {
+		t.Skip("the assembly fixture drives a real WebSocket control channel")
+	}
+	upgradeBody, err := proto.Marshal(&protocol.UpgradeRequired{TargetVersion: proto.String("1.0.1")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	var rejections atomic.Int32
+	platform := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		rejections.Add(1)
+		w.WriteHeader(http.StatusUpgradeRequired)
+		_, _ = w.Write(upgradeBody)
+	}))
+	defer platform.Close()
+
+	initial, cleanup := prepareProductionAssemblyFixture(t, platform.URL)
+	defer cleanup()
+	runner := &recordingUpdateRunner{started: make(chan update.Command, 1)}
+	runtimeDone := make(chan error, 1)
+	go func() { runtimeDone <- (productionRuntime{updateRunner: runner}).Run(ctx, initial) }()
+	select {
+	case command := <-runner.started:
+		if command.TargetVersion != "1.0.1" {
+			cancel()
+			t.Fatalf("assembled daemon updated to %q, want the 426 target version", command.TargetVersion)
+		}
+	case runtimeErr := <-runtimeDone:
+		t.Fatalf("assembled daemon exited instead of running the managed update: %v", runtimeErr)
+	case <-time.After(10 * time.Second):
+		cancel()
+		t.Fatal("assembled daemon did not run the managed update for a 426 rejection")
+	}
+	cancel()
+	select {
+	case <-runtimeDone:
+	case <-time.After(10 * time.Second):
+		t.Fatal("daemon did not shut down after the managed update")
+	}
+}
+
 func prepareProductionAssemblyFixture(t *testing.T, studioURL string) (config.DaemonConfig, func()) {
 	t.Helper()
 	directory := filepath.Join(t.TempDir(), "daemon")
@@ -145,4 +194,22 @@ func productionConfiguration(studioURL string) *protocol.Envelope {
 			Config:  &protocol.DaemonConfiguration{StudioUrl: studioURL},
 		}},
 	}
+}
+
+// recordingUpdateRunner reports the first managed update it is asked to run and then holds it until
+// the daemon shuts down, so the assembly test can assert the target version of a 426-driven upgrade.
+type recordingUpdateRunner struct {
+	started chan update.Command
+	once    sync.Once
+}
+
+func (r *recordingUpdateRunner) Configured() bool   { return true }
+func (r *recordingUpdateRunner) BusyReason() string { return "" }
+func (r *recordingUpdateRunner) StopForUpdate(context.Context) error {
+	return nil
+}
+func (r *recordingUpdateRunner) HandleUpdate(ctx context.Context, command update.Command, _ config.DaemonConfig, _ func(update.Progress)) (update.Outcome, error) {
+	r.once.Do(func() { r.started <- command })
+	<-ctx.Done()
+	return update.Outcome{}, ctx.Err()
 }

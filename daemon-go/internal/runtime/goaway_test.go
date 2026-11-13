@@ -140,12 +140,13 @@ func TestRuntimeClosesOldGenerationOnceOnGoawayAndCancelsItsIDEWork(t *testing.T
 		cancel()
 		t.Fatalf("GOAWAY closed the retired generation %d times, want exactly once", got)
 	}
+	// The retired generation stops being the active connection, so its scope can no longer serve work.
 	r.mu.RLock()
-	bound, ready := r.bound, r.ready
+	current := r.connection
 	r.mu.RUnlock()
-	if bound || ready {
+	if current != nil && current.connection == Connection(first) {
 		cancel()
-		t.Fatal("GOAWAY left the retired generation bound or ready")
+		t.Fatal("GOAWAY left the retired generation as the active connection")
 	}
 	// A GOAWAY never cancels an accepted Agent execution: the journal keeps the RUNNING fact.
 	if entry, ok := r.journal.Get(testInvocationID); !ok || entry.State != InvocationRunning {
