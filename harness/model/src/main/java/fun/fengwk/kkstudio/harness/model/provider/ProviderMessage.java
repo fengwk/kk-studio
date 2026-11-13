@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.model.provider;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
-
 import java.util.List;
 import java.util.Objects;
 
@@ -12,19 +10,13 @@ import java.util.Objects;
  * Provider，是否使用及如何编码由各协议决定。
  */
 public record ProviderMessage(
-    ProviderMessageRole role,
-    List<ProviderContentBlock> contents,
-    @JsonIgnore ProviderReplayState replayState,
-    String reasoningEffort) {
+    ProviderMessageRole role, List<ProviderContentBlock> contents, String reasoningEffort) {
 
   public ProviderMessage {
     role = Objects.requireNonNull(role, "role");
     contents = List.copyOf(Objects.requireNonNull(contents, "contents"));
     if (contents.isEmpty()) {
       throw new IllegalArgumentException("contents must not be empty");
-    }
-    if (replayState != null && role != ProviderMessageRole.ASSISTANT) {
-      throw new IllegalArgumentException("replayState is only allowed for ASSISTANT messages");
     }
     if (reasoningEffort != null && role != ProviderMessageRole.ASSISTANT) {
       throw new IllegalArgumentException("reasoningEffort is only allowed for ASSISTANT messages");
@@ -33,18 +25,7 @@ public record ProviderMessage(
   }
 
   public ProviderMessage(ProviderMessageRole role, List<ProviderContentBlock> contents) {
-    this(role, contents, null, null);
-  }
-
-  public ProviderMessage(
-      ProviderMessageRole role,
-      List<ProviderContentBlock> contents,
-      ProviderReplayState replayState) {
-    this(role, contents, replayState, null);
-  }
-
-  public boolean hasReplayState() {
-    return replayState != null;
+    this(role, contents, null);
   }
 
   private static void validateRoleContents(

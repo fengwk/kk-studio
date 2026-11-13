@@ -70,20 +70,43 @@ function withInstall(body) {
 function addRelease(fixture, version) {
   const asset = `kk-studio-daemon-v${version}-${fixture.releaseOs}-${fixture.releaseArch}.tar.gz`
   const archive = path.join(fixture.httpDir, asset)
-  copyFileSync(path.join(fixture.httpDir, fixture.asset), archive)
+  fixture.buildArchive(archive, null, version)
   writeFileSync(`${archive}.sha256`, `${sha256Of(archive)}  ${asset}\n`)
   return asset
 }
 
 describe('install.sh on Linux', () => {
+  it('installs a real Go build and runs its --version command', { skip: process.platform === 'win32' }, () =>
+    withInstall(({ fixture, install }) => {
+      const daemonGo = path.join(process.cwd(), 'daemon-go')
+      const binary = path.join(fixture.root, 'actual-kk-studio-daemon')
+      const go = process.env.GO_BIN ?? '/usr/local/opt/go/bin/go'
+      const build = spawnSync(go, [
+        'build', '-trimpath', '-ldflags',
+        '-X github.com/fengwk/kk-studio/daemon/internal/config.DaemonVersion=1.1.1',
+        '-o', binary, './cmd/kk-studio-daemon',
+      ], { cwd: daemonGo, encoding: 'utf8', env: { ...process.env, CGO_ENABLED: '0' } })
+      assert.equal(build.status, 0, build.stderr)
+      const archive = path.join(fixture.httpDir, fixture.asset)
+      fixture.buildArchive(archive, null, '1.1.1', binary)
+      writeFileSync(`${archive}.sha256`, `${sha256Of(archive)}  ${fixture.asset}\n`)
+
+      const result = install()
+      assert.equal(result.status, 0, result.stderr)
+      const installedDaemon = path.join(envRoot(fixture), 'lib/kk-studio-daemon')
+      const version = spawnSync(installedDaemon, ['--version'], { encoding: 'utf8' })
+      assert.equal(version.status, 0, version.stderr)
+      assert.equal(version.stdout.trim(), 'kk-studio-daemon 1.1.1')
+    }))
+
   it('installs one card into its UUID layout without backups and cleans its staging area', () =>
     withInstall(({ fixture, install }) => {
       const result = install()
       assert.equal(result.status, 0, result.stderr)
       assert.ok(result.stdout.includes('READY'))
       const root = envRoot(fixture)
-      assert.ok(existsSync(path.join(root, 'lib/main.js')))
-      accessSync(path.join(root, 'lib/runtime/code-server/lib/node'), constants.X_OK)
+      assert.ok(existsSync(path.join(root, 'lib/kk-studio-daemon')))
+      accessSync(path.join(root, 'lib/kk-studio-daemon'), constants.X_OK)
       for (const name of ['daemon.json', 'daemon.token']) {
         assert.equal(mode(path.join(root, name)), 0o600, name)
       }
@@ -94,8 +117,7 @@ describe('install.sh on Linux', () => {
       assert.ok(!existsSync(path.join(root, '.work')))
       const unit = text(unitPath(fixture))
       assert.equal(unit.split('\n')[0], '# Managed by scripts/daemon/install.sh')
-      assert.ok(unit.includes(`${root}/lib/runtime/code-server/lib/node`))
-      assert.ok(unit.includes(`${root}/lib/main.js`))
+      assert.ok(unit.includes(`${root}/lib/kk-studio-daemon`))
       assert.ok(unit.includes(`${root}/daemon.json`))
       assert.ok(unit.includes(ENVIRONMENT_ID))
       assert.ok(existsSync(path.join(fixture.state, 'active')))
@@ -122,8 +144,8 @@ describe('install.sh on Linux', () => {
       assert.equal(second.status, 0, second.stderr)
       const firstRoot = path.join(fixture.installRoot, 'environments', ENVIRONMENT_ID)
       const secondRoot = path.join(fixture.installRoot, 'environments', SECOND_ENVIRONMENT_ID)
-      assert.ok(existsSync(path.join(firstRoot, 'lib/main.js')))
-      assert.ok(existsSync(path.join(secondRoot, 'lib/main.js')))
+      assert.ok(existsSync(path.join(firstRoot, 'lib/kk-studio-daemon')))
+      assert.ok(existsSync(path.join(secondRoot, 'lib/kk-studio-daemon')))
       assert.notEqual(firstRoot, secondRoot)
       const firstUnit = path.join(fixture.home, `.config/systemd/user/kk-studio-daemon-${ENVIRONMENT_ID}.service`)
       const secondUnit = path.join(fixture.home, `.config/systemd/user/kk-studio-daemon-${SECOND_ENVIRONMENT_ID}.service`)
@@ -138,7 +160,7 @@ describe('install.sh on Linux', () => {
       assert.ok(!existsSync(path.join(firstRoot, 'lib')))
       assert.ok(existsSync(path.join(firstRoot, 'daemon.json')))
       assert.ok(existsSync(secondUnit))
-      assert.ok(existsSync(path.join(secondRoot, 'lib/main.js')))
+      assert.ok(existsSync(path.join(secondRoot, 'lib/kk-studio-daemon')))
       const uninstallCommands = text(path.join(fixture.state, 'commands'))
       assert.match(uninstallCommands, new RegExp(`--user stop kk-studio-daemon-${ENVIRONMENT_ID}.service`))
       assert.doesNotMatch(uninstallCommands, new RegExp(SECOND_ENVIRONMENT_ID))
@@ -212,7 +234,7 @@ describe('install.sh on Linux', () => {
       // A marker inside the program directory proves the directory was replaced, not merged.
       writeFileSync(path.join(root, 'lib/old-marker'), 'old')
       addRelease(fixture, '1.2.0')
-      const result = update({ FAKE_NODE_VERSION: '1.2.0' })
+      const result = update()
       assert.equal(result.status, 0, result.stderr)
       assert.ok(result.stdout.includes('配置与凭据未改动'))
       assert.ok(!existsSync(path.join(root, 'lib/old-marker')))
@@ -247,7 +269,7 @@ describe('install.sh on Linux', () => {
       assert.match(result.stderr, /未安装/)
     }))
 
-  it('update re-validates the current configuration after the service stops', () =>
+  it('update rejects an invalid current configuration before stopping the service', () =>
     withInstall(({ fixture, install, update }) => {
       assert.equal(install().status, 0)
       const root = envRoot(fixture)
@@ -255,15 +277,16 @@ describe('install.sh on Linux', () => {
       const config = daemonJson({ environmentId: ENVIRONMENT_ID, studioUrl: 'invalid' })
       writeFileSync(path.join(root, 'daemon.json'), config)
       addRelease(fixture, '1.2.0')
-      const result = update({ FAKE_NODE_VERSION: '1.2.0' })
+      const result = update()
       assert.notEqual(result.status, 0)
-      assert.match(result.stderr, /\[6\/7 停止发布启动\]/)
-      // 停机后复检失败：旧程序目录仍在，配置内容未变，结果记录 validate 阶段。
+      assert.match(result.stderr, /\[4\/7 校验解包配置\]/)
+      // 预检失败必须发生在服务停止前，旧程序与配置保持不变。
       assert.ok(existsSync(path.join(root, 'lib/new-marker')))
       assert.equal(text(path.join(root, 'daemon.json')), config)
-      assert.equal(lastOperation(fixture).result, 'failed')
-      assert.equal(lastOperation(fixture).phase, 'validate')
-      assert.ok(existsSync(path.join(fixture.state, 'active')) === false)
+      // 失败发生在取得安装锁之前，现有诊断记录仍保留上次成功的操作。
+      assert.equal(lastOperation(fixture).result, 'succeeded')
+      assert.equal(lastOperation(fixture).phase, 'done')
+      assert.ok(existsSync(path.join(fixture.state, 'active')))
     }))
 
   it('rejects the old flat configuration before downloading', () =>
@@ -303,7 +326,7 @@ describe('install.sh on Linux', () => {
       const [configFile, tokenFile] = fixture.makeInputs({ config })
       const result = install({}, { configFile, tokenFile })
       assert.notEqual(result.status, 0)
-      assert.ok(result.stderr.includes('Invalid daemon configuration'), result.stderr)
+      assert.match(result.stderr, /配置格式不是当前版本/)
       assert.ok(bytes(path.join(root, 'daemon.json')).equals(before))
       assert.ok(existsSync(path.join(fixture.state, 'active')))
     }))
@@ -323,9 +346,7 @@ describe('install.sh on Linux', () => {
       const root = envRoot(fixture)
       mkdirSync(root, { recursive: true, mode: 0o700 })
       chmodSync(root, 0o700)
-      // 原子目录标记模拟另一个进程持有 install.lock。
-      mkdirSync(path.join(root, '.fake-install-lock'))
-      const result = install()
+      const result = install({ FAKE_DAEMON_BUSY: '1' })
       assert.notEqual(result.status, 0)
       assert.match(result.stderr, /另一个安装操作正在执行/)
       assert.ok(!existsSync(path.join(root, 'lib')))
@@ -389,12 +410,12 @@ describe('install.sh on Linux', () => {
     withInstall(({ fixture, install, uninstall }) => {
       assert.equal(install().status, 0)
       const root = envRoot(fixture)
-      // 缺少 native helper 时无法取得管理副本：必须 fail closed，不能无锁删除。
-      unlinkSync(path.join(root, 'lib/native/lock-helper.js'))
+      // 缺少受管可执行文件时无法取得管理副本：必须 fail closed，不能无锁删除。
+      unlinkSync(path.join(root, 'lib/kk-studio-daemon'))
       const result = uninstall()
       assert.notEqual(result.status, 0)
       assert.ok(existsSync(unitPath(fixture)))
-      assert.ok(existsSync(path.join(root, 'lib/main.js')))
+      assert.ok(!existsSync(path.join(root, 'lib/kk-studio-daemon')))
     }))
 
   it('rejects duplicate, unknown and non-UUID options before network access', () =>
@@ -447,7 +468,7 @@ describe('install.sh on Linux', () => {
 
   it('rejects a version mismatch and unsafe input permissions', () =>
     withInstall(({ fixture, configFile, install }) => {
-      assert.notEqual(install({ FAKE_NODE_VERSION: '9.9.9' }).status, 0)
+      assert.notEqual(install({ FAKE_DAEMON_VERSION: '9.9.9' }).status, 0)
       assert.ok(!existsSync(path.join(envRoot(fixture), 'lib')))
       chmodSync(configFile, 0o644)
       assert.notEqual(install().status, 0)

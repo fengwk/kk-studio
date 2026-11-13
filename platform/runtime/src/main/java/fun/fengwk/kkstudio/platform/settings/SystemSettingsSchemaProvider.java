@@ -289,6 +289,7 @@ public class SystemSettingsSchemaProvider {
         "settings.tabs.storageMedia",
         "settings.section.storageMedia.description",
         uploadGroup(),
+        imageInputGroup(),
         canvasMediaGroup(),
         temporaryResourceGroup());
   }
@@ -324,6 +325,32 @@ public class SystemSettingsSchemaProvider {
             null));
   }
 
+  private static SystemSettingsSchemaDTO.GroupDTO imageInputGroup() {
+    return group(
+        "storageMedia.imageInput",
+        "settings.section.storageMedia.imageInput.title",
+        "settings.section.storageMedia.imageInput.description",
+        field(
+            "storageMedia.imageTier",
+            "settings.field.storageMedia.imageTier",
+            "settings.field.storageMedia.imageTier.hint",
+            FieldType.ENUM,
+            false,
+            null,
+            null,
+            option("720P", "settings.option.imageTier.720p"),
+            option("1080P", "settings.option.imageTier.1080p"),
+            option("ORIGINAL", "settings.option.imageTier.original")),
+        field(
+            "storageMedia.maxImagesPerRequest",
+            "settings.field.storageMedia.maxImagesPerRequest",
+            "settings.field.storageMedia.maxImagesPerRequest.hint",
+            FieldType.INTEGER,
+            false,
+            1,
+            null));
+  }
+
   private static SystemSettingsSchemaDTO.GroupDTO canvasMediaGroup() {
     return group(
         "storageMedia.canvasMedia",
@@ -352,18 +379,7 @@ public class SystemSettingsSchemaProvider {
             FieldType.INTEGER,
             false,
             1,
-            100),
-        field(
-            "storageMedia.imageTier",
-            "settings.field.storageMedia.imageTier",
-            "settings.field.storageMedia.imageTier.hint",
-            FieldType.ENUM,
-            false,
-            null,
-            null,
-            option("720P", "settings.option.imageTier.720p"),
-            option("1080P", "settings.option.imageTier.1080p"),
-            option("ORIGINAL", "settings.option.imageTier.original")));
+            100));
   }
 
   private static SystemSettingsSchemaDTO.GroupDTO temporaryResourceGroup() {

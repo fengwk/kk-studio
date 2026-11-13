@@ -96,6 +96,12 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         }
 
         @Override
+        public DownloadTicket download(
+            EnvironmentId environmentId, String invocationId, UUID transferId, UUID blobId) {
+          throw new AssertionError("routing test must not issue a download");
+        }
+
+        @Override
         public void release(EnvironmentId environmentId, String invocationId, UUID uploadId) {
           throw new AssertionError("routing test must not release an upload");
         }

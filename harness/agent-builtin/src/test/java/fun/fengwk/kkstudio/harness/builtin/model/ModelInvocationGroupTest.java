@@ -74,8 +74,8 @@ class ModelInvocationGroupTest {
         List.of(),
         CREATED,
         CREATED,
-        null,
-        new ModelGroupProgress("group", 7L, 0, 0));
+        new ModelGroupProgress("group", 7L, 0, 0),
+        null);
   }
 
   @Test
@@ -96,8 +96,8 @@ class ModelInvocationGroupTest {
             List.of(),
             CREATED,
             CREATED,
-            null,
-            new ModelGroupProgress("group", 7L, 0, 2));
+            new ModelGroupProgress("group", 7L, 0, 2),
+            null);
     ModelAttemptFailure failure =
         new ModelAttemptFailure(
             1,
@@ -138,8 +138,8 @@ class ModelInvocationGroupTest {
             List.of(),
             CREATED,
             CREATED,
-            null,
-            new ModelGroupProgress("group", 7L, 0, 0));
+            new ModelGroupProgress("group", 7L, 0, 0),
+            null);
     ModelAttemptFailure failure =
         new ModelAttemptFailure(
             1,
@@ -180,8 +180,8 @@ class ModelInvocationGroupTest {
             List.of(),
             CREATED,
             CREATED,
-            null,
-            new ModelGroupProgress("group", 7L, 1, 0));
+            new ModelGroupProgress("group", 7L, 1, 0),
+            null);
 
     ModelInvocation unknown =
         running.unknown(
@@ -281,7 +281,6 @@ class ModelInvocationGroupTest {
         value.failedAttempts(),
         value.createdAt(),
         value.updatedAt(),
-        value.providerReplayState(),
         value.groupProgress(),
         requestedAt);
   }

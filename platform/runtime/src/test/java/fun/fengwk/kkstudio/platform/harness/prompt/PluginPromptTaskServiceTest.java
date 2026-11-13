@@ -179,7 +179,9 @@ class PluginPromptTaskServiceTest {
 
     NewThreadCommand raw = command.getValue().commands().getFirst();
     List<NewThreadCommand> prepared =
-        preflight.getValue().prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw), List.of());
+        preflight
+            .getValue()
+            .prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw), List.of(), SETTINGS);
     AgentMessage durable = ((CustomMessageCommandPayload) prepared.getFirst().payload()).message();
     assertEquals(1, durable.contents().size());
     assertEquals("only", ((TextMessageContent) durable.contents().getFirst()).text());
@@ -211,7 +213,9 @@ class PluginPromptTaskServiceTest {
 
     NewThreadCommand raw = command.getValue().commands().getFirst();
     List<NewThreadCommand> prepared =
-        preflight.getValue().prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw), List.of());
+        preflight
+            .getValue()
+            .prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw), List.of(), SETTINGS);
 
     assertEquals(1, prepared.size());
     assertEquals(raw.idempotencyKey(), prepared.getFirst().idempotencyKey());
@@ -266,7 +270,8 @@ class PluginPromptTaskServiceTest {
         () ->
             preflight
                 .getValue()
-                .prepare(new Session(SESSION_ID, "h3", NOW), List.of(raw, raw), List.of()));
+                .prepare(
+                    new Session(SESSION_ID, "h3", NOW), List.of(raw, raw), List.of(), SETTINGS));
   }
 
   /** 同一内容与同一暂存句柄永远得到同一 request hash；durable 形态不参与 hash。 */
@@ -581,7 +586,7 @@ class PluginPromptTaskServiceTest {
     BranchSettings settings =
         new BranchSettings(
             "prompt-agent", BuiltinExecution.of(ModelSelection.group("gpt-4o")), "default");
-    Entry root = new Entry(headEntryId, sessionId, null, new RootPayload(settings), NOW, null);
+    Entry root = new Entry(headEntryId, sessionId, null, new RootPayload(settings), NOW);
     ThreadState thread =
         new ThreadState(
             threadId,

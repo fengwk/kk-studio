@@ -147,13 +147,32 @@ public class StorageUploadService {
             transactionTemplate);
   }
 
-  /** 预约上传：内容命中返回 READY，否则返回 PENDING（含预签名 PUT）。 */
+  /** 预约用户上传：图片必须携带客户端缩放后的 MIME 与像素事实。 */
   public StorageUploadDTO reserve(StorageUploadReserveRequestDTO request) {
+    return reserve(request, true);
+  }
+
+  /** 预约服务端受控 staging：媒体事实由服务端在 complete 时探测。 */
+  public StorageUploadDTO reserveStaged(StorageUploadReserveRequestDTO request) {
+    return reserve(request, false);
+  }
+
+  private StorageUploadDTO reserve(
+      StorageUploadReserveRequestDTO request, boolean requireImageMetadata) {
     Objects.requireNonNull(request, "request must not be null");
     String filename = validateFilename(request.getFilename());
     String mediaType = normalizeMediaType(request.getMediaType());
     long sizeBytes = validateSize(request.getSizeBytes());
     String sha256 = validateSha256(request.getSha256());
+    ImageMetadata imageMetadata =
+        validateImageMetadata(
+            mediaType,
+            request.getFormat(),
+            request.getOriginalWidth(),
+            request.getOriginalHeight(),
+            request.getStoredWidth(),
+            request.getStoredHeight(),
+            requireImageMetadata);
 
     // 一次操作读取同一份 TTL 快照：created_at 与响应快照到期时刻都由它换算。
     SystemSettings.StorageMedia media = settingsSnapshot.get().storageMedia();
@@ -186,6 +205,7 @@ public class StorageUploadService {
                       mediaType,
                       sizeBytes,
                       sha256,
+                      imageMetadata,
                       createdAt);
               if (!uploadRepository.insert(upload)) {
                 throw new IllegalStateException("insert storage upload failed: " + uploadId);
@@ -217,7 +237,7 @@ public class StorageUploadService {
       generatePreviewBestEffort(outcome.blobId);
     }
     return toDTO(
-        outcome.upload.getId(),
+        outcome.upload,
         outcome.blobId,
         expiresAt(outcome.upload.getCreatedAt(), uploadTtl),
         presignedPut);
@@ -247,15 +267,22 @@ public class StorageUploadService {
       s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(uploadId));
       expiryService.cleanupUnusedCandidate(upload);
       generatePreviewBestEffort(upload.getBlobId());
-      return toDTO(uploadId, upload.getBlobId(), expiresAt(upload.getCreatedAt(), uploadTtl), null);
+      return toDTO(upload, upload.getBlobId(), expiresAt(upload.getCreatedAt(), uploadTtl), null);
     }
 
     String tempKey = StorageObjectKeys.uploadOriginal(uploadId);
     S3ObjectMetadata head = headObjectWithChecksumOrFail(uploadId, tempKey);
     verifyObject(head, upload);
-    StorageMediaFacts facts = mediaProbe.probe(tempKey, head);
+    StorageMediaFacts facts =
+        upload.getFormat() == null
+            ? mediaProbe.probe(tempKey, head)
+            : new StorageMediaFacts(
+                upload.getDeclaredMediaType(),
+                upload.getStoredWidth().longValue(),
+                upload.getStoredHeight().longValue(),
+                null);
     UUID blobId = materializeAndBind(upload, facts, false, uploadTtl);
-    return toDTO(upload.getId(), blobId, expiresAt(upload.getCreatedAt(), uploadTtl), null);
+    return toDTO(upload, blobId, expiresAt(upload.getCreatedAt(), uploadTtl), null);
   }
 
   /**
@@ -324,6 +351,7 @@ public class StorageUploadService {
             mediaType,
             fileFacts.sizeBytes(),
             fileFacts.sha256(),
+            null,
             createdAt);
     // 先取操作锁再登记行：行登记完成的那一刻就已经在锁保护内，后台清理不可能在「行已登记、写窗口还没开始」的间隙
     // claim 并删除锚点（否则登记后线程停顿超过 TTL，GC 可先删行，随后 PUT/copy 落盘的就是无事实的孤儿对象）。
@@ -463,7 +491,7 @@ public class StorageUploadService {
                 "upload " + uploadId + " is PENDING; complete it before consuming");
           }
           requireCleanupAvailable(locked, uploadTtl);
-          return new ReadyUpload(locked.getBlobId(), locked.getFilename());
+          return readyUpload(locked);
         });
   }
 
@@ -491,7 +519,25 @@ public class StorageUploadService {
           "upload " + uploadId + " is PENDING; complete it before previewing");
     }
     requireCleanupAvailable(upload, uploadTtl);
-    return new ReadyUpload(upload.getBlobId(), upload.getFilename());
+    return readyUpload(upload);
+  }
+
+  private ReadyUpload readyUpload(StorageUpload upload) {
+    if (upload.getOriginalWidth() != null) {
+      return new ReadyUpload(
+          upload.getBlobId(),
+          upload.getFilename(),
+          upload.getOriginalWidth(),
+          upload.getOriginalHeight(),
+          upload.getStoredWidth(),
+          upload.getStoredHeight());
+    }
+    StorageBlob blob = blobRepository.getById(upload.getBlobId());
+    Integer width =
+        blob == null || blob.getWidth() == null ? null : Math.toIntExact(blob.getWidth());
+    Integer height =
+        blob == null || blob.getHeight() == null ? null : Math.toIntExact(blob.getHeight());
+    return new ReadyUpload(upload.getBlobId(), upload.getFilename(), width, height, null, null);
   }
 
   /** 后台回收入口：由 {@link StorageUploadExpiryService} 执行候选扫描、claim 与对象回收。 */
@@ -634,6 +680,62 @@ public class StorageUploadService {
     return createdAt.plusSeconds(uploadTtlSeconds);
   }
 
+  private static ImageMetadata validateImageMetadata(
+      String mediaType,
+      String format,
+      Integer originalWidth,
+      Integer originalHeight,
+      Integer storedWidth,
+      Integer storedHeight,
+      boolean requireImageMetadata) {
+    if (!mediaType.startsWith("image/")) {
+      if (format != null
+          || originalWidth != null
+          || originalHeight != null
+          || storedWidth != null
+          || storedHeight != null) {
+        throw DomainException.validation("format", "image metadata is only valid for images");
+      }
+      return null;
+    }
+    boolean anyImageMetadata =
+        format != null
+            || originalWidth != null
+            || originalHeight != null
+            || storedWidth != null
+            || storedHeight != null;
+    boolean completeImageMetadata =
+        format != null
+            && originalWidth != null
+            && originalHeight != null
+            && storedWidth != null
+            && storedHeight != null;
+    if (!anyImageMetadata) {
+      if (requireImageMetadata) {
+        throw DomainException.validation(
+            "format", "image format and dimensions are required for image uploads");
+      }
+      return null;
+    }
+    if (!completeImageMetadata) {
+      throw DomainException.validation(
+          "format", "image format and dimensions must be provided together");
+    }
+    if (!format.matches("[a-z0-9][a-z0-9.+-]{0,31}") || !mediaType.equals("image/" + format)) {
+      throw DomainException.validation("format", "format must match the stored image media type");
+    }
+    if (originalWidth <= 0 || originalHeight <= 0 || storedWidth <= 0 || storedHeight <= 0) {
+      throw DomainException.validation("storedWidth", "image dimensions must be positive");
+    }
+    long originalPixels = (long) originalWidth * originalHeight;
+    long storedPixels = (long) storedWidth * storedHeight;
+    if (originalPixels > 40_000_000L || storedPixels > originalPixels) {
+      throw DomainException.validation(
+          "storedWidth", "image dimensions exceed the supported range");
+    }
+    return new ImageMetadata(format, originalWidth, originalHeight, storedWidth, storedHeight);
+  }
+
   private StorageUpload newUpload(
       UUID uploadId,
       UUID candidateBlobId,
@@ -642,6 +744,7 @@ public class StorageUploadService {
       String mediaType,
       long sizeBytes,
       String sha256,
+      ImageMetadata imageMetadata,
       Instant createdAt) {
     StorageUpload upload = new StorageUpload();
     upload.setId(uploadId);
@@ -651,6 +754,13 @@ public class StorageUploadService {
     upload.setDeclaredMediaType(mediaType);
     upload.setDeclaredSize(sizeBytes);
     upload.setDeclaredSha256(sha256);
+    if (imageMetadata != null) {
+      upload.setFormat(imageMetadata.format());
+      upload.setOriginalWidth(imageMetadata.originalWidth());
+      upload.setOriginalHeight(imageMetadata.originalHeight());
+      upload.setStoredWidth(imageMetadata.storedWidth());
+      upload.setStoredHeight(imageMetadata.storedHeight());
+    }
     upload.setCreatedAt(createdAt);
     return upload;
   }
@@ -677,12 +787,35 @@ public class StorageUploadService {
 
   private record FileFacts(long sizeBytes, String sha256) {}
 
+  private record ImageMetadata(
+      String format,
+      Integer originalWidth,
+      Integer originalHeight,
+      Integer storedWidth,
+      Integer storedHeight) {}
+
   private static StorageUploadDTO toDTO(
-      UUID uploadId, UUID blobId, Instant expiresAt, StoragePresignedUrlDTO presignedPut) {
+      StorageUpload upload, UUID blobId, Instant expiresAt, StoragePresignedUrlDTO presignedPut) {
     if (blobId == null) {
-      return new StorageUploadPendingDTO(uploadId.toString(), presignedPut, expiresAt);
+      return new StorageUploadPendingDTO(
+          upload.getId().toString(),
+          presignedPut,
+          expiresAt,
+          upload.getFormat(),
+          upload.getOriginalWidth(),
+          upload.getOriginalHeight(),
+          upload.getStoredWidth(),
+          upload.getStoredHeight());
     }
-    return new StorageUploadReadyDTO(uploadId.toString(), blobId.toString(), expiresAt);
+    return new StorageUploadReadyDTO(
+        upload.getId().toString(),
+        blobId.toString(),
+        expiresAt,
+        upload.getFormat(),
+        upload.getOriginalWidth(),
+        upload.getOriginalHeight(),
+        upload.getStoredWidth(),
+        upload.getStoredHeight());
   }
 
   private record ReserveOutcome(StorageUpload upload, UUID blobId) {}
@@ -697,5 +830,16 @@ public class StorageUploadService {
       String sha256) {}
 
   /** READY 上传的权威消费事实。 */
-  public record ReadyUpload(UUID blobId, String filename) {}
+  public record ReadyUpload(
+      UUID blobId,
+      String filename,
+      Integer originalWidth,
+      Integer originalHeight,
+      Integer storedWidth,
+      Integer storedHeight) {
+
+    public ReadyUpload(UUID blobId, String filename) {
+      this(blobId, filename, null, null, null, null);
+    }
+  }
 }

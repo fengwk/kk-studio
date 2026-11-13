@@ -1,12 +1,12 @@
 #!/bin/sh
 set -eu
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-cd "$ROOT"
+TEMP=$(mktemp -d)
+trap 'rm -rf "$TEMP"' EXIT HUP INT TERM
+"$ROOT/daemon-go/scripts/generate-protocol.sh" "$TEMP"
 GENERATED=daemon-go/internal/protocol/control.pb.go
-BEFORE=$(sha256sum "$GENERATED" | cut -d ' ' -f 1)
-"$ROOT/daemon-go/scripts/generate-protocol.sh"
-AFTER=$(sha256sum "$GENERATED" | cut -d ' ' -f 1)
-if [ "$BEFORE" != "$AFTER" ]; then
+CANDIDATE=$TEMP/internal/protocol/control.pb.go
+if ! cmp -s "$GENERATED" "$CANDIDATE"; then
   echo "generated protocol code is stale; run daemon-go/scripts/generate-protocol.sh" >&2
   exit 1
 fi

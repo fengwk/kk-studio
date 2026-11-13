@@ -17,8 +17,8 @@ resolve_repo_root "$SCRIPT_DIR"
 NVD_SETTINGS_SERVER_ID=kk-studio-supply-chain-nvd
 NVD_DATAFEED_URL=https://nvd.nist.gov/feeds/json/cve/2.0/nvdcve-2.0-{0}.json.gz
 NPM_AUDIT_REGISTRY=https://registry.npmjs.org
-# npm 生态的项目根：SBOM 与漏洞审计按项目分别产出报告与状态，任一项目有漏洞都让门禁失败。
-NPM_PROJECTS=(frontend daemon)
+# npm 生态只保留前端；Daemon 已由 Go module 构建，不再扫描已移除的 Node Daemon 项目。
+NPM_PROJECTS=(frontend)
 TRIVY_IMAGE=aquasec/trivy@sha256:62b1e65e8869bc4b4c6aa4fa2b21595256c7c2f6018a9d9ad61caf87187c1969
 TRIVY_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-db:2
 TRIVY_JAVA_DB_REPOSITORY=public.ecr.aws/aquasecurity/trivy-java-db:1

@@ -1,0 +1,28 @@
+# Third-Party Notices
+
+The Go Daemon distribution includes the Go Daemon, the managed `fengwk/code-server` runtime,
+and the JavaScript IDE extension. The Daemon executable is built with `CGO_ENABLED=0`.
+
+Go modules are listed with pinned versions in `go.mod` and retain their license files at their
+source repositories. Direct modules include:
+
+- `github.com/Sriram-PR/go-ignore` — MIT
+- `github.com/aymanbagabas/go-udiff` — MIT
+- `github.com/bmatcuk/doublestar/v4` — MIT
+- `github.com/charlievieth/fastwalk` — BSD 3-Clause
+- `github.com/coder/websocket` — BSD 2-Clause
+- `github.com/disintegration/imaging` — MIT
+- `github.com/sourcegraph/jsonrpc2` — MIT
+- `go.uber.org/goleak` — MIT
+- `golang.org/x/image`, `golang.org/x/net`, `golang.org/x/sys`, `golang.org/x/text` — BSD 3-Clause
+- `google.golang.org/protobuf` — BSD 3-Clause
+- `fengwk/code-server` and its bundled Node.js — MIT
+
+Apache License 2.0 components are covered by the accompanying `LICENSE`.
+
+Source repositories:
+
+- Go modules: `https://pkg.go.dev/`
+- managed code-server: `https://github.com/fengwk/code-server`
+- upstream code-server: `https://github.com/coder/code-server`
+- Node.js: `https://github.com/nodejs/node`

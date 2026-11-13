@@ -56,12 +56,14 @@ public final class EnvironmentCapabilityCatalog {
         descriptor(EnvironmentCapabilityIds.FS_WRITE, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_EDIT, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.FS_EDIT_PREVIEW, Duration.ofMinutes(1)),
+        descriptor(EnvironmentCapabilityIds.FS_WRITE_PREVIEW, Duration.ofMinutes(1)),
         descriptor(EnvironmentCapabilityIds.PROCESS_EXEC, Duration.ofMinutes(5)),
         descriptor(EnvironmentCapabilityIds.FS_GREP, Duration.ofSeconds(15)),
         descriptor(EnvironmentCapabilityIds.FS_FIND, Duration.ofSeconds(15)),
         descriptor(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION, Duration.ofSeconds(180)),
         descriptor(EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS, Duration.ofSeconds(180)),
-        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofSeconds(180)));
+        descriptor(EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE, Duration.ofSeconds(180)),
+        descriptor(EnvironmentCapabilityIds.SKILL_INSTALL, Duration.ofMinutes(5)));
   }
 
   /** 构造单个 capability descriptor：id、从 classpath 加载的 input schema 与默认执行超时。 */

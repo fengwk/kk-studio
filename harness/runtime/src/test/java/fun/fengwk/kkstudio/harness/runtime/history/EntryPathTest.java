@@ -8,7 +8,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
@@ -49,10 +48,6 @@ import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -604,19 +599,6 @@ class EntryPathTest {
             start,
             assistantErrorWithMessage(id(3L), id(2L), "MODEL_FAILED", "down"),
             stopped));
-    // STOP turn 不可能误携 provider replay state：Entry 不变式只允许 replay state 出现在 ASSISTANT MESSAGE 上，
-    // 而 STOP turn 不接受任何 ASSISTANT MESSAGE。
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new Entry(
-                id(3L),
-                SESSION_ID,
-                id(2L),
-                new AssistantErrorPayload(
-                    new AssistantError(AssistantError.CANCELLED_CODE, "Cancelled by user"), null),
-                time(id(3L)),
-                sampleReplayState()));
     // 重复取消屏障。
     assertRejectsEntryPath(List.of(root, start, error, assistantError(id(4L), id(3L)), stopped));
     // outcome 必须是 STOPPED：COMPLETED / FAILED / CANCELLED 都不允许。
@@ -1439,14 +1421,6 @@ class EntryPathTest {
   private static Entry cancelBarrier(UUID id, UUID parentId) {
     return assistantErrorWithMessage(
         id, parentId, AssistantError.CANCELLED_CODE, "Cancelled by user");
-  }
-
-  private static ProviderReplayState sampleReplayState() {
-    return new ProviderReplayState(
-        ProviderReplayFormat.ANTHROPIC_MESSAGES,
-        new ProviderReplayAffinity(
-            ProviderType.ANTHROPIC, "anthropic", new UUID(0L, 9L), "claude-3-5-sonnet"),
-        JsonNodeFactory.instance.objectNode().put("k", "v"));
   }
 
   private static Entry modelAttemptFailure(UUID id, UUID parentId, int attempt) {

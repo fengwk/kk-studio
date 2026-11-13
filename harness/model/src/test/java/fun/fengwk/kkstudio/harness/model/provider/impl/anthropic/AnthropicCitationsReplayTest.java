@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -25,7 +24,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
@@ -103,18 +101,13 @@ class AnthropicCitationsReplayTest {
             MAPPER.readTree(
                 "{\"type\":\"document_location\",\"document_index\":0,\"cited_text\":\"is sunny\"}"));
 
-    ProviderReplayState replayState = completion.replayState();
-    assertNotNull(replayState);
-    JsonNode replayContent = replayState.payload().path("content");
-    assertEquals(1, replayContent.size());
-    assertEquals(expectedTextBlock, replayContent.get(0));
+    ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().getFirst();
+    assertEquals(
+        expectedTextBlock.get("citations"),
+        textBlock.providerBlockData().nativeFields().get("citations"));
 
     // 下一轮：citations 逐字段无损进入 wire
-    ProviderRequest nextRequest =
-        request(
-            List.of(
-                userMsg(),
-                assistantMsg(List.of(new ProviderTextBlock("Weather is sunny")), replayState)));
+    ProviderRequest nextRequest = request(List.of(userMsg(), assistantMsg(List.of(textBlock))));
     JsonNode assistantContent =
         wire(encoder.encode(nextRequest, descriptor)).path("messages").get(1).path("content");
     assertEquals(1, assistantContent.size());
@@ -148,15 +141,19 @@ class AnthropicCitationsReplayTest {
         "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":3}}");
     accumulator.handleEvent("message_stop", "{\"type\":\"message_stop\"}");
 
-    JsonNode content = accumulator.finish().replayState().payload().path("content");
-    assertEquals(2, content.size());
-    assertEquals("body", content.get(0).path("text").asString(""));
-    assertEquals(2, content.get(0).path("citations").size());
-    assertEquals("start", content.get(0).path("citations").get(0).path("cited_text").asString(""));
-    assertEquals("delta", content.get(0).path("citations").get(1).path("cited_text").asString(""));
-    assertEquals("plain", content.get(1).path("text").asString(""));
-    assertEquals(1, content.get(1).path("citations").size());
-    assertEquals("only", content.get(1).path("citations").get(0).path("cited_text").asString(""));
+    List<ProviderContentBlock> blocks = accumulator.finish().response().blocks();
+    assertEquals(2, blocks.size());
+    ProviderTextBlock first = (ProviderTextBlock) blocks.get(0);
+    JsonNode firstCitations = first.providerBlockData().nativeFields().path("citations");
+    assertEquals("body", first.text());
+    assertEquals(2, firstCitations.size());
+    assertEquals("start", firstCitations.get(0).path("cited_text").asString(""));
+    assertEquals("delta", firstCitations.get(1).path("cited_text").asString(""));
+    ProviderTextBlock second = (ProviderTextBlock) blocks.get(1);
+    JsonNode secondCitations = second.providerBlockData().nativeFields().path("citations");
+    assertEquals("plain", second.text());
+    assertEquals(1, secondCitations.size());
+    assertEquals("only", secondCitations.get(0).path("cited_text").asString(""));
   }
 
   /** 测试意图：citations_delta 的 citation 必须是对象；否则显式失败而不是累积损坏的 citation。 */
@@ -238,9 +235,8 @@ class AnthropicCitationsReplayTest {
     return new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("hi")));
   }
 
-  private static ProviderMessage assistantMsg(
-      List<ProviderContentBlock> blocks, ProviderReplayState replayState) {
-    return new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks, replayState);
+  private static ProviderMessage assistantMsg(List<ProviderContentBlock> blocks) {
+    return new ProviderMessage(ProviderMessageRole.ASSISTANT, blocks);
   }
 
   private static ModelDescriptor model() {

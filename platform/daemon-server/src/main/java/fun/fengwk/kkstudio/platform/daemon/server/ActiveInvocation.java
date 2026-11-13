@@ -40,8 +40,11 @@ final class ActiveInvocation implements EnvironmentCapabilityExecutionHandle {
   /** 最近一次发起递交 CANCEL 的连接代际；0 表示尚未发起。由 {@code this} 保护。 */
   private long cancelSentGeneration;
 
-  /** 本次调用名下的资源传输绑定（{@code transferId -> binding}），由 {@code this} 保护。 */
+  /** 本次调用名下的资源上传绑定（{@code transferId -> binding}），由 {@code this} 保护。 */
   final Map<UUID, TransferBinding> transfers = new LinkedHashMap<>();
+
+  /** 本次 invocation 唯一允许下载的归档（{@code transferId -> blobId}），由 {@code this} 保护。 */
+  final Map<UUID, UUID> downloadTransfers = new LinkedHashMap<>();
 
   ActiveInvocation(
       EnvironmentId environmentId,
@@ -97,7 +100,10 @@ final class ActiveInvocation implements EnvironmentCapabilityExecutionHandle {
   }
 
   void markTerminal() {
-    terminal.set(true);
+    synchronized (this) {
+      terminal.set(true);
+      downloadTransfers.clear();
+    }
   }
 
   boolean claimExit() {

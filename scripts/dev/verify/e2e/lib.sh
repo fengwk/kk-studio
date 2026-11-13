@@ -6,8 +6,7 @@
 # - 默认 backend=127.0.0.1:18081、frontend=127.0.0.1:5173、profile=e2e
 # - 使用 PostgreSQL durable 库；重启 backend 后由宿主 E2E runner 重新同步 provider credentials
 # - frontend Vite 代理必须指向当前 backend：API_PROXY_TARGET=http://$BACKEND_HOST:$BACKEND_PORT
-# - daemon 是 Node 产品：先 `npm --prefix daemon ci && npm --prefix daemon run build` 产出 `daemon/dist`，
-#   再由 bootstrap helper 用 Node 启动 `daemon/dist/main.js --config <daemon.json>`；没有 JVM/JAR/classpath
+# - Environment Daemon 使用 Go 1.27.4 构建的独立二进制；bootstrap helper 用它读取 daemon.json 启动。
 
 set -euo pipefail
 
@@ -63,9 +62,9 @@ if is_local_minio_endpoint; then
 else
   STORAGE_S3_BUCKET=${KK_STUDIO_STORAGE_S3_BUCKET:-kk-studio-e2e-matrix}
 fi
-DAEMON_DIST=${DAEMON_DIST:-"$REPO_ROOT/daemon/dist"}
-# 开发 E2E 用宿主 Node 运行编译产物；发行验收使用归档自带的冻结 Node（由 smoke-archive 负责）。
-DAEMON_NODE=${DAEMON_NODE:-}
+DAEMON_DIST=${DAEMON_DIST:-"$WORK_DIR/daemon-distribution"}
+DAEMON_BINARY=${DAEMON_BINARY:-"$DAEMON_DIST/kk-studio-daemon"}
+GO_BIN=${GO_BIN:-/usr/local/opt/go/bin/go}
 
 # E2E 拥有固定专用的独立数据库与 S3 bucket，绝不触碰开发应用的 kk_studio_e2e 或 kk_studio
 E2E_DEDICATED_DATABASE="kk_studio_e2e_matrix"
@@ -180,8 +179,7 @@ kill_port() {
 
 kill_daemon() {
   local pids
-  # daemon 进程命令行携带编译入口 `$DAEMON_DIST/main.js`，按该路径匹配。
-  pids=$(pgrep -f -- "$DAEMON_DIST/main.js" || true)
+  pids=$(pgrep -f -- "$DAEMON_BINARY" || true)
   if [ -n "$pids" ]; then
     step "Stopping daemon ($pids)"
     # shellcheck disable=SC2086
@@ -200,14 +198,19 @@ package_backend() {
 }
 
 package_daemon() {
-  mkdir -p "$WORK_DIR"
-  step "Building the Node daemon (npm ci + build -> $DAEMON_DIST, no JVM)"
+  mkdir -p "$DAEMON_DIST"
+  step "Building the Go 1.27.4 daemon ($DAEMON_BINARY)"
+  [ -x "$GO_BIN" ] || die "Go compiler not executable: $GO_BIN"
+  local version
+  version=$("$GO_BIN" version)
+  [[ "$version" == *"go1.27.4"* ]] || die "Go 1.27.4 is required; found: $version"
   (
-    cd "$REPO_ROOT"
-    npm --prefix daemon ci
-    npm --prefix daemon run build
+    cd "$REPO_ROOT/daemon-go"
+    CGO_ENABLED=0 "$GO_BIN" build -o "$DAEMON_BINARY" ./cmd/kk-studio-daemon
   )
-  [ -s "$DAEMON_DIST/main.js" ] || die "daemon entry missing: $DAEMON_DIST/main.js"
+  rm -rf "$DAEMON_DIST/ide-extension"
+  cp -R "$REPO_ROOT/daemon-go/ide-extension" "$DAEMON_DIST/ide-extension"
+  [ -x "$DAEMON_BINARY" ] || die "Go daemon binary missing: $DAEMON_BINARY"
 }
 
 ensure_s3_storage() {
@@ -366,8 +369,7 @@ start_daemon() {
     DAEMON_ROOT="$DAEMON_ROOT" \
     DAEMON_STUDIO_URL="http://$BACKEND_HOST:$BACKEND_PORT" \
     "${environment_selector[@]}" \
-    DAEMON_DIST="$DAEMON_DIST" \
-    DAEMON_NODE="$DAEMON_NODE" \
+    DAEMON_BINARY="$DAEMON_BINARY" \
     bash "$SCRIPT_DIR/lib/daemon-bootstrap.sh" \
     >"$WORK_DIR/daemon.log" 2>&1 &
   echo $! >"$WORK_DIR/daemon.pid"

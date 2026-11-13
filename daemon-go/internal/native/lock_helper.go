@@ -19,7 +19,19 @@ var lockTimeoutPattern = regexp.MustCompile(`^[0-9]{1,4}$`)
 // LockHelperMain executes the install-lock internal subcommand and returns its process exit code.
 func LockHelperMain(args []string) int { return runLockHelper(args, os.Stdin, os.Stdout, os.Stderr) }
 
+type lockHelperAPI struct {
+	acquire func(string, string) (DirectoryLock, error)
+	wait    func(context.Context, string, string, time.Duration) error
+}
+
 func runLockHelper(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return runLockHelperWithAPI(args, stdin, stdout, stderr, lockHelperAPI{
+		acquire: AcquireDirectoryLock,
+		wait:    WaitForDirectoryLock,
+	})
+}
+
+func runLockHelperWithAPI(args []string, stdin io.Reader, stdout, stderr io.Writer, api lockHelperAPI) int {
 	usage := func() int { _, _ = io.WriteString(stderr, lockHelperUsage); return 2 }
 	if len(args) < 2 || !filepath.IsAbs(args[1]) || hasControl(args[1]) {
 		return usage()
@@ -29,7 +41,7 @@ func runLockHelper(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		if len(args) != 2 {
 			return usage()
 		}
-		lock, err := AcquireDirectoryLock(args[1], InstallLockFileName)
+		lock, err := api.acquire(args[1], InstallLockFileName)
 		if err != nil {
 			if isLockBusy(err) {
 				_, _ = io.WriteString(stderr, "install operation lock is busy\n")
@@ -58,7 +70,7 @@ func runLockHelper(args []string, stdin io.Reader, stdout, stderr io.Writer) int
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(seconds)*time.Second)
 		defer cancel()
-		err = WaitForDirectoryLock(ctx, args[1], DaemonLockFileName, time.Duration(seconds)*time.Second)
+		err = api.wait(ctx, args[1], DaemonLockFileName, time.Duration(seconds)*time.Second)
 		if err == nil {
 			return 0
 		}

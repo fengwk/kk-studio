@@ -870,7 +870,8 @@ func helperMainWithSubreaper(args []string, goos string, enableSubreaper func() 
 			return convergeSessionExcept(context.Background(), os.Getpid(), helperGracePeriod, os.Getpid())
 		},
 		func() error {
-			return convergeAdoptedChildren(context.Background(), os.Getpid(), helperGracePeriod, nil)
+			// The command PID is exclusively owned by exec.Cmd.Wait; never let Wait4 race it.
+			return convergeAdoptedChildren(context.Background(), os.Getpid(), helperGracePeriod, []int{command.Process.Pid})
 		},
 		func(value string) error { return publishText(args[0], cleanupFile, value) },
 		func() { publishQuietly(args[0], errorFile, "helper-posix-failure") },

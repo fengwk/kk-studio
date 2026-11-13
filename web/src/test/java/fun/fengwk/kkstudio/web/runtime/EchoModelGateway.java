@@ -41,7 +41,7 @@ public final class EchoModelGateway extends SingleModelGateway {
       public Outcome run(Sink sink) {
         // 脚本化响应是同步内存交付：没有外部执行需要中断或释放。
         requests.add(request);
-        return new Succeeded(new ProviderCompletion(respond(request), null));
+        return new Succeeded(new ProviderCompletion(respond(request)));
       }
 
       @Override

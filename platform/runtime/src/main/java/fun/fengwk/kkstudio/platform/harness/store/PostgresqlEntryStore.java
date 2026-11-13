@@ -40,16 +40,16 @@ final class PostgresqlEntryStore implements EntryStore {
   private static final String LOAD_ENTRY_PATH =
       """
       with recursive entry_path as (
-          select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, 1 as depth
+          select id, session_id, parent_entry_id, entry_type, payload, created_at, 1 as depth
           from harness_entry
           where id = ?
           union all
-          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, e.provider_replay_state, ep.depth + 1
+          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, ep.depth + 1
           from harness_entry e
           join entry_path ep on e.id = ep.parent_entry_id
           where ep.parent_entry_id is not null
       )
-      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
+      select id, session_id, parent_entry_id, entry_type, payload, created_at
       from entry_path
       order by depth desc
       """;
@@ -62,22 +62,22 @@ final class PostgresqlEntryStore implements EntryStore {
   private static final String LOAD_ENTRY_SLICE =
       """
       with recursive entry_slice as (
-          select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, 1 as depth
+          select id, session_id, parent_entry_id, entry_type, payload, created_at, 1 as depth
           from harness_entry
           where id = ?
           union all
           select parent.id, parent.session_id, parent.parent_entry_id, parent.entry_type, parent.payload,
-                 parent.created_at, parent.provider_replay_state, es.depth + 1
+                 parent.created_at, es.depth + 1
           from entry_slice es
           join lateral (
-              select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
+              select id, session_id, parent_entry_id, entry_type, payload, created_at
               from harness_entry
               where id = es.parent_entry_id
           ) parent on true
           where es.id is distinct from ?::uuid
             and es.entry_type <> 'ROOT'
       )
-      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
+      select id, session_id, parent_entry_id, entry_type, payload, created_at
       from entry_slice
       order by depth desc
       """;
@@ -92,16 +92,16 @@ final class PostgresqlEntryStore implements EntryStore {
   private static final String LOAD_BRANCH_SETTINGS =
       """
       with recursive branch_settings_path as (
-          select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state, 0 as depth
+          select id, session_id, parent_entry_id, entry_type, payload, created_at, 0 as depth
           from harness_entry
           where id = ?
           union all
-          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, e.provider_replay_state, bsp.depth + 1
+          select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, bsp.depth + 1
           from harness_entry e
           join branch_settings_path bsp on e.id = bsp.parent_entry_id
           where bsp.parent_entry_id is not null
       )
-      select id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
+      select id, session_id, parent_entry_id, entry_type, payload, created_at
       from branch_settings_path
       where depth = 0
          or entry_type = 'ROOT'
@@ -183,7 +183,7 @@ final class PostgresqlEntryStore implements EntryStore {
              or a.settings_id is null
              or (a.needed_ref is not null and a.reference_id is null)
       )
-      select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at, e.provider_replay_state
+      select e.id, e.session_id, e.parent_entry_id, e.entry_type, e.payload, e.created_at
       from current_anchor a
       join harness_entry e on e.id = a.id
       where a.depth = 0
@@ -306,23 +306,16 @@ final class PostgresqlEntryStore implements EntryStore {
     tx.updateJdbc(
         """
         insert into harness_entry (
-            id, session_id, parent_entry_id, entry_type, payload, created_at, provider_replay_state
-        ) values (?, ?, ?, ?, cast(? as jsonb), ?, cast(? as jsonb))
+            id, session_id, parent_entry_id, entry_type, payload, created_at
+        ) values (?, ?, ?, ?, cast(? as jsonb), ?)
         """,
         entry.id(),
         entry.sessionId(),
         entry.parentEntryId(),
         entry.payload().type().name(),
         PostgresqlHarnessRows.ENTRY_PAYLOADS.encode(entry.payload()),
-        PostgresqlHarnessRows.timestamp(entry.createdAt()),
-        encodeEntryProviderReplayState(entry));
+        PostgresqlHarnessRows.timestamp(entry.createdAt()));
     tx.entryPathCache().put(entry.id(), candidatePath);
-  }
-
-  private static String encodeEntryProviderReplayState(Entry entry) {
-    return entry.providerReplayState() == null
-        ? null
-        : PostgresqlHarnessRows.PROVIDER_REPLAY_STATES.encode(entry.providerReplayState());
   }
 
   @Override

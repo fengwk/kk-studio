@@ -1,9 +1,12 @@
 package native
 
 import (
+	"bufio"
 	"bytes"
+	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -24,6 +27,17 @@ func (b *synchronizedBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	return b.value.String()
+}
+
+type releaseFailureDirectoryLock struct{}
+
+func (releaseFailureDirectoryLock) Close() error { return errors.New("injected release failure") }
+
+func lockHelperReleaseFailureFixture(args []string) int {
+	return runLockHelperWithAPI(args, os.Stdin, os.Stdout, os.Stderr, lockHelperAPI{
+		acquire: func(string, string) (DirectoryLock, error) { return releaseFailureDirectoryLock{}, nil },
+		wait:    WaitForDirectoryLock,
+	})
 }
 
 // NAT-T-013, NAT-T-014
@@ -124,6 +138,79 @@ func TestLockCommand_WaitResults(t *testing.T) {
 }
 
 // NAT-T-019 verifies malformed helper commands share the fixed usage error.
+// NAT-N-002/F-016 verifies the executable process contract, including stdin EOF, exit codes, and fixed errors.
+func TestLockCommand_InternalSubcommandProcessCompatibility(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := ensurePrivateDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(os.Args[0], "__lock-helper", "hold", dir)
+	stdin, err := command.StdinPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stdout, err := command.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := command.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := command.Start(); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(stdout)
+	if line, err := reader.ReadString('\n'); err != nil || line != "locked\n" {
+		_ = stdin.Close()
+		_ = command.Wait()
+		t.Fatalf("hold process stdout = %q, %v", line, err)
+	}
+	if _, err := AcquireDirectoryLock(dir, InstallLockFileName); !isLockBusy(err) {
+		t.Fatalf("process-held install lock = %v, want busy", err)
+	}
+	if err := stdin.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if remainder, err := io.ReadAll(reader); err != nil || len(remainder) != 0 {
+		t.Fatalf("hold process trailing stdout = %q, %v", remainder, err)
+	}
+	if output, err := io.ReadAll(stderr); err != nil || len(output) != 0 {
+		t.Fatalf("hold process stderr = %q, %v", output, err)
+	}
+	if err := command.Wait(); err != nil {
+		t.Fatalf("hold process exit = %v", err)
+	}
+	if output, err := exec.Command(os.Args[0], "__lock-helper", "wait", dir, "0").CombinedOutput(); err != nil || len(output) != 0 {
+		t.Fatalf("released wait process = %v, output %q", err, output)
+	}
+
+	lock, err := AcquireDirectoryLock(dir, DaemonLockFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(os.Args[0], "__lock-helper", "wait", dir, "0").CombinedOutput(); err == nil || err.(*exec.ExitError).ExitCode() != 76 || string(output) != "daemon runtime lock wait timed out\n" {
+		t.Fatalf("timeout wait process = %v, output %q", err, output)
+	}
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	invalidDir := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(invalidDir, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := exec.Command(os.Args[0], "__lock-helper", "hold", invalidDir).CombinedOutput(); err == nil || err.(*exec.ExitError).ExitCode() != 77 || string(output) != "cannot acquire the install operation lock\n" {
+		t.Fatalf("acquire failure process = %v, output %q", err, output)
+	}
+	if output, err := exec.Command(os.Args[0], "__lock-helper", "wait", invalidDir, "1").CombinedOutput(); err == nil || err.(*exec.ExitError).ExitCode() != 77 || string(output) != "cannot inspect the daemon runtime lock\n" {
+		t.Fatalf("wait inspection failure process = %v, output %q", err, output)
+	}
+	if output, err := exec.Command(os.Args[0], "__lock-helper-release-failure", "hold", dir).CombinedOutput(); err == nil || err.(*exec.ExitError).ExitCode() != 77 || string(output) != "locked\ncannot release the install operation lock\n" {
+		t.Fatalf("release failure process = %v, output %q", err, output)
+	}
+}
+
 func TestLockCommand_Usage(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	for _, testCase := range []struct {

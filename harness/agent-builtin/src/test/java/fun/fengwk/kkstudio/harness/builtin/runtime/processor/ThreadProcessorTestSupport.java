@@ -65,7 +65,6 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -576,31 +575,6 @@ public final class ThreadProcessorTestSupport {
       ModelRequestSpec requestSpec,
       ProviderResponse response,
       ModelInvocationError error) {
-    return seedModelInvocation(
-        store,
-        threadId,
-        turnStartEntryId,
-        basisEntryId,
-        status,
-        requestSpec,
-        response,
-        error,
-        null);
-  }
-
-  static UUID seedModelInvocation(
-      InMemoryBuiltinHarnessStore store,
-      UUID threadId,
-      UUID turnStartEntryId,
-      UUID basisEntryId,
-      ModelInvocationStatus status,
-      ModelRequestSpec requestSpec,
-      ProviderResponse response,
-      ModelInvocationError error,
-      ProviderReplayState replayState) {
-    if (replayState != null && status != ModelInvocationStatus.SUCCEEDED) {
-      throw new IllegalArgumentException("provider replay state requires SUCCEEDED status");
-    }
     UUID modelId =
         store.transaction(
             tx -> {
@@ -629,7 +603,7 @@ public final class ThreadProcessorTestSupport {
       case READY -> {}
       case SUCCEEDED -> {
         transitionModel(store, modelId, m -> m.markRunning(NOW));
-        transitionModel(store, modelId, m -> m.succeed(response, null, replayState, NOW));
+        transitionModel(store, modelId, m -> m.succeed(response, null, NOW));
       }
       case FAILED -> transitionModel(store, modelId, m -> m.fail(error, NOW));
       case CANCELLED -> transitionModel(store, modelId, m -> m.cancel(error, NOW));
@@ -809,7 +783,6 @@ public final class ThreadProcessorTestSupport {
                 model.failedAttempts(),
                 model.createdAt(),
                 updatedAt,
-                model.providerReplayState(),
                 model.groupProgress(),
                 model.requestedAt()));
   }

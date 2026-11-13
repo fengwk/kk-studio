@@ -1,4 +1,4 @@
-/** Permanent guards for E2E clean package, runtime work directory, and Node daemon contracts. */
+/** Permanent guards for E2E clean package, runtime work directory, and Go daemon contracts. */
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
@@ -59,19 +59,19 @@ function runE2eBackendMaven(offline) {
   })
 }
 
-// Deleted classes must not survive a script-requested rebuild, and the daemon contract is now Node.
+// Deleted build products must not survive rebuilds, and the daemon contract is Go.
 
 test('test intent: the E2E backend rebuild uses a clean package', () => {
   assert.match(functionBody(E2E_LIB, 'package_backend'), /(?:\bmvn\b|\brun_maven\b).*clean\b\s+\bpackage\b/)
 })
 
-test('test intent: the daemon rebuild installs and builds the Node product', () => {
-  // Daemon 重建走 npm ci + build（无 JVM），并显式产出编译入口。
+test('test intent: the daemon rebuild compiles the Go product and stages its extension', () => {
   const body = functionBody(E2E_LIB, 'package_daemon')
-  assert.ok(body.includes('npm --prefix daemon ci'))
-  assert.ok(body.includes('npm --prefix daemon run build'))
+  assert.ok(body.includes('Go 1.27.4'))
+  assert.ok(body.includes('CGO_ENABLED=0'))
+  assert.ok(body.includes('"$GO_BIN" build -o "$DAEMON_BINARY" ./cmd/kk-studio-daemon'))
+  assert.ok(body.includes('daemon-go/ide-extension'))
   assert.ok(!body.includes('mvn'))
-  assert.ok(body.includes('$DAEMON_DIST/main.js'))
 })
 
 test('test intent: the E2E runtime work directory survives maven clean', () => {
@@ -98,27 +98,24 @@ test('test intent: E2E Maven is online by default and offline only by opt-in', (
   assert.ok(!daemonBody.includes('E2E_MAVEN_OFFLINE'))
 })
 
-test('test intent: the daemon distribution is a Node entry without JVM or classpath machinery', () => {
-  // Daemon 是 Node 产品：没有 JAR/lib/classpath，只由 Node 启动编译入口。
+test('test intent: the Go daemon distribution has no JVM or classpath machinery', () => {
   const lib = readText(E2E_LIB)
-  assert.ok(lib.includes('DAEMON_DIST=${DAEMON_DIST:-"$REPO_ROOT/daemon/dist"}'))
+  assert.ok(lib.includes('DAEMON_BINARY=${DAEMON_BINARY:-"$DAEMON_DIST/kk-studio-daemon"}'))
   for (const machinery of ['dependency:build-classpath', 'dependency:copy-dependencies']) {
     assert.ok(!lib.includes(machinery), machinery)
   }
 
-  // 启动逻辑集中在 bootstrap helper：daemon 只通过 `node <dist>/main.js --config` 启动。
   const bootstrap = readText(E2E_DAEMON_BOOTSTRAP)
-  assert.ok(bootstrap.includes('exec "$node_bin" "$entry" --config "$config_file"'))
+  assert.ok(bootstrap.includes('exec "$daemon_binary" --config "$config_file"'))
 
   const startDaemon = functionBody(E2E_LIB, 'start_daemon')
   assert.ok(startDaemon.includes('daemon-bootstrap.sh'))
-  assert.ok(startDaemon.includes('DAEMON_DIST="$DAEMON_DIST"'))
+  assert.ok(startDaemon.includes('DAEMON_BINARY="$DAEMON_BINARY"'))
   assert.ok(!startDaemon.includes('JAVA_HOME'))
 
-  // 进程命令行里只有编译入口，所以 `kill_daemon` 必须匹配配置的 `$DAEMON_DIST/main.js`。
   const killDaemon = functionBody(E2E_LIB, 'kill_daemon')
   assert.ok(killDaemon.includes('pgrep -f --'))
-  assert.ok(killDaemon.includes('$DAEMON_DIST/main.js'))
+  assert.ok(killDaemon.includes('$DAEMON_BINARY'))
 })
 
 /** Stand-in for the daemon: any process whose argv carries the given path. */
@@ -141,14 +138,14 @@ test('test intent: kill_daemon terminates the configured entry process only', as
   const temporary = mkdtempSync(path.join(tmpdir(), 'kk-kill-daemon-'))
   const dist = path.join(temporary, 'dist')
   mkdirSync(dist)
-  const entry = path.join(dist, 'main.js')
-  writeFileSync(entry, '// daemon entry\n')
-  const daemon = standIn(entry)
-  const bystander = standIn(path.join(temporary, 'other-main.js'))
+  const daemonBinary = path.join(dist, 'kk-studio-daemon')
+  writeFileSync(daemonBinary, '#!/bin/bash\n')
+  const daemon = standIn(daemonBinary)
+  const bystander = standIn(path.join(temporary, 'other-daemon'))
   try {
     // Give both children time to start so their argv is visible to pgrep.
     await new Promise((resolve) => setTimeout(resolve, 500))
-    const result = runBash(`source ${E2E_LIB}\nkill_daemon\n`, { env: { ...process.env, DAEMON_DIST: dist } })
+    const result = runBash(`source ${E2E_LIB}\nkill_daemon\n`, { env: { ...process.env, DAEMON_BINARY: daemonBinary } })
     assert.equal(result.status, 0, output(result))
     assert.ok(await exited(daemon, 30_000), 'the process holding the configured entry path must be terminated')
     assert.equal(bystander.exitCode, null, 'a process that does not carry the configured entry path must survive')

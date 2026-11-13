@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
@@ -196,7 +195,10 @@ class GeminiModelProviderIntegrationTest {
     assertNotNull(completionRef.get());
     assertEquals("Hello world!", completionRef.get().response().text());
     assertEquals(GenerationStopReason.COMPLETE, completionRef.get().response().stopReason());
-    assertEquals(ProviderReplayFormat.GEMINI_CONTENT, completionRef.get().replayState().format());
+    assertEquals(1, completionRef.get().response().blocks().size());
+    assertEquals(
+        "Hello world!",
+        ((ProviderTextBlock) completionRef.get().response().blocks().get(0)).text());
 
     // 验证事件流分发
     List<ProviderStreamEvent.TextDelta> textEvents =

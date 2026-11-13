@@ -65,6 +65,7 @@ export interface SystemSettingsStorageMediaDraft {
   thumbnailMaxDimension: DraftNumericField
   thumbnailQuality: DraftNumericField
   imageTier: string
+  maxImagesPerRequest: DraftNumericField
   temporaryResourceTtlSeconds: DraftNumericField
   temporaryResourceCleanupIntervalSeconds: DraftNumericField
 }
@@ -143,6 +144,7 @@ export function settingsSectionsToDraft(dto: SystemSettingsSectionsDTO): SystemS
       thumbnailMaxDimension: String(dto.storageMedia.thumbnailMaxDimension),
       thumbnailQuality: String(dto.storageMedia.thumbnailQuality),
       imageTier: dto.storageMedia.imageTier,
+      maxImagesPerRequest: String(dto.storageMedia.maxImagesPerRequest),
       temporaryResourceTtlSeconds: dto.storageMedia.temporaryResourceTtlSeconds,
       temporaryResourceCleanupIntervalSeconds:
         dto.storageMedia.temporaryResourceCleanupIntervalSeconds,
@@ -279,6 +281,7 @@ export function assembleSettingsUpdate(
       thumbnailMaxDimension: requiredInt(draft.storageMedia.thumbnailMaxDimension),
       thumbnailQuality: requiredInt(draft.storageMedia.thumbnailQuality),
       imageTier: draft.storageMedia.imageTier,
+      maxImagesPerRequest: requiredInt(draft.storageMedia.maxImagesPerRequest),
       temporaryResourceTtlSeconds: requiredLong(draft.storageMedia.temporaryResourceTtlSeconds),
       temporaryResourceCleanupIntervalSeconds: requiredLong(
         draft.storageMedia.temporaryResourceCleanupIntervalSeconds,

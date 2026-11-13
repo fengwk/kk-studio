@@ -40,13 +40,13 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 ## Entry Tree 与回合文法
 
-`Entry` 是不可变记录 `(id, sessionId, parentEntryId, payload, createdAt, providerReplayState)`，类型是封闭集合 [`EntryType`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/history/EntryType.java)：
+`Entry` 是不可变记录 `(id, sessionId, parentEntryId, payload, createdAt)`，类型是封闭集合 [`EntryType`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/history/EntryType.java)：
 
 | 类型 | 语义 |
 | --- | --- |
 | `ROOT` | 唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/BranchSettings.java)：agent、[`ExecutionSelection`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/ExecutionSelection.java)（`driver` + `settings` JSON 对象）与可空的 Environment name |
 | `TURN_START` | 打开回合，冻结完整 settings、实际执行配置 `executedSelection`、owner Thread、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算 |
-| `MESSAGE` | USER / ASSISTANT / TOOL 消息；只有 ASSISTANT 消息可以携带 `providerReplayState` |
+| `MESSAGE` | USER / ASSISTANT / TOOL 消息；assistant 原生 Provider 数据保存在各自内容块上 |
 | `CUSTOM_MESSAGE` | 可信调用方注入的消息 |
 | `MODEL_ATTEMPT_FAILURE` | 与 Provider 无关的重试审计 |
 | `ASSISTANT_ERROR` / `ASSISTANT_ABORTED` | 异常与中止屏障 |

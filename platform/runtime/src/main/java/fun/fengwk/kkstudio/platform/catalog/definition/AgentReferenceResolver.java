@@ -113,6 +113,7 @@ public final class AgentReferenceResolver {
       return names;
     }
     List<String> missing = new ArrayList<>();
+    Map<String, String> packagesBySkillName = new LinkedHashMap<>();
     for (SkillRefDTO ref : skills) {
       String identity = ref == null ? "null" : ref.getPackageName() + "/" + ref.getName();
       SkillPackage pkg =
@@ -122,6 +123,17 @@ public final class AgentReferenceResolver {
           missing.add(identity);
         }
         continue;
+      }
+      String previousPackage = packagesBySkillName.putIfAbsent(ref.getName(), ref.getPackageName());
+      if (previousPackage != null && !previousPackage.equals(ref.getPackageName())) {
+        throw DomainException.validation(
+            SKILL_RESOURCE,
+            "agent skill names must be unique: "
+                + ref.getName()
+                + " is configured from both "
+                + previousPackage
+                + " and "
+                + ref.getPackageName());
       }
       names.computeIfAbsent(ref.getPackageName(), ignored -> new TreeSet<>()).add(ref.getName());
     }

@@ -376,10 +376,13 @@ frozen=/opt/kk-studio/daemon/runtime/code-server/lib/node
 [ -x "$frozen" ] || { echo "ERROR: frozen runtime is missing: $frozen" >&2; exit 1; }
 [ "$(readlink -f "$(command -v node)")" = "$(readlink -f "$frozen")" ] \
   || { echo "ERROR: node on PATH is not the frozen runtime" >&2; exit 1; }
-[ -f /opt/kk-studio/daemon/main.js ] \
-  || { echo "ERROR: daemon entry is missing: /opt/kk-studio/daemon/main.js" >&2; exit 1; }
+daemon=/opt/kk-studio/daemon/kk-studio-daemon
+[ -x "$daemon" ] || { echo "ERROR: Go daemon executable is missing: $daemon" >&2; exit 1; }
+[ -f /opt/kk-studio/daemon/runtime/code-server/out/node/entry.js ] \
+  || { echo "ERROR: code-server runtime entry is missing" >&2; exit 1; }
+"$daemon" --check-config /workspace/.kk-studio/daemon.json
 command -v java >/dev/null 2>&1 && { echo "ERROR: the daemon image must not ship a JRE" >&2; exit 1; }
-printf "rg=absent fd=absent jre=absent workspace_writable=true\n"
+printf "go-daemon=ready rg=absent fd=absent jre=absent workspace_writable=true\n"
 node --version
 npm --version
 git --version
@@ -394,18 +397,10 @@ smoke_tools() {
   require_cmd docker
   local container_id
   container_id=$(daemon_container_id)
-  step "running direct Node coding-tool smoke inside the Daemon image"
-  # 镜像里唯一的 Node 就是发行目录冻结的运行时（PATH 上的 node 指向它）；smoke 直接
-  # 调用该发行目录里打包好的 coding/native 模块，因此验证的是真实发行物而不是源码。
+  step "running Go daemon CLI smoke inside the Daemon image"
   docker exec --interactive --user 10001:10001 \
-    --env KK_STUDIO_DAEMON_DIST=/opt/kk-studio/daemon \
-    "$container_id" bash -c '
-set -euo pipefail
-tmp=$(mktemp -d)
-trap '"'"'rm -rf "$tmp"'"'"' EXIT
-cat >"$tmp/NativeToolSmoke.mjs"
-node "$tmp/NativeToolSmoke.mjs"
-' <"$REPO_ROOT/scripts/dev/verify/reliability/fixtures/NativeToolSmoke.mjs"
+    "$container_id" /opt/kk-studio/daemon/kk-studio-daemon \
+    --check-config /workspace/.kk-studio/daemon.json
 }
 
 safe_status() {

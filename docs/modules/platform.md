@@ -478,7 +478,7 @@ ACK。远端结果的 call id 映射回原模型 call id。审批前 edit 预览
 类型与字节不符直接失败。媒体模态在 TOOL 与 USER 位置都不支持时对全部模态显式失败；仅 USER 普通内容位置的非图片保留说明文本回退。
 原生推理回放与协议请求上限见 [Harness Model](harness-model.md)。
 
-统一 `read` 按 path 路由。受管 Blob 必须由执行上下文中的 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用 `TURN_START` 冻结的消费者媒体能力与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，受管 Blob 流扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；NUL、畸形代理对与解码错误按看似二进制拒绝。Daemon 侧本地实现是 [`daemon/src/coding/text.ts`](../../daemon/src/coding/text.ts)，检测到窗口外仍有内容后停止扫描，因此窗口后的编码错误不会影响当前读取。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
+统一 `read` 按 path 路由。受管 Blob 必须由执行上下文中的 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用 `TURN_START` 冻结的消费者媒体能力与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，受管 Blob 流扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；NUL、畸形代理对与解码错误按看似二进制拒绝。Daemon 侧本地实现是 [`daemon-go/internal/coding/text.go`](../../daemon-go/internal/coding/text.go)，检测到窗口外仍有内容后停止扫描，因此窗口后的编码错误不会影响当前读取。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
 
 结构化 Debug 区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`，排除 credential
 与 Base64 正文。公开的只读入口为 Thread 模型请求调试与历史 Provider 请求重建，
@@ -506,12 +506,12 @@ retain/release 加入调用方事务；引用减至零时切为 DELETING，后�
 HTTP 边界是 [`StorageController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/http/StorageController.java)，
 挂在 `/api/platform/storage`：`POST /uploads` 返回 201，`POST /uploads/{uploadId}/complete` 与两个 blob URL 端点返回 200，
 `DELETE /uploads/{uploadId}` 返回 204；`{uploadId}`、`{blobId}` 是类型化 UUID。上传响应是 `type` 判别的 PENDING/READY
-联合：PENDING 携带 `presignedPut`，READY 只携带 `blobId`；两者都带响应时刻的 `expiresAt`（Instant）。
+联合：PENDING 携带 `presignedPut`，READY 携带 `blobId`；两者都回显可空图片事实与响应时刻的 `expiresAt`（Instant）。
 blob URL 只暴露 `method`、`url`、必须回传的 `headers`、`expiresAt`、权威 `mediaType`/`sizeBytes`，不含 bucket 或对象 key。
 DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/dto/)。
 
-上传使用 reserve → 浏览器 PUT → complete。complete 在专用会话级 upload advisory lock
-内做事务外 checksum HEAD、媒体 probe 与 copy，再短事务绑定 Blob。
+上传使用 reserve → 浏览器 PUT → complete。图片 reserve 的 `format` 是已存储字节的 MIME subtype；`originalWidth` / `originalHeight` 是缩放前尺寸，`storedWidth` / `storedHeight` 是 PUT 字节的实际尺寸。四类图片事实一起持久化并在 PENDING/READY 响应中原样返回；reserve 对图片要求全部这些事实，complete 信任它们，不再探测或缩放用户上传的图片；非图片不发送这些字段。服务端 stage 使用独立路径，并可为其图片内容生成媒体事实。
+complete 在专用会话级 upload advisory lock 内做事务外 checksum HEAD 与 copy，再短事务绑定 Blob；
 上传对象大小或 checksum 不匹配、checksum 不可用等存储校验失败以 `conflict` 返回，
 稳定 `reason` 为 `STORAGE_VERIFICATION`（HTTP 409）。
 服务端 `stage` 有界落盘、计算摘要，复用上传生命周期。清理先取得同一操作锁、
@@ -523,7 +523,9 @@ DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fen
 
 [`storage/media`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/media/) 在上传确认后用 ffprobe 补充权威媒体事实、
 用 ffmpeg 生成 webp 预览；探针失败时退回 HEAD 元数据，非媒体内容的上传契约不受影响。可执行文件与临时目录由
-`kk-studio.storage.media` 配置。
+`kk-studio.storage.media` 配置。用户上传的已缩放图片将原始尺寸与存储尺寸保存在 durable Resource 中，Provider 读取时直接发送存储字节。图片前的英文标签包含 `resource://files/<uuid>`、原始尺寸和显示尺寸；仅当图像实际缩放时提示将坐标映射回原图。插件原图保持不变；首次需要缩放时按原图与档位生成独立 Blob，并在 `storage_image_model_view` 持久化原图、档位、模型视图 Blob 与尺寸。模型视图由该关联持有引用，原图最后一个引用释放时同事务删除关联并释放模型视图。被移到用户消息的工具图片以 `Tool call <toolCallId> image:` 标出来源。
+
+`storageMedia.maxImagesPerRequest` 默认 20。接受新用户消息时，图片数量取用户设置与所选模型协议已知上限的较小值；超出的图片在写入历史前截去，并附加模型可见的英文说明。该限制只处理当前新消息，不删减历史中的图片；跨历史累计超限由压缩流程处理。Provider attempt 读取缓存权重总计 100 MiB、单项最多 8 MiB，只按容量淘汰，不按时间过期；持久模型视图不会因缓存淘汰而重算。
 
 Tool 结果先经过无副作用 plan 与硬限校验，再外部化 Binary/Resource。
 普通文本内联预算 50 KiB / 2000 行，可信内置 read 为 320 KiB / 2020 行。
@@ -549,7 +551,7 @@ Environment 的 name 创建后不可变，UUID 用于路由；`environment_conne
 `environmentId + ownerNodeId + leaseToken` 围栏保存当前路由和租约。主动释放与零宽限期断线把
 `lease_until` 截断到语句时刻的毫秒边界，重复操作立即被围栏拒绝，其他节点可立即接管。
 READY 更新 `ready_metadata`：Daemon 上报的 `daemonVersion`（生产进程取自
-[`config.ts`](../../daemon/src/config.ts) 的 `DAEMON_VERSION`）与 `HostInfo`（OS、架构、时区、进程用户、
+[`version.go`](../../daemon-go/internal/config/version.go) 的 `DaemonVersion`）与 `HostInfo`（OS、架构、时区、进程用户、
 HOME、临时目录），断线保留最后已接受的 metadata；`daemonVersion` 与 Environment 的 CAS 配置版本是两个不同事实。
 连接状态与运维事件按 owner/lease fence 写回；事件窗口有界并去敏。
 

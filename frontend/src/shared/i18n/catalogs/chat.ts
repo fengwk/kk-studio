@@ -526,6 +526,14 @@ export const chatCatalog = {
     'en-US': 'Image resolution for {{name}}',
     'zh-CN': '{{name}} 图片清晰度',
   },
+  'ai.runtime.composer.imageTierHelp': {
+    'en-US': 'The image is scaled to this size before upload.',
+    'zh-CN': '图片会在上传前缩放到所选尺寸。',
+  },
+  'ai.runtime.composer.imageTierLoading': {
+    'en-US': 'Loading…',
+    'zh-CN': '读取中…',
+  },
   'ai.runtime.composer.tierOriginal': {
     'en-US': 'Original',
     'zh-CN': '原图',

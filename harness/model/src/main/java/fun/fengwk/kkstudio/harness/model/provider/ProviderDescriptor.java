@@ -38,8 +38,8 @@ public record ProviderDescriptor(
     this(providerName, type, endpoint, modelCallTimeoutPolicy, ZERO_UUID);
   }
 
-  /** 以真实 wire 模型标识构造 replay affinity。 */
+  /** 以真实 wire 模型标识构造回放判定所需的 Provider 身份。 */
   public ProviderReplayAffinity affinity(String modelId) {
-    return new ProviderReplayAffinity(type, providerName, connectionGenerationId, modelId);
+    return new ProviderReplayAffinity(type, providerName, modelId);
   }
 }

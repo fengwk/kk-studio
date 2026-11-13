@@ -1,14 +1,23 @@
 name: daemon-go-ci
 
 on:
+  workflow_call:
   push:
     paths:
       - 'daemon-go/**'
+      - 'scripts/daemon/**'
+      - 'scripts/dev/verify/repository/**'
       - '.github/workflows/daemon-go-ci.yml'
+      - '.github/workflows/daemon-release.yml'
+      - '.github/workflows/docker-publish.yml'
   pull_request:
     paths:
       - 'daemon-go/**'
+      - 'scripts/daemon/**'
+      - 'scripts/dev/verify/repository/**'
       - '.github/workflows/daemon-go-ci.yml'
+      - '.github/workflows/daemon-release.yml'
+      - '.github/workflows/docker-publish.yml'
 
 permissions:
   contents: read
@@ -16,11 +25,23 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    env:
+      GO_BIN: go
+      POSTGRES_VERSION: '17'
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.21.0'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: daemon-go/go.mod
+      - name: Set up PostgreSQL client tools
+        uses: ./.github/actions/postgres-client
+      - name: Run repository script tests
+        uses: ./.github/actions/repository-script-tests
+        with:
+          globs: scripts/daemon/tests/*.test.mjs scripts/dev/verify/repository/tests/check-version-alignment.test.mjs scripts/dev/verify/repository/tests/daemon-ci-contract.test.mjs scripts/dev/verify/repository/tests/workflow-action-pins.test.mjs scripts/dev/verify/repository/tests/workflow-validation-gates.test.mjs scripts/dev/verify/reliability/tests/daemon-entrypoint-contracts.test.mjs scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs
       - name: Install protoc and generator
         run: |
           sudo apt-get update
@@ -61,20 +82,13 @@ jobs:
           distribution: temurin
           java-version: '21'
           cache: maven
-      - name: Build Go daemon
-        working-directory: daemon-go
-        env:
-          CGO_ENABLED: '0'
-        run: go build -o "$RUNNER_TEMP/kk-studio-daemon-go" ./cmd/kk-studio-daemon
       - name: Verify RFC 8441 interoperability with Jetty
         env:
           MAVEN_OPTS: -Xmx2g
-          DAEMON_BINARY: ${{ runner.temp }}/kk-studio-daemon-go
         run: |
           mvn -B -ntp -q -pl web -am test \
             -Dtest=DaemonCrossLanguageIntegrationTest#dataPlaneRoutingHttpAndExtendedConnectReturn404ForNonexistentView \
-            -Dsurefire.failIfNoSpecifiedTests=false \
-            -Ddaemon.bin="$DAEMON_BINARY"
+            -Dsurefire.failIfNoSpecifiedTests=false
 
   test:
     strategy:
@@ -84,9 +98,15 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.21.0'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: daemon-go/go.mod
+      - name: Install ripgrep for search parity tests
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y ripgrep
       - name: Test
         working-directory: daemon-go
         shell: bash
@@ -134,6 +154,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '24.21.0'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: daemon-go/go.mod

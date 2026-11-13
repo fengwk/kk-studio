@@ -94,11 +94,10 @@ import java.util.function.Supplier;
 import java.util.stream.Stream;
 
 /**
- * Studio（Java）与 Environment Daemon（Node 24）的跨语言端到端集成测试。
+ * Studio（Java）与 Environment Daemon（Go）的跨语言端到端集成测试。
  *
- * <p>Java 侧使用真实 Jetty 12 容器承载 {@link EnvironmentDaemonAdmissionController}， 内部组装生产级 {@link
- * EnvironmentDaemonServer}（会话核心、通道协调与调用跟踪）； Node 侧启动由 {@code daemon/dist/main.js} 支撑的独立进程，两端经物理
- * WebSocket 与 HTTP/2 双向互通。
+ * <p>Java 侧使用真实 Jetty 12 容器承载 {@link EnvironmentDaemonAdmissionController}，内部组装生产级 {@link
+ * EnvironmentDaemonServer}（会话核心、通道协调与调用跟踪）；Go 二进制作为独立进程，两端经物理 WebSocket 与 HTTP/2 双向互通。
  */
 class DaemonCrossLanguageIntegrationTest {
 
@@ -127,18 +126,16 @@ class DaemonCrossLanguageIntegrationTest {
   private AtomicReference<EnvironmentConfigSnapshot> environmentConfig;
 
   private Path testDataDir;
+  private Path binaryTempDir;
+  private Path daemonBinary;
   private DaemonProcess daemonProcess;
   private String daemonVersion;
 
   @BeforeEach
   void setUp() throws Exception {
-    // 版本对齐门禁保护的包清单是期望值来源，不维护测试专属版本号。
-    daemonVersion =
-        JsonMapper.builder()
-            .build()
-            .readTree(Files.readString(repoRoot().resolve("daemon/package.json")))
-            .get("version")
-            .asString();
+    binaryTempDir = Files.createTempDirectory("kk-daemon-go-bin-");
+    daemonBinary = GoDaemonBinary.build(repoRoot(), binaryTempDir.resolve("kk-studio-daemon"));
+    daemonVersion = GoDaemonBinary.version(daemonBinary);
     scheduler = new ScheduledExecutorScheduler("test-transport-", false);
     scheduler.start();
     executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -237,6 +234,12 @@ class DaemonCrossLanguageIntegrationTest {
     testDataDir = null;
     if (dir != null) {
       deleteRecursively(dir);
+    }
+    Path binaryDir = binaryTempDir;
+    binaryTempDir = null;
+    daemonBinary = null;
+    if (binaryDir != null) {
+      deleteRecursively(binaryDir);
     }
 
     if (server != null) {
@@ -439,7 +442,12 @@ class DaemonCrossLanguageIntegrationTest {
 
     EnvironmentCapabilityResult result = sleepListener.awaitCompleted(TIMEOUT);
     assertNotNull(result, "In-flight invocation must complete successfully after reconnection");
-    assertFalse(result.error());
+    assertFalse(
+        result.error(),
+        "recovered process.exec failed: "
+            + result.detailsJson()
+            + " / "
+            + extractCombinedText(result));
 
     assertEquals(
         1,
@@ -463,7 +471,7 @@ class DaemonCrossLanguageIntegrationTest {
         1, daemonProcess.exitValue(), "Daemon exit code must be 1 on registration failure");
     String stderr = String.join("\n", daemonProcess.stderrLines());
     assertTrue(
-        stderr.contains("environment registration is rejected"),
+        stderr.contains("daemon registration rejected"),
         "Daemon stderr must report terminal registration failure, got:\n" + stderr);
   }
 
@@ -603,9 +611,9 @@ class DaemonCrossLanguageIntegrationTest {
   }
 
   /**
-   * 范围 7：跨实例 attach 恢复。 Node Daemon 正在执行耗时任务时，第一个 server 实例调用 drain() 优雅排空并释放租约； 第二个 server
+   * 范围 7：跨实例 attach 恢复。 Go Daemon 正在执行耗时任务时，第一个 server 实例调用 drain() 优雅排空并释放租约； 第二个 server
    * 实例与第一个实例共用同一个 leaseStore 接管路由准入并进入 READY； 第二个 server 实例通过 attach(environmentId, invocationId,
-   * listener) 挂接在途调用， 触发 RECOVER，真实 Node Daemon 查找到 journal 并重新交付 COMPLETED 终态。
+   * listener) 挂接在途调用， 触发 RECOVER，真实 Go Daemon 查找到 journal 并重新交付 COMPLETED 终态。
    */
   @Test
   void crossInstanceAttachReattachesInFlightCallAndCompletes() throws Exception {
@@ -668,7 +676,7 @@ class DaemonCrossLanguageIntegrationTest {
         newServer.attach(ENVIRONMENT_ID, inFlightInvocationId, attachListener);
     assertNotNull(handle);
 
-    // 验证新 server 向 Node daemon 发送了 RECOVER
+    // 验证新 server 向 Go daemon 发送了 RECOVER
     boolean sentRecover =
         recordingSessions.outboundEnvelopes().stream()
             .anyMatch(
@@ -677,10 +685,15 @@ class DaemonCrossLanguageIntegrationTest {
                         && inFlightInvocationId.toString().equals(env.getInvocationId()));
     assertTrue(sentRecover, "New server must emit RECOVER upon attach");
 
-    // 真实 Node daemon 收到 RECOVER 后完成并交付 COMPLETED
+    // 真实 Go daemon 收到 RECOVER 后完成并交付 COMPLETED
     EnvironmentCapabilityResult result = attachListener.awaitCompleted(TIMEOUT);
     assertNotNull(result, "In-flight invocation must complete via attach on new server");
-    assertFalse(result.error());
+    assertFalse(
+        result.error(),
+        "attached process.exec failed: "
+            + result.detailsJson()
+            + " / "
+            + extractCombinedText(result));
     assertEquals(1, attachListener.completedCount.get());
   }
 
@@ -688,11 +701,7 @@ class DaemonCrossLanguageIntegrationTest {
     testDataDir = Files.createTempDirectory("kk-daemon-crosslang-");
     daemonProcess =
         DaemonProcess.start(
-            repoRoot(),
-            connector.getLocalPort(),
-            token,
-            testDataDir,
-            System.getProperty("daemon.bin"));
+            repoRoot(), connector.getLocalPort(), token, testDataDir, daemonBinary.toString());
   }
 
   private EnvironmentConfigSnapshot configuration(long version, String bashExecutable) {
@@ -758,7 +767,7 @@ class DaemonCrossLanguageIntegrationTest {
     Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
     while (current != null) {
       if (Files.isRegularFile(current.resolve("pom.xml"))
-          && Files.isDirectory(current.resolve("daemon"))
+          && Files.isRegularFile(current.resolve("daemon-go/go.mod"))
           && Files.isDirectory(current.resolve("web"))) {
         return current;
       }
@@ -778,7 +787,7 @@ class DaemonCrossLanguageIntegrationTest {
     }
   }
 
-  /** 管理真实运行的 Node 24 Daemon 子进程。 */
+  /** 管理真实运行的 Go Daemon 子进程。 */
   private static final class DaemonProcess implements AutoCloseable {
 
     private final Process process;
@@ -799,15 +808,10 @@ class DaemonCrossLanguageIntegrationTest {
     static DaemonProcess start(
         Path repoRoot, int studioPort, String token, Path dataDir, String daemonBinary)
         throws IOException {
-      Path daemonDist = repoRoot.resolve("daemon/dist");
-      Path mainScript = daemonDist.resolve("main.js");
-      if (daemonBinary == null || daemonBinary.isBlank()) {
-        if (!Files.isRegularFile(mainScript)) {
-          throw new IllegalStateException(
-              "daemon/dist/main.js not found. Run `npm --prefix daemon ci && npm --prefix daemon run build` first.");
-        }
-      } else if (!Files.isRegularFile(Path.of(daemonBinary))) {
-        throw new IllegalStateException("daemon.bin does not exist: " + daemonBinary);
+      if (daemonBinary == null
+          || daemonBinary.isBlank()
+          || !Files.isRegularFile(Path.of(daemonBinary))) {
+        throw new IllegalStateException("Go daemon binary does not exist: " + daemonBinary);
       }
 
       boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");
@@ -831,36 +835,15 @@ class DaemonCrossLanguageIntegrationTest {
         Files.setPosixFilePermissions(tokenFile, PosixFilePermissions.fromString("rw-------"));
       }
 
-      ProcessBuilder pb;
-      if (daemonBinary == null || daemonBinary.isBlank()) {
-        pb =
-            new ProcessBuilder(
-                resolveNodeBinary(),
-                mainScript.toAbsolutePath().toString(),
-                "--config",
-                configFile.toAbsolutePath().toString());
-      } else {
-        pb = new ProcessBuilder(daemonBinary, "--config", configFile.toAbsolutePath().toString());
-        pb.environment().remove("GODEBUG");
-        pb.environment().put("TZ", "Etc/UTC");
-      }
+      ProcessBuilder pb =
+          new ProcessBuilder(daemonBinary, "--config", configFile.toAbsolutePath().toString());
+      pb.environment().remove("GODEBUG");
+      pb.environment().put("TZ", "Etc/UTC");
       pb.directory(repoRoot.toFile());
       pb.environment().put("http_proxy", "http://127.0.0.1:1");
       pb.environment().put("ALL_PROXY", "http://127.0.0.1:1");
       Process process = pb.start();
       return new DaemonProcess(process, dataDir);
-    }
-
-    private static String resolveNodeBinary() {
-      String env = System.getenv("NODE_BIN");
-      if (env != null && !env.isBlank()) {
-        return env;
-      }
-      String prop = System.getProperty("node.bin");
-      if (prop != null && !prop.isBlank()) {
-        return prop;
-      }
-      return "node";
     }
 
     boolean waitFor(Duration timeout) throws InterruptedException {
@@ -1129,6 +1112,12 @@ class DaemonCrossLanguageIntegrationTest {
 
     @Override
     public void release(EnvironmentId environmentId, String invocationId, UUID uploadId) {}
+
+    @Override
+    public DownloadTicket download(
+        EnvironmentId environmentId, String invocationId, UUID transferId, UUID blobId) {
+      return new DownloadTicket.Failed("not supported in test");
+    }
   }
 
   /** 收集 capability 异步执行结果的监听器。 */

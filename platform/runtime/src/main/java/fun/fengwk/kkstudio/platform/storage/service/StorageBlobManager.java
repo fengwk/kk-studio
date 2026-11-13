@@ -100,24 +100,34 @@ public class StorageBlobManager {
     // 读回状态决定是否注册提交后清理。
     StorageBlob blob = blobRepository.getById(blobId);
     if (blob != null && blob.getState() == StorageBlobState.DELETING) {
-      TransactionSynchronizationManager.registerSynchronization(
-          new TransactionSynchronization() {
-            @Override
-            public void afterCommit() {
-              try {
-                StorageMaintenanceWakeup wakeup = maintenanceWakeups.getObject();
-                wakeup.wake();
-              } catch (RuntimeException error) {
-                // API 事务已经提交：本地唤醒只是低延迟提示，失败由 periodic poll 恢复且绝不向调用方冒泡。
-                log.warn(
-                    "storage maintenance wake failed for deleting blob {}: {}",
-                    blobId,
-                    error.getClass().getSimpleName());
-              }
-            }
-          });
+      for (UUID viewBlobId : blobRepository.deleteImageModelViews(blobId)) {
+        if (!release(viewBlobId)) {
+          throw new IllegalStateException(
+              "image model view reference could not be released: " + viewBlobId);
+        }
+      }
+      registerMaintenanceWakeup(blobId);
     }
     return true;
+  }
+
+  private void registerMaintenanceWakeup(UUID blobId) {
+    TransactionSynchronizationManager.registerSynchronization(
+        new TransactionSynchronization() {
+          @Override
+          public void afterCommit() {
+            try {
+              StorageMaintenanceWakeup wakeup = maintenanceWakeups.getObject();
+              wakeup.wake();
+            } catch (RuntimeException error) {
+              // API 事务已经提交：本地唤醒只是低延迟提示，失败由 periodic poll 恢复且绝不向调用方冒泡。
+              log.warn(
+                  "storage maintenance wake failed for deleting blob {}: {}",
+                  blobId,
+                  error.getClass().getSimpleName());
+            }
+          }
+        });
   }
 
   /** 读取 blob 行（不存在时返回 null；状态由调用方解释）。 */

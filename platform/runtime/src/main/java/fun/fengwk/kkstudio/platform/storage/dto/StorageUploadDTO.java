@@ -28,4 +28,14 @@ public sealed interface StorageUploadDTO permits StorageUploadPendingDTO, Storag
    * 回改这里已经返回的值。
    */
   Instant getExpiresAt();
+
+  String getFormat();
+
+  Integer getOriginalWidth();
+
+  Integer getOriginalHeight();
+
+  Integer getStoredWidth();
+
+  Integer getStoredHeight();
 }

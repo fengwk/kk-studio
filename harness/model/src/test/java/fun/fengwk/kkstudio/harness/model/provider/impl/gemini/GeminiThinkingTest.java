@@ -1,8 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.gemini;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -19,12 +18,11 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
@@ -32,6 +30,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 
@@ -99,7 +98,7 @@ class GeminiThinkingTest {
     bridge = new ProviderStreamBridge(handler);
   }
 
-  /** 验证空文本 thought 但带有 thoughtSignature 时，签名能正确记录在 ReplayState 中。 */
+  /** 验证空文本 thought 的 thoughtSignature 保存在对应 thinking block 的 provider data 中。 */
   @Test
   void handlesEmptyThoughtWithSignature() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
@@ -132,10 +131,10 @@ class GeminiThinkingTest {
     assertEquals("", response.thinking());
     assertEquals("Result after empty thought.", response.text());
 
-    assertNotNull(completion.replayState());
-    JsonNode replayPayload = completion.replayState().payload();
-    ArrayNode parts = (ArrayNode) replayPayload.get("parts");
-    assertEquals("valid_sig_empty_thought", parts.get(0).get("thoughtSignature").asString(""));
+    ProviderThinkingBlock emptyThought = (ProviderThinkingBlock) response.blocks().get(0);
+    assertEquals("", emptyThought.thinking());
+    assertEquals("valid_sig_empty_thought", emptyThought.providerBlockData().signature());
+    assertTrue(emptyThought.providerBlockData().thought());
   }
 
   /** 验证多个连续 reasoning parts 被累加，并保留签名。 */
@@ -224,17 +223,13 @@ class GeminiThinkingTest {
     List<ProviderToolCall> calls = response.toolCalls();
     assertEquals(2, calls.size());
 
-    assertNotNull(completion.replayState());
-    JsonNode replayPayload = completion.replayState().payload();
-    ArrayNode parts = (ArrayNode) replayPayload.get("parts");
-    assertEquals(2, parts.size());
-
-    // 第一个 part 保留原生 thoughtSignature
-    assertEquals("first_call_signature", parts.get(0).get("thoughtSignature").asString(""));
-    // 第二个 part 绝不伪造 thoughtSignature
-    assertFalse(
-        parts.get(1).has("thoughtSignature"),
-        "Second parallel tool call must not fabricate thoughtSignature");
+    assertEquals(2, response.blocks().size());
+    ProviderToolCallBlock firstCall = (ProviderToolCallBlock) response.blocks().get(0);
+    ProviderToolCallBlock secondCall = (ProviderToolCallBlock) response.blocks().get(1);
+    assertEquals("first_call_signature", firstCall.providerBlockData().signature());
+    assertEquals("tool_first", firstCall.toolCall().name());
+    assertEquals("tool_second", secondCall.toolCall().name());
+    assertNull(secondCall.providerBlockData().signature());
   }
 
   /** 意图：空文本签名 part 是合法的原生事实（思考结束标记），必须在原位置原样保留，既不被相邻 part 吸收也不重复保留。 */
@@ -277,6 +272,15 @@ class GeminiThinkingTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals("think", completion.response().thinking());
     assertEquals("answer", completion.response().text());
+    assertEquals(3, completion.response().blocks().size());
+    assertEquals(
+        "think", ((ProviderThinkingBlock) completion.response().blocks().get(0)).thinking());
+    assertEquals(
+        "sig_1",
+        ((ProviderThinkingBlock) completion.response().blocks().get(0))
+            .providerBlockData()
+            .signature());
+    assertEquals("answer", ((ProviderTextBlock) completion.response().blocks().get(2)).text());
 
     List<String> thinkingDeltas =
         emittedEvents.stream()
@@ -285,14 +289,15 @@ class GeminiThinkingTest {
             .toList();
     assertEquals(List.of("think"), thinkingDeltas, "空文本签名 part 绝不产生重复思考增量");
 
-    JsonNode parts = completion.replayState().payload().get("parts");
-    assertEquals(3, parts.size());
-    assertEquals("think", parts.get(0).path("text").asString(""));
-    assertEquals("sig_1", parts.get(0).path("thoughtSignature").asString(""));
-    assertTrue(parts.get(1).has("text"));
-    assertEquals("", parts.get(1).path("text").asString(""));
-    assertEquals("sig_empty", parts.get(1).path("thoughtSignature").asString(""));
-    assertEquals("answer", parts.get(2).path("text").asString(""));
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(3, blocks.size());
+    ProviderThinkingBlock firstThought = (ProviderThinkingBlock) blocks.get(0);
+    ProviderThinkingBlock emptyThought = (ProviderThinkingBlock) blocks.get(1);
+    assertEquals("think", firstThought.thinking());
+    assertEquals("sig_1", firstThought.providerBlockData().signature());
+    assertEquals("", emptyThought.thinking());
+    assertEquals("sig_empty", emptyThought.providerBlockData().signature());
+    assertEquals("answer", ((ProviderTextBlock) blocks.get(2)).text());
   }
 
   /**
@@ -339,15 +344,17 @@ class GeminiThinkingTest {
     assertEquals("think A think B", completion.response().thinking(), "重复快照绝不被重复计入 thinking");
     assertEquals("answer", completion.response().text());
 
-    JsonNode parts = completion.replayState().payload().get("parts");
-    assertEquals(3, parts.size(), "两个签名 part 与文本 part 必须各自保留");
-    assertEquals("think A", parts.get(0).path("text").asString(""));
-    assertEquals("sig_a", parts.get(0).path("thoughtSignature").asString(""));
-    assertTrue(parts.get(0).path("thought").asBoolean(false));
-    assertEquals(" think B", parts.get(1).path("text").asString(""));
-    assertEquals("sig_b", parts.get(1).path("thoughtSignature").asString(""));
-    assertEquals("answer", parts.get(2).path("text").asString(""));
-    assertFalse(parts.get(2).has("thoughtSignature"), "文本 part 绝不伪造签名");
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(3, blocks.size(), "两个签名 part 与文本 part 必须各自保留");
+    ProviderThinkingBlock first = (ProviderThinkingBlock) blocks.get(0);
+    ProviderThinkingBlock second = (ProviderThinkingBlock) blocks.get(1);
+    assertEquals("think A", first.thinking());
+    assertEquals("sig_a", first.providerBlockData().signature());
+    assertTrue(first.providerBlockData().thought());
+    assertEquals(" think B", second.thinking());
+    assertEquals("sig_b", second.providerBlockData().signature());
+    assertEquals("answer", ((ProviderTextBlock) blocks.get(2)).text());
+    assertNull(((ProviderTextBlock) blocks.get(2)).providerBlockData().signature());
   }
 
   /** 意图：两个带不同签名的累积形态无法证明是同一 part，绝不合并、绝不覆盖签名；两份原生事实按原顺序各自保留。 */
@@ -385,12 +392,14 @@ class GeminiThinkingTest {
         """);
 
     ProviderCompletion completion = accumulator.finish();
-    JsonNode parts = completion.replayState().payload().get("parts");
-    assertEquals(2, parts.size(), "带不同签名的累积形态绝不合并成单个 part");
-    assertEquals("think", parts.get(0).path("text").asString(""));
-    assertEquals("sig_1", parts.get(0).path("thoughtSignature").asString(""), "本地签名绝不被上游覆盖");
-    assertEquals("think more", parts.get(1).path("text").asString(""));
-    assertEquals("sig_2", parts.get(1).path("thoughtSignature").asString(""));
+    List<ProviderContentBlock> blocks = completion.response().blocks();
+    assertEquals(2, blocks.size(), "带不同签名的累积形态绝不合并成单个 part");
+    ProviderThinkingBlock first = (ProviderThinkingBlock) blocks.get(0);
+    ProviderThinkingBlock second = (ProviderThinkingBlock) blocks.get(1);
+    assertEquals("think", first.thinking());
+    assertEquals("sig_1", first.providerBlockData().signature(), "本地签名绝不被上游覆盖");
+    assertEquals("think more", second.thinking());
+    assertEquals("sig_2", second.providerBlockData().signature());
   }
 
   /**
@@ -427,8 +436,6 @@ class GeminiThinkingTest {
     ProviderResponse response = completion.response();
     assertEquals("think", response.thinking());
     assertEquals("answer", response.text());
-    assertNotNull(completion.replayState());
-
     ProviderRequest secondTurn =
         new ProviderRequest(
             request.model(),
@@ -438,12 +445,7 @@ class GeminiThinkingTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 1"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(
-                        new ProviderThinkingBlock(response.thinking()),
-                        new ProviderTextBlock(response.text())),
-                    completion.replayState()),
+                new ProviderMessage(ProviderMessageRole.ASSISTANT, response.blocks()),
                 new ProviderMessage(
                     ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 2")))),
             List.of(),
@@ -457,58 +459,5 @@ class GeminiThinkingTest {
     assertTrue(modelParts.get(0).get("thought").asBoolean(false));
     assertEquals("t-1", modelParts.get(1).path("futurePartField").path("trace").asString(""));
     assertEquals("QQ==", modelParts.get(2).path("inlineData").path("data").asString(""));
-  }
-
-  /** 验证多轮对话中，包含 thoughtSignature 的 ReplayState 经过编码器完整发送回服务端。 */
-  @Test
-  void preservesThoughtSignatureInReplayAcrossTurns() throws Exception {
-    GeminiRequestEncoder encoder = new GeminiRequestEncoder();
-
-    ModelVariant variant = new ModelVariant("default", null, PromptCacheRetention.NONE, null);
-
-    // 构造第一轮返回的 replayState
-    var replayPayload = MAPPER.createObjectNode();
-    replayPayload.put("role", "model");
-    ArrayNode parts = replayPayload.putArray("parts");
-    var p0 = parts.addObject();
-    p0.put("text", "thinking round 1");
-    p0.put("thought", true);
-    p0.put("thoughtSignature", "sig_round_1");
-    var p1 = parts.addObject();
-    p1.put("text", "answer round 1");
-
-    var replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.GEMINI_CONTENT,
-            descriptor.affinity("gemini-2.5-pro"),
-            replayPayload);
-
-    // 第二轮请求
-    ProviderRequest req2 =
-        new ProviderRequest(
-            request.model(),
-            variant,
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 1"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(
-                        new ProviderThinkingBlock("thinking round 1"),
-                        new ProviderTextBlock("answer round 1")),
-                    replayState),
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Round 2")))),
-            List.of(),
-            ProviderCacheControl.none());
-
-    GeminiEncodedRequest enc2 = encoder.encode(req2, descriptor);
-    JsonNode req2Json = MAPPER.readTree(enc2.bodyUtf8Bytes());
-
-    ArrayNode modelParts = (ArrayNode) req2Json.get("contents").get(1).get("parts");
-    assertEquals("sig_round_1", modelParts.get(0).get("thoughtSignature").asString(""));
-    assertEquals("answer round 1", modelParts.get(1).get("text").asString(""));
   }
 }

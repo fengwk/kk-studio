@@ -441,8 +441,8 @@ export function sanitizeArtifact(data) {
       ) {
         result[key] = '[REDACTED_RAW_USAGE]'
       } else if (
-        lower.includes('replaystate')
-        || lower.includes('replay_state')
+        lower.includes('providerblockdata')
+        || lower.includes('provider_block_data')
         || lower.includes('replaypayload')
         || lower.includes('replay_payload')
         || lower === 'payload'

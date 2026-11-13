@@ -47,6 +47,11 @@ create table storage_upload (
     declared_media_type varchar(256)   not null,
     declared_size       bigint         not null,
     declared_sha256     char(64)       not null,
+    image_format        varchar(32),
+    original_width      integer,
+    original_height     integer,
+    stored_width        integer,
+    stored_height       integer,
     cleanup_requested_at timestamptz(3),
     cleanup_token       uuid,
     cleanup_until       timestamptz(3),
@@ -56,6 +61,20 @@ create table storage_upload (
     constraint ck_storage_upload_media_type_nonblank check (btrim(declared_media_type) <> ''),
     constraint ck_storage_upload_size_nonneg check (declared_size >= 0),
     constraint ck_storage_upload_sha256 check (declared_sha256 ~ '^[0-9a-f]{64}$'),
+    constraint ck_storage_upload_image_metadata_pair check (
+        (image_format is null and original_width is null and original_height is null
+            and stored_width is null and stored_height is null)
+        or (image_format is not null and original_width is not null and original_height is not null
+            and stored_width is not null and stored_height is not null)
+    ),
+    constraint ck_storage_upload_image_dimensions check (
+        original_width is null or (original_width > 0 and original_height > 0
+            and stored_width > 0 and stored_height > 0)
+    ),
+    constraint ck_storage_upload_image_format check (
+        image_format is null or (image_format ~ '^[a-z0-9][a-z0-9.+-]{0,31}$'
+            and declared_media_type = 'image/' || image_format)
+    ),
     constraint ck_storage_upload_cleanup_pair check (
         (cleanup_token is null) = (cleanup_until is null)
     ),
@@ -65,6 +84,28 @@ create table storage_upload (
 
 create index idx_storage_upload_cleanup_claim
     on storage_upload (cleanup_requested_at, created_at, cleanup_until, id);
+
+create table storage_image_model_view (
+    source_blob_id  uuid         not null,
+    image_tier      varchar(16)  not null,
+    view_blob_id    uuid         not null,
+    original_width  integer      not null,
+    original_height integer      not null,
+    display_width   integer      not null,
+    display_height  integer      not null,
+    constraint pk_storage_image_model_view primary key (source_blob_id, image_tier),
+    constraint ck_storage_image_model_view_tier check (image_tier in ('720P', '1080P')),
+    constraint ck_storage_image_model_view_dimensions check (
+        original_width > 0 and original_height > 0 and display_width > 0 and display_height > 0
+    ),
+    constraint ck_storage_image_model_view_distinct_blobs check (source_blob_id <> view_blob_id),
+    constraint fk_storage_image_model_view_source foreign key (source_blob_id)
+        references storage_blob (id) on delete restrict,
+    constraint fk_storage_image_model_view_blob foreign key (view_blob_id)
+        references storage_blob (id) on delete restrict
+);
+
+comment on table storage_image_model_view is 'Durable resized model view for a plugin image, keyed by original blob and image tier; the row owns one reference to view_blob_id and is removed when its source enters DELETING.';
 
 comment on table storage_blob is 'Deduplicated immutable content address of the global blob storage: one ACTIVE row per (sha256, size_bytes) content, with immutable media facts and a counted reference lifecycle ACTIVE -> DELETING -> row removal.';
 
@@ -252,7 +293,7 @@ insert into system_setting (id, config) values (
       "aiRuntime":{"compactionKeepRecentTokens":20000,"modelHttpRetryStatusCodes":[408,429,500,502,503,504],"retryBackoffStrategy":"EXPONENTIAL","retryBaseDelayMillis":2000,"retryMaxDelayMillis":60000,"retryMaxRetries":3,"subagentMaxConcurrency":10,"subagentMaxDepth":2,"subagentMaxTotalConcurrency":0,"subagentMaxTurns":50},
       "environment":{"heartbeatTimeoutMillis":60000},
       "backendNetwork":{"noProxyHosts":"localhost,127.*,::1"},
-      "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"imageTier":"720P","s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
+      "storageMedia":{"canvasMediaProcessTimeoutMillis":30000,"imageTier":"720P","maxImagesPerRequest":20,"s3PresignDefaultExpiresSeconds":1800,"s3PresignMaxExpiresSeconds":3600,"temporaryResourceCleanupIntervalSeconds":1800,"temporaryResourceTtlSeconds":259200,"thumbnailMaxDimension":512,"thumbnailQuality":80,"uploadExpiresSeconds":86400},
       "tool":{"maxOutputMib":16,"modelGatewayBusyRetryMillis":5000,"permission":{"bash":[{"action":"ask","pattern":"*"}],"edit":[{"action":"ask","pattern":"*"}],"write":[{"action":"ask","pattern":"*"}]},"toolGatewayOverloadRetryMillis":5000}
     }'::jsonb
 );
@@ -279,7 +320,6 @@ create table harness_entry (
     payload jsonb not null check (jsonb_typeof(payload) = 'object'),
     created_at timestamptz(3) not null,
     entry_seq bigint generated always as identity,
-    provider_replay_state jsonb,
     constraint uk_harness_entry_session_id unique (session_id, id),
     constraint fk_harness_entry_session foreign key (session_id)
         references harness_session (id),
@@ -308,10 +348,6 @@ create table harness_entry (
     ),
     constraint ck_harness_entry_parent_not_self check (
         parent_entry_id is null or parent_entry_id <> id
-    ),
-    constraint ck_harness_entry_provider_replay_state check (
-        provider_replay_state is null
-        or jsonb_typeof(provider_replay_state) = 'object'
     )
 );
 
@@ -323,7 +359,6 @@ comment on column harness_entry.entry_type is 'Entry 类型（ROOT/TURN_START/ME
 comment on column harness_entry.payload is '按 entry_type 编码的不可变 payload（JSON object）';
 comment on column harness_entry.created_at is 'Entry 创建时间（毫秒精度，不承担排序）';
 comment on column harness_entry.entry_seq is '数据库分配的追加序号：同一 Session 内严格递增且父先于子，只用于创建序读取与 keyset 分页';
-comment on column harness_entry.provider_replay_state is 'Provider native terminal replay 状态（JSON object，可空）；适用状态与 payload 关联由应用维护';
 
 create unique index uk_harness_entry_single_root
     on harness_entry (session_id)
@@ -1204,7 +1239,6 @@ create table builtin_model_invocation (
     requested_at timestamptz(3),
     created_at timestamptz(3) not null,
     updated_at timestamptz(3) not null,
-    provider_replay_state jsonb,
     constraint fk_builtin_model_invocation_thread foreign key (thread_id)
         references harness_thread (id),
     constraint fk_builtin_model_invocation_turn_start foreign key (turn_start_entry_id)
@@ -1226,10 +1260,6 @@ create table builtin_model_invocation (
     ),
     constraint ck_builtin_model_invocation_terminal_facts check (
         result is null or error is null
-    ),
-    constraint ck_builtin_model_invocation_provider_replay_state check (
-        provider_replay_state is null
-        or jsonb_typeof(provider_replay_state) = 'object'
     )
 );
 
@@ -1250,7 +1280,6 @@ comment on column builtin_model_invocation.group_execution is 'Model Group 当�
 comment on column builtin_model_invocation.requested_at is '当前已确认 Provider 调用的发起时间；成功历史 metadata 记录实际请求时刻';
 comment on column builtin_model_invocation.created_at is '创建时间（毫秒精度）';
 comment on column builtin_model_invocation.updated_at is '最后更新时间（毫秒精度）';
-comment on column builtin_model_invocation.provider_replay_state is 'Provider native terminal replay 状态（JSON object，可空）；适用状态与 result 关联由应用维护';
 
 create unique index uk_builtin_model_invocation_result
     on builtin_model_invocation (result_entry_id)

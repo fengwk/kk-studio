@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.platform.harness.http.HarnessCommandBatchService;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadCommandBatchController;
 import fun.fengwk.kkstudio.platform.i18n.MessageService;
 import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.ModelImageCountLimitResolver;
 import fun.fengwk.kkstudio.platform.orchestration.SessionOwnership;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
@@ -96,6 +97,8 @@ class HarnessAcceptanceProblemWireTest {
     SessionOwnership issueAgentOwner = mock(SessionOwnership.class);
     when(issueAgentOwner.kind()).thenReturn("ISSUE_AGENT");
     uploads = mock(StorageUploadService.class);
+    ModelImageCountLimitResolver imageLimitResolver = mock(ModelImageCountLimitResolver.class);
+    when(imageLimitResolver.resolve(any())).thenReturn(null);
     HarnessCommandAcceptanceOrchestrator acceptance =
         new HarnessCommandAcceptanceOrchestrator(
             List.of(owner, issueAgentOwner),
@@ -103,7 +106,8 @@ class HarnessAcceptanceProblemWireTest {
             uploads,
             mock(SessionBlobRefManager.class),
             mock(StorageBlobManager.class),
-            new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT));
+            new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT),
+            imageLimitResolver);
     HarnessCommandBatchService service = new HarnessCommandBatchService(acceptance, runtime);
     mvc =
         MockMvcBuilders.standaloneSetup(

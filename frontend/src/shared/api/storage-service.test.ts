@@ -36,6 +36,11 @@ function pendingUpload(id: string): StorageUploadPendingDTO {
       sizeBytes: null,
     },
     expiresAt: 1786492800000,
+    format: null,
+    originalWidth: null,
+    originalHeight: null,
+    storedWidth: null,
+    storedHeight: null,
   }
 }
 
@@ -45,6 +50,11 @@ function readyUpload(id: string): StorageUploadReadyDTO {
     id,
     blobId: 'blob-1',
     expiresAt: 1786492800000,
+    format: null,
+    originalWidth: null,
+    originalHeight: null,
+    storedWidth: null,
+    storedHeight: null,
   }
 }
 

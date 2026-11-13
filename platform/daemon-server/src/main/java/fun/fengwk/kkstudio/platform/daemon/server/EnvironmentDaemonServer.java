@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityE
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.environment.capability.ResourceDownload;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
@@ -374,6 +375,10 @@ public final class EnvironmentDaemonServer
             session.daemonInstanceId(),
             this::expire,
             () -> sessionOf(environmentId));
+    ResourceDownload download = request.resourceDownload();
+    if (download != null) {
+      active.downloadTransfers.put(download.transferId(), download.blobId());
+    }
 
     DaemonOfferResult outcome;
     RuntimeException sendFailure = null;
@@ -396,11 +401,12 @@ public final class EnvironmentDaemonServer
               .setMaxOutputBytes(currentSettings.maxOutputBytes())
               .setImageInputTier(currentSettings.imageInputTier());
       if (request.expectedFile() != null) {
-        invokeBuilder.setExpectedFile(
-            ExpectedFile.newBuilder()
-                .setPath(request.expectedFile().path())
-                .setSha256(request.expectedFile().sha256())
-                .build());
+        ExpectedFile.Builder expectedFileBuilder =
+            ExpectedFile.newBuilder().setPath(request.expectedFile().path());
+        if (request.expectedFile().sha256() != null) {
+          expectedFileBuilder.setSha256(request.expectedFile().sha256());
+        }
+        invokeBuilder.setExpectedFile(expectedFileBuilder.build());
       }
       Envelope invokeEnvelope =
           Envelope.newBuilder()

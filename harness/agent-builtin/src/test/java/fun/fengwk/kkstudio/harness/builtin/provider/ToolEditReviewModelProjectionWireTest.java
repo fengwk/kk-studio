@@ -147,9 +147,9 @@ class ToolEditReviewModelProjectionWireTest {
         ProviderMessageProjector.byNames(Set.of("edit"))
             .projectSources(
                 List.of(
-                    ProviderMessageProjector.ProjectedMessage.of(user, null),
-                    ProviderMessageProjector.ProjectedMessage.of(assistant, null),
-                    ProviderMessageProjector.ProjectedMessage.of(tool, null)));
+                    ProviderMessageProjector.ProjectedMessage.of(user),
+                    ProviderMessageProjector.ProjectedMessage.of(assistant),
+                    ProviderMessageProjector.ProjectedMessage.of(tool)));
 
     verifyWireAcrossFourProtocols(messages, true);
   }
@@ -185,9 +185,9 @@ class ToolEditReviewModelProjectionWireTest {
         ProviderMessageProjector.byNames(Set.of())
             .projectSources(
                 List.of(
-                    ProviderMessageProjector.ProjectedMessage.of(user, null),
-                    ProviderMessageProjector.ProjectedMessage.of(assistant, null),
-                    ProviderMessageProjector.ProjectedMessage.of(tool, null)));
+                    ProviderMessageProjector.ProjectedMessage.of(user),
+                    ProviderMessageProjector.ProjectedMessage.of(assistant),
+                    ProviderMessageProjector.ProjectedMessage.of(tool)));
 
     verifyWireAcrossFourProtocols(messages, false);
   }

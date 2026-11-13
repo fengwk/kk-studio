@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -133,6 +134,91 @@ func TestWindowsProcessInJob_FailureBranches(t *testing.T) {
 			t.Fatalf("membership result = %t, %v", inJob, err)
 		}
 	})
+}
+
+type fakeWindowsJobAccountingAPI struct {
+	active uint32
+	err    error
+	calls  int
+}
+
+func (api *fakeWindowsJobAccountingAPI) QueryInformationJobObject(_ windows.Handle, accounting *windowsJobAccounting) error {
+	api.calls++
+	if api.err != nil {
+		return api.err
+	}
+	accounting.ActiveProcesses = api.active
+	return nil
+}
+
+// NAT-N-005 verifies unknown Job accounting remains an error and is never interpreted as an empty scope.
+func TestNativeSyscallFakes_FailClosedOnUnknown(t *testing.T) {
+	queryErr := errors.New("injected accounting query failure")
+	t.Run("accounting query failure", func(t *testing.T) {
+		api := &fakeWindowsJobAccountingAPI{err: queryErr}
+		if active, err := jobActiveProcessesWithAPI(7, api); active != 0 || !errors.Is(err, queryErr) {
+			t.Fatalf("active/error = %d/%v, want unknown/error", active, err)
+		}
+	})
+	t.Run("drain query failure", func(t *testing.T) {
+		api := &fakeWindowsJobAccountingAPI{err: queryErr}
+		err := awaitWindowsJobEmptyWithAPI(context.Background(), 7, 10*time.Millisecond, api)
+		if !errors.Is(err, queryErr) || strings.Contains(err.Error(), "still reports 0") {
+			t.Fatalf("failed accounting drain = %v, want preserved query failure", err)
+		}
+	})
+	t.Run("active process is not empty", func(t *testing.T) {
+		api := &fakeWindowsJobAccountingAPI{active: 1}
+		err := awaitWindowsJobEmptyWithAPI(context.Background(), 7, 10*time.Millisecond, api)
+		if err == nil || !strings.Contains(err.Error(), "still reports 1 active process") {
+			t.Fatalf("nonempty Job drain = %v, want active-process evidence", err)
+		}
+	})
+}
+
+// NAT-F-010/011 verifies the real Windows Job accounting structure reports a live managed command.
+func TestWindowsJobAccounting_RealJobTracksManagedProcess(t *testing.T) {
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	process, err := supervisor.Start(context.Background(), ProcessSpec{Executable: os.Args[0], Args: []string{"__native-fixture", "hold"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	managed := process.(*windowsProcess)
+	active, err := jobActiveProcesses(managed.job)
+	if err != nil || active == 0 {
+		t.Fatalf("live Job active count = %d, %v; want at least one process", active, err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	if err := managed.Terminate(ctx, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// NAT-F-011 verifies a real closed Job handle is an accounting failure, never an empty Job.
+func TestWindowsJobAccounting_ClosedHandleIsUnknown(t *testing.T) {
+	job, err := createWindowsJob(jobNameFor(stateTestDir(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.CloseHandle(job); err != nil {
+		t.Fatal(err)
+	}
+	err = awaitWindowsJobEmpty(context.Background(), job, 10*time.Millisecond)
+	if err == nil || !strings.Contains(err.Error(), "cannot read process scope Job accounting") {
+		t.Fatalf("closed Job drain = %v, want an accounting error", err)
+	}
+}
+
+// NAT-F-011 keeps the production Job drain budget aligned with the 2-second contract.
+func TestWindowsSupervisor_DrainBudget(t *testing.T) {
+	if windowsDrainBudget != 2*time.Second {
+		t.Fatalf("Windows Job drain budget = %s, want 2s", windowsDrainBudget)
+	}
 }
 
 type pollingWindowsJobAPI struct {

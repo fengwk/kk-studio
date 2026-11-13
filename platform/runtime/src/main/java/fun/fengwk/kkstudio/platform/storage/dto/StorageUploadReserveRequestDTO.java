@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.storage.dto;
 
 import lombok.Data;
+import org.jspecify.annotations.Nullable;
 
 /**
  * 全局 Blob 存储上传预约请求体。
@@ -24,4 +25,19 @@ public class StorageUploadReserveRequestDTO {
 
   /** 必填声明的 SHA-256：64 位十六进制摘要（大小写均可，服务端统一小写）。 */
   private String sha256;
+
+  /** 图像文件的存储格式，为存储后字节的 MIME subtype（例如 jpeg、png 或 webp）；非图片为空。 */
+  private @Nullable String format;
+
+  /** 图像缩放前的原始像素宽度；非图片为空。 */
+  private @Nullable Integer originalWidth;
+
+  /** 图像缩放前的原始像素高度；非图片为空。 */
+  private @Nullable Integer originalHeight;
+
+  /** 实际上传字节的像素宽度；非图片为空。 */
+  private @Nullable Integer storedWidth;
+
+  /** 实际上传字节的像素高度；非图片为空。 */
+  private @Nullable Integer storedHeight;
 }

@@ -385,9 +385,8 @@ class DatabaseTurnResolverTest {
             + "agent system prompt\n\n"
             + "[harness]\n"
             + "You are working in the KK Studio harness. A session is a tree of messages; you are a"
-            + " thread working on one branch of it. Subagents run in their own threads: they share"
-            + " the environment and session files with you, but not messages, and see only the task"
-            + " prompt they are given.",
+            + " thread working on one branch of it. Subagents run in their own threads, do not"
+            + " share messages, and see only the task prompt they are given.",
         instructionText(requestSpec));
   }
 
@@ -495,7 +494,7 @@ class DatabaseTurnResolverTest {
     assertTrue(skillSpec.systemInstruction().contains("<available_skills>"));
     assertFalse(skillSpec.systemInstruction().contains("<path>"));
     assertEquals(
-        List.of("read"),
+        List.of("read", "load_skill"),
         skillSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
         EnvironmentSupport.ROUTED, skillSpec.toolBindings().getFirst().environmentSupport());
@@ -600,10 +599,13 @@ class DatabaseTurnResolverTest {
     // draft 未选环境：REQUIRED bash 只被过滤，OPTIONAL read 与 Agent skill 照常来自 Agent 配置。
     LiveTurnPlan.Planned unbound = fixture.plannedWithSettings(path, unboundSettings("default"));
     assertEquals(
-        List.of("read", "bash"),
+        List.of("read", "load_skill", "bash"),
         unbound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::name).toList());
     assertEquals(
-        List.of(LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.FILTERED),
+        List.of(
+            LiveTurnPlan.ToolState.SENT,
+            LiveTurnPlan.ToolState.SENT,
+            LiveTurnPlan.ToolState.FILTERED),
         unbound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::state).toList());
     assertTrue(
         unbound.spec().toolBindings().stream()
@@ -614,10 +616,11 @@ class DatabaseTurnResolverTest {
     // draft 选择环境：同一次 planner 立即把 bash 送入模型工具面并绑定解析出的路由身份。
     LiveTurnPlan.Planned bound = fixture.plannedWithSettings(path, settings("default"));
     assertEquals(
-        List.of("bash", "read"),
+        List.of("bash", "read", "load_skill"),
         bound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::name).toList());
     assertEquals(
-        List.of(LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT),
+        List.of(
+            LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT, LiveTurnPlan.ToolState.SENT),
         bound.candidateTools().stream().map(LiveTurnPlan.CandidateTool::state).toList());
     assertEquals(ENV_A, bound.spec().toolBindings().getFirst().environmentId());
 
@@ -717,7 +720,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings));
 
     assertEquals(
-        List.of("bash", "read"),
+        List.of("bash", "read", "load_skill"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     List<EnvironmentId> boundRoutes =
         requestSpec.toolBindings().stream().map(ToolBinding::environmentId).toList();
@@ -758,7 +761,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(
-        List.of("read"),
+        List.of("read", "load_skill"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertFalse(requestSpec.systemInstruction().contains("<path>"));
   }
@@ -771,7 +774,7 @@ class DatabaseTurnResolverTest {
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("default")));
 
     assertEquals(
-        List.of("read"),
+        List.of("read", "load_skill"),
         requestSpec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList());
     assertEquals(
         EnvironmentSupport.ROUTED, requestSpec.toolBindings().getFirst().environmentSupport());
@@ -801,7 +804,7 @@ class DatabaseTurnResolverTest {
             ProviderType.OPENAI,
             PromptCacheRetention.NONE,
             true,
-            HarnessCatalog.from(List.of()));
+            skillLoadOnlyCatalog());
     fixture.readyEnvironment(ENV_A, List.of("dev"));
     assertEquals(
         "tool not found: read",
@@ -1936,7 +1939,23 @@ class DatabaseTurnResolverTest {
     Tool dummyTask = mock(Tool.class);
     when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
     when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
-    return new BuiltinHarnessContributor(BuiltinFileToolsTestSupport.fileTools(), dummyTask);
+    Tool dummySkillLoad = mock(Tool.class);
+    when(dummySkillLoad.descriptor()).thenReturn(hostDescriptor("load_skill"));
+    when(dummySkillLoad.requirements()).thenReturn(ToolRequirements.none());
+    return new BuiltinHarnessContributor(
+        BuiltinFileToolsTestSupport.fileTools(), dummyTask, dummySkillLoad);
+  }
+
+  static HarnessCatalog skillLoadOnlyCatalog() {
+    Tool skillLoad = mock(Tool.class);
+    when(skillLoad.descriptor()).thenReturn(hostDescriptor("load_skill"));
+    when(skillLoad.requirements()).thenReturn(ToolRequirements.none());
+    HarnessContributor skillContributor =
+        HarnessContributor.of(
+            new ContributorDescriptor(new ContributorId("skill-load"), "Skill load", "1", Set.of()),
+            registrar ->
+                registrar.registerTool("load-skill", skillLoad, ToolVisibility.INTERNAL, 0));
+    return HarnessCatalog.from(List.of(skillContributor));
   }
 
   /** 业务 contributor 替身：一个可显式选择、无需环境的工具。 */

@@ -204,8 +204,13 @@ describe('InteractionsPage', () => {
             link: '/projects/proj-xyz?issue=issue-101&thread=old#details' },
           toolCallId: 'call-2',
           toolName: 'write',
-          argumentsJson: '{"path":"main.ts"}',
-          approval: { required: true, reason: '写代码' },
+          argumentsJson: '{"path":"/repo/main.ts","content":"x\\n"}',
+          // write 审批必须携带 Environment 返回的真实 review；新文件的 sha256 为 null。
+          approval: {
+            required: true,
+            reason: '写代码',
+            editReview: { path: '/repo/main.ts', diff: '@@ -0,0 +1 @@\n+x', sha256: null },
+          },
           queuedSameFileCount: 2,
           createdAt: 1790503500000,
         },

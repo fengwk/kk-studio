@@ -23,7 +23,11 @@ public record ResourceMessageContent(
     Long totalBytes,
     Long totalLines,
     String preview,
-    ImageInputTier imageTier)
+    ImageInputTier imageTier,
+    Integer originalWidth,
+    Integer originalHeight,
+    Integer displayWidth,
+    Integer displayHeight)
     implements AgentMessageContent {
 
   /** name 的 UTF-8 字节上限（与 {@link ResourceRef#MAX_NAME_UTF8_BYTES} 一致）。 */
@@ -48,6 +52,11 @@ public record ResourceMessageContent(
       throw new IllegalArgumentException(
           "preview must not exceed " + MAX_PREVIEW_UTF8_BYTES + " UTF-8 bytes");
     }
+    validateDimensions("original", originalWidth, originalHeight);
+    validateDimensions("display", displayWidth, displayHeight);
+    if ((displayWidth != null || displayHeight != null) && originalWidth == null) {
+      throw new IllegalArgumentException("display dimensions require original dimensions");
+    }
     if (totalBytes != null || totalLines != null) {
       if (totalBytes == null || totalLines == null) {
         throw new IllegalArgumentException(
@@ -59,10 +68,35 @@ public record ResourceMessageContent(
       if (totalLines < 0) {
         throw new IllegalArgumentException("totalLines must not be negative");
       }
-      if (imageTier != null) {
-        throw new IllegalArgumentException("externalized text must not carry an image input tier");
+      if (imageTier != null
+          || originalWidth != null
+          || originalHeight != null
+          || displayWidth != null
+          || displayHeight != null) {
+        throw new IllegalArgumentException(
+            "externalized text must not carry image tier or dimensions");
       }
     }
+  }
+
+  private static void validateDimensions(String name, Integer width, Integer height) {
+    if ((width == null) != (height == null)) {
+      throw new IllegalArgumentException(name + " width and height must both be present or null");
+    }
+    if (width != null && (width <= 0 || height <= 0)) {
+      throw new IllegalArgumentException(name + " dimensions must be positive");
+    }
+  }
+
+  /** 保留无尺寸的媒体构造调用。 */
+  public ResourceMessageContent(
+      UUID blobId,
+      String name,
+      Long totalBytes,
+      Long totalLines,
+      String preview,
+      ImageInputTier imageTier) {
+    this(blobId, name, totalBytes, totalLines, preview, imageTier, null, null, null, null);
   }
 
   /** 普通媒体便利工厂方法（无 preview），图片输入档位由平台默认决定。 */
@@ -79,6 +113,29 @@ public record ResourceMessageContent(
   public static ResourceMessageContent media(
       UUID blobId, String name, String preview, ImageInputTier imageTier) {
     return new ResourceMessageContent(blobId, name, null, null, preview, imageTier);
+  }
+
+  /** 普通媒体便利工厂方法（带原始与显示尺寸）。 */
+  public static ResourceMessageContent media(
+      UUID blobId,
+      String name,
+      String preview,
+      ImageInputTier imageTier,
+      Integer originalWidth,
+      Integer originalHeight,
+      Integer displayWidth,
+      Integer displayHeight) {
+    return new ResourceMessageContent(
+        blobId,
+        name,
+        null,
+        null,
+        preview,
+        imageTier,
+        originalWidth,
+        originalHeight,
+        displayWidth,
+        displayHeight);
   }
 
   /** 外部化文本便利工厂方法（文本工件不携带图片输入档位）。 */

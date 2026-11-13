@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.contributor.api.ConfiguredSkill;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -18,6 +19,7 @@ import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 import fun.fengwk.kkstudio.harness.tool.codec.AgentToolDefinitionJsonCodec;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -43,6 +45,7 @@ class ToolBindingJsonCodecTest {
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + ",\"environmentName\":\"dev\""
+            + ",\"configuredSkills\":[]"
             + "}";
     assertEquals(environmentJson, codec.encode(environment));
     assertEquals(environment, codec.decode(environmentJson));
@@ -57,6 +60,7 @@ class ToolBindingJsonCodecTest {
             + ",\"environmentSupport\":\"NONE\""
             + ",\"environmentId\":null"
             + ",\"environmentName\":null"
+            + ",\"configuredSkills\":[]"
             + "}";
     assertEquals(hostJson, codec.encode(host));
     assertEquals(host, codec.decode(hostJson));
@@ -73,6 +77,7 @@ class ToolBindingJsonCodecTest {
             + ",\"environmentSupport\":\"ROUTED\""
             + ",\"environmentId\":null"
             + ",\"environmentName\":null"
+            + ",\"configuredSkills\":[]"
             + "}";
     assertEquals(optionalWithoutEnvJson, codec.encode(optionalWithoutEnv));
     assertEquals(optionalWithoutEnv, codec.decode(optionalWithoutEnvJson));
@@ -97,6 +102,7 @@ class ToolBindingJsonCodecTest {
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + ",\"environmentName\":\"dev\""
+            + ",\"configuredSkills\":[]"
             + "}";
     assertEquals(optionalWithEnvJson, codec.encode(optionalWithEnv));
     assertEquals(optionalWithEnv, codec.decode(optionalWithEnvJson));
@@ -120,11 +126,38 @@ class ToolBindingJsonCodecTest {
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + ",\"environmentName\":\"dev\""
+            + ",\"configuredSkills\":[]"
             + "}";
     assertEquals(requiredJson, codec.encode(requiredWithGoalContributor));
     assertEquals(requiredWithGoalContributor, codec.decode(requiredJson));
     assertEquals(EnvironmentSupport.REQUIRED, codec.decode(requiredJson).environmentSupport());
     assertEquals(ENVIRONMENT_ID, codec.decode(requiredJson).environmentId());
+  }
+
+  /** Configured skills survive serialization and malformed skill data is rejected. */
+  @Test
+  void roundTripsConfiguredSkillsAndRejectsMalformedSkills() {
+    ConfiguredSkill skill = new ConfiguredSkill("review", "acme/review", "1.2.3");
+    ToolBinding binding =
+        new ToolBinding(
+            definition("load_skill"),
+            new ContributorBinding("core", "load-skill"),
+            EnvironmentSupport.NONE,
+            null,
+            null,
+            List.of(skill));
+    String json = codec.encode(binding);
+    assertEquals(
+        "{\"name\":\"review\",\"packageName\":\"acme/review\",\"version\":\"1.2.3\"}",
+        json.substring(json.indexOf("[{") + 1, json.lastIndexOf("]")));
+    assertEquals(binding, codec.decode(json));
+
+    String nonArraySkills =
+        json.substring(0, json.indexOf(",\"configuredSkills\":")) + ",\"configuredSkills\":{}}";
+    assertThrows(IllegalArgumentException.class, () -> codec.decode(nonArraySkills));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> codec.decode(json.replace("\"packageName\":\"acme/review\"", "\"packageName\":1")));
   }
 
   /** 字符串边界在任何领域值构造之前拒绝畸形文档。 */
@@ -159,6 +192,7 @@ class ToolBindingJsonCodecTest {
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + ",\"environmentName\":\"dev\""
+            + ",\"configuredSkills\":[]"
             + "}";
 
     // 未知字段
@@ -278,6 +312,7 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentSupport\":\"REQUIRED\""
                     + ",\"environmentId\":null"
                     + ",\"environmentName\":null"
+                    + ",\"configuredSkills\":[]"
                     + suffix));
 
     assertThrows(
@@ -289,6 +324,7 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentId\":"
                     + environmentJson(ENVIRONMENT_ID)
                     + ",\"environmentName\":null"
+                    + ",\"configuredSkills\":[]"
                     + suffix));
 
     assertThrows(
@@ -299,6 +335,7 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentSupport\":\"REQUIRED\""
                     + ",\"environmentId\":null"
                     + ",\"environmentName\":\"dev\""
+                    + ",\"configuredSkills\":[]"
                     + suffix));
 
     // NONE 携带 environmentId 被拒绝
@@ -311,6 +348,7 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentId\":"
                     + environmentJson(ENVIRONMENT_ID)
                     + ",\"environmentName\":null"
+                    + ",\"configuredSkills\":[]"
                     + suffix));
 
     // NONE 携带 environmentName 被拒绝
@@ -322,6 +360,7 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentSupport\":\"NONE\""
                     + ",\"environmentId\":null"
                     + ",\"environmentName\":\"dev\""
+                    + ",\"configuredSkills\":[]"
                     + suffix));
 
     // ROUTED 只提供 id 不提供 name 被拒绝
@@ -334,6 +373,7 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentId\":"
                     + environmentJson(ENVIRONMENT_ID)
                     + ",\"environmentName\":null"
+                    + ",\"configuredSkills\":[]"
                     + suffix));
 
     // ROUTED 只提供 name 不提供 id 被拒绝
@@ -345,6 +385,7 @@ class ToolBindingJsonCodecTest {
                     + ",\"environmentSupport\":\"ROUTED\""
                     + ",\"environmentId\":null"
                     + ",\"environmentName\":\"dev\""
+                    + ",\"configuredSkills\":[]"
                     + suffix));
 
     // environmentName 为空白字符串被拒绝

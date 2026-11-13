@@ -34,18 +34,11 @@ public final class ModelAttemptMaterialization {
         || attached.resultEntryId() == null
         || !attached.status().isTerminal()
         || !attached.failedAttempts().isEmpty()
-        || attached.streamCheckpoint() != null
-        || attached.providerReplayState() != null) {
+        || attached.streamCheckpoint() != null) {
       throw new IllegalArgumentException(
           "attempt materialization validation requires a pending terminal attach transition");
     }
     List<Entry> materialized = failuresAfterBasis(stored, resultPath);
-    for (Entry failureEntry : materialized) {
-      if (failureEntry.providerReplayState() != null) {
-        throw new IllegalArgumentException(
-            "materialized model attempt failure must not carry provider replay state");
-      }
-    }
     if (materialized.size() != stored.failedAttempts().size()) {
       throw new IllegalArgumentException(
           "model result path must materialize every failed attempt exactly once");
@@ -102,17 +95,8 @@ public final class ModelAttemptMaterialization {
   private static void requireTerminalResult(ModelInvocation invocation, EntryPath resultPath) {
     if (invocation.status() == ModelInvocationStatus.SUCCEEDED) {
       TurnStartPayload start = requiredTurnStart(invocation, resultPath);
-      if (!Objects.equals(
-          invocation.providerReplayState(), resultPath.head().providerReplayState())) {
-        throw new IllegalArgumentException(
-            "materialized assistant entry must match the invocation provider replay state");
-      }
       requireSuccessfulResult(invocation, resultPath, start);
       return;
-    }
-    if (resultPath.head().providerReplayState() != null) {
-      throw new IllegalArgumentException(
-          "materialized terminal error must not carry provider replay state");
     }
     EntryPayload resultPayload = resultPath.head().payload();
     if (!(resultPayload instanceof AssistantErrorPayload actual)
@@ -169,10 +153,6 @@ public final class ModelAttemptMaterialization {
     if (attached.status() != ModelInvocationStatus.CANCELLED) {
       throw new IllegalArgumentException(
           "only a direct Stop may attach a result while the stored invocation is active");
-    }
-    if (resultEntry.providerReplayState() != null) {
-      throw new IllegalArgumentException(
-          "direct stop result entry must not carry provider replay state");
     }
     EntryPayload resultPayload = resultEntry.payload();
     StreamCheckpoint checkpoint = stored.streamCheckpoint();

@@ -56,7 +56,7 @@ class EnvironmentCapabilityContractTest {
   @Test
   void requestContainsOnlyCapabilityExecutionFields() {
     assertArrayEquals(
-        new String[] {"descriptor", "call", "timeout", "expectedFile"},
+        new String[] {"descriptor", "call", "timeout", "expectedFile", "resourceDownload"},
         componentNames(EnvironmentCapabilityExecutionRequest.class.getRecordComponents()));
   }
 
@@ -154,10 +154,40 @@ class EnvironmentCapabilityContractTest {
                 new EnvironmentCapabilityCall("call-1", "{\"path\":\"/srv/a\"}"),
                 Duration.ofSeconds(-1)));
     assertEquals(
-        List.of("descriptor", "call", "timeout", "expectedFile"),
+        List.of("descriptor", "call", "timeout", "expectedFile", "resourceDownload"),
         Arrays.stream(EnvironmentCapabilityExecutionRequest.class.getRecordComponents())
             .map(RecordComponent::getName)
             .toList());
+  }
+
+  /** 新文件的 fs.write 前置条件不带 SHA；edit 仍必须引用现有文件的内容哈希。 */
+  @Test
+  void expectedFileAllowsMissingShaOnlyForWrite() {
+    EnvironmentCapabilityDescriptor write =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE);
+    EnvironmentCapabilityDescriptor edit =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT);
+    ExpectedFile newFile = new ExpectedFile("/srv/new.txt", null);
+
+    EnvironmentCapabilityExecutionRequest request =
+        new EnvironmentCapabilityExecutionRequest(
+            write,
+            new EnvironmentCapabilityCall(
+                "write-call", "{\"path\":\"/srv/new.txt\",\"content\":\"x\"}"),
+            Duration.ZERO,
+            newFile);
+
+    assertEquals(newFile, request.expectedFile());
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EnvironmentCapabilityExecutionRequest(
+                edit,
+                new EnvironmentCapabilityCall(
+                    "edit-call",
+                    "{\"path\":\"/srv/a.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}"),
+                Duration.ZERO,
+                newFile));
   }
 
   /** Capability result 的 details JSON 默认值、object 校验和 content 数量边界。 */

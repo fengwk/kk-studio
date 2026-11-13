@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.api.session;
 
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+
 /**
  * Assistant 声明的已完成工具调用；rendererKey 是冻结的前端渲染身份。
  *
@@ -13,7 +15,8 @@ public record ToolCallMessageContent(
     String rendererKey,
     String argumentsJson,
     String historyAction,
-    String environmentName)
+    String environmentName,
+    ProviderBlockData providerBlockData)
     implements AgentMessageContent {
 
   public ToolCallMessageContent {
@@ -25,10 +28,20 @@ public record ToolCallMessageContent(
     environmentName = requireNullOrNonBlank(environmentName, "environmentName");
   }
 
+  public ToolCallMessageContent(
+      String toolCallId,
+      String toolName,
+      String rendererKey,
+      String argumentsJson,
+      String historyAction,
+      String environmentName) {
+    this(toolCallId, toolName, rendererKey, argumentsJson, historyAction, environmentName, null);
+  }
+
   /** 不携带冻结 action / Environment 名的调用内容（无附加历史投影元数据时使用）。 */
   public ToolCallMessageContent(
       String toolCallId, String toolName, String rendererKey, String argumentsJson) {
-    this(toolCallId, toolName, rendererKey, argumentsJson, null, null);
+    this(toolCallId, toolName, rendererKey, argumentsJson, null, null, null);
   }
 
   private static String requireNonBlank(String value, String name) {

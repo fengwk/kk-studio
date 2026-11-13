@@ -384,6 +384,14 @@ public class StorageControllerTest extends WebPostgresTestSupport {
     request.put("mediaType", mediaType);
     request.put("sizeBytes", Long.toString(size));
     request.put("sha256", sha256);
+    // Image reserves must report the browser-side image facts; these tests do not depend on them.
+    if (mediaType.startsWith("image/")) {
+      request.put("format", mediaType.substring("image/".length()));
+      request.put("originalWidth", 1);
+      request.put("originalHeight", 1);
+      request.put("storedWidth", 1);
+      request.put("storedHeight", 1);
+    }
     return objectMapper.writeValueAsString(request);
   }
 

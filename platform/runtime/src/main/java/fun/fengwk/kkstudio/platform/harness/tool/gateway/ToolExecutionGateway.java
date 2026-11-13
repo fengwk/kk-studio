@@ -9,6 +9,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityTransport;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
@@ -58,9 +59,9 @@ public final class ToolExecutionGateway implements ToolGateway {
   private static final String TOOL_UNAVAILABLE_NEXT_ACTION =
       "Continue without this tool or ask the user";
 
-  /** 需要编辑评审时的下一步：先携带编辑评审请求审批，再调用工具。 */
+  /** 文件变更需要评审时的下一步：先请求审批，再调用工具。 */
   private static final String EDIT_REVIEW_REQUIRED_NEXT_ACTION =
-      "Request approval with an edit review before calling the tool again";
+      "Request approval with a file mutation review before calling the tool again";
 
   /** 冻结定义与当前 catalog 不一致时的确定性下一步：下一轮按当前目录重新冻结工具定义。 */
   private static final String DEFINITION_MISMATCH_NEXT_ACTION =
@@ -158,12 +159,26 @@ public final class ToolExecutionGateway implements ToolGateway {
     }
   }
 
-  /** 编辑身份：环境 edit 能力工具或逐调用路由的 edit 文件工具。 */
-  private static boolean isEditTool(Tool tool) {
+  /** 返回文件变更工具对应的只读预览能力；其它工具不需要 mutation review。 */
+  private static EnvironmentCapabilityId reviewCapability(Tool tool) {
     if (tool instanceof EnvironmentCapabilityTool environmentTool) {
-      return EnvironmentCapabilityIds.FS_EDIT.equals(environmentTool.capability().id());
+      EnvironmentCapabilityId capabilityId = environmentTool.capability().id();
+      if (EnvironmentCapabilityIds.FS_EDIT.equals(capabilityId)) {
+        return EnvironmentCapabilityIds.FS_EDIT_PREVIEW;
+      }
+      if (EnvironmentCapabilityIds.FS_WRITE.equals(capabilityId)) {
+        return EnvironmentCapabilityIds.FS_WRITE_PREVIEW;
+      }
     }
-    return tool instanceof FileTool fileTool && fileTool.operation() == FileTool.Operation.EDIT;
+    if (tool instanceof FileTool fileTool) {
+      if (fileTool.operation() == FileTool.Operation.EDIT) {
+        return EnvironmentCapabilityIds.FS_EDIT_PREVIEW;
+      }
+      if (fileTool.operation() == FileTool.Operation.WRITE) {
+        return EnvironmentCapabilityIds.FS_WRITE_PREVIEW;
+      }
+    }
+    return null;
   }
 
   /** 只读校验冻结工具绑定，并返回当前权限策略的判定。 */
@@ -188,8 +203,11 @@ public final class ToolExecutionGateway implements ToolGateway {
         case ALLOW -> new ToolGateway.Allow();
         case ASK -> {
           String reason = "Permission rules require approval";
-          if (isEditTool(resolved.contribution().tool())) {
-            yield EditReviewPreflight.prepare(capabilityTransport, request, reason);
+          EnvironmentCapabilityId previewCapability =
+              reviewCapability(resolved.contribution().tool());
+          if (previewCapability != null) {
+            yield EditReviewPreflight.prepare(
+                capabilityTransport, request, reason, previewCapability);
           }
           yield new ToolGateway.Ask(reason);
         }
@@ -221,15 +239,20 @@ public final class ToolExecutionGateway implements ToolGateway {
       ToolContribution contribution = resolved.contribution();
       Tool tool = contribution.tool();
       ToolBinding binding = execution.request().binding();
-      // 编辑的审批必须携带 Environment 返回的真实文件审查。
-      if (isEditTool(tool) && execution.approval().required() && execution.expectedFile() == null) {
+      // 文件变更工具的审批必须携带 Environment 返回的真实文件审查。
+      EnvironmentCapabilityId reviewCapability = reviewCapability(tool);
+      if (reviewCapability != null
+          && execution.approval().required()
+          && (execution.expectedFile() == null
+              || (EnvironmentCapabilityIds.FS_EDIT_PREVIEW.equals(reviewCapability)
+                  && execution.expectedFile().sha256() == null))) {
         return reject(
             catalogLease,
             lease,
             new ToolInvocationError(
                 ToolErrorClassifier.EDIT_REVIEW_REQUIRED_KIND,
                 ToolErrorGuidance.message(
-                    "Required edit approval must include a valid edit review",
+                    "Required file mutation approval must include a valid review",
                     ExecutionFact.NOT_EXECUTED,
                     EDIT_REVIEW_REQUIRED_NEXT_ACTION)));
       }
@@ -253,7 +276,8 @@ public final class ToolExecutionGateway implements ToolGateway {
               scope.assistantEntryId(),
               clock.instant(),
               scope.mediaCapabilities(),
-              Optional.ofNullable(boundEnvironment));
+              Optional.ofNullable(boundEnvironment),
+              execution.request().binding().configuredSkills());
       // 超时在执行前只解析一次：解析结果原样进入请求，下游直接使用该超时值，不施加额外上限。
       ToolExecutionRequest toolRequest;
       try {

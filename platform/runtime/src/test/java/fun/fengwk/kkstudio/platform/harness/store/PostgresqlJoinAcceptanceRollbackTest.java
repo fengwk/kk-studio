@@ -151,7 +151,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                 runtime,
                 command,
                 join,
-                (current, commands, copiedEntries) -> {
+                (current, commands, copiedEntries, branchSettings) -> {
                   throw new IllegalStateException(
                       "preflight rejected: insufficient balance or policy denial");
                 }));
@@ -340,7 +340,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                       newSessionChild(
                           child1SessionId, child1ThreadId, baseline.threadId(), "task 1"),
                       joinRequest(join1Id, baseline.threadId(), baseline.rootEntryId(), 5, 5),
-                      (current, commands, copiedEntries) -> {
+                      (current, commands, copiedEntries, branchSettings) -> {
                         tx1HoldingLock.countDown();
                         try {
                           if (!tx1CanCommit.await(10, TimeUnit.SECONDS)) {
@@ -461,7 +461,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                       runtime,
                       request,
                       join,
-                      (current, commands, copiedEntries) -> {
+                      (current, commands, copiedEntries, branchSettings) -> {
                         tx1HoldingTreeLock.countDown();
                         awaitOrFail(tx1CanCommit);
                         return commands;
@@ -526,7 +526,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                       runtime,
                       request,
                       ticket,
-                      (current, commands, copiedEntries) -> {
+                      (current, commands, copiedEntries, branchSettings) -> {
                         tx1HoldingTreeLock.countDown();
                         awaitOrFail(tx1CanCommit);
                         return commands;
@@ -635,7 +635,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                 runtime,
                 newSessionChild(abortedSessionId, abortedThreadId, baseline.threadId(), "garbage"),
                 joinRequest(abortedJoinId, baseline.threadId(), baseline.rootEntryId(), 5, 3),
-                (current, commands, copiedEntries) -> {
+                (current, commands, copiedEntries, branchSettings) -> {
                   throw new RuntimeException("abort");
                 }));
     assertEquals(
@@ -796,7 +796,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
                       runtime,
                       requestA,
                       joinA,
-                      (current, commands, copiedEntries) -> {
+                      (current, commands, copiedEntries, branchSettings) -> {
                         tx1HoldingAdmission.countDown();
                         awaitOrFail(tx1CanCommit);
                         return commands;

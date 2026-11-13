@@ -6,7 +6,7 @@
 # `:<branch>` 与 `:<commit-sha>` 两个 tag。
 #
 # 每次触发先跑低成本的版本/文档/敏感数据 preflight。`main` 随后并行执行 Java 仓库门禁、
-# 前端门禁与 daemon-ci 五平台矩阵；Java 门禁只构建一次带内嵌前端的发行 Fat JAR，并把它
+# 前端门禁与可复用 Go Daemon CI；Java 门禁只构建一次带内嵌前端的发行 Fat JAR，并把它
 # 作为同 run artifact 交给 publish。`dev` 不跑全量门禁，直接从源码构建镜像。真实模型 E2E 与真实端到端 UI E2E 不在本文工作流内。
 #
 # Registry credential 只来自 Actions secrets，不作为 build arg、不进入 image layer
@@ -61,13 +61,12 @@ jobs:
       - name: Verify capability schema synchronization
         run: node scripts/dev/verify/generated-contracts/capabilities.mjs --check
 
-  # 五平台 Daemon 平台门禁与安装器宿主验收由可复用工作流提供：main 发布镜像前必须通过，
-  # dev 只发布镜像，不需要等待该矩阵；改动 daemon/** 时 PR 门禁仍会独立触发。
+  # Go Daemon 静态构建、跨平台测试与安装脚本门禁由可复用工作流提供。
   daemon_ci:
-    name: node daemon matrix
+    name: Go daemon CI
     needs: preflight
     if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
-    uses: ./.github/workflows/daemon-ci.yml
+    uses: ./.github/workflows/daemon-go-ci.yml
 
   validate:
     name: validate repository
@@ -89,29 +88,27 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-          cache-dependency-path: |
-            frontend/package-lock.json
-            daemon/package-lock.json
+          cache-dependency-path: frontend/package-lock.json
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: daemon-go/go.mod
       - name: Set up PostgreSQL client tools
         uses: ./.github/actions/postgres-client
-      - name: Install daemon dependencies
-        # 仓库脚本 fixture 使用真实 daemon 依赖（含 tar 解析器）与真实 Node 入口。
-        run: npm --prefix daemon ci
-      - name: Build daemon transport for Java integration tests
-        # Web 反向流测试启动真实 Node 进程，必须先生成同一提交的 daemon/dist。
-        run: npm --prefix daemon run build
+      - name: Build Go daemon for Java integration tests
+        working-directory: daemon-go
+        env:
+          CGO_ENABLED: '0'
+        run: go build -o "$RUNNER_TEMP/kk-studio-daemon-go" ./cmd/kk-studio-daemon
       - name: Run repository script tests
         uses: ./.github/actions/repository-script-tests
+        env:
+          GO_BIN: go
         with:
           globs: scripts/*/tests/*.test.mjs scripts/dev/verify/*/tests/*.test.mjs deploy/test/mock/*.test.mjs
       - name: Verify Java sources, tests, coverage and package the distribution JAR
         # -Pdistribution 在同一个 reactor 中安装前端工具链并只打包一次带内嵌 React 产物的
         # 发行 Fat JAR；后续启动、decoder 与镜像发布都复用这个产物。
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify
-      - name: Verify the generated control protocol code
-        # The Maven protobuf build above resolved the pinned protoc into ~/.m2; the committed
-        # daemon/src/generated/control_pb.ts must equal protoc-gen-es output for control.proto.
-        run: npm --prefix daemon run check:control
+        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify "-Ddaemon.bin=$RUNNER_TEMP/kk-studio-daemon-go"
       - name: Resolve the distribution Fat JAR
         id: distribution
         run: |

@@ -83,7 +83,7 @@ func TestTunnel_WebSocketHandshakeHeadersAndDuplex(t *testing.T) {
 	done := make(chan any, 1)
 	go func() {
 		defer func() { done <- recover() }()
-		(&ControlConnection{}).tunnelIDEWebSocket(response, request, upstream, "/")
+		(&ControlConnection{}).tunnelIDEWebSocket(response, request, upstream)
 	}()
 	select {
 	case got := <-serverRequest:

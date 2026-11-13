@@ -126,7 +126,7 @@ class InvocationValueJsonTest {
         "[{\"attempt\":1,\"sequence\":7,\"text\":\"partial\",\"thinking\":\"thinking\","
             + "\"model\":{\"modelName\":\"model\",\"variant\":\"v1\"},\"requestedAt\":null,"
             + "\"error\":{\"kind\":\"TRANSIENT\",\"message\":\"provider unavailable\","
-            + "\"httpStatus\":null},"
+            + "\"httpStatus\":null,\"providerErrorCode\":null},"
             + "\"failedAt\":\"2026-01-01T00:00:00.123Z\","
             + "\"retryAt\":\"2026-01-01T00:00:02.123Z\"}]";
 

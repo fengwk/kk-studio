@@ -1,24 +1,11 @@
 /**
- * Shared fixtures for the Node Daemon packaging, installation and update tests.
- *
- * These fixtures never touch the network, never register a real service and never download the
- * real code-server runtime. They build a tiny, self-contained fake repository plus PATH shims
- * (curl / npm / uname / service managers) that are behaviourally faithful to the contracts the
- * scripts rely on:
- *
- * - `curl` maps the official URLs onto local fixture files.
- * - `npm` honours `--os` / `--cpu` by materialising only the matching `@koromix/koffi-<os>-<cpu>`
- *   and `@vscode/ripgrep-<os>-<cpu>` optional prebuilts, and refuses any install that would run
- *   target lifecycle scripts without `--ignore-scripts`.
- * - the daemon entrypoint and the frozen `lib/node` are real executables with a controlled
- *   `--version` / `--check-config` contract.
- * - the managed update script is imported from the shipped TypeScript module, so the tests never
- *   keep a second copy of the UNIX/Windows update facts.
+ * Local fixtures for Go daemon release archives and Unix installation tests. No fixture contacts
+ * the network or registers a real service: curl and service managers are replaced by local shims.
  */
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 
@@ -26,11 +13,8 @@ import { repositoryRoot } from '../../../dev/lib/repo-root.mjs'
 import { treeEntries, writeTarGz } from './tar.mjs'
 
 export const DAEMON_VERSION = '1.1.1'
-// This version is for simulated archives only and does not imply a published release.
-export const CODE_SERVER_VERSION = '4.143.1-kk.1'
 export const RELEASE_TAG = `v${DAEMON_VERSION}`
 export const RELEASE_BASE = 'https://github.com/fengwk/kk-studio/releases'
-export const PLATFORMS = ['linux-amd64', 'linux-arm64', 'macos-amd64', 'macos-arm64', 'windows-amd64']
 // TEST_BASH lets an isolated Bash 3.2 build run the same suite. Production and CI keep /bin/bash.
 export const SYSTEM_BASH = process.env.TEST_BASH || '/bin/bash'
 
@@ -38,109 +22,6 @@ export const REPOSITORY_ROOT = repositoryRoot()
 const TESTS_DIR = path.join(REPOSITORY_ROOT, 'scripts/daemon/tests')
 const PTY_RUN = path.join(TESTS_DIR, 'support/pty_run.py')
 const SCRIPTS_DIR = path.join(REPOSITORY_ROOT, 'scripts/daemon')
-
-const MAIN_JS = `console.log("kk-studio-daemon ${DAEMON_VERSION}")\n`
-
-/**
- * Behaviourally faithful `--check-config` stand-in for the fixture runtime: the real daemon
- * validates a config together with its sibling daemon.token. The fixture checker therefore
- * requires the same named pair, rejects the old/invalid envelope and verifies the credential
- * bytes the installer promised to publish, so a configuration staged under a temporary file
- * name cannot silently pass preflight.
- */
-const CHECK_CONFIG_JS = `import fs from "node:fs"
-import path from "node:path"
-
-const file = process.argv[2]
-function invalid(detail) {
-  process.stderr.write("Invalid daemon configuration: " + detail + "\\n")
-  process.exit(2)
-}
-let value
-try {
-  value = JSON.parse(fs.readFileSync(file, "utf8"))
-} catch {
-  invalid("daemon: invalid JSON")
-}
-if (value === null || typeof value !== "object" || Array.isArray(value)) {
-  invalid("daemon: expected object")
-}
-if (Object.keys(value).sort().join(",") !== "daemonConfig,environmentId,version") {
-  invalid("daemon: unknown field")
-}
-const tokenFile = path.join(path.dirname(file), "daemon.token")
-if (!fs.existsSync(tokenFile) || !fs.statSync(tokenFile).isFile() || fs.statSync(tokenFile).size === 0) {
-  invalid("daemon.token: missing sibling token")
-}
-const expected = process.env.FAKE_EXPECTED_TOKEN
-if (expected !== undefined && fs.readFileSync(tokenFile, "utf8").replace(/\\r?\\n$/, "") !== expected) {
-  invalid("daemon.token: does not match the staged credential")
-}
-if (JSON.stringify(value.daemonConfig).includes('"invalid"')) {
-  invalid("daemon.daemonConfig: unknown field")
-}
-process.stdout.write("Daemon configuration is valid\\n")
-`
-
-// The frozen runtime's lib/node is invoked as `lib/node -e ...` or
-// `lib/node <main.js> --version|--check-config <cfg>`.
-const FAKE_NODE = String.raw`#!/bin/sh
-# Frozen runtime Node shim used only by tests.
-# The installer still runs its real JSON envelope/manifest checks: \`-e\` scripts are delegated to
-# the host Node, because the shim only has to satisfy the daemon call shapes below.
-if [ "$1" = -e ]; then
-  exec "${process.execPath}" "$@"
-fi
-case "$1" in
-  */native/lock-helper.js)
-    # Behaviourally faithful stand-in for the real native helper: a directory marker is an atomic
-    # mutual-exclusion primitive, and \`hold\` keeps stdin open exactly like the kernel lock does.
-    mode=$2
-    directory=$3
-    log="$FAKE_SERVICE_STATE/lock.log"
-    case "$mode" in
-      hold)
-        # The real helper first ensures the private card directory, then takes the kernel lock.
-        mkdir -p "$directory" 2>/dev/null || :
-        if ! mkdir "$directory/.fake-install-lock" 2>/dev/null; then
-          echo 'install operation lock is busy' >&2
-          exit 75
-        fi
-        echo 'hold-start' >>"$log"
-        printf 'locked\n'
-        cat >/dev/null
-        rmdir "$directory/.fake-install-lock" 2>/dev/null || :
-        echo 'hold-end' >>"$log"
-        exit 0
-        ;;
-      wait)
-        echo 'wait-runtime-lock' >>"$log"
-        if [ "$FAKE_DAEMON_LOCKED" = "1" ]; then
-          echo 'daemon runtime lock wait timed out' >&2
-          exit 76
-        fi
-        exit 0
-        ;;
-      *)
-        echo 'usage: lock-helper hold <directory> | lock-helper wait <directory> <timeout-seconds>' >&2
-        exit 2
-        ;;
-    esac
-    ;;
-esac
-case "$2" in
-  --version)
-    version=$FAKE_NODE_VERSION
-    if [ -z "$version" ]; then version=__DAEMON_VERSION__; fi
-    printf 'kk-studio-daemon %s\n' "$version"
-    ;;
-  --check-config)
-    # 与真实 daemon 相同：配置与同目录 daemon.token 成对校验，由独立的检查器读取字节。
-    exec "${process.execPath}" "$(dirname "$0")/../../../check-config.mjs" "$3"
-    ;;
-  *) exit 3 ;;
-esac
-`.replaceAll('__DAEMON_VERSION__', DAEMON_VERSION)
 
 export const ENVIRONMENT_ID = '11111111-1111-4111-8111-111111111111'
 export const SECOND_ENVIRONMENT_ID = '22222222-2222-4222-8222-222222222222'
@@ -164,23 +45,6 @@ export function writeText(file, content, mode = 0o600) {
 }
 
 export const sha256Of = (file) => createHash('sha256').update(readFileSync(file)).digest('hex')
-
-/** Build a minimal stand-in for one frozen fork code-server archive. */
-export function codeServerTar(file, platform) {
-  const work = mkdtempSync(path.join(path.dirname(file), `cs-src-${platform}-`))
-  try {
-    const nodeName = platform.startsWith('windows-') ? 'node.exe' : 'node'
-    const rootName = `code-server-${CODE_SERVER_VERSION}-${platform}`
-    const root = path.join(work, rootName)
-    writeExecutable(path.join(root, 'lib', nodeName), FAKE_NODE)
-    writeText(path.join(root, 'out/node/entry.js'), '// frozen entry\n', 0o644)
-    mkdirSync(path.join(root, 'bin'))
-    symlinkSync(path.join('..', 'out', 'node', 'entry.js'), path.join(root, 'bin', 'code-server'))
-    writeTarGz(file, treeEntries(root, rootName))
-  } finally {
-    rmSync(work, { recursive: true, force: true })
-  }
-}
 
 const CURL_SHIM = `#!${process.execPath}
 const fs = require('node:fs')
@@ -227,172 +91,7 @@ if (!fs.existsSync(source) || !fs.statSync(source).isFile() || output === null) 
 fs.copyFileSync(source, output)
 `
 
-function npmShim() {
-  return `#!${process.execPath}
-const fs = require('node:fs')
-const path = require('node:path')
-
-const args = process.argv.slice(2)
-let prefix = null
-let targetOs = null
-let targetCpu = null
-let ignoreScripts = false
-for (let i = 0; i < args.length; i += 1) {
-  const arg = args[i]
-  if (arg === '--prefix') {
-    i += 1
-    prefix = args[i]
-  } else if (arg.startsWith('--prefix=')) {
-    prefix = arg.slice('--prefix='.length)
-  } else if (arg.startsWith('--os=')) {
-    targetOs = arg.slice('--os='.length)
-  } else if (arg.startsWith('--cpu=')) {
-    targetCpu = arg.slice('--cpu='.length)
-  } else if (arg === '--ignore-scripts') {
-    ignoreScripts = true
-  }
-}
-
-if (process.env.FAKE_NPM_LOG) {
-  fs.appendFileSync(process.env.FAKE_NPM_LOG, JSON.stringify(args) + '\\n')
-}
-
-if (prefix === null) {
-  process.exit(1)
-}
-// Real npm runs the target package's lifecycle scripts here. koffi's install script loads the
-// target prebuilt in the host process and falls back to a source build; cross-platform staging
-// only ever ships the locked prebuilt, so an install without --ignore-scripts must fail.
-if (!ignoreScripts) {
-  process.stderr.write('fake npm: refusing to run target lifecycle scripts without --ignore-scripts\\n')
-  process.stderr.write(
-    'fake npm: koffi install script cannot load @koromix/koffi-' + targetOs + '-' + targetCpu +
-      ' on this host and failed to rebuild from source\\n',
-  )
-  process.exit(1)
-}
-fs.mkdirSync(path.join(prefix, 'node_modules'), { recursive: true })
-if (process.env.FAKE_NPM_OMIT_PREBUILT === '1' || targetOs === null || targetCpu === null) {
-  process.exit(0)
-}
-// koffi 本体是普通生产依赖；安装锁 helper 从 node_modules/koffi 加载原生绑定。
-const koffiRoot = path.join(prefix, 'node_modules', 'koffi')
-fs.mkdirSync(koffiRoot, { recursive: true })
-fs.writeFileSync(path.join(koffiRoot, 'index.js'), 'module.exports = {}\\n')
-const prebuilt = path.join(prefix, 'node_modules', '@koromix', 'koffi-' + targetOs + '-' + targetCpu)
-fs.mkdirSync(prebuilt, { recursive: true })
-fs.writeFileSync(path.join(prebuilt, 'index.js'), 'module.exports = {}\\n')
-if (process.env.FAKE_NPM_FOREIGN_PREBUILT === '1') {
-  const foreign = path.join(prefix, 'node_modules', '@koromix', 'koffi-freebsd-x64')
-  fs.mkdirSync(foreign, { recursive: true })
-  fs.writeFileSync(path.join(foreign, 'index.js'), 'module.exports = {}\\n')
-}
-if (process.env.FAKE_NPM_OMIT_RG !== '1') {
-  // @vscode/ripgrep resolves @vscode/ripgrep-<platform>-<arch>/bin/rg from the installed package.
-  const rgRoot = path.join(prefix, 'node_modules', '@vscode', 'ripgrep-' + targetOs + '-' + targetCpu)
-  const rgName = targetOs === 'win32' ? 'rg.exe' : 'rg'
-  fs.mkdirSync(path.join(rgRoot, 'bin'), { recursive: true })
-  fs.writeFileSync(path.join(rgRoot, 'bin', rgName), '#!/bin/sh\\nexit 0\\n')
-  fs.chmodSync(path.join(rgRoot, 'bin', rgName), 0o755)
-  if (process.env.FAKE_NPM_FOREIGN_PREBUILT === '1') {
-    const foreignRg = path.join(prefix, 'node_modules', '@vscode', 'ripgrep-freebsd-x64')
-    fs.mkdirSync(path.join(foreignRg, 'bin'), { recursive: true })
-    fs.writeFileSync(path.join(foreignRg, 'bin', 'rg'), '#!/bin/sh\\nexit 0\\n')
-  }
-}
-`
-}
-
 const asResult = (completed) => ({ status: completed.status, stdout: completed.stdout, stderr: completed.stderr })
-
-/** A fake repository root for `scripts/daemon/prepare-release.sh`. */
-export class ReleaseFixture {
-  constructor(root) {
-    this.root = root
-    this.script = path.join(SCRIPTS_DIR, 'prepare-release.sh')
-    this.bindir = path.join(root, 'bin')
-    this.httpDir = path.join(root, 'http')
-    this.repo = path.join(root, 'repo')
-    // 每次 npm 调用的原始参数追加写入这里，供测试断言选择器与 --ignore-scripts。
-    this.npmLog = path.join(root, 'npm-args.log')
-    mkdirSync(this.bindir, { recursive: true })
-    mkdirSync(this.httpDir, { recursive: true })
-
-    writeExecutable(path.join(this.bindir, 'curl'), CURL_SHIM)
-    writeExecutable(path.join(this.bindir, 'npm'), npmShim())
-
-    const daemon = path.join(this.repo, 'daemon')
-    writeText(path.join(this.repo, 'LICENSE'), 'Apache License 2.0\n', 0o644)
-    writeText(path.join(daemon, 'THIRD_PARTY_NOTICES'), 'third-party notices\n', 0o644)
-    writeText(path.join(daemon, 'package.json'), `{"name":"@kk-studio/daemon","version":"${DAEMON_VERSION}"}\n`, 0o644)
-    writeText(path.join(daemon, 'package-lock.json'), '{}\n', 0o644)
-    // 构建侧使用真实 tar 解析器；目标平台的 --omit=dev 依赖不包含它。
-    mkdirSync(path.join(daemon, 'node_modules'), { recursive: true })
-    symlinkSync(path.join(REPOSITORY_ROOT, 'daemon/node_modules/tar'), path.join(daemon, 'node_modules/tar'), 'dir')
-    writeText(path.join(daemon, 'dist', 'main.js'), MAIN_JS, 0o644)
-    // The release archive ships the native install-lock helper and its dependencies.
-    writeText(path.join(daemon, 'dist', 'delay.js'), 'export {}\n', 0o644)
-    writeText(path.join(daemon, 'dist', 'native', 'lock-helper.js'), 'export {}\n', 0o644)
-    writeExecutable(path.join(daemon, 'ide-extension', 'extension.js'), 'module.exports = {}\n')
-
-    const codeServer = {}
-    for (const platform of PLATFORMS) {
-      const name = `code-server-${CODE_SERVER_VERSION}-${platform}.tar.gz`
-      const runtimeTar = path.join(this.httpDir, name)
-      codeServerTar(runtimeTar, platform)
-      codeServer[platform] = {
-        url: `https://github.com/fengwk/code-server/releases/download/v${CODE_SERVER_VERSION}/${name}`,
-        sha256: sha256Of(runtimeTar),
-      }
-    }
-    writeText(
-      path.join(daemon, 'runtime-manifest.json'),
-      JSON.stringify({ codeServerVersion: CODE_SERVER_VERSION, codeServer }, null, 2) + '\n',
-      0o644,
-    )
-    this.gitInit()
-  }
-
-  gitInit() {
-    const env = {
-      ...process.env,
-      GIT_AUTHOR_NAME: 'fixture',
-      GIT_AUTHOR_EMAIL: 'fixture@example.invalid',
-      GIT_COMMITTER_NAME: 'fixture',
-      GIT_COMMITTER_EMAIL: 'fixture@example.invalid',
-    }
-    for (const command of [
-      ['init', '-q', '-b', 'main'],
-      ['add', '-A'],
-      ['commit', '-q', '-m', 'fixture'],
-    ]) {
-      const result = spawnSync('git', command, { cwd: this.repo, env })
-      if (result.status !== 0) {
-        throw new Error(`git ${command[0]} failed: ${result.stderr}`)
-      }
-    }
-  }
-
-  run(args, extraEnv = {}) {
-    const env = {
-      ...process.env,
-      PATH: `${this.bindir}:${process.env.PATH}`,
-      KK_STUDIO_REPO_ROOT: this.repo,
-      FAKE_RELEASE_BASE: RELEASE_BASE,
-      FAKE_TAG: RELEASE_TAG,
-      FAKE_HTTP_DIR: this.httpDir,
-      FAKE_NPM_LOG: this.npmLog,
-      NODE_BIN: process.execPath,
-      NPM_BIN: path.join(this.bindir, 'npm'),
-      ...extraEnv,
-    }
-    return asResult(spawnSync(SYSTEM_BASH, [this.script, ...args], { cwd: this.repo, env, encoding: 'utf8' }))
-  }
-
-  releaseDir(platform) {
-    return path.join(this.repo, 'daemon', 'release', platform)
-  }
-}
 
 /**
  * A fake host for `scripts/daemon/install.sh`.
@@ -450,34 +149,34 @@ exit 0
     return ['x86_64', 'amd64'].includes(this.machine) ? 'amd64' : 'arm64'
   }
 
-  buildArchive(file, platform = null) {
+  buildArchive(file, platform = null, version = DAEMON_VERSION, binaryPath = null) {
     const key = platform ?? `${this.releaseOs}-${this.releaseArch}`
-    const nodeName = key.startsWith('windows-') ? 'node.exe' : 'node'
-    const koffiPlatform = key.startsWith('linux-')
-      ? `linux-${key.endsWith('arm64') ? 'arm64' : 'x64'}`
-      : `darwin-${key.endsWith('arm64') ? 'arm64' : 'x64'}`
+    const binary = key.startsWith('windows-') ? 'kk-studio-daemon.exe' : 'kk-studio-daemon'
     const work = mkdtempSync(path.join(this.root, 'archive-src-'))
     try {
-      writeExecutable(path.join(work, 'runtime/code-server/lib', nodeName), FAKE_NODE)
-      writeText(path.join(work, 'runtime/code-server/out/node/entry.js'), '// frozen entry\n', 0o644)
-      writeText(path.join(work, 'main.js'), MAIN_JS, 0o644)
-      writeText(
-        path.join(work, 'package.json'),
-        `{"name":"@kk-studio/daemon","version":"${DAEMON_VERSION}","private":true,"type":"module"}\n`,
-        0o644,
-      )
-      writeText(path.join(work, 'delay.js'), 'export {}\n', 0o644)
-      writeText(path.join(work, 'check-config.mjs'), CHECK_CONFIG_JS, 0o644)
-      for (const file of ['lock-helper.js', 'lock.js', 'lock-error.js', 'private-fs.js']) {
-        writeText(path.join(work, 'native', file), 'export {}\n', 0o644)
-      }
-      writeText(path.join(work, 'node_modules/koffi/index.js'), 'module.exports = {}\n', 0o644)
-      writeText(path.join(work, `node_modules/@koromix/koffi-${koffiPlatform}/index.js`), 'module.exports = {}\n', 0o644)
-      writeText(
-        path.join(work, 'runtime-manifest.json'),
-        `{"daemonVersion":"${DAEMON_VERSION}","codeServer":{"${key}":{"url":"https://example.invalid"}}}\n`,
-        0o644,
-      )
+      const fakeDaemon = `#!/bin/sh
+case "$1" in
+  --version) printf 'kk-studio-daemon %s\\n' "\${FAKE_DAEMON_VERSION:-${version}}" ;;
+  --check-config)
+    if grep -Eq '"invalid"[[:space:]]*:[[:space:]]*true|"studioUrl"[[:space:]]*:[[:space:]]*"invalid"' "$2"; then printf 'Invalid daemon configuration: invalid test config\\n' >&2; exit 1; fi
+    printf 'Daemon configuration is valid\\n' ;;
+  __lock-helper)
+    case "$2" in
+      hold)
+        if [ "$FAKE_DAEMON_BUSY" = 1 ]; then exit 75; fi
+        printf 'locked\\n'; cat >/dev/null ;;
+      wait) [ "$FAKE_DAEMON_LOCKED" = 1 ] && exit 76; exit 0 ;;
+      *) exit 2 ;;
+    esac ;;
+  *) exit 1 ;;
+esac
+`
+      writeExecutable(path.join(work, binary), binaryPath ? readFileSync(binaryPath) : fakeDaemon)
+      writeText(path.join(work, 'runtime/code-server/out/node/entry.js'), '// bundled IDE runtime\\n', 0o644)
+      writeText(path.join(work, 'ide-extension/extension.cjs'), '// IDE extension\\n', 0o644)
+      writeText(path.join(work, 'runtime-manifest.json'), `{"daemonVersion":"${version}","codeServer":{"${key}":{}}}\n`, 0o644)
+      writeText(path.join(work, 'LICENSE'), 'Apache License\\n', 0o644)
+      writeText(path.join(work, 'THIRD_PARTY_NOTICES'), 'Go daemon notices\\n', 0o644)
       const entries = treeEntries(work, '.').slice(1).map((entry) => ({ ...entry, name: entry.name.replace(/^\.\//, '') }))
       writeTarGz(file, entries)
     } finally {

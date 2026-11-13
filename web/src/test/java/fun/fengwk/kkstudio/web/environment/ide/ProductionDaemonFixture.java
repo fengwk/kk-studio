@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
+import fun.fengwk.kkstudio.web.environment.GoDaemonBinary;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
@@ -18,12 +20,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * 生产 Daemon 子进程夹具：私有临时发行根 + 真实 Node 24 进程。
+ * 生产 Go Daemon 子进程夹具：私有临时发行根 + 临时构建的真实 Go 二进制。
  *
- * <p>发行根按 Daemon 自身的解析规则构造：{@code daemon/src/config.ts} 的 {@code resolveDistributionDir}
- * 以模块所在目录的父级作为发行根，因此临时发行根包含：{@code dist} 副本、{@code package.json} 副本、{@code node_modules}
- * 软链（复用已安装的生产依赖）、{@code ide-extension} 副本，以及指向只读 code-server 产物的 {@code runtime/code-server} 软链。
- * {@code dist} 必须复制而不是软链：避免 {@code realpath(argv[1])} 与 {@code import.meta.url} 失配或发行根定位落回仓库树。
+ * <p>Go Daemon 从可执行文件的父目录解析发行根。临时发行根包含 daemon 二进制、IDE 扩展副本，以及指向只读 code-server 产物的 {@code
+ * runtime/code-server} 软链。
  *
  * <p>注册凭据只写进临时数据目录的 {@code daemon.token}（0600），进程 stdout/stderr 落在工作区 {@code records} 目录（0700）内的
  * 0600 文件里；夹具从不把凭据写进命令行、环境或异常消息。
@@ -75,14 +75,13 @@ final class ProductionDaemonFixture implements AutoCloseable {
   /**
    * 启动生产 Daemon。
    *
-   * @param repoRoot 仓库根（提供 {@code daemon/dist} 与 {@code daemon/ide-extension}）
+   * @param repoRoot 仓库根（提供 Go 源码与 {@code daemon-go/ide-extension}）
    * @param codeServerRelease 只读的已构建 code-server 发行目录
    * @param environmentId 创建环境后由服务端返回的 canonical UUID
    * @param configVersion 创建环境后由服务端返回的配置 CAS 版本
    * @param daemonConfigJson 创建环境后由服务端返回的完整 daemonConfig JSON
    * @param registrationToken 注册凭据明文；只写进 0600 的 {@code daemon.token}
    * @param recordsDir 私有日志目录（0700）
-   * @param nodeBinary Node 24 可执行文件
    */
   static ProductionDaemonFixture start(
       Path repoRoot,
@@ -91,8 +90,7 @@ final class ProductionDaemonFixture implements AutoCloseable {
       long configVersion,
       String daemonConfigJson,
       String registrationToken,
-      Path recordsDir,
-      Path nodeBinary)
+      Path recordsDir)
       throws IOException {
     Path workspace = Files.createTempDirectory("kk-ide-acceptance-");
     List<Path> logs = new ArrayList<>();
@@ -103,16 +101,14 @@ final class ProductionDaemonFixture implements AutoCloseable {
       Files.createDirectories(distributionDir);
       restrictDirectory(distributionDir);
 
-      copyTree(repoRoot.resolve("daemon").resolve("dist"), distributionDir.resolve("dist"));
+      String binaryName =
+          System.getProperty("os.name").toLowerCase().contains("win")
+              ? "kk-studio-daemon.exe"
+              : "kk-studio-daemon";
+      Path daemonBinary = GoDaemonBinary.build(repoRoot, distributionDir.resolve(binaryName));
       copyTree(
-          repoRoot.resolve("daemon").resolve("ide-extension"),
+          repoRoot.resolve("daemon-go").resolve("ide-extension"),
           distributionDir.resolve("ide-extension"));
-      Files.copy(
-          repoRoot.resolve("daemon").resolve("package.json"),
-          distributionDir.resolve("package.json"));
-      Files.createSymbolicLink(
-          distributionDir.resolve("node_modules"),
-          repoRoot.resolve("daemon").resolve("node_modules"));
 
       Path runtimeDir = distributionDir.resolve("runtime");
       Files.createDirectories(runtimeDir);
@@ -147,11 +143,7 @@ final class ProductionDaemonFixture implements AutoCloseable {
       restrictFile(stderrLog);
 
       ProcessBuilder builder =
-          new ProcessBuilder(
-              nodeBinary.toString(),
-              distributionDir.resolve("dist").resolve("main.js").toString(),
-              "--config",
-              configFile.toString());
+          new ProcessBuilder(daemonBinary.toString(), "--config", configFile.toString());
       builder.directory(distributionDir.toFile());
       builder.redirectOutput(stdoutLog.toFile());
       builder.redirectError(stderrLog.toFile());
@@ -160,6 +152,8 @@ final class ProductionDaemonFixture implements AutoCloseable {
       builder.environment().put("XDG_CACHE_HOME", homeDir.toString());
       builder.environment().put("XDG_DATA_HOME", homeDir.toString());
       builder.environment().put("TMPDIR", homeDir.toString());
+      builder.environment().remove("GODEBUG");
+      builder.environment().put("TZ", "Etc/UTC");
       builder.environment().put("no_proxy", "127.0.0.1,localhost,::1");
       builder.environment().put("NO_PROXY", "127.0.0.1,localhost,::1");
       started = builder.start();

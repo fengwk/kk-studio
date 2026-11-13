@@ -8,6 +8,8 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 const REPORTS_DIR = process.env.KK_MUTATION_REPORTS_DIR ?? path.resolve(__dirname, '../../reports/mutation-review')
 const HARNESS_URL = '/browser-tests/mutation-review-harness.html'
+const WRITE_REVIEW_DIFF = LONG_WRITE_CONTENT.split('\n').slice(0, -1)
+  .map((line, index) => `+${index + 1}|${line}`).join('\n')
 
 type HarnessApi = {
   renderWritePending(): void
@@ -94,13 +96,12 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     )
     await expect(toolPane.locator('.thread-tool-preview-target-path')).toHaveCount(0)
 
-    // 正文默认展开，且 48 行全文无截断
+    // 时间线仍展示 write 的完整输入正文。
     const writeViewport = toolPane.locator('.thread-tool-preview-body.is-write')
     await expect(writeViewport).toBeVisible()
     await expect(writeViewport).toContainText('public void longMethodWithIndent() {')
     await expect(writeViewport).toContainText('// indented comment')
     await expect(writeViewport).toContainText('line-48 with code and spaces')
-    // 逐字核对，避免 toHaveText 默认归一化空白掩盖缩进、空行或末尾换行丢失。
     expect(await writeViewport.textContent()).toBe(LONG_WRITE_CONTENT)
     await expect(writeViewport).toHaveCSS('white-space', 'pre-wrap')
 
@@ -113,7 +114,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     // 对话记录没有内部滚动，也不横向撑宽
     await verifyNoInnerScroll(writeViewport)
 
-    // 同屏审批卡片验证
+    // 同屏审批卡片展示相同的真实 diff，并保持有界滚动。
     const approvalPane = page.locator('[data-testid="approval-card-pane"]')
     await expect(approvalPane).toBeVisible()
     await expect(approvalPane.locator('.thread-tool-preview-target-path')).toHaveText(
@@ -121,8 +122,8 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     )
     await expect(approvalPane.getByRole('button', { name: '允许' })).toBeEnabled()
     await expect(approvalPane.getByRole('button', { name: '拒绝' })).toBeEnabled()
-    const approvalWriteViewport = approvalPane.locator('.thread-tool-preview-body.is-write')
-    expect(await approvalWriteViewport.textContent()).toBe(LONG_WRITE_CONTENT)
+    const approvalWriteViewport = approvalPane.locator('.thread-tool-preview-body.is-edit')
+    expect(await approvalWriteViewport.textContent()).toBe(WRITE_REVIEW_DIFF)
     await expect(approvalWriteViewport).toHaveCSS('white-space', 'pre-wrap')
     await verifyBoundedScrollAndNoBlowout(approvalWriteViewport)
 
@@ -133,7 +134,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await verifyNoInnerScroll(writeViewport)
     await verifyBoundedScrollAndNoBlowout(approvalWriteViewport)
     expect(await writeViewport.textContent()).toBe(LONG_WRITE_CONTENT)
-    expect(await approvalWriteViewport.textContent()).toBe(LONG_WRITE_CONTENT)
+    expect(await approvalWriteViewport.textContent()).toBe(WRITE_REVIEW_DIFF)
 
     const contentBox = await page.locator('.mutation-harness-content').boundingBox()
     expect(contentBox?.width).toBeLessThanOrEqual(390)

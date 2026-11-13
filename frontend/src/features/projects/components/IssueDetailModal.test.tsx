@@ -150,6 +150,11 @@ describe('IssueDetailModal', () => {
     type: 'READY',
     blobId: 'mock-blob-id',
     expiresAt: 1789905600000,
+    format: null,
+    originalWidth: null,
+    originalHeight: null,
+    storedWidth: null,
+    storedHeight: null,
   }
 
   const createMockStorageService = (): StorageService => ({

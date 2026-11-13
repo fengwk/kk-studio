@@ -18,8 +18,6 @@
       "description": "Optional positive integer 1-based offset in Unicode code points within the first returned line. Text files only; it does not constrain limit and does not apply to later lines."
     }
   },
-  "required": [
-    "path"
-  ],
+  "required": ["path"],
   "additionalProperties": false
 }

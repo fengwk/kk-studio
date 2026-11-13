@@ -1198,6 +1198,19 @@ class ControlProtocolCodecTest {
                 ControlProtocolFixtures.envelope(
                     MessageType.INVOKE, Envelope.newBuilder().setInvoke(missingExpectedSha))));
 
+    Invoke newFileExpected =
+        ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
+            .setCapabilityId("fs.write")
+            .setExpectedFile(
+                ExpectedFile.newBuilder().setPath(ControlProtocolFixtures.EXPECTED_PATH))
+            .build();
+    Envelope newFileEnvelope =
+        ControlProtocolFixtures.envelope(
+            MessageType.INVOKE, Envelope.newBuilder().setInvoke(newFileExpected));
+    Envelope decodedNewFile =
+        ControlProtocolCodec.decodeBinary(ControlProtocolCodec.encodeBinary(newFileEnvelope));
+    assertEquals(false, decodedNewFile.getInvoke().getExpectedFile().hasSha256());
+
     Invoke invalidExpectedSha =
         ControlProtocolFixtures.invokeEnvelope().getInvoke().toBuilder()
             .setExpectedFile(

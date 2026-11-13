@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.contributor.api;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -30,7 +31,31 @@ public record ToolExecutionContext(
     UUID assistantEntryId,
     Instant executedAt,
     TurnMediaCapabilities mediaCapabilities,
-    Optional<BoundEnvironment> environment) {
+    Optional<BoundEnvironment> environment,
+    List<ConfiguredSkill> configuredSkills) {
+
+  public ToolExecutionContext(
+      UUID invocationId,
+      UUID threadId,
+      UUID sessionId,
+      UUID rootThreadId,
+      UUID rootSessionId,
+      UUID assistantEntryId,
+      Instant executedAt,
+      TurnMediaCapabilities mediaCapabilities,
+      Optional<BoundEnvironment> environment) {
+    this(
+        invocationId,
+        threadId,
+        sessionId,
+        rootThreadId,
+        rootSessionId,
+        assistantEntryId,
+        executedAt,
+        mediaCapabilities,
+        environment,
+        List.of());
+  }
 
   public ToolExecutionContext {
     Objects.requireNonNull(invocationId, "invocationId");
@@ -42,5 +67,6 @@ public record ToolExecutionContext(
     Objects.requireNonNull(executedAt, "executedAt");
     Objects.requireNonNull(mediaCapabilities, "mediaCapabilities");
     Objects.requireNonNull(environment, "environment");
+    configuredSkills = List.copyOf(Objects.requireNonNull(configuredSkills, "configuredSkills"));
   }
 }

@@ -85,7 +85,11 @@ final class PlatformBoundEnvironment implements BoundEnvironment {
         new EnvironmentCapabilityCall(remoteCallId, request.call().argumentsJson());
     EnvironmentCapabilityExecutionRequest capabilityRequest =
         new EnvironmentCapabilityExecutionRequest(
-            capability, capabilityCall, request.timeout(), expectedFile);
+            capability,
+            capabilityCall,
+            request.timeout(),
+            expectedFile,
+            request.resourceDownload());
     CompletableFuture<EnvironmentCapabilityResult> terminal = new CompletableFuture<>();
     EnvironmentCapabilityExecutionListener listener =
         new EnvironmentCapabilityExecutionListener() {

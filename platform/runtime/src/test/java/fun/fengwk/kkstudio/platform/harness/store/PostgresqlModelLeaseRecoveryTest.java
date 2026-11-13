@@ -262,7 +262,7 @@ class PostgresqlModelLeaseRecoveryTest {
                   builtin(store, tx)
                       .lockModelInvocation(modelId)
                       .orElseThrow()
-                      .succeed(response, null, null, T3));
+                      .succeed(response, null, T3));
           UUID assistantId = tx.nextId();
           tx.entries()
               .insert(

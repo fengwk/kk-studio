@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.harness.api.tool;
 
+import fun.fengwk.kkstudio.harness.contributor.api.ConfiguredSkill;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
+import java.util.List;
 import java.util.Objects;
 
 /**
@@ -29,12 +31,26 @@ public record ToolBinding(
     ContributorBinding contributor,
     EnvironmentSupport environmentSupport,
     EnvironmentId environmentId,
-    String environmentName) {
+    String environmentName,
+    List<ConfiguredSkill> configuredSkills) {
+
+  public ToolBinding(
+      AgentToolDefinition definition,
+      ContributorBinding contributor,
+      EnvironmentSupport environmentSupport,
+      EnvironmentId environmentId,
+      String environmentName) {
+    this(definition, contributor, environmentSupport, environmentId, environmentName, List.of());
+  }
 
   public ToolBinding {
     definition = Objects.requireNonNull(definition, "definition");
     contributor = Objects.requireNonNull(contributor, "contributor");
     environmentSupport = Objects.requireNonNull(environmentSupport, "environmentSupport");
+    configuredSkills = List.copyOf(Objects.requireNonNull(configuredSkills, "configuredSkills"));
+    if (!configuredSkills.isEmpty() && !"load_skill".equals(definition.descriptor().name())) {
+      throw new IllegalArgumentException("only load_skill may carry configured skills");
+    }
     if (environmentSupport == EnvironmentSupport.NONE) {
       requireWithoutEnvironment(environmentId, environmentName);
     } else if (environmentSupport == EnvironmentSupport.REQUIRED) {

@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
@@ -102,7 +101,6 @@ public final class ModelRequestMaterializer {
       List<ProviderMessageProjector.ProjectedMessage> projectedMessages) {
     List<Entry> entries = path.entries();
     int walkStart = 0;
-    int compactionResultIndex = -1;
     var latest = CompactionTurns.latestComplete(path);
     if (latest.isPresent()) {
       var complete = latest.get();
@@ -117,7 +115,6 @@ public final class ModelRequestMaterializer {
               AgentMessage.user(
                   CompactionPrompts.compactedContext(complete.result().summaryText()))));
       walkStart = cutIndex;
-      compactionResultIndex = complete.resultIndex();
     }
     boolean inCompactionTurn = false;
     for (int i = walkStart; i < entries.size(); i++) {
@@ -136,13 +133,10 @@ public final class ModelRequestMaterializer {
       if (inCompactionTurn) {
         continue;
       }
-      boolean suppressReplay = (compactionResultIndex >= 0 && i <= compactionResultIndex);
-      ProviderReplayState replayState = suppressReplay ? null : entry.providerReplayState();
-
       if (payload instanceof MessagePayload message) {
         projectedMessages.add(
             new ProviderMessageProjector.ProjectedMessage(
-                message.message(), replayState, reasoningEffort(message, spec)));
+                message.message(), reasoningEffort(message, spec)));
       } else if (payload instanceof CustomMessagePayload message) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       } else if (payload instanceof NotificationPayload notification) {

@@ -740,7 +740,7 @@ class PostgresqlCompactionChildTest {
     gateway.queue(
         new ModelGateway.Succeeded(
             new ProviderCompletion(
-                providerResponse("truncated partial summary", GenerationStopReason.LENGTH), null)));
+                providerResponse("truncated partial summary", GenerationStopReason.LENGTH))));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     ModelInvocation afterFirstAttempt = findModel(childModelId);
     assertEquals(ModelInvocationStatus.READY, afterFirstAttempt.status());
@@ -756,8 +756,7 @@ class PostgresqlCompactionChildTest {
     String summary = "durable compacted summary";
     gateway.queue(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(
-                providerResponse(summary, GenerationStopReason.COMPLETE), null)));
+            new ProviderCompletion(providerResponse(summary, GenerationStopReason.COMPLETE))));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     ModelInvocation afterSecondAttempt = findModel(childModelId);
     assertEquals(ModelInvocationStatus.SUCCEEDED, afterSecondAttempt.status());
@@ -801,11 +800,11 @@ class PostgresqlCompactionChildTest {
     String partial = "partial text that must never surface";
     gateway.queue(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(providerResponse(partial, GenerationStopReason.LENGTH), null)));
+            new ProviderCompletion(providerResponse(partial, GenerationStopReason.LENGTH))));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     gateway.queue(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(providerResponse(partial, GenerationStopReason.LENGTH), null)));
+            new ProviderCompletion(providerResponse(partial, GenerationStopReason.LENGTH))));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
 
     ModelInvocation exhausted = findModel(childModelId);
@@ -912,8 +911,7 @@ class PostgresqlCompactionChildTest {
     // attempt 1：纯空白 final → INVALID_RESPONSE，绝不产生结果，也不交付父。
     gateway.queue(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(
-                providerResponse("  \n ", GenerationStopReason.COMPLETE), null)));
+            new ProviderCompletion(providerResponse("  \n ", GenerationStopReason.COMPLETE))));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     ModelInvocation afterFirstAttempt = findModel(childModelId);
     assertEquals(ModelInvocationStatus.READY, afterFirstAttempt.status());
@@ -929,8 +927,7 @@ class PostgresqlCompactionChildTest {
     String summary = "durable compacted summary";
     gateway.queue(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(
-                providerResponse(summary, GenerationStopReason.COMPLETE), null)));
+            new ProviderCompletion(providerResponse(summary, GenerationStopReason.COMPLETE))));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     assertEquals(ModelInvocationStatus.SUCCEEDED, findModel(childModelId).status());
 
@@ -968,11 +965,11 @@ class PostgresqlCompactionChildTest {
 
     gateway.queue(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(providerResponse("   ", GenerationStopReason.COMPLETE), null)));
+            new ProviderCompletion(providerResponse("   ", GenerationStopReason.COMPLETE))));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
     gateway.queue(
         new ModelGateway.Succeeded(
-            new ProviderCompletion(providerResponse("\n\n", GenerationStopReason.COMPLETE), null)));
+            new ProviderCompletion(providerResponse("\n\n", GenerationStopReason.COMPLETE))));
     assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
 
     ModelInvocation exhausted = findModel(childModelId);
@@ -1553,7 +1550,7 @@ class PostgresqlCompactionChildTest {
           Thread.interrupted();
           return new Succeeded(
               new ProviderCompletion(
-                  providerResponse("held summary", GenerationStopReason.COMPLETE), null));
+                  providerResponse("held summary", GenerationStopReason.COMPLETE)));
         }
 
         @Override

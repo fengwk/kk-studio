@@ -18,10 +18,6 @@
       "description": "Replace every exact occurrence of old_string. Defaults to false."
     }
   },
-  "required": [
-    "path",
-    "old_string",
-    "new_string"
-  ],
+  "required": ["path", "old_string", "new_string"],
   "additionalProperties": false
 }

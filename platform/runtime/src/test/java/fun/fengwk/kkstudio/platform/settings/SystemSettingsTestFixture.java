@@ -44,7 +44,7 @@ public final class SystemSettingsTestFixture {
 
   public static final SystemSettings.StorageMedia STORAGE_MEDIA =
       new SystemSettings.StorageMedia(
-          86_400L, 1_800L, 3_600L, 30_000L, 512, 80, ImageInputTier.P720, 259_200L, 1_800L);
+          86_400L, 1_800L, 3_600L, 30_000L, 512, 80, ImageInputTier.P720, 259_200L, 1_800L, 20);
 
   public static final SystemSettings.Advanced ADVANCED =
       new SystemSettings.Advanced(

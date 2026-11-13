@@ -87,8 +87,7 @@ public final class ModelOutcomeAppender {
                     model.actualSelection(),
                     model.requestedAt())
                 : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
-            mutationNow,
-            succeeded ? model.providerReplayState() : null);
+            mutationNow);
     tx.entries().insert(resultEntry);
     UUID resultEntryId = resultEntry.id();
     if (!succeeded) {

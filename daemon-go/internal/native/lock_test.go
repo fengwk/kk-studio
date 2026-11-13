@@ -74,6 +74,22 @@ func TestDirectoryLock_WaitTimeout(t *testing.T) {
 	}
 }
 
+// NAT-N-006 verifies the Go lock API applies only the timeout supplied by its caller.
+func TestDirectoryLockWait_RequiresExplicitTimeout(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "private")
+	if err := ensurePrivateDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
+	lock, err := AcquireDirectoryLock(dir, DaemonLockFileName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer lock.Close()
+	if err := WaitForDirectoryLock(context.Background(), dir, DaemonLockFileName, 0); !errors.Is(err, ErrDirectoryLockTimeout) {
+		t.Fatalf("explicit zero-timeout wait = %v, want timeout", err)
+	}
+}
+
 // NAT-T-027
 func TestDirectoryLock_RejectSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {

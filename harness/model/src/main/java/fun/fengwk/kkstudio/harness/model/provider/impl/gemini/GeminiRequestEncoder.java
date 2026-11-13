@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
@@ -22,8 +23,9 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -49,9 +51,9 @@ import java.util.Set;
  *
  * <p>负责将运行时 {@link ProviderRequest} 转换为符合 Gemini streamGenerateContent 规范的 UTF-8 JSON 字节数组。
  *
- * <p>assistant replay 直接使用 {@link ProviderReplayState} 中的 native payload（含 {@code thoughtSignature}
- * 与 functionCall opaque 字段）：只要求同 format、affinity 匹配且 payload 语义与 durable 一致。affinity 不匹配、format 不同或
- * durable 语义已被改写时退回 durable 语义编码；payload 结构或已知字段类型损坏则以 {@code INVALID_REQUEST} 拒绝。
+ * <p>assistant replay 从有序 blocks 的 Provider 元数据重建 Gemini parts（含 {@code thoughtSignature} 与
+ * functionCall 扩展）；只有同 protocol、provider/model affinity 匹配且 block 语义与 durable 内容一致时原样回放。否则按 durable
+ * 语义编码；跨模型工具签名不会保留。
  */
 final class GeminiRequestEncoder {
 
@@ -132,9 +134,11 @@ final class GeminiRequestEncoder {
           currentParts = contentNode.putArray("parts");
         }
 
-        if (canReplay(msg.replayState(), descriptor, request.model().modelId(), msg.contents())) {
-          for (JsonNode partNode : msg.replayState().payload().path("parts")) {
-            currentParts.add(partNode.deepCopy());
+        List<ObjectNode> blockReplayParts =
+            buildBlockReplayParts(descriptor, request.model().modelId(), msg.contents());
+        if (blockReplayParts != null) {
+          for (ObjectNode partNode : blockReplayParts) {
+            currentParts.add(partNode);
           }
         } else {
           for (ProviderContentBlock block : msg.contents()) {
@@ -560,11 +564,117 @@ final class GeminiRequestEncoder {
     }
   }
 
+  private static List<ObjectNode> buildBlockReplayParts(
+      ProviderDescriptor descriptor, String requestedModel, List<ProviderContentBlock> blocks) {
+    if (blocks.isEmpty()) {
+      return null;
+    }
+    var requestedAffinity = descriptor.affinity(requestedModel);
+    List<ObjectNode> parts = new ArrayList<>();
+    ObjectNode payload = NODES.objectNode();
+    payload.put("role", "model");
+    ArrayNode payloadParts = payload.putArray("parts");
+
+    for (ProviderContentBlock block : blocks) {
+      ProviderBlockData data = providerBlockData(block);
+      if (data == null
+          || data.protocol() != ProviderReplayFormat.GEMINI_CONTENT
+          || !data.affinity().equals(requestedAffinity)) {
+        return null;
+      }
+
+      ObjectNode part = NODES.objectNode();
+      JsonNode functionCallExtras = null;
+      ObjectNode nativeFields = (ObjectNode) data.nativeFields();
+      if (block instanceof ProviderToolCallBlock) {
+        functionCallExtras = nativeFields.remove("functionCall");
+      }
+      mergeNativeFields(part, nativeFields);
+      if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        part.put("text", thinkingBlock.thinking());
+        part.put("thought", data.thought() == null || data.thought().booleanValue());
+      } else if (block instanceof ProviderTextBlock textBlock) {
+        part.put("text", textBlock.text());
+        if (data.thought() != null) {
+          part.put("thought", data.thought().booleanValue());
+        }
+      } else if (block instanceof ProviderToolCallBlock toolCallBlock) {
+        ProviderToolCall call = toolCallBlock.toolCall();
+        ObjectNode functionCall = part.putObject("functionCall");
+        if (functionCallExtras != null) {
+          mergeNativeFields(functionCall, functionCallExtras);
+        }
+        functionCall.put("name", call.name());
+        if (call.id() != null && !call.id().isBlank()) {
+          functionCall.put("id", call.id());
+        }
+        JsonNode args =
+            ProviderJsonHelper.parseStrictJson(
+                call.argumentsJson(), "tool call arguments must be a valid JSON object");
+        if (!args.isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_REQUEST, "tool call arguments must be a valid JSON object");
+        }
+        functionCall.set("args", args);
+      } else if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+        if (!"gemini_part".equals(opaqueBlock.blockType())) {
+          return null;
+        }
+      } else {
+        return null;
+      }
+      if (data.thought() != null && !(block instanceof ProviderTextBlock)) {
+        part.put("thought", data.thought().booleanValue());
+      }
+      if (data.signature() != null) {
+        part.put("thoughtSignature", data.signature());
+      }
+      parts.add(part);
+      payloadParts.add(part.deepCopy());
+    }
+
+    if (!validateGeminiReplayPayload(payload, blocks)) {
+      return null;
+    }
+    return parts;
+  }
+
+  private static ProviderBlockData providerBlockData(ProviderContentBlock block) {
+    if (block instanceof ProviderTextBlock textBlock) {
+      return textBlock.providerBlockData();
+    }
+    if (block instanceof ProviderThinkingBlock thinkingBlock) {
+      return thinkingBlock.providerBlockData();
+    }
+    if (block instanceof ProviderToolCallBlock toolCallBlock) {
+      return toolCallBlock.providerBlockData();
+    }
+    if (block instanceof ProviderOpaqueBlock opaqueBlock) {
+      return opaqueBlock.providerBlockData();
+    }
+    if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
+      return redactedBlock.providerBlockData();
+    }
+    return null;
+  }
+
+  private static void mergeNativeFields(ObjectNode target, JsonNode fields) {
+    if (fields == null || !fields.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini assistant block native fields");
+    }
+    for (var field : fields.properties()) {
+      target.set(field.getKey(), field.getValue().deepCopy());
+    }
+  }
+
   private static void encodeAssistantBlock(ArrayNode parts, ProviderContentBlock block) {
     if (block instanceof ProviderThinkingBlock thinkingBlock) {
+      if (thinkingBlock.thinking() == null || thinkingBlock.thinking().isEmpty()) {
+        return;
+      }
       ObjectNode part = parts.addObject();
       part.put("text", thinkingBlock.thinking());
-      part.put("thought", true);
       return;
     }
     if (block instanceof ProviderTextBlock textBlock) {
@@ -596,39 +706,11 @@ final class GeminiRequestEncoder {
       functionCall.set("args", argsNode);
       return;
     }
+    if (block instanceof ProviderOpaqueBlock || block instanceof ProviderRedactedThinkingBlock) {
+      return;
+    }
     throw new ProviderException(
         ProviderErrorKind.INVALID_REQUEST, "unsupported ASSISTANT content block");
-  }
-
-  /**
-   * 判定 replay 能否原位回放。
-   *
-   * <p>同 format (GEMINI_CONTENT) 的 payload 先做结构/已知字段类型校验（损坏一律 INVALID_REQUEST）。只有 affinity（provider
-   * / connection generation / wire model）完全匹配且 payload 语义投影与 durable 内容一致时才原位回放 native payload（含
-   * {@code thoughtSignature} 与 opaque functionCall 字段）；affinity 不匹配、format 不同或 durable 语义已被改写则退回
-   * durable 语义编码，绝不因为 payload 携带原生事实而拒绝请求。
-   */
-  private static boolean canReplay(
-      ProviderReplayState replayState,
-      ProviderDescriptor descriptor,
-      String requestedModel,
-      List<ProviderContentBlock> durableContents) {
-    if (replayState == null) {
-      return false;
-    }
-    if (replayState.format() != ProviderReplayFormat.GEMINI_CONTENT) {
-      return false;
-    }
-
-    // 同 format 的 payload 无论 affinity 是否匹配都先严格校验：损坏必须 INVALID_REQUEST。
-    boolean durableSemanticsMatch =
-        validateGeminiReplayPayload(replayState.payload(), durableContents);
-    // durable 语义不一致（历史被改写/压缩等）时绝不回放陈旧 native payload，退回 durable 语义编码。
-    if (!durableSemanticsMatch) {
-      return false;
-    }
-
-    return replayState.affinity().equals(descriptor.affinity(requestedModel));
   }
 
   /** thoughtSignature 属于已知字段：出现时必须是非空白字符串；作为 opaque 原生事实只在原位回放时使用。 */
@@ -765,6 +847,9 @@ final class GeminiRequestEncoder {
               ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
         }
         durableCalls.add(call);
+      } else if (block instanceof ProviderOpaqueBlock
+          || block instanceof ProviderRedactedThinkingBlock) {
+        // Native opaque and redacted content does not contribute to durable semantic comparison.
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");

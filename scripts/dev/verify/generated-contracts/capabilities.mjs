@@ -1,8 +1,8 @@
 /**
  * Capability JSON Schema 的单一事实源同步：Java classpath 资源是源，
- * daemon/resources/capabilities 是生成副本。
+ * daemon-go/internal/capability/schemas 是生成副本。
  *
- * <p>只复制 catalog 声明的 schema 文件，不改 share DTO，也不改 schema 内容。
+ * <p>只复制已提交的 schema 资源，不改 schema 内容。
  * `--check` 只比较；默认写入。多余副本视为漂移。
  */
 import { readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -15,7 +15,7 @@ const JAVA_DIR = resolve(
   REPO,
   'harness/environment/src/main/resources/fun/fengwk/kkstudio/harness/environment/capability/schemas',
 )
-const DAEMON_DIR = resolve(REPO, 'daemon/resources/capabilities')
+const DAEMON_DIR = resolve(REPO, 'daemon-go/internal/capability/schemas')
 const CHECK = process.argv.includes('--check')
 
 function normalize(text) {

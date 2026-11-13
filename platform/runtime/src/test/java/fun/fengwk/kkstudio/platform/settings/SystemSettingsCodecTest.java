@@ -36,6 +36,14 @@ class SystemSettingsCodecTest {
   private final ObjectMapper mapper = JsonMapper.builder().build();
 
   @Test
+  void missingStoredImageCountIsRejectedAsARequiredField() throws Exception {
+    ObjectNode root = (ObjectNode) mapper.readTree(codec.encode(SystemSettingsTestFixture.DEFAULT));
+    ((ObjectNode) root.get("storageMedia")).remove("maxImagesPerRequest");
+
+    assertThrows(IllegalStateException.class, () -> codec.decode(root.toString()));
+  }
+
+  @Test
   void canonicalRoundTripIsIdentity() {
     String canonical = codec.encode(SystemSettingsTestFixture.DEFAULT);
     SystemSettings decoded = codec.decode(canonical);

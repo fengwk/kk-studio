@@ -120,8 +120,7 @@ class ModelGatewayTest {
                                 new ModelUsage(1L, 1L, 0L, 0L, Map.of(), 0L, 2L),
                                 null,
                                 null,
-                                null),
-                            null));
+                                null)));
                   }
 
                   @Override

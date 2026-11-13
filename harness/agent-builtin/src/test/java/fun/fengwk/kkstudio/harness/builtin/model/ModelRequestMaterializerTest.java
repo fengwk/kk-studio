@@ -55,11 +55,11 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
@@ -319,39 +319,37 @@ class ModelRequestMaterializerTest {
   }
 
   @Test
-  void liveHistoryTransmitsReplayState() {
-    ProviderReplayState replayState = sampleReplayState();
+  void liveHistoryTransmitsProviderDataOnItsAssistantBlock() {
+    ProviderBlockData providerData = sampleProviderBlockData("live");
     List<Entry> entries = new ArrayList<>();
     entries.add(entry(1, 0, new RootPayload(SETTINGS)));
     entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(3, 2, user("user question")));
-    // 带 replayState 的 assistant entry
     entries.add(
-        new Entry(id(4L), id(100L), id(3L), assistant("assistant answer"), T0, replayState));
+        new Entry(id(4L), id(100L), id(3L), assistant("assistant answer", providerData), T0));
 
     ProviderRequest request =
         MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
 
     assertEquals(2, request.messages().size());
     assertEquals("Test system instruction.", request.systemInstruction());
-    // index 0: user
-    // index 1: assistant
-    ProviderMessage assistantMsg = request.messages().get(1);
-    assertEquals(replayState, assistantMsg.replayState());
+    ProviderTextBlock assistantText =
+        (ProviderTextBlock) request.messages().get(1).contents().getFirst();
+    assertEquals(providerData, assistantText.providerBlockData());
   }
 
   @Test
-  void compactionSuppressesOldTailReplayStateAndPreservesNewTail() {
-    ProviderReplayState oldReplayState = sampleReplayState();
-    ProviderReplayState newReplayState = sampleReplayState();
+  void compactionPreservesNativeDataOnRetainedAssistantBlocks() {
+    ProviderBlockData oldProviderData = sampleProviderBlockData("old");
+    ProviderBlockData newProviderData = sampleProviderBlockData("new");
 
     List<Entry> entries = new ArrayList<>();
     entries.add(entry(1, 0, new RootPayload(SETTINGS)));
     entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(3, 2, user("old user")));
-    // old tail assistant: 带有 oldReplayState，且处于 cutEntryId(4) 到 compaction result(7) 之间
+    // The cut assistant remains in the retained tail, including its block-native metadata.
     entries.add(
-        new Entry(id(4L), id(100L), id(3L), assistant("old assistant"), T0, oldReplayState));
+        new Entry(id(4L), id(100L), id(3L), assistant("old assistant", oldProviderData), T0));
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
 
@@ -366,37 +364,26 @@ class ModelRequestMaterializerTest {
     // compaction 之后的新 turn
     entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(10, 9, user("new user")));
-    // new tail assistant: 带有 newReplayState
     entries.add(
-        new Entry(id(11L), id(100L), id(10L), assistant("new assistant"), T0, newReplayState));
+        new Entry(id(11L), id(100L), id(10L), assistant("new assistant", newProviderData), T0));
 
     ProviderRequest request =
         MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
 
-    // 结构：
-    // 0: summary (USER wrapper, null replay)
-    // 1: old assistant (retained old tail: replay 必须被压制为 null)
-    // 2: new user (null replay)
-    // 3: new assistant (post-compaction new tail: replay 必须保留)
+    // 结构：summary, retained old assistant, new user, new assistant。
     assertEquals(4, request.messages().size());
     assertEquals("Test system instruction.", request.systemInstruction());
 
     assertEquals(CompactionPrompts.compactedContext("summary"), textOf(request.messages().get(0)));
-    assertFalse(request.messages().get(0).hasReplayState());
-
     assertEquals("old assistant", textOf(request.messages().get(1)));
-    assertFalse(
-        request.messages().get(1).hasReplayState(),
-        "retained old tail assistant entry's replay state must be suppressed");
-
+    assertEquals(
+        oldProviderData,
+        ((ProviderTextBlock) request.messages().get(1).contents().getFirst()).providerBlockData());
     assertEquals("new user", textOf(request.messages().get(2)));
-    assertFalse(request.messages().get(2).hasReplayState());
-
     assertEquals("new assistant", textOf(request.messages().get(3)));
-    assertTrue(
-        request.messages().get(3).hasReplayState(),
-        "post-compaction assistant entry's replay state must be preserved");
-    assertEquals(newReplayState, request.messages().get(3).replayState());
+    assertEquals(
+        newProviderData,
+        ((ProviderTextBlock) request.messages().get(3).contents().getFirst()).providerBlockData());
   }
 
   /**
@@ -496,12 +483,11 @@ class ModelRequestMaterializerTest {
         environmentName);
   }
 
-  private static ProviderReplayState sampleReplayState() {
-    return new ProviderReplayState(
+  private static ProviderBlockData sampleProviderBlockData(String value) {
+    return new ProviderBlockData(
         ProviderReplayFormat.ANTHROPIC_MESSAGES,
-        new ProviderReplayAffinity(
-            ProviderType.ANTHROPIC, "anthropic", UUID.randomUUID(), "claude-3-5-sonnet"),
-        JsonNodeFactory.instance.objectNode().put("k", "v"));
+        new ProviderReplayAffinity(ProviderType.ANTHROPIC, "anthropic", "claude-3-5-sonnet"),
+        JsonNodeFactory.instance.objectNode().put("k", value));
   }
 
   private static EntryPath conversationPath(int closedTurns) {
@@ -604,8 +590,13 @@ class ModelRequestMaterializerTest {
   }
 
   private static MessagePayload assistant(String text) {
+    return assistant(text, null);
+  }
+
+  private static MessagePayload assistant(String text, ProviderBlockData providerBlockData) {
     return new MessagePayload(
-        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text, providerBlockData))),
         new AssistantMessageMetadata(
             GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
         null);

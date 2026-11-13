@@ -359,7 +359,8 @@ class ToolExecutionGatewayAdmitTest {
         rejected
             .error()
             .message()
-            .contains("Request approval with an edit review before calling the tool again"));
+            .contains(
+                "Request approval with a file mutation review before calling the tool again"));
     assertTrue(transport.invocations.isEmpty());
     admission.tryAcquire().orElseThrow().close();
   }
@@ -401,6 +402,68 @@ class ToolExecutionGatewayAdmitTest {
     auto.execute(partial -> {});
     auto.close();
     assertNull(transport.invocations.get(1).request().expectedFile());
+  }
+
+  /** 新文件审查以 path-only expectedFile 穿过网关，供 fs.write 在执行时校验不存在。 */
+  @Test
+  void writeReviewExpectedFileReachesTheTransportWithoutSha() throws Exception {
+    HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog();
+    ToolInvocationRequest request = writeRequest(catalog, "call-write");
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
+    transport.syncResult = ToolGatewayTestSupport.result("call-write", "ok");
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            catalog, transport, new ToolGatewayTestSupport.FakeResourceStager());
+    ExpectedFile expectedFile = new ExpectedFile("/canonical/workspace/new.txt", null);
+
+    ToolGateway.Run reviewed =
+        assertInstanceOf(
+                ToolGateway.Admitted.class,
+                gateway.admit(
+                    new ToolGateway.Execution(
+                        ToolGatewayTestSupport.INVOCATION_ID,
+                        ToolGatewayTestSupport.scope(),
+                        1,
+                        request,
+                        approved(new ToolEditReview(expectedFile, "+1|new")),
+                        new ToolGatewayTestSupport.RecordingRemoteExecutions())))
+            .run();
+    reviewed.execute(partial -> {});
+    reviewed.close();
+
+    assertEquals(expectedFile, transport.invocations.getFirst().request().expectedFile());
+  }
+
+  /** 覆盖写的审查 SHA 原样进入 fs.write 执行请求。 */
+  @Test
+  void writeOverwriteReviewExpectedFileReachesTheTransportWithSha() throws Exception {
+    HarnessCatalog catalog = ToolGatewayTestSupport.defaultCatalog();
+    ToolInvocationRequest request = writeRequest(catalog, "call-write-overwrite");
+    ToolGatewayTestSupport.FakeTransport transport = new ToolGatewayTestSupport.FakeTransport();
+    transport.action = ToolGatewayTestSupport.FakeTransport.InvokeAction.SYNC_COMPLETE;
+    transport.syncResult = ToolGatewayTestSupport.result("call-write-overwrite", "ok");
+    ToolExecutionGateway gateway =
+        ToolGatewayTestSupport.gateway(
+            catalog, transport, new ToolGatewayTestSupport.FakeResourceStager());
+    ExpectedFile expectedFile = new ExpectedFile("/canonical/workspace/new.txt", "a".repeat(64));
+
+    ToolGateway.Run reviewed =
+        assertInstanceOf(
+                ToolGateway.Admitted.class,
+                gateway.admit(
+                    new ToolGateway.Execution(
+                        ToolGatewayTestSupport.INVOCATION_ID,
+                        ToolGatewayTestSupport.scope(),
+                        1,
+                        request,
+                        approved(new ToolEditReview(expectedFile, "-1|old\\n+1|new")),
+                        new ToolGatewayTestSupport.RecordingRemoteExecutions())))
+            .run();
+    reviewed.execute(partial -> {});
+    reviewed.close();
+
+    assertEquals(expectedFile, transport.invocations.getFirst().request().expectedFile());
   }
 
   /** 非环境的同名 edit 工具不被审查守卫误拦：守卫基于真实贡献身份而非仅工具名。 */
@@ -461,6 +524,18 @@ class ToolExecutionGatewayAdmitTest {
         new ToolBinding(
             edit.definition(),
             new ContributorBinding(edit.id().contributorId().value(), edit.id().localName()),
+            EnvironmentSupport.ROUTED,
+            ToolGatewayTestSupport.ENV_A,
+            "test-env"));
+  }
+
+  private static ToolInvocationRequest writeRequest(HarnessCatalog catalog, String callId) {
+    ToolContribution write = catalog.findTool("write").orElseThrow();
+    return new ToolInvocationRequest(
+        new ToolCall(callId, "write", "{\"path\":\"/workspace/new.txt\",\"content\":\"new\"}"),
+        new ToolBinding(
+            write.definition(),
+            new ContributorBinding(write.id().contributorId().value(), write.id().localName()),
             EnvironmentSupport.ROUTED,
             ToolGatewayTestSupport.ENV_A,
             "test-env"));

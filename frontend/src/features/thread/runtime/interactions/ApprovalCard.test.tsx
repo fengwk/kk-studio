@@ -18,6 +18,53 @@ const args = '{"command":"pwd\\nls -la","workdir":"/srv/完整目录","timeout":
 const props = { threadId: 'source-child', invocationId: 'original-invocation', toolName: 'bash',
   argumentsJson: args, approval: { required: true, reason: 'Permission rules require approval' } }
 
+it('write 审批卡片显示真实覆盖 diff，且新文件允许 null SHA', () => {
+  render(
+    <ApprovalCard
+      {...props}
+      toolName="write"
+      argumentsJson={'{"path":"/workspace/new.txt","content":"NEW CONTENT"}'}
+      approval={{
+        required: true,
+        editReview: {
+          path: '/canonical/new.txt',
+          diff: '+1|NEW CONTENT',
+          sha256: null,
+        },
+      }}
+    />,
+    { wrapper },
+  )
+
+  expect(screen.getByText('/canonical/new.txt')).toBeInTheDocument()
+  expect(document.querySelector('.is-added')?.textContent).toBe('+1|NEW CONTENT')
+  expect(document.querySelector('.thread-tool-preview-body')?.textContent).toBe('+1|NEW CONTENT')
+})
+
+it('write 覆盖审批卡片展示哈希保护的变更而非整文件输入', () => {
+  render(
+    <ApprovalCard
+      {...props}
+      toolName="write"
+      argumentsJson={'{"path":"/workspace/a.txt","content":"whole replacement"}'}
+      approval={{
+        required: true,
+        editReview: {
+          path: '/canonical/a.txt',
+          diff: '@@ -1 +1 @@\n-1|before\n+1|after',
+          sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        },
+      }}
+    />,
+    { wrapper },
+  )
+
+  expect(screen.getByText('/canonical/a.txt')).toBeInTheDocument()
+  expect(document.querySelector('.is-removed')?.textContent).toBe('-1|before\n')
+  expect(document.querySelector('.is-added')?.textContent).toBe('+1|after')
+  expect(screen.queryByText('whole replacement')).not.toBeInTheDocument()
+})
+
 it('显示同文件后续审批数量并本地化单复数文案', () => {
   const { rerender } = render(<ApprovalCard {...props} queuedSameFileCount={2} />, { wrapper })
   expect(screen.getByText('处理后，此文件还有 2 个修改将依次请求审批')).toBeInTheDocument()

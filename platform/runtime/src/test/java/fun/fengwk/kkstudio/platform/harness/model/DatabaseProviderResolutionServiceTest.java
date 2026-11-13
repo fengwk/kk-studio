@@ -19,7 +19,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
@@ -31,6 +30,7 @@ import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
@@ -382,13 +381,10 @@ class DatabaseProviderResolutionServiceTest {
         "effectiveRequest must not expose nested ProviderResourceBlock to the adapter");
   }
 
-  /**
-   * 意图：resolve 交给 transport 的 effectiveRequest 必须原样保留 assistant 的 native replay state（同一实例），
-   * 即使同时存在需要物化的用户 Resource——物化边界不得解析或重建 replay payload。
-   */
+  /** Resource conversion preserves assistant block metadata unchanged for every provider format. */
   @ParameterizedTest
   @EnumSource(ProviderReplayFormat.class)
-  void resolvePreservesAssistantReplayStateThroughResourceMaterialization(
+  void resolvePreservesAssistantBlockDataThroughResourceMaterialization(
       ProviderReplayFormat format) {
     when(repository.getByName(PROVIDER_NAME)).thenReturn(provider(ProviderType.OPENAI, ENDPOINT));
     DatabaseProviderResolutionService resolution =
@@ -397,12 +393,23 @@ class DatabaseProviderResolutionServiceTest {
                 ProviderType.OPENAI,
                 PromptCacheRetention.SHORT,
                 adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
-    ProviderReplayState replayState = sampleReplayState(format);
+    ProviderType providerType =
+        switch (format) {
+          case OPENAI_RESPONSES, OPENAI_CHAT -> ProviderType.OPENAI;
+          case ANTHROPIC_MESSAGES -> ProviderType.ANTHROPIC;
+          case GEMINI_CONTENT -> ProviderType.GOOGLE;
+        };
+    ProviderBlockData data =
+        new ProviderBlockData(
+            format,
+            new ProviderReplayAffinity(providerType, PROVIDER_NAME, "model"),
+            JsonMapper.builder().build().createObjectNode().put("opaque", format.name()));
     ProviderMessage assistant =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("answer"), new ProviderThinkingBlock("reasoning")),
-            replayState);
+            List.of(
+                new ProviderTextBlock("answer", data),
+                new ProviderThinkingBlock("reasoning", data)));
     ProviderRequest persisted =
         request(
             ProviderCacheControl.none(),
@@ -423,31 +430,11 @@ class DatabaseProviderResolutionServiceTest {
         effective.get(0).contents().stream().noneMatch(ProviderResourceBlock.class::isInstance),
         "Resource 必须已被物化");
     assertEquals(ProviderMessageRole.ASSISTANT, effective.get(1).role());
-    assertSame(replayState, effective.get(1).replayState(), "replay state 必须是同一实例");
-    assertEquals(format, effective.get(1).replayState().format());
-    assertEquals(
-        replayState.payload(),
-        effective.get(1).replayState().payload(),
-        "不同 Provider 的 replay payload 必须逐字段保持不变（本边界不得解析或重写 payload）");
-    assertEquals(replayState.affinity(), effective.get(1).replayState().affinity());
+    assertSame(assistant.contents().get(0), effective.get(1).contents().get(0));
+    assertSame(assistant.contents().get(1), effective.get(1).contents().get(1));
+    assertSame(data, ((ProviderTextBlock) effective.get(1).contents().get(0)).providerBlockData());
     assertSame(
-        assistant.contents().get(1),
-        effective.get(1).contents().get(1),
-        "durable thinking 必须保持 identity，绝不重建");
-  }
-
-  /** 合成 replay state：payload 刻意不透明，只为验证 resolve 边界的对象透传。 */
-  private static ProviderReplayState sampleReplayState(ProviderReplayFormat format) {
-    try {
-      return new ProviderReplayState(
-          format,
-          new ProviderReplayAffinity(ProviderType.OPENAI, PROVIDER_NAME, GENERATION_ID, "model"),
-          JsonMapper.builder()
-              .build()
-              .readTree("{\"output\":[{\"type\":\"opaque-" + format.name() + "\"}]}"));
-    } catch (JacksonException error) {
-      throw new IllegalStateException(error);
-    }
+        data, ((ProviderThinkingBlock) effective.get(1).contents().get(1)).providerBlockData());
   }
 
   @Test
@@ -594,6 +581,8 @@ class DatabaseProviderResolutionServiceTest {
     blob.setId(blobId);
     blob.setMediaType("image/png");
     blob.setSizeBytes(3L);
+    blob.setWidth(1L);
+    blob.setHeight(1L);
     blob.setState(StorageBlobState.ACTIVE);
     when(blobManager.getBlob(blobId)).thenReturn(blob);
     when(contentService.readBlobContent(
@@ -626,7 +615,7 @@ class DatabaseProviderResolutionServiceTest {
     ProviderImageBlock image =
         assertInstanceOf(
             ProviderImageBlock.class,
-            resolved.effectiveRequest().messages().get(0).contents().get(0));
+            resolved.effectiveRequest().messages().get(0).contents().get(1));
     assertEquals("data:image/png;base64,AAEC", image.source());
   }
 

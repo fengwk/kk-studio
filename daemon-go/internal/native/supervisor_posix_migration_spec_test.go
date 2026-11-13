@@ -497,3 +497,25 @@ func TestPOSIXSupervisor_MultipleProcessGroups(t *testing.T) {
 		t.Fatalf("different-group child %d survived termination: %v", childPID, err)
 	}
 }
+
+func posixOwnerFixture(args []string) int {
+	if len(args) != 1 {
+		return 2
+	}
+	ownerReader, ownerWriter, err := os.Pipe()
+	if err != nil {
+		return 3
+	}
+	helper := exec.Command(os.Args[0], "__native-helper", args[0])
+	helper.ExtraFiles = []*os.File{ownerReader}
+	helper.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	if err := helper.Start(); err != nil {
+		_ = ownerReader.Close()
+		_ = ownerWriter.Close()
+		return 4
+	}
+	_ = ownerReader.Close()
+	for {
+		time.Sleep(time.Hour)
+	}
+}

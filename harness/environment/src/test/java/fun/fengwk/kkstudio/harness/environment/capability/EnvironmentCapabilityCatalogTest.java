@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.environment.capability;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -13,12 +14,14 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeSet;
 
 /** 固定 atomic capability ID 与 descriptor 顺序的契约测试。 */
 class EnvironmentCapabilityCatalogTest {
@@ -32,12 +35,14 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_WRITE,
             EnvironmentCapabilityIds.FS_EDIT,
             EnvironmentCapabilityIds.FS_EDIT_PREVIEW,
+            EnvironmentCapabilityIds.FS_WRITE_PREVIEW,
             EnvironmentCapabilityIds.PROCESS_EXEC,
             EnvironmentCapabilityIds.FS_GREP,
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
-            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
+            EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
+            EnvironmentCapabilityIds.SKILL_INSTALL);
 
     assertEquals(
         List.of(
@@ -45,12 +50,14 @@ class EnvironmentCapabilityCatalogTest {
             "fs.write",
             "fs.edit",
             "fs.edit.preview",
+            "fs.write.preview",
             "process.exec",
             "fs.grep",
             "fs.find",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
-            "lsp.java-decompile"),
+            "lsp.java-decompile",
+            "skill.install"),
         expected.stream().map(EnvironmentCapabilityId::value).toList());
     assertEquals(
         expected,
@@ -96,6 +103,13 @@ class EnvironmentCapabilityCatalogTest {
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT).inputSchema(),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT_PREVIEW)
             .inputSchema());
+    assertEquals(
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE)
+            .inputSchema()
+            .required(),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE_PREVIEW)
+            .inputSchema()
+            .required());
     assertEquals(
         Set.of("path", "pattern"),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_GREP)
@@ -198,6 +212,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_WRITE,
             EnvironmentCapabilityIds.FS_EDIT,
             EnvironmentCapabilityIds.FS_EDIT_PREVIEW,
+            EnvironmentCapabilityIds.FS_WRITE_PREVIEW,
             EnvironmentCapabilityIds.FS_GREP,
             EnvironmentCapabilityIds.FS_FIND,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
@@ -208,7 +223,8 @@ class EnvironmentCapabilityCatalogTest {
       String validArgs =
           switch (id.value()) {
             case "fs.read" -> "{\"path\":\"/app/file.txt\"}";
-            case "fs.write" -> "{\"path\":\"/app/file.txt\",\"content\":\"hello\"}";
+            case "fs.write",
+                "fs.write.preview" -> "{\"path\":\"/app/file.txt\",\"content\":\"hello\"}";
             case "fs.edit",
                 "fs.edit.preview" -> "{\"path\":\"/app/file.txt\",\"old_string\":\"a\",\"new_string\":\"b\"}";
             case "fs.grep" -> "{\"pattern\":\"foo\",\"path\":\"/app\"}";
@@ -245,6 +261,10 @@ class EnvironmentCapabilityCatalogTest {
     assertEquals(
         Duration.ofSeconds(60),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_EDIT_PREVIEW)
+            .defaultTimeout());
+    assertEquals(
+        Duration.ofSeconds(60),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_WRITE_PREVIEW)
             .defaultTimeout());
     assertEquals(
         Duration.ofSeconds(300),
@@ -290,39 +310,72 @@ class EnvironmentCapabilityCatalogTest {
     assertTrue(findDescription.contains("Defaults to 15."), findDescription);
   }
 
-  /** 测试意图：验证 Java classpath 加载的 schema 与 Daemon capabilities 镜像文件完全一致。 */
+  /** 测试意图：验证 Java classpath 中的每份 schema 与 Go Daemon 声明逐字节一致。 */
   @Test
-  void javaSchemasMirrorDaemonCapabilitySchemas() throws IOException {
-    Path projectRoot = findProjectRootDir();
-    Path daemonCapabilitiesDir = projectRoot.resolve("daemon/resources/capabilities");
-    for (EnvironmentCapabilityDescriptor descriptor : EnvironmentCapabilityCatalog.descriptors()) {
-      String fileName = descriptor.id().value() + ".schema.json";
-      Path daemonSchemaPath = daemonCapabilitiesDir.resolve(fileName);
-      assertTrue(Files.exists(daemonSchemaPath), "daemon schema must exist: " + daemonSchemaPath);
-      String daemonSchema =
-          Files.readString(daemonSchemaPath, StandardCharsets.UTF_8).stripTrailing();
+  void javaSchemasMirrorGoCapabilitySchemas() throws IOException {
+    Path goCapabilitiesDir = findProjectRootDir().resolve("daemon-go/internal/capability/schemas");
+    Set<String> goSchemaNames = new TreeSet<>();
+    try (var files = Files.list(goCapabilitiesDir)) {
+      files
+          .filter(Files::isRegularFile)
+          .map(path -> path.getFileName().toString())
+          .filter(name -> name.endsWith(".schema.json"))
+          .forEach(goSchemaNames::add);
+    }
+    Path javaCapabilitiesDir =
+        findProjectRootDir()
+            .resolve(
+                "harness/environment/src/main/resources/fun/fengwk/kkstudio/harness/environment/capability/schemas");
+    Set<String> javaSchemaNames = new TreeSet<>();
+    try (var files = Files.list(javaCapabilitiesDir)) {
+      files
+          .filter(Files::isRegularFile)
+          .map(path -> path.getFileName().toString())
+          .filter(name -> name.endsWith(".schema.json"))
+          .forEach(javaSchemaNames::add);
+    }
+    assertEquals(goSchemaNames, javaSchemaNames, "Java and Go schema inventories must match");
+
+    for (String fileName : goSchemaNames) {
+      Path goSchemaPath = goCapabilitiesDir.resolve(fileName);
       String javaSchemaResource =
           "/fun/fengwk/kkstudio/harness/environment/capability/schemas/" + fileName;
       try (InputStream input =
           EnvironmentCapabilityCatalog.class.getResourceAsStream(javaSchemaResource)) {
-        assertNotNull(input, "missing java schema resource: " + javaSchemaResource);
-        String javaSchema =
-            new String(input.readAllBytes(), StandardCharsets.UTF_8).stripTrailing();
-        assertEquals(
-            daemonSchema, javaSchema, "Java and daemon schemas must match for " + fileName);
+        assertNotNull(input, "missing Java schema resource: " + javaSchemaResource);
+        assertArrayEquals(
+            Files.readAllBytes(goSchemaPath),
+            input.readAllBytes(),
+            "Java and Go schemas must match byte-for-byte for " + fileName);
       }
     }
+  }
+
+  /** 测试意图：schema 资源缺失时 catalog 必须显式失败，不能静默接受空 schema。 */
+  @Test
+  void missingSchemaResourceFailsFast() throws Exception {
+    Method loadText =
+        EnvironmentCapabilityCatalog.class.getDeclaredMethod("loadText", String.class);
+    loadText.setAccessible(true);
+
+    InvocationTargetException failure =
+        assertThrows(
+            InvocationTargetException.class,
+            () -> loadText.invoke(null, "missing-capability.schema.json"));
+
+    assertTrue(failure.getCause() instanceof IllegalStateException);
+    assertTrue(failure.getCause().getMessage().contains("missing Environment capability schema"));
   }
 
   private static Path findProjectRootDir() {
     Path current = Path.of("").toAbsolutePath();
     while (current != null) {
-      if (Files.isDirectory(current.resolve("daemon/resources/capabilities"))) {
+      if (Files.isDirectory(current.resolve("daemon-go/internal/capability/schemas"))) {
         return current;
       }
       current = current.getParent();
     }
     throw new IllegalStateException(
-        "cannot find project root containing daemon/resources/capabilities");
+        "cannot find project root containing daemon-go/internal/capability/schemas");
   }
 }

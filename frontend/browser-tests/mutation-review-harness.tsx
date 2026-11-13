@@ -92,6 +92,12 @@ const mutationReviewHarness = {
       decision: null,
       decisionId: null,
       reason: 'Permission rules require approval',
+      editReview: {
+        path: '/workspace/src/LongService.java',
+        diff: LONG_WRITE_CONTENT.split('\n').slice(0, -1)
+          .map((line, index) => `+${index + 1}|${line}`).join('\n'),
+        sha256: null,
+      },
     }
 
     const callMsg: ToolDialogueMessage = {

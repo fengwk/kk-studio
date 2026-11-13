@@ -9,18 +9,23 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderProtocolEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
@@ -795,19 +800,7 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
           ProviderErrorKind.INVALID_RESPONSE, "failed to serialize raw usage JSON");
     }
 
-    ProviderResponse response =
-        new ProviderResponse(
-            textBuffer.toString(),
-            thinkingBuffer.toString(),
-            Collections.unmodifiableList(toolCalls),
-            stopReason,
-            usage,
-            requestId,
-            serviceTier,
-            rawUsageJson,
-            Collections.unmodifiableList(toolCallDiagnostics));
-
-    ProviderReplayState replayState = null;
+    List<ProviderContentBlock> responseBlocks = new ArrayList<>();
     if (canReplay) {
       ArrayNode replayOutputArray =
           OpenAiResponsesReplayBuilder.build(
@@ -819,18 +812,205 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
       // 只含空 reasoning 占位符的 replay 不承载任何原生推理，冻结它没有语义价值，交由下一轮语义编码。
       if (!replayOutputArray.isEmpty()
           && !OpenAiResponsesReplayItems.isEmptyPlaceholderOnly(replayOutputArray)) {
-        ObjectNode payload = NODES.objectNode();
-        payload.set("output", replayOutputArray);
-        replayState =
-            new ProviderReplayState(
-                ProviderReplayFormat.OPENAI_RESPONSES,
-                descriptor.affinity(request.model().modelId()),
-                payload);
+        responseBlocks.addAll(responseBlocks(replayOutputArray, toolCalls));
       }
     }
+    if (responseBlocks.isEmpty()) {
+      if (!thinkingBuffer.isEmpty()) {
+        responseBlocks.add(new ProviderThinkingBlock(thinkingBuffer.toString()));
+      }
+      if (!textBuffer.isEmpty()) {
+        responseBlocks.add(new ProviderTextBlock(textBuffer.toString()));
+      }
+      for (ProviderToolCall call : toolCalls) {
+        responseBlocks.add(new ProviderToolCallBlock(call));
+      }
+    }
+    ProviderResponse response =
+        new ProviderResponse(
+            responseBlocks,
+            stopReason,
+            usage,
+            requestId,
+            serviceTier,
+            rawUsageJson,
+            Collections.unmodifiableList(toolCallDiagnostics),
+            null,
+            null);
 
-    finishedCompletion = new ProviderCompletion(response, replayState);
+    finishedCompletion = new ProviderCompletion(response);
     return finishedCompletion;
+  }
+
+  private List<ProviderContentBlock> responseBlocks(
+      ArrayNode outputItems, List<ProviderToolCall> toolCalls) {
+    Map<String, ProviderToolCall> callsById = new LinkedHashMap<>();
+    for (ProviderToolCall call : toolCalls) {
+      callsById.put(call.id(), call);
+    }
+    List<ProviderContentBlock> blocks = new ArrayList<>();
+    for (JsonNode item : outputItems) {
+      String itemType = item.path("type").asString("");
+      if ("message".equals(itemType)) {
+        addMessageBlocks(blocks, item);
+      } else if ("reasoning".equals(itemType)) {
+        addReasoningBlocks(blocks, item);
+      } else if ("function_call".equals(itemType)) {
+        ProviderToolCall call = callsById.get(item.path("call_id").asString(""));
+        if (call == null) {
+          ObjectNode fields = NODES.objectNode();
+          fields.set("item", item.deepCopy());
+          blocks.add(new ProviderOpaqueBlock(itemType, responseBlockData(fields)));
+        } else {
+          ObjectNode fields = NODES.objectNode();
+          fields.put("itemType", itemType);
+          fields.set(
+              "itemFields", copyFields(item, Set.of("type", "call_id", "name", "arguments")));
+          blocks.add(new ProviderToolCallBlock(call, responseBlockData(fields)));
+        }
+      } else {
+        ObjectNode fields = NODES.objectNode();
+        fields.set("item", item.deepCopy());
+        blocks.add(new ProviderOpaqueBlock(itemType, responseBlockData(fields)));
+      }
+    }
+    return blocks;
+  }
+
+  private void addMessageBlocks(List<ProviderContentBlock> blocks, JsonNode item) {
+    JsonNode content = item.path("content");
+    if (!content.isArray() || content.isEmpty()) {
+      ObjectNode fields = NODES.objectNode();
+      fields.set("item", item.deepCopy());
+      blocks.add(new ProviderOpaqueBlock("message", responseBlockData(fields)));
+      return;
+    }
+    ObjectNode itemFields = copyFields(item, Set.of("content"));
+    boolean first = true;
+    for (JsonNode contentPart : content) {
+      String contentType = contentPart.path("type").asString("");
+      ObjectNode fields = NODES.objectNode();
+      fields.put("itemType", "message");
+      fields.put("contentType", contentType);
+      if (first) {
+        fields.set("itemFields", itemFields);
+        first = false;
+      }
+      Set<String> semanticContentFields =
+          switch (contentType) {
+            case "output_text" -> Set.of("type", "text");
+            case "refusal" -> Set.of("type", "refusal");
+            default -> Set.of("type");
+          };
+      ObjectNode contentFields = copyFields(contentPart, semanticContentFields);
+      if (!contentFields.isEmpty()) {
+        fields.set("contentFields", contentFields);
+      }
+      String text =
+          "refusal".equals(contentType)
+              ? contentPart.path("refusal").asString("")
+              : contentPart.path("text").asString("");
+      if ("output_text".equals(contentType)) {
+        blocks.add(new ProviderTextBlock(text, responseBlockData(fields)));
+      } else if ("refusal".equals(contentType)) {
+        fields.put("refusal", true);
+        blocks.add(new ProviderTextBlock(text, responseBlockData(fields)));
+      } else {
+        blocks.add(new ProviderOpaqueBlock("message_content", responseBlockData(fields)));
+      }
+    }
+  }
+
+  private void addReasoningBlocks(List<ProviderContentBlock> blocks, JsonNode item) {
+    JsonNode summary = item.path("summary");
+    ObjectNode itemFields = copyFields(item, Set.of("summary"));
+    if (summary.isArray()) {
+      boolean first = true;
+      for (JsonNode summaryPart : summary) {
+        if (!"summary_text".equals(summaryPart.path("type").asString(""))) {
+          ObjectNode fields = NODES.objectNode();
+          fields.set("item", item.deepCopy());
+          blocks.add(new ProviderOpaqueBlock("reasoning", responseBlockData(fields)));
+          continue;
+        }
+        ObjectNode fields = NODES.objectNode();
+        fields.put("itemType", "reasoning");
+        fields.put("contentType", "summary_text");
+        if (first) {
+          fields.set("itemFields", itemFields);
+          first = false;
+        }
+        blocks.add(
+            new ProviderThinkingBlock(
+                summaryPart.path("text").asString(""), responseBlockData(fields)));
+      }
+      if (!first) {
+        return;
+      }
+    }
+    ObjectNode fields = NODES.objectNode();
+    fields.set("item", item.deepCopy());
+    blocks.add(new ProviderOpaqueBlock("reasoning", responseBlockData(fields)));
+  }
+
+  private ProviderBlockData responseBlockData(ObjectNode nativeFields) {
+    String itemId = null;
+    String encryptedContent = null;
+    String itemType = textualValue(nativeFields.remove("itemType"));
+    String contentType = textualValue(nativeFields.remove("contentType"));
+    JsonNode refusalNode = nativeFields.remove("refusal");
+    boolean refusal = refusalNode != null && refusalNode.isBoolean() && refusalNode.booleanValue();
+    JsonNode itemFields = nativeFields.get("itemFields");
+    if (itemFields instanceof ObjectNode objectFields) {
+      itemId = textualValue(objectFields.remove("id"));
+      if (itemType == null) {
+        itemType = textualValue(objectFields.remove("type"));
+      } else {
+        objectFields.remove("type");
+      }
+      encryptedContent = textualValue(objectFields.remove("encrypted_content"));
+    }
+    JsonNode item = nativeFields.get("item");
+    if (item instanceof ObjectNode objectItem) {
+      itemId = itemId == null ? textualValue(objectItem.remove("id")) : itemId;
+      if (itemType == null) {
+        itemType = textualValue(objectItem.remove("type"));
+      } else {
+        objectItem.remove("type");
+      }
+      if ("reasoning".equals(itemType)) {
+        encryptedContent = textualValue(objectItem.remove("encrypted_content"));
+      }
+    }
+    return new ProviderBlockData(
+        ProviderReplayFormat.OPENAI_RESPONSES,
+        descriptor.affinity(request.model().modelId()),
+        null,
+        encryptedContent,
+        itemId,
+        itemType,
+        contentType,
+        refusal,
+        null,
+        nativeFields.has("itemFields") || nativeFields.has("item"),
+        nativeFields);
+  }
+
+  private static String textualValue(JsonNode node) {
+    return node != null && node.isString() ? node.stringValue() : null;
+  }
+
+  private ObjectNode copyFields(JsonNode source, Set<String> excludedFields) {
+    ObjectNode copy = NODES.objectNode();
+    source
+        .properties()
+        .forEach(
+            entry -> {
+              if (!excludedFields.contains(entry.getKey())) {
+                copy.set(entry.getKey(), entry.getValue().deepCopy());
+              }
+            });
+    return copy;
   }
 
   /** 权威 item 按顺序聚合；全部无可比文本时保留流式思考，绝不混入草稿。 */
@@ -853,10 +1033,6 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
 
   public ProviderResponse response() {
     return finish().response();
-  }
-
-  public ProviderReplayState replayState() {
-    return finish().replayState();
   }
 
   /** 把流内工具状态冻结为 replay 重建所需的不可变快照。 */

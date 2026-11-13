@@ -453,7 +453,7 @@ class StoragePluginResourceGatewayTest {
 
     ArgumentCaptor<StorageUploadReserveRequestDTO> captor =
         ArgumentCaptor.forClass(StorageUploadReserveRequestDTO.class);
-    verify(storageUploadService).reserve(captor.capture());
+    verify(storageUploadService).reserveStaged(captor.capture());
     assertEquals(expectedSha256, captor.getValue().getSha256());
     assertEquals((long) pngData.length, captor.getValue().getSizeBytes());
     assertEquals("image/png", captor.getValue().getMediaType());
@@ -854,7 +854,7 @@ class StoragePluginResourceGatewayTest {
     URI uri = URI.create("https://media.example.com/pic.png");
     byte[] pngData = createPngData(100);
 
-    when(storageUploadService.reserve(any()))
+    when(storageUploadService.reserveStaged(any()))
         .thenThrow(new RuntimeException("Storage unavailable"));
     transport.setGetResponse(
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
@@ -1187,7 +1187,7 @@ class StoragePluginResourceGatewayTest {
     transport.setGetResponse(
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
 
-    when(storageUploadService.reserve(any()))
+    when(storageUploadService.reserveStaged(any()))
         .thenReturn(new StorageUploadPendingDTO(null, null, Instant.parse("2026-07-28T10:01:00Z")));
     PluginResourceUnavailableException noId =
         assertThrows(
@@ -1199,7 +1199,7 @@ class StoragePluginResourceGatewayTest {
                     "pic.png"));
     assertTrue(noId.getMessage().contains("has no id"));
 
-    when(storageUploadService.reserve(any()))
+    when(storageUploadService.reserveStaged(any()))
         .thenReturn(
             new StorageUploadPendingDTO("not-a-uuid", null, Instant.parse("2026-07-28T10:01:00Z")));
     PluginResourceUnavailableException badId =
@@ -1296,14 +1296,14 @@ class StoragePluginResourceGatewayTest {
     StorageUploadDTO upload =
         new StorageUploadReadyDTO(
             uploadId.toString(), blobId.toString(), Instant.parse("2026-07-28T10:01:00Z"));
-    when(storageUploadService.reserve(any())).thenReturn(upload);
+    when(storageUploadService.reserveStaged(any())).thenReturn(upload);
   }
 
   private void mockReservePending(UUID uploadId, StoragePresignedUrlDTO presignedPut) {
     StorageUploadDTO upload =
         new StorageUploadPendingDTO(
             uploadId.toString(), presignedPut, Instant.parse("2026-07-28T10:01:00Z"));
-    when(storageUploadService.reserve(any())).thenReturn(upload);
+    when(storageUploadService.reserveStaged(any())).thenReturn(upload);
   }
 
   private void assertTempDirClean() throws IOException {

@@ -4,13 +4,11 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertSame;
 
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -18,15 +16,10 @@ import java.util.concurrent.atomic.AtomicReference;
  */
 class ProviderStreamHandlerTest {
 
-  /** 意图：成功终态只有一个入口，必须原样交付 ProviderCompletion（含 native replay），不丢信息也不做二次适配。 */
+  /** 意图：成功终态只有一个入口，必须原样交付完整 ProviderCompletion，不丢失响应信息。 */
   @Test
-  void completionHandlerReceivesFullCompletionIncludingReplayState() {
-    ProviderReplayState replayState =
-        new ProviderReplayState(
-            ProviderReplayFormat.OPENAI_CHAT,
-            new ProviderReplayAffinity(ProviderType.OPENAI, "openai", UUID.randomUUID(), "gpt-5"),
-            new ObjectMapper().createObjectNode());
-    ProviderCompletion completion = new ProviderCompletion(sampleResponse(), replayState);
+  void completionHandlerReceivesFullCompletion() {
+    ProviderCompletion completion = new ProviderCompletion(sampleResponse());
     AtomicReference<ProviderCompletion> captured = new AtomicReference<>();
     ProviderStreamHandler handler =
         new ProviderStreamHandler() {
@@ -45,7 +38,6 @@ class ProviderStreamHandlerTest {
     handler.onComplete(completion);
 
     assertSame(completion, captured.get());
-    assertSame(replayState, captured.get().replayState());
     assertSame(completion.response(), captured.get().response());
   }
 

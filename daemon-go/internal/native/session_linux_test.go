@@ -366,3 +366,16 @@ func TestLinuxConvergeAdoptedChildrenRejectsUnknownOwner(t *testing.T) {
 		t.Fatalf("convergeAdoptedChildren error = %v, want owner-session error", err)
 	}
 }
+
+// NAT-F-005 excludes exec.Cmd.Wait's PID from the adopted-child Wait4 set.
+func TestLinuxDirectChildrenExcludesCommandWaitPID(t *testing.T) {
+	all := []sessionMember{
+		{PID: 201, Parent: 42, Session: 101, Identity: "command"},
+		{PID: 202, Parent: 42, Session: 102, Identity: "adopted"},
+		{PID: 203, Parent: 7, Session: 103, Identity: "unrelated"},
+	}
+	got := directChildrenFromSnapshot(42, []int{201}, all)
+	if len(got) != 1 || got[0].PID != 202 {
+		t.Fatalf("adopted children = %+v, want only PID 202; command PID 201 belongs to exec.Cmd.Wait", got)
+	}
+}

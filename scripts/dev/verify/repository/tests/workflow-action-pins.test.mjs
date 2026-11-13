@@ -7,7 +7,7 @@ import { repositoryRoot } from '../../../lib/repo-root.mjs'
 const REPOSITORY_ROOT = repositoryRoot()
 
 const WORKFLOWS = [
-  '.github/workflows/daemon-ci.yml',
+  '.github/workflows/daemon-go-ci.yml',
   '.github/workflows/daemon-release.yml',
   '.github/workflows/docker-publish.yml',
 ]
@@ -33,6 +33,7 @@ const PINNED_ACTIONS = new Map([
   ['actions/checkout', { sha: '11d5960a326750d5838078e36cf38b85af677262', version: 'v4' }],
   ['actions/setup-java', { sha: 'cf277c60eb25467037889841efdb72551f06f6c3', version: 'v4' }],
   ['actions/setup-node', { sha: '49933ea5288caeca8642d1e84afbd3f7d6820020', version: 'v4' }],
+  ['actions/setup-go', { sha: 'b7ad1dad31e06c5925ef5d2fc7ad053ef454303e', version: 'v7.0.0' }],
   ['actions/upload-artifact', { sha: 'ea165f8d65b6e75b540449e92b4886f43607fa02', version: 'v4' }],
   ['actions/download-artifact', { sha: 'd3f86a106a0bac45b974a628896c90dbdf5c8093', version: 'v4' }],
   ['docker/setup-buildx-action', { sha: '8d2750c68a42422c14e847fe6c8ac0403b4cbd6f', version: 'v3' }],

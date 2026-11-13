@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,12 +20,12 @@ import com.github.benmanes.caffeine.cache.Ticker;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderAudioBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
@@ -35,7 +34,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayState;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResourceBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
@@ -49,7 +47,6 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
-import java.time.Duration;
 import java.util.Base64;
 import java.util.List;
 import java.util.Set;
@@ -60,7 +57,8 @@ import java.util.UUID;
  * Base64；其余一律确定性文本回退，且任何路径都不产生 URL、不读取未授权内容。
  *
  * <p>测试意图涵盖：四类媒体块与模态/能力交集、DOCUMENT 仅 PDF、SYSTEM/ASSISTANT 与非支持媒体类型的免读取回退、缺失或转 DELETING 的 Blob
- * 每次都重新判定状态（含缓存命中）、声明大小与单次 request 字符总量上限（重复与嵌套引用同样计入）、缓存对读 取的合并，以及 replay state/顺序/嵌套元数据的透传。
+ * 每次都重新判定状态（含缓存命中）、声明大小与单次 request 字符总量上限（重复与嵌套引用同样计入）、缓存对读 取的合并，以及 assistant block
+ * metadata、顺序和嵌套元数据的透传。
  *
  * <p>图片档位部分额外覆盖：档位决定实际送达的像素尺寸（含档位缺失时的平台默认）、档位框内逐字节直通、request 字符预算按转化后的实际字符数记账， 以及档位转化失败时整个 attempt
  * 显式失败而不是退回原图。
@@ -104,9 +102,15 @@ class ProviderResourceMaterializerTest {
                 ALL_MEDIA);
 
     ProviderImageBlock image =
-        assertInstanceOf(ProviderImageBlock.class, materialized.get(0).contents().get(0));
+        assertInstanceOf(ProviderImageBlock.class, materialized.get(0).contents().get(1));
     assertEquals("image/png", image.mediaType());
     assertEquals(IMAGE_DATA_URI, image.source());
+    ProviderTextBlock imageLabel =
+        assertInstanceOf(ProviderTextBlock.class, materialized.get(0).contents().get(0));
+    assertTrue(imageLabel.text().contains("resource://files/" + BLOB_ID));
+    assertTrue(imageLabel.text().contains("Original size: 1 x 1"));
+    assertTrue(imageLabel.text().contains("Display size: 1 x 1"));
+    assertFalse(imageLabel.text().contains("Multiply coordinates"));
     verify(contentService).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
     // 内联路径绝不触碰预签名能力。
     verify(blobManager, never()).presignOriginalUrl(any());
@@ -205,9 +209,12 @@ class ProviderResourceMaterializerTest {
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
     stubContent(contentService, BLOB_ID, "image/png", BYTES);
+    ProviderResourceBlock scaledToolImage =
+        ProviderResourceBlock.media(
+            BLOB_ID, "scan.png", "tiny preview", null, 4000, 2000, 1280, 640);
     ProviderToolResultBlock toolResult =
         new ProviderToolResultBlock(
-            "call-image", "read", List.of(IMAGE_RESOURCE), false, "{\"bytes\":3}");
+            "call-image", "read", List.of(scaledToolImage), false, "{\"bytes\":3}");
     ProviderMediaCapabilities userOnly =
         new ProviderMediaCapabilities(Set.of(ModelInputModality.IMAGE), Set.of());
     ProviderMediaCapabilities toolOnly =
@@ -232,8 +239,14 @@ class ProviderResourceMaterializerTest {
         assertInstanceOf(ProviderTextBlock.class, userMedia.contents().get(0));
     assertTrue(source.text().contains("call-image"), source.text());
     assertTrue(source.text().contains(BLOB_ID.toString()), source.text());
+    ProviderTextBlock imageLabel =
+        assertInstanceOf(ProviderTextBlock.class, userMedia.contents().get(1));
+    assertTrue(imageLabel.text().startsWith("Tool call call-image image: resource://files/"));
+    assertTrue(imageLabel.text().contains("Original size: 4000 x 2000"));
+    assertTrue(imageLabel.text().contains("Display size: 1280 x 640"));
+    assertTrue(imageLabel.text().contains("Multiply coordinates … to map to the original image."));
     ProviderImageBlock image =
-        assertInstanceOf(ProviderImageBlock.class, userMedia.contents().get(1));
+        assertInstanceOf(ProviderImageBlock.class, userMedia.contents().get(2));
     assertEquals(IMAGE_DATA_URI, image.source());
     verify(contentService, times(1)).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
 
@@ -249,8 +262,11 @@ class ProviderResourceMaterializerTest {
                 .get(0)
                 .contents()
                 .get(0));
+    ProviderTextBlock nativeImageLabel =
+        assertInstanceOf(ProviderTextBlock.class, inlined.contents().get(0));
+    assertTrue(nativeImageLabel.text().startsWith("Image: resource://files/"));
     ProviderImageBlock nativeImage =
-        assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(0));
+        assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(1));
     assertEquals(IMAGE_DATA_URI, nativeImage.source());
     IllegalArgumentException userError =
         assertThrows(
@@ -396,7 +412,7 @@ class ProviderResourceMaterializerTest {
     List<ProviderMessage> materialized =
         materializer(blobManager, contentService)
             .materialize(
-                List.of(new ProviderMessage(role, List.of(IMAGE_RESOURCE), null, "max")),
+                List.of(new ProviderMessage(role, List.of(IMAGE_RESOURCE), "max")),
                 Set.of(ModelInputModality.IMAGE),
                 ALL_MEDIA);
 
@@ -471,7 +487,7 @@ class ProviderResourceMaterializerTest {
             .materialize(List.of(message), Set.of(ModelInputModality.IMAGE), ALL_MEDIA)
             .get(0)
             .contents()
-            .get(0));
+            .get(1));
 
     StorageBlob deleting = activeBlob("image/png", BYTES.length);
     deleting.setState(StorageBlobState.DELETING);
@@ -507,9 +523,9 @@ class ProviderResourceMaterializerTest {
                 ALL_MEDIA);
 
     assertEquals(
-        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(0).contents().get(0)).source());
+        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(0).contents().get(1)).source());
     assertEquals(
-        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(1).contents().get(0)).source());
+        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(1).contents().get(1)).source());
     verify(contentService, times(1)).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
   }
 
@@ -527,6 +543,24 @@ class ProviderResourceMaterializerTest {
 
     assertEquals(1280, materializedImageWidth(materializer, tieredResource(ImageInputTier.P720)));
     assertEquals(1920, materializedImageWidth(materializer, tieredResource(ImageInputTier.P1080)));
+    ProviderTextBlock label =
+        assertInstanceOf(
+            ProviderTextBlock.class,
+            materializer
+                .materialize(
+                    List.of(
+                        new ProviderMessage(
+                            ProviderMessageRole.USER,
+                            List.of(tieredResource(ImageInputTier.P720)))),
+                    Set.of(ModelInputModality.IMAGE),
+                    ALL_MEDIA)
+                .get(0)
+                .contents()
+                .get(0));
+    assertTrue(label.text().startsWith("Image: resource://files/" + BLOB_ID));
+    assertTrue(label.text().contains("Original size: 4000 x 2000"));
+    assertTrue(label.text().contains("Display size: 1280 x 640"));
+    assertTrue(label.text().contains("Multiply coordinates … to map to the original image."));
     // 档位是缓存 key 的组成部分：两次读取不会互相复用转化结果。
     verify(contentService, times(2)).readBlobContent(eq(BLOB_ID), anyLong());
   }
@@ -567,6 +601,62 @@ class ProviderResourceMaterializerTest {
 
     assertEquals(
         "data:image/png;base64," + Base64.getEncoder().encodeToString(png), image.source());
+  }
+
+  /** 意图：已有显示尺寸表示上传时已缩放，provider 物化必须将存储字节直接送达，不再按档位缩放。 */
+  @Test
+  void storedImageDimensionsBypassProviderRescaling() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
+    stubContent(contentService, BLOB_ID, "image/png", BYTES);
+    ProviderResourceBlock storedImage =
+        ProviderResourceBlock.media(
+            BLOB_ID, "scan.png", "preview", ImageInputTier.P720, 4000, 2000, 1280, 640);
+
+    ProviderImageBlock image =
+        firstImage(
+            materializer(blobManager, contentService),
+            storedImage,
+            Set.of(ModelInputModality.IMAGE),
+            ALL_MEDIA);
+
+    assertEquals(IMAGE_DATA_URI, image.source());
+    verify(contentService).readBlobContent(BLOB_ID, defaultReaderLimits().maxBlobBytes());
+  }
+
+  /** 意图：持久模型视图的真实尺寸与缩放事实进入图片标签，而非源图片的声明推测。 */
+  @Test
+  void persistedModelViewDimensionsDriveImageLabel() {
+    StorageBlobManager blobManager = mock(StorageBlobManager.class);
+    StorageBlobContentService contentService = mock(StorageBlobContentService.class);
+    ProviderImageModelViewService modelViewService = mock(ProviderImageModelViewService.class);
+    UUID viewBlobId = OTHER_BLOB_ID;
+    when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
+    when(modelViewService.resolve(BLOB_ID, "image/png", BYTES.length, ImageInputTier.P720))
+        .thenReturn(
+            new ProviderImageModelViewService.ModelView(
+                viewBlobId, "image/png", BYTES.length, 4000, 2000, 1280, 640, true));
+    stubContent(contentService, viewBlobId, "image/png", BYTES);
+    ProviderResourceMaterializer materializer =
+        new ProviderResourceMaterializer(
+            blobManager, contentService, () -> ImageInputTier.P720, modelViewService);
+
+    List<ProviderMessage> messages =
+        materializer.materialize(
+            List.of(new ProviderMessage(ProviderMessageRole.USER, List.of(tieredResource(null)))),
+            Set.of(ModelInputModality.IMAGE),
+            ALL_MEDIA);
+
+    ProviderTextBlock label =
+        assertInstanceOf(ProviderTextBlock.class, messages.get(0).contents().get(0));
+    assertTrue(label.text().contains("Original size: 4000 x 2000"));
+    assertTrue(label.text().contains("Display size: 1280 x 640"));
+    assertTrue(label.text().contains("Multiply coordinates … to map to the original image."));
+    ProviderImageBlock image =
+        assertInstanceOf(ProviderImageBlock.class, messages.get(0).contents().get(1));
+    assertEquals(IMAGE_DATA_URI, image.source());
+    verify(contentService).readBlobContent(viewBlobId, defaultReaderLimits().maxBlobBytes());
   }
 
   /** 意图：缩放后的实际字符数只有在读取完成后才知道，request 预算必须按实际产物记账，而不是按原始大小。 */
@@ -673,7 +763,7 @@ class ProviderResourceMaterializerTest {
                 .get(0));
 
     ProviderImageBlock image =
-        assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(0));
+        assertInstanceOf(ProviderImageBlock.class, inlined.contents().get(1));
     assertEquals(
         1280, TestImages.decode(image.mediaType(), decodeSource(image.source())).getWidth());
   }
@@ -795,7 +885,7 @@ class ProviderResourceMaterializerTest {
                 mediaCapabilities)
             .get(0)
             .contents()
-            .get(0));
+            .get(1));
   }
 
   private static byte[] decodeSource(String dataUri) {
@@ -922,7 +1012,7 @@ class ProviderResourceMaterializerTest {
                     ALL_MEDIA)
                 .get(0)
                 .contents()
-                .get(0));
+                .get(1));
 
     assertEquals(IMAGE_DATA_URI, image.source());
   }
@@ -1125,40 +1215,39 @@ class ProviderResourceMaterializerTest {
     assertSame(second, materialized.contents().get(1));
   }
 
-  // ---------- assistant provider replay state 透传 ----------
+  // ---------- assistant block metadata 透传 ----------
 
-  /** 意图：物化边界不解析 replay payload；四种 Provider format 的 replay state 都必须以同一对象穿过本类。 */
+  /** Resource 物化不重建 assistant content block，也不改变四种协议的 block metadata。 */
   @ParameterizedTest
   @EnumSource(ProviderReplayFormat.class)
-  void assistantReplayStateSurvivesMaterializationForEveryFormat(ProviderReplayFormat format) {
-    ProviderReplayState replayState = replayState(format);
+  void assistantBlockDataSurvivesMaterializationForEveryFormat(ProviderReplayFormat format) {
+    ProviderBlockData data = blockData(format);
+    ProviderTextBlock text = new ProviderTextBlock("answer", data);
+    ProviderThinkingBlock thinking = new ProviderThinkingBlock("reasoning", data);
     ProviderMessage assistant =
-        new ProviderMessage(
-            ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("answer"), new ProviderThinkingBlock("reasoning")),
-            replayState);
+        new ProviderMessage(ProviderMessageRole.ASSISTANT, List.of(text, thinking));
 
     ProviderMessage materialized =
         materialize(List.of(assistant), Set.of(), ProviderMediaCapabilities.NONE).get(0);
 
-    assertSame(replayState, materialized.replayState(), format + " replay state must be identical");
-    assertSame(assistant.contents().get(0), materialized.contents().get(0));
-    assertSame(assistant.contents().get(1), materialized.contents().get(1));
+    assertSame(text, materialized.contents().get(0));
+    assertSame(thinking, materialized.contents().get(1));
+    assertSame(data, ((ProviderTextBlock) materialized.contents().get(0)).providerBlockData());
+    assertSame(data, ((ProviderThinkingBlock) materialized.contents().get(1)).providerBlockData());
   }
 
-  /** 意图：用户 Resource 与 assistant replay 混排时，顺序、Resource 物化与 replay identity 必须同时保持。 */
+  /** User Resource 与 assistant block metadata 混排时，消息顺序和原生 block metadata 都保持不变。 */
   @Test
-  void mixedUserResourceAndAssistantReplayPreservesOrderAndReplayIdentity() {
+  void mixedUserResourceAndAssistantBlocksPreserveOrderAndMetadata() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
     stubContent(contentService, BLOB_ID, "image/png", BYTES);
-    ProviderReplayState replayState = replayState(ProviderReplayFormat.OPENAI_CHAT);
+    ProviderBlockData data = blockData(ProviderReplayFormat.OPENAI_CHAT);
     ProviderMessage assistant =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT,
-            List.of(new ProviderTextBlock("answer"), new ProviderThinkingBlock("reasoning")),
-            replayState);
+            List.of(new ProviderTextBlock("answer", data), new ProviderThinkingBlock("reasoning")));
 
     List<ProviderMessage> materialized =
         materializer(blobManager, contentService)
@@ -1170,52 +1259,17 @@ class ProviderResourceMaterializerTest {
                 Set.of(ModelInputModality.IMAGE),
                 ALL_MEDIA);
 
-    assertEquals(3, materialized.size(), "消息顺序与数量必须保持不变");
+    assertEquals(3, materialized.size());
     assertEquals(ProviderMessageRole.USER, materialized.get(0).role());
     assertEquals(ProviderMessageRole.ASSISTANT, materialized.get(1).role());
     assertEquals(ProviderMessageRole.USER, materialized.get(2).role());
     assertEquals(
-        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(0).contents().get(0)).source());
+        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(0).contents().get(1)).source());
     assertEquals(
-        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(2).contents().get(0)).source());
-    assertSame(replayState, materialized.get(1).replayState());
-    assertTrue(materialized.get(1).hasReplayState());
+        IMAGE_DATA_URI, ((ProviderImageBlock) materialized.get(2).contents().get(1)).source());
+    assertSame(
+        data, ((ProviderTextBlock) materialized.get(1).contents().get(0)).providerBlockData());
     assertEquals(2, materialized.get(1).contents().size());
-  }
-
-  /** 意图：只有 assistant 允许携带 replay state；物化不得为其他角色合成 replay state。 */
-  @Test
-  void materializationNeverSynthesizesReplayStateForNonAssistantMessages() {
-    ProviderReplayState replayState = replayState(ProviderReplayFormat.OPENAI_CHAT);
-    List<ProviderMessage> materialized =
-        materialize(
-            List.of(
-                new ProviderMessage(ProviderMessageRole.USER, List.of(new ProviderTextBlock("u"))),
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT,
-                    List.of(new ProviderTextBlock("a")),
-                    replayState)),
-            Set.of(),
-            ProviderMediaCapabilities.NONE);
-
-    assertNull(materialized.get(0).replayState());
-    assertSame(replayState, materialized.get(1).replayState());
-  }
-
-  /** 意图：无 replay state 的 assistant 消息物化后仍必须保持无 replay state，绝不伪造 thinking 或 replay。 */
-  @Test
-  void assistantWithoutReplayStateStaysWithoutReplayState() {
-    List<ProviderMessage> materialized =
-        materialize(
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("plain")))),
-            Set.of(),
-            ProviderMediaCapabilities.NONE);
-
-    assertFalse(materialized.get(0).hasReplayState());
-    assertNull(materialized.get(0).replayState());
-    assertEquals("plain", ((ProviderTextBlock) materialized.get(0).contents().get(0)).text());
   }
 
   // ---------- 构造 ----------
@@ -1296,8 +1350,7 @@ class ProviderResourceMaterializerTest {
 
   /** 测试用上限：原始字节上限足够小，避免测试分配大对象。 */
   private static ProviderInlineBlobReader.Limits limits(long maxBlobBytes) {
-    return new ProviderInlineBlobReader.Limits(
-        maxBlobBytes, 1024L * 1024L, 4L * 1024L * 1024L, Duration.ofMinutes(5), 2);
+    return new ProviderInlineBlobReader.Limits(maxBlobBytes, 1024L * 1024L, 4L * 1024L * 1024L, 2);
   }
 
   private static void stubContent(
@@ -1349,24 +1402,17 @@ class ProviderResourceMaterializerTest {
     assertEquals(expected, actualSource, mediaType + " must be inlined as real bytes");
   }
 
-  /** 合成 replay state：各 format 使用各自真实的 payload 形态，payload 对本边界保持完全不透明。 */
-  private static ProviderReplayState replayState(ProviderReplayFormat format) {
-    String payload =
+  private static ProviderBlockData blockData(ProviderReplayFormat format) {
+    ProviderType providerType =
         switch (format) {
-          case OPENAI_RESPONSES -> "{\"output\":[{\"type\":\"reasoning\",\"encrypted_content\":\"opaque\"}]}";
-          case OPENAI_CHAT -> "{\"role\":\"assistant\",\"content\":\"opaque\",\"reasoning_content\":\"opaque\"}";
-          case ANTHROPIC_MESSAGES -> "{\"content\":[{\"type\":\"thinking\",\"signature\":\"opaque\"}]}";
-          case GEMINI_CONTENT -> "{\"parts\":[{\"thoughtSignature\":\"opaque\"}]}";
+          case OPENAI_RESPONSES, OPENAI_CHAT -> ProviderType.OPENAI;
+          case ANTHROPIC_MESSAGES -> ProviderType.ANTHROPIC;
+          case GEMINI_CONTENT -> ProviderType.GOOGLE;
         };
-    try {
-      return new ProviderReplayState(
-          format,
-          new ProviderReplayAffinity(
-              ProviderType.OPENAI, "test-provider", new UUID(0L, 9L), "test-model"),
-          JsonMapper.builder().build().readTree(payload));
-    } catch (JacksonException error) {
-      throw new IllegalStateException(error);
-    }
+    return new ProviderBlockData(
+        format,
+        new ProviderReplayAffinity(providerType, "test-provider", "test-model"),
+        JsonMapper.builder().build().createObjectNode().put("opaque", format.name()));
   }
 
   private static StorageBlob activeBlob(String mediaType, long sizeBytes) {
@@ -1374,6 +1420,8 @@ class ProviderResourceMaterializerTest {
     blob.setId(BLOB_ID);
     blob.setMediaType(mediaType);
     blob.setSizeBytes(sizeBytes);
+    blob.setWidth(1L);
+    blob.setHeight(1L);
     blob.setState(StorageBlobState.ACTIVE);
     return blob;
   }
