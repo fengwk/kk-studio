@@ -184,7 +184,12 @@ public final class AnthropicRequestEncoder {
 
     // 注入 cache marker
     applyCacheMarkers(
-        request.cacheControl(), toolsArray, unmarkedSystemArray, cacheEndpoints, deferredToolLane);
+        request.cacheControl(),
+        wireMessagesArray,
+        toolsArray,
+        unmarkedSystemArray,
+        cacheEndpoints,
+        deferredToolLane);
     if (messageLevelEffort) {
       wireMessagesArray =
           applyMessageLevelEffort(wireMessagesArray, messageEfforts, currentEffort, topLevelEffort);
@@ -986,6 +991,7 @@ public final class AnthropicRequestEncoder {
    */
   private static void applyCacheMarkers(
       ProviderCacheControl cacheControl,
+      ArrayNode messagesArray,
       ArrayNode toolsArray,
       ArrayNode systemArray,
       List<ObjectNode> cacheEndpoints,
@@ -998,6 +1004,19 @@ public final class AnthropicRequestEncoder {
     marker.put("type", "ephemeral");
     if (cacheControl.retention() == PromptCacheRetention.LONG) {
       marker.put("ttl", "1h");
+    }
+
+    // 只读模式：压缩分支复用主 Thread 已写入的前缀，只在指定消息上放一个断点，绝不写入 tools/system/尾部新缓存。
+    if (cacheControl.messageBreakpoint() != null) {
+      int index = cacheControl.messageBreakpoint();
+      if (index >= 0 && index < messagesArray.size()) {
+        ObjectNode endpoint =
+            latestEligibleBlock(((ObjectNode) messagesArray.get(index)).path("content"));
+        if (endpoint != null) {
+          endpoint.set("cache_control", marker);
+        }
+      }
+      return;
     }
 
     int markersPlaced = 0;

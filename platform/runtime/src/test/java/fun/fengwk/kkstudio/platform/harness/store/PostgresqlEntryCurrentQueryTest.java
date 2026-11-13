@@ -13,7 +13,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -180,12 +179,7 @@ class PostgresqlEntryCurrentQueryTest {
                 baseline.threadId(),
                 null,
                 null,
-                CompactionStart.pending(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.MANUAL,
-                    baseline.rootEntryId(),
-                    null,
-                    null),
+                CompactionStart.pending(CompactionTrigger.MANUAL, baseline.rootEntryId()),
                 null),
             4);
     fullPathCounter.set(0);
@@ -302,12 +296,7 @@ class PostgresqlEntryCurrentQueryTest {
                 baseline.threadId(),
                 null,
                 null,
-                CompactionStart.pending(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.MANUAL,
-                    baseline.rootEntryId(),
-                    null,
-                    null),
+                CompactionStart.pending(CompactionTrigger.MANUAL, baseline.rootEntryId()),
                 null),
             7);
     UUID summary = insert(baseline, compaction, new CompactionPayload("summary", null), 8);

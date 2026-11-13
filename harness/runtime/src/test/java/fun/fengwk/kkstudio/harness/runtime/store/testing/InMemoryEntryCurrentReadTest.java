@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -127,12 +126,7 @@ class InMemoryEntryCurrentReadTest {
                 baseline.threadId(),
                 null,
                 null,
-                CompactionStart.pending(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.MANUAL,
-                    baseline.rootEntryId(),
-                    null,
-                    null),
+                CompactionStart.pending(CompactionTrigger.MANUAL, baseline.rootEntryId()),
                 null),
             4);
     UUID summary =

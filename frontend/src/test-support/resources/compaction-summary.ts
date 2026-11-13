@@ -1,23 +1,22 @@
 /**
- * 压缩摘要正文 fixture：与 CompactionSummaryAssembler / CompactionFileSections 的真实输出形态一致。
+ * 压缩摘要正文 fixture：模型摘要中的普通 Markdown 与标签文本按原样显示。
  *
- * <p>正常 Markdown 标题/列表/代码块 + Runtime 追加的 &lt;read-files&gt;/&lt;modified-files&gt;
- * 保留标签；不做专用解析，标签与逐行路径必须原样可见。
+ * <p>保留标签作为展示安全性的样例；运行时不会追加或解析这些标签。
  */
 export const FULL_COMPACTION_SUMMARY = [
   '# 会话压缩摘要',
   '',
-  '用户要求为 kk-studio 增加**上下文压缩视图**，同时保持后端压缩行为不变。',
+  '对话较长时，系统会将较早内容压缩为摘要，并保留最近的对话继续工作。',
   '',
   '## 关键决策',
   '',
   '- 只读取 `COMPACTION.payload.summaryText`',
-  '- 成功判定依赖 `phase` 与匹配的 `TURN_END.outcome`',
+  '- 成功结果在 `COMPACTION` Entry 中保存，并匹配 `TURN_END`',
   '',
   '## 代码示例',
   '',
   '```ts',
-  "const ok = phase === 'FULL' || phase === 'TURN_PREFIX'",
+  'const ok = outcome === "COMPLETED" && continueModel',
   '```',
   '',
   '<read-files>',

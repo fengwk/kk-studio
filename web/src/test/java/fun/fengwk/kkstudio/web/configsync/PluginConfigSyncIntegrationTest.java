@@ -7,12 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.http.MediaType;
 import org.springframework.test.annotation.DirtiesContext;
 import tools.jackson.databind.JsonNode;
 
@@ -20,7 +17,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
@@ -52,6 +48,9 @@ import java.util.Set;
  */
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
+
+  /** 系统持有身份的 Agent 名：由测试直接写入 BUILTIN 行，生产启动不再创建任何内置 Agent。 */
+  private static final String SYSTEM_AGENT = "system-agent";
 
   /** 本用例独享的一次性 provider 名；每个用例前都重置数据库，因此固定名不会互相干扰。 */
   private static final String CAS_PROVIDER = "plugin-sync-cas-provider";
@@ -186,14 +185,14 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   @Test
   void builtinAgentSatisfiesReferencesWithoutBecomingPortable() throws Exception {
     // 系统内置 Agent 由系统持有身份：测试按同类身份落一行真实 BUILTIN 行，绝不把它当作可同步条目。
-    seedBuiltinAgent(BuiltinAgents.COMPACTION_NAME);
+    seedBuiltinAgent(SYSTEM_AGENT);
     String agent = "builtin-dep-agent";
     createBuiltinDependentAgent(agent);
 
     JsonNode items = getData("/api/platform/config-sync").path("items");
     assertNotNull(findItem(items, "agents", agent));
     assertNull(
-        findItem(items, "agents", BuiltinAgents.COMPACTION_NAME),
+        findItem(items, "agents", SYSTEM_AGENT),
         "a builtin agent must never be a selectable inventory item");
 
     JsonNode exported =
@@ -210,26 +209,6 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         postData("/api/platform/config-sync/import", Map.of("yaml", yaml, "allowPartial", true));
     assertTrue(references(result.path("imported")).contains("agents/" + agent));
     assertTrue(references(result.path("skipped")).isEmpty());
-
-    // 保留名仍不可覆盖：导入内置身份本身必须整份拒绝，库内内置行逐字段不变（version/config 都不被改写）。
-    Agent before = definitionRepository.getByName(BuiltinAgents.COMPACTION_NAME);
-    String reserved =
-        "agents:\n  - name: "
-            + BuiltinAgents.COMPACTION_NAME
-            + "\n    description: overridden\n"
-            + "    execution: {driver: builtin, settings: {modelName: acceptance-stub, variant: default}}\n"
-            + "    systemPrompt: overridden\n"
-            + "    config: {tools: [], skills: [], subagents: []}\n";
-    mockMvc
-        .perform(
-            post("/api/platform/config-sync/import")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(Map.of("yaml", reserved))))
-        .andExpect(status().isBadRequest());
-    Agent after = definitionRepository.getByName(BuiltinAgents.COMPACTION_NAME);
-    assertEquals(before.version(), after.version());
-    assertEquals(before.configJson(), after.configJson());
-    assertEquals(before.systemPrompt(), after.systemPrompt());
   }
 
   /** 以系统持有身份落一行 BUILTIN Agent：只用于证明内置身份满足引用却绝不进入 portable 范围。 */
@@ -249,7 +228,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
     config.setSkills(List.of());
-    config.setSubagents(List.of(BuiltinAgents.COMPACTION_NAME));
+    config.setSubagents(List.of(SYSTEM_AGENT));
 
     AgentCreateDTO dto = new AgentCreateDTO();
     dto.setName(name);

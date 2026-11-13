@@ -6,65 +6,26 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 
-import java.util.List;
-import java.util.UUID;
-
-/** Transient CompactionPreparation 的非空摘要范围与 phase anchor 不变量。 */
+/** Validates that preparation freezes only the compaction trigger and legal cut identity. */
 class CompactionPreparationTest {
 
-  private static final List<AgentMessage> MESSAGES = List.of(AgentMessage.user("message"));
-
   @Test
-  void pendingStartContainsOnlyDurableFacts() {
-    CompactionPreparation preparation =
-        new CompactionPreparation(
-            CompactionPhase.FULL,
-            CompactionTrigger.MANUAL,
-            id(4L),
-            null,
-            null,
-            "previous",
-            MESSAGES,
-            10);
+  void pendingStartContainsTriggerAndCutPoint() {
+    CompactionPreparation preparation = new CompactionPreparation(CompactionTrigger.MANUAL, id(4L));
 
     assertEquals(
-        CompactionStart.pending(CompactionPhase.FULL, CompactionTrigger.MANUAL, id(4L), null, null),
-        preparation.pendingStart());
+        CompactionStart.pending(CompactionTrigger.MANUAL, id(4L)), preparation.pendingStart());
   }
 
   @Test
-  void rejectsInvalidPhaseAnchorsAndEmptyRanges() {
-    assertInvalid(CompactionPhase.FULL, id(3L), null, MESSAGES, 10);
-    assertInvalid(CompactionPhase.HISTORY, null, null, MESSAGES, 10);
-    assertInvalid(CompactionPhase.HISTORY, id(3L), id(8L), MESSAGES, 10);
-    assertInvalid(CompactionPhase.TURN_PREFIX, null, null, MESSAGES, 10);
-    assertInvalid(CompactionPhase.FULL, null, null, List.of(), 10);
-    assertInvalid(CompactionPhase.FULL, null, null, MESSAGES, 0);
-  }
-
-  private static void assertInvalid(
-      CompactionPhase phase,
-      UUID turnPrefixStartEntryId,
-      UUID historyCompactionEntryId,
-      List<AgentMessage> messages,
-      long removedPrefixTokens) {
+  void rejectsMissingTriggerOrCutPoint() {
+    assertThrows(NullPointerException.class, () -> new CompactionPreparation(null, id(4L)));
     assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CompactionPreparation(
-                phase,
-                CompactionTrigger.THRESHOLD,
-                id(4L),
-                turnPrefixStartEntryId,
-                historyCompactionEntryId,
-                null,
-                messages,
-                removedPrefixTokens));
+        NullPointerException.class,
+        () -> new CompactionPreparation(CompactionTrigger.MANUAL, null));
   }
 }

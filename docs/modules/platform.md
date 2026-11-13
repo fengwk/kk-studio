@@ -452,7 +452,7 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 subagent allowlist 非空时加入内部 `task`。System prompt 按实际工具、Environment、Skill 与
 subagent 生成，并保留稳定具名 sections；技能按 Agent 配置顺序列出名称与描述，不依赖 Environment 的连接或安装状态。
 每条 Thread 路径以 `SYSTEM` Entry 保存初始 prompt、模型可见 client-tool 定义与 vendor-hosted-tool baseline，后续 prompt 或工具定义变化作为 append-only delta 与使用该上下文的 `TURN_START` 同事务提交；无变化复用既有基线，分支继承其路径上的上下文。Claude capability 开启且 baseline 含 client tools 时，请求始终启用 deferred-tool lane，在 tools 末尾追加 encoder-only placeholder 并保持此前工具前缀可缓存；其中变化以有序 system messages 表达，其它协议折叠基线和变更文本。历史工具调用与结果始终按已存记录投影，不因当前 Environment 或 binding 变化而改写。
-规划期冻结 variant 的缓存留存档位，执行期以该档位及本次 Session UUID 构造缓存控制；压缩使用 Compaction Agent 的 variant，后续配置更改不影响已冻结调用。
+规划期冻结 variant 的缓存留存档位，执行期以该档位及本次 Session UUID 构造缓存控制；压缩使用 `aiRuntime.compactionModel` 选定模型的 variant，后续配置更改不影响已冻结调用。
 输出预算所需的请求输入 token 估算只经内核端口 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 注入；[`HarnessCompactionConfiguration`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/configuration/HarnessCompactionConfiguration.java)
 作为组合根把端口绑定到内核 `runtime.compaction.TokenEstimator` 的正式实现，因此解析器不 import runtime 实现类型，也不需要 `HarnessRuntime` bean，platform 独立测试上下文与 web 组合根都不会出现装配环或缺失 bean。
 资源输出外置与媒体后置的模型说明保存在本模块的

@@ -289,7 +289,7 @@ describe('thread timeline edge branches', () => {
     ])
   })
 
-  it('suppresses the entire compaction turn and its realtime model overlay', () => {
+  it('shows the durable summary but suppresses internal compaction and realtime output', () => {
     const timeline = buildThreadTimeline(
       [
         entry('stopped-start', 'TURN_START', { reason: 'COMPACTION', settings: {} }),
@@ -308,15 +308,12 @@ describe('thread timeline edge branches', () => {
         }),
         entry('completed-start', 'TURN_START', { reason: 'COMPACTION', settings: {} }),
         entry('compaction', 'COMPACTION', {
-          phase: 'FULL',
-          trigger: 'THRESHOLD',
-          complete: true,
           summaryText: 'internal summary',
         }),
         entry('completed-end', 'TURN_END', {
           turnStartEntryId: 'completed-start',
           outcome: 'COMPLETED',
-          continueModel: false,
+          continueModel: true,
           reason: null,
           closeRequestId: null,
         }),
@@ -335,7 +332,9 @@ describe('thread timeline edge branches', () => {
         status: 'streaming',
       },
     )
-    expect(timeline.messages).toEqual([])
+    expect(timeline.messages).toMatchObject([
+      { role: 'entry', kind: 'compaction', text: 'internal summary' },
+    ])
     expect(timeline.queuedMessages).toEqual([])
     expect(timeline.hasPendingInputs).toBe(false)
   })

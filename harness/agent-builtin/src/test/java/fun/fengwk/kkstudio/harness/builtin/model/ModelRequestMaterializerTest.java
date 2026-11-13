@@ -4,6 +4,8 @@ import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.sp
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -11,7 +13,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -21,13 +22,17 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
+import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.ForkMode;
+import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
@@ -40,6 +45,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
@@ -66,8 +72,11 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -376,9 +385,7 @@ class ModelRequestMaterializerTest {
             base.systemInstruction(),
             base.toolBindings(),
             base.subagentBindings());
-    CompactionStart compact =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(7L), null, null);
+    CompactionStart compact = CompactionStart.pending(CompactionTrigger.THRESHOLD, id(7L));
     EntryPath path =
         new EntryPath(
             List.of(
@@ -398,7 +405,7 @@ class ModelRequestMaterializerTest {
                 entry(
                     12,
                     11,
-                    new TurnEndPayload(id(10L), TurnEndOutcome.COMPLETED, false, null, null))));
+                    new TurnEndPayload(id(10L), TurnEndOutcome.COMPLETED, true, null, null))));
     List<ProviderMessage> messages = MATERIALIZER.materialize(path, spec).messages();
     assertTrue(messages.stream().noneMatch(m -> "high".equals(m.reasoningEffort())));
     assertEquals("max", messages.getLast().reasoningEffort());
@@ -462,13 +469,11 @@ class ModelRequestMaterializerTest {
     entries.add(entry(4, 3, assistant("old-reply")));
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
-    CompactionStart completed =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
+    CompactionStart completed = CompactionStart.pending(CompactionTrigger.THRESHOLD, id(4L));
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("kept summary", null)));
     entries.add(
-        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
+        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, true, null, null)));
     entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(10, 9, user("kept-user")));
     entries.add(
@@ -495,6 +500,240 @@ class ModelRequestMaterializerTest {
     assertEquals("old-reply", textOf(request.messages().get(1)));
     assertEquals("kept-user", textOf(request.messages().get(2)));
     assertEquals("latest-user", textOf(request.messages().get(3)));
+  }
+
+  /** 压缩重建 prompt 前缀后，只有 Claude 保留段不再重放旧签名 thinking；压缩后的新 assistant 与其它 Provider 原样保留。 */
+  @Test
+  void compactionDropsClaudeThinkingOnlyFromTheRetainedSegment() {
+    List<Entry> entries = retainedSegmentPath(null);
+
+    ProviderRequest anthropic =
+        MATERIALIZER.materialize(new EntryPath(entries), anthropicSpec(bashBinding()));
+    assertEquals(5, anthropic.messages().size());
+    assertEquals(
+        CompactionPrompts.compactedContext("summary"), textOf(anthropic.messages().get(0)));
+    // 保留段（切点之后、压缩结果之前）的旧 assistant 移除 thinking。
+    assertEquals(ProviderMessageRole.ASSISTANT, anthropic.messages().get(2).role());
+    assertNoThinking(anthropic.messages().get(2));
+    // 压缩之后的新 assistant 绑定新前缀，必须原样重放。
+    assertTrue(
+        anthropic.messages().get(4).contents().stream()
+            .anyMatch(ProviderThinkingBlock.class::isInstance));
+
+    ProviderRequest openai =
+        MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
+    assertTrue(
+        openai.messages().get(2).contents().stream()
+            .anyMatch(ProviderThinkingBlock.class::isInstance));
+  }
+
+  /** 压缩后工具续作：新 assistant 的 thinking 与工具调用必须原样重放，否则 Anthropic 要求工具环路以 thinking 开头。 */
+  @Test
+  void compactionKeepsPostCompactionToolLoopThinking() {
+    List<Entry> entries =
+        retainedSegmentPath(
+            new AgentMessage(
+                AgentMessageRole.ASSISTANT,
+                List.of(
+                    new ThinkingMessageContent("new thinking"),
+                    new ToolCallMessageContent("call-1", "bash", "bash", "{}"))));
+
+    ProviderRequest request =
+        MATERIALIZER.materialize(new EntryPath(entries), anthropicSpec(bashBinding()));
+
+    assertEquals(6, request.messages().size());
+    ProviderMessage continuation = request.messages().get(4);
+    assertEquals(ProviderMessageRole.ASSISTANT, continuation.role());
+    assertInstanceOf(ProviderThinkingBlock.class, continuation.contents().getFirst());
+    assertTrue(
+        continuation.contents().stream().anyMatch(block -> block instanceof ProviderToolCallBlock));
+    // 未收到结果的调用仍由历史正规化补齐 synthetic TOOL 结果，thinking 与调用成对保留。
+    assertEquals(ProviderMessageRole.TOOL, request.messages().get(5).role());
+  }
+
+  /**
+   * 真实压缩形状：切点落在第一个 TURN_END，保留段是其后完整 turn，压缩结果之后才是新 turn。
+   *
+   * @param postCompactionAssistant 压缩之后新 assistant 的消息；{@code null} 时使用带 thinking 的纯文本回复
+   */
+  private static List<Entry> retainedSegmentPath(AgentMessage postCompactionAssistant) {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(3, 2, user("summarized user")));
+    entries.add(entry(4, 3, assistantWithThinking("summarized assistant")));
+    UUID summarizedEnd = id(5L);
+    entries.add(
+        entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
+    // 保留段：切点之后的完整 turn（assistant 仍绑定旧前缀）。
+    entries.add(entry(6, 5, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(7, 6, user("retained user")));
+    entries.add(entry(8, 7, assistantWithThinking("retained assistant")));
+    entries.add(
+        entry(9, 8, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
+    CompactionStart completed = CompactionStart.pending(CompactionTrigger.THRESHOLD, summarizedEnd);
+    entries.add(entry(10, 9, resolvedStart(TurnStartReason.COMPACTION, completed)));
+    entries.add(entry(11, 10, new CompactionPayload("summary", null)));
+    entries.add(
+        entry(12, 11, new TurnEndPayload(id(10L), TurnEndOutcome.COMPLETED, true, null, null)));
+    entries.add(entry(13, 12, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(14, 13, user("new user")));
+    if (postCompactionAssistant == null) {
+      entries.add(entry(15, 14, assistantWithThinking("new assistant")));
+    } else {
+      entries.add(
+          new Entry(
+              id(15L),
+              id(100L),
+              id(14L),
+              new MessagePayload(
+                  postCompactionAssistant,
+                  new AssistantMessageMetadata(
+                      GenerationStopReason.COMPLETE,
+                      new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                  null),
+              T0));
+    }
+    return entries;
+  }
+
+  private static void assertNoThinking(ProviderMessage message) {
+    assertFalse(message.contents().stream().anyMatch(ProviderThinkingBlock.class::isInstance));
+  }
+
+  private static MessagePayload assistantWithThinking(String text) {
+    return new MessagePayload(
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(new ThinkingMessageContent("thinking-" + text), new TextMessageContent(text))),
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+        null);
+  }
+
+  private static ModelRequestSpec anthropicSpec(ToolBinding binding) {
+    return anthropicSpec(binding, PromptCacheRetention.NONE);
+  }
+
+  private static ModelRequestSpec anthropicSpec(
+      ToolBinding binding, PromptCacheRetention promptCacheRetention) {
+    ModelVariant variant = new ModelVariant("v1", null, promptCacheRetention, null);
+    return spec(
+        ProviderType.ANTHROPIC,
+        new ModelDescriptor(
+            "anthropic",
+            "model",
+            "model",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            true,
+            true,
+            false),
+        variant,
+        1024,
+        "Test system instruction.",
+        List.of(binding),
+        List.of());
+  }
+
+  /** 压缩分支第一次请求：只读缓存断点落在切点前最后一条 assistant 之前的消息上。 */
+  @Test
+  void compactionBranchUsesSingleReadOnlyBreakpointBeforeLastAssistant() {
+    ProviderRequest request =
+        MATERIALIZER.materialize(
+            new EntryPath(branchPath(T0.plus(Duration.ofMinutes(1)), "model")),
+            anthropicSpec(bashBinding(), PromptCacheRetention.SHORT));
+
+    assertEquals(0, request.cacheControl().messageBreakpoint());
+  }
+
+  /** 压缩模型与产生切点前 assistant 的模型不同时不写只读断点。 */
+  @Test
+  void compactionBranchSkipsBreakpointWhenCompactionModelDiffers() {
+    ProviderRequest request =
+        MATERIALIZER.materialize(
+            new EntryPath(branchPath(T0.plus(Duration.ofMinutes(1)), "other-model")),
+            anthropicSpec(bashBinding(), PromptCacheRetention.SHORT));
+
+    assertNull(request.cacheControl().messageBreakpoint());
+  }
+
+  /** 缓存留存已过期（SHORT 5m）时不写只读断点。 */
+  @Test
+  void compactionBranchSkipsBreakpointWhenCacheEntryExpired() {
+    ProviderRequest request =
+        MATERIALIZER.materialize(
+            new EntryPath(branchPath(T0.plus(Duration.ofMinutes(10)), "model")),
+            anthropicSpec(bashBinding(), PromptCacheRetention.SHORT));
+
+    assertNull(request.cacheControl().messageBreakpoint());
+  }
+
+  /** 切点前 assistant 所在的完整历史 + FORK + 分支 instruction。 */
+  private static List<Entry> branchPath(Instant instructionAt, String assistantModel) {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(3, 2, user("old question")));
+    entries.add(
+        new Entry(
+            id(4L),
+            id(100L),
+            id(3L),
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("old answer"))),
+                new AssistantMessageMetadata(
+                    GenerationStopReason.COMPLETE,
+                    new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
+                    null,
+                    new ModelSelection(assistantModel, "v1"),
+                    null,
+                    null,
+                    null,
+                    null),
+                null),
+            T0));
+    entries.add(
+        entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
+    entries.add(
+        new Entry(
+            id(6L),
+            id(100L),
+            id(5L),
+            new ForkPayload(ForkMode.BRANCH, id(4L), id(99L)),
+            instructionAt));
+    entries.add(
+        new Entry(
+            id(7L),
+            id(100L),
+            id(6L),
+            new SettingsPayload(
+                new BranchSettings(
+                    "agent", BuiltinExecution.of(ModelSelection.model("model", "v1")), null),
+                OWNER),
+            instructionAt));
+    entries.add(
+        new Entry(
+            id(8L),
+            id(100L),
+            id(7L),
+            new TurnStartPayload(
+                TurnStartReason.COMPACTION_BRANCH_INPUT, SETTINGS, OWNER, 4096, 1024, null, null),
+            instructionAt));
+    entries.add(
+        new Entry(
+            id(9L),
+            id(100L),
+            id(8L),
+            new CustomMessagePayload(
+                "core",
+                "message",
+                "message",
+                AgentMessage.user(CompactionBranchPrompts.instruction(1024)),
+                "{}"),
+            instructionAt));
+    return entries;
   }
 
   @Test
@@ -532,13 +771,11 @@ class ModelRequestMaterializerTest {
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
 
-    CompactionStart completed =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
+    CompactionStart completed = CompactionStart.pending(CompactionTrigger.THRESHOLD, id(4L));
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("summary", null)));
     entries.add(
-        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
+        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, true, null, null)));
 
     // compaction 之后的新 turn
     entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));

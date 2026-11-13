@@ -32,14 +32,8 @@ public record ManualCompactionAvailability(DisabledReason disabledReason) {
     /** 找不到带已解析上下文窗口与输出上限的可用历史 Turn。 */
     NO_RESOLVED_CONTEXT,
 
-    /** 执行配置已变更，无法沿用历史上下文执行压缩。 */
-    EXECUTION_CHANGED,
-
     /** Driver 不支持手工压缩。 */
     EXECUTION_UNSUPPORTED,
-
-    /** 预计投影 token 数低于手动压缩的最小阈值。 */
-    BELOW_MINIMUM,
 
     /** 当前历史无可压缩内容。 */
     NOTHING_TO_COMPACT

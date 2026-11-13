@@ -451,7 +451,7 @@ class AnthropicRequestEncoderTest {
                 asstMsg(List.of(new ProviderTextBlock("Asst 1"))),
                 userMsg(new ProviderTextBlock("User 2"))),
             List.of(tool),
-            new ProviderCacheControl(PromptCacheRetention.LONG, "test-affinity"));
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "test-affinity"));
 
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
@@ -1074,7 +1074,7 @@ class AnthropicRequestEncoderTest {
             defaultVariant(),
             List.of(userMsg(new ProviderTextBlock("Text before")), thinking),
             List.of(),
-            new ProviderCacheControl(PromptCacheRetention.SHORT, "aff"));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "aff"));
 
     AnthropicEncodedRequest encoded = encoder.encode(req, descriptor);
     JsonNode messages = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages");
@@ -1418,7 +1418,7 @@ class AnthropicRequestEncoderTest {
     ProviderCacheControl control =
         retention == PromptCacheRetention.NONE
             ? ProviderCacheControl.none()
-            : new ProviderCacheControl(retention, "cache");
+            : ProviderCacheControl.session(retention, "cache");
     ProviderException error =
         assertThrows(
             ProviderException.class,
@@ -1511,7 +1511,7 @@ class AnthropicRequestEncoderTest {
                     defaultVariant(),
                     messages,
                     List.of(new ProviderToolDefinition("calc", "calc", "{\"type\":\"object\"}")),
-                    new ProviderCacheControl(PromptCacheRetention.LONG, "cache")),
+                    ProviderCacheControl.session(PromptCacheRetention.LONG, "cache")),
                 descriptor)
             .bodyUtf8Bytes());
   }

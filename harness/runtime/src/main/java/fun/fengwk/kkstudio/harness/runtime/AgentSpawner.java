@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -57,6 +58,9 @@ public final class AgentSpawner {
     Objects.requireNonNull(preflight, "preflight");
     // 统一创建路径复用 accept 的 batch 形状规则，且在任何写入之前拒绝非法请求（含 settings-only / 多输入 / SET 乱序）。
     AcceptCommandsValidation.validateBatchShape("SpawnRequest", request.commands(), true);
+    if (request.sameSessionBranch() != null) {
+      return spawnSameSessionBranch(tx, request, preflight);
+    }
     return request.continuation() == null
         ? spawnNew(tx, request, preflight)
         : spawnOnExisting(tx, request, preflight);
@@ -71,6 +75,9 @@ public final class AgentSpawner {
           tx.threads()
               .find(parentId)
               .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
+      if (parent.kind() == ThreadKind.COMPACTION) {
+        throw new IllegalArgumentException("COMPACTION threads cannot spawn children");
+      }
     }
     UUID rootThreadId = parent == null ? request.threadId() : parent.rootThreadId();
     ThreadConstraints effective =
@@ -114,6 +121,41 @@ public final class AgentSpawner {
             creationRequestHash,
             request.commands(),
             preflight),
+        request);
+  }
+
+  private static AcceptedCommands spawnSameSessionBranch(
+      HarnessStore.Transaction tx, SpawnRequest request, AcceptancePreflight preflight) {
+    SpawnRequest.SameSessionBranch branch = request.sameSessionBranch();
+    String creationRequestHash =
+        ThreadCreationRequestHash.forSameSessionBranch(
+            request.sessionId(),
+            branch.startEntryId(),
+            request.threadId(),
+            request.parentThreadId(),
+            request.settings(),
+            request.yoloEnabled(),
+            request.kind(),
+            request.constraints(),
+            request.commands());
+    ThreadState existing = tx.threads().find(request.threadId()).orElse(null);
+    if (existing != null) {
+      return SpawnTickets.attach(
+          tx,
+          AcceptCommandsReplay.replayInitial(
+              tx,
+              request.sessionId(),
+              request.threadId(),
+              existing,
+              request.commands(),
+              creationRequestHash),
+          request);
+    }
+    SpawnTickets.admit(tx, request, true);
+    return SpawnTickets.attach(
+        tx,
+        AcceptCommandsControl.createSameSessionBranchWithThread(
+            tx, request, creationRequestHash, preflight),
         request);
   }
 

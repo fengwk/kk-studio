@@ -12,7 +12,6 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.model.provider.ContextPressureDetector;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 
@@ -119,35 +118,6 @@ public final class CompactionHistory {
     return null;
   }
 
-  /**
-   * 当前 open Compaction 之前是否仍有本 Thread 拥有的普通 continuation obligation。连续 COMPACTION turns
-   * 只承载压缩阶段/fallback；遇到 foreign owner 或首个普通 closed turn 即停止。
-   */
-  public static boolean hasPendingOwnedContinuation(
-      ThreadState thread, EntryPath path, UUID currentCompactionStartEntryId) {
-    Objects.requireNonNull(thread, "thread");
-    Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(currentCompactionStartEntryId, "currentCompactionStartEntryId");
-    int currentStartIndex = indexOfEntry(path.entries(), currentCompactionStartEntryId);
-    if (currentStartIndex < 0) {
-      throw new IllegalStateException(
-          "current compaction start is not on the path: " + currentCompactionStartEntryId);
-    }
-    ClosedTurn candidate = latestClosedTurn(path, currentStartIndex);
-    while (candidate != null) {
-      TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
-      if (!thread.id().equals(start.ownerThreadId())) {
-        return false;
-      }
-      if (start.reason() != TurnStartReason.COMPACTION) {
-        return candidate.end().outcome() == TurnEndOutcome.COMPLETED
-            && candidate.end().continueModel();
-      }
-      candidate = previousClosedTurn(path, candidate);
-    }
-    return false;
-  }
-
   /** 当前失败 turn 是否正是 complete OVERFLOW compaction 创建的 immediate CONTINUATION 重试。 */
   public static boolean isOverflowRecoveryRetry(EntryPath path, ClosedTurn latestTurn) {
     Objects.requireNonNull(path, "path");
@@ -172,6 +142,29 @@ public final class CompactionHistory {
         compactionTurnAtStart(path, previousTurn.start().id());
     return previousCompaction.complete()
         && previousCompaction.trigger() == CompactionTrigger.OVERFLOW;
+  }
+
+  /**
+   * 最新 closed turn 是否是某个 complete compaction 之后立即恢复的 CONTINUATION。该请求是压缩后的唯一一次重试；若它仍放不下，
+   * 必须直接失败，绝不再启动第二次压缩。
+   */
+  public static boolean isImmediatePostCompactionRetry(EntryPath path) {
+    Objects.requireNonNull(path, "path");
+    ClosedTurn latestTurn = latestClosedTurn(path);
+    if (latestTurn == null
+        || ((TurnStartPayload) latestTurn.start().payload()).reason()
+            != TurnStartReason.CONTINUATION) {
+      return false;
+    }
+    ClosedTurn previousTurn = previousClosedTurn(path, latestTurn);
+    if (previousTurn == null
+        || previousTurn.end().outcome() != TurnEndOutcome.COMPLETED
+        || !previousTurn.end().continueModel()
+        || ((TurnStartPayload) previousTurn.start().payload()).reason()
+            != TurnStartReason.COMPACTION) {
+      return false;
+    }
+    return compactionTurnAtStart(path, previousTurn.start().id()).complete();
   }
 
   /** 判断是否达到上下文边界/溢出墙（ProviderErrorKind.OVERFLOW 或 ContextPressureDetector 判定）。 */

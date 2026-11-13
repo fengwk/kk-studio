@@ -13,7 +13,7 @@ describe('SystemMessageBody', () => {
     expect(body).not.toBeNull()
     expect(body?.querySelector('.md-root h1')?.textContent).toBe('会话压缩摘要')
     expect(body?.querySelectorAll('.md-root li')).toHaveLength(2)
-    expect(body?.querySelector('.md-code-block')?.textContent).toContain('TURN_PREFIX')
+    expect(body?.querySelector('.md-code-block')?.textContent).toContain('continueModel')
 
     // <read-files>/<modified-files> 各自是一个安全 span，逐行保留，不解析成元素。
     const rawSpans = body?.querySelectorAll('.md-raw-text') ?? []

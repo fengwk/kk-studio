@@ -21,20 +21,17 @@ import type { ToolInvocationStatus } from '@/shared/api/generated/contracts'
 import type { GenerationStatus } from '@/shared/api/generated/contracts'
 
 /**
- * 完整成功压缩的健康路径：
- * - 只以 COMPACTION.payload.summaryText 为源；
- * - TURN_START.reason=COMPACTION 且 compaction.phase=FULL/TURN_PREFIX；
- * - 匹配 TURN_END.turnStartEntryId 且 outcome=COMPLETED。
- * HISTORY、失败/取消/未关闭与不匹配形状都不产生卡片。
+ * 完整成功压缩的健康路径：只以 COMPACTION.payload.summaryText 为源，并要求匹配 TURN_END、COMPLETED 与 continueModel=true。
+ * 失败/取消/未关闭与不匹配形状都不产生卡片；成功判定不依赖旧 phase 字段。
  */
 describe('compaction summary projection', () => {
   const buildThreadTimeline = buildCompactionTimeline
 
-  it('projects one durable card for a FULL compaction closed as COMPLETED', () => {
+  it('projects one durable card for a completed compaction', () => {
     const timeline = buildThreadTimeline(
       [
         userEntry('before', 'entry-user-1'),
-        ...compactionTurn('cs1', 'FULL', [compactionEntry('comp1', FULL_COMPACTION_SUMMARY)]),
+        ...compactionTurn('cs1', [compactionEntry('comp1', FULL_COMPACTION_SUMMARY)]),
         userEntry('after', 'entry-user-2'),
       ],
       [],
@@ -48,7 +45,7 @@ describe('compaction summary projection', () => {
       role: 'entry',
       kind: 'compaction',
       title: '上下文已压缩',
-      // 逐字保留完整摘要（含 Runtime 追加的保留标签与逐行路径）。
+      // 摘要正文逐字保留。
       text: FULL_COMPACTION_SUMMARY,
       subjectEntryId: 'comp1',
       status: 'done',
@@ -64,27 +61,16 @@ describe('compaction summary projection', () => {
     ])
   })
 
-  it('projects TURN_PREFIX compaction that completed', () => {
+  it('projects a completed compaction without legacy phase metadata', () => {
     const timeline = buildThreadTimeline(
-      [...compactionTurn('cs1', 'TURN_PREFIX', [compactionEntry('comp1', 'split summary')])],
+      [...compactionTurn('cs1', [compactionEntry('comp1', 'summary')])],
       [],
       [],
     )
 
     expect(compactionCards(timeline.messages)).toMatchObject([
-      { kind: 'compaction', text: 'split summary', subjectEntryId: 'comp1' },
+      { kind: 'compaction', text: 'summary', subjectEntryId: 'comp1' },
     ])
-  })
-
-  it('never displays a HISTORY intermediate summary as success', () => {
-    // HISTORY 只是中间 partial；即使 TURN_END COMPLETED 也不能冒充完整成功。
-    const timeline = buildThreadTimeline(
-      [...compactionTurn('cs1', 'HISTORY', [compactionEntry('comp1', 'partial summary')])],
-      [],
-      [],
-    )
-
-    expect(compactionCards(timeline.messages)).toEqual([])
   })
 
   it.each(['FAILED', 'STOPPED', 'CANCELLED'])(
@@ -92,7 +78,7 @@ describe('compaction summary projection', () => {
     (outcome) => {
       const timeline = buildThreadTimeline(
         [
-          ...compactionTurn('cs1', 'FULL', [compactionEntry('comp1', 'summary')], outcome),
+          ...compactionTurn('cs1', [compactionEntry('comp1', 'summary')], outcome),
         ],
         [],
         [],
@@ -105,7 +91,7 @@ describe('compaction summary projection', () => {
   it('hides a compaction turn that never closed', () => {
     const timeline = buildThreadTimeline(
       [
-        turnStart('cs1', 'COMPACTION', 'FULL'),
+        turnStart('cs1', 'COMPACTION'),
         compactionEntry('comp1', 'unclosed summary'),
       ],
       [],
@@ -118,7 +104,7 @@ describe('compaction summary projection', () => {
   it('hides the payload when the TURN_END references another TURN_START', () => {
     const timeline = buildThreadTimeline(
       [
-        turnStart('cs1', 'COMPACTION', 'FULL'),
+        turnStart('cs1', 'COMPACTION'),
         compactionEntry('comp1', 'mismatched summary'),
         turnEnd('cs-other', 'COMPLETED'),
       ],
@@ -129,11 +115,10 @@ describe('compaction summary projection', () => {
     expect(compactionCards(timeline.messages)).toEqual([])
   })
 
-  it('does not guess a phase when TURN_START lacks compaction metadata', () => {
-    // 不静默把缺失/未知 phase 当作 FULL；只有真实 schema 的 FULL/TURN_PREFIX 才成功。
+  it('hides a compaction turn that does not resume the owner model', () => {
     const timeline = buildThreadTimeline(
       [
-        entry('cs1', 'TURN_START', { reason: 'COMPACTION', settings: {} }),
+        turnStart('cs1', 'COMPACTION'),
         compactionEntry('comp1', 'summary'),
         turnEnd('cs1', 'COMPLETED'),
       ],
@@ -148,7 +133,7 @@ describe('compaction summary projection', () => {
     // CompactionPayload 保证非空 summaryText；空/未知形状不能伪装成成功。
     const timeline = buildThreadTimeline(
       [
-        turnStart('cs1', 'COMPACTION', 'FULL'),
+        turnStart('cs1', 'COMPACTION'),
         entry('empty', 'COMPACTION', { summaryText: '   ' }),
         entry('wrong-shape', 'COMPACTION', { summaryText: 42 }),
         entry('missing', 'COMPACTION', {}),
@@ -164,9 +149,9 @@ describe('compaction summary projection', () => {
   it('keeps each complete success as its own card in scan order', () => {
     const timeline = buildThreadTimeline(
       [
-        ...compactionTurn('cs1', 'FULL', [compactionEntry('comp1', 'first')]),
+        ...compactionTurn('cs1', [compactionEntry('comp1', 'first')]),
         userEntry('between', 'entry-user-1'),
-        ...compactionTurn('cs2', 'FULL', [compactionEntry('comp2', 'second')]),
+        ...compactionTurn('cs2', [compactionEntry('comp2', 'second')]),
       ],
       [],
       [],
@@ -186,7 +171,7 @@ describe('compaction summary projection', () => {
   it('keeps internal compaction streams, thinking and usage hidden', () => {
     const timeline = buildThreadTimeline(
       [
-        turnStart('cs1', 'COMPACTION', 'FULL'),
+        turnStart('cs1', 'COMPACTION'),
         entry('assistant', 'MESSAGE', {
           message: {
             role: 'ASSISTANT',
@@ -208,7 +193,7 @@ describe('compaction summary projection', () => {
           },
         }),
         compactionEntry('comp1', 'final summary'),
-        turnEnd('cs1', 'COMPLETED'),
+        turnEnd('cs1', 'COMPLETED', true),
       ],
       [],
       [],
@@ -230,14 +215,17 @@ describe('compaction summary projection', () => {
 
   function compactionTurn(
     startEntryId: string,
-    phase: string,
     body: HarnessSessionEntryDTO[],
     outcome = 'COMPLETED',
   ): HarnessSessionEntryDTO[] {
-    return [turnStart(startEntryId, 'COMPACTION', phase), ...body, turnEnd(startEntryId, outcome)]
+    return [
+      turnStart(startEntryId, 'COMPACTION'),
+      ...body,
+      turnEnd(startEntryId, outcome, outcome === 'COMPLETED'),
+    ]
   }
 
-  function turnStart(startEntryId: string, reason: string, phase: string): HarnessSessionEntryDTO {
+  function turnStart(startEntryId: string, reason: string): HarnessSessionEntryDTO {
     return entry(startEntryId, 'TURN_START', {
       reason,
       settings: {
@@ -248,19 +236,15 @@ describe('compaction summary projection', () => {
       ownerThreadId: 'thread-1',
       contextWindow: 200000,
       maxOutputTokens: 8192,
-      compaction: {
-        phase,
-        trigger: 'THRESHOLD',
-        execution: createBuiltinExecution('m', 'high'),
-        cutEntryId: 'cut-1',
-        turnPrefixStartEntryId: phase === 'FULL' ? null : 'prefix-1',
-        historyCompactionEntryId: null,
-      },
     })
   }
 
-  function turnEnd(startEntryId: string, outcome: string): HarnessSessionEntryDTO {
-    return entry('end', 'TURN_END', { turnStartEntryId: startEntryId, outcome, continueModel: false })
+  function turnEnd(
+    startEntryId: string,
+    outcome: string,
+    continueModel = false,
+  ): HarnessSessionEntryDTO {
+    return entry('end', 'TURN_END', { turnStartEntryId: startEntryId, outcome, continueModel })
   }
 
   function compactionEntry(entryId: string, summaryText: string): HarnessSessionEntryDTO {
@@ -496,11 +480,11 @@ describe('thread timeline', () => {
     const messages = buildThreadTimeline([
       entry('baseline', 'SETTINGS', { settings }),
       entry('compact', 'TURN_START', {
-        reason: 'COMPACTION', settings, compaction: { phase: 'FULL' },
+        reason: 'COMPACTION', settings,
       }),
       entry('summary', 'COMPACTION', { summaryText: 'Earlier work' }),
       entry('compact-end', 'TURN_END', {
-        outcome: 'COMPLETED', turnStartEntryId: 'compact',
+        outcome: 'COMPLETED', turnStartEntryId: 'compact', continueModel: true,
       }),
       entry('changed', 'SETTINGS', {
         settings: { ...settings, execution: createBuiltinExecution('grok-4.7', 'xhigh') },

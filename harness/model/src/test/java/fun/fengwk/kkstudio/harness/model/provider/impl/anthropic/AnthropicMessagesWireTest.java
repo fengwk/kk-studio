@@ -1151,11 +1151,42 @@ class AnthropicMessagesWireTest {
     assertFalse(root.path("messages").get(0).path("content").get(0).has("cache_control"));
   }
 
+  /** 只读断点模式：只标记指定消息，tools/system 与其它消息绝不写缓存。 */
+  @Test
+  void should_place_single_read_only_cache_breakpoint_on_requested_message() throws Exception {
+    ProviderToolDefinition tool = new ProviderToolDefinition("t", "tool", "{\"type\":\"object\"}");
+    ProviderDescriptor descriptor = createDescriptor(null);
+    ProviderMessage assistant =
+        new ProviderMessage(
+            ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")));
+    ProviderCacheControl cacheControl =
+        ProviderCacheControl.readOnlyMessage(PromptCacheRetention.SHORT, "test-aff", 1);
+    ProviderRequest request =
+        requestWithInstruction(
+            "System prompt",
+            List.of(userTextMsg("question"), assistant, userTextMsg("follow-up")),
+            List.of(tool),
+            cacheControl);
+
+    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
+    JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
+
+    JsonNode messages = root.path("messages");
+    assertFalse(root.path("system").get(0).has("cache_control"));
+    assertFalse(root.path("tools").get(0).has("cache_control"));
+    assertFalse(messages.get(0).path("content").get(0).has("cache_control"));
+    assertTrue(messages.get(1).path("content").get(0).has("cache_control"));
+    assertEquals(
+        "ephemeral",
+        messages.get(1).path("content").get(0).path("cache_control").path("type").asString());
+    assertFalse(messages.get(2).path("content").get(0).has("cache_control"));
+  }
+
   /** 验证 retention 非 NONE 时唯一的顶层 system 块固定携带 ephemeral 标记，SHORT 不带 ttl。 */
   @Test
   void should_cache_system_message() throws Exception {
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1178,7 +1209,7 @@ class AnthropicMessagesWireTest {
     ProviderToolDefinition tool2 =
         new ProviderToolDefinition("t2", "desc2", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1204,7 +1235,7 @@ class AnthropicMessagesWireTest {
   void should_cache_system_message_and_tools() throws Exception {
     ProviderToolDefinition tool = new ProviderToolDefinition("t", "desc", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1221,7 +1252,7 @@ class AnthropicMessagesWireTest {
   @Test
   void should_cache_system_message_with_long_retention_and_1h_ttl() throws Exception {
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.LONG, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.LONG, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1248,7 +1279,7 @@ class AnthropicMessagesWireTest {
 
     // 1. SHORT retention
     ProviderCacheControl shortCache =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
     ProviderRequest reqShort =
         createRequest("claude-3-5-sonnet", null, List.of(u1, a1, u2), null, shortCache);
     AnthropicEncodedRequest encShort = encoder.encode(reqShort, descriptor);
@@ -1260,7 +1291,7 @@ class AnthropicMessagesWireTest {
 
     // 2. LONG retention
     ProviderCacheControl longCache =
-        new ProviderCacheControl(PromptCacheRetention.LONG, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.LONG, "test-aff");
     ProviderRequest reqLong =
         createRequest("claude-3-5-sonnet", null, List.of(u1, a1, u2), null, longCache);
     AnthropicEncodedRequest encLong = encoder.encode(reqLong, descriptor);
@@ -1275,7 +1306,7 @@ class AnthropicMessagesWireTest {
   void should_place_fixed_cache_markers_newest_first_up_to_budget() throws Exception {
     ProviderToolDefinition tool = new ProviderToolDefinition("t", "desc", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderMessage u1 = userTextMsg("Turn 1");
     ProviderMessage a1 =

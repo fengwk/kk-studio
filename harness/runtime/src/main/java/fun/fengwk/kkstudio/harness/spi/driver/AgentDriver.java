@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.spi.driver;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -104,10 +103,6 @@ public interface AgentDriver {
       LockedDriverState state,
       List<ToolInvocation> siblings,
       DriverCommit commit);
-
-  /** 按当前 Driver 自己的策略计算下一次自动压缩；返回 {@code null} 表示无需压缩。Runtime 只调用本方法，不反向依赖具体 Driver 的压缩策略实现。 */
-  CompactionPreparation prepareAutomaticCompaction(
-      ThreadState thread, EntryPath path, CompactionConfig config, boolean hasQueuedMessage);
 
   /**
    * 是否允许在本安全边界消费 queued settings 或输入。

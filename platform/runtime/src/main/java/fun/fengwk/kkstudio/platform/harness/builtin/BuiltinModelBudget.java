@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.builtin;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser.ParsedAgentModelConfig;
 
 /**
@@ -53,13 +52,9 @@ public final class BuiltinModelBudget {
     return (int) outputTokens;
   }
 
-  /** 按 CompactionConfig 计算压缩输出预算，并校验可表示为正 int。 */
-  public static int compactionOutputBudget(
-      CompactionConfig config,
-      CompactionPhase phase,
-      int maxOutputTokens,
-      long removedPrefixTokens) {
-    long outputBudget = config.outputBudget(phase, maxOutputTokens, removedPrefixTokens);
+  /** 按 CompactionConfig 计算摘要输出预算，并校验可表示为正 int。 */
+  public static int compactionOutputBudget(CompactionConfig config, int maxOutputTokens) {
+    long outputBudget = config.outputBudget(maxOutputTokens);
     if (outputBudget <= 0L || outputBudget > Integer.MAX_VALUE) {
       throw new IllegalArgumentException(
           "compaction output budget must be a positive int, got " + outputBudget);

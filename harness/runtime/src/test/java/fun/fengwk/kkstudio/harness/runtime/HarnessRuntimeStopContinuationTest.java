@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -163,13 +162,8 @@ class HarnessRuntimeStopContinuationTest {
                           new TurnEndPayload(
                               inputStartId, TurnEndOutcome.COMPLETED, false, null, null),
                           T5));
-              CompactionStart history =
-                  CompactionStart.pending(
-                      CompactionPhase.HISTORY,
-                      CompactionTrigger.THRESHOLD,
-                      assistantId,
-                      userId,
-                      null);
+              CompactionStart compaction =
+                  CompactionStart.pending(CompactionTrigger.THRESHOLD, assistantId);
               tx.entries()
                   .insert(
                       new Entry(
@@ -182,7 +176,7 @@ class HarnessRuntimeStopContinuationTest {
                               threadId,
                               100_000,
                               16_384,
-                              history,
+                              compaction,
                               null),
                           T5));
               tx.entries()
@@ -214,11 +208,8 @@ class HarnessRuntimeStopContinuationTest {
     EntryPath path = store.transaction(tx -> tx.entries().loadPath(stored.headEntryId()));
     assertEquals(11, path.entries().size());
     TurnStartPayload barrierStart = (TurnStartPayload) path.entries().get(8).payload();
-    assertEquals(TurnStartReason.COMPACTION, barrierStart.reason());
-    assertEquals(CompactionPhase.TURN_PREFIX, barrierStart.compaction().phase());
-    assertEquals(ids[3], barrierStart.compaction().cutEntryId());
-    assertEquals(ids[4], barrierStart.compaction().turnPrefixStartEntryId());
-    assertEquals(ids[2], barrierStart.compaction().historyCompactionEntryId());
+    assertEquals(TurnStartReason.CONTINUATION, barrierStart.reason());
+    assertNull(barrierStart.compaction());
     TurnEndPayload barrierEnd = (TurnEndPayload) path.head().payload();
     assertEquals(TurnEndOutcome.STOPPED, barrierEnd.outcome());
     assertEquals(stopRequestId, barrierEnd.closeRequestId());

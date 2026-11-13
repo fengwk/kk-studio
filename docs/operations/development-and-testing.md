@@ -801,7 +801,7 @@ Environment 条目把完整卡片配置 `daemonConfig`、可空 `note` 与 `name
 文件省略 `note` 表示清空备注，缺失 `daemonConfig` 或仍含旧安装设置字段（`installConfig`、`operatingSystem`）
 时拒绝。Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
 Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插件在代码里声明的所需 Agent 补齐依赖。
-内置 Agent（如 `Compaction`）只满足依赖，不作为条目导出；导入节点用自身内置定义满足引用，不会因此被覆盖。
+系统持有身份的 Agent 只满足依赖，不作为条目导出。
 系统设置是有界的六节核心设置，不引用任何模型或提示词 Agent。
 依赖只沿引用方向扩展，不包含无关的其它模型或 Agent，也不因选择 Agent 自动加入 Environment。
 

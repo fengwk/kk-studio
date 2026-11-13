@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.runtime.compaction;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -44,19 +43,12 @@ public final class CompactionChildSpawn {
     Objects.requireNonNull(resolved, "resolved");
     Objects.requireNonNull(preparation, "preparation");
 
-    UUID sessionId = tx.nextId();
+    UUID sessionId = parentThread.sessionId();
     UUID threadId = tx.nextId();
     UUID ticketId = tx.nextId();
     BranchSettings childSettings = resolved.childSettings();
 
-    String prompt;
-    if (preparation.phase() == CompactionPhase.TURN_PREFIX) {
-      prompt = CompactionPrompts.turnPrefixUserPrompt(preparation.messagesToSummarize());
-    } else {
-      prompt =
-          CompactionPrompts.summaryUserPrompt(
-              preparation.messagesToSummarize(), preparation.previousSummary());
-    }
+    String prompt = CompactionBranchPrompts.instruction(resolved.outputBudget());
     CustomMessageCommandPayload payload =
         new CustomMessageCommandPayload(AgentMessage.user(prompt));
     String requestHash = ThreadCommandPayloadJsonCodec.requestHash(payload);
@@ -79,17 +71,15 @@ public final class CompactionChildSpawn {
             JoinDelivery.SETTLE_OWNER_TURN,
             SpawnRequest.Budget.unlimited(),
             ticketId,
-            requestHash),
+            requestHash,
+            new SpawnRequest.SameSessionBranch(preparation.cutEntryId())),
         AcceptancePreflight.IDENTITY);
 
     return new CompactionStart(
-        preparation.phase(),
         preparation.trigger(),
         resolved.execution(),
         resolved.outputBudget(),
         preparation.cutEntryId(),
-        preparation.turnPrefixStartEntryId(),
-        preparation.historyCompactionEntryId(),
         threadId,
         ticketId);
   }

@@ -23,21 +23,31 @@ import java.util.UUID;
  * reschedule；任何其它 RuntimeException、null 结果或 validator 契约失败都视为确定性失败，落成 durable AssistantError +
  * FAILED TURN_END 并结算 Join，绝不无限重排。
  *
- * <p>{@code compactionPreparation} 非空当且仅当本次是 COMPACTION turn：实现必须按切分事实冻结输出预算作为 {@code
- * maxOutputTokens}，不得把 messagesToSummarize / previousSummary 写入 spec。YOLO 不进入本端口。
+ * <p>{@code compactionPreparation} 非空当且仅当本次是 owner COMPACTION turn：实现冻结压缩执行、摘要预算与子设置，且不把摘要输入写入
+ * spec。 {@code threadKind=COMPACTION} 表示压缩分支自身的请求：它继承切点处的 SYSTEM 基线与工具定义，不重新解析
+ * Agent。普通请求在冻结前估算输入；预计 加保留量超过对话与压缩模型中较小的上下文窗口时返回 {@link CompactionRequired}，由调用方先压缩再重试同一请求。YOLO
+ * 不进入本端口。
  */
 public interface TurnResolver {
 
-  /** 解析一次 turn；{@code rootSessionId} 是该 Thread 不可变执行根所在会话。 */
+  /** 解析一次普通 turn；{@code rootSessionId} 是该 Thread 不可变执行根所在会话。 */
   Result resolve(
       UUID threadId,
       UUID rootSessionId,
       EntryPath path,
       CompactionPreparation compactionPreparation);
 
-  /** 解析结果：冻结请求或确定性拒绝。 */
+  /** 解析压缩分支自身的 turn：继承切点处的 SYSTEM 基线与工具定义；默认实现按普通请求解析。 */
+  default Result resolveCompactionBranch(UUID threadId, UUID rootSessionId, EntryPath path) {
+    return resolve(threadId, rootSessionId, path, null);
+  }
+
+  /** 解析结果：冻结请求、确定性拒绝、压缩执行或必须先压缩的请求预算事实。 */
   sealed interface Result
-      permits TurnResolver.Resolved, TurnResolver.Rejected, TurnResolver.CompactionResolved {}
+      permits TurnResolver.Resolved,
+          TurnResolver.Rejected,
+          TurnResolver.CompactionResolved,
+          TurnResolver.CompactionRequired {}
 
   /** 解析成功：紧凑 spec 已冻结，contextWindow 与 maxOutputTokens 为本次 turn 冻结的正整数。 */
   record Resolved(ModelRequestSpec spec, int contextWindow, int maxOutputTokens) implements Result {
@@ -59,7 +69,7 @@ public interface TurnResolver {
     }
   }
 
-  /** 压缩 turn 解析成功：冻结 compactor 执行选择、输出预算与子 Thread 设置。 */
+  /** 压缩 turn 解析成功：冻结压缩执行选择、输出预算、窗口与子 Thread 设置。 */
   record CompactionResolved(
       ExecutionSelection execution,
       long outputBudget,
@@ -79,6 +89,15 @@ public interface TurnResolver {
         throw new IllegalArgumentException("maxOutputTokens must be positive");
       }
       childSettings = Objects.requireNonNull(childSettings, "childSettings");
+    }
+  }
+
+  /** 本次请求预计无法放入上下文预算：调用方必须先压缩，再以同一输入重试一次。 */
+  record CompactionRequired(int conversationContextWindow) implements Result {
+    public CompactionRequired {
+      if (conversationContextWindow <= 0) {
+        throw new IllegalArgumentException("conversationContextWindow must be positive");
+      }
     }
   }
 }

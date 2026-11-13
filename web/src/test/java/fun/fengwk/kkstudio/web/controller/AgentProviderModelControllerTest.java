@@ -26,7 +26,9 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgentInitializer;
+import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
+import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO;
@@ -65,7 +67,7 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
-  @Autowired private BuiltinAgentInitializer builtinAgentInitializer;
+  @Autowired private AgentRepository agentRepository;
 
   /** 远端模型发现：成功返回排序 id，缺少 baseUrl 为 400，上游非 2xx 为 502。 */
   @Test
@@ -780,9 +782,9 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
   }
 
-  /** 测试意图：读模型暴露系统持有的 type；可编辑请求不接受 type；保留名不能覆盖内置身份；内置 Agent 在普通目录可见且不可删除。 */
+  /** 测试意图：可编辑请求不接受 type；系统持有身份的 Agent 在普通目录可见且不可删除。 */
   @Test
-  void shouldExposeTypeAndProtectBuiltinIdentity() throws Exception {
+  void shouldExposeTypeAndProtectSystemOwnedIdentity() throws Exception {
     String suffix = Long.toString(System.nanoTime());
     AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of());
@@ -801,32 +803,27 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
                 .content(forged.toString()))
         .andExpect(status().isBadRequest());
 
-    ObjectNode reserved = objectMapper.createObjectNode();
-    reserved.put("name", "Compaction");
-    reserved.set("execution", objectMapper.valueToTree(execution("p/m")));
-    reserved.set("config", objectMapper.valueToTree(config));
-    mockMvc
-        .perform(
-            post("/api/platform/agents")
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(reserved.toString()))
-        .andExpect(status().isConflict())
-        .andExpect(jsonPath("$.code").value("duplicate"))
-        .andExpect(jsonPath("$.errors.resource").doesNotExist());
-
-    builtinAgentInitializer.afterPropertiesSet();
+    // 系统持有身份的 Agent 不再由启动初始化创建；直接落一行同类 BUILTIN 事实以验证目录与删除保护。
+    String systemAgent = "system-agent-" + suffix;
+    agentRepository.create(
+        Agent.builder()
+            .name(systemAgent)
+            .type(AgentType.BUILTIN)
+            .systemPrompt("system prompt")
+            .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
+            .build());
     JsonNode page =
         data(mockMvc.perform(get("/api/platform/agents")).andExpect(status().isOk()).andReturn());
-    JsonNode builtin = findAgent(page, "Compaction");
+    JsonNode builtin = findAgent(page, systemAgent);
     assertEquals("BUILTIN", builtin.path("type").asText());
-    // 未配置模型的内置 Agent 显式序列化 null，而不是字段缺失。
+    // 未配置模型的 Agent 显式序列化 null，而不是字段缺失。
     assertTrue(builtin.has("execution"));
     assertTrue(builtin.path("execution").isNull());
     assertFalse(builtin.has("model"));
     assertFalse(builtin.has("variant"));
 
     mockMvc
-        .perform(delete("/api/platform/agents/{name}", "Compaction").param("expectedVersion", "0"))
+        .perform(delete("/api/platform/agents/{name}", systemAgent).param("expectedVersion", "0"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("in_use"))
         .andExpect(jsonPath("$.errors.resource").doesNotExist());
@@ -835,18 +832,34 @@ public class AgentProviderModelControllerTest extends WebPostgresTestSupport {
   /** Agent 配置中选择未知工具时，校验器在产生处给出的 validation 直接到达 HTTP 边界。 */
   @Test
   void shouldRejectAgentConfigSelectionsAtTheHttpBoundary() throws Exception {
-    builtinAgentInitializer.afterPropertiesSet();
+    String agentName = "config-boundary-" + System.nanoTime();
+    AgentConfigDTO createConfig = new AgentConfigDTO();
+    createConfig.setTools(List.of());
+    createConfig.setSkills(List.of());
+    createConfig.setSubagents(List.of());
+    AgentCreateDTO create = new AgentCreateDTO();
+    create.setName(agentName);
+    create.setExecution(execution("acceptance-stub"));
+    create.setConfig(createConfig);
+    mockMvc
+        .perform(
+            post("/api/platform/agents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(create)))
+        .andExpect(status().isCreated());
+
     AgentConfigDTO config = new AgentConfigDTO();
     config.setTools(List.of("missing_tool"));
     config.setSkills(List.of());
     config.setSubagents(List.of());
     AgentUpdateDTO update = new AgentUpdateDTO();
     update.setExpectedVersion(0L);
+    update.setExecution(execution("acceptance-stub"));
     update.setConfig(config);
 
     mockMvc
         .perform(
-            put("/api/platform/agents/{name}", "Compaction")
+            put("/api/platform/agents/{name}", agentName)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(update)))
         .andExpect(status().isBadRequest())

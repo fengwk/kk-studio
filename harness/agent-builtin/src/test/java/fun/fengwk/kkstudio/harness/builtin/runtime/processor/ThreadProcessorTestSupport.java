@@ -1029,6 +1029,14 @@ public final class ThreadProcessorTestSupport {
 
   static ClosedTurnBaseline seedCompactionReadyClosedTurn(
       InMemoryBuiltinHarnessStore store, ModelUsage usage, boolean continueModel) {
+    return seedCompactionReadyClosedTurn(store, usage, continueModel, ThreadConstraints.NONE);
+  }
+
+  static ClosedTurnBaseline seedCompactionReadyClosedTurn(
+      InMemoryBuiltinHarnessStore store,
+      ModelUsage usage,
+      boolean continueModel,
+      ThreadConstraints constraints) {
     // 形状：turn1（有足够可移除历史，确保成功摘要有真实 gain）+ turn2（长 USER + 短 ASSISTANT）。
     // planner 从尾部累计：turn2 的 ASSISTANT 远小于 keepRecentTokens，长 USER 处越过 -> cut 落在 turn2 USER（非切分
     // FULL）。
@@ -1130,7 +1138,7 @@ public final class ThreadProcessorTestSupport {
                       new TurnEndPayload(
                           secondTurnStartId, TurnEndOutcome.COMPLETED, continueModel, null, null),
                       NOW));
-          tx.threads().insert(threadState(threadId, sessionId, secondTurnEndId, NOW));
+          tx.threads().insert(threadState(threadId, sessionId, secondTurnEndId, NOW, constraints));
           return new ClosedTurnBaseline(
               sessionId,
               rootEntryId,

@@ -66,7 +66,11 @@ public final class ModelOutcomeAppender {
    * 非 compaction turn 的 terminal Model：追加 ASSISTANT 结果（+TURN_END 或 Tool siblings）并维护 Invocation 行。
    */
   public Applied appendModel(
-      BuiltinStore.Transaction tx, EntryPath path, ModelInvocation model, Instant mutationNow) {
+      BuiltinStore.Transaction tx,
+      EntryPath path,
+      ModelInvocation model,
+      Instant mutationNow,
+      boolean compactionThread) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(model, "model");
@@ -106,7 +110,8 @@ public final class ModelOutcomeAppender {
       tx.deleteModelInvocation(model.id());
       return new Applied(turnEndId, null, true, false, false, TurnEndOutcome.FAILED, List.of());
     }
-    ModelResponsePlan plan = responsePlanner.plan(response, model.requestSpec().toolBindings());
+    ModelResponsePlan plan =
+        responsePlanner.plan(response, model.requestSpec().toolBindings(), compactionThread);
     return switch (plan) {
       case ModelResponsePlan.Completed ignored -> {
         UUID turnEndId =

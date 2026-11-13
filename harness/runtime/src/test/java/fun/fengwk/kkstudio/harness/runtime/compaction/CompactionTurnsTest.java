@@ -2,13 +2,11 @@ package fun.fengwk.kkstudio.harness.runtime.compaction;
 
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -25,7 +23,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import java.time.Instant;
 import java.util.List;
 
-/** CompactionTurns 从 enclosing turn 派生 complete/result/anchor 事实。 */
+/** Derives compaction completion from the result payload and enclosing turn end. */
 class CompactionTurnsTest {
 
   private static final BranchSettings SETTINGS =
@@ -34,14 +32,13 @@ class CompactionTurnsTest {
 
   @Test
   void scansCompleteTurnAndFindsExactResult() {
-    EntryPath path = completedPath(CompactionPhase.FULL, false);
+    EntryPath path = completedPath();
 
     List<CompactionTurns.CompactionTurn> turns = CompactionTurns.scan(path);
     assertEquals(1, turns.size());
     CompactionTurns.CompactionTurn turn = turns.getFirst();
     assertTrue(turn.complete());
     assertTrue(turn.completed());
-    assertEquals(CompactionPhase.FULL, turn.phase());
     assertEquals(CompactionTrigger.THRESHOLD, turn.trigger());
     assertEquals(turn, CompactionTurns.latestComplete(path).orElseThrow());
     assertEquals(turn, CompactionTurns.ofResult(path, id(3L)));
@@ -50,18 +47,12 @@ class CompactionTurnsTest {
   }
 
   @Test
-  void completedHistoryIsPartialAndConstructorRejectsInvalidFacts() {
-    EntryPath history = completedPath(CompactionPhase.HISTORY, true);
-    CompactionTurns.CompactionTurn turn = CompactionTurns.scan(history).getFirst();
-    assertFalse(turn.complete());
-    assertTrue(turn.completed());
-    assertTrue(CompactionTurns.latestComplete(history).isEmpty());
-
+  void constructorRejectsInvalidFacts() {
     TurnStartPayload normal = new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, id(10L));
     assertThrows(
         IllegalArgumentException.class,
         () -> new CompactionTurns.CompactionTurn(normal, null, null, 1, -1, -1));
-    TurnStartPayload compaction = (TurnStartPayload) history.entries().get(1).payload();
+    TurnStartPayload compaction = (TurnStartPayload) completedPath().entries().get(1).payload();
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -69,14 +60,8 @@ class CompactionTurnsTest {
                 compaction, new CompactionPayload("summary", null), null, 1, 2, -1));
   }
 
-  private static EntryPath completedPath(CompactionPhase phase, boolean continueModel) {
-    CompactionStart start =
-        CompactionStart.pending(
-            phase,
-            CompactionTrigger.THRESHOLD,
-            id(1L),
-            phase == CompactionPhase.FULL ? null : id(1L),
-            null);
+  private static EntryPath completedPath() {
+    CompactionStart start = CompactionStart.pending(CompactionTrigger.THRESHOLD, id(1L));
     return new EntryPath(
         List.of(
             new Entry(id(1L), id(100L), null, new RootPayload(SETTINGS), NOW),
@@ -92,7 +77,7 @@ class CompactionTurnsTest {
                 id(4L),
                 id(100L),
                 id(3L),
-                new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, continueModel, null, null),
+                new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, true, null, null),
                 NOW)));
   }
 }

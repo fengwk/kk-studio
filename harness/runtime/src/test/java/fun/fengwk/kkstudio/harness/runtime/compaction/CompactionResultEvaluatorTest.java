@@ -1,113 +1,55 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
-import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
-import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.api.history.RootPayload;
-import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 
-import java.time.Instant;
-import java.util.List;
 import java.util.Map;
 
-/** Compaction terminal 到 durable result/error 的纯语义映射。 */
+/** Maps provider terminal semantics to a direct summary payload or stable semantic error. */
 class CompactionResultEvaluatorTest {
 
-  private static final ExecutionSelection EXECUTION = new ExecutionSelection("fake", "{}");
-  private static final BranchSettings SETTINGS = new BranchSettings("agent", EXECUTION, null);
-  private static final Instant NOW = Instant.EPOCH;
   private static final long BUDGET = 4096L;
 
   @Test
   void mapsSemanticTerminalFailuresWithoutProviderRetry() {
-    EntryPath path = historyPath();
-    CompactionStart start = ((TurnStartPayload) path.head().payload()).compaction();
-
     assertError(
         "COMPACTION_OUTPUT_TRUNCATED",
         CompactionResultEvaluator.evaluate(
-            path, start, "partial", metadata(GenerationStopReason.LENGTH), BUDGET));
+            "partial", metadata(GenerationStopReason.LENGTH), BUDGET));
     assertError(
         "COMPACTION_CONTENT_FILTERED",
-        CompactionResultEvaluator.evaluate(
-            path, start, "", metadata(GenerationStopReason.FILTERED), BUDGET));
+        CompactionResultEvaluator.evaluate("", metadata(GenerationStopReason.FILTERED), BUDGET));
     assertError(
-        "COMPACTION_INVALID_RESPONSE",
-        CompactionResultEvaluator.evaluate(path, start, "summary", null, BUDGET));
+        "COMPACTION_INVALID_RESPONSE", CompactionResultEvaluator.evaluate("summary", null, BUDGET));
     assertError(
         "COMPACTION_EMPTY_SUMMARY",
-        CompactionResultEvaluator.evaluate(
-            path, start, " ", metadata(GenerationStopReason.COMPLETE), BUDGET));
-    assertError(
-        "COMPACTION_INVALID_SUMMARY",
-        CompactionResultEvaluator.evaluate(
-            path,
-            start,
-            "<read-files>\na.txt\n</read-files>",
-            metadata(GenerationStopReason.COMPLETE),
-            BUDGET));
+        CompactionResultEvaluator.evaluate(" ", metadata(GenerationStopReason.COMPLETE), BUDGET));
     assertError(
         "COMPACTION_BUDGET_EXCEEDED",
         CompactionResultEvaluator.evaluate(
-            path,
-            start,
             "very long summary that definitely exceeds a budget of one token",
             metadata(GenerationStopReason.COMPLETE),
             1L));
   }
 
   @Test
-  void historySuccessProducesMinimalPayload() {
-    EntryPath path = historyPath();
-    CompactionStart start = ((TurnStartPayload) path.head().payload()).compaction();
-    AssistantMessageMetadata meta = metadata(GenerationStopReason.COMPLETE);
+  void successfulSummaryIsStoredVerbatimWithProviderMetadata() {
+    AssistantMessageMetadata metadata = metadata(GenerationStopReason.COMPLETE);
 
-    EntryPayload result = CompactionResultEvaluator.evaluate(path, start, "summary", meta, BUDGET);
+    EntryPayload result = CompactionResultEvaluator.evaluate("summary", metadata, BUDGET);
 
     CompactionPayload payload = assertInstanceOf(CompactionPayload.class, result);
     assertEquals("summary", payload.summaryText());
-    assertEquals(meta, payload.assistantMetadata());
-  }
-
-  private static EntryPath historyPath() {
-    CompactionStart start =
-        new CompactionStart(
-            CompactionPhase.HISTORY,
-            CompactionTrigger.THRESHOLD,
-            EXECUTION,
-            BUDGET,
-            id(1L),
-            id(1L),
-            null,
-            id(300L),
-            id(400L));
-    return new EntryPath(
-        List.of(
-            new Entry(id(1L), id(100L), null, new RootPayload(SETTINGS), NOW),
-            new Entry(
-                id(2L),
-                id(100L),
-                id(1L),
-                new TurnStartPayload(
-                    TurnStartReason.COMPACTION, SETTINGS, id(200L), 100_000, 16_384, start, null),
-                NOW)));
+    assertEquals(metadata, payload.assistantMetadata());
   }
 
   private static AssistantMessageMetadata metadata(GenerationStopReason stopReason) {

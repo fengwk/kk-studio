@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -51,6 +50,7 @@ import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -78,6 +78,71 @@ class EntryPathTest {
     assertEquals(settings("turn"), path.baseSettings());
     assertEquals(start, path.openTurnStart().orElseThrow());
     assertEquals(List.of(root, start, user), path.entries());
+  }
+
+  @Test
+  void compactionBranchAllowsItsInstructionAndOnlyFixedFailedToolResults() {
+    Entry root = root(settings("root"));
+    Entry instructionStart =
+        turnStart(id(2L), id(1L), TurnStartReason.COMPACTION_BRANCH_INPUT, settings("branch"));
+    Entry instruction = compactionInstruction(id(3L), id(2L));
+    Entry toolAssistant = assistantMessage(id(4L), id(3L), "call-1:bash");
+    Entry toolError = compactionToolError(id(5L), id(4L), id(4L), "call-1", "bash", 0);
+    Entry toolTurnEnd = turnEnd(id(6L), id(5L), id(2L), TurnEndOutcome.COMPLETED, true, null, null);
+    Entry continuationStart =
+        turnStart(
+            id(7L), id(6L), TurnStartReason.COMPACTION_BRANCH_CONTINUATION, settings("branch"));
+    Entry finalAnswer = assistantMessage(id(8L), id(7L));
+    Entry continuationEnd =
+        turnEnd(id(9L), id(8L), id(7L), TurnEndOutcome.COMPLETED, false, null, null);
+
+    EntryPath path =
+        new EntryPath(
+            List.of(
+                root,
+                instructionStart,
+                instruction,
+                toolAssistant,
+                toolError,
+                toolTurnEnd,
+                continuationStart,
+                finalAnswer,
+                continuationEnd));
+
+    assertEquals(continuationEnd, path.head());
+  }
+
+  @Test
+  void compactionBranchRejectsExternalUserInputAndExecutedToolResults() {
+    Entry root = root(settings("root"));
+    Entry branchStart =
+        turnStart(id(2L), id(1L), TurnStartReason.COMPACTION_BRANCH_INPUT, settings("branch"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new EntryPath(List.of(root, branchStart, userMessage(id(3L), id(2L)))));
+
+    Entry instruction = compactionInstruction(id(3L), id(2L));
+    Entry assistant = assistantMessage(id(4L), id(3L), "call-1:bash");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            new EntryPath(
+                List.of(
+                    root,
+                    branchStart,
+                    instruction,
+                    assistant,
+                    toolResult(id(5L), id(4L), 0, id(4L), "call-1", "bash"))));
+  }
+
+  @Test
+  void compactionBranchContinuationRequiresTheInstructionFirst() {
+    Entry root = root(settings("root"));
+    Entry continuation =
+        turnStart(
+            id(2L), id(1L), TurnStartReason.COMPACTION_BRANCH_CONTINUATION, settings("branch"));
+
+    assertThrows(IllegalArgumentException.class, () -> new EntryPath(List.of(root, continuation)));
   }
 
   @Test
@@ -356,145 +421,26 @@ class EntryPathTest {
   }
 
   @Test
-  void acceptsCompletedCompactionTurnsForAllPhases() {
+  void completedCompactionMustResumeTheOwnerModel() {
     Entry root = root(settings("root"));
-    for (CompactionPhase phase :
-        List.of(CompactionPhase.FULL, CompactionPhase.HISTORY, CompactionPhase.TURN_PREFIX)) {
-      UUID prefix = phase == CompactionPhase.FULL ? null : id(3L);
-      new EntryPath(
-          List.of(
-              root,
-              compactionStart(
-                  id(2L),
-                  id(1L),
-                  settings("turn"),
-                  phase,
-                  CompactionTrigger.THRESHOLD,
-                  prefix,
-                  null),
-              compactionResult(id(3L), id(2L)),
-              turnEnd(
-                  id(4L),
-                  id(3L),
-                  id(2L),
-                  TurnEndOutcome.COMPLETED,
-                  phase == CompactionPhase.HISTORY,
-                  null,
-                  null)));
-    }
-  }
-
-  @Test
-  void completedCompactionContinueModelMatchesRecoverySemantics() {
-    Entry root = root(settings("root"));
-    Entry thresholdStart =
-        compactionStart(
-            id(2L),
-            id(1L),
-            settings("turn"),
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            null,
-            null);
-    Entry overflowStart =
-        compactionStart(
-            id(2L),
-            id(1L),
-            settings("turn"),
-            CompactionPhase.FULL,
-            CompactionTrigger.OVERFLOW,
-            null,
-            null);
+    Entry start = compactionStart(id(2L), id(1L), settings("turn"));
     Entry result = compactionResult(id(3L), id(2L));
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new EntryPath(
-                List.of(
-                    root,
-                    thresholdStart,
-                    result,
-                    turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, true, null, null))));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new EntryPath(
-                List.of(
-                    root,
-                    overflowStart,
-                    result,
-                    turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, false, null, null))));
-
     new EntryPath(
         List.of(
             root,
-            overflowStart,
+            start,
             result,
             turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, true, null, null)));
-
-    // active normal continuation 可以跨 THRESHOLD checkpoint 保留；没有此前 obligation 的同形仍由上方逆证拒绝。
-    Entry inputStart = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(id(3L), id(2L));
-    Entry assistant = assistantMessage(id(4L), id(3L));
-    Entry inputEnd = turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, true, null, null);
-    Entry thresholdAfterContinuation =
-        compactionStart(
-            id(6L),
-            id(5L),
-            settings("turn"),
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            null,
-            null);
-    Entry thresholdResult = compactionResult(id(7L), id(6L));
-    Entry thresholdEnd =
-        turnEnd(id(8L), id(7L), id(6L), TurnEndOutcome.COMPLETED, true, null, null);
-    new EntryPath(
-        List.of(
-            root,
-            inputStart,
-            user,
-            assistant,
-            inputEnd,
-            thresholdAfterContinuation,
-            thresholdResult,
-            thresholdEnd));
-  }
-
-  @Test
-  void thresholdCompactionCannotBorrowForeignContinuation() {
-    Entry root = root(settings("root"));
-    Entry inputStart = turnStart(id(2L), id(1L), TurnStartReason.INPUT, settings("turn"));
-    Entry user = userMessage(id(3L), id(2L));
-    Entry assistant = assistantMessage(id(4L), id(3L));
-    Entry inputEnd = turnEnd(id(5L), id(4L), id(2L), TurnEndOutcome.COMPLETED, true, null, null);
-    BranchSettings compactionSettings = settings("turn");
-    Entry foreignCompaction =
-        new Entry(
-            id(6L),
-            SESSION_ID,
-            id(5L),
-            new TurnStartPayload(
-                TurnStartReason.COMPACTION,
-                compactionSettings,
-                id(999L),
-                null,
-                null,
-                CompactionStart.pending(
-                    CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(1L), null, null),
-                null),
-            time(id(6L)));
-    Entry result = compactionResult(id(7L), id(6L));
-    Entry end = turnEnd(id(8L), id(7L), id(6L), TurnEndOutcome.COMPLETED, true, null, null);
-
-    // reducer 的 owner barrier 与 Store 物化校验一致：不能借兄弟 Thread 的 continuation。
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EntryPath(
                 List.of(
-                    root, inputStart, user, assistant, inputEnd, foreignCompaction, result, end)));
+                    root,
+                    start,
+                    result,
+                    turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, false, null, null))));
   }
 
   @Test
@@ -1283,7 +1229,8 @@ class EntryPathTest {
     Entry notification = notification(id(2L), id(1L));
     Entry compaction = compactionStart(id(3L), id(2L), settings("turn"));
     Entry summary = compactionResult(id(4L), id(3L));
-    Entry compactionEnd = turnEnd(id(5L), id(4L), id(3L), TurnEndOutcome.COMPLETED, null, null);
+    Entry compactionEnd =
+        turnEnd(id(5L), id(4L), id(3L), TurnEndOutcome.COMPLETED, true, null, null);
     Entry start = turnStart(id(6L), id(5L), TurnStartReason.INPUT, settings("turn"));
     Entry reply = assistantMessage(id(7L), id(6L));
     Entry end = turnEnd(id(8L), id(7L), id(6L), TurnEndOutcome.COMPLETED, null, null);
@@ -1327,6 +1274,58 @@ class EntryPathTest {
 
   private static Entry root(BranchSettings settings) {
     return new Entry(id(1L), SESSION_ID, null, new RootPayload(settings), BASE);
+  }
+
+  private static Entry compactionInstruction(UUID entryId, UUID parentId) {
+    return new Entry(
+        entryId,
+        SESSION_ID,
+        parentId,
+        new CustomMessagePayload(
+            CustomMessagePayload.CORE_CONTRIBUTOR_ID,
+            CustomMessagePayload.CORE_CUSTOM_TYPE,
+            CustomMessagePayload.CORE_RENDERER_KEY,
+            new AgentMessage(
+                AgentMessageRole.USER,
+                List.of(new TextMessageContent(CompactionBranchPrompts.instruction(128)))),
+            CustomMessagePayload.CORE_DETAILS_JSON),
+        time(entryId));
+  }
+
+  private static Entry compactionToolError(
+      UUID entryId,
+      UUID parentId,
+      UUID assistantEntryId,
+      String callId,
+      String toolName,
+      int callIndex) {
+    return new Entry(
+        entryId,
+        SESSION_ID,
+        parentId,
+        new MessagePayload(
+            new AgentMessage(
+                AgentMessageRole.TOOL,
+                List.of(
+                    new ToolResultMessageContent(
+                        callId,
+                        toolName,
+                        toolName,
+                        List.of(new TextMessageContent(CompactionBranchPrompts.TOOL_ERROR)),
+                        true,
+                        "{}"))),
+            null,
+            new ToolResultMetadata(
+                id(900L + callIndex),
+                assistantEntryId,
+                callId,
+                callIndex,
+                ToolResultStatus.FAILED,
+                false,
+                null,
+                null,
+                toolName)),
+        time(entryId));
   }
 
   private static Entry turnStart(
@@ -1468,18 +1467,11 @@ class EntryPathTest {
   }
 
   private static Entry compactionStart(UUID id, UUID parentId, BranchSettings settings) {
-    return compactionStart(
-        id, parentId, settings, CompactionPhase.FULL, CompactionTrigger.THRESHOLD, null, null);
+    return compactionStart(id, parentId, settings, CompactionTrigger.THRESHOLD);
   }
 
   private static Entry compactionStart(
-      UUID id,
-      UUID parentId,
-      BranchSettings settings,
-      CompactionPhase phase,
-      CompactionTrigger trigger,
-      UUID turnPrefixStartEntryId,
-      UUID historyCompactionEntryId) {
+      UUID id, UUID parentId, BranchSettings settings, CompactionTrigger trigger) {
     return new Entry(
         id,
         SESSION_ID,
@@ -1490,8 +1482,7 @@ class EntryPathTest {
             OWNER_THREAD_ID,
             null,
             null,
-            CompactionStart.pending(
-                phase, trigger, id(1L), turnPrefixStartEntryId, historyCompactionEntryId),
+            CompactionStart.pending(trigger, id(1L)),
             null),
         time(id));
   }
@@ -1590,14 +1581,7 @@ class EntryPathTest {
                         TurnEndReason.EXECUTION_FAILED,
                         null))));
     Entry compaction =
-        compactionStart(
-            id(2L),
-            id(1L),
-            settings("turn"),
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            null,
-            null);
+        compactionStart(id(2L), id(1L), settings("turn"), CompactionTrigger.THRESHOLD);
     assertThrows(
         IllegalArgumentException.class,
         () ->

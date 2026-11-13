@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -69,6 +70,10 @@ public class HarnessOwnerQueryService {
     List<ThreadState> threads = runtime.listThreadsBySession(sessionId);
     List<HarnessThreadSummaryDTO> summaries = new ArrayList<>(threads.size());
     for (ThreadState thread : threads) {
+      // COMPACTION 分支是内部执行载体：只能按 id 读取快照与停止，不进入普通 Thread 列表。
+      if (thread.kind() == ThreadKind.COMPACTION) {
+        continue;
+      }
       ThreadSnapshot snapshot = runtime.getThreadSnapshot(thread.id());
       summaries.add(toThreadSummary(snapshot));
     }

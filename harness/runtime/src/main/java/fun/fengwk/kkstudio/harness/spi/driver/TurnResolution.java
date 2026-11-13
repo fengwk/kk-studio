@@ -16,7 +16,10 @@ import java.util.UUID;
  * generation 状态并请求 Model Work。Runtime 不读取或强转该私有状态。
  */
 public sealed interface TurnResolution
-    permits TurnResolution.Rejected, TurnResolution.Compaction, TurnResolution.Accepted {
+    permits TurnResolution.Rejected,
+        TurnResolution.Compaction,
+        TurnResolution.CompactionRequired,
+        TurnResolution.Accepted {
 
   /** 确定性拒绝：Runtime 写入 AssistantError + FAILED TURN_END，不创建 Driver 状态。 */
   record Rejected(AssistantError error) implements TurnResolution {
@@ -29,6 +32,15 @@ public sealed interface TurnResolution
   record Compaction(CompactionResolution resolution) implements TurnResolution {
     public Compaction {
       resolution = Objects.requireNonNull(resolution, "resolution");
+    }
+  }
+
+  /** 请求预算不足：Runtime 必须先执行压缩，再以同一输入重试；不产生 ModelInvocation。 */
+  record CompactionRequired(int conversationContextWindow) implements TurnResolution {
+    public CompactionRequired {
+      if (conversationContextWindow <= 0) {
+        throw new IllegalArgumentException("conversationContextWindow must be positive");
+      }
     }
   }
 

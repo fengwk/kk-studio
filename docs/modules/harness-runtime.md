@@ -231,7 +231,6 @@ preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理�
 - `readState` / `lockState`：读取或锁定当前 open 回合的 Driver 状态；只有 `lockState` 的结果可用于执行与变更。
 - `applyResponse`：generation 已终止但尚未物化（`GENERATION_TERMINAL_PENDING`）时，由 ThreadProcessor 或 Stop 调用，把结果原子物化为公共 Entry 与工具调用。
 - `completeToolBatch`：工具结果与 `TURN_END` 已追加、Thread head 已推进之后调用，供 Driver 校验并清理该 generation 的私有状态。
-- `prepareAutomaticCompaction`：由 Driver 自己的策略决定是否需要自动压缩；Runtime 只负责压缩回合的结构与子执行结算。
 - `stop`：撤销执行资格，按需追加 barrier Entry，返回 [`DriverStopResult`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/DriverStopResult.java)`(barrierEntryId, executionIds)`。
 - `allowsQueuedInputHarvest`（默认 `true`）：Runtime 在应用排队设置、`ContinuationDue` 与新 `INPUT` 回合这三个收割边界询问 Driver；Driver 的私有周期仍在进行时返回 `false`，排队输入留待下一个边界。
 - `completeStop`（默认 no-op）：Stop 推进公共 Thread head 之后调用，供 Driver 把私有记录对齐到已提交的 head。
@@ -270,29 +269,30 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 
 ## 压缩
 
-压缩回合自身不调用模型：父 Thread 打开 `TURN_START(COMPACTION)`，在同一事务里经统一 [`AgentSpawner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AgentSpawner.java) 创建新 Session 上的子 Thread、首条摘要命令与 `SETTLE_OWNER_TURN` 票据，然后在 durable wait 中等待结算：
+压缩回合自身不调用模型：父 Thread 打开 `TURN_START(COMPACTION)`，在同一事务里经统一 [`AgentSpawner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AgentSpawner.java) 在同一 Session 上从切点创建 `COMPACTION` branch Thread、首条摘要命令与 `SETTLE_OWNER_TURN` 票据，然后在 durable wait 中等待结算：
 
 ```text
 父 TURN_START(COMPACTION) -> COMPACTION(summaryText) -> TURN_END
-子 TURN_START(INPUT)      -> Driver generation（Compaction Agent）-> ASSISTANT MESSAGE(summaryText) -> TURN_END
+子 TURN_START(COMPACTION_BRANCH_INPUT) -> Driver generation -> ASSISTANT MESSAGE(summaryText) -> TURN_END
 ```
 
-自动压缩的阈值判定由各 Driver 通过 `AgentDriver.prepareAutomaticCompaction` 提供；Builtin 的 owned `HISTORY` -> hard overflow -> eligible threshold 策略见 [Harness Agent Builtin](harness-agent-builtin.md#自动压缩)。Runtime 只负责压缩回合结构与子执行结算。
+触发判定发生在提交普通请求之前：平台按当前请求实际发送的 system 与历史估算输入 token，`输入 + reserve` 超过 `min(会话模型上下文窗口, 压缩模型上下文窗口)` 时先压缩同一历史，压缩成功后重试原请求一次。provider 报告上下文溢出时同样只压缩一次并重试一次；重试再次放不下则保留真实失败，不递归压缩。手工压缩与自动压缩共用同一预算与切点规则，不存在独立阈值。
 
-子执行使用目录中的 `Compaction` 内置 Agent，约束为父回合的输出预算与禁止自动压缩；提示缓存遵循该 Agent 选用的 variant。[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionStart.java) 冻结阶段、触发原因、执行模型、输出预算、切分锚点与子身份，后来排队的输入不会污染它。
+压缩在同一 Session 的 `COMPACTION` branch Thread 中执行。该分支继承 owner 的系统基线与约束，使用专用摘要指令；完成后将摘要结果结算到 owner Thread。[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionStart.java) 冻结触发原因、执行模型、输出预算、切点与子身份，后来排队的输入不会污染它。
 
-[`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionConfig.java) 只有 `keepRecentTokens` 一个参数，其余阈值都由它与上下文窗口 `C`、输出上限派生：
+[`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionConfig.java) 只有 `keepRecentTokens` 一个参数，其余预算由它与上下文窗口 `C`、输出上限派生：
 
 ```text
 effectiveKeep    = min(keepRecentTokens, C/2)
 effectiveReserve = min(16384, maxOutputTokens)
-softThreshold    = max(effectiveKeep, C - effectiveReserve)
-manualMinimum    = min(keepRecentTokens*2, C/2)
+summaryBudget    = floor(0.8 * effectiveReserve)
 ```
 
-[`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 是纯函数：从尾部估算长度，越过 `effectiveKeep` 后取下一个合法切点，绝不切在 Tool 结果或压缩回合内部；切点落在 Agent 轮次中间时先出 HISTORY 摘要，再由续写义务驱动 TURN_PREFIX 摘要。最新一批尚未被后续 assistant 消费的工具调用不会被提前摘要。[`CompactionResultEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionResultEvaluator.java) 把截断、过滤、返回工具调用、空摘要、保留段解析失败与无 token 收益判为失败；可重试的失败走普通调用重试预算，耗尽则子执行失败、父回合失败且不交付部分结果。
+压缩执行模型来自 `aiRuntime.compactionModel`：可配置带 variant 的具体 MODEL，或不带 variant 的 MODEL_GROUP；未配置、无法解析、模型已删除或不可用时回退到会话当前模型与 variant。有效配置的执行失败只按普通模型调用重试并最终失败，不切换模型。压缩模型支持消息级 effort 时，分支请求在摘要指令之后声明 `low`；分支第一次请求复用主 Thread 已写入的 Claude 前缀缓存，仅在切点前最后一条 assistant 之前写一个只读断点，具体模型不同或缓存留存 TTL 已过时不写断点。OpenAI 没有只读缓存模式：GPT-5.6+ 的 explicit breakpoint 模式在未命中时同样写入，而开启 explicit 模式却不放断点会关闭缓存；因此分支与其它请求一样只携带 `prompt_cache_key` / `prompt_cache_retention`，并接受一次正常写入。
 
-手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ManualCompactionAvailability.java) 是给界面的瞬时投影（Thread 已停止、忙碌、模型已变化、低于最小量、无可压缩内容等），不能替代提交时的复验。`STOPPED` 是持久执行事实：即使历史仍满足压缩阈值，`manualDecision` 也在 resolve 与任何写入之前直接返回 `THREAD_STOPPED`；先由显式新输入恢复为 `RUNNABLE` 才允许再次压缩。
+[`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 只在完整 turn 边界选切点：取第一个累计历史越过 `effectiveKeep` 的完整 turn 之前，始终保留最新模型调用 turn 及其工具结果，不切入 turn、工具回合或压缩结果。摘要文本逐字保存为单一 `COMPACTION` 结果；截断、过滤、工具调用、空结果或超出输出预算均视为失败，按普通模型调用重试策略处理。
+
+手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。模型侧的 `compact` 工具（INTERNAL，默认声明、无参数）只返回“已排队”，Runtime 在该工具批次结束后的第一个安全边界按同一手动压缩规则启动压缩，再续作原请求；COMPACTION Thread 内平台工具一律禁用，因此不会递归压缩。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ManualCompactionAvailability.java) 是给界面的瞬时投影（Thread 已停止、忙碌、模型已变化、预算不足、无可压缩内容等），不能替代提交时的复验。`STOPPED` 是持久执行事实：即使历史仍满足压缩阈值，`manualDecision` 也在 resolve 与任何写入之前直接返回 `THREAD_STOPPED`；先由显式新输入恢复为 `RUNNABLE` 才允许再次压缩。
 
 ## 停止
 
@@ -395,6 +395,7 @@ environmentSupport       NONE / ROUTED / REQUIRED
 | `lsp_goto_definition` / `lsp_workspace_symbols` / `lsp_java_decompile` | Environment | SELECTABLE | 对应 `lsp.*` 能力，READ_ONLY |
 | `task` | 无 | INTERNAL | 委派 Subagent 任务，NON_IDEMPOTENT |
 | `ask_user` | 无 | SELECTABLE | 冻结问卷并等待人工回答 |
+| `compact` | 无 | INTERNAL | 请求在批次结束后整理上下文，只返回排队回执 |
 
 每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，所有配置的工具都声明给模型，候选与冻结 binding 按 Agent 配置顺序排列；未选 Environment 时 `bash` 与 LSP 仍可见，但调用不会执行。五个文件工具由 [`FileTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/FileTool.java) 实现：schema 与默认超时取自同名能力描述符，`read` 的 `resource://` URI 调用 [`ResourceReadGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/ResourceReadGateway.java)，本地绝对路径委托 `BoundEnvironment`，没有绑定环境时本地路径返回明确的 Environment 错误。`bash` 与 LSP 由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定能力执行；没有绑定时返回同一确定性未执行错误。
 
@@ -429,7 +430,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 | --- | --- |
 | `api` | 对外公开的消费契约与公开值类型：`HarnessChangeSubscriptions` 暴露 Thread version、执行树与待处理交互的变更订阅，事件与句柄不可变，不泄漏 Store 或 channel 协议；同一根包承载控制面入参与查询结果的形状（`AcceptCommandsCommand`、`SpawnRequest`、`StopResult`、`StoppedThreadReceipt`、`ThreadTreeNode`、`ToolOutcomeView`、`ManualCompactionAvailability`、`Names`）及冲突原因名称 `HarnessConflictReason`；实现由平台提供 |
 | `api.command` | 命令邮箱的公开值类型：`ThreadCommand`、封闭 payload 族与派生的 `ThreadCommandState`；只做不变量校验与纯派生，JSON 形态与 request hash 在 `codec`，harvest 归约在 `runtime.thread.command` |
-| `api.compaction` | 压缩的公开值类型：`CompactionConfig`（只含 `keepRecentTokens` 与阈值换算的纯函数）、`CompactionPhase` / `CompactionTrigger`、切分事实 `CompactionPreparation` 与 `TURN_START` 上冻结的 `CompactionStart` |
+| `api.compaction` | 压缩的公开值类型：`CompactionConfig`（`keepRecentTokens` 与预算换算）、`CompactionTrigger`、切点事实 `CompactionPreparation` 与 `TURN_START` 上冻结的 `CompactionStart` |
 | `api.entry` | 分支配置与回合边界值：`BranchSettings`、`ExecutionSelection`、`ModelSelection`、`TurnStartReason` 与 `TurnEndOutcome` |
 | `api.execution` | 具体执行代次的退出证据：`ExecutionExitFact`、`ExecutionExitState` 与 `ExecutionExitKind`（只有 `DRIVER` / `TOOL` / `REMOTE`，Driver 私有模型调用统一归 `DRIVER`）；真实证据含本地 `STUDIO_EXITED` / `OWNER_EXITED`、远端 `REMOTE_ACKNOWLEDGED` 与 `NOT_STARTED`，`OWNER_EXITED` 只允许本地 `DRIVER` / `TOOL`；登记、确认、journal 与恢复扫描在 `runtime.execution` |
 | `api.generation` | Thread 快照中 generation 部分的公开投影：`GenerationProjection` 承载稳定身份、`GenerationStatus` 生命周期状态、已完成的文本/思考输出与结构化错误，`FailureProjection` 描述未物化的失败 attempt；消费方读快照无需依赖 `spi.driver`，包内不暴露 Driver 私有调用实体与 Provider 协议 |
@@ -465,6 +466,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 | `contributor.builtin` | 第一方 Contributor 与内置工具的历史渲染 |
 | `contributor.builtin.environment` | 绑定环境能力的宿主工具与统一 `read` |
 | `contributor.builtin.input` | `ask_user` 工具定义 |
+| `contributor.builtin.compact` | `compact` 工具定义 |
 | `contributor.builtin.subagent` | `task` 工具、委派请求与子代理配置 |
 | `prompt` | 严格 prompt 模板与 classpath 加载 |
 

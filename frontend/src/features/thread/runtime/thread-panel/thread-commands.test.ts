@@ -36,9 +36,7 @@ describe('AgentPane command registry', () => {
       'THREAD_BUSY',
       'OWNERSHIP_BARRIER',
       'NO_RESOLVED_CONTEXT',
-      'EXECUTION_CHANGED',
       'EXECUTION_UNSUPPORTED',
-      'BELOW_MINIMUM',
       'NOTHING_TO_COMPACT',
       'FUTURE_REASON',
     ]

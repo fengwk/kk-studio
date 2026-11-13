@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessContributor;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessRegistrar;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
+import fun.fengwk.kkstudio.harness.contributor.builtin.compact.CompactTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentPrompts;
 import fun.fengwk.kkstudio.harness.contributor.builtin.input.AskUserTool;
@@ -24,10 +25,10 @@ import java.util.Set;
 /**
  * 第一方内置功能包 Contributor。
  *
- * <p>集中注册 11 个内置工具（5 个逐调用路由的文件工具、{@code bash} 与 3 个 LSP 宿主工具、{@code task} internal 工具、 {@code
- * ask_user} 人工输入工具）。文件工具声明 {@link EnvironmentSupport#ROUTED}，{@code bash} 与 LSP 工具声明 {@link
- * EnvironmentSupport#REQUIRED}，{@code task} 与 {@code ask_user} 声明 {@link EnvironmentSupport#NONE}。
- * {@code ask_user} 的等待由 Runtime 在 dispatch 前冻结，本 Contributor 只提供它的模型可见契约。
+ * <p>集中注册内置工具（5 个逐调用路由的文件工具、{@code bash} 与 3 个 LSP 宿主工具、{@code task} internal 工具、{@code ask_user}
+ * 人工输入工具与 {@code compact} 上下文整理工具）。文件工具声明 {@link EnvironmentSupport#ROUTED}，{@code bash} 与 LSP 工具声明
+ * {@link EnvironmentSupport#REQUIRED}，{@code task} 与 {@code ask_user} 声明 {@link
+ * EnvironmentSupport#NONE}。 {@code ask_user} 的等待由 Runtime 在 dispatch 前冻结，本 Contributor 只提供它的模型可见契约。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
 
@@ -131,6 +132,9 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
 
     // 人工输入工具：Runtime 在 dispatch 前按 provenance 把内置 ask_user 冻结为 WAITING_INPUT。
     registrar.registerTool("ask-user", new AskUserTool(), ToolVisibility.SELECTABLE, 0);
+
+    // 上下文整理请求：工具只返回排队回执，Runtime 在批次结束后的安全边界启动压缩。
+    registrar.registerTool("runtime.compact", new CompactTool(), ToolVisibility.INTERNAL, 0);
   }
 
   private static void registerEnvironment(

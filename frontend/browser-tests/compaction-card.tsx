@@ -42,7 +42,7 @@ function userEntry(text: string): HarnessSessionEntryDTO {
   return entry('MESSAGE', { message: { role: 'USER', contents: [{ type: 'text', text }] } })
 }
 
-/** 一个完整成功（FULL + COMPLETED）的压缩回合，正文为给定摘要。 */
+/** 一个已完成并继续 owner model 的压缩回合，正文为给定摘要。 */
 function compactionTurn(summaryText: string): HarnessSessionEntryDTO[] {
   const startEntryId = `turn-start-${entrySequence += 1}`
   return [
@@ -57,16 +57,13 @@ function compactionTurn(summaryText: string): HarnessSessionEntryDTO[] {
       contextWindow: 200000,
       maxOutputTokens: 8192,
       compaction: {
-        phase: 'FULL',
         trigger: 'THRESHOLD',
         execution: { driver: 'builtin', settings: { modelName: 'gpt', variant: 'high' } },
         cutEntryId: 'cut-1',
-        turnPrefixStartEntryId: null,
-        historyCompactionEntryId: null,
       },
     }, startEntryId),
     entry('COMPACTION', { summaryText }, `compaction-${entrySequence}`),
-    entry('TURN_END', { turnStartEntryId: startEntryId, outcome: 'COMPLETED', continueModel: false }),
+    entry('TURN_END', { turnStartEntryId: startEntryId, outcome: 'COMPLETED', continueModel: true }),
   ]
 }
 

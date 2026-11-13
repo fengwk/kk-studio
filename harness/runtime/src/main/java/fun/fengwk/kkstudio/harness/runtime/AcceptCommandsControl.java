@@ -14,8 +14,11 @@ import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.ForkMode;
 import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.Session;
@@ -176,6 +179,97 @@ final class AcceptCommandsControl {
   }
 
   /**
+   * Creates a ticketed COMPACTION branch sharing its owner's Session and the prefix at a closed
+   * cut.
+   *
+   * <p>调用方必须已按锁阶梯持有该 Session 的 KEY SHARE 并锁定父 Thread 行；本方法不再重复获取 Session 锁，避免破坏 Session -&gt;
+   * Thread 的固定锁序。
+   */
+  static AcceptedCommands createSameSessionBranchWithThread(
+      HarnessStore.Transaction tx,
+      SpawnRequest request,
+      String creationRequestHash,
+      AcceptancePreflight preflight) {
+    SpawnRequest.SameSessionBranch branch = request.sameSessionBranch();
+    ThreadState parent =
+        tx.threads()
+            .find(request.parentThreadId())
+            .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
+    if (parent.kind() == ThreadKind.COMPACTION) {
+      throw new IllegalArgumentException("COMPACTION threads cannot spawn children");
+    }
+    if (parent.executionControl().isStopped()) {
+      throw new IllegalArgumentException("join parent is stopped");
+    }
+    if (!parent.sessionId().equals(request.sessionId())) {
+      throw new IllegalArgumentException("same-session branch must reuse its owner's Session");
+    }
+    if (tx.threads().listChildren(parent.id()).stream()
+        .filter(child -> child.kind() == ThreadKind.COMPACTION)
+        .anyMatch(
+            child ->
+                tx.joins().loadIncomplete(child.id()).stream()
+                    .anyMatch(join -> join.delivery() == JoinDelivery.SETTLE_OWNER_TURN))) {
+      throw new IllegalArgumentException("a compaction branch is already active for this Thread");
+    }
+    // Session KEY SHARE 必须由调用方在锁定 Thread 行之前取得；此处再锁会破坏 Session -> Thread 锁阶梯。
+    Entry cutEntry =
+        tx.entries()
+            .find(branch.startEntryId())
+            .orElseThrow(() -> new IllegalArgumentException("compaction cut entry does not exist"));
+    if (!cutEntry.sessionId().equals(request.sessionId())) {
+      throw new IllegalArgumentException("compaction cut entry belongs to a different Session");
+    }
+    AcceptCommandsValidation.requireLegalForkBoundary(cutEntry);
+    boolean cutOnParentPath =
+        tx.entries().loadPath(parent.headEntryId()).entries().stream()
+            .anyMatch(entry -> entry.id().equals(branch.startEntryId()));
+    if (!cutOnParentPath) {
+      throw new IllegalArgumentException("compaction cut entry is not on the owner's current path");
+    }
+    Instant now = tx.now();
+    UUID forkEntryId = tx.nextId();
+    tx.entries()
+        .insert(
+            new Entry(
+                forkEntryId,
+                request.sessionId(),
+                branch.startEntryId(),
+                ForkPayload.branch(branch.startEntryId()),
+                now));
+    UUID settingsEntryId = tx.nextId();
+    tx.entries()
+        .insert(
+            new Entry(
+                settingsEntryId,
+                request.sessionId(),
+                forkEntryId,
+                new SettingsPayload(request.settings(), request.threadId()),
+                now));
+    ThreadState thread =
+        new ThreadState(
+            request.threadId(),
+            request.sessionId(),
+            parent.id(),
+            settingsEntryId,
+            creationRequestHash,
+            "Compaction",
+            parent.rootThreadId(),
+            false,
+            ThreadKind.COMPACTION,
+            request.constraints().merge(parent.constraints()),
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            0,
+            now,
+            now);
+    tx.threads().insert(thread);
+    return acceptNewCommandsOnThread(
+        tx, thread, request.commands(), preflight, now, request.settings());
+  }
+
+  /**
    * NEW_THREAD：在既有 Session 的合法 fork 边界独立 fork 新执行根。合法边界只有 ROOT 或已闭合 {@code TURN_END}（最新的闭合 {@code
    * TURN_END} 同样合法）；任何 active / 半轮 / 未闭合前缀（USER、tool result、ASSISTANT message、仍在进行的 TURN_START 或
    * STOP barrier）一律确定性拒绝且零写入。
@@ -228,6 +322,10 @@ final class AcceptCommandsControl {
                     + target.sessionId());
           }
           AcceptCommandsValidation.requireLegalForkBoundary(startEntry);
+          if (isCompactionBranchEntry(tx, target.sessionId(), target.startEntryId())) {
+            throw DomainException.validation(
+                "startEntry", "COMPACTION branch entries cannot be fork sources");
+          }
           BranchSettings sourceSettings = tx.entries().loadBranchSettings(target.startEntryId());
           AcceptCommandsValidation.validateForkExecutionCommands(
               driverRegistry, sourceSettings, commands, "NEW_THREAD");
@@ -437,6 +535,9 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight,
       SpawnRequest ticket,
       DriverRegistry driverRegistry) {
+    if (thread.kind() == ThreadKind.COMPACTION) {
+      throw DomainException.validation("threadId", "COMPACTION threads do not accept input");
+    }
     AcceptCommandsValidation.requireRootForEnvironment(thread, commands);
     boolean genuineUserInput = AcceptCommandsValidation.isGenuineUserInput(commands);
     boolean cursorFreeBatch =
@@ -513,6 +614,25 @@ final class AcceptCommandsControl {
             false,
             false),
         ticket);
+  }
+
+  private static boolean isCompactionBranchEntry(
+      HarnessStore.Transaction tx, UUID sessionId, UUID entryId) {
+    for (ThreadState thread : tx.threads().listBySession(sessionId)) {
+      if (thread.kind() != ThreadKind.COMPACTION) {
+        continue;
+      }
+      boolean inCompactionBranch = false;
+      for (Entry entry : tx.entries().loadPath(thread.headEntryId()).entries()) {
+        if (entry.payload() instanceof ForkPayload fork && fork.mode() == ForkMode.BRANCH) {
+          inCompactionBranch = true;
+        }
+        if (inCompactionBranch && entry.id().equals(entryId)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   static LockedAncestors lockTreeAndAncestors(

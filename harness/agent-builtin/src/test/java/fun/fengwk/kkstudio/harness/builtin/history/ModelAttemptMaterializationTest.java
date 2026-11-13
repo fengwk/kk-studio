@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -627,7 +626,7 @@ class ModelAttemptMaterializationTest {
 
   @Test
   void rejectsModelInvocationOnCompactionTurn() {
-    CompactionStart compaction = historyCompactionStart();
+    CompactionStart compaction = compactionStart();
     ModelInvocation stored = compactionSucceededInvocation();
     Entry result = new Entry(id(4L), id(100L), id(2L), new CompactionPayload("summary", null), T6);
     EntryPath path =
@@ -1042,9 +1041,8 @@ class ModelAttemptMaterializationTest {
         TurnStartReason.COMPACTION, SETTINGS, OWNER_THREAD_ID, 100_000, 16_384, compaction, null);
   }
 
-  private static CompactionStart historyCompactionStart() {
-    return CompactionStart.pending(
-        CompactionPhase.HISTORY, CompactionTrigger.THRESHOLD, id(1L), id(1L), null);
+  private static CompactionStart compactionStart() {
+    return CompactionStart.pending(CompactionTrigger.THRESHOLD, id(1L));
   }
 
   private static Entry assistantToolMessage(UUID entryId, UUID parentId) {

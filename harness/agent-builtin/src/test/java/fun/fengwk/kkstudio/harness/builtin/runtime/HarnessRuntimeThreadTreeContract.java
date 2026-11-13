@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -624,7 +623,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
                       sessionId,
                       compactionBody,
                       new TurnEndPayload(
-                          compactionStart, TurnEndOutcome.COMPLETED, false, null, null),
+                          compactionStart, TurnEndOutcome.COMPLETED, true, null, null),
                       T2));
           tx.entries()
               .insert(
@@ -735,8 +734,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
             ownerThreadId,
             100_000,
             16_384,
-            CompactionStart.pending(
-                CompactionPhase.FULL, CompactionTrigger.MANUAL, cutEntryId, null, null),
+            CompactionStart.pending(CompactionTrigger.MANUAL, cutEntryId),
             null),
         createdAt);
   }

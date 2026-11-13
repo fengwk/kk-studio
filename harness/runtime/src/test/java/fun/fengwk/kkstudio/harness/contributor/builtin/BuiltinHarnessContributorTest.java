@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolOutcome;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolRequirements;
+import fun.fengwk.kkstudio.harness.contributor.builtin.compact.CompactTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.EnvironmentCapabilityTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.contributor.builtin.input.AskUserTool;
@@ -123,11 +124,12 @@ class BuiltinHarnessContributorTest {
     assertEquals(contributor.descriptor(), catalog.descriptors().get(0));
     assertEquals(new ContributorId("builtin"), catalog.descriptors().get(0).id());
 
-    // Tools inventory: exactly 11 tools（含 1 个人工输入工具）
+    // Tools inventory: exactly 12 tools（含 1 个人工输入工具与 1 个上下文整理工具）
     List<ToolContribution> tools = catalog.tools();
-    assertEquals(11, tools.size(), "exact total 11 tools expected");
+    assertEquals(12, tools.size(), "exact total 12 tools expected");
 
-    // Selectable tools: 1 read + 8 environment + 1 ask_user = 10 tools (task is INTERNAL)
+    // Selectable tools: 5 file + 4 environment + 1 ask_user = 10 tools (task and compact are
+    // INTERNAL)
     List<ToolContribution> selectables = catalog.selectableTools();
     assertEquals(10, selectables.size(), "exact 10 selectable tools expected");
 
@@ -193,11 +195,13 @@ class BuiltinHarnessContributorTest {
         ToolSideEffect.READ_ONLY,
         Duration.ofMinutes(3));
 
-    // 1 个 Internal 工具 (INTERNAL visibility, NONE requirements)
+    // 2 个 Internal 工具 (INTERNAL visibility, NONE requirements)
     assertInternalTool(catalog, "task", "runtime.task", ToolRequirements.none());
+    assertInternalTool(catalog, "compact", "runtime.compact", ToolRequirements.none());
 
     // 人工输入工具：Runtime 的 provenance 判据是 (contributor=builtin, name=ask_user)，因此身份必须在目录里冻结。
     assertAskUserTool(catalog);
+    assertCompactTool(catalog);
 
     // Ensure all model-visible tool names and ContributionIds are unique
     Set<String> names = new HashSet<>();
@@ -378,6 +382,23 @@ class BuiltinHarnessContributorTest {
     assertEquals(expectedRequirements, tool.requirements());
 
     assertEquals(tool, catalog.findTool(tool.id()).orElseThrow());
+  }
+
+  /** {@code compact}：只排队，不执行；稳定身份 + NONE requirements + READ_ONLY 且没有执行 deadline。 */
+  private static void assertCompactTool(HarnessCatalog catalog) {
+    ToolContribution tool = catalog.findTool("compact").orElseThrow();
+    assertEquals(ToolVisibility.INTERNAL, tool.definition().visibility());
+    assertEquals(new ContributionId(new ContributorId("builtin"), "runtime.compact"), tool.id());
+    assertEquals(ToolRequirements.none(), tool.requirements());
+    assertInstanceOf(CompactTool.class, tool.tool());
+
+    ToolDescriptor descriptor = tool.definition().descriptor();
+    assertEquals("compact", descriptor.name());
+    assertEquals("compact", descriptor.rendererKey());
+    assertEquals(ToolSideEffect.READ_ONLY, descriptor.sideEffect());
+    assertEquals(Duration.ZERO, descriptor.defaultTimeout());
+    assertFalse(descriptor.description().isBlank());
+    assertTrue(descriptor.inputSchema().properties().isEmpty());
   }
 
   /** 人工输入工具：稳定身份 + NONE requirements + READ_ONLY 且没有执行 deadline（真正的等待由 Runtime 冻结）。 */

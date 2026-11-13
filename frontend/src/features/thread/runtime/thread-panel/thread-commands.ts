@@ -115,9 +115,7 @@ const COMPACTION_DISABLED_REASON_KEYS: Record<string, TranslationKey> = {
   THREAD_BUSY: 'ai.runtime.command.disabled.compaction.threadBusy',
   OWNERSHIP_BARRIER: 'ai.runtime.command.disabled.compaction.ownershipBarrier',
   NO_RESOLVED_CONTEXT: 'ai.runtime.command.disabled.compaction.noResolvedContext',
-  EXECUTION_CHANGED: 'ai.runtime.command.disabled.compaction.executionChanged',
   EXECUTION_UNSUPPORTED: 'ai.runtime.command.disabled.compaction.executionUnsupported',
-  BELOW_MINIMUM: 'ai.runtime.command.disabled.compaction.belowMinimum',
   NOTHING_TO_COMPACT: 'ai.runtime.command.disabled.compaction.nothingToCompact',
 }
 

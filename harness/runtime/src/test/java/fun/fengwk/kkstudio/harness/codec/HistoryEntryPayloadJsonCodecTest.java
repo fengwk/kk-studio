@@ -11,7 +11,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -632,18 +631,10 @@ class HistoryEntryPayloadJsonCodecTest {
 
   @Test
   void roundTripsCompactionStartMetadataInsideTurnStart() {
-    // Compaction 的全部执行事实只在 TURN_START 冻结一次（测试完整 run group 往返）。
+    // A completed compaction freezes its trigger, execution, budget, and branch identities on
+    // TURN_START.
     CompactionStart start =
-        new CompactionStart(
-            CompactionPhase.TURN_PREFIX,
-            CompactionTrigger.MANUAL,
-            MODEL,
-            2048L,
-            id(50L),
-            id(51L),
-            id(4L),
-            id(3L),
-            id(2L));
+        new CompactionStart(CompactionTrigger.MANUAL, MODEL, 2048L, id(50L), id(3L), id(2L));
     TurnStartPayload payload =
         new TurnStartPayload(
             TurnStartReason.COMPACTION, settings(), OWNER_THREAD_ID, 4096, 1024, start, null);
@@ -652,9 +643,7 @@ class HistoryEntryPayloadJsonCodecTest {
     assertEquals(payload, CODEC.decodeNode(EntryType.TURN_START, CODEC.encodeNode(payload)));
 
     // pending compaction start（run group 全 null）往返
-    CompactionStart pending =
-        CompactionStart.pending(
-            CompactionPhase.TURN_PREFIX, CompactionTrigger.MANUAL, id(4L), id(3L), id(2L));
+    CompactionStart pending = CompactionStart.pending(CompactionTrigger.MANUAL, id(4L));
     TurnStartPayload pendingPayload =
         new TurnStartPayload(
             TurnStartReason.COMPACTION, settings(), OWNER_THREAD_ID, 4096, 1024, pending, null);

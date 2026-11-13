@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.mcp.McpServerRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
@@ -130,8 +129,7 @@ class ConfigSyncSnapshotReaderTest {
             .type(AgentType.USER)
             .build();
     Agent builtin =
-        agent(BuiltinAgents.COMPACTION_NAME, null, agentConfig(List.of(), List.of(), List.of()))
-            .toBuilder()
+        agent("system-agent", null, agentConfig(List.of(), List.of(), List.of())).toBuilder()
             .type(AgentType.BUILTIN)
             .build();
     when(definitionRepository.listAll()).thenReturn(List.of(user, builtin));
@@ -139,7 +137,7 @@ class ConfigSyncSnapshotReaderTest {
     ConfigSyncSnapshot snapshot = reader.read();
 
     assertEquals(List.of("user-agent"), snapshot.agents().stream().map(Agent::name).toList());
-    assertEquals(Set.of(BuiltinAgents.COMPACTION_NAME), snapshot.builtinAgentNames());
+    assertEquals(Set.of("system-agent"), snapshot.builtinAgentNames());
   }
 
   @Test

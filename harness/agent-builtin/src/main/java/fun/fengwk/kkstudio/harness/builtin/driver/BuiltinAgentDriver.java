@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.builtin.driver;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -31,7 +30,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
@@ -92,7 +90,6 @@ public final class BuiltinAgentDriver implements AgentDriver {
   private final TurnResolver resolver;
   private final ModelProcessor processor;
   private final ModelOutcomeAppender appender = new ModelOutcomeAppender();
-  private final AutomaticCompactionPlanner compactionPlanner = new AutomaticCompactionPlanner();
 
   /** 仅供只验证规划与物化的测试构造；不注册 Work 处理器。 */
   public BuiltinAgentDriver(BuiltinStore store, TurnResolver resolver) {
@@ -181,7 +178,11 @@ public final class BuiltinAgentDriver implements AgentDriver {
       CompactionPreparation preparation) {
     TurnResolver.Result result;
     try {
-      result = resolver.resolve(thread.id(), rootSessionId(tx, thread), candidatePath, preparation);
+      UUID rootSessionId = rootSessionId(tx, thread);
+      result =
+          thread.kind() == ThreadKind.COMPACTION && preparation == null
+              ? resolver.resolveCompactionBranch(thread.id(), rootSessionId, candidatePath)
+              : resolver.resolve(thread.id(), rootSessionId, candidatePath, preparation);
     } catch (TurnResolveTransientException transientFailure) {
       throw transientFailure;
     }
@@ -197,6 +198,8 @@ public final class BuiltinAgentDriver implements AgentDriver {
               resolved.contextWindow(),
               resolved.maxOutputTokens(),
               resolved.childSettings()));
+      case TurnResolver.CompactionRequired required -> new TurnResolution.CompactionRequired(
+          required.conversationContextWindow());
       case TurnResolver.Resolved resolved -> accepted(thread, candidatePath, resolved);
     };
   }
@@ -409,7 +412,8 @@ public final class BuiltinAgentDriver implements AgentDriver {
           "terminal builtin generation preconditions changed under the same transaction");
     }
     ModelOutcomeAppender.Applied applied =
-        appender.appendModel(store.in(tx), path, model, commit.now());
+        appender.appendModel(
+            store.in(tx), path, model, commit.now(), thread.kind() == ThreadKind.COMPACTION);
     return new DriverApplied(
         applied.headEntryId(),
         applied.finalAnswerEntryId(),
@@ -442,12 +446,6 @@ public final class BuiltinAgentDriver implements AgentDriver {
     }
     ModelAttemptMaterialization.validateAttached(model, path);
     store.in(tx).deleteModelInvocation(model.id());
-  }
-
-  @Override
-  public CompactionPreparation prepareAutomaticCompaction(
-      ThreadState thread, EntryPath path, CompactionConfig config, boolean hasQueuedMessage) {
-    return compactionPlanner.plan(thread, path, config, hasQueuedMessage);
   }
 
   @Override

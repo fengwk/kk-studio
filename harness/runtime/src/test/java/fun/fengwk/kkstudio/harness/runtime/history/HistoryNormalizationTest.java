@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -223,8 +222,7 @@ class HistoryNormalizationTest {
               OWNER_THREAD_ID,
               null,
               null,
-              CompactionStart.pending(
-                  CompactionPhase.FULL, CompactionTrigger.THRESHOLD, new UUID(0L, 3L), null, null),
+              CompactionStart.pending(CompactionTrigger.THRESHOLD, new UUID(0L, 3L)),
               null));
     }
 

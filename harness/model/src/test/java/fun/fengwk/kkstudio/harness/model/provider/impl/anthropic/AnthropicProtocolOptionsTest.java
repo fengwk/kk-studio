@@ -229,7 +229,7 @@ class AnthropicProtocolOptionsTest {
             1024,
             List.of(userMsg()),
             List.of(runtimeTool),
-            new ProviderCacheControl(PromptCacheRetention.SHORT, "aff"));
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, "aff"));
 
     JsonNode tools = wire(encoder.encode(request, descriptor)).path("tools");
 

@@ -19,13 +19,16 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
@@ -37,10 +40,12 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -49,9 +54,10 @@ import java.util.UUID;
 /**
  * 唯一请求重建边界：从不可变 {@link EntryPath} 与冻结 {@link ModelRequestSpec} 纯投影内存 {@link ProviderRequest}。
  *
- * <p>不访问 catalog 或 Environment registry，也不持有事务。压缩执行已完全移出本 materializer：压缩子 Thread 由 {@code
- * CompactionChildSpawn} 经统一 spawn 创建，首条输入是普通 CUSTOM_MESSAGE； 父 COMPACTION turn 不创建
- * ModelInvocation，也不在请求内复制 compaction facts。
+ * <p>不访问 catalog 或 Environment registry，也不持有事务。压缩执行不在本 materializer 内发生：COMPACTION 分支由 {@link
+ * CompactionChildSpawn} 经统一 spawn 创建，首条输入是普通 CUSTOM_MESSAGE，父 COMPACTION turn 不创建
+ * ModelInvocation。本类只把 durable 事实投影成请求：压缩后的主 Thread 以 摘要 wrapper 替代切点前历史，分支第一次请求在切点前最后一条 assistant
+ * 之前写入唯一只读缓存断点。
  *
  * <p>历史工具调用与结果按 durable Entry 投影，不根据当前工具绑定或 Environment 重新分类；没有存储结果的调用由历史正规化补齐 synthetic 结果。
  */
@@ -68,8 +74,8 @@ public final class ModelRequestMaterializer {
   }
 
   /**
-   * 纯投影一次普通 Model 请求：压缩执行已完全移出本 materializer——压缩子 Thread 的首条输入是普通 CUSTOM_MESSAGE，由 {@code
-   * CompactionChildSpawn} 用共享 {@link CompactionPrompts} 构造，父 COMPACTION turn 不产生 ModelInvocation。
+   * 纯投影一次 Model 请求：压缩执行的 spawning 与结算不在本类发生；分支首条输入由 {@code CompactionChildSpawn} 用共享 {@link
+   * CompactionPrompts} 构造，父 COMPACTION turn 不产生 ModelInvocation。
    */
   public ProviderRequest materialize(EntryPath path, ModelRequestSpec spec) {
     Objects.requireNonNull(path, "path");
@@ -124,8 +130,7 @@ public final class ModelRequestMaterializer {
         systemInstruction,
         messages,
         tools,
-        ProviderCacheControl.session(
-            spec.variant().promptCacheRetention(), path.root().sessionId().toString()),
+        cacheControl(path, spec, messages),
         baselineHasClientTools);
   }
 
@@ -151,6 +156,10 @@ public final class ModelRequestMaterializer {
       }
     }
     int walkStart = 0;
+    // 保留段 = (切点, 压缩结果)：只有这里的 Claude thinking 绑定旧前缀，必须在重放时移除。
+    // 压缩之后新产生的 assistant 绑定新前缀，必须原样重放；否则 Anthropic 的工具续作会丢掉 thinking。
+    int thinkingDropFrom = -1;
+    int thinkingDropBefore = -1;
     var latest = CompactionTurns.latestComplete(path);
     if (latest.isPresent()) {
       var complete = latest.get();
@@ -165,6 +174,10 @@ public final class ModelRequestMaterializer {
               AgentMessage.user(
                   CompactionPrompts.compactedContext(complete.result().summaryText()))));
       walkStart = cutIndex;
+      if (spec.providerType() == ProviderType.ANTHROPIC) {
+        thinkingDropFrom = cutIndex;
+        thinkingDropBefore = complete.resultIndex();
+      }
     }
     boolean inCompactionTurn = false;
     for (int i = walkStart; i < entries.size(); i++) {
@@ -196,9 +209,19 @@ public final class ModelRequestMaterializer {
         continue;
       }
       if (payload instanceof MessagePayload message) {
+        AgentMessage projected = message.message();
+        if (projected.role() == AgentMessageRole.ASSISTANT
+            && i > thinkingDropFrom
+            && i < thinkingDropBefore) {
+          projected = withoutThinking(projected);
+          if (projected.contents().isEmpty()) {
+            // 只剩 thinking 的 assistant 不得变成空消息：它本来就没有可回放的语义内容。
+            continue;
+          }
+        }
         projectedMessages.add(
             new ProviderMessageProjector.ProjectedMessage(
-                message.message(), reasoningEffort(message, spec)));
+                projected, reasoningEffort(message, spec)));
         if (incrementalSystem
             && !deferredSystemMessages.isEmpty()
             && message.message().role() == AgentMessageRole.USER) {
@@ -222,6 +245,77 @@ public final class ModelRequestMaterializer {
     }
     messages.addAll(projector.projectSources(projectedMessages));
     messages.addAll(deferredSystemMessages);
+  }
+
+  private static AgentMessage withoutThinking(AgentMessage message) {
+    List<AgentMessageContent> contents = new ArrayList<>(message.contents().size());
+    for (AgentMessageContent content : message.contents()) {
+      if (!(content instanceof ThinkingMessageContent)
+          && !(content instanceof RedactedThinkingMessageContent)) {
+        contents.add(content);
+      }
+    }
+    return new AgentMessage(message.role(), contents);
+  }
+
+  /**
+   * 请求缓存控制：压缩分支第一次请求只读复用主 Thread 已写入的前缀，仅在切点前最后一条 assistant 之前的消息上放一个断点。
+   *
+   * <p>具体模型与产生该 assistant 的模型不同、或距该请求已超过留存 TTL 时退回常规会话缓存控制（不再额外写断点）。
+   */
+  private static ProviderCacheControl cacheControl(
+      EntryPath path, ModelRequestSpec spec, List<ProviderMessage> messages) {
+    String sessionId = path.root().sessionId().toString();
+    PromptCacheRetention retention = spec.variant().promptCacheRetention();
+    Integer breakpoint = branchMessageBreakpoint(path, spec, messages);
+    return breakpoint == null
+        ? ProviderCacheControl.session(retention, sessionId)
+        : ProviderCacheControl.readOnlyMessage(retention, sessionId, breakpoint);
+  }
+
+  private static Integer branchMessageBreakpoint(
+      EntryPath path, ModelRequestSpec spec, List<ProviderMessage> messages) {
+    if (spec.providerType() != ProviderType.ANTHROPIC
+        || spec.variant().promptCacheRetention() == PromptCacheRetention.NONE) {
+      return null;
+    }
+    var openTurn = path.openTurnStart();
+    if (openTurn.isEmpty()
+        || !(openTurn.get().payload() instanceof TurnStartPayload start)
+        || start.reason() != TurnStartReason.COMPACTION_BRANCH_INPUT) {
+      return null;
+    }
+    Entry lastAssistant = null;
+    for (Entry entry : path.entries()) {
+      if (entry.payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.ASSISTANT) {
+        lastAssistant = entry;
+      }
+    }
+    if (lastAssistant == null) {
+      return null;
+    }
+    MessagePayload assistant = (MessagePayload) lastAssistant.payload();
+    if (assistant.assistantMetadata() == null
+        || assistant.assistantMetadata().model() == null
+        || !spec.model().modelName().equals(assistant.assistantMetadata().model().modelName())) {
+      return null;
+    }
+    Duration ttl =
+        spec.variant().promptCacheRetention() == PromptCacheRetention.LONG
+            ? Duration.ofHours(1)
+            : Duration.ofMinutes(5);
+    if (Duration.between(lastAssistant.createdAt(), openTurn.get().createdAt()).compareTo(ttl)
+        > 0) {
+      return null;
+    }
+    int lastAssistantMessage = -1;
+    for (int i = 0; i < messages.size(); i++) {
+      if (messages.get(i).role() == ProviderMessageRole.ASSISTANT) {
+        lastAssistantMessage = i;
+      }
+    }
+    return lastAssistantMessage <= 0 ? null : lastAssistantMessage - 1;
   }
 
   private static String reasoningEffort(MessagePayload message, ModelRequestSpec spec) {

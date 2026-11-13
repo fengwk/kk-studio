@@ -16,11 +16,12 @@ import java.util.List;
 class TurnResolverTest {
 
   @Test
-  void resultIsSealedWithExactlyResolvedAndRejected() {
+  void resultIsSealedWithExactlyTheFourTurnOutcomes() {
     List<Class<?>> permitted = List.of(TurnResolver.Result.class.getPermittedSubclasses());
-    assertEquals(3, permitted.size());
+    assertEquals(4, permitted.size());
     assertTrue(permitted.contains(TurnResolver.Resolved.class));
     assertTrue(permitted.contains(TurnResolver.CompactionResolved.class));
+    assertTrue(permitted.contains(TurnResolver.CompactionRequired.class));
     assertTrue(permitted.contains(TurnResolver.Rejected.class));
   }
 

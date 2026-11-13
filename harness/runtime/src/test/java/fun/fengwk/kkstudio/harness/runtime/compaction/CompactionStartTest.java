@@ -7,85 +7,33 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 
-import java.util.UUID;
-
-/** CompactionStart 的 phase/anchor 最小形状与 run group 不变量。 */
+/** Validates the pending and resolved durable compaction turn shapes. */
 class CompactionStartTest {
 
-  private static final ExecutionSelection MODEL = new ExecutionSelection("fake", "{}");
-  private static final Long BUDGET = 4096L;
-  private static final UUID CHILD_ID = id(100L);
-  private static final UUID JOIN_ID = id(101L);
-
   @Test
-  void acceptsFullHistoryPairedAndDirectPrefixShapes() {
-    CompactionStart full =
-        new CompactionStart(
-            CompactionPhase.FULL,
-            CompactionTrigger.MANUAL,
-            MODEL,
-            BUDGET,
-            id(4L),
-            null,
-            null,
-            CHILD_ID,
-            JOIN_ID);
-    CompactionStart history =
-        new CompactionStart(
-            CompactionPhase.HISTORY,
-            CompactionTrigger.THRESHOLD,
-            MODEL,
-            BUDGET,
-            id(4L),
-            id(3L),
-            null,
-            CHILD_ID,
-            JOIN_ID);
-    CompactionStart pairedPrefix =
-        new CompactionStart(
-            CompactionPhase.TURN_PREFIX,
-            CompactionTrigger.THRESHOLD,
-            MODEL,
-            BUDGET,
-            id(4L),
-            id(3L),
-            id(8L),
-            CHILD_ID,
-            JOIN_ID);
-    CompactionStart directPrefix =
-        new CompactionStart(
-            CompactionPhase.TURN_PREFIX,
-            CompactionTrigger.OVERFLOW,
-            MODEL,
-            BUDGET,
-            id(4L),
-            id(3L),
-            null,
-            CHILD_ID,
-            JOIN_ID);
-
-    assertNull(full.turnPrefixStartEntryId());
-    assertEquals(id(3L), history.turnPrefixStartEntryId());
-    assertEquals(id(8L), pairedPrefix.historyCompactionEntryId());
-    assertNull(directPrefix.historyCompactionEntryId());
-    assertEquals(BUDGET, full.outputBudget());
-    assertEquals(CHILD_ID, full.childThreadId());
-    assertEquals(JOIN_ID, full.joinInvocationId());
-  }
-
-  @Test
-  void acceptsPendingFactory() {
-    CompactionStart pending =
-        CompactionStart.pending(CompactionPhase.FULL, CompactionTrigger.MANUAL, id(4L), null, null);
+  void acceptsPendingAndResolvedRunGroup() {
+    CompactionStart pending = CompactionStart.pending(CompactionTrigger.MANUAL, id(4L));
     assertNull(pending.execution());
     assertNull(pending.outputBudget());
     assertNull(pending.childThreadId());
     assertNull(pending.joinInvocationId());
+
+    CompactionStart resolved =
+        new CompactionStart(
+            CompactionTrigger.MANUAL,
+            new ExecutionSelection("fake", "{}"),
+            4096L,
+            id(4L),
+            id(100L),
+            id(101L));
+
+    assertEquals(4096L, resolved.outputBudget());
+    assertEquals(id(100L), resolved.childThreadId());
+    assertEquals(id(101L), resolved.joinInvocationId());
   }
 
   @Test
@@ -94,83 +42,21 @@ class CompactionStartTest {
         IllegalArgumentException.class,
         () ->
             new CompactionStart(
-                CompactionPhase.FULL,
                 CompactionTrigger.MANUAL,
-                MODEL,
+                new ExecutionSelection("fake", "{}"),
                 null,
                 id(4L),
-                null,
-                null,
-                CHILD_ID,
-                JOIN_ID));
+                id(100L),
+                id(101L)));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CompactionStart(
-                CompactionPhase.FULL,
                 CompactionTrigger.MANUAL,
-                MODEL,
+                new ExecutionSelection("fake", "{}"),
                 -1L,
                 id(4L),
-                null,
-                null,
-                CHILD_ID,
-                JOIN_ID));
-  }
-
-  @Test
-  void rejectsPhaseAnchorMismatches() {
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CompactionStart(
-                CompactionPhase.FULL,
-                CompactionTrigger.THRESHOLD,
-                MODEL,
-                BUDGET,
-                id(4L),
-                id(3L),
-                null,
-                CHILD_ID,
-                JOIN_ID));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CompactionStart(
-                CompactionPhase.HISTORY,
-                CompactionTrigger.THRESHOLD,
-                MODEL,
-                BUDGET,
-                id(4L),
-                null,
-                null,
-                CHILD_ID,
-                JOIN_ID));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CompactionStart(
-                CompactionPhase.HISTORY,
-                CompactionTrigger.THRESHOLD,
-                MODEL,
-                BUDGET,
-                id(4L),
-                id(3L),
-                id(8L),
-                CHILD_ID,
-                JOIN_ID));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new CompactionStart(
-                CompactionPhase.TURN_PREFIX,
-                CompactionTrigger.THRESHOLD,
-                MODEL,
-                BUDGET,
-                id(4L),
-                null,
-                id(8L),
-                CHILD_ID,
-                JOIN_ID));
+                id(100L),
+                id(101L)));
   }
 }

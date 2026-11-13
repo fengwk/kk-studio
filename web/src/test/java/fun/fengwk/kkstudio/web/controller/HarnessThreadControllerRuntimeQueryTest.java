@@ -114,13 +114,13 @@ class HarnessThreadControllerRuntimeQueryTest extends HarnessThreadControllerTes
     when(runtime.manualCompactionAvailability(id(1)))
         .thenReturn(
             ManualCompactionAvailability.disabled(
-                ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM));
+                ManualCompactionAvailability.DisabledReason.NOTHING_TO_COMPACT));
 
     mockMvc
         .perform(get("/api/harness/threads/" + idText(1) + "/compaction-availability"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.available").value(false))
-        .andExpect(jsonPath("$.disabledReason").value("BELOW_MINIMUM"));
+        .andExpect(jsonPath("$.disabledReason").value("NOTHING_TO_COMPACT"));
     verify(runtime).manualCompactionAvailability(id(1));
     verify(runtime, never()).getThreadSnapshot(any());
 

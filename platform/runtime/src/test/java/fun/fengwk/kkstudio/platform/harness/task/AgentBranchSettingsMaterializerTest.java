@@ -19,7 +19,6 @@ import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.model.Model;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
@@ -163,19 +162,16 @@ class AgentBranchSettingsMaterializerTest {
   void rejectsUnconfiguredAgentModelExplicitly() {
     Agent unconfigured =
         Agent.builder()
-            .name(BuiltinAgents.COMPACTION_NAME)
+            .name("unconfigured-agent")
             .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
             .build();
-    when(agentRepository.getByName(BuiltinAgents.COMPACTION_NAME)).thenReturn(unconfigured);
+    when(agentRepository.getByName("unconfigured-agent")).thenReturn(unconfigured);
 
     IllegalArgumentException error =
         assertThrows(
-            IllegalArgumentException.class,
-            () -> materializer.materialize(BuiltinAgents.COMPACTION_NAME));
+            IllegalArgumentException.class, () -> materializer.materialize("unconfigured-agent"));
     assertTrue(
-        error
-            .getMessage()
-            .contains("agent execution is not configured: " + BuiltinAgents.COMPACTION_NAME));
+        error.getMessage().contains("agent execution is not configured: " + "unconfigured-agent"));
   }
 
   private static String validModelConfig() {

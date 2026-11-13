@@ -21,7 +21,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -671,12 +670,7 @@ class ThreadProcessorSoftBudgetTest extends ThreadProcessorTestBase {
                           childId,
                           100_000,
                           16_384,
-                          CompactionStart.pending(
-                              CompactionPhase.FULL,
-                              CompactionTrigger.THRESHOLD,
-                              userEntry,
-                              null,
-                              null),
+                          CompactionStart.pending(CompactionTrigger.THRESHOLD, userEntry),
                           null),
                       NOW));
           tx.entries()

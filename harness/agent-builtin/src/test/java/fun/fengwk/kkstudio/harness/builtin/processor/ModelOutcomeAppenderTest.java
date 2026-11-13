@@ -71,7 +71,7 @@ class ModelOutcomeAppenderTest {
     when(tx.nextId()).thenReturn(id(5), id(6));
     EntryPath path = requestPath();
 
-    new ModelOutcomeAppender().appendModel(tx, path, invocation, NOW);
+    new ModelOutcomeAppender().appendModel(tx, path, invocation, NOW, false);
 
     ArgumentCaptor<Entry> inserted = ArgumentCaptor.forClass(Entry.class);
     verify(entries, times(2)).insert(inserted.capture());

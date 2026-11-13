@@ -19,8 +19,6 @@ import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
@@ -61,7 +59,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
-import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
@@ -427,17 +424,6 @@ public final class HarnessRuntime {
   /** 返回 Thread 当前的手动压缩可用性；结果是瞬时 projection，提交仍由 expectedVersion 做最终 CAS。 */
   public ManualCompactionAvailability manualCompactionAvailability(UUID threadId) {
     return manualCompactionControl.manualCompactionAvailability(threadId);
-  }
-
-  /** 以当前 Driver 自己的策略判断是否需要自动压缩；Runtime 不自行选择阈值或 fallback。返回 null 表示无需压缩。 */
-  public CompactionPreparation prepareAutomaticCompaction(
-      ThreadState thread, EntryPath path, CompactionConfig config, boolean hasQueuedMessage) {
-    AgentDriver driver = driverRegistry.of(path.baseSettings());
-    return driver.prepareAutomaticCompaction(
-        Objects.requireNonNull(thread, "thread"),
-        Objects.requireNonNull(path, "path"),
-        Objects.requireNonNull(config, "config"),
-        hasQueuedMessage);
   }
 
   /**

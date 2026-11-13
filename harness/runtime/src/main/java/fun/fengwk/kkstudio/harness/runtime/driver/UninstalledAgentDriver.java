@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.driver;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
@@ -88,12 +87,6 @@ final class UninstalledAgentDriver implements AgentDriver {
       List<ToolInvocation> siblings,
       DriverCommit commit) {
     throw new IllegalStateException("uninstalled driver cannot complete tool batch");
-  }
-
-  @Override
-  public CompactionPreparation prepareAutomaticCompaction(
-      ThreadState thread, EntryPath path, CompactionConfig config, boolean hasQueuedMessage) {
-    return null;
   }
 
   @Override

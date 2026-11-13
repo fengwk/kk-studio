@@ -15,7 +15,6 @@
 | `lockState` | 按 open `TURN_START` 锁定当前 generation；terminal 但尚未物化时为 `RESPONSE_PENDING`，否则为 `ACTIVE` 或 `NONE`；`workTarget()` 声明以 `ModelInvocation` id 为键的 MODEL Work，Stop 据此锁定并删除 |
 | `applyResponse` | 经 [`ModelOutcomeAppender`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelOutcomeAppender.java) 把终态物化为 Assistant / Error / Compaction / ToolBatch 历史 |
 | `completeToolBatch` | 校验 generation 已附着到当前 Assistant head，并删除临时 ModelInvocation |
-| `prepareAutomaticCompaction` | 委托 [`AutomaticCompactionPlanner`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/compaction/AutomaticCompactionPlanner.java) |
 | `stop` | 把在途生成收敛为 `ASSISTANT_ERROR(CANCELLED)` 或携带已冻结流式内容的 `ASSISTANT_ABORTED` barrier，并取消 generation；返回的 `executionIds` 是该 generation 的 ModelInvocation id，Stop 事务提交后用于取消本地执行 |
 | `works` / `cancelWork` / `hasActiveWork` | 注册以 `ModelInvocation` id 为键的 MODEL Work 处理器；Stop 提交后取消对应本地执行；节点退出时报告仍活跃的模型执行 |
 | `lockThreadStateForDeletion` / `deleteLockedThreadState` | Thread 深删时先按 id 升序锁定 ModelInvocation 并返回 MODEL Work，待 Work 与 ToolInvocation 删除后再经 BuiltinStore 删除这些私有行 |
@@ -41,7 +40,7 @@ systemInstruction / systemSections / toolBindings / subagentBindings
 groupExecution?
 ```
 
-完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称与描述已进入命名 system sections，`systemInstruction` 是这些 sections 的拼接视图。SYSTEM 历史只保存模型可见工具定义；Environment、Contributor 等执行路由保留在冻结的 `ModelRequestSpec` / `ToolBinding` 中。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩也遵循 Compaction Agent 自身的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
+完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称与描述已进入命名 system sections，`systemInstruction` 是这些 sections 的拼接视图。SYSTEM 历史只保存模型可见工具定义；Environment、Contributor 等执行路由保留在冻结的 `ModelRequestSpec` / `ToolBinding` 中。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。存在完成压缩时，以摘要 wrapper 替代切点前历史，并从切点原样回放保留段；Claude 保留段的 thinking 因签名绑定旧前缀而被移除。分支第一次请求在切点前最后一条 assistant 之前写唯一只读缓存断点（具体模型不同或缓存留存过期时不写）。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩沿用压缩执行模型自己的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
 
 Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员及其所选 Variant，成员切换时整体使用该成员快照。assistant 回复持久化本次请求实际声明的 effort（未声明或 `off` 时为空）；后续回放读取该历史事实，不根据当前模型 variants 反查。新 invocation 使用最新配置，重试与重启沿用冻结请求。
 
@@ -80,7 +79,7 @@ Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员
 
 ## 自动压缩
 
-[`AutomaticCompactionPlanner`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/compaction/AutomaticCompactionPlanner.java) 是 Builtin 的自动压缩策略，按 owned `HISTORY` -> hard overflow -> eligible threshold 的顺序计算下一次压缩。它复用 Runtime 的 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 与 [`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionConfig.java)，不复制阈值判定；无压缩义务时返回 `null`。Runtime 只通过 `AgentDriver.prepareAutomaticCompaction` 调用本策略，不反向依赖 Builtin 的压缩实现。压缩回合的父子结构、子 Thread 创建与 `SETTLE_OWNER_TURN` 结算仍由 [Harness Runtime](harness-runtime.md#压缩) 掌握。
+压缩触发不在 Builtin Driver 内：平台 Turn 解析按请求输入预算返回 `CompactionRequired`，溢出失败由 Runtime 直接启动一次补偿压缩。Builtin 只负责压缩分支的普通模型调用与工具禁用；切点选择统一由 Runtime 的 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 与 [`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionConfig.java) 完成。压缩回合的父子结构、子 Thread 创建与 `SETTLE_OWNER_TURN` 结算仍由 [Harness Runtime](harness-runtime.md#压缩) 掌握。
 
 ## 私有查询
 
