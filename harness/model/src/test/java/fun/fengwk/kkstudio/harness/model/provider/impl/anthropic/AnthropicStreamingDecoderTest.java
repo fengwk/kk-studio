@@ -55,7 +55,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -987,8 +986,7 @@ class AnthropicStreamingDecoderTest {
         "test-anthropic",
         ProviderType.ANTHROPIC,
         baseUrl,
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-        UUID.randomUUID());
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
   }
 
   private static final class RecordingHandler implements ProviderStreamHandler {

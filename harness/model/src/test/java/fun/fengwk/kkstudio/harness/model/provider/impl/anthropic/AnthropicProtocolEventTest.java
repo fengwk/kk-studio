@@ -45,7 +45,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -74,8 +73,7 @@ class AnthropicProtocolEventTest {
             "anthropic-protocol-event",
             ProviderType.ANTHROPIC,
             "https://api.anthropic.com/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
-            UUID.randomUUID());
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
     ModelDescriptor model =
         new ModelDescriptor(
             "anthropic-protocol-event",
@@ -244,8 +242,7 @@ class AnthropicProtocolEventTest {
               "anthropic-protocol-event",
               ProviderType.ANTHROPIC,
               "http://127.0.0.1:" + server.getAddress().getPort() + "/v1",
-              new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)),
-              UUID.randomUUID());
+              new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
       RecordingHandler handler = new RecordingHandler();
       JdkHttpSseTransport transport = new JdkHttpSseTransport(client, sched);
       AnthropicProviderAdapter adapter = new AnthropicProviderAdapter(transport, "key");

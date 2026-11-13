@@ -558,6 +558,7 @@ public final class OpenAiResponsesRequestEncoder {
         return false;
       }
       ObjectNode summary = item.withArray("summary").addObject();
+      mergeNativeFields(summary, data.nativeFields().get("summaryPartFields"));
       summary.put("type", data.contentType());
       summary.put("text", thinkingBlock.thinking());
       return true;

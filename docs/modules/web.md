@@ -154,7 +154,7 @@ Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/c
 | `reason` | 拒绝事实 |
 | --- | --- |
 | `PREVIEW_PLANNING_FAILED` | 历史前缀无法规划 |
-| `PREVIEW_PROVIDER_UNAVAILABLE` | 当前 Provider 无法解析，包括连接 generation 漂移 |
+| `PREVIEW_PROVIDER_UNAVAILABLE` | 当前 Provider 不存在、类型不匹配或无法解析 |
 | `PREVIEW_UNSUPPORTED` | 冻结压缩子执行无法可靠定位，或 adapter 无请求体预览能力 |
 | `PREVIEW_ENCODING_FAILED` | 请求体编码失败 |
 

@@ -25,7 +25,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** Gemini SSE 流式分包与边缘格式解析测试。 */
 class GeminiStreamingDecoderTest {
@@ -35,8 +34,7 @@ class GeminiStreamingDecoderTest {
         "google-test",
         ProviderType.GOOGLE,
         "https://generativelanguage.googleapis.com",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-        new UUID(1L, 2L));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
   }
 
   private static ProviderRequest request() {

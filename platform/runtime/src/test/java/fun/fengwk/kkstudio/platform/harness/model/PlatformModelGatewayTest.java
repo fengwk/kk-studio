@@ -60,10 +60,8 @@ class PlatformModelGatewayTest {
   private static final ModelCallTimeoutPolicy TIMEOUT_POLICY =
       new ModelCallTimeoutPolicy(Duration.ofSeconds(45), Duration.ofSeconds(3));
   private static final ProviderRequest PROVIDER_REQUEST = providerRequest();
-  private static final UUID CONNECTION_GENERATION_ID = new UUID(0L, 43L);
   private static final ModelGateway.Execution EXECUTION =
-      new ModelGateway.Execution(
-          new UUID(0L, 42L), 1, ProviderType.OPENAI, CONNECTION_GENERATION_ID, PROVIDER_REQUEST);
+      new ModelGateway.Execution(new UUID(0L, 42L), 1, ProviderType.OPENAI, PROVIDER_REQUEST);
 
   /**
    * admit resolves and reserves capacity; run forwards deltas and returns the provider completion.
@@ -439,8 +437,7 @@ class PlatformModelGatewayTest {
     }
 
     @Override
-    public ResolvedExecution resolve(
-        ProviderType frozenType, UUID frozenConnectionGenerationId, ProviderRequest request) {
+    public ResolvedExecution resolve(ProviderType frozenType, ProviderRequest request) {
       resolveCount.incrementAndGet();
       if (resolveFailure != null) {
         throw resolveFailure;

@@ -13,7 +13,6 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.persistence.test.PostgresSpringTestSupport;
 
-import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -106,8 +105,7 @@ public class ProviderRepositoryTest extends PostgresSpringTestSupport {
   }
 
   private Provider provider(String name) {
-    return new Provider(
-        name, null, ProviderType.OPENAI, null, null, "{}", UUID.randomUUID(), null, null, null);
+    return new Provider(name, null, ProviderType.OPENAI, null, null, "{}", null, null, null);
   }
 
   private static Provider withDescription(Provider source, String description) {
@@ -118,7 +116,6 @@ public class ProviderRepositoryTest extends PostgresSpringTestSupport {
         source.baseUrl(),
         source.credential(),
         source.configJson(),
-        source.connectionGenerationId(),
         source.version(),
         source.createdAt(),
         source.updatedAt());

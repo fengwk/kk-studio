@@ -26,7 +26,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /** port 契约测试使用的最小化 frozen request fixture。 */
 public final class PortTestData {
@@ -39,7 +38,6 @@ public final class PortTestData {
   public static ModelRequestSpec modelRequest() {
     return spec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
         1024,

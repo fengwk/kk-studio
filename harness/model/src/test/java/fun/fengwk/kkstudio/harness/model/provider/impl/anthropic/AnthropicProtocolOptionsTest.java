@@ -35,7 +35,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 /** 验证 native protocolOptions 合并语义：非所有权官方顶层字段无损透传、所有权字段冲突显式失败、tools 与 output_config 按官方语义合并。 */
@@ -68,8 +67,7 @@ class AnthropicProtocolOptionsTest {
           "test-anthropic",
           ProviderType.ANTHROPIC,
           "https://api.anthropic.com/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
 
   /**
    * 测试意图：非 runtime 所有权官方顶层字段（含 effort 未声明时的 thinking/output_config）必须无损进入 wire，runtime 事实仍由 runtime

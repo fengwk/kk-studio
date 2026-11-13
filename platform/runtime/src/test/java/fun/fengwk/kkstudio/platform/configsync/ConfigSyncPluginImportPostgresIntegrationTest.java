@@ -66,7 +66,6 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -175,10 +174,9 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
               jdbcClient
                   .sql(
                       "insert into provider"
-                          + " (name, provider_type, config, connection_generation_id)"
-                          + " values (:name, 'openai', '{}'::jsonb, cast(:generation as uuid))")
+                          + " (name, provider_type, config)"
+                          + " values (:name, 'openai', '{}'::jsonb)")
                   .param("name", invocation.getArgument(0, ProviderCreateDTO.class).getName())
-                  .param("generation", UUID.randomUUID().toString())
                   .update();
               return null;
             });
@@ -309,10 +307,8 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
   private static void seedAgentModel() {
     jdbcClient
         .sql(
-            "insert into provider (name, provider_type, config, connection_generation_id)"
-                + " values (:name, 'openai', '{}'::jsonb, cast(:generation as uuid))")
+            "insert into provider (name, provider_type, config) values (:name, 'openai', '{}'::jsonb)")
         .param("name", MODEL_PROVIDER)
-        .param("generation", UUID.randomUUID().toString())
         .update();
     jdbcClient
         .sql(

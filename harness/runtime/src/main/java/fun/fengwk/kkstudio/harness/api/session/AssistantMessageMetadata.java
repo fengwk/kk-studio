@@ -26,7 +26,8 @@ public record AssistantMessageMetadata(
     ModelSelection model,
     Instant requestedAt,
     String responseServiceTier,
-    RequestBodyPricingSnapshot requestBodyPricing) {
+    RequestBodyPricingSnapshot requestBodyPricing,
+    String effort) {
 
   public AssistantMessageMetadata {
     stopReason = Objects.requireNonNull(stopReason, "stopReason");
@@ -41,7 +42,7 @@ public record AssistantMessageMetadata(
 
   public AssistantMessageMetadata(
       GenerationStopReason stopReason, ModelUsage usage, Long decodeDurationMillis) {
-    this(stopReason, usage, decodeDurationMillis, null, null, null, null);
+    this(stopReason, usage, decodeDurationMillis, null, null, null, null, null);
   }
 
   public AssistantMessageMetadata(
@@ -51,7 +52,34 @@ public record AssistantMessageMetadata(
       ModelSelection model,
       Instant requestedAt,
       String responseServiceTier) {
-    this(stopReason, usage, decodeDurationMillis, model, requestedAt, responseServiceTier, null);
+    this(
+        stopReason,
+        usage,
+        decodeDurationMillis,
+        model,
+        requestedAt,
+        responseServiceTier,
+        null,
+        null);
+  }
+
+  public AssistantMessageMetadata(
+      GenerationStopReason stopReason,
+      ModelUsage usage,
+      Long decodeDurationMillis,
+      ModelSelection model,
+      Instant requestedAt,
+      String responseServiceTier,
+      RequestBodyPricingSnapshot requestBodyPricing) {
+    this(
+        stopReason,
+        usage,
+        decodeDurationMillis,
+        model,
+        requestedAt,
+        responseServiceTier,
+        requestBodyPricing,
+        null);
   }
 
   /** 无可信流计时的 Provider 元数据快照。 */

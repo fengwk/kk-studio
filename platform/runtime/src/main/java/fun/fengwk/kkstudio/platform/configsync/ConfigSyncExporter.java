@@ -34,8 +34,8 @@ import java.util.Set;
 /**
  * 把一次快照按引用选择导出为纯结构 YAML 文档。
  *
- * <p>只导出可编辑业务字段：不含 UUID、时间戳、乐观锁版本、Provider generation、连接/发现状态等运行态事实；凭据、registrationToken 与 MCP
- * headers 按原值导出，{@code ${VAR}} 不解析。插件只导出安装身份与普通值文本，其秘密一律不进入文件。
+ * <p>只导出可编辑业务字段：不含 UUID、时间戳、乐观锁版本、连接/发现状态等运行态事实；凭据、registrationToken 与 MCP headers 按原值导出，{@code
+ * ${VAR}} 不解析。插件只导出安装身份与普通值文本，其秘密一律不进入文件。
  */
 @AllArgsConstructor
 @Component

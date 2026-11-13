@@ -66,12 +66,18 @@ describe('applyCatalogCandidate', () => {
     })
   })
 
-  it('prefills mid-conversation system messages only for supported Claude candidates', () => {
-    const supported = applyCatalogCandidate(draft(), candidate({ modelId: 'claude-sonnet-5.5' }))
-    const unsupported = applyCatalogCandidate(draft(), candidate({ modelId: 'claude-sonnet-4-5' }))
+  it('prefills Claude capabilities only for supported model families', () => {
+    const before = draft()
+    const next = applyCatalogCandidate(before, candidate({ modelId: 'anthropic/claude-sonnet-5.5-20260723' }))
 
-    expect(supported.midConversationSystemMessages).toBe(true)
+    expect(next.midConversationSystemMessages).toBe(true)
+    expect(next.messageLevelEffort).toBe(true)
+    expect(before.midConversationSystemMessages).toBe(false)
+    expect(before.messageLevelEffort).toBe(false)
+
+    const unsupported = applyCatalogCandidate(before, candidate({ modelId: 'claude-sonnet-4-5' }))
     expect(unsupported.midConversationSystemMessages).toBe(false)
+    expect(unsupported.messageLevelEffort).toBe(false)
   })
 
   it('does not replace pricing unless it is supported and complete', () => {

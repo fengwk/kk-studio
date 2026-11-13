@@ -16,14 +16,12 @@ import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * 按当前 {@code provider} 行解析每次 Model attempt 的 Provider。
  *
  * <p>每次 {@link #resolve} 都按 {@code request.model().providerName()} 读取最新一行，并在创建 adapter 前校验
- * providerType 与 connection generation 均等于 invocation 冻结值。endpoint、credential 或协议配置变化以及同名重建都会轮换
- * generation，使既有 invocation 确定性拒绝；不轮换 generation 的 timeout-only 更新保持 attempt-time live，删除后确定性 not
+ * providerType 等于 invocation 冻结值。endpoint、credential 与 timeout 配置按 attempt-time 当前值生效，删除后确定性 not
  * found。
  *
  * <p>持久 request 中已有的 cache control（retention 与 session key）在规划期冻结，执行期原样沿用，不按当前 {@code
@@ -52,10 +50,8 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
   }
 
   @Override
-  public ResolvedExecution resolve(
-      ProviderType frozenType, UUID frozenConnectionGenerationId, ProviderRequest request) {
+  public ResolvedExecution resolve(ProviderType frozenType, ProviderRequest request) {
     Objects.requireNonNull(frozenType, "frozenType");
-    Objects.requireNonNull(frozenConnectionGenerationId, "frozenConnectionGenerationId");
     Objects.requireNonNull(request, "request");
     String providerName = request.model().providerName();
     Provider provider = providerRepository.getByName(providerName);
@@ -83,21 +79,8 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
       throw new IllegalArgumentException("cannot parse provider configuration for " + providerName);
     }
     String baseUrl = provider.baseUrl();
-    UUID connectionGenerationId = provider.connectionGenerationId();
-    if (connectionGenerationId == null) {
-      throw new IllegalStateException(
-          "provider " + providerName + " connectionGenerationId must not be null");
-    }
-    if (!connectionGenerationId.equals(frozenConnectionGenerationId)) {
-      throw new IllegalArgumentException(
-          "provider connection generation drift: frozen="
-              + frozenConnectionGenerationId
-              + " current="
-              + connectionGenerationId);
-    }
     // 准入期验证 endpoint 非空白：确定性失败在 resolve 阶段暴露，而不是推迟到 transport。
-    new ProviderDescriptor(
-        providerName, providerType, baseUrl, timeoutPolicy, connectionGenerationId);
+    new ProviderDescriptor(providerName, providerType, baseUrl, timeoutPolicy);
     ProviderAdapter adapter;
     try {
       adapter = factory.create(provider.credential());
@@ -133,12 +116,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
         timeoutPolicy,
         effectiveTimeoutPolicy -> {
           ProviderDescriptor descriptor =
-              new ProviderDescriptor(
-                  providerName,
-                  providerType,
-                  baseUrl,
-                  effectiveTimeoutPolicy,
-                  connectionGenerationId);
+              new ProviderDescriptor(providerName, providerType, baseUrl, effectiveTimeoutPolicy);
           ModelProvider modelProvider;
           try {
             modelProvider = adapter.create(descriptor);
@@ -155,8 +133,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
         // UnsupportedOperationException，由调用方显式拒绝。
         bodyRequest -> {
           ProviderDescriptor descriptor =
-              new ProviderDescriptor(
-                  providerName, providerType, baseUrl, timeoutPolicy, connectionGenerationId);
+              new ProviderDescriptor(providerName, providerType, baseUrl, timeoutPolicy);
           return adapter.encodeRequestBody(bodyRequest, descriptor);
         });
   }

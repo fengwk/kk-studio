@@ -61,7 +61,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 /** AnthropicRequestEncoder 的纯单元与 Golden 测试。 */
@@ -77,8 +76,7 @@ class AnthropicRequestEncoderTest {
           "test-anthropic",
           ProviderType.ANTHROPIC,
           "https://api.anthropic.com/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
 
   @Test
   void encodesBasicUserMessageWithDefaultMaxTokensAndStream() throws IOException {
@@ -709,12 +707,7 @@ class AnthropicRequestEncoderTest {
     assertEquals("adaptive", root.path("thinking").path("type").asString(""));
     assertEquals("summarized", root.path("thinking").path("display").asString(""));
     assertEquals("high", root.path("output_config").path("effort").asString(""));
-    assertEquals(
-        List.of(
-            "mid-conversation-system-2026-04-07",
-            "per-turn-control-2026-07-01",
-            "effort-2025-11-24"),
-        encoded.betaFeatures());
+    assertEquals(List.of("mid-conversation-output-config-2026-07-01"), encoded.betaFeatures());
   }
 
   @Test
@@ -868,12 +861,7 @@ class AnthropicRequestEncoderTest {
     assertEquals("high", root.path("output_config").path("effort").asString(""));
     assertEquals(512, root.path("max_tokens").asInt(0));
     assertFalse(root.path("thinking").has("budget_tokens"));
-    assertEquals(
-        List.of(
-            "mid-conversation-system-2026-04-07",
-            "per-turn-control-2026-07-01",
-            "effort-2025-11-24"),
-        encoded.betaFeatures());
+    assertEquals(List.of("mid-conversation-output-config-2026-07-01"), encoded.betaFeatures());
   }
 
   @Test
@@ -1578,7 +1566,8 @@ class AnthropicRequestEncoderTest {
             Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE, ModelInputModality.DOCUMENT),
             true,
             false,
-            true);
+            true,
+            false);
     return new ProviderRequest(
         model, defaultVariant(), 1024, SYSTEM_INSTRUCTION, messages, tools, cacheControl, true);
   }

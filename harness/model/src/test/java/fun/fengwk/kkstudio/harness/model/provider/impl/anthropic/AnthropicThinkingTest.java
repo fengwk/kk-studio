@@ -50,7 +50,6 @@ import java.io.InputStream;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
@@ -75,9 +74,6 @@ class AnthropicThinkingTest {
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final UUID CONNECTION_GEN_ID =
-      UUID.fromString("00000000-0000-0000-0000-000000000001");
-
   private ProviderDescriptor descriptor;
   private AnthropicRequestEncoder encoder;
 
@@ -88,8 +84,7 @@ class AnthropicThinkingTest {
             "anthropic-thinking",
             ProviderType.ANTHROPIC,
             "https://api.anthropic.com/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-            CONNECTION_GEN_ID);
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
     encoder = new AnthropicRequestEncoder();
   }
 
@@ -144,12 +139,7 @@ class AnthropicThinkingTest {
     assertEquals("adaptive", turn1WireRoot.path("thinking").path("type").asString(""));
     assertEquals("summarized", turn1WireRoot.path("thinking").path("display").asString(""));
     assertEquals("high", turn1WireRoot.path("output_config").path("effort").asString(""));
-    assertEquals(
-        List.of(
-            "mid-conversation-system-2026-04-07",
-            "per-turn-control-2026-07-01",
-            "effort-2025-11-24"),
-        encodedTurn1.betaFeatures());
+    assertEquals(List.of("mid-conversation-output-config-2026-07-01"), encodedTurn1.betaFeatures());
     assertFalse(
         turn1WireRoot.path("thinking").has("budget_tokens"),
         "kk-studio uses adaptive thinking without budget_tokens");
@@ -245,10 +235,8 @@ class AnthropicThinkingTest {
     JsonNode turn2WireRoot = MAPPER.readTree(encodedTurn2.bodyUtf8Bytes());
     ArrayNode wireMessages = (ArrayNode) turn2WireRoot.path("messages");
 
-    assertEquals(4, wireMessages.size());
-    assertEquals("system", wireMessages.get(1).path("role").asString(""));
-    assertEquals("high", wireMessages.get(1).path("output_config").path("effort").asString(""));
-    JsonNode replayedAssistant = wireMessages.get(2);
+    assertEquals(3, wireMessages.size());
+    JsonNode replayedAssistant = wireMessages.get(1);
     assertEquals("assistant", replayedAssistant.path("role").asString(""));
     ArrayNode asstContent = (ArrayNode) replayedAssistant.path("content");
     assertEquals(2, asstContent.size());
@@ -403,10 +391,8 @@ class AnthropicThinkingTest {
     JsonNode turn2Wire = MAPPER.readTree(encodedTurn2.bodyUtf8Bytes());
     ArrayNode messages = (ArrayNode) turn2Wire.path("messages");
 
-    assertEquals(4, messages.size());
-    assertEquals("system", messages.get(1).path("role").asString(""));
-    assertEquals("medium", messages.get(1).path("output_config").path("effort").asString(""));
-    JsonNode asstWire = messages.get(2);
+    assertEquals(3, messages.size());
+    JsonNode asstWire = messages.get(1);
     assertEquals("assistant", asstWire.path("role").asString(""));
     ArrayNode asstWireContent = (ArrayNode) asstWire.path("content");
     assertEquals(2, asstWireContent.size());
@@ -424,7 +410,7 @@ class AnthropicThinkingTest {
     assertEquals("Munich", asstWireContent.get(1).path("input").path("city").asString(""));
 
     // 工具结果 wire 断言
-    JsonNode toolWire = messages.get(3);
+    JsonNode toolWire = messages.get(2);
     assertEquals("user", toolWire.path("role").asString(""));
     assertEquals("tool_result", toolWire.path("content").get(0).path("type").asString(""));
     assertEquals(
@@ -510,9 +496,8 @@ class AnthropicThinkingTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(followUpReq, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
-    assertEquals("system", root.path("messages").get(1).path("role").asString(""));
-    assertEquals("assistant", root.path("messages").get(2).path("role").asString(""));
-    JsonNode asstWireContent = root.path("messages").get(2).path("content");
+    assertEquals("assistant", root.path("messages").get(1).path("role").asString(""));
+    JsonNode asstWireContent = root.path("messages").get(1).path("content");
 
     assertEquals(2, asstWireContent.size());
     assertEquals("redacted_thinking", asstWireContent.get(0).path("type").asString(""));
@@ -585,8 +570,7 @@ class AnthropicThinkingTest {
 
     AnthropicEncodedRequest encoded = encoder.encode(nextReq, descriptor);
     JsonNode wireMessages = MAPPER.readTree(encoded.bodyUtf8Bytes()).path("messages");
-    assertEquals("system", wireMessages.get(1).path("role").asString(""));
-    JsonNode asstWire = wireMessages.get(2);
+    JsonNode asstWire = wireMessages.get(1);
     assertEquals("assistant", asstWire.path("role").asString(""));
     ArrayNode contents = (ArrayNode) asstWire.path("content");
 
@@ -647,9 +631,8 @@ class AnthropicThinkingTest {
     // 亲和性失配：signature 不回放，thinking 降级为普通 text，wire 上不含 thinking/signature
     JsonNode fallbackMessages =
         MAPPER.readTree(encoder.encode(followUp, descriptor).bodyUtf8Bytes()).path("messages");
-    assertEquals("system", fallbackMessages.get(1).path("role").asString(""));
-    assertEquals("assistant", fallbackMessages.get(2).path("role").asString(""));
-    ArrayNode fallbackContents = (ArrayNode) fallbackMessages.get(2).path("content");
+    assertEquals("assistant", fallbackMessages.get(1).path("role").asString(""));
+    ArrayNode fallbackContents = (ArrayNode) fallbackMessages.get(1).path("content");
     assertEquals(2, fallbackContents.size());
     assertEquals("text", fallbackContents.get(0).path("type").asString(""));
     assertEquals("Thought", fallbackContents.get(0).path("text").asString(""));
@@ -705,9 +688,8 @@ class AnthropicThinkingTest {
 
     JsonNode replayMessages =
         MAPPER.readTree(encoder.encode(followUp, descriptor).bodyUtf8Bytes()).path("messages");
-    assertEquals("system", replayMessages.get(1).path("role").asString(""));
-    assertEquals("assistant", replayMessages.get(2).path("role").asString(""));
-    ArrayNode replayedContent = (ArrayNode) replayMessages.get(2).path("content");
+    assertEquals("assistant", replayMessages.get(1).path("role").asString(""));
+    ArrayNode replayedContent = (ArrayNode) replayMessages.get(1).path("content");
     assertEquals(2, replayedContent.size());
     assertEquals("thinking", replayedContent.get(0).path("type").asString(""));
     assertEquals("Thought", replayedContent.get(0).path("thinking").asString(""));
@@ -768,7 +750,7 @@ class AnthropicThinkingTest {
             ProviderCacheControl.none());
 
     JsonNode wire = MAPPER.readTree(encoder.encode(followUp, descriptor).bodyUtf8Bytes());
-    JsonNode wireThinking = wire.path("messages").get(2).path("content").get(0);
+    JsonNode wireThinking = wire.path("messages").get(1).path("content").get(0);
     assertEquals("Tampered Thought in durable content", wireThinking.path("thinking").asString(""));
     assertEquals("sig_valid", wireThinking.path("signature").asString(""));
   }

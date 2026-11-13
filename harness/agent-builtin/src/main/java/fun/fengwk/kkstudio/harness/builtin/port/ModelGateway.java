@@ -17,8 +17,7 @@ import java.util.UUID;
  * Model 执行端口：先做纯本地准入，再在调用线程上阻塞执行一次冻结的 Model invocation。
  *
  * <p>execution key 是 {@code (invocationId, proposedAttempt)}，{@code proposedAttempt}
- * 必须为正数；execution 携带冻结 {@link ProviderType}、Provider connection generation 与内存 {@link
- * ProviderRequest}。
+ * 必须为正数；execution 携带 {@link ProviderType} 与内存 {@link ProviderRequest}。
  *
  * <p>调用顺序：{@link #admit} 不产生任何外部副作用，只回答「本进程现在能否执行」；{@link Admitted#run} 阻塞到 Provider 调用结束并返回 {@link
  * Outcome}。取消就是中断运行线程：实现必须随之关闭连接并尽快返回，返回值此时被调用方忽略。
@@ -49,15 +48,11 @@ public interface ModelGateway {
       Instant cooldownUntil);
 
   /**
-   * 一次 Model execution 的不可变描述：key 为 {@code (invocationId, proposedAttempt)}，携带冻结协议类型、Provider
-   * connection generation 与内存 ProviderRequest。
+   * 一次 Model execution 的不可变描述：key 为 {@code (invocationId, proposedAttempt)}，携带冻结协议类型与内存
+   * ProviderRequest。
    */
   record Execution(
-      UUID invocationId,
-      int proposedAttempt,
-      ProviderType providerType,
-      UUID providerConnectionGenerationId,
-      ProviderRequest request) {
+      UUID invocationId, int proposedAttempt, ProviderType providerType, ProviderRequest request) {
 
     public Execution {
       Objects.requireNonNull(invocationId, "invocationId");
@@ -65,8 +60,6 @@ public interface ModelGateway {
         throw new IllegalArgumentException("proposedAttempt must be positive");
       }
       providerType = Objects.requireNonNull(providerType, "providerType");
-      providerConnectionGenerationId =
-          Objects.requireNonNull(providerConnectionGenerationId, "providerConnectionGenerationId");
       request = Objects.requireNonNull(request, "request");
     }
   }

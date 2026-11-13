@@ -21,7 +21,6 @@ import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -63,8 +62,7 @@ class AnthropicSecurityTest {
             "p1",
             ProviderType.ANTHROPIC,
             "https://api.anthropic.com/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(5)),
-            UUID.randomUUID());
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(5)));
 
     AnthropicModelProvider modelProvider = (AnthropicModelProvider) adapter.create(descriptor);
     assertFalse(modelProvider.toString().contains(sensitiveKey));
@@ -92,8 +90,7 @@ class AnthropicSecurityTest {
             "p2",
             ProviderType.OPENAI,
             "https://api.openai.com/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(5)),
-            UUID.randomUUID());
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(5)));
 
     assertThrows(IllegalArgumentException.class, () -> adapter.create(openAiDescriptor));
   }

@@ -137,6 +137,7 @@ const SAMPLE_MODEL: ModelDTO = {
       tools: true,
       reasoning: true,
       midConversationSystemMessages: false,
+      messageLevelEffort: false,
       inputModalities: ['TEXT', 'IMAGE'],
     },
     pricing: {

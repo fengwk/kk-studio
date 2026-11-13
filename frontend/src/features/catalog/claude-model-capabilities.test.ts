@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { supportsClaudeMidConvoSystemMessages } from '@/features/catalog/claude-model-capabilities'
+import {
+  supportsClaudeMessageLevelEffort,
+  supportsClaudeMidConvoSystemMessages,
+} from '@/features/catalog/claude-model-capabilities'
 
 describe('supportsClaudeMidConvoSystemMessages', () => {
   it.each([
@@ -26,5 +29,28 @@ describe('supportsClaudeMidConvoSystemMessages', () => {
     'other/claude-opus-5.5',
   ])('does not support %s', (modelId) => {
     expect(supportsClaudeMidConvoSystemMessages(modelId)).toBe(false)
+  })
+})
+
+describe('supportsClaudeMessageLevelEffort', () => {
+  it.each([
+    'claude-opus-5',
+    'anthropic/claude-opus-5.5-20260723',
+    'CLAUDE-SONNET-5-5',
+    'claude-haiku-5.5',
+    'claude-fable-5.1',
+    'claude-mythos-5-2-20261111',
+  ])('supports %s', (modelId) => {
+    expect(supportsClaudeMessageLevelEffort(modelId)).toBe(true)
+  })
+
+  it.each([
+    'claude-opus-4-8',
+    'claude-sonnet-5',
+    'claude-fable-5',
+    'claude-mythos-5.3',
+    'gpt-5.5',
+  ])('does not support %s', (modelId) => {
+    expect(supportsClaudeMessageLevelEffort(modelId)).toBe(false)
   })
 })

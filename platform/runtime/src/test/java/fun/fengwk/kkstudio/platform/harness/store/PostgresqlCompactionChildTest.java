@@ -1565,10 +1565,8 @@ class PostgresqlCompactionChildTest {
             base.variant().protocolOptions());
     return new ModelRequestSpec(
         base.providerType(),
-        base.providerConnectionGenerationId(),
         base.model(),
         variant,
-        List.of(variant),
         resolvedOutputTokens != null ? resolvedOutputTokens : base.outputTokens(),
         base.systemInstruction(),
         base.toolBindings(),
@@ -2238,7 +2236,6 @@ class PostgresqlCompactionChildTest {
     ModelSelection model = BuiltinExecution.model(settings.execution());
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         new ModelDescriptor(
             "provider",
             model.modelName(),
@@ -2247,7 +2244,6 @@ class PostgresqlCompactionChildTest {
             true,
             true),
         new ModelVariant(model.variant(), null, PromptCacheRetention.NONE, null),
-        List.of(new ModelVariant(model.variant(), null, PromptCacheRetention.NONE, null)),
         1024,
         "Test system instruction.",
         List.of(),

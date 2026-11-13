@@ -87,6 +87,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesProviderAdapter;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.JdkHttpSseTransport;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.TokenEstimator;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -209,7 +210,6 @@ class DatabaseTurnResolverTest {
 
     assertEquals("provider", requestSpec.model().providerName());
     assertEquals("model", requestSpec.model().modelName());
-    assertEquals(new UUID(0L, 42L), requestSpec.providerConnectionGenerationId());
     // 上游 wire 标识来自 Model.modelId，与 catalog 逻辑名相互独立。
     assertEquals("wire-model", requestSpec.model().modelId());
     assertEquals(Set.of(ModelInputModality.TEXT), requestSpec.model().inputModalities());
@@ -271,8 +271,82 @@ class DatabaseTurnResolverTest {
         fixture.rejected(fixture.path(settings("default"))).error().message());
   }
 
+  /** 消息级 effort 模型的压缩分支：在摘要指令之后声明 low，同时保持同一具体模型与 variant 身份。 */
   @Test
-  void modelMidConversationSystemMessageCapabilityReachesRequestDescriptor() {
+  void compactionBranchAddsLowEffortWhenModelSupportsMessageLevelEffort() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    ParsedAgentModelConfig parsed = Fixture.parsedModel();
+    when(fixture.modelConfigParser.parse("model-config"))
+        .thenReturn(
+            new ParsedAgentModelConfig(
+                parsed.contextWindow(),
+                parsed.maxOutputTokens(),
+                parsed.inputModalities(),
+                parsed.tools(),
+                parsed.reasoning(),
+                false,
+                true,
+                parsed.variants(),
+                parsed.defaultVariant(),
+                parsed.pricing()));
+
+    TurnResolver.Resolved resolved =
+        assertInstanceOf(
+            TurnResolver.Resolved.class,
+            fixture.resolver.resolveCompactionBranch(
+                THREAD_ID, SESSION_ID, compactionBranchPath()));
+
+    assertEquals("low", resolved.spec().variant().reasoningEffort());
+    assertEquals("default", resolved.spec().variant().id());
+  }
+
+  /** 没有消息级 effort 能力时不改写分支 variant 的 effort。 */
+  @Test
+  void compactionBranchKeepsVariantEffortWithoutMessageLevelCapability() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+
+    TurnResolver.Resolved resolved =
+        assertInstanceOf(
+            TurnResolver.Resolved.class,
+            fixture.resolver.resolveCompactionBranch(
+                THREAD_ID, SESSION_ID, compactionBranchPath()));
+
+    assertNull(resolved.spec().variant().reasoningEffort());
+  }
+
+  /** ROOT + SYSTEM 基线 + 开放 COMPACTION_BRANCH_INPUT turn + 内部指令。 */
+  private static EntryPath compactionBranchPath() {
+    BranchSettings settings = settings("default");
+    return new EntryPath(
+        List.of(
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            new Entry(
+                id(2),
+                SESSION_ID,
+                id(1),
+                new SystemPayload(Map.of("agent", "[agent] baseline"), List.of(), List.of(), true),
+                NOW.plusSeconds(1)),
+            new Entry(
+                id(3),
+                SESSION_ID,
+                id(2),
+                new TurnStartPayload(TurnStartReason.COMPACTION_BRANCH_INPUT, settings, THREAD_ID),
+                NOW.plusSeconds(2)),
+            new Entry(
+                id(4),
+                SESSION_ID,
+                id(3),
+                new CustomMessagePayload(
+                    "core",
+                    "message",
+                    "message",
+                    AgentMessage.user(CompactionBranchPrompts.instruction(1024)),
+                    "{}"),
+                NOW.plusSeconds(3))));
+  }
+
+  @Test
+  void modelCapabilitiesReachRequestDescriptor() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     ParsedAgentModelConfig parsed = Fixture.parsedModel();
     when(fixture.modelConfigParser.parse("model-config"))
@@ -284,6 +358,7 @@ class DatabaseTurnResolverTest {
                 parsed.tools(),
                 parsed.reasoning(),
                 true,
+                true,
                 parsed.variants(),
                 parsed.defaultVariant(),
                 parsed.pricing()));
@@ -293,6 +368,7 @@ class DatabaseTurnResolverTest {
             .resolved(fixture.path(settings("default")))
             .model()
             .midConversationSystemMessages());
+    assertTrue(fixture.resolved(fixture.path(settings("default"))).model().messageLevelEffort());
   }
 
   @Test
@@ -333,12 +409,6 @@ class DatabaseTurnResolverTest {
     fixture.editProvider(provider -> provider.providerType(null));
     assertEquals(
         "provider type must not be null",
-        fixture.rejected(fixture.path(settings("default"))).error().message());
-
-    fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.editProvider(provider -> provider.connectionGenerationId(null));
-    assertEquals(
-        "provider connection generation id must not be null",
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -958,7 +1028,6 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
     assertEquals("custom", requestSpec.variant().id());
-    assertEquals(Fixture.parsedModel().variants(), requestSpec.modelVariants());
     // 所选 catalog variant 的 reasoningEffort 原样生效，不存在运行时 override。
     assertEquals("medium", requestSpec.variant().reasoningEffort());
     // variant 只承载 reasoning effort：输出预算由 model 级 limit.output 决定。
@@ -1506,8 +1575,7 @@ class DatabaseTurnResolverTest {
             new ProviderConfigurationCodec(JsonMapper.builder().build()),
             Map.of(factory.providerType(), factory),
             new ProviderResourceMaterializer(blobs, content, () -> ImageInputTier.P720));
-    ResolvedExecution execution =
-        resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
+    ResolvedExecution execution = resolution.resolve(spec.providerType(), request);
     assertEquals(request.cacheControl(), execution.effectiveRequest().cacheControl());
     ObjectMapper mapper = JsonMapper.builder().build();
     JsonNode wire = mapper.readTree(execution.encodeRequestBody());
@@ -1539,7 +1607,6 @@ class DatabaseTurnResolverTest {
             resolution
                 .resolve(
                     nextSpec.providerType(),
-                    nextSpec.providerConnectionGenerationId(),
                     new ModelRequestMaterializer().materialize(nextPath, nextSpec))
                 .encodeRequestBody());
     assertEquals(request.cacheControl().key(), nextWire.path("prompt_cache_key").asText());
@@ -1556,8 +1623,7 @@ class DatabaseTurnResolverTest {
             request.messages(),
             request.tools(),
             ProviderCacheControl.none());
-    ResolvedExecution disabledExecution =
-        resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), disabled);
+    ResolvedExecution disabledExecution = resolution.resolve(spec.providerType(), disabled);
     assertEquals(ProviderCacheControl.none(), disabledExecution.effectiveRequest().cacheControl());
     JsonNode disabledWire = mapper.readTree(disabledExecution.encodeRequestBody());
     assertFalse(disabledWire.has("prompt_cache_key"));
@@ -2127,6 +2193,7 @@ class DatabaseTurnResolverTest {
             true,
             true,
             false,
+            true,
             List.of(new ModelVariant("compact", null, PromptCacheRetention.NONE, null)),
             "compact",
             pricing()));
@@ -2440,7 +2507,6 @@ class DatabaseTurnResolverTest {
           Provider.builder()
               .name("provider")
               .providerType(persistedProviderType)
-              .connectionGenerationId(new UUID(0L, 42L))
               .version(0L)
               .build());
 
@@ -2519,6 +2585,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   parsed.tools(),
                   parsed.reasoning(),
+                  false,
                   false,
                   List.of(
                       new ModelVariant("default", null, promptCacheRetention, null),
@@ -2639,7 +2706,6 @@ class DatabaseTurnResolverTest {
           Provider.builder()
               .name(providerName)
               .providerType(ProviderType.OPENAI)
-              .connectionGenerationId(new UUID(0L, 43L))
               .version(0L)
               .build();
       when(providers.getByName(providerName)).thenReturn(fallbackProvider);
@@ -2713,6 +2779,7 @@ class DatabaseTurnResolverTest {
                   tools,
                   parsed.reasoning(),
                   parsed.midConversationSystemMessages(),
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -2734,6 +2801,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   parsed.reasoning(),
                   parsed.midConversationSystemMessages(),
+                  false,
                   List.of(new ModelVariant("default", null, PromptCacheRetention.NONE, null)),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -2750,6 +2818,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   parsed.reasoning(),
                   supported,
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -2766,6 +2835,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   reasoning,
                   parsed.midConversationSystemMessages(),
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -2782,6 +2852,7 @@ class DatabaseTurnResolverTest {
           Set.of(ModelInputModality.TEXT),
           true,
           true,
+          false,
           false,
           List.of(defaultVariant, customVariant),
           "default",

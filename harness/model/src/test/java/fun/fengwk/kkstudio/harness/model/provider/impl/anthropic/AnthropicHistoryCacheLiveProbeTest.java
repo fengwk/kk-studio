@@ -207,8 +207,7 @@ class AnthropicHistoryCacheLiveProbeTest {
   }
 
   private static ProviderDescriptor descriptor(String base) {
-    return new ProviderDescriptor(
-        "minimax-anthropic", ProviderType.ANTHROPIC, base, TIMEOUT, UUID.randomUUID());
+    return new ProviderDescriptor("minimax-anthropic", ProviderType.ANTHROPIC, base, TIMEOUT);
   }
 
   private static ProviderRequest request(List<ProviderMessage> messages) {

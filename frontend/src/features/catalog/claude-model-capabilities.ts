@@ -11,3 +11,12 @@ export function supportsClaudeMidConvoSystemMessages(modelId: string): boolean {
     /^claude-(fable|mythos)-5([.-][12])?(-\d{8})?$/.test(id)
   )
 }
+
+export function supportsClaudeMessageLevelEffort(modelId: string): boolean {
+  const id = normalizeClaudeModelId(modelId)
+  return (
+    /^claude-opus-(5|5[.-]5)(-\d{8})?$/.test(id) ||
+    /^claude-(sonnet|haiku)-5[.-]5(-\d{8})?$/.test(id) ||
+    /^claude-(fable|mythos)-5[.-][12](-\d{8})?$/.test(id)
+  )
+}

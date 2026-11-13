@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.platform.harness.task.SkillPromptEntry;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /** {@link LiveTurnPlan} invariants are enforced at construction boundaries. */
 class LiveTurnPlanTest {
@@ -69,11 +68,9 @@ class LiveTurnPlanTest {
   private static ModelRequestSpec spec() {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        new UUID(0L, 42L),
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), true, false),
         new ModelVariant("default", null, PromptCacheRetention.SHORT, null),
-        List.of(new ModelVariant("default", null, PromptCacheRetention.SHORT, null)),
         512,
         "system instruction",
         List.of(),

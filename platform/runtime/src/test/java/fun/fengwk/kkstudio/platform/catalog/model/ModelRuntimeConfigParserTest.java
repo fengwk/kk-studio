@@ -103,18 +103,22 @@ class ModelRuntimeConfigParserTest {
   }
 
   @Test
-  void defaultsMidConversationSystemMessagesToFalseAndRoundTripsEnabledValue() {
+  void defaultsSystemMessageAndEffortCapabilitiesFalseAndRoundTripsEnabledValues() {
     assertFalse(parser.parse(configWithoutPricing()).midConversationSystemMessages());
+    assertFalse(parser.parse(configWithoutPricing()).messageLevelEffort());
     String enabled =
         configWithoutPricing()
             .replace(
                 "\"reasoning\":true,",
-                "\"reasoning\":true,\"midConversationSystemMessages\":true,");
+                "\"reasoning\":true,\"midConversationSystemMessages\":true,"
+                    + "\"messageLevelEffort\":true,");
 
     var parsed = parser.parse(enabled);
     assertTrue(parsed.midConversationSystemMessages());
-    assertTrue(
-        parser.encode(parser.decode(enabled)).contains("\"midConversationSystemMessages\":true"));
+    assertTrue(parsed.messageLevelEffort());
+    String encoded = parser.encode(parser.decode(enabled));
+    assertTrue(encoded.contains("\"midConversationSystemMessages\":true"));
+    assertTrue(encoded.contains("\"messageLevelEffort\":true"));
   }
 
   /** 条件与规则按顺序解析；日期允许单侧缺省，显式 reasoning:null 与未声明 reasoning 保持不同语义。 */

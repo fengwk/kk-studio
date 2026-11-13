@@ -41,7 +41,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** 验证 OpenAI Responses SSE 流式状态机的事件聚合、截断诊断、用量归一化与原生 block 生成。 */
 class OpenAiResponsesStreamAccumulatorTest {
@@ -53,8 +52,7 @@ class OpenAiResponsesStreamAccumulatorTest {
         "openai_test",
         ProviderType.OPENAI_RESPONSES,
         "https://api.openai.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private ProviderRequest createRequest() {
