@@ -341,11 +341,9 @@ class AnthropicMessagesWireTest {
     assertFalse(bodyJson.has("output_config"), "BUDGET mode must omit output_config");
   }
 
-  /**
-   * Without message-level effort capability, adaptive effort stays top-level and emits no marker.
-   */
+  /** Without message-level effort capability, adaptive effort stays top-level and needs no beta. */
   @Test
-  void should_send_output_config_beta_header_without_message_level_effort() throws Exception {
+  void should_not_send_output_config_beta_without_message_level_effort() throws Exception {
     AtomicReference<RecordedRequest> recorded = new AtomicReference<>();
     CountDownLatch serverLatch = new CountDownLatch(1);
 
@@ -378,10 +376,9 @@ class AnthropicMessagesWireTest {
     assertTrue(serverLatch.await(5, TimeUnit.SECONDS), "server should receive request");
     RecordedRequest req = recorded.get();
     assertNotNull(req);
-    assertEquals(
-        "mid-conversation-output-config-2026-07-01",
+    assertNull(
         req.firstHeader("anthropic-beta"),
-        "ADAPTIVE effort must send the output-config beta header");
+        "top-level adaptive effort must not send the output-config beta header");
 
     JsonNode bodyJson = mapper.readTree(req.bodyBytes);
     assertEquals("adaptive", bodyJson.path("thinking").path("type").asString(""));
@@ -635,7 +632,7 @@ class AnthropicMessagesWireTest {
     assertEquals("adaptive", root.path("thinking").path("type").asString(""));
     assertEquals("summarized", root.path("thinking").path("display").asString(""));
     assertEquals("low", root.path("output_config").path("effort").asString(""));
-    assertEquals(List.of("mid-conversation-output-config-2026-07-01"), encoded.betaFeatures());
+    assertEquals(List.of(), encoded.betaFeatures());
   }
 
   /** 验证通用请求参数中的 outputTokens 能够正常透传至线缆。 */

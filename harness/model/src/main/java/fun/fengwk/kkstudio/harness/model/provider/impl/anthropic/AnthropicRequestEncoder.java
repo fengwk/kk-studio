@@ -121,8 +121,6 @@ public final class AnthropicRequestEncoder {
     String topLevelEffort =
         messageLevelEffort && firstStoredEffort != null ? firstStoredEffort : currentEffort;
     applyReasoningParameters(root, request, topLevelEffort, messageLevelEffort);
-    boolean hasEffortConfig =
-        request.model().reasoning() && !currentEffortOff && hasEffort(topLevelEffort);
 
     boolean deferredToolLane =
         request.model().midConversationSystemMessages() && request.baselineHasClientTools();
@@ -133,8 +131,7 @@ public final class AnthropicRequestEncoder {
     }
     boolean hasInlineToolChanges = hasInlineToolChanges(request.messages());
     List<String> betaFeatures =
-        resolveBetaFeatures(
-            hasEffortConfig, messageLevelThinking, deferredToolLane || hasInlineToolChanges);
+        resolveBetaFeatures(messageLevelThinking, deferredToolLane || hasInlineToolChanges);
 
     ArrayNode toolsArray = mergeTools(root, request.tools(), deferredToolLane);
 
@@ -228,14 +225,12 @@ public final class AnthropicRequestEncoder {
     return false;
   }
 
-  /** Add the beta support required by reasoning settings and inline tool changes. */
+  /** Add the beta support required by message-level reasoning and inline tool changes. */
   private static List<String> resolveBetaFeatures(
-      boolean hasEffortConfig, boolean messageLevelThinking, boolean inlineTools) {
+      boolean messageLevelThinking, boolean inlineTools) {
     List<String> betaFeatures = new ArrayList<>();
-    if (hasEffortConfig || messageLevelThinking) {
-      betaFeatures.add(OUTPUT_CONFIG_BETA);
-    }
     if (messageLevelThinking) {
+      betaFeatures.add(OUTPUT_CONFIG_BETA);
       betaFeatures.add(THINKING_BINDING_BETA);
     }
     if (inlineTools) {
