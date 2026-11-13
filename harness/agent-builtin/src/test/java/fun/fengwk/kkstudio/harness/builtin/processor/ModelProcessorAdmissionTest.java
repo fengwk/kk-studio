@@ -56,6 +56,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionLifecycle;
@@ -552,9 +554,12 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
     assertFalse(fixture.processor.hasActiveExecution());
   }
 
-  /** 历史物化遇到被移除的工具与 opaque replay：放弃不兼容 replay、按合法语义降级投影，网关收到该请求并 start。 */
+  /**
+   * Historical tool calls remain native after opaque replay is dropped for an incompatible
+   * provider.
+   */
   @Test
-  void incompatibleOpaqueReplayProjectsSemanticFallbackThenStarts() {
+  void incompatibleOpaqueReplayPreservesHistoricalToolCallThenStarts() {
     ReplayHistory history = seedReplayHistory();
     InMemoryBuiltinHarnessStore store = history.store();
     UserBasis basis = history.basis();
@@ -569,18 +574,23 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
     ModelGateway.Execution execution = gateway.executions.get(0);
     assertEquals(invocationId, execution.invocationId());
     assertEquals(1, execution.proposedAttempt());
-    // 降级语义投影：保留 assistant 文本，原 bash 调用并入 USER 上下文并逐字保留 arguments，无 native replay。
+    // The unavailable historical call remains native and is closed with a synthetic result.
     List<ProviderMessage> messages = execution.request().messages();
     assertEquals(3, messages.size());
     assertEquals(
-        List.of(ProviderMessageRole.USER, ProviderMessageRole.ASSISTANT, ProviderMessageRole.USER),
+        List.of(ProviderMessageRole.USER, ProviderMessageRole.ASSISTANT, ProviderMessageRole.TOOL),
         messages.stream().map(ProviderMessage::role).toList());
     assertEquals("answer", ((ProviderTextBlock) messages.get(1).contents().get(0)).text());
-    String fallback = ((ProviderTextBlock) messages.get(2).contents().get(0)).text();
-    assertTrue(fallback.startsWith("Previous context:"));
-    assertTrue(fallback.contains("{\"secret\":1}"));
+    ProviderToolCallBlock call = (ProviderToolCallBlock) messages.get(1).contents().get(1);
+    assertEquals("call-1", call.toolCall().id());
+    assertEquals("bash", call.toolCall().name());
+    assertEquals("{\"secret\":1}", call.toolCall().argumentsJson());
+    ProviderToolResultBlock orphan =
+        (ProviderToolResultBlock) messages.get(2).contents().getFirst();
+    assertEquals("call-1", orphan.toolCallId());
+    assertTrue(orphan.error());
+    assertEquals("No result provided", ((ProviderTextBlock) orphan.contents().getFirst()).text());
     assertNull(((ProviderTextBlock) messages.get(1).contents().getFirst()).providerBlockData());
-    assertNull(((ProviderTextBlock) messages.get(2).contents().getFirst()).providerBlockData());
 
     ModelInvocation running = model(store, invocationId);
     assertEquals(ModelInvocationStatus.RUNNING, running.status());
