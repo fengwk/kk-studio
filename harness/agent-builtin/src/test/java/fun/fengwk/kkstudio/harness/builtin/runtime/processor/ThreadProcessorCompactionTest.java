@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.CONTEXT_WINDOW;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.ClosedTurnBaseline;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.Fixture;
@@ -2025,7 +2026,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
             30);
     List<SubagentBinding> subagents = List.of(new SubagentBinding("helper", "delegate"));
     ModelRequestSpec original =
-        new ModelRequestSpec(
+        spec(
             base.providerType(),
             base.model(),
             base.variant(),
@@ -2039,7 +2040,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
 
     ModelInvocation invocation = childOpenModel(fixture.store, taskChild);
     assertEquals(
-        new ModelRequestSpec(
+        spec(
             base.providerType(),
             base.model(),
             base.variant(),
@@ -2056,9 +2057,6 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                     tx.entries().find(invocation.turnStartEntryId()).orElseThrow().payload());
     assertEquals(CONTEXT_WINDOW, start.contextWindow());
     assertEquals(expectedMax, start.maxOutputTokens());
-    assertEquals(
-        base.toolBindings().stream().map(binding -> binding.descriptor().name()).toList(),
-        start.capabilities().toolNames());
     assertEquals(subagents, start.capabilities().subagentBindings());
     assertEquals("test-group", BuiltinExecution.model(start.executedSelection()).modelName());
     assertEquals("test-group", invocation.groupProgress().groupName());
@@ -2068,7 +2066,7 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
   private static ModelRequestSpec probeSpec(
       BranchSettings settings, int outputTokens, PromptCacheRetention retention) {
     ModelRequestSpec base = ThreadProcessorTestSupport.requestFor(settings);
-    return new ModelRequestSpec(
+    return spec(
         base.providerType(),
         base.model(),
         new ModelVariant(

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.driver;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
@@ -28,6 +29,7 @@ import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.builtin.compaction.AutomaticCompactionPlanner;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
@@ -48,6 +50,7 @@ import fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
@@ -63,6 +66,7 @@ import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Instant;
@@ -82,6 +86,7 @@ import java.util.UUID;
 public final class BuiltinAgentDriver implements AgentDriver {
 
   private static final String CANCELLED_MESSAGE = "Cancelled by user";
+  private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
 
   private final BuiltinStore store;
   private final TurnResolver resolver;
@@ -247,7 +252,6 @@ public final class BuiltinAgentDriver implements AgentDriver {
         resolved.contextWindow(),
         maxOutputTokens,
         new TurnCapabilities(
-            spec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList(),
             spec.subagentBindings(),
             new TurnMediaCapabilities(
                 spec.model().inputModalities(),
@@ -261,13 +265,14 @@ public final class BuiltinAgentDriver implements AgentDriver {
   }
 
   static SystemPayload systemChange(ThreadState thread, EntryPath path, ModelRequestSpec spec) {
+    List<ProviderToolDefinition> clientTools = modelToolDefinitions(spec.toolBindings());
     SystemContext resolved =
-        new SystemContext(spec.systemSections(), spec.toolBindings(), hostedTools(spec));
+        new SystemContext(spec.systemSections(), clientTools, hostedTools(spec));
     if (thread.kind() == ThreadKind.COMPACTION) {
       return null;
     }
     if (path.requiresSystemBaseline()) {
-      return freshSystemBaseline(spec);
+      return freshSystemBaseline(spec, clientTools);
     }
     SystemPayload change = path.systemContext().orElseThrow().changesTo(resolved).orElse(null);
     if (change == null || !latestAssistantPaused(path)) {
@@ -311,15 +316,29 @@ public final class BuiltinAgentDriver implements AgentDriver {
    * Build a fresh request-context baseline; compaction can reuse this at its future rebuild
    * boundary.
    */
-  private static SystemPayload freshSystemBaseline(ModelRequestSpec spec) {
+  private static SystemPayload freshSystemBaseline(
+      ModelRequestSpec spec, List<ProviderToolDefinition> clientTools) {
     return new SystemPayload(
         spec.systemSections(),
         List.of(),
-        spec.toolBindings(),
+        clientTools,
         List.of(),
         hostedTools(spec),
         List.of(),
         true);
+  }
+
+  private static List<ProviderToolDefinition> modelToolDefinitions(List<ToolBinding> bindings) {
+    return bindings.stream()
+        .map(
+            binding -> {
+              ToolDescriptor descriptor = binding.descriptor();
+              return new ProviderToolDefinition(
+                  descriptor.name(),
+                  descriptor.description(),
+                  SCHEMA_CODEC.encode(descriptor.inputSchema()));
+            })
+        .toList();
   }
 
   @Override

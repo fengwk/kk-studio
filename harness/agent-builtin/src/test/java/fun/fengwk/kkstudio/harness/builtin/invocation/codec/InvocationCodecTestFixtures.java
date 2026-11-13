@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.invocation.codec;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
+
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
@@ -91,7 +93,7 @@ public final class InvocationCodecTestFixtures {
   public static ModelRequestSpec environmentModelRequest() {
     ToolBinding binding = binding(EnvironmentSupport.REQUIRED);
     ProviderRequest provider = providerRequest(binding.descriptor());
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         provider.model(),
         provider.variant(),
@@ -104,7 +106,7 @@ public final class InvocationCodecTestFixtures {
   public static ModelRequestSpec hostModelRequest() {
     ToolBinding binding = binding(EnvironmentSupport.NONE);
     ProviderRequest provider = providerRequest(binding.descriptor());
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         provider.model(),
         provider.variant(),

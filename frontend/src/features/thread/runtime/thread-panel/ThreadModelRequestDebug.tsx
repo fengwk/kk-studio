@@ -64,18 +64,7 @@ export function ThreadModelRequestDebug({
 }) {
   const { t } = useI18n()
 
-  const { sentTools, filteredTools } = useMemo(() => {
-    const sent: ThreadModelRequestDebugTool[] = []
-    const filtered: ThreadModelRequestDebugTool[] = []
-    for (const tool of debug.tools || []) {
-      if (tool.state === 'SENT') {
-        sent.push(tool)
-      } else {
-        filtered.push(tool)
-      }
-    }
-    return { sentTools: sent, filteredTools: filtered }
-  }, [debug.tools])
+  const tools = debug.tools || []
 
   const cacheSummary = useMemo(() => {
     if (!debug.cacheControl || debug.cacheControl.retention === 'NONE') {
@@ -125,15 +114,14 @@ export function ThreadModelRequestDebug({
         </Code>
       </div>
 
-      {/* TOOLS (SENT 在前，FILTERED 在后) */}
       <div className="thread-debug-section">
         <div className="thread-debug-section-header">
           <span>
-            {t('ai.runtime.debug.toolsTitle')} {sentTools.length} {t('ai.runtime.debug.toolsSent')} · {filteredTools.length} {t('ai.runtime.debug.toolsFiltered')}
+            {t('ai.runtime.debug.toolsTitle')} {tools.length} {t('ai.runtime.debug.toolsSent')}
           </span>
         </div>
         <div className="thread-debug-rail" data-testid="debug-tools-rail">
-          {sentTools.map((tool) => (
+          {tools.map((tool) => (
             <Button
               variant="inline"
               key={tool.name}
@@ -151,30 +139,7 @@ export function ThreadModelRequestDebug({
             </Button>
           ))}
 
-          {filteredTools.length > 0 && sentTools.length > 0 ? (
-            <span className="thread-debug-rail-divider" aria-hidden="true">│</span>
-          ) : null}
-
-          {filteredTools.map((tool) => (
-            <Button
-              variant="inline"
-              key={tool.name}
-              className="thread-debug-chip is-filtered"
-              aria-label={`${t('ai.runtime.debug.filteredToolAriaPrefix')} ${tool.name}`}
-              onClick={() => onSelectInspector({ type: 'tool', tool })}
-            >
-              <span>⊘ </span>
-              <Mono>{tool.name}</Mono>{' '}
-              <span
-                className="thread-debug-chip-badge"
-                title={envBadgeTitle(tool.environmentSupport, t)}
-              >
-                {envBadge(tool.environmentSupport)}
-              </span>
-            </Button>
-          ))}
-
-          {sentTools.length === 0 && filteredTools.length === 0 ? (
+          {tools.length === 0 ? (
             <span className="thread-debug-empty-text">{t('ai.runtime.debug.none')}</span>
           ) : null}
         </div>

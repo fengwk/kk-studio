@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelRequestDebugDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessModelSelectionDTO;
-import fun.fengwk.kkstudio.platform.harness.thread.command.LiveTurnPlan;
 
 import java.time.Instant;
 import java.util.List;
@@ -51,12 +50,9 @@ class HarnessModelRequestDebugControllerTest extends HarnessThreadControllerTest
         .andExpect(jsonPath("$.environmentName").value(nullValue()))
         .andExpect(jsonPath("$.systemInstruction").value("system instruction"))
         .andExpect(jsonPath("$.tools[0].name").value("read"))
-        .andExpect(jsonPath("$.tools[0].state").value("SENT"))
         .andExpect(jsonPath("$.tools[0].environmentSupport").value("ROUTED"))
-        .andExpect(jsonPath("$.tools[0].filterReason").value(nullValue()))
         .andExpect(jsonPath("$.tools[1].name").value("bash"))
-        .andExpect(jsonPath("$.tools[1].state").value("FILTERED"))
-        .andExpect(jsonPath("$.tools[1].filterReason").value("ENVIRONMENT_NOT_SELECTED"))
+        .andExpect(jsonPath("$.tools[1].environmentSupport").value("REQUIRED"))
         .andExpect(jsonPath("$.subagents[0].name").value("coder"))
         .andExpect(jsonPath("$.subagents[0].tools[0]").value("read"))
         .andExpect(jsonPath("$.subagents[0].subagents[0]").value("nested"))
@@ -159,25 +155,21 @@ class HarnessModelRequestDebugControllerTest extends HarnessThreadControllerTest
     verifyNoInteractions(runtime);
   }
 
-  /** 最小合法 Debug 投影：覆盖 required-nullable 与 SENT 在前、FILTERED 在后的候选顺序。 */
+  /** 最小合法 Debug 投影：覆盖 required-nullable 与 Agent 配置顺序的 Tool 列表。 */
   private static HarnessModelRequestDebugDTO sampleDebug() {
-    HarnessModelRequestDebugDTO.ToolDTO sent = new HarnessModelRequestDebugDTO.ToolDTO();
-    sent.setName("read");
-    sent.setDescription("Read a file.");
-    sent.setInputSchema(JsonValues.readTree("{\"type\":\"object\"}"));
-    sent.setEnvironmentSupport(EnvironmentSupport.ROUTED);
-    sent.setProvenance("builtin:read");
-    sent.setState(LiveTurnPlan.ToolState.SENT);
-    sent.setFilterReason(null);
+    HarnessModelRequestDebugDTO.ToolDTO read = new HarnessModelRequestDebugDTO.ToolDTO();
+    read.setName("read");
+    read.setDescription("Read a file.");
+    read.setInputSchema(JsonValues.readTree("{\"type\":\"object\"}"));
+    read.setEnvironmentSupport(EnvironmentSupport.ROUTED);
+    read.setProvenance("builtin:read");
 
-    HarnessModelRequestDebugDTO.ToolDTO filtered = new HarnessModelRequestDebugDTO.ToolDTO();
-    filtered.setName("bash");
-    filtered.setDescription("Run a command.");
-    filtered.setInputSchema(JsonValues.readTree("{\"type\":\"object\"}"));
-    filtered.setEnvironmentSupport(EnvironmentSupport.REQUIRED);
-    filtered.setProvenance("builtin:bash");
-    filtered.setState(LiveTurnPlan.ToolState.FILTERED);
-    filtered.setFilterReason(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED);
+    HarnessModelRequestDebugDTO.ToolDTO bash = new HarnessModelRequestDebugDTO.ToolDTO();
+    bash.setName("bash");
+    bash.setDescription("Run a command.");
+    bash.setInputSchema(JsonValues.readTree("{\"type\":\"object\"}"));
+    bash.setEnvironmentSupport(EnvironmentSupport.REQUIRED);
+    bash.setProvenance("builtin:bash");
 
     HarnessModelRequestDebugDTO.SubagentDTO subagent =
         new HarnessModelRequestDebugDTO.SubagentDTO();
@@ -202,7 +194,7 @@ class HarnessModelRequestDebugControllerTest extends HarnessThreadControllerTest
     debug.setModel(model);
     debug.setEnvironmentName(null);
     debug.setSystemInstruction("system instruction");
-    debug.setTools(List.of(sent, filtered));
+    debug.setTools(List.of(read, bash));
     debug.setSubagents(List.of(subagent));
     debug.setCacheControl(cacheControl);
     debug.setPlanningError(null);

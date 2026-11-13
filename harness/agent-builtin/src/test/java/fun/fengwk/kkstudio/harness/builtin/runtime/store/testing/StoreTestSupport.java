@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.store.testing;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.ASK_USER_QUESTIONNAIRE;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.T2;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.askUserBinding;
@@ -68,7 +69,7 @@ public final class StoreTestSupport {
 
   public static ModelRequestSpec modelRequest() {
     ProviderRequest provider = providerRequest();
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         provider.model(),
         provider.variant(),
@@ -81,7 +82,7 @@ public final class StoreTestSupport {
   /** SUCCEEDED live-attach 的机械请求：单一 bash binding（renderer 由 binding 派生，与 assistant ToolCall 全等）。 */
   public static ModelRequestSpec succeededRequest() {
     ModelRequestSpec base = modelRequest();
-    return new ModelRequestSpec(
+    return spec(
         base.providerType(),
         base.model(),
         base.variant(),
@@ -94,7 +95,7 @@ public final class StoreTestSupport {
   /** 只有 {@code ask_user} binding 的 frozen request：assistant ToolCall 必须与该 binding 全等。 */
   public static ModelRequestSpec askUserRequest() {
     ModelRequestSpec base = modelRequest();
-    return new ModelRequestSpec(
+    return spec(
         base.providerType(),
         base.model(),
         base.variant(),

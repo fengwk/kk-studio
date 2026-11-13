@@ -303,17 +303,17 @@ class ToolBindingJsonCodecTest {
     String prefix = "{\"definition\":" + definition + ",\"contributor\":" + emptyContributorJson;
     String suffix = "}";
 
-    // REQUIRED 缺 environmentId 或缺 environmentName 在解码构造边界必须被拒绝
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                prefix
-                    + ",\"environmentSupport\":\"REQUIRED\""
-                    + ",\"environmentId\":null"
-                    + ",\"environmentName\":null"
-                    + ",\"configuredSkills\":[]"
-                    + suffix));
+    // branch 未选择 Environment 时 REQUIRED 允许冻结无环境身份；只缺一侧仍被拒绝。
+    ToolBinding unbound =
+        codec.decode(
+            prefix
+                + ",\"environmentSupport\":\"REQUIRED\""
+                + ",\"environmentId\":null"
+                + ",\"environmentName\":null"
+                + ",\"configuredSkills\":[]"
+                + suffix);
+    assertNull(unbound.environmentId());
+    assertNull(unbound.environmentName());
 
     assertThrows(
         IllegalArgumentException.class,

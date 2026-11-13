@@ -37,47 +37,6 @@ public record ModelRequestSpec(
     ModelGroupExecution groupExecution,
     Map<String, String> systemSections) {
 
-  public ModelRequestSpec(
-      ProviderType providerType,
-      ModelDescriptor model,
-      ModelVariant variant,
-      int outputTokens,
-      String systemInstruction,
-      List<ToolBinding> toolBindings,
-      List<SubagentBinding> subagentBindings) {
-    this(
-        providerType,
-        model,
-        variant,
-        outputTokens,
-        systemInstruction,
-        toolBindings,
-        subagentBindings,
-        null,
-        systemSections(systemInstruction));
-  }
-
-  public ModelRequestSpec(
-      ProviderType providerType,
-      ModelDescriptor model,
-      ModelVariant variant,
-      int outputTokens,
-      String systemInstruction,
-      List<ToolBinding> toolBindings,
-      List<SubagentBinding> subagentBindings,
-      ModelGroupExecution groupExecution) {
-    this(
-        providerType,
-        model,
-        variant,
-        outputTokens,
-        systemInstruction,
-        toolBindings,
-        subagentBindings,
-        groupExecution,
-        systemSections(systemInstruction));
-  }
-
   public ModelRequestSpec {
     providerType = Objects.requireNonNull(providerType, "providerType");
     model = Objects.requireNonNull(model, "model");
@@ -130,10 +89,6 @@ public record ModelRequestSpec(
         subagentBindings,
         groupExecution,
         systemSections);
-  }
-
-  private static Map<String, String> systemSections(String systemInstruction) {
-    return systemInstruction == null ? Map.of() : Map.of("system", systemInstruction);
   }
 
   private static void requireUniqueToolBindings(List<ToolBinding> toolBindings) {

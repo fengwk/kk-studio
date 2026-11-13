@@ -247,12 +247,9 @@ class HistoryPayloadMapperTest {
     assertEquals(HistoryPayloadMapper.UNBOUND_RENDERER_KEY, unboundCall.rendererKey());
   }
 
-  /**
-   * 意图：durable ToolCall 内容必须完整携带成功响应冻结的 historyAction 与 binding 冻结的 environmentName——前者是 Tool 拥有的
-   * 语义，后者是后续投影判定 native 资格的事实；未冻结 action 时保持 null，投影回退到中性描述，绝不丢弃 arguments。
-   */
+  /** 成功响应冻结的历史动作按原样持久化；未冻结 action 时保持 null，arguments 不丢失。 */
   @Test
-  void assistantPayloadFreezesHistoryActionAndEnvironmentName() {
+  void assistantPayloadFreezesHistoryAction() {
     ProviderResponse response =
         new ProviderResponse(
             "",
@@ -277,11 +274,9 @@ class HistoryPayloadMapperTest {
 
     ToolCallMessageContent frozen = (ToolCallMessageContent) payload.message().contents().get(0);
     assertEquals("read a.txt", frozen.historyAction());
-    assertEquals("dev", frozen.environmentName());
     assertEquals("{\"path\":\"a.txt\"}", frozen.argumentsJson());
     ToolCallMessageContent unfrozen = (ToolCallMessageContent) payload.message().contents().get(1);
     assertNull(unfrozen.historyAction());
-    assertEquals("dev", unfrozen.environmentName());
     assertEquals("{\"path\":\"b.txt\"}", unfrozen.argumentsJson());
   }
 
@@ -592,7 +587,7 @@ class HistoryPayloadMapperTest {
     assertNull(
         MAPPER
             .syntheticHistoryCutToolResult(
-                id(7L), 0, new ToolCallMessageContent("call-1", "bash", "bash", "{}", null, null))
+                id(7L), 0, new ToolCallMessageContent("call-1", "bash", "bash", "{}"))
             .toolResultMetadata()
             .inputReceipt());
   }

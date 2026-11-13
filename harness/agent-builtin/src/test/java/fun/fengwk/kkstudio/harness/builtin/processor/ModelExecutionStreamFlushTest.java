@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -1462,7 +1463,7 @@ class ModelExecutionStreamFlushTest {
   }
 
   private static ModelRequestSpec requestSpec() {
-    return spec(List.of());
+    return modelSpec(List.of());
   }
 
   private static ModelRequestSpec requestWithTool() {
@@ -1481,11 +1482,11 @@ class ModelExecutionStreamFlushTest {
             EnvironmentSupport.NONE,
             null,
             null);
-    return spec(List.of(binding));
+    return modelSpec(List.of(binding));
   }
 
-  private static ModelRequestSpec spec(List<ToolBinding> bindings) {
-    return new ModelRequestSpec(
+  private static ModelRequestSpec modelSpec(List<ToolBinding> bindings) {
+    return spec(
         ProviderType.OPENAI,
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),

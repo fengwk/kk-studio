@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.model;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -65,6 +66,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -101,8 +103,7 @@ class ModelRequestMaterializerTest {
     members.add(new ModelGroupMemberExecution(ProviderType.OPENAI, descriptor(), shortCache));
     ModelGroupExecution group = new ModelGroupExecution("group", 1L, members, Set.of(429), 30);
     ModelRequestSpec spec =
-        new ModelRequestSpec(
-            ProviderType.OPENAI, descriptor(), none, 1024, "system", List.of(), List.of(), group);
+        spec(ProviderType.OPENAI, descriptor(), none, 1024, "system", List.of(), List.of(), group);
     EntryPath path = new EntryPath(List.of(entry(1, 0, new RootPayload(SETTINGS))));
 
     ProviderRequest first = MATERIALIZER.materialize(path, spec.forMember(0));
@@ -131,7 +132,7 @@ class ModelRequestMaterializerTest {
     ProviderRequest request =
         MATERIALIZER.materialize(
             new EntryPath(List.of(root, baseline, change)),
-            new ModelRequestSpec(
+            spec(
                 ProviderType.OPENAI,
                 descriptor(),
                 variant(),
@@ -175,7 +176,7 @@ class ModelRequestMaterializerTest {
             new SystemPayload(
                 Map.of("agent", "[agent]\nnew"),
                 List.of(),
-                List.of(bashBinding()),
+                List.of(definitionOf(bashBinding())),
                 List.of("obsolete"),
                 List.of(
                     new SystemHostedTool(
@@ -185,7 +186,7 @@ class ModelRequestMaterializerTest {
                 false));
     ModelVariant variant = variant();
     ModelRequestSpec spec =
-        new ModelRequestSpec(
+        spec(
             ProviderType.ANTHROPIC,
             new ModelDescriptor(
                 "anthropic",
@@ -243,7 +244,7 @@ class ModelRequestMaterializerTest {
             new SystemPayload(
                 Map.of("agent", "[agent] baseline"),
                 List.of(),
-                List.of(baselineTool),
+                List.of(definitionOf(baselineTool)),
                 List.of(),
                 List.of(),
                 List.of(),
@@ -253,10 +254,16 @@ class ModelRequestMaterializerTest {
             3,
             2,
             new SystemPayload(
-                Map.of(), List.of(), List.of(addedTool), List.of(), List.of(), List.of(), false));
+                Map.of(),
+                List.of(),
+                List.of(definitionOf(addedTool)),
+                List.of(),
+                List.of(),
+                List.of(),
+                false));
     ModelVariant variant = variant();
     ModelRequestSpec spec =
-        new ModelRequestSpec(
+        spec(
             ProviderType.ANTHROPIC,
             new ModelDescriptor(
                 "anthropic",
@@ -295,7 +302,7 @@ class ModelRequestMaterializerTest {
     ModelRequestSpec base = liveSpec(bashBinding());
     ModelVariant current = new ModelVariant("v1", "max", PromptCacheRetention.NONE, null);
     ModelRequestSpec spec =
-        new ModelRequestSpec(
+        spec(
             base.providerType(),
             base.model(),
             current,
@@ -361,7 +368,7 @@ class ModelRequestMaterializerTest {
     ModelRequestSpec base = liveSpec(bashBinding());
     ModelVariant current = new ModelVariant("v1", "max", PromptCacheRetention.NONE, null);
     ModelRequestSpec spec =
-        new ModelRequestSpec(
+        spec(
             base.providerType(),
             base.model(),
             current,
@@ -589,12 +596,7 @@ class ModelRequestMaterializerTest {
                     AgentMessageRole.ASSISTANT,
                     List.of(
                         new ToolCallMessageContent(
-                            "call-1",
-                            "fs_read",
-                            "fs.read",
-                            "{\"path\":\"a.txt\"}",
-                            "read a.txt",
-                            "dev"))),
+                            "call-1", "fs_read", "fs.read", "{\"path\":\"a.txt\"}", "read a.txt"))),
                 new AssistantMessageMetadata(
                     GenerationStopReason.COMPLETE,
                     new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
@@ -686,7 +688,7 @@ class ModelRequestMaterializerTest {
   }
 
   private static ModelRequestSpec liveSpec(ToolBinding binding) {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         descriptor(),
         variant(),
@@ -727,6 +729,14 @@ class ModelRequestMaterializerTest {
         EnvironmentSupport.NONE,
         null,
         null);
+  }
+
+  private static ProviderToolDefinition definitionOf(ToolBinding binding) {
+    ToolDescriptor descriptor = binding.descriptor();
+    return new ProviderToolDefinition(
+        descriptor.name(),
+        descriptor.description(),
+        new SchemaJsonCodec().encode(descriptor.inputSchema()));
   }
 
   private static ToolBinding bashBinding() {

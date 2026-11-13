@@ -238,7 +238,6 @@ class OpenAiResponsesDurableReplayTest {
                     "query",
                     "{\"q\":\"Paris\"}",
                     null,
-                    null,
                     functionCall.providerBlockData())));
     AgentMessage durableToolResult =
         new AgentMessage(

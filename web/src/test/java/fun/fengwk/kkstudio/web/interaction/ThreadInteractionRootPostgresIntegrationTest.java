@@ -1244,7 +1244,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
         1024,
         "Test system instruction.",
         List.of(binding),
-        List.of());
+        List.of(),
+        null,
+        Map.of("system", "Test system instruction."));
   }
 
   private static ProviderResponse toolCallResponse(

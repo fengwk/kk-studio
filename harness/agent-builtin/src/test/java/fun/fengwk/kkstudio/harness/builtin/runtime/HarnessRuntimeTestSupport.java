@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -697,7 +698,7 @@ public final class HarnessRuntimeTestSupport {
   /** {@code ask_user} 冻结的 Model 请求：toolBindings 只含内置 {@code ask_user}（问卷由 response 携带）。 */
   static ModelRequestSpec askUserModelRequest() {
     ProviderRequest provider = providerRequest();
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         provider.model(),
         provider.variant(),
@@ -1129,8 +1130,7 @@ public final class HarnessRuntimeTestSupport {
   }
 
   static TurnCapabilities capabilities(ToolBinding... bindings) {
-    return new TurnCapabilities(
-        List.of(bindings).stream().map(binding -> binding.descriptor().name()).toList(), List.of());
+    return new TurnCapabilities(List.of());
   }
 
   static Entry userMessageEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {
@@ -1305,7 +1305,7 @@ public final class HarnessRuntimeTestSupport {
               null,
               null));
     }
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
@@ -1381,7 +1381,7 @@ public final class HarnessRuntimeTestSupport {
 
   static ModelRequestSpec modelRequest() {
     ProviderRequest provider = providerRequest();
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         provider.model(),
         provider.variant(),

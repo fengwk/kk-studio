@@ -195,20 +195,16 @@ class ModelRequestDebugServiceTest {
     assertNull(debug.getPlanningError());
     assertNull(debug.getFrozenInvocation());
 
-    // 候选 Tool 保持共享规划的「SENT 在前、FILTERED 在后」顺序，并携带稳定原因与固定 requiredEnvironmentId。
+    // 所有配置的工具进入模型工具面，并按 Agent 配置顺序投影。
     assertEquals(
         List.of("read", "bash"),
         debug.getTools().stream().map(HarnessModelRequestDebugDTO.ToolDTO::getName).toList());
     HarnessModelRequestDebugDTO.ToolDTO sent = debug.getTools().getFirst();
-    assertEquals(LiveTurnPlan.ToolState.SENT, sent.getState());
-    assertNull(sent.getFilterReason());
     assertEquals(EnvironmentSupport.ROUTED, sent.getEnvironmentSupport());
     assertEquals("builtin:read", sent.getProvenance());
     assertEquals(JsonValues.readTree("{\"type\":\"object\"}"), sent.getInputSchema());
-    HarnessModelRequestDebugDTO.ToolDTO filtered = debug.getTools().get(1);
-    assertEquals(LiveTurnPlan.ToolState.FILTERED, filtered.getState());
-    assertEquals(LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED, filtered.getFilterReason());
-    assertEquals(EnvironmentSupport.REQUIRED, filtered.getEnvironmentSupport());
+    HarnessModelRequestDebugDTO.ToolDTO environmentTool = debug.getTools().get(1);
+    assertEquals(EnvironmentSupport.REQUIRED, environmentTool.getEnvironmentSupport());
 
     // Skill promptXml 复用 compose 的同一渲染入口，XML 不可能漂移。
     HarnessModelRequestDebugDTO.SkillDTO skill = debug.getSkills().getFirst();
@@ -760,7 +756,7 @@ class ModelRequestDebugServiceTest {
         "assistant", BuiltinExecution.of(new ModelSelection("model", "default")), "env-b");
   }
 
-  /** 成功共享规划：SENT 候选在前、FILTERED 候选在后，附 Skill 交付事实、subagent 与 cache control。 */
+  /** 成功共享规划：工具按 Agent 配置顺序投影，并附 Skill、subagent 与 cache control 事实。 */
   private static LiveTurnPlan.Planned successfulPlan() {
     return new LiveTurnPlan.Planned(
         requestSpec(),
@@ -771,17 +767,13 @@ class ModelRequestDebugServiceTest {
                 "Read a file.",
                 "{\"type\":\"object\"}",
                 EnvironmentSupport.ROUTED,
-                "builtin:read",
-                LiveTurnPlan.ToolState.SENT,
-                null),
+                "builtin:read"),
             new LiveTurnPlan.CandidateTool(
                 "bash",
                 "Run a command.",
                 "{\"type\":\"object\"}",
                 EnvironmentSupport.REQUIRED,
-                "builtin:environment.bash",
-                LiveTurnPlan.ToolState.FILTERED,
-                LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED)),
+                "builtin:environment.bash")),
         List.of(
             new LiveTurnPlan.PlannedSkill(
                 "test-package", "dev", "dev description", CURRENT_COMMIT, "observed-head")));
@@ -804,6 +796,8 @@ class ModelRequestDebugServiceTest {
         512,
         "system instruction",
         List.of(),
-        List.of(new SubagentBinding("coder", "Codes solutions.")));
+        List.of(new SubagentBinding("coder", "Codes solutions.")),
+        null,
+        Map.of("system", "system instruction"));
   }
 }

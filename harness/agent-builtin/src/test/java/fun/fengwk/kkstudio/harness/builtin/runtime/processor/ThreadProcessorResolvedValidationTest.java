@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.processor;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.Fixture;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.branchSettings;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.builtinExecution;
@@ -149,7 +150,7 @@ class ThreadProcessorResolvedValidationTest extends ThreadProcessorTestBase {
             EnvironmentSupport.REQUIRED,
             EnvironmentId.parse("11111111-1111-1111-1111-111111111111"),
             "dev");
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         new ModelDescriptor(
             "provider",

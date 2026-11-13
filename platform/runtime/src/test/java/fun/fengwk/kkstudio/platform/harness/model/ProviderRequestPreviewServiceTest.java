@@ -493,7 +493,8 @@ class ProviderRequestPreviewServiceTest {
             base.systemInstruction(),
             base.toolBindings(),
             base.subagentBindings(),
-            group);
+            group,
+            base.systemSections());
 
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(compactionOutputPath().entries());
     when(runtime.findJoin(COMPACTION_JOIN_ID))
@@ -869,7 +870,9 @@ class ProviderRequestPreviewServiceTest {
         outputTokens,
         "system instruction",
         List.of(),
-        List.of());
+        List.of(),
+        null,
+        Map.of("system", "system instruction"));
   }
 
   private static ThreadSnapshot snapshot(

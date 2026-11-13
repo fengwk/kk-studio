@@ -142,7 +142,7 @@ class AgentMessageJsonCodecTest {
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"call-1\","
             + "\"toolName\":\"read\",\"rendererKey\":\"read\","
             + "\"argumentsJson\":\"{\\\"path\\\":\\\"README.md\\\"}\","
-            + "\"historyAction\":null,\"environmentName\":null}]}",
+            + "\"historyAction\":null}]}",
         codec.encode(
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
@@ -181,20 +181,22 @@ class AgentMessageJsonCodecTest {
   }
 
   @Test
-  void roundTripsFrozenToolCallHistoryFacts() {
-    // 冻结的 action 与 Environment 名是 durable 事实：非空/空白边界都必须无损往返，且缺失或空白必须被拒绝。
+  void roundTripsFrozenToolCallHistoryAction() {
+    // The frozen action survives durable encoding while the obsolete environment snapshot is
+    // absent.
     AgentMessage message =
         new AgentMessage(
             AgentMessageRole.ASSISTANT,
             List.of(
                 new ToolCallMessageContent(
-                    "call-1", "fs_read", "fs.read", "{\"path\":\"a.txt\"}", "read a.txt", "dev"),
+                    "call-1", "fs_read", "fs.read", "{\"path\":\"a.txt\"}", "read a.txt"),
                 new ToolCallMessageContent("call-2", "bash", "bash", "{}")));
-    assertEquals(message, codec.decode(codec.encode(message)));
+    String encoded = codec.encode(message);
+    assertFalse(encoded.contains("environmentName"));
+    assertEquals(message, codec.decode(encoded));
     ToolCallMessageContent decoded =
-        (ToolCallMessageContent) codec.decode(codec.encode(message)).contents().get(0);
+        (ToolCallMessageContent) codec.decode(encoded).contents().get(0);
     assertEquals("read a.txt", decoded.historyAction());
-    assertEquals("dev", decoded.environmentName());
 
     assertThrows(
         IllegalArgumentException.class,
@@ -202,14 +204,14 @@ class AgentMessageJsonCodecTest {
             codec.decode(
                 "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\","
                     + "\"toolCallId\":\"c\",\"toolName\":\"t\",\"rendererKey\":\"t\","
-                    + "\"argumentsJson\":\"{}\",\"environmentName\":null}]}"));
+                    + "\"argumentsJson\":\"{}\",\"historyAction\":null,\"environmentName\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             codec.decode(
                 "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\","
                     + "\"toolCallId\":\"c\",\"toolName\":\"t\",\"rendererKey\":\"t\","
-                    + "\"argumentsJson\":\"{}\",\"historyAction\":\" \",\"environmentName\":null}]}"));
+                    + "\"argumentsJson\":\"{}\",\"historyAction\":\" \"}]}"));
   }
 
   @Test
@@ -533,7 +535,7 @@ class AgentMessageJsonCodecTest {
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c\","
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"argumentsJson\":\"[1]\","
-                    + "\"historyAction\":null,\"environmentName\":null}]}"));
+                    + "\"historyAction\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -614,7 +616,7 @@ class AgentMessageJsonCodecTest {
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\","
                     + "\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c2\","
                     + "\"toolName\":\"t2\",\"rendererKey\":\"t2\",\"argumentsJson\":\"{}\","
-                    + "\"historyAction\":null,\"environmentName\":null}],"
+                    + "\"historyAction\":null}],"
                     + "\"error\":false,\"detailsJson\":\"{}\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
@@ -636,7 +638,7 @@ class AgentMessageJsonCodecTest {
             codec.decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c\","
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"argumentsJson\":\"{}\","
-                    + "\"historyAction\":null,\"environmentName\":null}]}"));
+                    + "\"historyAction\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -688,7 +690,7 @@ class AgentMessageJsonCodecTest {
               + "\"toolCallId\":\"c\",\"toolName\":\"read\",\"rendererKey\":\"read\","
               + "\"argumentsJson\":\""
               + raw
-              + "\",\"historyAction\":null,\"environmentName\":null}]}";
+              + "\",\"historyAction\":null}]}";
       IllegalArgumentException argumentsError =
           assertThrows(IllegalArgumentException.class, () -> codec.decode(toolCall));
       assertTrue(

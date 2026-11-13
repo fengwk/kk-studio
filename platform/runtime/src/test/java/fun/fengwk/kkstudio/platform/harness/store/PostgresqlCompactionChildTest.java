@@ -1296,20 +1296,24 @@ class PostgresqlCompactionChildTest {
     if (resolvedOutputTokens == null && resolvedCacheControl == null) {
       return base;
     }
-    return new ModelRequestSpec(
-        base.providerType(),
-        base.model(),
+    ModelVariant variant =
         new ModelVariant(
             base.variant().id(),
             base.variant().reasoningEffort(),
             resolvedCacheControl != null
                 ? resolvedCacheControl.retention()
                 : base.variant().promptCacheRetention(),
-            base.variant().protocolOptions()),
+            base.variant().protocolOptions());
+    return new ModelRequestSpec(
+        base.providerType(),
+        base.model(),
+        variant,
         resolvedOutputTokens != null ? resolvedOutputTokens : base.outputTokens(),
         base.systemInstruction(),
         base.toolBindings(),
-        base.subagentBindings());
+        base.subagentBindings(),
+        base.groupExecution(),
+        base.systemSections());
   }
 
   /** 父路径上冻结的压缩输出预算。 */
@@ -1902,6 +1906,8 @@ class PostgresqlCompactionChildTest {
         1024,
         "Test system instruction.",
         List.of(),
-        List.of());
+        List.of(),
+        null,
+        Map.of("system", "Test system instruction."));
   }
 }

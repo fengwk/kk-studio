@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
-import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
@@ -12,7 +12,7 @@ import java.util.Objects;
 public record SystemPayload(
     Map<String, String> sections,
     List<String> removedSections,
-    List<ToolBinding> addedTools,
+    List<ProviderToolDefinition> addedTools,
     List<String> removedTools,
     List<SystemHostedTool> addedHostedTools,
     List<String> removedHostedTools,
@@ -22,7 +22,7 @@ public record SystemPayload(
   public SystemPayload(
       Map<String, String> sections,
       List<String> removedSections,
-      List<ToolBinding> addedTools,
+      List<ProviderToolDefinition> addedTools,
       List<String> removedTools,
       boolean baseline) {
     this(sections, removedSections, addedTools, removedTools, List.of(), List.of(), baseline);
@@ -30,7 +30,7 @@ public record SystemPayload(
 
   public SystemPayload(
       Map<String, String> sections,
-      List<ToolBinding> addedTools,
+      List<ProviderToolDefinition> addedTools,
       List<String> removedTools,
       boolean baseline) {
     this(sections, List.of(), addedTools, removedTools, List.of(), List.of(), baseline);

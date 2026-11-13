@@ -53,8 +53,7 @@ import java.util.UUID;
  * CompactionChildSpawn} 经统一 spawn 创建，首条输入是普通 CUSTOM_MESSAGE； 父 COMPACTION turn 不创建
  * ModelInvocation，也不在请求内复制 compaction facts。
  *
- * <p>历史 native 资格按次判定：toolName 必须在当前 {@code toolBindings} 中，且环境工具冻结的 Environment 名必须与当前 binding
- * 一致；其余调用及结果在投影时降级为 USER 自然语言上下文，durable Entry 永不被改写。
+ * <p>历史工具调用与结果按 durable Entry 投影，不根据当前工具绑定或 Environment 重新分类；没有存储结果的调用由历史正规化补齐 synthetic 结果。
  */
 public final class ModelRequestMaterializer {
 
@@ -86,16 +85,16 @@ public final class ModelRequestMaterializer {
             && context != null;
     boolean baselineHasClientTools =
         incrementalSystem && !SystemContext.baselineTools(path.entries()).isEmpty();
-    List<ToolBinding> effectiveBindings = context == null ? spec.toolBindings() : context.tools();
+    List<ProviderToolDefinition> effectiveTools =
+        context == null ? providerTools(spec.toolBindings()) : context.tools();
     String systemInstruction =
         context == null
             ? spec.systemInstruction()
             : incrementalSystem
                 ? SystemContext.baselineSystemInstruction(path.entries())
                 : SystemContext.collapseSystemInstruction(path.entries());
-    List<ToolBinding> requestBindings =
-        baselineHasClientTools ? SystemContext.baselineTools(path.entries()) : effectiveBindings;
-    List<ProviderToolDefinition> tools = providerTools(requestBindings);
+    List<ProviderToolDefinition> tools =
+        baselineHasClientTools ? SystemContext.baselineTools(path.entries()) : effectiveTools;
     List<ProviderMessage> messages = new ArrayList<>();
     appendHistory(path, spec, incrementalSystem, baselineHasClientTools, messages);
     ModelVariant variant = spec.variant();
@@ -249,8 +248,8 @@ public final class ModelRequestMaterializer {
       for (String name : change.removedHostedTools()) {
         contents.add(new ProviderSystemToolRemovalBlock(name));
       }
-      for (ToolBinding binding : change.addedTools()) {
-        contents.add(new ProviderSystemToolAdditionBlock(providerTool(binding)));
+      for (ProviderToolDefinition tool : change.addedTools()) {
+        contents.add(new ProviderSystemToolAdditionBlock(tool));
       }
       for (SystemHostedTool tool : change.addedHostedTools()) {
         contents.add(new ProviderSystemHostedToolAdditionBlock(tool.definitionJson()));

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.StoreCallProbe.wrap;
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
@@ -919,7 +920,7 @@ abstract class ModelProcessorTestSupport {
   }
 
   static ModelRequestSpec requestSpec() {
-    return spec(List.of());
+    return modelRequest(List.of());
   }
 
   static ModelRequestSpec requestWithTool() {
@@ -938,11 +939,11 @@ abstract class ModelProcessorTestSupport {
             EnvironmentSupport.NONE,
             null,
             null);
-    return spec(List.of(binding));
+    return modelRequest(List.of(binding));
   }
 
-  static ModelRequestSpec spec(List<ToolBinding> bindings) {
-    return new ModelRequestSpec(
+  static ModelRequestSpec modelRequest(List<ToolBinding> bindings) {
+    return spec(
         ProviderType.OPENAI,
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.invocation.tool;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -145,7 +146,7 @@ class ToolBindingTest {
             new ToolBinding(
                 definition("host"), contributor, EnvironmentSupport.NONE, ENV_ID, "dev"));
 
-    // REQUIRED 缺少 environmentId 或缺少 environmentName 必须被拒绝
+    // REQUIRED 的环境身份必须成对；branch 未选择 Environment 时允许两者同时缺失。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -156,8 +157,7 @@ class ToolBindingTest {
         () ->
             new ToolBinding(
                 definition("fs"), contributor, EnvironmentSupport.REQUIRED, ENV_ID, null));
-    assertThrows(
-        IllegalArgumentException.class,
+    assertDoesNotThrow(
         () ->
             new ToolBinding(
                 definition("fs"), contributor, EnvironmentSupport.REQUIRED, null, null));

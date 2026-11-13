@@ -143,7 +143,7 @@ class SubagentTaskRunnerTest {
     List<SubagentBinding> allowed =
         allowedSubagents.stream().map(name -> new SubagentBinding(name, name)).toList();
     when(turnStartEntry.payload()).thenReturn(turnStart);
-    when(turnStart.capabilities()).thenReturn(new TurnCapabilities(List.of(), allowed));
+    when(turnStart.capabilities()).thenReturn(new TurnCapabilities(allowed));
     when(parentState.openTurnStart()).thenReturn(Optional.of(turnStartEntry));
     when(runtime.getThreadSnapshot(parentThreadId)).thenReturn(parent);
     when(materializer.materialize(AGENT)).thenReturn(target);

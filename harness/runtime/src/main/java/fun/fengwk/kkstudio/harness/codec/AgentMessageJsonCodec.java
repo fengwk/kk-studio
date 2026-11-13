@@ -80,14 +80,7 @@ public final class AgentMessageJsonCodec {
       orderedSet("type", "blockType", "providerBlockData");
   private static final Set<String> JSON_FIELDS = orderedSet("type", "json");
   private static final Set<String> TOOL_CALL_FIELDS =
-      orderedSet(
-          "type",
-          "toolCallId",
-          "toolName",
-          "rendererKey",
-          "argumentsJson",
-          "historyAction",
-          "environmentName");
+      orderedSet("type", "toolCallId", "toolName", "rendererKey", "argumentsJson", "historyAction");
   private static final Set<String> TOOL_CALL_NATIVE_FIELDS =
       orderedSet(
           "type",
@@ -96,7 +89,6 @@ public final class AgentMessageJsonCodec {
           "rendererKey",
           "argumentsJson",
           "historyAction",
-          "environmentName",
           "providerBlockData");
   private static final Set<String> TOOL_RESULT_FIELDS =
       orderedSet(
@@ -233,7 +225,6 @@ public final class AgentMessageJsonCodec {
         node.put("rendererKey", value.rendererKey());
         node.put("argumentsJson", value.argumentsJson());
         putNullableText(node, "historyAction", value.historyAction());
-        putNullableText(node, "environmentName", value.environmentName());
         putProviderBlockData(node, value.providerBlockData());
       }
       case ToolResultMessageContent value -> {
@@ -315,7 +306,6 @@ public final class AgentMessageJsonCodec {
             requiredText(node, "rendererKey", "content"),
             requiredStrictJsonObjectString(node, "argumentsJson", "content"),
             nullableText(node, "historyAction", "content"),
-            nullableText(node, "environmentName", "content"),
             decodeProviderBlockData(node));
       }
       case "tool_result" -> {

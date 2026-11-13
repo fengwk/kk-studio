@@ -232,25 +232,19 @@ public final class DatabaseAgentTurnContextResolver {
                                   skill.name(), skill.packageName(), skill.packageVersion()))
                       .toList()
                   : List.of()));
-      candidates.add(
-          candidateTool(contribution, inputSchemaJson, LiveTurnPlan.ToolState.SENT, null));
+      candidates.add(candidateTool(contribution, inputSchemaJson));
     }
     return new PlannedTools(List.copyOf(bindings), List.copyOf(candidates));
   }
 
   private static LiveTurnPlan.CandidateTool candidateTool(
-      ToolContribution contribution,
-      String inputSchemaJson,
-      LiveTurnPlan.ToolState state,
-      LiveTurnPlan.FilterReason filterReason) {
+      ToolContribution contribution, String inputSchemaJson) {
     return new LiveTurnPlan.CandidateTool(
         contribution.definition().descriptor().name(),
         contribution.definition().descriptor().description(),
         inputSchemaJson,
         contribution.requirements().environmentSupport(),
-        contribution.id().toString(),
-        state,
-        filterReason);
+        contribution.id().toString());
   }
 
   /**
@@ -374,7 +368,7 @@ public final class DatabaseAgentTurnContextResolver {
     return detail == null || detail.isBlank() ? error.getClass().getSimpleName() : detail;
   }
 
-  /** 一次工具规划的全部事实：冻结进 spec 的 SENT bindings 与「SENT 在前、FILTERED 在后」的完整候选投影。 */
+  /** 一次工具规划的全部事实：冻结进 spec 的 bindings 与 Agent 配置顺序的候选投影。 */
   private record PlannedTools(
       List<ToolBinding> bindings, List<LiveTurnPlan.CandidateTool> candidates) {}
 }

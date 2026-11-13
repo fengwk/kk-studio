@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.model;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
+
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -116,7 +118,7 @@ final class InvocationTestData {
 
   static ModelRequestSpec requestSpec(List<ToolBinding> bindings) {
     ProviderRequest provider = providerRequest(bindings);
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         provider.model(),
         provider.variant(),

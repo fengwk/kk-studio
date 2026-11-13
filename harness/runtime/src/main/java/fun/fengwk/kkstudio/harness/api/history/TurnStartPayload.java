@@ -19,7 +19,7 @@ import java.util.UUID;
  * 发现 {@code settings.model()} 不可用、改用 Agent 默认模型执行时非空，记录本 turn 实际调用的型号，用于界面提示与按实际型号计价。
  *
  * <p>{@code capabilities} 在 Resolver 成功、Turn 与 Driver generation 同事务提交时冻结；pending / rejected
- * TurnStart 允许为 null。工具执行、审批、{@code task} 父权限与媒体读取只读取该快照，不沿 ToolInvocation 反查 Driver 私有状态。
+ * TurnStart 允许为 null。{@code task} 父权限与媒体读取只读取该快照，不沿 ToolInvocation 反查 Driver 私有状态。
  */
 public record TurnStartPayload(
     TurnStartReason reason,

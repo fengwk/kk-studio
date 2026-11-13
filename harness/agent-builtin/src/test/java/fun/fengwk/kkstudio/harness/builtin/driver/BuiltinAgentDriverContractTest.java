@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.driver;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtinDriver;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -52,6 +54,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
@@ -137,6 +140,7 @@ class BuiltinAgentDriverContractTest {
     EntryPath pausedPath =
         new EntryPath(List.of(root, baseline, turnStart, user, pausedAssistant, pausedEnd));
     ToolBinding addedTool = toolBinding();
+    ProviderToolDefinition addedToolDefinition = definitionOf(addedTool);
     ModelRequestSpec updated = updatedRequest(addedTool);
 
     SystemPayload textChange =
@@ -195,7 +199,7 @@ class BuiltinAgentDriverContractTest {
             thread(threadId, sessionId, continuationEnd.id(), "complete"), completedPath, updated);
 
     assertTrue(deferredTools.sections().isEmpty());
-    assertEquals(List.of(addedTool), deferredTools.addedTools());
+    assertEquals(List.of(addedToolDefinition), deferredTools.addedTools());
     assertEquals(
         List.of("web_search"),
         deferredTools.addedHostedTools().stream().map(SystemHostedTool::name).toList());
@@ -512,7 +516,7 @@ class BuiltinAgentDriverContractTest {
   }
 
   private static ModelRequestSpec modelRequest() {
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.OPENAI,
         modelDescriptor(),
         new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
@@ -530,7 +534,7 @@ class BuiltinAgentDriverContractTest {
             PromptCacheRetention.NONE,
             new ProviderProtocolOptions(
                 "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":\"web_search\"}]}"));
-    return new ModelRequestSpec(
+    return spec(
         ProviderType.ANTHROPIC,
         new ModelDescriptor(
             "anthropic",
@@ -548,6 +552,14 @@ class BuiltinAgentDriverContractTest {
         List.of(),
         null,
         Map.of("agent", "[agent] new"));
+  }
+
+  private static ProviderToolDefinition definitionOf(ToolBinding binding) {
+    ToolDescriptor descriptor = binding.descriptor();
+    return new ProviderToolDefinition(
+        descriptor.name(),
+        descriptor.description(),
+        new SchemaJsonCodec().encode(descriptor.inputSchema()));
   }
 
   private static ToolBinding toolBinding() {

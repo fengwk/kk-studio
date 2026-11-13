@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.model;
 
+import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
 import static fun.fengwk.kkstudio.harness.builtin.invocation.codec.InvocationCodecTestFixtures.environmentModelRequest;
 import static fun.fengwk.kkstudio.harness.builtin.invocation.codec.InvocationCodecTestFixtures.hostModelRequest;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -92,7 +93,7 @@ class ModelRequestSpecJsonCodecTest {
     ModelGroupExecution group =
         new ModelGroupExecution("fallback-group", 9L, List.of(first, second), Set.of(429, 503), 45);
     ModelRequestSpec spec =
-        new ModelRequestSpec(
+        spec(
             first.providerType(),
             first.model(),
             first.variant(),
@@ -124,7 +125,7 @@ class ModelRequestSpecJsonCodecTest {
   void roundTripsFrozenSubagentBindings() {
     ModelRequestSpec base = hostModelRequest();
     ModelRequestSpec requestSpec =
-        new ModelRequestSpec(
+        spec(
             base.providerType(),
             base.model(),
             base.variant(),
@@ -148,7 +149,7 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec base = hostModelRequest();
     String longDescription = "d".repeat(4096);
     ModelRequestSpec requestSpec =
-        new ModelRequestSpec(
+        spec(
             base.providerType(),
             base.model(),
             base.variant(),
@@ -188,7 +189,7 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec base = hostModelRequest();
     String instruction = "You are a careful reviewer.\n\n<rules>\n- be terse\n</rules>";
     ModelRequestSpec requestSpec =
-        new ModelRequestSpec(
+        spec(
             base.providerType(),
             base.model(),
             base.variant(),
@@ -258,7 +259,7 @@ class ModelRequestSpecJsonCodecTest {
     // Subagent binding 的 name 与 description 全部必填，缺失时必须严格拒绝。
     ModelRequestSpec base = hostModelRequest();
     ModelRequestSpec specWithSubagent =
-        new ModelRequestSpec(
+        spec(
             base.providerType(),
             base.model(),
             base.variant(),
@@ -300,7 +301,7 @@ class ModelRequestSpecJsonCodecTest {
     ModelRequestSpec base = hostModelRequest();
     String rawOptions = "{\"big\":1e309,\"tiny\":1e-324,\"exact\":0.1234567890123456789012345678}";
     ModelRequestSpec requestSpec =
-        new ModelRequestSpec(
+        spec(
             base.providerType(),
             base.model(),
             new ModelVariant(
