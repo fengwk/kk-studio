@@ -158,7 +158,7 @@ func TestEditUTF16LEPreservesBOM(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "b", "new_string": "c"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("b", "c")), nil)
 	if result.Error {
 		t.Fatalf("edit failed: %#v", result)
 	}
@@ -181,7 +181,7 @@ func TestEditReviewOutputSeparatesDiff(t *testing.T) {
 	if err := os.WriteFile(path, []byte("before\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "before", "new_string": "after"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("before", "after")), nil)
 	if result.Error || result.Contents[0].Text != "Edited successfully.\nReplacements: 1" {
 		t.Fatalf("result=%#v", result)
 	}

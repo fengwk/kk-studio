@@ -1516,8 +1516,7 @@ class ToolCardOpenAiMock {
         marker: markers.edit,
         argumentsJson: JSON.stringify({
           path,
-          old_string: oldText,
-          new_string: newText,
+          edits: [{ old_string: oldText, new_string: newText }],
         }),
       },
       write: {

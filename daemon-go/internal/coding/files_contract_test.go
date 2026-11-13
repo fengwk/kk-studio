@@ -24,8 +24,8 @@ func TestFileCapabilitiesKeepTimeoutDistinctFromCancellation(t *testing.T) {
 	}{
 		{"fs.read", map[string]any{"path": path}},
 		{"fs.write", map[string]any{"path": path, "content": "after\n"}},
-		{"fs.edit", map[string]any{"path": path, "old_string": "before", "new_string": "after"}},
-		{"fs.edit.preview", map[string]any{"path": path, "old_string": "before", "new_string": "after"}},
+		{"fs.edit", editArgs(path, replace("before", "after"))},
+		{"fs.edit.preview", editArgs(path, replace("before", "after"))},
 	}
 	handlers := Provider{}.Capabilities()
 	for _, test := range cases {
@@ -177,7 +177,7 @@ func TestEditUniqueMatchPreservesCRLF(t *testing.T) {
 	if err := os.WriteFile(path, []byte("one\r\nold\r\nthree\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "old", "new_string": "TWO"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("old", "TWO")), nil)
 	if result.Error || !strings.Contains(result.Contents[0].Text, "Replacements: 1") {
 		t.Fatalf("result=%#v", result)
 	}
@@ -196,7 +196,7 @@ func TestEditReplaceAllReplacesEveryMatch(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old old\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "old", "new_string": "new", "replace_all": true}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replaceAll("old", "new")), nil)
 	if result.Error || !strings.Contains(result.Contents[0].Text, "Replacements: 2") {
 		t.Fatalf("result=%#v", result)
 	}
@@ -215,7 +215,7 @@ func TestEditMixedLineEndingsAndNoFinalNewline(t *testing.T) {
 	if err := os.WriteFile(path, []byte("line1\r\nline2\nline3\r\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result := invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": path, "old_string": "line2\n", "new_string": "sub1\nsub2\nsub3\n"}, nil)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("line2\n", "sub1\nsub2\nsub3\n")), nil)
 	if result.Error {
 		t.Fatalf("multiline edit failed: %#v", result)
 	}
@@ -230,7 +230,7 @@ func TestEditMixedLineEndingsAndNoFinalNewline(t *testing.T) {
 	if err := os.WriteFile(noEnding, []byte("hello"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	result = invokeCoding(t, Provider{}, "fs.edit", map[string]any{"path": noEnding, "old_string": "o", "new_string": "p"}, nil)
+	result = invokeCoding(t, Provider{}, "fs.edit", editArgs(noEnding, replace("o", "p")), nil)
 	if result.Error {
 		t.Fatalf("no-ending edit failed: %#v", result)
 	}

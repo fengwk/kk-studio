@@ -74,37 +74,58 @@ class EnvironmentCapabilityRendererTest {
   }
 
   /**
-   * 验证 FS_EDIT 动作渲染：在 replace_all 为 true 时渲染为 "replace every occurrence in " + path， 在缺省或为 false
-   * 时渲染为 "edit " + path，且绝不包含 old_string、new_string 等具体编辑内容。
+   * 验证 FS_EDIT 动作渲染：单项渲染为 "edit " + path，单项 replace_all 渲染为 "replace every occurrence in " + path，
+   * 多项带上条目数并在任一项 replace_all 时说明；绝不包含 old_string、new_string 等具体编辑内容。
    */
   @Test
-  void fsEditRendersPathAndDistinguishesReplaceAll() {
+  void fsEditRendersPathAndChangeCount() {
     EnvironmentCapabilityRenderer renderer =
         EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_EDIT);
 
-    // 缺省 replace_all
-    Optional<String> defaultEdit =
+    // 单个普通条目
+    assertEquals(
+        Optional.of("edit src/Main.java"),
         renderer.render(
             request(
                 "fs_edit",
-                "{\"path\":\"src/Main.java\",\"old_string\":\"foo\",\"new_string\":\"bar\"}"));
-    assertEquals(Optional.of("edit src/Main.java"), defaultEdit);
+                "{\"path\":\"src/Main.java\",\"edits\":[{\"old_string\":\"foo\",\"new_string\":\"bar\"}]}")));
 
-    // 显式 replace_all = false
-    Optional<String> explicitFalse =
+    // 显式 replace_all = false 与缺省一致
+    assertEquals(
+        Optional.of("edit src/Main.java"),
         renderer.render(
             request(
                 "fs_edit",
-                "{\"path\":\"src/Main.java\",\"replace_all\":false,\"old_string\":\"foo\",\"new_string\":\"bar\"}"));
-    assertEquals(Optional.of("edit src/Main.java"), explicitFalse);
+                "{\"path\":\"src/Main.java\",\"edits\":[{\"old_string\":\"foo\",\"new_string\":\"bar\",\"replace_all\":false}]}")));
 
-    // 显式 replace_all = true
-    Optional<String> replaceAll =
+    // 单项 replace_all = true
+    assertEquals(
+        Optional.of("replace every occurrence in src/Main.java"),
         renderer.render(
             request(
                 "fs_edit",
-                "{\"path\":\"src/Main.java\",\"replace_all\":true,\"old_string\":\"foo\",\"new_string\":\"bar\"}"));
-    assertEquals(Optional.of("replace every occurrence in src/Main.java"), replaceAll);
+                "{\"path\":\"src/Main.java\",\"edits\":[{\"old_string\":\"foo\",\"new_string\":\"bar\",\"replace_all\":true}]}")));
+
+    // 多项且都不 replace_all
+    assertEquals(
+        Optional.of("edit src/Main.java (2 changes)"),
+        renderer.render(
+            request(
+                "fs_edit",
+                "{\"path\":\"src/Main.java\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\"},{\"old_string\":\"c\",\"new_string\":\"d\"}]}")));
+
+    // 多项且任一项 replace_all
+    assertEquals(
+        Optional.of("edit src/Main.java (2 changes, some replacing every occurrence)"),
+        renderer.render(
+            request(
+                "fs_edit",
+                "{\"path\":\"src/Main.java\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\",\"replace_all\":true},{\"old_string\":\"c\",\"new_string\":\"d\"}]}")));
+
+    // 没有任何条目时回退，由 Runtime 中性渲染
+    assertEquals(
+        Optional.empty(),
+        renderer.render(request("fs_edit", "{\"path\":\"src/Main.java\",\"edits\":[]}")));
   }
 
   /** 验证 PROCESS_EXEC 动作渲染：保留 command 与 workdir 作用域，并省略 timeout_seconds。 */
@@ -272,7 +293,10 @@ class EnvironmentCapabilityRendererTest {
         EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_EDIT);
     assertEquals(
         Optional.of("edit src/Main.java"),
-        edit.render(request("fs_edit", "{\"path\":\"src/Main.java\",\"workdir\":\"/tmp\"}")));
+        edit.render(
+            request(
+                "fs_edit",
+                "{\"path\":\"src/Main.java\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\"}],\"workdir\":\"/tmp\"}")));
 
     EnvironmentCapabilityRenderer grep =
         EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_GREP);
@@ -325,7 +349,10 @@ class EnvironmentCapabilityRendererTest {
     assertEquals(
         Optional.of("replace every occurrence in src/App.java in environment staging"),
         editRenderer.render(
-            request("fs_edit", "{\"path\":\"src/App.java\",\"replace_all\":true}", "staging")));
+            request(
+                "fs_edit",
+                "{\"path\":\"src/App.java\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\",\"replace_all\":true}]}",
+                "staging")));
 
     EnvironmentCapabilityRenderer execRenderer =
         EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.PROCESS_EXEC);
@@ -375,7 +402,12 @@ class EnvironmentCapabilityRendererTest {
     EnvironmentCapabilityRenderer edit =
         EnvironmentCapabilityRenderer.of(EnvironmentCapabilityIds.FS_EDIT);
     assertEquals(Optional.empty(), edit.render(request("fs_edit", "{}")));
-    assertEquals(Optional.empty(), edit.render(request("fs_edit", "{\"replace_all\":true}")));
+    assertEquals(
+        Optional.empty(),
+        edit.render(
+            request(
+                "fs_edit",
+                "{\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\",\"replace_all\":true}]}")));
     assertEquals(Optional.empty(), edit.render(request("fs_edit", "{\"path\":\"  \"}")));
 
     // PROCESS_EXEC: 缺失 command
