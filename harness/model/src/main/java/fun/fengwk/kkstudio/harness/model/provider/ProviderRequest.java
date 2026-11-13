@@ -10,10 +10,10 @@ import java.util.Objects;
 /**
  * 一次 Provider 流请求。
  *
- * <p>{@code systemInstruction} 是本次请求唯一的模型系统指令：各协议把它编码到各自的顶层位置（Anthropic {@code system}、Gemini
+ * <p>{@code systemInstruction} 是本次请求的基线模型系统指令：各协议把它编码到各自的顶层位置（Anthropic {@code system}、Gemini
  * {@code systemInstruction}、OpenAI Chat 唯一的前导 system message、OpenAI Responses {@code
- * instructions}），会话消息中绝不出现 SYSTEM 角色。{@code outputTokens} 是本次请求唯一的输出预算：由 Model 级 {@code
- * limit.output} 与当前剩余上下文计算，压缩调用则使用压缩阶段预算。预算随请求显式传递，绝不回写到 variant 或请求体的自定义字段。
+ * instructions}）。支持中途 system 消息的 Provider 可在会话历史中另带 SYSTEM 消息。{@code outputTokens} 是本次请求唯一的输出预算：由
+ * Model 级 {@code limit.output} 与当前剩余上下文计算，压缩调用则使用压缩阶段预算。预算随请求显式传递，绝不回写到 variant 或请求体的自定义字段。
  */
 public record ProviderRequest(
     ModelDescriptor model,
@@ -22,7 +22,19 @@ public record ProviderRequest(
     String systemInstruction,
     List<ProviderMessage> messages,
     List<ProviderToolDefinition> tools,
-    ProviderCacheControl cacheControl) {
+    ProviderCacheControl cacheControl,
+    boolean baselineHasClientTools) {
+
+  public ProviderRequest(
+      ModelDescriptor model,
+      ModelVariant variant,
+      int outputTokens,
+      String systemInstruction,
+      List<ProviderMessage> messages,
+      List<ProviderToolDefinition> tools,
+      ProviderCacheControl cacheControl) {
+    this(model, variant, outputTokens, systemInstruction, messages, tools, cacheControl, false);
+  }
 
   public ProviderRequest {
     model = Objects.requireNonNull(model, "model");
@@ -36,5 +48,9 @@ public record ProviderRequest(
     messages = List.copyOf(Objects.requireNonNull(messages, "messages"));
     tools = List.copyOf(Objects.requireNonNull(tools, "tools"));
     cacheControl = Objects.requireNonNull(cacheControl, "cacheControl");
+    if (baselineHasClientTools && tools.isEmpty()) {
+      throw new IllegalArgumentException(
+          "baselineHasClientTools requires baseline tool definitions");
+    }
   }
 }

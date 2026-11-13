@@ -186,12 +186,12 @@ public final class DatabaseAgentTurnContextResolver {
   }
 
   /**
-   * 按最新 Agent 配置派生的精确顺序逐一规划候选工具。声明环境需求的工具（REQUIRED）在 branch 未选择环境时从最终模型工具面过滤，
-   * 绝不拒绝规划，但候选事实仍保留并携带唯一稳定原因；branch 已选择环境时冻结内部路由身份与环境名。OPTIONAL 工具在已选环境时冻结环境， 未选环境时两者为 null；NONE
+   * 按最新 Agent 配置派生的精确顺序逐一规划候选工具。所有工具始终声明给模型；环境需求工具在 branch 未选择环境时冻结为 null 路由， 调用时由工具返回确定性的
+   * needs-an-Environment 结果。branch 已选择环境时冻结内部路由身份与环境名。OPTIONAL 工具在已选环境时冻结环境，未选环境时两者为 null；NONE
    * 工具始终不绑定环境。贡献声明的固定 {@code requiredEnvironmentId} 只在 branch 已选择另一个非 null 环境时确定性拒绝。
    * 缺失能力仍立即拒绝，绝不静默跳过。
    *
-   * <p>返回的候选顺序固定为「SENT 在前、FILTERED 在后」，与 {@link LiveTurnPlan.Planned} 的投影契约一致。
+   * <p>候选按 Agent 配置顺序返回，与冻结的模型工具面顺序一致。
    */
   private PlannedTools resolveTools(
       RuntimeToolCatalog catalog,
@@ -200,8 +200,7 @@ public final class DatabaseAgentTurnContextResolver {
       List<String> toolNames,
       List<LiveTurnPlan.PlannedSkill> skills) {
     List<ToolBinding> bindings = new ArrayList<>(toolNames.size());
-    List<LiveTurnPlan.CandidateTool> sent = new ArrayList<>(toolNames.size());
-    List<LiveTurnPlan.CandidateTool> filtered = new ArrayList<>();
+    List<LiveTurnPlan.CandidateTool> candidates = new ArrayList<>(toolNames.size());
     String environmentName = selectedEnvironment == null ? null : selectedEnvironment.getName();
     for (String toolName : toolNames) {
       ToolContribution contribution = catalog.findTool(toolName).orElse(null);
@@ -211,16 +210,6 @@ public final class DatabaseAgentTurnContextResolver {
       EnvironmentSupport environmentSupport = contribution.requirements().environmentSupport();
       String inputSchemaJson =
           schemaCodec.encode(contribution.definition().descriptor().inputSchema());
-      if (environmentId == null && environmentSupport == EnvironmentSupport.REQUIRED) {
-        // 未选择环境时只从最终模型工具面过滤 REQUIRED 工具：候选仍可见，并携带唯一稳定原因。
-        filtered.add(
-            candidateTool(
-                contribution,
-                inputSchemaJson,
-                LiveTurnPlan.ToolState.FILTERED,
-                LiveTurnPlan.FilterReason.ENVIRONMENT_NOT_SELECTED));
-        continue;
-      }
       ContributorBinding contributor =
           new ContributorBinding(
               contribution.id().contributorId().value(), contribution.id().localName());
@@ -243,11 +232,9 @@ public final class DatabaseAgentTurnContextResolver {
                                   skill.name(), skill.packageName(), skill.packageVersion()))
                       .toList()
                   : List.of()));
-      sent.add(candidateTool(contribution, inputSchemaJson, LiveTurnPlan.ToolState.SENT, null));
+      candidates.add(
+          candidateTool(contribution, inputSchemaJson, LiveTurnPlan.ToolState.SENT, null));
     }
-    List<LiveTurnPlan.CandidateTool> candidates = new ArrayList<>(sent.size() + filtered.size());
-    candidates.addAll(sent);
-    candidates.addAll(filtered);
     return new PlannedTools(List.copyOf(bindings), List.copyOf(candidates));
   }
 

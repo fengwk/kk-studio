@@ -62,9 +62,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemHostedToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
@@ -213,9 +211,11 @@ class ModelRequestMaterializerTest {
         MATERIALIZER.materialize(new EntryPath(List.of(root, baseline, change)), spec);
 
     assertEquals("[agent]\nold", request.systemInstruction());
-    assertTrue(request.tools().isEmpty());
+    assertEquals(1, request.tools().size());
+    assertEquals("bash", request.tools().getFirst().name());
+    assertFalse(request.baselineHasClientTools());
     assertEquals(
-        "web_search_20250305",
+        "code_execution_20250522",
         request
             .variant()
             .protocolOptions()
@@ -227,17 +227,64 @@ class ModelRequestMaterializerTest {
     assertEquals(1, request.messages().size());
     ProviderMessage system = request.messages().getFirst();
     assertEquals(ProviderMessageRole.SYSTEM, system.role());
-    assertEquals(5, system.contents().size());
+    assertEquals(1, system.contents().size());
     assertEquals(
         "This section replaces the earlier [agent] section.\n\n[agent]\nnew",
         ((ProviderTextBlock) system.contents().getFirst()).text());
-    assertEquals("obsolete", ((ProviderSystemToolRemovalBlock) system.contents().get(1)).name());
-    assertEquals("web_search", ((ProviderSystemToolRemovalBlock) system.contents().get(2)).name());
+  }
+
+  /** 首个客户端工具变更在基线含工具时作为 system 消息增量编码，顶层只保留基线工具。 */
+  @Test
+  void keepsBaselineClientToolsAndAppendsFirstToolChangeInlineForAnthropic() {
+    Entry root = entry(1, 0, new RootPayload(SETTINGS));
+    ToolBinding baselineTool = bashBinding();
+    ToolBinding addedTool = toolBinding("search");
+    Entry baseline =
+        entry(
+            2,
+            1,
+            new SystemPayload(
+                Map.of("agent", "[agent] baseline"),
+                List.of(),
+                List.of(baselineTool),
+                List.of(),
+                List.of(),
+                List.of(),
+                true));
+    Entry change =
+        entry(
+            3,
+            2,
+            new SystemPayload(
+                Map.of(), List.of(), List.of(addedTool), List.of(), List.of(), List.of(), false));
+    ModelVariant variant = variant();
+    ModelRequestSpec spec =
+        new ModelRequestSpec(
+            ProviderType.ANTHROPIC,
+            id(1L),
+            new ModelDescriptor(
+                "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
+            variant,
+            List.of(variant),
+            1024,
+            "[agent] current",
+            List.of(baselineTool, addedTool),
+            List.of(),
+            null,
+            Map.of("agent", "[agent] current"));
+
+    ProviderRequest request =
+        MATERIALIZER.materialize(new EntryPath(List.of(root, baseline, change)), spec);
+
+    assertTrue(request.baselineHasClientTools());
+    assertEquals("[agent] baseline", request.systemInstruction());
+    assertEquals(List.of("bash"), request.tools().stream().map(tool -> tool.name()).toList());
+    assertEquals(1, request.messages().size());
+    ProviderMessage system = request.messages().getFirst();
+    assertEquals(ProviderMessageRole.SYSTEM, system.role());
+    assertEquals(1, system.contents().size());
     assertEquals(
-        "bash", ((ProviderSystemToolAdditionBlock) system.contents().get(3)).tool().name());
-    assertEquals(
-        "{\"type\":\"code_execution_20250522\",\"name\":\"code_execution\"}",
-        ((ProviderSystemHostedToolAdditionBlock) system.contents().get(4)).definitionJson());
+        "search", ((ProviderSystemToolAdditionBlock) system.contents().getFirst()).tool().name());
   }
 
   /** 只用当前实际模型的冻结 variants 重新解释历史；缺失、外模型和 null effort 均未知。 */
@@ -652,6 +699,23 @@ class ModelRequestMaterializerTest {
   private static TurnStartPayload resolvedStart(
       TurnStartReason reason, CompactionStart compaction) {
     return new TurnStartPayload(reason, SETTINGS, OWNER, 4096, 1024, compaction, null);
+  }
+
+  private static ToolBinding toolBinding(String name) {
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new ToolDescriptor(
+                name,
+                "run " + name,
+                name,
+                new InputSchema("arguments", Map.of(), Set.of(), false),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(30)),
+            ToolVisibility.SELECTABLE),
+        new ContributorBinding("test", name),
+        EnvironmentSupport.NONE,
+        null,
+        null);
   }
 
   private static ToolBinding bashBinding() {
