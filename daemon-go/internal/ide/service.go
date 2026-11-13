@@ -146,6 +146,7 @@ type Service struct {
 	claimOrder       []string
 	viewLocks        map[string]*sync.Mutex
 	claimLocks       map[string]*sync.Mutex
+	workspaceMu      sync.Mutex
 	activeStreams    map[*activeIdeStream]struct{}
 	revision         int64
 	closed           bool
@@ -273,6 +274,18 @@ func (s *Service) Handle(ctx context.Context, command *protocol.IdeCommand) *pro
 	return s.HandleCommand(ctx, command)
 }
 
+func (s *Service) writeManagedWorkspace(path, directory string) error {
+	s.workspaceMu.Lock()
+	defer s.workspaceMu.Unlock()
+	if err := native.EnsurePrivateDirectory(s.paths.IDEDir); err != nil {
+		return err
+	}
+	if err := native.EnsurePrivateDirectory(s.paths.ViewsDir); err != nil {
+		return err
+	}
+	return native.WritePrivateFile(path, []byte(WorkspaceFileContent(directory)))
+}
+
 func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
 	if err := s.requireDaemonInstance(command); err != nil {
 		return nil, err
@@ -349,14 +362,8 @@ func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand)
 	if err != nil {
 		return nil, err
 	}
-	if err := native.EnsurePrivateDirectory(s.paths.IDEDir); err != nil {
-		return nil, NewError("managed workspace directory is unavailable", "UNAVAILABLE")
-	}
-	if err := native.EnsurePrivateDirectory(s.paths.ViewsDir); err != nil {
-		return nil, NewError("managed workspace directory is unavailable", "UNAVAILABLE")
-	}
 	workspacePath := filepath.Join(s.paths.ViewsDir, parsed.viewID+".code-workspace")
-	if err := native.WritePrivateFile(workspacePath, []byte(WorkspaceFileContent(directory))); err != nil {
+	if err := s.writeManagedWorkspace(workspacePath, directory); err != nil {
 		return nil, NewError("managed workspace could not be written", "UNAVAILABLE")
 	}
 	workspacePath, err = filepath.EvalSymlinks(workspacePath)
@@ -669,7 +676,7 @@ func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeComm
 	if !s.isCurrentOpen(view) || result.Directory != directory {
 		return nil, NewError("view binding changed", "VIEW_GONE")
 	}
-	if err := native.WritePrivateFile(view.workspacePath, []byte(WorkspaceFileContent(directory))); err != nil {
+	if err := s.writeManagedWorkspace(view.workspacePath, directory); err != nil {
 		return nil, NewError("managed workspace could not be updated", "UNAVAILABLE")
 	}
 	s.mu.Lock()

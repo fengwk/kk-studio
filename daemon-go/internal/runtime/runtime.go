@@ -1036,8 +1036,8 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 func (r *Runtime) execute(ctx context.Context, id string, call CapabilityCall, executor CapabilityExecutor, capctx CapabilityContext, budget int64, active *runningCall) {
 	defer r.wg.Done()
 	defer active.cancel()
-	defer func() { r.callsMu.Lock(); delete(r.calls, id); r.callsMu.Unlock() }()
 	defer r.publishRequestedExit(id)
+	defer func() { r.callsMu.Lock(); delete(r.calls, id); r.callsMu.Unlock() }()
 	result, err := invokeCapability(ctx, call, capctx, executor)
 	r.callsMu.Lock()
 	progressError := active.progressError

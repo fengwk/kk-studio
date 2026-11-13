@@ -53,7 +53,7 @@ func TestRunInternalCommand_LeavesPublicCommandsAlone(t *testing.T) {
 
 // RUN-T-135 verifies that the single-argument help/version commands are side-effect free.
 func TestInformationCommands(t *testing.T) {
-	for _, tc := range []struct{ arg, want string }{{"--help", "Usage:"}, {"--version", "kk-studio-daemon 1.0.0"}, {"-h", "Usage:"}} {
+	for _, tc := range []struct{ arg, want string }{{"--help", "Usage:"}, {"--version", "kk-studio-daemon 1.0.1"}, {"-h", "Usage:"}} {
 		var out, errOut bytes.Buffer
 		if code := RunCLI(context.Background(), []string{tc.arg}, Dependencies{}, &out, &errOut); code != 0 || !bytes.Contains(out.Bytes(), []byte(tc.want)) || errOut.Len() != 0 {
 			t.Fatalf("%s: code=%d out=%q err=%q", tc.arg, code, out.String(), errOut.String())
