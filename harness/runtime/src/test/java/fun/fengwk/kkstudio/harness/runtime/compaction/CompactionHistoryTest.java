@@ -30,10 +30,6 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -56,31 +52,8 @@ class CompactionHistoryTest {
   private static final UUID TURN_END_ID = id(5);
   private static final UUID COMPACTION_START_ID = id(6);
   private static final Instant NOW = Instant.parse("2026-09-05T00:00:00Z");
-  private static final String CREATION_REQUEST_HASH =
-      "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
   private static final BranchSettings SETTINGS =
       new BranchSettings("agent", new ExecutionSelection("fake", "{}"), null);
-
-  @Test
-  void pendingContinuationRequiresOwnedHistoryAndKnownCurrentCompactionStart() {
-    // 共享投影必须只恢复当前 Thread 拥有的 continuation，并对未知 current start fail closed。
-    EntryPath ownedPath = pathWithPendingContinuation(THREAD_ID);
-    ThreadState thread = thread(ownedPath.head().id());
-    assertTrue(
-        CompactionHistory.hasPendingOwnedContinuation(thread, ownedPath, COMPACTION_START_ID));
-
-    EntryPath foreignPath = pathWithPendingContinuation(OTHER_THREAD_ID);
-    assertFalse(
-        CompactionHistory.hasPendingOwnedContinuation(thread, foreignPath, COMPACTION_START_ID));
-
-    assertThrows(
-        IllegalStateException.class,
-        () -> CompactionHistory.hasPendingOwnedContinuation(thread, ownedPath, id(999)));
-
-    EntryPath noHistoryPath = new EntryPath(List.of(root(), compactionStart(ROOT_ID)));
-    assertFalse(
-        CompactionHistory.hasPendingOwnedContinuation(thread, noHistoryPath, COMPACTION_START_ID));
-  }
 
   @Test
   void closedTurnNavigationAndTurnResultFollowThePath() {
@@ -154,20 +127,12 @@ class CompactionHistoryTest {
   }
 
   @Test
-  void pendingContinuationWalksClosedCompactionTurnsAndRejectsForeignOwners() {
-    UUID compactionResultId = id(20);
-    UUID compactionEndId = id(21);
-    UUID currentStartId = id(22);
-    EntryPath ownedPath =
-        pendingPath(THREAD_ID, compactionResultId, compactionEndId, currentStartId);
-    ThreadState thread = thread(ownedPath.head().id());
-    assertTrue(CompactionHistory.hasPendingOwnedContinuation(thread, ownedPath, currentStartId));
+  void immediatePostCompactionRetryRequiresCompleteCompactionThenContinuation() {
+    // 压缩后 owner 的唯一一次恢复请求：前一回合必须是 complete 且 continueModel=true 的 COMPACTION。
+    EntryPath retryAfterManual = overflowRetryPath(CompactionTrigger.MANUAL);
+    assertTrue(CompactionHistory.isImmediatePostCompactionRetry(retryAfterManual));
 
-    EntryPath foreignPath =
-        pendingPath(OTHER_THREAD_ID, compactionResultId, compactionEndId, currentStartId);
-    assertFalse(CompactionHistory.hasPendingOwnedContinuation(thread, foreignPath, currentStartId));
-
-    EntryPath closedWithoutContinuation =
+    EntryPath plainInput =
         new EntryPath(
             List.of(
                 root(),
@@ -177,12 +142,9 @@ class CompactionHistoryTest {
                     new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, THREAD_ID)),
                 message(USER_ID, TURN_START_ID, AgentMessageRole.USER, "input"),
                 message(ASSISTANT_ID, USER_ID, AgentMessageRole.ASSISTANT, "answer"),
-                turnEnd(TURN_END_ID, ASSISTANT_ID, TURN_START_ID, false),
-                compactionStartEntry(
-                    currentStartId, TURN_END_ID, THREAD_ID, CompactionTrigger.OVERFLOW)));
-    assertFalse(
-        CompactionHistory.hasPendingOwnedContinuation(
-            thread, closedWithoutContinuation, currentStartId));
+                turnEnd(TURN_END_ID, ASSISTANT_ID, TURN_START_ID, true)));
+    assertFalse(CompactionHistory.isImmediatePostCompactionRetry(plainInput));
+    assertFalse(CompactionHistory.isImmediatePostCompactionRetry(new EntryPath(List.of(root()))));
   }
 
   @Test
@@ -288,25 +250,6 @@ class CompactionHistoryTest {
                     null))));
   }
 
-  private static EntryPath pendingPath(
-      UUID compactionOwner, UUID resultId, UUID endId, UUID currentStartId) {
-    return new EntryPath(
-        List.of(
-            root(),
-            entry(
-                TURN_START_ID,
-                ROOT_ID,
-                new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, THREAD_ID)),
-            message(USER_ID, TURN_START_ID, AgentMessageRole.USER, "input"),
-            message(ASSISTANT_ID, USER_ID, AgentMessageRole.ASSISTANT, "answer"),
-            turnEnd(TURN_END_ID, ASSISTANT_ID, TURN_START_ID, true),
-            compactionStartEntry(
-                COMPACTION_START_ID, TURN_END_ID, compactionOwner, CompactionTrigger.OVERFLOW),
-            entry(resultId, COMPACTION_START_ID, new CompactionPayload("summary", null)),
-            turnEnd(endId, resultId, COMPACTION_START_ID, true),
-            compactionStartEntry(currentStartId, endId, THREAD_ID, CompactionTrigger.OVERFLOW)));
-  }
-
   private static EntryPath overflowRetryPath(CompactionTrigger trigger) {
     UUID compactionResultId = id(40);
     UUID compactionEndId = id(41);
@@ -363,39 +306,8 @@ class CompactionHistoryTest {
         new ModelUsage(inputTokens, outputTokens, 0, 0, Map.of(), 0L, inputTokens + outputTokens));
   }
 
-  private static EntryPath pathWithPendingContinuation(UUID ownerThreadId) {
-    return new EntryPath(
-        List.of(
-            root(),
-            entry(
-                TURN_START_ID,
-                ROOT_ID,
-                new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, ownerThreadId)),
-            message(USER_ID, TURN_START_ID, AgentMessageRole.USER, "input"),
-            message(ASSISTANT_ID, USER_ID, AgentMessageRole.ASSISTANT, "answer"),
-            entry(
-                TURN_END_ID,
-                ASSISTANT_ID,
-                new TurnEndPayload(TURN_START_ID, TurnEndOutcome.COMPLETED, true, null, null)),
-            compactionStart(TURN_END_ID)));
-  }
-
   private static Entry root() {
     return entry(ROOT_ID, null, new RootPayload(SETTINGS));
-  }
-
-  private static Entry compactionStart(UUID parentId) {
-    return entry(
-        COMPACTION_START_ID,
-        parentId,
-        new TurnStartPayload(
-            TurnStartReason.COMPACTION,
-            SETTINGS,
-            THREAD_ID,
-            null,
-            null,
-            CompactionStart.pending(CompactionTrigger.MANUAL, ROOT_ID),
-            null));
   }
 
   private static Entry message(UUID entryId, UUID parentId, AgentMessageRole role, String text) {
@@ -415,25 +327,5 @@ class CompactionHistoryTest {
 
   private static Entry entry(UUID entryId, UUID parentId, EntryPayload payload) {
     return new Entry(entryId, SESSION_ID, parentId, payload, NOW);
-  }
-
-  private static ThreadState thread(UUID headEntryId) {
-    return new ThreadState(
-        THREAD_ID,
-        SESSION_ID,
-        null,
-        headEntryId,
-        CREATION_REQUEST_HASH,
-        "main",
-        THREAD_ID,
-        false,
-        ThreadKind.USER,
-        ThreadConstraints.NONE,
-        ThreadExecutionControl.RUNNABLE,
-        0L,
-        1,
-        0,
-        NOW,
-        NOW);
   }
 }

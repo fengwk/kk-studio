@@ -6,6 +6,7 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.runtime.compaction.TokenEstimator;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.spi.compaction.CompactionModelProvider;
 import fun.fengwk.kkstudio.harness.spi.compaction.RequestTokenEstimator;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
@@ -32,6 +33,13 @@ public class HarnessCompactionConfiguration {
       SystemSettings.AiRuntime aiRuntime = systemSettingsSnapshot.get().aiRuntime();
       return new CompactionConfig(aiRuntime.compactionKeepRecentTokens());
     };
+  }
+
+  /** 显式压缩模型选择：每次 Turn 解析现读；未配置时返回 null，由解析器沿用对话当前模型。 */
+  @Bean
+  public CompactionModelProvider compactionModelProvider(
+      SystemSettingsSnapshot systemSettingsSnapshot) {
+    return () -> systemSettingsSnapshot.get().aiRuntime().compactionModel();
   }
 
   /** 请求输入 token 估算：直接复用内核正式发送所用的唯一估算实现，本层不复制算法、不做兜底。 */

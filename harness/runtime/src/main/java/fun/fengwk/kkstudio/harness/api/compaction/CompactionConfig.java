@@ -6,11 +6,8 @@ package fun.fengwk.kkstudio.harness.api.compaction;
  * <p>{@code keepRecentTokens} 是压缩后保留最近上下文的 token 上限（默认 20_000）。
  *
  * <ul>
- *   <li>{@code effectiveKeep = min(keepRecentTokens, C / 2)}——C 为触发 turn 的冻结 contextWindow。
- *   <li>{@code effectiveReserve = min(16_384, maxOutputTokens)}——summary prompt + output 的预留预算。
- *   <li>{@code softThreshold = max(effectiveKeep, C - effectiveReserve)}——活跃 continuation /
- *       next-demand 门控阈值。
- *   <li>{@code manualMinimum = min(keepRecentTokens * 2, C / 2)}——手动控制的最低上下文量。
+ *   <li>{@code effectiveKeep = min(keepRecentTokens, C / 2)}——C 为本次请求的对话模型 contextWindow。
+ *   <li>{@code effectiveReserve = min(16_384, maxOutputTokens)}——请求预留预算。
  *   <li>摘要输出上限为 {@code floor(0.8 * reserve)}。
  * </ul>
  */
@@ -35,33 +32,12 @@ public record CompactionConfig(int keepRecentTokens) {
     return Math.min(contextWindow / 2L, keepRecentTokens);
   }
 
-  /** 内部预留预算：{@code min(16_384, maxOutputTokens)}。 */
+  /** 请求预留预算：{@code min(16_384, maxOutputTokens)}。 */
   public long effectiveReserve(long maxOutputTokens) {
     if (maxOutputTokens <= 0) {
       throw new IllegalArgumentException("maxOutputTokens must be positive");
     }
     return Math.min(EFFECTIVE_RESERVE_CAP, maxOutputTokens);
-  }
-
-  /** soft threshold：{@code max(effectiveKeep, C - effectiveReserve)}。 */
-  public long softThreshold(long contextWindow, long maxOutputTokens) {
-    if (contextWindow <= 0) {
-      throw new IllegalArgumentException("contextWindow must be positive");
-    }
-    if (maxOutputTokens <= 0) {
-      throw new IllegalArgumentException("maxOutputTokens must be positive");
-    }
-    long keep = effectiveKeep(contextWindow);
-    long reserve = effectiveReserve(maxOutputTokens);
-    return Math.max(keep, contextWindow - reserve);
-  }
-
-  /** 手动压缩最低上下文量：{@code min(keepRecentTokens * 2, C / 2)}。 */
-  public long manualMinimum(long contextWindow) {
-    if (contextWindow <= 0) {
-      throw new IllegalArgumentException("contextWindow must be positive");
-    }
-    return Math.min(keepRecentTokens * 2L, contextWindow / 2L);
   }
 
   /** Summary output token limit: {@code floor(0.8 * reserve)}. */

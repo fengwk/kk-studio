@@ -207,7 +207,7 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 事务外的外部执行，以及把终态物化为公共 Entry。
 
 - `AgentDriver` 声明 `id()`、`capabilities()` 与 `validateSettings()`，实现回合生命周期（`resolveTurn`、
-  `readState`、`lockState`、`applyResponse`、`completeToolBatch`、`prepareAutomaticCompaction`、`stop`），
+  `readState`、`lockState`、`applyResponse`、`completeToolBatch`、`stop`），
   并通过 `works()` 交出 `DriverWork(type, handler)`、通过 `cancelWork()` 与 `hasActiveWork()` 参与停止与排空。
 - Work 类型由定义方声明：内核只有 `WorkTargetType.THREAD` 与 `TOOL`；Driver 用
   `WorkTargetType.driver(value, rank)` 定义自己的类型；环境亲和性目前只有内核 `TOOL` 声明。`rank` 决定调度顺序与锁阶梯，Builtin 的

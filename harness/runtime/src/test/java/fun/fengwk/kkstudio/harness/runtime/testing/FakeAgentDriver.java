@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.testing;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
@@ -42,7 +41,6 @@ public final class FakeAgentDriver implements AgentDriver {
       new FakeLockedDriverState(DriverActivity.NONE, null, null, null, null);
 
   private final Supplier<TurnResolution> turnResolution;
-  private final Supplier<CompactionPreparation> automaticCompaction;
   private String id = "fake";
   private DriverCapabilities capabilities = new DriverCapabilities(true, true);
   private LockedDriverState state = NONE_STATE;
@@ -50,23 +48,16 @@ public final class FakeAgentDriver implements AgentDriver {
   private DriverStopResult stopResult = new DriverStopResult(null, List.of());
 
   public FakeAgentDriver() {
-    this(() -> null, () -> null);
+    this(() -> null);
   }
 
   public FakeAgentDriver(String id) {
-    this(() -> null, () -> null);
+    this(() -> null);
     this.id = Objects.requireNonNull(id, "id");
   }
 
   public FakeAgentDriver(Supplier<TurnResolution> turnResolution) {
-    this(turnResolution, () -> null);
-  }
-
-  public FakeAgentDriver(
-      Supplier<TurnResolution> turnResolution,
-      Supplier<CompactionPreparation> automaticCompaction) {
     this.turnResolution = Objects.requireNonNull(turnResolution, "turnResolution");
-    this.automaticCompaction = Objects.requireNonNull(automaticCompaction, "automaticCompaction");
   }
 
   /** 固定返回同一个 turn resolution 的便捷构造。 */
@@ -158,12 +149,6 @@ public final class FakeAgentDriver implements AgentDriver {
       LockedDriverState state,
       List<ToolInvocation> siblings,
       DriverCommit commit) {}
-
-  @Override
-  public CompactionPreparation prepareAutomaticCompaction(
-      ThreadState thread, EntryPath path, CompactionConfig config, boolean hasQueuedMessage) {
-    return automaticCompaction.get();
-  }
 
   @Override
   public DriverStopResult stop(

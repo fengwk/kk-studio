@@ -140,6 +140,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /** 真实临时 PostgreSQL 端到端集成测试：覆盖压缩子 Thread 创建、父 durable wait、子真实执行到终态、父消费并按摘要提交。 */
 class PostgresqlCompactionChildTest {
@@ -444,6 +445,9 @@ class PostgresqlCompactionChildTest {
   /** 记录每次普通 Turn 解析出的 spec：用于在断言收紧结果的同时证明“收紧前确实更大 / 带 cache”。 */
   private final List<ModelRequestSpec> observedResolvedSpecs = new CopyOnWriteArrayList<>();
 
+  /** 模拟平台请求前预算判定：本测试类的基线历史第一次请求必须先压缩。 */
+  private final AtomicBoolean compactionRequired = new AtomicBoolean(true);
+
   @BeforeEach
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
@@ -459,6 +463,9 @@ class PostgresqlCompactionChildTest {
                 CONTEXT_WINDOW,
                 MAX_OUTPUT_TOKENS,
                 new BranchSettings("compaction", BuiltinExecution.of(compactorModel), null));
+          }
+          if (compactionRequired.compareAndSet(true, false)) {
+            return new TurnResolver.CompactionRequired(CONTEXT_WINDOW);
           }
           ModelRequestSpec spec = resolvedSpec(path.baseSettings());
           observedResolvedSpecs.add(spec);
@@ -723,6 +730,64 @@ class PostgresqlCompactionChildTest {
     assertEquals("CANCELLED", ((AssistantErrorPayload) result.payload()).error().code());
     assertFalse(snapshot(parentId).thread().executionControl().isStopped());
     assertEquals(1, queuedCommandCount(parentId));
+    assertFalse(hasWork(WorkTargetType.THREAD, parentId));
+  }
+
+  /** 普通请求因上下文溢出失败后只规划一次 OVERFLOW 压缩；重试再次溢出时直接失败，绝不递归压缩。 */
+  @Test
+  void overflowFailureCompactsOnceAndRejectsTheSecondOverflowRetry() {
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    compactionRequired.set(false);
+    seedUserCommand(parentId, "queued input");
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    UUID inputTurnId = path(parentId).openTurnStart().orElseThrow().id();
+    UUID parentModelId = findModelInvocationByTurn(parentId, inputTurnId).orElseThrow().id();
+    gateway.queue(
+        new ModelGateway.Failed(
+            new ModelInvocationError(ProviderErrorKind.CONTEXT_LIMIT, "context window exceeded")));
+    assertEquals(ProcessResult.STARTED, processModel(parentModelId, T1));
+    processNext(parentId);
+
+    // 失败事实保留；同一事务内启动 OVERFLOW 压缩并 durable wait。
+    EntryPath afterFailure = path(parentId);
+    TurnStartPayload overflowStart =
+        assertInstanceOf(TurnStartPayload.class, afterFailure.head().payload());
+    assertEquals(TurnStartReason.COMPACTION, overflowStart.reason());
+    assertEquals(CompactionTrigger.OVERFLOW, overflowStart.compaction().trigger());
+
+    UUID childThreadId = overflowStart.compaction().childThreadId();
+    processNext(childThreadId);
+    UUID childModelId = openChildModel(childThreadId);
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(
+                providerResponse("summary after overflow", GenerationStopReason.COMPLETE))));
+    assertEquals(ProcessResult.STARTED, processModel(childModelId, T1));
+    processNext(childThreadId);
+    processNext(parentId);
+    processNext(parentId);
+
+    // 压缩成功后的唯一一次 CONTINUATION 重试。
+    EntryPath retryPath = path(parentId);
+    TurnStartPayload retryStart =
+        assertInstanceOf(TurnStartPayload.class, retryPath.head().payload());
+    assertEquals(TurnStartReason.CONTINUATION, retryStart.reason());
+    UUID retryModelId =
+        findModelInvocationByTurn(parentId, retryPath.head().id()).orElseThrow().id();
+    gateway.queue(
+        new ModelGateway.Failed(
+            new ModelInvocationError(ProviderErrorKind.CONTEXT_LIMIT, "still too long")));
+    assertEquals(ProcessResult.STARTED, processModel(retryModelId, T1));
+    processNext(parentId);
+
+    // 再次溢出：不规划第二次压缩，保留真实失败并停止。
+    EntryPath stoppedPath = path(parentId);
+    TurnEndPayload end = assertInstanceOf(TurnEndPayload.class, stoppedPath.head().payload());
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
+    assertFalse(end.continueModel());
     assertFalse(hasWork(WorkTargetType.THREAD, parentId));
   }
 

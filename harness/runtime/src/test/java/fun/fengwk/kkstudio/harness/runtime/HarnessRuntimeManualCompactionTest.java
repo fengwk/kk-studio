@@ -90,15 +90,15 @@ class HarnessRuntimeManualCompactionTest {
           BigDecimal.ZERO);
 
   @Test
-  void availabilityDisablesSmallAndBusyThreads() {
-    // 小上下文低于 manualMinimum；open turn 即使无 Model 行也属于不安全控制面。
+  void availabilityUsesTheCompactionCutRuleAndRejectsBusyThreads() {
+    // 小历史没有越过 keepRecent，cut 落在 ROOT：没有可摘要前缀，稳定返回 NOTHING_TO_COMPACT。
     Fixture smallFixture = fixture();
     ClosedTurnBaseline small = seedSmallClosedTurn(smallFixture.store);
     ManualCompactionAvailability smallAvailability =
         smallFixture.runtime.manualCompactionAvailability(small.threadId());
     assertFalse(smallAvailability.available());
     assertEquals(
-        ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM,
+        ManualCompactionAvailability.DisabledReason.NOTHING_TO_COMPACT,
         smallAvailability.disabledReason());
 
     Fixture busyFixture = fixture();

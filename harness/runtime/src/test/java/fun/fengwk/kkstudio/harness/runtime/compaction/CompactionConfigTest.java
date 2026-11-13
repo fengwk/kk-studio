@@ -7,7 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 
-/** CompactionConfig 统一 keep/reserve/threshold/manual/output 公式。 */
+/** CompactionConfig 统一 keep/reserve/output 公式。 */
 class CompactionConfigTest {
 
   @Test
@@ -17,18 +17,17 @@ class CompactionConfigTest {
   }
 
   @Test
-  void computesKeepReserveThresholdAndManualMinimum() {
-    // 30k window：keep 与 manual 都受 C/2 限制；soft threshold 不低于 effectiveKeep。
+  void computesKeepAndReserveFromWindowAndOutput() {
     CompactionConfig config = new CompactionConfig(20_000);
-    assertEquals(15_000L, config.effectiveKeep(30_000));
-    assertEquals(15_000L, config.manualMinimum(30_000));
-    assertEquals(16_384L, config.effectiveReserve(50_000));
-    assertEquals(15_000L, config.softThreshold(30_000, 50_000));
 
-    // 128k window：keep=20k，reserve=16,384，soft threshold=111,616，manual=40k。
+    // 30k window：keep 与 reserve 都受各自上限限制。
+    assertEquals(15_000L, config.effectiveKeep(30_000));
+    assertEquals(16_384L, config.effectiveReserve(50_000));
+
+    // 128k window：keep=20k，reserve=16,384。
     assertEquals(20_000L, config.effectiveKeep(128_000));
-    assertEquals(40_000L, config.manualMinimum(128_000));
-    assertEquals(111_616L, config.softThreshold(128_000, 32_000));
+    assertEquals(16_384L, config.effectiveReserve(32_000));
+    assertEquals(1_000L, config.effectiveReserve(1_000));
   }
 
   @Test
@@ -45,8 +44,6 @@ class CompactionConfigTest {
     assertThrows(IllegalArgumentException.class, () -> new CompactionConfig(0));
     assertThrows(IllegalArgumentException.class, () -> config.effectiveKeep(0));
     assertThrows(IllegalArgumentException.class, () -> config.effectiveReserve(0));
-    assertThrows(IllegalArgumentException.class, () -> config.softThreshold(1, 0));
-    assertThrows(IllegalArgumentException.class, () -> config.manualMinimum(0));
     assertThrows(IllegalArgumentException.class, () -> config.outputBudget(0));
   }
 }

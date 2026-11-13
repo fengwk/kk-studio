@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -41,6 +42,8 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
@@ -132,6 +135,12 @@ public final class ThreadProcessor {
       new AssistantError(
           "TURN_RESOLVE_FAILED",
           "Turn planning failed before the model was invoked. Send a new message to retry.");
+
+  /** 请求无法放入模型上下文且已无可压缩前缀（或压缩后的唯一重试仍放不下）。 */
+  private static final AssistantError CONTEXT_BUDGET_EXCEEDED =
+      new AssistantError(
+          "CONTEXT_LIMIT",
+          "The conversation does not fit the model context window and cannot be compacted further. Reduce the attached context or start a new conversation.");
 
   private final HarnessStore store;
   private final DriverRegistry driverRegistry;
@@ -279,19 +288,8 @@ public final class ThreadProcessor {
       case ThreadContext.ToolActive pending -> dispatchQueuedTools(
           tx, claim, thread, pending.assistant());
       case ThreadContext.ContinuationDue ignored -> {
-        // owned HISTORY 机械续作仍由 compactionPreparation 保持最高优先级；普通 continuation
-        // 在越过 soft threshold 时先压缩，成功后再由 durable continueModel obligation 恢复。
-        CompactionPreparation preparation =
-            thread.constraints().allowAutoCompaction()
-                ? driver.prepareAutomaticCompaction(
-                    thread, path, config.compactionProvider().compactionConfig(), true)
-                : null;
-        if (preparation != null) {
-          planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
-          return;
-        }
-        // 压缩判断完成后，已关闭 turn 是安全边界：有序消费完整输入快照，
-        // 让预算提醒、用户 steering 与 child completion 不必等自动续作彻底停止。
+        // 已关闭 turn 是安全边界：有序消费完整输入快照，让预算提醒、用户 steering 与 child completion
+        // 不必等自动续作彻底停止。
         if (ThreadInputDemand.hasInputDemand(tx, thread)
             && driver.allowsQueuedInputHarvest(tx, thread, path)) {
           planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
@@ -303,16 +301,6 @@ public final class ThreadProcessor {
         // 已物化但位于输入水位之后的系统通知仍需普通输入处理：需求只按本 Thread 自己的 Command 判定（fork 不继承源邮箱，
         // 压缩改写 head 也不会丢失该需求）。
         boolean userDemand = ThreadInputDemand.hasInputDemand(tx, thread);
-        // owned HISTORY / fallback / hard overflow 优先；idle soft threshold 只有真实 user demand 存在时才启动。
-        CompactionPreparation preparation =
-            thread.constraints().allowAutoCompaction()
-                ? driver.prepareAutomaticCompaction(
-                    thread, path, config.compactionProvider().compactionConfig(), userDemand)
-                : null;
-        if (preparation != null) {
-          planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
-          return;
-        }
         if (userDemand && driver.allowsQueuedInputHarvest(tx, thread, path)) {
           planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
           return;
@@ -429,17 +417,14 @@ public final class ThreadProcessor {
     }
     boolean requestThread = false;
     if (!toolPhase) {
-      boolean compactionDue =
-          advancedThread.constraints().allowAutoCompaction()
-              && driver.prepareAutomaticCompaction(
-                      advancedThread,
-                      tx.entries().loadPath(head),
-                      config.compactionProvider().compactionConfig(),
-                      hasQueuedMessage)
-                  != null;
-      requestThread = continueModel || hasQueuedMessage || compactionDue;
+      EntryPath endPath = tx.entries().loadPath(head);
+      if (applied.outcome() == TurnEndOutcome.FAILED
+          && startOverflowCompaction(tx, claim, advancedThread, endPath, now)) {
+        return;
+      }
+      requestThread = continueModel || hasQueuedMessage;
       if (continueModel) {
-        coordinator.remindSoftBudgetIfDue(tx, advancedThread, tx.entries().loadPath(head), now);
+        coordinator.remindSoftBudgetIfDue(tx, advancedThread, endPath, now);
       }
       if (terminal) {
         ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
@@ -697,19 +682,9 @@ public final class ThreadProcessor {
     EntryPath endPath = tx.entries().loadPath(turnEndId);
     AgentDriver driver = driverRegistry.of(endPath.baseSettings());
     boolean compactionCancelled = outcome == TurnEndOutcome.STOPPED;
-    boolean compactionDue =
-        !stopped
-            && !compactionCancelled
-            && thread.constraints().allowAutoCompaction()
-            && driver.prepareAutomaticCompaction(
-                    advanced,
-                    endPath,
-                    config.compactionProvider().compactionConfig(),
-                    hasQueuedDemand)
-                != null;
     boolean mechanicalWake = !stopped && outcome == TurnEndOutcome.COMPLETED && continueModel;
     boolean requestThread =
-        !compactionCancelled && (hasQueuedDemand && !stopped || compactionDue || mechanicalWake);
+        !compactionCancelled && ((hasQueuedDemand && !stopped) || mechanicalWake);
     if (mechanicalWake) {
       coordinator.remindSoftBudgetIfDue(tx, advanced, endPath, now);
     }
@@ -861,7 +836,7 @@ public final class ThreadProcessor {
             pendingNotificationInput,
             childThread,
             rootEnvironmentName);
-    resolveAndCommitTx(tx, claim, thread, plan);
+    resolveAndCommitTx(tx, claim, thread, path, plan, now);
   }
 
   /**
@@ -871,7 +846,12 @@ public final class ThreadProcessor {
    * + FAILED TURN_END 并结算 Join，绝不无限重排，也不把 raw cause 写入 durable。
    */
   private void resolveAndCommitTx(
-      HarnessStore.Transaction tx, ClaimedWork claim, ThreadState thread, TurnPlan plan) {
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      EntryPath path,
+      TurnPlan plan,
+      Instant now) {
     TurnResolution resolution;
     AgentDriver driver = driverRegistry.of(plan.candidatePath().baseSettings());
     try {
@@ -889,7 +869,61 @@ public final class ThreadProcessor {
       log.warn("turn resolver returned null for thread {}; failing the turn", plan.threadId());
       resolution = new TurnResolution.Rejected(DETERMINISTIC_FAILURE);
     }
+    if (resolution instanceof TurnResolution.CompactionRequired required) {
+      // 请求预算不足：先压缩同一历史；压缩后的请求只重试一次，仍放不下则直接失败，绝不递归压缩。
+      CompactionPreparation preparation =
+          compactionPreparation(
+              path, CompactionTrigger.THRESHOLD, required.conversationContextWindow());
+      if (preparation != null && !CompactionHistory.isImmediatePostCompactionRetry(path)) {
+        planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
+        return;
+      }
+      resolution = new TurnResolution.Rejected(CONTEXT_BUDGET_EXCEEDED);
+    }
     commitTx(tx, claim, thread, plan, resolution);
+  }
+
+  /**
+   * 失败请求若由上下文溢出导致，立即在同一事务内启动一次 OVERFLOW 压缩；压缩成功后 owner 以普通 CONTINUATION 重试同一输入。
+   *
+   * <p>溢出重试本身再次溢出时不再压缩，保留真实失败事实并等待用户下一步。返回 {@code true} 表示已启动压缩并完成 claim。
+   */
+  private boolean startOverflowCompaction(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      EntryPath path,
+      Instant now) {
+    if (path.openTurnStart().isPresent()) {
+      return false;
+    }
+    CompactionHistory.ClosedTurn latest = CompactionHistory.latestClosedTurn(path);
+    if (latest == null) {
+      return false;
+    }
+    TurnStartPayload start = (TurnStartPayload) latest.start().payload();
+    if (!thread.id().equals(start.ownerThreadId()) || start.contextWindow() == null) {
+      return false;
+    }
+    Entry result = CompactionHistory.turnResultEntry(path, latest.start());
+    if (!CompactionHistory.isContextWall(start, result)
+        || CompactionHistory.isOverflowRecoveryRetry(path, latest)) {
+      return false;
+    }
+    CompactionPreparation preparation =
+        compactionPreparation(path, CompactionTrigger.OVERFLOW, start.contextWindow());
+    if (preparation == null) {
+      return false;
+    }
+    planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
+    return true;
+  }
+
+  private CompactionPreparation compactionPreparation(
+      EntryPath path, CompactionTrigger trigger, int contextWindow) {
+    return new CompactionPlanner(config.compactionProvider().compactionConfig())
+        .prepare(path, trigger, contextWindow)
+        .orElse(null);
   }
 
   /**

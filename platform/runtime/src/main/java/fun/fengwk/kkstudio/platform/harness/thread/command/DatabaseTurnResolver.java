@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.thread.command;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
@@ -26,10 +27,10 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
+import fun.fengwk.kkstudio.harness.spi.compaction.CompactionModelProvider;
 import fun.fengwk.kkstudio.harness.spi.compaction.RequestTokenEstimator;
 import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.Model;
@@ -81,6 +82,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   private final ModelGroupConfigCodec groupConfigCodec;
   private final Map<ProviderType, ProviderFactory> providerFactories;
   private final CompactionConfigProvider compactionConfigProvider;
+  private final CompactionModelProvider compactionModelProvider;
   private final DatabaseAgentTurnContextResolver contextResolver;
   private final RequestTokenEstimator requestTokenEstimator;
 
@@ -92,6 +94,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
       ModelGroupConfigCodec groupConfigCodec,
       Map<ProviderType, ProviderFactory> providerFactories,
       CompactionConfigProvider compactionConfigProvider,
+      CompactionModelProvider compactionModelProvider,
       DatabaseAgentTurnContextResolver contextResolver,
       RequestTokenEstimator requestTokenEstimator) {
     this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
@@ -103,6 +106,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
         Map.copyOf(Objects.requireNonNull(providerFactories, "providerFactories"));
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
+    this.compactionModelProvider =
+        Objects.requireNonNull(compactionModelProvider, "compactionModelProvider");
     this.contextResolver = Objects.requireNonNull(contextResolver, "contextResolver");
     this.requestTokenEstimator =
         Objects.requireNonNull(requestTokenEstimator, "requestTokenEstimator");
@@ -117,17 +122,40 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(path, "path");
     try {
       if (compactionPreparation != null) {
-        return resolveCompaction(compactionPreparation);
+        return resolveCompaction(path.baseSettings(), compactionPreparation);
       }
       Objects.requireNonNull(threadId, "threadId");
       Objects.requireNonNull(rootSessionId, "rootSessionId");
-      return resolved(plan(threadId, rootSessionId, path, path.baseSettings()));
+      RequestPlan request = planRequest(threadId, rootSessionId, path, path.baseSettings());
+      LiveTurnPlan.Planned planned = request.planned();
+      CompactionConfig compaction = compactionConfigProvider.compactionConfig();
+      long reserve = compaction.effectiveReserve(request.conversationMaxOutputTokens());
+      long budget =
+          Math.min(
+              planned.contextWindow(), compactorContextWindow(request.conversationContextWindow()));
+      if (request.estimatedInputTokens() + reserve > budget) {
+        return new CompactionRequired(planned.contextWindow());
+      }
+      return resolved(planned);
     } catch (Rejection | AgentTurnContextException rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常按类型分别处理。
       return rejected(rejection.getMessage());
     } catch (DataAccessException failure) {
       // 解析在调用方 turn 事务内执行：任何 SQL 访问异常都可能已把该事务标记为 rollback-only，绝不能继续在同一事务里写
       // Rejected/FAILED。统一适配为显式 typed transient，由 Processor 整体回滚后在事务边界外受控 reschedule。
+      throw new TurnResolveTransientException(
+          "turn resolution infrastructure unavailable", failure);
+    }
+  }
+
+  @Override
+  public Result resolveCompactionBranch(UUID threadId, UUID rootSessionId, EntryPath path) {
+    Objects.requireNonNull(path, "path");
+    try {
+      return resolveCompactionBranch(path);
+    } catch (Rejection | AgentTurnContextException rejection) {
+      return rejected(rejection.getMessage());
+    } catch (DataAccessException failure) {
       throw new TurnResolveTransientException(
           "turn resolution infrastructure unavailable", failure);
     }
@@ -200,6 +228,18 @@ public final class DatabaseTurnResolver implements TurnResolver {
 
   private LiveTurnPlan.Planned plan(
       UUID threadId, UUID rootSessionId, EntryPath path, BranchSettings settings) {
+    return planRequest(threadId, rootSessionId, path, settings).planned();
+  }
+
+  /** 普通请求的完整规划事实：冻结 spec 与触发阈值判定所需的输入/输出估算。 */
+  private record RequestPlan(
+      LiveTurnPlan.Planned planned,
+      long estimatedInputTokens,
+      long conversationMaxOutputTokens,
+      int conversationContextWindow) {}
+
+  private RequestPlan planRequest(
+      UUID threadId, UUID rootSessionId, EntryPath path, BranchSettings settings) {
     // 一次上下文解析租用一份 catalog 快照：Agent/Environment/tools/skills/subagents/prompt 同源。
     AgentTurnContext context = contextResolver.resolve(threadId, rootSessionId, path, settings);
     ResolvedSelection resolved =
@@ -228,22 +268,31 @@ public final class DatabaseTurnResolver implements TurnResolver {
                         member.parsed(), contextWindow(member.parsed()), estimatedInputTokens))
             .min()
             .orElseThrow();
-    return new LiveTurnPlan.Planned(
-        new ModelRequestSpec(
-            first.providerType(),
-            first.providerConnectionGenerationId(),
-            resolved.descriptor(),
-            first.variant(),
-            first.parsed().variants(),
-            outputTokens,
-            systemInstruction,
-            context.toolBindings(),
-            context.subagentBindings(),
-            resolved.group(),
-            context.systemSections()),
-        contextWindow,
-        context.candidateTools(),
-        context.skills());
+    long conversationMaxOutputTokens =
+        resolved.members().stream()
+            .mapToLong(member -> member.parsed().maxOutputTokens())
+            .min()
+            .orElseThrow();
+    return new RequestPlan(
+        new LiveTurnPlan.Planned(
+            new ModelRequestSpec(
+                first.providerType(),
+                first.providerConnectionGenerationId(),
+                resolved.descriptor(),
+                first.variant(),
+                first.parsed().variants(),
+                outputTokens,
+                systemInstruction,
+                context.toolBindings(),
+                context.subagentBindings(),
+                resolved.group(),
+                context.systemSections()),
+            contextWindow,
+            context.candidateTools(),
+            context.skills()),
+        estimatedInputTokens,
+        conversationMaxOutputTokens,
+        contextWindow);
   }
 
   private static List<String> requestSystemMessages(
@@ -454,35 +503,23 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /**
-   * 压缩 resolver 路径：只按 preparation 的 executionModel 查找模型、Provider 与 Variant 构造请求——不查 Agent system
-   * prompt、不查 contributors、零 tool/skill、不做 environment 可用性查找。压缩使用 Compaction Agent 自身配置的模型与
-   * variant。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按模型输出上限与固定比例计算。
+   * 压缩 owner turn：按 {@code aiRuntime.compactionModel} 解析压缩执行；未配置或配置无效时沿用对话当前模型与 variant。
+   *
+   * <p>配置有效但调用失败仍按普通重试耗尽后判定压缩失败，绝不换模型。摘要预算固定为模型输出上限 reserve 的 80%，切分事实由 candidate path 的 compaction
+   * TURN_START 持有，不复制进 spec。
    */
-  private Result resolveCompaction(CompactionPreparation preparation) {
-    String compactionAgentName = BuiltinAgents.COMPACTION_NAME;
-    Agent agent =
-        require(
-            agentRepository.getByName(compactionAgentName),
-            "agent not found: " + compactionAgentName);
-    if (agent.execution() == null) {
-      throw rejection("compaction agent has no configured model");
+  private Result resolveCompaction(
+      BranchSettings conversationSettings, CompactionPreparation preparation) {
+    Objects.requireNonNull(preparation, "preparation");
+    ModelSelection conversation = BuiltinExecution.model(conversationSettings.execution());
+    ResolvedSelection resolved = configuredCompactionSelection();
+    if (resolved == null) {
+      resolved = resolveLogicalModel(conversation);
     }
-    if (!BuiltinExecution.DRIVER.equals(agent.execution().driver())) {
-      throw rejection("compaction agent must use builtin execution");
-    }
-    ModelSelection selection = builtinAgentModel(agent);
-    Model model =
-        require(
-            modelRepository.getByName(selection.modelName()),
-            "model not found: " + selection.modelName());
-    ResolvedSelection resolved = resolveLogical(model, selection.variant(), null);
     for (MemberRuntime member : resolved.members()) {
       requireReasoningSupport(member);
     }
-    ModelSelection compactorModel =
-        resolved.group() == null
-            ? ModelSelection.model(model.name(), resolved.members().getFirst().variant().id())
-            : ModelSelection.group(model.name());
+    ExecutionSelection compactorExecution = BuiltinExecution.of(compactorSelection(resolved));
     int maxOutputTokens =
         resolved.members().stream()
             .mapToInt(member -> outputTokens(member.parsed()))
@@ -496,11 +533,90 @@ public final class DatabaseTurnResolver implements TurnResolver {
     } catch (IllegalArgumentException error) {
       throw rejection(error.getMessage());
     }
-    ExecutionSelection compactorExecution = BuiltinExecution.of(compactorModel);
+    // 分支继承 owner Agent 身份；压缩执行模型独立，环境与工具面来自切点处的 SYSTEM 基线而不是现场解析。
     BranchSettings childSettings =
-        new BranchSettings(compactionAgentName, compactorExecution, null);
+        new BranchSettings(conversationSettings.agentName(), compactorExecution, null);
     return new TurnResolver.CompactionResolved(
         compactorExecution, outputBudget, resolved.contextWindow(), maxOutputTokens, childSettings);
+  }
+
+  /**
+   * 压缩分支自身的请求：SYSTEM instruction 与工具定义继承切点处的基线，模型来自分支冻结执行。
+   *
+   * <p>分支不重新解析 Agent/Environment，也不执行工具；工具调用由 Driver 以固定错误拒绝。分支超出压缩模型窗口时直接拒绝，压缩失败。
+   */
+  private Result resolveCompactionBranch(EntryPath path) {
+    BranchSettings settings = path.baseSettings();
+    ResolvedSelection resolved = resolveLogicalModel(BuiltinExecution.model(settings.execution()));
+    for (MemberRuntime member : resolved.members()) {
+      requireReasoningSupport(member);
+    }
+    SystemContext inherited =
+        path.systemContext()
+            .orElseThrow(() -> rejection("compaction branch has no inherited SYSTEM baseline"));
+    String systemInstruction = inherited.systemInstruction();
+    long estimatedInputTokens =
+        requestTokenEstimator.estimateRequestTokens(path, List.of(systemInstruction));
+    int outputTokens =
+        resolved.members().stream()
+            .mapToInt(
+                member ->
+                    outputTokens(
+                        member.parsed(), contextWindow(member.parsed()), estimatedInputTokens))
+            .min()
+            .orElseThrow();
+    MemberRuntime first = resolved.members().getFirst();
+    return new TurnResolver.Resolved(
+        new ModelRequestSpec(
+            first.providerType(),
+            first.providerConnectionGenerationId(),
+            resolved.descriptor(),
+            first.variant(),
+            first.parsed().variants(),
+            outputTokens,
+            systemInstruction,
+            inherited.tools(),
+            List.of(),
+            resolved.group(),
+            inherited.sections()),
+        resolved.contextWindow(),
+        outputTokens);
+  }
+
+  /** 已配置的压缩模型；未配置或无法解析（引用缺失、Provider 删除/停用、组带 variant）时返回 null 由调用方回退对话模型。 */
+  private ResolvedSelection configuredCompactionSelection() {
+    ModelSelection configured = compactionModelProvider.compactionModel();
+    if (configured == null) {
+      return null;
+    }
+    try {
+      return resolveLogicalModel(configured);
+    } catch (Rejection ignored) {
+      return null;
+    }
+  }
+
+  /** 触发阈值使用的压缩模型窗口；无效配置沿用对话模型窗口。 */
+  private int compactorContextWindow(int conversationContextWindow) {
+    ResolvedSelection configured = configuredCompactionSelection();
+    return configured == null ? conversationContextWindow : configured.contextWindow();
+  }
+
+  /** 按显式选择解析单个 MODEL 或 MODEL_GROUP；GROUP 必须不带 variant。 */
+  private ResolvedSelection resolveLogicalModel(ModelSelection selection) {
+    Objects.requireNonNull(selection, "selection");
+    Model model =
+        require(
+            modelRepository.getByName(selection.modelName()),
+            "model not found: " + selection.modelName());
+    return resolveLogical(model, selection.variant(), null);
+  }
+
+  private static ModelSelection compactorSelection(ResolvedSelection resolved) {
+    return resolved.group() == null
+        ? ModelSelection.model(
+            resolved.descriptor().modelName(), resolved.members().getFirst().variant().id())
+        : ModelSelection.group(resolved.descriptor().modelName());
   }
 
   /** Builtin 预算口径集中在 platform.harness.builtin；这里只把非法配置转换为确定性拒绝。 */

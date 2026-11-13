@@ -23,7 +23,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
-import fun.fengwk.kkstudio.harness.runtime.compaction.TokenEstimator;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
@@ -136,7 +135,7 @@ final class ManualCompactionControl {
         hasUserDemand(queued));
   }
 
-  /** 沿当前分支回溯带上下文预算的已关闭 Turn，并依次检查所有权、模型与 token 阈值。 */
+  /** 沿当前分支回溯带上下文预算的已关闭 Turn，并检查所有权并使用同一 cut 规则。 */
   private ManualDecision manualDecision(
       HarnessStore.Transaction tx, ThreadState thread, EntryPath path) {
     // STOPPED 是持久执行事实：历史仍然可读，但绝不能在停止的 Thread 上启动新的压缩回合或 resolve。
@@ -155,49 +154,29 @@ final class ManualCompactionControl {
         || !tx.joins().loadIncomplete(thread.id()).isEmpty()
         // 手动入口使用与自动压缩相同的约束 guard：创建约束不允许压缩的 Thread（压缩子自身及其后代）一律不可手动压缩，
         // 不依赖上层调用方（Web root guard）拦截，runtime primitive 自身绝不递归创建压缩子。
-        || !thread.constraints().allowAutoCompaction()
-        || driver.prepareAutomaticCompaction(thread, path, compactionConfig, false) != null) {
+        || !thread.constraints().allowAutoCompaction()) {
       return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.THREAD_BUSY);
     }
     CompactionHistory.ClosedTurn candidate = CompactionHistory.latestClosedTurn(path);
-    boolean mismatchedExecutionSeen = false;
     while (candidate != null) {
       TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
       if (!thread.id().equals(start.ownerThreadId())) {
         return ManualDecision.disabled(
             ManualCompactionAvailability.DisabledReason.OWNERSHIP_BARRIER);
       }
-      if (start.contextWindow() != null && start.maxOutputTokens() != null) {
-        var execution =
-            start.compaction() == null
-                ? start.settings().execution()
-                : start.compaction().execution();
-        if (execution.equals(path.baseSettings().execution())) {
-          long projectedTokens = TokenEstimator.estimateProjectionTokens(path);
-          long minimum = compactionConfig.manualMinimum(start.contextWindow());
-          if (projectedTokens < minimum) {
-            return ManualDecision.disabled(
-                ManualCompactionAvailability.DisabledReason.BELOW_MINIMUM);
-          }
-          CompactionPreparation preparation =
-              new CompactionPlanner(compactionConfig)
-                  .prepare(path, CompactionTrigger.MANUAL, start.contextWindow())
-                  .orElse(null);
-          return preparation == null
-              ? ManualDecision.disabled(
-                  ManualCompactionAvailability.DisabledReason.NOTHING_TO_COMPACT)
-              : ManualDecision.enabled(preparation);
-        }
-        if (start.compaction() == null) {
-          mismatchedExecutionSeen = true;
-        }
+      if (start.contextWindow() != null) {
+        CompactionPreparation preparation =
+            new CompactionPlanner(compactionConfig)
+                .prepare(path, CompactionTrigger.MANUAL, start.contextWindow())
+                .orElse(null);
+        return preparation == null
+            ? ManualDecision.disabled(
+                ManualCompactionAvailability.DisabledReason.NOTHING_TO_COMPACT)
+            : ManualDecision.enabled(preparation);
       }
       candidate = CompactionHistory.previousClosedTurn(path, candidate);
     }
-    return ManualDecision.disabled(
-        mismatchedExecutionSeen
-            ? ManualCompactionAvailability.DisabledReason.EXECUTION_CHANGED
-            : ManualCompactionAvailability.DisabledReason.NO_RESOLVED_CONTEXT);
+    return ManualDecision.disabled(ManualCompactionAvailability.DisabledReason.NO_RESOLVED_CONTEXT);
   }
 
   /** 在当前已锁定事务中原子提交压缩 Turn 及其 Model Work 或失败终态。 */

@@ -81,25 +81,6 @@ public final class TokenEstimator {
     return tokens;
   }
 
-  /** 估算以 {@code newSummary} 替换掉 cut 之前内容后的 provider projection token（wrapper + cut 后保留段）。 */
-  public static long estimateProjectionTokensAfter(
-      EntryPath path, String newSummary, UUID cutEntryId) {
-    Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(newSummary, "newSummary");
-    Objects.requireNonNull(cutEntryId, "cutEntryId");
-    List<Entry> entries = path.entries();
-    boolean[] visible = visibilityMask(entries);
-    int cutIndex = indexOfId(entries, cutEntryId);
-    if (cutIndex < 0) {
-      throw new IllegalStateException("cutEntryId is not on the current path: " + cutEntryId);
-    }
-    long tokens = estimateTextTokens(CompactionPrompts.compactedContext(newSummary));
-    for (int i = cutIndex; i < entries.size(); i++) {
-      tokens = Math.addExact(tokens, visible[i] ? estimateTokens(entries.get(i)) : 0L);
-    }
-    return tokens;
-  }
-
   /** 估算指定 Entry 之后仍会进入 Provider Context 的可见消息 token；Entry 缺失即分支损坏，fail closed。 */
   public static long estimateVisibleTokensAfter(EntryPath path, UUID entryId) {
     Objects.requireNonNull(path, "path");

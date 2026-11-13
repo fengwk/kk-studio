@@ -231,7 +231,6 @@ preflight 创建的 execution 在返回 `STARTED` 前由 Processor 负责清理�
 - `readState` / `lockState`：读取或锁定当前 open 回合的 Driver 状态；只有 `lockState` 的结果可用于执行与变更。
 - `applyResponse`：generation 已终止但尚未物化（`GENERATION_TERMINAL_PENDING`）时，由 ThreadProcessor 或 Stop 调用，把结果原子物化为公共 Entry 与工具调用。
 - `completeToolBatch`：工具结果与 `TURN_END` 已追加、Thread head 已推进之后调用，供 Driver 校验并清理该 generation 的私有状态。
-- `prepareAutomaticCompaction`：由 Driver 自己的策略决定是否需要自动压缩；Runtime 只负责压缩回合的结构与子执行结算。
 - `stop`：撤销执行资格，按需追加 barrier Entry，返回 [`DriverStopResult`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/driver/DriverStopResult.java)`(barrierEntryId, executionIds)`。
 - `allowsQueuedInputHarvest`（默认 `true`）：Runtime 在应用排队设置、`ContinuationDue` 与新 `INPUT` 回合这三个收割边界询问 Driver；Driver 的私有周期仍在进行时返回 `false`，排队输入留待下一个边界。
 - `completeStop`（默认 no-op）：Stop 推进公共 Thread head 之后调用，供 Driver 把私有记录对齐到已提交的 head。
@@ -270,14 +269,14 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 
 ## 压缩
 
-压缩回合自身不调用模型：父 Thread 打开 `TURN_START(COMPACTION)`，在同一事务里经统一 [`AgentSpawner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AgentSpawner.java) 创建新 Session 上的子 Thread、首条摘要命令与 `SETTLE_OWNER_TURN` 票据，然后在 durable wait 中等待结算：
+压缩回合自身不调用模型：父 Thread 打开 `TURN_START(COMPACTION)`，在同一事务里经统一 [`AgentSpawner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/AgentSpawner.java) 在同一 Session 上从切点创建 `COMPACTION` branch Thread、首条摘要命令与 `SETTLE_OWNER_TURN` 票据，然后在 durable wait 中等待结算：
 
 ```text
 父 TURN_START(COMPACTION) -> COMPACTION(summaryText) -> TURN_END
-子 TURN_START(INPUT)      -> Driver generation（Compaction Agent）-> ASSISTANT MESSAGE(summaryText) -> TURN_END
+子 TURN_START(COMPACTION_BRANCH_INPUT) -> Driver generation -> ASSISTANT MESSAGE(summaryText) -> TURN_END
 ```
 
-自动压缩的阈值判定由 Driver 提供；Builtin 在调用边界检查输入预算，超限时执行一次压缩后重试。Runtime 负责压缩回合结构与分支结算。
+触发判定发生在提交普通请求之前：平台按当前请求实际发送的 system 与历史估算输入 token，`输入 + reserve` 超过 `min(会话模型上下文窗口, 压缩模型上下文窗口)` 时先压缩同一历史，压缩成功后重试原请求一次。provider 报告上下文溢出时同样只压缩一次并重试一次；重试再次放不下则保留真实失败，不递归压缩。手工压缩与自动压缩共用同一预算与切点规则，不存在独立阈值。
 
 压缩在同一 Session 的 `COMPACTION` branch Thread 中执行。该分支继承 owner 的系统基线与约束，使用专用摘要指令；完成后将摘要结果结算到 owner Thread。[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionStart.java) 冻结触发原因、执行模型、输出预算、切点与子身份，后来排队的输入不会污染它。
 
@@ -286,13 +285,14 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 ```text
 effectiveKeep    = min(keepRecentTokens, C/2)
 effectiveReserve = min(16384, maxOutputTokens)
-softThreshold    = max(effectiveKeep, C - effectiveReserve)
-manualMinimum    = min(keepRecentTokens*2, C/2)
+summaryBudget    = floor(0.8 * effectiveReserve)
 ```
+
+压缩执行模型来自 `aiRuntime.compactionModel`：可配置带 variant 的具体 MODEL，或不带 variant 的 MODEL_GROUP；未配置、无法解析、模型已删除或不可用时回退到会话当前模型与 variant。有效配置的执行失败只按普通模型调用重试并最终失败，不切换模型。
 
 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 只在完整 turn 边界选切点：取第一个累计历史越过 `effectiveKeep` 的完整 turn 之前，始终保留最新模型调用 turn 及其工具结果，不切入 turn、工具回合或压缩结果。摘要文本逐字保存为单一 `COMPACTION` 结果；截断、过滤、工具调用、空结果或超出输出预算均视为失败，按普通模型调用重试策略处理。
 
-手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ManualCompactionAvailability.java) 是给界面的瞬时投影（Thread 已停止、忙碌、模型已变化、低于最小量、无可压缩内容等），不能替代提交时的复验。`STOPPED` 是持久执行事实：即使历史仍满足压缩阈值，`manualDecision` 也在 resolve 与任何写入之前直接返回 `THREAD_STOPPED`；先由显式新输入恢复为 `RUNNABLE` 才允许再次压缩。
+手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ManualCompactionAvailability.java) 是给界面的瞬时投影（Thread 已停止、忙碌、模型已变化、预算不足、无可压缩内容等），不能替代提交时的复验。`STOPPED` 是持久执行事实：即使历史仍满足压缩阈值，`manualDecision` 也在 resolve 与任何写入之前直接返回 `THREAD_STOPPED`；先由显式新输入恢复为 `RUNNABLE` 才允许再次压缩。
 
 ## 停止
 
