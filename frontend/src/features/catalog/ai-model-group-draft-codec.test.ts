@@ -36,7 +36,7 @@ function groupModel(): ModelDTO {
     },
     config: {
       limit: { context: 128000, output: 8192 },
-      abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, inputModalities: ['TEXT'] },
       variants: [{ id: 'standard', promptCacheRetention: 'NONE' }],
     },
     version: '1',
