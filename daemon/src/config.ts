@@ -24,7 +24,7 @@ import { LONG_MAX } from './validation-constants.js'
  */
 
 /** 统一项目版本；READY 上报的 daemon 构建版本。 */
-export const DAEMON_VERSION = '1.0.1'
+export const DAEMON_VERSION = '1.0.0'
 
 /** 未显式配置时的 bash 可执行文件。 */
 export const DEFAULT_BASH_EXECUTABLE = 'bash'
