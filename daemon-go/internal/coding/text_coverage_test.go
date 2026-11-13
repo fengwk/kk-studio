@@ -28,7 +28,7 @@ func TestTextCodecRejectsMalformedEncodingAndUnsupportedCharsets(t *testing.T) {
 }
 
 // COD-F-003
-func TestEncodeTextRestoresEachSupportedBOM(t *testing.T) {
+func TestEncodeRestoresEachSupportedBOM(t *testing.T) {
 	for _, test := range []struct {
 		charset string
 		bom     int

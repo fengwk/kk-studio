@@ -119,7 +119,7 @@ func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
 	}
 	for _, data := range sequences {
 		if _, _, err := decodeFixture(data); err == nil {
-			t.Errorf("DecodeText accepted malformed UTF-8 %x", data)
+			t.Errorf("Decode accepted malformed UTF-8 %x", data)
 		}
 		if _, err := ReadTextWindowReader(bytes.NewReader(data), WindowOptions{Offset: 1, Limit: 1}); err == nil {
 			t.Errorf("ReadTextWindowReader accepted malformed UTF-8 %x", data)
@@ -132,12 +132,12 @@ func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
 		}
 	}
 	if _, err := encodeFixture(string([]byte{0xed, 0xa0, 0x80}), "UTF-8", 0); err == nil {
-		t.Fatal("EncodeText accepted a surrogate-encoded invalid UTF-8 string")
+		t.Fatal("Encode accepted a surrogate-encoded invalid UTF-8 string")
 	}
 }
 
 // COD-T-221: decoding removes the BOM from text while retaining charset and BOM byte count.
-func TestDecodeTextReportsUTF8BOM(t *testing.T) {
+func TestDecodeReportsUTF8BOM(t *testing.T) {
 	text, decoded, err := decodeFixture([]byte{0xef, 0xbb, 0xbf, 'a'})
 	if err != nil || text != "a" || decoded.Name != "UTF-8" || !decoded.BOM {
 		t.Fatalf("text=%q encoding=%#v err=%v", text, decoded, err)
