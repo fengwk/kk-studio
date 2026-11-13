@@ -1250,12 +1250,20 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bridge.Close(context.Background())
-	manager := &fakeCodeServerManager{stopFailures: 2, stopStarted: make(chan struct{}), stopDone: make(chan struct{})}
+	manager := &fakeCodeServerManager{stopFailures: 2, stopStarted: make(chan struct{}), stopGate: make(chan struct{}), stopDone: make(chan struct{})}
 	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, MaxViews: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer service.Close(context.Background())
+	released := false
+	releaseStop := func() {
+		if !released {
+			released = true
+			close(manager.stopGate)
+		}
+	}
+	defer releaseStop()
 	openCtx, cancelOpen := context.WithTimeout(context.Background(), 10*time.Second)
 	opened := service.HandleCommand(openCtx, openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
 	cancelOpen()
@@ -1263,14 +1271,20 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 		t.Fatalf("phase=initial-open: reply=%v", opened)
 	}
 	manager.Crash()
-	service.mu.Lock()
-	recovery := service.crashRecovery
-	service.mu.Unlock()
 	select {
 	case <-manager.stopStarted:
 	case <-time.After(60 * time.Second):
 		t.Fatal("phase=crash-recovery-manager-stop-start: fake manager Stop was not entered")
 	}
+	// Stop is gated so crashRecovery cannot be cleared before it is captured; a settled
+	// recovery reads as a nil channel, which would never signal and stall the wait below.
+	service.mu.Lock()
+	recovery := service.crashRecovery
+	service.mu.Unlock()
+	if recovery == nil {
+		t.Fatal("phase=crash-recovery-registration: recovery settled before the manager stop returned")
+	}
+	releaseStop()
 	select {
 	case <-manager.stopDone:
 	case <-time.After(60 * time.Second):

@@ -121,11 +121,7 @@ func TestSharedStartupCancellation(t *testing.T) {
 	manager := NewCodeServerManager(fakeIDEConfig(root), supervisor, BridgeCredentials{})
 	firstResult := make(chan error, 1)
 	go func() { _, err := manager.EnsureStarted(context.Background()); firstResult <- err }()
-	select {
-	case <-startEntered:
-	case <-time.After(time.Second):
-		t.Fatal("shared startup did not begin")
-	}
+	waitForSupervisorEntry(t, startEntered, firstResult, "shared startup did not begin")
 	waiter := newSignaledCancelContext()
 	secondResult := make(chan error, 1)
 	go func() { _, err := manager.EnsureStarted(waiter); secondResult <- err }()
@@ -159,11 +155,7 @@ func TestCloseDuringStartup(t *testing.T) {
 	manager := NewCodeServerManager(fakeIDEConfig(root), supervisor, BridgeCredentials{})
 	startResult := make(chan error, 1)
 	go func() { _, err := manager.EnsureStarted(context.Background()); startResult <- err }()
-	select {
-	case <-startEntered:
-	case <-time.After(time.Second):
-		t.Fatal("startup did not enter supervisor")
-	}
+	waitForSupervisorEntry(t, startEntered, startResult, "startup did not enter supervisor")
 	closeResult := make(chan error, 1)
 	go func() { closeResult <- manager.Close(context.Background()) }()
 	select {
@@ -346,4 +338,20 @@ func newSignaledCancelContext() *signaledCancelContext {
 func (ctx *signaledCancelContext) Done() <-chan struct{} {
 	ctx.once.Do(func() { close(ctx.entered) })
 	return ctx.Context.Done()
+}
+
+// waitForSupervisorEntry waits until a startup attempt reaches the supervisor. The
+// deadline is the production startup budget instead of a scheduling guess, because a
+// loaded runner can spend seconds in storage preparation before the supervisor handoff.
+func waitForSupervisorEntry(t *testing.T, entered <-chan struct{}, result <-chan error, message string) {
+	t.Helper()
+	timer := time.NewTimer(startupTimeout)
+	defer timer.Stop()
+	select {
+	case <-entered:
+	case err := <-result:
+		t.Fatalf("%s: startup ended before entering the supervisor: %v", message, err)
+	case <-timer.C:
+		t.Fatalf("%s", message)
+	}
 }
