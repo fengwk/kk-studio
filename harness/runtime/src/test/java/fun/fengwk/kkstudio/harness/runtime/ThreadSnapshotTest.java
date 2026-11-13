@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -869,12 +868,7 @@ class ThreadSnapshotTest {
                 baseline.threadId(),
                 100_000,
                 16_384,
-                CompactionStart.pending(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.THRESHOLD,
-                    base.thread().headEntryId(),
-                    null,
-                    null),
+                CompactionStart.pending(CompactionTrigger.THRESHOLD, base.thread().headEntryId()),
                 null),
             T5);
     EntryPath compactionPath =
@@ -926,12 +920,7 @@ class ThreadSnapshotTest {
                 UUID.randomUUID(),
                 100_000,
                 16_384,
-                CompactionStart.pending(
-                    CompactionPhase.FULL,
-                    CompactionTrigger.THRESHOLD,
-                    base.thread().headEntryId(),
-                    null,
-                    null),
+                CompactionStart.pending(CompactionTrigger.THRESHOLD, base.thread().headEntryId()),
                 null),
             T5);
     EntryPath path =

@@ -10,7 +10,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -317,9 +316,7 @@ class ModelRequestMaterializerTest {
             base.systemInstruction(),
             base.toolBindings(),
             base.subagentBindings());
-    CompactionStart compact =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(7L), null, null);
+    CompactionStart compact = CompactionStart.pending(CompactionTrigger.THRESHOLD, id(7L));
     EntryPath path =
         new EntryPath(
             List.of(
@@ -403,9 +400,7 @@ class ModelRequestMaterializerTest {
     entries.add(entry(4, 3, assistant("old-reply")));
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
-    CompactionStart completed =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
+    CompactionStart completed = CompactionStart.pending(CompactionTrigger.THRESHOLD, id(4L));
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("kept summary", null)));
     entries.add(
@@ -473,9 +468,7 @@ class ModelRequestMaterializerTest {
     entries.add(
         entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
 
-    CompactionStart completed =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(4L), null, null);
+    CompactionStart completed = CompactionStart.pending(CompactionTrigger.THRESHOLD, id(4L));
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("summary", null)));
     entries.add(

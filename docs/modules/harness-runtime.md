@@ -277,11 +277,11 @@ Driver 的 Work 处理器在事务外认领并执行，可复用 [`ClaimedExecut
 子 TURN_START(INPUT)      -> Driver generation（Compaction Agent）-> ASSISTANT MESSAGE(summaryText) -> TURN_END
 ```
 
-自动压缩的阈值判定由各 Driver 通过 `AgentDriver.prepareAutomaticCompaction` 提供；Builtin 的 owned `HISTORY` -> hard overflow -> eligible threshold 策略见 [Harness Agent Builtin](harness-agent-builtin.md#自动压缩)。Runtime 只负责压缩回合结构与子执行结算。
+自动压缩的阈值判定由 Driver 提供；Builtin 在调用边界检查输入预算，超限时执行一次压缩后重试。Runtime 负责压缩回合结构与分支结算。
 
-子执行使用目录中的 `Compaction` 内置 Agent，约束为父回合的输出预算与禁止自动压缩；提示缓存遵循该 Agent 选用的 variant。[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionStart.java) 冻结阶段、触发原因、执行模型、输出预算、切分锚点与子身份，后来排队的输入不会污染它。
+压缩在同一 Session 的 `COMPACTION` branch Thread 中执行。该分支继承 owner 的系统基线与约束，使用专用摘要指令；完成后将摘要结果结算到 owner Thread。[`CompactionStart`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionStart.java) 冻结触发原因、执行模型、输出预算、切点与子身份，后来排队的输入不会污染它。
 
-[`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionConfig.java) 只有 `keepRecentTokens` 一个参数，其余阈值都由它与上下文窗口 `C`、输出上限派生：
+[`CompactionConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/compaction/CompactionConfig.java) 只有 `keepRecentTokens` 一个参数，其余预算由它与上下文窗口 `C`、输出上限派生：
 
 ```text
 effectiveKeep    = min(keepRecentTokens, C/2)
@@ -290,7 +290,7 @@ softThreshold    = max(effectiveKeep, C - effectiveReserve)
 manualMinimum    = min(keepRecentTokens*2, C/2)
 ```
 
-[`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 是纯函数：从尾部估算长度，越过 `effectiveKeep` 后取下一个合法切点，绝不切在 Tool 结果或压缩回合内部；切点落在 Agent 轮次中间时先出 HISTORY 摘要，再由续写义务驱动 TURN_PREFIX 摘要。最新一批尚未被后续 assistant 消费的工具调用不会被提前摘要。[`CompactionResultEvaluator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionResultEvaluator.java) 把截断、过滤、返回工具调用、空摘要、保留段解析失败与无 token 收益判为失败；可重试的失败走普通调用重试预算，耗尽则子执行失败、父回合失败且不交付部分结果。
+[`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 只在完整 turn 边界选切点：取第一个累计历史越过 `effectiveKeep` 的完整 turn 之前，始终保留最新模型调用 turn 及其工具结果，不切入 turn、工具回合或压缩结果。摘要文本逐字保存为单一 `COMPACTION` 结果；截断、过滤、工具调用、空结果或超出输出预算均视为失败，按普通模型调用重试策略处理。
 
 手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ManualCompactionAvailability.java) 是给界面的瞬时投影（Thread 已停止、忙碌、模型已变化、低于最小量、无可压缩内容等），不能替代提交时的复验。`STOPPED` 是持久执行事实：即使历史仍满足压缩阈值，`manualDecision` 也在 resolve 与任何写入之前直接返回 `THREAD_STOPPED`；先由显式新输入恢复为 `RUNNABLE` 才允许再次压缩。
 
@@ -429,7 +429,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 | --- | --- |
 | `api` | 对外公开的消费契约与公开值类型：`HarnessChangeSubscriptions` 暴露 Thread version、执行树与待处理交互的变更订阅，事件与句柄不可变，不泄漏 Store 或 channel 协议；同一根包承载控制面入参与查询结果的形状（`AcceptCommandsCommand`、`SpawnRequest`、`StopResult`、`StoppedThreadReceipt`、`ThreadTreeNode`、`ToolOutcomeView`、`ManualCompactionAvailability`、`Names`）及冲突原因名称 `HarnessConflictReason`；实现由平台提供 |
 | `api.command` | 命令邮箱的公开值类型：`ThreadCommand`、封闭 payload 族与派生的 `ThreadCommandState`；只做不变量校验与纯派生，JSON 形态与 request hash 在 `codec`，harvest 归约在 `runtime.thread.command` |
-| `api.compaction` | 压缩的公开值类型：`CompactionConfig`（只含 `keepRecentTokens` 与阈值换算的纯函数）、`CompactionPhase` / `CompactionTrigger`、切分事实 `CompactionPreparation` 与 `TURN_START` 上冻结的 `CompactionStart` |
+| `api.compaction` | 压缩的公开值类型：`CompactionConfig`（`keepRecentTokens` 与预算换算）、`CompactionTrigger`、切点事实 `CompactionPreparation` 与 `TURN_START` 上冻结的 `CompactionStart` |
 | `api.entry` | 分支配置与回合边界值：`BranchSettings`、`ExecutionSelection`、`ModelSelection`、`TurnStartReason` 与 `TurnEndOutcome` |
 | `api.execution` | 具体执行代次的退出证据：`ExecutionExitFact`、`ExecutionExitState` 与 `ExecutionExitKind`（只有 `DRIVER` / `TOOL` / `REMOTE`，Driver 私有模型调用统一归 `DRIVER`）；真实证据含本地 `STUDIO_EXITED` / `OWNER_EXITED`、远端 `REMOTE_ACKNOWLEDGED` 与 `NOT_STARTED`，`OWNER_EXITED` 只允许本地 `DRIVER` / `TOOL`；登记、确认、journal 与恢复扫描在 `runtime.execution` |
 | `api.generation` | Thread 快照中 generation 部分的公开投影：`GenerationProjection` 承载稳定身份、`GenerationStatus` 生命周期状态、已完成的文本/思考输出与结构化错误，`FailureProjection` 描述未物化的失败 attempt；消费方读快照无需依赖 `spi.driver`，包内不暴露 Driver 私有调用实体与 Provider 协议 |

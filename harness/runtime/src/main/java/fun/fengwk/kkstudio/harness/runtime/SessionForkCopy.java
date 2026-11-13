@@ -133,13 +133,10 @@ final class SessionForkCopy {
           start.contextWindow(),
           start.maxOutputTokens(),
           new CompactionStart(
-              compaction.phase(),
               compaction.trigger(),
               compaction.execution(),
               compaction.outputBudget(),
               requireMapped(compaction.cutEntryId(), newIds),
-              mappedOrNull(compaction.turnPrefixStartEntryId(), newIds),
-              mappedOrNull(compaction.historyCompactionEntryId(), newIds),
               compaction.childThreadId(),
               compaction.joinInvocationId()),
           null);

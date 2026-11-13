@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -530,7 +529,6 @@ class PostgresqlCompactionChildTest {
     assertTrue(compaction.outputBudget() > 0);
     assertNotNull(compaction.childThreadId());
     assertNotNull(compaction.joinInvocationId());
-    assertEquals(CompactionPhase.FULL, compaction.phase());
     assertEquals(CompactionTrigger.THRESHOLD, compaction.trigger());
 
     UUID childThreadId = compaction.childThreadId();
@@ -686,7 +684,7 @@ class PostgresqlCompactionChildTest {
     TurnEndPayload endPayload = (TurnEndPayload) turnEndEntry.payload();
     assertEquals(compactionStartEntry.id(), endPayload.turnStartEntryId());
     assertEquals(TurnEndOutcome.COMPLETED, endPayload.outcome());
-    assertFalse(endPayload.continueModel());
+    assertTrue(endPayload.continueModel());
 
     // 父 head 推进
     ThreadState finalParentThread =

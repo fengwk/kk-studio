@@ -23,8 +23,8 @@ import java.util.UUID;
  * reschedule；任何其它 RuntimeException、null 结果或 validator 契约失败都视为确定性失败，落成 durable AssistantError +
  * FAILED TURN_END 并结算 Join，绝不无限重排。
  *
- * <p>{@code compactionPreparation} 非空当且仅当本次是 COMPACTION turn：实现必须按切分事实冻结输出预算作为 {@code
- * maxOutputTokens}，不得把 messagesToSummarize / previousSummary 写入 spec。YOLO 不进入本端口。
+ * <p>{@code compactionPreparation} 非空当且仅当本次是 COMPACTION turn：实现按切点与解析后的模型输出上限冻结摘要预算，且不把摘要输入写入 spec。
+ * YOLO 不进入本端口。
  */
 public interface TurnResolver {
 

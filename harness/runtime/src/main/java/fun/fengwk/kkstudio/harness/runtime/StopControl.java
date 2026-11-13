@@ -6,8 +6,6 @@ import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.StoppedThreadReceipt;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
@@ -26,7 +24,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
@@ -576,7 +573,7 @@ final class StopControl {
                 turnStartId,
                 sessionId,
                 path.head().id(),
-                continuationBarrierStart(path, thread),
+                continuationBarrierStart(thread, path),
                 now));
     UUID barrierId = tx.nextId();
     tx.entries()
@@ -597,55 +594,9 @@ final class StopControl {
     return new NodeStop(stopped, turnEndId);
   }
 
-  /**
-   * 普通 continueModel obligation 写 CONTINUATION barrier；completed HISTORY phase gap 写精确配对的
-   * TURN_PREFIX COMPACTION barrier，使 Stop receipt 与被取消的 durable obligation 同域。
-   */
-  private static TurnStartPayload continuationBarrierStart(EntryPath path, ThreadState thread) {
-    TurnEndPayload due = (TurnEndPayload) path.headIgnoringTrailingControlEntries().payload();
-    Entry referencedStart = null;
-    for (Entry entry : path.entries()) {
-      if (entry.id().equals(due.turnStartEntryId())
-          && entry.payload() instanceof TurnStartPayload) {
-        referencedStart = entry;
-        break;
-      }
-    }
-    if (referencedStart == null) {
-      throw new IllegalStateException(
-          "continuation TURN_END references missing TURN_START " + due.turnStartEntryId());
-    }
-    TurnStartPayload source = (TurnStartPayload) referencedStart.payload();
-    if (source.compaction() == null || source.compaction().phase() != CompactionPhase.HISTORY) {
-      return new TurnStartPayload(TurnStartReason.CONTINUATION, path.baseSettings(), thread.id());
-    }
-    CompactionTurns.CompactionTurn history = null;
-    for (CompactionTurns.CompactionTurn turn : CompactionTurns.scan(path)) {
-      if (CompactionTurns.entryAt(path, turn.startIndex()).id().equals(referencedStart.id())) {
-        history = turn;
-        break;
-      }
-    }
-    if (history == null || history.result() == null || history.resultIndex() < 0) {
-      throw new IllegalStateException(
-          "completed HISTORY continuation requires its exact compaction result");
-    }
-    CompactionStart frozen = source.compaction();
-    CompactionStart stoppedPrefix =
-        CompactionStart.pending(
-            CompactionPhase.TURN_PREFIX,
-            frozen.trigger(),
-            frozen.cutEntryId(),
-            frozen.turnPrefixStartEntryId(),
-            CompactionTurns.entryAt(path, history.resultIndex()).id());
-    return new TurnStartPayload(
-        TurnStartReason.COMPACTION,
-        path.baseSettings(),
-        thread.id(),
-        null,
-        null,
-        stoppedPrefix,
-        null);
+  /** Creates the durable cancellation barrier for a pending model continuation. */
+  private static TurnStartPayload continuationBarrierStart(ThreadState thread, EntryPath path) {
+    return new TurnStartPayload(TurnStartReason.CONTINUATION, path.baseSettings(), thread.id());
   }
 
   private NodeStop stopGeneration(

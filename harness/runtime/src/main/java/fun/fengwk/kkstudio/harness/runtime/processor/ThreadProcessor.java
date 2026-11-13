@@ -4,10 +4,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -43,7 +41,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
@@ -86,10 +83,9 @@ import java.util.UUID;
  * 结果恰为当前 Assistant head 时加载），再按上下文恰执行一个动作：(a) GENERATION_TERMINAL_PENDING —— head 恰为 basis 且未挂结果的
  * terminal Driver generation 原子 apply；(b) TOOL_TERMINAL_PENDING —— 当前 head 恰为本 Thread generation
  * 产出的 Assistant Entry、且其 Tool siblings 全部 terminal 时按 callIndex 原子 apply；(c) GENERATION_ACTIVE /
- * TOOL_ACTIVE —— 当前 applicable generation/tool 非 terminal 时完成 claim；(d) CONTINUATION_DUE —— HISTORY
- * phase gap 启动 TURN_PREFIX，其它 continuation obligation 启动 CONTINUATION；(e) queued
- * USER_MESSAGE/CUSTOM_MESSAGE 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成 claim。未闭合 open Turn
- * 只在启动新 INPUT Turn 时被 normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
+ * TOOL_ACTIVE —— 当前 applicable generation/tool 非 terminal 时完成 claim；(d) CONTINUATION_DUE ——启动
+ * CONTINUATION；(e) queued USER_MESSAGE/CUSTOM_MESSAGE 存在时启动 INPUT Turn（IDLE_OR_HISTORICAL）；(f) 否则完成
+ * claim。未闭合 open Turn 只在启动新 INPUT Turn 时被 normalization，绝不恢复 / 复用。不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
  *
  * <p>Turn 启动在单个 store transaction 内完成：按 Session KEY SHARE -&gt; Thread 顺序加锁、读取 queued Command 快照与
  * cutoff、校验 claim、分配 candidate Entry ID 并构造完整合法 candidate EntryPath（不写任何持久化状态），随后在同一事务内同步调用 {@link
@@ -115,18 +111,18 @@ import java.util.UUID;
  * phase 仅为 READY 槽位请求 TOOL Work（全部 immediate terminal 则请求 THREAD 让 batch 分下一 claim 经
  * ToolTerminalPending 应用）；closed turn（COMPLETE 无 calls / CONTINUE / LENGTH 无 calls / FILTERED /
  * terminal failure / cancel / unknown / compaction 关闭结果）在同一事务追加 TURN_END
- * 与严格物化校验（attach-then-delete）并由 Driver complete/物化清理私有状态，且仅在已有 queued user demand、HISTORY /
- * OVERFLOW obligation、hard overflow 或 continuation obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft
- * threshold 自唤醒。失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构：
- * 固定先请求 THREAD 再 complete，下一 claim 才由 durable continuation 启动续写；Tool sibling batch 追加 outcome 后追加
+ * 与严格物化校验（attach-then-delete）并由 Driver complete/物化清理私有状态，且仅在已有 queued user demand、OVERFLOW
+ * obligation、hard overflow 或 continuation obligation 已确定时请求 THREAD；完全结束的 idle run 不因 soft threshold
+ * 自唤醒。失败 / 停止 / complete COMPACTION 由 planner 判定不 spin。CONTINUE 与 Tool sibling batch 同构： 固定先请求
+ * THREAD 再 complete，下一 claim 才由 durable continuation 启动续写；Tool sibling batch 追加 outcome 后追加
  * continueModel=true TURN_END 并同事务删除 children。resolve commit 的 resolved 只请求 Driver Work，绝不因
  * deferred messages 制造无意义 THREAD claim （terminal apply 会按 queued 快照重建 wake）；rejected 只在仍保留合法
  * deferred messages 时先请求 THREAD 再 complete，绝不立即重排同一压缩。
  *
- * <p>压缩触发正交：soft threshold 在尚未完成的 continuation 边界或下一条真实 user demand 到达时门控；hard overflow 立即压缩并只恢复一次。
- * 所有 trigger 共用 Driver Work 与 deterministic no-gain，且统一在隔离的 child Runtime Thread 内执行（父 durable
- * wait、无父 generation）；切分先 HISTORY 再以 continueModel obligation 机械启动 TURN_PREFIX。压缩消费零 queued
- * Command，另一 Thread 拥有的共享历史 turn 不压缩，COMPACTION 子执行树内绝不再次规划压缩。
+ * <p>压缩触发正交：soft threshold 在 continuation 边界或真实 user demand 到达时门控；hard overflow 立即压缩并只恢复一次。 压缩在隔离的同
+ * Session COMPACTION branch Thread 中执行，父 Thread durable wait 且无父 generation。摘要完成后以单一 COMPACTION
+ * 结果替换前缀；成功压缩继续 owner model。压缩消费零 queued Command，另一 Thread 拥有的共享历史 turn 不压缩， COMPACTION
+ * 子执行树内绝不再次规划压缩。
  */
 @Slf4j
 public final class ThreadProcessor {
@@ -666,11 +662,7 @@ public final class ThreadProcessor {
           CompactionResultEvaluator.evaluate(summaryText, metadata, start.outputBudget());
       if (resultPayload instanceof CompactionPayload) {
         outcome = TurnEndOutcome.COMPLETED;
-        continueModel =
-            start.phase() == CompactionPhase.HISTORY
-                || start.trigger() == CompactionTrigger.OVERFLOW
-                || (start.trigger() == CompactionTrigger.THRESHOLD
-                    && CompactionHistory.hasPendingOwnedContinuation(thread, path, openTurn.id()));
+        continueModel = true;
       } else {
         outcome = TurnEndOutcome.FAILED;
       }

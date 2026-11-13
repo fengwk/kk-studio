@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -575,13 +574,10 @@ class UsageCostProjectionServiceTest {
             null,
             null,
             new CompactionStart(
-                CompactionPhase.FULL,
                 CompactionTrigger.THRESHOLD,
                 BuiltinExecution.of(new ModelSelection("model-b", "default")),
                 1024L,
                 ROOT_ID,
-                null,
-                null,
                 new UUID(0L, 50L),
                 new UUID(0L, 51L)),
             null),

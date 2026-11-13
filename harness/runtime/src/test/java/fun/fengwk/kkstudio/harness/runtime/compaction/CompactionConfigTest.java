@@ -6,7 +6,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 
 /** CompactionConfig 统一 keep/reserve/threshold/manual/output 公式。 */
 class CompactionConfigTest {
@@ -33,12 +32,11 @@ class CompactionConfigTest {
   }
 
   @Test
-  void outputBudgetUsesPhaseRatioAndRemovedPrefixCap() {
+  void outputBudgetIsEightyPercentOfTheFixedReserve() {
     CompactionConfig config = new CompactionConfig(20_000);
 
-    assertEquals(13_107L, config.outputBudget(CompactionPhase.FULL, 20_000, 50_000));
-    assertEquals(8_192L, config.outputBudget(CompactionPhase.TURN_PREFIX, 20_000, 50_000));
-    assertEquals(500L, config.outputBudget(CompactionPhase.HISTORY, 20_000, 500));
+    assertEquals(13_107L, config.outputBudget(20_000));
+    assertEquals(4_000L, config.outputBudget(5_000));
   }
 
   @Test
@@ -49,7 +47,6 @@ class CompactionConfigTest {
     assertThrows(IllegalArgumentException.class, () -> config.effectiveReserve(0));
     assertThrows(IllegalArgumentException.class, () -> config.softThreshold(1, 0));
     assertThrows(IllegalArgumentException.class, () -> config.manualMinimum(0));
-    assertThrows(
-        IllegalArgumentException.class, () -> config.outputBudget(CompactionPhase.FULL, 1, -1));
+    assertThrows(IllegalArgumentException.class, () -> config.outputBudget(0));
   }
 }

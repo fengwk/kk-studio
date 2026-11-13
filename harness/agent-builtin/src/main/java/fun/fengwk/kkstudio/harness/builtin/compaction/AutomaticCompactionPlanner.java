@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.compaction;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
@@ -16,14 +15,12 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.compaction.TokenEstimator;
 
 import java.util.Objects;
 
 /**
- * Builtin Driver 的自动压缩规划器：按 owned HISTORY -&gt; hard overflow -&gt; eligible threshold
- * 的顺序计算下一次自动压缩。
+ * Builtin Driver 的自动压缩规划器：优先恢复硬溢出，再在 eligible 时判断软阈值。
  *
  * <p>策略属于 Builtin；Runtime 只通过 {@code AgentDriver#prepareAutomaticCompaction} 调用。每次决策使用同一个 {@link
  * CompactionConfig} 快照构建或驱动 {@link CompactionPlanner}，保证阈值判定与规划逻辑完全一致。
@@ -32,7 +29,7 @@ public final class AutomaticCompactionPlanner {
 
   public AutomaticCompactionPlanner() {}
 
-  /** 按 owned HISTORY -&gt; hard overflow -&gt; eligible threshold 的顺序计算下一次压缩。 无需自动压缩时返回 null。 */
+  /** 优先规划硬溢出恢复，再检查 eligible 的软阈值；无需自动压缩时返回 null。 */
   public CompactionPreparation plan(
       ThreadState thread, EntryPath path, CompactionConfig compaction, boolean thresholdEligible) {
     Objects.requireNonNull(thread, "thread");
@@ -49,14 +46,6 @@ public final class AutomaticCompactionPlanner {
     CompactionPlanner planner = new CompactionPlanner(compaction);
 
     if (latestStartPayload.reason() == TurnStartReason.COMPACTION) {
-      if (!thread.id().equals(latestStartPayload.ownerThreadId())) {
-        return null;
-      }
-      CompactionPreparation historyContinuation =
-          ownedHistoryContinuation(thread, path, latestTurn, planner);
-      if (historyContinuation != null) {
-        return historyContinuation;
-      }
       return null;
     }
     if (!thread.id().equals(latestStartPayload.ownerThreadId())) {
@@ -80,26 +69,6 @@ public final class AutomaticCompactionPlanner {
     return thresholdPreparation(thread, path, latestTurn, compaction, execution, planner);
   }
 
-  /** owned completed HISTORY turn 的机械 TURN_PREFIX obligation；其它 head 返回 null。 */
-  private CompactionPreparation ownedHistoryContinuation(
-      ThreadState thread,
-      EntryPath path,
-      CompactionHistory.ClosedTurn latestTurn,
-      CompactionPlanner planner) {
-    if (latestTurn.end().outcome() != TurnEndOutcome.COMPLETED
-        || !(latestTurn.start().payload() instanceof TurnStartPayload start)
-        || start.reason() != TurnStartReason.COMPACTION
-        || !thread.id().equals(start.ownerThreadId())) {
-      return null;
-    }
-    CompactionTurns.CompactionTurn compactionTurn =
-        CompactionHistory.compactionTurnAtStart(path, latestTurn.start().id());
-    if (compactionTurn.phase() != CompactionPhase.HISTORY || compactionTurn.result() == null) {
-      return null;
-    }
-    return planner.prepareTurnPrefix(path, compactionTurn);
-  }
-
   /**
    * 最近一次 complete compaction 是 threshold freshness barrier；失败、STOPPED、incomplete compaction 与
    * Resolver Rejected turn（{@code contextWindow == null}）不抹掉更早成功 usage。其它 Thread 拥有的共享 turn 是
@@ -116,9 +85,7 @@ public final class AutomaticCompactionPlanner {
     while (candidate != null) {
       TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
       if (start.reason() == TurnStartReason.COMPACTION) {
-        CompactionTurns.CompactionTurn turn =
-            CompactionHistory.compactionTurnAtStart(path, candidate.start().id());
-        if (turn.complete()) {
+        if (candidate.end().outcome() == TurnEndOutcome.COMPLETED) {
           return null;
         }
         candidate = CompactionHistory.previousClosedTurn(path, candidate);

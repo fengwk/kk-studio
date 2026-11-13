@@ -26,7 +26,6 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -1833,13 +1832,10 @@ class DatabaseTurnResolverTest {
     BranchSettings settings = settings("default");
     CompactionStart start =
         new CompactionStart(
-            CompactionPhase.FULL,
             CompactionTrigger.THRESHOLD,
             BuiltinExecution.of(executionModel),
             1234L,
             id(3),
-            null,
-            null,
             id(50),
             id(51));
     return new EntryPath(
@@ -2041,25 +2037,15 @@ class DatabaseTurnResolverTest {
     BranchSettings settings = settings("default");
     ModelSelection compactorModel = BuiltinExecution.model(settings.execution());
     fixture.compactionAgent(compactorModel);
-    List<AgentMessage> messages =
-        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
     CompactionPreparation preparation =
-        new CompactionPreparation(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            id(4),
-            null,
-            null,
-            null,
-            messages,
-            123L);
+        new CompactionPreparation(CompactionTrigger.THRESHOLD, id(4));
 
     EntryPath historyPath = compactionHistoryPath(settings, preparation);
     TurnResolver.CompactionResolved resolved = fixture.resolvedCompaction(historyPath, preparation);
 
     assertEquals(BuiltinExecution.of(compactorModel), resolved.execution());
     assertEquals(4096, resolved.contextWindow());
-    assertEquals(123, resolved.outputBudget());
+    assertEquals(819, resolved.outputBudget());
     assertEquals("Compaction", resolved.childSettings().agentName());
     assertEquals(BuiltinExecution.of(compactorModel), resolved.childSettings().execution());
     assertNull(resolved.childSettings().environmentName());
@@ -2071,18 +2057,8 @@ class DatabaseTurnResolverTest {
     BranchSettings settings = settings("default"); // 父 thread 拥有完整的 model
     // 场景 1: compaction agent 存在但未配置 model
     fixture.compactionAgent(null);
-    List<AgentMessage> messages =
-        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
     CompactionPreparation preparation =
-        new CompactionPreparation(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            id(4),
-            null,
-            null,
-            null,
-            messages,
-            123L);
+        new CompactionPreparation(CompactionTrigger.THRESHOLD, id(4));
 
     TurnResolver.Result result =
         fixture.resolver.resolve(THREAD_ID, SESSION_ID, fixture.path(settings), preparation);
@@ -2195,53 +2171,18 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void compactionOutputBudgetUsesActualModelLimitAndRemovedPrefixTokens() {
+  void compactionOutputBudgetUsesFixedReserveRatio() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     fixture.modelGlobalOutputLimit(600);
     ModelSelection compactorModel = BuiltinExecution.model(settings("default").execution());
     fixture.compactionAgent(compactorModel);
-    List<AgentMessage> messages =
-        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
-    CompactionPreparation fullSmall =
-        new CompactionPreparation(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            id(3),
-            null,
-            null,
-            null,
-            messages,
-            123L);
-    CompactionPreparation fullLarge =
-        new CompactionPreparation(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            id(3),
-            null,
-            null,
-            null,
-            messages,
-            50_000L);
-    CompactionPreparation prefix =
-        new CompactionPreparation(
-            CompactionPhase.TURN_PREFIX,
-            CompactionTrigger.THRESHOLD,
-            id(3),
-            id(2),
-            null,
-            null,
-            messages,
-            50_000L);
+    CompactionPreparation preparation =
+        new CompactionPreparation(CompactionTrigger.THRESHOLD, id(3));
 
-    // 预算先取实际 model 全局 600，再由 outputBudget 阶段公式裁剪。
-    assertEquals(
-        123,
-        fixture.resolvedCompaction(fixture.path(settings("default")), fullSmall).outputBudget());
+    // The 600-token model limit is the reserve; the summary may use 80% of it.
     assertEquals(
         480,
-        fixture.resolvedCompaction(fixture.path(settings("default")), fullLarge).outputBudget());
-    assertEquals(
-        300, fixture.resolvedCompaction(fixture.path(settings("default")), prefix).outputBudget());
+        fixture.resolvedCompaction(fixture.path(settings("default")), preparation).outputBudget());
   }
 
   /** 逆证：compaction 必须按 catalog 中的 compaction agent 解析目标，绝不回退或继承 branch settings.model。 */
@@ -2268,18 +2209,8 @@ class DatabaseTurnResolverTest {
     when(fixture.models.getByName("model"))
         .thenThrow(new AssertionError("compaction must not resolve branch settings.model"));
 
-    List<AgentMessage> messages =
-        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
     CompactionPreparation preparation =
-        new CompactionPreparation(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            id(3),
-            null,
-            null,
-            null,
-            messages,
-            50_000L);
+        new CompactionPreparation(CompactionTrigger.THRESHOLD, id(3));
 
     TurnResolver.CompactionResolved resolved =
         fixture.resolvedCompaction(fixture.path(settings("default")), preparation);
@@ -2539,18 +2470,8 @@ class DatabaseTurnResolverTest {
     ModelSelection compactorModel = new ModelSelection("model", "default");
     fixture.compactionAgent(compactorModel);
 
-    List<AgentMessage> messages =
-        List.of(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello"))));
     CompactionPreparation preparation =
-        new CompactionPreparation(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            id(4),
-            null,
-            null,
-            null,
-            messages,
-            123L);
+        new CompactionPreparation(CompactionTrigger.THRESHOLD, id(4));
 
     TurnResolver.CompactionResolved resolved =
         fixture.resolvedCompaction(fixture.path(settings("default")), preparation);
@@ -2646,23 +2567,14 @@ class DatabaseTurnResolverTest {
     Fixture fixture = groupFixture(Set.of(ModelInputModality.TEXT));
     fixture.compactionAgent(ModelSelection.group("group"));
     CompactionPreparation preparation =
-        new CompactionPreparation(
-            CompactionPhase.FULL,
-            CompactionTrigger.THRESHOLD,
-            id(4),
-            null,
-            null,
-            null,
-            List.of(
-                new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))),
-            123L);
+        new CompactionPreparation(CompactionTrigger.THRESHOLD, id(4));
     TurnResolver.CompactionResolved resolved =
         fixture.resolvedCompaction(fixture.path(settings("default")), preparation);
     assertEquals(
         BuiltinExecution.of(ModelSelection.group("group")), resolved.childSettings().execution());
     assertEquals(2048, resolved.contextWindow());
     assertEquals(256, resolved.maxOutputTokens());
-    assertEquals(123, resolved.outputBudget());
+    assertEquals(204, resolved.outputBudget());
     verifyNoInteractions(
         fixture.environmentRepository,
         fixture.environmentRegistry,
@@ -2750,7 +2662,7 @@ class DatabaseTurnResolverTest {
                 // CompactionStart carries the cut; the result payload carries only the summary.
                 new CompactionPayload(summary, null),
                 NOW),
-            turnEnd(id(8), id(7), id(6)),
+            compactionTurnEnd(id(8), id(7), id(6)),
             turnEntry(id(9), id(8), settings),
             userEntry(id(10), id(9), "second user"),
             assistantEntry(id(11), id(10), "second reply"),
@@ -2800,7 +2712,7 @@ class DatabaseTurnResolverTest {
             turnEnd(id(5), id(4), id(2)),
             compactionStartEntry(id(6), id(5), settings, id(4)),
             new Entry(id(7), SESSION_ID, id(6), new CompactionPayload("old summary", null), NOW),
-            turnEnd(id(8), id(7), id(6)),
+            compactionTurnEnd(id(8), id(7), id(6)),
             turnEntry(id(9), id(8), settings),
             userEntry(id(10), id(9), "second user"),
             assistantEntry(id(11), id(10), "second reply"),
@@ -2808,7 +2720,7 @@ class DatabaseTurnResolverTest {
             compactionStartEntry(id(13), id(12), settings, id(10)),
             new Entry(
                 id(14), SESSION_ID, id(13), new CompactionPayload("latest summary", null), NOW),
-            turnEnd(id(15), id(14), id(13)),
+            compactionTurnEnd(id(15), id(14), id(13)),
             turnEntry(id(16), id(15), settings),
             userEntry(id(17), id(16), "third user"),
             assistantEntry(id(18), id(17), "third reply"),
@@ -2851,9 +2763,7 @@ class DatabaseTurnResolverTest {
 
   private static Entry compactionStartEntry(
       UUID id, UUID parentId, BranchSettings settings, UUID cutEntryId) {
-    CompactionStart compaction =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, cutEntryId, null, null);
+    CompactionStart compaction = CompactionStart.pending(CompactionTrigger.THRESHOLD, cutEntryId);
     return new Entry(
         id,
         SESSION_ID,
@@ -2869,6 +2779,15 @@ class DatabaseTurnResolverTest {
         SESSION_ID,
         parentId,
         new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, false, null, null),
+        NOW);
+  }
+
+  private static Entry compactionTurnEnd(UUID id, UUID parentId, UUID turnStartEntryId) {
+    return new Entry(
+        id,
+        SESSION_ID,
+        parentId,
+        new TurnEndPayload(turnStartEntryId, TurnEndOutcome.COMPLETED, true, null, null),
         NOW);
   }
 

@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -215,8 +214,7 @@ class EntryCurrentStateTest {
             OWNER,
             null,
             null,
-            CompactionStart.pending(
-                CompactionPhase.FULL, CompactionTrigger.THRESHOLD, id(1L), null, null),
+            CompactionStart.pending(CompactionTrigger.THRESHOLD, id(1L)),
             null),
         BASE.plusSeconds(entryId.getLeastSignificantBits()));
   }

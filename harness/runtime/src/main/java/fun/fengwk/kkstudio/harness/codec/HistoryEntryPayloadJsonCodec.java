@@ -10,7 +10,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
@@ -819,19 +818,15 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static final Set<String> COMPACTION_START_FIELDS =
       orderedSet(
-          "phase",
           "trigger",
           "execution",
           "outputBudget",
           "cutEntryId",
-          "turnPrefixStartEntryId",
-          "historyCompactionEntryId",
           "childThreadId",
           "joinInvocationId");
 
   private static ObjectNode encodeCompactionStart(CompactionStart start) {
     ObjectNode node = NODES.objectNode();
-    node.put("phase", start.phase().name());
     node.put("trigger", start.trigger().name());
     if (start.execution() == null) {
       node.putNull("execution");
@@ -844,16 +839,6 @@ public final class HistoryEntryPayloadJsonCodec {
       node.put("outputBudget", start.outputBudget());
     }
     node.put("cutEntryId", start.cutEntryId().toString());
-    if (start.turnPrefixStartEntryId() == null) {
-      node.putNull("turnPrefixStartEntryId");
-    } else {
-      node.put("turnPrefixStartEntryId", start.turnPrefixStartEntryId().toString());
-    }
-    if (start.historyCompactionEntryId() == null) {
-      node.putNull("historyCompactionEntryId");
-    } else {
-      node.put("historyCompactionEntryId", start.historyCompactionEntryId().toString());
-    }
     if (start.childThreadId() == null) {
       node.putNull("childThreadId");
     } else {
@@ -880,20 +865,12 @@ public final class HistoryEntryPayloadJsonCodec {
             : ExecutionSelectionJsonCodec.decode(executionNode, "TURN_START.compaction.execution");
     return new CompactionStart(
         HistoryValueCodecs.readEnum(
-            CompactionPhase.class,
-            HistoryValueCodecs.text(node, "phase"),
-            "TURN_START.compaction.phase"),
-        HistoryValueCodecs.readEnum(
             CompactionTrigger.class,
             HistoryValueCodecs.text(node, "trigger"),
             "TURN_START.compaction.trigger"),
         execution,
         HistoryValueCodecs.nullablePositiveLong(node, "outputBudget", "TURN_START.compaction"),
         HistoryValueCodecs.requiredPositiveId(node, "cutEntryId", "TURN_START.compaction"),
-        HistoryValueCodecs.nullablePositiveId(
-            node, "turnPrefixStartEntryId", "TURN_START.compaction"),
-        HistoryValueCodecs.nullablePositiveId(
-            node, "historyCompactionEntryId", "TURN_START.compaction"),
         HistoryValueCodecs.nullablePositiveId(node, "childThreadId", "TURN_START.compaction"),
         HistoryValueCodecs.nullablePositiveId(node, "joinInvocationId", "TURN_START.compaction"));
   }

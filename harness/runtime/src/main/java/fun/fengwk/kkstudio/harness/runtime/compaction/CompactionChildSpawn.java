@@ -76,13 +76,10 @@ public final class CompactionChildSpawn {
         AcceptancePreflight.IDENTITY);
 
     return new CompactionStart(
-        preparation.phase(),
         preparation.trigger(),
         resolved.execution(),
         resolved.outputBudget(),
         preparation.cutEntryId(),
-        preparation.turnPrefixStartEntryId(),
-        preparation.historyCompactionEntryId(),
         threadId,
         ticketId);
   }

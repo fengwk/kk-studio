@@ -10,7 +10,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -200,7 +199,7 @@ class CompactionHistoryTest {
                 compactionStartEntry(
                     COMPACTION_START_ID, ROOT_ID, THREAD_ID, CompactionTrigger.MANUAL),
                 entry(id(45), COMPACTION_START_ID, new CompactionPayload("summary", null)),
-                turnEnd(id(46), id(45), COMPACTION_START_ID, false)));
+                turnEnd(id(46), id(45), COMPACTION_START_ID, true)));
     CompactionHistory.ClosedTurn manualLatest = CompactionHistory.latestClosedTurn(manualPath);
     assertNotNull(manualLatest);
     assertFalse(CompactionHistory.isOverflowRecoveryRetry(manualPath, manualLatest));
@@ -346,7 +345,7 @@ class CompactionHistoryTest {
             ownerThreadId,
             null,
             null,
-            CompactionStart.pending(CompactionPhase.FULL, trigger, ROOT_ID, null, null),
+            CompactionStart.pending(trigger, ROOT_ID),
             null));
   }
 
@@ -395,8 +394,7 @@ class CompactionHistoryTest {
             THREAD_ID,
             null,
             null,
-            CompactionStart.pending(
-                CompactionPhase.FULL, CompactionTrigger.MANUAL, ROOT_ID, null, null),
+            CompactionStart.pending(CompactionTrigger.MANUAL, ROOT_ID),
             null));
   }
 

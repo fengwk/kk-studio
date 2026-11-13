@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -19,11 +18,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 从 root-to-head EntryPath 派生每个已关闭 COMPACTION turn 的完整事实；{@link CompactionPayload} 只保存 summaryText，
- * 因此 phase / trigger / executionModel / cut 从 enclosing TURN_START 的 {@link CompactionStart}
- * 读取，complete = {@code phase != HISTORY 且紧邻 TURN_END COMPLETED}（{@link CompactionTurn#complete()}）。
- *
- * <p>切分 / fallback reducer、previous-summary 投影、no-gain 估算与 manual control 共用本扫描，禁止各自重复配对逻辑。
+ * 从 root-to-head EntryPath 派生每个 COMPACTION turn 的完整事实；{@link CompactionPayload} 只保存
+ * summaryText，trigger、execution 和 cut 从 enclosing TURN_START 的 {@link CompactionStart} 读取。成功压缩需要
+ * summary payload 和匹配的 COMPLETED TURN_END。
  */
 public final class CompactionTurns {
 
@@ -54,21 +51,13 @@ public final class CompactionTurns {
       }
     }
 
-    /** complete = phase != HISTORY 且 TURN_END COMPLETED（点 3）。 */
     public boolean complete() {
-      return start.compaction().phase() != CompactionPhase.HISTORY
-          && result != null
-          && end != null
-          && end.outcome() == TurnEndOutcome.COMPLETED;
+      return result != null && end != null && end.outcome() == TurnEndOutcome.COMPLETED;
     }
 
-    /** 该压缩 turn 是否以 COMPLETED 关闭（HISTORY 部分成功也在此列）。 */
+    /** Whether the compaction turn has a completed TURN_END. */
     public boolean completed() {
       return end != null && end.outcome() == TurnEndOutcome.COMPLETED;
-    }
-
-    public CompactionPhase phase() {
-      return start.compaction().phase();
     }
 
     public CompactionTrigger trigger() {

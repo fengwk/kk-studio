@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -79,9 +78,7 @@ class ResolvedRequestValidatorTest {
 
   @Test
   void rejectsNormalTurnThatCarriesCompactionMetadata() {
-    CompactionStart start =
-        CompactionStart.pending(
-            CompactionPhase.FULL, CompactionTrigger.THRESHOLD, CUT_ENTRY_ID, null, null);
+    CompactionStart start = CompactionStart.pending(CompactionTrigger.THRESHOLD, CUT_ENTRY_ID);
     EntryPath path = compactionPath(SETTINGS, start);
 
     // normal 校验不得借 candidate path 末尾的 COMPACTION TURN_START 携带压缩元数据。

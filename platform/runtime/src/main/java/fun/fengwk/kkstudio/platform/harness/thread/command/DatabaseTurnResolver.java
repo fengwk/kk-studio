@@ -456,8 +456,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   /**
    * 压缩 resolver 路径：只按 preparation 的 executionModel 查找模型、Provider 与 Variant 构造请求——不查 Agent system
    * prompt、不查 contributors、零 tool/skill、不做 environment 可用性查找。压缩使用 Compaction Agent 自身配置的模型与
-   * variant。 切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按当前 config 与
-   * removedPrefixTokens 现算。
+   * variant。切分事实由 candidate path 的 compaction TURN_START 持有，不复制进 spec；输出预算按模型输出上限与固定比例计算。
    */
   private Result resolveCompaction(CompactionPreparation preparation) {
     String compactionAgentName = BuiltinAgents.COMPACTION_NAME;
@@ -493,10 +492,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     try {
       outputBudget =
           BuiltinModelBudget.compactionOutputBudget(
-              compactionConfigProvider.compactionConfig(),
-              preparation.phase(),
-              maxOutputTokens,
-              preparation.removedPrefixTokens());
+              compactionConfigProvider.compactionConfig(), maxOutputTokens);
     } catch (IllegalArgumentException error) {
       throw rejection(error.getMessage());
     }

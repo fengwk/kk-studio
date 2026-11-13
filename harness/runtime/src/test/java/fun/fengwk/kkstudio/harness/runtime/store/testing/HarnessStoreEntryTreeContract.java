@@ -25,7 +25,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -1153,12 +1152,7 @@ public abstract class HarnessStoreEntryTreeContract {
                               StoreTestSupport.OWNER_THREAD_ID,
                               StoreTestSupport.CONTEXT_WINDOW,
                               StoreTestSupport.MAX_OUTPUT_TOKENS,
-                              CompactionStart.pending(
-                                  CompactionPhase.FULL,
-                                  CompactionTrigger.MANUAL,
-                                  inputTurnEnd,
-                                  null,
-                                  null),
+                              CompactionStart.pending(CompactionTrigger.MANUAL, inputTurnEnd),
                               null),
                           T2));
               return id;
@@ -1250,8 +1244,7 @@ public abstract class HarnessStoreEntryTreeContract {
                           StoreTestSupport.OWNER_THREAD_ID,
                           StoreTestSupport.CONTEXT_WINDOW,
                           StoreTestSupport.MAX_OUTPUT_TOKENS,
-                          CompactionStart.pending(
-                              CompactionPhase.FULL, CompactionTrigger.MANUAL, parentId, null, null),
+                          CompactionStart.pending(CompactionTrigger.MANUAL, parentId),
                           null),
                       createdAt));
           tx.entries()

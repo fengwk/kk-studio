@@ -65,7 +65,7 @@ test.describe('Compaction summary system card', () => {
     await expect(fileCard.locator('.md-root h2').first()).toHaveText('关键决策')
     await expect(fileCard.locator('.md-root h2')).toHaveCount(2)
     await expect(fileCard.locator('.md-root li')).toHaveCount(2)
-    await expect(fileCard.locator('.md-code-block')).toContainText('TURN_PREFIX')
+    await expect(fileCard.locator('.md-code-block')).toContainText('continueModel')
     await expect(fileCard).toContainText('<read-files>')
     await expect(fileCard).toContainText('src/features/thread/runtime/thread-timeline-builder.ts')
     await expect(fileCard.locator('read-files')).toHaveCount(0)

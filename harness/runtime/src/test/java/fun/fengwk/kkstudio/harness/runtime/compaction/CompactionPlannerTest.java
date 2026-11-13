@@ -9,7 +9,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -66,7 +65,6 @@ class CompactionPlannerTest {
             .orElseThrow();
 
     assertEquals(id(5L), preparation.cutEntryId());
-    assertEquals(CompactionPhase.FULL, preparation.phase());
     assertInstanceOf(
         TurnEndPayload.class,
         path.path()
@@ -77,7 +75,6 @@ class CompactionPlannerTest {
                     .orElseThrow()
                     .pathIndex())
             .payload());
-    assertEquals(2, preparation.messagesToSummarize().size());
   }
 
   @Test

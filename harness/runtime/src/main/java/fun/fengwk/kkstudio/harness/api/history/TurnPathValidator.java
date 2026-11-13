@@ -1,8 +1,5 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
@@ -15,35 +12,21 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
 
 /**
  * package-private EntryPath turn-sequence validation state（KISS：非通用 workflow/state-machine）。
  *
- * <p>校验 open Turn 内的 entry 顺序与 TURN_END outcome 前置条件：ROOT 后所有非 ROOT entry 必须在 open TURN_START
- * 内（NATIVE_COMPACTION 透明除外，见 {@link #visit}）；input 阶段只允许 USER/CUSTOM MESSAGE；MODEL_ATTEMPT_FAILURE
- * 只能位于 open 非压缩 Turn 的 Assistant 结果之前，attempt 从 1 连续递增；INPUT turn 在 Assistant 结果前必须已有至少一条
- * USER/CUSTOM（或紧邻其前的回合间系统通知，由本 INPUT 接纳；compaction 不消费该待接纳输入）；CONTINUATION turn 偿还上一 TURN_END 的
- * continueModel obligation，不消费 USER/CUSTOM（配置 Commands 只体现在 TURN_START.settings），可零 input 直接产生
- * Assistant 结果；COMPACTION turn 消费零 Command、绝不出现 USER/CUSTOM MESSAGE，成功结果只能是 COMPACTION payload （普通
- * turn 绝不包含它），失败/停止可复用 ASSISTANT_ERROR / ASSISTANT_ABORTED barrier 且无需 USER input；STOP turn
- * 是显式停止的持久屏障（不是模型工作轮），只允许唯一一条 ASSISTANT_ERROR(CANCELLED) 取消屏障及其后 {@code continueModel=false}、{@code
- * closeRequestId} 非 null 的 STOPPED TURN_END，绝不出现 USER/CUSTOM MESSAGE、真实 Assistant 结果、Tool
- * 结果、ModelAttemptFailure 或 COMPACTION 载荷； Assistant 结果（ASSISTANT MESSAGE / ASSISTANT_ERROR /
- * ASSISTANT_ABORTED / COMPACTION）只能出现一次且之后 不得再出现 USER/CUSTOM/第二个 Assistant；TOOL MESSAGE 只能跟随带
- * ToolCall 的 ASSISTANT MESSAGE，且必须是 callIndex 0 开始的严格前缀（callIndex 连续、toolCallId/toolName
- * 匹配、assistantEntryId 等于该 Assistant Entry id）；TURN_END 只能关闭当前 open TURN_START 且 ID 匹配，并按 outcome
- * 校验前置条件（COMPLETED 必须已有 ASSISTANT MESSAGE / COMPACTION 且 ToolResult 完整；HISTORY phase gap、complete
- * OVERFLOW recovery 与 active continuation 前的 complete THRESHOLD compaction 必须 {@code
- * continueModel=true}，其它 compaction 必须 false；FAILED 必须已有 ASSISTANT_ERROR；STOPPED 必须已有 stop
- * barrier/Assistant 且 ToolResult 完整；CANCELLED 可在任意 open phase关闭）。路径可以在任意 prefix 截断。
+ * <p>校验 open Turn 内的 entry 顺序与 TURN_END outcome 前置条件：ROOT 后所有非 ROOT entry 必须位于 open TURN_START
+ * 内（NATIVE_COMPACTION 透明除外）；INPUT turn 必须包含 USER/CUSTOM 输入，CONTINUATION 不消费外部输入， COMPACTION turn
+ * 不消费外部输入且成功时必须保存 COMPACTION 结果并继续 owner model。COMPACTION branch 首轮只允许固定内部
+ * 摘要指令，后续只允许继续轮次及固定失败工具结果，不执行平台工具。普通 Assistant 结果只能出现一次；Tool 结果必须严格匹配 Assistant ToolCall 的连续前缀。STOP
+ * turn 只允许取消错误屏障和带 closeRequestId 的 STOPPED TURN_END。路径可以在任意 prefix 截断。
  */
 final class TurnPathValidator {
 
   private Entry openTurnStart;
   private TurnStartReason openReason;
-  private CompactionStart openCompactionStart;
   private UUID openOwnerThreadId;
   private UUID pendingContinuationOwnerThreadId;
   private boolean pendingNotificationInput;
@@ -98,7 +81,6 @@ final class TurnPathValidator {
       }
       openTurnStart = entry;
       openReason = start.reason();
-      openCompactionStart = start.compaction();
       openOwnerThreadId = start.ownerThreadId();
       if (openReason == TurnStartReason.COMPACTION_BRANCH_INPUT) {
         if (compactionBranchInstructionSeen) {
@@ -165,16 +147,9 @@ final class TurnPathValidator {
               throw new IllegalArgumentException(
                   "completed compaction turns require a COMPACTION result");
             }
-            CompactionPhase phase = openCompactionStart.phase();
-            boolean expectedContinueModel =
-                phase == CompactionPhase.HISTORY
-                    || openCompactionStart.trigger() == CompactionTrigger.OVERFLOW
-                    || (openCompactionStart.trigger() == CompactionTrigger.THRESHOLD
-                        && Objects.equals(pendingContinuationOwnerThreadId, openOwnerThreadId));
-            if (end.continueModel() != expectedContinueModel) {
+            if (!end.continueModel()) {
               throw new IllegalArgumentException(
-                  "completed compaction continueModel must match HISTORY, OVERFLOW, or preserved "
-                      + "continuation obligation");
+                  "completed compaction turns must continue the owner model");
             }
           } else {
             requireAssistantMessage("completed");

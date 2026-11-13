@@ -40,18 +40,12 @@ import type {
 } from '@/shared/api/generated/contracts'
 
 /**
- * 压缩回合的挂起状态：FULL / TURN_PREFIX 的完整成功才产生卡片。
- * HISTORY 只是中间 partial，失败/取消/未关闭回合同样不产生卡片。
+ * 压缩回合只有在保存摘要并以 COMPLETED、continueModel=true 关闭时才产生卡片。
  */
 interface CompactionTurnContext {
   startEntryId: string
-  phase: string
   summaryEntry: HarnessSessionEntryDTO | null
   summaryText: string
-}
-
-function isSuccessfulCompactionPhase(phase: string): boolean {
-  return phase === 'FULL' || phase === 'TURN_PREFIX'
 }
 
 /**
@@ -90,7 +84,6 @@ export function buildThreadTimeline(
       compactionTurn = latestTurnIsCompaction
         ? {
             startEntryId: entry.entryId,
-            phase: getString(asRecord(payload.compaction).phase),
             summaryEntry: null,
             summaryText: '',
           }
@@ -111,9 +104,9 @@ export function buildThreadTimeline(
         if (
           compactionTurn != null
           && compactionTurn.summaryEntry != null
-          && isSuccessfulCompactionPhase(compactionTurn.phase)
           && getString(payload.turnStartEntryId) === compactionTurn.startEntryId
           && getString(payload.outcome) === 'COMPLETED'
+          && payload.continueModel === true
         ) {
           // 卡片留在原压缩回合的位置（此前对话之后、后续对话之前），与切点无关。
           messages.push(

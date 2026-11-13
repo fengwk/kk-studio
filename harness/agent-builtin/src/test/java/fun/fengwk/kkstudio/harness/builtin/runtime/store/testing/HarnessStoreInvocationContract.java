@@ -48,7 +48,6 @@ import org.junit.jupiter.api.Test;
 import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -2514,12 +2513,8 @@ public abstract class HarnessStoreInvocationContract {
 
   // ---- 压缩调用 ----
 
-  /** 关闭 baseline INPUT turn，并按 immutable TURN_START 事实打开一个 COMPACTION turn。 */
+  /** Closes the baseline INPUT turn and opens one COMPACTION turn at its complete boundary. */
   private UUID openCompactionTurn() {
-    return openCompactionTurn(CompactionPhase.HISTORY, null);
-  }
-
-  private UUID openCompactionTurn(CompactionPhase phase, UUID requestedCutEntryId) {
     return store.transaction(
         tx -> {
           tx.threads().lock(baseline.threadId());
@@ -2548,11 +2543,8 @@ public abstract class HarnessStoreInvocationContract {
                           baseline.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
                       T1));
           UUID start = tx.nextId();
-          UUID cutEntryId = requestedCutEntryId == null ? endEntryId : requestedCutEntryId;
-          UUID turnPrefixStartEntryId = phase == CompactionPhase.FULL ? null : userEntryId;
           CompactionStart compaction =
-              CompactionStart.pending(
-                  phase, CompactionTrigger.THRESHOLD, cutEntryId, turnPrefixStartEntryId, null);
+              CompactionStart.pending(CompactionTrigger.THRESHOLD, endEntryId);
           tx.entries()
               .insert(
                   new Entry(
@@ -2636,13 +2628,10 @@ public abstract class HarnessStoreInvocationContract {
           UUID joinInvocationId = tx.nextId();
           CompactionStart compaction =
               new CompactionStart(
-                  CompactionPhase.FULL,
                   CompactionTrigger.THRESHOLD,
                   executionSelection(),
                   4096L,
                   cutEntryId,
-                  null,
-                  null,
                   childThreadId,
                   joinInvocationId);
           tx.entries()

@@ -107,7 +107,7 @@ describe('CompactionEntryBlock', () => {
     expect(preview.querySelector('.md-root h1')?.textContent).toBe('会话压缩摘要')
     expect(preview.querySelector('.md-root h2')?.textContent).toBe('关键决策')
     expect(preview.querySelectorAll('.md-root li')).toHaveLength(2)
-    expect(preview.querySelector('.md-code-block')?.textContent).toContain('TURN_PREFIX')
+    expect(preview.querySelector('.md-code-block')?.textContent).toContain('continueModel')
 
     const root = preview.querySelector('.md-root') as HTMLElement
     const rawSpans = root.querySelectorAll('.md-raw-text')

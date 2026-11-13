@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -588,13 +587,10 @@ class ProviderRequestPreviewServiceTest {
     UUID end = id(34L);
     CompactionStart start =
         new CompactionStart(
-            CompactionPhase.FULL,
             CompactionTrigger.THRESHOLD,
             BuiltinExecution.of(COMPACTION_MODEL),
             (long) COMPACTION_OUTPUT_BUDGET,
             assistant,
-            null,
-            null,
             CHILD_THREAD_ID,
             COMPACTION_JOIN_ID);
     return new EntryPath(
@@ -643,7 +639,7 @@ class ProviderRequestPreviewServiceTest {
                 SESSION_ID,
                 COMPACTION_ENTRY_ID,
                 new TurnEndPayload(
-                    COMPACTION_TURN_START_ID, TurnEndOutcome.COMPLETED, false, null, null),
+                    COMPACTION_TURN_START_ID, TurnEndOutcome.COMPLETED, true, null, null),
                 COMPACTION_RESULT_TIME.plusSeconds(1))));
   }
 

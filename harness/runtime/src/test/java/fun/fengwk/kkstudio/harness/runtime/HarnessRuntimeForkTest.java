@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionPhase;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
@@ -324,43 +323,6 @@ class HarnessRuntimeForkTest {
     assertTrue(texts.contains("u2"));
     assertTrue(texts.contains("u3"));
     assertEquals(ForkPayload.SESSION_NOTICE, texts.getLast());
-  }
-
-  /**
-   * 保留尾部切点之外的压缩内部引用必须安全降级为 null：TURN_PREFIX 精确引用的 HISTORY 结果 Entry 不在复制范围内时 {@code
-   * historyCompactionEntryId} 置 null（TURN_PREFIX 的合法取值），路径仍可加载与投影，绝不留悬空引用，也不拼接半轮。
-   */
-  @Test
-  void sessionForkNullsCompactionReferencesOutsideCopiedRange() {
-    CompactionSeed source = seedSplitCompactionHistory(store);
-    UUID newSessionId = TestIds.id(980);
-    UUID newThreadId = TestIds.id(981);
-    AcceptedCommands accepted =
-        acceptSessionFork(source.threadId(), source.lastEntryId(), newSessionId, newThreadId);
-
-    EntryPath path =
-        store.transaction(tx -> tx.entries().loadPath(accepted.thread().headEntryId()));
-    List<CompactionStart> copiedStarts =
-        path.entries().stream()
-            .filter(
-                entry ->
-                    entry.payload() instanceof TurnStartPayload start && start.compaction() != null)
-            .map(entry -> ((TurnStartPayload) entry.payload()).compaction())
-            .toList();
-    assertEquals(1, copiedStarts.size());
-    CompactionStart copiedStart = copiedStarts.getFirst();
-    assertEquals(CompactionPhase.TURN_PREFIX, copiedStart.phase());
-    assertNull(copiedStart.historyCompactionEntryId());
-    assertTrue(
-        path.entries().stream().anyMatch(entry -> entry.id().equals(copiedStart.cutEntryId())));
-    assertTrue(
-        path.entries().stream()
-            .anyMatch(entry -> entry.id().equals(copiedStart.turnPrefixStartEntryId())));
-    // 复制的每个 TURN_START 都在复制范围内闭合：绝不留下半轮。
-    assertEquals(
-        0,
-        countUnclosedTurns(path.entries()),
-        "copied history must only contain whole closed turns");
   }
 
   // ---------------------------------------------------------------- 会话 fork：来源校验
@@ -765,8 +727,7 @@ class HarnessRuntimeForkTest {
                 resultId,
                 sessionId,
                 turnStartId,
-                new CompactionPayload(
-                    start.phase() == CompactionPhase.HISTORY ? "history" : "summary", null),
+                new CompactionPayload("summary", null),
                 createdAt));
     UUID endId = tx.nextId();
     tx.entries()
@@ -861,93 +822,16 @@ class HarnessRuntimeForkTest {
                       te2,
                       threadId,
                       new CompactionStart(
-                          CompactionPhase.FULL,
                           CompactionTrigger.MANUAL,
                           HarnessRuntimeTestSupport.executionSelection(),
                           4_096L,
                           u2,
-                          null,
-                          null,
                           tx.nextId(),
                           tx.nextId()),
                       T2,
                       false)
                   .endId();
           tx.entries().insert(turnStartEntry(ts3, sessionId, compactionEnd, T3, threadId));
-          tx.entries().insert(userEntry(u3, sessionId, ts3, T3, "u3"));
-          tx.entries().insert(assistantEntry(a3, sessionId, u3, T3));
-          tx.entries().insert(turnEndEntry(te3, sessionId, a3, T3, ts3, false));
-          tx.threads().insert(thread(threadId, sessionId, te3));
-          return new CompactionSeed(sessionId, threadId, te3, ts2);
-        });
-  }
-
-  /** HISTORY 压缩后紧接 TURN_PREFIX 压缩（引用 HISTORY 结果）；head = END3，保留尾部从 T2 开始。 */
-  private static CompactionSeed seedSplitCompactionHistory(InMemoryHarnessStore store) {
-    return store.transaction(
-        tx -> {
-          UUID sessionId = tx.nextId();
-          UUID threadId = tx.nextId();
-          UUID root = tx.nextId();
-          UUID ts1 = tx.nextId();
-          UUID u1 = tx.nextId();
-          UUID a1 = tx.nextId();
-          UUID te1 = tx.nextId();
-          UUID ts2 = tx.nextId();
-          UUID u2 = tx.nextId();
-          UUID a2 = tx.nextId();
-          UUID te2 = tx.nextId();
-          UUID ts3 = tx.nextId();
-          UUID u3 = tx.nextId();
-          UUID a3 = tx.nextId();
-          UUID te3 = tx.nextId();
-          tx.sessions().insert(session(sessionId));
-          tx.entries().insert(rootEntry(root, sessionId));
-          tx.entries().insert(turnStartEntry(ts1, sessionId, root, T1, threadId));
-          tx.entries().insert(userEntry(u1, sessionId, ts1, T1, "u1"));
-          tx.entries().insert(assistantEntry(a1, sessionId, u1, T1));
-          tx.entries().insert(turnEndEntry(te1, sessionId, a1, T1, ts1, false));
-          CompactionTurnIds historyTurn =
-              insertCompactionTurn(
-                  tx,
-                  sessionId,
-                  te1,
-                  threadId,
-                  new CompactionStart(
-                      CompactionPhase.HISTORY,
-                      CompactionTrigger.THRESHOLD,
-                      HarnessRuntimeTestSupport.executionSelection(),
-                      4_096L,
-                      a1,
-                      u1,
-                      null,
-                      tx.nextId(),
-                      tx.nextId()),
-                  T1,
-                  true);
-          tx.entries().insert(turnStartEntry(ts2, sessionId, historyTurn.endId(), T2, threadId));
-          tx.entries().insert(userEntry(u2, sessionId, ts2, T2, "u2"));
-          tx.entries().insert(assistantEntry(a2, sessionId, u2, T2));
-          tx.entries().insert(turnEndEntry(te2, sessionId, a2, T2, ts2, false));
-          CompactionTurnIds prefixTurn =
-              insertCompactionTurn(
-                  tx,
-                  sessionId,
-                  te2,
-                  threadId,
-                  new CompactionStart(
-                      CompactionPhase.TURN_PREFIX,
-                      CompactionTrigger.MANUAL,
-                      HarnessRuntimeTestSupport.executionSelection(),
-                      4_096L,
-                      a2,
-                      u2,
-                      historyTurn.resultId(),
-                      tx.nextId(),
-                      tx.nextId()),
-                  T2,
-                  false);
-          tx.entries().insert(turnStartEntry(ts3, sessionId, prefixTurn.endId(), T3, threadId));
           tx.entries().insert(userEntry(u3, sessionId, ts3, T3, "u3"));
           tx.entries().insert(assistantEntry(a3, sessionId, u3, T3));
           tx.entries().insert(turnEndEntry(te3, sessionId, a3, T3, ts3, false));
