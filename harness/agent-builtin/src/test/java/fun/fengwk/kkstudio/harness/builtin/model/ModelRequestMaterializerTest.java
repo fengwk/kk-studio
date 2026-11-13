@@ -383,7 +383,7 @@ class ModelRequestMaterializerTest {
                 entry(
                     12,
                     11,
-                    new TurnEndPayload(id(10L), TurnEndOutcome.COMPLETED, false, null, null))));
+                    new TurnEndPayload(id(10L), TurnEndOutcome.COMPLETED, true, null, null))));
     List<ProviderMessage> messages = MATERIALIZER.materialize(path, spec).messages();
     assertTrue(messages.stream().noneMatch(m -> "high".equals(m.reasoningEffort())));
     assertEquals("max", messages.getLast().reasoningEffort());
@@ -451,7 +451,7 @@ class ModelRequestMaterializerTest {
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("kept summary", null)));
     entries.add(
-        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
+        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, true, null, null)));
     entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
     entries.add(entry(10, 9, user("kept-user")));
     entries.add(
@@ -519,7 +519,7 @@ class ModelRequestMaterializerTest {
     entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
     entries.add(entry(7, 6, new CompactionPayload("summary", null)));
     entries.add(
-        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
+        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, true, null, null)));
 
     // compaction 之后的新 turn
     entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
