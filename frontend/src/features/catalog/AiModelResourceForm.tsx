@@ -6,6 +6,7 @@ import { VariantListEditor } from '@/features/catalog/AiVariantListEditor'
 import { ModelPricingEditor } from '@/features/catalog/AiModelPricingEditor'
 import { ModelCatalogPicker } from '@/features/catalog/AiModelCatalogPicker'
 import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
+import { supportsClaudeMidConvoSystemMessages } from '@/features/catalog/claude-model-capabilities'
 import {
   defaultPromptCacheRetention,
   resolvePromptCacheRetentions,
@@ -101,7 +102,8 @@ export function ModelForm({
       modelId,
       name: nameFollows ? modelId : draft.name,
       midConversationSystemMessages:
-        draft.midConversationSystemMessages || (mode === 'create' && /claude/i.test(modelId)),
+        draft.midConversationSystemMessages ||
+        (mode === 'create' && supportsClaudeMidConvoSystemMessages(modelId)),
     })
   }
 

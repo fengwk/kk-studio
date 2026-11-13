@@ -94,7 +94,7 @@ class AnthropicRequestProjectionWireTest {
     AgentMessage userAgentMsg =
         new AgentMessage(
             AgentMessageRole.USER, List.of(new TextMessageContent("What is the weather?")));
-    ProviderMessageProjector projector = ProviderMessageProjector.byNames(Set.of());
+    ProviderMessageProjector projector = new ProviderMessageProjector();
     List<ProviderMessage> projectedMessages =
         projector.project(List.of(userAgentMsg, asstAgentMsg));
 
@@ -141,7 +141,7 @@ class AnthropicRequestProjectionWireTest {
       additions.add(new TextMessageContent("new-" + i));
     }
     history.add(new AgentMessage(AgentMessageRole.USER, new ArrayList<>(additions)));
-    JsonNode wire = cacheWire(ProviderMessageProjector.byNames(Set.of()).project(history));
+    JsonNode wire = cacheWire(new ProviderMessageProjector().project(history));
     // tools、system 与最近两个历史请求端点（User 的最后一个新增块、Assistant answer）共 4 个标记
     assertTrue(wire.path("tools").get(0).has("cache_control"));
     assertTrue(wire.path("system").get(0).has("cache_control"));

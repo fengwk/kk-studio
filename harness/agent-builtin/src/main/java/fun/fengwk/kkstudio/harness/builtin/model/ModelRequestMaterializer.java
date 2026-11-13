@@ -95,7 +95,7 @@ public final class ModelRequestMaterializer {
         incrementalSystem ? SystemContext.baselineTools(path.entries()) : effectiveBindings;
     List<ProviderToolDefinition> tools = providerTools(requestBindings);
     List<ProviderMessage> messages = new ArrayList<>();
-    appendHistory(path, spec, effectiveBindings, incrementalSystem, messages);
+    appendHistory(path, spec, incrementalSystem, messages);
     ModelVariant variant = spec.variant();
     if (incrementalSystem) {
       List<ProviderProtocolOptions.ToolDefinition> baselineHostedTools =
@@ -123,16 +123,6 @@ public final class ModelRequestMaterializer {
             spec.variant().promptCacheRetention(), path.root().sessionId().toString()));
   }
 
-  private ProviderMessageProjector projector(List<ToolBinding> toolBindings) {
-    List<ProviderMessageProjector.NativeTool> nativeTools = new ArrayList<>(toolBindings.size());
-    for (ToolBinding binding : toolBindings) {
-      nativeTools.add(
-          new ProviderMessageProjector.NativeTool(
-              binding.descriptor().name(), binding.environmentName()));
-    }
-    return new ProviderMessageProjector(nativeTools);
-  }
-
   /**
    * 压缩感知历史投影：路径上存在 complete 压缩时，以最新 complete 压缩的 summary 作为单个 wrapper USER 消息，并从其 cutEntryId
    * 继续投影。COMPACTION 控制 turn 内部、TURN 边界、MODEL_ATTEMPT_FAILURE 与 ASSISTANT_ERROR 不进入 Provider
@@ -141,12 +131,12 @@ public final class ModelRequestMaterializer {
   private void appendHistory(
       EntryPath path,
       ModelRequestSpec spec,
-      List<ToolBinding> effectiveBindings,
       boolean incrementalSystem,
       List<ProviderMessage> messages) {
     List<Entry> entries = path.entries();
     List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
     List<ProviderMessage> deferredSystemMessages = new ArrayList<>();
+    ProviderMessageProjector projector = new ProviderMessageProjector();
     int lastBaselineIndex = -1;
     for (int i = 0; i < entries.size(); i++) {
       if (entries.get(i).payload() instanceof SystemPayload system && system.baseline()) {
@@ -190,7 +180,7 @@ public final class ModelRequestMaterializer {
           && i > lastBaselineIndex
           && payload instanceof SystemPayload system
           && !system.baseline()) {
-        messages.addAll(projector(effectiveBindings).projectSources(projectedMessages));
+        messages.addAll(projector.projectSources(projectedMessages));
         projectedMessages.clear();
         ProviderMessage change = systemMessage(system);
         if (change != null) {
@@ -205,7 +195,7 @@ public final class ModelRequestMaterializer {
         if (incrementalSystem
             && !deferredSystemMessages.isEmpty()
             && message.message().role() == AgentMessageRole.USER) {
-          messages.addAll(projector(effectiveBindings).projectSources(projectedMessages));
+          messages.addAll(projector.projectSources(projectedMessages));
           projectedMessages.clear();
           messages.addAll(deferredSystemMessages);
           deferredSystemMessages.clear();
@@ -223,7 +213,7 @@ public final class ModelRequestMaterializer {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       }
     }
-    messages.addAll(projector(effectiveBindings).projectSources(projectedMessages));
+    messages.addAll(projector.projectSources(projectedMessages));
     messages.addAll(deferredSystemMessages);
   }
 
