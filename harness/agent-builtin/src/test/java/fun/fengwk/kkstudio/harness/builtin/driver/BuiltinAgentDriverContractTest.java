@@ -6,10 +6,12 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -17,8 +19,10 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
@@ -32,11 +36,14 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
+import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.InMemoryBuiltinHarnessStore;
+import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -48,7 +55,12 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
+import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
+import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
+import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -79,6 +91,107 @@ class BuiltinAgentDriverContractTest {
   void setUp() {
     store = new InMemoryBuiltinHarnessStore();
     driver = builtinDriver(store, UNUSED_RESOLVER);
+  }
+
+  @Test
+  void pauseTurnDefersOnlyToolChangesUntilContinuationCompletes() {
+    UUID sessionId = new UUID(0L, 50L);
+    UUID threadId = new UUID(0L, 51L);
+    Entry root = rootEntry(new UUID(0L, 1L), sessionId);
+    Entry baseline =
+        new Entry(
+            new UUID(0L, 2L),
+            sessionId,
+            root.id(),
+            new SystemPayload(Map.of("agent", "[agent] old"), List.of(), List.of(), true),
+            T0);
+    Entry turnStart =
+        new Entry(
+            new UUID(0L, 3L),
+            sessionId,
+            baseline.id(),
+            new TurnStartPayload(
+                TurnStartReason.INPUT, settings(), threadId, 4096, 1024, null, null, null),
+            T0);
+    Entry user = userEntry(new UUID(0L, 4L), sessionId, turnStart.id());
+    Entry pausedAssistant =
+        new Entry(
+            new UUID(0L, 5L),
+            sessionId,
+            user.id(),
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("paused"))),
+                new AssistantMessageMetadata(GenerationStopReason.CONTINUE, usage()),
+                null),
+            T0);
+    Entry pausedEnd =
+        new Entry(
+            new UUID(0L, 6L),
+            sessionId,
+            pausedAssistant.id(),
+            new TurnEndPayload(turnStart.id(), TurnEndOutcome.COMPLETED, true, null, null),
+            T0);
+    EntryPath pausedPath =
+        new EntryPath(List.of(root, baseline, turnStart, user, pausedAssistant, pausedEnd));
+    ToolBinding addedTool = toolBinding();
+    ModelRequestSpec updated = updatedRequest(addedTool);
+
+    SystemPayload textChange =
+        BuiltinAgentDriver.systemChange(
+            thread(threadId, sessionId, pausedEnd.id(), "paused"), pausedPath, updated);
+
+    assertEquals(Map.of("agent", "[agent] new"), textChange.sections());
+    assertTrue(textChange.addedTools().isEmpty());
+    assertTrue(textChange.removedTools().isEmpty());
+
+    Entry textEntry = new Entry(new UUID(0L, 7L), sessionId, pausedEnd.id(), textChange, T0);
+    Entry continuationStart =
+        new Entry(
+            new UUID(0L, 8L),
+            sessionId,
+            textEntry.id(),
+            new TurnStartPayload(
+                TurnStartReason.CONTINUATION, settings(), threadId, 4096, 1024, null, null, null),
+            T0);
+    Entry continuationAssistant =
+        new Entry(
+            new UUID(0L, 9L),
+            sessionId,
+            continuationStart.id(),
+            new MessagePayload(
+                new AgentMessage(
+                    AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("complete"))),
+                new AssistantMessageMetadata(GenerationStopReason.COMPLETE, usage()),
+                null),
+            T0);
+    Entry continuationEnd =
+        new Entry(
+            new UUID(0L, 10L),
+            sessionId,
+            continuationAssistant.id(),
+            new TurnEndPayload(continuationStart.id(), TurnEndOutcome.COMPLETED, false, null, null),
+            T0);
+    EntryPath completedPath =
+        new EntryPath(
+            List.of(
+                root,
+                baseline,
+                turnStart,
+                user,
+                pausedAssistant,
+                pausedEnd,
+                textEntry,
+                continuationStart,
+                continuationAssistant,
+                continuationEnd));
+
+    SystemPayload deferredTools =
+        BuiltinAgentDriver.systemChange(
+            thread(threadId, sessionId, continuationEnd.id(), "complete"), completedPath, updated);
+
+    assertTrue(deferredTools.sections().isEmpty());
+    assertEquals(List.of(addedTool), deferredTools.addedTools());
   }
 
   @Test
@@ -401,6 +514,40 @@ class BuiltinAgentDriverContractTest {
         "Test system instruction.",
         List.of(),
         List.of());
+  }
+
+  private static ModelRequestSpec updatedRequest(ToolBinding tool) {
+    ModelVariant variant = new ModelVariant("v1", null, PromptCacheRetention.NONE, null);
+    return new ModelRequestSpec(
+        ProviderType.ANTHROPIC,
+        new UUID(0L, 1L),
+        new ModelDescriptor(
+            "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
+        variant,
+        List.of(variant),
+        1024,
+        "[agent] new",
+        List.of(tool),
+        List.of(),
+        null,
+        Map.of("agent", "[agent] new"));
+  }
+
+  private static ToolBinding toolBinding() {
+    return new ToolBinding(
+        new AgentToolDefinition(
+            new ToolDescriptor(
+                "added",
+                "added tool",
+                "added",
+                new InputSchema("arguments", Map.of(), Set.of(), false),
+                ToolSideEffect.READ_ONLY,
+                Duration.ofSeconds(30)),
+            ToolVisibility.SELECTABLE),
+        new ContributorBinding("core", "added"),
+        EnvironmentSupport.NONE,
+        null,
+        null);
   }
 
   private static ModelDescriptor modelDescriptor() {

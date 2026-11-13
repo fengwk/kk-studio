@@ -26,6 +26,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -84,6 +86,7 @@ public final class AnthropicRequestEncoder {
   private static final String PER_TURN_BETA = "per-turn-control-2026-07-01";
   private static final String MID_CONVERSATION_BETA = "mid-conversation-system-2026-04-07";
   private static final String EFFORT_BETA = "effort-2025-11-24";
+  private static final String INLINE_TOOLS_BETA = "inline-tools-2026-09-15";
 
   private final RequestBodySizeGuard bodySizeGuard;
 
@@ -116,7 +119,10 @@ public final class AnthropicRequestEncoder {
             && request.variant() != null
             && request.variant().reasoningEffort() != null
             && !request.variant().reasoningOff();
-    List<String> betaFeatures = resolveBetaFeatures(perTurnEffort);
+    boolean hasSystemChanges =
+        request.messages().stream()
+            .anyMatch(message -> message.role() == ProviderMessageRole.SYSTEM);
+    List<String> betaFeatures = resolveBetaFeatures(perTurnEffort, hasSystemChanges);
 
     ArrayNode toolsArray = mergeTools(root, request.tools());
 
@@ -151,6 +157,8 @@ public final class AnthropicRequestEncoder {
         wireMessagesArray.add(encodeUserMessage(msg));
       } else if (msg.role() == ProviderMessageRole.TOOL) {
         wireMessagesArray.add(encodeToolMessage(msg));
+      } else if (msg.role() == ProviderMessageRole.SYSTEM) {
+        wireMessagesArray.add(encodeSystemMessage(msg));
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "unexpected message role: " + msg.role());
@@ -191,12 +199,18 @@ public final class AnthropicRequestEncoder {
     return new AnthropicEncodedRequest(utf8Bytes, betaFeatures);
   }
 
-  /** 按实际启用的推理模式追加所需 beta。 */
-  private static List<String> resolveBetaFeatures(boolean perTurnEffort) {
+  /** Add the beta support required by the selected mid-conversation request features. */
+  private static List<String> resolveBetaFeatures(boolean perTurnEffort, boolean hasSystemChanges) {
+    List<String> betaFeatures = new ArrayList<>();
     if (perTurnEffort) {
-      return List.of(MID_CONVERSATION_BETA, PER_TURN_BETA, EFFORT_BETA);
+      betaFeatures.add(MID_CONVERSATION_BETA);
+      betaFeatures.add(PER_TURN_BETA);
+      betaFeatures.add(EFFORT_BETA);
     }
-    return List.of();
+    if (hasSystemChanges) {
+      betaFeatures.add(INLINE_TOOLS_BETA);
+    }
+    return List.copyOf(betaFeatures);
   }
 
   /** 从最终保留的消息反向补齐未知等级，再在连续 user/tool 消息之后声明变化。 */
@@ -393,6 +407,41 @@ public final class AnthropicRequestEncoder {
     }
     toolNode.set("input_schema", schemaNode);
     return toolNode;
+  }
+
+  private static ObjectNode encodeSystemMessage(ProviderMessage message) {
+    ObjectNode msgNode = NODES.objectNode();
+    msgNode.put("role", "system");
+    ArrayNode contents = msgNode.putArray("content");
+    for (ProviderContentBlock block : message.contents()) {
+      if (block instanceof ProviderTextBlock textBlock) {
+        ObjectNode text = NODES.objectNode();
+        text.put("type", "text");
+        text.put("text", textBlock.text());
+        contents.add(text);
+      } else if (block instanceof ProviderSystemToolAdditionBlock addition) {
+        ObjectNode tool = NODES.objectNode();
+        tool.put("type", "tool_definition");
+        tool.set("definition", encodeTool(addition.tool()));
+        ObjectNode node = NODES.objectNode();
+        node.put("type", "tool_addition");
+        node.set("tool", tool);
+        contents.add(node);
+      } else if (block instanceof ProviderSystemToolRemovalBlock removal) {
+        ObjectNode tool = NODES.objectNode();
+        tool.put("type", "tool_reference");
+        tool.put("name", removal.name());
+        ObjectNode node = NODES.objectNode();
+        node.put("type", "tool_removal");
+        node.set("tool", tool);
+        contents.add(node);
+      } else {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "unsupported content in Anthropic system message: " + block.getClass().getSimpleName());
+      }
+    }
+    return msgNode;
   }
 
   private static ObjectNode encodeUserMessage(ProviderMessage message) {

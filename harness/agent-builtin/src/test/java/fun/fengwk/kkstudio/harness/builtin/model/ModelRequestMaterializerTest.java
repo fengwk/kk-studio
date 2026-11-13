@@ -62,6 +62,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
@@ -155,6 +157,54 @@ class ModelRequestMaterializerTest {
         request.systemInstruction());
     assertTrue(request.tools().isEmpty());
     assertTrue(request.messages().isEmpty());
+  }
+
+  @Test
+  void projectsBaselineToolsAndInlineChangesForCapableAnthropicModel() {
+    Entry root = entry(1, 0, new RootPayload(SETTINGS));
+    Entry baseline =
+        entry(2, 1, new SystemPayload(Map.of("agent", "[agent]\nold"), List.of(), List.of(), true));
+    Entry change =
+        entry(
+            3,
+            2,
+            new SystemPayload(
+                Map.of("agent", "[agent]\nnew"),
+                List.of(),
+                List.of(bashBinding()),
+                List.of("obsolete"),
+                false));
+    ModelVariant variant = variant();
+    ModelRequestSpec spec =
+        new ModelRequestSpec(
+            ProviderType.ANTHROPIC,
+            id(1L),
+            new ModelDescriptor(
+                "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
+            variant,
+            List.of(variant),
+            1024,
+            "[agent]\nnew",
+            List.of(bashBinding()),
+            List.of(),
+            null,
+            Map.of("agent", "[agent]\nnew"));
+
+    ProviderRequest request =
+        MATERIALIZER.materialize(new EntryPath(List.of(root, baseline, change)), spec);
+
+    assertEquals("[agent]\nold", request.systemInstruction());
+    assertTrue(request.tools().isEmpty());
+    assertEquals(1, request.messages().size());
+    ProviderMessage system = request.messages().getFirst();
+    assertEquals(ProviderMessageRole.SYSTEM, system.role());
+    assertEquals(3, system.contents().size());
+    assertEquals(
+        "This section replaces the earlier [agent] section.\n\n[agent]\nnew",
+        ((ProviderTextBlock) system.contents().getFirst()).text());
+    assertEquals(
+        "bash", ((ProviderSystemToolAdditionBlock) system.contents().get(1)).tool().name());
+    assertEquals("obsolete", ((ProviderSystemToolRemovalBlock) system.contents().get(2)).name());
   }
 
   /** 只用当前实际模型的冻结 variants 重新解释历史；缺失、外模型和 null effort 均未知。 */

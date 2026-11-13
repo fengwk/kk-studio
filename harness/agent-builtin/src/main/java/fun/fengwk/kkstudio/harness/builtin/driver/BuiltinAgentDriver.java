@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.SystemContext;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
@@ -44,6 +45,7 @@ import fun.fengwk.kkstudio.harness.builtin.processor.ModelOutcomeAppender;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
@@ -258,8 +260,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
         systemChange(thread, candidatePath, spec));
   }
 
-  private static SystemPayload systemChange(
-      ThreadState thread, EntryPath path, ModelRequestSpec spec) {
+  static SystemPayload systemChange(ThreadState thread, EntryPath path, ModelRequestSpec spec) {
     SystemContext resolved = new SystemContext(spec.systemSections(), spec.toolBindings());
     if (thread.kind() == ThreadKind.COMPACTION) {
       return null;
@@ -267,7 +268,27 @@ public final class BuiltinAgentDriver implements AgentDriver {
     if (path.requiresSystemBaseline()) {
       return freshSystemBaseline(spec);
     }
-    return path.systemContext().orElseThrow().changesTo(resolved).orElse(null);
+    SystemPayload change = path.systemContext().orElseThrow().changesTo(resolved).orElse(null);
+    if (change == null || !latestAssistantPaused(path)) {
+      return change;
+    }
+    if (change.sections().isEmpty() && change.removedSections().isEmpty()) {
+      return null;
+    }
+    return new SystemPayload(
+        change.sections(), change.removedSections(), List.of(), List.of(), false);
+  }
+
+  private static boolean latestAssistantPaused(EntryPath path) {
+    List<Entry> entries = path.entries();
+    for (int i = entries.size() - 1; i >= 0; i--) {
+      if (entries.get(i).payload() instanceof MessagePayload message
+          && message.message().role() == AgentMessageRole.ASSISTANT
+          && message.assistantMetadata() != null) {
+        return message.assistantMetadata().stopReason() == GenerationStopReason.CONTINUE;
+      }
+    }
+    return false;
   }
 
   /**

@@ -44,5 +44,14 @@ public record ProviderMessage(
       throw new IllegalArgumentException(
           "TOOL messages must contain exactly one provider tool result block");
     }
+    if (role == ProviderMessageRole.SYSTEM
+        && contents.stream()
+            .anyMatch(
+                block ->
+                    !(block instanceof ProviderTextBlock)
+                        && !(block instanceof ProviderSystemToolAdditionBlock)
+                        && !(block instanceof ProviderSystemToolRemovalBlock))) {
+      throw new IllegalArgumentException("SYSTEM messages may contain text and tool changes only");
+    }
   }
 }

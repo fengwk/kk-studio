@@ -41,6 +41,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -503,6 +505,48 @@ class AnthropicRequestEncoderTest {
 
     // 会话 key 是 runtime 事实，Anthropic 无原生 cache-key 选项，绝不写入请求体
     assertFalse(root.toString().contains("test-affinity"));
+  }
+
+  @Test
+  void encodesMidConversationSystemTextAndToolChanges() throws IOException {
+    ProviderMessage change =
+        new ProviderMessage(
+            ProviderMessageRole.SYSTEM,
+            List.of(
+                new ProviderTextBlock("system update"),
+                new ProviderSystemToolAdditionBlock(
+                    new ProviderToolDefinition("new_tool", "new tool", "{\"type\":\"object\"}")),
+                new ProviderSystemToolRemovalBlock("old_tool")));
+    ProviderRequest request =
+        request(
+            defaultVariant(),
+            List.of(userMsg(new ProviderTextBlock("hello")), change),
+            List.of(),
+            ProviderCacheControl.none());
+
+    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
+    JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
+    JsonNode systemMessage = root.path("messages").get(1);
+    assertEquals("system", systemMessage.path("role").asString());
+    assertEquals("system update", systemMessage.path("content").get(0).path("text").asString());
+    assertEquals(
+        "tool_definition",
+        systemMessage.path("content").get(1).path("tool").path("type").asString());
+    assertEquals(
+        "new_tool",
+        systemMessage
+            .path("content")
+            .get(1)
+            .path("tool")
+            .path("definition")
+            .path("name")
+            .asString());
+    assertEquals(
+        "tool_reference",
+        systemMessage.path("content").get(2).path("tool").path("type").asString());
+    assertEquals(
+        "old_tool", systemMessage.path("content").get(2).path("tool").path("name").asString());
+    assertEquals(List.of("inline-tools-2026-09-15"), encoded.betaFeatures());
   }
 
   @Test

@@ -12,10 +12,12 @@ import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.SystemContext;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -23,8 +25,15 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.request.ProviderMessageProjector;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -68,20 +77,28 @@ public final class ModelRequestMaterializer {
 
   private ProviderRequest materializeLive(EntryPath path, ModelRequestSpec spec) {
     SystemContext context = path.systemContext().orElse(null);
+    boolean incrementalSystem =
+        spec.providerType() == ProviderType.ANTHROPIC
+            && spec.model().midConversationSystemMessages()
+            && context != null;
     List<ToolBinding> effectiveBindings = context == null ? spec.toolBindings() : context.tools();
     String systemInstruction =
         context == null
             ? spec.systemInstruction()
-            : SystemContext.collapseSystemInstruction(path.entries());
-    List<ProviderToolDefinition> tools = providerTools(effectiveBindings);
-    List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
-    appendHistory(path, spec, projectedMessages);
+            : incrementalSystem
+                ? SystemContext.baselineSystemInstruction(path.entries())
+                : SystemContext.collapseSystemInstruction(path.entries());
+    List<ToolBinding> requestBindings =
+        incrementalSystem ? SystemContext.baselineTools(path.entries()) : effectiveBindings;
+    List<ProviderToolDefinition> tools = providerTools(requestBindings);
+    List<ProviderMessage> messages = new ArrayList<>();
+    appendHistory(path, spec, effectiveBindings, incrementalSystem, messages);
     return new ProviderRequest(
         spec.model(),
         spec.variant(),
         spec.outputTokens(),
         systemInstruction,
-        projector(effectiveBindings).projectSources(projectedMessages),
+        messages,
         tools,
         ProviderCacheControl.session(
             spec.variant().promptCacheRetention(), path.root().sessionId().toString()));
@@ -102,11 +119,21 @@ public final class ModelRequestMaterializer {
    * 继续投影。COMPACTION 控制 turn 内部、TURN 边界、MODEL_ATTEMPT_FAILURE 与 ASSISTANT_ERROR 不进入 Provider
    * messages。
    */
-  private static void appendHistory(
+  private void appendHistory(
       EntryPath path,
       ModelRequestSpec spec,
-      List<ProviderMessageProjector.ProjectedMessage> projectedMessages) {
+      List<ToolBinding> effectiveBindings,
+      boolean incrementalSystem,
+      List<ProviderMessage> messages) {
     List<Entry> entries = path.entries();
+    List<ProviderMessageProjector.ProjectedMessage> projectedMessages = new ArrayList<>();
+    List<ProviderMessage> deferredSystemMessages = new ArrayList<>();
+    int lastBaselineIndex = -1;
+    for (int i = 0; i < entries.size(); i++) {
+      if (entries.get(i).payload() instanceof SystemPayload system && system.baseline()) {
+        lastBaselineIndex = i;
+      }
+    }
     int walkStart = 0;
     var latest = CompactionTurns.latestComplete(path);
     if (latest.isPresent()) {
@@ -140,10 +167,30 @@ public final class ModelRequestMaterializer {
       if (inCompactionTurn) {
         continue;
       }
+      if (incrementalSystem
+          && i > lastBaselineIndex
+          && payload instanceof SystemPayload system
+          && !system.baseline()) {
+        messages.addAll(projector(effectiveBindings).projectSources(projectedMessages));
+        projectedMessages.clear();
+        ProviderMessage change = systemMessage(system);
+        if (change != null) {
+          deferredSystemMessages.add(change);
+        }
+        continue;
+      }
       if (payload instanceof MessagePayload message) {
         projectedMessages.add(
             new ProviderMessageProjector.ProjectedMessage(
                 message.message(), reasoningEffort(message, spec)));
+        if (incrementalSystem
+            && !deferredSystemMessages.isEmpty()
+            && message.message().role() == AgentMessageRole.USER) {
+          messages.addAll(projector(effectiveBindings).projectSources(projectedMessages));
+          projectedMessages.clear();
+          messages.addAll(deferredSystemMessages);
+          deferredSystemMessages.clear();
+        }
       } else if (payload instanceof CustomMessagePayload message) {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       } else if (payload instanceof NotificationPayload notification) {
@@ -157,6 +204,8 @@ public final class ModelRequestMaterializer {
         projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
       }
     }
+    messages.addAll(projector(effectiveBindings).projectSources(projectedMessages));
+    messages.addAll(deferredSystemMessages);
   }
 
   private static String reasoningEffort(MessagePayload message, ModelRequestSpec spec) {
@@ -175,15 +224,33 @@ public final class ModelRequestMaterializer {
     return null;
   }
 
+  private ProviderMessage systemMessage(SystemPayload change) {
+    List<ProviderContentBlock> contents = new ArrayList<>();
+    String text = SystemContext.renderChangeText(change);
+    if (!text.isEmpty()) {
+      contents.add(new ProviderTextBlock(text));
+    }
+    for (ToolBinding binding : change.addedTools()) {
+      contents.add(new ProviderSystemToolAdditionBlock(providerTool(binding)));
+    }
+    for (String name : change.removedTools()) {
+      contents.add(new ProviderSystemToolRemovalBlock(name));
+    }
+    return contents.isEmpty() ? null : new ProviderMessage(ProviderMessageRole.SYSTEM, contents);
+  }
+
   private List<ProviderToolDefinition> providerTools(List<ToolBinding> toolBindings) {
     List<ProviderToolDefinition> tools = new ArrayList<>(toolBindings.size());
     for (ToolBinding binding : toolBindings) {
-      ToolDescriptor tool = binding.descriptor();
-      tools.add(
-          new ProviderToolDefinition(
-              tool.name(), tool.description(), schemaCodec.encode(tool.inputSchema())));
+      tools.add(providerTool(binding));
     }
     return List.copyOf(tools);
+  }
+
+  private ProviderToolDefinition providerTool(ToolBinding binding) {
+    ToolDescriptor tool = binding.descriptor();
+    return new ProviderToolDefinition(
+        tool.name(), tool.description(), schemaCodec.encode(tool.inputSchema()));
   }
 
   private static int indexOfId(List<Entry> entries, UUID entryId) {

@@ -400,6 +400,9 @@ public final class OpenAiResponsesRequestEncoder {
         // Semantic fallback
         encodeAssistantSemanticFallback(msg.contents(), inputItems);
       }
+      case SYSTEM -> throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "mid-conversation system messages are unsupported by OpenAI Responses");
       case TOOL -> {
         for (ProviderContentBlock block : msg.contents()) {
           if (block instanceof ProviderToolResultBlock resultBlock) {

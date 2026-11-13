@@ -57,6 +57,30 @@ public record SystemContext(Map<String, String> sections, List<ToolBinding> tool
     return String.join("\n\n", sections.values());
   }
 
+  /** Return the latest baseline text, discarding any earlier compacted segment. */
+  public static String baselineSystemInstruction(List<Entry> entries) {
+    SystemPayload baseline = latestBaseline(entries);
+    return String.join("\n\n", baseline.sections().values());
+  }
+
+  /** Return the tool definitions from the latest baseline. */
+  public static List<ToolBinding> baselineTools(List<Entry> entries) {
+    return latestBaseline(entries).addedTools();
+  }
+
+  private static SystemPayload latestBaseline(List<Entry> entries) {
+    SystemPayload baseline = null;
+    for (Entry entry : entries) {
+      if (entry.payload() instanceof SystemPayload system && system.baseline()) {
+        baseline = system;
+      }
+    }
+    if (baseline == null) {
+      throw new IllegalArgumentException("Entry path has no SYSTEM baseline");
+    }
+    return baseline;
+  }
+
   /** Collapse a SYSTEM history into baseline text followed by every append-only change in order. */
   public static String collapseSystemInstruction(List<Entry> entries) {
     String baseline = null;

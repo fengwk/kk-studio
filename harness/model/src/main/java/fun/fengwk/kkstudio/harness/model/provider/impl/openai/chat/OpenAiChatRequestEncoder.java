@@ -280,6 +280,9 @@ final class OpenAiChatRequestEncoder {
       case ASSISTANT -> throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "ASSISTANT message must be encoded with replay context");
+      case SYSTEM -> throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "mid-conversation system messages are unsupported by OpenAI Chat");
     };
   }
 
