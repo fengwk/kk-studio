@@ -29,6 +29,29 @@ func TestRuntimeDoesNotConfirmExitWithoutExecutorConfirmation(t *testing.T) {
 	}
 }
 
+// A delivered terminal result must release protected execution before update admission.
+func TestRuntimeTerminalReleasesProtectedExecution(t *testing.T) {
+	r, _ := newReadyRuntimeForTest(t, runtimeOptionsForTest())
+	r.callsMu.Lock()
+	r.calls["terminal"] = &runningCall{cancel: func() {}}
+	r.callsMu.Unlock()
+	if !r.journal.Start("terminal").Created {
+		t.Fatal("invocation was not started")
+	}
+	if err := r.finish("terminal", protocol.MessageType_FAILED, &protocol.Envelope_Failed{Failed: &protocol.Failed{}}, InvocationFailed); err != nil {
+		t.Fatal(err)
+	}
+	r.callsMu.Lock()
+	_, active := r.calls["terminal"]
+	r.callsMu.Unlock()
+	if active {
+		t.Fatal("terminal invocation remained protected")
+	}
+	if reason := r.updateBusyReason(nil); reason != "" {
+		t.Fatalf("update busy reason=%q after terminal", reason)
+	}
+}
+
 // RUN-T-071 replays the stored terminal and exit fact in response to CANCEL after completion.
 func TestRuntimeCancelReplaysStoredExitAfterTerminal(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())

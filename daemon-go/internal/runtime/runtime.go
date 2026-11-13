@@ -1265,6 +1265,11 @@ func (r *Runtime) rejectCall(id, msg string) error {
 	return sendErr
 }
 func (r *Runtime) finish(id string, kind protocol.MessageType, payload any, state InvocationState) error {
+	// A delivered terminal ends protected execution immediately; update admission must
+	// never observe a call whose result the client has already received.
+	r.callsMu.Lock()
+	delete(r.calls, id)
+	r.callsMu.Unlock()
 	frame := &protocol.Envelope{MessageType: kind, EnvironmentId: stringPtr(r.options.EnvironmentID), InvocationId: stringPtr(id)}
 	switch value := payload.(type) {
 	case *protocol.Envelope_Failed:
