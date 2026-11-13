@@ -85,16 +85,16 @@ public final class ModelRequestMaterializer {
             && context != null;
     boolean baselineHasClientTools =
         incrementalSystem && !SystemContext.baselineTools(path.entries()).isEmpty();
-    List<ToolBinding> effectiveBindings = context == null ? spec.toolBindings() : context.tools();
+    List<ProviderToolDefinition> effectiveTools =
+        context == null ? providerTools(spec.toolBindings()) : context.tools();
     String systemInstruction =
         context == null
             ? spec.systemInstruction()
             : incrementalSystem
                 ? SystemContext.baselineSystemInstruction(path.entries())
                 : SystemContext.collapseSystemInstruction(path.entries());
-    List<ToolBinding> requestBindings =
-        baselineHasClientTools ? SystemContext.baselineTools(path.entries()) : effectiveBindings;
-    List<ProviderToolDefinition> tools = providerTools(requestBindings);
+    List<ProviderToolDefinition> tools =
+        baselineHasClientTools ? SystemContext.baselineTools(path.entries()) : effectiveTools;
     List<ProviderMessage> messages = new ArrayList<>();
     appendHistory(path, spec, incrementalSystem, baselineHasClientTools, messages);
     ModelVariant variant = spec.variant();
@@ -253,8 +253,8 @@ public final class ModelRequestMaterializer {
       for (String name : change.removedHostedTools()) {
         contents.add(new ProviderSystemToolRemovalBlock(name));
       }
-      for (ToolBinding binding : change.addedTools()) {
-        contents.add(new ProviderSystemToolAdditionBlock(providerTool(binding)));
+      for (ProviderToolDefinition tool : change.addedTools()) {
+        contents.add(new ProviderSystemToolAdditionBlock(tool));
       }
       for (SystemHostedTool tool : change.addedHostedTools()) {
         contents.add(new ProviderSystemHostedToolAdditionBlock(tool.definitionJson()));

@@ -48,11 +48,11 @@ import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
-import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.time.Instant;
@@ -152,7 +152,8 @@ public final class HistoryEntryPayloadJsonCodec {
           "invocationId",
           "toolName");
 
-  private static final ToolBindingJsonCodec TOOL_BINDING_CODEC = new ToolBindingJsonCodec();
+  private static final ProviderToolDefinitionJsonCodec PROVIDER_TOOL_DEFINITION_CODEC =
+      new ProviderToolDefinitionJsonCodec();
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
@@ -242,7 +243,9 @@ public final class HistoryEntryPayloadJsonCodec {
     ArrayNode removedSections = node.putArray("removedSections");
     value.removedSections().forEach(removedSections::add);
     ArrayNode added = node.putArray("addedTools");
-    value.addedTools().forEach(binding -> added.add(TOOL_BINDING_CODEC.encodeNode(binding)));
+    value
+        .addedTools()
+        .forEach(definition -> added.add(PROVIDER_TOOL_DEFINITION_CODEC.encodeNode(definition)));
     ArrayNode removed = node.putArray("removedTools");
     value.removedTools().forEach(removed::add);
     ArrayNode addedHosted = node.putArray("addedHostedTools");
@@ -538,9 +541,9 @@ public final class HistoryEntryPayloadJsonCodec {
     }
     ArrayNode added =
         HistoryValueCodecs.requireArray(node.get("addedTools"), context + ".addedTools");
-    List<ToolBinding> addedTools = new ArrayList<>(added.size());
+    List<ProviderToolDefinition> addedTools = new ArrayList<>(added.size());
     for (JsonNode item : added) {
-      addedTools.add(TOOL_BINDING_CODEC.decodeNode(item));
+      addedTools.add(PROVIDER_TOOL_DEFINITION_CODEC.decodeNode(item));
     }
     ArrayNode removed =
         HistoryValueCodecs.requireArray(node.get("removedTools"), context + ".removedTools");

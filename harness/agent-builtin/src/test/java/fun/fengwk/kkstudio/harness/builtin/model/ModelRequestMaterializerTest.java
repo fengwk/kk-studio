@@ -66,6 +66,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -185,7 +186,7 @@ class ModelRequestMaterializerTest {
             new SystemPayload(
                 Map.of("agent", "[agent]\nnew"),
                 List.of(),
-                List.of(bashBinding()),
+                List.of(definitionOf(bashBinding())),
                 List.of("obsolete"),
                 List.of(
                     new SystemHostedTool(
@@ -248,7 +249,7 @@ class ModelRequestMaterializerTest {
             new SystemPayload(
                 Map.of("agent", "[agent] baseline"),
                 List.of(),
-                List.of(baselineTool),
+                List.of(definitionOf(baselineTool)),
                 List.of(),
                 List.of(),
                 List.of(),
@@ -258,7 +259,13 @@ class ModelRequestMaterializerTest {
             3,
             2,
             new SystemPayload(
-                Map.of(), List.of(), List.of(addedTool), List.of(), List.of(), List.of(), false));
+                Map.of(),
+                List.of(),
+                List.of(definitionOf(addedTool)),
+                List.of(),
+                List.of(),
+                List.of(),
+                false));
     ModelVariant variant = variant();
     ModelRequestSpec spec =
         spec(
@@ -719,6 +726,14 @@ class ModelRequestMaterializerTest {
         EnvironmentSupport.NONE,
         null,
         null);
+  }
+
+  private static ProviderToolDefinition definitionOf(ToolBinding binding) {
+    ToolDescriptor descriptor = binding.descriptor();
+    return new ProviderToolDefinition(
+        descriptor.name(),
+        descriptor.description(),
+        new SchemaJsonCodec().encode(descriptor.inputSchema()));
   }
 
   private static ToolBinding bashBinding() {

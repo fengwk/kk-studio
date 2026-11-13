@@ -46,7 +46,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 | --- | --- |
 | `ROOT` | 唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/BranchSettings.java)：agent、[`ExecutionSelection`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/ExecutionSelection.java)（`driver` + `settings` JSON 对象）与可空的 Environment name |
 | `TURN_START` | 打开回合，冻结完整 settings、实际执行配置 `executedSelection`、owner Thread、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算 |
-| `SYSTEM` | 回合间的系统上下文基线或增量，保存具名 prompt sections 与完整工具定义 |
+| `SYSTEM` | 回合间的系统上下文基线或增量，保存具名 prompt sections 与模型可见工具定义 |
 | `MESSAGE` | USER / ASSISTANT / TOOL 消息；assistant 原生 Provider 数据保存在各自内容块上 |
 | `CUSTOM_MESSAGE` | 可信调用方注入的消息 |
 | `MODEL_ATTEMPT_FAILURE` | 与 Provider 无关的重试审计 |
@@ -67,7 +67,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 - `INPUT` 回合在 Assistant 结果前至少有一条 USER 或 `CUSTOM_MESSAGE`；`CONTINUATION` 偿还上一回合的 `continueModel=true`，不消费用户消息；`COMPACTION` 不出现 USER 或 `CUSTOM_MESSAGE`，成功结果只能是 `COMPACTION`；`STOP` 是显式停止的持久屏障，只含一条 `ASSISTANT_ERROR(CANCELLED)` 与随后的 `STOPPED` `TURN_END`。
 - `TURN_END` 只能关闭当前 open 的回合，并按结局校验前置条件。路径可以在任意前缀截断，用于恢复未闭合的回合。
 
-`SYSTEM` Entry 是每条 Thread 路径的持久请求上下文：首条记录具名 system prompt sections 与完整 client / vendor-hosted tool definitions，之后只追加变更的 sections / tools；路径规约出的当前上下文用于规划下一回合。首次基线或上下文变化与对应 `TURN_START` 在同一事务提交，未变化时复用现有基线。分支沿用来源路径上的 SYSTEM Entries；完整工具定义只在 SYSTEM 中保存，`TURN_START` 与 tool-result metadata 只保留工具名。压缩回合不重建基线，压缩后的普通回合需要新基线。
+`SYSTEM` Entry 是每条 Thread 路径的持久请求上下文：首条记录具名 system prompt sections、模型可见 client tool definitions（name / description / input schema）与完整 vendor-hosted tool definitions，之后只追加变更的 sections / tools；路径规约出的当前上下文用于规划下一回合。首次基线或上下文变化与对应 `TURN_START` 在同一事务提交，未变化时复用现有基线。分支沿用来源路径上的 SYSTEM Entries；模型可见工具定义只在 SYSTEM 中保存，`TURN_START` 与 tool-result metadata 只保留工具名。压缩回合不重建基线，压缩后的普通回合需要新基线。
 
 ## Thread
 
@@ -112,7 +112,7 @@ WAITING_INPUT    -> SUCCEEDED（已作答或明确拒答）/ CANCELLED
 RUNNING          -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 ```
 
-`attempt` 同样在副作用之前持久化；RUNNING 工具的旧租约恢复绝不重放，只在能够重新挂接在途远端调用时继续等待结果，否则收敛为 `UNKNOWN`（见下文）。`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答，两者都只占 durable 行，不占 Worker。`ToolBinding` 冻结工具定义、Contributor 归属、环境支持级别与 Environment id/name；branch 未选择 Environment 时 `REQUIRED` binding 仍以空环境身份冻结并保留在模型工具面，调用返回确定性的 needs-Environment 未执行结果。网关对已移除或定义已变化的 binding 返回确定性失败。真实工具的终态在结果 metadata 中保留 `toolName`，完整工具定义只由 SYSTEM 历史承载；删除临时行或 fork 不会丢失调用时定义。
+`attempt` 同样在副作用之前持久化；RUNNING 工具的旧租约恢复绝不重放，只在能够重新挂接在途远端调用时继续等待结果，否则收敛为 `UNKNOWN`（见下文）。`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答，两者都只占 durable 行，不占 Worker。`ToolBinding` 冻结执行所需的工具定义、Contributor 归属、环境支持级别与 Environment id/name；branch 未选择 Environment 时 `REQUIRED` binding 仍以空环境身份冻结并保留在模型工具面，调用返回确定性的 needs-Environment 未执行结果。网关对已移除或定义已变化的 binding 返回确定性失败。真实工具的终态在结果 metadata 中保留 `toolName`；模型可见工具定义由 SYSTEM 历史承载，执行路由由调用时的冻结 binding 保留，删除临时行或 fork 不会丢失调用时定义。
 
 [`ToolOutcomeQuery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ToolOutcomeQuery.java) 按 Thread 和 invocation 身份查询稳定终态：调用行仍在时读取 terminal Invocation，物化后从当前路径的 ToolResult Entry 读取，并校验所属 Thread 与 Turn。返回的 [`ToolOutcomeView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ToolOutcomeView.java) 保留调用身份、终态与稳定内容；`resultError` 是模型可见的业务错误标志，与生命周期 `status` 正交，执行 `SUCCEEDED` 也可能携带业务错误。
 

@@ -7,6 +7,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.SystemContext;
@@ -15,6 +17,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport.Baseline;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
@@ -22,66 +25,128 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /** PostgreSQL verifies SYSTEM context reuse, deltas, and branch path inheritance. */
 class PostgresqlSystemContextTest {
 
   @Test
-  void reusesBaselineAppendsEnvironmentChangeOnceAndSharesItWithBranchThread() {
+  void environmentSwitchNoneToAAndBAppendsOnlySectionChanges() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
     Baseline baseline = seedThreadBaseline(store);
-    SystemContext firstEnvironment = new SystemContext(sections("env-a"), List.of(), List.of());
+    List<ProviderToolDefinition> tools = List.of(definition("read_file", "Read a file"));
+    SystemContext noEnvironment = new SystemContext(sections("none"), tools, List.of());
 
     EntryPath beforeFirstRequest = path(store, baseline.threadId());
     assertTrue(beforeFirstRequest.requiresSystemBaseline());
-    UUID baselineEntryId = appendSystemEntry(store, baseline, baseline(firstEnvironment));
+    UUID baselineEntryId = appendSystemEntry(store, baseline, baseline(noEnvironment));
     EntryPath afterFirstRequest = path(store, baseline.threadId());
     assertEquals(1, systemEntries(afterFirstRequest));
 
     // The next request with unchanged context reuses the stored baseline without appending SYSTEM.
-    assertTrue(
-        afterFirstRequest.systemContext().orElseThrow().changesTo(firstEnvironment).isEmpty());
+    assertTrue(afterFirstRequest.systemContext().orElseThrow().changesTo(noEnvironment).isEmpty());
     assertEquals(baselineEntryId, afterFirstRequest.head().id());
     assertEquals(1, systemEntries(path(store, baseline.threadId())));
 
-    SystemContext secondEnvironment = new SystemContext(sections("env-b"), List.of(), List.of());
-    SystemPayload environmentChange =
-        afterFirstRequest.systemContext().orElseThrow().changesTo(secondEnvironment).orElseThrow();
-    assertFalse(environmentChange.baseline());
+    SystemContext environmentA = new SystemContext(sections("env-a"), tools, List.of());
+    SystemPayload firstEnvironmentChange =
+        afterFirstRequest.systemContext().orElseThrow().changesTo(environmentA).orElseThrow();
+    assertFalse(firstEnvironmentChange.baseline());
     assertEquals(
-        Map.of("environment", sections("env-b").get("environment")), environmentChange.sections());
-    assertTrue(environmentChange.removedSections().isEmpty());
-    assertTrue(environmentChange.addedTools().isEmpty());
-    assertTrue(environmentChange.removedTools().isEmpty());
+        Map.of("environment", sections("env-a").get("environment")),
+        firstEnvironmentChange.sections());
+    assertTrue(firstEnvironmentChange.removedSections().isEmpty());
+    assertTrue(firstEnvironmentChange.addedTools().isEmpty());
+    assertTrue(firstEnvironmentChange.removedTools().isEmpty());
 
-    UUID changeEntryId = appendSystemEntry(store, baseline, environmentChange);
-    EntryPath afterEnvironmentSwitch = path(store, baseline.threadId());
-    assertEquals(2, systemEntries(afterEnvironmentSwitch));
-    assertEquals(secondEnvironment, afterEnvironmentSwitch.systemContext().orElseThrow());
+    appendSystemEntry(store, baseline, firstEnvironmentChange);
+    EntryPath afterFirstEnvironment = path(store, baseline.threadId());
+    assertEquals(2, systemEntries(afterFirstEnvironment));
+    assertEquals(environmentA, afterFirstEnvironment.systemContext().orElseThrow());
+
+    SystemContext environmentB = new SystemContext(sections("env-b"), tools, List.of());
+    SystemPayload secondEnvironmentChange =
+        afterFirstEnvironment.systemContext().orElseThrow().changesTo(environmentB).orElseThrow();
+    assertEquals(
+        Map.of("environment", sections("env-b").get("environment")),
+        secondEnvironmentChange.sections());
+    assertTrue(secondEnvironmentChange.removedSections().isEmpty());
+    assertTrue(secondEnvironmentChange.addedTools().isEmpty());
+    assertTrue(secondEnvironmentChange.removedTools().isEmpty());
+
+    UUID secondChangeEntryId = appendSystemEntry(store, baseline, secondEnvironmentChange);
+    EntryPath afterSecondEnvironment = path(store, baseline.threadId());
+    assertEquals(3, systemEntries(afterSecondEnvironment));
+    assertEquals(environmentB, afterSecondEnvironment.systemContext().orElseThrow());
     assertTrue(
-        afterEnvironmentSwitch
-            .systemContext()
-            .orElseThrow()
-            .changesTo(secondEnvironment)
-            .isEmpty());
-    assertEquals(2, systemEntries(path(store, baseline.threadId())));
+        afterSecondEnvironment.systemContext().orElseThrow().changesTo(environmentB).isEmpty());
 
-    UUID branchThreadId = insertBranchThread(store, baseline, changeEntryId);
+    UUID branchThreadId = insertBranchThread(store, baseline, secondChangeEntryId);
     EntryPath branchPath = path(store, branchThreadId);
-    assertEquals(2, systemEntries(branchPath));
-    assertEquals(secondEnvironment, branchPath.systemContext().orElseThrow());
+    assertEquals(3, systemEntries(branchPath));
+    assertEquals(environmentB, branchPath.systemContext().orElseThrow());
+  }
+
+  @Test
+  void appendsToolSelectionAndDefinitionChangesAsRemoveThenAdd() {
+    HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
+    Baseline baseline = seedThreadBaseline(store);
+    ProviderToolDefinition readFile = definition("read_file", "Read a file");
+    ProviderToolDefinition bash = definition("bash", "Run a command");
+    SystemContext initial =
+        new SystemContext(sectionsWithoutEnvironment(), List.of(readFile), List.of());
+    appendSystemEntry(store, baseline, baseline(initial));
+
+    EntryPath initialPath = path(store, baseline.threadId());
+    SystemContext selectedTools =
+        new SystemContext(sectionsWithoutEnvironment(), List.of(readFile, bash), List.of());
+    SystemPayload added =
+        initialPath.systemContext().orElseThrow().changesTo(selectedTools).orElseThrow();
+    assertEquals(List.of(bash), added.addedTools());
+    assertTrue(added.removedTools().isEmpty());
+    assertTrue(added.sections().isEmpty());
+    appendSystemEntry(store, baseline, added);
+
+    EntryPath selectedPath = path(store, baseline.threadId());
+    ProviderToolDefinition changedReadFile = definition("read_file", "Read a UTF-8 file");
+    SystemContext changedDefinition =
+        new SystemContext(sectionsWithoutEnvironment(), List.of(changedReadFile, bash), List.of());
+    SystemPayload replaced =
+        selectedPath.systemContext().orElseThrow().changesTo(changedDefinition).orElseThrow();
+    assertEquals(List.of(changedReadFile), replaced.addedTools());
+    assertEquals(List.of("read_file"), replaced.removedTools());
+    assertTrue(replaced.sections().isEmpty());
+    appendSystemEntry(store, baseline, replaced);
+
+    EntryPath replacedPath = path(store, baseline.threadId());
+    assertEquals(3, systemEntries(replacedPath));
+    SystemContext reducedAfterDefinitionChange =
+        new SystemContext(sectionsWithoutEnvironment(), List.of(bash, changedReadFile), List.of());
+    assertEquals(reducedAfterDefinitionChange, replacedPath.systemContext().orElseThrow());
   }
 
   private static SystemPayload baseline(SystemContext context) {
-    return new SystemPayload(context.sections(), List.of(), List.of(), true);
+    return new SystemPayload(context.sections(), context.tools(), List.of(), true);
+  }
+
+  private static Map<String, String> sectionsWithoutEnvironment() {
+    Map<String, String> sections = new LinkedHashMap<>();
+    sections.put("agent", "[agent] Use the configured assistant.");
+    return sections;
   }
 
   private static Map<String, String> sections(String environment) {
-    Map<String, String> sections = new LinkedHashMap<>();
-    sections.put("agent", "[agent] Use the configured assistant.");
+    Map<String, String> sections = sectionsWithoutEnvironment();
     sections.put("environment", "[environment] Current environment: " + environment);
     return sections;
+  }
+
+  private static ProviderToolDefinition definition(String name, String description) {
+    return new ProviderToolDefinition(
+        name,
+        description,
+        new SchemaJsonCodec().encode(new InputSchema("arguments", Map.of(), Set.of(), false)));
   }
 
   private static UUID appendSystemEntry(

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
-import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -10,13 +10,11 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
-/** Current system-prompt sections and tools reduced from SYSTEM entries on an Entry path. */
+/** Current system-prompt sections and model-visible tools reduced from SYSTEM entries on a path. */
 public record SystemContext(
-    Map<String, String> sections, List<ToolBinding> tools, List<SystemHostedTool> hostedTools) {
-
-  public SystemContext(Map<String, String> sections, List<ToolBinding> tools) {
-    this(sections, tools, List.of());
-  }
+    Map<String, String> sections,
+    List<ProviderToolDefinition> tools,
+    List<SystemHostedTool> hostedTools) {
 
   public SystemContext {
     sections =
@@ -29,7 +27,7 @@ public record SystemContext(
   /** Reduce baseline and all following deltas in path order. */
   public static SystemContext reduce(List<Entry> entries) {
     Map<String, String> sections = new LinkedHashMap<>();
-    Map<String, ToolBinding> tools = new LinkedHashMap<>();
+    Map<String, ProviderToolDefinition> tools = new LinkedHashMap<>();
     Map<String, SystemHostedTool> hostedTools = new LinkedHashMap<>();
     boolean baselineSeen = false;
     for (Entry entry : entries) {
@@ -53,10 +51,9 @@ public record SystemContext(
           throw new IllegalArgumentException("SYSTEM hosted tool already exists: " + tool.name());
         }
       }
-      for (ToolBinding binding : change.addedTools()) {
-        String name = binding.descriptor().name();
-        if (tools.putIfAbsent(name, binding) != null) {
-          throw new IllegalArgumentException("SYSTEM tool already exists: " + name);
+      for (ProviderToolDefinition tool : change.addedTools()) {
+        if (tools.putIfAbsent(tool.name(), tool) != null) {
+          throw new IllegalArgumentException("SYSTEM tool already exists: " + tool.name());
         }
       }
     }
@@ -78,8 +75,8 @@ public record SystemContext(
     return String.join("\n\n", baseline.sections().values());
   }
 
-  /** Return the tool definitions from the latest baseline. */
-  public static List<ToolBinding> baselineTools(List<Entry> entries) {
+  /** Return the model-visible tool definitions from the latest baseline. */
+  public static List<ProviderToolDefinition> baselineTools(List<Entry> entries) {
     return latestBaseline(entries).addedTools();
   }
 
@@ -157,26 +154,25 @@ public record SystemContext(
         });
     List<String> removedSections =
         sections.keySet().stream().filter(name -> !next.sections.containsKey(name)).toList();
-    Map<String, ToolBinding> oldTools = byName(tools);
-    Map<String, ToolBinding> newTools = byName(next.tools);
-    List<ToolBinding> added = new ArrayList<>();
+    Map<String, ProviderToolDefinition> oldTools = byName(tools);
+    Map<String, ProviderToolDefinition> newTools = byName(next.tools);
+    List<ProviderToolDefinition> added = new ArrayList<>();
     List<String> removed = new ArrayList<>();
     Map<String, SystemHostedTool> oldHostedTools = hostedByName(hostedTools);
     Map<String, SystemHostedTool> newHostedTools = hostedByName(next.hostedTools);
     List<SystemHostedTool> addedHosted = new ArrayList<>();
     List<String> removedHosted = new ArrayList<>();
     next.tools.forEach(
-        binding -> {
-          ToolBinding old = oldTools.get(binding.descriptor().name());
-          if (!binding.equals(old)) {
-            added.add(binding);
+        tool -> {
+          if (!tool.equals(oldTools.get(tool.name()))) {
+            added.add(tool);
           }
         });
     tools.forEach(
-        binding -> {
-          ToolBinding replacement = newTools.get(binding.descriptor().name());
-          if (replacement == null || !replacement.equals(binding)) {
-            removed.add(binding.descriptor().name());
+        tool -> {
+          ProviderToolDefinition replacement = newTools.get(tool.name());
+          if (replacement == null || !replacement.equals(tool)) {
+            removed.add(tool.name());
           }
         });
     next.hostedTools.forEach(
@@ -215,11 +211,11 @@ public record SystemContext(
     return result;
   }
 
-  private static Map<String, ToolBinding> byName(List<ToolBinding> bindings) {
-    Map<String, ToolBinding> result = new LinkedHashMap<>();
-    for (ToolBinding binding : bindings) {
-      if (result.putIfAbsent(binding.descriptor().name(), binding) != null) {
-        throw new IllegalArgumentException("tool bindings must have unique names");
+  private static Map<String, ProviderToolDefinition> byName(List<ProviderToolDefinition> tools) {
+    Map<String, ProviderToolDefinition> result = new LinkedHashMap<>();
+    for (ProviderToolDefinition tool : tools) {
+      if (result.putIfAbsent(tool.name(), tool) != null) {
+        throw new IllegalArgumentException("tool definitions must have unique names");
       }
     }
     return result;
