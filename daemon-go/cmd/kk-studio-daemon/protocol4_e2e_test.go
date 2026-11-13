@@ -293,6 +293,70 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 			}
 		})
 	}
+	t.Run("reviewed-write-matching-snapshot", func(t *testing.T) {
+		path := filepath.Join(directory, "reviewed-overwrite.txt")
+		if err := os.WriteFile(path, []byte("reviewed\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		review := previewProtocolWrite(t, bodyWriter, response.Body, "123e4567-e89b-42d3-a456-426614174009", path, "approved\n")
+		if review.NewFile || review.SHA256 == nil {
+			t.Fatalf("overwrite review = %+v", review)
+		}
+		result := invokeProtocolCapability(t, bodyWriter, response.Body, "123e4567-e89b-42d3-a456-426614174010", "fs.write", fmt.Sprintf(`{"path":%q,"content":"approved\n"}`, path), &protocol.ExpectedFile{Path: proto.String(review.Path), Sha256: review.SHA256})
+		if result.GetError() {
+			t.Fatalf("matching-snapshot overwrite failed: %v", result)
+		}
+		if got, err := os.ReadFile(path); err != nil || string(got) != "approved\n" {
+			t.Fatalf("matching-snapshot file=%q err=%v", got, err)
+		}
+	})
+	t.Run("reviewed-write-rejects-external-overwrite", func(t *testing.T) {
+		path := filepath.Join(directory, "stale-overwrite.txt")
+		if err := os.WriteFile(path, []byte("reviewed\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		review := previewProtocolWrite(t, bodyWriter, response.Body, "123e4567-e89b-42d3-a456-426614174011", path, "approved\n")
+		if review.SHA256 == nil {
+			t.Fatalf("overwrite review has no SHA-256: %+v", review)
+		}
+		if err := os.WriteFile(path, []byte("external change\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		result := invokeProtocolCapability(t, bodyWriter, response.Body, "123e4567-e89b-42d3-a456-426614174012", "fs.write", fmt.Sprintf(`{"path":%q,"content":"approved\n"}`, path), &protocol.ExpectedFile{Path: proto.String(review.Path), Sha256: review.SHA256})
+		assertStaleWriteReview(t, result)
+		if got, err := os.ReadFile(path); err != nil || string(got) != "external change\n" {
+			t.Fatalf("external overwrite file=%q err=%v", got, err)
+		}
+	})
+	t.Run("reviewed-new-file-rejects-external-create", func(t *testing.T) {
+		path := filepath.Join(directory, "stale-create.txt")
+		review := previewProtocolWrite(t, bodyWriter, response.Body, "123e4567-e89b-42d3-a456-426614174013", path, "approved\n")
+		if review.SHA256 != nil {
+			t.Fatalf("new-file review = %+v", review)
+		}
+		if err := os.WriteFile(path, []byte("external create\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		result := invokeProtocolCapability(t, bodyWriter, response.Body, "123e4567-e89b-42d3-a456-426614174014", "fs.write", fmt.Sprintf(`{"path":%q,"content":"approved\n"}`, path), &protocol.ExpectedFile{Path: proto.String(review.Path)})
+		assertStaleWriteReview(t, result)
+		if got, err := os.ReadFile(path); err != nil || string(got) != "external create\n" {
+			t.Fatalf("externally created file=%q err=%v", got, err)
+		}
+	})
+	t.Run("reviewed-new-file-write", func(t *testing.T) {
+		path := filepath.Join(directory, "new-reviewed-file.txt")
+		review := previewProtocolWrite(t, bodyWriter, response.Body, "123e4567-e89b-42d3-a456-426614174015", path, "approved\n")
+		if review.SHA256 != nil {
+			t.Fatalf("new-file review = %+v", review)
+		}
+		result := invokeProtocolCapability(t, bodyWriter, response.Body, "123e4567-e89b-42d3-a456-426614174016", "fs.write", fmt.Sprintf(`{"path":%q,"content":"approved\n"}`, path), &protocol.ExpectedFile{Path: proto.String(review.Path)})
+		if result.GetError() {
+			t.Fatalf("create-only reviewed write failed: %v", result)
+		}
+		if got, err := os.ReadFile(path); err != nil || string(got) != "approved\n" {
+			t.Fatalf("reviewed new file=%q err=%v", got, err)
+		}
+	})
 	t.Run("output-limit", func(t *testing.T) {
 		const invocation = "123e4567-e89b-42d3-a456-426614174005"
 		writeControlEnvelope(t, bodyWriter, &protocol.Envelope{
@@ -335,6 +399,74 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("daemon did not shut down after context cancellation")
+	}
+}
+
+func previewProtocolWrite(t *testing.T, writer *io.PipeWriter, reader io.Reader, invocation, path, content string) coding.WriteReview {
+	t.Helper()
+	arguments, err := json.Marshal(map[string]string{"path": path, "content": content})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := invokeProtocolCapability(t, writer, reader, invocation, "fs.write.preview", string(arguments), nil)
+	if result.GetError() {
+		t.Fatalf("fs.write.preview failed: %v", result)
+	}
+	for _, item := range result.GetContents() {
+		if jsonContent := item.GetJson(); jsonContent != nil {
+			var review coding.WriteReview
+			if err := json.Unmarshal([]byte(jsonContent.GetJson()), &review); err != nil {
+				t.Fatalf("decode write review: %v", err)
+			}
+			return review
+		}
+	}
+	t.Fatal("fs.write.preview did not return its write review")
+	return coding.WriteReview{}
+}
+
+func invokeProtocolCapability(t *testing.T, writer *io.PipeWriter, reader io.Reader, invocation, capability, arguments string, expected *protocol.ExpectedFile) *protocol.CapabilityResult {
+	t.Helper()
+	writeControlEnvelope(t, writer, &protocol.Envelope{
+		MessageType: protocol.MessageType_INVOKE, EnvironmentId: proto.String(e2eEnvironmentID), InvocationId: proto.String(invocation),
+		Payload: &protocol.Envelope_Invoke{Invoke: &protocol.Invoke{
+			CapabilityId: proto.String(capability), ArgumentsJson: proto.String(arguments), TimeoutMillis: proto.Int64(10000),
+			MaxOutputBytes: proto.Int64(10 << 20), ImageInputTier: imageTier(protocol.ImageInputTier_P720), ExpectedFile: expected,
+		}},
+	})
+	for {
+		envelope, err := readControlEnvelopeResult(reader)
+		if err != nil {
+			t.Fatalf("read %s invocation result: %v", capability, err)
+		}
+		if envelope.GetInvocationId() != invocation {
+			continue
+		}
+		switch envelope.MessageType {
+		case protocol.MessageType_STARTED, protocol.MessageType_PROGRESS:
+		case protocol.MessageType_COMPLETED:
+			return envelope.GetCompleted().GetResult()
+		case protocol.MessageType_FAILED:
+			t.Fatalf("%s invocation failed: %s", capability, envelope.GetFailed().GetMessage())
+		default:
+			t.Fatalf("%s invocation returned unexpected frame: %v", capability, envelope)
+		}
+	}
+}
+
+func assertStaleWriteReview(t *testing.T, result *protocol.CapabilityResult) {
+	t.Helper()
+	if result == nil || !result.GetError() {
+		t.Fatalf("stale write result = %v, want an error", result)
+	}
+	var output strings.Builder
+	for _, item := range result.GetContents() {
+		if text := item.GetText(); text != nil {
+			output.WriteString(text.GetText())
+		}
+	}
+	if !strings.Contains(output.String(), "File changed since review; nothing was written.") {
+		t.Fatalf("stale write result = %q, want stale-review message", output.String())
 	}
 }
 

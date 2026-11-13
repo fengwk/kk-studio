@@ -207,7 +207,7 @@ func TestRuntimeHandleInvokeRejectsMalformedCalls(t *testing.T) {
 		{"missing budget", invokeWithID("bad-budget", imageTierPtr(protocol.ImageInputTier_P720), 0, `{}`), "maxOutputBytes must be a positive integer"},
 		{"missing capability", invokeWithEmptyCapability("empty-capability"), "capabilityId is required"},
 		{"unknown capability", invokeWithCapability("unknown", imageTierPtr(protocol.ImageInputTier_P720), 1, `{}`), "unknown Environment capability: unknown"},
-		{"expected file on other capability", invokeWithExpectedFile("expected-file"), "expectedFile is only valid for fs.edit"},
+		{"expected file on other capability", invokeWithExpectedFile("expected-file"), "expectedFile is only valid for fs.edit and fs.write"},
 		{"non-object arguments", invokeWithArgs("non-object", "[]"), "arguments must be a JSON object"},
 		{"invalid arguments", invokeWithArgs("invalid-json", "{"), "arguments must be a JSON object"},
 		{"negative timeout", invokeWithTimeout("negative-timeout", -1), "timeoutMillis must be a non-negative duration"},
@@ -273,6 +273,32 @@ func invokeWithExpectedFile(id string) *protocol.Envelope {
 	e := invokeWithArgs(id, `{}`)
 	e.GetInvoke().ExpectedFile = &protocol.ExpectedFile{Path: stringPtr("/tmp/file"), Sha256: stringPtr("abc")}
 	return e
+}
+
+func TestRuntimeMapsAbsentExpectedFileSHA256ToEmptyString(t *testing.T) {
+	received := make(chan CapabilityCall, 1)
+	options := runtimeOptionsForTest()
+	options.Capabilities = map[string]CapabilityExecutor{
+		"fs.write": func(_ context.Context, call CapabilityCall, _ CapabilityContext) (CapabilityResult, error) {
+			received <- call
+			return CapabilityResult{CallID: call.InvocationID, Details: []byte("{}")}, nil
+		},
+	}
+	r, _ := newReadyRuntimeForTest(t, options)
+	envelope := invokeWithArgs("write-create-only", `{}`)
+	envelope.GetInvoke().CapabilityId = stringPtr("fs.write")
+	envelope.GetInvoke().ExpectedFile = &protocol.ExpectedFile{Path: stringPtr("/tmp/new-file")}
+	if err := r.handleInvoke(context.Background(), envelope); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case call := <-received:
+		if call.ExpectedFile == nil || call.ExpectedFile.Path != "/tmp/new-file" || call.ExpectedFile.SHA256 != "" {
+			t.Fatalf("mapped expectedFile = %+v, want path and empty SHA-256", call.ExpectedFile)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("fs.write executor did not receive create-only expectedFile")
+	}
 }
 
 func invokeWithTimeout(id string, timeout int64) *protocol.Envelope {

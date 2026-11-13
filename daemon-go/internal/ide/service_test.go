@@ -1250,41 +1250,52 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer bridge.Close(context.Background())
-	manager := &fakeCodeServerManager{stopFailures: 2, stopDone: make(chan struct{})}
+	manager := &fakeCodeServerManager{stopFailures: 2, stopStarted: make(chan struct{}), stopDone: make(chan struct{})}
 	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, MaxViews: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer service.Close(context.Background())
-	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	openCtx, cancelOpen := context.WithTimeout(context.Background(), 10*time.Second)
+	opened := service.HandleCommand(openCtx, openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	cancelOpen()
 	if !opened.GetOk() {
-		t.Fatalf("open reply=%v", opened)
+		t.Fatalf("phase=initial-open: reply=%v", opened)
 	}
 	manager.Crash()
 	service.mu.Lock()
 	recovery := service.crashRecovery
 	service.mu.Unlock()
 	select {
+	case <-manager.stopStarted:
+	case <-time.After(60 * time.Second):
+		t.Fatal("phase=crash-recovery-manager-stop-start: fake manager Stop was not entered")
+	}
+	select {
 	case <-manager.stopDone:
 	case <-time.After(60 * time.Second):
-		t.Fatal("crash recovery did not reach the manager stop")
+		t.Fatal("phase=crash-recovery-manager-stop-return: fake manager Stop did not return")
 	}
 	select {
 	case <-recovery:
 	case <-time.After(60 * time.Second):
-		t.Fatal("crash recovery did not settle after the manager stop")
+		t.Fatal("phase=crash-recovery-post-stop-settlement: recovery did not settle after manager Stop returned")
 	}
 	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_CLOSING {
-		t.Fatalf("unproven crash state=%v", state)
+		t.Fatalf("phase=unproven-cleanup-state: state=%v", state)
 	}
 	replacement := openCommandForTest(root, "22222222-2222-4222-8222-222222222222", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
-	blocked := service.HandleCommand(context.Background(), replacement)
+	blockedCtx, cancelBlocked := context.WithTimeout(context.Background(), 10*time.Second)
+	blocked := service.HandleCommand(blockedCtx, replacement)
+	cancelBlocked()
 	if blocked.GetOk() || blocked.GetCode() != "CLEANUP_FAILED" || service.GetViewState(opened.GetViewId()) == nil || service.GetViewState(replacement.GetViewId()) != nil {
-		t.Fatalf("replacement during unproven cleanup=%v old=%v new=%v", blocked, service.GetViewState(opened.GetViewId()), service.GetViewState(replacement.GetViewId()))
+		t.Fatalf("phase=capacity-retained-during-unproven-cleanup: replacement=%v old=%v new=%v", blocked, service.GetViewState(opened.GetViewId()), service.GetViewState(replacement.GetViewId()))
 	}
-	result := service.HandleCommand(context.Background(), replacement)
+	convergedCtx, cancelConverged := context.WithTimeout(context.Background(), 10*time.Second)
+	result := service.HandleCommand(convergedCtx, replacement)
+	cancelConverged()
 	if !result.GetOk() || service.GetViewState(opened.GetViewId()) != nil || service.GetViewState(replacement.GetViewId()) == nil {
-		t.Fatalf("replacement after convergence=%v old=%v", result, service.GetViewState(opened.GetViewId()))
+		t.Fatalf("phase=capacity-restored-after-convergence: replacement=%v old=%v", result, service.GetViewState(opened.GetViewId()))
 	}
 }
 
@@ -2240,27 +2251,28 @@ func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 
 // fakeCodeServerManager supplies a bounded code-server contract without launching a real process.
 type fakeCodeServerManager struct {
-	mu            sync.Mutex
-	startCalls    int
-	registerCalls int
-	closeCalls    int
-	closeFailures int
-	stopCalls     int
-	stopFailures  int
-	stopGate      chan struct{}
-	stopStarted   chan struct{}
-	stopDone      chan struct{}
-	stopDoneOnce  sync.Once
-	ensureHook    func()
-	registerHook  func()
-	closeErr      error
-	generation    uint64
-	registerMode  string
-	startFailure  bool
-	listError     bool
-	views         map[string]ManagedViewInspection
-	listeners     []func(uint64)
-	session       *CodeServerSession
+	mu              sync.Mutex
+	startCalls      int
+	registerCalls   int
+	closeCalls      int
+	closeFailures   int
+	stopCalls       int
+	stopFailures    int
+	stopGate        chan struct{}
+	stopStarted     chan struct{}
+	stopStartedOnce sync.Once
+	stopDone        chan struct{}
+	stopDoneOnce    sync.Once
+	ensureHook      func()
+	registerHook    func()
+	closeErr        error
+	generation      uint64
+	registerMode    string
+	startFailure    bool
+	listError       bool
+	views           map[string]ManagedViewInspection
+	listeners       []func(uint64)
+	session         *CodeServerSession
 }
 
 func (m *fakeCodeServerManager) EnsureStarted(context.Context) (*CodeServerSession, error) {
@@ -2297,7 +2309,7 @@ func (m *fakeCodeServerManager) Stop(ctx context.Context) error {
 	started := m.stopStarted
 	m.mu.Unlock()
 	if started != nil {
-		close(started)
+		m.stopStartedOnce.Do(func() { close(started) })
 	}
 	if gate != nil {
 		select {
