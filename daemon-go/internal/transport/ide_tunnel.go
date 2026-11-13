@@ -51,10 +51,10 @@ func (c *ControlConnection) handleIDE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if r.Method == http.MethodConnect {
-		c.tunnelIDEWebSocket(w, r, up, subpath)
+		c.tunnelIDEWebSocket(w, r, up)
 		return
 	}
-	c.proxyIDEHTTP(w, r, up, subpath)
+	c.proxyIDEHTTP(w, r, up)
 }
 
 var ideUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
@@ -162,11 +162,8 @@ func validHeaderName(s string) bool {
 	return true
 }
 
-func (c *ControlConnection) proxyIDEHTTP(w http.ResponseWriter, r *http.Request, up ViewUpstream, subpath string) {
-	path := strings.TrimSuffix(up.Path, "/") + subpath
-	if r.URL.RawQuery != "" {
-		path += "?" + r.URL.RawQuery
-	}
+func (c *ControlConnection) proxyIDEHTTP(w http.ResponseWriter, r *http.Request, up ViewUpstream) {
+	path := up.Path
 	urlText := "http://" + net.JoinHostPort(strings.Trim(up.Host, "[]"), strconv.Itoa(up.Port)) + path
 	req, err := http.NewRequestWithContext(r.Context(), r.Method, urlText, r.Body)
 	if err != nil {
@@ -227,7 +224,7 @@ func isHopHeader(name string, h http.Header) bool {
 	return false
 }
 
-func (c *ControlConnection) tunnelIDEWebSocket(w http.ResponseWriter, r *http.Request, up ViewUpstream, subpath string) {
+func (c *ControlConnection) tunnelIDEWebSocket(w http.ResponseWriter, r *http.Request, up ViewUpstream) {
 	addr := net.JoinHostPort(strings.Trim(up.Host, "[]"), strconv.Itoa(up.Port))
 	upstream, err := (&net.Dialer{}).DialContext(r.Context(), "tcp", addr)
 	if err != nil {
@@ -235,10 +232,7 @@ func (c *ControlConnection) tunnelIDEWebSocket(w http.ResponseWriter, r *http.Re
 		return
 	}
 	defer upstream.Close()
-	path := strings.TrimSuffix(up.Path, "/") + subpath
-	if r.URL.RawQuery != "" {
-		path += "?" + r.URL.RawQuery
-	}
+	path := up.Path
 	targetURL := "http://" + addr + path
 	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
 	if err != nil {

@@ -63,7 +63,7 @@ func TestTunnel_WebSocketRejectedHandshakeAndUpstreamFailures(t *testing.T) {
 			port, _ := strconv.Atoi(portText)
 			writer := &recordedHTTPWriter{header: make(http.Header)}
 			request := &http.Request{Method: http.MethodConnect, URL: &url.URL{Path: "/ws?ignored"}, Header: make(http.Header), Body: http.NoBody}
-			(&ControlConnection{}).tunnelIDEWebSocket(writer, request, ViewUpstream{Host: host, Port: port, Path: "/base"}, "/socket")
+			(&ControlConnection{}).tunnelIDEWebSocket(writer, request, ViewUpstream{Host: host, Port: port, Path: "/base"})
 			if writer.status != tc.wantStatus || writer.body.String() != tc.wantBody || writer.header.Get("Set-Cookie") != tc.wantHeader {
 				t.Fatalf("response status=%d headers=%v body=%q", writer.status, writer.header, writer.body.String())
 			}
@@ -80,7 +80,7 @@ func TestTunnel_WebSocketRejectedHandshakeAndUpstreamFailures(t *testing.T) {
 	closed.Close()
 	port, _ := strconv.Atoi(portText)
 	writer := &recordedHTTPWriter{header: make(http.Header)}
-	(&ControlConnection{}).tunnelIDEWebSocket(writer, &http.Request{Method: http.MethodConnect, URL: &url.URL{Path: "/"}, Header: make(http.Header), Body: http.NoBody}, ViewUpstream{Host: host, Port: port, Path: "/"}, "/")
+	(&ControlConnection{}).tunnelIDEWebSocket(writer, &http.Request{Method: http.MethodConnect, URL: &url.URL{Path: "/"}, Header: make(http.Header), Body: http.NoBody}, ViewUpstream{Host: host, Port: port, Path: "/"})
 	if writer.status != http.StatusBadGateway {
 		t.Fatalf("unavailable upstream status=%d", writer.status)
 	}
@@ -127,7 +127,7 @@ func TestTunnel_HTTPBodyFailureAfterHeadersAbortsStream(t *testing.T) {
 			t.Fatalf("panic=%v, want http.ErrAbortHandler", recovered)
 		}
 	}()
-	(&ControlConnection{}).proxyIDEHTTP(writer, request, ViewUpstream{Host: host, Port: port, Path: "/"}, "/")
+	(&ControlConnection{}).proxyIDEHTTP(writer, request, ViewUpstream{Host: host, Port: port, Path: "/"})
 }
 
 // TRN-T-059

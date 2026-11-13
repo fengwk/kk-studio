@@ -227,6 +227,7 @@ func TestTunnel_WebSocketExtensionsAndUpstreamEOF(t *testing.T) {
 	}
 	defer listener.Close()
 	serverDone := make(chan struct{})
+	upstreamRequest := make(chan string, 1)
 	go func() {
 		defer close(serverDone)
 		conn, acceptErr := listener.Accept()
@@ -234,7 +235,11 @@ func TestTunnel_WebSocketExtensionsAndUpstreamEOF(t *testing.T) {
 			return
 		}
 		defer conn.Close()
-		_, _ = http.ReadRequest(bufio.NewReader(conn))
+		request, readErr := http.ReadRequest(bufio.NewReader(conn))
+		if readErr != nil {
+			return
+		}
+		upstreamRequest <- request.URL.RequestURI()
 		_, _ = io.WriteString(conn, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Accept: accept\r\nSec-WebSocket-Protocol: chat\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\nhead")
 	}()
 	host, portText, err := net.SplitHostPort(listener.Addr().String())
@@ -251,7 +256,8 @@ func TestTunnel_WebSocketExtensionsAndUpstreamEOF(t *testing.T) {
 	done := make(chan any, 1)
 	go func() {
 		defer func() { done <- recover() }()
-		(&ControlConnection{}).tunnelIDEWebSocket(writer, request, ViewUpstream{Host: host, Port: port, Path: "/"}, "/")
+		(&ControlConnection{}).tunnelIDEWebSocket(
+			writer, request, ViewUpstream{Host: host, Port: port, Path: "/base/socket?channel=chat"})
 	}()
 	select {
 	case outcome := <-done:
@@ -262,6 +268,9 @@ func TestTunnel_WebSocketExtensionsAndUpstreamEOF(t *testing.T) {
 		t.Fatal("upstream EOF did not close websocket bridge")
 	}
 	<-serverDone
+	if got := <-upstreamRequest; got != "/base/socket?channel=chat" {
+		t.Fatalf("upstream request URI=%q", got)
+	}
 	if writer.header.Get("Sec-WebSocket-Extensions") != "permessage-deflate" {
 		t.Fatalf("extensions response header=%q", writer.header.Get("Sec-WebSocket-Extensions"))
 	}
