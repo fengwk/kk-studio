@@ -28,6 +28,9 @@ interface ParseState {
   position: number
 }
 
+/** 字符串内不需要解码的一段字符；长文本按段追加，而不是逐字符拼接。 */
+const PLAIN_RUN = /[^"\\]+/y
+
 const LITERALS: ReadonlyArray<readonly [string, unknown]> = [
   ['true', true],
   ['false', false],
@@ -152,15 +155,16 @@ function parseString(state: ParseState): { text: string; closed: boolean } {
   let value = ''
   state.position += 1
   while (state.position < text.length) {
-    const char = text[state.position]
-    if (char === '"') {
+    PLAIN_RUN.lastIndex = state.position
+    const run = PLAIN_RUN.exec(text)
+    if (run) {
+      value += run[0]
+      state.position += run[0].length
+      continue
+    }
+    if (text[state.position] === '"') {
       state.position += 1
       return { text: value, closed: true }
-    }
-    if (char !== '\\') {
-      value += char
-      state.position += 1
-      continue
     }
     const escape = decodeEscape(text, state.position)
     if (escape == null) {
