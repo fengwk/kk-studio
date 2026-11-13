@@ -70,6 +70,10 @@ public class ModelImageCountLimitResolver {
     if (provider == null) {
       return null;
     }
+    // 未配置 baseUrl 的 Provider 没有可判定的官方端点，按未知限制处理而不是让空 endpoint 进入协议解析。
+    if (provider.baseUrl() == null || provider.baseUrl().isBlank()) {
+      return null;
+    }
     ImageRequestLimits limits =
         RequestLimitsPresets.resolve(provider.providerType(), provider.baseUrl()).image();
     return limits.maxCount();

@@ -114,6 +114,22 @@ class ModelImageCountLimitResolverTest {
     assertNull(resolver.resolve(branchSettings()));
   }
 
+  @Test
+  void leavesTheProtocolLimitUnknownForProvidersWithoutABaseUrl() {
+    // 免费/未配置 Provider 的 baseUrl 为 null 或空白：没有可判定的官方端点，必须按未知限制返回 null。
+    for (String baseUrl : new String[] {null, "", "   "}) {
+      when(providerRepository.getByName("openai"))
+          .thenReturn(
+              Provider.builder()
+                  .name("openai")
+                  .providerType(ProviderType.OPENAI)
+                  .baseUrl(baseUrl)
+                  .build());
+
+      assertNull(resolver.resolve(branchSettings()), "baseUrl=" + baseUrl);
+    }
+  }
+
   private static BranchSettings branchSettings() {
     return branchSettings("vision-model");
   }

@@ -887,7 +887,7 @@ registerCase({
   level: 'L2',
   title: '真实 task 委派创建 durable 子 Thread',
   requires: ['real', 'tools'],
-  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；即时回执是 MESSAGE + role=TOOL 的 tool_result{toolName:"task"}，冻结 rendererKey=task 与可读英文 Task accepted. thread_id: <uuid>. 异步说明；完成结果由 Runtime 在子 Thread 到达收敛终态边界结算有效 join 后异步交付为 NOTIFICATION Entry（kind=SUBAGENT_RESULT，sourceThreadId=被委派子 Thread，notificationId 由 join 身份确定性派生，message 为 USER 角色、正文唯一形状 <subagent_result thread_id="..." agent="..." state="...">），因此 case 轮询真实 snapshot 直到该通知 durable 且父重新 quiescent；完成身份由 kind=SUBAGENT_RESULT + sourceThreadId + notificationId 与受理回执的子 Thread 匹配，不靠正文 XML，普通 CUSTOM_MESSAGE 与 TASK_BUDGET 通知被排除；thread_id 对应子 Thread 的不可变执行父关系 HarnessThreadDTO.parentThreadId=父 Thread，且子 ROOT payload 只有 settings（无 subagentContext）；父 prompt 只对最初人类指令委派一次，<subagent_result> 是历史报告不再委派；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
+  docs: '父 ModelInvocation 冻结 subagent allowlist 并调用内部 task；task 是同步委派：tool_result 在子 Thread 收敛后才返回，wire 为 MESSAGE + role=TOOL 的 tool_result{toolName:"task", rendererKey:"task", detailsJson}，detailsJson 精确为 kind=task.result/thread_id/session_id/status/subagent_type/replayed，正文为子 Thread 的最终 report；父 Thread 在 tool result 后继续同一回合并只产生一个 TURN_END；子 Thread 由 details.thread_id 定位，其不可变执行父关系 HarnessThreadDTO.parentThreadId=父 Thread，且子 ROOT payload 只有 settings（无 subagentContext）；正常完成不产生 SUBAGENT_RESULT 通知（旧的异步接受回执与完成通知已移除）；模型来自 E2E_BUILTIN_MODEL（默认 minimax_anthropic），实际选择写入 artifact',
   async run(ctx) {
     const model = await requireBuiltinModel(ctx)
     const modelChoice = builtinModelChoice(model)
@@ -986,38 +986,29 @@ registerCase({
         .filter((content) => content?.type === 'text')
         .map((content) => String(content.text || ''))
         .join('')
-      assert(taskResult.error === false, `task acceptance failed: ${taskText}`)
-      const taskId = taskAcceptedThreadId(taskText)
-
-      // 完成结果由 Runtime 在子 Thread 到达首个终态边界结算 join 后异步交付为 NOTIFICATION
-      // (kind=SUBAGENT_RESULT, sourceThreadId=被委派子 Thread)，因此必须轮询而非只取一次
-      // quiescent 快照；provider/规划错误立即失败并带完整诊断。
-      const completion = await waitForSubagentResult(ctx, parentThreadId, taskId, {
-        timeoutMs: 240_000,
-        intervalMs: 1_000,
-      })
-      parentSnapshot = completion.snapshot
+      assert(taskResult.error === false, `task execution failed: ${taskText}`)
+      const details = taskResultDetails(taskResult)
+      assert(details.status === 'completed', safeDiagnosticJson(details))
+      assert(details.subagent_type === childAgent.name, safeDiagnosticJson(details))
+      assert(details.replayed === false, safeDiagnosticJson(details))
+      const taskId = details.thread_id
       assert(
-        parentSnapshot.thread.status === 'IDLE',
-        safeDiagnosticJson(parentSnapshot.thread),
+        taskText.includes(marker),
+        `task result for thread ${taskId} missing marker: ${taskText}`,
       )
+      // 同步委派在工具结果返回前已经结算 Join；旧异步完成通知若出现说明契约回退。
       assert(
-        threadParentIdOf(parentSnapshot.thread) === null,
-        `root parent thread must be null: ${safeDiagnosticJson(parentSnapshot.thread)}`,
-      )
-      const subagentResult = completion.result
-      assert(
-        subagentResult.sourceThreadId === taskId,
-        `subagent result source ${subagentResult.sourceThreadId} != accepted child ${taskId}`,
-      )
-      canonicalUuid(subagentResult.notificationId, 'subagent result notification id')
-      const subagentResultText = subagentResult.text
-      assert(
-        subagentResultText.includes(marker),
-        `subagent result for thread ${taskId} missing marker: ${subagentResultText}`,
+        subagentResults(parentSnapshot.entries || []).length === 0,
+        `synchronous task must not deliver SUBAGENT_RESULT notifications: ${safeDiagnosticJson(
+          summarizeThreadHistory(parentSnapshot.entries || []),
+        )}`,
       )
 
       const childSnapshot = await getThreadSnapshot(ctx, taskId)
+      assert(
+        String(childSnapshot.thread.sessionId) === String(details.session_id),
+        `task result session ${details.session_id} != child thread session ${childSnapshot.thread.sessionId}`,
+      )
       // <task> 也含 marker；必须验证子线程真实答复，不能把回显的委派指令当执行成功。
       const childAnswer = normalAssistantEntries(childSnapshot.entries || []).at(-1)
       assert(
@@ -1030,18 +1021,15 @@ registerCase({
         childSnapshot.thread.status === 'IDLE',
         `child thread must be settled: ${safeDiagnosticJson(childSnapshot.thread)}`,
       )
-      const completionEntry = (parentSnapshot.entries || []).findIndex((entry) => {
-        const [result] = subagentResults([entry])
-        return (
-          result !== undefined
-          && result.sourceThreadId === taskId
-          && result.notificationId === subagentResult.notificationId
-        )
-      })
-      const parentAnswer = normalAssistantEntries(parentSnapshot.entries.slice(completionEntry + 1)).at(-1)
+      const taskResultEntryIndex = (parentSnapshot.entries || []).findIndex(
+        (entry) => collectTaskToolResults([entry]).length > 0,
+      )
+      const parentAnswer = normalAssistantEntries(
+        (parentSnapshot.entries || []).slice(taskResultEntryIndex + 1),
+      ).at(-1)
       assert(
-        completionEntry >= 0 && parentAnswer && messageText(parentAnswer).includes(marker),
-        'parent assistant did not consume the delivered subagent result',
+        taskResultEntryIndex >= 0 && parentAnswer && messageText(parentAnswer).includes(marker),
+        'parent assistant did not consume the synchronous subagent result',
       )
       ctx.writeArtifact(
         'task-delegation.json',
@@ -1466,10 +1454,18 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment READY（控制协议 2）；Environment UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；卡片投影完整 daemonConfig，并投影 10 项 capability（9 项模型可见 + 内部 fs.edit.preview）与宿主事实 userName/homeDirectory，且不公开产品目录、raw READY metadata、工具或凭据',
+  docs: 'Environment 在有限预算内收敛到 READY（控制协议 2，重连窗口允许短暂 CONNECTING）；Environment UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；卡片投影完整 daemonConfig，并投影 12 项 capability（9 项模型可见 + 内部 fs.edit.preview/fs.write.preview/skill.install）与宿主事实 userName/homeDirectory，且不公开产品目录、raw READY metadata、工具或凭据',
   async run(ctx) {
-    const environments = await listEnvironments(ctx)
-    const match = environments.find((environment) => environment.name === ctx.daemonEnv)
+    // 控制连接可能在重连窗口短暂显示 CONNECTING；在有限预算内等待权威 READY，再断言能力投影。
+    let match = (await listEnvironments(ctx)).find(
+      (environment) => environment.name === ctx.daemonEnv,
+    )
+    for (let attempt = 0; attempt < 180 && match?.status !== 'READY'; attempt++) {
+      await sleep(500)
+      match = (await listEnvironments(ctx)).find(
+        (environment) => environment.name === ctx.daemonEnv,
+      )
+    }
     assert(match?.status === 'READY', safeDiagnosticJson(match))
     canonicalUuid(match.id, 'match.id')
     assert(
@@ -1495,6 +1491,8 @@ registerCase({
     // 内部能力是 catalog 的一部分但不注册为模型工具，因此同样出现在 canonical 投影里。
     const expectedIds = [...modelCapabilityIds]
     expectedIds.splice(3, 0, 'fs.edit.preview')
+    expectedIds.splice(4, 0, 'fs.write.preview')
+    expectedIds.push('skill.install')
     const expectedCapabilities = expectedIds.map((id) => ({
       id,
     }))
@@ -1670,10 +1668,10 @@ registerCase({
       assert(readInvocation.status === 'WAITING_APPROVAL', safeDiagnosticJson(readInvocation))
       assertExactFields(readInvocation, [
         'id', 'threadId', 'turnStartEntryId', 'assistantEntryId', 'callIndex', 'status',
-        'attempt', 'toolCallId', 'toolName', 'rendererKey', 'environmentId',
-        'requiredEnvironmentId', 'requiredEnvironmentName', 'environmentWaitFreshnessAt',
-        'waitingForEnvironment', 'argumentsJson', 'approval', 'result', 'error',
-        'createTime', 'updateTime',
+        'attempt', 'toolCallId', 'queuedBehindToolCallId', 'toolName', 'rendererKey',
+        'environmentId', 'requiredEnvironmentId', 'requiredEnvironmentName',
+        'environmentWaitFreshnessAt', 'waitingForEnvironment', 'argumentsJson', 'approval',
+        'result', 'error', 'createdAt', 'updatedAt',
       ], 'tool invocation')
       assert(
         readInvocation.toolName === 'read',
@@ -1890,24 +1888,41 @@ export function collectTaskToolResults(entries) {
 }
 
 /**
- * 从唯一接受说明首行读取 canonical child Thread；不接受旧 JSON 回执。
+ * 解析同步 `task` 工具结果的 `detailsJson`：当前 wire 固定为
+ * `{kind:"task.result", thread_id, session_id, status, subagent_type, replayed}`。
  */
-export function taskAcceptedThreadId(text) {
-  const match = /^Task accepted\. thread_id: ([0-9a-f-]{36})\.\n/.exec(text)
-  assert(match, 'expected readable task acceptance with a canonical thread_id')
-  canonicalUuid(match[1], 'task receipt thread id')
-  return match[1]
+export function taskResultDetails(content) {
+  assert(
+    content && typeof content.detailsJson === 'string',
+    'task result must carry detailsJson',
+  )
+  let details
+  try {
+    details = JSON.parse(content.detailsJson)
+  } catch {
+    assert(false, 'task result detailsJson must be valid JSON')
+  }
+  assert(details.kind === 'task.result', `task result kind mismatch: ${JSON.stringify(details)}`)
+  canonicalUuid(details.thread_id, 'task result thread_id')
+  canonicalUuid(details.session_id, 'task result session_id')
+  assert(
+    typeof details.status === 'string' && details.status.length > 0,
+    `task result status missing: ${JSON.stringify(details)}`,
+  )
+  assert(
+    typeof details.subagent_type === 'string' && details.subagent_type.length > 0,
+    `task result subagent_type missing: ${JSON.stringify(details)}`,
+  )
+  assert(typeof details.replayed === 'boolean', `task result replayed missing: ${JSON.stringify(details)}`)
+  return details
 }
 
 /**
- * 提取父 Thread 收到的 task 完成通知（`EntryType.NOTIFICATION`）。
+ * 提取 Thread Entry 中 kind=SUBAGENT_RESULT 的完成通知。
  *
- * <p>真实 wire 由 `ThreadJoinCompletion.buildDelivery` 构造：payload 为
- * `{notificationId,kind,sourceThreadId,message}`，`kind=SUBAGENT_RESULT`，`sourceThreadId` 是被委派
- * 的子 Thread，`message` 固定为 USER 角色、正文外层唯一形状
- * `<subagent_result thread_id="…" agent="…" state="…">`。完成身份取自持久字段
- * `kind` / `sourceThreadId` / `notificationId`，不解析正文 XML；普通 `CUSTOM_MESSAGE`（含用户伪装的
- * `<system-reminder>` / `<subagent_result>`）与同属 NOTIFICATION 的 `TASK_BUDGET` 提醒都被排除。
+ * <p>1.0.0 的 `task` 已改为同步委派（工具结果在子 Thread 收敛后返回），正常完成不再产生该通知；
+ * 本 helper 只用于在 `real.task_delegation` 中断言旧异步通知确实缺席。普通 `CUSTOM_MESSAGE` 与
+ * `TASK_BUDGET` 提醒不属于完成通知。
  */
 export function subagentResults(entries) {
   const results = []
@@ -2016,49 +2031,6 @@ async function captureThreadFailureDiagnostics(ctx, threadId, label, extra = {})
   } catch (error) {
     ctx.writeArtifact(`${label}-failure.txt`, String(error?.message || error))
   }
-}
-
-/**
- * 等待父 Thread 收到指定 task 的完成通知并重新 quiescent。
- *
- * <p>完成通知异步交付，因此轮询真实 snapshot，并按 `kind=SUBAGENT_RESULT` 通知的
- * `sourceThreadId` 匹配受理回执里的子 Thread；一旦出现 ASSISTANT_ERROR 且父不再推进
- * （provider/规划错误），立即失败并带完整诊断，绝不为一条不可能出现的通知挂满超时。
- */
-async function waitForSubagentResult(ctx, threadId, taskId, { timeoutMs = 240_000, intervalMs = 1_000 } = {}) {
-  const deadline = Date.now() + timeoutMs
-  let last = null
-  while (Date.now() <= deadline) {
-    const snapshot = await getThreadSnapshot(ctx, threadId)
-    last = snapshot
-    const idle = snapshot.thread.status === 'IDLE'
-      && (snapshot.queuedCommands || []).length === 0
-    const matched = subagentResults(snapshot.entries || []).filter(
-      (result) => result.sourceThreadId === taskId,
-    )
-    if (matched.length > 0) {
-      if (idle) return { snapshot, result: matched.at(-1) }
-    } else if (idle) {
-      const errors = (snapshot.entries || []).filter(
-        (entry) => entryType(entry) === 'ASSISTANT_ERROR',
-      )
-      if (errors.length > 0) {
-        throw new Error(
-          `parent thread ${threadId} failed before delivering the subagent result: ${safeDiagnosticJson({
-            thread: snapshot.thread,
-            entries: summarizeThreadHistory(snapshot.entries || []),
-          })}`,
-        )
-      }
-    }
-    await sleep(intervalMs)
-  }
-  throw new Error(
-    `subagent result for thread ${taskId} was not delivered within ${timeoutMs}ms: ${safeDiagnosticJson({
-      thread: last?.thread,
-      entries: summarizeThreadHistory(last?.entries || []),
-    })}`,
-  )
 }
 
 function normalAssistantEntries(entries) {

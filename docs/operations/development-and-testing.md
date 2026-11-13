@@ -413,8 +413,8 @@ environmentId 返回 `400` / `code: validation`。二者均创建并清理独立
 视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
 
 事件 L1 使用 `/ws/events`：heartbeat case 校验首帧 `connected` 的
-`eventNodeId` / `connectionId` 与保活帧，Project case 验证全局失效通知。
-L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.preview`）；
+`eventNodeId` / `connectionId` / `heartbeatIntervalMillis`（十进制正整数字符串）与保活帧，Project case 验证全局失效通知。
+L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.preview` / `fs.write.preview` / `skill.install`）；
 它们分别要求 tools / distributed，不进入默认免费 L1 的真实 Daemon 路径。
 
 case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与

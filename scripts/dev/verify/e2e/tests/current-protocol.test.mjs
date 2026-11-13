@@ -6,6 +6,7 @@ const identity = {
   type: 'connected',
   eventNodeId: '11111111-1111-4111-8111-111111111111',
   connectionId: '22222222-2222-4222-8222-222222222222',
+  heartbeatIntervalMillis: '20000',
 }
 
 // 执行真实 case，仅替换物理 WS；首帧与 heartbeat 使用生产形状。
@@ -48,8 +49,9 @@ test('heartbeat case rejects heartbeat with unexpected fields after a valid iden
 })
 
 const ids = [
-  'fs.read', 'fs.write', 'fs.edit', 'fs.edit.preview', 'process.exec', 'fs.grep', 'fs.find',
-  'lsp.goto-definition', 'lsp.workspace-symbols', 'lsp.java-decompile',
+  'fs.read', 'fs.write', 'fs.edit', 'fs.edit.preview', 'fs.write.preview',
+  'process.exec', 'fs.grep', 'fs.find', 'lsp.goto-definition', 'lsp.workspace-symbols',
+  'lsp.java-decompile', 'skill.install',
 ]
 const environment = {
   id: identity.eventNodeId, name: 'fixture', status: 'READY', ready: true,

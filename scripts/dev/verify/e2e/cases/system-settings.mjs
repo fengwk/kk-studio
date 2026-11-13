@@ -59,7 +59,7 @@ registerCase({
   level: 'L1',
   title: 'SystemSettings 完整聚合、严格校验、CAS 与恢复',
   docs:
-    'GET 六 section + decimal-string Long/version，aiRuntime.modelHttpRetryStatusCodes 为 400–599 整数数组，storageMedia.tmp TTL/扫描间隔为正整数字符串；PUT 全局代理与重试名单 roundtrip；非法代理/凭据/重试名单形状和缺 backendNetwork 400 fail-closed；严格权限和 CAS；finally 用最新版本恢复原值',
+    'GET 六 section + decimal-string Long/version，aiRuntime.modelHttpRetryStatusCodes 为 400–599 整数数组，storageMedia 的 tmp TTL/扫描间隔为正整数字符串、imageTier 为 720P/1080P/ORIGINAL、maxImagesPerRequest 为正整数；PUT 全局代理与重试名单 roundtrip；非法代理/凭据/重试名单形状和缺 backendNetwork 400 fail-closed；严格权限和 CAS；finally 用最新版本恢复原值',
   async run(ctx) {
     const readSettings = async () => {
       const { json } = await ctx.call('GET', '/api/platform/settings')
@@ -79,8 +79,18 @@ registerCase({
     assertExactFields(before.storageMedia, [
       'uploadExpiresSeconds', 's3PresignDefaultExpiresSeconds', 's3PresignMaxExpiresSeconds',
       'canvasMediaProcessTimeoutMillis', 'thumbnailMaxDimension', 'thumbnailQuality',
-      'temporaryResourceTtlSeconds', 'temporaryResourceCleanupIntervalSeconds',
+      'imageTier', 'temporaryResourceTtlSeconds', 'temporaryResourceCleanupIntervalSeconds',
+      'maxImagesPerRequest',
     ], 'SystemSettings.storageMedia')
+    assert(
+      ['720P', '1080P', 'ORIGINAL'].includes(before.storageMedia.imageTier),
+      `storageMedia.imageTier has an invalid value: ${JSON.stringify(before.storageMedia.imageTier)}`,
+    )
+    assert(
+      Number.isInteger(before.storageMedia.maxImagesPerRequest)
+        && before.storageMedia.maxImagesPerRequest > 0,
+      `storageMedia.maxImagesPerRequest must be a positive integer: ${JSON.stringify(before.storageMedia.maxImagesPerRequest)}`,
+    )
     // 系统默认值必须存在且形状合法：HTTP 重试白名单是 400–599 整数数组，tmp TTL/扫描间隔是正整数字符串。
     assertRetryStatusCodes(
       before.aiRuntime.modelHttpRetryStatusCodes,
