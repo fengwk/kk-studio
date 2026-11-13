@@ -2,9 +2,12 @@ package coding
 
 import (
 	"bytes"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
 // COD-T-099, COD-T-102: decoding keeps UTF-8 code points and UTF-16 surrogate pairs intact across tiny reads.
@@ -150,28 +153,23 @@ func TestTextCodecAcceptsUTF8BoundaryCodePoints(t *testing.T) {
 	}
 }
 
-// COD-T-228…231: binary controls, the 8192-byte probe boundary, and UTF-16 exemption.
-func TestBinaryProbeBoundaryAndUTF16Allowance(t *testing.T) {
-	allowed := []byte("hello\tworld\r\n\f\x1b")
-	if LooksBinary(allowed, false) {
-		t.Fatal("allowed text controls were classified as binary")
+// COD-T-228…231: only NUL is binary, the probe window is 8000 bytes, and control characters
+// are text.
+func TestBinaryProbeBoundaryAndControlCharacters(t *testing.T) {
+	if _, _, err := textcodec.Decode("/repo/controls.txt", []byte("hello\tworld\r\n\f\x1b\x01\x1f")); err != nil {
+		t.Fatalf("control characters were classified as binary: %v", err)
 	}
-	for _, b := range []byte{0x00, 0x01, 0x08, 0x0e, 0x1f} {
-		if !LooksBinary([]byte{b}, false) {
-			t.Errorf("control byte %02x was not classified as binary", b)
-		}
+	inside := bytes.Repeat([]byte{'a'}, 8000)
+	inside[7999] = 0
+	if _, _, err := textcodec.Decode("/repo/nul.txt", inside); !errors.Is(err, textcodec.ErrBinary) {
+		t.Fatalf("NUL within the probe window: err=%v", err)
 	}
-	inside := bytes.Repeat([]byte{'a'}, 8192)
-	inside[8191] = 0
-	if !LooksBinary(inside, false) {
-		t.Fatal("control byte within the probe window was missed")
+	outside := bytes.Repeat([]byte{'a'}, 8001)
+	outside[8000] = 0
+	if _, _, err := textcodec.Decode("/repo/late-nul.txt", outside); err != nil {
+		t.Fatalf("NUL outside the probe window: err=%v", err)
 	}
-	outside := bytes.Repeat([]byte{'a'}, 8193)
-	outside[8192] = 0
-	if LooksBinary(outside, false) {
-		t.Fatal("control byte outside the probe window was scanned")
-	}
-	if LooksBinary([]byte{0, 0x61, 0, 0x62}, true) {
-		t.Fatal("UTF-16 data was classified as binary")
+	if _, _, err := textcodec.Decode("/repo/utf16.txt", []byte{0xff, 0xfe, 'a', 0, 'b', 0}); err != nil {
+		t.Fatalf("UTF-16 data was classified as binary: %v", err)
 	}
 }

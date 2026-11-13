@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"go.uber.org/goleak"
+
+	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
 // COD-N-008
@@ -457,9 +459,9 @@ func TestGitMarkerRequiresValidRepository(t *testing.T) {
 	}
 }
 
-// COD-N-017: malformed BOM-encoded text is not searched as UTF-16.
+// COD-N-017: malformed BOM-encoded text is rejected by the codec, so it is never searched.
 func TestGrepUTF16RejectsOddByteCount(t *testing.T) {
-	if _, valid := normalizeSearchText([]byte{0xff, 0xfe, 'x'}); valid {
+	if _, _, err := textcodec.Decode("/repo/odd.txt", []byte{0xff, 0xfe, 'x'}); err == nil {
 		t.Fatal("odd-length UTF-16 payload accepted")
 	}
 }

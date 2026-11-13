@@ -334,7 +334,7 @@ func readCapabilityWithLSPStatus(ctx context.Context, call runtime.CapabilityCal
 		file.Close()
 		return errorResult(call.InvocationID, err), nil
 	}
-	window, readErr := ReadTextWindowReader(file, WindowOptions{Offset: args.Offset, Limit: args.Limit, ColumnOffset: args.ColumnOffset})
+	window, readErr := ReadTextWindowReader(file, WindowOptions{Path: args.Path, Offset: args.Offset, Limit: args.Limit, ColumnOffset: args.ColumnOffset})
 	closeErr := file.Close()
 	if readErr != nil {
 		var typed *toolError
@@ -357,6 +357,9 @@ func readCapabilityWithLSPStatus(ctx context.Context, call runtime.CapabilityCal
 
 func formatTextWindow(path string, window TextWindow) string {
 	lines := []string{"path: " + filepath.ToSlash(path)}
+	if window.Encoding != "" && window.Encoding != "UTF-8" {
+		lines = append(lines, "encoding: "+window.Encoding)
+	}
 	if window.EndsWithNewline != nil {
 		value := "no"
 		if *window.EndsWithNewline {
@@ -558,6 +561,12 @@ func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome sea
 		}
 		text += formatIgnoreSkippedHint(outcome.IgnoreSkipped, outcome.IgnoreSkippedCount)
 	}
+	if outcome.UndecodableCount > 0 {
+		if text != "" {
+			text += "\n"
+		}
+		text += formatUndecodableHint(outcome.Undecodable, outcome.UndecodableCount)
+	}
 	result := textResult(call.InvocationID, text)
 	if exceedsInlineOutput(text) {
 		store, err := TextOutputStoreForDataDir(dataDir)
@@ -593,6 +602,19 @@ func formatIgnoreSkippedHint(paths []string, count int) string {
 		entries += fmt.Sprintf("… and %d more", count-len(shown))
 	}
 	return "[No matches. Not searched because of ignore rules: " + entries + "]"
+}
+
+// formatUndecodableHint lists the files whose text encoding could not be determined.
+func formatUndecodableHint(paths []string, count int) string {
+	shown := paths[:min(len(paths), 10)]
+	entries := strings.Join(shown, ", ")
+	if count > len(shown) {
+		if entries != "" {
+			entries += ", "
+		}
+		entries += fmt.Sprintf("… and %d more", count-len(shown))
+	}
+	return "[Not searched because the text encoding could not be determined: " + entries + "]"
 }
 
 func exceedsInlineOutput(text string) bool {

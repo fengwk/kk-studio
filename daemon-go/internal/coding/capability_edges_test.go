@@ -53,7 +53,7 @@ func TestReadDirectoryAndBinaryFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	binary := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": binaryPath}, nil)
-	if !binary.Error || !strings.Contains(binary.Contents[0].Text, "file appears to be binary") {
+	if !binary.Error || !strings.Contains(binary.Contents[0].Text, "is a binary file (it contains NUL bytes)") {
 		t.Fatalf("binary=%#v", binary)
 	}
 }

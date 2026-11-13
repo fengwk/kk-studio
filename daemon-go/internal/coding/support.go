@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/fengwk/kk-studio/daemon/internal/coding/search"
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
@@ -94,6 +95,10 @@ func errorSentence(text string) string {
 const verifyEffectNextAction = "Verify whether the intended effect already took place before deciding what to do next"
 
 func classifySearchError(err error) error {
+	var undecodable *search.UndecodableError
+	if errors.As(err, &undecodable) {
+		return codecError(undecodable.Path, undecodable.Err, codecSearch)
+	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || isFileSystemError(err) {
 		return err
 	}
@@ -108,8 +113,6 @@ func classifySearchError(err error) error {
 		return rejectInput("Invalid glob: " + diagnostic)
 	case lower == "root is not a directory":
 		return rejectInput("path is not a directory")
-	case lower == "directly specified file is binary":
-		return failRun("file appears to be binary", "CODEC")
 	default:
 		return failRun("ripgrep failed while searching; results are incomplete", "FAILED")
 	}

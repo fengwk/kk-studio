@@ -14,6 +14,8 @@ Environment 提供 OS、用户、HOME 等宿主事实。任务路径由用户、
 
 读取以整体行数和字符数限制，不限制单行长度。流式跳过起点之前的内容，仅收集窗口，不能先丢弃长行尾部。到达预算且恰好 EOF 不算截断。续读坐标指向第一个未返回字符，完整行边界归一到下一行第一列。空文件和越过 EOF 使用明确空范围；有效目标行上的越界列报错。CRLF、CR 和 LF 都作为行边界，Unicode 代理对不得拆开。
 
+Daemon 读取本地文件时，文本编码由统一的 codec 决定，顺序为 BOM、标准声明、有效 UTF-8：识别 UTF-8/UTF-16/UTF-32 BOM，以及 XML、CSS、HTML `<meta charset>`、Python/Ruby 编码注释与 JSP page 指令中的声明，不做统计猜测，也不推测无 BOM 的 UTF-16。非 UTF-8 的文件在 header 输出 `encoding: <名称>`（UTF-8 BOM 不输出）；既不合法 UTF-8 又无声明的文件明确报错。前 8000 字节内出现 NUL 视为二进制（UTF-16/32 BOM 文件按解码后的字符判断），其余控制字符按文本处理。声明编码的文件按整文件解码，上限 64 MiB；UTF-8 与 BOM 标记的 UTF-16/32 按窗口流式解码。
+
 ```text
 path: /srv/project/example.ts
 range: 1:1-83:1240
@@ -36,7 +38,7 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 
 ## 文件变更与搜索
 
-现有文件原子替换保持文件系统支持的权限；edit 保持编码、BOM 和换行风格，write 按完整内容写入。无法无损编码则拒绝。提交成功后，通知或展示故障单独报告。设备、FIFO 等非普通文件在 I/O 前拒绝。
+现有文件原子替换保持文件系统支持的权限；edit 保持编码、BOM 和换行风格，write 按完整内容写入。write 沿用已有文件的 BOM 与编码；没有 BOM 时由新内容中的标准声明决定，两者都没有则写无 BOM 的 UTF-8。声明与 BOM 冲突、或删除已有非 UTF-8 文件的声明都会被拒绝；无法无损编码同样拒绝，无法解码的已有文件不会被覆盖。提交成功后，通知或展示故障单独报告。设备、FIFO 等非普通文件在 I/O 前拒绝。
 
 同一 Assistant 调用批次中的 Environment `edit` / `write` 按冻结的 Environment 与绝对 `path` 词法身份串行：同一目标文件只允许最早的未结束调用进入预检与执行；前项成功、失败、拒绝或取消后，再派发下一项。不同文件仍可并行。路径只按目标文件系统词法折叠分隔符、`.` 与 `..`，Windows 路径另忽略大小写；不解析符号链接。非 Environment 路径和无法解析的参数不参与此排序。审批逐项请求，因此后续 edit 的预览在前项写入之后生成。
 
@@ -44,7 +46,7 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 Daemon 使用 Go diff 实现计算变更，保留变更行与上下文；行尾与 EOF 缺失换行标记纳入 review 结果，新文件 diff 将全部内容显示为新增行，由统一的 review 传输预算约束。
 完整 review 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[开发与测试](../operations/development-and-testing.md)。
 
-Go Daemon 在进程内实现 `find` 与 `grep`，不调用随包或宿主安装的 ripgrep。两项工具都可用 `glob` 限定相对搜索根的路径；grep 的 `pattern` 可包含换行，跨行匹配不另设 `multiline` 开关。检索默认超时 15 秒，可由正数 `timeout_seconds` 覆盖；超时或取消保留已收集的 partial 匹配，并显式标记 `search.incomplete`。grep 的 `limit` 按匹配数计算；多行匹配返回该匹配展开的行，结果仍受有界输出保护。正则或 glob 错误作为输入拒绝，无法读取的路径作为 skipped 报告。
+Go Daemon 在进程内实现 `find` 与 `grep`，不调用随包或宿主安装的 ripgrep。两项工具都可用 `glob` 限定相对搜索根的路径；grep 的 `pattern` 可包含换行，跨行匹配不另设 `multiline` 开关。检索默认超时 15 秒，可由正数 `timeout_seconds` 覆盖；超时或取消保留已收集的 partial 匹配，并显式标记 `search.incomplete`。grep 的 `limit` 按匹配数计算；多行匹配返回该匹配展开的行，结果仍受有界输出保护。正则或 glob 错误作为输入拒绝，无法读取的路径作为 skipped 报告。grep 匹配解码后的文本，行号与 read 一致；二进制文件静默跳过，无法确定编码的文件在结果末尾按绝对路径列出，最多 10 个。
 
 grep/find 按 Git 仓库边界应用忽略规则：仓库内只使用仓库根到目标文件之间的 `.gitignore` 与该仓库 `.git/info/exclude`；嵌套仓库只使用自身规则；仓库根以上的 `.gitignore` 和全局 Git excludes 不生效。仓库外仅使用搜索根及其以下的 `.gitignore`。支持 `.git` 文件形式的 worktree；隐藏文件会搜索，`.git` 会跳过，符号链接不跟随。忽略路径在结果中被略过；若没有匹配，会提示最多 10 个因忽略规则未搜索的路径。要搜索被忽略目录，可将其本身作为 `path`；直接传入的文件路径会被搜索。
 

@@ -1,0 +1,2 @@
+coding: gbk
+This plain text mentions an encoding declaration without being one.

@@ -11,6 +11,8 @@ import (
 	"runtime"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
 func (c *Client) Sync(path string) error {
@@ -22,27 +24,28 @@ func (c *Client) Sync(path string) error {
 	if err != nil {
 		return &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
 	}
-	decoded, err := DecodeTextFile(data)
-	if err != nil {
-		return &LspError{Message: "LSP request failed: the source file is not valid text", Cause: err}
+	decoded, _, decodeErr := textcodec.Decode(abs, data)
+	if decodeErr != nil {
+		return &LspError{Message: "LSP request failed: the source file is not valid text", Cause: decodeErr}
 	}
+	text := string(decoded)
 	uri := pathURI(abs)
 	c.mu.Lock()
 	old, opened := c.documents[abs]
-	if opened && old.text == decoded.Text {
+	if opened && old.text == text {
 		c.mu.Unlock()
 		return nil
 	}
 	language := languageID(filepath.Ext(abs), c.server.ID)
 	if !opened {
-		c.documents[abs] = document{text: decoded.Text, version: 1}
+		c.documents[abs] = document{text: text, version: 1}
 		c.mu.Unlock()
-		return c.Notify(context.Background(), "textDocument/didOpen", DidOpenTextDocumentParams{TextDocument: TextDocumentItem{LanguageID: language, Text: decoded.Text, URI: uri, Version: 1}})
+		return c.Notify(context.Background(), "textDocument/didOpen", DidOpenTextDocumentParams{TextDocument: TextDocumentItem{LanguageID: language, Text: text, URI: uri, Version: 1}})
 	}
 	version := old.version + 1
-	c.documents[abs] = document{text: decoded.Text, version: version}
+	c.documents[abs] = document{text: text, version: version}
 	c.mu.Unlock()
-	if err := c.Notify(context.Background(), "textDocument/didChange", DidChangeTextDocumentParams{ContentChanges: []ContentChangeEvent{{Text: decoded.Text}}, TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: version}}); err != nil {
+	if err := c.Notify(context.Background(), "textDocument/didChange", DidChangeTextDocumentParams{ContentChanges: []ContentChangeEvent{{Text: text}}, TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: version}}); err != nil {
 		return err
 	}
 	return c.Notify(context.Background(), "textDocument/didSave", DidSaveTextDocumentParams{TextDocument: TextDocumentIdentifier{URI: uri}})
@@ -223,11 +226,11 @@ func (c *Client) definitionColumn(uri string, line, character int) int {
 	if err != nil {
 		return fallback
 	}
-	decoded, err := DecodeTextFile(data)
-	if err != nil {
+	decoded, _, decodeErr := textcodec.Decode(path, data)
+	if decodeErr != nil {
 		return fallback
 	}
-	lines := strings.Split(decoded.Text, "\n")
+	lines := strings.Split(string(decoded), "\n")
 	if line < 0 || line >= len(lines) {
 		return fallback
 	}

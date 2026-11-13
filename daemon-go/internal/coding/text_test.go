@@ -29,8 +29,8 @@ func TestTextUTF16RoundTrip(t *testing.T) {
 // COD-T-220
 func TestTextRejectsNULAndMalformedUTF8(t *testing.T) {
 	for _, data := range [][]byte{{'a', 0, 'b'}, {0xff}} {
-		if _, err := DecodeText(data); err == nil || err.Error() != "file appears to be binary" {
-			t.Fatalf("expected binary rejection, got %v", err)
+		if _, err := DecodeText(data); err == nil {
+			t.Fatalf("expected rejection of %x, got %v", data, err)
 		}
 	}
 }
@@ -90,7 +90,7 @@ func TestReadTextWindowReaderHandlesUTF16AndRejectsMalformedUnits(t *testing.T) 
 		}
 	}
 	malformed := []byte{0xff, 0xfe, 0x00, 0xd8}
-	if _, err := ReadTextWindowReader(bytes.NewReader(malformed), WindowOptions{Offset: 1, Limit: 1}); err == nil || err.Error() != "file appears to be binary" {
+	if _, err := ReadTextWindowReader(bytes.NewReader(malformed), WindowOptions{Offset: 1, Limit: 1}); err == nil || !strings.Contains(err.Error(), "not valid UTF-16") {
 		t.Fatalf("expected malformed UTF-16 error, got %v", err)
 	}
 }
@@ -122,10 +122,9 @@ func TestReadTextWindowReaderValidatesRangesAndEncoding(t *testing.T) {
 		{"limit", []byte("x"), WindowOptions{Offset: 1, Limit: MaxReadLimit + 1}, "limit must be a positive integer no greater than 2000"},
 		{"column", []byte("x\n"), WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 2}, "column_offset 2 is out of range: line 1 has 1 columns"},
 		{"column exact contract", []byte("a\n"), WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 5}, "column_offset 5 is out of range: line 1 has 1 columns"},
-		{"utf8", []byte{0xff}, WindowOptions{Offset: 1, Limit: 1}, "file appears to be binary"},
-		{"control byte", []byte{'x', 1}, WindowOptions{Offset: 1, Limit: 1}, "file appears to be binary"},
-		{"utf16 odd", []byte{0xff, 0xfe, 'x'}, WindowOptions{Offset: 1, Limit: 1}, "file appears to be binary"},
-		{"utf16 low surrogate", []byte{0xff, 0xfe, 0x00, 0xdc}, WindowOptions{Offset: 1, Limit: 1}, "file appears to be binary"},
+		{"utf8", []byte{0xff}, WindowOptions{Offset: 1, Limit: 1}, "file is not UTF-8 text and declares no encoding"},
+		{"utf16 odd", []byte{0xff, 0xfe, 'x'}, WindowOptions{Offset: 1, Limit: 1}, "the bytes are not valid UTF-16LE; the first byte that cannot be reproduced is at offset 2"},
+		{"utf16 low surrogate", []byte{0xff, 0xfe, 0x00, 0xdc}, WindowOptions{Offset: 1, Limit: 1}, "the bytes are not valid UTF-16LE; the first byte that cannot be reproduced is at offset 2"},
 		{"negative column", []byte("x"), WindowOptions{Offset: 1, Limit: 1, ColumnOffset: -1}, "column_offset must be a positive integer"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

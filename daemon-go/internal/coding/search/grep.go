@@ -3,14 +3,12 @@ package search
 import (
 	"bytes"
 	"context"
-	binaryencoding "encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
 	"regexp/syntax"
 	"sync"
-	"unicode/utf16"
 	"unicode/utf8"
 )
 
@@ -86,11 +84,11 @@ func releaseBuffer(buf []byte) {
 }
 
 func grepFile(data []byte, path, pattern string, literal, ignoreCase bool, re *regexp.Regexp, required []byte) []string {
-	data, validText := normalizeSearchText(data)
-	if !validText || len(data) == 0 || binary(data) {
+	if len(data) == 0 {
 		return nil
 	}
-	lines := &lineCollector{data: data, path: path, end: lineEnd(data, 0), number: 1, lastOutput: -1}
+	lines := &lineCollector{data: data, path: path, number: 1, lastOutput: -1}
+	lines.end = lines.lineEnd(0)
 	if literal && !(ignoreCase && !ascii(pattern)) {
 		needle := []byte(pattern)
 		if ignoreCase {
@@ -125,7 +123,7 @@ func grepFile(data []byte, path, pattern string, literal, ignoreCase bool, re *r
 	// literal can safely screen candidates.
 	normalized := stripCRLF(data)
 	lines.data = normalized
-	lines.end = lineEnd(normalized, 0)
+	lines.end = lines.lineEnd(0)
 	for _, loc := range re.FindAllIndex(normalized, -1) {
 		lines.add(loc[0])
 	}
@@ -241,13 +239,13 @@ func hasCrossLineOperator(ast *syntax.Regexp) bool {
 }
 
 func grepMultilineFile(data []byte, path string, re *regexp.Regexp, maxMatches int) ([]string, int) {
-	data, validText := normalizeSearchText(data)
-	if !validText || len(data) == 0 || binary(data) {
+	if len(data) == 0 {
 		return nil, 0
 	}
 	normalized := stripCRLF(data)
 	locations := re.FindAllIndex(normalized, -1)
-	lines := &lineCollector{data: normalized, path: path, end: lineEnd(normalized, 0), number: 1, lastOutput: -1}
+	lines := &lineCollector{data: normalized, path: path, number: 1, lastOutput: -1}
+	lines.end = lines.lineEnd(0)
 	seen := make(map[int]struct{})
 	for matchIndex, loc := range locations {
 		if maxMatches < 0 || maxMatches > 0 && matchIndex >= maxMatches {
@@ -264,11 +262,11 @@ func grepMultilineFile(data []byte, path string, re *regexp.Regexp, maxMatches i
 				lines.add(pos)
 				seen[lineStart] = struct{}{}
 			}
-			next := bytes.IndexByte(normalized[pos:end+1], '\n')
-			if next < 0 {
+			lineTerminator := lines.lineEnd(pos)
+			if lineTerminator > end {
 				break
 			}
-			pos += next + 1
+			pos = lineTerminator + 1
 		}
 	}
 	return lines.out, len(locations)
@@ -320,7 +318,33 @@ type lineCollector struct {
 	data                           []byte
 	path                           string
 	start, end, number, lastOutput int
+	crCursor                       int
+	crLoaded                       bool
 	out                            []string
+}
+
+// lineEnd reports where the line that starts at start ends. Like read, CRLF, CR and LF are all
+// line breaks, so a lone CR ends a line. The next carriage return is cached because the
+// collector only moves forward, which keeps the search to one pass over the scanned text.
+func (c *lineCollector) lineEnd(start int) int {
+	end := lineEnd(c.data, start)
+	if cr := c.nextCarriageReturn(start); cr < end {
+		return cr
+	}
+	return end
+}
+
+// nextCarriageReturn reports the first carriage return at or after from, or len(data).
+func (c *lineCollector) nextCarriageReturn(from int) int {
+	if c.crLoaded && c.crCursor >= from {
+		return c.crCursor
+	}
+	c.crLoaded = true
+	c.crCursor = len(c.data)
+	if i := bytes.IndexByte(c.data[from:], '\r'); i >= 0 {
+		c.crCursor = from + i
+	}
+	return c.crCursor
 }
 
 func (c *lineCollector) bounds(pos int) (int, int, bool) {
@@ -329,8 +353,11 @@ func (c *lineCollector) bounds(pos int) (int, int, bool) {
 	}
 	for pos > c.end && c.end < len(c.data) {
 		c.start = c.end + 1
+		if c.start < len(c.data) && c.data[c.end] == '\r' && c.data[c.start] == '\n' {
+			c.start++
+		}
 		c.number++
-		c.end = lineEnd(c.data, c.start)
+		c.end = c.lineEnd(c.start)
 	}
 	return c.start, c.end, c.start <= pos && pos <= c.end
 }
@@ -369,29 +396,7 @@ func centeredExcerpt(line string, matchStart int) string {
 	return text
 }
 
-func normalizeSearchText(data []byte) ([]byte, bool) {
-	if len(data) < 2 {
-		return data, true
-	}
-	littleEndian := bytes.HasPrefix(data, []byte{0xff, 0xfe})
-	bigEndian := bytes.HasPrefix(data, []byte{0xfe, 0xff})
-	if !littleEndian && !bigEndian {
-		return data, true
-	}
-	data = data[2:]
-	if len(data)%2 != 0 {
-		return nil, false
-	}
-	units := make([]uint16, len(data)/2)
-	for i := range units {
-		if littleEndian {
-			units[i] = binaryencoding.LittleEndian.Uint16(data[i*2:])
-		} else {
-			units[i] = binaryencoding.BigEndian.Uint16(data[i*2:])
-		}
-	}
-	return []byte(string(utf16.Decode(units))), true
-}
+// lineEnd reports where the line that starts at start ends when only line feeds count.
 func lineEnd(data []byte, start int) int {
 	if start >= len(data) {
 		return len(data)

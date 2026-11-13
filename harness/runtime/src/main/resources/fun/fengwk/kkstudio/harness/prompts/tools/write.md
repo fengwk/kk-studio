@@ -5,8 +5,14 @@ Usage:
 - For existing files, prefer `edit`; use `write` only for whole-file replacement or roughly 60%+ file-wide rewrites, never for localized edits that an `edit` can handle safely.
 - Provide complete content without placeholders such as `...` or omitted sections.
 - `content` replaces the file exactly as provided: line endings are never rewritten, and `write`
-  never restores an older newline style. When overwriting an existing text file, its encoding and
-  BOM are preserved, and content that cannot be represented in that encoding is rejected.
+  never restores an older newline style.
+- Encoding: an existing file keeps its byte order mark and encoding. Without a byte order mark the
+  standard declaration in `content` decides (for example `<meta charset>` or `# coding:`), and
+  without either the file is written as UTF-8 without a BOM. A declaration that contradicts an
+  existing byte order mark is rejected, and so is dropping the declaration of an existing non-UTF-8
+  file: keep the declaration, or declare the new encoding explicitly to convert the file.
+- Content that cannot be represented in the target encoding is rejected instead of substituted, and
+  an existing file that `read` cannot decode is never overwritten.
 - `write` supports regular text files only. Directories, devices, FIFOs and binary files are
   rejected before any write.
 - `write` returns a success message only. If you need to inspect the resulting file content, use `read` afterward.

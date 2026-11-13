@@ -210,7 +210,7 @@ func TestGrepDirectBinaryReportsBinaryReason(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": path, "pattern": "x", "literal": true}, nil)
-	if !result.Error || !strings.Contains(result.Contents[0].Text, "file appears to be binary") || strings.Contains(result.Contents[0].Text, "ripgrep") || !strings.Contains(string(result.Details), `"code":"CODEC"`) {
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "is a binary file (it contains NUL bytes)") || strings.Contains(result.Contents[0].Text, "ripgrep") || !strings.Contains(string(result.Details), `"code":"CODEC"`) {
 		t.Fatalf("result=%#v", result)
 	}
 }
