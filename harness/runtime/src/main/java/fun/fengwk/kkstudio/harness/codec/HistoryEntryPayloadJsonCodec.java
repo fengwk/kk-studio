@@ -106,7 +106,7 @@ public final class HistoryEntryPayloadJsonCodec {
           "capabilities");
   private static final Set<String> SYSTEM_HOSTED_TOOL_FIELDS = orderedSet("name", "definitionJson");
   private static final Set<String> TURN_CAPABILITIES_FIELDS =
-      orderedSet("toolBindings", "subagentBindings", "mediaCapabilities");
+      orderedSet("toolNames", "subagentBindings", "mediaCapabilities");
   private static final Set<String> SUBAGENT_BINDING_FIELDS = orderedSet("name", "description");
   private static final Set<String> TURN_MEDIA_CAPABILITIES_FIELDS =
       orderedSet("inputModalities", "userModalities", "toolResultModalities");
@@ -150,7 +150,7 @@ public final class HistoryEntryPayloadJsonCodec {
           "reason",
           "inputReceipt",
           "invocationId",
-          "binding");
+          "toolName");
 
   private static final ToolBindingJsonCodec TOOL_BINDING_CODEC = new ToolBindingJsonCodec();
 
@@ -292,10 +292,8 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static ObjectNode encodeTurnCapabilities(TurnCapabilities value) {
     ObjectNode node = NODES.objectNode();
-    var tools = node.putArray("toolBindings");
-    for (ToolBinding binding : value.toolBindings()) {
-      tools.add(TOOL_BINDING_CODEC.encodeNode(binding));
-    }
+    var tools = node.putArray("toolNames");
+    value.toolNames().forEach(tools::add);
     var subagents = node.putArray("subagentBindings");
     for (SubagentBinding binding : value.subagentBindings()) {
       ObjectNode item = subagents.addObject();
@@ -498,11 +496,10 @@ public final class HistoryEntryPayloadJsonCodec {
     } else {
       node.put("invocationId", metadata.invocationId().toString());
     }
-    // 真实终态即使 invocation 行被物理删除也必须保留原冻结 binding；synthetic 结果没有真实 invocation，输出显式 null。
-    if (metadata.binding() == null) {
-      node.putNull("binding");
+    if (metadata.toolName() == null) {
+      node.putNull("toolName");
     } else {
-      node.set("binding", TOOL_BINDING_CODEC.encodeNode(metadata.binding()));
+      node.put("toolName", metadata.toolName());
     }
     return node;
   }
@@ -618,11 +615,13 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.capabilities");
     JsonCodecSupport.requireFields(node, TURN_CAPABILITIES_FIELDS, "TURN_START.capabilities");
     ArrayNode toolValues =
-        HistoryValueCodecs.requireArray(
-            node.get("toolBindings"), "TURN_START.capabilities.toolBindings");
-    List<ToolBinding> toolBindings = new ArrayList<>(toolValues.size());
+        HistoryValueCodecs.requireArray(node.get("toolNames"), "TURN_START.capabilities.toolNames");
+    List<String> toolNames = new ArrayList<>(toolValues.size());
     for (JsonNode toolValue : toolValues) {
-      toolBindings.add(TOOL_BINDING_CODEC.decodeNode(toolValue));
+      if (!toolValue.isString()) {
+        throw new IllegalArgumentException("TURN_START.capabilities.toolNames[] must be text");
+      }
+      toolNames.add(toolValue.stringValue());
     }
     ArrayNode subagentValues =
         HistoryValueCodecs.requireArray(
@@ -638,7 +637,7 @@ public final class HistoryEntryPayloadJsonCodec {
               HistoryValueCodecs.requiredText(subagent, "description", context)));
     }
     return new TurnCapabilities(
-        toolBindings, subagentBindings, decodeTurnMediaCapabilities(node.get("mediaCapabilities")));
+        toolNames, subagentBindings, decodeTurnMediaCapabilities(node.get("mediaCapabilities")));
   }
 
   private static TurnMediaCapabilities decodeTurnMediaCapabilities(JsonNode value) {
@@ -966,9 +965,7 @@ public final class HistoryEntryPayloadJsonCodec {
             ? null
             : StrictJson.standard()
                 .read(node.get("inputReceipt"), ToolInputReceipt.class, "inputReceipt"),
-        node.get("binding") == null || node.get("binding").isNull()
-            ? null
-            : TOOL_BINDING_CODEC.decodeNode(node.get("binding")));
+        HistoryValueCodecs.nullableText(node, "toolName"));
   }
 
   // ---------- 通用工具方法 ----------

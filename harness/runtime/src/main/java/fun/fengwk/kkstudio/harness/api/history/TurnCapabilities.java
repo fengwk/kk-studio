@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
-import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
 import java.util.HashSet;
@@ -10,61 +8,36 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * 一次 Turn 解析完成后冻结的执行能力：工具 bindings、子代理 allowlist 与消费者媒体能力。
+ * 一次 Turn 解析完成后冻结的执行能力：工具名称引用、子代理 allowlist 与消费者媒体能力。
  *
- * <p>这是工具声明、审批、执行、{@code task} 父权限与媒体读取的公共权限来源。Driver 私有请求中的工具列表不得作为公共工具授权事实。尚未解析（pending /
- * rejected）的 TurnStart 允许没有 capabilities；任何可执行 ToolInvocation 都必须能引用其 TurnStart 中冻结的 binding。
- *
- * <p>工具 bindings 必须名称唯一并共享最多一个 Environment；子代理名称唯一。媒体能力只含中立枚举，不携带 Provider 实现类型。
+ * <p>工具定义只存储在 SYSTEM 历史中；TurnStart 保留可执行工具名称与公共消费者能力。子代理名称唯一，媒体能力只含中立枚举，不携带 Provider 实现类型。
  */
 public record TurnCapabilities(
-    List<ToolBinding> toolBindings,
+    List<String> toolNames,
     List<SubagentBinding> subagentBindings,
     TurnMediaCapabilities mediaCapabilities) {
 
-  public TurnCapabilities(List<ToolBinding> toolBindings, List<SubagentBinding> subagentBindings) {
-    this(toolBindings, subagentBindings, TurnMediaCapabilities.NONE);
+  public TurnCapabilities(List<String> toolNames, List<SubagentBinding> subagentBindings) {
+    this(toolNames, subagentBindings, TurnMediaCapabilities.NONE);
   }
 
   public TurnCapabilities {
-    toolBindings = List.copyOf(Objects.requireNonNull(toolBindings, "toolBindings"));
+    toolNames = List.copyOf(Objects.requireNonNull(toolNames, "toolNames"));
     subagentBindings = List.copyOf(Objects.requireNonNull(subagentBindings, "subagentBindings"));
     mediaCapabilities = Objects.requireNonNull(mediaCapabilities, "mediaCapabilities");
-    requireUniqueToolBindings(toolBindings);
+    requireUniqueToolNames(toolNames);
     requireUniqueSubagentNames(subagentBindings);
-    environment(toolBindings);
   }
 
-  /** 冻结工具共享的唯一 Environment 身份；没有环境绑定工具时返回 null。 */
-  public EnvironmentId environmentId() {
-    return environment(toolBindings);
-  }
-
-  private static EnvironmentId environment(List<ToolBinding> toolBindings) {
-    EnvironmentId environmentId = null;
-    boolean seen = false;
-    for (ToolBinding binding : toolBindings) {
-      if (binding.environmentId() == null) {
-        continue;
-      }
-      if (!seen) {
-        environmentId = binding.environmentId();
-        seen = true;
-      } else if (!environmentId.equals(binding.environmentId())) {
-        throw new IllegalArgumentException(
-            "environment-bound tools in one turn must share one environment");
-      }
-    }
-    return environmentId;
-  }
-
-  private static void requireUniqueToolBindings(List<ToolBinding> toolBindings) {
+  private static void requireUniqueToolNames(List<String> toolNames) {
     Set<String> names = new HashSet<>();
-    for (ToolBinding binding : toolBindings) {
-      Objects.requireNonNull(binding, "toolBindings[]");
-      if (!names.add(binding.descriptor().name())) {
-        throw new IllegalArgumentException(
-            "tool binding names must not repeat: " + binding.descriptor().name());
+    for (String name : toolNames) {
+      Objects.requireNonNull(name, "toolNames[]");
+      if (name.isBlank() || !name.equals(name.strip())) {
+        throw new IllegalArgumentException("tool names must be non-blank and canonical");
+      }
+      if (!names.add(name)) {
+        throw new IllegalArgumentException("tool names must not repeat: " + name);
       }
     }
   }

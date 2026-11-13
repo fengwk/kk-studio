@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
-import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 
 import java.util.Objects;
@@ -21,10 +20,8 @@ import java.util.UUID;
  * 因此已接受回答的 submissionId / actor / acceptedAt 随结果一起迁入 Entry 元数据，绝不写入业务 {@code detailsJson}。synthetic
  * 结果不携带回执。
  *
- * <p>{@code binding} 是产生本结果的原 Tool invocation 冻结的 {@link
- * ToolBinding}（完整定义、贡献身份与环境路由）：真实终态（SUCCEEDED/FAILED/CANCELLED/UNKNOWN，含人工 resolve 后的结果）即使
- * invocation 行被物理删除也必须保留 binding，使历史始终记录产生结果的定义，绝不静默按当前版本补造。模型调用未命中冻结 binding 的 unknown-tool 槽位与
- * synthetic 结果为 null。
+ * <p>{@code toolName} 引用 SYSTEM 历史中定义的工具；真实终态即使 invocation 行被物理删除，也能通过该名称关联到调用时冻结的工具定义。模型调用未命中冻结定义的
+ * unknown-tool 槽位与 synthetic 结果为 null。
  */
 public record ToolResultMetadata(
     UUID invocationId,
@@ -35,7 +32,7 @@ public record ToolResultMetadata(
     boolean synthetic,
     ToolResultReason reason,
     ToolInputReceipt inputReceipt,
-    ToolBinding binding) {
+    String toolName) {
 
   private static final int TOOL_CALL_ID_MAX_LENGTH = 256;
 
@@ -46,6 +43,9 @@ public record ToolResultMetadata(
       throw new IllegalArgumentException("callIndex must not be negative");
     }
     status = Objects.requireNonNull(status, "status");
+    if (toolName != null) {
+      toolName = requireCanonicalName(toolName, "toolName");
+    }
     if (synthetic) {
       if (status != ToolResultStatus.UNKNOWN || reason != ToolResultReason.HISTORY_CUT) {
         throw new IllegalArgumentException(
@@ -59,9 +59,8 @@ public record ToolResultMetadata(
         throw new IllegalArgumentException(
             "synthetic tool results must not carry an input receipt");
       }
-      if (binding != null) {
-        throw new IllegalArgumentException(
-            "synthetic tool results must not carry a frozen tool binding");
+      if (toolName != null) {
+        throw new IllegalArgumentException("synthetic tool results must not carry a tool name");
       }
     } else {
       if (invocationId == null) {

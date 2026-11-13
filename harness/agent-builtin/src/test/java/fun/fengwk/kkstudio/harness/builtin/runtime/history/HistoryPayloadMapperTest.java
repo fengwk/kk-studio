@@ -325,7 +325,7 @@ class HistoryPayloadMapperTest {
     assertEquals("{\"a\":1}", ((JsonMessageContent) result.contents().get(1)).json());
     ToolResultMetadata metadata = payload.toolResultMetadata();
     assertEquals(ToolResultStatus.SUCCEEDED, metadata.status());
-    assertEquals(invocation.binding(), metadata.binding());
+    assertEquals(invocation.binding().descriptor().name(), metadata.toolName());
     assertEquals(id(7L), metadata.assistantEntryId());
     assertEquals(3, metadata.callIndex());
     assertEquals("call-1", metadata.toolCallId());
@@ -384,7 +384,7 @@ class HistoryPayloadMapperTest {
     assertEquals(blobId, mapped.blobId());
     assertEquals("report.txt", mapped.name());
     assertEquals("complete preview", mapped.preview());
-    assertEquals(invocation.binding(), payload.toolResultMetadata().binding());
+    assertEquals(invocation.binding().descriptor().name(), payload.toolResultMetadata().toolName());
   }
 
   @Test
@@ -435,7 +435,8 @@ class HistoryPayloadMapperTest {
           StrictJson.standard().read(result.detailsJson(), ToolInvocationError.class, "error");
       assertEquals("KIND_X", decoded.kind());
       assertEquals("boom", decoded.message());
-      assertEquals(invocation.binding(), payload.toolResultMetadata().binding());
+      assertEquals(
+          invocation.binding().descriptor().name(), payload.toolResultMetadata().toolName());
       assertEquals(
           switch (status) {
             case FAILED -> ToolResultStatus.FAILED;
@@ -514,7 +515,7 @@ class HistoryPayloadMapperTest {
     assertEquals(ToolResultStatus.UNKNOWN, metadata.status());
     assertTrue(metadata.synthetic());
     assertEquals(ToolResultReason.HISTORY_CUT, metadata.reason());
-    assertNull(metadata.binding());
+    assertNull(metadata.toolName());
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
     assertTrue(result.error());
@@ -542,7 +543,7 @@ class HistoryPayloadMapperTest {
             NOW,
             NOW);
     MessagePayload payload = MAPPER.toolResultPayload(invocation);
-    assertNull(payload.toolResultMetadata().binding());
+    assertNull(payload.toolResultMetadata().toolName());
     ToolResultMessageContent result =
         (ToolResultMessageContent) payload.message().contents().get(0);
     assertEquals("tool", result.rendererKey());

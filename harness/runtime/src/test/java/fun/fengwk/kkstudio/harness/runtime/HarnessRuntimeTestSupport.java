@@ -729,7 +729,8 @@ public final class HarnessRuntimeTestSupport {
   }
 
   static TurnCapabilities capabilities(ToolBinding... bindings) {
-    return new TurnCapabilities(List.of(bindings), List.of());
+    return new TurnCapabilities(
+        List.of(bindings).stream().map(binding -> binding.descriptor().name()).toList(), List.of());
   }
 
   static Entry userMessageEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {

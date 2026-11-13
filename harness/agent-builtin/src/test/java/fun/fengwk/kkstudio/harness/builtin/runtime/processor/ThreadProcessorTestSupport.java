@@ -886,7 +886,8 @@ public final class ThreadProcessorTestSupport {
         MAX_OUTPUT_TOKENS,
         null,
         null,
-        new TurnCapabilities(toolBindings, List.of()));
+        new TurnCapabilities(
+            toolBindings.stream().map(binding -> binding.descriptor().name()).toList(), List.of()));
   }
 
   /** Resolver 成功后的 COMPACTION TurnStart：owner 为创建 Thread，contextWindow 已冻结。 */

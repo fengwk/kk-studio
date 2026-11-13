@@ -2062,7 +2062,9 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                     tx.entries().find(invocation.turnStartEntryId()).orElseThrow().payload());
     assertEquals(CONTEXT_WINDOW, start.contextWindow());
     assertEquals(expectedMax, start.maxOutputTokens());
-    assertEquals(base.toolBindings(), start.capabilities().toolBindings());
+    assertEquals(
+        base.toolBindings().stream().map(binding -> binding.descriptor().name()).toList(),
+        start.capabilities().toolNames());
     assertEquals(subagents, start.capabilities().subagentBindings());
     assertEquals("test-group", BuiltinExecution.model(start.executedSelection()).modelName());
     assertEquals("test-group", invocation.groupProgress().groupName());

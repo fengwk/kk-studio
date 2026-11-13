@@ -158,7 +158,7 @@ final class SessionForkCopy {
               metadata.synthetic(),
               metadata.reason(),
               metadata.inputReceipt(),
-              metadata.binding()));
+              metadata.toolName()));
     }
     return payload;
   }

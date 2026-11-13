@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultReason;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
+import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -396,7 +397,7 @@ class HistoryEntryPayloadJsonCodecTest {
             false,
             null,
             null,
-            binding);
+            binding.descriptor().name());
 
     MessagePayload payload =
         new MessagePayload(
@@ -414,11 +415,11 @@ class HistoryEntryPayloadJsonCodecTest {
             metadata);
 
     String encoded = CODEC.encode(payload);
-    assertTrue(encoded.contains("\"binding\":{\"definition\":"));
+    assertTrue(encoded.contains("\"toolName\":\"custom_tool\""));
 
     MessagePayload decoded = (MessagePayload) CODEC.decode(EntryType.MESSAGE, encoded);
     assertEquals(payload, decoded);
-    assertEquals(binding, decoded.toolResultMetadata().binding());
+    assertEquals(binding.descriptor().name(), decoded.toolResultMetadata().toolName());
   }
 
   /** 意图：decodeDurationMillis 的严格边界——非负整数与显式 null 合法，负值、非整数、非数字类型与未知字段一律拒绝。 */
@@ -539,6 +540,25 @@ class HistoryEntryPayloadJsonCodecTest {
             new AssistantErrorPayload(
                 new AssistantError("MODEL_FAILED", "down"),
                 new ModelAttemptSnapshot(2, 9, "final", ""))));
+  }
+
+  @Test
+  void turnCapabilitiesStoreToolNamesInsteadOfDefinitions() {
+    TurnStartPayload payload =
+        new TurnStartPayload(
+            TurnStartReason.INPUT,
+            settings(),
+            OWNER_THREAD_ID,
+            4096,
+            1024,
+            null,
+            null,
+            new TurnCapabilities(List.of("bash"), List.of()));
+
+    String encoded = CODEC.encode(payload);
+    assertTrue(encoded.contains("\"toolNames\":[\"bash\"]"));
+    assertFalse(encoded.contains("toolBindings"));
+    assertEquals(payload, CODEC.decode(EntryType.TURN_START, encoded));
   }
 
   /** 模型回退的 turn 记录实际调用的型号；settings 保持 Thread 自己的设置。 */

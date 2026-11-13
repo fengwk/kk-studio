@@ -645,8 +645,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
       assertTrue(result.detailsJson().contains("\"kind\""));
       ToolResultMetadata metadata = toolPayload.toolResultMetadata();
       assertEquals(expectedStatus[i], metadata.status());
-      assertNotNull(metadata.binding());
-      assertEquals(originals.get(i).binding(), metadata.binding());
+      assertEquals(originals.get(i).binding().descriptor().name(), metadata.toolName());
       assertFalse(metadata.synthetic());
       assertNull(metadata.reason());
       assertEquals("call-" + (i + 1), metadata.toolCallId());

@@ -440,7 +440,9 @@ public final class ToolProcessorTestSupport {
                           null,
                           null,
                           new TurnCapabilities(
-                              modelRequest.toolBindings(),
+                              modelRequest.toolBindings().stream()
+                                  .map(binding -> binding.descriptor().name())
+                                  .toList(),
                               List.of(),
                               new TurnMediaCapabilities(
                                   Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
@@ -541,7 +543,9 @@ public final class ToolProcessorTestSupport {
                           null,
                           null,
                           new TurnCapabilities(
-                              modelRequest.toolBindings(),
+                              modelRequest.toolBindings().stream()
+                                  .map(binding -> binding.descriptor().name())
+                                  .toList(),
                               List.of(),
                               new TurnMediaCapabilities(
                                   Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),

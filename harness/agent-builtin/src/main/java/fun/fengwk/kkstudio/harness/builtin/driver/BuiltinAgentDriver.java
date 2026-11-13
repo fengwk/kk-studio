@@ -249,7 +249,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
         resolved.contextWindow(),
         maxOutputTokens,
         new TurnCapabilities(
-            spec.toolBindings(),
+            spec.toolBindings().stream().map(binding -> binding.descriptor().name()).toList(),
             spec.subagentBindings(),
             new TurnMediaCapabilities(
                 spec.model().inputModalities(),

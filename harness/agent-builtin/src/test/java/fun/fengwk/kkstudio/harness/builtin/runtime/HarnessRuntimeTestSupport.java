@@ -571,9 +571,9 @@ public final class HarnessRuntimeTestSupport {
 
   /** {@code ask_user} 的冻结问卷原文：一问单选 + 一问多选，用于覆盖答案覆盖度与顺序归一化。 */
   static final String ASK_USER_QUESTIONNAIRE =
-      "{\"questions\":["
-          + "{\"question\":\"which plan?\",\"options\":[{\"label\":\"fast\"},{\"label\":\"safe\",\"recommended\":true}]},"
-          + "{\"question\":\"which tracks?\",\"multiple\":true,\"options\":[{\"label\":\"a\"},{\"label\":\"b\"},{\"label\":\"c\"}]}"
+      "{\"questions\":[{\"question\":\"which"
+          + " plan?\",\"options\":[{\"label\":\"fast\"},{\"label\":\"safe\",\"recommended\":true}]},{\"question\":\"which"
+          + " tracks?\",\"multiple\":true,\"options\":[{\"label\":\"a\"},{\"label\":\"b\"},{\"label\":\"c\"}]}"
           + "]}";
 
   /** {@code ask_user} TOOL baseline：默认根 Thread、IDLE 状态与标准冻结问卷。 */
@@ -1130,7 +1130,8 @@ public final class HarnessRuntimeTestSupport {
   }
 
   static TurnCapabilities capabilities(ToolBinding... bindings) {
-    return new TurnCapabilities(List.of(bindings), List.of());
+    return new TurnCapabilities(
+        List.of(bindings).stream().map(binding -> binding.descriptor().name()).toList(), List.of());
   }
 
   static Entry userMessageEntry(UUID id, UUID sessionId, UUID parentId, Instant createdAt) {

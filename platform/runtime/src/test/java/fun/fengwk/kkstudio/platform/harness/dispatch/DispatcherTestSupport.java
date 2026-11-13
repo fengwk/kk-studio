@@ -211,7 +211,8 @@ final class DispatcherTestSupport {
                           16_384,
                           null,
                           null,
-                          new TurnCapabilities(List.of(toolRequest().binding()), List.of())),
+                          new TurnCapabilities(
+                              List.of(toolRequest().binding().descriptor().name()), List.of())),
                       NOW));
           tx.entries().insert(userEntry(userEntryId, sessionId, turnStartEntryId));
           // SUCCEEDED assistant 由同一 request/response 经 mapper 派生（strict attach 校验要求全等）：请求带 bash
