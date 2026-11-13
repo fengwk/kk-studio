@@ -287,6 +287,11 @@ func (c *ControlConnection) beginSend() error {
 	if c.sendClosed {
 		return net.ErrClosed
 	}
+	select {
+	case <-c.closed:
+		return net.ErrClosed
+	default:
+	}
 	c.activeSends++
 	return nil
 }
@@ -314,6 +319,11 @@ func (c *ControlConnection) finishControlHandler() {
 }
 
 func (c *ControlConnection) awaitControl(ctx context.Context) error {
+	select {
+	case <-c.closed:
+		return net.ErrClosed
+	default:
+	}
 	select {
 	case <-c.controlReady:
 		return nil

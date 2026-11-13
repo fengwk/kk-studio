@@ -370,8 +370,14 @@ func TestSingleConnListener_AcceptAndClose(t *testing.T) {
 // TRN-T-011
 func TestControlConnection_CloseBeforeControlWait(t *testing.T) {
 	cc := &ControlConnection{controlReady: make(chan struct{}), closed: make(chan struct{})}
+	close(cc.controlReady)
 	close(cc.closed)
 	if err := cc.awaitControl(context.Background()); !errors.Is(err, net.ErrClosed) {
 		t.Fatalf("closed wait error=%v", err)
+	}
+	cc.controlStream = &testStream{reader: bytes.NewReader(nil), writer: failingWriter{}}
+	envelope := &protocol.Envelope{MessageType: protocol.MessageType_ERROR, EnvironmentId: protoString(testEnvironment), Payload: &protocol.Envelope_Error{Error: &protocol.Error{Message: protoString("failure")}}}
+	if err := cc.Send(context.Background(), envelope); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("send after closed connection error=%v, want net.ErrClosed", err)
 	}
 }
