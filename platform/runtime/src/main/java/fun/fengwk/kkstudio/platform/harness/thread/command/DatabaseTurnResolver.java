@@ -356,6 +356,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
     List<MemberRuntime> members = new ArrayList<>(group.getMembers().size());
     List<ModelGroupMemberExecution> executions = new ArrayList<>(group.getMembers().size());
     Set<ModelInputModality> modalities = null;
+    boolean tools = true;
+    boolean reasoning = true;
+    boolean midConversationSystemMessages = true;
+    boolean messageLevelEffort = true;
     int contextWindow = Integer.MAX_VALUE;
     for (ModelGroupMemberDTO member : group.getMembers()) {
       Model memberModel =
@@ -370,6 +374,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
       executions.add(
           new ModelGroupMemberExecution(
               runtime.providerType(), runtime.descriptor(), runtime.variant()));
+      tools &= runtime.descriptor().tools();
+      reasoning &= runtime.descriptor().reasoning();
+      midConversationSystemMessages &= runtime.descriptor().midConversationSystemMessages();
+      messageLevelEffort &= runtime.descriptor().messageLevelEffort();
       if (modalities == null) {
         modalities = new LinkedHashSet<>(runtime.descriptor().inputModalities());
       } else {
@@ -387,10 +395,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
             groupModel.name(),
             first.modelId(),
             modalities,
-            first.tools(),
-            first.reasoning(),
-            first.midConversationSystemMessages(),
-            first.messageLevelEffort());
+            tools,
+            reasoning,
+            midConversationSystemMessages,
+            messageLevelEffort);
     ModelGroupExecution execution =
         new ModelGroupExecution(
             groupModel.name(),

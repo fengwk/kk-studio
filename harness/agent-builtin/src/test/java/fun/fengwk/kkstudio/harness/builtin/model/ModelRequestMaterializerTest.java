@@ -190,7 +190,14 @@ class ModelRequestMaterializerTest {
         new ModelRequestSpec(
             ProviderType.ANTHROPIC,
             new ModelDescriptor(
-                "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true),
+                "anthropic",
+                "model",
+                "model",
+                Set.of(ModelInputModality.TEXT),
+                true,
+                true,
+                true,
+                false),
             variant,
             1024,
             "[agent]\nnew",

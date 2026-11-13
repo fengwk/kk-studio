@@ -31,25 +31,6 @@ public record ModelDescriptor(
       String modelId,
       Set<ModelInputModality> inputModalities,
       boolean tools,
-      boolean reasoning,
-      boolean midConversationSystemMessages) {
-    this(
-        providerName,
-        modelName,
-        modelId,
-        inputModalities,
-        tools,
-        reasoning,
-        midConversationSystemMessages,
-        false);
-  }
-
-  public ModelDescriptor(
-      String providerName,
-      String modelName,
-      String modelId,
-      Set<ModelInputModality> inputModalities,
-      boolean tools,
       boolean reasoning) {
     this(providerName, modelName, modelId, inputModalities, tools, reasoning, false, false);
   }

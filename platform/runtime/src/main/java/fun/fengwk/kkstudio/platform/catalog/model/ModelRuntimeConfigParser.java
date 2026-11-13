@@ -381,29 +381,6 @@ public final class ModelRuntimeConfigParser {
       String defaultVariant,
       ModelPricing pricing) {
 
-    public ParsedAgentModelConfig(
-        long contextWindow,
-        long maxOutputTokens,
-        Set<ModelInputModality> inputModalities,
-        boolean tools,
-        boolean reasoning,
-        boolean midConversationSystemMessages,
-        List<ModelVariant> variants,
-        String defaultVariant,
-        ModelPricing pricing) {
-      this(
-          contextWindow,
-          maxOutputTokens,
-          inputModalities,
-          tools,
-          reasoning,
-          midConversationSystemMessages,
-          false,
-          variants,
-          defaultVariant,
-          pricing);
-    }
-
     public ParsedAgentModelConfig {
       inputModalities = Set.copyOf(inputModalities);
       variants = List.copyOf(variants);

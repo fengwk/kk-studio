@@ -2250,6 +2250,7 @@ class DatabaseTurnResolverTest {
             true,
             true,
             false,
+            false,
             List.of(new ModelVariant("fallback", null, PromptCacheRetention.NONE, null)),
             "fallback",
             pricing()));
@@ -2586,6 +2587,14 @@ class DatabaseTurnResolverTest {
         group.members().get(1).variant());
     assertEquals(group.members().get(1).variant(), resolved.spec().forMember(1).variant());
     assertEquals(Set.of(ModelInputModality.TEXT), resolved.spec().model().inputModalities());
+    assertFalse(resolved.spec().model().tools());
+    assertFalse(resolved.spec().model().reasoning());
+    assertFalse(resolved.spec().model().midConversationSystemMessages());
+    assertFalse(resolved.spec().model().messageLevelEffort());
+    assertTrue(group.members().getFirst().model().tools());
+    assertTrue(group.members().getFirst().model().reasoning());
+    assertTrue(group.members().getFirst().model().midConversationSystemMessages());
+    assertTrue(group.members().getFirst().model().messageLevelEffort());
     assertEquals(
         List.of("provider", "second-provider"),
         group.members().stream().map(member -> member.model().providerName()).toList());
@@ -2665,7 +2674,8 @@ class DatabaseTurnResolverTest {
                 Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
                 true,
                 true,
-                false,
+                true,
+                true,
                 List.of(
                     new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null),
                     new ModelVariant("deep", "max", PromptCacheRetention.NONE, null)),
@@ -2678,8 +2688,9 @@ class DatabaseTurnResolverTest {
             2048,
             256,
             secondModalities,
-            true,
-            true,
+            false,
+            false,
+            false,
             false,
             List.of(
                 new ModelVariant("fast", null, PromptCacheRetention.NONE, null),
@@ -3080,6 +3091,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   parsed.reasoning(),
                   false,
+                  false,
                   List.of(
                       new ModelVariant("default", null, promptCacheRetention, null),
                       new ModelVariant("custom", "medium", promptCacheRetention, null)),
@@ -3271,6 +3283,7 @@ class DatabaseTurnResolverTest {
                   tools,
                   parsed.reasoning(),
                   parsed.midConversationSystemMessages(),
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3292,6 +3305,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   parsed.reasoning(),
                   parsed.midConversationSystemMessages(),
+                  false,
                   List.of(new ModelVariant("default", null, PromptCacheRetention.NONE, null)),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3308,6 +3322,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   parsed.reasoning(),
                   supported,
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3324,6 +3339,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   reasoning,
                   parsed.midConversationSystemMessages(),
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3340,6 +3356,7 @@ class DatabaseTurnResolverTest {
           Set.of(ModelInputModality.TEXT),
           true,
           true,
+          false,
           false,
           List.of(defaultVariant, customVariant),
           "default",
