@@ -883,7 +883,9 @@ public final class ThreadProcessor {
       CompactionPreparation preparation =
           compactionPreparation(
               path, CompactionTrigger.THRESHOLD, required.conversationContextWindow());
-      if (preparation != null && !CompactionHistory.isImmediatePostCompactionRetry(path)) {
+      if (preparation != null
+          && thread.constraints().allowAutoCompaction()
+          && !CompactionHistory.isImmediatePostCompactionRetry(path)) {
         planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
         return;
       }
@@ -903,7 +905,7 @@ public final class ThreadProcessor {
       ThreadState thread,
       EntryPath path,
       Instant now) {
-    if (path.openTurnStart().isPresent()) {
+    if (path.openTurnStart().isPresent() || !thread.constraints().allowAutoCompaction()) {
       return false;
     }
     CompactionHistory.ClosedTurn latest = CompactionHistory.latestClosedTurn(path);

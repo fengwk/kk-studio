@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
@@ -145,6 +146,31 @@ class ThreadProcessorCompactionTriggerTest extends ThreadProcessorTestBase {
     TurnStartPayload start = assertInstanceOf(TurnStartPayload.class, path.head().payload());
     assertEquals(TurnStartReason.COMPACTION, start.reason());
     assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
+  }
+
+  /** 创建约束禁止自动压缩的 Thread 即使请求放不下也只失败，绝不启动压缩分支。 */
+  @Test
+  void autoCompactionDisabledThreadFailsOnBudgetPressureWithoutCompacting() {
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline =
+        seedCompactionReadyClosedTurn(
+            fixture.store, overThresholdUsage(), false, new ThreadConstraints(null, false));
+    UUID threadId = baseline.threadId();
+    seedCommand(
+        fixture.store, threadId, new UserMessageCommandPayload(userMessage("queued input")));
+    requestThreadWork(fixture.store, threadId);
+    fixture.resolver.results.add(new TurnResolver.CompactionRequired(CONTEXT_WINDOW));
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(threadId));
+
+    EntryPath path = path(fixture.store, threadId);
+    TurnEndPayload end = assertInstanceOf(TurnEndPayload.class, path.head().payload());
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
+    AssistantErrorPayload error =
+        assertInstanceOf(
+            AssistantErrorPayload.class, path.entries().get(path.entries().size() - 2).payload());
+    assertEquals("CONTEXT_LIMIT", error.error().code());
+    assertTrue(inTx(fixture, tx -> tx.threads().listChildren(threadId).isEmpty()).booleanValue());
   }
 
   /** 追加一个以 compact 成功回执结束、仍要求续作的普通 INPUT 回合。 */
