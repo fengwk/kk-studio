@@ -20,7 +20,7 @@ public final class GoDaemonBinary {
       configured = System.getenv("GO_BIN");
     }
     if (configured == null || configured.isBlank()) {
-      configured = "/usr/local/opt/go/bin/go";
+      configured = "go";
     }
     Path go = Path.of(configured);
     String version = run(go.toString(), "version").trim();
