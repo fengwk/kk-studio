@@ -62,6 +62,45 @@ test('canonical seed catalog preserves explicit options text and every other fie
   assert.equal(model.config.defaultVariant, 'high')
 })
 
+test('canonical seed catalog fills missing ability flags with false and preserves explicit values', () => {
+  // 公开读取契约总是返回新增能力；种子持久化形态允许省略，缺省语义为 false，显式声明值不得被覆盖。
+  const canonical = canonicalSeedCatalog([
+    {
+      provider: 'anthropic',
+      name: 'claude-fable-5',
+      config: {
+        abilities: { tools: true, reasoning: true, inputModalities: ['TEXT'] },
+        defaultVariant: 'max',
+        variants: [{ id: 'max', reasoningEffort: 'high', promptCacheRetention: 'SHORT' }],
+      },
+    },
+    {
+      provider: 'minimax-anthropic',
+      name: 'MiniMax-M3',
+      config: {
+        abilities: {
+          tools: true,
+          reasoning: true,
+          midConversationSystemMessages: true,
+          messageLevelEffort: true,
+          inputModalities: ['TEXT'],
+        },
+        defaultVariant: 'high',
+        variants: [{ id: 'high', reasoningEffort: 'high', promptCacheRetention: 'SHORT' }],
+      },
+    },
+  ])
+  assert.deepEqual(canonical[0].config.abilities, {
+    tools: true,
+    reasoning: true,
+    midConversationSystemMessages: false,
+    messageLevelEffort: false,
+    inputModalities: ['TEXT'],
+  })
+  assert.equal(canonical[1].config.abilities.midConversationSystemMessages, true)
+  assert.equal(canonical[1].config.abilities.messageLevelEffort, true)
+})
+
 test('canonical seed catalog does not mutate its input', () => {
   const input = [
     {

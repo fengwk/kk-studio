@@ -189,8 +189,10 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
       canvasMediaProcessTimeoutMillis: '60000',
       thumbnailMaxDimension: 1024,
       thumbnailQuality: 80,
+      imageTier: '720P',
       temporaryResourceTtlSeconds: '259200',
       temporaryResourceCleanupIntervalSeconds: '1800',
+      maxImagesPerRequest: 20,
     },
     advanced: {},
   }
@@ -227,13 +229,22 @@ test('settings contract accepts an empty existing HTTP retry list without mutati
 })
 
 test('tool catalog case accepts its public fields and rejects extra fields', async () => {
-  // 真实 case 检查工具目录形状，不允许未知成员绕过。
-  const entries = [{ name: 'read', description: 'fixture', environmentSupport: 'NONE' }]
+  // 真实 case 检查工具目录形状，不允许未知成员绕过；目录项的 provider 是独立的 {kind,id,name} 身份投影。
+  const entries = [{
+    name: 'read',
+    description: 'fixture',
+    environmentSupport: 'NONE',
+    provider: { kind: 'BUILTIN', id: 'builtin', name: 'Built-in' },
+  }]
   const run = (tools) => getCase('catalog.internal_tools_hidden').run({
     async call() { return { json: tools } },
   })
   await run(entries)
   await assert.rejects(run([{ ...entries[0], unexpected: true }]), /fields must be/)
+  await assert.rejects(
+    run([{ ...entries[0], provider: { ...entries[0].provider, unexpected: true } }]),
+    /fields must be/,
+  )
 })
 
 test('chat default environment case executes the create/replace/clear wire with full replacement', async () => {

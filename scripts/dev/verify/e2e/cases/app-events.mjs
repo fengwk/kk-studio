@@ -8,7 +8,7 @@ registerCase({
   id: 'events.heartbeat_keepalive',
   level: 'L1',
   title: '应用事件 WebSocket 周期 heartbeat 保活',
-  docs: '原生 WebSocket 直连 /ws/events，不建立资源订阅；验证首帧 connected 的 eventNodeId/connectionId，再等待严格 {type:"heartbeat"} 且连接保持打开',
+  docs: '原生 WebSocket 直连 /ws/events，不建立资源订阅；验证首帧 connected 的 eventNodeId/connectionId 与十进制正整数字符串 heartbeatIntervalMillis，再等待严格 {type:"heartbeat"} 且连接保持打开',
   async run(ctx) {
     const socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
     const startedAt = Date.now()
@@ -190,10 +190,19 @@ async function waitForHeartbeat(socket, timeoutMs) {
       }
       if (!connected) {
         try {
-          assertExactKeys(frame, ['type', 'eventNodeId', 'connectionId'], 'connected')
+          assertExactKeys(
+            frame,
+            ['type', 'eventNodeId', 'connectionId', 'heartbeatIntervalMillis'],
+            'connected',
+          )
           const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
           assert(frame.type === 'connected'
             && uuid.test(frame.eventNodeId) && uuid.test(frame.connectionId), 'invalid connected identity')
+          assert(
+            typeof frame.heartbeatIntervalMillis === 'string'
+              && /^[1-9][0-9]*$/.test(frame.heartbeatIntervalMillis),
+            `invalid connected heartbeatIntervalMillis: ${JSON.stringify(frame.heartbeatIntervalMillis)}`,
+          )
           connected = true
         } catch (error) {
           cleanup()

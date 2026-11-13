@@ -104,17 +104,21 @@ export function basePricing(overrides = {}) {
 }
 
 export function baseModelConfig(overrides = {}) {
+  const { abilities, ...rest } = overrides
   return {
     limit: { context: 4096, output: 512 },
     abilities: {
       tools: true,
       reasoning: false,
+      midConversationSystemMessages: false,
+      messageLevelEffort: false,
       inputModalities: ['TEXT'],
+      ...abilities,
     },
     pricing: basePricing(),
     defaultVariant: 'default',
     variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
-    ...overrides,
+    ...rest,
   }
 }
 
@@ -133,16 +137,23 @@ export function seedCatalogWithVariants(models, variantsByName) {
 }
 
 /**
- * 把种子目录（持久化形态：variant 允许省略 `protocolOptionsJson`）规范化为公开读取契约的 canonical 形态。
+ * 把种子目录（持久化形态：variant 允许省略 `protocolOptionsJson`，abilities 允许省略新增能力）规范化为公开读取契约的
+ * canonical 形态。
  *
  * <p>产品读取路径（`ModelRuntimeConfigParser`）对每个 variant 统一返回 `protocolOptionsJson` 字符串，其中 null / 空选项
- * 等价于 `{}`；既有选项文本原样保留，其它字段一概不改写、不丢弃。
+ * 等价于 `{}`；abilities 的新增布尔能力在持久化缺省时公开为 false，显式声明值原样保留；其它字段一概不改写、不丢弃。
  */
 export function canonicalSeedCatalog(models) {
   return models.map((model) => ({
     ...model,
     config: {
       ...model.config,
+      abilities: {
+        ...model.config.abilities,
+        midConversationSystemMessages:
+          model.config.abilities?.midConversationSystemMessages ?? false,
+        messageLevelEffort: model.config.abilities?.messageLevelEffort ?? false,
+      },
       variants: model.config.variants.map((variant) => ({
         ...variant,
         protocolOptionsJson: variant.protocolOptionsJson ?? '{}',

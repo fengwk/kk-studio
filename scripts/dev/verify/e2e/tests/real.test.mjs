@@ -14,7 +14,7 @@ import {
   assertProviderUsageAlgebra,
   DEFAULT_BUILTIN_MODEL_ID,
   collectTaskToolResults,
-  taskAcceptedThreadId,
+  taskResultDetails,
   delegatedChildFacts,
   resolveBuiltinModelDef,
   sanitizeArtifact,
@@ -920,9 +920,19 @@ test('委派子 Thread 必须指回发起父且 ROOT payload 只有 settings', (
   )
 })
 
-test('task 即时回执与诊断摘要只读真实 entry payload，错误码可见', () => {
-  // 测试意图：失败时 artifacts 必须能区分「模型没调用 task」与「产品没记录回执/回合报错」，
-  // 因此摘要要投影 role/tool 名/文本前缀/assistant 错误码，而回执只认 MESSAGE + TOOL + tool_result{toolName:"task"}。
+test('task 同步结果 detailsJson 与诊断摘要只读真实 entry payload，错误码可见', () => {
+  // 测试意图：失败时 artifacts 必须能区分「模型没调用 task」与「产品没记录结果/回合报错」，
+  // 因此摘要要投影 role/tool 名/assistant 错误码；同步 task 结果只认 tool_result.detailsJson 的当前契约。
+  const threadId = '12345678-1234-1234-1234-123456789abc'
+  const sessionId = '22345678-1234-1234-1234-123456789abc'
+  const details = {
+    kind: 'task.result',
+    thread_id: threadId,
+    session_id: sessionId,
+    status: 'completed',
+    subagent_type: 'child-agent',
+    replayed: false,
+  }
   const entries = [
     {
       entryId: 'e1',
@@ -941,10 +951,8 @@ test('task 即时回执与诊断摘要只读真实 entry payload，错误码可�
               toolName: 'task',
               rendererKey: 'task',
               error: false,
-              contents: [{
-                type: 'text',
-                text: 'Task accepted. thread_id: 12345678-1234-1234-1234-123456789abc.\nThe subagent runs asynchronously.',
-              }],
+              detailsJson: JSON.stringify(details),
+              contents: [{ type: 'text', text: 'SUBAGENT-E2E-marker' }],
             },
           ],
         },
@@ -956,16 +964,18 @@ test('task 即时回执与诊断摘要只读真实 entry payload，错误码可�
   const results = collectTaskToolResults(entries)
   assert.equal(results.length, 1)
   assert.equal(results[0].rendererKey, 'task')
-  assert.equal(
-    taskAcceptedThreadId(results[0].contents[0].text),
-    '12345678-1234-1234-1234-123456789abc',
-  )
+  assert.deepEqual(taskResultDetails(results[0]), details)
   for (const invalid of [
-    '{"thread_id":"12345678-1234-1234-1234-123456789abc","status":"accepted"}',
-    'Task accepted. thread_id: not-a-uuid.\n',
-    'Task accepted. thread_id: 12345678123412341234123456789abc.\n',
+    { ...results[0], detailsJson: undefined },
+    { ...results[0], detailsJson: 'not-json' },
+    { ...results[0], detailsJson: JSON.stringify({ ...details, kind: 'other' }) },
+    { ...results[0], detailsJson: JSON.stringify({ ...details, thread_id: 'not-a-uuid' }) },
+    { ...results[0], detailsJson: JSON.stringify({ ...details, session_id: 'not-a-uuid' }) },
+    { ...results[0], detailsJson: JSON.stringify({ ...details, status: '' }) },
+    { ...results[0], detailsJson: JSON.stringify({ ...details, subagent_type: '' }) },
+    { ...results[0], detailsJson: JSON.stringify({ ...details, replayed: 'false' }) },
   ]) {
-    assert.throws(() => taskAcceptedThreadId(invalid), /canonical/)
+    assert.throws(() => taskResultDetails(invalid), /task result|canonical/)
   }
 
   const summary = summarizeThreadHistory(entries)

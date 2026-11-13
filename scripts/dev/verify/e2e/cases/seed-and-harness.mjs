@@ -211,7 +211,7 @@ registerCase({
   id: 'catalog.internal_tools_hidden',
   level: 'L1',
   title: '内部 HOST Tool 不进入 Agent 可选目录',
-  docs: 'GET /api/platform/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools',
+  docs: 'GET /api/platform/tools 只返回 SELECTABLE Tool；load_skill/task 由 skills/subagents 派生激活，不能直接写入 Agent config.tools；每条目录项精确为 name/description/environmentSupport/provider，provider 精确为 kind/id/name',
   async run(ctx) {
     const tools = (await ctx.call('GET', '/api/platform/tools')).json
     assert(Array.isArray(tools), JSON.stringify(tools))
@@ -219,7 +219,12 @@ registerCase({
     assert(!names.includes('load_skill'), `load_skill must be internal: ${JSON.stringify(names)}`)
     assert(!names.includes('task'), `task must be internal: ${JSON.stringify(names)}`)
     for (const tool of tools) {
-      assertExactFields(tool, ['name', 'description', 'environmentSupport'], 'Tool catalog entry')
+      assertExactFields(
+        tool,
+        ['name', 'description', 'environmentSupport', 'provider'],
+        'Tool catalog entry',
+      )
+      assertExactFields(tool.provider, ['kind', 'id', 'name'], 'Tool catalog entry provider')
     }
   },
 })
@@ -1924,7 +1929,7 @@ registerCase({
   id: 'thread_tree.query_contract',
   level: 'L1',
   title: 'Agent 关系树最小只读投影',
-  docs: 'GET /api/harness/threads/{id}/tree：真实根 parentThreadId 与未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；updatedAt 为只读的 Thread 权威更新时刻且与 Thread 快照一致；缺失 Agent 确定性失败，无真实 Provider 调用',
+  docs: 'GET /api/harness/threads/{id}/tree：节点精确投影 threadId/kind/parentThreadId/name/agentName/execution/status/executionControl/turnCount/toolCallCount/outcome/updatedAt；真实根 kind=USER 与 parentThreadId 可空，未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；updatedAt 为只读的 Thread 权威更新时刻且与 Thread 快照一致；缺失 Agent 确定性失败，无真实 Provider 调用',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -1950,10 +1955,13 @@ registerCase({
       const root = nodes[0]
       assertExactFields(
         root,
-        ['threadId', 'parentThreadId', 'name', 'agentName', 'execution', 'status', 'executionControl', 'turnCount', 'toolCallCount', 'outcome', 'updatedAt'],
+        ['threadId', 'kind', 'parentThreadId', 'name', 'agentName', 'execution', 'status', 'executionControl', 'turnCount', 'toolCallCount', 'outcome', 'updatedAt'],
         'HarnessThreadTreeNodeDTO',
       )
-      assert(root.threadId === threadId && root.parentThreadId === null, JSON.stringify(root))
+      assert(
+        root.threadId === threadId && root.kind === 'USER' && root.parentThreadId === null,
+        JSON.stringify(root),
+      )
       assert(root.status === 'IDLE' && root.executionControl === 'RUNNABLE', JSON.stringify(root))
       assert(root.outcome === 'FAILED' && root.turnCount === 1 && root.toolCallCount === 0, JSON.stringify(root))
       assert(isDeepStrictEqual(root.execution, before.thread.branchSettings.execution), JSON.stringify(root))
