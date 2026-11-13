@@ -39,6 +39,9 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptMaterialization;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupMemberExecution;
+import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
@@ -517,6 +520,37 @@ class ModelAttemptMaterializationTest {
     }
   }
 
+  @Test
+  void validatesStoredEffortFromGroupMemberAndOffAsNull() {
+    ModelInvocation group = successfulEffortInvocation(true);
+    Entry groupResult = effortResult(group, "high");
+    assertDoesNotThrow(
+        () ->
+            ModelAttemptMaterialization.validate(
+                group, group.attachResultEntry(groupResult.id(), T6), inputPath(groupResult)));
+    Entry missingGroupEffort = effortResult(group, null);
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                group,
+                group.attachResultEntry(missingGroupEffort.id(), T6),
+                inputPath(missingGroupEffort)));
+
+    ModelInvocation off = successfulEffortInvocation(false);
+    Entry offResult = effortResult(off, null);
+    assertDoesNotThrow(
+        () ->
+            ModelAttemptMaterialization.validate(
+                off, off.attachResultEntry(offResult.id(), T6), inputPath(offResult)));
+    Entry explicitOff = effortResult(off, "off");
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ModelAttemptMaterialization.validate(
+                off, off.attachResultEntry(explicitOff.id(), T6), inputPath(explicitOff)));
+  }
+
   /** attach 转换的普通成功结果必须完整等于 mapper 重放的 assistant payload。 */
   @Test
   void acceptsExactSuccessResultAndRejectsDrift() {
@@ -607,6 +641,84 @@ class ModelAttemptMaterializationTest {
         "a COMPACTION turn must not have model invocations; compaction runs in a child runtime"
             + " thread",
         error.getMessage());
+  }
+
+  private static ModelInvocation successfulEffortInvocation(boolean group) {
+    ModelGroupExecution groupExecution = null;
+    ModelGroupProgress groupProgress = null;
+    ModelVariant selectedVariant =
+        new ModelVariant("selected", group ? "low" : "off", PromptCacheRetention.NONE, null);
+    if (group) {
+      groupExecution =
+          new ModelGroupExecution(
+              "group",
+              1,
+              List.of(
+                  new ModelGroupMemberExecution(
+                      ProviderType.OPENAI,
+                      modelDescriptor("first"),
+                      new ModelVariant("first", "medium", PromptCacheRetention.NONE, null)),
+                  new ModelGroupMemberExecution(
+                      ProviderType.OPENAI,
+                      modelDescriptor("second"),
+                      new ModelVariant("second", "high", PromptCacheRetention.NONE, null))),
+              Set.of(),
+              0);
+      groupProgress = new ModelGroupProgress("group", 1, 1, 0);
+    }
+    ModelRequestSpec request =
+        new ModelRequestSpec(
+            ProviderType.OPENAI,
+            modelDescriptor(group ? "group" : "model"),
+            selectedVariant,
+            1024,
+            "Test system instruction.",
+            List.of(),
+            List.of(),
+            groupExecution,
+            Map.of("system", "Test system instruction."));
+    ProviderResponse response =
+        new ProviderResponse(
+            "complete",
+            null,
+            List.of(),
+            GenerationStopReason.COMPLETE,
+            usage(),
+            "request-id",
+            null,
+            null);
+    return new ModelInvocation(
+        id(10L),
+        id(20L),
+        id(2L),
+        id(3L),
+        request,
+        ModelInvocationStatus.SUCCEEDED,
+        1,
+        null,
+        response,
+        null,
+        null,
+        List.of(),
+        T2,
+        T6,
+        groupProgress,
+        T3);
+  }
+
+  private static Entry effortResult(ModelInvocation invocation, String effort) {
+    return new Entry(
+        id(4L),
+        id(100L),
+        id(3L),
+        new BuiltinHistoryPayloadMapper()
+            .assistantPayload(
+                invocation.result(),
+                invocation.requestSpec().toolBindings(),
+                invocation.actualSelection(),
+                invocation.requestedAt(),
+                effort),
+        T6);
   }
 
   /** SUCCEEDED compaction invocation：requestHead = TURN_START id(2)，result = 固定摘要文本快照。 */
@@ -752,8 +864,11 @@ class ModelAttemptMaterializationTest {
   }
 
   private static ModelDescriptor modelDescriptor() {
-    return new ModelDescriptor(
-        "provider", "model", "model", Set.of(ModelInputModality.TEXT), true, true);
+    return modelDescriptor("model");
+  }
+
+  private static ModelDescriptor modelDescriptor(String name) {
+    return new ModelDescriptor("provider", name, name, Set.of(ModelInputModality.TEXT), true, true);
   }
 
   /**
