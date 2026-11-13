@@ -139,7 +139,7 @@ class AnthropicThinkingTest {
     assertEquals("adaptive", turn1WireRoot.path("thinking").path("type").asString(""));
     assertEquals("summarized", turn1WireRoot.path("thinking").path("display").asString(""));
     assertEquals("high", turn1WireRoot.path("output_config").path("effort").asString(""));
-    assertEquals(List.of("mid-conversation-output-config-2026-07-01"), encodedTurn1.betaFeatures());
+    assertEquals(List.of(), encodedTurn1.betaFeatures());
     assertFalse(
         turn1WireRoot.path("thinking").has("budget_tokens"),
         "kk-studio uses adaptive thinking without budget_tokens");

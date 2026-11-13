@@ -40,12 +40,12 @@ class AnthropicBetaFeaturesTest {
       new ModelDescriptor(
           "anthropic", "model", "model", Set.of(ModelInputModality.TEXT), true, true, true, false);
 
-  // 显式 adaptive effort 必须继续附加消息级控制所需 beta。
+  // 顶层 effort 本身不需要消息级 beta；关闭 effort 同样不发送 beta。
   @Test
-  void includesEffortBetasOnlyWhenEffortEnabled() {
+  void topLevelEffortDoesNotRequireMessageLevelBetas() {
     AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
     assertEquals(
-        List.of("mid-conversation-output-config-2026-07-01"),
+        List.of(),
         encoder
             .encode(
                 request(new ModelVariant("v", "high", PromptCacheRetention.NONE, null)), DESCRIPTOR)

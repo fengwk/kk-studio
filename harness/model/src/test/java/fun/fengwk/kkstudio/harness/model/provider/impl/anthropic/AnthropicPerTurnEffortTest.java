@@ -167,15 +167,16 @@ class AnthropicPerTurnEffortTest {
 
   @Test
   void modelsWithoutCapabilityKeepCurrentTopLevelEffortAndDoNotBindThinking() {
-    JsonNode root =
-        body(
-            encode(
-                MODEL_WITHOUT_MESSAGE_LEVEL_EFFORT,
-                "low",
-                List.of(user("u"), assistant("high"), user("tail"))));
+    AnthropicEncodedRequest encoded =
+        encode(
+            MODEL_WITHOUT_MESSAGE_LEVEL_EFFORT,
+            "low",
+            List.of(user("u"), assistant("high"), user("tail")));
+    JsonNode root = body(encoded);
 
     assertEquals("low", root.path("output_config").path("effort").asString());
     assertFalse(root.path("thinking").has("block_binding"));
+    assertEquals(List.of(), encoded.betaFeatures());
     assertEquals(List.of("user", "assistant", "user"), describe(root.path("messages")));
   }
 
