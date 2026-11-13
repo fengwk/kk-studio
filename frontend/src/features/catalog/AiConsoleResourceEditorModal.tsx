@@ -139,7 +139,6 @@ export function ResourceEditorModal({
             <AgentForm
               draft={agentDraft}
               mode={modal.mode}
-              agentType={modal.type}
               models={models}
               agents={agents}
               toolCatalog={toolCatalog}

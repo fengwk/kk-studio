@@ -1,6 +1,5 @@
 import type { CatalogVersion } from '@/shared/api/contracts/base'
 import type {
-  AgentType,
   ModelDTO,
   ModelInputModality,
   ModelPricingDTO,
@@ -114,13 +113,10 @@ export type ResourceModal =
       name: string
       expectedVersion: CatalogVersion
     }
-  | { kind: 'agent'; mode: 'create'; type: AgentType }
+  | { kind: 'agent'; mode: 'create' }
   | {
       kind: 'agent'
       mode: 'edit'
       name: string
-      /** 系统持有的 identity 类型；前端据此保护删除等动作，不随请求发送。 */
-      type: AgentType
-      model: string | null
       expectedVersion: CatalogVersion
     }

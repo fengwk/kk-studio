@@ -401,9 +401,9 @@ AI feature 维护 Catalog、Chat、Environment、MCP、Skill 和 Thread 工作�
 Provider → Model → Agent → Chat 的首次使用引导并链接到对应页面，已有可用 Agent 时不再查询。
 新建 Model 时可从已保存的 Provider 拉取上游模型 ID 作为 Model ID 候选，Name 默认跟随 Model ID，
 上游失败时就地展示状态与原因。
-Agent 目录按读 DTO 的 `type` 展示 `USER` / `BUILTIN` 徽标：内置定义的名称与删除受保护。
-表单选择 execution Driver，当前提供 Builtin 的模型与 Variant 配置；内置定义允许未配置
-execution，用户创建的 Agent 必须配置。无法编辑的其他 Driver 保留原始 settings，不静默改写。
+Agent 目录不区分所有权类型：每个 Agent 都可编辑与删除。表单选择 execution Driver，当前提供
+Builtin 的模型与 Variant 配置，Agent 必须配置 execution。无法编辑的其他 Driver 保留原始
+settings，不静默改写。
 Model 目录在同一列表中区分 `MODEL` 与 `GROUP`，二者共用全局逻辑名称空间；Group 表单按顺序维护
 Fill First 成员，并编辑 `fallbackStatusCodes`（HTTP 400–599，可为空）与 `cooldownSeconds`
 （非负，0 表示仅本次降级）。单模型表单编辑 `modelId`、limit、abilities、variants 与结构化

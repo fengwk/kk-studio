@@ -155,23 +155,15 @@ select pg_temp.assert_true('group kind accepts only group config',
         from model
         where name = 'probe-group' and kind = 'GROUP'));
 
--- Catalog ownership and explicit unconfigured built-in models are database facts.
-select pg_temp.assert_true('user agent is the default ownership',
-    (select type = 'USER' from agent where name = 'designer'));
-insert into agent (name, type, config)
-    values ('probe-builtin', 'BUILTIN', '{}');
-select pg_temp.assert_true('built-in agent accepts unconfigured execution',
-    (select execution is null
-        from agent where name = 'probe-builtin'));
-select pg_temp.rejects('unknown agent ownership is rejected',
-    $$insert into agent(name,type,execution,config)
-      values('probe-unknown','ROOT','{"driver":"x","settings":{}}','{}')$$,
-    '23514', 'ck_agent_type');
+-- Agent rows carry no ownership column: every Agent is user-owned and may stay unconfigured.
+insert into agent (name, config) values ('probe-unconfigured', '{}');
+select pg_temp.assert_true('agent accepts unconfigured execution',
+    (select execution is null from agent where name = 'probe-unconfigured'));
 select pg_temp.assert_true('agent stores builtin execution',
     (select execution -> 'settings' ->> 'modelName' = 'fixture' from agent where name = 'designer'));
 select pg_temp.rejects('execution requires object settings',
-    $$insert into agent(name,type,execution,config)
-      values('probe-invalid','BUILTIN','{"driver":"x","settings":null}','{}')$$,
+    $$insert into agent(name,execution,config)
+      values('probe-invalid','{"driver":"x","settings":null}','{}')$$,
     '23514', 'ck_agent_execution_shape');
 select pg_temp.rejects('execution rejects extra fields',
     $$insert into agent(name,execution,config)

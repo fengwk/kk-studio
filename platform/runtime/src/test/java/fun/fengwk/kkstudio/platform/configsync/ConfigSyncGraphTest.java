@@ -25,15 +25,11 @@ import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncRef;
 
 import java.util.List;
-import java.util.Set;
 
 /** 测试意图：锁定依赖图的一次性构图、传递闭包去重与循环终止，以及导出的严格校验（空选择/未知引用/缺失依赖都必须拒绝，不产出不完整包）。 */
 class ConfigSyncGraphTest {
 
   private static final String PLUGIN_ID = "acme.plugin";
-
-  /** 合成系统内置 Agent 名称：只从快照的内置集合里读取，测试不依赖任何真实内置身份。 */
-  private static final String BUILTIN_AGENT = "Compaction";
 
   private final ConfigSyncGraph graph =
       new ConfigSyncGraph(
@@ -58,7 +54,6 @@ class ConfigSyncGraphTest {
         List.of(provider("p")),
         List.of(model("p", "m")),
         agents,
-        Set.of(),
         List.of(),
         List.of(),
         List.of(),
@@ -232,65 +227,14 @@ class ConfigSyncGraphTest {
                 prepared, List.of(new ConfigSyncRef(ConfigSyncKind.PLUGINS, PLUGIN_ID))));
   }
 
-  /** 插件声明的 Agent 是系统内置 Agent 时视为已由系统满足：不产生边、不进 portable 闭包，导出不失败。 */
+  /** subagent 不在快照中即视为缺失依赖，导出必须拒绝。 */
   @Test
-  void builtinAgentDeclarationIsSatisfiedWithoutPortableDependency() {
-    ConfigSyncGraph pluginGraph = pluginGraph();
-    ConfigSyncSnapshot snapshot =
-        snapshotWithPlugins(
-            List.of(provider("p")),
-            List.of(model("p", "m")),
-            List.of(),
-            Set.of(BUILTIN_AGENT),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(
-                ConfigSyncFixtures.pluginRow(
-                    PLUGIN_ID, 3L, "{\"promptAgentName\":\"" + BUILTIN_AGENT + "\"}")));
-    ConfigSyncGraph.Graph prepared = pluginGraph.graph(snapshot);
-
-    assertEquals(
-        List.of(), prepared.edges().get(new ConfigSyncRef(ConfigSyncKind.PLUGINS, PLUGIN_ID)));
-    assertEquals(
-        List.of(new ConfigSyncRef(ConfigSyncKind.PLUGINS, PLUGIN_ID)),
-        pluginGraph.expand(
-            prepared, List.of(new ConfigSyncRef(ConfigSyncKind.PLUGINS, PLUGIN_ID))));
-  }
-
-  /** 自定义 Agent 把系统内置 Agent 当 subagent：同样视为已满足，导出该 Agent 不因内置身份失败。 */
-  @Test
-  void builtinSubagentIsSatisfiedForCustomAgents() {
-    ConfigSyncSnapshot snapshot =
-        snapshotWithPlugins(
-            List.of(provider("p")),
-            List.of(model("p", "m")),
-            List.of(agent("a", "m", agentConfig(List.of(), List.of(), List.of(BUILTIN_AGENT)))),
-            Set.of(BUILTIN_AGENT),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of(),
-            List.of());
-    ConfigSyncGraph.Graph prepared = graph.graph(snapshot);
-
-    List<ConfigSyncRef> expanded =
-        graph.expand(prepared, List.of(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
-
-    assertTrue(expanded.contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
-    assertFalse(expanded.contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, BUILTIN_AGENT)));
-  }
-
-  /** 内置豁免不放宽其它缺失依赖：不在内置集合里的 subagent 缺失仍拒绝导出。 */
-  @Test
-  void nonBuiltinMissingSubagentStillRejectsExport() {
+  void missingSubagentRejectsExport() {
     ConfigSyncSnapshot snapshot =
         snapshotWithPlugins(
             List.of(provider("p")),
             List.of(model("p", "m")),
             List.of(agent("a", "m", agentConfig(List.of(), List.of(), List.of("ghost")))),
-            Set.of(BUILTIN_AGENT),
             List.of(),
             List.of(),
             List.of(),
@@ -301,22 +245,6 @@ class ConfigSyncGraphTest {
     assertThrows(
         DomainException.class,
         () -> graph.expand(prepared, List.of(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a"))));
-  }
-
-  /** 系统内置 Agent 既不出现在条目集合里，也不可被显式选择。 */
-  @Test
-  void builtinAgentsAreNeverPortableItems() {
-    ConfigSyncGraph.Graph prepared = graph.graph(builtinSubagentSnapshot());
-
-    assertFalse(
-        prepared.present().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, BUILTIN_AGENT)));
-    assertFalse(
-        prepared.allRefs().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, BUILTIN_AGENT)));
-    assertThrows(
-        DomainException.class,
-        () ->
-            graph.expand(
-                prepared, List.of(new ConfigSyncRef(ConfigSyncKind.AGENTS, BUILTIN_AGENT))));
   }
 
   /** 插件拒绝自身普通配置是已知输入边界：统一收敛为固定去敏校验失败，不回显配置值也不串联 cause。 */
@@ -345,19 +273,6 @@ class ConfigSyncGraphTest {
     assertThrows(IllegalStateException.class, () -> failingGraph.graph(pluginSnapshot("h3", true)));
   }
 
-  private static ConfigSyncSnapshot builtinSubagentSnapshot() {
-    return snapshotWithPlugins(
-        List.of(provider("p")),
-        List.of(model("p", "m")),
-        List.of(agent("a", "m", agentConfig(List.of(), List.of(), List.of(BUILTIN_AGENT)))),
-        Set.of(BUILTIN_AGENT),
-        List.of(),
-        List.of(),
-        List.of(),
-        List.of(),
-        List.of());
-  }
-
   /** settings 不持有任何 Agent 引用：它仍是可同步条目，但依赖闭包为空、不反向扩展 Agent。 */
   @Test
   void settingsCarriesNoAgentReference() {
@@ -366,7 +281,6 @@ class ConfigSyncGraphTest {
             List.of(),
             List.of(),
             List.of(agent("standalone", "m", agentConfig(List.of(), List.of(), List.of()))),
-            Set.of(),
             List.of(),
             List.of(),
             List.of(),

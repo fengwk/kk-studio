@@ -1048,65 +1048,6 @@ registerCase({
   },
 })
 
-registerCase({
-  id: 'crud.agent.builtin_identity',
-  level: 'L1',
-  title: '内置 Compaction Agent identity 只读与改名/删除拒绝',
-  docs: 'GET /api/platform/agents 必含内置 Compaction：type=BUILTIN，execution 字段显式输出；PUT 携带由系统持有的 name 字段 => 400；DELETE => 409；拒绝后 identity/version 不变',
-  async run(ctx) {
-    const agents = listResults(
-      (await ctx.call('GET', '/api/platform/agents')).json,
-    )
-    const compaction = agents.find((agent) => agent.name === 'Compaction')
-    assert(
-      compaction,
-      `builtin Compaction Agent must be listed: ${JSON.stringify(agents.map((a) => a.name))}`,
-    )
-    assert(compaction.type === 'BUILTIN', JSON.stringify(compaction))
-    // execution 字段恒在；已配置时检查 builtin 模型引用。
-    assert(
-      Object.hasOwn(compaction, 'execution'),
-      `builtin execution field must be present: ${JSON.stringify(compaction)}`,
-    )
-    if (compaction.execution?.driver === 'builtin') {
-      modelSelectionFor(compaction)
-    }
-    // 改名：name 由系统持有，不在可编辑请求体中，携带即被严格反序列化拒绝（写入前失败）。
-    for (const identity of [{ name: 'compaction-renamed' }, { type: 'USER' }]) {
-      await expectHttpError(
-        () =>
-        ctx.call('PUT', '/api/platform/agents/Compaction', {
-          ...identity,
-          description: compaction.description,
-          systemPrompt: compaction.systemPrompt,
-          execution: compaction.execution,
-          config: compaction.config,
-          expectedVersion: String(compaction.version),
-        }),
-        { status: 400, code: 'validation' },
-      )
-    }
-    // 删除：内置 Agent 的名称与存在性由系统持有。
-    await expectHttpError(
-      () =>
-        ctx.call(
-          'DELETE',
-          `/api/platform/agents/Compaction?expectedVersion=${encodeURIComponent(compaction.version)}`,
-        ),
-      { status: 409, code: 'in_use' },
-    )
-    // 拒绝后 identity/version 严格不变。
-    const after = listResults(
-      (await ctx.call('GET', '/api/platform/agents')).json,
-    ).find((agent) => agent.name === 'Compaction')
-    assert(
-      after && after.type === 'BUILTIN' && String(after.version) === String(compaction.version),
-      `builtin Compaction identity must be unchanged: ${JSON.stringify({ before: compaction, after })}`,
-    )
-  },
-})
-
-
 /** 由 builtin Agent execution 构造 selection。 */
 function modelSelectionFor(agent) {
   const { modelName, variant } = agent.execution?.settings || {}

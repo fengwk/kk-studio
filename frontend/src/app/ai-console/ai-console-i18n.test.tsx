@@ -30,7 +30,6 @@ const agent: AgentDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
-  type: 'USER',
   execution: { driver: 'builtin', settings: { modelName: 'm1', variant: 'default' } },
   config: {
     tools: [],

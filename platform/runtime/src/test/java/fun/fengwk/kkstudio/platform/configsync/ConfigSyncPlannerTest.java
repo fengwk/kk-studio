@@ -48,7 +48,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /**
  * 测试意图：锁定 Planner 的依赖判定与外部准备——MCP 发现失败必须 skip 当前 MCP 及依赖 Agent、disabled MCP 保存配置且不发起发现、
@@ -79,9 +78,6 @@ class ConfigSyncPlannerTest {
   }
 
   private static final String PLUGIN_ID = "acme.plugin";
-
-  /** 合成系统内置 Agent 名称：只来自快照的内置集合，测试不依赖任何真实内置身份。 */
-  private static final String BUILTIN_AGENT = "Compaction";
 
   private static ConfigSyncFixtures.AgentDependencyPlugin syntheticPlugin() {
     return new ConfigSyncFixtures.AgentDependencyPlugin(PLUGIN_ID);
@@ -545,7 +541,6 @@ class ConfigSyncPlannerTest {
                 List.of(),
                 List.of(),
                 List.of(),
-                Set.of(),
                 List.of(),
                 List.of(),
                 List.of(),
@@ -839,7 +834,6 @@ class ConfigSyncPlannerTest {
                 List.of(
                     ConfigSyncFixtures.agent(
                         "h3", "m", agentConfig(List.of(), List.of(), List.of()))),
-                Set.of(),
                 List.of(),
                 List.of(),
                 List.of(),
@@ -866,7 +860,6 @@ class ConfigSyncPlannerTest {
                 List.of(provider("p")),
                 List.of(model("p", "m")),
                 List.of(),
-                Set.of(),
                 List.of(),
                 List.of(),
                 List.of(),
@@ -893,7 +886,6 @@ class ConfigSyncPlannerTest {
                 List.of(
                     ConfigSyncFixtures.agent(
                         "a", "m", agentConfig(List.of(), List.of(), List.of()))),
-                Set.of(),
                 List.of(),
                 List.of(),
                 List.of(),
@@ -921,71 +913,6 @@ class ConfigSyncPlannerTest {
     assertEquals("missing agent: a", reason(plan.skipped(), "plugins", PLUGIN_ID));
   }
 
-  /** 插件声明的 Agent 是系统内置 Agent 时视为已由系统满足：不 skip，插件按计划写入。 */
-  @Test
-  void pluginDependingOnBuiltinAgentIsPlanned() {
-    when(snapshotReader.read())
-        .thenReturn(
-            snapshotWithPlugins(
-                List.of(provider("p")),
-                List.of(model("p", "m")),
-                List.of(),
-                Set.of(BUILTIN_AGENT),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(
-                    ConfigSyncFixtures.pluginRow(
-                        PLUGIN_ID, 7L, "{\"promptAgentName\":\"" + BUILTIN_AGENT + "\"}"))));
-    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-
-    ConfigSyncPlan plan = pluginPlanner().plan(pluginParser().parse(pluginEntry(BUILTIN_AGENT)));
-
-    assertEquals(
-        List.of(
-            new ConfigSyncPlan.PluginImport(
-                PLUGIN_ID, 7L, "{\"promptAgentName\":\"" + BUILTIN_AGENT + "\"}")),
-        plan.plugins());
-    assertTrue(plan.skipped().isEmpty());
-  }
-
-  /** 自定义 Agent 把系统内置 Agent 当 subagent：内置身份满足依赖，Agent 不会被 skip。 */
-  @Test
-  void agentSubagentBuiltinIsSatisfiedByTheSystem() {
-    when(snapshotReader.read())
-        .thenReturn(
-            snapshotWithPlugins(
-                List.of(provider("p")),
-                List.of(model("p", "m")),
-                List.of(),
-                Set.of(BUILTIN_AGENT),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of(),
-                List.of()));
-    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
-    when(toolCatalog.findTool(anyString())).thenReturn(Optional.empty());
-
-    ConfigSyncPlan plan =
-        plan(
-            "providers:\n  - name: p\n    providerType: openai\n"
-                + ConfigSyncFixtures.documentYaml(
-                    Map.of(
-                        "agents",
-                        List.of(
-                            agent(
-                                "a",
-                                "m",
-                                "default",
-                                ConfigSyncFixtures.agentConfig(
-                                    List.of(), List.of(), List.of(BUILTIN_AGENT)))))));
-
-    assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.AGENTS, "a")));
-    assertTrue(plan.skipped().isEmpty());
-  }
-
   /** 插件拒绝自身普通配置是已知输入边界：计划必须硬失败，绝不降级为 skip，也不回显配置值。 */
   @Test
   void pluginDeclarationInputErrorFailsThePlan() {
@@ -995,7 +922,6 @@ class ConfigSyncPlannerTest {
                 List.of(provider("p")),
                 List.of(model("p", "m")),
                 List.of(),
-                Set.of(),
                 List.of(),
                 List.of(),
                 List.of(),
@@ -1022,7 +948,6 @@ class ConfigSyncPlannerTest {
                 List.of(provider("p")),
                 List.of(model("p", "m")),
                 List.of(),
-                Set.of(),
                 List.of(),
                 List.of(),
                 List.of(),

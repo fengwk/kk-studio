@@ -93,8 +93,8 @@ health、资源下载和 WebSocket 使用各自传输形式。业务路由按所
 | Environment IDE | `/api/ide/environments/{id}/views`、`/ide/{environmentId}/{viewId}/` | 打开/关闭视图、切换目录与终端；同源 IDE 固定入口、bootstrap 票据与 HTTP/WebSocket 数据面 |
 | Environment Daemon | `/ws/daemon` | Daemon 准入裁决与 WebSocket 升级端点，承载控制与数据传输 |
 
-Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`。用户 Agent 必须配置，
-内置 Agent 可显式为 null；当前 `builtin` 的 settings 为 `{modelName, variant}`。
+Agent 的创建、完整 PUT 和读取使用 `execution: {driver, settings}`，且必须配置；
+当前 `builtin` 的 settings 为 `{modelName, variant}`。
 Driver、模型与 Variant 的校验和引用事务见 [Platform Catalog](platform.md#catalog)。
 
 `POST /api/chat/chats`、`PUT /api/chat/chats/{chatId}` 与 `PUT /api/chat/chats/{chatId}/yolo` 的字段语义见 [Chat](chat.md)。

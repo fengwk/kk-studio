@@ -18,7 +18,6 @@ function agent(name: string, description: string | null): AgentDTO {
     name,
     description,
     systemPrompt: null,
-    type: 'USER',
     execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: null } },
     config: { tools: [], skills: [], subagents: [] },
     version: '1',

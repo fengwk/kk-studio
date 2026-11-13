@@ -153,7 +153,6 @@ describe('AI domain utilities', () => {
         name: 'assistant',
         description: 'desc',
         systemPrompt: 'prompt',
-        type: 'USER',
         execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
         config: {
           tools: ['search'],
@@ -325,7 +324,6 @@ describe('AI domain utilities', () => {
         name: 'assistant',
         description: 'Cloud agent',
         systemPrompt: null,
-        type: 'USER' as const,
         execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
         config: {
           tools: [],
@@ -393,7 +391,7 @@ describe('AI domain utilities', () => {
 
     expect(resourceTitle({ kind: 'provider', mode: 'create' })).toBe('新建 Provider')
     expect(resourceTitle({ kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'MiniMax-M2.7', expectedVersion: '1' })).toBe('编辑 Model')
-    expect(resourceTitle({ kind: 'agent', mode: 'create', type: 'USER' })).toBe('新建 Agent')
+    expect(resourceTitle({ kind: 'agent', mode: 'create' })).toBe('新建 Agent')
   })
 
   /** 可为空的 optional 资源字段映射为完整的可编辑草稿。 */
@@ -434,7 +432,6 @@ describe('AI domain utilities', () => {
         name: 'fallback-agent',
         description: null,
         systemPrompt: null,
-        type: 'USER',
         execution: { driver: 'builtin', settings: { modelName: 'gpt-5.4', variant: 'default' } },
         config: {
           tools: [],

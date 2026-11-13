@@ -14,7 +14,6 @@ const DEFERRED_OUTPUT_FIXTURE = fileURLToPath(
 
 const FREE_L1_CASES = [
   'crud.provider.http_retry_override',
-  'crud.agent.builtin_identity',
   'crud.chat.default_environment',
   'settings.system_contract_cas',
 ]

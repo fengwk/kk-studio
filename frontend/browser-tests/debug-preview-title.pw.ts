@@ -190,7 +190,6 @@ async function installPreviewApiMock(
       if (path === '/api/platform/agents') {
         const results = options.agentSelection ? ['coder', 'broken-agent'].map((name) => ({
           name,
-          type: 'USER',
           execution: { driver: 'builtin', settings: { modelName: name === 'coder' ? 'Claude' : 'missing-model', variant: 'fast' } },
           config: { tools: [], skills: [], subagents: [] },
           version: '1',

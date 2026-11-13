@@ -69,7 +69,6 @@ function agent(
     name: 'root',
     description: null,
     systemPrompt: null,
-    type: 'USER',
     execution: createBuiltinExecution('model', null),
     config: {
       tools,

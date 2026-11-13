@@ -1,5 +1,4 @@
 import { ResourceCardLayout } from '@/features/catalog/AiResourceCardLayout'
-import { Badge } from '@/shared/ui/data/Badge'
 import {
   formatModelLabel,
 } from '@/features/catalog/model-labels'
@@ -9,7 +8,7 @@ import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 
 /**
  * Agent 展示实际生效的 model + variant：显式 override 优先，否则使用 model 的 defaultVariant。model 未加载且没有
- * override 时标注未解析，不编造 variant。BUILTIN 的 null model 明确显示未配置，
+ * override 时标注未解析，不编造 variant。缺模型引用时明确显示未配置，
  * 不回退父模型或 catalog 中的第一个 model。
  */
 function formatEffectiveModel(
@@ -57,19 +56,12 @@ export function AgentResourceCard({
   const tools = agent.config.tools
   const skillTags = (agent.config.skills ?? []).map((s) => `${s.packageName} / ${s.name}`)
   const subagents = agent.config.subagents
-  // identity 保护只看系统类型，不按名称硬编码：任何 BUILTIN 都不可删除，普通 USER 与之无差别。
-  const builtin = agent.type === 'BUILTIN'
 
   return (
     <ResourceCardLayout
       icon="agent"
       title={agent.name}
       subtitle={agent.description || agent.systemPrompt || agent.name}
-      badge={
-        builtin ? (
-          <Badge tone="neutral">{t('ai.catalog.card.builtinBadge')}</Badge>
-        ) : undefined
-      }
       rows={[
         [t(agent.execution && agent.execution.driver !== 'builtin'
           ? 'ai.catalog.form.executionDriver'
@@ -81,7 +73,6 @@ export function AgentResourceCard({
       onEdit={onEdit}
       onDelete={onDelete}
       deletePending={deletePending}
-      deleteDisabled={builtin}
     />
   )
 }

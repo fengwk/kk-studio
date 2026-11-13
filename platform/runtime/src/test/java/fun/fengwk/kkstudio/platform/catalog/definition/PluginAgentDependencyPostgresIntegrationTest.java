@@ -420,7 +420,6 @@ class PluginAgentDependencyPostgresIntegrationTest {
     Agent agent =
         Agent.builder()
             .name(name)
-            .type(AgentType.USER)
             .systemPrompt("prompt " + name)
             .execution(BuiltinExecution.of(ModelSelection.model(MODEL_NAME, null)))
             .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")

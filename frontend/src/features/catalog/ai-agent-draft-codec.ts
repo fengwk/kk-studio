@@ -124,37 +124,30 @@ export function toEditableAgent(draft: AgentDraft): AgentCreateDTO {
     name,
     description: trimToNull(draft.description),
     systemPrompt: trimToNull(draft.systemPrompt),
-    execution: draftExecution(draft, false),
+    execution: draftExecution(draft),
     config: toConfig(draft),
   }
 }
 
-function draftExecution(draft: AgentDraft, allowUnconfigured: boolean) {
+function draftExecution(draft: AgentDraft) {
   if (draft.execution && draft.execution.driver !== 'builtin') {
     return draft.execution
   }
   const model = draft.model.trim()
   if (!model) {
-    if (allowUnconfigured) {
-      return null
-    }
     throw new Error('model must not be blank')
   }
   return createBuiltinExecution(model, trimToNull(draft.variant))
 }
 
-/**
- * 构建 Agent PUT 请求体。`BUILTIN` 允许未配置模型（写入 null）；`USER` 仍要求非空模型引用。
- * 请求体只包含可编辑字段，绝不携带系统持有的 `type`。
- */
+/** 构建 Agent PUT 请求体；请求体只包含可编辑字段。 */
 export function toEditableAgentUpdate(
   draft: AgentDraft,
-  allowUnconfiguredModel = false,
 ): Omit<AgentUpdateDTO, 'expectedVersion'> {
   return {
     description: trimToNull(draft.description),
     systemPrompt: trimToNull(draft.systemPrompt),
-    execution: draftExecution(draft, allowUnconfiguredModel),
+    execution: draftExecution(draft),
     config: toConfig(draft),
   }
 }

@@ -622,7 +622,6 @@ function agent(): AgentDTO {
     name: 'default-assistant',
     description: 'Cloud agent',
     systemPrompt: 'You are helpful',
-    type: 'USER' as const,
     execution: { driver: 'builtin', settings: { modelName: 'acceptance-stub', variant: 'default' } },
     config: {
       tools: [],

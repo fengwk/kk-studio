@@ -50,7 +50,6 @@ const agents: AgentDTO[] = [
     name: 'assistant',
     description: null,
     systemPrompt: null,
-    type: 'USER',
     execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
     config: {
       tools: [],
@@ -65,7 +64,6 @@ const agents: AgentDTO[] = [
     name: 'coder',
     description: null,
     systemPrompt: null,
-    type: 'USER',
     execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
     config: {
       tools: [],

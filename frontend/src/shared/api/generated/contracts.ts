@@ -30,7 +30,6 @@ export interface AgentCreateDTO {
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO */
 export interface AgentDTO {
   name: string
-  type: AgentType
   description?: string | null
   systemPrompt?: string | null
   execution: HarnessExecutionSelectionDTO | null
@@ -39,16 +38,6 @@ export interface AgentDTO {
   createdAt: number
   updatedAt: number
 }
-
-/** Java：fun.fengwk.kkstudio.platform.catalog.definition.AgentType */
-export type AgentType =
-  | 'USER'
-  | 'BUILTIN'
-
-export const AGENT_TYPE_VALUES: readonly AgentType[] = [
-  'USER',
-  'BUILTIN',
-]
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.AgentUpdateDTO */
 export interface AgentUpdateDTO {

@@ -18,7 +18,6 @@ const agentWithEnv: AgentDTO = {
   name: 'assistant',
   description: null,
   systemPrompt: null,
-  type: 'USER',
   execution: { driver: 'builtin', settings: { modelName: 'minimax/MiniMax', variant: 'default' } },
   config: {
     tools: [],

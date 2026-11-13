@@ -21,16 +21,15 @@ public class AgentRepository {
   private static final ObjectMapper MAPPER = HarnessJson.STRICT_DECIMAL;
 
   private static final String COLUMNS =
-      "name, type, description, system_prompt, execution, config,"
-          + " version, created_at, updated_at";
+      "name, description, system_prompt, execution, config, version, created_at, updated_at";
 
   private static final String INSERT_SQL =
       """
       insert into agent (
-          name, type, description, system_prompt, execution, config,
+          name, description, system_prompt, execution, config,
           created_at, updated_at, version
       ) values (
-          :name, :type, :description, :systemPrompt, cast(:executionJson as jsonb),
+          :name, :description, :systemPrompt, cast(:executionJson as jsonb),
           cast(:configJson as jsonb), current_timestamp, current_timestamp, 0
       )
       """;
@@ -49,7 +48,6 @@ public class AgentRepository {
       (rs, rowNum) ->
           new Agent(
               rs.getString("name"),
-              AgentType.valueOf(rs.getString("type")),
               rs.getString("description"),
               rs.getString("system_prompt"),
               decodeExecution(rs.getString("execution")),
@@ -126,7 +124,6 @@ public class AgentRepository {
     return jdbcClient
             .sql(INSERT_SQL)
             .param("name", agent.name())
-            .param("type", agent.type().name())
             .param("description", agent.description())
             .param("systemPrompt", agent.systemPrompt())
             .param("executionJson", encodeExecution(agent.execution()))

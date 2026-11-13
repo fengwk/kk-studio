@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -14,11 +13,6 @@ import org.springframework.test.annotation.DirtiesContext;
 import tools.jackson.databind.JsonNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
-import fun.fengwk.kkstudio.platform.catalog.definition.AgentType;
-import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncApplier;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser;
@@ -49,9 +43,6 @@ import java.util.Set;
 @DirtiesContext(classMode = DirtiesContext.ClassMode.AFTER_EACH_TEST_METHOD)
 class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
-  /** 系统持有身份的 Agent 名：由测试直接写入 BUILTIN 行，生产启动不再创建任何内置 Agent。 */
-  private static final String SYSTEM_AGENT = "system-agent";
-
   /** 本用例独享的一次性 provider 名；每个用例前都重置数据库，因此固定名不会互相干扰。 */
   private static final String CAS_PROVIDER = "plugin-sync-cas-provider";
 
@@ -63,7 +54,6 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
   @Autowired private ConfigSyncSnapshotReader snapshotReader;
   @Autowired private PluginManagementService pluginManagementService;
   @Autowired private DataSource dataSource;
-  @Autowired private AgentRepository definitionRepository;
 
   /** inventory 与导出把已安装插件当第八类，且 portable 条目只含 pluginId 与 valuesJson。 */
   @SuppressWarnings("unchecked")
@@ -175,80 +165,6 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     assertFalse(
         providerNames(after).contains(CAS_PROVIDER),
         "the earlier provider write must be rolled back when the plugin version CAS fails");
-  }
-
-  /**
-   * 意图：系统内置 Agent 绝不导出、绝不出现在 inventory、也不允许被覆盖，但它的存在必须满足引用依赖。
-   *
-   * <p>subagent 指向真实内置 Agent 的自定义 Agent 能正常 inventory、导出与重新导入；portable 文件里只有这一个自定义 Agent 条目。
-   */
-  @Test
-  void builtinAgentSatisfiesReferencesWithoutBecomingPortable() throws Exception {
-    // 系统内置 Agent 由系统持有身份：测试按同类身份落一行真实 BUILTIN 行，绝不把它当作可同步条目。
-    seedBuiltinAgent(SYSTEM_AGENT);
-    String agent = "builtin-dep-agent";
-    createBuiltinDependentAgent(agent);
-
-    JsonNode items = getData("/api/platform/config-sync").path("items");
-    assertNotNull(findItem(items, "agents", agent));
-    assertNull(
-        findItem(items, "agents", SYSTEM_AGENT),
-        "a builtin agent must never be a selectable inventory item");
-
-    JsonNode exported =
-        postData(
-            "/api/platform/config-sync/export",
-            Map.of("items", List.of(Map.of("kind", "agents", "name", agent))));
-    String yaml = exported.path("yaml").asText();
-    assertEquals(
-        List.of(agent),
-        agentNames(parseYaml(yaml)),
-        "only the selected custom agent may be exported; the builtin subagent must not become an item");
-
-    JsonNode result =
-        postData("/api/platform/config-sync/import", Map.of("yaml", yaml, "allowPartial", true));
-    assertTrue(references(result.path("imported")).contains("agents/" + agent));
-    assertTrue(references(result.path("skipped")).isEmpty());
-  }
-
-  /** 以系统持有身份落一行 BUILTIN Agent：只用于证明内置身份满足引用却绝不进入 portable 范围。 */
-  private void seedBuiltinAgent(String name) {
-    Agent builtin =
-        Agent.builder()
-            .name(name)
-            .type(AgentType.BUILTIN)
-            .systemPrompt("builtin prompt")
-            .configJson("{\"tools\":[],\"skills\":[],\"subagents\":[]}")
-            .build();
-    definitionRepository.create(builtin);
-  }
-
-  /** 建一个 subagent 指向系统内置 Agent 的自定义 Agent：内置身份必须满足该引用。 */
-  private void createBuiltinDependentAgent(String name) throws Exception {
-    AgentConfigDTO config = new AgentConfigDTO();
-    config.setTools(List.of());
-    config.setSkills(List.of());
-    config.setSubagents(List.of(SYSTEM_AGENT));
-
-    AgentCreateDTO dto = new AgentCreateDTO();
-    dto.setName(name);
-    dto.setDescription("agent " + name);
-    dto.setSystemPrompt("prompt " + name);
-    dto.setExecution(execution("acceptance-stub", "default"));
-    dto.setConfig(config);
-    postData("/api/platform/agents", dto);
-  }
-
-  /** 导出文档里的 Agent 条目名，用于断言内置身份没有变成独立条目。 */
-  @SuppressWarnings("unchecked")
-  private static List<String> agentNames(Map<String, Object> document) {
-    List<Map<String, Object>> agents =
-        (List<Map<String, Object>>) document.getOrDefault("agents", List.of());
-    List<String> names = new ArrayList<>();
-    for (Map<String, Object> entry : agents) {
-      names.add((String) entry.get("name"));
-    }
-    return names;
   }
 
   /** 已安装插件的 pluginId 到权威普通值原文；只取真实存在配置投影的插件。 */

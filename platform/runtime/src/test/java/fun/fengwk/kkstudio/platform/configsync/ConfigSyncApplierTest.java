@@ -378,7 +378,7 @@ class ConfigSyncApplierTest {
     verify(pluginConfigurationService, never()).configure(anyString(), anyLong(), any(), any());
   }
 
-  /** 意图：依赖池里的既有（含系统内置）Agent 满足插件依赖；重检按稳定顺序去重，每个名称只锁一次。 */
+  /** 意图：依赖池里的既有 Agent 满足插件依赖；重检按稳定顺序去重，每个名称只锁一次。 */
   @Test
   void pluginAgentDependenciesAcceptExistingAgentsInStableOrder() {
     when(definitionRepository.getByNameForUpdate(anyString()))
