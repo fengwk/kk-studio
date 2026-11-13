@@ -20,6 +20,7 @@ import (
 
 	udiff "github.com/aymanbagabas/go-udiff"
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
+	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
 const (
@@ -101,19 +102,19 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	if call.ExpectedFile != nil && (call.ExpectedFile.Path != path || call.ExpectedFile.SHA256 != hash) {
 		return errorResult(call.InvocationID, rejectInput(staleWriteReviewMessage)), nil
 	}
-	decoded, err := DecodeText(original)
-	if err != nil {
-		return errorResult(call.InvocationID, failRun(err.Error(), "CODEC")), nil
+	decoded, existing, decodeErr := textcodec.Decode(path, original)
+	if decodeErr != nil {
+		return errorResult(call.InvocationID, codecError(path, decodeErr, codecEdit)), nil
 	}
-	source := newEditSource(decoded.Text)
+	source := newEditSource(string(decoded))
 	replacements, err := planEdits(path, source, args.Edits)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	updated := applyEdits(decoded.Text, source, replacements)
-	encoded, err := EncodeText(updated, decoded.Charset, decoded.BOMBytes)
+	updated := applyEdits(string(decoded), source, replacements)
+	encoded, err := encodeEditContent(path, existing, updated)
 	if err != nil {
-		return errorResult(call.InvocationID, failRun(err.Error(), "CODEC")), nil
+		return errorResult(call.InvocationID, err), nil
 	}
 	if bytes.Equal(encoded, original) {
 		return errorResult(call.InvocationID, rejectInput("No changes to apply: the edits would not change the file")), nil

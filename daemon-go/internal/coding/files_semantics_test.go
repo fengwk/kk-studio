@@ -1,64 +1,18 @@
 package coding
 
 import (
-	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
 
-// COD-F-003, COD-T-222
-func TestFileTextCodecPreservesBOMAndRejectsMalformedUTF16(t *testing.T) {
-	for _, test := range []struct {
-		name string
-		data []byte
-		want string
-	}{
-		{name: "utf8-bom", data: []byte{0xef, 0xbb, 0xbf, 'h', 'i'}, want: "hi"},
-		{name: "utf16le-bom", data: []byte{0xff, 0xfe, 'h', 0, 'i', 0}, want: "hi"},
-		{name: "utf16be-bom", data: []byte{0xfe, 0xff, 0, 'h', 0, 'i'}, want: "hi"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			got, err := decodeFileText(test.data)
-			if err != nil || got != test.want {
-				t.Fatalf("text=%q err=%v", got, err)
-			}
-		})
-	}
-	for _, malformed := range [][]byte{{0xff, 0xfe, 'a'}, {0xff, 0xfe, 0x00, 0xd8}, {0xfe, 0xff, 0xdc, 0x00}, {0xff, 0xfe, 0, 0, 0, 0xd8, 0, 0}} {
-		if _, err := decodeFileText(malformed); err == nil || err.Error() != "file appears to be binary" {
-			t.Fatalf("expected malformed UTF16 rejection for %x, got %v", malformed, err)
-		}
-	}
-}
-
-// COD-F-003
-func TestFileTextEncodeRetainsCharsetAndRejectsInvalidInput(t *testing.T) {
-	for _, test := range []struct {
-		charset string
-		bom     []byte
-		want    []byte
-	}{
-		{charset: "UTF-8", bom: []byte{0xef, 0xbb, 0xbf}, want: []byte{0xef, 0xbb, 0xbf, 'x'}},
-		{charset: "UTF-16LE", bom: []byte{0xff, 0xfe}, want: []byte{0xff, 0xfe, 'x', 0}},
-		{charset: "UTF-16BE", bom: []byte{0xfe, 0xff}, want: []byte{0xfe, 0xff, 0, 'x'}},
-	} {
-		got, err := encodeFileText("x", test.charset, len(test.bom))
-		if err != nil || !bytes.Equal(got, test.want) {
-			t.Fatalf("charset=%s bytes=%x err=%v", test.charset, got, err)
-		}
-	}
-	if _, err := encodeFileText("x", "unknown", 0); err == nil || !strings.Contains(err.Error(), "losslessly encoded") {
-		t.Fatalf("unsupported charset err=%v", err)
-	}
-}
-
+// COD-F-003: write surfaces the exact charset and stable CODEC error for unencodable text.
 // COD-F-003: write surfaces the exact charset and stable CODEC error for unencodable text.
 func TestWriteEncodingFailureIncludesCharsetAndCodecCode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid.txt")
 	_, err := Write(path, string([]byte{0xff}), nil)
-	if err == nil || err.Error() != "text cannot be losslessly encoded in charset UTF-8" {
+	if err == nil || err.Error() != "The new text cannot be encoded in UTF-8: \"\ufffd\" (U+FFFD) on line 1." {
 		t.Fatalf("write encoding error=%v", err)
 	}
 	result := toCapabilityErrorResult("invalid-write", err)

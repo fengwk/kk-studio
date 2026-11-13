@@ -8,7 +8,7 @@ import (
 // COD-F-003
 func TestTextCodecRejectsMalformedEncodingAndUnsupportedCharsets(t *testing.T) {
 	for _, data := range [][]byte{{0xff, 0xfe, 0x41}, {0xff, 0xfe, 0x00, 0xdc}, {0xfe, 0xff, 0xdc, 0x00}} {
-		if _, err := DecodeText(data); err == nil || err.Error() != "file appears to be binary" {
+		if _, _, err := decodeFixture(data); err == nil || !strings.Contains(err.Error(), "not valid UTF-16") {
 			t.Fatalf("malformed UTF-16 %x error=%v", data, err)
 		}
 	}
@@ -21,7 +21,7 @@ func TestTextCodecRejectsMalformedEncodingAndUnsupportedCharsets(t *testing.T) {
 		{"text", "UNKNOWN", 0},
 		{"text", "UNKNOWN", 1},
 	} {
-		if _, err := EncodeText(test.text, test.charset, test.bom); err == nil || !strings.Contains(err.Error(), "text cannot be losslessly encoded") {
+		if _, err := encodeFixture(test.text, test.charset, test.bom); err == nil || !strings.Contains(err.Error(), "cannot be encoded in") && !strings.Contains(err.Error(), "unknown encoding") {
 			t.Fatalf("charset=%s bom=%d error=%v", test.charset, test.bom, err)
 		}
 	}
@@ -38,7 +38,7 @@ func TestEncodeTextRestoresEachSupportedBOM(t *testing.T) {
 		{"UTF-16LE", 2, []byte{0xff, 0xfe}},
 		{"UTF-16BE", 2, []byte{0xfe, 0xff}},
 	} {
-		data, err := EncodeText("A", test.charset, test.bom)
+		data, err := encodeFixture("A", test.charset, test.bom)
 		if err != nil || !strings.HasPrefix(string(data), string(test.prefix)) {
 			t.Fatalf("charset=%s data=%x err=%v", test.charset, data, err)
 		}

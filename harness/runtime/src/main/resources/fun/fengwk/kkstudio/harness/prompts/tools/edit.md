@@ -2,13 +2,15 @@ Perform exact text replacements in one text file. One call can carry any number 
 
 Usage:
 - Prefer using `read` before editing an existing text file so you can copy the exact current text.
-- `read` text output starts with a small header (`path`, `range`, and `ends_with_newline` only when the read reaches EOF), then a blank line, then numbered body lines in `number|content` form.
+- `read` text output starts with a small header (`path`, `encoding` only when the file is not plain UTF-8, `ends_with_newline` only when the read reaches EOF, and `range`), then a blank line, then numbered body lines in `number|content` form.
 - When copying text from `read`, use only the file content after the first `|` on each numbered line. Never include the number column or the `|` itself in `old_string` or `new_string`.
 - For long lines, `read` returns exact bounded fragments without truncation markers inside the body. Copy the unique fragment directly from the numbered body into `old_string`. To inspect subsequent parts of a long line, pass `column_offset` to `read`.
 - If `read` reports `ends_with_newline: yes`, remember that the file ends with a newline, even though `read` does not add an extra numbered blank line to represent it.
 - Prefer `edit` for existing text files. Use `write` for new files or intentional whole-file replacement.
 - `edit` keeps the file's encoding, BOM and existing line-ending style. Matching happens on a
-  newline-normalized view, so CRLF/CR/LF spelling alone is not a change.
+  newline-normalized view, so CRLF/CR/LF spelling alone is not a change. An edit that would
+  change the effective encoding is rejected: keep the file's declaration as it is, or use `write`
+  with the complete content to convert the file.
 - `edit` supports regular text files only. Directories, devices, FIFOs and binary files are
   rejected before any write.
 - Put all independent changes to one file into one call, one `edits` entry per change. Every entry matches the original file content, not the result of earlier entries, and entries must not overlap.

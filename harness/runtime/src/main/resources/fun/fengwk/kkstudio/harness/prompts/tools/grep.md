@@ -11,6 +11,7 @@ Usage:
 - To search an ignored directory, pass that directory as `path`; rules from above it then no longer apply. A file passed directly as `path` is always searched.
 - If no matches are found because ignore rules skipped entries, the result adds a hint such as `[No matches. Not searched because of ignore rules: /repo/node_modules/, /repo/.env.local, … and N more]` (up to 10 absolute paths).
 - When `path` is a single binary file, `grep` returns a clear error instead of binary output.
+- `grep` matches decoded text, so BOM-marked and declared files (for example UTF-16 or GBK) match the characters you see in `read`, and reported line numbers equal `read`'s. Binary files are skipped silently. Files whose text encoding cannot be determined are skipped and listed at the end, such as `[Not searched because the text encoding could not be determined: /repo/notes.txt, … and 2 more]` (up to 10 absolute paths).
 - `pattern` is a regular expression by default; use `literal=true` for exact text.
 - `glob` uses the same glob rules as `find` and cannot re-include ignored files.
 - A pattern that contains an actual newline, a `\\n` escape, or `(?s)` with `.` can match across lines.

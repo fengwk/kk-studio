@@ -41,7 +41,7 @@ func TestEditReviewRejectsChangedHashWithoutWriting(t *testing.T) {
 
 func TestEditUTF16ReviewPreservesBOMCRLFAndExpectedHash(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "utf16.txt")
-	original, err := EncodeText("第一行\r\n第二行\r\n第三行\r\n", "UTF-16LE", 2)
+	original, err := encodeFixture("第一行\r\n第二行\r\n第三行\r\n", "UTF-16LE", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,9 +87,9 @@ func TestEditUTF16ReviewPreservesBOMCRLFAndExpectedHash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := DecodeText(written)
-	if err != nil || decoded.Charset != "UTF-16LE" || decoded.BOMBytes != 2 || decoded.Text != "第一行\r\n修改行\r\n第三行\r\n" {
-		t.Fatalf("decoded=%#v err=%v", decoded, err)
+	decoded, encoding, err := decodeFixture(written)
+	if err != nil || encoding.Name != "UTF-16LE" || !encoding.BOM || decoded != "第一行\r\n修改行\r\n第三行\r\n" {
+		t.Fatalf("decoded=%q encoding=%#v err=%v", decoded, encoding, err)
 	}
 }
 

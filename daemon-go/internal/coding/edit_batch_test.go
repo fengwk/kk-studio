@@ -254,7 +254,7 @@ func TestEditMixedLineEndingsUseSpanBreak(t *testing.T) {
 // BOM and UTF-16 encoding survive a call with several entries.
 func TestEditPreservesBOMAndUTF16AcrossEntries(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "utf16.txt")
-	original, err := EncodeText("one\r\ntwo\r\nthree\r\n", "UTF-16LE", 2)
+	original, err := encodeFixture("one\r\ntwo\r\nthree\r\n", "UTF-16LE", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -268,12 +268,12 @@ func TestEditPreservesBOMAndUTF16AcrossEntries(t *testing.T) {
 	if result.Error {
 		t.Fatalf("edit failed: %#v", result)
 	}
-	decoded, err := DecodeText([]byte(readEditFile(t, path)))
+	decoded, encoding, err := decodeFixture([]byte(readEditFile(t, path)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Charset != "UTF-16LE" || decoded.BOMBytes != 2 || decoded.Text != "ONE\r\ntwo\r\nTHREE\r\n" {
-		t.Fatalf("decoded=%#v", decoded)
+	if encoding.Name != "UTF-16LE" || !encoding.BOM || decoded != "ONE\r\ntwo\r\nTHREE\r\n" {
+		t.Fatalf("decoded=%q encoding=%#v", decoded, encoding)
 	}
 }
 

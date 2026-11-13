@@ -2,14 +2,17 @@ package coding
 
 import (
 	"bytes"
+	"errors"
 	"strconv"
 	"strings"
 	"testing"
+
+	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
 // COD-T-099, COD-T-102: decoding keeps UTF-8 code points and UTF-16 surrogate pairs intact across tiny reads.
 func TestReadTextWindowReaderPreservesMultibyteCharactersAcrossChunks(t *testing.T) {
-	utf16Data, err := EncodeText("a中😀\n", "UTF-16LE", 2)
+	utf16Data, err := encodeFixture("a中😀\n", "UTF-16LE", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +118,7 @@ func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
 		{0xed, 0xa0, 0x80}, {0xf4, 0x90, 0x80, 0x80},
 	}
 	for _, data := range sequences {
-		if _, err := DecodeText(data); err == nil {
+		if _, _, err := decodeFixture(data); err == nil {
 			t.Errorf("DecodeText accepted malformed UTF-8 %x", data)
 		}
 		if _, err := ReadTextWindowReader(bytes.NewReader(data), WindowOptions{Offset: 1, Limit: 1}); err == nil {
@@ -128,50 +131,45 @@ func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
 			}
 		}
 	}
-	if _, err := EncodeText(string([]byte{0xed, 0xa0, 0x80}), "UTF-8", 0); err == nil {
+	if _, err := encodeFixture(string([]byte{0xed, 0xa0, 0x80}), "UTF-8", 0); err == nil {
 		t.Fatal("EncodeText accepted a surrogate-encoded invalid UTF-8 string")
 	}
 }
 
 // COD-T-221: decoding removes the BOM from text while retaining charset and BOM byte count.
 func TestDecodeTextReportsUTF8BOM(t *testing.T) {
-	decoded, err := DecodeText([]byte{0xef, 0xbb, 0xbf, 'a'})
-	if err != nil || decoded.Text != "a" || decoded.Charset != "UTF-8" || decoded.BOMBytes != 3 {
-		t.Fatalf("decoded=%#v err=%v", decoded, err)
+	text, decoded, err := decodeFixture([]byte{0xef, 0xbb, 0xbf, 'a'})
+	if err != nil || text != "a" || decoded.Name != "UTF-8" || !decoded.BOM {
+		t.Fatalf("text=%q encoding=%#v err=%v", text, decoded, err)
 	}
 }
 
 // COD-T-225: legal UTF-8 boundary code points decode without normalization.
 func TestTextCodecAcceptsUTF8BoundaryCodePoints(t *testing.T) {
 	want := string([]rune{0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xe000, 0xffff, 0x10000, 0x10ffff})
-	got, err := DecodeText([]byte(want))
-	if err != nil || got.Text != want {
-		t.Fatalf("decoded=%q want=%q err=%v", got.Text, want, err)
+	got, _, err := decodeFixture([]byte(want))
+	if err != nil || got != want {
+		t.Fatalf("decoded=%q want=%q err=%v", got, want, err)
 	}
 }
 
-// COD-T-228…231: binary controls, the 8192-byte probe boundary, and UTF-16 exemption.
-func TestBinaryProbeBoundaryAndUTF16Allowance(t *testing.T) {
-	allowed := []byte("hello\tworld\r\n\f\x1b")
-	if LooksBinary(allowed, false) {
-		t.Fatal("allowed text controls were classified as binary")
+// COD-T-228…231: only NUL is binary, the probe window is 8000 bytes, and control characters
+// are text.
+func TestBinaryProbeBoundaryAndControlCharacters(t *testing.T) {
+	if _, _, err := textcodec.Decode("/repo/controls.txt", []byte("hello\tworld\r\n\f\x1b\x01\x1f")); err != nil {
+		t.Fatalf("control characters were classified as binary: %v", err)
 	}
-	for _, b := range []byte{0x00, 0x01, 0x08, 0x0e, 0x1f} {
-		if !LooksBinary([]byte{b}, false) {
-			t.Errorf("control byte %02x was not classified as binary", b)
-		}
+	inside := bytes.Repeat([]byte{'a'}, 8000)
+	inside[7999] = 0
+	if _, _, err := textcodec.Decode("/repo/nul.txt", inside); !errors.Is(err, textcodec.ErrBinary) {
+		t.Fatalf("NUL within the probe window: err=%v", err)
 	}
-	inside := bytes.Repeat([]byte{'a'}, 8192)
-	inside[8191] = 0
-	if !LooksBinary(inside, false) {
-		t.Fatal("control byte within the probe window was missed")
+	outside := bytes.Repeat([]byte{'a'}, 8001)
+	outside[8000] = 0
+	if _, _, err := textcodec.Decode("/repo/late-nul.txt", outside); err != nil {
+		t.Fatalf("NUL outside the probe window: err=%v", err)
 	}
-	outside := bytes.Repeat([]byte{'a'}, 8193)
-	outside[8192] = 0
-	if LooksBinary(outside, false) {
-		t.Fatal("control byte outside the probe window was scanned")
-	}
-	if LooksBinary([]byte{0, 0x61, 0, 0x62}, true) {
-		t.Fatal("UTF-16 data was classified as binary")
+	if _, _, err := textcodec.Decode("/repo/utf16.txt", []byte{0xff, 0xfe, 'a', 0, 'b', 0}); err != nil {
+		t.Fatalf("UTF-16 data was classified as binary: %v", err)
 	}
 }

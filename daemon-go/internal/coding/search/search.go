@@ -3,7 +3,6 @@
 package search
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -19,18 +18,34 @@ import (
 	ignorealt "github.com/Sriram-PR/go-ignore"
 	"github.com/bmatcuk/doublestar/v4"
 	"github.com/charlievieth/fastwalk"
+
+	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
 // SearchOutcome contains deterministic results and the reason an incomplete scan stopped.
 type SearchOutcome struct {
 	Results            []string
 	Skipped            []string
+	Undecodable        []string
+	UndecodableCount   int
 	IgnoreSkipped      []string
 	IgnoreSkippedCount int
 	Incomplete         bool
 	StopReason         string
 	LimitReached       bool
 }
+
+// UndecodableError reports a file given directly as path whose text encoding the codec could
+// not decode.
+type UndecodableError struct {
+	Path string
+	Err  error
+}
+
+func (e *UndecodableError) Error() string { return e.Err.Error() }
+
+// Unwrap returns the codec failure.
+func (e *UndecodableError) Unwrap() error { return e.Err }
 
 // Find returns paths relative to root, ordered like rg --sort path.
 func Find(root, glob string, limit int) ([]string, error) {
@@ -97,11 +112,17 @@ func Grep(root, pattern string, literal, ignoreCase bool, glob string, limit int
 	}
 	directFile := !rootInfo.IsDir()
 	results := parallel(files, func(rel string) []string {
-		data, release, e := readPooled(searchFilePath(root, rel, directFile))
+		filePath := searchFilePath(root, rel, directFile)
+		data, release, e := readPooled(filePath)
 		if e != nil {
 			return nil
 		}
 		defer release()
+		decoded, _, decodeErr := textcodec.Decode(filePath, data)
+		if decodeErr != nil {
+			return nil
+		}
+		data = decoded
 		display := filepath.ToSlash(rel)
 		if directFile {
 			display = filepath.ToSlash(root)
@@ -200,10 +221,21 @@ func grepContextWithReader(ctx context.Context, root, pattern string, literal, i
 			outcome.Skipped = append(outcome.Skipped, display)
 			continue
 		}
-		if directFile && binary(data) {
+		decoded, _, decodeErr := textcodec.Decode(filePath, data)
+		if decodeErr != nil {
 			release()
-			return outcome, errors.New("directly specified file is binary")
+			if directFile {
+				return outcome, &UndecodableError{Path: filePath, Err: decodeErr}
+			}
+			// A binary file is skipped silently; any other codec failure is reported.
+			if errors.Is(decodeErr, textcodec.ErrBinary) {
+				continue
+			}
+			outcome.Undecodable = append(outcome.Undecodable, filepath.ToSlash(filePath))
+			outcome.UndecodableCount++
+			continue
 		}
+		data = decoded
 		var matches []string
 		limitReached := false
 		if multiline {
@@ -627,16 +659,6 @@ func (m *ignoreMatcher) Ignored(path string, isDir bool) bool {
 	return err == nil && m.matcher.Match(filepath.ToSlash(rel), isDir)
 }
 
-func binary(b []byte) bool {
-	if bytes.HasPrefix(b, []byte{0xff, 0xfe}) || bytes.HasPrefix(b, []byte{0xfe, 0xff}) {
-		return false
-	}
-	n := len(b)
-	if n > 8192 {
-		n = 8192
-	}
-	return bytes.IndexByte(b[:n], 0) >= 0
-}
 func parallel[T any](items []string, fn func(string) T) []T {
 	out := make([]T, len(items))
 	if len(items) == 0 {
