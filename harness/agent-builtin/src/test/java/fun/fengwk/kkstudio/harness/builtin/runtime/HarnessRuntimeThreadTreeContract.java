@@ -623,7 +623,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
                       sessionId,
                       compactionBody,
                       new TurnEndPayload(
-                          compactionStart, TurnEndOutcome.COMPLETED, false, null, null),
+                          compactionStart, TurnEndOutcome.COMPLETED, true, null, null),
                       T2));
           tx.entries()
               .insert(
