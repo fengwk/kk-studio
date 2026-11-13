@@ -279,9 +279,10 @@ task 初次执行入口只读取规范 `task.accepted` details 中的 thread_id�
 Chat 工具卡片与 ApprovalCard 共享文件变更审查组件：
 
 - **write 审查**：审批前展示目标路径与完整文件正文；参数中显式携带工作目录时一并展示，不补默认目录。时间线全文铺开、不创建内部滚动，审批卡片保留有界滚动；两者都严格保留缩进与空白。
-- **edit 审查与真实 Diff**：模型流式生成参数阶段，展示传入的 `old_string` 与 `new_string`，明确标注为输入而非真实文件变更；
+- **edit 审查与真实 Diff**：`edit` 的参数是 `edits` 数组，每个条目一项独立精确替换。模型流式生成参数阶段逐条展示已到达的 `old_string` 与 `new_string`，
+  多条时以 `Change i of n` 编号，`replace_all` 条目单独标注，全部明确标注为输入而非真实文件变更；
   参数流结束后进入准备状态（preparing spinner），等待后端预检生成 `approval.editReview`；
-  就绪后立即替换为真实文件 diff（包含 canonical 绝对路径、多 hunk 真实行号与变更行）。
+  就绪后立即整体替换为真实文件 diff（包含 canonical 绝对路径、多 hunk 真实行号与变更行），不再逐条重放输入。
   若缺失或无法解析有效 review，禁用“允许”按钮，保留“拒绝”。
 - **展开与结果呈现**：write 与 edit 审查预览期间完整显示；结束后默认截取前 10 行。执行成功后，展开的补充正文呈现简洁的本地化提示
   （中文“写入成功”/“编辑成功”，英文“Write succeeded”/“Edit succeeded”），不在成功结果中重复回显文件正文或 diff；

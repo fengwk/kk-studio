@@ -2216,7 +2216,7 @@ describe('thread timeline', () => {
           toolCallId: 'call-edit-1',
           toolName: 'edit',
           rendererKey: 'edit',
-          argumentsJson: '{"path":"/canonical/src/App.tsx","old_string":"old","new_string":"new"}',
+          argumentsJson: '{"path":"/canonical/src/App.tsx","edits":[{"old_string":"old","new_string":"new"}]}',
         }])),
       ],
       [],

@@ -15,6 +15,7 @@ type HarnessApi = {
   renderWritePending(): void
   renderWriteSuccess(): void
   renderEditStreaming(): void
+  renderEditStreamingMultiEntry(): void
   renderEditPreparing(): void
   renderEditReviewed(): void
   renderEditConflict(): void
@@ -163,6 +164,34 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(toolPane.locator('.is-added, .is-removed')).toHaveCount(0)
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-streaming.png') })
+
+    // 阶段 A2: 多条目流式输入逐条编号，replace_all 单列徽标
+    await harness(page, 'renderEditStreamingMultiEntry')
+    await expect(page.locator('[data-testid="active-scenario"]')).toHaveText('edit-streaming-multi')
+    await expect(toolPane.locator('.thread-tool-summary-detail')).toHaveText(
+      '/src/App.tsx [3 changes, replace_all]',
+    )
+    await expect(toolPane.locator('.thread-tool-preview-input-label')).toHaveText('流式输入内容')
+    const entryBlocks = toolPane.locator('.thread-tool-preview-input-block')
+    await expect(entryBlocks).toHaveCount(3)
+    await expect(entryBlocks.nth(0).locator('.thread-tool-preview-input-heading'))
+      .toContainText('第 1/3 处修改')
+    await expect(entryBlocks.nth(0).locator('.thread-tool-preview-badge')).toHaveText('替换全部')
+    await expect(entryBlocks.nth(1).locator('.thread-tool-preview-input-heading'))
+      .toContainText('第 2/3 处修改')
+    await expect(entryBlocks.nth(1).locator('.thread-tool-preview-badge')).toHaveCount(0)
+    await expect(entryBlocks.nth(1).locator('.is-input-new')).toHaveText('const b = 200;')
+    // 截断处只有 old_string：条目仍然出现，new 部分不伪造。
+    await expect(entryBlocks.nth(2).locator('.is-input-old')).toHaveText('const c = 3;')
+    await expect(entryBlocks.nth(2).locator('.is-input-new')).toHaveCount(0)
+    await expect(toolPane.locator('.is-added, .is-removed')).toHaveCount(0)
+    // 多条目输入不横向撑宽。
+    const inputOverflow = await toolPane.locator('.thread-tool-preview-input-section').evaluate((el) => ({
+      clientWidth: el.clientWidth,
+      scrollWidth: el.scrollWidth,
+    }))
+    expect(inputOverflow.scrollWidth).toBeLessThanOrEqual(inputOverflow.clientWidth + 1)
+    await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-streaming-multi.png') })
 
     // 阶段 B: 参数结束等待 review，展示准备中占位态
     await harness(page, 'renderEditPreparing')

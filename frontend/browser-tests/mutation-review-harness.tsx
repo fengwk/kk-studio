@@ -186,8 +186,7 @@ const mutationReviewHarness = {
       rendererKey: 'edit',
       arguments: JSON.stringify({
         path: '/src/App.tsx',
-        old_string: 'const oldVal = 1;',
-        new_string: 'const newVal = 2;',
+        edits: [{ old_string: 'const oldVal = 1;', new_string: 'const newVal = 2;' }],
       }),
       contents: [],
       createdAt: Date.parse('2026-10-19T00:00:00Z'),
@@ -201,11 +200,36 @@ const mutationReviewHarness = {
     })
   },
 
+  renderEditStreamingMultiEntry() {
+    const callMsg: ToolDialogueMessage = {
+      id: 'call-edit-stream-multi',
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: null,
+      toolCallId: 'call-edit-stream-multi',
+      toolName: 'edit',
+      rendererKey: 'edit',
+      // 参数在生成中：第三条尚未给出 new_string，用来验证前缀解析。
+      arguments: '{"path":"/src/App.tsx","edits":['
+        + '{"old_string":"const a = 1;","new_string":"const a = 100;","replace_all":true},'
+        + '{"old_string":"const b = 2;","new_string":"const b = 200;"},'
+        + '{"old_string":"const c = 3;","new_',
+      contents: [],
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
+      status: 'streaming',
+    }
+
+    updateState({
+      scenario: 'edit-streaming-multi',
+      toolBlock: { message: callMsg },
+      approvalCard: null,
+    })
+  },
+
   renderEditPreparing() {
     const rawArgs = JSON.stringify({
       path: '/src/App.tsx',
-      old_string: 'const a = 1;',
-      new_string: 'const a = 100;',
+      edits: [{ old_string: 'const a = 1;', new_string: 'const a = 100;' }],
     })
     const callMsg: ToolDialogueMessage = {
       id: 'call-edit-preparing',
@@ -239,8 +263,10 @@ const mutationReviewHarness = {
   renderEditReviewed() {
     const rawArgs = JSON.stringify({
       path: '/src/App.tsx',
-      old_string: 'const a = 1;\nconst b = 2;',
-      new_string: 'const a = 100;\nconst b = 200;',
+      edits: [
+        { old_string: 'const a = 1;', new_string: 'const a = 100;' },
+        { old_string: 'const b = 2;', new_string: 'const b = 200;' },
+      ],
     })
     const reviewData = {
       path: '/canonical/src/App.tsx',
@@ -402,7 +428,9 @@ const mutationReviewHarness = {
       rendererKey: tool,
       arguments: JSON.stringify({
         path: '/protected/config.ts',
-        ...(isWrite ? { content: 'test content' } : { old_string: 'a', new_string: 'b' }),
+        ...(isWrite
+          ? { content: 'test content' }
+          : { edits: [{ old_string: 'a', new_string: 'b' }] }),
       }),
       contents: [],
       createdAt: Date.parse('2026-10-19T00:00:00Z'),
@@ -439,7 +467,10 @@ const mutationReviewHarness = {
         threadId: 'thread-1',
         invocationId: 'inv-missing-review',
         toolName: 'edit',
-        argumentsJson: JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' }),
+        argumentsJson: JSON.stringify({
+          path: '/src/App.tsx',
+          edits: [{ old_string: 'a', new_string: 'b' }],
+        }),
         approval: { required: true },
       },
     })
@@ -453,7 +484,10 @@ const mutationReviewHarness = {
         threadId: 'thread-1',
         invocationId: 'inv-malformed-review',
         toolName: 'edit',
-        argumentsJson: JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' }),
+        argumentsJson: JSON.stringify({
+          path: '/src/App.tsx',
+          edits: [{ old_string: 'a', new_string: 'b' }],
+        }),
         approval: {
           required: true,
           editReview: {
@@ -474,7 +508,10 @@ const mutationReviewHarness = {
         threadId: 'thread-1',
         invocationId: 'inv-valid-review',
         toolName: 'edit',
-        argumentsJson: JSON.stringify({ path: '/src/App.tsx', old_string: 'a', new_string: 'b' }),
+        argumentsJson: JSON.stringify({
+          path: '/src/App.tsx',
+          edits: [{ old_string: 'a', new_string: 'b' }],
+        }),
         approval: {
           required: true,
           editReview: {

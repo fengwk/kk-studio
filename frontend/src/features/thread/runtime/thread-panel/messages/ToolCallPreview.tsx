@@ -137,9 +137,13 @@ export function ToolCallPreview({
     )
   }
 
-  // Edit tool: streamed input (old_string / new_string) explicitly labeled as input
+  // Edit tool: streamed input, one block per entry, explicitly labeled as model input
   if (preview.mode === 'input') {
-    if (!preview.oldText && !preview.newText) {
+    const total = preview.entries.length
+    const entries = preview.entries
+      .map((entry, index) => ({ entry, index }))
+      .filter(({ entry }) => entry.oldText || entry.newText)
+    if (entries.length === 0) {
       return null
     }
     return (
@@ -151,28 +155,48 @@ export function ToolCallPreview({
         ) : null}
         <div className="thread-tool-preview-input-section">
           <div className="thread-tool-preview-input-label">{t('ai.runtime.mutation.inputLabel')}</div>
-          {preview.oldText ? (
-            <div className="thread-tool-preview-input-block">
-              <span className="thread-tool-preview-input-sublabel">{t('ai.runtime.mutation.oldString')}</span>
-              <ToolOutputViewport
-                bounded={bounded}
-                className="thread-tool-preview-body is-input-old"
-              >
-                {preview.oldText}
-              </ToolOutputViewport>
+          {entries.map(({ entry, index }) => (
+            <div className="thread-tool-preview-input-block" key={`entry-${index}`}>
+              {total > 1 || entry.replaceAll ? (
+                <span className="thread-tool-preview-input-heading">
+                  {total > 1
+                    ? t('ai.runtime.mutation.changeOf', { index: index + 1, total })
+                    : null}
+                  {entry.replaceAll ? (
+                    <span className="thread-tool-preview-badge">
+                      {t('ai.runtime.mutation.replaceAll')}
+                    </span>
+                  ) : null}
+                </span>
+              ) : null}
+              {entry.oldText ? (
+                <>
+                  <span className="thread-tool-preview-input-sublabel">
+                    {t('ai.runtime.mutation.oldString')}
+                  </span>
+                  <ToolOutputViewport
+                    bounded={bounded}
+                    className="thread-tool-preview-body is-input-old"
+                  >
+                    {entry.oldText}
+                  </ToolOutputViewport>
+                </>
+              ) : null}
+              {entry.newText ? (
+                <>
+                  <span className="thread-tool-preview-input-sublabel">
+                    {t('ai.runtime.mutation.newString')}
+                  </span>
+                  <ToolOutputViewport
+                    bounded={bounded}
+                    className="thread-tool-preview-body is-input-new"
+                  >
+                    {entry.newText}
+                  </ToolOutputViewport>
+                </>
+              ) : null}
             </div>
-          ) : null}
-          {preview.newText ? (
-            <div className="thread-tool-preview-input-block">
-              <span className="thread-tool-preview-input-sublabel">{t('ai.runtime.mutation.newString')}</span>
-              <ToolOutputViewport
-                bounded={bounded}
-                className="thread-tool-preview-body is-input-new"
-              >
-                {preview.newText}
-              </ToolOutputViewport>
-            </div>
-          ) : null}
+          ))}
         </div>
       </div>
     )
