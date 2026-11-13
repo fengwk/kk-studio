@@ -7,8 +7,13 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.AppenderBase;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
@@ -115,6 +120,46 @@ class AnthropicStreamAccumulatorTest {
     ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
     assertTrue(error.getMessage().contains("Anthropic Messages model"));
+  }
+
+  @Test
+  void logsInputTransformationsWithResponseIdAndWarnsOnPrefixBindingMismatch() {
+    Logger logger = (Logger) LoggerFactory.getLogger(AnthropicStreamAccumulator.class);
+    Level previousLevel = logger.getLevel();
+    List<ILoggingEvent> events = new ArrayList<>();
+    AppenderBase<ILoggingEvent> appender =
+        new AppenderBase<>() {
+          @Override
+          protected void append(ILoggingEvent event) {
+            events.add(event);
+          }
+        };
+    appender.setContext(logger.getLoggerContext());
+    appender.start();
+    logger.addAppender(appender);
+    logger.setLevel(Level.INFO);
+    try {
+      AnthropicStreamAccumulator accumulator =
+          new AnthropicStreamAccumulator(request, descriptor, bridge);
+      accumulator.handleEvent(
+          "message_start",
+          "{\"type\":\"message_start\",\"message\":{\"id\":\"msg_transform\","
+              + "\"input_transformations\":["
+              + "{\"type\":\"drop_block\",\"path\":[\"messages\",0],\"reason\":\"prefix_binding_mismatch\"},"
+              + "{\"type\":\"rewrite\",\"path\":[\"system\"],\"reason\":\"other\"}]}}");
+
+      assertEquals(2, events.size());
+      assertEquals(Level.WARN, events.get(0).getLevel());
+      assertTrue(events.get(0).getFormattedMessage().contains("responseId=msg_transform"));
+      assertTrue(events.get(0).getFormattedMessage().contains("type=drop_block"));
+      assertTrue(events.get(0).getFormattedMessage().contains("reason=prefix_binding_mismatch"));
+      assertEquals(Level.INFO, events.get(1).getLevel());
+      assertTrue(events.get(1).getFormattedMessage().contains("path=[\"system\"]"));
+    } finally {
+      logger.detachAppender(appender);
+      logger.setLevel(previousLevel);
+      appender.stop();
+    }
   }
 
   @Test
