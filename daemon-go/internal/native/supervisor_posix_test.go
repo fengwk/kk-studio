@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -20,8 +21,17 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 1 && os.Args[1] == "__lock-helper" {
+		os.Exit(LockHelperMain(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "__lock-helper-release-failure" {
+		os.Exit(lockHelperReleaseFailureFixture(os.Args[2:]))
+	}
 	if len(os.Args) > 1 && os.Args[1] == "__native-helper" {
 		os.Exit(HelperMain(os.Args[2:]))
+	}
+	if len(os.Args) > 1 && os.Args[1] == "__native-owner-fixture" {
+		os.Exit(posixOwnerFixture(os.Args[2:]))
 	}
 	goleak.VerifyTestMain(m)
 }
@@ -309,6 +319,73 @@ func TestPOSIXSupervisor_InheritedEnvironment(t *testing.T) {
 	}
 	if string(output) != "inherited" {
 		t.Fatalf("inherited environment output = %q", output)
+	}
+}
+
+// NAT-N-001 confirms POSIX scope helpers are launched by the daemon executable with only the helper subcommand and private state path.
+func TestPOSIXSupervisor_HelperUsesCurrentExecutable(t *testing.T) {
+	supervisorValue, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	supervisor := supervisorValue.(*PosixSupervisor)
+	var executable string
+	var args []string
+	supervisor.startHelper = func(command *exec.Cmd) error {
+		executable = command.Path
+		args = append([]string(nil), command.Args...)
+		return command.Start()
+	}
+	process, err := supervisor.Start(context.Background(), ProcessSpec{Executable: "/bin/sh", Args: []string{"-c", "exit 0", "PRIVATE-COMMAND-ARG"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.ReadAll(process.Stdout()); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := process.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	currentExecutable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if executable != currentExecutable || len(args) != 3 || args[0] != currentExecutable || args[1] != "__native-helper" || !filepath.IsAbs(args[2]) || strings.Contains(strings.Join(args, " "), "PRIVATE-COMMAND-ARG") {
+		t.Fatalf("helper process = executable %q, args %q; want same executable and private re-exec arguments", executable, args)
+	}
+	if err := supervisor.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// NAT-F-003 verifies the actual command environment drops Node's management descriptor.
+func TestPOSIXSupervisor_CommandEnvironmentDropsNodeChannelFD(t *testing.T) {
+	t.Setenv("NODE_CHANNEL_FD", "7")
+	supervisor, err := NewSupervisor()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer supervisor.Close(context.Background())
+	process, err := supervisor.Start(context.Background(), ProcessSpec{
+		Executable: "/bin/sh",
+		Args:       []string{"-c", `printf '%s' "${NODE_CHANNEL_FD-unset}"`},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(process.Stdout())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := process.Wait(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if string(output) != "unset" {
+		t.Fatalf("command observed NODE_CHANNEL_FD as %q, want it filtered", output)
 	}
 }
 

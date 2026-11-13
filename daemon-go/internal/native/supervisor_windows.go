@@ -328,9 +328,23 @@ func createWindowsJobWithAPI(name string, api windowsJobCreationAPI) (windows.Ha
 	return job, nil
 }
 
+type windowsJobAccountingAPI interface {
+	QueryInformationJobObject(windows.Handle, *windowsJobAccounting) error
+}
+
+type nativeWindowsJobAccountingAPI struct{}
+
+func (nativeWindowsJobAccountingAPI) QueryInformationJobObject(job windows.Handle, accounting *windowsJobAccounting) error {
+	return windows.QueryInformationJobObject(job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(accounting)), uint32(unsafe.Sizeof(*accounting)), nil)
+}
+
 func jobActiveProcesses(job windows.Handle) (uint32, error) {
+	return jobActiveProcessesWithAPI(job, nativeWindowsJobAccountingAPI{})
+}
+
+func jobActiveProcessesWithAPI(job windows.Handle, api windowsJobAccountingAPI) (uint32, error) {
 	var accounting windowsJobAccounting
-	if err := windows.QueryInformationJobObject(job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(&accounting)), uint32(unsafe.Sizeof(accounting)), nil); err != nil {
+	if err := api.QueryInformationJobObject(job, &accounting); err != nil {
 		return 0, fmt.Errorf("cannot read process scope Job accounting: %w", err)
 	}
 	return accounting.ActiveProcesses, nil
@@ -453,6 +467,10 @@ func (p *windowsHelperPipes) close() {
 	}
 }
 
+func windowsHelperCommandLine(executable, stateDir string) string {
+	return ComposeCommandLine([]string{executable, "__native-helper", stateDir})
+}
+
 func startWindowsHelper(stateDir string, pipes *windowsHelperPipes, env []string) (windows.ProcessInformation, error) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -462,7 +480,7 @@ func startWindowsHelper(stateDir string, pipes *windowsHelperPipes, env []string
 	if err != nil {
 		return windows.ProcessInformation{}, err
 	}
-	line, err := windows.UTF16PtrFromString(ComposeCommandLine([]string{executable, "__native-helper", stateDir}))
+	line, err := windows.UTF16PtrFromString(windowsHelperCommandLine(executable, stateDir))
 	if err != nil {
 		return windows.ProcessInformation{}, err
 	}
@@ -946,13 +964,17 @@ func (p *windowsProcess) cleanupFailedStart(cause error) error {
 }
 
 func awaitWindowsJobEmpty(ctx context.Context, job windows.Handle, budget time.Duration) error {
+	return awaitWindowsJobEmptyWithAPI(ctx, job, budget, nativeWindowsJobAccountingAPI{})
+}
+
+func awaitWindowsJobEmptyWithAPI(ctx context.Context, job windows.Handle, budget time.Duration, api windowsJobAccountingAPI) error {
 	deadline := time.NewTimer(budget)
 	defer deadline.Stop()
 	ticker := time.NewTicker(windowsScopePoll)
 	defer ticker.Stop()
 	var lastErr error
 	for {
-		active, err := jobActiveProcesses(job)
+		active, err := jobActiveProcessesWithAPI(job, api)
 		if err == nil && active == 0 {
 			return nil
 		}

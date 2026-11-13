@@ -93,6 +93,10 @@ func directChildren(ownerPID int, excludedPIDs []int) ([]sessionMember, error) {
 	if err != nil {
 		return nil, err
 	}
+	return directChildrenFromSnapshot(ownerPID, excludedPIDs, all), nil
+}
+
+func directChildrenFromSnapshot(ownerPID int, excludedPIDs []int, all []sessionMember) []sessionMember {
 	excluded := make(map[int]struct{}, len(excludedPIDs))
 	for _, pid := range excludedPIDs {
 		excluded[pid] = struct{}{}
@@ -108,7 +112,7 @@ func directChildren(ownerPID int, excludedPIDs []int) ([]sessionMember, error) {
 		children = append(children, member)
 	}
 	sort.Slice(children, func(i, j int) bool { return children[i].PID < children[j].PID })
-	return children, nil
+	return children
 }
 
 func convergeAdoptedChildren(ctx context.Context, ownerPID int, grace time.Duration, excludedPIDs []int) error {

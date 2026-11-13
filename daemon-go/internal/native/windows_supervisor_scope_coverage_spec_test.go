@@ -184,6 +184,32 @@ func TestWindowsSupervisor_OpenWindowsJobRejectsInvalidNames(t *testing.T) {
 	}
 }
 
+// NAT-F-010 verifies state-directory hashing produces a stable name shared by CreateJobObject and OpenJobObject.
+func TestWindowsJobName_HashAndOpenRoundTrip(t *testing.T) {
+	firstDir := filepath.Join(t.TempDir(), "scope-one")
+	secondDir := filepath.Join(t.TempDir(), "scope-two")
+	name := jobNameFor(firstDir)
+	if !strings.HasPrefix(name, windowsJobNamePrefix) || len(strings.TrimPrefix(name, windowsJobNamePrefix)) != 24 || strings.Trim(strings.TrimPrefix(name, windowsJobNamePrefix), "0123456789abcdef") != "" {
+		t.Fatalf("hashed Job name = %q, want prefix and 24 lowercase hex characters", name)
+	}
+	if name != jobNameFor(firstDir) || name == jobNameFor(secondDir) {
+		t.Fatalf("Job names are not stable and state-directory-specific: %q/%q", name, jobNameFor(secondDir))
+	}
+	created, err := createWindowsJob(name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(created)
+	opened, err := openWindowsJob(name)
+	if err != nil {
+		t.Fatalf("open Job created under same hashed name: %v", err)
+	}
+	defer windows.CloseHandle(opened)
+	if active, err := jobActiveProcesses(opened); err != nil || active != 0 {
+		t.Fatalf("newly created named Job accounting = %d, %v; want empty", active, err)
+	}
+}
+
 // TestWindowsHelperPipes_CloseReleasesFiles confirms all parent pipe endpoints close even if child handles are invalid.
 func TestWindowsHelperPipes_CloseReleasesFiles(t *testing.T) {
 	files := make([]*os.File, 4)

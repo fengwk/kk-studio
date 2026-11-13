@@ -235,3 +235,78 @@ func TestPOSIXHelper_OwnerDeathBeforePermitDoesNotRunCommand(t *testing.T) {
 		t.Fatalf("command exit record exists without permit: %v", err)
 	}
 }
+
+// NAT-F-008 verifies the real helper fails closed when its configured 20-second permit budget expires.
+func TestPOSIXHelper_PermitBudgetExpires(t *testing.T) {
+	dir := stateTestDir(t)
+	marker := filepath.Join(t.TempDir(), "command-started")
+	launch, err := json.Marshal(launchSpec{Cwd: t.TempDir(), Args: []string{"/bin/sh", "-c", "touch \"$1\"", "helper-command", marker}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := publish(dir, launchFile, launch); err != nil {
+		t.Fatal(err)
+	}
+	ownerReader, ownerWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command(os.Args[0], "__native-helper", dir)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+	cmd.ExtraFiles = []*os.File{ownerReader}
+	if err := cmd.Start(); err != nil {
+		_ = ownerReader.Close()
+		_ = ownerWriter.Close()
+		t.Fatal(err)
+	}
+	_ = ownerReader.Close()
+	defer func() {
+		_ = ownerWriter.Close()
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := readState(dir, scopeFile); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("helper did not publish its scope")
+		}
+		time.Sleep(scopePollInterval)
+	}
+	started := time.Now()
+	waited := make(chan error, 1)
+	go func() { waited <- cmd.Wait() }()
+	select {
+	case err := <-waited:
+		if err == nil {
+			t.Fatal("helper accepted a missing permit")
+		}
+		cmd.Process = nil
+	case <-time.After(scopeStartBudget + 5*time.Second):
+		t.Fatal("helper did not enforce its permit deadline")
+	}
+	elapsed := time.Since(started)
+	if elapsed < scopeStartBudget || elapsed > scopeStartBudget+5*time.Second {
+		t.Fatalf("permit wait elapsed = %s, want %s through %s", elapsed, scopeStartBudget, scopeStartBudget+5*time.Second)
+	}
+	if err := ownerWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if failure, err := readState(dir, errorFile); err != nil || string(failure) != "helper-permit-failure" {
+		t.Fatalf("permit timeout failure = %q, %v", failure, err)
+	}
+	cleanup, err := readCleanup(dir)
+	if err != nil || cleanup == nil || !*cleanup {
+		t.Fatalf("permit timeout cleanup = %v, %v", cleanup, err)
+	}
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Fatalf("command ran without permit: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, exitFile)); !os.IsNotExist(err) {
+		t.Fatalf("helper published a command exit without permit: %v", err)
+	}
+}

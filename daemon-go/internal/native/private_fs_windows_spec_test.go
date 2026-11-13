@@ -74,6 +74,49 @@ func windowsPrivatePathOwner(path string) (*windows.SID, error) {
 	return owner, err
 }
 
+// NAT-F-013 exercises owner rejection against a real Windows security descriptor.
+func TestWindowsPrivateFS_RejectsRealForeignOwner(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "private")
+	if err := ensurePrivateDirectory(directory); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(directory, "foreign-owner")
+	if err := writePrivateFile(path, []byte("original")); err != nil {
+		t.Fatal(err)
+	}
+	var token windows.Token
+	if err := windows.OpenProcessToken(windows.CurrentProcess(), windows.TOKEN_QUERY|windows.TOKEN_ADJUST_PRIVILEGES, &token); err != nil {
+		t.Fatal(err)
+	}
+	defer token.Close()
+	var restorePrivilege windows.LUID
+	if err := windows.LookupPrivilegeValue(nil, windows.StringToUTF16Ptr("SeRestorePrivilege"), &restorePrivilege); err != nil {
+		t.Fatal(err)
+	}
+	privileges := windows.Tokenprivileges{PrivilegeCount: 1}
+	privileges.Privileges[0] = windows.LUIDAndAttributes{Luid: restorePrivilege, Attributes: windows.SE_PRIVILEGE_ENABLED}
+	if err := windows.AdjustTokenPrivileges(token, false, &privileges, 0, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	foreignOwner, err := windows.StringToSid("S-1-5-18")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION, foreignOwner, nil, nil, nil); err != nil {
+		t.Fatalf("set real foreign owner: %v", err)
+	}
+	actualOwner, err := windowsPrivatePathOwner(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !actualOwner.Equals(foreignOwner) {
+		t.Fatalf("file owner = %s, want foreign SID %s", actualOwner, foreignOwner)
+	}
+	if err := verifyPrivateFile(path); err == nil || !strings.Contains(err.Error(), "not owned by the current user") {
+		t.Fatalf("real foreign-owner verification = %v", err)
+	}
+}
+
 // TestWindowsPrivateFS_CreatesNestedDirectory verifies missing parents are also protected.
 func TestWindowsPrivateFS_CreatesNestedDirectory(t *testing.T) {
 	root := t.TempDir()
@@ -187,7 +230,7 @@ func setWindowsTestLooseDACL(t *testing.T, path string) {
 	}
 }
 
-// NAT-T-207..208 verify foreign ACEs are rejected before a private file can be replaced.
+// NAT-F-013 and NAT-T-207..208 verify a real Windows foreign DACL ACE is rejected before private state can be replaced.
 func TestWindowsPrivateFS_RejectsForeignACEWithoutOverwriting(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(directory); err != nil {

@@ -23,6 +23,7 @@ type fakeWindowsAttributes struct {
 	failAt    int
 	updateErr error
 	updates   int
+	order     []uintptr
 	deleted   bool
 	job       windows.Handle
 	handles   []windows.Handle
@@ -30,6 +31,7 @@ type fakeWindowsAttributes struct {
 
 func (a *fakeWindowsAttributes) Update(attribute uintptr, value unsafe.Pointer, size uintptr) error {
 	a.updates++
+	a.order = append(a.order, attribute)
 	if a.failAt == a.updates {
 		return a.updateErr
 	}
@@ -161,6 +163,9 @@ func TestCreateSuspendedWindowsCommand_UsesJobAndHandleLists(t *testing.T) {
 	}
 	if api.attributes.job != 10 || !reflect.DeepEqual(api.attributes.handles, []windows.Handle{19, 20, 21}) || !api.attributes.deleted {
 		t.Fatalf("attributes: job=%d handles=%v deleted=%t", api.attributes.job, api.attributes.handles, api.attributes.deleted)
+	}
+	if !reflect.DeepEqual(api.attributes.order, []uintptr{procThreadAttributeJobList, windows.PROC_THREAD_ATTRIBUTE_HANDLE_LIST}) {
+		t.Fatalf("process attribute update order = %v, want Job list then inherited handles", api.attributes.order)
 	}
 }
 
