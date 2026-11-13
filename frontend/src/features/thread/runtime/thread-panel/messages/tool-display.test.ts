@@ -14,11 +14,11 @@ describe('tool display', () => {
       pattern: 'needle',
       path: 'src',
       workdir: '/srv/project',
-      include: '**/*.ts',
+      glob: '**/*.ts',
       ignore_case: true,
       limit: 12,
     })).text).toBe(
-      'grep "needle" in src from /srv/project [include=**/*.ts ignore_case limit=12]',
+      'grep "needle" in src from /srv/project [glob=**/*.ts ignore_case limit=12]',
     )
     expect(formatToolCallSummary('bash', JSON.stringify({
       command: 'npm test',
@@ -123,23 +123,58 @@ describe('tool display', () => {
       workdir: '/srv/project/src',
       content: 'class App {}',
     })).text).toBe('write App.java in /srv/project/src')
-    // replace_all=true 渲染为旗标；false/缺省不出现（影响范围参数仍可见）。
-    expect(formatToolCallSummary('edit', JSON.stringify({
-      path: 'App.java',
-      replace_all: true,
-      old_string: 'a',
-      new_string: 'b',
-    })).text).toBe('edit App.java [replace_all]')
-    expect(formatToolCallSummary('edit', JSON.stringify({
-      path: 'App.java',
-      replace_all: false,
-    })).text).toBe('edit App.java')
     // 缺少 path 时返回空详情（不回退到原始 JSON，避免重复铺开 old/new）。
     expect(formatToolCallSummary('write', JSON.stringify({ content: 'x' }))).toEqual({
       name: 'write',
       detail: '',
       text: 'write',
     })
+  })
+
+  it('summarizes edit entries by count and replace_all without exposing old/new text', () => {
+    // 单条目：只给目标与可选的 replace_all 旗标。
+    expect(formatToolCallSummary('edit', JSON.stringify({
+      path: 'App.java',
+      workdir: '/srv/project/src',
+      edits: [{ old_string: 'a', new_string: 'b' }],
+    })).text).toBe('edit App.java in /srv/project/src')
+    expect(formatToolCallSummary('edit', JSON.stringify({
+      path: 'App.java',
+      edits: [{ old_string: 'a', new_string: 'b', replace_all: true }],
+    })).text).toBe('edit App.java [replace_all]')
+    // 多条目：给出变更总数，任一条整体替换时在同一个方括号里标注。
+    expect(formatToolCallSummary('edit', JSON.stringify({
+      path: 'App.java',
+      edits: [
+        { old_string: 'a', new_string: 'b' },
+        { old_string: 'c', new_string: 'd' },
+        { old_string: 'e', new_string: 'f' },
+      ],
+    })).text).toBe('edit App.java [3 changes]')
+    expect(formatToolCallSummary('edit', JSON.stringify({
+      path: 'App.java',
+      edits: [
+        { old_string: 'a', new_string: 'b', replace_all: true },
+        { old_string: 'c', new_string: 'd' },
+        { old_string: 'e', new_string: 'f' },
+      ],
+    })).text).toBe('edit App.java [3 changes, replace_all]')
+    // 摘要绝不带出 old/new 文本。
+    const summary = formatToolCallSummary('edit', JSON.stringify({
+      path: 'App.java',
+      edits: [{ old_string: 'SECRET-OLD', new_string: 'SECRET-NEW' }],
+    }))
+    expect(summary.text).not.toContain('SECRET')
+  })
+
+  it('keeps the edit summary usable while the edits array is still streaming', () => {
+    // 参数未闭合时同样只展示已解析出的条目数量，不等待完整参数。
+    expect(formatToolCallSummary(
+      'edit',
+      '{"path":"App.java","edits":[{"old_string":"a","new_string":"b"},{"old_string":"c","new_',
+    ).text).toBe('edit App.java [2 changes]')
+    expect(formatToolCallSummary('edit', '{"path":"App.java","edits":[').text)
+      .toBe('edit App.java')
   })
 
   it('formats bash/grep/find summaries and falls back when required fields are absent', () => {
@@ -150,18 +185,17 @@ describe('tool display', () => {
     expect(formatToolCallSummary('grep', JSON.stringify({
       pattern: 'needle',
       path: 'src',
-      include: '**/*.ts',
+      glob: '**/*.ts',
       ignore_case: true,
       literal: false,
-      multiline: true,
       limit: 5,
       timeout_seconds: 9,
     })).text).toBe(
-      'grep "needle" in src [include=**/*.ts ignore_case multiline limit=5 timeout_seconds=9]',
+      'grep "needle" in src [glob=**/*.ts ignore_case limit=5 timeout_seconds=9]',
     )
     // pattern/path 均缺失时回退为原始 JSON 文本。
-    expect(formatToolCallSummary('grep', JSON.stringify({ include: 'x' })).text).toBe(
-      'grep {"include":"x"}',
+    expect(formatToolCallSummary('grep', JSON.stringify({ glob: 'x' })).text).toBe(
+      'grep {"glob":"x"}',
     )
     expect(formatToolCallSummary('find', JSON.stringify({
       pattern: '*.ts',

@@ -1,4 +1,6 @@
 import type { EditReview } from '@/features/thread/runtime/mutation-review'
+import { parseJsonPrefix } from '@/features/thread/runtime/thread-panel/messages/json-prefix'
+import { isRecord, getString } from '@/shared/lib/value'
 
 export interface ParsedToolArguments {
   raw: string
@@ -16,14 +18,19 @@ interface WriteCallPreview {
   review?: EditReview
 }
 
+/** 编辑条目是模型输入，在真实 diff 生成前供核对将要替换的文本。 */
+interface EditInputEntry {
+  oldText: string
+  newText: string
+  replaceAll: boolean
+}
+
 type EditCallPreview =
   | {
       kind: 'edit'
       mode: 'input'
       path: string
-      oldText: string
-      newText: string
-      replaceAll: boolean
+      entries: EditInputEntry[]
     }
   | {
       kind: 'edit'
@@ -48,22 +55,13 @@ interface EditPreviewOptions {
   isTerminalWithoutReview?: boolean
 }
 
+/** 参数可能仍在流式生成；完整 JSON 之外按已到达的前缀解析。 */
 export function parseToolArguments(raw: string): ParsedToolArguments {
-  const trimmed = raw.trim()
-  if (!trimmed) {
-    return { raw, complete: false, values: {} }
-  }
-  try {
-    const parsed: unknown = JSON.parse(trimmed)
-    return {
-      raw,
-      complete: true,
-      values: parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-        ? parsed as Record<string, unknown>
-        : {},
-    }
-  } catch {
-    return { raw, complete: false, values: extractPartialObjectFields(trimmed) }
+  const parsed = parseJsonPrefix(raw)
+  return {
+    raw,
+    complete: parsed.complete,
+    values: isRecord(parsed.value) ? parsed.value : {},
   }
 }
 
@@ -88,12 +86,12 @@ export function formatWritePreview(
   options?: EditPreviewOptions,
 ): WriteCallPreview {
   const hasContent = 'content' in parsed.values
-  const content = stringField(parsed.values.content)
-  const workdir = stringField(parsed.values.workdir)
+  const content = getString(parsed.values.content)
+  const workdir = getString(parsed.values.workdir)
   const review = options?.editReview ?? undefined
   return {
     kind: 'write',
-    path: review?.path ?? stringField(parsed.values.path),
+    path: review?.path ?? getString(parsed.values.path),
     workdir: workdir || undefined,
     content,
     hasContent,
@@ -123,19 +121,15 @@ export function formatEditPreview(
     return null
   }
 
-  const path = stringField(parsed.values.path)
+  const path = getString(parsed.values.path)
   const isStreaming = options?.streaming ?? !parsed.complete
 
   if (isStreaming) {
-    const oldText = stringField(parsed.values.old_string)
-    const newText = stringField(parsed.values.new_string)
     return {
       kind: 'edit',
       mode: 'input',
       path,
-      oldText,
-      newText,
-      replaceAll: parsed.values.replace_all === true,
+      entries: editInputEntries(parsed.values.edits),
     }
   }
 
@@ -151,39 +145,19 @@ export function formatEditPreview(
   return null
 }
 
-function extractPartialObjectFields(raw: string): Record<string, unknown> {
-  const values: Record<string, unknown> = {}
-  const pattern =
-    /"(path|content|old_string|new_string|replace_all|workdir|offset|limit|pattern|include|ignore_case|literal|multiline|timeout_seconds|command|line|character|query|target|subagent_type|thread_id|max_turns|name|server|tool)"\s*:\s*(true|false|-?\d+(?:\.\d+)?|"((?:\\.|[^"\\])*)("|$))/g
-  for (const match of raw.matchAll(pattern)) {
-    const key = match[1]
-    if (!key) {
-      continue
-    }
-    if (match[2] === 'true' || match[2] === 'false') {
-      values[key] = match[2] === 'true'
-      continue
-    }
-    if (match[2] != null && !match[2].startsWith('"')) {
-      values[key] = Number(match[2])
-      continue
-    }
-    values[key] = unescapeJsonString(match[3] ?? '')
+/** `edits` 是模型输入的替换清单；未成形的条目按已解析出的部分展示。 */
+function editInputEntries(value: unknown): EditInputEntry[] {
+  if (!Array.isArray(value)) {
+    return []
   }
-  return values
-}
-
-function unescapeJsonString(value: string): string {
-  return value
-    .replace(/\\n/g, '\n')
-    .replace(/\\t/g, '\t')
-    .replace(/\\r/g, '\r')
-    .replace(/\\"/g, '"')
-    .replace(/\\\\/g, '\\')
-}
-
-function stringField(value: unknown): string {
-  return typeof value === 'string' ? value : ''
+  return value.map((entry) => {
+    const record = isRecord(entry) ? entry : {}
+    return {
+      oldText: getString(record.old_string),
+      newText: getString(record.new_string),
+      replaceAll: record.replace_all === true,
+    }
+  })
 }
 
 function splitContentLines(content: string): string[] {

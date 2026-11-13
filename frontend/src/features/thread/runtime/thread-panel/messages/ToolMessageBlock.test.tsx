@@ -723,9 +723,11 @@ describe('ToolMessageBlock per-tool bodies', () => {
           rendererKey: 'edit',
           arguments: JSON.stringify({
             path: 'App.java',
-            replace_all: true,
-            old_string: 'alpha\nbeta',
-            new_string: 'alpha\nBETA',
+            edits: [{
+              old_string: 'alpha\nbeta',
+              new_string: 'alpha\nBETA',
+              replace_all: true,
+            }],
           }),
           editReview: {
             path: 'App.java',
@@ -774,8 +776,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
           rendererKey: 'edit',
           arguments: JSON.stringify({
             path: 'App.java',
-            old_string: 'one\ntwo',
-            new_string: 'ONE\nTWO',
+            edits: [{ old_string: 'one\ntwo', new_string: 'ONE\nTWO' }],
           }),
         })}
       />,
@@ -788,6 +789,35 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(container.querySelector('.thread-tool-preview-body.is-input-new')?.textContent).toBe('ONE\nTWO')
   })
 
+  it('numbers each streamed edit entry and marks the replace-all one', () => {
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          status: 'streaming',
+          subjectEntryId: null,
+          toolName: 'edit',
+          rendererKey: 'edit',
+          // 参数在中途截止：最后一个条目尚未给出 new_string。
+          arguments: '{"path":"App.java","edits":['
+            + '{"old_string":"one","new_string":"ONE","replace_all":true},'
+            + '{"old_string":"two","new_string":"TW',
+        })}
+      />,
+    )
+
+    expect(screen.getByText(/第 1\/2 处修改/)).toBeInTheDocument()
+    expect(screen.getByText(/第 2\/2 处修改/)).toBeInTheDocument()
+    const blocks = container.querySelectorAll('.thread-tool-preview-input-block')
+    expect(blocks).toHaveLength(2)
+    expect(blocks[0]?.querySelector('.thread-tool-preview-badge')).toHaveTextContent('替换全部')
+    expect(blocks[1]?.querySelector('.thread-tool-preview-badge')).toBeNull()
+    expect(blocks[1]?.querySelector('.is-input-new')?.textContent).toBe('TW')
+    // 摘要同样按条目数计数，且带出 replace_all。
+    expect(container.querySelector('.thread-tool-summary-detail'))
+      .toHaveTextContent('App.java [2 changes, replace_all]')
+  })
+
   it('shows a complete edit diff once editReview is provided', () => {
     const { container } = render(
       <ToolMessageBlock
@@ -797,8 +827,10 @@ describe('ToolMessageBlock per-tool bodies', () => {
           rendererKey: 'edit',
           arguments: JSON.stringify({
             path: 'App.java',
-            old_string: 'one\ntwo\nthree\nfour\nfive\nsix',
-            new_string: 'ONE\nTWO\nTHREE\nFOUR\nFIVE\nSIX',
+            edits: [{
+              old_string: 'one\ntwo\nthree\nfour\nfive\nsix',
+              new_string: 'ONE\nTWO\nTHREE\nFOUR\nFIVE\nSIX',
+            }],
           }),
           editReview: {
             path: 'App.java',

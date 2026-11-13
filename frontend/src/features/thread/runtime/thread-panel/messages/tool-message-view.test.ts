@@ -79,8 +79,10 @@ describe('buildToolMessageView', () => {
   it('distinguishes model argument streaming from a durable call awaiting execution', () => {
     const argumentsJson = JSON.stringify({
       path: 'App.java',
-      old_string: 'one\ntwo\nthree\nfour\nfive\nsix',
-      new_string: 'ONE\nTWO\nTHREE\nFOUR\nFIVE\nSIX',
+      edits: [{
+        old_string: 'one\ntwo\nthree\nfour\nfive\nsix',
+        new_string: 'ONE\nTWO\nTHREE\nFOUR\nFIVE\nSIX',
+      }],
     })
     const streaming = buildToolMessageView({
       message: message({
