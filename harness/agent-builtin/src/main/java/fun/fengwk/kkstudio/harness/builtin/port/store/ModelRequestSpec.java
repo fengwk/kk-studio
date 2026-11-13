@@ -62,7 +62,7 @@ public record ModelRequestSpec(
         toolBindings,
         subagentBindings,
         null,
-        Map.of("system", systemInstruction));
+        systemSections(systemInstruction));
   }
 
   public ModelRequestSpec(
@@ -110,7 +110,7 @@ public record ModelRequestSpec(
         toolBindings,
         subagentBindings,
         groupExecution,
-        Map.of("system", systemInstruction));
+        systemSections(systemInstruction));
   }
 
   public ModelRequestSpec(
@@ -134,7 +134,7 @@ public record ModelRequestSpec(
         toolBindings,
         subagentBindings,
         null,
-        Map.of("system", systemInstruction));
+        systemSections(systemInstruction));
   }
 
   public ModelRequestSpec {
@@ -194,6 +194,10 @@ public record ModelRequestSpec(
         subagentBindings,
         groupExecution,
         systemSections);
+  }
+
+  private static Map<String, String> systemSections(String systemInstruction) {
+    return systemInstruction == null ? Map.of() : Map.of("system", systemInstruction);
   }
 
   private static void requireUniqueToolBindings(List<ToolBinding> toolBindings) {
