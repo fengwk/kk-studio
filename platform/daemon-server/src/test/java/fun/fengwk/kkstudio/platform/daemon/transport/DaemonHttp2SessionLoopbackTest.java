@@ -190,6 +190,10 @@ class DaemonHttp2SessionLoopbackTest {
     fixture.sessions.openFuture.get(5, TimeUnit.SECONDS);
     assertNotNull(fixture.clientSession.whenSessionEstablished().get(5, TimeUnit.SECONDS));
 
+    // 断开 server → client 方向：Jetty 服务端会自动回 PING ACK，本测试要求 ACK 永不到达客户端，
+    // 否则 ACK 可能在两次调度之间取消 30 秒超时任务，使断言随执行时序抖动。
+    fixture.pair.serverPipe.link(null, fixture.pair.serverEndPoint);
+
     // 触发 15 秒 PING 定时任务，该任务发送 PING 帧并调度 30 秒 ACK 超时任务
     controlledScheduler.runScheduledTasks();
 
