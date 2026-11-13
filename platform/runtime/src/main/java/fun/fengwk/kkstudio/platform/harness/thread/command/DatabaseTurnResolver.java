@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.thread.command;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
 
@@ -69,6 +70,7 @@ import java.util.UUID;
  * <p>请求输入 token 估算只经内核端口 {@link RequestTokenEstimator} 注入；实现由组合根绑定到正式发送所用的同一估算算法，本类不复制算法、 不 import
  * 内核实现类型，也不依赖 {@code HarnessRuntime} 门面，因此 Resolver 在 platform 独立测试上下文里始终可以装配。
  */
+@Slf4j
 @Component
 public final class DatabaseTurnResolver implements TurnResolver {
 
@@ -505,7 +507,21 @@ public final class DatabaseTurnResolver implements TurnResolver {
       BranchSettings conversationSettings, CompactionPreparation preparation) {
     Objects.requireNonNull(preparation, "preparation");
     ModelSelection conversation = BuiltinExecution.model(conversationSettings.execution());
-    ResolvedSelection resolved = configuredCompactionSelection();
+    // 回退是设计行为，但只在真正执行压缩时告知一次配置与原因；请求前窗口判断不得重复刷日志。
+    ModelSelection configured = compactionModelProvider.compactionModel();
+    ResolvedSelection resolved = null;
+    if (configured != null) {
+      ConfiguredCompactionSelection candidate = resolveConfiguredSelection(configured);
+      if (candidate.resolved() == null) {
+        log.warn(
+            "configured compaction model {} is unusable ({}); falling back to the conversation"
+                + " model {}",
+            configured,
+            candidate.failureReason(),
+            conversation);
+      }
+      resolved = candidate.resolved();
+    }
     if (resolved == null) {
       resolved = resolveLogicalModel(conversation);
     }
@@ -584,20 +600,24 @@ public final class DatabaseTurnResolver implements TurnResolver {
         outputTokens);
   }
 
-  /** 已配置的压缩模型；未配置或无法解析（引用缺失、Provider 删除/停用、组带 variant）时返回 null 由调用方回退对话模型。 */
-  private ResolvedSelection configuredCompactionSelection() {
-    ModelSelection configured = compactionModelProvider.compactionModel();
-    if (configured == null) {
-      return null;
-    }
+  /** 已配置压缩模型的选择或不可用原因：引用缺失、Provider 删除/停用、组带 variant 都只影响本次回退。 */
+  private record ConfiguredCompactionSelection(ResolvedSelection resolved, String failureReason) {}
+
+  private ConfiguredCompactionSelection resolveConfiguredSelection(ModelSelection configured) {
     try {
-      return resolveLogicalModel(configured);
-    } catch (Rejection ignored) {
-      return null;
+      return new ConfiguredCompactionSelection(resolveLogicalModel(configured), null);
+    } catch (Rejection rejected) {
+      return new ConfiguredCompactionSelection(null, rejected.getMessage());
     }
   }
 
-  /** 触发阈值使用的压缩模型窗口；无效配置沿用对话模型窗口。 */
+  /** 已配置的压缩模型（仅用于请求前窗口判断；无效配置静默沿用对话模型窗口）。 */
+  private ResolvedSelection configuredCompactionSelection() {
+    ModelSelection configured = compactionModelProvider.compactionModel();
+    return configured == null ? null : resolveConfiguredSelection(configured).resolved();
+  }
+
+  /** 触发阈值使用的压缩模型窗口；无效配置沿用对话模型窗口，且不在这里记录回退日志。 */
   private int compactorContextWindow(int conversationContextWindow) {
     ResolvedSelection configured = configuredCompactionSelection();
     return configured == null ? conversationContextWindow : configured.contextWindow();

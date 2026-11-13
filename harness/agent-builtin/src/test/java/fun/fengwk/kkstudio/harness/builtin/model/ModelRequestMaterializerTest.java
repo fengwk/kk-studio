@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.sp
 import static fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds.id;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -72,6 +73,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
@@ -500,36 +502,99 @@ class ModelRequestMaterializerTest {
     assertEquals("latest-user", textOf(request.messages().get(3)));
   }
 
-  /** 压缩重建 prompt 前缀后，Claude 保留段不再重放旧签名 thinking；其它 Provider 原样保留。 */
+  /** 压缩重建 prompt 前缀后，只有 Claude 保留段不再重放旧签名 thinking；压缩后的新 assistant 与其它 Provider 原样保留。 */
   @Test
-  void compactionDropsClaudeThinkingFromTheRetainedTail() {
-    List<Entry> entries = new ArrayList<>();
-    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
-    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
-    entries.add(entry(3, 2, user("old user")));
-    entries.add(entry(4, 3, assistantWithThinking("old assistant")));
-    entries.add(
-        entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
-    CompactionStart completed = CompactionStart.pending(CompactionTrigger.THRESHOLD, id(4L));
-    entries.add(entry(6, 5, resolvedStart(TurnStartReason.COMPACTION, completed)));
-    entries.add(entry(7, 6, new CompactionPayload("summary", null)));
-    entries.add(
-        entry(8, 7, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, true, null, null)));
-    entries.add(entry(9, 8, resolvedStart(TurnStartReason.INPUT, null)));
-    entries.add(entry(10, 9, user("new user")));
-    entries.add(entry(11, 10, assistantWithThinking("new assistant")));
+  void compactionDropsClaudeThinkingOnlyFromTheRetainedSegment() {
+    List<Entry> entries = retainedSegmentPath(null);
 
     ProviderRequest anthropic =
         MATERIALIZER.materialize(new EntryPath(entries), anthropicSpec(bashBinding()));
-    assertEquals(4, anthropic.messages().size());
-    assertNoThinking(anthropic.messages().get(1));
-    assertNoThinking(anthropic.messages().get(3));
+    assertEquals(5, anthropic.messages().size());
+    assertEquals(
+        CompactionPrompts.compactedContext("summary"), textOf(anthropic.messages().get(0)));
+    // 保留段（切点之后、压缩结果之前）的旧 assistant 移除 thinking。
+    assertEquals(ProviderMessageRole.ASSISTANT, anthropic.messages().get(2).role());
+    assertNoThinking(anthropic.messages().get(2));
+    // 压缩之后的新 assistant 绑定新前缀，必须原样重放。
+    assertTrue(
+        anthropic.messages().get(4).contents().stream()
+            .anyMatch(ProviderThinkingBlock.class::isInstance));
 
     ProviderRequest openai =
         MATERIALIZER.materialize(new EntryPath(entries), liveSpec(bashBinding()));
     assertTrue(
-        openai.messages().get(1).contents().stream()
+        openai.messages().get(2).contents().stream()
             .anyMatch(ProviderThinkingBlock.class::isInstance));
+  }
+
+  /** 压缩后工具续作：新 assistant 的 thinking 与工具调用必须原样重放，否则 Anthropic 要求工具环路以 thinking 开头。 */
+  @Test
+  void compactionKeepsPostCompactionToolLoopThinking() {
+    List<Entry> entries =
+        retainedSegmentPath(
+            new AgentMessage(
+                AgentMessageRole.ASSISTANT,
+                List.of(
+                    new ThinkingMessageContent("new thinking"),
+                    new ToolCallMessageContent("call-1", "bash", "bash", "{}"))));
+
+    ProviderRequest request =
+        MATERIALIZER.materialize(new EntryPath(entries), anthropicSpec(bashBinding()));
+
+    assertEquals(6, request.messages().size());
+    ProviderMessage continuation = request.messages().get(4);
+    assertEquals(ProviderMessageRole.ASSISTANT, continuation.role());
+    assertInstanceOf(ProviderThinkingBlock.class, continuation.contents().getFirst());
+    assertTrue(
+        continuation.contents().stream().anyMatch(block -> block instanceof ProviderToolCallBlock));
+    // 未收到结果的调用仍由历史正规化补齐 synthetic TOOL 结果，thinking 与调用成对保留。
+    assertEquals(ProviderMessageRole.TOOL, request.messages().get(5).role());
+  }
+
+  /**
+   * 真实压缩形状：切点落在第一个 TURN_END，保留段是其后完整 turn，压缩结果之后才是新 turn。
+   *
+   * @param postCompactionAssistant 压缩之后新 assistant 的消息；{@code null} 时使用带 thinking 的纯文本回复
+   */
+  private static List<Entry> retainedSegmentPath(AgentMessage postCompactionAssistant) {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(3, 2, user("summarized user")));
+    entries.add(entry(4, 3, assistantWithThinking("summarized assistant")));
+    UUID summarizedEnd = id(5L);
+    entries.add(
+        entry(5, 4, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
+    // 保留段：切点之后的完整 turn（assistant 仍绑定旧前缀）。
+    entries.add(entry(6, 5, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(7, 6, user("retained user")));
+    entries.add(entry(8, 7, assistantWithThinking("retained assistant")));
+    entries.add(
+        entry(9, 8, new TurnEndPayload(id(6L), TurnEndOutcome.COMPLETED, false, null, null)));
+    CompactionStart completed = CompactionStart.pending(CompactionTrigger.THRESHOLD, summarizedEnd);
+    entries.add(entry(10, 9, resolvedStart(TurnStartReason.COMPACTION, completed)));
+    entries.add(entry(11, 10, new CompactionPayload("summary", null)));
+    entries.add(
+        entry(12, 11, new TurnEndPayload(id(10L), TurnEndOutcome.COMPLETED, true, null, null)));
+    entries.add(entry(13, 12, resolvedStart(TurnStartReason.INPUT, null)));
+    entries.add(entry(14, 13, user("new user")));
+    if (postCompactionAssistant == null) {
+      entries.add(entry(15, 14, assistantWithThinking("new assistant")));
+    } else {
+      entries.add(
+          new Entry(
+              id(15L),
+              id(100L),
+              id(14L),
+              new MessagePayload(
+                  postCompactionAssistant,
+                  new AssistantMessageMetadata(
+                      GenerationStopReason.COMPLETE,
+                      new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                  null),
+              T0));
+    }
+    return entries;
   }
 
   private static void assertNoThinking(ProviderMessage message) {

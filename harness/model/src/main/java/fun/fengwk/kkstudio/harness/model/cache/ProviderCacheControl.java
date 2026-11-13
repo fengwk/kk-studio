@@ -31,14 +31,9 @@ public record ProviderCacheControl(
     }
   }
 
-  /** 常规缓存控制：不带只读消息断点。 */
-  public ProviderCacheControl(PromptCacheRetention retention, String key) {
-    this(retention, key, null);
-  }
-
   /** 工厂：禁用 Provider 端缓存控制。 */
   public static ProviderCacheControl none() {
-    return new ProviderCacheControl(PromptCacheRetention.NONE, null);
+    return new ProviderCacheControl(PromptCacheRetention.NONE, null, null);
   }
 
   /**
@@ -50,12 +45,13 @@ public record ProviderCacheControl(
   public static ProviderCacheControl session(PromptCacheRetention retention, String sessionId) {
     Objects.requireNonNull(retention, "retention");
     if (retention == PromptCacheRetention.NONE) {
+      // NONE 忽略调用方标识，归一化为完全不启用缓存。
       return none();
     }
     if (sessionId == null || sessionId.isBlank()) {
       throw new IllegalArgumentException("sessionId must not be blank");
     }
-    return new ProviderCacheControl(retention, sessionId);
+    return new ProviderCacheControl(retention, sessionId, null);
   }
 
   /**
@@ -69,6 +65,7 @@ public record ProviderCacheControl(
       PromptCacheRetention retention, String sessionId, int messageIndex) {
     Objects.requireNonNull(retention, "retention");
     if (retention == PromptCacheRetention.NONE) {
+      // NONE 忽略调用方标识，归一化为完全不启用缓存。
       return none();
     }
     if (sessionId == null || sessionId.isBlank()) {

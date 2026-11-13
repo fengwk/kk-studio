@@ -149,7 +149,7 @@ Anthropic 每次最多放置 **4 个**断点：最后一个合格 tool、最后�
 
 ### OpenAI prompt cache 请求边界
 
-Chat 与 Responses 都只由运行时 `ProviderCacheControl` 决定缓存字段：`NONE` 不发任何 cache 字段；非 `NONE` 时 `prompt_cache_key` 直接使用运行时给的会话 key，`prompt_cache_retention` 按 `SHORT` / `LONG` 映射为 `in_memory` / `24h`。原生 `protocolOptions` 上的 `prompt_cache_key`、`prompt_cache_retention`、`prompt_cache_options` 等运行时独占字段一律拒绝；编码器不发送 `prompt_cache_options` 或 `prompt_cache_breakpoint`，不改写历史内容结构。缓存有效不等于必然命中：上游最小 token 长度、TTL、路由与上下文变化仍影响实际命中率。
+Chat 与 Responses 都只由运行时 `ProviderCacheControl` 决定缓存字段：`NONE` 不发任何 cache 字段；非 `NONE` 时 `prompt_cache_key` 直接使用运行时给的会话 key，`prompt_cache_retention` 按 `SHORT` / `LONG` 映射为 `in_memory` / `24h`。OpenAI 没有只读缓存模式：GPT-5.6+ 的 explicit breakpoint 在未命中时同样写入，开启 explicit 却不放断点等于关闭缓存，因此压缩分支与普通请求使用完全相同的 key 字段，接受一次正常写入，不尝试只读。原生 `protocolOptions` 上的 `prompt_cache_key`、`prompt_cache_retention`、`prompt_cache_options` 等运行时独占字段一律拒绝；编码器不发送 `prompt_cache_options` 或 `prompt_cache_breakpoint`，不改写历史内容结构。缓存有效不等于必然命中：上游最小 token 长度、TTL、路由与上下文变化仍影响实际命中率。
 
 ## 模型列表发现
 

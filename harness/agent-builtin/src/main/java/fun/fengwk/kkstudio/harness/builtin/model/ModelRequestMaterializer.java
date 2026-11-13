@@ -156,10 +156,11 @@ public final class ModelRequestMaterializer {
       }
     }
     int walkStart = 0;
+    // 保留段 = (切点, 压缩结果)：只有这里的 Claude thinking 绑定旧前缀，必须在重放时移除。
+    // 压缩之后新产生的 assistant 绑定新前缀，必须原样重放；否则 Anthropic 的工具续作会丢掉 thinking。
+    int thinkingDropFrom = -1;
+    int thinkingDropBefore = -1;
     var latest = CompactionTurns.latestComplete(path);
-    // 压缩重建了 prompt 前缀：保留段里 Claude thinking 的签名绑定的是旧前缀，必须只在该 Provider 重放时丢弃。
-    boolean dropClaudeThinking =
-        latest.isPresent() && spec.providerType() == ProviderType.ANTHROPIC;
     if (latest.isPresent()) {
       var complete = latest.get();
       int cutIndex = indexOfId(entries, complete.freezing().cutEntryId());
@@ -173,6 +174,10 @@ public final class ModelRequestMaterializer {
               AgentMessage.user(
                   CompactionPrompts.compactedContext(complete.result().summaryText()))));
       walkStart = cutIndex;
+      if (spec.providerType() == ProviderType.ANTHROPIC) {
+        thinkingDropFrom = cutIndex;
+        thinkingDropBefore = complete.resultIndex();
+      }
     }
     boolean inCompactionTurn = false;
     for (int i = walkStart; i < entries.size(); i++) {
@@ -205,8 +210,14 @@ public final class ModelRequestMaterializer {
       }
       if (payload instanceof MessagePayload message) {
         AgentMessage projected = message.message();
-        if (dropClaudeThinking && projected.role() == AgentMessageRole.ASSISTANT) {
+        if (projected.role() == AgentMessageRole.ASSISTANT
+            && i > thinkingDropFrom
+            && i < thinkingDropBefore) {
           projected = withoutThinking(projected);
+          if (projected.contents().isEmpty()) {
+            // 只剩 thinking 的 assistant 不得变成空消息：它本来就没有可回放的语义内容。
+            continue;
+          }
         }
         projectedMessages.add(
             new ProviderMessageProjector.ProjectedMessage(

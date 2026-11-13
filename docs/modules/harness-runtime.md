@@ -288,7 +288,7 @@ effectiveReserve = min(16384, maxOutputTokens)
 summaryBudget    = floor(0.8 * effectiveReserve)
 ```
 
-压缩执行模型来自 `aiRuntime.compactionModel`：可配置带 variant 的具体 MODEL，或不带 variant 的 MODEL_GROUP；未配置、无法解析、模型已删除或不可用时回退到会话当前模型与 variant。有效配置的执行失败只按普通模型调用重试并最终失败，不切换模型。压缩模型支持消息级 effort 时，分支请求在摘要指令之后声明 `low`；分支第一次请求复用主 Thread 已写入的 Claude 前缀缓存，仅在切点前最后一条 assistant 之前写一个只读断点，具体模型不同或缓存留存 TTL 已过时不写断点。OpenAI 协议当前只有 `prompt_cache_key` / `prompt_cache_retention`，没有显式只读缓存模式，因此分支沿用普通会话 key。
+压缩执行模型来自 `aiRuntime.compactionModel`：可配置带 variant 的具体 MODEL，或不带 variant 的 MODEL_GROUP；未配置、无法解析、模型已删除或不可用时回退到会话当前模型与 variant。有效配置的执行失败只按普通模型调用重试并最终失败，不切换模型。压缩模型支持消息级 effort 时，分支请求在摘要指令之后声明 `low`；分支第一次请求复用主 Thread 已写入的 Claude 前缀缓存，仅在切点前最后一条 assistant 之前写一个只读断点，具体模型不同或缓存留存 TTL 已过时不写断点。OpenAI 没有只读缓存模式：GPT-5.6+ 的 explicit breakpoint 模式在未命中时同样写入，而开启 explicit 模式却不放断点会关闭缓存；因此分支与其它请求一样只携带 `prompt_cache_key` / `prompt_cache_retention`，并接受一次正常写入。
 
 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 只在完整 turn 边界选切点：取第一个累计历史越过 `effectiveKeep` 的完整 turn 之前，始终保留最新模型调用 turn 及其工具结果，不切入 turn、工具回合或压缩结果。摘要文本逐字保存为单一 `COMPACTION` 结果；截断、过滤、工具调用、空结果或超出输出预算均视为失败，按普通模型调用重试策略处理。
 

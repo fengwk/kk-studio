@@ -219,7 +219,7 @@ class AnthropicHistoryCacheLiveProbeTest {
         "answer OK only",
         messages,
         List.of(),
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "probe"));
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "probe"));
   }
 
   private static ProviderMessage prefix() {

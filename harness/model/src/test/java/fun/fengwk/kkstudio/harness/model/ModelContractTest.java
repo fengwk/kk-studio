@@ -319,13 +319,10 @@ class ModelContractTest {
         ProviderCacheControl.none(), ProviderCacheControl.session(PromptCacheRetention.NONE, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ProviderCacheControl(PromptCacheRetention.NONE, "key"));
+        () -> ProviderCacheControl.session(PromptCacheRetention.SHORT, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ProviderCacheControl(PromptCacheRetention.SHORT, null));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new ProviderCacheControl(PromptCacheRetention.SHORT, "  "));
+        () -> ProviderCacheControl.session(PromptCacheRetention.SHORT, "  "));
     ProviderCacheControl control =
         ProviderCacheControl.session(PromptCacheRetention.LONG, "session-1");
     assertEquals(PromptCacheRetention.LONG, control.retention());

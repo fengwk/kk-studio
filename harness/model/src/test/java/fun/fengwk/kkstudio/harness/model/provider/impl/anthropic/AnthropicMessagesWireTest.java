@@ -1189,7 +1189,7 @@ class AnthropicMessagesWireTest {
   @Test
   void should_cache_system_message() throws Exception {
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1212,7 +1212,7 @@ class AnthropicMessagesWireTest {
     ProviderToolDefinition tool2 =
         new ProviderToolDefinition("t2", "desc2", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1238,7 +1238,7 @@ class AnthropicMessagesWireTest {
   void should_cache_system_message_and_tools() throws Exception {
     ProviderToolDefinition tool = new ProviderToolDefinition("t", "desc", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1255,7 +1255,7 @@ class AnthropicMessagesWireTest {
   @Test
   void should_cache_system_message_with_long_retention_and_1h_ttl() throws Exception {
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.LONG, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.LONG, "test-aff");
 
     ProviderDescriptor descriptor = createDescriptor(null);
     ProviderRequest request =
@@ -1282,7 +1282,7 @@ class AnthropicMessagesWireTest {
 
     // 1. SHORT retention
     ProviderCacheControl shortCache =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
     ProviderRequest reqShort =
         createRequest("claude-3-5-sonnet", null, List.of(u1, a1, u2), null, shortCache);
     AnthropicEncodedRequest encShort = encoder.encode(reqShort, descriptor);
@@ -1294,7 +1294,7 @@ class AnthropicMessagesWireTest {
 
     // 2. LONG retention
     ProviderCacheControl longCache =
-        new ProviderCacheControl(PromptCacheRetention.LONG, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.LONG, "test-aff");
     ProviderRequest reqLong =
         createRequest("claude-3-5-sonnet", null, List.of(u1, a1, u2), null, longCache);
     AnthropicEncodedRequest encLong = encoder.encode(reqLong, descriptor);
@@ -1309,7 +1309,7 @@ class AnthropicMessagesWireTest {
   void should_place_fixed_cache_markers_newest_first_up_to_budget() throws Exception {
     ProviderToolDefinition tool = new ProviderToolDefinition("t", "desc", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
-        new ProviderCacheControl(PromptCacheRetention.SHORT, "test-aff");
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
 
     ProviderMessage u1 = userTextMsg("Turn 1");
     ProviderMessage a1 =
