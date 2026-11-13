@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -78,6 +79,60 @@ class AnthropicPerTurnEffortTest {
   }
 
   @Test
+  void requestBytesExtendEarlierTurnWhenEffortChangesAndCacheBreakpointMoves() throws Exception {
+    List<ProviderMessage> history =
+        List.of(
+            user("first user"),
+            assistant(null),
+            user("second user"),
+            assistant(null),
+            user("third user"),
+            assistant(null),
+            user("fourth user"),
+            assistant(null),
+            user("request N"));
+    ProviderCacheControl cacheControl =
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "effort-prefix");
+    byte[] requestN = encode(MESSAGE_LEVEL_MODEL, "low", history, cacheControl).bodyUtf8Bytes();
+
+    List<ProviderMessage> nextHistory = new ArrayList<>(history);
+    nextHistory.add(assistant("low"));
+    nextHistory.add(user("request N+1"));
+    byte[] requestNPlusOne =
+        encode(MESSAGE_LEVEL_MODEL, "high", nextHistory, cacheControl).bodyUtf8Bytes();
+
+    JsonNode before = MAPPER.readTree(requestN);
+    JsonNode after = MAPPER.readTree(requestNPlusOne);
+    assertTrue(before.path("messages").get(4).path("content").get(0).has("cache_control"));
+    assertFalse(after.path("messages").get(4).path("content").get(0).has("cache_control"));
+    assertBytesPrefixAfterRemovingMovingCacheBreakpoint(requestN, requestNPlusOne, 4);
+  }
+
+  @Test
+  void keepsSystemMessageAndEffortChangeAtTheSamePositionPrefixStable() throws Exception {
+    List<ProviderMessage> history =
+        List.of(user("previous"), assistant("low"), system("system update"));
+    byte[] requestN =
+        encode(MESSAGE_LEVEL_MODEL, "high", history, ProviderCacheControl.none()).bodyUtf8Bytes();
+
+    List<ProviderMessage> nextHistory = new ArrayList<>(history);
+    nextHistory.add(assistant("high"));
+    nextHistory.add(user("next"));
+    byte[] requestNPlusOne =
+        encode(MESSAGE_LEVEL_MODEL, "medium", nextHistory, ProviderCacheControl.none())
+            .bodyUtf8Bytes();
+
+    JsonNode before = MAPPER.readTree(requestN);
+    JsonNode after = MAPPER.readTree(requestNPlusOne);
+    assertEquals(
+        "high", before.path("messages").get(2).path("output_config").path("effort").asString());
+    assertEquals(
+        "high", after.path("messages").get(2).path("output_config").path("effort").asString());
+    assertEquals("assistant", after.path("messages").get(3).path("role").asString());
+    assertBytesPrefix(requestN, requestNPlusOne);
+  }
+
+  @Test
   void insertsOnlySameModelLevelChangesBeforeTheirRepliesAndMergesSystemAtPosition() {
     ArrayNode messages = MAPPER.createArrayNode();
     messages.add(message("user"));
@@ -141,6 +196,14 @@ class AnthropicPerTurnEffortTest {
 
   private static AnthropicEncodedRequest encode(
       ModelDescriptor model, String effort, List<ProviderMessage> messages) {
+    return encode(model, effort, messages, ProviderCacheControl.none());
+  }
+
+  private static AnthropicEncodedRequest encode(
+      ModelDescriptor model,
+      String effort,
+      List<ProviderMessage> messages,
+      ProviderCacheControl cacheControl) {
     ProviderRequest request =
         new ProviderRequest(
             model,
@@ -149,8 +212,27 @@ class AnthropicPerTurnEffortTest {
             "system",
             messages,
             List.of(),
-            ProviderCacheControl.none());
+            cacheControl);
     return new AnthropicRequestEncoder().encode(request, PROVIDER);
+  }
+
+  private static void assertBytesPrefix(byte[] before, byte[] after) {
+    byte[] expectedPrefix = Arrays.copyOf(before, before.length - 2);
+    assertArrayEquals(expectedPrefix, Arrays.copyOf(after, expectedPrefix.length));
+  }
+
+  private static void assertBytesPrefixAfterRemovingMovingCacheBreakpoint(
+      byte[] before, byte[] after, int messageIndex) throws Exception {
+    ObjectNode normalizedBefore = (ObjectNode) MAPPER.readTree(before);
+    ObjectNode movedBlock =
+        (ObjectNode) normalizedBefore.path("messages").get(messageIndex).path("content").get(0);
+    assertTrue(movedBlock.has("cache_control"));
+    movedBlock.remove("cache_control");
+
+    JsonNode afterWire = MAPPER.readTree(after);
+    assertFalse(
+        afterWire.path("messages").get(messageIndex).path("content").get(0).has("cache_control"));
+    assertBytesPrefix(MAPPER.writeValueAsBytes(normalizedBefore), after);
   }
 
   private static JsonNode body(AnthropicEncodedRequest encoded) {
@@ -164,6 +246,10 @@ class AnthropicPerTurnEffortTest {
   private static ProviderMessage assistant(String effort) {
     return new ProviderMessage(
         ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")), effort);
+  }
+
+  private static ProviderMessage system(String text) {
+    return new ProviderMessage(ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock(text)));
   }
 
   private static ObjectNode message(String role) {
