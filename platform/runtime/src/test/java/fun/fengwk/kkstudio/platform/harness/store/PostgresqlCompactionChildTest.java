@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
 import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
@@ -71,6 +72,7 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
@@ -79,6 +81,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
@@ -97,12 +100,17 @@ import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
+import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -702,6 +710,46 @@ class PostgresqlCompactionChildTest {
 
     // 父无 ModelInvocation
     assertTrue(findModelInvocationByTurn(parentId, compactionStartEntry.id()).isEmpty());
+
+    // f. 下一次请求：新 SYSTEM 基线 + 摘要 wrapper + 保留尾部，切点前历史不再回放。
+    processNext(parentId);
+    EntryPath requestPath = path(parentId);
+    UUID retryTurnId = requestPath.openTurnStart().orElseThrow().id();
+    ModelInvocation retryInvocation =
+        store.transaction(
+            tx ->
+                builtin(store, tx).findModelInvocationByTurn(parentId, retryTurnId).orElseThrow());
+    ProviderRequest request =
+        new ModelRequestMaterializer().materialize(requestPath, retryInvocation.requestSpec());
+    List<String> requestTexts =
+        request.messages().stream().map(PostgresqlCompactionChildTest::messageText).toList();
+    assertEquals(CompactionPrompts.compactedContext(childSummaryText), requestTexts.getFirst());
+    assertTrue(
+        requestTexts.stream().anyMatch(text -> text.contains("user asks a very long question")));
+    assertFalse(requestTexts.stream().anyMatch(text -> text.contains("historical user ")));
+    assertFalse(requestTexts.stream().anyMatch(text -> text.contains("historical assistant ")));
+
+    int lastBaselineIndex = -1;
+    int lastCompactionIndex = -1;
+    for (int i = 0; i < requestPath.entries().size(); i++) {
+      EntryPayload payload = requestPath.entries().get(i).payload();
+      if (payload instanceof SystemPayload system && system.baseline()) {
+        lastBaselineIndex = i;
+      } else if (payload instanceof CompactionPayload) {
+        lastCompactionIndex = i;
+      }
+    }
+    assertTrue(lastBaselineIndex > lastCompactionIndex);
+  }
+
+  private static String messageText(ProviderMessage message) {
+    StringBuilder text = new StringBuilder();
+    for (ProviderContentBlock block : message.contents()) {
+      if (block instanceof ProviderTextBlock textBlock) {
+        text.append(textBlock.text());
+      }
+    }
+    return text.toString();
   }
 
   /**
@@ -755,6 +803,52 @@ class PostgresqlCompactionChildTest {
     assertTrue(store.transaction(tx -> tx.sessions().find(baseline.sessionId())).isEmpty());
     assertNull(store.transaction(tx -> tx.entries().find(baseline.rootEntryId()).orElse(null)));
     assertNull(store.transaction(tx -> tx.entries().find(parentPath.head().id()).orElse(null)));
+  }
+
+  /** compact 工具的成功回执在 PostgreSQL 上排队 MANUAL 压缩：批次结束后的安全边界才创建分支。 */
+  @Test
+  void compactToolResultQueuesManualCompaction() {
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    compactionRequired.set(false);
+    seedCompactToolTurn(parentId, baseline);
+    requestThreadWork(parentId);
+
+    processNext(parentId);
+
+    EntryPath path = path(parentId);
+    TurnStartPayload start = assertInstanceOf(TurnStartPayload.class, path.head().payload());
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
+    UUID childThreadId = start.compaction().childThreadId();
+    store.transaction(
+        tx -> {
+          ThreadState parent = tx.threads().lock(parentId).orElseThrow();
+          ThreadState child = tx.threads().lock(childThreadId).orElseThrow();
+          assertEquals(parent.sessionId(), child.sessionId());
+          assertEquals(parentId, child.parentThreadId());
+          return null;
+        });
+  }
+
+  /** 手动压缩在 PostgreSQL 上原子提交 MANUAL COMPACTION turn 与同 Session 分支。 */
+  @Test
+  void manualCompactionCreatesSameSessionBranch() {
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    long version = snapshot(parentId).thread().version();
+
+    CompactThreadResult result = runtime.compactThread(new CompactThreadCommand(parentId, version));
+
+    EntryPath path = path(parentId);
+    TurnStartPayload start = assertInstanceOf(TurnStartPayload.class, path.head().payload());
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
+    assertEquals(result.childThreadId(), start.compaction().childThreadId());
+    assertEquals(
+        baseline.sessionId(),
+        store.transaction(
+            tx -> tx.threads().find(result.childThreadId()).orElseThrow().sessionId()));
   }
 
   /** 普通请求因上下文溢出失败后只规划一次 OVERFLOW 压缩；重试再次溢出时直接失败，绝不递归压缩。 */
@@ -1926,6 +2020,91 @@ class PostgresqlCompactionChildTest {
         MAX_OUTPUT_TOKENS,
         null,
         null);
+  }
+
+  /** 在基线历史之后追加一个以 compact 成功回执结束、仍要求续作的普通 INPUT turn。 */
+  private void seedCompactToolTurn(UUID threadId, ClosedTurnBaseline baseline) {
+    store.transaction(
+        tx -> {
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          UUID turnStart = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      baseline.sessionId(),
+                      thread.headEntryId(),
+                      resolvedInputTurnStart(threadId),
+                      T1));
+          UUID user = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      user,
+                      baseline.sessionId(),
+                      turnStart,
+                      new MessagePayload(AgentMessage.user("please compact"), null, null),
+                      T1));
+          UUID assistant = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant,
+                      baseline.sessionId(),
+                      user,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new ToolCallMessageContent(
+                                      "call-compact", "compact", "compact", "{}"))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE,
+                              new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                          null),
+                      T1));
+          UUID result = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      result,
+                      baseline.sessionId(),
+                      assistant,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.TOOL,
+                              List.of(
+                                  new ToolResultMessageContent(
+                                      "call-compact",
+                                      "compact",
+                                      "compact",
+                                      List.of(new TextMessageContent("compaction queued")),
+                                      false,
+                                      "{}"))),
+                          null,
+                          new ToolResultMetadata(
+                              tx.nextId(),
+                              assistant,
+                              "call-compact",
+                              0,
+                              ToolResultStatus.SUCCEEDED,
+                              false,
+                              null,
+                              null,
+                              "compact")),
+                      T1));
+          UUID end = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      end,
+                      baseline.sessionId(),
+                      result,
+                      new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, true, null, null),
+                      T1));
+          tx.threads().update(thread.advanceHead(end, T1));
+          return null;
+        });
   }
 
   private UUID seedUserCommand(UUID threadId, String text) {
