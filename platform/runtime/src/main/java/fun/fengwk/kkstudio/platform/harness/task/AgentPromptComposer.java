@@ -36,15 +36,6 @@ public final class AgentPromptComposer {
     this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
   }
 
-  /**
-   * 按固定顺序组合 {@code [agent] -> [harness] -> [paths] -> [environment] -> [skills] -> [subagents]}。
-   *
-   * <p>段落与句子只由实际注入的工具、Environment、Skills 与子 Agent 决定；空段落整段省略，段间保留一个空行。
-   */
-  public String compose(AgentPromptInput input) {
-    return String.join("\n\n", composeSections(input).values());
-  }
-
   /** Returns each rendered section separately so the history can persist only changed sections. */
   public Map<String, String> composeSections(AgentPromptInput input) {
     Objects.requireNonNull(input, "input");
