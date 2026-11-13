@@ -48,13 +48,17 @@ public final class TokenEstimator {
 
   private TokenEstimator() {}
 
-  /**
-   * 估算一次普通请求的输入 token：调用方准备好的 system instruction 与当前 path 的可见对话投影之和。供 Turn 解析计算「剩余上下文」
-   * 输出预算，不参与压缩切分。
-   */
-  public static long estimateRequestTokens(EntryPath path, String systemInstruction) {
-    Objects.requireNonNull(systemInstruction, "systemInstruction");
-    return Math.addExact(estimateTextTokens(systemInstruction), estimateProjectionTokens(path));
+  /** 估算一次普通请求的输入 token：本次将发送的 system 消息文本与当前 path 的可见对话投影之和。供 Turn 解析计算「剩余上下文」输出预算，不参与压缩切分。 */
+  public static long estimateRequestTokens(EntryPath path, List<String> systemMessages) {
+    Objects.requireNonNull(path, "path");
+    Objects.requireNonNull(systemMessages, "systemMessages");
+    long tokens = 0L;
+    for (String message : systemMessages) {
+      tokens =
+          Math.addExact(
+              tokens, estimateTextTokens(Objects.requireNonNull(message, "system message")));
+    }
+    return Math.addExact(tokens, estimateProjectionTokens(path));
   }
 
   /** 以最新 complete 压缩 projection 估算当前 provider 上下文 token（wrapper summary + cut 后保留段）。 */

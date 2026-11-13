@@ -23,7 +23,7 @@ Join                         一次子执行委派的票据，只记凭据与冻
 
 [`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 是外部与内核交互的同步命令与控制入口，覆盖命令接受与 spawn、Stop、审批与人工输入、YOLO 与重命名、手工压缩，以及快照、执行树与 Join 查询。
 
-同一个门面还承担只读规划事实，调用方无需接触实现类：`previewInputCandidatePath` 用正式规划装配尚未落库命令 batch 的 candidate 路径，`findCompactionTurnStart` 按结果 Entry 返回已关闭压缩 turn 冻结的元数据（缺失即 fail closed）。两者都是纯委托，不写 durable 状态，也不复制算法。请求输入 token 估算不经过门面：算法作为 [`runtime.compaction.TokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/TokenEstimator.java) 留在实现层，内核外部只经 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 端口消费，端口实现由组合根以方法引用绑定，因此既没有第二份口径，也不需要任何 Runtime bean 参与装配。
+同一个门面还承担只读规划事实，调用方无需接触实现类：`previewInputCandidatePath` 用正式规划装配尚未落库命令 batch 的 candidate 路径，`findCompactionTurnStart` 按结果 Entry 返回已关闭压缩 turn 冻结的元数据（缺失即 fail closed）。两者都是纯委托，不写 durable 状态，也不复制算法。请求输入 token 估算不经过门面：算法作为 [`runtime.compaction.TokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/TokenEstimator.java) 留在实现层，内核外部只经 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 端口消费，端口接收当前请求实际发送的 system message 列表（collapsed 协议为折叠后的 baseline 与变更文本，增量协议为独立的 baseline / change messages），实现由组合根以方法引用绑定，因此既没有第二份口径，也不需要任何 Runtime bean 参与装配。
 
 每个控制操作在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/store/HarnessStore.java) 内完成全部写入并原子提交；手工压缩也只用一个短事务（锁内复验、同步 resolve、提交）。查询同样走 Store 事务，快照查询会加锁。Stop 的本地取消登记在 `afterCommit` 上，只在物理事务真正提交后执行，外层回滚即不取消，取消失败也不回滚已提交的事实。
 
@@ -46,6 +46,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 | --- | --- |
 | `ROOT` | 唯一根，保存初始 [`BranchSettings`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/BranchSettings.java)：agent、[`ExecutionSelection`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/entry/ExecutionSelection.java)（`driver` + `settings` JSON 对象）与可空的 Environment name |
 | `TURN_START` | 打开回合，冻结完整 settings、实际执行配置 `executedSelection`、owner Thread、启动原因（`INPUT` / `CONTINUATION` / `COMPACTION` / `STOP`）与解析出的上下文窗口和输出预算 |
+| `SYSTEM` | 回合间的系统上下文基线或增量，保存具名 prompt sections 与完整工具定义 |
 | `MESSAGE` | USER / ASSISTANT / TOOL 消息；assistant 原生 Provider 数据保存在各自内容块上 |
 | `CUSTOM_MESSAGE` | 可信调用方注入的消息 |
 | `MODEL_ATTEMPT_FAILURE` | 与 Provider 无关的重试审计 |
@@ -61,10 +62,12 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 [`EntryPath`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/history/EntryPath.java) 是从 `ROOT` 到 head 的不可变连续路径（同 Session、父链相接、ID 不重复、首节点是唯一的 `ROOT`）。[`EntrySlice`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/history/EntrySlice.java) 是同一条链的读取视图：`baseEntryId` 为空时就是这条完整路径；非空时只含该祖先之后、不含游标本身的连续子链，空列表表示游标就是 head。增量不满足 `EntryPath` 的 ROOT 约束，不能当作完整路径使用。[`TurnPathValidator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/history/TurnPathValidator.java) 在其上校验回合文法：
 
-- `SETTINGS`、`FORK`、`NATIVE_COMPACTION` 是透明节点，不打开也不关闭回合，且只能位于回合之间；其余节点必须落在唯一 open 的 `TURN_START` 内，前一回合未关闭时不得再开。
+- `SETTINGS`、`FORK`、`NATIVE_COMPACTION` 是透明节点，不打开也不关闭回合，且只能位于回合之间；`SYSTEM` 同样只能位于回合之间，并在后续使用该上下文的 `TURN_START` 之前；其余节点必须落在唯一 open 的 `TURN_START` 内，前一回合未关闭时不得再开。
 - 每回合至多一个 Assistant 结果（ASSISTANT 消息、`ASSISTANT_ERROR`、`ASSISTANT_ABORTED` 或 `COMPACTION`）；TOOL 消息紧随带 `ToolCall` 的 ASSISTANT 消息，`callIndex` 从 0 起严格连续，调用 ID、工具名与所属 Assistant 精确匹配。
 - `INPUT` 回合在 Assistant 结果前至少有一条 USER 或 `CUSTOM_MESSAGE`；`CONTINUATION` 偿还上一回合的 `continueModel=true`，不消费用户消息；`COMPACTION` 不出现 USER 或 `CUSTOM_MESSAGE`，成功结果只能是 `COMPACTION`；`STOP` 是显式停止的持久屏障，只含一条 `ASSISTANT_ERROR(CANCELLED)` 与随后的 `STOPPED` `TURN_END`。
 - `TURN_END` 只能关闭当前 open 的回合，并按结局校验前置条件。路径可以在任意前缀截断，用于恢复未闭合的回合。
+
+`SYSTEM` Entry 是每条 Thread 路径的持久请求上下文：首条记录具名 system prompt sections 与完整 client / vendor-hosted tool definitions，之后只追加变更的 sections / tools；路径规约出的当前上下文用于规划下一回合。首次基线或上下文变化与对应 `TURN_START` 在同一事务提交，未变化时复用现有基线。分支沿用来源路径上的 SYSTEM Entries；完整工具定义只在 SYSTEM 中保存，`TURN_START` 与 tool-result metadata 只保留工具名。压缩回合不重建基线，压缩后的普通回合需要新基线。
 
 ## Thread
 

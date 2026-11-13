@@ -46,6 +46,8 @@ import fun.fengwk.kkstudio.harness.api.history.ModelAttemptFailurePayload;
 import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
+import fun.fengwk.kkstudio.harness.api.history.SystemContext;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -1749,6 +1751,27 @@ class DatabaseTurnResolverTest {
         List.of(new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW)));
   }
 
+  /** A stored baseline and change force request planning to estimate the persisted context. */
+  private static EntryPath systemHistoryPath(BranchSettings settings) {
+    return new EntryPath(
+        List.of(
+            new Entry(id(1), SESSION_ID, null, new RootPayload(settings), NOW),
+            new Entry(
+                id(2),
+                SESSION_ID,
+                id(1),
+                new SystemPayload(
+                    Map.of("legacy", "[legacy] baseline"), List.of(), List.of(), true),
+                NOW.plusSeconds(1)),
+            new Entry(
+                id(3),
+                SESSION_ID,
+                id(2),
+                new SystemPayload(
+                    Map.of("legacy", "[legacy] stored change"), List.of(), List.of(), false),
+                NOW.plusSeconds(2))));
+  }
+
   /** ROOT + INPUT turn + USER + ASSISTANT，供压缩 materialize 按冻结 Entry IDs 取摘要范围。 */
   private static EntryPath compactionHistoryPath(
       BranchSettings settings, CompactionPreparation preparation) {
@@ -2092,7 +2115,7 @@ class DatabaseTurnResolverTest {
 
     // 上下文只剩 37 token 时严格取 remaining，不应用正数钳位或 variant 回退。
     long estimatedInputTokens =
-        TokenEstimator.estimateRequestTokens(path, resolved.spec().systemInstruction());
+        TokenEstimator.estimateRequestTokens(path, List.of(resolved.spec().systemInstruction()));
     fixture.modelLimits(estimatedInputTokens + 37, 600);
     resolved = fixture.resolvedResult(path, null);
     assertEquals(37, resolved.maxOutputTokens());
@@ -2111,6 +2134,66 @@ class DatabaseTurnResolverTest {
     Fixture explicit = new Fixture(List.of(), List.of(), List.of());
     assertEquals(1024, explicit.resolved(explicit.path(settings("default"))).outputTokens());
     assertEquals(1024, explicit.resolved(explicit.path(settings("custom"))).outputTokens());
+  }
+
+  /**
+   * Collapsed protocols estimate the stored baseline, history changes, and pending section change.
+   */
+  @Test
+  void estimatesCollapsedSystemContextInsteadOfCurrentFlatPrompt() {
+    Fixture fixture = new Fixture(List.of(), List.of(), List.of());
+    EntryPath path = systemHistoryPath(settings("default"));
+
+    LiveTurnPlan.Planned planned = fixture.planned(path);
+    SystemContext existing = path.systemContext().orElseThrow();
+    SystemPayload pending =
+        existing
+            .changesTo(
+                new SystemContext(
+                    planned.spec().systemSections(), existing.tools(), existing.hostedTools()))
+            .orElseThrow();
+    String expected =
+        SystemContext.collapseSystemInstruction(path.entries())
+            + "\n\n"
+            + SystemContext.renderChangeText(pending);
+
+    assertEquals(List.of(expected), fixture.estimatedSystemMessages);
+    assertNotEquals(List.of(planned.spec().systemInstruction()), fixture.estimatedSystemMessages);
+  }
+
+  /** Claude estimates baseline and each persisted or pending SYSTEM message separately. */
+  @Test
+  void estimatesClaudeBaselineAndSystemChangeMessagesSeparately() {
+    Fixture fixture =
+        new Fixture(
+            List.of(),
+            List.of(),
+            List.of(),
+            Set.of(),
+            ProviderType.ANTHROPIC,
+            ProviderType.ANTHROPIC,
+            PromptCacheRetention.NONE,
+            true);
+    fixture.modelSupportsMidConversationSystemMessages(true);
+    EntryPath path = systemHistoryPath(settings("default"));
+
+    LiveTurnPlan.Planned planned = fixture.planned(path);
+    SystemContext existing = path.systemContext().orElseThrow();
+    SystemPayload pending =
+        existing
+            .changesTo(
+                new SystemContext(
+                    planned.spec().systemSections(), existing.tools(), existing.hostedTools()))
+            .orElseThrow();
+    SystemPayload stored = (SystemPayload) path.entries().getLast().payload();
+
+    assertEquals(
+        List.of(
+            SystemContext.baselineSystemInstruction(path.entries()),
+            SystemContext.renderChangeText(stored),
+            SystemContext.renderChangeText(pending)),
+        fixture.estimatedSystemMessages);
+    assertNotEquals(List.of(planned.spec().systemInstruction()), fixture.estimatedSystemMessages);
   }
 
   @Test
@@ -2839,8 +2922,10 @@ class DatabaseTurnResolverTest {
     private Provider provider;
     private final ProviderFactory providerFactory = mock(ProviderFactory.class);
 
-    /** 输入 token 估算与正式发送同源：Fixture 用同一 runtime 实现绑定端口，测试期望值也来自该实现。 */
+    /** 输入 token 估算与正式发送同源：Fixture 记录本次 system 消息并委托给同一 runtime 实现。 */
     private final DatabaseTurnResolver resolver;
+
+    private List<String> estimatedSystemMessages = List.of();
 
     private Fixture(List<String> tools, List<String> skills, List<ToolDescriptor> hostDescriptors) {
       this(tools, skills, hostDescriptors, (HarnessCatalog) null);
@@ -3092,7 +3177,10 @@ class DatabaseTurnResolverTest {
                           ProviderFactory::providerType, Function.identity())),
               () -> new CompactionConfig(20_000),
               contextResolver,
-              TokenEstimator::estimateRequestTokens);
+              (path, systemMessages) -> {
+                estimatedSystemMessages = List.copyOf(systemMessages);
+                return TokenEstimator.estimateRequestTokens(path, systemMessages);
+              });
     }
 
     /** 把 branch 可见的不可变 Environment name 注册为内部路由身份。 */
@@ -3202,7 +3290,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   tools,
                   parsed.reasoning(),
-                  false,
+                  parsed.midConversationSystemMessages(),
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3223,8 +3311,24 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   parsed.tools(),
                   parsed.reasoning(),
-                  false,
+                  parsed.midConversationSystemMessages(),
                   List.of(new ModelVariant("default", null, PromptCacheRetention.NONE, null)),
+                  parsed.defaultVariant(),
+                  parsed.pricing()));
+    }
+
+    private void modelSupportsMidConversationSystemMessages(boolean supported) {
+      ParsedAgentModelConfig parsed = parsedModel();
+      when(modelConfigParser.parse("model-config"))
+          .thenReturn(
+              new ParsedAgentModelConfig(
+                  parsed.contextWindow(),
+                  parsed.maxOutputTokens(),
+                  parsed.inputModalities(),
+                  parsed.tools(),
+                  parsed.reasoning(),
+                  supported,
+                  parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
     }
@@ -3239,7 +3343,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   parsed.tools(),
                   reasoning,
-                  false,
+                  parsed.midConversationSystemMessages(),
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
