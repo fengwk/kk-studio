@@ -262,7 +262,10 @@ func (u dynamicResourceUploader) Upload(ctx context.Context, invocationID string
 }
 
 func skillCapability(current func() config.DaemonConfig, networks *networkRuntimeStore, control *runtimeResourceControl) daemonruntime.CapabilityExecutor {
-	return func(ctx context.Context, call daemonruntime.CapabilityCall, _ daemonruntime.CapabilityContext) (daemonruntime.CapabilityResult, error) {
+	return func(ctx context.Context, call daemonruntime.CapabilityCall, capability daemonruntime.CapabilityContext) (daemonruntime.CapabilityResult, error) {
+		if capability.ConfirmExecutionExit != nil {
+			defer capability.ConfirmExecutionExit()
+		}
 		applied := current()
 		network, release, err := networks.acquire()
 		if err != nil {

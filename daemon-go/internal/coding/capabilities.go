@@ -66,9 +66,25 @@ func (p Provider) Capabilities() map[string]runtime.CapabilityExecutor {
 		"process.exec":     processCapability,
 	}
 	for id, handler := range handlers {
-		handlers[id] = limitOutput(handler)
+		handler = limitOutput(handler)
+		if id != "process.exec" {
+			handler = confirmExecutionExit(handler)
+		}
+		handlers[id] = handler
 	}
 	return handlers
+}
+
+// confirmExecutionExit reports that an in-process capability has no surviving
+// execution scope. process.exec and LSP capabilities confirm their own process
+// lifetimes instead.
+func confirmExecutionExit(handler runtime.CapabilityExecutor) runtime.CapabilityExecutor {
+	return func(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
+		if capability.ConfirmExecutionExit != nil {
+			defer capability.ConfirmExecutionExit()
+		}
+		return handler(ctx, call, capability)
+	}
 }
 
 func limitOutput(handler runtime.CapabilityExecutor) runtime.CapabilityExecutor {
