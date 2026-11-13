@@ -110,7 +110,7 @@ func TestRuntimeDoesNotRetryRegistrationRejection(t *testing.T) {
 
 type rejectingConnectionFactory struct{ calls atomic.Int32 }
 
-func (f *rejectingConnectionFactory) Connect(context.Context) (Connection, error) {
+func (f *rejectingConnectionFactory) Connect(context.Context, ControlObserver) (Connection, error) {
 	f.calls.Add(1)
 	return nil, ErrRegistrationRejected
 }
@@ -159,7 +159,7 @@ type retryingConnectionFactory struct {
 	connection Connection
 }
 
-func (f *retryingConnectionFactory) Connect(context.Context) (Connection, error) {
+func (f *retryingConnectionFactory) Connect(context.Context, ControlObserver) (Connection, error) {
 	if f.calls.Add(1) == 1 {
 		return nil, errors.New("temporary connect failure")
 	}
