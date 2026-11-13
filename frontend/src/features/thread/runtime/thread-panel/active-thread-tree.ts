@@ -12,10 +12,12 @@ export interface ActiveThreadTreeRow {
   isLast: boolean
 }
 
-/** 完整执行树是唯一事实源；非法父链与冲突快照不得伪造成有效树。 */
+/** 完整执行树是唯一事实源；非法的父链与冲突快照不得伪造成有效树。 */
 export function projectThreadTree(nodes: readonly ActiveThreadTreeNode[]) {
+  // COMPACTION 分支只从压缩卡进入，永远不是执行树的一部分；后端已排除，这里再兜底过滤。
+  const executionNodes = nodes.filter((node) => node.kind !== 'COMPACTION')
   const nodesById = new Map<string, ActiveThreadTreeNode>()
-  for (const node of nodes) {
+  for (const node of executionNodes) {
     const previous = nodesById.get(node.threadId)
     if (previous != null) {
       if (signature(previous) !== signature(node)) {

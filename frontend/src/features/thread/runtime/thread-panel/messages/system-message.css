@@ -30,3 +30,38 @@
 .thread-system-message-body .md-root > .md-raw-text {
   display: block;
 }
+
+/*
+ * 压缩卡：标题旁只补一句结果说明，状态色由统一 disclosure tone 提供。
+ * 摘要正文仍走系统消息正文样式，不引入第二套排版。
+ */
+.thread-compaction-note {
+  display: block;
+  margin-top: var(--space-1);
+  color: var(--fg-muted);
+  font-weight: 400;
+}
+
+/* 卡片动作沿用 disclosure header 的右对齐槽位；只收紧密度，不改变控件语义。 */
+.thread-compaction .thread-disclosure-actions {
+  gap: var(--space-2);
+}
+
+/*
+ * 保留段分隔线：一条可读的边界说明，左右各一条细线；它不承担任何交互。
+ */
+.thread-compaction-separator {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin: var(--space-2) 0;
+  color: var(--fg-muted);
+  font-size: var(--font-size-xs);
+}
+
+.thread-compaction-separator::before,
+.thread-compaction-separator::after {
+  content: '';
+  flex: 1;
+  border-top: 1px solid var(--border);
+}

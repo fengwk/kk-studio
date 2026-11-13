@@ -12,12 +12,17 @@ import './system-message.css'
 export function SystemMessageCard({
   title,
   label,
+  actions,
+  tone = 'neutral',
   children,
   className,
   ...rest
 }: {
   title: ReactNode
   label?: string
+  /** 卡片级动作槽位：只渲染调用方给出的真实操作，外壳不附加默认动作。 */
+  actions?: ReactNode
+  tone?: 'neutral' | 'info' | 'pending' | 'success' | 'error'
   children?: ReactNode
   className?: string
 } & Omit<ComponentProps<'section'>, 'title' | 'children' | 'className'>) {
@@ -30,7 +35,8 @@ export function SystemMessageCard({
       {...rest}
       className={['thread-system-message', className].filter(Boolean).join(' ')}
       header={title}
-      tone="neutral"
+      actions={actions}
+      tone={tone}
       expanded={expanded}
       onExpandedChange={setExpanded}
       hasDetails={hasContent && !showContent}

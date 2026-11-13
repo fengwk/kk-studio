@@ -525,8 +525,13 @@ export function useRootThreadControl({
       ? controller.disabled || branchPanel.branchState == null || branchPanel.effectiveBase == null
       : activeDraft == null || !draftHistoryReady)
 
+  // 失败/停止的压缩卡会显示“重新压缩”，与命令面板共用同一条可用性查询；没有卡片时不额外请求。
+  const hasRetryableCompaction = controller.timeline.messages.some((message) =>
+    message.role === 'entry'
+    && message.kind === 'compaction'
+    && (message.compaction?.state === 'failed' || message.compaction?.state === 'stopped'))
   const advisoryEnabled = Boolean(
-    commandPaletteVisible
+    (commandPaletteVisible || hasRetryableCompaction)
     && isBoundTarget(target)
     && boundThreadId
     && !composerDisabled,
@@ -716,6 +721,7 @@ export function useRootThreadControl({
     controller,
     branchPanel,
     boundViews,
+    compaction,
     composer,
     restoreComposerFocus: () => setFocusIntent(target),
     pendingAcceptance,

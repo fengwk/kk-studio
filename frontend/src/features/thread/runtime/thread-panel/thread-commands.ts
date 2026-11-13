@@ -119,15 +119,19 @@ const COMPACTION_DISABLED_REASON_KEYS: Record<string, TranslationKey> = {
   NOTHING_TO_COMPACT: 'ai.runtime.command.disabled.compaction.nothingToCompact',
 }
 
-function manualCompactionDisabledReason(reason: string | null): string {
+/**
+ * 手动压缩不可用原因的稳定文案 key：命令面板与压缩卡上的“重新压缩”共用同一映射，
+ * 避免两处对同一条后端原因给出不同说法。
+ */
+export function manualCompactionDisabledReasonKey(reason: string | null): TranslationKey {
   if (reason == null) {
-    return translate('ai.runtime.action.compactUnavailable')
+    return 'ai.runtime.action.compactUnavailable'
   }
-  const key = COMPACTION_DISABLED_REASON_KEYS[reason]
-  if (key) {
-    return translate(key)
-  }
-  return translate('ai.runtime.action.compactUnavailable')
+  return COMPACTION_DISABLED_REASON_KEYS[reason] ?? 'ai.runtime.action.compactUnavailable'
+}
+
+export function manualCompactionDisabledReason(reason: string | null): string {
+  return translate(manualCompactionDisabledReasonKey(reason))
 }
 
 export type CommandCompactionState =

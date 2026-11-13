@@ -9,6 +9,14 @@ import type { EntryEventDialogueMessage } from '@/features/thread/runtime/thread
  * 而不是 Harness DTO、controller 或 query state。
  */
 export function EntryMessageBlock({ message }: { message: EntryEventDialogueMessage }) {
+  if (message.kind === 'compaction_separator') {
+    // 保留段分隔线：说明以上历史已被摘要，不伪装成回合或对话消息。
+    return (
+      <div className="thread-compaction-separator" data-entry-kind="compaction_separator">
+        <span>{message.text}</span>
+      </div>
+    )
+  }
   if (message.kind === 'compaction') {
     return <CompactionEntryBlock message={message} />
   }

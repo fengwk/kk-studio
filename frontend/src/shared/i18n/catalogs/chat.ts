@@ -810,6 +810,66 @@ export const chatCatalog = {
     'en-US': 'Failed to copy thread ID',
     'zh-CN': '无法复制 thread ID',
   },
+  'ai.runtime.compactionBranch.title': {
+    'en-US': 'Compaction execution',
+    'zh-CN': '压缩执行',
+  },
+  'ai.runtime.compactionBranch.back': {
+    'en-US': 'Back to the conversation',
+    'zh-CN': '返回主对话',
+  },
+  'ai.runtime.compactionBranch.stop': {
+    'en-US': 'Stop',
+    'zh-CN': '停止',
+  },
+  'ai.runtime.compactionBranch.stopping': {
+    'en-US': 'Stopping…',
+    'zh-CN': '正在停止…',
+  },
+  'ai.runtime.compactionBranch.stopFailed': {
+    'en-US': 'The compaction execution could not be stopped.',
+    'zh-CN': '无法停止本次压缩执行。',
+  },
+  'ai.runtime.compactionBranch.loading': {
+    'en-US': 'Loading execution…',
+    'zh-CN': '正在加载执行…',
+  },
+  'ai.runtime.compactionBranch.loadFailed': {
+    'en-US': 'This execution could not be loaded.',
+    'zh-CN': '无法加载本次执行。',
+  },
+  'ai.runtime.compactionBranch.retry': {
+    'en-US': 'Reload',
+    'zh-CN': '重新加载',
+  },
+  'ai.runtime.compactionBranch.inheritedContext': {
+    'en-US': 'Inherited context: {{tokens}} tokens',
+    'zh-CN': '继承的上下文：{{tokens}} tokens',
+  },
+  'ai.runtime.compactionBranch.inheritedContextUnknown': {
+    'en-US': 'Inherited context: not reported',
+    'zh-CN': '继承的上下文：未提供',
+  },
+  'ai.runtime.compactionBranch.instruction': {
+    'en-US': 'Compaction instruction',
+    'zh-CN': '压缩指令',
+  },
+  'ai.runtime.compactionBranch.modelCalls': {
+    'en-US': 'Model calls',
+    'zh-CN': '模型调用',
+  },
+  'ai.runtime.compactionBranch.noModelCalls': {
+    'en-US': 'No model call yet',
+    'zh-CN': '尚无模型调用',
+  },
+  'ai.runtime.compactionBranch.toolErrors': {
+    'en-US': 'Disabled tool calls',
+    'zh-CN': '被停用的工具调用',
+  },
+  'ai.runtime.compactionBranch.noToolErrors': {
+    'en-US': 'This execution made no tool call.',
+    'zh-CN': '本次执行没有发起工具调用。',
+  },
   'ai.runtime.agentTree.panel': {
     'en-US': 'Active subagents',
     'zh-CN': '活跃子代理',
@@ -1395,6 +1455,70 @@ export const chatCatalog = {
   'ai.runtime.entry.compactionTitle': {
     'en-US': 'Context compacted',
     'zh-CN': '上下文已压缩',
+  },
+  'ai.runtime.entry.compactionRunning': {
+    'en-US': 'Compacting context…',
+    'zh-CN': '正在压缩上下文…',
+  },
+  'ai.runtime.entry.compactionFailed': {
+    'en-US': 'Context compaction failed',
+    'zh-CN': '上下文压缩失败',
+  },
+  'ai.runtime.entry.compactionStopped': {
+    'en-US': 'Context compaction stopped',
+    'zh-CN': '上下文压缩已停止',
+  },
+  'ai.runtime.entry.compactionRunningHint': {
+    'en-US': 'Earlier messages are being summarized.',
+    'zh-CN': '正在整理以上内容。',
+  },
+  'ai.runtime.entry.compactionStoppedHint': {
+    'en-US': 'Stopped before a summary was produced.',
+    'zh-CN': '未生成摘要即被停止。',
+  },
+  'ai.runtime.entry.compactionReason.failed': {
+    'en-US': 'The summarization call failed.',
+    'zh-CN': '摘要生成调用失败。',
+  },
+  'ai.runtime.entry.compactionReason.truncated': {
+    'en-US': 'The summary was cut off by the output limit.',
+    'zh-CN': '摘要因输出上限被截断。',
+  },
+  'ai.runtime.entry.compactionReason.filtered': {
+    'en-US': 'The model provider filtered the summary.',
+    'zh-CN': '摘要被模型提供方过滤。',
+  },
+  'ai.runtime.entry.compactionReason.invalidResponse': {
+    'en-US': 'The model returned a response that cannot be used as a summary.',
+    'zh-CN': '模型返回了无法作为摘要使用的结果。',
+  },
+  'ai.runtime.entry.compactionReason.emptySummary': {
+    'en-US': 'The model returned an empty summary.',
+    'zh-CN': '模型返回了空摘要。',
+  },
+  'ai.runtime.entry.compactionReason.budgetExceeded': {
+    'en-US': 'The summary exceeded its token budget.',
+    'zh-CN': '摘要超出了 token 预算。',
+  },
+  'ai.runtime.entry.compactionReason.contextLimit': {
+    'en-US': 'The conversation still exceeded the model context limit.',
+    'zh-CN': '上下文仍然超出模型上限。',
+  },
+  'ai.runtime.entry.compactionViewExecution': {
+    'en-US': 'View execution',
+    'zh-CN': '查看执行',
+  },
+  'ai.runtime.entry.compactionRetry': {
+    'en-US': 'Compact again',
+    'zh-CN': '重新压缩',
+  },
+  'ai.runtime.entry.compactionRetryPending': {
+    'en-US': 'Starting a new compaction…',
+    'zh-CN': '正在启动新的压缩…',
+  },
+  'ai.runtime.entry.compactionSeparator': {
+    'en-US': 'Earlier messages are summarized above',
+    'zh-CN': '以上内容已压缩为摘要',
   },
   'ai.runtime.entry.forkTitle': {
     'en-US': 'Thread forked',
