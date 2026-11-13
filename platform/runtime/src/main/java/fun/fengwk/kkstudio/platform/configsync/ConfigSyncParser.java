@@ -7,7 +7,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentEditablePropertiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
@@ -314,11 +313,6 @@ public final class ConfigSyncParser {
   private AgentSpec parseAgent(
       Entry entry, List<ConfigSyncSkipped> skipped, List<String> declared) {
     String name = entry.reqName("name");
-    if (BuiltinAgents.isReservedName(name)) {
-      // 内置 Agent 身份由系统持有：文件声明同名条目是硬冲突，不能通过导入覆盖或降级内置定义。
-      throw DomainException.validation(
-          RESOURCE, "agent name is reserved for a built-in agent: " + name);
-    }
     declared.add(name);
     String description = entry.optString("description");
     String systemPrompt = entry.optString("systemPrompt");

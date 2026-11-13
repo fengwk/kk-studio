@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
@@ -76,7 +75,6 @@ public class AgentService {
   @Transactional
   public AgentDTO createAgent(AgentCreateDTO createDTO) {
     String name = createDTO == null ? null : createDTO.getName();
-    rejectReservedName(name);
     Mutation mutation = mutation(name, createDTO, true);
     Agent definition = mutation.applyTo(Agent.builder().type(AgentType.USER)).build();
     builtinExecutionValidator.validateCatalog(definition.execution());
@@ -175,18 +173,6 @@ public class AgentService {
   private static void ensureExpectedVersion(Agent definition, long expected) {
     if (definition.version() != expected) {
       throw DomainException.versionConflict(RESOURCE, expected, definition.version());
-    }
-  }
-
-  private static void rejectReservedName(String name) {
-    if (name == null) {
-      return;
-    }
-    String normalized = name.strip();
-    if (BuiltinAgents.isReservedName(normalized)) {
-      // 内置 Agent 的身份由系统持有：用户不能以同名创建自己的 Agent 覆盖它。
-      throw DomainException.duplicate(
-          RESOURCE, "agent name is reserved for a built-in agent: " + normalized);
     }
   }
 

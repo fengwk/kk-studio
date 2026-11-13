@@ -33,7 +33,6 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.api.HarnessCatalog;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
-import fun.fengwk.kkstudio.platform.catalog.definition.builtin.BuiltinAgents;
 import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
@@ -344,13 +343,9 @@ class AgentServiceUnitTest {
     verify(repository, never()).deleteByName(any(), anyLong());
   }
 
-  /** 内置 Agent：名称保留不可同名创建、按类型受删除保护、允许未配置 execution 但拒绝无模型的 variant。 */
+  /** 系统持有身份的 Agent：按类型受删除保护、允许未配置 execution 但拒绝无模型的 variant。 */
   @Test
-  void builtinAgentsKeepSystemOwnedIdentity() {
-    AgentCreateDTO reserved = create(BuiltinAgents.COMPACTION_NAME, "model", emptyConfig(), null);
-    assertThrows(DomainException.class, () -> service.createAgent(reserved));
-    verify(repository, never()).create(any());
-
+  void systemOwnedAgentsKeepIdentityProtection() {
     Agent builtin = definition().toBuilder().type(AgentType.BUILTIN).execution(null).build();
     when(resolver.requireAgentForUpdate("agent")).thenReturn(builtin);
     assertThrows(DomainException.class, () -> service.deleteAgent("agent", 0L));
