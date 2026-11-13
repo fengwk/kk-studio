@@ -18,6 +18,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	"github.com/fengwk/kk-studio/daemon/internal/update"
+	"github.com/fengwk/kk-studio/daemon/internal/uuid"
 )
 
 const (
@@ -58,6 +59,83 @@ type RuntimeOptions struct {
 type activeConnection struct {
 	generation uint64
 	connection Connection
+	// goaway records that this generation ended through a control GOAWAY. Its retirement closes the
+	// old connection once and reconnects immediately instead of applying the disconnect backoff.
+	goaway atomic.Bool
+}
+
+// controlAttempt carries transport-level events for one connection attempt back to the runtime. It
+// is bound to the attempt's generation after a successful dial so that late events of an older
+// generation can never act on the current connection.
+type controlAttempt struct {
+	runtime *Runtime
+	active  atomic.Pointer[activeConnection]
+	mu      sync.Mutex
+	pending bool
+	status  int
+	target  string
+}
+
+// statusUpgradeRequired is the handshake rejection that asks the daemon to install a newer release.
+const statusUpgradeRequired = 426
+
+func newControlAttempt(runtime *Runtime) *controlAttempt {
+	return &controlAttempt{runtime: runtime}
+}
+
+// bind attaches the generation this attempt produced. A GOAWAY that arrived before the generation
+// was known retires it immediately, exactly like a GOAWAY observed on a bound generation. The
+// generation and the pending flag share the lock so a GOAWAY racing the bind is never dropped;
+// retirement always runs outside it because closing the connection can re-enter the observer.
+func (a *controlAttempt) bind(active *activeConnection) {
+	a.mu.Lock()
+	a.active.Store(active)
+	pending := a.pending
+	a.mu.Unlock()
+	if pending {
+		a.runtime.retireConnection(active)
+	}
+}
+
+// NotifyGoaway retires the generation on a graceful control GOAWAY. Other error codes stay on the
+// ordinary disconnect path.
+func (a *controlAttempt) NotifyGoaway(code uint32) {
+	if code != 0 {
+		return
+	}
+	a.mu.Lock()
+	active := a.active.Load()
+	if active == nil {
+		a.pending = true
+		a.mu.Unlock()
+		return
+	}
+	a.mu.Unlock()
+	a.runtime.retireConnection(active)
+}
+
+// NotifyUpgradeFailed records a handshake rejection so the run loop can apply upgrade policy for the
+// attempt that observed it.
+func (a *controlAttempt) NotifyUpgradeFailed(statusCode int, upgradeRequired *protocol.UpgradeRequired) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.status = statusCode
+	a.target = ""
+	if upgradeRequired != nil {
+		a.target = upgradeRequired.GetTargetVersion()
+	}
+}
+
+// upgradeRejection reports whether this attempt observed a 426 rejection and, if the body carried a
+// parsable UpgradeRequired, the version the platform requires.
+func (a *controlAttempt) upgradeRejection() (rejected bool, targetVersion string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.status != statusUpgradeRequired {
+		return false, ""
+	}
+	a.status = 0
+	return true, a.target
 }
 
 type runningCall struct {
@@ -112,6 +190,8 @@ type Runtime struct {
 	running                bool
 	hasRun                 bool
 	sendCtx                context.Context
+	runCancel              context.CancelFunc
+	runFailure             error
 	updateOps              *update.Operations
 	updateMu               sync.Mutex
 	updateCancel           context.CancelFunc
@@ -259,6 +339,7 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 	runCtx, cancel := context.WithCancel(ctx)
 	r.mu.Lock()
 	r.sendCtx = runCtx
+	r.runCancel = cancel
 	r.mu.Unlock()
 	heartbeatDone := make(chan struct{})
 	sweepDone := make(chan struct{})
@@ -288,18 +369,27 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 			r.cancelAndWait()
 			return nil
 		})
-		runErr = errors.Join(runErr, aggregateShutdownFailures(r.ShutdownFailures()))
+		r.mu.RLock()
+		failure := r.runFailure
+		r.mu.RUnlock()
+		runErr = errors.Join(runErr, failure, aggregateShutdownFailures(r.ShutdownFailures()))
 	}()
 
 	delay := r.options.InitialReconnectDelay
 	for {
-		connection, err := r.options.Connections.Connect(runCtx)
+		attempt := newControlAttempt(r)
+		connection, err := r.options.Connections.Connect(runCtx, attempt)
 		if err != nil {
 			if runCtx.Err() != nil {
 				return nil
 			}
 			if errors.Is(err, ErrRegistrationRejected) {
 				return err
+			}
+			if rejected, targetVersion := attempt.upgradeRejection(); rejected {
+				if !r.beginManagedUpdate(runCtx, targetVersion) {
+					return errProtocolUpgradeRequired
+				}
 			}
 			if !waitReconnect(runCtx, delay) {
 				return nil
@@ -311,6 +401,7 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 			return errors.New("connection factory returned an empty connection")
 		}
 		active := r.attachConnection(connection)
+		attempt.bind(active)
 		err = r.serveConnection(runCtx, active)
 		if runCtx.Err() == nil && r.options.ReportError != nil {
 			r.options.ReportError(err)
@@ -328,11 +419,40 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 		if errors.Is(err, ErrRegistrationRejected) {
 			return err
 		}
+		if active.goaway.Load() {
+			// A graceful GOAWAY already retired this generation: reconnect immediately and keep the
+			// existing backoff state instead of waiting on it.
+			continue
+		}
 		if !waitReconnect(runCtx, delay) {
 			return nil
 		}
 		delay = doubledDelay(delay, r.options.MaxReconnectDelay)
 	}
+}
+
+// errProtocolUpgradeRequired is the terminal failure for a 426 the daemon cannot upgrade out of.
+var errProtocolUpgradeRequired = errors.New("daemon requires protocol upgrade")
+
+// stopRun records the terminal runtime failure and stops the run loop. It serves paths that are not
+// driven by an inbound frame, such as a managed update a 426 rejection required.
+func (r *Runtime) stopRun(cause error) {
+	r.mu.Lock()
+	if r.runFailure == nil {
+		r.runFailure = cause
+	}
+	cancel := r.runCancel
+	r.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
+// retireConnection closes one generation exactly once, releasing its binding and IDE work, and
+// marks it as GOAWAY-retired so the run loop reconnects immediately.
+func (r *Runtime) retireConnection(active *activeConnection) {
+	active.goaway.Store(true)
+	_ = r.dropConnection(active)
 }
 
 func (r *Runtime) serveConnection(ctx context.Context, active *activeConnection) error {
@@ -776,6 +896,70 @@ func (r *Runtime) handleUpdate(ctx context.Context, envelope *protocol.Envelope)
 	}
 }
 
+// beginManagedUpdate starts the managed update a 426 handshake rejection demands and reports whether
+// the daemon may keep running. It reuses the admission bookkeeping, runner, receipts and shutdown
+// cancellation of a server-sent UPDATE, but the operation id is generated locally because no UPDATE
+// frame exists. An update that is already active or already prepared keeps the daemon alive; only a
+// rejection the daemon cannot act on, or an update that never prepared, stops it.
+func (r *Runtime) beginManagedUpdate(ctx context.Context, targetVersion string) bool {
+	runner := r.options.Update
+	if targetVersion == "" || runner == nil || !runner.Configured() {
+		if r.options.ReportError != nil {
+			r.options.ReportError(errProtocolUpgradeRequired)
+		}
+		return false
+	}
+	// A 426 rejection carries no UPDATE envelope, so the operation id is minted locally.
+	command := update.Command{OperationID: uuid.New(), TargetVersion: targetVersion}
+	r.mu.RLock()
+	configuration := cloneDaemonConfig(r.config)
+	r.mu.RUnlock()
+	// A rejection-driven upgrade is not turned down by in-flight work: like the TS beginUpgrade it
+	// hands the runner the stop signal instead of waiting for admission to free up.
+	r.admissionMu.Lock()
+	decision, err := r.updateOps.Decide(command, r.options.DaemonVersion, true, "")
+	if err != nil {
+		r.admissionMu.Unlock()
+		if r.options.ReportError != nil {
+			r.options.ReportError(err)
+		}
+		return false
+	}
+	if decision.Action != update.ActionAdmit {
+		// The target is already installed, the same target is already being handled, or the daemon is
+		// busy. None of those is a reason to stop: no update is started twice.
+		r.admissionMu.Unlock()
+		return true
+	}
+	updateCtx, cancel := context.WithCancel(ctx)
+	r.updateMu.Lock()
+	r.updateCancel = cancel
+	r.updateMu.Unlock()
+	if err := r.status.BeginUpdate(command.TargetVersion); err != nil {
+		cancel()
+		_, _ = r.updateOps.Complete(command.OperationID, update.PhaseFailed, "managed update failed")
+		r.admissionMu.Unlock()
+		if r.options.ReportError != nil {
+			r.options.ReportError(err)
+		}
+		return false
+	}
+	r.admissionMu.Unlock()
+	_ = r.sendStatus()
+	_ = r.sendUpdateReceipt(*decision.Receipt)
+	r.wg.Add(1)
+	go r.executeUpgradeUpdate(updateCtx, cancel, command, configuration)
+	return true
+}
+
+// executeUpgradeUpdate runs one rejection-triggered update and stops the daemon when the installer
+// never accepted the handover, mirroring the TS onUnprepared callback.
+func (r *Runtime) executeUpgradeUpdate(ctx context.Context, cancel context.CancelFunc, command update.Command, configuration config.DaemonConfig) {
+	if r.runUpdate(ctx, cancel, command, configuration) == updateRunFailed {
+		r.stopRun(errProtocolUpgradeRequired)
+	}
+}
+
 func (r *Runtime) updateBusyReason(runner update.Runner) string {
 	r.callsMu.Lock()
 	protected := len(r.calls) > 0
@@ -796,12 +980,19 @@ func (r *Runtime) updateBusyReason(runner update.Runner) string {
 }
 
 func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, command update.Command, configuration config.DaemonConfig) {
+	r.runUpdate(ctx, cancel, command, configuration)
+}
+
+// runUpdate drives one admitted managed update through the runner and publishes its receipts. It
+// reports whether the installer accepted the handover, which the 426 path uses to decide whether the
+// daemon may keep running.
+func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, command update.Command, configuration config.DaemonConfig) updateRunResult {
 	defer r.wg.Done()
 	defer cancel()
 	runner := r.options.Update
 	if runner == nil {
 		r.finishUpdate(command.OperationID, update.PhaseFailed, "managed update is not configured")
-		return
+		return updateRunFailed
 	}
 	if err := runner.StopForUpdate(ctx); err != nil {
 		if ctx.Err() == nil {
@@ -811,7 +1002,7 @@ func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, 
 			}
 			r.finishUpdate(command.OperationID, update.PhaseFailed, message)
 		}
-		return
+		return updateRunFailed
 	}
 	outcome, err := runner.HandleUpdate(ctx, command, configuration, func(progress update.Progress) {
 		if active, ok := r.updateOps.Active(); !ok || active.Command.OperationID != command.OperationID {
@@ -823,7 +1014,7 @@ func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, 
 		}
 	})
 	if ctx.Err() != nil {
-		return
+		return updateRunCancelled
 	}
 	if err != nil || outcome.Phase == update.PhaseFailed || outcome.Phase != update.PhasePrepared {
 		message := "capability execution failed"
@@ -838,11 +1029,11 @@ func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, 
 			}
 		}
 		r.finishUpdate(command.OperationID, update.PhaseFailed, message)
-		return
+		return updateRunFailed
 	}
 	receipt, ok := r.updateOps.Complete(command.OperationID, update.PhasePrepared, outcome.Message)
 	if !ok {
-		return
+		return updateRunFailed
 	}
 	var stopWatching func()
 	if outcome.WatchFailure != nil {
@@ -856,7 +1047,7 @@ func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, 
 		if stopWatching != nil {
 			stopWatching()
 		}
-		return
+		return updateRunFailed
 	}
 	r.updateCancel = nil
 	r.updatePermit = outcome.ReleasePermit
@@ -864,7 +1055,18 @@ func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, 
 	r.updateMu.Unlock()
 	_ = r.sendStatus()
 	_ = r.deliverUpdateReceipt(receipt)
+	return updateRunPrepared
 }
+
+// updateRunResult distinguishes a prepared handover from a failure the daemon must react to and from
+// an update the shutdown cancelled, which is not a failure.
+type updateRunResult int
+
+const (
+	updateRunPrepared updateRunResult = iota
+	updateRunFailed
+	updateRunCancelled
+)
 
 func (r *Runtime) finishUpdate(operationID string, phase update.Phase, message string) {
 	receipt, ok := r.updateOps.Complete(operationID, phase, message)

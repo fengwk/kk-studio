@@ -23,7 +23,7 @@ type testConnection struct {
 
 type fixedConnectionFactory struct{ connection Connection }
 
-func (f fixedConnectionFactory) Connect(context.Context) (Connection, error) {
+func (f fixedConnectionFactory) Connect(context.Context, ControlObserver) (Connection, error) {
 	return f.connection, nil
 }
 
@@ -32,7 +32,7 @@ type sequenceConnectionFactory struct {
 	connections []Connection
 }
 
-func (f *sequenceConnectionFactory) Connect(ctx context.Context) (Connection, error) {
+func (f *sequenceConnectionFactory) Connect(ctx context.Context, _ ControlObserver) (Connection, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if len(f.connections) == 0 {

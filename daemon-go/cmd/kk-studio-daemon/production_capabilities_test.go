@@ -423,7 +423,7 @@ type productionCapabilityConnectionFactory struct {
 	connection *productionCapabilityConnection
 }
 
-func (f productionCapabilityConnectionFactory) Connect(context.Context) (daemonruntime.Connection, error) {
+func (f productionCapabilityConnectionFactory) Connect(context.Context, daemonruntime.ControlObserver) (daemonruntime.Connection, error) {
 	return f.connection, nil
 }
 

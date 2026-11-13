@@ -94,7 +94,8 @@ class AgentPromptComposerTest {
     assertTrue(rendered.contains("<name>dev</name>"), rendered);
     assertTrue(rendered.contains("<description>Development conventions.</description>"), rendered);
     assertFalse(rendered.contains("<path>"), rendered);
-    assertTrue(rendered.contains("The default is `" + DEFAULT_MAX_TURNS + "`"), rendered);
+    assertTrue(
+        rendered.contains("The default `max_turns` is `" + DEFAULT_MAX_TURNS + "`."), rendered);
   }
 
   /** 特殊字符在 prompt XML 中正确转义。 */

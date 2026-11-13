@@ -10,7 +10,9 @@ import (
 
 type emptyConnectionFactory struct{}
 
-func (emptyConnectionFactory) Connect(context.Context) (Connection, error) { return nil, nil }
+func (emptyConnectionFactory) Connect(context.Context, ControlObserver) (Connection, error) {
+	return nil, nil
+}
 
 // RUN-F-011 prevents a stopped runtime from being entered again and rejects empty connections.
 func TestRuntimeRunLifecycleGuards(t *testing.T) {

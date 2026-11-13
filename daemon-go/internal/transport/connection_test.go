@@ -318,12 +318,12 @@ func TestTransport_HandshakeRejection(t *testing.T) {
 				status  int
 				upgrade *protocol.UpgradeRequired
 			}, 1)
-			_, err := Dial(context.Background(), DialConfig{Applied: config.DaemonConfig{TokenPath: "token", StudioURL: server.URL, EnvironmentID: testEnvironment}, ReadToken: func(string) (string, error) { return "token", nil }, OnUpgradeFailed: func(status int, u *protocol.UpgradeRequired) {
+			_, err := Dial(context.Background(), DialConfig{Applied: config.DaemonConfig{TokenPath: "token", StudioURL: server.URL, EnvironmentID: testEnvironment}, ReadToken: func(string) (string, error) { return "token", nil }, Observer: recordingObserver{upgradeFailed: func(status int, u *protocol.UpgradeRequired) {
 				called <- struct {
 					status  int
 					upgrade *protocol.UpgradeRequired
 				}{status, u}
-			}})
+			}}})
 			if err == nil {
 				t.Fatal("handshake rejection unexpectedly succeeded")
 			}
