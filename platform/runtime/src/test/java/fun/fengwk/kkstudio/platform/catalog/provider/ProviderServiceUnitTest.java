@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.platform.catalog.provider;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
@@ -34,9 +32,8 @@ import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.time.Duration;
 import java.util.List;
-import java.util.UUID;
 
-/** Provider 服务的输入规范化、凭据补丁、连接世代轮换与 CAS 失败映射（仓库为替身，不触库）。 */
+/** Provider 服务的输入规范化、凭据补丁与 CAS 失败映射（仓库为替身，不触库）。 */
 public class ProviderServiceUnitTest {
 
   private final ProviderRepository repository = mock(ProviderRepository.class);
@@ -95,10 +92,9 @@ public class ProviderServiceUnitTest {
   }
 
   @Test
-  public void createAssignsConnectionGenerationAndKeepsMissingCredentialAbsent() {
+  public void createKeepsMissingCredentialAbsent() {
     Provider created = created(provider("new-provider", "   "));
 
-    assertNotNull(created.connectionGenerationId());
     assertNull(created.credential());
     assertNull(created.version());
   }
@@ -114,7 +110,7 @@ public class ProviderServiceUnitTest {
     assertThrows(DomainException.class, () -> service.createProvider(create));
   }
 
-  // ---- 更新、凭据补丁与连接世代 ----
+  // ---- 更新与凭据补丁 ----
 
   @Test
   public void shouldRetainCredentialOnKeepAndClearItOnClear() {
@@ -162,47 +158,6 @@ public class ProviderServiceUnitTest {
 
     assertFalse(error.getMessage().contains("sensitive-value"));
     assertNull(error.getCause());
-  }
-
-  @Test
-  public void shouldRotateConnectionGenerationIdOnCredentialOrBaseUrlOrTypeChange() {
-    UUID original = UUID.randomUUID();
-    Provider provider = existing("initial-secret", "{}", "http://localhost:8080", original);
-
-    ProviderUpdateDTO credChange = update(SecretUpdate.set("new-secret"));
-    credChange.setBaseUrl("http://localhost:8080");
-    Provider afterCred = updated(provider, credChange);
-    assertNotEquals(original, afterCred.connectionGenerationId());
-
-    ProviderUpdateDTO urlChange = update(SecretUpdate.keep());
-    urlChange.setBaseUrl("http://localhost:9090");
-    Provider afterUrl = updated(afterCred, urlChange);
-    assertNotEquals(afterCred.connectionGenerationId(), afterUrl.connectionGenerationId());
-  }
-
-  @Test
-  public void shouldNotRotateConnectionGenerationIdOnDescriptionOrTimeoutOnlyChange() {
-    UUID original = UUID.randomUUID();
-    Provider provider = existing("initial-secret", "{}", "http://localhost:8080", original);
-
-    ProviderUpdateDTO descChange = update(SecretUpdate.keep());
-    descChange.setBaseUrl("http://localhost:8080");
-    descChange.setDescription("new-description");
-    Provider afterDesc = updated(provider, descChange);
-    assertEquals(original, afterDesc.connectionGenerationId());
-
-    ProviderUpdateDTO timeoutChange = update(SecretUpdate.keep());
-    timeoutChange.setBaseUrl("http://localhost:8080");
-    timeoutChange.setModelCallTimeoutMillis(60000L);
-    timeoutChange.setModelCallIdleTimeoutMillis(10000L);
-    assertEquals(original, updated(afterDesc, timeoutChange).connectionGenerationId());
-  }
-
-  @Test
-  public void shouldAssignConnectionGenerationIdIfPreviouslyNull() {
-    Provider provider = existing("initial-secret", "{}", null, null);
-
-    assertNotNull(updated(provider, update(SecretUpdate.keep())).connectionGenerationId());
   }
 
   @Test
@@ -256,7 +211,7 @@ public class ProviderServiceUnitTest {
   /** 导入已有 Provider 用读取到的当前版本做 CAS；null/空白凭据按文件事实清空，与普通更新的保留语义相反。 */
   @Test
   public void importUpdatesExistingWithReadVersionAndClearsMissingCredential() {
-    Provider current = existing("initial-secret", "{}", null, UUID.randomUUID(), 3L);
+    Provider current = existing("initial-secret", "{}", null, 3L);
     when(repository.getByName("provider")).thenReturn(current);
     when(repository.updateByName(any(), eq(3L))).thenReturn(true);
 
@@ -265,16 +220,13 @@ public class ProviderServiceUnitTest {
     ArgumentCaptor<Provider> captor = ArgumentCaptor.forClass(Provider.class);
     verify(repository).updateByName(captor.capture(), eq(3L));
     assertNull(captor.getValue().credential());
-    // 凭据由有值变为无值，连接世代轮换。
-    assertNotEquals(current.connectionGenerationId(), captor.getValue().connectionGenerationId());
     verify(repository, never()).create(any());
   }
 
-  /** 导入恢复原始凭据时写入该值，并在凭据变更时轮换 connection generation。 */
+  /** 导入恢复原始凭据时写入该值。 */
   @Test
-  public void importRestoresCredentialAndRotatesGeneration() {
-    UUID original = UUID.randomUUID();
-    Provider current = existing(null, "{}", "http://localhost:8080", original, 0L);
+  public void importRestoresCredential() {
+    Provider current = existing(null, "{}", "http://localhost:8080", 0L);
     when(repository.getByName("provider")).thenReturn(current);
     when(repository.updateByName(any(), eq(0L))).thenReturn(true);
     ProviderCreateDTO props = properties(ProviderType.OPENAI, "restored-secret");
@@ -285,7 +237,6 @@ public class ProviderServiceUnitTest {
     ArgumentCaptor<Provider> captor = ArgumentCaptor.forClass(Provider.class);
     verify(repository).updateByName(captor.capture(), eq(0L));
     assertEquals("restored-secret", captor.getValue().credential());
-    assertNotEquals(original, captor.getValue().connectionGenerationId());
   }
 
   /** 导入 CAS 失败：行已消失为未找到，版本已前进为版本冲突。 */
@@ -368,7 +319,7 @@ public class ProviderServiceUnitTest {
   /** 远端模型发现使用已保存的连接配置；地址错误与上游失败分别映射为校验与上游错误。 */
   @Test
   public void shouldListRemoteModelsWithSavedConnection() {
-    Provider provider = existing("k", "{}", "https://h/v1", UUID.randomUUID());
+    Provider provider = existing("k", "{}", "https://h/v1");
     when(repository.getByName("provider")).thenReturn(provider);
 
     when(discovery.listModelIds(ProviderType.OPENAI, "https://h/v1", "k"))
@@ -453,29 +404,19 @@ public class ProviderServiceUnitTest {
   private static Provider existing(
       ProviderType providerType, String credential, String configJson) {
     return new Provider(
-        "provider",
-        null,
-        providerType,
-        null,
-        credential,
-        configJson,
-        UUID.randomUUID(),
-        0L,
-        null,
-        null);
+        "provider", null, providerType, null, credential, configJson, 0L, null, null);
   }
 
   private static Provider existing(String credential, String configJson, long version) {
-    return existing(credential, configJson, null, UUID.randomUUID(), version);
+    return existing(credential, configJson, null, version);
+  }
+
+  private static Provider existing(String credential, String configJson, String baseUrl) {
+    return existing(credential, configJson, baseUrl, 0L);
   }
 
   private static Provider existing(
-      String credential, String configJson, String baseUrl, UUID generationId) {
-    return existing(credential, configJson, baseUrl, generationId, 0L);
-  }
-
-  private static Provider existing(
-      String credential, String configJson, String baseUrl, UUID generationId, long version) {
+      String credential, String configJson, String baseUrl, long version) {
     return new Provider(
         "provider",
         null,
@@ -483,7 +424,6 @@ public class ProviderServiceUnitTest {
         baseUrl,
         credential,
         configJson,
-        generationId,
         version,
         null,
         null);

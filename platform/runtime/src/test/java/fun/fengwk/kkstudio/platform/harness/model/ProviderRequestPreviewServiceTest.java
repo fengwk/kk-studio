@@ -129,7 +129,6 @@ class ProviderRequestPreviewServiceTest {
   private static final UUID TURN_TWO_USER_ID = id(9L);
   private static final UUID TURN_TWO_ASSISTANT_ID = id(10L);
   private static final UUID TURN_TWO_END_ID = id(11L);
-  private static final UUID GENERATION_ID = id(15L);
   private static final UUID TOOL_RESULT_ID = id(16L);
   private static final UUID INVOCATION_ID = id(17L);
   private static final UUID LATER_USER_ID = id(18L);
@@ -204,7 +203,7 @@ class ProviderRequestPreviewServiceTest {
     // 预览只调用历史冻结规划与 Provider 解析，绝不经过接受/游标/压缩等其它 resolver 能力。
     verify(turnResolver, atLeast(0)).planHistorical(any(), any(), any());
     verifyNoMoreInteractions(turnResolver);
-    verify(providerResolution, atLeast(0)).resolve(any(), any(), any());
+    verify(providerResolution, atLeast(0)).resolve(any(), any());
     verifyNoMoreInteractions(providerResolution);
   }
 
@@ -218,11 +217,11 @@ class ProviderRequestPreviewServiceTest {
     when(runtime.getSessionEntries(SESSION_ID)).thenReturn(sessionTree.entries());
     when(turnResolver.planHistorical(any(), any(), any()))
         .thenReturn(new LiveTurnPlan.Planned(spec(), CONTEXT_WINDOW, List.of(), List.of()));
-    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), any()))
         .thenAnswer(
             invocation ->
                 new ResolvedExecution(
-                    invocation.getArgument(2),
+                    invocation.getArgument(1),
                     new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
                     policy -> null,
                     request -> BODY));
@@ -292,11 +291,11 @@ class ProviderRequestPreviewServiceTest {
                 CONTEXT_WINDOW,
                 List.of(),
                 List.of()));
-    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), any()))
         .thenAnswer(
             invocation ->
                 new ResolvedExecution(
-                    invocation.getArgument(2),
+                    invocation.getArgument(1),
                     new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
                     policy -> null,
                     request -> BODY));
@@ -330,8 +329,7 @@ class ProviderRequestPreviewServiceTest {
 
     // 规划 spec 的输出预算被 child Thread 约束收紧，cache 仍遵循 variant。
     ArgumentCaptor<ProviderRequest> requestCaptor = ArgumentCaptor.forClass(ProviderRequest.class);
-    verify(providerResolution)
-        .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), requestCaptor.capture());
+    verify(providerResolution).resolve(eq(ProviderType.OPENAI), requestCaptor.capture());
     assertEquals(COMPACTION_OUTPUT_BUDGET, requestCaptor.getValue().outputTokens());
     assertEquals(
         ProviderCacheControl.session(PromptCacheRetention.SHORT, CHILD_SESSION_ID.toString()),
@@ -363,7 +361,7 @@ class ProviderRequestPreviewServiceTest {
 
     verify(turnResolver, never()).planHistorical(any(), any(), any());
     verify(turnResolver, never()).planLive(any(), any(), any());
-    verify(providerResolution, never()).resolve(any(), any(), any());
+    verify(providerResolution, never()).resolve(any(), any());
   }
 
   @Test
@@ -426,7 +424,7 @@ class ProviderRequestPreviewServiceTest {
 
     assertFrozenCompactionRejected();
     verify(turnResolver, never()).planHistorical(any(), any(), any());
-    verify(providerResolution, never()).resolve(any(), any(), any());
+    verify(providerResolution, never()).resolve(any(), any());
   }
 
   /** 测试意图：child 约束必须是正且不超过父冻结预算；null 表示无上限，比冻结预算更宽，不能当作可信冻结执行。更宽上限同样拒绝。 */
@@ -454,7 +452,7 @@ class ProviderRequestPreviewServiceTest {
     assertFrozenCompactionRejected();
 
     verify(turnResolver, never()).planHistorical(any(), any(), any());
-    verify(providerResolution, never()).resolve(any(), any(), any());
+    verify(providerResolution, never()).resolve(any(), any());
   }
 
   /** 测试意图：child 约束比父冻结预算更紧时接受，并让实际请求沿用更紧的上限。 */
@@ -466,14 +464,13 @@ class ProviderRequestPreviewServiceTest {
     service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID);
 
     ArgumentCaptor<ProviderRequest> requestCaptor = ArgumentCaptor.forClass(ProviderRequest.class);
-    verify(providerResolution)
-        .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), requestCaptor.capture());
+    verify(providerResolution).resolve(eq(ProviderType.OPENAI), requestCaptor.capture());
     assertEquals(COMPACTION_OUTPUT_BUDGET / 2, requestCaptor.getValue().outputTokens());
   }
 
   /** 测试意图：压缩历史预览在应用 child 约束时保留模型组，并按首个实际成员物化。 */
   @Test
-  void compactionPreviewRetainsGroupAndVariantsUnderConstraints() {
+  void compactionPreviewRetainsGroupAndSelectedVariantUnderConstraints() {
     ModelRequestSpec base =
         spec(8_192, ProviderCacheControl.session(PromptCacheRetention.SHORT, "child-session"));
     ModelDescriptor actual = base.model();
@@ -485,22 +482,13 @@ class ProviderRequestPreviewServiceTest {
             actual.inputModalities(),
             actual.tools(),
             actual.reasoning());
-    var member =
-        new ModelGroupMemberExecution(
-            base.providerType(),
-            GENERATION_ID,
-            actual,
-            base.variant(),
-            List.of(
-                base.variant(), new ModelVariant("other", "max", PromptCacheRetention.NONE, null)));
+    var member = new ModelGroupMemberExecution(base.providerType(), actual, base.variant());
     var group = new ModelGroupExecution("group", 1L, List.of(member), Set.of(429), 0);
     var groupSpec =
         new ModelRequestSpec(
             base.providerType(),
-            GENERATION_ID,
             logical,
             base.variant(),
-            member.modelVariants(),
             base.outputTokens(),
             base.systemInstruction(),
             base.toolBindings(),
@@ -521,11 +509,11 @@ class ProviderRequestPreviewServiceTest {
     when(runtime.getSessionEntries(CHILD_SESSION_ID)).thenReturn(childEntries());
     when(turnResolver.planHistorical(eq(CHILD_THREAD_ID), eq(SESSION_ID), any()))
         .thenReturn(new LiveTurnPlan.Planned(groupSpec, CONTEXT_WINDOW, List.of(), List.of()));
-    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), any()))
         .thenAnswer(
             invocation ->
                 new ResolvedExecution(
-                    invocation.getArgument(2),
+                    invocation.getArgument(1),
                     new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
                     policy -> null,
                     request -> BODY));
@@ -533,12 +521,12 @@ class ProviderRequestPreviewServiceTest {
     var dto = service.previewHistorical(SESSION_ID, COMPACTION_ENTRY_ID);
 
     ArgumentCaptor<ProviderRequest> requestCaptor = ArgumentCaptor.forClass(ProviderRequest.class);
-    verify(providerResolution)
-        .resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), requestCaptor.capture());
+    verify(providerResolution).resolve(eq(ProviderType.OPENAI), requestCaptor.capture());
     assertEquals(COMPACTION_OUTPUT_BUDGET / 2, requestCaptor.getValue().outputTokens());
     assertEquals(
         ProviderCacheControl.session(PromptCacheRetention.SHORT, CHILD_SESSION_ID.toString()),
         requestCaptor.getValue().cacheControl());
+    assertEquals(base.variant(), requestCaptor.getValue().variant());
     assertEquals("model", requestCaptor.getValue().model().modelName());
     assertEquals("group", dto.getModelName());
   }
@@ -562,11 +550,11 @@ class ProviderRequestPreviewServiceTest {
                 CONTEXT_WINDOW,
                 List.of(),
                 List.of()));
-    when(providerResolution.resolve(eq(ProviderType.OPENAI), eq(GENERATION_ID), any()))
+    when(providerResolution.resolve(eq(ProviderType.OPENAI), any()))
         .thenAnswer(
             invocation ->
                 new ResolvedExecution(
-                    invocation.getArgument(2),
+                    invocation.getArgument(1),
                     new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(1)),
                     policy -> null,
                     request -> BODY));
@@ -876,11 +864,9 @@ class ProviderRequestPreviewServiceTest {
   private static ModelRequestSpec spec(int outputTokens, ProviderCacheControl cacheControl) {
     return new ModelRequestSpec(
         ProviderType.OPENAI,
-        GENERATION_ID,
         new ModelDescriptor(
             "provider", "model", "wire-model", Set.of(ModelInputModality.TEXT), false, false),
         new ModelVariant("v1", null, cacheControl.retention(), null),
-        List.of(new ModelVariant("v1", null, cacheControl.retention(), null)),
         outputTokens,
         "system instruction",
         List.of(),

@@ -30,7 +30,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** 基于真实 Wire SSE Fixture 的完整解析与累积回归测试。 */
 class GeminiWireTest {
@@ -40,8 +39,7 @@ class GeminiWireTest {
         "google-test",
         ProviderType.GOOGLE,
         "https://generativelanguage.googleapis.com",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-        new UUID(1L, 2L));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
   }
 
   private static ProviderRequest request() {

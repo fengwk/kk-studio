@@ -39,7 +39,6 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiRe
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** Responses reasoning metadata is persisted on the content block that owns each native item. */
 class OpenAiResponsesEmptyReasoningReplayRepairTest {
@@ -54,8 +53,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
         "minimax_test",
         ProviderType.OPENAI_RESPONSES,
         "https://api.example.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private ProviderRequest request(List<ProviderMessage> messages) {

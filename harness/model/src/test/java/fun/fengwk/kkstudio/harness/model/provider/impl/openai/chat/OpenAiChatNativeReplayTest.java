@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -48,7 +49,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 测试意图：验证 provider 原生 assistant message 的累积与 replay 语义——delta 的字符串/对象/标量按规则合并，audio 仅回放 id，
@@ -165,16 +165,18 @@ class OpenAiChatNativeReplayTest {
   }
 
   @Test
-  void replayAffinityIgnoresConnectionGeneration() {
-    ProviderDescriptor nextConnection =
-        new ProviderDescriptor(
-            "openai",
-            ProviderType.OPENAI,
-            "https://api.openai.com/v1",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-            UUID.randomUUID());
+  void replayAffinityIsScopedToProviderProtocolAndModel() {
+    ProviderReplayAffinity affinity = descriptor.affinity("gpt-4o-audio");
 
-    assertEquals(descriptor.affinity("gpt-4o-audio"), nextConnection.affinity("gpt-4o-audio"));
+    assertEquals(
+        new ProviderReplayAffinity(ProviderType.OPENAI, "openai", "gpt-4o-audio"), affinity);
+    assertNotEquals(
+        affinity,
+        new ProviderReplayAffinity(ProviderType.OPENAI_RESPONSES, "openai", "gpt-4o-audio"));
+    assertNotEquals(
+        affinity, new ProviderReplayAffinity(ProviderType.OPENAI, "other", "gpt-4o-audio"));
+    assertNotEquals(
+        affinity, new ProviderReplayAffinity(ProviderType.OPENAI, "openai", "other-model"));
   }
 
   @Test

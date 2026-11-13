@@ -70,8 +70,6 @@ class DatabaseProviderResolutionServiceTest {
 
   private static final String PROVIDER_NAME = "test-provider";
   private static final String ENDPOINT = "https://example/v1";
-  private static final UUID GENERATION_ID = new UUID(0L, 1L);
-
   private final ProviderRepository repository = mock(ProviderRepository.class);
   private final ProviderConfigurationCodec configurationCodec =
       new ProviderConfigurationCodec(JsonMapper.builder().build());
@@ -79,16 +77,12 @@ class DatabaseProviderResolutionServiceTest {
   // ---------- resolve 失败路径 ----------
 
   @Test
-  void resolveRejectsNullFrozenFactsAndRequest() {
+  void resolveRejectsNullFrozenTypeAndRequest() {
     DatabaseProviderResolutionService resolution = resolution();
-    ProviderRequest request = request(ProviderCacheControl.none());
-    assertThrows(
-        NullPointerException.class, () -> resolution.resolve(null, GENERATION_ID, request));
-    assertThrows(
-        NullPointerException.class, () -> resolution.resolve(ProviderType.OPENAI, null, request));
     assertThrows(
         NullPointerException.class,
-        () -> resolution.resolve(ProviderType.OPENAI, GENERATION_ID, null));
+        () -> resolution.resolve(null, request(ProviderCacheControl.none())));
+    assertThrows(NullPointerException.class, () -> resolution.resolve(ProviderType.OPENAI, null));
   }
 
   @Test
@@ -98,9 +92,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
     assertEquals("provider not found: " + PROVIDER_NAME, failure.getMessage());
   }
 
@@ -111,51 +103,8 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
     assertEquals("provider type must not be null", failure.getMessage());
-  }
-
-  @Test
-  void resolveRejectsProviderWithNullConnectionGenerationId() {
-    Provider p =
-        provider(ProviderType.OPENAI, ENDPOINT).toBuilder().connectionGenerationId(null).build();
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(p);
-    ProviderFactory factory = openAiFactory(PromptCacheRetention.NONE);
-    DatabaseProviderResolutionService resolution = resolution(factory);
-
-    IllegalStateException error =
-        assertThrows(
-            IllegalStateException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
-    assertTrue(error.getMessage().contains("connectionGenerationId must not be null"));
-  }
-
-  @Test
-  void resolveRejectsFrozenConnectionGenerationDrift() {
-    Provider provider =
-        provider(ProviderType.OPENAI, ENDPOINT).toBuilder()
-            .connectionGenerationId(new UUID(0L, 2L))
-            .build();
-    when(repository.getByName(PROVIDER_NAME)).thenReturn(provider);
-    ProviderAdapter adapter = adapter(ProviderType.OPENAI, mock(ModelProvider.class));
-    ProviderFactory factory = factory(ProviderType.OPENAI, PromptCacheRetention.NONE, adapter);
-    DatabaseProviderResolutionService resolution = resolution(factory);
-
-    IllegalArgumentException failure =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
-
-    assertTrue(failure.getMessage().contains("provider connection generation drift"));
-    // generation fence 必须先于 adapter 创建，确保漂移的 endpoint/credential 永远不会进入执行路径。
-    verify(factory, never()).create(anyString());
-    verify(adapter, never()).create(any(ProviderDescriptor.class));
   }
 
   @Test
@@ -171,9 +120,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
     assertEquals("provider type drift: frozen=OPENAI current=ANTHROPIC", failure.getMessage());
   }
 
@@ -190,9 +137,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
     assertEquals("ProviderFactory is not registered for OPENAI", failure.getMessage());
   }
 
@@ -204,9 +149,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
     assertEquals("endpoint must not be blank", failure.getMessage());
   }
 
@@ -225,9 +168,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
 
     assertEquals("cannot parse provider configuration for " + PROVIDER_NAME, failure.getMessage());
     assertFalse(failure.getMessage().contains("sensitive-value"));
@@ -243,9 +184,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
     assertEquals("cannot create provider adapter for " + PROVIDER_NAME, failure.getMessage());
     assertNull(failure.getCause());
   }
@@ -258,9 +197,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
     assertEquals(
         "ProviderFactory returned null adapter for " + PROVIDER_NAME, failure.getMessage());
   }
@@ -278,9 +215,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                resolution.resolve(
-                    ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none())));
+            () -> resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none())));
     assertEquals("ProviderFactory returned adapter type GOOGLE for OPENAI", failure.getMessage());
   }
 
@@ -298,7 +233,7 @@ class DatabaseProviderResolutionServiceTest {
                   PromptCacheRetention.SHORT,
                   adapter(providerType, mock(ModelProvider.class))));
       resolution
-          .resolve(providerType, GENERATION_ID, request(ProviderCacheControl.none()))
+          .resolve(providerType, request(ProviderCacheControl.none()))
           .openProvider(ModelCallTimeoutPolicy.DEFAULT);
     }
   }
@@ -314,7 +249,7 @@ class DatabaseProviderResolutionServiceTest {
     ProviderRequest persisted =
         request(ProviderCacheControl.session(PromptCacheRetention.SHORT, "pc-key"));
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
+        resolution.resolve(ProviderType.OPENAI, persisted);
 
     // 有效 request 与持久 request 共享模型 / variant / 消息 / tools 与规划期冻结的 cache control。
     assertEquals(persisted.model(), resolved.effectiveRequest().model());
@@ -366,7 +301,7 @@ class DatabaseProviderResolutionServiceTest {
 
     // 意图：验证解析服务交给后续 Provider transport 的 effectiveRequest 不包含嵌套 durable Resource。
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
+        resolution.resolve(ProviderType.OPENAI, persisted);
 
     ProviderToolResultBlock effectiveResult =
         assertInstanceOf(
@@ -421,7 +356,7 @@ class DatabaseProviderResolutionServiceTest {
             List.of());
 
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
+        resolution.resolve(ProviderType.OPENAI, persisted);
 
     List<ProviderMessage> effective = resolved.effectiveRequest().messages();
     assertEquals(2, effective.size());
@@ -447,8 +382,7 @@ class DatabaseProviderResolutionServiceTest {
                 PromptCacheRetention.SHORT,
                 adapter(ProviderType.OPENAI, null)));
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
+        resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none()));
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class, () -> resolved.openProvider(resolved.timeoutPolicy()));
@@ -466,8 +400,7 @@ class DatabaseProviderResolutionServiceTest {
     DatabaseProviderResolutionService resolution =
         resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter));
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
+        resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none()));
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class, () -> resolved.openProvider(resolved.timeoutPolicy()));
@@ -483,8 +416,7 @@ class DatabaseProviderResolutionServiceTest {
     DatabaseProviderResolutionService resolution =
         resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter));
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
+        resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none()));
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class, () -> resolved.openProvider(resolved.timeoutPolicy()));
@@ -502,8 +434,7 @@ class DatabaseProviderResolutionServiceTest {
     DatabaseProviderResolutionService resolution =
         resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter));
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
+        resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none()));
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class, () -> resolved.openProvider(resolved.timeoutPolicy()));
@@ -522,8 +453,7 @@ class DatabaseProviderResolutionServiceTest {
     DatabaseProviderResolutionService resolution =
         resolution(factory(ProviderType.OPENAI, PromptCacheRetention.SHORT, adapter));
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
+        resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none()));
     IllegalArgumentException failure =
         assertThrows(
             IllegalArgumentException.class, () -> resolved.openProvider(resolved.timeoutPolicy()));
@@ -544,8 +474,7 @@ class DatabaseProviderResolutionServiceTest {
                 PromptCacheRetention.SHORT,
                 adapter(ProviderType.OPENAI, mock(ModelProvider.class))));
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(
-            ProviderType.OPENAI, GENERATION_ID, request(ProviderCacheControl.none()));
+        resolution.resolve(ProviderType.OPENAI, request(ProviderCacheControl.none()));
     assertEquals(ProviderCacheControl.none(), resolved.effectiveRequest().cacheControl());
   }
 
@@ -563,7 +492,7 @@ class DatabaseProviderResolutionServiceTest {
         ProviderCacheControl.session(PromptCacheRetention.LONG, "session-key");
 
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, request(frozen));
+        resolution.resolve(ProviderType.OPENAI, request(frozen));
 
     assertSame(frozen, resolved.effectiveRequest().cacheControl());
   }
@@ -610,7 +539,7 @@ class DatabaseProviderResolutionServiceTest {
             Set.of(ModelInputModality.IMAGE));
 
     ProviderResolutionService.ResolvedExecution resolved =
-        resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted);
+        resolution.resolve(ProviderType.OPENAI, persisted);
 
     ProviderImageBlock image =
         assertInstanceOf(
@@ -656,7 +585,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted));
+            () -> resolution.resolve(ProviderType.OPENAI, persisted));
 
     assertTrue(error.getMessage().contains("cannot be sent"), error.getMessage());
     verify(contentService, never()).readBlobContent(any(), anyLong());
@@ -703,7 +632,7 @@ class DatabaseProviderResolutionServiceTest {
     IllegalArgumentException error =
         assertThrows(
             IllegalArgumentException.class,
-            () -> resolution.resolve(ProviderType.OPENAI, GENERATION_ID, persisted));
+            () -> resolution.resolve(ProviderType.OPENAI, persisted));
 
     assertTrue(error.getMessage().contains("model does not declare IMAGE"), error.getMessage());
     verify(contentService, never()).readBlobContent(any(), anyLong());
@@ -766,7 +695,6 @@ class DatabaseProviderResolutionServiceTest {
         .baseUrl(baseUrl)
         .credential("secret")
         .configJson("{}")
-        .connectionGenerationId(GENERATION_ID)
         .build();
   }
 

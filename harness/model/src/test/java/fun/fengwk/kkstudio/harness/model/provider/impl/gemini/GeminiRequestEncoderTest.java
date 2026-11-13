@@ -69,8 +69,7 @@ class GeminiRequestEncoderTest {
         "google-test",
         ProviderType.GOOGLE,
         "https://generativelanguage.googleapis.com/v1beta",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-        new UUID(1L, 2L));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
   }
 
   private static ProviderBlockData geminiBlockData(

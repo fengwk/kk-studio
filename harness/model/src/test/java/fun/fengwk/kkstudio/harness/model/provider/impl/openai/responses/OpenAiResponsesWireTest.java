@@ -37,7 +37,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** 验证 OpenAI Responses Wire 协议交互、finish reasons 映射与 SSE 事件解析。 */
 class OpenAiResponsesWireTest {
@@ -53,8 +52,7 @@ class OpenAiResponsesWireTest {
         "openai_test",
         ProviderType.OPENAI_RESPONSES,
         "https://api.openai.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private ModelDescriptor createModel() {

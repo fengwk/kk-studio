@@ -1,10 +1,12 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
@@ -322,6 +324,36 @@ class ModelServiceUnitTest {
     assertThrows(
         DomainException.class,
         () -> service.toDto(group.toBuilder().groupConfigJson(null).version(0L).build()));
+  }
+
+  /** 组能力摘要只在每个成员都支持时才声明该能力。 */
+  @Test
+  void derivesGroupBooleanCapabilitiesByIntersection() {
+    ModelConfigDTO capable = validConfig();
+    capable.getAbilities().setMidConversationSystemMessages(true);
+    capable.getAbilities().setMessageLevelEffort(true);
+    stubMember(existing("capable-a", 0L).toBuilder().configJson(parser.encode(capable)).build());
+    stubMember(existing("not-capable", 0L));
+
+    Model group =
+        createAndCapture(
+            groupCreate(
+                "partial-capability",
+                member("capable-a", "default"),
+                member("not-capable", "default")));
+    ModelGroupDTO partialDto = (ModelGroupDTO) service.toDto(group.toBuilder().version(0L).build());
+    assertFalse(partialDto.getConfig().getAbilities().isMidConversationSystemMessages());
+    assertFalse(partialDto.getConfig().getAbilities().isMessageLevelEffort());
+
+    stubMember(existing("capable-b", 0L).toBuilder().configJson(parser.encode(capable)).build());
+    Model allCapableGroup =
+        createAndCapture(
+            groupCreate(
+                "all-capable", member("capable-a", "default"), member("capable-b", "default")));
+    ModelGroupDTO allCapableDto =
+        (ModelGroupDTO) service.toDto(allCapableGroup.toBuilder().version(0L).build());
+    assertTrue(allCapableDto.getConfig().getAbilities().isMidConversationSystemMessages());
+    assertTrue(allCapableDto.getConfig().getAbilities().isMessageLevelEffort());
   }
 
   /** 组输入上限按声明成员取最小值：无成员声明保持缺省，最小值不小于派生上下文时不产出无意义的上限。 */

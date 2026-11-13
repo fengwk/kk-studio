@@ -141,7 +141,8 @@ public final class ModelAttemptMaterialization {
                 invocation.result(),
                 invocation.requestSpec().toolBindings(),
                 invocation.actualSelection(),
-                invocation.requestedAt());
+                invocation.requestedAt(),
+                invocation.actualEffort());
     if (!expected.equals(resultPayload)) {
       throw new IllegalArgumentException(
           "model result must materialize the exact assistant payload");

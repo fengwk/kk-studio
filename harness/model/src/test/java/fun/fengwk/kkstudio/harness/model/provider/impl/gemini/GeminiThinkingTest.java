@@ -38,7 +38,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /** Gemini 思考过程、thoughtSignature 签名及多轮回放测试。 */
 class GeminiThinkingTest {
@@ -71,8 +70,7 @@ class GeminiThinkingTest {
             "google-test",
             ProviderType.GOOGLE,
             "https://generativelanguage.googleapis.com",
-            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-            new UUID(1L, 2L));
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
 
     ModelDescriptor model =
         new ModelDescriptor(

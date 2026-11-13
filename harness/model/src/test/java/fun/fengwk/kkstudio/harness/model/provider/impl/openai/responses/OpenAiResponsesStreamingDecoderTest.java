@@ -46,7 +46,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -108,8 +107,7 @@ class OpenAiResponsesStreamingDecoderTest {
         "openai_test",
         ProviderType.OPENAI_RESPONSES,
         "http://127.0.0.1:" + port,
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(10)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(10), Duration.ofSeconds(10)));
   }
 
   private ProviderRequest createRequest() {

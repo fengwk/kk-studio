@@ -38,7 +38,6 @@ import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ScheduledExecutorService;
@@ -226,8 +225,7 @@ class ModelExecutionConfigurationTest extends PostgresSpringTestSupport {
                     "provider-" + type.wireValue(),
                     type,
                     "https://provider.example/v1",
-                    ModelCallTimeoutPolicy.DEFAULT,
-                    UUID.randomUUID()));
+                    ModelCallTimeoutPolicy.DEFAULT));
     assertNotNull(modelProvider);
   }
 }

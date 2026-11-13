@@ -14,8 +14,8 @@ import java.util.Set;
  * 从成员单 Model 配置派生模型组的只读能力摘要。
  *
  * <p>上下文与输出取所有成员的最小值（输出再受最小上下文约束）；输入上限只取声明了 {@code limit.input}
- * 的成员的最小值，没有成员声明或最小值不小于派生上下文时保持缺省。能力取工具/推理的与和输入模态的交集。组没有自身价格或 Variant：派生结果不携带
- * pricing、defaultVariant 或 variants。
+ * 的成员的最小值，没有成员声明或最小值不小于派生上下文时保持缺省。工具、推理、中途 system 消息和消息级 effort 能力均取成员交集，输入模态也取交集。组没有自身价格或
+ * Variant：派生结果不携带 pricing、defaultVariant 或 variants。
  */
 public final class ModelGroupConfigDerivation {
 
@@ -31,6 +31,8 @@ public final class ModelGroupConfigDerivation {
     boolean anyInputDeclared = false;
     boolean tools = true;
     boolean reasoning = true;
+    boolean midConversationSystemMessages = true;
+    boolean messageLevelEffort = true;
     Set<ModelInputModality> modalities = null;
     for (ModelConfigDTO member : members) {
       ModelLimitDTO limit = member.getLimit();
@@ -42,6 +44,8 @@ public final class ModelGroupConfigDerivation {
       }
       tools &= Boolean.TRUE.equals(member.getAbilities().getTools());
       reasoning &= Boolean.TRUE.equals(member.getAbilities().getReasoning());
+      midConversationSystemMessages &= member.getAbilities().isMidConversationSystemMessages();
+      messageLevelEffort &= member.getAbilities().isMessageLevelEffort();
       if (modalities == null) {
         modalities = new LinkedHashSet<>(member.getAbilities().getInputModalities());
       } else {
@@ -61,6 +65,8 @@ public final class ModelGroupConfigDerivation {
     ModelAbilitiesDTO abilities = new ModelAbilitiesDTO();
     abilities.setTools(tools);
     abilities.setReasoning(reasoning);
+    abilities.setMidConversationSystemMessages(midConversationSystemMessages);
+    abilities.setMessageLevelEffort(messageLevelEffort);
     abilities.setInputModalities(new ArrayList<>(modalities));
 
     ModelConfigDTO derived = new ModelConfigDTO();

@@ -29,15 +29,13 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiRe
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 /** Producer-side validation rejects malformed known reasoning content without exposing secrets. */
 class OpenAiResponsesReasoningContentReplayTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
-  private static final UUID GENERATION = UUID.fromString("11111111-1111-1111-1111-111111111111");
-  private static final ProviderDescriptor SOURCE = descriptor("deepseek_test", GENERATION);
+  private static final ProviderDescriptor SOURCE = descriptor("deepseek_test");
   private static final String MODEL = "synthetic-source-model";
   private static final List<String> MALFORMED_CONTENT_SHAPES =
       List.of(
@@ -60,13 +58,12 @@ class OpenAiResponsesReasoningContentReplayTest {
     return MALFORMED_CONTENT_SHAPES.stream().map(Arguments::of);
   }
 
-  private static ProviderDescriptor descriptor(String name, UUID generation) {
+  private static ProviderDescriptor descriptor(String name) {
     return new ProviderDescriptor(
         name,
         ProviderType.OPENAI_RESPONSES,
         "https://api.example.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        generation);
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private static ProviderRequest request() {

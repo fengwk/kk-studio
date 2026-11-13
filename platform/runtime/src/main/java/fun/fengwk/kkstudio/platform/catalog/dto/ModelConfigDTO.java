@@ -12,7 +12,7 @@ import java.util.List;
  *
  * <pre>
  * limit:        { context: positive int, output: positive int &lt;= context }
- * abilities:    { tools: boolean, reasoning: boolean, midConversationSystemMessages?: boolean, inputModalities: non-empty list }
+ * abilities:    { tools: boolean, reasoning: boolean, midConversationSystemMessages?: boolean, messageLevelEffort?: boolean, inputModalities: non-empty list }
  * pricing:      { base: { input, output, cacheRead, cacheWrite, cacheWriteByTtl, reasoning },
  *                overrides: [], multipliers: [] }，可缺省并归一为完整零定义
  * defaultVariant: existing variant id

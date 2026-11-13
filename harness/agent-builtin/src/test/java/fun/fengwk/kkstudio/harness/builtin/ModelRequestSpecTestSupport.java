@@ -8,10 +8,8 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
-import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.UUID;
 
 /** Test fixtures for the canonical ModelRequestSpec record constructor. */
 public final class ModelRequestSpecTestSupport {
@@ -20,7 +18,6 @@ public final class ModelRequestSpecTestSupport {
 
   public static ModelRequestSpec spec(
       ProviderType providerType,
-      UUID providerConnectionGenerationId,
       ModelDescriptor model,
       ModelVariant variant,
       int outputTokens,
@@ -29,10 +26,8 @@ public final class ModelRequestSpecTestSupport {
       List<SubagentBinding> subagentBindings) {
     return spec(
         providerType,
-        providerConnectionGenerationId,
         model,
         variant,
-        Collections.singletonList(variant),
         outputTokens,
         systemInstruction,
         toolBindings,
@@ -42,7 +37,6 @@ public final class ModelRequestSpecTestSupport {
 
   public static ModelRequestSpec spec(
       ProviderType providerType,
-      UUID providerConnectionGenerationId,
       ModelDescriptor model,
       ModelVariant variant,
       int outputTokens,
@@ -52,57 +46,8 @@ public final class ModelRequestSpecTestSupport {
       ModelGroupExecution groupExecution) {
     return spec(
         providerType,
-        providerConnectionGenerationId,
         model,
         variant,
-        Collections.singletonList(variant),
-        outputTokens,
-        systemInstruction,
-        toolBindings,
-        subagentBindings,
-        groupExecution);
-  }
-
-  public static ModelRequestSpec spec(
-      ProviderType providerType,
-      UUID providerConnectionGenerationId,
-      ModelDescriptor model,
-      ModelVariant variant,
-      List<ModelVariant> modelVariants,
-      int outputTokens,
-      String systemInstruction,
-      List<ToolBinding> toolBindings,
-      List<SubagentBinding> subagentBindings) {
-    return spec(
-        providerType,
-        providerConnectionGenerationId,
-        model,
-        variant,
-        modelVariants,
-        outputTokens,
-        systemInstruction,
-        toolBindings,
-        subagentBindings,
-        null);
-  }
-
-  public static ModelRequestSpec spec(
-      ProviderType providerType,
-      UUID providerConnectionGenerationId,
-      ModelDescriptor model,
-      ModelVariant variant,
-      List<ModelVariant> modelVariants,
-      int outputTokens,
-      String systemInstruction,
-      List<ToolBinding> toolBindings,
-      List<SubagentBinding> subagentBindings,
-      ModelGroupExecution groupExecution) {
-    return new ModelRequestSpec(
-        providerType,
-        providerConnectionGenerationId,
-        model,
-        variant,
-        modelVariants,
         outputTokens,
         systemInstruction,
         toolBindings,
@@ -113,10 +58,8 @@ public final class ModelRequestSpecTestSupport {
 
   public static ModelRequestSpec spec(
       ProviderType providerType,
-      UUID providerConnectionGenerationId,
       ModelDescriptor model,
       ModelVariant variant,
-      List<ModelVariant> modelVariants,
       int outputTokens,
       String systemInstruction,
       List<ToolBinding> toolBindings,
@@ -125,10 +68,8 @@ public final class ModelRequestSpecTestSupport {
       Map<String, String> systemSections) {
     return new ModelRequestSpec(
         providerType,
-        providerConnectionGenerationId,
         model,
         variant,
-        modelVariants,
         outputTokens,
         systemInstruction,
         toolBindings,

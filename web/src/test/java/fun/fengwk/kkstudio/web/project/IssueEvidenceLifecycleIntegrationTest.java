@@ -376,10 +376,8 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
     String modelName = "mod-" + id;
     String agentName = "agent-" + id;
     jdbc.update(
-        "insert into provider (name, provider_type, config, connection_generation_id) "
-            + "values (?, 'openai', '{}'::jsonb, ?::uuid)",
-        providerName,
-        UUID.randomUUID());
+        "insert into provider (name, provider_type, config) " + "values (?, 'openai', '{}'::jsonb)",
+        providerName);
     jdbc.update(
         "insert into model (name, kind, provider_name, model_id, config)"
             + " values (?, 'MODEL', ?, ?, ?::jsonb)",

@@ -34,7 +34,6 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderTestFixtures;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 测试意图：Gemini 自由 JSON 数值语义的边界行为——工具 schema 与原生 opaque part 的数值以 {@link java.math.BigDecimal} 穿过
@@ -56,8 +55,7 @@ class GeminiPrecisionRegressionTest {
           "google-test",
           ProviderType.GOOGLE,
           "https://generativelanguage.googleapis.com",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
   private final ModelDescriptor model =
       new ModelDescriptor(
           "google-test",

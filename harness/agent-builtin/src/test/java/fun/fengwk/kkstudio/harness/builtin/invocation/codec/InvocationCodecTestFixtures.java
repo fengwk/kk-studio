@@ -29,7 +29,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /** 严格 Invocation codec 测试间共享的小型完整测试值。 */
 public final class InvocationCodecTestFixtures {
@@ -96,7 +95,6 @@ public final class InvocationCodecTestFixtures {
     ProviderRequest provider = providerRequest(binding.descriptor());
     return spec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
         1024,
@@ -110,7 +108,6 @@ public final class InvocationCodecTestFixtures {
     ProviderRequest provider = providerRequest(binding.descriptor());
     return spec(
         ProviderType.OPENAI,
-        new UUID(0L, 1L),
         provider.model(),
         provider.variant(),
         1024,

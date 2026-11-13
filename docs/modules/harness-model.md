@@ -69,11 +69,11 @@ Assistant 回复按 Provider 内容块的顺序持久化。每个块携带规范
 
 原生字段仅在 Provider、协议与 wire model affinity 匹配时回放。不同模型时，投影可读 thinking 为普通内容、丢弃空或 redacted thinking 和不可移植的原生字段；Gemini 工具调用保留而移除源 thought signature。缺少兼容的 block 元数据时走语义编码。各协议只在其终态规则允许时给块附加 metadata；不适用于成功结果的截断、诊断或过滤响应不把原生字段写入相应块。
 
-OpenAI Responses 的 reasoning item 按块保留 summary、content、item id 与 `encrypted_content`。同模型回放以该 item 的原生字段为准，不额外插入推理文本；跨模型时仅投影可读思考，密文、源 id 与不兼容字段不随请求发送。流中 captured 的 encrypted content 在终态省略它时仍保留在对应 thinking block 上，且绝不作为 semantic thinking 暴露。
+OpenAI Responses 的 reasoning item 按块保留 `id`、`encrypted_content` 与完整的 `summary` part 顺序、边界和文本。同模型回放重建原 item，不将摘要拼接或重复写入；每个摘要文本对应一个 durable thinking block，part 的其他原生字段随该 block 保留。空 `summary` 仍作为原生 item 回放。流中 captured 的 encrypted content 在终态省略它时仍保留在对应 thinking block 上，且绝不作为 semantic thinking 暴露。跨模型时仅投影可读思考，密文、源 id 与不兼容字段不随请求发送。
 
 Entry 和模型 invocation 均不保存独立的 Provider replay-state 副本；原生上下文随 assistant 内容块一起序列化、持久化和回放。块级 metadata 不进入公共 DTO、日志或异常。
 
-OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 保存在对应 assistant block metadata 中：同 Provider、协议和 wire 模型回放原生字段，跨 Provider 或模型转移时回退语义编码，可读思考以带 `<thinking>`/`</thinking>` 来源标记的普通文本保留，与 final text 明确分隔（[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode) 在请求带 `tools` 时要求保留历轮 `reasoning_content`）。`annotations` 与非法形态的 `audio` 以 `INVALID_REQUEST` 拒绝。
+OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 保存在对应 assistant block metadata 中：同 Provider、协议和 wire 模型回放原生字段；跨 Provider 或模型转移时回退语义编码，可读思考作为普通 assistant 文本保留，不添加来源标记（[DeepSeek 思考模式](https://api-docs.deepseek.com/guides/thinking_mode) 在请求带 `tools` 时要求保留历轮 `reasoning_content`）。`annotations` 与非法形态的 `audio` 以 `INVALID_REQUEST` 拒绝。
 
 历史工具调用与结果只按 durable Entry 投影，不因当前工具绑定、Environment 或模型配置变化而改写成普通用户文本；缺少已存结果的历史调用会在 provider 投影中以合成错误结果闭合。模型切换与压缩仍按 block affinity 回退语义内容。
 
@@ -131,13 +131,13 @@ OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 保存在对应 assi
 
 ## 协议差异
 
-**Anthropic Messages**（[`AnthropicProviderAdapter`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/anthropic/AnthropicProviderAdapter.java)）。端点由 [`AnthropicEndpoints.resolveMessagesUri`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/anthropic/AnthropicEndpoints.java) 幂等解析：已以 `/v1/messages` 或 `/messages` 结尾保持不变，以 `/v1` 结尾追加 `/messages`，其余 base path 追加 `/v1/messages`；严格拒绝 user-info、query 与 fragment，并保真保留 raw authority（含 IPv6 与端口）与已转义 raw path。请求同时发送 `x-api-key` 与 `Authorization: Bearer`，并始终带 `anthropic-version: 2023-06-01`。显式 adaptive effort 时 `anthropic-beta` 自动包含消息级控制所需的标识。
+**Anthropic Messages**（[`AnthropicProviderAdapter`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/anthropic/AnthropicProviderAdapter.java)）。端点由 [`AnthropicEndpoints.resolveMessagesUri`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/anthropic/AnthropicEndpoints.java) 幂等解析：已以 `/v1/messages` 或 `/messages` 结尾保持不变，以 `/v1` 结尾追加 `/messages`，其余 base path 追加 `/v1/messages`；严格拒绝 user-info、query 与 fragment，并保真保留 raw authority（含 IPv6 与端口）与已转义 raw path。请求同时发送 `x-api-key` 与 `Authorization: Bearer`，并始终带 `anthropic-version: 2023-06-01`。启用消息级 effort 时，`anthropic-beta` 声明 `mid-conversation-output-config-2026-07-01` 与 `thinking-binding-controls-2026-08-01`。
 
-wire 模型标识直接取 `ModelDescriptor.modelId()`，不存在别名替换。推理编码上，`reasoningOff` 发送 `thinking: {"type": "disabled"}`；非空 effort 发送 `thinking: {"type": "adaptive", "display": "summarized"}` 与 `output_config.effort`。运行时指定 effort 时原生 `thinking` / `output_config.effort` 不能冲突；`reasoningEffort` 为 null 时不由运行时声明推理字段，原生选项可携带旧版模型所需的预算 `thinking`。Prompt Cache 由运行时 `ProviderCacheControl` 驱动：`NONE` 不发任何标记，`SHORT` 写 `cache_control: {"type":"ephemeral"}`，`LONG` 追加 `ttl: "1h"`；会话 `key` 不属于 Anthropic 原生选项，因此不下发。
+wire 模型标识直接取 `ModelDescriptor.modelId()`，不存在别名替换。推理编码上，`reasoningOff` 发送 `thinking: {"type": "disabled"}`；启用推理时发送 `thinking: {"type": "adaptive", "display": "summarized"}` 与 `output_config.effort`。只有显式声明 `messageLevelEffort` 能力的模型才启用历史消息级 effort 与 `thinking.block_binding.prefix_mismatch_behavior: "drop_block"`；没有该能力时只发送当前顶层 effort。`off` 不插入 effort marker，也不发送 block binding。运行时指定 effort 时原生 `thinking` / `output_config.effort` 不能冲突；`reasoningEffort` 为 null 时不由运行时声明推理字段，原生选项可携带旧版模型所需的预算 `thinking`。Prompt Cache 由运行时 `ProviderCacheControl` 驱动：`NONE` 不发任何标记，`SHORT` 写 `cache_control: {"type":"ephemeral"}`，`LONG` 追加 `ttl: "1h"`；会话 `key` 不属于 Anthropic 原生选项，因此不下发。
 
 Anthropic 每次最多放置 **4 个**断点：最后一个合格 tool、最后一个合格 system block，其余按最新优先分配给最近的会话请求端点。工具的缓存断点只落在最后一个真实工具，绝不标记 encoder-only deferred placeholder。断点只添加到支持的非空 text、image、document、tool_use、tool_result 块，thinking、redacted thinking 与 compaction 等块保留但不新增标记。追加 SYSTEM message 时，编码器先为此前的消息端点安排缓存断点，使新请求保留此前请求的 message 字节前缀及缓存边界；标记只在原生校验完成后注入。compaction 块回放时清空此前累积的消息与端点，使该 assistant 消息成为首条。
 
-模型支持推理且选中非 null / 非 `off` effort 时，消息级 effort 是唯一的编码方式，无需额外配置。请求顶层仍发送当前 effort；最终保留的历史中未知等级从后向前继承，在连续 USER/TOOL 结果段之后仅首次或等级变化时插入 `role: system`、空 content 与 `output_config.effort`，当前尾部使用当前 effort。自动按顺序追加 `mid-conversation-system-2026-04-07`、`per-turn-control-2026-07-01`、`effort-2025-11-24` beta；空控制消息不是缓存断点。`off` 或原生选项模式不插入控制消息。内部消息元数据不由其他 Provider 写入 wire。
+`messageLevelEffort` 是 Model 的显式能力。对启用该能力且 effort 不为 `off` 的请求，top-level `output_config.effort` 固定为当前 compaction segment 中首个同一具体 wire model 历史回复实际声明的 effort；没有该回复时使用当前 effort。编码器按历史顺序遍历：同一模型 assistant 回复的存储 effort 与当前声明不同，就在该回复前加入空内容 `role: system` effort marker；若该位置已有 SYSTEM 消息，则把 `output_config` 合并到该消息。其他模型的回复不改变当前声明；当前 effort 与历史末尾不同，则在请求尾部追加 marker。这样下一轮只扩展请求后缀，已发送的 prefix 保持稳定。启用消息级 effort 时发送 `mid-conversation-output-config-2026-07-01` 与 `thinking-binding-controls-2026-08-01` beta，并设置 `thinking.block_binding.prefix_mismatch_behavior: "drop_block"`。未启用该能力时只发送当前顶层 effort、不插入 marker 或 block binding；`off` 时关闭 thinking 且不插入 marker。
 
 缓存字段由运行时独占：原生顶层 `cache_control` 与工具直属的 `protocolOptions.tools[].cache_control`（包括显式 `null`）都在编码前以 `INVALID_REQUEST` 拒绝，即使 retention 为 NONE 也不允许透传；工具 schema 内同名业务属性不受影响。
 

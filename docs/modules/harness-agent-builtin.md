@@ -36,14 +36,14 @@ RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 [`ModelRequestSpec`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelRequestSpec.java) 冻结一次调用不可变的请求契约：
 
 ```text
-providerType / providerConnectionGenerationId / model / variant / modelVariants / outputTokens
+providerType / model / variant / outputTokens
 systemInstruction / systemSections / toolBindings / subagentBindings
 groupExecution?
 ```
 
 完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称与描述已进入命名 system sections，`systemInstruction` 是这些 sections 的拼接视图。SYSTEM 历史只保存模型可见工具定义；Environment、Contributor 等执行路由保留在冻结的 `ModelRequestSpec` / `ToolBinding` 中。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩也遵循 Compaction Agent 自身的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
 
-平台在 invocation 创建时冻结当前实际模型的完整 variants；模型组每个成员各自冻结列表，切换成员时一起切换。历史 assistant 的实际模型名匹配当前模型时，按其 variant ID 在该冻结列表中查找可空 effort；缺失或不匹配为未知。新 invocation 使用最新配置重解释历史，重试与重启沿用冻结列表，不新增 Entry 历史字段。
+Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员及其所选 Variant，成员切换时整体使用该成员快照。assistant 回复持久化本次请求实际声明的 effort（未声明或 `off` 时为空）；后续回放读取该历史事实，不根据当前模型 variants 反查。新 invocation 使用最新配置，重试与重启沿用冻结请求。
 
 [`ProviderMessageProjector`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/request/ProviderMessageProjector.java) 把语义上下文投影为 `ProviderMessage`，投影只影响本次请求，从不改写 durable 历史：
 

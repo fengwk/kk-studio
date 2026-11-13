@@ -215,7 +215,6 @@ class DatabaseTurnResolverTest {
 
     assertEquals("provider", requestSpec.model().providerName());
     assertEquals("model", requestSpec.model().modelName());
-    assertEquals(new UUID(0L, 42L), requestSpec.providerConnectionGenerationId());
     // 上游 wire 标识来自 Model.modelId，与 catalog 逻辑名相互独立。
     assertEquals("wire-model", requestSpec.model().modelId());
     assertEquals(Set.of(ModelInputModality.TEXT), requestSpec.model().inputModalities());
@@ -278,7 +277,7 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void modelMidConversationSystemMessageCapabilityReachesRequestDescriptor() {
+  void modelCapabilitiesReachRequestDescriptor() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     ParsedAgentModelConfig parsed = Fixture.parsedModel();
     when(fixture.modelConfigParser.parse("model-config"))
@@ -290,6 +289,7 @@ class DatabaseTurnResolverTest {
                 parsed.tools(),
                 parsed.reasoning(),
                 true,
+                true,
                 parsed.variants(),
                 parsed.defaultVariant(),
                 parsed.pricing()));
@@ -299,6 +299,7 @@ class DatabaseTurnResolverTest {
             .resolved(fixture.path(settings("default")))
             .model()
             .midConversationSystemMessages());
+    assertTrue(fixture.resolved(fixture.path(settings("default"))).model().messageLevelEffort());
   }
 
   @Test
@@ -339,12 +340,6 @@ class DatabaseTurnResolverTest {
     fixture.editProvider(provider -> provider.providerType(null));
     assertEquals(
         "provider type must not be null",
-        fixture.rejected(fixture.path(settings("default"))).error().message());
-
-    fixture = new Fixture(List.of(), List.of(), List.of());
-    fixture.editProvider(provider -> provider.connectionGenerationId(null));
-    assertEquals(
-        "provider connection generation id must not be null",
         fixture.rejected(fixture.path(settings("default"))).error().message());
 
     fixture = new Fixture(List.of(), List.of(), List.of());
@@ -964,7 +959,6 @@ class DatabaseTurnResolverTest {
 
     ModelRequestSpec requestSpec = fixture.resolved(fixture.path(settings("custom")));
     assertEquals("custom", requestSpec.variant().id());
-    assertEquals(Fixture.parsedModel().variants(), requestSpec.modelVariants());
     // 所选 catalog variant 的 reasoningEffort 原样生效，不存在运行时 override。
     assertEquals("medium", requestSpec.variant().reasoningEffort());
     // variant 只承载 reasoning effort：输出预算由 model 级 limit.output 决定。
@@ -1513,8 +1507,7 @@ class DatabaseTurnResolverTest {
             new ProviderConfigurationCodec(JsonMapper.builder().build()),
             Map.of(factory.providerType(), factory),
             new ProviderResourceMaterializer(blobs, content, () -> ImageInputTier.P720));
-    ResolvedExecution execution =
-        resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), request);
+    ResolvedExecution execution = resolution.resolve(spec.providerType(), request);
     assertEquals(request.cacheControl(), execution.effectiveRequest().cacheControl());
     ObjectMapper mapper = JsonMapper.builder().build();
     JsonNode wire = mapper.readTree(execution.encodeRequestBody());
@@ -1546,7 +1539,6 @@ class DatabaseTurnResolverTest {
             resolution
                 .resolve(
                     nextSpec.providerType(),
-                    nextSpec.providerConnectionGenerationId(),
                     new ModelRequestMaterializer().materialize(nextPath, nextSpec))
                 .encodeRequestBody());
     assertEquals(request.cacheControl().key(), nextWire.path("prompt_cache_key").asText());
@@ -1563,8 +1555,7 @@ class DatabaseTurnResolverTest {
             request.messages(),
             request.tools(),
             ProviderCacheControl.none());
-    ResolvedExecution disabledExecution =
-        resolution.resolve(spec.providerType(), spec.providerConnectionGenerationId(), disabled);
+    ResolvedExecution disabledExecution = resolution.resolve(spec.providerType(), disabled);
     assertEquals(ProviderCacheControl.none(), disabledExecution.effectiveRequest().cacheControl());
     JsonNode disabledWire = mapper.readTree(disabledExecution.encodeRequestBody());
     assertFalse(disabledWire.has("prompt_cache_key"));
@@ -2240,6 +2231,7 @@ class DatabaseTurnResolverTest {
             true,
             true,
             false,
+            false,
             List.of(new ModelVariant("fallback", null, PromptCacheRetention.NONE, null)),
             "fallback",
             pricing()));
@@ -2572,25 +2564,26 @@ class DatabaseTurnResolverTest {
         List.of("model", "second"),
         group.members().stream().map(member -> member.model().modelName()).toList());
     assertEquals(
-        List.of(new UUID(0, 42), new UUID(0, 43)),
-        group.members().stream().map(member -> member.providerConnectionGenerationId()).toList());
-    assertEquals(
         List.of("custom", "fast"),
         group.members().stream().map(member -> member.variant().id()).toList());
-    // 每个成员连同完整 variants 冻结，切换后使用该成员自己的列表。
+    // Each member freezes only its selected variant; switching uses that member's exact variant
+    // metadata.
     assertEquals(
-        List.of(
-            new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null),
-            new ModelVariant("deep", "max", PromptCacheRetention.NONE, null)),
-        group.members().get(0).modelVariants());
+        new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null),
+        group.members().get(0).variant());
     assertEquals(
-        List.of(
-            new ModelVariant("fast", null, PromptCacheRetention.NONE, null),
-            new ModelVariant("careful", "high", PromptCacheRetention.NONE, null)),
-        group.members().get(1).modelVariants());
-    assertEquals(
-        group.members().get(1).modelVariants(), resolved.spec().forMember(1).modelVariants());
+        new ModelVariant("fast", null, PromptCacheRetention.NONE, null),
+        group.members().get(1).variant());
+    assertEquals(group.members().get(1).variant(), resolved.spec().forMember(1).variant());
     assertEquals(Set.of(ModelInputModality.TEXT), resolved.spec().model().inputModalities());
+    assertFalse(resolved.spec().model().tools());
+    assertFalse(resolved.spec().model().reasoning());
+    assertFalse(resolved.spec().model().midConversationSystemMessages());
+    assertFalse(resolved.spec().model().messageLevelEffort());
+    assertTrue(group.members().getFirst().model().tools());
+    assertTrue(group.members().getFirst().model().reasoning());
+    assertTrue(group.members().getFirst().model().midConversationSystemMessages());
+    assertTrue(group.members().getFirst().model().messageLevelEffort());
     assertEquals(
         List.of("provider", "second-provider"),
         group.members().stream().map(member -> member.model().providerName()).toList());
@@ -2670,7 +2663,8 @@ class DatabaseTurnResolverTest {
                 Set.of(ModelInputModality.TEXT, ModelInputModality.IMAGE),
                 true,
                 true,
-                false,
+                true,
+                true,
                 List.of(
                     new ModelVariant("custom", "medium", PromptCacheRetention.NONE, null),
                     new ModelVariant("deep", "max", PromptCacheRetention.NONE, null)),
@@ -2683,8 +2677,9 @@ class DatabaseTurnResolverTest {
             2048,
             256,
             secondModalities,
-            true,
-            true,
+            false,
+            false,
+            false,
             false,
             List.of(
                 new ModelVariant("fast", null, PromptCacheRetention.NONE, null),
@@ -3006,7 +3001,6 @@ class DatabaseTurnResolverTest {
           Provider.builder()
               .name("provider")
               .providerType(persistedProviderType)
-              .connectionGenerationId(new UUID(0L, 42L))
               .version(0L)
               .build());
 
@@ -3085,6 +3079,7 @@ class DatabaseTurnResolverTest {
                   parsed.inputModalities(),
                   parsed.tools(),
                   parsed.reasoning(),
+                  false,
                   false,
                   List.of(
                       new ModelVariant("default", null, promptCacheRetention, null),
@@ -3204,7 +3199,6 @@ class DatabaseTurnResolverTest {
           Provider.builder()
               .name(providerName)
               .providerType(ProviderType.OPENAI)
-              .connectionGenerationId(new UUID(0L, 43L))
               .version(0L)
               .build();
       when(providers.getByName(providerName)).thenReturn(fallbackProvider);
@@ -3278,6 +3272,7 @@ class DatabaseTurnResolverTest {
                   tools,
                   parsed.reasoning(),
                   parsed.midConversationSystemMessages(),
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3299,6 +3294,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   parsed.reasoning(),
                   parsed.midConversationSystemMessages(),
+                  false,
                   List.of(new ModelVariant("default", null, PromptCacheRetention.NONE, null)),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3315,6 +3311,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   parsed.reasoning(),
                   supported,
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3331,6 +3328,7 @@ class DatabaseTurnResolverTest {
                   parsed.tools(),
                   reasoning,
                   parsed.midConversationSystemMessages(),
+                  false,
                   parsed.variants(),
                   parsed.defaultVariant(),
                   parsed.pricing()));
@@ -3347,6 +3345,7 @@ class DatabaseTurnResolverTest {
           Set.of(ModelInputModality.TEXT),
           true,
           true,
+          false,
           false,
           List.of(defaultVariant, customVariant),
           "default",

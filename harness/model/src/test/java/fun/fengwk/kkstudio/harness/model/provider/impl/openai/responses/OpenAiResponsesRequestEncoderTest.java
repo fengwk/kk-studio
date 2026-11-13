@@ -50,7 +50,6 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 import java.util.stream.Stream;
 
 /** 验证 OpenAI Responses 请求编码、参数映射、媒体支持、回放与缓存控制规则。 */
@@ -67,8 +66,7 @@ class OpenAiResponsesRequestEncoderTest {
         "openai_test",
         ProviderType.OPENAI_RESPONSES,
         "https://api.openai.com/v1",
-        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)),
-        UUID.fromString("11111111-1111-1111-1111-111111111111"));
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(60)));
   }
 
   private ModelDescriptor createModel() {

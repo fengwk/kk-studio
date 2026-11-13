@@ -17,8 +17,6 @@ import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.util.Comparator;
 import java.util.List;
-import java.util.Objects;
-import java.util.UUID;
 
 /**
  * 全局 provider CRUD：输入规范化、名称唯一、(name, version) CAS、删除引用检查与远端模型发现。
@@ -153,7 +151,6 @@ public class ProviderService {
             .baseUrl(mutation.baseUrl())
             .credential(normalizedCredential)
             .configJson(mutation.configJson())
-            .connectionGenerationId(UUID.randomUUID())
             .build();
     try {
       if (!repository.create(provider)) {
@@ -197,21 +194,12 @@ public class ProviderService {
     }
   }
 
-  /** 凭据只在 {@code baseUrl} 或凭据本身变化时轮换连接世代。 */
   private Provider applyEdits(Provider provider, Mutation mutation, String credential) {
-    boolean connectionChanged =
-        !Objects.equals(provider.baseUrl(), mutation.baseUrl())
-            || !Objects.equals(provider.credential(), credential);
-    UUID generationId =
-        provider.connectionGenerationId() == null || connectionChanged
-            ? UUID.randomUUID()
-            : provider.connectionGenerationId();
     return provider.toBuilder()
         .description(mutation.description())
         .baseUrl(mutation.baseUrl())
         .credential(credential)
         .configJson(mutation.configJson())
-        .connectionGenerationId(generationId)
         .build();
   }
 

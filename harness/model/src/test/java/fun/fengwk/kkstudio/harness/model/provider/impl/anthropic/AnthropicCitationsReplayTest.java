@@ -35,7 +35,6 @@ import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
-import java.util.UUID;
 
 /**
  * 验证官方 text citations 的无损链路：{@code citations_delta} 依序累积为 text block 的 {@code citations} 数组，终态
@@ -53,8 +52,7 @@ class AnthropicCitationsReplayTest {
           "test-anthropic",
           ProviderType.ANTHROPIC,
           "https://api.anthropic.com/v1",
-          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)),
-          new UUID(1L, 2L));
+          new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
 
   /** 测试意图：citations_delta 依序累积进 text block 的 citations，并原样进入 replay 与下一轮 wire。 */
   @Test
