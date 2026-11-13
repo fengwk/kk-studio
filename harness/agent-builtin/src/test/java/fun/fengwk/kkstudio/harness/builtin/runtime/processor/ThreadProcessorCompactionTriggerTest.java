@@ -30,13 +30,23 @@ import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.runtime.processor.ThreadProcessorTestSupport.ClosedTurnBaseline;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 
 import java.util.List;
@@ -108,6 +118,130 @@ class ThreadProcessorCompactionTriggerTest extends ThreadProcessorTestBase {
             AssistantErrorPayload.class, path.entries().get(path.entries().size() - 2).payload());
     assertEquals("CONTEXT_LIMIT", error.error().code());
     assertTrue(inTx(fixture, tx -> tx.threads().listChildren(threadId).isEmpty()).booleanValue());
+  }
+
+  /** compact 工具只排队：批次结束后的安全边界按手动压缩规则启动 MANUAL 压缩，而不是直接续作。 */
+  @Test
+  void compactToolQueuesManualCompactionAtTheNextSafeBoundary() {
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline =
+        seedCompactionReadyClosedTurn(fixture.store, overThresholdUsage());
+    UUID threadId = baseline.threadId();
+    seedCompactToolTurn(fixture, baseline);
+    requestThreadWork(fixture.store, threadId);
+    ExecutionSelection compactor =
+        BuiltinExecution.of(ModelSelection.model("compactor-model", "v1"));
+    fixture.resolver.results.add(
+        new TurnResolver.CompactionResolved(
+            compactor,
+            4096L,
+            CONTEXT_WINDOW,
+            MAX_OUTPUT_TOKENS,
+            new BranchSettings("compaction", compactor, null)));
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(threadId));
+
+    EntryPath path = path(fixture.store, threadId);
+    TurnStartPayload start = assertInstanceOf(TurnStartPayload.class, path.head().payload());
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
+  }
+
+  /** 追加一个以 compact 成功回执结束、仍要求续作的普通 INPUT 回合。 */
+  private static void seedCompactToolTurn(Fixture fixture, ClosedTurnBaseline baseline) {
+    fixture.store.transaction(
+        tx -> {
+          ThreadState thread = tx.threads().lock(baseline.threadId()).orElseThrow();
+          UUID turnStart = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStart,
+                      baseline.sessionId(),
+                      baseline.turnEndEntryId(),
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          thread.id(),
+                          CONTEXT_WINDOW,
+                          MAX_OUTPUT_TOKENS,
+                          null,
+                          null),
+                      NOW));
+          UUID user = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      user,
+                      baseline.sessionId(),
+                      turnStart,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.USER,
+                              List.of(new TextMessageContent("compact now"))),
+                          null,
+                          null),
+                      NOW));
+          UUID assistant = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistant,
+                      baseline.sessionId(),
+                      user,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new ToolCallMessageContent(
+                                      "call-1", "compact", "compact", "{}"))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE,
+                              new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                          null),
+                      NOW));
+          UUID result = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      result,
+                      baseline.sessionId(),
+                      assistant,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.TOOL,
+                              List.of(
+                                  new ToolResultMessageContent(
+                                      "call-1",
+                                      "compact",
+                                      "compact",
+                                      List.of(new TextMessageContent("compaction queued")),
+                                      false,
+                                      "{}"))),
+                          null,
+                          new ToolResultMetadata(
+                              tx.nextId(),
+                              assistant,
+                              "call-1",
+                              0,
+                              ToolResultStatus.SUCCEEDED,
+                              false,
+                              null,
+                              null,
+                              "compact")),
+                      NOW));
+          UUID end = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      end,
+                      baseline.sessionId(),
+                      result,
+                      new TurnEndPayload(turnStart, TurnEndOutcome.COMPLETED, true, null, null),
+                      NOW));
+          tx.threads().update(thread.advanceHead(end, NOW));
+          return null;
+        });
   }
 
   /** 追加 complete COMPACTION turn 与其唯一的 CONTINUATION 恢复回合，head 停在恢复回合的 TURN_END。 */

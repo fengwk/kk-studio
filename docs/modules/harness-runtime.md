@@ -292,7 +292,7 @@ summaryBudget    = floor(0.8 * effectiveReserve)
 
 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 只在完整 turn 边界选切点：取第一个累计历史越过 `effectiveKeep` 的完整 turn 之前，始终保留最新模型调用 turn 及其工具结果，不切入 turn、工具回合或压缩结果。摘要文本逐字保存为单一 `COMPACTION` 结果；截断、过滤、工具调用、空结果或超出输出预算均视为失败，按普通模型调用重试策略处理。
 
-手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ManualCompactionAvailability.java) 是给界面的瞬时投影（Thread 已停止、忙碌、模型已变化、预算不足、无可压缩内容等），不能替代提交时的复验。`STOPPED` 是持久执行事实：即使历史仍满足压缩阈值，`manualDecision` 也在 resolve 与任何写入之前直接返回 `THREAD_STOPPED`；先由显式新输入恢复为 `RUNNABLE` 才允许再次压缩。
+手工压缩走 `compactThread`：单事务复验 expected version 与可用性，成功时原子提交压缩回合、子 Thread 与票据。模型侧的 `compact` 工具（INTERNAL，默认声明、无参数）只返回“已排队”，Runtime 在该工具批次结束后的第一个安全边界按同一手动压缩规则启动压缩，再续作原请求；COMPACTION Thread 内平台工具一律禁用，因此不会递归压缩。[`ManualCompactionAvailability`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ManualCompactionAvailability.java) 是给界面的瞬时投影（Thread 已停止、忙碌、模型已变化、预算不足、无可压缩内容等），不能替代提交时的复验。`STOPPED` 是持久执行事实：即使历史仍满足压缩阈值，`manualDecision` 也在 resolve 与任何写入之前直接返回 `THREAD_STOPPED`；先由显式新输入恢复为 `RUNNABLE` 才允许再次压缩。
 
 ## 停止
 
@@ -395,6 +395,7 @@ environmentSupport       NONE / ROUTED / REQUIRED
 | `lsp_goto_definition` / `lsp_workspace_symbols` / `lsp_java_decompile` | Environment | SELECTABLE | 对应 `lsp.*` 能力，READ_ONLY |
 | `task` | 无 | INTERNAL | 委派 Subagent 任务，NON_IDEMPOTENT |
 | `ask_user` | 无 | SELECTABLE | 冻结问卷并等待人工回答 |
+| `compact` | 无 | INTERNAL | 请求在批次结束后整理上下文，只返回排队回执 |
 
 每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，未选 Environment 时只过滤 `REQUIRED` 工具（`bash` 与 LSP），文件工具始终可见。五个文件工具由 [`FileTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/FileTool.java) 实现：schema 与默认超时取自同名能力描述符，`read` 的 `resource://` URI 调用 [`ResourceReadGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/ResourceReadGateway.java)，本地绝对路径委托 `BoundEnvironment`，没有绑定环境时本地路径返回明确的 Environment 错误。`bash` 与 LSP 由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定能力执行。
 
@@ -465,6 +466,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 | `contributor.builtin` | 第一方 Contributor 与内置工具的历史渲染 |
 | `contributor.builtin.environment` | 绑定环境能力的宿主工具与统一 `read` |
 | `contributor.builtin.input` | `ask_user` 工具定义 |
+| `contributor.builtin.compact` | `compact` 工具定义 |
 | `contributor.builtin.subagent` | `task` 工具、委派请求与子代理配置 |
 | `prompt` | 严格 prompt 模板与 classpath 加载 |
 

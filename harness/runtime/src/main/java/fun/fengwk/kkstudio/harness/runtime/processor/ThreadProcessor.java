@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactToolName;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -22,6 +23,8 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
+import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -288,6 +291,12 @@ public final class ThreadProcessor {
       case ThreadContext.ToolActive pending -> dispatchQueuedTools(
           tx, claim, thread, pending.assistant());
       case ThreadContext.ContinuationDue ignored -> {
+        // compact 工具只排队：批次结束后的第一个安全边界按手动压缩规则整理同一历史，再消费后续输入。
+        CompactionPreparation compactRequest = compactToolPreparation(thread, path);
+        if (compactRequest != null) {
+          planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, compactRequest, now);
+          return;
+        }
         // 已关闭 turn 是安全边界：有序消费完整输入快照，让预算提醒、用户 steering 与 child completion
         // 不必等自动续作彻底停止。
         if (ThreadInputDemand.hasInputDemand(tx, thread)
@@ -924,6 +933,59 @@ public final class ThreadProcessor {
     return new CompactionPlanner(config.compactionProvider().compactionConfig())
         .prepare(path, trigger, contextWindow)
         .orElse(null);
+  }
+
+  /**
+   * {@code compact} 工具在最新已关闭 turn 内成功返回后的排队压缩；批次已结束，按手动压缩规则选择切点。
+   *
+   * <p>返回 {@code null} 表示没有排队请求、当前 Thread 不可压缩或历史已没有可摘要前缀；此时继续普通续作。
+   */
+  private CompactionPreparation compactToolPreparation(ThreadState thread, EntryPath path) {
+    if (thread.kind() == ThreadKind.COMPACTION || !thread.constraints().allowAutoCompaction()) {
+      return null;
+    }
+    CompactionHistory.ClosedTurn latest = CompactionHistory.latestClosedTurn(path);
+    if (latest == null || !completedCompactTool(path, latest)) {
+      return null;
+    }
+    CompactionHistory.ClosedTurn candidate = latest;
+    while (candidate != null) {
+      TurnStartPayload start = (TurnStartPayload) candidate.start().payload();
+      if (!thread.id().equals(start.ownerThreadId())) {
+        return null;
+      }
+      if (start.contextWindow() != null) {
+        return compactionPreparation(path, CompactionTrigger.MANUAL, start.contextWindow());
+      }
+      candidate = CompactionHistory.previousClosedTurn(path, candidate);
+    }
+    return null;
+  }
+
+  /** 该已关闭 turn 内是否有内置 {@code compact} 工具的成功结果。 */
+  private static boolean completedCompactTool(EntryPath path, CompactionHistory.ClosedTurn turn) {
+    boolean inTurn = false;
+    for (Entry entry : path.entries()) {
+      if (entry.id().equals(turn.start().id())) {
+        inTurn = true;
+        continue;
+      }
+      if (!inTurn) {
+        continue;
+      }
+      if (entry.payload() instanceof TurnEndPayload) {
+        return false;
+      }
+      if (entry.payload() instanceof MessagePayload message) {
+        ToolResultMetadata metadata = message.toolResultMetadata();
+        if (metadata != null
+            && CompactToolName.NAME.equals(metadata.toolName())
+            && metadata.status() == ToolResultStatus.SUCCEEDED) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**

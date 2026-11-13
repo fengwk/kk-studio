@@ -48,11 +48,13 @@ import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.api.history.CustomMessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.ForkPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
+import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
@@ -770,11 +772,24 @@ class PostgresqlCompactionChildTest {
     processNext(parentId);
     processNext(parentId);
 
-    // 压缩成功后的唯一一次 CONTINUATION 重试。
+    // 压缩成功后的唯一一次 CONTINUATION 重试：先追加新的 SYSTEM 基线，摘要结果与保留尾部随后回放。
     EntryPath retryPath = path(parentId);
     TurnStartPayload retryStart =
         assertInstanceOf(TurnStartPayload.class, retryPath.head().payload());
     assertEquals(TurnStartReason.CONTINUATION, retryStart.reason());
+    int baselineIndex = -1;
+    int compactionIndex = -1;
+    for (int i = 0; i < retryPath.entries().size(); i++) {
+      EntryPayload payload = retryPath.entries().get(i).payload();
+      if (payload instanceof SystemPayload system && system.baseline()) {
+        baselineIndex = i;
+      } else if (payload instanceof CompactionPayload) {
+        compactionIndex = i;
+      }
+    }
+    assertTrue(compactionIndex >= 0);
+    assertTrue(baselineIndex > compactionIndex);
+    assertTrue(baselineIndex < retryPath.entries().size() - 1);
     UUID retryModelId =
         findModelInvocationByTurn(parentId, retryPath.head().id()).orElseThrow().id();
     gateway.queue(

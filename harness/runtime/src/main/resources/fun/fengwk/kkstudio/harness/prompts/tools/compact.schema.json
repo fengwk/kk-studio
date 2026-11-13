@@ -1,0 +1,7 @@
+{
+  "description": "Request context compaction after the current tool batch. No parameters.",
+  "properties": {},
+  "required": [],
+  "type": "object",
+  "additionalProperties": false
+}
