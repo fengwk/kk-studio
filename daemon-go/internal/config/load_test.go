@@ -34,6 +34,17 @@ func TestLoadCanonicalConfiguration(t *testing.T) {
 	}
 }
 
+func TestLoadNormalizesBackslashMarkers(t *testing.T) {
+	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"4","daemonConfig":{"studioUrl":"https://studio.example","lsp":{"servers":{"ts":{"command":["tsls"],"extensions":[".ts"],"rootMarkers":["folder\\README.md"],"firstMatchMarkers":[]}}}}}`)
+	got, err := LoadDaemonConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marker := got.LSP[0].RootMarkers[0]; marker != "folder/README.md" {
+		t.Fatalf("normalized root marker = %q", marker)
+	}
+}
+
 // RUN-T-164 rejects duplicate keys rather than silently accepting a normalized JSON object.
 func TestLoadRejectsDuplicateKeys(t *testing.T) {
 	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{}}`)

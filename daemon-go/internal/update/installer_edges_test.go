@@ -217,6 +217,71 @@ func TestUnixRunnerScriptParses(t *testing.T) {
 	}
 }
 
+func TestUnixRunnerExecutesInstallerRecordsFailureAndCleansWorkspace(t *testing.T) {
+	bash, err := exec.LookPath("bash")
+	if err != nil {
+		t.Skip("bash is unavailable on this host")
+	}
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	if err := os.Mkdir(work, 0700); err != nil {
+		t.Fatal(err)
+	}
+	environmentRoot := filepath.Join(root, "environment")
+	if err := os.Mkdir(environmentRoot, 0700); err != nil {
+		t.Fatal(err)
+	}
+	installer := filepath.Join(root, "install.sh")
+	if err := os.WriteFile(installer, []byte("exit 23\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "permit"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	operationID := installerTestEnvironmentID
+	command := exec.Command(bash, "-c", unixRunner, "runner", work, installer, environmentRoot, operationID, "2.0.0", "update", "--environment-id", operationID, "--version", "2.0.0")
+	command.Env = append(os.Environ(), "KK_UPDATE_PERMIT_TIMEOUT_SECONDS=0")
+	if err := command.Run(); err == nil {
+		t.Fatal("failed installer was reported as successful")
+	}
+	if _, err := os.Stat(work); !os.IsNotExist(err) {
+		t.Fatalf("runner workspace remains after installer failure: %v", err)
+	}
+	record, err := os.ReadFile(filepath.Join(environmentRoot, "last-operation.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []string{`"operationId":"` + operationID + `"`, `"targetVersion":"2.0.0"`, `"phase":"job"`, `"result":"failed"`} {
+		if !strings.Contains(string(record), expected) {
+			t.Fatalf("fallback failure record %q lacks %q", record, expected)
+		}
+	}
+
+	officialRecord := `{"operationId":"` + operationID + `","phase":"installer","result":"failed"}`
+	if err := os.WriteFile(filepath.Join(environmentRoot, "last-operation.json"), []byte(officialRecord), 0600); err != nil {
+		t.Fatal(err)
+	}
+	work = filepath.Join(root, "work-existing-record")
+	if err := os.Mkdir(work, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(work, "permit"), nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	command = exec.Command(bash, "-c", unixRunner, "runner", work, installer, environmentRoot, operationID, "2.0.0", "update", "--environment-id", operationID, "--version", "2.0.0")
+	command.Env = append(os.Environ(), "KK_UPDATE_PERMIT_TIMEOUT_SECONDS=0")
+	if err := command.Run(); err == nil {
+		t.Fatal("failed installer was reported as successful with an existing operation record")
+	}
+	preserved, err := os.ReadFile(filepath.Join(environmentRoot, "last-operation.json"))
+	if err != nil || string(preserved) != officialRecord {
+		t.Fatalf("official installer record was changed: %q, %v", preserved, err)
+	}
+	if _, err := os.Stat(work); !os.IsNotExist(err) {
+		t.Fatalf("runner workspace remains after fallback was suppressed: %v", err)
+	}
+}
+
 func decodePowerShell(value string) ([]byte, error) {
 	return base64.StdEncoding.DecodeString(value)
 }

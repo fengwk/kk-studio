@@ -475,6 +475,8 @@ timeout=${KK_UPDATE_PERMIT_TIMEOUT_SECONDS:-120}
 case "$timeout" in ''|*[!0-9]*) timeout=120 ;; esac
 if [ "$timeout" -gt 3600 ]; then timeout=120; fi
 record_failure() {
+  [[ "$operationId" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || return 0
+  [[ "$targetVersion" =~ ^[0-9A-Za-z._+-]{1,64}$ ]] || return 0
   [ -d "$envRoot" ] || return 0
   [ ! -L "$envRoot" ] || return 0
   current="$envRoot/last-operation.json"

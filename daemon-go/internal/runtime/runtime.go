@@ -6,6 +6,7 @@ import (
 	jsonv2 "encoding/json/v2"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -125,6 +126,7 @@ type Runtime struct {
 	resourceSweepInterval  time.Duration
 	resourcePolicyActive   bool
 	resourcePolicyChanged  chan struct{}
+	shutdown               *shutdownFailureTracker
 }
 
 // NewRuntime validates the required injectable boundaries and creates an in-memory session runtime.
@@ -188,7 +190,7 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), ideCommands: make(map[string]*ideCommandCall), resourceRequests: make(map[resourceExchangeKey]chan *protocol.Envelope), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1)}
+	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), ideCommands: make(map[string]*ideCommandCall), resourceRequests: make(map[resourceExchangeKey]chan *protocol.Envelope), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1), shutdown: newShutdownFailureTracker(nil)}
 	if options.IDECommandCount == nil {
 		runtime.options.IDECommandCount = func() int { return int(runtime.ideCommandCount.Load()) }
 	}
@@ -238,8 +240,13 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	return runtime, nil
 }
 
+// ShutdownFailures returns the shutdown release and diagnostic failures recorded by this runtime.
+func (r *Runtime) ShutdownFailures() []error {
+	return r.shutdown.snapshot()
+}
+
 // Run reconnects the injected control transport and retains accepted invocations across connection generations.
-func (r *Runtime) Run(ctx context.Context) error {
+func (r *Runtime) Run(ctx context.Context) (runErr error) {
 	r.runMu.Lock()
 	if r.hasRun {
 		r.runMu.Unlock()
@@ -261,14 +268,27 @@ func (r *Runtime) Run(ctx context.Context) error {
 		cancel()
 		<-heartbeatDone
 		<-sweepDone
-		r.dropActiveConnection()
-		r.cancelIDECommands(nil)
-		r.ideWG.Wait()
-		r.stopUpdateForShutdown()
-		if r.options.EnvironmentConfig != nil {
-			r.options.EnvironmentConfig.Close()
-		}
-		r.cancelAndWait()
+		r.shutdown.release("connection close", r.closeActiveConnection)
+		r.shutdown.release("IDE command stop", func() error {
+			r.cancelIDECommands(nil)
+			r.ideWG.Wait()
+			return nil
+		})
+		r.shutdown.release("managed update stop", func() error {
+			r.stopUpdateForShutdown()
+			return nil
+		})
+		r.shutdown.release("environment config close", func() error {
+			if r.options.EnvironmentConfig != nil {
+				r.options.EnvironmentConfig.Close()
+			}
+			return nil
+		})
+		r.shutdown.release("in-flight execution did not converge", func() error {
+			r.cancelAndWait()
+			return nil
+		})
+		runErr = errors.Join(runErr, aggregateShutdownFailures(r.ShutdownFailures()))
 	}()
 
 	delay := r.options.InitialReconnectDelay
@@ -295,7 +315,10 @@ func (r *Runtime) Run(ctx context.Context) error {
 		if runCtx.Err() == nil && r.options.ReportError != nil {
 			r.options.ReportError(err)
 		}
-		r.dropConnection(active)
+		stopping := runCtx.Err() != nil || errors.Is(err, ErrRuntimeFatal) || errors.Is(err, ErrRegistrationRejected)
+		if !stopping {
+			r.dropConnection(active)
+		}
 		if runCtx.Err() != nil {
 			return nil
 		}
@@ -371,12 +394,12 @@ func (r *Runtime) isActiveConnection(active *activeConnection) bool {
 	return r.connection == active
 }
 
-func (r *Runtime) dropConnection(active *activeConnection) {
+func (r *Runtime) dropConnection(active *activeConnection) error {
 	r.cancelIDECommands(active)
 	r.mu.Lock()
 	if r.connection != active {
 		r.mu.Unlock()
-		return
+		return nil
 	}
 	r.clearIDELeaseRound()
 	r.connection = nil
@@ -384,16 +407,25 @@ func (r *Runtime) dropConnection(active *activeConnection) {
 	r.ready = false
 	r.mu.Unlock()
 	r.gate.Clear()
-	_ = active.connection.Close()
+	return active.connection.Close()
 }
 
-func (r *Runtime) dropActiveConnection() {
+func (r *Runtime) closeActiveConnection() error {
 	r.mu.RLock()
 	active := r.connection
 	r.mu.RUnlock()
-	if active != nil {
-		r.dropConnection(active)
+	if active == nil {
+		return nil
 	}
+	err := r.dropConnection(active)
+	if errors.Is(err, net.ErrClosed) {
+		return nil
+	}
+	return err
+}
+
+func (r *Runtime) dropActiveConnection() {
+	_ = r.closeActiveConnection()
 }
 
 func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
@@ -445,21 +477,38 @@ func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.
 		if !ok || request.IdeCommand == nil {
 			return errors.New("IDE command payload is invalid")
 		}
-		return r.acceptIDECommand(ideCtx, e.GetInvocationId(), request.IdeCommand)
+		r.admissionMu.Lock()
+		if r.admissionPaused {
+			r.admissionMu.Unlock()
+			return r.sendBoundError(e.InvocationId, "environment configuration is switching; new work is not admitted")
+		}
+		err := r.acceptIDECommand(ideCtx, e.GetInvocationId(), request.IdeCommand)
+		r.admissionMu.Unlock()
+		return err
 	case protocol.MessageType_IDE_LEASE:
 		if !ready || r.options.IDE == nil {
 			return errors.New("IDE lease requires a READY bound connection")
 		}
-		lease, ok := e.Payload.(*protocol.Envelope_IdeLease)
-		if !ok || lease.IdeLease == nil {
+		r.admissionMu.Lock()
+		if r.admissionPaused {
+			r.admissionMu.Unlock()
+			return r.sendBoundError(nil, "environment configuration is switching; new work is not admitted")
+		}
+		if r.updateIsHeld() {
+			r.admissionMu.Unlock()
+			return errors.New("IDE_LEASE is not allowed while environment update admission is held")
+		}
+		request, ok := e.Payload.(*protocol.Envelope_IdeLease)
+		if !ok || request.IdeLease == nil {
+			r.admissionMu.Unlock()
 			return errors.New("IDE lease payload is invalid")
 		}
-		roundStartedAt, err := r.consumeIDELease(lease.IdeLease, time.Now())
-		if err != nil {
-			return err
+		roundStartedAt, err := r.consumeIDELease(request.IdeLease, time.Now())
+		if err == nil {
+			r.options.IDE.ApplyLease(request.IdeLease, roundStartedAt)
 		}
-		r.options.IDE.ApplyLease(lease.IdeLease, roundStartedAt)
-		return nil
+		r.admissionMu.Unlock()
+		return err
 	case protocol.MessageType_TEMPORARY_RESOURCE_POLICY:
 		if !ready {
 			return r.sendBoundError(e.InvocationId, "TEMPORARY_RESOURCE_POLICY requires a READY bound connection")
@@ -1417,19 +1466,21 @@ func (r *Runtime) heartbeatLoop(ctx context.Context, done chan<- struct{}) {
 			return
 		case <-ticker.C:
 			r.mu.RLock()
-			bound := r.bound
+			bound, ready := r.bound, r.ready
+			activeConnection := r.connection
 			r.mu.RUnlock()
-			if bound {
-				h := &protocol.Heartbeat{RuntimeStatus: r.runtimeSnapshot()}
-				if r.options.IDE != nil && r.options.IDE.HasActiveViews() {
-					round, _ := r.newIDELeaseRound()
-					h.IdeLeaseRound = int64Ptr(round)
-				} else {
-					r.clearIDELeaseRound()
-				}
-				if err := r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_HEARTBEAT, Payload: &protocol.Envelope_Heartbeat{Heartbeat: h}}, false); err != nil {
-					r.clearIDELeaseRound()
-				}
+			if !bound || activeConnection == nil {
+				continue
+			}
+			heartbeat := &protocol.Heartbeat{RuntimeStatus: r.runtimeSnapshot()}
+			if ready && r.options.IDE != nil && r.options.IDE.HasActiveViews() {
+				round, _ := r.newIDELeaseRound()
+				heartbeat.IdeLeaseRound = int64Ptr(round)
+			} else {
+				r.clearIDELeaseRound()
+			}
+			if err := r.sendBound(&protocol.Envelope{MessageType: protocol.MessageType_HEARTBEAT, Payload: &protocol.Envelope_Heartbeat{Heartbeat: heartbeat}}, false); err != nil {
+				r.clearIDELeaseRound()
 			}
 		}
 	}

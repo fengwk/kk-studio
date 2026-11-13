@@ -51,6 +51,17 @@ func TestConfigValidationHelpers(t *testing.T) {
 	}
 }
 
+func TestConfigNestingDepthMatchesTypeScriptBoundary(t *testing.T) {
+	withinLimit := []byte(strings.Repeat("[", 20) + "0" + strings.Repeat("]", 20))
+	if err := rejectDuplicateKeys(withinLimit); err != nil {
+		t.Fatalf("20 nested containers rejected: %v", err)
+	}
+	overLimit := []byte(strings.Repeat("[", 21) + "0" + strings.Repeat("]", 21))
+	if err := rejectDuplicateKeys(overLimit); err == nil {
+		t.Fatal("21 nested containers accepted")
+	}
+}
+
 // RUN-T-165/176/185 exercise hot Bash resolution and executable path validation.
 func TestResolveExecutableBranches(t *testing.T) {
 	resolved, err := ResolveExecutable(os.Args[0])

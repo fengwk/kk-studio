@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	"github.com/fengwk/kk-studio/daemon/internal/update"
 )
@@ -116,6 +117,14 @@ func TestRuntimeForbiddenInboundFrameDisconnects(t *testing.T) {
 	}
 }
 
+// RUN-T-043 rejects lease frames when no IDE service is configured.
+func TestRuntimeReportsMissingIDELeaseHandler(t *testing.T) {
+	r, _ := newReadyRuntimeForTest(t, runtimeOptionsForTest())
+	if err := r.handle(context.Background(), ideLeaseEnvelope(1)); err == nil || err.Error() != "IDE lease requires a READY bound connection" {
+		t.Fatalf("missing IDE lease handler error = %v", err)
+	}
+}
+
 // RUN-T-090 rejects a temporary-resource policy until the environment is READY.
 func TestRuntimeTemporaryResourcePolicyRequiresReady(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
@@ -169,11 +178,194 @@ func TestRuntimeUpdateRejectsBusyIDEWithExactReason(t *testing.T) {
 	}
 }
 
-// RUN-T-052 verifies in-flight deduplication and rejects OPEN_VIEW while update admission is held.
+// RUN-T-107 validates READY and configuration-switch admission for IDE work.
+func TestRuntimeSuspendsIDECommandAndLeaseDuringConfigurationSwitch(t *testing.T) {
+	ide := &blockingIDEAdmission{entered: make(chan struct{}), release: make(chan struct{}), canUpdate: true}
+	options := runtimeOptionsForTest()
+	options.IDE = ide
+	r, connection := newReadyRuntimeForTest(t, options)
+	r.mu.Lock()
+	r.ready = false
+	r.mu.Unlock()
+	if err := r.handle(context.Background(), &protocol.Envelope{
+		MessageType:  protocol.MessageType_IDE_COMMAND,
+		InvocationId: stringPtr(testInvocationID),
+		Payload:      &protocol.Envelope_IdeCommand{IdeCommand: &protocol.IdeCommand{}},
+	}); err != nil {
+		t.Fatalf("pre-READY IDE command error frame failed: %v", err)
+	}
+	if err := r.handle(context.Background(), ideLeaseEnvelope(1)); err == nil || err.Error() != "IDE lease requires a READY bound connection" {
+		t.Fatalf("pre-READY IDE lease error = %v", err)
+	}
+	r.mu.Lock()
+	r.ready = true
+	r.mu.Unlock()
+	r.admissionMu.Lock()
+	r.admissionPaused = true
+	r.admissionMu.Unlock()
+
+	commandErr := r.handle(context.Background(), &protocol.Envelope{
+		MessageType:  protocol.MessageType_IDE_COMMAND,
+		InvocationId: stringPtr(testInvocationID),
+		Payload:      &protocol.Envelope_IdeCommand{IdeCommand: &protocol.IdeCommand{}},
+	})
+	if commandErr != nil {
+		t.Fatalf("switching IDE command error frame failed: %v", commandErr)
+	}
+	leaseErr := r.handle(context.Background(), ideLeaseEnvelope(1))
+	if leaseErr != nil {
+		t.Fatalf("switching IDE lease error frame failed: %v", leaseErr)
+	}
+	select {
+	case <-ide.entered:
+		t.Fatal("IDE command started while configuration admission was suspended")
+	default:
+	}
+	if r.options.IDECommandCount() != 0 {
+		t.Fatal("rejected IDE command was counted as active")
+	}
+	messages := []string{}
+	for _, frame := range connection.frames() {
+		if frame.MessageType == protocol.MessageType_ERROR {
+			messages = append(messages, frame.GetError().GetMessage())
+		}
+	}
+	want := map[string]int{
+		"IDE command requires a READY bound connection":                    1,
+		"environment configuration is switching; new work is not admitted": 2,
+	}
+	for _, message := range messages {
+		want[message]--
+	}
+	for message, count := range want {
+		if count != 0 {
+			t.Fatalf("diagnostic %q count mismatch; messages=%v", message, messages)
+		}
+	}
+}
+
+// RUN-T-107 verifies candidate suspension, abort recovery, and successful reconnect hold for IDE writes.
+func TestRuntimeConfigCandidateControlsIDEAdmission(t *testing.T) {
+	initial := initialRuntimeConfig()
+	status := NewStatusTracker()
+	prepareStarted, releasePrepare := make(chan struct{}), make(chan struct{})
+	manager, err := NewEnvironmentConfigRuntime(EnvironmentConfigOptions{
+		Initial: initial,
+		Cache:   &testCacheWriter{},
+		Prepare: func(_ context.Context, candidate config.DaemonConfig, _ *config.DaemonConfig) (PreparedConfiguration, error) {
+			if candidate.ConfigVersion == 2 {
+				close(prepareStarted)
+				<-releasePrepare
+				return nil, errors.New("candidate preparation failed")
+			}
+			return &testPreparedConfiguration{config: candidate}, nil
+		},
+		Status: status,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		select {
+		case <-releasePrepare:
+		default:
+			close(releasePrepare)
+		}
+		manager.Close()
+	}()
+	ide := &blockingIDEAdmission{entered: make(chan struct{}), release: make(chan struct{}), canUpdate: true}
+	options := runtimeOptionsForTest()
+	options.IDE = ide
+	options.Status = status
+	options.EnvironmentConfig = manager
+	r, connection := newReadyRuntimeForTest(t, options)
+
+	failed := make(chan ConfigApplyResult, 1)
+	go func() {
+		result, _ := manager.Submit(context.Background(), 2, changedConfiguration(initial, "https://failed.example"))
+		failed <- result
+	}()
+	select {
+	case <-prepareStarted:
+	case <-time.After(time.Second):
+		t.Fatal("candidate preparation did not start")
+	}
+	r.admissionMu.Lock()
+	pausedDuringPrepare := r.admissionPaused
+	r.admissionMu.Unlock()
+	if !pausedDuringPrepare {
+		t.Fatal("IDE admission was not paused before endpoint candidate preparation")
+	}
+	if err := r.handle(context.Background(), &protocol.Envelope{
+		MessageType:  protocol.MessageType_IDE_COMMAND,
+		InvocationId: stringPtr(testInvocationID),
+		Payload:      &protocol.Envelope_IdeCommand{IdeCommand: &protocol.IdeCommand{}},
+	}); err != nil {
+		t.Fatalf("switching IDE command error frame failed: %v", err)
+	}
+	close(releasePrepare)
+	select {
+	case result := <-failed:
+		if result.Kind != ConfigFailed {
+			t.Fatalf("failed candidate result = %+v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("failed candidate did not converge")
+	}
+	r.admissionMu.Lock()
+	pausedAfterFailure := r.admissionPaused
+	r.admissionMu.Unlock()
+	if pausedAfterFailure {
+		t.Fatal("failed candidate did not restore prior IDE admission")
+	}
+
+	commandDone := make(chan error, 1)
+	go func() {
+		commandDone <- r.handle(context.Background(), &protocol.Envelope{
+			MessageType:  protocol.MessageType_IDE_COMMAND,
+			InvocationId: stringPtr(testInvocationID),
+			Payload:      &protocol.Envelope_IdeCommand{IdeCommand: &protocol.IdeCommand{}},
+		})
+	}()
+	select {
+	case <-ide.entered:
+	case <-time.After(time.Second):
+		t.Fatal("IDE command was not admitted after candidate failure")
+	}
+	close(ide.release)
+	if err := <-commandDone; err != nil {
+		t.Fatalf("IDE command after candidate failure: %v", err)
+	}
+
+	result, err := manager.Submit(context.Background(), 3, changedConfiguration(initial, "https://applied.example"))
+	if err != nil || result.Kind != ConfigApplied {
+		t.Fatalf("successful candidate result = %+v, %v", result, err)
+	}
+	r.admissionMu.Lock()
+	pausedAfterApply := r.admissionPaused
+	r.admissionMu.Unlock()
+	if !pausedAfterApply {
+		t.Fatal("applied endpoint change did not keep IDE admission paused for reconnect")
+	}
+	r.mu.RLock()
+	connectionDropped := r.connection == nil
+	r.mu.RUnlock()
+	if !connectionDropped {
+		t.Fatal("endpoint change did not clear the old control connection")
+	}
+	select {
+	case <-connection.closed:
+	default:
+		t.Fatal("endpoint change did not close the old control connection")
+	}
+}
+
+// RUN-T-042/052/130 verifies update admission, duplicate suppression, and OPEN_VIEW rejection.
 func TestRuntimeDerivesUpdateAdmissionFromIDEService(t *testing.T) {
 	ide := &blockingIDEAdmission{entered: make(chan struct{}, 1), release: make(chan struct{}), canUpdate: true}
 	options := runtimeOptionsForTest()
 	options.IDE = ide
+	options.Update = &testUpdateRunner{}
 	r, connection := newReadyRuntimeForTest(t, options)
 	invocationID := "123e4567-e89b-42d3-a456-426614174000"
 	command := &protocol.IdeCommand{Action: protocol.IdeAction_LIST_VIEWS}
@@ -200,9 +392,20 @@ func TestRuntimeDerivesUpdateAdmissionFromIDEService(t *testing.T) {
 	if got := r.updateBusyReason(nil); got != "IDE command is in progress" {
 		t.Fatalf("active IDE command busy reason = %q", got)
 	}
-
-	if _, err := r.updateOps.Decide(updateCommandForTest(), "1.0.0", true, ""); err != nil {
-		t.Fatal(err)
+	if err := r.handle(context.Background(), updateEnvelope(testUpdateOperationID, "2.0.0")); err != nil {
+		t.Fatalf("IDE-busy update error receipt failed: %v", err)
+	}
+	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
+		for _, frame := range frames {
+			if frame.MessageType == protocol.MessageType_UPDATE_RESULT && frame.GetUpdateResult().GetOperationId() == testUpdateOperationID {
+				return frame.GetUpdateResult().GetPhase() == protocol.UpdatePhase_UPDATE_FAILED && frame.GetUpdateResult().GetMessage() == "update is busy: IDE command is in progress"
+			}
+		}
+		return false
+	})
+	decision, err := r.updateOps.Decide(update.Command{OperationID: "123e4567-e89b-42d3-a456-426614174099", TargetVersion: "3.0.0"}, "1.0.0", true, "")
+	if err != nil || decision.Action != update.ActionAdmit {
+		t.Fatalf("update admission decision = %+v, %v", decision, err)
 	}
 	if err := r.handle(context.Background(), frame(protocol.IdeAction_OPEN_VIEW, "123e4567-e89b-42d3-a456-426614174001")); err != nil {
 		t.Fatal(err)

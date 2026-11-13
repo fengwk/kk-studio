@@ -2,7 +2,11 @@ package runtime
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
@@ -18,6 +22,32 @@ func TestDetectHostInfoCollectsHostFacts(t *testing.T) {
 	}
 	if info.TimeZone == nil || info.UserName == nil || info.HomeDirectory == nil || info.TempDirectory == nil || *info.TempDirectory == "" {
 		t.Fatalf("host environment facts are incomplete: %+v", info)
+	}
+}
+
+// RUN-N-010 records Go's literal Local timezone identifier when TZ is unset.
+func TestDetectHostInfoUsesLocalIdentifierWhenTZUnset(t *testing.T) {
+	const probe = "KK_STUDIO_TEST_TZ_UNSET"
+	if os.Getenv(probe) == "1" {
+		info, err := detectHostInfo()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := info.GetTimeZone(); got != time.Local.String() || got != "Local" {
+			t.Fatalf("Go host time zone with TZ unset = %q, local location = %q; want Local", got, time.Local.String())
+		}
+		return
+	}
+	command := exec.Command(os.Args[0], "-test.run=^TestDetectHostInfoUsesLocalIdentifierWhenTZUnset$")
+	for _, value := range os.Environ() {
+		if strings.HasPrefix(value, "TZ=") || strings.HasPrefix(value, probe+"=") {
+			continue
+		}
+		command.Env = append(command.Env, value)
+	}
+	command.Env = append(command.Env, probe+"=1")
+	if output, err := command.CombinedOutput(); err != nil {
+		t.Fatalf("time-zone probe with TZ unset failed: %v: %s", err, output)
 	}
 }
 

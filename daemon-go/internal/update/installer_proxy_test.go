@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -67,6 +68,23 @@ func TestClientForProxyRejectsInvalidOrUnenforceableProxy(t *testing.T) {
 	}
 	if _, err := clientForProxy(nil, nil); err == nil {
 		t.Fatal("nil client was accepted")
+	}
+}
+
+// RUN-T-205 ensures the Unix update job explicitly clears inherited proxy variables for direct access.
+func TestUnixInvocationClearsInheritedProxyForDirectUpdate(t *testing.T) {
+	args := unixInvocation("/tmp/work", "/tmp/work/install.sh", "/home/user/.kk-studio/environments/env", InstallerConfig{EnvironmentID: installerTestEnvironmentID}, "2.0.0", installerTestEnvironmentID, "/home/user", map[string]string{
+		"PATH": "/usr/bin", "HTTP_PROXY": "http://inherited.example:8080", "https_proxy": "http://inherited.example:8080",
+	})
+	for _, expected := range []string{"https_proxy=", "HTTPS_PROXY=", "http_proxy=", "HTTP_PROXY=", "no_proxy=", "NO_PROXY="} {
+		if !containsArg(args, expected) {
+			t.Fatalf("direct update omitted explicit proxy clearing %q: %v", expected, args)
+		}
+	}
+	for _, arg := range args {
+		if strings.Contains(arg, "inherited.example") {
+			t.Fatalf("direct update inherited a proxy: %q", arg)
+		}
 	}
 }
 

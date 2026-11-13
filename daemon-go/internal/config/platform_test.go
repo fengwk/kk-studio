@@ -16,4 +16,7 @@ func TestReleaseKey(t *testing.T) {
 	if _, err := ReleaseKey("linux", "386"); err == nil {
 		t.Fatal("unsupported architecture accepted")
 	}
+	if _, err := ReleaseKey("windows", "arm64"); err == nil {
+		t.Fatal("Windows ARM64 has no bundled release and must be rejected")
+	}
 }

@@ -19,6 +19,9 @@ func ReleaseKey(goos, goarch string) (string, error) {
 		osName = "macos"
 	case "windows":
 		osName = "windows"
+		if goarch != "amd64" {
+			return "", errors.New("unsupported architecture")
+		}
 	default:
 		return "", errors.New("unsupported operating system")
 	}

@@ -211,7 +211,7 @@ func normalizeExtensions(values []string) []string {
 func normalizeMarkers(values []string) []string {
 	normalized := make([]string, len(values))
 	for i, value := range values {
-		normalized[i] = strings.TrimSpace(value)
+		normalized[i] = strings.ReplaceAll(strings.TrimSpace(value), `\`, "/")
 	}
 	return normalized
 }
@@ -325,9 +325,6 @@ func rejectDuplicateKeys(b []byte) error {
 	d.UseNumber()
 	var walk func(int) error
 	walk = func(depth int) error {
-		if depth > 20 {
-			return errors.New("depth")
-		}
 		t, err := d.Token()
 		if err != nil {
 			return err
@@ -338,6 +335,9 @@ func rejectDuplicateKeys(b []byte) error {
 				return errors.New("number")
 			}
 			return nil
+		}
+		if depth >= 20 {
+			return errors.New("depth")
 		}
 		switch del {
 		case '{':
