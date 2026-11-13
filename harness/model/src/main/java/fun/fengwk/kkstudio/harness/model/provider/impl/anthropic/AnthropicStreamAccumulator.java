@@ -422,8 +422,8 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       applyUsageSnapshot(usageNode);
     }
 
-    if (messageNode.has("diagnostics")) {
-      JsonNode diagnosticsNode = messageNode.get("diagnostics");
+    JsonNode diagnosticsNode = messageNode.get("diagnostics");
+    if (diagnosticsNode != null && !diagnosticsNode.isNull()) {
       if (!diagnosticsNode.isObject()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_RESPONSE, "diagnostics must be an object");

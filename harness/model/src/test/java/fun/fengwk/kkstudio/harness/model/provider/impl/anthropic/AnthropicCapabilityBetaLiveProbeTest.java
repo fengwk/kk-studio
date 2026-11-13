@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -16,26 +17,29 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.model.provider.impl.transport.JdkHttpSseTransport;
 
-import java.io.BufferedReader;
-import java.io.InputStream;
-import java.io.InputStreamReader;
-import java.net.URI;
 import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 显式付费门禁的 Anthropic 能力 beta 实测；只访问 TEST_ANTHROPIC 凭据指向的线路，不重试。
@@ -102,80 +106,69 @@ class AnthropicCapabilityBetaLiveProbeTest {
     assertTrue(
         base != null && !base.isBlank() && key != null && !key.isBlank(),
         "classification=MISSING_CREDENTIAL_PAIR");
-    AnthropicEncodedRequest encoded = new AnthropicRequestEncoder().encode(request(), descriptor());
+    ProviderDescriptor descriptor =
+        new ProviderDescriptor("anthropic", ProviderType.ANTHROPIC, base, TIMEOUT);
+    AnthropicEncodedRequest encoded = new AnthropicRequestEncoder().encode(request(), descriptor);
     assertEquals(List.of(EXPECTED_BETAS.split(",")), encoded.betaFeatures());
-    try (HttpClient client =
+
+    AtomicReference<ProviderCompletion> completion = new AtomicReference<>();
+    AtomicReference<ProviderException> failure = new AtomicReference<>();
+    AtomicInteger events = new AtomicInteger();
+    HttpClient client =
         HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
             .followRedirects(HttpClient.Redirect.NEVER)
-            .build()) {
-      URI uri = AnthropicEndpoints.resolveMessagesUri(base);
-      HttpRequest httpRequest =
-          HttpRequest.newBuilder(uri)
-              .timeout(Duration.ofSeconds(120))
-              .header("Content-Type", "application/json")
-              .header("Accept", "text/event-stream")
-              .header("anthropic-version", "2023-06-01")
-              // 与生产 provider 完全相同的 beta 头顺序与逗号拼接。
-              .header("anthropic-beta", String.join(",", encoded.betaFeatures()))
-              .header("x-api-key", key)
-              .header("Authorization", "Bearer " + key)
-              .POST(HttpRequest.BodyPublishers.ofByteArray(encoded.bodyUtf8Bytes()))
-              .build();
-      HttpResponse<InputStream> response =
-          client.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
-      assertEquals(200, response.statusCode(), "classification=HTTP_" + response.statusCode());
-      String acceptedBeta = response.headers().firstValue("anthropic-beta").orElse("");
-      int events = 0;
-      boolean messageStart = false;
-      boolean messageStop = false;
-      String errorType = null;
-      try (BufferedReader reader =
-          new BufferedReader(new InputStreamReader(response.body(), StandardCharsets.UTF_8))) {
-        String event = "";
-        String line;
-        while ((line = reader.readLine()) != null) {
-          if (line.startsWith("event:")) {
-            event = line.substring("event:".length()).trim();
-          } else if (line.startsWith("data:")) {
-            events++;
-            String data = line.substring("data:".length()).trim();
-            String dataType = "";
-            try {
-              dataType = JSON.readTree(data).path("type").asString("");
-            } catch (Exception ignored) {
-              // [DONE] 等非 JSON data 只按哨兵处理。
+            .build();
+    ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
+    try {
+      // 付费路径完全走生产 provider：同一份编码请求、同一套 header 与流式解析。
+      ModelProvider provider =
+          new AnthropicProviderAdapter(new JdkHttpSseTransport(client, scheduler), key)
+              .create(descriptor);
+      provider.stream(
+          request(),
+          new ProviderStreamHandler() {
+            @Override
+            public void onEvent(ProviderStreamEvent event) {
+              events.incrementAndGet();
             }
-            messageStart |= "message_start".equals(event) || "message_start".equals(dataType);
-            messageStop |=
-                "message_stop".equals(event)
-                    || "message_stop".equals(dataType)
-                    || "[DONE]".equals(data);
-            if (errorType == null && "error".equals(dataType)) {
-              errorType = JSON.readTree(data).path("error").path("type").asString("error");
+
+            @Override
+            public void onComplete(ProviderCompletion value) {
+              completion.set(value);
             }
-          }
-        }
-      }
-      assertTrue(errorType == null, "classification=SSE_ERROR type=" + errorType);
-      assertTrue(messageStart, "classification=MISSING_MESSAGE_START events=" + events);
-      assertTrue(messageStop, "classification=INCOMPLETE_STREAM events=" + events);
-      System.out.println(
-          "classification=ACCEPTED model="
-              + LIVE_MODEL
-              + " http=200 beta="
-              + String.join(",", encoded.betaFeatures())
-              + " responseBeta="
-              + (acceptedBeta.isBlank() ? "<none>" : acceptedBeta)
-              + " events="
-              + events
-              + " messageStop=true");
-    } catch (AssertionError failure) {
-      throw failure;
-    } catch (Exception failure) {
+
+            @Override
+            public void onError(ProviderException error) {
+              failure.set(error);
+            }
+          });
+    } catch (AssertionError error) {
+      throw error;
+    } catch (Exception error) {
       // 不把上游、URI、headers 或 cause 放进 Surefire 报告。
       throw new AssertionError("classification=LOCAL_OR_PROTOCOL_FAILURE");
+    } finally {
+      scheduler.shutdownNow();
+      client.shutdownNow();
     }
+
+    assertTrue(
+        failure.get() == null,
+        "classification=PROVIDER_ERROR kind="
+            + (failure.get() == null ? "<none>" : failure.get().kind()));
+    ProviderCompletion accepted = completion.get();
+    assertNotNull(accepted, "classification=NO_TERMINAL_STATE events=" + events.get());
+    assertTrue(events.get() > 0, "classification=NO_STREAM_EVENTS");
+    System.out.println(
+        "classification=ACCEPTED model="
+            + LIVE_MODEL
+            + " beta="
+            + String.join(",", encoded.betaFeatures())
+            + " events="
+            + events.get()
+            + " stopReason="
+            + accepted.response().stopReason());
   }
 
   private static ProviderDescriptor descriptor() {

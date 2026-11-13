@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
@@ -211,6 +212,65 @@ class AnthropicModelProviderIntegrationTest {
     assertEquals(GenerationStopReason.COMPLETE, completion.response().stopReason());
     assertEquals(8, completion.response().usage().inputTokens());
     assertEquals(5, completion.response().usage().outputTokens());
+  }
+
+  /**
+   * 测试意图：真实响应在 message_start 携带 JSON null 的 diagnostics（以及 null container/stop_details/
+   * context_management），生产流式解析必须把 null 当作缺省字段并交付完整结果，而不是 INVALID_RESPONSE。
+   */
+  @Test
+  void treatsNullDiagnosticsAsAbsentAndCompletes() throws Exception {
+    byte[] stream;
+    try (var fixture = getClass().getResourceAsStream("fixtures/diagnostics-null.sse")) {
+      assertNotNull(fixture);
+      stream = fixture.readAllBytes();
+    }
+    server.createContext(
+        "/v1/messages",
+        exchange -> {
+          exchange.getResponseHeaders().set("Content-Type", "text/event-stream");
+          exchange.sendResponseHeaders(200, 0);
+          try (OutputStream out = exchange.getResponseBody()) {
+            out.write(stream);
+          }
+        });
+
+    ProviderDescriptor descriptor =
+        new ProviderDescriptor(
+            "anthropic-null-diagnostics",
+            ProviderType.ANTHROPIC,
+            "http://127.0.0.1:" + port + "/v1",
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
+    AnthropicModelProvider provider =
+        (AnthropicModelProvider) new AnthropicProviderAdapter(transport, null).create(descriptor);
+    ProviderRequest request =
+        new ProviderRequest(
+            new ModelDescriptor(
+                "anthropic-null-diagnostics",
+                "claude-3-5-sonnet",
+                "claude-3-5-sonnet",
+                Set.of(ModelInputModality.TEXT),
+                true,
+                false),
+            new ModelVariant("default", null, PromptCacheRetention.NONE, null),
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+
+    ProviderResponse response = complete(provider, request).response();
+    assertEquals("Hi!", response.text());
+    assertEquals(GenerationStopReason.LENGTH, response.stopReason());
+    assertEquals("standard", response.serviceTier());
+    assertNull(response.requestId());
+    assertEquals(137L, response.usage().inputTokens());
+    assertEquals(16L, response.usage().outputTokens());
+    assertEquals(0L, response.usage().cacheReadTokens());
+    assertEquals(0L, response.usage().cacheWriteTokens());
+    assertEquals(0L, response.usage().reasoningTokens());
   }
 
   @Test
