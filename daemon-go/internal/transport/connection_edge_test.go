@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -34,6 +35,42 @@ func (deadlineErrorConn) SetReadDeadline(time.Time) error { return errors.New("d
 type failingWriter struct{}
 
 func (failingWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+
+type blockedControlWriter struct {
+	writeStarted       chan struct{}
+	unblockWrite       chan struct{}
+	closed             <-chan struct{}
+	handlerReturned    <-chan struct{}
+	writeStartedOnce   sync.Once
+	unblockWriteOnce   sync.Once
+	mu                 sync.Mutex
+	writes             int
+	writeAfterReturned bool
+}
+
+func (w *blockedControlWriter) Header() http.Header { return make(http.Header) }
+func (w *blockedControlWriter) WriteHeader(int)     {}
+func (w *blockedControlWriter) releaseWrite() {
+	w.unblockWriteOnce.Do(func() { close(w.unblockWrite) })
+}
+func (w *blockedControlWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	w.writes++
+	select {
+	case <-w.handlerReturned:
+		w.writeAfterReturned = true
+	default:
+	}
+	w.mu.Unlock()
+	w.writeStartedOnce.Do(func() { close(w.writeStarted) })
+	<-w.unblockWrite
+	select {
+	case <-w.closed:
+		return 0, net.ErrClosed
+	default:
+		return len(p), nil
+	}
+}
 
 // TRN-T-066, TRN-T-069
 func TestDial_ConfigurationAndTokenFailures(t *testing.T) {
@@ -92,6 +129,94 @@ func TestControlConnection_StreamFailuresAndClose(t *testing.T) {
 	}
 	if err := cc.Close(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TRN-T-086 verifies the control handler waits for in-flight sends before returning.
+func TestControlConnection_HandlerWaitsForActiveSendBeforeClose(t *testing.T) {
+	left, right := net.Pipe()
+	defer right.Close()
+	cc := &ControlConnection{conn: left, server: &http.Server{}, controlReady: make(chan struct{}), closed: make(chan struct{}), stopControl: make(chan struct{})}
+	cc.sendStateCond = sync.NewCond(&cc.sendStateMu)
+	handlerReturned := make(chan struct{})
+	writer := &blockedControlWriter{
+		writeStarted:    make(chan struct{}),
+		unblockWrite:    make(chan struct{}),
+		closed:          cc.closed,
+		handlerReturned: handlerReturned,
+	}
+	defer writer.releaseWrite()
+	requestCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	handlerDone := make(chan struct{})
+	go func() {
+		cc.handleControl(writer, httptest.NewRequest(http.MethodPost, "/control", nil).WithContext(requestCtx))
+		close(handlerReturned)
+		close(handlerDone)
+	}()
+	select {
+	case <-cc.controlReady:
+	case <-time.After(5 * time.Second):
+		t.Fatal("phase=control-ready: handler did not publish the control stream")
+	}
+
+	envelope := &protocol.Envelope{MessageType: protocol.MessageType_ERROR, EnvironmentId: protoString(testEnvironment), Payload: &protocol.Envelope_Error{Error: &protocol.Error{Message: protoString("failure")}}}
+	sendDone := make(chan error, 1)
+	go func() { sendDone <- cc.Send(context.Background(), envelope) }()
+	select {
+	case <-writer.writeStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("phase=send-blocked: send did not enter the control writer")
+	}
+
+	cancel()
+	if err := cc.Close(); err != nil {
+		t.Fatalf("phase=close: %v", err)
+	}
+	sendClosureObserved := make(chan struct{})
+	go func() {
+		cc.sendStateMu.Lock()
+		for !cc.sendClosed {
+			cc.sendStateCond.Wait()
+		}
+		cc.sendStateMu.Unlock()
+		close(sendClosureObserved)
+	}()
+	select {
+	case <-sendClosureObserved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("phase=handler-closing: handler did not reject new sends")
+	}
+	select {
+	case <-handlerDone:
+		t.Fatal("handler returned while a send was still blocked")
+	default:
+	}
+	writer.releaseWrite()
+	select {
+	case err := <-sendDone:
+		if !errors.Is(err, net.ErrClosed) {
+			t.Fatalf("in-flight send error=%v, want net.ErrClosed", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("phase=send-return: closed control write did not return")
+	}
+	select {
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("phase=handler-return: handler did not finish after send returned")
+	}
+
+	if err := cc.Send(context.Background(), envelope); !errors.Is(err, net.ErrClosed) {
+		t.Fatalf("send after handler return error=%v, want net.ErrClosed", err)
+	}
+	writer.mu.Lock()
+	defer writer.mu.Unlock()
+	if writer.writes != 1 {
+		t.Fatalf("control writer writes=%d, want only the blocked in-flight write", writer.writes)
+	}
+	if writer.writeAfterReturned {
+		t.Fatal("control writer was called after the handler returned")
 	}
 }
 
