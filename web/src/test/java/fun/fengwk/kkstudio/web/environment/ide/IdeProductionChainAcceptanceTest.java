@@ -864,8 +864,6 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
         browserDriver.proceed();
         browserDriver.await("done");
         browserDriver.finish();
-        // 浏览器已关闭后窗口状态未知，才允许用 discard 清理本测试的资源。
-        closeView(environmentId, viewId, browserSessionId, secondEpoch);
       }
     }
   }
