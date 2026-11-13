@@ -1,11 +1,11 @@
 #!/bin/bash
-# kk-studio reliability/distributed Daemon 容器入口（Node 产品）。
+# kk-studio reliability/distributed Go Daemon container entrypoint.
 #
-# Daemon 是完整的 Node 发行目录：入口是发行根目录的 `main.js`，运行时是随发行一起冻结、
-# 按 SHA256 校验过的 `runtime/code-server/lib/node`。镜像里没有 JRE，也没有第二个 Node。
+# The Go daemon executable is at the distribution root. A bundled Node runtime remains only
+# for the code-server IDE and the small configuration-cache helper.
 #
-# 容器内没有 jq/python；读取 Environment 卡片并序列化本地缓存用的是**同一个冻结 Node**，
-# 因此不依赖 PATH 上是否存在用户 Node。注册凭证只经内建 printf 写成 owner-only 文件：
+# Container config serialization uses that bundled Node because jq/python are absent. The token
+# is written with shell builtins to an owner-only file:
 # 凭证文本既不出现在 daemon argv（`ps` 可见），也不留在环境变量中（`/proc/<pid>/environ`
 # 可见）。所有文件与目录权限显式收敛为 0600/0700，不依赖镜像 umask。
 #
@@ -14,8 +14,7 @@
 # 数据目录；根默认在唯一的 /workspace named volume 下，因此不引入额外挂载。daemon 只接收
 # 唯一的 `--config <绝对路径>`。
 #
-# `KK_STUDIO_DAEMON_DIST` 只是镜像布局契约（默认 /opt/kk-studio/daemon），它必须指向一个
-# 带 `main.js` 与冻结运行时的发行目录；入口不会去 PATH 上寻找别的 Node 或入口。
+# `KK_STUDIO_DAEMON_DIST` defaults to /opt/kk-studio/daemon and points to the Go distribution root.
 set -euo pipefail
 
 # 显式 PATH：入口自身、node/npm 包装与能力子进程都解析到同一份冻结运行时。
@@ -27,7 +26,7 @@ studio_url="${KK_STUDIO_DAEMON_STUDIO_URL:-}"
 environment_id="${KK_STUDIO_DAEMON_ENVIRONMENT_ID:-}"
 environment_name="${KK_STUDIO_DAEMON_ENVIRONMENT_NAME:-}"
 
-entry="$dist/main.js"
+entry="$dist/kk-studio-daemon"
 node_bin="$dist/runtime/code-server/lib/node"
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 config_helper="$script_dir/daemon-config-cache.mjs"
@@ -54,8 +53,8 @@ case "$root" in
     exit 1
     ;;
 esac
-if [ ! -f "$entry" ]; then
-  echo "ERROR: the Daemon distribution has no entrypoint: $entry" >&2
+if [ ! -x "$entry" ]; then
+  echo "ERROR: the Go Daemon executable is missing or not executable: $entry" >&2
   exit 1
 fi
 if [ ! -x "$node_bin" ]; then
@@ -88,4 +87,4 @@ fi
 chmod 600 "$config_file"
 unset studio_url environment_id environment_name selector_args
 
-exec "$node_bin" "$entry" --config "$config_file"
+exec "$entry" --config "$config_file"

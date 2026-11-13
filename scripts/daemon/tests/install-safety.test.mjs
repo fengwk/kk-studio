@@ -55,7 +55,7 @@ describe('install.sh safety', () => {
       const before = {
         config: bytes(path.join(root, 'daemon.json')),
         token: bytes(path.join(root, 'daemon.token')),
-        program: bytes(path.join(root, 'lib/main.js')),
+        program: bytes(path.join(root, 'lib/kk-studio-daemon')),
       }
       const real = path.join(fixture.bindir, 'curl.real')
       renameSync(path.join(fixture.bindir, 'curl'), real)
@@ -79,7 +79,7 @@ describe('install.sh safety', () => {
         assert.notEqual(result.status, 0, `${label}: ${result.stdout}`)
         assert.ok(result.stderr.includes(expected), `${label}: ${result.stderr}`)
         assert.ok(!result.stderr.includes('token-value'), label)
-        assert.ok(before.program.equals(bytes(path.join(root, 'lib/main.js'))), label)
+        assert.ok(before.program.equals(bytes(path.join(root, 'lib/kk-studio-daemon'))), label)
         assert.ok(before.config.equals(bytes(path.join(root, 'daemon.json'))), label)
         assert.ok(before.token.equals(bytes(path.join(root, 'daemon.token'))), label)
         assert.ok(existsSync(path.join(fixture.state, 'active')), 'the running service must stay untouched')
@@ -92,9 +92,9 @@ describe('install.sh safety', () => {
     withInstall(({ fixture, install }) => {
       assert.equal(install().status, 0)
       const root = envRoot(fixture)
-      const files = [path.join(root, 'daemon.json'), path.join(root, 'daemon.token'), path.join(root, 'lib/main.js'), unitPath(fixture)]
+      const files = [path.join(root, 'daemon.json'), path.join(root, 'daemon.token'), path.join(root, 'lib/kk-studio-daemon'), unitPath(fixture)]
       const before = files.map((file) => bytes(file))
-      const result = install({ FAKE_NODE_VERSION: '9.9.9' })
+      const result = install({ FAKE_DAEMON_VERSION: '9.9.9' })
       assert.notEqual(result.status, 0)
       files.forEach((file, index) => assert.ok(before[index].equals(bytes(file)), file))
       assert.ok(existsSync(path.join(fixture.state, 'active')), 'the running service must not be stopped')
@@ -105,13 +105,13 @@ describe('install.sh safety', () => {
     withInstall(({ fixture, install }) => {
       assert.equal(install().status, 0)
       const root = envRoot(fixture)
-      const program = bytes(path.join(root, 'lib/main.js'))
+      const program = bytes(path.join(root, 'lib/kk-studio-daemon'))
       chmodSync(root, 0o770)
       const result = install()
       assert.notEqual(result.status, 0)
       assert.ok(result.stderr.includes('unsafe permissions'), result.stderr)
       assert.equal(mode(root), 0o770)
-      assert.ok(program.equals(bytes(path.join(root, 'lib/main.js'))))
+      assert.ok(program.equals(bytes(path.join(root, 'lib/kk-studio-daemon'))))
       assert.ok(existsSync(path.join(fixture.state, 'active')))
     }))
 
@@ -157,14 +157,13 @@ describe('install.sh safety', () => {
         ? [
             managedMarker(fixture),
             '[Service]',
-            `ExecStart="${other}/lib/runtime/code-server/lib/node" "${other}/lib/main.js" --config "${other}/daemon.json"`,
+            `ExecStart="${other}/lib/kk-studio-daemon" --config "${other}/daemon.json"`,
           ]
         : [
             '<?xml version="1.0" encoding="UTF-8"?>',
             managedMarker(fixture),
             '<plist version="1.0"><dict><key>ProgramArguments</key><array>',
-            `<string>${other}/lib/runtime/code-server/lib/node</string>`,
-            `<string>${other}/lib/main.js</string>`,
+            `<string>${other}/lib/kk-studio-daemon</string>`,
             '<string>--config</string>',
             `<string>${other}/daemon.json</string>`,
             '</array></dict></plist>',
@@ -199,7 +198,7 @@ describe('install.sh safety', () => {
       const config = daemonJson({ environmentId: ENVIRONMENT_ID })
       writeFileSync(path.join(root, 'daemon.json'), config)
       writeFileSync(path.join(root, 'lib/previous-marker'), 'previous')
-      const result = update({ FAKE_NODE_VERSION: '9.9.9' })
+      const result = update({ FAKE_DAEMON_VERSION: '9.9.9' })
       assert.notEqual(result.status, 0)
       assert.equal(readFileSync(path.join(root, 'daemon.json'), 'utf8'), config)
       assert.ok(existsSync(path.join(root, 'skills/skill-a/SKILL.md')))

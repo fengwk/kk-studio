@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Test;
 
 class ToolOutputLimitTest {
 
-  /** These vectors are mirrored in daemon/test/tool-output-limit.test.ts. */
+  /** These vectors are mirrored in daemon-go/internal/runtime/output_limit_test.go. */
   @Test
   void formatsSharedSizeVectorsAndMessages() {
     long limit = 16L * 1_048_576L;

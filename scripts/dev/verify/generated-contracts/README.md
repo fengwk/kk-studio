@@ -20,12 +20,13 @@ Java 侧是带 `type` 字段的扁平类（如 Harness 命令、交互、上传�
 细化；其余代码直接从生成物导入，不手改生成物。
 
 控制协议的单一事实源是
-[control.proto](../../../../platform/daemon-server/src/main/protocol/control.proto)。Java 由 Maven 的官方 protoc 在编译期生成；
-TypeScript 由同一 proto 经 `protoc-gen-es` 生成到
-[control_pb.ts](../../../../daemon/src/generated/control_pb.ts)。`check.sh` / `write.sh` 会检查或重写这份生成物。
+[control.proto](../../../../platform/daemon-server/src/main/protocol/control.proto)。Java 由 Maven 的官方 protoc 在编译期生成；Go
+类型由同一 proto 生成到
+[control.pb.go](../../../../daemon-go/internal/protocol/control.pb.go)。`daemon-go/scripts/check-generated.sh` 用相同生成器重跑并比较
+生成结果；Go golden round-trip 测试继续校验所有协议样例。
 
 Capability JSON Schema 以 Java classpath 资源为唯一来源，
-[capabilities.mjs](capabilities.mjs) 把它们同步到 `daemon/resources/capabilities`。`check.sh` 发现内容或多余副本即失败，
+[capabilities.mjs](capabilities.mjs) 把它们同步到 `daemon-go/internal/capability/schemas`。`check.sh` 发现内容或多余副本即失败，
 `write.sh` 覆写副本。
 
 ## 校验（默认）
@@ -34,8 +35,7 @@ Capability JSON Schema 以 Java classpath 资源为唯一来源，
 scripts/dev/verify/generated-contracts/check.sh
 ```
 
-只读：重新生成并与提交的产物逐字符比对，缺文件、类型变化或产物被手改都会失败，绝不修改源码。
-`mvn verify` 会执行同样的 `TsContractArtifactTest`，因此正常 CI 已覆盖这条门禁。
+校验能力 schema、Go protobuf 生成物和前端 HTTP 契约；缺文件、类型变化或产物被手改都会失败。
 
 ## 更新
 
@@ -43,7 +43,7 @@ scripts/dev/verify/generated-contracts/check.sh
 scripts/dev/verify/generated-contracts/write.sh
 ```
 
-重写两个生成产物。提交前必须人工审阅 diff，并同步更新依赖它们的前端细化、解码器与测试。
+重写前端 HTTP 契约、Go protobuf 和能力 schema 副本。提交前必须人工审阅 diff，并同步更新依赖它们的前端细化、解码器与测试。
 
 两个入口都需要 JDK 21（`JAVA_HOME_21`，回退 `JAVA_HOME`），并且只运行 `-pl web -am` 的定向 reactor，
-不替代全量验证。
+不替代全量验证。Go 协议生成还需要仓库要求版本的 `protoc` 与 `protoc-gen-go`。

@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "properties": {
+    "transferId": {"type": "string", "description": "Lowercase UUID identifying the skill archive transfer."},
+    "package": {"type": "string", "description": "Skill package name; must be one safe path segment."},
+    "version": {"type": "string", "description": "Skill package version; must be one safe path segment."},
+    "skill": {"type": "string", "description": "Skill directory name inside the package; must be one safe path segment."}
+  },
+  "required": ["transferId", "package", "version", "skill"],
+  "additionalProperties": false
+}

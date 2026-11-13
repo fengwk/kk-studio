@@ -10,9 +10,6 @@
       "description": "Complete file content, written exactly as provided: line endings are not rewritten, and an existing file's encoding and BOM are preserved."
     }
   },
-  "required": [
-    "path",
-    "content"
-  ],
+  "required": ["path", "content"],
   "additionalProperties": false
 }

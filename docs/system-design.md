@@ -31,7 +31,7 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | L1 共享 | [`common`](../common/pom.xml) | 值契约：领域错误、严格 JSON、URI 编码、资源引用、结果内容、输入 Schema、Work 状态 |
 | L1 共享 | [`work`](../work/pom.xml) | `durable_work` 的 claim、租约 SQL 与有界调度骨架 |
 | L1 共享 | [`schema`](../schema/pom.xml) | 唯一的 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，按归属模块分段 |
-| 宿主 | [`daemon`](../daemon/package.json) | 文件、进程、LSP 与 IDE 服务；代理来自所属卡片；在线更新调用官方安装器 |
+| 宿主 | [`daemon-go`](../daemon-go/README.md) | Go Environment Daemon：文件、进程、LSP 与 IDE 服务；代理来自所属卡片；扩展宿主代码位于 `daemon-go/ide-extension/` |
 | 前端 | [`frontend`](../frontend/package.json) | `app` → `platform`、`features` → `shared` 的浏览器工作台 |
 
 依赖只能向下，模块依赖由 [`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护：
@@ -99,14 +99,14 @@ Maven 之外的连接：
 
 ```text
 frontend ──REST 与 /ws/events WebSocket──▶ web
-daemon ──每台主机一条 WSS，承载 HTTP/2 的控制流与 IDE 数据流──▶ platform/daemon-server
-daemon ──托管──▶ code-server（版本与摘要由 daemon/runtime-manifest.json 固定）
+daemon-go/kk-studio-daemon ──每台主机一条 WSS，承载 HTTP/2 的控制流与 IDE 数据流──▶ platform/daemon-server
+daemon-go/kk-studio-daemon ──托管──▶ code-server（发行版包含受管 IDE 运行时）
 ```
 
 构建期生成物各有唯一来源：`web` 测试源码中的契约生成器产出前端的
 [`contracts.ts`](../frontend/src/shared/api/generated/contracts.ts)；
-[`control.proto`](../platform/daemon-server/src/main/protocol/control.proto) 生成 Daemon 的协议代码；
-`harness/environment` 的能力 Schema 同步到 `daemon/resources/capabilities`。
+[`control.proto`](../platform/daemon-server/src/main/protocol/control.proto) 生成 `daemon-go/internal/protocol` 协议代码；
+`daemon-go/internal/capability/schemas` 是能力 Schema 基准，`harness/environment` 的镜像由一致性测试逐字节校验。
 
 `check.mjs` 同时守护聚合 POM 的模块清单、插件只 import 插件 SPI 与产品 SPI、内核契约包不反向依赖 runtime
 内部实现、Harness 公开包访问边界、按表名前缀的表归属、Java 包跨模块唯一，以及平台组合根与无 Redis /

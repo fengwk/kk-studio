@@ -8,8 +8,8 @@ Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/REA
 
 | 平台 | 入口 | 所需环境与行为 |
 | --- | --- | --- |
-| Linux / macOS | [daemon/install.sh](daemon/install.sh) | Bash、curl、SHA-256 工具（官方发行归档自带冻结运行时，无需宿主安装 Node 或 JDK）；Linux 需 `systemctl --user`，macOS 需当前用户 GUI 登录域 |
-| Windows 10/11 | [daemon/install.ps1](daemon/install.ps1) | PowerShell 5.1/7、ScheduledTasks、可用的 Bash（官方发行归档自带冻结运行时，无需宿主安装 Node 或 JDK）；当前用户交互登录期间运行 AtLogOn 计划任务，不是 Windows Service |
+| Linux / macOS | [daemon/install.sh](daemon/install.sh) | Bash、curl、SHA-256 工具（Go Daemon 作为独立可执行文件发行，无需宿主安装 Go、Node 或 JDK；code-server 另带 Node 运行时）；Linux 需 `systemctl --user`，macOS 需当前用户 GUI 登录域 |
+| Windows 10/11 | [daemon/install.ps1](daemon/install.ps1) | PowerShell 5.1/7、ScheduledTasks、可用的 Bash（Go Daemon 作为独立可执行文件发行，无需宿主安装 Go、Node 或 JDK；code-server 另带 Node 运行时）；当前用户交互登录期间运行 AtLogOn 计划任务，不是 Windows Service |
 
 正常入口是 Studio 的 Web 安装弹窗：保存配置后复制命令，脚本会自行暂存 `daemon.json` 与
 `daemon.token`、下载安装器并执行。安装器只有 `install` / `status` / `uninstall` / `help`
@@ -53,7 +53,7 @@ systemd/launchd 服务，测试入口见
 | 隔离栈应用 smoke | [dev/verify/smoke/offline-chat.sh](dev/verify/smoke/offline-chat.sh) | Docker，`--with-app` 另需 Node，覆盖 Blob、Canvas revision/typed commands、fake Function 与 Chat；创建/删除栈与数据卷 |
 | Seedance prepare-only smoke | [dev/verify/smoke/seedance-prepare.mjs](dev/verify/smoke/seedance-prepare.mjs) | 显式 `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_HUB_BASE_URL`；只做页面准备，不提交生成或下载视频 |
 | 文档与仓库结构 | [dev/verify/repository/check.mjs](dev/verify/repository/check.mjs) | Node，只读 |
-| 生成契约（前端传输、Daemon 协议代码与能力 Schema）生成/漂移 | [dev/verify/generated-contracts/check.sh](dev/verify/generated-contracts/check.sh)（更新用 [write.sh](dev/verify/generated-contracts/write.sh)） | JDK 21、Maven、Node；按 Web 控制器签名用真实 HTTP Jackson mapper 生成/比对 [frontend/src/shared/api/generated/contracts.ts](../frontend/src/shared/api/generated/contracts.ts)，根据 control.proto 校验 [daemon/src/generated/control_pb.ts](../daemon/src/generated/control_pb.ts)，并通过 capabilities.mjs 校验 [daemon/resources/capabilities](../daemon/resources/capabilities) 与 Java classpath 资源对齐，只跑 `-pl web -am` 定向 reactor；`check.sh` 只读，`write.sh` 会改源码需人工审阅 diff；`mvn verify` 执行同一 check |
+| 生成契约（前端传输、Go Daemon 协议代码与能力 Schema）生成/漂移 | [dev/verify/generated-contracts/check.sh](dev/verify/generated-contracts/check.sh)（更新用 [write.sh](dev/verify/generated-contracts/write.sh)） | Go 1.27.4、JDK 21、Maven、Node；按 Web 控制器签名用真实 HTTP Jackson mapper 生成/比对 [frontend/src/shared/api/generated/contracts.ts](../frontend/src/shared/api/generated/contracts.ts)，根据 control.proto 校验 [daemon-go/internal/protocol](../daemon-go/internal/protocol)，并通过 capabilities.mjs 校验 Java classpath Schema 与 Go Schema 一致，只跑 `-pl web -am` 定向 reactor；`check.sh` 只读，`write.sh` 会改协议代码或前端契约，需人工审阅 diff；`mvn verify` 执行同一 check |
 | 当前代码树敏感数据门禁 | [dev/verify/repository/check-sensitive-data.mjs](dev/verify/repository/check-sensitive-data.mjs) | Node、git，只读；命中只报告规则与位置，不回显敏感值 |
 | Git 历史敏感数据审计 | [dev/verify/repository/check-sensitive-history.mjs](dev/verify/repository/check-sensitive-history.mjs) | Node、git；扫描本地可见 refs 与当前树，可选抓取公开 PR refs 到隔离临时仓库；`--baseline` 只让门禁忽略该 revision 已可达对象里的命中，报告仍完整；Daemon Release 同时检查公开 PR refs，以上一个发布 tag 为基线，之后新出现的高置信度命中或扫描不完整时停止，脱敏报告留在 runner 临时目录 |
 
@@ -63,7 +63,7 @@ E2E 的精确 case 列表以 `run.sh --list` / `--docs` 为准，分类与执行
 
 | 任务 | 入口 | 前置条件与影响 |
 | --- | --- | --- |
-| 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag> <os> <arch>` | checkout、Node 24、npm、git、已编译 `daemon/dist`；按目标平台安装生产依赖并打包冻结 code-server 运行时，替换 `daemon/release/<os>-<arch>`，生成 tar.gz、SHA256、JSON 元数据、LICENSE、THIRD_PARTY_NOTICES 5 个资产，**不上传发布** |
+| 暂存 Daemon 发布资产 | [daemon/prepare-release.sh](daemon/prepare-release.sh) `<release-tag> <os> <arch>` | 发布流程以 `daemon-go/` 的 Go 源码构建平台二进制，并将 `ide-extension/` 与受管 code-server 运行时打入发行归档；目标平台、归档布局和校验文件由发布工具负责；本步骤不上传发布 |
 | 备份、冻结旧库、建空库 | [ops/reset-database.sh](ops/reset-database.sh) | psql/pg_dump/pg_restore/createdb、Node，owner 或 superuser 且有建库权限、无其它会话；完整备份与校验写仓库外，旧库改名禁连接，按原元数据建空库；非 `--yes` 需交互确认 |
 
 配置导出与导入在产品的“设置 → 同步”完成，YAML 始终包含所需凭据，不属于数据库脚本。

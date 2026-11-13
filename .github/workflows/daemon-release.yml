@@ -1,7 +1,7 @@
 # kk-studio Daemon GitHub Release.
 #
-# 推送 `v*` tag 时发布 Environment Daemon 的多平台可运行发行归档及其校验和、确定性元数据
-# 与法律文件。发布前必须通过仓库质量门禁与五平台 Node 矩阵，且 tag 必须落在 `main` 的历史上，
+# 推送 `v*` tag 时发布 Go Environment Daemon 的多平台可运行发行归档及其校验和、确定性元数据
+# 与法律文件。发布前必须通过仓库质量门禁与 Go daemon CI，且 tag 必须落在 `main` 的历史上，
 # 确保发布物对应已经合入主分支、可精确追溯的提交。
 #
 # 上传只使用 workflow 自带的 `github.token`（`contents: write`），不使用 PAT，也不读取
@@ -33,29 +33,30 @@ permissions:
   contents: read
 
 env:
-  NODE_VERSION: '24.21.0'
+  GO_VERSION: '1.27.4'
+  GO_BIN: go
   POSTGRES_VERSION: '17'
   # push tag 用真实 tag，workflow_dispatch 用输入 tag 做候选验收。资产名、版本门禁与
   # Release 命令都只通过它取值，input 绝不直接拼进 shell。
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-  # 每个平台在 daemon/release/<os>-<arch> 下产出一套资产；工作流的资产校验与上传只读这些目录。
-  RELEASE_ROOT: daemon/release
+  # 每个平台在 daemon-go/release/<os>-<arch> 下产出一套资产；工作流的资产校验与上传只读这些目录。
+  RELEASE_ROOT: daemon-go/release
   # 官方 Daemon 发行归档覆盖的平台矩阵（windows 只支持 amd64）。
   RELEASE_PLATFORMS: linux-amd64 linux-arm64 macos-amd64 macos-arm64 windows-amd64
 
 jobs:
-  # 五平台 Node 矩阵由可复用工作流提供：tag 发布与 main 镜像发布跑同一套门禁，发布不会因为
-  # tag 触发而绕过平台矩阵。Ubuntu 的 Unix 安装器/归档契约由 stage 的完整仓库脚本测试覆盖，
-  # macOS 由其系统 Bash 的矩阵步骤覆盖，Windows 由 `windows_daemon_installer` 的两个
-  # PowerShell 宿主覆盖；这里不再重复建立并行验收 job。
+  # Formal tag releases and Docker builds share the Go daemon CI gates. Manual dispatch remains
+  # a focused archive candidate: its script tests, staging and host smoke run without publishing.
   daemon_ci:
-    name: node daemon matrix
-    uses: ./.github/workflows/daemon-ci.yml
+    name: Go daemon CI
+    if: github.event_name == 'push'
+    uses: ./.github/workflows/daemon-go-ci.yml
 
   stage:
     name: build and stage daemon release
     needs:
       - daemon_ci
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || needs.daemon_ci.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       # 全量历史：父提交必须可达，否则无法判定 tag 是否落在 main 上。
@@ -63,12 +64,14 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Set up Node 24.21
+      - name: Set up Node 24
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: daemon/package-lock.json
+          node-version: '24.21.0'
+      - name: Set up Go 1.27.4
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
 
       # tag 名会进入资产文件名，因此只接受只含安全字符的版本 tag。提交约束分事件：
       # tag push 必须在 origin/main 上（正式发布）；手动 dry run 的候选 HEAD 必须包含
@@ -123,6 +126,7 @@ jobs:
           node scripts/dev/verify/repository/check-sensitive-history.mjs \
             --remote-pr --fail-on-high --baseline "${previous}" --json "${RUNNER_TEMP}/sensitive-history.json"
       - name: Check documentation layout
+        if: github.event_name != 'workflow_dispatch'
         run: node scripts/dev/verify/repository/check.mjs
       # 版本对齐以仓库里的真实文件为准：根 POM 的 <version>、kk-studio.version 属性、daemon 包
       # 版本与发布 tag 必须完全一致。这里不写死任何版本号，因此改版本时不需要修改本工作流。
@@ -132,21 +136,15 @@ jobs:
           node scripts/dev/verify/repository/check-version-alignment.mjs
       - name: Set up PostgreSQL client tools
         uses: ./.github/actions/postgres-client
-      # 仓库脚本测试使用真实 daemon 归档解析器；先安装锁定依赖。
-      - name: Install daemon dependencies
-        run: npm --prefix daemon ci
       - name: Run repository script tests
         uses: ./.github/actions/repository-script-tests
+        env:
+          GO_BIN: go
         with:
-          globs: scripts/*/tests/*.test.mjs scripts/dev/verify/*/tests/*.test.mjs deploy/test/mock/*.test.mjs
+          globs: scripts/daemon/tests/*.test.mjs scripts/dev/verify/repository/tests/check-version-alignment.test.mjs scripts/dev/verify/repository/tests/daemon-ci-contract.test.mjs scripts/dev/verify/repository/tests/workflow-action-pins.test.mjs scripts/dev/verify/repository/tests/workflow-validation-gates.test.mjs scripts/dev/verify/reliability/tests/daemon-entrypoint-contracts.test.mjs scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs
 
-      # 编译 Node Daemon 的发行 JS；依赖已在上一步安装，生产依赖由 prepare-release.sh 按平台重装。
-      - name: Verify and build the Node daemon
-        run: |
-          npm --prefix daemon run check
-          npm --prefix daemon run build
-
-      # 唯一资产暂存实现：按平台矩阵产出归档，每个平台写进 daemon/release/<os>-<arch>。
+      # Go CI owns compilation and tests; release staging compiles each supported archive target.
+      # 唯一资产暂存实现：按平台矩阵产出归档，每个平台写进 daemon-go/release/<os>-<arch>。
       - name: Stage release assets
         run: |
           set -euo pipefail
@@ -158,13 +156,14 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: daemon-release-archives
-          path: daemon/release
+          path: daemon-go/release
           retention-days: 1
           if-no-files-found: error
 
   smoke_archives:
     name: smoke staged archive (${{ matrix.platform }})
     needs: stage
+    if: ${{ always() && needs.stage.result == 'success' }}
     strategy:
       fail-fast: false
       matrix:
@@ -188,7 +187,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: daemon-release-archives
-          path: daemon/release
+          path: daemon-go/release
       # code-server 的 MSAL native broker (microsoft-authentication/dist/msal-node-runtime.node)
       # 链接 libmsalruntime.so，后者需要 WebKitGTK/libsecret 等宿主库；headless runner 默认缺少这些库。
       # 这些只是本烟测宿主的依赖，不是 Daemon 启动的通用要求，因此只在 linux-amd64 安装，
@@ -203,7 +202,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="daemon/release/${{ matrix.platform }}/kk-studio-daemon-${RELEASE_TAG}-${{ matrix.platform }}.tar.gz"
+          archive="daemon-go/release/${{ matrix.platform }}/kk-studio-daemon-${RELEASE_TAG}-${{ matrix.platform }}.tar.gz"
           test -f "${archive}"
           case "${{ matrix.platform }}" in
             windows-*)
@@ -234,7 +233,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: daemon-release-archives
-          path: daemon/release
+          path: daemon-go/release
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "properties": {
+    "pattern": {"type": "string", "description": "Regular-expression pattern to search for by default; use literal=true to treat it as exact text."},
+    "path": {"type": "string", "description": "Absolute path on the selected Environment's file system of the directory or file to search. Relative paths are rejected; results and errors are reported as absolute paths."},
+    "glob": {"type": "string", "description": "Optional file filter glob such as `**/*.ts`; it follows the same glob rules as fs.find and cannot re-include ignored files."},
+    "ignore_case": {"type": "boolean", "description": "Case-insensitive search. Defaults to false."},
+    "literal": {"type": "boolean", "description": "Treat the pattern literally instead of as a regular expression. Defaults to false."},
+    "limit": {"type": "integer", "description": "Positive maximum number of matches to return. Defaults to 100."},
+    "timeout_seconds": {"type": "integer", "description": "Positive search timeout in seconds. Defaults to 15."}
+  },
+  "required": ["pattern", "path"],
+  "additionalProperties": false
+}
