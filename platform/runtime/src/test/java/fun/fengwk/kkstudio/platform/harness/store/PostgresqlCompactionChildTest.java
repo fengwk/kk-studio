@@ -735,6 +735,28 @@ class PostgresqlCompactionChildTest {
     assertFalse(hasWork(WorkTargetType.THREAD, parentId));
   }
 
+  /** Session 深删闭包同时删除同 Session 的 COMPACTION 分支，不残留 Thread 或 Entry。 */
+  @Test
+  void sessionDeletionRemovesTheCompactionBranch() {
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    seedUserCommand(parentId, "queued input");
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    EntryPath parentPath = path(parentId);
+    TurnStartPayload start = assertInstanceOf(TurnStartPayload.class, parentPath.head().payload());
+    UUID childThreadId = start.compaction().childThreadId();
+
+    runtime.deleteSessions(List.of(baseline.sessionId()), ids -> {}, ids -> {});
+
+    assertTrue(store.transaction(tx -> tx.threads().find(parentId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.threads().find(childThreadId)).isEmpty());
+    assertTrue(store.transaction(tx -> tx.sessions().find(baseline.sessionId())).isEmpty());
+    assertNull(store.transaction(tx -> tx.entries().find(baseline.rootEntryId()).orElse(null)));
+    assertNull(store.transaction(tx -> tx.entries().find(parentPath.head().id()).orElse(null)));
+  }
+
   /** 普通请求因上下文溢出失败后只规划一次 OVERFLOW 压缩；重试再次溢出时直接失败，绝不递归压缩。 */
   @Test
   void overflowFailureCompactsOnceAndRejectsTheSecondOverflowRetry() {

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -260,6 +261,43 @@ class HarnessOwnerQueryServiceTest {
         service.listThreadSummaries(sessionId).getFirst().getHeadMessagePreview();
     assertEquals("latest user", reminderHeadPreview);
     assertFalse(reminderHeadPreview.contains("system-reminder"), reminderHeadPreview);
+  }
+
+  /** COMPACTION 分支只在按 id 读取时可见，绝不进入普通 Thread 摘要列表。 */
+  @Test
+  void threadSummariesExcludeCompactionBranches() {
+    UUID sessionId = id(80);
+    UUID rootId = id(81);
+    UUID branchId = id(82);
+    Entry root = new Entry(rootId, sessionId, null, new RootPayload(ROOT_SETTINGS), T0);
+    ThreadState rootThread = thread(rootId, sessionId, rootId, T0, T1);
+    ThreadState branchThread =
+        new ThreadState(
+            branchId,
+            sessionId,
+            rootId,
+            rootId,
+            "0".repeat(64),
+            "compaction",
+            rootId,
+            false,
+            ThreadKind.COMPACTION,
+            new ThreadConstraints(4096, false),
+            ThreadExecutionControl.RUNNABLE,
+            0L,
+            1L,
+            0L,
+            T0,
+            T1);
+    when(runtime.listThreadsBySession(sessionId)).thenReturn(List.of(rootThread, branchThread));
+    when(runtime.getThreadSnapshot(rootId))
+        .thenReturn(snapshot(rootThread, new EntryPath(List.of(root))));
+
+    List<HarnessThreadSummaryDTO> summaries = service.listThreadSummaries(sessionId);
+
+    assertEquals(1, summaries.size());
+    assertEquals(rootId.toString(), summaries.getFirst().getThreadId());
+    verify(runtime, never()).getThreadSnapshot(branchId);
   }
 
   /** Session 摘要保留同名根与子，父身份只从既有 snapshot 读取，不追加查询。 */
