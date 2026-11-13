@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -57,6 +58,7 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -556,6 +558,36 @@ class AnthropicRequestEncoderTest {
     assertEquals(
         "old_tool", systemMessage.path("content").get(3).path("tool").path("name").asString());
     assertEquals(List.of("inline-tools-2026-09-15"), encoded.betaFeatures());
+  }
+
+  /** Appending a SYSTEM delta leaves all previously encoded conversation bytes cache-stable. */
+  @Test
+  void keepsEncodedMessagePrefixStableWhenSystemChangeIsAppended() throws IOException {
+    List<ProviderMessage> history =
+        List.of(
+            userMsg(new ProviderTextBlock("question")),
+            asstMsg(List.of(new ProviderTextBlock("answer"))));
+    ProviderCacheControl cacheControl =
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "prefix-test");
+    ProviderRequest before = request(defaultVariant(), history, List.of(), cacheControl);
+    List<ProviderMessage> changedHistory = new ArrayList<>(history);
+    changedHistory.add(
+        new ProviderMessage(
+            ProviderMessageRole.SYSTEM, List.of(new ProviderTextBlock("system update"))));
+    ProviderRequest after = request(defaultVariant(), changedHistory, List.of(), cacheControl);
+
+    byte[] beforeBytes = encoder.encode(before, descriptor).bodyUtf8Bytes();
+    byte[] afterBytes = encoder.encode(after, descriptor).bodyUtf8Bytes();
+    JsonNode beforeWire = MAPPER.readTree(beforeBytes);
+    JsonNode afterWire = MAPPER.readTree(afterBytes);
+
+    assertTrue(afterBytes.length > beforeBytes.length);
+    // The closing messages-array and root braces are replaced when a new element is appended.
+    assertArrayEquals(
+        Arrays.copyOf(beforeBytes, beforeBytes.length - 2),
+        Arrays.copyOf(afterBytes, beforeBytes.length - 2));
+    assertTrue(cacheBlock(beforeWire, 1, 0).has("cache_control"));
+    assertTrue(cacheBlock(afterWire, 1, 0).has("cache_control"));
   }
 
   @Test

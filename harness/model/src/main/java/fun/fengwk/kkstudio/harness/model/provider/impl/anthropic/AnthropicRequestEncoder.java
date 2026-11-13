@@ -159,6 +159,7 @@ public final class AnthropicRequestEncoder {
       } else if (msg.role() == ProviderMessageRole.TOOL) {
         wireMessagesArray.add(encodeToolMessage(msg));
       } else if (msg.role() == ProviderMessageRole.SYSTEM) {
+        addCacheEndpoint(cacheEndpoints, lastEligible);
         wireMessagesArray.add(encodeSystemMessage(msg));
       } else {
         throw new ProviderException(
