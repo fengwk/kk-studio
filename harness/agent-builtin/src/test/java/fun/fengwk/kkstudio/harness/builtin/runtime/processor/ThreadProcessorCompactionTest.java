@@ -95,7 +95,6 @@ import fun.fengwk.kkstudio.harness.runtime.AgentSpawner;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.ThreadTreeLocks;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionSummaryAssembler;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
@@ -1418,11 +1417,8 @@ class ThreadProcessorCompactionTest extends ThreadProcessorTestBase {
                   tx.threads().find(baseline.threadId()).orElseThrow().advanceHead(ids[0], NOW));
           return null;
         });
-    // result payload 由同一 request 的冻结切分事实 + 真实 apply 前缀路径经 assembler 机械派生（HISTORY 前缀即
-    // head==TURN_START 的路径）。
-    CompactionPayload resultPayload =
-        CompactionSummaryAssembler.resultPayload(
-            path(fixture.store, baseline.threadId()), frozenStart, response.text());
+    // Compaction results persist the provider summary directly.
+    CompactionPayload resultPayload = new CompactionPayload(response.text(), null);
     fixture.store.transaction(
         tx -> {
           tx.threads().lock(baseline.threadId());

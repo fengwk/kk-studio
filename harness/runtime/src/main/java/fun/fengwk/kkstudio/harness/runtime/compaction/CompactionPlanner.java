@@ -85,7 +85,7 @@ public final class CompactionPlanner {
             plannedCut.get().entryId(),
             null,
             null,
-            previousSummary(entries),
+            null,
             messages,
             removedPrefixTokens));
   }
@@ -139,17 +139,6 @@ public final class CompactionPlanner {
         null,
         prefixMessages,
         removedPrefixTokens);
-  }
-
-  private static String previousSummary(List<Entry> entries) {
-    var path = new EntryPath(entries);
-    Optional<CompactionTurns.CompactionTurn> latest = CompactionTurns.latestComplete(path);
-    if (latest.isEmpty()) {
-      return null;
-    }
-    String stripped =
-        CompactionFileSections.stripReservedSections(latest.get().result().summaryText());
-    return stripped.isBlank() ? null : stripped;
   }
 
   /**

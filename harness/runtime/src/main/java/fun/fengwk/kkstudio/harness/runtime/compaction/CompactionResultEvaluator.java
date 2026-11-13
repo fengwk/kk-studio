@@ -1,42 +1,22 @@
 package fun.fengwk.kkstudio.harness.runtime.compaction;
 
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
 import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
-import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 
-import java.util.Objects;
-
-/** 把一次成功 Provider terminal 纯评估为 durable CompactionPayload 或稳定的语义错误。 */
+/** Evaluates a completed provider response as a durable compaction payload or semantic error. */
 public final class CompactionResultEvaluator {
 
   private CompactionResultEvaluator() {}
 
   public static EntryPayload evaluate(
-      EntryPath parentPath,
-      CompactionStart start,
-      String summaryText,
-      AssistantMessageMetadata metadata,
-      long outputBudget) {
-    Objects.requireNonNull(parentPath, "parentPath");
-    Objects.requireNonNull(start, "start");
+      String summaryText, AssistantMessageMetadata metadata, long outputBudget) {
     AssistantError error = semanticError(summaryText, metadata);
-    CompactionPayload payload = null;
     if (error == null) {
-      try {
-        CompactionPayload summary =
-            CompactionSummaryAssembler.resultPayload(parentPath, start, summaryText);
-        payload = new CompactionPayload(summary.summaryText(), metadata);
-      } catch (IllegalArgumentException invalidSummary) {
-        error = new AssistantError("COMPACTION_INVALID_SUMMARY", invalidSummary.getMessage());
-      }
-    }
-    if (error == null) {
-      long estimatedTokens = TokenEstimator.estimateTextTokens(payload.summaryText());
+      long estimatedTokens = TokenEstimator.estimateTextTokens(summaryText);
       if (estimatedTokens > outputBudget) {
         error =
             new AssistantError(
@@ -47,7 +27,9 @@ public final class CompactionResultEvaluator {
                     + outputBudget);
       }
     }
-    return error == null ? payload : new AssistantErrorPayload(error, null);
+    return error == null
+        ? new CompactionPayload(summaryText, metadata)
+        : new AssistantErrorPayload(error, null);
   }
 
   private static AssistantError semanticError(

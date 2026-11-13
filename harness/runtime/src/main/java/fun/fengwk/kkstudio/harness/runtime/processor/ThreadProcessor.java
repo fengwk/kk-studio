@@ -663,8 +663,7 @@ public final class ThreadProcessor {
         }
       }
       resultPayload =
-          CompactionResultEvaluator.evaluate(
-              path, start, summaryText, metadata, start.outputBudget());
+          CompactionResultEvaluator.evaluate(summaryText, metadata, start.outputBudget());
       if (resultPayload instanceof CompactionPayload) {
         outcome = TurnEndOutcome.COMPLETED;
         continueModel =
