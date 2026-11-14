@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.limits;
 
 /**
- * 音频内联限制（PLAN 11.1 audio 列）。
+ * 音频内联限制。
  *
  * <p>口径：{@code singleRawBytes} 为单个音频 RAW 字节；{@code maxCount} 为单请求音频数量上限；{@code maxDurationSeconds}
  * 为单个音频时长上限。全部可空，null 表示未知。

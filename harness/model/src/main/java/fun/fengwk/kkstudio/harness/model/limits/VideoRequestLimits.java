@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.limits;
 
 /**
- * 视频内联限制（PLAN 11.1 video 列）。
+ * 视频内联限制。
  *
  * <p>口径：{@code singleRawBytes} 为单个视频 RAW 字节；{@code maxCount} 为单请求视频数量上限；{@code maxDurationSeconds}
  * 为单个视频时长上限。全部可空，null 表示未知。

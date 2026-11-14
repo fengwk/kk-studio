@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider;
 
-/** 用于 Runtime 重试与压缩决策的 Provider 错误分类（PLAN 7.4）。 */
+/** 用于 Runtime 重试与压缩决策的 Provider 错误分类。 */
 public enum ProviderErrorKind {
   /** 可重试的瞬态网络错误或服务过载。 */
   TRANSIENT,

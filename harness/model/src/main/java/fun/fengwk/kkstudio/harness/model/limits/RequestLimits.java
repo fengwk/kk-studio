@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.limits;
 
 /**
- * 一次 Provider 请求的已计量限制快照（PLAN 11.1）。
+ * 一次 Provider 请求的已计量限制快照。
  *
  * <p>全部字段可空：null 表示该端点的该项限制未知，未知即缺省，不补默认值；发送方只对已知项执行发送前检查， 未知项依赖上游拒绝后的分类。{@code bodyMaxBytes} 是
  * BODY 口径（最终 UTF-8 请求体）；{@code visualUnitsMax} 是协议自定义的视觉计量单位上限（如 Gemini 的 {@code mediaResolution}

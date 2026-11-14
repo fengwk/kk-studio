@@ -11,8 +11,6 @@ import java.util.Objects;
  * <p>该上限是适配器自身的内存与请求安全策略，<strong>不是</strong>对厂商能力的断言：厂商允许的请求体大小由其自身策略决定， 本上限只在本地超限时以 {@link
  * ProviderErrorKind#INVALID_REQUEST} 明确拒绝，不静默截断、不降级、不改写请求内容。
  *
- * <p>各协议可在应用上限之下叠加更严格的协议级限制（Anthropic 保留自己的 32 MiB），此时由协议自身守卫负责。
- *
  * <p>依赖方通过 {@link #DEFAULT} 使用应用上限；测试可注入更小的 {@code limitBytes}，从而在无昂贵大内存分配的前提下覆盖边界行为。
  */
 public final class RequestBodySizeGuard {
