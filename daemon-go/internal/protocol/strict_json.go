@@ -46,50 +46,71 @@ func strictValue(dec *json.Decoder, limits JSONLimits, depth int) error {
 	}
 	switch v := tok.(type) {
 	case json.Delim:
-		if v == '{' || v == '[' {
-			depth++
-			if limits.MaxNestingDepth > 0 && depth > limits.MaxNestingDepth {
-				return fmt.Errorf("exceeds maximum nesting depth %d", limits.MaxNestingDepth)
-			}
-			if v == '{' {
-				seen := make(map[string]struct{})
-				for dec.More() {
-					key, err := dec.Token()
-					if err != nil {
-						return fmt.Errorf("must be valid JSON")
-					}
-					name, ok := key.(string)
-					if !ok {
-						return fmt.Errorf("must be valid JSON")
-					}
-					if _, ok := seen[name]; ok {
-						return fmt.Errorf("contains duplicate field: %s", name)
-					}
-					seen[name] = struct{}{}
-					if err := strictValue(dec, limits, depth); err != nil {
-						return err
-					}
-				}
-				if _, err := dec.Token(); err != nil {
-					return fmt.Errorf("must be valid JSON")
-				}
-				return nil
-			}
-			for dec.More() {
-				if err := strictValue(dec, limits, depth); err != nil {
-					return err
-				}
-			}
-			if _, err := dec.Token(); err != nil {
-				return fmt.Errorf("must be valid JSON")
-			}
-			return nil
+		switch v {
+		case '{':
+			return strictObject(dec, limits, depth+1)
+		case '[':
+			return strictArray(dec, limits, depth+1)
+		default:
+			return fmt.Errorf("must be valid JSON")
 		}
-		return fmt.Errorf("must be valid JSON")
 	case json.Number:
 		if limits.MaxNumberLength > 0 && len(v.String()) > limits.MaxNumberLength {
 			return fmt.Errorf("number exceeds %d characters", limits.MaxNumberLength)
 		}
+	}
+	return nil
+}
+
+// strictObject checks one object for depth, duplicate field names and its values, then consumes the
+// closing delimiter.
+func strictObject(dec *json.Decoder, limits JSONLimits, depth int) error {
+	if err := checkDepth(limits, depth); err != nil {
+		return err
+	}
+	seen := make(map[string]struct{})
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return fmt.Errorf("must be valid JSON")
+		}
+		name, ok := key.(string)
+		if !ok {
+			return fmt.Errorf("must be valid JSON")
+		}
+		if _, ok := seen[name]; ok {
+			return fmt.Errorf("contains duplicate field: %s", name)
+		}
+		seen[name] = struct{}{}
+		if err := strictValue(dec, limits, depth); err != nil {
+			return err
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return fmt.Errorf("must be valid JSON")
+	}
+	return nil
+}
+
+// strictArray checks one array for depth and its values, then consumes the closing delimiter.
+func strictArray(dec *json.Decoder, limits JSONLimits, depth int) error {
+	if err := checkDepth(limits, depth); err != nil {
+		return err
+	}
+	for dec.More() {
+		if err := strictValue(dec, limits, depth); err != nil {
+			return err
+		}
+	}
+	if _, err := dec.Token(); err != nil {
+		return fmt.Errorf("must be valid JSON")
+	}
+	return nil
+}
+
+func checkDepth(limits JSONLimits, depth int) error {
+	if limits.MaxNestingDepth > 0 && depth > limits.MaxNestingDepth {
+		return fmt.Errorf("exceeds maximum nesting depth %d", limits.MaxNestingDepth)
 	}
 	return nil
 }
