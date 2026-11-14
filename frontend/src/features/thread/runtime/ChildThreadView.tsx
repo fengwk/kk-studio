@@ -13,7 +13,7 @@ import { useI18n } from '@/shared/i18n'
 import '@/features/thread/runtime/child-thread-view.css'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 
-export interface ThreadViewProps {
+interface ThreadViewProps {
   threadId?: string
   /** 纯展示组件消费必填的投影，自身不再拥有或自建订阅 */
   projection: ThreadProjection
@@ -108,7 +108,7 @@ export function ThreadView({
   )
 }
 
-export interface ConnectedThreadViewProps {
+interface ConnectedThreadViewProps {
   threadId: string
   environments: EnvironmentDTO[]
   navigation?: ReactNode

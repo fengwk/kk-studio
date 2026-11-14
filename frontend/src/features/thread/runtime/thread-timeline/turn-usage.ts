@@ -3,7 +3,7 @@ import { getString } from '@/shared/lib/value'
 import {
   accumulateTurnUsage,
   parseAssistantUsage,
-} from '@/features/thread/runtime/thread-timeline/content-utils'
+} from '@/features/thread/runtime/thread-timeline/turn-usage-format'
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 

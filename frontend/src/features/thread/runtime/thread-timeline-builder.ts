@@ -1,30 +1,18 @@
-import {
-  extractResultEditReview,
-  parseEditReview,
-} from '@/features/thread/runtime/mutation-review'
-import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
-import { getString, isRecord } from '@/shared/lib/value'
+import { asRecord } from '@/features/thread/runtime/payload-json'
+import { getString } from '@/shared/lib/value'
 import type {
   RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'
 import type {
   RealtimeToolStream,
 } from '@/features/thread/runtime/thread-realtime/tool-stream'
-import {
-  sameToolCall,
-  toolCallIdentity,
-  type DialogueMessage,
-  type QueuedThreadMessage,
-  type ThreadTimeline,
-  type ToolApprovalState,
-  type ToolDialogueMessage,
+import type {
+  DialogueMessage,
+  QueuedThreadMessage,
+  ThreadTimeline,
 } from '@/features/thread/runtime/thread-timeline-types'
 import {
-  parseToolErrorText,
-} from '@/features/thread/runtime/thread-realtime/tool-stream'
-import {
   projectDurableEntry,
-  projectToolResultContent,
   type EntryProjectionContext,
 } from '@/features/thread/runtime/thread-timeline/entry-projection'
 import {
@@ -35,9 +23,13 @@ import {
   recordCompactionTurnEntry,
   type CompactionTurnProjection,
 } from '@/features/thread/runtime/thread-timeline/compaction-turn'
-import { contentText } from '@/features/thread/runtime/thread-timeline/content-utils'
-import { createModelAttemptFailureMessage } from '@/features/thread/runtime/thread-timeline/model-attempt-failure'
-import { translate } from '@/shared/i18n'
+import { projectInvocationOverlays } from '@/features/thread/runtime/thread-timeline/invocation-overlay-projection'
+import { projectGenerationFailures } from '@/features/thread/runtime/thread-timeline/failure-projection'
+import {
+  isProjectableGenerationFailure,
+  projectModelStream,
+} from '@/features/thread/runtime/thread-timeline/model-stream-projection'
+import { extractQueuedMessage } from '@/features/thread/runtime/thread-timeline/queued-message-projection'
 import type {
   HarnessActiveAssistantOutputDTO,
   HarnessGenerationFailureDTO,
@@ -64,11 +56,49 @@ export function buildThreadTimeline(
   activeAssistantOutput: HarnessActiveAssistantOutputDTO | null = null,
 ): ThreadTimeline {
   const messages: DialogueMessage[] = []
-  const queuedMessages: QueuedThreadMessage[] = []
-  const durableToolArguments = new Map<string, string[]>()
   // Turn usage 挂起上下文：summary 在相应 TURN_END 之后投影。
   const projectionContext: EntryProjectionContext = { pendingTurnSummary: null, lastSettings: null }
-  let hasPendingInputs = false
+  const durableToolArguments = new Map<string, string[]>()
+  const summary = projectDurableEntries(entries, messages, durableToolArguments, projectionContext)
+  const queuedMessages = projectQueuedMessages(queuedCommands)
+
+  projectInvocationOverlays(
+    messages,
+    toolInvocations,
+    toolStreams,
+    toolInvocations[0]?.threadId,
+  )
+
+  if (!summary.latestTurnIsCompaction) {
+    projectGenerationFailures(messages, generationFailures, activeAssistantOutput)
+    const streamAttemptFailed = isStreamAttemptFailed(modelStream, generationFailures)
+    if (modelStream != null) {
+      projectModelStream(messages, modelStream, streamAttemptFailed, activeAssistantOutput)
+    }
+  }
+
+  return {
+    messages,
+    queuedMessages,
+    hasPendingInputs: queuedMessages.length > 0,
+  }
+}
+
+interface DurableProjectionSummary {
+  /** 最新 Turn 是否压缩回合：压缩回合内的失败/流式 overlay 不进入对话视图。 */
+  latestTurnIsCompaction: boolean
+}
+
+/**
+ * 顺序投影 durable Entries：压缩回合的卡片在一开始出现、回合内事实在关闭时定稿，
+ * 其余 Entry 走通用 durable 投影。
+ */
+function projectDurableEntries(
+  entries: readonly HarnessSessionEntryDTO[],
+  messages: DialogueMessage[],
+  durableToolArguments: Map<string, string[]>,
+  projectionContext: EntryProjectionContext,
+): DurableProjectionSummary {
   let inCompactionTurn = false
   let latestTurnIsCompaction = false
   // 压缩回合的生命周期投影：卡片在 TURN_START 立即出现，回合内事实在关闭时定稿。
@@ -112,14 +142,19 @@ export function buildThreadTimeline(
     }
     projectDurableEntry(entry, messages, durableToolArguments, projectionContext)
   }
+  return { latestTurnIsCompaction }
+}
 
+/**
+ * 可编辑队列只承载人类输入：NOTIFICATION（系统结果事实）、CUSTOM_MESSAGE（编排产物）
+ * 与配置命令都不进入。
+ */
+function projectQueuedMessages(
+  queuedCommands: readonly HarnessThreadCommandDTO[],
+): QueuedThreadMessage[] {
+  const queuedMessages: QueuedThreadMessage[] = []
   for (const command of queuedCommands) {
-    if (command.state !== 'QUEUED') {
-      continue
-    }
-    // 可编辑队列与上下键历史只承载人类输入 USER_MESSAGE：NOTIFICATION（系统结果事实）、
-    // CUSTOM_MESSAGE（编排产物）与配置命令都不进入。
-    if (command.type !== 'USER_MESSAGE') {
+    if (command.state !== 'QUEUED' || command.type !== 'USER_MESSAGE') {
       continue
     }
     const queuedMessage = extractQueuedMessage(command.payload)
@@ -132,418 +167,20 @@ export function buildThreadTimeline(
       text: queuedMessage.text,
       sequence: command.sequence,
     })
-    hasPendingInputs = true
   }
+  return queuedMessages
+}
 
-  projectInvocationOverlays(
-    messages,
-    toolInvocations,
-    toolStreams,
-    toolInvocations[0]?.threadId,
-  )
-
-  if (!latestTurnIsCompaction) {
-    projectGenerationFailures(messages, generationFailures, activeAssistantOutput)
-  }
-
-  const modelStreamAttemptFailed =
-    modelStream != null
+/** 当前实时 model stream 的 attempt 是否已被记录为失败（同一 generation/attempt）。 */
+function isStreamAttemptFailed(
+  modelStream: RealtimeModelStream | null,
+  generationFailures: readonly HarnessGenerationFailureDTO[],
+): boolean {
+  return modelStream != null
     && generationFailures.some(
       (failure) =>
         isProjectableGenerationFailure(failure)
         && failure.generationId === modelStream.invocationId
         && failure.attempt === modelStream.attempt,
     )
-  if (!latestTurnIsCompaction && modelStream != null) {
-    projectModelStream(
-      messages,
-      modelStream,
-      modelStreamAttemptFailed,
-      activeAssistantOutput,
-    )
-  }
-
-  return {
-    messages,
-    queuedMessages,
-    hasPendingInputs,
-  }
-}
-
-function projectGenerationFailures(
-  messages: DialogueMessage[],
-  failures: readonly HarnessGenerationFailureDTO[],
-  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null,
-): void {
-  const identities = new Set<string>()
-  const orderedFailures = [...failures].sort((left, right) => left.attempt - right.attempt)
-  for (const failure of orderedFailures) {
-    if (!isProjectableGenerationFailure(failure)) {
-      continue
-    }
-    const identity = `${failure.generationId}:${failure.attempt}`
-    if (identities.has(identity)) {
-      continue
-    }
-    identities.add(identity)
-    const liveRetry = isLiveRetryPending(failure, activeAssistantOutput)
-    messages.push(
-      createModelAttemptFailureMessage({
-        id: `snapshot:model-attempt-failure:${identity}`,
-        subjectEntryId: null,
-        createdAt: failure.failedAt,
-        attempt: failure.attempt,
-        sequence: failure.sequence,
-        text: failure.text,
-        thinking: failure.thinking,
-        errorCode: failure.errorCode,
-        errorMessage: failure.errorMessage,
-        failedAt: failure.failedAt,
-        retryAt: failure.retryAt,
-        nextAttempt: failure.attempt + 1,
-        generationId: liveRetry ? failure.generationId : undefined,
-        turnStartEntryId: failure.turnStartEntryId,
-        requestHeadEntryId: failure.requestHeadEntryId,
-      }),
-    )
-  }
-}
-
-function isLiveRetryPending(
-  failure: HarnessGenerationFailureDTO,
-  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null,
-): boolean {
-  return activeAssistantOutput != null
-    && activeAssistantOutput.generationId === failure.generationId
-    && activeAssistantOutput.attempt === failure.attempt
-    && activeAssistantOutput.status === 'READY'
-}
-
-function projectModelStream(
-  messages: DialogueMessage[],
-  stream: RealtimeModelStream,
-  attemptAlreadyFailed: boolean,
-  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null,
-): void {
-  const id = `realtime:model:${stream.invocationId}:${stream.attempt}`
-  if (stream.status === 'error') {
-    const errorText =
-      stream.errorText || translate('ai.runtime.entry.assistantRequestFailed')
-    const cancelled =
-      activeAssistantOutput?.generationId === stream.invocationId
-      && activeAssistantOutput.status === 'CANCELLED'
-    if (cancelled && (stream.text || stream.thinking)) {
-      messages.push({
-        id,
-        role: 'assistant',
-        subjectEntryId: null,
-        text: stream.text,
-        thinking: stream.thinking || undefined,
-        createdAt: stream.createdAt,
-        status: 'done',
-        aborted: true,
-      })
-      return
-    }
-    if (cancelled || attemptAlreadyFailed || stream.attempt <= 0) {
-      messages.push({
-        id,
-        role: 'assistant',
-        subjectEntryId: null,
-        text: errorText,
-        createdAt: stream.createdAt,
-        status: 'error',
-      })
-      return
-    }
-    messages.push(
-      createModelAttemptFailureMessage({
-        id,
-        subjectEntryId: null,
-        createdAt: stream.createdAt,
-        attempt: stream.attempt,
-        sequence: String(stream.sequence),
-        text: stream.text,
-        thinking: stream.thinking,
-        errorCode: stream.errorCode ?? '',
-        errorMessage: errorText,
-        failedAt: stream.createdAt,
-        retryAt: null,
-        nextAttempt: null,
-      }),
-    )
-    return
-  }
-  if (attemptAlreadyFailed || (!stream.text && !stream.thinking && stream.toolCalls.length === 0)) {
-    return
-  }
-  if (stream.text || stream.thinking) {
-    messages.push({
-      id,
-      role: 'assistant',
-      subjectEntryId: null,
-      text: stream.text,
-      thinking: stream.thinking || undefined,
-      createdAt: stream.createdAt,
-      // 持久终止态 success 投影绝不会以 streaming 形式渲染。
-      status: stream.status,
-    })
-  }
-  projectStreamingToolCalls(messages, stream)
-}
-
-function projectStreamingToolCalls(messages: DialogueMessage[], stream: RealtimeModelStream): void {
-  if (stream.toolCalls.length === 0) {
-    return
-  }
-  const existing = new Set(
-    messages
-      .filter((message): message is ToolDialogueMessage => message.role === 'tool')
-      .map((message) => message.toolCallId)
-      .filter(Boolean),
-  )
-  for (const draft of stream.toolCalls) {
-    if (draft.id && existing.has(draft.id)) {
-      continue
-    }
-    const toolName = draft.name.trim() || 'Tool'
-    messages.push({
-      id: `realtime:model:${stream.invocationId}:${stream.attempt}:tool:${draft.index}`,
-      role: 'tool',
-      phase: 'call',
-      subjectEntryId: null,
-      toolCallId: draft.id,
-      toolName,
-      rendererKey: draft.name.trim(),
-      arguments: draft.argumentsJson,
-      contents: [],
-      createdAt: stream.createdAt,
-      status: stream.status === 'streaming' ? 'streaming' : 'done',
-    })
-  }
-}
-
-function isProjectableGenerationFailure(failure: HarnessGenerationFailureDTO): boolean {
-  return Boolean(
-    failure.generationId
-    && failure.turnStartEntryId
-    && failure.requestHeadEntryId
-    && Number.isSafeInteger(failure.attempt)
-    && failure.attempt > 0
-    && isCanonicalNonNegativeDecimal(failure.sequence)
-    && typeof failure.text === 'string'
-    && typeof failure.thinking === 'string'
-    && typeof failure.errorCode === 'string'
-    && typeof failure.errorMessage === 'string',
-  )
-}
-
-function isCanonicalNonNegativeDecimal(value: unknown): value is string {
-  return typeof value === 'string' && /^(?:0|[1-9]\d*)$/.test(value)
-}
-
-/**
- * 将 ToolInvocation 状态投影到持久的 tool-call 消息上：活动状态/审批，以及
- * 在持久的 tool result Entry 到达之前的瞬态 TOOL_PARTIAL overlay。
- */
-function projectInvocationOverlays(
-  messages: DialogueMessage[],
-  toolInvocations: ToolInvocationDTO[],
-  toolStreams: ReadonlyMap<string, RealtimeToolStream> | null,
-  threadId?: string,
-): void {
-  if (toolInvocations.length === 0) {
-    return
-  }
-  // 持久身份键（assistantEntryId, callIndex）：一次 invocation 只属于一个 assistant Entry 的
-  // 一个调用位置。复用的 toolCallId 出现在不同的 assistant Entry 上时，绝不能接收该
-  // invocation 的 overlay，因此不存在「第一个候选」回退。
-  const byDurableIdentity = new Map<string, ToolInvocationDTO>()
-  for (const invocation of toolInvocations) {
-    const key = `${invocation.assistantEntryId}:${invocation.callIndex}`
-    if (!byDurableIdentity.has(key)) {
-      byDurableIdentity.set(key, invocation)
-    }
-  }
-  for (let index = 0; index < messages.length; index += 1) {
-    const message = messages[index]
-    if (message == null || message.role !== 'tool' || message.phase !== 'call') {
-      continue
-    }
-    const invocation = byDurableIdentity.get(
-      `${message.subjectEntryId ?? ''}:${toolCallOrdinal(message.id)}`,
-    )
-    if (
-      invocation == null
-      || message.subjectEntryId !== invocation.assistantEntryId
-      || invocation.toolCallId !== message.toolCallId
-      || invocation.rendererKey !== message.rendererKey
-    ) {
-      continue
-    }
-    const terminalResult = terminalInvocationResult(invocation, message)
-    const stream = toolStreams?.get(invocation.id) ?? null
-    const overlay =
-      stream != null && stream.attempt === invocation.attempt ? stream : null
-    const approval = parseApproval(invocation.approval)
-    const failed =
-      terminalResult != null
-      && (
-        terminalResult.status === 'error'
-        || invocation.error != null
-        || isFailedInvocationStatus(invocation.status)
-      )
-    const failureText = invocation.error != null
-      ? parseToolErrorText(invocation.error)
-      : null
-    const effectiveEditReview =
-      approval?.editReview
-      ?? terminalResult?.editReview
-      ?? extractResultEditReview(invocation.result)
-      ?? undefined
-    const queuedPredecessor = invocation.queuedBehindToolCallId == null
-      ? null
-      : toolInvocations.find((candidate) =>
-        candidate.assistantEntryId === invocation.assistantEntryId
-        && candidate.toolCallId === invocation.queuedBehindToolCallId,
-      ) ?? null
-    const projected: ToolDialogueMessage = {
-      ...message,
-      callIdentity: toolCallIdentity(invocation.assistantEntryId, invocation.callIndex),
-      // 终态以 invocation 自己的 result/error 为准。call.status=done 只表示
-      // arguments 已完成，不能在 durable result 或 invocation 结果到达前当成成功。
-      status: terminalResult == null
-        ? (invocation.status === 'RUNNING' ? 'streaming' : 'done')
-        : (failed ? 'error' : 'done'),
-      invocationId: invocation.id,
-      invocationStatus: invocation.status,
-      queuedBehindToolCallId: invocation.queuedBehindToolCallId,
-      queuedBehindToolCallUnfinished:
-        queuedPredecessor != null && !isTerminalInvocationStatus(queuedPredecessor.status),
-      requiredEnvironmentId: invocation.requiredEnvironmentId,
-      waitingForEnvironment: invocation.waitingForEnvironment,
-      requiredEnvironmentName: invocation.requiredEnvironmentName,
-      environmentWaitFreshnessAt: invocation.environmentWaitFreshnessAt,
-      // environmentId 是环境路由身份，绝不能当作审批目标 Thread。
-      threadId: threadId || undefined,
-      // 终态结果已经可见时，partial 不能盖过正文和错误。
-      partialContents:
-        terminalResult == null && overlay?.text
-          ? [{ type: 'text', text: overlay.text }]
-          : undefined,
-      partialErrorText: terminalResult == null ? overlay?.errorText : undefined,
-      approval: approval?.required ? approval : undefined,
-      editReview: effectiveEditReview,
-      errorMessage: failed ? failureText ?? undefined : message.errorMessage,
-    }
-    messages[index] = projected
-    if (terminalResult != null && !hasDurableToolResult(messages, projected)) {
-      messages.splice(index + 1, 0, {
-        ...terminalResult,
-        id: `transient:tool-result:${invocation.id}:${invocation.attempt}`,
-        role: 'tool',
-        phase: 'result',
-        subjectEntryId: projected.subjectEntryId,
-        callIdentity: projected.callIdentity,
-        toolCallId: projected.toolCallId,
-        toolName: projected.toolName,
-        rendererKey: projected.rendererKey,
-        createdAt: invocation.updatedAt,
-        invocationId: invocation.id,
-        threadId: projected.threadId,
-        status: failed ? 'error' : terminalResult.status,
-        editReview: terminalResult.editReview,
-        errorMessage: failed
-          ? terminalResult.errorMessage ?? failureText ?? undefined
-          : undefined,
-      })
-      index += 1
-    }
-  }
-}
-
-/**
- * invocation 自身的终态结果。result 里 error=true 优先于 SUCCEEDED；
- * FAILED / UNKNOWN / CANCELLED 即使没有结果正文也是错误终态。
- * 没有 result/error 且状态仍活动时返回 null，调用保持 pending。
- */
-function terminalInvocationResult(
-  invocation: ToolInvocationDTO,
-  call: ToolDialogueMessage,
-): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'details' | 'errorMessage' | 'status' | 'editReview'> | null {
-  if (invocation.result != null) {
-    const projected = projectToolResultContent(asRecord(invocation.result), call.arguments)
-    return {
-      ...projected,
-      editReview: extractResultEditReview(invocation.result) ?? projected.editReview,
-    }
-  }
-  if (invocation.error != null || isFailedInvocationStatus(invocation.status)) {
-    return {
-      arguments: call.arguments,
-      contents: [],
-      // 错误原文来自 error；没有可解析原文时只有错误态，不补通用失败文案。
-      errorMessage: parseToolErrorText(invocation.error) ?? undefined,
-      status: 'error',
-    }
-  }
-  return null
-}
-
-function isFailedInvocationStatus(status: string): boolean {
-  return status === 'FAILED' || status === 'UNKNOWN' || status === 'CANCELLED'
-}
-
-function isTerminalInvocationStatus(status: string): boolean {
-  return status === 'SUCCEEDED' || isFailedInvocationStatus(status)
-}
-
-/** durable result 到达后是唯一展示源；transient overlay 不得再重复输出。 */
-function hasDurableToolResult(
-  messages: readonly DialogueMessage[],
-  call: ToolDialogueMessage,
-): boolean {
-  return messages.some((candidate) =>
-    candidate.role === 'tool'
-    && candidate.phase === 'result'
-    && !candidate.id.startsWith('transient:tool-result:')
-    && sameToolCall(call, candidate),
-  )
-}
-
-/** 将规范的 ToolApproval JSON 节点解析为可安全展示的投影。 */
-export function parseApproval(approval: unknown): ToolApprovalState | null {
-  const value = approval
-  if (!isRecord(value)) {
-    return null
-  }
-  const required = value.required === true
-  const decision = value.decision
-  return {
-    required,
-    // 持久 codec 保存的是领域枚举 ALLOWED/DENIED（输入 DTO 使用的是 ALLOW/DENY）。
-    decision: decision === 'ALLOWED' || decision === 'DENIED' ? decision : null,
-    decisionId: typeof value.decisionId === 'string' ? value.decisionId : null,
-    reason: typeof value.reason === 'string' && value.reason.trim() ? value.reason : null,
-    editReview: parseEditReview(value.editReview),
-  }
-}
-
-function toolCallOrdinal(messageId: string): number {
-  const last = messageId.split(':').pop() ?? ''
-  const parsed = Number(last)
-  return Number.isSafeInteger(parsed) ? parsed : -1
-}
-
-function extractQueuedMessage(
-  payloadValue: unknown,
-): { role: 'user'; text: string } | null {
-  const payload = asRecord(payloadValue)
-  const message = asRecord(payload.message)
-  const contents = getRecordList(message.contents)
-  const text = contents.map(contentText).filter(Boolean).join('\n')
-  if (!text) {
-    return null
-  }
-  return { role: 'user', text }
 }

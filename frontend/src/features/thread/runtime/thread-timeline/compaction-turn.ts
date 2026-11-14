@@ -138,7 +138,7 @@ export function closeCompactionTurn(
   turn.message.compaction = fact
 }
 
-export interface CompactionRetainedAnchor {
+interface CompactionRetainedAnchor {
   cutEntryId: string
   beforeEntryId: string
 }

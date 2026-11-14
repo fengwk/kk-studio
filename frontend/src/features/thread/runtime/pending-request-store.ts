@@ -43,7 +43,7 @@ export interface BoundPendingMessage {
   unknownOutcome: boolean
 }
 
-export type PendingAcceptanceSlot =
+type PendingAcceptanceSlot =
   | { status: 'empty' }
   | { status: 'occupied'; pending: PendingAcceptance }
   | { status: 'invalid' }
@@ -56,7 +56,7 @@ export function acceptanceStorageKey(owner: AgentRuntimeOwnerDTO, paneId: string
   return `${ACCEPTANCE_STORAGE_PREFIX}${ownerIdentity(owner)}:${paneId}`
 }
 
-export function boundPendingStorageKey(threadId: string): string {
+function boundPendingStorageKey(threadId: string): string {
   return `${BOUND_PENDING_STORAGE_PREFIX}${threadId}`
 }
 

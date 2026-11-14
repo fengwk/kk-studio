@@ -1,8 +1,6 @@
 import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
-import {
-  contentText,
-  parseAssistantUsage,
-} from '@/features/thread/runtime/thread-timeline/content-utils'
+import { contentText } from '@/features/thread/runtime/thread-timeline/content-utils'
+import { parseAssistantUsage } from '@/features/thread/runtime/thread-timeline/turn-usage-format'
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
 import { getString } from '@/shared/lib/value'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
@@ -13,13 +11,13 @@ import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
  * 继承量取分支第一次模型调用的上下文输入估计（未缓存输入 + 缓存读写），它正是分支
  * 从主对话继承的上下文规模；未知时保持 null，不用 0 伪造。
  */
-export interface CompactionBranchModelCall {
+interface CompactionBranchModelCall {
   entryId: string
   createdAt: number
   usage: TurnUsage
 }
 
-export interface CompactionBranchToolError {
+interface CompactionBranchToolError {
   id: string
   toolName: string
   text: string

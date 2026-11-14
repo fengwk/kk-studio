@@ -14,7 +14,7 @@ export function paneTargetViewKey(target: PaneTarget): string {
         : ''
 }
 
-export type PresentationAction = 'debug' | 'close-debug' | 'restore-focus' | 'parent'
+type PresentationAction = 'debug' | 'close-debug' | 'restore-focus' | 'parent'
 
 /** 临时查看层报告；与根的路由/草稿/busy 摘要分离，不缓存 controller 或节点。 */
 export interface ThreadPresentation {

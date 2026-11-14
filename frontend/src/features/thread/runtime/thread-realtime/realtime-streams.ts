@@ -57,6 +57,13 @@ export interface RealtimeStreamContext {
   clearModelRecovery: () => void
 }
 
+/** lossy realtime 事件的外部动作：snapshot 回读与 catchup 请求。 */
+export interface RealtimeEventDeps {
+  refetchSnapshot: () => Promise<void>
+  requestCatchup: (threadId: string, invocationId: string, attempt: number, force?: boolean) => void
+}
+
+
 /** 持久化 snapshot 到达后对账 model/tool overlay：终态投影取代 lossy 增量。 */
 export function reconcileSnapshotStreams(
   ctx: RealtimeStreamContext,
@@ -246,202 +253,226 @@ export function reconcileSnapshotStreams(
  */
 export function createRealtimeEventHandler(
   ctx: RealtimeStreamContext,
-  deps: {
-    refetchSnapshot: () => Promise<void>
-    requestCatchup: (threadId: string, invocationId: string, attempt: number, force?: boolean) => void
-  },
+  deps: RealtimeEventDeps,
 ): (data: unknown) => void {
-  const {
-    threadId, scheduler, modelStreamRef, toolStreamsRef, snapshotModelStreamRef, activeOutputRef,
-    toolInvocationsRef, generationFailuresRef, modelRecoveryRef, toolPartialSeenEventIdsRef,
-    clearModelRecovery,
-  } = ctx
-  const { refetchSnapshot, requestCatchup } = deps
-  // 协议 data 是 envelope 的 JSON 对象，直接校验和投影节点。
   return (data: unknown) => {
-    const checkpoint = parseRealtimeModelCheckpoint(data)
-    if (checkpoint != null && checkpoint.threadId === threadId) {
-      const durable = activeOutputRef.current
-      if (
-        !isActiveModelGeneration(
-          durable,
-          checkpoint.invocationId,
-          checkpoint.attempt,
-          generationFailuresRef.current,
-        )
-      ) {
-        return
-      }
-      const current =
-        modelStreamRef.current
-        ?? snapshotModelStreamRef.current
-        ?? snapshotModelStream(threadId, durable)
-      const visibleSequence = current?.sequence ?? 0
-      let recovery = modelRecoveryRef.current
-      if (
-        recovery != null
-        && (
-          recovery.invocationId !== checkpoint.invocationId
-          || recovery.attempt !== checkpoint.attempt
-        )
-      ) {
-        clearModelRecovery()
-        recovery = null
-      }
-      if (recovery == null && checkpoint.sequence <= visibleSequence) {
-        // 连续 delta overlay 已完整覆盖该 durable 水位（例如周期 checkpoint 仍
-        // 停在已显示的 sequence）：无需创建恢复 episode，也无需无意义回读。
-        return
-      }
-      const requiredSequence =
-        recovery != null
-          ? Math.max(0, recovery.firstGapSequence - 1)
-          : visibleSequence
-      if (checkpoint.sequence < requiredSequence) {
-        // 尚未覆盖缺口（例如仅重复了已见的 durable 水位）：等待下一周期。
-        return
-      }
-      if (recovery == null) {
-        recovery = createModelRecovery(
-          threadId,
-          checkpoint.invocationId,
-          checkpoint.attempt,
-          visibleSequence + 1,
-        )
-        modelRecoveryRef.current = recovery
-      }
-      recovery.requested = true
-      recovery.pendingCheckpointSequence = Math.max(
-        recovery.pendingCheckpointSequence ?? 0,
-        checkpoint.sequence,
-      )
-      // 真正的单飞锁是 refreshInFlight；pendingCheckpointSequence 只记录等待
-      // snapshot 覆盖的水位。promise settled 后立即释放锁，不依赖 props 变化；
-      // 同 sequence 的下一 checkpoint 事件也可再次触发（非自动重试）。
-      if (!recovery.refreshInFlight) {
-        recovery.refreshInFlight = true
-        // 仅在 checkpoint 覆盖缺口/推进水位时回读一次；快照仍落后就等下一周期，
-        // 不循环拉取旧 snapshot。旧 recovery/thread/attempt 的 settle 不得
-        // 清掉新 recovery 的在途状态。
-        void refetchSnapshot()
-          .catch(() => undefined)
-          .finally(() => {
-            if (modelRecoveryRef.current === recovery) {
-              recovery.refreshInFlight = false
-            }
-          })
-      }
+    if (handleModelCheckpoint(ctx, deps, data)) {
       return
     }
-    const delta = parseRealtimeModelDelta(data)
-    if (delta != null && delta.threadId === threadId) {
-      // 持久化终态 fence：终态 activeAssistantOutput（resultEntryId 已挂接或
-      // SUCCEEDED/FAILED/CANCELLED/BLOCKED）拒绝所有迟到的 MODEL_DELTA。冻结的
-      // typed overlay 在 Entry 到达前保持可见，但终态输出永远不会再追加。
-      const durable = activeOutputRef.current
-      if (
-        !isActiveModelGeneration(
-          durable,
-          delta.invocationId,
-          delta.attempt,
-          generationFailuresRef.current,
-        )
-      ) {
-        return
-      }
-      const current = modelStreamRef.current
-      const base =
-        current != null
-        && current.invocationId === delta.invocationId
-        && current.attempt === delta.attempt
-          ? current
-          : (snapshotModelStreamRef.current ?? snapshotModelStream(threadId, durable))
-      if (base == null) {
-        return
-      }
-      let recovery = modelRecoveryRef.current
-      if (
-        recovery != null
-        && (
-          recovery.invocationId !== delta.invocationId
-          || recovery.attempt !== delta.attempt
-        )
-      ) {
-        clearModelRecovery()
-        recovery = null
-      }
-      if (recovery == null && isRealtimeModelDeltaGap(base, delta)) {
-        recovery = createModelRecovery(
-          threadId,
-          delta.invocationId,
-          delta.attempt,
-          delta.sequence,
-        )
-        modelRecoveryRef.current = recovery
-      }
-      if (recovery != null) {
-        // gap 或 checkpoint 在途期间到达的 delta 一律按 sequence 入有界 suffix
-        // 缓冲；snapshot 基线到达后再顺序拼接，绝不把缺口后的片段直接显示。
-        bufferModelDelta(recovery, delta)
-        if (!recovery.requested) {
-          recovery.requested = true
-          requestCatchup(threadId, delta.invocationId, delta.attempt)
-        }
-        return
-      }
-      const next = reduceRealtimeModelStream(base, delta)
-      modelStreamRef.current = next
-      scheduler.notifyModelDirty()
+    if (handleModelDelta(ctx, deps, data)) {
       return
     }
-    const partial = parseRealtimeToolPartial(data)
-    if (partial == null || partial.threadId !== threadId) {
-      return
-    }
-    // Snapshot 优先：只有 invocation 在持久化 snapshot 中仍然活跃时
-    // （同 attempt、无终态 result/error）才聚合 partial。一旦终态
-    // result/error 成为权威（ToolResult Entry 与 invocation 删除原子
-    // 提交：Entry 落地即 invocation 消失），迟到的或重复的 lossy realtime partial
-    // 绝不能追加到完整的终态投影上。
-    const invocation = toolInvocationsRef.current.find(
-      (item) => item.id === partial.invocationId,
+    handleToolPartial(ctx, data)
+  }
+}
+
+/** MODEL_CHECKPOINT：推进恢复水位并按需单飞回读 snapshot。命中该事件类型时返回 true。 */
+function handleModelCheckpoint(
+  ctx: RealtimeStreamContext,
+  deps: RealtimeEventDeps,
+  data: unknown,
+): boolean {
+  const { threadId, modelStreamRef, snapshotModelStreamRef, activeOutputRef,
+    generationFailuresRef, modelRecoveryRef, clearModelRecovery } = ctx
+  const checkpoint = parseRealtimeModelCheckpoint(data)
+  if (checkpoint == null || checkpoint.threadId !== threadId) {
+    return false
+  }
+  const durable = activeOutputRef.current
+  if (
+    !isActiveModelGeneration(
+      durable,
+      checkpoint.invocationId,
+      checkpoint.attempt,
+      generationFailuresRef.current,
     )
-    if (
-      invocation == null
-      || invocation.attempt !== partial.attempt
-      || invocation.result != null
-      || invocation.error != null
-    ) {
+  ) {
+    return true
+  }
+  const current =
+    modelStreamRef.current
+    ?? snapshotModelStreamRef.current
+    ?? snapshotModelStream(threadId, durable)
+  const visibleSequence = current?.sequence ?? 0
+  let recovery = modelRecoveryRef.current
+  if (
+    recovery != null
+    && (
+      recovery.invocationId !== checkpoint.invocationId
+      || recovery.attempt !== checkpoint.attempt
+    )
+  ) {
+    clearModelRecovery()
+    recovery = null
+  }
+  if (recovery == null && checkpoint.sequence <= visibleSequence) {
+    // 连续 delta overlay 已完整覆盖该 durable 水位（例如周期 checkpoint 仍
+    // 停在已显示的 sequence）：无需创建恢复 episode，也无需无意义回读。
+    return true
+  }
+  const requiredSequence =
+    recovery != null
+      ? Math.max(0, recovery.firstGapSequence - 1)
+      : visibleSequence
+  if (checkpoint.sequence < requiredSequence) {
+    // 尚未覆盖缺口（例如仅重复了已见的 durable 水位）：等待下一周期。
+    return true
+  }
+  if (recovery == null) {
+    recovery = createModelRecovery(
+      threadId,
+      checkpoint.invocationId,
+      checkpoint.attempt,
+      visibleSequence + 1,
+    )
+    modelRecoveryRef.current = recovery
+  }
+  recovery.requested = true
+  recovery.pendingCheckpointSequence = Math.max(
+    recovery.pendingCheckpointSequence ?? 0,
+    checkpoint.sequence,
+  )
+  // 真正的单飞锁是 refreshInFlight；pendingCheckpointSequence 只记录等待
+  // snapshot 覆盖的水位。promise settled 后立即释放锁，不依赖 props 变化；
+  // 同 sequence 的下一 checkpoint 事件也可再次触发（非自动重试）。
+  if (!recovery.refreshInFlight) {
+    recovery.refreshInFlight = true
+    // 仅在 checkpoint 覆盖缺口/推进水位时回读一次；快照仍落后就等下一周期，
+    // 不循环拉取旧 snapshot。旧 recovery/thread/attempt 的 settle 不得
+    // 清掉新 recovery 的在途状态。
+    void deps.refetchSnapshot()
+      .catch(() => undefined)
+      .finally(() => {
+        if (modelRecoveryRef.current === recovery) {
+          recovery.refreshInFlight = false
+        }
+      })
+  }
+  return true
+}
+
+/** MODEL_DELTA：缺口期间入有界缓冲并请求 catchup，否则直接推进 overlay。 */
+function handleModelDelta(
+  ctx: RealtimeStreamContext,
+  deps: RealtimeEventDeps,
+  data: unknown,
+): boolean {
+  const { threadId, scheduler, modelStreamRef, snapshotModelStreamRef, activeOutputRef,
+    generationFailuresRef, modelRecoveryRef, clearModelRecovery } = ctx
+  const delta = parseRealtimeModelDelta(data)
+  if (delta == null || delta.threadId !== threadId) {
+    return false
+  }
+  // 持久化终态 fence：终态 activeAssistantOutput（resultEntryId 已挂接或
+  // SUCCEEDED/FAILED/CANCELLED/BLOCKED）拒绝所有迟到的 MODEL_DELTA。冻结的
+  // typed overlay 在 Entry 到达前保持可见，但终态输出永远不会再追加。
+  const durable = activeOutputRef.current
+  if (
+    !isActiveModelGeneration(
+      durable,
+      delta.invocationId,
+      delta.attempt,
+      generationFailuresRef.current,
+    )
+  ) {
+    return true
+  }
+  const current = modelStreamRef.current
+  const base =
+    current != null
+    && current.invocationId === delta.invocationId
+    && current.attempt === delta.attempt
+      ? current
+      : (snapshotModelStreamRef.current ?? snapshotModelStream(threadId, durable))
+  if (base == null) {
+    return true
+  }
+  let recovery = modelRecoveryRef.current
+  if (
+    recovery != null
+    && (
+      recovery.invocationId !== delta.invocationId
+      || recovery.attempt !== delta.attempt
+    )
+  ) {
+    clearModelRecovery()
+    recovery = null
+  }
+  if (recovery == null && isRealtimeModelDeltaGap(base, delta)) {
+    recovery = createModelRecovery(
+      threadId,
+      delta.invocationId,
+      delta.attempt,
+      delta.sequence,
+    )
+    modelRecoveryRef.current = recovery
+  }
+  if (recovery != null) {
+    // gap 或 checkpoint 在途期间到达的 delta 一律按 sequence 入有界 suffix
+    // 缓冲；snapshot 基线到达后再顺序拼接，绝不把缺口后的片段直接显示。
+    bufferModelDelta(recovery, delta)
+    if (!recovery.requested) {
+      recovery.requested = true
+      deps.requestCatchup(threadId, delta.invocationId, delta.attempt)
+    }
+    return true
+  }
+  const next = reduceRealtimeModelStream(base, delta)
+  modelStreamRef.current = next
+  scheduler.notifyModelDirty()
+  return true
+}
+
+/** TOOL_PARTIAL：snapshot 仍活跃的 invocation 才聚合，普通 partial 按 eventId 去重。 */
+function handleToolPartial(ctx: RealtimeStreamContext, data: unknown): void {
+  const { threadId, scheduler, toolStreamsRef, toolInvocationsRef, toolPartialSeenEventIdsRef } = ctx
+  const partial = parseRealtimeToolPartial(data)
+  if (partial == null || partial.threadId !== threadId) {
+    return
+  }
+  // Snapshot 优先：只有 invocation 在持久化 snapshot 中仍然活跃时
+  // （同 attempt、无终态 result/error）才聚合 partial。一旦终态
+  // result/error 成为权威（ToolResult Entry 与 invocation 删除原子
+  // 提交：Entry 落地即 invocation 消失），迟到的或重复的 lossy realtime partial
+  // 绝不能追加到完整的终态投影上。
+  const invocation = toolInvocationsRef.current.find(
+    (item) => item.id === partial.invocationId,
+  )
+  if (
+    invocation == null
+    || invocation.attempt !== partial.attempt
+    || invocation.result != null
+    || invocation.error != null
+  ) {
+    return
+  }
+  const isProcessOutput = isProcessOutputPartial(partial.payload)
+  if (!isProcessOutput) {
+    // 事件 identity 去重 fence：只有普通非 process.output 的 partial 以生产端 eventId
+    // 去重；process.output 依赖 offset 严格去重，不进入这里。
+    const seenKey = `${threadId}:${partial.invocationId}:${partial.attempt}`
+    let seenEventIds = toolPartialSeenEventIdsRef.current.get(seenKey)
+    if (seenEventIds == null) {
+      seenEventIds = new Set()
+      toolPartialSeenEventIdsRef.current.set(seenKey, seenEventIds)
+    }
+    if (seenEventIds.has(partial.eventId)) {
       return
     }
-    const isProcessOutput = isProcessOutputPartial(partial.payload)
-    if (!isProcessOutput) {
-      // 事件 identity 去重 fence：只有普通非 process.output 的 partial 以生产端 eventId
-      // 去重；process.output 依赖 offset 严格去重，不进入这里。
-      const seenKey = `${threadId}:${partial.invocationId}:${partial.attempt}`
-      let seenEventIds = toolPartialSeenEventIdsRef.current.get(seenKey)
-      if (seenEventIds == null) {
-        seenEventIds = new Set()
-        toolPartialSeenEventIdsRef.current.set(seenKey, seenEventIds)
+    if (seenEventIds.size >= TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT) {
+      const oldest = seenEventIds.values().next().value
+      if (oldest !== undefined) {
+        seenEventIds.delete(oldest)
       }
-      if (seenEventIds.has(partial.eventId)) {
-        return
-      }
-      if (seenEventIds.size >= TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT) {
-        const oldest = seenEventIds.values().next().value
-        if (oldest !== undefined) {
-          seenEventIds.delete(oldest)
-        }
-      }
-      seenEventIds.add(partial.eventId)
     }
-    const streams = toolStreamsRef.current
-    const current = streams.get(partial.invocationId) ?? null
-    const next = reduceRealtimeToolStream(current, partial)
-    if (next !== current) {
-      streams.set(partial.invocationId, next)
-      toolStreamsRef.current = streams
-      scheduler.notifyToolDirty()
-    }
+    seenEventIds.add(partial.eventId)
+  }
+  const streams = toolStreamsRef.current
+  const current = streams.get(partial.invocationId) ?? null
+  const next = reduceRealtimeToolStream(current, partial)
+  if (next !== current) {
+    streams.set(partial.invocationId, next)
+    toolStreamsRef.current = streams
+    scheduler.notifyToolDirty()
   }
 }

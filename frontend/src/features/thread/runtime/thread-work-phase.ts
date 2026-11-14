@@ -5,7 +5,7 @@ import type {
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
-export type ThreadWorkPhase =
+type ThreadWorkPhase =
   | { kind: 'model-running' }
   | { kind: 'tool-running' }
   | { kind: 'materializing-result' }
@@ -17,7 +17,7 @@ export type ThreadWorkPhase =
   }
   | { kind: 'none' }
 
-export interface ThreadWorkSnapshot {
+interface ThreadWorkSnapshot {
   thread: Pick<HarnessThreadDTO, 'status'> | null | undefined
   activeAssistantOutput: Pick<HarnessActiveAssistantOutputDTO, 'status' | 'resultEntryId'> | null
   entries: Pick<HarnessSessionEntryDTO, 'entryId'>[]

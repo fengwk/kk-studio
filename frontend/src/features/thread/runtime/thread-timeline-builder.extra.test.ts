@@ -2,10 +2,8 @@ import { describe, expect, it } from 'vitest'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import { setLocale } from '@/shared/i18n'
-import {
-  buildThreadTimeline,
-  parseApproval,
-} from '@/features/thread/runtime/thread-timeline-builder'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline-builder'
+import { parseApproval } from '@/features/thread/runtime/thread-timeline/approval-parsing'
 import { aggregateEntryUsage } from '@/features/thread/runtime/thread-timeline/turn-usage'
 import type {
   RealtimeToolStream,

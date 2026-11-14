@@ -1,12 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query'
-import { AlertCircle, Check, RotateCw, X } from 'lucide-react'
+import { Check, RotateCw } from 'lucide-react'
 import { useMemo } from 'react'
-import { isConflictError } from '@/shared/api/client'
-import { interactionService } from '@/shared/api/interaction-service'
 import { useI18n } from '@/shared/i18n'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { createUuid } from '@/shared/lib/uuid'
-import { Code } from '@/shared/ui/data/Mono'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import {
@@ -18,6 +14,16 @@ import {
   parseCompletedResult,
   parseQuestionnaire,
 } from './questionnaire-parser'
+import {
+  applyCustomText,
+  submitQuestionnaireAnswer,
+  toggleSingleOrMultiOption,
+} from './questionnaire-submission'
+import {
+  QuestionnaireCompletedView,
+  QuestionnaireErrorBanner,
+  QuestionnaireInvalidView,
+} from './questionnaire-views'
 import './interaction-cards.css'
 import type { HarnessToolInputResultDTO } from '@/shared/api/generated/contracts'
 
@@ -49,176 +55,76 @@ export function QuestionnaireCard({
     [result],
   )
 
-  // 1. 如果已物化终态结果，展示完成状态视图
   if (completed) {
-    if (completed.declined) {
-      return (
-        <div className="interaction-questionnaire-card is-completed is-declined">
-          <div className="interaction-questionnaire-badge declined">
-            <X aria-hidden="true" size={14} />
-            <span>{t('ai.interaction.declined')}</span>
-          </div>
-        </div>
-      )
-    }
-
-    return (
-      <div className="interaction-questionnaire-card is-completed">
-        <div className="interaction-questionnaire-header">
-          <span className="interaction-questionnaire-badge completed">
-            <Check aria-hidden="true" size={14} />
-            <span>{t('shared.completed')}</span>
-          </span>
-        </div>
-        <div className="interaction-questions-list">
-          {questionnaire?.questions.map((q, idx) => {
-            const ans = completed.answers?.[idx] || []
-            return (
-              <div key={idx} className="interaction-question-item">
-                <div className="interaction-question-title">
-                  <span className="interaction-question-idx">{idx + 1}.</span>
-                  <span>{q.question}</span>
-                </div>
-                <div className="interaction-completed-answers">
-                  {ans.map((a, aIdx) => (
-                    <span key={aIdx} className="interaction-answer-tag">
-                      {a}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    )
+    return <QuestionnaireCompletedView completed={completed} questionnaire={questionnaire} t={t} />
   }
-
-  // 2. 问卷无法解析时的回退展示
   if (!questionnaire) {
-    return (
-      <div className="interaction-questionnaire-card is-invalid">
-        <span className="interaction-error-text">
-          {t('ai.common.operationFailed')}
-        </span>
-        <Code className="interaction-raw-pre">{argumentsJson}</Code>
-      </div>
-    )
+    return <QuestionnaireInvalidView argumentsJson={argumentsJson} t={t} />
   }
 
-  // 3. 活动交互态（正在等待输入）
   const validAnswers = normalizeAnswers(questionnaire, draft.questionDrafts)
   const canSubmit = validAnswers != null && !draft.isSubmitting && !draft.isNonRecoverable
+  const locked = draft.isSubmitting || draft.isNonRecoverable
 
-  const handleSelectOption = (qIdx: number, label: string, multiple: boolean) => {
-    if (draft.isSubmitting || draft.isNonRecoverable) return
-    interactionDraftStore.updateQuestionDraft(interactionId, qIdx, (prev) => {
-      if (!multiple) {
-        // 单选：恰好选择一个选项，清空自定义输入
-        return {
-          selectedLabels: prev.selectedLabels[0] === label ? [] : [label],
-          customText: '',
-        }
-      }
-      // 多选：切换选项选中态
-      const exists = prev.selectedLabels.includes(label)
-      const nextLabels = exists
-        ? prev.selectedLabels.filter((item) => item !== label)
-        : [...prev.selectedLabels, label]
-      return {
-        ...prev,
-        selectedLabels: nextLabels,
-      }
-    })
-  }
-
-  const handleCustomTextChange = (qIdx: number, text: string, multiple: boolean) => {
-    if (draft.isSubmitting || draft.isNonRecoverable) return
-    interactionDraftStore.updateQuestionDraft(interactionId, qIdx, (prev) => {
-      if (!multiple) {
-        // 单选：输入自定义文本时，清空预置选项选择
-        return {
-          selectedLabels: [],
-          customText: text,
-        }
-      }
-      return {
-        ...prev,
-        customText: text,
-      }
-    })
-  }
-
-  const doSubmit = async (
+  const submit = (
     submissionId: string,
     answers?: string[][],
     declined?: boolean,
   ) => {
-    interactionDraftStore.setSubmitting(interactionId, true)
-    try {
-      const res = await interactionService.submitToolInput(
-        threadId,
-        interactionId,
-        declined
-          ? { type: 'DECLINE', submissionId }
-          : { type: 'ANSWER', submissionId, answers: answers ?? [] },
-      )
-      // 提交成功，清理草稿并刷新 queries
-      interactionDraftStore.clearDraft(interactionId)
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.threads.snapshot(threadId),
-        }),
-      ])
-      onSuccess?.(res)
-    } catch (err: unknown) {
-      if (isConflictError(err)) {
-        // 409 冲突：保留草稿作查看，禁止过期提交
-        interactionDraftStore.setSubmissionError(
-          interactionId,
-          t('ai.interaction.nonRecoverable'),
-          true,
-        )
-      } else {
-        // 普通网络/服务错误：允许使用同一 submissionId 精确重试
-        const msg = err instanceof Error ? err.message : t('ai.common.operationFailed')
-        interactionDraftStore.setSubmissionError(interactionId, msg, false)
-      }
+    void submitQuestionnaireAnswer({
+      interactionId,
+      threadId,
+      submissionId,
+      answers,
+      declined,
+      queryClient,
+      conflictErrorText: t('ai.interaction.nonRecoverable'),
+      fallbackErrorText: t('ai.common.operationFailed'),
+      onSuccess,
+    })
+  }
+
+  const handleSelectOption = (qIdx: number, label: string, multiple: boolean) => {
+    if (locked) {
+      return
     }
+    interactionDraftStore.updateQuestionDraft(interactionId, qIdx, (prev) =>
+      toggleSingleOrMultiOption(prev, label, multiple),
+    )
+  }
+
+  const handleCustomTextChange = (qIdx: number, text: string, multiple: boolean) => {
+    if (locked) {
+      return
+    }
+    interactionDraftStore.updateQuestionDraft(interactionId, qIdx, (prev) =>
+      applyCustomText(prev, text, multiple),
+    )
   }
 
   const handleSubmit = () => {
-    if (!validAnswers) return
+    if (!validAnswers) {
+      return
+    }
     const submissionId = createUuid()
-    interactionDraftStore.freezeSubmission(
-      interactionId,
-      submissionId,
-      validAnswers,
-      false,
-    )
-    void doSubmit(submissionId, validAnswers, false)
+    interactionDraftStore.freezeSubmission(interactionId, submissionId, validAnswers, false)
+    submit(submissionId, validAnswers, false)
   }
 
   const handleRetry = () => {
-    if (draft.isNonRecoverable || !draft.frozenSubmissionId) return
-    void doSubmit(
-      draft.frozenSubmissionId,
-      draft.frozenAnswers,
-      draft.frozenDeclined,
-    )
+    if (draft.isNonRecoverable || !draft.frozenSubmissionId) {
+      return
+    }
+    submit(draft.frozenSubmissionId, draft.frozenAnswers, draft.frozenDeclined)
   }
 
   const handleDecline = () => {
-    if (draft.isSubmitting || draft.isNonRecoverable) return
+    if (locked) {
+      return
+    }
     const submissionId = createUuid()
-    interactionDraftStore.freezeSubmission(
-      interactionId,
-      submissionId,
-      undefined,
-      true,
-    )
-    void doSubmit(submissionId, undefined, true)
+    interactionDraftStore.freezeSubmission(interactionId, submissionId, undefined, true)
+    submit(submissionId, undefined, true)
   }
 
   return (
@@ -252,7 +158,7 @@ export function QuestionnaireCard({
                         key={optIdx}
                         type="button"
                         className={`interaction-option-btn ${isSelected ? 'is-selected' : ''}`}
-                        disabled={draft.isSubmitting || draft.isNonRecoverable}
+                        disabled={locked}
                         onClick={() => handleSelectOption(qIdx, opt.label, isMultiple)}
                       >
                         <span className="interaction-option-label-row">
@@ -284,7 +190,7 @@ export function QuestionnaireCard({
                   className="interaction-custom-input"
                   placeholder={t('ai.interaction.customInputPlaceholder')}
                   value={qDraft.customText}
-                  disabled={draft.isSubmitting || draft.isNonRecoverable}
+                  disabled={locked}
                   onChange={(e) =>
                     handleCustomTextChange(qIdx, e.target.value, isMultiple)
                   }
@@ -296,19 +202,14 @@ export function QuestionnaireCard({
       </div>
 
       {draft.error ? (
-        <div
-          className={`interaction-error-banner ${draft.isNonRecoverable ? 'is-non-recoverable' : ''}`}
-        >
-          <AlertCircle size={16} aria-hidden="true" />
-          <span>{draft.error}</span>
-        </div>
+        <QuestionnaireErrorBanner error={draft.error} nonRecoverable={Boolean(draft.isNonRecoverable)} />
       ) : null}
 
       <div className="interaction-actions-bar">
         <Button
           variant="ghost"
           className="interaction-decline-btn"
-          disabled={draft.isSubmitting || draft.isNonRecoverable}
+          disabled={locked}
           onClick={handleDecline}
         >
           {t('ai.interaction.decline')}

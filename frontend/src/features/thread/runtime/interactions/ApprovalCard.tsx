@@ -1,16 +1,12 @@
-import { useQueryClient } from '@tanstack/react-query'
 import { AlertCircle, Check, ShieldAlert, X } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { isConflictError } from '@/shared/api/client'
-import { harnessService } from '@/shared/api/harness-service'
 import { useI18n } from '@/shared/i18n'
-import { queryKeys } from '@/shared/lib/query-keys'
-import { createUuid } from '@/shared/lib/uuid'
 import { Button } from '@/shared/ui/controls/Button'
 import { extractApprovalEditReview } from '@/features/thread/runtime/mutation-review'
 import { asRecord } from '@/features/thread/runtime/payload-json'
 import { previewForToolCall } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
 import { ToolCallPreview } from '@/features/thread/runtime/thread-panel/messages/ToolCallPreview'
+import { useApprovalDecision } from '@/features/thread/runtime/interactions/useApprovalDecision'
 import './interaction-cards.css'
 
 export interface ApprovalCardProps {
@@ -33,15 +29,12 @@ export function ApprovalCard({
   onSuccess,
 }: ApprovalCardProps) {
   const { t } = useI18n()
-  const queryClient = useQueryClient()
-
-  const [busy, setBusy] = useState(false)
   const [denyReason, setDenyReason] = useState('')
-  const [error, setError] = useState<string | null>(null)
-  const [isNonRecoverable, setIsNonRecoverable] = useState(false)
-
-  // 幂等 decisionId
-  const [decisionIdMap] = useState(() => new Map<string, string>())
+  const { busy, error, isNonRecoverable, decide } = useApprovalDecision({
+    threadId,
+    invocationId,
+    onSuccess,
+  })
 
   const approvalData = useMemo(() => asRecord(approval), [approval])
 
@@ -64,43 +57,13 @@ export function ApprovalCard({
     })
   }, [isMutation, toolName, argumentsJson, editReview])
 
-  const handleDecision = async (decision: 'ALLOW' | 'DENY') => {
-    if (busy || isNonRecoverable || decided) return
-    if (decision === 'ALLOW' && isMutationMissingReview) return
-    setBusy(true)
-    setError(null)
-
-    const key = `${threadId}:${invocationId}:${decision}`
-    let decisionId = decisionIdMap.get(key)
-    if (!decisionId) {
-      decisionId = createUuid()
-      decisionIdMap.set(key, decisionId)
-    }
-
-    try {
-      await harnessService.decideApproval(threadId, invocationId, {
-        decision,
-        decisionId,
-        reason: decision === 'DENY' ? denyReason.trim() || null : null,
-      })
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.threads.snapshot(threadId),
-        }),
-      ])
-      onSuccess?.()
-    } catch (err: unknown) {
-      if (isConflictError(err)) {
-        setIsNonRecoverable(true)
-        setError(t('ai.interaction.nonRecoverable'))
-      } else {
-        const msg = err instanceof Error ? err.message : t('ai.common.operationFailed')
-        setError(msg)
-      }
-    } finally {
-      setBusy(false)
-    }
+  const handleDecision = (decision: 'ALLOW' | 'DENY') => {
+    void decide({
+      decision,
+      denyReason,
+      decided,
+      mutationReviewMissing: isMutationMissingReview,
+    })
   }
 
   if (decided) {
@@ -183,7 +146,7 @@ export function ApprovalCard({
           onKeyDown={(event) => {
             if (event.key === 'Enter') {
               event.preventDefault()
-              void handleDecision('DENY')
+              handleDecision('DENY')
             }
           }}
         />

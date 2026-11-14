@@ -31,7 +31,7 @@ export interface ThreadPaneLabels {
 }
 
 /** 只读 Thread 视图的可选交互：仅根面板的 Debug 预检需要。 */
-export interface ThreadPaneActivityInput {
+interface ThreadPaneActivityInput {
   actionError?: string | null
   onDismissActionError?: () => void
   /** EXIT_PENDING + RUNNABLE 时把“停止并处理”接到现有 Stop 流程；只读视图可不提供。 */
@@ -50,7 +50,7 @@ export interface ThreadPaneActivityInput {
  * 根与可查看的子代理 Thread 上都可用；其余写入口仍只属于根控制区。
  */
 /** 主视图与滚动恢复由调用方持有：根面板复用控制面的视图实例，只读视图自持。 */
-export interface ThreadPaneViews {
+interface ThreadPaneViews {
   mainView?: ThreadPanelMainView
   initialConversationScrollTop: number | null
 }

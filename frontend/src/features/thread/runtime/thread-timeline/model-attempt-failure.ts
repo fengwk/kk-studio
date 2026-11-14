@@ -1,6 +1,6 @@
 import type { ModelAttemptFailureDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
 
-export interface ModelAttemptFailureMessageInput {
+interface ModelAttemptFailureMessageInput {
   id: string
   subjectEntryId: string | null
   createdAt: ModelAttemptFailureDialogueMessage['createdAt']
