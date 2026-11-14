@@ -1,10 +1,10 @@
+import { formatCompactTokens } from '@/features/thread/runtime/thread-timeline/content-utils'
 import {
   calculateCacheHitRate,
   calculateDecodeTokensPerSecond,
-  formatCompactTokens,
   formatTurnUsageText,
   formatUsageCost,
-} from '@/features/thread/runtime/thread-timeline/content-utils'
+} from '@/features/thread/runtime/thread-timeline/turn-usage-format'
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
 import { translate, type TranslationKey } from '@/shared/i18n'
 

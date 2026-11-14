@@ -1,5 +1,5 @@
 import type { MetaDialogueMessage, TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
-import { formatTurnUsageText } from '@/features/thread/runtime/thread-timeline/content-utils'
+import { formatTurnUsageText } from '@/features/thread/runtime/thread-timeline/turn-usage-format'
 
 /**
  * 生成一次已关闭回合的 turn footer meta 消息。

@@ -35,7 +35,7 @@ import {
 import {
   accumulateTurnUsage,
   parseAssistantUsage,
-} from '@/features/thread/runtime/thread-timeline/content-utils'
+} from '@/features/thread/runtime/thread-timeline/turn-usage-format'
 import { translate } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 

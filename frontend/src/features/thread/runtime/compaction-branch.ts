@@ -1,8 +1,6 @@
 import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
-import {
-  contentText,
-  parseAssistantUsage,
-} from '@/features/thread/runtime/thread-timeline/content-utils'
+import { contentText } from '@/features/thread/runtime/thread-timeline/content-utils'
+import { parseAssistantUsage } from '@/features/thread/runtime/thread-timeline/turn-usage-format'
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
 import { getString } from '@/shared/lib/value'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'

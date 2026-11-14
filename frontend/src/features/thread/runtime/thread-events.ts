@@ -6,13 +6,13 @@ import type {
 import type {
   RealtimeToolStream,
 } from '@/features/thread/runtime/thread-realtime/tool-stream'
+import { contentText } from '@/features/thread/runtime/thread-timeline/content-utils'
 import {
   accumulateTurnUsage,
-  contentText,
   formatTurnUsageText,
   formatUsageCost,
   parseAssistantUsage,
-} from '@/features/thread/runtime/thread-timeline/content-utils'
+} from '@/features/thread/runtime/thread-timeline/turn-usage-format'
 import type {
   TurnUsage,
 } from '@/features/thread/runtime/thread-timeline-types'
