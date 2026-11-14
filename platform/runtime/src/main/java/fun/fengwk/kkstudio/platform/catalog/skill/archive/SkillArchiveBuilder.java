@@ -87,7 +87,7 @@ public final class SkillArchiveBuilder {
 
   public Result fromZip(InputStream input) throws IOException {
     byte[] bytes = readBounded(input, limits.compressed(), "ZIP");
-    checkZipDirectory(bytes);
+    ZipCentralDirectory.verify(bytes, limits.entries());
     Accumulator acc = new Accumulator();
     try (ZipFile zip =
         ZipFile.builder().setSeekableByteChannel(new SeekableInMemoryByteChannel(bytes)).get()) {
@@ -120,91 +120,6 @@ public final class SkillArchiveBuilder {
       }
     }
     return build(acc);
-  }
-
-  // ZipFile 会先物化中央目录再暴露条目；因此先自行计数，避免体积很小但空条目极多的归档在建目录时耗尽内存。
-  private void checkZipDirectory(byte[] bytes) throws IOException {
-    int end = -1;
-    for (int p = bytes.length - 22; p >= Math.max(0, bytes.length - 65557); p--) {
-      if (u32(bytes, p) == 0x06054b50L && p + 22L + u16(bytes, p + 20) == bytes.length) {
-        end = p;
-        break;
-      }
-    }
-    if (end < 0 || u16(bytes, end + 4) != 0 || u16(bytes, end + 6) != 0) {
-      throw new IOException("Invalid or multi-disk ZIP");
-    }
-    long declared = u16(bytes, end + 10);
-    long start = u32(bytes, end + 16);
-    long size = u32(bytes, end + 12);
-    long directoryEnd = end;
-    if ((end >= 20 && u32(bytes, end - 20) == 0x07064b50L)
-        || declared == 0xffff
-        || start == 0xffffffffL
-        || size == 0xffffffffL) {
-      int locator = end - 20;
-      if (locator < 0
-          || u32(bytes, locator) != 0x07064b50L
-          || u32(bytes, locator + 4) != 0
-          || u32(bytes, locator + 16) != 1) {
-        throw new IOException("Invalid ZIP64 locator");
-      }
-      long record = u64(bytes, locator + 8);
-      if (record < 0 || record > locator - 56L) {
-        throw new IOException("Invalid ZIP64 offset");
-      }
-      int z = (int) record;
-      long recordSize = u64(bytes, z + 4);
-      if (u32(bytes, z) != 0x06064b50L
-          || recordSize < 44
-          || recordSize != locator - record - 12
-          || u32(bytes, z + 16) != 0
-          || u32(bytes, z + 20) != 0
-          || u64(bytes, z + 24) != u64(bytes, z + 32)) {
-        throw new IOException("Invalid ZIP64 directory");
-      }
-      declared = u64(bytes, z + 32);
-      size = u64(bytes, z + 40);
-      start = u64(bytes, z + 48);
-      directoryEnd = record;
-    } else if (declared != u16(bytes, end + 8)) {
-      throw new IOException("Invalid ZIP directory count");
-    }
-    if (declared < 0
-        || declared > limits.entries()
-        || size < 0
-        || start < 0
-        || start > directoryEnd
-        || size != directoryEnd - start) {
-      throw new IOException("Invalid or oversized ZIP directory");
-    }
-    int p = (int) start;
-    int count = 0;
-    while (p < directoryEnd) {
-      if (directoryEnd - p < 46 || u32(bytes, p) != 0x02014b50L) {
-        throw new IOException("Invalid ZIP directory entry");
-      }
-      long next = p + 46L + u16(bytes, p + 28) + u16(bytes, p + 30) + u16(bytes, p + 32);
-      if (next > directoryEnd || ++count > limits.entries()) {
-        throw new IOException("ZIP directory limit exceeded");
-      }
-      p = (int) next;
-    }
-    if (count != declared) {
-      throw new IOException("Invalid ZIP directory count");
-    }
-  }
-
-  private static int u16(byte[] bytes, int offset) {
-    return (bytes[offset] & 255) | (bytes[offset + 1] & 255) << 8;
-  }
-
-  private static long u32(byte[] bytes, int offset) {
-    return (u16(bytes, offset) & 0xffffL) | (long) u16(bytes, offset + 2) << 16;
-  }
-
-  private static long u64(byte[] bytes, int offset) {
-    return u32(bytes, offset) | u32(bytes, offset + 4) << 32;
   }
 
   public Result fromTarGz(InputStream input) throws IOException {
