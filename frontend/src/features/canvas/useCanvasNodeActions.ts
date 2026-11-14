@@ -3,6 +3,12 @@ import { currentCanvasSnapshot, type CanvasScope } from '@/features/canvas/canva
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import { projectCanvasSnapshot, type ResourceNode } from '@/features/canvas/domain'
 import { configToFunctionArgs, createDefaultFunctionConfig } from '@/features/canvas/generation'
+import {
+  deleteGroupCommands,
+  deleteSelectionCommands,
+  groupBounds,
+  groupMemberTransforms,
+} from '@/features/canvas/node-commands'
 import type { AddMenuAction, CanvasLocalState } from '@/features/canvas/types'
 import type {
   CanvasCommandDTO,
@@ -101,21 +107,14 @@ export function useCanvasNodeActions({
       setToast('请先选择未分组的资源节点。')
       return
     }
-    const memberTransforms = members.map((node) => {
-      const draft = positionDrafts[node.id]
-      return draft ? { ...node.transform, ...draft } : node.transform
-    })
-    const minX = Math.min(...memberTransforms.map((transform) => transform.x)) - 32
-    const minY = Math.min(...memberTransforms.map((transform) => transform.y)) - 52
-    const maxX = Math.max(...memberTransforms.map((transform) => transform.x + transform.width)) + 32
-    const maxY = Math.max(...memberTransforms.map((transform) => transform.y + transform.height)) + 32
+    const memberTransforms = groupMemberTransforms(members, positionDrafts)
     const groupId = crypto.randomUUID()
     void executeCommands([
       {
         type: 'CREATE_GROUP',
         groupId,
         title: '分组',
-        transform: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+        transform: groupBounds(memberTransforms),
       },
       ...members.map((node) => ({
         type: 'SET_NODE_GROUP' as const,
@@ -150,41 +149,14 @@ export function useCanvasNodeActions({
 
   const deleteGroup = useCallback((groupId: string) => {
     const memberIds = (snapshot?.nodes ?? []).filter((n) => n.groupId === groupId).map((n) => n.id)
-    void executeCommands([
-      ...memberIds.map((nodeId) => ({
-        type: 'SET_NODE_GROUP' as const,
-        nodeId,
-        expectedGroupId: groupId,
-        groupId: null,
-      })),
-      { type: 'DELETE_GROUP', groupId, expectedMemberNodeIds: memberIds },
-    ]).catch(() => undefined)
+    void executeCommands(deleteGroupCommands(groupId, memberIds)).catch(() => undefined)
   }, [executeCommands, snapshot?.nodes])
 
   const deleteSelection = useCallback(() => {
     if (!snapshot) {
       return
     }
-    const commands: CanvasCommandDTO[] = []
-    for (const id of selectedIds) {
-      const node = snapshot.nodes.find((n) => n.id === id)
-      if (node) {
-        commands.push({
-          type: 'DELETE_NODE',
-          nodeId: node.id,
-          expectedResourceIds: node.resources.map((r) => r.id),
-          expectedFunction: node.function ? { name: node.function.name, args: node.function.args } : null,
-        })
-      }
-      const group = snapshot.groups.find((g) => g.id === id)
-      if (group) {
-        const members = snapshot.nodes.filter((n) => n.groupId === group.id).map((n) => n.id)
-        for (const memberId of members) {
-          commands.push({ type: 'SET_NODE_GROUP', nodeId: memberId, expectedGroupId: group.id, groupId: null })
-        }
-        commands.push({ type: 'DELETE_GROUP', groupId: group.id, expectedMemberNodeIds: members })
-      }
-    }
+    const commands = deleteSelectionCommands(snapshot, selectedIds)
     if (commands.length === 0) {
       return
     }
