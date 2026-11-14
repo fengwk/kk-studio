@@ -18,7 +18,10 @@
  * <p>Entry payload 的 durable 形态由 {@link
  * fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec} 按 {@link
  * fun.fengwk.kkstudio.harness.api.history.EntryType} 分派，其 settings / model / assistant metadata
- * 子树与严格 JSON 原语由包内 {@link fun.fengwk.kkstudio.harness.codec.HistoryValueCodecs} 提供；{@link
+ * 子树与严格 JSON 原语由包内 {@link fun.fengwk.kkstudio.harness.codec.HistoryValueCodecs} 提供，
+ * SYSTEM 与 TURN_START 的嵌套值形态分别由 {@link
+ * fun.fengwk.kkstudio.harness.codec.HistorySystemJsonCodec} 与 {@link
+ * fun.fengwk.kkstudio.harness.codec.HistoryTurnStartJsonCodec} 承载；{@link
  * fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper} 只把终态 ToolInvocation 与 history
  * normalization 事实纯映射为 Entry payload，不做持久化决策。
  *
