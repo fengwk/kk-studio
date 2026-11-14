@@ -1,5 +1,4 @@
 import { LoaderCircle } from 'lucide-react'
-import { useState } from 'react'
 import type { Resource } from '@/features/canvas/domain'
 import { useCanvasResourceUrl } from '@/features/canvas/useCanvasResourceUrl'
 import { usePreviewRecovery } from '@/features/canvas/nodes/resources/usePreviewRecovery'
@@ -7,7 +6,6 @@ import { useI18n } from '@/shared/i18n'
 
 export function CanvasVisualResource({ resource }: { resource: Resource }) {
   const { t } = useI18n()
-  const [originalRequested, setOriginalRequested] = useState(false)
   const dimensions = resourceDimensions(resource)
   const {
     targetRef: previewTargetRef,
@@ -22,18 +20,10 @@ export function CanvasVisualResource({ resource }: { resource: Resource }) {
     lazy: true,
   })
   const {
-    url: originalUrl,
-    loading: originalLoading,
-    error: originalError,
-    refresh: refreshOriginal,
-  } = useCanvasResourceUrl({
-    canvasId: resource.canvasId,
-    resourceId: resource.id,
-    kind: 'original',
-    enabled: originalRequested,
-  })
-  const {
     recoveryPhase,
+    originalUrl,
+    originalLoading,
+    originalError,
     originalUnavailable,
     setOriginalUnavailable,
     playRequested,
@@ -43,13 +33,9 @@ export function CanvasVisualResource({ resource }: { resource: Resource }) {
     handlePreviewError,
   } = usePreviewRecovery({
     resource,
-    originalRequested,
-    setOriginalRequested,
     previewUrl,
     previewError,
     refreshPreview,
-    originalUrl,
-    refreshOriginal,
   })
 
   if (resource.kind === 'IMAGE') {

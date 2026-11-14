@@ -3,6 +3,7 @@ import {
   useRef,
   useState,
 } from 'react'
+import { useCanvasResourceUrl } from '@/features/canvas/useCanvasResourceUrl'
 
 /**
  * preview 恢复状态机（同一失败周期内不无限重试）：
@@ -12,14 +13,9 @@ type PreviewRecoveryPhase = 'initial' | 'refreshing' | 'refreshed' | 'original'
 
 interface PreviewRecoveryInput {
   resource: { canvasId: string; id: string }
-  /** original 是否已被请求过；由调用方持有，因为它决定 original URL hook 的 enabled。 */
-  originalRequested: boolean
-  setOriginalRequested: (requested: boolean) => void
   previewUrl: string | null
   previewError: unknown
   refreshPreview: () => Promise<{ isError: boolean }>
-  originalUrl: string | null
-  refreshOriginal: () => Promise<unknown>
 }
 
 /**
@@ -28,18 +24,26 @@ interface PreviewRecoveryInput {
  */
 export function usePreviewRecovery({
   resource,
-  originalRequested,
-  setOriginalRequested,
   previewUrl,
   previewError,
   refreshPreview,
-  originalUrl,
-  refreshOriginal,
 }: PreviewRecoveryInput) {
   const [recoveryPhase, setRecoveryPhase] = useState<PreviewRecoveryPhase>('initial')
+  const [originalRequested, setOriginalRequested] = useState(false)
   const [playRequested, setPlayRequested] = useState(false)
   const [originalUnavailable, setOriginalUnavailable] = useState(false)
   const mediaRef = useRef<HTMLMediaElement | null>(null)
+  const {
+    url: originalUrl,
+    loading: originalLoading,
+    error: originalError,
+    refresh: refreshOriginal,
+  } = useCanvasResourceUrl({
+    canvasId: resource.canvasId,
+    resourceId: resource.id,
+    kind: 'original',
+    enabled: originalRequested,
+  })
 
   useEffect(() => {
     setRecoveryPhase('initial')
@@ -105,6 +109,8 @@ export function usePreviewRecovery({
     setOriginalUnavailable,
     mediaRef,
     originalUrl,
+    originalLoading,
+    originalError,
     requestOriginal,
     handlePreviewError,
   }
