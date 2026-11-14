@@ -13,12 +13,12 @@ import { useI18n } from '@/shared/i18n'
 import { MAX_PLUGIN_VALUES_UTF8_BYTES } from './plugin-config-json'
 import { parsePluginValuesSchema } from './plugin-schema'
 import { SchemaElementRenderer } from './SchemaElementRenderer'
+import { usePluginSecretDraft } from './usePluginSecretDraft'
 import { usePluginValuesEditor } from './usePluginValuesEditor'
 import './plugin-config.css'
 import type {
   PluginConfigurationUpdateRequestDTO,
   PluginDTO,
-  SecretUpdate,
   SecretUpdateOperation,
 } from '@/shared/api/generated/contracts'
 
@@ -37,17 +37,19 @@ export function PluginConfigModal({
   const isDeepLink = plugin.authKind?.type === 'DEEP_LINK'
   const version = plugin.configuration.version
 
-  const [secretOperations, setSecretOperations] = useState<
-    Record<string, SecretUpdateOperation>
-  >(() => {
-    const initial: Record<string, SecretUpdateOperation> = Object.create(null)
-    for (const key of Object.keys(plugin.configuration.secrets)) {
-      initial[key] = 'KEEP'
-    }
-    return initial
+  const {
+    secretOperations,
+    secretValues,
+    clearConfirmed,
+    clearSecretValues,
+    changeOperation,
+    changeSecretValue,
+    changeClearConfirmed,
+    buildSecretPatch,
+  } = usePluginSecretDraft({
+    configuredSecretNames: Object.keys(plugin.configuration.secrets),
+    isDeepLink,
   })
-  const [secretValues, setSecretValues] = useState<Record<string, string>>({})
-  const [clearConfirmed, setClearConfirmed] = useState<Record<string, boolean>>({})
 
   const {
     valuesJson,
@@ -85,8 +87,6 @@ export function PluginConfigModal({
     mountedRef.current = true
     return () => {
       mountedRef.current = false
-      // 卸载时彻底清空内存中的秘密值，不进入全局缓存
-      setSecretValues({})
     }
   }, [])
 
@@ -112,28 +112,16 @@ export function PluginConfigModal({
       return
     }
 
-    // 组装 secretPatch
-    const secretPatch: Record<string, SecretUpdate> = Object.create(null)
-    for (const [key, op] of Object.entries(secretOperations)) {
-      if (isDeepLink || op === 'KEEP') {
-        secretPatch[key] = { operation: 'KEEP' }
-      } else if (op === 'CLEAR') {
-        // 在提交 handler 中严格检查确认勾选，不仅依靠 disabled
-        if (!Object.hasOwn(clearConfirmed, key) || clearConfirmed[key] !== true) {
-          setSaveError(t('plugins.configDialog.mustConfirmClear', { key }))
-          return
-        }
-        secretPatch[key] = { operation: 'CLEAR' }
-      } else if (op === 'SET') {
-        // SET 严格保留用户原值，严禁静默 trim，无 padding
-        const val = Object.hasOwn(secretValues, key) ? secretValues[key] : undefined
-        if (val === undefined || val === '') {
-          setSaveError(t('plugins.configDialog.secretRequired', { key }))
-          return
-        }
-        secretPatch[key] = { operation: 'SET', value: val }
-      }
+    const secretPatchResult = buildSecretPatch()
+    if (!secretPatchResult.ok) {
+      setSaveError(
+        secretPatchResult.reason === 'mustConfirmClear'
+          ? t('plugins.configDialog.mustConfirmClear', { key: secretPatchResult.key })
+          : t('plugins.configDialog.secretRequired', { key: secretPatchResult.key }),
+      )
+      return
     }
+    const secretPatch = secretPatchResult.patch
 
     const payload: PluginConfigurationUpdateRequestDTO = {
       expectedVersion: version,
@@ -142,7 +130,7 @@ export function PluginConfigModal({
     }
 
     busyRef.current = true
-    setSecretValues({})
+    clearSecretValues()
     setPending(true)
     setSaveError(null)
     setConflictError(false)
@@ -153,7 +141,7 @@ export function PluginConfigModal({
         { path: { pluginId: plugin.pluginId }, body: payload },
       )
       if (!mountedRef.current) return
-      setSecretValues({})
+      clearSecretValues()
       onSuccess(updated)
     } catch (err) {
       if (!mountedRef.current) return
@@ -172,7 +160,7 @@ export function PluginConfigModal({
 
   function handleClose() {
     if (!pending && !busyRef.current) {
-      setSecretValues({})
+      clearSecretValues()
       onClose()
     }
   }
@@ -374,20 +362,7 @@ export function PluginConfigModal({
                                 },
                               ]}
                               onChange={(next) => {
-                                setSecretOperations((prev) => ({
-                                  ...prev,
-                                  [secretField]: next as SecretUpdateOperation,
-                                }))
-                                setSecretValues((prev) => {
-                                  const remaining = { ...prev }
-                                  delete remaining[secretField]
-                                  return remaining
-                                })
-                                setClearConfirmed((prev) => {
-                                  const remaining = { ...prev }
-                                  delete remaining[secretField]
-                                  return remaining
-                                })
+                                changeOperation(secretField, next as SecretUpdateOperation)
                                 setSaveError(null)
                               }}
                             />
@@ -410,11 +385,7 @@ export function PluginConfigModal({
                             value={Object.hasOwn(secretValues, secretField) ? secretValues[secretField] : ''}
                             onChange={(e) => {
                               // 保持原值，绝不 trim
-                              const nextVal = e.target.value
-                              setSecretValues((prev) => ({
-                                ...prev,
-                                [secretField]: nextVal,
-                              }))
+                              changeSecretValue(secretField, e.target.value)
                               setSaveError(null)
                             }}
                           />
@@ -431,10 +402,7 @@ export function PluginConfigModal({
                             checked={Object.hasOwn(clearConfirmed, secretField) && clearConfirmed[secretField] === true}
                             disabled={pending}
                             onChange={(checked) => {
-                              setClearConfirmed((prev) => ({
-                                ...prev,
-                                [secretField]: checked,
-                              }))
+                              changeClearConfirmed(secretField, checked)
                               setSaveError(null)
                             }}
                             label={t('plugins.secrets.clearConfirmPrompt')}
