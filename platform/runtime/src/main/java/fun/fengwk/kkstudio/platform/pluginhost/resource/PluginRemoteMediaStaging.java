@@ -1,0 +1,477 @@
+package fun.fengwk.kkstudio.platform.pluginhost.resource;
+
+import lombok.extern.slf4j.Slf4j;
+
+import fun.fengwk.kkstudio.common.hash.Sha256;
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.common.resource.ResourceRef;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
+import fun.fengwk.kkstudio.platform.plugin.resource.PluginMediaFamily;
+import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceUnavailableException;
+import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
+import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadPendingDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReadyDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadReserveRequestDTO;
+import fun.fengwk.kkstudio.platform.storage.dto.StorageUrlMethod;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.time.Duration;
+import java.util.HexFormat;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
+import java.util.UUID;
+
+/**
+ * 远端媒体真实暂存：先把远端地址流式落盘，再走 reserve → 预签名 PUT → complete。
+ *
+ * <p>都不信任调用方给出的字符串或响应头：远端地址必须是 HTTPS 且没有 userinfo/fragment；地址准入由下载传输在真正解析 socket
+ * 目标时执行；宿主授权检查（{@code beforeRequest}）在每一次真正出网（下载 GET 与预签名上传 PUT）的紧前执行，一旦抛出就不发送该请求；
+ * 下载禁止自动重定向与自动重试、受整体期限与字节上限约束，内容边流式写临时文件边算 SHA-256（不把媒体读进内存），媒体类型由 magic 特征判定并复核调用方声明的族；只有真正 READY
+ * 才返回引用。
+ *
+ * <p>失败语义：任何一步失败都收敛为 {@link PluginResourceUnavailableException}，并且在已 reserve 的情况下 best-effort 删除上传，
+ * 避免留下孤儿对象；临时文件由调用方在 finally 中删除。{@link PluginCredentialUnavailableException} 由 {@code
+ * beforeRequest} 抛出时保持自身类型向上传播（绝不包装成普通资源错误），且同样完成上传的清理。日志只记录 id、大小与类型，绝不记录预签名 URL 或响应头。
+ */
+@Slf4j
+final class PluginRemoteMediaStaging {
+
+  /** magic 嗅探需要的头部字节数。 */
+  private static final int SNIFF_BYTES = 64;
+
+  /** 流式复制缓冲区；媒体大小不受堆内存限制。 */
+  private static final int COPY_BUFFER_BYTES = 64 * 1024;
+
+  /** 文件名与扩展名之间的固定分隔符。 */
+  private static final char EXTENSION_SEPARATOR = '.';
+
+  private final StorageUploadService storageUploadService;
+  private final PluginProperties properties;
+  private final RemoteMediaTransport transport;
+  private final Path tempDirectory;
+
+  PluginRemoteMediaStaging(
+      StorageUploadService storageUploadService,
+      PluginProperties properties,
+      RemoteMediaTransport transport,
+      Path tempDirectory) {
+    this.storageUploadService = storageUploadService;
+    this.properties = properties;
+    this.transport = transport;
+    this.tempDirectory = tempDirectory;
+  }
+
+  /** 校验远端地址、下载并上传；临时文件在返回或失败时都由本方法删除。 */
+  ResourceRef stage(URI remoteUri, PluginMediaFamily family, String name, Runnable beforeRequest) {
+    Objects.requireNonNull(family, "family");
+    Objects.requireNonNull(beforeRequest, "beforeRequest");
+    URI uri = PluginResourceUris.requireDownloadable(remoteUri);
+    StagedMedia media = download(uri, family, beforeRequest);
+    try {
+      return upload(media, family, sanitizeName(name), beforeRequest);
+    } finally {
+      deleteQuietly(media.path());
+    }
+  }
+
+  /**
+   * 校验远端地址并流式落盘：返回权威 size、SHA-256、媒体类型与临时文件。
+   *
+   * <p>GET 前检查宿主授权；总期限覆盖响应体读取，超时后关闭响应体并删除临时文件。
+   */
+  private StagedMedia download(URI uri, PluginMediaFamily family, Runnable beforeRequest) {
+    Duration timeout = properties.getResource().getRequestTimeout();
+    long maxBytes = properties.getResource().getMaxBytes();
+    long deadlineNanos = System.nanoTime() + timeout.toNanos();
+    beforeRequest.run();
+    RemoteMediaTransport.MediaResponse response = transport.get(uri, timeout);
+    if (response.status() != 200) {
+      closeQuietly(response.body());
+      throw new PluginResourceUnavailableException(
+          "remote media responded with status " + response.status());
+    }
+    long declaredLength;
+    Path temp;
+    try {
+      declaredLength = contentLength(response);
+      if (declaredLength > maxBytes) {
+        throw new PluginResourceUnavailableException(
+            "remote media declares more bytes than this deployment can stage");
+      }
+      temp = createTempFile();
+    } catch (RuntimeException | Error failure) {
+      // 交给 StreamingCopy 之前，响应体仍由当前调用负责释放。
+      closeQuietly(response.body());
+      throw failure;
+    }
+    StreamingCopy copy = new StreamingCopy(response.body(), temp, maxBytes, deadlineNanos);
+    copy.awaitCompletion();
+    PluginResourceUnavailableException failure = copy.failure();
+    if (failure != null) {
+      deleteQuietly(temp);
+      throw failure;
+    }
+    if (declaredLength >= 0L && declaredLength != copy.total()) {
+      deleteQuietly(temp);
+      throw new PluginResourceUnavailableException(
+          "remote media content-length does not match the received body");
+    }
+    String mediaType =
+        MediaTypeSniffer.sniff(copy.head())
+            .or(() -> MediaTypeSniffer.normalizeHeader(firstHeader(response, "content-type")))
+            .orElse(null);
+    if (mediaType == null) {
+      deleteQuietly(temp);
+      throw new PluginResourceUnavailableException("cannot determine remote media type");
+    }
+    if (!family.accepts(mediaType)) {
+      deleteQuietly(temp);
+      throw new PluginResourceUnavailableException(
+          "remote media type is not the declared " + family.name().toLowerCase(Locale.ROOT));
+    }
+    return new StagedMedia(temp, copy.total(), HexFormat.of().formatHex(copy.digest()), mediaType);
+  }
+
+  /** reserve → （PENDING 时预签名 PUT）→ complete，任何失败都清理上传。 */
+  private ResourceRef upload(
+      StagedMedia media, PluginMediaFamily family, String baseName, Runnable beforeRequest) {
+    String filename = filename(baseName, media.mediaType());
+    StorageUploadDTO reserved;
+    try {
+      reserved = storageUploadService.reserveStaged(reserveRequest(filename, media));
+    } catch (RuntimeException error) {
+      throw new PluginResourceUnavailableException("cannot reserve a staging upload", error);
+    }
+    UUID uploadId = parseUploadId(reserved);
+    try {
+      StorageUploadDTO upload = reserved;
+      if (reserved instanceof StorageUploadPendingDTO pending) {
+        // 下载已经完成不代表 PUT 获准：真正上传的紧前再检查一次当前授权。
+        beforeRequest.run();
+        putObject(pending.getPresignedPut(), media.path());
+        upload = storageUploadService.complete(uploadId);
+      }
+      if (!(upload instanceof StorageUploadReadyDTO)) {
+        throw new PluginResourceUnavailableException("staged upload did not become READY");
+      }
+      log.debug(
+          "Staged plugin media upload {} ({} bytes, {}, family {})",
+          uploadId,
+          media.sizeBytes(),
+          media.mediaType(),
+          family);
+      return new ResourceRef(
+          ResourceRef.blobUploadUri(uploadId),
+          media.mediaType(),
+          filename,
+          media.sizeBytes(),
+          media.sha256());
+    } catch (RuntimeException error) {
+      deleteQuietly(uploadId);
+      if (error instanceof PluginResourceUnavailableException
+          || error instanceof PluginCredentialUnavailableException) {
+        throw error;
+      }
+      throw new PluginResourceUnavailableException("cannot stage remote media", error);
+    }
+  }
+
+  private void putObject(StoragePresignedUrlDTO presignedPut, Path file) {
+    if (presignedPut == null || presignedPut.getUrl() == null || presignedPut.getUrl().isBlank()) {
+      throw new PluginResourceUnavailableException("staged upload has no presigned target");
+    }
+    if (!StorageUrlMethod.PUT.equals(presignedPut.getMethod())) {
+      throw new PluginResourceUnavailableException("staged upload requires an unexpected method");
+    }
+    URI target = PluginResourceUris.parseAbsoluteUri(presignedPut.getUrl());
+    if (target.getUserInfo() != null) {
+      throw new PluginResourceUnavailableException("staged upload target must not carry userinfo");
+    }
+    Map<String, String> headers = new LinkedHashMap<>();
+    if (presignedPut.getHeaders() != null) {
+      presignedPut
+          .getHeaders()
+          .forEach(
+              (name, value) -> {
+                if (name != null
+                    && value != null
+                    && !RemoteMediaTransport.isRestrictedHeader(name)) {
+                  headers.put(name, value);
+                }
+              });
+    }
+    int status = transport.put(target, headers, file, properties.getResource().getUploadTimeout());
+    if (status / 100 != 2) {
+      throw new PluginResourceUnavailableException(
+          "presigned media upload responded with status " + status);
+    }
+  }
+
+  private static StorageUploadReserveRequestDTO reserveRequest(String filename, StagedMedia media) {
+    StorageUploadReserveRequestDTO request = new StorageUploadReserveRequestDTO();
+    request.setFilename(filename);
+    request.setMediaType(media.mediaType());
+    request.setSizeBytes(media.sizeBytes());
+    request.setSha256(media.sha256());
+    return request;
+  }
+
+  private static UUID parseUploadId(StorageUploadDTO upload) {
+    if (upload == null || upload.getId() == null) {
+      throw new PluginResourceUnavailableException("staging upload has no id");
+    }
+    try {
+      return Uuids.parseCanonical(upload.getId(), "uploadId");
+    } catch (IllegalArgumentException error) {
+      throw new PluginResourceUnavailableException(
+          "staging upload id is not a canonical uuid", error);
+    }
+  }
+
+  private static long contentLength(RemoteMediaTransport.MediaResponse response) {
+    String value = firstHeader(response, "content-length");
+    if (value == null) {
+      return -1L;
+    }
+    try {
+      long parsed = Long.parseLong(value.strip());
+      return parsed < 0L ? -1L : parsed;
+    } catch (NumberFormatException error) {
+      throw new PluginResourceUnavailableException("remote media content-length is not a number");
+    }
+  }
+
+  private static String firstHeader(RemoteMediaTransport.MediaResponse response, String name) {
+    Map<String, List<String>> headers = response.headers();
+    if (headers == null) {
+      return null;
+    }
+    for (Map.Entry<String, List<String>> header : headers.entrySet()) {
+      if (header.getKey() != null
+          && header.getKey().equalsIgnoreCase(name)
+          && header.getValue() != null
+          && !header.getValue().isEmpty()) {
+        return header.getValue().get(0);
+      }
+    }
+    return null;
+  }
+
+  private Path createTempFile() {
+    try {
+      Files.createDirectories(tempDirectory);
+      return Files.createTempFile(tempDirectory, "plugin-media-", ".part");
+    } catch (IOException error) {
+      throw new PluginResourceUnavailableException("cannot create a staging temp file", error);
+    }
+  }
+
+  /** 规范文件名：去掉路径成分与控制字符、限制长度。 */
+  private static String sanitizeName(String name) {
+    String candidate = name == null ? "" : name.strip();
+    int separator = Math.max(candidate.lastIndexOf('/'), candidate.lastIndexOf('\\'));
+    if (separator >= 0) {
+      candidate = candidate.substring(separator + 1);
+    }
+    StringBuilder builder = new StringBuilder(candidate.length());
+    for (int index = 0; index < candidate.length() && builder.length() < 120; index++) {
+      char value = candidate.charAt(index);
+      builder.append(Character.isISOControl(value) ? '_' : value);
+    }
+    String sanitized = builder.toString().strip();
+    return sanitized.isEmpty() ? "media" : sanitized;
+  }
+
+  /** 按嗅探结果补出扩展名；已有扩展名的名字保持原样。 */
+  private static String filename(String baseName, String mediaType) {
+    if (baseName.indexOf(EXTENSION_SEPARATOR) >= 0) {
+      return baseName;
+    }
+    String extension = extensionOf(mediaType);
+    return extension.isEmpty() ? baseName : baseName + EXTENSION_SEPARATOR + extension;
+  }
+
+  private static String extensionOf(String mediaType) {
+    int separator = mediaType.indexOf('/');
+    String subtype = separator < 0 ? mediaType : mediaType.substring(separator + 1);
+    String normalized = subtype.replaceAll("[^a-z0-9]", "");
+    return switch (normalized) {
+      case "jpeg" -> "jpg";
+      case "mp4" -> "mp4";
+      case "quicktime" -> "mov";
+      case "xmsvideo" -> "avi";
+      case "xmatroska" -> "mkv";
+      case "plain" -> "txt";
+      case "octetstream" -> "bin";
+      case "zip" -> "zip";
+      default -> normalized.length() > 8 ? "" : normalized;
+    };
+  }
+
+  private static void closeQuietly(InputStream body) {
+    if (body == null) {
+      return;
+    }
+    try {
+      body.close();
+    } catch (IOException ignored) {
+      // 关闭失败不影响确定性失败结果。
+    }
+  }
+
+  private static void deleteQuietly(Path path) {
+    if (path == null) {
+      return;
+    }
+    try {
+      Files.deleteIfExists(path);
+    } catch (IOException error) {
+      log.warn("Cannot delete plugin media temp file {}", path.getFileName());
+    }
+  }
+
+  private void deleteQuietly(UUID uploadId) {
+    try {
+      storageUploadService.delete(uploadId);
+    } catch (RuntimeException error) {
+      log.warn("Cannot clean up plugin staging upload {}", uploadId);
+    }
+  }
+
+  /** 一次下载的权威结果。 */
+  private record StagedMedia(Path path, long sizeBytes, String sha256, String mediaType) {}
+
+  /**
+   * 一次下载的流式复制任务：在独立线程内边读边写临时文件并计算摘要，同时由调用线程施加**整体**期限。
+   *
+   * <p>只靠 HTTP 请求期限不足以约束响应体：服务端可以在读完响应头后一直不发送正文，让阻塞的 {@code read} 永久挂住调用线程。因此这里把复制放到 daemon
+   * 线程，超时后关闭响应体让读线程尽快退出，并在调用线程上立刻给出确定性失败。字节预算仍在读循环内逐块判定。
+   */
+  private static final class StreamingCopy {
+
+    private final InputStream source;
+    private final Path target;
+    private final long maxBytes;
+    private final long deadlineNanos;
+    private final MessageDigest digest = Sha256.newDigest();
+    private final byte[] head = new byte[SNIFF_BYTES];
+
+    private PluginResourceUnavailableException failure;
+    private long total;
+    private int headLength;
+
+    StreamingCopy(InputStream source, Path target, long maxBytes, long deadlineNanos) {
+      this.source = source;
+      this.target = target;
+      this.maxBytes = maxBytes;
+      this.deadlineNanos = deadlineNanos;
+    }
+
+    /** 在调用线程上等待复制完成；超时或中断时收敛为确定性失败并关闭响应体。 */
+    void awaitCompletion() {
+      // 调用线程先持有输出流，确保迟启动的 worker 无法在超时清理后重新创建目标文件。
+      try (OutputStream output =
+          Files.newOutputStream(
+              target, StandardOpenOption.WRITE, StandardOpenOption.TRUNCATE_EXISTING)) {
+        long remainingMillis = (deadlineNanos - System.nanoTime()) / 1_000_000L;
+        if (remainingMillis <= 0L) {
+          fail(
+              new PluginResourceUnavailableException(
+                  "remote media download exceeded the response deadline"));
+          closeQuietly(source);
+          return;
+        }
+        Thread worker = new Thread(() -> copyTo(output), "plugin-media-staging");
+        worker.setDaemon(true);
+        worker.start();
+        try {
+          worker.join(remainingMillis);
+        } catch (InterruptedException error) {
+          Thread.currentThread().interrupt();
+          closeQuietly(source);
+          worker.interrupt();
+          fail(
+              new PluginResourceUnavailableException(
+                  "remote media download was interrupted", error));
+          return;
+        }
+        if (worker.isAlive()) {
+          fail(
+              new PluginResourceUnavailableException(
+                  "remote media download exceeded the response deadline"));
+          closeQuietly(source);
+          worker.interrupt();
+        }
+      } catch (IOException error) {
+        closeQuietly(source);
+        fail(new PluginResourceUnavailableException("cannot stage remote media", error));
+      }
+    }
+
+    private void copyTo(OutputStream output) {
+      try (InputStream body = source) {
+        byte[] buffer = new byte[COPY_BUFFER_BYTES];
+        int read = body.read(buffer);
+        while (read != -1) {
+          total += read;
+          if (total > maxBytes) {
+            fail(
+                new PluginResourceUnavailableException(
+                    "remote media exceeds the configured staging byte budget"));
+            return;
+          }
+          digest.update(buffer, 0, read);
+          output.write(buffer, 0, read);
+          headLength = copyHead(buffer, head, headLength, read);
+          read = body.read(buffer);
+        }
+      } catch (IOException error) {
+        fail(new PluginResourceUnavailableException("cannot stage remote media", error));
+      }
+    }
+
+    private synchronized void fail(PluginResourceUnavailableException error) {
+      if (failure == null) {
+        failure = error;
+      }
+    }
+
+    synchronized PluginResourceUnavailableException failure() {
+      return failure;
+    }
+
+    long total() {
+      return total;
+    }
+
+    byte[] head() {
+      return head;
+    }
+
+    byte[] digest() {
+      return digest.digest();
+    }
+
+    private static int copyHead(byte[] buffer, byte[] head, int headLength, int read) {
+      if (headLength >= head.length) {
+        return headLength;
+      }
+      int copy = Math.min(read, head.length - headLength);
+      System.arraycopy(buffer, 0, head, headLength, copy);
+      return headLength + copy;
+    }
+  }
+}
