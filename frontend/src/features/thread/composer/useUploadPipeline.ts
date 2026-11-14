@@ -1,9 +1,10 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, type MutableRefObject } from 'react'
 import {
   createPreviewUrl,
   isAmbiguousUploadOutcome,
   revokePreviewUrl,
   type AttachmentUpload,
+  type AttachmentUploadError,
 } from '@/features/thread/composer/attachment-uploads'
 import {
   persistPendingUnknownUpload,
@@ -22,6 +23,143 @@ export interface UploadPipelineOptions {
   registry: UploadRegistry
   service: StorageService
   hashFile: HashFile
+}
+
+
+/** 默认图片档位只读一次平台设置；读取失败时清空缓存，下一次上传重新读取。 */
+function loadDefaultImageTier(
+  cache: MutableRefObject<Promise<ImageInputTier> | null>,
+): Promise<ImageInputTier> {
+  if (!cache.current) {
+    const pending = request('GET /api/platform/settings', {}).then((settings) => {
+      if (!isImageTier(settings.storageMedia.imageTier)) {
+        throw new Error(`Unsupported default image tier: ${settings.storageMedia.imageTier}`)
+      }
+      return settings.storageMedia.imageTier
+    })
+    cache.current = pending
+    void pending.catch(() => {
+      if (cache.current === pending) {
+        cache.current = null
+      }
+    })
+  }
+  return cache.current
+}
+
+/** 缩放图片，并返回直传用的文件与补齐缩放信息后的上传条目。 */
+async function scaleImageForUpload(
+  file: File,
+  record: AttachmentUpload,
+  imageTier: ImageInputTier,
+): Promise<{ file: File; record: AttachmentUpload }> {
+  const scaled = await scaleImageFile(file, imageTier)
+  return {
+    file: scaled.file,
+    record: {
+      ...record,
+      mediaType: scaled.file.type,
+      sizeBytes: scaled.file.size,
+      imageTier,
+      format: scaled.format,
+      originalWidth: scaled.originalWidth,
+      originalHeight: scaled.originalHeight,
+      storedWidth: scaled.storedWidth,
+      storedHeight: scaled.storedHeight,
+      sourceFileAvailable: true,
+    },
+  }
+}
+
+
+interface CompleteReservationOptions {
+  service: StorageService
+  localId: string
+  uploadId: string
+  /** 已补齐缩放信息的条目：identity 记录必须与直传的文件一致。 */
+  record: AttachmentUpload
+  sha256: string
+  scope?: string
+  isStillActive: () => boolean
+  patchUpload: (localId: string, patch: Partial<AttachmentUpload>) => void
+  onErrorRef: MutableRefObject<((error: AttachmentUploadError) => void) | undefined>
+}
+
+/**
+ * 把预留的 upload 移交 ready。
+ *
+ * complete 前先在 scope 中原子保存 identity，防范在途网络未知或刷新窗口丢句柄；
+ * Fail-Closed：若存储满额（QuotaExceededError）或写入失败，抛出错误，绝不继续执行 complete。
+ * complete 结果未知时保留同一 uploadId 供幂等重试，绝不 DELETE 已可能 READY 的句柄。
+ */
+async function completeReservation({
+  service,
+  localId,
+  uploadId,
+  record,
+  sha256,
+  scope,
+  isStillActive,
+  patchUpload,
+  onErrorRef,
+}: CompleteReservationOptions): Promise<void> {
+  if (scope) {
+    persistPendingUnknownUpload(scope, {
+      localId,
+      uploadId,
+      filename: record.filename,
+      mediaType: record.mediaType,
+      sizeBytes: record.sizeBytes,
+      sha256,
+      imageTier: record.imageTier,
+    })
+  }
+
+  let completed: StorageUploadDTO
+  try {
+    completed = await service.completeUpload(uploadId)
+  } catch (completeError) {
+    if (!isStillActive()) {
+      return
+    }
+    if (isAmbiguousUploadOutcome(completeError)) {
+      // 未知结果：保留同 uploadId 精确重试，绝对不能 DELETE 已可能 READY 的句柄
+      patchUpload(localId, {
+        uploadId,
+        status: 'complete_unknown',
+        progress: 0.8,
+      })
+      onErrorRef.current?.({
+        filename: record.filename,
+        reason: completeError instanceof Error ? completeError.message : String(completeError),
+        localId,
+      })
+      return
+    }
+    // 确定未接受错误（非 5xx/408/429/网络异常）：清理当前 identity，进入外层 cleanup
+    if (scope && isStillActive()) {
+      removeStoredUnknownUpload(scope, localId)
+    }
+    throw completeError
+  }
+
+  if (!isStillActive()) {
+    void service.deleteUpload(completed.id).catch(() => undefined)
+    if (scope) {
+      removeStoredUnknownUpload(scope, localId)
+    }
+    return
+  }
+  // complete 成功：仅从 scope 移除当前已确认的条目
+  if (scope) {
+    removeStoredUnknownUpload(scope, localId)
+  }
+  // complete 返回同一 DTO：upload 句柄不变，绝不替换为 blobId。
+  patchUpload(localId, {
+    uploadId: completed.id,
+    status: 'ready',
+    progress: 1,
+  })
 }
 
 /**
@@ -66,41 +204,13 @@ export function useUploadPipeline({ registry, service, hashFile }: UploadPipelin
         let uploadFile = file
         let uploadRecord = record
         if (mediaKindOf(record.mediaType) === 'image') {
-          let imageTier = record.imageTier
-          if (!imageTier) {
-            if (!defaultImageTierRef.current) {
-              const pendingTier = request('GET /api/platform/settings', {}).then((settings) => {
-                if (!isImageTier(settings.storageMedia.imageTier)) {
-                  throw new Error(`Unsupported default image tier: ${settings.storageMedia.imageTier}`)
-                }
-                return settings.storageMedia.imageTier
-              })
-              defaultImageTierRef.current = pendingTier
-              void pendingTier.catch(() => {
-                if (defaultImageTierRef.current === pendingTier) {
-                  defaultImageTierRef.current = null
-                }
-              })
-            }
-            imageTier = await defaultImageTierRef.current
-          }
-          const scaled = await scaleImageFile(file, imageTier)
+          const imageTier = record.imageTier || (await loadDefaultImageTier(defaultImageTierRef))
+          const scaled = await scaleImageForUpload(file, record, imageTier)
           if (!active()) {
             return
           }
           uploadFile = scaled.file
-          uploadRecord = {
-            ...record,
-            mediaType: scaled.file.type,
-            sizeBytes: scaled.file.size,
-            imageTier,
-            format: scaled.format,
-            originalWidth: scaled.originalWidth,
-            originalHeight: scaled.originalHeight,
-            storedWidth: scaled.storedWidth,
-            storedHeight: scaled.storedHeight,
-            sourceFileAvailable: true,
-          }
+          uploadRecord = scaled.record
           revokePreviewUrl(localId, previewUrlsRef.current)
           const previewUrl = createPreviewUrl(uploadFile)
           if (previewUrl) {
@@ -140,65 +250,16 @@ export function useUploadPipeline({ registry, service, hashFile }: UploadPipelin
           patchUpload(localId, { progress: 0.8 })
         }
 
-        // 发送 complete 前预先在 capturedScope 中原子保存 identity，防范在途网络未知或刷新窗口丢句柄
-        // Fail-Closed 机制：若存储满额（QuotaExceededError）或写入失败，抛出错误，
-        // 绝不继续执行 completeUpload！
-        if (capturedScope) {
-          persistPendingUnknownUpload(capturedScope, {
-            localId,
-            uploadId: reservation.id,
-            filename: uploadRecord.filename,
-            mediaType: uploadRecord.mediaType,
-            sizeBytes: uploadRecord.sizeBytes,
-            sha256,
-            imageTier: uploadRecord.imageTier,
-          })
-        }
-
-        let completed: StorageUploadDTO
-        try {
-          completed = await service.completeUpload(reservation.id)
-        } catch (completeError) {
-          if (!active()) {
-            return
-          }
-          if (isAmbiguousUploadOutcome(completeError)) {
-            // 未知结果：保留同 uploadId 精确重试，绝对不能 DELETE 已可能 READY 的句柄
-            patchUpload(localId, {
-              uploadId: reservation.id,
-              status: 'complete_unknown',
-              progress: 0.8,
-            })
-            onErrorRef.current?.({
-              filename: record.filename,
-              reason: completeError instanceof Error ? completeError.message : String(completeError),
-              localId,
-            })
-            return
-          }
-          // 确定未接受错误（非 5xx/408/429/网络异常）：清理当前 identity，进入外层 cleanup
-          if (capturedScope && active()) {
-            removeStoredUnknownUpload(capturedScope, localId)
-          }
-          throw completeError
-        }
-
-        if (!active()) {
-          void service.deleteUpload(completed.id).catch(() => undefined)
-          if (capturedScope) {
-            removeStoredUnknownUpload(capturedScope, localId)
-          }
-          return
-        }
-        // complete 成功：仅从 capturedScope 移除当前已确认的条目
-        if (capturedScope) {
-          removeStoredUnknownUpload(capturedScope, localId)
-        }
-        // complete 返回同一 DTO：upload 句柄不变，绝不替换为 blobId。
-        patchUpload(localId, {
-          uploadId: completed.id,
-          status: 'ready',
-          progress: 1,
+        await completeReservation({
+          service,
+          localId,
+          uploadId: reservation.id,
+          record: uploadRecord,
+          sha256,
+          scope: capturedScope,
+          isStillActive: active,
+          patchUpload,
+          onErrorRef,
         })
       } catch (error) {
         if (reservedUploadId && active()) {
