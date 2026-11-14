@@ -14,7 +14,6 @@ import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import {
   readRecentDirectories,
-  saveIdeSession,
   type IdePendingClaim,
   type IdePresentation,
   type IdeTabLoadResult,
@@ -41,9 +40,11 @@ import { useIdeViewStore } from '@/features/environment/ide/useIdeViewStore'
 import { useIdeOperationQueue } from '@/features/environment/ide/useIdeOperationQueue'
 import { useIdeSnapshotCache } from '@/features/environment/ide/useIdeSnapshotCache'
 import {
-  buildUsageViews,
+  useIdeSessionWriter,
+  useIdeUsageProof,
+} from '@/features/environment/ide/useIdeUsageProof'
+import {
   isBoundToConnection,
-  recoveryFromViews,
   type IdeViewState,
 } from '@/features/environment/ide/ide-view-state'
 import {
@@ -94,7 +95,6 @@ export function useIdeClaimReconciliation({
   const identityRef = useRef(identity)
   const mountedRef = useRef(false)
   const pageSuspendedRef = useRef(false)
-  const revisionRef = useRef(0n)
   const sessionRef = useRef(session)
   const lastSessionStatusRef = useRef(session.status)
   const lastActiveEnvironmentRef = useRef(activeEnvironmentId)
@@ -111,6 +111,26 @@ export function useIdeClaimReconciliation({
     useIdeViewStore(mountedRef, initial)
   const { runExclusive, invalidateOperations } = useIdeOperationQueue(identityRef, mountedRef)
   const { acceptSnapshot, forgetView, clearSnapshots } = useIdeSnapshotCache(sessionRef)
+  const { writeSession } = useIdeSessionWriter({
+    storage,
+    sessionRef,
+    viewsRef,
+    mountedRef,
+    getPresentation,
+    onStorageStatusChange,
+  })
+  const { registerUsageNow, registerUsageQuiet, usageOverride, resetRevision, withdrawUsage: withdrawUsageProof } = useIdeUsageProof({
+    identityRef,
+    sessionRef,
+    viewsRef,
+    getPresentation,
+    sessionReady,
+    isPageSuspended: () => pageSuspendedRef.current,
+    setPageSuspended: (suspended) => {
+      pageSuspendedRef.current = suspended
+    },
+    registerUsage: (usage) => events.registerUsage(usage),
+  })
 
   identityRef.current = identity
   sessionRef.current = session
@@ -134,67 +154,6 @@ export function useIdeClaimReconciliation({
       && identityRef.current != null
       && !pageSuspendedRef.current
       && getEnvironmentMap().get(environmentId)?.ready === true
-  }
-
-  function writeSession(): boolean {
-    const presentation = getPresentation()
-    const saved = saveIdeSession(
-      sessionRef.current.browserSessionId,
-      presentation,
-      recoveryFromViews(viewsRef.current, presentation.openedEnvironmentIds),
-      storage,
-    )
-    if (mountedRef.current) {
-      onStorageStatusChange(!saved)
-    }
-    return saved
-  }
-
-  function nextRevision(): string {
-    revisionRef.current += 1n
-    return revisionRef.current.toString()
-  }
-
-  function usageOverride(
-    environmentId: string,
-    viewId: string,
-    claimId: string,
-    bindingEpoch?: string,
-  ) {
-    return { environmentId, viewId, claimId, ...(bindingEpoch == null ? {} : { bindingEpoch }) }
-  }
-
-  function registerUsageNow(override?: {
-    environmentId: string
-    viewId: string
-    claimId: string
-    bindingEpoch?: string
-  }): Promise<unknown> {
-    const currentIdentity = identityRef.current
-    const browserSessionId = sessionRef.current.browserSessionId
-    if (currentIdentity == null || !sessionReady() || pageSuspendedRef.current) {
-      return Promise.reject(new Error('application event connection is not ready'))
-    }
-    const opened = getPresentation().openedEnvironmentIds
-    const environmentIds = override != null && !opened.includes(override.environmentId)
-      ? [...opened, override.environmentId]
-      : opened
-    return events.registerUsage({
-      browserSessionId,
-      revision: nextRevision(),
-      views: buildUsageViews(viewsRef.current, environmentIds, override),
-    })
-  }
-
-  function registerUsageQuiet(override?: {
-    environmentId: string
-    viewId: string
-    claimId: string
-    bindingEpoch?: string
-  }): void {
-    void registerUsageNow(override).catch(() => {
-      // 断线由 reject 明示；后续只由新的 connected 身份重新对账，不在这里重试。
-    })
   }
 
   function setWaitingReady(
@@ -1249,26 +1208,16 @@ export function useIdeClaimReconciliation({
 
   function resetForClone(): void {
     clearViews()
-    revisionRef.current = 0n
+    resetRevision()
     lastIdentityRef.current = null
     clearSnapshots()
     invalidateOperations()
     pageSuspendedRef.current = false
   }
 
+
   function withdrawUsage(): void {
-    if (identityRef.current == null || !sessionReady()) {
-      return
-    }
-    pageSuspendedRef.current = true
-    const browserSessionId = sessionRef.current.browserSessionId
-    void events.registerUsage({
-      browserSessionId,
-      revision: nextRevision(),
-      views: [],
-    }).catch(() => {
-      // pagehide/断线后发送失败是预期路径；Daemon 按最后有效证明回收。
-    })
+    withdrawUsageProof(() => identityRef.current != null && sessionReady())
   }
 
   function restoreUsage(): void {
