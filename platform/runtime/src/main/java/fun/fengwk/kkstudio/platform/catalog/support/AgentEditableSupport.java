@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.support;
 
 import org.springframework.stereotype.Component;
-import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 
@@ -12,15 +11,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
  */
 @Component
 public final class AgentEditableSupport {
-
-  private final ObjectMapper objectMapper;
-
-  public AgentEditableSupport(ObjectMapper objectMapper) {
-    if (objectMapper == null) {
-      throw new IllegalArgumentException("objectMapper must not be null");
-    }
-    this.objectMapper = objectMapper;
-  }
 
   public String trimToNull(String value) {
     if (value == null) {

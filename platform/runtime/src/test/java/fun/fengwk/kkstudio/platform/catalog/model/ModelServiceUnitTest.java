@@ -68,7 +68,7 @@ class ModelServiceUnitTest {
         new ModelService(
             repository,
             providerRepository,
-            new AgentEditableSupport(objectMapper),
+            new AgentEditableSupport(),
             parser,
             new ModelGroupConfigCodec(objectMapper));
   }

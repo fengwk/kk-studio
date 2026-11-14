@@ -20,7 +20,6 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
@@ -94,7 +93,7 @@ class SkillCatalogServiceTest {
             packageRepository,
             agentRepository,
             gitRepository,
-            new AgentEditableSupport(JsonMapper.builder().build()),
+            new AgentEditableSupport(),
             writes,
             uploadService,
             contentService,

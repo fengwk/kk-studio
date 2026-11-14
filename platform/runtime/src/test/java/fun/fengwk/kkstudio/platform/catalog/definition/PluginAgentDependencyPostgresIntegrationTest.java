@@ -153,7 +153,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
             new AgentConfigValidator(
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
             new AgentConfigCodec(JsonMapper.builder().build()),
-            new AgentEditableSupport(JsonMapper.builder().build()),
+            new AgentEditableSupport(),
             pluginAgentDependencies,
             List.of());
 

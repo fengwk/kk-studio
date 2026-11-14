@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.platform.catalog.skill;
 
 import static org.mockito.Mockito.mock;
 
-import tools.jackson.databind.json.JsonMapper;
-
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.catalog.skill.git.SkillGitRepository;
 import fun.fengwk.kkstudio.platform.catalog.support.AgentEditableSupport;
@@ -24,7 +22,7 @@ public final class SkillCatalogTestFixtures {
         mock(SkillPackageRepository.class),
         mock(AgentRepository.class),
         mock(SkillGitRepository.class),
-        new AgentEditableSupport(JsonMapper.builder().build()),
+        new AgentEditableSupport(),
         mock(SkillCatalogWrites.class),
         mock(StorageUploadService.class),
         mock(StorageBlobContentService.class),

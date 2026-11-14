@@ -64,7 +64,8 @@ class SystemNetworkConfigurationMcpProxyTest {
 
                 try (McpClient client =
                     McpClientFactory.createRemote(
-                        new RemoteMcpConfig(TARGET.toString(), Map.of()), Duration.ofSeconds(15))) {
+                        new RemoteMcpConfig(TARGET.toString(), Map.of()),
+                        McpDeadline.of(Duration.ofSeconds(15)))) {
                   // 装配完成后建 client：MCP 握手只能经 proxyA，且此时尚未触碰 proxyB。
                   int handshakeThroughA = proxyARequests.get();
                   assertThat(handshakeThroughA).isPositive();

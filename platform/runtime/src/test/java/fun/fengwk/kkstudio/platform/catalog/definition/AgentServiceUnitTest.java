@@ -108,7 +108,7 @@ class AgentServiceUnitTest {
             new AgentConfigValidator(
                 TestRuntimeToolCatalogSource.of(HarnessCatalog.from(List.of()))),
             new AgentConfigCodec(objectMapper),
-            new AgentEditableSupport(objectMapper),
+            new AgentEditableSupport(),
             pluginAgentDependencies,
             List.of(productReference, otherProductReference));
   }

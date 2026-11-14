@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
 import fun.fengwk.kkstudio.chat.dto.ChatUpdateDTO;
@@ -110,6 +109,6 @@ class ChatMutationFactoryTest {
   }
 
   private static ChatMutationFactory factory() {
-    return new ChatMutationFactory(new AgentEditableSupport(JsonMapper.builder().build()));
+    return new ChatMutationFactory(new AgentEditableSupport());
   }
 }
