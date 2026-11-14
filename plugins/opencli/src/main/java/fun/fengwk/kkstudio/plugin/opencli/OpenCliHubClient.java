@@ -4,40 +4,26 @@ import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.support.DeadlineResponseBody;
 import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport;
-import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport.ResponseTooLargeException;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubException.Kind;
 
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
-import java.net.ConnectException;
-import java.net.NoRouteToHostException;
-import java.net.PortUnreachableException;
 import java.net.ProxySelector;
 import java.net.URI;
-import java.net.URISyntaxException;
-import java.net.UnknownHostException;
 import java.net.http.HttpClient;
-import java.net.http.HttpConnectTimeoutException;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
-import java.text.Normalizer;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -46,42 +32,26 @@ import java.util.regex.Pattern;
 /**
  * OpenCLI Hub 的 HTTP 协议客户端。
  *
- * <p>负责资源上传、作业提交与查询、尽力取消以及产物下载。上传使用定长流，下载将响应流交给调用方关闭；JSON 和错误响应始终有界读取。
- *
- * <p>远端资源 URL 必须与 Hub 同源并位于 {@code /api/resources/} 下。客户端还会规范化上传文件名，校验响应
- * envelope、输出长度和截断标记，避免把不完整结果交给下游。
+ * <p>负责资源上传、作业提交与查询、尽力取消以及产物下载；鉴权发送、信封校验、凭据解析与 URL 同源判定由 {@link OpenCliHubTransport} 与 {@link
+ * OpenCliHubProtocol} 承担。上传使用定长流，下载将响应流交给调用方关闭；JSON 和错误响应始终有界读取。
  *
  * <p>所有端点统一通过带 scoped 凭据校验的发送路径出网；每次 HTTP 发送前独立解析权威凭据，局部添加 Bearer 认证。 同一份 snapshot 同时提供唯一认证密钥
  * {@code apiKey} 与可选私有身份 {@code instanceId}，后者只填入执行请求体，不构造期读取也不跨请求缓存。 401/403
  * 触发调用期确定性作废，固定去敏错误上抛；无凭据时直接抛出去敏异常，不重试。
- *
- * <p>已取得响应后，任何失败路径都必须释放响应正文流：凭据作废或响应解释抛出的 {@code RuntimeException}/{@code Error} 原样上抛，close 失败只作为
- * suppressed 附加，既不遮蔽原 primary 也不被降级吞掉。
  */
 @Slf4j
 public class OpenCliHubClient implements AutoCloseable {
 
   private static final Pattern EXECUTION_ID = Pattern.compile("[A-Za-z0-9-]{1,64}");
-  private static final Pattern VIRTUAL_RESOURCE_PATH =
-      Pattern.compile("/resources/[A-Za-z0-9._~!$&'()+,;=:@%/-]+");
   private static final List<String> TERMINAL_STATUSES =
       List.of("SUCCEEDED", "FAILED", "TIMED_OUT", "CANCELLED");
-  private static final int MAX_UPLOAD_BASENAME_LENGTH = 128;
-  private static final int MAX_UPLOAD_EXTENSION_LENGTH = 16;
-  static final int MAX_JSON_RESPONSE_BYTES = 512 * 1024;
-  static final int MAX_ERROR_RESPONSE_BYTES = 4096;
   static final int MAX_OUTPUT_CHARS = 65_535;
-  private static final String AUTH_REJECTED_ERROR = "OpenCLI Hub authentication rejected";
-
-  private static final ObjectMapper CREDENTIAL_MAPPER =
-      PluginHttpSupport.strictJson(JsonMapper.builder().build());
 
   private final OpenCliSettings settings;
   private final ObjectMapper mapper;
-  private final PluginCredentialAccess credentials;
   private final HttpClient httpClient;
-  private final URI origin;
   private final boolean ownedClient;
+  private final OpenCliHubTransport transport;
   private final AtomicBoolean closed = new AtomicBoolean();
 
   public OpenCliHubClient(
@@ -116,13 +86,9 @@ public class OpenCliHubClient implements AutoCloseable {
       boolean ownedClient) {
     this.settings = Objects.requireNonNull(settings, "settings");
     this.mapper = PluginHttpSupport.strictJson(mapper);
-    this.credentials = Objects.requireNonNull(credentials, "credentials");
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
     this.ownedClient = ownedClient;
-    this.origin =
-        settings.baseUrl() == null || settings.baseUrl().isBlank()
-            ? null
-            : normalizeOrigin(URI.create(settings.baseUrl()));
+    this.transport = new OpenCliHubTransport(this.mapper, credentials, httpClient, settings);
   }
 
   @Override
@@ -142,8 +108,8 @@ public class OpenCliHubClient implements AutoCloseable {
       throw new IllegalArgumentException("upload size must be positive");
     }
     Objects.requireNonNull(content, "content");
-    String safeFilename = safeBasename(filename);
-    String safeMediaType = safeMediaType(mediaType);
+    String safeFilename = OpenCliHubNames.safeBasename(filename);
+    String safeMediaType = OpenCliHubNames.safeMediaType(mediaType);
     String boundary = "kkstudio-" + UUID.randomUUID();
     byte[] prefix =
         ("--"
@@ -172,16 +138,17 @@ public class OpenCliHubClient implements AutoCloseable {
             media,
             HttpRequest.BodyPublishers.ofByteArray(suffix));
     HttpRequest.Builder request =
-        request("/api/resources/uploads")
+        transport
+            .request("/api/resources/uploads")
             .header("Content-Type", "multipart/form-data; boundary=" + boundary)
             .POST(body);
-    JsonNode data = sendEnvelope(request, requestTimeout());
-    JsonNode items = required(data, "items");
+    JsonNode data = transport.sendEnvelope(request, requestTimeout());
+    JsonNode items = OpenCliHubProtocol.required(data, "items");
     if (!(items instanceof ArrayNode array) || array.size() != 1) {
-      throw malformed("upload data.items must contain exactly one item");
+      throw OpenCliHubProtocol.malformed("upload data.items must contain exactly one item");
     }
-    String resourcePath = requiredText(array.get(0), "resourcePath");
-    validateVirtualResourcePath(resourcePath);
+    String resourcePath = OpenCliHubProtocol.requiredText(array.get(0), "resourcePath");
+    OpenCliHubProtocol.requireCanonicalResourcePath(resourcePath);
     return new UploadedResource(resourcePath);
   }
 
@@ -196,15 +163,16 @@ public class OpenCliHubClient implements AutoCloseable {
       throw new IllegalArgumentException("timeoutMillis must be between 1 and 1800000");
     }
     // 私有身份只在真正发送前从本次 scoped snapshot 取得，因此请求体在鉴权发送路径内构造。
-    CredentialedRequest request =
+    OpenCliHubTransport.CredentialedRequest request =
         credential ->
-            request("/api/opencli/execute")
+            transport
+                .request("/api/opencli/execute")
                 .header("Content-Type", "application/json")
                 .POST(
                     HttpRequest.BodyPublishers.ofString(
                         writeJson(executeBody(credential.instanceId(), normalized, timeoutMillis)),
                         StandardCharsets.UTF_8));
-    return parseExecution(sendEnvelope(request, requestTimeout()));
+    return parseExecution(transport.sendEnvelope(request, requestTimeout()));
   }
 
   /** 执行请求体：只有已配置的私有身份才出现 {@code instanceId}，未配置时交给 Hub 自由路由。 */
@@ -228,8 +196,8 @@ public class OpenCliHubClient implements AutoCloseable {
     }
     Duration timeout = waitSeconds == 0 ? requestTimeout() : longPollTimeout();
     HttpRequest.Builder request =
-        request("/api/executions/" + id + "?waitSeconds=" + waitSeconds).GET();
-    return parseExecution(sendEnvelope(request, timeout));
+        transport.request("/api/executions/" + id + "?waitSeconds=" + waitSeconds).GET();
+    return parseExecution(transport.sendEnvelope(request, timeout));
   }
 
   /** 仅尝试取消 PENDING 作业；Hub 查询或取消失败不会改变调用方的本地终态。 */
@@ -240,9 +208,10 @@ public class OpenCliHubClient implements AutoCloseable {
         return;
       }
       HttpRequest.Builder request =
-          request("/api/executions/" + validateExecutionId(executionId) + "/cancel")
+          transport
+              .request("/api/executions/" + validateExecutionId(executionId) + "/cancel")
               .POST(HttpRequest.BodyPublishers.noBody());
-      parseExecution(sendEnvelope(request, requestTimeout()));
+      parseExecution(transport.sendEnvelope(request, requestTimeout()));
     } catch (RuntimeException ignored) {
       log.debug("OpenCLI Hub cancel failed type={}", ignored.getClass().getSimpleName());
     }
@@ -257,9 +226,10 @@ public class OpenCliHubClient implements AutoCloseable {
    */
   public void probeConnection() {
     requireEnabled();
-    JsonNode data = sendEnvelope(request("/api/resources/dates").GET(), requestTimeout());
+    JsonNode data =
+        transport.sendEnvelope(transport.request("/api/resources/dates").GET(), requestTimeout());
     if (!(data instanceof ArrayNode)) {
-      throw malformed("resources dates data must be an array");
+      throw OpenCliHubProtocol.malformed("resources dates data must be an array");
     }
   }
 
@@ -267,9 +237,10 @@ public class OpenCliHubClient implements AutoCloseable {
   public HubResourceStream openResource(ExecutionResource resource) {
     requireEnabled();
     Objects.requireNonNull(resource, "resource");
-    URI uri = resolveResourceUri(firstText(resource.downloadUrl(), resource.contentUrl()));
-    HttpRequest.Builder request = HttpRequest.newBuilder(uri).GET();
-    SendResult result = send(request, requestTimeout());
+    URI uri =
+        transport.resolveResourceUri(firstText(resource.downloadUrl(), resource.contentUrl()));
+    OpenCliHubTransport.Response result =
+        transport.send(HttpRequest.newBuilder(uri).GET(), requestTimeout());
     HttpResponse<InputStream> response = result.response();
     DeadlineResponseBody body = result.body();
     try {
@@ -296,514 +267,50 @@ public class OpenCliHubClient implements AutoCloseable {
       body.expectLength(contentLength);
       return new HubResourceStream(body, contentLength, mediaType.strip());
     } catch (RuntimeException | Error exception) {
-      closeAfterFailure(body, exception);
+      OpenCliHubTransport.closeAfterFailure(body, exception);
       throw exception;
     }
   }
 
-  /**
-   * 统一鉴权发送：每次请求独立解析凭据并构造 Bearer Header； 401/403 触发 rejectUsed CAS 并抛出去敏 HTTP 错误；统一管理 response
-   * deadline，并在任何失败路径上释放已取得的响应正文。
-   */
-  private SendResult send(CredentialedRequest requestFactory, Duration timeout) {
-    PluginCredentialSnapshot snapshot = resolveCredential();
-    ScopedCredential credential = parseCredential(snapshot.payloadJson());
-    HttpRequest request;
-    try {
-      request =
-          requestFactory
-              .build(credential)
-              .copy()
-              .header("Authorization", PluginHttpSupport.bearer(credential.apiKey()))
-              .timeout(timeout)
-              .build();
-    } catch (IllegalArgumentException exception) {
-      log.warn(
-          "failed to construct OpenCLI Hub request type={}", exception.getClass().getSimpleName());
-      throw new OpenCliHubException(
-          Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential is invalid");
-    }
-    long deadline = System.nanoTime() + timeout.toNanos();
-    HttpResponse<InputStream> response;
-    try {
-      response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
-    } catch (IOException exception) {
-      throw hubFailure(transportKind(exception), "OpenCLI Hub request failed", exception);
-    } catch (IllegalArgumentException exception) {
-      throw new OpenCliHubException(Kind.INDETERMINATE, "OpenCLI Hub response headers are invalid");
-    } catch (InterruptedException exception) {
-      Thread.currentThread().interrupt();
-      throw hubFailure(Kind.INDETERMINATE, "OpenCLI Hub request interrupted", exception);
-    }
-
-    InputStream stream = response.body();
-    DeadlineResponseBody body = null;
-    try {
-      if (PluginHttpSupport.isAuthRejected(response.statusCode())) {
-        rejectUsed(snapshot);
-      }
-      body = new DeadlineResponseBody(stream, deadline);
-      if (response.statusCode() < 200 || response.statusCode() >= 300) {
-        throw httpError(response.statusCode(), body);
-      }
-      return new SendResult(response, body);
-    } catch (RuntimeException | Error failure) {
-      // 凭据作废与错误响应解释都可能任意失败：正文流必须在此释放，且原失败原样上抛。
-      closeAfterFailure(body == null ? stream : body, failure);
-      throw failure;
-    }
-  }
-
-  /** 与凭据无关的请求：调用方已在鉴权前构造并校验过 builder。 */
-  private SendResult send(HttpRequest.Builder requestBuilder, Duration timeout) {
-    return send(credential -> requestBuilder, timeout);
-  }
-
-  /** 发送 HTTP 请求并校验解包 OpenCLI Hub 标准响应信封中的业务数据。 */
-  private JsonNode sendEnvelope(CredentialedRequest requestFactory, Duration timeout) {
-    SendResult result = send(requestFactory, timeout);
-    HttpResponse<InputStream> response = result.response();
-    try (InputStream body = result.body()) {
-      String contentType = response.headers().firstValue("Content-Type").orElse("");
-      if (!contentType.toLowerCase(Locale.ROOT).startsWith("application/json")) {
-        throw malformed("success response Content-Type must be application/json");
-      }
-      byte[] bytes = readBounded(body, MAX_JSON_RESPONSE_BYTES, "JSON response");
-      JsonNode root = mapper.readTree(bytes);
-      if (root == null || !root.isObject()) {
-        throw malformed("Result envelope must be an object");
-      }
-      JsonNode status = required(root, "status");
-      if (!status.isIntegralNumber()
-          || !status.canConvertToInt()
-          || status.intValue() != response.statusCode()) {
-        throw malformed("Result envelope status must match HTTP status");
-      }
-      requiredText(root, "code");
-      JsonNode success = root.get("success");
-      if (success != null && (!success.isBoolean() || !success.booleanValue())) {
-        throw malformed("Result envelope success must be true");
-      }
-      return required(root, "data");
-    } catch (JacksonException exception) {
-      throw malformed("Result envelope must be valid JSON", exception);
-    } catch (IOException exception) {
-      throw closeFailure("OpenCLI Hub response", exception);
-    }
-  }
-
-  /** 与凭据无关的请求：仍走同一鉴权发送路径后再解包信封。 */
-  private JsonNode sendEnvelope(HttpRequest.Builder requestBuilder, Duration timeout) {
-    return sendEnvelope(credential -> requestBuilder, timeout);
-  }
-
-  private PluginCredentialSnapshot resolveCredential() {
-    PluginCredentialSnapshot snapshot;
-    try {
-      snapshot = credentials.resolve();
-    } catch (PluginCredentialUnavailableException exception) {
-      log.debug("OpenCLI Hub credential unavailable type={}", exception.getClass().getSimpleName());
-      throw new OpenCliHubException(
-          Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential is not available");
-    } catch (RuntimeException exception) {
-      // 未知运行时失败不是「没有凭据」：只记录异常类型，抛固定去敏错误，绝不把数据库/编程错误
-      // 投影成健康结果，也不携带原始消息或 cause。
-      log.warn(
-          "OpenCLI Hub credential resolution failed type={}", exception.getClass().getSimpleName());
-      throw new IllegalStateException("OpenCLI Hub credential resolution failed");
-    }
-    if (snapshot == null || snapshot.payloadJson() == null || snapshot.payloadJson().isBlank()) {
-      throw new OpenCliHubException(
-          Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential is not available");
-    }
-    return snapshot;
-  }
-
-  /**
-   * 从同一次 scoped snapshot 的载荷严格解析本次请求真正使用的凭据：必需 {@code apiKey} 与可选 {@code instanceId}。
-   *
-   * <p>载荷形状是宿主实际写入的秘密 JSON 对象，只允许这两个声明字段；任何其它字段、类型不符或越界都 fail closed。
-   */
-  private ScopedCredential parseCredential(String payloadJson) {
-    JsonNode root;
-    try {
-      root = CREDENTIAL_MAPPER.readTree(payloadJson);
-    } catch (JacksonException exception) {
-      log.warn(
-          "failed to parse OpenCLI Hub credential payload type={}",
-          exception.getClass().getSimpleName());
-      throw invalidCredential();
-    }
-    if (root == null || !root.isObject() || !root.has("apiKey")) {
-      throw invalidCredential();
-    }
-    String instanceId = null;
-    for (String field : root.propertyNames()) {
-      if (!"apiKey".equals(field) && !"instanceId".equals(field)) {
-        throw invalidCredential();
-      }
-    }
-    JsonNode apiKeyNode = root.get("apiKey");
-    if (!apiKeyNode.isTextual() || apiKeyNode.textValue().isBlank()) {
-      throw invalidCredential();
-    }
-    JsonNode instanceIdNode = root.get("instanceId");
-    if (instanceIdNode != null) {
-      if (!instanceIdNode.isTextual()) {
-        throw invalidCredential();
-      }
-      instanceId = requireInstanceId(instanceIdNode.textValue());
-    }
-    return new ScopedCredential(validateApiKey(apiKeyNode.textValue()), instanceId);
-  }
-
-  /** 私有身份沿用部署期 1..36 字符约束；非法取值只以固定去敏错误暴露，绝不回显取值。 */
-  private static String requireInstanceId(String value) {
-    try {
-      return OpenCliSettingsValidation.requireOptionalBoundedText(value.strip(), 36, "instanceId");
-    } catch (IllegalArgumentException error) {
-      throw invalidCredential();
-    }
-  }
-
-  private static OpenCliHubException invalidCredential() {
-    return new OpenCliHubException(
-        Kind.CREDENTIAL_UNAVAILABLE, "OpenCLI Hub credential payload is invalid");
-  }
-
-  private String validateApiKey(String apiKey) {
-    try {
-      PluginHttpSupport.bearer(apiKey);
-      return apiKey;
-    } catch (IllegalArgumentException error) {
-      throw invalidCredential();
-    }
-  }
-
-  private void rejectUsed(PluginCredentialSnapshot snapshot) {
-    PluginHttpSupport.rejectUsed(credentials, snapshot, AUTH_REJECTED_ERROR);
-  }
-
   private Execution parseExecution(JsonNode data) {
-    String id = validateExecutionId(requiredText(data, "id"));
-    String rawStatus = requiredText(data, "status");
+    String id = validateExecutionId(OpenCliHubProtocol.requiredText(data, "id"));
+    String rawStatus = OpenCliHubProtocol.requiredText(data, "status");
     ExecutionStatus status;
     try {
       status = ExecutionStatus.valueOf(rawStatus);
     } catch (IllegalArgumentException exception) {
-      throw malformed("unknown OpenCLI Hub execution status", exception);
+      throw OpenCliHubProtocol.malformed("unknown OpenCLI Hub execution status", exception);
     }
-    if (requiredBoolean(data, "stdoutTruncated") || requiredBoolean(data, "stderrTruncated")) {
-      throw malformed("truncated OpenCLI Hub execution output is not accepted");
+    if (OpenCliHubProtocol.requiredBoolean(data, "stdoutTruncated")
+        || OpenCliHubProtocol.requiredBoolean(data, "stderrTruncated")) {
+      throw OpenCliHubProtocol.malformed("truncated OpenCLI Hub execution output is not accepted");
     }
-    String stdout = optionalText(data, "stdout");
-    String stderr = optionalText(data, "stderr");
+    String stdout = OpenCliHubProtocol.optionalText(data, "stdout");
+    String stderr = OpenCliHubProtocol.optionalText(data, "stderr");
     if (stdout.length() > MAX_OUTPUT_CHARS || stderr.length() > MAX_OUTPUT_CHARS) {
-      throw malformed("OpenCLI Hub execution output exceeds local limit");
+      throw OpenCliHubProtocol.malformed("OpenCLI Hub execution output exceeds local limit");
     }
     List<ExecutionResource> resources = new ArrayList<>();
     JsonNode rawResources = data.get("resources");
     if (rawResources != null && !rawResources.isNull()) {
       if (!(rawResources instanceof ArrayNode array)) {
-        throw malformed("execution resources must be an array");
+        throw OpenCliHubProtocol.malformed("execution resources must be an array");
       }
       for (JsonNode item : array) {
-        long size = requiredLong(item, "size");
+        long size = OpenCliHubProtocol.requiredLong(item, "size");
         if (size <= 0L) {
-          throw malformed("execution resource size must be positive");
+          throw OpenCliHubProtocol.malformed("execution resource size must be positive");
         }
         resources.add(
             new ExecutionResource(
-                requiredText(item, "fileName"),
-                requiredText(item, "mimeType"),
+                OpenCliHubProtocol.requiredText(item, "fileName"),
+                OpenCliHubProtocol.requiredText(item, "mimeType"),
                 size,
-                optionalNullableText(item, "contentUrl"),
-                optionalNullableText(item, "downloadUrl")));
+                OpenCliHubProtocol.optionalNullableText(item, "contentUrl"),
+                OpenCliHubProtocol.optionalNullableText(item, "downloadUrl")));
       }
     }
     return new Execution(id, status, stdout, stderr, List.copyOf(resources));
-  }
-
-  private HttpRequest.Builder request(String pathAndQuery) {
-    if (origin == null) {
-      throw new OpenCliHubException(Kind.INDETERMINATE, "OpenCLI Hub baseUrl is not configured");
-    }
-    return HttpRequest.newBuilder(origin.resolve(pathAndQuery));
-  }
-
-  private OpenCliHubException httpError(int status, InputStream body) {
-    // 已确认收到 HTTP 响应：401/403 是远端确定性拒绝凭据，其它状态码不得被当作认证结论。
-    Kind kind = PluginHttpSupport.isAuthRejected(status) ? Kind.AUTH_REJECTED : Kind.HTTP_STATUS;
-    String message = "OpenCLI Hub HTTP " + status;
-    try {
-      drainErrorBody(body, MAX_ERROR_RESPONSE_BYTES);
-    } catch (IOException exception) {
-      return hubFailure(kind, message + " error response read failed", exception);
-    }
-    return new OpenCliHubException(kind, message);
-  }
-
-  private void drainErrorBody(InputStream input, int limit) throws IOException {
-    byte[] buffer = new byte[8192];
-    int remaining = limit;
-    while (remaining > 0) {
-      int read = input.read(buffer, 0, Math.min(buffer.length, remaining));
-      if (read == -1) {
-        return;
-      }
-      remaining -= read;
-    }
-    if (input.read() != -1) {
-      log.debug("OpenCLI Hub error response exceeded local limit");
-    }
-  }
-
-  private byte[] readBounded(InputStream input, int limit, String description) {
-    try {
-      return PluginHttpSupport.readBounded(input, limit);
-    } catch (ResponseTooLargeException exception) {
-      throw new OpenCliHubException(
-          Kind.PROTOCOL, "OpenCLI Hub " + description + " exceeds local limit");
-    } catch (IOException exception) {
-      throw hubFailure(Kind.PROTOCOL, "failed to read OpenCLI Hub " + description, exception);
-    }
-  }
-
-  private URI resolveResourceUri(String value) {
-    if (origin == null) {
-      throw new OpenCliHubException(Kind.INDETERMINATE, "OpenCLI Hub baseUrl is not configured");
-    }
-    if (value == null || value.isBlank()) {
-      throw malformed("execution resource has no contentUrl/downloadUrl");
-    }
-    URI parsed;
-    try {
-      parsed = URI.create(value);
-    } catch (IllegalArgumentException exception) {
-      throw malformed("execution resource URL is invalid", exception);
-    }
-    URI resolved = parsed.isAbsolute() ? parsed : origin.resolve(parsed);
-    URI normalized = resolved.normalize();
-    if (!sameOrigin(origin, resolved)
-        || resolved.getUserInfo() != null
-        || resolved.getFragment() != null
-        || resolved.getRawPath() == null
-        || !resolved.getRawPath().startsWith("/api/resources/")
-        || hasDotSegment(resolved.getPath())
-        || normalized.getRawPath() == null
-        || !normalized.getRawPath().startsWith("/api/resources/")) {
-      throw malformed(
-          "execution resource URL must stay on the configured origin under /api/resources/");
-    }
-    return resolved;
-  }
-
-  private static URI normalizeOrigin(URI baseUrl) {
-    int port = effectivePort(baseUrl);
-    try {
-      return new URI(
-          baseUrl.getScheme().toLowerCase(Locale.ROOT),
-          null,
-          baseUrl.getHost().toLowerCase(Locale.ROOT),
-          port == defaultPort(baseUrl.getScheme()) ? -1 : port,
-          "/",
-          null,
-          null);
-    } catch (URISyntaxException exception) {
-      throw new IllegalArgumentException("opencli-hub baseUrl origin is invalid", exception);
-    }
-  }
-
-  private static boolean sameOrigin(URI left, URI right) {
-    return left.getScheme().equalsIgnoreCase(right.getScheme())
-        && left.getHost().equalsIgnoreCase(right.getHost())
-        && effectivePort(left) == effectivePort(right);
-  }
-
-  private static int effectivePort(URI uri) {
-    return uri.getPort() == -1 ? defaultPort(uri.getScheme()) : uri.getPort();
-  }
-
-  private static int defaultPort(String scheme) {
-    return "https".equalsIgnoreCase(scheme) ? 443 : 80;
-  }
-
-  private static String safeBasename(String filename) {
-    if (filename == null) {
-      throw new IllegalArgumentException("filename must not be null");
-    }
-    String normalized = Normalizer.normalize(filename, Normalizer.Form.NFKC);
-    int slash = Math.max(normalized.lastIndexOf('/'), normalized.lastIndexOf('\\'));
-    String basename = (slash >= 0 ? normalized.substring(slash + 1) : normalized).strip();
-    if (basename.isEmpty() || ".".equals(basename) || "..".equals(basename)) {
-      return "resource.bin";
-    }
-
-    String extension = safeTrailingExtension(basename);
-    String rawStem = basename.substring(0, basename.length() - extension.length());
-    int stemBudget = MAX_UPLOAD_BASENAME_LENGTH - extension.length();
-    StringBuilder safeStem = new StringBuilder(Math.min(rawStem.length(), stemBudget));
-    for (int index = 0; index < rawStem.length() && safeStem.length() < stemBudget; ) {
-      int codePoint = rawStem.codePointAt(index);
-      if ((codePoint >= 'A' && codePoint <= 'Z')
-          || (codePoint >= 'a' && codePoint <= 'z')
-          || (codePoint >= '0' && codePoint <= '9')
-          || codePoint == '.'
-          || codePoint == '_'
-          || codePoint == '-') {
-        safeStem.append((char) codePoint);
-      } else {
-        safeStem.append('_');
-      }
-      index += Character.charCount(codePoint);
-    }
-    if (safeStem.isEmpty()) {
-      safeStem.append('_');
-    }
-    for (int index = 0; index < safeStem.length() && safeStem.charAt(index) == '.'; index++) {
-      safeStem.setCharAt(index, '_');
-    }
-    for (int index = safeStem.length() - 1; index >= 0 && safeStem.charAt(index) == '.'; index--) {
-      safeStem.setCharAt(index, '_');
-    }
-
-    String result = safeStem.append(extension).toString();
-    if (result.isBlank() || ".".equals(result) || "..".equals(result)) {
-      return "resource.bin";
-    }
-    return result;
-  }
-
-  private static String safeTrailingExtension(String basename) {
-    int dot = basename.lastIndexOf('.');
-    int extensionLength = basename.length() - dot - 1;
-    if (dot < 0 || extensionLength < 1 || extensionLength > MAX_UPLOAD_EXTENSION_LENGTH) {
-      return "";
-    }
-    for (int index = dot + 1; index < basename.length(); index++) {
-      char character = basename.charAt(index);
-      if (!((character >= 'A' && character <= 'Z')
-          || (character >= 'a' && character <= 'z')
-          || (character >= '0' && character <= '9'))) {
-        return "";
-      }
-    }
-    return basename.substring(dot);
-  }
-
-  private static String safeMediaType(String mediaType) {
-    if (mediaType == null) {
-      throw new IllegalArgumentException("mediaType must not be null");
-    }
-    String normalized = mediaType.strip().toLowerCase(Locale.ROOT);
-    if (!normalized.matches("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+")) {
-      throw new IllegalArgumentException("mediaType must be a simple MIME type");
-    }
-    return normalized;
-  }
-
-  static boolean isCanonicalResourcePath(String resourcePath) {
-    if (resourcePath == null || !VIRTUAL_RESOURCE_PATH.matcher(resourcePath).matches()) {
-      return false;
-    }
-    URI parsed;
-    try {
-      parsed = URI.create(resourcePath);
-    } catch (IllegalArgumentException exception) {
-      return false;
-    }
-    return parsed.getQuery() == null
-        && parsed.getFragment() == null
-        && !hasDotSegment(parsed.getPath())
-        && parsed.normalize().getPath() != null
-        && parsed.normalize().getPath().startsWith("/resources/");
-  }
-
-  private static void validateVirtualResourcePath(String resourcePath) {
-    try {
-      URI.create(resourcePath);
-    } catch (IllegalArgumentException exception) {
-      throw malformed("upload resourcePath must be a canonical /resources/ path", exception);
-    }
-    if (!isCanonicalResourcePath(resourcePath)) {
-      throw malformed("upload resourcePath must be a canonical /resources/ path");
-    }
-  }
-
-  private static boolean hasDotSegment(String path) {
-    if (path == null) {
-      return true;
-    }
-    for (String segment : path.split("/", -1)) {
-      if (".".equals(segment) || "..".equals(segment)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
-  private static String validateExecutionId(String value) {
-    if (value == null || !EXECUTION_ID.matcher(value).matches()) {
-      throw new IllegalArgumentException("executionId is invalid");
-    }
-    return value;
-  }
-
-  private static JsonNode required(JsonNode node, String field) {
-    if (node == null || !node.isObject()) {
-      throw malformed("expected JSON object while reading " + field);
-    }
-    JsonNode value = node.get(field);
-    if (value == null || value.isNull()) {
-      throw malformed(field + " is required");
-    }
-    return value;
-  }
-
-  private static String requiredText(JsonNode node, String field) {
-    JsonNode value = required(node, field);
-    if (!value.isTextual() || value.textValue().isBlank()) {
-      throw malformed(field + " must be non-blank text");
-    }
-    return value.textValue();
-  }
-
-  private static boolean requiredBoolean(JsonNode node, String field) {
-    JsonNode value = required(node, field);
-    if (!value.isBoolean()) {
-      throw malformed(field + " must be boolean");
-    }
-    return value.booleanValue();
-  }
-
-  private static long requiredLong(JsonNode node, String field) {
-    JsonNode value = required(node, field);
-    if (!value.isIntegralNumber() || !value.canConvertToLong()) {
-      throw malformed(field + " must be an integer");
-    }
-    return value.longValue();
-  }
-
-  private static String optionalText(JsonNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value == null || value.isNull()) {
-      return "";
-    }
-    if (!value.isTextual()) {
-      throw malformed(field + " must be text or null");
-    }
-    return value.textValue();
-  }
-
-  private static String optionalNullableText(JsonNode node, String field) {
-    JsonNode value = node.get(field);
-    if (value == null || value.isNull()) {
-      return null;
-    }
-    if (!value.isTextual() || value.textValue().isBlank()) {
-      throw malformed(field + " must be non-blank text or null");
-    }
-    return value.textValue();
   }
 
   private static String firstText(String first, String second) {
@@ -834,86 +341,12 @@ public class OpenCliHubClient implements AutoCloseable {
     return Duration.ofMillis(settings.longPollTimeoutMillis());
   }
 
-  private static OpenCliHubException malformed(String message) {
-    return new OpenCliHubException(Kind.PROTOCOL, "Malformed OpenCLI Hub response: " + message);
-  }
-
-  private static OpenCliHubException malformed(String message, Throwable cause) {
-    log.warn(
-        "Malformed OpenCLI Hub response: {} type={}", message, cause.getClass().getSimpleName());
-    return new OpenCliHubException(Kind.PROTOCOL, "Malformed OpenCLI Hub response: " + message);
-  }
-
-  private static OpenCliHubException hubFailure(Kind kind, String message, Throwable cause) {
-    log.warn("OpenCLI Hub failure: {} type={}", message, cause.getClass().getSimpleName());
-    return new OpenCliHubException(kind, message, timeoutCause(cause));
-  }
-
-  /**
-   * IO 失败的最小分类：只有可证明「连接从未建立」的失败才是 {@link Kind#TRANSPORT}，其余无法区分的 IO 失败保持 {@link
-   * Kind#INDETERMINATE}，绝不把未知失败说成不可达。
-   */
-  private static Kind transportKind(IOException cause) {
-    if (cause instanceof HttpConnectTimeoutException
-        || cause instanceof ConnectException
-        || cause instanceof UnknownHostException
-        || cause instanceof NoRouteToHostException
-        || cause instanceof PortUnreachableException) {
-      return Kind.TRANSPORT;
+  private static String validateExecutionId(String value) {
+    if (value == null || !EXECUTION_ID.matcher(value).matches()) {
+      throw new IllegalArgumentException("executionId is invalid");
     }
-    return Kind.INDETERMINATE;
+    return value;
   }
-
-  private static UncheckedIOException closeFailure(String description, IOException cause) {
-    log.warn("failed to close {} type={}", description, cause.getClass().getSimpleName());
-    return new UncheckedIOException(new IOException("failed to close " + description));
-  }
-
-  private static Throwable timeoutCause(Throwable cause) {
-    if (cause instanceof HttpTimeoutException) {
-      return new HttpTimeoutException("OpenCLI Hub response deadline exceeded");
-    }
-    return null;
-  }
-
-  /**
-   * 已取得 response 后的唯一清理：释放正文流并保留原 primary。
-   *
-   * <p>非致命 close 失败只附加固定分类，不泄露底层异常详情；Error 原样保留为 suppressed，绝不替换 primary。
-   */
-  private static void closeAfterFailure(InputStream body, Throwable primary) {
-    try {
-      body.close();
-    } catch (IOException | RuntimeException | Error closeFailure) {
-      log.debug("OpenCLI Hub stream close failed type={}", closeFailure.getClass().getSimpleName());
-      if (closeFailure != primary) {
-        primary.addSuppressed(
-            closeFailure instanceof Error
-                ? closeFailure
-                : new IOException(
-                    "OpenCLI Hub response close failed type="
-                        + closeFailure.getClass().getSimpleName()));
-      }
-    }
-  }
-
-  /** 一次请求真正使用的 scoped 凭据：同一份 snapshot 解析出的认证密钥与可选私有身份；永不回显取值。 */
-  record ScopedCredential(String apiKey, String instanceId) {
-
-    @Override
-    public String toString() {
-      return "ScopedCredential[<redacted>]";
-    }
-  }
-
-  /** 出网请求构造器：在真正鉴权发送前用本次解析出的 scoped 凭据补全请求。 */
-  @FunctionalInterface
-  private interface CredentialedRequest {
-
-    HttpRequest.Builder build(ScopedCredential credential);
-  }
-
-  private record SendResult(HttpResponse<InputStream> response, DeadlineResponseBody body) {}
 
   public enum ExecutionStatus {
     /** 任务已排队或等待执行。 */

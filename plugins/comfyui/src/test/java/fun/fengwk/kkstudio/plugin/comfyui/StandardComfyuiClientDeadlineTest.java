@@ -136,7 +136,7 @@ class StandardComfyuiClientDeadlineTest {
   void oversizedJsonResponseIsRejectedAtTheBoundedLimit() throws Exception {
     // 超 1MiB 的 2xx JSON 必须在有界读取处失败，而不是完整物化到内存。
     byte[] body =
-        ("{\"padding\":\"" + "a".repeat(StandardComfyuiClient.MAX_JSON_BYTES + 16) + "\"}")
+        ("{\"padding\":\"" + "a".repeat(ComfyuiHttpTransport.MAX_JSON_BYTES + 16) + "\"}")
             .getBytes(StandardCharsets.UTF_8);
     HttpServer server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext(

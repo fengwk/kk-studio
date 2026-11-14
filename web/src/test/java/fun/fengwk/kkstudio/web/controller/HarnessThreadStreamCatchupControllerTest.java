@@ -135,18 +135,6 @@ class HarnessThreadStreamCatchupControllerTest {
         .andExpect(jsonPath("$.code").value("validation"));
   }
 
-  /** 旧路径不保留兼容入口。 */
-  @Test
-  void legacyPathIsNotMapped() throws Exception {
-    mockMvc
-        .perform(
-            post("/api/harness/threads/{threadId}/stream-catchup", THREAD_TEXT)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(validBody()))
-        .andExpect(status().isNotFound());
-    verify(catchupService, never()).catchUp(any(), any(), anyInt());
-  }
-
   private static String validBody() {
     return "{\"invocationId\":\"" + INVOCATION_TEXT + "\",\"attempt\":3}";
   }

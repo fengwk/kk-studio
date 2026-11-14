@@ -55,7 +55,7 @@ final class OpenCliAdapterState {
       Object resourcePath = map.get("resourcePath");
       if (!(resourceId instanceof String idText)
           || !(resourcePath instanceof String path)
-          || !OpenCliHubClient.isCanonicalResourcePath(path)) {
+          || !OpenCliHubProtocol.isCanonicalResourcePath(path)) {
         throw new IllegalArgumentException(
             "adapterState.uploads contains an invalid resourceId/resourcePath");
       }

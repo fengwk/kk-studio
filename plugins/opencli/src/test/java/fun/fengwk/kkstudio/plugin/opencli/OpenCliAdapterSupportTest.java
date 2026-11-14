@@ -253,17 +253,17 @@ class OpenCliAdapterSupportTest {
   /** 验证规范虚拟资源路径谓词对合法格式与非法格式的判定。 */
   @Test
   void canonicalResourcePathValidatesVirtualPathCorrectly() {
-    assertTrue(OpenCliHubClient.isCanonicalResourcePath("/resources/2026-08-10/a.png"));
-    assertTrue(OpenCliHubClient.isCanonicalResourcePath("/resources/sub/dir/res.bin"));
+    assertTrue(OpenCliHubProtocol.isCanonicalResourcePath("/resources/2026-08-10/a.png"));
+    assertTrue(OpenCliHubProtocol.isCanonicalResourcePath("/resources/sub/dir/res.bin"));
 
-    assertFalse(OpenCliHubClient.isCanonicalResourcePath(null));
-    assertFalse(OpenCliHubClient.isCanonicalResourcePath(""));
-    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/api/resources/a.png"));
-    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/a.png?query=1"));
-    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/a.png#fragment"));
-    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/../outside.png"));
-    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/./inside.png"));
-    assertFalse(OpenCliHubClient.isCanonicalResourcePath("/resources/%zz"));
+    assertFalse(OpenCliHubProtocol.isCanonicalResourcePath(null));
+    assertFalse(OpenCliHubProtocol.isCanonicalResourcePath(""));
+    assertFalse(OpenCliHubProtocol.isCanonicalResourcePath("/api/resources/a.png"));
+    assertFalse(OpenCliHubProtocol.isCanonicalResourcePath("/resources/a.png?query=1"));
+    assertFalse(OpenCliHubProtocol.isCanonicalResourcePath("/resources/a.png#fragment"));
+    assertFalse(OpenCliHubProtocol.isCanonicalResourcePath("/resources/../outside.png"));
+    assertFalse(OpenCliHubProtocol.isCanonicalResourcePath("/resources/./inside.png"));
+    assertFalse(OpenCliHubProtocol.isCanonicalResourcePath("/resources/%zz"));
   }
 
   private static CanvasFunctionFrozenReference image(long resourceId, String name) {
