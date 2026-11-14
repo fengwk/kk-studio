@@ -78,6 +78,19 @@ if [ -n "${KK_STUDIO_DB_URL:-}" ]; then
     DB_PORT="${BASH_REMATCH[3]:-5432}"
   fi
 fi
+
+# deploy/local compose 只在未被覆盖的默认端点上才是当前 E2E 数据库；其它端点必须由宿主 psql 访问。
+is_local_compose_postgres_endpoint() {
+  case "$DB_HOST:$DB_PORT" in
+    127.0.0.1:5432|localhost:5432)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 export KK_STUDIO_DB_URL="jdbc:postgresql://${DB_HOST}:${DB_PORT}/${E2E_DEDICATED_DATABASE}"
 export KK_STUDIO_DB_USER="$DB_USER"
 export KK_STUDIO_DB_PASSWORD="$DB_PASSWORD"
@@ -265,11 +278,15 @@ exec_postgres_admin_sql() {
   if command -v psql >/dev/null 2>&1; then
     PGPASSWORD="$DB_PASSWORD" psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d postgres \
       -v ON_ERROR_STOP=1 -c "$sql"
-  elif command -v docker >/dev/null 2>&1 && [ -n "$(docker compose -f "$REPO_ROOT/deploy/local/compose.yaml" ps --status running -q postgres 2>/dev/null)" ]; then
+  elif ! is_local_compose_postgres_endpoint; then
+    # 数据库端点被覆盖时绝不回退到共享的 deploy/local 实例：那会重置另一套数据库。
+    die "cannot reset E2E database at $DB_HOST:$DB_PORT: host psql is required unless the endpoint is the local compose postgres"
+  elif ! command -v docker >/dev/null 2>&1 \
+    || [ -z "$(docker compose -f "$REPO_ROOT/deploy/local/compose.yaml" ps --status running -q postgres 2>/dev/null)" ]; then
+    die "cannot reset E2E database: psql is not installed on host and deploy/local postgres container is not running"
+  else
     docker compose -f "$REPO_ROOT/deploy/local/compose.yaml" exec -T -e PGPASSWORD="$DB_PASSWORD" postgres \
       psql -h 127.0.0.1 -p 5432 -U "$DB_USER" -d postgres -v ON_ERROR_STOP=1 -c "$sql"
-  else
-    die "cannot reset E2E database: psql is not installed on host and deploy/local postgres container is not running"
   fi
 }
 
