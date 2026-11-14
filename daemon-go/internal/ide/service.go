@@ -64,13 +64,6 @@ type ServiceOptions struct {
 	MaxViews           int
 }
 
-// IdeCommandService is the command/lease boundary consumed by runtime; transport owns wire encoding.
-type IdeCommandService interface {
-	HandleCommand(context.Context, *protocol.IdeCommand) *protocol.IdeResult
-	ApplyLease(*protocol.IdeLease, time.Time)
-	Close(context.Context) error
-}
-
 type viewState string
 
 const (
@@ -267,11 +260,6 @@ func (s *Service) HandleCommand(ctx context.Context, command *protocol.IdeComman
 		return failureResult(err, s.snapshot(), true)
 	}
 	return result
-}
-
-// Handle is a short name for the runtime-owned IDE command entrypoint.
-func (s *Service) Handle(ctx context.Context, command *protocol.IdeCommand) *protocol.IdeResult {
-	return s.HandleCommand(ctx, command)
 }
 
 func (s *Service) writeManagedWorkspace(path, directory string) error {
@@ -1815,5 +1803,4 @@ func optionalStringPtr(value string) *string {
 	return &value
 }
 
-var _ IdeCommandService = (*Service)(nil)
 var _ transport.ViewResolver = (*Service)(nil)
