@@ -255,33 +255,48 @@ public final class ModelRuntimeConfigParser {
       if (variant == null) {
         throw invalid(path + " must be an object");
       }
-      if (variant.getId() == null || variant.getId().isBlank()) {
-        throw invalid(path + ".id must be a non-blank string");
-      }
-      if (!variant.getId().equals(variant.getId().trim())) {
-        throw invalid(path + ".id must not have surrounding whitespace");
-      }
-      if (!ids.add(variant.getId())) {
-        throw invalid("config.variants contains duplicate id: " + variant.getId());
-      }
-      if (variant.getPromptCacheRetention() == null) {
-        throw invalid(path + ".promptCacheRetention is required");
-      }
-      // reasoning 关闭时任何非 null reasoningEffort 都是自相矛盾配置；null（协议默认）仍然合法。
-      if (Boolean.FALSE.equals(abilities.getReasoning()) && variant.getReasoningEffort() != null) {
-        throw invalid(
-            path + ".reasoningEffort must be null when config.abilities.reasoning is false");
-      }
-      validateReasoningEffort(variant.getReasoningEffort(), path);
-      if (variant.getReasoningEffort() != null) {
-        variant.setReasoningEffort(variant.getReasoningEffort().trim());
-      }
-      String json = variant.getProtocolOptionsJson();
-      ProviderProtocolOptions parsed = toProtocolOptions(json, path);
-      variant.setProtocolOptionsJson(parsed.isEmpty() ? "{}" : json.trim());
-      options.add(parsed);
+      checkVariantId(variant, ids, path);
+      options.add(normalizeVariant(variant, abilities, path));
     }
-    String defaultVariant = config.getDefaultVariant();
+    validateDefaultVariant(config.getDefaultVariant(), ids);
+    return options;
+  }
+
+  /** 变体 id 必须非空、无首尾空白且全局唯一；三条拒绝按此顺序执行。 */
+  private static void checkVariantId(ModelVariantDTO variant, Set<String> ids, String path) {
+    if (variant.getId() == null || variant.getId().isBlank()) {
+      throw invalid(path + ".id must be a non-blank string");
+    }
+    if (!variant.getId().equals(variant.getId().trim())) {
+      throw invalid(path + ".id must not have surrounding whitespace");
+    }
+    if (!ids.add(variant.getId())) {
+      throw invalid("config.variants contains duplicate id: " + variant.getId());
+    }
+  }
+
+  /** 校验并规范化单个变体，返回已解析的协议选项。 */
+  private static ProviderProtocolOptions normalizeVariant(
+      ModelVariantDTO variant, ModelAbilitiesDTO abilities, String path) {
+    if (variant.getPromptCacheRetention() == null) {
+      throw invalid(path + ".promptCacheRetention is required");
+    }
+    // reasoning 关闭时任何非 null reasoningEffort 都是自相矛盾配置；null（协议默认）仍然合法。
+    if (Boolean.FALSE.equals(abilities.getReasoning()) && variant.getReasoningEffort() != null) {
+      throw invalid(
+          path + ".reasoningEffort must be null when config.abilities.reasoning is false");
+    }
+    validateReasoningEffort(variant.getReasoningEffort(), path);
+    if (variant.getReasoningEffort() != null) {
+      variant.setReasoningEffort(variant.getReasoningEffort().trim());
+    }
+    String json = variant.getProtocolOptionsJson();
+    ProviderProtocolOptions parsed = toProtocolOptions(json, path);
+    variant.setProtocolOptionsJson(parsed.isEmpty() ? "{}" : json.trim());
+    return parsed;
+  }
+
+  private static void validateDefaultVariant(String defaultVariant, Set<String> ids) {
     if (defaultVariant == null || defaultVariant.isBlank()) {
       throw invalid("config.defaultVariant must be a non-blank string");
     }
@@ -291,7 +306,6 @@ public final class ModelRuntimeConfigParser {
     if (!ids.contains(defaultVariant)) {
       throw invalid("config.defaultVariant must match a variants[].id");
     }
-    return options;
   }
 
   private static void validateReasoningEffort(String reasoningEffort, String path) {

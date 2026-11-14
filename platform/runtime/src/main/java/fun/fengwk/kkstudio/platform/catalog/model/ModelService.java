@@ -139,6 +139,12 @@ public class ModelService {
             .configJson(mutation.configJson())
             .groupConfigJson(mutation.groupConfigJson())
             .build();
+    persist(name, model, expected);
+    return toDto(repository.getByName(model.name()));
+  }
+
+  /** 按名字是否变化选择 rename 或 CAS update，并把持久层异常翻译成与其余模型操作一致的领域错误。 */
+  private void persist(String name, Model model, long expected) {
     try {
       if (!name.equals(model.name())) {
         repository.rename(name, model, expected);
@@ -158,7 +164,6 @@ public class ModelService {
       }
       throw error;
     }
-    return toDto(repository.getByName(model.name()));
   }
 
   @Transactional

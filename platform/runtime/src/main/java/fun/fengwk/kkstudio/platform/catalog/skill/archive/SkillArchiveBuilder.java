@@ -186,6 +186,12 @@ public final class SkillArchiveBuilder {
       if (path.isEmpty()) {
         return;
       }
+      addParents(path);
+      putEntry(path, input);
+    }
+
+    /** 逐级补出隐式目录；隐式目录不得覆盖同名文件，否则形成路径冲突。 */
+    private void addParents(String path) throws IOException {
       String[] segments = path.split("/");
       String parent = "";
       for (int i = 0; i < segments.length - 1; i++) {
@@ -197,6 +203,10 @@ public final class SkillArchiveBuilder {
           throw new IOException("Path conflict: " + parent);
         }
       }
+    }
+
+    /** 写入正式条目；只有目录能覆盖已有目录，其余同名组合一律拒绝。 */
+    private void putEntry(String path, InputEntry input) throws IOException {
       checkPortable(path);
       InputEntry old = entries.get(path);
       if (old != null && (old.type() != Type.DIRECTORY || input.type() != Type.DIRECTORY)) {
@@ -218,7 +228,8 @@ public final class SkillArchiveBuilder {
     }
   }
 
-  private static String normalize(String path, boolean directory) throws IOException {
+  /** 拒绝绝对路径、盘符、控制字符与不可编码文本；长度上限单独检查，因为两者的拒绝文案不同。 */
+  private static void requirePortablePath(String path, boolean directory) throws IOException {
     if (path == null
         || path.isEmpty()
         || path.startsWith("/")
@@ -232,6 +243,24 @@ public final class SkillArchiveBuilder {
     if (path.length() > 4096) {
       throw new IOException("Path too long: " + path);
     }
+  }
+
+  /** 拒绝不跨平台的段：空段、`.` 之外的相对段、结尾点/空格、Windows 保留字符与设备名。 */
+  private static void requirePortableSegment(String part, String path) throws IOException {
+    String upper = part.toUpperCase(Locale.ROOT);
+    String stem = upper.split("\\.", 2)[0];
+    if (part.isEmpty()
+        || part.equals("..")
+        || part.endsWith(".")
+        || part.endsWith(" ")
+        || part.chars().anyMatch(c -> "<>:\"|?*".indexOf(c) >= 0)
+        || stem.matches("CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]")) {
+      throw new IOException("Invalid path: " + path);
+    }
+  }
+
+  private static String normalize(String path, boolean directory) throws IOException {
+    requirePortablePath(path, directory);
     String candidate =
         directory && path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
     List<String> parts = new ArrayList<>();
@@ -239,16 +268,7 @@ public final class SkillArchiveBuilder {
       if (part.equals(".")) {
         continue;
       }
-      String upper = part.toUpperCase(Locale.ROOT);
-      String stem = upper.split("\\.", 2)[0];
-      if (part.isEmpty()
-          || part.equals("..")
-          || part.endsWith(".")
-          || part.endsWith(" ")
-          || part.chars().anyMatch(c -> "<>:\"|?*".indexOf(c) >= 0)
-          || stem.matches("CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]")) {
-        throw new IOException("Invalid path: " + path);
-      }
+      requirePortableSegment(part, path);
       parts.add(part);
     }
     if (parts.isEmpty() && !directory) {
@@ -258,12 +278,8 @@ public final class SkillArchiveBuilder {
   }
 
   private Result build(Accumulator acc) throws IOException {
-    String root = "";
+    String root = resolveRoot(acc.entries);
     Set<String> dirs = childDirectories(acc.entries, root);
-    if (skillsAt(acc.entries, root, dirs).isEmpty() && dirs.size() == 1) {
-      root = dirs.iterator().next() + "/";
-      dirs = childDirectories(acc.entries, root);
-    }
     Set<String> skills = skillsAt(acc.entries, root, dirs);
     if (skills.isEmpty()) {
       throw new IOException("No skills found");
@@ -272,35 +288,71 @@ public final class SkillArchiveBuilder {
     ignored.removeAll(skills);
     List<SkillManifestEntry> manifest = new ArrayList<>();
     Map<String, InputEntry> output = new TreeMap<>();
+    collectSkills(acc.entries, root, skills, manifest, output);
+    byte[] bytes = writeArchive(output);
+    return new Result(bytes, List.copyOf(manifest), List.copyOf(ignored), index(bytes, output));
+  }
+
+  /** 仅有一个顶层目录且其下无技能时，把该目录当作归档根，兼容包了一层目录的上传。 */
+  private static String resolveRoot(Map<String, InputEntry> entries) {
+    Set<String> dirs = childDirectories(entries, "");
+    if (skillsAt(entries, "", dirs).isEmpty() && dirs.size() == 1) {
+      return dirs.iterator().next() + "/";
+    }
+    return "";
+  }
+
+  /** 逐个技能解析 manifest 并收集输出条目；SKILL.md 的解析失败统一换成带技能路径的 IOException。 */
+  private static void collectSkills(
+      Map<String, InputEntry> entries,
+      String root,
+      Set<String> skills,
+      List<SkillManifestEntry> manifest,
+      Map<String, InputEntry> output)
+      throws IOException {
     for (String skill : skills) {
       try {
         SkillNames.canonicalSkillName(skill);
-        byte[] content = acc.entries.get(root + skill + "/SKILL.md").content();
-        String text =
-            StandardCharsets.UTF_8
-                .newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(ByteBuffer.wrap(content))
-                .toString();
-        manifest.add(SkillManifestScanner.parseFrontmatter(skill, text));
+        byte[] content = entries.get(root + skill + "/SKILL.md").content();
+        manifest.add(SkillManifestScanner.parseFrontmatter(skill, decodeUtf8(content)));
       } catch (IllegalArgumentException | SkillGitException | CharacterCodingException e) {
         throw new IOException("Invalid " + root + skill + "/SKILL.md: " + e.getMessage(), e);
       }
-      String prefix = root + skill;
-      for (InputEntry entry : acc.entries.values()) {
-        if (entry.path().equals(prefix) || entry.path().startsWith(prefix + "/")) {
-          if (entry.type() != Type.FILE && entry.type() != Type.DIRECTORY) {
-            throw new IOException("Forbidden entry type: " + entry.path());
-          }
-          String name = entry.path().substring(root.length());
-          if (Arrays.asList(name.split("/")).contains(".git")) {
-            continue;
-          }
-          output.put(name + (entry.type() == Type.DIRECTORY ? "/" : ""), entry);
-        }
-      }
+      collectSkillEntries(entries, root, skill, output);
     }
+  }
+
+  /** 严格按 UTF-8 解码；非法字节序列必须暴露给调用方，不能静默替换。 */
+  private static String decodeUtf8(byte[] content) throws CharacterCodingException {
+    return StandardCharsets.UTF_8
+        .newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(content))
+        .toString();
+  }
+
+  /** 收集属于该技能的条目：目录保持尾斜杠，`.git` 目录整枝丢弃，链接等特殊类型拒绝。 */
+  private static void collectSkillEntries(
+      Map<String, InputEntry> entries, String root, String skill, Map<String, InputEntry> output)
+      throws IOException {
+    String prefix = root + skill;
+    for (InputEntry entry : entries.values()) {
+      if (!entry.path().equals(prefix) && !entry.path().startsWith(prefix + "/")) {
+        continue;
+      }
+      if (entry.type() != Type.FILE && entry.type() != Type.DIRECTORY) {
+        throw new IOException("Forbidden entry type: " + entry.path());
+      }
+      String name = entry.path().substring(root.length());
+      if (Arrays.asList(name.split("/")).contains(".git")) {
+        continue;
+      }
+      output.put(name + (entry.type() == Type.DIRECTORY ? "/" : ""), entry);
+    }
+  }
+
+  private byte[] writeArchive(Map<String, InputEntry> output) throws IOException {
     ByteArrayOutputStream buffer = new ByteArrayOutputStream();
     try (ZipArchiveOutputStream zip =
         new ZipArchiveOutputStream(new BoundedOutputStream(buffer, limits.compressed()))) {
@@ -318,9 +370,7 @@ public final class SkillArchiveBuilder {
         zip.closeArchiveEntry();
       }
     }
-    byte[] bytes = buffer.toByteArray();
-    List<IndexEntry> index = index(bytes, output);
-    return new Result(bytes, List.copyOf(manifest), List.copyOf(ignored), index);
+    return buffer.toByteArray();
   }
 
   private List<IndexEntry> index(byte[] bytes, Map<String, InputEntry> expected)
