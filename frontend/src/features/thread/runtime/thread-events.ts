@@ -1,4 +1,4 @@
-import { asRecord, formatRawJsonText, getRecordList } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
 import { getString } from '@/shared/lib/value'
 import type {
   RealtimeModelStream,
@@ -6,90 +6,30 @@ import type {
 import type {
   RealtimeToolStream,
 } from '@/features/thread/runtime/thread-realtime/tool-stream'
-import { contentText } from '@/features/thread/runtime/thread-timeline/content-utils'
-import {
-  accumulateTurnUsage,
-  formatTurnUsageText,
-  formatUsageCost,
-  parseAssistantUsage,
-} from '@/features/thread/runtime/thread-timeline/turn-usage-format'
-import type {
-  TurnUsage,
-} from '@/features/thread/runtime/thread-timeline-types'
-import { formatBackendDateSeconds } from '@/shared/lib/date-format'
-import { translate, type TranslationKey } from '@/shared/i18n'
 import type {
   HarnessActiveAssistantOutputDTO,
   HarnessGenerationFailureDTO,
   HarnessSessionEntryDTO,
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
+import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events-types'
+import {
+  accumulateUsage,
+  compactJson,
+  prettyJson,
+  scalarText,
+} from '@/features/thread/runtime/thread-events-json'
+import { projectEntryRecord } from '@/features/thread/runtime/thread-events-entry'
+import {
+  projectActiveModelRecord,
+  projectActiveToolRecord,
+  projectAttemptFailureRecord,
+} from '@/features/thread/runtime/thread-events-active'
 
-/**
- * Event 投影的独立模型：不依赖 DialogueMessage 与 transcript 渲染。
- *
- * 输入持久 Entries 与活跃 overlay（activeAssistantOutput / toolInvocations /
- * generationFailures / realtime streams），输出有序的 ThreadEventRecord 列表。
- * durable Entry 全类型都会保留且**恰好一条记录**（含控制边界 TURN_START /
- * TURN_END / COMPACTION）；活跃 model/tool invocation 是单条 synthetic 记录
- * （Provider delta token 绝不逐条成行），并锚定在所属 durable Entry 之后。
- */
-type ThreadEventSource = 'entry' | 'active-model' | 'active-tool' | 'attempt-failure'
+export type { ThreadEventRecord } from '@/features/thread/runtime/thread-events-types'
 
-type ThreadEventKind =
-  | 'ROOT'
-  | 'TURN_START'
-  | 'SETTINGS'
-  | 'USER_MESSAGE'
-  | 'ASSISTANT_MESSAGE'
-  | 'TOOL_CALL'
-  | 'TOOL_RESULT'
-  | 'NOTIFICATION'
-  | 'FORK'
-  | 'MODEL_ATTEMPT_FAILURE'
-  | 'ASSISTANT_ERROR'
-  | 'ASSISTANT_ABORTED'
-  | 'UNKNOWN_ENTRY'
-  | 'CUSTOM_MESSAGE'
-  | 'COMPACTION'
-  | 'TURN_END'
-  | 'ACTIVE_MODEL_INVOCATION'
-  | 'ACTIVE_TOOL_INVOCATION'
-
-type ThreadEventStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
-
-interface ThreadEventDetailRow {
-  label: string
-  value: string
-}
-
-export interface ThreadEventRecord {
-  id: string
-  source: ThreadEventSource
-  /** durable Entry id；synthetic 活跃记录为 null（不冒充持久事实）。 */
-  entryId: string | null
-  /** 所属 Turn 的 TURN_START entryId；TURN_START 之前的记录为 null。 */
-  turnStartEntryId: string | null
-  /** 1-based Turn 序号；TURN_START 之前的记录为 0。 */
-  turnNumber: number
-  kind: ThreadEventKind
-  status: ThreadEventStatus
-  /**
-   * 调试标签：durable Entry 使用语义标题（消息按真实 USER/ASSISTANT/TOOL 角色，通知按真实
-   * kind），synthetic 使用内部 kind 名。entryType 只在详情行保留，不覆盖语义标题。
-   */
-  title: string
-  /** 单行摘要：durable Entry 使用压缩后的 payload JSON。 */
-  summary: string
-  /** epoch 毫秒。 */
-  createdAt: number
-  /** 结构化详情行（detail widget 渲染为 label/value）。 */
-  details: ThreadEventDetailRow[]
-  /** 事件的完整原始 JSON（durable Entry 为 payload JSON，synthetic 活跃记录为其 DTO / realtime stream 的 pretty JSON）。 */
-  rawJson: string | null
-  /** ASSISTANT / COMPACTION 实际携带模型输出 metadata，可读取历史请求预览；非模型记录无入口。 */
-  historicalPreviewEligible?: boolean
-}
+export { eventStatusText } from '@/features/thread/runtime/thread-events-types'
 
 interface ThreadEventTimelineInput {
   entries: HarnessSessionEntryDTO[]
@@ -100,82 +40,13 @@ interface ThreadEventTimelineInput {
   toolStreams?: ReadonlyMap<string, RealtimeToolStream> | null
 }
 
-const STATUS_TEXT_KEY: Record<ThreadEventStatus, TranslationKey> = {
-  pending: 'ai.runtime.event.status.PENDING',
-  running: 'ai.runtime.event.status.RUNNING',
-  completed: 'ai.runtime.event.status.COMPLETED',
-  failed: 'ai.runtime.event.status.FAILED',
-  stopped: 'ai.runtime.event.status.STOPPED',
-}
-
-/** 五态状态本地化。 */
-export function eventStatusText(status: ThreadEventStatus): string {
-  return translate(STATUS_TEXT_KEY[status])
-}
-
-/**
- * durable Entry 的 raw 事实：summary 为压缩后的 payload JSON，rawJson 为 pretty JSON。
- * 语义标题/kind 由各分支决定，绝不在此用 entryType 覆盖。
- */
-function withRawPayload(
-  record: ThreadEventRecord,
-  entry: HarnessSessionEntryDTO,
-): ThreadEventRecord {
-  return {
-    ...record,
-    summary: compactJson(entry.payload),
-    rawJson: prettyJson(entry.payload),
-  }
-}
-
-function compactJson(value: unknown): string {
-  try {
-    return JSON.stringify(value) ?? '{}'
-  } catch {
-    return '{}'
-  }
-}
-
-function prettyJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2) ?? '{}'
-  } catch {
-    return '{}'
-  }
-}
-
-/**
- * 一条 durable Entry 是否携带真实模型输出 metadata（assistantMetadata）。
- *
- * 它与后端历史预览的准入完全一致：只有真正发生过 provider 调用的 ASSISTANT / COMPACTION
- * 输出才带它，USER/TOOL 通知等没有可重建的请求前缀。
- */
-function hasAssistantMetadata(payload: Record<string, unknown>): boolean {
-  return Object.keys(asRecord(payload.assistantMetadata)).length > 0
-}
-
-/**
- * 把一条真实模型输出（ASSISTANT MESSAGE 或 COMPACTION 结果）的 canonical metadata 与
- * 读取投影费用并入当前 Turn 的挂起 usage；无事实时原样返回；缺 usage 时未知传播。
- */
-function accumulateUsage(
-  pending: TurnUsage | null,
-  payload: Record<string, unknown>,
-  entry: HarnessSessionEntryDTO,
-): TurnUsage | null {
-  const parsed = parseAssistantUsage(payload.assistantMetadata, entry.usageCost ?? null)
-  return accumulateTurnUsage(pending, parsed)
-}
-
-function formatDisplayJson(value: unknown): string {
-  if (value == null) {
-    return ''
-  }
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
+/** durable Entry 扫描的副产品：Turn 线性映射与活跃 overlay 的物化身份集合。 */
+interface DurableScan {
+  records: ThreadEventRecord[]
+  turnStartByEntryId: Map<string, string | null>
+  turnNumberByTurnStart: Map<string, number>
+  durableFailureIdentities: Set<string>
+  durableToolResultIdentities: Set<string>
 }
 
 /**
@@ -200,24 +71,32 @@ export function buildThreadEventTimeline(
     modelStream = null,
     toolStreams = null,
   } = input
-  const records: ThreadEventRecord[] = []
-  // 活跃 overlay 锚定在其所属 durable Entry 之后；找不到锚点时追加到末尾。
-  const anchored = new Map<number, ThreadEventRecord[]>()
-  const unanchored: ThreadEventRecord[] = []
-  const anchor = (entryId: string | null, record: ThreadEventRecord) => {
-    const index = entryId == null ? -1 : entries.findIndex((entry) => entry.entryId === entryId)
-    if (index < 0) {
-      unanchored.push(record)
-      return
-    }
-    const group = anchored.get(index) ?? []
-    group.push(record)
-    anchored.set(index, group)
+  const scan = scanDurableEntries(entries)
+  const turnOf = createTurnResolver(scan)
+  const anchor = createOverlayAnchor(entries)
+  projectActiveOverlays({
+    anchor,
+    scan,
+    entries,
+    activeAssistantOutput,
+    toolInvocations,
+    generationFailures,
+    modelStream,
+    toolStreams,
+    turnOf,
+  })
+  return mergeAnchoredRecords(scan.records, anchor)
+}
+
+/** 逐条 durable Entry 投影，并记录 Turn 映射与已物化的失败/工具结果身份。 */
+function scanDurableEntries(entries: readonly HarnessSessionEntryDTO[]): DurableScan {
+  const scan: DurableScan = {
+    records: [],
+    turnStartByEntryId: new Map(),
+    turnNumberByTurnStart: new Map(),
+    durableFailureIdentities: new Set(),
+    durableToolResultIdentities: new Set(),
   }
-  const turnStartByEntryId = new Map<string, string | null>()
-  const turnNumberByTurnStart = new Map<string, number>()
-  const durableFailureIdentities = new Set<string>()
-  const durableToolResultIdentities = new Set<string>()
   let currentTurnStartEntryId: string | null = null
   let currentTurnNumber = 0
   let pendingUsage: TurnUsage | null = null
@@ -225,13 +104,13 @@ export function buildThreadEventTimeline(
     if (entry.entryType === 'TURN_START') {
       currentTurnStartEntryId = entry.entryId
       currentTurnNumber += 1
-      turnNumberByTurnStart.set(currentTurnStartEntryId, currentTurnNumber)
+      scan.turnNumberByTurnStart.set(currentTurnStartEntryId, currentTurnNumber)
       // 新 turn 开始：丢弃上一 turn 未关闭的残留 usage。
       pendingUsage = null
     }
-    turnStartByEntryId.set(entry.entryId, currentTurnStartEntryId)
+    scan.turnStartByEntryId.set(entry.entryId, currentTurnStartEntryId)
     const payload = asRecord(entry.payload)
-    records.push(
+    scan.records.push(
       withRawPayload(
         projectEntryRecord(entry, payload, {
           turnStartEntryId: currentTurnStartEntryId,
@@ -242,32 +121,11 @@ export function buildThreadEventTimeline(
       ),
     )
     if (entry.entryType === 'MODEL_ATTEMPT_FAILURE') {
-      const attempt = asRecord(payload.attempt)
-      const attemptNumber = scalarText(attempt.attempt)
-      const sequence = scalarText(attempt.sequence)
-      if (attemptNumber && sequence) {
-        durableFailureIdentities.add(
-          `${currentTurnStartEntryId ?? ''}:${attemptNumber}:${sequence}`,
-        )
-      }
+      recordDurableFailureIdentity(scan, payload, currentTurnStartEntryId)
       continue
     }
     if (entry.entryType === 'MESSAGE' || entry.entryType === 'CUSTOM_MESSAGE') {
-      const message = asRecord(payload.message)
-      // Turn usage 挂起：该 Turn 最后一个 ASSISTANT 的 metadata 在 TURN_END 发射。
-      if (entry.entryType === 'MESSAGE' && getString(message.role) === 'ASSISTANT') {
-        pendingUsage = accumulateUsage(pendingUsage, payload, entry)
-      }
-      for (const content of getRecordList(message.contents)) {
-        // 只有物化的 durable tool_result 才让活跃 tool overlay 退休：durable
-        // assistant tool_call 只表示调用已记录，运行中的 invocation 必须继续展示。
-        if (getString(content.type) === 'tool_result') {
-          const toolCallId = getString(content.toolCallId)
-          if (toolCallId) {
-            durableToolResultIdentities.add(`${currentTurnStartEntryId ?? ''}:${toolCallId}`)
-          }
-        }
-      }
+      pendingUsage = recordMessageFacts(scan, entry, payload, currentTurnStartEntryId, pendingUsage)
     }
     if (entry.entryType === 'COMPACTION') {
       // 压缩结果是真实模型输出：其 canonical metadata 的 usage 同样归入该压缩 turn。
@@ -278,15 +136,126 @@ export function buildThreadEventTimeline(
       pendingUsage = null
     }
   }
+  return scan
+}
 
-  const turnOf = (entryId: string | null): { turnStartEntryId: string | null; turnNumber: number } => {
-    const turnStartEntryId = entryId == null ? null : (turnStartByEntryId.get(entryId) ?? null)
-    return {
-      turnStartEntryId,
-      turnNumber: turnStartEntryId == null ? 0 : (turnNumberByTurnStart.get(turnStartEntryId) ?? 0),
+function recordDurableFailureIdentity(
+  scan: DurableScan,
+  payload: Record<string, unknown>,
+  turnStartEntryId: string | null,
+): void {
+  const attempt = asRecord(payload.attempt)
+  const attemptNumber = scalarText(attempt.attempt)
+  const sequence = scalarText(attempt.sequence)
+  if (attemptNumber && sequence) {
+    scan.durableFailureIdentities.add(`${turnStartEntryId ?? ''}:${attemptNumber}:${sequence}`)
+  }
+}
+
+/**
+ * 一条 MESSAGE / CUSTOM_MESSAGE 的 Turn 事实：ASSISTANT usage 挂起，以及已物化的
+ * tool_result 身份。返回更新后的挂起 usage。
+ */
+function recordMessageFacts(
+  scan: DurableScan,
+  entry: HarnessSessionEntryDTO,
+  payload: Record<string, unknown>,
+  turnStartEntryId: string | null,
+  pendingUsage: TurnUsage | null,
+): TurnUsage | null {
+  const message = asRecord(payload.message)
+  let nextUsage = pendingUsage
+  // Turn usage 挂起：该 Turn 最后一个 ASSISTANT 的 metadata 在 TURN_END 发射。
+  if (entry.entryType === 'MESSAGE' && getString(message.role) === 'ASSISTANT') {
+    nextUsage = accumulateUsage(pendingUsage, payload, entry)
+  }
+  for (const content of getRecordList(message.contents)) {
+    // 只有物化的 durable tool_result 才让活跃 tool overlay 退休：durable
+    // assistant tool_call 只表示调用已记录，运行中的 invocation 必须继续展示。
+    if (getString(content.type) === 'tool_result') {
+      const toolCallId = getString(content.toolCallId)
+      if (toolCallId) {
+        scan.durableToolResultIdentities.add(`${turnStartEntryId ?? ''}:${toolCallId}`)
+      }
     }
   }
+  return nextUsage
+}
 
+/** 任一 entryId 所属 Turn 的 entryId 与 1-based 序号；未知 entry 为 (null, 0)。 */
+function createTurnResolver(
+  scan: DurableScan,
+): (entryId: string | null) => { turnStartEntryId: string | null; turnNumber: number } {
+  return (entryId) => {
+    const turnStartEntryId = entryId == null ? null : (scan.turnStartByEntryId.get(entryId) ?? null)
+    return {
+      turnStartEntryId,
+      turnNumber: turnStartEntryId == null
+        ? 0
+        : (scan.turnNumberByTurnStart.get(turnStartEntryId) ?? 0),
+    }
+  }
+}
+
+/** 活跃 overlay 的落点：所属 durable Entry 之后，找不到锚点时追加末尾。 */
+interface OverlayAnchor {
+  anchor(entryId: string | null, record: ThreadEventRecord): void
+  anchored: Map<number, ThreadEventRecord[]>
+  unanchored: ThreadEventRecord[]
+}
+
+function createOverlayAnchor(entries: readonly HarnessSessionEntryDTO[]): OverlayAnchor {
+  const anchored = new Map<number, ThreadEventRecord[]>()
+  const unanchored: ThreadEventRecord[] = []
+  return {
+    anchored,
+    unanchored,
+    anchor(entryId, record) {
+      const index = entryId == null ? -1 : entries.findIndex((entry) => entry.entryId === entryId)
+      if (index < 0) {
+        unanchored.push(record)
+        return
+      }
+      const group = anchored.get(index) ?? []
+      group.push(record)
+      anchored.set(index, group)
+    },
+  }
+}
+
+/** 活跃 overlay 投影：先失败记录，再 model generation，最后 tool invocation。 */
+function projectActiveOverlays({
+  anchor,
+  scan,
+  entries,
+  activeAssistantOutput,
+  toolInvocations,
+  generationFailures,
+  modelStream,
+  toolStreams,
+  turnOf,
+}: {
+  anchor: OverlayAnchor
+  scan: DurableScan
+  entries: readonly HarnessSessionEntryDTO[]
+  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null
+  toolInvocations: ToolInvocationDTO[]
+  generationFailures: readonly HarnessGenerationFailureDTO[]
+  modelStream: RealtimeModelStream | null
+  toolStreams: ReadonlyMap<string, RealtimeToolStream> | null
+  turnOf: ReturnType<typeof createTurnResolver>
+}): void {
+  projectFailureOverlays(anchor, scan, generationFailures, turnOf)
+  projectModelOverlay(anchor, entries, activeAssistantOutput, modelStream, turnOf)
+  projectToolOverlays(anchor, scan, toolInvocations, toolStreams, turnOf)
+}
+
+function projectFailureOverlays(
+  anchor: OverlayAnchor,
+  scan: DurableScan,
+  generationFailures: readonly HarnessGenerationFailureDTO[],
+  turnOf: ReturnType<typeof createTurnResolver>,
+): void {
   const orderedFailures = [...generationFailures].sort(
     (left, right) => left.attempt - right.attempt || left.failedAt - right.failedAt,
   )
@@ -300,668 +269,101 @@ export function buildThreadEventTimeline(
     seenFailures.add(identity)
     // durable MODEL_ATTEMPT_FAILURE Entry 已在同一 Turn 物化该失败时，跳过活跃 overlay。
     if (
-      durableFailureIdentities.has(
+      scan.durableFailureIdentities.has(
         `${failure.turnStartEntryId}:${failure.attempt}:${failure.sequence}`,
       )
     ) {
       continue
     }
-    anchor(failure.turnStartEntryId, projectAttemptFailureRecord(failure, turnOf(failure.turnStartEntryId)))
+    anchor.anchor(
+      failure.turnStartEntryId,
+      projectAttemptFailureRecord(failure, turnOf(failure.turnStartEntryId)),
+    )
   }
+}
+
+function projectModelOverlay(
+  anchor: OverlayAnchor,
+  entries: readonly HarnessSessionEntryDTO[],
+  activeAssistantOutput: HarnessActiveAssistantOutputDTO | null,
+  modelStream: RealtimeModelStream | null,
+  turnOf: ReturnType<typeof createTurnResolver>,
+): void {
   // 活跃 model generation synthetic；resultEntryId 已对应现存 Entry 时消失。
   const modelMaterialized =
     activeAssistantOutput != null
     && activeAssistantOutput.resultEntryId != null
     && entries.some((entry) => entry.entryId === activeAssistantOutput.resultEntryId)
-  if (activeAssistantOutput != null && !modelMaterialized) {
-    anchor(
-      activeAssistantOutput.turnStartEntryId,
-      projectActiveModelRecord(
-        activeAssistantOutput,
-        modelStream,
-        turnOf(activeAssistantOutput.turnStartEntryId),
-      ),
-    )
+  if (activeAssistantOutput == null || modelMaterialized) {
+    return
   }
+  anchor.anchor(
+    activeAssistantOutput.turnStartEntryId,
+    projectActiveModelRecord(
+      activeAssistantOutput,
+      modelStream,
+      turnOf(activeAssistantOutput.turnStartEntryId),
+    ),
+  )
+}
+
+function projectToolOverlays(
+  anchor: OverlayAnchor,
+  scan: DurableScan,
+  toolInvocations: ToolInvocationDTO[],
+  toolStreams: ReadonlyMap<string, RealtimeToolStream> | null,
+  turnOf: ReturnType<typeof createTurnResolver>,
+): void {
   for (const invocation of toolInvocations) {
     // 运行中的 invocation 在 durable assistant tool_call 物化后仍必须展示：只有
     // 同一 Turn 的 durable tool_result Entry 已物化时才跳过 terminal-pending
     // overlay；跨 Turn 复用相同 toolCallId 不误抑制。ToolResult Entry 写入与
     // invocation 删除原子提交，因此只需依据 durable Entry 与 invocation 存在性收敛。
-    const materialized = durableToolResultIdentities.has(
-      `${turnStartByEntryId.get(invocation.assistantEntryId) ?? ''}:${invocation.toolCallId}`,
+    const materialized = scan.durableToolResultIdentities.has(
+      `${scan.turnStartByEntryId.get(invocation.assistantEntryId) ?? ''}:${invocation.toolCallId}`,
     )
     if (materialized) {
       continue
     }
-    anchor(
+    anchor.anchor(
       invocation.assistantEntryId,
-      projectActiveToolRecord(invocation, toolStreams?.get(invocation.id) ?? null, turnOf(invocation.assistantEntryId)),
+      projectActiveToolRecord(
+        invocation,
+        toolStreams?.get(invocation.id) ?? null,
+        turnOf(invocation.assistantEntryId),
+      ),
     )
   }
+}
 
+/** durable 记录顺序不变，各自锚定的活跃 overlay 紧随其后，未锚定的追加末尾。 */
+function mergeAnchoredRecords(
+  records: readonly ThreadEventRecord[],
+  anchor: OverlayAnchor,
+): ThreadEventRecord[] {
   const result: ThreadEventRecord[] = []
   for (let index = 0; index < records.length; index += 1) {
     result.push(records[index]!)
-    const group = anchored.get(index)
+    const group = anchor.anchored.get(index)
     if (group) {
       result.push(...group)
     }
   }
-  result.push(...unanchored)
+  result.push(...anchor.unanchored)
   return result
 }
 
-interface EntryTurnContext {
-  turnStartEntryId: string | null
-  turnNumber: number
-  pendingUsage: TurnUsage | null
-}
-
-/** durable 记录的公共字段（kind/status/title/summary/details 由各分支补全）。 */
-type RecordBase = Pick<ThreadEventRecord, 'id' | 'source' | 'entryId' | 'turnStartEntryId' | 'turnNumber' | 'createdAt' | 'rawJson'> & {
-  details: ThreadEventDetailRow[]
-}
-
-function withTime(details: ThreadEventDetailRow[], createdAt: number): ThreadEventDetailRow[] {
-  return [
-    ...details,
-    { label: translate('ai.runtime.event.detail.createdAt'), value: formatBackendDateSeconds(createdAt) },
-  ]
-}
-
-function projectEntryRecord(
-  entry: HarnessSessionEntryDTO,
-  payload: Record<string, unknown>,
-  turn: EntryTurnContext,
-): ThreadEventRecord {
-  const baseDetails: ThreadEventDetailRow[] = [
-    { label: translate('ai.runtime.event.detail.entryId'), value: entry.entryId },
-    {
-      label: translate('ai.runtime.event.detail.entryType'),
-      value: entry.entryType || translate('ai.runtime.entry.unknownType'),
-    },
-    ...(turn.turnNumber > 0
-      ? [{ label: translate('ai.runtime.event.detail.turn'), value: String(turn.turnNumber) }]
-      : []),
-  ]
-  const base: RecordBase = {
-    id: `entry:${entry.entryId}`,
-    source: 'entry',
-    entryId: entry.entryId,
-    turnStartEntryId: turn.turnStartEntryId,
-    turnNumber: turn.turnNumber,
-    createdAt: entry.createdAt,
-    rawJson: prettyJson(entry.payload),
-    details: baseDetails,
-  }
-
-  switch (entry.entryType) {
-    case 'ROOT':
-      return {
-        ...base,
-        kind: 'ROOT',
-        status: 'completed',
-        title: 'ROOT',
-        summary: translate('ai.runtime.entry.rootText'),
-        details: withTime(base.details, entry.createdAt),
-      }
-    case 'TURN_START':
-      return {
-        ...base,
-        kind: 'TURN_START',
-        status: 'completed',
-        title: 'TURN_START',
-        summary: summarizeField(getString(payload.reason), translate('ai.runtime.event.emptyText')),
-        details: withTime(base.details, entry.createdAt),
-      }
-    case 'SETTINGS':
-      return {
-        ...base,
-        kind: 'SETTINGS',
-        status: 'completed',
-        title: 'SETTINGS',
-        summary: '',
-        details: withTime(base.details, entry.createdAt),
-      }
-    case 'COMPACTION':
-      return {
-        ...base,
-        kind: 'COMPACTION',
-        status: 'completed',
-        title: 'COMPACTION',
-        summary: summarizeField(getString(payload.reason), translate('ai.runtime.event.emptyText')),
-        // 只有真实模型输出（携带 canonical metadata）才可读取历史请求预览；纯摘要无请求可重建。
-        historicalPreviewEligible: hasAssistantMetadata(payload),
-        details: withTime(base.details, entry.createdAt),
-      }
-    case 'TURN_END': {
-      const outcome = getString(payload.outcome)
-      const usage = turn.pendingUsage
-      const details = [...base.details]
-      if (usage != null) {
-        details.push(
-          {
-            label: translate('ai.runtime.event.detail.input'),
-            value:
-              usage.input != null
-                ? String(usage.input)
-                : translate('ai.runtime.status.noData'),
-          },
-          {
-            label: translate('ai.runtime.event.detail.output'),
-            value:
-              usage.output != null
-                ? String(usage.output)
-                : translate('ai.runtime.status.noData'),
-          },
-          {
-            label: translate('ai.runtime.event.detail.cacheRead'),
-            value:
-              usage.cacheRead != null
-                ? String(usage.cacheRead)
-                : translate('ai.runtime.status.noData'),
-          },
-          {
-            label: translate('ai.runtime.event.detail.cacheWrite'),
-            value:
-              usage.cacheWrite != null
-                ? String(usage.cacheWrite)
-                : translate('ai.runtime.status.noData'),
-          },
-          {
-            label: translate('ai.runtime.event.detail.reasoning'),
-            value:
-              usage.reasoning != null
-                ? String(usage.reasoning)
-                : translate('ai.runtime.status.noData'),
-          },
-          {
-            label: translate('ai.runtime.event.detail.providerTotal'),
-            value:
-              usage.providerTotal != null
-                ? String(usage.providerTotal)
-                : translate('ai.runtime.status.noData'),
-          },
-          {
-            label: translate('ai.runtime.event.detail.cost'),
-            value: formatUsageCost(usage.cost) ?? translate('ai.runtime.status.noData'),
-          },
-        )
-      }
-      return {
-        ...base,
-        kind: 'TURN_END',
-        status: 'completed',
-        title: 'TURN_END',
-        summary: [
-          outcome,
-          ...(usage != null ? [formatTurnUsageText(usage)] : []),
-        ].filter(Boolean).join(' · '),
-        details: withTime([
-          ...details,
-          { label: translate('ai.runtime.event.detail.outcome'), value: outcome },
-        ], entry.createdAt),
-      }
-    }
-    case 'MODEL_ATTEMPT_FAILURE': {
-      const attempt = asRecord(payload.attempt)
-      const error = asRecord(payload.error)
-      // attempt.attempt 在 durable payload 中是数字（JSON number）。
-      const attemptText = scalarText(attempt.attempt)
-      const code = getString(error.code)
-      return {
-        ...base,
-        kind: 'MODEL_ATTEMPT_FAILURE',
-        status: 'failed',
-        title: 'MODEL_ATTEMPT_FAILURE',
-        summary: [`attempt ${attemptText}`, code].filter(Boolean).join(' · '),
-        details: withTime([
-          ...base.details,
-          { label: translate('ai.runtime.event.detail.attempt'), value: attemptText },
-          { label: translate('ai.runtime.event.detail.sequence'), value: scalarText(attempt.sequence) },
-          { label: translate('ai.runtime.event.detail.errorCode'), value: code },
-          {
-            label: translate('ai.runtime.event.detail.errorMessage'),
-            value: getString(error.message),
-          },
-        ], entry.createdAt),
-      }
-    }
-    case 'ASSISTANT_ERROR': {
-      const error = asRecord(payload.error)
-      return {
-        ...base,
-        kind: 'ASSISTANT_ERROR',
-        status: 'failed',
-        title: 'ASSISTANT_ERROR',
-        summary: summarizeField(
-          getString(error.message),
-          translate('ai.runtime.entry.assistantRequestFailed'),
-        ),
-        details: withTime([
-          ...base.details,
-          {
-            label: translate('ai.runtime.event.detail.errorMessage'),
-            value: getString(error.message),
-          },
-        ], entry.createdAt),
-      }
-    }
-    case 'ASSISTANT_ABORTED':
-      return {
-        ...base,
-        kind: 'ASSISTANT_ABORTED',
-        status: 'stopped',
-        title: 'ASSISTANT_ABORTED',
-        summary: translate('ai.runtime.event.abortedText'),
-        details: withTime(base.details, entry.createdAt),
-      }
-    case 'CUSTOM_MESSAGE':
-      return projectMessageRecord(base, payload, 'CUSTOM_MESSAGE')
-    case 'NOTIFICATION': {
-      // 系统结果通知：它是 runtime 的上下文事实，不是人类输入。按真实 kind 呈现，绝不伪装成人类消息。
-      const notificationKind = getString(payload.kind)
-      return {
-        ...base,
-        kind: 'NOTIFICATION',
-        status: 'completed',
-        title: notificationKind || translate('ai.runtime.event.unknownType', { type: entry.entryType }),
-        summary: notificationKind,
-        details: withTime([
-          ...base.details,
-          ...(getString(payload.sourceThreadId)
-            ? [{
-              label: translate('ai.runtime.notification.entry.source'),
-              value: getString(payload.sourceThreadId),
-            }]
-            : []),
-        ], entry.createdAt),
-      }
-    }
-    case 'FORK': {
-      const mode = getString(payload.mode)
-      const sourceEntryId = getString(payload.sourceEntryId)
-      const sourceThreadId = getString(payload.sourceThreadId)
-      return {
-        ...base,
-        kind: 'FORK',
-        status: 'completed',
-        title: 'FORK',
-        summary: [mode, sourceEntryId].filter(Boolean).join(' · '),
-        details: withTime([
-          ...base.details,
-          ...(mode
-            ? [{ label: translate('ai.runtime.event.detail.forkMode'), value: mode }]
-            : []),
-          ...(sourceEntryId
-            ? [{ label: translate('ai.runtime.event.detail.sourceEntryId'), value: sourceEntryId }]
-            : []),
-          ...(sourceThreadId
-            ? [{ label: translate('ai.runtime.notification.entry.source'), value: sourceThreadId }]
-            : []),
-        ], entry.createdAt),
-      }
-    }
-    case 'MESSAGE': {
-      const message = asRecord(payload.message)
-      const role = getString(message.role)
-      if (role === 'USER') {
-        return projectMessageRecord(base, payload, 'USER_MESSAGE')
-      }
-      if (role === 'ASSISTANT') {
-        const contents = getRecordList(message.contents)
-        const record = contents.some((content) => getString(content.type) === 'tool_call')
-          ? projectToolCallRecord(base, payload)
-          : projectMessageRecord(base, payload, 'ASSISTANT_MESSAGE')
-        // 模型输出来源以 assistantMetadata 判定：普通输出与带 tool_call 的输出同样可读取历史预览。
-        return hasAssistantMetadata(payload)
-          ? { ...record, historicalPreviewEligible: true }
-          : record
-      }
-      if (role === 'TOOL') {
-        return projectToolResultRecord(base, payload)
-      }
-      // 其他未知角色按 CUSTOM_MESSAGE 处理。
-      return projectMessageRecord(base, payload, 'CUSTOM_MESSAGE')
-    }
-    default:
-      // 未知 Entry 类型：审计视图不丢信息，并以原类型标签展示。
-      return {
-        ...base,
-        kind: 'UNKNOWN_ENTRY',
-        status: 'completed',
-        title: translate('ai.runtime.event.unknownType', { type: entry.entryType }),
-        summary: translate('ai.runtime.event.emptyText'),
-        details: withTime(base.details, entry.createdAt),
-      }
-  }
-}
-
-function projectMessageRecord(
-  base: RecordBase,
-  payload: Record<string, unknown>,
-  kind: 'USER_MESSAGE' | 'ASSISTANT_MESSAGE' | 'CUSTOM_MESSAGE',
-): ThreadEventRecord {
-  const message = asRecord(payload.message)
-  const role = getString(message.role) || translate('ai.runtime.entry.unknownRole')
-  const text = messageContentsText(getRecordList(message.contents))
-  return {
-    ...base,
-    kind,
-    status: 'completed',
-    // 标题用消息真实角色（USER/ASSISTANT/TOOL/SYSTEM），不再被 entryType 覆盖成 "MESSAGE"。
-    title: role,
-    summary: summarizeField(text, role),
-    details: withTime([
-      ...base.details,
-      { label: translate('ai.runtime.event.detail.role'), value: role },
-    ], base.createdAt),
-  }
-}
-
-function projectToolCallRecord(
-  base: RecordBase,
-  payload: Record<string, unknown>,
-): ThreadEventRecord {
-  const message = asRecord(payload.message)
-  const contents = getRecordList(message.contents)
-  const toolCall = contents.find((content) => getString(content.type) === 'tool_call')
-  const toolName = getString(toolCall?.toolName) || translate('ai.runtime.event.unknownTool')
-  const text = messageContentsText(contents)
-  return {
-    ...base,
-    kind: 'TOOL_CALL',
-    status: 'completed',
-    // 带 tool_call 的输出仍是 ASSISTANT：kind 保留 TOOL_CALL，标题仍是真实角色。
-    title: getString(message.role) || translate('ai.runtime.entry.unknownRole'),
-    summary: summarizeField([text, toolName].filter(Boolean).join(' · '), toolName),
-    details: withTime([
-      ...base.details,
-      { label: translate('ai.runtime.event.detail.role'), value: getString(message.role) },
-      { label: translate('ai.runtime.event.detail.toolName'), value: toolName },
-      { label: translate('ai.runtime.event.detail.toolCallId'), value: getString(toolCall?.toolCallId) },
-    ], base.createdAt),
-  }
-}
-
-function projectToolResultRecord(
-  base: RecordBase,
-  payload: Record<string, unknown>,
-): ThreadEventRecord {
-  const message = asRecord(payload.message)
-  const contents = getRecordList(message.contents)
-  const toolResult = contents.find((content) => getString(content.type) === 'tool_result')
-  const text = toolResultText(contents)
-  return {
-    ...base,
-    kind: 'TOOL_RESULT',
-    status: 'completed',
-    title: getString(message.role) || 'TOOL',
-    summary: summarizeField(text, translate('ai.runtime.event.emptyText')),
-    details: withTime([
-      ...base.details,
-      {
-        label: translate('ai.runtime.event.detail.toolCallId'),
-        value: getString(toolResult?.toolCallId),
-      },
-    ], base.createdAt),
-  }
-}
-
-function projectAttemptFailureRecord(
-  failure: HarnessGenerationFailureDTO,
-  turn: { turnStartEntryId: string | null; turnNumber: number },
-): ThreadEventRecord {
-  const details: ThreadEventDetailRow[] = [
-    { label: translate('ai.runtime.event.detail.generationId'), value: failure.generationId },
-    { label: translate('ai.runtime.event.detail.turnStartEntryId'), value: failure.turnStartEntryId },
-    { label: translate('ai.runtime.event.detail.requestHeadEntryId'), value: failure.requestHeadEntryId },
-    { label: translate('ai.runtime.event.detail.attempt'), value: String(failure.attempt) },
-    { label: translate('ai.runtime.event.detail.sequence'), value: failure.sequence },
-    { label: translate('ai.runtime.event.detail.errorCode'), value: failure.errorCode },
-    { label: translate('ai.runtime.event.detail.errorMessage'), value: failure.errorMessage },
-    { label: translate('ai.runtime.event.detail.failedAt'), value: formatBackendDateSeconds(failure.failedAt) },
-    { label: translate('ai.runtime.event.detail.retryAt'), value: formatBackendDateSeconds(failure.retryAt) },
-  ]
-  if (failure.text) {
-    details.push({
-      label: translate('ai.runtime.event.detail.partialText'),
-      value: failure.text,
-    })
-  }
-  if (failure.thinking) {
-    details.push({
-      label: translate('ai.runtime.event.detail.partialThinking'),
-      value: failure.thinking,
-    })
-  }
-  return {
-    id: `active:attempt-failure:${failure.generationId}:${failure.attempt}`,
-    source: 'attempt-failure',
-    entryId: null,
-    turnStartEntryId: turn.turnStartEntryId,
-    turnNumber: turn.turnNumber,
-    kind: 'MODEL_ATTEMPT_FAILURE',
-    status: 'failed',
-    title: 'MODEL_ATTEMPT_FAILURE',
-    summary: `${failure.errorCode} · ${summarizeField(failure.errorMessage, translate('ai.runtime.event.emptyText'))}`,
-    createdAt: failure.failedAt,
-    details,
-    rawJson: formatDisplayJson(failure),
-  }
-}
-
-function projectActiveModelRecord(
-  activeOutput: HarnessActiveAssistantOutputDTO,
-  stream: RealtimeModelStream | null,
-  turn: { turnStartEntryId: string | null; turnNumber: number },
-): ThreadEventRecord {
-  const status =
-    stream?.status === 'error'
-      ? 'failed'
-      : mapActiveStatus(activeOutput.status)
-  const chars = (stream?.text.length ?? 0) + (stream?.thinking.length ?? 0)
-  const details: ThreadEventDetailRow[] = [
-    { label: translate('ai.runtime.event.detail.status'), value: eventStatusText(status) },
-    ...(activeOutput.status
-      ? [{ label: translate('ai.runtime.event.detail.rawStatus'), value: activeOutput.status }]
-      : []),
-    { label: translate('ai.runtime.event.detail.generationId'), value: activeOutput.generationId },
-    { label: translate('ai.runtime.event.detail.turnStartEntryId'), value: activeOutput.turnStartEntryId },
-    { label: translate('ai.runtime.event.detail.requestHeadEntryId'), value: activeOutput.requestHeadEntryId },
-    { label: translate('ai.runtime.event.detail.attempt'), value: String(activeOutput.attempt) },
-    { label: translate('ai.runtime.event.detail.sequence'), value: activeOutput.sequence },
-  ]
-  if (activeOutput.error != null) {
-    details.push(
-      { label: translate('ai.runtime.event.detail.errorCode'), value: activeOutput.error.code },
-      { label: translate('ai.runtime.event.detail.errorMessage'), value: activeOutput.error.message },
-    )
-  }
-  if (activeOutput.resultEntryId != null) {
-    details.push({
-      label: translate('ai.runtime.event.detail.result'),
-      value: activeOutput.resultEntryId,
-    })
-  }
-  if (chars > 0) {
-    details.push({ label: translate('ai.runtime.event.detail.chars'), value: String(chars) })
-  }
-  if (stream != null) {
-    details.push({
-      label: translate('ai.runtime.event.detail.realtime'),
-      value: formatDisplayJson(stream),
-    })
-  }
-  const rawPayload = stream != null
-    ? { ...activeOutput, realtimeStream: stream }
-    : activeOutput
-
-  return {
-    id: `active:model:${activeOutput.generationId}`,
-    source: 'active-model',
-    entryId: null,
-    turnStartEntryId: turn.turnStartEntryId,
-    turnNumber: turn.turnNumber,
-    kind: 'ACTIVE_MODEL_INVOCATION',
-    status,
-    title: 'ACTIVE_MODEL_INVOCATION',
-    summary: `${eventStatusText(status)} · ${translate('ai.runtime.event.detail.attempt')} ${activeOutput.attempt}`,
-    createdAt: activeOutput.createdAt,
-    details: withTime(details, activeOutput.createdAt),
-    rawJson: formatDisplayJson(rawPayload),
-  }
-}
-
-function projectActiveToolRecord(
-  invocation: ToolInvocationDTO,
-  stream: RealtimeToolStream | null,
-  turn: { turnStartEntryId: string | null; turnNumber: number },
-): ThreadEventRecord {
-  const status = activeToolStatus(invocation, stream)
-  const details: ThreadEventDetailRow[] = [
-    { label: translate('ai.runtime.event.detail.status'), value: eventStatusText(status) },
-    ...(invocation.status
-      ? [{ label: translate('ai.runtime.event.detail.rawStatus'), value: invocation.status }]
-      : []),
-    { label: translate('ai.runtime.event.detail.invocationId'), value: invocation.id },
-    { label: translate('ai.runtime.event.detail.threadId'), value: invocation.threadId },
-    { label: translate('ai.runtime.event.detail.turnStartEntryId'), value: invocation.turnStartEntryId },
-    { label: translate('ai.runtime.event.detail.assistantEntryId'), value: invocation.assistantEntryId },
-    { label: translate('ai.runtime.event.detail.toolName'), value: invocation.toolName || '' },
-    { label: translate('ai.runtime.event.detail.toolCallId'), value: invocation.toolCallId || '' },
-    { label: translate('ai.runtime.event.detail.rendererKey'), value: invocation.rendererKey || '' },
-    { label: translate('ai.runtime.event.detail.callIndex'), value: String(invocation.callIndex) },
-    { label: translate('ai.runtime.event.detail.attempt'), value: String(invocation.attempt) },
-    {
-      label: translate('ai.runtime.event.detail.environment'),
-      value: invocation.environmentId ?? '',
-    },
-    { label: translate('ai.runtime.event.detail.arguments'), value: formatRawJsonText(invocation.argumentsJson) },
-  ]
-  if (invocation.approval != null) {
-    details.push({
-      label: translate('ai.runtime.event.detail.approval'),
-      value: formatDisplayJson(invocation.approval),
-    })
-  }
-  if (invocation.result != null) {
-    details.push({
-      label: translate('ai.runtime.event.detail.result'),
-      value: formatDisplayJson(invocation.result),
-    })
-  }
-  if (invocation.error != null) {
-    details.push({
-      label: translate('ai.runtime.event.detail.error'),
-      value: formatDisplayJson(invocation.error),
-    })
-  }
-  if (stream != null) {
-    details.push({
-      label: translate('ai.runtime.event.detail.realtime'),
-      value: formatDisplayJson(stream),
-    })
-  }
-  const rawPayload = stream != null
-    ? { ...invocation, realtimeStream: stream }
-    : invocation
-
-  return {
-    id: `active:tool:${invocation.id}`,
-    source: 'active-tool',
-    entryId: null,
-    turnStartEntryId: turn.turnStartEntryId,
-    turnNumber: turn.turnNumber,
-    kind: 'ACTIVE_TOOL_INVOCATION',
-    status,
-    title: 'ACTIVE_TOOL_INVOCATION',
-    summary: `${invocation.toolName || translate('ai.runtime.event.unknownTool')} · ${eventStatusText(status)}`,
-    createdAt: invocation.createdAt,
-    details: withTime(details, invocation.createdAt),
-    rawJson: formatDisplayJson(rawPayload),
-  }
-}
-
 /**
- * 活跃状态映射到冻结五态：approval/派发中→pending，运行/流式→running，
- * 终态成功→completed，失败/错误→failed，取消/停止→stopped；未知原样按 pending。
+ * durable Entry 的 raw 事实：summary 为压缩后的 payload JSON，rawJson 为 pretty JSON。
+ * 语义标题/kind 由各分支决定，绝不在此用 entryType 覆盖。
  */
-function mapActiveStatus(raw: string | undefined | null): ThreadEventStatus {
-  switch ((raw ?? '').toLowerCase()) {
-    case 'waiting_approval':
-    case 'ready':
-    case 'waiting_retry':
-    case 'dispatching':
-    case 'queued':
-    case 'pending':
-      return 'pending'
-    case 'running':
-    case 'streaming':
-    case 'in_progress':
-      return 'running'
-    case 'succeeded':
-    case 'done':
-    case 'completed':
-    case 'success':
-      return 'completed'
-    case 'failed':
-    case 'blocked':
-    case 'error':
-      return 'failed'
-    case 'cancelled':
-    case 'aborted':
-    case 'stopped':
-      return 'stopped'
-    default:
-      return 'pending'
+function withRawPayload(
+  record: ThreadEventRecord,
+  entry: HarnessSessionEntryDTO,
+): ThreadEventRecord {
+  return {
+    ...record,
+    summary: compactJson(entry.payload),
+    rawJson: prettyJson(entry.payload),
   }
-}
-
-function activeToolStatus(
-  invocation: ToolInvocationDTO,
-  stream: RealtimeToolStream | null,
-): ThreadEventStatus {
-  if (stream?.error === true) {
-    return 'failed'
-  }
-  if (invocation.error != null) {
-    return 'failed'
-  }
-  if (invocation.result != null) {
-    return 'completed'
-  }
-  return mapActiveStatus(invocation.status)
-}
-
-/** 截断为单行摘要（首行 + 140 字符上限）。 */
-function summarizeField(value: string, fallback: string): string {
-  const line = value.split('\n')[0]?.trim() ?? ''
-  if (!line) {
-    return fallback
-  }
-  return line.length > 140 ? `${line.slice(0, 140)}…` : line
-}
-
-function messageContentsText(contents: Array<Record<string, unknown>>): string {
-  return contents.map(contentText).filter(Boolean).join(' ').trim()
-}
-
-/** tool_result content 的正文（text/json 内层 contents）。 */
-function toolResultText(contents: Array<Record<string, unknown>>): string {
-  for (const content of contents) {
-    if (getString(content.type) === 'tool_result') {
-      const text = messageContentsText(getRecordList(content.contents))
-      if (text) {
-        return text
-      }
-    }
-  }
-  return ''
-}
-
-/** 字符串或数字（JSON number）统一转文本。 */
-function scalarText(value: unknown): string {
-  return typeof value === 'number' ? String(value) : getString(value)
 }
