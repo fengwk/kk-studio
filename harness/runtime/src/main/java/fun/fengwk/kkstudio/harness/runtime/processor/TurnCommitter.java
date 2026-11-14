@@ -81,10 +81,10 @@ final class TurnCommitter {
     if (accepted != null) {
       ThreadState advanced = advanceCommittedThread(tx, thread, plan, now);
       accepted.install(tx, thread.id(), plan.turnStartEntryId(), plan.candidateHeadEntryId());
-      completeClaim(tx, claim);
+      WorkClaims.complete(tx, claim);
     } else if (compaction != null) {
       advanceCommittedThread(tx, thread, plan, now);
-      completeClaim(tx, claim);
+      WorkClaims.complete(tx, claim);
     } else {
       commitRejected(tx, claim, thread, plan, (TurnResolution.Rejected) resolution, now);
     }
@@ -150,14 +150,6 @@ final class TurnCommitter {
     }
     if (requestThread) {
       tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
-    }
-    tx.work().complete(claim);
-  }
-
-  /** final fence 最后执行：损失抛内部信号整事务回滚，绝无带 mutation 的 LOST 提交。 */
-  private static void completeClaim(HarnessStore.Transaction tx, ClaimedWork claim) {
-    if (tx.work().lockClaimed(claim).isEmpty()) {
-      throw new ClaimLostSignal();
     }
     tx.work().complete(claim);
   }

@@ -219,7 +219,7 @@ public final class ThreadProcessor {
     // STOPPED 是持久的执行控制：停止后只固化通知，绝不自动启动模型；只有显式新人工/可信输入在 accept 阶段恢复
     // RUNNABLE 后才会再次进入这里。残留 claim 在这里完成 fencing，不产生任何 durable mutation。
     if (thread.executionControl().isStopped()) {
-      completeClaim(tx, claim, now);
+      WorkClaims.complete(tx, claim);
       return;
     }
     // 唯一的 live/historical 适用性来源：不变量被破坏的形状由分类器以 ISE 拒绝，绝不降级为业务上下文。
@@ -246,7 +246,7 @@ public final class ThreadProcessor {
         }
         applyGeneration(tx, claim, thread, path, driverState, now, hasQueuedMessage, driver);
       }
-      case ThreadContext.GenerationActive ignored -> completeClaim(tx, claim, now);
+      case ThreadContext.GenerationActive ignored -> WorkClaims.complete(tx, claim);
       case ThreadContext.ToolTerminalPending pending -> {
         // 锁序 Thread -> Driver -> Tools：公共工具批次不要求 Driver generation；Driver 只在存在时参与附加校验。
         LockedDriverState driverState = driver.lockState(tx, thread, currentState);
@@ -290,17 +290,9 @@ public final class ThreadProcessor {
           planStep(tx, claim, thread, path, TurnStartReason.INPUT, now);
           return;
         }
-        completeClaim(tx, claim, now);
+        WorkClaims.complete(tx, claim);
       }
     }
-  }
-
-  /** blocker / idle 完成：final fence 后 completeWork；fence 失败抛内部信号回滚（零 mutation 的 LOST）。 */
-  private static void completeClaim(HarnessStore.Transaction tx, ClaimedWork claim, Instant now) {
-    if (tx.work().lockClaimed(claim).isEmpty()) {
-      throw new ClaimLostSignal();
-    }
-    tx.work().complete(claim);
   }
 
   /**

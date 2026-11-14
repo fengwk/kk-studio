@@ -81,7 +81,7 @@ final class OwnerTurnSettlement {
       throw new IllegalStateException("ticket " + ticketId + " does not settle the owner turn");
     }
     if (!join.matched()) {
-      completeClaim(tx, claim);
+      WorkClaims.complete(tx, claim);
       return;
     }
     switch (start.reason()) {
@@ -220,14 +220,6 @@ final class OwnerTurnSettlement {
     // 先推进 wakeVersion 再 complete：既有 Work 行被保留，而不是删除后重建。
     if (requestThread) {
       tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
-    }
-    tx.work().complete(claim);
-  }
-
-  /** 无待做动作的 claim 完成：final fence 后 completeWork。 */
-  private static void completeClaim(HarnessStore.Transaction tx, ClaimedWork claim) {
-    if (tx.work().lockClaimed(claim).isEmpty()) {
-      throw new ClaimLostSignal();
     }
     tx.work().complete(claim);
   }
