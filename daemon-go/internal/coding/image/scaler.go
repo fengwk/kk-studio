@@ -15,7 +15,6 @@ import (
 
 	"github.com/disintegration/imaging"
 	_ "golang.org/x/image/bmp"
-	"golang.org/x/image/draw"
 	_ "golang.org/x/image/tiff"
 	_ "golang.org/x/image/webp"
 )
@@ -32,7 +31,7 @@ func ScaleContext(ctx context.Context, mediaType string, data []byte, tier Tier,
 	case <-ctx.Done():
 		return Result{}, ctx.Err()
 	}
-	result, err := scale(mediaType, data, tier, ImagingLanczos)
+	result, err := scale(mediaType, data, tier)
 	if err != nil {
 		return Result{}, err
 	}
@@ -50,15 +49,6 @@ const (
 	Original
 )
 
-type Engine int
-
-const (
-	CatmullRom Engine = iota
-	ApproxBiLinear
-	ImagingLanczos
-	CatmullRomSingle
-)
-
 type Result struct {
 	MediaType      string
 	Bytes          []byte
@@ -70,6 +60,14 @@ type Result struct {
 }
 
 type box struct{ width, height int }
+
+// container is what the headers of an encoded image declare; no pixel is decoded to build it.
+type container struct {
+	metadata    Result
+	format      string
+	orientation int
+	animated    bool
+}
 
 func tierEdges(t Tier) (int, int, error) {
 	switch t {
@@ -99,73 +97,105 @@ func tierBox(t Tier, w, h int) (box, error) {
 	}
 }
 
-// Scale validates container metadata before allocating decoded pixels, then resizes
-// only when required. Engine is exposed solely for benchmark comparison.
-func Scale(mediaType string, data []byte, tier Tier, engine Engine) (Result, error) {
-	return scale(mediaType, data, tier, engine)
-}
-
-func scale(mediaType string, data []byte, tier Tier, engine Engine) (Result, error) {
-	if len(data) == 0 {
-		return Result{}, errors.New("empty image")
-	}
-	orientation, err := jpegOrientation(mediaType, data)
+// scale validates the container metadata before any pixel is allocated and returns the encoded
+// bytes unchanged unless the requested tier needs a smaller raster.
+func scale(mediaType string, data []byte, tier Tier) (Result, error) {
+	source, err := inspectImage(mediaType, data)
 	if err != nil {
 		return Result{}, err
 	}
+	bounds, err := tierBox(tier, source.metadata.DisplayWidth, source.metadata.DisplayHeight)
+	if err != nil {
+		return Result{}, err
+	}
+	if tier == Original || fitsWithin(source.metadata, bounds) {
+		source.metadata.MediaType, source.metadata.Bytes = mediaType, data
+		return source.metadata, nil
+	}
+	if source.animated {
+		return Result{}, errors.New("animated or multi-frame image cannot be resized")
+	}
+	resized, err := resizeToBox(data, source, bounds)
+	if err != nil {
+		return Result{}, err
+	}
+	encoded, outType, err := encodeResized(mediaType, resized)
+	if err != nil {
+		return Result{}, err
+	}
+	source.metadata.MediaType, source.metadata.Bytes, source.metadata.Resized = outType, encoded, true
+	source.metadata.DisplayWidth, source.metadata.DisplayHeight = resized.Bounds().Dx(), resized.Bounds().Dy()
+	return source.metadata, nil
+}
+
+// inspectImage reads the container metadata of an encoded image and refuses anything that is not
+// a supported, bounded single image.
+func inspectImage(mediaType string, data []byte) (container, error) {
+	if len(data) == 0 {
+		return container{}, errors.New("empty image")
+	}
+	orientation, err := jpegOrientation(mediaType, data)
+	if err != nil {
+		return container{}, err
+	}
 	cfg, format, err := image.DecodeConfig(bytes.NewReader(data))
 	if err != nil {
-		return Result{}, fmt.Errorf("cannot parse image: %w", err)
+		return container{}, fmt.Errorf("cannot parse image: %w", err)
 	}
 	if !formatMatches(mediaType, format) {
-		return Result{}, fmt.Errorf("media type %s does not match format %s", mediaType, format)
+		return container{}, fmt.Errorf("media type %s does not match format %s", mediaType, format)
 	}
 	if cfg.Width <= 0 || cfg.Height <= 0 || int64(cfg.Width) > MaxPixels/int64(cfg.Height) {
-		return Result{}, fmt.Errorf("image %dx%d exceeds pixel budget %d", cfg.Width, cfg.Height, MaxPixels)
+		return container{}, fmt.Errorf("image %dx%d exceeds pixel budget %d", cfg.Width, cfg.Height, MaxPixels)
+	}
+	animated, err := validateAnimation(format, data)
+	if err != nil {
+		return container{}, err
 	}
 	displayWidth, displayHeight := cfg.Width, cfg.Height
 	if orientation >= 5 {
 		displayWidth, displayHeight = displayHeight, displayWidth
 	}
-	metadata := Result{OriginalWidth: cfg.Width, OriginalHeight: cfg.Height, DisplayWidth: displayWidth, DisplayHeight: displayHeight}
-	animated, err := validateAnimation(format, data)
+	return container{
+		metadata:    Result{OriginalWidth: cfg.Width, OriginalHeight: cfg.Height, DisplayWidth: displayWidth, DisplayHeight: displayHeight},
+		format:      format,
+		orientation: orientation,
+		animated:    animated,
+	}, nil
+}
+
+func fitsWithin(metadata Result, bounds box) bool {
+	return metadata.DisplayWidth <= bounds.width && metadata.DisplayHeight <= bounds.height
+}
+
+// resizeToBox decodes the pixels and scales them into the tier box, honouring EXIF orientation.
+func resizeToBox(data []byte, source container, bounds box) (image.Image, error) {
+	decoded, format, err := image.Decode(bytes.NewReader(data))
 	if err != nil {
-		return Result{}, err
+		return nil, fmt.Errorf("cannot decode image: %w", err)
 	}
-	if tier == Original {
-		metadata.MediaType, metadata.Bytes = mediaType, data
-		return metadata, nil
+	if format != source.format || decoded.Bounds().Dx() != source.metadata.OriginalWidth || decoded.Bounds().Dy() != source.metadata.OriginalHeight {
+		return nil, errors.New("decoded dimensions do not match declaration")
 	}
-	w, h := displayWidth, displayHeight
-	b, err := tierBox(tier, w, h)
-	if err != nil {
-		return Result{}, err
-	}
-	if w <= b.width && h <= b.height {
-		metadata.MediaType, metadata.Bytes = mediaType, data
-		return metadata, nil
-	}
-	if animated {
-		return Result{}, errors.New("animated or multi-frame image cannot be resized")
-	}
-	decoded, decodedFormat, err := image.Decode(bytes.NewReader(data))
-	if err != nil {
-		return Result{}, fmt.Errorf("cannot decode image: %w", err)
-	}
-	if decodedFormat != format || decoded.Bounds().Dx() != cfg.Width || decoded.Bounds().Dy() != cfg.Height {
-		return Result{}, errors.New("decoded dimensions do not match declaration")
-	}
-	factor := math.Min(float64(b.width)/float64(w), float64(b.height)/float64(h))
-	dw := int(math.Min(float64(b.width), math.Max(1, math.Round(float64(w)*factor))))
-	dh := int(math.Min(float64(b.height), math.Max(1, math.Round(float64(h)*factor))))
-	src := oriented{src: decoded, orientation: orientation}
-	resized, err := resize(src, dw, dh, ImagingLanczos)
-	if err != nil {
-		return Result{}, err
-	}
+	width, height := fitDimensions(source.metadata.DisplayWidth, source.metadata.DisplayHeight, bounds)
+	return imaging.Resize(oriented{src: decoded, orientation: source.orientation}, width, height, imaging.Lanczos), nil
+}
+
+// fitDimensions scales the displayed size down into bounds, keeping the aspect ratio and never
+// rounding a side to zero.
+func fitDimensions(width, height int, bounds box) (int, int) {
+	factor := math.Min(float64(bounds.width)/float64(width), float64(bounds.height)/float64(height))
+	scaledWidth := int(math.Min(float64(bounds.width), math.Max(1, math.Round(float64(width)*factor))))
+	scaledHeight := int(math.Min(float64(bounds.height), math.Max(1, math.Round(float64(height)*factor))))
+	return scaledWidth, scaledHeight
+}
+
+// encodeResized encodes a resized image as PNG, or as JPEG when the source was an opaque JPEG.
+func encodeResized(mediaType string, resized image.Image) ([]byte, string, error) {
 	alpha := hasAlpha(resized)
 	var output bytes.Buffer
 	outType := "image/png"
+	var err error
 	if !alpha && mediaType == "image/jpeg" {
 		outType = "image/jpeg"
 		err = jpeg.Encode(&output, toOpaque(resized), &jpeg.Options{Quality: 92})
@@ -173,11 +203,9 @@ func scale(mediaType string, data []byte, tier Tier, engine Engine) (Result, err
 		err = png.Encode(&output, resized)
 	}
 	if err != nil {
-		return Result{}, fmt.Errorf("encode resized image: %w", err)
+		return nil, "", fmt.Errorf("encode resized image: %w", err)
 	}
-	metadata.MediaType, metadata.Bytes, metadata.Resized = outType, output.Bytes(), true
-	metadata.DisplayWidth, metadata.DisplayHeight = dw, dh
-	return metadata, nil
+	return output.Bytes(), outType, nil
 }
 
 func formatMatches(mediaType, format string) bool {
@@ -197,45 +225,6 @@ func formatMatches(mediaType, format string) bool {
 	default:
 		return false
 	}
-}
-
-// ResizeForBenchmark resamples an already decoded image without encoding it.
-func ResizeForBenchmark(src image.Image, width, height int, engine Engine) (image.Image, error) {
-	return resize(src, width, height, engine)
-}
-
-func resize(src image.Image, width, height int, engine Engine) (image.Image, error) {
-	if engine == ImagingLanczos {
-		return imaging.Resize(src, width, height, imaging.Lanczos), nil
-	}
-	if engine == CatmullRomSingle {
-		dst := image.NewNRGBA(image.Rect(0, 0, width, height))
-		draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Over, nil)
-		return dst, nil
-	}
-	if engine != CatmullRom && engine != ApproxBiLinear {
-		return nil, fmt.Errorf("unknown resize engine %d", engine)
-	}
-	maxRatio := math.Max(float64(src.Bounds().Dx())/float64(width), float64(src.Bounds().Dy())/float64(height))
-	step := 1
-	for step*2 <= int(maxRatio) {
-		step *= 2
-	}
-	var filter draw.Interpolator = draw.CatmullRom
-	if engine == ApproxBiLinear {
-		filter = draw.ApproxBiLinear
-	}
-	current := src
-	if step > 1 {
-		w := max(1, int(math.Round(float64(src.Bounds().Dx())/float64(step))))
-		h := max(1, int(math.Round(float64(src.Bounds().Dy())/float64(step))))
-		tmp := image.NewNRGBA(image.Rect(0, 0, w, h))
-		filter.Scale(tmp, tmp.Bounds(), current, current.Bounds(), draw.Over, nil)
-		current = tmp
-	}
-	dst := image.NewNRGBA(image.Rect(0, 0, width, height))
-	filter.Scale(dst, dst.Bounds(), current, current.Bounds(), draw.Over, nil)
-	return dst, nil
 }
 
 func hasAlpha(img image.Image) bool {
