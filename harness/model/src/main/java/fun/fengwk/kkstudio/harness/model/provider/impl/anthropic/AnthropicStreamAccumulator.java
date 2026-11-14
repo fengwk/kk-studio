@@ -3,47 +3,27 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallDiagnostic;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamState;
 
-import java.util.ArrayList;
 import java.util.Collections;
-import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
 /**
  * Anthropic Messages SSE 流式事件状态机与响应累积器。
  *
- * <p>按原生 index 维护严格 indexed content block 状态机，支持多工具调用交错 delta、连续 toolOrdinal、累计 usage 快照更新、LENGTH
- * 截断诊断与 native replay 隔离。
- *
- * <p>每个 block 的 {@code content_block_start} 对象都是 replay 事实源：终态只覆盖 normalized
- * 字段（text、thinking/signature、 redacted data、tool input、citations），官方附加字段原样保留。官方 delta 只有 {@code
- * text_delta}、{@code input_json_delta}、{@code thinking_delta}、{@code signature_delta}、{@code
- * citations_delta}：只接受可证明安全的 block/delta 配对，未知配对显式失败而不是猜测性合并。<br>
- * 未知但合法的 provider block（如 server tool use）本身原样保留，携带 {@code input_json_delta} 时按 deterministic 规则累积
- * partial JSON 并在终态解析为 {@code input} 对象。
+ * <p>本类只负责事件级校验与分派：block 状态机在 {@link AnthropicContentBlocks}，usage 累积在 {@link
+ * AnthropicUsageAccumulator}，终态装配在 {@link AnthropicResponseAssembler}。
  */
 final class AnthropicStreamAccumulator extends ProviderStreamState {
 
@@ -68,6 +48,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
 
   private final AnthropicContentBlocks blocks;
   private final AnthropicUsageAccumulator usage = new AnthropicUsageAccumulator();
+  private final AnthropicResponseAssembler responseAssembler;
 
   AnthropicStreamAccumulator(
       ProviderRequest request, ProviderDescriptor descriptor, ProviderStreamBridge bridge) {
@@ -75,6 +56,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
     this.descriptor = Objects.requireNonNull(descriptor, "descriptor");
     this.bridge = Objects.requireNonNull(bridge, "bridge");
     this.blocks = new AnthropicContentBlocks(bridge);
+    this.responseAssembler = new AnthropicResponseAssembler(request, descriptor);
   }
 
   /** 处理单个 SSE 事件。 */
@@ -146,157 +128,22 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
           ProviderErrorKind.INVALID_RESPONSE, "missing stop_reason in Anthropic response");
     }
 
-    StringBuilder combinedText = new StringBuilder();
-    StringBuilder combinedThinking = new StringBuilder();
-    List<ProviderToolCall> toolCalls = new ArrayList<>();
-    List<ProviderContentBlock> responseBlocks = new ArrayList<>();
-    List<ProviderToolCallDiagnostic> toolCallDiagnostics = new ArrayList<>();
-
-    // blocksByIndex 升序遍历，严格保持原生 block index 顺序
-    for (AnthropicWireBlock block : blocks.ordered()) {
-      switch (block.type) {
-        case "text" -> {
-          combinedText.append(block.textBuffer);
-          ObjectNode textFields = block.rawBlock.deepCopy();
-          if (block.citations != null) {
-            textFields.set("citations", block.citations.deepCopy());
-          }
-          responseBlocks.add(
-              new ProviderTextBlock(
-                  block.textBuffer.toString(), blockData(textFields, Set.of("text"))));
-        }
-        case "thinking" -> {
-          combinedThinking.append(block.thinkingBuffer);
-          ObjectNode thinkingFields = block.rawBlock.deepCopy();
-          thinkingFields.put("signature", block.signature);
-          responseBlocks.add(
-              new ProviderThinkingBlock(
-                  block.thinkingBuffer.toString(), blockData(thinkingFields, Set.of("thinking"))));
-        }
-        case "redacted_thinking" -> {
-          if (block.redactedData != null) {
-            responseBlocks.add(
-                new ProviderRedactedThinkingBlock(
-                    block.redactedData, blockData(block.rawBlock, Set.of("data"))));
-          }
-        }
-        case "tool_use" -> {
-          if (stopReason == GenerationStopReason.FILTERED) {
-            // FILTERED 协议撤回，忽略工具处理
-            break;
-          }
-          if (stopReason == GenerationStopReason.CONTINUE) {
-            // CONTINUE 是撤下工具意图的续写终止态：归一化 tool call 与 native-only 续写语义不可共存，显式失败
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_RESPONSE,
-                "CONTINUE response must not contain tool calls");
-          }
-          String argsStr = block.toolArgsBuffer.toString();
-          if (argsStr.isEmpty()) {
-            if (block.initialInputPlaceholder) {
-              // 终态补齐 {}
-              ProviderToolCall call = new ProviderToolCall(block.toolId, block.toolName, "{}");
-              toolCalls.add(call);
-              responseBlocks.add(
-                  new ProviderToolCallBlock(
-                      call, blockData(block.rawBlock, Set.of("id", "name", "input"))));
-            } else {
-              if (stopReason == GenerationStopReason.LENGTH) {
-                toolCallDiagnostics.add(
-                    new ProviderToolCallDiagnostic(
-                        block.toolOrdinal,
-                        block.toolId,
-                        block.toolName,
-                        null,
-                        "tool call truncated before arguments received"));
-              } else {
-                throw new ProviderException(
-                    ProviderErrorKind.INVALID_RESPONSE, "incomplete tool call missing arguments");
-              }
-            }
-          } else {
-            JsonNode parsedArgs = ProviderJsonHelper.tryParseJsonObject(argsStr);
-            if (parsedArgs != null) {
-              ProviderToolCall call = new ProviderToolCall(block.toolId, block.toolName, argsStr);
-              toolCalls.add(call);
-              responseBlocks.add(
-                  new ProviderToolCallBlock(
-                      call, blockData(block.rawBlock, Set.of("id", "name", "input"))));
-            } else {
-              if (stopReason == GenerationStopReason.LENGTH) {
-                toolCallDiagnostics.add(
-                    new ProviderToolCallDiagnostic(
-                        block.toolOrdinal,
-                        block.toolId,
-                        block.toolName,
-                        argsStr,
-                        "tool arguments truncated before valid JSON formed"));
-              } else {
-                throw new ProviderException(
-                    ProviderErrorKind.INVALID_RESPONSE, "invalid tool arguments JSON");
-              }
-            }
-          }
-        }
-        default -> {
-          ObjectNode obj = block.rawBlock.deepCopy();
-          if (block.nativeInputBuffer != null) {
-            JsonNode parsedInput =
-                ProviderJsonHelper.tryParseJsonObject(block.nativeInputBuffer.toString());
-            if (parsedInput == null) {
-              if (stopReason != GenerationStopReason.LENGTH) {
-                throw new ProviderException(
-                    ProviderErrorKind.INVALID_RESPONSE,
-                    "invalid native block input JSON accumulated from input_json_delta");
-              }
-            } else {
-              obj.set("input", parsedInput);
-            }
-          }
-          responseBlocks.add(new ProviderOpaqueBlock(block.type, blockData(obj, Set.of())));
-        }
-      }
-    }
-
-    if (stopReason == GenerationStopReason.FILTERED) {
-      toolCalls.clear();
-      toolCallDiagnostics.clear();
-    }
-
+    AnthropicAssembledResponse assembled = responseAssembler.assemble(blocks.ordered(), stopReason);
     AnthropicUsageSnapshot usageSnapshot = usage.freeze();
 
     ProviderResponse response =
         new ProviderResponse(
-            responseBlocks,
+            assembled.blocks(),
             stopReason,
             usageSnapshot.usage(),
             messageId,
             usage.serviceTier(),
             usageSnapshot.rawUsageJson(),
-            Collections.unmodifiableList(toolCallDiagnostics),
+            Collections.unmodifiableList(assembled.toolCallDiagnostics()),
             null,
             null);
 
     return new ProviderCompletion(response);
-  }
-
-  private ProviderBlockData blockData(ObjectNode rawBlock, Set<String> normalizedFields) {
-    ObjectNode nativeFields = rawBlock.deepCopy();
-    nativeFields.remove("type");
-    for (String field : normalizedFields) {
-      nativeFields.remove(field);
-    }
-    String signature =
-        rawBlock.path("signature").isString() ? rawBlock.path("signature").stringValue() : null;
-    nativeFields.remove("signature");
-    nativeFields.remove("data");
-    return new ProviderBlockData(
-        ProviderReplayFormat.ANTHROPIC_MESSAGES,
-        descriptor.affinity(request.model().modelId()),
-        signature,
-        null,
-        null,
-        nativeFields);
   }
 
   /** 除 message_start 外的所有事件都只在已开始且未停止的流上处理。 */
