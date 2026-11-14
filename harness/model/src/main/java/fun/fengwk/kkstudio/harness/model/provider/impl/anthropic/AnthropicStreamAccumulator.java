@@ -7,7 +7,6 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -32,7 +31,6 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamState;
 
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -57,9 +55,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
   private static final Logger log = LoggerFactory.getLogger(AnthropicStreamAccumulator.class);
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
-  private static final String USAGE_INTEGER_FORMAT = "usage %s must be an integer";
-  private static final String USAGE_NEGATIVE_FORMAT = "usage %s must not be negative";
-
   private static final Set<String> KNOWN_SSE_EVENTS =
       Set.of(
           "message_start",
@@ -68,15 +63,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
           "content_block_stop",
           "message_delta",
           "message_stop");
-
-  private static final Set<String> ALLOWED_CACHE_MISS_REASONS =
-      Set.of(
-          "model_changed",
-          "system_changed",
-          "tools_changed",
-          "messages_changed",
-          "previous_message_not_found",
-          "unavailable");
 
   private final ProviderRequest request;
   private final ProviderDescriptor descriptor;
@@ -90,19 +76,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
 
   private final Map<Integer, AnthropicWireBlock> blocksByIndex = new TreeMap<>();
 
-  private long inputTokens = 0L;
-  private long cacheReadInputTokens = 0L;
-  private long cacheCreationInputTokens = 0L;
-  private long cacheCreation5m = 0L;
-  private long cacheCreation1h = 0L;
-  private long outputTokens = 0L;
-  private boolean hasExplicitCacheBreakdown = false;
-
-  /** usage 快照的原始累积：按顶层字段合并，保留官方未知字段；normalized 计数在终态覆盖同名键。 */
-  private final ObjectNode rawUsage = NODES.objectNode();
-
-  private String cacheMissReasonType = null;
-  private Long cacheMissedInputTokens = null;
+  private final AnthropicUsageAccumulator usage = new AnthropicUsageAccumulator();
 
   AnthropicStreamAccumulator(
       ProviderRequest request, ProviderDescriptor descriptor, ProviderStreamBridge bridge) {
@@ -156,7 +130,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
 
   /** 在流传输自然结束或接收到完整报文后触发完成组装。 */
   ProviderCompletion finish() {
-    if (!rawUsage.has("input_tokens") || !rawUsage.has("output_tokens")) {
+    if (!usage.hasCompleteUsage()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
           "missing complete usage: Anthropic Messages model " + request.model().modelId());
@@ -288,85 +262,16 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       toolCallDiagnostics.clear();
     }
 
-    if (!hasExplicitCacheBreakdown) {
-      this.cacheCreation5m = this.cacheCreationInputTokens;
-      this.cacheCreation1h = 0L;
-    } else {
-      long sum;
-      try {
-        sum = Math.addExact(this.cacheCreation5m, this.cacheCreation1h);
-      } catch (ArithmeticException overflow) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "cache_creation tokens breakdown overflow");
-      }
-      if (sum != this.cacheCreationInputTokens) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "cache_creation tokens breakdown mismatch");
-      }
-    }
-
-    // usage 以原始快照的顶层合并结果为基座：官方未知字段（如 server_tool_use）原样保留，normalized 计数覆盖同名键
-    ObjectNode usageJsonNode = rawUsage;
-    usageJsonNode.put("input_tokens", this.inputTokens);
-    usageJsonNode.put("output_tokens", this.outputTokens);
-    usageJsonNode.put("cache_read_input_tokens", this.cacheReadInputTokens);
-    usageJsonNode.put("cache_creation_input_tokens", this.cacheCreationInputTokens);
-    ObjectNode cacheCreationNode = usageJsonNode.putObject("cache_creation");
-    cacheCreationNode.put("ephemeral_5m_input_tokens", this.cacheCreation5m);
-    cacheCreationNode.put("ephemeral_1h_input_tokens", this.cacheCreation1h);
-    if (this.cacheMissReasonType != null) {
-      ObjectNode missNode = usageJsonNode.putObject("cache_miss_reason");
-      missNode.put("type", this.cacheMissReasonType);
-      if (this.cacheMissedInputTokens != null) {
-        missNode.put("cache_missed_input_tokens", this.cacheMissedInputTokens);
-      }
-    }
-
-    String rawUsageJson = usageJsonNode.toString();
-
-    // Anthropic Messages 无原生 total_tokens，不合成虚假总数。
-    Map<Long, Long> cacheWriteByTtl = new LinkedHashMap<>();
-    if (cacheCreation5m > 0) {
-      cacheWriteByTtl.put(300L, cacheCreation5m);
-    }
-    if (cacheCreation1h > 0) {
-      cacheWriteByTtl.put(3600L, cacheCreation1h);
-    }
-
-    Long reasoningTokens = null;
-    JsonNode outputDetails = rawUsage.get("output_tokens_details");
-    if (outputDetails != null && !outputDetails.isNull()) {
-      if (!outputDetails.isObject()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "output_tokens_details must be an object");
-      }
-      JsonNode thinking = outputDetails.get("thinking_tokens");
-      if (thinking != null && !thinking.isNull()) {
-        reasoningTokens = usageLong(thinking, "thinking_tokens");
-        if (reasoningTokens > outputTokens) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "thinking tokens exceed output tokens");
-        }
-      }
-    }
-    ModelUsage usage =
-        new ModelUsage(
-            inputTokens,
-            outputTokens,
-            cacheReadInputTokens,
-            cacheCreationInputTokens,
-            Map.copyOf(cacheWriteByTtl),
-            reasoningTokens,
-            null);
+    AnthropicUsageSnapshot usageSnapshot = usage.freeze();
 
     ProviderResponse response =
         new ProviderResponse(
             responseBlocks,
             stopReason,
-            usage,
+            usageSnapshot.usage(),
             messageId,
-            serviceTier,
-            rawUsageJson,
+            usage.serviceTier(),
+            usageSnapshot.rawUsageJson(),
             Collections.unmodifiableList(toolCallDiagnostics),
             null,
             null);
@@ -419,36 +324,10 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       if (!usageNode.isObject()) {
         throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "usage must be an object");
       }
-      applyUsageSnapshot(usageNode);
+      usage.applySnapshot(usageNode);
     }
 
-    JsonNode diagnosticsNode = messageNode.get("diagnostics");
-    if (diagnosticsNode != null && !diagnosticsNode.isNull()) {
-      if (!diagnosticsNode.isObject()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "diagnostics must be an object");
-      }
-      if (diagnosticsNode.has("cache_miss_reason")) {
-        JsonNode missNode = diagnosticsNode.get("cache_miss_reason");
-        if (!missNode.isObject()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "cache_miss_reason must be an object");
-        }
-        JsonNode typeNode = missNode.get("type");
-        if (typeNode == null || !typeNode.isString()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "cache_miss_reason type must be a string");
-        }
-        String type = typeNode.stringValue();
-        if (ALLOWED_CACHE_MISS_REASONS.contains(type)) {
-          this.cacheMissReasonType = type;
-          if (missNode.has("cache_missed_input_tokens")) {
-            this.cacheMissedInputTokens =
-                usageLong(missNode.get("cache_missed_input_tokens"), "cache_missed_input_tokens");
-          }
-        }
-      }
-    }
+    usage.applyDiagnostics(messageNode.get("diagnostics"));
   }
 
   private void logInputTransformations(JsonNode messageNode) {
@@ -822,7 +701,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       if (!usageNode.isObject()) {
         throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "usage must be an object");
       }
-      applyUsageSnapshot(usageNode);
+      usage.applySnapshot(usageNode);
     }
   }
 
@@ -843,118 +722,6 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       }
     }
     stopped = true;
-  }
-
-  private void applyUsageSnapshot(JsonNode usageNode) {
-    // 原始快照按顶层字段合并：官方未知字段（如 server_tool_use）原样保留，绝不被 normalized 解析丢弃
-    for (Map.Entry<String, JsonNode> field : usageNode.properties()) {
-      rawUsage.set(field.getKey(), field.getValue().deepCopy());
-    }
-
-    if (usageNode.has("input_tokens")) {
-      this.inputTokens = usageLong(usageNode.get("input_tokens"), "input_tokens");
-    }
-    if (usageNode.has("output_tokens")) {
-      this.outputTokens = usageLong(usageNode.get("output_tokens"), "output_tokens");
-    }
-    if (usageNode.has("cache_read_input_tokens")) {
-      this.cacheReadInputTokens =
-          usageLong(usageNode.get("cache_read_input_tokens"), "cache_read_input_tokens");
-    }
-    if (usageNode.has("cache_creation_input_tokens")) {
-      this.cacheCreationInputTokens =
-          usageLong(usageNode.get("cache_creation_input_tokens"), "cache_creation_input_tokens");
-    }
-    if (usageNode.has("service_tier") && !usageNode.get("service_tier").isNull()) {
-      JsonNode tierNode = usageNode.get("service_tier");
-      if (!tierNode.isString() || tierNode.stringValue().isBlank()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "usage service_tier must be a non-blank string");
-      }
-      this.serviceTier = tierNode.stringValue();
-    }
-    extractAndValidateCacheCreationBreakdown(usageNode);
-  }
-
-  private void extractAndValidateCacheCreationBreakdown(JsonNode usageNode) {
-    long m5 = 0L;
-    long h1 = 0L;
-    boolean has5m = false;
-    boolean has1h = false;
-
-    JsonNode nested = usageNode.get("cache_creation");
-    if (nested != null) {
-      if (!nested.isObject()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "cache_creation must be an object");
-      }
-      if (nested.has("ephemeral_5m_input_tokens")) {
-        m5 = usageLong(nested.get("ephemeral_5m_input_tokens"), "ephemeral_5m_input_tokens");
-        has5m = true;
-      }
-      if (nested.has("ephemeral_5m")) {
-        long alias5m = usageLong(nested.get("ephemeral_5m"), "ephemeral_5m_input_tokens");
-        if (has5m && m5 != alias5m) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "conflicting cache_creation breakdown fields");
-        }
-        m5 = alias5m;
-        has5m = true;
-      }
-      if (nested.has("ephemeral_1h_input_tokens")) {
-        h1 = usageLong(nested.get("ephemeral_1h_input_tokens"), "ephemeral_1h_input_tokens");
-        has1h = true;
-      }
-      if (nested.has("ephemeral_1h")) {
-        long alias1h = usageLong(nested.get("ephemeral_1h"), "ephemeral_1h_input_tokens");
-        if (has1h && h1 != alias1h) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "conflicting cache_creation breakdown fields");
-        }
-        h1 = alias1h;
-        has1h = true;
-      }
-    }
-
-    if (usageNode.has("cache_creation_ephemeral_5m_input_tokens")) {
-      long flat5m =
-          usageLong(
-              usageNode.get("cache_creation_ephemeral_5m_input_tokens"),
-              "cache_creation_ephemeral_5m_input_tokens");
-      if (has5m && m5 != flat5m) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "conflicting cache_creation breakdown fields");
-      }
-      m5 = flat5m;
-      has5m = true;
-    }
-    if (usageNode.has("cache_creation_ephemeral_1h_input_tokens")) {
-      long flat1h =
-          usageLong(
-              usageNode.get("cache_creation_ephemeral_1h_input_tokens"),
-              "cache_creation_ephemeral_1h_input_tokens");
-      if (has1h && h1 != flat1h) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE, "conflicting cache_creation breakdown fields");
-      }
-      h1 = flat1h;
-      has1h = true;
-    }
-
-    if (has5m || has1h) {
-      if (has5m) {
-        this.cacheCreation5m = m5;
-      }
-      if (has1h) {
-        this.cacheCreation1h = h1;
-      }
-      hasExplicitCacheBreakdown = true;
-    }
-  }
-
-  private static long usageLong(JsonNode node, String fieldName) {
-    return ProviderJsonHelper.parseNonNegativeLong(
-        node, fieldName, USAGE_INTEGER_FORMAT, USAGE_NEGATIVE_FORMAT);
   }
 
   private static GenerationStopReason mapStopReason(String reasonStr) {
