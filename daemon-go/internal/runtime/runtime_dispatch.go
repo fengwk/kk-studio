@@ -50,42 +50,12 @@ func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.
 		if !ready {
 			return r.sendBoundError(e.InvocationId, "IDE command requires a READY bound connection")
 		}
-		request, ok := e.Payload.(*protocol.Envelope_IdeCommand)
-		if !ok || request.IdeCommand == nil {
-			return errors.New("IDE command payload is invalid")
-		}
-		r.admissionMu.Lock()
-		if r.admissionPaused {
-			r.admissionMu.Unlock()
-			return r.sendBoundError(e.InvocationId, "environment configuration is switching; new work is not admitted")
-		}
-		err := r.acceptIDECommand(ideCtx, e.GetInvocationId(), request.IdeCommand)
-		r.admissionMu.Unlock()
-		return err
+		return r.handleIDECommand(ideCtx, e)
 	case protocol.MessageType_IDE_LEASE:
 		if !ready || r.options.IDE == nil {
 			return errors.New("IDE lease requires a READY bound connection")
 		}
-		r.admissionMu.Lock()
-		if r.admissionPaused {
-			r.admissionMu.Unlock()
-			return r.sendBoundError(nil, "environment configuration is switching; new work is not admitted")
-		}
-		if r.updateIsHeld() {
-			r.admissionMu.Unlock()
-			return errors.New("IDE_LEASE is not allowed while environment update admission is held")
-		}
-		request, ok := e.Payload.(*protocol.Envelope_IdeLease)
-		if !ok || request.IdeLease == nil {
-			r.admissionMu.Unlock()
-			return errors.New("IDE lease payload is invalid")
-		}
-		roundStartedAt, err := r.consumeIDELease(request.IdeLease, time.Now())
-		if err == nil {
-			r.options.IDE.ApplyLease(request.IdeLease, roundStartedAt)
-		}
-		r.admissionMu.Unlock()
-		return err
+		return r.handleIDELease(e)
 	case protocol.MessageType_TEMPORARY_RESOURCE_POLICY:
 		if !ready {
 			return r.sendBoundError(e.InvocationId, "TEMPORARY_RESOURCE_POLICY requires a READY bound connection")
@@ -99,4 +69,42 @@ func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.
 	default:
 		return r.sendBoundError(e.InvocationId, "unsupported inbound message type")
 	}
+}
+
+func (r *Runtime) handleIDECommand(ctx context.Context, e *protocol.Envelope) error {
+	request, ok := e.Payload.(*protocol.Envelope_IdeCommand)
+	if !ok || request.IdeCommand == nil {
+		return errors.New("IDE command payload is invalid")
+	}
+	r.admissionMu.Lock()
+	if r.admissionPaused {
+		r.admissionMu.Unlock()
+		return r.sendBoundError(e.InvocationId, "environment configuration is switching; new work is not admitted")
+	}
+	err := r.acceptIDECommand(ctx, e.GetInvocationId(), request.IdeCommand)
+	r.admissionMu.Unlock()
+	return err
+}
+
+func (r *Runtime) handleIDELease(e *protocol.Envelope) error {
+	r.admissionMu.Lock()
+	if r.admissionPaused {
+		r.admissionMu.Unlock()
+		return r.sendBoundError(nil, "environment configuration is switching; new work is not admitted")
+	}
+	if r.updateIsHeld() {
+		r.admissionMu.Unlock()
+		return errors.New("IDE_LEASE is not allowed while environment update admission is held")
+	}
+	request, ok := e.Payload.(*protocol.Envelope_IdeLease)
+	if !ok || request.IdeLease == nil {
+		r.admissionMu.Unlock()
+		return errors.New("IDE lease payload is invalid")
+	}
+	roundStartedAt, err := r.consumeIDELease(request.IdeLease, time.Now())
+	if err == nil {
+		r.options.IDE.ApplyLease(request.IdeLease, roundStartedAt)
+	}
+	r.admissionMu.Unlock()
+	return err
 }
