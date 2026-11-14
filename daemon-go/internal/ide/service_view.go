@@ -225,26 +225,23 @@ func (s *Service) registerOpenView(ctx context.Context, parsed parsedOpen, epoch
 	return reason
 }
 
+// resumeBinding carries the epoch pair and workspace fixed at the start of one resume attempt.
+type resumeBinding struct {
+	view          *viewRecord
+	command       parsedOpen
+	session       *CodeServerSession
+	oldEpoch      int64
+	newEpoch      int64
+	crashAtStart  uint64
+	workspacePath string
+	directory     string
+}
+
 func (s *Service) resumeView(ctx context.Context, command parsedOpen, view *viewRecord) (*protocol.IdeResult, error) {
-	s.mu.Lock()
-	if view.state != viewOpen {
-		s.mu.Unlock()
-		return nil, NewError("view is closing", "BUSY")
+	currentDirectory, err := s.admitsResume(command, view)
+	if err != nil {
+		return nil, err
 	}
-	if view.cleanupFailed {
-		s.mu.Unlock()
-		return nil, NewError("view cleanup is incomplete", "CLEANUP_FAILED")
-	}
-	if view.browserSession != command.browserSession {
-		s.mu.Unlock()
-		return nil, NewError("view is owned by another browser session", "VIEW_OWNED_BY_OTHER_SESSION")
-	}
-	if view.bindingEpoch != command.expectedEpoch {
-		s.mu.Unlock()
-		return nil, NewError("view binding changed", "STALE_BINDING")
-	}
-	currentDirectory := view.directory
-	s.mu.Unlock()
 	if command.hasDirectory {
 		directory, err := CanonicalDirectory(command.directory)
 		if err != nil {
@@ -257,66 +254,109 @@ func (s *Service) resumeView(ctx context.Context, command parsedOpen, view *view
 	if err := s.awaitReady(ctx); err != nil {
 		return nil, err
 	}
+	binding, err := s.beginResume(command, view)
+	if err != nil {
+		return nil, err
+	}
+	s.abortViewStreams(view)
+	registered, registerErr := s.manager.RegisterView(ctx, view.viewID, binding.newEpoch, binding.workspacePath)
+	if registerErr == nil && registered != nil && registered.State == ManagedViewOpen && registered.BindingEpoch == strconv.FormatInt(binding.newEpoch, 10) && registered.WorkspacePath == binding.workspacePath && s.currentCrashEpoch() == binding.crashAtStart && currentGeneration(s.manager) == binding.session.Generation {
+		if reply := s.commitResumedBinding(binding, true); reply != nil {
+			return reply, nil
+		}
+	}
+	registerErr = s.resumeFailure(registerErr, binding)
+	return s.reconcileResume(binding, registerErr)
+}
+
+// admitsResume reports the current directory when the view may accept a new binding.
+func (s *Service) admitsResume(command parsedOpen, view *viewRecord) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if view.state != viewOpen {
+		return "", NewError("view is closing", "BUSY")
+	}
+	if view.cleanupFailed {
+		return "", NewError("view cleanup is incomplete", "CLEANUP_FAILED")
+	}
+	if view.browserSession != command.browserSession {
+		return "", NewError("view is owned by another browser session", "VIEW_OWNED_BY_OTHER_SESSION")
+	}
+	if view.bindingEpoch != command.expectedEpoch {
+		return "", NewError("view binding changed", "STALE_BINDING")
+	}
+	return view.directory, nil
+}
+
+// beginResume takes the epoch pair and marks the binding pending until it is settled.
+func (s *Service) beginResume(command parsedOpen, view *viewRecord) (resumeBinding, error) {
 	s.mu.Lock()
 	if s.views[view.viewID] != view || view.state != viewOpen || view.bindingPending || view.bindingEpoch != command.expectedEpoch {
 		s.mu.Unlock()
-		return nil, NewError("view binding changed", "STALE_BINDING")
+		return resumeBinding{}, NewError("view binding changed", "STALE_BINDING")
 	}
-	oldEpoch := view.bindingEpoch
-	crashAtStart := s.crashEpoch
+	binding := resumeBinding{view: view, command: command, oldEpoch: view.bindingEpoch, crashAtStart: s.crashEpoch}
 	view.bindingPending = true
 	s.clearExpiryLocked(view)
 	newEpoch, err := s.commitRevisionLocked()
 	if err != nil {
 		s.restoreLeaseExpiryLocked(view)
-		return nil, err
+		return resumeBinding{}, err
 	}
-	workspacePath, directory := view.workspacePath, view.directory
+	binding.newEpoch = newEpoch
+	binding.workspacePath, binding.directory = view.workspacePath, view.directory
 	s.mu.Unlock()
 	session := s.manager.Session()
 	if session == nil {
 		s.mu.Lock()
 		s.restoreLeaseExpiryLocked(view)
-		return nil, NewError("code-server is not running", "UNAVAILABLE")
+		return resumeBinding{}, NewError("code-server is not running", "UNAVAILABLE")
 	}
-	s.abortViewStreams(view)
-	registered, registerErr := s.manager.RegisterView(ctx, view.viewID, newEpoch, workspacePath)
-	if registerErr == nil && registered != nil && registered.State == ManagedViewOpen && registered.BindingEpoch == strconv.FormatInt(newEpoch, 10) && registered.WorkspacePath == workspacePath && s.currentCrashEpoch() == crashAtStart && currentGeneration(s.manager) == session.Generation {
-		if reply := s.commitResumedBinding(command, view, newEpoch, oldEpoch, crashAtStart, session, workspacePath, directory, true); reply != nil {
-			return reply, nil
-		}
-	}
+	binding.session = session
+	return binding, nil
+}
+
+// resumeFailure settles the error reported when the direct registration was not confirmed.
+func (s *Service) resumeFailure(registerErr error, binding resumeBinding) error {
 	if registerErr == nil {
 		registerErr = NewError("managed view did not accept the new binding epoch", "CLEANUP_FAILED")
 	}
-	if s.currentCrashEpoch() != crashAtStart || currentGeneration(s.manager) != session.Generation {
-		registerErr = NewError("code-server generation changed during resume", "BUSY")
+	if s.currentCrashEpoch() != binding.crashAtStart || currentGeneration(s.manager) != binding.session.Generation {
+		return NewError("code-server generation changed during resume", "BUSY")
 	}
-	// A lost management response is reconciled only from the native registry.
+	return registerErr
+}
+
+// reconcileResume settles a lost management response from the native registry alone.
+func (s *Service) reconcileResume(binding resumeBinding, registerErr error) (*protocol.IdeResult, error) {
 	nativeViews, listErr := s.manager.ListViews(context.Background())
-	if listErr == nil && s.currentCrashEpoch() == crashAtStart && currentGeneration(s.manager) == session.Generation {
-		for _, nativeView := range nativeViews {
-			if nativeView.ViewID != view.viewID || nativeView.State != ManagedViewOpen || nativeView.WorkspacePath != workspacePath {
-				continue
-			}
-			if nativeView.BindingEpoch == strconv.FormatInt(newEpoch, 10) {
-				if reply := s.commitResumedBinding(command, view, newEpoch, oldEpoch, crashAtStart, session, workspacePath, directory, false); reply != nil {
-					return reply, nil
-				}
-			}
-			if nativeView.BindingEpoch == strconv.FormatInt(oldEpoch, 10) {
-				s.mu.Lock()
-				s.restoreLeaseExpiryLocked(view)
-				return nil, registerErr
+	if listErr != nil || s.currentCrashEpoch() != binding.crashAtStart || currentGeneration(s.manager) != binding.session.Generation {
+		return nil, s.markResumeUnverified(binding.view, registerErr)
+	}
+	for _, nativeView := range nativeViews {
+		if nativeView.ViewID != binding.view.viewID || nativeView.State != ManagedViewOpen || nativeView.WorkspacePath != binding.workspacePath {
+			continue
+		}
+		if nativeView.BindingEpoch == strconv.FormatInt(binding.newEpoch, 10) {
+			if reply := s.commitResumedBinding(binding, false); reply != nil {
+				return reply, nil
 			}
 		}
+		if nativeView.BindingEpoch == strconv.FormatInt(binding.oldEpoch, 10) {
+			s.mu.Lock()
+			s.restoreLeaseExpiryLocked(binding.view)
+			return nil, registerErr
+		}
 	}
-	return nil, s.markResumeUnverified(view, registerErr)
+	return nil, s.markResumeUnverified(binding.view, registerErr)
 }
 
 // commitResumedBinding installs the new epoch under the same liveness checks as the caller.
 // assignDirectory is false for the reconciliation path, which leaves the directory untouched.
-func (s *Service) commitResumedBinding(command parsedOpen, view *viewRecord, newEpoch, oldEpoch int64, crashAtStart uint64, session *CodeServerSession, workspacePath, directory string, assignDirectory bool) *protocol.IdeResult {
+func (s *Service) commitResumedBinding(binding resumeBinding, assignDirectory bool) *protocol.IdeResult {
+	command, view, session := binding.command, binding.view, binding.session
+	newEpoch, oldEpoch, crashAtStart := binding.newEpoch, binding.oldEpoch, binding.crashAtStart
+	workspacePath, directory := binding.workspacePath, binding.directory
 	s.mu.Lock()
 	current := s.views[view.viewID] == view && view.state == viewOpen && view.bindingPending && view.bindingEpoch == oldEpoch && s.crashEpoch == crashAtStart
 	var err error
