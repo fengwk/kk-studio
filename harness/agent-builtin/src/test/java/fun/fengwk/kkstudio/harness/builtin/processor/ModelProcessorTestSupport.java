@@ -512,7 +512,9 @@ abstract class ModelProcessorTestSupport {
                                   nativeToolResponse(
                                       "answer",
                                       new ProviderToolCall("call-1", "bash", "{\"secret\":1}")),
-                                  requestWithTool().toolBindings()),
+                                  requestWithTool().toolBindings(),
+                                  null,
+                                  null),
                           NOW.plusMillis(3)));
               tx.threads()
                   .update(
