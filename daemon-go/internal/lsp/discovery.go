@@ -49,16 +49,14 @@ func NewExecutableResolver(options ResolverOptions) *ExecutableResolver {
 	return &ExecutableResolver{options: options}
 }
 func (r *ExecutableResolver) expand(path string) string {
-	h := r.options.Home
-	for _, prefix := range []string{"~/", "~\\", "$HOME/", "$HOME\\", "${HOME}/", "${HOME}\\"} {
-		if strings.HasPrefix(path, prefix) {
-			return filepath.Join(h, path[len(prefix):])
-		}
+	suffix, ok := config.HomePathSuffix(path)
+	if !ok {
+		return path
 	}
-	if path == "~" {
-		return h
+	if r.options.Home == "" {
+		return ""
 	}
-	return path
+	return filepath.Join(r.options.Home, suffix)
 }
 func (r *ExecutableResolver) Resolve(command string) (string, bool) {
 	command = r.expand(command)

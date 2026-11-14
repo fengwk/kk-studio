@@ -287,7 +287,7 @@ environments:
 
 ## 可选 LSP
 
-**LSP 客户端已内置在 Daemon 中**，基于 `vscode-jsonrpc` 实现，不需要额外安装客户端，Daemon 也不负责下载或升级语言服务器。
+**LSP 客户端已内置在 Daemon 中**，不需要额外安装客户端，Daemon 也不负责下载或升级语言服务器。
 服务器由你在卡片的 `daemonConfig.lsp` 中以内联 JSON 声明；不启用时保存为 `null`，LSP 查询返回明确的
 不可用错误，但文件、命令、检索仍可使用。没有独立的 `lsp.json` 或文件路径配置项。修改 LSP 声明后
 新调用使用新 generation，在途调用按既有生命周期收敛。
@@ -313,8 +313,9 @@ npm install -g typescript typescript-language-server
 }
 ```
 
-Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径；`command` 首元素支持 `~` / HOME
-前缀展开，Daemon 仍以服务进程的 PATH 解析其余可执行程序：
+Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径。`command` 首元素支持 `~/`、`$HOME/`
+和 `${HOME}/` 前缀，均相对于 **Daemon 运行用户的主目录**展开；后续参数保持字面值，不展开变量。
+不带路径的命令名按服务进程的 PATH 查找：
 
 ```json
 {

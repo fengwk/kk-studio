@@ -37,10 +37,31 @@ func ReleaseKey(goos, goarch string) (string, error) {
 	return osName + "-" + arch, nil
 }
 
-// ResolveExecutable returns an absolute executable path from an explicit path or PATH.
+// HomePathSuffix recognizes the supported home prefixes without interpreting shell syntax.
+// The suffix is joined to the daemon user's home by validation and LSP discovery alike.
+func HomePathSuffix(path string) (string, bool) {
+	if path == "~" {
+		return "", true
+	}
+	for _, prefix := range []string{"~/", "~\\", "$HOME/", "$HOME\\", "${HOME}/", "${HOME}\\"} {
+		if strings.HasPrefix(path, prefix) {
+			return path[len(prefix):], true
+		}
+	}
+	return "", false
+}
+
+// ResolveExecutable returns an absolute executable path from a home-relative path, explicit path or PATH.
 func ResolveExecutable(command string) (string, error) {
 	if command == "" {
 		return "", errors.New("executable is empty")
+	}
+	if suffix, ok := HomePathSuffix(command); ok {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", errors.New("executable home directory cannot be resolved")
+		}
+		command = filepath.Join(home, suffix)
 	}
 	resolved, err := exec.LookPath(command)
 	if err != nil {

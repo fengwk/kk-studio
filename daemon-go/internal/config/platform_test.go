@@ -1,6 +1,21 @@
 package config
 
-import "testing"
+import (
+	"os"
+	"testing"
+)
+
+// A missing home must reject home-relative commands without breaking absolute commands.
+func TestResolveExecutableWithoutHome(t *testing.T) {
+	t.Setenv("HOME", "")
+	t.Setenv("USERPROFILE", "")
+	if _, err := ResolveExecutable("~/bin/jdtls"); err == nil {
+		t.Fatal("resolved a home-relative command without a home directory")
+	}
+	if _, err := ResolveExecutable(os.Args[0]); err != nil {
+		t.Fatalf("absolute command incorrectly required a home directory: %v", err)
+	}
+}
 
 // RUN-T-187 checks the supported release keys and fails closed for unsupported targets.
 func TestReleaseKey(t *testing.T) {

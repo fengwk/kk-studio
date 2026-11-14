@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"testing"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
@@ -74,6 +75,53 @@ func TestBuildEnvironmentConfigAllowsOptionalLSP(t *testing.T) {
 	}
 	if len(got.LSP) != 0 {
 		t.Fatalf("omitted LSP block produced servers: %+v", got.LSP)
+	}
+}
+
+// The documented Mason command must pass hot configuration validation, not just LSP discovery.
+func TestBuildEnvironmentConfigExpandsLSPHomeCommand(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "daemon home")
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	name := "jdtls"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	executable := filepath.Join(home, ".local", "share", "nvim", "mason", "bin", name)
+	if err := os.MkdirAll(filepath.Dir(executable), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(executable, []byte("fixture"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	for _, prefix := range []string{"~/", "$HOME/", "${HOME}/"} {
+		t.Run(prefix, func(t *testing.T) {
+			command := []string{prefix + ".local/share/nvim/mason/bin/" + name, "--stdio", "$HOME/literal-argument"}
+			input := validEnvironmentConfig(t)
+			input.Lsp.Servers = []*protocol.LspServer{{Id: "jdtls", Command: command, Extensions: []string{".java"}, RootMarkers: []string{"pom.xml", "build.gradle", "settings.gradle"}, FirstMatchMarkers: []string{".git"}}}
+			got, err := BuildEnvironmentConfig(DaemonConfig{}, 1, input)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{executable, "--stdio", "$HOME/literal-argument"}
+			if len(got.LSP) != 1 || !slices.Equal(got.LSP[0].Command, want) {
+				t.Fatalf("resolved LSP configuration = %+v; want command %q", got.LSP, want)
+			}
+			if input.Lsp.Servers[0].Command[0] != prefix+".local/share/nvim/mason/bin/"+name {
+				t.Fatal("home expansion mutated the server snapshot")
+			}
+		})
+	}
+	// Expansion must not turn a missing server into an accepted configuration.
+	if err := os.Remove(executable); err != nil {
+		t.Fatal(err)
+	}
+	input := validEnvironmentConfig(t)
+	input.Lsp.Servers = []*protocol.LspServer{{Id: "jdtls", Command: []string{"~/.local/share/nvim/mason/bin/" + name}, Extensions: []string{".java"}}}
+	_, err := BuildEnvironmentConfig(DaemonConfig{}, 1, input)
+	var validation *EnvironmentConfigError
+	if !errors.As(err, &validation) || validation.Field != "lsp.servers.jdtls.command" || validation.Code != "VALIDATION_FAILED" {
+		t.Fatalf("missing home-relative server validation = %v", err)
 	}
 }
 
