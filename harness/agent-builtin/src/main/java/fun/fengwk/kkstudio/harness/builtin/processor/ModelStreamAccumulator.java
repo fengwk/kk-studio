@@ -55,42 +55,65 @@ final class ModelStreamAccumulator {
     Objects.requireNonNull(response, "response");
     String textGap = textGap(response.text());
     String thinkingGap = thinkingGap(response.thinking());
+    List<ToolGap> toolGaps = toolGaps(response);
+    List<ProviderStreamEvent> gaps = gaps(textGap, thinkingGap, toolGaps);
+    String candidateThinking = candidateThinking(response, thinkingGap);
+    ProviderResponse durableResponse = durableResponse(response, candidateThinking);
+    return new PreparedCompletion(
+        durableResponse, gaps, () -> apply(textGap, thinkingGap, toolGaps));
+  }
 
-    List<ToolGap> toolGaps = new ArrayList<>();
+  /**
+   * tool-call 收敛：每个 observed outcome（call 或 diagnostic）恰好对应一个流式槽位；FILTERED 属于 provider protocol
+   * withdrawal，忽略已有 partial 且不产生 tool gap。
+   */
+  private List<ToolGap> toolGaps(ProviderResponse response) {
     if (response.stopReason() == GenerationStopReason.FILTERED) {
       if (!response.toolCalls().isEmpty() || !response.toolCallDiagnostics().isEmpty()) {
         throw new IllegalArgumentException(
             "FILTERED response must not contain tool calls or diagnostics");
       }
-      // FILTERED 属于 provider protocol withdrawal：忽略已有 partialToolCalls，不生成 tool gap
-    } else {
-      int totalOutcomes = response.toolCalls().size() + response.toolCallDiagnostics().size();
-      if (partialToolCalls.keySet().stream().anyMatch(index -> index >= totalOutcomes)) {
-        throw new IllegalArgumentException("final response omits a streamed tool call");
-      }
-      Map<Integer, ProviderToolCallDiagnostic> diagnosticByIndex = new HashMap<>();
-      for (ProviderToolCallDiagnostic diagnostic : response.toolCallDiagnostics()) {
-        diagnosticByIndex.put(diagnostic.callIndex(), diagnostic);
-      }
-      int completeCallIndex = 0;
-      for (int index = 0; index < totalOutcomes; index++) {
-        ProviderToolCallDiagnostic diagnostic = diagnosticByIndex.get(index);
-        if (diagnostic != null) {
-          PartialToolCall partial = partialToolCalls.get(index);
-          if (partial != null) {
-            partial.reconcileDiagnostic(diagnostic);
-          }
-        } else {
-          ProviderToolCall complete = response.toolCalls().get(completeCallIndex++);
-          PartialToolCall partial = partialToolCalls.get(index);
-          ToolGap gap =
-              partial == null
-                  ? PartialToolCall.previewComplete(index, complete)
-                  : partial.previewGap(index, complete);
-          toolGaps.add(gap);
-        }
-      }
+      return List.of();
     }
+    int totalOutcomes = response.toolCalls().size() + response.toolCallDiagnostics().size();
+    if (partialToolCalls.keySet().stream().anyMatch(index -> index >= totalOutcomes)) {
+      throw new IllegalArgumentException("final response omits a streamed tool call");
+    }
+    Map<Integer, ProviderToolCallDiagnostic> diagnosticByIndex = new HashMap<>();
+    for (ProviderToolCallDiagnostic diagnostic : response.toolCallDiagnostics()) {
+      diagnosticByIndex.put(diagnostic.callIndex(), diagnostic);
+    }
+    List<ToolGap> toolGaps = new ArrayList<>();
+    int completeCallIndex = 0;
+    for (int index = 0; index < totalOutcomes; index++) {
+      ProviderToolCallDiagnostic diagnostic = diagnosticByIndex.get(index);
+      if (diagnostic != null) {
+        reconcileDiagnostic(index, diagnostic);
+        continue;
+      }
+      ProviderToolCall complete = response.toolCalls().get(completeCallIndex++);
+      toolGaps.add(toolGap(index, complete));
+    }
+    return toolGaps;
+  }
+
+  private void reconcileDiagnostic(int index, ProviderToolCallDiagnostic diagnostic) {
+    PartialToolCall partial = partialToolCalls.get(index);
+    if (partial != null) {
+      partial.reconcileDiagnostic(diagnostic);
+    }
+  }
+
+  private ToolGap toolGap(int index, ProviderToolCall complete) {
+    PartialToolCall partial = partialToolCalls.get(index);
+    return partial == null
+        ? PartialToolCall.previewComplete(index, complete)
+        : partial.previewGap(index, complete);
+  }
+
+  /** 尾部 gap 按 text -&gt; thinking -&gt; tool call 的顺序编号；只包含确有增长的部分。 */
+  private static List<ProviderStreamEvent> gaps(
+      String textGap, String thinkingGap, List<ToolGap> toolGaps) {
     List<ProviderStreamEvent> gaps = new ArrayList<>();
     if (textGap != null) {
       gaps.add(new ProviderStreamEvent.TextDelta(textGap));
@@ -104,38 +127,38 @@ final class ModelStreamAccumulator {
         gaps.add(delta);
       }
     }
-    String candidateThinking = response.thinking();
-    if (candidateThinking.isEmpty()) {
-      StringBuilder combined = new StringBuilder(thinking);
-      if (thinkingGap != null) {
-        combined.append(thinkingGap);
-      }
-      if (combined.length() > 0) {
-        candidateThinking = combined.toString();
-      }
+    return List.copyOf(gaps);
+  }
+
+  /** final 缺失 thinking 时用流式累积与尾部 gap 补齐；final 已有内容时以 final 为准。 */
+  private String candidateThinking(ProviderResponse response, String thinkingGap) {
+    if (!response.thinking().isEmpty()) {
+      return response.thinking();
     }
-    ProviderResponse durableResponse = response;
-    if (!candidateThinking.equals(response.thinking())) {
-      durableResponse = withThinking(response, candidateThinking);
+    StringBuilder combined = new StringBuilder(thinking);
+    if (thinkingGap != null) {
+      combined.append(thinkingGap);
     }
-    final ProviderResponse finalDurableResponse = durableResponse;
-    final List<ProviderStreamEvent> finalGaps = List.copyOf(gaps);
-    return new PreparedCompletion(
-        finalDurableResponse,
-        finalGaps,
-        () -> {
-          if (textGap != null) {
-            text.append(textGap);
-          }
-          if (thinkingGap != null) {
-            thinking.append(thinkingGap);
-          }
-          for (ToolGap gap : toolGaps) {
-            PartialToolCall partial =
-                partialToolCalls.computeIfAbsent(gap.index(), ignored -> new PartialToolCall());
-            partial.applyGap(gap);
-          }
-        });
+    return combined.length() == 0 ? "" : combined.toString();
+  }
+
+  private static ProviderResponse durableResponse(
+      ProviderResponse response, String candidateThinking) {
+    return candidateThinking.equals(response.thinking())
+        ? response
+        : withThinking(response, candidateThinking);
+  }
+
+  private void apply(String textGap, String thinkingGap, List<ToolGap> toolGaps) {
+    if (textGap != null) {
+      text.append(textGap);
+    }
+    if (thinkingGap != null) {
+      thinking.append(thinkingGap);
+    }
+    for (ToolGap gap : toolGaps) {
+      partialToolCalls.computeIfAbsent(gap.index(), ignored -> new PartialToolCall()).applyGap(gap);
+    }
   }
 
   /**

@@ -1,13 +1,10 @@
 /**
- * Builtin 的模型调用持久化事实：{@link fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation}
- * 至多一行当前生成， 保存冻结请求、状态、attempt、流式 checkpoint、终态结果、失败 attempt 审计与模型组进度。
+ * Builtin 的请求重建：{@link fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer} 每次
+ * attempt 从不可变 EntryPath 与冻结的 {@link
+ * fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec} 纯内存重建供应商中立请求。
  *
- * <p>{@link fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec} 冻结一次调用不可变的请求契约，{@link
- * fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec} 是它的严格确定性 JSON
- * codec；{@link fun.fengwk.kkstudio.harness.builtin.model.ModelRequestMaterializer} 每次 attempt 从不可变
- * EntryPath 纯内存重建供应商中立 请求。模型组的冻结成员与进度见 {@link
- * fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution} 与 {@link
- * fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupProgress}。完整历史、Provider
- * tools、凭证与端点留在各自事实源。
+ * <p>{@link fun.fengwk.kkstudio.harness.builtin.model.ModelHistoryProjection} 负责压缩感知的历史投影：以摘要
+ * wrapper 替代切点前历史、移除绑定旧前缀的 thinking、在消息之间插入增量 system 变更。持久化事实（Invocation、冻结请求与模型组）在 {@code
+ * port.store} 包。两者都只读输入并返回不可变值，不访问 Store、catalog 或 Environment registry。
  */
 package fun.fengwk.kkstudio.harness.builtin.model;

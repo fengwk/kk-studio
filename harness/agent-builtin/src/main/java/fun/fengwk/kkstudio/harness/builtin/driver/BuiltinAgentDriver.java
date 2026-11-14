@@ -1,55 +1,25 @@
 package fun.fengwk.kkstudio.harness.builtin.driver;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
-import fun.fengwk.kkstudio.harness.api.generation.FailureProjection;
-import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
-import fun.fengwk.kkstudio.harness.api.generation.GenerationStatus;
-import fun.fengwk.kkstudio.harness.api.history.AssistantAbortedPayload;
-import fun.fengwk.kkstudio.harness.api.history.AssistantError;
-import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
-import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.api.history.SystemContext;
-import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
-import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptMaterialization;
-import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
-import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
-import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
-import fun.fengwk.kkstudio.harness.builtin.processor.ModelAttemptFailureAppender;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelOutcomeAppender;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator;
-import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
@@ -64,27 +34,22 @@ import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.TurnMediaCapabilities;
 
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.UUID;
 
 /**
  * Builtin Agent Driver：拥有 Builtin 模型状态、Turn 解析与响应物化，Runtime 只经 {@link AgentDriver} 语义方法调用。
  *
  * <p>所有方法都在 Runtime 已开启的事务内执行；模型状态通过 {@link BuiltinStore#in(HarnessStore.Transaction)}
- * 与公共历史写入共享同一物理事务。Provider I/O 不在此类中执行，由 Builtin 注册的 MODEL Work 处理器负责。
+ * 与公共历史写入共享同一物理事务。Provider I/O 不在此类中执行，由 Builtin 注册的 MODEL Work 处理器负责。system change 计算、turn
+ * 安装、状态投影与 Stop 收敛分别是同包协作者。
  */
 public final class BuiltinAgentDriver implements AgentDriver {
-
-  private static final String CANCELLED_MESSAGE = "Cancelled by user";
-  private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
 
   private final BuiltinStore store;
   private final TurnResolver resolver;
@@ -229,168 +194,68 @@ public final class BuiltinAgentDriver implements AgentDriver {
       throw new IllegalStateException(
           "builtin resolved request violated the contract", contractFailure);
     }
-    ModelRequestSpec spec = resolved.spec();
-    ThreadConstraints constraints = thread.constraints();
-    Integer cap = constraints.maxOutputTokens();
-    if (cap != null) {
-      spec =
-          new ModelRequestSpec(
-              spec.providerType(),
-              spec.model(),
-              spec.variant(),
-              Math.min(spec.outputTokens(), cap),
-              spec.systemInstruction(),
-              spec.toolBindings(),
-              spec.subagentBindings(),
-              spec.groupExecution(),
-              spec.systemSections());
-    }
+    ModelRequestSpec spec = capOutputTokens(resolved.spec(), thread.constraints());
     // 无 cap 时保留 resolver 的模型上限元数据；有 cap 时不得超过实际请求预算。
     int maxOutputTokens =
-        cap == null
+        thread.constraints().maxOutputTokens() == null
             ? resolved.maxOutputTokens()
             : Math.min(resolved.maxOutputTokens(), spec.outputTokens());
-    return new AcceptedTurn(
+    return new BuiltinAcceptedTurn(
+        store,
         spec,
         resolved.contextWindow(),
         maxOutputTokens,
-        new TurnCapabilities(
-            spec.subagentBindings(),
-            new TurnMediaCapabilities(
-                spec.model().inputModalities(),
-                spec.providerType().mediaCapabilities().userModalities(),
-                spec.providerType().mediaCapabilities().toolResultModalities())),
-        BuiltinExecution.of(
-            spec.groupExecution() == null
-                ? ModelSelection.model(spec.model().modelName(), spec.variant().id())
-                : ModelSelection.group(spec.groupExecution().groupName())),
+        new TurnCapabilities(spec.subagentBindings(), mediaCapabilities(spec)),
+        BuiltinExecution.of(executedSelection(spec)),
         systemChange(thread, candidatePath, spec));
   }
 
+  /** Thread 级输出上限只收紧请求预算，不改变冻结的模型身份。 */
+  private static ModelRequestSpec capOutputTokens(
+      ModelRequestSpec spec, ThreadConstraints constraints) {
+    Integer cap = constraints.maxOutputTokens();
+    if (cap == null || cap >= spec.outputTokens()) {
+      return spec;
+    }
+    return new ModelRequestSpec(
+        spec.providerType(),
+        spec.model(),
+        spec.variant(),
+        Math.min(spec.outputTokens(), cap),
+        spec.systemInstruction(),
+        spec.toolBindings(),
+        spec.subagentBindings(),
+        spec.groupExecution(),
+        spec.systemSections());
+  }
+
+  private static TurnMediaCapabilities mediaCapabilities(ModelRequestSpec spec) {
+    return new TurnMediaCapabilities(
+        spec.model().inputModalities(),
+        spec.providerType().mediaCapabilities().userModalities(),
+        spec.providerType().mediaCapabilities().toolResultModalities());
+  }
+
+  private static ModelSelection executedSelection(ModelRequestSpec spec) {
+    return spec.groupExecution() == null
+        ? ModelSelection.model(spec.model().modelName(), spec.variant().id())
+        : ModelSelection.group(spec.groupExecution().groupName());
+  }
+
   static SystemPayload systemChange(ThreadState thread, EntryPath path, ModelRequestSpec spec) {
-    List<ProviderToolDefinition> clientTools = modelToolDefinitions(spec.toolBindings());
-    SystemContext resolved =
-        new SystemContext(spec.systemSections(), clientTools, hostedTools(spec));
-    if (thread.kind() == ThreadKind.COMPACTION) {
-      return null;
-    }
-    if (path.requiresSystemBaseline()) {
-      return freshSystemBaseline(spec, clientTools);
-    }
-    SystemPayload change = path.systemContext().orElseThrow().changesTo(resolved).orElse(null);
-    if (change == null || !latestAssistantPaused(path)) {
-      return change;
-    }
-    if (change.sections().isEmpty() && change.removedSections().isEmpty()) {
-      return null;
-    }
-    return new SystemPayload(
-        change.sections(),
-        change.removedSections(),
-        List.of(),
-        List.of(),
-        List.of(),
-        List.of(),
-        false);
-  }
-
-  private static List<SystemHostedTool> hostedTools(ModelRequestSpec spec) {
-    if (spec.providerType() != ProviderType.ANTHROPIC) {
-      return List.of();
-    }
-    return spec.variant().protocolOptions().toolDefinitions().stream()
-        .map(tool -> new SystemHostedTool(tool.name(), tool.definitionJson()))
-        .toList();
-  }
-
-  private static boolean latestAssistantPaused(EntryPath path) {
-    List<Entry> entries = path.entries();
-    for (int i = entries.size() - 1; i >= 0; i--) {
-      if (entries.get(i).payload() instanceof MessagePayload message
-          && message.message().role() == AgentMessageRole.ASSISTANT
-          && message.assistantMetadata() != null) {
-        return message.assistantMetadata().stopReason() == GenerationStopReason.CONTINUE;
-      }
-    }
-    return false;
-  }
-
-  /**
-   * Build a fresh request-context baseline; compaction can reuse this at its future rebuild
-   * boundary.
-   */
-  private static SystemPayload freshSystemBaseline(
-      ModelRequestSpec spec, List<ProviderToolDefinition> clientTools) {
-    return new SystemPayload(
-        spec.systemSections(),
-        List.of(),
-        clientTools,
-        List.of(),
-        hostedTools(spec),
-        List.of(),
-        true);
-  }
-
-  private static List<ProviderToolDefinition> modelToolDefinitions(List<ToolBinding> bindings) {
-    return bindings.stream()
-        .map(
-            binding -> {
-              ToolDescriptor descriptor = binding.descriptor();
-              return new ProviderToolDefinition(
-                  descriptor.name(),
-                  descriptor.description(),
-                  SCHEMA_CODEC.encode(descriptor.inputSchema()));
-            })
-        .toList();
+    return BuiltinSystemContext.change(thread, path, spec);
   }
 
   @Override
   public LockedDriverState readState(
       HarnessStore.Transaction tx, ThreadState thread, EntryCurrentState state) {
-    Optional<Entry> openTurn = state.openTurnStart();
-    if (openTurn.isEmpty()) {
-      return NoDriverState.INSTANCE;
-    }
-    return store
-        .in(tx)
-        .findModelInvocationByTurn(thread.id(), openTurn.get().id())
-        .map(model -> project(model, state))
-        .orElse(NoDriverState.INSTANCE);
+    return BuiltinState.read(store, tx, thread, state);
   }
 
   @Override
   public LockedDriverState lockState(
       HarnessStore.Transaction tx, ThreadState thread, EntryCurrentState state) {
-    Optional<Entry> openTurn = state.openTurnStart();
-    if (openTurn.isEmpty()) {
-      return NoDriverState.INSTANCE;
-    }
-    BuiltinStore.Transaction builtin = store.in(tx);
-    Optional<ModelInvocation> found =
-        builtin.findModelInvocationByTurn(thread.id(), openTurn.get().id());
-    if (found.isEmpty()) {
-      return NoDriverState.INSTANCE;
-    }
-    ModelInvocation model =
-        builtin
-            .lockModelInvocation(found.get().id())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "model "
-                            + found.get().id()
-                            + " could not be locked for thread "
-                            + thread.id()));
-    return project(model, state);
-  }
-
-  private LockedDriverState project(ModelInvocation model, EntryCurrentState state) {
-    DriverActivity activity = DriverActivity.NONE;
-    if (model.resultEntryId() == null && model.requestHeadEntryId().equals(state.head().id())) {
-      activity =
-          model.status().isTerminal() ? DriverActivity.RESPONSE_PENDING : DriverActivity.ACTIVE;
-    }
-    return new BuiltinState(model, activity);
+    return BuiltinState.lock(store, tx, thread, state);
   }
 
   @Override
@@ -401,11 +266,11 @@ public final class BuiltinAgentDriver implements AgentDriver {
       LockedDriverState state,
       DriverCommit commit) {
     BuiltinState builtin = requireBuiltin(state);
-    if (builtin.activity() != DriverActivity.RESPONSE_PENDING || builtin.model == null) {
+    if (builtin.activity() != DriverActivity.RESPONSE_PENDING) {
       throw new IllegalStateException(
           "builtin response apply requires a pending terminal generation");
     }
-    ModelInvocation model = builtin.model;
+    ModelInvocation model = builtin.model();
     if (!model.threadId().equals(thread.id())
         || !thread.headEntryId().equals(model.requestHeadEntryId())) {
       throw new IllegalStateException(
@@ -436,10 +301,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
     if (builtin == null) {
       return;
     }
-    ModelInvocation model = builtin.model;
-    if (model == null) {
-      return;
-    }
+    ModelInvocation model = builtin.model();
     UUID assistantId = path.head().id();
     if (model.resultEntryId() == null || !model.resultEntryId().equals(assistantId)) {
       throw new IllegalStateException("builtin generation does not own the locked tool batch");
@@ -460,50 +322,7 @@ public final class BuiltinAgentDriver implements AgentDriver {
     if (builtin == null) {
       return new DriverStopResult(null, List.of());
     }
-    ModelInvocation model = builtin.model;
-    if (model == null) {
-      return new DriverStopResult(null, List.of());
-    }
-    if (builtin.activity() != DriverActivity.ACTIVE) {
-      if (model.resultEntryId() != null && model.resultEntryId().equals(path.head().id())) {
-        ModelAttemptMaterialization.validateAttached(model, path);
-        store.in(tx).deleteModelInvocation(model.id());
-      }
-      return new DriverStopResult(null, List.of());
-    }
-    Instant now = commit.now();
-    StreamCheckpoint checkpoint = model.streamCheckpoint();
-    EntryPayload barrier = stopBarrier(checkpoint);
-    ModelInvocationError error =
-        new ModelInvocationError(ProviderErrorKind.CANCELLED, CANCELLED_MESSAGE);
-    UUID parentId =
-        ModelAttemptFailureAppender.append(
-            store.in(tx), path.root().sessionId(), path.head().id(), model, false);
-    UUID barrierId = commit.nextId();
-    commit.insertEntry(new Entry(barrierId, path.root().sessionId(), parentId, barrier, now));
-    ModelInvocation cancelled = model.cancel(error, now).attachResultEntry(barrierId, now);
-    store.in(tx).updateModelInvocation(cancelled);
-    store.in(tx).deleteModelInvocation(model.id());
-    return new DriverStopResult(barrierId, List.of(model.id()));
-  }
-
-  private static EntryPayload stopBarrier(StreamCheckpoint checkpoint) {
-    if (checkpoint == null) {
-      return new AssistantErrorPayload(
-          new AssistantError(AssistantError.CANCELLED_CODE, CANCELLED_MESSAGE), null);
-    }
-    List<AgentMessageContent> contents = new ArrayList<>(2);
-    if (!checkpoint.thinking().isEmpty()) {
-      contents.add(new ThinkingMessageContent(checkpoint.thinking()));
-    }
-    if (!checkpoint.text().isEmpty()) {
-      contents.add(new TextMessageContent(checkpoint.text()));
-    }
-    if (contents.isEmpty()) {
-      return new AssistantErrorPayload(
-          new AssistantError(AssistantError.CANCELLED_CODE, CANCELLED_MESSAGE), null);
-    }
-    return new AssistantAbortedPayload(new AgentMessage(AgentMessageRole.ASSISTANT, contents));
+    return new BuiltinStop(store, tx).stop(path, builtin, commit);
   }
 
   private static BuiltinState requireBuiltin(LockedDriverState state) {
@@ -523,222 +342,5 @@ public final class BuiltinAgentDriver implements AgentDriver {
       return null;
     }
     throw new IllegalArgumentException("locked state does not belong to the builtin driver");
-  }
-
-  private static GenerationProjection projection(ModelInvocation model) {
-    List<FailureProjection> failures = new ArrayList<>(model.failedAttempts().size());
-    for (ModelAttemptFailure failure : model.failedAttempts()) {
-      failures.add(
-          new FailureProjection(
-              failure.attempt(),
-              failure.sequence(),
-              failure.text(),
-              failure.thinking(),
-              failure.error().kind().name(),
-              failure.error().message(),
-              failure.failedAt(),
-              failure.retryAt()));
-    }
-    StreamCheckpoint checkpoint = model.streamCheckpoint();
-    return new GenerationProjection(
-        model.id(),
-        model.turnStartEntryId(),
-        model.requestHeadEntryId(),
-        status(model),
-        model.attempt(),
-        checkpoint == null ? 0L : checkpoint.sequence(),
-        outputContents(checkpoint),
-        model.error() == null
-            ? null
-            : new AssistantError(model.error().kind().name(), model.error().message()),
-        model.resultEntryId(),
-        model.createdAt(),
-        model.updatedAt(),
-        failures);
-  }
-
-  private static GenerationStatus status(ModelInvocation model) {
-    return switch (model.status()) {
-      case READY -> model.failedAttempts().isEmpty()
-          ? GenerationStatus.READY
-          : GenerationStatus.WAITING_RETRY;
-      case RUNNING -> GenerationStatus.RUNNING;
-      case SUCCEEDED -> GenerationStatus.SUCCEEDED;
-      case FAILED -> GenerationStatus.FAILED;
-      case CANCELLED -> GenerationStatus.CANCELLED;
-      case UNKNOWN -> GenerationStatus.BLOCKED;
-    };
-  }
-
-  private static List<AgentMessageContent> outputContents(StreamCheckpoint checkpoint) {
-    if (checkpoint == null) {
-      return List.of();
-    }
-    List<AgentMessageContent> contents = new ArrayList<>(2);
-    if (!checkpoint.thinking().isEmpty()) {
-      contents.add(new ThinkingMessageContent(checkpoint.thinking()));
-    }
-    if (!checkpoint.text().isEmpty()) {
-      contents.add(new TextMessageContent(checkpoint.text()));
-    }
-    return List.copyOf(contents);
-  }
-
-  private static final class BuiltinState implements LockedDriverState {
-
-    private final ModelInvocation model;
-    private final DriverActivity activity;
-    private final GenerationProjection projection;
-
-    private BuiltinState(ModelInvocation model, DriverActivity activity) {
-      this.model = model;
-      this.activity = activity;
-      this.projection = BuiltinAgentDriver.projection(model);
-    }
-
-    @Override
-    public DriverActivity activity() {
-      return activity;
-    }
-
-    @Override
-    public UUID requestHeadEntryId() {
-      return model.requestHeadEntryId();
-    }
-
-    @Override
-    public UUID resultEntryId() {
-      return model.resultEntryId();
-    }
-
-    @Override
-    public GenerationProjection projection() {
-      return projection;
-    }
-
-    @Override
-    public UUID generationId() {
-      return model.id();
-    }
-
-    @Override
-    public WorkTarget workTarget() {
-      // Stop 据此锁定并删除本 generation 的 MODEL Work；tool 阶段 generation 已 attached、
-      // activity 不是 ACTIVE，但 Work 仍归属该 generation。
-      return new WorkTarget(BuiltinWorkType.MODEL, model.id());
-    }
-  }
-
-  private static final class NoDriverState implements LockedDriverState {
-
-    private static final NoDriverState INSTANCE = new NoDriverState();
-
-    @Override
-    public DriverActivity activity() {
-      return DriverActivity.NONE;
-    }
-
-    @Override
-    public UUID requestHeadEntryId() {
-      return null;
-    }
-
-    @Override
-    public UUID resultEntryId() {
-      return null;
-    }
-
-    @Override
-    public GenerationProjection projection() {
-      return null;
-    }
-  }
-
-  private final class AcceptedTurn implements TurnResolution.Accepted {
-
-    private final ModelRequestSpec spec;
-    private final Integer contextWindow;
-    private final Integer maxOutputTokens;
-    private final TurnCapabilities capabilities;
-    private final ExecutionSelection executedSelection;
-    private final SystemPayload systemChange;
-
-    private AcceptedTurn(
-        ModelRequestSpec spec,
-        int contextWindow,
-        int maxOutputTokens,
-        TurnCapabilities capabilities,
-        ExecutionSelection executedSelection,
-        SystemPayload systemChange) {
-      this.spec = spec;
-      this.contextWindow = contextWindow;
-      this.maxOutputTokens = maxOutputTokens;
-      this.capabilities = capabilities;
-      this.executedSelection = executedSelection;
-      this.systemChange = systemChange;
-    }
-
-    @Override
-    public Integer contextWindow() {
-      return contextWindow;
-    }
-
-    @Override
-    public Integer maxOutputTokens() {
-      return maxOutputTokens;
-    }
-
-    @Override
-    public TurnCapabilities capabilities() {
-      return capabilities;
-    }
-
-    @Override
-    public SystemPayload systemChange() {
-      return systemChange;
-    }
-
-    @Override
-    public ExecutionSelection executedSelection() {
-      return executedSelection;
-    }
-
-    @Override
-    public void install(
-        HarnessStore.Transaction tx,
-        UUID threadId,
-        UUID turnStartEntryId,
-        UUID requestHeadEntryId) {
-      UUID invocationId = tx.nextId();
-      Instant now = tx.now();
-      store
-          .in(tx)
-          .insertModelInvocation(
-              new ModelInvocation(
-                  invocationId,
-                  threadId,
-                  turnStartEntryId,
-                  requestHeadEntryId,
-                  spec,
-                  ModelInvocationStatus.READY,
-                  0,
-                  null,
-                  null,
-                  null,
-                  null,
-                  List.of(),
-                  now,
-                  now,
-                  groupProgress(spec),
-                  null));
-      tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, invocationId));
-    }
-  }
-
-  private static ModelGroupProgress groupProgress(ModelRequestSpec spec) {
-    ModelGroupExecution group = spec.groupExecution();
-    return group == null
-        ? null
-        : new ModelGroupProgress(group.groupName(), group.groupVersion(), 0, 0);
   }
 }

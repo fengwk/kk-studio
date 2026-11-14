@@ -590,7 +590,7 @@ class ModelProcessorLifecycleTest extends ModelProcessorTestSupport {
               throw new RejectedExecutionException("rejected");
             },
             TestExecutionLifecycle.create(fixture.store, fixture.clock));
-    ExitLogCapture exitLogs = ExitLogCapture.attach(ModelProcessor.class);
+    ExitLogCapture exitLogs = ExitLogCapture.attach(ModelExecutionLauncher.class);
     try {
       assertEquals(
           ProcessResult.LOST_OWNERSHIP,

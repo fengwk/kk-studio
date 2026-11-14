@@ -90,10 +90,15 @@
                                     <element>CLASS</element>
                                     <includes>
                                         <include>fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatusFields</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationTransitions</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelExecution</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamPublisher</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelCheckpointCommitter</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelTerminalCommitter</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelGroupFailureCommitter</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelAttemptFailures</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelFailureRetry</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec</include>
                                     </includes>

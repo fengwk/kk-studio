@@ -82,9 +82,9 @@ import java.util.UUID;
  * ToolInvocation 输入，覆盖全部六种上下文与每一族不变量错误（不接触 Store）。
  *
  * <p>Driver 状态按 Runtime 契约提供：真实 Driver 只按 (threadId, 当前 open turn 的 TURN_START entry id) 锁定
- * generation，无状态时给出 {@link DriverActivity#NONE} 的实现。生产实现里的 {@code NoDriverState} 是私有嵌套类、
- * 测试不可见，因此本类提供等价的本地实现；模型状态的替身由本类的 {@link #classify} 入口按本次输入的 Thread 与 open turn 显式校验身份，跨 Thread/跨
- * turn 的模型一律 fail closed，绝不进入分类器（真实 Driver 的同一行为见 {@code BuiltinAgentDriverContractTest}）。
+ * generation，无状态时给出 {@link DriverActivity#NONE} 的实现。本类提供与该契约一致的本地无状态实现，不依赖 Driver 内部类；模型状态的替身由本类的
+ * {@link #classify} 入口按本次输入的 Thread 与 open turn 显式校验身份，跨 Thread/跨 turn 的模型一律 fail closed，绝不进入分类器（真实
+ * Driver 的同一行为见 {@code BuiltinAgentDriverContractTest}）。
  */
 class ThreadContextClassifierTest {
 
@@ -1046,7 +1046,7 @@ class ThreadContextClassifierTest {
     }
   }
 
-  /** 无 Driver 状态的本地实现：生产实现的 NoDriverState 是私有嵌套类，测试不可见。 */
+  /** 无 Driver 状态的本地实现：与生产无状态行为一致，activity 为 NONE 且没有 generation 身份。 */
   private static final class NoDriverState implements LockedDriverState {
 
     @Override

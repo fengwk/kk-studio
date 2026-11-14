@@ -156,46 +156,72 @@ public final class ModelExecution
     this.invocationId = claim.target().id();
     this.threadId = Objects.requireNonNull(threadId, "threadId");
     this.attempt = attempt;
-    Clock storeClock = HarnessStoreTime.millisecondClock(clock);
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
     this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
-    this.heartbeat =
-        new WorkHeartbeat(
-            this.store,
-            Objects.requireNonNull(scheduler, "scheduler"),
-            Objects.requireNonNull(heartbeatWorker, "heartbeatWorker"),
-            Objects.requireNonNull(config, "config").leaseConfigProvider().get(),
-            this::abandon);
-    ModelCheckpointCommitter checkpoints =
-        new ModelCheckpointCommitter(this.store, builtinStore, this.claim, invocationId, attempt);
+    this.heartbeat = createHeartbeat(config, scheduler, heartbeatWorker);
     this.stream =
-        new ModelStreamPublisher(
-            threadId,
-            invocationId,
-            attempt,
+        createStream(
+            realtimeEventSink,
             config,
-            Objects.requireNonNull(realtimeEventSink, "realtimeEventSink"),
-            storeClock,
+            HarnessStoreTime.millisecondClock(clock),
             scheduler,
-            Objects.requireNonNull(flushExecutor, "flushExecutor"),
-            this.nanoTime,
-            abandoned::get,
-            checkpoints,
-            this::abandon);
-    this.terminal =
-        new ModelTerminalCommitter(
-            this.store,
-            builtinStore,
-            Objects.requireNonNull(gateway, "gateway"),
-            config,
-            this.claim,
-            threadId,
-            invocationId,
-            attempt,
-            ownerSettledSummary,
-            Objects.requireNonNull(bindings, "bindings"),
-            requireProviderName(providerName),
-            stream);
+            flushExecutor);
+    this.terminal = createTerminal(gateway, config, ownerSettledSummary, bindings, providerName);
+  }
+
+  /** lease heartbeat 在每次 tick 时读取部署配置；停止或丢失 lease 即 abandon。 */
+  private WorkHeartbeat createHeartbeat(
+      ModelProcessorConfig config, ScheduledExecutorService scheduler, Executor heartbeatWorker) {
+    return new WorkHeartbeat(
+        store,
+        Objects.requireNonNull(scheduler, "scheduler"),
+        Objects.requireNonNull(heartbeatWorker, "heartbeatWorker"),
+        Objects.requireNonNull(config, "config").leaseConfigProvider().get(),
+        this::abandon);
+  }
+
+  private ModelStreamPublisher createStream(
+      RealtimeEventSink realtimeEventSink,
+      ModelProcessorConfig config,
+      Clock storeClock,
+      ScheduledExecutorService scheduler,
+      Executor flushExecutor) {
+    ModelCheckpointCommitter checkpoints =
+        new ModelCheckpointCommitter(store, builtinStore, claim, invocationId, attempt);
+    return new ModelStreamPublisher(
+        threadId,
+        invocationId,
+        attempt,
+        config,
+        Objects.requireNonNull(realtimeEventSink, "realtimeEventSink"),
+        storeClock,
+        scheduler,
+        Objects.requireNonNull(flushExecutor, "flushExecutor"),
+        nanoTime,
+        abandoned::get,
+        checkpoints,
+        this::abandon);
+  }
+
+  private ModelTerminalCommitter createTerminal(
+      ModelGateway gateway,
+      ModelProcessorConfig config,
+      boolean ownerSettledSummary,
+      List<ToolBinding> bindings,
+      String providerName) {
+    return new ModelTerminalCommitter(
+        store,
+        builtinStore,
+        Objects.requireNonNull(gateway, "gateway"),
+        config,
+        claim,
+        threadId,
+        invocationId,
+        attempt,
+        ownerSettledSummary,
+        Objects.requireNonNull(bindings, "bindings"),
+        requireProviderName(providerName),
+        stream);
   }
 
   /** 冻结的 Provider 身份必须非空白：未知名称在策略层按“继承系统名单”处理，但 null/blank 不得进入 live 路径。 */
