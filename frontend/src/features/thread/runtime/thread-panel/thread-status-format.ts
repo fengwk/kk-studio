@@ -22,7 +22,7 @@ export interface EnvironmentStatusIdentity {
   environmentName?: string | null
 }
 
-export interface ThreadStatusSegment {
+interface ThreadStatusSegment {
   key: 'environment' | 'context' | 'usage'
   text: string
   title: string

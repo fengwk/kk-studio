@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import {
-  commandIdsForTarget,
   filterThreadCommands,
   threadCommandsForTarget,
   THREAD_COMMANDS,
 } from '@/features/thread/runtime/thread-panel/thread-commands'
+import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
+
+/** 目标 kind 启用的命令（按注册表顺序），不含被启用能力裁剪的禁用项。 */
+function enabledCommandIds(target: PaneTarget): string[] {
+  return threadCommandsForTarget(target)
+    .filter((command) => !command.disabled)
+    .map((command) => command.id)
+}
 
 describe('AgentPane command registry', () => {
   it('has exactly the frozen command ids', () => {
@@ -114,7 +121,7 @@ describe('AgentPane command registry', () => {
       startEntryId: 'e1',
       threadName: 'branch-1',
     }
-    expect(commandIdsForTarget(target)).toEqual([
+    expect(enabledCommandIds(target)).toEqual([
       'thread',
       'agent',
       'yolo',
@@ -150,9 +157,9 @@ describe('AgentPane command registry', () => {
 
   it('limits rename commands by the durable target state', () => {
     // NEW_SESSION_DRAFT：Session 尚未持久化，session/thread 重命名都不可用。
-    expect(commandIdsForTarget({ kind: 'NEW_SESSION_DRAFT' }))
+    expect(enabledCommandIds({ kind: 'NEW_SESSION_DRAFT' }))
       .not.toContain('rename-session')
-    expect(commandIdsForTarget({ kind: 'NEW_SESSION_DRAFT' }))
+    expect(enabledCommandIds({ kind: 'NEW_SESSION_DRAFT' }))
       .not.toContain('rename-thread')
     // NEW_THREAD_DRAFT：父 Session 走服务端重命名，Thread 名称只改本地草稿。
     const newThread = {
@@ -161,8 +168,8 @@ describe('AgentPane command registry', () => {
       startEntryId: 'e1',
       threadName: 'branch-1',
     }
-    expect(commandIdsForTarget(newThread)).toContain('rename-session')
-    expect(commandIdsForTarget(newThread)).toContain('rename-thread')
+    expect(enabledCommandIds(newThread)).toContain('rename-session')
+    expect(enabledCommandIds(newThread)).toContain('rename-thread')
     // FORK_SESSION_DRAFT：新 Session / Thread 均尚未创建且无本地命名字段，重命名不可用。
     const forkSession = {
       kind: 'FORK_SESSION_DRAFT' as const,
@@ -170,12 +177,12 @@ describe('AgentPane command registry', () => {
       sourceThreadId: 't1',
       startEntryId: 'e1',
     }
-    expect(commandIdsForTarget(forkSession)).not.toContain('rename-session')
-    expect(commandIdsForTarget(forkSession)).not.toContain('rename-thread')
+    expect(enabledCommandIds(forkSession)).not.toContain('rename-session')
+    expect(enabledCommandIds(forkSession)).not.toContain('rename-thread')
     // BOUND_THREAD：Session 与 Thread 都已持久化，两者可用。
     const bound = { kind: 'BOUND_THREAD' as const, threadId: 't1' }
-    expect(commandIdsForTarget(bound)).toContain('rename-session')
-    expect(commandIdsForTarget(bound)).toContain('rename-thread')
+    expect(enabledCommandIds(bound)).toContain('rename-session')
+    expect(enabledCommandIds(bound)).toContain('rename-thread')
   })
 
   it('exposes the full BOUND_THREAD command set without owner-based filtering', () => {

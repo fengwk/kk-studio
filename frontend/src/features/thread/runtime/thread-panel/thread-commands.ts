@@ -9,7 +9,7 @@ interface ManualCompactionAvailability {
   disabledReason: string | null
 }
 
-export type ThreadCommandId =
+type ThreadCommandId =
   | 'thread'
   | 'agent'
   | 'yolo'
@@ -130,7 +130,7 @@ export function manualCompactionDisabledReasonKey(reason: string | null): Transl
   return COMPACTION_DISABLED_REASON_KEYS[reason] ?? 'ai.runtime.action.compactUnavailable'
 }
 
-export function manualCompactionDisabledReason(reason: string | null): string {
+function manualCompactionDisabledReason(reason: string | null): string {
   return translate(manualCompactionDisabledReasonKey(reason))
 }
 
@@ -221,10 +221,6 @@ export function threadCommandsForTarget(
         disabled && !compactDisabled && !readOnlyDisabled && !newDisabled && !agentDisabled && !branchingDisabled ? DISABLED_KEY : undefined,
     }
   })
-}
-
-export function commandIdsForTarget(target: PaneTarget): ThreadCommandId[] {
-  return TARGET_COMMANDS[target.kind]
 }
 
 export function filterThreadCommands(

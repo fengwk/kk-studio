@@ -21,7 +21,7 @@ export function isPreviewableAttachment(attachment: ToolAttachment): boolean {
 }
 
 /** 当 URI 属于规范的 data/http/https 资源引用时返回 true。 */
-export function isCanonicalResourceUri(uri: string): boolean {
+function isCanonicalResourceUri(uri: string): boolean {
   return RESOURCE_URI_PATTERN.test(uri.trim())
 }
 

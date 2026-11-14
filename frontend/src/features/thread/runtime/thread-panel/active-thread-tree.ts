@@ -96,10 +96,6 @@ export function projectThreadTree(nodes: readonly ActiveThreadTreeNode[]) {
   return { root, nodesById, rows: flatten(visible), historyRows: flatten() }
 }
 
-export function projectActiveThreadTree(nodes: readonly ActiveThreadTreeNode[]): ActiveThreadTreeRow[] {
-  return projectThreadTree(nodes).rows
-}
-
 function signature(node: ActiveThreadTreeNode): string {
   return JSON.stringify([
     node.threadId, node.parentThreadId, node.updatedAt, node.name, node.agentName,

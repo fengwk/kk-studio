@@ -30,7 +30,7 @@ export interface SubmissionSettle {
 }
 
 /** 提交快照引用的上传条目 localId 集合（本地草稿直接按 localId 匹配）。 */
-export function submittedUploadIds(
+function submittedUploadIds(
   submitted: ComposerPart[],
   uploads: AttachmentUpload[],
 ): Set<string> {
@@ -42,7 +42,7 @@ export function submittedUploadIds(
 }
 
 /** 未被任何 parts 引用且未 detached 的条目（pill 移除/无提交周期时调用）。 */
-export function unreferencedUploads(
+function unreferencedUploads(
   uploads: AttachmentUpload[],
   parts: ComposerPart[],
 ): AttachmentUpload[] {

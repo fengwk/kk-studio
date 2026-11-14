@@ -27,7 +27,7 @@ export interface ThreadComposerModelOption {
   } | null
 }
 
-export interface ThreadComposerEnvironmentOption {
+interface ThreadComposerEnvironmentOption {
   name: string
 }
 
@@ -35,7 +35,7 @@ export interface ThreadComposerEnvironmentOption {
  * 设置选择的状态：draft=本地草稿，将随下一条消息一起生效；pending=已提交，等待安全点生效；
  * null=无需要展示的差异（已生效或未编辑）。applied 不做常驻提示。
  */
-export type ThreadComposerSettingsStatus = 'draft' | 'pending' | null
+type ThreadComposerSettingsStatus = 'draft' | 'pending' | null
 
 export interface ThreadComposerSettingsInput {
   modelSelection: ThreadComposerModelSelection | null

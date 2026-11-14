@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   buildToolMessageView,
   toolDefaultExpanded,
-  toolMessageContents,
 } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
 import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
 
@@ -27,6 +26,11 @@ function message(
 
 function withContents(text: string): Partial<ToolDialogueMessage> {
   return { contents: [{ type: 'text', text }] }
+}
+
+/** 宿主 shell 看到的结果内容；调用/结果合并规则只经由此单一入口验证。 */
+function viewContents(message: ToolDialogueMessage, result?: ToolDialogueMessage) {
+  return buildToolMessageView({ message, result, hasCallRecordRenderer: false }).contents
 }
 
 describe('buildToolMessageView', () => {
@@ -171,15 +175,15 @@ describe('buildToolMessageView', () => {
       status: 'streaming',
       partialContents: [{ type: 'text', text: 'streaming partial' }],
     })
-    expect(toolMessageContents(call, undefined)).toEqual([
+    expect(viewContents(call)).toEqual([
       { type: 'text', text: 'streaming partial' },
     ])
 
     const result = message({ id: 'r', phase: 'result', ...withContents('final') })
-    expect(toolMessageContents(call, result)).toEqual([{ type: 'text', text: 'final' }])
+    expect(viewContents(call, result)).toEqual([{ type: 'text', text: 'final' }])
     // result 存在但内容为空时也不回退旧 partial（避免旧 partial 盖过终态错误）。
     const emptyResult = message({ id: 'r2', phase: 'result', contents: [] })
-    expect(toolMessageContents(call, emptyResult)).toEqual([])
+    expect(viewContents(call, emptyResult)).toEqual([])
   })
 
   it('keeps execution output streaming after the call entry is durable', () => {

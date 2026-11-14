@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import type { TurnEndOutcome } from '@/shared/api/generated/contracts'
 import {
-  projectActiveThreadTree,
   projectThreadTree,
   threadTreeOutcome,
   type ActiveThreadTreeNode,
 } from '@/features/thread/runtime/thread-panel/active-thread-tree'
+
+/** 活跃树只保留非 IDLE 节点及其祖先；根节点自身永不出行。 */
+function activeRows(nodes: ActiveThreadTreeNode[]) {
+  return projectThreadTree(nodes).rows
+}
 
 function node(
   threadId: string,
@@ -29,7 +33,7 @@ function node(
   }
 }
 
-describe('projectActiveThreadTree', () => {
+describe('projectThreadTree rows', () => {
   it('deduplicates identical resumed records but keeps same-name executions and history', () => {
     const a = node('a', 'root', { name: 'main', agentName: 'Explorer', status: 'RUNNING' })
     const tree = projectThreadTree([node('root', null), a, { ...a }, node('b', 'a', { agentName: 'Explorer', outcome: 'FAILED' })])
@@ -82,7 +86,7 @@ describe('projectActiveThreadTree', () => {
     },
   )
   it('keeps active (non-IDLE) nodes with their idle ancestors, rooted at the execution root children', () => {
-    const rows = projectActiveThreadTree([
+    const rows = activeRows([
       node('root', null),
       node('a', 'root', { status: 'RUNNING' }),
       node('b', 'a'),
@@ -100,15 +104,15 @@ describe('projectActiveThreadTree', () => {
   })
 
   it('does not emit the root itself and hides everything when no descendant is active', () => {
-    expect(projectActiveThreadTree([node('root', null)])).toEqual([])
-    expect(projectActiveThreadTree([
+    expect(activeRows([node('root', null)])).toEqual([])
+    expect(activeRows([
       node('root', null, { status: 'RUNNING' }),
       node('a', 'root'),
     ])).toEqual([])
   })
 
   it('keeps sibling order stable and independent of input order', () => {
-    const rows = projectActiveThreadTree([
+    const rows = activeRows([
       node('root', null),
       node('b', 'root', { status: 'RUNNING' }),
       node('a', 'root', { status: 'RUNNING' }),
@@ -118,7 +122,7 @@ describe('projectActiveThreadTree', () => {
   })
 
   it('preserves deep ancestor chains for nested active subagents', () => {
-    const rows = projectActiveThreadTree([
+    const rows = activeRows([
       node('root', null),
       node('a', 'root'),
       node('b', 'a'),
@@ -135,13 +139,13 @@ describe('projectActiveThreadTree', () => {
 
   it('treats STOPPED orthogonally as executionControl and not as a fourth activity', () => {
     // STOPPED 是 executionControl：如果节点 status 为 IDLE 且无活跃后代，不进入活跃树
-    expect(projectActiveThreadTree([
+    expect(activeRows([
       node('root', null),
       node('idle-stopped', 'root', { status: 'IDLE', executionControl: 'STOPPED' }),
     ])).toEqual([])
 
     // 如果节点 status 为 RUNNING，即使 executionControl 为 STOPPED，仍保留在活跃树
-    const rows = projectActiveThreadTree([
+    const rows = activeRows([
       node('root', null),
       node('running-stopped', 'root', { status: 'RUNNING', executionControl: 'STOPPED' }),
     ])
@@ -152,14 +156,14 @@ describe('projectActiveThreadTree', () => {
   })
 
   it('rejects malformed trees instead of fabricating rows', () => {
-    expect(() => projectActiveThreadTree([
+    expect(() => activeRows([
       node('root', null),
       node('root', null, { status: 'RUNNING' }),
     ])).toThrow(/duplicate/)
-    expect(() => projectActiveThreadTree([
+    expect(() => activeRows([
       node('a', 'missing', { status: 'RUNNING' }),
     ])).toThrow(/root/)
-    expect(() => projectActiveThreadTree([
+    expect(() => activeRows([
       node('root', null),
       node('orphan', 'ghost', { status: 'RUNNING' }),
     ])).toThrow(/parent/)

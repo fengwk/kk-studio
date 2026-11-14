@@ -5,10 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
 import { EntryMessageBlock } from '@/features/thread/runtime/thread-panel/messages/EntryMessageBlock'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
-import {
-  SUBAGENT_TASK_PREVIEW_LIMIT,
-  subagentTaskPreview,
-} from '@/features/thread/runtime/thread-panel/messages/subagent-receipt-preview'
+import { subagentTaskPreview } from '@/features/thread/runtime/thread-panel/messages/subagent-receipt-preview'
 import type { EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
 
 type ReceiptState = 'completed' | 'error' | 'cancelled'
@@ -128,13 +125,17 @@ describe('subagentTaskPreview', () => {
     expect(subagentTaskPreview('   \n\t  ')).toBeNull()
     expect(subagentTaskPreview('line one\n\nline two')).toBe('line one line two')
 
+    // 72 个字符以内原样保留；超过即压成单行并截断为 72 个字符加省略号。
     const long = 'word '.repeat(40)
+    const flattenedLength = long.replace(/\s+/gu, ' ').trim().length
     const preview = subagentTaskPreview(long)
-    expect(preview).toBe(`${long.replace(/\s+/gu, ' ').trim().slice(0, SUBAGENT_TASK_PREVIEW_LIMIT)}…`)
-    expect(preview!.length).toBeLessThanOrEqual(SUBAGENT_TASK_PREVIEW_LIMIT + 1)
+    expect(preview).toBe(`${long.replace(/\s+/gu, ' ').trim().slice(0, 72)}…`)
+    expect(preview!.length).toBeLessThanOrEqual(72 + 1)
+    expect(preview!.length).toBeLessThan(flattenedLength)
 
-    const exactlyLimited = 'x'.repeat(SUBAGENT_TASK_PREVIEW_LIMIT)
+    const exactlyLimited = 'x'.repeat(72)
     expect(subagentTaskPreview(exactlyLimited)).toBe(exactlyLimited)
+    expect(subagentTaskPreview('x'.repeat(73))).toBe(`${'x'.repeat(72)}…`)
   })
 })
 
@@ -167,7 +168,7 @@ describe('SubagentReceipt collapsed summary', () => {
 
     const preview = card.querySelector('.thread-subagent-receipt-preview')
     expect(preview?.textContent).toBe(subagentTaskPreview(task))
-    expect(container.textContent).not.toContain(task.slice(SUBAGENT_TASK_PREVIEW_LIMIT + 5))
+    expect(container.textContent).not.toContain(task.slice(72 + 5))
 
     // 默认 0 行：没有任何回执正文分区，结果与任务原文都不在 DOM 中。
     expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
