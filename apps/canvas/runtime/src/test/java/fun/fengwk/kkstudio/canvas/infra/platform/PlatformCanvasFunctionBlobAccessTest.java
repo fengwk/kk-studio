@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
@@ -12,7 +11,6 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.canvas.BlobFacts;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionResourceStream;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
-import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectStream;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
@@ -29,8 +27,8 @@ class PlatformCanvasFunctionBlobAccessTest {
   private static final UUID BLOB = UUID.fromString("00000000-0000-0000-0000-000000000001");
 
   @Test
-  void mapsFactsAndDelegatesPresignWithoutLeakingPlatformTypes() {
-    // 测试意图：验证通过强依赖注入的 S3StorageService 和 StorageBlobManager 正确映射 facts 与预签名。
+  void mapsFactsWithoutLeakingPlatformTypes() {
+    // 测试意图：验证通过强依赖注入的 S3StorageService 和 StorageBlobManager 正确映射 facts。
     StorageBlobManager manager = mock(StorageBlobManager.class);
     StorageBlob blob = new StorageBlob();
     blob.setId(BLOB);
@@ -39,15 +37,11 @@ class PlatformCanvasFunctionBlobAccessTest {
     blob.setWidth(1L);
     blob.setHeight(2L);
     when(manager.getBlob(BLOB)).thenReturn(blob);
-    when(manager.presignOriginalUrl(BLOB))
-        .thenReturn(StoragePresignedUrlDTO.builder().url("https://s3.example/original").build());
     PlatformCanvasFunctionBlobAccess access =
         new PlatformCanvasFunctionBlobAccess(mock(S3StorageService.class), manager);
 
     assertEquals(
         new BlobFacts(BLOB, "image/png", 3L, 1L, 2L, null), access.findFacts(BLOB).orElseThrow());
-    assertEquals("https://s3.example/original", access.originalUrl(BLOB, 120L));
-    verify(manager).presignOriginalUrl(BLOB);
   }
 
   @Test

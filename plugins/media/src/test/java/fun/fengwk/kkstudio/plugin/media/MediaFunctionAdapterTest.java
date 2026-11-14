@@ -434,12 +434,6 @@ class MediaFunctionAdapterTest {
           }
 
           @Override
-          public String presignOriginal(
-              CanvasFunctionFrozenReference reference, long expiresSeconds) {
-            return "https://example.com/broken";
-          }
-
-          @Override
           public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
             return output.resourceId();
           }
@@ -607,11 +601,6 @@ class MediaFunctionAdapterTest {
       }
       return new CanvasFunctionResourceStream(
           new ByteArrayInputStream(data), data.length, () -> {});
-    }
-
-    @Override
-    public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
-      return "https://example.com/" + reference.blobId();
     }
 
     @Override

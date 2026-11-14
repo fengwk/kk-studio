@@ -151,6 +151,10 @@ class CanvasFunctionExecutionContextImplTest {
                     1L,
                     1L,
                     null)));
+    when(runs.findByNodeId(NODE)).thenReturn(Optional.empty());
+    assertThrows(
+        CanvasFunctionInternalCancellation.class,
+        () -> context.openOriginal(frozen.manifest().get(0)));
   }
 
   /** 只能物化预分配的目标资源 ID，且宿主返回不匹配资源时必须报错。 */
@@ -227,39 +231,6 @@ class CanvasFunctionExecutionContextImplTest {
             new CanvasResource(TARGET, CANVAS, null, null, null, "report", "text", Instant.EPOCH));
     assertEquals(TARGET, context().materializeTextOutput(output, "text"));
     verify(materializer).materializeText(CANVAS, NODE, REQUEST, LEASE, TARGET, "report", "text");
-  }
-
-  /** 只有在 Run 处于 RUNNING 且租约有效时才允许预签名原图 URL。 */
-  @Test
-  void presignsOnlyFrozenOriginalWhileRunIsRunning() {
-    when(blobAccess.originalUrl(BLOB, 120L)).thenReturn("https://s3.example/object");
-    CanvasFunctionExecutionContextImpl context = context();
-
-    assertEquals(
-        "https://s3.example/object", context.presignOriginal(frozen.manifest().get(0), 120L));
-    verify(blobAccess).originalUrl(BLOB, 120L);
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            context.presignOriginal(
-                new CanvasFunctionFrozenReference(
-                    SOURCE_NODE,
-                    0,
-                    RESOURCE,
-                    UUID.randomUUID(),
-                    CanvasResourceKind.IMAGE,
-                    "other.png",
-                    "image/png",
-                    3L,
-                    1L,
-                    1L,
-                    null),
-                120L));
-
-    when(runs.findByNodeId(NODE)).thenReturn(Optional.empty());
-    assertThrows(
-        CanvasFunctionInternalCancellation.class,
-        () -> context.presignOriginal(frozen.manifest().get(0), 120L));
   }
 
   /** isRunning 检查状态、requestId、租约 token 及租约到期时间。 */

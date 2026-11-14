@@ -386,7 +386,17 @@ class ProviderReplayMaterializationTransportTest {
         ProviderMessageRole.USER,
         List.of(
             new ProviderTextBlock("hello"),
-            new ProviderResourceBlock(BLOB_ID, "notes.txt", "synthetic preview")));
+            new ProviderResourceBlock(
+                BLOB_ID,
+                "notes.txt",
+                null,
+                null,
+                "synthetic preview",
+                null,
+                null,
+                null,
+                null,
+                null)));
   }
 
   private static ProviderCompletion stream(ModelProvider provider, ProviderRequest request)

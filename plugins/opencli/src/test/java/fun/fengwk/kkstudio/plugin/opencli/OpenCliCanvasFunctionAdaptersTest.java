@@ -1523,11 +1523,6 @@ class OpenCliCanvasFunctionAdaptersTest {
     }
 
     @Override
-    public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
     public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
       try {
         materialized = content.readAllBytes();

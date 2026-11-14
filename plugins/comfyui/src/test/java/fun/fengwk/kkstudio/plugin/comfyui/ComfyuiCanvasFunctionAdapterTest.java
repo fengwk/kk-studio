@@ -166,7 +166,6 @@ class ComfyuiCanvasFunctionAdapterTest {
             ComfyuiCanvasFunctionAdapter.COMFY_READY,
             ComfyuiCanvasFunctionAdapter.COMPLETE),
         context.stages);
-    assertNull(context.lastPresign);
     assertEquals(TARGET, context.materializedTarget);
     assertEquals(List.of(9, 8, 7), context.materializedBytes);
   }
@@ -600,7 +599,6 @@ class ComfyuiCanvasFunctionAdapterTest {
     private Map<String, Object> lastAdapterState = Map.of();
     private UUID materializedTarget;
     private List<Integer> materializedBytes;
-    private String lastPresign;
     private boolean running = true;
 
     @Override
@@ -618,12 +616,6 @@ class ComfyuiCanvasFunctionAdapterTest {
     public CanvasFunctionResourceStream openOriginal(CanvasFunctionFrozenReference reference) {
       ByteArrayInputStream stream = new ByteArrayInputStream(new byte[] {1, 2, 3});
       return new CanvasFunctionResourceStream(stream, 3L, () -> {});
-    }
-
-    @Override
-    public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
-      lastPresign = "https://example.com/presigned/" + reference.resourceId();
-      return lastPresign;
     }
 
     @Override

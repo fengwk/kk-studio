@@ -53,8 +53,4 @@ public final class PlatformCanvasFunctionBlobAccess {
     return new CanvasFunctionResourceStream(
         object.inputStream(), object.metadata().contentLength(), object);
   }
-
-  public String originalUrl(UUID blobId, long expiresSeconds) {
-    return blobManager.presignOriginalUrl(Objects.requireNonNull(blobId, "blobId")).getUrl();
-  }
 }

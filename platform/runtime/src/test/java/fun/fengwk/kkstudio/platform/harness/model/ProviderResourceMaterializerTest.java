@@ -71,7 +71,17 @@ class ProviderResourceMaterializerTest {
   private static final String IMAGE_DATA_URI = "data:image/png;base64,AAEC";
   // 原字节档位：内联/预算/缓存用例只验证字节直通语义，不引入解码（扫描件语义的固定夹具）。
   private static final ProviderResourceBlock IMAGE_RESOURCE =
-      ProviderResourceBlock.media(BLOB_ID, "scan.png", "tiny preview", ImageInputTier.ORIGINAL);
+      new ProviderResourceBlock(
+          BLOB_ID,
+          "scan.png",
+          null,
+          null,
+          "tiny preview",
+          ImageInputTier.ORIGINAL,
+          null,
+          null,
+          null,
+          null);
   private static final ProviderMediaCapabilities ALL_MEDIA =
       new ProviderMediaCapabilities(
           Set.of(
@@ -210,8 +220,8 @@ class ProviderResourceMaterializerTest {
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
     stubContent(contentService, BLOB_ID, "image/png", BYTES);
     ProviderResourceBlock scaledToolImage =
-        ProviderResourceBlock.media(
-            BLOB_ID, "scan.png", "tiny preview", null, 4000, 2000, 1280, 640);
+        new ProviderResourceBlock(
+            BLOB_ID, "scan.png", null, null, "tiny preview", null, 4000, 2000, 1280, 640);
     ProviderToolResultBlock toolResult =
         new ProviderToolResultBlock(
             "call-image", "read", List.of(scaledToolImage), false, "{\"bytes\":3}");
@@ -575,7 +585,8 @@ class ProviderResourceMaterializerTest {
     stubContent(contentService, BLOB_ID, "image/png", png);
 
     ProviderResourceBlock withoutTier =
-        ProviderResourceBlock.media(BLOB_ID, "scan.png", "tiny preview", null);
+        new ProviderResourceBlock(
+            BLOB_ID, "scan.png", null, null, "tiny preview", null, null, null, null, null);
 
     ProviderResourceMaterializer materializer =
         new ProviderResourceMaterializer(blobManager, contentService, () -> ImageInputTier.P1080);
@@ -611,8 +622,8 @@ class ProviderResourceMaterializerTest {
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("image/png", BYTES.length));
     stubContent(contentService, BLOB_ID, "image/png", BYTES);
     ProviderResourceBlock storedImage =
-        ProviderResourceBlock.media(
-            BLOB_ID, "scan.png", "preview", ImageInputTier.P720, 4000, 2000, 1280, 640);
+        new ProviderResourceBlock(
+            BLOB_ID, "scan.png", null, null, "preview", ImageInputTier.P720, 4000, 2000, 1280, 640);
 
     ProviderImageBlock image =
         firstImage(
@@ -787,8 +798,17 @@ class ProviderResourceMaterializerTest {
                             new ProviderMessage(
                                 ProviderMessageRole.USER,
                                 List.of(
-                                    ProviderResourceBlock.media(
-                                        BLOB_ID, "anim.gif", "preview", ImageInputTier.P720)))),
+                                    new ProviderResourceBlock(
+                                        BLOB_ID,
+                                        "anim.gif",
+                                        null,
+                                        null,
+                                        "preview",
+                                        ImageInputTier.P720,
+                                        null,
+                                        null,
+                                        null,
+                                        null)))),
                         Set.of(ModelInputModality.IMAGE),
                         ALL_MEDIA));
     assertTrue(error.getMessage().contains("multi-frame"), error.getMessage());
@@ -861,7 +881,8 @@ class ProviderResourceMaterializerTest {
   }
 
   private static ProviderResourceBlock tieredResource(ImageInputTier tier) {
-    return ProviderResourceBlock.media(BLOB_ID, "scan.png", "tiny preview", tier);
+    return new ProviderResourceBlock(
+        BLOB_ID, "scan.png", null, null, "tiny preview", tier, null, null, null, null);
   }
 
   private static int materializedImageWidth(
@@ -897,7 +918,8 @@ class ProviderResourceMaterializerTest {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
     ProviderResourceBlock externalizedText =
-        ProviderResourceBlock.externalizedText(BLOB_ID, "demo.txt", 12345L, 100L, "first 20 lines");
+        new ProviderResourceBlock(
+            BLOB_ID, "demo.txt", 12345L, 100L, "first 20 lines", null, null, null, null, null);
 
     List<ProviderMessage> result =
         materializer(blobManager, contentService)
@@ -931,7 +953,8 @@ class ProviderResourceMaterializerTest {
   void externalizedPreviewKeepsSpecialCharactersAndTrailingWhitespace() {
     // 预览为真实工具输出：模板渲染不能转义或剥离结尾空白。
     ProviderResourceBlock resource =
-        ProviderResourceBlock.externalizedText(BLOB_ID, "<&>.txt", 12, 2, "<&> {{literal}}\n ");
+        new ProviderResourceBlock(
+            BLOB_ID, "<&>.txt", 12L, 2L, "<&> {{literal}}\n ", null, null, null, null, null);
     ProviderTextBlock text =
         assertInstanceOf(
             ProviderTextBlock.class,
@@ -956,7 +979,8 @@ class ProviderResourceMaterializerTest {
   @Test
   void externalizedTextWithoutPreviewEndsAtPreviewMarker() {
     // 空预览不应凭模板尾部换行新增模型可见内容。
-    ProviderResourceBlock resource = ProviderResourceBlock.externalizedText(BLOB_ID, "x", 0, 0, "");
+    ProviderResourceBlock resource =
+        new ProviderResourceBlock(BLOB_ID, "x", 0L, 0L, "", null, null, null, null, null);
     ProviderTextBlock text =
         assertInstanceOf(
             ProviderTextBlock.class,
@@ -1102,8 +1126,17 @@ class ProviderResourceMaterializerTest {
     long singleDataUriChars =
         ProviderInlineBlobReader.estimatedDataUriChars("image/png", BYTES.length);
     ProviderResourceBlock otherResource =
-        ProviderResourceBlock.media(
-            OTHER_BLOB_ID, "other.png", "other preview", ImageInputTier.ORIGINAL);
+        new ProviderResourceBlock(
+            OTHER_BLOB_ID,
+            "other.png",
+            null,
+            null,
+            "other preview",
+            ImageInputTier.ORIGINAL,
+            null,
+            null,
+            null,
+            null);
 
     IllegalArgumentException error =
         assertThrows(
@@ -1153,7 +1186,9 @@ class ProviderResourceMaterializerTest {
   void nestedTextResourceReconstructsToolResultWithMetadataAndOrder() {
     StorageBlobManager blobManager = mock(StorageBlobManager.class);
     StorageBlobContentService contentService = mock(StorageBlobContentService.class);
-    ProviderResourceBlock resource = new ProviderResourceBlock(BLOB_ID, "scan.txt", "tiny preview");
+    ProviderResourceBlock resource =
+        new ProviderResourceBlock(
+            BLOB_ID, "scan.txt", null, null, "tiny preview", null, null, null, null, null);
     when(blobManager.getBlob(BLOB_ID)).thenReturn(activeBlob("text/plain", 42L));
     ProviderTextBlock before = new ProviderTextBlock("before");
     ProviderTextBlock after = new ProviderTextBlock("after");
@@ -1376,7 +1411,9 @@ class ProviderResourceMaterializerTest {
         new ProviderToolResultBlock(
             "call-media",
             "read",
-            List.of(ProviderResourceBlock.media(blobId, "media.bin", "preview")),
+            List.of(
+                new ProviderResourceBlock(
+                    blobId, "media.bin", null, null, "preview", null, null, null, null, null)),
             false,
             "{}");
     ProviderMediaCapabilities userOnly = new ProviderMediaCapabilities(Set.of(modality), Set.of());

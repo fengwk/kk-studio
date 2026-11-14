@@ -190,11 +190,6 @@ class FakeCanvasFunctionAdapterTest {
     }
 
     @Override
-    public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
-      throw new UnsupportedOperationException();
-    }
-
-    @Override
     public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
       if (output.inlineText()) {
         throw new IllegalArgumentException(
