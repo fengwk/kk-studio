@@ -57,21 +57,19 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
       Executor executionExecutor,
       LocalExecutionLifecycle lifecycle) {
     HarnessStore requiredStore = Objects.requireNonNull(store, "store");
+    BuiltinStore builtinStore = requireBuiltinStore(requiredStore);
+    ModelGateway requiredGateway = Objects.requireNonNull(gateway, "gateway");
     this.config = Objects.requireNonNull(config, "config");
     this.executions = new ClaimedExecutionSupport<>(requiredStore, BuiltinWorkType.MODEL);
     this.preparer =
         new ModelClaimPreparer(
-            requiredStore,
-            requireBuiltinStore(requiredStore),
-            Objects.requireNonNull(gateway, "gateway"),
-            this.config,
-            executions);
+            requiredStore, builtinStore, requiredGateway, this.config, executions);
     this.launcher =
         new ModelExecutionLauncher(
             requiredStore,
-            requireBuiltinStore(requiredStore),
+            builtinStore,
             Objects.requireNonNull(lifecycle, "lifecycle"),
-            Objects.requireNonNull(gateway, "gateway"),
+            requiredGateway,
             Objects.requireNonNull(realtimeEventSink, "realtimeEventSink"),
             this.config,
             HarnessStoreTime.millisecondClock(clock),
