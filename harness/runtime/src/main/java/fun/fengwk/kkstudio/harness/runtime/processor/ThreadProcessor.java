@@ -8,7 +8,6 @@ import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
@@ -21,7 +20,6 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
-import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
@@ -37,7 +35,6 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.DriverCommits;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
@@ -47,7 +44,6 @@ import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
 import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
-import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
 import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
@@ -137,6 +133,7 @@ public final class ThreadProcessor {
   private final ThreadProcessorConfig config;
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final CompactionGate compactionGate;
+  private final TurnCommitter turnCommitter = new TurnCommitter();
   private final CommandHarvestReducer settingsReducer = new CommandHarvestReducer();
   private final ThreadAdmissionGuard admissionGuard = new ThreadAdmissionGuard();
   private final ThreadContextProbe threadContextProbe;
@@ -773,7 +770,7 @@ public final class ThreadProcessor {
       }
       resolution = new TurnResolution.Rejected(CONTEXT_BUDGET_EXCEEDED);
     }
-    commitTx(tx, claim, thread, plan, resolution);
+    turnCommitter.commit(tx, claim, thread, plan, resolution);
   }
 
   /**
@@ -793,195 +790,6 @@ public final class ThreadProcessor {
     }
     planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
     return true;
-  }
-
-  /**
-   * 在已锁定 Session / Thread / Claim 的当前事务中按低序 mutation 原子提交 TURN_START + Message + Command markers +
-   * Thread 更新 + Driver 私有 Turn 状态与 Work（accepted）或 AssistantError + FAILED TURN_END（rejected）。
-   */
-  private void commitTx(
-      HarnessStore.Transaction tx,
-      ClaimedWork claim,
-      ThreadState thread,
-      TurnPlan plan,
-      TurnResolution resolution) {
-    Instant now = tx.now();
-    Integer contextWindow = null;
-    Integer maxOutputTokens = null;
-    CompactionStart compactionStart = null;
-    TurnResolution.Accepted accepted = null;
-    CompactionResolution compaction = null;
-    if (resolution instanceof TurnResolution.Accepted acceptedTurn) {
-      accepted = acceptedTurn;
-      contextWindow = accepted.contextWindow();
-      maxOutputTokens = accepted.maxOutputTokens();
-    } else if (resolution instanceof TurnResolution.Compaction compactionTurn) {
-      compaction = compactionTurn.resolution();
-      contextWindow = compaction.contextWindow();
-      maxOutputTokens = compaction.maxOutputTokens();
-      compactionStart = CompactionChildSpawn.start(tx, thread, compaction, plan.preparation());
-    }
-    List<Entry> candidateEntries = plan.candidateEntries();
-    if (accepted != null && accepted.systemChange() != null) {
-      candidateEntries =
-          insertSystemChange(tx, plan, candidateEntries, accepted.systemChange(), now);
-    }
-    for (Entry entry : candidateEntries) {
-      tx.entries()
-          .insert(
-              withCreatedAt(
-                  withResolvedTurnStart(
-                      entry, plan, contextWindow, maxOutputTokens, compactionStart, accepted),
-                  now));
-    }
-    List<ThreadCommand> consumed = new ArrayList<>(plan.consumedCommands().size());
-    for (ThreadCommand command : plan.consumedCommands()) {
-      consumed.add(command.markApplied(plan.appliedEntryId(command.sequence())));
-    }
-    tx.commands().update(consumed);
-    if (accepted != null) {
-      ThreadState advanced =
-          thread.advanceHeadAndInputThroughSequence(
-              plan.candidateHeadEntryId(), nextWatermark(plan, thread), now);
-      tx.threads().update(advanced);
-      accepted.install(tx, thread.id(), plan.turnStartEntryId(), plan.candidateHeadEntryId());
-      if (tx.work().lockClaimed(claim).isEmpty()) {
-        throw new ClaimLostSignal();
-      }
-      tx.work().complete(claim);
-    } else if (compaction != null) {
-      ThreadState advanced =
-          thread.advanceHeadAndInputThroughSequence(
-              plan.candidateHeadEntryId(), nextWatermark(plan, thread), now);
-      tx.threads().update(advanced);
-      if (tx.work().lockClaimed(claim).isEmpty()) {
-        throw new ClaimLostSignal();
-      }
-      tx.work().complete(claim);
-    } else {
-      TurnResolution.Rejected rejected = (TurnResolution.Rejected) resolution;
-      UUID errorEntryId = tx.nextId();
-      tx.entries()
-          .insert(
-              new Entry(
-                  errorEntryId,
-                  plan.sessionId(),
-                  plan.candidateHeadEntryId(),
-                  new AssistantErrorPayload(rejected.error(), null),
-                  now));
-      UUID turnEndId = tx.nextId();
-      tx.entries()
-          .insert(
-              new Entry(
-                  turnEndId,
-                  plan.sessionId(),
-                  errorEntryId,
-                  new TurnEndPayload(
-                      plan.turnStartEntryId(),
-                      TurnEndOutcome.FAILED,
-                      false,
-                      TurnEndReason.TURN_FAILED,
-                      null),
-                  now));
-      boolean requestThread = plan.hasDeferredUserMessages();
-      ThreadState advanced =
-          thread.advanceHeadAndInputThroughSequence(turnEndId, nextWatermark(plan, thread), now);
-      tx.threads().update(advanced);
-      ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
-          tx, advanced, turnEndId, null, now, false);
-      if (tx.work().lockClaimed(claim).isEmpty()) {
-        throw new ClaimLostSignal();
-      }
-      if (requestThread) {
-        tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
-      }
-      tx.work().complete(claim);
-    }
-  }
-
-  /** INPUT 与分支内部指令推进输入水位；CONTINUATION / COMPACTION 不推进。 */
-  private static long nextWatermark(TurnPlan plan, ThreadState thread) {
-    if (plan.reason() == TurnStartReason.INPUT
-        || plan.reason() == TurnStartReason.COMPACTION_BRANCH_INPUT) {
-      return plan.cutoffSequence();
-    }
-    return thread.inputThroughSequence();
-  }
-
-  private static List<Entry> insertSystemChange(
-      HarnessStore.Transaction tx,
-      TurnPlan plan,
-      List<Entry> candidateEntries,
-      SystemPayload systemChange,
-      Instant now) {
-    int turnStartIndex = -1;
-    for (int i = 0; i < candidateEntries.size(); i++) {
-      if (candidateEntries.get(i).id().equals(plan.turnStartEntryId())) {
-        turnStartIndex = i;
-        break;
-      }
-    }
-    if (turnStartIndex < 0) {
-      throw new IllegalStateException("candidate entries do not contain TURN_START");
-    }
-    Entry turnStart = candidateEntries.get(turnStartIndex);
-    if (!(turnStart.payload() instanceof TurnStartPayload)) {
-      throw new IllegalStateException("turnStartEntryId does not identify a TURN_START");
-    }
-    Entry systemEntry =
-        new Entry(tx.nextId(), plan.sessionId(), turnStart.parentEntryId(), systemChange, now);
-    List<Entry> result = new ArrayList<>(candidateEntries.size() + 1);
-    result.addAll(candidateEntries.subList(0, turnStartIndex));
-    result.add(systemEntry);
-    result.add(
-        new Entry(
-            turnStart.id(),
-            turnStart.sessionId(),
-            systemEntry.id(),
-            turnStart.payload(),
-            turnStart.createdAt()));
-    result.addAll(candidateEntries.subList(turnStartIndex + 1, candidateEntries.size()));
-    return List.copyOf(result);
-  }
-
-  static Entry withCreatedAt(Entry entry, Instant createdAt) {
-    return new Entry(
-        entry.id(), entry.sessionId(), entry.parentEntryId(), entry.payload(), createdAt);
-  }
-
-  /**
-   * 第二阶段 commit 在插入前补齐 Driver 解析成功时的 contextWindow/maxOutputTokens/compactionStart；rejected 保持
-   * null。Driver 实际执行的模型不同于 Thread 设置时记为 fallbackModel。
-   */
-  static Entry withResolvedTurnStart(
-      Entry entry,
-      TurnPlan plan,
-      Integer contextWindow,
-      Integer maxOutputTokens,
-      CompactionStart compactionStart,
-      TurnResolution.Accepted accepted) {
-    if (!entry.id().equals(plan.turnStartEntryId())
-        || !(entry.payload() instanceof TurnStartPayload start)) {
-      return entry;
-    }
-    ExecutionSelection executed = accepted == null ? null : accepted.executedSelection();
-    ExecutionSelection selectedExecution = start.settings().execution();
-    return new Entry(
-        entry.id(),
-        entry.sessionId(),
-        entry.parentEntryId(),
-        new TurnStartPayload(
-            start.reason(),
-            start.settings(),
-            start.ownerThreadId(),
-            contextWindow,
-            maxOutputTokens,
-            compactionStart != null ? compactionStart : start.compaction(),
-            executed == null || selectedExecution == null || executed.equals(selectedExecution)
-                ? null
-                : executed,
-            accepted == null ? null : accepted.capabilities()),
-        entry.createdAt());
   }
 
   /** Work-only 前置校验：仅锁 Work 行验证 claim 当前真实 owned。 */
