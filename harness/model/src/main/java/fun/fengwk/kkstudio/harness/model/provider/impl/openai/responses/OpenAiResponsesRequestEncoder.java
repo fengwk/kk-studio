@@ -8,40 +8,18 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
-import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderDocumentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderImageBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
-import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
-import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderMediaValidator;
 import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 
-import java.net.URI;
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -65,11 +43,7 @@ public final class OpenAiResponsesRequestEncoder {
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   /** OpenAI Responses 拒绝低于 16 的 max_output_tokens；该下限只属于本 Provider。 */
-  private static final int OPENAI_RESPONSES_MIN_OUTPUT_TOKENS = 16;
-
-  /** 可等价重建的 reasoning item 成员：超出这些成员的额外成员是 durable 语义无法表达的原生事实。 */
-  private static final Set<String> REASONING_ITEM_FIELDS =
-      Set.of("type", "id", "status", "summary");
+  private static final int MIN_OUTPUT_TOKENS = 16;
 
   /** variant 原生选项绝不覆盖的 prompt cache 控制字段：是否下发、下发什么值完全由 runtime 冻结的缓存控制决定。 */
   private static final Set<String> RUNTIME_OWNED_CACHE_FIELDS =
@@ -114,31 +88,27 @@ public final class OpenAiResponsesRequestEncoder {
     ObjectNode root = request.variant().protocolOptions().copyOptions();
     validateNativeOptions(root);
     applyRuntimeFacts(root, request);
-
     applyOutputBudget(root, request.outputTokens());
     applyReasoningParameters(root, request.variant());
-
     mergeTools(root, encodeTools(request.tools()));
-
-    ArrayNode inputItems = NODES.arrayNode();
-    for (ProviderMessage msg : request.messages()) {
-      encodeMessage(msg, descriptor, request.model(), inputItems);
-    }
-    applyRuntimeOwnedField(root, "input", inputItems);
-
+    applyRuntimeOwnedField(
+        root,
+        "input",
+        OpenAiResponsesInputEncoder.encode(request.messages(), descriptor, request.model()));
     applyCacheControl(root, request.cacheControl());
 
-    byte[] utf8Bytes;
+    byte[] utf8Bytes = serialize(root);
+    bodySizeGuard.enforce(utf8Bytes);
+    return new OpenAiResponsesEncodedRequest(utf8Bytes);
+  }
+
+  private static byte[] serialize(ObjectNode root) {
     try {
-      utf8Bytes = OBJECT_MAPPER.writeValueAsBytes(root);
-    } catch (JacksonException e) {
+      return OBJECT_MAPPER.writeValueAsBytes(root);
+    } catch (JacksonException exception) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "failed to serialize OpenAI Responses request JSON");
     }
-
-    bodySizeGuard.enforce(utf8Bytes);
-
-    return new OpenAiResponsesEncodedRequest(utf8Bytes);
   }
 
   /**
@@ -148,29 +118,28 @@ public final class OpenAiResponsesRequestEncoder {
    * 绝不静默改写厂商事实。显式 {@code null} 与缺失不同：它是一次声明，按同样的类型规则判定。
    */
   private static void validateNativeOptions(ObjectNode root) {
-    for (String field : STATEFUL_FIELD_NAMES) {
-      if (root.has(field)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "protocolOptions conflicts with the stateless replay invariant: " + field);
-      }
-    }
-    for (String field : RUNTIME_OWNED_CACHE_FIELDS) {
-      if (root.has(field)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "protocolOptions must not declare the runtime-owned prompt cache field: " + field);
-      }
-    }
+    rejectDeclaredFields(
+        root,
+        STATEFUL_FIELD_NAMES,
+        "protocolOptions conflicts with the stateless replay invariant: ");
+    rejectDeclaredFields(
+        root,
+        RUNTIME_OWNED_CACHE_FIELDS,
+        "protocolOptions must not declare the runtime-owned prompt cache field: ");
     requireNativeArray(root, "tools");
-    if (root.has("background")
-        && (!root.get("background").isBoolean() || root.get("background").booleanValue())) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "protocolOptions background must be false");
-    }
+    requireDisabledBackground(root);
     requireNativeArray(root, "include");
     requireNativeObject(root, "reasoning");
     dedupeInclude(root);
+  }
+
+  private static void rejectDeclaredFields(
+      ObjectNode root, Set<String> fields, String errorPrefix) {
+    for (String field : fields) {
+      if (root.has(field)) {
+        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorPrefix + field);
+      }
+    }
   }
 
   private static void requireNativeArray(ObjectNode root, String field) {
@@ -188,6 +157,14 @@ public final class OpenAiResponsesRequestEncoder {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "protocolOptions field must be a JSON object: " + field);
+    }
+  }
+
+  private static void requireDisabledBackground(ObjectNode root) {
+    if (root.has("background")
+        && (!root.get("background").isBoolean() || root.get("background").booleanValue())) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "protocolOptions background must be false");
     }
   }
 
@@ -219,7 +196,7 @@ public final class OpenAiResponsesRequestEncoder {
 
   /** 输出预算低于本 Provider 的协议下限 {@code 16} 时明确拒绝；合法预算原样编码，绝不擅自扩大冻结值。 */
   private static void applyOutputBudget(ObjectNode root, int outputTokens) {
-    if (outputTokens < OPENAI_RESPONSES_MIN_OUTPUT_TOKENS) {
+    if (outputTokens < MIN_OUTPUT_TOKENS) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "max_output_tokens must be at least 16");
     }
@@ -285,52 +262,64 @@ public final class OpenAiResponsesRequestEncoder {
   }
 
   /** tools 合并：只保留可执行的 hosted 工具，runtime function 工具追加在其后；无任何工具时不发送 {@code tools}。 */
-  private static ArrayNode mergeTools(ObjectNode root, ArrayNode runtimeTools) {
+  private static void mergeTools(ObjectNode root, ArrayNode runtimeTools) {
     if (!root.has("tools")) {
-      if (runtimeTools == null || runtimeTools.isEmpty()) {
-        return null;
+      if (runtimeTools != null && !runtimeTools.isEmpty()) {
+        root.set("tools", runtimeTools);
       }
-      root.set("tools", runtimeTools);
-      return runtimeTools;
+      return;
     }
     ArrayNode tools = (ArrayNode) root.get("tools");
-    Set<String> names = new HashSet<>();
+    Set<String> hostedNames = new HashSet<>();
     for (int i = 0; i < tools.size(); i++) {
-      JsonNode tool = tools.get(i);
-      JsonNode type = tool.path("type");
-      String kind = type.isString() ? type.stringValue() : "";
-      if (!tool.isObject()
-          || !HOSTED_TOOL_TYPES.contains(kind)
-          || ("mcp".equals(kind)
-              && (!tool.path("require_approval").isString()
-                  || !"never".equals(tool.path("require_approval").stringValue())))) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "protocolOptions tools["
-                + i
-                + "] must be a supported hosted tool; bind client tools through runtime"
-                + " ProviderToolDefinition");
-      }
-      JsonNode name = tool.get("name");
-      if (name != null && name.isString() && !names.add(name.stringValue())) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "protocolOptions tools[" + i + "] duplicates a tool name");
-      }
-      if (name != null && name.isString() && runtimeTools != null) {
-        for (JsonNode runtimeTool : runtimeTools) {
-          if (name.stringValue().equals(runtimeTool.path("name").asString(""))) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST,
-                "protocolOptions tools[" + i + "] name conflicts with runtime tool");
-          }
-        }
-      }
+      validateHostedTool(tools.get(i), i, runtimeTools, hostedNames);
     }
     if (runtimeTools != null) {
       tools.addAll(runtimeTools);
     }
-    return tools;
+  }
+
+  private static void validateHostedTool(
+      JsonNode tool, int index, ArrayNode runtimeTools, Set<String> hostedNames) {
+    String kind = tool.path("type").isString() ? tool.path("type").stringValue() : "";
+    if (!tool.isObject()
+        || !HOSTED_TOOL_TYPES.contains(kind)
+        || ("mcp".equals(kind) && !requiresNoApproval(tool))) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions tools["
+              + index
+              + "] must be a supported hosted tool; bind client tools through runtime"
+              + " ProviderToolDefinition");
+    }
+    JsonNode name = tool.get("name");
+    if (name == null || !name.isString()) {
+      return;
+    }
+    if (!hostedNames.add(name.stringValue())) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions tools[" + index + "] duplicates a tool name");
+    }
+    if (runtimeTools != null && containsToolName(runtimeTools, name.stringValue())) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "protocolOptions tools[" + index + "] name conflicts with runtime tool");
+    }
+  }
+
+  private static boolean requiresNoApproval(JsonNode tool) {
+    return tool.path("require_approval").isString()
+        && "never".equals(tool.path("require_approval").stringValue());
+  }
+
+  private static boolean containsToolName(ArrayNode runtimeTools, String name) {
+    for (JsonNode runtimeTool : runtimeTools) {
+      if (name.equals(runtimeTool.path("name").asString(""))) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static ArrayNode encodeTools(List<ProviderToolDefinition> tools) {
@@ -339,16 +328,21 @@ public final class OpenAiResponsesRequestEncoder {
     }
     ArrayNode array = NODES.arrayNode();
     for (ProviderToolDefinition tool : tools) {
-      ObjectNode node = array.addObject();
-      node.put("type", "function");
-      node.put("name", tool.name());
-      if (tool.description() != null && !tool.description().isBlank()) {
-        node.put("description", tool.description());
-      }
-      node.set("parameters", encodeStrictParameters(tool));
-      node.put("strict", true);
+      array.add(encodeTool(tool));
     }
     return array;
+  }
+
+  private static ObjectNode encodeTool(ProviderToolDefinition tool) {
+    ObjectNode node = NODES.objectNode();
+    node.put("type", "function");
+    node.put("name", tool.name());
+    if (tool.description() != null && !tool.description().isBlank()) {
+      node.put("description", tool.description());
+    }
+    node.set("parameters", encodeStrictParameters(tool));
+    node.put("strict", true);
+    return node;
   }
 
   /** 解析工具参数 schema 并归一化为 strict 形态；共享的 inputSchemaJson 绝不被修改。 */
@@ -367,719 +361,20 @@ public final class OpenAiResponsesRequestEncoder {
     return OpenAiResponsesStrictSchema.normalize((ObjectNode) schemaNode);
   }
 
-  private static void encodeMessage(
-      ProviderMessage msg,
-      ProviderDescriptor descriptor,
-      ModelDescriptor model,
-      ArrayNode inputItems) {
-    Objects.requireNonNull(msg, "msg");
-    ProviderMessageRole role = msg.role();
-
-    switch (role) {
-      case USER -> {
-        ObjectNode userMsg = inputItems.addObject();
-        userMsg.put("type", "message");
-        userMsg.put("role", "user");
-        ArrayNode contents = userMsg.putArray("content");
-        for (ProviderContentBlock block : msg.contents()) {
-          ObjectNode blockNode = encodeUserContentBlock(block);
-          contents.add(blockNode);
-        }
-      }
-      case ASSISTANT -> {
-        List<ObjectNode> blockReplayItems =
-            buildBlockReplayItems(descriptor, model.modelId(), msg.contents());
-        if (blockReplayItems != null) {
-          for (ObjectNode item : blockReplayItems) {
-            inputItems.add(item);
-          }
-          return;
-        }
-        // Semantic fallback
-        encodeAssistantSemanticFallback(msg.contents(), inputItems);
-      }
-      case SYSTEM -> throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "mid-conversation system messages are unsupported by OpenAI Responses");
-      case TOOL -> {
-        for (ProviderContentBlock block : msg.contents()) {
-          if (block instanceof ProviderToolResultBlock resultBlock) {
-            ObjectNode toolOutput = inputItems.addObject();
-            toolOutput.put("type", "function_call_output");
-            toolOutput.put("call_id", resultBlock.toolCallId());
-            encodeToolResultContent(resultBlock, toolOutput);
-          } else {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST,
-                "TOOL message must only contain ProviderToolResultBlock");
-          }
-        }
-      }
-    }
-  }
-
-  private static ObjectNode encodeUserContentBlock(ProviderContentBlock block) {
-    if (block instanceof ProviderTextBlock textBlock) {
-      ObjectNode node = NODES.objectNode();
-      node.put("type", "input_text");
-      node.put("text", textBlock.text());
-      return node;
-    }
-    if (block instanceof ProviderImageBlock imageBlock) {
-      validateImageType(imageBlock.mediaType());
-      validateUri(imageBlock.source());
-      ObjectNode node = NODES.objectNode();
-      node.put("type", "input_image");
-      node.put("image_url", imageBlock.source());
-      node.put("detail", "auto");
-      return node;
-    }
-    if (block instanceof ProviderDocumentBlock docBlock) {
-      validateDocumentType(docBlock.mediaType());
-      validateUri(docBlock.source());
-      ObjectNode node = NODES.objectNode();
-      node.put("type", "input_file");
-      if (docBlock.source().startsWith("data:")) {
-        node.put("file_data", docBlock.source());
-        node.put("filename", "document.pdf");
-      } else {
-        node.put("file_url", docBlock.source());
-      }
-      return node;
-    }
-    throw new ProviderException(
-        ProviderErrorKind.INVALID_REQUEST,
-        "OpenAI Responses does not support content block type: "
-            + block.getClass().getSimpleName());
-  }
-
-  private static List<ObjectNode> buildBlockReplayItems(
-      ProviderDescriptor descriptor, String requestedModel, List<ProviderContentBlock> blocks) {
-    if (blocks.isEmpty()) {
-      return null;
-    }
-    var affinity = descriptor.affinity(requestedModel);
-    ArrayNode output = NODES.arrayNode();
-    ObjectNode currentItem = null;
-
-    for (ProviderContentBlock block : blocks) {
-      ProviderBlockData data = providerBlockData(block);
-      if (data == null
-          || data.protocol() != ProviderReplayFormat.OPENAI_RESPONSES
-          || !data.affinity().equals(affinity)) {
-        return null;
-      }
-      if (data.itemStart()) {
-        if (currentItem != null) {
-          output.add(currentItem);
-        }
-        currentItem = beginReplayItem(data);
-      } else if (currentItem == null) {
-        return null;
-      }
-      if (!appendReplayBlock(currentItem, block, data)) {
-        return null;
-      }
-    }
-    if (currentItem == null) {
-      return null;
-    }
-    output.add(currentItem);
-    if (declinesReplay(output, blocks)) {
-      return null;
-    }
-    List<ObjectNode> items = new ArrayList<>(output.size());
-    for (JsonNode item : output) {
-      items.add((ObjectNode) item.deepCopy());
-    }
-    return items;
-  }
-
-  private static ObjectNode beginReplayItem(ProviderBlockData data) {
-    ObjectNode item = NODES.objectNode();
-    JsonNode nativeFields = data.nativeFields();
-    JsonNode itemFields = nativeFields.get("itemFields");
-    if (itemFields != null) {
-      mergeNativeFields(item, itemFields);
-    }
-    JsonNode rawItem = nativeFields.get("item");
-    if (rawItem != null) {
-      mergeNativeFields(item, rawItem);
-    }
-    if (data.itemId() != null) {
-      item.put("id", data.itemId());
-    }
-    if (data.itemType() == null || data.itemType().isBlank()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI Responses block item type");
-    }
-    item.put("type", data.itemType());
-    if ("message".equals(data.itemType())) {
-      item.put("role", "assistant");
-      if (!item.path("content").isArray()) {
-        item.putArray("content");
-      }
-    } else if ("reasoning".equals(data.itemType())) {
-      if (data.encryptedContent() != null) {
-        item.put("encrypted_content", data.encryptedContent());
-      }
-      if (!item.path("summary").isArray()) {
-        item.putArray("summary");
-      }
-    }
-    return item;
-  }
-
-  private static boolean appendReplayBlock(
-      ObjectNode item, ProviderContentBlock block, ProviderBlockData data) {
-    if (block instanceof ProviderTextBlock textBlock) {
-      if (!"message".equals(data.itemType())
-          || !Set.of("output_text", "refusal").contains(data.contentType())) {
-        return false;
-      }
-      ObjectNode content = item.withArray("content").addObject();
-      mergeNativeFields(content, data.nativeFields().get("contentFields"));
-      content.put("type", data.contentType());
-      if (data.refusal()) {
-        content.put("refusal", textBlock.text());
-      } else {
-        content.put("text", textBlock.text());
-      }
-      JsonNode annotations = data.nativeFields().get("annotations");
-      if (annotations != null) {
-        content.set("annotations", annotations.deepCopy());
-      }
-      return true;
-    }
-    if (block instanceof ProviderThinkingBlock thinkingBlock) {
-      if (!"reasoning".equals(data.itemType()) || data.contentType() == null) {
-        return false;
-      }
-      ObjectNode summary = item.withArray("summary").addObject();
-      mergeNativeFields(summary, data.nativeFields().get("summaryPartFields"));
-      summary.put("type", data.contentType());
-      summary.put("text", thinkingBlock.thinking());
-      return true;
-    }
-    if (block instanceof ProviderToolCallBlock toolCallBlock) {
-      if (!"function_call".equals(data.itemType()) || !data.itemStart()) {
-        return false;
-      }
-      ProviderToolCall call = toolCallBlock.toolCall();
-      ProviderJsonHelper.parseStrictJsonObject(
-          call.argumentsJson(), "function_call arguments must be a JSON object");
-      item.put("call_id", call.id());
-      item.put("name", call.name());
-      item.put("arguments", call.argumentsJson());
-      return true;
-    }
-    if (block instanceof ProviderOpaqueBlock opaqueBlock) {
-      if ("message_content".equals(opaqueBlock.blockType())) {
-        if (!"message".equals(data.itemType()) || data.contentType() == null) {
-          return false;
-        }
-        JsonNode fields = data.nativeFields();
-        JsonNode contentFields = fields.get("content");
-        if (contentFields == null || !contentFields.isObject()) {
-          return false;
-        }
-        ObjectNode content = item.withArray("content").addObject();
-        mergeNativeFields(content, contentFields);
-        content.put("type", data.contentType());
-        return true;
-      }
-      return data.itemStart() && data.itemType() != null;
-    }
-    return false;
-  }
-
-  private static ProviderBlockData providerBlockData(ProviderContentBlock block) {
-    if (block instanceof ProviderTextBlock textBlock) {
-      return textBlock.providerBlockData();
-    }
-    if (block instanceof ProviderThinkingBlock thinkingBlock) {
-      return thinkingBlock.providerBlockData();
-    }
-    if (block instanceof ProviderToolCallBlock toolCallBlock) {
-      return toolCallBlock.providerBlockData();
-    }
-    if (block instanceof ProviderOpaqueBlock opaqueBlock) {
-      return opaqueBlock.providerBlockData();
-    }
-    if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
-      return redactedBlock.providerBlockData();
-    }
-    return null;
-  }
-
-  private static void mergeNativeFields(ObjectNode target, JsonNode fields) {
-    if (fields == null) {
-      return;
-    }
-    if (!fields.isObject()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI Responses block native fields");
-    }
-    for (var field : fields.properties()) {
-      target.set(field.getKey(), field.getValue().deepCopy());
-    }
-  }
-
-  private static void encodeAssistantSemanticFallback(
-      List<ProviderContentBlock> contents, ArrayNode inputItems) {
-    StringBuilder textBuf = new StringBuilder();
-
-    for (ProviderContentBlock block : contents) {
-      if (block instanceof ProviderTextBlock textBlock) {
-        textBuf.append(textBlock.text());
-      } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
-        if (thinkingBlock.thinking() != null) {
-          textBuf.append(thinkingBlock.thinking());
-        }
-      } else if (block instanceof ProviderJsonBlock jsonBlock) {
-        textBuf.append(jsonBlock.json());
-      } else if (block instanceof ProviderToolCallBlock toolCallBlock) {
-        flushAssistantText(textBuf, inputItems);
-        ProviderToolCall call = toolCallBlock.toolCall();
-        ProviderJsonHelper.parseStrictJsonObject(
-            call.argumentsJson(), "toolCall argumentsJson must be a JSON object");
-        ObjectNode item = inputItems.addObject();
-        item.put("type", "function_call");
-        item.put("call_id", call.id());
-        item.put("name", call.name());
-        item.put("arguments", call.argumentsJson());
-      } else if (block instanceof ProviderOpaqueBlock
-          || block instanceof ProviderRedactedThinkingBlock) {
-        // Opaque and redacted provider content is same-model-only.
-      } else {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "Unsupported assistant content block: " + block.getClass().getSimpleName());
-      }
-    }
-    flushAssistantText(textBuf, inputItems);
-  }
-
-  private static void flushAssistantText(StringBuilder text, ArrayNode inputItems) {
-    if (text.isEmpty()) {
-      return;
-    }
-    ObjectNode message = inputItems.addObject();
-    message.put("type", "message");
-    message.put("role", "assistant");
-    ObjectNode content = message.putArray("content").addObject();
-    content.put("type", "output_text");
-    content.put("text", text.toString());
-    text.setLength(0);
-  }
-
-  /**
-   * 工具结果编码：单文本/JSON 保持简洁的 string 形态，含媒体时使用 {@code output} 数组。
-   *
-   * <p>数组元素只允许 {@code input_text}、{@code input_image} 与 {@code input_file}（PDF）：OpenAI Responses 的
-   * {@code function_call_output.output} 明确支持这三种输入项。音频、视频与任何其他块类型都以 {@code INVALID_REQUEST} 明确失败，
-   * 绝不静默丢弃媒体。
-   */
-  private static void encodeToolResultContent(
-      ProviderToolResultBlock resultBlock, ObjectNode toolOutput) {
-    List<ProviderContentBlock> contents = resultBlock.contents();
-    if (contents == null || contents.isEmpty()) {
-      toolOutput.put("output", "");
-      return;
-    }
-    if (contents.size() == 1) {
-      ProviderContentBlock single = contents.get(0);
-      if (single instanceof ProviderTextBlock textBlock) {
-        toolOutput.put("output", textBlock.text());
-        return;
-      }
-      if (single instanceof ProviderJsonBlock jsonBlock) {
-        toolOutput.put("output", jsonBlock.json());
-        return;
-      }
-    }
-
-    ArrayNode array = toolOutput.putArray("output");
-    for (ProviderContentBlock block : contents) {
-      array.add(encodeToolResultItem(block));
-    }
-  }
-
-  /** 工具结果的文本与 JSON 统一编码为 {@code input_text}，媒体与用户内容共用同一规则，保证同模态两处 wire 形态一致。 */
-  private static ObjectNode encodeToolResultItem(ProviderContentBlock block) {
-    if (block instanceof ProviderTextBlock textBlock) {
-      ObjectNode item = NODES.objectNode();
-      item.put("type", "input_text");
-      item.put("text", textBlock.text());
-      return item;
-    }
-    if (block instanceof ProviderJsonBlock jsonBlock) {
-      ObjectNode item = NODES.objectNode();
-      item.put("type", "input_text");
-      item.put("text", jsonBlock.json());
-      return item;
-    }
-    if (block instanceof ProviderImageBlock || block instanceof ProviderDocumentBlock) {
-      return encodeUserContentBlock(block);
-    }
-    throw new ProviderException(
-        ProviderErrorKind.INVALID_REQUEST,
-        "OpenAI Responses does not support tool result content block type: "
-            + block.getClass().getSimpleName());
-  }
-
-  /**
-   * 严格校验 durable replay payload 的真实形状与 durable 语义一致性，并返回该 payload 是否只由空 reasoning 占位符构成。
-   *
-   * <p>结构性损坏或与 durable 文本/思考/工具调用矛盾都在此抛出 {@code INVALID_REQUEST}，与 affinity 是否匹配无关。已知 {@code
-   * message}/{@code reasoning}/{@code function_call} 只对 durable 语义所必需的字段做结构/类型校验并逐项比对 durable 内容；超出
-   * durable 语义的官方响应字段（{@code phase}、{@code annotations}/{@code logprobs}、reasoning 密文、 {@code
-   * status} 及未来新增成员）与未知官方 item 都作为原生事实原样保留，不影响校验结果。
-   *
-   * <p>无 {@code encrypted_content}、无可用摘要文本、也没有超出 {@code type/id/status/summary} 成员的 reasoning item
-   * 是上游“原生推理不可用”的合法空占位符：当 payload 只由这类占位符构成时不承载原生推理，返回 {@code true} 由调用方回退语义编码， 而不是判为损坏请求。
-   *
-   * <p>带 {@code encrypted_content} 且没有可比可读文本的 reasoning item 是原生推理的权威事实：即便 durable 有可读思考也不
-   * 判为矛盾（该可读文本无法在 payload 内表达），放行原位回放；真实可读文本矛盾或纯文本占位符仍需回退或拒绝。
-   */
-  private static boolean declinesReplay(
-      ArrayNode outputArray, List<ProviderContentBlock> durableContents) {
-    StringBuilder replayText = new StringBuilder();
-    StringBuilder replayThinking = new StringBuilder();
-    List<ProviderToolCall> replayToolCalls = new ArrayList<>();
-    int reasoningItemCount = 0;
-    int emptyReasoningPlaceholderCount = 0;
-    boolean replayHasOpaqueReasoning = false;
-
-    for (JsonNode item : outputArray) {
-      if (!item.isObject()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid replay output item: must be a JSON object");
-      }
-      if (!item.has("type")
-          || !item.get("type").isString()
-          || item.get("type").stringValue().isBlank()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid replay output item: missing string type");
-      }
-      String type = item.get("type").stringValue();
-      switch (type) {
-        case "message" -> {
-          if (!item.has("role")
-              || !item.get("role").isString()
-              || !"assistant".equals(item.get("role").stringValue())) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST,
-                "replay message item must have role='assistant'");
-          }
-          // id/status/phase 与任何额外成员都是原生事实，原样保留
-          if (item.has("id")) {
-            if (!item.get("id").isString() || item.get("id").stringValue().isBlank()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST, "replay message id must be non-blank string");
-            }
-          }
-          if (item.has("phase")) {
-            if (!item.get("phase").isString() || item.get("phase").stringValue().isBlank()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST,
-                  "replay message phase must be non-blank string");
-            }
-          }
-          JsonNode content = item.get("content");
-          if (content == null || !content.isArray()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "replay message content must be an array");
-          }
-          for (JsonNode block : content) {
-            if (!block.isObject()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST,
-                  "replay message content block must be an object");
-            }
-            if (!block.has("type") || !block.get("type").isString()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST,
-                  "replay message content block must have string type");
-            }
-            switch (block.get("type").stringValue()) {
-              case "output_text" -> {
-                if (!block.has("text") || !block.get("text").isString()) {
-                  throw new ProviderException(
-                      ProviderErrorKind.INVALID_REQUEST,
-                      "replay output_text block must have string text");
-                }
-                // annotations/logprobs 与任何额外成员都是原生事实，原样保留
-                replayText.append(block.get("text").stringValue());
-              }
-              case "refusal" -> {
-                if (!block.has("refusal") || !block.get("refusal").isString()) {
-                  throw new ProviderException(
-                      ProviderErrorKind.INVALID_REQUEST,
-                      "replay refusal block must have string refusal");
-                }
-                replayText.append(block.get("refusal").stringValue());
-              }
-              default -> {
-                // Unknown content unions are opaque native facts and do not contribute text.
-              }
-            }
-          }
-        }
-        case "reasoning" -> {
-          if (item.has("id")) {
-            if (!item.get("id").isString() || item.get("id").stringValue().isBlank()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST,
-                  "replay reasoning id must be non-blank string");
-            }
-          }
-          boolean itemHasEncrypted = false;
-          if (item.has("encrypted_content")) {
-            JsonNode encNode = item.get("encrypted_content");
-            if (!encNode.isString() || encNode.stringValue().isBlank()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST,
-                  "replay reasoning encrypted_content must be non-blank string");
-            }
-            itemHasEncrypted = true;
-          }
-          boolean itemHasUsableSummary = false;
-          if (item.has("summary")) {
-            JsonNode summary = item.get("summary");
-            if (!summary.isArray()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST, "replay reasoning summary must be an array");
-            }
-            for (JsonNode s : summary) {
-              if (!s.isObject()) {
-                throw new ProviderException(
-                    ProviderErrorKind.INVALID_REQUEST,
-                    "replay reasoning summary block must be an object");
-              }
-              if (!s.has("type")
-                  || !s.get("type").isString()
-                  || !"summary_text".equals(s.get("type").stringValue())) {
-                throw new ProviderException(
-                    ProviderErrorKind.INVALID_REQUEST,
-                    "replay reasoning summary block type must be 'summary_text'");
-              }
-              if (!s.has("text") || !s.get("text").isString()) {
-                throw new ProviderException(
-                    ProviderErrorKind.INVALID_REQUEST,
-                    "replay reasoning summary block must have string text");
-              }
-              // opaque summary 块（除 type/text 外还有成员）仍按原生事实原样保留
-              String summaryText = s.get("text").stringValue();
-              if (!summaryText.isBlank()) {
-                itemHasUsableSummary = true;
-              }
-            }
-          }
-          // content 形状严格校验与可比文本读取复用同一 helper；损坏历史一律 INVALID_REQUEST。
-          replayThinking.append(
-              OpenAiResponsesReasoningText.read(item, ProviderErrorKind.INVALID_REQUEST));
-          reasoningItemCount++;
-          if (itemHasEncrypted) {
-            replayHasOpaqueReasoning = true;
-          }
-          if (!itemHasEncrypted
-              && !hasFieldOutside(item, REASONING_ITEM_FIELDS)
-              && !itemHasUsableSummary) {
-            // 无密文、无可用摘要文本、无额外成员：结构合法的空占位符（上游声明原生推理不可用），而不是损坏请求。
-            emptyReasoningPlaceholderCount++;
-          }
-        }
-        case "function_call" -> {
-          String callId = null;
-          if (item.has("call_id")) {
-            if (!item.get("call_id").isString() || item.get("call_id").stringValue().isBlank()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST,
-                  "function_call call_id must be non-blank string");
-            }
-            callId = item.get("call_id").stringValue();
-          }
-          if (item.has("id")) {
-            if (!item.get("id").isString() || item.get("id").stringValue().isBlank()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_REQUEST, "function_call id must be non-blank string");
-            }
-            if (callId == null) {
-              callId = item.get("id").stringValue();
-            }
-          }
-          if (callId == null || callId.isBlank()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "function_call missing call_id or id");
-          }
-          if (!item.has("name")
-              || !item.get("name").isString()
-              || item.get("name").stringValue().isBlank()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "function_call missing non-blank string name");
-          }
-          String name = item.get("name").stringValue();
-          if (!item.has("arguments") || !item.get("arguments").isString()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "function_call missing string arguments");
-          }
-          String args = item.get("arguments").stringValue();
-          ProviderJsonHelper.parseStrictJsonObject(
-              args, "function_call arguments must be a JSON object");
-          replayToolCalls.add(new ProviderToolCall(callId, name, args));
-        }
-        default -> {
-          // 未知但可信的官方 item（web/file search、code interpreter、image generation、custom tool
-          // call、computer/shell 等）：不承载 durable 语义，因此不参与文本/思考/工具一致性比对，只作为原生事实原样回放。
-        }
-      }
-    }
-
-    StringBuilder durableText = new StringBuilder();
-    StringBuilder durableThinking = new StringBuilder();
-    List<ProviderToolCall> durableToolCalls = new ArrayList<>();
-
-    for (ProviderContentBlock block : durableContents) {
-      if (block instanceof ProviderTextBlock tb) {
-        durableText.append(tb.text());
-      } else if (block instanceof ProviderThinkingBlock thb) {
-        durableThinking.append(thb.thinking());
-      } else if (block instanceof ProviderToolCallBlock tcb) {
-        ProviderToolCall tc = tcb.toolCall();
-        ProviderJsonHelper.parseStrictJsonObject(
-            tc.argumentsJson(), "durable tool call arguments must be a JSON object");
-        durableToolCalls.add(tc);
-      } else if (block instanceof ProviderOpaqueBlock
-          || block instanceof ProviderRedactedThinkingBlock) {
-        // Opaque and redacted provider content carries no comparable assistant semantics.
-      } else {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "durable content block not supported in assistant message replay: "
-                + block.getClass().getSimpleName());
-      }
-    }
-
-    if (!replayText.toString().equals(durableText.toString())) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "replay text content mismatch with durable message content");
-    }
-    // 只由空 reasoning 占位符构成：至少一个 reasoning，且每个都无密文、无任何非空摘要文本、无额外成员。
-    boolean replayIsEmptyPlaceholderOnly =
-        reasoningItemCount > 0 && emptyReasoningPlaceholderCount == reasoningItemCount;
-    if (!replayIsEmptyPlaceholderOnly) {
-      boolean replayHasNoComparableThinking = replayThinking.isEmpty();
-      if (!durableThinking.isEmpty()
-          && !replayThinking.toString().equals(durableThinking.toString())) {
-        if (!(replayHasNoComparableThinking && replayHasOpaqueReasoning)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "replay thinking content mismatch with durable message thinking");
-        }
-        // 携带 opaque 密文且没有可比可读文本的 reasoning 是原生推理的权威事实：durable 可读思考无法在 payload 内表达，
-        // 但也不能据此拒绝。原位回放保留密文原生事实；编码器会把缺失的可读思考作为普通 assistant 文本附带，不猜测、不改写密文。
-      } else if (durableThinking.isEmpty() && !replayThinking.isEmpty()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "replay thinking content mismatch with durable message thinking");
-      }
-    }
-    if (replayToolCalls.size() != durableToolCalls.size()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "replay tool calls count mismatch with durable tool calls");
-    }
-    for (int i = 0; i < replayToolCalls.size(); i++) {
-      ProviderToolCall rc = replayToolCalls.get(i);
-      ProviderToolCall dc = durableToolCalls.get(i);
-      if (!rc.id().equals(dc.id())
-          || !rc.name().equals(dc.name())
-          || !rc.argumentsJson().equals(dc.argumentsJson())) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "replay tool call mismatch with durable tool call at index " + i);
-      }
-    }
-
-    return replayIsEmptyPlaceholderOnly;
-  }
-
-  /** 节点是否携带给定白名单之外的成员：reasoning 额外成员都是 durable 语义无法表达的原生事实。 */
-  private static boolean hasFieldOutside(JsonNode node, Set<String> allowedFields) {
-    for (String field : node.propertyNames()) {
-      if (!allowedFields.contains(field)) {
-        return true;
-      }
-    }
-    return false;
-  }
-
   /**
    * 将 runtime 冻结的缓存控制映射为本协议 wire 字段：{@code retention = NONE} 不下发任何 cache hint；否则以会话 UUID 原样作为
-   * {@code prompt_cache_key}，并把留存档位映射为原有支持的 {@code prompt_cache_retention} 值。
+   * {@code prompt_cache_key}，并把留存档位映射为 {@code prompt_cache_retention}。
    */
   private static void applyCacheControl(ObjectNode root, ProviderCacheControl cacheControl) {
-    if (cacheControl.retention() == PromptCacheRetention.NONE) {
-      return;
-    }
-    root.put("prompt_cache_key", cacheControl.key());
-    root.put(
-        "prompt_cache_retention",
-        cacheControl.retention() == PromptCacheRetention.SHORT ? "in_memory" : "24h");
-  }
-
-  private static void validateImageType(String mediaType) {
-    if (mediaType == null
-        || !ProviderMediaValidator.isAllowedMediaType(
-            mediaType.toLowerCase(Locale.ROOT), ProviderMediaValidator.IMAGE_MEDIA_TYPES)) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "Unsupported image media type: "
-              + mediaType
-              + ". Supported types: "
-              + ProviderMediaValidator.IMAGE_MEDIA_TYPES);
+    switch (cacheControl.retention()) {
+      case NONE -> {}
+      case SHORT -> applyPromptCache(root, cacheControl.key(), "in_memory");
+      case LONG -> applyPromptCache(root, cacheControl.key(), "24h");
     }
   }
 
-  private static void validateDocumentType(String mediaType) {
-    if (!ProviderMediaValidator.isAllowedMediaType(
-        mediaType == null ? null : mediaType.toLowerCase(Locale.ROOT),
-        ProviderMediaValidator.DOCUMENT_MEDIA_TYPES)) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "Unsupported document media type: " + mediaType + ". Only application/pdf is supported");
-    }
-  }
-
-  private static void validateUri(String source) {
-    if (source == null || source.isBlank()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "media source must not be blank");
-    }
-    if (source.startsWith("data:")) {
-      int comma = source.indexOf(',');
-      if (comma < 0) {
-        throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, "invalid data URI format");
-      }
-      return;
-    }
-    try {
-      URI uri = URI.create(source);
-      String scheme = uri.getScheme();
-      if (scheme == null
-          || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "media source URL must use http or https scheme");
-      }
-      if (uri.getHost() == null || uri.getHost().isBlank()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "media source URL must contain a valid host");
-      }
-    } catch (IllegalArgumentException e) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "media source is not a valid URI");
-    }
+  private static void applyPromptCache(ObjectNode root, String key, String retention) {
+    root.put("prompt_cache_key", key);
+    root.put("prompt_cache_retention", retention);
   }
 }
