@@ -10,21 +10,10 @@ import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { isConflictError, request } from '@/shared/api/client'
 import { useI18n } from '@/shared/i18n'
-import { utf8ByteLength } from '@/shared/lib/value'
-import {
-  appendStrictJsonArrayItem,
-  isValidJsonIntegerLiteral,
-  isValidJsonNumberLiteral,
-  MAX_PLUGIN_VALUES_UTF8_BYTES,
-  parseStrictJsonContainer,
-  parseStrictJsonObject,
-  removeStrictJsonNode,
-  updateStrictJsonField,
-} from './plugin-config-json'
-import { isDraftKeyUnderPath, withoutStaleDrafts } from './plugin-draft-keys'
+import { MAX_PLUGIN_VALUES_UTF8_BYTES } from './plugin-config-json'
 import { parsePluginValuesSchema } from './plugin-schema'
-import { SchemaElementRenderer, type PluginSchemaEditor } from './SchemaElementRenderer'
-import type { JSONPath } from 'jsonc-parser'
+import { SchemaElementRenderer } from './SchemaElementRenderer'
+import { usePluginValuesEditor } from './usePluginValuesEditor'
 import './plugin-config.css'
 import type {
   PluginConfigurationUpdateRequestDTO,
@@ -48,8 +37,6 @@ export function PluginConfigModal({
   const isDeepLink = plugin.authKind?.type === 'DEEP_LINK'
   const version = plugin.configuration.version
 
-  // 编辑器按文本处理以保留数值；服务端校验后存储和返回补默认值、压缩空白的规范文本。
-  const [valuesJson, setValuesJson] = useState(plugin.configuration.valuesJson)
   const [secretOperations, setSecretOperations] = useState<
     Record<string, SecretUpdateOperation>
   >(() => {
@@ -62,18 +49,25 @@ export function PluginConfigModal({
   const [secretValues, setSecretValues] = useState<Record<string, string>>({})
   const [clearConfirmed, setClearConfirmed] = useState<Record<string, boolean>>({})
 
-  // 数字与复杂容器的局部草稿及草稿错误状态
-  const [fieldDrafts, setFieldDrafts] = useState<Record<string, string>>({})
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
-  // 结构增删代数：让数组条目子树重建，避免旧条目的局部编辑状态与在途文件读取落到移位后的条目上
-  const [structureGeneration, setStructureGeneration] = useState(0)
-  // 在途的本地文件读取数量：父组件据此阻止提交，晚到的读取结果因此不可能落在已提交的旧值之后。
-  const [pendingFileReads, setPendingFileReads] = useState(0)
-  const readingFiles = pendingFileReads > 0
+  const {
+    valuesJson,
+    replaceValuesJson,
+    fieldDrafts,
+    fieldErrors,
+    editor,
+    parseResult,
+    hasFieldErrors,
+    firstFieldError,
+    valuesTooLarge,
+    draftsBlockForm,
+    structureGeneration,
+    readingFiles,
+    saveError,
+    setSaveError,
+  } = usePluginValuesEditor({ initialValuesJson: plugin.configuration.valuesJson })
 
   const [pending, setPending] = useState(false)
   const [conflictError, setConflictError] = useState(false)
-  const [saveError, setSaveError] = useState<string | null>(null)
   const mountedRef = useRef(false)
   const busyRef = useRef(false)
 
@@ -96,27 +90,13 @@ export function PluginConfigModal({
     }
   }, [])
 
-  // 严格验证 valuesJson
-  const parseResult = useMemo(
-    () => parseStrictJsonObject(valuesJson),
-    [valuesJson],
-  )
-
-  const hasFieldErrors = Object.keys(fieldErrors).length > 0
-
-  // POST 前的 UTF-8 字节预算：判定对象就是即将提交的 valuesJson 原文（含嵌入字符串的转义开销）。
-  const valuesByteLength = useMemo(() => utf8ByteLength(valuesJson), [valuesJson])
-  const valuesTooLarge = valuesByteLength > MAX_PLUGIN_VALUES_UTF8_BYTES
-  // 表单子树里的草稿错误（键即字段路径）都会拦住离开表单模式与提交，绝不替换成上次的合法值。
-  const formModeBlockedByDrafts =
-    editorMode === 'form' && Object.keys(fieldErrors).some((key) => isDraftKeyUnderPath(key, []))
+  const formModeBlockedByDrafts = editorMode === 'form' && draftsBlockForm
 
   async function handleSave() {
     if (pending || busyRef.current || readingFiles) return
 
     if (hasFieldErrors) {
-      const firstErr = Object.values(fieldErrors)[0]
-      setSaveError(firstErr)
+      setSaveError(firstFieldError ?? null)
       return
     }
 
@@ -197,195 +177,7 @@ export function PluginConfigModal({
     }
   }
 
-  function handleFieldScalarChange(path: JSONPath, value: unknown) {
-    const res = updateStrictJsonField({
-      rawJson: valuesJson,
-      path,
-      value,
-    })
-    if (res.ok) {
-      setValuesJson(res.newJson)
-    } else {
-      setSaveError(res.error)
-    }
-  }
-
-  /** 显式省略可选字段：只有这条路径会删除键，清空输入永远是写入空串。 */
-  function handleFieldRemove(path: JSONPath) {
-    const fieldKey = JSON.stringify(path)
-    setFieldDrafts((prev) => withoutKey(prev, fieldKey))
-    setFieldErrors((prev) => withoutKey(prev, fieldKey))
-    const res = removeStrictJsonNode(valuesJson, path)
-    if (res.ok) {
-      setValuesJson(res.newJson)
-      setSaveError(null)
-    } else {
-      setSaveError(res.error)
-    }
-  }
-
-  /** 字符串字段落值：开启 JSON 校验时先按严格 JSON 判定，非法草稿只报错、绝不写入旧值顶替。 */
-  function handleStringEdit(
-    path: JSONPath,
-    fieldKey: string,
-    text: string,
-    validateJson: boolean,
-  ) {
-    if (validateJson) {
-      const strict = parseStrictJsonContainer(text)
-      if (!strict.ok) {
-        setFieldErrors((prev) => ({
-          ...prev,
-          [fieldKey]: t('plugins.configDialog.invalidJsonText', { error: strict.error }),
-        }))
-        setSaveError(null)
-        return
-      }
-    }
-
-    setFieldErrors((prev) => withoutKey(prev, fieldKey))
-    const res = updateStrictJsonField({ rawJson: valuesJson, path, value: text })
-    if (res.ok) {
-      setValuesJson(res.newJson)
-      setSaveError(null)
-    } else {
-      setFieldErrors((prev) => ({ ...prev, [fieldKey]: res.error }))
-    }
-  }
-
-  function handleFieldDraftDiscard(fieldKey: string) {
-    setFieldDrafts((prev) => withoutKey(prev, fieldKey))
-    setFieldErrors((prev) => withoutKey(prev, fieldKey))
-  }
-
-  /** 追加只插入新条目切片：既有条目与草稿都不会移动，因此不重置任何草稿。 */
-  function handleArrayItemAppend(path: JSONPath, value: unknown) {
-    const res = appendStrictJsonArrayItem({ rawJson: valuesJson, path, value })
-    if (!res.ok) {
-      setSaveError(res.error)
-      return
-    }
-    setValuesJson(res.newJson)
-    setSaveError(null)
-  }
-
-  /**
-   * 删除条目：只丢弃随目标索引之后条目一起移位的草稿，其余字段草稿原样保留；被移动的条目子树按代数重建。
-   */
-  function handleArrayItemRemove(path: JSONPath, index: number) {
-    const res = removeStrictJsonNode(valuesJson, [...path, index])
-    if (!res.ok) {
-      setSaveError(res.error)
-      return
-    }
-    setValuesJson(res.newJson)
-    setFieldDrafts((prev) => withoutStaleDrafts(prev, path, index))
-    setFieldErrors((prev) => withoutStaleDrafts(prev, path, index))
-    setStructureGeneration((prev) => prev + 1)
-    setSaveError(null)
-  }
-
-  function handleFieldDraftNumberChange(
-    path: JSONPath,
-    fieldKey: string,
-    rawText: string,
-    isInteger: boolean,
-  ) {
-    setFieldDrafts((prev) => ({ ...prev, [fieldKey]: rawText }))
-
-    const isValid = isInteger
-      ? isValidJsonIntegerLiteral(rawText)
-      : isValidJsonNumberLiteral(rawText)
-
-    if (!isValid) {
-      setFieldErrors((prev) => ({
-        ...prev,
-        [fieldKey]: isInteger
-          ? t('plugins.configDialog.invalidInteger')
-          : t('plugins.configDialog.invalidNumber'),
-      }))
-      return
-    }
-
-    // 草稿合法，清除错误并更新 valuesJson
-    setFieldErrors((prev) => {
-      const next = { ...prev }
-      delete next[fieldKey]
-      return next
-    })
-
-    const res = updateStrictJsonField({
-      rawJson: valuesJson,
-      path,
-      rawNumberString: rawText,
-    })
-    if (res.ok) {
-      setValuesJson(res.newJson)
-    } else {
-      setFieldErrors((prev) => ({ ...prev, [fieldKey]: res.error }))
-    }
-  }
-
-  function handleFieldRawSnippetChange(
-    path: JSONPath,
-    fieldKey: string,
-    snippetText: string,
-    expectedType: 'array' | 'object',
-  ) {
-    setFieldDrafts((prev) => ({ ...prev, [fieldKey]: snippetText }))
-
-    const strict = parseStrictJsonContainer(snippetText, expectedType)
-    if (!strict.ok) {
-      setFieldErrors((prev) => ({
-        ...prev,
-        [fieldKey]: t('plugins.configDialog.invalidContainerJson', {
-          error: strict.error,
-        }),
-      }))
-      return
-    }
-
-    setFieldErrors((prev) => {
-      const next = { ...prev }
-      delete next[fieldKey]
-      return next
-    })
-
-    const res = updateStrictJsonField({
-      rawJson: valuesJson,
-      path,
-      rawSnippetString: snippetText,
-    })
-    if (res.ok) {
-      setValuesJson(res.newJson)
-    } else {
-      setFieldErrors((prev) => ({ ...prev, [fieldKey]: res.error }))
-    }
-  }
-
   const hasSecrets = Object.keys(plugin.configuration.secrets).length > 0
-
-  /** 每次文件读取开始/结束各报告一次，父组件据此持有在途读取计数。 */
-  function handleFileReadStart() {
-    setPendingFileReads((prev) => prev + 1)
-  }
-
-  function handleFileReadEnd() {
-    setPendingFileReads((prev) => Math.max(0, prev - 1))
-  }
-
-  const editor: PluginSchemaEditor = {
-    onFileReadStart: handleFileReadStart,
-    onFileReadEnd: handleFileReadEnd,
-    onScalarChange: handleFieldScalarChange,
-    onFieldRemove: handleFieldRemove,
-    onStringEdit: handleStringEdit,
-    onFieldDraftDiscard: handleFieldDraftDiscard,
-    onNumberDraftChange: handleFieldDraftNumberChange,
-    onRawSnippetChange: handleFieldRawSnippetChange,
-    onArrayItemAppend: handleArrayItemAppend,
-    onArrayItemRemove: handleArrayItemRemove,
-  }
 
   return (
     <Dialog
@@ -503,12 +295,7 @@ export function PluginConfigModal({
                 aria-label={t('plugins.configDialog.jsonEditor')}
                 disabled={pending}
                 value={valuesJson}
-                onChange={(e) => {
-                  setValuesJson(e.target.value)
-                  setFieldDrafts({})
-                  setFieldErrors({})
-                  setSaveError(null)
-                }}
+                onChange={(e) => replaceValuesJson(e.target.value)}
                 rows={10}
               />
               {!parseResult.ok ? (
@@ -694,11 +481,4 @@ export function PluginConfigModal({
       </div>
     </Dialog>
   )
-}
-
-/** 复制并去掉指定键；草稿与错误映射共用同一不可变更新方式。 */
-function withoutKey<T>(record: Record<string, T>, key: string): Record<string, T> {
-  const next = { ...record }
-  delete next[key]
-  return next
 }
