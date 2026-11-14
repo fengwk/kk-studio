@@ -202,10 +202,6 @@ func (c *Client) JavaDecompile(ctx context.Context, target string, tracking ...f
 	return result, nil
 }
 
-func formatLocations(result DefinitionResult) []string {
-	return formatLocationsWithColumn(result, func(_ string, _ int, character int) int { return character + 1 })
-}
-
 func (c *Client) formatDefinitionLocations(result DefinitionResult) []string {
 	return formatLocationsWithColumn(result, func(uri string, line, character int) int {
 		return c.definitionColumn(uri, line, character)

@@ -10,7 +10,8 @@ import (
 
 // LSP-T-075 and LSP-T-077 exercise malformed and incomplete definition/symbol results.
 func TestDocument_FormattingEdges(t *testing.T) {
-	locations := formatLocations(mustDefinitionResult(t, `[{"targetUri":"jdt://contents/module/Type.class","targetRange":{"start":{"line":2,"character":4}}},null,{"uri":"custom://host/path"},{"uri":""}]`))
+	client := &Client{positionEncoding: "utf-16"}
+	locations := client.formatDefinitionLocations(mustDefinitionResult(t, `[{"targetUri":"jdt://contents/module/Type.class","targetRange":{"start":{"line":2,"character":4}}},null,{"uri":"custom://host/path"},{"uri":""}]`))
 	wantLocations := []string{"jdt://contents/module/Type.class:3:5", "custom://host/path", "unknown"}
 	if !reflect.DeepEqual(locations, wantLocations) {
 		t.Fatalf("locations = %v, want %v", locations, wantLocations)

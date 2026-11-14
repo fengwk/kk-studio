@@ -118,7 +118,7 @@ func TestWindowsHelper_FailedCommandCreationDrainsJob(t *testing.T) {
 	if cleanup, err := readState(dir, cleanupFile); err != nil || string(cleanup) != "true" {
 		t.Fatalf("Job cleanup = %q, %v", cleanup, err)
 	}
-	if data, err := os.ReadFile(filepath.Join(dir, diagnosticsFile)); err == nil && strings.Contains(string(data), secret) {
+	if data, err := os.ReadFile(filepath.Join(dir, "diagnostics")); err == nil && strings.Contains(string(data), secret) {
 		t.Fatalf("private launch argument leaked in diagnostics: %q", data)
 	} else if err != nil && !os.IsNotExist(err) {
 		t.Fatalf("read diagnostics: %v", err)

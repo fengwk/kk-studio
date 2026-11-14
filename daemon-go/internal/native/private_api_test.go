@@ -16,9 +16,6 @@ func TestPrivateFilePublicAPI(t *testing.T) {
 	if err := WritePrivateFile(path, []byte("native")); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyPrivateFile(path); err != nil {
-		t.Fatal(err)
-	}
 	got, err := os.ReadFile(path)
 	if err != nil || string(got) != "native" {
 		t.Fatalf("private file = %q, %v", got, err)

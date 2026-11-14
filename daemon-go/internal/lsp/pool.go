@@ -17,7 +17,6 @@ type poolEntry struct {
 	key      string
 	client   *Client
 	inFlight int
-	lastUsed time.Time
 	timer    *time.Timer
 }
 type boot struct {
@@ -256,7 +255,7 @@ func (p *Pool) start(ctx context.Context, key string, server ServerConfig, root,
 	p.mu.Lock()
 	b.err = err
 	if err == nil && !p.closing {
-		entry := &poolEntry{key: key, client: client, lastUsed: time.Now()}
+		entry := &poolEntry{key: key, client: client}
 		p.entries[key] = entry
 		b.client = client
 		if p.boots[key] == b {
@@ -279,7 +278,6 @@ func (l *Lease) Release() {
 		if e.inFlight > 0 {
 			e.inFlight--
 		}
-		e.lastUsed = time.Now()
 		if e.inFlight == 0 && !p.closing {
 			if e.timer != nil {
 				e.timer.Stop()
