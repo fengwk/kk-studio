@@ -99,9 +99,9 @@ public record SystemSettings(
       SystemSettingsValidation.requireNonNegativeInt(retryMaxRetries, "aiRuntime.retryMaxRetries");
       retryBackoffStrategy =
           Objects.requireNonNull(retryBackoffStrategy, "aiRuntime.retryBackoffStrategy");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           retryBaseDelayMillis, "aiRuntime.retryBaseDelayMillis");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           retryMaxDelayMillis, "aiRuntime.retryMaxDelayMillis");
       if (retryMaxDelayMillis < retryBaseDelayMillis) {
         throw new IllegalArgumentException(
@@ -189,7 +189,7 @@ public record SystemSettings(
             "storageMedia.s3PresignDefaultExpiresSeconds must not exceed"
                 + " s3PresignMaxExpiresSeconds");
       }
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           canvasMediaProcessTimeoutMillis, "storageMedia.canvasMediaProcessTimeoutMillis");
       SystemSettingsValidation.requirePositive(
           thumbnailMaxDimension, "storageMedia.thumbnailMaxDimension");
@@ -222,35 +222,35 @@ public record SystemSettings(
       long postgresqlWorkReconnectBackoffMillis) {
 
     public Advanced {
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           processorLeaseDurationMillis, "advanced.processorLeaseDurationMillis");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           processorHeartbeatIntervalMillis, "advanced.processorHeartbeatIntervalMillis");
       if (processorHeartbeatIntervalMillis > processorLeaseDurationMillis / 2) {
         throw new IllegalArgumentException(
             "advanced.processorHeartbeatIntervalMillis must not exceed half of"
                 + " processorLeaseDurationMillis");
       }
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           threadResolveFailureDelayMillis, "advanced.threadResolveFailureDelayMillis");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           modelDispatchBusyFallbackDelayMillis, "advanced.modelDispatchBusyFallbackDelayMillis");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           toolPreflightFailureDelayMillis, "advanced.toolPreflightFailureDelayMillis");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           toolDispatchBusyFallbackDelayMillis, "advanced.toolDispatchBusyFallbackDelayMillis");
       SystemSettingsValidation.requireAtLeast(
           applicationEventQueueCapacity, 1, "advanced.applicationEventQueueCapacity");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           applicationEventMaxBytes, "advanced.applicationEventMaxBytes");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           applicationEventSendTimeoutMillis, "advanced.applicationEventSendTimeoutMillis");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           applicationEventHeartbeatIntervalMillis,
           "advanced.applicationEventHeartbeatIntervalMillis");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           postgresqlWorkNotificationPollMillis, "advanced.postgresqlWorkNotificationPollMillis");
-      SystemSettingsValidation.requirePositiveMillis(
+      SystemSettingsValidation.requirePositive(
           postgresqlWorkReconnectBackoffMillis, "advanced.postgresqlWorkReconnectBackoffMillis");
     }
   }

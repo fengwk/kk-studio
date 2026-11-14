@@ -29,18 +29,7 @@ final class SystemSettingsValidation {
     PermissionPathPattern.validate(pattern);
   }
 
-  static void requirePositiveMillis(long value, String field) {
-    if (value <= 0) {
-      throw new IllegalArgumentException(field + " must be positive");
-    }
-  }
-
-  static void requireNonNegativeMillis(long value, String field) {
-    if (value < 0) {
-      throw new IllegalArgumentException(field + " must not be negative");
-    }
-  }
-
+  /** 单位由调用点的字段名表达（{@code ...Millis} / {@code ...Seconds}），检查本身与单位无关。 */
   static void requirePositive(long value, String field) {
     if (value <= 0) {
       throw new IllegalArgumentException(field + " must be positive");
@@ -56,18 +45,6 @@ final class SystemSettingsValidation {
   static void requireAtLeast(int value, int minimum, String field) {
     if (value < minimum) {
       throw new IllegalArgumentException(field + " must be at least " + minimum);
-    }
-  }
-
-  static void requirePositiveBounded(long value, long maximum, String field) {
-    if (value <= 0 || value > maximum) {
-      throw new IllegalArgumentException(field + " must be positive and at most " + maximum);
-    }
-  }
-
-  static void requireBounded(long value, long minimum, long maximum, String field) {
-    if (value < minimum || value > maximum) {
-      throw new IllegalArgumentException(field + " must be between " + minimum + " and " + maximum);
     }
   }
 

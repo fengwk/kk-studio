@@ -107,7 +107,12 @@ final class DeadlineBoundedBlobStream extends InputStream {
     return executor;
   }
 
-  /** 当前挂起的看门狗任务数；包内测试据此验证读取结束后任务被注销。 */
+  /**
+   * 当前挂起的看门狗任务数；包内测试据此验证读取结束后任务被注销。
+   *
+   * <p>保留依据：看门狗挂在进程级共享调度器上，任务泄漏不会抛错也不会改变返回值，只能通过队列长度观测；该调度器是私有静态字段，无法从测试侧用别的办法读数。
+   * 它不是生产入口，也不为任何生产路径服务。
+   */
   static int pendingWatchdogTasks() {
     return WATCHDOG.getQueue().size();
   }

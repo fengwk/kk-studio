@@ -1,9 +1,7 @@
 package fun.fengwk.kkstudio.platform.storage.service;
 
-import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.decodeHex;
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.normalizeMediaType;
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateFilename;
-import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateSha256;
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateSize;
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.verifyObject;
 
@@ -19,11 +17,10 @@ import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
-import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
+import fun.fengwk.kkstudio.platform.storage.StorageMediaTypes;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
-import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
@@ -35,7 +32,6 @@ import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
 import fun.fengwk.kkstudio.platform.storage.persistence.StorageUploadRepository;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.s3.S3PresignService;
-import fun.fengwk.kkstudio.platform.storage.s3.S3PresignedUrl;
 import fun.fengwk.kkstudio.platform.storage.s3.S3StorageService;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
@@ -92,12 +88,12 @@ public class StorageUploadService {
   private final StorageBlobPreviewService blobPreviewService;
   private final StorageUploadOperationLock operationLock;
   private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
-  private final S3StorageProperties s3Properties;
   private final SystemSettingsSnapshot settingsSnapshot;
   private final Clock clock;
   private final TransactionTemplate transactionTemplate;
   private final TransactionTemplate mandatoryTransactionTemplate;
   private final StorageUploadExpiryService expiryService;
+  private final StorageUploadReservation reservation;
 
   public StorageUploadService(
       StorageUploadRepository uploadRepository,
@@ -110,7 +106,6 @@ public class StorageUploadService {
       StorageObjectCleanupService objectCleanupService,
       StorageUploadOperationLock operationLock,
       ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups,
-      S3StorageProperties s3Properties,
       SystemSettingsSnapshot settingsSnapshot,
       StorageMaintenanceProperties maintenanceProperties,
       Clock clock,
@@ -124,7 +119,6 @@ public class StorageUploadService {
     this.blobPreviewService = Objects.requireNonNull(blobPreviewService, "blobPreviewService");
     this.operationLock = Objects.requireNonNull(operationLock, "operationLock");
     this.maintenanceWakeups = Objects.requireNonNull(maintenanceWakeups, "maintenanceWakeups");
-    this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
     this.settingsSnapshot = Objects.requireNonNull(settingsSnapshot, "settingsSnapshot");
     this.clock = Objects.requireNonNull(clock, "clock");
     Objects.requireNonNull(maintenanceProperties, "maintenanceProperties");
@@ -145,102 +139,27 @@ public class StorageUploadService {
             clock,
             maintenanceProperties.getCleanupLease(),
             transactionTemplate);
+    this.reservation =
+        new StorageUploadReservation(
+            uploadRepository,
+            blobRepository,
+            blobManager,
+            s3PresignService,
+            settingsSnapshot,
+            clock,
+            transactionTemplate,
+            this::generatePreviewBestEffort,
+            this::requestFailedStageCleanup);
   }
 
   /** 预约用户上传：图片必须携带客户端缩放后的 MIME 与像素事实。 */
   public StorageUploadDTO reserve(StorageUploadReserveRequestDTO request) {
-    return reserve(request, true);
+    return reservation.reserve(request);
   }
 
   /** 预约服务端受控 staging：媒体事实由服务端在 complete 时探测。 */
   public StorageUploadDTO reserveStaged(StorageUploadReserveRequestDTO request) {
-    return reserve(request, false);
-  }
-
-  private StorageUploadDTO reserve(
-      StorageUploadReserveRequestDTO request, boolean requireImageMetadata) {
-    Objects.requireNonNull(request, "request must not be null");
-    String filename = validateFilename(request.getFilename());
-    String mediaType = normalizeMediaType(request.getMediaType());
-    long sizeBytes = validateSize(request.getSizeBytes());
-    String sha256 = validateSha256(request.getSha256());
-    ImageMetadata imageMetadata =
-        validateImageMetadata(
-            mediaType,
-            request.getFormat(),
-            request.getOriginalWidth(),
-            request.getOriginalHeight(),
-            request.getStoredWidth(),
-            request.getStoredHeight(),
-            requireImageMetadata);
-
-    // 一次操作读取同一份 TTL 快照：created_at 与响应快照到期时刻都由它换算。
-    SystemSettings.StorageMedia media = settingsSnapshot.get().storageMedia();
-    long uploadTtl = media.uploadExpiresSeconds();
-    UUID uploadId = UUID.randomUUID();
-    UUID candidateBlobId = UUID.randomUUID();
-    Instant createdAt = clock.instant();
-    ReserveOutcome outcome =
-        transactionTemplate.execute(
-            status -> {
-              UUID hitBlobId = null;
-              StorageBlob active = blobRepository.getActiveByHashAndSize(sha256, sizeBytes);
-              if (active != null) {
-                try {
-                  blobManager.retain(active.getId());
-                  hitBlobId = active.getId();
-                } catch (DomainException e) {
-                  if (e.code() != DomainErrorCode.NOT_FOUND || !"blob".equals(e.resource())) {
-                    throw e;
-                  }
-                  // ACTIVE 行在并发中被释放到 DELETING：按未命中处理。
-                }
-              }
-              StorageUpload upload =
-                  newUpload(
-                      uploadId,
-                      candidateBlobId,
-                      hitBlobId,
-                      filename,
-                      mediaType,
-                      sizeBytes,
-                      sha256,
-                      imageMetadata,
-                      createdAt);
-              if (!uploadRepository.insert(upload)) {
-                throw new IllegalStateException("insert storage upload failed: " + uploadId);
-              }
-              return new ReserveOutcome(upload, hitBlobId);
-            });
-
-    StoragePresignedUrlDTO presignedPut = null;
-    if (outcome.blobId == null) {
-      try {
-        S3PresignedUrl signed =
-            s3PresignService.presignChecksummedCreateOnlyUpload(
-                StorageObjectKeys.uploadOriginal(uploadId),
-                mediaType,
-                Base64.getEncoder().encodeToString(decodeHex(sha256)),
-                presignExpiresSeconds(media));
-        presignedPut = StoragePresignedUrls.from(signed);
-      } catch (RuntimeException failure) {
-        // 上传行已登记但签票失败：调用方拿不到 uploadId，不能让它无诊断地等 TTL；
-        // 这里登记耐久清理请求，后台 TTL 继续兜底回收；清理请求本身失败不得掩盖签票失败。
-        try {
-          requestFailedStageCleanup(outcome.upload);
-        } catch (RuntimeException cleanupFailure) {
-          failure.addSuppressed(cleanupFailure);
-        }
-        throw failure;
-      }
-    } else {
-      generatePreviewBestEffort(outcome.blobId);
-    }
-    return toDTO(
-        outcome.upload,
-        outcome.blobId,
-        expiresAt(outcome.upload.getCreatedAt(), uploadTtl),
-        presignedPut);
+    return reservation.reserveStaged(request);
   }
 
   /** 完成上传：校验直传对象并绑定 blob，返回 READY。 */
@@ -431,7 +350,7 @@ public class StorageUploadService {
       StorageBlob blob = blobManager.getBlob(blobId);
       if (blob == null
           || blob.getState() != StorageBlobState.ACTIVE
-          || !isPreviewable(blob.getMediaType())) {
+          || !StorageMediaTypes.isPreviewable(blob.getMediaType())) {
         return;
       }
       blobPreviewService.ensurePreview(blobId, blob.getMediaType());
@@ -441,10 +360,6 @@ public class StorageUploadService {
           blobId,
           error.getClass().getSimpleName());
     }
-  }
-
-  private static boolean isPreviewable(String mediaType) {
-    return mediaType != null && (mediaType.startsWith("image/") || mediaType.startsWith("video/"));
   }
 
   /**
@@ -671,72 +586,13 @@ public class StorageUploadService {
     }
   }
 
-  private static long presignExpiresSeconds(SystemSettings.StorageMedia media) {
-    return Math.min(media.uploadExpiresSeconds(), media.s3PresignMaxExpiresSeconds());
-  }
-
   /** DTO 快照到期时刻：仅按当下 TTL 换算的展示值，绝不作为过期权威事实。 */
-  private static Instant expiresAt(Instant createdAt, long uploadTtlSeconds) {
+  static Instant expiresAt(Instant createdAt, long uploadTtlSeconds) {
     return createdAt.plusSeconds(uploadTtlSeconds);
   }
 
-  private static ImageMetadata validateImageMetadata(
-      String mediaType,
-      String format,
-      Integer originalWidth,
-      Integer originalHeight,
-      Integer storedWidth,
-      Integer storedHeight,
-      boolean requireImageMetadata) {
-    if (!mediaType.startsWith("image/")) {
-      if (format != null
-          || originalWidth != null
-          || originalHeight != null
-          || storedWidth != null
-          || storedHeight != null) {
-        throw DomainException.validation("format", "image metadata is only valid for images");
-      }
-      return null;
-    }
-    boolean anyImageMetadata =
-        format != null
-            || originalWidth != null
-            || originalHeight != null
-            || storedWidth != null
-            || storedHeight != null;
-    boolean completeImageMetadata =
-        format != null
-            && originalWidth != null
-            && originalHeight != null
-            && storedWidth != null
-            && storedHeight != null;
-    if (!anyImageMetadata) {
-      if (requireImageMetadata) {
-        throw DomainException.validation(
-            "format", "image format and dimensions are required for image uploads");
-      }
-      return null;
-    }
-    if (!completeImageMetadata) {
-      throw DomainException.validation(
-          "format", "image format and dimensions must be provided together");
-    }
-    if (!format.matches("[a-z0-9][a-z0-9.+-]{0,31}") || !mediaType.equals("image/" + format)) {
-      throw DomainException.validation("format", "format must match the stored image media type");
-    }
-    if (originalWidth <= 0 || originalHeight <= 0 || storedWidth <= 0 || storedHeight <= 0) {
-      throw DomainException.validation("storedWidth", "image dimensions must be positive");
-    }
-    long originalPixels = (long) originalWidth * originalHeight;
-    long storedPixels = (long) storedWidth * storedHeight;
-    if (originalPixels > 40_000_000L || storedPixels > originalPixels) {
-      throw DomainException.validation(
-          "storedWidth", "image dimensions exceed the supported range");
-    }
-    return new ImageMetadata(format, originalWidth, originalHeight, storedWidth, storedHeight);
-  }
-
-  private StorageUpload newUpload(
+  /** 组装一条待登记的上传行；图片事实缺省时保持五列为 null。 */
+  static StorageUpload newUpload(
       UUID uploadId,
       UUID candidateBlobId,
       UUID blobId,
@@ -744,7 +600,7 @@ public class StorageUploadService {
       String mediaType,
       long sizeBytes,
       String sha256,
-      ImageMetadata imageMetadata,
+      StorageUploadImageMetadata.Facts imageMetadata,
       Instant createdAt) {
     StorageUpload upload = new StorageUpload();
     upload.setId(uploadId);
@@ -787,14 +643,8 @@ public class StorageUploadService {
 
   private record FileFacts(long sizeBytes, String sha256) {}
 
-  private record ImageMetadata(
-      String format,
-      Integer originalWidth,
-      Integer originalHeight,
-      Integer storedWidth,
-      Integer storedHeight) {}
-
-  private static StorageUploadDTO toDTO(
+  /** 按是否已绑定 blob 输出 PENDING 或 READY 契约。 */
+  static StorageUploadDTO toDTO(
       StorageUpload upload, UUID blobId, Instant expiresAt, StoragePresignedUrlDTO presignedPut) {
     if (blobId == null) {
       return new StorageUploadPendingDTO(
