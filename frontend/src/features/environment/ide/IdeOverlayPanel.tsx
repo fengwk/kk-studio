@@ -315,7 +315,7 @@ export function IdeOverlayPanel({
   return (
     <aside
       id="ide-panel"
-      className="ide-overlay-panel ide-global-panel"
+      className="ide-overlay-panel"
       data-testid="ide-overlay-panel"
       tabIndex={-1}
       hidden={!isOpen}
