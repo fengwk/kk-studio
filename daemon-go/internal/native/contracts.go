@@ -53,5 +53,5 @@ func (e *ProcessScopeNotConvergedError) Unwrap() error {
 	return errors.Join(ErrScopeNotConverged, e.Cause)
 }
 
-// ErrScopeNotConverged is the compatibility sentinel for a failed convergence proof.
+// ErrScopeNotConverged is the sentinel matched with errors.Is when a convergence proof fails.
 var ErrScopeNotConverged = errors.New("process scope termination not converged")
