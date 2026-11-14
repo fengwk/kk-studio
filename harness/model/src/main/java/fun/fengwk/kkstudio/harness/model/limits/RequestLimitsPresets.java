@@ -7,7 +7,7 @@ import java.util.Locale;
 import java.util.Objects;
 
 /**
- * 代码内 {@link RequestLimits} 预设注册表（PLAN 11.1）。
+ * 代码内 {@link RequestLimits} 预设注册表。
  *
  * <p>按 Provider 协议与官方域名匹配：只有 {@code ANTHROPIC} 直连 {@code api.anthropic.com}、{@code OPENAI} / {@code
  * OPENAI_RESPONSES} 官方 {@code api.openai.com} 与 {@code GOOGLE} inline {@code

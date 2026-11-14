@@ -13,7 +13,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * 一次 Provider 请求的最终编码与计量（PLAN 11.2）。
+ * 一次 Provider 请求的最终编码与计量。
  *
  * <p>适配器先把请求编码为最终 UTF-8 body，再用本类计量 body 字节、bodyHash 与每个内联媒体的 RAW/BASE64 字节，并按端点 {@link
  * RequestLimits} 做发送前检查。HTTP 发送的正是 {@link #body()} 这份字节，计量与发送不会出现两次编码。

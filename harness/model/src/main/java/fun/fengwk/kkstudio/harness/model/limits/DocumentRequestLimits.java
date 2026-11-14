@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.limits;
 
 /**
- * 文档内联限制（PLAN 11.1 文档列）。
+ * 文档内联限制。
  *
  * <p>口径全部为 RAW 字节：{@code singleRawBytes} 为单个文档原始字节，{@code totalRawBytes} 为一个请求全部文档的合计原始字节，{@code
  * maxPages} 为单个文档页数上限。全部可空，null 表示未知。

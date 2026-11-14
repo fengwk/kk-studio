@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.limits;
 
 /**
- * 图片内联限制（PLAN 11.1 图片列）。
+ * 图片内联限制。
  *
  * <p>口径：{@code singleRawBytes} 为单张图片 RAW 字节；{@code singleEncodedBytes} 为单张图片 Base64 编码后字节；{@code
  * totalBytes} 为一个请求全部图片的合计字节；{@code maxSide} 为单张边长像素上限；{@code manyImageThreshold}

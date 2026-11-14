@@ -19,13 +19,8 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderErrorHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportException;
 
-import java.io.IOException;
-import java.net.ConnectException;
-import java.net.SocketTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.TimeoutException;
 
 /** Gemini 错误码分类与所见即所得真实错误正文暴露测试。 */
 class GeminiErrorMapperTest {
@@ -37,13 +32,13 @@ class GeminiErrorMapperTest {
   void preservesClassificationPrecedence() {
     assertEquals(
         ProviderErrorKind.REQUEST_BODY_LIMIT,
-        GeminiErrorMapper.fromHttp(413, "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\"}}").kind());
+        httpError(413, "{\"error\":{\"status\":\"RESOURCE_EXHAUSTED\"}}").kind());
     assertEquals(
         ProviderErrorKind.TRANSIENT,
-        GeminiErrorMapper.fromHttp(600, "{\"error\":{\"status\":\"INTERNAL\"}}").kind());
+        httpError(600, "{\"error\":{\"status\":\"INTERNAL\"}}").kind());
     assertEquals(
         ProviderErrorKind.INVALID_REQUEST,
-        GeminiErrorMapper.fromHttp(600, "{\"error\":{\"status\":\"INVALID_ARGUMENT\"}}").kind());
+        httpError(600, "{\"error\":{\"status\":\"INVALID_ARGUMENT\"}}").kind());
   }
 
   /** HTTP 状态元数据必须结构化传播，包含非预期 3xx；非 HTTP 传输失败不得携带状态。 */
@@ -52,8 +47,8 @@ class GeminiErrorMapperTest {
     assertEquals(401, GeminiErrorMapper.mapTransportException(httpStatus(401, "{}")).httpStatus());
     assertEquals(503, GeminiErrorMapper.mapTransportException(httpStatus(503, "{}")).httpStatus());
     assertEquals(301, GeminiErrorMapper.mapTransportException(httpStatus(301, "")).httpStatus());
-    assertEquals(503, GeminiErrorMapper.fromHttp(503, "{}").httpStatus());
-    assertEquals(301, GeminiErrorMapper.fromHttp(301, "").httpStatus());
+    assertEquals(503, httpError(503, "{}").httpStatus());
+    assertEquals(301, httpError(301, "").httpStatus());
     assertNull(
         GeminiErrorMapper.mapTransportException(
                 new TransportException(TransportErrorKind.IO, "io", 0, null, null, null))
@@ -65,9 +60,14 @@ class GeminiErrorMapperTest {
         TransportErrorKind.HTTP_STATUS,
         "status",
         status,
-        body.getBytes(StandardCharsets.UTF_8),
+        body == null ? null : body.getBytes(StandardCharsets.UTF_8),
         null,
         null);
+  }
+
+  /** HTTP 状态错误走生产入口：传输层失败经 mapTransportException 分类与格式化。 */
+  private static ProviderException httpError(int status, String body) {
+    return GeminiErrorMapper.mapTransportException(httpStatus(status, body));
   }
 
   /** 验证 HTTP 400 及 INVALID_ARGUMENT 规范映射为 INVALID_REQUEST 且完整保留正文。 */
@@ -83,7 +83,7 @@ class GeminiErrorMapperTest {
           }
         }
         """;
-    ProviderException ex = GeminiErrorMapper.fromHttp(400, errorJson);
+    ProviderException ex = httpError(400, errorJson);
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertEquals("HTTP 400\n" + errorJson, ex.getMessage());
   }
@@ -93,13 +93,13 @@ class GeminiErrorMapperTest {
   void maps401And403AuthErrors() {
     String unauth =
         "{\"error\":{\"code\":401,\"message\":\"API key not valid\",\"status\":\"UNAUTHENTICATED\"}}";
-    ProviderException ex1 = GeminiErrorMapper.fromHttp(401, unauth);
+    ProviderException ex1 = httpError(401, unauth);
     assertEquals(ProviderErrorKind.AUTHENTICATION, ex1.kind());
     assertEquals("HTTP 401\n" + unauth, ex1.getMessage());
 
     String denied =
         "{\"error\":{\"code\":403,\"message\":\"Quota exceeded\",\"status\":\"PERMISSION_DENIED\"}}";
-    ProviderException ex2 = GeminiErrorMapper.fromHttp(403, denied);
+    ProviderException ex2 = httpError(403, denied);
     assertEquals(ProviderErrorKind.AUTHENTICATION, ex2.kind());
     assertEquals("HTTP 403\n" + denied, ex2.getMessage());
   }
@@ -107,7 +107,7 @@ class GeminiErrorMapperTest {
   /** 验证 HTTP 402 映射为 BILLING 且保留正文。 */
   @Test
   void maps402BillingError() {
-    ProviderException ex = GeminiErrorMapper.fromHttp(402, "{}");
+    ProviderException ex = httpError(402, "{}");
     assertEquals(ProviderErrorKind.BILLING, ex.kind());
     assertEquals("HTTP 402\n{}", ex.getMessage());
   }
@@ -117,7 +117,7 @@ class GeminiErrorMapperTest {
   void maps404NotFound() {
     String notFound =
         "{\"error\":{\"code\":404,\"message\":\"models/gemini-unknown not found\",\"status\":\"NOT_FOUND\"}}";
-    ProviderException ex = GeminiErrorMapper.fromHttp(404, notFound);
+    ProviderException ex = httpError(404, notFound);
     assertEquals(ProviderErrorKind.INVALID_REQUEST, ex.kind());
     assertEquals("HTTP 404\n" + notFound, ex.getMessage());
   }
@@ -127,7 +127,7 @@ class GeminiErrorMapperTest {
   void maps429ResourceExhausted() {
     String rateLimit =
         "{\"error\":{\"code\":429,\"message\":\"Resource has been exhausted\",\"status\":\"RESOURCE_EXHAUSTED\"}}";
-    ProviderException ex = GeminiErrorMapper.fromHttp(429, rateLimit);
+    ProviderException ex = httpError(429, rateLimit);
     assertEquals(ProviderErrorKind.TRANSIENT, ex.kind());
     assertEquals("HTTP 429\n" + rateLimit, ex.getMessage());
   }
@@ -136,12 +136,12 @@ class GeminiErrorMapperTest {
   @Test
   void maps500And503ServerErrors() {
     String internalJson = "{\"error\":{\"status\":\"INTERNAL\"}}";
-    ProviderException ex1 = GeminiErrorMapper.fromHttp(500, internalJson);
+    ProviderException ex1 = httpError(500, internalJson);
     assertEquals(ProviderErrorKind.TRANSIENT, ex1.kind());
     assertEquals("HTTP 500\n" + internalJson, ex1.getMessage());
 
     String unavailJson = "{\"error\":{\"status\":\"UNAVAILABLE\"}}";
-    ProviderException ex2 = GeminiErrorMapper.fromHttp(503, unavailJson);
+    ProviderException ex2 = httpError(503, unavailJson);
     assertEquals(ProviderErrorKind.TRANSIENT, ex2.kind());
     assertEquals("HTTP 503\n" + unavailJson, ex2.getMessage());
   }
@@ -149,12 +149,12 @@ class GeminiErrorMapperTest {
   /** 验证 599/600 边界：只有标准 5xx 可重试，范围外状态不得变成 TRANSIENT。 */
   @Test
   void preservesNonStandardStatusClassification() {
-    ProviderException http599 = GeminiErrorMapper.fromHttp(599, null);
+    ProviderException http599 = httpError(599, null);
     assertEquals(ProviderErrorKind.TRANSIENT, http599.kind());
     assertEquals("HTTP 599: " + GeminiErrorMapper.MSG_TRANSIENT, http599.getMessage());
     assertEquals(599, http599.httpStatus());
 
-    ProviderException http600 = GeminiErrorMapper.fromHttp(600, null);
+    ProviderException http600 = httpError(600, null);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, http600.kind());
     assertEquals("HTTP 600: " + GeminiErrorMapper.MSG_INVALID_RESPONSE, http600.getMessage());
     assertNull(http600.httpStatus());
@@ -171,39 +171,6 @@ class GeminiErrorMapperTest {
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, sse600.kind());
     assertEquals(env600.toString(), sse600.getMessage());
     assertNull(sse600.httpStatus());
-  }
-
-  /** 验证底层网络与超时异常的规范映射。 */
-  @Test
-  void mapsTransportExceptions() {
-    ProviderException timeoutEx =
-        GeminiErrorMapper.fromThrowable(new TimeoutException("read timed out"));
-    assertEquals(ProviderErrorKind.TRANSIENT, timeoutEx.kind());
-    assertEquals("Gemini request timed out", timeoutEx.getMessage());
-
-    ProviderException sockTimeoutEx =
-        GeminiErrorMapper.fromThrowable(new SocketTimeoutException("connect timed out"));
-    assertEquals(ProviderErrorKind.TRANSIENT, sockTimeoutEx.kind());
-    assertEquals("Gemini request timed out", sockTimeoutEx.getMessage());
-
-    ProviderException connEx =
-        GeminiErrorMapper.fromThrowable(new ConnectException("connection refused"));
-    assertEquals(ProviderErrorKind.TRANSIENT, connEx.kind());
-    assertEquals("Gemini network error", connEx.getMessage());
-
-    ProviderException ioEx = GeminiErrorMapper.fromThrowable(new IOException("broken pipe"));
-    assertEquals(ProviderErrorKind.TRANSIENT, ioEx.kind());
-    assertEquals("Gemini network error", ioEx.getMessage());
-
-    ProviderException cancelEx =
-        GeminiErrorMapper.fromThrowable(new CancellationException("client canceled"));
-    assertEquals(ProviderErrorKind.CANCELLED, cancelEx.kind());
-    assertEquals("Gemini request cancelled", cancelEx.getMessage());
-
-    ProviderException unknownEx =
-        GeminiErrorMapper.fromThrowable(new IllegalArgumentException("runtime"));
-    assertEquals(ProviderErrorKind.TRANSIENT, unknownEx.kind());
-    assertEquals(GeminiErrorMapper.MSG_TRANSIENT, unknownEx.getMessage());
   }
 
   /** 验证 TransportException 各个 kind 的精确映射与静默取消。 */
@@ -246,11 +213,6 @@ class GeminiErrorMapperTest {
     ProviderException peHttp = GeminiErrorMapper.mapTransportException(httpEx);
     assertEquals(ProviderErrorKind.TRANSIENT, peHttp.kind());
     assertEquals("HTTP 500\n{\"error\":{\"status\":\"INTERNAL\"}}", peHttp.getMessage());
-
-    // fromThrowable wrapping TransportException
-    ProviderException wrapped = GeminiErrorMapper.fromThrowable(httpEx);
-    assertEquals(ProviderErrorKind.TRANSIENT, wrapped.kind());
-    assertEquals("HTTP 500\n{\"error\":{\"status\":\"INTERNAL\"}}", wrapped.getMessage());
   }
 
   /** 验证 SSE Error Envelope 的映射解析与边界情况。 */
@@ -293,7 +255,7 @@ class GeminiErrorMapperTest {
           }
         }
         """;
-    ProviderException ex = GeminiErrorMapper.fromHttp(400, rawPayload);
+    ProviderException ex = httpError(400, rawPayload);
     assertNotNull(ex.getMessage());
     assertEquals("HTTP 400\n" + rawPayload, ex.getMessage());
     assertTrue(ex.getMessage().contains("fake-gemini-key-123"));
@@ -317,30 +279,30 @@ class GeminiErrorMapperTest {
   @DisplayName("验证正文缺失后备、空白、非 JSON、截断标记与多行 Unicode 正文")
   void testBodyVariantsAndTruncation() {
     // 无正文时带状态码回退
-    ProviderException exNoBody401 = GeminiErrorMapper.fromHttp(401, null);
+    ProviderException exNoBody401 = httpError(401, null);
     assertEquals(ProviderErrorKind.AUTHENTICATION, exNoBody401.kind());
     assertEquals("HTTP 401: " + GeminiErrorMapper.MSG_AUTH, exNoBody401.getMessage());
 
-    ProviderException exNoBody402 = GeminiErrorMapper.fromHttp(402, "");
+    ProviderException exNoBody402 = httpError(402, "");
     assertEquals(ProviderErrorKind.BILLING, exNoBody402.kind());
     assertEquals("HTTP 402: " + GeminiErrorMapper.MSG_BILLING, exNoBody402.getMessage());
 
-    ProviderException exNoBody400 = GeminiErrorMapper.fromHttp(400, null);
+    ProviderException exNoBody400 = httpError(400, null);
     assertEquals(ProviderErrorKind.INVALID_REQUEST, exNoBody400.kind());
     assertEquals("HTTP 400: " + GeminiErrorMapper.MSG_INVALID_REQUEST, exNoBody400.getMessage());
 
-    ProviderException exNoBody500 = GeminiErrorMapper.fromHttp(500, null);
+    ProviderException exNoBody500 = httpError(500, null);
     assertEquals(ProviderErrorKind.TRANSIENT, exNoBody500.kind());
     assertEquals("HTTP 500: " + GeminiErrorMapper.MSG_TRANSIENT, exNoBody500.getMessage());
 
     // 空白正文必须完整保留
     String whitespace = "   \n\t  ";
-    ProviderException exWhitespace = GeminiErrorMapper.fromHttp(400, whitespace);
+    ProviderException exWhitespace = httpError(400, whitespace);
     assertEquals("HTTP 400\n" + whitespace, exWhitespace.getMessage());
 
     // 非 JSON 正文
     String html = "<html><body>Bad Gateway</body></html>";
-    ProviderException exHtml = GeminiErrorMapper.fromHttp(502, html);
+    ProviderException exHtml = httpError(502, html);
     assertEquals(ProviderErrorKind.TRANSIENT, exHtml.kind());
     assertEquals("HTTP 502\n" + html, exHtml.getMessage());
 

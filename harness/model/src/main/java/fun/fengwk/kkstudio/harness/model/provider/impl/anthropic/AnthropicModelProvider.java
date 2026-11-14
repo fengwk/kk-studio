@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.transport.ServerSentEvent
 
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -130,26 +131,8 @@ final class AnthropicModelProvider implements ModelProvider {
     byte[] body = prepared.body();
     handler.onRequestBody(body);
 
-    HttpRequest httpRequest;
-    try {
-      HttpRequest.Builder requestBuilder =
-          HttpRequest.newBuilder(messagesUri)
-              .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-              .header("Content-Type", "application/json")
-              .header("Accept", "text/event-stream")
-              .header(ANTHROPIC_VERSION_HEADER, ANTHROPIC_VERSION_VALUE);
-      if (!encoded.betaFeatures().isEmpty()) {
-        // Anthropic 官方支持在单个 anthropic-beta 头内以逗号分隔多个能力标识
-        requestBuilder.header(ANTHROPIC_BETA_HEADER, String.join(",", encoded.betaFeatures()));
-      }
-      if (apiKey != null && !apiKey.isBlank()) {
-        requestBuilder.header(API_KEY_HEADER, apiKey);
-        requestBuilder.header(AUTHORIZATION_HEADER, "Bearer " + apiKey);
-      }
-      httpRequest = requestBuilder.build();
-    } catch (IllegalArgumentException ex) {
-      bridge.emitError(
-          new ProviderException(ProviderErrorKind.INVALID_REQUEST, "invalid request header value"));
+    HttpRequest httpRequest = buildHttpRequest(body, encoded.betaFeatures(), bridge);
+    if (httpRequest == null) {
       return;
     }
 
@@ -168,6 +151,32 @@ final class AnthropicModelProvider implements ModelProvider {
         },
         accumulator::finish,
         AnthropicErrorMapper::mapTransportException);
+  }
+
+  /** 组装流式 POST；header 非法时已通过 bridge 上报，返回 null 表示调用结束。 */
+  private HttpRequest buildHttpRequest(
+      byte[] body, List<String> betaFeatures, ProviderStreamBridge bridge) {
+    try {
+      HttpRequest.Builder requestBuilder =
+          HttpRequest.newBuilder(messagesUri)
+              .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+              .header("Content-Type", "application/json")
+              .header("Accept", "text/event-stream")
+              .header(ANTHROPIC_VERSION_HEADER, ANTHROPIC_VERSION_VALUE);
+      if (!betaFeatures.isEmpty()) {
+        // Anthropic 官方支持在单个 anthropic-beta 头内以逗号分隔多个能力标识
+        requestBuilder.header(ANTHROPIC_BETA_HEADER, String.join(",", betaFeatures));
+      }
+      if (apiKey != null && !apiKey.isBlank()) {
+        requestBuilder.header(API_KEY_HEADER, apiKey);
+        requestBuilder.header(AUTHORIZATION_HEADER, "Bearer " + apiKey);
+      }
+      return requestBuilder.build();
+    } catch (IllegalArgumentException ex) {
+      bridge.emitError(
+          new ProviderException(ProviderErrorKind.INVALID_REQUEST, "invalid request header value"));
+      return null;
+    }
   }
 
   @Override
