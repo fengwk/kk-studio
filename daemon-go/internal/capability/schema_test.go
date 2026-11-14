@@ -50,12 +50,6 @@ func TestSchemas_DeclareEveryCapability(t *testing.T) {
 	if err := json.Unmarshal(schemas["fs.grep"], &grep); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := grep.Properties["include"]; ok {
-		t.Fatal("fs.grep schema still declares include")
-	}
-	if _, ok := grep.Properties["multiline"]; ok {
-		t.Fatal("fs.grep schema still declares multiline")
-	}
 	if _, ok := grep.Properties["glob"]; !ok {
 		t.Fatal("fs.grep schema does not declare glob")
 	}

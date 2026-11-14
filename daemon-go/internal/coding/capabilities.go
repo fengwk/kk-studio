@@ -494,15 +494,6 @@ func findCapability(ctx context.Context, call runtime.CapabilityCall, capability
 }
 
 func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(call.Arguments, &raw); err != nil {
-		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
-	}
-	for _, removed := range []string{"multiline", "include"} {
-		if _, exists := raw[removed]; exists {
-			return errorResult(call.InvocationID, rejectInput("unknown argument: "+removed)), nil
-		}
-	}
 	args, err := decodeArguments(call)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil

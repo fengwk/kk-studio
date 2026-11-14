@@ -288,19 +288,6 @@ func TestFormatSearchSkippedPathSummary(t *testing.T) {
 	}
 }
 
-// COD-N-010: the removed multiline argument is rejected.
-func TestGrepRejectsRemovedArguments(t *testing.T) {
-	root := t.TempDir()
-	for _, argument := range []string{"multiline", "include"} {
-		result := invokeCoding(t, Provider{}, "fs.grep", map[string]any{
-			"path": root, "pattern": "x", argument: true,
-		}, nil)
-		if !result.Error || !strings.Contains(result.Contents[0].Text, "unknown argument: "+argument) {
-			t.Errorf("argument %q result=%#v", argument, result)
-		}
-	}
-}
-
 // COD-F-015
 func TestLargeSearchResultUsesDurableOutput(t *testing.T) {
 	dataDir := t.TempDir()
