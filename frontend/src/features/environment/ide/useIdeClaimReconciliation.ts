@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useRef,
   useState,
@@ -42,9 +41,9 @@ import {
   viewFingerprint,
 } from '@/features/environment/ide/ide-contract'
 import { compareDecimal } from '@/features/environment/ide/ide-decimal'
+import { useIdeViewStore } from '@/features/environment/ide/useIdeViewStore'
 import {
   buildUsageViews,
-  initialViews,
   isBoundToConnection,
   recoveryFromViews,
   type IdeViewState,
@@ -98,11 +97,7 @@ export function useIdeClaimReconciliation({
   const [identity, setIdentity] = useState<ApplicationEventConnectionIdentity | null>(
     () => events.getIdentity(),
   )
-  const [views, setViews] = useState<Record<string, IdeViewState>>(
-    () => initialViews(initial.presentation, initial.recoveryByEnvironment),
-  )
 
-  const viewsRef = useRef(views)
   const identityRef = useRef(identity)
   const mountedRef = useRef(false)
   const pageSuspendedRef = useRef(false)
@@ -124,6 +119,15 @@ export function useIdeClaimReconciliation({
     restoreUsage: () => void
   } | null>(null)
 
+  const {
+    views,
+    viewsRef,
+    commitViews,
+    updateView,
+    startAttempt,
+    clearViews,
+  } = useIdeViewStore(mountedRef, initial)
+
   identityRef.current = identity
   sessionRef.current = session
 
@@ -135,27 +139,6 @@ export function useIdeClaimReconciliation({
   }, [])
 
   useEffect(() => events.subscribeIdentity(setIdentity), [events])
-
-  const commitViews = useCallback((next: Record<string, IdeViewState>) => {
-    viewsRef.current = next
-    if (mountedRef.current) {
-      setViews(next)
-    }
-  }, [])
-
-  function updateView(
-    environmentId: string,
-    attempt: number,
-    patch: Partial<IdeViewState>,
-  ): IdeViewState | null {
-    const current = viewsRef.current[environmentId]
-    if (current == null || current.attempt !== attempt) {
-      return null
-    }
-    const next = { ...current, ...patch }
-    commitViews({ ...viewsRef.current, [environmentId]: next })
-    return next
-  }
 
   function sessionReady(): boolean {
     const status = sessionRef.current.status
@@ -228,19 +211,6 @@ export function useIdeClaimReconciliation({
     void registerUsageNow(override).catch(() => {
       // 断线由 reject 明示；后续只由新的 connected 身份重新对账，不在这里重试。
     })
-  }
-
-  function startAttempt(
-    environmentId: string,
-    seed: Omit<IdeViewState, 'environmentId' | 'attempt'>,
-  ): number {
-    const current = viewsRef.current[environmentId]
-    const attempt = (current?.attempt ?? 0) + 1
-    commitViews({
-      ...viewsRef.current,
-      [environmentId]: { ...seed, environmentId, attempt },
-    })
-    return attempt
   }
 
   /** 当前连接内只允许一个在途绑定操作；旧连接的在途操作不阻塞新连接立即对账。 */
@@ -1354,8 +1324,7 @@ export function useIdeClaimReconciliation({
   }
 
   function resetForClone(): void {
-    viewsRef.current = {}
-    setViews({})
+    clearViews()
     revisionRef.current = 0n
     lastIdentityRef.current = null
     snapshotCacheRef.current.clear()
