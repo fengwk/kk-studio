@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import static fun.fengwk.kkstudio.harness.builtin.ModelRequestSpecTestSupport.spec;
+import static fun.fengwk.kkstudio.harness.builtin.runtime.store.testing.BuiltinTestTransactions.builtin;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -28,12 +29,15 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
+import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /** 模型组：冷却候选选择、fallback 冻结与成员推进、组预算和租约恢复的专用语义。 */
 class ModelProcessorGroupTest extends ModelProcessorTestSupport {
@@ -288,5 +292,100 @@ class ModelProcessorGroupTest extends ModelProcessorTestSupport {
     assertEquals(2, failed.failedAttempts().size());
     assertFalse(cooling(fixture, "model"));
     assertEquals(0, fixture.gateway.admitCalls);
+  }
+
+  /** 组内普通重试时 MODEL Work 已被删除：retry 事务的 claim 围栏失败，invocation 保持 RUNNING 且不写失败审计。 */
+  @Test
+  void groupRetryWithoutClaimIsLostAndKeepsRunning() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            groupSpec(Set.of(), 30));
+    fixture.gateway.queueControlled();
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
+    deleteModelWork(fixture);
+
+    listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "server"));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+    assertEquals(1, model.attempt());
+    assertTrue(model.failedAttempts().isEmpty());
+    assertEquals(0, groupProgress(model).memberIndex());
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** 单成员组耗尽且 MODEL Work 已被删除：终态事务回滚，不留下无主 THREAD wake 或终态。 */
+  @Test
+  void exhaustedGroupWithoutClaimRollsBackTerminal() {
+    Fixture fixture = fixture(NO_RETRY, singleMemberGroupSpec());
+    fixture.gateway.queueControlled();
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
+    long threadWakeVersion = threadWorkVersion(fixture);
+    deleteModelWork(fixture);
+
+    listener.fail(new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "denied"));
+
+    ModelInvocation model = model(fixture.store, fixture.invocationId);
+    assertEquals(ModelInvocationStatus.RUNNING, model.status());
+    assertTrue(model.failedAttempts().isEmpty());
+    assertEquals(threadWakeVersion, threadWorkVersion(fixture));
+  }
+
+  /** 组失败事务中 model 行已不存在：整体返回 LOST，不触碰 Work 与 Thread。 */
+  @Test
+  void groupFailureWithoutModelRowIsLost() {
+    Fixture fixture =
+        fixture(
+            new InvocationRetryPolicy(
+                1,
+                InvocationRetryBackoffStrategy.FIXED,
+                Duration.ofSeconds(5),
+                Duration.ofSeconds(5)),
+            groupSpec(Set.of(), 30));
+    fixture.gateway.queueControlled();
+    assertEquals(
+        ProcessResult.STARTED,
+        fixture.processor.process(claim(fixture.store, fixture.invocationId)));
+    ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
+    UUID invocationId = fixture.invocationId;
+    fixture.store.transaction(
+        tx -> {
+          builtin(fixture.store, tx).lockModelInvocation(invocationId).orElseThrow();
+          builtin(fixture.store, tx).deleteModelInvocation(invocationId);
+          return null;
+        });
+
+    listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "server"));
+
+    assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  private static ModelRequestSpec singleMemberGroupSpec() {
+    return spec(
+        ProviderType.OPENAI,
+        new ModelDescriptor("group", "group", "group", Set.of(ModelInputModality.TEXT), true, true),
+        new ModelVariant("v1", null, PromptCacheRetention.NONE, null),
+        1024,
+        "Test system instruction.",
+        List.of(),
+        List.of(),
+        new ModelGroupExecution("group", 7L, List.of(groupMember("model")), Set.of(), 30));
+  }
+
+  private static long threadWorkVersion(Fixture fixture) {
+    Work work =
+        work(fixture.store, new WorkTarget(WorkTargetType.THREAD, fixture.baseline.threadId()));
+    return work == null ? 0L : work.wakeVersion();
   }
 }
