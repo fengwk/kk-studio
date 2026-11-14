@@ -81,7 +81,7 @@ export function previewForToolCall(
   return null
 }
 
-export function formatWritePreview(
+function formatWritePreview(
   parsed: ParsedToolArguments,
   options?: EditPreviewOptions,
 ): WriteCallPreview {
@@ -100,7 +100,7 @@ export function formatWritePreview(
   }
 }
 
-export function formatEditPreview(
+function formatEditPreview(
   parsed: ParsedToolArguments,
   options?: EditPreviewOptions,
 ): EditCallPreview | null {

@@ -1,10 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import {
-  submittedUploadIds,
-  unreferencedUploads,
-  useComposerSubmissionSettle,
-} from '@/features/thread/runtime/thread-panel/useComposerSubmissionSettle'
+import { useComposerSubmissionSettle } from '@/features/thread/runtime/thread-panel/useComposerSubmissionSettle'
 import {
   createAttachmentPart,
   createTextPart,
@@ -54,40 +50,27 @@ function renderSettle() {
   return { ...rendered, markDetached, releaseUpload }
 }
 
-describe('submission settle helpers', () => {
-  it('maps only the submitted-referenced uploads to their localIds', () => {
+describe('useComposerSubmissionSettle', () => {
+  it('detaches only the uploads referenced by the submitted draft', () => {
+    const { result, rerender, markDetached } = renderSettle()
     const uploads = [
       upload('local-1', { uploadId: 'up-1' }),
       upload('local-2'),
       upload('local-3', { uploadId: 'up-3' }),
     ]
-    const submitted = [
+    const draft = [
       createTextPart('keep'),
       createAttachmentPart('local-1', 'a.txt'),
       // 服务端句柄同样命中（提交 payload 恢复比对前的本地快照也可按句柄匹配）。
       createAttachmentPart('up-3', 'c.txt'),
     ]
-    expect(submittedUploadIds(submitted, uploads)).toEqual(new Set(['local-1', 'local-3']))
+
+    act(() => result.current.commit(draft))
+    rerender({ parts: [], pending: false, uploads })
+
+    expect(markDetached).toHaveBeenCalledWith(new Set(['local-1', 'local-3']), true)
   })
 
-  it('releases only unreferenced non-detached uploads', () => {
-    const uploads = [
-      upload('referenced', { uploadId: 'up-1' }),
-      upload('unreferenced'),
-      upload('detached-unreferenced', { detached: true }),
-      upload('detached-referenced', { uploadId: 'up-2', detached: true }),
-    ]
-    const parts = [
-      createAttachmentPart('referenced', 'a.txt'),
-      createAttachmentPart('up-2', 'b.txt'),
-    ]
-    expect(unreferencedUploads(uploads, parts).map((item) => item.localId)).toEqual([
-      'unreferenced',
-    ])
-  })
-})
-
-describe('useComposerSubmissionSettle', () => {
   it('detaches submitted uploads while waiting for the send result', () => {
     const { result, rerender, markDetached, releaseUpload } = renderSettle()
     const draft = [createTextPart('hello'), createAttachmentPart('local-1', 'a.txt')]
@@ -161,9 +144,14 @@ describe('useComposerSubmissionSettle', () => {
       upload('keep-referenced', { uploadId: 'up-1' }),
       upload('remove-me'),
       upload('keep-detached', { detached: true }),
+      // 已挂起但草稿仍按服务端句柄引用：既不算可回收，也不再重复挂起。
+      upload('keep-detached-referenced', { uploadId: 'up-2', detached: true }),
     ]
     rerender({
-      parts: [createAttachmentPart('keep-referenced', 'a.txt')],
+      parts: [
+        createAttachmentPart('keep-referenced', 'a.txt'),
+        createAttachmentPart('up-2', 'b.txt'),
+      ],
       pending: false,
       uploads,
     })

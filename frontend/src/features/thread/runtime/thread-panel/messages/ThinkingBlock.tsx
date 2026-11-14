@@ -9,7 +9,7 @@ import {
 import { announceTranscriptReading } from '@/features/thread/runtime/transcript-reading'
 import { useI18n } from '@/shared/i18n'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
-import './ThinkingBlock.css'
+import './thinking-block.css'
 
 /** 收起态前文省略标记；仅当前文确实放不下时出现。 */
 const ELLIPSIS = '…'

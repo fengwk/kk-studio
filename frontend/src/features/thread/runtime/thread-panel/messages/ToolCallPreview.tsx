@@ -1,9 +1,14 @@
-import { useI18n } from '@/shared/i18n'
-import { ToolOutputViewport } from '@/features/thread/runtime/thread-panel/messages/ToolOutputViewport'
+import {
+  ApprovalArgumentsSection,
+  EditDiffSection,
+  EditInputSection,
+  EditPreparingSection,
+  PreviewTarget,
+  WriteContentSection,
+  WriteReviewSection,
+} from '@/features/thread/runtime/thread-panel/messages/ToolCallPreviewSections'
 import type { ToolCallPreview as ToolCallPreviewData } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
 import './tool-card.css'
-
-const BASH_LEADING_FIELDS = ['command', 'workdir', 'timeout_seconds']
 
 /**
  * 共享 mutation 审查组件：对话记录与审批卡片使用同一份数据。
@@ -11,6 +16,8 @@ const BASH_LEADING_FIELDS = ['command', 'workdir', 'timeout_seconds']
  * - `variant="approval"`：保留路径行与有界内部滚动，审批卡片行为不变；
  * - `variant="transcript"`：普通正文、无内部滚动，Header 已有路径时不重复路径行；
  * - write 展示目标与完整内容（含空文件标识），edit 展示流式输入、准备态或后端冻结 diff。
+ *
+ * 分支只决定「渲染哪一段正文」，各段正文在 ToolCallPreviewSections。
  */
 export function ToolCallPreview({
   preview,
@@ -26,66 +33,22 @@ export function ToolCallPreview({
   toolName?: string
   argumentsJson?: string
 }) {
-  const { t } = useI18n()
   const bounded = variant === 'approval'
   const showTarget = variant === 'approval'
+  // 路径行只有 path；workdir 属于正文目标，仅 write 正文分支附带。
+  const target = showTarget && preview?.path ? <PreviewTarget path={preview.path} /> : null
 
   if (!preview) {
     if (variant !== 'approval' || !argumentsJson) return null
-    let fields: Record<string, unknown> = {}
-    try {
-      const parsed: unknown = JSON.parse(argumentsJson)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        fields = parsed as Record<string, unknown>
-      }
-    } catch {
-      return <div className="thread-tool-approval-unreadable">{t('ai.interaction.unreadableArguments')}</div>
-    }
-    // 审批前用户必须看到将要执行的全部参数；bash 只把最关键的字段排在前面。
-    const leading = toolName?.trim().toLowerCase() === 'bash' ? BASH_LEADING_FIELDS : []
-    const entries = [
-      ...leading.filter((key) => key in fields).map((key) => [key, fields[key]] as const),
-      ...Object.entries(fields).filter(([key]) => !leading.includes(key)),
-    ]
-    if (entries.length === 0) return null
-    return (
-      <dl className="thread-tool-approval-fields">
-        {entries.map(([key, value]) => {
-          const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2) ?? String(value)
-          const long = text.length > 320
-          return (
-            <div className="thread-tool-approval-field" key={key}>
-              <dt>{key}</dt>
-              <dd>{long ? (
-                <details>
-                  <summary>{text.slice(0, 160)}…</summary>
-                  <pre>{text}</pre>
-                </details>
-              ) : <pre className={key === 'command' ? 'is-command' : ''}>{text}</pre>}</dd>
-            </div>
-          )
-        })}
-      </dl>
-    )
+    return <ApprovalArgumentsSection toolName={toolName} argumentsJson={argumentsJson} />
   }
 
   if (preview.kind === 'write') {
     if (variant === 'approval' && preview.review) {
       return (
         <div className="thread-tool-call-body">
-          {showTarget && preview.path ? (
-            <div className="thread-tool-preview-target">
-              <span className="thread-tool-preview-target-path">{preview.path}</span>
-            </div>
-          ) : null}
-          <ToolOutputViewport bounded className="thread-tool-preview-body is-edit">
-            {preview.review.diff.split('\n').map((line, index, lines) => (
-              <span key={`diff-${index}`} className={diffLineClass(line)}>
-                {line}
-                {index < lines.length - 1 ? '\n' : ''}
-              </span>
-            ))}
-          </ToolOutputViewport>
+          {target}
+          <WriteReviewSection preview={preview} />
         </div>
       )
     }
@@ -95,27 +58,9 @@ export function ToolCallPreview({
     return (
       <div className="thread-tool-call-body">
         {showTarget && preview.path ? (
-          <div className="thread-tool-preview-target">
-            <span className="thread-tool-preview-target-path">{preview.path}</span>
-            {preview.workdir ? (
-              <span className="thread-tool-preview-target-workdir">· {preview.workdir}</span>
-            ) : null}
-          </div>
+          <PreviewTarget path={preview.path} workdir={preview.workdir} />
         ) : null}
-        <ToolOutputViewport
-          bounded={bounded}
-          className={[
-            'thread-tool-preview-body',
-            'is-write',
-            streaming ? 'is-streaming' : '',
-          ].filter(Boolean).join(' ')}
-        >
-          {preview.content.length > 0 ? (
-            preview.content
-          ) : (
-            <span className="thread-tool-empty-content">{t('ai.runtime.mutation.emptyFile')}</span>
-          )}
-        </ToolOutputViewport>
+        <WriteContentSection preview={preview} streaming={streaming} bounded={bounded} />
       </div>
     )
   }
@@ -124,80 +69,21 @@ export function ToolCallPreview({
   if (preview.mode === 'preparing') {
     return (
       <div className="thread-tool-call-body">
-        {showTarget && preview.path ? (
-          <div className="thread-tool-preview-target">
-            <span className="thread-tool-preview-target-path">{preview.path}</span>
-          </div>
-        ) : null}
-        <div className="thread-tool-preview-preparing">
-          <span className="thread-tool-spinner" aria-hidden="true">⏳</span>
-          <span>{t('ai.runtime.mutation.preparing')}</span>
-        </div>
+        {target}
+        <EditPreparingSection />
       </div>
     )
   }
 
   // Edit tool: streamed input, one block per entry, explicitly labeled as model input
   if (preview.mode === 'input') {
-    const total = preview.entries.length
-    const entries = preview.entries
-      .map((entry, index) => ({ entry, index }))
-      .filter(({ entry }) => entry.oldText || entry.newText)
-    if (entries.length === 0) {
+    if (!preview.entries.some((entry) => entry.oldText || entry.newText)) {
       return null
     }
     return (
       <div className="thread-tool-call-body">
-        {showTarget && preview.path ? (
-          <div className="thread-tool-preview-target">
-            <span className="thread-tool-preview-target-path">{preview.path}</span>
-          </div>
-        ) : null}
-        <div className="thread-tool-preview-input-section">
-          <div className="thread-tool-preview-input-label">{t('ai.runtime.mutation.inputLabel')}</div>
-          {entries.map(({ entry, index }) => (
-            <div className="thread-tool-preview-input-block" key={`entry-${index}`}>
-              {total > 1 || entry.replaceAll ? (
-                <span className="thread-tool-preview-input-heading">
-                  {total > 1
-                    ? t('ai.runtime.mutation.changeOf', { index: index + 1, total })
-                    : null}
-                  {entry.replaceAll ? (
-                    <span className="thread-tool-preview-badge">
-                      {t('ai.runtime.mutation.replaceAll')}
-                    </span>
-                  ) : null}
-                </span>
-              ) : null}
-              {entry.oldText ? (
-                <>
-                  <span className="thread-tool-preview-input-sublabel">
-                    {t('ai.runtime.mutation.oldString')}
-                  </span>
-                  <ToolOutputViewport
-                    bounded={bounded}
-                    className="thread-tool-preview-body is-input-old"
-                  >
-                    {entry.oldText}
-                  </ToolOutputViewport>
-                </>
-              ) : null}
-              {entry.newText ? (
-                <>
-                  <span className="thread-tool-preview-input-sublabel">
-                    {t('ai.runtime.mutation.newString')}
-                  </span>
-                  <ToolOutputViewport
-                    bounded={bounded}
-                    className="thread-tool-preview-body is-input-new"
-                  >
-                    {entry.newText}
-                  </ToolOutputViewport>
-                </>
-              ) : null}
-            </div>
-          ))}
-        </div>
+        {target}
+        <EditInputSection preview={preview} bounded={bounded} />
       </div>
     )
   }
@@ -208,42 +94,8 @@ export function ToolCallPreview({
   }
   return (
     <div className="thread-tool-call-body">
-      {showTarget && preview.path ? (
-        <div className="thread-tool-preview-target">
-          <span className="thread-tool-preview-target-path">{preview.path}</span>
-        </div>
-      ) : null}
-      <ToolOutputViewport
-        bounded={bounded}
-        className={[
-          'thread-tool-preview-body',
-          'is-edit',
-          streaming ? 'is-streaming' : '',
-        ].filter(Boolean).join(' ')}
-      >
-        {preview.lines.map((line, index) => (
-          <span
-            key={`diff-${index}`}
-            className={diffLineClass(line)}
-          >
-            {line}
-            {index < preview.lines.length - 1 ? '\n' : ''}
-          </span>
-        ))}
-      </ToolOutputViewport>
+      {target}
+      <EditDiffSection preview={preview} streaming={streaming} bounded={bounded} />
     </div>
   )
-}
-
-function diffLineClass(line: string): string {
-  if (line.startsWith('+')) {
-    return 'is-added'
-  }
-  if (line.startsWith('-')) {
-    return 'is-removed'
-  }
-  if (line.startsWith('@')) {
-    return 'is-hunk-header'
-  }
-  return 'is-context'
 }

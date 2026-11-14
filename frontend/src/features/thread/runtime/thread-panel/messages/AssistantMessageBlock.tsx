@@ -31,7 +31,7 @@ export const AssistantMessageBlock = memo(function AssistantMessageBlock({
       }`}
     >
       {aborted ? (
-        <div className="thread-block thread-block-assistant thread-assistant-aborted-tag">
+        <div className="thread-block thread-block-assistant">
           <div className="thread-block-body">{t('ai.runtime.message.stopped')}</div>
         </div>
       ) : null}

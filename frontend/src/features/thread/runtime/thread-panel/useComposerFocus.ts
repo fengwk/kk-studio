@@ -7,11 +7,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
   type RefObject,
 } from 'react'
-import { isEditorComposing, placeCaretAtEnd } from '@/features/thread/composer/composer-dom'
 import { shouldDeferToBlockingModal } from '@/shared/ui/blocking-overlay'
-
-const MAX_FOCUS_ATTEMPTS = 5
-const FOCUS_RETRY_DELAY_MS = 16
+import { useComposerFocusTimer } from '@/features/thread/runtime/thread-panel/useComposerFocusTimer'
 
 export interface ComposerFocusOptions {
   /** 编辑器根节点（contenteditable=true）。焦点定时器重试期间节点可能尚未可编辑。 */
@@ -75,7 +72,12 @@ export function useComposerFocus({
 }: ComposerFocusOptions): ComposerFocus {
   const [isFocused, setIsFocused] = useState(false)
   const isFocusedRef = useRef(false)
-  const focusTimerRef = useRef<number | null>(null)
+
+  /** 区域/编辑器真的获得焦点时的唯一写入口。 */
+  const markFocused = useCallback(() => {
+    isFocusedRef.current = true
+    setIsFocused(true)
+  }, [])
   const restoreFocusRef = useRef(false)
   const wasPendingRef = useRef(false)
   const closeOverlayRef = useRef(closeOverlay)
@@ -105,12 +107,11 @@ export function useComposerFocus({
     return Boolean(container && container.contains(target))
   }, [containerRef])
 
-  const clearFocusTimer = useCallback(() => {
-    if (focusTimerRef.current !== null) {
-      window.clearTimeout(focusTimerRef.current)
-      focusTimerRef.current = null
-    }
-  }, [])
+  const { focusTimerRef, clearFocusTimer, focusComposer } = useComposerFocusTimer({
+    editorRef,
+    activeRef,
+    onFocused: markFocused,
+  })
 
   // A routed focus may still be queued when workspace focus moves elsewhere.
   // Cancel in layout phase, before the existing timer can focus the old pane.
@@ -132,55 +133,6 @@ export function useComposerFocus({
     setIsFocused(false)
     onLeaveRegionRef.current?.()
   }, [clearFocusTimer, isInsideRegion])
-
-  const focusComposer = useCallback((forceCaretAtEnd = false) => {
-    clearFocusTimer()
-    const scheduleFocus = (attempt: number, delay: number) => {
-      focusTimerRef.current = window.setTimeout(() => {
-        focusTimerRef.current = null
-        const el = editorRef.current
-        if (!el || !activeRef.current) {
-          return
-        }
-        if (shouldDeferToBlockingModal(el)) {
-          return
-        }
-        if (el.getAttribute('contenteditable') !== 'true') {
-          if (attempt < MAX_FOCUS_ATTEMPTS) {
-            scheduleFocus(attempt + 1, FOCUS_RETRY_DELAY_MS)
-          }
-          return
-        }
-        if (isEditorComposing(el)) {
-          // 组合期间不强制 focus、不移动光标：组合态归输入法所有，
-          // 外部改动与焦点恢复统一等到 compositionend 之后。
-          return
-        }
-        if (document.activeElement !== el) {
-          el.focus({ preventScroll: true })
-        }
-        const selection = el.ownerDocument.getSelection()
-        if (
-          document.activeElement === el
-          && (
-            forceCaretAtEnd
-            || !selection
-            || selection.rangeCount === 0
-            || !el.contains(selection.getRangeAt(0).commonAncestorContainer)
-          )
-        ) {
-          placeCaretAtEnd(el)
-        }
-        if (document.activeElement === el) {
-          isFocusedRef.current = true
-          setIsFocused(true)
-        } else if (attempt < MAX_FOCUS_ATTEMPTS) {
-          scheduleFocus(attempt + 1, FOCUS_RETRY_DELAY_MS)
-        }
-      }, delay)
-    }
-    scheduleFocus(0, 0)
-  }, [clearFocusTimer, editorRef])
 
   // 区域内的 focusin / focusout 原生监听（仅负责区域焦点状态检测与防抢焦清理）：
   useEffect(() => {
@@ -240,7 +192,8 @@ export function useComposerFocus({
       container.removeEventListener('focusin', handleFocusIn)
       container.removeEventListener('focusout', handleFocusOut)
     }
-  }, [clearFocusTimer, containerRef])
+    // focusTimerRef 是稳定的 ref 对象：列出它不改变重跑时机（仍只在容器变化时重挂监听）。
+  }, [clearFocusTimer, containerRef, focusTimerRef])
 
   // 区域内 React 键盘事件处理器：挂载在 Composer 最外层容器上。
   // React 合成事件自下而上冒泡，子组件（如 Controls 下拉菜单）可优先拦截 Escape。

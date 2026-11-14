@@ -8,13 +8,13 @@ import type {
   ToolDialogueMessage,
 } from '@/features/thread/runtime/thread-timeline-types'
 
-export type ToolVisualState = 'pending' | 'success' | 'error'
-export type ToolExecutionState =
+type ToolVisualState = 'pending' | 'success' | 'error'
+type ToolExecutionState =
   | 'preparing' | 'queued' | 'environment' | 'approval' | 'input'
   | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'unknown'
 
 /** 状态仅取 durable invocation；模型流里的 call.done 只是参数完整。 */
-export function toolExecutionState(
+function toolExecutionState(
   message: Pick<ToolDialogueMessage, 'invocationStatus' | 'waitingForEnvironment' | 'phase' | 'status'>,
 ): ToolExecutionState {
   switch (message.invocationStatus) {
@@ -74,7 +74,7 @@ export interface ToolMessageView {
  * durable result 是唯一展示源；它出现后旧 partial 不得再贡献内容。
  * 结果消息存在但内容为空时不回退 partial（避免旧 partial 盖过终态错误）。
  */
-export function toolMessageContents(
+function toolMessageContents(
   message: ToolDialogueMessage,
   result?: ToolDialogueMessage,
 ): ToolContent[] {
@@ -212,7 +212,7 @@ function hasArgumentsBody(rawArguments: string): boolean {
  * 调用/结果的失败事实：失败摘要与配色必须覆盖「调用本身失败但还没有结果」的状态，
  * 否则时间线里的失败调用会被渲染成仍在等待。
  */
-export function toolErrorFacts({
+function toolErrorFacts({
   message,
   result,
 }: {

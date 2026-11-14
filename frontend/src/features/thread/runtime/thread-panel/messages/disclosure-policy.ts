@@ -14,7 +14,7 @@ const HIDDEN: DisclosureQuota = { preview: 0, body: 0 }
  * 工具卡片的收起配额：active 对应生成调用、排队、等待审批/输入/环境和执行中；
  * settled 对应成功、失败、已停止和结果未知。
  */
-export const TOOL_DISCLOSURE: Record<string, { active: DisclosureQuota; settled: DisclosureQuota }> = {
+const TOOL_DISCLOSURE: Record<string, { active: DisclosureQuota; settled: DisclosureQuota }> = {
   bash: { active: { preview: 10, body: 0 }, settled: { preview: 10, body: 0 } },
   write: { active: { preview: -1, body: 0 }, settled: { preview: 10, body: 0 } },
   edit: { active: { preview: -1, body: 0 }, settled: { preview: 10, body: 0 } },

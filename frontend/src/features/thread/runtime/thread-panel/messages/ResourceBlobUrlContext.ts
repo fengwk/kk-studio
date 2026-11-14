@@ -13,8 +13,9 @@ export interface ResourceBlobUrls {
 }
 
 /**
- * durable RESOURCE blob URL 的渲染期解析回调；由面板外部的适配层（如 ChatPanel）
- * 注入 shared storage service，panel 本身保持 API 无关。返回 null 表示整体失败。
+ * durable RESOURCE blob URL 的渲染期解析回调；由面板外部的适配层
+ * （{@link ThreadPane}）注入 shared storage service，panel 本身保持 API 无关。
+ * 返回 null 表示整体失败。
  */
 export const ResourceBlobUrlContext = createContext<
   ((blobId: string) => Promise<ResourceBlobUrls | null>) | null

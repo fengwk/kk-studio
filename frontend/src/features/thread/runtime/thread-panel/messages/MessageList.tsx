@@ -13,7 +13,7 @@ import { useOptionalApplicationContributions } from '@/platform/extensions/Appli
 import type { ApplicationContributions } from '@/platform/extensions/types'
 import type { ReactNode } from 'react'
 
-/** 将每条对话消息分派给对应的块组件（pi 风格按消息类型分发）。 */
+/** 将每条对话消息分派给对应的块组件。 */
 export function MessageList({ messages }: { messages: DialogueMessage[] }) {
   const contributions = useOptionalApplicationContributions()
   const usedKeys = new Set<string>()

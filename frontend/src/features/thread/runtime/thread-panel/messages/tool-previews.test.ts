@@ -1,11 +1,25 @@
 import { describe, expect, it } from 'vitest'
 import {
-  formatEditPreview,
-  formatWritePreview,
   parseToolArguments,
   previewForToolCall,
   type ToolCallPreview,
 } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
+
+type PreviewOptions = Parameters<typeof previewForToolCall>[2]
+
+/** write 预览；预览的唯一生产入口按工具名分发，因此调用方必须得到 write 形状。 */
+function writePreview(raw: string, options?: PreviewOptions) {
+  const preview = previewForToolCall('write', raw, options)
+  if (preview?.kind !== 'write') {
+    throw new Error(`expected write preview, got ${JSON.stringify(preview)}`)
+  }
+  return preview
+}
+
+/** edit 预览；允许 null（终态无审查时不伪造准备中）。 */
+function editPreview(raw: string, options?: PreviewOptions) {
+  return previewForToolCall('edit', raw, options)
+}
 
 /** 从 edit 预览取出流式输入的条目列表；同时确认当前处于 input 模式。 */
 function inputEntries(preview: ToolCallPreview | null) {
@@ -19,12 +33,13 @@ describe('tool previews', () => {
   const validSha = '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef'
 
   it('parses complete write arguments and keeps the full content and workdir', () => {
-    const parsed = parseToolArguments(JSON.stringify({
+    const raw = JSON.stringify({
       path: 'SortingAlgorithms.java',
       workdir: '/home/user/project',
       content: 'line1\nline2\nline3\nline4\nline5\nline6\nline7\nline8\n',
-    }))
-    const preview = formatWritePreview(parsed)
+    })
+    const parsed = parseToolArguments(raw)
+    const preview = writePreview(raw)
 
     expect(parsed.complete).toBe(true)
     expect(preview.path).toBe('SortingAlgorithms.java')
@@ -62,8 +77,9 @@ describe('tool previews', () => {
   })
 
   it('keeps parsed content while write arguments are still streaming', () => {
-    const parsed = parseToolArguments('{"path":"App.java","content":"one\\ntwo\\nthree\\nfour\\nfive\\nsix\\nseven\\neight')
-    const preview = formatWritePreview(parsed)
+    const raw = '{"path":"App.java","content":"one\\ntwo\\nthree\\nfour\\nfive\\nsix\\nseven\\neight'
+    const parsed = parseToolArguments(raw)
+    const preview = writePreview(raw)
 
     expect(parsed.complete).toBe(false)
     expect(preview.path).toBe('App.java')
@@ -71,10 +87,10 @@ describe('tool previews', () => {
   })
 
   it('renders one streamed edit entry as explicit input rather than diff', () => {
-    const parsed = parseToolArguments(
+    const preview = editPreview(
       '{"path":"App.java","edits":[{"old_string":"alpha\\nbeta","new_string":"alpha\\nBETA',
+      { streaming: true },
     )
-    const preview = formatEditPreview(parsed, { streaming: true })
 
     expect(inputEntries(preview)).toEqual([
       { oldText: 'alpha\nbeta', newText: 'alpha\nBETA', replaceAll: false },
@@ -83,15 +99,13 @@ describe('tool previews', () => {
   })
 
   it('keeps every parsed entry of a multi-entry edit that is still streaming', () => {
-    const parsed = parseToolArguments(
-      '{"path":"App.java","edits":['
+    const raw = '{"path":"App.java","edits":['
       + '{"old_string":"one","new_string":"ONE","replace_all":true},'
       + '{"old_string":"two","new_string":"TWO"},'
-      + '{"old_string":"three","new_',
-    )
-    const preview = formatEditPreview(parsed, { streaming: true })
+      + '{"old_string":"three","new_'
+    const preview = editPreview(raw, { streaming: true })
 
-    expect(parsed.complete).toBe(false)
+    expect(parseToolArguments(raw).complete).toBe(false)
     expect(inputEntries(preview)).toEqual([
       { oldText: 'one', newText: 'ONE', replaceAll: true },
       { oldText: 'two', newText: 'TWO', replaceAll: false },
@@ -100,41 +114,33 @@ describe('tool previews', () => {
   })
 
   it('omits entries while edits itself is still an empty or unparsed array', () => {
-    expect(inputEntries(formatEditPreview(
-      parseToolArguments('{"path":"App.java","edits":['),
-      { streaming: true },
-    ))).toEqual([])
-    expect(inputEntries(formatEditPreview(
-      parseToolArguments('{"path":"App.java","edits":'),
-      { streaming: true },
-    ))).toEqual([])
+    expect(inputEntries(editPreview('{"path":"App.java","edits":[', { streaming: true }))).toEqual([])
+    expect(inputEntries(editPreview('{"path":"App.java","edits":', { streaming: true }))).toEqual([])
     // 顶层仍是旧的单替换参数时不伪造输入条目。
-    expect(inputEntries(formatEditPreview(
-      parseToolArguments('{"path":"App.java","old_string":"a","new_string":"b"}'),
+    expect(inputEntries(editPreview(
+      '{"path":"App.java","old_string":"a","new_string":"b"}',
       { streaming: true },
     ))).toEqual([])
   })
 
   it('renders preparing state after arguments finish while waiting for review', () => {
-    const parsed = parseToolArguments(JSON.stringify({
+    const preview = editPreview(JSON.stringify({
       path: 'App.java',
       edits: [{ old_string: 'alpha\nbeta', new_string: 'alpha\nBETA' }],
-    }))
-    const preview = formatEditPreview(parsed, { isWaitingReview: true })
+    }), { isWaitingReview: true })
 
     expect(preview).toMatchObject({ kind: 'edit', mode: 'preparing', path: 'App.java' })
   })
 
   it('replaces streamed input with the real multi-hunk diff from editReview', () => {
-    const parsed = parseToolArguments(JSON.stringify({
+    const realDiff = '@@ -10,3 +10,3 @@\n 10|context\n-11|alpha\n-12|beta\n+11|alpha\n+12|BETA\n 13|context'
+    const preview = editPreview(JSON.stringify({
       path: 'App.java',
       edits: [
         { old_string: 'alpha\nbeta', new_string: 'alpha\nBETA' },
         { old_string: 'gamma', new_string: 'GAMMA', replace_all: true },
       ],
-    }))
-    const realDiff = '@@ -10,3 +10,3 @@\n 10|context\n-11|alpha\n-12|beta\n+11|alpha\n+12|BETA\n 13|context'
-    const preview = formatEditPreview(parsed, {
+    }), {
       editReview: {
         path: '/canonical/App.java',
         diff: realDiff,
@@ -162,23 +168,22 @@ describe('tool previews', () => {
   })
 
   it('prefers editReview over streamed entries as soon as it exists', () => {
-    const parsed = parseToolArguments(
+    const preview = editPreview(
       '{"path":"App.java","edits":[{"old_string":"alpha","new_string":"BETA',
+      {
+        streaming: true,
+        editReview: { path: '/canonical/App.java', diff: '-1|alpha\n+1|BETA', sha256: validSha },
+      },
     )
-    const preview = formatEditPreview(parsed, {
-      streaming: true,
-      editReview: { path: '/canonical/App.java', diff: '-1|alpha\n+1|BETA', sha256: validSha },
-    })
 
     expect(preview).toMatchObject({ kind: 'edit', mode: 'review', path: '/canonical/App.java' })
   })
 
   it('returns null for historical terminal calls without a review instead of eternal spinner', () => {
-    const parsed = parseToolArguments(JSON.stringify({
+    const preview = editPreview(JSON.stringify({
       path: 'App.java',
       edits: [{ old_string: 'a', new_string: 'b' }],
-    }))
-    const preview = formatEditPreview(parsed, { isTerminalWithoutReview: true })
+    }), { isTerminalWithoutReview: true })
     expect(preview).toBeNull()
   })
 
@@ -233,10 +238,9 @@ describe('tool previews', () => {
   })
 
   it('drops the trailing empty line produced by a content that ends with a newline', () => {
-    const parsed = parseToolArguments(JSON.stringify({
+    expect(writePreview(JSON.stringify({
       path: 'a.txt',
       content: 'one\ntwo\n',
-    }))
-    expect(formatWritePreview(parsed).lines).toEqual(['one', 'two'])
+    })).lines).toEqual(['one', 'two'])
   })
 })
