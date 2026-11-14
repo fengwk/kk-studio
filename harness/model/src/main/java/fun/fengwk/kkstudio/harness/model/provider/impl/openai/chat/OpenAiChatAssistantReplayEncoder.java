@@ -31,68 +31,94 @@ final class OpenAiChatAssistantReplayEncoder {
    */
   static ObjectNode build(
       ProviderMessage message, ProviderDescriptor descriptor, String requestedModel) {
-    ObjectNode result = NODES.objectNode();
-    result.put("role", "assistant");
-    StringBuilder content = new StringBuilder();
-    StringBuilder refusal = new StringBuilder();
-    StringBuilder reasoning = new StringBuilder();
-    ArrayNode toolCalls = NODES.arrayNode();
-    boolean hasTextBlock = false;
-    boolean hasReasoningBlock = false;
+    Draft draft = new Draft();
     for (ProviderContentBlock block : message.contents()) {
+      if (!draft.append(block, descriptor, requestedModel)) {
+        return null;
+      }
+    }
+    return draft.toWireMessage();
+  }
+
+  /** 回放草稿：按 durable 顺序累积可读内容与工具调用，同时合并各 block 的原生字段。 */
+  private static final class Draft {
+    private final ObjectNode result = NODES.objectNode();
+    private final StringBuilder content = new StringBuilder();
+    private final StringBuilder refusal = new StringBuilder();
+    private final StringBuilder reasoning = new StringBuilder();
+    private final ArrayNode toolCalls = NODES.arrayNode();
+    private boolean hasTextBlock = false;
+    private boolean hasReasoningBlock = false;
+
+    Draft() {
+      result.put("role", "assistant");
+    }
+
+    /** 追加一个 block；缺少同协议同 affinity 的 metadata 或原生字段冲突时返回 {@code false}。 */
+    boolean append(
+        ProviderContentBlock block, ProviderDescriptor descriptor, String requestedModel) {
       ProviderBlockData data = providerBlockData(block);
       if (data == null
           || data.protocol() != ProviderReplayFormat.OPENAI_CHAT
           || !data.affinity().equals(descriptor.affinity(requestedModel))) {
-        return null;
+        return false;
       }
       ObjectNode nativeFields = (ObjectNode) data.nativeFields();
       if (block instanceof ProviderTextBlock textBlock) {
-        if (data.refusal()) {
-          refusal.append(textBlock.text());
-        } else {
-          hasTextBlock = true;
-          content.append(textBlock.text());
-        }
-      } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        appendText(textBlock, data);
+        return true;
+      }
+      if (block instanceof ProviderThinkingBlock thinkingBlock) {
         hasReasoningBlock = true;
         reasoning.append(thinkingBlock.thinking());
-        if (!mergeFields(result, nativeFields)) {
-          return null;
-        }
-      } else if (block instanceof ProviderToolCallBlock toolCallBlock) {
-        ProviderToolCall call = toolCallBlock.toolCall();
-        ProviderJsonHelper.parseStrictJsonObject(
-            call.argumentsJson(), "toolCall argumentsJson must be a JSON object");
-        ObjectNode callNode = encodeToolCall(call);
-        if (!mergeToolCallFields(callNode, nativeFields)) {
-          return null;
-        }
-        toolCalls.add(callNode);
-      } else if (block instanceof ProviderOpaqueBlock opaqueBlock
-          && "openai_chat_message".equals(opaqueBlock.blockType())) {
-        if (!mergeFields(result, nativeFields)) {
-          return null;
-        }
-      } else if (block instanceof ProviderRedactedThinkingBlock) {
-        return null;
-      } else {
-        return null;
+        return mergeFields(result, nativeFields);
       }
+      if (block instanceof ProviderToolCallBlock toolCallBlock) {
+        return appendToolCall(toolCallBlock, nativeFields);
+      }
+      if (block instanceof ProviderOpaqueBlock opaqueBlock
+          && "openai_chat_message".equals(opaqueBlock.blockType())) {
+        return mergeFields(result, nativeFields);
+      }
+      return false;
     }
-    if (hasTextBlock) {
-      result.put("content", content.toString());
+
+    private void appendText(ProviderTextBlock block, ProviderBlockData data) {
+      if (data.refusal()) {
+        refusal.append(block.text());
+        return;
+      }
+      hasTextBlock = true;
+      content.append(block.text());
     }
-    if (!refusal.isEmpty()) {
-      result.put("refusal", refusal.toString());
+
+    private boolean appendToolCall(ProviderToolCallBlock block, ObjectNode nativeFields) {
+      ProviderToolCall call = block.toolCall();
+      ProviderJsonHelper.parseStrictJsonObject(
+          call.argumentsJson(), "toolCall argumentsJson must be a JSON object");
+      ObjectNode callNode = encodeToolCall(call);
+      if (!mergeToolCallFields(callNode, nativeFields)) {
+        return false;
+      }
+      toolCalls.add(callNode);
+      return true;
     }
-    if (hasReasoningBlock) {
-      result.put("reasoning_content", reasoning.toString());
+
+    ObjectNode toWireMessage() {
+      if (hasTextBlock) {
+        result.put("content", content.toString());
+      }
+      if (!refusal.isEmpty()) {
+        result.put("refusal", refusal.toString());
+      }
+      if (hasReasoningBlock) {
+        result.put("reasoning_content", reasoning.toString());
+      }
+      if (!toolCalls.isEmpty()) {
+        result.set("tool_calls", toolCalls);
+      }
+      return result;
     }
-    if (!toolCalls.isEmpty()) {
-      result.set("tool_calls", toolCalls);
-    }
-    return result;
   }
 
   private static ObjectNode encodeToolCall(ProviderToolCall call) {
