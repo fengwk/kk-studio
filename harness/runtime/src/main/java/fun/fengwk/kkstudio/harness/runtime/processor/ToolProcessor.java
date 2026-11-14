@@ -3,11 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
@@ -24,12 +20,10 @@ import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorExceptions;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
@@ -74,6 +68,7 @@ public final class ToolProcessor implements AutoCloseable {
   private final ClaimedExecutionSupport<ToolExecution> executions;
   private final ThreadLocal<ProcessorDelaySnapshot> currentDelays = new ThreadLocal<>();
   private final ToolPrepare toolPrepare;
+  private final ToolWorkWrites workWrites;
 
   private record ProcessorDelaySnapshot(
       ProcessorLeaseConfig leaseConfig, Duration preflightFailure, Duration admitFailure) {}
@@ -102,6 +97,7 @@ public final class ToolProcessor implements AutoCloseable {
         Objects.requireNonNull(toolResultHistoryMaterializer, "toolResultHistoryMaterializer");
     this.executions = new ClaimedExecutionSupport<>(store, WorkTargetType.TOOL);
     this.toolPrepare = new ToolPrepare(store, executions);
+    this.workWrites = new ToolWorkWrites(store);
   }
 
   /**
@@ -220,6 +216,35 @@ public final class ToolProcessor implements AutoCloseable {
     return executions.hasActiveExecution();
   }
 
+  /**
+   * Allow（含 YOLO 直接 Allow）：把 READY / null approval 持久为 not-required approval（Thread version
+   * +1），然后进入 执行。意图提交失败（lost / 状态被并发改写）完整 no-op。
+   *
+   * <p>{@code execution} 为 null 表示 YOLO 直接 Allow 路径（未创建事务外 preflight execution）：执行段在 {@link
+   * #launch} 中新建。
+   */
+  private ProcessResult applyPreflightAllow(
+      ClaimedWork claim,
+      ExecutionScope scope,
+      int attempt,
+      ToolInvocationRequest request,
+      ToolExecution execution,
+      ClaimAdmissionGuard.Ticket<ToolExecution> ticket) {
+    if (!workWrites.allow(claim, scope.threadId(), attempt)) {
+      return ProcessResult.LOST_OWNERSHIP;
+    }
+    ToolPrepare.Step.Dispatched dispatched =
+        new ToolPrepare.Step.Dispatched(scope, attempt, request, ToolApproval.notRequired());
+    if (execution != null) {
+      if (executions.isClosed() || execution.abandoned() || ticket.isSuperseded()) {
+        // Allow 意图提交后 close / cancel 获胜：不 admit，保持 READY 并重排。
+        return rescheduleResult(claim, dispatched, admitFailureDelay());
+      }
+      return admitAndRun(claim, dispatched, execution, ticket);
+    }
+    return launch(claim, dispatched, ticket);
+  }
+
   /** 内部人工输入工具的冻结结果：READY -&gt; WAITING_INPUT，或契约破坏时确定性失败。 */
   private ProcessResult requestInput(ClaimedWork claim, UUID threadId) {
     return toolPrepare.freezeInput(claim, threadId)
@@ -286,8 +311,11 @@ public final class ToolProcessor implements AutoCloseable {
                 preflight.request(),
                 execution,
                 ticket);
-            case ToolGateway.Ask ask -> applyPreflightAsk(claim, preflight, ask);
-            case ToolGateway.Deny deny -> applyPreflightDeny(claim, preflight, deny.error());
+            case ToolGateway.Ask ask -> decision(
+                workWrites.ask(claim, preflight.scope().threadId(), preflight.attempt(), ask));
+            case ToolGateway.Deny deny -> decision(
+                workWrites.fail(
+                    claim, preflight.scope().threadId(), preflight.attempt(), deny.error()));
           };
       if (outcome == ProcessResult.STARTED) {
         started = true;
@@ -301,165 +329,18 @@ public final class ToolProcessor implements AutoCloseable {
   }
 
   private ProcessResult bouncePreflight(ClaimedWork claim, ToolPrepare.Step.Preflight preflight) {
-    return reschedule(
-            claim, preflight.scope().threadId(), preflight.attempt(), preflightFailureDelay())
-        ? ProcessResult.RESCHEDULED
-        : ProcessResult.LOST_OWNERSHIP;
+    return rescheduleResult(
+        workWrites.rescheduleReady(
+            claim, preflight.scope().threadId(), preflight.attempt(), preflightFailureDelay()));
   }
 
-  /**
-   * Allow（含 YOLO 直接 Allow）：在短事务内把 READY / null approval 持久为 not-required approval（Thread version
-   * +1）；然后进入 执行。二次校验失败（lost / 状态被并发改写）完整 no-op。
-   *
-   * <p>{@code execution} 为 null 表示 YOLO 直接 Allow 路径（未创建事务外 preflight execution）：执行段在 {@link
-   * #launch} 中新建。
-   */
-  private ProcessResult applyPreflightAllow(
-      ClaimedWork claim,
-      ExecutionScope scope,
-      int attempt,
-      ToolInvocationRequest request,
-      ToolExecution execution,
-      ClaimAdmissionGuard.Ticket<ToolExecution> ticket) {
-    boolean allowed =
-        Boolean.TRUE.equals(
-            store.transaction(tx -> allowIntent(tx, claim, scope.threadId(), attempt, tx.now())));
-    if (!allowed) {
-      return ProcessResult.LOST_OWNERSHIP;
-    }
-    ToolPrepare.Step.Dispatched dispatched =
-        new ToolPrepare.Step.Dispatched(scope, attempt, request, ToolApproval.notRequired());
-    if (execution != null) {
-      if (executions.isClosed() || execution.abandoned() || ticket.isSuperseded()) {
-        // Allow 意图提交后 close / cancel 获胜：不 admit，保持 READY 并重排。
-        return rescheduleResult(claim, dispatched, admitFailureDelay());
-      }
-      return admitAndRun(claim, dispatched, execution, ticket);
-    }
-    return launch(claim, dispatched, ticket);
-  }
-
-  /**
-   * Allow 的持久意图：按 own Thread -&gt; Tool 锁序锁定后二次校验 claim + READY + attempt + approval null，再
-   * markApprovalNotRequired。
-   */
-  private boolean allowIntent(
-      HarnessStore.Transaction tx, ClaimedWork claim, UUID threadId, int attempt, Instant now) {
-    ThreadState thread = tx.threads().lock(threadId).orElse(null);
-    if (thread == null) {
-      return false;
-    }
-    ToolInvocation tool = tx.tools().lock(claim.target().id()).orElse(null);
-    if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-      return false;
-    }
-    if (tool.status() != ToolInvocationStatus.READY
-        || tool.attempt() != attempt
-        || tool.approval() != null) {
-      return false;
-    }
-    tx.tools().update(List.of(tool.markApprovalNotRequired(now)));
-    tx.threads().update(thread.touchVersion(now));
-    return true;
-  }
-
-  /**
-   * Ask：READY -&gt; WAITING_APPROVAL(request reason)，version+1，complete TOOL Work；不 request THREAD。
-   */
-  private ProcessResult applyPreflightAsk(
-      ClaimedWork claim, ToolPrepare.Step.Preflight preflight, ToolGateway.Ask ask) {
-    boolean committed =
-        Boolean.TRUE.equals(
-            store.transaction(
-                tx -> {
-                  Instant now = tx.now();
-                  ThreadState thread = tx.threads().lock(preflight.scope().threadId()).orElse(null);
-                  if (thread == null) {
-                    return false;
-                  }
-                  ToolInvocation tool = tx.tools().lock(claim.target().id()).orElse(null);
-                  if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-                    return false;
-                  }
-                  if (tool.status() != ToolInvocationStatus.READY
-                      || tool.attempt() != preflight.attempt()
-                      || tool.approval() != null) {
-                    return false;
-                  }
-                  tx.tools()
-                      .update(List.of(tool.requestApproval(ask.reason(), ask.editReview(), now)));
-                  tx.threads().update(thread.touchVersion(now));
-                  tx.work().complete(claim);
-                  return true;
-                }));
+  /** 已提交的 durable 决策映射为处理器结果：写入成立即 TERMINATED，否则视为失权。 */
+  private static ProcessResult decision(boolean committed) {
     return committed ? ProcessResult.TERMINATED : ProcessResult.LOST_OWNERSHIP;
   }
 
-  /** Deny：READY -&gt; FAILED(error)，version+1，request THREAD Work，complete。 */
-  private ProcessResult applyPreflightDeny(
-      ClaimedWork claim, ToolPrepare.Step.Preflight preflight, ToolInvocationError error) {
-    boolean committed = failReady(claim, preflight.scope().threadId(), preflight.attempt(), error);
-    return committed ? ProcessResult.TERMINATED : ProcessResult.LOST_OWNERSHIP;
-  }
-
-  /**
-   * 肯定未执行的确定性失败（preflight Deny / admission Rejected）：二次校验 claim + READY + attempt 后 READY -&gt;
-   * FAILED + version+1 + 请求 THREAD Work + complete TOOL Work（attempt 不变）。
-   */
-  private boolean failReady(
-      ClaimedWork claim, UUID threadId, int attempt, ToolInvocationError error) {
-    try {
-      return Boolean.TRUE.equals(
-          store.transaction(
-              tx -> {
-                Instant now = tx.now();
-                ThreadState thread = tx.threads().lock(threadId).orElse(null);
-                if (thread == null) {
-                  return false;
-                }
-                ToolInvocation tool = tx.tools().lock(claim.target().id()).orElse(null);
-                if (tool == null) {
-                  return false;
-                }
-                if (tool.status() != ToolInvocationStatus.READY || tool.attempt() != attempt) {
-                  return false;
-                }
-                tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
-                if (tx.work().lockClaimed(claim).isEmpty()) {
-                  throw new ClaimLostSignal();
-                }
-                tx.tools().update(List.of(tool.fail(error, now)));
-                tx.threads().update(thread.touchVersion(now));
-                tx.work().complete(claim);
-                return true;
-              }));
-    } catch (ClaimLostSignal ignored) {
-      return false;
-    }
-  }
-
-  /**
-   * 肯定未执行且无需改状态（preflight 失败 / admission Busy 或失败 / close）：二次校验 claim + READY + attempt 后仅按延迟
-   * reschedule TOOL Work，无 version。
-   */
-  private boolean reschedule(ClaimedWork claim, UUID threadId, int attempt, Duration delay) {
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ThreadState thread = tx.threads().lock(threadId).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ToolInvocation tool = tx.tools().lock(claim.target().id()).orElse(null);
-              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-                return false;
-              }
-              if (tool.status() != ToolInvocationStatus.READY || tool.attempt() != attempt) {
-                return false;
-              }
-              tx.work().reschedule(claim, delay);
-              return true;
-            }));
+  private static ProcessResult rescheduleResult(boolean committed) {
+    return committed ? ProcessResult.RESCHEDULED : ProcessResult.LOST_OWNERSHIP;
   }
 
   /**
@@ -475,9 +356,9 @@ public final class ToolProcessor implements AutoCloseable {
         "tool execution scope read failed for invocation {}: {}",
         claim.target().id(),
         ProcessorExceptions.describe(failure.getCause()));
-    return reschedule(claim, failure.threadId(), failure.attempt(), admitFailureDelay())
-        ? ProcessResult.RESCHEDULED
-        : ProcessResult.LOST_OWNERSHIP;
+    return rescheduleResult(
+        workWrites.rescheduleReady(
+            claim, failure.threadId(), failure.attempt(), admitFailureDelay()));
   }
 
   /**
@@ -564,18 +445,17 @@ public final class ToolProcessor implements AutoCloseable {
         yield execution.start(admitted.run());
       }
       case ToolGateway.Busy busy -> rescheduleResult(claim, dispatched, busy.retryAfter());
-      case ToolGateway.Rejected rejected -> failReady(
-              claim, dispatched.scope().threadId(), dispatched.attempt(), rejected.error())
-          ? ProcessResult.TERMINATED
-          : ProcessResult.LOST_OWNERSHIP;
+      case ToolGateway.Rejected rejected -> decision(
+          workWrites.fail(
+              claim, dispatched.scope().threadId(), dispatched.attempt(), rejected.error()));
     };
   }
 
   private ProcessResult rescheduleResult(
       ClaimedWork claim, ToolPrepare.Step.Dispatched dispatched, Duration delay) {
-    return reschedule(claim, dispatched.scope().threadId(), dispatched.attempt(), delay)
-        ? ProcessResult.RESCHEDULED
-        : ProcessResult.LOST_OWNERSHIP;
+    return rescheduleResult(
+        workWrites.rescheduleReady(
+            claim, dispatched.scope().threadId(), dispatched.attempt(), delay));
   }
 
   private ProcessResult launchReattach(
@@ -652,30 +532,9 @@ public final class ToolProcessor implements AutoCloseable {
     return execution.startReattach(run, reattach.remoteFact());
   }
 
-  private boolean rescheduleReattach(
-      ClaimedWork claim, UUID threadId, int attempt, Duration delay) {
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              ThreadState thread = tx.threads().lock(threadId).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ToolInvocation tool = tx.tools().lock(claim.target().id()).orElse(null);
-              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-                return false;
-              }
-              if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-                return false;
-              }
-              tx.work().reschedule(claim, delay);
-              return true;
-            }));
-  }
-
   private ProcessResult rescheduleReattachResult(
       ClaimedWork claim, ToolPrepare.Step.Reattach reattach, Duration delay) {
-    return rescheduleReattach(claim, reattach.threadId(), reattach.attempt(), delay)
+    return workWrites.rescheduleRunning(claim, reattach.threadId(), reattach.attempt(), delay)
         ? ProcessResult.RESCHEDULED
         : ProcessResult.LOST_OWNERSHIP;
   }
