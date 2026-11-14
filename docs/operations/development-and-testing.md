@@ -339,7 +339,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 命中时只输出规则与 `path:line`，不要回显完整敏感值。该入口不扫描 Git 历史；历史由 Daemon Release 的
 [check-sensitive-history.mjs](../../scripts/dev/verify/repository/check-sensitive-history.mjs) 审计，覆盖全部 refs
 与公开 PR refs。上一个发布 tag 可达的历史已随该次发布通过门禁或人工复核，因此只有之后新出现的高置信度
-命中或扫描不完整才阻止发布；脱敏报告仍列出全部历史命中。
+命中或扫描不完整才阻止发布；没有更早的发布 tag 时，基线是 workflow 中 `REVIEWED_HISTORY_BASELINE`
+指定的已复核历史末端提交。脱敏报告仍列出全部历史命中。
 
 ## E2E
 

@@ -117,12 +117,15 @@ jobs:
       # tag 事件中 actions/checkout 会把发布 tag 改写成指向提交的轻量 tag；先从 origin 恢复全部
       # 原始 tag，远端 ref 核对才一致，附注 tag 的消息也在扫描范围内。上一个发布 tag 作为基线：
       # 它可达的历史已随该次发布通过门禁或人工复核，本次只对之后新出现的高置信度命中失败。
+      # 没有更早的发布 tag 时，以 REVIEWED_HISTORY_BASELINE 为基线：它是已经复核过的历史的末端提交。
       - name: Scan full Git history for sensitive data
+        env:
+          REVIEWED_HISTORY_BASELINE: 9919683fc13fafb7973d6add9c95b9d936999957
         run: |
           set -euo pipefail
           test "$(git rev-parse --is-shallow-repository)" = false
           git fetch --quiet origin '+refs/tags/*:refs/tags/*'
-          previous=$(git describe --tags --abbrev=0 --match 'v*' 'HEAD^')
+          previous=$(git describe --tags --abbrev=0 --match 'v*' 'HEAD^' 2>/dev/null || echo "${REVIEWED_HISTORY_BASELINE}")
           node scripts/dev/verify/repository/check-sensitive-history.mjs \
             --remote-pr --fail-on-high --baseline "${previous}" --json "${RUNNER_TEMP}/sensitive-history.json"
       - name: Check documentation layout
