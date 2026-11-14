@@ -1,7 +1,7 @@
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { isRecord } from '@/shared/lib/value'
 
-export interface TaskToolArguments {
+interface TaskToolArguments {
   subagentType: string | null
   prompt: string | null
   threadId: string | null

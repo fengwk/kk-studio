@@ -98,7 +98,7 @@ export function mergeThreadSnapshotCache(
   }
 }
 
-export interface FetchThreadSnapshotOptions {
+interface FetchThreadSnapshotOptions {
   signal?: AbortSignal
 }
 

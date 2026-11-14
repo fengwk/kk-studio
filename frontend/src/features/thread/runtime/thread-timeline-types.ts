@@ -211,7 +211,7 @@ export interface EntryNotification {
  * FORK Entry 的来源事实：mode 为 BRANCH 或 SESSION，sourceEntryId 为切点 Entry，
  * sourceThreadId 仅在 SESSION fork 时非 null。
  */
-export interface EntryFork {
+interface EntryFork {
   mode: string
   sourceEntryId: string | null
   sourceThreadId: string | null
@@ -341,12 +341,12 @@ export interface ThreadModelRequestDebugSubagent {
   configuration: unknown
 }
 
-export interface ThreadModelRequestDebugCacheControl {
+interface ThreadModelRequestDebugCacheControl {
   retention: string
   key: string | null
 }
 
-export interface ThreadModelRequestDebugFrozenInvocation {
+interface ThreadModelRequestDebugFrozenInvocation {
   kind: string
   /** Builtin generation 的稳定身份（canonical UUID string）。 */
   generationId: string

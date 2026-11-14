@@ -26,7 +26,7 @@ export type BoundThreadPanelController = Pick<
 >
 
 /** Bound Thread 共用的 Conversation/Debug 视图和 Footer 投影（只读视图状态）。 */
-export interface BoundThreadPreviewOptions {
+interface BoundThreadPreviewOptions {
   /**
    * 本地视图身份：本地分支/新建草稿没有 API threadId（都传 ""），Debug 模式、滚动位置
    * 与检查器选中必须按目标稳定字段区分，否则换绑到另一份草稿会复用上一份的 Debug 视图

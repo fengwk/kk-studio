@@ -34,9 +34,9 @@ import type {
  * TURN_END / COMPACTION）；活跃 model/tool invocation 是单条 synthetic 记录
  * （Provider delta token 绝不逐条成行），并锚定在所属 durable Entry 之后。
  */
-export type ThreadEventSource = 'entry' | 'active-model' | 'active-tool' | 'attempt-failure'
+type ThreadEventSource = 'entry' | 'active-model' | 'active-tool' | 'attempt-failure'
 
-export type ThreadEventKind =
+type ThreadEventKind =
   | 'ROOT'
   | 'TURN_START'
   | 'SETTINGS'
@@ -56,9 +56,9 @@ export type ThreadEventKind =
   | 'ACTIVE_MODEL_INVOCATION'
   | 'ACTIVE_TOOL_INVOCATION'
 
-export type ThreadEventStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
+type ThreadEventStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stopped'
 
-export interface ThreadEventDetailRow {
+interface ThreadEventDetailRow {
   label: string
   value: string
 }
@@ -91,7 +91,7 @@ export interface ThreadEventRecord {
   historicalPreviewEligible?: boolean
 }
 
-export interface ThreadEventTimelineInput {
+interface ThreadEventTimelineInput {
   entries: HarnessSessionEntryDTO[]
   activeAssistantOutput: HarnessActiveAssistantOutputDTO | null
   toolInvocations: ToolInvocationDTO[]

@@ -9,7 +9,7 @@ const COMPLETION_AFTER_REJECTION_SUPPRESSION_MS = 5_000
 
 export type BrowserNotificationPermission = NotificationPermission | 'unsupported'
 
-export interface PendingPermission {
+interface PendingPermission {
   key: string
   toolName: string
   reason: string | null

@@ -54,7 +54,7 @@ export function prependCancelledMessages(
   return mergeTextParts([...prefix, ...currentDraft])
 }
 
-export function payloadMessageToParts(message: unknown): ComposerPart[] {
+function payloadMessageToParts(message: unknown): ComposerPart[] {
   if (message == null) {
     return []
   }

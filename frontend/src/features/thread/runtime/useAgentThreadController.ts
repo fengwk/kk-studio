@@ -49,15 +49,6 @@ function errorMessage(error: unknown): string {
 }
 
 /**
- * 一次失败发送的回放身份：精确的 command batch（保持相同的 ID/负载/顺序
- * 以及原始 expected cursor），加上恢复后的 ordered composer parts。
- */
-export interface CommandBatchReplay {
-  plan: CommandBatchPlan
-  parts: ComposerPart[]
-}
-
-/**
  * 由 stopThread（在每次复用前同步执行）与被动清理 effect 共享的 basis 栅栏：
  * 当且仅当权威 snapshot 证明 pending 操作的 basis 已变化（head 或 version 已
  * 前进 => 旧 Turn 已结束或 Thread 已前进）时，该操作会被失效。stopThread

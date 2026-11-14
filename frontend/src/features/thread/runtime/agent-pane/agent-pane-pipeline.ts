@@ -28,7 +28,7 @@ import type { HarnessBranchSettingsDTO, HarnessThreadDTO } from '@/shared/api/ge
  * 只有容器创建（NEW_SESSION / NEW_THREAD）需要产品 owner；既有 Thread 的发送、
  * 设置、预览一律走 {@link buildThreadCommandBatchRequest} 的无 owner 契约。
  */
-export interface AcceptanceBuildInput {
+interface AcceptanceBuildInput {
   owner: AgentRuntimeOwnerDTO
   target: PaneTarget
   draft: BranchDraft
@@ -49,15 +49,15 @@ export interface FrozenCommandBatchRequest {
   identity: string
 }
 
-export function createIdempotencyKey(): string {
+function createIdempotencyKey(): string {
   return createUuid()
 }
 
-export function createSessionId(): string {
+function createSessionId(): string {
   return createUuid()
 }
 
-export function createThreadId(): string {
+function createThreadId(): string {
   return createUuid()
 }
 

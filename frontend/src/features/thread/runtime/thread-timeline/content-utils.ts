@@ -27,7 +27,7 @@ export function contentText(content: Record<string, unknown>): string {
  * 只有非空 text、显式 json 字段与合法 resource 会保留；思考等其它类型不进入工具展示。
  * resource 的 URI/名称/媒体类型原样保留，媒体 URL 只在渲染时解析或直接使用 data:。
  */
-export function toToolContent(content: Record<string, unknown>): ToolContent | null {
+function toToolContent(content: Record<string, unknown>): ToolContent | null {
   const type = getString(content.type)
   if (type === 'text') {
     const text = getString(content.text)
@@ -218,7 +218,7 @@ export function addDecimalStrings(left: string, right: string): string | null {
 }
 
 /** 费用展示阈值（1e-6）：精确金额落在 (0, 1e-6) 时展示为该下界，而不是伪造成 0 或夸大成 0.000001。 */
-export const COST_DISPLAY_THRESHOLD = '0.000001'
+const COST_DISPLAY_THRESHOLD = '0.000001'
 
 /**
  * 精确十进制金额与阈值 1e-6 的比较：>0 大于、0 相等（含精确 0）、<0 小于、null 非法。
@@ -241,7 +241,7 @@ function compareDecimalToThreshold(amount: string): number | null {
  * 十进制金额的数值展示文本：统一四舍五入到最多 6 位小数并去掉尾随 0。
  * 只负责数值部分（不含货币与阈值下界）；非法输入返回 null。
  */
-export function formatDecimalAmount(amount: string): string | null {
+function formatDecimalAmount(amount: string): string | null {
   const parts = parseDecimal(amount)
   if (parts == null) {
     return null
@@ -306,7 +306,7 @@ export function normalizeUsageCost(value: unknown): UsageCost | null {
  * 合并两次调用的读取投影费用。
  * 缺失（未定价）或跨币种时返回 null：绝不给出误导性的完整总额，也绝不伪造成 $0。
  */
-export function mergeUsageCost(left: UsageCost | null, right: UsageCost | null): UsageCost | null {
+function mergeUsageCost(left: UsageCost | null, right: UsageCost | null): UsageCost | null {
   if (left == null || right == null || left.currency !== right.currency) {
     return null
   }
@@ -336,7 +336,7 @@ export function addNullableSafeInteger(
 /**
  * 构造一个字段全部为 unknown (null) 的 TurnUsage 对象。
  */
-export function createUnknownTurnUsage(): TurnUsage {
+function createUnknownTurnUsage(): TurnUsage {
   return {
     input: null,
     output: null,
@@ -465,7 +465,7 @@ export function calculateCacheHitRate(usage: {
  * 有效测速样本：decodeTokens 为有限非负 token、decodeDurationMillis 为有限正 duration。
  * 缺失、负数、NaN/Infinity 或 0 样本一律视为无效，绝不进入速率分子与分母。
  */
-export function isValidDecodeSample(sample: {
+function isValidDecodeSample(sample: {
   decodeTokens?: number | null
   decodeDurationMillis?: number | null
 }): sample is { decodeTokens: number; decodeDurationMillis: number } {

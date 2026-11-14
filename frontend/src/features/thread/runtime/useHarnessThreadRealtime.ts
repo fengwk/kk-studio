@@ -26,7 +26,7 @@ import type {
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
-export interface HarnessThreadRealtimeState {
+interface HarnessThreadRealtimeState {
   /** 当前 generation 的瞬态 model overlay（无则 null）。 */
   modelStream: RealtimeModelStream | null
   /** 按 ToolInvocation id 索引的瞬态 tool 结果 overlay。 */

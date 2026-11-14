@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { ThreadNavigationOptions } from '@/features/thread/runtime/thread-navigation-context'
 
 /** 一层查看路径：Thread ID、进入前持焦的触发元素与压缩执行游标（必要视图状态）。 */
-export interface ThreadViewLayer {
+interface ThreadViewLayer {
   threadId: string
   returnFocus: HTMLElement | null
   /** 压缩执行视图从该 Entry 之后读取；普通子代理层为 null。 */

@@ -12,7 +12,7 @@ import type { HarnessThreadDTO } from '@/shared/api/generated/contracts'
 
 const RUNNING_POLL_MILLIS = 2000
 
-export interface CompactionBranchState {
+interface CompactionBranchState {
   thread: HarnessThreadDTO | null
   branch: CompactionBranchProjection | null
   isLoading: boolean
