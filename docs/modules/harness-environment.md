@@ -52,15 +52,7 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 
 ## 执行与传输契约
 
-[`EnvironmentCapability`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapability.java) 是 Daemon 侧的异步执行 SPI：
-
-```java
-EnvironmentCapabilityDescriptor descriptor();
-EnvironmentCapabilityExecutionHandle execute(
-    EnvironmentCapabilityExecutionRequest request,
-    EnvironmentCapabilityExecutionListener listener);
-```
-
+[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 是原子能力描述符与输入 schema 的唯一事实源，[`daemon-go/internal/capability/schemas`](../../daemon-go/internal/capability/schemas) 是同一批 schema 的生成副本。能力在 Daemon 本机执行（[`daemon-go/internal/coding`](../../daemon-go/internal/coding/) 与 [`daemon-go/internal/lsp`](../../daemon-go/internal/lsp/)），Java 侧只保留调用方契约：
 [`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 组合 descriptor、call（标识与 arguments）、timeout 与可选 `ExpectedFile`（仅 `fs.edit`，携带路径与原始字节 SHA-256），构造时按 descriptor schema 归一化并严格校验。`workdir` 只属于具体工具的 arguments（仅 `process.exec`）；timeout 是上游解析后的有效值，执行层原样采用，0 表示无限 execution deadline。
 
 [`EnvironmentCapabilityTransport`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java) 是调用方的传输窄端口：
@@ -98,7 +90,7 @@ Duration terminalDeliveryGrace();
 
 `cancel()` 请求取消，`isCancelled()` 表示已收到停止请求，不证明远端执行已经结束。
 `request.timeout` 是 capability 的远端执行预算，`0` 显式表示无界；
-`terminalDeliveryGrace` 是终态传输恢复窗，不控制 TypeScript Daemon 的执行计时器。
+`terminalDeliveryGrace` 是终态传输恢复窗，不控制 Daemon 的执行计时器。
 生产远端句柄在 invoke 时冻结当前 `heartbeatTimeout` 为该窗口，因此它只覆盖终态回传与重连恢复，
 不是额外执行时间，也不会重置执行预算。Platform Tool Gateway 从发送前起只合成一次等待上界
 `request.timeout + terminalDeliveryGrace`；partial 和重连不延长它，`timeout` 为 `0` 时保持无界，
@@ -122,6 +114,7 @@ SETTINGS / ENVIRONMENT_CONFIG / READY / HEARTBEAT / RUNTIME_STATUS / TEMPORARY_R
 INVOKE / STARTED / PROGRESS / COMPLETED / FAILED
 CANCEL / RECOVER / RECOVER_NOT_FOUND / CANCELLED / EXECUTION_EXITED / ERROR
 RESOURCE_UPLOAD_REQUEST / RESOURCE_UPLOAD_TICKET / RESOURCE_UPLOAD_COMMIT
+RESOURCE_DOWNLOAD_REQUEST / RESOURCE_DOWNLOAD_TICKET
 UPDATE / UPDATE_RESULT
 IDE_COMMAND / IDE_RESULT
 IDE_LEASE
@@ -133,7 +126,7 @@ Protobuf `Envelope` 的固定字段为：
 message_type / environment_id / invocation_id? / payload (oneof body)
 ```
 
-`environment_id` 是规范小写 UUID 字符串作用域。调用与资源上传消息通过非空 `invocation_id`（UUID 字符串）关联具体执行；IDE 命令与回执同样携带请求 UUID；而 `SETTINGS`、`READY`、`HEARTBEAT`、`RUNTIME_STATUS`、`TEMPORARY_RESOURCE_POLICY` 与 `IDE_LEASE` 作用于整个连接作用域，不携带 `invocation_id`。
+`environment_id` 是规范小写 UUID 字符串作用域。调用、资源上传与资源下载消息通过非空 `invocation_id`（UUID 字符串）关联具体执行；IDE 命令与回执同样携带请求 UUID；而 `SETTINGS`、`READY`、`HEARTBEAT`、`RUNTIME_STATUS`、`TEMPORARY_RESOURCE_POLICY` 与 `IDE_LEASE` 作用于整个连接作用域，不携带 `invocation_id`。
 
 重连恢复按 `invocationId` 以不终止执行的 `RECOVER` 取回在途调用（Daemon 回放 STARTED，或重放冻结的终态与退出确认），只有调用方已表达取消意图的调用才重放 `CANCEL`；各调用沿自己的 STARTED/PROGRESS/终态推进。
 
@@ -170,7 +163,7 @@ Daemon -> IDE_RESULT
 Studio -> IDE_LEASE(round, bindings)
 ```
 
-`SETTINGS` 只通告临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`），不携带代理或显示名。每个 `INVOKE` 携带 `max_output_bytes` 与必填 `image_input_tier`：输出上限按发送时的当前系统工具输出设置（MiB）换算为字节，图片档位读取当前系统图片档位，值只能是 `P720`、`P1080` 或 `ORIGINAL`。Daemon 使用该次调用携带的值；TypeScript Daemon 校验图片档位，但不消费它。平台在每个 `RESOURCE_UPLOAD_REQUEST` 到达时按当前设置复核上传声明大小；超限会返回该调用的 `FAILED` 上传票据与统一工具输出超限错误，不会断开连接。
+`SETTINGS` 只通告临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`），不携带代理或显示名。每个 `INVOKE` 携带 `max_output_bytes` 与必填 `image_input_tier`：输出上限按发送时的当前系统工具输出设置（MiB）换算为字节，图片档位读取当前系统图片档位，值只能是 `P720`、`P1080` 或 `ORIGINAL`。Daemon 使用该次调用携带的值：`fs.read` 读图片时按该档位缩放，非图片输出不受影响。平台在每个 `RESOURCE_UPLOAD_REQUEST` 到达时按当前设置复核上传声明大小；超限会返回该调用的 `FAILED` 上传票据与统一工具输出超限错误，不会断开连接。
 同一连接上随后下发 `ENVIRONMENT_CONFIG` 完整卡片配置快照（`version` + `studio_url`、
 `bash_executable`、LSP servers、`proxy_url`）；Daemon 应用成功后才回执 `READY`。后续配置变更仍使用
 `ENVIRONMENT_CONFIG` 下发完整快照，不重复发送 READY；配置校验失败时已有可用快照继续运行并上报
@@ -213,7 +206,7 @@ runtimeStatus: {
 
 `configuration.appliedVersion` 缺失表示当前进程尚无可用配置；存在时 `proxyUrl` 缺失表示该版本明确直连。`error` 只携带最近一次应用失败的稳定规则与字段，不回显命令参数、token 或原始输入。版本更新状态与配置应用状态在增量变化时通过 `RUNTIME_STATUS` 或心跳载荷同步；无更新时 `update` 为 null。Server 仅在接受更高 revision 后替换缓存；同 revision 内容不同是协议错误，更低 revision 视为迟到快照忽略。
 
-`IDE_COMMAND` 与 `IDE_RESULT` 是连接上的 IDE 控制通道；`IDE_LEASE` 承载 IDE 租约批量证明下发。资源上传控制消息（`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）通过 `invocationId` 与 `transferId` 精确关联单次上传。二进制字节不进入控制通道，实际 PUT 上传由 Daemon 直连对象存储。
+`IDE_COMMAND` 与 `IDE_RESULT` 是连接上的 IDE 控制通道；`IDE_LEASE` 承载 IDE 租约批量证明下发。资源上传控制消息（`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）与资源下载控制消息（`RESOURCE_DOWNLOAD_REQUEST`、`RESOURCE_DOWNLOAD_TICKET`）通过 `invocationId` 与 `transferId` 精确关联单次传输。二进制字节不进入控制通道，实际 PUT 上传与 GET 下载由 Daemon 直连对象存储。
 
 ### 数据面环境隧道与多节点路由
 
