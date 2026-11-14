@@ -14,19 +14,18 @@ frontend/coverage/
 
 # Daemon release and staging outputs (rebuilt from source)
 daemon-go/release/
+daemon-go/kk-studio-daemon
+daemon-go/kk-studio-daemon.exe
 daemon-go/.kk-studio-daemon-stage.*/
 
 # Local reports and artifacts (never required for build)
 reports/
-extracted/
 **/test-results/
 **/playwright-report/
 
 # Local runtime state: PID files, logs, generated classpaths, agent metadata
 runtime/
 logs/
-pids/
-.kkstudio/
 
 # IDE / editor
 .idea/
@@ -53,8 +52,6 @@ Desktop.ini
 .env.*
 **/.env
 **/.env.*
-!.env.example
-!**/.env.example
 *.pem
 *.key
 *.p12

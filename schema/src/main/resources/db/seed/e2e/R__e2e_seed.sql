@@ -152,9 +152,7 @@ on conflict (id) do update set
     daemon_config = excluded.daemon_config,
     updated_at = current_timestamp;
 
--- Harness runtime policy rows are gone: retry and realtime stream policy are
--- no longer database tables. The runtime owns execution state with
--- application-generated UUID ids, so the business sequence needs no seed alignment.
+-- Harness execution state uses application-generated UUIDs and needs no sequence alignment.
 
 -- -----------------------------------------------------------------------------
 -- E2E Tool 权限语义：只在 e2e 数据库生效的 system_setting 覆盖。

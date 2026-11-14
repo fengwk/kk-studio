@@ -1059,8 +1059,7 @@ select pg_temp.assert_true('execution exit invocation and attempt index exists',
         and strpos(indexdef, '(invocation_id, attempt)') > 0));
 
 -- ---------------------------------------------------------------------------
--- Storage/Skills/Environment-update baseline changes: removed persisted upload
--- expiry, the current-version skill package model, and managed update admission.
+-- Storage cleanup, current-version skill packages, and managed update admission.
 -- ---------------------------------------------------------------------------
 select pg_temp.assert_true('default HTTP retry list matches the runtime policy',
     (select config->'aiRuntime'->'modelHttpRetryStatusCodes' = '[408,429,500,502,503,504]'::jsonb

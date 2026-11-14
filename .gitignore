@@ -6,6 +6,11 @@
 hs_err_pid*
 target/
 
+# Go daemon build and release outputs
+/daemon-go/kk-studio-daemon
+/daemon-go/kk-studio-daemon.exe
+/daemon-go/release/
+
 # Frontend
 node_modules/
 dist/
@@ -15,9 +20,7 @@ test-results/
 # Local runtime, reports, and workspaces
 /runtime/
 reports/
-/extracted/
 .workspace/
-/.kkstudio/
 
 # IDE
 .idea/
@@ -42,14 +45,12 @@ $RECYCLE.BIN/
 # Logs and process files
 logs/
 *.log
-pids/
 *.pid
 *.pid.lock
 
 # Local secrets and credentials
 .env
 .env.*
-!.env.example
 *.pem
 *.key
 *.p12
