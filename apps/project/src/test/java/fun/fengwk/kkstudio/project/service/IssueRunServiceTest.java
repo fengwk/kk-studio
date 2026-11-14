@@ -94,19 +94,23 @@ class IssueRunServiceTest {
   @SuppressWarnings("unchecked")
   private final ObjectProvider<IssueThreadExecution> executions = mock(ObjectProvider.class);
 
+  private final IssueRunAdmission admission =
+      new IssueRunAdmission(issueRunRepository, stageBudgetRepository, workflowCodec);
+
+  private final IssueRunHarness harness =
+      new IssueRunHarness(issueAgentThreadRepository, agentBranchSettings, executions);
+
   private final IssueRunService service =
       new IssueRunService(
           projectRepository,
           issueRepository,
           issueRunRepository,
-          stageBudgetRepository,
-          issueAgentThreadRepository,
           issueActivityRepository,
           issueWorkQueue,
           workflowCodec,
-          agentBranchSettings,
-          executions,
-          JsonMapper.builder().build());
+          JsonMapper.builder().build(),
+          admission,
+          harness);
 
   /**
    * 新 Agent 接受 Run：四条命令按 SET_AGENT→SET_EXECUTION→SET_ENVIRONMENT→CUSTOM_MESSAGE 提交，任务消息是唯一业务上下文。

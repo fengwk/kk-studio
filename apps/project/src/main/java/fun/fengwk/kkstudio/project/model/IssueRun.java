@@ -44,8 +44,4 @@ public class IssueRun {
   public boolean isActive() {
     return status != null && status.isActive();
   }
-
-  public boolean isTerminal() {
-    return status != null && status.isTerminal();
-  }
 }

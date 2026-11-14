@@ -54,11 +54,6 @@ public final class IdeViewSnapshotStore {
         throw new IllegalArgumentException("state must be OPEN or CLOSING");
       }
     }
-
-    public boolean matchesBinding(UUID expectedBrowserSessionId, long expectedBindingEpoch) {
-      return browserSessionId.equals(expectedBrowserSessionId)
-          && bindingEpoch == expectedBindingEpoch;
-    }
   }
 
   /** 一个 Daemon 进程在某个 revision 的不可变完整快照。 */

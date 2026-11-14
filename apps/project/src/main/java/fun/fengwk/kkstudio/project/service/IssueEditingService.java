@@ -60,13 +60,12 @@ public class IssueEditingService {
       throw DomainException.validation("project", "Cannot create an issue in an archived project");
     }
     String validTitle =
-        ProjectValidationUtils.requireDisplayName(
-            title, "title", ProjectValidationUtils.MAX_TITLE_LENGTH);
+        InputValidation.requireDisplayName(title, "title", InputValidation.MAX_TITLE_LENGTH);
     String validDescription =
-        ProjectValidationUtils.optionalUtf8Text(
+        InputValidation.optionalUtf8Text(
             description == null ? "" : description,
             "description",
-            ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+            InputValidation.MAX_LARGE_TEXT_BYTES);
     long number = projectRepository.allocateNextIssueNumber(projectId);
     Issue issue =
         Issue.builder()
@@ -102,15 +101,14 @@ public class IssueEditingService {
     locked
         .issue()
         .setTitle(
-            ProjectValidationUtils.requireDisplayName(
-                title, "title", ProjectValidationUtils.MAX_TITLE_LENGTH));
+            InputValidation.requireDisplayName(title, "title", InputValidation.MAX_TITLE_LENGTH));
     locked
         .issue()
         .setDescription(
-            ProjectValidationUtils.optionalUtf8Text(
+            InputValidation.optionalUtf8Text(
                 description == null ? "" : description,
                 "description",
-                ProjectValidationUtils.MAX_LARGE_TEXT_BYTES));
+                InputValidation.MAX_LARGE_TEXT_BYTES));
     return mutationSupport.persist(locked, expectedVersion);
   }
 
@@ -132,10 +130,9 @@ public class IssueEditingService {
       String requestKey,
       String body) {
     Objects.requireNonNull(issueId, "issueId");
-    String validRequestKey = ProjectValidationUtils.requireRequestKey(requestKey);
+    String validRequestKey = InputValidation.requireRequestKey(requestKey);
     String validBody =
-        ProjectValidationUtils.requireUtf8Text(
-            body, "body", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+        InputValidation.requireUtf8Text(body, "body", InputValidation.MAX_LARGE_TEXT_BYTES);
     if (kind == IssueActivityKind.INSTRUCTION) {
       return appendInstructionActivity(issueId, expectedVersion, validRequestKey, validBody);
     } else if (kind == null || kind == IssueActivityKind.COMMENT) {

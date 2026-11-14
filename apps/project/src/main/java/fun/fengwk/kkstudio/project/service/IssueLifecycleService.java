@@ -66,10 +66,9 @@ public class IssueLifecycleService {
   @Transactional
   public Issue blockIssue(UUID issueId, long expectedVersion, String requestKey, String reason) {
     Objects.requireNonNull(issueId, "issueId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    String key = InputValidation.requireRequestKey(requestKey);
     String validReason =
-        ProjectValidationUtils.requireUtf8Text(
-            reason, "reason", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+        InputValidation.requireUtf8Text(reason, "reason", InputValidation.MAX_LARGE_TEXT_BYTES);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "BLOCK", key, validReason);
     ReceiptLock<IssueMutationSupport.Locked> receipt =
@@ -100,7 +99,7 @@ public class IssueLifecycleService {
   @Transactional
   public Issue recoverIssue(UUID issueId, long expectedVersion, String requestKey) {
     Objects.requireNonNull(issueId, "issueId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    String key = InputValidation.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RECOVER", key);
     ReceiptLock<IssueMutationSupport.Locked> receipt =
@@ -139,7 +138,7 @@ public class IssueLifecycleService {
   @Transactional
   public Issue resumeIssue(UUID issueId, long expectedVersion, String requestKey) {
     Objects.requireNonNull(issueId, "issueId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    String key = InputValidation.requireRequestKey(requestKey);
     Identity identity = IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "RESUME", key);
     ReceiptLock<IssueMutationSupport.Locked> receipt =
         mutationSupport.lockUnlessReplayed(issueId, identity);
@@ -174,12 +173,12 @@ public class IssueLifecycleService {
   @Transactional
   public Issue stopIssue(UUID issueId, long expectedVersion, String requestKey, String detail) {
     Objects.requireNonNull(issueId, "issueId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    String key = InputValidation.requireRequestKey(requestKey);
     String validDetail =
         detail == null || detail.isBlank()
             ? "Stopped by user"
-            : ProjectValidationUtils.requireUtf8Text(
-                detail, "detail", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+            : InputValidation.requireUtf8Text(
+                detail, "detail", InputValidation.MAX_LARGE_TEXT_BYTES);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.CONTROL, "STOP", key, validDetail);
     ReceiptLock<IssueMutationSupport.Locked> receipt =
@@ -285,8 +284,8 @@ public class IssueLifecycleService {
   @Transactional
   public Issue transition(UUID issueId, long expectedVersion, String requestKey, String toState) {
     Objects.requireNonNull(issueId, "issueId");
-    ProjectStateCode to = ProjectValidationUtils.requireStateCode(toState, "toState");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    ProjectStateCode to = InputValidation.requireStateCode(toState, "toState");
+    String key = InputValidation.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(
             IssueActivityKind.STATE_CHANGE, "TRANSITION", key, to.value());
@@ -324,7 +323,7 @@ public class IssueLifecycleService {
   @Transactional
   public Issue reopen(UUID issueId, long expectedVersion, String requestKey) {
     Objects.requireNonNull(issueId, "issueId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    String key = InputValidation.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.STATE_CHANGE, "REOPEN", key);
     ReceiptLock<IssueMutationSupport.Locked> receipt =

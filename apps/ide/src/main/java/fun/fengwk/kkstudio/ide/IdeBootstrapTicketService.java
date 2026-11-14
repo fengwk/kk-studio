@@ -44,7 +44,7 @@ public class IdeBootstrapTicketService {
                 && ticket.bindingEpoch() == bindingEpoch);
   }
 
-  /** 只单向撤销同 view 严格早于 {@code currentBindingEpoch} 的遗留票据；当前与更新 epoch 永不受影响。 */
+  /** 只撤销同 view 严格早于 {@code currentBindingEpoch} 的票据；当前与更新 epoch 永不受影响。 */
   public void revokeOlderThan(
       DaemonConnectionIdentity identity, String viewId, long currentBindingEpoch) {
     Objects.requireNonNull(identity, "identity");

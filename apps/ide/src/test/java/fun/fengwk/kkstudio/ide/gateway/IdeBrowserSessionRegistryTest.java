@@ -75,7 +75,7 @@ class IdeBrowserSessionRegistryTest {
     assertNotNull(token);
     Optional<IdeBrowserSessionRegistry.Session> session = registry.lookup(token, ENV, viewId);
     assertTrue(session.isPresent());
-    assertEquals(ENV, session.get().environmentId());
+    assertEquals(ENV, session.get().identity().environmentId());
     assertEquals("/workspace", session.get().workspacePath());
 
     now.set(now.get().plus(Duration.ofHours(2)));

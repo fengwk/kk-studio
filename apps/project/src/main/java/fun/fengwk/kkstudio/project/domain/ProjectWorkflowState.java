@@ -28,10 +28,10 @@ public record ProjectWorkflowState(
 
   public ProjectWorkflowState {
     Objects.requireNonNull(state, "state");
-    name = ProjectValidation.requireDisplayName(name, "name");
-    agent = ProjectValidation.optionalCanonicalName(agent, "agent");
-    environment = ProjectValidation.optionalCanonicalName(environment, "environment");
-    instructions = ProjectValidation.optionalText(instructions, "instructions");
+    name = WorkflowFieldValidation.requireDisplayName(name, "name");
+    agent = WorkflowFieldValidation.optionalCanonicalName(agent, "agent");
+    environment = WorkflowFieldValidation.optionalCanonicalName(environment, "environment");
+    instructions = WorkflowFieldValidation.optionalText(instructions, "instructions");
     next = normalizeNext(state, next);
     if (ProjectWorkflowReservedState.isReserved(state)) {
       requireReservedShape(state, agent, environment, instructions, maxRuns, enabled, next);

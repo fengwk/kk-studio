@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.ide.cluster;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.uri.UrlEncoding;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.ide.IdeUuids;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 
 /**
@@ -58,11 +58,7 @@ public final class IdeInternalPaths {
     if (value == null) {
       throw DomainException.validation("environment", field + " is required");
     }
-    try {
-      return Uuids.parseCanonical(value, field).toString();
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation("environment", field + " must be a canonical UUID");
-    }
+    return IdeUuids.requireInput(value, field).toString();
   }
 
   private static String requireNonBlank(String value, String field) {

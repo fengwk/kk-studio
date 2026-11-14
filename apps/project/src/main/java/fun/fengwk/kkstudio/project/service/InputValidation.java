@@ -12,12 +12,12 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 
 /**
- * Project 领域边界预校验工具：使用严格 UTF-8 encoder（REPORT）做字符与字节边界检查，错误消息脱敏且不回显输入正文。
+ * Project 请求入参校验：显示名/规范名、严格 UTF-8 正文与幂等请求键。使用严格 UTF-8 encoder（REPORT）做字符与字节边界检查，错误消息脱敏且不回显输入正文。
  *
  * <p>列宽上限与目标 DDL 一致：title 256、Agent/Environment 自然名 64、description 64 KiB、Activity/Evidence 正文 1
  * MiB。
  */
-public final class ProjectValidationUtils {
+public final class InputValidation {
 
   /** {@code varchar(256)} 的字符上限。 */
   public static final int MAX_TITLE_LENGTH = 256;
@@ -34,7 +34,7 @@ public final class ProjectValidationUtils {
   /** 幂等请求键的字符上限。 */
   private static final int MAX_REQUEST_KEY_LENGTH = 128;
 
-  private ProjectValidationUtils() {}
+  private InputValidation() {}
 
   /** 显示名：非空白、无首尾空白、不超过 {@code maxLength} 个码点。 */
   public static String requireDisplayName(String value, String field, int maxLength) {

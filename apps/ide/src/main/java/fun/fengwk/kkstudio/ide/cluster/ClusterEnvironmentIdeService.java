@@ -1,10 +1,10 @@
 package fun.fengwk.kkstudio.ide.cluster;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeUuids;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
@@ -154,10 +154,6 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
   }
 
   private static String parseViewId(String viewId) {
-    try {
-      return Uuids.parseCanonical(viewId, "viewId").toString();
-    } catch (IllegalArgumentException | NullPointerException error) {
-      throw DomainException.validation("environment", "viewId must be a canonical UUID");
-    }
+    return IdeUuids.requireInput(viewId, "viewId").toString();
   }
 }

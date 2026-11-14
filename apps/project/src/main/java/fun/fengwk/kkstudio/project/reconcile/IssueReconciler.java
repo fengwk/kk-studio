@@ -1,41 +1,18 @@
 package fun.fengwk.kkstudio.project.reconcile;
 
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
-import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
-import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
-import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
-import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
-import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
 import fun.fengwk.kkstudio.project.model.Issue;
-import fun.fengwk.kkstudio.project.model.IssueActivity;
-import fun.fengwk.kkstudio.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.platform.IssueThreadExecution;
-import fun.fengwk.kkstudio.project.platform.IssueThreadView;
-import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
 import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
@@ -44,11 +21,9 @@ import fun.fengwk.kkstudio.project.service.IssueRunService;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 import fun.fengwk.kkstudio.work.WorkClaim;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -84,24 +59,15 @@ public class IssueReconciler {
   /** Issue Reconcile 在 {@code durable_work} 上的 target type。 */
   public static final String TARGET_TYPE = "ISSUE";
 
-  /** 单次 reconcile 检视的 Activity 窗口上限：只读有界窗口，窗口未到流尾时先推进已检视游标再立即续扫。 */
-  static final int ACTIVITY_SCAN_LIMIT = 200;
-
-  private static final String BUDGET_REASON = "Run active execution budget is exhausted";
-  private static final String STALE_REASON = "Run no longer matches the current issue stage";
-
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
   private final IssueRunRepository issueRunRepository;
-  private final IssueActivityRepository issueActivityRepository;
-  private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final IssueStageBudgetRepository stageBudgetRepository;
   private final IssueRunService issueRunService;
-  private final IssueReconcileEvidence evidence;
   private final DurableWorkStore issueWorkQueue;
-  private final ObjectProvider<IssueThreadExecution> threadExecutions;
   private final ProjectWorkflowJsonCodec workflowCodec;
   private final IssueReconcileProperties properties;
+  private final IssueReconcileActiveRun activeRun;
   private final Clock clock;
 
   @Autowired
@@ -109,28 +75,22 @@ public class IssueReconciler {
       ProjectRepository projectRepository,
       IssueRepository issueRepository,
       IssueRunRepository issueRunRepository,
-      IssueActivityRepository issueActivityRepository,
-      IssueAgentThreadRepository issueAgentThreadRepository,
       IssueStageBudgetRepository stageBudgetRepository,
       IssueRunService issueRunService,
-      IssueReconcileEvidence evidence,
       DurableWorkStore issueWorkQueue,
-      ObjectProvider<IssueThreadExecution> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
-      IssueReconcileProperties properties) {
+      IssueReconcileProperties properties,
+      IssueReconcileActiveRun activeRun) {
     this(
         projectRepository,
         issueRepository,
         issueRunRepository,
-        issueActivityRepository,
-        issueAgentThreadRepository,
         stageBudgetRepository,
         issueRunService,
-        evidence,
         issueWorkQueue,
-        threadExecutions,
         workflowCodec,
         properties,
+        activeRun,
         Clock.systemUTC());
   }
 
@@ -138,31 +98,23 @@ public class IssueReconciler {
       ProjectRepository projectRepository,
       IssueRepository issueRepository,
       IssueRunRepository issueRunRepository,
-      IssueActivityRepository issueActivityRepository,
-      IssueAgentThreadRepository issueAgentThreadRepository,
       IssueStageBudgetRepository stageBudgetRepository,
       IssueRunService issueRunService,
-      IssueReconcileEvidence evidence,
       DurableWorkStore issueWorkQueue,
-      ObjectProvider<IssueThreadExecution> threadExecutions,
       ProjectWorkflowJsonCodec workflowCodec,
       IssueReconcileProperties properties,
+      IssueReconcileActiveRun activeRun,
       Clock clock) {
     this.projectRepository = Objects.requireNonNull(projectRepository, "projectRepository");
     this.issueRepository = Objects.requireNonNull(issueRepository, "issueRepository");
     this.issueRunRepository = Objects.requireNonNull(issueRunRepository, "issueRunRepository");
-    this.issueActivityRepository =
-        Objects.requireNonNull(issueActivityRepository, "issueActivityRepository");
-    this.issueAgentThreadRepository =
-        Objects.requireNonNull(issueAgentThreadRepository, "issueAgentThreadRepository");
     this.stageBudgetRepository =
         Objects.requireNonNull(stageBudgetRepository, "stageBudgetRepository");
     this.issueRunService = Objects.requireNonNull(issueRunService, "issueRunService");
-    this.evidence = Objects.requireNonNull(evidence, "evidence");
     this.issueWorkQueue = Objects.requireNonNull(issueWorkQueue, "issueWorkQueue");
-    this.threadExecutions = Objects.requireNonNull(threadExecutions, "threadExecutions");
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
     this.properties = Objects.requireNonNull(properties, "properties");
+    this.activeRun = Objects.requireNonNull(activeRun, "activeRun");
     this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
   }
 
@@ -173,7 +125,7 @@ public class IssueReconciler {
     Instant now = clock.instant();
     LockedIssue locked = lockIssue(claim.targetId());
     if (locked == null) {
-      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_ARCHIVED);
+      return apply(claim, IssueReconcileStep.converged(IssueReconcileOutcome.CONVERGED_ARCHIVED));
     }
     heartbeat(claim);
 
@@ -181,232 +133,52 @@ public class IssueReconciler {
     Issue issue = locked.issue();
     if (project.isArchived()
         || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
-      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_ARCHIVED);
+      return apply(claim, IssueReconcileStep.converged(IssueReconcileOutcome.CONVERGED_ARCHIVED));
     }
-    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issue.getId());
-    if (activeRun != null) {
-      return reconcileActiveRun(project, issue, activeRun, claim, now);
+    IssueRun run = issueRunRepository.lockActiveByIssueId(issue.getId());
+    if (run != null) {
+      return apply(claim, activeRun.step(project, issue, run, now));
     }
     return reconcileIdle(project, issue, claim);
-  }
-
-  private IssueReconcileOutcome reconcileActiveRun(
-      Project project, Issue issue, IssueRun run, WorkClaim claim, Instant now) {
-    IssueThreadView view = requireThreadExecution().readThread(run.getThreadId());
-    IssueAgentThread binding = issueAgentThreadRepository.findByThreadId(run.getThreadId());
-    boolean bindingValid = binding != null && binding.issueId().equals(issue.getId());
-    ProjectWorkflowState stage = workflowStage(project, run.getState());
-    boolean stageStillOwned =
-        stage != null
-            && stage.enabled()
-            && stage.hasAgent()
-            && bindingValid
-            && stage.agent().equals(binding.agentName());
-    boolean stateStillCurrent =
-        run.getState().equals(issue.getState())
-            || (issue.getBlockedFromState() != null
-                && run.getState().equals(issue.getBlockedFromState()));
-    boolean current = bindingValid && stageStillOwned && stateStillCurrent;
-
-    // 已冻结的 root Join 决定执行终态：必须先于任何 busy/等待/指示判断收尾，终态 Entry 与 final 只取 Join 冻结值，
-    // 本 Thread 之后的普通对话或后代忙碌都不能再把已结束的执行重新拉回在途。
-    ThreadJoin join = matchedJoin(run.getId());
-    if (join != null) {
-      return closeMatchedJoin(issue, run, binding, view, join, current, claim);
-    }
-
-    // 统一执行事实：本地工作（命令/Model/工具/continuation）与人工等待各由唯一投影给出，本类只决定预算、等待与停止政策。
-    ThreadExecutionFacts facts = view.executionFacts();
-
-    if (!bindingValid) {
-      if (facts.hasWork()) {
-        return finish(
-            claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
-      }
-      // 归属已不存在：Run 无法再被驱动，安全收尾为失败并显式要求人工核查。
-      return failRun(
-          run, view.headEntryId(), STALE_REASON, claim, IssueReconcileOutcome.STALE_RUN_CLOSED);
-    }
-    if (!stageStillOwned || !stateStillCurrent) {
-      // 迟到回调：旧 Run 的同名阶段或旧归属不得刷新当前职责，只做安全收尾，绝不提交交接目标。
-      if (facts.hasWork()) {
-        return finish(
-            claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
-      }
-      IssueActivity deliverable = nextDeliverableInstruction(run);
-      if (deliverable != null) {
-        deliverInstruction(issue, run, deliverable);
-        return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
-      }
-      return failRun(
-          run, view.headEntryId(), STALE_REASON, claim, IssueReconcileOutcome.STALE_RUN_CLOSED);
-    }
-
-    if (run.getStatus() == IssueRunStatus.RUNNING && isBudgetExhausted(run, now)) {
-      // 业务预算要求停止在途长 loop：显式 Stop（当前 Thread 版本 CAS + 稳定 requestId）结束执行，再在同一业务事务失败收尾。
-      // 收尾区间以 Stop 回执的权威 Thread head 为界，绝不再反查当前 head，冻结本次停止的确定边界。
-      UUID stopHeadEntryId =
-          requireThreadExecution()
-              .stop(
-                  new StopCommand(
-                      run.getThreadId(), budgetStopRequestId(run.getId()), view.version()));
-      return failRun(
-          run, stopHeadEntryId, BUDGET_REASON, claim, IssueReconcileOutcome.RUN_BUDGET_EXHAUSTED);
-    }
-    if (run.getStatus() == IssueRunStatus.RUNNING) {
-      chargeActiveTime(run, now);
-    }
-
-    if (facts.hasWork()) {
-      // 未处理命令、合法在途 Model/Tool 或 owned continuation：不投递、不等待、不收尾。已收敛的 UNKNOWN 工具不计为工作。
-      return finish(
-          claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
-    }
-
-    // 控制暂停在活动 Run 收尾后设置；活动 Run 在安全点因业务阻塞或安全工具等待进入 WAITING。
-    boolean blocked = issue.isBlocked();
-    boolean waitingTool = facts.waitingForHuman();
-
-    if (run.getStatus() == IssueRunStatus.WAITING) {
-      if (issue.isGateClosed() || waitingTool) {
-        // 门禁或安全等待尚未解除：保持 WAITING，不消耗新额度也不恢复执行。
-        return finish(
-            claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.WAITING_FOR_GATE);
-      }
-      // 门禁与安全等待均已解除，恢复同一 Run：不新建 Run，也不重新扣额度。
-      issueRunService.resumeRun(run.getId(), run.getVersion());
-      return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.RUN_RESUMED);
-    }
-
-    if (blocked || waitingTool) {
-      // 阻塞或工具等待：到达安全点后才停止活动计时，保留交接目标等待显式恢复。
-      issueRunService.waitRun(run.getId(), run.getVersion());
-      return finish(
-          claim, true, properties.getBlockedDelay(), IssueReconcileOutcome.WAITING_FOR_GATE);
-    }
-
-    IssueActivity deliverable = nextDeliverableInstruction(run);
-    if (deliverable != null) {
-      deliverInstruction(issue, run, deliverable);
-      return finish(claim, true, Duration.ZERO, IssueReconcileOutcome.INSTRUCTION_DELIVERED);
-    }
-
-    // 执行静止但 root Join 尚未冻结结果：既不按当前 head 猜测完成，也不等待永久子树 idle。
-    return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_IDLE);
-  }
-
-  /**
-   * 按 root Join 冻结的结果收敛 Run：正常完成提交冻结的 final-answer 与（仅当本次 Run 仍是当前职责时的）交接目标；失败与取消只做安全终态， 绝不推进阶段。
-   *
-   * <p>完成只引用 {@code join.finalAnswerEntryId()}，终态 Entry 只引用 {@code join.terminalEntryId()}，都不看当前
-   * head；已匹配的 Join 不会被之后到达的普通对话或指示改写，后续业务由下一次 Run/人工输入独立接受。
-   */
-  private IssueReconcileOutcome closeMatchedJoin(
-      Issue issue,
-      IssueRun run,
-      IssueAgentThread binding,
-      IssueThreadView view,
-      ThreadJoin join,
-      boolean current,
-      WorkClaim claim) {
-    ThreadJoinReceipt receipt =
-        requireThreadExecution()
-            .projectJoinReceipt(run.getId())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "matched root join has no receipt for run " + run.getId()));
-    switch (receipt.outcome()) {
-      case COMPLETED -> {
-        evidence.publishEvidence(issue, run, binding, view, join.finalAnswerEntryId());
-        String nextState = current ? run.getNextState() : null;
-        issueRunService.finishRun(
-            run.getId(),
-            run.getVersion(),
-            completeKey(run),
-            IssueRunStatus.COMPLETED,
-            join.terminalEntryId(),
-            join.finalAnswerEntryId(),
-            nextState,
-            null);
-        if (!current) {
-          return finish(
-              claim, true, properties.getActiveDelay(), IssueReconcileOutcome.STALE_RUN_CLOSED);
-        }
-        return finish(
-            claim,
-            true,
-            Duration.ZERO,
-            nextState != null
-                ? IssueReconcileOutcome.RUN_HANDED_OFF
-                : IssueReconcileOutcome.RUN_COMPLETED);
-      }
-      case ERROR -> {
-        String error =
-            receipt.error() == null || receipt.error().isBlank()
-                ? "Subagent execution failed"
-                : receipt.error();
-        return failRun(
-            run,
-            join.terminalEntryId(),
-            error,
-            claim,
-            current ? IssueReconcileOutcome.RUN_FAILED : IssueReconcileOutcome.STALE_RUN_CLOSED);
-      }
-      case CANCELLED -> {
-        issueRunService.finishRun(
-            run.getId(),
-            run.getVersion(),
-            cancelKey(run, join.terminalEntryId()),
-            IssueRunStatus.CANCELLED,
-            join.terminalEntryId(),
-            null,
-            null,
-            null);
-        return finish(
-            claim,
-            true,
-            properties.getBlockedDelay(),
-            current ? IssueReconcileOutcome.RUN_CANCELLED : IssueReconcileOutcome.STALE_RUN_CLOSED);
-      }
-      default -> throw new IllegalStateException("unsupported join outcome: " + receipt.outcome());
-    }
   }
 
   private IssueReconcileOutcome reconcileIdle(Project project, Issue issue, WorkClaim claim) {
     if (project.isArchived()
         || ProjectWorkflowReservedState.DONE.code().value().equals(issue.getState())) {
-      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_ARCHIVED);
+      return apply(claim, IssueReconcileStep.converged(IssueReconcileOutcome.CONVERGED_ARCHIVED));
     }
     if (issue.isGateClosed()) {
-      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE);
+      return apply(
+          claim, IssueReconcileStep.converged(IssueReconcileOutcome.CONVERGED_UNDISPATCHABLE));
     }
     ProjectStateCode state = ProjectStateCode.of(issue.getState());
     if (ProjectWorkflowReservedState.isReserved(state)) {
-      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_NO_AGENT);
+      return apply(claim, IssueReconcileStep.converged(IssueReconcileOutcome.CONVERGED_NO_AGENT));
     }
-    ProjectWorkflowState stage = workflowStage(project, issue.getState());
+    ProjectWorkflowState stage =
+        IssueReconcileStages.find(workflowCodec, project, issue.getState());
     if (stage == null || !stage.enabled() || !stage.hasAgent()) {
-      return finish(claim, false, Duration.ZERO, IssueReconcileOutcome.CONVERGED_NO_AGENT);
+      return apply(claim, IssueReconcileStep.converged(IssueReconcileOutcome.CONVERGED_NO_AGENT));
     }
     var budget = stageBudgetRepository.get(issue.getId(), issue.getState());
-    if (budget != null) {
-      if (budget.usedRuns() >= budget.maxRuns()) {
-        // 额度用尽只展示待人工重置：保留 mailbox 以便重置后立即推进。
-        return finish(
-            claim,
-            true,
-            properties.getBlockedDelay(),
-            IssueReconcileOutcome.CONVERGED_BUDGET_EXHAUSTED);
-      }
+    if (budget != null && budget.usedRuns() >= budget.maxRuns()) {
+      // 额度用尽只展示待人工重置：保留 mailbox 以便重置后立即推进。
+      return apply(
+          claim,
+          IssueReconcileStep.poll(
+              properties.getBlockedDelay(), IssueReconcileOutcome.CONVERGED_BUDGET_EXHAUSTED));
     }
-    IssueRun activeRun = issueRunRepository.lockActiveByIssueId(issue.getId());
-    if (activeRun != null) {
-      return finish(
-          claim, true, properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING);
+    IssueRun active = issueRunRepository.lockActiveByIssueId(issue.getId());
+    if (active != null) {
+      return apply(
+          claim,
+          IssueReconcileStep.poll(
+              properties.getActiveDelay(), IssueReconcileOutcome.DEFERRED_PROCESSING));
     }
-    issueRunService.acceptRun(issue.getId(), acceptKey(issue));
-    return finish(claim, true, properties.getActiveDelay(), IssueReconcileOutcome.RUN_ACCEPTED);
+    issueRunService.acceptRun(issue.getId(), IssueReconcileKeys.accept(issue));
+    return apply(
+        claim,
+        IssueReconcileStep.poll(properties.getActiveDelay(), IssueReconcileOutcome.RUN_ACCEPTED));
   }
 
   /**
@@ -416,16 +188,15 @@ public class IssueReconciler {
    * <p>两种情况都以调用方自己的 lease token 围栏；返回 false 说明未删除（含新 wake 已释放 lease）或租约围栏未匹配，此时新事实由下一次 claim
    * 处理，因此只记录而不抛出。
    */
-  private IssueReconcileOutcome finish(
-      WorkClaim claim, boolean keepPolling, Duration delay, IssueReconcileOutcome outcome) {
-    boolean applied = finishClaim(claim, keepPolling, delay);
+  private IssueReconcileOutcome apply(WorkClaim claim, IssueReconcileStep step) {
+    boolean applied = finishClaim(claim, step.keepPolling(), step.delay());
     if (!applied) {
       log.debug(
           "Issue work claim was already superseded; issueId={}, leaseToken={}",
           claim.targetId(),
           claim.leaseToken());
     }
-    return outcome;
+    return step.outcome();
   }
 
   /** 成功重排或删除当前 wake 为 true；保留更新 wake 或已经失权为 false。 */
@@ -469,162 +240,6 @@ public class IssueReconciler {
       throw new IllegalStateException("issue work lease is no longer held: " + claim.targetId());
     }
     issueWorkQueue.renew(claim, properties.getLeaseDuration());
-  }
-
-  /** 判断本次 Run 的活动执行时长是否已耗尽。 */
-  private boolean isBudgetExhausted(IssueRun run, Instant now) {
-    if (run.getActiveSince() == null) {
-      return false;
-    }
-    long elapsed = Math.max(0L, Duration.between(run.getActiveSince(), now).toMillis());
-    return run.getRemainingExecutionMs() - elapsed <= 0;
-  }
-
-  /** 扣减本次 Run 的活动执行时长。 */
-  private void chargeActiveTime(IssueRun run, Instant now) {
-    if (run.getActiveSince() == null) {
-      return;
-    }
-    long elapsed = Math.max(0L, Duration.between(run.getActiveSince(), now).toMillis());
-    long remaining = Math.max(0L, run.getRemainingExecutionMs() - elapsed);
-    long expectedVersion = run.getVersion();
-    run.setRemainingExecutionMs(remaining);
-    run.setActiveSince(now);
-    if (!issueRunRepository.updateById(run, expectedVersion)) {
-      throw new IllegalStateException("failed to charge run execution budget");
-    }
-    run.setVersion(expectedVersion + 1);
-  }
-
-  private IssueReconcileOutcome failRun(
-      IssueRun run,
-      UUID endEntryId,
-      String reason,
-      WorkClaim claim,
-      IssueReconcileOutcome outcome) {
-    issueRunService.finishRun(
-        run.getId(),
-        run.getVersion(),
-        failKey(run, endEntryId),
-        IssueRunStatus.FAILED,
-        endEntryId,
-        null,
-        null,
-        reason);
-    // 失败与 ERROR 暂停门禁同事务写入，等待显式恢复；mailbox 保留以便恢复后立即推进。
-    return finish(claim, true, properties.getBlockedDelay(), outcome);
-  }
-
-  /** 本次 Run 的 root Join 已冻结结果时返回它，否则返回 {@code null}。 */
-  private ThreadJoin matchedJoin(UUID invocationId) {
-    return requireThreadExecution().findJoin(invocationId).filter(ThreadJoin::matched).orElse(null);
-  }
-
-  /**
-   * 读取投递给当前 Run 的下一条 INSTRUCTION：跳过普通评论与系统事件，扫描至活动流尾，绝不因它们永久卡住游标。
-   *
-   * <p>只按「活动事实位置是否已被任何 Run 观察」判定，不要求指示恰好绑定当前 Run：上一个 Run 因匹配 root Join 安全收尾时未在安全点投递的
-   * 业务指示（游标未推进）会保留给下一个 Run 投递，绝不被收尾吞掉。
-   */
-  private IssueActivity nextDeliverableInstruction(IssueRun run) {
-    long cursor = run.getObservedActivitySequence();
-    long maxSeen = cursor;
-    while (true) {
-      List<IssueActivity> window =
-          issueActivityRepository.listPage(run.getIssueId(), cursor, ACTIVITY_SCAN_LIMIT);
-      if (window.isEmpty()) {
-        break;
-      }
-      for (IssueActivity activity : window) {
-        maxSeen = Math.max(maxSeen, activity.getSequence());
-        if (activity.getKind() == IssueActivityKind.INSTRUCTION) {
-          if (activity.getSequence() > run.getObservedActivitySequence() + 1) {
-            advanceObservedSequence(run, activity.getSequence() - 1);
-          }
-          return activity;
-        }
-      }
-      cursor = maxSeen;
-      if (window.size() < ACTIVITY_SCAN_LIMIT) {
-        break;
-      }
-    }
-    if (maxSeen > run.getObservedActivitySequence()) {
-      advanceObservedSequence(run, maxSeen);
-    }
-    return null;
-  }
-
-  private void advanceObservedSequence(IssueRun run, long sequence) {
-    if (sequence <= run.getObservedActivitySequence()) {
-      return;
-    }
-    long expectedVersion = run.getVersion();
-    run.setObservedActivitySequence(sequence);
-    if (!issueRunRepository.updateById(run, expectedVersion)) {
-      throw new IllegalStateException("failed to advance run activity cursor");
-    }
-    run.setVersion(expectedVersion + 1);
-  }
-
-  /** 把来自人的定向指示作为 USER_MESSAGE 投递给明确的当前 Run；幂等键由 Issue 事实位置确定，重放不会重复入队。 */
-  private void deliverInstruction(Issue issue, IssueRun run, IssueActivity activity) {
-    AgentMessage message =
-        new AgentMessage(
-            AgentMessageRole.USER, List.of(new TextMessageContent(activity.getBody())));
-    UserMessageCommandPayload payload = new UserMessageCommandPayload(message);
-    UUID idempotencyKey =
-        UUID.nameUUIDFromBytes(
-            ("issue-instruction:" + issue.getId() + ":" + activity.getSequence())
-                .getBytes(StandardCharsets.UTF_8));
-    NewThreadCommand command = new NewThreadCommand(payload, idempotencyKey);
-    requireThreadExecution()
-        .acceptCommands(
-            new AcceptCommandsCommand(
-                new AcceptCommandsTarget.Thread(run.getThreadId()), List.of(command)),
-            AcceptancePreflight.IDENTITY);
-    advanceObservedSequence(run, activity.getSequence());
-  }
-
-  private ProjectWorkflowState workflowStage(Project project, String state) {
-    try {
-      ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
-      return workflow.find(ProjectStateCode.of(state)).orElse(null);
-    } catch (IllegalArgumentException | DomainException error) {
-      // 只解码持久化事实：损坏的 workflow 或状态编码不参与重建，也不向调用方暴露。
-      return null;
-    }
-  }
-
-  private IssueThreadExecution requireThreadExecution() {
-    IssueThreadExecution port = threadExecutions.getIfAvailable();
-    if (port == null) {
-      throw new IllegalStateException("harness runtime is not available in this deployment");
-    }
-    return port;
-  }
-
-  /** 接受 key 由 Issue 内待分配的 Run 序号确定：同一次催促重放不会创建第二个 Run。 */
-  private static String acceptKey(Issue issue) {
-    return "reconciler-accept:" + issue.getNextRunOrdinal();
-  }
-
-  private static String completeKey(IssueRun run) {
-    return "reconciler-complete:" + run.getId() + ":" + run.getVersion();
-  }
-
-  private static String failKey(IssueRun run, UUID endEntryId) {
-    return "reconciler-fail:" + run.getId() + ":" + endEntryId;
-  }
-
-  private static String cancelKey(IssueRun run, UUID endEntryId) {
-    return "reconciler-cancel:" + run.getId() + ":" + endEntryId;
-  }
-
-  /** 预算 Stop 的稳定幂等键：同一 Run 的预算停止重放不会产生第二次 Stop。 */
-  private static UUID budgetStopRequestId(UUID runId) {
-    return UUID.nameUUIDFromBytes(
-        ("issue-run-budget-stop:" + runId).getBytes(StandardCharsets.UTF_8));
   }
 
   private record LockedIssue(Project project, Issue issue) {}
