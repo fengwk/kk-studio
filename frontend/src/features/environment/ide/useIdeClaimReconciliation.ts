@@ -160,7 +160,11 @@ export function useIdeClaimReconciliation({
     reconcile,
   })
 
+  // 事件处理器与串行队列在 effect 之外读取这两个镜像，必须在本次渲染期间就指向最新输入；
+  // 改为 effect 写入会让提交前的回调看到上一轮的会话/身份。
+  // eslint-disable-next-line react-hooks/refs -- 渲染期镜像，见上
   identityRef.current = identity
+  // eslint-disable-next-line react-hooks/refs -- 渲染期镜像，见上
   sessionRef.current = session
 
   useEffect(() => {
@@ -992,6 +996,8 @@ export function useIdeClaimReconciliation({
     }
   }
 
+  // 父组件通过 ref 调用这三个动作；它们必须对应本次渲染的闭包，因此在渲染期写入。
+  // eslint-disable-next-line react-hooks/refs -- 渲染期闭包镜像，见上
   actionsRef.current = {
     reconcileAll,
     withdrawUsage,
