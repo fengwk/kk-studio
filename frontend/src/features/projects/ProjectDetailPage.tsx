@@ -1,44 +1,21 @@
-import { useEffect, useRef, useState } from 'react'
-import { Toolbar, ToolbarActions } from '@/shared/ui/layout/Toolbar'
-import { Badge } from '@/shared/ui/data/Badge'
+import { AlertTriangle } from 'lucide-react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useLocation, useSearchParams } from 'react-router'
-import {
-  AlertTriangle,
-  Archive,
-  ArrowLeft,
-  Bot,
-  FileText,
-  Pencil,
-  Plus,
-  Trash2,
-  X,
-} from 'lucide-react'
-import { CreateIssueModal } from './components/CreateIssueModal'
-import { DeleteProjectModal } from './components/DeleteProjectModal'
-import { EditProjectModal } from './components/EditProjectModal'
+import { useState } from 'react'
+import { queryKeys } from '@/shared/lib/query-keys'
 import { IssueBoard } from './components/IssueBoard'
-import { IssueDetailModal } from './components/IssueDetailModal'
-import { AgentPane } from '@/features/thread/runtime/AgentPane'
-import { agentService } from '@/shared/api/agent-service'
-import { environmentService } from '@/features/environment/environment-service'
-import { Button } from '@/shared/ui/controls/Button'
-import { IconButton } from '@/shared/ui/controls/IconButton'
-import { SearchField } from '@/shared/ui/controls/SearchField'
-import { StateBlock } from '@/shared/ui/feedback/StateBlock'
+import { ProjectBoardToolbar } from './components/project-detail/ProjectBoardToolbar'
+import { ProjectDetailModals } from './components/project-detail/ProjectDetailModals'
+import {
+  ProjectAgentDock,
+  ProjectDetailPlaceholder,
+  ProjectDetailTitleBar,
+} from './components/project-detail/ProjectDetailPanels'
+import { useBoardIssueActions } from './useBoardIssueActions'
+import { useProjectArchive, useProjectBoardModals } from './useProjectBoardModals'
+import { useProjectBoardRoute } from './useProjectBoardRoute'
+import { useProjectThreadGate } from './useProjectThreadGate'
 import type { ProjectsApi } from './projects-api'
 import { projectsApi } from './projects-api'
-import { useI18n } from '@/shared/i18n'
-import { createUuid } from '@/shared/lib/uuid'
-import { queryKeys } from '@/shared/lib/query-keys'
-import {
-  clearPendingAction,
-  isNetworkUnknownError,
-  isPayloadEqual,
-  loadPendingAction,
-  storePendingAction,
-  type PendingIssueAction,
-} from './pending-action-sidecar'
 import './projects.css'
 
 export interface ProjectDetailPageProps {
@@ -47,20 +24,18 @@ export interface ProjectDetailPageProps {
   api?: ProjectsApi
 }
 
-export function ProjectDetailPage({
-  projectId,
-  onBack,
-  api = projectsApi,
-}: ProjectDetailPageProps) {
-  const { t } = useI18n()
-  const location = useLocation()
+/**
+ * 项目看板：项目快照、状态列 Issue 卡片、受控 Agent 面板与四种弹窗。
+ *
+ * <p>路由状态、弹窗开关、归档写操作、看板 Issue 写操作与线程门禁各自在自己的 hook 里；
+ * 页面只负责把快照投影到看板并编排这些部件。
+ */
+export function ProjectDetailPage({ projectId, onBack, api = projectsApi }: ProjectDetailPageProps) {
   const queryClient = useQueryClient()
-  const [searchParams, setSearchParams] = useSearchParams()
+  const route = useProjectBoardRoute()
+  const modals = useProjectBoardModals()
+  const [searchQuery, setSearchQuery] = useState('')
 
-  const queryIssueId = searchParams.get('issue')
-  const queryThreadId = searchParams.get('thread')
-
-  // 权威聚合状态
   const {
     data: snapshot,
     isLoading,
@@ -71,91 +46,6 @@ export function ProjectDetailPage({
     queryFn: () => api.getProjectSnapshot(projectId),
   })
 
-  const [actionError, setActionError] = useState<string | null>(null)
-
-  // Modals
-  const [isEditProjectOpen, setIsEditProjectOpen] = useState(false)
-  const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
-  const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
-  const [isManualModalOpen, setIsManualModalOpen] = useState(false)
-
-  // 看板搜索由页面头部统一持有，IssueBoard 只负责按结果渲染列与卡片。
-  const [searchQuery, setSearchQuery] = useState('')
-
-  // 路由或参数变化时关闭 manualModal，避免前进后退复活弹窗
-  useEffect(() => {
-    setIsManualModalOpen(false)
-  }, [location.key, queryIssueId, queryThreadId])
-
-  // Issue 详情查询（用于受控 AgentPane 门禁验证与元数据）
-  const issueQuery = useQuery({
-    queryKey: queryKeys.projects.issue(projectId, queryIssueId ?? ''),
-    queryFn: () => api.getIssue(queryIssueId!),
-    enabled: Boolean(queryIssueId),
-  })
-  const issueDetail = issueQuery.data
-
-  const agentsQuery = useQuery({
-    queryKey: queryKeys.agents.list,
-    queryFn: () => agentService.listAgents(),
-    enabled: Boolean(queryThreadId),
-  })
-
-  const environmentsQuery = useQuery({
-    queryKey: queryKeys.environments.list,
-    queryFn: () => environmentService.listEnvironments(),
-    enabled: Boolean(queryThreadId),
-  })
-
-  // 门禁验证：目标 thread 必须属于 detail.agentThreads 或 detail.runs
-  const matchedAgentThread = issueDetail?.agentThreads?.find((t) => t.threadId === queryThreadId)
-  const matchedRun = issueDetail?.runs?.find((r) => r.threadId === queryThreadId)
-  const matchedAgentName = matchedAgentThread?.agentName || matchedRun?.agentName || null
-  const isThreadValid = Boolean((matchedAgentThread || matchedRun) && matchedAgentName)
-
-  const handleSelectIssue = (id: string | null) => {
-    setIsManualModalOpen(false)
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (id) {
-        next.set('issue', id)
-      } else {
-        next.delete('issue')
-        next.delete('thread')
-      }
-      return next
-    })
-  }
-
-  const handleOpenThread = (threadId: string) => {
-    setIsManualModalOpen(false)
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (queryIssueId) {
-        next.set('issue', queryIssueId)
-      }
-      next.set('thread', threadId)
-      return next
-    })
-  }
-
-  const handleCloseThread = () => {
-    setIsManualModalOpen(false)
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      next.delete('thread')
-      next.delete('issue')
-      return next
-    })
-  }
-
-  const handleCloseIssueDetail = () => {
-    setIsManualModalOpen(false)
-    if (!queryThreadId) {
-      handleSelectIssue(null)
-    }
-  }
-
   const invalidateSnapshot = async () => {
     await queryClient.invalidateQueries({
       queryKey: queryKeys.projects.snapshot(projectId),
@@ -163,274 +53,57 @@ export function ProjectDetailPage({
     })
   }
 
-  const inflightIssuesRef = useRef<Set<string>>(new Set())
+  const archive = useProjectArchive({ api, onUpdated: invalidateSnapshot })
+  const boardActions = useBoardIssueActions({ projectId, api, onSelectIssue: route.selectIssue })
+  const threadGate = useProjectThreadGate({
+    projectId,
+    issueId: route.issueId,
+    threadId: route.threadId,
+    api,
+  })
 
-  // 看板与 Agent 视图共用的动作执行器：通过通用 executor 统一处理防重防覆盖、连点阻断、侧车持久化与受控错误处理
-  const executeBoardIssueAction = async (
-    issueId: string,
-    expectedVersion: string,
-    action: PendingIssueAction,
-    runApi: (requestKey: string, expectedVersion: string) => Promise<unknown>,
-    failureLabel: string,
-  ): Promise<boolean> => {
-    // 阻断连点：同一 issue 若正在执行中，忽略重复触发
-    if (inflightIssuesRef.current.has(issueId)) {
-      return false
-    }
-
-    const loadResult = loadPendingAction(issueId)
-    if (loadResult.type === 'STORAGE_ERROR') {
-      setActionError(t('projects.detail.storageUnavailable', { reason: loadResult.error }))
-      return false
-    }
-    if (loadResult.type === 'CORRUPT') {
-      setActionError(t('projects.detail.corruptPending'))
-      handleSelectIssue(issueId)
-      return false
-    }
-
-    if (loadResult.type === 'VALID') {
-      const existing = loadResult.action
-      const isSameAction =
-        existing.kind === action.kind &&
-        isPayloadEqual(existing.payload, action.payload)
-
-      if (isSameAction) {
-        // 精确重试原请求
-        inflightIssuesRef.current.add(issueId)
-        try {
-          setActionError(null)
-          await runApi(existing.requestKey, existing.expectedVersion)
-          clearPendingAction(issueId, existing.requestKey)
-          await invalidateSnapshot()
-          await queryClient.invalidateQueries({
-            queryKey: queryKeys.projects.issue(projectId, issueId),
-          })
-          return true
-        } catch (err) {
-          if (!isNetworkUnknownError(err)) {
-            clearPendingAction(issueId, existing.requestKey)
-          }
-          setActionError(
-            err instanceof Error ? err.message : t('projects.detail.retryFailed', { label: failureLabel }),
-          )
-          return false
-        } finally {
-          inflightIssuesRef.current.delete(issueId)
-        }
-      } else {
-        setActionError(t('projects.detail.pendingWriteBlocked'))
-        handleSelectIssue(issueId)
-        return false
-      }
-    }
-
-    // 新请求：发送前落盘到侧车（fail closed，处于受控 try/catch 中）
-    try {
-      storePendingAction(issueId, action)
-    } catch (err) {
-      setActionError(
-        t('projects.detail.storePendingFailed', {
-          reason: err instanceof Error ? err.message : String(err),
-        }),
-      )
-      return false
-    }
-
-    inflightIssuesRef.current.add(issueId)
-    try {
-      setActionError(null)
-      await runApi(action.requestKey, expectedVersion)
-      clearPendingAction(issueId, action.requestKey)
-      await invalidateSnapshot()
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.projects.issue(projectId, issueId),
-      })
-      return true
-    } catch (err) {
-      if (!isNetworkUnknownError(err)) {
-        clearPendingAction(issueId, action.requestKey)
-      }
-      setActionError(
-        err instanceof Error ? err.message : t('projects.detail.actionFailed', { label: failureLabel }),
-      )
-      return false
-    } finally {
-      inflightIssuesRef.current.delete(issueId)
+  // 从线程视图关闭详情只退出线程，保留用户正在看的 issue。
+  const closeIssueDetail = () => {
+    modals.dismissManualDetail()
+    if (!route.threadId) {
+      route.selectIssue(null)
     }
   }
-
-  const handleTransitionIssue = async (
-    issueId: string,
-    expectedVersion: string,
-    toState: string,
-  ) => {
-    const requestKey = createUuid()
-    const action: PendingIssueAction = {
-      issueId,
-      kind: 'TRANSITION',
-      requestKey,
-      expectedVersion,
-      payload: { toState },
-      createdAt: new Date().toISOString(),
-      isUnknown: true,
-    }
-    await executeBoardIssueAction(
-      issueId,
-      expectedVersion,
-      action,
-      (reqKey, expVer) => api.transitionIssue(issueId, { expectedVersion: expVer, requestKey: reqKey, toState }),
-      t('projects.detail.action.transition'),
-    )
-  }
-
-  const handleBlockIssue = async (issueId: string, _expectedVersion: string) => {
-    handleSelectIssue(issueId)
-  }
-
-  const handleRecoverIssue = async (issueId: string, expectedVersion: string) => {
-    const requestKey = createUuid()
-    const action: PendingIssueAction = {
-      issueId,
-      kind: 'RECOVER',
-      requestKey,
-      expectedVersion,
-      payload: {},
-      createdAt: new Date().toISOString(),
-      isUnknown: true,
-    }
-    await executeBoardIssueAction(
-      issueId,
-      expectedVersion,
-      action,
-      (reqKey, expVer) => api.recoverIssue(issueId, { expectedVersion: expVer, requestKey: reqKey }),
-      t('projects.detail.action.recover'),
-    )
-  }
-
-  const handleReopenIssue = async (issueId: string, expectedVersion: string) => {
-    const requestKey = createUuid()
-    const action: PendingIssueAction = {
-      issueId,
-      kind: 'REOPEN',
-      requestKey,
-      expectedVersion,
-      payload: {},
-      createdAt: new Date().toISOString(),
-      isUnknown: true,
-    }
-    await executeBoardIssueAction(
-      issueId,
-      expectedVersion,
-      action,
-      (reqKey, expVer) => api.reopenIssue(issueId, { expectedVersion: expVer, requestKey: reqKey }),
-      t('projects.detail.action.reopen'),
-    )
-  }
-
-  // 项目归档 / 取消归档
-  const handleProjectArchiveToggle = async () => {
-    if (!snapshot) {
-      return
-    }
-    const project = snapshot.project
-    try {
-      setActionError(null)
-      if (project.archivedAt) {
-        await api.unarchiveProject(project.id, { expectedVersion: project.version })
-      } else {
-        await api.archiveProject(project.id, { expectedVersion: project.version })
-      }
-      await invalidateSnapshot()
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('projects.detail.archiveFailed'))
-    }
-  }
-
-  const errorMessage = actionError || (queryError instanceof Error ? queryError.message : null)
-
-  const isIssueDetailModalOpen = Boolean(queryIssueId && (!queryThreadId || isManualModalOpen))
 
   if (!snapshot) {
-    // 加载失败、已删除或仍在加载的项目看板：始终保留返回入口与明确重试，不因隐藏全局导航而失去退出路径。
     return (
-      <div className="project-detail-layout">
-        <header className="project-detail-header">
-          <div className="project-detail-nav">
-            <div className="project-detail-nav-left">
-              {onBack && (
-                <IconButton label={t('projects.detail.back')} onClick={onBack}>
-                  <ArrowLeft size={16} aria-hidden="true" />
-                </IconButton>
-              )}
-              <h1 className="project-detail-title">{t('projects.detail.boardTitle')}</h1>
-            </div>
-          </div>
-        </header>
-        <div className="project-detail-body project-detail-status">
-          {isLoading ? (
-            <StateBlock title={t('projects.detail.loading')} />
-          ) : (
-            <div className="project-detail-status-actions">
-              <StateBlock tone="danger" title={errorMessage ?? t('projects.detail.loadFailed')} />
-              <Button onClick={() => void refetch()}>{t('projects.retry')}</Button>
-            </div>
-          )}
-        </div>
-      </div>
+      <ProjectDetailPlaceholder
+        isLoading={isLoading}
+        errorMessage={archive.error || (queryError instanceof Error ? queryError.message : null)}
+        onBack={onBack}
+        onRetry={() => void refetch()}
+      />
     )
   }
 
   const project = snapshot.project
+  const errorMessage =
+    archive.error || boardActions.actionError || (queryError instanceof Error ? queryError.message : null)
+  const isIssueDetailOpen = Boolean(route.issueId && (!route.threadId || modals.isManualDetailOpen))
 
   return (
     <div className="project-detail-layout">
       <header className="project-detail-header">
-        <div className="project-detail-nav">
-          <div className="project-detail-nav-left">
-            {onBack && (
-              <IconButton label={t('projects.detail.back')} onClick={onBack}>
-                <ArrowLeft size={16} aria-hidden="true" />
-              </IconButton>
-            )}
-            <h1 className="project-detail-title">{project.title}</h1>
-            {project.archivedAt && (
-              <Badge tone="neutral">{t('projects.archived')}</Badge>
-            )}
-            <Badge tone="neutral" title={t('projects.detail.yoloBadge')}>
-              YOLO {project.yoloEnabled ? t('projects.yoloEnabled') : t('projects.yoloDisabled')}
-            </Badge>
-          </div>
-        </div>
-
-        <Toolbar className="project-detail-toolbar">
-          <SearchField
-            value={searchQuery}
-            onChange={setSearchQuery}
-            placeholder={t('projects.detail.searchPlaceholder')}
-            aria-label={t('projects.detail.searchIssues')}
-          />
-          <ToolbarActions>
-            <Button onClick={() => setIsCreateIssueOpen(true)}>
-              <Plus size={14} aria-hidden="true" />
-              <span>{t('projects.issue.create')}</span>
-            </Button>
-            <Button variant="ghost" onClick={() => setIsEditProjectOpen(true)}>
-              <Pencil size={14} aria-hidden="true" />
-              <span>{t('projects.detail.editWorkflow')}</span>
-            </Button>
-            <Button variant="ghost" onClick={() => void handleProjectArchiveToggle()}>
-              <Archive size={14} aria-hidden="true" />
-              <span>
-                {project.archivedAt ? t('projects.unarchive') : t('projects.detail.archiveAction')}
-              </span>
-            </Button>
-            <Button variant="ghost" danger onClick={() => setIsDeleteProjectOpen(true)}>
-              <Trash2 size={14} aria-hidden="true" />
-              <span>{t('projects.detail.deleteAction')}</span>
-            </Button>
-          </ToolbarActions>
-        </Toolbar>
+        <ProjectDetailTitleBar
+          title={project.title}
+          archived={Boolean(project.archivedAt)}
+          yoloEnabled={project.yoloEnabled}
+          onBack={onBack}
+        />
+        <ProjectBoardToolbar
+          searchQuery={searchQuery}
+          archived={Boolean(project.archivedAt)}
+          onSearchChange={setSearchQuery}
+          onCreateIssue={modals.openCreateIssue}
+          onEditWorkflow={modals.openEditProject}
+          onToggleArchive={() => void archive.toggle(project)}
+          onDeleteProject={modals.openDeleteProject}
+        />
       </header>
 
       {errorMessage && (
@@ -440,117 +113,54 @@ export function ProjectDetailPage({
         </div>
       )}
 
-      {/* 状态自然 token 看板 + 受控 AgentPane */}
       <div className="project-detail-body">
         <IssueBoard
           workflow={project.workflow}
           issues={snapshot.issues}
           searchQuery={searchQuery}
-          onSelectIssue={(id) => handleSelectIssue(id)}
-          onTransitionIssue={handleTransitionIssue}
-          onBlockIssue={handleBlockIssue}
-          onRecoverIssue={handleRecoverIssue}
-          onReopenIssue={handleReopenIssue}
+          onSelectIssue={route.selectIssue}
+          onTransitionIssue={boardActions.transitionIssue}
+          onBlockIssue={boardActions.openBlockDialog}
+          onRecoverIssue={boardActions.recoverIssue}
+          onReopenIssue={boardActions.reopenIssue}
         />
 
-        {queryThreadId && (
-          <aside className="project-agent-dock" data-testid="project-agent-dock">
-            <div className="project-agent-dock-header">
-              <div className="project-agent-dock-meta">
-                <Bot size={16} aria-hidden="true" />
-                <span className="project-agent-dock-title">
-                  {issueDetail?.issue.title ?? t('projects.detail.threadTitle')}
-                </span>
-                {matchedAgentName && <Badge tone="accent">{matchedAgentName}</Badge>}
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <Button
-                  variant="ghost"
-                  size="compact"
-                  onClick={() => setIsManualModalOpen(true)}
-                  title={t('projects.detail.viewIssueDetail')}
-                  aria-label={t('projects.detail.viewIssueDetail')}
-                >
-                  <FileText size={14} aria-hidden="true" />
-                  <span>{t('projects.detail.issueDetail')}</span>
-                </Button>
-                <IconButton
-                  label={t('projects.detail.closeAgentView')}
-                  size="compact"
-                  onClick={handleCloseThread}
-                >
-                  <X size={14} aria-hidden="true" />
-                </IconButton>
-              </div>
-            </div>
-
-            <div className="project-agent-dock-content">
-              {issueQuery.isLoading ? (
-                <StateBlock title={t('projects.detail.loadingThread')} />
-              ) : !isThreadValid ? (
-                <div style={{ padding: '24px' }}>
-                  <div className="form-error-banner" role="alert">
-                    <AlertTriangle size={16} aria-hidden="true" />
-                    <span>{t('projects.detail.threadRejected')}</span>
-                  </div>
-                </div>
-              ) : (
-                <AgentPane
-                  key={queryThreadId}
-                  paneId={`project-issue-${queryThreadId}`}
-                  agents={agentsQuery.data ?? []}
-                  environments={environmentsQuery.data ?? []}
-                  initialTarget={{ kind: 'BOUND_THREAD', threadId: queryThreadId }}
-                  capabilities={{
-                    allowNewSession: false,
-                    allowBranching: false,
-                  }}
-                  focused
-                />
-              )}
-            </div>
-          </aside>
+        {route.threadId && (
+          <ProjectAgentDock
+            threadId={route.threadId}
+            issueTitle={threadGate.issueTitle}
+            isLoading={threadGate.isLoading}
+            isThreadValid={threadGate.isThreadValid}
+            agentName={threadGate.agentName}
+            agents={threadGate.agents}
+            environments={threadGate.environments}
+            onOpenIssueDetail={modals.openManualDetail}
+            onClose={route.closeThread}
+          />
         )}
       </div>
 
-      {/* Modals */}
-      <EditProjectModal
-        isOpen={isEditProjectOpen}
-        initialTab="workflow"
+      <ProjectDetailModals
+        projectId={projectId}
         project={project}
+        workflow={project.workflow}
         snapshot={snapshot}
         snapshotError={queryError}
-        onClose={() => setIsEditProjectOpen(false)}
-        onSuccess={() => void invalidateSnapshot()}
         api={api}
-      />
-
-      <DeleteProjectModal
-        isOpen={isDeleteProjectOpen}
-        project={project}
-        onClose={() => setIsDeleteProjectOpen(false)}
-        onSuccess={() => onBack?.()}
-        api={api}
-      />
-
-      <CreateIssueModal
-        isOpen={isCreateIssueOpen}
-        projectId={projectId}
-        onClose={() => setIsCreateIssueOpen(false)}
-        onSuccess={() => void invalidateSnapshot()}
-        api={api}
-      />
-
-      <IssueDetailModal
-        key={queryIssueId ?? 'none'}
-        isOpen={isIssueDetailModalOpen}
-        projectId={projectId}
-        issueId={queryIssueId}
-        workflow={project.workflow}
-        onClose={handleCloseIssueDetail}
-        onUpdated={() => void invalidateSnapshot()}
-        onOpenThread={handleOpenThread}
-        api={api}
+        isEditOpen={modals.isEditProjectOpen}
+        isDeleteOpen={modals.isDeleteProjectOpen}
+        isCreateIssueOpen={modals.isCreateIssueOpen}
+        onCloseEdit={modals.closeEditProject}
+        onCloseDelete={modals.closeDeleteProject}
+        onCloseCreateIssue={modals.closeCreateIssue}
+        onDeleted={() => onBack?.()}
+        onProjectUpdated={() => void invalidateSnapshot()}
+        issueDetail={{
+          isOpen: isIssueDetailOpen,
+          issueId: route.issueId,
+          onClose: closeIssueDetail,
+          onOpenThread: route.openThread,
+        }}
       />
     </div>
   )
