@@ -11,7 +11,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UncheckedIOException;
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.zip.CRC32;
@@ -31,11 +30,6 @@ public class SkillArchiveFileReader {
   public SkillArchiveFileReader(StorageBlobManager blobManager, S3StorageService s3StorageService) {
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.s3StorageService = Objects.requireNonNull(s3StorageService, "s3StorageService");
-  }
-
-  /** 归档索引中的全部条目；只读取 {@code storage_blob.archive_index}，不访问对象存储。 */
-  public List<SkillArchiveIndex.Entry> listEntries(UUID artifactBlobId) {
-    return requireIndex(artifactBlobId).entries();
   }
 
   /** 读取归档中的一个文件；条目不存在时抛出 {@link IllegalArgumentException}。 */

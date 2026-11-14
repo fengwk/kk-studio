@@ -169,7 +169,7 @@ public final class AgentReferenceResolver {
   }
 
   /**
-   * 创建 Agent 时锁定并校验 task allowlist 中的既有 Agent。
+   * 创建 Agent 时锁定并校验 subagents allowlist 中的既有 Agent。
    *
    * <p>自身引用无需预先存在：目标行将在同一事务中插入；其它名称仍必须存在并加锁。
    */

@@ -39,13 +39,9 @@ import java.util.TreeSet;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 
-/**
- * Bounded, in-memory construction of a canonical skill archive. No input path is written to disk.
- */
+/** 在内存内按上限构建规范化技能归档：任何输入路径都不落盘。 */
 public final class SkillArchiveBuilder {
-  /**
-   * Bounds derived from the measured local sample; Git readers must enforce them before loading.
-   */
+  /** 各项上限取自实测样本；Git 读取方必须在加载之前先用对象元信息执行这些上限。 */
   public static final long MAX_ARCHIVE_BYTES = 64L << 20;
 
   public static final long MAX_TOTAL_BYTES = 128L << 20;
@@ -71,15 +67,12 @@ public final class SkillArchiveBuilder {
     FILE,
     DIRECTORY,
     LINK,
-    SUBMODULE,
     SPECIAL
   }
 
   /**
-   * Git callers supply object contents, not checked-out filesystem paths. Before reading any
-   * object, callers must use its object metadata to enforce {@link #MAX_FILE_BYTES}, {@link
-   * #MAX_TOTAL_BYTES} and {@link #MAX_PATHS}. This builder cannot bound allocations already made by
-   * its caller.
+   * Git 调用方提供对象内容而不是检出后的文件系统路径。读取任何对象之前，调用方必须先用对象元信息执行 {@link #MAX_FILE_BYTES}、{@link
+   * #MAX_TOTAL_BYTES} 与 {@link #MAX_PATHS}；构建器无法约束调用方已经发生的分配。
    */
   public record InputEntry(String path, Type type, boolean executable, byte[] content) {}
 
@@ -129,8 +122,7 @@ public final class SkillArchiveBuilder {
     return build(acc);
   }
 
-  // ZipFile materializes the central directory before exposing entries. Count it first so a
-  // small archive with a huge number of empty entries cannot exhaust memory during construction.
+  // ZipFile 会先物化中央目录再暴露条目；因此先自行计数，避免体积很小但空条目极多的归档在建目录时耗尽内存。
   private void checkZipDirectory(byte[] bytes) throws IOException {
     int end = -1;
     for (int p = bytes.length - 22; p >= Math.max(0, bytes.length - 65557); p--) {
@@ -218,7 +210,7 @@ public final class SkillArchiveBuilder {
   public Result fromTarGz(InputStream input) throws IOException {
     byte[] bytes = readBounded(input, limits.compressed(), "tar.gz");
     Accumulator acc = new Accumulator();
-    // Bound headers, PAX metadata and padding too, not just regular file payloads.
+    // 除普通文件负载外，header、PAX 元数据与填充字节同样计入上限。
     try (InputStream gzip =
             GzipCompressorInputStream.builder()
                 .setInputStream(new ByteArrayInputStream(bytes))
@@ -240,7 +232,7 @@ public final class SkillArchiveBuilder {
         byte[] data = readBounded(tar, limits.file(), entry.getName());
         acc.add(new InputEntry(entry.getName(), type, (entry.getMode() & 0111) != 0, data));
       }
-      // Force gzip trailer verification and account for trailing decompressed bytes.
+      // 读尽剩余字节：强制校验 gzip trailer，并把末尾解压出的字节计入上限。
       byte[] buffer = new byte[8192];
       while (bounded.read(buffer) != -1) {}
     }

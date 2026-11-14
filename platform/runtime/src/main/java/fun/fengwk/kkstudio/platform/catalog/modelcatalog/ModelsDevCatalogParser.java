@@ -556,10 +556,10 @@ public class ModelsDevCatalogParser {
             stringFilter(when.get("service_tier"), "condition.service_tier"));
         case "date" -> condition.setDate(date(when.get("date")));
         case "utc_hours" -> {
-          // utc_days and utc_hours jointly form one time window.
+          // utc_days 与 utc_hours 共同构成同一个时间窗，因此在循环之后合并处理。
         }
         case "utc_days" -> {
-          // handled with utc_hours below
+          // 与 utc_hours 一起在循环之后合并处理。
         }
         case "all" -> condition.setAll(conditions(when.get("all"), depth + 1, importContext));
         case "any" -> condition.setAny(conditions(when.get("any"), depth + 1, importContext));

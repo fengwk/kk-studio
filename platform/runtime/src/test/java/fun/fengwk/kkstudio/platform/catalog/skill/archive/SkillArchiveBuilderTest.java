@@ -107,7 +107,7 @@ class SkillArchiveBuilderTest {
                 List.of(
                     new InputEntry("x", Type.FILE, false, SCRIPT),
                     new InputEntry("x/y", Type.FILE, false, SCRIPT))));
-    for (Type type : List.of(Type.LINK, Type.SPECIAL, Type.SUBMODULE)) {
+    for (Type type : List.of(Type.LINK, Type.SPECIAL)) {
       assertThrows(
           IOException.class,
           () ->

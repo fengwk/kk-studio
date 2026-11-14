@@ -15,7 +15,6 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 
@@ -54,9 +53,10 @@ class McpClientFactoryTest {
 
   /** 预算已耗尽时不得再发起握手：必须立即以超时结束，而不是进入初始化流程。 */
   @Test
-  void failsWithoutHandshakeWhenDeadlineAlreadyExpired() {
+  void failsWithoutHandshakeWhenDeadlineAlreadyExpired() throws InterruptedException {
     RemoteMcpConfig config = new RemoteMcpConfig("http://127.0.0.1:1/mcp", Map.of());
-    McpDeadline expired = McpDeadline.ofDeadline(Instant.now().minusSeconds(1));
+    McpDeadline expired = McpDeadline.of(Duration.ofMillis(1));
+    Thread.sleep(20);
 
     assertThatThrownBy(() -> McpClientFactory.createRemote(config, expired))
         .isInstanceOf(McpTimeoutException.class)

@@ -199,7 +199,7 @@ public class McpServerService {
         });
   }
 
-  /** 在父 Server 行锁下整体物理替换当前工具行并标记 AVAILABLE；被 Agent 引用的旧工具名若将消失则 fail closed，不存在 tombstone 或修订版本。 */
+  /** 在父 Server 行锁下整体物理替换当前工具行并标记 AVAILABLE；被 Agent 引用的工具名若将消失则 fail closed。 */
   private void replaceTools(McpServer locked, List<McpTool> discovered) {
     String name = locked.name();
     Set<String> nextNames = discovered.stream().map(McpTool::name).collect(Collectors.toSet());

@@ -101,7 +101,11 @@ public final class McpCancellationToken {
     }
   }
 
-  /** 已保留的监听器数量；仅供同包测试观测共享单例绝不累积监听器，且取消后清除监听器引用。 */
+  /**
+   * 已保留的监听器数量。
+   *
+   * <p>生产代码不调用它：这是同包测试观测点，用于断言共享单例绝不累积监听器、以及取消后监听器引用被清空。测试与实现同包，因此不需要反射或额外抽象。
+   */
   synchronized int listenerCount() {
     return cancellable && !cancelled && listeners != null ? listeners.size() : 0;
   }

@@ -33,28 +33,23 @@ import java.util.Map;
  *   <li>非法 Base64 等受控结构仍保留为有界 JSON，不因单条畸形内容二次失败。
  * </ul>
  *
- * <p>普通 content 优先，保持既有工具结果映射；只有 content 为空时才把结构化结果写成可读 JSON 文本。模块自有 JSON 与 SDK 内容序列化一律走 Jackson
- * 3（{@code tools.jackson}）。
+ * <p>普通 content 优先；只有 content 为空时才把结构化结果写成可读 JSON 文本。模块自有 JSON 与 SDK 内容序列化一律走 Jackson 3（{@code
+ * tools.jackson}）。
  *
  * <p>累计预算是单次 {@code extract} 内全部 text 与 binary 字节之和，上限为 {@link #MAX_CONTENT_BUDGET_BYTES}（64
- * MiB）。该数字对齐既有 terminal 工具产物硬上限的数量级（daemon multiline 扫描与 terminal 结果尺寸检查使用的 64 MiB），不是新的调用配置：MCP
- * client 没有独立的结果预算配置项。
+ * MiB）：MCP client 不提供独立的结果预算配置项。
  */
 @Slf4j
 public final class McpResultExtractor {
 
-  /**
-   * 单次 MCP 响应全部内容的累计字节预算：64 MiB。
-   *
-   * <p>与既有 terminal/daemon 64 MiB 上界对齐，不新增配置。
-   */
+  /** 单次 MCP 响应全部内容的累计字节预算：64 MiB；不提供配置项。 */
   public static final int MAX_CONTENT_BUDGET_BYTES = 64 * 1024 * 1024;
 
   /**
    * 模块 JSON 与结构化内容共用的 Jackson 3 mapper。
    *
    * <p>显式开启 {@link SerializationFeature#FAIL_ON_EMPTY_BEANS}：Jackson 3 默认关闭该开关，会把无可序列化属性的 value 写成
-   * {@code {}}；这里保持既有约定，让无法编码的详情继续走失败回退，而不是产出看似合法的空对象 JSON。
+   * {@code {}}；开启后无法编码的详情走失败回退，而不是产出看似合法的空对象 JSON。
    */
   private static final ObjectMapper OBJECT_MAPPER =
       JsonMapper.builder().enable(SerializationFeature.FAIL_ON_EMPTY_BEANS).build();

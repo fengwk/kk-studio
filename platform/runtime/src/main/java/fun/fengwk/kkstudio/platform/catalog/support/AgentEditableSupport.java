@@ -1,13 +1,12 @@
 package fun.fengwk.kkstudio.platform.catalog.support;
 
 import org.springframework.stereotype.Component;
-import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 
 /**
- * AgentEditableSupport 负责标准化 agent 管理面的字符串与 JSON 可编辑字段。
+ * AgentEditableSupport 负责标准化 agent 管理面的可编辑文本字段：去除环绕空白并拒绝超出列宽的值。
  *
  * @author fengwk
  */
@@ -31,55 +30,11 @@ public final class AgentEditableSupport {
     return trimmed.isEmpty() ? null : trimmed;
   }
 
-  public String firstNonBlank(String... values) {
-    if (values == null) {
-      return null;
-    }
-    for (String value : values) {
-      String trimmed = trimToNull(value);
-      if (trimmed != null) {
-        return trimmed;
-      }
-    }
-    return null;
-  }
-
   /** 拒绝规范化后超出当前 PostgreSQL schema 列宽限制的值。 */
   public void validateMaxLength(String resource, String field, String value, int maxLength) {
     if (value != null && value.codePointCount(0, value.length()) > maxLength) {
       throw DomainException.validation(
           resource, field + " must not exceed " + maxLength + " characters");
-    }
-  }
-
-  public void validateJsonArray(String json, String fieldName) {
-    try {
-      if (!objectMapper.readTree(json).isArray()) {
-        throw new IllegalArgumentException(fieldName + " must be a JSON array");
-      }
-    } catch (JacksonException e) {
-      throw new IllegalArgumentException(fieldName + " must be valid JSON", e);
-    }
-  }
-
-  public void validateJsonObject(String json, String fieldName) {
-    if (trimToNull(json) == null) {
-      throw new IllegalArgumentException(fieldName + " must be a JSON object");
-    }
-    validateJsonObjectOrNull(json, fieldName);
-  }
-
-  public void validateJsonObjectOrNull(String json, String fieldName) {
-    String trimmed = trimToNull(json);
-    if (trimmed == null) {
-      return;
-    }
-    try {
-      if (!objectMapper.readTree(trimmed).isObject()) {
-        throw new IllegalArgumentException(fieldName + " must be a JSON object");
-      }
-    } catch (JacksonException e) {
-      throw new IllegalArgumentException(fieldName + " must be valid JSON", e);
     }
   }
 }
