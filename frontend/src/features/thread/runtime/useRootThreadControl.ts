@@ -8,7 +8,6 @@ import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import {
   materializeAgentBranchDraft,
-  materializeBlankBranchDraft,
   type BranchDraft,
 } from '@/features/thread/branch-draft'
 import type { ThreadComposerHandle } from '@/features/thread/runtime/thread-panel'
@@ -48,6 +47,7 @@ import {
   handlePaneCommand,
   type PaneCommandContext,
 } from '@/features/thread/runtime/root-thread/pane-command-handler'
+import { useLocalBranchDraft } from '@/features/thread/runtime/root-thread/useLocalBranchDraft'
 import { usePaneAcceptance } from '@/features/thread/runtime/root-thread/usePaneAcceptance'
 import { usePaneBackgroundProjection } from '@/features/thread/runtime/root-thread/usePaneBackgroundProjection'
 import {
@@ -132,9 +132,6 @@ export function useRootThreadControl({
   const composerScope = ownerKey
     ? `agent-pane:${ownerKey}:${paneId}`
     : `agent-pane:thread:${paneId}`
-  const [localDraft, setLocalDraft] = useState<BranchDraft | null>(null)
-  // 未创建分支草稿是否被用户真的改过：只有存在 diff 才展示 draft 状态，默认不做常驻噪声。
-  const [localDraftEdited, setLocalDraftEdited] = useState(false)
   const [parts, setPartsState] = useState<ComposerPart[]>(
     () => restoreComposerDraft(composerScope, []),
   )
@@ -149,7 +146,6 @@ export function useRootThreadControl({
     targetRef.current = target
   }, [target])
   const partsRef = useRef(parts)
-  const localDraftRef = useRef<BranchDraft | null>(localDraft)
   const pendingAcceptanceRef = useRef<PendingAcceptance | null>(null)
   // rename PUT 在途栅栏：state commit 前也能让 changeTarget/handleCommand 看到
   // 重命名正在进行，从而阻塞外部 target 切换与并发命令（与 pendingAcceptance
@@ -179,49 +175,24 @@ export function useRootThreadControl({
     projection,
   })
   const controller = branchPanel.controller
+  const models = controller.models
+
+  const {
+    localDraft,
+    setLocalDraft,
+    localDraftEdited,
+    setLocalDraftEdited,
+    localDraftRef,
+  } = useLocalBranchDraft({ target, agents, environments, defaults, models })
+
   const activeDraft = isBoundTarget(target) ? branchPanel.draft ?? null : localDraft
   const boundThreadName = isBoundTarget(target) && controller.thread?.threadId === target.threadId
     ? controller.thread.name
     : null
-  const models = controller.models
 
   useEffect(() => {
     partsRef.current = parts
   }, [parts])
-
-  useEffect(() => {
-    localDraftRef.current = localDraft
-  }, [localDraft])
-
-  useEffect(() => {
-    if (isBoundTarget(target)) {
-      return
-    }
-    if (localDraft != null || models.length === 0) {
-      return
-    }
-    const preferred = defaults.agentName
-      ? agents.find((agent) => agent.name === defaults.agentName)
-      : agents.find((agent) =>
-        materializeBlankBranchDraft(
-          agent,
-          defaults.yoloEnabled ?? false,
-          models,
-          defaults.environmentName,
-        ) != null,
-      )
-    const materialized = preferred == null
-      ? null
-      : materializeBlankBranchDraft(
-        preferred,
-        defaults.yoloEnabled ?? false,
-        models,
-        defaults.environmentName,
-      )
-    if (materialized != null) {
-      setLocalDraft(materialized)
-    }
-  }, [agents, defaults.agentName, defaults.environmentName, defaults.yoloEnabled, localDraft, models, target])
 
   usePaneBackgroundProjection(boundThreadId)
 
