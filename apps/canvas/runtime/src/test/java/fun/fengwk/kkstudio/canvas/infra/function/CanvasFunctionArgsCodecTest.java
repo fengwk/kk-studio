@@ -45,7 +45,7 @@ class CanvasFunctionArgsCodecTest {
     assertEquals(new JsonText("16:9"), decoded.values().get("ratio"));
     assertEquals(new JsonNumber(BigDecimal.valueOf(5)), decoded.values().get("duration"));
 
-    String encoded = codec.encode(decoded);
+    String encoded = decoded.write();
     assertEquals(
         "{\"prompt\":\"a cinematic video\",\"ratio\":\"16:9\",\"duration\":5,"
             + "\"source\":{\"type\":\"resource\","

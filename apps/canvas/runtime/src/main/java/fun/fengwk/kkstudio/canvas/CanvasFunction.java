@@ -18,7 +18,7 @@ import java.util.UUID;
  * ResourceNode 上可选的资源生产配置：函数名 + 插件声明的 args。
  *
  * <p>args 是 {@link CanvasJson.JsonObject}，因此 {@link Object#equals(Object)} 就是 JSON 语义比较，可直接作为
- * Function 语义组的编辑基线。 核心按保留引用形状遍历 args：出现 {@code type=resource} 的对象必须恰好声明 {@code
+ * Function 语义组的编辑基线。 服务端按保留引用形状遍历 args：出现 {@code type=resource} 的对象必须恰好声明 {@code
  * type/nodeId/index}，否则视为非法配置。
  */
 public record CanvasFunction(String name, CanvasJson.JsonObject args) {

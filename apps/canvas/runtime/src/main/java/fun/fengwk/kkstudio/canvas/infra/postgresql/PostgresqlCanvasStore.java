@@ -19,7 +19,7 @@ import java.util.UUID;
  * Canvas document 可变行状态（document/node/group/dedup）的 PostgreSQL 持久化。
  *
  * <p>锁语义是跨域事务协议的一部分：命令与 Function Run 先锁 document，Function Run 再锁 node。保留 PostgreSQL 的 {@code FOR
- * UPDATE} 行为。引用连线是 args 的读取投影，因此这里没有 link 行。
+ * UPDATE} 行为。引用连线是 args 的读取投影，不存为独立的行。
  */
 @Repository
 public class PostgresqlCanvasStore {

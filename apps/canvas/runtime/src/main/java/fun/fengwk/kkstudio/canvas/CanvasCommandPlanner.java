@@ -553,7 +553,7 @@ public final class CanvasCommandPlanner {
       return new CanvasConflict.StaleNode(node.id, group, project(node));
     }
 
-    /** 运行期间禁止手工换输出与删除节点，避免与正在进行的执行竞争。 */
+    /** 运行期间禁止手工换输出与删除节点，避免与活跃执行或待核查的 Run 竞争。 */
     private boolean requireIdleNode(NodeState node) {
       if (node.run == null) {
         return false;
