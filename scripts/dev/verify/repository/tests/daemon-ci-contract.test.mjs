@@ -35,6 +35,7 @@ test('Go daemon CI builds all six static targets and is reusable by release and 
 
 test('Go CI watches its script suites and local composite actions for both push and pull requests', () => {
   for (const dependency of [
+    'scripts/dev/lib/**',
     'scripts/dev/verify/reliability/**',
     'scripts/dev/verify/supply-chain/**',
     '.github/actions/**',

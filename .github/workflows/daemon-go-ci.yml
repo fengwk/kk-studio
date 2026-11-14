@@ -6,6 +6,7 @@ on:
     paths:
       - 'daemon-go/**'
       - 'scripts/daemon/**'
+      - 'scripts/dev/lib/**'
       - 'scripts/dev/verify/repository/**'
       - 'scripts/dev/verify/reliability/**'
       - 'scripts/dev/verify/supply-chain/**'
@@ -17,6 +18,7 @@ on:
     paths:
       - 'daemon-go/**'
       - 'scripts/daemon/**'
+      - 'scripts/dev/lib/**'
       - 'scripts/dev/verify/repository/**'
       - 'scripts/dev/verify/reliability/**'
       - 'scripts/dev/verify/supply-chain/**'
