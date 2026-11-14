@@ -160,3 +160,14 @@ export function isBoundToConnection(
     && view.eventNodeId === eventNodeId
     && view.connectionId === connectionId
 }
+
+/** 视图仍是同一个绑定（同 view、同实例、同 bindingEpoch）时，迟到的命令回执才有意义。 */
+export function isSameBinding(
+  current: IdeViewState | undefined,
+  expected: Pick<IdeViewState, 'viewId' | 'daemonInstanceId' | 'bindingEpoch'>,
+): boolean {
+  return current != null
+    && current.viewId === expected.viewId
+    && current.daemonInstanceId === expected.daemonInstanceId
+    && current.bindingEpoch === expected.bindingEpoch
+}

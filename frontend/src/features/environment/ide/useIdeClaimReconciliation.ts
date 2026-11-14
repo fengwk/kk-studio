@@ -45,6 +45,7 @@ import {
 } from '@/features/environment/ide/useIdeUsageProof'
 import {
   isBoundToConnection,
+  isSameBinding,
   type IdeViewState,
 } from '@/features/environment/ide/ide-view-state'
 import {
@@ -914,7 +915,7 @@ export function useIdeClaimReconciliation({
       const current = viewsRef.current[environmentId]
       const appliedIdentity = identityRef.current
       if (
-        !bindingMatches(current, view)
+        !isSameBinding(current, view)
         || requestIdentity == null
         || appliedIdentity == null
         || appliedIdentity.eventNodeId !== requestIdentity.eventNodeId
@@ -942,16 +943,6 @@ export function useIdeClaimReconciliation({
       return
     }
     void runTerminal(environmentId)
-  }
-
-  function bindingMatches(
-    current: IdeViewState | undefined,
-    expected: Pick<IdeViewState, 'viewId' | 'daemonInstanceId' | 'bindingEpoch'>,
-  ): boolean {
-    return current != null
-      && current.viewId === expected.viewId
-      && current.daemonInstanceId === expected.daemonInstanceId
-      && current.bindingEpoch === expected.bindingEpoch
   }
 
   async function closeEnvironment(environmentId: string, discard: boolean): Promise<IdeCloseResult> {
@@ -987,7 +978,7 @@ export function useIdeClaimReconciliation({
       }
       await closeIdeView(environmentId, view.viewId, body)
       const current = viewsRef.current[environmentId]
-      if (!bindingMatches(current, view)) {
+      if (!isSameBinding(current, view)) {
         return { ok: false, dirty: false, message: 'binding-changed' }
       }
       const next = { ...viewsRef.current }
@@ -999,7 +990,7 @@ export function useIdeClaimReconciliation({
       return { ok: true, dirty: false }
     } catch (error) {
       const current = viewsRef.current[environmentId]
-      if (!bindingMatches(current, view)) {
+      if (!isSameBinding(current, view)) {
         return { ok: false, dirty: false, message: 'binding-changed' }
       }
       const unknown = isUnknownIdeFailure(error) || ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN'
@@ -1082,7 +1073,7 @@ export function useIdeClaimReconciliation({
         }
         return { ok: false, message: 'binding-changed' }
       }
-      if (bindingMatches(current, view)) {
+      if (isSameBinding(current, view)) {
         updateView(environmentId, view.attempt, {
           daemonInstanceId: validated.daemonInstanceId,
           bindingEpoch: validated.bindingEpoch,
@@ -1099,7 +1090,7 @@ export function useIdeClaimReconciliation({
       return { ok: true }
     } catch (error) {
       const current = viewsRef.current[environmentId]
-      if (bindingMatches(current, view)) {
+      if (isSameBinding(current, view)) {
         if (isIdeProtocolError(error)) {
           updateView(environmentId, view.attempt, {
             status: 'error',
