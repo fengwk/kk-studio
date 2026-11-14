@@ -92,15 +92,15 @@ export interface ThreadComposerProps {
 }
 
 /**
- * 共享的 ordered Pill Composer（OpenCode 风格）。
+ * Composer 底层的 ordered Pill 输入区。
  *
  * 原生 contenteditable editor + `contenteditable=false` attachment/resource pill；draft 是
  * ordered {@link ComposerPart}（TEXT/ATTACHMENT/RESOURCE），DOM pill 携带
  * `data-part-id`、`data-part-type` 与对应引用字段。只有文件粘贴/拖放/选择会创建
  * attachment pill，typed '@filename' 始终是文本。
  *
- * 上传注册表（strip）由组件内部持有；通过可注入的 storageService/hashFile
- * 适配（Canvas 后续可复用同一契约，无需依赖本组件之外的 AI 状态）。
+ * 上传注册表（strip）由组件内部持有；storageService/hashFile 可注入，使组件不依赖
+ * 任何 Thread 身份或 AI 状态。
  */
 export function ThreadComposer({
   ref,

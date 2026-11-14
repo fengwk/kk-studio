@@ -8,8 +8,8 @@ import './thread-interaction-panel.css'
 /**
  * Composer 区域的轻量交互面板外壳。
  *
- * 面板不创建 backdrop，也不抢占整个页面；由 ThreadPanel/调用方与 Composer
- * 互斥展示。选择器、历史树等交互只需复用统一的标题、控制区、正文与 footer。
+ * 面板不创建 backdrop，也不抢占整个页面；由调用方与 Composer 互斥展示。
+ * 选择器、历史树等交互只需复用统一的标题、控制区、正文与 footer。
  */
 export function ThreadInteractionPanel({
   title,

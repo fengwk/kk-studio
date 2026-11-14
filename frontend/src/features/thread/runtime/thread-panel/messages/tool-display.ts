@@ -12,7 +12,7 @@ export interface ToolCallSummary {
 }
 
 /**
- * 将工具参数压缩成 pi 风格的单行标题；未知工具/MCP 回退为紧凑 JSON。
+ * 将工具参数压缩成单行标题；未知工具/MCP 回退为紧凑 JSON。
  *
  * 紧凑 JSON 由规范值直接序列化：不改变字符串内容，不丢弃 false/0/空值，
  * 也不补充未传入的默认值。超长值由 Header 的换行与 overflow-wrap 承载。
