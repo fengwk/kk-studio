@@ -16,8 +16,7 @@ import java.util.UUID;
 /**
  * {@code environment_connection} 行到 {@link EnvironmentConnection} 的映射。
  *
- * <p>只做列读取与解码：连接状态、宿主 metadata 与事件窗口都按行内既有事实还原，不从其它来源补值。状态推进、围栏与通知仍由 {@link EnvironmentRegistry}
- * 负责。
+ * <p>只做列读取与解码：连接状态、宿主 metadata 与事件窗口都从行内列还原，不从其它来源补值。状态推进、围栏与通知仍由 {@link EnvironmentRegistry} 负责。
  */
 final class EnvironmentConnectionRows {
 
