@@ -34,47 +34,72 @@ final class SpawnTickets {
     }
     UUID childId = ticket.threadId();
     UUID parentId = ticket.parentThreadId();
-    // owner 的结算票据不能被续接接管；exact replay 已在调用准入前完成身份校验并返回。
-    if (tx.joins().loadIncomplete(childId).stream()
-        .anyMatch(pending -> pending.delivery() == JoinDelivery.SETTLE_OWNER_TURN)) {
-      throw new IllegalArgumentException("child has an unfinished owner settlement");
-    }
+    requireNoOwnerSettlement(tx, childId);
     if (parentId != null) {
       ThreadState parent =
           tx.threads()
               .find(parentId)
               .orElseThrow(() -> new IllegalArgumentException("join parent does not exist"));
       if (countsAsSubagent(ticket.delivery())) {
-        // 停止父 Thread 不再接受新的执行子任务：不能只依赖 head 变化，STOPPED 是持久的拒绝条件。
-        if (parent.executionControl().isStopped()) {
-          throw new IllegalArgumentException("join parent is stopped");
-        }
-        if (!parent.headEntryId().equals(ticket.expectedParentHeadEntryId())) {
-          throw new IllegalArgumentException("join parent no longer accepts this invocation");
-        }
-      }
-      if (countsAsSubagent(ticket.delivery())) {
-        int projectedChildren =
-            tx.joins().countIncompleteChildren(parentId)
-                - replacedQuotaJoins(tx, childId, parentId)
-                + 1;
-        if (projectedChildren > ticket.budget().maxConcurrentChildren()) {
-          throw new SpawnQuotaExceededException("parent join quota exceeded");
-        }
+        requireParentAcceptsInvocation(parent, ticket);
+        requireChildQuota(tx, ticket, childId, parentId);
       }
     }
+    requireDepthQuota(tx, ticket, childId, parentId, creating);
+    if (parentId != null && countsAsSubagent(ticket.delivery())) {
+      requireGlobalQuota(tx, ticket, childId, parentId);
+    }
+  }
+
+  /** owner 的结算票据不能被续接接管；exact replay 已在调用准入前完成身份校验并返回。 */
+  private static void requireNoOwnerSettlement(HarnessStore.Transaction tx, UUID childId) {
+    if (tx.joins().loadIncomplete(childId).stream()
+        .anyMatch(pending -> pending.delivery() == JoinDelivery.SETTLE_OWNER_TURN)) {
+      throw new IllegalArgumentException("child has an unfinished owner settlement");
+    }
+  }
+
+  /** 停止父 Thread 不再接受新的执行子任务：不能只依赖 head 变化，STOPPED 是持久的拒绝条件。 */
+  private static void requireParentAcceptsInvocation(ThreadState parent, SpawnRequest ticket) {
+    if (parent.executionControl().isStopped()) {
+      throw new IllegalArgumentException("join parent is stopped");
+    }
+    if (!parent.headEntryId().equals(ticket.expectedParentHeadEntryId())) {
+      throw new IllegalArgumentException("join parent no longer accepts this invocation");
+    }
+  }
+
+  private static void requireChildQuota(
+      HarnessStore.Transaction tx, SpawnRequest ticket, UUID childId, UUID parentId) {
+    int projectedChildren =
+        tx.joins().countIncompleteChildren(parentId)
+            - replacedQuotaJoins(tx, childId, parentId)
+            + 1;
+    if (projectedChildren > ticket.budget().maxConcurrentChildren()) {
+      throw new SpawnQuotaExceededException("parent join quota exceeded");
+    }
+  }
+
+  private static void requireDepthQuota(
+      HarnessStore.Transaction tx,
+      SpawnRequest ticket,
+      UUID childId,
+      UUID parentId,
+      boolean creating) {
     List<UUID> chain =
         tx.threads().findAncestorChain(creating && parentId != null ? parentId : childId);
     int depth = creating ? chain.size() + 1 : chain.size();
     if (depth > ticket.budget().maxDepth()) {
       throw new IllegalArgumentException("join depth quota exceeded");
     }
-    if (parentId != null && countsAsSubagent(ticket.delivery())) {
-      int projectedGlobal =
-          tx.joins().countIncompleteSubagent() - replacedQuotaJoins(tx, childId, parentId) + 1;
-      if (projectedGlobal > ticket.budget().maxConcurrentThreads()) {
-        throw new SpawnQuotaExceededException("subagent concurrency quota exceeded");
-      }
+  }
+
+  private static void requireGlobalQuota(
+      HarnessStore.Transaction tx, SpawnRequest ticket, UUID childId, UUID parentId) {
+    int projectedGlobal =
+        tx.joins().countIncompleteSubagent() - replacedQuotaJoins(tx, childId, parentId) + 1;
+    if (projectedGlobal > ticket.budget().maxConcurrentThreads()) {
+      throw new SpawnQuotaExceededException("subagent concurrency quota exceeded");
     }
   }
 

@@ -38,21 +38,39 @@ public record ExecutionExitJournalRecord(
     }
     ownerLeaseToken = Objects.requireNonNull(ownerLeaseToken, "ownerLeaseToken");
     kind = Objects.requireNonNull(kind, "kind");
+    requireLocationMatchesKind(kind, executionId, parentExecutionId, environmentId);
+    stage = Objects.requireNonNull(stage, "stage");
+    requireStageEvidence(stage, kind, targetState, confirmedAt);
+  }
+
+  /** 远端执行必须有父执行与环境，本地执行必须都没有。 */
+  private static void requireLocationMatchesKind(
+      ExecutionExitKind kind,
+      UUID executionId,
+      UUID parentExecutionId,
+      EnvironmentId environmentId) {
     if (kind == ExecutionExitKind.REMOTE) {
-      parentExecutionId = Objects.requireNonNull(parentExecutionId, "parentExecutionId");
+      Objects.requireNonNull(parentExecutionId, "parentExecutionId");
       if (parentExecutionId.equals(executionId)) {
         throw new IllegalArgumentException("remote execution cannot parent itself");
       }
-      environmentId = Objects.requireNonNull(environmentId, "environmentId");
-    } else {
-      if (parentExecutionId != null) {
-        throw new IllegalArgumentException("only a remote execution has a parent execution");
-      }
-      if (environmentId != null) {
-        throw new IllegalArgumentException("only a remote execution has an environment id");
-      }
+      Objects.requireNonNull(environmentId, "environmentId");
+      return;
     }
-    stage = Objects.requireNonNull(stage, "stage");
+    if (parentExecutionId != null) {
+      throw new IllegalArgumentException("only a remote execution has a parent execution");
+    }
+    if (environmentId != null) {
+      throw new IllegalArgumentException("only a remote execution has an environment id");
+    }
+  }
+
+  /** PREPARED 只冻结身份；EXIT_PROOF 必须携带与 kind 相容的真实退出证据与确认时间。 */
+  private static void requireStageEvidence(
+      ExecutionExitJournalStage stage,
+      ExecutionExitKind kind,
+      ExecutionExitState targetState,
+      Instant confirmedAt) {
     if (stage == ExecutionExitJournalStage.PREPARED) {
       if (kind == ExecutionExitKind.REMOTE) {
         throw new IllegalArgumentException("a remote execution has no local prepared lifecycle");
@@ -63,23 +81,22 @@ public record ExecutionExitJournalRecord(
       if (confirmedAt != null) {
         throw new IllegalArgumentException("a prepared execution has no confirmation time");
       }
-    } else {
-      targetState = Objects.requireNonNull(targetState, "targetState");
-      if (!targetState.confirmed()) {
-        throw new IllegalArgumentException("journal target must be real exit evidence");
-      }
-      if (targetState == ExecutionExitState.REMOTE_ACKNOWLEDGED
-          && kind != ExecutionExitKind.REMOTE) {
-        throw new IllegalArgumentException("only a remote execution can be remote-acknowledged");
-      }
-      if ((targetState == ExecutionExitState.STUDIO_EXITED
-              || targetState == ExecutionExitState.OWNER_EXITED)
-          && kind == ExecutionExitKind.REMOTE) {
-        throw new IllegalArgumentException("a remote execution cannot claim a local exit");
-      }
-      confirmedAt = Objects.requireNonNull(confirmedAt, "confirmedAt");
-      HarnessStoreTime.requireMillisecondPrecision(confirmedAt);
+      return;
     }
+    Objects.requireNonNull(targetState, "targetState");
+    if (!targetState.confirmed()) {
+      throw new IllegalArgumentException("journal target must be real exit evidence");
+    }
+    if (targetState == ExecutionExitState.REMOTE_ACKNOWLEDGED && kind != ExecutionExitKind.REMOTE) {
+      throw new IllegalArgumentException("only a remote execution can be remote-acknowledged");
+    }
+    if ((targetState == ExecutionExitState.STUDIO_EXITED
+            || targetState == ExecutionExitState.OWNER_EXITED)
+        && kind == ExecutionExitKind.REMOTE) {
+      throw new IllegalArgumentException("a remote execution cannot claim a local exit");
+    }
+    Objects.requireNonNull(confirmedAt, "confirmedAt");
+    HarnessStoreTime.requireMillisecondPrecision(confirmedAt);
   }
 
   /** 允许本地 body 之前的持久声明：只冻结执行身份。 */

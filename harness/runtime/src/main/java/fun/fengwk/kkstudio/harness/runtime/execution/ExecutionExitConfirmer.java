@@ -13,16 +13,13 @@ import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Supplier;
 
@@ -42,13 +39,12 @@ import java.util.function.Supplier;
  * <p>同一 execution 的确认在进程内按稳定 stripe 串行化，事实与 version 推进幂等，并始终复用待确认记录的第一次 canonical proof
  * 的身份、目标和确认时刻。首次 journal 写入失败时 proof 只保留在本进程内等待重试，不能宣称跨进程 durable。事实缺失或 canonical proof 与
  * journal/数据库的真实 identity/target 冲突只对该 execution 每 30 秒低频核对；被拒绝的新输入不改变原 proof。其它数据库或文件失败按 {@link
- * #BACKOFF_SECONDS} 退避，成功后重置。
+ * {@link FailureBackoff} 退避，成功后重置。
  */
 @Slf4j
 public final class ExecutionExitConfirmer {
 
   private static final int LOCK_STRIPES = 64;
-  private static final int[] BACKOFF_SECONDS = {1, 2, 4, 8, 16, 30};
   private static final String PHASE_CONFIRM = "EXIT_CONFIRMATION_CONFIRM";
   private static final String PHASE_REPLAY = "EXIT_CONFIRMATION_REPLAY";
   private static final String PHASE_RECOVER = "EXIT_CONFIRMATION_OWNER_RECOVERY";
@@ -62,9 +58,7 @@ public final class ExecutionExitConfirmer {
   private final ConcurrentHashMap<UUID, PendingProof> proofs = new ConcurrentHashMap<>();
   private final ConcurrentHashMap<UUID, ExecutionExitJournalRecord> frozenPrepared =
       new ConcurrentHashMap<>();
-  private final ConcurrentHashMap<UUID, Failure> failures = new ConcurrentHashMap<>();
-  private final Set<String> reportedFileFailures = ConcurrentHashMap.newKeySet();
-  private final AtomicReference<DirectoryFailure> directoryFailure = new AtomicReference<>();
+  private final FailureBackoff backoff = new FailureBackoff();
   private final AtomicBoolean recovered = new AtomicBoolean();
 
   public ExecutionExitConfirmer(HarnessStore store, ExecutionExitJournal journal, Clock clock) {
@@ -89,7 +83,7 @@ public final class ExecutionExitConfirmer {
     ExecutionExitJournalSnapshot snapshot;
     try {
       snapshot = journal.loadAll();
-      directoryFailure.set(null);
+      backoff.resetDirectoryFailure();
     } catch (RuntimeException failure) {
       reportDirectoryFailure(now, failure);
       throw failure;
@@ -157,10 +151,10 @@ public final class ExecutionExitConfirmer {
         candidates.put(executionId, ReplayCandidate.inMemory(executionId));
       }
     }
-    if (shouldLoadDirectory(now)) {
+    if (backoff.shouldLoadDirectory(now)) {
       try {
         ExecutionExitJournalSnapshot snapshot = journal.loadAll();
-        directoryFailure.set(null);
+        backoff.resetDirectoryFailure();
         reportFileFailures(snapshot.failures());
         for (ExecutionExitJournalRecord record : snapshot.records()) {
           // 当前进程新登记的 PREPARED 绝不是退出证据，只有冻结的上一进程集合才会被对账。
@@ -179,7 +173,7 @@ public final class ExecutionExitConfirmer {
     }
     if (includeFrozenPrepared) {
       for (ExecutionExitJournalRecord record : List.copyOf(frozenPrepared.values())) {
-        if (shouldAttempt(record.executionId(), now)) {
+        if (backoff.shouldAttempt(record.executionId(), now)) {
           reconcilePrepared(record, PHASE_REPLAY, now);
         }
       }
@@ -188,7 +182,7 @@ public final class ExecutionExitConfirmer {
 
   private void replay(ReplayCandidate candidate, Instant now) {
     UUID executionId = candidate.executionId();
-    if (!shouldAttempt(executionId, now)) {
+    if (!backoff.shouldAttempt(executionId, now)) {
       return;
     }
     locked(
@@ -208,7 +202,7 @@ public final class ExecutionExitConfirmer {
             current = new PendingProof(candidate.journalRecord());
             proofs.put(executionId, current);
           }
-          if (shouldAttempt(executionId, now)) {
+          if (backoff.shouldAttempt(executionId, now)) {
             replayOne(current.record(), now);
           }
           return true;
@@ -240,7 +234,8 @@ public final class ExecutionExitConfirmer {
           try {
             lookup = store.transaction(tx -> lookupPreparedFact(tx, record));
           } catch (RuntimeException failure) {
-            recordFailure(record.executionId(), FailureReason.DATABASE, phase, now, failure);
+            recordFailure(
+                record.executionId(), FailureBackoff.FailureReason.DATABASE, phase, now, failure);
             return PreparedOutcome.RETAINED;
           }
           return switch (lookup.kind()) {
@@ -249,7 +244,7 @@ public final class ExecutionExitConfirmer {
             case CONFLICT -> {
               recordFailure(
                   record.executionId(),
-                  FailureReason.IDENTITY_CONFLICT,
+                  FailureBackoff.FailureReason.IDENTITY_CONFLICT,
                   phase,
                   now,
                   new IllegalStateException(
@@ -331,7 +326,7 @@ public final class ExecutionExitConfirmer {
       throw invariantFailure(executionId, conflictReason(conflict), phase, now, conflict);
     } catch (RuntimeException failure) {
       proofs.put(executionId, new PendingProof(offered));
-      recordFailure(executionId, FailureReason.JOURNAL_WRITE, phase, now, failure);
+      recordFailure(executionId, FailureBackoff.FailureReason.JOURNAL_WRITE, phase, now, failure);
       throw failure;
     }
 
@@ -346,7 +341,7 @@ public final class ExecutionExitConfirmer {
         attempt = store.transaction(tx -> attemptSlow(tx, confirmedFact, targetState, confirmedAt));
       }
     } catch (RuntimeException failure) {
-      recordFailure(executionId, FailureReason.DATABASE, phase, now, failure);
+      recordFailure(executionId, FailureBackoff.FailureReason.DATABASE, phase, now, failure);
       throw failure;
     }
     // 事务结果中的不变量冲突不是数据库瞬态故障，必须在事务异常分类之外处理。
@@ -357,8 +352,9 @@ public final class ExecutionExitConfirmer {
     try {
       confirmInLock(record, PHASE_REPLAY, now);
     } catch (RuntimeException failure) {
-      if (!failures.containsKey(record.executionId())) {
-        recordFailure(record.executionId(), FailureReason.REPLAY, PHASE_REPLAY, now, failure);
+      if (!backoff.hasFailure(record.executionId())) {
+        recordFailure(
+            record.executionId(), FailureBackoff.FailureReason.REPLAY, PHASE_REPLAY, now, failure);
       }
     }
   }
@@ -376,14 +372,14 @@ public final class ExecutionExitConfirmer {
       }
       case FACT_MISSING -> throw invariantFailure(
           executionId,
-          FailureReason.FACT_MISSING,
+          FailureBackoff.FailureReason.FACT_MISSING,
           phase,
           now,
           new IllegalStateException(
               "thread still exists but execution " + executionId + " is missing"));
       case CONFLICT -> throw invariantFailure(
           executionId,
-          FailureReason.CONFLICT,
+          FailureBackoff.FailureReason.CONFLICT,
           phase,
           now,
           new IllegalArgumentException(
@@ -460,44 +456,39 @@ public final class ExecutionExitConfirmer {
       journal.delete(executionId);
       proofs.remove(executionId);
       frozenPrepared.remove(executionId);
-      failures.remove(executionId);
+      backoff.forget(executionId);
       return true;
     } catch (RuntimeException failure) {
-      recordFailure(executionId, FailureReason.JOURNAL_DELETE, phase, now, failure);
+      recordFailure(executionId, FailureBackoff.FailureReason.JOURNAL_DELETE, phase, now, failure);
       return false;
     }
   }
 
-  private static FailureReason conflictReason(ExecutionExitJournalConflictException conflict) {
+  private static FailureBackoff.FailureReason conflictReason(
+      ExecutionExitJournalConflictException conflict) {
     return switch (conflict.conflict()) {
-      case IDENTITY -> FailureReason.IDENTITY_CONFLICT;
-      case TARGET, STAGE -> FailureReason.TARGET_CONFLICT;
+      case IDENTITY -> FailureBackoff.FailureReason.IDENTITY_CONFLICT;
+      case TARGET, STAGE -> FailureBackoff.FailureReason.TARGET_CONFLICT;
     };
   }
 
+  /** 只对首次出现、且当前仍存在的文件问题告警，避免每轮重放重复刷日志。 */
   private void reportFileFailures(List<ExecutionExitJournalFailure> fileFailures) {
-    Set<String> current = new HashSet<>();
-    for (ExecutionExitJournalFailure failure : fileFailures) {
-      current.add(failure.fileName());
-      if (reportedFileFailures.add(failure.fileName())) {
-        UUID executionId = failure.canonicalExecutionId();
-        log.warn(
-            "cannot read execution exit journal entry;"
-                + " phase={}; reason={}; executionId={}; exception={}",
-            PHASE_JOURNAL_READ,
-            failure.reason(),
-            executionId == null ? "-" : executionId,
-            failure.exceptionClass());
-      }
+    for (ExecutionExitJournalFailure failure : backoff.newFileFailures(fileFailures)) {
+      UUID executionId = failure.canonicalExecutionId();
+      log.warn(
+          "cannot read execution exit journal entry;"
+              + " phase={}; reason={}; executionId={}; exception={}",
+          PHASE_JOURNAL_READ,
+          failure.reason(),
+          executionId == null ? "-" : executionId,
+          failure.exceptionClass());
     }
-    reportedFileFailures.retainAll(current);
   }
 
+  /** 目录读取失败：累计次数并推进下次尝试时刻，只在首次失败时告警。 */
   private void reportDirectoryFailure(Instant now, RuntimeException failure) {
-    DirectoryFailure previous = directoryFailure.get();
-    int attempts = previous == null ? 1 : previous.attempts() + 1;
-    directoryFailure.set(new DirectoryFailure(attempts, now.plusSeconds(backoffSeconds(attempts))));
-    if (previous == null) {
+    if (backoff.recordDirectoryFailure(now)) {
       log.warn(
           "cannot read execution exit journal;"
               + " phase={}; reason=DIRECTORY; executionId=-; exception={}",
@@ -506,37 +497,14 @@ public final class ExecutionExitConfirmer {
     }
   }
 
-  private boolean shouldLoadDirectory(Instant now) {
-    DirectoryFailure failure = directoryFailure.get();
-    return failure == null || !now.isBefore(failure.nextAttemptAt());
-  }
-
-  private boolean shouldAttempt(UUID executionId, Instant now) {
-    Failure failure = failures.get(executionId);
-    return failure == null || !now.isBefore(failure.nextAttemptAt());
-  }
-
-  private RuntimeException invariantFailure(
-      UUID executionId, FailureReason reason, String phase, Instant now, RuntimeException failure) {
-    recordFailure(executionId, reason, phase, now, failure);
-    return failure;
-  }
-
+  /** 记录一次失败；连续同一原因只累计退避，首次或原因变化时告警一次。 */
   private void recordFailure(
-      UUID executionId, FailureReason reason, String phase, Instant now, Throwable failure) {
-    Failure previous = failures.get(executionId);
-    boolean sameReason = previous != null && previous.reason() == reason;
-    int attempts = sameReason ? previous.attempts() + 1 : 1;
-    boolean invariantFailure =
-        reason == FailureReason.FACT_MISSING
-            || reason == FailureReason.IDENTITY_CONFLICT
-            || reason == FailureReason.TARGET_CONFLICT
-            || reason == FailureReason.CONFLICT;
-    // 不变量错误不高频重放，但仍需识别人工修复和合法深删，不能永久停止核对。
-    int backoffStep = invariantFailure ? BACKOFF_SECONDS.length : attempts;
-    Instant nextAttemptAt = now.plusSeconds(backoffSeconds(backoffStep));
-    failures.put(executionId, new Failure(reason, attempts, nextAttemptAt));
-    if (!sameReason) {
+      UUID executionId,
+      FailureBackoff.FailureReason reason,
+      String phase,
+      Instant now,
+      Throwable failure) {
+    if (backoff.record(executionId, reason, now)) {
       log.warn(
           "cannot resolve execution exit confirmation;"
               + " phase={}; reason={}; executionId={}; exception={}",
@@ -547,8 +515,14 @@ public final class ExecutionExitConfirmer {
     }
   }
 
-  private static long backoffSeconds(int attempts) {
-    return BACKOFF_SECONDS[Math.min(attempts - 1, BACKOFF_SECONDS.length - 1)];
+  private RuntimeException invariantFailure(
+      UUID executionId,
+      FailureBackoff.FailureReason reason,
+      String phase,
+      Instant now,
+      RuntimeException failure) {
+    recordFailure(executionId, reason, phase, now, failure);
+    return failure;
   }
 
   /** 一次确认的对外结果。 */
@@ -578,17 +552,6 @@ public final class ExecutionExitConfirmer {
     OWNER_EXITED,
     CLEANED,
     RETAINED
-  }
-
-  private enum FailureReason {
-    FACT_MISSING,
-    IDENTITY_CONFLICT,
-    TARGET_CONFLICT,
-    CONFLICT,
-    JOURNAL_WRITE,
-    JOURNAL_DELETE,
-    DATABASE,
-    REPLAY
   }
 
   /** Thread 锁内读到的旧 PREPARED 权威状态；事实只在 UNCONFIRMED / SETTLED 时非空。 */
@@ -638,8 +601,4 @@ public final class ExecutionExitConfirmer {
       return new ReplayCandidate(executionId, false, journalRecord);
     }
   }
-
-  private record DirectoryFailure(int attempts, Instant nextAttemptAt) {}
-
-  private record Failure(FailureReason reason, int attempts, Instant nextAttemptAt) {}
 }

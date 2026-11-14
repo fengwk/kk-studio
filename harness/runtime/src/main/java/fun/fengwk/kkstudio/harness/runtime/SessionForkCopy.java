@@ -169,10 +169,6 @@ final class SessionForkCopy {
     return mapped;
   }
 
-  private static UUID mappedOrNull(UUID sourceId, Map<UUID, UUID> newIds) {
-    return sourceId == null ? null : newIds.get(sourceId);
-  }
-
   private static int indexOfId(List<Entry> entries, UUID entryId) {
     for (int i = 0; i < entries.size(); i++) {
       if (entries.get(i).id().equals(entryId)) {

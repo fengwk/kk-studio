@@ -182,36 +182,50 @@ final class ManualCompactionControl {
   /** 在当前已锁定事务中原子提交压缩 Turn 及其 Model Work 或失败终态。 */
   private CompactThreadResult commitManual(
       HarnessStore.Transaction tx, ManualPlan plan, TurnResolution result) {
+    if (result instanceof TurnResolution.Compaction compactionTurn) {
+      return commitAccepted(tx, plan, compactionTurn.resolution());
+    }
+    return commitRejected(tx, plan, (TurnResolution.Rejected) result);
+  }
+
+  /** resolved：写入带冻结压缩元数据的 TURN_START，推进 head，并交回新压缩子执行身份。 */
+  private static CompactThreadResult commitAccepted(
+      HarnessStore.Transaction tx, ManualPlan plan, CompactionResolution compactionResolved) {
     Instant now = tx.now();
     ThreadState thread = plan.thread();
-    if (result instanceof TurnResolution.Compaction compactionTurn) {
-      CompactionResolution compactionResolved = compactionTurn.resolution();
-      CompactionStart frozenStart =
-          CompactionChildSpawn.start(tx, thread, compactionResolved, plan.preparation());
-      TurnStartPayload startPayload = (TurnStartPayload) plan.candidateTurnStartEntry().payload();
-      TurnStartPayload resolvedPayload =
-          new TurnStartPayload(
-              startPayload.reason(),
-              startPayload.settings(),
-              startPayload.ownerThreadId(),
-              compactionResolved.contextWindow(),
-              compactionResolved.maxOutputTokens(),
-              frozenStart,
-              null);
-      tx.entries()
-          .insert(
-              new Entry(
-                  plan.turnStartEntryId(),
-                  plan.sessionId(),
-                  plan.sourceHeadEntryId(),
-                  resolvedPayload,
-                  now));
-      ThreadState advanced = thread.advanceHead(plan.turnStartEntryId(), now);
-      tx.threads().update(advanced);
-      return new CompactThreadResult(
-          advanced, plan.turnStartEntryId(), frozenStart.childThreadId());
-    }
-    TurnResolution.Rejected rejected = (TurnResolution.Rejected) result;
+    CompactionStart frozenStart =
+        CompactionChildSpawn.start(tx, thread, compactionResolved, plan.preparation());
+    TurnStartPayload startPayload = (TurnStartPayload) plan.candidateTurnStartEntry().payload();
+    TurnStartPayload resolvedPayload =
+        new TurnStartPayload(
+            startPayload.reason(),
+            startPayload.settings(),
+            startPayload.ownerThreadId(),
+            compactionResolved.contextWindow(),
+            compactionResolved.maxOutputTokens(),
+            frozenStart,
+            null);
+    tx.entries()
+        .insert(
+            new Entry(
+                plan.turnStartEntryId(),
+                plan.sessionId(),
+                plan.sourceHeadEntryId(),
+                resolvedPayload,
+                now));
+    ThreadState advanced = thread.advanceHead(plan.turnStartEntryId(), now);
+    tx.threads().update(advanced);
+    return new CompactThreadResult(advanced, plan.turnStartEntryId(), frozenStart.childThreadId());
+  }
+
+  /**
+   * rejected：写入 candidate TURN_START + AssistantError + FAILED TURN_END，必要时唤醒仍有 deferred 输入的
+   * Thread。
+   */
+  private static CompactThreadResult commitRejected(
+      HarnessStore.Transaction tx, ManualPlan plan, TurnResolution.Rejected rejected) {
+    Instant now = tx.now();
+    ThreadState thread = plan.thread();
     tx.entries()
         .insert(
             new Entry(

@@ -22,8 +22,8 @@ import java.util.UUID;
  * 准入锁，再取执行树锁， 再按 Session、Thread 的 UUID 序锁定父链（含续用的目标 Thread）。从零开始的调用方使用 {@link #lockForSpawn}
  * 取得同样的锁集合，已处于树锁内的调用方 （处理器的压缩）直接调用 {@link #spawn}。
  *
- * <p>新建时 Session / ROOT / Thread 经 {@link AcceptCommandsControl#createSessionWithThread} 创建，子
- * Thread 的有效约束为请求约束与父约束的合并； 续用既有 Thread 时沿用其冻结的创建来源与约束。票据的准入与登记由 {@link SpawnTickets} 唯一承担。
+ * <p>新建时 Session / ROOT / Thread 经 {@link ThreadCreations#createSessionWithThread} 创建，子 Thread
+ * 的有效约束为请求约束与父约束的合并； 续用既有 Thread 时沿用其冻结的创建来源与约束。票据的准入与登记由 {@link SpawnTickets} 唯一承担。
  */
 public final class AgentSpawner {
 
@@ -108,7 +108,7 @@ public final class AgentSpawner {
     SpawnTickets.admit(tx, request, true);
     return SpawnTickets.attach(
         tx,
-        AcceptCommandsControl.createSessionWithThread(
+        ThreadCreations.createSessionWithThread(
             tx,
             request.sessionId(),
             request.threadId(),
@@ -154,7 +154,7 @@ public final class AgentSpawner {
     SpawnTickets.admit(tx, request, true);
     return SpawnTickets.attach(
         tx,
-        AcceptCommandsControl.createSameSessionBranchWithThread(
+        ThreadCreations.createSameSessionBranchWithThread(
             tx, request, creationRequestHash, preflight),
         request);
   }

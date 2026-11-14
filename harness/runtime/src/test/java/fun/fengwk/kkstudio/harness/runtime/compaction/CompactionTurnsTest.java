@@ -42,7 +42,7 @@ class CompactionTurnsTest {
     assertEquals(CompactionTrigger.THRESHOLD, turn.trigger());
     assertEquals(turn, CompactionTurns.latestComplete(path).orElseThrow());
     assertEquals(turn, CompactionTurns.ofResult(path, id(3L)));
-    assertEquals(id(3L), CompactionTurns.entryAt(path, turn.resultIndex()).id());
+    assertEquals(id(3L), path.entries().get(turn.resultIndex()).id());
     assertThrows(IllegalStateException.class, () -> CompactionTurns.ofResult(path, id(99L)));
   }
 

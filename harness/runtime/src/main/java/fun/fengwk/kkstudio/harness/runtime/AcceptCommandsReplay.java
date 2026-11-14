@@ -74,32 +74,44 @@ final class AcceptCommandsReplay {
       ThreadState immutable,
       List<NewThreadCommand> requests,
       String creationRequestHash) {
-    if (!immutable.sessionId().equals(sessionId)
-        || !immutable.creationRequestHash().equals(creationRequestHash)) {
-      throw conflict(
-          HarnessConflictReason.THREAD_ID_REUSED,
-          "thread "
-              + threadId
-              + " is already associated with a different initial creation request (session "
-              + immutable.sessionId()
-              + ")");
-    }
+    requireCreationRequest(
+        sessionId, threadId, creationRequestHash, immutable.sessionId(), immutable);
+    // immutable 快照只用于定位 Session；随即按 KEY SHARE Session -> FOR UPDATE Thread 复核。
     tx.sessions().lockForKeyShare(immutable.sessionId()).orElseThrow();
     ThreadState thread =
         tx.threads()
             .lock(threadId)
             .orElseThrow(
                 () -> DomainException.notFound("thread", "thread " + threadId + " does not exist"));
-    if (!thread.sessionId().equals(sessionId)
+    requireCreationRequest(sessionId, threadId, creationRequestHash, thread.sessionId(), thread);
+    List<ThreadCommand> ordered = replayInitialCommands(tx, threadId, requests);
+    Session session = tx.sessions().find(sessionId).orElseThrow();
+    return new AcceptedCommands(
+        session, tx.entries().findRoot(sessionId).orElseThrow(), thread, ordered, true, false);
+  }
+
+  /** 同一 threadId 只允许同一个 Session + creation request hash；任一不一致即 Thread id 复用冲突。 */
+  private static void requireCreationRequest(
+      UUID sessionId,
+      UUID threadId,
+      String creationRequestHash,
+      UUID actualSessionId,
+      ThreadState thread) {
+    if (!actualSessionId.equals(sessionId)
         || !thread.creationRequestHash().equals(creationRequestHash)) {
       throw conflict(
           HarnessConflictReason.THREAD_ID_REUSED,
           "thread "
               + threadId
               + " is already associated with a different initial creation request (session "
-              + thread.sessionId()
+              + actualSessionId
               + ")");
     }
+  }
+
+  /** 按请求顺序重放初始命令：idempotencyKey 必须存在且 hash 一致，sequence 必须从 1 连续。 */
+  private static List<ThreadCommand> replayInitialCommands(
+      HarnessStore.Transaction tx, UUID threadId, List<NewThreadCommand> requests) {
     List<ThreadCommand> ordered = new ArrayList<>(requests.size());
     for (NewThreadCommand request : requests) {
       ThreadCommand existing =
@@ -132,14 +144,7 @@ final class AcceptCommandsReplay {
                 + " must start at sequence 1 and be contiguous in the request order");
       }
     }
-    Session session = tx.sessions().find(sessionId).orElseThrow();
-    return new AcceptedCommands(
-        session,
-        tx.entries().findRoot(sessionId).orElseThrow(),
-        thread,
-        List.copyOf(ordered),
-        true,
-        false);
+    return List.copyOf(ordered);
   }
 
   /**

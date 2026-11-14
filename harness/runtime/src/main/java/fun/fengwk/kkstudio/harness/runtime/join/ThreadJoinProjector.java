@@ -60,33 +60,34 @@ public final class ThreadJoinProjector {
     if (!join.matched()) {
       return Optional.empty();
     }
-
-    ThreadCommand sourceCommand =
-        tx.commands()
-            .find(join.childThreadId(), join.sourceCommandSequence())
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "source command sequence "
-                            + join.sourceCommandSequence()
-                            + " not found for child thread "
-                            + join.childThreadId()));
-
+    ThreadCommand sourceCommand = requireSourceCommand(tx, join);
     String prompt = extractPrompt(sourceCommand);
     UUID appliedStart = sourceCommand.appliedEntryId();
     if (appliedStart == null) {
-      if (sourceCommand.cancelledAt() != null) {
-        return Optional.of(
-            new ThreadJoinReceipt(
-                join.invocationId(),
-                join.childThreadId(),
-                join.agent(),
-                ThreadJoinOutcome.CANCELLED,
-                prompt,
-                null,
-                null,
-                "Cancelled before execution."));
-      }
+      return Optional.of(cancelledBeforeExecution(join, sourceCommand, prompt));
+    }
+    EntryPath path = requireTerminalPath(tx, join, appliedStart);
+    TurnEndPayload end = requireTurnEnd(join, path);
+    return Optional.of(toReceipt(join, path, appliedStart, prompt, end));
+  }
+
+  /** join 冻结的源命令：缺失即分支损坏，绝不返回空回执。 */
+  private static ThreadCommand requireSourceCommand(HarnessStore.Transaction tx, ThreadJoin join) {
+    return tx.commands()
+        .find(join.childThreadId(), join.sourceCommandSequence())
+        .orElseThrow(
+            () ->
+                new IllegalStateException(
+                    "source command sequence "
+                        + join.sourceCommandSequence()
+                        + " not found for child thread "
+                        + join.childThreadId()));
+  }
+
+  /** 源命令已被取消、从未开始执行：回执只说明取消，不带报告与部分结果。 */
+  private static ThreadJoinReceipt cancelledBeforeExecution(
+      ThreadJoin join, ThreadCommand sourceCommand, String prompt) {
+    if (sourceCommand.cancelledAt() == null) {
       throw new IllegalStateException(
           "matched join source command sequence "
               + join.sourceCommandSequence()
@@ -94,10 +95,22 @@ public final class ThreadJoinProjector {
               + join.childThreadId()
               + " has no appliedEntryId and is not cancelled");
     }
+    return new ThreadJoinReceipt(
+        join.invocationId(),
+        join.childThreadId(),
+        join.agent(),
+        ThreadJoinOutcome.CANCELLED,
+        prompt,
+        null,
+        null,
+        "Cancelled before execution.");
+  }
 
+  /** 终态路径必须仍包含源命令落地的 TURN_START。 */
+  private static EntryPath requireTerminalPath(
+      HarnessStore.Transaction tx, ThreadJoin join, UUID appliedStart) {
     EntryPath path = tx.entries().loadPath(join.terminalEntryId());
-    int startIndex = indexOf(path, appliedStart);
-    if (startIndex < 0) {
+    if (indexOf(path, appliedStart) < 0) {
       throw new IllegalStateException(
           "applied turn start entry "
               + appliedStart
@@ -106,55 +119,62 @@ public final class ThreadJoinProjector {
               + " for child thread "
               + join.childThreadId());
     }
+    return path;
+  }
 
+  private static TurnEndPayload requireTurnEnd(ThreadJoin join, EntryPath path) {
     if (!(path.head().payload() instanceof TurnEndPayload end)) {
       throw new IllegalStateException(
           "result head entry " + join.terminalEntryId() + " is not a TurnEndPayload");
     }
+    return end;
+  }
 
+  /** 按已冻结的 TURN_END outcome 投影固定结果：COMPLETED 只取最终回答，其余带部分结果与错误说明。 */
+  private static ThreadJoinReceipt toReceipt(
+      ThreadJoin join, EntryPath path, UUID appliedStart, String prompt, TurnEndPayload end) {
+    int startIndex = indexOf(path, appliedStart);
     String lastAssistantText = extractLastAssistantText(path, startIndex);
     String lastErrorText = extractLastErrorText(path, startIndex);
-
-    ThreadJoinOutcome outcome;
-    String reportField = null;
-    String partialResultField = null;
-    String errorField = null;
-
-    switch (end.outcome()) {
-      case COMPLETED -> {
-        // 正常完成只取冻结的最终回答条目：绝不扫描之前 tool-call 附带的旧文本；最终答复为空即明确占位。
-        outcome = ThreadJoinOutcome.COMPLETED;
-        reportField = extractFinalAnswerText(path, join.finalAnswerEntryId());
-      }
-      case FAILED -> {
-        outcome = ThreadJoinOutcome.ERROR;
-        partialResultField = lastAssistantText;
-        errorField =
-            lastErrorText != null ? lastErrorText : "subagent turn failed: " + end.reason();
-      }
-      case STOPPED -> {
-        outcome = ThreadJoinOutcome.CANCELLED;
-        partialResultField = lastAssistantText;
-        errorField = lastErrorText != null ? lastErrorText : "Cancelled by user.";
-      }
-      case CANCELLED -> {
-        outcome = ThreadJoinOutcome.CANCELLED;
-        partialResultField = lastAssistantText;
-        errorField = lastErrorText != null ? lastErrorText : "Cancelled before completion.";
-      }
+    return switch (end.outcome()) {
+      case COMPLETED -> new ThreadJoinReceipt(
+          join.invocationId(),
+          join.childThreadId(),
+          join.agent(),
+          ThreadJoinOutcome.COMPLETED,
+          prompt,
+          extractFinalAnswerText(path, join.finalAnswerEntryId()),
+          null,
+          null);
+      case FAILED -> new ThreadJoinReceipt(
+          join.invocationId(),
+          join.childThreadId(),
+          join.agent(),
+          ThreadJoinOutcome.ERROR,
+          prompt,
+          null,
+          lastAssistantText,
+          lastErrorText != null ? lastErrorText : "subagent turn failed: " + end.reason());
+      case STOPPED -> new ThreadJoinReceipt(
+          join.invocationId(),
+          join.childThreadId(),
+          join.agent(),
+          ThreadJoinOutcome.CANCELLED,
+          prompt,
+          null,
+          lastAssistantText,
+          lastErrorText != null ? lastErrorText : "Cancelled by user.");
+      case CANCELLED -> new ThreadJoinReceipt(
+          join.invocationId(),
+          join.childThreadId(),
+          join.agent(),
+          ThreadJoinOutcome.CANCELLED,
+          prompt,
+          null,
+          lastAssistantText,
+          lastErrorText != null ? lastErrorText : "Cancelled before completion.");
       default -> throw new IllegalStateException("unsupported turn end outcome: " + end.outcome());
-    }
-
-    return Optional.of(
-        new ThreadJoinReceipt(
-            join.invocationId(),
-            join.childThreadId(),
-            join.agent(),
-            outcome,
-            prompt,
-            reportField,
-            partialResultField,
-            errorField));
+    };
   }
 
   /**
