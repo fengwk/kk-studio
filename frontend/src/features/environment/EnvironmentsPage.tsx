@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/shared/ui/data/Badge'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Box, Download, KeyRound, Pencil, SlidersHorizontal, Trash2 } from 'lucide-react'
 import {
   environmentProxyText,
@@ -15,6 +15,7 @@ import { EnvironmentConfigModal } from '@/features/environment/EnvironmentConfig
 import { EnvironmentConfigStatusBadge } from '@/features/environment/EnvironmentConfigStatusBadge'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
 import { environmentRuntimeQueryOptions } from '@/features/environment/environment-runtime-query'
+import { environmentService } from '@/features/environment/environment-service'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Button } from '@/shared/ui/controls/Button'
@@ -22,14 +23,12 @@ import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
-import { environmentService } from '@/features/environment/environment-service'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
-import { isConflictError } from '@/shared/api/client'
-import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
 import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
+import { useEnvironmentCardActions } from '@/features/environment/useEnvironmentCardActions'
 import type {
   EnvironmentDTO,
   EnvironmentUpdateProgressDTO,
@@ -94,14 +93,28 @@ export function EnvironmentsPage() {
   const [installTarget, setInstallTarget] = useState<EnvironmentDTO | null>(null)
   const [uninstallTarget, setUninstallTarget] = useState<EnvironmentDTO | null>(null)
 
-  const [deleteTarget, setDeleteTarget] = useState<EnvironmentDTO | null>(null)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [updateTarget, setUpdateTarget] = useState<EnvironmentDTO | null>(null)
-  const [updateError, setUpdateError] = useState<string | null>(null)
-  const [rotateTarget, setRotateTarget] = useState<EnvironmentDTO | null>(null)
-  const [rotateError, setRotateError] = useState<string | null>(null)
   const [manageTarget, setManageTarget] = useState<EnvironmentDTO | null>(null)
-  const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
+
+  const {
+    deleteTarget,
+    setDeleteTarget,
+    deleteError,
+    setDeleteError,
+    updateTarget,
+    setUpdateTarget,
+    updateError,
+    setUpdateError,
+    rotateTarget,
+    setRotateTarget,
+    rotateError,
+    setRotateError,
+    conflict,
+    setConflict,
+    clearAllTargets,
+    updateMutation,
+    rotateMutation,
+    deleteMutation,
+  } = useEnvironmentCardActions({ t })
 
   const invalidateEnvironments = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
@@ -147,70 +160,6 @@ export function EnvironmentsPage() {
     const timer = setTimeout(invalidateEnvironments, delay)
     return () => clearTimeout(timer)
   }, [statusExpiresAt, invalidateEnvironments])
-
-  const updateMutation = useMutation({
-    mutationFn: (id: string) => environmentService.startEnvironmentUpdate(id),
-    onSuccess: (result, id) => {
-      // 命令回执携带当前快照；先写入缓存再回读列表，界面不会把发送前状态误标成已启动。
-      queryClient.setQueryData(queryKeys.environments.runtime(id), result.runtimeStatus)
-      setUpdateTarget(null)
-      setUpdateError(null)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
-    },
-    onError: (err: unknown) => {
-      if (isEnvironmentRuntimeUnavailableError(err)) {
-        setUpdateError(t('ai.environment.runtime.unavailable'))
-        return
-      }
-      if (isConflictError(err)) {
-        setConflict(presentConflict(err))
-        setUpdateTarget(null)
-        setUpdateError(null)
-        return
-      }
-      setUpdateError(err instanceof Error ? err.message : String(err))
-    },
-  })
-
-  const rotateMutation = useMutation({
-    mutationFn: async ({ id, expectedVersion }: { id: string; expectedVersion: string }) => {
-      const card = await environmentService.rotateToken(id, expectedVersion)
-      return { ...card, registrationToken: null }
-    },
-    onSuccess: () => {
-      setRotateTarget(null)
-      setRotateError(null)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
-    },
-    onError: (err: unknown) => {
-      if (isConflictError(err)) {
-        setConflict(presentConflict(err))
-        setRotateTarget(null)
-        setRotateError(null)
-        return
-      }
-      setRotateError(err instanceof Error ? err.message : String(err))
-    },
-  })
-
-  const deleteMutation = useMutation({
-    mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: string }) =>
-      environmentService.deleteEnvironment(id, expectedVersion),
-    onSuccess: () => {
-      setDeleteTarget(null)
-      setDeleteError(null)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
-    },
-    onError: (err: unknown) => {
-      if (isConflictError(err)) {
-        setConflict(presentConflict(err))
-        setDeleteTarget(null)
-        setDeleteError(null)
-        return
-      }
-      setDeleteError(err instanceof Error ? err.message : String(err))
-    },
-  })
 
   return (
     <section className="screen active">
@@ -526,14 +475,8 @@ export function EnvironmentsPage() {
         className="modal-touch-target"
         conflict={conflict}
         onRefresh={() => {
-          setConflict(null)
+          clearAllTargets()
           setEditor(null)
-          setUpdateTarget(null)
-          setUpdateError(null)
-          setRotateTarget(null)
-          setRotateError(null)
-          setDeleteTarget(null)
-          setDeleteError(null)
           setManageTarget(null)
           void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
         }}
