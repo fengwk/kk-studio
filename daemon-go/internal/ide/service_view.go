@@ -1,0 +1,928 @@
+package ide
+
+import (
+	"context"
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/fengwk/kk-studio/daemon/internal/protocol"
+)
+
+type viewRecord struct {
+	viewID             string
+	browserSession     string
+	eventNode          string
+	connectionID       string
+	claimID            string
+	bindingEpoch       int64
+	bindingPending     bool
+	directory          string
+	workspacePath      string
+	state              viewState
+	cleanupFailed      bool
+	createdAt          time.Time
+	lastProofAt        time.Time
+	hasProof           bool
+	expiresAt          time.Time
+	expiryTimer        IdeTimer
+	streams            map[*activeIdeStream]struct{}
+	forceAllowed       bool
+	nativeClosePending bool
+	sessionGeneration  uint64
+}
+
+type activeIdeStream struct {
+	viewID  string
+	epoch   int64
+	cancel  context.CancelFunc
+	release func()
+	done    chan struct{}
+	once    sync.Once
+}
+
+type claimRecord struct {
+	shape  string
+	viewID string
+	epoch  int64
+}
+
+type parsedOpen struct {
+	viewID, browserSession, eventNode, connectionID, claimID string
+	mode                                                     protocol.IdeOpenMode
+	directory                                                string
+	hasDirectory                                             bool
+	expectedEpoch                                            int64
+}
+
+func (s *Service) openCommand(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
+	if err := s.requireDaemonInstance(command); err != nil {
+		return nil, err
+	}
+	parsed, err := s.parseOpen(command)
+	if err != nil {
+		return nil, err
+	}
+	shape := openShape(parsed)
+	claimLock := s.keyedLock(s.claimLocks, parsed.claimID)
+	claimLock.Lock()
+	defer claimLock.Unlock()
+	if reply, err := s.replayClaim(parsed.claimID, shape); err != nil || reply != nil {
+		return reply, err
+	}
+	viewLock := s.keyedLock(s.viewLocks, parsed.viewID)
+	viewLock.Lock()
+	defer viewLock.Unlock()
+	if reply, err := s.replayClaim(parsed.claimID, shape); err != nil || reply != nil {
+		return reply, err
+	}
+	s.mu.Lock()
+	existing := s.views[parsed.viewID]
+	if parsed.mode == protocol.IdeOpenMode_RESUME {
+		if existing == nil {
+			s.mu.Unlock()
+			return nil, NewError("view is gone", "VIEW_GONE")
+		}
+		s.mu.Unlock()
+		return s.resumeView(ctx, parsed, existing)
+	}
+	if existing != nil {
+		s.mu.Unlock()
+		if existing.browserSession != parsed.browserSession {
+			return nil, NewError("view is owned by another browser session", "VIEW_OWNED_BY_OTHER_SESSION")
+		}
+		return nil, NewError("view already exists for this session", "STALE_BINDING")
+	}
+	if len(s.views)+len(s.reservations) >= s.maxViews {
+		s.mu.Unlock()
+		if err := s.awaitReady(ctx); err != nil {
+			return nil, err
+		}
+		s.mu.Lock()
+		if len(s.views)+len(s.reservations) >= s.maxViews {
+			s.mu.Unlock()
+			return nil, NewError("IDE view limit reached", "IDE_CAPACITY_EXCEEDED")
+		}
+	}
+	s.reservations[parsed.viewID] = struct{}{}
+	s.cancelIdleLocked()
+	crashAtStart := s.crashEpoch
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		delete(s.reservations, parsed.viewID)
+		s.mu.Unlock()
+		s.scheduleIdleStop()
+	}()
+	if err := s.awaitReady(ctx); err != nil {
+		return nil, err
+	}
+	if err := s.convergeAfterCrash(ctx); err != nil {
+		return nil, err
+	}
+	directory := parsed.directory
+	if !parsed.hasDirectory {
+		directory, err = HostHome(hostEnvironment())
+		if err != nil {
+			return nil, err
+		}
+	}
+	directory, err = CanonicalDirectory(directory)
+	if err != nil {
+		return nil, err
+	}
+	workspacePath := filepath.Join(s.paths.ViewsDir, parsed.viewID+".code-workspace")
+	if err := s.writeManagedWorkspace(workspacePath, directory); err != nil {
+		return nil, NewError("managed workspace could not be written", "UNAVAILABLE")
+	}
+	workspacePath, err = filepath.EvalSymlinks(workspacePath)
+	if err != nil {
+		_ = os.Remove(workspacePath)
+		return nil, NewError("managed workspace could not be resolved", "UNAVAILABLE")
+	}
+	s.mu.Lock()
+	epoch, err := s.commitRevisionLocked()
+	s.mu.Unlock()
+	if err != nil {
+		_ = os.Remove(workspacePath)
+		return nil, err
+	}
+	session, err := s.manager.EnsureStarted(ctx)
+	if err != nil {
+		_ = os.Remove(workspacePath)
+		return nil, err
+	}
+	registered, registerErr := s.manager.RegisterView(ctx, parsed.viewID, epoch, workspacePath)
+	if registerErr != nil || registered == nil || registered.State != ManagedViewOpen || registered.BindingEpoch != strconv.FormatInt(epoch, 10) || registered.WorkspacePath != workspacePath || s.currentCrashEpoch() != crashAtStart || currentGeneration(s.manager) != session.Generation {
+		reason := registerErr
+		if s.currentCrashEpoch() != crashAtStart || currentGeneration(s.manager) != session.Generation {
+			reason = NewError("code-server generation changed during view registration", "BUSY")
+		} else if reason == nil {
+			reason = NewError("managed view registration drifted", "CLEANUP_FAILED")
+		}
+		cleanupFailed := false
+		if s.currentCrashEpoch() == crashAtStart && currentGeneration(s.manager) == session.Generation {
+			closed, closeErr := s.manager.CloseView(context.Background(), parsed.viewID, epoch, ManagedViewCloseDiscard)
+			cleanupFailed = closeErr != nil || closed == nil || closed.State != ManagedViewClosed || !closed.Cleanup.Complete
+		} else if s.currentCrashEpoch() == crashAtStart {
+			cleanupFailed = true
+		}
+		s.mu.Lock()
+		retainForCrash := s.crashEpoch != crashAtStart && (s.crashRecovery != nil || s.crashUnconverged)
+		if cleanupFailed || retainForCrash {
+			view := &viewRecord{viewID: parsed.viewID, browserSession: parsed.browserSession, eventNode: parsed.eventNode, connectionID: parsed.connectionID, claimID: parsed.claimID, bindingEpoch: epoch, directory: directory, workspacePath: workspacePath, state: viewClosing, cleanupFailed: true, createdAt: s.scheduler.Now(), streams: make(map[*activeIdeStream]struct{}), sessionGeneration: session.Generation}
+			_, _ = s.commitRevisionLocked()
+			s.views[view.viewID] = view
+			s.mu.Unlock()
+			s.emit(IdeServiceEvent{Kind: "cleanup-failed", ViewID: view.viewID, Message: "failed view registration could not be cleaned up"})
+		} else {
+			s.mu.Unlock()
+			_ = os.Remove(workspacePath)
+		}
+		return nil, reason
+	}
+	view := &viewRecord{
+		viewID: parsed.viewID, browserSession: parsed.browserSession, eventNode: parsed.eventNode,
+		connectionID: parsed.connectionID, claimID: parsed.claimID, bindingEpoch: epoch,
+		directory: directory, workspacePath: workspacePath, state: viewOpen,
+		createdAt: s.scheduler.Now(), streams: make(map[*activeIdeStream]struct{}), sessionGeneration: session.Generation,
+	}
+	s.bridge.Assign(view.viewID, view.workspacePath, epoch, directory)
+	s.resolver.BindView(view.viewID, epoch, session.Port, session.Cookie)
+	s.mu.Lock()
+	_, _ = s.commitRevisionLocked()
+	s.views[view.viewID] = view
+	s.scheduleExpiryLocked(view, time.Time{})
+	s.rememberClaimLocked(parsed.claimID, claimRecord{shape: shape, viewID: view.viewID, epoch: epoch})
+	s.mu.Unlock()
+	return openReply(view, s.snapshot()), nil
+}
+
+func (s *Service) resumeView(ctx context.Context, command parsedOpen, view *viewRecord) (*protocol.IdeResult, error) {
+	s.mu.Lock()
+	if view.state != viewOpen {
+		s.mu.Unlock()
+		return nil, NewError("view is closing", "BUSY")
+	}
+	if view.cleanupFailed {
+		s.mu.Unlock()
+		return nil, NewError("view cleanup is incomplete", "CLEANUP_FAILED")
+	}
+	if view.browserSession != command.browserSession {
+		s.mu.Unlock()
+		return nil, NewError("view is owned by another browser session", "VIEW_OWNED_BY_OTHER_SESSION")
+	}
+	if view.bindingEpoch != command.expectedEpoch {
+		s.mu.Unlock()
+		return nil, NewError("view binding changed", "STALE_BINDING")
+	}
+	currentDirectory := view.directory
+	s.mu.Unlock()
+	if command.hasDirectory {
+		directory, err := CanonicalDirectory(command.directory)
+		if err != nil {
+			return nil, err
+		}
+		if directory != currentDirectory {
+			return nil, NewError("resume must not change the workspace directory", "VIEW_IN_USE")
+		}
+	}
+	if err := s.awaitReady(ctx); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	if s.views[view.viewID] != view || view.state != viewOpen || view.bindingPending || view.bindingEpoch != command.expectedEpoch {
+		s.mu.Unlock()
+		return nil, NewError("view binding changed", "STALE_BINDING")
+	}
+	oldEpoch := view.bindingEpoch
+	crashAtStart := s.crashEpoch
+	view.bindingPending = true
+	s.clearExpiryLocked(view)
+	newEpoch, err := s.commitRevisionLocked()
+	if err != nil {
+		view.bindingPending = false
+		s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
+		s.mu.Unlock()
+		return nil, err
+	}
+	workspacePath, directory := view.workspacePath, view.directory
+	s.mu.Unlock()
+	session := s.manager.Session()
+	if session == nil {
+		s.mu.Lock()
+		view.bindingPending = false
+		s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
+		s.mu.Unlock()
+		return nil, NewError("code-server is not running", "UNAVAILABLE")
+	}
+	s.abortViewStreams(view)
+	registered, registerErr := s.manager.RegisterView(ctx, view.viewID, newEpoch, workspacePath)
+	if registerErr == nil && registered != nil && registered.State == ManagedViewOpen && registered.BindingEpoch == strconv.FormatInt(newEpoch, 10) && registered.WorkspacePath == workspacePath && s.currentCrashEpoch() == crashAtStart && currentGeneration(s.manager) == session.Generation {
+		s.mu.Lock()
+		current := s.views[view.viewID] == view && view.state == viewOpen && view.bindingPending && view.bindingEpoch == oldEpoch && s.crashEpoch == crashAtStart
+		if current {
+			_, err = s.commitRevisionLocked()
+			if err == nil {
+				view.bindingEpoch = newEpoch
+				view.eventNode = command.eventNode
+				view.connectionID = command.connectionID
+				view.claimID = command.claimID
+				view.cleanupFailed = false
+				view.forceAllowed = false
+				view.hasProof = false
+				view.createdAt = s.scheduler.Now()
+				view.sessionGeneration = session.Generation
+				view.directory = directory
+			}
+		}
+		s.mu.Unlock()
+		if current && err == nil {
+			s.bridge.Assign(view.viewID, workspacePath, newEpoch, directory)
+			s.resolver.BindView(view.viewID, newEpoch, session.Port, session.Cookie)
+			s.mu.Lock()
+			view.bindingPending = false
+			s.scheduleExpiryLocked(view, time.Time{})
+			s.rememberClaimLocked(command.claimID, claimRecord{shape: openShape(command), viewID: view.viewID, epoch: newEpoch})
+			s.mu.Unlock()
+			return openReply(view, s.snapshot()), nil
+		}
+	}
+	if registerErr == nil {
+		registerErr = NewError("managed view did not accept the new binding epoch", "CLEANUP_FAILED")
+	}
+	if s.currentCrashEpoch() != crashAtStart || currentGeneration(s.manager) != session.Generation {
+		registerErr = NewError("code-server generation changed during resume", "BUSY")
+	}
+	// A lost management response is reconciled only from the native registry.
+	nativeViews, listErr := s.manager.ListViews(context.Background())
+	if listErr == nil && s.currentCrashEpoch() == crashAtStart && currentGeneration(s.manager) == session.Generation {
+		for _, nativeView := range nativeViews {
+			if nativeView.ViewID != view.viewID || nativeView.State != ManagedViewOpen || nativeView.WorkspacePath != workspacePath {
+				continue
+			}
+			if nativeView.BindingEpoch == strconv.FormatInt(newEpoch, 10) {
+				s.mu.Lock()
+				current := s.views[view.viewID] == view && view.state == viewOpen && view.bindingPending && view.bindingEpoch == oldEpoch && s.crashEpoch == crashAtStart
+				if current {
+					_, err = s.commitRevisionLocked()
+					if err == nil {
+						view.bindingEpoch = newEpoch
+						view.eventNode = command.eventNode
+						view.connectionID = command.connectionID
+						view.claimID = command.claimID
+						view.cleanupFailed = false
+						view.forceAllowed = false
+						view.hasProof = false
+						view.createdAt = s.scheduler.Now()
+						view.sessionGeneration = session.Generation
+					}
+				}
+				s.mu.Unlock()
+				if current && err == nil {
+					s.bridge.Assign(view.viewID, workspacePath, newEpoch, directory)
+					s.resolver.BindView(view.viewID, newEpoch, session.Port, session.Cookie)
+					s.mu.Lock()
+					view.bindingPending = false
+					s.scheduleExpiryLocked(view, time.Time{})
+					s.rememberClaimLocked(command.claimID, claimRecord{shape: openShape(command), viewID: view.viewID, epoch: newEpoch})
+					s.mu.Unlock()
+					return openReply(view, s.snapshot()), nil
+				}
+			}
+			if nativeView.BindingEpoch == strconv.FormatInt(oldEpoch, 10) {
+				s.mu.Lock()
+				view.bindingPending = false
+				s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
+				s.mu.Unlock()
+				return nil, registerErr
+			}
+		}
+	}
+	s.mu.Lock()
+	if view.state != viewClosing || !view.cleanupFailed {
+		_, _ = s.commitRevisionLocked()
+		view.state, view.cleanupFailed, view.forceAllowed = viewClosing, true, true
+		s.clearExpiryLocked(view)
+	}
+	view.bindingPending = false
+	s.mu.Unlock()
+	s.emit(IdeServiceEvent{Kind: "cleanup-failed", ViewID: view.viewID, Message: "resume binding outcome could not be verified"})
+	return nil, registerErr
+}
+
+func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
+	viewID, err := s.requiredViewCommand(command, true)
+	if err != nil {
+		return nil, err
+	}
+	lock := s.keyedLock(s.viewLocks, viewID)
+	lock.Lock()
+	defer lock.Unlock()
+	view, err := s.requireBound(command, true)
+	if err != nil {
+		return nil, err
+	}
+	directory, err := CanonicalDirectory(command.GetDirectory())
+	if err != nil {
+		return nil, err
+	}
+	result, err := s.bridge.Request(ctx, viewID, BridgeCommand{Op: "changeDirectory", Directory: directory}, BridgeRequestOptions{ExpectedDirectory: directory, ExpectedEpoch: view.bindingEpoch})
+	if err != nil {
+		return nil, err
+	}
+	if !result.OK {
+		return nil, NewError(result.MessageOr("directory change was rejected"), result.Code)
+	}
+	if !s.isCurrentOpen(view) || result.Directory != directory {
+		return nil, NewError("view binding changed", "VIEW_GONE")
+	}
+	if err := s.writeManagedWorkspace(view.workspacePath, directory); err != nil {
+		return nil, NewError("managed workspace could not be updated", "UNAVAILABLE")
+	}
+	s.mu.Lock()
+	_, err = s.commitRevisionLocked()
+	if err == nil {
+		view.directory = directory
+	}
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	return changedDirectoryReply(view, s.snapshot()), nil
+}
+
+func (s *Service) focusTerminal(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
+	if s.tracker == nil {
+		return nil, NewError("terminal supervision is unavailable", "UNAVAILABLE")
+	}
+	viewID, err := s.requiredViewCommand(command, true)
+	if err != nil {
+		return nil, err
+	}
+	lock := s.keyedLock(s.viewLocks, viewID)
+	lock.Lock()
+	defer lock.Unlock()
+	view, err := s.requireBound(command, true)
+	if err != nil {
+		return nil, err
+	}
+	if !s.bridge.IsConnected(viewID, view.bindingEpoch) {
+		if err := s.bridge.WaitForConnection(ctx, viewID); err != nil {
+			return nil, err
+		}
+	}
+	if !s.isCurrentOpen(view) {
+		return nil, NewError("view binding changed", "VIEW_GONE")
+	}
+	result, err := s.bridge.Request(ctx, viewID, BridgeCommand{Op: "focusTerminal"}, BridgeRequestOptions{ExpectedEpoch: view.bindingEpoch})
+	if err != nil {
+		return nil, err
+	}
+	if !result.OK {
+		return nil, NewError(result.MessageOr("terminal could not be focused"), result.Code)
+	}
+	if !s.isCurrentOpen(view) {
+		return nil, NewError("view binding changed", "VIEW_GONE")
+	}
+	return viewAck(viewID), nil
+}
+
+func (s *Service) collapseMobile(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
+	viewID, err := s.requiredViewCommand(command, true)
+	if err != nil {
+		return nil, err
+	}
+	lock := s.keyedLock(s.viewLocks, viewID)
+	lock.Lock()
+	defer lock.Unlock()
+	view, err := s.requireBound(command, true)
+	if err != nil {
+		return nil, err
+	}
+	if !s.bridge.IsConnected(viewID, view.bindingEpoch) {
+		if err := s.bridge.WaitForConnection(ctx, viewID); err != nil {
+			return nil, err
+		}
+	}
+	if !s.isCurrentOpen(view) {
+		return nil, NewError("view binding changed", "VIEW_GONE")
+	}
+	result, err := s.bridge.Request(ctx, viewID, BridgeCommand{Op: "collapseMobile"}, BridgeRequestOptions{ExpectedEpoch: view.bindingEpoch})
+	if err != nil {
+		return nil, err
+	}
+	if !result.OK {
+		return nil, NewError(result.MessageOr("mobile layout could not be applied"), result.Code)
+	}
+	return viewAck(viewID), nil
+}
+
+func (s *Service) listDirectories(command *protocol.IdeCommand) *protocol.IdeResult {
+	path := ""
+	if command.Directory != nil {
+		path = command.GetDirectory()
+		if strings.TrimSpace(path) == "" || len([]rune(path)) > maxCommandTextCharacters || hasControl(path) {
+			return failureResult(NewError("directory is invalid", "UNAVAILABLE"), IdeSnapshot{}, false)
+		}
+	} else {
+		var err error
+		path, err = HostHome(hostEnvironment())
+		if err != nil {
+			return failureResult(err, IdeSnapshot{}, false)
+		}
+	}
+	listing, err := ListDirectories(path)
+	if err != nil {
+		return failureResult(err, IdeSnapshot{}, false)
+	}
+	return directoryListingReply(listing)
+}
+
+func (s *Service) closeView(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
+	viewID, err := s.requiredViewCommand(command, false)
+	if err != nil {
+		return nil, err
+	}
+	if command.Discard == nil {
+		return nil, NewError("discard is required", "UNAVAILABLE")
+	}
+	lock := s.keyedLock(s.viewLocks, viewID)
+	lock.Lock()
+	defer lock.Unlock()
+	view, err := s.requireBound(command, false)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	state, cleanupFailed := view.state, view.cleanupFailed
+	epoch := view.bindingEpoch
+	s.mu.Unlock()
+	if state == viewClosing {
+		if !cleanupFailed {
+			return nil, NewError("view is closing", "BUSY")
+		}
+		return s.performClose(ctx, view, ManagedViewCloseDiscard)
+	}
+	mode := ManagedViewCloseNormal
+	if command.GetDiscard() {
+		mode = ManagedViewCloseDiscard
+	}
+	if mode == ManagedViewCloseDiscard && s.bridge.IsConnected(viewID, epoch) {
+		s.mu.Lock()
+		forceAllowed := view.forceAllowed
+		s.mu.Unlock()
+		if !forceAllowed {
+			return nil, NewError("force close is only available when the window state is unknown", "BUSY")
+		}
+	}
+	if mode == ManagedViewCloseNormal {
+		if !s.bridge.IsConnected(viewID, epoch) {
+			s.mu.Lock()
+			view.forceAllowed = true
+			s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
+			s.mu.Unlock()
+			return nil, NewError("IDE window is not connected; close outcome is unknown", "UNAVAILABLE")
+		}
+		s.mu.Lock()
+		view.nativeClosePending = true
+		s.clearExpiryLocked(view)
+		s.mu.Unlock()
+		closeCtx, cancel := context.WithCancel(ctx)
+		stop := context.AfterFunc(s.lifetime, cancel)
+		result, requestErr := s.bridge.Request(closeCtx, viewID, BridgeCommand{Op: "closeView"}, BridgeRequestOptions{ExpectedEpoch: epoch})
+		stop()
+		cancel()
+		s.mu.Lock()
+		view.nativeClosePending = false
+		s.mu.Unlock()
+		if requestErr != nil || ctx.Err() != nil || !s.bridge.IsConnected(viewID, epoch) {
+			s.mu.Lock()
+			view.forceAllowed = true
+			s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
+			s.mu.Unlock()
+			return nil, NewError("IDE close outcome is unknown", "UNAVAILABLE")
+		}
+		if !result.OK {
+			s.mu.Lock()
+			view.forceAllowed = result.Code != "CANCELLED"
+			s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
+			s.mu.Unlock()
+			code := result.Code
+			if code == "" {
+				code = "UNAVAILABLE"
+			}
+			return nil, NewError(result.MessageOr("IDE close outcome is unknown"), code)
+		}
+		if !s.isCurrent(view) {
+			return nil, NewError("view binding changed", "VIEW_GONE")
+		}
+		s.mu.Lock()
+		view.forceAllowed = false
+		_, err = s.commitRevisionLocked()
+		if err == nil {
+			view.state = viewClosing
+		}
+		s.clearExpiryLocked(view)
+		s.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		s.mu.Lock()
+		_, err = s.commitRevisionLocked()
+		if err == nil {
+			view.state = viewClosing
+		}
+		s.clearExpiryLocked(view)
+		s.mu.Unlock()
+		if err != nil {
+			return nil, err
+		}
+		s.snapshotForClose(ctx, view)
+	}
+	return s.performClose(ctx, view, mode)
+}
+
+func (s *Service) performClose(ctx context.Context, view *viewRecord, mode ManagedViewCloseMode) (*protocol.IdeResult, error) {
+	epoch := view.bindingEpoch
+	s.abortViewStreams(view)
+	if err := s.waitViewStreams(ctx, view); err != nil {
+		return nil, s.cleanupFailed(view, err)
+	}
+	if mode != ManagedViewCloseNormal && s.bridge.IsConnected(view.viewID, epoch) {
+		result, err := s.bridge.Request(ctx, view.viewID, BridgeCommand{Op: "closeView", Discard: true}, BridgeRequestOptions{ExpectedEpoch: epoch})
+		if err != nil || !result.OK {
+			message := "ide window did not confirm close"
+			if result.Message != "" {
+				message = result.Message
+			}
+			return nil, s.cleanupFailed(view, NewError(message, "CLEANUP_FAILED"))
+		}
+	}
+	if !s.isCurrent(view) {
+		return nil, NewError("view binding changed", "VIEW_GONE")
+	}
+	serverMode := mode
+	if mode == ManagedViewCloseNormal {
+		serverMode = ManagedViewCloseDiscard
+	}
+	result, err := s.manager.CloseView(ctx, view.viewID, epoch, serverMode)
+	if err != nil {
+		return nil, s.cleanupFailed(view, err)
+	}
+	if result == nil || !result.Cleanup.Complete || result.State != ManagedViewClosed {
+		return nil, s.cleanupFailed(view, NewError("managed view resources did not report exit", "CLEANUP_FAILED"))
+	}
+	s.clearExpiry(view)
+	s.bridge.Revoke(view.viewID, epoch)
+	s.resolver.UnbindView(view.viewID, epoch)
+	if err := os.Remove(view.workspacePath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, s.cleanupFailed(view, NewError("managed workspace could not be removed", "CLEANUP_FAILED"))
+	}
+	s.mu.Lock()
+	if s.views[view.viewID] == view && view.bindingEpoch == epoch {
+		_, err = s.commitRevisionLocked()
+		if err == nil {
+			delete(s.views, view.viewID)
+		}
+	}
+	s.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	s.scheduleIdleStop()
+	return successSnapshot(s.snapshot()), nil
+}
+
+func (s *Service) snapshotForClose(ctx context.Context, view *viewRecord) {
+	if !s.bridge.IsConnected(view.viewID, view.bindingEpoch) {
+		s.emit(IdeServiceEvent{Kind: "backup-failed", ViewID: view.viewID, Message: "recovery bridge is not connected"})
+		return
+	}
+	limit := s.recoveryQuota
+	if limit > 4<<20 {
+		limit = 4 << 20
+	}
+	signal, cancel := context.WithTimeout(ctx, closeOperationTimeout)
+	defer cancel()
+	result, err := s.bridge.Request(signal, view.viewID, BridgeCommand{Op: "snapshot", MaxBytes: limit}, BridgeRequestOptions{ExpectedEpoch: view.bindingEpoch})
+	if err != nil || !result.OK {
+		message := "dirty text snapshot failed"
+		if err != nil {
+			message = SafeMessage(err)
+		} else if result.Message != "" {
+			message = result.Message
+		}
+		s.emit(IdeServiceEvent{Kind: "backup-failed", ViewID: view.viewID, Message: message})
+		return
+	}
+	complete := result.Complete == nil || *result.Complete
+	if result.Omitted != nil && *result.Omitted != 0 {
+		complete = false
+	}
+	documents := make([]RecoveryDocument, len(result.Documents))
+	for i, document := range result.Documents {
+		documents[i] = RecoveryDocument(document)
+	}
+	backup := RecoveryBackup{ViewID: view.viewID, BindingEpoch: strconv.FormatInt(view.bindingEpoch, 10), Directory: view.directory, CreatedAt: s.scheduler.Now().UTC().Format(time.RFC3339Nano), Complete: complete, Documents: documents}
+	if backup.Documents == nil {
+		backup.Documents = []RecoveryDocument{}
+	}
+	if _, err := WriteRecoveryBackup(s.cfg, backup, s.recoveryQuota); err != nil {
+		s.emit(IdeServiceEvent{Kind: "backup-failed", ViewID: view.viewID, Message: SafeMessage(err)})
+		return
+	}
+	if !complete {
+		s.emit(IdeServiceEvent{Kind: "backup-incomplete", ViewID: view.viewID, Message: "dirty text snapshot was incomplete"})
+	}
+}
+
+func (s *Service) cleanupFailed(view *viewRecord, err error) error {
+	s.mu.Lock()
+	if s.views[view.viewID] == view {
+		if view.state != viewClosing {
+			_, _ = s.commitRevisionLocked()
+		}
+		view.state, view.cleanupFailed = viewClosing, true
+		s.clearExpiryLocked(view)
+	}
+	s.mu.Unlock()
+	message := SafeMessage(err)
+	var ideErr *Error
+	if errors.As(err, &ideErr) {
+		message = ideErr.Message
+	}
+	s.emit(IdeServiceEvent{Kind: "cleanup-failed", ViewID: view.viewID, Message: message})
+	return err
+}
+
+func (s *Service) expireView(viewID string, epoch int64) {
+	lock := s.keyedLock(s.viewLocks, viewID)
+	lock.Lock()
+	defer lock.Unlock()
+	s.mu.Lock()
+	view := s.views[viewID]
+	if view == nil || view.bindingEpoch != epoch || view.state != viewOpen || view.bindingPending || view.nativeClosePending || s.closed {
+		s.mu.Unlock()
+		return
+	}
+	_, err := s.commitRevisionLocked()
+	if err == nil {
+		view.state = viewClosing
+		view.expiryTimer = nil
+	}
+	s.mu.Unlock()
+	if err != nil {
+		return
+	}
+	confirmed := false
+	ctx, cancel := context.WithTimeout(s.lifetime, closeOperationTimeout)
+	defer cancel()
+	if s.bridge.IsConnected(viewID, epoch) {
+		inspection, inspectErr := s.bridge.Request(ctx, viewID, BridgeCommand{Op: "inspect"}, BridgeRequestOptions{ExpectedEpoch: epoch})
+		if inspectErr == nil && inspection.OK && inspection.Clean != nil && *inspection.Clean && s.bridge.IsConnected(viewID, epoch) {
+			result, closeErr := s.bridge.Request(ctx, viewID, BridgeCommand{Op: "closeView"}, BridgeRequestOptions{ExpectedEpoch: epoch})
+			confirmed = closeErr == nil && result.OK && s.bridge.IsConnected(viewID, epoch) && ctx.Err() == nil
+		}
+	}
+	if !confirmed {
+		s.mu.Lock()
+		if s.views[viewID] == view && view.bindingEpoch == epoch {
+			_, _ = s.commitRevisionLocked()
+			view.state = viewOpen
+			view.forceAllowed = !s.bridge.IsConnected(viewID, epoch)
+			view.expiresAt = time.Time{}
+		}
+		s.mu.Unlock()
+		s.scheduleExpiry(view, s.scheduler.Now().Add(viewLeaseDuration))
+		s.emit(IdeServiceEvent{Kind: "expiry-deferred", ViewID: viewID, Message: "view expiry requires an explicit close"})
+		return
+	}
+	_, err = s.performClose(context.Background(), view, ManagedViewCloseNormal)
+	_ = err
+}
+
+// ApplyLease updates expiry only from a fresh, identity-matching daemon lease proof.
+func (s *Service) ApplyLease(lease *protocol.IdeLease, roundStartedAt time.Time) {
+	if lease == nil || roundStartedAt.IsZero() {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.closed {
+		return
+	}
+	for _, binding := range lease.GetBindings() {
+		if binding == nil || binding.ViewId == nil || binding.BrowserSessionId == nil || binding.BindingEpoch == nil {
+			continue
+		}
+		view := s.views[binding.GetViewId()]
+		if view == nil || view.state != viewOpen || view.bindingPending || view.browserSession != binding.GetBrowserSessionId() || view.bindingEpoch != binding.GetBindingEpoch() || roundStartedAt.Before(view.createdAt) || view.hasProof && !roundStartedAt.After(view.lastProofAt) {
+			continue
+		}
+		view.lastProofAt, view.hasProof = roundStartedAt, true
+		s.scheduleExpiryLocked(view, time.Time{})
+	}
+}
+
+func (s *Service) scheduleExpiry(view *viewRecord, notBefore time.Time) {
+	s.mu.Lock()
+	s.scheduleExpiryLocked(view, notBefore)
+	s.mu.Unlock()
+}
+
+func (s *Service) scheduleExpiryLocked(view *viewRecord, notBefore time.Time) {
+	s.clearExpiryLocked(view)
+	if view.state != viewOpen || view.bindingPending || view.nativeClosePending || s.closed {
+		return
+	}
+	base := view.createdAt
+	if view.hasProof {
+		base = view.lastProofAt
+	}
+	expires := base.Add(viewLeaseDuration)
+	if notBefore.After(expires) {
+		expires = notBefore
+	}
+	view.expiresAt = expires
+	delay := expires.Sub(s.scheduler.Now())
+	if delay < 0 {
+		delay = 0
+	}
+	view.expiryTimer = s.scheduler.AfterFunc(delay, func() { s.expireView(view.viewID, view.bindingEpoch) })
+}
+
+func (s *Service) clearExpiry(view *viewRecord) {
+	s.mu.Lock()
+	s.clearExpiryLocked(view)
+	s.mu.Unlock()
+}
+
+func (s *Service) clearExpiryLocked(view *viewRecord) {
+	if view.expiryTimer != nil {
+		view.expiryTimer.Stop()
+		view.expiryTimer = nil
+	}
+}
+
+func (s *Service) releaseStream(stream *activeIdeStream) {
+	stream.once.Do(func() {
+		stream.cancel()
+		stream.release()
+		s.mu.Lock()
+		delete(s.activeStreams, stream)
+		if view := s.views[stream.viewID]; view != nil && view.bindingEpoch == stream.epoch {
+			delete(view.streams, stream)
+		}
+		last := len(s.activeStreams) == 0
+		close(stream.done)
+		s.mu.Unlock()
+		if last {
+			s.scheduleIdleStop()
+		}
+	})
+}
+
+func (s *Service) abortViewStreams(view *viewRecord) {
+	s.mu.Lock()
+	streams := make([]*activeIdeStream, 0, len(view.streams))
+	for stream := range view.streams {
+		streams = append(streams, stream)
+	}
+	s.mu.Unlock()
+	for _, stream := range streams {
+		stream.cancel()
+	}
+}
+
+func (s *Service) waitViewStreams(ctx context.Context, view *viewRecord) error {
+	s.abortViewStreams(view)
+	s.mu.Lock()
+	streams := make([]*activeIdeStream, 0, len(view.streams))
+	for stream := range view.streams {
+		streams = append(streams, stream)
+	}
+	s.mu.Unlock()
+	if len(streams) == 0 {
+		return nil
+	}
+	timer := time.NewTimer(closeOperationTimeout)
+	defer timer.Stop()
+	for _, stream := range streams {
+		select {
+		case <-stream.done:
+		case <-ctx.Done():
+			return ErrCancelled
+		case <-timer.C:
+			return NewError("ide data streams did not close before the cleanup budget", "CLEANUP_FAILED")
+		}
+	}
+	return nil
+}
+
+func (s *Service) RestoreBackup(ctx context.Context, viewID string) (int, int, error) {
+	ctx, finish, err := s.beginOperation(ctx)
+	if err != nil {
+		return 0, 0, err
+	}
+	defer finish()
+	viewID, err = ValidateViewID(viewID)
+	if err != nil {
+		return 0, 0, err
+	}
+	backup, err := ReadRecoveryBackup(s.cfg, viewID, s.recoveryQuota)
+	if err != nil {
+		return 0, 0, NewError(SafeMessage(err), "UNAVAILABLE")
+	}
+	if backup == nil {
+		return 0, 0, nil
+	}
+	s.mu.Lock()
+	view := s.views[viewID]
+	if view == nil || view.state != viewOpen {
+		s.mu.Unlock()
+		return 0, 0, NewError("view is not open", "VIEW_GONE")
+	}
+	epoch := view.bindingEpoch
+	s.mu.Unlock()
+	if !s.bridge.IsConnected(viewID, epoch) {
+		return 0, 0, NewError("IDE window is not connected", "UNAVAILABLE")
+	}
+	documents := make([]BridgeDocument, len(backup.Documents))
+	for i, document := range backup.Documents {
+		documents[i] = BridgeDocument(document)
+	}
+	result, err := s.bridge.Request(ctx, viewID, BridgeCommand{Op: "restore", Documents: documents}, BridgeRequestOptions{ExpectedEpoch: epoch})
+	if err != nil {
+		return 0, 0, err
+	}
+	if !result.OK {
+		return 0, 0, NewError(result.MessageOr("recovery restore failed"), result.Code)
+	}
+	restored, skipped := 0, 0
+	if result.Restored != nil {
+		restored = int(*result.Restored)
+	}
+	if result.Skipped != nil {
+		skipped = int(*result.Skipped)
+	}
+	return restored, skipped, nil
+}
+
+func (s *Service) GetViewState(viewID string) *protocol.IdeViewSummary {
+	if _, err := ValidateViewID(viewID); err != nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	view := s.views[viewID]
+	if view == nil {
+		return nil
+	}
+	return viewSummary(view)
+}
