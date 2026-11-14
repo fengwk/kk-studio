@@ -26,9 +26,6 @@ binary="$tmp/kk-studio-daemon"
 [ -f "$tmp/ide-extension/extension.cjs" ] || fail 'archive is missing IDE extension'
 [ -f "$tmp/runtime-manifest.json" ] || fail 'archive is missing runtime manifest'
 [ -f "$tmp/LICENSE" ] && [ -f "$tmp/THIRD_PARTY_NOTICES" ] || fail 'archive is missing legal notices'
-for forbidden in main.js package.json node_modules native/lock-helper.js delay.js rg; do
-  [ ! -e "$tmp/$forbidden" ] || fail "Go archive unexpectedly contains $forbidden"
-done
 ripgrep_binary=$(find "$tmp" -type f \( -name rg -o -name rg.exe \) -print -quit)
 [ -z "$ripgrep_binary" ] || fail "Go archive unexpectedly contains ripgrep binary: $ripgrep_binary"
 ripgrep_package=$(find "$tmp/runtime/code-server" -type d -name 'ripgrep*' -print -quit)

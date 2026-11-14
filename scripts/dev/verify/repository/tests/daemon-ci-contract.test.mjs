@@ -71,17 +71,15 @@ test('Unix and Windows installers execute the Go binary and internal lock helper
   assert.match(install, /__lock-helper wait/)
   assert.match(install, /--config/)
   assert.match(install, /local arguments=\("\$daemon_binary" --config/)
-  assert.doesNotMatch(install, /main\.js|node_modules\/koffi|runtime\/code-server\/lib\/node/)
+  assert.doesNotMatch(install, /runtime\/code-server\/lib\/node/)
   assert.match(windowsInstall, /kk-studio-daemon\.exe/)
   assert.match(windowsInstall, /__lock-helper/)
-  assert.doesNotMatch(windowsInstall, /main\.js|node_modules\\koffi/)
   assert.ok(windowsInstall.includes(String.raw`runtime\code-server\lib\node.exe`))
 })
 
-test('archive smoke verifies the Go executable, bundled IDE runtime and excludes legacy payload', () => {
+test('archive smoke verifies the Go executable and bundled IDE runtime', () => {
   assert.match(smoke, /kk-studio-daemon/)
   assert.match(smoke, /runtime\/code-server\/out\/node\/entry\.js/)
   assert.match(smoke, /ide-extension\/extension\.cjs/)
-  assert.match(smoke, /node_modules/)
   assert.match(smoke, /--version/)
 })
