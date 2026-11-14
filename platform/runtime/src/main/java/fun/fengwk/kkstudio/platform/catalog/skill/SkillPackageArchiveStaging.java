@@ -88,18 +88,19 @@ final class SkillPackageArchiveStaging {
   /** 读取已完成的原始上传并重建规范化归档；超限时翻译为校验错误。 */
   SkillArchiveBuilder.Result readUploaded(UUID uploadId) {
     StorageUploadService.ReadyUpload ready = uploadService.peekReady(uploadId);
+    byte[] bytes;
     try {
-      byte[] bytes =
+      bytes =
           blobContentService
               .readBlobContent(ready.blobId(), SkillArchiveBuilder.MAX_ARCHIVE_BYTES)
               .getBytes();
-      return build(ready.filename(), bytes);
     } catch (IllegalArgumentException error) {
       throw DomainException.validation(
           SkillPackageInputs.RESOURCE,
           "uploaded archive exceeds the size limit: " + error.getMessage(),
           error);
     }
+    return build(ready.filename(), bytes);
   }
 
   /** 暂存上传当前指向的 ACTIVE blob；用于读取归档摘要与尺寸。 */
