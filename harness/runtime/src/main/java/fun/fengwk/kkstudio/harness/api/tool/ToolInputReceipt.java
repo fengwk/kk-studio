@@ -14,9 +14,6 @@ import java.util.UUID;
  */
 public record ToolInputReceipt(UUID submissionId, String actor, Instant acceptedAt) {
 
-  /** actor 的字符上限，与 approval actor 保持一致。 */
-  public static final int ACTOR_MAX_LENGTH = 128;
-
   public ToolInputReceipt {
     submissionId = Objects.requireNonNull(submissionId, "submissionId");
     actor = requireCanonicalActor(actor);

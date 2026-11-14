@@ -1337,6 +1337,99 @@ class HistoryEntryPayloadJsonCodecTest {
   }
 
   /** CUSTOM_MESSAGE 的 details 自由 JSON number 以 BigDecimal 保留精度，1e309/1e-324 不得失真。 */
+  /** SYSTEM 每个集合字段的错误文案；baseline 的类型错误只在六个集合都读通后才出现。 */
+  @Test
+  void rejectsWrongTypedSystemFieldsAndChecksBaselineLast() {
+    String validCollections =
+        "\"sections\":{},\"removedSections\":[],\"addedTools\":[],\"removedTools\":[],"
+            + "\"addedHostedTools\":[],\"removedHostedTools\":[]";
+    assertEquals(
+        "SYSTEM.sections values must be non-blank text",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    CODEC.decode(
+                        EntryType.SYSTEM,
+                        "{\"sections\":{\"a\":\" \"},\"removedSections\":[],\"addedTools\":[],"
+                            + "\"removedTools\":[],\"addedHostedTools\":[],\"removedHostedTools\":[],"
+                            + "\"baseline\":true}"))
+            .getMessage());
+    assertEquals(
+        "SYSTEM.removedSections must be a JSON array",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    CODEC.decode(
+                        EntryType.SYSTEM,
+                        "{\"sections\":{},\"removedSections\":{},\"addedTools\":[],\"removedTools\":[],"
+                            + "\"addedHostedTools\":[],\"removedHostedTools\":[],\"baseline\":true}"))
+            .getMessage());
+    assertEquals(
+        "SYSTEM.removedSections[] must be text",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    CODEC.decode(
+                        EntryType.SYSTEM,
+                        "{\"sections\":{},\"removedSections\":[1],\"addedTools\":[],"
+                            + "\"removedTools\":[],\"addedHostedTools\":[],\"removedHostedTools\":[],"
+                            + "\"baseline\":true}"))
+            .getMessage());
+    assertEquals(
+        "systemToolDefinition must be a JSON object",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    CODEC.decode(
+                        EntryType.SYSTEM,
+                        "{\"sections\":{},\"removedSections\":[],\"addedTools\":[5],"
+                            + "\"removedTools\":[],\"addedHostedTools\":[],\"removedHostedTools\":[],"
+                            + "\"baseline\":true}"))
+            .getMessage());
+    assertEquals(
+        "SYSTEM.addedHostedTools[] unexpected fields: [name] (expected [name, definitionJson])",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    CODEC.decode(
+                        EntryType.SYSTEM,
+                        "{\"sections\":{},\"removedSections\":[],\"addedTools\":[],\"removedTools\":[],"
+                            + "\"addedHostedTools\":[{\"name\":\"n\"}],\"removedHostedTools\":[],"
+                            + "\"baseline\":true}"))
+            .getMessage());
+    assertEquals(
+        "SYSTEM.baseline must be boolean",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    CODEC.decode(
+                        EntryType.SYSTEM, "{" + validCollections + ",\"baseline\":\"yes\"}"))
+            .getMessage());
+    // 基线顺序：baseline 非布尔且另有字段非法时，报的是另一个字段的错误。
+    assertEquals(
+        "SYSTEM.sections values must be non-blank text",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    CODEC.decode(
+                        EntryType.SYSTEM,
+                        "{\"sections\":{\"a\":\" \"},\"removedSections\":[],\"addedTools\":[],"
+                            + "\"removedTools\":[],\"addedHostedTools\":[],\"removedHostedTools\":[],"
+                            + "\"baseline\":\"yes\"}"))
+            .getMessage());
+    assertEquals(
+        "SYSTEM.removedSections[] must be text",
+        assertThrows(
+                IllegalArgumentException.class,
+                () ->
+                    CODEC.decode(
+                        EntryType.SYSTEM,
+                        "{\"sections\":{},\"removedSections\":[1],\"addedTools\":[],"
+                            + "\"removedTools\":[],\"addedHostedTools\":[],\"removedHostedTools\":[],"
+                            + "\"baseline\":\"yes\"}"))
+            .getMessage());
+  }
+
   @Test
   void preservesCustomMessageDetailsNumberPrecision() {
     String detailsJson = "{\"big\":1E+309,\"tiny\":1E-324}";
