@@ -380,11 +380,6 @@ final class AnthropicAssistantReplay {
         ProviderErrorKind.INVALID_REQUEST, "unsupported assistant block type");
   }
 
-  /**
-   * 按 Anthropic 原生协议在固定边界写入 {@code cache_control} ephemeral 标记：最后一个 tools 条目、最后一个合格 system
-   * block，以及最近历史请求端点；总标记数不超过 {@link #MAX_CACHE_BREAKPOINTS}。会话 {@code key} 不是 Anthropic 原生选项，因此不下发。
-   */
-
   /** replay 判定结果；{@code startsHistory} 为真当且仅当 payload 以 compaction block 开头。 */
   private record ReplayDecision(boolean replayable, ArrayNode content, boolean startsHistory) {
 

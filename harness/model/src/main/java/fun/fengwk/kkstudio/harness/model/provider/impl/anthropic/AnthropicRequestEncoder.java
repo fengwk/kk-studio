@@ -10,8 +10,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -63,11 +61,9 @@ public final class AnthropicRequestEncoder {
   private static final List<String> RUNTIME_OWNED_OPTION_FIELDS =
       List.of("model", "max_tokens", "stream", "messages", "system", "cache_control");
 
-  private static final int MAX_CACHE_BREAKPOINTS = 4;
   private static final String OUTPUT_CONFIG_BETA = "mid-conversation-output-config-2026-07-01";
   private static final String THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
   private static final String INLINE_TOOLS_BETA = "inline-tools-2026-09-15";
-  private static final String DEFERRED_PLACEHOLDER_NAME = "__kk_deferred_placeholder__";
 
   private final RequestBodySizeGuard bodySizeGuard;
 
@@ -133,7 +129,7 @@ public final class AnthropicRequestEncoder {
     for (ProviderMessage msg : request.messages()) {
       if (msg.role() == ProviderMessageRole.ASSISTANT) {
         // assistant 之前的完整前缀就是上次模型请求的端点，不受本轮新增块数量影响。
-        addCacheEndpoint(cacheEndpoints, lastEligible);
+        AnthropicCacheMarkers.addEndpoint(cacheEndpoints, lastEligible);
         AnthropicEncodedAssistant assistant =
             AnthropicAssistantReplay.encodeMessage(msg, descriptor, request.model().modelId());
         // compaction 回放代表已经摘要完成的历史：durable 校验完成后清空已编码消息，
@@ -150,7 +146,7 @@ public final class AnthropicRequestEncoder {
       } else if (msg.role() == ProviderMessageRole.TOOL) {
         wireMessagesArray.add(AnthropicContentEncoder.encodeToolMessage(msg));
       } else if (msg.role() == ProviderMessageRole.SYSTEM) {
-        addCacheEndpoint(cacheEndpoints, lastEligible);
+        AnthropicCacheMarkers.addEndpoint(cacheEndpoints, lastEligible);
         wireMessagesArray.add(AnthropicToolsEncoder.encodeSystemMessage(msg));
       } else {
         throw new ProviderException(
@@ -158,15 +154,16 @@ public final class AnthropicRequestEncoder {
       }
       messageEfforts.add(msg.reasoningEffort());
       ObjectNode messageEndpoint =
-          latestEligibleBlock(wireMessagesArray.get(wireMessagesArray.size() - 1).path("content"));
+          AnthropicCacheMarkers.latestEligibleBlock(
+              wireMessagesArray.get(wireMessagesArray.size() - 1).path("content"));
       if (messageEndpoint != null) {
         lastEligible = messageEndpoint;
       }
     }
-    addCacheEndpoint(cacheEndpoints, lastEligible);
+    AnthropicCacheMarkers.addEndpoint(cacheEndpoints, lastEligible);
 
     // 注入 cache marker
-    applyCacheMarkers(
+    AnthropicCacheMarkers.apply(
         request.cacheControl(),
         wireMessagesArray,
         toolsArray,
@@ -348,87 +345,5 @@ public final class AnthropicRequestEncoder {
             "protocolOptions must not override runtime field: " + field);
       }
     }
-  }
-
-  private static void applyCacheMarkers(
-      ProviderCacheControl cacheControl,
-      ArrayNode messagesArray,
-      ArrayNode toolsArray,
-      ArrayNode systemArray,
-      List<ObjectNode> cacheEndpoints,
-      boolean hasDeferredPlaceholder) {
-    if (cacheControl.retention() == PromptCacheRetention.NONE) {
-      return;
-    }
-
-    ObjectNode marker = NODES.objectNode();
-    marker.put("type", "ephemeral");
-    if (cacheControl.retention() == PromptCacheRetention.LONG) {
-      marker.put("ttl", "1h");
-    }
-
-    // 只读模式：压缩分支复用主 Thread 已写入的前缀，只在指定消息上放一个断点，绝不写入 tools/system/尾部新缓存。
-    if (cacheControl.messageBreakpoint() != null) {
-      int index = cacheControl.messageBreakpoint();
-      if (index >= 0 && index < messagesArray.size()) {
-        ObjectNode endpoint =
-            latestEligibleBlock(((ObjectNode) messagesArray.get(index)).path("content"));
-        if (endpoint != null) {
-          endpoint.set("cache_control", marker);
-        }
-      }
-      return;
-    }
-
-    int markersPlaced = 0;
-
-    // 1. TOOLS: 最后一个实际可用 tool，不能标记 encoder-only deferred placeholder。
-    int lastRealToolIndex = toolsArray.size() - (hasDeferredPlaceholder ? 2 : 1);
-    if (lastRealToolIndex >= 0) {
-      ((ObjectNode) toolsArray.get(lastRealToolIndex)).set("cache_control", marker);
-      markersPlaced++;
-    }
-
-    // 2. SYSTEM: 最后一个合格 system block
-    ObjectNode lastSystemBlock = latestEligibleBlock(systemArray);
-    if (lastSystemBlock != null) {
-      lastSystemBlock.set("cache_control", marker);
-      markersPlaced++;
-    }
-
-    // 3. CONVERSATION: 剩余预算用于最近历史请求端点与当前尾部；最近端点优先。
-    for (int i = cacheEndpoints.size() - 1; i >= 0 && markersPlaced < MAX_CACHE_BREAKPOINTS; i--) {
-      cacheEndpoints.get(i).set("cache_control", marker);
-      markersPlaced++;
-    }
-  }
-
-  /** 候选必须引用最终 wire 中的同一对象；相同文本不是相同端点，连续空/opaque 消息则不重复占预算。 */
-  private static void addCacheEndpoint(List<ObjectNode> endpoints, ObjectNode endpoint) {
-    if (endpoint != null
-        && (endpoints.isEmpty() || endpoints.get(endpoints.size() - 1) != endpoint)) {
-      endpoints.add(endpoint);
-      if (endpoints.size() > MAX_CACHE_BREAKPOINTS) {
-        endpoints.removeFirst();
-      }
-    }
-  }
-
-  /** 保守选择本地支持的官方可缓存块，不猜测未知块或签名块的格式，也不清洗空 text。 */
-  private static ObjectNode latestEligibleBlock(JsonNode contents) {
-    for (int i = contents.size() - 1; i >= 0; i--) {
-      JsonNode block = contents.get(i);
-      boolean eligible =
-          switch (block.path("type").asString("")) {
-            case "text" -> block.path("text").isString()
-                && !block.path("text").stringValue().isEmpty();
-            case "image", "document", "tool_use", "tool_result" -> true;
-            default -> false;
-          };
-      if (eligible) {
-        return (ObjectNode) block;
-      }
-    }
-    return null;
   }
 }
