@@ -29,12 +29,7 @@ final class SystemSettingsValidation {
     PermissionPathPattern.validate(pattern);
   }
 
-  static void requirePositiveMillis(long value, String field) {
-    if (value <= 0) {
-      throw new IllegalArgumentException(field + " must be positive");
-    }
-  }
-
+  /** 单位由调用点的字段名表达（{@code ...Millis} / {@code ...Seconds}），检查本身与单位无关。 */
   static void requirePositive(long value, String field) {
     if (value <= 0) {
       throw new IllegalArgumentException(field + " must be positive");
