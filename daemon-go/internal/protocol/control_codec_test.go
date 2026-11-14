@@ -130,7 +130,7 @@ func TestCodec_ScopeMismatch(t *testing.T) {
 func TestCodec_Settings(t *testing.T) {
 	e := testEnvelope(MessageType_SETTINGS, "", &Envelope_Settings{Settings: &Settings{ResourceBudgets: &ResourceBudgets{TemporaryResourceTtlSeconds: proto.Int64(1), TemporaryResourceCleanupIntervalSeconds: proto.Int64(1)}}})
 	if _, err := MarshalEnvelope(e); err != nil {
-		t.Fatalf("settings without removed maxResourceBytes rejected: %v", err)
+		t.Fatalf("settings with positive resource budgets rejected: %v", err)
 	}
 	for _, budgets := range []*ResourceBudgets{{}, {TemporaryResourceTtlSeconds: proto.Int64(1)}, {TemporaryResourceTtlSeconds: proto.Int64(1), TemporaryResourceCleanupIntervalSeconds: proto.Int64(0)}} {
 		bad := testEnvelope(MessageType_SETTINGS, "", &Envelope_Settings{Settings: &Settings{ResourceBudgets: budgets}})
