@@ -201,35 +201,44 @@ function assembleModelSelection(selection: ModelSelectionDraft): HarnessModelSel
 }
 
 /** 把可编辑 draft 组装为 PUT 请求体；空/非法数字、空 tool 名、trim 后重复的 canonical tool 名与空 pattern 都会抛 {@link DraftValidationError}。 */
-export function assembleSettingsUpdate(
-  draft: SystemSettingsSectionsDraft,
-  expectedVersion: string,
-): SystemSettingsUpdateDTO {
-  const permissionEntries = new Map<
-    string,
-    PermissionRuleDraft[]
-  >()
-  for (const group of draft.tool.permission) {
+/**
+ * 工具权限规则表：按 trim 后的工具名建对象。
+ *
+ * 空白工具名、trim 后重名（JSON 对象键会静默覆盖，造成规则丢失）与空白 pattern 都在这里拒绝。
+ * Object.fromEntries 使用 CreateDataProperty 创建键；`__proto__` 是普通 own property，
+ * 不会触发 Object.prototype 上的特殊 setter。
+ */
+function assemblePermissionMap(
+  groups: PermissionGroupDraft[],
+): Record<string, PermissionRuleDraft[]> {
+  const entries = new Map<string, PermissionRuleDraft[]>()
+  for (const group of groups) {
     const tool = group.tool.trim()
     if (tool === '') {
       throw new DraftValidationError('blankToolName')
     }
-    if (permissionEntries.has(tool)) {
-      // 两个分组 trim 后 canonical 名相同：JSON 对象键会静默覆盖前面的规则造成数据丢失，必须拒绝。
+    if (entries.has(tool)) {
       throw new DraftValidationError('duplicateToolName')
     }
-    const rules = group.rules.map((rule) => {
-      const pattern = rule.pattern.trim()
-      if (pattern === '') {
-        throw new DraftValidationError('blankPattern')
-      }
-      return { pattern, action: rule.action }
-    })
-    permissionEntries.set(tool, rules)
+    entries.set(
+      tool,
+      group.rules.map((rule) => {
+        const pattern = rule.pattern.trim()
+        if (pattern === '') {
+          throw new DraftValidationError('blankPattern')
+        }
+        return { pattern, action: rule.action }
+      }),
+    )
   }
-  // Object.fromEntries 使用 CreateDataProperty 创建键；`__proto__` 是普通 own property，不会触发
-  // Object.prototype 上的 __proto__ 特殊 setter。
-  const permission = Object.fromEntries(permissionEntries)
+  return Object.fromEntries(entries)
+}
+
+export function assembleSettingsUpdate(
+  draft: SystemSettingsSectionsDraft,
+  expectedVersion: string,
+): SystemSettingsUpdateDTO {
+  const permission = assemblePermissionMap(draft.tool.permission)
 
   return {
     tool: {

@@ -111,7 +111,7 @@ function mapError(error: unknown): ResourceFormValidationResult {
   return { ok: false, message, fields: { general: message } }
 }
 
-/** 提交前本地校验。 */
+/** 提交前本地校验：按资源种类分派到各自的校验体，统一经 `mapError` 翻译契约错误。 */
 export function validateResourceDraft(
   modal: ResourceModal,
   drafts: {
@@ -123,112 +123,128 @@ export function validateResourceDraft(
 ): ResourceFormValidationResult {
   try {
     if (modal.kind === 'provider') {
-      if (!drafts.providerDraft.name.trim()) {
-        return {
-          ok: false,
-          message: translate('ai.catalog.validation.providerName'),
-          fields: { name: translate('ai.catalog.validation.name') },
-        }
-      }
-      if (modal.mode === 'edit') {
-        toEditableProviderUpdate(drafts.providerDraft)
-      } else {
-        toEditableProvider(drafts.providerDraft)
-      }
-      return { ok: true, message: '', fields: {} }
+      return validateProviderDraft(modal, drafts.providerDraft)
     }
-
     if (modal.kind === 'model') {
       if (modal.resourceKind === 'GROUP') {
-        const groupDraft = drafts.modelGroupDraft
-        if (!groupDraft.name.trim()) {
-          return {
-            ok: false,
-            message: translate('ai.catalog.validation.modelName'),
-            fields: { name: translate('ai.catalog.validation.name') },
-          }
-        }
-        if (groupDraft.members.length === 0) {
-          return {
-            ok: false,
-            message: translate('ai.catalog.validation.groupMembers'),
-            fields: { group: translate('ai.catalog.validation.groupMembers') },
-          }
-        }
-        try {
-          toEditableModelGroup(groupDraft)
-        } catch (error) {
-          return mapError(error)
-        }
-        return { ok: true, message: '', fields: {} }
+        return validateModelGroupDraft(drafts.modelGroupDraft)
       }
-      const modelDraft = drafts.modelDraft
-      const ids = modelDraft.variants.map((variant) => variant.id.trim()).filter(Boolean)
-      if (ids.length === 0) {
-        return {
-          ok: false,
-          message: translate('ai.catalog.validation.variantAddOne'),
-          fields: { variants: translate('ai.catalog.validation.addVariant') },
-        }
-      }
-      if (!ids.includes(modelDraft.defaultVariant.trim())) {
-        return {
-          ok: false,
-          message: translate('ai.catalog.validation.defaultVariant'),
-          fields: { defaultVariant: translate('ai.catalog.validation.defaultVariantField') },
-        }
-      }
-
-      if (!modelDraft.name.trim()) {
-        return {
-          ok: false,
-          message: translate('ai.catalog.validation.modelName'),
-          fields: { name: translate('ai.catalog.validation.name') },
-        }
-      }
-      if (!modelDraft.providerName.trim()) {
-        return {
-          ok: false,
-          message: translate('ai.catalog.validation.provider'),
-          fields: { providerName: translate('ai.catalog.validation.provider') },
-        }
-      }
-      if (modelDraft.inputModalities.length === 0) {
-        return {
-          ok: false,
-          message: translate('ai.catalog.validation.inputModality'),
-          fields: { inputModalities: translate('ai.catalog.validation.inputModality') },
-        }
-      }
-
-      toEditableModel(modelDraft)
-      return { ok: true, message: '', fields: {} }
+      return validateModelDraft(drafts.modelDraft)
     }
-
-    if (!drafts.agentDraft.name.trim()) {
-      return {
-        ok: false,
-        message: translate('ai.catalog.validation.agentName'),
-        fields: { name: translate('ai.catalog.validation.name') },
-      }
-    }
-    if (
-      (!drafts.agentDraft.execution || drafts.agentDraft.execution.driver === 'builtin') &&
-      !drafts.agentDraft.model.trim()
-    ) {
-      return {
-        ok: false,
-        message: translate('ai.catalog.validation.agentModel'),
-        fields: { model: translate('ai.catalog.validation.agentModel') },
-      }
-    }
-    if (modal.mode === 'edit') {
-      toEditableAgentUpdate(drafts.agentDraft)
-    } else {
-      toEditableAgent(drafts.agentDraft)
-    }
-    return { ok: true, message: '', fields: {} }
+    return validateAgentDraft(modal, drafts.agentDraft)
   } catch (error) {
     return mapError(error)
   }
+}
+
+/** 提供商：名称必填；转换器同时验证连接与凭据形状。 */
+function validateProviderDraft(
+  modal: ResourceModal,
+  draft: ProviderDraft,
+): ResourceFormValidationResult {
+  if (!draft.name.trim()) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.providerName'),
+      fields: { name: translate('ai.catalog.validation.name') },
+    }
+  }
+  if (modal.mode === 'edit') {
+    toEditableProviderUpdate(draft)
+  } else {
+    toEditableProvider(draft)
+  }
+  return { ok: true, message: '', fields: {} }
+}
+
+/** 模型组：名称必填且至少要有一个成员。 */
+function validateModelGroupDraft(draft: ModelGroupDraft): ResourceFormValidationResult {
+  if (!draft.name.trim()) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.modelName'),
+      fields: { name: translate('ai.catalog.validation.name') },
+    }
+  }
+  if (draft.members.length === 0) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.groupMembers'),
+      fields: { group: translate('ai.catalog.validation.groupMembers') },
+    }
+  }
+  toEditableModelGroup(draft)
+  return { ok: true, message: '', fields: {} }
+}
+
+/**
+ * 单个模型：先确认存在变体且默认变体属于其中之一，再校验名称、提供商与输入模态；
+ * 顺序即用户修正顺序，不要合并。
+ */
+function validateModelDraft(draft: ModelDraft): ResourceFormValidationResult {
+  const ids = draft.variants.map((variant) => variant.id.trim()).filter(Boolean)
+  if (ids.length === 0) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.variantAddOne'),
+      fields: { variants: translate('ai.catalog.validation.addVariant') },
+    }
+  }
+  if (!ids.includes(draft.defaultVariant.trim())) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.defaultVariant'),
+      fields: { defaultVariant: translate('ai.catalog.validation.defaultVariantField') },
+    }
+  }
+  if (!draft.name.trim()) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.modelName'),
+      fields: { name: translate('ai.catalog.validation.name') },
+    }
+  }
+  if (!draft.providerName.trim()) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.provider'),
+      fields: { providerName: translate('ai.catalog.validation.provider') },
+    }
+  }
+  if (draft.inputModalities.length === 0) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.inputModality'),
+      fields: { inputModalities: translate('ai.catalog.validation.inputModality') },
+    }
+  }
+  toEditableModel(draft)
+  return { ok: true, message: '', fields: {} }
+}
+
+/** Agent：名称必填；builtin driver（或未设 execution）必须有默认模型。 */
+function validateAgentDraft(
+  modal: ResourceModal,
+  draft: AgentDraft,
+): ResourceFormValidationResult {
+  if (!draft.name.trim()) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.agentName'),
+      fields: { name: translate('ai.catalog.validation.name') },
+    }
+  }
+  if ((!draft.execution || draft.execution.driver === 'builtin') && !draft.model.trim()) {
+    return {
+      ok: false,
+      message: translate('ai.catalog.validation.agentModel'),
+      fields: { model: translate('ai.catalog.validation.agentModel') },
+    }
+  }
+  if (modal.mode === 'edit') {
+    toEditableAgentUpdate(draft)
+  } else {
+    toEditableAgent(draft)
+  }
+  return { ok: true, message: '', fields: {} }
 }
