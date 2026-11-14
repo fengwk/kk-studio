@@ -72,16 +72,26 @@ final class HistorySystemJsonCodec {
     String context = "SYSTEM";
     ObjectNode node = object(value, context);
     JsonCodecSupport.requireFields(node, SYSTEM_FIELDS, context);
+    Map<String, String> sections = decodeSections(node, context);
+    List<String> removedSections =
+        decodeTextArray(node.get("removedSections"), context + ".removedSections");
+    List<ProviderToolDefinition> addedTools = decodeAddedTools(node, context);
+    List<String> removedTools =
+        decodeTextArray(node.get("removedTools"), context + ".removedTools");
+    List<SystemHostedTool> addedHostedTools = decodeAddedHostedTools(node, context);
+    List<String> removedHostedTools =
+        decodeTextArray(node.get("removedHostedTools"), context + ".removedHostedTools");
+    // baseline 只在六个集合都读取通过后才校验，与基线拒绝顺序一致。
     if (!node.get("baseline").isBoolean()) {
       throw new IllegalArgumentException("SYSTEM.baseline must be boolean");
     }
     return new SystemPayload(
-        decodeSections(node, context),
-        decodeTextArray(node.get("removedSections"), context + ".removedSections"),
-        decodeAddedTools(node, context),
-        decodeTextArray(node.get("removedTools"), context + ".removedTools"),
-        decodeAddedHostedTools(node, context),
-        decodeTextArray(node.get("removedHostedTools"), context + ".removedHostedTools"),
+        sections,
+        removedSections,
+        addedTools,
+        removedTools,
+        addedHostedTools,
+        removedHostedTools,
         node.get("baseline").booleanValue());
   }
 
