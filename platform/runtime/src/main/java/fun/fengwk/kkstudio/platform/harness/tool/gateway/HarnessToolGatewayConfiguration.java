@@ -33,9 +33,9 @@ public class HarnessToolGatewayConfiguration {
   }
 
   /**
-   * 生产 {@link ToolExecutionGateway}：与测试共用唯一构造器，本方法解析 SystemSettings 的 resourceMaxBytes，并直接传 live
-   * supplier——每次 RetryLater 判定从 SystemSettingsSnapshot 现读 {@code
-   * tool.toolGatewayOverloadRetryMillis}。任何自定义 {@link ToolGateway} bean 都会抑制该默认实现。
+   * 生产 {@link ToolExecutionGateway}：本方法从 SystemSettings 解析输出硬上限与 Gateway 过载重试间隔，各以一个 live supplier
+   * 传入，每次都从 {@link SystemSettingsSnapshot} 现读（{@code tool.maxOutputMib} 与 {@code
+   * tool.toolGatewayOverloadRetryMillis}）。任何自定义 {@link ToolGateway} bean 都会抑制该默认实现。
    */
   @Bean
   @ConditionalOnMissingBean(ToolGateway.class)

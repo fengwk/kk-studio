@@ -50,14 +50,6 @@ public class GlobalStorageToolResultHistoryMaterializer implements ToolResultHis
       StorageUploadService uploadService,
       StorageBlobManager blobManager,
       SessionBlobRefManager refManager,
-      int resourceMaxBytes) {
-    this(uploadService, blobManager, refManager, () -> resourceMaxBytes);
-  }
-
-  public GlobalStorageToolResultHistoryMaterializer(
-      StorageUploadService uploadService,
-      StorageBlobManager blobManager,
-      SessionBlobRefManager refManager,
       IntSupplier outputLimitBytes) {
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");

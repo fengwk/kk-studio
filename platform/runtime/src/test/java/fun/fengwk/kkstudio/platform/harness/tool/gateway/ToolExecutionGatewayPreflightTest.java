@@ -130,7 +130,7 @@ class ToolExecutionGatewayPreflightTest {
             new ToolGatewayTestSupport.FixedToolSettingsProvider(
                 ToolGatewayTestSupport.settings(PermissionAction.ALLOW)),
             stager,
-            ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
+            () -> ToolGatewayTestSupport.RESOURCE_MAX_BYTES,
             ToolGatewayTestSupport.OVERLOAD_RETRY_DELAY,
             ToolGatewayTestSupport.TEST_CLOCK,
             new ConcurrencyAdmission(Integer.MAX_VALUE));

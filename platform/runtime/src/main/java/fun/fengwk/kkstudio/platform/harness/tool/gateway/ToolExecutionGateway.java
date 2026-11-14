@@ -83,28 +83,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ToolResourceStager resourceStager,
-      int resourceMaxBytes,
-      Supplier<Duration> retryDelay,
-      Clock clock,
-      ConcurrencyAdmission admission) {
-    this(
-        toolCatalogSource,
-        capabilityTransport,
-        permissionEvaluator,
-        toolSettingsProvider,
-        resourceStager,
-        () -> resourceMaxBytes,
-        retryDelay,
-        clock,
-        admission);
-  }
-
-  public ToolExecutionGateway(
-      RuntimeToolCatalogSource toolCatalogSource,
-      EnvironmentCapabilityTransport capabilityTransport,
-      PermissionEvaluator permissionEvaluator,
-      ToolSettingsProvider toolSettingsProvider,
-      ToolResourceStager resourceStager,
       IntSupplier outputLimitBytes,
       Supplier<Duration> retryDelay,
       Clock clock,

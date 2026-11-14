@@ -262,7 +262,7 @@ class GlobalStorageToolResultHistoryMaterializerTest {
       StorageBlobManager blobManager,
       SessionBlobRefManager refManager) {
     return new GlobalStorageToolResultHistoryMaterializer(
-        uploadService, blobManager, refManager, 1024);
+        uploadService, blobManager, refManager, () -> 1024);
   }
 
   private static void stubBlob(

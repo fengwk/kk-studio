@@ -101,7 +101,10 @@ class EditReviewPreflightTest {
 
     ToolGateway.PreflightResult result =
         EditReviewPreflight.prepare(
-            transport, createRequest(), "Permission rules require approval");
+            transport,
+            createRequest(),
+            "Permission rules require approval",
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
 
     assertTrue(executed.get());
     ToolGateway.Ask ask = assertInstanceOf(ToolGateway.Ask.class, result);
@@ -119,7 +122,8 @@ class EditReviewPreflightTest {
               throw new EnvironmentCapabilityBusyException("daemon busy");
             });
     ToolGateway.PreflightResult busyResult =
-        EditReviewPreflight.prepare(busyTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            busyTransport, createRequest(), "reason", EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     ToolGateway.Deny busyDeny = assertInstanceOf(ToolGateway.Deny.class, busyResult);
     assertEquals("EDIT_REVIEW_FAILED", busyDeny.error().kind());
     assertTrue(busyDeny.error().message().contains("daemon busy"));
@@ -130,7 +134,11 @@ class EditReviewPreflightTest {
               throw new EnvironmentCapabilityUnavailableException("daemon offline");
             });
     ToolGateway.PreflightResult unavailResult =
-        EditReviewPreflight.prepare(unavailableTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            unavailableTransport,
+            createRequest(),
+            "reason",
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     ToolGateway.Deny unavailDeny = assertInstanceOf(ToolGateway.Deny.class, unavailResult);
     assertEquals("EDIT_REVIEW_FAILED", unavailDeny.error().kind());
     assertTrue(unavailDeny.error().message().contains("daemon offline"));
@@ -141,7 +149,11 @@ class EditReviewPreflightTest {
     EnvironmentCapabilityTransport nullHandleTransport =
         transport((envId, request, listener) -> null);
     ToolGateway.PreflightResult result =
-        EditReviewPreflight.prepare(nullHandleTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            nullHandleTransport,
+            createRequest(),
+            "reason",
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("EDIT_REVIEW_FAILED", deny.error().kind());
     assertTrue(
@@ -157,7 +169,8 @@ class EditReviewPreflightTest {
               return new FakeHandle();
             });
     ToolGateway.PreflightResult result =
-        EditReviewPreflight.prepare(errorTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            errorTransport, createRequest(), "reason", EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("EDIT_REVIEW_FAILED", deny.error().kind());
     assertTrue(deny.error().message().contains("preview failed on daemon"));
@@ -178,7 +191,11 @@ class EditReviewPreflightTest {
               return new FakeHandle();
             });
     ToolGateway.PreflightResult result =
-        EditReviewPreflight.prepare(errorResultTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            errorResultTransport,
+            createRequest(),
+            "reason",
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("EDIT_REVIEW_FAILED", deny.error().kind());
     assertTrue(deny.error().message().contains("File not found on disk"));
@@ -192,7 +209,11 @@ class EditReviewPreflightTest {
               return new FakeHandle();
             });
     ToolGateway.PreflightResult blankResult =
-        EditReviewPreflight.prepare(blankErrorTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            blankErrorTransport,
+            createRequest(),
+            "reason",
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     ToolGateway.Deny blankDeny = assertInstanceOf(ToolGateway.Deny.class, blankResult);
     assertTrue(
         blankDeny.error().message().contains("Edit preview failed without an error description"));
@@ -213,7 +234,11 @@ class EditReviewPreflightTest {
               return new FakeHandle();
             });
     ToolGateway.PreflightResult mismatchResult =
-        EditReviewPreflight.prepare(mismatchIdTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            mismatchIdTransport,
+            createRequest(),
+            "reason",
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     ToolGateway.Deny mismatchDeny = assertInstanceOf(ToolGateway.Deny.class, mismatchResult);
     assertTrue(mismatchDeny.error().message().contains("mismatched call ID"));
 
@@ -225,7 +250,11 @@ class EditReviewPreflightTest {
               return new FakeHandle();
             });
     ToolGateway.PreflightResult nullResult =
-        EditReviewPreflight.prepare(nullResultTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            nullResultTransport,
+            createRequest(),
+            "reason",
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     assertInstanceOf(ToolGateway.Deny.class, nullResult);
 
     // Non-JSON content
@@ -241,7 +270,8 @@ class EditReviewPreflightTest {
               return new FakeHandle();
             });
     ToolGateway.PreflightResult nonJsonResult =
-        EditReviewPreflight.prepare(nonJsonTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            nonJsonTransport, createRequest(), "reason", EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     ToolGateway.Deny nonJsonDeny = assertInstanceOf(ToolGateway.Deny.class, nonJsonResult);
     assertTrue(
         nonJsonDeny
@@ -263,7 +293,11 @@ class EditReviewPreflightTest {
               return new FakeHandle();
             });
     ToolGateway.PreflightResult multipleResult =
-        EditReviewPreflight.prepare(multipleContentTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            multipleContentTransport,
+            createRequest(),
+            "reason",
+            EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     assertInstanceOf(ToolGateway.Deny.class, multipleResult);
   }
 
@@ -292,7 +326,8 @@ class EditReviewPreflightTest {
             });
 
     ToolGateway.PreflightResult result =
-        EditReviewPreflight.prepare(hugeTransport, createRequest(), "reason");
+        EditReviewPreflight.prepare(
+            hugeTransport, createRequest(), "reason", EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
     ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
     assertEquals("EDIT_REVIEW_FAILED", deny.error().kind());
     assertTrue(deny.error().message().contains("exceeds the result limit"));
@@ -311,7 +346,8 @@ class EditReviewPreflightTest {
     Thread.currentThread().interrupt();
     try {
       ToolGateway.PreflightResult result =
-          EditReviewPreflight.prepare(transport, createRequest(), "reason");
+          EditReviewPreflight.prepare(
+              transport, createRequest(), "reason", EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
       ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
       assertEquals("EDIT_REVIEW_FAILED", deny.error().kind());
       assertTrue(handle.cancelled.get());

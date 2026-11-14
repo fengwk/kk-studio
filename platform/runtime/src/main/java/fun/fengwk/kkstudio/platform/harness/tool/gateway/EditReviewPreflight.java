@@ -48,11 +48,6 @@ final class EditReviewPreflight {
   private EditReviewPreflight() {}
 
   static ToolGateway.PreflightResult prepare(
-      EnvironmentCapabilityTransport transport, ToolInvocationRequest request, String reason) {
-    return prepare(transport, request, reason, EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
-  }
-
-  static ToolGateway.PreflightResult prepare(
       EnvironmentCapabilityTransport transport,
       ToolInvocationRequest request,
       String reason,

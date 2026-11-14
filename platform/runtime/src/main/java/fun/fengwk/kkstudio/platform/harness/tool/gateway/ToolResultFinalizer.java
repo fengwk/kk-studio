@@ -48,7 +48,7 @@ import java.util.regex.Pattern;
  *       ResourceResultContent}，其余非文本 Resource 顺序保持不变；
  *   <li>所有 {@link BinaryResultContent} 外部化为 managed Resource；已有 Resource 只接受已上传的 {@code
  *       blob-upload} 或已授权的 Session 引用并原样透传，其余 scheme 一律拒绝；文本工件的 preview 只从受信 bytes 重新计算；
- *   <li>All-or-nothing plan：第一个 put 之前完成所有确定性校验、全文有界测量、硬上限（默认 16 MiB，超限报 {@code
+ *   <li>All-or-nothing plan：第一个 put 之前完成所有确定性校验、全文有界测量、硬上限（{@code tool.maxOutputMib}，超限报 {@code
  *       OUTPUT_TOO_LARGE}）、元数据规划与投影 canonical JSON 尺寸（&le; 1 MiB）验证；
  *   <li>存储失败或契约违反收敛为 {@code UNKNOWN / RESOURCE_STORE_FAILED}。
  * </ul>
@@ -85,10 +85,6 @@ public final class ToolResultFinalizer {
   public static final int MAX_TERMINAL_RESULT_UTF8_BYTES =
       ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES;
 
-  /** 单条 live partial 上限（256 KiB）。 */
-  public static final int MAX_PARTIAL_RESULT_UTF8_BYTES =
-      ToolResultSizeLimits.MAX_PARTIAL_RESULT_UTF8_BYTES;
-
   public static final String INVALID_RESULT_KIND = "INVALID_RESULT";
   public static final String OUTPUT_TOO_LARGE_KIND = "OUTPUT_TOO_LARGE";
   public static final String RESOURCE_STORE_FAILED_KIND = "RESOURCE_STORE_FAILED";
@@ -101,10 +97,6 @@ public final class ToolResultFinalizer {
 
   private final ToolResourceStager resourceStager;
   private final IntSupplier outputLimitBytes;
-
-  public ToolResultFinalizer(ToolResourceStager resourceStager, int maxOutputBytes) {
-    this(resourceStager, () -> maxOutputBytes);
-  }
 
   public ToolResultFinalizer(ToolResourceStager resourceStager, IntSupplier outputLimitBytes) {
     this.resourceStager = Objects.requireNonNull(resourceStager, "resourceStager");
