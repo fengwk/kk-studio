@@ -35,12 +35,6 @@ final class SystemSettingsValidation {
     }
   }
 
-  static void requireNonNegativeMillis(long value, String field) {
-    if (value < 0) {
-      throw new IllegalArgumentException(field + " must not be negative");
-    }
-  }
-
   static void requirePositive(long value, String field) {
     if (value <= 0) {
       throw new IllegalArgumentException(field + " must be positive");
@@ -56,12 +50,6 @@ final class SystemSettingsValidation {
   static void requireAtLeast(int value, int minimum, String field) {
     if (value < minimum) {
       throw new IllegalArgumentException(field + " must be at least " + minimum);
-    }
-  }
-
-  static void requirePositiveBounded(long value, long maximum, String field) {
-    if (value <= 0 || value > maximum) {
-      throw new IllegalArgumentException(field + " must be positive and at most " + maximum);
     }
   }
 

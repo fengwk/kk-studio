@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
@@ -31,8 +32,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -72,8 +73,6 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
 
   /** 文件名与扩展名之间的固定分隔符。 */
   private static final char EXTENSION_SEPARATOR = '.';
-
-  private static final String SHA256 = "SHA-256";
 
   private final SessionBlobRefManager sessionBlobRefManager;
   private final StorageBlobManager storageBlobManager;
@@ -227,7 +226,7 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
       throw new PluginResourceUnavailableException(
           "remote media type is not the declared " + family.name().toLowerCase(Locale.ROOT));
     }
-    return new StagedMedia(temp, copy.total(), hex(copy.digest()), mediaType);
+    return new StagedMedia(temp, copy.total(), HexFormat.of().formatHex(copy.digest()), mediaType);
   }
 
   /** reserve → （PENDING 时预签名 PUT）→ complete，任何失败都清理上传。 */
@@ -406,23 +405,6 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
     return headLength + copy;
   }
 
-  private static MessageDigest sha256Digest() {
-    try {
-      return MessageDigest.getInstance(SHA256);
-    } catch (NoSuchAlgorithmException error) {
-      throw new IllegalStateException("SHA-256 must be available", error);
-    }
-  }
-
-  private static String hex(byte[] digest) {
-    StringBuilder builder = new StringBuilder(digest.length * 2);
-    for (byte value : digest) {
-      builder.append(Character.forDigit((value >> 4) & 0xF, 16));
-      builder.append(Character.forDigit(value & 0xF, 16));
-    }
-    return builder.toString();
-  }
-
   private Path createTempFile() {
     try {
       Files.createDirectories(tempDirectory);
@@ -526,7 +508,7 @@ public final class StoragePluginResourceGateway implements PluginResourceGateway
     private final Path target;
     private final long maxBytes;
     private final long deadlineNanos;
-    private final MessageDigest digest = sha256Digest();
+    private final MessageDigest digest = Sha256.newDigest();
     private final byte[] head = new byte[SNIFF_BYTES];
 
     private PluginResourceUnavailableException failure;

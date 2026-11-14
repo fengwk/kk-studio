@@ -370,7 +370,7 @@ public final class ConfigSyncParser {
     String name = entry.reqName("name");
     declared.add(name);
     if (entry.contains("installConfig") || entry.contains("operatingSystem")) {
-      // 旧安装设置不是可跳过的未知字段：旧格式永远不能被静默当作兼容导入。
+      // 这两个字段不是可跳过的未知字段：必须在导入前置契约检查中明确拒绝，不能按未知字段静默跳过。
       throw DomainException.validation(
           RESOURCE,
           "environment entry uses removed installConfig/operatingSystem; use daemonConfig");
@@ -469,7 +469,7 @@ public final class ConfigSyncParser {
       throw DomainException.validation(RESOURCE, "settings must be an object");
     }
     if (rawMap.containsKey("network")) {
-      // 旧全局 network 已被 card/backend 配置隔离取代，必须在导入前置契约检查中明确拒绝。
+      // network 不属于当前六节契约：必须在导入前置契约检查中明确拒绝，不能按未知字段跳过。
       throw DomainException.validation(
           RESOURCE, "settings.network is no longer supported; use backendNetwork");
     }
