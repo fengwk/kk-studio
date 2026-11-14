@@ -93,13 +93,12 @@ public class ProjectService {
   @Transactional
   public Project createProject(String title, String description, boolean yoloEnabled) {
     String validTitle =
-        ProjectValidationUtils.requireDisplayName(
-            title, "title", ProjectValidationUtils.MAX_TITLE_LENGTH);
+        InputValidation.requireDisplayName(title, "title", InputValidation.MAX_TITLE_LENGTH);
     String validDescription =
-        ProjectValidationUtils.optionalUtf8Text(
+        InputValidation.optionalUtf8Text(
             description == null ? "" : description,
             "description",
-            ProjectValidationUtils.MAX_DESCRIPTION_BYTES);
+            InputValidation.MAX_DESCRIPTION_BYTES);
     Project project =
         Project.builder()
             .id(UUID.randomUUID())
@@ -135,13 +134,12 @@ public class ProjectService {
     requireEditable(locked);
     requireVersion(locked, expectedVersion);
     locked.setTitle(
-        ProjectValidationUtils.requireDisplayName(
-            title, "title", ProjectValidationUtils.MAX_TITLE_LENGTH));
+        InputValidation.requireDisplayName(title, "title", InputValidation.MAX_TITLE_LENGTH));
     locked.setDescription(
-        ProjectValidationUtils.optionalUtf8Text(
+        InputValidation.optionalUtf8Text(
             description == null ? "" : description,
             "description",
-            ProjectValidationUtils.MAX_DESCRIPTION_BYTES));
+            InputValidation.MAX_DESCRIPTION_BYTES));
     return applyConfiguration(locked, expectedVersion);
   }
 
@@ -240,8 +238,8 @@ public class ProjectService {
 
   private ProjectWorkflow decodeWorkflow(String workflowJson) {
     String json =
-        ProjectValidationUtils.requireUtf8Text(
-            workflowJson, "workflow", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES);
+        InputValidation.requireUtf8Text(
+            workflowJson, "workflow", InputValidation.MAX_LARGE_TEXT_BYTES);
     try {
       return workflowCodec.decode(json);
     } catch (IllegalArgumentException error) {

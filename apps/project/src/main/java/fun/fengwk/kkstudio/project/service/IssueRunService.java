@@ -107,7 +107,7 @@ public class IssueRunService {
   @Transactional
   public IssueRun acceptRun(UUID issueId, String requestKey) {
     Objects.requireNonNull(issueId, "issueId");
-    String acceptKey = ProjectValidationUtils.requireRequestKey(requestKey);
+    String acceptKey = InputValidation.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(IssueActivityKind.RUN, "ACCEPT_RUN", acceptKey, issueId);
     if (issueRepository.getById(issueId) == null) {
@@ -322,7 +322,7 @@ public class IssueRunService {
       String error) {
     Objects.requireNonNull(runId, "runId");
     Objects.requireNonNull(endEntryId, "endEntryId");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    String key = InputValidation.requireRequestKey(requestKey);
     if (status != IssueRunStatus.COMPLETED
         && status != IssueRunStatus.CANCELLED
         && status != IssueRunStatus.FAILED) {
@@ -334,8 +334,7 @@ public class IssueRunService {
     }
     String validError =
         status == IssueRunStatus.FAILED
-            ? ProjectValidationUtils.requireUtf8Text(
-                error, "error", ProjectValidationUtils.MAX_LARGE_TEXT_BYTES)
+            ? InputValidation.requireUtf8Text(error, "error", InputValidation.MAX_LARGE_TEXT_BYTES)
             : null;
     boolean handoff = nextState != null;
     Identity identity =

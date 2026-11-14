@@ -4,13 +4,13 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.Objects;
 
-/** Project 领域值对象的共享边界校验：显示名、正文与 Agent/Environment 规范名。 */
-final class ProjectValidation {
+/** workflow 配置字段的边界校验：显示名、正文与 Agent/Environment 规范名；错误资源固定为 {@code workflow}。 */
+final class WorkflowFieldValidation {
 
   /** agent.name 与 environment.name 的列宽约束。 */
   private static final int MAX_CANONICAL_NAME_LENGTH = 64;
 
-  private ProjectValidation() {}
+  private WorkflowFieldValidation() {}
 
   /** 显示名：非空白且无首尾空白。 */
   static String requireDisplayName(String value, String field) {

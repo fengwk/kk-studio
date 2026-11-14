@@ -35,8 +35,8 @@ public class IssueStageBudgetService {
   public StageBudgetView resetStageBudget(
       UUID issueId, long expectedVersion, String requestKey, String state, int maxRuns) {
     Objects.requireNonNull(issueId, "issueId");
-    ProjectStateCode code = ProjectValidationUtils.requireStateCode(state, "state");
-    String key = ProjectValidationUtils.requireRequestKey(requestKey);
+    ProjectStateCode code = InputValidation.requireStateCode(state, "state");
+    String key = InputValidation.requireRequestKey(requestKey);
     Identity identity =
         IssueActivityIdempotency.identity(
             IssueActivityKind.CONTROL, "RESET", key, code.value(), maxRuns);

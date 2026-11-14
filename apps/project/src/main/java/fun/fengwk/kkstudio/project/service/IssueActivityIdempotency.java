@@ -47,7 +47,7 @@ final class IssueActivityIdempotency {
     return new Identity(
         kind,
         kind.name().toLowerCase(Locale.ROOT) + ":" + requestKey,
-        ProjectValidationUtils.sha256(canonical.toString()));
+        InputValidation.sha256(canonical.toString()));
   }
 
   /**

@@ -32,7 +32,7 @@ public class IssueEvidenceService {
   /** 单次列举返回的证据上限（按发布时间倒序）。 */
   static final int MAX_EVIDENCE_LIMIT = 100;
 
-  /** 托管资源 URI 前缀：与平台 {@code SessionResourceUri} 的规范形态一致；project 不反向依赖 platform，故只在此保留协议常量。 */
+  /** 托管资源 URI 前缀：与平台 {@code SessionResourceUri} 的规范形态一致，用于生成人为事实正文里的资源链接。 */
   private static final String RESOURCE_URI_PREFIX = "resource://files/";
 
   private final IssueEvidenceRepository issueEvidenceRepository;
@@ -78,7 +78,7 @@ public class IssueEvidenceService {
       return existing;
     }
 
-    String validatedName = ProjectValidationUtils.requireDisplayName(ready.filename(), "name", 512);
+    String validatedName = InputValidation.requireDisplayName(ready.filename(), "name", 512);
 
     long version = issue.getVersion();
     blobPort.retainBlob(blobId);
@@ -138,7 +138,7 @@ public class IssueEvidenceService {
     if (blobId == null) {
       throw DomainException.validation("blobId", "blobId must not be null");
     }
-    String validatedName = ProjectValidationUtils.requireDisplayName(name, "name", 512);
+    String validatedName = InputValidation.requireDisplayName(name, "name", 512);
 
     Issue issue = issueRepository.getById(issueId);
     if (issue == null) {
@@ -149,7 +149,7 @@ public class IssueEvidenceService {
         throw DomainException.validation(
             "actorAgentName", "actorAgentName must not be blank when runId is provided");
       }
-      ProjectValidationUtils.requireCanonicalName(actorAgentName, "actorAgentName");
+      InputValidation.requireCanonicalName(actorAgentName, "actorAgentName");
       IssueRun run = issueRunRepository.getById(runId);
       if (run == null) {
         throw DomainException.notFound("run");
@@ -158,7 +158,7 @@ public class IssueEvidenceService {
         throw DomainException.validation("runId", "run does not belong to the target issue");
       }
     } else if (actorAgentName != null) {
-      ProjectValidationUtils.requireCanonicalName(actorAgentName, "actorAgentName");
+      InputValidation.requireCanonicalName(actorAgentName, "actorAgentName");
     }
 
     IssueEvidence existing = issueEvidenceRepository.get(issueId, blobId);

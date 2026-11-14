@@ -56,7 +56,6 @@ import java.util.UUID;
 @RequestMapping("/api/project")
 public class IssueController {
 
-  private static final int DEFAULT_ACTIVITY_LIMIT = 50;
   private static final int MAX_ACTIVITY_LIMIT = 200;
 
   private final IssueEditingService issueEditingService;
