@@ -502,7 +502,6 @@ create table harness_thread_command (
     constraint ck_harness_thread_command_type check (
         command_type in (
             'USER_MESSAGE',
-            'GOAL',
             'CUSTOM_MESSAGE',
             'SET_AGENT',
             'SET_EXECUTION',

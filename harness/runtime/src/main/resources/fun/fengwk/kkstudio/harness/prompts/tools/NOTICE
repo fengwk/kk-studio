@@ -1,7 +1,7 @@
 The environment tools (bash.md, edit.md, find.md, grep.md, lsp_goto_definition.md,
-lsp_java_decompile.md, lsp_workspace_symbols.md, read.md, write.md), goal tools
-(get-goal.md, update-goal.md and their schemas), and task.md, task-system.md and
-task.schema.json are copied or adapted from pi-base under the MIT License.
+lsp_java_decompile.md, lsp_workspace_symbols.md, read.md, write.md), and task.md,
+task-system.md and task.schema.json are copied or adapted from pi-base under the MIT
+License.
 
 MIT License
 

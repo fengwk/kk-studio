@@ -73,7 +73,7 @@ public sealed interface AcceptCommandsTarget {
 
   /**
    * 在既有 Thread 上继续接受 Commands。单条纯 USER_MESSAGE 批次必须省略 head / next-command-sequence
-   * cursor，按当前邮箱尾部入队； 其余批次（SET_* 混合、纯设置、GOAL、内部 spawn continuation）必须给出精确 cursor。两个 cursor
+   * cursor，按当前邮箱尾部入队； 其余批次（SET_* 混合、纯设置、内部 spawn continuation）必须给出精确 cursor。两个 cursor
    * 字段必须同时给出或同时省略。
    */
   record Thread(UUID threadId, UUID expectedHeadEntryId, Long expectedNextCommandSequence)

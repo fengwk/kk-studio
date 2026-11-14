@@ -25,8 +25,8 @@ public class HarnessThreadCommandDTO {
   private Long sequence;
 
   /**
-   * 命令类型，取 {@code ThreadCommandType} 枚举名：USER_MESSAGE / CUSTOM_MESSAGE / GOAL / SET_AGENT /
-   * SET_EXECUTION / SET_ENVIRONMENT / NOTIFICATION。
+   * 命令类型，取 {@code ThreadCommandType} 枚举名：USER_MESSAGE / CUSTOM_MESSAGE / SET_AGENT / SET_EXECUTION
+   * / SET_ENVIRONMENT / NOTIFICATION。
    */
   private ThreadCommandType type;
 
