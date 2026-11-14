@@ -1,4 +1,4 @@
-import type { RealtimeFrameScheduler } from '@/features/thread/runtime/realtime-frame-scheduler'
+import type { RealtimeFrameScheduler } from '@/features/thread/runtime/thread-realtime/realtime-frame-scheduler'
 import {
   isRealtimeModelDeltaGap,
   mergeRealtimeModelStreamAfterCheckpoint,

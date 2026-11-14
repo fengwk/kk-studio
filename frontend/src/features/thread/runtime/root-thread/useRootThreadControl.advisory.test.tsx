@@ -2,7 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
-import { useRootThreadControl } from '@/features/thread/runtime/useRootThreadControl'
+import { useRootThreadControl } from '@/features/thread/runtime/controllers/useRootThreadControl'
 import { harnessService } from '@/shared/api/harness-service'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
@@ -68,7 +68,7 @@ function makeMockProjection(threadId: string): ThreadProjection {
 }
 
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 
 const mockDefaults = {
   agentName: 'assistant',

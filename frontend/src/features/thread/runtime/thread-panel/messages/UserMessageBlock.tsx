@@ -1,4 +1,4 @@
-import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { ResourceAttachmentChip } from '@/features/thread/runtime/thread-panel/messages/ResourceAttachmentChip'
 import './resource-attachments.css'
 

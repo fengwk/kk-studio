@@ -9,7 +9,7 @@ import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-tes
 import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { makeApplicationContributions } from '@/test-support/application-contributions'
 
 vi.mock('@/features/settings/system-settings-service', () => ({

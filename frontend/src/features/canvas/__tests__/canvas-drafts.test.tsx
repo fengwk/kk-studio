@@ -11,7 +11,7 @@ import {
   saveCanvasDraft,
 } from '@/features/canvas/canvas-draft-storage'
 import { onCanvasStorageError } from '@/features/canvas/canvas-local-store'
-import { createMockIDBFactory } from './mock-idb'
+import { createMockIDBFactory } from '@/test-support/mock-idb'
 import type { ResourceNode } from '@/features/canvas/domain'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'

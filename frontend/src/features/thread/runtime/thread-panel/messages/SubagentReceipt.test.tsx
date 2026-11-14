@@ -2,11 +2,11 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
+import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { EntryMessageBlock } from '@/features/thread/runtime/thread-panel/messages/EntryMessageBlock'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
 import { subagentTaskPreview } from '@/features/thread/runtime/thread-panel/messages/subagent-receipt-preview'
-import type { EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 type ReceiptState = 'completed' | 'error' | 'cancelled'
 

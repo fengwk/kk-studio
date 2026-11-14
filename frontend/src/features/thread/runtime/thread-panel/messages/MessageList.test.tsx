@@ -5,7 +5,7 @@ import { MessageList } from '@/features/thread/runtime/thread-panel/messages/Mes
 import type {
   DialogueMessage,
   ToolDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
 import { makeApplicationContributions } from '@/test-support/application-contributions'
 

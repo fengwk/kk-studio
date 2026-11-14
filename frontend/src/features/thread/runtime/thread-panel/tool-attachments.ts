@@ -1,4 +1,4 @@
-import type { ToolAttachment } from '@/features/thread/runtime/thread-timeline-types'
+import type { ToolAttachment } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { translate } from '@/shared/i18n'
 
 export function getToolAttachmentLabel(attachment: ToolAttachment): string {

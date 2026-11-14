@@ -1,15 +1,15 @@
 import { useMemo, useRef } from 'react'
 import { extractContextWindow } from '@/features/catalog'
 import type { ModelDTO } from '@/shared/api/generated/contracts'
-import { buildThreadTimeline, isThreadWorking } from '@/features/thread/runtime/thread-timeline'
-import { buildThreadEventTimeline } from '@/features/thread/runtime/thread-events'
+import { buildThreadTimeline, isThreadWorking } from '@/features/thread/runtime/thread-timeline/thread-timeline'
+import { buildThreadEventTimeline } from '@/features/thread/runtime/thread-timeline/thread-events'
 import { aggregateEntryUsage } from '@/features/thread/runtime/thread-timeline/turn-usage'
-import { useAgentThreadQueries } from '@/features/thread/runtime/useAgentThreadQueries'
-import { useHarnessThreadRealtime } from '@/features/thread/runtime/useHarnessThreadRealtime'
+import { useAgentThreadQueries } from '@/features/thread/runtime/queries/useAgentThreadQueries'
+import { useHarnessThreadRealtime } from '@/features/thread/runtime/thread-realtime/useHarnessThreadRealtime'
 import {
   extractQueuedCustomMessages,
   type QueuedCustomMessage,
-} from '@/features/thread/runtime/queued-custom-messages'
+} from '@/features/thread/runtime/state/queued-custom-messages'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import { translate } from '@/shared/i18n'
 

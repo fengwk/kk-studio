@@ -1,4 +1,4 @@
-import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { contentText } from '@/features/thread/runtime/thread-timeline/content-utils'
 
 export function extractQueuedMessage(

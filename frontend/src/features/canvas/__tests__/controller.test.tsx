@@ -7,7 +7,7 @@ import { loadPendingFunctionRun } from '@/features/canvas/function-run-pending'
 import { loadCanvasDrafts, saveCanvasDraft } from '@/features/canvas/canvas-draft-storage'
 import * as draftStorageModule from '@/features/canvas/canvas-draft-storage'
 import { loadCanvasOperations } from '@/features/canvas/canvas-operation-storage'
-import { createMockIDBFactory } from './mock-idb'
+import { createMockIDBFactory } from '@/test-support/mock-idb'
 import type { CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
 import { readJsonObject } from '@/features/canvas/domain'
 import {

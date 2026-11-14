@@ -1,7 +1,7 @@
 import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { ThreadWorkingStatus } from '@/features/thread/runtime/thread-panel/ThreadWorkingStatus'
-import type { QueuedThreadMessage } from '@/features/thread/runtime/thread-timeline-types'
-import type { QueuedCustomMessage } from '@/features/thread/runtime/queued-custom-messages'
+import type { QueuedThreadMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import type { QueuedCustomMessage } from '@/features/thread/runtime/state/queued-custom-messages'
 import { useI18n } from '@/shared/i18n'
 import '@/features/thread/runtime/thread-panel/thread-widgets.css'
 

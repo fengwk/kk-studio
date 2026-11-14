@@ -3,7 +3,7 @@ import {
   createRealtimeFrameScheduler,
   type RealtimeFrameScheduler,
   type RealtimeFrameSchedulerOptions,
-} from '@/features/thread/runtime/realtime-frame-scheduler'
+} from '@/features/thread/runtime/thread-realtime/realtime-frame-scheduler'
 import {
   isFailedGeneration,
   isTerminalAssistantOutputStatus,

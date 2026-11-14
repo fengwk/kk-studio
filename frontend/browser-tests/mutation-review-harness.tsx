@@ -8,8 +8,8 @@ import '@/features/thread/runtime/interactions/interaction-cards.css'
 import { setLocale } from '@/shared/i18n'
 import { ToolMessageBlock } from '@/features/thread/runtime/thread-panel/messages/ToolMessageBlock'
 import { ApprovalCard, type ApprovalCardProps } from '@/features/thread/runtime/interactions/ApprovalCard'
-import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
-import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline'
+import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
 import { LONG_WRITE_CONTENT, MULTI_HUNK_DIFF, VALID_SHA } from './mutation-review-fixtures'
 
 setLocale('zh-CN')

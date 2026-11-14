@@ -5,7 +5,7 @@ import type {
 import type {
   DialogueMessage,
   ToolDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { createModelAttemptFailureMessage } from '@/features/thread/runtime/thread-timeline/model-attempt-failure'
 import type {
   HarnessActiveAssistantOutputDTO,

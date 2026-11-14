@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import { ToolMessageBlock } from '@/features/thread/runtime/thread-panel/messages/ToolMessageBlock'
 import { TaskToolRenderer } from '@/features/thread/runtime/thread-panel/messages/TaskToolRenderer'
-import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
+import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import '@/styles.css'
 // .thread-dialogue/.thread-blocks 的滚动布局随 styles 拆分移入 thread 面板样式；
 // 本 harness 直接挂载 ThreadConversationView 而不经过 ThreadPanel，必须显式引入。
@@ -13,7 +13,7 @@ import { ThreadConversationView } from '@/features/thread/runtime/thread-panel/T
 import type {
   DialogueMessage,
   ToolDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
 
 /**

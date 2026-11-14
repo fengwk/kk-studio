@@ -27,7 +27,7 @@ import {
   savePendingAcceptance,
   type BoundPendingMessage,
   type PendingAcceptance,
-} from '@/features/thread/runtime/pending-request-store'
+} from '@/features/thread/runtime/state/pending-request-store'
 import {
   createResourcePart,
   createTextPart,

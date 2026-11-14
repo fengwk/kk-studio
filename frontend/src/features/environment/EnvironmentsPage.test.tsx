@@ -6,7 +6,7 @@ import { EnvironmentsPage } from '@/features/environment/EnvironmentsPage'
 import { environmentService } from '@/features/environment/environment-service'
 import { ApiError } from '@/shared/api/client'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type {
   EnvironmentDTO,

@@ -9,7 +9,7 @@ import {
   loadPendingStop,
   storePendingStop,
   type PendingStopOperation,
-} from '@/features/thread/runtime/pending-stop-sidecar'
+} from '@/features/thread/runtime/state/pending-stop-sidecar'
 import { createStopRequestId } from '@/features/thread/command-batch-plan'
 import type { HarnessStoppedThreadReceiptDTO } from '@/shared/api/generated/contracts'
 

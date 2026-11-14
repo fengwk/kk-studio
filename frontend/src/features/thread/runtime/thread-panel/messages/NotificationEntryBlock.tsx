@@ -4,7 +4,7 @@ import { SystemMessageCard } from '@/features/thread/runtime/thread-panel/messag
 import type {
   EntryEventDialogueMessage,
   EntryNotification,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 import './notification-entry.css'
 

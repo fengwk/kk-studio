@@ -6,8 +6,8 @@ import { useI18n } from '@/shared/i18n'
 import type { BranchDraft } from '@/features/thread/branch-draft'
 import { threadDraftPath } from '@/features/thread/thread-draft-path'
 import { isDraftHistoryTarget, type PaneTarget } from '@/features/thread/runtime/agent-pane'
-import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline'
-import { buildThreadEventTimeline } from '@/features/thread/runtime/thread-events'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
+import { buildThreadEventTimeline } from '@/features/thread/runtime/thread-timeline/thread-events'
 import {
   branchDraftFromEntry,
   cloneDraft,

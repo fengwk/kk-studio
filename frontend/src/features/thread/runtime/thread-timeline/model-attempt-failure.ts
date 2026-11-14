@@ -1,4 +1,4 @@
-import type { ModelAttemptFailureDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { ModelAttemptFailureDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 interface ModelAttemptFailureMessageInput {
   id: string

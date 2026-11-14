@@ -1,4 +1,4 @@
-import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 export function isVisibleDialogueMessage(message: DialogueMessage): boolean {
   if (message.role === 'meta') {

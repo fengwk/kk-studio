@@ -1,6 +1,6 @@
-import { extractResultEditReview } from '@/features/thread/runtime/mutation-review'
-import { getRecordList, parseRawJsonText } from '@/features/thread/runtime/payload-json'
-import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import { extractResultEditReview } from '@/features/thread/runtime/state/mutation-review'
+import { getRecordList, parseRawJsonText } from '@/features/thread/runtime/thread-timeline/payload-json'
+import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { toToolContents } from '@/features/thread/runtime/thread-timeline/content-utils'
 
 /**

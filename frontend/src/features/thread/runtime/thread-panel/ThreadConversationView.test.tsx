@@ -2,8 +2,8 @@ import { createRef } from 'react'
 import { act, fireEvent, render } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ThreadConversationView } from '@/features/thread/runtime/thread-panel/ThreadConversationView'
-import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/transcript-reading'
-import type { DialogueMessage, TextDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/thread-timeline/transcript-reading'
+import type { DialogueMessage, TextDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 /**
  * Conversation 视图的自动贴底生命周期（挂载即生效，卸载即消失）：

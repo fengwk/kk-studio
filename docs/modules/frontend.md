@@ -92,7 +92,7 @@ Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 
 没有 EventSource，也不用固定轮询兜底。
 
 Thread Snapshot 只有一份 query 缓存，所有读取都经
-[`thread-snapshot-cache.ts`](../../frontend/src/features/thread/runtime/thread-snapshot-cache.ts) 的同一 fetcher。
+[`thread-snapshot-cache.ts`](../../frontend/src/features/thread/runtime/state/thread-snapshot-cache.ts) 的同一 fetcher。
 缓存始终是完整的 root-to-head 历史；只有末 Entry 确为当前 head 时才以它为 `afterEntryId` 请求增量。
 响应到达时按当时的缓存合并：完整响应替换缓存，增量保留到 `baseEntryId` 的前缀再按 Entry id 幂等接上，
 较旧 version 不覆盖较新缓存，空增量仍更新全部当前状态。增量的基线已不在缓存链上时显式再读一次完整历史，
@@ -122,7 +122,7 @@ TOOL_PARTIAL 按 thread/invocation/attempt 内 eventId 精确去重，process.ou
 Invocation 终态和 attempt failure 建立围栏，迟到信号丢弃；
 durable 结果到达后退出 transient overlay。
 
-[`thread-events.ts`](../../frontend/src/features/thread/runtime/thread-events.ts) 将 Entry、活动
+[`thread-events.ts`](../../frontend/src/features/thread/runtime/thread-timeline/thread-events.ts) 将 Entry、活动
 Invocation 与 attempt failure 投影为时间线记录。Thread 活动有四态：`RUNNING`、`EXIT_PENDING`、`WAITING` 与 `IDLE`。
 RUNNING 表示本地流程未结束（包括审批、问卷、环境阻塞、终态物化与续作）；EXIT_PENDING 表示没有活跃流程，
 但仍有已登记且未确认退出的执行代次阻塞收敛或待启动动作；WAITING 仅表示本地已让出执行并等待直接异步
@@ -495,7 +495,7 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 并透传 WebSocket。
 
 测试入口：[`frontend/src/features/environment/ide`](../../frontend/src/features/environment/ide) 的状态机、存储与
-对账单测，以及 [`AgentPane.test.tsx`](../../frontend/src/features/thread/runtime/AgentPane.test.tsx) 对非 Chat 入口
+对账单测，以及 [`AgentPane.test.tsx`](../../frontend/src/features/thread/runtime/panes/AgentPane.test.tsx) 对非 Chat 入口
 隐藏与 Chat 宿主的守护。真实浏览器 reload、旧 WS 重叠、复制 tab 与 BFCache 从
 [开发与测试](../operations/development-and-testing.md#真实-ide-与-daemon-验收) 的真实 IDE 入口执行；只记录实际
 运行结果，不预设固定用例数。

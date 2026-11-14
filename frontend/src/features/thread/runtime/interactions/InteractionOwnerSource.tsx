@@ -1,7 +1,7 @@
 import { ExternalLink } from 'lucide-react'
 import { useNavigate } from 'react-router'
 import { Button } from '@/shared/ui/controls/Button'
-import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
+import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import { useI18n } from '@/shared/i18n'
 import {
   interactionOwnerLabel,

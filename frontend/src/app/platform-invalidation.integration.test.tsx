@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { ProjectsInvalidationBridge } from '@/features/projects/extensions/projects-extension'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { queryKeys } from '@/shared/lib/query-keys'
 
 const PROJECT_ID = '11111111-2222-4333-8444-555555555555'

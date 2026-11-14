@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { AssistantMessageBlock } from '@/features/thread/runtime/thread-panel/messages/AssistantMessageBlock'
 import { ThreadTranscript } from '@/features/thread/runtime/thread-panel/ThreadTranscript'
 import { isVisibleDialogueMessage } from '@/features/thread/runtime/thread-panel/visibility'
-import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 describe('isVisibleDialogueMessage', () => {
   it('keeps thinking-only assistant messages visible', () => {

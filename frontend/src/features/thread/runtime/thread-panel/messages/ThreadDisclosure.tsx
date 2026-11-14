@@ -1,6 +1,6 @@
 import { ChevronDown, ChevronRight, ChevronUp } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type CSSProperties } from 'react'
-import { announceTranscriptReading } from '@/features/thread/runtime/transcript-reading'
+import { announceTranscriptReading } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import { useI18n } from '@/shared/i18n'
 import { HEADER_COLLAPSED_LINES } from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
 import type { ThreadDisclosureProps } from '@/features/thread/runtime/thread-panel/messages/thread-disclosure.types'

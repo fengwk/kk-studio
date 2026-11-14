@@ -1,5 +1,5 @@
 import { Coins, GitBranch } from 'lucide-react'
-import type { MetaDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { MetaDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useEntryBranchRequest } from '@/features/thread/runtime/thread-panel/entry-branch-context'
 import { formatUsageDetails } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import { IconButton } from '@/shared/ui/controls/IconButton'

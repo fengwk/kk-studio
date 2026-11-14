@@ -11,7 +11,7 @@ import type { ApplicationContributions, ExtensionComponentProps } from '@/platfo
 import type { PrimaryNavItem } from '@/platform/shell/types'
 import { WorkbenchShell } from '@/platform/workbench/WorkbenchShell'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { makeApplicationContributions } from '@/test-support/application-contributions'
 
 const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [

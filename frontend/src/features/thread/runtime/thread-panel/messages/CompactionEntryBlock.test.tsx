@@ -6,11 +6,11 @@ import {
   CompactionActionsContext,
   type CompactionActions,
 } from '@/features/thread/runtime/thread-panel/compaction-actions-context'
-import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/transcript-reading'
+import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import type {
   CompactionCardFact,
   EntryEventDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import {
   FULL_COMPACTION_SUMMARY,
   LONG_COMPACTION_SUMMARY,

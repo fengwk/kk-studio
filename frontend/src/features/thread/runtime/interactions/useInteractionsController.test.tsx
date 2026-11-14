@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { InteractionDTO, InteractionPageDTO } from '@/shared/api/generated/contracts'
 import { interactionService } from '@/shared/api/interaction-service'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useInteractionsController } from './useInteractionsController'
 

@@ -1,7 +1,7 @@
 import { memo } from 'react'
 import { ThinkingBlock } from '@/features/thread/runtime/thread-panel/messages/ThinkingBlock'
 import { normalizeThinkingText } from '@/features/thread/runtime/thread-panel/messages/thinking-text'
-import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { useI18n } from '@/shared/i18n'

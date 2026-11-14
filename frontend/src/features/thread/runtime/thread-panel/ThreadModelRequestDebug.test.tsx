@@ -10,7 +10,7 @@ import {
 import type {
   ThreadModelRequestDebugData,
   ThreadModelRequestDebugTool,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
 
 function sampleDebug(overrides: Partial<ThreadModelRequestDebugData> = {}): ThreadModelRequestDebugData {

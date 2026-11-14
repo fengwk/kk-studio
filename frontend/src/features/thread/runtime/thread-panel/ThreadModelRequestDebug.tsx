@@ -4,7 +4,7 @@ import { AlertCircle, Eye } from 'lucide-react'
 import type {
   ThreadModelRequestDebugData,
   ThreadModelRequestDebugTool,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { DebugInspectorSelection } from '@/features/thread/runtime/thread-panel/ThreadDebugInspector'
 import { useI18n } from '@/shared/i18n'
 import { Code, Mono } from '@/shared/ui/data/Mono'

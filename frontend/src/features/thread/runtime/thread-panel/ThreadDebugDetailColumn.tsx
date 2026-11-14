@@ -4,11 +4,11 @@ import {
   type DebugInspectorSelection,
 } from '@/features/thread/runtime/thread-panel/ThreadDebugInspector'
 import { ThreadEventDetail } from '@/features/thread/runtime/thread-panel/ThreadEventDetail'
-import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
 import type {
   ThreadModelRequestDebugData,
   ThreadProviderRequestPreviewData,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 
 /**

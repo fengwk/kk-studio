@@ -3,7 +3,7 @@ import {
   getCanvas,
   postCanvasCommands,
 } from '@/features/canvas/canvas-api'
-import { compareCanvasRevisions } from '@/shared/lib/canvas-version'
+import { compareCanvasRevisions } from '@/features/canvas/canvas-version'
 import { getCurrentUserId } from '@/features/canvas/canvas-local-store'
 import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
 import {

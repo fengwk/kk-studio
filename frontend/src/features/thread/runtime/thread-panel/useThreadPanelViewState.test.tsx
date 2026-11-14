@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
 import { useThreadPanelViewState } from './useThreadPanelViewState'
 
 function event(id: string, overrides: Partial<ThreadEventRecord> = {}): ThreadEventRecord {

@@ -12,7 +12,7 @@ import { formatJsonContent } from '@/features/thread/runtime/thread-timeline/con
 import type {
   ToolAttachment,
   ToolContent,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 import { ResourceUriText } from '@/shared/ui/markdown/ResourceUriText'
 import './resource-attachments.css'

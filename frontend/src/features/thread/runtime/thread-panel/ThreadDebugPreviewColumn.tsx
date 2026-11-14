@@ -1,7 +1,7 @@
 import { AlertCircle } from 'lucide-react'
 import { ThreadModelRequestDebug } from '@/features/thread/runtime/thread-panel/ThreadModelRequestDebug'
 import type { DebugInspectorSelection } from '@/features/thread/runtime/thread-panel/ThreadDebugInspector'
-import type { ThreadModelRequestDebugData } from '@/features/thread/runtime/thread-timeline-types'
+import type { ThreadModelRequestDebugData } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 
 /**

@@ -1,4 +1,4 @@
-import type { TurnUsage, UsageCost } from '@/features/thread/runtime/thread-timeline-types'
+import type { TurnUsage, UsageCost } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { translate, type TranslationKey } from '@/shared/i18n'
 import { formatCompactTokens } from '@/features/thread/runtime/thread-timeline/content-utils'
 import {

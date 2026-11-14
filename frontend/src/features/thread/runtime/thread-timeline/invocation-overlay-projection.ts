@@ -1,5 +1,5 @@
-import { asRecord } from '@/features/thread/runtime/payload-json'
-import { extractResultEditReview } from '@/features/thread/runtime/mutation-review'
+import { asRecord } from '@/features/thread/runtime/thread-timeline/payload-json'
+import { extractResultEditReview } from '@/features/thread/runtime/state/mutation-review'
 import { parseToolErrorText } from '@/features/thread/runtime/thread-realtime/tool-stream'
 import type { RealtimeToolStream } from '@/features/thread/runtime/thread-realtime/tool-stream'
 import {
@@ -7,7 +7,7 @@ import {
   toolCallIdentity,
   type DialogueMessage,
   type ToolDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { projectToolResultContent } from '@/features/thread/runtime/thread-timeline/tool-result-projection'
 import { parseApproval } from '@/features/thread/runtime/thread-timeline/approval-parsing'
 import type { ToolInvocationDTO } from '@/shared/api/generated/contracts'

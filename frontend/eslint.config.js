@@ -8,9 +8,9 @@ import path from 'node:path'
 // Cross-feature entry points currently allowed; `entry/*` allows the whole feature-owned slice.
 // New dependencies require review.
 const featureDependencies = {
-  projects: ['thread/runtime/AgentPane', 'environment/environment-service'],
+  projects: ['thread/runtime/panes/AgentPane', 'environment/environment-service'],
   settings: [
-    'thread/runtime/thread-notifications',
+    'thread/runtime/state/thread-notifications',
     'extensions/PluginsTab',
     'catalog/agent-capability-candidates',
     'catalog/ai-draft-variant-options',
@@ -114,7 +114,7 @@ export default tseslint.config(
   {
     files: [
       'src/features/thread/runtime/thread-panel/**/*.{ts,tsx}',
-      'src/features/thread/runtime/thread-timeline-types.ts',
+      'src/features/thread/runtime/thread-timeline/thread-timeline-types.ts',
     ],
     rules: {
       'no-restricted-imports': [
@@ -126,7 +126,7 @@ export default tseslint.config(
               message: 'Portable thread presentation must receive data through props.',
             },
             {
-              name: '@/features/thread/runtime/thread-timeline',
+              name: '@/features/thread/runtime/thread-timeline/thread-timeline',
               message: 'Import the pure thread-timeline-types contract instead of the Harness adapter barrel.',
             },
           ],

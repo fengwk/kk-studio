@@ -4,8 +4,8 @@ import {
   parseCompletedResult,
   parseQuestionnaire,
 } from '@/features/thread/runtime/interactions/questionnaire-parser'
-import type { ToolContent } from '@/features/thread/runtime/thread-timeline-types'
-import { parseRawJsonText } from '@/features/thread/runtime/payload-json'
+import type { ToolContent } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import { parseRawJsonText } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { useI18n } from '@/shared/i18n'
 
 /**

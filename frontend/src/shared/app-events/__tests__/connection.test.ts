@@ -4,7 +4,7 @@ import {
   createApplicationEventUrl,
   type ApplicationEventConnectionState,
 } from '@/shared/app-events/connection'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import type { ApplicationEventServerMessage } from '@/shared/app-events/protocol'
 
 const URL = 'ws://test/ws/events'

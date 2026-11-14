@@ -1,4 +1,4 @@
-import type { ThreadModelRequestDebugTool } from '@/features/thread/runtime/thread-timeline-types'
+import type { ThreadModelRequestDebugTool } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { useI18n } from '@/shared/i18n'
 
 /** 结构化 payload 的展示形态；不可序列化时退回字符串，不抛错。 */

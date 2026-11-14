@@ -5,7 +5,7 @@ import { createBrowserRouter, RouterProvider, Route, Routes, useNavigate } from 
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { AgentPane } from '@/features/thread/runtime/AgentPane'
+import { AgentPane } from '@/features/thread/runtime/panes/AgentPane'
 import { ThreadWorkspacePage } from '@/features/chat/thread/ThreadWorkspacePage'
 import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type { AgentDTO, EnvironmentDTO } from '@/shared/api/generated/contracts'

@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline-builder'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline-builder'
 import { UserMessageBlock } from '@/features/thread/runtime/thread-panel/messages/UserMessageBlock'
 import { ResourceBlobUrlContext } from '@/features/thread/runtime/thread-panel/messages/ResourceBlobUrlContext'
 

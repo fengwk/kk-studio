@@ -2,7 +2,7 @@ import { useEffect, useRef, type KeyboardEvent, type Ref, type RefObject } from 
 import { KeyValue, KeyValueRow } from '@/shared/ui/data/KeyValue'
 import { Code } from '@/shared/ui/data/Mono'
 import { Eye, LoaderCircle, X } from 'lucide-react'
-import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
 import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { IconButton } from '@/shared/ui/controls/IconButton'

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { MetaMessageBlock } from '@/features/thread/runtime/thread-panel/messages/MetaMessageBlock'
 import { EntryBranchContext } from '@/features/thread/runtime/thread-panel/entry-branch-context'
-import type { MetaDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { MetaDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 describe('MetaMessageBlock', () => {
   // 意图：回合 footer 的 hover 明细必须由真实 turnUsage 事实生成完整数字与全称字段，

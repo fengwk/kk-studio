@@ -1,7 +1,7 @@
 import type {
   MetaDialogueMessage,
   TurnUsage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { SettingsSnapshot } from '@/features/thread/runtime/thread-timeline/entry-event-projection'
 
 /**

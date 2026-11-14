@@ -42,7 +42,7 @@ vi.mock('./components/IssueDetailModal', async (importOriginal) => {
   }
 })
 
-vi.mock('@/features/thread/runtime/AgentPane', () => ({
+vi.mock('@/features/thread/runtime/panes/AgentPane', () => ({
   AgentPane: (props: Record<string, unknown>) => {
     capturedPaneProps = props
     return (

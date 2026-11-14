@@ -15,7 +15,7 @@ import { emptyProviderDraft } from '@/features/catalog/ai-provider-draft-codec'
 import { environmentService } from '@/features/environment/environment-service'
 import { setLocale, translate } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/features/environment/environment-service', () => ({

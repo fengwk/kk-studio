@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from 'react'
-import type { ToolAttachment } from '@/features/thread/runtime/thread-timeline-types'
+import type { ToolAttachment } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { AttachmentMediaPreview } from '@/features/thread/runtime/thread-panel/messages/AttachmentMediaPreview'
 import {
   ResourceBlobUrlContext,

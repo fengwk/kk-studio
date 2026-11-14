@@ -3,7 +3,7 @@ import {
   buildToolMessageView,
   toolDefaultExpanded,
 } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
-import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 function message(
   overrides: Partial<ToolDialogueMessage> = {},
