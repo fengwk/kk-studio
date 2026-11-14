@@ -360,6 +360,13 @@ final class DaemonConnectionSession implements DaemonSession {
       return;
     }
     drainCallbacks();
+    executePrepared(prepared, preparedDownload);
+  }
+
+  /** 锁外执行已准备好的传输：传输本身会做网络与存储 IO，不能占用接收锁。 */
+  private void executePrepared(
+      DaemonTransferCoordinator.PreparedTransfer prepared,
+      DaemonDownloadCoordinator.PreparedDownload preparedDownload) {
     if (prepared != null) {
       transferCoordinator.executeTransfer(prepared, ticketService, invocationTracker);
     }

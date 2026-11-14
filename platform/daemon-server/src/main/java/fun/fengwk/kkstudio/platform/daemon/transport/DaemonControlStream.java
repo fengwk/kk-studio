@@ -278,54 +278,61 @@ public class DaemonControlStream implements DaemonControlChannel {
         .build();
   }
 
+  /** 读出当前可用的全部 DATA 帧并解帧；遇到 endStream 或首个协议违规即停止。 */
+  private InboundBatch readAvailable(Stream source) {
+    List<Envelope> envelopes = new ArrayList<>();
+    ControlFrameDecoder.ProtocolViolation violation = new ControlFrameDecoder.ProtocolViolation();
+    boolean peerEnded = false;
+    while (true) {
+      Stream.Data data = source.readData();
+      if (data == null) {
+        break;
+      }
+      envelopes.addAll(decoder.accept(data.frame().getByteBuffer(), violation));
+      boolean endStream = data.frame().isEndStream();
+      data.release();
+      if (endStream) {
+        peerEnded = true;
+        break;
+      }
+      if (violation.message() != null) {
+        break;
+      }
+    }
+    return new InboundBatch(envelopes, violation.message(), peerEnded);
+  }
+
+  /**
+   * 锁外按到达顺序交付。
+   *
+   * <p>绑定前不 demand，因此进入数据回调时会话必然已就绪；这里读一次引用即可，避免在交付期间持有锁。
+   */
+  private void deliver(List<Envelope> envelopes) {
+    DaemonSession currentSession;
+    synchronized (lock) {
+      currentSession = daemonSession;
+    }
+    for (Envelope envelope : envelopes) {
+      currentSession.receive(envelope);
+    }
+  }
+
   public Stream.Listener listener() {
     return new Stream.Listener() {
       @Override
       public void onDataAvailable(Stream source) {
-        List<Envelope> readyEnvelopes = new ArrayList<>();
-        ControlFrameDecoder.ProtocolViolation violation =
-            new ControlFrameDecoder.ProtocolViolation();
-        boolean peerEnded = false;
-
-        while (true) {
-          Stream.Data data = source.readData();
-          if (data == null) {
-            break;
-          }
-          readyEnvelopes.addAll(decoder.accept(data.frame().getByteBuffer(), violation));
-          boolean endStream = data.frame().isEndStream();
-          data.release();
-          if (endStream) {
-            peerEnded = true;
-            break;
-          }
-          if (violation.message() != null) {
-            break;
-          }
-        }
-
-        // 按到达顺序分发给 DaemonSession.receive（绑定前不 demand，因此会话已就绪）
-        DaemonSession currentSession;
-        synchronized (lock) {
-          currentSession = daemonSession;
-        }
-        for (Envelope envelope : readyEnvelopes) {
-          currentSession.receive(envelope);
-        }
-
-        String errorMsg = violation.message();
-        if (errorMsg != null) {
-          log.warn("Control stream protocol violation: {}", errorMsg);
-          offer(protocolError(errorMsg));
+        InboundBatch batch = readAvailable(source);
+        deliver(batch.envelopes());
+        if (batch.violation() != null) {
+          log.warn("Control stream protocol violation: {}", batch.violation());
+          offer(protocolError(batch.violation()));
           closeAfterFlush();
           return;
         }
-
-        if (peerEnded) {
+        if (batch.peerEnded()) {
           onPeerClose();
           return;
         }
-
         synchronized (lock) {
           if (daemonSession != null && !closed && !draining) {
             source.demand();
@@ -367,4 +374,7 @@ public class DaemonControlStream implements DaemonControlChannel {
       }
     }
   }
+
+  /** 一次数据回调读到的结果：已解出的信封、首个违规说明（可为 null）与对端是否已结束。 */
+  private record InboundBatch(List<Envelope> envelopes, String violation, boolean peerEnded) {}
 }
