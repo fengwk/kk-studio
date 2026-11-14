@@ -22,15 +22,11 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemHostedToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolAdditionBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderSystemToolRemovalBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
 
 /**
  * Anthropic Messages 协议的请求编码器。
@@ -119,7 +115,8 @@ public final class AnthropicRequestEncoder {
     List<String> betaFeatures =
         resolveBetaFeatures(messageLevelThinking, deferredToolLane || hasInlineToolChanges);
 
-    ArrayNode toolsArray = mergeTools(root, request.tools(), deferredToolLane);
+    ArrayNode toolsArray =
+        AnthropicToolsEncoder.mergeTools(root, request.tools(), deferredToolLane);
 
     // 系统指令是请求唯一的顶层 system；编码为单块数组以便在 SYSTEM 边界打缓存标记。
     ArrayNode unmarkedSystemArray = NODES.arrayNode();
@@ -154,7 +151,7 @@ public final class AnthropicRequestEncoder {
         wireMessagesArray.add(AnthropicContentEncoder.encodeToolMessage(msg));
       } else if (msg.role() == ProviderMessageRole.SYSTEM) {
         addCacheEndpoint(cacheEndpoints, lastEligible);
-        wireMessagesArray.add(encodeSystemMessage(msg));
+        wireMessagesArray.add(AnthropicToolsEncoder.encodeSystemMessage(msg));
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "unexpected message role: " + msg.role());
@@ -351,166 +348,6 @@ public final class AnthropicRequestEncoder {
             "protocolOptions must not override runtime field: " + field);
       }
     }
-  }
-
-  /**
-   * 合并 native tools 与 runtime function tools：先保留 native 条目（server tools 等官方非 function 工具），再追加
-   * runtime 工具；合并结果同时是 prefix hash、cache marker 与请求体大小的依据。
-   */
-  private static ArrayNode mergeTools(
-      ObjectNode root,
-      List<ProviderToolDefinition> runtimeTools,
-      boolean appendDeferredPlaceholder) {
-    JsonNode nativeTools = root.get("tools");
-    if (nativeTools != null && !nativeTools.isArray()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "protocolOptions tools must be a JSON array");
-    }
-
-    ArrayNode merged = NODES.arrayNode();
-    Set<String> names = new HashSet<>();
-    if (nativeTools != null) {
-      for (int i = 0; i < nativeTools.size(); i++) {
-        JsonNode nativeTool = nativeTools.get(i);
-        if (nativeTool.has("cache_control")) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "protocolOptions must not override runtime field: tools[" + i + "].cache_control");
-        }
-        JsonNode type = nativeTool.path("type");
-        JsonNode name = nativeTool.path("name");
-        if (!nativeTool.isObject()
-            || !type.isString()
-            || !type.stringValue().matches("(web_search|web_fetch|code_execution)_[0-9]{8}")
-            || !name.isString()
-            || name.stringValue().isBlank()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "protocolOptions tools["
-                  + i
-                  + "] must be a supported hosted tool; bind client tools through runtime"
-                  + " ProviderToolDefinition");
-        }
-        if (!names.add(name.stringValue())) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST,
-              "protocolOptions tools[" + i + "] duplicates a tool name");
-        }
-        for (ProviderToolDefinition runtimeTool : runtimeTools) {
-          if (name.stringValue().equals(runtimeTool.name())) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST,
-                "protocolOptions tools[" + i + "] name conflicts with runtime tool");
-          }
-        }
-        merged.add(nativeTool.deepCopy());
-      }
-    }
-    for (ProviderToolDefinition tool : runtimeTools) {
-      if (appendDeferredPlaceholder && DEFERRED_PLACEHOLDER_NAME.equals(tool.name())) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "runtime tools must not use the reserved deferred placeholder name");
-      }
-      merged.add(encodeTool(tool));
-    }
-    if (appendDeferredPlaceholder) {
-      if (!names.add(DEFERRED_PLACEHOLDER_NAME)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "runtime tools must not use the reserved deferred placeholder name");
-      }
-      merged.add(encodeDeferredPlaceholder());
-    }
-    return merged;
-  }
-
-  private static ObjectNode encodeDeferredPlaceholder() {
-    ObjectNode placeholder = NODES.objectNode();
-    placeholder.put("name", DEFERRED_PLACEHOLDER_NAME);
-    placeholder.put("description", "Reserved placeholder. Never available. Never call this.");
-    ObjectNode inputSchema = placeholder.putObject("input_schema");
-    inputSchema.put("type", "object");
-    inputSchema.putObject("properties");
-    inputSchema.putArray("required");
-    placeholder.put("defer_loading", true);
-    return placeholder;
-  }
-
-  private static ObjectNode encodeTool(ProviderToolDefinition tool) {
-    ObjectNode toolNode = NODES.objectNode();
-    toolNode.put("name", tool.name());
-    if (tool.description() != null && !tool.description().isBlank()) {
-      toolNode.put("description", tool.description());
-    }
-    JsonNode schemaNode;
-    try {
-      schemaNode = OBJECT_MAPPER.readTree(tool.inputSchemaJson());
-    } catch (JacksonException exception) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "tool inputSchemaJson is not valid JSON");
-    }
-    if (!schemaNode.isObject()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "tool input_schema must be a JSON object");
-    }
-    toolNode.set("input_schema", schemaNode);
-    return toolNode;
-  }
-
-  private static ObjectNode encodeSystemMessage(ProviderMessage message) {
-    ObjectNode msgNode = NODES.objectNode();
-    msgNode.put("role", "system");
-    ArrayNode contents = msgNode.putArray("content");
-    for (ProviderContentBlock block : message.contents()) {
-      if (block instanceof ProviderTextBlock textBlock) {
-        ObjectNode text = NODES.objectNode();
-        text.put("type", "text");
-        text.put("text", textBlock.text());
-        contents.add(text);
-      } else if (block instanceof ProviderSystemToolAdditionBlock addition) {
-        contents.add(encodeToolAddition(encodeTool(addition.tool())));
-      } else if (block instanceof ProviderSystemHostedToolAdditionBlock addition) {
-        contents.add(encodeToolAddition(parseHostedToolDefinition(addition.definitionJson())));
-      } else if (block instanceof ProviderSystemToolRemovalBlock removal) {
-        ObjectNode tool = NODES.objectNode();
-        tool.put("type", "tool_reference");
-        tool.put("name", removal.name());
-        ObjectNode node = NODES.objectNode();
-        node.put("type", "tool_removal");
-        node.set("tool", tool);
-        contents.add(node);
-      } else {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "unsupported content in Anthropic system message: " + block.getClass().getSimpleName());
-      }
-    }
-    return msgNode;
-  }
-
-  private static ObjectNode encodeToolAddition(ObjectNode definition) {
-    ObjectNode tool = NODES.objectNode();
-    tool.put("type", "tool_definition");
-    tool.set("definition", definition);
-    ObjectNode addition = NODES.objectNode();
-    addition.put("type", "tool_addition");
-    addition.set("tool", tool);
-    return addition;
-  }
-
-  private static ObjectNode parseHostedToolDefinition(String definitionJson) {
-    try {
-      JsonNode definition = OBJECT_MAPPER.readTree(definitionJson);
-      if (definition.isObject() && definition.path("name").isString()) {
-        return (ObjectNode) definition;
-      }
-    } catch (JacksonException ignored) {
-      // The durable source is validated as an object when materialized.
-    }
-    throw new ProviderException(
-        ProviderErrorKind.INVALID_REQUEST,
-        "hosted tool definition must be a JSON object with a name");
   }
 
   private static void applyCacheMarkers(
