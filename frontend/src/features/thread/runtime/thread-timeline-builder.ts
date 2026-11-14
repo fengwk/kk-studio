@@ -38,8 +38,6 @@ import type {
   ToolInvocationDTO,
 } from '@/shared/api/generated/contracts'
 
-export { parseApproval } from '@/features/thread/runtime/thread-timeline/approval-parsing'
-
 /**
  * Thread transcript 投影：
  * 持久路径的 Entries 是 transcript 的唯一权威来源；
