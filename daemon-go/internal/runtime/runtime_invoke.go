@@ -29,57 +29,89 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 	if !start.Created {
 		return r.replay(start.Entry)
 	}
+	call, executor, admitted, err := r.admitInvoke(id, e)
+	if !admitted {
+		return err
+	}
+	callCtx, active, admitted, err := r.reserveInvoke(ctx, id, call)
+	if !admitted {
+		return err
+	}
+	if err := r.sendStarted(id, false); err != nil {
+		active.cancel()
+		r.releaseInvoke(id)
+		return r.rejectCall(id, "control connection send failed")
+	}
+	capctx := r.capabilityContext(id)
+	go r.execute(callCtx, id, call, executor, capctx, call.MaxOutputBytes, active)
+	return nil
+}
+
+// admitInvoke validates one INVOKE frame and resolves the capability it addresses. Every rejection
+// is reported to the client and ends the journal entry it started.
+func (r *Runtime) admitInvoke(id string, e *protocol.Envelope) (CapabilityCall, CapabilityExecutor, bool, error) {
 	invoke, ok := e.Payload.(*protocol.Envelope_Invoke)
 	if !ok || invoke.Invoke == nil {
-		return r.rejectCall(id, "invoke payload is required")
+		return CapabilityCall{}, nil, false, r.rejectCall(id, "invoke payload is required")
 	}
-	tier, tierErr := mapImageInputTier(invoke.Invoke.ImageInputTier)
-	if tierErr != nil {
-		return r.rejectCall(id, tierErr.Error())
+	request := invoke.Invoke
+	tier, err := mapImageInputTier(request.ImageInputTier)
+	if err != nil {
+		return CapabilityCall{}, nil, false, r.rejectCall(id, err.Error())
 	}
-	budget := invoke.Invoke.GetMaxOutputBytes()
-	if invoke.Invoke.MaxOutputBytes == nil || budget <= 0 {
-		return r.rejectCall(id, "maxOutputBytes must be a positive integer")
+	budget := request.GetMaxOutputBytes()
+	if request.MaxOutputBytes == nil || budget <= 0 {
+		return CapabilityCall{}, nil, false, r.rejectCall(id, "maxOutputBytes must be a positive integer")
 	}
-	capabilityID := invoke.Invoke.GetCapabilityId()
+	capabilityID := request.GetCapabilityId()
 	if capabilityID == "" {
-		return r.rejectCall(id, "capabilityId is required")
+		return CapabilityCall{}, nil, false, r.rejectCall(id, "capabilityId is required")
 	}
-	if invoke.Invoke.ExpectedFile != nil && capabilityID != "fs.edit" && capabilityID != "fs.write" {
-		return r.rejectCall(id, "expectedFile is only valid for fs.edit and fs.write")
+	if request.ExpectedFile != nil && capabilityID != "fs.edit" && capabilityID != "fs.write" {
+		return CapabilityCall{}, nil, false, r.rejectCall(id, "expectedFile is only valid for fs.edit and fs.write")
 	}
 	executor, ok := r.options.Capabilities[capabilityID]
 	if !ok {
-		return r.rejectCall(id, "unknown Environment capability: "+capabilityID)
+		return CapabilityCall{}, nil, false, r.rejectCall(id, "unknown Environment capability: "+capabilityID)
 	}
-	arguments := []byte(invoke.Invoke.GetArgumentsJson())
+	arguments := []byte(request.GetArgumentsJson())
 	if len(arguments) == 0 || len(arguments) > maxArgumentsBytes {
-		return r.rejectCall(id, "arguments must be a JSON object")
+		return CapabilityCall{}, nil, false, r.rejectCall(id, "arguments must be a JSON object")
 	}
 	var parsed map[string]json.RawMessage
 	if err := jsonv2.Unmarshal(arguments, &parsed); err != nil || parsed == nil {
-		return r.rejectCall(id, "arguments must be a JSON object")
+		return CapabilityCall{}, nil, false, r.rejectCall(id, "arguments must be a JSON object")
 	}
+	call := CapabilityCall{InvocationID: id, CapabilityID: capabilityID, Arguments: arguments, TimeoutMillis: request.GetTimeoutMillis(), MaxOutputBytes: budget, ImageInputTier: tier}
+	if f := request.ExpectedFile; f != nil {
+		call.ExpectedFile = &ExpectedFile{Path: f.GetPath(), SHA256: f.GetSha256()}
+	}
+	return call, executor, true, nil
+}
+
+// reserveInvoke applies the admission and concurrency gates, then registers the running call so a
+// CANCEL or a shutdown can reach its context.
+func (r *Runtime) reserveInvoke(ctx context.Context, id string, call CapabilityCall) (context.Context, *runningCall, bool, error) {
 	r.admissionMu.Lock()
 	if r.admissionPaused {
 		r.admissionMu.Unlock()
-		return r.rejectCall(id, "environment configuration is switching; new work is not admitted")
+		return nil, nil, false, r.rejectCall(id, "environment configuration is switching; new work is not admitted")
 	}
 	if _, held := r.updateOps.Active(); held {
 		r.admissionMu.Unlock()
-		return r.rejectCall(id, "environment update admission is held")
+		return nil, nil, false, r.rejectCall(id, "environment update admission is held")
 	}
 	r.callsMu.Lock()
 	if len(r.calls) >= r.options.MaxConcurrentInvocations {
 		r.callsMu.Unlock()
 		r.admissionMu.Unlock()
-		return r.rejectCall(id, "too many concurrent capability invocations")
+		return nil, nil, false, r.rejectCall(id, "too many concurrent capability invocations")
 	}
-	millis := invoke.Invoke.GetTimeoutMillis()
+	millis := call.TimeoutMillis
 	if millis < 0 || millis > int64((time.Duration(1<<63-1))/time.Millisecond) {
 		r.callsMu.Unlock()
 		r.admissionMu.Unlock()
-		return r.rejectCall(id, "timeoutMillis must be a non-negative duration")
+		return nil, nil, false, r.rejectCall(id, "timeoutMillis must be a non-negative duration")
 	}
 	var callCtx context.Context
 	var cancel context.CancelFunc
@@ -88,30 +120,28 @@ func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error 
 	} else {
 		callCtx, cancel = context.WithCancel(ctx)
 	}
-	active := &runningCall{cancel: cancel, maxOutputBytes: budget}
+	active := &runningCall{cancel: cancel, maxOutputBytes: call.MaxOutputBytes}
 	r.calls[id] = active
 	r.wg.Add(1)
 	r.callsMu.Unlock()
 	r.admissionMu.Unlock()
-	if err := r.sendStarted(id, false); err != nil {
-		cancel()
-		r.callsMu.Lock()
-		delete(r.calls, id)
-		r.callsMu.Unlock()
-		r.wg.Done()
-		return r.rejectCall(id, "control connection send failed")
-	}
+	return callCtx, active, true, nil
+}
+
+// releaseInvoke forgets a call whose STARTED frame could not be delivered.
+func (r *Runtime) releaseInvoke(id string) {
+	r.callsMu.Lock()
+	delete(r.calls, id)
+	r.callsMu.Unlock()
+	r.wg.Done()
+}
+
+// capabilityContext snapshots the applied configuration and the injected execution boundaries.
+func (r *Runtime) capabilityContext(id string) CapabilityContext {
 	r.mu.RLock()
 	snapshot := r.config
 	r.mu.RUnlock()
-	call := CapabilityCall{InvocationID: id, CapabilityID: capabilityID, Arguments: arguments, TimeoutMillis: invoke.Invoke.GetTimeoutMillis(), MaxOutputBytes: budget, ImageInputTier: tier}
-	if f := invoke.Invoke.ExpectedFile; f != nil {
-		call.ExpectedFile = &ExpectedFile{Path: f.GetPath(), SHA256: f.GetSha256()}
-	}
-	resources := r.options.Resources
-	capctx := CapabilityContext{Config: snapshot, Processes: r.options.Processes, FileChanged: r.options.FileChanged, Resources: resources, Progress: func(progress CapabilityResult) error { return r.sendProgress(id, progress) }, ConfirmExecutionExit: func() { r.noteExecutionExit(id) }}
-	go r.execute(callCtx, id, call, executor, capctx, budget, active)
-	return nil
+	return CapabilityContext{Config: snapshot, Processes: r.options.Processes, FileChanged: r.options.FileChanged, Resources: r.options.Resources, Progress: func(progress CapabilityResult) error { return r.sendProgress(id, progress) }, ConfirmExecutionExit: func() { r.noteExecutionExit(id) }}
 }
 
 func (r *Runtime) execute(ctx context.Context, id string, call CapabilityCall, executor CapabilityExecutor, capctx CapabilityContext, budget int64, active *runningCall) {
