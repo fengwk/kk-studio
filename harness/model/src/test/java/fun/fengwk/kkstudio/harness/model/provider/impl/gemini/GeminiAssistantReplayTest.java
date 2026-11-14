@@ -243,6 +243,29 @@ class GeminiAssistantReplayTest {
     assertEquals(ProviderErrorKind.INVALID_REQUEST, failure.kind());
   }
 
+  /** durable 参数损坏先于语义比对被拒绝：即使文本本就不一致，也必须抛错而不是提前返回 false、掩盖损坏事实。 */
+  @Test
+  void rejectsUnparseableDurableToolArgumentsBeforeSemanticMismatch() {
+    ProviderToolCallBlock brokenBlock =
+        new ProviderToolCallBlock(new ProviderToolCall("c1", "t", "{broken"));
+    ProviderException failure =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                GeminiAssistantReplay.validateReplayPayload(
+                    payloadWithPart(NODES.objectNode().put("text", "mismatched")),
+                    List.of(new ProviderTextBlock("durable"), brokenBlock)));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, failure.kind());
+  }
+
+  /** 只有 thoughtSignature 的 part 属于 opaque 原生事实，但仍需校验签名；校验失败不能因跳过语义投影而放过。 */
+  @Test
+  void rejectsInvalidThoughtSignatureOnSkippedOpaquePart() {
+    assertRejected(
+        payloadWithPart(NODES.objectNode().put("thoughtSignature", " ")),
+        new ProviderTextBlock("answer"));
+  }
+
   private static void assertRejected(JsonNode payload, ProviderContentBlock durable) {
     ProviderException failure =
         assertThrows(

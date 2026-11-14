@@ -206,174 +206,203 @@ final class GeminiAssistantReplay {
   }
 
   /**
-   * 完成结构校验、已知字段类型校验与 durable 一致性比对：结构/类型损坏一律 INVALID_REQUEST；返回 payload 的语义投影是否与 durable
+   * 完成根结构校验、已知字段类型校验与 durable 一致性比对：结构/类型损坏一律 INVALID_REQUEST；返回 payload 的语义投影是否与 durable
    * 内容完全一致（不一致表示历史被改写，调用方应退回语义编码而非回放陈旧 payload）。
    */
   static boolean validateReplayPayload(
       JsonNode payload, List<ProviderContentBlock> durableContents) {
+    ReplayPayloadSummary payloadSummary = summarizeReplayPayload(requirePayloadParts(payload));
+    DurableSummary durableSummary = summarizeDurable(durableContents);
+    return semanticsMatch(payloadSummary, durableSummary);
+  }
+
+  /** payload 只能是 {@code {role:"model", parts:[...]}}：顶级字段白名单与 role/parts 类型损坏一律拒绝。 */
+  private static ArrayNode requirePayloadParts(JsonNode payload) {
     if (payload == null || !payload.isObject()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      throw invalidReplayPayload();
     }
 
-    // 严格检查顶级字段白名单：只能有 role 和 parts，禁止无关字段混入
-    for (String f : payload.propertyNames()) {
-      if (!"role".equals(f) && !"parts".equals(f)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+    for (String field : payload.propertyNames()) {
+      if (!"role".equals(field) && !"parts".equals(field)) {
+        throw invalidReplayPayload();
       }
     }
 
     if (!payload.has("role")
         || !payload.get("role").isString()
         || !"model".equals(payload.get("role").asString(""))) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      throw invalidReplayPayload();
     }
 
     if (!payload.has("parts") || !payload.get("parts").isArray()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      throw invalidReplayPayload();
     }
+    return (ArrayNode) payload.get("parts");
+  }
 
-    ArrayNode partsArray = (ArrayNode) payload.get("parts");
-
-    StringBuilder payloadText = new StringBuilder();
-    StringBuilder payloadThinking = new StringBuilder();
-    record ReplayPayloadCall(String id, String name, String argsJson) {}
-    List<ReplayPayloadCall> payloadCalls = new ArrayList<>();
+  /** 顺序扫描 payload parts，投影出 text、thinking 与 function 调用；未知 Part 作为 opaque 原生事实跳过。 */
+  private static ReplayPayloadSummary summarizeReplayPayload(ArrayNode partsArray) {
+    StringBuilder text = new StringBuilder();
+    StringBuilder thinking = new StringBuilder();
+    List<ReplayPayloadCall> calls = new ArrayList<>();
 
     for (JsonNode item : partsArray) {
-      if (!item.isObject()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+      requireKnownPartShape(item);
+      if (item.has("text")) {
+        appendTextPart(item, text, thinking);
+      } else if (item.has("functionCall")) {
+        calls.add(readFunctionCallPart(item));
       }
+      // 其余官方 Part 与未知 Part 都作为 opaque 原生事实：只在 affinity 匹配时原位回放。
+    }
+    return new ReplayPayloadSummary(text.toString(), thinking.toString(), calls);
+  }
 
-      // 已知语义（text/thinking/functionCall）严格核对；未知 Part 与额外成员作为 opaque 原生事实原样保留。
-      boolean hasText = item.has("text");
-      boolean hasFunctionCall = item.has("functionCall");
+  /** 已知语义（text/functionCall）互斥；thoughtSignature 虽只用于 opaque 原生事实，仍须先于跳过校验。 */
+  private static void requireKnownPartShape(JsonNode item) {
+    if (!item.isObject()) {
+      throw invalidReplayPayload();
+    }
+    if (item.has("text") && item.has("functionCall")) {
+      throw invalidReplayPayload();
+    }
+    validateReplayThoughtSignature(item);
+  }
 
-      if (hasText && hasFunctionCall) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-      }
-
-      validateReplayThoughtSignature(item);
-
-      if (!hasText && !hasFunctionCall) {
-        // inlineData/fileData/executableCode/codeExecutionResult/toolCall/toolResponse 等官方 Part 与未知
-        // Part 都作为 opaque 原生事实：只在 affinity 匹配时原位回放。
-        continue;
-      }
-
-      if (hasText) {
-        if (!item.get("text").isString()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-        }
-        if (item.has("thought") && !item.get("thought").isBoolean()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-        }
-
-        String txt = item.get("text").asString("");
-        if (item.has("thought") && item.get("thought").asBoolean(false)) {
-          payloadThinking.append(txt);
-        } else {
-          payloadText.append(txt);
-        }
-      } else { // hasFunctionCall
-        JsonNode fn = item.get("functionCall");
-        if (!fn.isObject()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-        }
-
-        if (!fn.has("name") || !fn.get("name").isString()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-        }
-        if (!fn.has("args") || !fn.get("args").isObject()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-        }
-        if (fn.has("id") && !fn.get("id").isString()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-        }
-
-        String name = fn.get("name").asString("");
-        String id = fn.has("id") ? fn.get("id").asString("") : null;
-        String argsJson = fn.get("args").toString();
-        payloadCalls.add(new ReplayPayloadCall(id, name, argsJson));
-      }
+  /** text part 的 text 必为字符串、thought 必为布尔；thinking 与普通文本分别累计。 */
+  private static void appendTextPart(JsonNode item, StringBuilder text, StringBuilder thinking) {
+    if (!item.get("text").isString()) {
+      throw invalidReplayPayload();
+    }
+    if (item.has("thought") && !item.get("thought").isBoolean()) {
+      throw invalidReplayPayload();
     }
 
-    // 提取 durable 内容
-    StringBuilder durableText = new StringBuilder();
-    StringBuilder durableThinking = new StringBuilder();
-    List<ProviderToolCall> durableCalls = new ArrayList<>();
+    String value = item.get("text").asString("");
+    if (item.has("thought") && item.get("thought").asBoolean(false)) {
+      thinking.append(value);
+    } else {
+      text.append(value);
+    }
+  }
+
+  /** functionCall 的 name 必为字符串、args 必为对象，id 若出现必为字符串。 */
+  private static ReplayPayloadCall readFunctionCallPart(JsonNode item) {
+    JsonNode functionCall = item.get("functionCall");
+    if (!functionCall.isObject()) {
+      throw invalidReplayPayload();
+    }
+    if (!functionCall.has("name") || !functionCall.get("name").isString()) {
+      throw invalidReplayPayload();
+    }
+    if (!functionCall.has("args") || !functionCall.get("args").isObject()) {
+      throw invalidReplayPayload();
+    }
+    if (functionCall.has("id") && !functionCall.get("id").isString()) {
+      throw invalidReplayPayload();
+    }
+
+    String id = functionCall.has("id") ? functionCall.get("id").asString("") : null;
+    return new ReplayPayloadCall(
+        id, functionCall.get("name").asString(""), functionCall.get("args").toString());
+  }
+
+  /** durable contents 投影成语义摘要；无法投影的块类型属于请求事实损坏，必须拒绝。 */
+  private static DurableSummary summarizeDurable(List<ProviderContentBlock> durableContents) {
+    StringBuilder text = new StringBuilder();
+    StringBuilder thinking = new StringBuilder();
+    List<ProviderToolCall> calls = new ArrayList<>();
 
     for (ProviderContentBlock block : durableContents) {
-      if (block instanceof ProviderTextBlock tb) {
-        durableText.append(tb.text() != null ? tb.text() : "");
-      } else if (block instanceof ProviderThinkingBlock tb) {
-        durableThinking.append(tb.thinking() != null ? tb.thinking() : "");
-      } else if (block instanceof ProviderToolCallBlock tcb) {
-        ProviderToolCall call = tcb.toolCall();
-        JsonNode dNode =
-            ProviderJsonHelper.parseStrictJson(
-                call.argumentsJson(), "invalid Gemini replay payload");
-        if (!dNode.isObject()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-        }
-        durableCalls.add(call);
+      if (block instanceof ProviderTextBlock textBlock) {
+        text.append(textBlock.text() != null ? textBlock.text() : "");
+      } else if (block instanceof ProviderThinkingBlock thinkingBlock) {
+        thinking.append(thinkingBlock.thinking() != null ? thinkingBlock.thinking() : "");
+      } else if (block instanceof ProviderToolCallBlock toolCallBlock) {
+        ProviderToolCall call = toolCallBlock.toolCall();
+        requireDurableToolArguments(call);
+        calls.add(call);
       } else if (block instanceof ProviderOpaqueBlock
           || block instanceof ProviderRedactedThinkingBlock) {
         // Native opaque and redacted content does not contribute to durable semantic comparison.
       } else {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+        throw invalidReplayPayload();
       }
     }
+    return new DurableSummary(text.toString(), thinking.toString(), calls);
+  }
 
-    // durable 语义一致性：不一致返回 false（退回语义编码），结构/类型损坏已在上面抛出。
-    if (!payloadText.toString().equals(durableText.toString())) {
+  /** durable 工具参数必须是可严格解析的 JSON object。 */
+  private static void requireDurableToolArguments(ProviderToolCall call) {
+    JsonNode arguments =
+        ProviderJsonHelper.parseStrictJson(call.argumentsJson(), "invalid Gemini replay payload");
+    if (!arguments.isObject()) {
+      throw invalidReplayPayload();
+    }
+  }
+
+  /** 逐项比对语义；拒绝顺序不变：text、thinking、调用数量、逐个调用。不一致返回 false 以回退语义编码。 */
+  private static boolean semanticsMatch(ReplayPayloadSummary payload, DurableSummary durable) {
+    if (!payload.text().equals(durable.text())) {
       return false;
     }
-    if (!payloadThinking.toString().equals(durableThinking.toString())) {
+    if (!payload.thinking().equals(durable.thinking())) {
       return false;
     }
-    if (payloadCalls.size() != durableCalls.size()) {
+    if (payload.calls().size() != durable.calls().size()) {
       return false;
     }
-    for (int i = 0; i < payloadCalls.size(); i++) {
-      ReplayPayloadCall pCall = payloadCalls.get(i);
-      ProviderToolCall dCall = durableCalls.get(i);
-      if (!Objects.equals(pCall.name(), dCall.name())) {
-        return false;
-      }
-      String pId = (pCall.id() != null && !pCall.id().isBlank()) ? pCall.id() : null;
-      String dId = (dCall.id() != null && !dCall.id().isBlank()) ? dCall.id() : null;
-      if (!Objects.equals(pId, dId)) {
-        return false;
-      }
-      JsonNode pArgs;
-      JsonNode dArgs;
-      try {
-        // 数值按 scale 无关比对（1.0 与 1.00 同值）；比较专用 reader 只读取比较树，wire 仍用 replay 原生 args。
-        pArgs = COMPARISON_READER.readTree(pCall.argsJson());
-        dArgs = COMPARISON_READER.readTree(dCall.argumentsJson());
-      } catch (Exception e) {
-        // durable 参数本身无法解析属于请求事实损坏，必须明确拒绝而非静默 fallback。
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
-      }
-      if (!Objects.equals(pArgs, dArgs)) {
+    for (int i = 0; i < payload.calls().size(); i++) {
+      if (!toolCallMatches(payload.calls().get(i), durable.calls().get(i))) {
         return false;
       }
     }
     return true;
   }
+
+  /** 单个工具调用的 name、空白归一后的 id 与参数语义都必须一致。 */
+  private static boolean toolCallMatches(
+      ReplayPayloadCall payloadCall, ProviderToolCall durableCall) {
+    if (!Objects.equals(payloadCall.name(), durableCall.name())) {
+      return false;
+    }
+    if (!Objects.equals(blankAsNull(payloadCall.id()), blankAsNull(durableCall.id()))) {
+      return false;
+    }
+    return argumentsMatch(payloadCall.argsJson(), durableCall.argumentsJson());
+  }
+
+  /** functionCall id 的空白与缺失等价。 */
+  private static String blankAsNull(String id) {
+    return id != null && !id.isBlank() ? id : null;
+  }
+
+  /** 参数按数值 scale 无关比对（1.0 与 1.00 同值）；比较专用 reader 只读取比较树，wire 仍用 replay 原生 args。 */
+  private static boolean argumentsMatch(String payloadArgs, String durableArgs) {
+    JsonNode payloadArguments;
+    JsonNode durableArguments;
+    try {
+      payloadArguments = COMPARISON_READER.readTree(payloadArgs);
+      durableArguments = COMPARISON_READER.readTree(durableArgs);
+    } catch (Exception e) {
+      // durable 参数本身无法解析属于请求事实损坏，必须明确拒绝而非静默 fallback。
+      throw invalidReplayPayload();
+    }
+    return Objects.equals(payloadArguments, durableArguments);
+  }
+
+  private static ProviderException invalidReplayPayload() {
+    return new ProviderException(
+        ProviderErrorKind.INVALID_REQUEST, "invalid Gemini replay payload");
+  }
+
+  /** payload 的语义投影：text/thinking 拼接结果与 function 调用序列。 */
+  private record ReplayPayloadSummary(
+      String text, String thinking, List<ReplayPayloadCall> calls) {}
+
+  /** payload 中参与 durable 比对的 function 调用；{@code argsJson} 保留 wire 原生参数树。 */
+  private record ReplayPayloadCall(String id, String name, String argsJson) {}
+
+  /** durable contents 的语义投影。 */
+  private record DurableSummary(String text, String thinking, List<ProviderToolCall> calls) {}
 }
