@@ -248,50 +248,98 @@ func uploadedContent(content runtimeapi.ResultContent, uploadID string) runtimea
 }
 
 func (u *ResourceUploader) put(ctx context.Context, targetURL string, headers map[string]string, body []byte) error {
+	req, err := newPutRequest(ctx, targetURL, headers, body)
+	if err != nil {
+		return err
+	}
+	if u.Network != nil {
+		return u.putThroughNetwork(ctx, req)
+	}
+	return u.putThroughClient(req)
+}
+
+// newPutRequest builds the presigned PUT, rejecting destinations or headers the storage service
+// must never receive.
+func newPutRequest(ctx context.Context, targetURL string, headers map[string]string, body []byte) (*http.Request, error) {
 	fail := func(stage string) error { return fmt.Errorf("resource upload %s failed", stage) }
 	parsed, err := url.Parse(targetURL)
 	if err != nil || parsed.Host == "" || parsed.User != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") {
-		return fail("request")
+		return nil, fail("request")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, targetURL, bytes.NewReader(body))
 	if err != nil {
-		return fail("request")
+		return nil, fail("request")
 	}
 	for key, value := range headers {
 		if !validHeaderName(key) || hasUnsafeHeaderCharacter(value) {
-			return fail("request")
+			return nil, fail("request")
 		}
 		req.Header.Set(key, value)
 	}
-	if u.Network != nil {
-		var responseErr error
-		err := u.Network.WithResponse(ctx, req, func(resp *http.Response) error {
-			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-				responseErr = fail(fmt.Sprintf("storage status %d", resp.StatusCode))
-				return responseErr
-			}
-			if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-				responseErr = fail("response")
-				return responseErr
-			}
-			return nil
-		})
-		if err != nil {
-			if responseErr != nil {
-				return uploadFailure("put", "storage-rejected", true, responseErr)
-			}
-			if errors.Is(err, context.Canceled) {
-				return err
-			}
-			return uploadFailure("put", "cleanup-failed", false, err)
+	return req, nil
+}
+
+// putThroughNetwork performs the PUT inside the applied network policy so a policy change drains it.
+func (u *ResourceUploader) putThroughNetwork(ctx context.Context, req *http.Request) error {
+	fail := func(stage string) error { return fmt.Errorf("resource upload %s failed", stage) }
+	var responseErr error
+	err := u.Network.WithResponse(ctx, req, func(resp *http.Response) error {
+		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+			responseErr = fail(fmt.Sprintf("storage status %d", resp.StatusCode))
+			return responseErr
+		}
+		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
+			responseErr = fail("response")
+			return responseErr
 		}
 		return nil
+	})
+	if err != nil {
+		if responseErr != nil {
+			return uploadFailure("put", "storage-rejected", true, responseErr)
+		}
+		if errors.Is(err, context.Canceled) {
+			return err
+		}
+		return uploadFailure("put", "cleanup-failed", false, err)
 	}
+	return nil
+}
+
+// putThroughClient performs the PUT with the injected or policy-derived client, isolated from
+// caller cookies and redirects.
+func (u *ResourceUploader) putThroughClient(req *http.Request) error {
+	fail := func(stage string) error { return fmt.Errorf("resource upload %s failed", stage) }
+	client, owned, err := u.uploadClient()
+	if err != nil {
+		return err
+	}
+	if owned {
+		defer client.CloseIdleConnections()
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fail("request")
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("resource upload storage status %d failed", resp.StatusCode)
+	}
+	if _, err = io.Copy(io.Discard, resp.Body); err != nil {
+		return fail("response")
+	}
+	return nil
+}
+
+// uploadClient returns the HTTP client for one PUT and whether its idle connections are owned by
+// this call.
+func (u *ResourceUploader) uploadClient() (*http.Client, bool, error) {
+	fail := func(stage string) error { return fmt.Errorf("resource upload %s failed", stage) }
 	client := u.Client
 	owned := false
 	if client == nil {
 		if u.Policy == nil {
-			return fail("network")
+			return nil, false, fail("network")
 		}
 		client = u.Policy.HTTPClient()
 		owned = true
@@ -306,23 +354,7 @@ func (u *ResourceUploader) put(ctx context.Context, targetURL string, headers ma
 	}
 	copy := *client
 	copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	client = &copy
-	if owned {
-		defer client.CloseIdleConnections()
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fail("request")
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("resource upload storage status %d failed", resp.StatusCode)
-	}
-	_, err = io.Copy(io.Discard, resp.Body)
-	if err != nil {
-		return fail("response")
-	}
-	return nil
+	return &copy, owned, nil
 }
 
 func protoString(s string) *string { return &s }
