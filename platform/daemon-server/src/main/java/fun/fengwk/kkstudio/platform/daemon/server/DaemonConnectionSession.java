@@ -528,6 +528,18 @@ final class DaemonConnectionSession implements DaemonSession {
     }
   }
 
+  /** 已结束或从未登记的 invocation 会继续收到迟到回调；墓碑表示该调用已正常收尾，因此只有完全未知才值得排查。 */
+  private void logUnknown(String messageType, UUID invocationId) {
+    if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
+      LOG.log(
+          Level.DEBUG,
+          "ignoring {0} for unknown invocation {1} on {2}",
+          messageType,
+          invocationId,
+          environmentId);
+    }
+  }
+
   private void handleStarted(Envelope envelope) {
     requireReady();
     if (envelope.getStarted().hasReplayed() && !envelope.getStarted().getReplayed()) {
@@ -535,12 +547,8 @@ final class DaemonConnectionSession implements DaemonSession {
     }
     UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.callbackTarget(environmentId, invocationId);
-    if (active == null && !invocationTracker.hasTombstone(environmentId, invocationId)) {
-      LOG.log(
-          Level.DEBUG,
-          "ignoring STARTED for unknown invocation {0} on {1}",
-          invocationId,
-          environmentId);
+    if (active == null) {
+      logUnknown("STARTED", invocationId);
     }
   }
 
@@ -549,13 +557,7 @@ final class DaemonConnectionSession implements DaemonSession {
     UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.callbackTarget(environmentId, invocationId);
     if (active == null) {
-      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
-        LOG.log(
-            Level.DEBUG,
-            "ignoring PROGRESS for unknown invocation {0} on {1}",
-            invocationId,
-            environmentId);
-      }
+      logUnknown("PROGRESS", invocationId);
       return;
     }
     EnvironmentCapabilityResult result =
@@ -573,13 +575,7 @@ final class DaemonConnectionSession implements DaemonSession {
     UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
     if (active == null) {
-      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
-        LOG.log(
-            Level.DEBUG,
-            "ignoring COMPLETED for unknown invocation {0} on {1}",
-            invocationId,
-            environmentId);
-      }
+      logUnknown("COMPLETED", invocationId);
       return;
     }
     EnvironmentCapabilityResult result =
@@ -595,13 +591,7 @@ final class DaemonConnectionSession implements DaemonSession {
     UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
     if (active == null) {
-      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
-        LOG.log(
-            Level.DEBUG,
-            "ignoring FAILED for unknown invocation {0} on {1}",
-            invocationId,
-            environmentId);
-      }
+      logUnknown("FAILED", invocationId);
       return;
     }
     String message = envelope.getFailed().getMessage();
@@ -614,13 +604,7 @@ final class DaemonConnectionSession implements DaemonSession {
     UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
     if (active == null) {
-      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
-        LOG.log(
-            Level.DEBUG,
-            "ignoring CANCELLED for unknown invocation {0} on {1}",
-            invocationId,
-            environmentId);
-      }
+      logUnknown("CANCELLED", invocationId);
       return;
     }
     String reason = envelope.getCancelled().getReason();
@@ -634,13 +618,7 @@ final class DaemonConnectionSession implements DaemonSession {
     UUID invocationId = parseInvocationId(envelope);
     ActiveInvocation active = invocationTracker.takeTerminalTarget(environmentId, invocationId);
     if (active == null) {
-      if (!invocationTracker.hasTombstone(environmentId, invocationId)) {
-        LOG.log(
-            Level.DEBUG,
-            "ignoring RECOVER_NOT_FOUND for unknown invocation {0} on {1}",
-            invocationId,
-            environmentId);
-      }
+      logUnknown("RECOVER_NOT_FOUND", invocationId);
       return;
     }
     deferred.add(
