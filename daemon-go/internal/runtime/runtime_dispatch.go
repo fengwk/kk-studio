@@ -13,14 +13,9 @@ func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.
 	if e.MessageType == protocol.MessageType_SETTINGS {
 		return r.handleSettings(e)
 	}
-	r.mu.RLock()
-	bound, ready := r.bound, r.ready
-	r.mu.RUnlock()
-	if !bound {
-		return errors.New("environment scope is not bound")
-	}
-	if e.EnvironmentId != nil && *e.EnvironmentId != r.options.EnvironmentID {
-		return errors.New("envelope is bound to a different environment")
+	ready, err := r.admitEnvelope(e)
+	if err != nil {
+		return err
 	}
 	switch e.MessageType {
 	case protocol.MessageType_ERROR:
@@ -107,4 +102,19 @@ func (r *Runtime) handleIDELease(e *protocol.Envelope) error {
 	}
 	r.admissionMu.Unlock()
 	return err
+}
+
+// admitEnvelope applies the scope gates every control message after SETTINGS must pass, and reports
+// whether the environment scope has already published a READY configuration.
+func (r *Runtime) admitEnvelope(e *protocol.Envelope) (bool, error) {
+	r.mu.RLock()
+	bound, ready := r.bound, r.ready
+	r.mu.RUnlock()
+	if !bound {
+		return false, errors.New("environment scope is not bound")
+	}
+	if e.EnvironmentId != nil && *e.EnvironmentId != r.options.EnvironmentID {
+		return false, errors.New("envelope is bound to a different environment")
+	}
+	return ready, nil
 }
