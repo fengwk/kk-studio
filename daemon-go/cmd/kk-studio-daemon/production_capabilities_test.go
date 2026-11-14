@@ -65,9 +65,10 @@ func TestProductionCapabilitiesConfirmExecutionExit(t *testing.T) {
 	}
 }
 
-// TestProductionCapabilitiesCancel pins the caller-cancellation contract for the two
-// long-running production capabilities: one CANCELLED terminal, no COMPLETED, and one
-// EXECUTION_EXITED after the executor has left its scope.
+// TestProductionCapabilitiesCancel pins the caller-cancellation contract the platform relies on
+// for the two long-running production capabilities: one COMPLETED(error=true) that keeps the
+// partial result, no CANCELLED terminal, and one EXECUTION_EXITED after the executor has left
+// its scope.
 func TestProductionCapabilitiesCancel(t *testing.T) {
 	underTest := newProductionRuntimeUnderTest(t)
 	root := t.TempDir()
@@ -332,11 +333,16 @@ func assertCancelledInvocation(t *testing.T, underTest *productionRuntimeUnderTe
 		return envelope.MessageType == protocol.MessageType_EXECUTION_EXITED
 	})
 	frames := invocationFrames(underTest.connection.frames(), invocation)
-	if got := countInvocationFrames(frames, invocation, protocol.MessageType_CANCELLED); got != 1 {
-		t.Fatalf("CANCELLED terminals = %d, want exactly one: %v", got, frames)
+	if got := countInvocationFrames(frames, invocation, protocol.MessageType_COMPLETED); got != 1 {
+		t.Fatalf("COMPLETED terminals = %d, want exactly one: %v", got, frames)
 	}
-	if got := countInvocationFrames(frames, invocation, protocol.MessageType_COMPLETED); got != 0 {
-		t.Fatalf("COMPLETED terminals = %d, want none: %v", got, frames)
+	if got := countInvocationFrames(frames, invocation, protocol.MessageType_CANCELLED); got != 0 {
+		t.Fatalf("CANCELLED terminals = %d, want none: %v", got, frames)
+	}
+	for _, frame := range frames {
+		if frame.MessageType == protocol.MessageType_COMPLETED && !frame.GetCompleted().GetResult().GetError() {
+			t.Fatalf("COMPLETED result = %v, want error=true for a cancelled invocation", frame)
+		}
 	}
 	if got := countInvocationFrames(frames, invocation, protocol.MessageType_EXECUTION_EXITED); got != 1 {
 		t.Fatalf("EXECUTION_EXITED frames = %d, want exactly one: %v", got, frames)

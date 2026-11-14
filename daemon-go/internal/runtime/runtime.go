@@ -1315,10 +1315,6 @@ func (r *Runtime) execute(ctx context.Context, id string, call CapabilityCall, e
 		_ = r.finish(id, protocol.MessageType_FAILED, &protocol.Envelope_Failed{Failed: &protocol.Failed{Message: stringPtr(message)}}, InvocationFailed)
 		return
 	}
-	if cancelledCapabilityResult(result) {
-		_ = r.finish(id, protocol.MessageType_CANCELLED, &protocol.Envelope_Cancelled{Cancelled: &protocol.Cancelled{Reason: stringPtr("cancelled")}}, InvocationCancelled)
-		return
-	}
 	encoded, encodeErr := r.encodeResult(ctx, id, result, budget, false)
 	if encodeErr != nil {
 		var uploadFailure *resourceUploadFailure
@@ -1351,19 +1347,6 @@ func failedCapabilityResultMessage(result CapabilityResult) (string, bool) {
 		}
 	}
 	return "capability execution failed", true
-}
-
-// cancelledCapabilityResult reports an executor-observed CALLER cancellation. Executors
-// finish their cleanup and preserve partial output before returning this result, so the
-// runtime arbitrates it into the CANCELLED terminal instead of COMPLETED(error=true).
-func cancelledCapabilityResult(result CapabilityResult) bool {
-	if !result.Error {
-		return false
-	}
-	var details struct {
-		Code string `json:"code"`
-	}
-	return json.Unmarshal(result.Details, &details) == nil && details.Code == "CANCELLED"
 }
 
 func (r *Runtime) encodeResult(ctx context.Context, id string, result CapabilityResult, budget int64, progress bool) (*protocol.CapabilityResult, error) {

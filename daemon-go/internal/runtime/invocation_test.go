@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -244,9 +245,10 @@ func TestRuntimeCancelsRunningInvocation(t *testing.T) {
 	}
 }
 
-// RUN-T-233: an executor that cleans up and reports a CALLER CANCELLED result yields exactly
-// one CANCELLED terminal (never COMPLETED(error=true)) and one exit confirmation.
-func TestRuntimeCancelledCapabilityResultIsCancelledTerminal(t *testing.T) {
+// RUN-T-233: an executor that cleans up after CANCEL and returns its partial result is delivered
+// as exactly one COMPLETED(error=true) carrying that result, never a CANCELLED terminal, which
+// the platform treats as a result-less failure; one exit confirmation follows.
+func TestRuntimeCancelledCapabilityResultIsCompletedWithError(t *testing.T) {
 	c := newTestConnection()
 	queueHandshake(c)
 	c.in <- invocationEnvelope()
@@ -271,15 +273,24 @@ func TestRuntimeCancelledCapabilityResultIsCancelledTerminal(t *testing.T) {
 	}
 	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_CANCEL, EnvironmentId: stringPtr("env"), InvocationId: stringPtr(testInvocationID), Payload: &protocol.Envelope_Cancel{Cancel: &protocol.Cancel{}}}
 	frames := c.waitFor(t, func(frames []*protocol.Envelope) bool {
-		return countFrames(frames, protocol.MessageType_CANCELLED) == 1 && countFrames(frames, protocol.MessageType_EXECUTION_EXITED) == 1
+		return countFrames(frames, protocol.MessageType_COMPLETED) == 1 && countFrames(frames, protocol.MessageType_EXECUTION_EXITED) == 1
 	})
-	if got := countFrames(frames, protocol.MessageType_CANCELLED); got != 1 {
+	if got := countFrames(frames, protocol.MessageType_COMPLETED); got != 1 {
 		stopRuntime()
-		t.Fatalf("CANCELLED terminals=%d, want one", got)
+		t.Fatalf("COMPLETED terminals=%d, want one", got)
 	}
-	if got := countFrames(frames, protocol.MessageType_COMPLETED); got != 0 {
+	if got := countFrames(frames, protocol.MessageType_CANCELLED); got != 0 {
 		stopRuntime()
-		t.Fatalf("COMPLETED terminals=%d, want none for a cancelled result", got)
+		t.Fatalf("CANCELLED terminals=%d, want none when the executor returned a result", got)
+	}
+	for _, frame := range frames {
+		if frame.MessageType == protocol.MessageType_COMPLETED {
+			result := frame.GetCompleted().GetResult()
+			if !result.GetError() || !strings.Contains(result.GetDetailsJson(), `"code":"CANCELLED"`) || len(result.GetContents()) != 1 {
+				stopRuntime()
+				t.Fatalf("COMPLETED result = %v, want the executor's cancelled partial result", result)
+			}
+		}
 	}
 	if got := countFrames(frames, protocol.MessageType_EXECUTION_EXITED); got != 1 {
 		stopRuntime()
