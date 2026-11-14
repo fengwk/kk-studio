@@ -55,25 +55,12 @@ final class GeminiModelProvider implements ModelProvider {
 
     ProviderStreamBridge bridge = new ProviderStreamBridge(handler);
 
-    GeminiEncodedRequest encoded;
-    try {
-      encoded = encoder.encode(request, descriptor);
-    } catch (ProviderException exception) {
-      bridge.emitError(exception);
+    Optional<PreparedProviderRequest> prepared = prepareBytes(request, bridge);
+    if (prepared.isEmpty()) {
       return;
     }
     // 先计量最终 body 并按端点已知限制检查；超限不发送。计量、定价观察与 HTTP 发送共用同一份字节。
-    PreparedProviderRequest prepared =
-        PreparedProviderRequest.prepare(
-            request,
-            encoded.bodyUtf8Bytes(),
-            RequestLimitsPresets.resolve(descriptor.type(), descriptor.endpoint()));
-    Optional<ProviderException> violation = prepared.limitViolation();
-    if (violation.isPresent()) {
-      bridge.emitError(violation.get());
-      return;
-    }
-    byte[] body = prepared.body();
+    byte[] body = prepared.get().body();
     handler.onRequestBody(body);
 
     URI streamUri;
@@ -87,20 +74,8 @@ final class GeminiModelProvider implements ModelProvider {
       return;
     }
 
-    HttpRequest httpRequest;
-    try {
-      HttpRequest.Builder requestBuilder =
-          HttpRequest.newBuilder(streamUri)
-              .POST(HttpRequest.BodyPublishers.ofByteArray(body))
-              .header("Content-Type", "application/json")
-              .header("Accept", "text/event-stream");
-      if (apiKey != null && !apiKey.isBlank()) {
-        requestBuilder.header(API_KEY_HEADER, apiKey);
-      }
-      httpRequest = requestBuilder.build();
-    } catch (IllegalArgumentException ex) {
-      bridge.emitError(
-          new ProviderException(ProviderErrorKind.INVALID_REQUEST, "invalid request header value"));
+    HttpRequest httpRequest = buildHttpRequest(streamUri, body, bridge);
+    if (httpRequest == null) {
       return;
     }
 
@@ -119,6 +94,48 @@ final class GeminiModelProvider implements ModelProvider {
         },
         accumulator::finish,
         GeminiErrorMapper::mapTransportException);
+  }
+
+  /** 编码请求并做端点限制校验；失败已通过 bridge 上报，返回空表示调用结束。 */
+  private Optional<PreparedProviderRequest> prepareBytes(
+      ProviderRequest request, ProviderStreamBridge bridge) {
+    GeminiEncodedRequest encoded;
+    try {
+      encoded = encoder.encode(request, descriptor);
+    } catch (ProviderException exception) {
+      bridge.emitError(exception);
+      return Optional.empty();
+    }
+    PreparedProviderRequest prepared =
+        PreparedProviderRequest.prepare(
+            request,
+            encoded.bodyUtf8Bytes(),
+            RequestLimitsPresets.resolve(descriptor.type(), descriptor.endpoint()));
+    Optional<ProviderException> violation = prepared.limitViolation();
+    if (violation.isPresent()) {
+      bridge.emitError(violation.get());
+      return Optional.empty();
+    }
+    return Optional.of(prepared);
+  }
+
+  /** 组装流式 POST；header 非法时已通过 bridge 上报，返回 null 表示调用结束。 */
+  private HttpRequest buildHttpRequest(URI streamUri, byte[] body, ProviderStreamBridge bridge) {
+    try {
+      HttpRequest.Builder requestBuilder =
+          HttpRequest.newBuilder(streamUri)
+              .POST(HttpRequest.BodyPublishers.ofByteArray(body))
+              .header("Content-Type", "application/json")
+              .header("Accept", "text/event-stream");
+      if (apiKey != null && !apiKey.isBlank()) {
+        requestBuilder.header(API_KEY_HEADER, apiKey);
+      }
+      return requestBuilder.build();
+    } catch (IllegalArgumentException ex) {
+      bridge.emitError(
+          new ProviderException(ProviderErrorKind.INVALID_REQUEST, "invalid request header value"));
+      return null;
+    }
   }
 
   @Override
