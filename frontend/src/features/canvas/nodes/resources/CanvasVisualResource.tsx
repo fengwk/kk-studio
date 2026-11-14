@@ -1,26 +1,13 @@
 import { LoaderCircle } from 'lucide-react'
-import {
-  useEffect,
-  useRef,
-  useState,
-} from 'react'
+import { useState } from 'react'
 import type { Resource } from '@/features/canvas/domain'
 import { useCanvasResourceUrl } from '@/features/canvas/useCanvasResourceUrl'
+import { usePreviewRecovery } from '@/features/canvas/nodes/resources/usePreviewRecovery'
 import { useI18n } from '@/shared/i18n'
-
-/**
- * preview 恢复状态机（同一失败周期内不无限重试）：
- * initial -> refreshing -> refreshed -> original。
- */
-type PreviewRecoveryPhase = 'initial' | 'refreshing' | 'refreshed' | 'original'
 
 export function CanvasVisualResource({ resource }: { resource: Resource }) {
   const { t } = useI18n()
-  const [recoveryPhase, setRecoveryPhase] = useState<PreviewRecoveryPhase>('initial')
   const [originalRequested, setOriginalRequested] = useState(false)
-  const [playRequested, setPlayRequested] = useState(false)
-  const [originalUnavailable, setOriginalUnavailable] = useState(false)
-  const mediaRef = useRef<HTMLMediaElement | null>(null)
   const dimensions = resourceDimensions(resource)
   const {
     targetRef: previewTargetRef,
@@ -45,61 +32,25 @@ export function CanvasVisualResource({ resource }: { resource: Resource }) {
     kind: 'original',
     enabled: originalRequested,
   })
-
-  useEffect(() => {
-    setRecoveryPhase('initial')
-    setOriginalRequested(false)
-    setPlayRequested(false)
-    setOriginalUnavailable(false)
-  }, [resource.canvasId, resource.id])
-
-  useEffect(() => () => {
-    const media = mediaRef.current
-    if (media) {
-      media.removeAttribute('src')
-    }
-  }, [])
-
-  const requestOriginal = () => {
-    if (originalRequested) {
-      void refreshOriginal()
-    } else {
-      setOriginalRequested(true)
-    }
-  }
-
-  const recoverWithOriginal = () => {
-    setRecoveryPhase('original')
-    requestOriginal()
-  }
-
-  useEffect(() => {
-    if (
-      (recoveryPhase === 'initial' || recoveryPhase === 'refreshing')
-      && previewError
-      && !previewUrl
-    ) {
-      setRecoveryPhase('original')
-      setOriginalRequested(true)
-    }
-  }, [previewError, previewUrl, recoveryPhase])
-
-  const handlePreviewError = () => {
-    if (recoveryPhase === 'initial') {
-      setRecoveryPhase('refreshing')
-      void refreshPreview()
-        .then((result) => {
-          if (result.isError) {
-            recoverWithOriginal()
-          } else {
-            setRecoveryPhase('refreshed')
-          }
-        })
-        .catch(recoverWithOriginal)
-    } else if (recoveryPhase === 'refreshed') {
-      recoverWithOriginal()
-    }
-  }
+  const {
+    recoveryPhase,
+    originalUnavailable,
+    setOriginalUnavailable,
+    playRequested,
+    setPlayRequested,
+    mediaRef,
+    requestOriginal,
+    handlePreviewError,
+  } = usePreviewRecovery({
+    resource,
+    originalRequested,
+    setOriginalRequested,
+    previewUrl,
+    previewError,
+    refreshPreview,
+    originalUrl,
+    refreshOriginal,
+  })
 
   if (resource.kind === 'IMAGE') {
     return (
