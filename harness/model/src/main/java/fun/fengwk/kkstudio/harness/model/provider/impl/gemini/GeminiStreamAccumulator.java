@@ -4,7 +4,6 @@ import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -29,7 +28,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
@@ -89,8 +87,7 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
   private boolean terminalChunkReceived = false;
   private boolean promptBlocked = false;
 
-  private JsonNode latestUsageSnapshot = null;
-  private String rawUsageJson = "{}";
+  private final GeminiUsageAccumulator usage = new GeminiUsageAccumulator();
 
   GeminiStreamAccumulator(
       ProviderRequest request, ProviderDescriptor descriptor, ProviderStreamBridge bridge) {
@@ -128,7 +125,7 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
       if (!root.get("usageMetadata").isObject()) {
         throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "invalid usageMetadata");
       }
-      updateUsage(root.get("usageMetadata"));
+      usage.update(root.get("usageMetadata"));
     }
 
     // 处理 candidates
@@ -139,95 +136,6 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
         processCandidate(firstCandidate);
       }
     }
-  }
-
-  private void updateUsage(JsonNode usageNode) {
-    for (String field :
-        List.of(
-            "promptTokenCount",
-            "candidatesTokenCount",
-            "cachedContentTokenCount",
-            "thoughtsTokenCount",
-            "totalTokenCount")) {
-      JsonNode value = usageNode.get(field);
-      if (value != null && !value.isNull()) {
-        optionalTokenCount(usageNode, field);
-      }
-    }
-    if (usageNode.has("serviceTier")) {
-      serviceTier(usageNode);
-    }
-    // 保留最新原始快照；终态才解释 proto3 省略零，不跨快照补字段。
-    latestUsageSnapshot = usageNode.deepCopy();
-  }
-
-  private ModelUsage normalizeFinalUsage(JsonNode usageNode) {
-    // UsageMetadata 的 prompt/candidates/cache 是普通 proto3 int32，ProtoJSON 可省略零值。
-    // 这是 Gemini 协议事实，不是通用缺字段补零；显式 null、非法数字仍拒绝。
-    long promptTokens = proto3ZeroDefaultCount(usageNode, "promptTokenCount");
-    long output = proto3ZeroDefaultCount(usageNode, "candidatesTokenCount");
-    long cached = proto3ZeroDefaultCount(usageNode, "cachedContentTokenCount");
-    Long providerTotal = optionalReportedCount(usageNode, "totalTokenCount");
-    Long reasoning = optionalReportedCount(usageNode, "thoughtsTokenCount");
-    if (cached > promptTokens) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "cached tokens exceed prompt tokens");
-    }
-    long ordinaryInput = promptTokens - cached;
-    this.serviceTier = serviceTier(usageNode);
-
-    // Gemini candidatesTokenCount 不含 thoughts；内部输出总量包含 reasoning，避免重复计费。
-    long outputTotal;
-    try {
-      outputTotal = Math.addExact(output, reasoning == null ? 0L : reasoning);
-    } catch (ArithmeticException overflow) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "output token count overflow");
-    }
-    this.rawUsageJson = usageNode.toString();
-    return new ModelUsage(
-        ordinaryInput, outputTotal, cached, 0L, Map.of(), reasoning, providerTotal);
-  }
-
-  private static String serviceTier(JsonNode usageNode) {
-    if (!usageNode.has("serviceTier")) {
-      return null;
-    }
-    JsonNode value = usageNode.get("serviceTier");
-    if (!value.isString() || value.stringValue().isBlank()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
-    }
-    return value.stringValue();
-  }
-
-  private static long proto3ZeroDefaultCount(JsonNode usageNode, String field) {
-    JsonNode value = usageNode.get(field);
-    if (value == null || value.isMissingNode()) {
-      return 0L;
-    }
-    return optionalTokenCount(usageNode, field);
-  }
-
-  private static Long optionalReportedCount(JsonNode usageNode, String field) {
-    JsonNode value = usageNode.get(field);
-    if (value == null || value.isNull() || value.isMissingNode()) {
-      return null;
-    }
-    return optionalTokenCount(usageNode, field);
-  }
-
-  private static long optionalTokenCount(JsonNode usageNode, String field) {
-    JsonNode value = usageNode.get(field);
-    if (value == null
-        || value.isNull()
-        || !value.isIntegralNumber()
-        || !value.canConvertToLong()
-        || value.longValue() < 0L) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: " + field);
-    }
-    return value.longValue();
   }
 
   private void processCandidate(JsonNode candidate) {
@@ -528,12 +436,12 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
 
   /** 流正常传输完毕后的终态验证与 Completion 交付。 */
   ProviderCompletion finish() {
-    if (latestUsageSnapshot == null) {
+    if (!usage.hasSnapshot()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
           "missing complete usage: Gemini model " + request.model().modelId());
     }
-    ModelUsage usage = normalizeFinalUsage(latestUsageSnapshot);
+    GeminiUsageSnapshot usageSnapshot = usage.freeze();
     if (this.stopReason == null) {
       if (this.promptBlocked && trackedParts.isEmpty()) {
         this.stopReason = GenerationStopReason.FILTERED;
@@ -582,10 +490,10 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
         new ProviderResponse(
             responseBlocks,
             this.stopReason,
-            usage,
+            usageSnapshot.usage(),
             null,
-            this.serviceTier,
-            this.rawUsageJson,
+            usageSnapshot.serviceTier(),
+            usageSnapshot.rawUsageJson(),
             List.of(),
             null,
             null);
