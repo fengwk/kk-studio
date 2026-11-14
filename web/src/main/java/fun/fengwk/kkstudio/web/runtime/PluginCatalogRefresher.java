@@ -5,6 +5,7 @@ import org.springframework.context.SmartLifecycle;
 
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRefreshTrigger;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
+import fun.fengwk.kkstudio.web.MillisecondDurations;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -61,7 +62,7 @@ public final class PluginCatalogRefresher
       Duration interval,
       Supplier<ScheduledExecutorService> executorFactory) {
     this.runtime = Objects.requireNonNull(runtime, "runtime");
-    this.intervalMillis = requirePositiveWholeMillis(interval);
+    this.intervalMillis = MillisecondDurations.requirePositiveWholeMillis(interval, "interval");
     this.executorFactory = Objects.requireNonNull(executorFactory, "executorFactory");
   }
 
@@ -212,19 +213,5 @@ public final class PluginCatalogRefresher
   private static ScheduledExecutorService newRefreshExecutor() {
     return Executors.newSingleThreadScheduledExecutor(
         Thread.ofPlatform().name("plugin-catalog-refresh").daemon(true).factory());
-  }
-
-  private static long requirePositiveWholeMillis(Duration interval) {
-    Objects.requireNonNull(interval, "interval");
-    long nanos;
-    try {
-      nanos = interval.toNanos();
-    } catch (ArithmeticException error) {
-      throw new IllegalArgumentException("interval is too large", error);
-    }
-    if (nanos <= 0 || nanos % 1_000_000 != 0) {
-      throw new IllegalArgumentException("interval must be a positive whole-millisecond duration");
-    }
-    return nanos / 1_000_000;
   }
 }

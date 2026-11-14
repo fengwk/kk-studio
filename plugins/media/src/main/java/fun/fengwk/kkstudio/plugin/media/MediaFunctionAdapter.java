@@ -147,8 +147,22 @@ public class MediaFunctionAdapter implements CanvasFunctionAdapter {
     preflight(run);
 
     CropRectangle rect = CropRectangle.from(run.args());
+    BufferedImage sourceImage = decodeSource(context, run.manifest().get(0));
+    requireWithinDecodedBounds(rect, sourceImage);
+    byte[] cropped = encodePng(crop(sourceImage, rect));
 
-    CanvasFunctionFrozenReference reference = run.manifest().get(0);
+    if (!context.isRunning()) {
+      throw new IllegalStateException("Execution is no longer running");
+    }
+
+    UUID materializedId =
+        context.materializeOutput(run.output(0), new ByteArrayInputStream(cropped));
+    return List.of(materializedId);
+  }
+
+  /** 解码冻结引用的原始流；解码器返回 null 表示格式不受支持或数据损坏。 */
+  private static BufferedImage decodeSource(
+      CanvasFunctionExecutionContext context, CanvasFunctionFrozenReference reference) {
     BufferedImage sourceImage;
     try (CanvasFunctionResourceStream stream = context.openOriginal(reference)) {
       sourceImage = ImageIO.read(stream.content());
@@ -159,7 +173,11 @@ public class MediaFunctionAdapter implements CanvasFunctionAdapter {
       throw new IllegalArgumentException(
           "Failed to decode source image: unsupported format or corrupt data");
     }
+    return sourceImage;
+  }
 
+  /** 解码后的真实尺寸可能与冻结事实不同，因此按解码结果再拒绝一次越界矩形。 */
+  private static void requireWithinDecodedBounds(CropRectangle rect, BufferedImage sourceImage) {
     if (rect.x() + rect.width() > sourceImage.getWidth()
         || rect.y() + rect.height() > sourceImage.getHeight()) {
       throw new IllegalArgumentException(
@@ -172,7 +190,10 @@ public class MediaFunctionAdapter implements CanvasFunctionAdapter {
               sourceImage.getWidth(),
               sourceImage.getHeight()));
     }
+  }
 
+  /** 保留源图 alpha：有 alpha 的源图裁出 ARGB，其余裁出 RGB。 */
+  private static BufferedImage crop(BufferedImage sourceImage, CropRectangle rect) {
     int imageType =
         sourceImage.getColorModel().hasAlpha()
             ? BufferedImage.TYPE_INT_ARGB
@@ -194,25 +215,19 @@ public class MediaFunctionAdapter implements CanvasFunctionAdapter {
     } finally {
       graphics.dispose();
     }
+    return croppedImage;
+  }
 
+  private static byte[] encodePng(BufferedImage image) {
     ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
     try {
-      boolean written = ImageIO.write(croppedImage, "PNG", outputStream);
-      if (!written) {
+      if (!ImageIO.write(image, "PNG", outputStream)) {
         throw new IllegalStateException("No PNG ImageWriter found");
       }
     } catch (IOException exception) {
       throw new IllegalStateException("Failed to encode cropped image as PNG", exception);
     }
-
-    if (!context.isRunning()) {
-      throw new IllegalStateException("Execution is no longer running");
-    }
-
-    UUID materializedId =
-        context.materializeOutput(
-            run.output(0), new ByteArrayInputStream(outputStream.toByteArray()));
-    return List.of(materializedId);
+    return outputStream.toByteArray();
   }
 
   @Override

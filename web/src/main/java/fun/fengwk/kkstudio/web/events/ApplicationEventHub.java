@@ -12,14 +12,11 @@ import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
+import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
+import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
 
-import java.util.ArrayDeque;
-import java.util.ArrayList;
-import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.IntSupplier;
@@ -32,11 +29,12 @@ import java.util.function.IntSupplier;
  * source。首个本地订阅建立上游，最后一个释放时关闭；重复订阅幂等由传输层保证。订阅原子返回建立瞬间的 durable cursor 作为 {@code subscribed} ack
  * 游标（全局提示型资源固定为 0，无持久游标的 Tree 资源同样为 0）。
  *
- * <p>同一资源的状态（上游句柄、订阅者集合、early 缓冲）由该状态的监视器串行化；map 只做「生命周期围栏内创建/获取」与「状态锁内的 identity 条件删除」。{@link
- * #lifecycleFence} 只把「{@link #closed} 边界」与「向 map 发布新状态」串在同一把锁上：{@link #close()} 一旦设立 closed，之后的
- * {@link #subscribe} 不能再插入存活状态；排空已发布状态在围栏外进行，避免外部 close 回等待时再抢围栏。被最后释放、建立失败或 {@link #close()}
- * 淘汰的状态先标记 {@link ResourceState#retired} 再移出 map，之后的上游回调一律丢弃，绝不向 detached state 累积；订阅者若在锁内发现状态已
- * retired 则重取 新状态，因此不会在 detached state 上重建上游（避免 orphan upstream）。
+ * <p>同一资源的状态（上游句柄、订阅者集合、early 缓冲）由 {@link ApplicationEventResourceState} 的监视器串行化；map
+ * 只做「生命周期围栏内创建/获取」与「状态锁内的 identity 条件删除」。{@link #lifecycleFence} 只把「{@link #closed} 边界」与「向 map
+ * 发布新状态」串在同一把锁上：{@link #close()} 一旦设立 closed，之后的 {@link #subscribe} 不能再插入存活状态；排空已发布状态在围栏外进行，避免外部
+ * close 回等待时再抢围栏。被最后释放、建立失败或 {@link #close()} 淘汰的状态先标记 {@link
+ * ApplicationEventResourceState#retired} 再移出 map，之后的上游回调一律丢弃，绝不向 detached state 累积；订阅者若在锁内发现状态已
+ * retired 则重取新状态，因此不会在 detached state 上重建上游（避免 orphan upstream）。
  *
  * <p>订阅激活前（传输层尚未发出 ack 帧）到达的事件缓冲在订阅内，{@link Subscription#activate()} 后按到达顺序 投递，保证事件帧不先于 ack 帧。
  */
@@ -131,7 +129,8 @@ final class ApplicationEventHub implements AutoCloseable {
   private final NotificationInvalidationSource projectChangeSource;
   private final NotificationInvalidationSource environmentChangeSource;
   private final IntSupplier maxBufferedSignals;
-  private final Map<ResourceKey, ResourceState> resources = new ConcurrentHashMap<>();
+  private final Map<ResourceKey, ApplicationEventResourceState> resources =
+      new ConcurrentHashMap<>();
 
   /**
    * 生命周期围栏：只串行化 {@link #subscribe} 的「检查 closed + 发布状态」与 {@link #close()} 的「设立 closed 边界」。
@@ -175,14 +174,16 @@ final class ApplicationEventHub implements AutoCloseable {
     Objects.requireNonNull(resource, "resource");
     Objects.requireNonNull(sink, "sink");
     while (true) {
-      ResourceState state;
+      ApplicationEventResourceState state;
       synchronized (lifecycleFence) {
         if (closed) {
           throw new IllegalStateException("hub is closed");
         }
         state =
             resources.compute(
-                resource, (key, existing) -> existing != null ? existing : new ResourceState(key));
+                resource,
+                (key, existing) ->
+                    existing != null ? existing : new ApplicationEventResourceState(key));
       }
       synchronized (state) {
         if (state.retired) {
@@ -203,8 +204,9 @@ final class ApplicationEventHub implements AutoCloseable {
         if (maxSignals <= 0) {
           throw new IllegalStateException("application event queue capacity must be positive");
         }
-        LocalSubscription subscription =
-            new LocalSubscription(this, resource, state.cursor, sink, maxSignals);
+        ApplicationEventLocalSubscription subscription =
+            new ApplicationEventLocalSubscription(
+                resource, state.cursor, sink, maxSignals, this::release);
         state.subscribers.add(subscription);
         // 回放建立上游期间暂存的信号（establish 回调早于第一个订阅者加入）；deliver 按 cursor 过滤并缓冲到激活。
         for (Signal signal : state.early) {
@@ -231,7 +233,7 @@ final class ApplicationEventHub implements AutoCloseable {
     }
     // 边界已设立：此后不能再发布新状态。已发布条目仍可见，在状态锁内淘汰并关闭上游。
     while (!resources.isEmpty()) {
-      for (ResourceState state : resources.values()) {
+      for (ApplicationEventResourceState state : resources.values()) {
         synchronized (state) {
           if (state.retired) {
             continue;
@@ -240,7 +242,7 @@ final class ApplicationEventHub implements AutoCloseable {
           resources.remove(state.key, state);
           closeUpstreams(state);
           unregisterRealtimeSubscription(state);
-          for (LocalSubscription subscription : state.subscribers) {
+          for (ApplicationEventLocalSubscription subscription : state.subscribers) {
             subscription.markClosed();
           }
           state.subscribers.clear();
@@ -249,7 +251,7 @@ final class ApplicationEventHub implements AutoCloseable {
     }
   }
 
-  private void establishUpstream(ResourceState state) {
+  private void establishUpstream(ApplicationEventResourceState state) {
     switch (state.key.kind()) {
       case THREAD -> {
         HarnessChangeSubscription version =
@@ -317,7 +319,8 @@ final class ApplicationEventHub implements AutoCloseable {
   }
 
   /** 提示型资源的通用失效信号按资源种类折叠为最小回读信号。 */
-  private void fanoutInvalidation(ResourceState state, NotificationInvalidationSource.Event event) {
+  private void fanoutInvalidation(
+      ApplicationEventResourceState state, NotificationInvalidationSource.Event event) {
     if (event instanceof NotificationInvalidationSource.Event.Resync) {
       fanout(state, new Signal.Resync());
       return;
@@ -331,7 +334,8 @@ final class ApplicationEventHub implements AutoCloseable {
     }
   }
 
-  private void fanoutVersion(ResourceState state, CanvasVersionEventSource.Event event) {
+  private void fanoutVersion(
+      ApplicationEventResourceState state, CanvasVersionEventSource.Event event) {
     if (event.resync()) {
       fanout(state, new Signal.Resync());
     } else {
@@ -341,11 +345,11 @@ final class ApplicationEventHub implements AutoCloseable {
 
   /**
    * 在资源锁内 fan-out：与「读 cursor + 注册订阅者」互斥，保证 ack 后无注册竞态窗口。 没有订阅者时（establish 上游期间的回调可能先于第一个
-   * LocalSubscription 加入）信号暂存到 {@link ResourceState#early}，由随后加入的订阅者按 cursor 过滤回放；early
-   * 超过缓冲上限时清空并折叠为单个 {@link Signal.Resync}，之后不再累积（首订阅前内存有界且可恢复）。 retired 状态（最后释放/建立失败/hub close
-   * 淘汰）的迟到回调直接丢弃，不向 detached state 累积。
+   * LocalSubscription 加入）信号暂存到 {@link ApplicationEventResourceState#early}，由随后加入的订阅者按 cursor
+   * 过滤回放；early 超过缓冲上限时清空并折叠为单个 {@link Signal.Resync}，之后不再累积（首订阅前内存有界且可恢复）。 retired 状态（最后释放/建立失败/hub
+   * close 淘汰）的迟到回调直接丢弃，不向 detached state 累积。
    */
-  private void fanout(ResourceState state, Signal signal) {
+  private void fanout(ApplicationEventResourceState state, Signal signal) {
     synchronized (state) {
       if (state.retired) {
         return;
@@ -363,14 +367,14 @@ final class ApplicationEventHub implements AutoCloseable {
         state.early.add(signal);
         return;
       }
-      for (LocalSubscription subscription : state.subscribers) {
+      for (ApplicationEventLocalSubscription subscription : state.subscribers) {
         subscription.deliver(signal);
       }
     }
   }
 
-  private void release(LocalSubscription subscription) {
-    ResourceState state = resources.get(subscription.resource);
+  private void release(ApplicationEventLocalSubscription subscription) {
+    ApplicationEventResourceState state = resources.get(subscription.resource());
     if (state == null) {
       return; // 已被最后释放/hub close 清理（幂等）
     }
@@ -385,7 +389,7 @@ final class ApplicationEventHub implements AutoCloseable {
       if (state.subscribers.isEmpty()) {
         state.retired = true;
         // 先移除 map entry 再关闭上游：并发 subscribe 只能取得全新状态，不会复用正在退役的旧状态。
-        resources.remove(subscription.resource, state);
+        resources.remove(subscription.resource(), state);
         closeUpstreams(state);
         unregisterRealtimeSubscription(state);
       }
@@ -393,7 +397,7 @@ final class ApplicationEventHub implements AutoCloseable {
   }
 
   /** 首个 Thread 订阅建立时登记跨节点订阅。登记失败只影响跨节点投递：记录安全错误并向该 Thread 缓冲一次 resync，本机上游保持建立。 */
-  private void registerRealtimeSubscription(ResourceState state) {
+  private void registerRealtimeSubscription(ApplicationEventResourceState state) {
     UUID threadId = state.key.id();
     try {
       realtimeSubscriptions.register(threadId, () -> resyncThread(threadId));
@@ -408,7 +412,7 @@ final class ApplicationEventHub implements AutoCloseable {
   }
 
   /** 末个 Thread 订阅释放或 Hub close 时注销登记；注销失败只影响远端租约清理，不阻断本地释放。 */
-  private void unregisterRealtimeSubscription(ResourceState state) {
+  private void unregisterRealtimeSubscription(ApplicationEventResourceState state) {
     if (state.key.kind() != ResourceKind.THREAD) {
       return;
     }
@@ -425,13 +429,14 @@ final class ApplicationEventHub implements AutoCloseable {
 
   /** 服务续租失败/恢复时的锁外回调：只向当前仍存活的 Thread 状态投递 resync。 */
   private void resyncThread(UUID threadId) {
-    ResourceState state = resources.get(new ResourceKey(ResourceKind.THREAD, threadId));
+    ApplicationEventResourceState state =
+        resources.get(new ResourceKey(ResourceKind.THREAD, threadId));
     if (state != null) {
       fanout(state, new Signal.Resync());
     }
   }
 
-  private static void closeUpstreams(ResourceState state) {
+  private static void closeUpstreams(ApplicationEventResourceState state) {
     closeQuietly(state.threadVersionHandle);
     closeQuietly(state.realtimeHandle);
     closeQuietly(state.canvasVersionHandle);
@@ -457,122 +462,6 @@ final class ApplicationEventHub implements AutoCloseable {
       release.run();
     } catch (RuntimeException error) {
       // 释放失败不影响其余订阅
-    }
-  }
-
-  private static final class ResourceState {
-    private final ResourceKey key;
-    private final Set<LocalSubscription> subscribers = new HashSet<>();
-    private final List<Signal> early = new ArrayList<>();
-    private AutoCloseable threadVersionHandle;
-    private AutoCloseable realtimeHandle;
-    private AutoCloseable canvasVersionHandle;
-    private Runnable invalidationRelease;
-    private long cursor;
-
-    /** 已淘汰（最后释放/建立失败/hub close）：上游回调一律丢弃；只在状态锁内读写。 */
-    private boolean retired;
-
-    /** early 已折叠为单个 Resync：首订阅加入前不再累积；只在状态锁内读写。 */
-    private boolean earlyCollapsed;
-
-    private ResourceState(ResourceKey key) {
-      this.key = key;
-    }
-  }
-
-  private static final class LocalSubscription implements Subscription {
-    private final ApplicationEventHub hub;
-    private final ResourceKey resource;
-    private final long cursor;
-    private final int maxBufferedSignals;
-    private final Sink sink;
-    private final Object lock = new Object();
-    private boolean active;
-    private boolean closed;
-    private final ArrayDeque<Signal> pending = new ArrayDeque<>();
-
-    /** pending 已折叠为单个 Resync：激活前不再累积；只在 subscription lock 内读写。 */
-    private boolean pendingCollapsed;
-
-    private LocalSubscription(
-        ApplicationEventHub hub,
-        ResourceKey resource,
-        long cursor,
-        Sink sink,
-        int maxBufferedSignals) {
-      this.hub = hub;
-      this.resource = resource;
-      this.cursor = cursor;
-      this.sink = sink;
-      this.maxBufferedSignals = maxBufferedSignals;
-    }
-
-    @Override
-    public ResourceKey resource() {
-      return resource;
-    }
-
-    @Override
-    public long cursor() {
-      return cursor;
-    }
-
-    @Override
-    public void activate() {
-      synchronized (lock) {
-        if (closed) {
-          return;
-        }
-        active = true;
-        pendingCollapsed = false;
-        while (!pending.isEmpty()) {
-          sink.accept(pending.poll());
-        }
-      }
-    }
-
-    @Override
-    public void close() {
-      hub.release(this);
-    }
-
-    /** 由 hub 在资源锁内调用：标记关闭并丢弃缓冲。 */
-    private void markClosed() {
-      synchronized (lock) {
-        closed = true;
-        pending.clear();
-        pendingCollapsed = false;
-      }
-    }
-
-    /** 投递信号；version 信号过滤掉不晚于 ack cursor 的陈旧值。 */
-    private void deliver(Signal signal) {
-      if (signal instanceof Signal.Version version) {
-        if (Long.parseLong(version.version()) <= cursor) {
-          return;
-        }
-      }
-      synchronized (lock) {
-        if (closed) {
-          return;
-        }
-        if (!active) {
-          // 激活前缓冲有界：溢出清空并折叠为单个 Resync（客户端整体快照恢复），之后不再累积。
-          if (pendingCollapsed) {
-            return;
-          }
-          if (pending.size() >= maxBufferedSignals) {
-            pending.clear();
-            pending.add(new Signal.Resync());
-            pendingCollapsed = true;
-            return;
-          }
-          pending.add(signal);
-          return;
-        }
-      }
-      sink.accept(signal);
     }
   }
 }

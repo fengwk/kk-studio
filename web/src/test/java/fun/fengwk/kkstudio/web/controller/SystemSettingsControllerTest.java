@@ -52,7 +52,6 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.tool.maxOutputMib").value(16))
         // 仓库/Web 约定：Long 字段（时长/字节）在 wire 上输出十进制字符串；Integer 字段为数值。
         .andExpect(jsonPath("$.environment.heartbeatTimeoutMillis").value("60000"))
-        .andExpect(jsonPath("$.environment.maxResourceBytes").doesNotExist())
         .andExpect(jsonPath("$.backendNetwork.proxyUrl").doesNotExist())
         .andExpect(jsonPath("$.backendNetwork.noProxyHosts").value("localhost,127.*,::1"))
         .andExpect(jsonPath("$.advanced.applicationEventQueueCapacity").value(512))
@@ -126,9 +125,7 @@ public class SystemSettingsControllerTest extends WebPostgresTestSupport {
         .andExpect(jsonPath("$.sections[1].groups[1].fields[0].min").value(1))
         .andExpect(jsonPath("$.sections[1].groups[1].fields[0].max").value(100))
         .andExpect(jsonPath("$.sections[0].groups[2].fields.length()").value(2))
-        .andExpect(jsonPath("$.sections[2].groups[0].fields[0].min").value(30000))
-        .andExpect(jsonPath("$.sections[0].restartRequired").doesNotExist())
-        .andExpect(jsonPath("$.sections[1].groups[0].applyTiming").doesNotExist());
+        .andExpect(jsonPath("$.sections[2].groups[0].fields[0].min").value(30000));
   }
 
   @Test

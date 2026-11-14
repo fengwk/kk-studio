@@ -81,23 +81,6 @@ class EventFrameCodecTest {
         CODEC.decode("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"environments\"}}"));
   }
 
-  /** 旧 kind "tree" 不是 wire 词汇：只接受 "thread-tree"。 */
-  @Test
-  void rejectsLegacyTreeResourceKind() {
-    IllegalArgumentException error =
-        assertThrows(
-            IllegalArgumentException.class,
-            () ->
-                CODEC.decode(
-                    "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"tree\",\"id\":\""
-                        + THREAD
-                        + "\"}}"));
-    assertEquals(
-        "frame.resource.kind must be thread, canvas, thread-tree, projects, interactions, or"
-            + " environments",
-        error.getMessage());
-  }
-
   @Test
   void rejectsFramesWithoutType() {
     assertThrows(

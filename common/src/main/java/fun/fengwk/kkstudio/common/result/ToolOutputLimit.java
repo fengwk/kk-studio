@@ -18,14 +18,6 @@ public final class ToolOutputLimit {
         + " MiB. The tool ran but its output was discarded; side effects may have occurred. Request a smaller result, for example a narrower read range or filtered command output, or ask the user to raise the limit in system settings.";
   }
 
-  public static String fileExceededMessage(long actualBytes, long limitBytes) {
-    return "File is "
-        + formatActualMib(actualBytes, limitBytes)
-        + " MiB, which exceeds the tool output size limit of "
-        + formatLimitMib(limitBytes)
-        + " MiB. The file was not read. Use a smaller file, for example by converting or splitting it with bash, or ask the user to raise the limit in system settings.";
-  }
-
   private static String formatLimitMib(long bytes) {
     return Long.toString(bytes / BYTES_PER_MIB);
   }

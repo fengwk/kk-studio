@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import tools.jackson.core.json.JsonReadFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -168,7 +169,7 @@ class OpenCliHubClientContractTest {
                         200,
                         "application/json",
                         "{\"status\":200,\"code\":\"OK\",\"data\":\""
-                            + "x".repeat(OpenCliHubClient.MAX_JSON_RESPONSE_BYTES + 1)
+                            + "x".repeat(OpenCliHubTransport.MAX_JSON_RESPONSE_BYTES + 1)
                             + "\"}")));
     assertThrows(OpenCliHubException.class, () -> jsonClient.getExecution("exec-1", 0));
 
@@ -182,7 +183,7 @@ class OpenCliHubClientContractTest {
                     response(
                         500,
                         "text/plain",
-                        "bad\n" + "x".repeat(OpenCliHubClient.MAX_ERROR_RESPONSE_BYTES + 1))));
+                        "bad\n" + "x".repeat(OpenCliHubTransport.MAX_ERROR_RESPONSE_BYTES + 1))));
     OpenCliHubException error =
         assertThrows(OpenCliHubException.class, () -> errorClient.getExecution("exec-1", 0));
     // 远端错误正文无论是否超限都不进入公开消息，只保留 HTTP 状态。
@@ -788,7 +789,19 @@ class OpenCliHubClientContractTest {
     assertPayloadRejected("{\"apiKey\":\"abc\",\"instanceId\":\"" + "a".repeat(37) + "\"}");
   }
 
+  /** 宿主响应 mapper 的宽松选项不能改变秘密载荷的 JSON 文法。 */
+  @Test
+  void credentialParsingDoesNotInheritPermissiveHostJson() {
+    ObjectMapper permissive =
+        JsonMapper.builder().enable(JsonReadFeature.ALLOW_SINGLE_QUOTES).build();
+    assertPayloadRejected("{'apiKey':'invalid-json-key'}", permissive);
+  }
+
   private void assertPayloadRejected(String payloadJson) {
+    assertPayloadRejected(payloadJson, MAPPER);
+  }
+
+  private void assertPayloadRejected(String payloadJson, ObjectMapper mapper) {
     if (payloadJson == null) {
       PluginCredentialAccess nullAccess =
           new PluginCredentialAccess() {
@@ -840,7 +853,7 @@ class OpenCliHubClientContractTest {
     OpenCliHubClient client =
         new OpenCliHubClient(
             hub(),
-            MAPPER,
+            mapper,
             badAccess,
             new StubHttpClient(
                 request -> {
@@ -1085,8 +1098,8 @@ class OpenCliHubClientContractTest {
   /** 持有秘密的取值对象不得经 toString 泄漏：日志与异常只能看到脱敏表示。 */
   @Test
   void scopedCredentialToStringNeverExposesSecrets() {
-    OpenCliHubClient.ScopedCredential credential =
-        new OpenCliHubClient.ScopedCredential("sk-live-secret", "private-instance");
+    OpenCliHubTransport.ScopedCredential credential =
+        new OpenCliHubTransport.ScopedCredential("sk-live-secret", "private-instance");
 
     assertEquals("Bearer sk-live-secret", "Bearer " + credential.apiKey());
     assertEquals("private-instance", credential.instanceId());

@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionOutputSpec;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.plugin.prompt.PluginPromptContent;
 
 import java.math.BigDecimal;
@@ -46,15 +47,7 @@ class H3PromptWorkflowTest {
       H3ReferenceManifest manifest,
       Map<UUID, H3UploadedFile> uploads) {
     return H3WorkflowBuilder.build(
-        H3WorkflowBuilder.defaultTemplate(),
-        "92",
-        prompt,
-        ratio,
-        duration,
-        seed,
-        target,
-        manifest,
-        uploads);
+        defaultTemplate(), "92", prompt, ratio, duration, seed, target, manifest, uploads);
   }
 
   @Test
@@ -153,8 +146,8 @@ class H3PromptWorkflowTest {
     assertEquals(
         H3WorkflowBuilder.LENGTH_EXPRESSION,
         workflow.path("131").path("inputs").path("expression").asText());
-    assertEquals(243, H3WorkflowBuilder.frameLength(10));
-    assertEquals(362, H3WorkflowBuilder.frameLength(15));
+    assertEquals(243, frameLength(10));
+    assertEquals(362, frameLength(15));
     assertThrows(
         IllegalArgumentException.class,
         () -> buildWorkflow("prompt", "2:1", 5, 1L, TARGET, manifest, Map.of()));
@@ -200,7 +193,7 @@ class H3PromptWorkflowTest {
             reference(12L, 3L, 0, CanvasResourceKind.VIDEO, "video/mp4"),
             reference(13L, 4L, 2, CanvasResourceKind.AUDIO, "audio/mpeg"));
     H3ReferenceManifest manifest = H3ReferenceManifest.from(references);
-    int staticNodes = H3WorkflowBuilder.defaultTemplate().size();
+    int staticNodes = defaultTemplate().size();
 
     ObjectNode workflow =
         buildWorkflow(
@@ -237,6 +230,20 @@ class H3PromptWorkflowTest {
     when(definition.outputs())
         .thenReturn(List.of(CanvasFunctionOutputSpec.of(CanvasResourceKind.VIDEO)));
     return definition;
+  }
+
+  /** 生产默认预置图原文（同一资源入口）的已解析视图。 */
+  private static ObjectNode defaultTemplate() {
+    return (ObjectNode) JsonValues.readTree(H3WorkflowBuilder.defaultTemplateJson());
+  }
+
+  /**
+   * {@link H3WorkflowBuilder#LENGTH_EXPRESSION} 的整秒算例：表达式只在 ComfyUI 侧求值，生产 Java
+   * 不计算帧长，因此这里保留一份可执行的等价算例来固定 10 秒与 15 秒各自应有的帧数。
+   */
+  private static int frameLength(int durationSeconds) {
+    int base = Math.max(5, Math.toIntExact(Math.round(durationSeconds * 24D)));
+    return base + Math.floorMod(5 - Math.floorMod(base, 17), 17);
   }
 
   private static int occurrences(String text, String value) {
