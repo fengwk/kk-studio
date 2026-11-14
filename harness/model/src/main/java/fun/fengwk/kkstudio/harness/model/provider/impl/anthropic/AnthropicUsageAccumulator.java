@@ -223,10 +223,7 @@ final class AnthropicUsageAccumulator {
   }
 
   private void extractAndValidateCacheCreationBreakdown(JsonNode usageNode) {
-    long m5 = 0L;
-    long h1 = 0L;
-    boolean has5m = false;
-    boolean has1h = false;
+    BreakdownFields fields = new BreakdownFields();
 
     JsonNode nested = usageNode.get("cache_creation");
     if (nested != null) {
@@ -235,62 +232,71 @@ final class AnthropicUsageAccumulator {
             ProviderErrorKind.INVALID_RESPONSE, "cache_creation must be an object");
       }
       if (nested.has("ephemeral_5m_input_tokens")) {
-        m5 = usageLong(nested.get("ephemeral_5m_input_tokens"), "ephemeral_5m_input_tokens");
-        has5m = true;
+        fields.declare5m(
+            usageLong(nested.get("ephemeral_5m_input_tokens"), "ephemeral_5m_input_tokens"));
       }
       if (nested.has("ephemeral_5m")) {
-        long alias5m = usageLong(nested.get("ephemeral_5m"), "ephemeral_5m_input_tokens");
-        if (has5m && m5 != alias5m) {
-          throw conflictingBreakdown();
-        }
-        m5 = alias5m;
-        has5m = true;
+        fields.declare5m(usageLong(nested.get("ephemeral_5m"), "ephemeral_5m_input_tokens"));
       }
       if (nested.has("ephemeral_1h_input_tokens")) {
-        h1 = usageLong(nested.get("ephemeral_1h_input_tokens"), "ephemeral_1h_input_tokens");
-        has1h = true;
+        fields.declare1h(
+            usageLong(nested.get("ephemeral_1h_input_tokens"), "ephemeral_1h_input_tokens"));
       }
       if (nested.has("ephemeral_1h")) {
-        long alias1h = usageLong(nested.get("ephemeral_1h"), "ephemeral_1h_input_tokens");
-        if (has1h && h1 != alias1h) {
-          throw conflictingBreakdown();
-        }
-        h1 = alias1h;
-        has1h = true;
+        fields.declare1h(usageLong(nested.get("ephemeral_1h"), "ephemeral_1h_input_tokens"));
       }
     }
 
     if (usageNode.has("cache_creation_ephemeral_5m_input_tokens")) {
-      long flat5m =
+      fields.declare5m(
           usageLong(
               usageNode.get("cache_creation_ephemeral_5m_input_tokens"),
-              "cache_creation_ephemeral_5m_input_tokens");
-      if (has5m && m5 != flat5m) {
-        throw conflictingBreakdown();
-      }
-      m5 = flat5m;
-      has5m = true;
+              "cache_creation_ephemeral_5m_input_tokens"));
     }
     if (usageNode.has("cache_creation_ephemeral_1h_input_tokens")) {
-      long flat1h =
+      fields.declare1h(
           usageLong(
               usageNode.get("cache_creation_ephemeral_1h_input_tokens"),
-              "cache_creation_ephemeral_1h_input_tokens");
-      if (has1h && h1 != flat1h) {
+              "cache_creation_ephemeral_1h_input_tokens"));
+    }
+
+    if (fields.hasAny()) {
+      if (fields.has5m) {
+        this.cacheCreation5m = fields.m5;
+      }
+      if (fields.has1h) {
+        this.cacheCreation1h = fields.h1;
+      }
+      hasExplicitCacheBreakdown = true;
+    }
+  }
+
+  /** 同一 TTL 档位可能同时出现在嵌套与扁平字段：重复声明只允许同值。 */
+  private static final class BreakdownFields {
+
+    private long m5;
+    private long h1;
+    private boolean has5m;
+    private boolean has1h;
+
+    void declare5m(long value) {
+      if (has5m && m5 != value) {
         throw conflictingBreakdown();
       }
-      h1 = flat1h;
+      m5 = value;
+      has5m = true;
+    }
+
+    void declare1h(long value) {
+      if (has1h && h1 != value) {
+        throw conflictingBreakdown();
+      }
+      h1 = value;
       has1h = true;
     }
 
-    if (has5m || has1h) {
-      if (has5m) {
-        this.cacheCreation5m = m5;
-      }
-      if (has1h) {
-        this.cacheCreation1h = h1;
-      }
-      hasExplicitCacheBreakdown = true;
+    boolean hasAny() {
+      return has5m || has1h;
     }
   }
 
