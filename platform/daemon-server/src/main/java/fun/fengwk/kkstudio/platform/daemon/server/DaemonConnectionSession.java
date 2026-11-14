@@ -236,7 +236,10 @@ final class DaemonConnectionSession implements DaemonSession {
     try {
       snapshot = configSource.find(environmentId);
     } catch (RuntimeException error) {
-      logFailure("initial environment config lookup for " + environmentId, error);
+      DaemonFailures.log(
+          DaemonConnectionSession.class,
+          "initial environment config lookup for " + environmentId,
+          error);
       return;
     }
     if (snapshot.isEmpty()) {
@@ -252,7 +255,8 @@ final class DaemonConnectionSession implements DaemonSession {
     try {
       snapshot = configSource.find(environmentId);
     } catch (RuntimeException error) {
-      logFailure("environment config lookup for " + environmentId, error);
+      DaemonFailures.log(
+          DaemonConnectionSession.class, "environment config lookup for " + environmentId, error);
       return;
     }
     if (snapshot.isEmpty()) {
@@ -305,7 +309,10 @@ final class DaemonConnectionSession implements DaemonSession {
         }
       }
     } catch (RuntimeException error) {
-      logFailure("missing environment configuration notification for " + environmentId, error);
+      DaemonFailures.log(
+          DaemonConnectionSession.class,
+          "missing environment configuration notification for " + environmentId,
+          error);
     }
     close();
   }
@@ -451,7 +458,10 @@ final class DaemonConnectionSession implements DaemonSession {
       latestConfig = configSource.find(environmentId);
     } catch (RuntimeException error) {
       // READY 已提交；可选的最新配置回读失败由下一次心跳/通知继续对账。
-      logFailure("ready environment config lookup for " + environmentId, error);
+      DaemonFailures.log(
+          DaemonConnectionSession.class,
+          "ready environment config lookup for " + environmentId,
+          error);
       latestConfig = null;
     }
     if (latestConfig != null && latestConfig.isEmpty()) {
@@ -476,7 +486,8 @@ final class DaemonConnectionSession implements DaemonSession {
           try {
             sessionListener.onEnvironmentReady(environmentId);
           } catch (RuntimeException error) {
-            logFailure("environment ready notification", error);
+            DaemonFailures.log(
+                DaemonConnectionSession.class, "environment ready notification", error);
           }
         });
     recoverActiveInvocations();
@@ -663,7 +674,8 @@ final class DaemonConnectionSession implements DaemonSession {
             try {
               listener.onExitConfirmed();
             } catch (RuntimeException failure) {
-              logFailure("execution exit confirmation", failure);
+              DaemonFailures.log(
+                  DaemonConnectionSession.class, "execution exit confirmation", failure);
             }
           });
       return;
@@ -851,7 +863,10 @@ final class DaemonConnectionSession implements DaemonSession {
         }
       }
     } catch (RuntimeException notificationFailure) {
-      logFailure("protocol error notification for " + environmentId, notificationFailure);
+      DaemonFailures.log(
+          DaemonConnectionSession.class,
+          "protocol error notification for " + environmentId,
+          notificationFailure);
     }
     close();
   }
@@ -925,7 +940,7 @@ final class DaemonConnectionSession implements DaemonSession {
         try {
           callback.run();
         } catch (RuntimeException error) {
-          logFailure("callback for " + environmentId, error);
+          DaemonFailures.log(DaemonConnectionSession.class, "callback for " + environmentId, error);
         }
       }
     }
@@ -1011,7 +1026,7 @@ final class DaemonConnectionSession implements DaemonSession {
   private static Throwable logCleanupFailure(
       String stage, Throwable failure, Throwable firstDiagnosticFailure) {
     try {
-      logFailure(stage, failure);
+      DaemonFailures.log(DaemonConnectionSession.class, stage, failure);
       return firstDiagnosticFailure;
     } catch (Throwable diagnosticFailure) {
       if (firstDiagnosticFailure == null) {
@@ -1032,12 +1047,6 @@ final class DaemonConnectionSession implements DaemonSession {
       throw runtime;
     }
     throw new IllegalStateException("cleanup diagnostic failure is not unchecked", failure);
-  }
-
-  static void logFailure(String stage, Throwable failure) {
-    LOG.log(
-        Level.WARNING,
-        "environment daemon " + stage + " failed: " + failure.getClass().getSimpleName());
   }
 
   static DaemonOperatingSystem toDomainOs(OperatingSystem os) {

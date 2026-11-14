@@ -99,12 +99,6 @@ public final class EnvironmentDaemonServer
     this.configExecutor = Objects.requireNonNull(configExecutor, "configExecutor");
   }
 
-  private static void logFailure(String stage, Throwable failure) {
-    LOG.log(
-        Level.WARNING,
-        "environment daemon " + stage + " failed: " + failure.getClass().getSimpleName());
-  }
-
   @Override
   public DaemonAdmission admit(DaemonHandshake handshake) {
     Objects.requireNonNull(handshake, "handshake");
@@ -296,7 +290,10 @@ public final class EnvironmentDaemonServer
       configExecutor.execute(() -> runConfigSync(environmentId, state));
     } catch (RuntimeException error) {
       configSyncs.rejected(environmentId, state);
-      logFailure("environment config scheduling for " + environmentId, error);
+      DaemonFailures.log(
+          EnvironmentDaemonServer.class,
+          "environment config scheduling for " + environmentId,
+          error);
     }
   }
 
@@ -308,7 +305,10 @@ public final class EnvironmentDaemonServer
           session.reconcileEnvironmentConfig();
         }
       } catch (RuntimeException error) {
-        logFailure("environment config reconciliation for " + environmentId, error);
+        DaemonFailures.log(
+            EnvironmentDaemonServer.class,
+            "environment config reconciliation for " + environmentId,
+            error);
       }
       if (!configSyncs.repeat(environmentId, state)) {
         return;
@@ -524,14 +524,14 @@ public final class EnvironmentDaemonServer
       try {
         session.drain();
       } catch (RuntimeException error) {
-        logFailure("control drain", error);
+        DaemonFailures.log(EnvironmentDaemonServer.class, "control drain", error);
       }
       UUID leaseToken = session.leaseToken();
       if (leaseToken != null) {
         try {
           leaseStore.release(session.environmentId(), leaseToken);
         } catch (RuntimeException error) {
-          logFailure("lease release", error);
+          DaemonFailures.log(EnvironmentDaemonServer.class, "lease release", error);
         }
       }
     }
