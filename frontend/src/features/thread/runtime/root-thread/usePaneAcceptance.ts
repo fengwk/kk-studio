@@ -1,8 +1,7 @@
 import { useEffect, useState } from 'react'
-import { useQueryClient, type QueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
 import type { BranchDraft } from '@/features/thread/branch-draft'
@@ -29,7 +28,6 @@ import {
   clearPendingAcceptance,
   inspectPendingAcceptanceSlot,
   isBoundTarget,
-  isDraftHistoryTarget,
   isNewThreadTarget,
   samePaneTarget,
   savePendingAcceptance,
@@ -41,11 +39,12 @@ import {
   type AgentPaneCapabilities,
   type RenameKind,
 } from '@/features/thread/runtime/root-thread/types'
-import type {
-  HarnessAcceptedCommandsDTO,
-  HarnessSessionEntryDTO,
-  HarnessThreadSnapshotDTO,
-} from '@/shared/api/generated/contracts'
+import {
+  invalidateAcceptanceResult,
+  refreshPaneProjection,
+  seedAcceptedThreadSnapshot,
+} from '@/features/thread/runtime/root-thread/pane-acceptance-cache'
+import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 type Ref<T> = { current: T }
 
@@ -247,61 +246,6 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
     void submitFrozenAcceptance(pending)
   }
 
-  async function invalidateAcceptanceResult(threadId: string): Promise<void> {
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
-      ...(ownerKey
-        ? [
-            queryClient.invalidateQueries({
-              queryKey: ['agent-pane', 'sessions', ownerKey],
-            }),
-          ]
-        : []),
-    ])
-  }
-
-  /**
-   * 验收成功后、切目标之前把权威 Thread 状态放进 snapshot 缓存。
-   *
-   * 新 Session 没有历史；新 Thread 沿用已验证的闭合前缀，直到 invalidate 取回
-   * 权威快照。已有缓存的 Thread（重放）保持原样，不覆盖已加载的 Entry。
-   */
-  function seedAcceptedThreadSnapshot(
-    client: QueryClient,
-    response: HarnessAcceptedCommandsDTO,
-  ): void {
-    const key = queryKeys.threads.snapshot(response.thread.threadId)
-    if (client.getQueryData<HarnessThreadSnapshotDTO>(key) != null) {
-      return
-    }
-    client.setQueryData<HarnessThreadSnapshotDTO>(key, {
-      version: response.thread.version,
-      thread: response.thread,
-      baseEntryId: null,
-      entries: isDraftHistoryTarget(targetRef.current) ? draftHistoryEntries : [],
-      queuedCommands: response.acceptedCommands,
-      activeAssistantOutput: null,
-      toolInvocations: [],
-      generationFailures: [],
-      stopReceipts: [],
-      unconfirmedExecutions: [],
-    })
-  }
-
-  async function refreshPaneProjection(): Promise<void> {
-    const currentTarget = targetRef.current
-    if (isBoundTarget(currentTarget)) {
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.threads.snapshot(currentTarget.threadId),
-      })
-    }
-    if (ownerKey) {
-      await queryClient.invalidateQueries({
-        queryKey: ['agent-pane', 'sessions', ownerKey],
-      })
-    }
-  }
-
   async function submitFrozenAcceptance(pending: PendingAcceptance): Promise<void> {
     try {
       const response = await harnessService.acceptCommandBatch(pending.request)
@@ -311,7 +255,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
         generationRef.current,
       )
       if (!stillActive) {
-        await invalidateAcceptanceResult(response.thread.threadId)
+        await invalidateAcceptanceResult(queryClient, ownerKey, response.thread.threadId)
         return
       }
       pendingAcceptanceRef.current = null
@@ -323,7 +267,12 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       const bound: PaneTarget = { kind: 'BOUND_THREAD', threadId: response.thread.threadId }
       // 先种快照、再切目标：目标切换与执行根身份落在同一次 commit，根控制面（草稿与
       // 上传注册表）不会因为身份未知而瞬间卸载重建。
-      seedAcceptedThreadSnapshot(queryClient, response)
+      seedAcceptedThreadSnapshot(
+        queryClient,
+        targetRef.current,
+        draftHistoryEntries,
+        response,
+      )
       targetRef.current = bound
       setTarget(bound)
       setFocusIntent(bound)
@@ -333,7 +282,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       } else {
         storeComposerDraft(composerScope, partsRef.current)
       }
-      await invalidateAcceptanceResult(response.thread.threadId)
+      await invalidateAcceptanceResult(queryClient, ownerKey, response.thread.threadId)
     } catch (error) {
       const currentPending = pendingAcceptanceRef.current
       const stillActive = currentPending != null
@@ -375,7 +324,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
         setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
       }
       if (shouldRefreshAfterAcceptanceFailure(error)) {
-        await refreshPaneProjection()
+        await refreshPaneProjection(queryClient, ownerKey, targetRef.current)
       }
     }
   }
@@ -451,6 +400,6 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
     handleSubmit,
     retryAcceptance,
     abandonPendingAcceptance,
-    refreshPaneProjection,
+    refreshPaneProjection: () => refreshPaneProjection(queryClient, ownerKey, targetRef.current),
   }
 }
