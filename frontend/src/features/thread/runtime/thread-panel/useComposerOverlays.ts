@@ -35,6 +35,11 @@ export function useComposerOverlays({
     setControlMenu(null)
   }, [])
 
+  /** 只关设置菜单：plus 按钮打开命令表前同步收起它，不依赖外部 mousedown。 */
+  const closeControlMenu = useCallback(() => {
+    setControlMenu(null)
+  }, [])
+
   const handleLeaveRegion = useCallback(() => {
     setPlusMenuOpen(false)
     setControlMenu(null)
@@ -60,6 +65,7 @@ export function useComposerOverlays({
     setPlusMenuOpen,
     controlMenu,
     setControlMenu,
+    closeControlMenu,
     closeOverlay,
     dismissOverlays,
     handleLeaveRegion,

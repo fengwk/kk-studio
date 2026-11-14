@@ -1434,6 +1434,23 @@ describe('ThreadComposer edge interactions', () => {
     expect(editor).toHaveFocus()
   })
 
+  // 键盘激活 plus 不触发外部 mousedown：必须在打开分支同步收起底栏菜单。
+  it('closes the settings menu when plus is activated by keyboard', async () => {
+    const user = userEvent.setup()
+    render(<Harness settings={MODEL_SETTINGS} />)
+
+    await user.click(screen.getByRole('button', { name: '权限模式' }))
+    expect(await screen.findByRole('listbox', { name: '权限选项' })).toBeInTheDocument()
+
+    // 只把焦点交给 plus，再按 Enter/Space 激活；不经过任何 pointer/mousedown。
+    screen.getByRole('button', { name: '打开命令表' }).focus()
+    expect(screen.getByRole('listbox', { name: '权限选项' })).toBeInTheDocument()
+    await user.keyboard('{Enter}')
+
+    expect(await screen.findByLabelText('命令表')).toBeInTheDocument()
+    expect(screen.queryByRole('listbox', { name: '权限选项' })).not.toBeInTheDocument()
+  })
+
   it('auto-closes the open overlay when typing into the editor', async () => {
     const user = userEvent.setup()
     render(<Harness settings={MODEL_SETTINGS} />)

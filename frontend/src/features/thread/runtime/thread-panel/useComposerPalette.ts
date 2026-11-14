@@ -18,6 +18,8 @@ interface ComposerPaletteOptions {
   /** plus 菜单是否打开（由覆盖层状态机持有）。 */
   plusMenuOpen: boolean
   setPlusMenuOpen: (open: boolean) => void
+  /** 同步收起底栏设置菜单：两个覆盖层互斥，不依赖外部 mousedown。 */
+  closeControlMenu: () => void
   /** 草稿的 slash 查询；null 表示没有处于 slash 模式。 */
   slashQuery: string | null
   commands: ThreadCommand[]
@@ -46,6 +48,7 @@ export function useComposerPalette({
   isFocused,
   plusMenuOpen,
   setPlusMenuOpen,
+  closeControlMenu,
   slashQuery,
   commands,
   parts,
@@ -85,9 +88,10 @@ export function useComposerPalette({
     focusComposer()
   }, [closeOverlay, focusComposer])
 
-  /** plus 按钮：未展开时打开菜单，展开时按当前形态关闭（slash 直接失焦）。 */
+  /** plus 按钮：未展开时先收起设置菜单再打开命令表，展开时按当前形态关闭（slash 直接失焦）。 */
   const togglePalette = useCallback(() => {
     if (!paletteOpen) {
+      closeControlMenu()
       setPlusMenuOpen(true)
       focusComposer()
       return
@@ -97,7 +101,7 @@ export function useComposerPalette({
       return
     }
     closePalette()
-  }, [blurComposer, closePalette, focusComposer, paletteOpen, setPlusMenuOpen, slashMode])
+  }, [blurComposer, closeControlMenu, closePalette, focusComposer, paletteOpen, setPlusMenuOpen, slashMode])
 
   const selectCommand = useCallback((command: ThreadCommand) => {
     if (command.disabled) {

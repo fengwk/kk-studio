@@ -110,3 +110,55 @@ describe('ToolCallPreview 多条目流式输入', () => {
     expect(screen.queryByText(/Change \d+ of \d+/)).not.toBeInTheDocument()
   })
 })
+
+describe('ToolCallPreview 审批审查正文', () => {
+  const review = { path: '/workspace/a.txt', diff: '-old\n+new', sha256: null }
+
+  // 审查分支的 DOM 与原版一致：仅一层 body，路径行只有 path，workdir 不进审查路径行。
+  it('write 审查分支只有一层 body，路径行不带 workdir', () => {
+    const { container } = render(
+      <ToolCallPreview
+        streaming={false}
+        variant="approval"
+        preview={{
+          kind: 'write',
+          path: '/workspace/a.txt',
+          workdir: '/workspace/root',
+          content: '',
+          hasContent: false,
+          lines: [],
+          review,
+        }}
+      />,
+    )
+
+    const bodies = container.querySelectorAll('.thread-tool-call-body')
+    expect(bodies).toHaveLength(1)
+    expect(container.querySelector('.thread-tool-preview-target-path')?.textContent)
+      .toBe('/workspace/a.txt')
+    expect(container.querySelector('.thread-tool-preview-target-workdir')).toBeNull()
+    expect(container.querySelector('.thread-tool-preview-body.is-edit')?.textContent).toBe('-old\n+new')
+  })
+
+  // 正文分支仍需把 workdir 放在路径行，供审批时确认写入目录。
+  it('write 正文分支的路径行带 workdir', () => {
+    const { container } = render(
+      <ToolCallPreview
+        streaming={false}
+        variant="approval"
+        preview={{
+          kind: 'write',
+          path: '/workspace/a.txt',
+          workdir: '/workspace/root',
+          content: 'hello',
+          hasContent: true,
+          lines: ['hello'],
+        }}
+      />,
+    )
+
+    expect(container.querySelectorAll('.thread-tool-call-body')).toHaveLength(1)
+    expect(container.querySelector('.thread-tool-preview-target-workdir')?.textContent)
+      .toBe('· /workspace/root')
+  })
+})

@@ -37,16 +37,14 @@ export function WriteReviewSection({ preview }: { preview: Extract<ToolCallPrevi
     return null
   }
   return (
-    <div className="thread-tool-call-body">
-      <ToolOutputViewport bounded className="thread-tool-preview-body is-edit">
-        {review.diff.split('\n').map((line, index, lines) => (
-          <span key={`diff-${index}`} className={diffLineClass(line)}>
-            {line}
-            {index < lines.length - 1 ? '\n' : ''}
-          </span>
-        ))}
-      </ToolOutputViewport>
-    </div>
+    <ToolOutputViewport bounded className="thread-tool-preview-body is-edit">
+      {review.diff.split('\n').map((line, index, lines) => (
+        <span key={`diff-${index}`} className={diffLineClass(line)}>
+          {line}
+          {index < lines.length - 1 ? '\n' : ''}
+        </span>
+      ))}
+    </ToolOutputViewport>
   )
 }
 

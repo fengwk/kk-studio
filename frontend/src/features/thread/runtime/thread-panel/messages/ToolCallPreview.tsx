@@ -35,9 +35,8 @@ export function ToolCallPreview({
 }) {
   const bounded = variant === 'approval'
   const showTarget = variant === 'approval'
-  const target = showTarget && preview?.path
-    ? <PreviewTarget path={preview.path} workdir={preview.kind === 'write' ? preview.workdir : undefined} />
-    : null
+  // 路径行只有 path；workdir 属于正文目标，仅 write 正文分支附带。
+  const target = showTarget && preview?.path ? <PreviewTarget path={preview.path} /> : null
 
   if (!preview) {
     if (variant !== 'approval' || !argumentsJson) return null
@@ -58,7 +57,9 @@ export function ToolCallPreview({
     }
     return (
       <div className="thread-tool-call-body">
-        {target}
+        {showTarget && preview.path ? (
+          <PreviewTarget path={preview.path} workdir={preview.workdir} />
+        ) : null}
         <WriteContentSection preview={preview} streaming={streaming} bounded={bounded} />
       </div>
     )
