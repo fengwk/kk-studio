@@ -80,19 +80,24 @@ public class StorageObjectCleanupService {
     }
     List<String> claimed = cleanupRepository.claimDue(MAX_CLEANUP_BATCH, cleanupIntervalMillis);
     for (String objectKey : claimed) {
-      try {
-        s3StorageService.deleteObjectIfExists(objectKey);
-      } catch (RuntimeException error) {
-        // 认领已经把 next_attempt_at 推出，这里再改到短重试；即使该更新失败，记录仍在下一个长周期后被重试。
-        log.warn("storage object cleanup failed for key {}", objectKey);
-        try {
-          cleanupRepository.reschedule(objectKey, retryDelayMillis);
-        } catch (RuntimeException rescheduleError) {
-          log.warn("storage object cleanup reschedule failed for key {}", objectKey);
-        }
-      }
+      deleteAndReschedule(objectKey);
     }
     return claimed.size();
+  }
+
+  /** 删除单个已认领的对象；失败时把记录改到短重试截止点，重试写入失败也不再上抛。 */
+  private void deleteAndReschedule(String objectKey) {
+    try {
+      s3StorageService.deleteObjectIfExists(objectKey);
+    } catch (RuntimeException error) {
+      // 认领已经把 next_attempt_at 推出，这里再改到短重试；即使该更新失败，记录仍在下一个长周期后被重试。
+      log.warn("storage object cleanup failed for key {}", objectKey);
+      try {
+        cleanupRepository.reschedule(objectKey, retryDelayMillis);
+      } catch (RuntimeException rescheduleError) {
+        log.warn("storage object cleanup reschedule failed for key {}", objectKey);
+      }
+    }
   }
 
   /** 把配置时长换算成 SQL 安全参数：必须为正、至少 1 毫秒且 {@link Duration#toMillis()} 不溢出， 否则直接拒绝配置而不是让错误值进入数据库。 */
