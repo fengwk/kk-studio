@@ -65,7 +65,7 @@ final class DaemonConnectionSession implements DaemonSession {
   private boolean closeAfterFlush;
   private String daemonVersion;
   private DaemonOperatingSystem daemonOperatingSystem;
-  private DaemonRuntimeSnapshot runtimeStatus;
+  private final DaemonRuntimeStatusMerger runtimeStatus = new DaemonRuntimeStatusMerger();
   private long temporaryResourceTtlSeconds;
   private long temporaryResourceCleanupIntervalSeconds;
   private long lastSentVersion = -1L;
@@ -139,7 +139,7 @@ final class DaemonConnectionSession implements DaemonSession {
 
   Optional<DaemonRuntimeSnapshot> runtimeStatus() {
     synchronized (stateLock) {
-      return Optional.ofNullable(runtimeStatus);
+      return Optional.ofNullable(runtimeStatus.current());
     }
   }
 
@@ -431,7 +431,7 @@ final class DaemonConnectionSession implements DaemonSession {
       this.ready = true;
       this.daemonVersion = readyMessage.getDaemonVersion();
       this.daemonOperatingSystem = hostInfo.operatingSystem();
-      mergeRuntimeStatusLocked(readySnapshot, daemonVersion);
+      runtimeStatus.merge(readySnapshot, daemonVersion);
     }
     if (latestConfig != null) {
       reconcileEnvironmentConfig(latestConfig.get());
@@ -683,45 +683,8 @@ final class DaemonConnectionSession implements DaemonSession {
       if (cleaned) {
         throw new ControlProtocolException("runtimeStatus arrived after connection closed");
       }
-      return mergeRuntimeStatusLocked(snapshot, ready ? daemonVersion : null);
+      return runtimeStatus.merge(snapshot, ready ? daemonVersion : null);
     }
-  }
-
-  /**
-   * 同一连接内按 revision 单调合并运行快照；READY 后的 daemonVersion 必须与握手绑定的版本一致。
-   *
-   * @return 状态内容实际变化时返回 true
-   */
-  private boolean mergeRuntimeStatusLocked(
-      DaemonRuntimeSnapshot snapshot, String expectedDaemonVersion) {
-    if (expectedDaemonVersion != null
-        && !snapshot.status().daemonVersion().equals(expectedDaemonVersion)) {
-      throw new ControlProtocolException(
-          "runtimeStatus.daemonVersion does not match the READY daemonVersion");
-    }
-    DaemonRuntimeSnapshot current = this.runtimeStatus;
-    if (current != null
-        && !snapshot.status().daemonVersion().equals(current.status().daemonVersion())) {
-      throw new ControlProtocolException(
-          "runtimeStatus.daemonVersion changed within one connection");
-    }
-    if (current == null) {
-      this.runtimeStatus = snapshot;
-      return true;
-    }
-    if (snapshot.revision() < current.revision()) {
-      return false;
-    }
-    if (snapshot.revision() == current.revision()) {
-      if (!snapshot.equals(current)) {
-        throw new ControlProtocolException(
-            "runtimeStatus revision " + snapshot.revision() + " changed without advancing");
-      }
-      return false;
-    }
-    boolean changed = !snapshot.status().equals(current.status());
-    this.runtimeStatus = snapshot;
-    return changed;
   }
 
   private void publishRuntimeStatusChanged() {
