@@ -9,8 +9,6 @@ import type {
   EnvironmentIdeChangeDirectoryDTO,
   EnvironmentIdeCloseViewDTO,
   EnvironmentIdeViewBindingDTO,
-  EnvironmentIdeViewDTO,
-  EnvironmentIdeViewSnapshotDTO,
 } from '@/shared/api/generated/contracts'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
@@ -37,12 +35,11 @@ import {
   isIdeProtocolError,
   validateCommandView,
   validateOpenResponse,
-  validateViewSnapshot,
-  viewFingerprint,
 } from '@/features/environment/ide/ide-contract'
 import { compareDecimal } from '@/features/environment/ide/ide-decimal'
 import { useIdeViewStore } from '@/features/environment/ide/useIdeViewStore'
 import { useIdeOperationQueue } from '@/features/environment/ide/useIdeOperationQueue'
+import { useIdeSnapshotCache } from '@/features/environment/ide/useIdeSnapshotCache'
 import {
   buildUsageViews,
   isBoundToConnection,
@@ -66,11 +63,6 @@ export interface UseIdeClaimReconciliationOptions {
   getPresentation: () => IdePresentation
   getEnvironmentMap: () => Map<string, IdeEnvironmentInfo>
   onStorageStatusChange: (unavailable: boolean) => void
-}
-
-interface SnapshotCacheEntry {
-  revision: string
-  fingerprint: string
 }
 
 interface ReconcileOptions {
@@ -108,7 +100,6 @@ export function useIdeClaimReconciliation({
   const lastActiveEnvironmentRef = useRef(activeEnvironmentId)
   const lastIdentityRef = useRef<string | null>(null)
   const lastEnvironmentReadyRef = useRef(new Map<string, boolean>())
-  const snapshotCacheRef = useRef(new Map<string, SnapshotCacheEntry>())
   const pendingShellEnvironmentsRef = useRef(new Set<string>())
   const actionsRef = useRef<{
     reconcileAll: () => void
@@ -119,6 +110,7 @@ export function useIdeClaimReconciliation({
   const { views, viewsRef, commitViews, updateView, startAttempt, clearViews } =
     useIdeViewStore(mountedRef, initial)
   const { runExclusive, invalidateOperations } = useIdeOperationQueue(identityRef, mountedRef)
+  const { acceptSnapshot, forgetView, clearSnapshots } = useIdeSnapshotCache(sessionRef)
 
   identityRef.current = identity
   sessionRef.current = session
@@ -606,39 +598,6 @@ export function useIdeClaimReconciliation({
     runExclusive(() => runCreate(environmentId, attempt, viewId, claimId, directory))
   }
 
-  function acceptSnapshot(
-    environmentId: string,
-    viewId: string,
-    snapshot: EnvironmentIdeViewSnapshotDTO,
-  ): { accepted: boolean; daemonInstanceId: string; view: EnvironmentIdeViewDTO | null } {
-    const validated = validateViewSnapshot(
-      environmentId,
-      viewId,
-      sessionRef.current.browserSessionId,
-      snapshot,
-    )
-    const cacheKey = `${validated.daemonInstanceId}:${viewId}`
-    const cached = snapshotCacheRef.current.get(cacheKey)
-    if (cached != null) {
-      const compare = compareDecimal(validated.revision, cached.revision)
-      if (compare < 0) {
-        return {
-          accepted: false,
-          daemonInstanceId: validated.daemonInstanceId,
-          view: null,
-        }
-      }
-      if (compare === 0 && cached.fingerprint !== viewFingerprint(validated.view)) {
-        throw new IdeProtocolError('Invalid IDE view snapshot: conflicting revision')
-      }
-    }
-    snapshotCacheRef.current.set(cacheKey, {
-      revision: validated.revision,
-      fingerprint: viewFingerprint(validated.view),
-    })
-    return { accepted: true, daemonInstanceId: validated.daemonInstanceId, view: validated.view }
-  }
-
   async function runReconcile(
     environmentId: string,
     attempt: number,
@@ -1074,7 +1033,7 @@ export function useIdeClaimReconciliation({
       }
       const next = { ...viewsRef.current }
       delete next[environmentId]
-      snapshotCacheRef.current.delete(`${view.daemonInstanceId}:${view.viewId}`)
+      forgetView(view.daemonInstanceId, view.viewId)
       commitViews(next)
       writeSession()
       registerUsageQuiet()
@@ -1292,7 +1251,7 @@ export function useIdeClaimReconciliation({
     clearViews()
     revisionRef.current = 0n
     lastIdentityRef.current = null
-    snapshotCacheRef.current.clear()
+    clearSnapshots()
     invalidateOperations()
     pageSuspendedRef.current = false
   }
