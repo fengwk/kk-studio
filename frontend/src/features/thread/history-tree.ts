@@ -65,12 +65,8 @@ function childrenIndex(entries: HarnessSessionEntryDTO[]): Map<string | null, Ha
   return childrenByParent
 }
 
-/** lane 分配：已占用的列就地复用，否则第一个空闲列，最后追加新列。 */
-function laneOf(active: Array<string | null>, entryId: string): number {
-  const existing = active.indexOf(entryId)
-  if (existing >= 0) {
-    return existing
-  }
+/** 为待绘制的 sibling 占用第一个空闲列，没有空列则追加。 */
+function allocateLane(active: Array<string | null>, entryId: string): number {
   const free = active.indexOf(null)
   if (free >= 0) {
     active[free] = entryId
@@ -78,6 +74,12 @@ function laneOf(active: Array<string | null>, entryId: string): number {
   }
   active.push(entryId)
   return active.length - 1
+}
+
+/** 当前 Entry 已有待绘制列时复用它，否则分配新列。 */
+function laneOf(active: Array<string | null>, entryId: string): number {
+  const existing = active.indexOf(entryId)
+  return existing >= 0 ? existing : allocateLane(active, entryId)
 }
 
 /**
@@ -112,7 +114,7 @@ export function buildHistoryTree(
     if (children.length > 0) {
       active[lane] = children[0]!.entryId
       for (let index = 1; index < children.length; index += 1) {
-        laneOf(active, children[index]!.entryId)
+        allocateLane(active, children[index]!.entryId)
       }
     }
     const parentId = entry.parentEntryId
