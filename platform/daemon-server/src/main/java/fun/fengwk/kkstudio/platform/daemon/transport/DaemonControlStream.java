@@ -10,9 +10,7 @@ import org.eclipse.jetty.util.thread.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import fun.fengwk.kkstudio.platform.daemon.protocol.ControlFraming;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
-import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Error;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
@@ -55,9 +53,7 @@ public class DaemonControlStream implements DaemonControlChannel {
   private final Object lock = new Object();
 
   private final Queue<QueuedFrame> outboundQueue = new ArrayDeque<>();
-  private final ByteBuffer lengthBuffer = ByteBuffer.allocate(Integer.BYTES);
-  private byte[] bodyBuffer;
-  private int bodyFilled;
+  private final ControlFrameDecoder decoder = new ControlFrameDecoder();
 
   private DaemonSession daemonSession;
   private int pendingFrames;
@@ -273,12 +269,22 @@ public class DaemonControlStream implements DaemonControlChannel {
     notifyClosed();
   }
 
+  /** 把协议违规以 ERROR 信封回给对端，说明只包含固定的判定结果。 */
+  private Envelope protocolError(String message) {
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.ERROR)
+        .setEnvironmentId(identity.environmentId().value().toString())
+        .setError(Error.newBuilder().setMessage(message).build())
+        .build();
+  }
+
   public Stream.Listener listener() {
     return new Stream.Listener() {
       @Override
       public void onDataAvailable(Stream source) {
         List<Envelope> readyEnvelopes = new ArrayList<>();
-        String errorMsg = null;
+        ControlFrameDecoder.ProtocolViolation violation =
+            new ControlFrameDecoder.ProtocolViolation();
         boolean peerEnded = false;
 
         while (true) {
@@ -286,57 +292,19 @@ public class DaemonControlStream implements DaemonControlChannel {
           if (data == null) {
             break;
           }
-          ByteBuffer buffer = data.frame().getByteBuffer();
+          readyEnvelopes.addAll(decoder.accept(data.frame().getByteBuffer(), violation));
           boolean endStream = data.frame().isEndStream();
-
-          synchronized (lock) {
-            while (buffer.hasRemaining() && errorMsg == null) {
-              if (bodyBuffer == null) {
-                BufferUtil.put(buffer, lengthBuffer);
-                if (!lengthBuffer.hasRemaining()) {
-                  lengthBuffer.flip();
-                  int length = lengthBuffer.getInt();
-                  lengthBuffer.clear();
-                  if (length < 1 || length > ControlFraming.MAX_MESSAGE_BYTES) {
-                    errorMsg = "invalid inbound frame length: " + length;
-                    break;
-                  }
-                  bodyBuffer = new byte[length];
-                  bodyFilled = 0;
-                }
-              } else {
-                int needed = bodyBuffer.length - bodyFilled;
-                int toTake = Math.min(needed, buffer.remaining());
-                buffer.get(bodyBuffer, bodyFilled, toTake);
-                bodyFilled += toTake;
-                if (bodyFilled == bodyBuffer.length) {
-                  try {
-                    Envelope envelope = ControlProtocolCodec.decodeBinary(bodyBuffer);
-                    readyEnvelopes.add(envelope);
-                  } catch (ControlProtocolException ex) {
-                    errorMsg = "failed to decode control envelope: " + ex.getMessage();
-                    break;
-                  } finally {
-                    bodyBuffer = null;
-                    bodyFilled = 0;
-                    lengthBuffer.clear();
-                  }
-                }
-              }
-            }
-          }
-
           data.release();
           if (endStream) {
             peerEnded = true;
             break;
           }
-          if (errorMsg != null) {
+          if (violation.message() != null) {
             break;
           }
         }
 
-        // 锁外按到达顺序分发给 DaemonSession.receive（绑定前不 demand，因此会话已就绪）
+        // 按到达顺序分发给 DaemonSession.receive（绑定前不 demand，因此会话已就绪）
         DaemonSession currentSession;
         synchronized (lock) {
           currentSession = daemonSession;
@@ -345,15 +313,10 @@ public class DaemonControlStream implements DaemonControlChannel {
           currentSession.receive(envelope);
         }
 
+        String errorMsg = violation.message();
         if (errorMsg != null) {
           log.warn("Control stream protocol violation: {}", errorMsg);
-          Envelope errEnvelope =
-              Envelope.newBuilder()
-                  .setMessageType(MessageType.ERROR)
-                  .setEnvironmentId(identity.environmentId().value().toString())
-                  .setError(Error.newBuilder().setMessage(errorMsg).build())
-                  .build();
-          offer(errEnvelope);
+          offer(protocolError(errorMsg));
           closeAfterFlush();
           return;
         }
