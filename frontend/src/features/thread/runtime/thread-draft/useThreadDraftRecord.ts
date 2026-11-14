@@ -6,10 +6,10 @@ import {
   loadThreadDraft,
   restoreThreadDraftParts,
   saveThreadDraftParts,
-  type DraftSaveOutcome,
   type ThreadDraftRecord,
 } from '@/features/thread/runtime/thread-draft-store'
 import { hasMessageContent, partsKey, type ComposerPart } from '@/features/thread/composer/composer-parts'
+import { persistDraftField } from '@/features/thread/runtime/thread-draft/draft-write-barrier'
 import { translate, useI18n } from '@/shared/i18n'
 import type { HarnessStoppedThreadReceiptDTO } from '@/shared/api/generated/contracts'
 
@@ -121,43 +121,16 @@ export function useThreadDraftRecord({
     return partsWriteRef.current.dirty
   }
 
-  /**
-   * 整份字段写入的公共收尾：完成回调先过 originThreadId + epoch 栅栏与字段内 token 栅栏（旧 completion 绝不把新编辑标成已保存），再决定收尾。
-   */
-  function persistDraftField(
-    field: { token: number; dirty: boolean },
-    save: () => Promise<DraftSaveOutcome>,
-  ): void {
-    const originThreadId = threadId
-    const originEpoch = bindingEpochRef.current
-    const token = field.token + 1
-    field.token = token
-    // 该字段最新一次写入的完成才代表编辑区内容已落盘；同链 FIFO 保证在途写入先于任何后续合并落盘。
-    void save()
-      .then((outcome) => {
-        if (!isStillBound(originThreadId, originEpoch) || field.token !== token) {
-          return
-        }
-        if (outcome.status === 'STALE') {
-          // 被拒：编辑区内容确定不在记录里，标记未落盘。
-          field.dirty = true
-          handleDraftWriteConflict()
-          return
-        }
-        field.dirty = false
-      })
-      .catch(() => {
-        if (!isStillBound(originThreadId, originEpoch) || field.token !== token) {
-          return
-        }
-        field.dirty = true
-        setActionError(t('ai.runtime.action.draftSaveFailed'))
-      })
-  }
-
   function persistParts(parts: ComposerPart[]): void {
-    persistDraftField(partsWriteRef.current, () =>
-      saveThreadDraftParts(threadId, parts, observedStopRequestIdsRef.current))
+    persistDraftField({
+      field: partsWriteRef.current,
+      save: () => saveThreadDraftParts(threadId, parts, observedStopRequestIdsRef.current),
+      originThreadId: threadId,
+      originEpoch: bindingEpochRef.current,
+      isStillBound,
+      onStale: handleDraftWriteConflict,
+      onFailure: () => setActionError(t('ai.runtime.action.draftSaveFailed')),
+    })
   }
 
   /**
