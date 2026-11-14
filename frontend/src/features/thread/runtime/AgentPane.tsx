@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { paneTargetViewKey, type ThreadPresentation } from './thread-presentation'
 import { ThreadPresentationActions } from './ThreadPresentationActions'
 import { Button } from '@/shared/ui/controls/Button'
@@ -17,6 +17,7 @@ import {
 import { usePaneTarget } from '@/features/thread/runtime/usePaneTarget'
 import { useThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import { usePaneLayoutMode } from '@/features/thread/runtime/usePaneLayoutMode'
+import { usePanePresentation } from '@/features/thread/runtime/usePanePresentation'
 import { isBoundTarget, samePaneTarget } from '@/features/thread/runtime/agent-pane'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { useOptionalIdePanel, type IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
@@ -173,25 +174,10 @@ export function AgentPane({
   const topLayerIndex = navigation.layers.length - 1
   const expectedViewKey = navigation.activeThreadId
     ? `thread:${navigation.activeThreadId}` : paneTargetViewKey(target)
-  const expectedKeyRef = useRef(expectedViewKey)
-  useLayoutEffect(() => { expectedKeyRef.current = expectedViewKey })
-  const [presentation, setPresentation] = useState<ThreadPresentation | null>(null)
-  const acceptPresentation = useCallback((report: ThreadPresentation) => {
-    if (report.viewKey === expectedKeyRef.current) {
-      setPresentation(report)
-    }
-  }, [])
-  const visiblePresentation = presentation?.viewKey === expectedViewKey ? presentation : null
-  useLayoutEffect(() => {
-    if (onPresentation == null && visiblePresentation?.mode === 'conversation') {
-      visiblePresentation.act(visiblePresentation.viewKey, 'restore-focus')
-    }
-  }, [onPresentation, visiblePresentation])
-  const presentationCallback = useRef(onPresentation)
-  useLayoutEffect(() => { presentationCallback.current = onPresentation })
-  useEffect(() => {
-    presentationCallback.current?.(visiblePresentation)
-  }, [visiblePresentation])
+  const { visiblePresentation, acceptPresentation } = usePanePresentation({
+    expectedViewKey,
+    onPresentation,
+  })
   const openParent = isRoot === true ? navigation.openThread : undefined
 
   // IDE 命令只由根控制面提供；子代理查看层没有命令入口，隐藏的根控制面也不接收动作。
