@@ -64,6 +64,17 @@ type editSource struct {
 	lines     *lineIndex
 }
 
+// editTarget is the locked, reviewed state of one file before any edit is applied.
+type editTarget struct {
+	path         string
+	info         os.FileInfo
+	original     []byte
+	hash         string
+	decoded      []byte
+	existing     textcodec.Encoding
+	unlockTarget func()
+}
+
 func editFile(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext, preview bool) (runtime.CapabilityResult, error) {
 	args, err := decodeEditArguments(call.Arguments)
 	if err != nil {
@@ -75,40 +86,23 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	if err = ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	path, err := filepath.EvalSymlinks(args.Path)
+	target, err := openEditTarget(args.Path, call.ExpectedFile)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	unlock := lockPath(path)
-	defer unlock()
-	info, err := editableFileInfo(path)
+	defer target.unlockTarget()
+	updated, source, replacements, err := applyPlannedEdits(target.path, string(target.decoded), args.Edits)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	original, err := os.ReadFile(path)
+	encoded, err := encodeEditContent(target.path, target.existing, updated)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	hash := sha256Hex(original)
-	if call.ExpectedFile != nil && (call.ExpectedFile.Path != path || call.ExpectedFile.SHA256 != hash) {
-		return errorResult(call.InvocationID, rejectInput(staleWriteReviewMessage)), nil
-	}
-	decoded, existing, decodeErr := textcodec.Decode(path, original)
-	if decodeErr != nil {
-		return errorResult(call.InvocationID, codecError(path, decodeErr, codecEdit)), nil
-	}
-	updated, source, replacements, err := applyPlannedEdits(path, string(decoded), args.Edits)
-	if err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	encoded, err := encodeEditContent(path, existing, updated)
-	if err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	if bytes.Equal(encoded, original) {
+	if bytes.Equal(encoded, target.original) {
 		return errorResult(call.InvocationID, rejectInput("No changes to apply: the edits would not change the file")), nil
 	}
-	review, completed, err := editReview(call.InvocationID, path, hash, source.text, updated, len(replacements))
+	review, completed, err := editReview(call.InvocationID, target.path, target.hash, source.text, updated, len(replacements))
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
@@ -118,15 +112,47 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	if preview {
 		return runtime.CapabilityResult{CallID: call.InvocationID, Details: []byte(`{}`), Contents: []runtime.ResultContent{{Type: "json", JSON: mustJSON(review)}}}, nil
 	}
-	if err = atomicWrite(path, encoded, info.Mode().Perm()); err != nil {
+	if err = atomicWrite(target.path, encoded, target.info.Mode().Perm()); err != nil {
 		code, message := classifyFileSystemError(err)
 		return errorResult(call.InvocationID, failRun(message, code)), nil
 	}
 	if capability.FileChanged != nil {
-		capability.FileChanged(path)
+		capability.FileChanged(target.path)
 	}
 	completed.Details = mustJSON(map[string]any{"editReview": review})
 	return completed, nil
+}
+
+// openEditTarget locks and reads the edit target and refuses a file that changed since the review it
+// was planned against. The lock is released before returning an error, so a partial read can not
+// keep it.
+func openEditTarget(rawPath string, expected *runtime.ExpectedFile) (*editTarget, error) {
+	path, err := filepath.EvalSymlinks(rawPath)
+	if err != nil {
+		return nil, err
+	}
+	unlock := lockPath(path)
+	info, err := editableFileInfo(path)
+	if err != nil {
+		unlock()
+		return nil, err
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		unlock()
+		return nil, err
+	}
+	hash := sha256Hex(original)
+	if expected != nil && (expected.Path != path || expected.SHA256 != hash) {
+		unlock()
+		return nil, rejectInput(staleWriteReviewMessage)
+	}
+	decoded, existing, err := textcodec.Decode(path, original)
+	if err != nil {
+		unlock()
+		return nil, codecError(path, err, codecEdit)
+	}
+	return &editTarget{path: path, info: info, original: original, hash: hash, decoded: decoded, existing: existing, unlockTarget: unlock}, nil
 }
 
 // editableFileInfo stats the edit target and refuses anything but a regular file.

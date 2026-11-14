@@ -42,59 +42,75 @@ type TextWindow struct {
 // ReadTextWindowReader decodes and scans only the requested window plus the small
 // lookahead needed to distinguish truncation from EOF.
 func ReadTextWindowReader(source io.Reader, options WindowOptions) (TextWindow, error) {
-	if options.Offset < 1 || options.Offset > 2147483647 {
-		return TextWindow{}, errors.New("offset must be a positive integer")
-	}
-	if options.Limit == 0 {
-		options.Limit = DefaultReadLimit
-	}
-	if options.Limit < 1 || options.Limit > MaxReadLimit {
-		return TextWindow{}, errors.New("limit must be a positive integer no greater than 2000")
-	}
-	if options.ColumnOffset < 0 {
-		return TextWindow{}, errors.New("column_offset must be a positive integer")
-	}
-	if options.ColumnOffset == 0 {
-		options.ColumnOffset = 1
+	options, err := normalizeWindowOptions(options)
+	if err != nil {
+		return TextWindow{}, err
 	}
 	reader, err := textcodec.NewReader(options.Path, source)
 	if err != nil {
 		return TextWindow{}, codecError(options.Path, err, codecRead)
 	}
-	scanner := textWindowScanner{options: options, line: 1, endLine: options.Offset + options.Limit - 1}
-	finish := func(eof bool) (TextWindow, error) {
-		window, finishErr := scanner.finish(eof)
-		if finishErr != nil {
-			return TextWindow{}, finishErr
-		}
-		window.Encoding = reader.Encoding().Name
-		return window, nil
+	scanner := &textWindowScanner{options: options, line: 1, endLine: options.Offset + options.Limit - 1}
+	complete, err := scanTextWindow(reader, scanner)
+	if err != nil {
+		return TextWindow{}, err
 	}
+	window, err := scanner.finish(complete)
+	if err != nil {
+		return TextWindow{}, err
+	}
+	window.Encoding = reader.Encoding().Name
+	return window, nil
+}
+
+// normalizeWindowOptions applies the defaults and rejects a window that is out of range.
+func normalizeWindowOptions(options WindowOptions) (WindowOptions, error) {
+	if options.Offset < 1 || options.Offset > 2147483647 {
+		return WindowOptions{}, errors.New("offset must be a positive integer")
+	}
+	if options.Limit == 0 {
+		options.Limit = DefaultReadLimit
+	}
+	if options.Limit < 1 || options.Limit > MaxReadLimit {
+		return WindowOptions{}, errors.New("limit must be a positive integer no greater than 2000")
+	}
+	if options.ColumnOffset < 0 {
+		return WindowOptions{}, errors.New("column_offset must be a positive integer")
+	}
+	if options.ColumnOffset == 0 {
+		options.ColumnOffset = 1
+	}
+	return options, nil
+}
+
+// scanTextWindow feeds runes to the scanner and reports whether the whole document was read, so
+// the caller knows whether absent trailing metadata means EOF or a bounded stop.
+func scanTextWindow(reader *textcodec.Reader, scanner *textWindowScanner) (bool, error) {
 	for {
 		value, _, readErr := reader.ReadRune()
 		if readErr != nil {
 			if !errors.Is(readErr, io.EOF) {
 				if scanner.line > scanner.endLine {
 					scanner.stopAtLineLimit()
-					return finish(false)
+					return false, nil
 				}
 				if scanner.captured == MaxReadCodePoints {
 					scanner.stopAtCharacterLimit()
-					return finish(false)
+					return false, nil
 				}
 				if !isCodecFailure(readErr) {
-					return TextWindow{}, readErr
+					return false, readErr
 				}
-				return TextWindow{}, codecError(options.Path, readErr, codecRead)
+				return false, codecError(scanner.options.Path, readErr, codecRead)
 			}
-			return finish(true)
+			return true, nil
 		}
 		stop, scanErr := scanner.push(value)
 		if scanErr != nil {
-			return TextWindow{}, scanErr
+			return false, scanErr
 		}
 		if stop {
-			return finish(false)
+			return false, nil
 		}
 	}
 }
