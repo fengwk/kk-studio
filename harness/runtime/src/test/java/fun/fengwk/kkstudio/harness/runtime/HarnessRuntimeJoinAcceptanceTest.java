@@ -947,6 +947,36 @@ class HarnessRuntimeJoinAcceptanceTest {
   }
 
   @Test
+  void spawnChildThreadIdReusedUnderAnotherParentIsConflict() {
+    // 测试意图：child threadId 已属于另一个执行父时，树锁内直接以 THREAD_ID_REUSED 拒绝，绝不复用既有行。
+    AcceptedCommands rootA =
+        runtime.acceptCommands(session(2300, 2301, null), AcceptancePreflight.IDENTITY);
+    AcceptedCommands rootB =
+        runtime.acceptCommands(session(2310, 2311, null), AcceptancePreflight.IDENTITY);
+    UUID parentA = rootA.thread().id();
+    UUID parentB = rootB.thread().id();
+    Ticket a1 =
+        Ticket.task(
+            TestIds.id(2302), parentA, rootA.thread().headEntryId(), HASH, "assistant", 3, 3, 5, 5);
+    Child childA = child(2303, 2304, parentA);
+    acceptAndJoin(runtime, childA, a1, AcceptancePreflight.IDENTITY);
+
+    Ticket b1 =
+        Ticket.task(
+            TestIds.id(2312), parentB, rootB.thread().headEntryId(), HASH, "assistant", 3, 3, 5, 5);
+    DomainException conflict =
+        assertThrows(
+            DomainException.class,
+            () -> acceptAndJoin(runtime, childA, b1, AcceptancePreflight.IDENTITY));
+
+    assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+    assertEquals(HarnessConflictReason.THREAD_ID_REUSED.name(), conflict.reason());
+    assertEquals(
+        parentA,
+        store.transaction(tx -> tx.threads().find(childA.thread()).orElseThrow().parentThreadId()));
+  }
+
+  @Test
   void spawnContinuationOfMissingThreadIsNotFound() {
     // 续接目标不存在时不能注册票据或伪造已接受的子 Thread。
     UUID missingThread = TestIds.id(4900);
