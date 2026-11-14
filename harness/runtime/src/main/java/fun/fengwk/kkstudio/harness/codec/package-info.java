@@ -11,6 +11,10 @@
  * fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec} 定义 {@link
  * fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent} 的 live overlay 形态。
  *
+ * <p>{@link fun.fengwk.kkstudio.harness.codec.AgentMessageContentJsonCodec} 承载单个 content 的
+ * discriminator 分派、raw JSON 严格校验与 Provider block 投影，{@link
+ * fun.fengwk.kkstudio.harness.codec.AgentMessageJsonCodec} 只负责 message 信封与 string API。
+ *
  * <p>Entry payload 的 durable 形态由 {@link
  * fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec} 按 {@link
  * fun.fengwk.kkstudio.harness.api.history.EntryType} 分派，其 settings / model / assistant metadata
