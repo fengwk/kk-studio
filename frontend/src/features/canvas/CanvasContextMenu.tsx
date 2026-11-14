@@ -29,7 +29,6 @@ import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
 
-export type { CanvasContextMenuState, ContextMenuTarget } from '@/features/canvas/canvas-stage-model'
 
 const MENU_MARGIN = 8
 

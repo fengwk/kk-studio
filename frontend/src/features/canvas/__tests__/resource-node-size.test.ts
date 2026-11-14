@@ -1,14 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import {
-  CANVAS_MULTI_RESOURCE_TILE_HEIGHT,
-  CANVAS_MULTI_RESOURCE_TILE_WIDTH,
-  CANVAS_NODE_HEADER_GAP,
-  CANVAS_NODE_HEADER_HEIGHT,
-  CANVAS_RESOURCE_GRID_GAP,
-  resourceNodeSize,
-} from '@/features/canvas/resource-node-size'
+import { resourceNodeSize } from '@/features/canvas/resource-node-size'
 
 const fallback = { width: 320, height: 260 }
+const HEADER = 20 + 6
+const TILE = { width: 220, height: 160, gap: 4 }
 
 describe('resourceNodeSize', () => {
   it('lets a single media renderer declare its source-ratio size', () => {
@@ -49,25 +44,15 @@ describe('resourceNodeSize', () => {
       transform: fallback,
       resources: Array.from({ length: 5 }, () => ({ kind: 'IMAGE' })),
     })).toEqual({
-      width: CANVAS_MULTI_RESOURCE_TILE_WIDTH * 3 + CANVAS_RESOURCE_GRID_GAP * 2,
-      height: (
-        CANVAS_NODE_HEADER_HEIGHT
-        + CANVAS_NODE_HEADER_GAP
-        + CANVAS_MULTI_RESOURCE_TILE_HEIGHT * 2
-        + CANVAS_RESOURCE_GRID_GAP
-      ),
+      width: TILE.width * 3 + TILE.gap * 2,
+      height: HEADER + TILE.height * 2 + TILE.gap,
     })
     expect(resourceNodeSize({
       transform: fallback,
       resources: Array.from({ length: 10 }, () => ({ kind: 'VIDEO' })),
     })).toEqual({
-      width: CANVAS_MULTI_RESOURCE_TILE_WIDTH * 4 + CANVAS_RESOURCE_GRID_GAP * 3,
-      height: (
-        CANVAS_NODE_HEADER_HEIGHT
-        + CANVAS_NODE_HEADER_GAP
-        + CANVAS_MULTI_RESOURCE_TILE_HEIGHT * 3
-        + CANVAS_RESOURCE_GRID_GAP * 2
-      ),
+      width: TILE.width * 4 + TILE.gap * 3,
+      height: HEADER + TILE.height * 3 + TILE.gap * 2,
     })
   })
 })

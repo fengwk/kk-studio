@@ -36,7 +36,7 @@ function isValidCanvasFunctionVersion(value: unknown): value is CanvasFunctionVe
 }
 
 /** 存储读取失败（localStorage 不可用 / getItem 抛错）：原始字节必须保留，绝不删除。 */
-export class PendingRunStorageError extends Error {
+class PendingRunStorageError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
     this.name = 'PendingRunStorageError'
@@ -49,7 +49,7 @@ export class PendingRunStorageError extends Error {
  * raw 是本次 load 实际读到的原始字符串：丢弃必须按同一份 raw 确认（复用
  * discardPendingFunctionRun），绝不按 key 盲目删除——记录可能已被其它标签页替换。
  */
-export class PendingRunCorruptError extends Error {
+class PendingRunCorruptError extends Error {
   readonly raw: string
 
   constructor(message: string, raw: string, options?: ErrorOptions) {

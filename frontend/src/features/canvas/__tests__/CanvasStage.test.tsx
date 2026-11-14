@@ -6,7 +6,6 @@ import { CanvasStage } from '@/features/canvas/CanvasStage'
 import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { CanvasSnapshot } from '@/features/canvas/domain'
-import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
 import { setLocale } from '@/shared/i18n'
 import type { CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
@@ -545,7 +544,7 @@ describe('CanvasStage conditional rendering and viewport', () => {
 
   it('restores the persisted viewport through setFlowViewport and skips the initial fit', async () => {
     localStorage.setItem(
-      canvasViewportStorageKey(CANVAS_ID),
+      `kk-studio.canvas.viewport:${CANVAS_ID}`,
       JSON.stringify({ x: 30, y: -20, zoom: 0.7 }),
     )
     const { flow } = renderStage({

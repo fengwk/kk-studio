@@ -32,7 +32,7 @@ const STORE_NAME = 'operations'
 const SESSION_INDEX = 'sessionKey'
 
 /** ACK 时需要精准清除的草稿范围：仅当草稿 generation 与冻结时一致才清除。 */
-export type CanvasDraftAckField = 'position' | 'text' | 'function' | 'group'
+type CanvasDraftAckField = 'position' | 'text' | 'function' | 'group'
 
 export interface CanvasDraftAck {
   nodeId: string

@@ -53,21 +53,6 @@ export interface CanvasNodeDraft {
 }
 
 /**
- * 判断指定草稿是否包含实质未保存内容。
- */
-export function hasDraftContent(draft?: CanvasNodeDraft | null): boolean {
-  if (!draft) {
-    return false
-  }
-  return Boolean(
-    draft.position ||
-    draft.text ||
-    draft.function !== undefined ||
-    draft.groupId !== undefined,
-  )
-}
-
-/**
  * 将单个节点的本地未提交草稿叠加到权威节点之上，用于视图展示与当前投影。
  */
 export function overlayNodeWithDraft(node: ResourceNode, draft?: CanvasNodeDraft | null): ResourceNode {

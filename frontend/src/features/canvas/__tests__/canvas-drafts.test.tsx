@@ -1,13 +1,11 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
-  hasDraftContent,
   isNodeDirty,
   overlayNodeWithDraft,
   removeDraftField,
   type CanvasNodeDraft,
 } from '@/features/canvas/canvas-drafts'
 import {
-  clearCanvasDrafts,
   deleteCanvasDraft,
   loadCanvasDrafts,
   saveCanvasDraft,
@@ -160,7 +158,6 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
       generation: 0,
       updatedAt: Date.now(),
     }
-    expect(hasDraftContent(emptyDraft)).toBe(false)
     expect(isNodeDirty(emptyDraft)).toBe(false)
 
     const dirtyDraft: CanvasNodeDraft = {
@@ -171,7 +168,7 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
         args: { prompt: 'generate' },
       },
     }
-    expect(hasDraftContent(dirtyDraft)).toBe(true)
+    expect(isNodeDirty(dirtyDraft)).toBe(true)
     expect(isNodeDirty(dirtyDraft, 'function')).toBe(true)
     expect(isNodeDirty(dirtyDraft, 'text')).toBe(false)
   })
@@ -189,7 +186,7 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
     expect(loaded[NODE_A]).toBeUndefined()
     expect(loaded[NODE_B]).toBeDefined()
 
-    await clearCanvasDrafts(CANVAS_ID, { idbFactory })
+    await deleteCanvasDraft(CANVAS_ID, NODE_B, { idbFactory })
     loaded = await loadCanvasDrafts(CANVAS_ID, { idbFactory })
     expect(Object.keys(loaded)).toHaveLength(0)
   })
@@ -213,7 +210,7 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
     loaded = await loadCanvasDrafts(CANVAS_ID)
     expect(Object.keys(loaded)).toEqual([NODE_B])
 
-    await clearCanvasDrafts(CANVAS_ID)
+    await deleteCanvasDraft(CANVAS_ID, NODE_B)
     loaded = await loadCanvasDrafts(CANVAS_ID)
     expect(Object.keys(loaded)).toHaveLength(0)
     unsubscribe()
@@ -226,7 +223,6 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
 
     await expect(loadCanvasDrafts(CANVAS_ID, { idbFactory: openFailure })).rejects.toThrow()
     await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: openFailure })).rejects.toThrow()
-    await expect(clearCanvasDrafts(CANVAS_ID, { idbFactory: openFailure })).rejects.toThrow()
     expect(onError).toHaveBeenCalled()
 
     const readFailure = createMockIDBFactory({ shouldFailGetAll: true })
@@ -234,6 +230,10 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
 
     const deleteFailure = createMockIDBFactory({ shouldFailDelete: true })
     await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: deleteFailure })).rejects.toThrow()
+
+    // 会话内多条草稿的读取失败（getAll）同样 reject 并上报。
+    const getAllFailure = createMockIDBFactory({ shouldFailGetAll: true })
+    await expect(loadCanvasDrafts(CANVAS_ID, { idbFactory: getAllFailure })).rejects.toThrow()
 
     const putFailure = createMockIDBFactory({ shouldFailRequest: true })
     await expect(saveCanvasDraft(
@@ -253,21 +253,15 @@ describe('Canvas Drafts & IndexedDB Architecture', () => {
     const txError = createMockIDBFactory({ shouldFailTransaction: true })
     await expect(saveCanvasDraft(CANVAS_ID, NODE_A, draft, { idbFactory: txError })).rejects.toThrow()
     await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: txError })).rejects.toThrow()
-    await expect(clearCanvasDrafts(CANVAS_ID, { idbFactory: txError })).rejects.toThrow()
     // 加载在 request.onsuccess 时已 resolve；随后的 tx.onerror 只负责上报，不应产生未处理拒绝。
     await loadCanvasDrafts(CANVAS_ID, { idbFactory: txError })
 
     const abortFactory = createMockIDBFactory({ shouldAbortTransaction: true })
     await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: abortFactory })).rejects.toThrow()
-    await expect(clearCanvasDrafts(CANVAS_ID, { idbFactory: abortFactory })).rejects.toThrow()
-
-    const getAllFailure = createMockIDBFactory({ shouldFailGetAll: true })
-    await expect(clearCanvasDrafts(CANVAS_ID, { idbFactory: getAllFailure })).rejects.toThrow()
 
     const createFailure = createMockIDBFactory({ shouldFailTransactionCreate: true })
     await expect(saveCanvasDraft(CANVAS_ID, NODE_A, draft, { idbFactory: createFailure })).rejects.toThrow()
     await expect(deleteCanvasDraft(CANVAS_ID, NODE_A, { idbFactory: createFailure })).rejects.toThrow()
-    await expect(clearCanvasDrafts(CANVAS_ID, { idbFactory: createFailure })).rejects.toThrow()
     await expect(loadCanvasDrafts(CANVAS_ID, { idbFactory: createFailure })).rejects.toThrow()
 
     expect(onError).toHaveBeenCalled()

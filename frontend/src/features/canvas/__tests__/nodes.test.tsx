@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import type { CanvasFlowNode } from '@/features/canvas/projection'
-import type { ResourceFlowNodeData } from '@/features/canvas/types'
+import type { CanvasFlowNodeData } from '@/features/canvas/types'
 import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/features/canvas/canvas-api', () => ({
@@ -72,7 +72,7 @@ function resourceNode(overrides: Partial<ResourceNode> = {}): ResourceNode {
 
 function renderResourceNode(node: ResourceNode, callbacks = { editTextNode: vi.fn() }) {
   const Component = canvasNodeTypes.resource
-  const data: ResourceFlowNodeData = {
+  const data: Extract<CanvasFlowNodeData, { kind: 'resource' }> = {
     kind: 'resource',
     node,
     model: node.function ? {

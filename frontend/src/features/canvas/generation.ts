@@ -39,7 +39,7 @@ export function functionSupportsReferences(model: CanvasFunctionDefinitionDTO | 
   return items.type === 'resourceReference'
 }
 
-export function isCanonicalResourceReference(item: unknown): item is CanvasResourceReference {
+function isCanonicalResourceReference(item: unknown): item is CanvasResourceReference {
   if (!item || typeof item !== 'object' || Array.isArray(item)) return false
   const rec = item as Record<string, unknown>
   const keys = Object.keys(rec)
