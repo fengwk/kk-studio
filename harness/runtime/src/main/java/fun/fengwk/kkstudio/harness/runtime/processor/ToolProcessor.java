@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
@@ -90,7 +90,7 @@ public final class ToolProcessor implements AutoCloseable {
     this.gateway = Objects.requireNonNull(gateway, "gateway");
     this.realtimeEventSink = Objects.requireNonNull(realtimeEventSink, "realtimeEventSink");
     this.config = Objects.requireNonNull(config, "config");
-    this.clock = HarnessStoreTime.millisecondClock(clock);
+    this.clock = MillisecondTime.millisecondClock(clock);
     this.scheduler = Objects.requireNonNull(scheduler, "scheduler");
     this.heartbeatWorker = Objects.requireNonNull(heartbeatWorker, "heartbeatWorker");
     this.toolResultHistoryMaterializer =

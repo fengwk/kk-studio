@@ -5,12 +5,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Objects;
 
-/** HarnessStore 调用方与实现共享的 canonical 毫秒时间边界。 */
-public final class HarnessStoreTime {
+/** 各模块共享的 canonical 毫秒时间边界。 */
+public final class MillisecondTime {
 
   private static final Duration PRECISION = Duration.ofMillis(1);
 
-  private HarnessStoreTime() {}
+  private MillisecondTime() {}
 
   /** 包装源 clock，使每个采样 instant 都使用 durable 毫秒精度。 */
   public static Clock millisecondClock(Clock source) {

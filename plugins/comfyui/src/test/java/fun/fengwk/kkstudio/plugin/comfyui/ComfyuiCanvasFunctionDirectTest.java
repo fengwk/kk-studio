@@ -782,11 +782,6 @@ class ComfyuiCanvasFunctionDirectTest {
     }
 
     @Override
-    public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
-      return "https://example.com/presigned/" + reference.resourceId();
-    }
-
-    @Override
     public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
       try {
         materializedBytes.put(output.resourceId(), content.readAllBytes());

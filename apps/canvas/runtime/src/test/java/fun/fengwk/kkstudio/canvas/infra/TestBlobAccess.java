@@ -24,9 +24,6 @@ public final class TestBlobAccess {
                 return Optional.ofNullable(facts.get(invocation.getArgument(0, UUID.class)));
               case "openOriginal":
                 throw new UnsupportedOperationException("foundation test does not open originals");
-              case "originalUrl":
-                throw new UnsupportedOperationException(
-                    "foundation test does not presign originals");
               default:
                 return RETURNS_DEFAULTS.answer(invocation);
             }

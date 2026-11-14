@@ -878,7 +878,18 @@ class GeminiRequestEncoderTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
-                    List.of(new ProviderResourceBlock(UUID.randomUUID(), "file.txt", "preview")))),
+                    List.of(
+                        new ProviderResourceBlock(
+                            UUID.randomUUID(),
+                            "file.txt",
+                            null,
+                            null,
+                            "preview",
+                            null,
+                            null,
+                            null,
+                            null,
+                            null)))),
             List.of(),
             ProviderCacheControl.none());
 

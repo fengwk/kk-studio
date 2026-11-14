@@ -389,11 +389,6 @@ class ExecutionTreeLockRegressionTest {
     }
 
     @Override
-    public void assertNoAmbientTransaction() {
-      delegate.assertNoAmbientTransaction();
-    }
-
-    @Override
     public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
       return delegate.transaction(
           tx -> {

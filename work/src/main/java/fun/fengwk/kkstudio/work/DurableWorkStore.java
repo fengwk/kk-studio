@@ -4,7 +4,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.PlatformTransactionManager;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.common.work.WorkState;
 
 import java.sql.Timestamp;
@@ -171,7 +171,7 @@ public final class DurableWorkStore {
   public DurableWork request(UUID targetId, Duration delay, UUID requiredEnvironmentId) {
     Objects.requireNonNull(targetId, "targetId");
     Duration delayValue =
-        HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
+        MillisecondTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
     return jdbc.inTransaction(
         () -> {
           while (true) {
@@ -242,7 +242,7 @@ public final class DurableWorkStore {
       UUID leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
     UUID token = WorkState.requireLeaseToken(leaseToken);
     Duration lease =
-        HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+        MillisecondTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     return jdbc.inTransaction(
         () -> {
           Optional<Row> candidate =
@@ -270,7 +270,7 @@ public final class DurableWorkStore {
   public boolean renew(WorkClaim claim, Duration leaseDuration) {
     Objects.requireNonNull(claim, "claim");
     Duration lease =
-        HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+        MillisecondTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     return jdbc.inTransaction(
         () -> {
           Row row = lockRow(claim.targetId());
@@ -321,7 +321,7 @@ public final class DurableWorkStore {
   public void reschedule(WorkClaim claim, Duration delay) {
     Objects.requireNonNull(claim, "claim");
     Duration delayValue =
-        HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
+        MillisecondTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
     jdbc.inTransaction(
         () -> {
           Row row = lockRow(claim.targetId());

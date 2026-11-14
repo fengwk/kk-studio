@@ -260,36 +260,6 @@ final class PostgresqlJoinStore implements JoinStore {
   }
 
   @Override
-  public int deleteByChild(UUID childThreadId) {
-    tx.checkOpen();
-    Objects.requireNonNull(childThreadId, "childThreadId");
-    tx.requireLocked(LockKey.thread(childThreadId));
-    if (!tx.isInLockedTree(childThreadId)) {
-      throw new IllegalStateException("thread " + childThreadId + " is not in a locked tree");
-    }
-    List<ThreadJoin> joins =
-        tx.queryList(
-            "select * from harness_thread_join where child_thread_id = ?",
-            PostgresqlHarnessRows.JOIN,
-            childThreadId);
-    for (ThreadJoin join : joins) {
-      if (join.supersededByInvocationId() != null) {
-        // 已被后续续接 supersede 的 join 永远不会交付，可安全删除。
-        continue;
-      }
-      if (!join.matched()) {
-        throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
-      }
-      if (join.delivery() == JoinDelivery.NOTIFY_PARENT && join.deliveryCommandSequence() == null) {
-        throw new IllegalArgumentException(
-            "cannot delete join pending delivery " + join.invocationId());
-      }
-    }
-    return tx.updateJdbc(
-        "delete from harness_thread_join where child_thread_id = ?", childThreadId);
-  }
-
-  @Override
   public int deleteForThreads(List<UUID> threadIds) {
     tx.checkOpen();
     Objects.requireNonNull(threadIds, "threadIds");

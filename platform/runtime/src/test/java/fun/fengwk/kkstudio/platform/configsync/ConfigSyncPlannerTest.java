@@ -131,7 +131,7 @@ class ConfigSyncPlannerTest {
         new ModelService(
             mock(ModelRepository.class),
             providers,
-            new AgentEditableSupport(ConfigSyncFixtures.MAPPER),
+            new AgentEditableSupport(),
             ConfigSyncFixtures.MODEL_CONFIG_PARSER,
             ConfigSyncFixtures.GROUP_CONFIG_CODEC);
     var config = ConfigSyncFixtures.modelConfig();

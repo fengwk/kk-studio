@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
@@ -163,7 +163,7 @@ public final class ModelExecution
         createStream(
             realtimeEventSink,
             config,
-            HarnessStoreTime.millisecondClock(clock),
+            MillisecondTime.millisecondClock(clock),
             scheduler,
             flushExecutor);
     this.terminal = createTerminal(gateway, config, ownerSettledSummary, bindings, providerName);

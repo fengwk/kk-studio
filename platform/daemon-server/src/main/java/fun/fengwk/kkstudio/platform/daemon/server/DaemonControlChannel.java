@@ -6,13 +6,6 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 public interface DaemonControlChannel {
 
   /**
-   * 当前通道是否处于可用状态。
-   *
-   * @return 若通道可用且尚未关闭则返回 true
-   */
-  boolean isOpen();
-
-  /**
    * 尝试向控制通道递交一条控制协议信封。
    *
    * @param envelope 待递交的信封

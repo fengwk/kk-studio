@@ -268,11 +268,6 @@ class ToolProcessorExecutionScopeTest {
       delegate.afterCommit(action);
     }
 
-    @Override
-    public void assertNoAmbientTransaction() {
-      delegate.assertNoAmbientTransaction();
-    }
-
     /** 第一个执行了给定操作的 store 事务调用序列；用于断言某个 prepare 事务读了什么。 */
     private List<String> transactionPerforming(String operation) {
       return transactions.stream()

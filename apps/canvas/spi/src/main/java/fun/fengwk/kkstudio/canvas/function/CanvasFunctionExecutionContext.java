@@ -19,8 +19,6 @@ public interface CanvasFunctionExecutionContext {
 
   CanvasFunctionResourceStream openOriginal(CanvasFunctionFrozenReference reference);
 
-  String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds);
-
   /** 把冻结计划中的媒体槽位物化为不可变 Blob Resource；相同槽位重复调用返回同一 Resource。 */
   UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content);
 

@@ -86,13 +86,6 @@ public class DaemonControlStream implements DaemonControlChannel {
   }
 
   @Override
-  public boolean isOpen() {
-    synchronized (lock) {
-      return !closed && !draining;
-    }
-  }
-
-  @Override
   public DaemonOfferResult offer(Envelope envelope) {
     Objects.requireNonNull(envelope, "envelope must not be null");
     byte[] frameBytes = ControlProtocolCodec.encodeFrame(envelope);

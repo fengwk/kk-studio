@@ -45,7 +45,7 @@ public class ProviderServiceUnitTest {
     return new ProviderService(
         repository,
         new ProviderConfigurationCodec(objectMapper),
-        new AgentEditableSupport(objectMapper),
+        new AgentEditableSupport(),
         discovery);
   }
 

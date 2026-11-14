@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.realtime;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
@@ -61,7 +61,7 @@ public sealed interface RealtimeEvent
       }
       delta = Objects.requireNonNull(delta, "delta");
       createdAt =
-          HarnessStoreTime.requireMillisecondPrecision(
+          MillisecondTime.requireMillisecondPrecision(
               Objects.requireNonNull(createdAt, "createdAt"));
     }
 
@@ -94,7 +94,7 @@ public sealed interface RealtimeEvent
         throw new IllegalArgumentException("sequence must be positive");
       }
       createdAt =
-          HarnessStoreTime.requireMillisecondPrecision(
+          MillisecondTime.requireMillisecondPrecision(
               Objects.requireNonNull(createdAt, "createdAt"));
     }
 
@@ -132,7 +132,7 @@ public sealed interface RealtimeEvent
       Objects.requireNonNull(eventId, "eventId");
       partial = Objects.requireNonNull(partial, "partial");
       createdAt =
-          HarnessStoreTime.requireMillisecondPrecision(
+          MillisecondTime.requireMillisecondPrecision(
               Objects.requireNonNull(createdAt, "createdAt"));
     }
 

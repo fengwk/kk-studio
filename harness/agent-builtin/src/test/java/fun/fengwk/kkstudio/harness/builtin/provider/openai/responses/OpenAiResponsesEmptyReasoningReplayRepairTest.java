@@ -126,7 +126,7 @@ class OpenAiResponsesEmptyReasoningReplayRepairTest {
     assertTrue(data.itemStart());
 
     MessagePayload payload =
-        new BuiltinHistoryPayloadMapper().assistantPayload(response, List.of());
+        new BuiltinHistoryPayloadMapper().assistantPayload(response, List.of(), null, null);
     HistoryEntryPayloadJsonCodec codec = new HistoryEntryPayloadJsonCodec();
     MessagePayload durable =
         (MessagePayload) codec.decode(EntryType.MESSAGE, codec.encode(payload));

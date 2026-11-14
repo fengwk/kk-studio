@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.port;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -84,7 +84,7 @@ public interface ModelGateway {
   /** 肯定未发出请求；调用方应稍后按 {@code retryAfter} 重新调度（attempt 不变）。 */
   record Busy(Duration retryAfter) implements Admission {
     public Busy {
-      retryAfter = HarnessStoreTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
+      retryAfter = MillisecondTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
     }
   }
 

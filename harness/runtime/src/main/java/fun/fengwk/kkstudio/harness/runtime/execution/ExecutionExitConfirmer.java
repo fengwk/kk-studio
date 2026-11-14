@@ -2,7 +2,7 @@ package fun.fengwk.kkstudio.harness.runtime.execution;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
@@ -64,7 +64,7 @@ public final class ExecutionExitConfirmer {
   public ExecutionExitConfirmer(HarnessStore store, ExecutionExitJournal journal, Clock clock) {
     this.store = Objects.requireNonNull(store, "store");
     this.journal = Objects.requireNonNull(journal, "journal");
-    this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
+    this.clock = MillisecondTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
     for (int i = 0; i < executionLocks.length; i++) {
       executionLocks[i] = new ReentrantLock();
     }

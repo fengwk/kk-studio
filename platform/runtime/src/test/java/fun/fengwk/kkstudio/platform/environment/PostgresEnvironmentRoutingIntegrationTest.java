@@ -544,11 +544,6 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     }
 
     @Override
-    public boolean isOpen() {
-      return !closed;
-    }
-
-    @Override
     public synchronized DaemonOfferResult offer(Envelope envelope) {
       if (closed) {
         return DaemonOfferResult.CLOSED;

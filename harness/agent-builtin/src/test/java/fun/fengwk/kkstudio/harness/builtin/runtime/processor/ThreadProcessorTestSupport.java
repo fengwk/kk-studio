@@ -1127,7 +1127,8 @@ public final class ThreadProcessorTestSupport {
                       secondAssistantEntryId,
                       sessionId,
                       secondUserEntryId,
-                      new BuiltinHistoryPayloadMapper().assistantPayload(response, List.of()),
+                      new BuiltinHistoryPayloadMapper()
+                          .assistantPayload(response, List.of(), null, null),
                       NOW));
           tx.entries()
               .insert(

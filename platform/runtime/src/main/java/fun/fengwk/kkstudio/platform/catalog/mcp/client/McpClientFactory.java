@@ -67,11 +67,6 @@ public final class McpClientFactory {
 
   private McpClientFactory() {}
 
-  /** 创建远端 Streamable HTTP MCP 客户端（per-call 模式）。 */
-  public static McpClient createRemote(RemoteMcpConfig config, Duration timeout) {
-    return createRemote(config, McpDeadline.of(timeout));
-  }
-
   /** 基于外层 {@link McpDeadline} 创建远端 Streamable HTTP MCP 客户端。 */
   public static McpClient createRemote(RemoteMcpConfig config, McpDeadline deadline) {
     Objects.requireNonNull(config, "config");

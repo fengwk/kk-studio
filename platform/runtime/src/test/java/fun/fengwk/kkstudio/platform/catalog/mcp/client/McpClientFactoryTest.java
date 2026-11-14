@@ -45,7 +45,8 @@ class McpClientFactoryTest {
   @Test
   void rejectsMissingConfigOrDeadline() {
     RemoteMcpConfig config = new RemoteMcpConfig("http://127.0.0.1:1/mcp", Map.of());
-    assertThatThrownBy(() -> McpClientFactory.createRemote(null, Duration.ofSeconds(1)))
+    assertThatThrownBy(
+            () -> McpClientFactory.createRemote(null, McpDeadline.of(Duration.ofSeconds(1))))
         .isInstanceOf(NullPointerException.class);
     assertThatThrownBy(() -> McpClientFactory.createRemote(config, (McpDeadline) null))
         .isInstanceOf(NullPointerException.class);

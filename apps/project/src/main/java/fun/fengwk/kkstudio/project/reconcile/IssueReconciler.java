@@ -5,7 +5,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
@@ -115,7 +115,7 @@ public class IssueReconciler {
     this.workflowCodec = Objects.requireNonNull(workflowCodec, "workflowCodec");
     this.properties = Objects.requireNonNull(properties, "properties");
     this.activeRun = Objects.requireNonNull(activeRun, "activeRun");
-    this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
+    this.clock = MillisecondTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
   }
 
   /** 调谐一次已领取的 work；整个动作在单个物理事务内完成，外部执行从不在锁内发生。 */

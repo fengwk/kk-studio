@@ -290,7 +290,18 @@ class DatabaseProviderResolutionServiceTest {
             "call-1",
             "read",
             List.of(
-                sibling, new ProviderResourceBlock(new UUID(0L, 1L), "scan.txt", "tiny preview")),
+                sibling,
+                new ProviderResourceBlock(
+                    new UUID(0L, 1L),
+                    "scan.txt",
+                    null,
+                    null,
+                    "tiny preview",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null)),
             false,
             "{\"bytes\":42}");
     ProviderRequest persisted =
@@ -351,7 +362,18 @@ class DatabaseProviderResolutionServiceTest {
             List.of(
                 new ProviderMessage(
                     ProviderMessageRole.USER,
-                    List.of(new ProviderResourceBlock(new UUID(0L, 1L), "scan.txt", "tiny"))),
+                    List.of(
+                        new ProviderResourceBlock(
+                            new UUID(0L, 1L),
+                            "scan.txt",
+                            null,
+                            null,
+                            "tiny",
+                            null,
+                            null,
+                            null,
+                            null,
+                            null))),
                 assistant),
             List.of());
 
@@ -533,8 +555,17 @@ class DatabaseProviderResolutionServiceTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER,
                     List.of(
-                        ProviderResourceBlock.media(
-                            blobId, "scan.png", "tiny", ImageInputTier.ORIGINAL)))),
+                        new ProviderResourceBlock(
+                            blobId,
+                            "scan.png",
+                            null,
+                            null,
+                            "tiny",
+                            ImageInputTier.ORIGINAL,
+                            null,
+                            null,
+                            null,
+                            null)))),
             List.of(),
             Set.of(ModelInputModality.IMAGE));
 
@@ -577,8 +608,17 @@ class DatabaseProviderResolutionServiceTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER,
                     List.of(
-                        ProviderResourceBlock.media(
-                            blobId, "scan.png", "tiny", ImageInputTier.ORIGINAL)))),
+                        new ProviderResourceBlock(
+                            blobId,
+                            "scan.png",
+                            null,
+                            null,
+                            "tiny",
+                            ImageInputTier.ORIGINAL,
+                            null,
+                            null,
+                            null,
+                            null)))),
             List.of(),
             Set.of(ModelInputModality.IMAGE));
 
@@ -624,8 +664,17 @@ class DatabaseProviderResolutionServiceTest {
                 new ProviderMessage(
                     ProviderMessageRole.USER,
                     List.of(
-                        ProviderResourceBlock.media(
-                            blobId, "scan.png", "tiny", ImageInputTier.ORIGINAL)))),
+                        new ProviderResourceBlock(
+                            blobId,
+                            "scan.png",
+                            null,
+                            null,
+                            "tiny",
+                            ImageInputTier.ORIGINAL,
+                            null,
+                            null,
+                            null,
+                            null)))),
             List.of(),
             Set.of(ModelInputModality.TEXT));
 

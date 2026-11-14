@@ -130,11 +130,6 @@ class WorkHeartbeatTest {
           }
 
           @Override
-          public void assertNoAmbientTransaction() {
-            fixture.store.assertNoAmbientTransaction();
-          }
-
-          @Override
           public <T> T transaction(Function<Transaction, T> callback) {
             return fixture.store.transaction(
                 tx -> {

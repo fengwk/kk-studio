@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.platform.harness.builtin.store;
 import org.springframework.jdbc.core.RowMapper;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -61,7 +61,7 @@ final class PostgresqlBuiltinRows {
   static Timestamp timestamp(Instant instant) {
     return instant == null
         ? null
-        : Timestamp.from(HarnessStoreTime.requireMillisecondPrecision(instant));
+        : Timestamp.from(MillisecondTime.requireMillisecondPrecision(instant));
   }
 
   private static UUID uuid(ResultSet resultSet, String column) throws SQLException {

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
@@ -72,7 +72,7 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
             requiredGateway,
             Objects.requireNonNull(realtimeEventSink, "realtimeEventSink"),
             this.config,
-            HarnessStoreTime.millisecondClock(clock),
+            MillisecondTime.millisecondClock(clock),
             Objects.requireNonNull(scheduler, "scheduler"),
             Objects.requireNonNull(heartbeatWorker, "heartbeatWorker"),
             Objects.requireNonNull(executionExecutor, "executionExecutor"),

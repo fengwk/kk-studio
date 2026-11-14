@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
@@ -140,7 +140,7 @@ final class PostgresqlWorkStore implements WorkStore {
       WorkTargetType targetType, UUID leaseToken, Duration leaseDuration, UUID nodeInstanceId) {
     tx.checkOpen();
     Objects.requireNonNull(targetType, "targetType");
-    HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+    MillisecondTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     tx.requireCanClaimWork();
     Optional<WorkClaim> claimed =
         store(targetType).claimNext(leaseToken, leaseDuration, nodeInstanceId);
@@ -168,7 +168,7 @@ final class PostgresqlWorkStore implements WorkStore {
   public boolean renew(ClaimedWork claim, Duration leaseDuration) {
     tx.checkOpen();
     Objects.requireNonNull(claim, "claim");
-    HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+    MillisecondTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     tx.requireCanLockWork(claim.target());
     boolean renewed = store(claim.target()).renew(toClaim(claim), leaseDuration);
     tx.recordWorkLock(claim.target());
@@ -201,7 +201,7 @@ final class PostgresqlWorkStore implements WorkStore {
   public void reschedule(ClaimedWork claim, Duration delay) {
     tx.checkOpen();
     Objects.requireNonNull(claim, "claim");
-    HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
+    MillisecondTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
     tx.requireCanLockWork(claim.target());
     store(claim.target()).reschedule(toClaim(claim), delay);
     tx.recordWorkLock(claim.target());

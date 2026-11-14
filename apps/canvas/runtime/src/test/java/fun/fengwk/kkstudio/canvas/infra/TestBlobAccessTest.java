@@ -26,6 +26,5 @@ class TestBlobAccessTest {
     fake.put(updated);
     assertEquals(updated, fake.access().findFacts(id).orElseThrow());
     assertThrows(UnsupportedOperationException.class, () -> fake.access().openOriginal(id, 4L));
-    assertThrows(UnsupportedOperationException.class, () -> fake.access().originalUrl(id, 60L));
   }
 }

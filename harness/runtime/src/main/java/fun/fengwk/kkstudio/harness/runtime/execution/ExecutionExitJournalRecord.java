@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.execution;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
@@ -96,7 +96,7 @@ public record ExecutionExitJournalRecord(
       throw new IllegalArgumentException("a remote execution cannot claim a local exit");
     }
     Objects.requireNonNull(confirmedAt, "confirmedAt");
-    HarnessStoreTime.requireMillisecondPrecision(confirmedAt);
+    MillisecondTime.requireMillisecondPrecision(confirmedAt);
   }
 
   /** 允许本地 body 之前的持久声明：只冻结执行身份。 */

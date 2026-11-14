@@ -42,10 +42,6 @@ public final class BuiltinHistoryPayloadMapper {
   private final ProviderToolCallDiagnosticJsonCodec diagnosticCodec =
       new ProviderToolCallDiagnosticJsonCodec();
 
-  public MessagePayload assistantPayload(ProviderResponse response, List<ToolBinding> bindings) {
-    return assistantPayload(response, bindings, null, null);
-  }
-
   public MessagePayload assistantPayload(
       ProviderResponse response,
       List<ToolBinding> bindings,
@@ -126,12 +122,6 @@ public final class BuiltinHistoryPayloadMapper {
             response.requestBodyPricing(),
             effort),
         null);
-  }
-
-  public AssistantErrorPayload assistantErrorPayload(ModelInvocationError error) {
-    Objects.requireNonNull(error, "error");
-    return new AssistantErrorPayload(
-        new AssistantError(error.kind().name(), error.message()), null);
   }
 
   public AssistantErrorPayload assistantErrorPayload(

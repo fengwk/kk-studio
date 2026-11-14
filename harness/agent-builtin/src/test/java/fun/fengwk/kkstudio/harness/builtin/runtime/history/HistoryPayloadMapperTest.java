@@ -94,7 +94,9 @@ class HistoryPayloadMapperTest {
                     new ContributorBinding("core", "grep"),
                     EnvironmentSupport.NONE,
                     null,
-                    null)));
+                    null)),
+            null,
+            null);
     assertEquals(4, payload.message().contents().size());
     assertEquals(
         "thinking here", ((ThinkingMessageContent) payload.message().contents().get(0)).text());
@@ -146,7 +148,7 @@ class HistoryPayloadMapperTest {
             "{}",
             List.of(diagnostic));
 
-    MessagePayload payload = BUILTIN_MAPPER.assistantPayload(response, List.of());
+    MessagePayload payload = BUILTIN_MAPPER.assistantPayload(response, List.of(), null, null);
     assertEquals(2, payload.message().contents().size());
     assertEquals("part 1", ((TextMessageContent) payload.message().contents().get(0)).text());
     JsonMessageContent jsonContent = (JsonMessageContent) payload.message().contents().get(1);
@@ -175,7 +177,8 @@ class HistoryPayloadMapperTest {
             "{}",
             List.of(diag2));
 
-    MessagePayload payload = BUILTIN_MAPPER.assistantPayload(response, List.of(binding()));
+    MessagePayload payload =
+        BUILTIN_MAPPER.assistantPayload(response, List.of(binding()), null, null);
     assertEquals(4, payload.message().contents().size());
     assertEquals("result", ((TextMessageContent) payload.message().contents().get(0)).text());
     assertEquals(
@@ -202,7 +205,9 @@ class HistoryPayloadMapperTest {
                 null,
                 null,
                 "{}"),
-            List.of());
+            List.of(),
+            null,
+            null);
     assertEquals(1, thinkingOnly.message().contents().size());
     assertTrue(thinkingOnly.message().contents().get(0) instanceof ThinkingMessageContent);
 
@@ -210,7 +215,9 @@ class HistoryPayloadMapperTest {
         BUILTIN_MAPPER.assistantPayload(
             new ProviderResponse(
                 "", "", List.of(), GenerationStopReason.COMPLETE, usage(), null, null, "{}"),
-            List.of());
+            List.of(),
+            null,
+            null);
     assertEquals(1, empty.message().contents().size());
     assertEquals("", ((TextMessageContent) empty.message().contents().get(0)).text());
   }
@@ -228,7 +235,8 @@ class HistoryPayloadMapperTest {
             null,
             "{}");
 
-    MessagePayload payload = BUILTIN_MAPPER.assistantPayload(response, List.of(binding()));
+    MessagePayload payload =
+        BUILTIN_MAPPER.assistantPayload(response, List.of(binding()), null, null);
     ToolCallMessageContent call = (ToolCallMessageContent) payload.message().contents().get(0);
     assertEquals("shell-command", call.rendererKey());
     // 无匹配 binding（unknown tool 槽位）时 renderer fallback 固定为 "tool"。
@@ -241,7 +249,9 @@ class HistoryPayloadMapperTest {
                     new ContributorBinding("core", "grep"),
                     EnvironmentSupport.NONE,
                     null,
-                    null)));
+                    null)),
+            null,
+            null);
     ToolCallMessageContent unboundCall =
         (ToolCallMessageContent) unbound.message().contents().get(0);
     assertEquals(HistoryPayloadMapper.UNBOUND_RENDERER_KEY, unboundCall.rendererKey());
@@ -270,7 +280,8 @@ class HistoryPayloadMapperTest {
             new EnvironmentId(id(1)),
             "dev");
 
-    MessagePayload payload = BUILTIN_MAPPER.assistantPayload(response, List.of(environmentBinding));
+    MessagePayload payload =
+        BUILTIN_MAPPER.assistantPayload(response, List.of(environmentBinding), null, null);
 
     ToolCallMessageContent frozen = (ToolCallMessageContent) payload.message().contents().get(0);
     assertEquals("read a.txt", frozen.historyAction());
@@ -284,7 +295,7 @@ class HistoryPayloadMapperTest {
   void assistantErrorPayloadUsesKindNameAndMessage() {
     AssistantErrorPayload payload =
         BUILTIN_MAPPER.assistantErrorPayload(
-            new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "token expired"));
+            new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "token expired"), null);
     assertEquals("AUTHENTICATION", payload.error().code());
     assertEquals("token expired", payload.error().message());
   }
@@ -295,7 +306,7 @@ class HistoryPayloadMapperTest {
     String body = "\n<html>\n  <body>" + "x".repeat(2049) + "</body>\n</html>\n";
     AssistantErrorPayload payload =
         BUILTIN_MAPPER.assistantErrorPayload(
-            new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, body));
+            new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, body), null);
     assertEquals("INVALID_REQUEST", payload.error().code());
     assertEquals(body, payload.error().message());
   }

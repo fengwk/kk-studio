@@ -118,7 +118,8 @@ class RemoteMcpClientTest {
   void createsRemoteClientAndExecutesTool() {
     RemoteMcpConfig config =
         new RemoteMcpConfig(serverUrl, Map.of("Authorization", "Bearer test_token_123"));
-    try (McpClient client = McpClientFactory.createRemote(config, Duration.ofSeconds(5))) {
+    try (McpClient client =
+        McpClientFactory.createRemote(config, McpDeadline.of(Duration.ofSeconds(5)))) {
       List<McpToolDefinition> tools =
           client.listTools(McpDeadline.of(Duration.ofSeconds(5)), McpCancellationToken.none());
       assertThat(tools).hasSize(1);
@@ -143,7 +144,8 @@ class RemoteMcpClientTest {
   @Test
   void mapsStructuredAndErrorResultsOverRealTransport() {
     RemoteMcpConfig config = new RemoteMcpConfig(serverUrl, Map.of());
-    try (McpClient client = McpClientFactory.createRemote(config, Duration.ofSeconds(5))) {
+    try (McpClient client =
+        McpClientFactory.createRemote(config, McpDeadline.of(Duration.ofSeconds(5)))) {
       McpToolCallResult structured =
           client.callTool(
               "structured_tool",
@@ -169,7 +171,8 @@ class RemoteMcpClientTest {
   @Timeout(15)
   void tokenCancellationDirectlyTerminatesLocalWaitOnRemoteClient() {
     RemoteMcpConfig config = new RemoteMcpConfig(serverUrl, Map.of());
-    McpClient client = McpClientFactory.createRemote(config, Duration.ofSeconds(10));
+    McpClient client =
+        McpClientFactory.createRemote(config, McpDeadline.of(Duration.ofSeconds(10)));
     try {
       McpCancellationToken token = new McpCancellationToken();
       long startNanos = System.nanoTime();
@@ -204,7 +207,7 @@ class RemoteMcpClientTest {
   void preservesContentBudgetBeyondSdkAndJacksonDefaults() {
     try (McpClient client =
         McpClientFactory.createRemote(
-            new RemoteMcpConfig(serverUrl, Map.of()), Duration.ofSeconds(10))) {
+            new RemoteMcpConfig(serverUrl, Map.of()), McpDeadline.of(Duration.ofSeconds(10)))) {
       McpToolCallResult result =
           client.callTool(
               "large_tool",

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.port.store;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -43,10 +43,10 @@ public record ModelAttemptFailure(
           "cancelled or context-limit attempts are not model fallback audit failures");
     }
     if (requestedAt != null) {
-      requestedAt = HarnessStoreTime.requireMillisecondPrecision(requestedAt, "requestedAt");
+      requestedAt = MillisecondTime.requireMillisecondPrecision(requestedAt, "requestedAt");
     }
-    failedAt = HarnessStoreTime.requireMillisecondPrecision(failedAt, "failedAt");
-    retryAt = HarnessStoreTime.requireMillisecondPrecision(retryAt, "retryAt");
+    failedAt = MillisecondTime.requireMillisecondPrecision(failedAt, "failedAt");
+    retryAt = MillisecondTime.requireMillisecondPrecision(retryAt, "retryAt");
     if (retryAt.isBefore(failedAt)) {
       throw new IllegalArgumentException("retryAt must not precede failedAt");
     }

@@ -97,13 +97,6 @@ final class CanvasFunctionExecutionContextImpl implements CanvasFunctionExecutio
   }
 
   @Override
-  public String presignOriginal(CanvasFunctionFrozenReference reference, long expiresSeconds) {
-    requireManifestReference(reference);
-    ensureRunning();
-    return blobAccess.originalUrl(reference.blobId(), expiresSeconds);
-  }
-
-  @Override
   public UUID materializeOutput(CanvasFunctionFrozenOutput output, InputStream content) {
     Objects.requireNonNull(output, "output");
     Objects.requireNonNull(content, "content");

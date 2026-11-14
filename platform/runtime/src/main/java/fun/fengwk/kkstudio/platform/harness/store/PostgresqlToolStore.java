@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -162,8 +162,8 @@ final class PostgresqlToolStore implements ToolStore {
     Set<UUID> ids = new HashSet<>();
     Set<ToolCallIndexKey> callIndexes = new HashSet<>();
     for (ToolInvocation invocation : copied) {
-      HarnessStoreTime.requireMillisecondPrecision(invocation.createdAt());
-      HarnessStoreTime.requireMillisecondPrecision(invocation.updatedAt());
+      MillisecondTime.requireMillisecondPrecision(invocation.createdAt());
+      MillisecondTime.requireMillisecondPrecision(invocation.updatedAt());
       if (!ids.add(invocation.id())) {
         throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
       }
@@ -230,8 +230,8 @@ final class PostgresqlToolStore implements ToolStore {
     Set<UUID> ids = new HashSet<>();
     Set<UUID> interactionIds = new LinkedHashSet<>();
     for (ToolInvocation invocation : copied) {
-      HarnessStoreTime.requireMillisecondPrecision(invocation.createdAt());
-      HarnessStoreTime.requireMillisecondPrecision(invocation.updatedAt());
+      MillisecondTime.requireMillisecondPrecision(invocation.createdAt());
+      MillisecondTime.requireMillisecondPrecision(invocation.updatedAt());
       if (!ids.add(invocation.id())) {
         throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
       }

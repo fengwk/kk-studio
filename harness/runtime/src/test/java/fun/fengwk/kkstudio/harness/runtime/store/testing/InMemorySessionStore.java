@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.spi.store.SessionStore;
 
@@ -23,7 +23,7 @@ final class InMemorySessionStore implements SessionStore {
   public void insert(Session session) {
     tx.checkOpen();
     Objects.requireNonNull(session, "session");
-    HarnessStoreTime.requireMillisecondPrecision(session.createdAt());
+    MillisecondTime.requireMillisecondPrecision(session.createdAt());
     InMemoryHarnessTransaction.requireAbsent(state.sessions, session.id(), "session");
     state.sessions.put(session.id(), session);
   }
@@ -32,7 +32,7 @@ final class InMemorySessionStore implements SessionStore {
   public void update(Session session) {
     tx.checkOpen();
     Objects.requireNonNull(session, "session");
-    HarnessStoreTime.requireMillisecondPrecision(session.createdAt());
+    MillisecondTime.requireMillisecondPrecision(session.createdAt());
     tx.locks().requireLocked(InMemoryHarnessLocks.LockKey.session(session.id()));
     Session stored = state.sessions.get(session.id());
     if (stored == null) {

@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 
 import java.time.Instant;
@@ -20,9 +20,9 @@ public record ModelAttemptFailurePayload(
     model = Objects.requireNonNull(model, "model");
     error = Objects.requireNonNull(error, "error");
     if (requestedAt != null) {
-      requestedAt = HarnessStoreTime.requireMillisecondPrecision(requestedAt, "requestedAt");
+      requestedAt = MillisecondTime.requireMillisecondPrecision(requestedAt, "requestedAt");
     }
-    retryAt = HarnessStoreTime.requireMillisecondPrecision(retryAt, "retryAt");
+    retryAt = MillisecondTime.requireMillisecondPrecision(retryAt, "retryAt");
   }
 
   @Override

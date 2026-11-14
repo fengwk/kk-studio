@@ -170,7 +170,6 @@ class DaemonControlStreamTest {
 
     // 控制信道失败并通知关闭会话
     assertTrue(sessionClosed.get());
-    assertFalse(controlStream.isOpen());
   }
 
   @Test
@@ -241,7 +240,6 @@ class DaemonControlStreamTest {
   void offerRejectsWhenClosedOrDraining() {
     controlStream.bindSession(daemonSession);
     controlStream.close();
-    assertFalse(controlStream.isOpen());
     assertEquals(
         DaemonOfferResult.CLOSED, controlStream.offer(createCancelEnvelope(INVOCATION_CLOSED)));
   }
@@ -261,7 +259,6 @@ class DaemonControlStreamTest {
     controlStream.bindSession(daemonSession);
     controlStream.offer(createCancelEnvelope(INVOCATION_RESET));
     controlStream.close();
-    assertFalse(controlStream.isOpen());
     assertTrue(daemonSession.closed);
   }
 

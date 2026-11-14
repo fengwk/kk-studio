@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryType;
@@ -285,8 +285,8 @@ final class InMemoryToolStore implements ToolStore {
     Set<UUID> ids = new HashSet<>();
     Set<ToolCallIndexKey> callIndexes = new HashSet<>();
     for (ToolInvocation invocation : copied) {
-      HarnessStoreTime.requireMillisecondPrecision(invocation.createdAt());
-      HarnessStoreTime.requireMillisecondPrecision(invocation.updatedAt());
+      MillisecondTime.requireMillisecondPrecision(invocation.createdAt());
+      MillisecondTime.requireMillisecondPrecision(invocation.updatedAt());
       if (!ids.add(invocation.id())) {
         throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
       }
@@ -417,8 +417,8 @@ final class InMemoryToolStore implements ToolStore {
         List.copyOf(invocations).stream().sorted(InMemoryHarnessLocks.TOOL_LOCK_ORDER).toList();
     Set<UUID> ids = new HashSet<>();
     for (ToolInvocation invocation : copied) {
-      HarnessStoreTime.requireMillisecondPrecision(invocation.createdAt());
-      HarnessStoreTime.requireMillisecondPrecision(invocation.updatedAt());
+      MillisecondTime.requireMillisecondPrecision(invocation.createdAt());
+      MillisecondTime.requireMillisecondPrecision(invocation.updatedAt());
       if (!ids.add(invocation.id())) {
         throw new IllegalArgumentException("duplicate tool invocation id " + invocation.id());
       }

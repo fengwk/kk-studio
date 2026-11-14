@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -47,8 +47,8 @@ final class InMemoryJoinStore implements JoinStore {
   public void insert(ThreadJoin join) {
     tx.checkOpen();
     Objects.requireNonNull(join, "join");
-    HarnessStoreTime.requireMillisecondPrecision(join.createdAt());
-    HarnessStoreTime.requireMillisecondPrecision(join.updatedAt());
+    MillisecondTime.requireMillisecondPrecision(join.createdAt());
+    MillisecondTime.requireMillisecondPrecision(join.updatedAt());
     if (join.matched() || join.deliveryCommandSequence() != null || join.reminderTurn() != 0) {
       throw new IllegalArgumentException("new join must be unmatched");
     }
@@ -148,8 +148,8 @@ final class InMemoryJoinStore implements JoinStore {
   public void update(ThreadJoin join) {
     tx.checkOpen();
     Objects.requireNonNull(join, "join");
-    HarnessStoreTime.requireMillisecondPrecision(join.createdAt());
-    HarnessStoreTime.requireMillisecondPrecision(join.updatedAt());
+    MillisecondTime.requireMillisecondPrecision(join.createdAt());
+    MillisecondTime.requireMillisecondPrecision(join.updatedAt());
     tx.locks().requireLocked(InMemoryHarnessLocks.LockKey.thread(join.childThreadId()));
     ThreadJoin old =
         find(join.invocationId())
@@ -252,40 +252,6 @@ final class InMemoryJoinStore implements JoinStore {
       }
     }
     return -1;
-  }
-
-  @Override
-  public int deleteByChild(UUID childThreadId) {
-    tx.checkOpen();
-    Objects.requireNonNull(childThreadId, "childThreadId");
-    tx.locks().requireLocked(InMemoryHarnessLocks.LockKey.thread(childThreadId));
-    if (!tx.isInLockedTree(childThreadId)) {
-      throw new IllegalStateException("thread " + childThreadId + " is not in a locked tree");
-    }
-    List<ThreadJoin> childJoins =
-        state.joins.values().stream().filter(j -> j.childThreadId().equals(childThreadId)).toList();
-    for (ThreadJoin join : childJoins) {
-      if (join.supersededByInvocationId() != null) {
-        // 已被后续续接 supersede 的 join 永远不会交付，可安全删除。
-        continue;
-      }
-      if (!join.matched()) {
-        throw new IllegalArgumentException("cannot delete unmatched join " + join.invocationId());
-      }
-      if (join.delivery() == JoinDelivery.NOTIFY_PARENT && join.deliveryCommandSequence() == null) {
-        throw new IllegalArgumentException(
-            "cannot delete join pending delivery " + join.invocationId());
-      }
-    }
-    int count = 0;
-    var it = state.joins.entrySet().iterator();
-    while (it.hasNext()) {
-      if (it.next().getValue().childThreadId().equals(childThreadId)) {
-        it.remove();
-        count++;
-      }
-    }
-    return count;
   }
 
   @Override

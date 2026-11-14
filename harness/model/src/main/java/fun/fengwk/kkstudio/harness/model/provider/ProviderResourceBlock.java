@@ -69,60 +69,6 @@ public record ProviderResourceBlock(
     }
   }
 
-  public ProviderResourceBlock(
-      UUID blobId,
-      String name,
-      Long totalBytes,
-      Long totalLines,
-      String preview,
-      ImageInputTier imageTier) {
-    this(blobId, name, totalBytes, totalLines, preview, imageTier, null, null, null, null);
-  }
-
-  public ProviderResourceBlock(UUID blobId, String name, String preview) {
-    this(blobId, name, null, null, preview, null);
-  }
-
-  /** 普通媒体便利工厂（图片输入档位由平台默认决定）。 */
-  public static ProviderResourceBlock media(UUID blobId, String name, String preview) {
-    return new ProviderResourceBlock(blobId, name, null, null, preview, null);
-  }
-
-  /** 普通媒体便利工厂（带显式图片输入档位）。 */
-  public static ProviderResourceBlock media(
-      UUID blobId, String name, String preview, ImageInputTier imageTier) {
-    return new ProviderResourceBlock(blobId, name, null, null, preview, imageTier);
-  }
-
-  /** 普通媒体便利工厂（携带原始与显示尺寸）。 */
-  public static ProviderResourceBlock media(
-      UUID blobId,
-      String name,
-      String preview,
-      ImageInputTier imageTier,
-      Integer originalWidth,
-      Integer originalHeight,
-      Integer displayWidth,
-      Integer displayHeight) {
-    return new ProviderResourceBlock(
-        blobId,
-        name,
-        null,
-        null,
-        preview,
-        imageTier,
-        originalWidth,
-        originalHeight,
-        displayWidth,
-        displayHeight);
-  }
-
-  /** 外部化文本便利工厂（文本工件不携带图片输入档位）。 */
-  public static ProviderResourceBlock externalizedText(
-      UUID blobId, String name, long totalBytes, long totalLines, String preview) {
-    return new ProviderResourceBlock(blobId, name, totalBytes, totalLines, preview, null);
-  }
-
   /** 是否为外部化文本。 */
   public boolean isExternalizedText() {
     return totalBytes != null && totalLines != null;

@@ -100,7 +100,7 @@ final class ConfigSyncFixtures {
   static final ModelGroupConfigCodec GROUP_CONFIG_CODEC = new ModelGroupConfigCodec(MAPPER);
   static final ProviderConfigurationCodec PROVIDER_CONFIG_CODEC =
       new ProviderConfigurationCodec(MAPPER);
-  private static final AgentEditableSupport EDITABLE_SUPPORT = new AgentEditableSupport(MAPPER);
+  private static final AgentEditableSupport EDITABLE_SUPPORT = new AgentEditableSupport();
 
   /** 真实 {@code ProviderService.validateImport}：纯静态校验，仓储与上游发现以 mock 占位。 */
   static final ProviderService PROVIDER_SERVICE =

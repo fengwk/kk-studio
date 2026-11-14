@@ -973,11 +973,6 @@ class DaemonCrossLanguageIntegrationTest {
       DaemonControlChannel recordingControl =
           new DaemonControlChannel() {
             @Override
-            public boolean isOpen() {
-              return control.isOpen();
-            }
-
-            @Override
             public DaemonOfferResult offer(Envelope envelope) {
               outboundEnvelopes.add(envelope);
               for (Consumer<Envelope> l : outboundListeners) {

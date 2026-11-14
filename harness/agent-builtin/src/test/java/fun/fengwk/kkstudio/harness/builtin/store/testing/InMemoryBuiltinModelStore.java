@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.store.testing;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
@@ -61,8 +61,8 @@ final class InMemoryBuiltinModelStore {
 
   void insert(ModelInvocation invocation) {
     Objects.requireNonNull(invocation, "invocation");
-    HarnessStoreTime.requireMillisecondPrecision(invocation.createdAt());
-    HarnessStoreTime.requireMillisecondPrecision(invocation.updatedAt());
+    MillisecondTime.requireMillisecondPrecision(invocation.createdAt());
+    MillisecondTime.requireMillisecondPrecision(invocation.updatedAt());
     if (tx.findDriverRow(invocation.id()).isPresent()) {
       throw new IllegalArgumentException("duplicate model invocation id " + invocation.id());
     }
@@ -111,8 +111,8 @@ final class InMemoryBuiltinModelStore {
 
   void update(ModelInvocation invocation) {
     Objects.requireNonNull(invocation, "invocation");
-    HarnessStoreTime.requireMillisecondPrecision(invocation.createdAt());
-    HarnessStoreTime.requireMillisecondPrecision(invocation.updatedAt());
+    MillisecondTime.requireMillisecondPrecision(invocation.createdAt());
+    MillisecondTime.requireMillisecondPrecision(invocation.updatedAt());
     tx.requireDriverRowLocked(invocation.id());
     ModelInvocation stored =
         tx.findDriverRow(invocation.id())

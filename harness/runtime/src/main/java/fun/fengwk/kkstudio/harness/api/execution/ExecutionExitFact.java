@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.execution;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 
 import java.time.Instant;
@@ -59,9 +59,9 @@ public record ExecutionExitFact(
     if (state == ExecutionExitState.OWNER_EXITED && kind == ExecutionExitKind.REMOTE) {
       throw new IllegalArgumentException("a remote execution cannot claim local owner exit");
     }
-    registeredAt = HarnessStoreTime.requireMillisecondPrecision(registeredAt);
-    confirmedAt = HarnessStoreTime.requireMillisecondPrecision(confirmedAt);
-    abandonedAt = HarnessStoreTime.requireMillisecondPrecision(abandonedAt);
+    registeredAt = MillisecondTime.requireMillisecondPrecision(registeredAt);
+    confirmedAt = MillisecondTime.requireMillisecondPrecision(confirmedAt);
+    abandonedAt = MillisecondTime.requireMillisecondPrecision(abandonedAt);
     Objects.requireNonNull(registeredAt, "registeredAt");
     if (state == ExecutionExitState.UNCONFIRMED) {
       if (confirmedAt != null) {
@@ -121,7 +121,7 @@ public record ExecutionExitFact(
 
   /** 幂等放弃：相同放弃返回自身；真实确认后的放弃是冲突，不能把退出改写成放弃。 */
   public ExecutionExitFact abandon(Instant at) {
-    Instant abandoned = HarnessStoreTime.requireMillisecondPrecision(at);
+    Instant abandoned = MillisecondTime.requireMillisecondPrecision(at);
     Objects.requireNonNull(abandoned, "abandonedAt");
     if (state == ExecutionExitState.ABANDONED) {
       return this;
@@ -159,7 +159,7 @@ public record ExecutionExitFact(
     if (next == ExecutionExitState.UNCONFIRMED || next == ExecutionExitState.ABANDONED) {
       throw new IllegalArgumentException("confirmation requires real exit evidence");
     }
-    Instant confirmed = HarnessStoreTime.requireMillisecondPrecision(at);
+    Instant confirmed = MillisecondTime.requireMillisecondPrecision(at);
     Objects.requireNonNull(confirmed, "confirmedAt");
     if (state == next) {
       return this;

@@ -6,10 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyBoolean;
-import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.atLeast;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -180,11 +177,6 @@ class ProviderRequestPreviewServiceTest {
   @BeforeEach
   void setUp() {
     runtime = mock(HarnessRuntime.class);
-    // 预览的只读规划事实由 Runtime 门面承担：mock 直接执行其真实实现（纯委托，不读取 Runtime 状态），
-    // 因此预览仍与正式发送同一算法，测试也不复制估算或路径装配逻辑。
-    when(runtime.previewInputCandidatePath(
-            any(), any(), anyLong(), any(), any(), anyBoolean(), nullable(String.class)))
-        .thenCallRealMethod();
     when(runtime.findCompactionTurnStart(any(), any())).thenCallRealMethod();
     turnResolver = mock(DatabaseTurnResolver.class);
     providerResolution = mock(DatabaseProviderResolutionService.class);
