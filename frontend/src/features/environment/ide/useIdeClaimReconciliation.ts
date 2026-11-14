@@ -7,7 +7,6 @@ import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
 import type {
   EnvironmentIdeChangeDirectoryDTO,
-  EnvironmentIdeViewBindingDTO,
 } from '@/shared/api/generated/contracts'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
@@ -21,7 +20,6 @@ import {
 import {
   applyIdeMobileLayout,
   changeIdeViewDirectory,
-  focusIdeTerminal,
   openIdeView,
   readIdeView,
 } from '@/features/environment/ide/environment-ide-service'
@@ -38,6 +36,7 @@ import { useIdeOperationQueue } from '@/features/environment/ide/useIdeOperation
 import { useIdeSnapshotCache } from '@/features/environment/ide/useIdeSnapshotCache'
 import { useIdePendingShellIntent } from '@/features/environment/ide/useIdePendingShellIntent'
 import { useIdeCloseCommands } from '@/features/environment/ide/useIdeCloseCommands'
+import { useIdeTerminalCommands } from '@/features/environment/ide/useIdeTerminalCommands'
 import {
   useIdeSessionWriter,
   useIdeUsageProof,
@@ -146,6 +145,14 @@ export function useIdeClaimReconciliation({
     writeSession,
     registerUsageNow,
     registerUsageQuiet,
+  })
+  const { setPendingShell, maybeRunPendingShell } = useIdeTerminalCommands({
+    viewsRef,
+    sessionRef,
+    identityRef,
+    updateView,
+    registerUsageNow,
+    rememberPendingShellIntent,
   })
 
   identityRef.current = identity
@@ -879,84 +886,6 @@ export function useIdeClaimReconciliation({
       return
     }
     void reconcile(environmentId, 'retry')
-  }
-
-  function setPendingShell(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
-    if (view == null) {
-      rememberPendingShellIntent(environmentId)
-      return
-    }
-    if (view.pendingShell && view.terminalError === undefined) {
-      return
-    }
-    updateView(environmentId, view.attempt, {
-      pendingShell: true,
-      terminalError: undefined,
-    })
-  }
-
-  async function runTerminal(environmentId: string): Promise<void> {
-    const view = viewsRef.current[environmentId]
-    if (
-      view == null
-      || view.status !== 'ready'
-      || view.bindingEpoch == null
-      || view.daemonInstanceId == null
-      || view.closeInFlight
-    ) {
-      return
-    }
-    updateView(environmentId, view.attempt, {
-      pendingShell: false,
-      terminalError: undefined,
-    })
-    const requestIdentity = identityRef.current
-    try {
-      await registerUsageNow(usageOverride(
-        environmentId,
-        view.viewId,
-        view.claimId,
-        view.bindingEpoch,
-      ))
-      const body: EnvironmentIdeViewBindingDTO = {
-        browserSessionId: sessionRef.current.browserSessionId,
-        bindingEpoch: view.bindingEpoch,
-        expectedDaemonInstanceId: view.daemonInstanceId,
-      }
-      await focusIdeTerminal(environmentId, view.viewId, body)
-    } catch (error) {
-      const current = viewsRef.current[environmentId]
-      const appliedIdentity = identityRef.current
-      if (
-        !isSameBinding(current, view)
-        || requestIdentity == null
-        || appliedIdentity == null
-        || appliedIdentity.eventNodeId !== requestIdentity.eventNodeId
-        || appliedIdentity.connectionId !== requestIdentity.connectionId
-      ) {
-        return
-      }
-      updateView(environmentId, view.attempt, {
-        terminalError: isUnknownIdeFailure(error)
-          ? 'terminal-result-unknown'
-          : safeIdeError(error) || 'terminal-failed',
-      })
-    }
-  }
-
-  function maybeRunPendingShell(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
-    if (
-      view == null
-      || !view.pendingShell
-      || !view.iframeLoaded
-      || view.status !== 'ready'
-      || view.closeInFlight
-    ) {
-      return
-    }
-    void runTerminal(environmentId)
   }
 
   async function changeDirectory(
