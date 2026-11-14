@@ -1,119 +1,58 @@
-import { useMemo, useState } from 'react'
-import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowUpCircle, Package, RefreshCw } from 'lucide-react'
+import { useState } from 'react'
 import { AiConsoleFrame } from '@/app/ai-console/AiConsoleFrame'
-import { agentService } from '@/shared/api/agent-service'
-import type { SkillPackageDetailDTO } from '@/shared/api/generated/contracts'
-import { errorDetailMessage as errorDetail } from '@/shared/lib/user-facing-error'
-import { useI18n, type TranslationKey } from '@/shared/i18n'
-import { Badge, type BadgeTone } from '@/shared/ui/data/Badge'
-import { Button } from '@/shared/ui/controls/Button'
-import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
+import { useI18n } from '@/shared/i18n'
 import { ResourceGrid } from '@/shared/ui/cards/ResourceGrid'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
 import { SkillPackageCreateModal } from './SkillPackageCreateModal'
 import { SkillPackageDetailModal } from './SkillPackageDetailModal'
 import { SkillPackageEditModal } from './SkillPackageEditModal'
-import {
-  deriveCheckStatus,
-  displayPackageVersion,
-  formatCommit,
-  isGitPackage,
-  skillPackageQueryKeys,
-  type SkillCheckStatus,
-} from './skill-package-model'
+import { SkillPackageCard } from './SkillPackageCard'
+import { useSkillPackageActions, useSkillPackagesList } from './useSkillPackagesList'
 import './skill-packages.css'
 
-const CHECK_LABEL_KEYS: Record<SkillCheckStatus, TranslationKey> = {
-  UNCHECKED: 'ai.skillPackages.status.UNCHECKED',
-  UP_TO_DATE: 'ai.skillPackages.status.UP_TO_DATE',
-  UPDATE_AVAILABLE: 'ai.skillPackages.status.UPDATE_AVAILABLE',
-  CHECK_FAILED: 'ai.skillPackages.status.CHECK_FAILED',
-}
-
-const CHECK_TONES: Record<SkillCheckStatus, BadgeTone> = {
-  UNCHECKED: 'neutral',
-  UP_TO_DATE: 'success',
-  UPDATE_AVAILABLE: 'warning',
-  CHECK_FAILED: 'danger',
-}
-
+/**
+ * 技能包列表页：编排搜索、三个弹窗的打开状态与卡片动作。
+ * 数据读取、检查/升级写入与卡片呈现分别在 `useSkillPackagesList`、`SkillPackageCard` 中。
+ */
 export function SkillPackagesPage() {
   const { t } = useI18n()
-  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [detailName, setDetailName] = useState<string | null>(null)
   const [editName, setEditName] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
 
-  const packagesQuery = useQuery({
-    queryKey: skillPackageQueryKeys.list,
-    queryFn: () => agentService.listSkillPackages(),
-  })
+  const { packagesQuery, filteredPackages, detailsByName, invalidatePackages } =
+    useSkillPackagesList(search)
+  const { checkMutation, publishMutation } = useSkillPackageActions(
+    invalidatePackages,
+    setActionError,
+  )
 
-  const filteredPackages = useMemo(() => {
-    const packages = packagesQuery.data ?? []
-    const term = search.trim().toLowerCase()
-    if (!term) {
-      return packages
+  /** 升级需要有已读回的详情：提交当前版本与目标提交，服务端做 CAS。 */
+  function updateToHead(name: string) {
+    const detail = detailsByName.get(name)
+    if (!detail?.headCommit) {
+      return
     }
-    return packages.filter(
-      (pkg) =>
-        pkg.packageName.toLowerCase().includes(term)
-        || (pkg.description ? pkg.description.toLowerCase().includes(term) : false),
-    )
-  }, [packagesQuery.data, search])
-
-  // 列表摘要不含检查观察值：按包名读取详情，供卡片呈现状态。
-  const detailQueries = useQueries({
-    queries: filteredPackages.map((pkg) => ({
-      queryKey: skillPackageQueryKeys.detail(pkg.packageName),
-      queryFn: () => agentService.getSkillPackage(pkg.packageName),
-      staleTime: 30_000,
-    })),
-  })
-  const detailsByName = useMemo(() => {
-    const map = new Map<string, SkillPackageDetailDTO>()
-    filteredPackages.forEach((pkg, index) => {
-      const detail = detailQueries[index]?.data
-      if (detail) {
-        map.set(pkg.packageName, detail)
-      }
+    publishMutation.mutate({
+      name,
+      expectedVersion: detail.version,
+      targetCommit: detail.headCommit,
     })
-    return map
-  }, [filteredPackages, detailQueries])
-
-  const invalidatePackages = () => {
-    void queryClient.invalidateQueries({ queryKey: skillPackageQueryKeys.list })
   }
 
-  const checkMutation = useMutation({
-    mutationFn: ({ name, expectedVersion }: { name: string; expectedVersion: string }) =>
-      agentService.checkSkillPackage(name, { expectedVersion }),
-    onSuccess: () => {
-      setActionError(null)
-      invalidatePackages()
-    },
-    onError: (error: unknown) => setActionError(errorDetail(error)),
-  })
-
-  const publishMutation = useMutation({
-    mutationFn: ({
+  function checkNow(name: string) {
+    checkMutation.mutate({
       name,
-      expectedVersion,
-      targetCommit,
-    }: {
-      name: string
-      expectedVersion: string
-      targetCommit: string
-    }) => agentService.publishSkillPackage(name, { expectedVersion, targetCommit }),
-    onSuccess: () => {
-      setActionError(null)
-      invalidatePackages()
-    },
-    onError: (error: unknown) => setActionError(errorDetail(error)),
-  })
+      expectedVersion: detailsByName.get(name)?.version ?? versionOf(name),
+    })
+  }
+
+  /** 详情尚未读回时回落到列表摘要里的版本。 */
+  function versionOf(name: string): string {
+    return filteredPackages.find((pkg) => pkg.packageName === name)?.version ?? ''
+  }
 
   const content = (
     <ResourceGrid>
@@ -122,130 +61,18 @@ export function SkillPackagesPage() {
         subtitle={t('ai.skillPackages.description')}
         onClick={() => setCreateOpen(true)}
       />
-      {filteredPackages.map((pkg) => {
-        const detail = detailsByName.get(pkg.packageName)
-        const gitPackage = isGitPackage(pkg)
-        const checkStatus = detail && gitPackage ? deriveCheckStatus(detail) : null
-        const hasUpdate = Boolean(detail?.updateAvailable && detail.headCommit)
-        const checking = checkMutation.isPending
-          && checkMutation.variables?.name === pkg.packageName
-        const updating = publishMutation.isPending
-          && publishMutation.variables?.name === pkg.packageName
-
-        const rows: ResourceCardMetaRow[] = [
-          [
-            t('ai.skillPackages.packageVersion'),
-            <code title={pkg.packageVersion}>{displayPackageVersion(pkg)}</code>,
-          ],
-          [
-            t('ai.skillPackages.sourceLabel'),
-            <Badge tone="accent">
-              {gitPackage
-                ? t('ai.skillPackages.source.GIT')
-                : t('ai.skillPackages.source.UPLOAD')}
-            </Badge>,
-          ],
-          [t('ai.skillPackages.skillsCount'), String(pkg.skills.length)],
-        ]
-        if (gitPackage) {
-          rows.push([
-            t('ai.skillPackages.checkStatus'),
-            checkStatus ? (
-              <Badge tone={CHECK_TONES[checkStatus]} data-testid="check-status-pill">
-                {t(CHECK_LABEL_KEYS[checkStatus])}
-              </Badge>
-            ) : (
-              '—'
-            ),
-          ])
-        }
-        if (detail?.headCheckError) {
-          rows.push({
-            label: t('shared.error'),
-            value: (
-              <span className="inline-hint danger" role="alert">
-                {detail.headCheckError}
-              </span>
-            ),
-            wrap: true,
-          })
-        }
-        if (pkg.skills.length > 0) {
-          rows.push({
-            label: t('ai.skillPackages.skills'),
-            tags: pkg.skills.map((skill) => skill.name),
-            limit: 3,
-          })
-        }
-
-        const primaryAction = hasUpdate ? (
-          <Button
-            aria-label={`${t('ai.skillPackages.updateTo', {
-              commit: formatCommit(detail?.headCommit),
-            })} ${pkg.packageName}`}
-            disabled={checking}
-            loading={updating}
-            onClick={() =>
-              publishMutation.mutate({
-                name: pkg.packageName,
-                expectedVersion: detail!.version,
-                targetCommit: detail!.headCommit!,
-              })
-            }
-          >
-            {!updating && <ArrowUpCircle aria-hidden="true" />}
-            {t('ai.skillPackages.updateTo', { commit: formatCommit(detail?.headCommit) })}
-          </Button>
-        ) : gitPackage ? (
-          <Button
-            aria-label={`${t('ai.skillPackages.check')} ${pkg.packageName}`}
-            disabled={updating}
-            loading={checking}
-            onClick={() =>
-              checkMutation.mutate({
-                name: pkg.packageName,
-                expectedVersion: detail?.version ?? pkg.version,
-              })
-            }
-          >
-            {!checking && <RefreshCw aria-hidden="true" />}
-            {t('ai.skillPackages.check')}
-          </Button>
-        ) : (
-          <Button
-            aria-label={`${t('ai.skillPackages.detail')} ${pkg.packageName}`}
-            onClick={() => setDetailName(pkg.packageName)}
-          >
-            {t('ai.skillPackages.detail')}
-          </Button>
-        )
-
-        return (
-          <ResourceCard
-            key={pkg.packageName}
-            className="skill-package-card"
-            icon={<Package aria-hidden="true" />}
-            title={pkg.packageName}
-            subtitle={pkg.description || '—'}
-            meta={rows}
-            actions={
-              <>
-                {primaryAction}
-                {gitPackage ? (
-                  <Button
-                    variant="ghost"
-                    size="compact"
-                    aria-label={`${t('ai.skillPackages.detail')} ${pkg.packageName}`}
-                    onClick={() => setDetailName(pkg.packageName)}
-                  >
-                    {t('ai.skillPackages.detail')}
-                  </Button>
-                ) : null}
-              </>
-            }
-          />
-        )
-      })}
+      {filteredPackages.map((pkg) => (
+        <SkillPackageCard
+          key={pkg.packageName}
+          pkg={pkg}
+          detail={detailsByName.get(pkg.packageName)}
+          checking={checkMutation.isPending && checkMutation.variables?.name === pkg.packageName}
+          updating={publishMutation.isPending && publishMutation.variables?.name === pkg.packageName}
+          onUpdate={() => updateToHead(pkg.packageName)}
+          onCheck={() => checkNow(pkg.packageName)}
+          onDetails={() => setDetailName(pkg.packageName)}
+        />
+      ))}
     </ResourceGrid>
   )
 
