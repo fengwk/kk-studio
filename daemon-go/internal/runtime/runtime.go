@@ -108,6 +108,28 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if options.EnvironmentID == "" || options.Connections == nil || options.ApplyConfig == nil && options.EnvironmentConfig == nil {
 		return nil, errors.New("runtime requires environmentId, connection factory, and configuration applier")
 	}
+	if err := applyOptionDefaults(&options); err != nil {
+		return nil, err
+	}
+	hostInfo, err := resolveHostInfo(options.HostInfo)
+	if err != nil {
+		return nil, err
+	}
+	journal, err := NewInvocationJournal(1024)
+	if err != nil {
+		return nil, err
+	}
+	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), ideCommands: make(map[string]*ideCommandCall), resourceRequests: make(map[resourceExchangeKey]chan *protocol.Envelope), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1), shutdown: newShutdownFailureTracker(nil)}
+	runtime.bindOptionCallbacks()
+	if options.EnvironmentConfig != nil {
+		runtime.bindEnvironmentHooks(options.EnvironmentConfig)
+	}
+	return runtime, nil
+}
+
+// applyOptionDefaults validates the option set and fills every unset bound with its documented
+// default; the status tracker is shared with the environment config runtime when one is injected.
+func applyOptionDefaults(options *RuntimeOptions) error {
 	if options.Status == nil {
 		if options.EnvironmentConfig != nil {
 			options.Status = options.EnvironmentConfig.StatusTracker()
@@ -117,10 +139,10 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	}
 	if options.EnvironmentConfig != nil {
 		if options.EnvironmentConfig.StatusTracker() != options.Status {
-			return nil, errors.New("runtime and environment config runtime must share a status tracker")
+			return errors.New("runtime and environment config runtime must share a status tracker")
 		}
 		if options.EnvironmentConfig.Current().EnvironmentID != options.EnvironmentID {
-			return nil, errors.New("runtime and environment config runtime must share an environmentId")
+			return errors.New("runtime and environment config runtime must share an environmentId")
 		}
 	}
 	if options.InitialReconnectDelay == 0 {
@@ -130,88 +152,95 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 		options.MaxReconnectDelay = 30 * time.Second
 	}
 	if options.InitialReconnectDelay < 0 || options.MaxReconnectDelay < options.InitialReconnectDelay {
-		return nil, errors.New("invalid reconnect delay bounds")
+		return errors.New("invalid reconnect delay bounds")
 	}
 	if options.MaxConcurrentInvocations == 0 {
 		options.MaxConcurrentInvocations = defaultInvocationLimit
 	}
 	if options.MaxConcurrentInvocations < 1 || options.MaxConcurrentInvocations > 64 {
-		return nil, errors.New("maxConcurrentInvocations must be between 1 and 64")
+		return errors.New("maxConcurrentInvocations must be between 1 and 64")
 	}
 	if options.HeartbeatInterval == 0 {
 		options.HeartbeatInterval = 15 * time.Second
 	}
 	if options.HeartbeatInterval < 0 {
-		return nil, errors.New("heartbeat interval must not be negative")
+		return errors.New("heartbeat interval must not be negative")
 	}
 	if options.IDECommandTimeout == 0 {
 		options.IDECommandTimeout = 30 * time.Second
 	}
 	if options.IDECommandTimeout < 0 {
-		return nil, errors.New("IDE command timeout must be positive")
+		return errors.New("IDE command timeout must be positive")
 	}
-	var err error
-	hostInfo := options.HostInfo
+	return nil
+}
+
+// resolveHostInfo reports the host facts published in READY, cloned so later option changes cannot
+// reach the published snapshot.
+func resolveHostInfo(hostInfo *protocol.HostInfo) (*protocol.HostInfo, error) {
 	if hostInfo == nil {
-		hostInfo, err = detectHostInfo()
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		hostInfo = proto.Clone(hostInfo).(*protocol.HostInfo)
+		return detectHostInfo()
 	}
-	journal, err := NewInvocationJournal(1024)
-	if err != nil {
-		return nil, err
+	return proto.Clone(hostInfo).(*protocol.HostInfo), nil
+}
+
+// bindOptionCallbacks derives the runtime counts and update admission predicates the IDE service
+// exposes when the caller did not inject its own.
+func (r *Runtime) bindOptionCallbacks() {
+	if r.options.IDECommandCount == nil {
+		r.options.IDECommandCount = func() int { return int(r.ideCommandCount.Load()) }
 	}
-	runtime := &Runtime{options: options, hostInfo: hostInfo, journal: journal, status: options.Status, config: config.DaemonConfig{EnvironmentID: options.EnvironmentID}, calls: make(map[string]*runningCall), exitRequested: make(map[string]bool), exitCleanupUnconfirmed: make(map[string]bool), ideCommands: make(map[string]*ideCommandCall), resourceRequests: make(map[resourceExchangeKey]chan *protocol.Envelope), updateOps: update.NewOperations(), resourcePolicyChanged: make(chan struct{}, 1), shutdown: newShutdownFailureTracker(nil)}
-	if options.IDECommandCount == nil {
-		runtime.options.IDECommandCount = func() int { return int(runtime.ideCommandCount.Load()) }
-	}
-	if options.IDECanStartUpdate == nil {
-		if admission, ok := options.IDE.(IDEUpdateAdmission); ok {
-			runtime.options.IDECanStartUpdate = admission.CanStartUpdate
+	if r.options.IDECanStartUpdate == nil {
+		if admission, ok := r.options.IDE.(IDEUpdateAdmission); ok {
+			r.options.IDECanStartUpdate = admission.CanStartUpdate
 		}
 	}
-	if options.EnvironmentConfig != nil {
-		options.EnvironmentConfig.AddSessionHooks(
-			func(previous, candidate config.DaemonConfig) {
-				if previous.GatewayURL == candidate.GatewayURL && sameOptionalString(previous.ProxyURL, candidate.ProxyURL) {
-					return
-				}
-				runtime.admissionMu.Lock()
-				if runtime.candidateSuspension == nil {
-					wasPaused := runtime.admissionPaused
-					runtime.candidateSuspension = &wasPaused
-				}
-				runtime.admissionPaused = true
-				runtime.admissionMu.Unlock()
-			},
-			func(previous, candidate config.DaemonConfig) {
-				if previous.GatewayURL == candidate.GatewayURL && sameOptionalString(previous.ProxyURL, candidate.ProxyURL) {
-					return
-				}
-				runtime.admissionMu.Lock()
-				if runtime.candidateSuspension != nil {
-					runtime.admissionPaused = *runtime.candidateSuspension
-					runtime.candidateSuspension = nil
-				}
-				runtime.admissionMu.Unlock()
-			},
-			func(previous, next config.DaemonConfig) {
-				reconnect := previous.GatewayURL != next.GatewayURL || !sameOptionalString(previous.ProxyURL, next.ProxyURL)
-				runtime.admissionMu.Lock()
-				runtime.admissionPaused = reconnect
-				runtime.configReconnectPending = reconnect
-				runtime.candidateSuspension = nil
-				runtime.admissionMu.Unlock()
-				if reconnect {
-					runtime.dropActiveConnection()
-				}
-			},
-		)
-	}
-	return runtime, nil
+}
+
+// bindEnvironmentHooks suspends new work while a candidate configuration is prepared and reconnects
+// once the applied endpoints change.
+func (r *Runtime) bindEnvironmentHooks(environmentConfig *EnvironmentConfigRuntime) {
+	environmentConfig.AddSessionHooks(
+		func(previous, candidate config.DaemonConfig) {
+			if !endpointsChanged(previous, candidate) {
+				return
+			}
+			r.admissionMu.Lock()
+			if r.candidateSuspension == nil {
+				wasPaused := r.admissionPaused
+				r.candidateSuspension = &wasPaused
+			}
+			r.admissionPaused = true
+			r.admissionMu.Unlock()
+		},
+		func(previous, candidate config.DaemonConfig) {
+			if !endpointsChanged(previous, candidate) {
+				return
+			}
+			r.admissionMu.Lock()
+			if r.candidateSuspension != nil {
+				r.admissionPaused = *r.candidateSuspension
+				r.candidateSuspension = nil
+			}
+			r.admissionMu.Unlock()
+		},
+		func(previous, next config.DaemonConfig) {
+			reconnect := endpointsChanged(previous, next)
+			r.admissionMu.Lock()
+			r.admissionPaused = reconnect
+			r.configReconnectPending = reconnect
+			r.candidateSuspension = nil
+			r.admissionMu.Unlock()
+			if reconnect {
+				r.dropActiveConnection()
+			}
+		},
+	)
+}
+
+// endpointsChanged reports whether a configuration swap changes the control connection target.
+func endpointsChanged(previous, next config.DaemonConfig) bool {
+	return previous.GatewayURL != next.GatewayURL || !sameOptionalString(previous.ProxyURL, next.ProxyURL)
 }
 
 // ShutdownFailures returns the shutdown release and diagnostic failures recorded by this runtime.
