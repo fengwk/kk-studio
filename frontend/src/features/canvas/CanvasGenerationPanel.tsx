@@ -14,7 +14,7 @@ import { runDisplayLabel, runStatusKey } from '@/features/canvas/generation-pane
 import type { StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
 import { useFunctionConfigDraft } from '@/features/canvas/useFunctionConfigDraft'
-import { useLocalPendingRun } from '@/features/canvas/useLocalPendingRun'
+import { useLocalPendingRun, type LocalPendingRun } from '@/features/canvas/useLocalPendingRun'
 import { Button } from '@/shared/ui/controls/Button'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import { Select, type SelectOption } from '@/shared/ui/controls/Select'
@@ -49,13 +49,23 @@ export function CanvasGenerationPanel({
   const runtime = useCanvasRuntime()
   const { t } = useI18n()
   const { flushFunctionConfig } = runtime
-  const draft = useFunctionConfigDraft({
-    snapshot,
-    node,
-    models: runtime.models,
-    scheduleFunctionConfig: runtime.scheduleFunctionConfig,
-    onReferenceLimit: () => runtime.setToast(t('canvas.generation.referenceLimit')),
-  })
+
+  // 本地未决记录与丢弃确认属于面板生命周期：目录短暂为空导致面板不渲染时也不能重置。
+  const [localPending, setLocalPending] = useLocalPendingRun(
+    snapshot.document.id,
+    node.id,
+    runtime.localPendingErrors,
+  )
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  // UNKNOWN 运行必须由用户给出核查结论与说明，面板不自动重试。
+  const [unknownResolution, setUnknownResolution] = useState<CanvasFunctionUnknownResolution>('RESUME')
+  const [verificationText, setVerificationText] = useState('')
+
+  // 离开面板（卸载、切换选中节点）前冲刷尚未发送的函数配置。
+  useEffect(() => () => {
+    void flushFunctionConfig(node.id)
+  }, [flushFunctionConfig, node.id])
+
   const [expanded, setExpanded] = useState(false)
   const panelRef = useRef<HTMLElement | null>(null)
   const panelSize = useMeasuredPanelSize(panelRef)
@@ -64,10 +74,13 @@ export function CanvasGenerationPanel({
     [anchor, panelSize],
   )
 
-  // 离开面板（卸载、切换选中节点）前冲刷尚未发送的函数配置。
-  useEffect(() => () => {
-    void flushFunctionConfig(node.id)
-  }, [flushFunctionConfig, node.id])
+  const draft = useFunctionConfigDraft({
+    snapshot,
+    node,
+    models: runtime.models,
+    scheduleFunctionConfig: runtime.scheduleFunctionConfig,
+    onReferenceLimit: () => runtime.setToast(t('canvas.generation.referenceLimit')),
+  })
 
   const { model } = draft
   if (!node.function || !model) {
@@ -105,8 +118,25 @@ export function CanvasGenerationPanel({
               <ParameterJsonToggle draft={draft} />
             </>
           )}
-          <UnknownResolutionControls node={node} />
-          <LocalPendingRunNotice node={node} canvasId={snapshot.document.id} active={active} />
+          <UnknownResolutionControls
+            node={node}
+            resolution={unknownResolution}
+            verification={verificationText}
+            onResolutionChange={setUnknownResolution}
+            onVerificationChange={setVerificationText}
+          />
+          <LocalPendingRunNotice
+            node={node}
+            pending={localPending}
+            active={active}
+            confirmingDiscard={confirmingDiscard}
+            onRequestDiscard={() => setConfirmingDiscard(true)}
+            onCancelDiscard={() => setConfirmingDiscard(false)}
+            onDiscarded={() => {
+              setConfirmingDiscard(false)
+              setLocalPending(null)
+            }}
+          />
           <RunFeedback node={node} />
         </div>
       </div>
@@ -239,11 +269,21 @@ function OutputBadges({ model }: { model: CanvasFunctionDefinitionDTO }) {
 }
 
 /** UNKNOWN 运行必须由用户给出核查结论与说明，面板不自动重试。 */
-function UnknownResolutionControls({ node }: { node: ResourceNode }) {
+function UnknownResolutionControls({
+  node,
+  resolution,
+  verification,
+  onResolutionChange,
+  onVerificationChange,
+}: {
+  node: ResourceNode
+  resolution: CanvasFunctionUnknownResolution
+  verification: string
+  onResolutionChange: (next: CanvasFunctionUnknownResolution) => void
+  onVerificationChange: (next: string) => void
+}) {
   const runtime = useCanvasRuntime()
   const { t } = useI18n()
-  const [resolution, setResolution] = useState<CanvasFunctionUnknownResolution>('RESUME')
-  const [verification, setVerification] = useState('')
   if (node.run?.status !== 'UNKNOWN') {
     return null
   }
@@ -265,14 +305,14 @@ function UnknownResolutionControls({ node }: { node: ResourceNode }) {
           aria-label={t('canvas.generation.verifyDecision')}
           value={resolution}
           options={options}
-          onChange={(next) => setResolution(next as CanvasFunctionUnknownResolution)}
+          onChange={(next) => onResolutionChange(next as CanvasFunctionUnknownResolution)}
         />
         <TextInput
           className="generation-verify-note"
           aria-label={t('canvas.generation.verifyNote')}
           placeholder={t('canvas.generation.verifyNotePlaceholder')}
           value={verification}
-          onChange={(event) => setVerification(event.target.value)}
+          onChange={(event) => onVerificationChange(event.target.value)}
         />
         <Button
           size="compact"
@@ -293,36 +333,38 @@ function UnknownResolutionControls({ node }: { node: ResourceNode }) {
 /** 本地未决运行记录的告警与手动丢弃入口：损坏记录可读，但只在用户确认后清理。 */
 function LocalPendingRunNotice({
   node,
-  canvasId,
+  pending,
   active,
+  confirmingDiscard,
+  onRequestDiscard,
+  onCancelDiscard,
+  onDiscarded,
 }: {
   node: ResourceNode
-  canvasId: string
+  pending: LocalPendingRun | null
   active: boolean
+  confirmingDiscard: boolean
+  onRequestDiscard: () => void
+  onCancelDiscard: () => void
+  onDiscarded: () => void
 }) {
   const runtime = useCanvasRuntime()
   const { t } = useI18n()
-  const [localPending, setLocalPending] = useLocalPendingRun(
-    canvasId,
-    node.id,
-    runtime.localPendingErrors,
-  )
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
-  if (!localPending) {
+  if (!pending) {
     return null
   }
   return (
     <>
       <div className="generation-local-pending-error" role="alert" data-testid="local-pending-error">
         <strong>{t('canvas.generation.localPendingTitle')}</strong>
-        <p>{localPending.message}</p>
+        <p>{pending.message}</p>
         <Button
           variant="inline"
           size="compact"
           danger
           data-testid="discard-pending-btn"
           disabled={active || Boolean(runtime.isNodeInFlight?.(node.id))}
-          onClick={() => setConfirmingDiscard(true)}
+          onClick={onRequestDiscard}
         >
           {t('canvas.generation.discardPending')}
         </Button>
@@ -336,17 +378,13 @@ function LocalPendingRunNotice({
           icon: 'delete',
           tone: 'danger',
           onConfirm: () => {
-            if (localPending.raw !== null) {
-              const discarded = runtime.discardPendingRun(node.id, localPending.raw)
-              if (discarded) {
-                setConfirmingDiscard(false)
-                setLocalPending(null)
-              }
+            if (pending.raw !== null && runtime.discardPendingRun(node.id, pending.raw)) {
+              onDiscarded()
             }
           },
         } : null}
         pending={false}
-        onClose={() => setConfirmingDiscard(false)}
+        onClose={onCancelDiscard}
       />
     </>
   )

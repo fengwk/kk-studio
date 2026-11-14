@@ -84,6 +84,21 @@ function StageInner() {
     ? nodes.find((node) => node.id === selectedFunctionNode.id)
     : null
 
+  const {
+    contextMenu,
+    contextMenuKey,
+    closeContextMenu,
+    openNodeContextMenu,
+    openSelectionContextMenu,
+    handleSelectionChange: handleSelectionChangeMenu,
+  } = useCanvasStageContextMenu({
+    snapshot,
+    models,
+    selectedIds: state.selectedIds,
+    setSelection,
+    closeContextMenuRef,
+  })
+
   const publishMetrics = useCallback(() => {
     const element = containerRef.current
     if (!element) {
@@ -124,21 +139,6 @@ function StageInner() {
     fitViewRef,
     focusSelectionRef,
     zoomRef,
-  })
-
-  const {
-    contextMenu,
-    contextMenuKey,
-    closeContextMenu,
-    openNodeContextMenu,
-    openSelectionContextMenu,
-    handleSelectionChange: handleSelectionChangeMenu,
-  } = useCanvasStageContextMenu({
-    snapshot,
-    models,
-    selectedIds: state.selectedIds,
-    setSelection,
-    closeContextMenuRef,
   })
 
   const graph = useCanvasStageGraph({

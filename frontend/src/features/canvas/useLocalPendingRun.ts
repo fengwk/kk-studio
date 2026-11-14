@@ -16,9 +16,9 @@ export function useLocalPendingRun(
   runtimeErrors: Record<string, LocalPendingRun> | undefined,
 ): [LocalPendingRun | null, (next: LocalPendingRun | null) => void] {
   const [state, setState] = useState<LocalPendingRun | null>(null)
-  const runtimeError = runtimeErrors?.[nodeId]
 
   useEffect(() => {
+    const runtimeError = runtimeErrors?.[nodeId]
     if (runtimeError) {
       setState(runtimeError)
       return
@@ -30,7 +30,7 @@ export function useLocalPendingRun(
     setState(inspected.error && inspected.raw !== null
       ? { message: inspected.error, raw: inspected.raw }
       : null)
-  }, [canvasId, nodeId, runtimeError])
+  }, [canvasId, nodeId, runtimeErrors])
 
   return [state, setState]
 }

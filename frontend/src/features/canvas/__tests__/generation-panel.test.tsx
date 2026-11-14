@@ -826,6 +826,43 @@ describe('Canvas generic generation panel', () => {
     view.unmount()
   })
 
+  it('keeps UNKNOWN verification and the discard confirmation when the model catalog briefly empties', async () => {
+    // 面板短暂拿不到模型定义时不渲染，但核查输入、核查决定与丢弃确认属于面板生命周期，不得被重置。
+    const user = userEvent.setup()
+    window.localStorage.setItem(
+      `kk-studio.canvas.pending-run:${CANVAS_ID}:${NODE_TARGET}`,
+      'corrupt-raw-json-data',
+    )
+    const view = renderPanel({
+      nodeId: NODE_TARGET,
+      requestId: 'c9c9c9c9-9999-4999-8999-999999999994',
+      status: 'UNKNOWN',
+      stage: 'UNKNOWN',
+      error: null,
+      updatedAt: 1786291200000,
+    })
+
+    await user.type(screen.getByLabelText('核查说明'), 'checked provider side')
+    await chooseOption(user, '核查决定', '标记失败')
+    await user.click(await screen.findByTestId('discard-pending-btn'))
+    expect(screen.getByRole('alertdialog', { name: '确认放弃未决记录' })).toBeInTheDocument()
+
+    view.runtime.models = []
+    view.rerenderPanel(view.snapshot, view.target)
+    expect(screen.queryByLabelText('Function 生成面板')).not.toBeInTheDocument()
+
+    view.runtime.models = models
+    view.rerenderPanel(view.snapshot, view.target)
+    expect(screen.getByLabelText('Function 生成面板')).toBeInTheDocument()
+    expect(screen.getByLabelText('核查说明')).toHaveValue('checked provider side')
+    expectSelectValue('核查决定', 'FAILED')
+    expect(screen.getByTestId('local-pending-error')).toBeInTheDocument()
+    expect(screen.getByRole('alertdialog', { name: '确认放弃未决记录' })).toBeInTheDocument()
+
+    window.localStorage.removeItem(`kk-studio.canvas.pending-run:${CANVAS_ID}:${NODE_TARGET}`)
+    view.unmount()
+  })
+
   it('I06: 未决记录异常展示、确认放弃弹窗与状态恢复', async () => {
     const corruptRaw = 'corrupt-raw-json-data'
     const targetId = NODE_TARGET
