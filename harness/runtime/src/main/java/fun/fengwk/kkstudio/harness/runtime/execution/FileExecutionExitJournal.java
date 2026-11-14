@@ -20,6 +20,7 @@ import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
@@ -157,14 +158,12 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         return record;
       }
       try {
-        files.publishNew(
-            target,
-            encode(record),
-            () -> {
-              throw new ExecutionExitJournalConflictException(
-                  ExecutionExitJournalConflictException.Conflict.IDENTITY,
-                  "execution exit journal identity conflict for " + record.executionId());
-            });
+        files.publishNew(target, encode(record));
+      } catch (FileAlreadyExistsException error) {
+        throw new ExecutionExitJournalConflictException(
+            ExecutionExitJournalConflictException.Conflict.IDENTITY,
+            "execution exit journal identity conflict for " + record.executionId(),
+            error);
       } catch (IOException error) {
         throw new ExecutionExitJournalException(
             "cannot persist execution exit journal entry for " + record.executionId(), error);

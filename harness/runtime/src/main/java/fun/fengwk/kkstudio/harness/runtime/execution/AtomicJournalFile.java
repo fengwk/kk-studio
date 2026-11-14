@@ -30,21 +30,17 @@ final class AtomicJournalFile {
   }
 
   /**
-   * 首次发布：目标已存在时原子移动失败，由 {@code onAlreadyExists} 决定抛出的冲突。
+   * 首次发布：目标已存在时原子移动抛出 {@link FileAlreadyExistsException}，由调用方决定冲突语义。
    *
    * @throws IOException 写入 / 移动 / fsync 失败，临时文件已清理
    */
-  void publishNew(Path target, String content, Runnable onAlreadyExists) throws IOException {
+  void publishNew(Path target, String content) throws IOException {
     Path temporary = temporaryPath();
     boolean moved = false;
     Throwable failure = null;
     try {
       writeDurably(temporary, content);
-      try {
-        Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
-      } catch (FileAlreadyExistsException error) {
-        onAlreadyExists.run();
-      }
+      Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
       moved = true;
       forceDirectoryForWrite();
     } catch (IOException | RuntimeException error) {
