@@ -17,6 +17,8 @@ type temporarySweeperFunc func(time.Duration) (int, error)
 func (f temporarySweeperFunc) Sweep(ttl time.Duration) (int, error) { return f(ttl) }
 
 type blockingIDEAdmission struct {
+	// entered must be buffered: HandleCommand signals without blocking, so an unbuffered
+	// channel drops the signal whenever the test is not already receiving.
 	entered         chan struct{}
 	release         chan struct{}
 	leaseStarted    chan time.Time
@@ -180,7 +182,7 @@ func TestRuntimeUpdateRejectsBusyIDEWithExactReason(t *testing.T) {
 
 // RUN-T-107 validates READY and configuration-switch admission for IDE work.
 func TestRuntimeSuspendsIDECommandAndLeaseDuringConfigurationSwitch(t *testing.T) {
-	ide := &blockingIDEAdmission{entered: make(chan struct{}), release: make(chan struct{}), canUpdate: true}
+	ide := &blockingIDEAdmission{entered: make(chan struct{}, 1), release: make(chan struct{}), canUpdate: true}
 	options := runtimeOptionsForTest()
 	options.IDE = ide
 	r, connection := newReadyRuntimeForTest(t, options)
@@ -273,7 +275,7 @@ func TestRuntimeConfigCandidateControlsIDEAdmission(t *testing.T) {
 		}
 		manager.Close()
 	}()
-	ide := &blockingIDEAdmission{entered: make(chan struct{}), release: make(chan struct{}), canUpdate: true}
+	ide := &blockingIDEAdmission{entered: make(chan struct{}, 1), release: make(chan struct{}), canUpdate: true}
 	options := runtimeOptionsForTest()
 	options.IDE = ide
 	options.Status = status
