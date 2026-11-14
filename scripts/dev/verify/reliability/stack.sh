@@ -6,6 +6,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../lib/compose-stack.sh"
+source "$SCRIPT_DIR/../../lib/toolchain.sh"
 COMPOSE_FILE="$REPO_ROOT/deploy/test/compose.yaml"
 PROJECT_NAME=kk-studio-reliability
 COMPOSE=(docker compose --project-name "$PROJECT_NAME" --file "$COMPOSE_FILE")
@@ -35,10 +36,6 @@ step() {
 die() {
   printf 'ERROR: %s\n' "$*" >&2
   exit 1
-}
-
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
 }
 
 compose() {

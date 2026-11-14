@@ -8,17 +8,7 @@ die() {
     exit 2
 }
 
-require_cmd() {
-    command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
-}
-
-resolve_java_home() {
-    local java_home=${JAVA_HOME_21:-${JAVA_HOME:-}}
-    if [[ -z "$java_home" || ! -x "$java_home/bin/java" ]]; then
-        die "JAVA_HOME_21 or JAVA_HOME must point to JDK 21"
-    fi
-    printf '%s\n' "$java_home"
-}
+source "$SCRIPT_DIR/../../lib/toolchain.sh"
 
 json_object_file_is_non_empty() {
     local file=$1
