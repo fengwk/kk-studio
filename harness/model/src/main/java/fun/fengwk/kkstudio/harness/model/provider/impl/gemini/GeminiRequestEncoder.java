@@ -12,15 +12,11 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 
@@ -93,57 +89,8 @@ final class GeminiRequestEncoder {
 
     // 5. contents 映射与 prefix hash 维护（严格按当前实际构建的、已合并相邻同 role 的 wire contents 计算）
     ArrayNode contentsArray = root.putArray("contents");
-
-    String currentRole = null;
-    ArrayNode currentParts = null;
-
-    for (int i = 0; i < request.messages().size(); i++) {
-      ProviderMessage msg = request.messages().get(i);
-
-      if (msg.role() == ProviderMessageRole.ASSISTANT) {
-        String wireRole = "model";
-
-        if (currentParts == null || !wireRole.equals(currentRole)) {
-          ObjectNode contentNode = contentsArray.addObject();
-          contentNode.put("role", wireRole);
-          currentRole = wireRole;
-          currentParts = contentNode.putArray("parts");
-        }
-
-        List<ObjectNode> blockReplayParts =
-            GeminiAssistantReplay.buildParts(descriptor, request.model().modelId(), msg.contents());
-        if (blockReplayParts != null) {
-          for (ObjectNode partNode : blockReplayParts) {
-            currentParts.add(partNode);
-          }
-        } else {
-          for (ProviderContentBlock block : msg.contents()) {
-            GeminiAssistantReplay.encodeBlock(currentParts, block);
-          }
-        }
-      } else { // USER or TOOL
-        String wireRole = "user";
-
-        if (currentParts == null || !wireRole.equals(currentRole)) {
-          ObjectNode contentNode = contentsArray.addObject();
-          contentNode.put("role", wireRole);
-          currentRole = wireRole;
-          currentParts = contentNode.putArray("parts");
-        }
-
-        if (msg.role() == ProviderMessageRole.USER) {
-          for (ProviderContentBlock block : msg.contents()) {
-            GeminiContentEncoder.encodeUserBlock(currentParts, block);
-          }
-        } else { // TOOL
-          for (ProviderContentBlock block : msg.contents()) {
-            if (block instanceof ProviderToolResultBlock resultBlock) {
-              GeminiContentEncoder.encodeToolResultBlock(currentParts, resultBlock);
-            }
-          }
-        }
-      }
-    }
+    GeminiWireContents.encode(
+        contentsArray, request.messages(), descriptor, request.model().modelId());
 
     if (contentsArray.size() == 0) {
       throw new ProviderException(
