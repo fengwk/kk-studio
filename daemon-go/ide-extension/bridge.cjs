@@ -13,7 +13,7 @@
  * The mobile layout uses public workbench commands; no private SDK or DOM hacks are used.
  */
 
-const { LineFramer } = require('./framing.cjs')
+const { INVALID, LineFramer } = require('./framing.cjs')
 const documents = require('./documents.cjs')
 const { createHostActions } = require('./host-actions.cjs')
 
@@ -216,19 +216,18 @@ function createBridgeHost(vscode, options) {
   }
 
   const onData = (chunk) => {
-    const messages = framer.push(chunk)
-    if (messages === null) {
-      failStream()
-      return
-    }
-    for (const message of messages) {
+    const outcome = framer.push(chunk, (message) => {
       if (message && message.type === 'retired') {
         retire()
-        return
+        return false
       }
       if (message && message.type === 'command' && typeof message.id === 'string') {
         void handleCommand(message)
       }
+      return true
+    })
+    if (outcome === INVALID) {
+      failStream()
     }
   }
 
