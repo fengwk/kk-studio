@@ -34,7 +34,6 @@ import {
 } from '@/features/environment/ide/environment-ide-service'
 import {
   buildOpenRequest,
-  compareDecimal,
   IdeProtocolError,
   isIdeProtocolError,
   validateCommandView,
@@ -42,6 +41,7 @@ import {
   validateViewSnapshot,
   viewFingerprint,
 } from '@/features/environment/ide/ide-contract'
+import { compareDecimal } from '@/features/environment/ide/ide-decimal'
 import {
   buildUsageViews,
   initialViews,

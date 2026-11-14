@@ -1,6 +1,7 @@
 import type { EnvironmentIdeOpenMode } from '@/shared/api/generated/contracts'
 import type { ApplicationEventIdeUseView } from '@/shared/app-events/protocol'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { CANONICAL_POSITIVE_DECIMAL } from '@/features/environment/ide/ide-decimal'
 import type {
   IdePendingClaim,
   IdePresentation,
@@ -40,8 +41,6 @@ export interface IdeViewState {
   terminalError?: string
   errorMessage?: string
 }
-
-export const POSITIVE_DECIMAL = /^[1-9][0-9]*$/
 
 /** 从 session 恢复的运行身份进入统一对账；不预置任何“已绑定”结论。 */
 export function initialViews(
@@ -139,7 +138,7 @@ export function buildUsageViews(
     const bindingEpoch = isOverride ? override.bindingEpoch : view.bindingEpoch
     if (
       bindingEpoch != null
-      && POSITIVE_DECIMAL.test(bindingEpoch)
+      && CANONICAL_POSITIVE_DECIMAL.test(bindingEpoch)
       && (isOverride || view.status === 'ready')
     ) {
       entry.bindingEpoch = bindingEpoch

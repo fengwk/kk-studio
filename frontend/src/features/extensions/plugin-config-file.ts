@@ -4,7 +4,7 @@ import {
 } from '@/features/extensions/plugin-config-json'
 
 /** 外部 JSON 文件失败的封闭原因：超限、非严格 UTF-8、非法 JSON 语法、读取本身失败。 */
-export type JsonFileReadFailure = 'too-large' | 'not-utf8' | 'invalid-json' | 'read-failed'
+type JsonFileReadFailure = 'too-large' | 'not-utf8' | 'invalid-json' | 'read-failed'
 
 export type JsonFileReadResult =
   | { ok: true; text: string }

@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IdeOverlayPanel, type IdeOverlayPanelProps } from '@/features/environment/ide/IdeOverlayPanel'
-import type { IdeViewState } from '@/features/environment/ide/IdePanelProvider'
+import type { IdeViewState } from '@/features/environment/ide/ide-view-state'
 
 const listIdeDirectories = vi.hoisted(() => vi.fn())
 

@@ -16,7 +16,7 @@ import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type { ApplicationEventConnectionState } from '@/shared/app-events/connection'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
-import type { IdeViewState } from '@/features/environment/ide/IdePanelProvider'
+import type { IdeViewState } from '@/features/environment/ide/ide-view-state'
 import type { IdeBrowserSessionStatus } from '@/features/environment/ide/ide-browser-session'
 import './ide-overlay-panel.css'
 

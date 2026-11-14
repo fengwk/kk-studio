@@ -29,7 +29,7 @@ export type PluginSchemaElement =
       additionalProperties: boolean
     }
 
-export interface PluginRootSchema {
+interface PluginRootSchema {
   description?: string
   properties: Record<string, PluginSchemaElement>
   required: readonly string[]

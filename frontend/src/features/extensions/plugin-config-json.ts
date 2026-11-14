@@ -110,13 +110,6 @@ export function getNodeSlice(text: string, node: Node): string {
 }
 
 /**
- * 定位指定路径的节点。
- */
-export function getNodeAtPath(tree: Node, path: JSONPath): Node | undefined {
-  return findNodeAtLocation(tree, path)
-}
-
-/**
  * 从 AST 中安全读取未知值并收窄。
  */
 export function getNodeSafeValue(node: Node, rawJson: string): unknown {

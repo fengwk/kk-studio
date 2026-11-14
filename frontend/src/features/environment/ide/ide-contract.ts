@@ -6,10 +6,12 @@ import type {
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { validateIdeEntryUrl } from '@/features/environment/ide/ide-url'
+import {
+  CANONICAL_NON_NEGATIVE_DECIMAL,
+  CANONICAL_POSITIVE_DECIMAL,
+  compareDecimal,
+} from '@/features/environment/ide/ide-decimal'
 import { isIdeDirectory, type IdePendingClaim } from '@/features/environment/ide/ide-tab-state'
-
-export const CANONICAL_NON_NEGATIVE_DECIMAL = /^(0|[1-9][0-9]*)$/
-export const CANONICAL_POSITIVE_DECIMAL = /^[1-9][0-9]*$/
 
 /** 前端解析到的 IDE 契约错误；与网络结果未知严格区分，绝不触发自动重试。 */
 export class IdeProtocolError extends Error {
@@ -21,14 +23,6 @@ export class IdeProtocolError extends Error {
 
 export function isIdeProtocolError(error: unknown): error is IdeProtocolError {
   return error instanceof IdeProtocolError
-}
-
-/** 任意十进制字符串比较；revision 允许 gap，不要求 +1。 */
-export function compareDecimal(left: string, right: string): number {
-  if (left.length !== right.length) {
-    return left.length < right.length ? -1 : 1
-  }
-  return left < right ? -1 : left > right ? 1 : 0
 }
 
 /**

@@ -4,7 +4,7 @@ import type { JSONPath } from 'jsonc-parser'
  * 局部草稿的键就是 `JSON.stringify(path)`，因此这里只按同一条规范路径做判断，不引入第二套路径表示。
  * 键由本编辑器自己生成，调用方保证它可以被解析为路径。
  */
-export function draftKeyPath(key: string): JSONPath {
+function draftKeyPath(key: string): JSONPath {
   return JSON.parse(key) as JSONPath
 }
 
@@ -18,7 +18,7 @@ export function isDraftKeyUnderPath(key: string, path: JSONPath): boolean {
  * 该草稿键是否已随结构删除失效：位于 arrayPath 之下、索引不小于被删条目。
  * 被删条目自身的键与随后移位的条目键都指向已不存在或已移位的条目，只有索引更小的条目保持原位。
  */
-export function isStaleArrayDraftKey(
+function isStaleArrayDraftKey(
   key: string,
   arrayPath: JSONPath,
   removedIndex: number,

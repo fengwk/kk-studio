@@ -47,7 +47,7 @@ export function isEnvironmentRuntimeUnavailableError(error: unknown): boolean {
  * 只有已知且为正的总量才能计算百分比；总长未知时返回 null，由界面展示实际字节数。
  * 使用向下取整，避免下载尚未完成时提前显示 100%。
  */
-export function updateDownloadPercent(
+function updateDownloadPercent(
   downloadedBytes: string,
   totalBytes: string | null,
 ): number | null {
@@ -98,7 +98,7 @@ export type EnvironmentConfigState =
   | 'failed'
   | 'unknown'
 
-export type EnvironmentProxyView =
+type EnvironmentProxyView =
   | { known: false }
   | { known: true; url: string | null }
 

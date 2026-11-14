@@ -29,21 +29,12 @@ import {
 } from '@/features/environment/ide/ide-tab-state'
 import { IdeOverlayPanel, type IdeCloseResult } from '@/features/environment/ide/IdeOverlayPanel'
 import { IdeSplitShell } from '@/features/environment/ide/IdeSplitShell'
-import {
-  recoveryFromViews,
-  type IdeViewState,
-  type IdeViewStatus,
-} from '@/features/environment/ide/ide-view-state'
+import { recoveryFromViews } from '@/features/environment/ide/ide-view-state'
 import { useIdeClaimReconciliation } from '@/features/environment/ide/use-ide-claim-reconciliation'
 import { useIdeBrowserSession } from '@/features/environment/ide/ide-browser-session'
 
-export type { IdeViewState, IdeViewStatus, IdeActionMode }
-
-export interface IdePanelStorageProps {
+interface IdePanelProviderProps {
   storage?: IdeTabStorage
-}
-
-export interface IdePanelProviderProps extends IdePanelStorageProps {
   /** 仅 `/chats/:chatId` 时为 true；宿主离开 Chat 后保持 DOM 但 hidden + inert。 */
   active: boolean
 }

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { TabStorageArea } from '@/shared/lib/tab-storage'
 import {
   IDE_MAX_OPEN_ENVIRONMENTS,
   IDE_MAX_RECENT_DIRECTORIES,
@@ -14,7 +15,6 @@ import {
   type IdePendingClaim,
   type IdePresentation,
   type IdeRecovery,
-  type IdeTabStorageArea,
 } from '@/features/environment/ide/ide-tab-state'
 
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
@@ -26,7 +26,7 @@ const DAEMON_B = 'd2000000-0000-4000-8000-000000000002'
 const CLAIM_A = 'e1000000-0000-4000-8000-000000000001'
 const BROWSER_A = 'b1000000-0000-4000-8000-000000000001'
 
-class MemoryStorage implements IdeTabStorageArea {
+class MemoryStorage implements TabStorageArea {
   readonly values = new Map<string, string>()
   writes = 0
   failWrites = false
