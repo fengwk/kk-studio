@@ -1,37 +1,26 @@
 import { MoveHorizontal, X } from 'lucide-react'
-import {
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasSnapshot, ResourceNode } from '@/features/canvas/domain'
-import { generationPanelPosition } from '@/features/canvas/generation-panel-position'
 import {
-  canAddReference,
-  createDefaultFunctionConfig,
-  extractParametersFromDefinition,
-  filterConfigReferences,
-  parseFunctionConfig,
-  referenceCandidates,
-  referenceKey,
-  type ReferenceCandidate,
-} from '@/features/canvas/generation'
-import { CanvasResourceThumbnail } from '@/features/canvas/nodes/resources/CanvasResourceThumbnail'
-import type { CanvasFunctionConfig, StageMetrics } from '@/features/canvas/types'
+  ModelSelect,
+  ParameterControls,
+  ParameterJsonToggle,
+  PromptEditor,
+  RawJsonEditor,
+} from '@/features/canvas/generation-panel-config'
+import { generationPanelPosition } from '@/features/canvas/generation-panel-position'
+import { runDisplayLabel, runStatusKey } from '@/features/canvas/generation-panel-labels'
+import type { StageMetrics } from '@/features/canvas/types'
 import type { StoredCanvasViewport } from '@/features/canvas/viewport-storage'
-import { inspectLocalPendingRun } from '@/features/canvas/function-run'
+import { useFunctionConfigDraft } from '@/features/canvas/useFunctionConfigDraft'
+import { useLocalPendingRun, type LocalPendingRun } from '@/features/canvas/useLocalPendingRun'
 import { Button } from '@/shared/ui/controls/Button'
 import { IconButton } from '@/shared/ui/controls/IconButton'
-import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { Select, type SelectOption } from '@/shared/ui/controls/Select'
-import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { ConfirmActionModal } from '@/shared/ui/overlays/ConfirmActionModal'
-import { useI18n, type TranslationKey } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
 import type {
   CanvasFunctionDefinitionDTO,
   CanvasFunctionUnknownResolution,
@@ -44,6 +33,10 @@ export interface CanvasGenerationPanelAnchor {
   stage: StageMetrics
 }
 
+/**
+ * Function 节点的工作台：编辑该节点的函数配置（模型、参数、参考资源、完整 JSON），
+ * 展示运行状态，并让用户手动丢弃损坏的本地未决运行记录。
+ */
 export function CanvasGenerationPanel({
   snapshot,
   node,
@@ -56,94 +49,104 @@ export function CanvasGenerationPanel({
   const runtime = useCanvasRuntime()
   const { t } = useI18n()
   const { flushFunctionConfig } = runtime
-  const sourceModel = modelForNode(runtime.models, node)
-  const [modelKey, setModelKey] = useState(sourceModel?.name ?? node.function?.name ?? '')
-  const model = runtime.models.find((item) => item.name === modelKey) ?? sourceModel
-  const [expanded, setExpanded] = useState(false)
-  const [config, setConfig] = useState<CanvasFunctionConfig>(() => (
-    sourceModel && node.function
-      ? parseFunctionConfig(node.function.args, sourceModel)
-      : sourceModel
-        ? createDefaultFunctionConfig(sourceModel)
-        : { prompt: '', references: [], parameters: {} }
-  ))
+
+  // 本地未决记录与丢弃确认属于面板生命周期：目录短暂为空导致面板不渲染时也不能重置。
+  const [localPending, setLocalPending] = useLocalPendingRun(
+    snapshot.document.id,
+    node.id,
+    runtime.localPendingErrors,
+  )
+  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
+  // UNKNOWN 运行必须由用户给出核查结论与说明，面板不自动重试。
   const [unknownResolution, setUnknownResolution] = useState<CanvasFunctionUnknownResolution>('RESUME')
   const [verificationText, setVerificationText] = useState('')
-  const [showJsonArgs, setShowJsonArgs] = useState(false)
-  const [jsonArgsText, setJsonArgsText] = useState(() => JSON.stringify(config.rawArgs ?? config.parameters, null, 2))
-  const [jsonDirty, setJsonDirty] = useState(false)
-  const [jsonError, setJsonError] = useState<string | null>(null)
-  const [confirmingDiscard, setConfirmingDiscard] = useState(false)
-  const [localPendingState, setLocalPendingState] = useState<{ message: string; raw: string | null } | null>(null)
 
-  useEffect(() => {
-    if (runtime.localPendingErrors?.[node.id]) {
-      setLocalPendingState(runtime.localPendingErrors[node.id])
-      return
-    }
-    const canvasId = snapshot.document.id
-    if (canvasId) {
-      const inspected = inspectLocalPendingRun(canvasId, node.id)
-      if (inspected.error && inspected.raw !== null) {
-        setLocalPendingState({ message: inspected.error, raw: inspected.raw })
-      } else {
-        setLocalPendingState(null)
-      }
-    }
-  }, [node.id, snapshot.document.id, runtime.localPendingErrors])
-
-  const [panelSize, setPanelSize] = useState({ width: 560, height: 190 })
-  const panelRef = useRef<HTMLElement | null>(null)
-  const promptInputRef = useRef<HTMLTextAreaElement | null>(null)
-
-  // Every local edit gets a monotonic version and semantic source identity.
-  const draftVersionRef = useRef(0)
-  const dirtyRef = useRef(false)
-  const sourceRef = useRef<{ identity: string; modelSignature: string } | null>(null)
-  const localSourceVersionsRef = useRef(new Map<string, number>())
-
-  const candidates = useMemo(
-    () => model ? referenceCandidates(snapshot, node.id, model) : [],
-    [model, node.id, snapshot],
-  )
-  const candidateByKey = useMemo(
-    () => new Map(candidates.map((candidate) => [
-      referenceKey(candidate.nodeId, candidate.index),
-      candidate,
-    ])),
-    [candidates],
-  )
-  const referencedKeys = useMemo(
-    () => new Set(config.references.map((ref) => referenceKey(ref.nodeId, ref.index))),
-    [config.references],
-  )
-
-  const panelPosition = useMemo(() => (
-    anchor
-      ? (() => {
-        const compactDesktop = anchor.stage.width <= 1600
-        return generationPanelPosition({
-          node: anchor.node,
-          viewport: anchor.viewport,
-          stage: anchor.stage,
-          panel: panelSize,
-          gap: compactDesktop ? 8 : undefined,
-          padding: compactDesktop ? 4 : undefined,
-        })
-      })()
-      : null
-  ), [anchor, panelSize])
-
-  const panelStyle: CSSProperties | undefined = panelPosition ? {
-    bottom: 'auto',
-    left: panelPosition.left,
-    top: panelPosition.top,
-    transform: 'none',
-  } : undefined
-
+  // 离开面板（卸载、切换选中节点）前冲刷尚未发送的函数配置。
   useEffect(() => () => {
     void flushFunctionConfig(node.id)
   }, [flushFunctionConfig, node.id])
+
+  const [expanded, setExpanded] = useState(false)
+  const panelRef = useRef<HTMLElement | null>(null)
+  const panelSize = useMeasuredPanelSize(panelRef)
+  const panelPosition = useMemo(
+    () => (anchor ? anchorPlacement(anchor, panelSize) : null),
+    [anchor, panelSize],
+  )
+
+  const draft = useFunctionConfigDraft({
+    snapshot,
+    node,
+    models: runtime.models,
+    scheduleFunctionConfig: runtime.scheduleFunctionConfig,
+    onReferenceLimit: () => runtime.setToast(t('canvas.generation.referenceLimit')),
+  })
+
+  const { model } = draft
+  if (!node.function || !model) {
+    return null
+  }
+
+  const active = isRunActive(node)
+  return (
+    <section
+      className={`generation-panel ${expanded ? 'expanded' : ''}`}
+      aria-label={t('canvas.generation.panelAria')}
+      data-placement={panelPosition?.placement}
+      ref={panelRef}
+      style={anchoredStyle(panelPosition)}
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => event.stopPropagation()}
+    >
+      <PanelHeader
+        node={node}
+        model={model}
+        expanded={expanded}
+        onToggleExpanded={() => setExpanded((current) => !current)}
+        onClose={() => runtime.setSelection([])}
+      />
+      {draft.config.rawArgs
+        ? <RawJsonEditor draft={draft} />
+        : <PromptEditor draft={draft} active={active} />}
+      <div className="generation-footer">
+        <OutputBadges model={model} />
+        <div className="generation-controls">
+          <ModelSelect draft={draft} model={model} disabled={active} />
+          {draft.config.rawArgs ? null : (
+            <>
+              <ParameterControls draft={draft} disabled={active} />
+              <ParameterJsonToggle draft={draft} />
+            </>
+          )}
+          <UnknownResolutionControls
+            node={node}
+            resolution={unknownResolution}
+            verification={verificationText}
+            onResolutionChange={setUnknownResolution}
+            onVerificationChange={setVerificationText}
+          />
+          <LocalPendingRunNotice
+            node={node}
+            pending={localPending}
+            active={active}
+            confirmingDiscard={confirmingDiscard}
+            onRequestDiscard={() => setConfirmingDiscard(true)}
+            onCancelDiscard={() => setConfirmingDiscard(false)}
+            onDiscarded={() => {
+              setConfirmingDiscard(false)
+              setLocalPending(null)
+            }}
+          />
+          <RunFeedback node={node} />
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/** 面板实测尺寸，用于把它锚定到节点下方；首帧在 layout 阶段测量，之后随 ResizeObserver 更新。 */
+function useMeasuredPanelSize(panelRef: React.RefObject<HTMLElement | null>) {
+  const [size, setSize] = useState({ width: 560, height: 190 })
 
   useLayoutEffect(() => {
     const element = panelRef.current
@@ -153,7 +156,7 @@ export function CanvasGenerationPanel({
     const publish = () => {
       const rect = element.getBoundingClientRect()
       if (rect.width > 0 && rect.height > 0) {
-        setPanelSize((current) => (
+        setSize((current) => (
           current.width === rect.width && current.height === rect.height
             ? current
             : { width: rect.width, height: rect.height }
@@ -167,610 +170,241 @@ export function CanvasGenerationPanel({
     const observer = new ResizeObserver(publish)
     observer.observe(element)
     return () => observer.disconnect()
-  }, [])
+  }, [panelRef])
 
-  const sourceConfig = useMemo(() => (
-    node.function && sourceModel
-      ? parseFunctionConfig(node.function.args, sourceModel)
-      : null
-  ), [node.function, sourceModel])
+  return size
+}
 
-  const sourceIdentity = node.function && sourceConfig
-    ? functionSourceIdentity(node.function.name, sourceConfig)
-    : ''
-  const sourceModelSignature = sourceModel ? JSON.stringify(sourceModel) : ''
+/** 窄屏（≤1600px）收紧面板与节点的间距，避免小窗口下把面板挤出可视区。 */
+function anchorPlacement(
+  anchor: CanvasGenerationPanelAnchor,
+  panel: { width: number; height: number },
+) {
+  const compactDesktop = anchor.stage.width <= 1600
+  return generationPanelPosition({
+    node: anchor.node,
+    viewport: anchor.viewport,
+    stage: anchor.stage,
+    panel,
+    gap: compactDesktop ? 8 : undefined,
+    padding: compactDesktop ? 4 : undefined,
+  })
+}
 
-  useEffect(() => {
-    if (!node.function || !sourceModel || !sourceConfig) {
-      return
-    }
-    const previous = sourceRef.current
-    if (
-      previous?.identity === sourceIdentity
-      && previous.modelSignature === sourceModelSignature
-    ) {
-      return
-    }
-    sourceRef.current = {
-      identity: sourceIdentity,
-      modelSignature: sourceModelSignature,
-    }
-    const acknowledgedVersion = localSourceVersionsRef.current.get(sourceIdentity)
-    if (acknowledgedVersion !== undefined) {
-      for (const [identity, version] of localSourceVersionsRef.current) {
-        if (version <= acknowledgedVersion) {
-          localSourceVersionsRef.current.delete(identity)
-        }
-      }
-      if (dirtyRef.current && draftVersionRef.current > acknowledgedVersion) {
-        return
-      }
-    } else {
-      localSourceVersionsRef.current.clear()
-    }
-    setModelKey(node.function.name)
-    if (dirtyRef.current) {
-      // 保留正在键入的 prompt，同步更新外部 references/parameters 变更
-      setConfig((current) => ({
-        ...current,
-        rawArgs: current.rawArgs ? (jsonDirty ? current.rawArgs : sourceConfig.rawArgs) : undefined,
-        rawError: sourceConfig.rawError,
-        references: sourceConfig.references,
-        parameters: jsonDirty ? current.parameters : sourceConfig.parameters,
-      }))
-    } else {
-      setConfig(sourceConfig)
-      dirtyRef.current = false
-      if (!jsonDirty) {
-        setJsonArgsText(JSON.stringify(sourceConfig.rawArgs ?? sourceConfig.parameters, null, 2))
-        setJsonError(null)
-      }
-    }
-  }, [
-    jsonDirty,
-    node.function,
-    sourceIdentity,
-    sourceConfig,
-    sourceModel,
-    sourceModelSignature,
-  ])
+function anchoredStyle(
+  position: ReturnType<typeof generationPanelPosition> | null,
+): CSSProperties | undefined {
+  return position
+    ? { bottom: 'auto', left: position.left, top: position.top, transform: 'none' }
+    : undefined
+}
 
-  useEffect(() => {
-    if (!model) {
-      return
-    }
-    const filtered = filterConfigReferences(config, candidates, model)
-    if (JSON.stringify(filtered.references) !== JSON.stringify(config.references)) {
-      updateConfig(filtered)
-    }
-    // Candidate changes are the only reason for this reconciliation.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [candidates, model])
+function isRunActive(node: ResourceNode): boolean {
+  return node.run?.status === 'READY' || node.run?.status === 'RUNNING'
+}
 
-  if (!node.function || !model) {
+function PanelHeader({
+  node,
+  model,
+  expanded,
+  onToggleExpanded,
+  onClose,
+}: {
+  node: ResourceNode
+  model: CanvasFunctionDefinitionDTO
+  expanded: boolean
+  onToggleExpanded: () => void
+  onClose: () => void
+}) {
+  const { t } = useI18n()
+  return (
+    <div className="generation-panel-head">
+      <div>
+        <span className="generation-node-kicker">{t('canvas.generation.nodeKicker')}</span>
+        <strong>{model.description || model.name}</strong>
+        <span className={`generation-node-status ${node.run?.status.toLowerCase() ?? 'ready'}`}>
+          {node.run ? t(runStatusKey(node.run.status)) : t('canvas.generation.status.ready')}
+        </span>
+      </div>
+      <div className="generation-panel-actions">
+        <IconButton
+          label={t(expanded ? 'canvas.generation.collapse' : 'canvas.generation.expand')}
+          size="compact"
+          aria-expanded={expanded}
+          onClick={onToggleExpanded}
+        >
+          <MoveHorizontal aria-hidden="true" />
+        </IconButton>
+        <IconButton
+          className="close-panel"
+          label={t('canvas.generation.close')}
+          size="compact"
+          onClick={onClose}
+        >
+          <X aria-hidden="true" />
+        </IconButton>
+      </div>
+    </div>
+  )
+}
+
+function OutputBadges({ model }: { model: CanvasFunctionDefinitionDTO }) {
+  const { t } = useI18n()
+  if (!model.outputs || model.outputs.length === 0) {
     return null
   }
-
-  const activeModel = model
-  const outputKind = sourceModel?.outputs?.[0]?.kind
-    ?? activeModel.outputs?.[0]?.kind
-  const modelOptions = runtime.models.filter((item) =>
-    item.outputs?.[0]?.kind === outputKind
+  return (
+    <div className="generation-outputs-badge-list" aria-label={t('canvas.generation.outputsAria')}>
+      {model.outputs.map((output, index) => (
+        <span
+          key={index}
+          className="generation-output-badge"
+          title={output.name ? `${output.name} · ${output.kind}` : output.kind}
+        >
+          {output.kind}{output.name ? `: ${output.name}` : ''}
+        </span>
+      ))}
+    </div>
   )
-  const modelSelectOptions: SelectOption[] = modelOptions.map((item) => ({
-    value: item.name,
-    label: item.available === false
-      ? t('canvas.generation.modelUnavailableOption', {
-        label: item.description || item.name,
-        reason: item.unavailableReason ?? t('canvas.generation.modelUnavailable'),
-      })
-      : (item.description || item.name),
-    disabled: item.available === false,
-  }))
-  const active = node.run?.status === 'READY' || node.run?.status === 'RUNNING'
-  const unknownResolutionOptions: SelectOption[] = [
+}
+
+/** UNKNOWN 运行必须由用户给出核查结论与说明，面板不自动重试。 */
+function UnknownResolutionControls({
+  node,
+  resolution,
+  verification,
+  onResolutionChange,
+  onVerificationChange,
+}: {
+  node: ResourceNode
+  resolution: CanvasFunctionUnknownResolution
+  verification: string
+  onResolutionChange: (next: CanvasFunctionUnknownResolution) => void
+  onVerificationChange: (next: string) => void
+}) {
+  const runtime = useCanvasRuntime()
+  const { t } = useI18n()
+  if (node.run?.status !== 'UNKNOWN') {
+    return null
+  }
+  const note = verification.trim()
+  const options: SelectOption[] = [
     { value: 'RESUME', label: t('canvas.generation.resolution.resume') },
     { value: 'FAILED', label: t('canvas.generation.resolution.failed') },
     { value: 'CANCELLED', label: t('canvas.generation.resolution.cancelled') },
   ]
-
-  function updateConfig(next: CanvasFunctionConfig, nextModelKey = modelKey) {
-    setConfig(next)
-    const version = draftVersionRef.current + 1
-    draftVersionRef.current = version
-    dirtyRef.current = true
-    localSourceVersionsRef.current.set(
-      functionSourceIdentity(nextModelKey, next),
-      version,
-    )
-    if (!jsonDirty) {
-      setJsonArgsText(JSON.stringify(next.rawArgs ?? next.parameters, null, 2))
-      setJsonError(null)
-    }
-    runtime.scheduleFunctionConfig(node.id, nextModelKey, next)
-  }
-
-  /** 数值参数（整数走共享 NumberInput，小数保留原生 step=any 输入）共用同一校验。 */
-  function applyNumberParameter(
-    parameter: ReturnType<typeof extractParametersFromDefinition>[number],
-    raw: string,
-  ) {
-    const value = raw.trim() === '' ? Number.NaN : Number(raw)
-    if (
-      !Number.isFinite(value)
-      || (parameter.isInteger && !Number.isInteger(value))
-      || (parameter.min !== null && value < parameter.min)
-      || (parameter.max !== null && value > parameter.max)
-    ) {
-      return
-    }
-    updateConfig({
-      ...config,
-      parameters: {
-        ...config.parameters,
-        [parameter.key]: value,
-      },
-    })
-  }
-
-  function changeModel(nextName: string) {
-    const nextModel = runtime.models.find((item) => item.name === nextName)
-    if (!nextModel) {
-      return
-    }
-    const defaults = createDefaultFunctionConfig(nextModel)
-    const nextCandidates = referenceCandidates(snapshot, node.id, nextModel)
-    const nextConfig = filterConfigReferences({
-      prompt: config.prompt,
-      references: config.references,
-      parameters: defaults.parameters,
-    }, nextCandidates, nextModel)
-    setModelKey(nextModel.name)
-    updateConfig(nextConfig, nextModel.name)
-  }
-
-  function updatePrompt(promptText: string) {
-    updateConfig({
-      ...config,
-      prompt: promptText,
-    })
-  }
-
-  function toggleCandidate(candidate: ReferenceCandidate) {
-    const key = referenceKey(candidate.nodeId, candidate.index)
-    if (referencedKeys.has(key)) {
-      const nextRefs = config.references.filter((ref) => referenceKey(ref.nodeId, ref.index) !== key)
-      updateConfig({ ...config, references: nextRefs })
-    } else {
-      if (!canAddReference(config.references, candidate, candidates, activeModel)) {
-        runtime.setToast(t('canvas.generation.referenceLimit'))
-        return
-      }
-      const nextRefs = [
-        ...config.references,
-        { type: 'resource' as const, nodeId: candidate.nodeId, index: candidate.index },
-      ]
-      updateConfig({ ...config, references: nextRefs })
-    }
-  }
-
-  function removeReference(nodeId: string, index: number) {
-    const key = referenceKey(nodeId, index)
-    const nextRefs = config.references.filter((ref) => referenceKey(ref.nodeId, ref.index) !== key)
-    updateConfig({ ...config, references: nextRefs })
-  }
-
   return (
-    <section
-      className={`generation-panel ${expanded ? 'expanded' : ''}`}
-      aria-label={t('canvas.generation.panelAria')}
-      data-placement={panelPosition?.placement}
-      ref={panelRef}
-      style={panelStyle}
-      onPointerDown={(event) => event.stopPropagation()}
-      onClick={(event) => event.stopPropagation()}
+    <div
+      className="generation-unknown-resolution"
+      role="region"
+      aria-label={t('canvas.generation.unknownRegionAria')}
     >
-      <div className="generation-panel-head">
-        <div>
-          <span className="generation-node-kicker">{t('canvas.generation.nodeKicker')}</span>
-          <strong>{model.description || model.name}</strong>
-          <span className={`generation-node-status ${node.run?.status.toLowerCase() ?? 'ready'}`}>
-            {node.run
-              ? t(runStatusKey(node.run.status))
-              : t('canvas.generation.status.ready')}
-          </span>
-        </div>
-        <div className="generation-panel-actions">
-          <IconButton
-            label={t(expanded ? 'canvas.generation.collapse' : 'canvas.generation.expand')}
-            size="compact"
-            aria-expanded={expanded}
-            onClick={() => setExpanded((current) => !current)}
-          >
-            <MoveHorizontal aria-hidden="true" />
-          </IconButton>
-          <IconButton
-            className="close-panel"
-            label={t('canvas.generation.close')}
-            size="compact"
-            onClick={() => runtime.setSelection([])}
-          >
-            <X aria-hidden="true" />
-          </IconButton>
-        </div>
+      <div className="generation-unknown-title">{t('canvas.generation.unknownTitle')}</div>
+      <div className="generation-unknown-controls">
+        <Select
+          aria-label={t('canvas.generation.verifyDecision')}
+          value={resolution}
+          options={options}
+          onChange={(next) => onResolutionChange(next as CanvasFunctionUnknownResolution)}
+        />
+        <TextInput
+          className="generation-verify-note"
+          aria-label={t('canvas.generation.verifyNote')}
+          placeholder={t('canvas.generation.verifyNotePlaceholder')}
+          value={verification}
+          onChange={(event) => onVerificationChange(event.target.value)}
+        />
+        <Button
+          size="compact"
+          disabled={!note}
+          onClick={() => {
+            if (node.run?.requestId && note) {
+              void runtime.resolveFunctionRun(node.id, node.run.requestId, resolution, note)
+            }
+          }}
+        >
+          {t('canvas.generation.verifySubmit')}
+        </Button>
       </div>
+    </div>
+  )
+}
 
-      {config.rawArgs ? (
-        <div className="generation-raw-editor">
-          {config.rawError ? (
-            <div role="alert" className="generation-json-error">
-              {config.rawError}
-            </div>
-          ) : null}
-          <span className="generation-prompt-label">{t('canvas.generation.jsonConfiguration')}</span>
-          <TextArea
-            aria-label={t('canvas.generation.jsonArgsAria')}
-            className="generation-json-textarea"
-            value={jsonArgsText}
-            onChange={(e) => {
-              const text = e.target.value
-              setJsonArgsText(text)
-              setJsonDirty(true)
-              try {
-                const parsed = JSON.parse(text)
-                if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                  setJsonError(null)
-                  updateConfig({
-                    ...config,
-                    rawArgs: parsed,
-                    rawError: undefined,
-                  })
-                } else {
-                  setJsonError(t('canvas.generation.jsonObjectRequired'))
-                }
-              } catch {
-                setJsonError(t('canvas.generation.jsonSyntaxError'))
-              }
-            }}
-          />
-          {jsonError ? (
-            <div role="alert" className="generation-json-error">
-              {jsonError}
-            </div>
-          ) : null}
-        </div>
-      ) : (
-        <>
-          {candidates.length > 0 ? (
-            <div className="generation-reference-row" aria-label={t('canvas.generation.references')}>
-              {candidates.map((candidate) => (
-                <button
-                  key={referenceKey(candidate.nodeId, candidate.index)}
-                  type="button"
-                  className={`generation-reference ${
-                    referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))
-                      ? 'referenced'
-                      : ''
-                  }`}
-                  onClick={() => toggleCandidate(candidate)}
-                  title={candidate.label}
-                  aria-label={t('canvas.generation.referenceInsert', { label: candidate.label })}
-                  aria-pressed={referencedKeys.has(referenceKey(candidate.nodeId, candidate.index))}
-                >
-                  <CanvasResourceThumbnail resource={candidate.resource} />
-                  <span>{candidate.label}</span>
-                </button>
-              ))}
-            </div>
-          ) : null}
-
-          {config.references.length > 0 ? (
-            <div className="generation-attached-references" aria-label={t('canvas.generation.attachedReferencesAria')}>
-              {config.references.map((ref) => {
-                const candidate = candidateByKey.get(referenceKey(ref.nodeId, ref.index))
-                const label = candidate?.label ?? `@${ref.nodeId}_${ref.index}`
-                return (
-                  <span key={referenceKey(ref.nodeId, ref.index)} className="generation-attached-chip">
-                    {candidate ? <CanvasResourceThumbnail resource={candidate.resource} /> : null}
-                    <span>{label}</span>
-                    <button
-                      type="button"
-                      aria-label={t('canvas.generation.referenceRemove', { label })}
-                      onClick={() => removeReference(ref.nodeId, ref.index)}
-                    >
-                      ×
-                    </button>
-                  </span>
-                )
-              })}
-            </div>
-          ) : null}
-
-          <span className="generation-prompt-label">{t('canvas.generation.promptLabel')}</span>
-          <div className="prompt-segment-composer" aria-label={t('canvas.generation.composerAria')}>
-            <textarea
-              ref={promptInputRef}
-              className="generation-prompt-input"
-              aria-label={t('canvas.generation.promptLabel')}
-              value={config.prompt ?? ''}
-              placeholder={t('canvas.generation.placeholder')}
-              disabled={active}
-              onChange={(event) => updatePrompt(event.target.value)}
-              rows={2}
-            />
-          </div>
-        </>
-      )}
-
-      <div className="generation-footer">
-        {activeModel.outputs && activeModel.outputs.length > 0 ? (
-          <div className="generation-outputs-badge-list" aria-label={t('canvas.generation.outputsAria')}>
-            {activeModel.outputs.map((out, idx) => (
-              <span key={idx} className="generation-output-badge" title={out.name ? `${out.name} · ${out.kind}` : out.kind}>
-                {out.kind}{out.name ? `: ${out.name}` : ''}
-              </span>
-            ))}
-          </div>
-        ) : null}
-        <div className="generation-controls">
-          <div className="generation-control">
-            <span className="sr-only">{t('canvas.generation.modelLabel')}</span>
-            <Select
-              aria-label={t('canvas.generation.modelLabel')}
-              value={modelKey}
-              disabled={active}
-              options={modelSelectOptions}
-              onChange={changeModel}
-            />
-          </div>
-        {!config.rawArgs ? extractParametersFromDefinition(activeModel).map((parameter) => (
-          <div className="generation-control" key={parameter.key}>
-            <span>{parameter.label}</span>
-            {parameter.type === 'ENUM' ? (
-              <Select
-                aria-label={parameter.label}
-                value={String(config.parameters[parameter.key] ?? parameter.defaultValue ?? '')}
-                disabled={active}
-                options={parameter.options.map((option) => ({
-                  value: String(option),
-                  label: String(option),
-                }))}
-                onChange={(next) => {
-                  const matched = parameter.options.find((opt) => String(opt) === next)
-                  const nextVal = matched !== undefined ? matched : next
-                  updateConfig({
-                    ...config,
-                    parameters: {
-                      ...config.parameters,
-                      [parameter.key]: nextVal,
-                    },
-                  })
-                }}
-              />
-            ) : parameter.isInteger ? (
-              <NumberInput
-                aria-label={parameter.label}
-                min={parameter.min ?? undefined}
-                max={parameter.max ?? undefined}
-                value={String(
-                  config.parameters[parameter.key] ?? parameter.defaultValue ?? parameter.min ?? 0,
-                )}
-                disabled={active}
-                onChange={(next) => applyNumberParameter(parameter, next)}
-              />
-            ) : (
-              <input
-                type="number"
-                aria-label={parameter.label}
-                min={parameter.min ?? undefined}
-                max={parameter.max ?? undefined}
-                step="any"
-                value={Number(config.parameters[parameter.key] ?? parameter.defaultValue ?? parameter.min ?? 0)}
-                disabled={active}
-                onChange={(event) => applyNumberParameter(parameter, event.target.value)}
-              />
-            )}
-          </div>
-        )) : null}
-        {!config.rawArgs ? (
-          <div className="generation-json-toggle">
-            <Button
-              variant="inline"
-              size="compact"
-              onClick={() => {
-                if (!showJsonArgs) {
-                  // 切换打开时从当前 config.parameters 生成，确保展示表单已改最新值
-                  setJsonArgsText(JSON.stringify(config.parameters, null, 2))
-                  setJsonDirty(false)
-                  setJsonError(null)
-                  setShowJsonArgs(true)
-                } else {
-                  setShowJsonArgs(false)
-                  setJsonDirty(false)
-                  setJsonError(null)
-                }
-              }}
-            >
-              {showJsonArgs
-                ? t('canvas.generation.jsonCollapse')
-                : t('canvas.generation.jsonEdit')}
-            </Button>
-            {showJsonArgs ? (
-              <>
-                <TextArea
-                  aria-label={t('canvas.generation.jsonArgsAria')}
-                  className="generation-json-textarea"
-                  value={jsonArgsText}
-                  onChange={(e) => {
-                    const text = e.target.value
-                    setJsonArgsText(text)
-                    setJsonDirty(true)
-                    try {
-                      const parsed = JSON.parse(text)
-                      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-                        setJsonError(null)
-                        updateConfig({
-                          ...config,
-                          parameters: parsed,
-                        })
-                      } else {
-                        setJsonError(t('canvas.generation.jsonObjectRequired'))
-                      }
-                    } catch {
-                      // 非法 JSON draft 保留在 textarea 中供用户继续修改，但绝不调用 updateConfig 覆盖有效表单值
-                      setJsonError(t('canvas.generation.jsonSyntaxError'))
-                    }
-                  }}
-                />
-                {jsonError ? (
-                  <div role="alert" className="generation-json-error">
-                    {jsonError}
-                  </div>
-                ) : null}
-              </>
-            ) : null}
-          </div>
-        ) : null}
-        {node.run?.status === 'UNKNOWN' ? (
-          <div
-            className="generation-unknown-resolution"
-            role="region"
-            aria-label={t('canvas.generation.unknownRegionAria')}
-          >
-            <div className="generation-unknown-title">
-              {t('canvas.generation.unknownTitle')}
-            </div>
-            <div className="generation-unknown-controls">
-              <Select
-                aria-label={t('canvas.generation.verifyDecision')}
-                value={unknownResolution}
-                options={unknownResolutionOptions}
-                onChange={(next) => setUnknownResolution(next as CanvasFunctionUnknownResolution)}
-              />
-              <TextInput
-                className="generation-verify-note"
-                aria-label={t('canvas.generation.verifyNote')}
-                placeholder={t('canvas.generation.verifyNotePlaceholder')}
-                value={verificationText}
-                onChange={(e) => setVerificationText(e.target.value)}
-              />
-              <Button
-                size="compact"
-                disabled={!verificationText.trim()}
-                onClick={() => {
-                  if (node.run?.requestId && verificationText.trim()) {
-                    void runtime.resolveFunctionRun(
-                      node.id,
-                      node.run.requestId,
-                      unknownResolution,
-                      verificationText.trim(),
-                    )
-                  }
-                }}
-              >
-                {t('canvas.generation.verifySubmit')}
-              </Button>
-            </div>
-          </div>
-        ) : null}
-        {localPendingState ? (
-          <div
-            className="generation-local-pending-error"
-            role="alert"
-            data-testid="local-pending-error"
-          >
-            <strong>{t('canvas.generation.localPendingTitle')}</strong>
-            <p>{localPendingState.message}</p>
-            <Button
-              variant="inline"
-              size="compact"
-              danger
-              data-testid="discard-pending-btn"
-              disabled={active || Boolean(runtime.isNodeInFlight?.(node.id))}
-              onClick={() => setConfirmingDiscard(true)}
-            >
-              {t('canvas.generation.discardPending')}
-            </Button>
-          </div>
-        ) : null}
-        {node.run?.status === 'FAILED' ? (
-          <span className="generation-run-feedback failed" role="alert">
-            {node.run.error ?? t('canvas.generation.runFailed')}
-          </span>
-        ) : node.run ? (
-          <span className={`generation-run-feedback ${node.run.status.toLowerCase()}`}>
-            {runDisplayLabel(t, node.run.status, node.run.stage)}
-          </span>
-        ) : null}
-        </div>
+/** 本地未决运行记录的告警与手动丢弃入口：损坏记录可读，但只在用户确认后清理。 */
+function LocalPendingRunNotice({
+  node,
+  pending,
+  active,
+  confirmingDiscard,
+  onRequestDiscard,
+  onCancelDiscard,
+  onDiscarded,
+}: {
+  node: ResourceNode
+  pending: LocalPendingRun | null
+  active: boolean
+  confirmingDiscard: boolean
+  onRequestDiscard: () => void
+  onCancelDiscard: () => void
+  onDiscarded: () => void
+}) {
+  const runtime = useCanvasRuntime()
+  const { t } = useI18n()
+  if (!pending) {
+    return null
+  }
+  return (
+    <>
+      <div className="generation-local-pending-error" role="alert" data-testid="local-pending-error">
+        <strong>{t('canvas.generation.localPendingTitle')}</strong>
+        <p>{pending.message}</p>
+        <Button
+          variant="inline"
+          size="compact"
+          danger
+          data-testid="discard-pending-btn"
+          disabled={active || Boolean(runtime.isNodeInFlight?.(node.id))}
+          onClick={onRequestDiscard}
+        >
+          {t('canvas.generation.discardPending')}
+        </Button>
       </div>
       <ConfirmActionModal
         className="modal-touch-target"
-        modal={confirmingDiscard && localPendingState ? {
+        modal={confirmingDiscard ? {
           title: t('canvas.generation.discardConfirmAria'),
           description: t('canvas.generation.discardConfirmText'),
           confirmLabel: t('canvas.generation.discardConfirm'),
           icon: 'delete',
           tone: 'danger',
           onConfirm: () => {
-            if (localPendingState.raw !== null) {
-              const success = runtime.discardPendingRun(node.id, localPendingState.raw)
-              if (success) {
-                setConfirmingDiscard(false)
-                setLocalPendingState(null)
-              }
+            if (pending.raw !== null && runtime.discardPendingRun(node.id, pending.raw)) {
+              onDiscarded()
             }
           },
         } : null}
         pending={false}
-        onClose={() => setConfirmingDiscard(false)}
+        onClose={onCancelDiscard}
       />
-    </section>
+    </>
   )
 }
 
-function modelForNode(
-  models: CanvasFunctionDefinitionDTO[],
-  node: ResourceNode,
-): CanvasFunctionDefinitionDTO | null {
-  return models.find((model) => model.name === node.function?.name) ?? null
-}
-
-function functionSourceIdentity(modelKey: string, config: CanvasFunctionConfig): string {
-  if (config.rawArgs) {
-    return `${modelKey}\u0000raw\u0000${JSON.stringify(config.rawArgs)}`
+function RunFeedback({ node }: { node: ResourceNode }) {
+  const { t } = useI18n()
+  if (node.run?.status === 'FAILED') {
+    return (
+      <span className="generation-run-feedback failed" role="alert">
+        {node.run.error ?? t('canvas.generation.runFailed')}
+      </span>
+    )
   }
-  return `${modelKey}\u0000${config.prompt ?? ''}\u0000${JSON.stringify(config.references)}\u0000${JSON.stringify(
-    Object.fromEntries(Object.entries(config.parameters).sort(([left], [right]) => left.localeCompare(right))),
-  )}`
-}
-
-function runStatusKey(status: NonNullable<ResourceNode['run']>['status']): TranslationKey {
-  if (status === 'READY') {
-    return 'canvas.generation.status.ready'
+  if (!node.run) {
+    return null
   }
-  if (status === 'RUNNING') {
-    return 'canvas.generation.status.running'
-  }
-  if (status === 'FAILED') {
-    return 'canvas.generation.status.failed'
-  }
-  if (status === 'CANCELLED') {
-    return 'canvas.generation.status.cancelled'
-  }
-  if (status === 'UNKNOWN') {
-    return 'canvas.generation.status.unknown'
-  }
-  return 'canvas.generation.status.succeeded'
-}
-
-function runDisplayLabel(
-  t: (key: TranslationKey, values?: Record<string, string | number>) => string,
-  status: NonNullable<ResourceNode['run']>['status'],
-  stage: string,
-): string {
-  if (status === 'UNKNOWN') {
-    return stage && stage !== status ? stage : t('canvas.generation.unknownStage')
-  }
-  return stage && stage !== status ? stage : t(runStatusKey(status))
+  return (
+    <span className={`generation-run-feedback ${node.run.status.toLowerCase()}`}>
+      {runDisplayLabel(t, node.run.status, node.run.stage)}
+    </span>
+  )
 }

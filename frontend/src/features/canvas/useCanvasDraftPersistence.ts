@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
-import { applyDraftAcks as reduceDraftAcks, isNodeDirty, removeDraftField, type CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
+import { applyDraftAcks as reduceDraftAcks, isNodeDirty, removeDraftField } from '@/features/canvas/canvas-drafts'
+import { persistDraftDiff } from '@/features/canvas/canvas-draft-persist-run'
 import {
   ackCanvasDrafts,
-  deleteCanvasDraft,
   loadCanvasDrafts,
-  saveCanvasDraft,
 } from '@/features/canvas/canvas-draft-storage'
 import type { CanvasScope } from '@/features/canvas/canvas-controller-scope'
 import { getEditingSessionId } from '@/features/canvas/canvas-editing-session'
@@ -139,64 +138,33 @@ export function useCanvasDraftPersistence({ scope, canvasId, view, drafts, snaps
         return
       }
       // 在序列化执行阶段动态获取最新权威草稿引用，避免在排队期间因捕获旧快照而复活已 ACK 的草稿
-      const currentTarget = { ...targetDraftsRef.current }
+      const result = await persistDraftDiff({
+        canvasId: taskCanvasId,
+        isCurrentTask,
+        baselineDrafts: currentBaseline.drafts,
+        targetDrafts: { ...targetDraftsRef.current },
+        onWriteStarted: () => {
+          if (canReport()) {
+            setState((cur) => cur.draftPersistPending ? cur : { ...cur, draftPersistPending: true })
+          }
+        },
+        onError: reportFailure,
+      })
 
-      const toSave: Array<[string, CanvasNodeDraft]> = []
-      for (const [nodeId, draft] of Object.entries(currentTarget)) {
-        if (currentBaseline.drafts[nodeId] !== draft) {
-          toSave.push([nodeId, draft])
-        }
-      }
-      const toDelete = Object.keys(currentBaseline.drafts).filter((nodeId) => !(nodeId in currentTarget))
-
-      if (toSave.length === 0 && toDelete.length === 0) {
-        if (canReport()) {
-          setState((cur) => cur.draftPersistPending ? { ...cur, draftPersistPending: false } : cur)
-        }
+      // 画布已切换：本轮回调不得再写任何状态（进入下一画布时会重新开启 pending）。
+      if (result.outcome === 'abandoned') {
         return
       }
-
       if (canReport()) {
-        setState((cur) => cur.draftPersistPending ? cur : { ...cur, draftPersistPending: true })
-      }
-
-      let hadError = false
-      for (const [nodeId, draft] of toSave) {
-        if (!isCurrentTask()) {
-          return
-        }
-        try {
-          await saveCanvasDraft(taskCanvasId, nodeId, draft)
-          currentBaseline.drafts[nodeId] = draft
-        } catch (err) {
-          hadError = true
-          reportFailure(err)
-          break
-        }
-      }
-
-      if (!hadError) {
-        for (const nodeId of toDelete) {
-          if (!isCurrentTask()) {
-            return
-          }
-          try {
-            await deleteCanvasDraft(taskCanvasId, nodeId)
-            delete currentBaseline.drafts[nodeId]
-          } catch (err) {
-            hadError = true
-            reportFailure(err)
-            break
-          }
-        }
-      }
-
-      if (canReport()) {
-        setState((cur) => ({
-          ...cur,
-          draftPersistPending: false,
-          storageError: hadError ? cur.storageError : null,
-        }))
+        setState((cur) => (
+          result.hasChanges
+            ? {
+                ...cur,
+                draftPersistPending: false,
+                storageError: result.outcome === 'failed' ? cur.storageError : null,
+              }
+            : cur.draftPersistPending ? { ...cur, draftPersistPending: false } : cur
+        ))
       }
     }).catch(() => {
       if (canReport()) {

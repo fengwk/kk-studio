@@ -6,7 +6,7 @@ import { CanvasTextEditor } from '@/features/canvas/CanvasTextEditor'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { projectNodes } from '@/features/canvas/projection'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
-import type { CanvasTextEditorState } from '@/features/canvas/types'
+import type { CanvasLocalState } from '@/features/canvas/types'
 import type { CanvasSnapshotDTO } from '@/shared/api/generated/contracts'
 
 const CANVAS_ID = '8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
@@ -58,7 +58,7 @@ function snapshotDTO(
 }
 
 function renderTextEditor(options: {
-  textEditor?: CanvasTextEditorState | null
+  textEditor?: CanvasLocalState['textEditor']
   snapshot?: CanvasSnapshotDTO | null
   viewport?: { x: number; y: number; zoom: number }
 } = {}) {

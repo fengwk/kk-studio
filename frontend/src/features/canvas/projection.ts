@@ -105,7 +105,7 @@ export function projectEdges(
   return edges
 }
 
-export function groupFlowId(groupId: string): string {
+function groupFlowId(groupId: string): string {
   return `group:${groupId}`
 }
 

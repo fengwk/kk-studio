@@ -3,8 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { useState, type PropsWithChildren } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useCanvasController } from '@/features/canvas/useCanvasController'
-import { loadPendingFunctionRun } from '@/features/canvas/function-run'
-import { canvasViewportStorageKey } from '@/features/canvas/viewport-storage'
+import { loadPendingFunctionRun } from '@/features/canvas/function-run-pending'
 import { loadCanvasDrafts, saveCanvasDraft } from '@/features/canvas/canvas-draft-storage'
 import * as draftStorageModule from '@/features/canvas/canvas-draft-storage'
 import { loadCanvasOperations } from '@/features/canvas/canvas-operation-storage'
@@ -487,7 +486,7 @@ describe('useCanvasController real snapshot runtime', () => {
   })
 
   it('starts an initial canvas in editor mode and queries its snapshot immediately', async () => {
-    localStorage.removeItem(canvasViewportStorageKey(CANVAS_ID))
+    localStorage.removeItem(`kk-studio.canvas.viewport:${CANVAS_ID}`)
     const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
 
     expect(result.current.state.view).toBe('editor')

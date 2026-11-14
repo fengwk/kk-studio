@@ -5,14 +5,9 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react'
-import {
-  useEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-  type ChangeEvent,
-} from 'react'
+import { useState, type CSSProperties } from 'react'
 import type { Resource } from '@/features/canvas/domain'
+import { finiteSeconds, useAudioPlayback } from '@/features/canvas/nodes/resources/useAudioPlayback'
 import { useCanvasResourceUrl } from '@/features/canvas/useCanvasResourceUrl'
 import { useI18n } from '@/shared/i18n'
 
@@ -38,34 +33,6 @@ function CanvasAudioPlayer({ resource }: { resource: Resource }) {
     kind: 'original',
     enabled: originalRequested,
   })
-  const audioRef = useRef<HTMLAudioElement | null>(null)
-  const pendingPlayRef = useRef(false)
-  const [playing, setPlaying] = useState(false)
-  const [currentTime, setCurrentTime] = useState(0)
-  const [duration, setDuration] = useState(finiteSeconds(resource.durationMs) ?? 0)
-  const [volume, setVolume] = useState(1)
-  const [muted, setMuted] = useState(false)
-  const [playError, setPlayError] = useState(false)
-
-  useEffect(() => {
-    if (!originalUrl || !audioRef.current || !pendingPlayRef.current) {
-      return
-    }
-    pendingPlayRef.current = false
-    setPlayError(false)
-    const audio = audioRef.current
-    const result = audio.play()
-    if (result && typeof result.then === 'function') {
-      result
-        .then(() => setPlaying(true))
-        .catch(() => {
-          setPlaying(false)
-          setPlayError(true)
-        })
-    } else {
-      setPlaying(true)
-    }
-  }, [originalUrl])
 
   const requestOriginal = () => {
     if (originalRequested) {
@@ -75,60 +42,28 @@ function CanvasAudioPlayer({ resource }: { resource: Resource }) {
     }
   }
 
-  const togglePlay = () => {
-    const audio = audioRef.current
-    if (!audio || !originalUrl) {
-      pendingPlayRef.current = true
-      setPlayError(false)
-      requestOriginal()
-      return
-    }
-    setPlayError(false)
-    if (audio.paused) {
-      const result = audio.play()
-      if (result && typeof result.then === 'function') {
-        result
-          .then(() => setPlaying(true))
-          .catch(() => {
-            setPlaying(false)
-            setPlayError(true)
-          })
-      } else {
-        setPlaying(true)
-      }
-    } else {
-      audio.pause()
-      setPlaying(false)
-    }
-  }
-
-  const handleSeek = (event: ChangeEvent<HTMLInputElement>) => {
-    const next = Number(event.target.value)
-    setCurrentTime(next)
-    const audio = audioRef.current
-    if (audio && Number.isFinite(audio.duration)) {
-      audio.currentTime = Math.min(next, audio.duration)
-    }
-  }
-
-  const handleVolume = (event: ChangeEvent<HTMLInputElement>) => {
-    const next = Number(event.target.value)
-    setVolume(next)
-    setMuted(false)
-    const audio = audioRef.current
-    if (audio) {
-      audio.volume = next
-      audio.muted = false
-    }
-  }
-
-  const toggleMute = () => {
-    const next = !muted
-    setMuted(next)
-    if (audioRef.current) {
-      audioRef.current.muted = next
-    }
-  }
+  const {
+    playing,
+    currentTime,
+    duration,
+    volume,
+    muted,
+    playError,
+    togglePlay,
+    handleSeek,
+    handleVolume,
+    toggleMute,
+    attachAudio,
+    handleLoadedMetadata,
+    handleTimeUpdate,
+    handleEnded,
+    handlePause,
+    handlePlay,
+  } = useAudioPlayback({
+    originalUrl,
+    requestOriginal,
+    initialDuration: finiteSeconds(resource.durationMs) ?? 0,
+  })
 
   const signing = originalLoading && !originalUrl
   return (
@@ -198,26 +133,16 @@ function CanvasAudioPlayer({ resource }: { resource: Resource }) {
       {!playError && originalError ? <span className="audio-player-error" role="alert">{t('canvas.media.signFailed')}</span> : null}
       {originalUrl ? (
         <audio
-          ref={(element) => {
-            if (element) {
-              audioRef.current = element
-            }
-          }}
+          ref={attachAudio}
           src={originalUrl}
           preload="metadata"
           className="nodrag nowheel"
           aria-label={t('canvas.audio.play', { name: resource.name })}
-          onLoadedMetadata={(event) => {
-            const audio = event.currentTarget
-            if (Number.isFinite(audio.duration)) {
-              setDuration(audio.duration)
-            }
-            setCurrentTime(audio.currentTime)
-          }}
-          onTimeUpdate={(event) => setCurrentTime(event.currentTarget.currentTime)}
-          onEnded={() => setPlaying(false)}
-          onPause={() => setPlaying(false)}
-          onPlay={() => setPlaying(true)}
+          onLoadedMetadata={handleLoadedMetadata}
+          onTimeUpdate={handleTimeUpdate}
+          onEnded={handleEnded}
+          onPause={handlePause}
+          onPlay={handlePlay}
         />
       ) : null}
     </div>
@@ -237,10 +162,6 @@ function AudioWaveform() {
       ))}
     </div>
   )
-}
-
-function finiteSeconds(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value / 1000 : null
 }
 
 function formatTime(seconds: number): string {

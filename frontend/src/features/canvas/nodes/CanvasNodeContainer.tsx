@@ -50,7 +50,7 @@ export function CanvasNodeContainer({
   )
 }
 
-export function CanvasNodeHeader({
+function CanvasNodeHeader({
   icon,
   typeLabel,
   name,

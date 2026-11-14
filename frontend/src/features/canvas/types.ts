@@ -21,7 +21,7 @@ export interface CanvasLinkSelection {
   targetNodeId: string
 }
 
-export type CanvasTextEditorState =
+type CanvasTextEditorState =
   | { mode: 'create'; nodeId: null; name: string; markdown: string }
   | { mode: 'edit'; nodeId: string; name: string; markdown: string }
 
@@ -69,14 +69,14 @@ export interface PendingFunctionConfig {
   config: CanvasFunctionConfig
 }
 
-export interface ResourceFlowNodeData extends Record<string, unknown> {
+interface ResourceFlowNodeData extends Record<string, unknown> {
   kind: 'resource'
   node: ResourceNode
   model: CanvasFunctionDefinitionDTO | null
   callbacks: CanvasNodeCallbacks
 }
 
-export interface GroupFlowNodeData extends Record<string, unknown> {
+interface GroupFlowNodeData extends Record<string, unknown> {
   kind: 'group'
   group: Group
 }

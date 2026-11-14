@@ -32,9 +32,7 @@ const DB_VERSION = 1
 const STORE_NAME = 'drafts'
 const SESSION_INDEX = 'sessionKey'
 
-export type CanvasDraftStorageOptions = CanvasLocalStoreOptions
-
-export interface CanvasDraftRecord {
+interface CanvasDraftRecord {
   /** 唯一主键：`${userId}:${canvasId}:${editingSessionId}:${nodeId}` */
   id: string
   userId: string
@@ -51,7 +49,7 @@ function buildRecordKey(userId: string, canvasId: string, editingSessionId: stri
   return `${userId}:${canvasId}:${editingSessionId}:${nodeId}`
 }
 
-function resolveScope(canvasId: string, options?: CanvasDraftStorageOptions) {
+function resolveScope(canvasId: string, options?: CanvasLocalStoreOptions) {
   if (isSessionReloading()) {
     throw new CanvasStorageUnavailableError('Session is reloading due to bfcache re-isolation')
   }
@@ -96,7 +94,7 @@ function noticeUnavailable(): void {
  */
 export async function loadCanvasDrafts(
   canvasId: string,
-  options?: CanvasDraftStorageOptions,
+  options?: CanvasLocalStoreOptions,
 ): Promise<Record<string, CanvasNodeDraft>> {
   const scope = resolveScope(canvasId, options)
   const factory = resolveIdbFactory(options)
@@ -151,7 +149,7 @@ export async function saveCanvasDraft(
   canvasId: string,
   nodeId: string,
   draft: CanvasNodeDraft,
-  options?: CanvasDraftStorageOptions,
+  options?: CanvasLocalStoreOptions,
 ): Promise<void> {
   const scope = resolveScope(canvasId, options)
   const record: CanvasDraftRecord = {
@@ -211,7 +209,7 @@ export async function saveCanvasDraft(
 export async function deleteCanvasDraft(
   canvasId: string,
   nodeId: string,
-  options?: CanvasDraftStorageOptions,
+  options?: CanvasLocalStoreOptions,
 ): Promise<void> {
   const scope = resolveScope(canvasId, options)
   const id = buildRecordKey(scope.userId, canvasId, scope.editingSessionId, nodeId)
@@ -255,64 +253,6 @@ export async function deleteCanvasDraft(
 }
 
 /**
- * 清除当前会话、画布下的全部草稿。
- */
-export async function clearCanvasDrafts(
-  canvasId: string,
-  options?: CanvasDraftStorageOptions,
-): Promise<void> {
-  const scope = resolveScope(canvasId, options)
-
-  const factory = resolveIdbFactory(options)
-  if (!factory) {
-    for (const [key, record] of memoryFallbackStore.entries()) {
-      if (record.sessionKey === scope.sessionKey) {
-        memoryFallbackStore.delete(key)
-      }
-    }
-    return
-  }
-
-  const db = await openCanvasDatabase(factory, DB_NAME, DB_VERSION, upgradeDrafts)
-  return new Promise((resolve, reject) => {
-    try {
-      const tx = db.transaction(STORE_NAME, 'readwrite')
-      const store = tx.objectStore(STORE_NAME)
-      const request = store.index(SESSION_INDEX).getAll(scope.sessionKey)
-
-      request.onsuccess = () => {
-        const records = (request.result ?? []) as CanvasDraftRecord[]
-        for (const record of records) {
-          store.delete(record.id)
-        }
-      }
-      request.onerror = () => {
-        const error = request.error ?? new Error('Failed to query session drafts for clearing')
-        notifyCanvasStorageError(error)
-        reject(error)
-      }
-      tx.oncomplete = () => {
-        resolve()
-      }
-      tx.onabort = () => {
-        const error = tx.error ?? new Error('Transaction aborted while clearing session drafts')
-        notifyCanvasStorageError(error)
-        reject(error)
-      }
-      tx.onerror = () => {
-        const error = tx.error ?? new Error('Transaction failed while clearing session drafts')
-        notifyCanvasStorageError(error)
-        reject(error)
-      }
-    } catch (error) {
-      const storageError = toStorageError(error)
-      notifyCanvasStorageError(storageError)
-      reject(storageError)
-    }
-  })
-}
-
-/**
  * 依据 CanvasDraftAck 列表，在持久层精确清除匹配 generation 的草稿字段。
  * 必须在单个 readwrite transaction 中执行，严格等待 transaction.oncomplete 才算持久落盘完成。
  * 绝不可先删除 operation 后清草稿；如果 transaction abort/error，Promise 立即 reject。
@@ -320,7 +260,7 @@ export async function clearCanvasDrafts(
 export async function ackCanvasDrafts(
   canvasId: string,
   acks: CanvasDraftAck[],
-  options?: CanvasDraftStorageOptions,
+  options?: CanvasLocalStoreOptions,
 ): Promise<void> {
   if (acks.length === 0) {
     return

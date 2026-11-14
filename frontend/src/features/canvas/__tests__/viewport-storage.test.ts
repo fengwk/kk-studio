@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  canvasViewportStorageKey,
   DEFAULT_CANVAS_VIEWPORT,
   hasStoredCanvasViewport,
   loadCanvasViewport,
@@ -21,8 +20,10 @@ describe('canvas viewport storage', () => {
     expect(loadCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', storage)).toEqual({ x: 12, y: -9, zoom: 2 })
     expect(loadCanvasViewport('bbbbbbbb-2222-4222-8222-222222222222', storage)).toEqual({ x: 1, y: 2, zoom: 0.5 })
     expect(hasStoredCanvasViewport('aaaaaaaa-1111-4111-8111-111111111111', storage)).toBe(true)
-    expect(values.has(canvasViewportStorageKey('aaaaaaaa-1111-4111-8111-111111111111'))).toBe(true)
-    expect(canvasViewportStorageKey('aaaaaaaa-1111-4111-8111-111111111111')).toBe('kk-studio.canvas.viewport:aaaaaaaa-1111-4111-8111-111111111111')
+    expect([...values.keys()]).toEqual([
+      'kk-studio.canvas.viewport:aaaaaaaa-1111-4111-8111-111111111111',
+      'kk-studio.canvas.viewport:bbbbbbbb-2222-4222-8222-222222222222',
+    ])
   })
 
   it('falls back for malformed or non-finite persisted values', () => {

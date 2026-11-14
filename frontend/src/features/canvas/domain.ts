@@ -10,7 +10,7 @@ import type {
   CanvasTransformDTO,
 } from '@/shared/api/generated/contracts'
 
-export interface CanvasDocument {
+interface CanvasDocument {
   id: string
   title: string
   revision: CanvasRevision
@@ -35,12 +35,12 @@ export interface Resource {
   createdAt: number
 }
 
-export interface Function {
+interface Function {
   name: string
   args: Record<string, unknown>
 }
 
-export interface Run {
+interface Run {
   nodeId: string
   requestId: string
   status: CanvasFunctionRunStatus
@@ -88,7 +88,7 @@ export function readJsonObject(value: unknown): Record<string, unknown> {
     : {}
 }
 
-export function scanArgsForReferences(obj: unknown, onRef: (nodeId: string, index: number) => void): void {
+function scanArgsForReferences(obj: unknown, onRef: (nodeId: string, index: number) => void): void {
   if (!obj || typeof obj !== 'object') {
     return
   }
@@ -174,7 +174,7 @@ export function projectCanvasSnapshot(snapshot: CanvasSnapshotDTO): CanvasSnapsh
   }
 }
 
-export function projectCanvasResource(resource: CanvasResourceDTO): Resource {
+function projectCanvasResource(resource: CanvasResourceDTO): Resource {
   const base: Omit<
     Resource,
     'blobId' | 'textContent' | 'mediaType' | 'sizeBytes' | 'width' | 'height' | 'durationMs'

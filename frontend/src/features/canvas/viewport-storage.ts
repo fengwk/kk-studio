@@ -8,7 +8,7 @@ export const DEFAULT_CANVAS_VIEWPORT: StoredCanvasViewport = { x: 0, y: 0, zoom:
 export const MIN_CANVAS_ZOOM = 0.25
 export const MAX_CANVAS_ZOOM = 2
 
-export function canvasViewportStorageKey(canvasId: string): string {
+function canvasViewportStorageKey(canvasId: string): string {
   return `kk-studio.canvas.viewport:${canvasId}`
 }
 
@@ -75,6 +75,6 @@ export function saveCanvasViewport(
   )
 }
 
-export function clampCanvasZoom(zoom: number): number {
+function clampCanvasZoom(zoom: number): number {
   return Math.min(MAX_CANVAS_ZOOM, Math.max(MIN_CANVAS_ZOOM, zoom))
 }

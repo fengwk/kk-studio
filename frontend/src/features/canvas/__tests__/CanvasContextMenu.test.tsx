@@ -1,11 +1,11 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  CanvasContextMenu,
-  type CanvasContextMenuState,
-  type ContextMenuTarget,
-} from '@/features/canvas/CanvasContextMenu'
+import { CanvasContextMenu } from '@/features/canvas/CanvasContextMenu'
+import type {
+  CanvasContextMenuState,
+  ContextMenuTarget,
+} from '@/features/canvas/canvas-stage-model'
 import { CanvasRuntimeContext } from '@/features/canvas/CanvasRuntimeContext'
 import type { CanvasController } from '@/features/canvas/useCanvasController'
 import type { Group, Resource, ResourceNode } from '@/features/canvas/domain'

@@ -7,10 +7,6 @@ import {
   SelectionMode,
   useNodesInitialized,
   useReactFlow,
-  type Connection,
-  type Edge,
-  type NodeChange,
-  type OnSelectionChangeParams,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
@@ -19,23 +15,19 @@ import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasTextEditor } from '@/features/canvas/CanvasTextEditor'
 import { CanvasToolRail } from '@/features/canvas/CanvasToolRail'
-import { isValidResourceConnection } from '@/features/canvas/canvas-stage-model'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
-import { extractPositionUpdates } from '@/features/canvas/node-position-changes'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import { projectEdges, projectNodes } from '@/features/canvas/projection'
-import type { CanvasPositionUpdate } from '@/features/canvas/types'
 import { useCanvasStageContextMenu } from '@/features/canvas/useCanvasStageContextMenu'
+import { useCanvasStageGraph } from '@/features/canvas/useCanvasStageGraph'
+import { useCanvasStageViewport } from '@/features/canvas/useCanvasStageViewport'
 import {
   MAX_CANVAS_ZOOM,
   MIN_CANVAS_ZOOM,
 } from '@/features/canvas/viewport-storage'
-import { preserveCanvasWorldCenter } from '@/features/canvas/viewport-framing'
 import { useI18n } from '@/shared/i18n'
 
-const INITIAL_FIT = { padding: 0.18, maxZoom: 1.6, duration: 0 }
-const FOCUS_SELECTION_FIT = { padding: 0.22, maxZoom: 1.8, duration: 0 }
-
+/** 画布舞台：React Flow 视图、右键菜单、Function 工作台、文本编辑器与工具轨的装配点。 */
 function StageInner() {
   const runtime = useCanvasRuntime()
   const { t } = useI18n()
@@ -67,10 +59,6 @@ function StageInner() {
     [projectedSnapshot, snapshotDTO],
   )
   const containerRef = useRef<HTMLElement | null>(null)
-  const lastViewportRef = useRef(state.viewport)
-  const initialFitStartedRef = useRef(false)
-  const mountedRef = useRef(true)
-  const flowWidthRef = useRef<number | null>(null)
   const { fitView, getViewport, setViewport: setFlowViewport, zoomTo } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
 
@@ -134,210 +122,37 @@ function StageInner() {
     return () => observer.disconnect()
   }, [publishMetrics])
 
-  useEffect(() => {
-    const next = state.viewport
-    const previous = lastViewportRef.current
-    if (
-      Math.abs(next.x - previous.x) < 0.001
-      && Math.abs(next.y - previous.y) < 0.001
-      && Math.abs(next.zoom - previous.zoom) < 0.001
-    ) {
-      return
-    }
-    lastViewportRef.current = next
-    void setFlowViewport(next)
-  }, [setFlowViewport, state.viewport])
-
-  // 面板/拖拽调宽平移 viewport 时保持 world center；zoom 不得隐式改变。
-  // （宽度不变或首帧时跳过。）
-  useEffect(() => {
-    const width = containerRef.current?.getBoundingClientRect().width ?? stageMetrics.width
-    const previousWidth = flowWidthRef.current
-    flowWidthRef.current = width
-    if (previousWidth === null) {
-      return
-    }
-    if (Math.abs(width - previousWidth) < 1) {
-      return
-    }
-    const next = preserveCanvasWorldCenter(state.viewport, previousWidth, width)
-    lastViewportRef.current = next
-    void setFlowViewport(next)
-    setViewport(next)
-  }, [
-    setFlowViewport,
-    setViewport,
-    stageMetrics.width,
-    state.viewport,
-  ])
-
-  const syncViewport = useCallback(() => {
-    const viewport = getViewport()
-    const next = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
-    lastViewportRef.current = next
-    setViewport(next)
-  }, [getViewport, setViewport])
-
-  useEffect(() => {
-    initialFitStartedRef.current = false
-  }, [state.canvasId])
-
-  useEffect(() => {
-    mountedRef.current = true
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
-
-  useEffect(() => {
-    if (
-      !initialFitPending
-      || !nodesInitialized
-      || nodes.length === 0
-      || initialFitStartedRef.current
-    ) {
-      return
-    }
-    initialFitStartedRef.current = true
-    void fitView(INITIAL_FIT).then((fitted) => {
-      if (!mountedRef.current) {
-        return
-      }
-      if (!fitted) {
-        initialFitStartedRef.current = false
-        return
-      }
-      const fittedViewport = getViewport()
-      const next = {
-        x: fittedViewport.x,
-        y: fittedViewport.y,
-        zoom: fittedViewport.zoom,
-      }
-      lastViewportRef.current = next
-      void setFlowViewport(next)
-      setViewport(next)
-      completeInitialFit()
-    })
-  }, [
-    completeInitialFit,
+  const { emitViewport } = useCanvasStageViewport({
+    canvasId: state.canvasId,
+    viewport: state.viewport,
+    stageWidth: stageMetrics.width,
+    containerRef,
     fitView,
     getViewport,
-    initialFitPending,
-    nodes.length,
-    nodesInitialized,
+    zoomTo,
     setFlowViewport,
     setViewport,
-  ])
-
-  useEffect(() => {
-    fitViewRef.current = () => {
-      void fitView(INITIAL_FIT).then((fitted) => {
-        if (!fitted) {
-          return
-        }
-        const fittedViewport = getViewport()
-        const next = {
-          x: fittedViewport.x,
-          y: fittedViewport.y,
-          zoom: fittedViewport.zoom,
-        }
-        lastViewportRef.current = next
-        void setFlowViewport(next)
-        setViewport(next)
-      })
-    }
-    focusSelectionRef.current = () => {
-      const selected = nodes.filter((node) => node.selected)
-      void fitView({
-        ...FOCUS_SELECTION_FIT,
-        nodes: selected.length > 0 ? selected : undefined,
-      }).then(syncViewport)
-    }
-    zoomRef.current = (zoom) => {
-      void zoomTo(zoom).then(syncViewport)
-    }
-    return () => {
-      fitViewRef.current = null
-      focusSelectionRef.current = null
-      zoomRef.current = null
-    }
-  }, [
-    fitView,
+    nodes,
+    nodesInitialized,
+    initialFitPending,
+    completeInitialFit,
     fitViewRef,
     focusSelectionRef,
-    getViewport,
-    nodes,
-    setFlowViewport,
-    setViewport,
-    syncViewport,
     zoomRef,
-    zoomTo,
-  ])
+  })
 
-  const handleNodesChange = useCallback((changes: NodeChange[]) => {
-    if (!snapshot) {
-      return
-    }
-    const positions = extractPositionUpdates(changes)
-    const updates: CanvasPositionUpdate[] = []
-    for (const position of positions) {
-      if (position.id.startsWith('group:')) {
-        const group = snapshot.groups.find((item) => `group:${item.id}` === position.id)
-        if (group) {
-          updates.push({
-            id: position.id,
-            kind: 'group',
-            transform: {
-              ...group.transform,
-              x: position.x,
-              y: position.y,
-            },
-          })
-        }
-        continue
-      }
-      const node = snapshot.resourceNodes.find((item) => item.id === position.id)
-      if (node) {
-        updates.push({
-          id: position.id,
-          kind: 'resource',
-          transform: {
-            ...node.transform,
-            x: position.x,
-            y: position.y,
-          },
-        })
-      }
-    }
-    if (updates.length > 0) {
-      moveNodes(updates)
-      if (positions.some((position) => !position.dragging)) {
-        commitTransforms()
-      }
-    }
-  }, [commitTransforms, moveNodes, snapshot])
-
-  const validConnection = useCallback((connection: Connection | Edge) => (
-    isValidResourceConnection(snapshot, connection.source, connection.target, models)
-  ), [snapshot, models])
-
-  const emitViewport = useCallback((viewport: { x: number; y: number; zoom: number }) => {
-    const next = { x: viewport.x, y: viewport.y, zoom: viewport.zoom }
-    lastViewportRef.current = next
-    setViewport(next)
-  }, [setViewport])
-
-  const handleSelectionChange = useCallback((params: OnSelectionChangeParams) => {
-    const nodeIds = params.nodes.map((node) => node.id)
-    setSelection(
-      nodeIds,
-      params.edges.map((edge) => ({
-        sourceNodeId: edge.source,
-        targetNodeId: edge.target,
-      })),
-    )
-    handleSelectionChangeMenu(nodeIds)
-  }, [handleSelectionChangeMenu, setSelection])
+  const graph = useCanvasStageGraph({
+    snapshot,
+    models,
+    moveNodes,
+    commitTransforms,
+    createLink,
+    deleteLink,
+    editTextNode: runtime.editTextNode,
+    setSelection,
+    handleSelectionChangeMenu,
+    closeContextMenu,
+  })
 
   return (
     <section
@@ -391,56 +206,22 @@ function StageInner() {
             edgesFocusable
             edgesReconnectable={false}
             elementsSelectable
-            isValidConnection={validConnection}
-            onConnect={(connection) => {
-              if (connection.source && connection.target && validConnection(connection)) {
-                const source = snapshot?.resourceNodes.find((node) => node.id === connection.source)
-                const target = snapshot?.resourceNodes.find((node) => node.id === connection.target)
-                if (source && target) {
-                  createLink(source.id, target.id)
-                }
-              }
-            }}
-            onEdgesDelete={(deleted) => {
-              for (const edge of deleted) {
-                const hasRef = snapshot?.references.some((item) => (
-                  item.sourceNodeId === edge.source && item.targetNodeId === edge.target
-                ))
-                if (hasRef) {
-                  deleteLink(edge.source, edge.target)
-                }
-              }
-            }}
-            onNodesChange={handleNodesChange}
+            isValidConnection={graph.validConnection}
+            onConnect={graph.handleConnect}
+            onEdgesDelete={graph.handleEdgesDelete}
+            onNodesChange={graph.handleNodesChange}
             onNodeDragStop={() => commitTransforms()}
             onMove={(_event, viewport) => {
               emitViewport(viewport)
               closeContextMenu()
             }}
             onMoveEnd={(_event, viewport) => emitViewport(viewport)}
-            onSelectionChange={handleSelectionChange}
+            onSelectionChange={graph.handleSelectionChange}
             onNodeContextMenu={openNodeContextMenu}
             onSelectionContextMenu={openSelectionContextMenu}
-            onPaneContextMenu={(event) => {
-              event.preventDefault()
-              closeContextMenu()
-            }}
-            onNodeClick={(event, node) => {
-              if (!event.shiftKey) {
-                setSelection([node.id])
-                if (
-                  node.data.kind === 'resource'
-                  && !node.data.node.function
-                  && node.data.node.resources[0]?.kind === 'TEXT'
-                ) {
-                  runtime.editTextNode(node.data.node)
-                }
-              }
-            }}
-            onPaneClick={() => {
-              closeContextMenu()
-              setSelection([])
-            }}
+            onPaneContextMenu={graph.handlePaneContextMenu}
+            onNodeClick={graph.handleNodeClick}
+            onPaneClick={graph.handlePaneClick}
             proOptions={{ hideAttribution: true }}
           >
             <Background

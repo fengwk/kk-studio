@@ -10,7 +10,7 @@
  */
 
 /** 未接入登录态前的稳定匿名身份。 */
-export const DEFAULT_ANONYMOUS_USER = 'anonymous'
+const DEFAULT_ANONYMOUS_USER = 'anonymous'
 
 export interface CanvasLocalStoreOptions {
   userId?: string
