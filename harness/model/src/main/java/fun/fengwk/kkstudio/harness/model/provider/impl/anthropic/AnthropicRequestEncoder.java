@@ -12,12 +12,9 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 
@@ -119,46 +116,11 @@ public final class AnthropicRequestEncoder {
     systemBlock.put("text", request.systemInstruction());
     unmarkedSystemArray.add(systemBlock);
 
-    // 从左到右构建 wire messages，并记录可用于缓存标记的消息端点
-    ArrayNode wireMessagesArray = NODES.arrayNode();
-    List<String> messageEfforts = new ArrayList<>();
-    List<ObjectNode> cacheEndpoints = new ArrayList<>();
-    ObjectNode lastEligible = null;
-    for (ProviderMessage msg : request.messages()) {
-      if (msg.role() == ProviderMessageRole.ASSISTANT) {
-        // assistant 之前的完整前缀就是上次模型请求的端点，不受本轮新增块数量影响。
-        AnthropicCacheMarkers.addEndpoint(cacheEndpoints, lastEligible);
-        AnthropicEncodedAssistant assistant =
-            AnthropicAssistantReplay.encodeMessage(msg, descriptor, request.model().modelId());
-        // compaction 回放代表已经摘要完成的历史：durable 校验完成后清空已编码消息，
-        // 使 compaction assistant message 成为首条消息、被摘要历史整体省略。
-        if (assistant.resetsHistory()) {
-          wireMessagesArray.removeAll();
-          messageEfforts.clear();
-          cacheEndpoints.clear();
-          lastEligible = null;
-        }
-        wireMessagesArray.add(assistant.node());
-      } else if (msg.role() == ProviderMessageRole.USER) {
-        wireMessagesArray.add(AnthropicContentEncoder.encodeUserMessage(msg));
-      } else if (msg.role() == ProviderMessageRole.TOOL) {
-        wireMessagesArray.add(AnthropicContentEncoder.encodeToolMessage(msg));
-      } else if (msg.role() == ProviderMessageRole.SYSTEM) {
-        AnthropicCacheMarkers.addEndpoint(cacheEndpoints, lastEligible);
-        wireMessagesArray.add(AnthropicToolsEncoder.encodeSystemMessage(msg));
-      } else {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "unexpected message role: " + msg.role());
-      }
-      messageEfforts.add(msg.reasoningEffort());
-      ObjectNode messageEndpoint =
-          AnthropicCacheMarkers.latestEligibleBlock(
-              wireMessagesArray.get(wireMessagesArray.size() - 1).path("content"));
-      if (messageEndpoint != null) {
-        lastEligible = messageEndpoint;
-      }
-    }
-    AnthropicCacheMarkers.addEndpoint(cacheEndpoints, lastEligible);
+    AnthropicWireMessages.Result wire =
+        AnthropicWireMessages.encode(request.messages(), descriptor, request.model().modelId());
+    ArrayNode wireMessagesArray = wire.messages();
+    List<String> messageEfforts = wire.efforts();
+    List<ObjectNode> cacheEndpoints = wire.cacheEndpoints();
 
     // 注入 cache marker
     AnthropicCacheMarkers.apply(
