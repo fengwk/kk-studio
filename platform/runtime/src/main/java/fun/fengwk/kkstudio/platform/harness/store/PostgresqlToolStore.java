@@ -1,29 +1,16 @@
 package fun.fengwk.kkstudio.platform.harness.store;
 
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
-import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.history.EntryPath;
-import fun.fengwk.kkstudio.harness.api.history.EntryType;
-import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
-import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.PendingToolInvocationRow;
 import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
-import fun.fengwk.kkstudio.harness.tool.ToolCall;
-import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction.LockKey;
 
-import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -35,71 +22,24 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-/** ToolInvocation 聚合的 PostgreSQL 实现。 */
+/**
+ * ToolInvocation 聚合的 PostgreSQL 实现。
+ *
+ * <p>本类只负责锁阶梯、写入顺序与交互失效通知；等待环境的只读投影在 {@link PostgresqlEnvironmentToolWaits}，新调用的引用校验与 JSONB 列编码在
+ * {@link PostgresqlToolInvocationValidation}。
+ */
 final class PostgresqlToolStore implements ToolStore {
 
   private final PostgresqlHarnessTransaction tx;
-
-  /**
-   * 「等待环境」只读聚合查询：按 {@code (真实执行根, 冻结的所需环境)} 分组，代表取组内最早 {@code (created_at, id)}。
-   *
-   * <p>候选是「调用已 READY、其 TOOL Work 已到期且无有效执行 lease、冻结了非空 {@code required_environment_id}」的调用；
-   * 时间条件统一使用数据库时钟 {@code statement_timestamp()}，与 Work claim 的 due / lease 判定同一时间域。根取自 Thread 不可变的
-   * {@code root_thread_id}，分组后按代表 keyset 过滤并升序输出。查询只读，不产生锁。
-   */
-  private static final String LIST_PENDING_ENVIRONMENT_WAITS =
-      """
-      with waiting as (
-          select i.id as invocation_id,
-                 i.created_at as created_at,
-                 t.root_thread_id as root_thread_id,
-                 w.required_environment_id as environment_id
-          from harness_tool_invocation i
-          join harness_thread t on t.id = i.thread_id
-          join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
-          where i.status = 'READY'
-            and w.required_environment_id is not null
-            and w.available_at <= statement_timestamp()
-            and (w.lease_until is null or w.lease_until <= statement_timestamp())
-      ),
-      grouped as (
-          select root_thread_id,
-                 environment_id,
-                 min(created_at) as representative_created_at,
-                 (array_agg(invocation_id order by created_at, invocation_id))[1]
-                     as representative_invocation_id,
-                 count(*) as waiting_count
-          from waiting
-          group by root_thread_id, environment_id
-      )
-      select root_thread_id,
-             environment_id,
-             representative_created_at,
-             representative_invocation_id,
-             waiting_count
-      from grouped
-      where (representative_created_at, representative_invocation_id) > (?, ?)
-      order by representative_created_at, representative_invocation_id
-      limit ?
-      """;
-
-  /** 环境 Work 可领取性仅因时间推移最早可能改变的权威时刻。 */
-  private static final String NEXT_ENVIRONMENT_WORK_CHANGE =
-      """
-      select least(
-                 min(case when w.available_at > statement_timestamp() then w.available_at end),
-                 min(case when w.lease_until > statement_timestamp() then w.lease_until end)
-             ) as next_change_at
-      from harness_tool_invocation i
-      join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
-      where i.status = 'READY'
-        and w.required_environment_id is not null
-      """;
+  private final PostgresqlEnvironmentToolWaits environmentWaits;
+  private final PostgresqlToolInvocationValidation validation;
 
   private record ToolCallIndexKey(UUID assistantEntryId, int callIndex) {}
 
   PostgresqlToolStore(PostgresqlHarnessTransaction tx) {
     this.tx = tx;
+    this.environmentWaits = new PostgresqlEnvironmentToolWaits(tx);
+    this.validation = new PostgresqlToolInvocationValidation(tx);
   }
 
   @Override
@@ -193,72 +133,23 @@ final class PostgresqlToolStore implements ToolStore {
   @Override
   public List<PendingEnvironmentWaitRow> listEnvironmentWaitCandidates(
       Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
-    tx.checkOpen();
-    Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
-    Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
-    if (limit <= 0) {
-      throw new IllegalArgumentException("limit must be positive");
-    }
-    return tx.queryList(
-        LIST_PENDING_ENVIRONMENT_WAITS,
-        PostgresqlHarnessRows.PENDING_ENVIRONMENT_WAIT,
-        PostgresqlHarnessRows.timestamp(afterRepresentativeCreatedAt),
-        afterRepresentativeInvocationId,
-        limit);
+    return environmentWaits.listCandidates(
+        afterRepresentativeCreatedAt, afterRepresentativeInvocationId, limit);
   }
 
   @Override
   public List<EnvironmentToolWaitRow> listEnvironmentWaits(Collection<UUID> invocationIds) {
-    tx.checkOpen();
-    Objects.requireNonNull(invocationIds, "invocationIds");
-    List<UUID> ids = List.copyOf(invocationIds);
-    if (ids.isEmpty()) {
-      return List.of();
-    }
-    return tx.queryList(
-        """
-        select i.id as invocation_id,
-               w.required_environment_id,
-               i.status = 'READY' as invocation_ready,
-               case when i.status = 'READY' and w.required_environment_id is not null then
-                 least(
-                   case when w.available_at > statement_timestamp() then w.available_at end,
-                   case when w.lease_until > statement_timestamp() then w.lease_until end
-                 )
-               end as work_freshness_at,
-               i.status = 'READY'
-                 and w.target_id is not null
-                 and w.required_environment_id is not null
-                 and w.available_at <= statement_timestamp()
-                 and (w.lease_until is null or w.lease_until <= statement_timestamp())
-                 as work_available
-        from harness_tool_invocation i
-        left join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
-        where i.id in (%s)
-        """
-            .formatted(PostgresqlHarnessTransaction.placeholders(ids.size())),
-        PostgresqlHarnessRows.ENVIRONMENT_TOOL_WAIT,
-        ids.toArray());
+    return environmentWaits.listWaits(invocationIds);
   }
 
   @Override
   public List<EnvironmentId> listReadyToolEnvironments() {
-    tx.checkOpen();
-    return tx.queryList(
-        """
-        select distinct w.required_environment_id
-        from harness_tool_invocation i
-        join durable_work w on w.target_type = 'TOOL' and w.target_id = i.id
-        where i.status = 'READY' and w.required_environment_id is not null
-        """,
-        (rs, rowNumber) -> EnvironmentId.of(rs.getObject("required_environment_id", UUID.class)));
+    return environmentWaits.listReadyEnvironments();
   }
 
   @Override
   public Optional<Instant> findNextEnvironmentWorkChange() {
-    tx.checkOpen();
-    Timestamp nextChangeAt = tx.queryForObject(NEXT_ENVIRONMENT_WORK_CHANGE, Timestamp.class);
-    return Optional.ofNullable(nextChangeAt).map(Timestamp::toInstant);
+    return environmentWaits.findNextWorkChange();
   }
 
   @Override
@@ -294,8 +185,8 @@ final class PostgresqlToolStore implements ToolStore {
         throw new IllegalArgumentException(
             "new tool invocations must be READY or FAILED with attempt 0 and no approval");
       }
-      requireUniqueToolCallIndex(invocation);
-      requireValidToolReferences(invocation);
+      validation.requireUniqueToolCallIndex(invocation);
+      validation.requireValidToolReferences(invocation);
     }
     tx.requireCanLockTools(copied);
     for (ToolInvocation invocation : copied) {
@@ -316,15 +207,15 @@ final class PostgresqlToolStore implements ToolStore {
           invocation.assistantEntryId(),
           invocation.callIndex(),
           PostgresqlHarnessRows.JSON.write(invocation.call(), "toolCall"),
-          encodeToolBinding(invocation),
+          PostgresqlToolInvocationValidation.encodeBinding(invocation),
           invocation.status().name(),
           invocation.attempt(),
-          encodeToolApproval(invocation),
-          encodeToolResult(invocation),
-          encodeToolError(invocation),
+          PostgresqlToolInvocationValidation.encodeApproval(invocation),
+          PostgresqlToolInvocationValidation.encodeResult(invocation),
+          PostgresqlToolInvocationValidation.encodeError(invocation),
           PostgresqlHarnessRows.timestamp(invocation.createdAt()),
           PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
-          encodeToolInputReceipt(invocation));
+          PostgresqlToolInvocationValidation.encodeInputReceipt(invocation));
       tx.lockTool(invocation);
     }
   }
@@ -375,11 +266,11 @@ final class PostgresqlToolStore implements ToolStore {
               """,
               invocation.status().name(),
               invocation.attempt(),
-              encodeToolApproval(invocation),
-              encodeToolResult(invocation),
-              encodeToolError(invocation),
+              PostgresqlToolInvocationValidation.encodeApproval(invocation),
+              PostgresqlToolInvocationValidation.encodeResult(invocation),
+              PostgresqlToolInvocationValidation.encodeError(invocation),
               PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
-              encodeToolInputReceipt(invocation),
+              PostgresqlToolInvocationValidation.encodeInputReceipt(invocation),
               invocation.id());
       tx.requireSingleUpdate(updated, "tool invocation", invocation.id());
     }
@@ -426,127 +317,5 @@ final class PostgresqlToolStore implements ToolStore {
       tx.notifyToolInteraction(interactionRoot);
     }
     return copied.size();
-  }
-
-  private void requireUniqueToolCallIndex(ToolInvocation invocation) {
-    Boolean exists =
-        tx.queryForObject(
-            """
-            select exists (
-                select 1
-                from harness_tool_invocation
-                where assistant_entry_id = ? and call_index = ?
-            )
-            """,
-            Boolean.class,
-            invocation.assistantEntryId(),
-            invocation.callIndex());
-    if (Boolean.TRUE.equals(exists)) {
-      throw new IllegalArgumentException(
-          "tool invocation callIndex "
-              + invocation.callIndex()
-              + " already used on assistant entry "
-              + invocation.assistantEntryId());
-    }
-  }
-
-  private void requireValidToolReferences(ToolInvocation invocation) {
-    ThreadState thread =
-        tx.threads()
-            .find(invocation.threadId())
-            .orElseThrow(
-                () ->
-                    new IllegalArgumentException(
-                        "thread " + invocation.threadId() + " does not exist"));
-    if (invocation.binding() == null && invocation.status() != ToolInvocationStatus.FAILED) {
-      throw new IllegalArgumentException("unbound tool invocations must be terminal FAILED slots");
-    }
-    Entry turnStart = tx.requireExistingEntry(invocation.turnStartEntryId());
-    if (turnStart.payload().type() != EntryType.TURN_START
-        || !(turnStart.payload() instanceof TurnStartPayload start)) {
-      throw new IllegalArgumentException("turnStartEntryId must reference a TURN_START entry");
-    }
-    if (!start.ownerThreadId().equals(thread.id())
-        || !turnStart.sessionId().equals(thread.sessionId())) {
-      throw new IllegalArgumentException(
-          "turn start must belong to the tool invocation thread and session");
-    }
-    Entry assistant = tx.requireExistingEntry(invocation.assistantEntryId());
-    if (!isAssistantEntry(assistant)) {
-      throw new IllegalArgumentException(
-          "assistantEntryId must reference an assistant MESSAGE entry");
-    }
-    if (!assistant.sessionId().equals(thread.sessionId())) {
-      throw new IllegalArgumentException(
-          "assistantEntryId must belong to the tool invocation thread session");
-    }
-    EntryPath assistantPath = tx.entries().loadPath(assistant.id());
-    if (assistantPath.openTurnStart().map(Entry::id).orElse(null) == null
-        || !assistantPath.openTurnStart().orElseThrow().id().equals(turnStart.id())) {
-      throw new IllegalArgumentException(
-          "assistantEntryId must be on the branch opened by turnStartEntryId");
-    }
-    requireMatchingAssistantToolCall(invocation, assistant);
-  }
-
-  private static void requireMatchingAssistantToolCall(ToolInvocation invocation, Entry assistant) {
-    MessagePayload message = (MessagePayload) assistant.payload();
-    List<ToolCallMessageContent> calls = new ArrayList<>();
-    for (AgentMessageContent content : message.message().contents()) {
-      if (content instanceof ToolCallMessageContent call) {
-        calls.add(call);
-      }
-    }
-    if (invocation.callIndex() >= calls.size()) {
-      throw new IllegalArgumentException(
-          "tool callIndex " + invocation.callIndex() + " exceeds the assistant tool calls");
-    }
-    ToolCallMessageContent call = calls.get(invocation.callIndex());
-    ToolCall requestCall = invocation.call();
-    String expectedRendererKey =
-        invocation.binding() == null
-            ? HistoryPayloadMapper.UNBOUND_RENDERER_KEY
-            : invocation.binding().descriptor().rendererKey();
-    if (!call.toolCallId().equals(requestCall.id())
-        || !call.toolName().equals(requestCall.toolName())
-        || !call.rendererKey().equals(expectedRendererKey)
-        || !call.argumentsJson().equals(requestCall.argumentsJson())) {
-      throw new IllegalArgumentException(
-          "tool call/binding must exactly match the assistant tool call at the same callIndex");
-    }
-  }
-
-  private static boolean isAssistantEntry(Entry entry) {
-    return entry.payload().type() == EntryType.MESSAGE
-        && entry.payload() instanceof MessagePayload message
-        && message.message().role() == AgentMessageRole.ASSISTANT;
-  }
-
-  private static String encodeToolApproval(ToolInvocation invocation) {
-    return invocation.approval() == null
-        ? null
-        : PostgresqlHarnessRows.TOOL_APPROVALS.encode(invocation.approval());
-  }
-
-  private static String encodeToolBinding(ToolInvocation invocation) {
-    return invocation.binding() == null
-        ? null
-        : PostgresqlHarnessRows.TOOL_BINDINGS.encode(invocation.binding());
-  }
-
-  private static String encodeToolResult(ToolInvocation invocation) {
-    return invocation.result() == null ? null : ToolResultJsonCodec.encode(invocation.result());
-  }
-
-  private static String encodeToolInputReceipt(ToolInvocation invocation) {
-    return invocation.inputReceipt() == null
-        ? null
-        : PostgresqlHarnessRows.JSON.write(invocation.inputReceipt(), "toolInputReceipt");
-  }
-
-  private static String encodeToolError(ToolInvocation invocation) {
-    return invocation.error() == null
-        ? null
-        : PostgresqlHarnessRows.JSON.write(invocation.error(), "toolInvocationError");
   }
 }
