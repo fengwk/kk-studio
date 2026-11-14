@@ -6,6 +6,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
@@ -29,6 +30,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderJsonBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -577,6 +579,319 @@ class OpenAiProviderGoldenTest {
                   List.of(),
                   ProviderCacheControl.none())));
     }
+  }
+
+  /** assistant 回放 payload 的其余结构错误：tool_calls 与 audio 的每类非法形状。 */
+  @Test
+  void chatReplayPayloadToolShapes() {
+    Map<String, String> payloads = new LinkedHashMap<>();
+    payloads.put("non-object-audio", "{\"audio\":\"ref\"}");
+    payloads.put("non-array-tool-calls", "{\"tool_calls\":{}}");
+    payloads.put("non-object-tool-call", "{\"tool_calls\":[1]}");
+    payloads.put(
+        "tool-call-index",
+        "{\"tool_calls\":[{\"index\":0,\"id\":\"c1\","
+            + "\"type\":\"function\",\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}");
+    payloads.put(
+        "blank-tool-call-id",
+        "{\"tool_calls\":[{\"id\":\"\",\"type\":\"function\","
+            + "\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}");
+    payloads.put(
+        "missing-tool-call-type",
+        "{\"tool_calls\":[{\"id\":\"c1\","
+            + "\"function\":{\"name\":\"f\",\"arguments\":\"{}\"}}]}");
+    payloads.put(
+        "missing-tool-function", "{\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\"}]}");
+    payloads.put(
+        "blank-tool-name",
+        "{\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\","
+            + "\"function\":{\"name\":\" \",\"arguments\":\"{}\"}}]}");
+    payloads.put(
+        "blank-tool-arguments",
+        "{\"tool_calls\":[{\"id\":\"c1\",\"type\":\"function\","
+            + "\"function\":{\"name\":\"f\",\"arguments\":\"\"}}]}");
+    for (Map.Entry<String, String> payload : payloads.entrySet()) {
+      assertGolden(
+          "chat-replay-shape-" + payload.getKey(),
+          chatFailure(
+              chatRequest(
+                  plainVariant(),
+                  List.of(user("Hello"), chatReplayAssistant(payload.getValue())),
+                  List.of(),
+                  ProviderCacheControl.none())));
+    }
+  }
+
+  /** 回放 payload 与 durable 语义不一致：文本、思考与工具调用分别拒绝。 */
+  @Test
+  void chatReplayDurableMismatches() {
+    assertGolden(
+        "chat-replay-text-mismatch",
+        chatFailure(
+            chatRequest(
+                plainVariant(),
+                List.of(user("Hello"), chatReplayAssistant("{\"refusal\":\"extra\"}")),
+                List.of(),
+                ProviderCacheControl.none())));
+    assertGolden(
+        "chat-replay-thinking-mismatch",
+        chatFailure(
+            chatRequest(
+                plainVariant(),
+                List.of(user("Hello"), chatReplayAssistant("{\"reasoning_content\":\"other\"}")),
+                List.of(),
+                ProviderCacheControl.none())));
+    assertGolden(
+        "chat-replay-tool-count-mismatch",
+        chatFailure(
+            chatRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    chatReplayAssistant(
+                        "{\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\","
+                            + "\"function\":{\"name\":\"lookup\",\"arguments\":\"{}\"}}]}")),
+                List.of(),
+                ProviderCacheControl.none())));
+  }
+
+  /** 回放不适用的 native 事实一律退回语义编码，不拒绝整个请求。 */
+  @Test
+  void chatReplayFallbacks() {
+    ProviderReplayAffinity chatAffinity = CHAT_DESCRIPTOR.affinity(CHAT_MODEL.modelId());
+    assertGolden(
+        "chat-replay-plain-durable",
+        chatEncoding(
+            chatRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    new ProviderMessage(
+                        ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")))),
+                List.of(),
+                ProviderCacheControl.none())));
+    ProviderBlockData foreignProtocol =
+        new ProviderBlockData(
+            ProviderReplayFormat.OPENAI_RESPONSES,
+            RESPONSES_DESCRIPTOR.affinity(RESPONSES_MODEL.modelId()),
+            MAPPER.createObjectNode());
+    assertGolden(
+        "chat-replay-foreign-protocol",
+        chatEncoding(
+            chatRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    new ProviderMessage(
+                        ProviderMessageRole.ASSISTANT,
+                        List.of(new ProviderTextBlock("answer", foreignProtocol)))),
+                List.of(),
+                ProviderCacheControl.none())));
+    ProviderBlockData conflictingFields =
+        new ProviderBlockData(
+            ProviderReplayFormat.OPENAI_CHAT,
+            chatAffinity,
+            MAPPER.readTree("{\"role\":\"other\"}"));
+    assertGolden(
+        "chat-replay-conflicting-fields",
+        chatEncoding(
+            chatRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    new ProviderMessage(
+                        ProviderMessageRole.ASSISTANT,
+                        List.of(new ProviderThinkingBlock("thought", conflictingFields)))),
+                List.of(),
+                ProviderCacheControl.none())));
+    ProviderBlockData conflictingFunction =
+        new ProviderBlockData(
+            ProviderReplayFormat.OPENAI_CHAT,
+            chatAffinity,
+            MAPPER.readTree("{\"function\":{\"name\":\"other\"}}"));
+    assertGolden(
+        "chat-replay-conflicting-function",
+        chatEncoding(
+            chatRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    new ProviderMessage(
+                        ProviderMessageRole.ASSISTANT,
+                        List.of(
+                            new ProviderToolCallBlock(
+                                new ProviderToolCall("call_1", "lookup", "{\"q\":\"x\"}"),
+                                conflictingFunction)))),
+                List.of(),
+                ProviderCacheControl.none())));
+    ProviderBlockData redactedData =
+        new ProviderBlockData(
+            ProviderReplayFormat.OPENAI_CHAT, chatAffinity, MAPPER.createObjectNode());
+    assertGolden(
+        "chat-replay-redacted",
+        chatEncoding(
+            chatRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    new ProviderMessage(
+                        ProviderMessageRole.ASSISTANT,
+                        List.of(new ProviderRedactedThinkingBlock("opaque", redactedData)))),
+                List.of(),
+                ProviderCacheControl.none())));
+  }
+
+  /** Responses replay item 的结构错误：message/reasoning/function_call 的必需字段逐项拒绝。 */
+  @Test
+  void responsesReplayPayloadErrors() {
+    Map<String, String> items = new LinkedHashMap<>();
+    items.put("message-content-not-object", "{\"type\":\"message\",\"content\":[1]}");
+    items.put("message-content-missing-type", "{\"type\":\"message\",\"content\":[{}]}");
+    items.put(
+        "output-text-missing-text",
+        "{\"type\":\"message\",\"content\":[{\"type\":\"output_text\"}]}");
+    items.put(
+        "refusal-missing-refusal", "{\"type\":\"message\",\"content\":[{\"type\":\"refusal\"}]}");
+    items.put("blank-message-id", "{\"type\":\"message\",\"id\":\"\",\"content\":[]}");
+    items.put("blank-message-phase", "{\"type\":\"message\",\"phase\":\"\",\"content\":[]}");
+    items.put("blank-reasoning-encrypted", "{\"type\":\"reasoning\",\"encrypted_content\":\"\"}");
+    items.put("reasoning-summary-not-object", "{\"type\":\"reasoning\",\"summary\":[1]}");
+    items.put(
+        "reasoning-summary-wrong-type",
+        "{\"type\":\"reasoning\",\"summary\":[{\"type\":\"text\"}]}");
+    items.put(
+        "reasoning-summary-missing-text",
+        "{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\"}]}");
+    items.put(
+        "function-call-missing-identity",
+        "{\"type\":\"function_call\",\"name\":\"f\",\"arguments\":\"{}\"}");
+    items.put(
+        "function-call-blank-name",
+        "{\"type\":\"function_call\",\"call_id\":\"c1\",\"name\":\"\",\"arguments\":\"{}\"}");
+    items.put(
+        "function-call-missing-arguments",
+        "{\"type\":\"function_call\",\"call_id\":\"c1\",\"name\":\"f\"}");
+    items.put(
+        "function-call-invalid-arguments",
+        "{\"type\":\"function_call\",\"call_id\":\"c1\",\"name\":\"f\",\"arguments\":\"[]\"}");
+    for (Map.Entry<String, String> item : items.entrySet()) {
+      assertGolden(
+          "responses-replay-shape-" + item.getKey(),
+          responsesFailure(
+              responsesRequest(
+                  plainVariant(),
+                  List.of(user("Hello"), responsesReplayAssistant(item.getValue())),
+                  List.of(),
+                  ProviderCacheControl.none())));
+    }
+  }
+
+  /** Responses replay 与 durable 语义不一致，以及只含空 reasoning 占位符时的语义回退。 */
+  @Test
+  void responsesReplayDurableOutcomes() {
+    assertGolden(
+        "responses-replay-text-mismatch",
+        responsesFailure(
+            responsesRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    responsesReplayAssistant(
+                        "{\"type\":\"message\",\"content\":[{\"type\":\"output_text\","
+                            + "\"text\":\"other\"}]}")),
+                List.of(),
+                ProviderCacheControl.none())));
+    assertGolden(
+        "responses-replay-thinking-mismatch",
+        responsesFailure(
+            responsesRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    responsesReplayAssistant(
+                        "{\"type\":\"reasoning\",\"summary\":[{\"type\":\"summary_text\","
+                            + "\"text\":\"other\"}]}")),
+                List.of(),
+                ProviderCacheControl.none())));
+    assertGolden(
+        "responses-replay-tool-count-mismatch",
+        responsesFailure(
+            responsesRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    responsesReplayAssistant(
+                        "{\"type\":\"function_call\",\"call_id\":\"c1\",\"name\":\"f\","
+                            + "\"arguments\":\"{}\"}")),
+                List.of(),
+                ProviderCacheControl.none())));
+    assertGolden(
+        "responses-replay-empty-reasoning-placeholder",
+        responsesEncoding(
+            responsesRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    responsesReplayAssistant("{\"type\":\"reasoning\",\"summary\":[]}")),
+                List.of(),
+                ProviderCacheControl.none())));
+    assertGolden(
+        "responses-replay-unknown-item",
+        responsesEncoding(
+            responsesRequest(
+                plainVariant(),
+                List.of(
+                    user("Hello"),
+                    responsesReplayAssistant(
+                        "{\"type\":\"web_search_call\",\"id\":\"ws_1\","
+                            + "\"action\":{\"query\":\"x\"}}")),
+                List.of(),
+                ProviderCacheControl.none())));
+  }
+
+  private static ProviderMessage chatReplayAssistant(String payloadJson) {
+    return new ProviderMessage(
+        ProviderMessageRole.ASSISTANT,
+        List.of(
+            new ProviderTextBlock("answer", chatAffinityData()), chatReplayPayload(payloadJson)));
+  }
+
+  private static ProviderOpaqueBlock chatReplayPayload(String payloadJson) {
+    return new ProviderOpaqueBlock(
+        "openai_chat_message",
+        new ProviderBlockData(
+            ProviderReplayFormat.OPENAI_CHAT,
+            CHAT_DESCRIPTOR.affinity(CHAT_MODEL.modelId()),
+            MAPPER.readTree(payloadJson)));
+  }
+
+  private static ProviderBlockData chatAffinityData() {
+    return new ProviderBlockData(
+        ProviderReplayFormat.OPENAI_CHAT,
+        CHAT_DESCRIPTOR.affinity(CHAT_MODEL.modelId()),
+        MAPPER.createObjectNode());
+  }
+
+  /** 用一条不透明 block 承载任意原生 Responses output item，item 边界由该 block 独占。 */
+  private static ProviderMessage responsesReplayAssistant(String itemJson) {
+    JsonNode item = MAPPER.readTree(itemJson);
+    ObjectNode nativeFields = MAPPER.createObjectNode();
+    nativeFields.set("item", item);
+    ProviderBlockData data =
+        new ProviderBlockData(
+            ProviderReplayFormat.OPENAI_RESPONSES,
+            RESPONSES_DESCRIPTOR.affinity(RESPONSES_MODEL.modelId()),
+            null,
+            null,
+            null,
+            item.path("type").asString(""),
+            null,
+            false,
+            null,
+            true,
+            nativeFields);
+    return new ProviderMessage(
+        ProviderMessageRole.ASSISTANT, List.of(new ProviderOpaqueBlock("responses_item", data)));
   }
 
   /** native tools 非空与 n=1 的组合：判断顺序被守护。 */

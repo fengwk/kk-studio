@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat;
 
 import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -25,9 +24,8 @@ final class OpenAiChatReplayValidator {
 
   private OpenAiChatReplayValidator() {}
 
-  static void validate(JsonNode payload, List<ProviderContentBlock> durableContents) {
-    requireObject(payload);
-    requireAssistantRole(payload);
+  static void validate(ObjectNode payload, List<ProviderContentBlock> durableContents) {
+    // role 由 replay builder 固定为 assistant，payload 本身必为对象，故此处只校验原生字段。
     rejectResponseOnlyFields(payload);
     requireNullableString(
         payload, "content", "invalid OpenAI chat assistant replay payload: illegal content type");
@@ -45,24 +43,6 @@ final class OpenAiChatReplayValidator {
     requireTextMatches(payload, durable);
     requireThinkingMatches(payload, durable);
     requireToolCallsMatch(payloadCalls, durable.toolCalls());
-  }
-
-  private static void requireObject(JsonNode payload) {
-    if (payload == null || !payload.isObject()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "invalid OpenAI chat assistant replay payload: not a JSON object");
-    }
-  }
-
-  private static void requireAssistantRole(JsonNode payload) {
-    if (!payload.has("role")
-        || !payload.get("role").isString()
-        || !"assistant".equals(payload.get("role").stringValue())) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "invalid OpenAI chat assistant replay payload: illegal role");
-    }
   }
 
   /** 响应数据不能作为下一轮的请求字段；audio 只接受请求侧的 id 引用。 */
@@ -191,12 +171,6 @@ final class OpenAiChatReplayValidator {
             call.argumentsJson(),
             "invalid OpenAI chat assistant durable tool call arguments: must be a JSON object");
         toolCalls.add(call);
-      } else if (!(block instanceof ProviderOpaqueBlock)
-          && !(block instanceof ProviderRedactedThinkingBlock)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "invalid OpenAI chat assistant replay: unsupported durable block "
-                + block.getClass().getSimpleName());
       }
     }
     return new DurableContents(text.toString(), thinking.toString(), toolCalls);

@@ -6,8 +6,6 @@ import tools.jackson.databind.node.ArrayNode;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
@@ -56,8 +54,7 @@ final class OpenAiResponsesReplayValidator {
   private static ReplayFacts collectReplayFacts(ArrayNode outputArray) {
     ReplayFacts facts = new ReplayFacts();
     for (JsonNode item : outputArray) {
-      requireObjectItem(item);
-      String type = requireItemType(item);
+      String type = item.get("type").stringValue();
       switch (type) {
         case "message" -> collectMessageFacts(facts, item);
         case "reasoning" -> collectReasoningFacts(facts, item);
@@ -71,39 +68,11 @@ final class OpenAiResponsesReplayValidator {
     return facts;
   }
 
-  private static void requireObjectItem(JsonNode item) {
-    if (!item.isObject()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid replay output item: must be a JSON object");
-    }
-  }
-
-  private static String requireItemType(JsonNode item) {
-    if (!item.has("type")
-        || !item.get("type").isString()
-        || item.get("type").stringValue().isBlank()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "invalid replay output item: missing string type");
-    }
-    return item.get("type").stringValue();
-  }
-
   private static void collectMessageFacts(ReplayFacts facts, JsonNode item) {
-    if (!item.has("role")
-        || !item.get("role").isString()
-        || !"assistant".equals(item.get("role").stringValue())) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "replay message item must have role='assistant'");
-    }
-    // id/status/phase 与任何额外成员都是原生事实，原样保留
+    // id/status/phase 与任何额外成员都是原生事实，原样保留；role 与 content 形状由 replay builder 固定。
     requireOptionalNonBlankString(item, "id", "replay message id must be non-blank string");
     requireOptionalNonBlankString(item, "phase", "replay message phase must be non-blank string");
-    JsonNode content = item.get("content");
-    if (content == null || !content.isArray()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "replay message content must be an array");
-    }
-    for (JsonNode block : content) {
+    for (JsonNode block : item.get("content")) {
       collectMessageContentBlock(facts, block);
     }
   }
@@ -166,16 +135,8 @@ final class OpenAiResponsesReplayValidator {
   }
 
   private static boolean hasUsableSummary(JsonNode item) {
-    if (!item.has("summary")) {
-      return false;
-    }
-    JsonNode summary = item.get("summary");
-    if (!summary.isArray()) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST, "replay reasoning summary must be an array");
-    }
     boolean usable = false;
-    for (JsonNode part : summary) {
+    for (JsonNode part : item.get("summary")) {
       if (!part.isObject()) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "replay reasoning summary block must be an object");
@@ -250,12 +211,6 @@ final class OpenAiResponsesReplayValidator {
         ProviderJsonHelper.parseStrictJsonObject(
             call.argumentsJson(), "durable tool call arguments must be a JSON object");
         facts.toolCalls.add(call);
-      } else if (!(block instanceof ProviderOpaqueBlock)
-          && !(block instanceof ProviderRedactedThinkingBlock)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "durable content block not supported in assistant message replay: "
-                + block.getClass().getSimpleName());
       }
     }
     return facts;

@@ -8,8 +8,6 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderOpaqueBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRedactedThinkingBlock;
@@ -33,9 +31,6 @@ final class OpenAiChatAssistantReplayEncoder {
    */
   static ObjectNode build(
       ProviderMessage message, ProviderDescriptor descriptor, String requestedModel) {
-    if (message.contents().isEmpty()) {
-      return null;
-    }
     ObjectNode result = NODES.objectNode();
     result.put("role", "assistant");
     StringBuilder content = new StringBuilder();
@@ -51,11 +46,7 @@ final class OpenAiChatAssistantReplayEncoder {
           || !data.affinity().equals(descriptor.affinity(requestedModel))) {
         return null;
       }
-      JsonNode nativeFieldsNode = data.nativeFields();
-      if (!(nativeFieldsNode instanceof ObjectNode nativeFields)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid OpenAI chat assistant block metadata");
-      }
+      ObjectNode nativeFields = (ObjectNode) data.nativeFields();
       if (block instanceof ProviderTextBlock textBlock) {
         if (data.refusal()) {
           refusal.append(textBlock.text());

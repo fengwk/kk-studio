@@ -37,9 +37,6 @@ final class OpenAiResponsesReplayEncoder {
 
   static List<ObjectNode> build(
       ProviderDescriptor descriptor, String requestedModel, List<ProviderContentBlock> blocks) {
-    if (blocks.isEmpty()) {
-      return null;
-    }
     var affinity = descriptor.affinity(requestedModel);
     ArrayNode output = NODES.arrayNode();
     ObjectNode currentItem = null;

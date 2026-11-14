@@ -177,6 +177,15 @@ final class OpenAiGoldenValues {
         "chat-reasoning-off",
         "{\"model\":\"gpt-4o\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"reasoning_effort\":\"none\",\"max_tokens\":1024,\"messages\":[{\"role\":\"system\",\"content\":\"You are helpful.\"},{\"role\":\"user\",\"content\":\"Hello\"}]}");
     values.put(
+        "chat-replay-conflicting-fields",
+        "{\"model\":\"gpt-4o\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":1024,\"messages\":[{\"role\":\"system\",\"content\":\"You are helpful.\"},{\"role\":\"user\",\"content\":\"Hello\"},{\"role\":\"assistant\",\"content\":\"thought\"}]}");
+    values.put(
+        "chat-replay-conflicting-function",
+        "{\"model\":\"gpt-4o\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":1024,\"messages\":[{\"role\":\"system\",\"content\":\"You are helpful.\"},{\"role\":\"user\",\"content\":\"Hello\"},{\"role\":\"assistant\",\"tool_calls\":[{\"id\":\"call_1\",\"type\":\"function\",\"function\":{\"name\":\"lookup\",\"arguments\":\"{\\\"q\\\":\\\"x\\\"}\"}}]}]}");
+    values.put(
+        "chat-replay-foreign-protocol",
+        "{\"model\":\"gpt-4o\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":1024,\"messages\":[{\"role\":\"system\",\"content\":\"You are helpful.\"},{\"role\":\"user\",\"content\":\"Hello\"},{\"role\":\"assistant\",\"content\":\"answer\"}]}");
+    values.put(
         "chat-replay-payload-error-annotations-only",
         "INVALID_REQUEST|invalid OpenAI chat assistant replay annotations");
     values.put(
@@ -191,6 +200,48 @@ final class OpenAiGoldenValues {
     values.put(
         "chat-replay-payload-error-non-string-refusal",
         "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: illegal refusal type");
+    values.put(
+        "chat-replay-plain-durable",
+        "{\"model\":\"gpt-4o\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":1024,\"messages\":[{\"role\":\"system\",\"content\":\"You are helpful.\"},{\"role\":\"user\",\"content\":\"Hello\"},{\"role\":\"assistant\",\"content\":\"answer\"}]}");
+    values.put(
+        "chat-replay-redacted",
+        "{\"model\":\"gpt-4o\",\"stream\":true,\"stream_options\":{\"include_usage\":true},\"max_tokens\":1024,\"messages\":[{\"role\":\"system\",\"content\":\"You are helpful.\"},{\"role\":\"user\",\"content\":\"Hello\"},{\"role\":\"assistant\",\"content\":\"\"}]}");
+    values.put(
+        "chat-replay-shape-blank-tool-arguments",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: tool call function arguments must be a non-blank string");
+    values.put(
+        "chat-replay-shape-blank-tool-call-id",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: tool call id must be a non-blank string");
+    values.put(
+        "chat-replay-shape-blank-tool-name",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: tool call function name must be a non-blank string");
+    values.put(
+        "chat-replay-shape-missing-tool-call-type",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: tool call type must be function");
+    values.put(
+        "chat-replay-shape-missing-tool-function",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: tool call function must be a JSON object");
+    values.put(
+        "chat-replay-shape-non-array-tool-calls",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: illegal tool_calls type");
+    values.put(
+        "chat-replay-shape-non-object-audio",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay audio");
+    values.put(
+        "chat-replay-shape-non-object-tool-call",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: tool call must be a JSON object");
+    values.put(
+        "chat-replay-shape-tool-call-index",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay tool call index");
+    values.put(
+        "chat-replay-text-mismatch",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: mismatch with durable contents");
+    values.put(
+        "chat-replay-thinking-mismatch",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: reasoning_content mismatch with durable contents");
+    values.put(
+        "chat-replay-tool-count-mismatch",
+        "INVALID_REQUEST|invalid OpenAI chat assistant replay payload: mismatch with durable contents");
     values.put("chat-stream-after-done", "INVALID_RESPONSE|semantic payload received after [DONE]");
     values.put(
         "chat-stream-conflicting-tail",
@@ -351,6 +402,63 @@ final class OpenAiGoldenValues {
     values.put(
         "responses-reasoning-off",
         "{\"model\":\"gpt-5.4-mini\",\"stream\":true,\"store\":false,\"instructions\":\"You are helpful.\",\"max_output_tokens\":1024,\"reasoning\":{\"effort\":\"none\"},\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Hello\"}]}]}");
+    values.put(
+        "responses-replay-empty-reasoning-placeholder",
+        "{\"model\":\"gpt-5.4-mini\",\"stream\":true,\"store\":false,\"instructions\":\"You are helpful.\",\"max_output_tokens\":1024,\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Hello\"}]}]}");
+    values.put(
+        "responses-replay-shape-blank-message-id",
+        "INVALID_REQUEST|replay message id must be non-blank string");
+    values.put(
+        "responses-replay-shape-blank-message-phase",
+        "INVALID_REQUEST|replay message phase must be non-blank string");
+    values.put(
+        "responses-replay-shape-blank-reasoning-encrypted",
+        "INVALID_REQUEST|replay reasoning encrypted_content must be non-blank string");
+    values.put(
+        "responses-replay-shape-function-call-blank-name",
+        "INVALID_REQUEST|function_call missing non-blank string name");
+    values.put(
+        "responses-replay-shape-function-call-invalid-arguments",
+        "INVALID_REQUEST|function_call arguments must be a JSON object");
+    values.put(
+        "responses-replay-shape-function-call-missing-arguments",
+        "INVALID_REQUEST|function_call missing string arguments");
+    values.put(
+        "responses-replay-shape-function-call-missing-identity",
+        "INVALID_REQUEST|function_call missing call_id or id");
+    values.put(
+        "responses-replay-shape-message-content-missing-type",
+        "INVALID_REQUEST|replay message content block must have string type");
+    values.put(
+        "responses-replay-shape-message-content-not-object",
+        "INVALID_REQUEST|replay message content block must be an object");
+    values.put(
+        "responses-replay-shape-output-text-missing-text",
+        "INVALID_REQUEST|replay output_text block must have string text");
+    values.put(
+        "responses-replay-shape-reasoning-summary-missing-text",
+        "INVALID_REQUEST|replay reasoning summary block must have string text");
+    values.put(
+        "responses-replay-shape-reasoning-summary-not-object",
+        "INVALID_REQUEST|replay reasoning summary block must be an object");
+    values.put(
+        "responses-replay-shape-reasoning-summary-wrong-type",
+        "INVALID_REQUEST|replay reasoning summary block type must be 'summary_text'");
+    values.put(
+        "responses-replay-shape-refusal-missing-refusal",
+        "INVALID_REQUEST|replay refusal block must have string refusal");
+    values.put(
+        "responses-replay-text-mismatch",
+        "INVALID_REQUEST|replay text content mismatch with durable message content");
+    values.put(
+        "responses-replay-thinking-mismatch",
+        "INVALID_REQUEST|replay thinking content mismatch with durable message thinking");
+    values.put(
+        "responses-replay-tool-count-mismatch",
+        "INVALID_REQUEST|replay tool calls count mismatch with durable tool calls");
+    values.put(
+        "responses-replay-unknown-item",
+        "{\"model\":\"gpt-5.4-mini\",\"stream\":true,\"store\":false,\"instructions\":\"You are helpful.\",\"max_output_tokens\":1024,\"input\":[{\"type\":\"message\",\"role\":\"user\",\"content\":[{\"type\":\"input_text\",\"text\":\"Hello\"}]},{\"type\":\"web_search_call\",\"id\":\"ws_1\",\"action\":{\"query\":\"x\"}}]}");
     values.put(
         "responses-runtime-effort-conflict",
         "INVALID_REQUEST|protocolOptions conflicts with the runtime-owned request field: reasoning.effort");
