@@ -2,9 +2,9 @@ import type { TranslationKey } from '@/shared/i18n'
 import type { ProjectWorkflowDTO, ProjectWorkflowStateDTO } from '@/shared/api/generated/contracts'
 
 /** 固定保留状态：必须存在，且不能配置 Agent/Environment/指令/额度，也不能停用。 */
-export const RESERVED_STATE_CODES = ['INIT', 'BLOCKED', 'DONE'] as const
+const RESERVED_STATE_CODES = ['INIT', 'BLOCKED', 'DONE'] as const
 
-export const STATE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
+const STATE_CODE_PATTERN = /^[A-Z][A-Z0-9_]{0,63}$/
 
 /**
  * Run 额度的上界：后端 web 层把 maxRuns 解析为 long 后限制在 int 范围，领域层再要求大于 0，

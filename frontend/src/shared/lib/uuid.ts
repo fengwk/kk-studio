@@ -20,7 +20,7 @@ export function createUuid(): string {
  * 只校验 shape（不限定 UUID version/variant 位）：客户端生成的实体 id
  * 来自 crypto.randomUUID()（v4），服务端生成的 id 可能使用其他版本。
  */
-export const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
+const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 export type CanonicalUuidString = `${string}-${string}-${string}-${string}-${string}`
 

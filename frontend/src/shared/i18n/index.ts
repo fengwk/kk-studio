@@ -4,7 +4,6 @@ import type { InterpolationValues, LocaleMessages, AppLocale } from '@/shared/i1
 
 export type { AppLocale, InterpolationValues } from '@/shared/i18n/types'
 export type { TranslationKey } from '@/shared/i18n/catalogs'
-export { messageCatalog }
 
 /** 服务端等外部输入只有在 catalog 中存在时才能作为翻译 key 使用。 */
 export function isTranslationKey(value: string): value is TranslationKey {

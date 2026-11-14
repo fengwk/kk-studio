@@ -31,13 +31,13 @@ import type {
   ApiRoutes,
 } from '@/shared/api/generated/contracts'
 
-export type CatalogRequester = <R extends keyof ApiRoutes>(
+type CatalogRequester = <R extends keyof ApiRoutes>(
   route: R,
   args: RouteArgs<R>,
   options?: RequestOptions,
 ) => Promise<RouteResponse<R>>
 
-export function createAgentService(catalogRequest: CatalogRequester = request) {
+function createAgentService(catalogRequest: CatalogRequester = request) {
   return {
     listProviders: (): Promise<ProviderDTO[]> =>
       catalogRequest('GET /api/platform/providers', {}),

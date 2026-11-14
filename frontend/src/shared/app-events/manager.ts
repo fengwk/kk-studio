@@ -14,7 +14,7 @@ import type {
 } from '@/shared/app-events/protocol'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 
-export interface ApplicationEventListener {
+interface ApplicationEventListener {
   /** wire 订阅建立（首次与每次重连后都会触发）；cursor 是资源当前游标。 */
   onSubscribed?: (cursor: string) => void
   /** 资源事件：thread 为 version/realtime，canvas 为 version，projects 为 changed。 */
@@ -25,14 +25,14 @@ export interface ApplicationEventListener {
   onError?: (code: string, message: string) => void
 }
 
-export interface ApplicationEventManagerOptions {
+interface ApplicationEventManagerOptions {
   url: string
   /** 测试注入；生产使用原生 WebSocket。 */
   socketFactory?: ApplicationEventSocketFactory
 }
 
 /** ide-use 的异步确认；只回显服务端已接受的 revision。 */
-export interface ApplicationEventIdeUseAck {
+interface ApplicationEventIdeUseAck {
   revision: ApplicationEventRevision
 }
 

@@ -6,7 +6,7 @@ import type {
 } from '@/shared/api/generated/contracts'
 
 /** 查询一页待处理 Interaction（问卷等待、审批等待与环境等待合并，按 createdAt 升序）。 */
-export function listInteractions(
+function listInteractions(
   rootThreadId: string | null,
   cursor: string | null,
   limit: number,
@@ -24,7 +24,7 @@ export function listInteractions(
  * 提交一次问卷回答（或明确拒答）。
  * 目标 Thread 与 Tool invocation 都在路径中；请求体严禁携带 actor 字段，服务端从认证主体解析。
  */
-export function submitToolInput(
+function submitToolInput(
   threadId: string,
   toolInvocationId: string,
   body: HarnessToolInputDTO,

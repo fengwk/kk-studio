@@ -46,7 +46,7 @@
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { isRecord } from '@/shared/lib/value'
 
-export type ApplicationEventResourceKind =
+type ApplicationEventResourceKind =
   | 'thread'
   | 'canvas'
   | 'thread-tree'
@@ -65,7 +65,7 @@ export type ApplicationEventResource =
 export type ApplicationEventName = 'version' | 'realtime' | 'changed' | 'revision'
 
 /** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
-export type ApplicationEventCursor = string
+type ApplicationEventCursor = string
 
 /** ide-use revision：canonical 正十进制字符串，不超过 9223372036854775807。 */
 export type ApplicationEventRevision = string

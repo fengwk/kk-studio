@@ -3,7 +3,7 @@ import { renderHook, waitFor } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import { agentService } from '@/shared/api/agent-service'
-import { fetchAllCatalogAgentNames, useCatalogAgentNames } from './useCatalogAgentNames'
+import { useCatalogAgentNames } from './useCatalogAgentNames'
 import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -21,7 +21,7 @@ function createWrapper() {
   }
 }
 
-describe('useCatalogAgentNames and fetchAllCatalogAgentNames', () => {
+describe('useCatalogAgentNames', () => {
   it('reads the complete catalog agent list in one request', async () => {
     // 测试意图：Agent 列表已不分页，超过 50 个 Agent 时必须一次全部返回并排序去重
     const catalogAgents = Array.from({ length: 65 }, (_, i) => ({
@@ -30,21 +30,30 @@ describe('useCatalogAgentNames and fetchAllCatalogAgentNames', () => {
 
     vi.mocked(agentService.listAgents).mockResolvedValueOnce(catalogAgents as AgentDTO[])
 
-    const names = await fetchAllCatalogAgentNames()
+    const { result } = renderHook(() => useCatalogAgentNames(), { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(result.current.catalogNames).toHaveLength(65)
+    })
 
     expect(agentService.listAgents).toHaveBeenCalledTimes(1)
     expect(agentService.listAgents).toHaveBeenCalledWith()
-    expect(names).toHaveLength(65)
-    expect(names[0]).toBe('agent-001')
-    expect(names[64]).toBe('agent-065')
+    expect(result.current.catalogNames[0]).toBe('agent-001')
+    expect(result.current.catalogNames[64]).toBe('agent-065')
   })
 
   it('handles fetch failures robustly without phantom invalid values', async () => {
     // 测试意图：验证网络或服务端接口失败时，函数防御性捕获异常并返回空数组，不生成非法脏数据
     vi.mocked(agentService.listAgents).mockRejectedValueOnce(new Error('Network offline'))
 
-    const names = await fetchAllCatalogAgentNames()
-    expect(names).toEqual([])
+    const { result } = renderHook(() => useCatalogAgentNames(), { wrapper: createWrapper() })
+
+    await waitFor(() => {
+      expect(result.current.isLoading).toBe(false)
+    })
+
+    expect(result.current.catalogNames).toEqual([])
+    expect(result.current.agentOptions).toEqual([])
   })
 
   it('transparently preserves stale assigned names in options', async () => {

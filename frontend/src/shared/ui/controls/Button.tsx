@@ -2,9 +2,9 @@ import type { ButtonHTMLAttributes } from 'react'
 import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 
 /** 设计系统按钮变体：对应既有的三类按钮视觉。 */
-export type ButtonVariant = 'primary' | 'ghost' | 'inline'
+type ButtonVariant = 'primary' | 'ghost' | 'inline'
 /** 普通控件 32px；紧凑控件 28px（卡片动作、工具条等）。 */
-export type ButtonSize = 'normal' | 'compact'
+type ButtonSize = 'normal' | 'compact'
 
 const VARIANT_CLASS: Record<ButtonVariant, string> = {
   primary: 'btn-primary',

@@ -44,7 +44,7 @@ export const FORBIDDEN_UPLOAD_HEADERS = new Set([
  *
  * 该契约绝不暴露 bucket/key，客户端也不能提交对象 key。
  */
-export function createStorageService() {
+function createStorageService() {
   const getBlobDownloadUrl = (blobId: string): Promise<StoragePresignedUrlDTO> =>
     request('POST /api/platform/storage/blobs/{blobId}/download-url', {
       path: { blobId },

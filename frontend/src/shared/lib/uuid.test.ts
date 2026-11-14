@@ -1,6 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
-  CANONICAL_UUID_PATTERN,
   createUuid,
   isCanonicalUuid,
 } from '@/shared/lib/uuid'
@@ -56,8 +55,8 @@ describe('isCanonicalUuid', () => {
     expect(isCanonicalUuid(['8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f'])).toBe(false)
   })
 
-  it('matches pattern directly', () => {
-    expect(CANONICAL_UUID_PATTERN.test('8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f')).toBe(true)
-    expect(CANONICAL_UUID_PATTERN.test('invalid')).toBe(false)
+  it('rejects strings outside the canonical dash shape', () => {
+    expect(isCanonicalUuid('8d3b8a2e-4b9f-4c5d-9e6f-1a2b3c4d5e6f')).toBe(true)
+    expect(isCanonicalUuid('invalid')).toBe(false)
   })
 })

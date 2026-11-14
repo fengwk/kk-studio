@@ -2,8 +2,8 @@
  * 整数列表与 HTTP 状态码名单校验通用工具。
  */
 
-export const HTTP_STATUS_CODE_MIN = 400
-export const HTTP_STATUS_CODE_MAX = 599
+const HTTP_STATUS_CODE_MIN = 400
+const HTTP_STATUS_CODE_MAX = 599
 
 export type IntegerListErrorCode =
   | 'emptyToken'
@@ -165,51 +165,22 @@ export function validateIntegerListTokens(
   return { valid, error: null }
 }
 
-export function assembleIntegerList(
-  items: unknown,
-  options?: ValidateIntegerListOptions,
-): number[] {
+/** 校验外部输入的 HTTP 状态码列表：每项（数字或十进制文本）必须唯一且落在 400..599。 */
+export function assembleHttpStatusCodeList(items: unknown): number[] {
   if (!Array.isArray(items)) {
     throw new IntegerListValidationError('notInteger')
   }
   const result: number[] = []
   const seen = new Set<number>()
   for (const item of items) {
-    let num: number
-    if (typeof item === 'number') {
-      if (!Number.isSafeInteger(item)) {
-        throw new IntegerListValidationError('notInteger', { token: item })
-      }
-      num = item
-    } else if (typeof item === 'string') {
-      const trimmed = item.trim()
-      if (trimmed === '' || !/^-?\d+$/u.test(trimmed)) {
-        throw new IntegerListValidationError('notInteger', { token: item })
-      }
-      const parsed = Number(trimmed)
-      if (!Number.isSafeInteger(parsed)) {
-        throw new IntegerListValidationError('notInteger', { token: item })
-      }
-      num = parsed
-    } else {
-      throw new IntegerListValidationError('notInteger')
-    }
-
-    if (options?.min != null && num < options.min) {
+    const num = parseIntegerItem(item)
+    if (num < HTTP_STATUS_CODE_MIN || num > HTTP_STATUS_CODE_MAX) {
       throw new IntegerListValidationError('outOfRange', {
         token: num,
-        min: options.min,
-        max: options.max,
+        min: HTTP_STATUS_CODE_MIN,
+        max: HTTP_STATUS_CODE_MAX,
       })
     }
-    if (options?.max != null && num > options.max) {
-      throw new IntegerListValidationError('outOfRange', {
-        token: num,
-        min: options.min,
-        max: options.max,
-      })
-    }
-
     if (seen.has(num)) {
       throw new IntegerListValidationError('duplicate', { token: num })
     }
@@ -219,9 +190,24 @@ export function assembleIntegerList(
   return result
 }
 
-export function assembleHttpStatusCodeList(items: unknown): number[] {
-  return assembleIntegerList(items, {
-    min: HTTP_STATUS_CODE_MIN,
-    max: HTTP_STATUS_CODE_MAX,
-  })
+/** 安全整数或规范整数文本 -> number；文本越出安全整数范围时视为非法。 */
+function parseIntegerItem(item: unknown): number {
+  if (typeof item === 'number') {
+    if (!Number.isSafeInteger(item)) {
+      throw new IntegerListValidationError('notInteger', { token: item })
+    }
+    return item
+  }
+  if (typeof item === 'string') {
+    const trimmed = item.trim()
+    if (trimmed === '' || !/^-?\d+$/u.test(trimmed)) {
+      throw new IntegerListValidationError('notInteger', { token: item })
+    }
+    const parsed = Number(trimmed)
+    if (!Number.isSafeInteger(parsed)) {
+      throw new IntegerListValidationError('notInteger', { token: item })
+    }
+    return parsed
+  }
+  throw new IntegerListValidationError('notInteger')
 }

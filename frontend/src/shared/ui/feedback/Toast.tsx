@@ -5,7 +5,7 @@ import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import './feedback.css'
 
-export type ToastTone = 'success' | 'error'
+type ToastTone = 'success' | 'error'
 
 export interface ToastProps {
   message: string

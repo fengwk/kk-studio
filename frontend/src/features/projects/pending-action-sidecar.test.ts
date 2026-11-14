@@ -7,7 +7,6 @@ import {
   loadPendingAction,
   pendingActionStorageKey,
   storePendingAction,
-  validAction,
   type PendingIssueAction,
 } from './pending-action-sidecar'
 
@@ -108,11 +107,12 @@ describe('pending-action-sidecar', () => {
   })
 
   it('validates schema strictly across all kinds and rejects invalid kind or foreign issue', () => {
-    // 测试意图：验证 discriminated union 校验，拒绝垃圾 kind、payload 不匹配或外来 issue 写入
-    expect(validAction(mockAction, issueId)).toBe(true)
+    // 测试意图：验证 discriminated union 校验，拒绝垃圾 kind、payload 不匹配或外来 issue 写入。
+    // 校验只能经生产入口观察：合法记录写入成功，非法记录被写入前拒绝。
+    expect(() => storePendingAction(issueId, mockAction)).not.toThrow()
+    localStorage.clear()
 
     // 1. 外来 issueId 校验失败
-    expect(validAction(mockAction, 'different-issue-id')).toBe(false)
     expect(() => storePendingAction('different-issue-id', mockAction)).toThrow(
       /Invalid pending action payload or issueId/,
     )
@@ -121,8 +121,10 @@ describe('pending-action-sidecar', () => {
     const invalidKind = {
       ...mockAction,
       kind: 'UNKNOWN_HACK_KIND',
-    }
-    expect(validAction(invalidKind, issueId)).toBe(false)
+    } as unknown as PendingIssueAction
+    expect(() => storePendingAction(issueId, invalidKind)).toThrow(
+      /Invalid pending action payload or issueId/,
+    )
 
     // 3. 各种 kind 的 payload 校验
     const blockAction: PendingIssueAction = {
@@ -134,11 +136,14 @@ describe('pending-action-sidecar', () => {
       createdAt: '2026-09-29T10:00:00Z',
       isUnknown: false,
     }
-    expect(validAction(blockAction, issueId)).toBe(true)
+    expect(() => storePendingAction(issueId, blockAction)).not.toThrow()
+    localStorage.clear()
 
     // 空 reason 的 block 校验失败
-    const invalidBlock = { ...blockAction, payload: { reason: '   ' } }
-    expect(validAction(invalidBlock, issueId)).toBe(false)
+    const invalidBlock = { ...blockAction, payload: { reason: '   ' } } as PendingIssueAction
+    expect(() => storePendingAction(issueId, invalidBlock)).toThrow(
+      /Invalid pending action payload or issueId/,
+    )
 
     // reset budget 额度必须为大于 0 的整数
     const validBudget: PendingIssueAction = {
@@ -150,12 +155,15 @@ describe('pending-action-sidecar', () => {
       createdAt: '2026-09-29T10:00:00Z',
       isUnknown: false,
     }
-    expect(validAction(validBudget, issueId)).toBe(true)
+    expect(() => storePendingAction(issueId, validBudget)).not.toThrow()
+    localStorage.clear()
     const invalidBudget = {
       ...validBudget,
       payload: { state: 'DESIGN', maxRuns: -1 },
-    }
-    expect(validAction(invalidBudget, issueId)).toBe(false)
+    } as PendingIssueAction
+    expect(() => storePendingAction(issueId, invalidBudget)).toThrow(
+      /Invalid pending action payload or issueId/,
+    )
 
     // resume 与 reopen/recover 一样只带空 payload
     const resumeAction: PendingIssueAction = {
@@ -167,7 +175,7 @@ describe('pending-action-sidecar', () => {
       createdAt: '2026-09-29T10:00:00Z',
       isUnknown: false,
     }
-    expect(validAction(resumeAction, issueId)).toBe(true)
+    expect(() => storePendingAction(issueId, resumeAction)).not.toThrow()
   })
 
   it('handles corrupt storage records by returning CORRUPT and preserving evidence without silent deletion', () => {
