@@ -161,24 +161,23 @@ final class AnthropicAssistantReplay {
    */
   private static boolean validatePayloadAgainstDurable(
       ArrayNode contentArray, List<ProviderContentBlock> durableContents) {
-    StringBuilder payloadText = new StringBuilder();
-    StringBuilder payloadThinking = new StringBuilder();
-    List<ProviderToolCall> payloadCalls = new ArrayList<>();
-    List<String> payloadRedacted = new ArrayList<>();
+    ReplayPayload payload = parseReplayPayload(contentArray);
+    DurableSummary durable = summarizeDurable(durableContents);
+    requireMatchingSemantics(payload, durable);
+    return payload.compactionFirst();
+  }
+
+  /** payload 只接受已知 block 的形状；未知 type opaque 透传，但 compaction 最多一个且必须在首位。 */
+  private static ReplayPayload parseReplayPayload(ArrayNode contentArray) {
+    StringBuilder text = new StringBuilder();
+    StringBuilder thinking = new StringBuilder();
+    List<ProviderToolCall> calls = new ArrayList<>();
+    List<String> redacted = new ArrayList<>();
 
     int compactionIndex = -1;
     int blockIndex = 0;
-
     for (JsonNode item : contentArray) {
-      if (!item.isObject() || !item.has("type") || !item.get("type").isString()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
-      }
-      String type = item.get("type").stringValue();
-      if (type.isBlank()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
-      }
+      String type = replayBlockType(item);
       switch (type) {
         case "text" -> {
           if (!item.has("text") || !item.get("text").isString()) {
@@ -186,7 +185,7 @@ final class AnthropicAssistantReplay {
                 ProviderErrorKind.INVALID_REQUEST, "invalid text block in replay payload");
           }
           validateCitations(item.get("citations"));
-          payloadText.append(item.get("text").stringValue());
+          text.append(item.get("text").stringValue());
         }
         case "thinking" -> {
           if (!item.has("thinking")
@@ -197,7 +196,7 @@ final class AnthropicAssistantReplay {
             throw new ProviderException(
                 ProviderErrorKind.INVALID_REQUEST, "invalid thinking block in replay payload");
           }
-          payloadThinking.append(item.get("thinking").stringValue());
+          thinking.append(item.get("thinking").stringValue());
         }
         case "redacted_thinking" -> {
           if (!item.has("data")
@@ -207,26 +206,9 @@ final class AnthropicAssistantReplay {
                 ProviderErrorKind.INVALID_REQUEST,
                 "invalid redacted_thinking block in replay payload");
           }
-          payloadRedacted.add(item.get("data").stringValue());
+          redacted.add(item.get("data").stringValue());
         }
-        case "tool_use" -> {
-          if (!item.has("id")
-              || !item.get("id").isString()
-              || item.get("id").stringValue().isBlank()
-              || !item.has("name")
-              || !item.get("name").isString()
-              || item.get("name").stringValue().isBlank()
-              || !item.has("input")
-              || !item.get("input").isObject()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_REQUEST, "invalid tool_use block in replay payload");
-          }
-          payloadCalls.add(
-              new ProviderToolCall(
-                  item.get("id").stringValue(),
-                  item.get("name").stringValue(),
-                  item.get("input").toString()));
-        }
+        case "tool_use" -> calls.add(replayToolCall(item));
         case "compaction" -> {
           if (compactionIndex >= 0) {
             throw new ProviderException(
@@ -247,20 +229,54 @@ final class AnthropicAssistantReplay {
           ProviderErrorKind.INVALID_REQUEST,
           "compaction block must be the first content block of the replay message");
     }
+    return new ReplayPayload(text, thinking, calls, redacted, compactionIndex == 0);
+  }
 
-    // 与 durable contents 比对
-    StringBuilder durableText = new StringBuilder();
-    StringBuilder durableThinking = new StringBuilder();
-    List<ProviderToolCall> durableCalls = new ArrayList<>();
-    List<String> durableRedacted = new ArrayList<>();
+  /** replay block 必须是带非空 string type 的对象。 */
+  private static String replayBlockType(JsonNode item) {
+    if (!item.isObject() || !item.has("type") || !item.get("type").isString()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
+    }
+    String type = item.get("type").stringValue();
+    if (type.isBlank()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid Anthropic replay payload block");
+    }
+    return type;
+  }
+
+  /** tool_use 的 id/name/input 必须齐备且形状正确。 */
+  private static ProviderToolCall replayToolCall(JsonNode item) {
+    if (!item.has("id")
+        || !item.get("id").isString()
+        || item.get("id").stringValue().isBlank()
+        || !item.has("name")
+        || !item.get("name").isString()
+        || item.get("name").stringValue().isBlank()
+        || !item.has("input")
+        || !item.get("input").isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST, "invalid tool_use block in replay payload");
+    }
+    return new ProviderToolCall(
+        item.get("id").stringValue(), item.get("name").stringValue(), item.get("input").toString());
+  }
+
+  /** durable contents 投影成语义摘要；未知 block 类型属于请求事实损坏，必须拒绝。 */
+  private static DurableSummary summarizeDurable(List<ProviderContentBlock> durableContents) {
+    StringBuilder text = new StringBuilder();
+    StringBuilder thinking = new StringBuilder();
+    List<ProviderToolCall> calls = new ArrayList<>();
+    List<String> redacted = new ArrayList<>();
 
     for (ProviderContentBlock block : durableContents) {
       if (block instanceof ProviderTextBlock tb) {
-        durableText.append(tb.text());
+        text.append(tb.text());
       } else if (block instanceof ProviderThinkingBlock pb) {
-        durableThinking.append(pb.thinking());
+        thinking.append(pb.thinking());
       } else if (block instanceof ProviderRedactedThinkingBlock redactedBlock) {
-        durableRedacted.add(redactedBlock.data());
+        redacted.add(redactedBlock.data());
       } else if (block instanceof ProviderOpaqueBlock) {
         // opaque blocks are preserved for the same protocol but have no cross-model semantic
         // projection
@@ -268,57 +284,62 @@ final class AnthropicAssistantReplay {
         ProviderToolCall call = cb.toolCall();
         ProviderJsonHelper.parseStrictJsonObject(
             call.argumentsJson(), "durable tool call arguments must be a JSON object");
-        durableCalls.add(call);
+        calls.add(call);
       } else {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "unsupported durable block in assistant message");
       }
     }
+    return new DurableSummary(text, thinking, calls, redacted);
+  }
 
-    if (!payloadText.toString().equals(durableText.toString())) {
+  /** 逐项比对语义；拒绝顺序与原实现一致：text、thinking、redacted、工具调用数量、逐个工具调用。 */
+  private static void requireMatchingSemantics(ReplayPayload payload, DurableSummary durable) {
+    if (!payload.text().toString().equals(durable.text().toString())) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "replay payload text does not match durable content");
     }
-    if (!payloadThinking.toString().equals(durableThinking.toString())) {
+    if (!payload.thinking().toString().equals(durable.thinking().toString())) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "replay payload thinking does not match durable content");
     }
-    if (!durableRedacted.isEmpty() && !payloadRedacted.equals(durableRedacted)) {
+    if (!durable.redacted().isEmpty() && !payload.redacted().equals(durable.redacted())) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "replay payload redacted thinking does not match durable content");
     }
-    if (payloadCalls.size() != durableCalls.size()) {
+    if (payload.calls().size() != durable.calls().size()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "replay payload tool call count does not match durable content");
     }
-    for (int i = 0; i < payloadCalls.size(); i++) {
-      ProviderToolCall pCall = payloadCalls.get(i);
-      ProviderToolCall dCall = durableCalls.get(i);
-      if (!pCall.id().equals(dCall.id()) || !pCall.name().equals(dCall.name())) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "replay payload tool call id/name does not match durable content");
-      }
-      // 合法性边界不变：两侧参数仍按 wire 同款严格对象校验。
-      ProviderJsonHelper.parseStrictJsonObject(
-          pCall.argumentsJson(), "replay tool call input must be a JSON object");
-      ProviderJsonHelper.parseStrictJsonObject(
-          dCall.argumentsJson(), "durable tool call arguments must be a JSON object");
-      // 语义一致性按数值 scale 无关比对（1.0 与 1.00 同值）；比较专用 reader 只读取比较树，
-      // wire 仍使用 replay 原生 input，输出形态不被改写。
-      if (!COMPARISON_READER
-          .readTree(pCall.argumentsJson())
-          .equals(COMPARISON_READER.readTree(dCall.argumentsJson()))) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST,
-            "replay payload tool call arguments do not match durable content");
-      }
+    for (int i = 0; i < payload.calls().size(); i++) {
+      requireMatchingToolCall(payload.calls().get(i), durable.calls().get(i));
     }
+  }
 
-    return compactionIndex == 0;
+  /** 单个工具调用的 id/name 与参数语义都必须一致。 */
+  private static void requireMatchingToolCall(ProviderToolCall pCall, ProviderToolCall dCall) {
+    if (!pCall.id().equals(dCall.id()) || !pCall.name().equals(dCall.name())) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "replay payload tool call id/name does not match durable content");
+    }
+    // 合法性边界不变：两侧参数仍按 wire 同款严格对象校验。
+    ProviderJsonHelper.parseStrictJsonObject(
+        pCall.argumentsJson(), "replay tool call input must be a JSON object");
+    ProviderJsonHelper.parseStrictJsonObject(
+        dCall.argumentsJson(), "durable tool call arguments must be a JSON object");
+    // 语义一致性按数值 scale 无关比对（1.0 与 1.00 同值）；比较专用 reader 只读取比较树，
+    // wire 仍使用 replay 原生 input，输出形态不被改写。
+    if (!COMPARISON_READER
+        .readTree(pCall.argumentsJson())
+        .equals(COMPARISON_READER.readTree(dCall.argumentsJson()))) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "replay payload tool call arguments do not match durable content");
+    }
   }
 
   /** citations 是官方可扩展结构：只校验容器与元素形状，不做字段白名单。 */
@@ -381,6 +402,19 @@ final class AnthropicAssistantReplay {
   }
 
   /** replay 判定结果；{@code startsHistory} 为真当且仅当 payload 以 compaction block 开头。 */
+  private record ReplayPayload(
+      StringBuilder text,
+      StringBuilder thinking,
+      List<ProviderToolCall> calls,
+      List<String> redacted,
+      boolean compactionFirst) {}
+
+  private record DurableSummary(
+      StringBuilder text,
+      StringBuilder thinking,
+      List<ProviderToolCall> calls,
+      List<String> redacted) {}
+
   private record ReplayDecision(boolean replayable, ArrayNode content, boolean startsHistory) {
 
     static final ReplayDecision FALLBACK = new ReplayDecision(false, null, false);
