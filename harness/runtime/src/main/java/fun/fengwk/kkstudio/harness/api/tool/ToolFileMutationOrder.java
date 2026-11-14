@@ -51,24 +51,12 @@ public final class ToolFileMutationOrder {
     }
     String value = path.replace('\\', '/');
     boolean windows = isWindowsAbsolute(value);
-    String root;
-    String rest;
-    if (windows && value.startsWith("//")) {
-      String[] parts = value.substring(2).split("/", -1);
-      if (parts.length < 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
-        return null;
-      }
-      root = "//" + parts[0] + "/" + parts[1] + "/";
-      rest = String.join("/", Arrays.copyOfRange(parts, 2, parts.length));
-    } else if (windows) {
-      root = Character.toUpperCase(value.charAt(0)) + ":/";
-      rest = value.substring(3);
-    } else if (value.startsWith("/")) {
-      root = "/";
-      rest = value.substring(1);
-    } else {
+    RootSplit split = splitRoot(value, windows);
+    if (split == null) {
       return null;
     }
+    String root = split.root();
+    String rest = split.rest();
     Deque<String> segments = new ArrayDeque<>();
     for (String segment : rest.split("/", -1)) {
       if (segment.isEmpty() || ".".equals(segment)) {
@@ -85,6 +73,28 @@ public final class ToolFileMutationOrder {
     String normalized = root + String.join("/", segments);
     return windows ? normalized.toLowerCase(Locale.ROOT) : normalized;
   }
+
+  /** 把绝对路径拆成 canonical root 与剩余段；非绝对路径或 UNC 主机/共享缺失时返回 null。 */
+  private static RootSplit splitRoot(String value, boolean windows) {
+    if (windows && value.startsWith("//")) {
+      String[] parts = value.substring(2).split("/", -1);
+      if (parts.length < 2 || parts[0].isEmpty() || parts[1].isEmpty()) {
+        return null;
+      }
+      return new RootSplit(
+          "//" + parts[0] + "/" + parts[1] + "/",
+          String.join("/", Arrays.copyOfRange(parts, 2, parts.length)));
+    }
+    if (windows) {
+      return new RootSplit(Character.toUpperCase(value.charAt(0)) + ":/", value.substring(3));
+    }
+    if (value.startsWith("/")) {
+      return new RootSplit("/", value.substring(1));
+    }
+    return null;
+  }
+
+  private record RootSplit(String root, String rest) {}
 
   private static boolean isWindowsAbsolute(String value) {
     return (value.length() >= 3
