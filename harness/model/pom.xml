@@ -101,6 +101,9 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesReplayEncoder</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesReplayValidator</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesToolStream</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesResponseBlocks</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesStreamUsage</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesOutputItems</include>
                                     </includes>
                                     <limits>
                                         <limit>
