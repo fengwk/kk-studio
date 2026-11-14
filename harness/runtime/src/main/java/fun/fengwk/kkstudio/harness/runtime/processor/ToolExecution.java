@@ -3,17 +3,13 @@ package fun.fengwk.kkstudio.harness.runtime.processor;
 import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
-import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
@@ -21,7 +17,6 @@ import fun.fengwk.kkstudio.harness.runtime.retry.InvocationRetryDecision;
 import fun.fengwk.kkstudio.harness.spi.RealtimeEventSink;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
-import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
 import fun.fengwk.kkstudio.harness.spi.ToolResultHistoryMaterializer;
 import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.spi.ToolSuccess;
@@ -31,21 +26,16 @@ import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionLifecycle;
 import fun.fengwk.kkstudio.harness.spi.execution.LocalExecutionRegistration;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimAdmissionGuard;
-import fun.fengwk.kkstudio.harness.spi.work.ClaimLostSignal;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessResult;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorExceptions;
 import fun.fengwk.kkstudio.harness.spi.work.WorkHeartbeat;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
-import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -97,6 +87,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   private final ToolInvocationRequest request;
   private final ToolProcessorConfig config;
   private final ToolResultHistoryMaterializer toolResultHistoryMaterializer;
+  private final ToolTerminalWrites terminalWrites;
   private final Clock clock;
   private final WorkHeartbeat heartbeat;
   private final Consumer<ToolExecution> ownerRelease;
@@ -150,6 +141,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
     this.toolResultHistoryMaterializer =
         Objects.requireNonNull(toolResultHistoryMaterializer, "toolResultHistoryMaterializer");
+    this.terminalWrites = new ToolTerminalWrites(store, toolResultHistoryMaterializer);
   }
 
   UUID invocationId() {
@@ -533,9 +525,9 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
       case ToolGateway.Succeeded succeeded -> finishSuccess(succeeded.success());
       case ToolGateway.Failed failed -> finishFailure(failed.error(), failed.retryable());
       case ToolGateway.Cancelled cancelled -> safeTerminal(
-          () -> commitTerminal(TerminalKind.CANCELLED, cancelled.error()));
+          () -> commitTerminal(ToolTerminalWrites.TerminalKind.CANCELLED, cancelled.error()));
       case ToolGateway.Unknown unknown -> safeTerminal(
-          () -> commitTerminal(TerminalKind.UNKNOWN, unknown.error()));
+          () -> commitTerminal(ToolTerminalWrites.TerminalKind.UNKNOWN, unknown.error()));
     }
   }
 
@@ -588,7 +580,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
       }
       return;
     }
-    safeTerminal(() -> commitTerminal(TerminalKind.FAILED, error));
+    safeTerminal(() -> commitTerminal(ToolTerminalWrites.TerminalKind.FAILED, error));
   }
 
   /** Terminal result 基础校验：非空、toolCallId 匹配 request、不得携带 BinaryResultContent。编码尺寸校验在基础校验之后进行。 */
@@ -609,204 +601,31 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
 
   /** READY -&gt; RUNNING（attempt+1）+ version+1 并登记退出事实；事务提交成功但未登记时返回 {@code null}。 */
   private ExecutionExitFact registerRunning() {
-    return store.transaction(
-        tx -> {
-          Instant now = tx.now();
-          ThreadState thread = tx.threads().lock(threadId).orElse(null);
-          if (thread == null) {
-            return null;
-          }
-          ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
-          if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-            return null;
-          }
-          if (tool.status() != ToolInvocationStatus.READY || tool.attempt() != attempt - 1) {
-            return null;
-          }
-          tx.tools().update(List.of(tool.markRunning(now)));
-          tx.threads().update(thread.touchVersion(now));
-          return ExecutionExitLedger.register(
-              tx,
-              executionId(),
-              threadId,
-              invocationId,
-              attempt,
-              claim.leaseToken(),
-              ExecutionExitKind.TOOL,
-              null);
-        });
+    return terminalWrites.registerRunning(
+        executionId, claim, threadId, invocationId, attempt, request);
   }
 
   /**
-   * 挂接执行体在事务内锁 Thread -> Tool -> Work 登记本节点的 TOOL 事实： 同一 attempt、新 executionId、本 claim token。不调用
-   * markRunning，不修改 version。提交成功后由 {@link #startReattach} 将原 REMOTE 事实放入
+   * 挂接执行体在事务内锁 Thread -&gt; Tool -&gt; Work 登记本节点的 TOOL 事实： 同一 attempt、新 executionId、本 claim
+   * token。不调用 markRunning，不修改 version。提交成功后由 {@link #startReattach} 将原 REMOTE 事实放入
    * registeredRemotes，以便统一确认与排空移交判定。
    */
   private ExecutionExitFact registerReattach() {
-    return store.transaction(
-        tx -> {
-          ThreadState thread = tx.threads().lock(threadId).orElse(null);
-          if (thread == null) {
-            return null;
-          }
-          ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
-          if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-            return null;
-          }
-          if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-            return null;
-          }
-          return ExecutionExitLedger.register(
-              tx,
-              executionId(),
-              threadId,
-              invocationId,
-              attempt,
-              claim.leaseToken(),
-              ExecutionExitKind.TOOL,
-              null);
-        });
+    return terminalWrites.registerReattach(executionId, claim, threadId, invocationId, attempt);
   }
 
   /** RUNNING -&gt; READY + version+1 + reschedule；不 request THREAD。 */
   private boolean commitRetry(Duration delay) {
-    return Boolean.TRUE.equals(
-        store.transaction(
-            tx -> {
-              Instant now = tx.now();
-              ThreadState thread = tx.threads().lock(threadId).orElse(null);
-              if (thread == null) {
-                return false;
-              }
-              ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
-              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
-                return false;
-              }
-              if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-                return false;
-              }
-              tx.tools().update(List.of(tool.retryReady(now)));
-              tx.threads().update(thread.touchVersion(now));
-              tx.work().reschedule(claim, delay);
-              return true;
-            }));
+    return terminalWrites.retry(claim, threadId, invocationId, attempt, delay);
   }
 
-  /**
-   * RUNNING -&gt; SUCCEEDED：在同一事务内先把结果物化为 Session 稳定引用，再保存该唯一稳定结果与 SUCCEEDED。物化永久失败时回滚整个
-   * 成功事务，并以独立的无资源 UNKNOWN 收敛，绝不重试外部副作用或再次消费同一 upload。
-   */
+  /** RUNNING -&gt; SUCCEEDED：先把结果物化为 Session 稳定引用，再保存该唯一稳定结果；物化永久失败时以独立的无资源 UNKNOWN 收敛。 */
   private boolean commitSuccess(ToolResult result) {
-    try {
-      return Boolean.TRUE.equals(
-          store.transaction(
-              tx -> {
-                Instant now = tx.now();
-                ThreadState thread = tx.threads().lock(threadId).orElse(null);
-                if (thread == null) {
-                  return false;
-                }
-                ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
-                if (tool == null) {
-                  return false;
-                }
-                if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-                  return false;
-                }
-                tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
-                if (tx.work().lockClaimed(claim).isEmpty()) {
-                  throw new ClaimLostSignal();
-                }
-                ToolResult stable =
-                    toolResultHistoryMaterializer.materialize(
-                        thread.sessionId(), request.call().toolName(), result);
-                requireStableResult(stable, request.call().id());
-                if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
-                    stable, ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES)) {
-                  throw new ToolOutcomeMaterializationException(
-                      "stable tool outcome exceeds "
-                          + ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES
-                          + " bytes");
-                }
-                tx.tools().update(List.of(tool.succeed(stable, now)));
-                tx.threads().update(thread.touchVersion(now));
-                tx.work().complete(claim);
-                return true;
-              }));
-    } catch (ClaimLostSignal ignored) {
-      return false;
-    } catch (ToolOutcomeMaterializationException failure) {
-      log.warn(
-          "cannot materialize stable tool outcome for {}: {}",
-          invocationId,
-          ProcessorExceptions.describe(failure));
-      String message =
-          failure.getMessage() == null || failure.getMessage().isBlank()
-              ? "tool result resource persistence failed"
-              : failure.getMessage();
-      return commitTerminal(
-          TerminalKind.UNKNOWN,
-          new ToolInvocationError("RESOURCE_MATERIALIZATION_FAILED", message));
-    }
+    return terminalWrites.success(claim, threadId, invocationId, attempt, request, result);
   }
 
-  /** 稳定结果再校验：同一调用、仅 Text/JSON/Session Resource，且不含 inline binary 或瞬时 upload。 */
-  private static void requireStableResult(ToolResult result, String toolCallId) {
-    if (result == null) {
-      throw new ToolOutcomeMaterializationException("stable tool outcome must not be null");
-    }
-    if (!result.toolCallId().equals(toolCallId)) {
-      throw new ToolOutcomeMaterializationException(
-          "stable tool outcome toolCallId does not match the request call");
-    }
-    for (ResultContent content : result.contents()) {
-      if (content instanceof BinaryResultContent) {
-        throw new ToolOutcomeMaterializationException(
-            "stable tool outcome must not carry inline binary content");
-      }
-      if (content instanceof ResourceResultContent resource
-          && resource.resource().sessionBlobId() == null) {
-        throw new ToolOutcomeMaterializationException(
-            "stable tool outcome resources must be session resources");
-      }
-    }
-  }
-
-  private boolean commitTerminal(TerminalKind kind, ToolInvocationError error) {
-    try {
-      return Boolean.TRUE.equals(
-          store.transaction(
-              tx -> {
-                Instant now = tx.now();
-                ThreadState thread = tx.threads().lock(threadId).orElse(null);
-                if (thread == null) {
-                  return false;
-                }
-                ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
-                if (tool == null) {
-                  return false;
-                }
-                if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-                  return false;
-                }
-                tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
-                if (tx.work().lockClaimed(claim).isEmpty()) {
-                  throw new ClaimLostSignal();
-                }
-                ToolInvocation next =
-                    switch (kind) {
-                      case FAILED -> tool.fail(error, now);
-                      case CANCELLED -> tool.cancel(error, now);
-                      case UNKNOWN -> tool.unknown(error, now);
-                    };
-                tx.tools().update(List.of(next));
-                tx.threads().update(thread.touchVersion(now));
-                tx.work().complete(claim);
-                return true;
-              }));
-    } catch (ClaimLostSignal ignored) {
-      return false;
-    }
+  private boolean commitTerminal(ToolTerminalWrites.TerminalKind kind, ToolInvocationError error) {
+    return terminalWrites.terminal(claim, threadId, invocationId, attempt, kind, error);
   }
 
   /** 终态落库失败只记录：durable 状态保持 RUNNING，由 lease 恢复收敛为 UNKNOWN。 */
@@ -820,16 +639,5 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
           ProcessorExceptions.describe(failure));
       return false;
     }
-  }
-
-  private enum TerminalKind {
-    /** 收敛为明确的失败终态。 */
-    FAILED,
-
-    /** 收敛为取消终态。 */
-    CANCELLED,
-
-    /** 收敛为结果不确定的终态。 */
-    UNKNOWN
   }
 }
