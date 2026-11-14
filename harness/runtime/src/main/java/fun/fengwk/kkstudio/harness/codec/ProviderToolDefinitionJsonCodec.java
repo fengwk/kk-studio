@@ -31,7 +31,7 @@ final class ProviderToolDefinitionJsonCodec {
   }
 
   ProviderToolDefinition decodeNode(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, CONTEXT);
+    ObjectNode node = JsonCodecSupport.object(value, CONTEXT);
     JsonCodecSupport.requireFields(node, FIELDS, CONTEXT);
     String name = HistoryValueCodecs.requiredText(node, "name", CONTEXT);
     String description = HistoryValueCodecs.requiredText(node, "description", CONTEXT);

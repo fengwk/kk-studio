@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.harness.api.entry;
 
-import java.util.Objects;
-
 /**
  * 统一逻辑模型身份：全局名称 + 可选单模型 Variant。
  *
@@ -11,9 +9,9 @@ import java.util.Objects;
 public record ModelSelection(String modelName, String variant) {
 
   public ModelSelection {
-    modelName = requireCanonicalName(modelName, "modelName");
+    modelName = CanonicalNames.requireName(modelName, "modelName");
     if (variant != null) {
-      variant = requireCanonicalName(variant, "variant");
+      variant = CanonicalNames.requireName(variant, "variant");
     }
   }
 
@@ -25,19 +23,5 @@ public record ModelSelection(String modelName, String variant) {
   /** 模型组没有组级 Variant。 */
   public static ModelSelection group(String modelName) {
     return new ModelSelection(modelName, null);
-  }
-
-  private static String requireCanonicalName(String value, String field) {
-    Objects.requireNonNull(value, field);
-    if (value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
-    }
-    if (value.length() > 128) {
-      throw new IllegalArgumentException(field + " must be <= 128 characters");
-    }
-    return value;
   }
 }

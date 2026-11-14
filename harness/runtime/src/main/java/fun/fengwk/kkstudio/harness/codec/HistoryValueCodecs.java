@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
@@ -16,15 +19,14 @@ import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 
 import java.time.Instant;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
 /**
  * history Entry payload 的包内严格 value codec：BranchSettings / ModelSelection /
- * AssistantMessageMetadata 以及它们需要的通用 JSON 原语。仅供同包 {@link HistoryEntryPayloadJsonCodec} 组合使用，不复制
- * AgentMessage codec。
+ * AssistantMessageMetadata。仅供同包 {@link HistoryEntryPayloadJsonCodec} 组合使用，不复制 AgentMessage codec；
+ * object/array 判定与字段集合校验统一委托 {@link JsonCodecSupport}。
  */
 final class HistoryValueCodecs {
 
@@ -73,7 +75,7 @@ final class HistoryValueCodecs {
   }
 
   static BranchSettings decodeBranchSettings(JsonNode value, String context) {
-    ObjectNode node = requireObject(value, context);
+    ObjectNode node = object(value, context);
     JsonCodecSupport.requireFields(node, BRANCH_SETTINGS_FIELDS, context);
     return new BranchSettings(
         requiredText(node, "agentName", context),
@@ -104,7 +106,7 @@ final class HistoryValueCodecs {
   }
 
   static ModelSelection decodeModelSelection(JsonNode value, String context) {
-    ObjectNode node = requireObject(value, context);
+    ObjectNode node = object(value, context);
     JsonCodecSupport.requireFields(node, MODEL_SELECTION_FIELDS, context);
     JsonNode variant = node.get("variant");
     if (!variant.isNull() && !variant.isString()) {
@@ -156,13 +158,13 @@ final class HistoryValueCodecs {
   }
 
   static AssistantMessageMetadata decodeAssistantMetadata(JsonNode value) {
-    ObjectNode node = requireObject(value, "assistantMetadata");
+    ObjectNode node = object(value, "assistantMetadata");
     JsonCodecSupport.requireFields(
         node, METADATA_FIELDS, METADATA_OPTIONAL_FIELDS, "assistantMetadata");
     GenerationStopReason stopReason =
         readEnum(
             GenerationStopReason.class, text(node, "stopReason"), "assistantMetadata.stopReason");
-    ObjectNode usageNode = requireObject(node.get("usage"), "assistantMetadata.usage");
+    ObjectNode usageNode = object(node.get("usage"), "assistantMetadata.usage");
     JsonCodecSupport.requireFields(usageNode, USAGE_FIELDS, "assistantMetadata.usage");
     ModelUsage usage =
         new ModelUsage(
@@ -171,8 +173,7 @@ final class HistoryValueCodecs {
             requiredNonNegativeLong(usageNode, "cacheReadTokens", "assistantMetadata.usage"),
             requiredNonNegativeLong(usageNode, "cacheWriteTokens", "assistantMetadata.usage"),
             decodeTtlTokens(
-                requireObject(
-                    usageNode.get("cacheWriteByTtl"), "assistantMetadata.usage.cacheWriteByTtl"),
+                object(usageNode.get("cacheWriteByTtl"), "assistantMetadata.usage.cacheWriteByTtl"),
                 "assistantMetadata.usage.cacheWriteByTtl"),
             nullableNonNegativeLong(usageNode, "reasoningTokens", "assistantMetadata.usage"),
             nullableNonNegativeLong(usageNode, "providerTotalTokens", "assistantMetadata.usage"));
@@ -203,7 +204,7 @@ final class HistoryValueCodecs {
     if (value == null || value.isNull()) {
       return null;
     }
-    ObjectNode pricing = requireObject(value, "assistantMetadata.requestBodyPricing");
+    ObjectNode pricing = object(value, "assistantMetadata.requestBodyPricing");
     Map<String, Boolean> matches = new LinkedHashMap<>();
     for (String fingerprint : pricing.propertyNames()) {
       JsonNode matched = pricing.get(fingerprint);
@@ -245,13 +246,6 @@ final class HistoryValueCodecs {
       tokens.put(ttl, value.longValue());
     }
     return Map.copyOf(tokens);
-  }
-
-  static ObjectNode requireObject(JsonNode value, String context) {
-    if (!(value instanceof ObjectNode object)) {
-      throw new IllegalArgumentException(context + " must be a JSON object");
-    }
-    return object;
   }
 
   static ArrayNode requireArray(JsonNode value, String context) {
@@ -398,13 +392,5 @@ final class HistoryValueCodecs {
       throw new IllegalArgumentException(context + "." + field + " must be text or null");
     }
     return Uuids.parseCanonical(value.stringValue(), context + "." + field);
-  }
-
-  static Set<String> orderedSet(String... values) {
-    Set<String> set = new LinkedHashSet<>();
-    for (String value : values) {
-      set.add(value);
-    }
-    return Set.copyOf(set);
   }
 }

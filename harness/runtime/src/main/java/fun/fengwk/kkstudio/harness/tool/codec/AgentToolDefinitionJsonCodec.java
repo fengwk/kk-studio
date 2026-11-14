@@ -32,7 +32,8 @@ public final class AgentToolDefinitionJsonCodec {
   /** 把完整 Agent tool definition 编码为 deterministic canonical JSON 文本。 */
   public String encode(AgentToolDefinition definition) {
     Objects.requireNonNull(definition, "definition");
-    return write(encodeNode(definition));
+    return JsonCodecSupport.write(
+        MAPPER, encodeNode(definition), "cannot encode " + CONTEXT + " JSON");
   }
 
   /** 把完整 Agent tool definition 编码为 canonical object；String API 委派此方法。 */
@@ -93,14 +94,6 @@ public final class AgentToolDefinitionJsonCodec {
     } catch (IllegalArgumentException error) {
       throw new IllegalArgumentException(
           CONTEXT + "." + field + " has unknown value " + value, error);
-    }
-  }
-
-  private static String write(ObjectNode node) {
-    try {
-      return MAPPER.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode " + CONTEXT + " JSON", error);
     }
   }
 }

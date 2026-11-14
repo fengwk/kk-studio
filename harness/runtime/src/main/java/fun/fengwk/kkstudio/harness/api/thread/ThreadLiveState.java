@@ -7,9 +7,5 @@ public enum ThreadLiveState {
   DRIVER_ACTIVE,
   DRIVER_RESPONSE_PENDING,
   TOOL_ACTIVE,
-  TOOL_TERMINAL_PENDING;
-
-  public boolean isLive() {
-    return this != IDLE_OR_HISTORICAL;
-  }
+  TOOL_TERMINAL_PENDING
 }

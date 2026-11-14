@@ -1,0 +1,537 @@
+package fun.fengwk.kkstudio.harness.codec;
+
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.bool;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.decodeNullableText;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
+
+import fun.fengwk.kkstudio.common.id.Uuids;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.AudioMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ImageMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.JsonMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
+import fun.fengwk.kkstudio.harness.api.session.RedactedThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ResourceMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
+import fun.fengwk.kkstudio.harness.model.ImageInputTier;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+/**
+ * {@link AgentMessageContent} 的 durable JSON 形态：type discriminator 分派、raw JSON 严格校验与 {@link
+ * ProviderBlockData} 的投影/还原。
+ *
+ * <p>由 {@link AgentMessageJsonCodec} 组合使用；拒绝条件、字段集合与编码顺序由该 codec 的类注释声明。
+ */
+final class AgentMessageContentJsonCodec {
+
+  private static final ObjectMapper MAPPER = AgentMessageJsonCodec.MAPPER;
+
+  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
+
+  private static final Set<String> TEXT_FIELDS = orderedSet("type", "text");
+  private static final Set<String> TEXT_NATIVE_FIELDS =
+      orderedSet("type", "text", "providerBlockData");
+  private static final Set<String> THINKING_FIELDS = orderedSet("type", "text");
+  private static final Set<String> THINKING_NATIVE_FIELDS =
+      orderedSet("type", "text", "providerBlockData");
+  private static final Set<String> REDACTED_THINKING_FIELDS = orderedSet("type", "data");
+  private static final Set<String> REDACTED_THINKING_NATIVE_FIELDS =
+      orderedSet("type", "data", "providerBlockData");
+  private static final Set<String> NATIVE_BLOCK_FIELDS =
+      orderedSet("type", "blockType", "providerBlockData");
+  private static final Set<String> JSON_FIELDS = orderedSet("type", "json");
+  private static final Set<String> TOOL_CALL_FIELDS =
+      orderedSet("type", "toolCallId", "toolName", "rendererKey", "argumentsJson", "historyAction");
+  private static final Set<String> TOOL_CALL_NATIVE_FIELDS =
+      orderedSet(
+          "type",
+          "toolCallId",
+          "toolName",
+          "rendererKey",
+          "argumentsJson",
+          "historyAction",
+          "providerBlockData");
+  private static final Set<String> TOOL_RESULT_FIELDS =
+      orderedSet(
+          "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
+  private static final Set<String> RESOURCE_FIELDS =
+      orderedSet(
+          "type",
+          "blobId",
+          "name",
+          "totalBytes",
+          "totalLines",
+          "preview",
+          "imageTier",
+          "originalWidth",
+          "originalHeight",
+          "displayWidth",
+          "displayHeight");
+
+  private AgentMessageContentJsonCodec() {}
+
+  static void putProviderBlockData(ObjectNode node, ProviderBlockData data) {
+    if (data == null) {
+      return;
+    }
+    ObjectNode providerData = node.putObject("providerBlockData");
+    providerData.put("protocol", data.protocol().wireValue());
+    ObjectNode affinity = providerData.putObject("affinity");
+    affinity.put("providerType", data.affinity().providerType().wireValue());
+    affinity.put("providerName", data.affinity().providerName());
+    affinity.put("modelId", data.affinity().modelId());
+    putNullableText(providerData, "signature", data.signature());
+    putNullableText(providerData, "encryptedContent", data.encryptedContent());
+    putNullableText(providerData, "itemId", data.itemId());
+    putNullableText(providerData, "itemType", data.itemType());
+    putNullableText(providerData, "contentType", data.contentType());
+    providerData.put("refusal", data.refusal());
+    putNullableBoolean(providerData, "thought", data.thought());
+    providerData.put("itemStart", data.itemStart());
+    providerData.set("nativeFields", data.nativeFields());
+  }
+
+  static ProviderBlockData decodeProviderBlockData(ObjectNode node) {
+    if (!node.has("providerBlockData")) {
+      return null;
+    }
+    ObjectNode data = object(node.get("providerBlockData"), "content.providerBlockData");
+    requireFields(
+        data,
+        orderedSet(
+            "protocol",
+            "affinity",
+            "signature",
+            "encryptedContent",
+            "itemId",
+            "itemType",
+            "contentType",
+            "refusal",
+            "thought",
+            "itemStart",
+            "nativeFields"),
+        "content.providerBlockData");
+    ProviderReplayFormat protocol = ProviderReplayFormat.fromWireValue(text(data, "protocol"));
+    ObjectNode affinity = object(data.get("affinity"), "content.providerBlockData.affinity");
+    requireFields(
+        affinity,
+        orderedSet("providerType", "providerName", "modelId"),
+        "content.providerBlockData.affinity");
+    ProviderType providerType;
+    try {
+      providerType = ProviderType.fromWireValue(text(affinity, "providerType"));
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("unsupported provider type", error);
+    }
+    ProviderReplayAffinity providerAffinity =
+        new ProviderReplayAffinity(
+            providerType,
+            requiredText(affinity, "providerName", "content.providerBlockData.affinity"),
+            requiredText(affinity, "modelId", "content.providerBlockData.affinity"));
+    return new ProviderBlockData(
+        protocol,
+        providerAffinity,
+        decodeNullableText(data, "signature"),
+        decodeNullableText(data, "encryptedContent"),
+        decodeNullableText(data, "itemId"),
+        decodeNullableText(data, "itemType"),
+        decodeNullableText(data, "contentType"),
+        bool(data, "refusal"),
+        decodeNullableBoolean(data, "thought"),
+        bool(data, "itemStart"),
+        data.get("nativeFields"));
+  }
+
+  /** 与 {@link JsonCodecSupport#array} 同判定，但保留 “must be a JSON array” 文案。 */
+  static ArrayNode requireArray(JsonNode value, String context) {
+    if (!(value instanceof ArrayNode array)) {
+      throw new IllegalArgumentException(context + " must be a JSON array");
+    }
+    return array;
+  }
+
+  static ObjectNode encodeContent(AgentMessageContent content) {
+    ObjectNode node = NODES.objectNode();
+    switch (content) {
+      case TextMessageContent value -> {
+        node.put("type", "text");
+        node.put("text", value.text());
+        putProviderBlockData(node, value.providerBlockData());
+      }
+      case ImageMessageContent value -> throw new IllegalArgumentException(
+          "image content is transient (provider projection only) and must never be persisted");
+      case AudioMessageContent value -> throw new IllegalArgumentException(
+          "audio content is transient (provider projection only) and must never be persisted");
+      case VideoMessageContent value -> throw new IllegalArgumentException(
+          "video content is transient (provider projection only) and must never be persisted");
+      case NativeAssistantBlockContent value -> {
+        node.put("type", "provider_native");
+        node.put("blockType", value.blockType());
+        putProviderBlockData(node, value.providerBlockData());
+      }
+      case ThinkingMessageContent value -> {
+        node.put("type", "thinking");
+        node.put("text", value.text());
+        putProviderBlockData(node, value.providerBlockData());
+      }
+      case RedactedThinkingMessageContent value -> {
+        node.put("type", "redacted_thinking");
+        node.put("data", value.data());
+        putProviderBlockData(node, value.providerBlockData());
+      }
+      case JsonMessageContent value -> {
+        // Encode 端也必须严格校验 raw JSON value。
+        validateStrictJsonValue(value.json(), "content.json");
+        node.put("type", "json");
+        node.put("json", value.json());
+      }
+      case ToolCallMessageContent value -> {
+        validateStrictJsonObject(value.argumentsJson(), "content.argumentsJson");
+        node.put("type", "tool_call");
+        node.put("toolCallId", value.toolCallId());
+        node.put("toolName", value.toolName());
+        node.put("rendererKey", value.rendererKey());
+        node.put("argumentsJson", value.argumentsJson());
+        putNullableText(node, "historyAction", value.historyAction());
+        putProviderBlockData(node, value.providerBlockData());
+      }
+      case ToolResultMessageContent value -> {
+        validateStrictJsonObject(value.detailsJson(), "content.detailsJson");
+        node.put("type", "tool_result");
+        node.put("toolCallId", value.toolCallId());
+        node.put("toolName", value.toolName());
+        node.put("rendererKey", value.rendererKey());
+        ArrayNode nested = node.putArray("contents");
+        for (AgentMessageContent child : value.contents()) {
+          if (child instanceof ToolCallMessageContent
+              || child instanceof ToolResultMessageContent) {
+            throw new IllegalArgumentException(
+                "tool result contents cannot nest tool call or tool result");
+          }
+          nested.add(encodeContent(child));
+        }
+        node.put("error", value.error());
+        node.put("detailsJson", value.detailsJson());
+      }
+      case ResourceMessageContent value -> {
+        node.put("type", "resource");
+        node.put("blobId", value.blobId().toString());
+        putNullableText(node, "name", value.name());
+        putNullableLong(node, "totalBytes", value.totalBytes());
+        putNullableLong(node, "totalLines", value.totalLines());
+        putNullableText(node, "preview", value.preview());
+        putNullableText(node, "imageTier", wireName(value.imageTier()));
+        putNullableInt(node, "originalWidth", value.originalWidth());
+        putNullableInt(node, "originalHeight", value.originalHeight());
+        putNullableInt(node, "displayWidth", value.displayWidth());
+        putNullableInt(node, "displayHeight", value.displayHeight());
+      }
+      case AttachmentMessageContent value -> throw new IllegalArgumentException(
+          "attachment content is transient and must never be persisted");
+    }
+    return node;
+  }
+
+  static AgentMessageContent decodeContent(JsonNode value) {
+    ObjectNode node = object(value, "content");
+    JsonNode typeNode = node.get("type");
+    if (typeNode == null || !typeNode.isString()) {
+      throw new IllegalArgumentException("content.type must be text");
+    }
+    String type = typeNode.stringValue();
+    return switch (type) {
+      case "text" -> {
+        requireContentFields(node, TEXT_FIELDS, TEXT_NATIVE_FIELDS);
+        // TextMessageContent.text 域约束仅 non-null，decode 必须允许空字符串。
+        yield new TextMessageContent(
+            requiredTextAllowEmpty(node, "text", "content"), decodeProviderBlockData(node));
+      }
+      case "thinking" -> {
+        requireContentFields(node, THINKING_FIELDS, THINKING_NATIVE_FIELDS);
+        yield new ThinkingMessageContent(
+            requiredTextAllowEmpty(node, "text", "content"), decodeProviderBlockData(node));
+      }
+      case "redacted_thinking" -> {
+        requireContentFields(node, REDACTED_THINKING_FIELDS, REDACTED_THINKING_NATIVE_FIELDS);
+        yield new RedactedThinkingMessageContent(
+            requiredTextAllowEmpty(node, "data", "content"), decodeProviderBlockData(node));
+      }
+      case "provider_native" -> {
+        requireFields(node, NATIVE_BLOCK_FIELDS, "content");
+        yield new NativeAssistantBlockContent(
+            requiredText(node, "blockType", "content"), decodeProviderBlockData(node));
+      }
+      case "json" -> {
+        requireFields(node, JSON_FIELDS, "content");
+        String rawJson = requiredStrictJsonValueString(node, "json", "content");
+        yield new JsonMessageContent(rawJson);
+      }
+      case "tool_call" -> {
+        requireContentFields(node, TOOL_CALL_FIELDS, TOOL_CALL_NATIVE_FIELDS);
+        yield new ToolCallMessageContent(
+            requiredText(node, "toolCallId", "content"),
+            requiredText(node, "toolName", "content"),
+            requiredText(node, "rendererKey", "content"),
+            requiredStrictJsonObjectString(node, "argumentsJson", "content"),
+            nullableText(node, "historyAction", "content"),
+            decodeProviderBlockData(node));
+      }
+      case "tool_result" -> {
+        requireFields(node, TOOL_RESULT_FIELDS, "content");
+        ArrayNode contentsArray = requireArray(node.get("contents"), "content.contents");
+        List<AgentMessageContent> nestedContents = new ArrayList<>(contentsArray.size());
+        for (JsonNode element : contentsArray) {
+          AgentMessageContent nested = decodeContent(element);
+          if (nested instanceof ToolCallMessageContent
+              || nested instanceof ToolResultMessageContent) {
+            throw new IllegalArgumentException(
+                "tool result contents cannot nest tool call or tool result");
+          }
+          nestedContents.add(nested);
+        }
+        yield new ToolResultMessageContent(
+            requiredText(node, "toolCallId", "content"),
+            requiredText(node, "toolName", "content"),
+            requiredText(node, "rendererKey", "content"),
+            nestedContents,
+            requiredBoolean(node, "error", "content"),
+            requiredStrictJsonObjectString(node, "detailsJson", "content"));
+      }
+      case "resource" -> {
+        requireFields(node, RESOURCE_FIELDS, "content");
+        yield new ResourceMessageContent(
+            canonicalUuid(node, "blobId", "content"),
+            nullableText(node, "name", "content"),
+            nullableLong(node, "totalBytes", "content"),
+            nullableLong(node, "totalLines", "content"),
+            nullableText(node, "preview", "content"),
+            nullableImageTier(node, "imageTier", "content"),
+            nullableInt(node, "originalWidth", "content"),
+            nullableInt(node, "originalHeight", "content"),
+            nullableInt(node, "displayWidth", "content"),
+            nullableInt(node, "displayHeight", "content"));
+      }
+      default -> throw new IllegalArgumentException(
+          "unknown agent message content type: "
+              + type
+              + " (attachment and media content are transient and cannot be persisted)");
+    };
+  }
+
+  static void requireContentFields(
+      ObjectNode node, Set<String> fields, Set<String> fieldsWithNativeData) {
+    requireFields(node, node.has("providerBlockData") ? fieldsWithNativeData : fields, "content");
+  }
+
+  static void validateStrictJsonObject(String raw, String name) {
+    JsonNode parsed = parseStrict(raw, name);
+    if (!parsed.isObject()) {
+      throw new IllegalArgumentException(name + " must be a JSON object");
+    }
+  }
+
+  static void validateStrictJsonValue(String raw, String name) {
+    parseStrict(raw, name);
+  }
+
+  static String requiredStrictJsonObjectString(ObjectNode node, String field, String context) {
+    String raw = requiredText(node, field, context);
+    validateStrictJsonObject(raw, context + "." + field);
+    return raw;
+  }
+
+  static String requiredStrictJsonValueString(ObjectNode node, String field, String context) {
+    String raw = requiredText(node, field, context);
+    validateStrictJsonValue(raw, context + "." + field);
+    return raw;
+  }
+
+  static JsonNode parseStrict(String raw, String name) {
+    JsonNode parsed;
+    try {
+      parsed = MAPPER.readTree(raw);
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException(name + " must contain JSON", error);
+    }
+    // Jackson 3 对空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为缺失文档。
+    if (parsed == null || parsed.isMissingNode()) {
+      throw new IllegalArgumentException(name + " must contain JSON");
+    }
+    return parsed;
+  }
+
+  static String text(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (!value.isString()) {
+      throw new IllegalArgumentException(field + " must be text");
+    }
+    return value.stringValue();
+  }
+
+  static String requiredText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    return requiredText(value, field, context);
+  }
+
+  static String requiredText(JsonNode value, String field, String context) {
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    String text = value.stringValue();
+    if (text.isBlank()) {
+      throw new IllegalArgumentException(context + "." + field + " must not be blank");
+    }
+    return text;
+  }
+
+  static boolean requiredBoolean(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isBoolean()) {
+      throw new IllegalArgumentException(context + "." + field + " must be boolean");
+    }
+    return value.booleanValue();
+  }
+
+  /** 与 {@link #requiredText} 类似，但允许空字符串（仅 non-null 约束，如 {@link TextMessageContent#text}）。 */
+  static String requiredTextAllowEmpty(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    return value.stringValue();
+  }
+
+  /** 可空文本字段：JSON null 或 text。 */
+  static String nullableText(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value.isNull()) {
+      return null;
+    }
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text or null");
+    }
+    return value.stringValue();
+  }
+
+  /** 必填 canonical UUID 文本字段。 */
+  static UUID canonicalUuid(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (!value.isString()) {
+      throw new IllegalArgumentException(context + "." + field + " must be text");
+    }
+    String text = value.stringValue();
+    try {
+      return Uuids.parseCanonical(text, context + "." + field);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " must be a canonical UUID: " + text, error);
+    }
+  }
+
+  static void putNullableText(ObjectNode node, String field, String value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  static void putNullableBoolean(ObjectNode node, String field, Boolean value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value.booleanValue());
+    }
+  }
+
+  static Boolean decodeNullableBoolean(ObjectNode node, String field) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isBoolean()) {
+      throw new IllegalArgumentException(field + " must be boolean or null");
+    }
+    return value.booleanValue();
+  }
+
+  static void putNullableLong(ObjectNode node, String field, Long value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  static void putNullableInt(ObjectNode node, String field, Integer value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  static Long nullableLong(ObjectNode node, String field, String context) {
+    JsonNode value = node.get(field);
+    if (value == null || value.isNull()) {
+      return null;
+    }
+    if (!value.isIntegralNumber()) {
+      throw new IllegalArgumentException(context + "." + field + " must be integer or null");
+    }
+    return value.longValue();
+  }
+
+  static Integer nullableInt(ObjectNode node, String field, String context) {
+    Long value = nullableLong(node, field, context);
+    if (value == null) {
+      return null;
+    }
+    try {
+      return Math.toIntExact(value);
+    } catch (ArithmeticException error) {
+      throw new IllegalArgumentException(
+          context + "." + field + " is outside integer range", error);
+    }
+  }
+
+  /** 可空图片输入档位字段：JSON null 或档位 wire 名称；未知名称显式失败。 */
+  static ImageInputTier nullableImageTier(ObjectNode node, String field, String context) {
+    String wireName = nullableText(node, field, context);
+    if (wireName == null) {
+      return null;
+    }
+    try {
+      return ImageInputTier.fromWireName(wireName);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(context + "." + field + " " + error.getMessage(), error);
+    }
+  }
+
+  static String wireName(ImageInputTier tier) {
+    return tier == null ? null : tier.wireName();
+  }
+}

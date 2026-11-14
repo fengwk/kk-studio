@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.api.tool;
 
+import fun.fengwk.kkstudio.harness.api.entry.CanonicalNames;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -11,9 +13,6 @@ import java.util.UUID;
  * SUCCEEDED 且 result 非空的调用上；attempt 为 0（人工作答不是执行）且不携带 approval（问卷不能授权工具）。
  */
 public record ToolInputReceipt(UUID submissionId, String actor, Instant acceptedAt) {
-
-  /** actor 的字符上限，与 approval actor 保持一致。 */
-  public static final int ACTOR_MAX_LENGTH = 128;
 
   public ToolInputReceipt {
     submissionId = Objects.requireNonNull(submissionId, "submissionId");
@@ -27,16 +26,6 @@ public record ToolInputReceipt(UUID submissionId, String actor, Instant accepted
   }
 
   private static String requireCanonicalActor(String actor) {
-    Objects.requireNonNull(actor, "actor");
-    if (actor.isBlank()) {
-      throw new IllegalArgumentException("actor must not be blank");
-    }
-    if (!actor.equals(actor.strip())) {
-      throw new IllegalArgumentException("actor must not contain surrounding whitespace");
-    }
-    if (actor.length() > ACTOR_MAX_LENGTH) {
-      throw new IllegalArgumentException("actor must be <= " + ACTOR_MAX_LENGTH + " characters");
-    }
-    return actor;
+    return CanonicalNames.requireName(actor, "actor");
   }
 }

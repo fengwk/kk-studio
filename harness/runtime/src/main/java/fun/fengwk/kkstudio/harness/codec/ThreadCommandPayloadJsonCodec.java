@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.write;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -25,7 +28,6 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 
 import java.nio.charset.StandardCharsets;
-import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -57,15 +59,12 @@ public final class ThreadCommandPayloadJsonCodec {
 
   private static final AgentMessageJsonCodec MESSAGE_CODEC = new AgentMessageJsonCodec();
 
-  private static final ThreadCommandPayloadJsonCodec REQUEST_HASH_CODEC =
-      new ThreadCommandPayloadJsonCodec();
-
   public ThreadCommandPayloadJsonCodec() {}
 
   /** 把 {@link ThreadCommandPayload} 编码为 canonical JSON 文本；不包含 command type discriminator。 */
   public String encode(ThreadCommandPayload payload) {
     Objects.requireNonNull(payload, "payload");
-    return write(encodeNode(payload));
+    return write(MAPPER, encodeNode(payload), "cannot encode thread command payload JSON");
   }
 
   /**
@@ -77,7 +76,12 @@ public final class ThreadCommandPayloadJsonCodec {
    */
   public static String requestHash(ThreadCommandPayload payload) {
     Objects.requireNonNull(payload, "payload");
-    byte[] canonical = write(encodeRequestEnvelopeNode(payload)).getBytes(StandardCharsets.UTF_8);
+    byte[] canonical =
+        write(
+                MAPPER,
+                encodeRequestEnvelopeNode(payload),
+                "cannot encode thread command payload JSON")
+            .getBytes(StandardCharsets.UTF_8);
     return Sha256.hex(canonical);
   }
 
@@ -175,32 +179,32 @@ public final class ThreadCommandPayloadJsonCodec {
   // ---------- 解码器 ----------
 
   private static UserMessageCommandPayload decodeUserMessage(JsonNode value) {
-    ObjectNode node = requireObject(value, "USER_MESSAGE");
+    ObjectNode node = object(value, "USER_MESSAGE");
     requireFields(node, USER_MESSAGE_FIELDS, "USER_MESSAGE");
     return new UserMessageCommandPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
   }
 
   private static CustomMessageCommandPayload decodeCustomMessage(JsonNode value) {
-    ObjectNode node = requireObject(value, "CUSTOM_MESSAGE");
+    ObjectNode node = object(value, "CUSTOM_MESSAGE");
     requireFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
     return new CustomMessageCommandPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
   }
 
   private static SetAgentCommandPayload decodeSetAgent(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_AGENT");
+    ObjectNode node = object(value, "SET_AGENT");
     requireFields(node, SET_AGENT_FIELDS, "SET_AGENT");
     return new SetAgentCommandPayload(canonicalText(node, "agentName", "SET_AGENT"));
   }
 
   private static SetExecutionCommandPayload decodeSetExecution(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_EXECUTION");
+    ObjectNode node = object(value, "SET_EXECUTION");
     requireFields(node, SET_EXECUTION_FIELDS, "SET_EXECUTION");
     return new SetExecutionCommandPayload(
         ExecutionSelectionJsonCodec.decode(node.get("execution"), "SET_EXECUTION.execution"));
   }
 
   private static SetEnvironmentCommandPayload decodeSetEnvironment(JsonNode value) {
-    ObjectNode node = requireObject(value, "SET_ENVIRONMENT");
+    ObjectNode node = object(value, "SET_ENVIRONMENT");
     requireFields(node, SET_ENVIRONMENT_FIELDS, "SET_ENVIRONMENT");
     return new SetEnvironmentCommandPayload(
         nullableEnvironmentName(node, "environmentName", "SET_ENVIRONMENT"));
@@ -220,7 +224,7 @@ public final class ThreadCommandPayloadJsonCodec {
   }
 
   private static NotificationCommandPayload decodeNotification(JsonNode value) {
-    ObjectNode node = requireObject(value, "NOTIFICATION");
+    ObjectNode node = object(value, "NOTIFICATION");
     requireFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
     return new NotificationCommandPayload(
         requiredUuid(node, "notificationId", "NOTIFICATION"),
@@ -255,33 +259,7 @@ public final class ThreadCommandPayloadJsonCodec {
     }
   }
 
-  private static int requiredNonNegativeInt(ObjectNode node, String field, String context) {
-    JsonNode value = node.get(field);
-    if (value == null
-        || !value.isIntegralNumber()
-        || !value.canConvertToInt()
-        || value.intValue() < 0) {
-      throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
-    }
-    return value.intValue();
-  }
-
   // ---------- 通用工具方法 ----------
-
-  private static String write(ObjectNode node) {
-    try {
-      return MAPPER.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode thread command payload JSON", error);
-    }
-  }
-
-  private static ObjectNode requireObject(JsonNode value, String context) {
-    if (!(value instanceof ObjectNode object)) {
-      throw new IllegalArgumentException(context + " must be a JSON object");
-    }
-    return object;
-  }
 
   private static String canonicalText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
@@ -289,13 +267,5 @@ public final class ThreadCommandPayloadJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
     return CommandValueValidation.requireCanonicalName(value.stringValue(), context + "." + field);
-  }
-
-  private static Set<String> orderedSet(String... values) {
-    Set<String> set = new LinkedHashSet<>();
-    for (String value : values) {
-      set.add(value);
-    }
-    return Set.copyOf(set);
   }
 }

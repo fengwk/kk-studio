@@ -11,10 +11,16 @@
  * fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec} 定义 {@link
  * fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent} 的 live overlay 形态。
  *
+ * <p>{@link fun.fengwk.kkstudio.harness.codec.AgentMessageContentJsonCodec} 承载单个 content 的
+ * discriminator 分派、raw JSON 严格校验与 Provider block 投影，{@link
+ * fun.fengwk.kkstudio.harness.codec.AgentMessageJsonCodec} 只负责 message 信封与 string API。
+ *
  * <p>Entry payload 的 durable 形态由 {@link
  * fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec} 按 {@link
  * fun.fengwk.kkstudio.harness.api.history.EntryType} 分派，其 settings / model / assistant metadata
- * 子树与严格 JSON 原语由包内 {@link fun.fengwk.kkstudio.harness.codec.HistoryValueCodecs} 提供；{@link
+ * 子树与严格 JSON 原语由包内 {@link fun.fengwk.kkstudio.harness.codec.HistoryValueCodecs} 提供， SYSTEM 与
+ * TURN_START 的嵌套值形态分别由 {@link fun.fengwk.kkstudio.harness.codec.HistorySystemJsonCodec} 与 {@link
+ * fun.fengwk.kkstudio.harness.codec.HistoryTurnStartJsonCodec} 承载；{@link
  * fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper} 只把终态 ToolInvocation 与 history
  * normalization 事实纯映射为 Entry payload，不做持久化决策。
  *

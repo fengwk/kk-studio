@@ -9,6 +9,7 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 
@@ -33,7 +34,8 @@ public final class ToolDescriptorJsonCodec {
   /** 把单个 descriptor 编码为 deterministic canonical JSON 文本。 */
   public String encode(ToolDescriptor descriptor) {
     Objects.requireNonNull(descriptor, "descriptor");
-    return write(encodeNode(descriptor));
+    return JsonCodecSupport.write(
+        MAPPER, encodeNode(descriptor), "cannot encode tool descriptor JSON");
   }
 
   /** 把单个 descriptor 编码为 deterministic canonical {@link ObjectNode}；String API 委派此方法。 */
@@ -75,14 +77,6 @@ public final class ToolDescriptorJsonCodec {
     target.put("sideEffect", descriptor.sideEffect().name());
     target.put("defaultTimeoutMillis", descriptor.defaultTimeout().toMillis());
     target.set("inputSchema", SCHEMA_CODEC.encodeNode(descriptor.inputSchema()));
-  }
-
-  private static String write(ObjectNode node) {
-    try {
-      return MAPPER.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode tool descriptor JSON", error);
-    }
   }
 
   private static ToolDescriptor readDescriptor(JsonNode node) {

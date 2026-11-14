@@ -2,11 +2,8 @@ package fun.fengwk.kkstudio.harness.environment.capability;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -22,11 +19,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicBoolean;
 
-/** Environment Capability descriptor、参数、请求、结果和流式 SPI 契约测试。 */
+/** Environment Capability descriptor、参数、请求、结果与规范校验契约测试。 */
 class EnvironmentCapabilityContractTest {
 
   private static final InputSchema SCHEMA =
@@ -242,142 +237,11 @@ class EnvironmentCapabilityContractTest {
         () -> new EnvironmentCapabilityResult("call-1", List.of(), false, overLimit));
   }
 
-  /** fake capability 按顺序发送两个 partial 后 complete，并以 handle 提供幂等 cancel 形状。 */
-  @Test
-  void streamsOrderedPartialsAndOneTerminalWithCancellableHandle() {
-    FakeCapability capability = new FakeCapability(DESCRIPTOR);
-    RecordingListener listener = new RecordingListener();
-    EnvironmentCapabilityExecutionRequest request =
-        new EnvironmentCapabilityExecutionRequest(
-            DESCRIPTOR,
-            new EnvironmentCapabilityCall("call-1", "{\"path\":\"README.md\"}"),
-            Duration.ZERO);
-
-    EnvironmentCapabilityExecutionHandle handle = capability.execute(request, listener);
-
-    assertEquals(List.of("partial-1", "partial-2", "complete"), listener.events);
-    assertNull(listener.error);
-    assertFalse(handle.isCancelled());
-    handle.cancel();
-    handle.cancel();
-    assertTrue(handle.isCancelled());
-  }
-
   private static String[] componentNames(RecordComponent[] components) {
     String[] names = new String[components.length];
     for (int index = 0; index < components.length; index++) {
       names[index] = components[index].getName();
     }
     return names;
-  }
-
-  private static final class FakeCapability implements EnvironmentCapability {
-    private final EnvironmentCapabilityDescriptor descriptor;
-
-    private FakeCapability(EnvironmentCapabilityDescriptor descriptor) {
-      this.descriptor = descriptor;
-    }
-
-    @Override
-    public EnvironmentCapabilityDescriptor descriptor() {
-      return descriptor;
-    }
-
-    @Override
-    public EnvironmentCapabilityExecutionHandle execute(
-        EnvironmentCapabilityExecutionRequest request,
-        EnvironmentCapabilityExecutionListener listener) {
-      assertEquals(descriptor, request.descriptor());
-      AtomicBoolean terminal = new AtomicBoolean();
-      EnvironmentCapabilityExecutionListener fenced =
-          new EnvironmentCapabilityExecutionListener() {
-            @Override
-            public void onPartial(EnvironmentCapabilityResult partial) {
-              if (!terminal.get()) {
-                listener.onPartial(partial);
-              }
-            }
-
-            @Override
-            public void onComplete(EnvironmentCapabilityResult result) {
-              if (terminal.compareAndSet(false, true)) {
-                listener.onComplete(result);
-              }
-            }
-
-            @Override
-            public void onError(Throwable error) {
-              if (terminal.compareAndSet(false, true)) {
-                listener.onError(error);
-              }
-            }
-
-            @Override
-            public void onExitConfirmed() {
-              listener.onExitConfirmed();
-            }
-          };
-      fenced.onPartial(result(request, "partial-1"));
-      fenced.onPartial(result(request, "partial-2"));
-      fenced.onComplete(result(request, "complete"));
-      fenced.onPartial(result(request, "ignored"));
-      fenced.onError(new IllegalStateException("ignored"));
-
-      AtomicBoolean cancelled = new AtomicBoolean();
-      return new EnvironmentCapabilityExecutionHandle() {
-        @Override
-        public void cancel() {
-          cancelled.set(true);
-        }
-
-        @Override
-        public boolean isCancelled() {
-          return cancelled.get();
-        }
-
-        @Override
-        public void terminate(EnvironmentCapabilityTerminationCause cause) {
-          Objects.requireNonNull(cause, "cause");
-          cancel();
-        }
-
-        @Override
-        public Duration terminalDeliveryGrace() {
-          return Duration.ZERO;
-        }
-      };
-    }
-
-    private EnvironmentCapabilityResult result(
-        EnvironmentCapabilityExecutionRequest request, String text) {
-      return new EnvironmentCapabilityResult(
-          request.call().id(), List.of(new TextResultContent(text)), false, "{}");
-    }
-  }
-
-  private static final class RecordingListener implements EnvironmentCapabilityExecutionListener {
-    private final List<String> events = new ArrayList<>();
-    private Throwable error;
-
-    @Override
-    public void onPartial(EnvironmentCapabilityResult partial) {
-      events.add(((TextResultContent) partial.contents().getFirst()).text());
-    }
-
-    @Override
-    public void onComplete(EnvironmentCapabilityResult result) {
-      events.add(((TextResultContent) result.contents().getFirst()).text());
-    }
-
-    @Override
-    public void onError(Throwable error) {
-      this.error = error;
-      events.add("error");
-    }
-
-    @Override
-    public void onExitConfirmed() {
-      events.add("exit");
-    }
   }
 }

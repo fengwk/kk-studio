@@ -16,8 +16,6 @@ public record BranchSettings(
   /** Environment name 上限（与 Environment 资源名约束一致）。 */
   public static final int MAX_ENVIRONMENT_NAME_CHARS = 64;
 
-  private static final int MAX_AGENT_NAME_CHARS = 128;
-
   public BranchSettings {
     agentName = requireCanonicalAgentName(agentName, "agentName");
     execution = Objects.requireNonNull(execution, "execution");
@@ -40,18 +38,7 @@ public record BranchSettings(
   }
 
   private static String requireCanonicalAgentName(String value, String field) {
-    Objects.requireNonNull(value, field);
-    if (value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
-    }
-    if (value.length() > MAX_AGENT_NAME_CHARS) {
-      throw new IllegalArgumentException(
-          field + " must be <= " + MAX_AGENT_NAME_CHARS + " characters");
-    }
-    return value;
+    return CanonicalNames.requireName(value, field);
   }
 
   /**
