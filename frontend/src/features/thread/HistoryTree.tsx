@@ -1,29 +1,18 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type RefObject } from 'react'
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { CopyPlus, GitBranch } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/thread/runtime/thread-panel/ThreadInteractionPanel'
 import {
   buildHistoryTree,
-  highlightSegments,
   historyRowMatches,
   historySearchTokens,
-  type HistoryEntryKind,
-  type HistoryTreeRow,
 } from '@/features/thread/history-tree'
-import { useI18n, type TranslationKey } from '@/shared/i18n'
+import { HistoryTreeRowView } from '@/features/thread/HistoryTreeRow'
+import { resolveHistoryRowId } from '@/features/thread/history-tree-row-state'
+import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import '@/features/thread/history-tree.css'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
-
-const KIND_LABEL_KEYS: Record<HistoryEntryKind, TranslationKey> = {
-  root: 'ai.chat.branch.kindRoot',
-  user: 'ai.chat.history.user',
-  assistant: 'ai.chat.history.assistant',
-  tool: 'ai.chat.history.tool',
-  custom: 'ai.chat.history.custom',
-  notification: 'ai.chat.branch.kindNotification',
-  other: 'ai.chat.history.system',
-}
 
 /**
  * 历史树：一行一个真实 Entry，lane 只表达真实父子分叉，不含目录式缩进、卡片、
@@ -70,7 +59,7 @@ export function HistoryTree({
   const selectedIndex = selectedRow == null ? -1 : rows.indexOf(selectedRow)
 
   useEffect(() => {
-    setSelectedId((current) => resolveRowId(rows, current, headEntryId ?? null))
+    setSelectedId((current) => resolveHistoryRowId(rows, current, headEntryId ?? null))
   }, [rows, headEntryId])
   useEffect(() => {
     selectedRef.current?.scrollIntoView?.({ block: 'nearest' })
@@ -200,98 +189,5 @@ export function HistoryTree({
         </>
       ) : null}
     </ThreadInteractionPanel>
-  )
-}
-
-/** 默认选中 head，其次保留仍然存在的选择，最后回落到最后一行。 */
-function resolveRowId(
-  rows: HistoryTreeRow[],
-  currentId: string | null,
-  headEntryId: string | null,
-): string | null {
-  if (rows.length === 0) {
-    return null
-  }
-  if (currentId != null && rows.some((row) => row.entry.entryId === currentId)) {
-    return currentId
-  }
-  if (headEntryId != null && rows.some((row) => row.entry.entryId === headEntryId)) {
-    return headEntryId
-  }
-  return rows[rows.length - 1]!.entry.entryId
-}
-
-/** lane gutter 字形：每个 lane 一列，节点列画节点，其余列按连通性画竖线。 */
-function historyLaneGlyphs(row: HistoryTreeRow): string {
-  const width = Math.max(row.gutter.length, row.lane + 1)
-  let glyphs = ''
-  for (let column = 0; column < width; column += 1) {
-    if (column === row.lane) {
-      glyphs += row.isFork ? '◆' : '●'
-    } else {
-      glyphs += row.gutter[column] ? '│' : ' '
-    }
-  }
-  return glyphs
-}
-
-function HistoryTreeRowView({
-  row,
-  tokens,
-  dimmed,
-  selected,
-  selectedRef,
-  onSelect,
-}: {
-  row: HistoryTreeRow
-  tokens: string[]
-  dimmed: boolean
-  selected: boolean
-  selectedRef: RefObject<HTMLButtonElement | null>
-  onSelect: (entryId: string) => void
-}) {
-  const { t } = useI18n()
-  const kindLabel = t(KIND_LABEL_KEYS[row.kind])
-  const segments = tokens.length > 0 ? highlightSegments(row.preview, tokens) : [{ text: row.preview, match: false }]
-  return (
-    <div role="listitem">
-      <button
-        type="button"
-        aria-pressed={selected}
-        aria-current={row.isHead ? 'true' : undefined}
-        aria-label={t('ai.chat.history.entryAria', {
-          kind: kindLabel,
-          preview: row.preview,
-          path: row.onActivePath ? ` · ${t('ai.chat.history.currentPath')}` : '',
-          head: row.isHead ? ` · ${t('ai.chat.history.currentPosition')}` : '',
-        })}
-        data-lane={row.lane}
-        data-fork={row.isFork ? 'true' : undefined}
-        data-can-fork={row.canFork ? 'true' : 'false'}
-        className={[
-          'history-tree-entry',
-          selected ? 'selected' : '',
-          row.isHead ? 'head' : '',
-          row.onActivePath ? 'on-path' : '',
-          dimmed ? 'dimmed' : '',
-        ].filter(Boolean).join(' ')}
-        ref={selected ? selectedRef : undefined}
-        onClick={() => onSelect(row.entry.entryId)}
-      >
-        <span className="history-tree-entry-cursor" aria-hidden="true">{selected ? '›' : ''}</span>
-        <span className="history-tree-entry-lane" aria-hidden="true">{historyLaneGlyphs(row)}</span>
-        {row.onActivePath ? <span className="history-tree-entry-path" aria-hidden="true">•</span> : null}
-        <span className="history-tree-entry-kind">{kindLabel}</span>
-        <span className="history-tree-entry-sep" aria-hidden="true">·</span>
-        <span className="history-tree-entry-preview">
-          {segments.map((segment, index) => segment.match
-            ? <mark key={index} className="history-tree-mark">{segment.text}</mark>
-            : <span key={index}>{segment.text}</span>)}
-        </span>
-        {row.isHead ? (
-          <span className="history-tree-entry-head">{t('ai.chat.history.currentPosition')}</span>
-        ) : null}
-      </button>
-    </div>
   )
 }
