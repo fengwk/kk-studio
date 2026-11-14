@@ -4,37 +4,15 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
-  useState,
   type ChangeEvent,
-  type KeyboardEvent,
-  type Ref,
 } from 'react'
-import { ArrowUp, Plus, X } from 'lucide-react'
-import {
-  ThreadCommandPalette,
-} from '@/features/thread/runtime/thread-panel/ThreadCommandPalette'
-import {
-  ComposerEditor,
-  type ComposerEditorHandle,
-} from '@/features/thread/runtime/thread-panel/ComposerEditor'
-import {
-  ThreadComposerControls,
-  type ThreadComposerControlMenu,
-  type ThreadComposerSettingsInput,
-} from '@/features/thread/runtime/thread-panel/ThreadComposerControls'
-import {
-  firstEnabledCommandIndex,
-  stepEnabledCommandIndex,
-  useFilteredThreadCommands,
-} from '@/features/thread/runtime/thread-panel/thread-command-navigation'
-import { THREAD_COMMANDS, type ThreadCommand } from '@/features/thread/runtime/thread-panel/thread-commands'
-import { AttachmentStrip } from '@/features/thread/composer/attachment-strip'
-import {
-  slashQueryOf,
-  trimMessageParts,
-  type ComposerPart,
-  type ImageInputTier,
-} from '@/features/thread/composer/composer-parts'
+import { X } from 'lucide-react'
+import { ThreadCommandPalette } from '@/features/thread/runtime/thread-panel/ThreadCommandPalette'
+import type { ComposerEditorHandle } from '@/features/thread/runtime/thread-panel/ComposerEditor'
+import type { ThreadComposerControlMenu } from '@/features/thread/runtime/thread-panel/ThreadComposerControls'
+import { ThreadComposerDock } from '@/features/thread/runtime/thread-panel/ThreadComposerDock'
+import { THREAD_COMMANDS } from '@/features/thread/runtime/thread-panel/thread-commands'
+import { slashQueryOf } from '@/features/thread/composer/composer-parts'
 import {
   canSubmitParts,
   partForUpload,
@@ -42,54 +20,29 @@ import {
   useAttachmentUploads,
   type AttachmentUpload,
   type AttachmentUploadError,
-  type StorageService,
 } from '@/features/thread/composer'
-import type { HashFile } from '@/shared/lib/upload-file'
-import { useComposerMessageHistory } from '@/features/thread/runtime/thread-panel/useComposerMessageHistory'
+import {
+  localDraftSnapshot,
+  resolveSubmissionPayload,
+} from '@/features/thread/runtime/thread-panel/composer-submission'
+import type {
+  ThreadComposerHandle,
+  ThreadComposerProps,
+} from '@/features/thread/runtime/thread-panel/thread-composer-contract'
+import { useAttachmentImageTiers } from '@/features/thread/runtime/thread-panel/useAttachmentImageTiers'
 import { useComposerFocus } from '@/features/thread/runtime/thread-panel/useComposerFocus'
+import { useComposerMessageHistory } from '@/features/thread/runtime/thread-panel/useComposerMessageHistory'
+import { useComposerOverlays } from '@/features/thread/runtime/thread-panel/useComposerOverlays'
+import { useComposerPalette } from '@/features/thread/runtime/thread-panel/useComposerPalette'
 import { useComposerSubmissionSettle } from '@/features/thread/runtime/thread-panel/useComposerSubmissionSettle'
+import { useComposerToast } from '@/features/thread/runtime/thread-panel/useComposerToast'
 import { useI18n } from '@/shared/i18n'
 import { IconButton } from '@/shared/ui/controls/IconButton'
 import './thread-composer.css'
 
 const EMPTY_USER_MESSAGES: readonly string[] = []
 
-export interface ThreadComposerHandle {
-  focus: () => void
-}
-
-export interface ThreadComposerProps {
-  parts: ComposerPart[]
-  pending: boolean
-  disabled: boolean
-  onPartsChange: (parts: ComposerPart[]) => void
-  onHistoryPartsChange?: (parts: ComposerPart[]) => void
-  /**
-   * 提交载荷（payload, localDraft）：
-   * - payload：attachment parts 的 uploadId 已解析为服务端 upload 句柄，
-   *   用于构建 command batch / HTTP 发送；
-   * - localDraft：客户端 localId 的草稿快照（trim 后），用于失败恢复与
-   *   PendingAcceptance——恢复比对只命中本地 id 草稿。
-   */
-  onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
-  onCommand: (command: ThreadCommand) => void
-  commands?: ThreadCommand[]
-  historicalUserMessages?: readonly string[]
-  queuedUserMessages?: readonly string[]
-  storageService?: StorageService
-  hashFile?: HashFile
-  /** 当前交互作用域是否允许全局 Escape 把焦点恢复到此 Composer。 */
-  focusOnEscape?: boolean
-  /** 命令面板可见性变化轻量通知（只在 open 变化时回调，不发起网络请求）。 */
-  onCommandPaletteVisibilityChange?: (visible: boolean) => void
-  /** false 时由同一 Composer 区域的 interaction panel 接管；组件保持挂载以保留上传状态。 */
-  active?: boolean
-  restoreOnActivate?: boolean
-  /** 双层 Composer 底栏的受控 Permission 与 Model/Variant 设置。 */
-  settings?: ThreadComposerSettingsInput
-  scope?: string
-  ref?: Ref<ThreadComposerHandle>
-}
+export type { ThreadComposerHandle, ThreadComposerProps }
 
 /**
  * Composer 底层的 ordered Pill 输入区。
@@ -100,7 +53,8 @@ export interface ThreadComposerProps {
  * attachment pill，typed '@filename' 始终是文本。
  *
  * 上传注册表（strip）由组件内部持有；storageService/hashFile 可注入，使组件不依赖
- * 任何 Thread 身份或 AI 状态。
+ * 任何 Thread 身份或 AI 状态。本组件只做编排：焦点、覆盖层、命令表、上传与提交
+ * settle 各自在专属 hook 里，dock 与提示条的渲染在同目录的展示组件里。
  */
 export function ThreadComposer({
   ref,
@@ -129,39 +83,9 @@ export function ThreadComposer({
   const editorApiRef = useRef<ComposerEditorHandle>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const [toast, setToast] = useState<string | null>(null)
-  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const { toast, showToast, dismissToast } = useComposerToast()
 
-  const showToast = useCallback((message: string) => {
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current)
-      toastTimerRef.current = null
-    }
-    setToast(message)
-    toastTimerRef.current = setTimeout(() => {
-      setToast(null)
-      toastTimerRef.current = null
-    }, 5000)
-  }, [])
-
-  const dismissToast = useCallback(() => {
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current)
-      toastTimerRef.current = null
-    }
-    setToast(null)
-  }, [])
-
-  useEffect(() => () => {
-    if (toastTimerRef.current) {
-      clearTimeout(toastTimerRef.current)
-    }
-  }, [])
-
-  const {
-    changeDraft,
-    navigate: navigateMessageHistory,
-  } = useComposerMessageHistory({
+  const { changeDraft, navigate: navigateMessageHistory } = useComposerMessageHistory({
     parts,
     historicalUserMessages,
     queuedUserMessages,
@@ -169,25 +93,15 @@ export function ThreadComposer({
     onHistoryPartsChange,
   })
 
-  const [plusMenuOpen, setPlusMenuOpen] = useState(false)
-  const [controlMenu, setControlMenu] = useState<ThreadComposerControlMenu>(null)
-
-  /** 编辑器编辑交互：关闭命令表与底栏设置菜单。 */
-  const dismissOverlays = useCallback(() => {
-    setPlusMenuOpen(false)
-    setControlMenu(null)
-  }, [])
-
   const handleUploadError = useCallback((err: AttachmentUploadError) => {
     const reasonText = err.reason?.trim()
     const boundedReason = reasonText
       ? (reasonText.length > 120 ? `${reasonText.slice(0, 117)}…` : reasonText)
       : t('ai.runtime.composer.uploadFailed')
-    const message = t('ai.runtime.composer.uploadFailedDetail', {
+    showToast(t('ai.runtime.composer.uploadFailedDetail', {
       name: err.filename,
       reason: boundedReason,
-    })
-    showToast(message)
+    }))
 
     // 失败 pill 的 DOM 回滚由编辑器执行；组合期间由编辑器延后到 compositionend。
     editorApiRef.current?.removeAttachmentPills([err.localId])
@@ -202,59 +116,25 @@ export function ThreadComposer({
     updateImageTier,
   } = useAttachmentUploads({ storageService, hashFile, onError: handleUploadError, scope, parts })
 
-  const handleTierChange = useCallback(
-    (upload: AttachmentUpload, tier: ImageInputTier) => {
-      updateImageTier(upload.localId, tier)
-      const next = parts.map((part) => {
-        if (
-          part.type === 'attachment'
-          && (part.uploadId === upload.localId || (upload.uploadId && part.uploadId === upload.uploadId))
-        ) {
-          return { ...part, imageTier: tier }
-        }
-        return part
-      })
-      // 先就地更新已渲染 pill 的档位属性，再做受控回流；否则整树重建会丢光标。
-      editorApiRef.current?.updateAttachmentImageTier(
-        upload.uploadId ? [upload.localId, upload.uploadId] : [upload.localId],
-        tier,
-      )
-      changeDraft(next)
-    },
-    [changeDraft, parts, updateImageTier],
-  )
-
-  useEffect(() => {
-    for (const part of parts) {
-      if (part.type !== 'attachment' || part.imageTier) {
-        continue
-      }
-      const upload = uploads.find((item) => item.localId === part.uploadId || item.uploadId === part.uploadId)
-      if (upload?.imageTier) {
-        editorApiRef.current?.updateAttachmentImageTier([part.uploadId], upload.imageTier)
-      }
-    }
-  }, [parts, uploads])
+  const { handleTierChange } = useAttachmentImageTiers({
+    parts,
+    uploads,
+    updateImageTier,
+    changeDraft,
+    editorApiRef,
+  })
 
   const slashQuery = slashQueryOf(parts)
-  const slashMode = slashQuery != null
 
-  const [activeIndex, setActiveIndex] = useState(0)
-
-  // 关闭覆盖层只改变显隐；若 control menu 优先处理则返回 true 避免外部继续 blur。
-  const closeOverlay = useCallback((): boolean => {
-    if (controlMenu != null) {
-      setControlMenu(null)
-      return true
-    }
-    setPlusMenuOpen(false)
-    return false
-  }, [controlMenu])
-
-  const handleLeaveRegion = useCallback(() => {
-    setPlusMenuOpen(false)
-    setControlMenu(null)
-  }, [])
+  const {
+    plusMenuOpen,
+    setPlusMenuOpen,
+    controlMenu,
+    setControlMenu,
+    closeOverlay,
+    dismissOverlays,
+    handleLeaveRegion,
+  } = useComposerOverlays({ active, slashMode: slashQuery != null })
 
   // 组合焦点状态机：定时重试/覆盖层关闭后恢复/active 恢复/Escape/pending
   // 完成后自动聚焦/卸载清理。
@@ -275,37 +155,23 @@ export function ThreadComposer({
     onLeaveRegion: handleLeaveRegion,
   })
 
-  const paletteMode =
-    active && !disabled && isFocused
-      ? plusMenuOpen
-        ? 'menu'
-        : slashMode
-          ? 'slash'
-          : null
-      : null
-  const paletteOpen = paletteMode != null
-
-  useEffect(() => {
-    onCommandPaletteVisibilityChange?.(paletteOpen)
-    return () => {
-      if (paletteOpen) {
-        onCommandPaletteVisibilityChange?.(false)
-      }
+  /** 切换底栏设置菜单；可选把焦点还给编辑器（菜单关闭后继续键入）。 */
+  const changeControlMenu = useCallback((
+    next: ThreadComposerControlMenu,
+    restoreComposerFocus = false,
+  ) => {
+    setPlusMenuOpen(false)
+    setControlMenu(next)
+    if (restoreComposerFocus) {
+      focusComposer(true)
     }
-  }, [paletteOpen, onCommandPaletteVisibilityChange])
-
-  const query = paletteMode === 'slash' ? slashQuery ?? '' : ''
-  const filteredCommands = useFilteredThreadCommands(query, commands)
+  }, [focusComposer, setControlMenu, setPlusMenuOpen])
 
   // 进行中的 HTTP 变更不能阻塞连续提交；附件未全部 ready 时也不能发送。
   const canSend = useMemo(
-    () => !disabled && !slashMode && canSubmitParts(parts, uploads),
-    [disabled, parts, slashMode, uploads],
+    () => !disabled && slashQuery == null && canSubmitParts(parts, uploads),
+    [disabled, parts, slashQuery, uploads],
   )
-
-  useImperativeHandle(ref, () => ({
-    focus: () => focusComposer(true),
-  }))
 
   // 提交 settle 状态机：本地草稿快照、发送失败恢复与成功后 detached 上传释放。
   const { commit } = useComposerSubmissionSettle({
@@ -316,52 +182,59 @@ export function ThreadComposer({
     releaseUpload,
   })
 
-  const closeCommandPalette = useCallback((forceCaretAtEnd = false) => {
-    closeOverlay()
-    focusComposer(forceCaretAtEnd)
-  }, [closeOverlay, focusComposer])
-
-  const changeControlMenu = useCallback((
-    next: ThreadComposerControlMenu,
-    restoreComposerFocus = false,
-  ) => {
-    setPlusMenuOpen(false)
-    setControlMenu(next)
-    if (restoreComposerFocus) {
-      focusComposer(true)
-    }
-  }, [focusComposer])
-
-  // interaction panel 接管时关闭底栏菜单；焦点恢复请求（active 重新打开）由
-  // 焦点状态机 hook 负责。
-  useEffect(() => {
-    if (!active) {
-      setControlMenu(null)
-    }
-  }, [active])
-
-  const slashModeRef = useRef(slashMode)
-  useEffect(() => {
-    const startedSlash = !slashModeRef.current && slashMode
-    slashModeRef.current = slashMode
-    if (startedSlash && controlMenu != null) {
-      setControlMenu(null)
-    }
-  }, [controlMenu, slashMode])
-
-  useEffect(() => {
-    if (!paletteOpen) {
+  const submit = useCallback(() => {
+    if (!canSend) {
       return
     }
-    setActiveIndex(firstEnabledCommandIndex(filteredCommands))
-  }, [paletteOpen, query, filteredCommands])
+    setPlusMenuOpen(false)
+    // 草稿始终引用客户端 localId；提交 payload 在序列化前解析为服务端 upload
+    // 句柄（避免「上传完成异步改写 parts」与用户编辑竞态）。恢复快照必须保存
+    // 本地草稿（trim 后），与 payload 分开——恢复比对只命中本地 id 草稿。
+    const resolved = resolveSubmissionPayload(parts, uploads)
+    const localDraft = localDraftSnapshot(parts, uploads)
+    commit(localDraft)
+    onSubmit(resolved, localDraft)
+  }, [canSend, commit, onSubmit, parts, setPlusMenuOpen, uploads])
+
+  const {
+    paletteOpen,
+    query,
+    activeIndex,
+    setActiveIndex,
+    togglePalette,
+    selectCommand,
+    handleEditorKeyDown,
+  } = useComposerPalette({
+    active,
+    disabled,
+    isFocused,
+    plusMenuOpen,
+    setPlusMenuOpen,
+    slashQuery,
+    commands,
+    parts,
+    settings,
+    fileInputRef,
+    changeDraft,
+    onCommand,
+    onChangeControlMenu: (menu) => changeControlMenu(menu),
+    closeOverlay,
+    focusComposer,
+    blurComposer,
+    onSubmit: submit,
+  })
+
+  useComposerPaletteVisibilityNotice(paletteOpen, onCommandPaletteVisibilityChange)
+
+  useImperativeHandle(ref, () => ({
+    focus: () => focusComposer(true),
+  }))
 
   function addFilesToDraft(files: File[]) {
     if (disabled || files.length === 0) {
       return
     }
-    const added = addFiles(files)
-    const pillParts = added.map(partForUpload)
+    const pillParts = addFiles(files).map(partForUpload)
     if (pillParts.length === 0) {
       return
     }
@@ -371,116 +244,6 @@ export function ThreadComposer({
       return
     }
     editor.insertParts(pillParts)
-  }
-
-  /** 提交时把 attachment parts 的客户端 localId 解析为服务端 upload 句柄。 */
-  function resolveUploadIds(currentParts: ComposerPart[]): ComposerPart[] {
-    return currentParts.map((part) => {
-      if (part.type !== 'attachment') {
-        return part
-      }
-      const record = uploads.find(
-        (upload) => upload.localId === part.uploadId || upload.uploadId === part.uploadId,
-      )
-      const imageTier = part.imageTier ?? record?.imageTier
-      if (record?.uploadId) {
-        return {
-          ...part,
-          uploadId: record.uploadId,
-          ...(imageTier ? { imageTier } : {}),
-        }
-      }
-      return {
-        ...part,
-        ...(imageTier ? { imageTier } : {}),
-      }
-    })
-  }
-
-  function localDraftSnapshot() {
-    return trimMessageParts(
-      parts.map((part) => {
-        if (part.type !== 'attachment') {
-          return part
-        }
-        const record = uploads.find(
-          (upload) => upload.localId === part.uploadId || upload.uploadId === part.uploadId,
-        )
-        const imageTier = part.imageTier ?? record?.imageTier
-        return {
-          ...part,
-          ...(imageTier ? { imageTier } : {}),
-        }
-      }),
-    )
-  }
-
-  function handleSubmit() {
-    if (!canSend) {
-      return
-    }
-    setPlusMenuOpen(false)
-    // 草稿始终引用客户端 localId；提交 payload 在序列化前解析为服务端 upload
-    // 句柄（避免「上传完成异步改写 parts」与用户编辑竞态）。恢复快照必须保存
-    // 本地草稿（trim 后），与 payload 分开——恢复比对只命中本地 id 草稿。
-    const resolved = resolveUploadIds(parts)
-    const localDraft = localDraftSnapshot()
-    commit(localDraft)
-    onSubmit(resolved, localDraft)
-  }
-
-  function handleSelect(command: ThreadCommand) {
-    if (command.disabled) {
-      return
-    }
-    const consumeSlashCommand = !plusMenuOpen && slashMode
-    setPlusMenuOpen(false)
-    if (consumeSlashCommand) {
-      changeDraft(parts.filter((part) => part.type !== 'text'))
-    }
-    if (command.id === 'upload') {
-      fileInputRef.current?.click()
-      return
-    }
-    if (command.id === 'models') {
-      if (settings) {
-        changeControlMenu('model')
-      }
-      return
-    }
-    focusComposer()
-    onCommand(command)
-  }
-
-  /** 编辑器未消费的按键：命令表导航优先，其次 Enter 提交。返回是否已消费。 */
-  function handleEditorKeyDown(event: KeyboardEvent<HTMLDivElement>): boolean {
-    if (paletteOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-      event.preventDefault()
-      event.stopPropagation()
-      const delta = event.key === 'ArrowDown' ? 1 : -1
-      setActiveIndex((current) => stepEnabledCommandIndex(filteredCommands, current, delta))
-      return true
-    }
-    if (event.key === 'Enter' && !event.shiftKey) {
-      if (paletteOpen) {
-        event.preventDefault()
-        const command = filteredCommands[activeIndex]
-        if (command && !command.disabled) {
-          handleSelect(command)
-        } else {
-          const fallback = filteredCommands.find((item) => !item.disabled)
-          if (fallback) {
-            handleSelect(fallback)
-          }
-        }
-        return true
-      }
-      event.preventDefault()
-      handleSubmit()
-      focusComposer()
-      return true
-    }
-    return false
   }
 
   function handleFileInputChange(event: ChangeEvent<HTMLInputElement>) {
@@ -503,6 +266,15 @@ export function ThreadComposer({
     releaseUpload(upload.localId)
   }
 
+  function handleSend() {
+    submit()
+    focusComposer()
+  }
+
+  function handleEditorMouseDown() {
+    setControlMenu(null)
+  }
+
   return (
     <div
       ref={containerRef}
@@ -512,11 +284,7 @@ export function ThreadComposer({
       onKeyDown={handleRegionKeyDown}
     >
       {toast ? (
-        <div
-          className="composer-toast"
-          role="alert"
-          aria-live="assertive"
-        >
+        <div className="composer-toast" role="alert" aria-live="assertive">
           <span className="composer-toast-message">{toast}</span>
           <IconButton
             className="composer-toast-dismiss"
@@ -533,88 +301,51 @@ export function ThreadComposer({
         commands={commands}
         activeIndex={activeIndex}
         onActiveIndexChange={setActiveIndex}
-        onSelect={handleSelect}
+        onSelect={selectCommand}
       />
-      <div className="thread-dock">
-        <AttachmentStrip
-          uploads={uploads}
-          parts={parts}
-          disabled={disabled}
-          onRemove={handleRemoveUpload}
-          onRetry={retryComplete}
-          onTierChange={handleTierChange}
-        />
-        <ComposerEditor
-          ref={editorApiRef}
-          editorRef={editorRef}
-          parts={parts}
-          disabled={disabled}
-          onPartsChange={changeDraft}
-          onEditStart={dismissOverlays}
-          onEditorMouseDown={() => setControlMenu(null)}
-          onKeyDown={handleEditorKeyDown}
-          onNavigateHistory={navigateMessageHistory}
-          onFiles={addFilesToDraft}
-        />
-        <div className="thread-dock-controls">
-          <button
-            type="button"
-            className="thread-dock-add"
-            aria-label={t('ai.runtime.composer.openCommands')}
-            aria-expanded={paletteOpen}
-            disabled={disabled}
-            onMouseDown={(event) => {
-              // 鼠标打开菜单时保留 editor 的 focus、caret 与 selection。
-              event.preventDefault()
-            }}
-            onClick={() => {
-              if (paletteOpen) {
-                if (slashMode) {
-                  blurComposer()
-                } else {
-                  closeCommandPalette()
-                }
-                return
-              }
-              setControlMenu(null)
-              setPlusMenuOpen(true)
-              focusComposer()
-            }}
-          >
-            <Plus aria-hidden="true" />
-          </button>
-          {settings ? (
-            <ThreadComposerControls
-              settings={settings}
-              menu={controlMenu}
-              disabled={disabled}
-              onMenuChange={changeControlMenu}
-            />
-          ) : <span className="thread-dock-controls-spacer" />}
-          <button
-            className="thread-dock-send"
-            type="button"
-            aria-label={t('ai.runtime.composer.send')}
-            onClick={() => {
-              handleSubmit()
-              focusComposer()
-            }}
-            disabled={!canSend}
-          >
-            <ArrowUp className="send-icon" aria-hidden="true" />
-          </button>
-        </div>
-      </div>
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        hidden
-        className="composer-file-input-hidden"
-        tabIndex={-1}
-        aria-hidden="true"
-        onChange={handleFileInputChange}
+      <ThreadComposerDock
+        editorRef={editorRef}
+        editorApiRef={editorApiRef}
+        fileInputRef={fileInputRef}
+        parts={parts}
+        uploads={uploads}
+        disabled={disabled}
+        canSend={canSend}
+        paletteOpen={paletteOpen}
+        settings={settings}
+        controlMenu={controlMenu}
+        onPartsChange={changeDraft}
+        onEditStart={dismissOverlays}
+        onEditorMouseDown={handleEditorMouseDown}
+        onEditorKeyDown={handleEditorKeyDown}
+        onNavigateHistory={navigateMessageHistory}
+        onFiles={addFilesToDraft}
+        onRemoveUpload={handleRemoveUpload}
+        onRetryUpload={retryComplete}
+        onTierChange={handleTierChange}
+        onTogglePalette={togglePalette}
+        onSend={handleSend}
+        onMenuChange={changeControlMenu}
+        onFileInputChange={handleFileInputChange}
       />
     </div>
   )
+}
+
+/**
+ * 命令表可见性的轻量通知：打开与关闭各通知一次，卸载时若仍打开则补发一次关闭。
+ * 调用方据此暂停/恢复外层快捷键，不发起任何网络请求。
+ */
+function useComposerPaletteVisibilityNotice(
+  paletteOpen: boolean,
+  onVisibilityChange?: (visible: boolean) => void,
+) {
+  useEffect(() => {
+    onVisibilityChange?.(paletteOpen)
+    return () => {
+      if (paletteOpen) {
+        onVisibilityChange?.(false)
+      }
+    }
+  }, [paletteOpen, onVisibilityChange])
 }
