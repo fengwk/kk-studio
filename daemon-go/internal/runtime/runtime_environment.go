@@ -75,30 +75,9 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 		}
 		return errors.New("the same environment config version must not change its content")
 	}
-	var candidate config.DaemonConfig
-	if r.options.EnvironmentConfig != nil {
-		result, err := r.options.EnvironmentConfig.Submit(ctx, version, payload.EnvironmentConfig.Config)
-		if err != nil {
-			return err
-		}
-		switch result.Kind {
-		case ConfigFailed:
-			return r.sendStatus()
-		case ConfigFatal:
-			return fmt.Errorf("%w: environment configuration is inconsistent", ErrRuntimeFatal)
-		default:
-			candidate = result.Config
-		}
-	} else {
-		var err error
-		candidate, err = r.options.ApplyConfig(ctx, version, payload.EnvironmentConfig.Config)
-		if err != nil {
-			if !ready {
-				_ = r.sendBoundError(nil, "environment configuration could not be applied")
-				return nil
-			}
-			return r.sendBoundError(nil, "environment configuration could not be applied")
-		}
+	candidate, handled, err := r.applyEnvironmentConfig(ctx, ready, version, payload.EnvironmentConfig.Config)
+	if err != nil || handled {
+		return err
 	}
 	if candidate.EnvironmentID != "" && candidate.EnvironmentID != r.options.EnvironmentID {
 		return errors.New("applied configuration changed environment scope")
@@ -121,4 +100,36 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 		return r.sendReady()
 	}
 	return r.sendStatus()
+}
+
+// applyEnvironmentConfig resolves the incoming snapshot through the configuration runtime when one
+// is injected and through the injected applier otherwise. handled reports that the outcome was
+// already answered on the control stream, so the caller must not publish a candidate.
+func (r *Runtime) applyEnvironmentConfig(ctx context.Context, ready bool, version int64, wire *protocol.DaemonConfiguration) (config.DaemonConfig, bool, error) {
+	if r.options.EnvironmentConfig != nil {
+		result, err := r.options.EnvironmentConfig.Submit(ctx, version, wire)
+		if err != nil {
+			return config.DaemonConfig{}, false, err
+		}
+		switch result.Kind {
+		case ConfigFailed:
+			if err := r.sendStatus(); err != nil {
+				return config.DaemonConfig{}, true, err
+			}
+			return config.DaemonConfig{}, true, nil
+		case ConfigFatal:
+			return config.DaemonConfig{}, false, fmt.Errorf("%w: environment configuration is inconsistent", ErrRuntimeFatal)
+		default:
+			return result.Config, false, nil
+		}
+	}
+	candidate, err := r.options.ApplyConfig(ctx, version, wire)
+	if err != nil {
+		if !ready {
+			_ = r.sendBoundError(nil, "environment configuration could not be applied")
+			return config.DaemonConfig{}, true, nil
+		}
+		return config.DaemonConfig{}, true, r.sendBoundError(nil, "environment configuration could not be applied")
+	}
+	return candidate, false, nil
 }
