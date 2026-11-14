@@ -174,5 +174,11 @@ export function formatCompactTokens(count: number): string {
   return `${(count / 1_000_000).toFixed(1)}M`
 }
 
-// browser-tests 的 harness 按本模块路径引用该导出；实现见 turn-usage-format。
-export { formatTurnUsageText } from '@/features/thread/runtime/thread-timeline/turn-usage-format'
+// 冻结契约：thread-panel 与 browser-tests 按本模块路径引用这些用量投影，实现见
+// turn-usage-format / usage-cost，新增调用方请直接引用实现模块。
+export {
+  calculateCacheHitRate,
+  calculateDecodeTokensPerSecond,
+  formatTurnUsageText,
+} from '@/features/thread/runtime/thread-timeline/turn-usage-format'
+export { formatUsageCost } from '@/features/thread/runtime/thread-timeline/usage-cost'
