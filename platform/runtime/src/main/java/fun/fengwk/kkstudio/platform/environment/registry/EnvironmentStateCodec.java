@@ -7,6 +7,8 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
@@ -35,8 +37,8 @@ public final class EnvironmentStateCodec {
   private static ObjectNode eventNode(EnvironmentEvent event) {
     ObjectNode node = MAPPER.createObjectNode();
     node.put("time", event.time().toString());
-    node.put("level", event.level());
-    node.put("type", event.type());
+    node.put("level", event.level().name());
+    node.put("type", event.type().name());
     node.put("message", event.message());
     return node;
   }
@@ -45,15 +47,34 @@ public final class EnvironmentStateCodec {
     ArrayNode root = readArray(json, "recent_events");
     List<EnvironmentEvent> events = new ArrayList<>(root.size());
     for (JsonNode element : root) {
-      ObjectNode node = requireObject(element, "recent_events", EVENT_FIELDS);
-      events.add(
-          new EnvironmentEvent(
-              instant(node),
-              text(node, "level", true),
-              text(node, "type", true),
-              text(node, "message", true)));
+      events.add(decodeEvent(requireObject(element, "recent_events", EVENT_FIELDS)));
     }
     return List.copyOf(events);
+  }
+
+  /** 字段读取与取值校验的次序固定：先读全部文本字段，再按 level、type、message 的顺序校验。 */
+  private static EnvironmentEvent decodeEvent(ObjectNode node) {
+    Instant time = instant(node);
+    String level = text(node, "level", true);
+    String type = text(node, "type", true);
+    String message = text(node, "message", true);
+    return new EnvironmentEvent(time, eventLevel(level), eventType(type), message);
+  }
+
+  private static EnvironmentEventLevel eventLevel(String value) {
+    try {
+      return EnvironmentEventLevel.valueOf(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("unknown environment event level: " + value);
+    }
+  }
+
+  private static EnvironmentEventType eventType(String value) {
+    try {
+      return EnvironmentEventType.valueOf(value);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException("unknown environment event type: " + value);
+    }
   }
 
   private static Instant instant(ObjectNode node) {

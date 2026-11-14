@@ -16,8 +16,6 @@ import fun.fengwk.kkstudio.platform.environment.dto.DaemonConfigDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentCreateDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventDTO;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
-import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateDTO;
@@ -381,8 +379,8 @@ public class EnvironmentService {
   private static EnvironmentEventDTO toEventDto(EnvironmentEvent event) {
     EnvironmentEventDTO dto = new EnvironmentEventDTO();
     dto.setOccurredAt(event.time());
-    dto.setLevel(EnvironmentEventLevel.valueOf(event.level()));
-    dto.setType(EnvironmentEventType.valueOf(event.type()));
+    dto.setLevel(event.level());
+    dto.setType(event.type());
     dto.setMessage(event.message());
     return dto;
   }

@@ -5,6 +5,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
+
 import java.time.Instant;
 import java.util.List;
 
@@ -24,12 +27,12 @@ class EnvironmentStateCodecTest {
   void eventsRoundTrip() {
     EnvironmentEvent event1 =
         new EnvironmentEvent(
-            NOW, EnvironmentEvent.LEVEL_INFO, EnvironmentEvent.TYPE_CONNECTING, "accepted");
+            NOW, EnvironmentEventLevel.INFO, EnvironmentEventType.CONNECTING, "accepted");
     EnvironmentEvent event2 =
         new EnvironmentEvent(
             NOW.plusSeconds(1),
-            EnvironmentEvent.LEVEL_WARN,
-            EnvironmentEvent.TYPE_DISCONNECTED,
+            EnvironmentEventLevel.WARN,
+            EnvironmentEventType.DISCONNECTED,
             "daemon connection lost");
     String json = "[" + codec.encodeEvent(event1) + "," + codec.encodeEvent(event2) + "]";
 
@@ -52,27 +55,52 @@ class EnvironmentStateCodecTest {
     }
   }
 
+  /** 测试意图：持久化投影中的非法级别与类型由解码边界以既有文案拒绝，级别检查先于类型。 */
+  @Test
+  void unknownLevelsAndTypesAreRejectedWithTheCanonicalMessages() {
+    IllegalArgumentException level =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                codec.decodeEvents(
+                    "[{\"time\":\"2026-09-21T06:00:00Z\",\"level\":\"TRACE\","
+                        + "\"type\":\"READY\",\"message\":\"m\"}]"));
+    assertEquals("unknown environment event level: TRACE", level.getMessage());
+
+    IllegalArgumentException type =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                codec.decodeEvents(
+                    "[{\"time\":\"2026-09-21T06:00:00Z\",\"level\":\"INFO\","
+                        + "\"type\":\"SYNCING\",\"message\":\"m\"}]"));
+    assertEquals("unknown environment event type: SYNCING", type.getMessage());
+
+    // 两者同时非法时只报告级别：校验次序与旧实现一致。
+    IllegalArgumentException levelFirst =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                codec.decodeEvents(
+                    "[{\"time\":\"2026-09-21T06:00:00Z\",\"level\":\"TRACE\","
+                        + "\"type\":\"SYNCING\",\"message\":\"m\"}]"));
+    assertEquals("unknown environment event level: TRACE", levelFirst.getMessage());
+  }
+
   /** 测试意图：事件类型自身的不变量在构造期即被拒绝。 */
   @Test
   void projectionInvariantsAreEnforced() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> new EnvironmentEvent(NOW, "TRACE", EnvironmentEvent.TYPE_READY, "m"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> new EnvironmentEvent(NOW, EnvironmentEvent.LEVEL_INFO, "SYNCING", "m"));
-    assertThrows(
-        IllegalArgumentException.class,
         () ->
-            new EnvironmentEvent(
-                NOW, EnvironmentEvent.LEVEL_INFO, EnvironmentEvent.TYPE_READY, " "));
+            new EnvironmentEvent(NOW, EnvironmentEventLevel.INFO, EnvironmentEventType.READY, " "));
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new EnvironmentEvent(
                 NOW,
-                EnvironmentEvent.LEVEL_INFO,
-                EnvironmentEvent.TYPE_READY,
+                EnvironmentEventLevel.INFO,
+                EnvironmentEventType.READY,
                 "x".repeat(EnvironmentEvent.MAX_MESSAGE_CHARS + 1)));
   }
 }

@@ -16,6 +16,8 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonLeaseStore;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifier;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -286,7 +288,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   }
 
   /** 构造一条连接生命周期事件；{@code message} 必须是程序构造的固定事实，绝不承载 Daemon 输入。 */
-  private EnvironmentEvent lifecycleEvent(String level, String type, String message) {
+  private EnvironmentEvent lifecycleEvent(
+      EnvironmentEventLevel level, EnvironmentEventType type, String message) {
     return new EnvironmentEvent(clock.instant(), level, type, message);
   }
 
@@ -309,8 +312,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     String connectingEvent =
         stateCodec.encodeEvent(
             lifecycleEvent(
-                EnvironmentEvent.LEVEL_INFO,
-                EnvironmentEvent.TYPE_CONNECTING,
+                EnvironmentEventLevel.INFO,
+                EnvironmentEventType.CONNECTING,
                 "daemon connection accepted"));
     // 只有真实 upsert 成功（Acquired）才在提交前发布；认证拒绝与活跃租约抢占失败都不写行，保持静默。
     Optional<AcquireRow> acquired =
@@ -380,7 +383,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     String readyEvent =
         stateCodec.encodeEvent(
             lifecycleEvent(
-                EnvironmentEvent.LEVEL_INFO, EnvironmentEvent.TYPE_READY, "environment ready"));
+                EnvironmentEventLevel.INFO, EnvironmentEventType.READY, "environment ready"));
     return fencedWrite(
         environmentId,
         () ->
@@ -454,8 +457,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     String disconnectedEvent =
         stateCodec.encodeEvent(
             lifecycleEvent(
-                EnvironmentEvent.LEVEL_WARN,
-                EnvironmentEvent.TYPE_DISCONNECTED,
+                EnvironmentEventLevel.WARN,
+                EnvironmentEventType.DISCONNECTED,
                 "daemon connection lost"));
     try {
       return fencedWrite(
@@ -494,8 +497,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     String releasedEvent =
         stateCodec.encodeEvent(
             lifecycleEvent(
-                EnvironmentEvent.LEVEL_INFO,
-                EnvironmentEvent.TYPE_DISCONNECTED,
+                EnvironmentEventLevel.INFO,
+                EnvironmentEventType.DISCONNECTED,
                 "daemon connection released"));
     try {
       return fencedWrite(

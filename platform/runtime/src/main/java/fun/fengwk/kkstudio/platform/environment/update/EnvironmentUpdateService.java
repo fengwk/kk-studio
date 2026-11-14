@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentUpdateListener;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeConfigurationDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeConfigurationErrorDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeDTO;
@@ -219,8 +221,8 @@ public class EnvironmentUpdateService implements EnvironmentUpdateListener {
                       connection.leaseToken(),
                       new EnvironmentEvent(
                           clock.instant(),
-                          EnvironmentEvent.LEVEL_WARN,
-                          EnvironmentEvent.TYPE_UPDATE_FAILED,
+                          EnvironmentEventLevel.WARN,
+                          EnvironmentEventType.UPDATE_FAILED,
                           "daemon update failed")));
     } catch (RuntimeException error) {
       log.warn(

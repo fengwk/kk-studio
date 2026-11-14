@@ -40,6 +40,8 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonOfferResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonSession;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentEvent;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
@@ -136,8 +138,8 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
       EnvironmentEvent skillEvent =
           new EnvironmentEvent(
               Instant.now(),
-              EnvironmentEvent.LEVEL_INFO,
-              EnvironmentEvent.TYPE_READY,
+              EnvironmentEventLevel.INFO,
+              EnvironmentEventType.READY,
               "notify fencing test");
 
       assertFalse(
