@@ -370,7 +370,7 @@ func TestEmptySearchResultIgnoreHintLimit(t *testing.T) {
 	for i := range paths {
 		paths[i] = fmt.Sprintf("/repo/%02d", i)
 	}
-	got := formatIgnoreSkippedHint(paths[:10], 12)
+	got := formatHintList("No matches. Not searched because of ignore rules: ", paths[:10], 12)
 	want := "[No matches. Not searched because of ignore rules: /repo/00, /repo/01, /repo/02, /repo/03, /repo/04, /repo/05, /repo/06, /repo/07, /repo/08, /repo/09, … and 2 more]"
 	if got != want {
 		t.Fatalf("hint=%q want=%q", got, want)
