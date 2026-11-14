@@ -1083,8 +1083,9 @@ async function firstAgent(ctx) {
   const agents = listResults(
     (await ctx.call('GET', '/api/platform/agents')).json,
   )
-  const agent = agents.find((candidate) => candidate.type === 'USER' && candidate.execution?.driver === 'builtin')
-  assert(agent?.name, 'need a configured USER Agent')
+  // 1.0.0 没有 Agent 类型：Chat case 只要求已配置 builtin execution 的 Agent。
+  const agent = agents.find((candidate) => candidate.execution?.driver === 'builtin')
+  assert(agent?.name, 'need an Agent with a configured builtin execution')
   return agent
 }
 

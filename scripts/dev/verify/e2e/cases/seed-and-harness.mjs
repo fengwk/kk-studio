@@ -140,14 +140,14 @@ registerCase({
     )
     const agents = listResults(agentsJson)
     assert(agents.length > 0, 'no agents')
+    // 1.0.0 没有 Agent 类型：每个 Agent 都是用户 Agent，seed 只要求已配置 builtin execution。
     const agent = agents.find((candidate) => candidate.name === 'default-assistant')
-      || agents.find((candidate) => candidate.type === 'USER' && candidate.execution?.driver === 'builtin')
-    assert(agent, 'need a configured USER Agent')
+      || agents.find((candidate) => candidate.execution?.driver === 'builtin')
+    assert(agent, 'need an Agent with a configured builtin execution')
     assertExactFields(
       agent,
       [
         'name',
-        'type',
         'description',
         'systemPrompt',
         'execution',

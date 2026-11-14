@@ -9,7 +9,7 @@ const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`
 test('seed case reads the execution contract, including a null builtin variant', async () => {
   // Execute the registered case against a faithful catalog response, not a source-text probe.
   const agent = {
-    name: 'fixture-agent', type: 'USER', description: 'fixture', systemPrompt: 'prompt',
+    name: 'fixture-agent', description: 'fixture', systemPrompt: 'prompt',
     execution: { driver: 'builtin', settings: { modelName: 'fixture-model', variant: null } },
     config: {}, version: '0', createdAt: 0, updatedAt: 0,
   }
@@ -46,7 +46,6 @@ test('seed case reads the execution contract, including a null builtin variant',
 function modelRequestDebugFixture() {
   const agent = {
     name: 'fixture-agent',
-    type: 'USER',
     execution: { driver: 'builtin', settings: { modelName: 'fixture-model', variant: 'default' } },
   }
   const model = {

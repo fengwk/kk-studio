@@ -207,6 +207,52 @@ test('test intent: provider credentials are synchronized only for real mode', ()
   assert.ok(!ensureStack.includes('sync_e2e_provider_credentials'))
 })
 
+test('test intent: an overridden database endpoint can never reset the shared local compose postgres', () => {
+  // 隔离规则：只有未被覆盖的默认端点才能回退到 deploy/local；其它端点缺 psql 时必须先失败。
+  const overrideProbe = `source ${E2E_LIB}
+command() {
+  if [ "$1" = -v ] && [ "$2" = psql ]; then
+    return 1
+  fi
+  builtin command "$@"
+}
+reset_e2e_database`
+  const override = runBash(overrideProbe, {
+    env: {
+      ...cleanEnvironment(),
+      KK_STUDIO_DB_URL: 'jdbc:postgresql://127.0.0.1:55432/postgres',
+    },
+  })
+  assert.notEqual(override.status, 0)
+  assert.match(output(override), /host psql is required unless the endpoint is the local compose postgres/)
+  assert.ok(!output(override).includes('DROP DATABASE'))
+
+  // 默认端点保留原有 docker compose 回退路径。
+  const dockerProbe = `source ${E2E_LIB}
+command() {
+  if [ "$1" = -v ] && [ "$2" = psql ]; then
+    return 1
+  fi
+  builtin command "$@"
+}
+docker() {
+  printf 'docker %s\\n' "$*"
+  [ "$FAKE_COMPOSE_STATE" = running ] && printf 'postgres-container\\n'
+  return 0
+}
+reset_e2e_database`
+  const fallback = runBash(dockerProbe, {
+    env: {
+      ...cleanEnvironment(),
+      KK_STUDIO_DB_URL: 'jdbc:postgresql://127.0.0.1:5432/postgres',
+      FAKE_COMPOSE_STATE: 'running',
+    },
+  })
+  assert.equal(fallback.status, 0, output(fallback))
+  assert.match(output(fallback), /compose -f .*deploy\/local\/compose\.yaml exec -T .* postgres psql/)
+  assert.match(output(fallback), /DROP DATABASE IF EXISTS kk_studio_e2e_matrix/)
+})
+
 test('test intent: S3 bucket isolation rules for local MinIO vs external S3 endpoint', () => {
   // 本地 MinIO (127.0.0.1:9000) 固定专用名 kk-studio-e2e-matrix，忽略外部环境变量覆盖
   const localProbe = `source ${E2E_LIB}
