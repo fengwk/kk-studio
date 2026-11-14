@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
@@ -46,6 +47,8 @@ final class OpenCliHubTransport {
   static final int MAX_ERROR_RESPONSE_BYTES = 4096;
 
   private static final String AUTH_REJECTED_ERROR = "OpenCLI Hub authentication rejected";
+  private static final ObjectMapper CREDENTIAL_MAPPER =
+      PluginHttpSupport.strictJson(JsonMapper.builder().build());
 
   private final ObjectMapper mapper;
   private final PluginCredentialAccess credentials;
@@ -298,7 +301,7 @@ final class OpenCliHubTransport {
   private ScopedCredential parseCredential(String payloadJson) {
     JsonNode root;
     try {
-      root = mapper.readTree(payloadJson);
+      root = CREDENTIAL_MAPPER.readTree(payloadJson);
     } catch (JacksonException exception) {
       log.warn(
           "failed to parse OpenCLI Hub credential payload type={}",

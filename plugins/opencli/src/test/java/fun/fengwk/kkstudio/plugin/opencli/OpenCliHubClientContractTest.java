@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
+import tools.jackson.core.json.JsonReadFeature;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -788,7 +789,19 @@ class OpenCliHubClientContractTest {
     assertPayloadRejected("{\"apiKey\":\"abc\",\"instanceId\":\"" + "a".repeat(37) + "\"}");
   }
 
+  /** 宿主响应 mapper 的宽松选项不能改变秘密载荷的 JSON 文法。 */
+  @Test
+  void credentialParsingDoesNotInheritPermissiveHostJson() {
+    ObjectMapper permissive =
+        JsonMapper.builder().enable(JsonReadFeature.ALLOW_SINGLE_QUOTES).build();
+    assertPayloadRejected("{'apiKey':'invalid-json-key'}", permissive);
+  }
+
   private void assertPayloadRejected(String payloadJson) {
+    assertPayloadRejected(payloadJson, MAPPER);
+  }
+
+  private void assertPayloadRejected(String payloadJson, ObjectMapper mapper) {
     if (payloadJson == null) {
       PluginCredentialAccess nullAccess =
           new PluginCredentialAccess() {
@@ -840,7 +853,7 @@ class OpenCliHubClientContractTest {
     OpenCliHubClient client =
         new OpenCliHubClient(
             hub(),
-            MAPPER,
+            mapper,
             badAccess,
             new StubHttpClient(
                 request -> {
