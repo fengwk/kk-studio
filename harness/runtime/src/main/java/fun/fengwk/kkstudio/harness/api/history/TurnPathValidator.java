@@ -51,256 +51,313 @@ final class TurnPathValidator {
       return;
     }
     if (payload instanceof SystemPayload) {
-      if (openTurnStart != null) {
-        throw new IllegalArgumentException(
-            "SYSTEM entry must not appear inside an open TURN_START");
-      }
+      requireBetweenTurns("SYSTEM");
       return;
     }
     if (payload instanceof SettingsPayload) {
       // SETTINGS 是安全边界上 append 的 branch settings 快照：只允许位于回合之间，不参与 input/assistant/callIndex 判定，
       // 也不打开 / 关闭 turn。
-      if (openTurnStart != null) {
-        throw new IllegalArgumentException(
-            "SETTINGS entry must not appear inside an open TURN_START");
-      }
+      requireBetweenTurns("SETTINGS");
       return;
     }
     if (payload instanceof ForkPayload) {
       // FORK 是 fork 事实节点：只允许位于回合之间，不参与 input/assistant/callIndex 判定，也不打开 / 关闭 turn，
       // 更不作为需要模型回应的输入（不设置 pendingNotificationInput）。
-      if (openTurnStart != null) {
-        throw new IllegalArgumentException("FORK entry must not appear inside an open TURN_START");
-      }
+      requireBetweenTurns("FORK");
       return;
     }
     if (payload instanceof TurnStartPayload start) {
-      if (openTurnStart != null) {
-        throw new IllegalArgumentException(
-            "TURN_START must not open while a previous turn is open");
-      }
-      openTurnStart = entry;
-      openReason = start.reason();
-      openOwnerThreadId = start.ownerThreadId();
-      if (openReason == TurnStartReason.COMPACTION_BRANCH_INPUT) {
-        if (compactionBranchInstructionSeen) {
-          throw new IllegalArgumentException(
-              "COMPACTION branch input instruction must occur exactly once");
-        }
-      } else if (openReason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION
-          && !compactionBranchInstructionSeen) {
-        throw new IllegalArgumentException(
-            "COMPACTION branch continuation requires its internal instruction");
-      }
-      if (openReason != TurnStartReason.COMPACTION) {
-        // INPUT 覆盖旧 obligation；CONTINUATION 在打开时消费前一个 continueModel=true。
-        pendingContinuationOwnerThreadId = null;
-      }
-      inputSeen = openReason == TurnStartReason.INPUT && pendingNotificationInput;
-      if (openReason == TurnStartReason.INPUT) {
-        // 回合之间的通知由紧随其后的 INPUT 接纳；CONTINUATION / COMPACTION 都不消费它。
-        pendingNotificationInput = false;
-      }
-      assistantSeen = false;
-      assistantResultEntry = null;
-      toolCalls = null;
-      expectedCallIndex = 0;
-      expectedModelAttemptFailure = 0;
+      openTurn(entry, start);
       return;
     }
     if (openTurnStart == null) {
       throw new IllegalArgumentException(
-          entry.payload().type() + " entry must be inside an open TURN_START");
+          payload.type() + " entry must be inside an open TURN_START");
     }
     if (openReason == TurnStartReason.STOP) {
       visitStopTurn(entry, payload);
       return;
     }
     if (payload instanceof ModelAttemptFailurePayload failure) {
-      if (openReason == TurnStartReason.COMPACTION) {
-        throw new IllegalArgumentException(
-            "model attempt failures are not allowed inside compaction turns");
-      }
-      if (assistantSeen) {
-        throw new IllegalArgumentException(
-            "model attempt failures must precede the assistant result");
-      }
-      requireInput("a model attempt failure");
-      int expectedAttempt = Math.addExact(expectedModelAttemptFailure, 1);
-      if (failure.attempt().attempt() != expectedAttempt) {
-        throw new IllegalArgumentException(
-            "model attempt failures must be a strict prefix from 1, expected " + expectedAttempt);
-      }
-      expectedModelAttemptFailure = expectedAttempt;
+      visitModelAttemptFailure(failure);
       return;
     }
     if (payload instanceof TurnEndPayload end) {
-      if (!end.turnStartEntryId().equals(openTurnStart.id())) {
-        throw new IllegalArgumentException("TURN_END must reference its open TURN_START entry id");
-      }
-      switch (end.outcome()) {
-        case COMPLETED -> {
-          if (openReason == TurnStartReason.COMPACTION) {
-            // COMPACTION turn 的成功结果必须是 COMPACTION payload（见 visit 的跨用途校验）。
-            if (!(assistantResultEntry != null
-                && assistantResultEntry.payload() instanceof CompactionPayload)) {
-              throw new IllegalArgumentException(
-                  "completed compaction turns require a COMPACTION result");
-            }
-            if (!end.continueModel()) {
-              throw new IllegalArgumentException(
-                  "completed compaction turns must continue the owner model");
-            }
-          } else {
-            requireAssistantMessage("completed");
-          }
-          requireInput("a completed turn");
-          requireCompleteToolResults("completed");
-        }
-        case FAILED -> {
-          requireInput("a failed turn");
-          if (end.reason() == TurnEndReason.EXECUTION_FAILED) {
-            if (openReason != TurnStartReason.INPUT && openReason != TurnStartReason.CONTINUATION) {
-              throw new IllegalArgumentException(
-                  "execution failure is only allowed for INPUT or CONTINUATION turns");
-            }
-            requireAssistantMessage("execution failed");
-            requireCompleteToolResults("execution failed");
-          } else if (end.reason() == TurnEndReason.OUTPUT_TRUNCATED
-              || end.reason() == TurnEndReason.CONTENT_FILTERED) {
-            // 截断/过滤的 failed turn 以 ASSISTANT MESSAGE 结果结束：保留 partial 内容与 generation metadata，
-            // 且必须与 reason 匹配（LENGTH->OUTPUT_TRUNCATED、FILTERED->CONTENT_FILTERED）并零 tool call。
-            if (!(assistantResultEntry != null
-                && assistantResultEntry.payload() instanceof MessagePayload message)) {
-              throw new IllegalArgumentException(
-                  "truncated or filtered turns require an ASSISTANT MESSAGE result");
-            }
-            if (message.assistantMetadata() == null
-                || message.assistantMetadata().stopReason() != expectedStopReason(end.reason())) {
-              throw new IllegalArgumentException(
-                  "truncated or filtered turns require a matching assistant stop reason");
-            }
-            for (AgentMessageContent content : message.message().contents()) {
-              if (content instanceof ToolCallMessageContent) {
-                throw new IllegalArgumentException(
-                    "truncated or filtered turns must not contain tool calls");
-              }
-            }
-          } else if (!(assistantResultEntry != null
-              && assistantResultEntry.payload() instanceof AssistantErrorPayload)) {
-            throw new IllegalArgumentException("failed turns require an ASSISTANT_ERROR result");
-          }
-        }
-        case STOPPED -> {
-          if (assistantResultEntry == null) {
-            throw new IllegalArgumentException(
-                "stopped turns require a stop barrier or assistant result");
-          }
-          requireCompleteToolResults("stopped");
-        }
-        case CANCELLED -> {
-          // history cut 可在任意 open phase 关闭。
-        }
-      }
-      if (openReason != TurnStartReason.COMPACTION) {
-        pendingContinuationOwnerThreadId =
-            end.outcome() == TurnEndOutcome.COMPLETED && end.continueModel()
-                ? openOwnerThreadId
-                : null;
-      }
-      openTurnStart = null;
-      openOwnerThreadId = null;
+      closeTurn(end);
       return;
     }
     if (payload instanceof MessagePayload message) {
-      AgentMessageRole role = message.message().role();
-      if (!assistantSeen) {
-        if (role == AgentMessageRole.USER) {
-          if (isCompactionBranchTurn(openReason)) {
-            throw new IllegalArgumentException(
-                "COMPACTION branches must not consume external USER messages");
-          }
-          if (openReason == TurnStartReason.CONTINUATION) {
-            throw new IllegalArgumentException("continuation turns must not consume USER messages");
-          }
-          if (openReason == TurnStartReason.COMPACTION) {
-            throw new IllegalArgumentException("compaction turns must not consume USER messages");
-          }
-          inputSeen = true;
-          return;
-        }
-        if (role == AgentMessageRole.TOOL) {
-          throw new IllegalArgumentException(
-              "tool results require an assistant message with tool calls");
-        }
-        // ASSISTANT：本 turn 唯一的 assistant result。
-        if (openReason == TurnStartReason.COMPACTION) {
-          throw new IllegalArgumentException(
-              "compaction turns require a COMPACTION result, not an assistant message");
-        }
-        assistantSeen = true;
-        assistantResultEntry = entry;
-        requireInput("an assistant result");
-        toolCalls = new ArrayList<>();
-        for (AgentMessageContent content : message.message().contents()) {
-          if (content instanceof ToolCallMessageContent call) {
-            toolCalls.add(call);
-          }
-        }
-        return;
-      }
-      if (role == AgentMessageRole.USER) {
-        throw new IllegalArgumentException("user messages must not follow an assistant result");
-      }
-      if (role == AgentMessageRole.ASSISTANT) {
-        throw new IllegalArgumentException("assistant result must not repeat");
-      }
-      validateToolResult(entry, message);
-      if (isCompactionBranchTurn(openReason)) {
-        requireCompactionToolError(message);
-      }
+      visitMessage(entry, message);
       return;
     }
     if (payload instanceof CustomMessagePayload custom) {
-      if (assistantSeen) {
-        throw new IllegalArgumentException("custom messages must not follow an assistant result");
-      }
-      if (openReason == TurnStartReason.COMPACTION_BRANCH_INPUT) {
-        if (compactionBranchInstructionSeen || !isCompactionInstruction(custom)) {
-          throw new IllegalArgumentException(
-              "COMPACTION branch input must be its fixed internal instruction");
-        }
-        compactionBranchInstructionSeen = true;
-        inputSeen = true;
-        return;
-      }
-      if (openReason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION) {
-        throw new IllegalArgumentException(
-            "COMPACTION branch continuations must not consume custom messages");
-      }
-      if (openReason == TurnStartReason.CONTINUATION) {
-        throw new IllegalArgumentException("continuation turns must not consume custom messages");
-      }
-      if (openReason == TurnStartReason.COMPACTION) {
-        throw new IllegalArgumentException("compaction turns must not consume custom messages");
-      }
-      inputSeen = true;
+      visitCustomMessage(custom);
       return;
     }
     if (payload instanceof CompactionPayload) {
-      // COMPACTION payload：只能是 COMPACTION turn 的唯一 assistant result；普通 turn 绝不包含它。
-      if (assistantSeen) {
-        throw new IllegalArgumentException("assistant result must not repeat");
-      }
-      if (openReason != TurnStartReason.COMPACTION) {
-        throw new IllegalArgumentException(
-            "compaction entries are only allowed inside compaction turns");
-      }
-      assistantSeen = true;
-      assistantResultEntry = entry;
+      visitCompactionResult(entry);
       return;
     }
-    // ASSISTANT_ERROR / ASSISTANT_ABORTED：本 turn 唯一的 assistant result。
+    visitAssistantResult(entry);
+  }
+
+  /** 回合之间的控制节点（SYSTEM / SETTINGS / FORK）不得出现在未关闭的 TURN_START 内。 */
+  private void requireBetweenTurns(String entryType) {
+    if (openTurnStart != null) {
+      throw new IllegalArgumentException(
+          entryType + " entry must not appear inside an open TURN_START");
+    }
+  }
+
+  private void openTurn(Entry entry, TurnStartPayload start) {
+    if (openTurnStart != null) {
+      throw new IllegalArgumentException("TURN_START must not open while a previous turn is open");
+    }
+    openTurnStart = entry;
+    openReason = start.reason();
+    openOwnerThreadId = start.ownerThreadId();
+    requireCompactionBranchInstructionOrder();
+    if (openReason != TurnStartReason.COMPACTION) {
+      // INPUT 覆盖旧 obligation；CONTINUATION 在打开时消费前一个 continueModel=true。
+      pendingContinuationOwnerThreadId = null;
+    }
+    inputSeen = openReason == TurnStartReason.INPUT && pendingNotificationInput;
+    if (openReason == TurnStartReason.INPUT) {
+      // 回合之间的通知由紧随其后的 INPUT 接纳；CONTINUATION / COMPACTION 都不消费它。
+      pendingNotificationInput = false;
+    }
+    assistantSeen = false;
+    assistantResultEntry = null;
+    toolCalls = null;
+    expectedCallIndex = 0;
+    expectedModelAttemptFailure = 0;
+  }
+
+  /** COMPACTION branch：内部指令必须恰在首轮 INPUT 出现一次，续轮必须已见过它。 */
+  private void requireCompactionBranchInstructionOrder() {
+    if (openReason == TurnStartReason.COMPACTION_BRANCH_INPUT) {
+      if (compactionBranchInstructionSeen) {
+        throw new IllegalArgumentException(
+            "COMPACTION branch input instruction must occur exactly once");
+      }
+    } else if (openReason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION
+        && !compactionBranchInstructionSeen) {
+      throw new IllegalArgumentException(
+          "COMPACTION branch continuation requires its internal instruction");
+    }
+  }
+
+  private void visitModelAttemptFailure(ModelAttemptFailurePayload failure) {
+    if (openReason == TurnStartReason.COMPACTION) {
+      throw new IllegalArgumentException(
+          "model attempt failures are not allowed inside compaction turns");
+    }
+    if (assistantSeen) {
+      throw new IllegalArgumentException(
+          "model attempt failures must precede the assistant result");
+    }
+    requireInput("a model attempt failure");
+    int expectedAttempt = Math.addExact(expectedModelAttemptFailure, 1);
+    if (failure.attempt().attempt() != expectedAttempt) {
+      throw new IllegalArgumentException(
+          "model attempt failures must be a strict prefix from 1, expected " + expectedAttempt);
+    }
+    expectedModelAttemptFailure = expectedAttempt;
+  }
+
+  private void closeTurn(TurnEndPayload end) {
+    if (!end.turnStartEntryId().equals(openTurnStart.id())) {
+      throw new IllegalArgumentException("TURN_END must reference its open TURN_START entry id");
+    }
+    switch (end.outcome()) {
+      case COMPLETED -> requireCompletedOutcome(end);
+      case FAILED -> requireFailedOutcome(end);
+      case STOPPED -> requireStoppedOutcome();
+      case CANCELLED -> {
+        // history cut 可在任意 open phase 关闭。
+      }
+    }
+    if (openReason != TurnStartReason.COMPACTION) {
+      pendingContinuationOwnerThreadId =
+          end.outcome() == TurnEndOutcome.COMPLETED && end.continueModel()
+              ? openOwnerThreadId
+              : null;
+    }
+    openTurnStart = null;
+    openOwnerThreadId = null;
+  }
+
+  private void requireCompletedOutcome(TurnEndPayload end) {
+    if (openReason == TurnStartReason.COMPACTION) {
+      // COMPACTION turn 的成功结果必须是 COMPACTION payload（见 visit 的跨用途校验）。
+      if (!(assistantResultEntry != null
+          && assistantResultEntry.payload() instanceof CompactionPayload)) {
+        throw new IllegalArgumentException(
+            "completed compaction turns require a COMPACTION result");
+      }
+      if (!end.continueModel()) {
+        throw new IllegalArgumentException(
+            "completed compaction turns must continue the owner model");
+      }
+    } else {
+      requireAssistantMessage("completed");
+    }
+    requireInput("a completed turn");
+    requireCompleteToolResults("completed");
+  }
+
+  private void requireFailedOutcome(TurnEndPayload end) {
+    requireInput("a failed turn");
+    if (end.reason() == TurnEndReason.EXECUTION_FAILED) {
+      requireExecutionFailureOutcome();
+    } else if (end.reason() == TurnEndReason.OUTPUT_TRUNCATED
+        || end.reason() == TurnEndReason.CONTENT_FILTERED) {
+      requireTruncatedOutcome(end.reason());
+    } else if (!(assistantResultEntry != null
+        && assistantResultEntry.payload() instanceof AssistantErrorPayload)) {
+      throw new IllegalArgumentException("failed turns require an ASSISTANT_ERROR result");
+    }
+  }
+
+  private void requireExecutionFailureOutcome() {
+    if (openReason != TurnStartReason.INPUT && openReason != TurnStartReason.CONTINUATION) {
+      throw new IllegalArgumentException(
+          "execution failure is only allowed for INPUT or CONTINUATION turns");
+    }
+    requireAssistantMessage("execution failed");
+    requireCompleteToolResults("execution failed");
+  }
+
+  /**
+   * 截断/过滤的 failed turn 以 ASSISTANT MESSAGE 结果结束：保留 partial 内容与 generation metadata，且必须与 reason 匹配
+   * （LENGTH->OUTPUT_TRUNCATED、FILTERED->CONTENT_FILTERED）并零 tool call。
+   */
+  private void requireTruncatedOutcome(TurnEndReason reason) {
+    if (!(assistantResultEntry != null
+        && assistantResultEntry.payload() instanceof MessagePayload message)) {
+      throw new IllegalArgumentException(
+          "truncated or filtered turns require an ASSISTANT MESSAGE result");
+    }
+    if (message.assistantMetadata() == null
+        || message.assistantMetadata().stopReason() != expectedStopReason(reason)) {
+      throw new IllegalArgumentException(
+          "truncated or filtered turns require a matching assistant stop reason");
+    }
+    for (AgentMessageContent content : message.message().contents()) {
+      if (content instanceof ToolCallMessageContent) {
+        throw new IllegalArgumentException(
+            "truncated or filtered turns must not contain tool calls");
+      }
+    }
+  }
+
+  private void requireStoppedOutcome() {
+    if (assistantResultEntry == null) {
+      throw new IllegalArgumentException(
+          "stopped turns require a stop barrier or assistant result");
+    }
+    requireCompleteToolResults("stopped");
+  }
+
+  private void visitMessage(Entry entry, MessagePayload message) {
+    AgentMessageRole role = message.message().role();
+    if (!assistantSeen) {
+      if (role == AgentMessageRole.USER) {
+        visitUserMessage();
+        return;
+      }
+      if (role == AgentMessageRole.TOOL) {
+        throw new IllegalArgumentException(
+            "tool results require an assistant message with tool calls");
+      }
+      recordAssistantResult(entry, message);
+      return;
+    }
+    if (role == AgentMessageRole.USER) {
+      throw new IllegalArgumentException("user messages must not follow an assistant result");
+    }
+    if (role == AgentMessageRole.ASSISTANT) {
+      throw new IllegalArgumentException("assistant result must not repeat");
+    }
+    validateToolResult(entry, message);
+    if (isCompactionBranchTurn(openReason)) {
+      requireCompactionToolError(message);
+    }
+  }
+
+  /** 回合的 input 段：USER 消息。COMPACTION 及其 branch、CONTINUATION 都不消费外部输入。 */
+  private void visitUserMessage() {
+    if (isCompactionBranchTurn(openReason)) {
+      throw new IllegalArgumentException(
+          "COMPACTION branches must not consume external USER messages");
+    }
+    if (openReason == TurnStartReason.CONTINUATION) {
+      throw new IllegalArgumentException("continuation turns must not consume USER messages");
+    }
+    if (openReason == TurnStartReason.COMPACTION) {
+      throw new IllegalArgumentException("compaction turns must not consume USER messages");
+    }
+    inputSeen = true;
+  }
+
+  /** ASSISTANT：本 turn 唯一的 assistant result；它冻结后续 tool result 必须匹配的 tool call 顺序。 */
+  private void recordAssistantResult(Entry entry, MessagePayload message) {
+    if (openReason == TurnStartReason.COMPACTION) {
+      throw new IllegalArgumentException(
+          "compaction turns require a COMPACTION result, not an assistant message");
+    }
+    assistantSeen = true;
+    assistantResultEntry = entry;
+    requireInput("an assistant result");
+    toolCalls = new ArrayList<>();
+    for (AgentMessageContent content : message.message().contents()) {
+      if (content instanceof ToolCallMessageContent call) {
+        toolCalls.add(call);
+      }
+    }
+  }
+
+  private void visitCustomMessage(CustomMessagePayload custom) {
+    if (assistantSeen) {
+      throw new IllegalArgumentException("custom messages must not follow an assistant result");
+    }
+    if (openReason == TurnStartReason.COMPACTION_BRANCH_INPUT) {
+      if (compactionBranchInstructionSeen || !isCompactionInstruction(custom)) {
+        throw new IllegalArgumentException(
+            "COMPACTION branch input must be its fixed internal instruction");
+      }
+      compactionBranchInstructionSeen = true;
+      inputSeen = true;
+      return;
+    }
+    if (openReason == TurnStartReason.COMPACTION_BRANCH_CONTINUATION) {
+      throw new IllegalArgumentException(
+          "COMPACTION branch continuations must not consume custom messages");
+    }
+    if (openReason == TurnStartReason.CONTINUATION) {
+      throw new IllegalArgumentException("continuation turns must not consume custom messages");
+    }
+    if (openReason == TurnStartReason.COMPACTION) {
+      throw new IllegalArgumentException("compaction turns must not consume custom messages");
+    }
+    inputSeen = true;
+  }
+
+  /** COMPACTION payload：只能是 COMPACTION turn 的唯一 assistant result；普通 turn 绝不包含它。 */
+  private void visitCompactionResult(Entry entry) {
+    if (assistantSeen) {
+      throw new IllegalArgumentException("assistant result must not repeat");
+    }
+    if (openReason != TurnStartReason.COMPACTION) {
+      throw new IllegalArgumentException(
+          "compaction entries are only allowed inside compaction turns");
+    }
+    assistantSeen = true;
+    assistantResultEntry = entry;
+  }
+
+  /** ASSISTANT_ERROR / ASSISTANT_ABORTED：本 turn 唯一的 assistant result。 */
+  private void visitAssistantResult(Entry entry) {
     if (assistantSeen) {
       throw new IllegalArgumentException("assistant result must not repeat");
     }
@@ -342,26 +399,7 @@ final class TurnPathValidator {
     // 不校验 provider replay state：Entry 不变式只允许它出现在 ASSISTANT MESSAGE 上，而本 turn 拒绝一切
     // ASSISTANT MESSAGE，因此 STOP turn 在结构上不可能携带 replay state。
     if (payload instanceof TurnEndPayload end) {
-      if (!end.turnStartEntryId().equals(openTurnStart.id())) {
-        throw new IllegalArgumentException("TURN_END must reference its open TURN_START entry id");
-      }
-      if (end.outcome() != TurnEndOutcome.STOPPED
-          || end.continueModel()
-          || end.closeRequestId() == null) {
-        throw new IllegalArgumentException(
-            "STOP turns require a STOPPED outcome with continueModel=false and a closeRequestId");
-      }
-      if (!(assistantResultEntry != null
-          && assistantResultEntry.payload() instanceof AssistantErrorPayload barrier)) {
-        throw new IllegalArgumentException(
-            "stopped turns require a stop barrier or assistant result");
-      }
-      requireCancelBarrier(barrier);
-      requireCompleteToolResults("stopped");
-      // 显式停止后没有待偿还的模型义务。
-      pendingContinuationOwnerThreadId = null;
-      openTurnStart = null;
-      openOwnerThreadId = null;
+      closeStopTurn(end);
       return;
     }
     if (payload instanceof AssistantErrorPayload barrier) {
@@ -376,6 +414,29 @@ final class TurnPathValidator {
     throw new IllegalArgumentException(
         "STOP turns may only contain one ASSISTANT_ERROR cancel barrier and their STOPPED TURN_END, not "
             + payload.type());
+  }
+
+  private void closeStopTurn(TurnEndPayload end) {
+    if (!end.turnStartEntryId().equals(openTurnStart.id())) {
+      throw new IllegalArgumentException("TURN_END must reference its open TURN_START entry id");
+    }
+    if (end.outcome() != TurnEndOutcome.STOPPED
+        || end.continueModel()
+        || end.closeRequestId() == null) {
+      throw new IllegalArgumentException(
+          "STOP turns require a STOPPED outcome with continueModel=false and a closeRequestId");
+    }
+    if (!(assistantResultEntry != null
+        && assistantResultEntry.payload() instanceof AssistantErrorPayload barrier)) {
+      throw new IllegalArgumentException(
+          "stopped turns require a stop barrier or assistant result");
+    }
+    requireCancelBarrier(barrier);
+    requireCompleteToolResults("stopped");
+    // 显式停止后没有待偿还的模型义务。
+    pendingContinuationOwnerThreadId = null;
+    openTurnStart = null;
+    openOwnerThreadId = null;
   }
 
   /** STOP barrier 必须是稳定 CANCELLED code；其它 error code 属于模型失败，不属于显式停止。 */
