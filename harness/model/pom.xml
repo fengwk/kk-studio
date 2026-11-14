@@ -95,6 +95,7 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.TrackedPart</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiUsageSnapshot</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiWireContents</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.OpenAiEndpointUri</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatEndpoints</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatRequestEncoder</include>
@@ -102,6 +103,13 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatErrorMapper</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatModelProvider</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatProviderAdapter</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatUserMessageEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatAssistantMessageEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatAssistantReplayEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatReplayValidator</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatNativeAssistantMessage</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatToolCallStream</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatUsage</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesEndpoints</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesRequestEncoder</include>
@@ -110,6 +118,13 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesErrorMapper</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesModelProvider</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesProviderAdapter</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesInputEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesReplayEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesReplayValidator</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesToolStream</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesResponseBlocks</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesStreamUsage</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses.OpenAiResponsesOutputItems</include>
                                     </includes>
                                     <limits>
                                         <limit>
