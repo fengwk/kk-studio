@@ -22,7 +22,9 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * IDE 数据面网关核心：负责同源校验、路由调度、本地隧道交付与远程单跳转发。
@@ -191,70 +193,23 @@ public class IdeGatewayDataPlane {
       EnvironmentId environmentId,
       UUID viewId)
       throws IOException {
-    TunnelHttpRequest tunnelRequest =
-        new TunnelHttpRequest(request.getMethod(), daemonPath, forwardHeaders);
-    TunnelExchange exchange;
-    try {
-      exchange = tunnel.openHttp(tunnelRequest);
-    } catch (IllegalStateException error) {
-      log.info(
-          "local tunnel open failed; phase=LOCAL_TUNNEL_OPEN_HTTP; environmentId={}; viewId={}; exception={}",
-          environmentId,
-          viewId,
-          error.getClass().getSimpleName());
-      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+    TunnelExchange exchange =
+        openLocalHttpExchange(
+            tunnel,
+            new TunnelHttpRequest(request.getMethod(), daemonPath, forwardHeaders),
+            response,
+            environmentId,
+            viewId);
+    if (exchange == null) {
       return;
     }
     try {
-      boolean hasBody =
-          request.getContentLengthLong() > 0 || request.getHeader("Transfer-Encoding") != null;
-      Thread.ofVirtual()
-          .name("ide-local-http-pump")
-          .start(
-              () -> {
-                try {
-                  if (hasBody) {
-                    try (InputStream in = request.getInputStream()) {
-                      byte[] buffer = new byte[16 * 1024];
-                      int read;
-                      while ((read = in.read(buffer)) >= 0) {
-                        if (read > 0) {
-                          ByteBuffer bb = ByteBuffer.wrap(buffer, 0, read);
-                          exchange.stream().write(bb).toCompletableFuture().join();
-                        }
-                      }
-                    }
-                  }
-                  exchange.stream().endOutput().toCompletableFuture().join();
-                } catch (Exception error) {
-                  log.debug("ide local http pump failed", error);
-                  try {
-                    exchange.close();
-                  } catch (Exception closeErr) {
-                    log.debug("failed to close exchange after pump failure", closeErr);
-                  }
-                }
-              });
-
-      TunnelExchange.Response tunnelResponse;
-      try {
-        tunnelResponse =
-            exchange
-                .responseHeaders()
-                .toCompletableFuture()
-                .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
-      } catch (Exception error) {
-        log.info(
-            "local tunnel response headers failed; phase=LOCAL_TUNNEL_RESPONSE_HEADERS; environmentId={}; viewId={}; exception={}",
-            environmentId,
-            viewId,
-            error.getClass().getSimpleName());
-        if (!response.isCommitted()) {
-          IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
-        }
+      pumpRequestBody(exchange, request);
+      TunnelExchange.Response tunnelResponse =
+          awaitResponseHeaders(exchange, response, environmentId, viewId);
+      if (tunnelResponse == null) {
         return;
       }
-
       IdeDataHeaderPolicy.applyResponseHeaders(
           tunnelResponse.status(),
           tunnelResponse.headers(),
@@ -263,32 +218,12 @@ public class IdeGatewayDataPlane {
           environmentId,
           viewId,
           false);
-
       if ("HEAD".equalsIgnoreCase(request.getMethod())
           || tunnelResponse.status() == 204
           || tunnelResponse.status() == 304) {
         return;
       }
-
-      try (OutputStream out = response.getOutputStream()) {
-        while (true) {
-          ByteBuffer chunk =
-              exchange.stream()
-                  .read()
-                  .toCompletableFuture()
-                  .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
-          if (chunk == null) {
-            break;
-          }
-          if (chunk.hasRemaining()) {
-            byte[] bytes = new byte[chunk.remaining()];
-            chunk.get(bytes);
-            out.write(bytes);
-            out.flush();
-          }
-        }
-        out.flush();
-      }
+      copyResponseBody(exchange, response);
     } catch (Exception error) {
       log.info(
           "local tunnel http transfer failed; phase=LOCAL_TUNNEL_TRANSFER; environmentId={}; viewId={}; exception={}",
@@ -304,6 +239,109 @@ public class IdeGatewayDataPlane {
       } catch (Exception closeErr) {
         log.debug("failed to close local tunnel exchange", closeErr);
       }
+    }
+  }
+
+  /** 打开本地 HTTP 隧道；失败时已写 503 并返回 {@code null}。 */
+  private TunnelExchange openLocalHttpExchange(
+      EnvironmentTunnel tunnel,
+      TunnelHttpRequest tunnelRequest,
+      HttpServletResponse response,
+      EnvironmentId environmentId,
+      UUID viewId)
+      throws IOException {
+    try {
+      return tunnel.openHttp(tunnelRequest);
+    } catch (IllegalStateException error) {
+      log.info(
+          "local tunnel open failed; phase=LOCAL_TUNNEL_OPEN_HTTP; environmentId={}; viewId={}; exception={}",
+          environmentId,
+          viewId,
+          error.getClass().getSimpleName());
+      IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE);
+      return null;
+    }
+  }
+
+  /** 在独立虚拟线程里把浏览器请求体灌入隧道并结束输出；失败时关闭整条 exchange。 */
+  private void pumpRequestBody(TunnelExchange exchange, HttpServletRequest request) {
+    boolean hasBody =
+        request.getContentLengthLong() > 0 || request.getHeader("Transfer-Encoding") != null;
+    Thread.ofVirtual()
+        .name("ide-local-http-pump")
+        .start(
+            () -> {
+              try {
+                if (hasBody) {
+                  try (InputStream in = request.getInputStream()) {
+                    byte[] buffer = new byte[16 * 1024];
+                    int read;
+                    while ((read = in.read(buffer)) >= 0) {
+                      if (read > 0) {
+                        ByteBuffer bb = ByteBuffer.wrap(buffer, 0, read);
+                        exchange.stream().write(bb).toCompletableFuture().join();
+                      }
+                    }
+                  }
+                }
+                exchange.stream().endOutput().toCompletableFuture().join();
+              } catch (Exception error) {
+                log.debug("ide local http pump failed", error);
+                try {
+                  exchange.close();
+                } catch (Exception closeErr) {
+                  log.debug("failed to close exchange after pump failure", closeErr);
+                }
+              }
+            });
+  }
+
+  /** 等待 Daemon 响应头；失败时已写 502（仅当尚未提交）并返回 {@code null}。 */
+  private TunnelExchange.Response awaitResponseHeaders(
+      TunnelExchange exchange,
+      HttpServletResponse response,
+      EnvironmentId environmentId,
+      UUID viewId)
+      throws IOException {
+    try {
+      return exchange
+          .responseHeaders()
+          .toCompletableFuture()
+          .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+    } catch (Exception error) {
+      log.info(
+          "local tunnel response headers failed; phase=LOCAL_TUNNEL_RESPONSE_HEADERS; environmentId={}; viewId={}; exception={}",
+          environmentId,
+          viewId,
+          error.getClass().getSimpleName());
+      if (!response.isCommitted()) {
+        IdeDataHeaderPolicy.sendError(response, HttpServletResponse.SC_BAD_GATEWAY);
+      }
+      return null;
+    }
+  }
+
+  /** 逐块转发 Daemon 响应体到浏览器；响应输出流由本方法打开并关闭。 */
+  private void copyResponseBody(TunnelExchange exchange, HttpServletResponse response)
+      throws IOException, InterruptedException, ExecutionException, TimeoutException {
+    try (OutputStream out = response.getOutputStream()) {
+      while (true) {
+        ByteBuffer chunk =
+            exchange.stream()
+                .read()
+                .toCompletableFuture()
+                .get(IdeGatewayConstants.DEFAULT_REQUEST_TIMEOUT.toSeconds(), TimeUnit.SECONDS);
+        if (chunk == null) {
+          break;
+        }
+        if (chunk.hasRemaining()) {
+          byte[] bytes = new byte[chunk.remaining()];
+          chunk.get(bytes);
+          out.write(bytes);
+          out.flush();
+        }
+      }
+      out.flush();
     }
   }
 
