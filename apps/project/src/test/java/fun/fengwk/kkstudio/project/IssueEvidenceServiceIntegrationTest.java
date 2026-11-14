@@ -22,7 +22,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
-import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
@@ -559,7 +558,6 @@ class IssueEvidenceServiceIntegrationTest extends ProjectTestSupport {
           mock(StorageObjectCleanupService.class),
           mock(StorageUploadOperationLock.class),
           wakeups(),
-          new S3StorageProperties(),
           new SystemSettingsSnapshot(SystemSettingsTestFixture.DEFAULT),
           new StorageMaintenanceProperties(),
           Clock.systemUTC(),

@@ -42,9 +42,14 @@ describe('settings backend field contract', () => {
 
   // 服务端 schema 路径必须与前端 mock 和运行时草稿分别一致，不能只让 mock 自洽。
   it('matches the server schema field paths without weakening validation', () => {
-    const source = backendSource(
-      'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings/SystemSettingsSchemaProvider.java',
-    )
+    const settingsPackage = 'platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/settings'
+    const provider = backendSource(`${settingsPackage}/SystemSettingsSchemaProvider.java`)
+    // 只读取组合根实际注册的 section，避免扫描到未接线的定义后让测试假通过。
+    const definitions = [...provider.matchAll(/\b(\w+SettingsSchema)\.definition\(/g)]
+    expect(definitions).toHaveLength(6)
+    const source = definitions
+      .map((match) => backendSource(`${settingsPackage}/${match[1]}.java`))
+      .join('\n')
     const paths = [...source.matchAll(/\bfield\(\s*"([^"]+)"/g)]
       .map((match) => match[1])
       .sort()
