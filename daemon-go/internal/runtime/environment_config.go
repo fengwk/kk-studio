@@ -163,73 +163,91 @@ func (r *EnvironmentConfigRuntime) Submit(ctx context.Context, version int64, wi
 	}
 	waiter := make(chan ConfigApplyResult, 1)
 	r.mu.Lock()
-	if r.closed {
-		r.mu.Unlock()
-		return ConfigApplyResult{Kind: ConfigFatal, Message: "configuration runtime is closed"}, nil
-	}
-	if version == r.current.ConfigVersion && !bytes.Equal(content, r.acceptedBytes) {
-		accepted := append([]byte(nil), r.acceptedBytes...)
-		r.mu.Unlock()
-		logConfigContentMismatch(version, accepted, content)
+	submission := r.admitSubmissionLocked(version, content, wire, waiter)
+	r.mu.Unlock()
+	if submission.mismatch != nil {
+		logConfigContentMismatch(version, submission.mismatch, content)
 		return ConfigApplyResult{}, errors.New("the same environment config version must not change its content")
 	}
-	if version < r.current.ConfigVersion {
-		if !r.initialized {
-			r.mu.Unlock()
-			return ConfigApplyResult{Kind: ConfigFatal, Message: "Studio configuration version is older than the daemon cache"}, nil
-		}
-		result := ConfigApplyResult{Kind: ConfigStale, Config: cloneDaemonConfig(r.current)}
-		r.mu.Unlock()
-		return result, nil
+	if submission.settled {
+		return submission.result, nil
 	}
-	if version == r.current.ConfigVersion && r.initialized {
-		result := ConfigApplyResult{Kind: ConfigConfirmed, Config: cloneDaemonConfig(r.current)}
-		r.mu.Unlock()
-		return result, nil
-	}
-	if request := sameRequest(r.active, r.pending, version); request != nil {
-		if !bytes.Equal(request.content, content) {
-			accepted := append([]byte(nil), request.content...)
-			r.mu.Unlock()
-			logConfigContentMismatch(version, accepted, content)
-			return ConfigApplyResult{}, errors.New("the same environment config version must not change its content")
-		}
-		request.waiters = append(request.waiters, waiter)
-	} else if r.pending != nil && version < r.pending.version {
-		if r.initialized {
-			result := ConfigApplyResult{Kind: ConfigStale, Config: cloneDaemonConfig(r.current)}
-			r.mu.Unlock()
-			return result, nil
-		}
-		r.pending.waiters = append(r.pending.waiters, waiter)
-	} else if r.active != nil && version < r.active.version {
-		if r.initialized {
-			result := ConfigApplyResult{Kind: ConfigStale, Config: cloneDaemonConfig(r.current)}
-			r.mu.Unlock()
-			return result, nil
-		}
-		r.active.waiters = append(r.active.waiters, waiter)
-	} else {
-		request := &configRequest{version: version, wire: wire, content: content, waiters: []chan ConfigApplyResult{waiter}}
-		if r.pending != nil {
-			if r.initialized {
-				r.settleLocked(r.pending, ConfigApplyResult{Kind: ConfigStale, Config: cloneDaemonConfig(r.current)})
-			} else {
-				request.waiters = append(request.waiters, r.pending.waiters...)
-			}
-		}
-		r.pending = request
-		if !r.processing {
-			r.startWorkerLocked()
-		}
-	}
-	r.mu.Unlock()
 	select {
 	case result := <-waiter:
 		return result, nil
 	case <-ctx.Done():
 		return ConfigApplyResult{}, ctx.Err()
 	}
+}
+
+// submissionOutcome reports how one snapshot was admitted: answered inline, queued behind a worker,
+// or rejected because its version already carries different content.
+type submissionOutcome struct {
+	result   ConfigApplyResult
+	settled  bool
+	mismatch []byte
+}
+
+// admitSubmissionLocked answers one snapshot inline when the accepted version already decides it, or
+// attaches its waiter to the in-flight request that will answer it.
+func (r *EnvironmentConfigRuntime) admitSubmissionLocked(version int64, content []byte, wire *protocol.DaemonConfiguration, waiter chan ConfigApplyResult) submissionOutcome {
+	if r.closed {
+		return submissionOutcome{result: ConfigApplyResult{Kind: ConfigFatal, Message: "configuration runtime is closed"}, settled: true}
+	}
+	if version == r.current.ConfigVersion && !bytes.Equal(content, r.acceptedBytes) {
+		return submissionOutcome{mismatch: append([]byte(nil), r.acceptedBytes...)}
+	}
+	if result, decided := r.answerFromAcceptedLocked(version); decided {
+		return submissionOutcome{result: result, settled: true}
+	}
+	if request := sameRequest(r.active, r.pending, version); request != nil {
+		if !bytes.Equal(request.content, content) {
+			return submissionOutcome{mismatch: append([]byte(nil), request.content...)}
+		}
+		request.waiters = append(request.waiters, waiter)
+		return submissionOutcome{}
+	}
+	if r.pending != nil && version < r.pending.version {
+		if r.initialized {
+			return submissionOutcome{result: ConfigApplyResult{Kind: ConfigStale, Config: cloneDaemonConfig(r.current)}, settled: true}
+		}
+		r.pending.waiters = append(r.pending.waiters, waiter)
+		return submissionOutcome{}
+	}
+	if r.active != nil && version < r.active.version {
+		if r.initialized {
+			return submissionOutcome{result: ConfigApplyResult{Kind: ConfigStale, Config: cloneDaemonConfig(r.current)}, settled: true}
+		}
+		r.active.waiters = append(r.active.waiters, waiter)
+		return submissionOutcome{}
+	}
+	request := &configRequest{version: version, wire: wire, content: content, waiters: []chan ConfigApplyResult{waiter}}
+	if r.pending != nil {
+		if r.initialized {
+			r.settleLocked(r.pending, ConfigApplyResult{Kind: ConfigStale, Config: cloneDaemonConfig(r.current)})
+		} else {
+			request.waiters = append(request.waiters, r.pending.waiters...)
+		}
+	}
+	r.pending = request
+	if !r.processing {
+		r.startWorkerLocked()
+	}
+	return submissionOutcome{}
+}
+
+// answerFromAcceptedLocked reports the outcome the already accepted version decides on its own.
+func (r *EnvironmentConfigRuntime) answerFromAcceptedLocked(version int64) (ConfigApplyResult, bool) {
+	if version < r.current.ConfigVersion {
+		if !r.initialized {
+			return ConfigApplyResult{Kind: ConfigFatal, Message: "Studio configuration version is older than the daemon cache"}, true
+		}
+		return ConfigApplyResult{Kind: ConfigStale, Config: cloneDaemonConfig(r.current)}, true
+	}
+	if version == r.current.ConfigVersion && r.initialized {
+		return ConfigApplyResult{Kind: ConfigConfirmed, Config: cloneDaemonConfig(r.current)}, true
+	}
+	return ConfigApplyResult{}, false
 }
 
 func sameRequest(active, pending *configRequest, version int64) *configRequest {
