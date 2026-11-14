@@ -113,54 +113,52 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 	sweepDone := make(chan struct{})
 	go r.heartbeatLoop(runCtx, heartbeatDone)
 	go r.temporaryResourceSweepLoop(runCtx, sweepDone)
-	defer func() {
-		cancel()
-		<-heartbeatDone
-		<-sweepDone
-		r.shutdown.release("connection close", r.closeActiveConnection)
-		r.shutdown.release("IDE command stop", func() error {
-			r.cancelIDECommands(nil)
-			r.ideWG.Wait()
-			return nil
-		})
-		r.shutdown.release("managed update stop", func() error {
-			r.stopUpdateForShutdown()
-			return nil
-		})
-		r.shutdown.release("environment config close", func() error {
-			if r.options.EnvironmentConfig != nil {
-				r.options.EnvironmentConfig.Close()
-			}
-			return nil
-		})
-		r.shutdown.release("in-flight execution did not converge", func() error {
-			r.cancelAndWait()
-			return nil
-		})
-		r.mu.RLock()
-		failure := r.runFailure
-		r.mu.RUnlock()
-		runErr = errors.Join(runErr, failure, aggregateShutdownFailures(r.ShutdownFailures()))
-	}()
+	defer r.shutDown(runCtx, cancel, heartbeatDone, sweepDone, &runErr)
+	return r.serveGenerations(runCtx)
+}
 
+// shutDown stops the background loops, releases every runtime resource in order and joins the
+// recorded failures into the run result.
+func (r *Runtime) shutDown(runCtx context.Context, cancel context.CancelFunc, heartbeatDone, sweepDone <-chan struct{}, runErr *error) {
+	cancel()
+	<-heartbeatDone
+	<-sweepDone
+	r.shutdown.release("connection close", r.closeActiveConnection)
+	r.shutdown.release("IDE command stop", func() error {
+		r.cancelIDECommands(nil)
+		r.ideWG.Wait()
+		return nil
+	})
+	r.shutdown.release("managed update stop", func() error {
+		r.stopUpdateForShutdown()
+		return nil
+	})
+	r.shutdown.release("environment config close", func() error {
+		if r.options.EnvironmentConfig != nil {
+			r.options.EnvironmentConfig.Close()
+		}
+		return nil
+	})
+	r.shutdown.release("in-flight execution did not converge", func() error {
+		r.cancelAndWait()
+		return nil
+	})
+	r.mu.RLock()
+	failure := r.runFailure
+	r.mu.RUnlock()
+	*runErr = errors.Join(*runErr, failure, aggregateShutdownFailures(r.ShutdownFailures()))
+}
+
+// serveGenerations dials one generation at a time and applies the retry policy between attempts.
+func (r *Runtime) serveGenerations(runCtx context.Context) error {
 	delay := r.options.InitialReconnectDelay
 	for {
 		attempt := newControlAttempt(r)
 		connection, err := r.options.Connections.Connect(runCtx, attempt)
 		if err != nil {
-			if runCtx.Err() != nil {
-				return nil
-			}
-			if errors.Is(err, ErrRegistrationRejected) {
-				return err
-			}
-			if rejected, targetVersion := attempt.upgradeRejection(); rejected {
-				if !r.beginManagedUpdate(runCtx, targetVersion) {
-					return errProtocolUpgradeRequired
-				}
-			}
-			if !waitReconnect(runCtx, delay) {
-				return nil
+			done, dialErr := r.handleDialFailure(runCtx, attempt, err, delay)
+			if done {
+				return dialErr
 			}
 			delay = doubledDelay(delay, r.options.MaxReconnectDelay)
 			continue
@@ -197,6 +195,26 @@ func (r *Runtime) Run(ctx context.Context) (runErr error) {
 		}
 		delay = doubledDelay(delay, r.options.MaxReconnectDelay)
 	}
+}
+
+// handleDialFailure applies the registration and upgrade policy for one failed attempt and reports
+// whether the run loop must stop, along with the error that ends it.
+func (r *Runtime) handleDialFailure(runCtx context.Context, attempt *controlAttempt, dialErr error, delay time.Duration) (bool, error) {
+	if runCtx.Err() != nil {
+		return true, nil
+	}
+	if errors.Is(dialErr, ErrRegistrationRejected) {
+		return true, dialErr
+	}
+	if rejected, targetVersion := attempt.upgradeRejection(); rejected {
+		if !r.beginManagedUpdate(runCtx, targetVersion) {
+			return true, errProtocolUpgradeRequired
+		}
+	}
+	if !waitReconnect(runCtx, delay) {
+		return true, nil
+	}
+	return false, nil
 }
 
 // errProtocolUpgradeRequired is the terminal failure for a 426 the daemon cannot upgrade out of.
