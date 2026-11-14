@@ -59,7 +59,7 @@ class DaemonProtoMappingTest {
                 .setArchitecture(Architecture.ARM64)
                 .setTimeZone("UTC")
                 .setUserName("daemon")
-                .setHomeDirectory("/home/daemon")
+                .setHomeDirectory("/opt/daemon-home")
                 .setTempDirectory("/tmp")
                 .build());
     assertEquals(DaemonOperatingSystem.LINUX, host.operatingSystem());

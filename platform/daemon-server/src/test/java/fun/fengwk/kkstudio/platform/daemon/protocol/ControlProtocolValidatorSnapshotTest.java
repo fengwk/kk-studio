@@ -379,7 +379,7 @@ class ControlProtocolValidatorSnapshotTest {
                   .setArchitecture(Architecture.AMD64)
                   .setTimeZone("Asia/Shanghai")
                   .setUserName("daemon")
-                  .setHomeDirectory("/home/daemon")
+                  .setHomeDirectory("/opt/daemon-home")
                   .setTempDirectory("/tmp"))
           .setRuntimeStatus(snapshot)
           .build();
