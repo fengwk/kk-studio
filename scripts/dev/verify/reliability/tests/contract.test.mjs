@@ -117,8 +117,8 @@ test('run-agent-matrix contract: accepted snapshot assertions enforce the canoni
   )
 })
 
-test('accepted Thread requires an enabled root YOLO switch and an explicit null Goal', () => {
-  // 查询快照必须投影执行根自指与显式开启的 YOLO 开关，并完整投影未设置的 Goal。
+test('accepted Thread requires an enabled root YOLO switch', () => {
+  // 查询快照必须投影执行根自指与显式开启的 YOLO 开关。
   const chat = fakeChat()
   const model = fakeModel()
   const accepted = acceptedEnvelope(chat, model)
@@ -132,19 +132,6 @@ test('accepted Thread requires an enabled root YOLO switch and an explicit null 
     corrupt(invalid.thread)
     assert.throws(() => assertThreadSettings(invalid, fakeCase(model), chat.agentName))
   }
-
-  const missingGoal = structuredClone(accepted)
-  delete missingGoal.thread.branchSettings.goal
-  assert.throws(
-    () => assertThreadSettings(missingGoal, fakeCase(model), chat.agentName),
-    /Thread branch settings shape mismatch/,
-  )
-  const unexpectedGoal = structuredClone(accepted)
-  unexpectedGoal.thread.branchSettings.goal = { id: cid(), text: 'Unexpected user Goal' }
-  assert.throws(
-    () => assertThreadSettings(unexpectedGoal, fakeCase(model), chat.agentName),
-    /New Thread must have no user Goal/,
-  )
 })
 
 // ---------- 最小保真 fixture（只承载被测函数真正读取的字段） ----------
@@ -189,7 +176,7 @@ function acceptedEnvelope(chat, model) {
       parentThreadId: null,
       rootThreadId: threadId,
       yoloEnabled: true,
-      branchSettings: { ...branchSettingsOf(fakeAgent(), model), goal: null },
+      branchSettings: branchSettingsOf(fakeAgent(), model),
       status: 'RUNNING',
       executionControl: 'RUNNABLE',
     },

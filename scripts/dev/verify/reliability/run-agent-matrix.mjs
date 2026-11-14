@@ -614,10 +614,9 @@ export function assertThreadSettings(accepted, testCase, agentName) {
   )
   assert(
     Object.keys(thread.branchSettings ?? {}).sort().join(',')
-      === 'agentName,environmentName,execution,goal',
+      === 'agentName,environmentName,execution',
     `Thread branch settings shape mismatch: ${JSON.stringify(thread.branchSettings)}`,
   )
-  assert(thread.branchSettings.goal === null, 'New Thread must have no user Goal')
 }
 
 function assertNoAssistantError(entries) {

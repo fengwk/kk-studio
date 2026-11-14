@@ -1557,7 +1557,6 @@ registerCase({
       toolAgent,
       [
         'name',
-        'type',
         'description',
         'systemPrompt',
         'execution',

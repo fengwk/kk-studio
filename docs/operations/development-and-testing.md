@@ -382,7 +382,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 由 flag 组合和 case 的 `requires` 共同决定。所有 HTTP 4xx 断言必须显式给出 problem `code`；
 `code=conflict` 必须同时给出精确 `reason`，其他 reason 一旦断言也按完整字符串匹配，不能只检查状态码。
 
-Agent execution 的读取、CRUD 和内置身份约束属于免费 L1：目录请求使用
+Agent execution 的读取与 CRUD 属于免费 L1：Agent 目录项没有类型字段，execution 使用
 `{driver, settings}`，Builtin settings 包含 `modelName` 与可空 `variant`；Agent config
 矩阵检查 `tools`、`skills`、`subagents` 的形状及未知字段拒绝。这些 case 不调用真实模型。
 更改 Agent 契约时同步 case、fixture 与生成的前端契约。

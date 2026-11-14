@@ -26,7 +26,6 @@ const FREE_L1_CASES = [
 function chatDefaultEnvironmentFixture() {
   const agent = {
     name: 'fixture-agent',
-    type: 'USER',
     execution: { driver: 'builtin', settings: { modelName: 'fixture-model', variant: 'default' } },
   }
   const environments = new Map()
