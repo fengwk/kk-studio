@@ -47,21 +47,6 @@ public record EnvironmentConnection(
     return EnvironmentCapabilityCatalog.descriptors();
   }
 
-  /** 连接行保留的最近一次 READY 宿主用户名；从未 READY 时为 null。 */
-  public String userName() {
-    return readyMetadata == null ? null : readyMetadata.hostInfo().userName();
-  }
-
-  /** 连接行保留的最近一次 READY 宿主 canonical home 目录；从未 READY 时为 null。 */
-  public String homeDirectory() {
-    return readyMetadata == null ? null : readyMetadata.hostInfo().homeDirectory();
-  }
-
-  /** 连接行保留的最近一次 READY 上报的实际 Daemon 构建版本；从未 READY 时为 null。 */
-  public String daemonVersion() {
-    return readyMetadata == null ? null : readyMetadata.daemonVersion();
-  }
-
   public boolean isReady(Instant now, Duration heartbeatTimeout) {
     Instant current = now != null ? now : Instant.now();
     return status == LiveEnvironmentStatus.READY

@@ -102,7 +102,7 @@ class EnvironmentUpdateServiceTest {
 
   private EnvironmentUpdateService newService() {
     return new EnvironmentUpdateService(
-        new EnvironmentDaemonGateway(server, registry),
+        new EnvironmentDaemonGateway(server),
         registry,
         environmentRepository,
         releaseProvider,

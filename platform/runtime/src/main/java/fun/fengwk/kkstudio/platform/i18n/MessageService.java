@@ -131,34 +131,21 @@ public class MessageService {
   }
 
   public String httpMessage(int status) {
-    return httpMessage(status, "message");
-  }
-
-  public String httpTitle(int status) {
-    return httpMessage(status, "title");
-  }
-
-  public String httpCode(int status) {
-    HttpStatus resolved = HttpStatus.resolve(status);
-    return resolved == null ? Integer.toString(status) : resolved.name();
-  }
-
-  private String httpMessage(int status, String part) {
     HttpStatus resolved = HttpStatus.resolve(status);
     if (resolved == null) {
-      return unknownHttpMessage(status, part);
+      return unknownHttpMessage(status);
     }
-    String key = HTTP_PREFIX + resolved.name().toLowerCase(Locale.ROOT) + "." + part;
+    String key = HTTP_PREFIX + resolved.name().toLowerCase(Locale.ROOT) + ".message";
     try {
       return message(key, Collections.emptyMap());
     } catch (MissingResourceException missing) {
       // 已识别但未登记文案的状态（如 418）与未知状态使用同一兜底，对调用方屏蔽内部异常。
-      return unknownHttpMessage(status, part);
+      return unknownHttpMessage(status);
     }
   }
 
-  private String unknownHttpMessage(int status, String part) {
-    return message(HTTP_PREFIX + "unknown." + part, Map.of("status", status));
+  private String unknownHttpMessage(int status) {
+    return message(HTTP_PREFIX + "unknown.message", Map.of("status", status));
   }
 
   private static ResourceBundle createBundle(Locale locale, ClassLoader classLoader) {

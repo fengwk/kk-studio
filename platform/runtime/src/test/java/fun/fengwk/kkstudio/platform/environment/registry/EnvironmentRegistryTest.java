@@ -403,22 +403,4 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
   private static List<EnvironmentEventType> eventTypes(List<EnvironmentEvent> events) {
     return events.stream().map(EnvironmentEvent::type).toList();
   }
-
-  private static List<EnvironmentId> environmentIds(List<EnvironmentConnection> connections) {
-    return connections.stream().map(EnvironmentConnection::environmentId).toList();
-  }
-
-  /** 测试意图：验证 list 查询能列出不同环境的独立路由行。 */
-  @Test
-  void listAndDistinctEnvironments() {
-    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    LeaseBindResult r2 = registry2.tryAcquire(PROD, PROD_TOKEN, LEASE_DURATION);
-    assertInstanceOf(LeaseBindResult.Acquired.class, r1);
-    assertInstanceOf(LeaseBindResult.Acquired.class, r2);
-
-    List<EnvironmentConnection> list = registry1.list();
-    assertEquals(2, list.size());
-    assertEquals(DEV, list.get(0).environmentId());
-    assertEquals(PROD, list.get(1).environmentId());
-  }
 }

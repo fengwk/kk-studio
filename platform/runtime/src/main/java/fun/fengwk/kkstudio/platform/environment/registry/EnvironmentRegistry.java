@@ -171,14 +171,6 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
       )
       """;
 
-  private static final String LIST_SQL =
-      """
-      select environment_id, owner_node_id, lease_token,
-             status, ready_metadata, recent_events, last_seen_at, lease_until
-      from environment_connection
-      order by environment_id asc
-      """;
-
   /** 只追加一条运维事件的围栏写：锁定的必须是本节点未过期的 READY 租约。 */
   private static final String APPEND_EVENT_SQL =
       """
@@ -433,11 +425,6 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
             .query(connectionRows.mapper())
             .list();
     return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
-  }
-
-  /** 查询当前数据库中所有活跃环境的路由快照列表。 */
-  public List<EnvironmentConnection> list() {
-    return jdbcClient.sql(LIST_SQL).query(connectionRows.mapper()).list();
   }
 
   /**
