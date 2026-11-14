@@ -6,7 +6,6 @@ import {
 import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
 import type {
-  EnvironmentIdeChangeDirectoryDTO,
 } from '@/shared/api/generated/contracts'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
@@ -19,7 +18,6 @@ import {
 } from '@/features/environment/ide/ide-tab-state'
 import {
   applyIdeMobileLayout,
-  changeIdeViewDirectory,
   openIdeView,
   readIdeView,
 } from '@/features/environment/ide/environment-ide-service'
@@ -27,23 +25,21 @@ import {
   buildOpenRequest,
   IdeProtocolError,
   isIdeProtocolError,
-  validateCommandView,
   validateOpenResponse,
 } from '@/features/environment/ide/ide-contract'
-import { compareDecimal } from '@/features/environment/ide/ide-decimal'
 import { useIdeViewStore } from '@/features/environment/ide/useIdeViewStore'
 import { useIdeOperationQueue } from '@/features/environment/ide/useIdeOperationQueue'
 import { useIdeSnapshotCache } from '@/features/environment/ide/useIdeSnapshotCache'
 import { useIdePendingShellIntent } from '@/features/environment/ide/useIdePendingShellIntent'
 import { useIdeCloseCommands } from '@/features/environment/ide/useIdeCloseCommands'
 import { useIdeTerminalCommands } from '@/features/environment/ide/useIdeTerminalCommands'
+import { useIdeDirectoryCommand } from '@/features/environment/ide/useIdeDirectoryCommand'
 import {
   useIdeSessionWriter,
   useIdeUsageProof,
 } from '@/features/environment/ide/useIdeUsageProof'
 import {
   isBoundToConnection,
-  isSameBinding,
   retainAvailableViews,
 } from '@/features/environment/ide/ide-view-state'
 import {
@@ -153,6 +149,15 @@ export function useIdeClaimReconciliation({
     updateView,
     registerUsageNow,
     rememberPendingShellIntent,
+  })
+  const { changeDirectory } = useIdeDirectoryCommand({
+    viewsRef,
+    sessionRef,
+    identityRef,
+    updateView,
+    writeSession,
+    registerUsageNow,
+    reconcile,
   })
 
   identityRef.current = identity
@@ -886,104 +891,6 @@ export function useIdeClaimReconciliation({
       return
     }
     void reconcile(environmentId, 'retry')
-  }
-
-  async function changeDirectory(
-    environmentId: string,
-    directory: string,
-  ): Promise<{ ok: boolean; message?: string }> {
-    const view = viewsRef.current[environmentId]
-    if (
-      view == null
-      || view.status !== 'ready'
-      || view.bindingEpoch == null
-      || view.daemonInstanceId == null
-      || view.closeInFlight
-    ) {
-      return { ok: false, message: 'view-not-ready' }
-    }
-    const epoch = view.bindingEpoch
-    const requestIdentity = identityRef.current
-    try {
-      await registerUsageNow(usageOverride(
-        environmentId,
-        view.viewId,
-        view.claimId,
-        epoch,
-      ))
-      const body: EnvironmentIdeChangeDirectoryDTO = {
-        browserSessionId: sessionRef.current.browserSessionId,
-        bindingEpoch: epoch,
-        expectedDaemonInstanceId: view.daemonInstanceId,
-        directory,
-      }
-      const response = await changeIdeViewDirectory(environmentId, view.viewId, body)
-      const validated = validateCommandView(
-        environmentId,
-        sessionRef.current.browserSessionId,
-        view.viewId,
-        response,
-      )
-      if (
-        validated.daemonInstanceId !== view.daemonInstanceId
-        || compareDecimal(validated.bindingEpoch, epoch) < 0
-        || (validated.workspacePath !== view.workspacePath
-          && compareDecimal(validated.bindingEpoch, epoch) === 0)
-      ) {
-        throw new IdeProtocolError('Invalid IDE command response: binding regression')
-      }
-      const current = viewsRef.current[environmentId]
-      const appliedIdentity = identityRef.current
-      if (
-        requestIdentity == null
-        || appliedIdentity == null
-        || appliedIdentity.eventNodeId !== requestIdentity.eventNodeId
-        || appliedIdentity.connectionId !== requestIdentity.connectionId
-      ) {
-        if (appliedIdentity != null) {
-          reconcile(environmentId, 'connection')
-        }
-        return { ok: false, message: 'binding-changed' }
-      }
-      if (isSameBinding(current, view)) {
-        updateView(environmentId, view.attempt, {
-          daemonInstanceId: validated.daemonInstanceId,
-          bindingEpoch: validated.bindingEpoch,
-          eventNodeId: validated.eventNodeId,
-          connectionId: validated.connectionId,
-          directory: validated.directory,
-          workspacePath: validated.workspacePath,
-        })
-        writeSession()
-        if (validated.bindingEpoch !== epoch) {
-          reconcile(environmentId, 'directory', { allowRebind: true })
-        }
-      }
-      return { ok: true }
-    } catch (error) {
-      const current = viewsRef.current[environmentId]
-      if (isSameBinding(current, view)) {
-        if (isIdeProtocolError(error)) {
-          updateView(environmentId, view.attempt, {
-            status: 'error',
-            errorMessage: error.message,
-          })
-          return { ok: false, message: error.message }
-        }
-        const unknown = isUnknownIdeFailure(error)
-          || ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN'
-          || ideFailureReason(error) === 'STALE_BINDING'
-        if (unknown) {
-          reconcile(environmentId, 'directory', { allowRebind: false })
-          return { ok: false, message: 'directory-result-unknown' }
-        }
-        return {
-          ok: false,
-          message: safeIdeError(error) || 'directory-failed',
-        }
-      }
-      return { ok: false, message: 'binding-changed' }
-    }
   }
 
   function handleIframeLoaded(environmentId: string, entryUrl: string): void {
