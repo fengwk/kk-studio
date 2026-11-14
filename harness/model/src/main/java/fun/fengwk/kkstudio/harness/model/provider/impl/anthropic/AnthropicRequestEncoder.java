@@ -81,17 +81,9 @@ public final class AnthropicRequestEncoder {
     root.put("max_tokens", maxTokens);
     root.put("stream", true);
 
-    String currentEffort = request.variant() == null ? null : request.variant().reasoningEffort();
-    boolean currentEffortOff = request.variant() != null && request.variant().reasoningOff();
-    String firstStoredEffort = AnthropicReasoningEffort.firstStoredEffort(request.messages());
-    boolean messageLevelThinking =
-        request.model().reasoning() && request.model().messageLevelEffort() && !currentEffortOff;
-    boolean messageLevelEffort =
-        messageLevelThinking && (currentEffort != null || firstStoredEffort != null);
-    String topLevelEffort =
-        messageLevelEffort && firstStoredEffort != null ? firstStoredEffort : currentEffort;
+    EffortPlan effort = EffortPlan.resolve(request);
     AnthropicReasoningEffort.applyReasoningParameters(
-        root, request, topLevelEffort, messageLevelEffort);
+        root, request, effort.topLevelEffort(), effort.messageLevelEffort());
 
     boolean deferredToolLane =
         request.model().midConversationSystemMessages() && request.baselineHasClientTools();
@@ -104,23 +96,15 @@ public final class AnthropicRequestEncoder {
         AnthropicReasoningEffort.hasInlineToolChanges(request.messages());
     List<String> betaFeatures =
         AnthropicReasoningEffort.resolveBetaFeatures(
-            messageLevelThinking, deferredToolLane || hasInlineToolChanges);
+            effort.messageLevelThinking(), deferredToolLane || hasInlineToolChanges);
 
     ArrayNode toolsArray =
         AnthropicToolsEncoder.mergeTools(root, request.tools(), deferredToolLane);
-
-    // 系统指令是请求唯一的顶层 system；编码为单块数组以便在 SYSTEM 边界打缓存标记。
-    ArrayNode unmarkedSystemArray = NODES.arrayNode();
-    ObjectNode systemBlock = NODES.objectNode();
-    systemBlock.put("type", "text");
-    systemBlock.put("text", request.systemInstruction());
-    unmarkedSystemArray.add(systemBlock);
+    ArrayNode unmarkedSystemArray = encodeSystemInstruction(request.systemInstruction());
 
     AnthropicWireMessages.Result wire =
         AnthropicWireMessages.encode(request.messages(), descriptor, request.model().modelId());
     ArrayNode wireMessagesArray = wire.messages();
-    List<String> messageEfforts = wire.efforts();
-    List<ObjectNode> cacheEndpoints = wire.cacheEndpoints();
 
     // 注入 cache marker
     AnthropicCacheMarkers.apply(
@@ -128,12 +112,12 @@ public final class AnthropicRequestEncoder {
         wireMessagesArray,
         toolsArray,
         unmarkedSystemArray,
-        cacheEndpoints,
+        wire.cacheEndpoints(),
         deferredToolLane);
-    if (messageLevelEffort) {
+    if (effort.messageLevelEffort()) {
       wireMessagesArray =
           AnthropicReasoningEffort.applyMessageLevelEffort(
-              wireMessagesArray, messageEfforts, currentEffort, topLevelEffort);
+              wireMessagesArray, wire.efforts(), effort.currentEffort(), effort.topLevelEffort());
     }
 
     if (!toolsArray.isEmpty()) {
@@ -153,6 +137,38 @@ public final class AnthropicRequestEncoder {
     bodySizeGuard.enforce(utf8Bytes);
 
     return new AnthropicEncodedRequest(utf8Bytes, betaFeatures);
+  }
+
+  /** 系统指令是请求唯一的顶层 system；编码为单块数组以便在 SYSTEM 边界打缓存标记。 */
+  private static ArrayNode encodeSystemInstruction(String systemInstruction) {
+    ArrayNode unmarkedSystemArray = NODES.arrayNode();
+    ObjectNode systemBlock = NODES.objectNode();
+    systemBlock.put("type", "text");
+    systemBlock.put("text", systemInstruction);
+    unmarkedSystemArray.add(systemBlock);
+    return unmarkedSystemArray;
+  }
+
+  /** 本轮的推理等级决策：是否按消息级别编码、顶层等级与声明历史中的首个等级。 */
+  private record EffortPlan(
+      String currentEffort,
+      boolean messageLevelThinking,
+      boolean messageLevelEffort,
+      String topLevelEffort) {
+
+    static EffortPlan resolve(ProviderRequest request) {
+      String currentEffort = request.variant() == null ? null : request.variant().reasoningEffort();
+      boolean currentEffortOff = request.variant() != null && request.variant().reasoningOff();
+      String firstStoredEffort = AnthropicReasoningEffort.firstStoredEffort(request.messages());
+      boolean messageLevelThinking =
+          request.model().reasoning() && request.model().messageLevelEffort() && !currentEffortOff;
+      boolean messageLevelEffort =
+          messageLevelThinking && (currentEffort != null || firstStoredEffort != null);
+      String topLevelEffort =
+          messageLevelEffort && firstStoredEffort != null ? firstStoredEffort : currentEffort;
+      return new EffortPlan(
+          currentEffort, messageLevelThinking, messageLevelEffort, topLevelEffort);
+    }
   }
 
   /** 声明历史中存储的每个 effort 变化，并把当前等级放在请求前缀末尾。 */
