@@ -36,12 +36,8 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
-import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
-import fun.fengwk.kkstudio.harness.api.tool.ToolFileMutationOrder;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.runtime.DriverCommits;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
@@ -58,12 +54,10 @@ import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverActivity;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverApplied;
-import fun.fengwk.kkstudio.harness.spi.driver.DriverCommit;
 import fun.fengwk.kkstudio.harness.spi.driver.LockedDriverState;
 import fun.fengwk.kkstudio.harness.spi.driver.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimLostSignal;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
@@ -72,10 +66,7 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -288,7 +279,7 @@ public final class ThreadProcessor {
             now,
             driver);
       }
-      case ThreadContext.ToolActive pending -> dispatchQueuedTools(
+      case ThreadContext.ToolActive pending -> ToolDispatch.dispatchQueuedTools(
           tx, claim, thread, pending.assistant());
       case ThreadContext.ContinuationDue ignored -> {
         // compact 工具只排队：批次结束后的第一个安全边界按手动压缩规则整理同一历史，再消费后续输入。
@@ -404,7 +395,8 @@ public final class ThreadProcessor {
       Instant now,
       boolean hasQueuedMessage,
       AgentDriver driver) {
-    DriverApplied applied = driver.applyResponse(tx, thread, path, driverState, commit(tx));
+    DriverApplied applied =
+        driver.applyResponse(tx, thread, path, driverState, DriverCommits.of(tx));
     UUID head = applied.headEntryId();
     UUID finalAnswerEntryId = applied.finalAnswerEntryId();
     boolean terminal = applied.terminal();
@@ -445,7 +437,7 @@ public final class ThreadProcessor {
       throw new ClaimLostSignal();
     }
     if (toolPhase) {
-      boolean readyRequested = dispatchReadyTools(tx, invocations);
+      boolean readyRequested = ToolDispatch.dispatchReadyTools(tx, invocations);
       if (!readyRequested) {
         requestThread = true;
       }
@@ -454,114 +446,6 @@ public final class ThreadProcessor {
       tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
     tx.work().complete(claim);
-  }
-
-  /** Dispatches unkeyed calls as before and only the first live call for each file key. */
-  private boolean dispatchReadyTools(
-      HarnessStore.Transaction tx, List<ToolInvocation> invocations) {
-    List<ToolInvocation> ordered = new ArrayList<>(invocations);
-    ordered.sort(Comparator.comparingInt(ToolInvocation::callIndex));
-    Map<ToolFileMutationOrder.Key, ToolInvocation> firstByFile = new HashMap<>();
-    List<ToolInvocation> unkeyed = new ArrayList<>();
-    for (ToolInvocation invocation : ordered) {
-      Optional<ToolFileMutationOrder.Key> key = ToolFileMutationOrder.key(invocation);
-      if (key.isEmpty()) {
-        unkeyed.add(invocation);
-      } else if (!invocation.status().isTerminal()) {
-        firstByFile.putIfAbsent(key.get(), invocation);
-      }
-    }
-    List<ToolInvocation> dispatchable = new ArrayList<>();
-    for (ToolInvocation invocation : unkeyed) {
-      if (invocation.status() == ToolInvocationStatus.READY) {
-        dispatchable.add(invocation);
-      }
-    }
-    for (ToolInvocation invocation : firstByFile.values()) {
-      if (isDispatchableFileMutation(invocation)
-          && tx.work().find(new WorkTarget(WorkTargetType.TOOL, invocation.id())).isEmpty()) {
-        dispatchable.add(invocation);
-      }
-    }
-    dispatchable.sort(Comparator.comparing(ToolInvocation::id, UuidOrder.COMPARATOR));
-    for (ToolInvocation invocation : dispatchable) {
-      requestToolWork(tx, invocation);
-    }
-    return !dispatchable.isEmpty();
-  }
-
-  /** A THREAD wake rechecks each key's first live slot; unkeyed slots were dispatched on entry. */
-  private void dispatchQueuedTools(
-      HarnessStore.Transaction tx, ClaimedWork claim, ThreadState thread, Entry assistant) {
-    List<ToolInvocation> siblings = tx.tools().lockByAssistantEntry(assistant.id());
-    List<ToolInvocation> sameThread =
-        siblings.stream()
-            .filter(
-                invocation ->
-                    invocation.threadId().equals(thread.id())
-                        && invocation.assistantEntryId().equals(assistant.id()))
-            .toList();
-    dispatchReadyFileMutations(tx, sameThread);
-    if (tx.work().lockClaimed(claim).isEmpty()) {
-      throw new ClaimLostSignal();
-    }
-    tx.work().complete(claim);
-  }
-
-  private void dispatchReadyFileMutations(
-      HarnessStore.Transaction tx, List<ToolInvocation> invocations) {
-    List<ToolInvocation> ordered = new ArrayList<>(invocations);
-    ordered.sort(Comparator.comparingInt(ToolInvocation::callIndex));
-    Map<ToolFileMutationOrder.Key, ToolInvocation> firstByFile = new HashMap<>();
-    for (ToolInvocation invocation : ordered) {
-      Optional<ToolFileMutationOrder.Key> key = ToolFileMutationOrder.key(invocation);
-      if (key.isPresent() && !invocation.status().isTerminal()) {
-        firstByFile.putIfAbsent(key.get(), invocation);
-      }
-    }
-    List<ToolInvocation> dispatchable = new ArrayList<>();
-    for (ToolInvocation invocation : firstByFile.values()) {
-      WorkTarget target = new WorkTarget(WorkTargetType.TOOL, invocation.id());
-      if (isDispatchableFileMutation(invocation) && tx.work().find(target).isEmpty()) {
-        dispatchable.add(invocation);
-      }
-    }
-    dispatchable.sort(Comparator.comparing(ToolInvocation::id, UuidOrder.COMPARATOR));
-    for (ToolInvocation invocation : dispatchable) {
-      requestToolWork(tx, invocation);
-    }
-  }
-
-  private static boolean isDispatchableFileMutation(ToolInvocation invocation) {
-    return invocation.status() == ToolInvocationStatus.READY
-        && invocation.attempt() == 0
-        && invocation.approval() == null;
-  }
-
-  private static void requestToolWork(HarnessStore.Transaction tx, ToolInvocation invocation) {
-    // Only required-environment capabilities route Work to an Environment. Per-call file tools
-    // remain claimable even while that Environment is offline.
-    EnvironmentId environmentId = requiredEnvironmentId(invocation);
-    tx.work().request(new WorkTarget(WorkTargetType.TOOL, invocation.id()), environmentId);
-  }
-
-  private static DriverCommit commit(HarnessStore.Transaction tx) {
-    return new DriverCommit() {
-      @Override
-      public UUID nextId() {
-        return tx.nextId();
-      }
-
-      @Override
-      public Instant now() {
-        return tx.now();
-      }
-
-      @Override
-      public void insertEntry(Entry entry) {
-        tx.entries().insert(entry);
-      }
-    };
   }
 
   /**
@@ -763,7 +647,7 @@ public final class ThreadProcessor {
     ThreadState advanced = thread.advanceHead(turnEndId, now);
     tx.threads().update(advanced);
     // Driver 回调必须看到已提交的 Thread head，并用原 path 校验已挂接结果。
-    driver.completeToolBatch(tx, thread, path, driverState, siblings, commit(tx));
+    driver.completeToolBatch(tx, thread, path, driverState, siblings, DriverCommits.of(tx));
     EntryPath updatedPath = tx.entries().loadPath(turnEndId);
     coordinator.remindSoftBudgetIfDue(tx, advanced, updatedPath, now);
     if (tx.work().lockClaimed(claim).isEmpty()) {
@@ -1177,15 +1061,6 @@ public final class ThreadProcessor {
                 : executed,
             accepted == null ? null : accepted.capabilities()),
         entry.createdAt());
-  }
-
-  /** 只有只能在环境上执行的工具才把 Tool Work 路由到环境；逐调用路由的文件工具不等待环境。 */
-  private static EnvironmentId requiredEnvironmentId(ToolInvocation invocation) {
-    ToolBinding binding = invocation.binding();
-    if (binding == null || binding.environmentSupport() != EnvironmentSupport.REQUIRED) {
-      return null;
-    }
-    return binding.environmentId();
   }
 
   /** Work-only 前置校验：仅锁 Work 行验证 claim 当前真实 owned。 */

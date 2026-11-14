@@ -99,7 +99,7 @@ final class StopNodeConverger {
             facts.thread(),
             facts.path(),
             facts.driverState(),
-            DriverCommitAdapter.of(tx),
+            DriverCommits.of(tx),
             original.stopRequestId());
 
     StopTurnWrites.NodeStop node =
@@ -116,7 +116,7 @@ final class StopNodeConverger {
             ? node.thread()
             : StopTurnWrites.materializeQueuedNotifications(
                 tx, node.thread(), queuedNotifications, now);
-    driver.completeStop(tx, stoppedThread, DriverCommitAdapter.of(tx));
+    driver.completeStop(tx, stoppedThread, DriverCommits.of(tx));
     return new Converged(
         stoppedThread,
         StopReceipts.nodeReceipt(
@@ -259,7 +259,7 @@ final class StopNodeConverger {
     Instant mutationNow = tx.now();
     DriverApplied applied =
         driver.applyResponse(
-            tx, facts.thread(), facts.path(), generationState, DriverCommitAdapter.of(tx));
+            tx, facts.thread(), facts.path(), generationState, DriverCommits.of(tx));
     ThreadState current = tx.threads().find(facts.thread().id()).orElseThrow();
     ThreadState advanced;
     if (current.headEntryId().equals(applied.headEntryId())) {
@@ -309,12 +309,7 @@ final class StopNodeConverger {
     ThreadState advanced = facts.thread().advanceHead(turnEndId, mutationNow);
     tx.threads().update(advanced);
     driver.completeToolBatch(
-        tx,
-        facts.thread(),
-        facts.path(),
-        facts.driverState(),
-        siblings,
-        DriverCommitAdapter.of(tx));
+        tx, facts.thread(), facts.path(), facts.driverState(), siblings, DriverCommits.of(tx));
     return advanced;
   }
 

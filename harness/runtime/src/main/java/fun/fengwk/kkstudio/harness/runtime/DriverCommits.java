@@ -12,9 +12,9 @@ import java.util.UUID;
  *
  * <p>只转发 id 分配、事务时钟与 Entry 插入；不引入新事务、不改变提交边界。
  */
-public final class DriverCommitAdapter {
+public final class DriverCommits {
 
-  private DriverCommitAdapter() {}
+  private DriverCommits() {}
 
   public static DriverCommit of(HarnessStore.Transaction tx) {
     return new DriverCommit() {
