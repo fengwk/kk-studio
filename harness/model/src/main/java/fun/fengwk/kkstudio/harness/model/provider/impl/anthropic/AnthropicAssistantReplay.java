@@ -169,16 +169,27 @@ final class AnthropicAssistantReplay {
 
   /** payload 只接受已知 block 的形状；未知 type opaque 透传，但 compaction 最多一个且必须在首位。 */
   private static ReplayPayload parseReplayPayload(ArrayNode contentArray) {
-    StringBuilder text = new StringBuilder();
-    StringBuilder thinking = new StringBuilder();
-    List<ProviderToolCall> calls = new ArrayList<>();
-    List<String> redacted = new ArrayList<>();
+    ReplayPayloadBuilder payload = new ReplayPayloadBuilder();
 
-    int compactionIndex = -1;
     int blockIndex = 0;
     for (JsonNode item : contentArray) {
-      String type = replayBlockType(item);
-      switch (type) {
+      payload.accept(blockIndex++, item);
+    }
+
+    return payload.build();
+  }
+
+  /** 顺序扫描 replay block，累计语义文本、思考、工具调用与被压缩历史位置。 */
+  private static final class ReplayPayloadBuilder {
+
+    private final StringBuilder text = new StringBuilder();
+    private final StringBuilder thinking = new StringBuilder();
+    private final List<ProviderToolCall> calls = new ArrayList<>();
+    private final List<String> redacted = new ArrayList<>();
+    private int compactionIndex = -1;
+
+    void accept(int blockIndex, JsonNode item) {
+      switch (replayBlockType(item)) {
         case "text" -> {
           if (!item.has("text") || !item.get("text").isString()) {
             throw new ProviderException(
@@ -221,15 +232,16 @@ final class AnthropicAssistantReplay {
           // 未知但合法的 provider block：opaque 透传，不参与 durable 一致性比对，也绝不伪装成已知 type
         }
       }
-      blockIndex++;
     }
 
-    if (compactionIndex > 0) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "compaction block must be the first content block of the replay message");
+    ReplayPayload build() {
+      if (compactionIndex > 0) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "compaction block must be the first content block of the replay message");
+      }
+      return new ReplayPayload(text, thinking, calls, redacted, compactionIndex == 0);
     }
-    return new ReplayPayload(text, thinking, calls, redacted, compactionIndex == 0);
   }
 
   /** replay block 必须是带非空 string type 的对象。 */
