@@ -5,6 +5,8 @@ import org.postgresql.PGConnection;
 import org.postgresql.PGNotification;
 import org.springframework.context.SmartLifecycle;
 
+import fun.fengwk.kkstudio.web.MillisecondDurations;
+
 import javax.sql.DataSource;
 
 import java.sql.Connection;
@@ -261,7 +263,9 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
 
   private void sleepBeforeReconnect() {
     try {
-      Thread.sleep(requirePositiveWholeMillis(reconnectBackoffProvider.get(), "reconnectBackoff"));
+      Thread.sleep(
+          MillisecondDurations.requirePositiveWholeMillis(
+              reconnectBackoffProvider.get(), "reconnectBackoff"));
     } catch (InterruptedException ignored) {
       Thread.currentThread().interrupt();
     }
@@ -316,24 +320,10 @@ public final class PostgresqlNotificationLoop implements SmartLifecycle, AutoClo
   }
 
   private static int requirePositiveWholeMillisInt(Duration value, String name) {
-    long millis = requirePositiveWholeMillis(value, name);
+    long millis = MillisecondDurations.requirePositiveWholeMillis(value, name);
     if (millis > Integer.MAX_VALUE) {
       throw new IllegalArgumentException(name + " must not exceed " + Integer.MAX_VALUE + "ms");
     }
     return (int) millis;
-  }
-
-  private static long requirePositiveWholeMillis(Duration value, String name) {
-    Objects.requireNonNull(value, name);
-    long nanos;
-    try {
-      nanos = value.toNanos();
-    } catch (ArithmeticException error) {
-      throw new IllegalArgumentException(name + " is too large", error);
-    }
-    if (nanos <= 0 || nanos % 1_000_000 != 0) {
-      throw new IllegalArgumentException(name + " must be a positive whole-millisecond duration");
-    }
-    return nanos / 1_000_000;
   }
 }

@@ -249,6 +249,7 @@
                                         <include>fun.fengwk.kkstudio.web.runtime.PluginCatalogRefresher</include>
                                         <include>fun.fengwk.kkstudio.web.runtime.PluginCatalogConfiguration</include>
                                         <include>fun.fengwk.kkstudio.web.runtime.IssueReconcileRuntimeConfiguration</include>
+                                        <include>fun.fengwk.kkstudio.web.MillisecondDurations</include>
                                     </includes>
                                     <limits>
                                         <limit>

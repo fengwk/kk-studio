@@ -6,9 +6,7 @@ import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
-import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.canvas.function.CanvasResourceKind;
-import fun.fengwk.kkstudio.common.json.JsonValues;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -216,11 +214,6 @@ final class H3WorkflowBuilder {
     }
   }
 
-  static int frameLength(int durationSeconds) {
-    int base = Math.max(5, Math.toIntExact(Math.round(durationSeconds * 24D)));
-    return base + Math.floorMod(5 - Math.floorMod(base, 17), 17);
-  }
-
   /**
    * 从冻结图构造单次 H3 API workflow：先注入已声明参数（ratio 映射、duration 与精确 seed、帧长表达式、filename_prefix），再按 manifest
    * 顺序追加 动态媒体节点。
@@ -371,19 +364,5 @@ final class H3WorkflowBuilder {
 
   private static ArrayNode link(String id, int port) {
     return MAPPER.createArrayNode().add(id).add(port);
-  }
-
-  /** 预置 args schema 的已解析视图，供默认 workflow 与测试复用。 */
-  static JsonObject argsSchema() {
-    return CanvasJson.parseObject(ARGS_SCHEMA_JSON);
-  }
-
-  /** 默认预置图的已解析视图。 */
-  static ObjectNode defaultTemplate() {
-    JsonNode node = JsonValues.readTree(defaultTemplateJson());
-    if (!(node instanceof ObjectNode template)) {
-      throw new IllegalStateException("MiniMax-H3 workflow template must be a JSON object");
-    }
-    return template;
   }
 }
