@@ -114,7 +114,7 @@ func classifySearchError(err error) error {
 	case lower == "root is not a directory":
 		return rejectInput("path is not a directory")
 	default:
-		return failRun("ripgrep failed while searching; results are incomplete", "FAILED")
+		return failRun("search failed; results are incomplete", "FAILED")
 	}
 }
 

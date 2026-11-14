@@ -105,7 +105,7 @@ func TestClassifySearchErrorMapsMalformedInputAndUnexpectedFailures(t *testing.T
 	}{
 		{name: "regex", err: fmt.Errorf("invalid regex: missing ]"), code: "INVALID_ARGUMENT", text: "Invalid regex: missing ]. Use literal=true for exact text, or escape regex metacharacters."},
 		{name: "glob", err: fmt.Errorf("invalid glob: malformed range"), code: "INVALID_ARGUMENT", text: "Invalid glob: malformed range"},
-		{name: "unexpected", err: fmt.Errorf("unexpected scanner failure"), code: "FAILED", text: "ripgrep failed while searching; results are incomplete"},
+		{name: "unexpected", err: fmt.Errorf("unexpected scanner failure"), code: "FAILED", text: "search failed; results are incomplete"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			result := errorResult("call", classifySearchError(test.err))
