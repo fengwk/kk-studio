@@ -17,7 +17,6 @@ import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
 import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
-import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -42,7 +41,6 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitAbandonment;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
-import fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanPreview;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
@@ -71,8 +69,7 @@ import java.util.function.Consumer;
  * #compactThread}、{@link #getThreadSnapshot}、 {@link #listThreadsBySession} 与 {@link
  * #getSessionEntries}。
  *
- * <p>只读规划事实与上述入口同源并从本门面暴露，调用方无需接触实现类：{@link #previewInputCandidatePath}（未落库命令 batch 的 candidate
- * 路径）与 {@link #findCompactionTurnStart}（已关闭压缩 turn 的冻结元数据）。
+ * <p>只读规划事实与上述入口同源并从本门面暴露，调用方无需接触实现类：{@link #findCompactionTurnStart} （已关闭压缩 turn 的冻结元数据）。
  *
  * <p>Thread 控制请求值类型位于 {@code harness.api.thread}。
  */
@@ -596,32 +593,6 @@ public final class HarnessRuntime {
           }
           return tx.threads().listUserBySession(sessionId);
         });
-  }
-
-  /**
-   * 只读 Turn 计划预览：把尚未持久化的命令 batch 用与正式规划相同的纯 {@link TurnPlanPreview} 装配为 INPUT candidate 路径。
-   *
-   * <p>命中事实边界与正式规划一致：candidate Entry id 只是本次调用分配的内存 UUID，不接触 Store、不写 durable 状态、不分配 store id、不消费
-   * upload；草稿尚未落库时 {@code threadId} 可以是本次内存 UUID。
-   *
-   * @param threadId candidate 路径所属 Thread
-   * @param sourcePath 草稿起点 Entry 的 root-to-head 路径
-   * @param nextCommandSequence batch 第一条命令使用的 sequence
-   * @param commands 命令 batch，顺序即产品顺序
-   * @param now 规划时间
-   * @param childThread 是否为非执行根线程
-   * @param rootEnvironmentName 执行根当前环境，子线程规划时使用
-   */
-  public EntryPath previewInputCandidatePath(
-      UUID threadId,
-      EntryPath sourcePath,
-      long nextCommandSequence,
-      List<NewThreadCommand> commands,
-      Instant now,
-      boolean childThread,
-      String rootEnvironmentName) {
-    return TurnPlanPreview.inputCandidatePath(
-        threadId, sourcePath, nextCommandSequence, commands, now, childThread, rootEnvironmentName);
   }
 
   /**

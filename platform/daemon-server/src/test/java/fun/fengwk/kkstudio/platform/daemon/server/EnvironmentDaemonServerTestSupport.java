@@ -923,11 +923,6 @@ final class EnvironmentDaemonServerTestSupport {
     }
 
     @Override
-    public boolean isOpen() {
-      return open && !closed;
-    }
-
-    @Override
     public DaemonOfferResult offer(Envelope envelope) {
       if (holdNextOffer) {
         holdNextOffer = false;
@@ -941,7 +936,7 @@ final class EnvironmentDaemonServerTestSupport {
           throw new IllegalStateException("offer hold interrupted", error);
         }
       }
-      if (!isOpen()) {
+      if (!open || closed) {
         return DaemonOfferResult.CLOSED;
       }
       ControlProtocolCodec.encodeFrame(envelope);

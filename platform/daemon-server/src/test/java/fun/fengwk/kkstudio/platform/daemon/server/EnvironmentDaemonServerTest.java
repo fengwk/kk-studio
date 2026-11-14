@@ -385,7 +385,6 @@ class EnvironmentDaemonServerTest {
     assertEquals(1, failures.get(), "异常必须传播到测试可观察点而不是被吞掉");
     assertEquals(1, second.errorCount);
     assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, second.error);
-    assertTrue(takeover.isOpen());
 
     // drain 所有权已释放：接管后的新调用仍能正常收敛终态。
     UUID next = UUID.randomUUID();
@@ -443,7 +442,6 @@ class EnvironmentDaemonServerTest {
     assertEquals(
         List.of("partial:chunk-1", "error:EnvironmentCapabilitySendUncertainException"),
         listener.events());
-    assertTrue(second.isOpen());
   }
 
   /**
@@ -507,7 +505,6 @@ class EnvironmentDaemonServerTest {
                 ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()));
 
     assertFalse(channel.closed());
-    assertTrue(channel.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
     // 只有 SETTINGS：被拒绝的 INVOKE 没有产生任何 wire 帧。
     assertEquals(List.of(MessageType.SETTINGS), channel.messageTypes());
@@ -1766,7 +1763,6 @@ class EnvironmentDaemonServerTest {
     assertNull(listener.error);
     assertEquals(List.of(MessageType.SETTINGS, MessageType.RECOVER), second.messageTypes());
     assertEquals(0, second.countOf(MessageType.INVOKE), "旧代际在途调用只经 RECOVER 取回");
-    assertTrue(second.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
@@ -1790,7 +1786,6 @@ class EnvironmentDaemonServerTest {
     int secondEnvelopes = second.envelopes().size();
     fixture.receive(first, heartbeatEnvelope());
     assertEquals(secondEnvelopes, second.envelopes().size());
-    assertTrue(second.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
   }
 
@@ -1860,7 +1855,6 @@ class EnvironmentDaemonServerTest {
     fixture.server.resyncEnvironmentConfigs();
     fixture.receive(channel, heartbeatEnvelope());
     assertEquals(2, channel.countOf(MessageType.ENVIRONMENT_CONFIG), "同版本不重复下发");
-    assertTrue(channel.isOpen());
   }
 
   /** 源查询失败保留连接和当前快照；下一心跳恢复后追平权威版本，不扩展重试框架。 */
@@ -1875,7 +1869,6 @@ class EnvironmentDaemonServerTest {
         ENVIRONMENT_ID,
         EnvironmentDaemonServerTestSupport.Fixture.configSnapshot(ENVIRONMENT_ID, 2L));
     fixture.server.environmentChanged(ENVIRONMENT_ID);
-    assertTrue(channel.isOpen());
     assertEquals(before, channel.countOf(MessageType.ENVIRONMENT_CONFIG));
 
     fixture.configLookupFailure = null;
@@ -1933,7 +1926,6 @@ class EnvironmentDaemonServerTest {
 
     fixture.leaseStore.activeLeaseToken = false;
     FakeControlChannel reconnected = fixture.connectReady("config-reconnected");
-    assertTrue(reconnected.isOpen());
     assertEquals(4L, reconnected.lastEnvelope().getEnvironmentConfig().getVersion());
   }
 
@@ -1951,7 +1943,6 @@ class EnvironmentDaemonServerTest {
 
     fixture.server.environmentChanged(ENVIRONMENT_ID);
     assertTrue(failed.closed());
-    assertTrue(healthy.isOpen());
     assertEquals(0L, healthy.lastEnvelope().getEnvironmentConfig().getVersion());
   }
 
@@ -2154,7 +2145,6 @@ class EnvironmentDaemonServerTest {
     DaemonAdmission admission =
         fixture.server.admit(new DaemonHandshake(ENVIRONMENT_ID, TOKEN, OTHER_INSTANCE_ID));
     assertInstanceOf(DaemonAdmission.RetryLater.class, admission);
-    assertTrue(first.isOpen());
 
     // 旧持有者必须仍然可服务调用。
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
@@ -2167,7 +2157,6 @@ class EnvironmentDaemonServerTest {
     Fixture fixture = new Fixture();
     fixture.connectReady("channel-stale-holder");
     FakeControlChannel takeover = fixture.reconnectReady("channel-takeover");
-    assertTrue(takeover.isOpen());
     assertEquals(List.of(MessageType.SETTINGS), takeover.messageTypes());
   }
 
@@ -2226,7 +2215,6 @@ class EnvironmentDaemonServerTest {
     heartbeatFirst.receive(
         heartbeatChannel, heartbeatEnvelope(1L, new DaemonRuntimeStatus(DAEMON_VERSION, null)));
 
-    assertTrue(heartbeatChannel.isOpen());
     assertEquals(1, heartbeatFirst.leaseStore.heartbeatCount);
     assertTrue(heartbeatFirst.heartbeatNotifications.isEmpty());
     assertEquals(1L, heartbeatFirst.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().revision());
@@ -3519,11 +3507,9 @@ class EnvironmentDaemonServerTest {
 
     // 同 revision 完全相同内容重复到达不改变状态。
     fixture.receive(channel, runtimeStatusEnvelope(2L, DAEMON_VERSION, "1.0.10", 10L));
-    assertTrue(channel.isOpen());
 
     // 更低 revision 是迟到快照，忽略而不关闭连接。
     fixture.receive(channel, runtimeStatusEnvelope(1L, DAEMON_VERSION, "1.0.8", 1L));
-    assertTrue(channel.isOpen());
     assertEquals(
         new DaemonUpdateProgress("1.0.10", 10L, null),
         fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().status().update());
@@ -4045,7 +4031,6 @@ class EnvironmentDaemonServerTest {
 
     FakeControlChannel replacement =
         fixture.connectReady("channel-takeover-listener-new", OTHER_INSTANCE_ID);
-    assertTrue(replacement.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
   }
 

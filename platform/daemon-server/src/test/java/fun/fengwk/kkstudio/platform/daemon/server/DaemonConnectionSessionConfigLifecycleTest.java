@@ -27,7 +27,6 @@ class DaemonConnectionSessionConfigLifecycleTest {
     Fixture fixture = new Fixture();
     fixture.configLookupFailure = new IllegalStateException("config source unavailable");
     FakeControlChannel channel = fixture.openSession("initial-config-lookup-failure");
-    assertTrue(channel.isOpen());
     assertEquals(List.of(MessageType.SETTINGS), channel.allMessageTypes());
 
     fixture.configLookupFailure = null;
@@ -35,7 +34,6 @@ class DaemonConnectionSessionConfigLifecycleTest {
         ENVIRONMENT_ID,
         EnvironmentDaemonServerTestSupport.Fixture.configSnapshot(ENVIRONMENT_ID, 2L));
     fixture.receive(channel, heartbeatEnvelope());
-    assertTrue(channel.isOpen());
     assertEquals(1, channel.countOf(MessageType.ENVIRONMENT_CONFIG));
     assertEquals(2L, channel.lastEnvelope().getEnvironmentConfig().getVersion());
   }
@@ -46,7 +44,6 @@ class DaemonConnectionSessionConfigLifecycleTest {
     FakeControlChannel channel = fixture.openSession("ready-config-lookup-failure");
     fixture.configLookupFailure = new IllegalStateException("config source unavailable");
     fixture.receiveReady(channel);
-    assertTrue(channel.isOpen());
     assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
 
     fixture.configLookupFailure = null;
@@ -54,7 +51,6 @@ class DaemonConnectionSessionConfigLifecycleTest {
         ENVIRONMENT_ID,
         EnvironmentDaemonServerTestSupport.Fixture.configSnapshot(ENVIRONMENT_ID, 4L));
     fixture.receive(channel, heartbeatEnvelope());
-    assertTrue(channel.isOpen());
     assertEquals(2, channel.countOf(MessageType.ENVIRONMENT_CONFIG));
     assertEquals(4L, channel.lastEnvelope().getEnvironmentConfig().getVersion());
   }
@@ -89,13 +85,11 @@ class DaemonConnectionSessionConfigLifecycleTest {
     FakeControlChannel channel = fixture.openSession("connecting-runtime-revision");
     fixture.receive(
         channel, runtimeStatusEnvelope(2L, new DaemonRuntimeStatus(DAEMON_VERSION, null)));
-    assertTrue(channel.isOpen());
     assertEquals(2L, fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().revision());
 
     // 迟到的低 revision 不能被接受覆盖当前快照。
     fixture.receive(
         channel, runtimeStatusEnvelope(1L, new DaemonRuntimeStatus(DAEMON_VERSION, null)));
-    assertTrue(channel.isOpen());
     assertEquals(2L, fixture.server.runtimeStatus(ENVIRONMENT_ID).orElseThrow().revision());
 
     // 同 revision 但配置状态不同，说明内容在未推进 revision 时发生变化，必须拒绝。

@@ -103,7 +103,6 @@ class EnvironmentDaemonServerIdeTest {
     assertThrows(
         ControlProtocolException.class, () -> fixture.server.requestIde(ENVIRONMENT_ID, invalid));
 
-    assertTrue(channel.isOpen());
     assertFalse(channel.closed());
     assertEquals(0, fixture.server.activeIdeCount());
   }

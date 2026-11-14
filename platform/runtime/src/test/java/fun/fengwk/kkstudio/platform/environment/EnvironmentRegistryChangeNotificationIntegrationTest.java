@@ -221,7 +221,6 @@ class EnvironmentRegistryChangeNotificationIntegrationTest
                   new DaemonHandshake(DEV, DEV_TOKEN, UUID.randomUUID().toString())));
       listener.assertNotification(DEV.toString());
       DaemonControlChannel channel = mock(DaemonControlChannel.class);
-      when(channel.isOpen()).thenReturn(true);
       when(channel.offer(any())).thenReturn(DaemonOfferResult.ACCEPTED);
       DaemonSession session = daemonServer.open(admission, channel, null);
       RuntimeBody running = RuntimeBody.newBuilder().setDaemonVersion("1.0.9").build();
