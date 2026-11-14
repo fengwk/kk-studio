@@ -26,6 +26,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Predicate;
 
 /** Entry 聚合的 PostgreSQL 实现。 */
 final class PostgresqlEntryStore implements EntryStore {
@@ -112,12 +113,6 @@ final class PostgresqlEntryStore implements EntryStore {
 
   /**
    * 冷 current 的定位递归：只携带 id、parent、类型和停止所需的 payload 字段，不读取 payload 正文。
-   *
-   * <p>head、非控制锚点、open 或已关闭 Turn 引用、以及最近真实 settings 齐备后立即停止。COMPACTION 是回合而不是控制 Entry，其 settings
-   * 不参与锚点。结果不回填完整路径缓存。
-   */
-  /**
-   * 单语句冷 current 读取：递归只携带定位 id 与 depth，head 也由递归步统一处理。
    *
    * <p>head、非控制锚点、open 或已关闭 Turn 引用、以及最近真实 settings 齐备后立即停止。COMPACTION 是回合而不是控制 Entry，其 settings
    * 不参与真实模型。最终 join 只返回 head 与锚点行的完整列，按 depth 升序（head 在前），结果不回填完整路径缓存。
@@ -395,43 +390,53 @@ final class PostgresqlEntryStore implements EntryStore {
     if (cached != null) {
       return EntryCurrentState.from(cached);
     }
-    List<Entry> entries = tx.queryList(LOAD_CURRENT, PostgresqlHarnessRows.ENTRY, headEntryId);
-    if (entries.isEmpty()) {
+    return loadUncachedCurrent(headEntryId);
+  }
+
+  /** 冷缓存分类：锚点行由递归定位，这里只按行首 head 与三个首命中锚点还原当前状态。 */
+  private EntryCurrentState loadUncachedCurrent(UUID headEntryId) {
+    List<Entry> rows = tx.queryList(LOAD_CURRENT, PostgresqlHarnessRows.ENTRY, headEntryId);
+    if (rows.isEmpty()) {
       throw new IllegalArgumentException("entry " + headEntryId + " does not exist");
     }
-    Entry head = entries.get(0);
-    Entry nonControl = null;
-    Entry turnAnchor = null;
-    Entry settingsAnchor = null;
-    UUID neededRef = null;
-    for (Entry entry : entries) {
-      if (nonControl == null && !isControl(entry)) {
-        nonControl = entry;
-        if (entry.payload() instanceof TurnEndPayload end) {
-          neededRef = end.turnStartEntryId();
-        }
-      }
-      if (turnAnchor == null
-          && (entry.payload() instanceof TurnStartPayload
-              || entry.payload() instanceof TurnEndPayload)) {
-        turnAnchor = entry;
-      }
-      if (settingsAnchor == null && settingsOf(entry) != null) {
-        settingsAnchor = entry;
-      }
-    }
-    Entry referenced = null;
-    if (neededRef != null) {
-      for (Entry entry : entries) {
-        if (entry.id().equals(neededRef) && entry.payload() instanceof TurnStartPayload) {
-          referenced = entry;
-          break;
-        }
-      }
-    }
+    Entry nonControl = firstMatching(rows, entry -> !isControl(entry));
+    Entry turnAnchor =
+        firstMatching(
+            rows,
+            entry ->
+                entry.payload() instanceof TurnStartPayload
+                    || entry.payload() instanceof TurnEndPayload);
+    Entry settingsAnchor = firstMatching(rows, entry -> settingsOf(entry) != null);
+    Entry referenced = referencedTurnStart(rows, nonControl);
     Entry open =
         turnAnchor != null && turnAnchor.payload() instanceof TurnStartPayload ? turnAnchor : null;
-    return new EntryCurrentState(head, nonControl, open, referenced, settingsOf(settingsAnchor));
+    return new EntryCurrentState(
+        head(rows), nonControl, open, referenced, settingsOf(settingsAnchor));
+  }
+
+  /** 非控制锚点为闭合该 Turn 的 TURN_END 时，它引用的 TURN_START 也是分类输入：只在同批锚点行中查找，绝不额外查询。 */
+  private static Entry referencedTurnStart(List<Entry> rows, Entry nonControl) {
+    if (!(nonControl != null && nonControl.payload() instanceof TurnEndPayload end)) {
+      return null;
+    }
+    UUID turnStartEntryId = end.turnStartEntryId();
+    return firstMatching(
+        rows,
+        entry ->
+            entry.id().equals(turnStartEntryId) && entry.payload() instanceof TurnStartPayload);
+  }
+
+  private static Entry head(List<Entry> rows) {
+    return rows.get(0);
+  }
+
+  private static Entry firstMatching(List<Entry> rows, Predicate<Entry> condition) {
+    for (Entry entry : rows) {
+      if (condition.test(entry)) {
+        return entry;
+      }
+    }
+    return null;
   }
 
   /**

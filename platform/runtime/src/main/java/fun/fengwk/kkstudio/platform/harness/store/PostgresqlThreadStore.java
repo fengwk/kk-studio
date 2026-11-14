@@ -261,35 +261,72 @@ final class PostgresqlThreadStore implements ThreadStore {
   }
 
   // ---------- 应用侧深删除原语 ----------
+
+  /**
+   * 深删除一组 Thread：先按 UUID 顺序锁定依赖事实，再物理删除依赖行与 Thread 行，最后按执行根发布失效。
+   *
+   * <p>锁阶梯与删除顺序都是协议的一部分：调用方必须已持有目标 Thread 锁与所在执行树的树锁。
+   */
   @Override
   public int delete(List<UUID> threadIds, DriverThreadDeletion driverDeletion) {
     tx.checkOpen();
     Objects.requireNonNull(threadIds, "threadIds");
-    List<UUID> copied = List.copyOf(threadIds).stream().sorted(UuidOrder.COMPARATOR).toList();
-    for (int i = 1; i < copied.size(); i++) {
-      if (copied.get(i).equals(copied.get(i - 1))) {
-        throw new IllegalArgumentException(
-            "duplicate thread id " + copied.get(i) + " must not be deleted twice");
-      }
+    List<UUID> targets = requireDeletableThreads(threadIds);
+    if (targets.isEmpty()) {
+      return 0;
     }
-    for (UUID threadId : copied) {
+    lockCommands(targets);
+    List<WorkTarget> driverTargets = lockDriverFacts(targets, driverDeletion);
+    List<ToolInvocation> lockedTools = lockTools(targets);
+    List<WorkTarget> lockedWorkTargets = lockWorkTargets(targets, driverTargets, lockedTools);
+    // 删除前读取受影响执行根：行一旦删除就无法再解析根身份。
+    Set<UUID> executionRoots = executionRoots(targets);
+    deleteDependentRows(targets, lockedWorkTargets, lockedTools, driverDeletion, driverTargets);
+    deleteThreadRows(targets);
+    executionRoots.forEach(tx::notifyExecutionTree);
+    return targets.size();
+  }
+
+  /** 校验并返回按 UUID 升序的删除目标：去重、树锁、存在性、Join 引用与存活子 Thread 都在锁定依赖事实前拒绝。 */
+  private List<UUID> requireDeletableThreads(List<UUID> threadIds) {
+    List<UUID> targets = List.copyOf(threadIds).stream().sorted(UuidOrder.COMPARATOR).toList();
+    requireNoDuplicateTargets(targets);
+    for (UUID threadId : targets) {
       tx.requireLocked(LockKey.thread(threadId));
       if (!tx.isInLockedTree(threadId)) {
         throw new IllegalStateException("thread " + threadId + " is not in a locked tree");
       }
     }
-    if (copied.isEmpty()) {
-      return 0;
+    if (targets.isEmpty()) {
+      return targets;
     }
+    requireThreadsExist(targets);
+    requireNoJoinReferences(targets);
+    requireNoSurvivingChildren(targets);
+    return targets;
+  }
 
-    for (UUID threadId : copied) {
+  private static void requireNoDuplicateTargets(List<UUID> targets) {
+    for (int i = 1; i < targets.size(); i++) {
+      if (targets.get(i).equals(targets.get(i - 1))) {
+        throw new IllegalArgumentException(
+            "duplicate thread id " + targets.get(i) + " must not be deleted twice");
+      }
+    }
+  }
+
+  private void requireThreadsExist(List<UUID> targets) {
+    for (UUID threadId : targets) {
       tx.threads()
           .find(threadId)
           .orElseThrow(
               () -> new IllegalArgumentException("thread " + threadId + " does not exist"));
     }
+  }
 
-    for (UUID threadId : copied) {
+  /** 仍被 Join 引用的 Thread 不能删除：Join 事实只随子 Thread 的深删除一起消失。 */
+  private void requireNoJoinReferences(List<UUID> targets) {
+    for (UUID threadId : targets) {
       List<UUID> referencingJoinIds =
           tx.queryList(
               """
@@ -306,9 +343,12 @@ final class PostgresqlThreadStore implements ThreadStore {
             "cannot delete thread referenced by join " + referencingJoinIds.get(0));
       }
     }
+  }
 
-    Set<UUID> threadIdSet = Set.copyOf(copied);
-    for (UUID threadId : copied) {
+  /** 父 Thread 只能与它全部子 Thread 同批删除。 */
+  private void requireNoSurvivingChildren(List<UUID> targets) {
+    Set<UUID> targetIds = Set.copyOf(targets);
+    for (UUID threadId : targets) {
       List<UUID> childIds =
           tx.queryList(
               """
@@ -319,7 +359,7 @@ final class PostgresqlThreadStore implements ThreadStore {
               (rs, rowNum) -> rs.getObject("id", UUID.class),
               threadId);
       for (UUID childId : childIds) {
-        if (!threadIdSet.contains(childId)) {
+        if (!targetIds.contains(childId)) {
           throw new IllegalArgumentException(
               "cannot delete parent thread "
                   + threadId
@@ -329,8 +369,11 @@ final class PostgresqlThreadStore implements ThreadStore {
         }
       }
     }
+  }
 
-    for (UUID threadId : copied) {
+  /** 逐 Thread 锁定全部命令行，使命令回写与深删除在同一锁阶梯内互斥。 */
+  private void lockCommands(List<UUID> targets) {
+    for (UUID threadId : targets) {
       List<ThreadCommand> commands =
           tx.queryList(
               """
@@ -346,12 +389,19 @@ final class PostgresqlThreadStore implements ThreadStore {
         tx.lockResource(LockKey.command(command.threadId(), command.sequence()));
       }
     }
+  }
 
+  /** Driver 私有事实的锁与它返回的 Work 目标由 Driver 自己定义，Harness 只按它给出的顺序处理。 */
+  private List<WorkTarget> lockDriverFacts(
+      List<UUID> targets, DriverThreadDeletion driverDeletion) {
     Objects.requireNonNull(driverDeletion, "driverDeletion");
-    List<WorkTarget> driverTargets = driverDeletion.lockForDeletion(tx, copied);
+    return driverDeletion.lockForDeletion(tx, targets);
+  }
 
+  /** 按稳定 Tool 锁序锁定全部 ToolInvocation；锁不到的调用已不存在，不再参与后续删除。 */
+  private List<ToolInvocation> lockTools(List<UUID> targets) {
     List<ToolInvocation> tools = new ArrayList<>();
-    for (UUID threadId : copied) {
+    for (UUID threadId : targets) {
       tools.addAll(
           tx.queryList(
               "select * from harness_tool_invocation where thread_id = ?",
@@ -363,9 +413,14 @@ final class PostgresqlThreadStore implements ThreadStore {
     for (ToolInvocation tool : tools) {
       tx.tools().lock(tool.id()).ifPresent(lockedTools::add);
     }
+    return lockedTools;
+  }
 
+  /** 按稳定 Work 锁序锁定受影响的 Work（Thread、Driver 与 Tool 目标）。 */
+  private List<WorkTarget> lockWorkTargets(
+      List<UUID> targets, List<WorkTarget> driverTargets, List<ToolInvocation> lockedTools) {
     List<WorkTarget> workTargets = new ArrayList<>();
-    for (UUID threadId : copied) {
+    for (UUID threadId : targets) {
       workTargets.add(new WorkTarget(WorkTargetType.THREAD, threadId));
     }
     workTargets.addAll(driverTargets);
@@ -379,50 +434,60 @@ final class PostgresqlThreadStore implements ThreadStore {
         lockedWorkTargets.add(target);
       }
     }
+    return lockedWorkTargets;
+  }
 
-    // 删除前读取受影响执行根：行一旦删除就无法再解析根身份。
-    // 同一执行根只发一次：先按根聚合，再在删除成功后按根定点失效。
-    Set<UUID> deletedThreadRoots = new LinkedHashSet<>();
-    for (UUID threadId : copied) {
-      deletedThreadRoots.add(tx.executionRootOfThread(threadId));
+  /** 同一执行根只发一次失效：先按根聚合，再在删除成功后按根定点通知。 */
+  private Set<UUID> executionRoots(List<UUID> targets) {
+    Set<UUID> executionRoots = new LinkedHashSet<>();
+    for (UUID threadId : targets) {
+      executionRoots.add(tx.executionRootOfThread(threadId));
     }
+    return executionRoots;
+  }
 
+  /** 先删依赖事实再删 Thread：Work、命令、停止回执、Tool、Driver 事实与执行退出都不能留下孤儿行。 */
+  private void deleteDependentRows(
+      List<UUID> targets,
+      List<WorkTarget> lockedWorkTargets,
+      List<ToolInvocation> lockedTools,
+      DriverThreadDeletion driverDeletion,
+      List<WorkTarget> driverTargets) {
     for (WorkTarget target : lockedWorkTargets) {
       tx.work().delete(target);
     }
-    for (UUID threadId : copied) {
+    for (UUID threadId : targets) {
       tx.updateJdbc("delete from harness_thread_command where thread_id = ?", threadId);
     }
     // Stop 回执只引用 Thread 与 Entry：与 Thread 同批物理删除，避免深删残留孤儿回执。
     tx.updateJdbc(
         "delete from harness_thread_stop_receipt where thread_id in ("
-            + PostgresqlHarnessTransaction.placeholders(copied.size())
+            + PostgresqlHarnessTransaction.placeholders(targets.size())
             + ")",
-        copied.toArray());
+        targets.toArray());
     if (!lockedTools.isEmpty()) {
       tx.tools().deleteByIds(lockedTools.stream().map(ToolInvocation::id).toList());
     }
-    driverDeletion.deleteLocked(tx, copied, driverTargets);
+    driverDeletion.deleteLocked(tx, targets, driverTargets);
     // 自引用 parent FK 为 NO ACTION（语句级校验）：同一条 DELETE 可同时包含父与子执行事实。
     // 删除只是 Thread 深删，不是执行退出；先删 execution facts，再删 Thread。
     tx.updateJdbc(
         "delete from harness_execution_exit where thread_id in ("
-            + PostgresqlHarnessTransaction.placeholders(copied.size())
+            + PostgresqlHarnessTransaction.placeholders(targets.size())
             + ")",
-        copied.toArray());
+        targets.toArray());
+  }
+
+  private void deleteThreadRows(List<UUID> targets) {
     int deletedThreads =
         tx.updateJdbc(
             "delete from harness_thread where id in ("
-                + PostgresqlHarnessTransaction.placeholders(copied.size())
+                + PostgresqlHarnessTransaction.placeholders(targets.size())
                 + ")",
-            copied.toArray());
-    if (deletedThreads != copied.size()) {
+            targets.toArray());
+    if (deletedThreads != targets.size()) {
       throw new IllegalStateException(
-          "expected to delete " + copied.size() + " threads but deleted " + deletedThreads);
+          "expected to delete " + targets.size() + " threads but deleted " + deletedThreads);
     }
-    for (UUID root : deletedThreadRoots) {
-      tx.notifyExecutionTree(root);
-    }
-    return copied.size();
   }
 }
