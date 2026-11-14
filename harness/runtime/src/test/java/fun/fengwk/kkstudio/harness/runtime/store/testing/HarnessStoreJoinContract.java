@@ -979,79 +979,8 @@ public abstract class HarnessStoreJoinContract {
   }
 
   @Test
-  void deleteJoinsByChildRemovesOnlyTargetChildJoins() {
-    // 测试意图：验证 deleteJoinsByChild 仅删除指定子线程的全部已完成交付 join，需要子线程锁，并返回删除行数。
-    UUID childId1 =
-        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
-    UUID childId2 =
-        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
-    insertCommand(childId1, 1L, TestIds.id(1));
-    insertCommand(childId1, 2L, TestIds.id(2));
-    insertCommand(childId2, 1L, TestIds.id(3));
-    insertCommand(baseline.threadId(), 1L, TestIds.id(11));
-    insertCommand(baseline.threadId(), 2L, TestIds.id(12));
-    insertCommand(baseline.threadId(), 3L, TestIds.id(13));
-
-    UUID id1 = TestIds.id(401);
-    UUID id2 = TestIds.id(402);
-    UUID id3 = TestIds.id(403);
-
-    inTransaction(
-        store,
-        tx -> {
-          tx.threads().lock(childId1);
-          ThreadJoin j1 = initialJoin(id1, baseline.threadId(), childId1, 1L);
-          ThreadJoin j2 = initialJoin(id2, baseline.threadId(), childId1, 2L);
-          tx.joins().insert(j1);
-          tx.joins().insert(j2);
-          tx.joins().update(j1.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
-          tx.joins().update(j2.match(baseline.rootEntryId(), null, T1).delivered(2L, T2));
-
-          tx.threads().lock(childId2);
-          ThreadJoin j3 = initialJoin(id3, baseline.threadId(), childId2, 1L);
-          tx.joins().insert(j3);
-          tx.joins().update(j3.match(baseline.rootEntryId(), null, T1).delivered(3L, T2));
-        });
-
-    // 未锁定 childId1 时调用 deleteJoinsByChild 抛异常
-    assertThrows(
-        IllegalStateException.class,
-        () -> inTransaction(store, tx -> tx.joins().deleteByChild(childId1)));
-
-    // 仅锁定 Thread 但未持有 Tree 锁时调用 deleteJoinsByChild 抛异常
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.threads().lock(childId1);
-                  tx.joins().deleteByChild(childId1);
-                }));
-
-    // 持有 Tree 锁及 Thread 锁后删除 childId1 的 join
-    int deleted =
-        store.transaction(
-            tx -> {
-              tx.threads().lockTree(baseline.threadId());
-              tx.threads().lock(childId1);
-              return tx.joins().deleteByChild(childId1);
-            });
-    assertEquals(2, deleted);
-
-    // childId1 的 join 已被删除，childId2 的 join 依然存在
-    store.transaction(
-        tx -> {
-          assertTrue(tx.joins().find(id1).isEmpty());
-          assertTrue(tx.joins().find(id2).isEmpty());
-          assertTrue(tx.joins().find(id3).isPresent());
-          return null;
-        });
-  }
-
-  @Test
   void deleteThreadsRejectsDeletionWhenReferencedByJoins() {
-    // 测试意图：验证 deleteThreads 在线程存在关联 join 时拒绝删除，显式调用 deleteJoinsByChild 后方可 GC 线程。
+    // 测试意图：验证 deleteThreads 在线程存在关联 join 时拒绝删除，显式清理 join 后方可 GC 线程。
     UUID childId =
         createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
     insertCommand(childId, 1L, TestIds.id(1));
@@ -1098,7 +1027,7 @@ public abstract class HarnessStoreJoinContract {
           tx.joins().update(join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
         });
 
-    // 交付后但尚未调用 deleteJoinsByChild 时，deleteThreads 仍应被拒绝
+    // 交付后但尚未清理 Join 时，deleteThreads 仍应被拒绝
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -1116,137 +1045,12 @@ public abstract class HarnessStoreJoinContract {
         tx -> {
           tx.threads().lockTree(baseline.threadId());
           tx.threads().lock(childId);
-          tx.joins().deleteByChild(childId);
+          tx.joins().deleteForThreads(List.of(childId));
           tx.threads().delete(List.of(childId), NONE);
         });
 
     assertTrue(store.transaction(tx -> tx.threads().find(childId)).isEmpty());
     assertTrue(store.transaction(tx -> tx.threads().find(baseline.threadId())).isPresent());
-  }
-
-  @Test
-  void deleteJoinsByChildRejectsUnmatchedJoin() {
-    // 测试意图：验证 deleteJoinsByChild 在子线程存在未匹配 Join 时拒绝删除并抛出 IllegalArgumentException。
-    UUID childId =
-        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
-    insertCommand(childId, 1L, TestIds.id(1));
-    UUID invocationId = TestIds.id(502);
-
-    inTransaction(
-        store,
-        tx -> {
-          tx.threads().lock(childId);
-          tx.joins().insert(initialJoin(invocationId, baseline.threadId(), childId, 1L));
-        });
-
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.threads().lockTree(baseline.threadId());
-                  tx.threads().lock(childId);
-                  tx.joins().deleteByChild(childId);
-                }));
-
-    assertTrue(store.transaction(tx -> tx.joins().find(invocationId)).isPresent());
-  }
-
-  @Test
-  void deleteJoinsByChildRejectsUnmatchedJoinUntilDelivered() {
-    // 未匹配 Join 仍承担向存活父线程交付的义务；原子冻结并交付后方可删除。
-    UUID childId =
-        createChildThread(baseline.threadId(), baseline.sessionId(), baseline.rootEntryId());
-    insertCommand(childId, 1L, TestIds.id(1));
-    insertCommand(baseline.threadId(), 1L, TestIds.id(2));
-    UUID invocationId = TestIds.id(503);
-
-    inTransaction(
-        store,
-        tx -> {
-          tx.threads().lock(childId);
-          tx.joins().insert(initialJoin(invocationId, baseline.threadId(), childId, 1L));
-        });
-
-    // 未匹配时删除失败
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.threads().lockTree(baseline.threadId());
-                  tx.threads().lock(childId);
-                  tx.joins().deleteByChild(childId);
-                }));
-
-    // 推进为交付
-    inTransaction(
-        store,
-        tx -> {
-          tx.threads().lock(childId);
-          ThreadJoin join = tx.joins().find(invocationId).orElseThrow();
-          tx.joins().update(join.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
-        });
-
-    // 交付后成功删除
-    int deleted =
-        store.transaction(
-            tx -> {
-              tx.threads().lockTree(baseline.threadId());
-              tx.threads().lock(childId);
-              return tx.joins().deleteByChild(childId);
-            });
-    assertEquals(1, deleted);
-    assertTrue(store.transaction(tx -> tx.joins().find(invocationId)).isEmpty());
-  }
-
-  @Test
-  void deleteJoinsByChildSucceedsForMatchedRootTicket() {
-    // 测试意图：验证根 completion ticket（parentThreadId 为 null）在未匹配时拒绝删除，已匹配后允许显式清理。
-    UUID rootId = baseline.threadId();
-    insertCommand(rootId, 1L, TestIds.id(1));
-    UUID ticketId = TestIds.id(504);
-
-    inTransaction(
-        store,
-        tx -> {
-          tx.threads().lock(rootId);
-          tx.joins().insert(initialJoin(ticketId, null, rootId, 1L));
-        });
-
-    // 未匹配时删除根 ticket 抛出异常
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.threads().lockTree(rootId);
-                  tx.threads().lock(rootId);
-                  tx.joins().deleteByChild(rootId);
-                }));
-
-    // 匹配根 ticket
-    inTransaction(
-        store,
-        tx -> {
-          tx.threads().lock(rootId);
-          ThreadJoin join = tx.joins().find(ticketId).orElseThrow();
-          tx.joins().update(join.match(baseline.rootEntryId(), null, T1));
-        });
-
-    // 匹配后成功显式清理
-    int deleted =
-        store.transaction(
-            tx -> {
-              tx.threads().lockTree(rootId);
-              tx.threads().lock(rootId);
-              return tx.joins().deleteByChild(rootId);
-            });
-    assertEquals(1, deleted);
-    assertTrue(store.transaction(tx -> tx.joins().find(ticketId)).isEmpty());
   }
 
   @Test
@@ -2049,8 +1853,7 @@ public abstract class HarnessStoreJoinContract {
             tx.threads().lock(threadId);
           }
 
-          assertEquals(1, tx.joins().deleteByChild(childA1));
-          assertEquals(1, tx.joins().deleteByChild(childA2));
+          assertEquals(2, tx.joins().deleteForThreads(List.of(childA1, childA2)));
 
           // 删除子线程
           assertEquals(2, tx.threads().delete(List.of(childA1, childA2), NONE));
@@ -2610,61 +2413,6 @@ public abstract class HarnessStoreJoinContract {
     assertThrows(
         NullPointerException.class,
         () -> inTransaction(store, tx -> tx.joins().countIncompleteChildren(null)));
-  }
-
-  @Test
-  void deleteJoinsByChildRequiresHeldTreeLockOnSameRoot() {
-    // 测试意图：验证 deleteJoinsByChild 必须在当前事务已获取目标线程所属 execution tree 的 tree lock 下执行；
-    // 未加 tree lock 或持有其他不同 tree 的 lock 时均抛出 IllegalStateException。
-    UUID rootA = baseline.threadId();
-    UUID childA = createChildThread(rootA, baseline.sessionId(), baseline.rootEntryId());
-    insertCommand(childA, 1L, TestIds.id(1));
-    insertCommand(rootA, 1L, TestIds.id(2));
-    UUID joinA = TestIds.id(701);
-    inTransaction(
-        store,
-        tx -> {
-          tx.threads().lock(childA);
-          ThreadJoin j = initialJoin(joinA, rootA, childA, 1L);
-          tx.joins().insert(j);
-          tx.joins().update(j.match(baseline.rootEntryId(), null, T1).delivered(1L, T2));
-        });
-
-    Baseline baselineB = seedThreadBaseline(store);
-    UUID rootB = baselineB.threadId();
-
-    // 1. 无 tree lock：抛出 IllegalStateException
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.threads().lock(childA);
-                  tx.joins().deleteByChild(childA);
-                }));
-
-    // 2. 持有错误 tree 的 lock（rootB 而非 rootA）：抛出 IllegalStateException
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.threads().lockTree(rootB);
-                  tx.threads().lock(childA);
-                  tx.joins().deleteByChild(childA);
-                }));
-
-    // 3. 正确持有 rootA 的 tree lock：成功删除
-    int deleted =
-        store.transaction(
-            tx -> {
-              tx.threads().lockTree(rootA);
-              tx.threads().lock(childA);
-              return tx.joins().deleteByChild(childA);
-            });
-    assertEquals(1, deleted);
   }
 
   @Test

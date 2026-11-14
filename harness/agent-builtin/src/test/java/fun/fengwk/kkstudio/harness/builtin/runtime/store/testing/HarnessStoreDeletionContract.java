@@ -190,16 +190,6 @@ public abstract class HarnessStoreDeletionContract {
                   tx.threads().lock(childId);
                   tx.joins().deleteForThreads(List.of(childId));
                 }));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            inTransaction(
-                store,
-                tx -> {
-                  tx.threads().lockTree(parentId);
-                  tx.threads().lock(childId);
-                  tx.joins().deleteByChild(childId);
-                }));
     assertTrue(store.transaction(tx -> tx.joins().find(joinId)).isPresent());
 
     // 父子两端同批删除时 pending join 可一并删除

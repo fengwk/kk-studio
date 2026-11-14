@@ -392,11 +392,6 @@ final class DispatcherTestSupport {
     }
 
     @Override
-    public void assertNoAmbientTransaction() {
-      delegate.assertNoAmbientTransaction();
-    }
-
-    @Override
     public <T> T transaction(Function<HarnessStore.Transaction, T> callback) {
       if (armed.get() && Thread.currentThread() != armingThread) {
         entered.countDown();

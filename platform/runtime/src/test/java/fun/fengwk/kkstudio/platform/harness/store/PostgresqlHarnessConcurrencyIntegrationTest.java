@@ -124,11 +124,6 @@ class PostgresqlHarnessConcurrencyIntegrationTest {
     }
 
     @Override
-    public void assertNoAmbientTransaction() {
-      delegate.assertNoAmbientTransaction();
-    }
-
-    @Override
     public <T> T transaction(Function<Transaction, T> callback) {
       return delegate.transaction(
           tx ->

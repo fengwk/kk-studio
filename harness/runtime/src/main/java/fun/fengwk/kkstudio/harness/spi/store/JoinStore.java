@@ -37,9 +37,6 @@ public interface JoinStore {
   /** 更新 Join；只允许首次冻结、单调提醒、首次交付与首次 supersede。 */
   void update(ThreadJoin join);
 
-  /** 删除子 Thread 的全部 Join 并返回行数；要求子 Thread 已锁定。 */
-  int deleteByChild(UUID childThreadId);
-
   /** 整体删除一批 Thread 涉及的 Join 并返回行数。 */
   int deleteForThreads(List<UUID> threadIds);
 }

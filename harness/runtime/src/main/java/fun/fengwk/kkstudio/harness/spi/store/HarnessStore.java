@@ -57,13 +57,6 @@ public interface HarnessStore {
    */
   void afterCommit(Runnable action);
 
-  /**
-   * 断言当前调用不处于任何环境事务中。
-   *
-   * <p>供要求独立物理事务边界、不能加入调用方环境事务的入口在开始工作前调用。内存实现是 no-op；生产实现检测到真实环境事务时必须在 该工作执行前拒绝。无事务时立即返回。
-   */
-  void assertNoAmbientTransaction();
-
   /** 一次事务内的 typed persistence 句柄：只有事务时钟、id 分配与九个聚合视图。 */
   interface Transaction {
 

@@ -86,10 +86,4 @@ class InMemoryHarnessStoreAfterCommitTest {
     assertThrows(IllegalStateException.class, () -> store.afterCommit(() -> {}));
     assertThrows(NullPointerException.class, () -> store.afterCommit(null));
   }
-
-  /** 内存实现没有环境事务：手动压缩的事务外守卫始终放行。 */
-  @Test
-  void assertNoAmbientTransactionIsANoOpForTheInMemoryStore() {
-    new InMemoryBuiltinHarnessStore().assertNoAmbientTransaction();
-  }
 }

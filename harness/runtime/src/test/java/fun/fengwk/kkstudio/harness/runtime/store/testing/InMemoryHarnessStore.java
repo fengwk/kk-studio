@@ -200,10 +200,6 @@ public class InMemoryHarnessStore implements HarnessStore {
     pending.add(action);
   }
 
-  /** 内存实现没有环境事务；手动压缩的事务外入口在这里始终放行。 */
-  @Override
-  public void assertNoAmbientTransaction() {}
-
   /** 创建当前事务句柄的工厂；测试子类可返回扩展事务，与核心 Store 共用同一快照与锁语义。 */
   protected InMemoryHarnessTransaction createTransaction(InMemoryState state) {
     return new InMemoryHarnessTransaction(this, state);

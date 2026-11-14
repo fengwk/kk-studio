@@ -343,11 +343,6 @@ class ModelExecutionFailureConvergenceTest {
       public void afterCommit(Runnable action) {
         throw new UnsupportedOperationException("not a BuiltinStore");
       }
-
-      @Override
-      public void assertNoAmbientTransaction() {
-        throw new UnsupportedOperationException("not a BuiltinStore");
-      }
     };
   }
 

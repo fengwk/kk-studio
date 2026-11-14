@@ -383,21 +383,6 @@ class PostgresqlHarnessStoreTransactionTest {
     assertFalse(store.<Boolean>transaction(tx -> tx.sessions().find(id(1L)).isPresent()));
   }
 
-  /** 手动压缩等事务外入口的守卫：无环境事务时放行，真实 Spring 事务内必须在工作开始前拒绝。 */
-  @Test
-  void assertNoAmbientTransactionRejectsRealSpringTransactionsOnly() {
-    store.assertNoAmbientTransaction();
-    assertThrows(
-        IllegalStateException.class,
-        () ->
-            outerTemplate()
-                .execute(
-                    status -> {
-                      store.assertNoAmbientTransaction();
-                      return null;
-                    }));
-  }
-
   private static TransactionTemplate outerTemplate() {
     return new TransactionTemplate(
         new DataSourceTransactionManager(PostgresqlHarnessStoreFixture.dataSource()));

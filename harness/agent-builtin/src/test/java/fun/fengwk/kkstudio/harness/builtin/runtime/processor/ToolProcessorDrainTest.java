@@ -341,11 +341,6 @@ class ToolProcessorDrainTest {
           public void afterCommit(Runnable action) {
             fixture.store.afterCommit(action);
           }
-
-          @Override
-          public void assertNoAmbientTransaction() {
-            fixture.store.assertNoAmbientTransaction();
-          }
         };
 
     ToolProcessor processor =
