@@ -1,8 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQueryClient, type InfiniteData } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
-import { compareCatalogVersions } from '@/shared/lib/catalog-version'
-import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import { normalizeThreadName } from '@/features/thread/thread-name'
 import {
@@ -17,16 +15,13 @@ import {
   type RenameKind,
   type RenameTarget,
 } from '@/features/thread/runtime/root-thread/types'
-import type {
-  SessionSummaryPage,
-  SessionSummaryResolver,
-} from '@/features/thread/runtime/root-thread/usePaneHistory'
-import type {
-  HarnessSessionSummaryDTO,
-  HarnessThreadDTO,
-  HarnessThreadSnapshotDTO,
-  HarnessThreadSummaryDTO,
-} from '@/shared/api/generated/contracts'
+import type { SessionSummaryResolver } from '@/features/thread/runtime/root-thread/usePaneHistory'
+import {
+  invalidateAfterRename,
+  patchSessionNameCache,
+  patchThreadNameCache,
+} from '@/features/thread/runtime/root-thread/pane-rename-cache'
+import type { HarnessSessionSummaryDTO } from '@/shared/api/generated/contracts'
 
 interface PaneRenameOptions {
   ownerKey: string | null
@@ -263,15 +258,15 @@ export function usePaneRename(options: PaneRenameOptions) {
         if (renameTargetRef.current !== current) {
           return
         }
-        patchSessionNameCache(current.id, renamed.name)
+        patchSessionNameCache(queryClient, ownerKey, current.id, renamed.name)
       } else {
         const renamed = await harnessService.renameThread(current.id, { name: trimmed })
         if (renameTargetRef.current !== current) {
           return
         }
-        patchThreadNameCache(current.id, renamed)
+        patchThreadNameCache(queryClient, current.id, renamed)
       }
-      await invalidateAfterRename(current)
+      await invalidateAfterRename(queryClient, ownerKey, current)
       renamePendingRef.current = false
       closeRename()
     } catch (error) {
@@ -281,87 +276,6 @@ export function usePaneRename(options: PaneRenameOptions) {
       renamePendingRef.current = false
       setRenameError(errorMessage(error, t('ai.runtime.rename.failed')))
       setRenamePending(false)
-    }
-  }
-
-  /**
-   * 更新已加载缓存中的 Session 名称（owner session summaries 分页缓存）。保持简单：
-   * 直接 setQueryData 到已存在的 key，随后 invalidateAfterRename 做必要失效。
-   */
-  function patchSessionNameCache(sessionId: string, name: string): void {
-    if (!ownerKey) {
-      return
-    }
-    for (const [key, data] of queryClient.getQueriesData<InfiniteData<SessionSummaryPage>>({
-      queryKey: ['agent-pane', 'sessions', ownerKey],
-    })) {
-      if (data == null) {
-        continue
-      }
-      queryClient.setQueryData<InfiniteData<SessionSummaryPage>>(key, {
-        ...data,
-        pages: data.pages.map((page) => ({
-          ...page,
-          items: page.items.map((item) => (
-            item.sessionId === sessionId ? { ...item, name } : item
-          )),
-        })),
-      })
-    }
-  }
-
-  /** 重命名成功后失效相应查询：Session 摘要、Thread 投影与 Chat 列表。 */
-  async function invalidateAfterRename(renamed: RenameTarget): Promise<void> {
-    await Promise.all([
-      ...(ownerKey
-        ? [
-            queryClient.invalidateQueries({
-              queryKey: ['agent-pane', 'sessions', ownerKey],
-            }),
-          ]
-        : []),
-      ...(renamed.kind === 'thread'
-        ? [
-            queryClient.invalidateQueries({
-              queryKey: ['agent-pane', 'threads'],
-            }),
-            queryClient.invalidateQueries({
-              queryKey: queryKeys.threads.snapshot(renamed.id),
-            }),
-          ]
-        : []),
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
-    ])
-  }
-
-  /**
-   * 把 Thread 重命名成功响应 patch 进已加载的 snapshot/thread summary 缓存：
-   * snapshot cache 的 thread 本体直接采纳权威响应（含规范化的 name）；thread
-   * summary 只更新 name 字段。之后 invalidateAfterRename 会按需重新拉取权威数据。
-   */
-  function patchThreadNameCache(threadId: string, thread: HarnessThreadDTO): void {
-    const snapshotKey = queryKeys.threads.snapshot(threadId)
-    const snapshot = queryClient.getQueryData<HarnessThreadSnapshotDTO>(snapshotKey)
-    if (
-      snapshot != null
-      && snapshot.thread.threadId === threadId
-      && compareCatalogVersions(snapshot.version, thread.version) <= 0
-    ) {
-      queryClient.setQueryData<HarnessThreadSnapshotDTO>(
-        snapshotKey,
-        { ...snapshot, thread, version: thread.version, baseEntryId: null },
-      )
-    }
-    for (const [key, data] of queryClient.getQueriesData<HarnessThreadSummaryDTO[]>({
-      queryKey: ['agent-pane', 'threads'],
-    })) {
-      if (data == null) {
-        continue
-      }
-      queryClient.setQueryData<HarnessThreadSummaryDTO[]>(
-        key,
-        data.map((item) => item.threadId === threadId ? { ...item, name: thread.name } : item),
-      )
     }
   }
 
