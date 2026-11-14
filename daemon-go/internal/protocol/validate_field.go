@@ -18,6 +18,7 @@ var (
 	ideCodePattern    = regexp.MustCompile(`^[A-Z][A-Z0-9_]{0,63}$`)
 	proxyURLPattern   = regexp.MustCompile(`(?i)^http://(\[[^\]]+\]|[^/?#@\[\]:]+):([0-9]{1,5})$`)
 	serverIDPattern   = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+	fieldPathPattern  = regexp.MustCompile(`^[A-Za-z0-9_.\[\]-]+$`)
 )
 
 func invalid(s string) error   { return fmt.Errorf("%s", s) }

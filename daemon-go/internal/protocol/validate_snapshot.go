@@ -1,7 +1,6 @@
 package protocol
 
 import (
-	"regexp"
 	"strings"
 	"time"
 )
@@ -40,41 +39,60 @@ func validateSnapshot(s *RuntimeSnapshot, path string) error {
 		return err
 	}
 	if s.Status.Configuration != nil {
-		c := s.Status.Configuration
-		if c.AppliedVersion != nil && c.GetAppliedVersion() < 0 {
-			return invalid(path + ".status.configuration.appliedVersion must be non-negative")
-		}
-		if c.ProxyUrl != nil {
-			if c.AppliedVersion == nil {
-				return invalid(path + ".status.configuration.proxyUrl requires appliedVersion")
-			}
-			if !validProxyURL(*c.ProxyUrl) {
-				return invalid(path + ".status.configuration.proxyUrl has invalid syntax")
-			}
-		}
-		if c.Error != nil {
-			if c.Error.Version == nil || c.Error.GetVersion() < 0 {
-				return invalid(path + ".status.configuration.error.version is required")
-			}
-			if !ideCodePattern.MatchString(c.Error.Code) {
-				return invalid(path + ".status.configuration.error.code has invalid syntax")
-			}
-			if c.Error.Field != nil && (utf16Length(c.Error.GetField()) > 256 || !regexp.MustCompile(`^[A-Za-z0-9_.\[\]-]+$`).MatchString(c.Error.GetField())) {
-				return invalid(path + ".status.configuration.error.field has invalid syntax")
-			}
+		if err := validateConfigurationStatus(s.Status.Configuration, path+".status.configuration"); err != nil {
+			return err
 		}
 	}
 	if s.Status.Update != nil {
-		u := s.Status.Update
-		if err := daemonVersion(u.GetTargetVersion(), path+".status.update.targetVersion"); err != nil {
+		if err := validateUpdateProgress(s.Status.Update, path+".status.update"); err != nil {
 			return err
 		}
-		if u.DownloadedBytes == nil || u.GetDownloadedBytes() < 0 || u.GetDownloadedBytes() > maxSafeInteger {
-			return invalid(path + ".status.update.downloadedBytes must be a non-negative safe integer")
+	}
+	return nil
+}
+
+func validateConfigurationStatus(c *ConfigurationStatus, path string) error {
+	if c.AppliedVersion != nil && c.GetAppliedVersion() < 0 {
+		return invalid(path + ".appliedVersion must be non-negative")
+	}
+	if c.ProxyUrl != nil {
+		if c.AppliedVersion == nil {
+			return invalid(path + ".proxyUrl requires appliedVersion")
 		}
-		if u.TotalBytes != nil && u.GetTotalBytes() < u.GetDownloadedBytes() {
-			return invalid(path + ".status.update.totalBytes must be at least downloadedBytes")
+		if !validProxyURL(*c.ProxyUrl) {
+			return invalid(path + ".proxyUrl has invalid syntax")
 		}
+	}
+	if c.Error != nil {
+		if err := validateConfigurationError(c.Error, path+".error"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateConfigurationError(e *ConfigurationError, path string) error {
+	if e.Version == nil || e.GetVersion() < 0 {
+		return invalid(path + ".version is required")
+	}
+	if !ideCodePattern.MatchString(e.Code) {
+		return invalid(path + ".code has invalid syntax")
+	}
+	if e.Field != nil && (utf16Length(e.GetField()) > 256 || !fieldPathPattern.MatchString(e.GetField())) {
+		return invalid(path + ".field has invalid syntax")
+	}
+	return nil
+}
+
+func validateUpdateProgress(u *UpdateProgress, path string) error {
+	if err := daemonVersion(u.GetTargetVersion(), path+".targetVersion"); err != nil {
+		return err
+	}
+	if u.DownloadedBytes == nil || u.GetDownloadedBytes() < 0 || u.GetDownloadedBytes() > maxSafeInteger {
+		return invalid(path + ".downloadedBytes must be a non-negative safe integer")
+	}
+	if u.TotalBytes != nil && u.GetTotalBytes() < u.GetDownloadedBytes() {
+		return invalid(path + ".totalBytes must be at least downloadedBytes")
 	}
 	return nil
 }
