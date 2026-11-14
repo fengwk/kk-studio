@@ -42,6 +42,7 @@ import {
 } from '@/features/environment/ide/ide-contract'
 import { compareDecimal } from '@/features/environment/ide/ide-decimal'
 import { useIdeViewStore } from '@/features/environment/ide/useIdeViewStore'
+import { useIdeOperationQueue } from '@/features/environment/ide/useIdeOperationQueue'
 import {
   buildUsageViews,
   isBoundToConnection,
@@ -102,10 +103,6 @@ export function useIdeClaimReconciliation({
   const mountedRef = useRef(false)
   const pageSuspendedRef = useRef(false)
   const revisionRef = useRef(0n)
-  const bindingRef = useRef(false)
-  const operationConnectionRef = useRef<string | null>(null)
-  const operationGenerationRef = useRef(0)
-  const operationQueueRef = useRef<Array<() => Promise<void>>>([])
   const sessionRef = useRef(session)
   const lastSessionStatusRef = useRef(session.status)
   const lastActiveEnvironmentRef = useRef(activeEnvironmentId)
@@ -119,14 +116,9 @@ export function useIdeClaimReconciliation({
     restoreUsage: () => void
   } | null>(null)
 
-  const {
-    views,
-    viewsRef,
-    commitViews,
-    updateView,
-    startAttempt,
-    clearViews,
-  } = useIdeViewStore(mountedRef, initial)
+  const { views, viewsRef, commitViews, updateView, startAttempt, clearViews } =
+    useIdeViewStore(mountedRef, initial)
+  const { runExclusive, invalidateOperations } = useIdeOperationQueue(identityRef, mountedRef)
 
   identityRef.current = identity
   sessionRef.current = session
@@ -211,33 +203,6 @@ export function useIdeClaimReconciliation({
     void registerUsageNow(override).catch(() => {
       // 断线由 reject 明示；后续只由新的 connected 身份重新对账，不在这里重试。
     })
-  }
-
-  /** 当前连接内只允许一个在途绑定操作；旧连接的在途操作不阻塞新连接立即对账。 */
-  function runExclusive(task: () => Promise<void>): void {
-    const connectionId = identityRef.current?.connectionId ?? null
-    if (bindingRef.current && operationConnectionRef.current === connectionId) {
-      operationQueueRef.current.push(task)
-      return
-    }
-    const generation = operationGenerationRef.current + 1
-    operationGenerationRef.current = generation
-    bindingRef.current = true
-    operationConnectionRef.current = connectionId
-    void (async () => {
-      try {
-        await task()
-      } finally {
-        if (operationGenerationRef.current === generation) {
-          bindingRef.current = false
-          operationConnectionRef.current = null
-          const next = operationQueueRef.current.shift()
-          if (next != null && mountedRef.current) {
-            runExclusive(next)
-          }
-        }
-      }
-    })()
   }
 
   function setWaitingReady(
@@ -1328,10 +1293,7 @@ export function useIdeClaimReconciliation({
     revisionRef.current = 0n
     lastIdentityRef.current = null
     snapshotCacheRef.current.clear()
-    operationQueueRef.current = []
-    operationGenerationRef.current += 1
-    bindingRef.current = false
-    operationConnectionRef.current = null
+    invalidateOperations()
     pageSuspendedRef.current = false
   }
 
@@ -1368,10 +1330,7 @@ export function useIdeClaimReconciliation({
       return
     }
     // 连接变化使旧连接的在途绑定立即失效；新连接不得排在旧请求后面。
-    operationGenerationRef.current += 1
-    bindingRef.current = false
-    operationConnectionRef.current = null
-    operationQueueRef.current = []
+    invalidateOperations()
   }, [identity?.connectionId])
 
   useEffect(() => {
