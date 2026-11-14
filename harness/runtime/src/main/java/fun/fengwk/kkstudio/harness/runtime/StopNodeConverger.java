@@ -52,6 +52,9 @@ final class StopNodeConverger {
   /** terminal Driver generation 物化后的事实：推进后的 Thread 与可结算的终止边界。 */
   record Materialized(ThreadState thread, UUID terminalEntryId, UUID finalAnswerEntryId) {}
 
+  /** 收敛起点的事实与本次 Stop 全程沿用的 Driver（物化前按原 path 解析）。 */
+  private record MaterializedNode(NodeFacts facts, AgentDriver driver) {}
+
   /** 单个节点收敛结果：STOPPED Thread、其回执，以及提交后需取消的 process-local execution。 */
   record Converged(
       ThreadState thread,
@@ -78,7 +81,8 @@ final class StopNodeConverger {
       ThreadStopContext original,
       List<Materialized> committedTerminals,
       Instant now) {
-    NodeFacts facts = materializedFacts(tx, original, committedTerminals);
+    MaterializedNode materialized = materializedFacts(tx, original, committedTerminals);
+    NodeFacts facts = materialized.facts();
     List<ThreadCommand> cancelledCommands =
         cancelQueuedCommands(tx, original.queued(), original.stopRequestId(), now);
     List<ThreadCommand> queuedNotifications =
@@ -90,7 +94,8 @@ final class StopNodeConverger {
         facts.context() instanceof ThreadContext.ToolActive active
             ? StopTurnWrites.settleTools(tx, facts.path(), active, now)
             : null;
-    AgentDriver driver = driverRegistry.of(facts.path().baseSettings());
+    // 沿用物化前解析出的 Driver，避免同一 Stop 内两次解析出不同实现。
+    AgentDriver driver = materialized.driver();
     // generation/Tool 上下文由 Driver 写私有边界，idle/continuation 只收敛私有状态。
     // 返回的 executionIds 在本事务提交后交给组合根提供的 Driver 执行取消函数。
     DriverStopResult driverStop =
@@ -134,7 +139,7 @@ final class StopNodeConverger {
    * <p>不在此阶段新增 Commands/Models/Tools 行锁（Stop 已按规范顺序取得，WORK 之后禁止再取），直接复用已锁定的 model / siblings；Thread
    * 状态重新读取以保证基于 tx 内最新事实 mutation。
    */
-  private NodeFacts materializedFacts(
+  private MaterializedNode materializedFacts(
       HarnessStore.Transaction tx,
       ThreadStopContext original,
       List<Materialized> committedTerminals) {
@@ -147,11 +152,11 @@ final class StopNodeConverger {
       if (materialized.terminalEntryId() != null) {
         committedTerminals.add(materialized);
       }
-      facts = relockedFacts(tx, materialized.thread(), true);
+      facts = relockedFacts(tx, materialized.thread(), true, driver);
     } else if (facts.context() instanceof ThreadContext.ToolTerminalPending pending) {
       ThreadState materialized =
           materializeTerminalToolBatch(tx, facts, pending.siblings(), driver);
-      facts = relockedFacts(tx, materialized, false);
+      facts = relockedFacts(tx, materialized, false, driver);
     }
     if (facts.context() instanceof ThreadContext.GenerationTerminalPending
         || facts.context() instanceof ThreadContext.ToolTerminalPending) {
@@ -159,7 +164,7 @@ final class StopNodeConverger {
           "terminal invocation still pending after materialization for thread "
               + facts.thread().id());
     }
-    return facts;
+    return new MaterializedNode(facts, driver);
   }
 
   /** 收敛起点的分类：复用加锁阶段取得的 Driver 状态与 siblings，此时它们之间没有写入。 */
@@ -181,11 +186,10 @@ final class StopNodeConverger {
    * <p>generation 物化后仍需锁定新 head 上的 assistant sibling；Tool batch 物化已删除全部 sibling，直接以空集合分类。
    */
   private NodeFacts relockedFacts(
-      HarnessStore.Transaction tx, ThreadState thread, boolean loadSiblings) {
+      HarnessStore.Transaction tx, ThreadState thread, boolean loadSiblings, AgentDriver driver) {
     EntryPath path = tx.entries().loadPath(thread.headEntryId());
     EntryCurrentState state = EntryCurrentState.from(path);
-    LockedDriverState driverState =
-        driverRegistry.of(path.baseSettings()).lockState(tx, thread, state);
+    LockedDriverState driverState = driver.lockState(tx, thread, state);
     List<ToolInvocation> siblings =
         loadSiblings ? loadAssistantSiblings(tx, thread, path, driverState) : List.of();
     return new NodeFacts(
