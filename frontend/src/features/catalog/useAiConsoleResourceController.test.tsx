@@ -286,6 +286,35 @@ describe('useAiConsoleResourceController', () => {
     expect(screen.getByTestId('field-error')).toHaveTextContent('请填写名称')
   })
 
+  it('keeps the failure banner cleared once the user edits the draft', async () => {
+    const user = userEvent.setup()
+    const { queryClient } = renderHarness()
+    await ready()
+
+    vi.mocked(agentService.updateProvider).mockRejectedValue(
+      new Error('provider name already exists'),
+    )
+    await user.click(screen.getByRole('button', { name: 'open-provider' }))
+    await user.click(screen.getByRole('button', { name: 'submit' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('form-error')).toHaveTextContent('Provider 名称已存在')
+    })
+
+    // 编辑草稿即清空校验状态：同一次失败不得在这一轮重渲染里重返横幅。
+    await user.type(screen.getByTestId('provider-name'), '-renamed')
+    await waitFor(() => {
+      expect(screen.getByTestId('form-error')).toBeEmptyDOMElement()
+    })
+
+    // 与错误无关的重渲染（资源集合刷新）也不得使旧失败重现。
+    act(() => {
+      queryClient.setQueryData(queryKeys.models.list, [{ ...currentModel, description: 'refreshed' }])
+    })
+    await waitFor(() => {
+      expect(screen.getByTestId('form-error')).toBeEmptyDOMElement()
+    })
+  })
+
   it('maps a rejected Error and restores it when the resource modal reopens', async () => {
     const user = userEvent.setup()
     renderHarness()

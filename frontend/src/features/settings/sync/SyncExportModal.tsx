@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react'
-import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { Button } from '@/shared/ui/controls/Button'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
@@ -7,7 +6,6 @@ import { configSyncService } from '@/features/settings/config-sync-service'
 import {
   CONFIG_SYNC_GROUPS,
   configSyncErrorMessage,
-  configSyncKindLabelKey,
   configSyncRefKey,
   configSyncScopeKindCounts,
   configSyncScopeRefs,
@@ -17,6 +15,10 @@ import {
   CONFIG_SYNC_EXPORT_FILENAME,
   downloadConfigYaml,
 } from '@/features/settings/sync/download-config-yaml'
+import {
+  SyncExportGroupSection,
+  SyncExportScopeSummary,
+} from '@/features/settings/sync/SyncExportSections'
 import type { ConfigSyncItem, ConfigSyncKind } from '@/shared/api/generated/contracts'
 
 interface SyncExportModalProps {
@@ -38,6 +40,7 @@ export function SyncExportModal({ items, onClose, onExported }: SyncExportModalP
   const scopeRefs = useMemo(() => configSyncScopeRefs(items, scope), [items, scope])
   const directRefs = useMemo(() => configSyncScopeRefs(items, directKeys), [directKeys, items])
   const kindCounts = useMemo(() => configSyncScopeKindCounts(items, scope), [items, scope])
+  const itemCount = scopeRefs.length
   const empty = directRefs.length === 0
 
   const toggleItem = (item: ConfigSyncItem) => {
@@ -92,159 +95,52 @@ export function SyncExportModal({ items, onClose, onExported }: SyncExportModalP
       pending={pending}
       onClose={onClose}
     >
-        <div className="modal-body settings-sync-modal-body">
-          <p className="settings-hint">{t('settings.sync.export.description')}</p>
-          <p className="settings-hint">{t('settings.sync.credentialsNotice')}</p>
-          <p className="settings-hint">{t('settings.sync.export.dependencyHint')}</p>
+      <div className="modal-body settings-sync-modal-body">
+        <p className="settings-hint">{t('settings.sync.export.description')}</p>
+        <p className="settings-hint">{t('settings.sync.credentialsNotice')}</p>
+        <p className="settings-hint">{t('settings.sync.export.dependencyHint')}</p>
 
-          {error ? (
-            <div className="settings-error-banner" role="alert">
-              {error}
-            </div>
-          ) : null}
-
-          <div className="settings-sync-groups">
-            {CONFIG_SYNC_GROUPS.map((group) => {
-              const groupKindKeys = group.kindKeys.filter((kind) =>
-                items.some((item) => item.kind === kind),
-              )
-              if (groupKindKeys.length === 0) {
-                return null
-              }
-              const multiKindGroup = group.kindKeys.length > 1
-              const singleKind = multiKindGroup ? null : group.kindKeys[0]!
-              return (
-                <section className="settings-sync-group" key={group.key}>
-                  <div className="settings-sync-group-head">
-                    {singleKind ? (
-                      <KindToggle
-                        kind={singleKind}
-                        label={t(configSyncKindLabelKey(singleKind))}
-                        items={items}
-                        directKeys={directKeys}
-                        onToggle={toggleKind}
-                      />
-                    ) : (
-                      <h3 className="settings-sync-group-title">{t(group.labelKey)}</h3>
-                    )}
-                  </div>
-                  {groupKindKeys.map((kind) => (
-                    <div className="settings-sync-kind" key={kind}>
-                      {multiKindGroup ? (
-                        <div className="settings-sync-kind-head">
-                          <KindToggle
-                            kind={kind}
-                            label={t(configSyncKindLabelKey(kind))}
-                            items={items}
-                            directKeys={directKeys}
-                            onToggle={toggleKind}
-                          />
-                        </div>
-                      ) : null}
-                      <ul className="settings-sync-items">
-                        {items
-                          .filter((item) => item.kind === kind)
-                          .map((item) => {
-                            const key = configSyncRefKey(item)
-                            const inScope = scope.has(key)
-                            const direct = directKeys.has(key)
-                            const kindLabel = t(configSyncKindLabelKey(kind))
-                            return (
-                              <li className="settings-sync-item" key={key}>
-                                <Checkbox
-                                  className="settings-sync-item-label"
-                                  checked={inScope}
-                                  disabled={inScope && !direct}
-                                  onChange={() => toggleItem(item)}
-                                  aria-label={`${kindLabel}: ${item.name}`}
-                                >
-                                  <span className="settings-sync-item-name">{item.name}</span>
-                                  {inScope && !direct ? (
-                                    <span className="settings-sync-dependency">
-                                      {t('settings.sync.export.dependency')}
-                                    </span>
-                                  ) : null}
-                                </Checkbox>
-                              </li>
-                            )
-                          })}
-                      </ul>
-                    </div>
-                  ))}
-                </section>
-              )
-            })}
+        {error ? (
+          <div className="settings-error-banner" role="alert">
+            {error}
           </div>
+        ) : null}
 
-          <div className="settings-sync-scope">
-            <p className="settings-sync-scope-summary" role="status">
-              {t('settings.sync.export.scopeSummary', {
-                kinds: kindCounts.length,
-                items: scopeRefs.length,
-              })}
-            </p>
-            <ul className="settings-sync-scope-list">
-              {kindCounts.map(({ kind, count }) => (
-                <li key={kind} data-kind={kind}>
-                  {t('settings.sync.export.kindCount', {
-                    kind: t(configSyncKindLabelKey(kind)),
-                    count,
-                  })}
-                </li>
-              ))}
-            </ul>
-            {empty ? (
-              <p className="settings-hint danger" role="status">
-                {t('settings.sync.export.empty')}
-              </p>
-            ) : null}
-          </div>
+        <div className="settings-sync-groups">
+          {CONFIG_SYNC_GROUPS.map((group) => (
+            <SyncExportGroupSection
+              key={group.key}
+              group={group}
+              items={items}
+              scope={scope}
+              directKeys={directKeys}
+              onToggleKind={toggleKind}
+              onToggleItem={toggleItem}
+            />
+          ))}
         </div>
-        <div className="modal-footer">
-          <Button variant="ghost" onClick={onClose} disabled={pending}>
-            {t('shared.cancel')}
-          </Button>
-          <Button
-            onClick={() => {
-              void handleExport()
-            }}
-            disabled={empty}
-            loading={pending}
-          >
-            {pending ? t('settings.sync.export.exporting') : t('settings.sync.export.confirm')}
-          </Button>
-        </div>
+
+        <SyncExportScopeSummary kindCounts={kindCounts} itemCount={itemCount} />
+        {empty ? (
+          <p className="settings-hint danger" role="status">
+            {t('settings.sync.export.empty')}
+          </p>
+        ) : null}
+      </div>
+      <div className="modal-footer">
+        <Button variant="ghost" onClick={onClose} disabled={pending}>
+          {t('shared.cancel')}
+        </Button>
+        <Button
+          onClick={() => {
+            void handleExport()
+          }}
+          disabled={empty}
+          loading={pending}
+        >
+          {pending ? t('settings.sync.export.exporting') : t('settings.sync.export.confirm')}
+        </Button>
+      </div>
     </Dialog>
-  )
-}
-
-/** 种类级全选只改直接选择；被依赖锁定的条目单独呈现。 */
-function KindToggle({
-  kind,
-  label,
-  items,
-  directKeys,
-  onToggle,
-}: {
-  kind: ConfigSyncKind
-  label: string
-  items: ConfigSyncItem[]
-  directKeys: ReadonlySet<string>
-  onToggle: (kind: ConfigSyncKind) => void
-}) {
-  const kindItems = items.filter((item) => item.kind === kind)
-  const directCount = kindItems.filter((item) => directKeys.has(configSyncRefKey(item))).length
-  const allDirect = kindItems.length > 0 && directCount === kindItems.length
-
-  return (
-    <Checkbox
-      className="settings-sync-kind-toggle"
-      checked={allDirect}
-      indeterminate={directCount > 0 && !allDirect}
-      onChange={() => onToggle(kind)}
-      aria-label={label}
-    >
-      <span>{label}</span>
-    </Checkbox>
   )
 }

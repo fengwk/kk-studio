@@ -1,8 +1,8 @@
 export const DEFAULT_TIMEOUT_MILLIS = '60000'
-export const URL_MAX_LENGTH = 2048
-export const HEADER_NAME_MAX_LENGTH = 256
-export const HEADER_VALUE_MAX_LENGTH = 8192
-export const NAME_MAX_LENGTH = 32
+const URL_MAX_LENGTH = 2048
+const HEADER_NAME_MAX_LENGTH = 256
+const HEADER_VALUE_MAX_LENGTH = 8192
+const NAME_MAX_LENGTH = 32
 
 const NAME_PATTERN = /^[a-z][a-z0-9_]*$/
 

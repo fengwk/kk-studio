@@ -49,7 +49,7 @@ export function configSyncRefKey(ref: ConfigSyncRef): string {
   return `${ref.kind}:${ref.name}`
 }
 
-export function indexConfigSyncItems(
+function indexConfigSyncItems(
   items: ConfigSyncItem[],
 ): Map<string, ConfigSyncItem> {
   return new Map(items.map((item) => [configSyncRefKey(item), item]))

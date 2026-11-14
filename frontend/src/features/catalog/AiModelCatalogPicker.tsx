@@ -105,7 +105,7 @@ export function ModelCatalogPicker({
   }
 
   return (
-    <section className="structured-section catalog-picker" aria-label={t('ai.catalog.catalog.title')}>
+    <section className="structured-section" aria-label={t('ai.catalog.catalog.title')}>
       <div className="catalog-picker-toolbar">
         <TextInput
           type="search"

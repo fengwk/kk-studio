@@ -2,39 +2,51 @@ import { act, render, renderHook, screen, waitFor } from '@testing-library/react
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   BrowserPreferencesProvider,
-  decodeBrowserPreferences,
   useBrowserPreferences,
 } from '@/features/settings/browser-preferences'
 
 const STORAGE_KEY = 'kk-studio.browser-preferences'
 
-describe('decodeBrowserPreferences', () => {
+/** 只通过 Provider 读回的真实存储读取路径；没有独立导出的解码入口。 */
+describe('BrowserPreferencesProvider storage decoding', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  /** 通过 Provider 的初始读取断言 decodeBrowserPreferences 的严格边界。 */
+  function readStored(raw: string | null): boolean {
+    localStorage.clear()
+    if (raw !== null) {
+      localStorage.setItem(STORAGE_KEY, raw)
+    }
+    const { result, unmount } = renderHook(() => useBrowserPreferences(), {
+      wrapper: BrowserPreferencesProvider,
+    })
+    const enabled = result.current.notificationsEnabled
+    unmount()
+    return enabled
+  }
+
   it('returns the default (false) for null, malformed JSON and non-object values', () => {
-    expect(decodeBrowserPreferences(null)).toEqual({ notificationsEnabled: false })
-    expect(decodeBrowserPreferences('not json')).toEqual({ notificationsEnabled: false })
-    expect(decodeBrowserPreferences('42')).toEqual({ notificationsEnabled: false })
-    expect(decodeBrowserPreferences('"text"')).toEqual({ notificationsEnabled: false })
-    expect(decodeBrowserPreferences('[]')).toEqual({ notificationsEnabled: false })
+    expect(readStored(null)).toBe(false)
+    expect(readStored('not json')).toBe(false)
+    expect(readStored('42')).toBe(false)
+    expect(readStored('"text"')).toBe(false)
+    expect(readStored('[]')).toBe(false)
   })
 
   it('strictly rejects unknown shapes and non-boolean fields back to the default', () => {
     // 字段缺失 / 类型非法 / 携带未知字段：一律回默认 false，绝不误读。
-    expect(decodeBrowserPreferences('{}')).toEqual({ notificationsEnabled: false })
-    expect(decodeBrowserPreferences('{"notificationsEnabled":"yes"}')).toEqual({ notificationsEnabled: false })
-    expect(decodeBrowserPreferences('{"notificationsEnabled":1}')).toEqual({ notificationsEnabled: false })
-    expect(decodeBrowserPreferences('{"notificationsEnabled":true,"other":1}')).toEqual({
-      notificationsEnabled: false,
-    })
-    expect(decodeBrowserPreferences('{"notificationsEnabled":null}')).toEqual({ notificationsEnabled: false })
+    expect(readStored('{}')).toBe(false)
+    expect(readStored('{"notificationsEnabled":"yes"}')).toBe(false)
+    expect(readStored('{"notificationsEnabled":1}')).toBe(false)
+    expect(readStored('{"notificationsEnabled":true,"other":1}')).toBe(false)
+    expect(readStored('{"notificationsEnabled":null}')).toBe(false)
   })
 
   it('accepts only the exact known shape', () => {
-    expect(decodeBrowserPreferences('{"notificationsEnabled":true}')).toEqual({
-      notificationsEnabled: true,
-    })
-    expect(decodeBrowserPreferences('{"notificationsEnabled":false}')).toEqual({
-      notificationsEnabled: false,
-    })
+    expect(readStored('{"notificationsEnabled":true}')).toBe(true)
+    expect(readStored('{"notificationsEnabled":false}')).toBe(false)
   })
 })
 

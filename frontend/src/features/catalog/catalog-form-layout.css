@@ -66,19 +66,10 @@
   gap: 12px;
 }
 
-.editor-grid-2 {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 @media (max-width: 860px) {
   .editor-grid,
-  .editor-grid-2,
   .editor-row {
     grid-template-columns: 1fr;
-  }
-
-  .editor-row.single {
-    grid-template-columns: 1fr 32px;
   }
 }
 

@@ -1,27 +1,4 @@
-import { useEffect, useState, type FormEventHandler } from 'react'
-import {
-  createAgentEditorPlan,
-  createModelEditorPlan,
-  createProviderEditorPlan,
-  editAgentEditorPlan,
-  editModelEditorPlan,
-  editProviderEditorPlan,
-} from '@/features/catalog/ai-resource-editor-open-plans'
-import type { ResourceEditorPlan } from '@/features/catalog/ai-resource-editor-plan-types'
-import type {
-  AgentDraft,
-  ModelDraft,
-  ModelGroupDraft,
-  ProviderDraft,
-  ResourceModal,
-} from '@/features/catalog/ai-console-types'
-import {
-  normalizeAgentDraftDefaultVariant,
-  normalizeCreateAgentDraftSelection,
-  normalizeCreateModelDraftProvider,
-  normalizeEditModelDraftProvider,
-  normalizeModelDraftDefaultVariant,
-} from '@/features/catalog/ai-draft-normalizers'
+import type { FormEventHandler } from 'react'
 import { buildResourceSubmitPlan } from '@/features/catalog/ai-resource-editor-submit-plans'
 import {
   validateResourceDraft,
@@ -32,9 +9,23 @@ import {
   useAiConsoleResourceQueries,
   type AiConsoleResourceQueryEnabled,
 } from '@/features/catalog/useAiConsoleResourceQueries'
-import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
-import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
-import { useI18n } from '@/shared/i18n'
+import { useResourceDeleteConfirm, useResourceFormErrors } from '@/features/catalog/ai-resource-editor-state'
+import { useDraftResourceSync, useResourceMutationError } from '@/features/catalog/useResourceDraftSync'
+import { useResourceEditorNavigation } from '@/features/catalog/useResourceEditorNavigation'
+import type { AgentDraft, ModelDraft, ModelGroupDraft, ProviderDraft } from '@/features/catalog/ai-console-types'
+import type { ResourceEditorPlan } from '@/features/catalog/ai-resource-editor-plan-types'
+
+/** 校验失败时先滚到模态顶部，再滚到首个标红字段，便于看见具体哪一项。 */
+function revealFirstFieldError(form: HTMLFormElement) {
+  form.querySelector('.modal-body')?.scrollTo({ top: 0, behavior: 'smooth' })
+  window.requestAnimationFrame(() => {
+    const firstError =
+      form.querySelector('.form-group.is-error') ||
+      form.querySelector('.capability-picker.is-error') ||
+      form.querySelector('.field-error')
+    firstError?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  })
+}
 
 /**
  * Catalog 资源编辑器控制器：资源查询、编辑器草稿与打开计划、保存校验、
@@ -43,163 +34,34 @@ import { useI18n } from '@/shared/i18n'
 export function useAiConsoleResourceController(
   enabled: AiConsoleResourceQueryEnabled,
 ) {
-  const { t, locale } = useI18n()
   const { queries, resources } = useAiConsoleResourceQueries(enabled)
   const { providers, models, agents, toolCatalog, skills } = resources
-  const [resourceModal, setResourceModal] = useState<ResourceModal | null>(null)
-  const [providerDraft, setProviderDraft] = useState<ProviderDraft>(
-    () => createProviderEditorPlan().providerDraft,
-  )
-  const [modelDraft, setModelDraft] = useState<ModelDraft>(
-    () => createModelEditorPlan([]).modelDraft,
-  )
-  const [modelGroupDraft, setModelGroupDraft] = useState<ModelGroupDraft>(
-    () => createModelEditorPlan([]).modelGroupDraft,
-  )
-  const [agentDraft, setAgentDraft] = useState<AgentDraft>(
-    () => createAgentEditorPlan([]).agentDraft,
-  )
-  const [deleteConfirm, setDeleteConfirm] = useState<ConfirmModalState | null>(null)
-  const [formError, setFormError] = useState<string>('')
-  const [fieldErrors, setFieldErrors] = useState<Partial<Record<ResourceFieldKey, string>>>({})
 
-  useEffect(() => {
-    if (!resourceModal) {
-      return
-    }
-
-    if (resourceModal.kind === 'model') {
-      setModelDraft((currentDraft) => {
-        const normalizedProvider =
-          resourceModal.mode === 'edit'
-            ? normalizeEditModelDraftProvider(currentDraft, currentDraft.providerName)
-            : normalizeCreateModelDraftProvider(currentDraft, providers)
-        return normalizeModelDraftDefaultVariant(normalizedProvider)
-      })
-      return
-    }
-
-    if (resourceModal.kind === 'agent') {
-      setAgentDraft((currentDraft) =>
-        resourceModal.mode === 'edit'
-          ? normalizeAgentDraftDefaultVariant(currentDraft, models)
-          : normalizeCreateAgentDraftSelection(currentDraft, models),
-      )
-    }
-  }, [models, providers, resourceModal])
-
-  function closeResourceModal() {
-    setResourceModal(null)
-  }
-
-  function applyResourceEditorPlan(plan: ResourceEditorPlan | null) {
-    if (!plan) {
-      return
-    }
-    setResourceModal(plan.modal)
-    if (plan.kind === 'provider') {
-      setProviderDraft(plan.providerDraft)
-      return
-    }
-    if (plan.kind === 'model') {
-      setModelDraft(plan.modelDraft)
-      setModelGroupDraft(plan.modelGroupDraft)
-      return
-    }
-    setAgentDraft(plan.agentDraft)
-  }
-
-  function closeDeleteConfirm() {
-    setDeleteConfirm(null)
-  }
+  const navigation = useResourceEditorNavigation()
+  const { resourceModal, drafts, closeResourceModal } = navigation
+  const errors = useResourceFormErrors(resourceModal)
+  const deleteConfirmState = useResourceDeleteConfirm()
 
   const mutations = useAiConsoleResourceMutations({
     onResourceSaved: closeResourceModal,
-    onDeleteCompleted: closeDeleteConfirm,
+    onDeleteCompleted: deleteConfirmState.closeDeleteConfirm,
   })
 
-  function deleteProvider(providerName: string, expectedVersion: string) {
-    setDeleteConfirm({
-      title: t('ai.catalog.deleteProviderTitle'),
-      description: t('ai.catalog.deleteProviderDescription', { name: providerName }),
-      confirmLabel: t('ai.catalog.action.confirmDelete'),
-      tone: 'danger',
-      onConfirm: () => mutations.deleteProvider(providerName, expectedVersion),
-    })
-  }
+  useDraftResourceSync({
+    modal: resourceModal,
+    providers,
+    models,
+    setModelDraft: drafts.setModelDraft,
+    setAgentDraft: drafts.setAgentDraft,
+  })
 
-  function deleteModel(modelName: string, expectedVersion: string) {
-    setDeleteConfirm({
-      title: t('ai.catalog.deleteModelTitle'),
-      description: t('ai.catalog.deleteModelDescription', { name: modelName }),
-      confirmLabel: t('ai.catalog.action.confirmDelete'),
-      tone: 'danger',
-      onConfirm: () => mutations.deleteModel(modelName, expectedVersion),
-    })
-  }
+  useResourceMutationError({
+    modal: resourceModal,
+    mutationError: mutations.resourceMutationError,
+    showFailure: errors.showFailure,
+  })
 
-  function deleteAgent(agentName: string, expectedVersion: string) {
-    setDeleteConfirm({
-      title: t('ai.catalog.deleteAgentTitle'),
-      description: t('ai.catalog.deleteAgentDescription', { name: agentName }),
-      confirmLabel: t('ai.catalog.action.confirmDelete'),
-      tone: 'danger',
-      onConfirm: () => mutations.deleteAgent(agentName, expectedVersion),
-    })
-  }
-
-  // 打开/关闭编辑器时清空校验状态
-  useEffect(() => {
-    setFormError('')
-    setFieldErrors({})
-  }, [resourceModal])
-
-  // API 错误：转成用户可读文案，只显示在模态内
-  useEffect(() => {
-    if (!resourceModal || !mutations.resourceMutationError) {
-      return
-    }
-    const message = toUserFacingErrorMessage(mutations.resourceMutationError)
-    setFormError(message)
-    setFieldErrors((current) =>
-      Object.keys(current).length > 0 ? current : { general: message },
-    )
-  }, [resourceModal, mutations.resourceMutationError, locale])
-
-  const submitResource: FormEventHandler<HTMLFormElement> = (event) => {
-    event.preventDefault()
-    if (!resourceModal) {
-      return
-    }
-
-    const drafts = {
-      providerDraft,
-      modelDraft,
-      modelGroupDraft,
-      agentDraft,
-    }
-    const validation = validateResourceDraft(resourceModal, drafts)
-    if (!validation.ok) {
-      setFormError(validation.message)
-      setFieldErrors(validation.fields)
-      const form = event.currentTarget as HTMLFormElement
-      const body = form.querySelector('.modal-body')
-      body?.scrollTo({ top: 0, behavior: 'smooth' })
-      // 优先滚到首个标红字段，便于看见「思考强度」等具体项
-      window.requestAnimationFrame(() => {
-        const firstError =
-          form.querySelector('.form-group.is-error') ||
-          form.querySelector('.capability-picker.is-error') ||
-          form.querySelector('.field-error')
-        firstError?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-      })
-      return
-    }
-    setFormError('')
-    setFieldErrors({})
-
-    const plan = buildResourceSubmitPlan(resourceModal, drafts)
-
+  function submitPlan(plan: ReturnType<typeof buildResourceSubmitPlan>) {
     if (plan.kind === 'provider') {
       if (plan.mode === 'edit') {
         mutations.updateProvider(plan.name, plan.data)
@@ -208,7 +70,6 @@ export function useAiConsoleResourceController(
       }
       return
     }
-
     if (plan.kind === 'model') {
       if (plan.mode === 'edit') {
         mutations.updateModel(plan.name, plan.data)
@@ -217,12 +78,56 @@ export function useAiConsoleResourceController(
       }
       return
     }
-
     if (plan.mode === 'edit') {
       mutations.updateAgent(plan.name, plan.data)
     } else {
       mutations.createAgent(plan.data)
     }
+  }
+
+  const submitResource: FormEventHandler<HTMLFormElement> = (event) => {
+    event.preventDefault()
+    if (!resourceModal) {
+      return
+    }
+    const validation = validateResourceDraft(resourceModal, drafts.drafts())
+    if (!validation.ok) {
+      errors.setFormError(validation.message)
+      errors.setFieldErrors(validation.fields)
+      revealFirstFieldError(event.currentTarget)
+      return
+    }
+    errors.clear()
+    submitPlan(buildResourceSubmitPlan(resourceModal, drafts.drafts()))
+  }
+
+  /** 编辑草稿时清空上一条校验错误：错误只在提交后成立。 */
+  function draftChangeHandler<T>(apply: (draft: T) => void) {
+    return (draft: T) => {
+      errors.clear()
+      apply(draft)
+    }
+  }
+
+  function requestDelete(kind: 'provider' | 'model' | 'agent', name: string, expectedVersion: string) {
+    const actions = {
+      provider: {
+        titleKey: 'ai.catalog.deleteProviderTitle',
+        descriptionKey: 'ai.catalog.deleteProviderDescription',
+        onConfirm: () => mutations.deleteProvider(name, expectedVersion),
+      },
+      model: {
+        titleKey: 'ai.catalog.deleteModelTitle',
+        descriptionKey: 'ai.catalog.deleteModelDescription',
+        onConfirm: () => mutations.deleteModel(name, expectedVersion),
+      },
+      agent: {
+        titleKey: 'ai.catalog.deleteAgentTitle',
+        descriptionKey: 'ai.catalog.deleteAgentDescription',
+        onConfirm: () => mutations.deleteAgent(name, expectedVersion),
+      },
+    } as const
+    deleteConfirmState.requestDelete({ ...actions[kind], name })
   }
 
   return {
@@ -243,63 +148,42 @@ export function useAiConsoleResourceController(
       skills,
       skillsLoading: queries.skills.isLoading,
       skillsError: queries.skills.error,
-      providerDraft,
-      modelDraft,
-      modelGroupDraft,
-      agentDraft,
+      providerDraft: drafts.providerDraft,
+      modelDraft: drafts.modelDraft,
+      modelGroupDraft: drafts.modelGroupDraft,
+      agentDraft: drafts.agentDraft,
       pending: mutations.resourceEditorPending,
-      formError,
-      fieldErrors,
+      formError: errors.formError,
+      fieldErrors: errors.fieldErrors,
       onClose: closeResourceModal,
-      onProviderDraftChange: (draft: ProviderDraft) => {
-        setFormError('')
-        setFieldErrors({})
-        setProviderDraft(draft)
-      },
-      onModelDraftChange: (draft: ModelDraft) => {
-        setFormError('')
-        setFieldErrors({})
-        setModelDraft(draft)
-      },
-      onModelGroupDraftChange: (draft: ModelGroupDraft) => {
-        setFormError('')
-        setFieldErrors({})
-        setModelGroupDraft(draft)
-      },
+      onProviderDraftChange: draftChangeHandler<ProviderDraft>(drafts.setProviderDraft),
+      onModelDraftChange: draftChangeHandler<ModelDraft>(drafts.setModelDraft),
+      onModelGroupDraftChange: draftChangeHandler<ModelGroupDraft>(drafts.setModelGroupDraft),
       /** 仅创建态切换 Tab；两份草稿都保留在 state 中。 */
-      onModelCreateKindChange: (resourceKind: 'MODEL' | 'GROUP') =>
-        setResourceModal((current) =>
-          current && current.kind === 'model' && current.mode === 'create'
-            ? { ...current, resourceKind }
-            : current,
-        ),
-      onAgentDraftChange: (draft: AgentDraft) => {
-        setFormError('')
-        setFieldErrors({})
-        setAgentDraft(draft)
-      },
+      onModelCreateKindChange: navigation.selectModelCreateKind,
+      onAgentDraftChange: draftChangeHandler<AgentDraft>(drafts.setAgentDraft),
       onSubmit: submitResource,
     },
     deleteConfirmModal: {
-      modal: deleteConfirm,
+      modal: deleteConfirmState.deleteConfirm,
       pending: mutations.deleteConfirmPending,
-      onClose: closeDeleteConfirm,
+      onClose: deleteConfirmState.closeDeleteConfirm,
     },
     editorActions: {
-      createProvider: () => applyResourceEditorPlan(createProviderEditorPlan()),
-      editProvider: (providerName: string) =>
-        applyResourceEditorPlan(editProviderEditorPlan(providers, providerName)),
-      createModel: () => applyResourceEditorPlan(createModelEditorPlan(providers)),
-      editModel: (modelName: string) =>
-        applyResourceEditorPlan(editModelEditorPlan(models, modelName)),
-      createAgent: () => applyResourceEditorPlan(createAgentEditorPlan(models)),
-      editAgent: (agentName: string) =>
-        applyResourceEditorPlan(editAgentEditorPlan(agents, models, agentName)),
+      createProvider: navigation.createProvider,
+      editProvider: (providerName: string) => navigation.editProvider(providers, providerName),
+      createModel: () => navigation.createModel(providers),
+      editModel: (modelName: string) => navigation.editModel(models, modelName),
+      createAgent: () => navigation.createAgent(models),
+      editAgent: (agentName: string) => navigation.editAgent(agents, models, agentName),
     },
     deleteResource: {
-      provider: deleteProvider,
-      model: deleteModel,
-      agent: deleteAgent,
+      provider: (name: string, expectedVersion: string) =>
+        requestDelete('provider', name, expectedVersion),
+      model: (name: string, expectedVersion: string) => requestDelete('model', name, expectedVersion),
+      agent: (name: string, expectedVersion: string) => requestDelete('agent', name, expectedVersion),
     },
   }
 }
+
+export type { ResourceEditorPlan, ResourceFieldKey }

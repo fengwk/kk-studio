@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { ModelDraft, VariantDraft } from '@/features/catalog/ai-console-types'
+import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/catalog/ai-draft-normalizers'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/catalog/AiVariantListEditor'
@@ -10,30 +10,28 @@ import {
   supportsClaudeMessageLevelEffort,
   supportsClaudeMidConvoSystemMessages,
 } from '@/features/catalog/claude-model-capabilities'
+import { resolvePromptCacheRetentions } from '@/shared/api/contracts/ai-catalog'
 import {
-  defaultPromptCacheRetention,
-  resolvePromptCacheRetentions,
-} from '@/shared/api/contracts/ai-catalog'
+  ModelAbilityToggles,
+  ModelInputModalityField,
+  ModelLimitFields,
+} from '@/features/catalog/ai-model-form-sections'
+import {
+  providerOptionsFor,
+  retargetVariants,
+  selectedDefaultVariant,
+  variantSelection,
+} from '@/features/catalog/ai-model-form-rules'
 import { Button } from '@/shared/ui/controls/Button'
-import { Checkbox } from '@/shared/ui/controls/Checkbox'
-import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import { useI18n } from '@/shared/i18n'
 import { RemoteModelIdPicker } from '@/features/catalog/AiRemoteModelIdPicker'
-import type { ModelInputModality, ProviderDTO } from '@/shared/api/generated/contracts'
+import type { ProviderDTO } from '@/shared/api/generated/contracts'
 import './capability-picker.css'
 import './catalog-form-layout.css'
 import './ai-model-resource-form.css'
-
-const AGENT_MODEL_INPUT_MODALITIES: ModelInputModality[] = [
-  'TEXT',
-  'IMAGE',
-  'AUDIO',
-  'VIDEO',
-  'DOCUMENT',
-]
 
 export function ModelForm({
   draft,
@@ -53,49 +51,11 @@ export function ModelForm({
   const { t } = useI18n()
   const [catalogOpen, setCatalogOpen] = useState(false)
   const variantOptions = variantOptionsFromDraft(draft.variants)
-  const activeProvider = providers.find((provider) => provider.name === draft.providerName)
-  const promptCacheRetentions = resolvePromptCacheRetentions(activeProvider)
-  const providerUnavailable =
-    mode === 'edit' &&
-    Boolean(draft.providerName) &&
-    !providers.some((provider) => provider.name === draft.providerName)
-  const providerOptions = providerUnavailable
-    ? [
-        {
-          value: draft.providerName,
-          label: `${draft.providerName} · ${t('ai.catalog.form.unavailable')}`,
-          disabled: true,
-        },
-        ...providers.map((provider) => ({ value: provider.name, label: provider.name })),
-      ]
-    : providers.map((provider) => ({ value: provider.name, label: provider.name }))
-  const selectedDefaultVariant = variantOptions.includes(draft.defaultVariant.trim())
-    ? draft.defaultVariant.trim()
-    : (variantOptions[0] ?? '')
-
-  /** Provider 切换后，逐 Variant 把新协议不支持的缓存档位重置为该 Provider 的默认档位。 */
-  function changeProvider(providerName: string) {
-    const provider = providers.find((item) => item.name === providerName)
-    const supported = resolvePromptCacheRetentions(provider)
-    const fallback = defaultPromptCacheRetention(provider)
-    const variants = draft.variants.map((variant) =>
-      supported.includes(variant.promptCacheRetention)
-        ? variant
-        : { ...variant, promptCacheRetention: fallback },
-    )
-    onChange({ ...draft, providerName, variants })
-  }
-
-  function commitVariants(nextVariants: VariantDraft[], preferredDefaultVariant?: string) {
-    const nextOptions = variantOptionsFromDraft(nextVariants)
-    const preferred = preferredDefaultVariant?.trim() || draft.defaultVariant.trim()
-    onChange({
-      ...draft,
-      variants: nextVariants,
-      defaultVariant:
-        preferred && nextOptions.includes(preferred) ? preferred : (nextOptions[0] ?? ''),
-    })
-  }
+  const provider = providerOptionsFor(providers, draft, mode, t('ai.catalog.form.unavailable'))
+  const promptCacheRetentions = resolvePromptCacheRetentions(
+    providers.find((item) => item.name === draft.providerName),
+  )
+  const defaultVariant = selectedDefaultVariant(draft)
 
   /** 新建时 Name 跟随 Model ID，直到用户单独编辑 Name。 */
   function setModelId(modelId: string) {
@@ -112,34 +72,26 @@ export function ModelForm({
     })
   }
 
-  function toggleInputModality(value: ModelInputModality) {
-    const has = draft.inputModalities.includes(value)
-    const next = has
-      ? draft.inputModalities.filter((item) => item !== value)
-      : [...draft.inputModalities, value]
-    // 至少保留一种；禁止全部取消勾选。
-    onChange({ ...draft, inputModalities: next.length > 0 ? next : ['TEXT'] })
-  }
-
-  /** Reasoning 只切换能力开关；空思考强度表示不覆盖协议默认，不自动补全。 */
-  function setReasoning(enabled: boolean) {
-    onChange({ ...draft, reasoning: enabled })
-  }
-
   return (
     <>
       <label className={`form-group${fieldErrors.providerName ? ' is-error' : ''}`}>
         <FieldLabel required>{t('ai.catalog.form.provider')}</FieldLabel>
         <Select
           aria-label={t('ai.catalog.form.provider')}
-          aria-describedby={providerUnavailable ? 'model-provider-identity-status' : undefined}
+          aria-describedby={provider.unavailable ? 'model-provider-identity-status' : undefined}
           value={draft.providerName}
           required
           disabled={mode === 'edit'}
-          options={providerOptions}
-          onChange={changeProvider}
+          options={provider.options}
+          onChange={(providerName) =>
+            onChange({
+              ...draft,
+              providerName,
+              variants: retargetVariants(draft, providers, providerName),
+            })
+          }
         />
-        {providerUnavailable ? (
+        {provider.unavailable ? (
           <span id="model-provider-identity-status" className="inline-hint" role="status">
             {t('ai.catalog.form.unavailableIdentityHint')}
           </span>
@@ -198,9 +150,7 @@ export function ModelForm({
           aria-expanded={catalogOpen}
           onClick={() => setCatalogOpen((current) => !current)}
         >
-          {catalogOpen
-            ? t('ai.catalog.catalog.hide')
-            : t('ai.catalog.catalog.open')}
+          {catalogOpen ? t('ai.catalog.catalog.hide') : t('ai.catalog.catalog.open')}
         </Button>
       </div>
       {catalogOpen ? (
@@ -212,113 +162,13 @@ export function ModelForm({
         />
       ) : null}
 
-      <section className="structured-section" aria-labelledby="model-limit-heading">
-        <div className="structured-section-head">
-          <h3 id="model-limit-heading">{t('ai.catalog.form.limit')}</h3>
-        </div>
-        <div className="form-grid-2">
-          <label className={`form-group${fieldErrors.contextWindow ? ' is-error' : ''}`}>
-            <FieldLabel required>{t('ai.catalog.form.contextWindow')}</FieldLabel>
-            <NumberInput
-              value={draft.contextWindow}
-              min={1}
-              placeholder="128000"
-              onChange={(contextWindow) => onChange({ ...draft, contextWindow })}
-              aria-label={t('ai.catalog.form.contextWindow')}
-            />
-            {fieldErrors.contextWindow ? (
-              <span className="field-error">{fieldErrors.contextWindow}</span>
-            ) : null}
-          </label>
-          <label className={`form-group${fieldErrors.inputLimit ? ' is-error' : ''}`}>
-            <FieldLabel>{t('ai.catalog.form.inputLimit')}</FieldLabel>
-            <NumberInput
-              value={draft.inputLimit}
-              min={1}
-              placeholder="272000"
-              onChange={(inputLimit) => onChange({ ...draft, inputLimit })}
-              aria-label={t('ai.catalog.form.inputLimit')}
-              aria-describedby="model-input-limit-hint"
-              invalid={Boolean(fieldErrors.inputLimit)}
-            />
-            <span id="model-input-limit-hint" className="inline-hint">
-              {t('ai.catalog.form.inputLimitHint')}
-            </span>
-            {fieldErrors.inputLimit ? (
-              <span className="field-error">{fieldErrors.inputLimit}</span>
-            ) : null}
-          </label>
-          <label className={`form-group${fieldErrors.maxOutputTokens ? ' is-error' : ''}`}>
-            <FieldLabel required>{t('ai.catalog.form.maxOutputTokens')}</FieldLabel>
-            <NumberInput
-              value={draft.maxOutputTokens}
-              min={1}
-              placeholder="8192"
-              onChange={(maxOutputTokens) => onChange({ ...draft, maxOutputTokens })}
-              aria-label={t('ai.catalog.form.maxOutputTokens')}
-            />
-            <span className="inline-hint">{t('ai.catalog.form.maxOutputLimitHint')}</span>
-            {fieldErrors.maxOutputTokens ? (
-              <span className="field-error">{fieldErrors.maxOutputTokens}</span>
-            ) : null}
-          </label>
-        </div>
-      </section>
-
-      <section className="structured-section" aria-labelledby="model-abilities-heading">
-        <div className="structured-section-head">
-          <h3 id="model-abilities-heading">{t('ai.catalog.form.abilities')}</h3>
-        </div>
-        <div className="ability-toggle-row">
-          <Checkbox
-            checked={draft.tools}
-            onChange={(tools) => onChange({ ...draft, tools })}
-            label={t('ai.catalog.form.tools')}
-          />
-          <Checkbox
-            checked={draft.reasoning}
-            onChange={setReasoning}
-            label={t('ai.catalog.form.reasoning')}
-          />
-          <Checkbox
-            checked={draft.midConversationSystemMessages}
-            onChange={(midConversationSystemMessages) =>
-              onChange({ ...draft, midConversationSystemMessages })
-            }
-            label={t('ai.catalog.form.midConversationSystemMessages')}
-          />
-          <Checkbox
-            checked={draft.messageLevelEffort}
-            onChange={(messageLevelEffort) => onChange({ ...draft, messageLevelEffort })}
-            label={t('ai.catalog.form.messageLevelEffort')}
-          />
-        </div>
-      </section>
-
-      <fieldset
-        className={`form-group capability-picker${fieldErrors.inputModalities ? ' is-error' : ''}`}
-      >
-        <legend><FieldLabel required>{t('ai.catalog.form.inputTypes')}</FieldLabel></legend>
-        <p className="inline-hint">{t('ai.catalog.form.inputModalityHint')}</p>
-        <div className="capability-options">
-          {AGENT_MODEL_INPUT_MODALITIES.map((item) => {
-            const checked = draft.inputModalities.includes(item)
-            return (
-              <Checkbox
-                key={item}
-                className={`capability-option${checked ? ' is-selected' : ''}`}
-                checked={checked}
-                onChange={() => toggleInputModality(item)}
-              >
-                <span>{item}</span>
-              </Checkbox>
-            )
-          })}
-        </div>
-        {fieldErrors.inputModalities ? (
-          <span className="field-error">{fieldErrors.inputModalities}</span>
-        ) : null}
-      </fieldset>
+      <ModelLimitFields draft={draft} fieldErrors={fieldErrors} onChange={onChange} />
+      <ModelAbilityToggles draft={draft} onChange={onChange} />
+      <ModelInputModalityField
+        draft={draft}
+        error={fieldErrors.inputModalities}
+        onChange={onChange}
+      />
 
       <ModelPricingEditor
         pricing={draft.pricing}
@@ -331,9 +181,9 @@ export function ModelForm({
         <FieldLabel required>{t('ai.catalog.form.defaultVariant')}</FieldLabel>
         <Select
           aria-label={t('ai.catalog.form.defaultVariant')}
-          value={selectedDefaultVariant}
+          value={defaultVariant}
           options={variantOptions.map((name) => ({ value: name, label: name }))}
-          onChange={(defaultVariant) => onChange({ ...draft, defaultVariant })}
+          onChange={(variant) => onChange({ ...draft, defaultVariant: variant })}
         />
         {fieldErrors.defaultVariant ? (
           <span className="field-error">{fieldErrors.defaultVariant}</span>
@@ -344,10 +194,12 @@ export function ModelForm({
         <VariantListEditor
           label={t('ai.catalog.form.variants')}
           variants={draft.variants}
-          defaultVariant={selectedDefaultVariant}
+          defaultVariant={defaultVariant}
           reasoning={draft.reasoning}
           promptCacheRetentions={promptCacheRetentions}
-          onChange={commitVariants}
+          onChange={(nextVariants, preferred) =>
+            onChange({ ...draft, ...variantSelection(draft, nextVariants, preferred) })
+          }
         />
         {/* 只保留一条汇总错误，避免顶部 banner + 字段旁重复堆叠 */}
         {fieldErrors.variants ? <span className="field-error">{fieldErrors.variants}</span> : null}

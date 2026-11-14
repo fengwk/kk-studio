@@ -1,18 +1,13 @@
-import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { keyToSkillRef, skillRefToKey } from '@/features/catalog/agent-capability-candidates'
 import {
-  buildSkillCandidates,
-  buildSubagentCandidates,
-  buildToolCandidates,
-  keyToSkillRef,
-  skillRefToKey,
-  withSelectedOrphans,
-  withSelectedSkillOrphans,
-  type CapabilityOption,
-} from '@/features/catalog/agent-capability-candidates'
+  agentCapabilityCandidates,
+  isAgentModelUnavailable,
+} from '@/features/catalog/agent-form-candidates'
+import { CapabilityChecklist } from '@/features/catalog/CapabilityChecklist'
 import type { AgentDraft } from '@/features/catalog/ai-console-types'
 import { applyAgentModelSelection } from '@/features/catalog/ai-draft-normalizers'
 import { emptyAgentDraft } from '@/features/catalog/ai-resource-draft-codecs'
@@ -20,7 +15,7 @@ import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-valid
 import { Select } from '@/shared/ui/controls/Select'
 import { ModelSelectionPicker } from '@/shared/ui/controls/ModelSelectionPicker'
 import { ToolSelectionPanel, SkillSelectionPanel } from '@/features/catalog/CapabilitySelectionPanels'
-import { translate, useI18n } from '@/shared/i18n'
+import { useI18n } from '@/shared/i18n'
 import type {
   AgentDTO,
   ModelDTO,
@@ -59,32 +54,14 @@ export function AgentForm({
   const { t } = useI18n()
   const driver = draft.execution?.driver ?? 'builtin'
   const selectedModel = models.find((model) => model.name === draft.model)
-  const modelUnavailable =
-    mode === 'edit' && Boolean(draft.model) && selectedModel === undefined
-  const toolCandidates = withSelectedOrphans(
-    buildToolCandidates(toolCatalog),
-    draft.tools,
-  )
-  const visibleToolValues = new Set(toolCandidates.map((option) => option.value))
-  const visibleSelectedTools = draft.tools.filter((id) => visibleToolValues.has(id.trim()))
-
-  const selectedSkillKeys = draft.skills.map(skillRefToKey)
-  const skillCandidates = withSelectedSkillOrphans(
-    buildSkillCandidates(skills),
-    draft.skills,
-  )
-  const visibleSkillValues = new Set(skillCandidates.map((option) => option.value))
-  const visibleSelectedSkills = selectedSkillKeys.filter((key) => visibleSkillValues.has(key))
-
-  // Subagent 候选来自当前全局 Agent catalog；create 模式下同名候选（该行尚不存在）不展示，
-  // edit 模式下当前 agent 已存在，可以正常显示。已勾选但 catalog 缺失的名称保留为可移除 orphan。
-  const subagentCatalogCandidates = buildSubagentCandidates(agents)
-  const subagentCandidates = withSelectedOrphans(
-    mode === 'create' && draft.name.trim()
-      ? subagentCatalogCandidates.filter((candidate) => candidate.name !== draft.name.trim())
-      : subagentCatalogCandidates,
-    draft.subagents,
-  )
+  const modelUnavailable = isAgentModelUnavailable(draft, models, mode)
+  const {
+    tools: toolCandidates,
+    selectedTools: visibleSelectedTools,
+    skills: skillCandidates,
+    selectedSkills: visibleSelectedSkills,
+    subagents: subagentCandidates,
+  } = agentCapabilityCandidates({ draft, mode, toolCatalog, agents, skills })
 
   return (
     <>
@@ -229,88 +206,3 @@ export function AgentForm({
   )
 }
 
-function CapabilityChecklist({
-  options,
-  selected,
-  emptyText,
-  statusText,
-  errorText,
-  onToggle,
-}: {
-  options: CapabilityOption[]
-  selected: string[]
-  emptyText: string
-  statusText?: string | null
-  errorText?: string | null
-  onToggle: (value: string) => void
-}) {
-  if (options.length === 0) {
-    if (statusText) {
-      return (
-        <div className="capability-options" role="status">
-          <div className="inline-hint">{statusText}</div>
-        </div>
-      )
-    }
-    if (errorText) {
-      return (
-        <div className="capability-options" role="alert">
-          <div className="inline-hint">{errorText}</div>
-        </div>
-      )
-    }
-    return (
-      <div className="capability-options">
-        <div className="inline-hint">{emptyText}</div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="capability-options">
-      {statusText ? (
-        <div className="inline-hint" role="status">
-          {statusText}
-        </div>
-      ) : null}
-      {errorText ? (
-        <div className="inline-hint" role="alert">
-          {errorText}
-        </div>
-      ) : null}
-      {options.map((option) => {
-        const checked = selected.includes(option.value)
-        const stateClass = option.missing ? ' is-offline is-missing' : option.offline ? ' is-offline' : ''
-        return (
-          <Checkbox
-            key={option.value}
-            className={`capability-option capability-option-detailed${checked ? ' is-selected' : ''}${stateClass}`}
-            checked={checked}
-            onChange={() => onToggle(option.value)}
-          >
-            <span className="capability-option-body">
-              <span className="capability-option-heading">
-                <code className="capability-name">{option.name}</code>
-                {option.missing ? (
-                  <span className="capability-option-status">
-                    {translate('ai.catalog.form.unavailable')}
-                  </span>
-                ) : null}
-                {!option.missing && option.offline ? (
-                  <span className="capability-option-status">
-                    {translate('ai.catalog.form.offline')}
-                  </span>
-                ) : null}
-              </span>
-              {option.description ? (
-                <span className="capability-option-description" title={option.description}>
-                  {option.description}
-                </span>
-              ) : null}
-            </span>
-          </Checkbox>
-        )
-      })}
-    </div>
-  )
-}

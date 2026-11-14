@@ -88,7 +88,7 @@ async function serverTab(name: string) {
   return await screen.findByRole('tab', { name })
 }
 
-describe('system settings server editor', () => {
+describe('SettingsPage server editor', () => {
   // 完整 CAS mock 验证全局代理保存和清空不丢失其他设置。
   it('edits and clears the global proxy while preserving every other section', async () => {
     const initial = makeSettingsDto()

@@ -2,8 +2,6 @@ import { describe, expect, it } from 'vitest'
 import {
   addRule,
   addTool,
-  hasBlankPattern,
-  hasBlankToolName,
   moveRule,
   removeRule,
   removeTool,
@@ -87,12 +85,5 @@ describe('permission-utils', () => {
   it('updates a single rule in place', () => {
     const next = updateRule(groups(['tool', [['a', 'allow']]]), 0, 0, { action: 'deny', pattern: 'b' })
     expect(next[0]!.rules[0]).toEqual({ pattern: 'b', action: 'deny' })
-  })
-
-  it('detects blank tool names and blank patterns for validation states', () => {
-    expect(hasBlankToolName(groups(['', [['a', 'allow']]]))).toBe(true)
-    expect(hasBlankToolName(groups(['tool', [['a', 'allow']]]))).toBe(false)
-    expect(hasBlankPattern(groups(['tool', [['', 'allow']]]))).toBe(true)
-    expect(hasBlankPattern(groups(['tool', [['a', 'allow']]]))).toBe(false)
   })
 })

@@ -8,7 +8,7 @@ import type { PermissionGroupDraft, PermissionRuleDraft } from '@/features/setti
  * 新名称为空串时不合并，只清空源分组名（呈现可修复的空态）。
  */
 
-export function cloneGroups(groups: readonly PermissionGroupDraft[]): PermissionGroupDraft[] {
+function cloneGroups(groups: readonly PermissionGroupDraft[]): PermissionGroupDraft[] {
   return groups.map((group) => ({ tool: group.tool, rules: group.rules.map((rule) => ({ ...rule })) }))
 }
 
@@ -109,12 +109,4 @@ export function moveRule(
   next.splice(targetIndex, 0, moved)
   copy[groupIndex] = { ...group, rules: next }
   return copy
-}
-
-export function hasBlankPattern(groups: readonly PermissionGroupDraft[]): boolean {
-  return groups.some((group) => group.rules.some((rule) => rule.pattern.trim() === ''))
-}
-
-export function hasBlankToolName(groups: readonly PermissionGroupDraft[]): boolean {
-  return groups.some((group) => group.tool.trim() === '')
 }

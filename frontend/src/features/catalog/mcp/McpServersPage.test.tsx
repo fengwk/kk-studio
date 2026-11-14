@@ -309,6 +309,37 @@ describe('McpServersPage', () => {
     })
   })
 
+  it('compares the submitted timeout instead of the raw input when blocking discover', async () => {
+    const user = userEvent.setup()
+    vi.mocked(mcpServerService.listServers).mockResolvedValue([summary({ name: 'srv_timeout', version: '2' })])
+    vi.mocked(mcpServerService.getServer).mockResolvedValue(
+      detail({ name: 'srv_timeout', timeoutMillis: '60000', version: '2' }),
+    )
+
+    renderPage()
+
+    await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_timeout'))
+    const modal = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_timeout' })
+    // 清空超时后提交会回退为默认 60000，与已保存值一致，不应被当作未保存的变更。
+    await user.clear(within(modal).getByLabelText('Timeout'))
+    await user.click(within(modal).getByRole('button', { name: '发现工具' }))
+
+    await waitFor(() => {
+      expect(mcpServerService.discoverServer).toHaveBeenCalledWith('srv_timeout', '2')
+    })
+
+    vi.mocked(mcpServerService.discoverServer).mockClear()
+    await user.click(await screen.findByLabelText('编辑 MCP 服务 srv_timeout'))
+    const reopened = await screen.findByRole('dialog', { name: '编辑 MCP 服务：srv_timeout' })
+    // 真正不同的超时仍然是未保存的变更，必须阻断发现工具。
+    await user.clear(within(reopened).getByLabelText('Timeout'))
+    await user.type(within(reopened).getByLabelText('Timeout'), '45000')
+    await user.click(within(reopened).getByRole('button', { name: '发现工具' }))
+
+    expect(screen.getByRole('alert')).toHaveTextContent('存在未保存的配置更改，请先保存再发现工具。')
+    expect(mcpServerService.discoverServer).not.toHaveBeenCalled()
+  })
+
   it('deletes with the displayed version', async () => {
     const user = userEvent.setup()
     vi.mocked(mcpServerService.listServers).mockResolvedValue([summary({ name: 'srv_del', version: '5' })])
