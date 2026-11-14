@@ -29,6 +29,12 @@ type WriteReview struct {
 
 var pathLocks sync.Map
 
+// sha256Hex returns the lower-case hex SHA-256 of data.
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 func lockPath(path string) func() {
 	lock, _ := pathLocks.LoadOrStore(path, &sync.Mutex{})
 	mutex := lock.(*sync.Mutex)
