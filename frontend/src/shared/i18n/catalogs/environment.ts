@@ -38,17 +38,9 @@ export const environmentCatalog = {
     'en-US': 'Environment',
     'zh-CN': '环境',
   },
-  'ai.ide.reconnecting': {
-    'en-US': 'Connection lost. Reconnecting; the IDE will resume automatically.',
-    'zh-CN': '连接已断开，正在重连，IDE 将自动恢复。',
-  },
   'ai.ide.connecting': {
     'en-US': 'Connecting to the live event stream...',
     'zh-CN': '正在建立实时事件连接…',
-  },
-  'ai.ide.connectionReady': {
-    'en-US': 'Live updates connected.',
-    'zh-CN': '实时事件已连接。',
   },
   'ai.ide.backoffReconnecting': {
     'en-US': 'Connection lost; reconnecting automatically.',

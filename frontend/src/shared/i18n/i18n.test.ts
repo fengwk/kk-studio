@@ -3,11 +3,11 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   getLocale,
   LOCALE_STORAGE_KEY,
-  messageCatalog,
   setLocale,
   translate,
   useI18n,
 } from '@/shared/i18n'
+import { messageCatalog } from '@/shared/i18n/catalogs'
 
 describe('i18n runtime', () => {
   it('defaults to en-US when the stored preference is absent or invalid', () => {

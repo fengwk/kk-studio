@@ -68,7 +68,7 @@ export function IssueAlerts({
         </div>
       )}
 
-      {/* 未决写操作未知状态警告条 (I07) */}
+      {/* 未决写操作未知状态警告条 */}
       {pendingUnknownAction && (
         <div className="form-error-banner issue-detail-alert issue-detail-alert-warning" role="alert">
           <div className="issue-detail-alert-heading">

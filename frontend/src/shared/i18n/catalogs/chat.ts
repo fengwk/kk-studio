@@ -1338,10 +1338,6 @@ export const chatCatalog = {
     'en-US': 'Source',
     'zh-CN': '来源',
   },
-  'ai.runtime.notification.entry.error': {
-    'en-US': 'Error',
-    'zh-CN': '错误',
-  },
   'ai.runtime.notification.entry.cancelled': {
     'en-US': 'Cancelled',
     'zh-CN': '已取消',

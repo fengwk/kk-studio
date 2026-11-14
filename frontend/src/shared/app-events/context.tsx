@@ -10,7 +10,7 @@ import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/pro
 
 const ApplicationEventContext = createContext<ApplicationEventManager | null>(null)
 
-export interface ApplicationEventProviderProps {
+interface ApplicationEventProviderProps {
   children: PropsWithChildren['children']
   /** 测试注入；默认使用生产 URL 与原生 WebSocket。 */
   url?: string

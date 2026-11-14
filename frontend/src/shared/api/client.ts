@@ -1,7 +1,7 @@
 import { API_RESPONSE_TYPES, type ApiRoutes } from './generated/contracts'
 import { getLocale, translate } from '@/shared/i18n'
 
-export type JsonParser = (text: string) => unknown
+type JsonParser = (text: string) => unknown
 
 export interface RequestOptions {
   signal?: AbortSignal

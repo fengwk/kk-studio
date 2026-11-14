@@ -7,7 +7,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
  * 读取全部 Catalog Agent 名称列表。
  * 针对拉取失败进行防御性捕获，避免抛出或生成非法幻影值。
  */
-export async function fetchAllCatalogAgentNames(): Promise<string[]> {
+async function fetchAllCatalogAgentNames(): Promise<string[]> {
   const names: string[] = []
 
   try {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   assembleHttpStatusCodeList,
-  assembleIntegerList,
   IntegerListValidationError,
   parseIntegerListTokens,
   splitTagInputDraft,
@@ -70,16 +69,16 @@ describe('integer-list helpers', () => {
   it('assembles integer list rejecting unsafe numbers, floats, out-of-range, and duplicates', () => {
     expect(assembleHttpStatusCodeList([408, '429', 500])).toEqual([408, 429, 500])
 
-    expect(() => assembleIntegerList(null)).toThrow(
+    expect(() => assembleHttpStatusCodeList(null)).toThrow(
       expect.objectContaining<Partial<IntegerListValidationError>>({ code: 'notInteger' }),
     )
-    expect(() => assembleIntegerList([true])).toThrow(
+    expect(() => assembleHttpStatusCodeList([true])).toThrow(
       expect.objectContaining<Partial<IntegerListValidationError>>({ code: 'notInteger' }),
     )
-    expect(() => assembleIntegerList([''])).toThrow(
+    expect(() => assembleHttpStatusCodeList([''])).toThrow(
       expect.objectContaining<Partial<IntegerListValidationError>>({ code: 'notInteger' }),
     )
-    expect(() => assembleIntegerList(['99999999999999999999'])).toThrow(
+    expect(() => assembleHttpStatusCodeList(['99999999999999999999'])).toThrow(
       expect.objectContaining<Partial<IntegerListValidationError>>({ code: 'notInteger' }),
     )
     expect(() => assembleHttpStatusCodeList([200])).toThrow(
@@ -87,6 +86,10 @@ describe('integer-list helpers', () => {
     )
     expect(() => assembleHttpStatusCodeList([600])).toThrow(
       expect.objectContaining<Partial<IntegerListValidationError>>({ code: 'outOfRange' }),
+    )
+    // 负整数先被解析为整数，再由范围检查拒绝。
+    expect(() => assembleHttpStatusCodeList(['-5'])).toThrow(
+      expect.objectContaining<Partial<IntegerListValidationError>>({ code: 'outOfRange', token: -5 }),
     )
     expect(() => assembleHttpStatusCodeList([429, '429'])).toThrow(
       expect.objectContaining<Partial<IntegerListValidationError>>({ code: 'duplicate' }),
@@ -100,8 +103,5 @@ describe('integer-list helpers', () => {
     expect(() => assembleHttpStatusCodeList([Infinity])).toThrow(
       expect.objectContaining<Partial<IntegerListValidationError>>({ code: 'notInteger' }),
     )
-
-    // assembleIntegerList without bounds accepts any safe integer
-    expect(assembleIntegerList([-5, '0', 999999])).toEqual([-5, 0, 999999])
   })
 })

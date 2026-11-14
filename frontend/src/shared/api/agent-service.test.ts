@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest'
-import { createAgentService, type CatalogRequester } from '@/shared/api/agent-service'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { agentService } from '@/shared/api/agent-service'
+import { request } from '@/shared/api/client'
 import { parseJsonPreservingPathEqualsNumbers } from '@/shared/lib/lossless-json-number'
 import type {
   AgentCreateDTO,
@@ -10,19 +11,24 @@ import type {
   ProviderUpdateDTO,
 } from '@/shared/api/generated/contracts'
 
-function createCatalogRequest() {
-  return vi.fn(async () => ({})) as unknown as CatalogRequester
-}
+vi.mock('@/shared/api/client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/shared/api/client')>()
+  return { ...actual, request: vi.fn() }
+})
+
+const catalogRequest = vi.mocked(request) as unknown as ReturnType<typeof vi.fn>
 
 describe('agentService', () => {
-  it('maps global resource lists to catalog routes', async () => {
-    const catalogRequest = createCatalogRequest()
-    const service = createAgentService(catalogRequest)
+  beforeEach(() => {
+    catalogRequest.mockReset()
+    catalogRequest.mockResolvedValue(undefined)
+  })
 
-    await service.listProviders()
-    await service.listModels()
-    await service.listAgents()
-    await service.listTools()
+  it('maps global resource lists to catalog routes', async () => {
+    await agentService.listProviders()
+    await agentService.listModels()
+    await agentService.listAgents()
+    await agentService.listTools()
 
     expect(catalogRequest).toHaveBeenNthCalledWith(1, 'GET /api/platform/providers', {})
     expect(catalogRequest).toHaveBeenNthCalledWith(
@@ -40,8 +46,6 @@ describe('agentService', () => {
    * 特别验证 Model 的 PUT/DELETE 端点使用尾段通配身份。
    */
   it('maps provider, model and agent mutations to name-based CRUD endpoints', async () => {
-    const catalogRequest = createCatalogRequest()
-    const service = createAgentService(catalogRequest)
     const providerBody: ProviderCreateDTO = {
       name: 'minimax',
       providerType: 'openai',
@@ -108,15 +112,15 @@ describe('agentService', () => {
       execution: { driver: 'builtin', settings: { modelName: 'MiniMax-M2.7', variant: 'default' } },
       config: { tools: [], skills: [], subagents: [] },
     }
-    await service.createProvider(providerBody)
-    await service.updateProvider('minimax', updateProviderBody)
-    await service.deleteProvider('minimax', '8')
-    await service.createModel(modelBody)
-    await service.updateModel('vendor/MiniMax M2.7', updateModelBody)
-    await service.deleteModel('vendor/MiniMax M2.7', '10')
-    await service.createAgent(agentBody)
-    await service.updateAgent('default-assistant', updateAgentBody)
-    await service.deleteAgent('default-assistant', '11')
+    await agentService.createProvider(providerBody)
+    await agentService.updateProvider('minimax', updateProviderBody)
+    await agentService.deleteProvider('minimax', '8')
+    await agentService.createModel(modelBody)
+    await agentService.updateModel('vendor/MiniMax M2.7', updateModelBody)
+    await agentService.deleteModel('vendor/MiniMax M2.7', '10')
+    await agentService.createAgent(agentBody)
+    await agentService.updateAgent('default-assistant', updateAgentBody)
+    await agentService.deleteAgent('default-assistant', '11')
 
     expect(catalogRequest).toHaveBeenNthCalledWith(1, 'POST /api/platform/providers', { body: providerBody })
     expect(catalogRequest).toHaveBeenNthCalledWith(2, 'PUT /api/platform/providers/{name}', {
@@ -155,11 +159,9 @@ describe('agentService', () => {
   })
 
   it('opts model catalog into the lossless JSON parser', async () => {
-    const catalogRequest = createCatalogRequest()
-    const service = createAgentService(catalogRequest)
 
-    await service.listModelCatalog('speed', 'cursor-1', 10)
-    await service.refreshModelCatalog()
+    await agentService.listModelCatalog('speed', 'cursor-1', 10)
+    await agentService.refreshModelCatalog()
 
     expect(catalogRequest).toHaveBeenNthCalledWith(
       1,

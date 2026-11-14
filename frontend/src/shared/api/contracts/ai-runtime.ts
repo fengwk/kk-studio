@@ -1,5 +1,4 @@
 import type {
-  HarnessBranchSettingsDTO,
   HarnessCommandOwnerDTO,
   HarnessCommandTargetDTO,
   HarnessExecutionSelectionDTO,
@@ -95,5 +94,3 @@ export function isSameExecution(a: unknown, b: unknown): boolean {
   // 服务端按键序规范化 settings，同一选择的 JSON 文本相同。
   return JSON.stringify(execA.settings) === JSON.stringify(execB.settings)
 }
-
-export type { HarnessBranchSettingsDTO }

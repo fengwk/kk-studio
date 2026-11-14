@@ -46,7 +46,7 @@
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { isRecord } from '@/shared/lib/value'
 
-export type ApplicationEventResourceKind =
+type ApplicationEventResourceKind =
   | 'thread'
   | 'canvas'
   | 'thread-tree'
@@ -65,7 +65,7 @@ export type ApplicationEventResource =
 export type ApplicationEventName = 'version' | 'realtime' | 'changed' | 'revision'
 
 /** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
-export type ApplicationEventCursor = string
+type ApplicationEventCursor = string
 
 /** ide-use revision：canonical 正十进制字符串，不超过 9223372036854775807。 */
 export type ApplicationEventRevision = string
@@ -209,165 +209,219 @@ export function decodeServerMessage(raw: string): ApplicationEventServerMessage 
   if (!isRecord(parsed) || typeof parsed.type !== 'string') {
     return null
   }
+  return decodeMessage(parsed)
+}
+
+/** 按 type 分派；未声明的 type 一律拒绝。各解码器只接受精确字段集。 */
+function decodeMessage(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
   switch (parsed.type) {
-    case 'connected': {
-      if (!hasOnlyFields(parsed, ['type', 'eventNodeId', 'connectionId', 'heartbeatIntervalMillis'])) {
-        return null
-      }
-      const eventNodeId = parseUuid(parsed.eventNodeId)
-      const connectionId = parseUuid(parsed.connectionId)
-      // heartbeat 间隔必须是正整数数量级内的 canonical 正十进制字符串。
-      const heartbeatIntervalMillis = parseHeartbeatIntervalMillis(
-        parsed.heartbeatIntervalMillis,
-      )
-      if (eventNodeId == null || connectionId == null || heartbeatIntervalMillis == null) {
-        return null
-      }
-      return {
-        type: 'connected',
-        eventNodeId,
-        connectionId,
-        heartbeatIntervalMillis,
-      }
-    }
-    case 'heartbeat': {
-      if (!hasOnlyFields(parsed, ['type'])) {
-        return null
-      }
-      return { type: 'heartbeat' }
-    }
-    case 'ide-use-accepted': {
-      if (!hasOnlyFields(parsed, ['type', 'revision'])) {
-        return null
-      }
-      const revision = parseRevision(parsed.revision)
-      if (revision == null) {
-        return null
-      }
-      return { type: 'ide-use-accepted', revision }
-    }
-    case 'subscribed': {
-      if (!hasOnlyFields(parsed, ['type', 'resource', 'cursor'])) {
-        return null
-      }
-      const resource = parseResource(parsed.resource)
-      if (resource == null) {
-        return null
-      }
-      const cursor = parseCursor(parsed.cursor)
-      if (cursor == null) {
-        return null
-      }
-      if (isHintResourceKind(resource.kind) && cursor !== '0') {
-        return null
-      }
-      return { type: 'subscribed', resource, cursor }
-    }
-    case 'event': {
-      if (!hasOnlyFields(parsed, EVENT_FIELDS)) {
-        return null
-      }
-      const resource = parseResource(parsed.resource)
-      if (resource == null || !isEventName(parsed.name)) {
-        return null
-      }
-      // resource/name 组合必须合法：thread 仅 version|realtime，canvas 仅 version。
-      if (isThreadResource(resource)) {
-        if (parsed.name === 'version') {
-          const version = parseSingleCursorField(parsed.data, 'version')
-          // durable 事件必须携带 canonical cursor，且与 data.version 完全相等。
-          if (version == null || parsed.cursor !== version) {
-            return null
-          }
-          const data = { version }
-          return { type: 'event', resource, name: 'version', data, cursor: data.version }
-        }
-        if (parsed.name === 'realtime') {
-          // realtime 事件绝不携带 cursor；data 必须是非数组 JSON 对象。
-          if (parsed.cursor !== undefined) {
-            return null
-          }
-          const data = isRecord(parsed.data) ? parsed.data : null
-          if (data == null) {
-            return null
-          }
-          return { type: 'event', resource, name: 'realtime', data }
-        }
-        return null
-      }
-      if (isCanvasResource(resource) && parsed.name === 'revision') {
-        const revision = parseSingleCursorField(parsed.data, 'revision')
-        // durable 事件必须携带 canonical cursor，且与 data.revision 完全相等。
-        if (revision == null || parsed.cursor !== revision) {
-          return null
-        }
-        const data = { revision }
-        return { type: 'event', resource, name: 'revision', data, cursor: data.revision }
-      }
-      if (resource.kind === 'projects' && parsed.name === 'changed') {
-        const projectId = parseSingleUuidField(parsed.data, 'projectId')
-        if (projectId == null || parsed.cursor !== undefined) {
-          return null
-        }
-        return { type: 'event', resource, name: 'changed', data: { projectId } }
-      }
-      if (resource.kind === 'thread-tree' && parsed.name === 'changed') {
-        // 提示型事件只提示回读：data 恒为空对象且绝不携带 cursor。
-        if (!hasExactFields(parsed.data, []) || parsed.cursor !== undefined) {
-          return null
-        }
-        return { type: 'event', resource, name: 'changed', data: {} }
-      }
-      if (resource.kind === 'interactions' && parsed.name === 'changed') {
-        const rootThreadId = parseSingleUuidField(parsed.data, 'rootThreadId')
-        if (rootThreadId == null || parsed.cursor !== undefined) {
-          return null
-        }
-        return { type: 'event', resource, name: 'changed', data: { rootThreadId } }
-      }
-      if (resource.kind === 'environments' && parsed.name === 'changed') {
-        if (!hasExactFields(parsed.data, []) || parsed.cursor !== undefined) {
-          return null
-        }
-        return { type: 'event', resource, name: 'changed', data: {} }
-      }
-      return null
-    }
-    case 'resync': {
-      if (!hasOnlyFields(parsed, ['type', 'resource'])) {
-        return null
-      }
-      const resource = parseResource(parsed.resource)
-      if (resource == null) {
-        return null
-      }
-      return { type: 'resync', resource }
-    }
-    case 'error': {
-      if (!hasOnlyFields(parsed, ['type', 'resource', 'code', 'message'])) {
-        return null
-      }
-      if (parsed.resource === undefined) {
-        if (typeof parsed.code !== 'string' || parsed.code.length === 0) {
-          return null
-        }
-        if (typeof parsed.message !== 'string') {
-          return null
-        }
-        return { type: 'error', code: parsed.code, message: parsed.message }
-      }
-      const resource = parseResource(parsed.resource)
-      if (resource == null || typeof parsed.code !== 'string' || parsed.code.length === 0) {
-        return null
-      }
-      if (typeof parsed.message !== 'string') {
-        return null
-      }
-      return { type: 'error', resource, code: parsed.code, message: parsed.message }
-    }
+    case 'connected':
+      return decodeConnected(parsed)
+    case 'heartbeat':
+      return decodeHeartbeat(parsed)
+    case 'ide-use-accepted':
+      return decodeIdeUseAccepted(parsed)
+    case 'subscribed':
+      return decodeSubscribed(parsed)
+    case 'event':
+      return decodeEvent(parsed)
+    case 'resync':
+      return decodeResync(parsed)
+    case 'error':
+      return decodeError(parsed)
     default:
       return null
   }
+}
+
+function decodeConnected(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
+  if (!hasOnlyFields(parsed, ['type', 'eventNodeId', 'connectionId', 'heartbeatIntervalMillis'])) {
+    return null
+  }
+  const eventNodeId = parseUuid(parsed.eventNodeId)
+  const connectionId = parseUuid(parsed.connectionId)
+  // heartbeat 间隔必须是正整数数量级内的 canonical 正十进制字符串。
+  const heartbeatIntervalMillis = parseHeartbeatIntervalMillis(parsed.heartbeatIntervalMillis)
+  if (eventNodeId == null || connectionId == null || heartbeatIntervalMillis == null) {
+    return null
+  }
+  return { type: 'connected', eventNodeId, connectionId, heartbeatIntervalMillis }
+}
+
+function decodeHeartbeat(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
+  if (!hasOnlyFields(parsed, ['type'])) {
+    return null
+  }
+  return { type: 'heartbeat' }
+}
+
+function decodeIdeUseAccepted(
+  parsed: Record<string, unknown>,
+): ApplicationEventServerMessage | null {
+  if (!hasOnlyFields(parsed, ['type', 'revision'])) {
+    return null
+  }
+  const revision = parseRevision(parsed.revision)
+  if (revision == null) {
+    return null
+  }
+  return { type: 'ide-use-accepted', revision }
+}
+
+function decodeSubscribed(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
+  if (!hasOnlyFields(parsed, ['type', 'resource', 'cursor'])) {
+    return null
+  }
+  const resource = parseResource(parsed.resource)
+  if (resource == null) {
+    return null
+  }
+  const cursor = parseCursor(parsed.cursor)
+  if (cursor == null) {
+    return null
+  }
+  // 提示型资源的 ack cursor 恒为 '0'。
+  if (isHintResourceKind(resource.kind) && cursor !== '0') {
+    return null
+  }
+  return { type: 'subscribed', resource, cursor }
+}
+
+function decodeResync(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
+  if (!hasOnlyFields(parsed, ['type', 'resource'])) {
+    return null
+  }
+  const resource = parseResource(parsed.resource)
+  if (resource == null) {
+    return null
+  }
+  return { type: 'resync', resource }
+}
+
+function decodeError(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
+  if (!hasOnlyFields(parsed, ['type', 'resource', 'code', 'message'])) {
+    return null
+  }
+  if (typeof parsed.code !== 'string' || parsed.code.length === 0) {
+    return null
+  }
+  if (typeof parsed.message !== 'string') {
+    return null
+  }
+  if (parsed.resource === undefined) {
+    return { type: 'error', code: parsed.code, message: parsed.message }
+  }
+  const resource = parseResource(parsed.resource)
+  if (resource == null) {
+    return null
+  }
+  return { type: 'error', resource, code: parsed.code, message: parsed.message }
+}
+
+/** event 先校验公共形状，再按 resource/name 组合分派：每种组合只接受各自的 data 与 cursor。 */
+function decodeEvent(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
+  if (!hasOnlyFields(parsed, EVENT_FIELDS)) {
+    return null
+  }
+  const resource = parseResource(parsed.resource)
+  if (resource == null || !isEventName(parsed.name)) {
+    return null
+  }
+  const name = parsed.name
+  // thread 仅 version|realtime，canvas 仅 revision，其余提示型资源仅 changed。
+  switch (resource.kind) {
+    case 'thread':
+      return decodeThreadEvent(parsed, resource, name)
+    case 'canvas':
+      return name === 'revision' ? decodeCanvasRevisionEvent(parsed, resource) : null
+    case 'projects':
+      return name === 'changed' ? decodeProjectChangedEvent(parsed, resource) : null
+    case 'thread-tree':
+      return name === 'changed' ? decodeTreeChangedEvent(parsed, resource) : null
+    case 'interactions':
+      return name === 'changed' ? decodeInteractionsChangedEvent(parsed, resource) : null
+    case 'environments':
+      return name === 'changed' ? decodeEnvironmentsChangedEvent(parsed, resource) : null
+  }
+}
+
+function decodeThreadEvent(
+  parsed: Record<string, unknown>,
+  resource: ApplicationEventResource & { kind: 'thread' },
+  name: ApplicationEventName,
+): ApplicationEventServerMessage | null {
+  if (name === 'version') {
+    const version = parseSingleCursorField(parsed.data, 'version')
+    // durable 事件必须携带 canonical cursor，且与 data.version 完全相等。
+    if (version == null || parsed.cursor !== version) {
+      return null
+    }
+    return { type: 'event', resource, name: 'version', data: { version }, cursor: version }
+  }
+  if (name === 'realtime') {
+    // realtime 事件绝不携带 cursor；data 必须是非数组 JSON 对象。
+    if (parsed.cursor !== undefined || !isRecord(parsed.data)) {
+      return null
+    }
+    return { type: 'event', resource, name: 'realtime', data: parsed.data }
+  }
+  return null
+}
+
+function decodeCanvasRevisionEvent(
+  parsed: Record<string, unknown>,
+  resource: ApplicationEventResource & { kind: 'canvas' },
+): ApplicationEventServerMessage | null {
+  const revision = parseSingleCursorField(parsed.data, 'revision')
+  // durable 事件必须携带 canonical cursor，且与 data.revision 完全相等。
+  if (revision == null || parsed.cursor !== revision) {
+    return null
+  }
+  return { type: 'event', resource, name: 'revision', data: { revision }, cursor: revision }
+}
+
+function decodeProjectChangedEvent(
+  parsed: Record<string, unknown>,
+  resource: ApplicationEventResource & { kind: 'projects' },
+): ApplicationEventServerMessage | null {
+  const projectId = parseSingleUuidField(parsed.data, 'projectId')
+  if (projectId == null || parsed.cursor !== undefined) {
+    return null
+  }
+  return { type: 'event', resource, name: 'changed', data: { projectId } }
+}
+
+/** thread-tree 的提示型事件：根 id 在 resource 上，data 恒为空对象且绝不携带 cursor。 */
+function decodeTreeChangedEvent(
+  parsed: Record<string, unknown>,
+  resource: ApplicationEventResource & { kind: 'thread-tree' },
+): ApplicationEventServerMessage | null {
+  if (!hasExactFields(parsed.data, []) || parsed.cursor !== undefined) {
+    return null
+  }
+  return { type: 'event', resource, name: 'changed', data: {} }
+}
+
+/** environments 的提示型事件：data 恒为空对象且绝不携带 cursor。 */
+function decodeEnvironmentsChangedEvent(
+  parsed: Record<string, unknown>,
+  resource: ApplicationEventResource & { kind: 'environments' },
+): ApplicationEventServerMessage | null {
+  if (!hasExactFields(parsed.data, []) || parsed.cursor !== undefined) {
+    return null
+  }
+  return { type: 'event', resource, name: 'changed', data: {} }
+}
+
+function decodeInteractionsChangedEvent(
+  parsed: Record<string, unknown>,
+  resource: ApplicationEventResource & { kind: 'interactions' },
+): ApplicationEventServerMessage | null {
+  const rootThreadId = parseSingleUuidField(parsed.data, 'rootThreadId')
+  if (rootThreadId == null || parsed.cursor !== undefined) {
+    return null
+  }
+  return { type: 'event', resource, name: 'changed', data: { rootThreadId } }
 }
 
 /** 只允许声明过的字段；多余/未知字段拒绝。 */
@@ -404,19 +458,6 @@ function isHintResourceKind(kind: ApplicationEventResourceKind): boolean {
 
 function isEventName(value: unknown): value is ApplicationEventName {
   return value === 'version' || value === 'realtime' || value === 'changed' || value === 'revision'
-}
-
-/** resource.kind 判别守卫：保证 thread/canvas 各自的事件组合在类型层面也合法。 */
-function isThreadResource(
-  resource: ApplicationEventResource,
-): resource is ApplicationEventResource & { kind: 'thread' } {
-  return resource.kind === 'thread'
-}
-
-function isCanvasResource(
-  resource: ApplicationEventResource,
-): resource is ApplicationEventResource & { kind: 'canvas' } {
-  return resource.kind === 'canvas'
 }
 
 function parseCursor(value: unknown): ApplicationEventCursor | null {

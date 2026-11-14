@@ -3,7 +3,7 @@ import type { SystemSettingsDTO, SystemSettingsSchemaDTO } from '@/shared/api/ge
 /**
  * 默认模型 HTTP 重试状态码列表。
  */
-export const DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES = [408, 429, 500, 502, 503, 504]
+const DEFAULT_MODEL_HTTP_RETRY_STATUS_CODES = [408, 429, 500, 502, 503, 504]
 
 /**
  * 测试基座：与 share DTO / V1 默认行一致的完整 GET {@code /api/platform/settings} 响应形状。

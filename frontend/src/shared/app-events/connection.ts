@@ -13,7 +13,7 @@ import {
  * - stopped：手动断开或 protocol/policy 终止；不自动重连；
  * - idle：尚未 connect() 的初始状态。
  */
-export type ApplicationEventConnectionStatus =
+type ApplicationEventConnectionStatus =
   | 'idle'
   | 'connecting'
   | 'ready'
@@ -21,16 +21,16 @@ export type ApplicationEventConnectionStatus =
   | 'stopped'
 
 /** backoff 的结构化原因：UI 用它区分恢复路径，不解析文案。 */
-export type ApplicationEventConnectionBackoffCause =
+type ApplicationEventConnectionBackoffCause =
   | 'transport-lost'
   | 'handshake-timeout'
   | 'liveness-timeout'
   | 'server-restart'
 
 /** stopped 的结构化原因：manual 是应用主动断开；protocol/policy 终止不能自动恢复。 */
-export type ApplicationEventConnectionStopCause = 'manual' | 'protocol' | 'policy'
+type ApplicationEventConnectionStopCause = 'manual' | 'protocol' | 'policy'
 
-export type ApplicationEventConnectionReason =
+type ApplicationEventConnectionReason =
   | { kind: 'connecting'; transportOpen: boolean }
   | { kind: 'backoff'; cause: ApplicationEventConnectionBackoffCause; retryAt: number }
   | { kind: 'stopped'; cause: ApplicationEventConnectionStopCause }
@@ -43,7 +43,7 @@ export interface ApplicationEventConnectionState {
 
 export type ApplicationEventSocketFactory = (url: string) => WebSocket
 
-export interface ApplicationEventConnectionOptions {
+interface ApplicationEventConnectionOptions {
   url: string
   /** 测试注入；生产默认使用全局 WebSocket。 */
   socketFactory?: ApplicationEventSocketFactory

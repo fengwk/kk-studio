@@ -79,7 +79,7 @@ export function IssueSpecPane({
 }
 
 /** Spec 只读视图：标题、描述与状态元数据。 */
-export function IssueSpecView({
+function IssueSpecView({
   issue,
   editDisabled,
   onEdit,

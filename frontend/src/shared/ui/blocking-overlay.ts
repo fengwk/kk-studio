@@ -19,7 +19,7 @@ export function hasBlockingModal(root: ParentNode = document): boolean {
   return root.querySelector(BLOCKING_MODAL_SELECTOR) != null
 }
 
-export function isInsideBlockingModal(element: Element): boolean {
+function isInsideBlockingModal(element: Element): boolean {
   return element.closest(BLOCKING_MODAL_SELECTOR) != null
 }
 

@@ -3,9 +3,9 @@ import { formatByteCount } from '@/shared/lib/format-bytes'
 import { createUuid } from '@/shared/lib/uuid'
 
 /** 共享存储上传的媒体类别；mediaType 负责精确分类，mediaKind 只是本地路由/限制键。 */
-export type StorageMediaKind = 'image' | 'video' | 'audio' | 'file'
+type StorageMediaKind = 'image' | 'video' | 'audio' | 'file'
 
-export interface UploadLimits {
+interface UploadLimits {
   image: number
   video: number
   audio: number
@@ -13,7 +13,7 @@ export interface UploadLimits {
 }
 
 /** 上传大小限制（字节）：图片 30 MiB、视频 100 MiB、音频 15 MiB、文件 30 MiB。 */
-export const UPLOAD_LIMITS: UploadLimits = {
+const UPLOAD_LIMITS: UploadLimits = {
   image: 30 * 1024 * 1024,
   video: 100 * 1024 * 1024,
   audio: 15 * 1024 * 1024,

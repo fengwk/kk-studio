@@ -15,7 +15,7 @@ export type IssueActionKind =
   | 'ACTIVITY'
 
 /** 每种写操作的精确 payload；键与 {@link IssueActionKind} 一一对应。 */
-export interface IssueActionPayloads {
+interface IssueActionPayloads {
   TRANSITION: { toState: string }
   RECOVER: Record<string, never>
   REOPEN: Record<string, never>
@@ -27,7 +27,7 @@ export interface IssueActionPayloads {
 }
 
 /** 单条侧车记录：kind 决定 payload 的精确形状。 */
-export interface PendingIssueActionOf<K extends IssueActionKind = IssueActionKind> {
+interface PendingIssueActionOf<K extends IssueActionKind = IssueActionKind> {
   issueId: string
   kind: K
   requestKey: string
@@ -354,7 +354,7 @@ export function isPayloadEqual(a: unknown, b: unknown): boolean {
 /**
  * 严格校验 PendingAction 是否为合法的动作之一，且核对 action.issueId === expectedIssueId
  */
-export function validAction(value: unknown, expectedIssueId?: string): value is PendingIssueAction {
+function validAction(value: unknown, expectedIssueId?: string): value is PendingIssueAction {
   if (!isRecord(value)) {
     return false
   }

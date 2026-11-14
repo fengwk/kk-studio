@@ -30,7 +30,7 @@ import type {
  *
  * <p>Issue 没有归档状态；Project 的归档是项目生命周期的一部分。
  */
-export function createProjectsApi() {
+function createProjectsApi() {
   return {
     listProjects: (includeArchived = false): Promise<ProjectDTO[]> =>
       request('GET /api/project/projects', { query: { includeArchived } }),

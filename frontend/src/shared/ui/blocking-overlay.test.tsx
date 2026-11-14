@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest'
 import {
   hasBlockingModal,
   isEditableKeyboardTarget,
-  isInsideBlockingModal,
   shouldDeferToBlockingModal,
 } from '@/shared/ui/blocking-overlay'
 
@@ -33,8 +32,6 @@ describe('keyboard priority guards', () => {
     document.body.innerHTML = '<div class="modal-backdrop"><section id="inside"></section></div><section id="outside"></section>'
     const inside = document.getElementById('inside')!
     const outside = document.getElementById('outside')!
-    expect(isInsideBlockingModal(inside)).toBe(true)
-    expect(isInsideBlockingModal(outside)).toBe(false)
     expect(shouldDeferToBlockingModal(inside)).toBe(false)
     expect(shouldDeferToBlockingModal(outside)).toBe(true)
     expect(shouldDeferToBlockingModal(null)).toBe(true)

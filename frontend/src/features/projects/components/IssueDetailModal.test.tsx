@@ -797,7 +797,7 @@ describe('IssueDetailModal', () => {
     ],
   }
 
-  it('persists transition request to sidecar and displays unknown banner on network failure; supports exact retry (I07)', async () => {
+  it('persists transition request to sidecar and displays unknown banner on network failure; supports exact retry', async () => {
     // 测试意图：网络错误或 500 时，流转操作必须持久化至 sidecar 并显示未知状态横幅，按钮被禁用，支持原样精确重试
     let callCount = 0
     let recordedRequestKey = ''
@@ -875,7 +875,7 @@ describe('IssueDetailModal', () => {
     })
   })
 
-  it('cleans sidecar on 409 conflict without entering unknown banner (I07)', async () => {
+  it('cleans sidecar on 409 conflict without entering unknown banner', async () => {
     // 测试意图：409 Conflict 表示服务端已明确拒绝，必须清理 sidecar，不展示未决警告
     const api = createMockApi({
       transitionIssue: vi.fn().mockRejectedValue(new ApiError('Version conflict', 409)),
@@ -903,7 +903,7 @@ describe('IssueDetailModal', () => {
     expect(loadPendingAction(issueId)).toEqual({ type: 'NONE' })
   })
 
-  it('allows explicit discard of unknown action with confirmation warning (I07)', async () => {
+  it('allows explicit discard of unknown action with confirmation warning', async () => {
     // 测试意图：对于从 storage 恢复的未知操作，用户点击放弃时弹出显式警告，确认后清除 sidecar
     storePendingAction(issueId, {
       issueId,
@@ -1051,7 +1051,7 @@ describe('IssueDetailModal', () => {
     getItemSpy.mockRestore()
   })
 
-  it('rotates requestKey when payload changes in draft inputs, preventing payload switching under same key (I07)', async () => {
+  it('rotates requestKey when payload changes in draft inputs, preventing payload switching under same key', async () => {
     // 测试意图：每次草稿输入修改后，下一次提交的 requestKey 必须重新生成，杜绝同一 requestKey 下静默更换 payload
     const keys: string[] = []
     const api = createMockApi({
@@ -1100,7 +1100,7 @@ describe('IssueDetailModal', () => {
     })
   })
 
-  it('draft inputs do not leak across modal close and reopen (I09)', async () => {
+  it('draft inputs do not leak across modal close and reopen', async () => {
     // 测试意图：在 IssueDetailModal 中输入未提交草稿，关闭弹窗后再打开，草稿输入被重置清理
     const api = createMockApi()
     const { rerender } = renderModal(

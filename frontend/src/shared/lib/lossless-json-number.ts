@@ -6,12 +6,12 @@
  */
 
 /** 内部 sentinel：JSON.parse reviver 保留下来的 number 原文。 */
-export interface RawJsonNumber {
+interface RawJsonNumber {
   readonly rawJson: string
 }
 
 /** `JSON.rawJSON` 返回的原生对象：JSON.stringify 会把它写成 JSON number。 */
-export interface NativeRawJsonNumber {
+interface NativeRawJsonNumber {
   readonly rawJSON: string
 }
 
