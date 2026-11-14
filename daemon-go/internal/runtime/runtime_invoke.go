@@ -200,8 +200,25 @@ func (r *Runtime) encodeResult(ctx context.Context, id string, result Capability
 	if !progress && budget <= 0 {
 		return nil, errors.New("maximumResourceBytes must be positive")
 	}
-	var total int64
+	if err := checkResultBudget(result.Contents, budget, progress); err != nil {
+		return nil, err
+	}
+	out := &protocol.CapabilityResult{CallId: stringPtr(result.CallID), Error: boolPtr(result.Error), DetailsJson: stringPtr(string(details))}
 	for _, content := range result.Contents {
+		item, err := r.encodeContent(ctx, id, content, progress)
+		if err != nil {
+			return nil, err
+		}
+		out.Contents = append(out.Contents, item)
+	}
+	return out, nil
+}
+
+// checkResultBudget rejects results whose payload and already emitted progress exceed the
+// invocation's declared output budget.
+func checkResultBudget(contents []ResultContent, budget int64, progress bool) error {
+	var total int64
+	for _, content := range contents {
 		var size int64
 		switch content.Type {
 		case "binary":
@@ -209,14 +226,14 @@ func (r *Runtime) encodeResult(ctx context.Context, id string, result Capability
 		case "resource":
 			size = content.Size
 			if size < 0 {
-				return nil, errors.New("resource size must not be negative")
+				return errors.New("resource size must not be negative")
 			}
 		case "text", "json":
 		default:
-			return nil, errors.New("capability result content type is invalid")
+			return errors.New("capability result content type is invalid")
 		}
 		if progress && content.Type != "text" && content.Type != "json" {
-			return nil, errors.New("progress does not allow binary content")
+			return errors.New("progress does not allow binary content")
 		}
 		if size > budget-total {
 			actual := size
@@ -225,47 +242,51 @@ func (r *Runtime) encodeResult(ctx context.Context, id string, result Capability
 			} else {
 				actual = maxSignedInt64
 			}
-			return nil, errors.New(toolOutputExceededMessage(actual, budget))
+			return errors.New(toolOutputExceededMessage(actual, budget))
 		}
 		total += size
 	}
-	out := &protocol.CapabilityResult{CallId: stringPtr(result.CallID), Error: boolPtr(result.Error), DetailsJson: stringPtr(string(details))}
-	for _, content := range result.Contents {
-		item := &protocol.Content{}
-		switch content.Type {
-		case "text":
-			item.Body = &protocol.Content_Text{Text: &protocol.TextContent{Text: stringPtr(content.Text)}}
-		case "json":
-			if len(content.JSON) > maxContentJSONBytes {
-				return nil, errors.New("capability JSON content exceeds 1 MiB")
-			}
-			var v any
-			if err := jsonv2.Unmarshal(content.JSON, &v); err != nil {
-				return nil, errors.New("capability JSON content is invalid")
-			}
-			item.Body = &protocol.Content_Json{Json: &protocol.JsonContent{Json: stringPtr(string(content.JSON))}}
-		case "binary":
-			if progress {
-				return nil, errors.New("progress does not allow binary content")
-			}
-			if r.options.Resources == nil {
-				return nil, errors.New("resource upload is not configured")
-			}
-			uploaded, err := r.options.Resources.Upload(ctx, id, content)
-			if err != nil {
-				var uploadErr *ResourceUploadError
-				cleanupConfirmed := errors.As(err, &uploadErr) && uploadErr.CleanupConfirmed
-				return nil, &resourceUploadFailure{cleanupConfirmed: cleanupConfirmed}
-			}
-			item.Body = &protocol.Content_Resource{Resource: &protocol.ResourceContent{UploadId: stringPtr(uploaded.UploadID), MediaType: stringPtr(uploaded.MediaType), Name: uploaded.Name, Size: int64Ptr(uploaded.Size), Sha256: stringPtr(uploaded.SHA256), Preview: stringPtr(uploaded.Preview)}}
-		case "resource":
-			item.Body = &protocol.Content_Resource{Resource: &protocol.ResourceContent{UploadId: stringPtr(content.UploadID), MediaType: stringPtr(content.MediaType), Name: content.Name, Size: int64Ptr(content.Size), Sha256: stringPtr(content.SHA256), Preview: stringPtr(content.Preview)}}
-		default:
-			return nil, errors.New("capability result content type is invalid")
+	return nil
+}
+
+// encodeContent converts one result item to its wire form, uploading binary payloads and
+// reporting a cleanup fact the runtime must remember for the execution-exit frame.
+func (r *Runtime) encodeContent(ctx context.Context, id string, content ResultContent, progress bool) (*protocol.Content, error) {
+	switch content.Type {
+	case "text":
+		return &protocol.Content{Body: &protocol.Content_Text{Text: &protocol.TextContent{Text: stringPtr(content.Text)}}}, nil
+	case "json":
+		if len(content.JSON) > maxContentJSONBytes {
+			return nil, errors.New("capability JSON content exceeds 1 MiB")
 		}
-		out.Contents = append(out.Contents, item)
+		var v any
+		if err := jsonv2.Unmarshal(content.JSON, &v); err != nil {
+			return nil, errors.New("capability JSON content is invalid")
+		}
+		return &protocol.Content{Body: &protocol.Content_Json{Json: &protocol.JsonContent{Json: stringPtr(string(content.JSON))}}}, nil
+	case "binary":
+		return r.uploadContent(ctx, id, content, progress)
+	case "resource":
+		return &protocol.Content{Body: &protocol.Content_Resource{Resource: &protocol.ResourceContent{UploadId: stringPtr(content.UploadID), MediaType: stringPtr(content.MediaType), Name: content.Name, Size: int64Ptr(content.Size), Sha256: stringPtr(content.SHA256), Preview: stringPtr(content.Preview)}}}, nil
+	default:
+		return nil, errors.New("capability result content type is invalid")
 	}
-	return out, nil
+}
+
+func (r *Runtime) uploadContent(ctx context.Context, id string, content ResultContent, progress bool) (*protocol.Content, error) {
+	if progress {
+		return nil, errors.New("progress does not allow binary content")
+	}
+	if r.options.Resources == nil {
+		return nil, errors.New("resource upload is not configured")
+	}
+	uploaded, err := r.options.Resources.Upload(ctx, id, content)
+	if err != nil {
+		var uploadErr *ResourceUploadError
+		cleanupConfirmed := errors.As(err, &uploadErr) && uploadErr.CleanupConfirmed
+		return nil, &resourceUploadFailure{cleanupConfirmed: cleanupConfirmed}
+	}
+	return &protocol.Content{Body: &protocol.Content_Resource{Resource: &protocol.ResourceContent{UploadId: stringPtr(uploaded.UploadID), MediaType: stringPtr(uploaded.MediaType), Name: uploaded.Name, Size: int64Ptr(uploaded.Size), Sha256: stringPtr(uploaded.SHA256), Preview: stringPtr(uploaded.Preview)}}}, nil
 }
 
 func (r *Runtime) handleCancel(e *protocol.Envelope) error {
