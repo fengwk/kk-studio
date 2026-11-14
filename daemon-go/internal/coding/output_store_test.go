@@ -75,29 +75,6 @@ func TestAppendFinalNoteToPublishedOutput(t *testing.T) {
 	}
 }
 
-// COD-T-006
-func TestListFilesWithSuffixSkipsNonWorkspaceEntries(t *testing.T) {
-	store, err := OpenTextOutputStore(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(store.Root(), "plain.log"), nil, 0600); err != nil {
-		t.Fatal(err)
-	}
-	file, part, err := store.CreateStagingFile("call")
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = file.Close()
-	paths, err := store.ListFilesWithSuffix(".part")
-	if err != nil || len(paths) != 1 || paths[0] != part {
-		t.Fatalf("paths=%v err=%v", paths, err)
-	}
-	if err := store.DeleteStaging(part); err != nil {
-		t.Fatal(err)
-	}
-}
-
 // COD-T-007
 func TestPublishUnregisteredPartFile(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
@@ -336,9 +313,6 @@ func TestOutputStoreDataDirCacheAndMissingRoots(t *testing.T) {
 	if removed, err := first.Sweep(time.Minute); err != nil || removed != 0 {
 		t.Fatalf("missing-root sweep removed=%d err=%v", removed, err)
 	}
-	if paths, err := first.ListFilesWithSuffix(".log"); err != nil || paths != nil {
-		t.Fatalf("missing-root paths=%v err=%v", paths, err)
-	}
 }
 
 // COD-F-015
@@ -381,8 +355,8 @@ func TestOutputSpoolKeepsShortOverlappingPreviewAndIgnoresWritesAfterTruncation(
 	limited.Write(bytes.Repeat([]byte("a"), inlineOutputBytes+1))
 	captured := limited.captured
 	limited.Write([]byte("later"))
-	if limited.captured != captured || !limited.IsCaptureTruncated() || limited.TotalBytes() != int64(inlineOutputBytes+6) {
-		t.Fatalf("capture=%d total=%d truncated=%v", limited.captured, limited.TotalBytes(), limited.IsCaptureTruncated())
+	if limited.captured != captured || !limited.IsCaptureTruncated() || limited.total != int64(inlineOutputBytes+6) {
+		t.Fatalf("capture=%d total=%d truncated=%v", limited.captured, limited.total, limited.IsCaptureTruncated())
 	}
 	_ = limited.Close()
 }

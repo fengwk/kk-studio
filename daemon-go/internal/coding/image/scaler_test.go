@@ -16,6 +16,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/disintegration/imaging"
 )
 
 // COD-N-007: exactly two scaling slots can be occupied before further work must wait.
@@ -79,7 +81,7 @@ func TestTierBoxesAndNoUpscale(t *testing.T) {
 			if err := png.Encode(&source, patternImage(tc.w, tc.h, false)); err != nil {
 				t.Fatal(err)
 			}
-			result, err := Scale("image/png", source.Bytes(), tc.tier, CatmullRom)
+			result, err := ScaleContext(context.Background(), "image/png", source.Bytes(), tc.tier, 0)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -103,7 +105,7 @@ func TestScaleContextAppliesOutputLimitOnlyToResizedImage(t *testing.T) {
 	if err := png.Encode(&source, patternImage(2000, 1000, false)); err != nil {
 		t.Fatal(err)
 	}
-	wantResized, err := Scale("image/png", source.Bytes(), P720, ImagingLanczos)
+	wantResized, err := ScaleContext(context.Background(), "image/png", source.Bytes(), P720, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,19 +117,6 @@ func TestScaleContextAppliesOutputLimitOnlyToResizedImage(t *testing.T) {
 	original, err := ScaleContext(context.Background(), "image/png", source.Bytes(), Original, 1)
 	if err != nil || original.Resized || !bytes.Equal(original.Bytes, source.Bytes()) {
 		t.Fatalf("ORIGINAL must pass through without resize or byte limit: result=%#v err=%v", original, err)
-	}
-}
-
-func TestBenchmarkResizeEnginesProduceRequestedDimensions(t *testing.T) {
-	src := patternImage(63, 41, false)
-	for _, engine := range []Engine{CatmullRomSingle, CatmullRom, ImagingLanczos} {
-		got, err := ResizeForBenchmark(src, 19, 13, engine)
-		if err != nil {
-			t.Fatalf("engine %d: %v", engine, err)
-		}
-		if got.Bounds() != image.Rect(0, 0, 19, 13) {
-			t.Fatalf("engine %d bounds=%v, want %v", engine, got.Bounds(), image.Rect(0, 0, 19, 13))
-		}
 	}
 }
 
@@ -169,7 +158,7 @@ func TestEXIFOrientationsMapAllEightDirections(t *testing.T) {
 func TestScaleReadsEXIFOrientationAndResizesDimensions(t *testing.T) {
 	for orientation := 1; orientation <= 8; orientation++ {
 		data := makeJPEGQuadrants(t, orientation)
-		result, err := Scale("image/jpeg", data, P720, CatmullRom)
+		result, err := ScaleContext(context.Background(), "image/jpeg", data, P720, 0)
 		if err != nil {
 			t.Fatalf("orientation %d: %v", orientation, err)
 		}
@@ -211,7 +200,7 @@ func TestAnimationMetadataMatchesJavaBehavior(t *testing.T) {
 		t.Fatalf("APNG present=%v err=%v", present, err)
 	}
 	// Java ImageIO reports one image for this APNG and scales its default frame.
-	apngResult, err := Scale("image/png", apngData, P720, CatmullRom)
+	apngResult, err := ScaleContext(context.Background(), "image/png", apngData, P720, 0)
 	if err != nil {
 		t.Fatalf("APNG default frame should follow Java's static PNG path: %v", err)
 	}
@@ -237,7 +226,7 @@ func TestAnimationMetadataMatchesJavaBehavior(t *testing.T) {
 	if animated, err := webpAnimated(webpData); err != nil || !animated {
 		t.Fatalf("WebP animated=%v err=%v", animated, err)
 	}
-	if _, err := Scale("image/webp", webpData, P720, CatmullRom); err == nil || !strings.Contains(err.Error(), "animated or multi-frame") {
+	if _, err := ScaleContext(context.Background(), "image/webp", webpData, P720, 0); err == nil || !strings.Contains(err.Error(), "animated or multi-frame") {
 		t.Fatalf("animated WebP was not rejected by animation metadata: %v", err)
 	}
 }
@@ -247,7 +236,7 @@ func TestDeclaredPixelBudgetRejectedBeforeDecodeAllocation(t *testing.T) {
 	data := pngWithDeclaredDimensions(t, 10_000_001, 4)
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
-	_, err := Scale("image/png", data, Original, CatmullRom)
+	_, err := ScaleContext(context.Background(), "image/png", data, Original, 0)
 	runtime.ReadMemStats(&after)
 	if err == nil || !strings.Contains(err.Error(), "pixel budget") {
 		t.Fatalf("oversized declaration was not rejected by pixel budget: %v", err)
@@ -256,11 +245,11 @@ func TestDeclaredPixelBudgetRejectedBeforeDecodeAllocation(t *testing.T) {
 		t.Fatalf("budget preflight allocated %d bytes", after.TotalAlloc-before.TotalAlloc)
 	}
 	nonPositive := pngWithDeclaredDimensions(t, 0, 4)
-	if _, err := Scale("image/png", nonPositive, Original, CatmullRom); err == nil {
+	if _, err := ScaleContext(context.Background(), "image/png", nonPositive, Original, 0); err == nil {
 		t.Fatal("non-positive declared image dimensions were accepted")
 	}
 	exactBudget := pngWithDeclaredDimensions(t, 10_000, 4_000)
-	if _, err := Scale("image/png", exactBudget, Original, CatmullRom); err != nil {
+	if _, err := ScaleContext(context.Background(), "image/png", exactBudget, Original, 0); err != nil {
 		t.Fatalf("exactly %d pixels must be allowed: %v", MaxPixels, err)
 	}
 }
@@ -272,7 +261,7 @@ func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 	if err := jpeg.Encode(&jpegBytes, photo, &jpeg.Options{Quality: 88}); err != nil {
 		t.Fatal(err)
 	}
-	result, err := Scale("image/jpeg", jpegBytes.Bytes(), P720, CatmullRom)
+	result, err := ScaleContext(context.Background(), "image/jpeg", jpegBytes.Bytes(), P720, 0)
 	if err != nil || result.MediaType != "image/jpeg" {
 		t.Fatalf("JPEG result=%s err=%v", result.MediaType, err)
 	}
@@ -280,10 +269,7 @@ func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	resized, err := resize(oriented{src: decoded, orientation: 1}, 1152, 720, ImagingLanczos)
-	if err != nil {
-		t.Fatal(err)
-	}
+	resized := imaging.Resize(oriented{src: decoded, orientation: 1}, 1152, 720, imaging.Lanczos)
 	outputConfig, format, err := image.DecodeConfig(bytes.NewReader(result.Bytes))
 	if err != nil || format != "jpeg" || outputConfig.Width != 1152 || outputConfig.Height != 720 {
 		t.Fatalf("opaque JPEG config=%#v format=%q err=%v", outputConfig, format, err)
@@ -300,7 +286,7 @@ func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 	if err := png.Encode(&pngBytes, alpha); err != nil {
 		t.Fatal(err)
 	}
-	result, err = Scale("image/png", pngBytes.Bytes(), P720, CatmullRom)
+	result, err = ScaleContext(context.Background(), "image/png", pngBytes.Bytes(), P720, 0)
 	if err != nil || result.MediaType != "image/png" {
 		t.Fatalf("alpha result=%s err=%v", result.MediaType, err)
 	}
@@ -317,10 +303,10 @@ func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 // COD-N-003, COD-N-004
 func TestMultiFrameGIFCanPassThroughButCannotBeResized(t *testing.T) {
 	data := animatedGIF(t)
-	if _, err := Scale("image/gif", data, P720, CatmullRom); err == nil {
+	if _, err := ScaleContext(context.Background(), "image/gif", data, P720, 0); err == nil {
 		t.Fatal("multi-frame GIF resize accepted")
 	}
-	if got, err := Scale("image/gif", data, Original, CatmullRom); err != nil || !bytes.Equal(got.Bytes, data) {
+	if got, err := ScaleContext(context.Background(), "image/gif", data, Original, 0); err != nil || !bytes.Equal(got.Bytes, data) {
 		t.Fatalf("original animation passthrough err=%v", err)
 	}
 }
@@ -333,7 +319,7 @@ func TestStaticGIFResizesToPNG(t *testing.T) {
 	if err := gif.Encode(&source, frame, nil); err != nil {
 		t.Fatal(err)
 	}
-	result, err := Scale("image/gif", source.Bytes(), P720, CatmullRom)
+	result, err := ScaleContext(context.Background(), "image/gif", source.Bytes(), P720, 0)
 	if err != nil || result.MediaType != "image/png" {
 		t.Fatalf("static GIF result=%#v err=%v", result, err)
 	}
@@ -349,7 +335,7 @@ func TestStaticWebPResizesToPNG(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := Scale("image/webp", data, P720, CatmullRom)
+	result, err := ScaleContext(context.Background(), "image/webp", data, P720, 0)
 	if err != nil || result.MediaType != "image/png" || !result.Resized {
 		t.Fatalf("static WebP result=%#v err=%v", result, err)
 	}
@@ -365,7 +351,7 @@ func TestWebPOriginalPassThrough(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := Scale("image/webp", data, Original, CatmullRom)
+	result, err := ScaleContext(context.Background(), "image/webp", data, Original, 0)
 	if err != nil || result.MediaType != "image/webp" || result.OriginalWidth != 2000 || result.OriginalHeight != 1000 || !bytes.Equal(result.Bytes, data) {
 		t.Fatalf("WebP original result=%#v err=%v", result, err)
 	}

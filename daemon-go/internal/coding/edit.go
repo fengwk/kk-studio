@@ -3,8 +3,6 @@ package coding
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -66,6 +64,17 @@ type editSource struct {
 	lines     *lineIndex
 }
 
+// editTarget is the locked, reviewed state of one file before any edit is applied.
+type editTarget struct {
+	path         string
+	info         os.FileInfo
+	original     []byte
+	hash         string
+	decoded      []byte
+	existing     textcodec.Encoding
+	unlockTarget func()
+}
+
 func editFile(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext, preview bool) (runtime.CapabilityResult, error) {
 	args, err := decodeEditArguments(call.Arguments)
 	if err != nil {
@@ -77,57 +86,25 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	if err = ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	path, err := filepath.EvalSymlinks(args.Path)
+	target, err := openEditTarget(args.Path, call.ExpectedFile)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	unlock := lockPath(path)
-	defer unlock()
-	info, err := os.Lstat(path)
+	defer target.unlockTarget()
+	updated, source, replacements, err := applyPlannedEdits(target.path, string(target.decoded), args.Edits)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	if info.IsDir() {
-		return errorResult(call.InvocationID, rejectInput(fmt.Sprintf("path must be a file: %s", path))), nil
-	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return errorResult(call.InvocationID, rejectInput(fmt.Sprintf("path is not a regular file: %s", path))), nil
-	}
-	original, err := os.ReadFile(path)
+	encoded, err := encodeEditContent(target.path, target.existing, updated)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	originalHash := sha256.Sum256(original)
-	hash := hex.EncodeToString(originalHash[:])
-	if call.ExpectedFile != nil && (call.ExpectedFile.Path != path || call.ExpectedFile.SHA256 != hash) {
-		return errorResult(call.InvocationID, rejectInput(staleWriteReviewMessage)), nil
-	}
-	decoded, existing, decodeErr := textcodec.Decode(path, original)
-	if decodeErr != nil {
-		return errorResult(call.InvocationID, codecError(path, decodeErr, codecEdit)), nil
-	}
-	source := newEditSource(string(decoded))
-	replacements, err := planEdits(path, source, args.Edits)
-	if err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	updated := applyEdits(string(decoded), source, replacements)
-	encoded, err := encodeEditContent(path, existing, updated)
-	if err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	if bytes.Equal(encoded, original) {
+	if bytes.Equal(encoded, target.original) {
 		return errorResult(call.InvocationID, rejectInput("No changes to apply: the edits would not change the file")), nil
 	}
-	diff, err := numberedDiff(source.text, normalizeEOL(updated))
+	review, completed, err := editReview(call.InvocationID, target.path, target.hash, source.text, updated, len(replacements))
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
-	}
-	review := map[string]string{"path": path, "diff": diff, "sha256": hash}
-	completed := textResult(call.InvocationID, fmt.Sprintf("Edited successfully.\nReplacements: %d", len(replacements)))
-	resultJSON := mustJSON(map[string]any{"toolCallId": completed.CallID, "contents": completed.Contents, "error": completed.Error, "details": map[string]any{"editReview": review}})
-	if len(resultJSON) > maxReviewBytes {
-		return errorResult(call.InvocationID, rejectInput("Complete edit diff exceeds the review transport limit; split the change into several smaller edit calls.")), nil
 	}
 	if err = ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -135,19 +112,91 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	if preview {
 		return runtime.CapabilityResult{CallID: call.InvocationID, Details: []byte(`{}`), Contents: []runtime.ResultContent{{Type: "json", JSON: mustJSON(review)}}}, nil
 	}
-	if err = atomicWrite(path, encoded, info.Mode().Perm()); err != nil {
+	if err = atomicWrite(target.path, encoded, target.info.Mode().Perm()); err != nil {
 		code, message := classifyFileSystemError(err)
 		return errorResult(call.InvocationID, failRun(message, code)), nil
 	}
 	if capability.FileChanged != nil {
-		capability.FileChanged(path)
+		capability.FileChanged(target.path)
 	}
 	completed.Details = mustJSON(map[string]any{"editReview": review})
 	return completed, nil
 }
 
-// decodeEditArguments rejects unknown fields at both levels, so a call written for the replaced
-// single-replacement contract fails instead of being silently ignored.
+// openEditTarget locks and reads the edit target and refuses a file that changed since the review it
+// was planned against. The lock is released before returning an error, so a partial read can not
+// keep it.
+func openEditTarget(rawPath string, expected *runtime.ExpectedFile) (*editTarget, error) {
+	path, err := filepath.EvalSymlinks(rawPath)
+	if err != nil {
+		return nil, err
+	}
+	unlock := lockPath(path)
+	info, err := editableFileInfo(path)
+	if err != nil {
+		unlock()
+		return nil, err
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		unlock()
+		return nil, err
+	}
+	hash := sha256Hex(original)
+	if expected != nil && (expected.Path != path || expected.SHA256 != hash) {
+		unlock()
+		return nil, rejectInput(staleWriteReviewMessage)
+	}
+	decoded, existing, err := textcodec.Decode(path, original)
+	if err != nil {
+		unlock()
+		return nil, codecError(path, err, codecEdit)
+	}
+	return &editTarget{path: path, info: info, original: original, hash: hash, decoded: decoded, existing: existing, unlockTarget: unlock}, nil
+}
+
+// editableFileInfo stats the edit target and refuses anything but a regular file.
+func editableFileInfo(path string) (os.FileInfo, error) {
+	info, err := os.Lstat(path)
+	if err != nil {
+		return nil, err
+	}
+	if info.IsDir() {
+		return nil, rejectInput(fmt.Sprintf("path must be a file: %s", path))
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+		return nil, rejectInput(fmt.Sprintf("path is not a regular file: %s", path))
+	}
+	return info, nil
+}
+
+// applyPlannedEdits validates the entries against the original snapshot and splices them in.
+func applyPlannedEdits(path, decoded string, entries []editEntry) (string, *editSource, []editReplacement, error) {
+	source := newEditSource(decoded)
+	replacements, err := planEdits(path, source, entries)
+	if err != nil {
+		return "", nil, nil, err
+	}
+	return applyEdits(decoded, source, replacements), source, replacements, nil
+}
+
+// editReview renders the numbered diff an approval shows and the completed result that carries it.
+func editReview(invocationID, path, hash, before, after string, replacements int) (map[string]string, runtime.CapabilityResult, error) {
+	diff, err := numberedDiff(before, normalizeEOL(after))
+	if err != nil {
+		return nil, runtime.CapabilityResult{}, err
+	}
+	review := map[string]string{"path": path, "diff": diff, "sha256": hash}
+	completed := textResult(invocationID, fmt.Sprintf("Edited successfully.\nReplacements: %d", replacements))
+	resultJSON := mustJSON(map[string]any{"toolCallId": completed.CallID, "contents": completed.Contents, "error": completed.Error, "details": map[string]any{"editReview": review}})
+	if len(resultJSON) > maxReviewBytes {
+		return nil, runtime.CapabilityResult{}, rejectInput("Complete edit diff exceeds the review transport limit; split the change into several smaller edit calls.")
+	}
+	return review, completed, nil
+}
+
+// decodeEditArguments rejects unknown fields at both levels, so a misspelled entry field fails
+// instead of being silently ignored.
 func decodeEditArguments(raw json.RawMessage) (editArguments, error) {
 	var args editArguments
 	decoder := json.NewDecoder(bytes.NewReader(raw))
@@ -545,71 +594,82 @@ func numberedDiff(oldText, newText string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	oldLines := diffLineCount(oldText)
-	newLines := diffLineCount(newText)
-	width := max(2, len(fmt.Sprint(max(len(oldLines), len(newLines)))))
-	var out []string
-	oldCursor, newCursor := 1, 1
-	inHunk := false
-	seen := false
+	d := &diffNumbering{width: max(2, len(fmt.Sprint(max(len(diffLineCount(oldText)), len(diffLineCount(newText)))))), oldCursor: 1, newCursor: 1}
 	for _, line := range strings.Split(strings.ReplaceAll(patch, "\r\n", "\n"), "\n") {
-		if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") || line == "" {
-			continue
-		}
-		if strings.HasPrefix(line, "@@ ") {
-			match := hunkHeader.FindStringSubmatch(line)
-			if match == nil {
-				return "", fmt.Errorf("invalid unified diff hunk: %s", line)
-			}
-			oldStart, _ := strconv.Atoi(match[1])
-			newStart, _ := strconv.Atoi(match[3])
-			if seen && (oldStart > oldCursor || newStart > newCursor) {
-				out = append(out, "...")
-			}
-			if !seen && (oldStart > 1 || newStart > 1) {
-				out = append(out, "...")
-			}
-			oldCursor, newCursor, inHunk, seen = oldStart, newStart, true, true
-			continue
-		}
-		if !inHunk {
-			continue
-		}
-		if line == `\ No newline at end of file` {
-			if len(out) > 0 {
-				previous := out[len(out)-1]
-				if strings.HasPrefix(previous, "-") || strings.HasPrefix(previous, "+") {
-					out = append(out, line)
-				}
-			}
-			continue
-		}
-		if line == "\\" {
-			continue
-		}
-		if len(line) == 0 {
-			continue
-		}
-		switch line[0] {
-		case ' ':
-			out = append(out, fmt.Sprintf(" %*d|%s", width, oldCursor, line[1:]))
-			oldCursor++
-			newCursor++
-		case '-':
-			out = append(out, fmt.Sprintf("-%*d|%s", width, oldCursor, line[1:]))
-			oldCursor++
-		case '+':
-			out = append(out, fmt.Sprintf("+%*d|%s", width, newCursor, line[1:]))
-			newCursor++
-		default:
-			return "", fmt.Errorf("invalid unified diff line: %s", line)
+		if err := d.add(line); err != nil {
+			return "", err
 		}
 	}
-	if !seen {
+	if !d.seen {
 		return "", errors.New("edit produced an empty diff")
 	}
-	if oldCursor > 0 && oldCursor <= len(oldLines) || newCursor > 0 && newCursor <= len(newLines) {
-		out = append(out, "...")
+	if d.oldCursor > 0 && d.oldCursor <= len(diffLineCount(oldText)) || d.newCursor > 0 && d.newCursor <= len(diffLineCount(newText)) {
+		d.out = append(d.out, "...")
 	}
-	return strings.Join(out, "\n"), nil
+	return strings.Join(d.out, "\n"), nil
+}
+
+// diffNumbering renders one unified-diff hunk line with the file line number beside it.
+type diffNumbering struct {
+	width     int
+	out       []string
+	oldCursor int
+	newCursor int
+	inHunk    bool
+	seen      bool
+}
+
+// add renders one line of the unified diff and skips the parts the numbered view omits.
+func (d *diffNumbering) add(line string) error {
+	if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") || line == "" {
+		return nil
+	}
+	if strings.HasPrefix(line, "@@ ") {
+		return d.startHunk(line)
+	}
+	if !d.inHunk {
+		return nil
+	}
+	if line == `\ No newline at end of file` {
+		if len(d.out) > 0 && (strings.HasPrefix(d.out[len(d.out)-1], "-") || strings.HasPrefix(d.out[len(d.out)-1], "+")) {
+			d.out = append(d.out, line)
+		}
+		return nil
+	}
+	if line == "\\" {
+		return nil
+	}
+	switch line[0] {
+	case ' ':
+		d.out = append(d.out, fmt.Sprintf(" %*d|%s", d.width, d.oldCursor, line[1:]))
+		d.oldCursor++
+		d.newCursor++
+	case '-':
+		d.out = append(d.out, fmt.Sprintf("-%*d|%s", d.width, d.oldCursor, line[1:]))
+		d.oldCursor++
+	case '+':
+		d.out = append(d.out, fmt.Sprintf("+%*d|%s", d.width, d.newCursor, line[1:]))
+		d.newCursor++
+	default:
+		return fmt.Errorf("invalid unified diff line: %s", line)
+	}
+	return nil
+}
+
+// startHunk positions the cursors at a new hunk and marks the gap that hides unshown lines.
+func (d *diffNumbering) startHunk(line string) error {
+	match := hunkHeader.FindStringSubmatch(line)
+	if match == nil {
+		return fmt.Errorf("invalid unified diff hunk: %s", line)
+	}
+	oldStart, _ := strconv.Atoi(match[1])
+	newStart, _ := strconv.Atoi(match[3])
+	if d.seen && (oldStart > d.oldCursor || newStart > d.newCursor) {
+		d.out = append(d.out, "...")
+	}
+	if !d.seen && (oldStart > 1 || newStart > 1) {
+		d.out = append(d.out, "...")
+	}
+	d.oldCursor, d.newCursor, d.inHunk, d.seen = oldStart, newStart, true, true
+	return nil
 }

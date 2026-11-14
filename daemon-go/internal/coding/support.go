@@ -170,35 +170,47 @@ func normalizePath(path string) string {
 	return pathpkg.Clean(path)
 }
 
+// windowsRoot is the parsed volume of a Windows path: its spelling, whether the path is rooted
+// above the remainder, and whether the volume is a UNC share.
+type windowsRoot struct {
+	display   string
+	rooted    bool
+	unc       bool
+	remainder string
+}
+
 func normalizeWindowsPath(path string) string {
-	value := strings.ReplaceAll(path, "/", windowsSeparator)
-	root := ""
-	rooted := false
-	unc := false
-	var remainder string
+	root := splitWindowsRoot(strings.ReplaceAll(path, "/", windowsSeparator))
+	clean := strings.Join(cleanWindowsParts(root.remainder, root.rooted), windowsSeparator)
+	return joinWindowsRoot(root, clean)
+}
+
+// splitWindowsRoot separates the volume prefix of a Windows path from its unresolved remainder.
+func splitWindowsRoot(value string) windowsRoot {
 	switch {
 	case strings.HasPrefix(value, windowsSeparator+windowsSeparator):
-		parts := strings.Split(strings.TrimLeft(value, windowsSeparator), windowsSeparator)
-		if len(parts) >= 2 {
-			root = windowsSeparator + windowsSeparator + parts[0] + windowsSeparator + parts[1]
-			remainder = strings.Join(parts[2:], windowsSeparator)
-			unc = true
-		} else {
-			root = windowsSeparator + windowsSeparator
-			remainder = strings.Join(parts, windowsSeparator)
-		}
-		rooted = true
+		return splitUNC(value)
 	case hasWindowsDriveRoot(value):
-		root = value[:2] + windowsSeparator
-		remainder = value[3:]
-		rooted = true
+		return windowsRoot{display: value[:2] + windowsSeparator, rooted: true, remainder: value[3:]}
 	case strings.HasPrefix(value, windowsSeparator):
-		root = windowsSeparator
-		remainder = value[1:]
-		rooted = true
+		return windowsRoot{display: windowsSeparator, rooted: true, remainder: value[1:]}
 	default:
-		remainder = value
+		return windowsRoot{remainder: value}
 	}
+}
+
+// splitUNC separates the server and share of a UNC path from the rest of the path.
+func splitUNC(value string) windowsRoot {
+	parts := strings.Split(strings.TrimLeft(value, windowsSeparator), windowsSeparator)
+	if len(parts) < 2 {
+		return windowsRoot{display: windowsSeparator + windowsSeparator, rooted: true, remainder: strings.Join(parts, windowsSeparator)}
+	}
+	display := windowsSeparator + windowsSeparator + parts[0] + windowsSeparator + parts[1]
+	return windowsRoot{display: display, rooted: true, unc: true, remainder: strings.Join(parts[2:], windowsSeparator)}
+}
+
+// cleanWindowsParts resolves the dot segments of a remainder, never climbing above a rooted path.
+func cleanWindowsParts(remainder string, rooted bool) []string {
 	var parts []string
 	for _, part := range strings.Split(remainder, windowsSeparator) {
 		switch part {
@@ -214,23 +226,28 @@ func normalizeWindowsPath(path string) string {
 			parts = append(parts, part)
 		}
 	}
-	clean := strings.Join(parts, windowsSeparator)
-	if root == "" {
+	return parts
+}
+
+// joinWindowsRoot attaches the cleaned segments to their volume, keeping the trailing separator a
+// bare volume or a bare UNC share spells with.
+func joinWindowsRoot(root windowsRoot, clean string) string {
+	if root.display == "" {
 		if clean == "" {
 			return "."
 		}
 		return clean
 	}
 	if clean == "" {
-		if unc {
-			return root + windowsSeparator
+		if root.unc {
+			return root.display + windowsSeparator
 		}
-		return root
+		return root.display
 	}
-	if strings.HasSuffix(root, windowsSeparator) {
-		return root + clean
+	if strings.HasSuffix(root.display, windowsSeparator) {
+		return root.display + clean
 	}
-	return root + windowsSeparator + clean
+	return root.display + windowsSeparator + clean
 }
 
 func toPosix(path string) string {
@@ -262,21 +279,6 @@ func resolveExistingPath(path string) (string, error) {
 		return "", err
 	}
 	return resolved, nil
-}
-
-func resolveWritablePath(path string) (string, error) {
-	if !filepath.IsAbs(path) {
-		return "", rejectInput("path must be an absolute path")
-	}
-	if pathExists(path) {
-		return filepath.EvalSymlinks(path)
-	}
-	return resolveWritePath(path)
-}
-
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func isSymbolicLink(path string) bool {

@@ -23,10 +23,13 @@ var (
 	decimalVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)$`)
 )
 
+// configEnvelope is the config file header: which environment and config version it describes.
+// version carries the header value as the number the applied snapshot holds.
 type configEnvelope struct {
 	EnvironmentID string          `json:"environmentId"`
 	Version       string          `json:"version"`
 	DaemonConfig  json.RawMessage `json:"daemonConfig"`
+	version       int64
 }
 
 type wireDaemonConfig struct {
@@ -52,100 +55,29 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 	if !filepath.IsAbs(path) {
 		return DaemonConfig{}, errors.New("config: path must be absolute")
 	}
-	f, err := os.Open(path)
+	document, err := readConfigDocument(path)
 	if err != nil {
-		return DaemonConfig{}, errors.New("config: cannot read configuration file")
+		return DaemonConfig{}, err
 	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, maxConfigBytes+1))
-	if err != nil || len(b) > maxConfigBytes {
-		return DaemonConfig{}, errors.New("config: configuration file is invalid")
-	}
-	if err := rejectDuplicateKeys(b); err != nil {
-		return DaemonConfig{}, errors.New("config: configuration file is invalid")
-	}
-	var top map[string]json.RawMessage
-	if err := jsonv2.Unmarshal(b, &top); err != nil || top == nil || hasUnknown(top, "environmentId", "version", "daemonConfig") {
-		return DaemonConfig{}, errors.New("config: configuration file is invalid")
-	}
-	var env configEnvelope
-	if err := jsonv2.Unmarshal(b, &env); err != nil {
-		return DaemonConfig{}, errors.New("daemon: configuration file is invalid")
-	}
-	if !canonicalUUID.MatchString(env.EnvironmentID) {
-		return DaemonConfig{}, errors.New("daemon.environmentId: must be a canonical lowercase UUID")
-	}
-	if !decimalVersion.MatchString(env.Version) {
-		return DaemonConfig{}, errors.New("daemon.version: must be a canonical non-negative decimal string")
-	}
-	version, err := strconv.ParseInt(env.Version, 10, 64)
+	env, err := decodeConfigEnvelope(document)
 	if err != nil {
-		return DaemonConfig{}, errors.New("daemon.version: must fit a signed 64-bit integer")
+		return DaemonConfig{}, err
 	}
-	var raw map[string]json.RawMessage
-	if err := jsonv2.Unmarshal(env.DaemonConfig, &raw); err != nil || raw == nil || hasUnknown(raw, "studioUrl", "bashExecutable", "lsp", "proxyUrl") {
-		return DaemonConfig{}, errors.New("config: daemonConfig is invalid")
-	}
-	var lspOrder []string
-	if lspRaw, ok := raw["lsp"]; ok && !bytes.Equal(bytes.TrimSpace(lspRaw), []byte("null")) {
-		var lspObject map[string]json.RawMessage
-		if jsonv2.Unmarshal(lspRaw, &lspObject) != nil || lspObject == nil || hasUnknown(lspObject, "servers") {
-			return DaemonConfig{}, errors.New("config: lsp is invalid")
-		}
-		serversRaw, ok := lspObject["servers"]
-		if !ok {
-			return DaemonConfig{}, errors.New("config: lsp servers are invalid")
-		}
-		var servers map[string]json.RawMessage
-		if jsonv2.Unmarshal(serversRaw, &servers) != nil || servers == nil || len(servers) == 0 {
-			return DaemonConfig{}, errors.New("config: lsp servers are invalid")
-		}
-		lspOrder, err = orderedJSONKeys(serversRaw)
-		if err != nil {
-			return DaemonConfig{}, errors.New("config: lsp servers are invalid")
-		}
-		for _, serverRaw := range servers {
-			var fields map[string]json.RawMessage
-			if jsonv2.Unmarshal(serverRaw, &fields) != nil || fields == nil || hasUnknown(fields, "command", "extensions", "rootMarkers", "firstMatchMarkers") {
-				return DaemonConfig{}, errors.New("config: lsp server is invalid")
-			}
-		}
-	}
-	var wire wireDaemonConfig
-	if err := jsonv2.Unmarshal(env.DaemonConfig, &wire); err != nil {
-		return DaemonConfig{}, errors.New("config: daemonConfig is invalid")
-	}
-	studio, err := parseStudioURL(wire.StudioURL)
+	lspOrder, err := validateLSPDeclaration(env.DaemonConfig)
 	if err != nil {
-		return DaemonConfig{}, errors.New("config: studioUrl is invalid")
+		return DaemonConfig{}, err
 	}
-	proxy, err := parseProxy(wire.ProxyURL)
+	wire, err := decodeWireConfig(env.DaemonConfig)
 	if err != nil {
-		return DaemonConfig{}, errors.New("config: proxyUrl is invalid")
+		return DaemonConfig{}, err
 	}
-	if wire.BashExecutable != nil && (strings.TrimSpace(*wire.BashExecutable) == "" || hasControl(*wire.BashExecutable)) {
-		return DaemonConfig{}, errors.New("config: bashExecutable is invalid")
+	studio, proxy, err := validateConnectionSettings(wire)
+	if err != nil {
+		return DaemonConfig{}, err
 	}
-	lsp := make([]LSPServerConfig, 0, len(wire.LSP.Servers))
-	for _, id := range lspOrder {
-		s := wire.LSP.Servers[id]
-		s.Extensions = normalizeExtensions(s.Extensions)
-		s.RootMarkers = normalizeMarkers(s.RootMarkers)
-		s.FirstMatchMarkers = normalizeMarkers(s.FirstMatchMarkers)
-		if id == "" || !lspServerID.MatchString(id) || !validStringList(s.Command, true) || !validStringList(s.Extensions, true) || !validStringList(s.RootMarkers, false) || !validStringList(s.FirstMatchMarkers, false) {
-			return DaemonConfig{}, errors.New("config: lsp server is invalid")
-		}
-		for _, ext := range s.Extensions {
-			if len(ext) < 2 || !strings.HasPrefix(ext, ".") || hasControl(ext) || strings.ContainsAny(ext, `/\\`) {
-				return DaemonConfig{}, errors.New("config: lsp extension is invalid")
-			}
-		}
-		for _, marker := range append(append([]string{}, s.RootMarkers...), s.FirstMatchMarkers...) {
-			if !validRelativePath(marker) {
-				return DaemonConfig{}, errors.New("config: lsp marker is invalid")
-			}
-		}
-		lsp = append(lsp, LSPServerConfig{ID: id, Command: s.Command, Extensions: s.Extensions, RootMarkers: s.RootMarkers, FirstMatchMarkers: s.FirstMatchMarkers})
+	lsp, err := buildLSPConfig(wire.LSP.Servers, lspOrder)
+	if err != nil {
+		return DaemonConfig{}, err
 	}
 	dataDir := filepath.Dir(path)
 	tokenPath := filepath.Join(dataDir, "daemon.token")
@@ -156,8 +88,137 @@ func LoadDaemonConfig(path string) (DaemonConfig, error) {
 	if resolved, err := ResolveBash(wire.BashExecutable); err == nil {
 		bash = &resolved
 	}
-	gateway := gatewayURL(studio)
-	return DaemonConfig{EnvironmentID: env.EnvironmentID, ConfigVersion: int64(version), ConfigPath: path, DataDir: dataDir, TokenPath: tokenPath, StudioURL: studio, GatewayURL: gateway, BashExecutable: bash, BashExecutableSetting: wire.BashExecutable, LSP: lsp, ProxyURL: proxy, DistributionDir: DistributionDir(executablePath())}, nil
+	return DaemonConfig{
+		EnvironmentID: env.EnvironmentID, ConfigVersion: int64(env.version), ConfigPath: path, DataDir: dataDir,
+		TokenPath: tokenPath, StudioURL: studio, GatewayURL: gatewayURL(studio), BashExecutable: bash,
+		BashExecutableSetting: wire.BashExecutable, LSP: lsp, ProxyURL: proxy, DistributionDir: DistributionDir(executablePath()),
+	}, nil
+}
+
+// readConfigDocument returns the raw bytes of the config file, bounded before parsing.
+func readConfigDocument(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, errors.New("config: cannot read configuration file")
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxConfigBytes+1))
+	if err != nil || len(b) > maxConfigBytes {
+		return nil, errors.New("config: configuration file is invalid")
+	}
+	if err := rejectDuplicateKeys(b); err != nil {
+		return nil, errors.New("config: configuration file is invalid")
+	}
+	var top map[string]json.RawMessage
+	if err := jsonv2.Unmarshal(b, &top); err != nil || top == nil || hasUnknown(top, "environmentId", "version", "daemonConfig") {
+		return nil, errors.New("config: configuration file is invalid")
+	}
+	return b, nil
+}
+
+// decodeConfigEnvelope validates the envelope header and its config version.
+func decodeConfigEnvelope(b []byte) (configEnvelope, error) {
+	var env configEnvelope
+	if err := jsonv2.Unmarshal(b, &env); err != nil {
+		return env, errors.New("daemon: configuration file is invalid")
+	}
+	if !canonicalUUID.MatchString(env.EnvironmentID) {
+		return env, errors.New("daemon.environmentId: must be a canonical lowercase UUID")
+	}
+	if !decimalVersion.MatchString(env.Version) {
+		return env, errors.New("daemon.version: must be a canonical non-negative decimal string")
+	}
+	version, err := strconv.ParseInt(env.Version, 10, 64)
+	if err != nil {
+		return env, errors.New("daemon.version: must fit a signed 64-bit integer")
+	}
+	env.version = version
+	return env, nil
+}
+
+// validateLSPDeclaration checks the shape of the raw lsp object and returns the declared server
+// order, which the first-match rule depends on.
+func validateLSPDeclaration(daemonConfig json.RawMessage) ([]string, error) {
+	var raw map[string]json.RawMessage
+	if err := jsonv2.Unmarshal(daemonConfig, &raw); err != nil || raw == nil || hasUnknown(raw, "studioUrl", "bashExecutable", "lsp", "proxyUrl") {
+		return nil, errors.New("config: daemonConfig is invalid")
+	}
+	lspRaw, ok := raw["lsp"]
+	if !ok || bytes.Equal(bytes.TrimSpace(lspRaw), []byte("null")) {
+		return nil, nil
+	}
+	var lspObject map[string]json.RawMessage
+	if jsonv2.Unmarshal(lspRaw, &lspObject) != nil || lspObject == nil || hasUnknown(lspObject, "servers") {
+		return nil, errors.New("config: lsp is invalid")
+	}
+	serversRaw, ok := lspObject["servers"]
+	if !ok {
+		return nil, errors.New("config: lsp servers are invalid")
+	}
+	var servers map[string]json.RawMessage
+	if jsonv2.Unmarshal(serversRaw, &servers) != nil || servers == nil || len(servers) == 0 {
+		return nil, errors.New("config: lsp servers are invalid")
+	}
+	lspOrder, err := orderedJSONKeys(serversRaw)
+	if err != nil {
+		return nil, errors.New("config: lsp servers are invalid")
+	}
+	for _, serverRaw := range servers {
+		var fields map[string]json.RawMessage
+		if jsonv2.Unmarshal(serverRaw, &fields) != nil || fields == nil || hasUnknown(fields, "command", "extensions", "rootMarkers", "firstMatchMarkers") {
+			return nil, errors.New("config: lsp server is invalid")
+		}
+	}
+	return lspOrder, nil
+}
+
+// decodeWireConfig decodes the daemon config into its typed shape.
+func decodeWireConfig(daemonConfig json.RawMessage) (wireDaemonConfig, error) {
+	var wire wireDaemonConfig
+	if err := jsonv2.Unmarshal(daemonConfig, &wire); err != nil {
+		return wire, errors.New("config: daemonConfig is invalid")
+	}
+	return wire, nil
+}
+
+// validateConnectionSettings normalizes the studio and proxy URLs and rejects a blank bash value.
+func validateConnectionSettings(wire wireDaemonConfig) (string, *string, error) {
+	studio, err := parseStudioURL(wire.StudioURL)
+	if err != nil {
+		return "", nil, errors.New("config: studioUrl is invalid")
+	}
+	proxy, err := parseProxy(wire.ProxyURL)
+	if err != nil {
+		return "", nil, errors.New("config: proxyUrl is invalid")
+	}
+	if wire.BashExecutable != nil && (strings.TrimSpace(*wire.BashExecutable) == "" || hasControl(*wire.BashExecutable)) {
+		return "", nil, errors.New("config: bashExecutable is invalid")
+	}
+	return studio, proxy, nil
+}
+
+// buildLSPConfig validates every declared server and returns them in declaration order.
+func buildLSPConfig(servers map[string]wireLSPConfig, order []string) ([]LSPServerConfig, error) {
+	lsp := make([]LSPServerConfig, 0, len(servers))
+	for _, id := range order {
+		s := servers[id]
+		fields := lspServerFields{id: id, command: s.Command, extensions: s.Extensions, rootMarkers: s.RootMarkers, firstMatchMarkers: s.FirstMatchMarkers}
+		fields.normalize()
+		if id == "" || !lspServerID.MatchString(id) {
+			return nil, errors.New("config: lsp server is invalid")
+		}
+		switch fields.check() {
+		case lspServerInvalidLists:
+			return nil, errors.New("config: lsp server is invalid")
+		case lspServerInvalidExtension:
+			return nil, errors.New("config: lsp extension is invalid")
+		case lspServerInvalidMarker:
+			return nil, errors.New("config: lsp marker is invalid")
+		case lspServerOK:
+		}
+		lsp = append(lsp, LSPServerConfig{ID: id, Command: fields.command, Extensions: fields.extensions, RootMarkers: fields.rootMarkers, FirstMatchMarkers: fields.firstMatchMarkers})
+	}
+	return lsp, nil
 }
 
 // CheckConfig validates config and its sibling token without creating directories or locks.
@@ -319,63 +380,76 @@ func ReadRegistrationToken(path string) (string, error) {
 	return token, nil
 }
 
+// maxConfigDepth bounds JSON nesting so an adversarially deep document cannot exhaust the stack.
+const maxConfigDepth = 20
+
 // rejectDuplicateKeys walks JSON tokens so duplicate keys cannot be normalized away by Unmarshal.
 func rejectDuplicateKeys(b []byte) error {
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.UseNumber()
-	var walk func(int) error
-	walk = func(depth int) error {
-		t, err := d.Token()
-		if err != nil {
-			return err
-		}
-		del, ok := t.(json.Delim)
-		if !ok {
-			if n, ok := t.(json.Number); ok && len(n.String()) > 64 {
-				return errors.New("number")
-			}
-			return nil
-		}
-		if depth >= 20 {
-			return errors.New("depth")
-		}
-		switch del {
-		case '{':
-			seen := map[string]bool{}
-			for d.More() {
-				k, err := d.Token()
-				if err != nil {
-					return err
-				}
-				key, ok := k.(string)
-				if !ok || seen[key] {
-					return errors.New("duplicate")
-				}
-				seen[key] = true
-				if err := walk(depth + 1); err != nil {
-					return err
-				}
-			}
-			_, err = d.Token()
-			return err
-		case '[':
-			for d.More() {
-				if err := walk(depth + 1); err != nil {
-					return err
-				}
-			}
-			_, err = d.Token()
-			return err
-		default:
-			return errors.New("delimiter")
-		}
-	}
-	if err := walk(0); err != nil {
+	if err := walkConfigValue(d, 0); err != nil {
 		return err
 	}
-	_, err := d.Token()
-	if err == io.EOF {
+	if _, err := d.Token(); err == io.EOF {
 		return nil
 	}
 	return errors.New("trailing data")
+}
+
+// walkConfigValue consumes one JSON value and rejects duplicates, deep nesting and long numbers.
+func walkConfigValue(d *json.Decoder, depth int) error {
+	t, err := d.Token()
+	if err != nil {
+		return err
+	}
+	del, ok := t.(json.Delim)
+	if !ok {
+		if n, ok := t.(json.Number); ok && len(n.String()) > 64 {
+			return errors.New("number")
+		}
+		return nil
+	}
+	if depth >= maxConfigDepth {
+		return errors.New("depth")
+	}
+	switch del {
+	case '{':
+		return walkConfigObject(d, depth)
+	case '[':
+		return walkConfigArray(d, depth)
+	default:
+		return errors.New("delimiter")
+	}
+}
+
+// walkConfigObject consumes the members of one object and rejects a repeated key.
+func walkConfigObject(d *json.Decoder, depth int) error {
+	seen := map[string]bool{}
+	for d.More() {
+		k, err := d.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := k.(string)
+		if !ok || seen[key] {
+			return errors.New("duplicate")
+		}
+		seen[key] = true
+		if err := walkConfigValue(d, depth+1); err != nil {
+			return err
+		}
+	}
+	_, err := d.Token()
+	return err
+}
+
+// walkConfigArray consumes the elements of one array.
+func walkConfigArray(d *json.Decoder, depth int) error {
+	for d.More() {
+		if err := walkConfigValue(d, depth+1); err != nil {
+			return err
+		}
+	}
+	_, err := d.Token()
+	return err
 }

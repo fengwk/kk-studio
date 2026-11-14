@@ -29,6 +29,12 @@ type WriteReview struct {
 
 var pathLocks sync.Map
 
+// sha256Hex returns the lower-case hex SHA-256 of data.
+func sha256Hex(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
+}
+
 func lockPath(path string) func() {
 	lock, _ := pathLocks.LoadOrStore(path, &sync.Mutex{})
 	mutex := lock.(*sync.Mutex)
@@ -44,32 +50,12 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 	}
 	unlock := lockPath(resolved)
 	defer unlock()
-	linkInfo, linkErr := os.Lstat(resolved)
-	if linkErr == nil && linkInfo.Mode()&os.ModeSymlink != 0 {
-		return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", resolved))
-	}
-	if linkErr != nil && !errors.Is(linkErr, os.ErrNotExist) {
-		return WriteReview{}, linkErr
-	}
-	if linkErr == nil && !linkInfo.Mode().IsRegular() {
-		if linkInfo.IsDir() {
-			return WriteReview{}, rejectInput(fmt.Sprintf("path is a directory: %s", resolved))
-		}
-		return WriteReview{}, rejectInput(fmt.Sprintf("path is not a regular file: %s", resolved))
+	if err := rejectNonRegularTarget(resolved); err != nil {
+		return WriteReview{}, err
 	}
 	current, err := os.ReadFile(resolved)
 	if errors.Is(err, os.ErrNotExist) {
-		if isSymbolicLink(resolved) {
-			return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", resolved))
-		}
-		if _, err = encodeWriteContent(resolved, nil, content); err != nil {
-			return WriteReview{}, err
-		}
-		diff, err := numberedDiff("", normalizeEOL(content))
-		if err != nil {
-			return WriteReview{}, err
-		}
-		return WriteReview{Path: resolved, Diff: diff, NewFile: true, Content: content}, nil
+		return previewNewFile(resolved, content)
 	}
 	if err != nil {
 		return WriteReview{}, err
@@ -88,13 +74,54 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 	if _, err = encodeWriteContent(resolved, &existing, content); err != nil {
 		return WriteReview{}, err
 	}
-	hash := sha256.Sum256(current)
 	diff, err := numberedDiff(normalizeEOL(string(decoded)), normalizeEOL(content))
 	if err != nil {
 		return WriteReview{}, err
 	}
-	hashText := hex.EncodeToString(hash[:])
+	hashText := sha256Hex(current)
 	return WriteReview{Path: resolved, SHA256: &hashText, Diff: diff}, nil
+}
+
+// rejectNonRegularTarget refuses a symbolic link or anything that is not a regular file. A path
+// that does not exist yet is not an error here; the caller decides how to create it.
+func rejectNonRegularTarget(path string) error {
+	info, err := os.Lstat(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	return rejectNonRegularInfo(path, info)
+}
+
+// rejectNonRegularInfo refuses an existing target that write and preview cannot replace.
+func rejectNonRegularInfo(path string, info os.FileInfo) error {
+	if info.Mode()&os.ModeSymlink != 0 {
+		return rejectInput(fmt.Sprintf("path is a symbolic link: %s", path))
+	}
+	if info.IsDir() {
+		return rejectInput(fmt.Sprintf("path is a directory: %s", path))
+	}
+	if !info.Mode().IsRegular() {
+		return rejectInput(fmt.Sprintf("path is not a regular file: %s", path))
+	}
+	return nil
+}
+
+// previewNewFile renders the preview of content that would create path.
+func previewNewFile(path, content string) (WriteReview, error) {
+	if isSymbolicLink(path) {
+		return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", path))
+	}
+	if _, err := encodeWriteContent(path, nil, content); err != nil {
+		return WriteReview{}, err
+	}
+	diff, err := numberedDiff("", normalizeEOL(content))
+	if err != nil {
+		return WriteReview{}, err
+	}
+	return WriteReview{Path: path, Diff: diff, NewFile: true, Content: content}, nil
 }
 
 // Write creates or atomically replaces a regular text file. expected, when present,
@@ -106,58 +133,13 @@ func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 	}
 	unlock := lockPath(resolved)
 	defer unlock()
-	info, statErr := os.Lstat(resolved)
-	exists := statErr == nil
-	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return WriteReview{}, statErr
+	info, exists, err := existingTarget(resolved, expected)
+	if err != nil {
+		return WriteReview{}, err
 	}
-	if expected != nil && expected.Path != resolved {
-		return WriteReview{}, rejectInput(staleWriteReviewMessage)
-	}
-	if expected != nil && !exists && expected.SHA256 != "" {
-		return WriteReview{}, rejectInput(staleWriteReviewMessage)
-	}
-	if exists && info.Mode()&os.ModeSymlink != 0 {
-		return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", resolved))
-	}
-	if exists && !info.Mode().IsRegular() {
-		if info.IsDir() {
-			return WriteReview{}, rejectInput(fmt.Sprintf("path is a directory: %s", resolved))
-		}
-		return WriteReview{}, rejectInput(fmt.Sprintf("path is not a regular file: %s", resolved))
-	}
-	var original []byte
-	var existing *textcodec.Encoding
-	var review WriteReview
-	if exists {
-		original, err = os.ReadFile(resolved)
-		if err != nil {
-			return WriteReview{}, err
-		}
-		if expected != nil {
-			hash := sha256.Sum256(original)
-			if expected.Path != resolved || expected.SHA256 != hex.EncodeToString(hash[:]) {
-				return WriteReview{}, rejectInput(staleWriteReviewMessage)
-			}
-		}
-		decoded, decodedEncoding, decodeErr := textcodec.Decode(resolved, original)
-		if decodeErr != nil {
-			return WriteReview{}, codecError(resolved, decodeErr, codecWrite)
-		}
-		existing = &decodedEncoding
-		hash := sha256.Sum256(original)
-		diff, diffErr := numberedDiff(normalizeEOL(string(decoded)), normalizeEOL(content))
-		if diffErr != nil {
-			return WriteReview{}, diffErr
-		}
-		hashText := hex.EncodeToString(hash[:])
-		review = WriteReview{Path: resolved, SHA256: &hashText, Diff: diff}
-	} else {
-		diff, diffErr := numberedDiff("", normalizeEOL(content))
-		if diffErr != nil {
-			return WriteReview{}, diffErr
-		}
-		review = WriteReview{Path: resolved, Diff: diff, NewFile: true, Content: content}
+	review, existing, err := writeReview(resolved, content, expected, exists)
+	if err != nil {
+		return WriteReview{}, err
 	}
 	encoded, err := encodeWriteContent(resolved, existing, content)
 	if err != nil {
@@ -166,15 +148,70 @@ func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 	if err = os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
 		return WriteReview{}, err
 	}
-	mode := os.FileMode(0o644)
-	if exists {
-		mode = info.Mode().Perm()
-	}
-	if err = atomicWrite(resolved, encoded, mode); err != nil {
+	if err = atomicWrite(resolved, encoded, writeMode(info, exists)); err != nil {
 		code, message := classifyFileSystemError(err)
 		return WriteReview{}, failRun(message, code)
 	}
 	return review, nil
+}
+
+// existingTarget stats the write target and applies the rejections that do not need its content.
+func existingTarget(path string, expected *ExpectedFile) (os.FileInfo, bool, error) {
+	info, statErr := os.Lstat(path)
+	exists := statErr == nil
+	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
+		return nil, false, statErr
+	}
+	if expected != nil && expected.Path != path {
+		return nil, false, rejectInput(staleWriteReviewMessage)
+	}
+	if expected != nil && !exists && expected.SHA256 != "" {
+		return nil, false, rejectInput(staleWriteReviewMessage)
+	}
+	if exists {
+		if err := rejectNonRegularInfo(path, info); err != nil {
+			return nil, false, err
+		}
+	}
+	return info, exists, nil
+}
+
+// writeReview builds the approval review of the pending write and reports the encoding the file
+// must keep.
+func writeReview(path, content string, expected *ExpectedFile, exists bool) (WriteReview, *textcodec.Encoding, error) {
+	if !exists {
+		diff, err := numberedDiff("", normalizeEOL(content))
+		if err != nil {
+			return WriteReview{}, nil, err
+		}
+		return WriteReview{Path: path, Diff: diff, NewFile: true, Content: content}, nil, nil
+	}
+	original, err := os.ReadFile(path)
+	if err != nil {
+		return WriteReview{}, nil, err
+	}
+	if expected != nil && expected.SHA256 != sha256Hex(original) {
+		return WriteReview{}, nil, rejectInput(staleWriteReviewMessage)
+	}
+	decoded, existing, decodeErr := textcodec.Decode(path, original)
+	if decodeErr != nil {
+		return WriteReview{}, nil, codecError(path, decodeErr, codecWrite)
+	}
+	diff, err := numberedDiff(normalizeEOL(string(decoded)), normalizeEOL(content))
+	if err != nil {
+		return WriteReview{}, nil, err
+	}
+	hashText := sha256Hex(original)
+	return WriteReview{Path: path, SHA256: &hashText, Diff: diff}, &existing, nil
+}
+
+// writeMode keeps the permissions of a replaced file and removes nothing from a new one.
+// info is nil when the target does not exist.
+func writeMode(info os.FileInfo, exists bool) os.FileMode {
+	if exists && info != nil {
+		return info.Mode().Perm()
+	}
+	return 0o644
 }
 
 func resolveWritePath(path string) (string, error) {

@@ -127,10 +127,10 @@ func TestOrientedImageExposesSourceColorModel(t *testing.T) {
 
 // COD-F-004
 func TestScaleRejectsEmptyAndUnparseableImages(t *testing.T) {
-	if _, err := Scale("image/png", nil, P720, ImagingLanczos); err == nil || err.Error() != "empty image" {
+	if _, err := ScaleContext(context.Background(), "image/png", nil, P720, 0); err == nil || err.Error() != "empty image" {
 		t.Fatalf("empty image error=%v", err)
 	}
-	if _, err := Scale("image/png", []byte("not an image"), P720, ImagingLanczos); err == nil || !strings.Contains(err.Error(), "cannot parse image") {
+	if _, err := ScaleContext(context.Background(), "image/png", []byte("not an image"), P720, 0); err == nil || !strings.Contains(err.Error(), "cannot parse image") {
 		t.Fatalf("unparseable image error=%v", err)
 	}
 }
@@ -138,10 +138,10 @@ func TestScaleRejectsEmptyAndUnparseableImages(t *testing.T) {
 // COD-F-004
 func TestScaleRejectsUnknownTierAndMismatchedMedia(t *testing.T) {
 	data := tinyPNG(t)
-	if _, err := Scale("image/png", data, Tier(99), ImagingLanczos); err == nil || !strings.Contains(err.Error(), "unknown tier") {
+	if _, err := ScaleContext(context.Background(), "image/png", data, Tier(99), 0); err == nil || !strings.Contains(err.Error(), "unknown tier") {
 		t.Fatalf("unknown tier error=%v", err)
 	}
-	if _, err := Scale("image/webp", data, P720, ImagingLanczos); err == nil || !strings.Contains(err.Error(), "does not match format") {
+	if _, err := ScaleContext(context.Background(), "image/webp", data, P720, 0); err == nil || !strings.Contains(err.Error(), "does not match format") {
 		t.Fatalf("media mismatch error=%v", err)
 	}
 }

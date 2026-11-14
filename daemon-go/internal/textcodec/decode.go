@@ -65,34 +65,43 @@ func decodeWide(enc Encoding, data []byte) ([]byte, error) {
 	}
 	text := make([]byte, 0, len(body))
 	for offset := 0; offset < len(body); offset += width {
-		position := len(prefix) + offset
 		value := readUnit(body[offset:], width, bigEndian)
-		if width == 4 {
-			if value > utf8.MaxRune || value >= 0xd800 && value <= 0xdfff {
-				return nil, &UndecodableError{Encoding: enc, Offset: position}
-			}
-			text = utf8.AppendRune(text, rune(value))
-			continue
+		decoded, consumed, err := decodeUnit(enc, body, offset, width, value)
+		if err != nil {
+			return nil, err
 		}
-		unit := uint16(value)
-		if unit >= 0xdc00 && unit <= 0xdfff {
-			return nil, &UndecodableError{Encoding: enc, Offset: position}
-		}
-		if unit < 0xd800 || unit > 0xdbff {
-			text = utf8.AppendRune(text, rune(unit))
-			continue
-		}
-		if offset+width >= len(body) {
-			return nil, &UndecodableError{Encoding: enc, Offset: position}
-		}
-		low := uint16(readUnit(body[offset+width:], width, bigEndian))
-		if low < 0xdc00 || low > 0xdfff {
-			return nil, &UndecodableError{Encoding: enc, Offset: position}
-		}
-		text = utf8.AppendRune(text, utf16.DecodeRune(rune(unit), rune(low)))
-		offset += width
+		text = utf8.AppendRune(text, decoded)
+		offset += consumed
 	}
 	return text, nil
+}
+
+// decodeUnit decodes the code point at offset and reports how many further units it consumed, so
+// a UTF-16 surrogate pair advances past its low half.
+func decodeUnit(enc Encoding, body []byte, offset, width int, value uint32) (rune, int, error) {
+	position := len(bomPrefix(enc)) + offset
+	if width == 4 {
+		if value > utf8.MaxRune || value >= 0xd800 && value <= 0xdfff {
+			return 0, 0, &UndecodableError{Encoding: enc, Offset: position}
+		}
+		return rune(value), 0, nil
+	}
+	unit := uint16(value)
+	if unit >= 0xdc00 && unit <= 0xdfff {
+		return 0, 0, &UndecodableError{Encoding: enc, Offset: position}
+	}
+	if unit < 0xd800 || unit > 0xdbff {
+		return rune(unit), 0, nil
+	}
+	if offset+width >= len(body) {
+		return 0, 0, &UndecodableError{Encoding: enc, Offset: position}
+	}
+	bigEndian := enc.Name == "UTF-16BE" || enc.Name == "UTF-32BE"
+	low := uint16(readUnit(body[offset+width:], width, bigEndian))
+	if low < 0xdc00 || low > 0xdfff {
+		return 0, 0, &UndecodableError{Encoding: enc, Offset: position}
+	}
+	return utf16.DecodeRune(rune(unit), rune(low)), width, nil
 }
 
 // readUnit reads one UTF-16 or UTF-32 unit.

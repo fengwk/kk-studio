@@ -5,10 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -187,178 +185,6 @@ func validatePathArgument(path string) error {
 	return nil
 }
 
-func readCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {
-	return readCapabilityWithLSPStatus(ctx, call, capability, nil)
-}
-
-func readCapabilityWithLSPStatus(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext, lspStatus func(file string) (language string, available bool)) (runtime.CapabilityResult, error) {
-	args, err := decodeArguments(call)
-	if err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(call.Arguments, &raw); err != nil {
-		return errorResult(call.InvocationID, rejectInput("invalid arguments")), nil
-	}
-	if _, exists := raw["offset"]; !exists {
-		args.Offset = 1
-	}
-	if _, exists := raw["limit"]; !exists {
-		args.Limit = DefaultReadLimit
-	}
-	if args.Offset < 1 || args.Offset > 2147483647 {
-		return errorResult(call.InvocationID, rejectInput("offset must be a positive integer")), nil
-	}
-	if args.Limit < 1 || args.Limit > MaxReadLimit {
-		return errorResult(call.InvocationID, rejectInput("limit must be a positive integer no greater than 2000")), nil
-	}
-	if column, exists := raw["column_offset"]; exists && string(column) != "null" {
-		if err := json.Unmarshal(column, &args.ColumnOffset); err != nil || args.ColumnOffset < 1 {
-			return errorResult(call.InvocationID, rejectInput("column_offset must be a positive integer")), nil
-		}
-	} else {
-		args.ColumnOffset = 1
-	}
-	if err := ctx.Err(); err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	args.Path, err = resolveExistingPath(args.Path)
-	if err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	if capability.Config.DataDir != "" {
-		store, err := TextOutputStoreForDataDir(capability.Config.DataDir)
-		if err != nil {
-			return errorResult(call.InvocationID, err), nil
-		}
-		release := store.Acquire(args.Path)
-		defer release()
-	}
-	info, err := os.Stat(args.Path)
-	if err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	if info.IsDir() {
-		entries, err := os.ReadDir(args.Path)
-		if err != nil {
-			return errorResult(call.InvocationID, err), nil
-		}
-		var names []string
-		for _, entry := range entries {
-			name := entry.Name()
-			if entry.IsDir() {
-				name += "/"
-			}
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		prefix := fmt.Sprintf("path: %s\nkind: directory\n", filepath.ToSlash(args.Path))
-		if args.Offset > len(names) {
-			return textResult(call.InvocationID, prefix+fmt.Sprintf("\n[Showing 0 entries of %d.]", len(names))), nil
-		}
-		start := args.Offset - 1
-		end := min(len(names), start+args.Limit)
-		page := make([]string, 0, end-start)
-		actualEnd := start
-		for index := start; index < end; index++ {
-			candidateEnd := index + 1
-			candidateBytes := len(prefix) + 1 + len(names[index])
-			if candidateEnd < len(names) {
-				tail := fmt.Sprintf("[Showing entries %d-%d of %d. Re-run read with offset=%d to continue.]", args.Offset, candidateEnd, len(names), candidateEnd+1)
-				candidateBytes += 2 + len(tail)
-			}
-			if candidateBytes > maxDirectoryResponseBytes {
-				if index == start {
-					message := fmt.Sprintf("directory read response exceeds %d bytes on first entry: %d bytes", maxDirectoryResponseBytes, candidateBytes)
-					return errorResult(call.InvocationID, errors.New(message)), nil
-				}
-				break
-			}
-			page = append(page, names[index])
-			actualEnd = candidateEnd
-		}
-		result := prefix + "\n" + strings.Join(page, "\n")
-		if actualEnd < len(names) {
-			tail := fmt.Sprintf("[Showing entries %d-%d of %d. Re-run read with offset=%d to continue.]", args.Offset, actualEnd, len(names), actualEnd+1)
-			result += "\n\n" + tail
-		}
-		return textResult(call.InvocationID, result), nil
-	}
-	if !info.Mode().IsRegular() {
-		return errorResult(call.InvocationID, failRun("path is not a regular file", "INVALID_ARGUMENT")), nil
-	}
-	file, err := os.Open(args.Path)
-	if err != nil {
-		return errorResult(call.InvocationID, err), nil
-	}
-	probe := make([]byte, 12)
-	n, probeErr := io.ReadFull(file, probe)
-	if probeErr != nil && !errors.Is(probeErr, io.EOF) && !errors.Is(probeErr, io.ErrUnexpectedEOF) {
-		file.Close()
-		return errorResult(call.InvocationID, probeErr), nil
-	}
-	probe = probe[:n]
-	imageType := DetectImageType(probe)
-	mediaType := DetectMediaType(probe)
-	if (imageType != "" || mediaType != "") && call.MaxOutputBytes > 0 && info.Size() > call.MaxOutputBytes {
-		file.Close()
-		message := fmt.Sprintf("File is %s MiB, which exceeds the tool output size limit of %d MiB. The file was not read. Use a smaller file, for example by converting or splitting it with bash, or ask the user to raise the limit in system settings.", formatMiB(info.Size(), call.MaxOutputBytes), call.MaxOutputBytes/(1<<20))
-		return codedErrorResult(call.InvocationID, "INVALID_ARGUMENT", message), nil
-	}
-	if imageType != "" || mediaType != "" {
-		if _, err = file.Seek(0, io.SeekStart); err != nil {
-			file.Close()
-			return errorResult(call.InvocationID, err), nil
-		}
-		data, readErr := io.ReadAll(file)
-		closeErr := file.Close()
-		if readErr != nil {
-			return errorResult(call.InvocationID, readErr), nil
-		}
-		if closeErr != nil {
-			return errorResult(call.InvocationID, closeErr), nil
-		}
-		if imageType != "" {
-			tier, err := parseImageTier(call.ImageInputTier)
-			if err != nil {
-				return errorResult(call.InvocationID, err), nil
-			}
-			result, err := imagescaler.ScaleContext(ctx, imageType, data, tier, call.MaxOutputBytes)
-			if err != nil {
-				return errorResult(call.InvocationID, err), nil
-			}
-			content := runtime.ResultContent{Type: "binary", Bytes: result.Bytes, MediaType: result.MediaType, Size: int64(len(result.Bytes))}
-			return runtime.CapabilityResult{CallID: call.InvocationID, Details: mustJSON(map[string]any{"image": map[string]int{"originalWidth": result.OriginalWidth, "originalHeight": result.OriginalHeight, "displayWidth": result.DisplayWidth, "displayHeight": result.DisplayHeight}}), Contents: []runtime.ResultContent{content}}, nil
-		}
-		name := filepath.Base(args.Path)
-		content := runtime.ResultContent{Type: "binary", Bytes: data, MediaType: mediaType, Name: &name, Size: int64(len(data))}
-		return runtime.CapabilityResult{CallID: call.InvocationID, Contents: []runtime.ResultContent{content}}, nil
-	}
-	if _, err = file.Seek(0, io.SeekStart); err != nil {
-		file.Close()
-		return errorResult(call.InvocationID, err), nil
-	}
-	window, readErr := ReadTextWindowReader(file, WindowOptions{Path: args.Path, Offset: args.Offset, Limit: args.Limit, ColumnOffset: args.ColumnOffset})
-	closeErr := file.Close()
-	if readErr != nil {
-		var typed *toolError
-		if errors.As(readErr, &typed) {
-			return errorResult(call.InvocationID, readErr), nil
-		}
-		return errorResult(call.InvocationID, rejectInput(readErr.Error())), nil
-	}
-	if closeErr != nil {
-		return errorResult(call.InvocationID, closeErr), nil
-	}
-	if lspStatus != nil {
-		language, available := lspStatus(args.Path)
-		if available && language != "" {
-			window.LSPStatus = "supported (" + language + ")"
-		}
-	}
-	return textResult(call.InvocationID, formatTextWindow(args.Path, window)), nil
-}
-
 func formatTextWindow(path string, window TextWindow) string {
 	lines := []string{"path: " + filepath.ToSlash(path)}
 	if window.Encoding != "" && window.Encoding != "UTF-8" {
@@ -523,45 +349,7 @@ func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability
 }
 
 func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome search.SearchOutcome, limit int, emptyText, limitUnit string) runtime.CapabilityResult {
-	text := strings.Join(outcome.Results, "\n")
-	if text == "" && len(outcome.Skipped) == 0 && !outcome.Incomplete && !outcome.LimitReached {
-		text = emptyText
-	}
-	if len(outcome.Skipped) > 0 {
-		describe := strings.Join(outcome.Skipped[:min(len(outcome.Skipped), 10)], ", ")
-		if len(outcome.Skipped) > 10 {
-			describe += ", ..."
-		}
-		if text != "" {
-			text += "\n\n"
-		}
-		text += fmt.Sprintf("[%d path(s) could not be searched: %s]", len(outcome.Skipped), describe)
-	}
-	if outcome.LimitReached {
-		if text != "" {
-			text += "\n\n"
-		}
-		text += fmt.Sprintf("[%d %s limit reached. Refine the pattern or raise limit.]", limit, limitUnit)
-	}
-	if outcome.StopReason == "TIMED_OUT" {
-		if text != "" {
-			text += "\n\n"
-		}
-		seconds := strconv.FormatFloat(float64(call.TimeoutMillis)/1000, 'f', -1, 64)
-		text += "[Search timed out after " + seconds + "s; results are incomplete. Narrow the path or pattern, or raise timeout_seconds.]"
-	}
-	if len(outcome.Results) == 0 && outcome.IgnoreSkippedCount > 0 {
-		if text != "" {
-			text += "\n"
-		}
-		text += formatIgnoreSkippedHint(outcome.IgnoreSkipped, outcome.IgnoreSkippedCount)
-	}
-	if outcome.UndecodableCount > 0 {
-		if text != "" {
-			text += "\n"
-		}
-		text += formatUndecodableHint(outcome.Undecodable, outcome.UndecodableCount)
-	}
+	text := searchResultText(call, outcome, limit, emptyText, limitUnit)
 	result := textResult(call.InvocationID, text)
 	if exceedsInlineOutput(text) {
 		store, err := TextOutputStoreForDataDir(dataDir)
@@ -587,20 +375,47 @@ func formatSearchResult(call runtime.CapabilityCall, dataDir string, outcome sea
 	return result
 }
 
-func formatIgnoreSkippedHint(paths []string, count int) string {
-	shown := paths[:min(len(paths), 10)]
-	entries := strings.Join(shown, ", ")
-	if count > len(shown) {
-		if entries != "" {
-			entries += ", "
-		}
-		entries += fmt.Sprintf("… and %d more", count-len(shown))
+// searchResultText joins the records with the notices that describe the outcome. Records and
+// the notices about them are separated by a blank line; the two hint lines that explain why
+// nothing matched follow on the next line, the way read reports them.
+func searchResultText(call runtime.CapabilityCall, outcome search.SearchOutcome, limit int, emptyText, limitUnit string) string {
+	text := strings.Join(outcome.Results, "\n")
+	if text == "" && len(outcome.Skipped) == 0 && !outcome.Incomplete && !outcome.LimitReached {
+		text = emptyText
 	}
-	return "[No matches. Not searched because of ignore rules: " + entries + "]"
+	if len(outcome.Skipped) > 0 {
+		describe := strings.Join(outcome.Skipped[:min(len(outcome.Skipped), 10)], ", ")
+		if len(outcome.Skipped) > 10 {
+			describe += ", ..."
+		}
+		text = appendNotice(text, "\n\n", fmt.Sprintf("[%d path(s) could not be searched: %s]", len(outcome.Skipped), describe))
+	}
+	if outcome.LimitReached {
+		text = appendNotice(text, "\n\n", fmt.Sprintf("[%d %s limit reached. Refine the pattern or raise limit.]", limit, limitUnit))
+	}
+	if outcome.StopReason == "TIMED_OUT" {
+		seconds := strconv.FormatFloat(float64(call.TimeoutMillis)/1000, 'f', -1, 64)
+		text = appendNotice(text, "\n\n", "[Search timed out after "+seconds+"s; results are incomplete. Narrow the path or pattern, or raise timeout_seconds.]")
+	}
+	if len(outcome.Results) == 0 && outcome.IgnoreSkippedCount > 0 {
+		text = appendNotice(text, "\n", formatHintList("No matches. Not searched because of ignore rules: ", outcome.IgnoreSkipped, outcome.IgnoreSkippedCount))
+	}
+	if outcome.UndecodableCount > 0 {
+		text = appendNotice(text, "\n", formatHintList("Not searched because the text encoding could not be determined: ", outcome.Undecodable, outcome.UndecodableCount))
+	}
+	return text
 }
 
-// formatUndecodableHint lists the files whose text encoding could not be determined.
-func formatUndecodableHint(paths []string, count int) string {
+// appendNotice adds notice after separator unless nothing precedes it yet.
+func appendNotice(text, separator, notice string) string {
+	if text == "" {
+		return notice
+	}
+	return text + separator + notice
+}
+
+// formatHintList renders one bracketed notice that names at most the first ten paths.
+func formatHintList(lead string, paths []string, count int) string {
 	shown := paths[:min(len(paths), 10)]
 	entries := strings.Join(shown, ", ")
 	if count > len(shown) {
@@ -609,7 +424,7 @@ func formatUndecodableHint(paths []string, count int) string {
 		}
 		entries += fmt.Sprintf("… and %d more", count-len(shown))
 	}
-	return "[Not searched because the text encoding could not be determined: " + entries + "]"
+	return "[" + lead + entries + "]"
 }
 
 func exceedsInlineOutput(text string) bool {

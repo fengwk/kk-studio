@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
@@ -135,20 +136,20 @@ func TestSearchOrderingGlobAndParallelLimit(t *testing.T) {
 	for _, n := range []string{"a-c", "a/b", "a/bb", "a/x.go", "b/x.go", "x.java", "deep/x.java"} {
 		put(t, root, n, "func main() {}\n")
 	}
-	got, err := Find(root, "", 0)
+	got, err := FindContext(context.Background(), root, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{"a/b", "a/bb", "a/x.go", "a-c", "b/x.go", "deep/x.java", "x.java"}
-	if !reflect.DeepEqual(got, want) {
+	if !reflect.DeepEqual(got.Results, want) {
 		t.Fatalf("Find order = %v; want %v", got, want)
 	}
 	for pattern, expected := range map[string][]string{"*.java": {"deep/x.java", "x.java"}, "**/*.go": {"a/x.go", "b/x.go"}, "{*.java,*.go}": {"a/x.go", "b/x.go", "deep/x.java", "x.java"}, "[ab]-c": {"a-c"}, "!*.java": {"a/b", "a/bb", "a/x.go", "a-c", "b/x.go"}} {
-		got, err = Find(root, pattern, 0)
+		got, err = FindContext(context.Background(), root, pattern, 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !reflect.DeepEqual(got, expected) {
+		if !reflect.DeepEqual(got.Results, expected) {
 			t.Errorf("glob %q = %v; want %v", pattern, got, expected)
 		}
 		if rgErr == nil {
@@ -164,12 +165,12 @@ func TestSearchOrderingGlobAndParallelLimit(t *testing.T) {
 					rgFiles = append(rgFiles, p)
 				}
 			}
-			if !reflect.DeepEqual(got, rgFiles) {
+			if !reflect.DeepEqual(got.Results, rgFiles) {
 				t.Errorf("glob %q differs from rg: Go=%v rg=%v", pattern, got, rgFiles)
 			}
 		}
 	}
-	if _, err = Find(root, "[", 0); err == nil {
+	if _, err = FindContext(context.Background(), root, "[", 0); err == nil {
 		t.Fatal("invalid glob accepted")
 	}
 	if rgErr == nil {
@@ -178,10 +179,16 @@ func TestSearchOrderingGlobAndParallelLimit(t *testing.T) {
 			t.Fatalf("rg invalid glob output=%q err=%v", out, e)
 		}
 	}
-	all, _ := findWith(root, "", 0, 1)
-	first, _ := findWith(root, "", 3, 4)
-	if !reflect.DeepEqual(first, all[:3]) {
-		t.Fatalf("parallel limit=%v; sequential first three=%v", first, all[:3])
+	all, err := FindContext(context.Background(), root, "", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := FindContext(context.Background(), root, "", 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first.Results, all.Results[:3]) {
+		t.Fatalf("parallel limit=%v; sequential first three=%v", first.Results, all.Results[:3])
 	}
 }
 
@@ -197,7 +204,7 @@ func TestGrepMatchesRipgrep(t *testing.T) {
 		literal, ic bool
 	}{{"func main", true, false}, {"func \\w+", false, false}, {"func main", true, true}, {"^func main$", false, false}, {"^$", false, false}}
 	for _, tc := range cases {
-		got, err := Grep(root, tc.pattern, tc.literal, tc.ic, "", 100)
+		got, err := GrepContext(context.Background(), root, tc.pattern, tc.literal, tc.ic, "", 100)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -215,7 +222,7 @@ func TestGrepMatchesRipgrep(t *testing.T) {
 				t.Fatalf("rg: %v", e)
 			}
 		}
-		// Compare path and line only; output text formatting is the prototype's interface.
+		// Compare path and line only; the record text is formatted by this package.
 		var expected []string
 		for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 			fields := strings.SplitN(line, ":", 3)
@@ -225,7 +232,7 @@ func TestGrepMatchesRipgrep(t *testing.T) {
 			}
 		}
 		var actual []string
-		for _, line := range got {
+		for _, line := range got.Results {
 			parts := strings.SplitN(line, ":", 3)
 			actual = append(actual, parts[0]+":"+parts[1])
 		}
@@ -233,19 +240,19 @@ func TestGrepMatchesRipgrep(t *testing.T) {
 			t.Errorf("grep %q got %v; rg %v", tc.pattern, actual, expected)
 		}
 	}
-	all, err := Grep(root, "func", true, false, "", 0)
+	all, err := GrepContext(context.Background(), root, "func", true, false, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	first, err := Grep(root, "func", true, false, "", 2)
+	first, err := GrepContext(context.Background(), root, "func", true, false, "", 2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) < 2 {
-		t.Fatalf("fixture has only %d grep results", len(all))
+	if len(all.Results) < 2 {
+		t.Fatalf("fixture has only %d grep results", len(all.Results))
 	}
-	if !reflect.DeepEqual(first, all[:2]) {
-		t.Fatalf("parallel grep limit=%v; sequential prefix=%v", first, all[:2])
+	if !reflect.DeepEqual(first.Results, all.Results[:2]) {
+		t.Fatalf("parallel grep limit=%v; sequential prefix=%v", first.Results, all.Results[:2])
 	}
 }
 
@@ -259,11 +266,11 @@ func TestRepositoryDiscoveryIgnoresGitCeilingDirectories(t *testing.T) {
 	searchRoot := filepath.Join(repo, "sub", "search")
 	put(t, repo, "sub/search/hidden.tmp", "")
 	t.Setenv("GIT_CEILING_DIRECTORIES", filepath.Join(repo, "sub"))
-	got, err := Find(searchRoot, "", 0)
+	got, err := FindContext(context.Background(), searchRoot, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 0 {
+	if len(got.Results) != 0 {
 		t.Fatalf("repository above GIT_CEILING_DIRECTORIES was not discovered: %v", got)
 	}
 }
@@ -292,33 +299,33 @@ func TestIgnoreAncestorExplicitRootSymlinkAndNoGit(t *testing.T) {
 			t.Fatalf("git oracle %s = %v, %v; want ignored", rel, ignored, e)
 		}
 	}
-	got, err := Find(searchRoot, "", 0)
+	got, err := FindContext(context.Background(), searchRoot, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []string{".gitignore", ".hidden"}) {
+	if !reflect.DeepEqual(got.Results, []string{".gitignore", ".hidden"}) {
 		t.Fatalf("ancestor/info/hidden ignore result=%v", got)
 	}
-	got, err = Find(filepath.Join(searchRoot, "ignored"), "", 0)
+	got, err = FindContext(context.Background(), filepath.Join(searchRoot, "ignored"), "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []string{"file.txt"}) {
+	if !reflect.DeepEqual(got.Results, []string{"file.txt"}) {
 		t.Fatalf("explicit ignored root=%v", got)
 	}
-	got, err = Find(searchRoot, "**/ignored/**", 0)
+	got, err = FindContext(context.Background(), searchRoot, "**/ignored/**", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 0 {
+	if len(got.Results) != 0 {
 		t.Fatalf("glob re-included ignored paths: %v", got)
 	}
 	if err := os.Symlink(filepath.Join(searchRoot, ".hidden"), filepath.Join(searchRoot, "link")); err == nil {
-		got, err = Find(searchRoot, "", 0)
+		got, err = FindContext(context.Background(), searchRoot, "", 0)
 		if err != nil {
 			t.Fatal(err)
 		}
-		for _, p := range got {
+		for _, p := range got.Results {
 			if p == "link" {
 				t.Fatal("symlink was followed")
 			}
@@ -329,11 +336,11 @@ func TestIgnoreAncestorExplicitRootSymlinkAndNoGit(t *testing.T) {
 	put(t, noGit, ".ignore", "hidden.log\n")
 	put(t, noGit, "hidden.log", "")
 	put(t, noGit, "hidden.tmp", "")
-	got, err = Find(noGit, "", 0)
+	got, err = FindContext(context.Background(), noGit, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(got, []string{".gitignore", ".ignore", "hidden.log"}) {
+	if !reflect.DeepEqual(got.Results, []string{".gitignore", ".ignore", "hidden.log"}) {
 		t.Fatalf("non-git .gitignore/.ignore source result=%v", got)
 	}
 }
@@ -360,11 +367,11 @@ func TestIgnoreBoundariesAgainstGit(t *testing.T) {
 	}
 	assertFind := func(name, root string, expected []string) {
 		t.Helper()
-		got, err := Find(root, "", 0)
+		got, err := FindContext(context.Background(), root, "", 0)
 		if err != nil {
 			t.Fatalf("%s find: %v", name, err)
 		}
-		if !reflect.DeepEqual(got, expected) {
+		if !reflect.DeepEqual(got.Results, expected) {
 			t.Fatalf("%s find=%v, want %v", name, got, expected)
 		}
 	}
@@ -380,8 +387,8 @@ func TestIgnoreBoundariesAgainstGit(t *testing.T) {
 			t.Fatalf("Git oracle under ancestor ignore=%v", want)
 		}
 		assertFind("ancestor ignore", repo, want)
-		got, err := Grep(repo, "needle", true, false, "", 0)
-		if err != nil || len(got) != 2 {
+		got, err := GrepContext(context.Background(), repo, "needle", true, false, "", 0)
+		if err != nil || len(got.Results) != 2 {
 			t.Fatalf("grep with ancestor ignore=%v err=%v", got, err)
 		}
 	})
@@ -490,11 +497,11 @@ func TestLinkedWorktreeCommonExclude(t *testing.T) {
 	if err != nil || !want {
 		t.Fatalf("git oracle linked exclude = %v, %v", want, err)
 	}
-	got, err := Find(linked, "", 0)
+	got, err := FindContext(context.Background(), linked, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, p := range got {
+	for _, p := range got.Results {
 		if p == "linked-only.local" || p == ".git" {
 			t.Fatalf("linked worktree exposed excluded metadata/path: %v", got)
 		}

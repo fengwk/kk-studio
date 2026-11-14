@@ -5,6 +5,11 @@ import (
 	"testing"
 )
 
+// readTextWindow projects an in-memory document through the same reader fs.read uses.
+func readTextWindow(text string, options WindowOptions) (TextWindow, error) {
+	return ReadTextWindowReader(strings.NewReader(text), options)
+}
+
 // COD-F-003
 func TestTextCodecRejectsMalformedEncodingAndUnsupportedCharsets(t *testing.T) {
 	for _, data := range [][]byte{{0xff, 0xfe, 0x41}, {0xff, 0xfe, 0x00, 0xdc}, {0xfe, 0xff, 0xdc, 0x00}} {
@@ -52,22 +57,22 @@ func TestReadTextWindowCoversValidationOffsetsAndTruncation(t *testing.T) {
 		{Offset: 1, Limit: MaxReadLimit + 1, ColumnOffset: 1},
 		{Offset: 1, Limit: 1, ColumnOffset: -1},
 	} {
-		if _, err := ReadTextWindow("text", options); err == nil {
+		if _, err := readTextWindow("text", options); err == nil {
 			t.Fatalf("invalid options accepted: %#v", options)
 		}
 	}
-	if _, err := ReadTextWindow("abc", WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 5}); err == nil {
+	if _, err := readTextWindow("abc", WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 5}); err == nil {
 		t.Fatal("out-of-range column accepted")
 	}
-	empty, err := ReadTextWindow("line", WindowOptions{Offset: 2, Limit: 1, ColumnOffset: 1})
+	empty, err := readTextWindow("line", WindowOptions{Offset: 2, Limit: 1, ColumnOffset: 1})
 	if err != nil || !empty.Empty || empty.EndsWithNewline == nil || *empty.EndsWithNewline {
 		t.Fatalf("past-EOF window=%#v err=%v", empty, err)
 	}
-	lineLimited, err := ReadTextWindow("a\nb\nc", WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 1})
+	lineLimited, err := readTextWindow("a\nb\nc", WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 1})
 	if err != nil || !lineLimited.Truncated || lineLimited.TruncationReason != "line_limit" || lineLimited.NextLine != 2 {
 		t.Fatalf("line-limited window=%#v err=%v", lineLimited, err)
 	}
-	charLimited, err := ReadTextWindow(strings.Repeat("界", MaxReadCodePoints+1), WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 1})
+	charLimited, err := readTextWindow(strings.Repeat("界", MaxReadCodePoints+1), WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 1})
 	if err != nil || !charLimited.Truncated || charLimited.TruncationReason != "character_limit" || charLimited.EndColumn != MaxReadCodePoints {
 		t.Fatalf("character-limited window=%#v err=%v", charLimited, err)
 	}

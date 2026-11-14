@@ -230,7 +230,7 @@ func TestResolveExisting(t *testing.T) {
 func TestResolveWritable(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "new", "deep", "f.txt")
-	got, err := resolveWritablePath(target)
+	got, err := resolveWritePath(target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,23 +244,22 @@ func TestResolveWritable(t *testing.T) {
 	}
 }
 
-// COD-T-211: filesystem predicates distinguish existing files, links, and missing paths.
+// COD-T-211: isSymbolicLink distinguishes links from regular files and missing paths.
 func TestPathPredicates(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "a.txt")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	missing := filepath.Join(root, "missing")
-	if !pathExists(file) || pathExists(missing) || isSymbolicLink(file) || isSymbolicLink(missing) {
-		t.Fatal("filesystem predicates returned an incorrect file/missing result")
+	if isSymbolicLink(file) || isSymbolicLink(filepath.Join(root, "missing")) {
+		t.Fatal("a regular file or a missing path was reported as a symbolic link")
 	}
 	link := filepath.Join(root, "link")
 	if err := os.Symlink(file, link); err != nil {
 		t.Skipf("symlink creation unavailable: %v", err)
 	}
-	if !pathExists(link) || !isSymbolicLink(link) {
-		t.Fatal("symlink predicates returned false for an existing link")
+	if !isSymbolicLink(link) {
+		t.Fatal("symlink predicate returned false for an existing link")
 	}
 }
 
