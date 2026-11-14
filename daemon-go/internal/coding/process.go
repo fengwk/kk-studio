@@ -20,6 +20,9 @@ import (
 const (
 	livePartialBytes  = 64 * 1024
 	liveFlushInterval = 150 * time.Millisecond
+	// terminateTimeout bounds how long one process scope may take to converge.
+	terminateTimeout  = 5 * time.Second
+	streamBufferBytes = 32 * 1024
 )
 
 // ExecuteProcess runs the supplied shell command under native process-tree supervision.
@@ -53,11 +56,7 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 	if err != nil {
 		return errorResult(call.InvocationID, failService("temporary output storage is unavailable")), nil
 	}
-	shell := "bash"
-	if capability.Config.BashExecutable != nil && *capability.Config.BashExecutable != "" {
-		shell = *capability.Config.BashExecutable
-	}
-	process, err := capability.Processes.Start(ctx, native.ProcessSpec{Executable: shell, Args: []string{"-lc", `cd -- "$1" || exit 1; shift; ` + command, "bash", workdir}, Directory: workdir})
+	process, err := capability.Processes.Start(ctx, processSpec(capability.Config.BashExecutable, command, workdir))
 	if err != nil {
 		executionExited = !errors.Is(err, native.ErrScopeNotConverged)
 		if executionExited && ctx.Err() != nil {
@@ -66,11 +65,51 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 		return errorResult(call.InvocationID, failRun(err.Error(), "FAILED")), nil
 	}
 	executionExited = false
-	_ = process.Stdin().Close()
-	emitter := &processEmitter{callID: call.InvocationID, progress: capability.Progress, stopped: func() bool { return ctx.Err() != nil }, lastFlush: time.Now()}
+	run := &processRun{ctx: ctx, process: process, spool: spool, terminate: terminateOnce(process)}
+	run.collect(call, capability.Progress)
+	executionExited = run.exited()
+	if run.readErr != nil && ctx.Err() == nil {
+		return streamFailureResult(spool), nil
+	}
+	if run.terminationErr != nil {
+		return errorResult(call.InvocationID, failRun("the process scope did not converge; processes may still be running", "FAILED")), nil
+	}
+	if run.waitErr != nil && ctx.Err() == nil {
+		return errorResult(call.InvocationID, failRun(run.waitErr.Error(), "FAILED")), nil
+	}
+	return exitResult(call, spool, run), nil
+}
+
+// processSpec wraps the command so that it starts in workdir under the configured shell.
+func processSpec(bashExecutable *string, command, workdir string) native.ProcessSpec {
+	shell := "bash"
+	if bashExecutable != nil && *bashExecutable != "" {
+		shell = *bashExecutable
+	}
+	return native.ProcessSpec{Executable: shell, Args: []string{"-lc", `cd -- "$1" || exit 1; shift; ` + command, "bash", workdir}, Directory: workdir}
+}
+
+// processRun holds the state of one started process until its output has been read.
+type processRun struct {
+	ctx       context.Context
+	process   native.ManagedProcess
+	spool     *OutputSpool
+	terminate func() error
+	exitedAt  atomic.Bool
+	// readErr joins the stream failures that were not caused by the wait itself.
+	readErr        error
+	terminationErr error
+	waitErr        error
+	exit           native.ProcessExit
+}
+
+// collect reads both output streams until the process exits, then flushes the last progress.
+func (r *processRun) collect(call runtime.CapabilityCall, progress runtime.Progress) {
+	_ = r.process.Stdin().Close()
+	emitter := &processEmitter{callID: call.InvocationID, progress: progress, stopped: func() bool { return r.ctx.Err() != nil }, lastFlush: time.Now()}
 	stopProgress := make(chan struct{})
 	var progressWait sync.WaitGroup
-	if capability.Progress != nil {
+	if progress != nil {
 		progressWait.Add(1)
 		go func() {
 			defer progressWait.Done()
@@ -88,127 +127,152 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 	}
 	defer func() { close(stopProgress); progressWait.Wait() }()
 	readErrors := make(chan error, 2)
-	var terminationOnce sync.Once
-	var terminationErr error
-	terminate := func() error {
-		terminationOnce.Do(func() {
-			termCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			defer cancel()
-			terminationErr = process.Terminate(termCtx, 5*time.Second)
-		})
-		return terminationErr
-	}
 	var truncationReported atomic.Bool
 	var readers sync.WaitGroup
-	for _, stream := range []io.ReadCloser{process.Stdout(), process.Stderr()} {
+	for _, stream := range []io.ReadCloser{r.process.Stdout(), r.process.Stderr()} {
 		readers.Add(1)
-		go func(r io.ReadCloser) {
+		go func(stream io.ReadCloser) {
 			defer readers.Done()
-			defer r.Close()
-			buffer := make([]byte, 32*1024)
+			defer stream.Close()
+			buffer := make([]byte, streamBufferBytes)
 			for {
-				n, readErr := r.Read(buffer)
+				n, readErr := stream.Read(buffer)
 				if n > 0 {
-					spool.Write(buffer[:n])
+					r.spool.Write(buffer[:n])
 					emitter.Write(buffer[:n])
-					if spool.IsCaptureTruncated() && truncationReported.CompareAndSwap(false, true) {
-						emitter.Snapshot(spool.CaptureTruncatedTailPreview())
+					if r.spool.IsCaptureTruncated() && truncationReported.CompareAndSwap(false, true) {
+						emitter.Snapshot(r.spool.CaptureTruncatedTailPreview())
 					}
 				}
 				if readErr != nil {
 					if !errors.Is(readErr, io.EOF) {
 						readErrors <- readErr
-						_ = terminate()
+						_ = r.terminate()
 					}
 					return
 				}
 			}
 		}(stream)
 	}
-	exit, waitErr := process.Wait(ctx)
-	terminationResult := terminate()
+	r.exit, r.waitErr = r.process.Wait(r.ctx)
+	r.terminationErr = r.terminate()
 	readers.Wait()
 	emitter.Flush()
-	if terminationResult == nil && (waitErr == nil || ctx.Err() != nil) {
-		executionExited = true
+	if r.terminationErr == nil && (r.waitErr == nil || r.ctx.Err() != nil) {
+		r.exitedAt.Store(true)
 	}
-	var readErr error
+	r.readErr = joinStreamErrors(readErrors, r.waitErr, r.terminationErr)
+}
+
+// joinStreamErrors keeps the stream failures that no normal wait explains.
+func joinStreamErrors(readErrors chan error, waitErr, terminationErr error) error {
+	var joined error
 	for len(readErrors) > 0 {
 		streamErr := <-readErrors
-		streamClosedByWait := errors.Is(streamErr, os.ErrClosed) && waitErr == nil && terminationResult == nil
+		streamClosedByWait := errors.Is(streamErr, os.ErrClosed) && waitErr == nil && terminationErr == nil
 		if !streamClosedByWait {
-			readErr = errors.Join(readErr, streamErr)
+			joined = errors.Join(joined, streamErr)
 		}
 	}
-	if readErr != nil && ctx.Err() == nil {
-		result := spool.Finish(true, "")
-		result.Error = true
-		result.Contents[0].Text += "\n\n" + guideText("the process output stream failed while reading", "FAILED", verifyEffectNextAction)
-		var details map[string]any
-		if err := json.Unmarshal(result.Details, &details); err != nil {
-			details = make(map[string]any)
-		}
-		details["code"] = "FAILED"
-		details["process"] = map[string]string{"outcome": "EXITED"}
-		result.Details = mustJSON(details)
-		return result, nil
+	return joined
+}
+
+// exited reports whether no process of the scope survives.
+func (r *processRun) exited() bool { return r.exitedAt.Load() }
+
+// terminateOnce returns a terminate function that runs the scope termination at most once.
+func terminateOnce(process native.ManagedProcess) func() error {
+	var once sync.Once
+	var err error
+	return func() error {
+		once.Do(func() {
+			termCtx, cancel := context.WithTimeout(context.Background(), terminateTimeout)
+			defer cancel()
+			err = process.Terminate(termCtx, terminateTimeout)
+		})
+		return err
 	}
-	if terminationResult != nil {
-		return errorResult(call.InvocationID, failRun("the process scope did not converge; processes may still be running", "FAILED")), nil
-	}
-	if waitErr != nil && ctx.Err() == nil {
-		return errorResult(call.InvocationID, failRun(waitErr.Error(), "FAILED")), nil
-	}
-	outcome := "EXITED"
-	naturalExit := ctx.Err() == nil && waitErr == nil
-	var exitCode *int
-	note := ""
-	failed := false
-	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		outcome = "TIMED_OUT"
-		failed = true
-		note = fmt.Sprintf("[Command timed out after %d ms and was terminated. Captured output above may be incomplete; side effects already performed are not rolled back.]", call.TimeoutMillis)
-	} else if errors.Is(ctx.Err(), context.Canceled) {
-		outcome = "CANCELLED"
-		failed = true
-		note = "[Operation cancelled by the caller. Captured output above may be incomplete; side effects already performed are not rolled back.]"
-	} else if waitErr != nil {
-		failed = true
-	} else if exit.Signal != nil {
-		failed = true
-		note = fmt.Sprintf("[Command was terminated by signal %s.]", *exit.Signal)
-	} else if exit.Code != nil {
-		code := *exit.Code
-		exitCode = &code
-		if code != 0 {
-			failed = true
-			note = fmt.Sprintf("[Command exited with code %d.]", code)
-		}
-	}
-	result := spool.Finish(failed, note)
+}
+
+// streamFailureResult reports output that could not be read even though the process exited.
+func streamFailureResult(spool *OutputSpool) runtime.CapabilityResult {
+	result := spool.Finish(true, "")
+	result.Error = true
+	result.Contents[0].Text += "\n\n" + guideText("the process output stream failed while reading", "FAILED", verifyEffectNextAction)
 	var details map[string]any
 	if err := json.Unmarshal(result.Details, &details); err != nil {
 		details = make(map[string]any)
 	}
-	processDetails := map[string]any{"outcome": outcome}
-	if failed {
+	details["code"] = "FAILED"
+	details["process"] = map[string]string{"outcome": "EXITED"}
+	result.Details = mustJSON(details)
+	return result
+}
+
+// exitResult reports how the process ended: its outcome note, exit code or signal.
+func exitResult(call runtime.CapabilityCall, spool *OutputSpool, run *processRun) runtime.CapabilityResult {
+	outcome := run.outcome(call)
+	result := spool.Finish(outcome.failed, outcome.note)
+	var details map[string]any
+	if err := json.Unmarshal(result.Details, &details); err != nil {
+		details = make(map[string]any)
+	}
+	processDetails := map[string]any{"outcome": outcome.outcome}
+	if outcome.failed {
 		code := "FAILED"
-		if outcome == "CANCELLED" {
+		if outcome.outcome == "CANCELLED" {
 			code = "CANCELLED"
-		} else if outcome == "TIMED_OUT" {
+		} else if outcome.outcome == "TIMED_OUT" {
 			code = "TIMEOUT"
 		}
 		details["code"] = code
 	}
-	if naturalExit && exitCode != nil {
-		processDetails["exitCode"] = *exitCode
+	naturalExit := run.ctx.Err() == nil && run.waitErr == nil
+	if naturalExit && outcome.exitCode != nil {
+		processDetails["exitCode"] = *outcome.exitCode
 	}
-	if naturalExit && exit.Signal != nil {
-		processDetails["signal"] = *exit.Signal
+	if naturalExit && run.exit.Signal != nil {
+		processDetails["signal"] = *run.exit.Signal
 	}
 	details["process"] = processDetails
 	result.Details = mustJSON(details)
-	return result, nil
+	return result
+}
+
+// processOutcome is the reported ending of one process.
+type processOutcome struct {
+	outcome  string
+	note     string
+	failed   bool
+	exitCode *int
+}
+
+// outcome derives the reported ending from the context, the wait error and the exit status.
+func (r *processRun) outcome(call runtime.CapabilityCall) processOutcome {
+	outcome := processOutcome{outcome: "EXITED"}
+	switch {
+	case errors.Is(r.ctx.Err(), context.DeadlineExceeded):
+		outcome.outcome = "TIMED_OUT"
+		outcome.failed = true
+		outcome.note = fmt.Sprintf("[Command timed out after %d ms and was terminated. Captured output above may be incomplete; side effects already performed are not rolled back.]", call.TimeoutMillis)
+	case errors.Is(r.ctx.Err(), context.Canceled):
+		outcome.outcome = "CANCELLED"
+		outcome.failed = true
+		outcome.note = "[Operation cancelled by the caller. Captured output above may be incomplete; side effects already performed are not rolled back.]"
+	case r.waitErr != nil:
+		outcome.failed = true
+	case r.exit.Signal != nil:
+		outcome.failed = true
+		outcome.note = fmt.Sprintf("[Command was terminated by signal %s.]", *r.exit.Signal)
+	case r.exit.Code != nil:
+		code := *r.exit.Code
+		outcome.exitCode = &code
+		if code != 0 {
+			outcome.failed = true
+			outcome.note = fmt.Sprintf("[Command exited with code %d.]", code)
+		}
+	}
+	return outcome
 }
 
 func closeProcessOutputBeforeExitConfirmation(closeOutput func(), executionExited bool, confirm func()) {
