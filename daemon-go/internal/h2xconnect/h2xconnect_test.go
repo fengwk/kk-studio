@@ -25,17 +25,17 @@ func TestEnableExtendedConnect(t *testing.T) {
 	}
 }
 
+// TestInitAppendsAndPreservesGODEBUG pins the value the package leaves in the process environment.
 func TestInitAppendsAndPreservesGODEBUG(t *testing.T) {
 	if !strings.Contains(os.Getenv("GODEBUG"), "http2xconnect=1") {
 		t.Fatalf("GODEBUG = %q, missing http2xconnect=1", os.Getenv("GODEBUG"))
 	}
-	original := OriginalGODEBUG()
-	want := original
-	if !strings.Contains(original, "http2xconnect=1") {
-		if original == "" {
+	want := inherited
+	if !strings.Contains(inherited, "http2xconnect=1") {
+		if inherited == "" {
 			want = "http2xconnect=1"
 		} else {
-			want = original + ",http2xconnect=1"
+			want = inherited + ",http2xconnect=1"
 		}
 	}
 	if got := os.Getenv("GODEBUG"); got != want {

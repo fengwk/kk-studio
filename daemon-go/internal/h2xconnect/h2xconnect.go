@@ -5,11 +5,12 @@ import (
 	"strings"
 )
 
-var original = os.Getenv("GODEBUG")
+// inherited records the GODEBUG value the process started with, before init appends the setting.
+var inherited = os.Getenv("GODEBUG")
 
 func init() {
-	updated := enableExtendedConnect(original)
-	if updated != original {
+	updated := enableExtendedConnect(inherited)
+	if updated != inherited {
 		_ = os.Setenv("GODEBUG", updated)
 	}
 }
@@ -24,9 +25,4 @@ func enableExtendedConnect(value string) string {
 		return "http2xconnect=1"
 	}
 	return value + ",http2xconnect=1"
-}
-
-// OriginalGODEBUG returns the environment value that must be restored in child processes.
-func OriginalGODEBUG() string {
-	return original
 }

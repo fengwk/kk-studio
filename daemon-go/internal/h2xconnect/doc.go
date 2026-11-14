@@ -1,7 +1,7 @@
-// Package h2xconnect prepares the http2xconnect GODEBUG value for Go 1.27.
-// The runtime reads GODEBUG before package initialization, so the setting must be present
-// before process startup to affect net/http. This package's init only updates the environment
-// inherited by child processes; it cannot configure the current process. OriginalGODEBUG
-// exposes the value to restore when a child should not inherit this setting.
-// Delete this compatibility package when Go 1.28 provides public Extended CONNECT configuration.
+// Package h2xconnect appends http2xconnect=1 to GODEBUG for the processes this daemon starts.
+//
+// Go 1.27 only lets its HTTP/2 server accept extended CONNECT requests, which the control channel
+// needs when the platform tunnels an IDE WebSocket, when GODEBUG already contains http2xconnect=1
+// at process startup. The executable therefore re-executes itself with that value; this package's
+// init keeps the setting in the environment inherited by the helper processes it starts later.
 package h2xconnect

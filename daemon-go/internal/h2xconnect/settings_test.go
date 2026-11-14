@@ -59,7 +59,7 @@ func TestStdlibHTTP2ServerSendsExtendedConnectSetting(t *testing.T) {
 			}
 		}
 		if mode == "startup" {
-			cmd.Env = append(cmd.Env, "GODEBUG="+enableExtendedConnect(OriginalGODEBUG()))
+			cmd.Env = append(cmd.Env, "GODEBUG="+enableExtendedConnect(inherited))
 		}
 		cmd.Env = append(cmd.Env, settingsProbeEnv+"="+mode)
 		output, err := cmd.CombinedOutput()
