@@ -31,11 +31,11 @@ func TestPool_ReusesClient(t *testing.T) {
 	}
 	supervisor := &fakeSupervisor{}
 	pool := NewPool(discovery, supervisor, PoolOptions{IdleTimeout: time.Hour, ShutdownGrace: time.Second, InitializeTimeout: time.Second})
-	first, err := pool.Lease(context.Background(), file)
+	first, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := pool.Lease(context.Background(), file)
+	second, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

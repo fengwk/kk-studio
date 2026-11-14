@@ -335,7 +335,7 @@ func TestCommandValidationAndDispatch(t *testing.T) {
 	if manager.startCalls != 0 || manager.registerCalls != 0 {
 		t.Fatalf("validation side effects starts=%d register=%d", manager.startCalls, manager.registerCalls)
 	}
-	if views := service.Handle(context.Background(), &protocol.IdeCommand{Action: protocol.IdeAction_LIST_VIEWS}); !views.GetOk() || views.GetRevision() != 0 {
+	if views := service.HandleCommand(context.Background(), &protocol.IdeCommand{Action: protocol.IdeAction_LIST_VIEWS}); !views.GetOk() || views.GetRevision() != 0 {
 		t.Fatalf("list views=%v", views)
 	}
 	if unknown := service.HandleCommand(context.Background(), &protocol.IdeCommand{Action: protocol.IdeAction(99)}); unknown.GetOk() || unknown.GetMessage() != "unknown ide action" {

@@ -24,8 +24,7 @@ func (s *Service) FileChanged(path string) {
 		client.Refresh(path)
 	}
 }
-func (s *Service) ActiveClientCount() int { return s.Pool.ActiveClientCount() }
-func (s *Service) Close() error           { return s.Pool.Close() }
+func (s *Service) Close() error { return s.Pool.Close() }
 
 func (s *Service) GotoDefinition(ctx context.Context, path string, line, character int, onExit ...func()) (string, error) {
 	callback := firstCallback(onExit)

@@ -269,68 +269,85 @@ func (m *codeServerManager) runStart(ctx context.Context) {
 }
 
 func (m *codeServerManager) start(ctx context.Context) (*CodeServerSession, error) {
+	if err := m.terminatePrevious(ctx); err != nil {
+		return nil, err
+	}
+	launch, port, password, managementToken, err := m.prepareStart()
+	if err != nil {
+		return nil, err
+	}
+	process, generation, processExit, err := m.launchProcess(ctx, launch, port, managementToken)
+	if err != nil {
+		return nil, err
+	}
+	if err := m.waitForHealth(ctx, port, processExit); err != nil {
+		return nil, m.abandonStart(process, err)
+	}
+	cookie, err := m.login(ctx, port, password)
+	if err != nil {
+		return nil, m.abandonStart(process, err)
+	}
+	return &CodeServerSession{Host: "127.0.0.1", Port: port, Cookie: cookie, PID: process.PID(), Generation: generation, ManagementToken: managementToken}, nil
+}
+
+// terminatePrevious converges the process left over from an earlier generation.
+func (m *codeServerManager) terminatePrevious(ctx context.Context) error {
 	m.mu.Lock()
 	previous := m.process
 	m.mu.Unlock()
-	if previous != nil {
-		if err := previous.Terminate(ctx, 5*time.Second); err != nil {
-			return nil, NewError("code-server process scope did not converge", "UNAVAILABLE")
-		}
-		m.mu.Lock()
-		if m.process == previous {
-			m.process = nil
-		}
-		m.mu.Unlock()
+	if previous == nil {
+		return nil
 	}
+	if err := previous.Terminate(ctx, 5*time.Second); err != nil {
+		return NewError("code-server process scope did not converge", "UNAVAILABLE")
+	}
+	m.mu.Lock()
+	if m.process == previous {
+		m.process = nil
+	}
+	m.mu.Unlock()
+	return nil
+}
+
+// prepareStart installs the private storage, config file and loopback credentials.
+func (m *codeServerManager) prepareStart() (CodeServerLaunch, int, string, string, error) {
 	launch, err := ResolveCodeServerLaunch(m.cfg.DistributionDir)
 	if err != nil {
-		return nil, err
+		return CodeServerLaunch{}, 0, "", "", err
 	}
 	for _, dir := range []string{m.paths.IDEDir, m.paths.CodeServerDir, m.paths.UserDataDir, m.paths.ExtensionsDir, m.paths.ViewsDir} {
 		if err := native.EnsurePrivateDirectory(dir); err != nil {
-			return nil, NewError("code-server storage is unavailable", "UNAVAILABLE")
+			return CodeServerLaunch{}, 0, "", "", NewError("code-server storage is unavailable", "UNAVAILABLE")
 		}
 	}
 	if err := installBridgeExtension(m.cfg.DistributionDir, m.paths.ExtensionsDir); err != nil {
-		return nil, err
+		return CodeServerLaunch{}, 0, "", "", err
 	}
 	port, err := allocateLoopbackPort()
 	if err != nil {
-		return nil, NewError("code-server port is unavailable", "UNAVAILABLE")
+		return CodeServerLaunch{}, 0, "", "", NewError("code-server port is unavailable", "UNAVAILABLE")
 	}
 	password, err := randomToken()
 	if err != nil {
-		return nil, NewError("code-server startup failed", "UNAVAILABLE")
+		return CodeServerLaunch{}, 0, "", "", NewError("code-server startup failed", "UNAVAILABLE")
 	}
 	managementToken, err := randomToken()
 	if err != nil {
-		return nil, NewError("code-server startup failed", "UNAVAILABLE")
+		return CodeServerLaunch{}, 0, "", "", NewError("code-server startup failed", "UNAVAILABLE")
 	}
 	configData := []byte(fmt.Sprintf("bind-addr: 127.0.0.1:%d\nauth: password\npassword: %s\ncert: false\n", port, password))
 	if err := native.WritePrivateFile(m.paths.ConfigFile, configData); err != nil {
-		return nil, NewError("code-server storage is unavailable", "UNAVAILABLE")
+		return CodeServerLaunch{}, 0, "", "", NewError("code-server storage is unavailable", "UNAVAILABLE")
 	}
-	args := append([]string(nil), launch.Args...)
-	if runtime.GOOS != "windows" {
-		m.mu.Lock()
-		ipcDirectory := m.ipcDirectory
-		m.mu.Unlock()
-		if ipcDirectory == "" {
-			ipcDirectory, err = os.MkdirTemp("/tmp", "kk-studio-ide-")
-			if err != nil {
-				return nil, NewError("code-server IPC storage is unavailable", "UNAVAILABLE")
-			}
-			if err := os.Chmod(ipcDirectory, 0o700); err != nil {
-				_ = os.RemoveAll(ipcDirectory)
-				return nil, NewError("code-server IPC storage is unavailable", "UNAVAILABLE")
-			}
-			m.mu.Lock()
-			m.ipcDirectory = ipcDirectory
-			m.mu.Unlock()
-		}
-		args = append(args, "--session-socket", filepath.Join(ipcDirectory, "session.sock"))
+	return launch, port, password, managementToken, nil
+}
+
+// launchProcess starts the supervised process and records it as the current generation.
+func (m *codeServerManager) launchProcess(ctx context.Context, launch CodeServerLaunch, port int, managementToken string) (native.ManagedProcess, uint64, chan struct{}, error) {
+	args, err := m.startArguments(launch, port)
+	if err != nil {
+		return nil, 0, nil, err
 	}
-	args = append(args, "--config", m.paths.ConfigFile, "--bind-addr", fmt.Sprintf("127.0.0.1:%d", port), "--auth", "password", "--user-data-dir", m.paths.UserDataDir, "--extensions-dir", m.paths.ExtensionsDir, "--disable-telemetry", "--disable-update-check", "--disable-workspace-trust", "--disable-getting-started-override")
 	process, err := m.processes.Start(ctx, native.ProcessSpec{
 		Executable: launch.Executable, Args: args, Directory: m.paths.CodeServerDir,
 		Env: mergeEnvironment(os.Environ(), map[string]string{
@@ -340,7 +357,7 @@ func (m *codeServerManager) start(ctx context.Context) (*CodeServerSession, erro
 		}),
 	})
 	if err != nil {
-		return nil, NewError("code-server could not be started", "UNAVAILABLE")
+		return nil, 0, nil, NewError("code-server could not be started", "UNAVAILABLE")
 	}
 	processExit := make(chan struct{})
 	m.mu.Lock()
@@ -354,30 +371,55 @@ func (m *codeServerManager) start(ctx context.Context) (*CodeServerSession, erro
 	go m.drain(process.Stdout())
 	go m.drain(process.Stderr())
 	go m.watchExit(process, generation, false)
-	if err := m.waitForHealth(ctx, port, processExit); err != nil {
-		if terminateErr := process.Terminate(context.Background(), 5*time.Second); terminateErr != nil {
-			return nil, NewError(fmt.Sprintf("code-server startup failed (%s) and could not be terminated", SafeMessage(err)), "UNAVAILABLE")
+	return process, generation, processExit, nil
+}
+
+// startArguments appends the fixed bind/auth options to the bundle entrypoint arguments.
+func (m *codeServerManager) startArguments(launch CodeServerLaunch, port int) ([]string, error) {
+	args := append([]string(nil), launch.Args...)
+	if runtime.GOOS != "windows" {
+		ipcDirectory, err := m.ensureIPCDirectory()
+		if err != nil {
+			return nil, err
 		}
-		m.mu.Lock()
-		if m.process == process {
-			m.process = nil
-		}
-		m.mu.Unlock()
-		return nil, err
+		args = append(args, "--session-socket", filepath.Join(ipcDirectory, "session.sock"))
 	}
-	cookie, err := m.login(ctx, port, password)
+	return append(args, "--config", m.paths.ConfigFile, "--bind-addr", fmt.Sprintf("127.0.0.1:%d", port), "--auth", "password", "--user-data-dir", m.paths.UserDataDir, "--extensions-dir", m.paths.ExtensionsDir, "--disable-telemetry", "--disable-update-check", "--disable-workspace-trust", "--disable-getting-started-override"), nil
+}
+
+// ensureIPCDirectory creates the private session-socket directory once per manager.
+func (m *codeServerManager) ensureIPCDirectory() (string, error) {
+	m.mu.Lock()
+	ipcDirectory := m.ipcDirectory
+	m.mu.Unlock()
+	if ipcDirectory != "" {
+		return ipcDirectory, nil
+	}
+	ipcDirectory, err := os.MkdirTemp("/tmp", "kk-studio-ide-")
 	if err != nil {
-		if terminateErr := process.Terminate(context.Background(), 5*time.Second); terminateErr != nil {
-			return nil, NewError(fmt.Sprintf("code-server startup failed (%s) and could not be terminated", SafeMessage(err)), "UNAVAILABLE")
-		}
-		m.mu.Lock()
-		if m.process == process {
-			m.process = nil
-		}
-		m.mu.Unlock()
-		return nil, err
+		return "", NewError("code-server IPC storage is unavailable", "UNAVAILABLE")
 	}
-	return &CodeServerSession{Host: "127.0.0.1", Port: port, Cookie: cookie, PID: process.PID(), Generation: generation, ManagementToken: managementToken}, nil
+	if err := os.Chmod(ipcDirectory, 0o700); err != nil {
+		_ = os.RemoveAll(ipcDirectory)
+		return "", NewError("code-server IPC storage is unavailable", "UNAVAILABLE")
+	}
+	m.mu.Lock()
+	m.ipcDirectory = ipcDirectory
+	m.mu.Unlock()
+	return ipcDirectory, nil
+}
+
+// abandonStart terminates a process that failed health or login and reports the original cause.
+func (m *codeServerManager) abandonStart(process native.ManagedProcess, cause error) error {
+	if terminateErr := process.Terminate(context.Background(), 5*time.Second); terminateErr != nil {
+		return NewError(fmt.Sprintf("code-server startup failed (%s) and could not be terminated", SafeMessage(cause)), "UNAVAILABLE")
+	}
+	m.mu.Lock()
+	if m.process == process {
+		m.process = nil
+	}
+	m.mu.Unlock()
+	return cause
 }
 
 func (m *codeServerManager) waitForHealth(ctx context.Context, port int, processExit <-chan struct{}) error {

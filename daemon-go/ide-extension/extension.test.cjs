@@ -583,6 +583,36 @@ test('a retired control host does not reconnect or dispose its terminal', async 
   } finally { context.host.dispose() }
 })
 
+test('dispatches commands decoded before a bad line in the same chunk', async () => {
+  const context = setup(undefined, { reconnectMillis: 1 })
+  try {
+    await focus(context)
+    const results = () => context.network.posts.filter((post) => post.pathname === '/bridge/result')
+    const before = results().length
+    // Both lines arrive together: the valid command still runs, then the bad line fails the stream.
+    context.network.streams[0].response.write(
+      `${JSON.stringify({ type: 'command', id: 'cmd-before-bad-line', op: 'inspect' })}\n{not json\n`,
+    )
+    await waitFor(() => results().length > before)
+    assert.equal(results().at(-1).payload.ok, true)
+    await waitFor(() => context.network.streams.length >= 2)
+  } finally { context.host.dispose() }
+})
+
+test('retirement in a chunk stops parsing before a later bad line', async () => {
+  const context = setup(undefined, { reconnectMillis: 1 })
+  try {
+    await focus(context)
+    const terminal = context.fake.terminals[0]
+    // The trailing bad line never counts: retirement already ended consumption.
+    context.network.streams[0].response.write(`${JSON.stringify({ type: 'retired' })}\n{not json\n`)
+    await waitFor(() => context.network.streams[0].request.destroyed)
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    assert.equal(context.network.streams.length, 1)
+    assert.equal(terminal.disposed, false)
+  } finally { context.host.dispose() }
+})
+
 test('retries a rejected handshake without crashing the extension host', async () => {
   const context = setup(undefined, { httpOptions: { streamStatuses: [401, 200] }, reconnectMillis: 1 })
   try {

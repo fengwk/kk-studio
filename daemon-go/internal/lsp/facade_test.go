@@ -13,6 +13,16 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
+// publishServers installs one configuration generation through the production entrypoints.
+func publishServers(t *testing.T, facade *Facade, servers []config.LSPServerConfig) error {
+	t.Helper()
+	prepared, err := facade.Prepare(servers)
+	if err != nil {
+		return err
+	}
+	return prepared.Publish()
+}
+
 // LSP-T-001 ensures argument rejection precedes any server launch and confirms exit once.
 func TestCapabilities_ValidateBeforeStart(t *testing.T) {
 	supervisor := &fakeSupervisor{}
@@ -123,7 +133,7 @@ func TestCapabilities_SharedClient(t *testing.T) {
 	}
 	supervisor := &fakeSupervisor{events: make(chan fakeRequest, 32)}
 	facade := NewFacade(supervisor, PoolOptions{IdleTimeout: time.Hour})
-	if err := facade.Update([]config.LSPServerConfig{{ID: "jdtls", Command: []string{binary}, Extensions: []string{".java"}}}); err != nil {
+	if err := publishServers(t, facade, []config.LSPServerConfig{{ID: "jdtls", Command: []string{binary}, Extensions: []string{".java"}}}); err != nil {
 		t.Fatal(err)
 	}
 	calls := []struct {
@@ -165,8 +175,8 @@ func TestCapabilities_SharedClient(t *testing.T) {
 	if !gotDefaultPosition {
 		t.Fatal("omitted character did not select the first 1-based code-point column")
 	}
-	if supervisor.starts != 1 || confirmed != len(calls) || facade.ActiveClientCount() != 1 {
-		t.Fatalf("starts=%d confirmations=%d clients=%d", supervisor.starts, confirmed, facade.ActiveClientCount())
+	if supervisor.starts != 1 || confirmed != len(calls) || facade.current.service.Pool.ActiveClientCount() != 1 {
+		t.Fatalf("starts=%d confirmations=%d clients=%d", supervisor.starts, confirmed, facade.current.service.Pool.ActiveClientCount())
 	}
 	if err := facade.Close(); err != nil {
 		t.Fatal(err)

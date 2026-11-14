@@ -12,14 +12,13 @@ import (
 )
 
 const (
-	stateDirPrefix  = "kk-studio-daemon-process-scope-"
-	scopeFile       = "scope"
-	permitFile      = "permit"
-	exitFile        = "exit"
-	errorFile       = "error"
-	cleanupFile     = "cleanup"
-	launchFile      = "launch"
-	diagnosticsFile = "diagnostics"
+	stateDirPrefix = "kk-studio-daemon-process-scope-"
+	scopeFile      = "scope"
+	permitFile     = "permit"
+	exitFile       = "exit"
+	errorFile      = "error"
+	cleanupFile    = "cleanup"
+	launchFile     = "launch"
 )
 
 type launchSpec struct {

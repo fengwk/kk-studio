@@ -65,7 +65,7 @@ func TestCapabilities_ErrorMapping(t *testing.T) {
 		}
 		supervisor := &fakeSupervisor{startErr: errors.New("secret spawn details")}
 		facade := NewFacade(supervisor, PoolOptions{})
-		if err := facade.Update([]config.LSPServerConfig{{ID: "go", Command: []string{executable}, Extensions: []string{".go"}}}); err != nil {
+		if err := publishServers(t, facade, []config.LSPServerConfig{{ID: "go", Command: []string{executable}, Extensions: []string{".go"}}}); err != nil {
 			t.Fatal(err)
 		}
 		confirmed := 0
@@ -92,7 +92,7 @@ func TestCapabilities_ErrorMapping(t *testing.T) {
 		if err := os.WriteFile(executable, []byte("fake"), 0700); err != nil {
 			t.Fatal(err)
 		}
-		if err := facade.Update([]config.LSPServerConfig{{ID: "go", Command: []string{executable}, Extensions: []string{".go"}}}); err != nil {
+		if err := publishServers(t, facade, []config.LSPServerConfig{{ID: "go", Command: []string{executable}, Extensions: []string{".go"}}}); err != nil {
 			t.Fatal(err)
 		}
 		ctx, cancel := context.WithCancel(context.Background())
@@ -133,7 +133,7 @@ func TestCapabilities_ErrorMapping(t *testing.T) {
 		}
 		supervisor := &fakeSupervisor{blockMethod: "textDocument/definition"}
 		facade := NewFacade(supervisor, PoolOptions{IdleTimeout: time.Hour})
-		if err := facade.Update([]config.LSPServerConfig{{ID: "go", Command: []string{executable}, Extensions: []string{".go"}}}); err != nil {
+		if err := publishServers(t, facade, []config.LSPServerConfig{{ID: "go", Command: []string{executable}, Extensions: []string{".go"}}}); err != nil {
 			t.Fatal(err)
 		}
 		arguments, err := json.Marshal(map[string]any{"path": source, "line": 1})

@@ -259,10 +259,7 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 		}
 	}
 	if ctx.Err() != nil {
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return newLspTimeoutError("Operation timed out", ctx.Err())
-		}
-		return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+		return contextFailure(ctx)
 	}
 	if c.closed.Load() {
 		return &LspError{Message: "LSP client stopped"}
@@ -283,77 +280,100 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 	select {
 	case err := <-done:
 		if err != nil {
-			if c.stopping.Load() {
-				if c.exitReported.Load() {
-					return c.exitError()
-				}
-				return &LspError{Message: "LSP client stopped"}
-			}
-			if c.processExitedWithTransportEOF() {
-				return c.exitError()
-			}
-			if c.getTransportFailure() != nil {
-				<-c.transportDone
-				if c.processExitedWithTransportEOF() {
-					return c.exitError()
-				}
-				if transportErr := c.getTransportFailure(); transportErr != nil {
-					return transportErr
-				}
-			}
-			if errors.Is(err, jsonrpc2.ErrClosed) {
-				<-c.transportDone
-				if transportErr := c.getTransportFailure(); transportErr != nil {
-					return transportErr
-				}
-				if !c.stopping.Load() {
-					exitErr := c.exitError()
-					var lspErr *LspError
-					if errors.As(exitErr, &lspErr) && lspErr.Message != "LSP client stopped" {
-						return exitErr
-					}
-				}
-			}
-			var rpcErr *jsonrpc2.Error
-			if errors.As(err, &rpcErr) {
-				finish()
-			}
-			return &LspError{Message: "LSP request failed (" + method + ")", Cause: err}
+			return c.responseFailure(err, method, finish)
 		}
 		finish()
 		return nil
 	case <-ctx.Done():
 		_ = c.conn.Notify(context.Background(), "$/cancelRequest", CancelRequestParams{ID: id})
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			message := fmt.Sprintf("LSP request timed out (%s).", method)
-			if hasDeadline {
-				if timeout := deadline.Sub(started); timeout > 0 {
-					message = fmt.Sprintf("LSP request timed out after %dms (%s).", timeout.Milliseconds(), method)
-				}
-			}
-			return newLspTimeoutError(message, ctx.Err())
-		}
-		return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+		return timedOutFailure(ctx, method, started, deadline, hasDeadline)
 	case <-c.stopStarted:
 		return &LspError{Message: "LSP client stopped"}
 	case exit := <-c.exited:
 		c.exited <- exit
-		if c.stopping.Load() && !c.exitReported.Load() {
-			return &LspError{Message: "LSP client stopped"}
-		}
-		if c.transportTerminating.Load() {
-			<-c.transportDone
-			if !c.processExitedWithTransportEOF() {
-				if transportErr := c.getTransportFailure(); transportErr != nil {
-					return transportErr
-				}
-			}
-		}
-		return c.exitError()
+		return c.exitFailure()
 	case err := <-c.exitErr:
 		c.exitErr <- err
 		return &LspError{Message: "LSP client stopped", Cause: err}
 	}
+}
+
+// contextFailure maps an already-failed request context before anything is sent.
+func contextFailure(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return newLspTimeoutError("Operation timed out", ctx.Err())
+	}
+	return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+}
+
+// timedOutFailure names the elapsed budget so callers can distinguish a real server hang.
+func timedOutFailure(ctx context.Context, method string, started time.Time, deadline time.Time, hasDeadline bool) error {
+	if !errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+	}
+	message := fmt.Sprintf("LSP request timed out (%s).", method)
+	if hasDeadline {
+		if timeout := deadline.Sub(started); timeout > 0 {
+			message = fmt.Sprintf("LSP request timed out after %dms (%s).", timeout.Milliseconds(), method)
+		}
+	}
+	return newLspTimeoutError(message, ctx.Err())
+}
+
+// responseFailure prefers the recorded transport or exit cause over the JSON-RPC error.
+func (c *Client) responseFailure(err error, method string, finish func()) error {
+	if c.stopping.Load() {
+		if c.exitReported.Load() {
+			return c.exitError()
+		}
+		return &LspError{Message: "LSP client stopped"}
+	}
+	if c.processExitedWithTransportEOF() {
+		return c.exitError()
+	}
+	if c.getTransportFailure() != nil {
+		<-c.transportDone
+		if c.processExitedWithTransportEOF() {
+			return c.exitError()
+		}
+		if transportErr := c.getTransportFailure(); transportErr != nil {
+			return transportErr
+		}
+	}
+	if errors.Is(err, jsonrpc2.ErrClosed) {
+		<-c.transportDone
+		if transportErr := c.getTransportFailure(); transportErr != nil {
+			return transportErr
+		}
+		if !c.stopping.Load() {
+			exitErr := c.exitError()
+			var lspErr *LspError
+			if errors.As(exitErr, &lspErr) && lspErr.Message != "LSP client stopped" {
+				return exitErr
+			}
+		}
+	}
+	var rpcErr *jsonrpc2.Error
+	if errors.As(err, &rpcErr) {
+		finish()
+	}
+	return &LspError{Message: "LSP request failed (" + method + ")", Cause: err}
+}
+
+// exitFailure maps a process exit observed while the request was in flight.
+func (c *Client) exitFailure() error {
+	if c.stopping.Load() && !c.exitReported.Load() {
+		return &LspError{Message: "LSP client stopped"}
+	}
+	if c.transportTerminating.Load() {
+		<-c.transportDone
+		if !c.processExitedWithTransportEOF() {
+			if transportErr := c.getTransportFailure(); transportErr != nil {
+				return transportErr
+			}
+		}
+	}
+	return c.exitError()
 }
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
 	if c.closed.Load() {

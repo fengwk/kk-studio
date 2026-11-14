@@ -21,7 +21,6 @@ type Location struct {
 }
 
 type LocationLink struct {
-	OriginSelectionRange *Range `json:"originSelectionRange,omitempty"`
 	TargetRange          Range  `json:"targetRange"`
 	TargetSelectionRange Range  `json:"targetSelectionRange"`
 	TargetURI            string `json:"targetUri"`

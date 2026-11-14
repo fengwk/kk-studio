@@ -11,9 +11,6 @@ func EnsurePrivateDirectory(path string) error { return ensurePrivateDirectory(p
 // WritePrivateFile atomically writes a file using the platform's owner-only file protections.
 func WritePrivateFile(path string, data []byte) error { return writePrivateFile(path, data) }
 
-// VerifyPrivateFile confirms a file is a regular file protected from other users.
-func VerifyPrivateFile(path string) error { return verifyPrivateFile(path) }
-
 // PrivateConfigCacheWriter adapts the native private-file capability to runtime cache writes.
 type PrivateConfigCacheWriter struct{}
 

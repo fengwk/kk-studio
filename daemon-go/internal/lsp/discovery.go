@@ -189,13 +189,6 @@ func cloneServer(server ServerConfig) ServerConfig {
 	return server
 }
 
-func (d *Discovery) Servers() []ServerConfig {
-	servers := make([]ServerConfig, len(d.servers))
-	for i, server := range d.servers {
-		servers[i] = cloneServer(server)
-	}
-	return servers
-}
 func (d *Discovery) Server(path string) (ServerConfig, bool) {
 	name := filepath.Base(path)
 	dot := strings.LastIndexByte(name, '.')

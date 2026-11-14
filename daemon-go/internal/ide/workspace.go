@@ -54,14 +54,6 @@ func ValidateBindingEpoch(value string) (string, error) {
 	return value, nil
 }
 
-// ValidateExpectedBindingEpoch validates a canonical non-negative signed-long epoch.
-func ValidateExpectedBindingEpoch(value string) (string, error) {
-	if value == "0" {
-		return value, nil
-	}
-	return ValidateBindingEpoch(value)
-}
-
 // HostHome returns HOME or USERPROFILE and refuses to guess when neither is set.
 func HostHome(env map[string]string) (string, error) {
 	if home := env["HOME"]; strings.TrimSpace(home) != "" {

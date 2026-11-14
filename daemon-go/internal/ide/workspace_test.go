@@ -56,14 +56,6 @@ func TestIdentityAndEpochValidation(t *testing.T) {
 	if _, err := ValidateBindingEpoch("9223372036854775807"); err != nil {
 		t.Fatalf("maximum epoch rejected: %v", err)
 	}
-	if _, err := ValidateExpectedBindingEpoch("0"); err != nil {
-		t.Fatalf("zero expected epoch rejected: %v", err)
-	}
-	for _, value := range []string{"00", "9223372036854775808"} {
-		if _, err := ValidateExpectedBindingEpoch(value); err == nil {
-			t.Errorf("ValidateExpectedBindingEpoch(%q) succeeded", value)
-		}
-	}
 }
 
 // IDE-T-142

@@ -9,12 +9,13 @@ import (
 
 // LSP-T-074 and LSP-T-075 exercise Location and LocationLink result formatting.
 func TestFormatLocations(t *testing.T) {
-	got := formatLocations(mustDefinitionResult(t, `[{"uri":"file:///tmp/a.go","range":{"start":{"line":0,"character":2}}},{"targetUri":"jdt://contents/java.base/java.lang/String.class","targetRange":{"start":{"line":1,"character":0}},"targetSelectionRange":{"start":{"line":2,"character":3}}}]`))
+	client := &Client{positionEncoding: "utf-16"}
+	got := client.formatDefinitionLocations(mustDefinitionResult(t, `[{"uri":"file:///tmp/a.go","range":{"start":{"line":0,"character":2}}},{"targetUri":"jdt://contents/java.base/java.lang/String.class","targetRange":{"start":{"line":1,"character":0}},"targetSelectionRange":{"start":{"line":2,"character":3}}}]`))
 	want := []string{filepath.FromSlash("/tmp/a.go") + ":1:3", "jdt://contents/java.base/java.lang/String.class:3:4"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("locations = %v, want %v", got, want)
 	}
-	empty := formatLocations(mustDefinitionResult(t, `null`))
+	empty := client.formatDefinitionLocations(mustDefinitionResult(t, `null`))
 	if !reflect.DeepEqual(empty, []string{"No results found"}) {
 		t.Fatalf("empty = %v", empty)
 	}

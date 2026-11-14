@@ -98,14 +98,6 @@ func (f *Facade) FileChanged(path string) {
 		service.FileChanged(path)
 	}
 }
-func (f *Facade) ActiveClientCount() int {
-	service, release := f.currentService()
-	defer release()
-	if service == nil {
-		return 0
-	}
-	return service.ActiveClientCount()
-}
 
 // PreparedGeneration separates candidate construction from the atomic publish step.
 type PreparedGeneration struct {
@@ -148,16 +140,6 @@ func (p *PreparedGeneration) Retire() error {
 	<-p.generation.done
 	return p.generation.closeErr
 }
-func (f *Facade) Update(servers []config.LSPServerConfig) error {
-	p, err := f.Prepare(servers)
-	if err != nil {
-		return err
-	}
-	if err = p.Publish(); err != nil {
-		return err
-	}
-	return nil
-}
 func (f *Facade) Close() error {
 	f.mu.Lock()
 	old := f.current
@@ -172,7 +154,7 @@ func (f *Facade) execute(ctx context.Context, call runtime.CapabilityCall, capct
 	confirm := onceConfirm(capctx.ConfirmExecutionExit)
 	fail := func(message string) runtime.CapabilityResult {
 		confirm()
-		return runtime.CapabilityResult{CallID: call.InvocationID, Error: true, Contents: []runtime.ResultContent{{Type: "text", Text: message}}}
+		return capabilityFailure(call.InvocationID, message)
 	}
 	if ctx.Err() != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
@@ -180,68 +162,9 @@ func (f *Facade) execute(ctx context.Context, call runtime.CapabilityCall, capct
 		}
 		return fail("Operation cancelled"), nil
 	}
-	args, err := decodeObject(call.Arguments)
-	if err != nil {
-		return fail(err.Error()), nil
-	}
-	path, err := stringArg(args, "path")
-	if err != nil {
-		return fail(err.Error()), nil
-	}
-	realPath, err := validatePath(path)
-	if err != nil {
-		return fail(err.Error()), nil
-	}
-	if kind == "definition" {
-		info, statErr := os.Stat(realPath)
-		if statErr != nil {
-			return fail("path must exist: " + realPath), nil
-		}
-		if info.IsDir() {
-			return fail("path must be a file: " + realPath), nil
-		}
-	}
-	var line, character, limit int
-	var query, target string
-	switch kind {
-	case "definition":
-		line, err = integerArg(args, "line", true, 0)
-		if err != nil {
-			return fail("line is required and must be a positive integer"), nil
-		}
-		if line < 1 {
-			return fail("line is required and must be a positive integer"), nil
-		}
-		character, err = integerArg(args, "character", false, 1)
-		if err != nil || character < 1 {
-			return fail("character must be a positive integer"), nil
-		}
-	case "symbols":
-		query, err = stringArg(args, "query")
-		if err != nil {
-			return fail("query is required and must be a string"), nil
-		}
-		if strings.TrimSpace(query) == "" {
-			return fail("query must not be blank"), nil
-		}
-		limit = 50
-		if value, ok := args["limit"]; ok && value != nil {
-			limit, err = integerArg(args, "limit", false, 0)
-			if err != nil || limit < 0 {
-				return fail("limit must be a non-negative integer"), nil
-			}
-			if limit > 500 {
-				return fail("limit must be <= 500"), nil
-			}
-		}
-	case "decompile":
-		target, err = stringArg(args, "target")
-		if err != nil {
-			return fail("target is required and must be a string"), nil
-		}
-		if strings.TrimSpace(target) == "" {
-			return fail("target must not be blank"), nil
-		}
+	realPath, arguments, message := targetArguments(kind, call.Arguments)
+	if message != "" {
+		return fail(message), nil
 	}
 	service, release := f.currentService()
 	defer release()
@@ -250,20 +173,100 @@ func (f *Facade) execute(ctx context.Context, call runtime.CapabilityCall, capct
 	}
 	requestCtx, cancel := requestContext(ctx, call.TimeoutMillis)
 	defer cancel()
-	var output string
-	switch kind {
-	case "definition":
-		output, err = service.GotoDefinition(requestCtx, realPath, line, character, confirm)
-	case "symbols":
-		output, err = service.WorkspaceSymbols(requestCtx, realPath, query, limit, confirm)
-	case "decompile":
-		output, err = service.JavaDecompile(requestCtx, realPath, target, confirm)
-	}
+	output, err := dispatch(kind, service, requestCtx, realPath, arguments, confirm)
 	if err != nil {
 		return capabilityFailure(call.InvocationID, capabilityErrorMessage(err)), nil
 	}
 	confirm()
 	return runtime.CapabilityResult{CallID: call.InvocationID, Contents: []runtime.ResultContent{{Type: "text", Text: output}}}, nil
+}
+
+// lspArguments carries the validated kind-specific arguments.
+type lspArguments struct {
+	query     string
+	target    string
+	line      int
+	character int
+	limit     int
+}
+
+// targetArguments validates the shared and kind-specific arguments before any service is acquired.
+func targetArguments(kind string, raw json.RawMessage) (string, lspArguments, string) {
+	args, err := decodeObject(raw)
+	if err != nil {
+		return "", lspArguments{}, err.Error()
+	}
+	path, err := stringArg(args, "path")
+	if err != nil {
+		return "", lspArguments{}, err.Error()
+	}
+	realPath, err := validatePath(path)
+	if err != nil {
+		return "", lspArguments{}, err.Error()
+	}
+	if kind == "definition" {
+		info, statErr := os.Stat(realPath)
+		if statErr != nil {
+			return "", lspArguments{}, "path must exist: " + realPath
+		}
+		if info.IsDir() {
+			return "", lspArguments{}, "path must be a file: " + realPath
+		}
+	}
+	switch kind {
+	case "definition":
+		line, err := integerArg(args, "line", true, 0)
+		if err != nil || line < 1 {
+			return "", lspArguments{}, "line is required and must be a positive integer"
+		}
+		character, err := integerArg(args, "character", false, 1)
+		if err != nil || character < 1 {
+			return "", lspArguments{}, "character must be a positive integer"
+		}
+		return realPath, lspArguments{line: line, character: character}, ""
+	case "symbols":
+		query, err := stringArg(args, "query")
+		if err != nil {
+			return "", lspArguments{}, "query is required and must be a string"
+		}
+		if strings.TrimSpace(query) == "" {
+			return "", lspArguments{}, "query must not be blank"
+		}
+		limit := 50
+		if value, ok := args["limit"]; ok && value != nil {
+			limit, err = integerArg(args, "limit", false, 0)
+			if err != nil || limit < 0 {
+				return "", lspArguments{}, "limit must be a non-negative integer"
+			}
+			if limit > 500 {
+				return "", lspArguments{}, "limit must be <= 500"
+			}
+		}
+		return realPath, lspArguments{query: query, limit: limit}, ""
+	case "decompile":
+		target, err := stringArg(args, "target")
+		if err != nil {
+			return "", lspArguments{}, "target is required and must be a string"
+		}
+		if strings.TrimSpace(target) == "" {
+			return "", lspArguments{}, "target must not be blank"
+		}
+		return realPath, lspArguments{target: target}, ""
+	}
+	return realPath, lspArguments{}, ""
+}
+
+// dispatch runs the capability through the acquired generation.
+func dispatch(kind string, service *Service, ctx context.Context, path string, arguments lspArguments, confirm func()) (string, error) {
+	switch kind {
+	case "definition":
+		return service.GotoDefinition(ctx, path, arguments.line, arguments.character, confirm)
+	case "symbols":
+		return service.WorkspaceSymbols(ctx, path, arguments.query, arguments.limit, confirm)
+	case "decompile":
+		return service.JavaDecompile(ctx, path, arguments.target, confirm)
+	}
+	return "", nil
 }
 func (f *Facade) gotoDefinition(ctx context.Context, c runtime.CapabilityCall, x runtime.CapabilityContext) (runtime.CapabilityResult, error) {
 	return f.execute(ctx, c, x, "definition")

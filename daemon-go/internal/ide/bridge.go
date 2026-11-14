@@ -372,12 +372,7 @@ func (b *Bridge) handleStream(writer http.ResponseWriter, request *http.Request)
 		bridgeRespond(writer, http.StatusBadRequest, "workspacePath is required")
 		return
 	}
-	viewID := ""
-	if key := b.pathKey(workspacePath); key != "" {
-		b.mu.Lock()
-		viewID = b.byKey[key]
-		b.mu.Unlock()
-	}
+	viewID := b.assignedView(workspacePath)
 	if viewID == "" {
 		bridgeRespond(writer, http.StatusForbidden, "workspace is not assigned")
 		return
@@ -387,53 +382,70 @@ func (b *Bridge) handleStream(writer http.ResponseWriter, request *http.Request)
 		bridgeRespond(writer, http.StatusBadRequest, "hostId must be a canonical lowercase UUID")
 		return
 	}
-	hostID := hostIDs[0]
-	folders := request.URL.Query()["folder"]
+	stream, status, message := b.admitStream(viewID, hostIDs[0], request.URL.Query()["folder"])
+	if stream == nil {
+		bridgeRespond(writer, status, message)
+		return
+	}
+	b.serveStream(writer, request, viewID, stream)
+}
+
+// assignedView resolves the view bound to a client-supplied workspace path.
+func (b *Bridge) assignedView(workspacePath string) string {
+	key := b.pathKey(workspacePath)
+	if key == "" {
+		return ""
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.byKey[key]
+}
+
+// admitStream registers the host stream against the view, or returns the rejection status.
+func (b *Bridge) admitStream(viewID, hostID string, folders []string) (*bridgeStream, int, string) {
 	stream := &bridgeStream{messages: make(chan []byte, 16), retired: make(chan struct{})}
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.closed {
-		b.mu.Unlock()
-		bridgeRespond(writer, http.StatusServiceUnavailable, "ide bridge closed")
-		return
+		return nil, http.StatusServiceUnavailable, "ide bridge closed"
 	}
 	view := b.views[viewID]
 	if view == nil {
-		b.mu.Unlock()
-		bridgeRespond(writer, http.StatusForbidden, "workspace is not assigned")
-		return
+		return nil, http.StatusForbidden, "workspace is not assigned"
 	}
 	_, knownHost := view.hosts[hostID]
 	if hostID != view.hostID && knownHost {
-		b.mu.Unlock()
-		bridgeRespond(writer, http.StatusGone, "workspace host is retired")
-		return
+		return nil, http.StatusGone, "workspace host is retired"
 	}
 	if !knownHost && len(view.hosts) >= bridgeMaxViewHosts {
-		b.mu.Unlock()
-		bridgeRespond(writer, http.StatusServiceUnavailable, "workspace host limit reached")
-		return
+		return nil, http.StatusServiceUnavailable, "workspace host limit reached"
 	}
 	for id, pending := range b.pending {
 		if pending.viewID == viewID && pending.op == "changeDirectory" && pending.hostID == hostID {
 			b.resolvePendingLocked(id, BridgeResult{Message: "directory change was not applied"})
-			b.mu.Unlock()
-			bridgeRespond(writer, http.StatusGone, "workspace host is retired")
-			return
+			return nil, http.StatusGone, "workspace host is retired"
 		}
 	}
-	var targetID string
-	var target *bridgePending
+	targetID, targetDirectory := b.reclaimDirectoryChangeLocked(viewID, view.epoch, hostID, folders)
+	if !matchesBridgeDirectory(folders, view.directory) && targetID == "" {
+		return nil, http.StatusGone, "workspace folder is retired"
+	}
+	b.installStreamLocked(viewID, view, stream, hostID, targetID, targetDirectory)
+	return stream, 0, ""
+}
+
+// reclaimDirectoryChangeLocked finds the pending directory change this host now satisfies.
+func (b *Bridge) reclaimDirectoryChangeLocked(viewID string, epoch int64, hostID string, folders []string) (string, string) {
 	for id, pending := range b.pending {
-		if pending.viewID == viewID && pending.epoch == view.epoch && pending.op == "changeDirectory" && pending.hostID != hostID && pending.expectedDirectory != "" && matchesBridgeDirectory(folders, pending.expectedDirectory) {
-			targetID, target = id, pending
-			break
+		if pending.viewID == viewID && pending.epoch == epoch && pending.op == "changeDirectory" && pending.hostID != hostID && pending.expectedDirectory != "" && matchesBridgeDirectory(folders, pending.expectedDirectory) {
+			return id, pending.expectedDirectory
 		}
 	}
-	if !matchesBridgeDirectory(folders, view.directory) && target == nil {
-		b.mu.Unlock()
-		bridgeRespond(writer, http.StatusGone, "workspace folder is retired")
-		return
-	}
+	return "", ""
+}
+
+// installStreamLocked replaces the view's host stream and settles its superseded requests.
+func (b *Bridge) installStreamLocked(viewID string, view *bridgeView, stream *bridgeStream, hostID, targetID, targetDirectory string) {
 	previous, previousHost := view.stream, view.hostID
 	b.nextStreamID++
 	stream.id, stream.hostID = b.nextStreamID, hostID
@@ -448,15 +460,17 @@ func (b *Bridge) handleStream(writer http.ResponseWriter, request *http.Request)
 			b.resolvePendingLocked(id, BridgeResult{Message: message})
 		}
 	}
-	if target != nil {
-		b.resolvePendingLocked(targetID, BridgeResult{OK: true, Directory: target.expectedDirectory})
+	if targetID != "" {
+		b.resolvePendingLocked(targetID, BridgeResult{OK: true, Directory: targetDirectory})
 	}
 	if previous != nil {
 		previous.close(previousHost != hostID)
 	}
 	b.notifyConnectedLocked(viewID)
-	b.mu.Unlock()
+}
 
+// serveStream streams NDJSON frames until the window retires or disconnects.
+func (b *Bridge) serveStream(writer http.ResponseWriter, request *http.Request, viewID string, stream *bridgeStream) {
 	writer.Header().Set("Content-Type", "application/x-ndjson")
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("Connection", "keep-alive")

@@ -12,7 +12,7 @@ func TestPool_RetirementFailureIsIsolated(t *testing.T) {
 	cleanupErr := errors.New("retirement termination failed")
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: 10 * time.Millisecond, ShutdownGrace: 10 * time.Millisecond})
 	supervisor.terminateErr = cleanupErr
-	lease, err := pool.Lease(context.Background(), file)
+	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +64,7 @@ func TestPool_RetirementFailureIsIsolated(t *testing.T) {
 // LSP-T-060 starts a new client after a previously leased client dies.
 func TestPool_RestartDeadClient(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour, ShutdownGrace: 5 * time.Millisecond})
-	first, err := pool.Lease(context.Background(), file)
+	first, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestPool_RestartDeadClient(t *testing.T) {
 	if oldClient.IsAlive() {
 		t.Fatal("stopped client still reports alive")
 	}
-	second, err := pool.Lease(context.Background(), file)
+	second, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestPool_RetirementWaiterAbort(t *testing.T) {
 			gate := make(chan struct{})
 			pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: 10 * time.Millisecond, ShutdownGrace: 5 * time.Millisecond})
 			supervisor.terminateGate = gate
-			lease, err := pool.Lease(context.Background(), file)
+			lease, err := pool.LeaseWithExit(context.Background(), file, nil)
 			if err != nil {
 				t.Fatal(err)
 			}

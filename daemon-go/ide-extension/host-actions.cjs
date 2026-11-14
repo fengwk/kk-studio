@@ -1,0 +1,282 @@
+'use strict'
+
+/**
+ * Command handlers for one bridge host.
+ *
+ * The host owns the control channel and the terminal list; this module owns what each daemon
+ * command does to the window. Every handler replies exactly once unless the host has already been
+ * disposed or retired, in which case the reply is abandoned because no channel remains.
+ */
+
+const nodePath = require('node:path')
+const documents = require('./documents.cjs')
+
+const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
+const MAX_SNAPSHOT_DOCUMENTS = 256
+
+function createHostActions(host) {
+  const { vscode, post, reply, retire, isInactive, folderPaths, workspacePath } = host
+
+  let terminal = null
+  const terminals = []
+
+  const disposeTerminals = () => {
+    terminal = null
+    while (terminals.length > 0) {
+      const item = terminals.pop()
+      try {
+        item.dispose()
+      } catch {
+        // terminal already gone
+      }
+    }
+  }
+
+  const inspectView = async (message) => {
+    await reply(message.id, { ok: true, clean: documents.canProveClean(vscode) })
+  }
+
+  const snapshot = async (message) => {
+    const maxBytes =
+      typeof message.maxBytes === 'number' && Number.isSafeInteger(message.maxBytes) && message.maxBytes > 0
+        ? Math.min(message.maxBytes, MAX_SNAPSHOT_BYTES)
+        : MAX_SNAPSHOT_BYTES
+    const collected = []
+    let bytes = 0
+    // An unobservable custom editor is explicitly reported as an omission, never as a complete backup.
+    let omitted = documents.hasUnknownEditorState(vscode) ? 1 : 0
+    for (const document of documents.ordinaryDirtyDocuments(vscode)) {
+      if (collected.length >= MAX_SNAPSHOT_DOCUMENTS) {
+        omitted += 1
+        continue
+      }
+      let text
+      try {
+        text = document.getText()
+      } catch {
+        omitted += 1
+        continue
+      }
+      const size = Buffer.byteLength(text, 'utf8')
+      if (bytes + size > maxBytes) {
+        omitted += 1
+        continue
+      }
+      collected.push({ path: document.uri.fsPath, text })
+      bytes += size
+    }
+    await reply(message.id, { ok: true, documents: collected, bytes, omitted, complete: omitted === 0 })
+  }
+
+  const restoreEntry = async (entry, editing) => {
+    const { workspaceEdit, range, position } = editing
+    if (
+      !entry ||
+      typeof entry.path !== 'string' ||
+      typeof entry.text !== 'string' ||
+      entry.path.length === 0 ||
+      !nodePath.isAbsolute(entry.path) ||
+      /[\u0000-\u001f\u007f]/.test(entry.path)
+    ) {
+      return 'skipped'
+    }
+    const uri = vscode.Uri.file(entry.path)
+    const document = await vscode.workspace.openTextDocument(uri)
+    if (isInactive()) {
+      return 'abandoned'
+    }
+    // Never overwrite unsaved work that already exists in the window.
+    if (document.isDirty === true) {
+      return 'skipped'
+    }
+    const edit = new workspaceEdit()
+    const end = document.positionAt(document.getText().length)
+    edit.replace(uri, new range(new position(0, 0), end), entry.text)
+    const applied = await vscode.workspace.applyEdit(edit)
+    if (isInactive()) {
+      return 'abandoned'
+    }
+    if (applied === false) {
+      return 'skipped'
+    }
+    if (typeof vscode.window.showTextDocument === 'function') {
+      await vscode.window.showTextDocument(document, { preview: false })
+    }
+    if (isInactive()) {
+      return 'abandoned'
+    }
+    return 'restored'
+  }
+
+  const restore = async (message) => {
+    const entries = Array.isArray(message.documents) ? message.documents : []
+    if (entries.length > MAX_SNAPSHOT_DOCUMENTS) {
+      await reply(message.id, { ok: false, code: 'UNAVAILABLE', message: 'too many recovery documents' })
+      return
+    }
+    const editing = { workspaceEdit: vscode.WorkspaceEdit, range: vscode.Range, position: vscode.Position }
+    if (
+      !editing.workspaceEdit ||
+      !editing.range ||
+      !editing.position ||
+      typeof vscode.workspace.openTextDocument !== 'function'
+    ) {
+      await reply(message.id, { ok: false, code: 'UNAVAILABLE', message: 'text restore is unavailable' })
+      return
+    }
+    let restored = 0
+    let skipped = 0
+    for (const entry of entries) {
+      if (isInactive()) {
+        return
+      }
+      let outcome
+      try {
+        outcome = await restoreEntry(entry, editing)
+      } catch {
+        outcome = 'skipped'
+      }
+      if (outcome === 'abandoned') {
+        return
+      }
+      if (outcome === 'restored') {
+        restored += 1
+      } else {
+        skipped += 1
+      }
+    }
+    await reply(message.id, { ok: true, restored, skipped })
+  }
+
+  const sameDirectory = (actual, expected) => {
+    const normalize = (path) => {
+      const resolved = nodePath.resolve(path)
+      return process.platform === 'win32' ? resolved.toLowerCase() : resolved
+    }
+    return actual.length === 1 && normalize(actual[0]) === normalize(expected)
+  }
+
+  const changeDirectory = async (message) => {
+    if (!documents.canProveClean(vscode)) {
+      await reply(message.id, {
+        ok: false,
+        code: 'DIRTY',
+        message: 'save or discard unsaved changes before switching directory',
+      })
+      return
+    }
+    const folders = vscode.workspace.workspaceFolders || []
+    const uri = vscode.Uri.file(message.directory)
+    if (sameDirectory(folderPaths(), message.directory)) {
+      await reply(message.id, { ok: true, directory: folderPaths()[0] })
+      return
+    }
+    // Replacing the first folder restarts extension hosts; only the new host can confirm it.
+    const updated = vscode.workspace.updateWorkspaceFolders(0, folders.length, { uri })
+    if (updated === false) {
+      await reply(message.id, { ok: false, message: 'directory change was rejected' })
+      return
+    }
+    retire()
+  }
+
+  const ensureTerminal = () => {
+    const live = vscode.window.terminals || []
+    if (terminal && live.indexOf(terminal) !== -1) {
+      return terminal
+    }
+    const folders = vscode.workspace.workspaceFolders || []
+    const cwd = folders.length > 0 ? folders[0].uri.fsPath : undefined
+    terminal = vscode.window.createTerminal({ name: 'kk-studio', cwd })
+    terminals.push(terminal)
+    return terminal
+  }
+
+  const focusTerminal = async (message) => {
+    const current = ensureTerminal()
+    current.show()
+    let pid
+    try {
+      pid = await current.processId
+    } catch {
+      pid = undefined
+    }
+    if (isInactive()) {
+      return
+    }
+    const path = workspacePath()
+    // A shell that cannot be handed to the daemon for supervision must not be left running.
+    if (!(typeof pid === 'number' && pid > 0) || !path) {
+      disposeTerminals()
+      await reply(message.id, { ok: false, message: 'terminal supervision is unavailable' })
+      return
+    }
+    const status = await post('/bridge/pty', { workspacePath: path, pid })
+    if (isInactive()) {
+      return
+    }
+    if (status >= 400 || status === 0) {
+      disposeTerminals()
+      await reply(message.id, { ok: false, message: 'terminal supervision failed' })
+      return
+    }
+    await reply(message.id, { ok: true })
+  }
+
+  const collapseMobile = async (message) => {
+    await vscode.commands.executeCommand('workbench.action.closeSidebar')
+    await vscode.commands.executeCommand('workbench.action.closePanel')
+    await reply(message.id, { ok: true })
+  }
+
+  const closeView = async (message) => {
+    // Explicit discard/expiry follows the daemon's backup attempt and cannot await an interactive window.
+    if (message.discard !== true) {
+      // Let the workbench handle dirty and custom editors, including save, discard and cancel.
+      const tabs = vscode.window.tabGroups.all.flatMap((group) => group.tabs)
+      const closed = await vscode.window.tabGroups.close(tabs)
+      // A hidden dirty document or a newly opened tab must not be destroyed with the view.
+      if (
+        !closed ||
+        documents.hasHiddenDirtyDocuments(vscode, tabs) ||
+        vscode.window.tabGroups.all.some((group) => group.tabs.length > 0)
+      ) {
+        await reply(message.id, {
+          ok: false,
+          code: 'CANCELLED',
+          message: 'closing the view was cancelled or editors remain open',
+        })
+        return
+      }
+    }
+    // A normal result may arrive after the daemon lost its controlling connection.
+    // The managed view owns terminals and disposes them only once close is committed.
+    if (message.discard === true) {
+      disposeTerminals()
+    }
+    await reply(message.id, { ok: true })
+  }
+
+  const handlers = {
+    changeDirectory,
+    focusTerminal,
+    inspect: inspectView,
+    closeView,
+    collapseMobile,
+    snapshot,
+    restore,
+  }
+
+  const execute = async (message) => {
+    const handler = handlers[message.op]
+    if (!handler) {
+      await reply(message.id, { ok: false, message: 'unsupported command' })
+      return
+    }
+    await handler(message)
+  }
+
+  return { execute, disposeTerminals }
+}
+
+module.exports = { createHostActions }
