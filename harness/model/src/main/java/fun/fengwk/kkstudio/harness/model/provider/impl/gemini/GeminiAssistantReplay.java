@@ -115,7 +115,7 @@ final class GeminiAssistantReplay {
       payloadParts.add(part.deepCopy());
     }
 
-    if (!validateGeminiReplayPayload(payload, blocks)) {
+    if (!validateReplayPayload(payload, blocks)) {
       return null;
     }
     return parts;
@@ -209,7 +209,7 @@ final class GeminiAssistantReplay {
    * 完成结构校验、已知字段类型校验与 durable 一致性比对：结构/类型损坏一律 INVALID_REQUEST；返回 payload 的语义投影是否与 durable
    * 内容完全一致（不一致表示历史被改写，调用方应退回语义编码而非回放陈旧 payload）。
    */
-  private static boolean validateGeminiReplayPayload(
+  static boolean validateReplayPayload(
       JsonNode payload, List<ProviderContentBlock> durableContents) {
     if (payload == null || !payload.isObject()) {
       throw new ProviderException(

@@ -68,6 +68,15 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicErrorMapper</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicModelProvider</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicProviderAdapter</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicWireBlock</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicUsageAccumulator</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicContentBlocks</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicResponseAssembler</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicContentEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicAssistantReplay</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicToolsEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicCacheMarkers</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicReasoningEffort</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiEndpoints</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiRequestEncoder</include>
@@ -75,6 +84,11 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiErrorMapper</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiModelProvider</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiProviderAdapter</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiContentEncoder</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiAssistantReplay</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiUsageAccumulator</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiPartAccumulator</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.TrackedPart</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatEndpoints</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatRequestEncoder</include>
