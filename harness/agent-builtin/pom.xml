@@ -99,6 +99,8 @@
                                         <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelGroupFailureCommitter</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelAttemptFailures</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelFailureRetry</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelClaimPreparer</include>
+                                        <include>fun.fengwk.kkstudio.harness.builtin.processor.ModelExecutionLauncher</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.request.ResolvedRequestValidator</include>
                                         <include>fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec</include>
                                     </includes>
