@@ -53,12 +53,6 @@ final class SystemSettingsValidation {
     }
   }
 
-  static void requireBounded(long value, long minimum, long maximum, String field) {
-    if (value < minimum || value > maximum) {
-      throw new IllegalArgumentException(field + " must be between " + minimum + " and " + maximum);
-    }
-  }
-
   static void requireBounded(int value, int minimum, int maximum, String field) {
     if (value < minimum || value > maximum) {
       throw new IllegalArgumentException(field + " must be between " + minimum + " and " + maximum);

@@ -108,7 +108,7 @@ public class PluginAgentDependencies {
   }
 
   /**
-   * 权威 desired manifest 与其匹配历史行中声明引用该 Agent 的插件 ID（按插件 ID 升序、去重、不可变）。
+   * 权威 desired manifest 与其匹配的当前配置行中声明引用该 Agent 的插件 ID（按插件 ID 升序、去重、不可变）。
    *
    * <p>只读 desired 事实：不读取本节点已应用的目录、不解析秘密、不猜字段。desired 声明引用了该 Agent 就绝不允许删除它。
    *
