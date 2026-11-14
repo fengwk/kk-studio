@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   appendUniqueChats,
   filterChats,
-  mergeChatIntoList,
   mergeChatPage,
-  preferNewerChat,
 } from '@/features/chat/chat-utils'
 import { compareCatalogVersions } from '@/shared/lib/catalog-version'
 import type { ChatDTO } from '@/shared/api/generated/contracts'
@@ -37,21 +35,25 @@ describe('compareCatalogVersions', () => {
   })
 })
 
-describe('preferNewerChat', () => {
+describe('per-id version preference inside mergeChatPage', () => {
+  function mergedFirstItem(current: ChatDTO | undefined, incoming: ChatDTO): ChatDTO {
+    const page = mergeChatPage(
+      current == null ? undefined : { items: [current], nextCursor: null },
+      { items: [incoming], nextCursor: null },
+    )
+    return page.items[0]!
+  }
+
   it('keeps the current chat when it has a strictly newer version', () => {
     const current = chat({ id: 'chat-1', version: '5', title: 'current' })
-    expect(preferNewerChat(current, chat({ id: 'chat-1', version: '4', title: 'incoming' }))).toBe(
-      current,
-    )
+    expect(mergedFirstItem(current, chat({ id: 'chat-1', version: '4', title: 'incoming' })))
+      .toBe(current)
   })
 
-  it('prefers incoming on missing current and on equal or newer versions', () => {
+  it('prefers incoming on equal or newer versions', () => {
     const incoming = chat({ id: 'chat-1', version: '4', title: 'incoming' })
-    expect(preferNewerChat(undefined, incoming)).toBe(incoming)
-    expect(preferNewerChat(chat({ version: '4', title: 'current' }), incoming)).toBe(incoming)
-    expect(
-      preferNewerChat(chat({ version: '3', title: 'current' }), incoming),
-    ).toBe(incoming)
+    expect(mergedFirstItem(chat({ version: '4', title: 'current' }), incoming)).toBe(incoming)
+    expect(mergedFirstItem(chat({ version: '3', title: 'current' }), incoming)).toBe(incoming)
   })
 })
 
@@ -91,43 +93,6 @@ describe('appendUniqueChats', () => {
       chat({ id: 'chat-2', title: 'duplicate' }),
       chat({ id: 'chat-3', title: 'new' }),
     ])).toEqual([chat({ id: 'chat-1' }), chat({ id: 'chat-2' }), chat({ id: 'chat-3', title: 'new' })])
-  })
-})
-
-describe('mergeChatIntoList', () => {
-  it('returns the undefined cache unchanged when no current list exists', () => {
-    expect(mergeChatIntoList(undefined, chat())).toBeUndefined()
-  })
-
-  it('replaces a matching chat only when the incoming version is newer or equal', () => {
-    const current = [
-      chat({ id: 'chat-1', version: '10', title: 'cached' }),
-      chat({ id: 'chat-2', version: '1', title: 'other' }),
-    ]
-    // stale authoritative response must not downgrade the cache
-    expect(
-      mergeChatIntoList(current, chat({ id: 'chat-1', version: '9', title: 'server' })),
-    ).toEqual([
-      chat({ id: 'chat-1', version: '10', title: 'cached' }),
-      chat({ id: 'chat-2', version: '1', title: 'other' }),
-    ])
-    // equal or newer response wins
-    expect(
-      mergeChatIntoList(current, chat({ id: 'chat-1', version: '10', title: 'server' })),
-    ).toEqual([
-      chat({ id: 'chat-1', version: '10', title: 'server' }),
-      chat({ id: 'chat-2', version: '1', title: 'other' }),
-    ])
-  })
-
-  it('appends the incoming chat at the end when its id is not cached', () => {
-    const current = [chat({ id: 'chat-1', version: '1' })]
-    expect(
-      mergeChatIntoList(current, chat({ id: 'chat-2', version: '1', title: 'new' })),
-    ).toEqual([
-      chat({ id: 'chat-1', version: '1' }),
-      chat({ id: 'chat-2', version: '1', title: 'new' }),
-    ])
   })
 })
 

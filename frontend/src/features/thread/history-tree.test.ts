@@ -91,6 +91,19 @@ describe('History tree lane projection', () => {
     expect(rows.find((row) => row.entry.entryId === 'end-a')?.isFork).toBe(false)
   })
 
+  it('reserves each sibling lane even when an entry id occurs twice', () => {
+    // 重复行仍由 walked 去重，但 sibling 预留列不能改成当前 Entry 的列复用规则。
+    const rows = buildHistoryTree([
+      entry('root', 'ROOT'),
+      entry('child', 'TURN_END', { parentEntryId: 'root' }),
+      entry('child', 'TURN_END', { parentEntryId: 'root' }),
+    ])
+
+    expect(ids(rows)).toEqual(['root', 'child'])
+    expect(rows[0]!.gutter).toEqual([true, true])
+    expect(rows[1]!.gutter).toEqual([false, true])
+  })
+
   it('allocates deeper lanes for nested forks without reindenting linear descendants', () => {
     const entries = [
       entry('root', 'ROOT'),

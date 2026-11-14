@@ -9,7 +9,7 @@ import { hasExactKeys, isRecord } from '@/shared/lib/value'
 
 const STORAGE_PREFIX = 'kk-studio.composer-draft:'
 
-export function composerDraftStorageKey(scope: string): string {
+function composerDraftStorageKey(scope: string): string {
   return `${STORAGE_PREFIX}${scope}`
 }
 
@@ -72,7 +72,7 @@ export function clearStoredComposerDraft(
   }
 }
 
-export function loadStoredComposerDraft(
+function loadStoredComposerDraft(
   scope: string,
   storage: Storage = localStorage,
 ): ComposerPart[] {
@@ -165,7 +165,7 @@ export interface StoredUnknownUpload {
   imageTier?: ImageInputTier
 }
 
-export function unknownUploadsStorageKey(scope: string): string {
+function unknownUploadsStorageKey(scope: string): string {
   return `${STORAGE_PREFIX}${scope}:unknown-uploads`
 }
 
@@ -320,17 +320,3 @@ export function removeStoredUnknownUpload(
   }
 }
 
-export function clearUnknownUploads(
-  scope: string,
-  explicitStorage?: Storage,
-): void {
-  if (!scope) {
-    return
-  }
-  try {
-    const storage = safeResolveStorage(explicitStorage)
-    storage.removeItem(unknownUploadsStorageKey(scope))
-  } catch {
-    // 容错
-  }
-}

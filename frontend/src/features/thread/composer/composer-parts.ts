@@ -123,7 +123,7 @@ export function mergeTextParts(parts: ComposerPart[]): ComposerPart[] {
 }
 
 /**
- * 合并相邻 text parts、去掉消息两端的空白（textarea 时代的 trim 语义），
+ * 合并相邻 text parts、去掉消息两端的空白，
  * 保留 attachment/resource parts 的相对位置。供发送/序列化前规范化。
  */
 export function trimMessageParts(parts: ComposerPart[]): ComposerPart[] {

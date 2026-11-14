@@ -204,9 +204,9 @@ vi.mock('@/features/thread/runtime/useRootThreadControl', async (importOriginal)
   }
 })
 
-vi.mock('@/features/thread/composer/use-attachment-uploads', async (importOriginal) => {
+vi.mock('@/features/thread/composer/useAttachmentUploads', async (importOriginal) => {
   const actual = await importOriginal<
-    typeof import('@/features/thread/composer/use-attachment-uploads')
+    typeof import('@/features/thread/composer/useAttachmentUploads')
   >()
   return {
     ...actual,

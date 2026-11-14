@@ -49,6 +49,39 @@ export interface BuildHistoryTreeOptions {
   headEntryId?: string | null
 }
 
+/** 按父 Entry 分组的子节点索引；未知或缺失的父引用归到根组。 */
+function childrenIndex(entries: HarnessSessionEntryDTO[]): Map<string | null, HarnessSessionEntryDTO[]> {
+  const knownIds = new Set(entries.map((entry) => entry.entryId))
+  const childrenByParent = new Map<string | null, HarnessSessionEntryDTO[]>()
+  for (const entry of entries) {
+    const parentId =
+      entry.parentEntryId != null && knownIds.has(entry.parentEntryId)
+        ? entry.parentEntryId
+        : null
+    const siblings = childrenByParent.get(parentId) ?? []
+    siblings.push(entry)
+    childrenByParent.set(parentId, siblings)
+  }
+  return childrenByParent
+}
+
+/** 为待绘制的 sibling 占用第一个空闲列，没有空列则追加。 */
+function allocateLane(active: Array<string | null>, entryId: string): number {
+  const free = active.indexOf(null)
+  if (free >= 0) {
+    active[free] = entryId
+    return free
+  }
+  active.push(entryId)
+  return active.length - 1
+}
+
+/** 当前 Entry 已有待绘制列时复用它，否则分配新列。 */
+function laneOf(active: Array<string | null>, entryId: string): number {
+  const existing = active.indexOf(entryId)
+  return existing >= 0 ? existing : allocateLane(active, entryId)
+}
+
 /**
  * 把 Session 的 Entry 列表投影为历史树行。
  *
@@ -59,18 +92,7 @@ export function buildHistoryTree(
   entries: HarnessSessionEntryDTO[],
   options: BuildHistoryTreeOptions = {},
 ): HistoryTreeRow[] {
-  const childrenByParent = new Map<string | null, HarnessSessionEntryDTO[]>()
-  const knownIds = new Set(entries.map((entry) => entry.entryId))
-  for (const entry of entries) {
-    const parentId =
-      entry.parentEntryId != null && knownIds.has(entry.parentEntryId)
-        ? entry.parentEntryId
-        : null
-    const siblings = childrenByParent.get(parentId) ?? []
-    siblings.push(entry)
-    childrenByParent.set(parentId, siblings)
-  }
-
+  const childrenByParent = childrenIndex(entries)
   const ancestry = activeAncestry(entries, options.headEntryId ?? null)
   const headEntryId = options.headEntryId ?? null
   const rows: HistoryTreeRow[] = []
@@ -79,27 +101,12 @@ export function buildHistoryTree(
   const active: Array<string | null> = []
   const walked = new Set<string>()
 
-  function allocateLane(entryId: string): number {
-    const free = active.indexOf(null)
-    if (free >= 0) {
-      active[free] = entryId
-      return free
-    }
-    active.push(entryId)
-    return active.length - 1
-  }
-
-  function laneOf(entryId: string): number {
-    const existing = active.indexOf(entryId)
-    return existing >= 0 ? existing : allocateLane(entryId)
-  }
-
   function visit(entry: HarnessSessionEntryDTO): void {
     if (walked.has(entry.entryId)) {
       return
     }
     walked.add(entry.entryId)
-    const lane = laneOf(entry.entryId)
+    const lane = laneOf(active, entry.entryId)
     laneById.set(entry.entryId, lane)
     // 本行已绘制：释放该列（若它有子节点，第一个子节点会立刻重新占用同一列）。
     active[lane] = null
@@ -107,7 +114,7 @@ export function buildHistoryTree(
     if (children.length > 0) {
       active[lane] = children[0]!.entryId
       for (let index = 1; index < children.length; index += 1) {
-        allocateLane(children[index]!.entryId)
+        allocateLane(active, children[index]!.entryId)
       }
     }
     const parentId = entry.parentEntryId

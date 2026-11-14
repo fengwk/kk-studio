@@ -48,7 +48,7 @@ import { ThreadWidgetStack } from '@/features/thread/runtime/thread-panel/Thread
 import type { ThreadComposerSettingsInput } from '@/features/thread/runtime/thread-panel/ThreadComposerControls'
 import type { HashFile } from '@/shared/lib/upload-file'
 import { AttachmentStrip } from '@/features/thread/composer/attachment-strip'
-import type { AttachmentUpload } from '@/features/thread/composer/use-attachment-uploads'
+import type { AttachmentUpload } from '@/features/thread/composer/useAttachmentUploads'
 import { fakeStorage, fileOf, partsSnapshot, waitForIdleUploads } from '@/test-support/composer-fixtures'
 
 function ControlledComposer() {

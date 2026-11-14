@@ -3,13 +3,13 @@ import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { createMemoryRouter, RouterProvider, useLocation, useNavigate } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { ChatWorkspacePage } from './ChatWorkspacePage'
-import type { ChatWorkspacePane } from './ChatWorkspacePane'
+import { ChatWorkspacePage } from '@/features/chat/ChatWorkspacePage'
+import type { ChatWorkspacePane } from '@/features/chat/ChatWorkspacePane'
 import {
   applyChatLayout,
   chatTabLastStorageKey,
   createDefaultChatPaneState,
-} from './chat-pane-state'
+} from '@/features/chat/chat-pane-state'
 import { agentService } from '@/shared/api/agent-service'
 import { chatService } from '@/features/chat/chat-service'
 import { environmentService } from '@/features/environment/environment-service'
@@ -104,6 +104,11 @@ beforeEach(() => {
   vi.mocked(environmentService.listEnvironments).mockResolvedValue([])
 })
 
+/**
+ * 深链目标归属（usePendingTargets 的语义）：?thread= 落到导航发生时的焦点 pane，
+ * 只由该 pane 消费一次，焦点变化不能转移未消费的请求。ChatWorkspacePane 被替换成
+ * 可手动确认消费的替身，以便确定性观察队列。
+ */
 describe('Chat deep-link pane ownership', () => {
   it('does not transfer an unconsumed target when focus changes', async () => {
     const user = userEvent.setup()

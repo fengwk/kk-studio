@@ -5,37 +5,16 @@ import {
   useState,
   type ReactNode,
 } from 'react'
-import { Pencil, Search } from 'lucide-react'
+import { Search } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/thread/runtime/thread-panel/ThreadInteractionPanel'
+import { SelectionLoadMoreRow, SelectionRow, type SelectionPanelItem } from '@/features/thread/SelectionRow'
+import { useSelectionKeyboard } from '@/features/thread/useSelectionKeyboard'
 import { useI18n } from '@/shared/i18n'
 import './thread-selection.css'
 
-export interface SelectionPanelItem {
-  id: string
-  title: string
-  subtitle?: string | null
-  badge?: string
-  searchText?: string
-}
+export type { SelectionPanelItem }
 
-export function SelectionPanel({
-  title,
-  items,
-  selectedId,
-  controls,
-  loading = false,
-  selectionPending = false,
-  renameLabel,
-  emptyText,
-  hasMore = false,
-  loadingMore = false,
-  onLoadMore,
-  onCycleControl,
-  cycleControlHint,
-  onRename,
-  onSelect,
-  onClose,
-}: {
+export interface SelectionPanelProps {
   title: string
   items: SelectionPanelItem[]
   selectedId?: string | null
@@ -54,28 +33,73 @@ export function SelectionPanel({
   onRename?: (id: string) => void
   onSelect: (id: string) => void | Promise<void>
   onClose: () => void
-}) {
+}
+
+/** 搜索框里的查询按空白拆分为小写 token；空查询返回 null 表示不过滤。 */
+function searchTokensOf(query: string): string[] | null {
+  const tokens = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
+  return tokens.length > 0 ? tokens : null
+}
+
+function filterItems(items: SelectionPanelItem[], tokens: string[] | null): SelectionPanelItem[] {
+  if (tokens == null) {
+    return items
+  }
+  return items.filter((item) => {
+    const haystack = [
+      item.id,
+      item.title,
+      item.subtitle,
+      item.badge,
+      item.searchText,
+    ].filter(Boolean).join(' ').toLocaleLowerCase()
+    return tokens.every((token) => haystack.includes(token))
+  })
+}
+
+/**
+ * 可搜索的单选面板：Session、Agent、Thread 等选择场景共用的键盘与无障碍语义。
+ *
+ * 活动项（键盘焦点行）优先保持在当前选择上；被过滤掉时依次回退到 selectedId
+ * （若仍可见）与第一项。搜索只影响列表，不改变已选值与提交结果。
+ */
+export function SelectionPanel({
+  title,
+  items,
+  selectedId,
+  controls,
+  loading = false,
+  selectionPending = false,
+  renameLabel,
+  emptyText,
+  hasMore = false,
+  loadingMore = false,
+  onLoadMore,
+  onCycleControl,
+  cycleControlHint,
+  onRename,
+  onSelect,
+  onClose,
+}: SelectionPanelProps) {
   const { t } = useI18n()
   const [query, setQuery] = useState('')
   const [activeId, setActiveId] = useState<string | null>(selectedId ?? null)
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
-  const filteredItems = useMemo(() => {
-    const tokens = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
-    if (tokens.length === 0) {
-      return items
-    }
-    return items.filter((item) => {
-      const haystack = [
-        item.id,
-        item.title,
-        item.subtitle,
-        item.badge,
-        item.searchText,
-      ].filter(Boolean).join(' ').toLocaleLowerCase()
-      return tokens.every((token) => haystack.includes(token))
-    })
-  }, [items, query])
+  const filteredItems = useMemo(
+    () => filterItems(items, searchTokensOf(query)),
+    [items, query],
+  )
+  const onKeyDown = useSelectionKeyboard({
+    filteredItems,
+    activeId,
+    setActiveId,
+    selectionPending,
+    onSelect,
+    onClose,
+    onCycleControl,
+    searchRef,
+  })
 
   useEffect(() => {
     searchRef.current?.focus({ preventScroll: true })
@@ -101,32 +125,9 @@ export function SelectionPanel({
     active?.scrollIntoView({ block: 'nearest' })
   }, [activeId])
 
-  function moveActive(delta: number) {
-    if (filteredItems.length === 0) {
-      return
-    }
-    const currentIndex = Math.max(
-      0,
-      filteredItems.findIndex((item) => item.id === activeId),
-    )
-    const nextIndex = (
-      currentIndex + delta + filteredItems.length
-    ) % filteredItems.length
-    setActiveId(filteredItems[nextIndex]?.id ?? null)
-  }
-
-  function moveToBoundary(boundary: 'first' | 'last') {
-    const next = boundary === 'first'
-      ? filteredItems[0]
-      : filteredItems.at(-1)
-    setActiveId(next?.id ?? null)
-  }
-
-  function selectActive() {
-    if (selectionPending || activeId == null) {
-      return
-    }
-    void onSelect(activeId)
+  const renameItem = onRename == null ? undefined : (id: string) => {
+    setActiveId(id)
+    onRename(id)
   }
 
   return (
@@ -136,47 +137,7 @@ export function SelectionPanel({
       bodyClassName="thread-selection-body"
       busy={loading || selectionPending}
       onClose={onClose}
-      onKeyDown={(event) => {
-        if (event.nativeEvent.isComposing || event.keyCode === 229) {
-          return
-        }
-        if (event.key === 'Escape') {
-          event.preventDefault()
-          event.stopPropagation()
-          onClose()
-          return
-        }
-        if (event.key === 'Tab' && onCycleControl) {
-          event.preventDefault()
-          event.stopPropagation()
-          onCycleControl()
-          searchRef.current?.focus({ preventScroll: true })
-          return
-        }
-        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-          event.preventDefault()
-          event.stopPropagation()
-          moveActive(event.key === 'ArrowDown' ? 1 : -1)
-          return
-        }
-        if (event.key === 'PageDown' || event.key === 'PageUp') {
-          event.preventDefault()
-          event.stopPropagation()
-          moveActive(event.key === 'PageDown' ? 8 : -8)
-          return
-        }
-        if (event.key === 'Home' || event.key === 'End') {
-          event.preventDefault()
-          event.stopPropagation()
-          moveToBoundary(event.key === 'Home' ? 'first' : 'last')
-          return
-        }
-        if (event.key === 'Enter') {
-          event.preventDefault()
-          event.stopPropagation()
-          selectActive()
-        }
-      }}
+      onKeyDown={onKeyDown}
       controls={(
         <>
           <label className="thread-selection-search">
@@ -217,79 +178,33 @@ export function SelectionPanel({
               : emptyText ?? t('ai.chat.noOptions')}
           </li>
         ) : null}
-        {!loading && filteredItems.map((item) => {
-          const active = item.id === activeId
-          const current = item.id === selectedId
-          return (
-            <li key={item.id} className="thread-selection-row">
-              <button
-                type="button"
-                role="option"
-                aria-selected={active}
-                aria-current={current ? 'true' : undefined}
-                className={[
-                  'thread-selection-item',
-                  active ? 'active' : '',
-                  current ? 'current' : '',
-                ].filter(Boolean).join(' ')}
-                disabled={selectionPending}
-                onMouseMove={() => setActiveId(item.id)}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={() => void onSelect(item.id)}
-              >
-                <span className="thread-selection-item-title">
-                  <span>{item.title}</span>
-                  {current ? <em>{t('ai.chat.selected')}</em> : null}
-                  {item.badge ? <em>{item.badge}</em> : null}
-                </span>
-                {item.subtitle ? (
-                  <span className="thread-selection-item-subtitle">{item.subtitle}</span>
-                ) : null}
-              </button>
-              {onRename && renameLabel ? (
-                <button
-                  type="button"
-                  className="thread-selection-rename"
-                  aria-label={renameLabel}
-                  title={renameLabel}
-                  disabled={selectionPending}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter' || event.key === ' ') {
-                      event.stopPropagation()
-                    }
-                  }}
-                  onClick={(event) => {
-                    event.stopPropagation()
-                    setActiveId(item.id)
-                    onRename(item.id)
-                  }}
-                >
-                  <Pencil aria-hidden="true" />
-                </button>
-              ) : null}
-            </li>
-          )
-        })}
+        {!loading && filteredItems.map((item) => (
+          <SelectionRow
+            key={item.id}
+            item={item}
+            active={item.id === activeId}
+            current={item.id === selectedId}
+            disabled={selectionPending}
+            selectedLabel={t('ai.chat.selected')}
+            renameLabel={renameLabel}
+            onHover={() => setActiveId(item.id)}
+            onSelect={() => void onSelect(item.id)}
+            onRename={renameItem == null ? undefined : () => renameItem(item.id)}
+          />
+        ))}
         {!loading && hasMore && onLoadMore ? (
-          <li className="thread-selection-row">
-            <button
-              type="button"
-              className="thread-selection-item"
-              disabled={selectionPending || loadingMore}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={onLoadMore}
-            >
-              <span className="thread-selection-item-title">
-                <span>{loadingMore ? t('ai.chat.loadingList') : t('ai.chat.loadMore')}</span>
-              </span>
-            </button>
-          </li>
+          <SelectionLoadMoreRow
+            label={loadingMore ? t('ai.chat.loadingList') : t('ai.chat.loadMore')}
+            disabled={selectionPending || loadingMore}
+            onLoadMore={onLoadMore}
+          />
         ) : null}
       </ul>
     </ThreadInteractionPanel>
   )
 }
 
+/** Agent 选择面板：把 Agent 目录投影成统一选择项，标题与空态文案由面板模板给出。 */
 export function AgentSelectionPanel({
   agents,
   selectedAgentName,

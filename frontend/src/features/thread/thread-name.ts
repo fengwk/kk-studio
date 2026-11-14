@@ -5,7 +5,7 @@
  * 名称是创建请求的事实之一（进入 creationRequestHash），因此前端只提交规范化后的
  * 唯一形态；无法规范化时返回 null，由调用方给出字段级错误，绝不静默截断或兜底。
  */
-export const THREAD_NAME_MAX_CODE_POINTS = 256
+const MAX_CODE_POINTS = 256
 
 export function normalizeThreadName(raw: unknown): string | null {
   if (typeof raw !== 'string') {
@@ -15,7 +15,7 @@ export function normalizeThreadName(raw: unknown): string | null {
   if (collapsed.length === 0) {
     return null
   }
-  if (Array.from(collapsed).length > THREAD_NAME_MAX_CODE_POINTS) {
+  if (Array.from(collapsed).length > MAX_CODE_POINTS) {
     return null
   }
   return collapsed

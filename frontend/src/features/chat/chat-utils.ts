@@ -2,7 +2,7 @@ import { includesSearch } from '@/shared/lib/search-utils'
 import { compareCatalogVersions } from '@/shared/lib/catalog-version'
 import type { ChatDTO, ChatPageDTO } from '@/shared/api/generated/contracts'
 
-export function preferNewerChat(
+function preferNewerChat(
   current: ChatDTO | undefined,
   incoming: ChatDTO,
 ): ChatDTO {
@@ -31,25 +31,6 @@ export function mergeChatPage(
 export function appendUniqueChats(current: ChatDTO[], incoming: ChatDTO[]): ChatDTO[] {
   const seen = new Set(current.map((chat) => chat.id))
   return [...current, ...incoming.filter((chat) => !seen.has(chat.id))]
-}
-
-/** 将权威 Chat 响应应用到已加载的列表 cache。 */
-export function mergeChatIntoList(
-  current: ChatDTO[] | undefined,
-  incoming: ChatDTO,
-): ChatDTO[] | undefined {
-  if (!current) {
-    return current
-  }
-  let found = false
-  const merged = current.map((chat) => {
-    if (chat.id !== incoming.id) {
-      return chat
-    }
-    found = true
-    return preferNewerChat(chat, incoming)
-  })
-  return found ? merged : [...merged, incoming]
 }
 
 export function filterChats(chats: ChatDTO[], search: string): ChatDTO[] {

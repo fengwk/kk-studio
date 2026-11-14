@@ -7,7 +7,7 @@ import {
 import { hasExactKeys, isRecord } from '@/shared/lib/value'
 import {
   loadTabSnapshot, resolveTabStorage, serializeTabSnapshot, writeTabSnapshot,
-  TAB_LAST_PREFIX, TAB_SESSION_PREFIX, TAB_STATE_MAX_BYTES,
+  TAB_LAST_PREFIX, TAB_SESSION_PREFIX,
   type TabStorage,
 } from '@/shared/lib/tab-storage'
 
@@ -46,9 +46,7 @@ export interface ChatPaneLoadResult {
 
 export type ChatTabStorage = TabStorage
 
-export const CHAT_TAB_STATE_MAX_BYTES = TAB_STATE_MAX_BYTES
-
-export const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
+const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
   single: 1,
   'split-2': 2,
   'split-3': 3,
@@ -62,6 +60,12 @@ export const CHAT_LAYOUT_CAPACITY: Record<ChatLayout, number> = {
 
 const CHAT_PANE_COUNT = 9
 
+/**
+ * 本 tab 的 sessionStorage 与全局最后状态的持久化键。
+ *
+ * 键名是刷新恢复契约的一部分：测试据此播种、读取快照，因此保留导出，而不是让
+ * 调用方各自拼接字符串。
+ */
 export function chatTabSessionStorageKey(chatId: string): string {
   return `${TAB_SESSION_PREFIX}chat:${chatId}`
 }
@@ -112,7 +116,7 @@ function parsePane(value: unknown, index: number): ChatPane | null {
 }
 
 /** 严格解析 Chat 呈现快照；任何未知字段、越界集合或坏目标都使整份快照失效。 */
-export function parseChatPaneState(value: unknown): ChatPaneState | null {
+function parseChatPaneState(value: unknown): ChatPaneState | null {
   if (!isRecord(value) || !hasExactKeys(value, ['layout', 'focusedPaneId', 'panes'])) {
     return null
   }
@@ -264,7 +268,12 @@ export function chatPanePosition(paneId: string): number | null {
   return Number.isInteger(position) && position >= 1 ? position : null
 }
 
-/** 容纳 `count` 个面板的最小布局；count 超出 9 时取 grid-9。 */
+/**
+ * 容纳 `count` 个面板的最小布局；count 超出 9 时取 grid-9。
+ *
+ * 只有 `revealChatPane` 调用它；下界钳制（count ≤ 0）没有生产入口可达，
+ * 因此保留导出，让测试能固定这条边界。
+ */
 export function chatLayoutForPaneCount(count: number): ChatLayout {
   const clamped = Math.min(Math.max(Math.trunc(count), 1), CHAT_PANE_COUNT)
   if (clamped === 1) {
