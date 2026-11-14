@@ -7,16 +7,21 @@ import { ToolCallPreview } from '@/features/thread/runtime/thread-panel/messages
 import { ToolContentView } from '@/features/thread/runtime/thread-panel/messages/ToolContentView'
 import { ToolOutputViewport } from '@/features/thread/runtime/thread-panel/messages/ToolOutputViewport'
 import {
-  disclosureHint,
   discloseText,
   COLLAPSED_MAX_CHARS,
   ERROR_COLLAPSED_LINES,
   isMcpToolName,
   toolDisclosureQuota,
-  type DisclosureEdge,
-  type TextDisclosure,
 } from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
 import { formatToolCallSummary } from '@/features/thread/runtime/thread-panel/messages/tool-display'
+import { DisclosureHint } from '@/features/thread/runtime/thread-panel/messages/ToolDisclosureHint'
+import {
+  joinTextContents,
+  splitContents,
+  toolBodyContents,
+  windowMutationPreview,
+  withoutExactError,
+} from '@/features/thread/runtime/thread-panel/messages/tool-message-content'
 import {
   buildToolMessageView,
   toolDefaultExpanded,
@@ -24,19 +29,13 @@ import {
 } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
 import {
   parseTaskReceipt,
-  type TaskToolReceipt,
 } from '@/features/thread/runtime/task-tool-parser'
 import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
-import { formatJsonContent } from '@/features/thread/runtime/thread-timeline/content-utils'
 import { announceTranscriptReading } from '@/features/thread/runtime/transcript-reading'
-import type {
-  ToolContent,
-  ToolDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
 import type { ToolRendererProps } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
 import { ResourceUriText } from '@/shared/ui/markdown/ResourceUriText'
-import type { ToolCallPreview as ToolCallPreviewData } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
 import './tool-card.css'
 
 /**
@@ -353,139 +352,4 @@ export function ToolMessageBlock({
       />
     </div>
   )
-}
-
-function splitContents(contents: ToolContent[]): { text: ToolContent[]; resources: ToolContent[] } {
-  const text: ToolContent[] = []
-  const resources: ToolContent[] = []
-  for (const content of contents) {
-    if (content.type === 'resource') {
-      resources.push(content)
-    } else {
-      text.push(content)
-    }
-  }
-  return { text, resources }
-}
-
-function joinTextContents(contents: ToolContent[]): string {
-  return contents
-    .map((content) => {
-      if (content.type === 'text') {
-        return content.text
-      }
-      return content.type === 'json' ? formatJsonContent(content.value) : ''
-    })
-    .join('\n')
-}
-
-/** 去掉与错误块完全相同的正文，避免展开后同一失败文本出现两次。 */
-function withoutExactError(
-  message: ToolDialogueMessage,
-  errorText: string,
-  isBash: boolean,
-): ToolDialogueMessage {
-  if (isBash || errorText === '') {
-    return message
-  }
-  const contents = message.contents.filter((content) =>
-    !(content.type === 'text' && content.text.trim() === errorText))
-  return contents.length === message.contents.length ? message : { ...message, contents }
-}
-
-/** 将 write/edit 预览按收起配额截取；-1 保持原始结构（含尾随空行）。 */
-function windowMutationPreview(
-  preview: ToolCallPreviewData | null,
-  limit: number,
-  maxChars: number,
-): { preview: ToolCallPreviewData | null; window: TextDisclosure | null } {
-  if (preview == null || limit < 0) {
-    return { preview, window: null }
-  }
-  if (preview.kind === 'write') {
-    const window = discloseText(preview.content, limit, 'start', maxChars)
-    return {
-      preview: preview.content !== '' && window.text === '' ? null
-        : { ...preview, content: window.text, lines: splitWindowLines(window.text) },
-      window,
-    }
-  }
-  if (preview.mode === 'review') {
-    const window = discloseText(preview.diff, limit, 'start', maxChars)
-    return {
-      preview: { ...preview, diff: window.text, lines: splitWindowLines(window.text) },
-      window,
-    }
-  }
-  return { preview, window: null }
-}
-
-function splitWindowLines(text: string): string[] {
-  return text === '' ? [] : text.split('\n')
-}
-
-function toolBodyContents(
-  contents: ToolContent[],
-  {
-    isTask,
-    taskReceipt,
-    isAskUser,
-    isMutation,
-    isMutationSuccess,
-    showTextPreview,
-  }: {
-    isTask: boolean
-    taskReceipt: TaskToolReceipt | null
-    isAskUser: boolean
-    isMutation: boolean
-    isMutationSuccess: boolean
-    showTextPreview: boolean
-  },
-): ToolContent[] {
-  if (isAskUser) {
-    return []
-  }
-  if (isMutation) {
-    // 成功正文已有审查预览，去重文本但保留附件；失败的其他结果内容仍完整展示。
-    return isMutationSuccess ? contents.filter((content) => content.type === 'resource') : contents
-  }
-  if (isTask) {
-    return taskReceipt == null ? contents : []
-  }
-  // bash/MCP 的展开态在 preview 中按原始顺序渲染全部内容，不再拆出 body。
-  return showTextPreview ? [] : contents
-}
-
-/**
- * 可点击提示行：节点本身完成展开回调；未截断时不渲染任何东西。
- */
-function DisclosureHint({
-  disclosure,
-  edge,
-  onExpand,
-  placement,
-  children,
-}: {
-  disclosure: TextDisclosure | null
-  edge: DisclosureEdge
-  onExpand: (element: HTMLElement) => void
-  placement: 'before' | 'after'
-  children?: ReactNode
-}) {
-  const hint = disclosure == null ? null : disclosureHint(disclosure, edge)
-  const button = hint == null
-    ? null
-    : (
-      <button
-        type="button"
-        className="thread-disclosure-hint"
-        onClick={(event) => onExpand(event.currentTarget)}
-      >
-        {hint}
-      </button>
-    )
-  if (children == null) {
-    return button
-  }
-  return placement === 'before' ? <>{button}{children}</> : <>{children}{button}</>
 }
