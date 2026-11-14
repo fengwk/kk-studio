@@ -191,15 +191,7 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
           "missing complete usage: Gemini model " + request.model().modelId());
     }
     GeminiUsageSnapshot usageSnapshot = usage.freeze();
-    if (this.stopReason == null) {
-      if (this.promptBlocked && parts.trackedParts().isEmpty()) {
-        this.stopReason = GenerationStopReason.FILTERED;
-      } else {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE,
-            "Gemini stream completed without terminal finish reason");
-      }
-    }
+    requireTerminalStopReason();
 
     List<ProviderToolCall> effectiveToolCalls;
     if (this.stopReason == GenerationStopReason.FILTERED) {
@@ -209,6 +201,37 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
           Collections.unmodifiableList(new ArrayList<>(parts.collectedToolCalls()));
     }
 
+    ProviderResponse response =
+        new ProviderResponse(
+            responseBlocks(effectiveToolCalls),
+            this.stopReason,
+            usageSnapshot.usage(),
+            null,
+            usageSnapshot.serviceTier(),
+            usageSnapshot.rawUsageJson(),
+            List.of(),
+            null,
+            null);
+
+    return new ProviderCompletion(response);
+  }
+
+  /** 只有 prompt 被拦截且没有任何 part 时才把缺失的终止原因解释为 FILTERED。 */
+  private void requireTerminalStopReason() {
+    if (this.stopReason != null) {
+      return;
+    }
+    if (this.promptBlocked && parts.trackedParts().isEmpty()) {
+      this.stopReason = GenerationStopReason.FILTERED;
+      return;
+    }
+    throw new ProviderException(
+        ProviderErrorKind.INVALID_RESPONSE,
+        "Gemini stream completed without terminal finish reason");
+  }
+
+  /** 按 part 顺序投影 normalized block；FILTERED 时撤回工具调用。 */
+  private List<ProviderContentBlock> responseBlocks(List<ProviderToolCall> effectiveToolCalls) {
     List<ProviderContentBlock> responseBlocks = new ArrayList<>();
     int toolCallIndex = 0;
     for (TrackedPart part : parts.trackedParts()) {
@@ -235,20 +258,7 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
             new ProviderOpaqueBlock("gemini_part", blockData(part.rawPart, Set.of())));
       }
     }
-
-    ProviderResponse response =
-        new ProviderResponse(
-            responseBlocks,
-            this.stopReason,
-            usageSnapshot.usage(),
-            null,
-            usageSnapshot.serviceTier(),
-            usageSnapshot.rawUsageJson(),
-            List.of(),
-            null,
-            null);
-
-    return new ProviderCompletion(response);
+    return responseBlocks;
   }
 
   private ProviderBlockData blockData(ObjectNode rawPart, Set<String> semanticFields) {
