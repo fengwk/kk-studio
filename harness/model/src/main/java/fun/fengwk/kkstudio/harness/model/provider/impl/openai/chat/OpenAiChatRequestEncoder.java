@@ -121,7 +121,7 @@ final class OpenAiChatRequestEncoder {
     }
   }
 
-  /** Responses 风格的 tools 数组与已废弃的单次 function 调用无法表达运行时工具，明确拒绝并指向运行时入口。 */
+  /** Responses 风格的 tools 数组与单次 function 调用无法表达运行时工具，明确拒绝并指向运行时入口。 */
   private static void rejectLegacyToolFields(ObjectNode root) {
     for (String field : List.of("functions", "function_call")) {
       if (root.has(field)) {

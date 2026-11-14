@@ -68,7 +68,7 @@ final class OpenAiChatUsage {
     }
   }
 
-  /** 缓存读命中：标准 details 优先，其次 DeepSeek 的 prompt cache 命中量，最后是部分兼容实现的顶层字段。 */
+  /** 缓存读命中：标准 details 优先，其次 DeepSeek 的 prompt cache 命中量，最后是部分厂商的顶层字段。 */
   private static long readCachedTokens(JsonNode usageNode, JsonNode promptDetails) {
     if (promptDetails != null && promptDetails.has("cached_tokens")) {
       return requiredNonNegativeLong(
