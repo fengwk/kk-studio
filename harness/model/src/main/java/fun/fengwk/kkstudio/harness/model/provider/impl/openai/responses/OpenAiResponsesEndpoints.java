@@ -1,7 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.OpenAiEndpointUri;
+
 import java.net.URI;
-import java.util.Locale;
 
 /** OpenAI Responses 端点 URI 解析与安全规范化工具。 */
 final class OpenAiResponsesEndpoints {
@@ -20,47 +21,14 @@ final class OpenAiResponsesEndpoints {
    * </ul>
    */
   static URI resolveResponsesUri(String endpoint) {
-    if (endpoint == null || endpoint.isBlank()) {
-      throw new IllegalArgumentException("endpoint must not be blank");
-    }
-    URI uri;
-    try {
-      uri = URI.create(endpoint);
-    } catch (IllegalArgumentException exception) {
-      throw new IllegalArgumentException("endpoint is not a valid URI");
-    }
-    String scheme = uri.getScheme();
-    if (scheme == null || (!scheme.equalsIgnoreCase("http") && !scheme.equalsIgnoreCase("https"))) {
-      throw new IllegalArgumentException("endpoint scheme must be http or https");
-    }
-    if (uri.getUserInfo() != null || uri.getRawUserInfo() != null) {
-      throw new IllegalArgumentException("endpoint must not contain user-info");
-    }
-    if (uri.getQuery() != null || uri.getRawQuery() != null) {
-      throw new IllegalArgumentException("endpoint must not contain query");
-    }
-    if (uri.getFragment() != null || uri.getRawFragment() != null) {
-      throw new IllegalArgumentException("endpoint must not contain fragment");
-    }
-    String rawAuthority = uri.getRawAuthority();
-    if (rawAuthority == null
-        || rawAuthority.isBlank()
-        || uri.getHost() == null
-        || uri.getHost().isBlank()) {
-      throw new IllegalArgumentException("endpoint must contain a valid host");
-    }
-    String rawPath = uri.getRawPath();
-    if (rawPath == null) {
-      rawPath = "";
-    }
-    while (rawPath.endsWith("/")) {
-      rawPath = rawPath.substring(0, rawPath.length() - 1);
-    }
-    String responsesPath = rawPath + "/responses";
-    try {
-      return URI.create(scheme.toLowerCase(Locale.ROOT) + "://" + rawAuthority + responsesPath);
-    } catch (IllegalArgumentException exception) {
-      throw new IllegalArgumentException("endpoint is not a valid URI");
-    }
+    URI uri = OpenAiEndpointUri.parse(endpoint);
+    String scheme = OpenAiEndpointUri.requireHttpScheme(uri);
+    OpenAiEndpointUri.requireNoUserInfo(uri, false);
+    OpenAiEndpointUri.requireNoQuery(uri);
+    OpenAiEndpointUri.requireNoFragment(uri);
+    String rawAuthority = OpenAiEndpointUri.requireAuthority(uri);
+    OpenAiEndpointUri.requireHost(uri);
+    return OpenAiEndpointUri.rebuild(
+        scheme, rawAuthority, OpenAiEndpointUri.appendPath(uri, "/responses"));
   }
 }

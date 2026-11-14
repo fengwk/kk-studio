@@ -75,6 +75,7 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiErrorMapper</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiModelProvider</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiProviderAdapter</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.OpenAiEndpointUri</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatEndpoints</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatEncodedRequest</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.openai.chat.OpenAiChatRequestEncoder</include>
