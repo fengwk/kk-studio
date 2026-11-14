@@ -134,6 +134,26 @@ class DaemonControlStreamTest {
     assertEquals(INVOCATION_2, daemonSession.received.get(1).getInvocationId());
   }
 
+  /** 长度前缀完整、body 只到一半时必须等到下一次回调再交付。 */
+  @Test
+  void waitsForBodyAcrossCallbacks() {
+    controlStream.bindSession(daemonSession);
+
+    byte[] framed = ControlProtocolCodec.encodeFrame(createCancelEnvelope(INVOCATION_1));
+    int split = Integer.BYTES + (framed.length - Integer.BYTES) / 2;
+
+    stream.inboundDataQueue.add(
+        new TestData(ByteBuffer.wrap(Arrays.copyOfRange(framed, 0, split)), false));
+    controlStream.listener().onDataAvailable(stream);
+    assertEquals(0, daemonSession.received.size());
+
+    stream.inboundDataQueue.add(
+        new TestData(ByteBuffer.wrap(Arrays.copyOfRange(framed, split, framed.length)), false));
+    controlStream.listener().onDataAvailable(stream);
+    assertEquals(1, daemonSession.received.size());
+    assertEquals(INVOCATION_1, daemonSession.received.get(0).getInvocationId());
+  }
+
   @Test
   void triggersWriteTimeoutViaSchedulerWhenUnacknowledged() {
     controlStream.bindSession(daemonSession);
