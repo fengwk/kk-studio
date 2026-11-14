@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.dispatch;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 
 import java.time.Duration;
 
@@ -24,13 +24,13 @@ public record HarnessWorkDispatcherConfig(
 
   public HarnessWorkDispatcherConfig {
     leaseDuration =
-        HarnessStoreTime.requireWholeMillisecondDuration(
+        MillisecondTime.requireWholeMillisecondDuration(
             leaseDuration, "kk-studio.harness.dispatcher.lease-duration");
     periodicPollInterval =
-        HarnessStoreTime.requireWholeMillisecondDuration(
+        MillisecondTime.requireWholeMillisecondDuration(
             periodicPollInterval, "kk-studio.harness.dispatcher.poll-interval");
     executorRejectionDelay =
-        HarnessStoreTime.requireWholeMillisecondDuration(
+        MillisecondTime.requireWholeMillisecondDuration(
             executorRejectionDelay, "kk-studio.harness.dispatcher.rejection-delay");
     if (maxDispatchTasks <= 0) {
       throw new IllegalArgumentException(

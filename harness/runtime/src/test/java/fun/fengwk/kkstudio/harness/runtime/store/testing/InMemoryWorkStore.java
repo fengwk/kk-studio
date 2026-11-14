@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
@@ -158,7 +158,7 @@ final class InMemoryWorkStore implements WorkStore {
     Instant now = tx.now();
     Objects.requireNonNull(targetType, "targetType");
     Objects.requireNonNull(leaseToken, "leaseToken");
-    HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+    MillisecondTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     Instant leaseUntil = now.plus(leaseDuration);
     tx.locks().requireCanClaimWork();
     List<Work> due =
@@ -197,7 +197,7 @@ final class InMemoryWorkStore implements WorkStore {
     tx.checkOpen();
     Instant now = tx.now();
     Objects.requireNonNull(claim, "claim");
-    HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+    MillisecondTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     Work work = lockedWork(claim.target());
     work.state().requireActiveLease(claim.leaseToken(), now);
     Instant target = now.plus(leaseDuration);
@@ -253,7 +253,7 @@ final class InMemoryWorkStore implements WorkStore {
     tx.checkOpen();
     Instant now = tx.now();
     Objects.requireNonNull(claim, "claim");
-    HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
+    MillisecondTime.requireNonNegativeWholeMillisecondDuration(delay, "delay");
     Work work = lockedWork(claim.target());
     Work next =
         work.reschedule(claim.leaseToken(), claim.claimedWakeVersion(), now, now.plus(delay));

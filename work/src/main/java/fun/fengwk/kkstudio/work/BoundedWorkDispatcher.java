@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.work;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
@@ -79,7 +79,7 @@ public final class BoundedWorkDispatcher<T> implements AutoCloseable {
     }
     this.maxDispatchTasks = maxDispatchTasks;
     this.pollInterval =
-        HarnessStoreTime.requireWholeMillisecondDuration(pollInterval, name + " pollInterval");
+        MillisecondTime.requireWholeMillisecondDuration(pollInterval, name + " pollInterval");
     this.drainExecutor = requireFailFastExecutor(drainExecutor, name, "drainExecutor");
     this.workerExecutor = requireFailFastExecutor(workerExecutor, name, "workerExecutor");
     this.pollScheduler = Objects.requireNonNull(pollScheduler, "pollScheduler");

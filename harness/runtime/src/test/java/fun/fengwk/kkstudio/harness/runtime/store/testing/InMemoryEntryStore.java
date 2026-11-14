@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
@@ -47,7 +47,7 @@ final class InMemoryEntryStore implements EntryStore {
   public void insert(Entry entry) {
     tx.checkOpen();
     Objects.requireNonNull(entry, "entry");
-    HarnessStoreTime.requireMillisecondPrecision(entry.createdAt());
+    MillisecondTime.requireMillisecondPrecision(entry.createdAt());
     InMemoryHarnessTransaction.requireAbsent(state.entries, entry.id(), "entry");
     if (!state.sessions.containsKey(entry.sessionId())) {
       throw new IllegalArgumentException("session " + entry.sessionId() + " does not exist");

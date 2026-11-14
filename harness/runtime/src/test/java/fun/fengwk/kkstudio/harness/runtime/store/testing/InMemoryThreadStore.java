@@ -1,7 +1,7 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
@@ -45,8 +45,8 @@ final class InMemoryThreadStore implements ThreadStore {
   public void insert(ThreadState thread) {
     tx.checkOpen();
     Objects.requireNonNull(thread, "thread");
-    HarnessStoreTime.requireMillisecondPrecision(thread.createdAt());
-    HarnessStoreTime.requireMillisecondPrecision(thread.updatedAt());
+    MillisecondTime.requireMillisecondPrecision(thread.createdAt());
+    MillisecondTime.requireMillisecondPrecision(thread.updatedAt());
     InMemoryHarnessTransaction.requireAbsent(state.threads, thread.id(), "thread");
     tx.requireExistingEntry(thread.headEntryId());
     requireThreadHeadInSession(thread);
@@ -140,8 +140,8 @@ final class InMemoryThreadStore implements ThreadStore {
   public void update(ThreadState thread) {
     tx.checkOpen();
     Objects.requireNonNull(thread, "thread");
-    HarnessStoreTime.requireMillisecondPrecision(thread.createdAt());
-    HarnessStoreTime.requireMillisecondPrecision(thread.updatedAt());
+    MillisecondTime.requireMillisecondPrecision(thread.createdAt());
+    MillisecondTime.requireMillisecondPrecision(thread.updatedAt());
     tx.locks().requireLocked(InMemoryHarnessLocks.LockKey.thread(thread.id()));
     ThreadState stored = state.threads.get(thread.id());
     if (stored == null) {

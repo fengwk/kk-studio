@@ -4,7 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 
 import fun.fengwk.kkstudio.common.result.BinaryResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
@@ -130,7 +130,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
     this.attempt = attempt;
     this.request = Objects.requireNonNull(request, "request");
     this.config = Objects.requireNonNull(config, "config");
-    this.clock = HarnessStoreTime.millisecondClock(clock);
+    this.clock = MillisecondTime.millisecondClock(clock);
     this.heartbeat =
         new WorkHeartbeat(
             this.store,

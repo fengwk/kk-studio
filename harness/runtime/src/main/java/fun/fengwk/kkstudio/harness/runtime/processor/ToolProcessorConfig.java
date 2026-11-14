@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.spi.work.ProcessorLeaseConfig;
 
@@ -35,6 +35,6 @@ public record ToolProcessorConfig(
     admitFailureDelayProvider =
         Objects.requireNonNull(admitFailureDelayProvider, "admitFailureDelayProvider");
     reattachWindow =
-        HarnessStoreTime.requireWholeMillisecondDuration(reattachWindow, "reattachWindow");
+        MillisecondTime.requireWholeMillisecondDuration(reattachWindow, "reattachWindow");
   }
 }

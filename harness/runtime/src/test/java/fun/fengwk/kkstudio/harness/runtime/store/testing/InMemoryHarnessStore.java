@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.Work;
@@ -47,7 +47,7 @@ public class InMemoryHarnessStore implements HarnessStore {
   private InMemoryState committed;
   private boolean inTransaction;
   private volatile RouteReadyPredicate routeReadyPredicate;
-  private volatile Clock clock = HarnessStoreTime.millisecondClock(Clock.systemUTC());
+  private volatile Clock clock = MillisecondTime.millisecondClock(Clock.systemUTC());
 
   /** Route-ready 判定谓词接口，供契约测试注入环境就绪状态与 lease 有效性。 */
   @FunctionalInterface
@@ -79,7 +79,7 @@ public class InMemoryHarnessStore implements HarnessStore {
 
   /** 测试时钟：每个事务首次 {@link HarnessStore.Transaction#now()} 时读取一次，对应生产实现的数据库时钟。 */
   public void setClock(Clock clock) {
-    this.clock = HarnessStoreTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
+    this.clock = MillisecondTime.millisecondClock(Objects.requireNonNull(clock, "clock"));
   }
 
   /** 把测试时钟固定在给定时刻。 */
@@ -112,7 +112,7 @@ public class InMemoryHarnessStore implements HarnessStore {
   /** 测试钩子：直接把已存在 Work 行的 lease deadline 改写为给定值（通常已过期），用于验证 stale ownership 路径。 */
   public void forceLeaseUntil(WorkTarget target, Instant leaseUntil) {
     Objects.requireNonNull(target, "target");
-    HarnessStoreTime.requireMillisecondPrecision(leaseUntil);
+    MillisecondTime.requireMillisecondPrecision(leaseUntil);
     synchronized (monitor) {
       Work work = committed.works.get(target);
       if (work == null || work.leaseToken() == null) {
@@ -133,7 +133,7 @@ public class InMemoryHarnessStore implements HarnessStore {
   /** 测试钩子：直接把已存在 Work 行的 availableAt 改写为给定值（通常已 due），用于验证“立即唤醒/到期即可 claim”路径。 */
   public void forceAvailableAt(WorkTarget target, Instant availableAt) {
     Objects.requireNonNull(target, "target");
-    HarnessStoreTime.requireMillisecondPrecision(availableAt);
+    MillisecondTime.requireMillisecondPrecision(availableAt);
     synchronized (monitor) {
       Work work = committed.works.get(target);
       if (work == null) {

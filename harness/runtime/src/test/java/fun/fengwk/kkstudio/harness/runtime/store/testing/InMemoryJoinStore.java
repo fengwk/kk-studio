@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
@@ -47,8 +47,8 @@ final class InMemoryJoinStore implements JoinStore {
   public void insert(ThreadJoin join) {
     tx.checkOpen();
     Objects.requireNonNull(join, "join");
-    HarnessStoreTime.requireMillisecondPrecision(join.createdAt());
-    HarnessStoreTime.requireMillisecondPrecision(join.updatedAt());
+    MillisecondTime.requireMillisecondPrecision(join.createdAt());
+    MillisecondTime.requireMillisecondPrecision(join.updatedAt());
     if (join.matched() || join.deliveryCommandSequence() != null || join.reminderTurn() != 0) {
       throw new IllegalArgumentException("new join must be unmatched");
     }
@@ -148,8 +148,8 @@ final class InMemoryJoinStore implements JoinStore {
   public void update(ThreadJoin join) {
     tx.checkOpen();
     Objects.requireNonNull(join, "join");
-    HarnessStoreTime.requireMillisecondPrecision(join.createdAt());
-    HarnessStoreTime.requireMillisecondPrecision(join.updatedAt());
+    MillisecondTime.requireMillisecondPrecision(join.createdAt());
+    MillisecondTime.requireMillisecondPrecision(join.updatedAt());
     tx.locks().requireLocked(InMemoryHarnessLocks.LockKey.thread(join.childThreadId()));
     ThreadJoin old =
         find(join.invocationId())

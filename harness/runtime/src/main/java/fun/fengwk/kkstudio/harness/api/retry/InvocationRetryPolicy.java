@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.retry;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -20,8 +20,8 @@ public record InvocationRetryPolicy(
       throw new IllegalArgumentException("maxRetries must not be negative");
     }
     backoffStrategy = Objects.requireNonNull(backoffStrategy, "backoffStrategy");
-    baseDelay = HarnessStoreTime.requireWholeMillisecondDuration(baseDelay, "baseDelay");
-    maxDelay = HarnessStoreTime.requireWholeMillisecondDuration(maxDelay, "maxDelay");
+    baseDelay = MillisecondTime.requireWholeMillisecondDuration(baseDelay, "baseDelay");
+    maxDelay = MillisecondTime.requireWholeMillisecondDuration(maxDelay, "maxDelay");
     if (maxDelay.compareTo(baseDelay) < 0) {
       throw new IllegalArgumentException("maxDelay must not be less than baseDelay");
     }

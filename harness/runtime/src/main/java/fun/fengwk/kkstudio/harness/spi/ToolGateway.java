@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.spi;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
@@ -150,7 +150,7 @@ public interface ToolGateway {
       request = Objects.requireNonNull(request, "request");
       environmentId = Objects.requireNonNull(environmentId, "environmentId");
       remoteExecutionId = Objects.requireNonNull(remoteExecutionId, "remoteExecutionId");
-      timeout = HarnessStoreTime.requireWholeMillisecondDuration(timeout, "timeout");
+      timeout = MillisecondTime.requireWholeMillisecondDuration(timeout, "timeout");
       remoteExecutions = Objects.requireNonNull(remoteExecutions, "remoteExecutions");
     }
   }
@@ -193,7 +193,7 @@ public interface ToolGateway {
   /** 本地容量暂时不足，肯定未执行；调用方按 {@code retryAfter} 重新调度（attempt 不变）。 */
   record Busy(Duration retryAfter) implements Admission {
     public Busy {
-      retryAfter = HarnessStoreTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
+      retryAfter = MillisecondTime.requireWholeMillisecondDuration(retryAfter, "retryAfter");
     }
   }
 

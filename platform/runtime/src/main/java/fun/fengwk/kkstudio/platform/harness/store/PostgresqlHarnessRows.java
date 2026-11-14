@@ -8,7 +8,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.json.StrictJson;
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
@@ -240,7 +240,7 @@ final class PostgresqlHarnessRows {
   static Timestamp timestamp(Instant instant) {
     return instant == null
         ? null
-        : Timestamp.from(HarnessStoreTime.requireMillisecondPrecision(instant));
+        : Timestamp.from(MillisecondTime.requireMillisecondPrecision(instant));
   }
 
   private static EnvironmentId nullableEnvironmentId(Object value) {

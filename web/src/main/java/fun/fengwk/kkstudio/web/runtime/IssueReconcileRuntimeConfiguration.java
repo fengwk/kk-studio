@@ -8,7 +8,7 @@ import org.springframework.context.SmartLifecycle;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.platform.harness.configuration.HarnessRuntimeProperties;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileProperties;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileWorkHandler;
@@ -85,15 +85,15 @@ public class IssueReconcileRuntimeConfiguration {
       @Qualifier("issueReconcileDispatcherDrainExecutor") Executor drainExecutor,
       @Qualifier("issueReconcileDispatcherWorkerExecutor") Executor workerExecutor,
       @Qualifier("issueReconcileDispatcherPollScheduler") ScheduledExecutorService pollScheduler) {
-    HarnessStoreTime.requireWholeMillisecondDuration(
+    MillisecondTime.requireWholeMillisecondDuration(
         properties.getLeaseDuration(), "kk-studio.project.reconcile.lease-duration");
-    HarnessStoreTime.requireWholeMillisecondDuration(
+    MillisecondTime.requireWholeMillisecondDuration(
         properties.getRejectionDelay(), "kk-studio.project.reconcile.rejection-delay");
-    HarnessStoreTime.requireWholeMillisecondDuration(
+    MillisecondTime.requireWholeMillisecondDuration(
         properties.getRetryDelay(), "kk-studio.project.reconcile.retry-delay");
-    HarnessStoreTime.requireWholeMillisecondDuration(
+    MillisecondTime.requireWholeMillisecondDuration(
         properties.getActiveDelay(), "kk-studio.project.reconcile.active-delay");
-    HarnessStoreTime.requireWholeMillisecondDuration(
+    MillisecondTime.requireWholeMillisecondDuration(
         properties.getBlockedDelay(), "kk-studio.project.reconcile.blocked-delay");
     return new BoundedWorkDispatcher<>(
         DISPATCHER_NAME,

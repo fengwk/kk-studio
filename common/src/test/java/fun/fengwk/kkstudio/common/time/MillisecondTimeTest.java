@@ -11,12 +11,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 
-class HarnessStoreTimeTest {
+class MillisecondTimeTest {
 
   @Test
   void millisecondClockCanonicalizesSourceSamples() {
     Instant source = Instant.parse("2026-08-05T00:00:00.123456789Z");
-    Clock clock = HarnessStoreTime.millisecondClock(Clock.fixed(source, ZoneOffset.UTC));
+    Clock clock = MillisecondTime.millisecondClock(Clock.fixed(source, ZoneOffset.UTC));
 
     assertEquals(Instant.parse("2026-08-05T00:00:00.123Z"), clock.instant());
   }
@@ -25,11 +25,11 @@ class HarnessStoreTimeTest {
   void precisionGuardAcceptsCanonicalAndNullableValuesButRejectsSubMillisecondValues() {
     Instant canonical = Instant.parse("2026-08-05T00:00:00.123Z");
 
-    assertEquals(canonical, HarnessStoreTime.requireMillisecondPrecision(canonical));
-    assertNull(HarnessStoreTime.requireMillisecondPrecision(null));
+    assertEquals(canonical, MillisecondTime.requireMillisecondPrecision(canonical));
+    assertNull(MillisecondTime.requireMillisecondPrecision(null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessStoreTime.requireMillisecondPrecision(canonical.plusNanos(1)));
+        () -> MillisecondTime.requireMillisecondPrecision(canonical.plusNanos(1)));
   }
 
   /** 命名字段校验保留非空要求与具体字段错误信息。 */
@@ -37,15 +37,14 @@ class HarnessStoreTimeTest {
   void namedPrecisionGuardRequiresNonNullAndMillisecondPrecision() {
     Instant canonical = Instant.parse("2026-08-05T00:00:00.123Z");
 
-    assertEquals(canonical, HarnessStoreTime.requireMillisecondPrecision(canonical, "timestamp"));
+    assertEquals(canonical, MillisecondTime.requireMillisecondPrecision(canonical, "timestamp"));
     assertThrows(
         NullPointerException.class,
-        () -> HarnessStoreTime.requireMillisecondPrecision(null, "timestamp"));
+        () -> MillisecondTime.requireMillisecondPrecision(null, "timestamp"));
     IllegalArgumentException exception =
         assertThrows(
             IllegalArgumentException.class,
-            () ->
-                HarnessStoreTime.requireMillisecondPrecision(canonical.plusNanos(1), "timestamp"));
+            () -> MillisecondTime.requireMillisecondPrecision(canonical.plusNanos(1), "timestamp"));
     assertEquals("timestamp must use millisecond precision", exception.getMessage());
   }
 
@@ -53,23 +52,21 @@ class HarnessStoreTimeTest {
   void durableDurationsMustBePositiveWholeMilliseconds() {
     Duration canonical = Duration.ofMillis(1500);
 
-    assertEquals(
-        canonical, HarnessStoreTime.requireWholeMillisecondDuration(canonical, "duration"));
+    assertEquals(canonical, MillisecondTime.requireWholeMillisecondDuration(canonical, "duration"));
     assertThrows(
         NullPointerException.class,
-        () -> HarnessStoreTime.requireWholeMillisecondDuration(null, "duration"));
+        () -> MillisecondTime.requireWholeMillisecondDuration(null, "duration"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> HarnessStoreTime.requireWholeMillisecondDuration(Duration.ZERO, "duration"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            HarnessStoreTime.requireWholeMillisecondDuration(
-                Duration.ofNanos(500_000), "duration"));
+        () -> MillisecondTime.requireWholeMillisecondDuration(Duration.ZERO, "duration"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessStoreTime.requireWholeMillisecondDuration(
+            MillisecondTime.requireWholeMillisecondDuration(Duration.ofNanos(500_000), "duration"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            MillisecondTime.requireWholeMillisecondDuration(
                 Duration.ofNanos(1_500_000), "duration"));
   }
 
@@ -80,34 +77,34 @@ class HarnessStoreTimeTest {
     // 零表示立即，合法。
     assertEquals(
         Duration.ZERO,
-        HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(Duration.ZERO, "delay"));
+        MillisecondTime.requireNonNegativeWholeMillisecondDuration(Duration.ZERO, "delay"));
     assertEquals(
-        canonical, HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(canonical, "delay"));
+        canonical, MillisecondTime.requireNonNegativeWholeMillisecondDuration(canonical, "delay"));
     assertThrows(
         NullPointerException.class,
-        () -> HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(null, "delay"));
+        () -> MillisecondTime.requireNonNegativeWholeMillisecondDuration(null, "delay"));
     // 负值拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(
+            MillisecondTime.requireNonNegativeWholeMillisecondDuration(
                 Duration.ofMillis(-1), "delay"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(
+            MillisecondTime.requireNonNegativeWholeMillisecondDuration(
                 Duration.ofNanos(-1), "delay"));
     // 亚毫秒精度拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(
+            MillisecondTime.requireNonNegativeWholeMillisecondDuration(
                 Duration.ofNanos(1_500_000), "delay"));
     // 毫秒范围溢出拒绝（toMillis 溢出应表现为调用方可见的校验错误，而不是延迟到后续算术）。
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            HarnessStoreTime.requireNonNegativeWholeMillisecondDuration(
+            MillisecondTime.requireNonNegativeWholeMillisecondDuration(
                 Duration.ofSeconds(Long.MAX_VALUE), "delay"));
   }
 }

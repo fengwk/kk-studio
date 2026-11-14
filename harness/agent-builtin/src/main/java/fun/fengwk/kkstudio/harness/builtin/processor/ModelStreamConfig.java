@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 
 import java.nio.charset.StandardCharsets;
@@ -24,9 +24,9 @@ public record ModelStreamConfig(
       new ModelStreamConfig(Duration.ofMillis(50), 256, 64 * 1024, Duration.ofMillis(1500));
 
   public ModelStreamConfig {
-    pushWindow = HarnessStoreTime.requireWholeMillisecondDuration(pushWindow, "pushWindow");
+    pushWindow = MillisecondTime.requireWholeMillisecondDuration(pushWindow, "pushWindow");
     checkpointInterval =
-        HarnessStoreTime.requireWholeMillisecondDuration(checkpointInterval, "checkpointInterval");
+        MillisecondTime.requireWholeMillisecondDuration(checkpointInterval, "checkpointInterval");
     if (maxBatchEvents <= 0) {
       throw new IllegalArgumentException("maxBatchEvents must be positive");
     }

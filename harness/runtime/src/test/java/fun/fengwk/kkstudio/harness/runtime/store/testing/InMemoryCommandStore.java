@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.runtime.store.testing;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandState;
@@ -115,8 +115,8 @@ final class InMemoryCommandStore implements CommandStore {
     Set<CommandSequenceKey> sequences = new HashSet<>();
     Set<CommandClientKey> idempotencyKeys = new HashSet<>();
     for (ThreadCommand command : copied) {
-      HarnessStoreTime.requireMillisecondPrecision(command.cancelledAt());
-      HarnessStoreTime.requireMillisecondPrecision(command.createdAt());
+      MillisecondTime.requireMillisecondPrecision(command.cancelledAt());
+      MillisecondTime.requireMillisecondPrecision(command.createdAt());
       if (!sequences.add(new CommandSequenceKey(command.threadId(), command.sequence()))) {
         throw new IllegalArgumentException(
             "duplicate command sequence "
@@ -178,8 +178,8 @@ final class InMemoryCommandStore implements CommandStore {
     List<ThreadCommand> copied =
         List.copyOf(commands).stream().sorted(InMemoryHarnessLocks.COMMAND_LOCK_ORDER).toList();
     for (ThreadCommand command : copied) {
-      HarnessStoreTime.requireMillisecondPrecision(command.cancelledAt());
-      HarnessStoreTime.requireMillisecondPrecision(command.createdAt());
+      MillisecondTime.requireMillisecondPrecision(command.cancelledAt());
+      MillisecondTime.requireMillisecondPrecision(command.createdAt());
       ThreadCommand stored =
           state.commands.get(new InMemoryState.CommandKey(command.threadId(), command.sequence()));
       if (stored == null) {

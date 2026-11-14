@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.harness.spi.work;
 
-import fun.fengwk.kkstudio.common.time.HarnessStoreTime;
+import fun.fengwk.kkstudio.common.time.MillisecondTime;
 
 import java.time.Duration;
 
@@ -13,10 +13,9 @@ import java.time.Duration;
 public record ProcessorLeaseConfig(Duration leaseDuration, Duration heartbeatInterval) {
 
   public ProcessorLeaseConfig {
-    leaseDuration =
-        HarnessStoreTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
+    leaseDuration = MillisecondTime.requireWholeMillisecondDuration(leaseDuration, "leaseDuration");
     heartbeatInterval =
-        HarnessStoreTime.requireWholeMillisecondDuration(heartbeatInterval, "heartbeatInterval");
+        MillisecondTime.requireWholeMillisecondDuration(heartbeatInterval, "heartbeatInterval");
     if (heartbeatInterval.compareTo(leaseDuration) >= 0) {
       throw new IllegalArgumentException("heartbeatInterval must be less than leaseDuration");
     }
