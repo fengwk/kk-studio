@@ -78,3 +78,48 @@ func validateSnapshot(s *RuntimeSnapshot, path string) error {
 	}
 	return nil
 }
+
+func validateReady(r *Ready) error {
+	if err := daemonVersion(r.GetDaemonVersion(), "ready.daemonVersion"); err != nil {
+		return err
+	}
+	if r.HostInfo == nil {
+		return invalid("ready.hostInfo is required")
+	}
+	if err := validateHost(r.HostInfo); err != nil {
+		return err
+	}
+	if r.RuntimeStatus == nil {
+		return invalid("ready.runtimeStatus is required")
+	}
+	if err := validateSnapshot(r.RuntimeStatus, "ready.runtimeStatus"); err != nil {
+		return err
+	}
+	if r.RuntimeStatus.GetStatus().GetDaemonVersion() != r.GetDaemonVersion() {
+		return invalid("ready.runtimeStatus.status.daemonVersion must match ready.daemonVersion")
+	}
+	if r.RuntimeStatus.GetStatus().GetConfiguration() == nil || r.RuntimeStatus.GetStatus().GetConfiguration().AppliedVersion == nil {
+		return invalid("ready.runtimeStatus.status.configuration.appliedVersion is required")
+	}
+	return nil
+}
+
+func validateHeartbeat(h *Heartbeat) error {
+	if h.RuntimeStatus == nil {
+		return invalid("heartbeat.runtimeStatus is required")
+	}
+	if err := validateSnapshot(h.RuntimeStatus, "heartbeat.runtimeStatus"); err != nil {
+		return err
+	}
+	if h.IdeLeaseRound != nil && h.GetIdeLeaseRound() <= 0 {
+		return invalid("heartbeat.ideLeaseRound must be positive")
+	}
+	return nil
+}
+
+func validateRuntimeStatus(s *RuntimeStatus) error {
+	if s.RuntimeStatus == nil {
+		return invalid("runtimeStatus.runtimeStatus is required")
+	}
+	return validateSnapshot(s.RuntimeStatus, "runtimeStatus.runtimeStatus")
+}

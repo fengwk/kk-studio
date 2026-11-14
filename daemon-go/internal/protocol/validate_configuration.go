@@ -72,3 +72,16 @@ func validateStringList(values []string, required, extension, marker bool) error
 	}
 	return nil
 }
+
+func validateEnvironmentConfig(c *EnvironmentConfig) error {
+	if c.Version == nil {
+		return invalid("environmentConfig.version is required")
+	}
+	if c.GetVersion() < 0 {
+		return invalid("environmentConfig.version must be non-negative")
+	}
+	if c.Config == nil {
+		return invalid("environmentConfig.config is required")
+	}
+	return validateDaemonConfig(c.Config)
+}
