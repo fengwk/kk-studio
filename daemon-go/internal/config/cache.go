@@ -26,42 +26,8 @@ func SerializeDaemonCache(value DaemonConfig) ([]byte, error) {
 		return nil, err
 	}
 	output.WriteString(`,"lsp":`)
-	if len(value.LSP) == 0 {
-		output.WriteString(`null`)
-	} else {
-		output.WriteString(`{"servers":{`)
-		for index, server := range value.LSP {
-			if index > 0 {
-				output.WriteByte(',')
-			}
-			if err := appendJSON(&output, server.ID); err != nil {
-				return nil, err
-			}
-			output.WriteString(`:{"command":`)
-			if err := appendJSON(&output, server.Command); err != nil {
-				return nil, err
-			}
-			if len(server.Extensions) > 0 {
-				output.WriteString(`,"extensions":`)
-				if err := appendJSON(&output, server.Extensions); err != nil {
-					return nil, err
-				}
-			}
-			if len(server.RootMarkers) > 0 {
-				output.WriteString(`,"rootMarkers":`)
-				if err := appendJSON(&output, server.RootMarkers); err != nil {
-					return nil, err
-				}
-			}
-			if len(server.FirstMatchMarkers) > 0 {
-				output.WriteString(`,"firstMatchMarkers":`)
-				if err := appendJSON(&output, server.FirstMatchMarkers); err != nil {
-					return nil, err
-				}
-			}
-			output.WriteByte('}')
-		}
-		output.WriteString(`}}`)
+	if err := appendLSPCache(&output, value.LSP); err != nil {
+		return nil, err
 	}
 	output.WriteString(`,"proxyUrl":`)
 	if err := appendJSON(&output, value.ProxyURL); err != nil {
@@ -69,6 +35,50 @@ func SerializeDaemonCache(value DaemonConfig) ([]byte, error) {
 	}
 	output.WriteString(`}}`)
 	return output.Bytes(), nil
+}
+
+// appendLSPCache writes the lsp object, whose empty state is an explicit null.
+func appendLSPCache(output *bytes.Buffer, servers []LSPServerConfig) error {
+	if len(servers) == 0 {
+		output.WriteString(`null`)
+		return nil
+	}
+	output.WriteString(`{"servers":{`)
+	for index, server := range servers {
+		if index > 0 {
+			output.WriteByte(',')
+		}
+		if err := appendLSPServerCache(output, server); err != nil {
+			return err
+		}
+	}
+	output.WriteString(`}}`)
+	return nil
+}
+
+// appendLSPServerCache writes one server entry, omitting empty marker and extension lists.
+func appendLSPServerCache(output *bytes.Buffer, server LSPServerConfig) error {
+	if err := appendJSON(output, server.ID); err != nil {
+		return err
+	}
+	output.WriteString(`:{"command":`)
+	if err := appendJSON(output, server.Command); err != nil {
+		return err
+	}
+	for _, field := range []struct {
+		name   string
+		values []string
+	}{{"extensions", server.Extensions}, {"rootMarkers", server.RootMarkers}, {"firstMatchMarkers", server.FirstMatchMarkers}} {
+		if len(field.values) == 0 {
+			continue
+		}
+		output.WriteString(`,"` + field.name + `":`)
+		if err := appendJSON(output, field.values); err != nil {
+			return err
+		}
+	}
+	output.WriteByte('}')
+	return nil
 }
 
 func appendJSON(output *bytes.Buffer, value any) error {
