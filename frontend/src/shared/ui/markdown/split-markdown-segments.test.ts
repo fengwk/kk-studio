@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { splitMarkdownSegments } from '@/shared/ui/markdown/splitMarkdownSegments'
+import { splitMarkdownSegments } from '@/shared/ui/markdown/split-markdown-segments'
 
 describe('splitMarkdownSegments', () => {
   it('keeps incomplete mermaid fence inside markdown segment', () => {

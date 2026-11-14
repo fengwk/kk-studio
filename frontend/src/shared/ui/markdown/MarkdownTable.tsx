@@ -3,7 +3,7 @@ import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 import {
   MarkdownSegmentSourceContext,
   readMarkdownTableSource,
-} from '@/shared/ui/markdown/markdownTableSource'
+} from '@/shared/ui/markdown/markdown-table-source'
 import { useI18n } from '@/shared/i18n'
 import './markdown-table.css'
 

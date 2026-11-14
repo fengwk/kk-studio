@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { MarkdownTable } from '@/shared/ui/markdown/MarkdownTable'
-import { readMarkdownTableSource } from '@/shared/ui/markdown/markdownTableSource'
+import { readMarkdownTableSource } from '@/shared/ui/markdown/markdown-table-source'
 
 const mermaidApi = vi.hoisted(() => ({
   initialize: vi.fn<(config: Record<string, unknown>) => void>(),

@@ -11,7 +11,7 @@ import {
 } from '../../pending-action-sidecar'
 import type { ProjectsApi } from '../../projects-api'
 import type { IssueDetailDTO } from '@/shared/api/generated/contracts'
-import { sendRetriedAction } from './sendRetriedAction'
+import { sendRetriedAction } from './send-retried-action'
 import { usePendingActionSidecar } from './usePendingActionSidecar'
 
 interface IssueWriteStateInput {
