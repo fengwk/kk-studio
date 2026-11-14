@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.web.advice;
 
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
@@ -26,6 +27,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** HTTP 失败的统一翻译；已提交的响应与断连由前置 resolver 处理。 */
+@Slf4j
 @Order(Ordered.HIGHEST_PRECEDENCE)
 @RestControllerAdvice
 public class ProblemAdvice {
@@ -101,13 +103,15 @@ public class ProblemAdvice {
     return framework(400, requestBodyDetail(error), null);
   }
 
+  /** 响应体不暴露 5xx 细节，因此必须在这里记录原始异常，否则服务端故障无迹可查。 */
   @ExceptionHandler(Exception.class)
   public ResponseEntity<Map<String, Object>> unexpected(Exception error) {
-    if (error instanceof ErrorResponse response) {
-      int status = response.getStatusCode().value();
-      return framework(status, status < 500 ? response.getBody().getDetail() : null, null);
+    if (error instanceof ErrorResponse response && response.getStatusCode().value() < 500) {
+      return framework(response.getStatusCode().value(), response.getBody().getDetail(), null);
     }
-    return framework(500, null, null);
+    int status = error instanceof ErrorResponse response ? response.getStatusCode().value() : 500;
+    log.error("unexpected HTTP failure status={}", status, error);
+    return framework(status, null, null);
   }
 
   private ResponseEntity<Map<String, Object>> framework(int status, String detail, String reason) {
