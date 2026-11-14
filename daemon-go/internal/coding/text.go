@@ -39,11 +39,6 @@ type TextWindow struct {
 	NextColumn       int
 }
 
-// ReadTextWindow projects a string through the same bounded reader used by fs.read.
-func ReadTextWindow(text string, options WindowOptions) (TextWindow, error) {
-	return ReadTextWindowReader(strings.NewReader(text), options)
-}
-
 // ReadTextWindowReader decodes and scans only the requested window plus the small
 // lookahead needed to distinguish truncation from EOF.
 func ReadTextWindowReader(source io.Reader, options WindowOptions) (TextWindow, error) {

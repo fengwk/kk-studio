@@ -264,21 +264,6 @@ func resolveExistingPath(path string) (string, error) {
 	return resolved, nil
 }
 
-func resolveWritablePath(path string) (string, error) {
-	if !filepath.IsAbs(path) {
-		return "", rejectInput("path must be an absolute path")
-	}
-	if pathExists(path) {
-		return filepath.EvalSymlinks(path)
-	}
-	return resolveWritePath(path)
-}
-
-func pathExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
-}
-
 func isSymbolicLink(path string) bool {
 	info, err := os.Lstat(path)
 	return err == nil && info.Mode()&os.ModeSymlink != 0

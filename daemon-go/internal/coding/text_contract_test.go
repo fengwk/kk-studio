@@ -48,12 +48,12 @@ func TestReadTextWindowProjectionAndColumnOffset(t *testing.T) {
 	for i := range lines {
 		lines[i] = "line " + strconv.Itoa(i+1)
 	}
-	window, err := ReadTextWindow(strings.Join(lines, "\n")+"\n", WindowOptions{Offset: 9, Limit: 2})
+	window, err := readTextWindow(strings.Join(lines, "\n")+"\n", WindowOptions{Offset: 9, Limit: 2})
 	if err != nil || window.Body != " 9|line 9\n10|line 10" {
 		t.Fatalf("window=%#v err=%v", window, err)
 	}
 
-	columnWindow, err := ReadTextWindow("abc\ndef\n", WindowOptions{Offset: 1, Limit: 2, ColumnOffset: 2})
+	columnWindow, err := readTextWindow("abc\ndef\n", WindowOptions{Offset: 1, Limit: 2, ColumnOffset: 2})
 	if err != nil || columnWindow.Body != "1|bc\n2|def" {
 		t.Fatalf("column window=%#v err=%v", columnWindow, err)
 	}
@@ -61,7 +61,7 @@ func TestReadTextWindowProjectionAndColumnOffset(t *testing.T) {
 
 // COD-T-216: CRLF is one separator and is not retained in line content.
 func TestReadTextWindowCRLFFoldsSeparator(t *testing.T) {
-	window, err := ReadTextWindow("a\r\nb", WindowOptions{Offset: 1, Limit: 2})
+	window, err := readTextWindow("a\r\nb", WindowOptions{Offset: 1, Limit: 2})
 	if err != nil || window.Body != "1|a\n2|b" || window.EndsWithNewline == nil || *window.EndsWithNewline {
 		t.Fatalf("window=%#v err=%v", window, err)
 	}
@@ -104,7 +104,7 @@ func TestReadTextWindowStopsAtRequestedWindow(t *testing.T) {
 
 // COD-T-245: the last requested row still reports EOF newline metadata when the window ends at EOF.
 func TestReadTextWindowEOFMetadataAtRequestedOffset(t *testing.T) {
-	window, err := ReadTextWindow("a\nb\n", WindowOptions{Offset: 2, Limit: DefaultReadLimit})
+	window, err := readTextWindow("a\nb\n", WindowOptions{Offset: 2, Limit: DefaultReadLimit})
 	if err != nil || window.Truncated || window.EndsWithNewline == nil || !*window.EndsWithNewline {
 		t.Fatalf("window=%#v err=%v", window, err)
 	}

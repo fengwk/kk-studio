@@ -38,7 +38,7 @@ func TestTextRejectsNULAndMalformedUTF8(t *testing.T) {
 // COD-T-246
 func TestReadWindowStopsAtLineLimit(t *testing.T) {
 	text := strings.Repeat("line\n", 220) + string([]byte{0xff})
-	window, err := ReadTextWindow(text, WindowOptions{Offset: 1, Limit: 200})
+	window, err := readTextWindow(text, WindowOptions{Offset: 1, Limit: 200})
 	if err != nil || !window.Truncated || window.TruncationReason != "line_limit" || window.EndsWithNewline != nil || !strings.Contains(window.Body, "200|line") {
 		t.Fatalf("unexpected bounded window %#v %v", window, err)
 	}
@@ -176,7 +176,7 @@ func TestReadTextWindowReaderCharacterBudgetTakesPrecedenceAtLineBoundary(t *tes
 
 // COD-T-022
 func TestReadWindowColumnOffsetUsesOneBasedColumnsAndCRSeparators(t *testing.T) {
-	window, err := ReadTextWindow("abcdef\rnext\r\n", WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 3})
+	window, err := readTextWindow("abcdef\rnext\r\n", WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 3})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,7 +187,7 @@ func TestReadWindowColumnOffsetUsesOneBasedColumnsAndCRSeparators(t *testing.T) 
 
 // COD-F-002
 func TestReadWindowEmptyRangeForEmptyFile(t *testing.T) {
-	window, err := ReadTextWindow("", WindowOptions{Offset: 1, Limit: 10})
+	window, err := readTextWindow("", WindowOptions{Offset: 1, Limit: 10})
 	if err != nil || !window.Empty || window.Body != "" || window.EndsWithNewline == nil || *window.EndsWithNewline {
 		t.Fatalf("window=%#v err=%v", window, err)
 	}
