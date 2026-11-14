@@ -111,7 +111,9 @@ func TestProductionRuntimeRunsManagedUpdateOnUpgradeRequired(t *testing.T) {
 	if testing.Short() {
 		t.Skip("the assembly fixture drives a real WebSocket control channel")
 	}
-	upgradeBody, err := proto.Marshal(&protocol.UpgradeRequired{TargetVersion: proto.String("1.0.1")})
+	// Keep the rejected target distinct from the running version across releases.
+	targetVersion := config.DaemonVersion + "-upgrade-test"
+	upgradeBody, err := proto.Marshal(&protocol.UpgradeRequired{TargetVersion: proto.String(targetVersion)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,7 +134,7 @@ func TestProductionRuntimeRunsManagedUpdateOnUpgradeRequired(t *testing.T) {
 	go func() { runtimeDone <- (productionRuntime{updateRunner: runner}).Run(ctx, initial) }()
 	select {
 	case command := <-runner.started:
-		if command.TargetVersion != "1.0.1" {
+		if command.TargetVersion != targetVersion {
 			cancel()
 			t.Fatalf("assembled daemon updated to %q, want the 426 target version", command.TargetVersion)
 		}
