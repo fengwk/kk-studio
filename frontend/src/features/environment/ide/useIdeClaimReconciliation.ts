@@ -56,7 +56,10 @@ import {
   isViewGone,
   safeIdeError,
 } from '@/features/environment/ide/ide-failure'
-import type { IdeBrowserSessionState } from '@/features/environment/ide/ide-browser-session'
+import {
+  isIdeBrowserSessionReady,
+  type IdeBrowserSessionState,
+} from '@/features/environment/ide/ide-browser-session'
 
 export interface UseIdeClaimReconciliationOptions {
   storage?: IdeTabStorage
@@ -150,8 +153,7 @@ export function useIdeClaimReconciliation({
   useEffect(() => events.subscribeIdentity(setIdentity), [events])
 
   function sessionReady(): boolean {
-    const status = sessionRef.current.status
-    return status === 'ready' || status === 'cloned'
+    return isIdeBrowserSessionReady(sessionRef.current.status)
   }
 
   function canRun(environmentId: string): boolean {

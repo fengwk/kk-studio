@@ -22,6 +22,14 @@ export interface IdeBrowserSessionState {
   sessionSaved: boolean
 }
 
+/**
+ * 会话已取得身份（`ready` 或复制 tab 后拿到的独立 `cloned`）时，才允许发出需要会话身份的请求。
+ * `acquiring`/`suspended`/`conflict`/`unsupported`/`unavailable` 都不是可运行状态。
+ */
+export function isIdeBrowserSessionReady(status: IdeBrowserSessionStatus): boolean {
+  return status === 'ready' || status === 'cloned'
+}
+
 interface BrowserSessionLock {
   acquired: Promise<boolean>
   release: () => void
