@@ -31,59 +31,134 @@ func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig)
 	if _, err := config.ReleaseKey(runtime.GOOS, runtime.GOARCH); err != nil {
 		return productionFailure("daemon platform is unsupported", err)
 	}
-	processes, err := native.NewSupervisor()
+	processes, cleanupProcesses, err := startProcessSupervision(&runErr)
 	if err != nil {
-		return productionFailure("native process supervision is unavailable", err)
+		return err
 	}
-	defer func() {
-		recordCleanupFailure(&runErr, "native process supervision shutdown failed", processes.Close(context.Background()))
-	}()
-	if err := native.EnsurePrivateDirectory(initial.DataDir); err != nil {
-		return productionFailure("daemon data directory is unavailable", err)
-	}
-	directoryLock, err := native.AcquireDirectoryLock(initial.DataDir, native.DaemonLockFileName)
+	defer cleanupProcesses()
+	temporaryResources, cleanupDataDirectory, err := prepareDataDirectory(ctx, initial, &runErr)
 	if err != nil {
-		return productionFailure("daemon directory lock is unavailable", err)
+		return err
 	}
-	defer func() { recordCleanupFailure(&runErr, "daemon directory lock release failed", directoryLock.Close()) }()
-	if err := (&skill.Installer{DataDir: initial.DataDir}).CleanupStaging(ctx); err != nil {
-		return productionFailure("abandoned skill staging cleanup failed", err)
-	}
-	temporaryResources, err := coding.TextOutputStoreForDataDir(initial.DataDir)
+	defer cleanupDataDirectory()
+	networks, cleanupNetworks, err := startNetworks(initial, &runErr)
 	if err != nil {
-		return productionFailure("temporary resource storage is unavailable", err)
+		return err
 	}
-	initialPolicy, err := proxyPolicy(initial)
-	if err != nil {
-		return productionFailure("initial proxy configuration is invalid", err)
-	}
-	networks := newNetworkRuntimeStore(transport.NewNetworkRuntime(initialPolicy))
-	defer func() { recordCleanupFailure(&runErr, "outbound network shutdown failed", networks.close()) }()
+	defer cleanupNetworks()
 	tracker, ok := processes.(native.DescendantTracker)
 	if !ok {
 		return productionFailure("native descendant tracking is unavailable", errors.New("supervisor does not implement descendant tracking"))
 	}
 	instanceID := uuid.New()
+	lspFacade, cleanupLSP, err := startLanguageServers(initial, processes, &runErr)
+	if err != nil {
+		return err
+	}
+	defer cleanupLSP()
+	ideService, cleanupIDE, err := startIDEService(initial, processes, tracker, instanceID, &runErr)
+	if err != nil {
+		return err
+	}
+	defer cleanupIDE()
+	environmentConfig, err := startEnvironmentConfig(initial, lspFacade, networks)
+	if err != nil {
+		return err
+	}
+	core, resourceControl, err := r.assembleRuntime(initial, productionAssembly{
+		processes:          processes,
+		networks:           networks,
+		temporaryResources: temporaryResources,
+		instanceID:         instanceID,
+		lspFacade:          lspFacade,
+		ideService:         ideService,
+		environmentConfig:  environmentConfig,
+	})
+	if err != nil {
+		return err
+	}
+	resourceControl.runtime = core
+	if err := core.Run(ctx); err != nil {
+		return productionFailure("daemon runtime execution failed", err)
+	}
+	return nil
+}
+
+// startProcessSupervision owns the OS process tree for the daemon's lifetime.
+func startProcessSupervision(runErr *error) (native.Supervisor, func(), error) {
+	processes, err := native.NewSupervisor()
+	if err != nil {
+		return nil, nil, productionFailure("native process supervision is unavailable", err)
+	}
+	return processes, func() {
+		recordCleanupFailure(runErr, "native process supervision shutdown failed", processes.Close(context.Background()))
+	}, nil
+}
+
+// prepareDataDirectory creates the private data directory, holds its single-instance lock, drops
+// any abandoned skill staging directory and opens the temporary resource store.
+func prepareDataDirectory(ctx context.Context, initial config.DaemonConfig, runErr *error) (*coding.TextOutputStore, func(), error) {
+	if err := native.EnsurePrivateDirectory(initial.DataDir); err != nil {
+		return nil, nil, productionFailure("daemon data directory is unavailable", err)
+	}
+	directoryLock, err := native.AcquireDirectoryLock(initial.DataDir, native.DaemonLockFileName)
+	if err != nil {
+		return nil, nil, productionFailure("daemon directory lock is unavailable", err)
+	}
+	releaseLock := func() {
+		recordCleanupFailure(runErr, "daemon directory lock release failed", directoryLock.Close())
+	}
+	if err := (&skill.Installer{DataDir: initial.DataDir}).CleanupStaging(ctx); err != nil {
+		releaseLock()
+		return nil, nil, productionFailure("abandoned skill staging cleanup failed", err)
+	}
+	temporaryResources, err := coding.TextOutputStoreForDataDir(initial.DataDir)
+	if err != nil {
+		releaseLock()
+		return nil, nil, productionFailure("temporary resource storage is unavailable", err)
+	}
+	return temporaryResources, releaseLock, nil
+}
+
+// startNetworks binds the outbound client to the initially applied proxy policy.
+func startNetworks(initial config.DaemonConfig, runErr *error) (*networkRuntimeStore, func(), error) {
+	initialPolicy, err := proxyPolicy(initial)
+	if err != nil {
+		return nil, nil, productionFailure("initial proxy configuration is invalid", err)
+	}
+	networks := newNetworkRuntimeStore(transport.NewNetworkRuntime(initialPolicy))
+	return networks, func() {
+		recordCleanupFailure(runErr, "outbound network shutdown failed", networks.close())
+	}, nil
+}
+
+func startLanguageServers(initial config.DaemonConfig, processes native.Supervisor, runErr *error) (*lsp.Facade, func(), error) {
 	lspFacade := lsp.NewFacade(processes, lsp.PoolOptions{})
 	initialLSP, err := lspFacade.Prepare(initial.LSP)
 	if err != nil {
-		return productionFailure("initial language-server configuration is invalid", err)
+		return nil, nil, productionFailure("initial language-server configuration is invalid", err)
 	}
 	if err := initialLSP.Publish(); err != nil {
-		return productionFailure("initial language-server configuration could not be published", err)
+		return nil, nil, productionFailure("initial language-server configuration could not be published", err)
 	}
-	defer func() { recordCleanupFailure(&runErr, "language-server shutdown failed", lspFacade.Close()) }()
+	return lspFacade, func() {
+		recordCleanupFailure(runErr, "language-server shutdown failed", lspFacade.Close())
+	}, nil
+}
 
+func startIDEService(initial config.DaemonConfig, processes native.Supervisor, tracker native.DescendantTracker, instanceID string, runErr *error) (*ide.Service, func(), error) {
 	ideService, err := ide.NewService(initial, processes, tracker, ide.ServiceOptions{DaemonInstanceID: instanceID})
 	if err != nil {
-		return productionFailure("managed IDE service could not be initialized", err)
+		return nil, nil, productionFailure("managed IDE service could not be initialized", err)
 	}
-	defer func() {
+	return ideService, func() {
 		closeCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
-		recordCleanupFailure(&runErr, "managed IDE shutdown failed", ideService.Close(closeCtx))
-	}()
+		recordCleanupFailure(runErr, "managed IDE shutdown failed", ideService.Close(closeCtx))
+	}, nil
+}
 
+func startEnvironmentConfig(initial config.DaemonConfig, lspFacade *lsp.Facade, networks *networkRuntimeStore) (*daemonruntime.EnvironmentConfigRuntime, error) {
 	status := daemonruntime.NewStatusTracker()
 	environmentConfig, err := daemonruntime.NewEnvironmentConfigRuntime(daemonruntime.EnvironmentConfigOptions{
 		Initial: initial,
@@ -92,56 +167,67 @@ func (r productionRuntime) Run(ctx context.Context, initial config.DaemonConfig)
 		Report:  func(err error) { slog.Error("environment configuration could not be applied", "error", err) },
 	})
 	if err != nil {
-		return productionFailure("environment configuration runtime could not be initialized", err)
+		return nil, productionFailure("environment configuration runtime could not be initialized", err)
 	}
+	return environmentConfig, nil
+}
 
+// productionAssembly is the set of already-started services the runtime session is built from.
+type productionAssembly struct {
+	processes          native.Supervisor
+	networks           *networkRuntimeStore
+	temporaryResources *coding.TextOutputStore
+	instanceID         string
+	lspFacade          *lsp.Facade
+	ideService         *ide.Service
+	environmentConfig  *daemonruntime.EnvironmentConfigRuntime
+}
+
+// assembleRuntime wires the started services into the runtime session, sharing the environment
+// config runtime's status tracker so both observe the same published configuration.
+func (r productionRuntime) assembleRuntime(initial config.DaemonConfig, assembly productionAssembly) (*daemonruntime.Runtime, *runtimeResourceControl, error) {
+	environmentConfig := assembly.environmentConfig
 	connections := connectionFactory(func(ctx context.Context, observer daemonruntime.ControlObserver) (daemonruntime.Connection, error) {
 		applied := environmentConfig.Current()
 		return transport.Dial(ctx, transport.DialConfig{
-			Applied: applied, InstanceID: instanceID, Platform: runtime.GOOS,
-			Observer: observer, Resolver: ideService,
+			Applied: applied, InstanceID: assembly.instanceID, Platform: runtime.GOOS,
+			Observer: observer, Resolver: assembly.ideService,
 		})
 	})
 	resourceControl := &runtimeResourceControl{}
-	capabilities := productionCapabilities(lspFacade, environmentConfig.Current, networks, resourceControl)
-	declarations, err := capability.Declare(capabilities)
+	declarations, err := capability.Declare(productionCapabilities(assembly.lspFacade, environmentConfig.Current, assembly.networks, resourceControl))
 	if err != nil {
-		return productionFailure("daemon capability declarations are incomplete", err)
+		return nil, nil, productionFailure("daemon capability declarations are incomplete", err)
 	}
-	capabilities = make(map[string]daemonruntime.CapabilityExecutor, len(declarations))
+	capabilities := make(map[string]daemonruntime.CapabilityExecutor, len(declarations))
 	for _, declaration := range declarations {
 		capabilities[declaration.ID] = declaration.Execute
 	}
 	updateRunner := r.updateRunner
 	if updateRunner == nil {
 		updateRunner = &productionUpdateRunner{current: environmentConfig.Current, stop: func(ctx context.Context) error {
-			return processes.Close(ctx)
+			return assembly.processes.Close(ctx)
 		}}
 	}
-	uploader := dynamicResourceUploader{networks: networks, control: resourceControl}
 	core, err := daemonruntime.NewRuntime(daemonruntime.RuntimeOptions{
 		EnvironmentID:      initial.EnvironmentID,
 		DaemonVersion:      config.DaemonVersion,
 		Connections:        connections,
 		Capabilities:       capabilities,
-		Processes:          processes,
-		FileChanged:        lspFacade.FileChanged,
-		Resources:          uploader,
-		TemporaryResources: temporaryResources,
+		Processes:          assembly.processes,
+		FileChanged:        assembly.lspFacade.FileChanged,
+		Resources:          dynamicResourceUploader{networks: assembly.networks, control: resourceControl},
+		TemporaryResources: assembly.temporaryResources,
 		EnvironmentConfig:  environmentConfig,
-		Status:             status,
+		Status:             environmentConfig.StatusTracker(),
 		Update:             updateRunner,
-		IDE:                ideService,
+		IDE:                assembly.ideService,
 		ReportError:        func(err error) { slog.Error("daemon runtime operation failed", "error", err) },
 	})
 	if err != nil {
-		return productionFailure("daemon runtime could not be initialized", err)
+		return nil, nil, productionFailure("daemon runtime could not be initialized", err)
 	}
-	resourceControl.runtime = core
-	if err := core.Run(ctx); err != nil {
-		return productionFailure("daemon runtime execution failed", err)
-	}
-	return nil
+	return core, resourceControl, nil
 }
 
 // productionCapabilities is the single registration point for daemon capabilities. The
