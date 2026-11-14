@@ -85,18 +85,8 @@ public final class AnthropicRequestEncoder {
     AnthropicReasoningEffort.applyReasoningParameters(
         root, request, effort.topLevelEffort(), effort.messageLevelEffort());
 
-    boolean deferredToolLane =
-        request.model().midConversationSystemMessages() && request.baselineHasClientTools();
-    if (request.baselineHasClientTools() && !deferredToolLane) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_REQUEST,
-          "client tool baseline requires mid-conversation system-message capability");
-    }
-    boolean hasInlineToolChanges =
-        AnthropicReasoningEffort.hasInlineToolChanges(request.messages());
-    List<String> betaFeatures =
-        AnthropicReasoningEffort.resolveBetaFeatures(
-            effort.messageLevelThinking(), deferredToolLane || hasInlineToolChanges);
+    boolean deferredToolLane = requireDeferredToolLane(request);
+    List<String> betaFeatures = resolveBetaFeatures(request, effort, deferredToolLane);
 
     ArrayNode toolsArray =
         AnthropicToolsEncoder.mergeTools(root, request.tools(), deferredToolLane);
@@ -147,6 +137,27 @@ public final class AnthropicRequestEncoder {
     systemBlock.put("text", systemInstruction);
     unmarkedSystemArray.add(systemBlock);
     return unmarkedSystemArray;
+  }
+
+  /** client tool baseline 需要 mid-conversation system-message 能力，否则请求本身不合法。 */
+  private static boolean requireDeferredToolLane(ProviderRequest request) {
+    boolean deferredToolLane =
+        request.model().midConversationSystemMessages() && request.baselineHasClientTools();
+    if (request.baselineHasClientTools() && !deferredToolLane) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "client tool baseline requires mid-conversation system-message capability");
+    }
+    return deferredToolLane;
+  }
+
+  /** 声明本轮启用的 beta 能力：消息级 thinking 与 (延迟工具通道或历史内工具变更)。 */
+  private static List<String> resolveBetaFeatures(
+      ProviderRequest request, EffortPlan effort, boolean deferredToolLane) {
+    boolean hasInlineToolChanges =
+        AnthropicReasoningEffort.hasInlineToolChanges(request.messages());
+    return AnthropicReasoningEffort.resolveBetaFeatures(
+        effort.messageLevelThinking(), deferredToolLane || hasInlineToolChanges);
   }
 
   /** 本轮的推理等级决策：是否按消息级别编码、顶层等级与声明历史中的首个等级。 */
