@@ -984,8 +984,6 @@ export const chatCatalog = {
   'ai.runtime.tool.input': { 'en-US': 'Waiting for input', 'zh-CN': '等待输入' },
   'ai.runtime.tool.running': { 'en-US': 'Running', 'zh-CN': '执行中' },
   'ai.runtime.tool.succeeded': { 'en-US': 'Succeeded', 'zh-CN': '成功' },
-  'ai.runtime.tool.accepted': { 'en-US': 'Delegation accepted', 'zh-CN': '委派已受理' },
-  'ai.runtime.tool.task.accepted': { 'en-US': 'Accepted', 'zh-CN': '已受理' },
   'ai.runtime.tool.task.running': { 'en-US': 'Subagent running', 'zh-CN': '子代理运行中' },
   'ai.runtime.tool.task.completed': { 'en-US': 'Completed', 'zh-CN': '已完成' },
   'ai.runtime.tool.task.failed': { 'en-US': 'Failed', 'zh-CN': '失败' },

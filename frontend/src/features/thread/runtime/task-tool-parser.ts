@@ -9,7 +9,7 @@ export interface TaskToolArguments {
 }
 
 export interface TaskToolReceipt {
-  status: 'accepted' | 'running' | 'completed' | 'failed' | 'cancelled'
+  status: 'running' | 'completed' | 'failed' | 'cancelled'
   threadId: string
 }
 
@@ -38,23 +38,14 @@ export function parseTaskArguments(json: string): TaskToolArguments {
 }
 
 /**
- * 只读取规范 task.accepted / task.result details，不从自然语言正文推断线程身份。
+ * 只读取规范 task.result details，不从自然语言正文推断线程身份。
  */
 export function parseTaskReceipt(value: unknown): TaskToolReceipt | null {
-  if (!isRecord(value)) {
+  if (!isRecord(value) || value.kind !== 'task.result') {
     return null
   }
-  if (value.kind !== 'task.accepted' && value.kind !== 'task.result') {
-    return null
-  }
-  const status = value.kind === 'task.accepted' ? 'accepted' : value.status
-  if (
-    status !== 'accepted'
-    && status !== 'running'
-    && status !== 'completed'
-    && status !== 'failed'
-    && status !== 'cancelled'
-  ) {
+  const status = taskStatus(value.status)
+  if (status == null) {
     return null
   }
   if (typeof value.thread_id !== 'string') {
@@ -68,6 +59,12 @@ export function parseTaskReceipt(value: unknown): TaskToolReceipt | null {
     status,
     threadId,
   }
+}
+
+function taskStatus(value: unknown): TaskToolReceipt['status'] | null {
+  return value === 'running' || value === 'completed' || value === 'failed' || value === 'cancelled'
+    ? value
+    : null
 }
 
 function positiveInteger(value: unknown): number | null {

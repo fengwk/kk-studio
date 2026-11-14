@@ -262,10 +262,12 @@ Thread ID 前 8 位，悬停查看完整值，复制按钮复制完整 ID。
 子代理观察面板从已有 Snapshot 展示 QUEUED CUSTOM_MESSAGE 的“待处理补充要求”，
 保留命令 sequence、稳定身份和真实正文；独立于人工输入队列，不提供编辑、删除或重排。
 应用后随 Snapshot 更新移出待处理区，历史只展示持久 Entry，不复制待处理记录。
-task 初次执行入口只读取规范 `task.accepted` details 中的 thread_id：
+`task` 同步返回结果，工具卡片只读取规范 `task.result` details 中的 thread_id 生成子 Thread 导航：
 持久 Entry 的 detailsJson 与 live invocation 的 result.details 使用同一投影。
-续接参数中已有的 thread_id 链接原样保留；缺失或损坏 details 时完整展示正文，
-不从自然语言或正文 JSON 推断链接，错误原文仍保留。
+`running` 进度回执只表示运行中且不重复正文；`completed`/`failed`/`cancelled` 终态在卡片正文展示
+子任务报告或失败原文，失败时导航与错误原文同时保留。
+续接参数中已有的 thread_id 原样保留；缺失或损坏 details 时完整展示正文，
+不从自然语言或正文 JSON 推断链接。
 
 全局与根交互区共用 InteractionCardBody/ApprovalCard。非文件变更工具的审批显示一次完整 `argumentsJson`（含 bash 的 workdir），
 默认权限原因本地化，额外原因完整展示；允许与拒绝复用共享 Button，拒绝使用 primary + danger。

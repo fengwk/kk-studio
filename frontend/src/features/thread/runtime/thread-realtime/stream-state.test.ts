@@ -180,13 +180,13 @@ describe('thread realtime state', () => {
       index: 0,
       id: 'call-1',
       name: 'edit',
-      argumentsJson: '{"new_string":"one',
+      argumentsJson: '{"path":"App.java","edits":[{"old_string":"one',
     }))!
     const second = parseRealtimeModelDelta(toolCallEvent(2, {
       index: 0,
       id: 'call-1',
       name: 'edit',
-      argumentsJson: '\\ntwo"}',
+      argumentsJson: '\\ntwo","new_string":"three"}]}',
     }))!
 
     const stream = reduceRealtimeModelStream(reduceRealtimeModelStream(null, first), second)
@@ -194,7 +194,7 @@ describe('thread realtime state', () => {
       index: 0,
       id: 'call-1',
       name: 'edit',
-      argumentsJson: '{"new_string":"one\\ntwo"}',
+      argumentsJson: '{"path":"App.java","edits":[{"old_string":"one\\ntwo","new_string":"three"}]}',
     }])
   })
 

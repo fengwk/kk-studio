@@ -86,11 +86,12 @@ describe('task canonical details projection', () => {
             rendererKey: 'task',
             error: false,
             detailsJson: JSON.stringify({
-              kind: 'task.accepted',
+              kind: 'task.result',
+              status: 'completed',
               thread_id: threadId,
             }),
             contents: [
-              { type: 'text', text: 'Subagent accepted execution.' },
+              { type: 'text', text: 'Subagent report.' },
             ],
           },
         ]),
@@ -104,16 +105,17 @@ describe('task canonical details projection', () => {
     )
     expect(resultMessage).toBeDefined()
     expect(resultMessage?.details).toEqual({
-      kind: 'task.accepted',
+      kind: 'task.result',
+      status: 'completed',
       thread_id: threadId,
     })
     expect(resultMessage?.contents).toEqual([
-      { type: 'text', text: 'Subagent accepted execution.' },
+      { type: 'text', text: 'Subagent report.' },
     ])
 
     const receipt = parseTaskReceipt(resultMessage?.details)
     expect(receipt).toEqual({
-      status: 'accepted',
+      status: 'completed',
       threadId,
     })
   })
@@ -160,10 +162,11 @@ describe('task canonical details projection', () => {
       status: 'SUCCEEDED',
       result: {
         details: {
-          kind: 'task.accepted',
+          kind: 'task.result',
+          status: 'running',
           thread_id: threadId,
         },
-        contents: [{ type: 'text', text: 'Live delegation accepted.' }],
+        contents: [{ type: 'text', text: 'Subagent is running.' }],
       },
     })
 
@@ -189,11 +192,12 @@ describe('task canonical details projection', () => {
     )
     expect(transientResult).toBeDefined()
     expect(transientResult?.details).toEqual({
-      kind: 'task.accepted',
+      kind: 'task.result',
+      status: 'running',
       thread_id: threadId,
     })
     expect(parseTaskReceipt(transientResult?.details)).toEqual({
-      status: 'accepted',
+      status: 'running',
       threadId,
     })
   })
