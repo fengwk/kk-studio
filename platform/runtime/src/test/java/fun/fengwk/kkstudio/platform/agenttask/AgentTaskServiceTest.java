@@ -48,9 +48,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 平台 Agent 任务入口的行为契约：提交只翻译为统一 spawn（交付方式由父关系决定），观察只投影票据冻结结果，停止按票据收敛。
+ * 平台 Agent 任务入口的行为契约：提交只翻译为统一 spawn（交付方式由父关系决定），结果只投影票据冻结回执，停止按票据收敛。
  *
- * <p>Runtime 以窄 mock 表达；本测试断言服务自己的翻译、状态投影与 CAS 重试语义，不重复 Runtime 的事务/额度测试。
+ * <p>Runtime 以窄 mock 表达；本测试断言服务自己的翻译、回执投影与 CAS 重试语义，不重复 Runtime 的事务/额度测试。
  */
 class AgentTaskServiceTest {
 
@@ -114,36 +114,16 @@ class AgentTaskServiceTest {
   }
 
   @Test
-  void observationProjectsTheFrozenReceiptAndNeverInfersFromThreadState() {
+  void resultProjectsOnlyTheFrozenReceipt() {
     UUID ticketId = UUID.randomUUID();
-    ThreadJoin join =
-        new ThreadJoin(
-            ticketId,
-            HASH,
-            null,
-            UUID.randomUUID(),
-            1,
-            "worker",
-            4,
-            0,
-            null,
-            null,
-            null,
-            NOW,
-            NOW,
-            JoinDelivery.RECEIPT_ONLY,
-            null);
-    when(runtime.findJoin(ticketId)).thenReturn(Optional.of(join));
+    UUID childId = UUID.randomUUID();
     when(runtime.projectJoinReceipt(ticketId)).thenReturn(Optional.empty());
-
-    AgentTaskStatus running = service.observe(ticketId).orElseThrow();
-    assertEquals(AgentTaskStatus.State.RUNNING, running.state());
-    assertNull(running.receipt());
+    assertTrue(service.result(ticketId).isEmpty());
 
     ThreadJoinReceipt receipt =
         new ThreadJoinReceipt(
             ticketId,
-            join.childThreadId(),
+            childId,
             "worker",
             ThreadJoinOutcome.COMPLETED,
             "prompt",
@@ -152,67 +132,16 @@ class AgentTaskServiceTest {
             null);
     when(runtime.projectJoinReceipt(ticketId)).thenReturn(Optional.of(receipt));
 
-    AgentTaskStatus completed = service.observe(ticketId).orElseThrow();
-    assertEquals(AgentTaskStatus.State.COMPLETED, completed.state());
-    assertSame(receipt, completed.receipt());
     assertSame(receipt, service.result(ticketId).orElseThrow());
-  }
-
-  @Test
-  void supersededTicketObservesATerminalStateWithoutBorrowingALaterRunsResult() {
-    // 旧票据不会再被匹配：接管事实本身必须终止轮询，不能显示 RUNNING 或借用后续 Run 的结果。
-    UUID ticketId = UUID.randomUUID();
-    ThreadJoin ticket = join(ticketId, UUID.randomUUID(), false, true);
-    when(runtime.findJoin(ticketId)).thenReturn(Optional.of(ticket));
-
-    AgentTaskStatus superseded = service.observe(ticketId).orElseThrow();
-
-    assertEquals(AgentTaskStatus.State.SUPERSEDED, superseded.state());
-    assertEquals(ticketId, superseded.ticketId());
-    assertEquals(ticket.childThreadId(), superseded.threadId());
-    assertNull(superseded.receipt());
-    verify(runtime, never()).projectJoinReceipt(any());
+    verify(runtime, never()).findJoin(any());
     verify(runtime, never()).getThreadSnapshot(any());
   }
 
   @Test
-  void onlyResultBearingTaskStatesAcceptAReceipt() {
-    // SUPERSEDED 不对应执行结果；仍在执行的票据也不能提前带回执，正常终态则必须有回执。
-    UUID ticketId = UUID.randomUUID();
-    UUID threadId = UUID.randomUUID();
-    ThreadJoinReceipt receipt =
-        new ThreadJoinReceipt(
-            ticketId,
-            threadId,
-            "worker",
-            ThreadJoinOutcome.COMPLETED,
-            "prompt",
-            "final",
-            null,
-            null);
-    for (AgentTaskStatus.State state :
-        List.of(AgentTaskStatus.State.RUNNING, AgentTaskStatus.State.SUPERSEDED)) {
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> new AgentTaskStatus(ticketId, threadId, "worker", state, receipt));
-    }
-    for (AgentTaskStatus.State state :
-        List.of(
-            AgentTaskStatus.State.COMPLETED,
-            AgentTaskStatus.State.ERROR,
-            AgentTaskStatus.State.CANCELLED)) {
-      assertThrows(
-          IllegalArgumentException.class,
-          () -> new AgentTaskStatus(ticketId, threadId, "worker", state, null));
-    }
-  }
-
-  @Test
-  void unknownTicketObservesEmptyAndStopFailsNotFound() {
+  void unknownTicketReturnsEmptyResultAndStopFailsNotFound() {
     UUID ticketId = UUID.randomUUID();
     when(runtime.findJoin(ticketId)).thenReturn(Optional.empty());
 
-    assertTrue(service.observe(ticketId).isEmpty());
     assertTrue(service.result(ticketId).isEmpty());
     DomainException error = assertThrows(DomainException.class, () -> service.stop(ticketId));
     assertEquals(DomainErrorCode.NOT_FOUND, error.code());
@@ -368,7 +297,7 @@ class AgentTaskServiceTest {
     IllegalStateException failure =
         assertThrows(IllegalStateException.class, () -> unbound.submit(request(null, null, null)));
     assertEquals("harness runtime is not available in this deployment", failure.getMessage());
-    assertThrows(IllegalStateException.class, () -> unbound.observe(UUID.randomUUID()));
+    assertThrows(IllegalStateException.class, () -> unbound.result(UUID.randomUUID()));
     assertThrows(IllegalStateException.class, () -> unbound.stop(UUID.randomUUID()));
   }
 
@@ -458,14 +387,9 @@ class AgentTaskServiceTest {
   }
 
   private static ThreadJoin join(UUID ticketId, UUID childId, boolean matched, boolean superseded) {
-    return join(ticketId, childId, matched, superseded, HASH);
-  }
-
-  private static ThreadJoin join(
-      UUID ticketId, UUID childId, boolean matched, boolean superseded, String requestHash) {
     return new ThreadJoin(
         ticketId,
-        requestHash,
+        HASH,
         UUID.randomUUID(),
         childId,
         1,
