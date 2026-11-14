@@ -90,7 +90,8 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
       return;
     }
     if (seenDone) {
-      throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "semantic payload");
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "semantic payload received after [DONE]");
     }
 
     JsonNode root = ProviderJsonHelper.parseSseJson(trimmed, "invalid SSE JSON payload");

@@ -26,17 +26,25 @@ final class OpenAiChatUserMessageEncoder {
   static ObjectNode encode(ProviderMessage message) {
     ObjectNode msgNode = NODES.objectNode();
     msgNode.put("role", "user");
+
+    // 检查是否包含媒体块或仅单一文本
+    boolean hasNonText = false;
     for (ProviderContentBlock block : message.contents()) {
       if (block instanceof ProviderVideoBlock) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST, "OpenAI chat does not support VIDEO");
       }
+      if (!(block instanceof ProviderTextBlock)) {
+        hasNonText = true;
+      }
     }
-    if (message.contents().size() == 1
-        && message.contents().get(0) instanceof ProviderTextBlock textBlock) {
+
+    if (!hasNonText && message.contents().size() == 1) {
+      ProviderTextBlock textBlock = (ProviderTextBlock) message.contents().get(0);
       msgNode.put("content", textBlock.text());
       return msgNode;
     }
+
     ArrayNode contents = msgNode.putArray("content");
     for (ProviderContentBlock block : message.contents()) {
       contents.add(encodeContentPart(block));
