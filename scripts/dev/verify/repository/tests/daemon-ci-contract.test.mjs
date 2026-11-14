@@ -33,6 +33,21 @@ test('Go daemon CI builds all six static targets and is reusable by release and 
   assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-go-ci\.yml/)
 })
 
+test('Go CI watches its script suites and local composite actions for both push and pull requests', () => {
+  for (const dependency of [
+    'scripts/dev/verify/reliability/**',
+    'scripts/dev/verify/supply-chain/**',
+    '.github/actions/**',
+  ]) {
+    assert.equal(goCi.split(`- '${dependency}'`).length - 1, 2, `both events must watch ${dependency}`)
+  }
+})
+
+test('release history scanning requires the preceding release tag as its baseline', () => {
+  assert.ok(release.includes("previous=$(git describe --tags --abbrev=0 --match 'v*' 'HEAD^')"))
+  assert.match(release, /--remote-pr --fail-on-high --baseline "\$\{previous\}"/)
+})
+
 test('reusable Go CI runs the bundled IDE extension contract tests', () => {
   assert.match(goCi, /- name: Test IDE bridge extension\n\s+run: node --test daemon-go\/ide-extension\/extension\.test\.cjs/)
 })
