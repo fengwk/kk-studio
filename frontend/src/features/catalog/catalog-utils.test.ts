@@ -73,7 +73,7 @@ function model(overrides: Partial<SingleModelDTO> = {}): SingleModelDTO {
   }
 }
 
-describe('AI domain utilities', () => {
+describe('catalog utils', () => {
   /** DTO 编解码器必须填充结构化的当前 schema 草稿，并提供稳定的创建默认值。 */
   it('builds editable drafts from DTOs and default factories', () => {
     expect(emptyProviderDraft()).toMatchObject({

@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
+import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
 import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
 import { newVariantDraft } from '@/features/catalog/ai-resource-draft-primitives'
-import type { ModelDraft, ProviderDraft } from '@/features/catalog/ai-console-types'
+import type {
+  AgentDraft,
+  ModelDraft,
+  ModelGroupDraft,
+  ProviderDraft,
+  ResourceModal,
+} from '@/features/catalog/ai-console-types'
 import {
   validateResourceDraft,
 } from '@/features/catalog/ai-resource-form-validation'
@@ -44,6 +51,58 @@ function providerDraft(): ProviderDraft {
     modelCallIdleTimeoutMillis: '',
     modelHttpRetryStatusCodes: null,
   }
+}
+
+function provider(overrides: Partial<ProviderDraft> = {}): ProviderDraft {
+  return {
+    name: 'provider',
+    description: '',
+    providerType: 'openai',
+    baseUrl: '',
+    credential: '',
+    credentialConfigured: false,
+    clearCredential: false,
+    modelCallTimeoutMillis: '1800000',
+    modelCallIdleTimeoutMillis: '120000',
+    modelHttpRetryStatusCodes: null,
+    ...overrides,
+  }
+}
+
+function model(overrides: Partial<ModelDraft> = {}): ModelDraft {
+  return {
+    ...emptyModelDraft({ name: 'minimax' }),
+    name: 'model',
+    modelId: 'wire-model',
+    ...overrides,
+  }
+}
+
+function agent(overrides: Partial<AgentDraft> = {}): AgentDraft {
+  return {
+    ...emptyAgentDraft(),
+    name: 'agent',
+    model: 'minimax/model',
+    variant: 'medium',
+    ...overrides,
+  }
+}
+
+function validate(
+  modal: ResourceModal,
+  overrides: {
+    providerDraft?: ProviderDraft
+    modelDraft?: ModelDraft
+    modelGroupDraft?: ModelGroupDraft
+    agentDraft?: AgentDraft
+  } = {},
+) {
+  return validateResourceDraft(modal, {
+    providerDraft: overrides.providerDraft ?? provider(),
+    modelDraft: overrides.modelDraft ?? model(),
+    modelGroupDraft: overrides.modelGroupDraft ?? emptyModelGroupDraft(),
+    agentDraft: overrides.agentDraft ?? agent(),
+  })
 }
 
 describe('ai-resource-form-validation', () => {
@@ -420,6 +479,194 @@ describe('ai-resource-form-validation', () => {
         },
       )
       expect(dupResult.ok).toBe(false)
+    })
+  })
+
+  describe('additional branches', () => {
+    it.each([
+      ['reasoningEffort is required', /思考强度/],
+      ['variant must not be blank', /有效的 Variant/],
+      ['at least one variant is required', /至少添加一个 Variant/],
+      ['duplicate variant id', /不能重复/],
+      ['config.defaultVariant is invalid', /默认 Variant/],
+      ['maxOutputTokens must not exceed context', /不能超过上下文窗口/],
+      ['contextWindow must be positive', /上下文窗口/],
+      ['maxOutputTokens must be positive', /最大输出长度/],
+      ['input modality is required', /输入类型/],
+      ['providerName is required', /Provider/],
+      ['providerType is invalid', /Provider Type/],
+      ['pricing.inputPerMillionTokens must not be negative', /价格/],
+      ['modelName is required', /Model/],
+      ['baseUrl is invalid', /Base URL/],
+      ['tools 重名', /Tools/],
+      ['skills 去前缀后存在重名', /Skills/],
+    ])('translates %s', (message, expected) => {
+      expect(toUserFacingErrorMessage(new Error(message))).toMatch(expected)
+    })
+
+    // 测试意图：HTTP 失败只按结构化 status/code 分类，标题文本不参与判断。
+    it.each([
+      [new ApiError('Request failed', undefined, 'network_error'), /网络异常/],
+      [new ApiError('Request timeout', undefined, 'timeout'), /网络异常/],
+      [new ApiError('Unauthorized', 401), /没有权限/],
+      [new ApiError('Forbidden', 403), /没有权限/],
+      [new ApiError('Not Found', 404), /不存在/],
+      [new ApiError('Conflict', 409), /冲突/],
+      [new ApiError('Internal Server Error', 500), /服务暂时异常/],
+      // 标题伪装成别的分类也不影响判断：状态码才是事实。
+      [new ApiError('Conflict', 500), /服务暂时异常/],
+    ])('classifies api error %# by status/code', (error, expected) => {
+      expect(toUserFacingErrorMessage(error)).toMatch(expected)
+    })
+
+    // 测试意图：普通 Error 只服务本地表单校验；带状态码字样的文本不再被当成 HTTP 失败。
+    it('does not classify plain error text as an HTTP failure', () => {
+      expect(toUserFacingErrorMessage(new Error('401 Unauthorized'))).toBe(
+        '保存失败，请检查必填项后重试',
+      )
+      expect(toUserFacingErrorMessage(new Error('409 Conflict'))).toBe(
+        '保存失败，请检查必填项后重试',
+      )
+    })
+
+    it('handles empty, localized, and unknown non-Error values', () => {
+      expect(toUserFacingErrorMessage(undefined)).toBe('保存失败，请检查表单后重试')
+      expect(toUserFacingErrorMessage('服务返回了中文错误')).toBe('服务返回了中文错误')
+      expect(toUserFacingErrorMessage('opaque failure')).toBe('保存失败，请检查必填项后重试')
+    })
+
+    it('surfaces model name conflicts under a provider as readable Chinese', () => {
+      expect(
+        toUserFacingErrorMessage(
+          new Error('model name already exists: MiniMax-M2.7'),
+        ),
+      ).toBe('当前 Provider 下已存在同名 Model，请换一个名称')
+    })
+
+    it('passes through other backend business English errors instead of a generic banner', () => {
+      expect(toUserFacingErrorMessage(new Error('invalid agent model: config is required'))).toBe(
+        'invalid agent model: config is required',
+      )
+    })
+
+    it.each([
+      { kind: 'provider', mode: 'create' },
+      { kind: 'provider', mode: 'edit', name: 'provider' },
+      { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
+      { kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'model' },
+      { kind: 'agent', mode: 'create' },
+      { kind: 'agent', mode: 'edit', name: 'agent' },
+    ] as ResourceModal[])('accepts a complete $kind $mode body', (modal) => {
+      expect(validate(modal)).toEqual({ ok: true, message: '', fields: {} })
+    })
+
+    /** 空思考强度表示协议默认，不被自动补全；显式 effort 原样保留。 */
+    it('keeps blank reasoning effort as the protocol default and preserves explicit effort', () => {
+      const withBlankEffort = model({ reasoning: true })
+      const blankResult = validate(
+        { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
+        { modelDraft: withBlankEffort },
+      )
+      expect(blankResult.ok).toBe(true)
+      expect(withBlankEffort.variants[0]!.reasoningEffort).toBe('')
+
+      const withExplicitEffort = model({
+        reasoning: true,
+        variants: [{ ...model().variants[0]!, reasoningEffort: 'high' }],
+      })
+      expect(
+        validate(
+          { kind: 'model', mode: 'edit', resourceKind: 'MODEL', name: 'model', expectedVersion: '1' },
+          { modelDraft: withExplicitEffort },
+        ).ok,
+      ).toBe(true)
+    })
+
+    it('rejects duplicate input modalities through the serialization boundary', () => {
+      // validateResourceDraft 的本地预检只拦截空模态列表；重复项由 codec 序列化时拒绝。
+      // toUserFacingErrorMessage 将 "inputModalities ... duplicate" 翻译为输入类型文案，
+      // 但 mapError 无任何规则命中该原文（/modality/ 不匹配复数 inputModalities），落到 general。
+      const result = validate(
+        { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
+        { modelDraft: model({ inputModalities: ['TEXT', 'IMAGE', 'TEXT'] }) },
+      )
+      expect(result.ok).toBe(false)
+      expect(result.fields.general).toBe('请至少选择一种输入类型，建议保留 TEXT')
+    })
+
+    it('rejects one blank variant among valid ones', () => {
+      // 空白 variant id 在 codec 序列化时被拒绝（variant 2 id is required），
+      // mapError 将其同时映射到 variants 与 defaultVariant。
+      const result = validate(
+        { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
+        {
+          modelDraft: model({
+            defaultVariant: 'valid',
+            variants: [
+              { ...model().variants[0]!, id: '' },
+              { ...model().variants[0]!, id: 'valid' },
+            ],
+          }),
+        },
+      )
+      expect(result.ok).toBe(false)
+      expect(result.fields.variants).toBe('请至少添加一个 Variant，并填写 ID')
+      expect(result.fields.defaultVariant).toBe('请至少添加一个 Variant，并填写 ID')
+    })
+
+    it('rejects an invalid base input rate', () => {
+      const base = model().pricing.base
+      const result = validate(
+        { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
+        { modelDraft: model({ pricing: { ...model().pricing, base: { ...base, input: '' } } }) },
+      )
+      expect(result.ok).toBe(false)
+      expect(result.fields.pricing).toBe('请检查价格：填写 0 或正数即可')
+    })
+
+    it.each([
+      [model({ variants: [] }), 'variants'],
+      [model({ contextWindow: '0' }), 'contextWindow'],
+      [model({ maxOutputTokens: '999999' }), 'maxOutputTokens'],
+      [model({ modelId: '   ' }), 'modelId'],
+      [model({ reasoning: true, variants: [{ ...model().variants[0]!, reasoningEffort: 'a'.repeat(65) }] }), 'variants'],
+      [model({ pricing: { ...model().pricing, base: { ...model().pricing.base, input: '-1' } } }), 'pricing'],
+    ] as Array<[ModelDraft, string]>)('maps invalid model body %# to %s', (modelDraft, field) => {
+      const result = validate({ kind: 'model', mode: 'create', resourceKind: 'MODEL' }, { modelDraft })
+      expect(result.ok).toBe(false)
+      expect(result.fields).toHaveProperty(field)
+    })
+
+    it.each([
+      // 空 variant 是合法的「使用 model 默认」覆盖
+      [agent({ tools: ['read', 'read'] }), 'tools'],
+      [agent({ skills: [{ packageName: 'pkg', name: 'dev' }, { packageName: 'pkg', name: 'dev' }] }), 'skills'],
+      [agent({ subagents: ['dev', 'dev'] }), 'subagents'],
+    ] as Array<[AgentDraft, string]>)('maps invalid agent body %# to %s', (agentDraft, field) => {
+      const result = validate({ kind: 'agent', mode: 'create' }, { agentDraft })
+      expect(result.ok).toBe(false)
+      expect(result.fields).toHaveProperty(field)
+    })
+
+    it('rejects missing provider/agent required fields before serialization', () => {
+      expect(
+        validate({ kind: 'provider', mode: 'create' }, { providerDraft: provider({ name: '' }) }).fields,
+      ).toHaveProperty('name')
+      expect(validate({ kind: 'agent', mode: 'create' }, { agentDraft: agent({ name: '' }) }).fields).toHaveProperty(
+        'name',
+      )
+      expect(
+        validate({ kind: 'agent', mode: 'create' }, { agentDraft: agent({ model: '' }) }).fields,
+      ).toHaveProperty('model')
+    })
+
+    it('requires a configured model on agent edit', () => {
+      expect(
+        validate(
+          { kind: 'agent', mode: 'edit', name: 'assistant', expectedVersion: '1' },
+          { agentDraft: agent({ model: '' }) },
+        ).fields,
+      ).toHaveProperty('model')
     })
   })
 })
