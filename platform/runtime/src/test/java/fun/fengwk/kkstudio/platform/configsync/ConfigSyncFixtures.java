@@ -30,6 +30,8 @@ import fun.fengwk.kkstudio.platform.catalog.definition.configuration.AgentConfig
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
@@ -260,6 +262,27 @@ final class ConfigSyncFixtures {
         .configJson(MODEL_CONFIG_PARSER.encode(config))
         .version(0L)
         .build();
+  }
+
+  /** 快照中的 GROUP 行：成员由调用方给出，便于构造「成员缺失/非 MODEL/未知 Variant」的池判定。 */
+  static Model groupModel(String name, List<ModelGroupMemberDTO> members) {
+    ModelGroupConfigDTO group = new ModelGroupConfigDTO();
+    group.setMembers(members);
+    group.setFallbackStatusCodes(List.of());
+    group.setCooldownSeconds(0);
+    return Model.builder()
+        .kind(ModelKind.GROUP)
+        .name(name)
+        .groupConfigJson(GROUP_CONFIG_CODEC.encode(group))
+        .version(0L)
+        .build();
+  }
+
+  static ModelGroupMemberDTO groupMember(String modelName, String variant) {
+    ModelGroupMemberDTO member = new ModelGroupMemberDTO();
+    member.setModelName(modelName);
+    member.setVariant(variant);
+    return member;
   }
 
   static Agent agent(String name, String modelName, AgentConfigDTO config) {

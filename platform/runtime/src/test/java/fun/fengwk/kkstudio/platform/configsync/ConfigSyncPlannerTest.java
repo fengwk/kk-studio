@@ -430,6 +430,47 @@ class ConfigSyncPlannerTest {
     assertTrue(plan.imported().contains(new ConfigSyncRef(ConfigSyncKind.ENVIRONMENTS, "env")));
   }
 
+  /**
+   * 快照中的组按成员事实被移出模型池，每种成因带自己的原因；能解析到单 MODEL 成员的组留在池中并进入写入计划。
+   *
+   * <p>组只能引用单 MODEL：内层组即使自身可用也不能当成员。
+   */
+  @Test
+  void snapshotGroupsLeaveThePoolWithTheirUnsatisfiedMemberReason() {
+    when(snapshotReader.read())
+        .thenReturn(
+            snapshot(
+                List.of(provider("p")),
+                List.of(
+                    model("p", "m"),
+                    ConfigSyncFixtures.groupModel(
+                        "missing-member",
+                        List.of(ConfigSyncFixtures.groupMember("ghost", "default"))),
+                    ConfigSyncFixtures.groupModel(
+                        "nested-group",
+                        List.of(ConfigSyncFixtures.groupMember("inner", "default"))),
+                    ConfigSyncFixtures.groupModel(
+                        "unknown-variant", List.of(ConfigSyncFixtures.groupMember("m", "nope"))),
+                    ConfigSyncFixtures.groupModel(
+                        "inner", List.of(ConfigSyncFixtures.groupMember("m", "default")))),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of(),
+                List.of()));
+    when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
+
+    ConfigSyncPlan plan = plan("providers:\n  - name: p\n    providerType: openai\n");
+
+    assertEquals("missing group member: ghost", reason(plan.skipped(), "models", "missing-member"));
+    assertEquals(
+        "group member is not a model: inner", reason(plan.skipped(), "models", "nested-group"));
+    assertEquals(
+        "group member references unknown variant: m",
+        reason(plan.skipped(), "models", "unknown-variant"));
+    assertFalse(skipped(plan.skipped(), "models", "inner"));
+  }
+
   /** 嵌套 config 内 null skill 引用是结构错误，必须在计划阶段硬拒绝而不是当作依赖 skip。 */
   @Test
   void invalidSkillReferenceIsRejected() {
