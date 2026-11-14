@@ -2,18 +2,15 @@ import { useCallback } from 'react'
 import { useI18n } from '@/shared/i18n'
 import {
   ThreadPanel,
-  ThreadShortcutsPanel,
   ThreadStatusFooter,
 } from '@/features/thread/runtime/thread-panel'
 import { ThreadPane } from '@/features/thread/runtime/ThreadPane'
 import { RootThreadControlArea } from '@/features/thread/runtime/RootThreadControlArea'
 import { ActiveThreadTree } from '@/features/thread/runtime/ActiveThreadTree'
-import { SubagentTreePanel } from '@/features/thread/runtime/SubagentTreePanel'
 import { useThreadPresentation, type ThreadPresentation } from './thread-presentation'
+import { renderPaneInteraction } from '@/features/thread/runtime/root-agent-pane-interactions'
 import { Button } from '@/shared/ui/controls/Button'
 import { useActiveThreadTree } from '@/features/thread/runtime/useActiveThreadTree'
-import { AgentSelectionPanel, SelectionPanel } from '@/features/thread/SelectionPanel'
-import { HistoryTree } from '@/features/thread/HistoryTree'
 import {
   EntryBranchContext,
   branchRequestFromEndEntry,
@@ -23,8 +20,6 @@ import {
   type CompactionActions,
 } from '@/features/thread/runtime/thread-panel/compaction-actions-context'
 import { ConflictPresenter } from '@/shared/conflict/ConflictPresenter'
-import { NameRenamePanel } from '@/features/thread/runtime/thread-panel/NameRenamePanel'
-import { sessionSelectionItem, threadSelectionItem } from '@/features/thread/runtime/root-thread/session-selection-items'
 import { useRootThreadControl } from '@/features/thread/runtime/useRootThreadControl'
 import { type AgentPaneCapabilities, type AgentPaneDefaults, type BranchRequestInput, type PaneReport } from '@/features/thread/runtime/root-thread/types'
 import type { AgentRuntimeOwnerDTO } from '@/shared/api/contracts/ai-runtime'
@@ -154,7 +149,14 @@ export function RootAgentPane({
     // 已打开的交互面板仍接管输入；Debug 退出恢复读入口，不向隐藏 Composer 排队焦点意图。
     onRestoreFocus: pane.interaction == null ? pane.restoreComposerFocus : undefined,
   })
-  const interactionPanel = renderInteractionPanel()
+  const interactionPanel = renderPaneInteraction({
+    pane,
+    tree,
+    boundThreadId,
+    agents,
+    capabilities,
+    t,
+  })
   // 环境归执行根：执行树里有正在运行的子代理时，切换操作同样作用于它们，提示只在此条件下出现。
   const environmentSwitchNotice = tree.activeCount > 0
     ? t('ai.runtime.composer.environmentSwitchNotice')
@@ -357,128 +359,4 @@ export function RootAgentPane({
       />
     </EntryBranchContext.Provider>
   )
-
-  function renderInteractionPanel() {
-    if (pane.interaction === 'subagent') {
-      return <SubagentTreePanel tree={tree} currentThreadId={boundThreadId ?? undefined} onClose={pane.closeInteraction} />
-    }
-    if (pane.interaction === 'rename-session' || pane.interaction === 'rename-thread') {
-      if (pane.renameTarget == null) {
-        return null
-      }
-      const renameTarget = pane.renameTarget
-      const sessionTitle = t('ai.runtime.rename.sessionTitle')
-      const threadTitle = t('ai.runtime.rename.threadTitle')
-      return (
-        <NameRenamePanel
-          title={renameTarget.kind === 'session' ? sessionTitle : threadTitle}
-          initialName={renameTarget.name}
-          busy={pane.renameBusy}
-          pending={pane.renamePending}
-          error={pane.renameError}
-          onSubmit={(name) => pane.submitRename(name)}
-          onClose={pane.closeRename}
-        />
-      )
-    }
-    if (pane.interaction === 'agent') {
-      if (capabilities?.allowSwitchAgent === false) {
-        return null
-      }
-      return (
-        <AgentSelectionPanel
-          agents={agents.map((agent) => ({ name: agent.name, description: agent.description }))}
-          selectedAgentName={pane.activeDraft?.agentName}
-          selectionPending={pane.pending}
-          onClose={pane.closeInteraction}
-          onSelect={pane.selectAgent}
-        />
-      )
-    }
-    if (pane.interaction === 'shortcuts') {
-      return <ThreadShortcutsPanel onClose={pane.closeInteraction} />
-    }
-    if (pane.interaction === 'history') {
-      if (capabilities?.allowBranching === false) {
-        return null
-      }
-      return (
-        <HistoryTree
-          entries={pane.treeEntries}
-          headEntryId={
-            pane.target.kind === 'BOUND_THREAD'
-              ? pane.controller.thread?.headEntryId ?? null
-              : pane.target.kind === 'NEW_THREAD_DRAFT' || pane.target.kind === 'FORK_SESSION_DRAFT'
-                ? pane.target.startEntryId
-                : null
-          }
-          loading={pane.treeEntriesLoading}
-          queryError={pane.treeEntriesError}
-          onClose={pane.closeInteraction}
-          onFork={pane.requestBranchFromEntry}
-          onForkSession={pane.canForkSession ? pane.requestSessionForkFromEntry : undefined}
-        />
-      )
-    }
-    if (pane.interaction === 'thread-sessions') {
-      if (capabilities?.allowBranching === false) {
-        return null
-      }
-      return (
-        <SelectionPanel
-          title={t('ai.chat.selectSession')}
-          items={pane.sessions.map(sessionSelectionItem)}
-          loading={pane.sessionsLoading}
-          hasMore={pane.sessionsHasMore}
-          loadingMore={pane.sessionsLoadingMore}
-          onLoadMore={pane.loadMoreSessions}
-          emptyText={t('ai.chat.noSessions')}
-          renameLabel={t('ai.runtime.rename.titleAria')}
-          onClose={pane.closeInteraction}
-          onRename={(id) => {
-            const session = pane.sessions.find((item) => item.sessionId === id)
-            if (session) {
-              pane.openRenameWithBackTo('session', session.sessionId, session.name, 'thread-sessions')
-            }
-          }}
-          onSelect={(id) => {
-            const session = pane.sessions.find((item) => item.sessionId === id)
-            if (session) {
-              pane.selectSession(session)
-            }
-          }}
-        />
-      )
-    }
-    if (pane.interaction === 'thread-threads') {
-      if (capabilities?.allowBranching === false) {
-        return null
-      }
-      return (
-        <SelectionPanel
-          title={t('ai.chat.selectThread')}
-          items={pane.threads.map(threadSelectionItem)}
-          loading={pane.threadsLoading}
-          emptyText={t('ai.chat.noThreads')}
-          renameLabel={t('ai.runtime.rename.titleAria')}
-          onClose={() => {
-            pane.openInteraction('thread-sessions')
-          }}
-          onRename={(id) => {
-            const thread = pane.threads.find((item) => item.threadId === id)
-            if (thread) {
-              pane.openRenameWithBackTo('thread', thread.threadId, thread.name, 'thread-threads')
-            }
-          }}
-          onSelect={(id) => {
-            const thread = pane.threads.find((item) => item.threadId === id)
-            if (thread) {
-              pane.selectThread(thread)
-            }
-          }}
-        />
-      )
-    }
-    return null
-  }
 }
