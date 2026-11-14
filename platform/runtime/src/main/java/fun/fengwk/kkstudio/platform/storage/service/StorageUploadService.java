@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
+import fun.fengwk.kkstudio.platform.storage.StorageMediaTypes;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
@@ -431,7 +432,7 @@ public class StorageUploadService {
       StorageBlob blob = blobManager.getBlob(blobId);
       if (blob == null
           || blob.getState() != StorageBlobState.ACTIVE
-          || !isPreviewable(blob.getMediaType())) {
+          || !StorageMediaTypes.isPreviewable(blob.getMediaType())) {
         return;
       }
       blobPreviewService.ensurePreview(blobId, blob.getMediaType());
@@ -441,10 +442,6 @@ public class StorageUploadService {
           blobId,
           error.getClass().getSimpleName());
     }
-  }
-
-  private static boolean isPreviewable(String mediaType) {
-    return mediaType != null && (mediaType.startsWith("image/") || mediaType.startsWith("video/"));
   }
 
   /**

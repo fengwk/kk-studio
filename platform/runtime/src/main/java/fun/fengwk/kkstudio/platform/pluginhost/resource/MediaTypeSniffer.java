@@ -30,6 +30,25 @@ final class MediaTypeSniffer {
     if (head == null || head.length < 4) {
       return Optional.empty();
     }
+    Optional<String> result = sniffImage(head);
+    if (result.isPresent()) {
+      return result;
+    }
+    if (isRiffContainer(head)) {
+      return sniffRiffContainer(head);
+    }
+    result = sniffAudioOrDocument(head);
+    if (result.isPresent()) {
+      return result;
+    }
+    result = sniffIsoBaseMedia(head);
+    if (result.isPresent()) {
+      return result;
+    }
+    return sniffMpegAudioFrame(head);
+  }
+
+  private static Optional<String> sniffImage(byte[] head) {
     if (startsWith(head, 0xFF, 0xD8, 0xFF)) {
       return Optional.of("image/jpeg");
     }
@@ -45,19 +64,28 @@ final class MediaTypeSniffer {
     if (startsWith(head, 0x49, 0x49, 0x2A, 0x00) || startsWith(head, 0x4D, 0x4D, 0x00, 0x2A)) {
       return Optional.of("image/tiff");
     }
-    if (startsWithAscii(head, "RIFF") && head.length >= 12) {
-      String form = ascii(head, 8, 4);
-      if ("WEBP".equals(form)) {
-        return Optional.of("image/webp");
-      }
-      if ("WAVE".equals(form)) {
-        return Optional.of("audio/wav");
-      }
-      if ("AVI ".equals(form)) {
-        return Optional.of("video/x-msvideo");
-      }
-      return Optional.empty();
+    return Optional.empty();
+  }
+
+  private static boolean isRiffContainer(byte[] head) {
+    return startsWithAscii(head, "RIFF") && head.length >= 12;
+  }
+
+  private static Optional<String> sniffRiffContainer(byte[] head) {
+    String form = ascii(head, 8, 4);
+    if ("WEBP".equals(form)) {
+      return Optional.of("image/webp");
     }
+    if ("WAVE".equals(form)) {
+      return Optional.of("audio/wav");
+    }
+    if ("AVI ".equals(form)) {
+      return Optional.of("video/x-msvideo");
+    }
+    return Optional.empty();
+  }
+
+  private static Optional<String> sniffAudioOrDocument(byte[] head) {
     if (startsWithAscii(head, "fLaC")) {
       return Optional.of("audio/flac");
     }
@@ -76,9 +104,17 @@ final class MediaTypeSniffer {
     if (startsWith(head, 0x50, 0x4B, 0x03, 0x04) || startsWith(head, 0x50, 0x4B, 0x05, 0x06)) {
       return Optional.of(APPLICATION_ZIP);
     }
+    return Optional.empty();
+  }
+
+  private static Optional<String> sniffIsoBaseMedia(byte[] head) {
     if (head.length >= 12 && "ftyp".equals(ascii(head, 4, 4))) {
       return Optional.of(isoBaseMediaType(ascii(head, 8, 4)));
     }
+    return Optional.empty();
+  }
+
+  private static Optional<String> sniffMpegAudioFrame(byte[] head) {
     if (head.length >= 2
         && (head[0] & 0xFF) == 0xFF
         && ((head[1] & 0xFF) == 0xFB || (head[1] & 0xFF) == 0xF3 || (head[1] & 0xFF) == 0xF2)) {

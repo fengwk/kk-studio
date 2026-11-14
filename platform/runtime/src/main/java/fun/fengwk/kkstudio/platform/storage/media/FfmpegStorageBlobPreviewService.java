@@ -1,9 +1,8 @@
 package fun.fengwk.kkstudio.platform.storage.media;
 
-import lombok.extern.slf4j.Slf4j;
-
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
+import fun.fengwk.kkstudio.platform.storage.StorageMediaTypes;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectMetadata;
 import fun.fengwk.kkstudio.platform.storage.s3.S3ObjectStream;
@@ -12,19 +11,16 @@ import fun.fengwk.kkstudio.platform.storage.service.StorageBlobPreviewService;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 
 /** 基于 ffmpeg 的 Blob webp 预览生成器：{@code blobs/{blobId}/preview.webp} 只由本服务写入，已存在时幂等跳过。 */
-@Slf4j
 public class FfmpegStorageBlobPreviewService implements StorageBlobPreviewService {
 
   private static final long MAX_PREVIEW_INPUT = 512L * 1024 * 1024;
@@ -51,7 +47,7 @@ public class FfmpegStorageBlobPreviewService implements StorageBlobPreviewServic
   @Override
   public boolean ensurePreview(UUID blobId, String mediaType) {
     Objects.requireNonNull(blobId, "blobId");
-    if (!isPreviewable(mediaType)) {
+    if (!StorageMediaTypes.isPreviewable(mediaType)) {
       return false;
     }
     String previewKey = StorageObjectKeys.blobPreview(blobId);
@@ -71,14 +67,14 @@ public class FfmpegStorageBlobPreviewService implements StorageBlobPreviewServic
       Path workDir = Files.createTempDirectory(properties.getTempDir(), "canvas-preview-");
       try {
         Path original = workDir.resolve("original");
-        copyBounded(object.inputStream(), original, MAX_PREVIEW_INPUT);
+        MediaScratchFiles.copyBounded(object.inputStream(), original, MAX_PREVIEW_INPUT);
         Path preview = renderPreview(original, workDir);
         try (InputStream previewContent = Files.newInputStream(preview)) {
           storageService.putObject(previewKey, previewContent, Files.size(preview), "image/webp");
         }
         return true;
       } finally {
-        deleteRecursively(workDir);
+        MediaScratchFiles.deleteRecursively(workDir);
       }
     } catch (IOException error) {
       throw new UncheckedIOException("failed to generate blob preview", error);
@@ -113,7 +109,7 @@ public class FfmpegStorageBlobPreviewService implements StorageBlobPreviewServic
         stdout,
         stderr,
         Duration.ofMillis(storageMedia().canvasMediaProcessTimeoutMillis()));
-    if (!isNonEmptyFile(preview)) {
+    if (!MediaScratchFiles.isNonEmptyFile(preview)) {
       throw new IllegalArgumentException("ffmpeg did not create preview.webp");
     }
     return preview;
@@ -121,57 +117,5 @@ public class FfmpegStorageBlobPreviewService implements StorageBlobPreviewServic
 
   private SystemSettings.StorageMedia storageMedia() {
     return snapshot.get().storageMedia();
-  }
-
-  private static boolean isPreviewable(String mediaType) {
-    return mediaType != null && (mediaType.startsWith("image/") || mediaType.startsWith("video/"));
-  }
-
-  private static long copyBounded(InputStream content, Path target, long maxSize) {
-    try (OutputStream output = Files.newOutputStream(target)) {
-      byte[] buffer = new byte[8192];
-      long total = 0L;
-      int read;
-      while ((read = content.read(buffer)) != -1) {
-        total += read;
-        if (total > maxSize) {
-          throw new IllegalArgumentException("media exceeds maximum size");
-        }
-        output.write(buffer, 0, read);
-      }
-      return total;
-    } catch (IOException error) {
-      throw new UncheckedIOException("failed to spool media", error);
-    }
-  }
-
-  private static boolean isNonEmptyFile(Path path) {
-    try {
-      return Files.isRegularFile(path) && Files.size(path) > 0L;
-    } catch (IOException error) {
-      return false;
-    }
-  }
-
-  private static void deleteRecursively(Path path) {
-    if (path == null || !Files.exists(path)) {
-      return;
-    }
-    try (var walk = Files.walk(path)) {
-      walk.sorted(Comparator.reverseOrder())
-          .forEach(
-              child -> {
-                try {
-                  Files.deleteIfExists(child);
-                } catch (IOException error) {
-                  log.warn(
-                      "failed to delete temp path {} type={}",
-                      child,
-                      error.getClass().getSimpleName());
-                }
-              });
-    } catch (IOException error) {
-      log.warn("failed to walk temp path {} type={}", path, error.getClass().getSimpleName());
-    }
   }
 }
