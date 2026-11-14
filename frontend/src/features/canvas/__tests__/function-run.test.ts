@@ -8,11 +8,11 @@ import {
   discardPendingFunctionRun,
   inspectLocalPendingRun,
   loadPendingFunctionRun,
-  patchSnapshotRun,
   savePendingFunctionRun,
-  useCanvasFunctionRun,
   type PendingFunctionRunAttempt,
-} from '@/features/canvas/function-run'
+} from '@/features/canvas/function-run-pending'
+import { patchSnapshotRun } from '@/features/canvas/function-run-snapshot'
+import { useCanvasFunctionRun } from '@/features/canvas/function-run'
 import type {
   CanvasFunctionRunDTO,
   CanvasFunctionRunRequestDTO,

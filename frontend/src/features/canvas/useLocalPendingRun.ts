@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { inspectLocalPendingRun } from '@/features/canvas/function-run'
+import { inspectLocalPendingRun } from '@/features/canvas/function-run-pending'
 
 export interface LocalPendingRun {
   message: string
