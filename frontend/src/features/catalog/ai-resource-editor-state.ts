@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
 import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
@@ -79,11 +79,16 @@ export function useResourceFormErrors(modal: ResourceModal | null) {
   /** 打开/关闭编辑器时校验状态随之清空；错误只在一次打开会话内有意义。 */
   useEffect(clear, [modal])
 
-  /** 保存失败只影响 banner；已有字段级错误时不再追加 general，避免重复提示。 */
-  function showFailure(message: string) {
+  /**
+   * 保存失败只影响 banner；已有字段级错误时不再追加 general，避免重复提示。
+   *
+   * 身份必须稳定：写入错误 effect 以它为依赖，依赖每次渲染都变会让同一次失败
+   * 在用户逐字清空错误后的每次重渲染里重新落回 banner。
+   */
+  const showFailure = useCallback((message: string) => {
     setFormError(message)
     setFieldErrors((current) => (Object.keys(current).length > 0 ? current : { general: message }))
-  }
+  }, [])
 
   return { formError, fieldErrors, setFormError, setFieldErrors, clear, showFailure }
 }

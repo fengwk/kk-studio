@@ -111,6 +111,9 @@ export function validateUpdateMcpServer(
 /**
  * 发现工具前必须提交的是“已保存的配置”：headers 从不回读，
  * 任何一次替换或清除都视为未保存的变更。
+ *
+ * 超时按归一后的值比较：空输入提交时会回退为默认值，与已保存值相同就不算改动。
+ * 调用方须先通过 `validateDiscoverEndpoint`，非法输入在那里已被拒绝。
  */
 export function hasUnsavedDiscoverChanges(form: EditMcpServerFormState): boolean {
   if (!form.loaded) {
@@ -120,7 +123,7 @@ export function hasUnsavedDiscoverChanges(form: EditMcpServerFormState): boolean
   return (
     form.url !== form.loaded.url ||
     form.enabled !== form.loaded.enabled ||
-    form.timeoutMillis !== form.loaded.timeoutMillis ||
+    validateTimeoutMillis(form.timeoutMillis).timeoutMillis !== form.loaded.timeoutMillis ||
     headersDirty
   )
 }
