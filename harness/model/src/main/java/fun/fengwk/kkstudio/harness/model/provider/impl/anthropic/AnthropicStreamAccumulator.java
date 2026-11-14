@@ -88,7 +88,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
   private int nextToolOrdinal = 0;
   private String messageId = null;
 
-  private final Map<Integer, WireBlockAccumulator> blocksByIndex = new TreeMap<>();
+  private final Map<Integer, AnthropicWireBlock> blocksByIndex = new TreeMap<>();
 
   private long inputTokens = 0L;
   private long cacheReadInputTokens = 0L;
@@ -178,7 +178,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
     List<ProviderToolCallDiagnostic> toolCallDiagnostics = new ArrayList<>();
 
     // blocksByIndex 升序遍历，严格保持原生 block index 顺序
-    for (WireBlockAccumulator block : blocksByIndex.values()) {
+    for (AnthropicWireBlock block : blocksByIndex.values()) {
       switch (block.type) {
         case "text" -> {
           combinedText.append(block.textBuffer);
@@ -512,8 +512,8 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
 
     String type = blockNode.get("type").stringValue();
     // start 对象是所有 block 的 replay 基座：终态只覆盖 normalized 字段，官方附加字段原样保留
-    WireBlockAccumulator accumulator =
-        new WireBlockAccumulator(type, (ObjectNode) blockNode.deepCopy());
+    AnthropicWireBlock accumulator =
+        new AnthropicWireBlock(type, (ObjectNode) blockNode.deepCopy());
 
     switch (type) {
       case "text" -> {
@@ -621,8 +621,8 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
           ProviderErrorKind.INVALID_RESPONSE, "invalid content_block_delta index");
     }
     int index = indexNode.asInt(0);
-    WireBlockAccumulator block = blocksByIndex.get(index);
-    if (block == null || block.state != BlockLifecycle.ACTIVE) {
+    AnthropicWireBlock block = blocksByIndex.get(index);
+    if (block == null || block.state != AnthropicWireBlock.Lifecycle.ACTIVE) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "unexpected content_block_delta for index: " + index);
     }
@@ -722,7 +722,7 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
    * input} 对象。其余 delta 无法证明可保真组装，显式失败而不是猜测性合并或静默丢弃。
    */
   private static void handleNativeBlockDelta(
-      WireBlockAccumulator block, String deltaType, JsonNode deltaNode) {
+      AnthropicWireBlock block, String deltaType, JsonNode deltaNode) {
     if (!"input_json_delta".equals(deltaType)) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
@@ -784,12 +784,12 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
           ProviderErrorKind.INVALID_RESPONSE, "invalid content_block_stop index");
     }
     int index = indexNode.asInt(0);
-    WireBlockAccumulator block = blocksByIndex.get(index);
-    if (block == null || block.state != BlockLifecycle.ACTIVE) {
+    AnthropicWireBlock block = blocksByIndex.get(index);
+    if (block == null || block.state != AnthropicWireBlock.Lifecycle.ACTIVE) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "unexpected content_block_stop for index: " + index);
     }
-    block.state = BlockLifecycle.STOPPED;
+    block.state = AnthropicWireBlock.Lifecycle.STOPPED;
   }
 
   private void handleMessageDelta(JsonNode root) {
@@ -797,8 +797,8 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "unexpected message_delta state");
     }
-    for (WireBlockAccumulator block : blocksByIndex.values()) {
-      if (block.state != BlockLifecycle.STOPPED) {
+    for (AnthropicWireBlock block : blocksByIndex.values()) {
+      if (block.state != AnthropicWireBlock.Lifecycle.STOPPED) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_RESPONSE,
             "message_delta received while content block active");
@@ -835,8 +835,8 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "message_stop received without stop reason");
     }
-    for (WireBlockAccumulator block : blocksByIndex.values()) {
-      if (block.state != BlockLifecycle.STOPPED) {
+    for (AnthropicWireBlock block : blocksByIndex.values()) {
+      if (block.state != AnthropicWireBlock.Lifecycle.STOPPED) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_RESPONSE,
             "message_stop received while content block still active");
@@ -971,43 +971,5 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       default -> throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "unsupported or missing stop_reason");
     };
-  }
-
-  private enum BlockLifecycle {
-    ACTIVE,
-    STOPPED
-  }
-
-  private static final class WireBlockAccumulator {
-    final String type;
-
-    /** provider 给出的原始 start 对象：所有 block 的 replay 基座，终态只覆盖 normalized 字段。 */
-    final ObjectNode rawBlock;
-
-    BlockLifecycle state = BlockLifecycle.ACTIVE;
-
-    final StringBuilder textBuffer = new StringBuilder();
-
-    /** text block 累积到的 citation 列表；null 表示上游未下发 citations_delta（start 自带的 citations 原样保留）。 */
-    ArrayNode citations = null;
-
-    final StringBuilder thinkingBuffer = new StringBuilder();
-    String signature = null;
-    String redactedData = null;
-
-    int toolOrdinal = -1;
-    String toolId = null;
-    String toolName = null;
-    final StringBuilder toolArgsBuffer = new StringBuilder();
-    boolean initialInputPlaceholder = false;
-    boolean initialArgumentsComplete = false;
-
-    /** 原生（非 normalized）block 累积到的 input_json_delta partial JSON；null 表示上游未下达该类 delta。 */
-    StringBuilder nativeInputBuffer = null;
-
-    WireBlockAccumulator(String type, ObjectNode rawBlock) {
-      this.type = type;
-      this.rawBlock = rawBlock;
-    }
   }
 }
