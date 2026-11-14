@@ -84,6 +84,13 @@ final class AnthropicContentBlocks {
     AnthropicWireBlock accumulator =
         new AnthropicWireBlock(type, (ObjectNode) blockNode.deepCopy());
 
+    applyStartBlock(type, blockNode, accumulator);
+
+    blocksByIndex.put(index, accumulator);
+  }
+
+  /** 按 block type 校验 start 字段并写入 normalized 状态；未知 type 只保留 raw 基座。 */
+  private void applyStartBlock(String type, JsonNode blockNode, AnthropicWireBlock accumulator) {
     switch (type) {
       case "text" -> {
         if (blockNode.has("text")) {
@@ -175,8 +182,6 @@ final class AnthropicContentBlocks {
         // 未知或未来新增 block type：不产生 normalized 语义，raw block 原样保留供 opaque replay
       }
     }
-
-    blocksByIndex.put(index, accumulator);
   }
 
   void delta(JsonNode root) {
@@ -202,6 +207,11 @@ final class AnthropicContentBlocks {
     }
 
     String deltaType = deltaNode.get("type").stringValue();
+    applyDelta(block, deltaType, deltaNode);
+  }
+
+  /** 按 block type 分派 delta；normalized block 只接受成对类型，未知 type 交给原生组装。 */
+  private void applyDelta(AnthropicWireBlock block, String deltaType, JsonNode deltaNode) {
     switch (block.type) {
       case "text" -> {
         switch (deltaType) {
