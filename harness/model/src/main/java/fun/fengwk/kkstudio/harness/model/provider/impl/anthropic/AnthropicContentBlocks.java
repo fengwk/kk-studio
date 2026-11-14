@@ -92,96 +92,108 @@ final class AnthropicContentBlocks {
   /** 按 block type 校验 start 字段并写入 normalized 状态；未知 type 只保留 raw 基座。 */
   private void applyStartBlock(String type, JsonNode blockNode, AnthropicWireBlock accumulator) {
     switch (type) {
-      case "text" -> {
-        if (blockNode.has("text")) {
-          if (!blockNode.get("text").isString()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_RESPONSE, "text content_block text must be string");
-          }
-          String text = blockNode.get("text").stringValue();
-          if (!text.isEmpty()) {
-            accumulator.textBuffer.append(text);
-            bridge.emitEvent(new ProviderStreamEvent.TextDelta(text));
-          }
-        }
-        if (blockNode.has("citations")) {
-          // start 已声明 citations 时，后续 citations_delta 依序追加在其后
-          accumulator.citations = requireCitationArray(blockNode.get("citations"));
-        }
-      }
-      case "thinking" -> {
-        if (blockNode.has("thinking")) {
-          if (!blockNode.get("thinking").isString()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_RESPONSE,
-                "thinking content_block thinking must be string");
-          }
-          String thinking = blockNode.get("thinking").stringValue();
-          if (!thinking.isEmpty()) {
-            accumulator.thinkingBuffer.append(thinking);
-            bridge.emitEvent(new ProviderStreamEvent.ThinkingDelta(thinking));
-          }
-        }
-        if (blockNode.has("signature")) {
-          if (!blockNode.get("signature").isString()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_RESPONSE, "thinking signature must be string");
-          }
-          accumulator.signature = blockNode.get("signature").stringValue();
-        }
-      }
-      case "redacted_thinking" -> {
-        if (blockNode.has("data")) {
-          if (!blockNode.get("data").isString()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_RESPONSE, "redacted_thinking data must be string");
-          }
-          accumulator.redactedData = blockNode.get("data").stringValue();
-        }
-      }
-      case "tool_use" -> {
-        if (!blockNode.has("id")
-            || !blockNode.get("id").isString()
-            || !blockNode.has("name")
-            || !blockNode.get("name").isString()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE,
-              "tool_use content_block missing valid id or name");
-        }
-        accumulator.toolId = blockNode.get("id").stringValue();
-        accumulator.toolName = blockNode.get("name").stringValue();
-        if (accumulator.toolId.isBlank() || accumulator.toolName.isBlank()) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE,
-              "tool_use content_block missing valid id or name");
-        }
-        accumulator.toolOrdinal = nextToolOrdinal++;
-        String initialArguments = null;
-        if (blockNode.has("input")) {
-          JsonNode inputNode = blockNode.get("input");
-          if (!inputNode.isObject()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_RESPONSE, "tool_use input must be a JSON object");
-          }
-          if (inputNode.isEmpty()) {
-            accumulator.initialInputPlaceholder = true;
-          } else {
-            initialArguments = inputNode.toString();
-            accumulator.toolArgsBuffer.append(initialArguments);
-            accumulator.initialArgumentsComplete = true;
-          }
-        }
-        bridge.emitEvent(
-            new ProviderStreamEvent.ToolCallDelta(
-                accumulator.toolOrdinal,
-                accumulator.toolId,
-                accumulator.toolName,
-                initialArguments));
-      }
+      case "text" -> startText(blockNode, accumulator);
+      case "thinking" -> startThinking(blockNode, accumulator);
+      case "redacted_thinking" -> startRedactedThinking(blockNode, accumulator);
+      case "tool_use" -> startToolUse(blockNode, accumulator);
       default -> {
         // 未知或未来新增 block type：不产生 normalized 语义，raw block 原样保留供 opaque replay
       }
     }
+  }
+
+  /** text start：可携带初始文本与 citations 声明。 */
+  private void startText(JsonNode blockNode, AnthropicWireBlock accumulator) {
+    if (blockNode.has("text")) {
+      if (!blockNode.get("text").isString()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "text content_block text must be string");
+      }
+      String text = blockNode.get("text").stringValue();
+      if (!text.isEmpty()) {
+        accumulator.textBuffer.append(text);
+        bridge.emitEvent(new ProviderStreamEvent.TextDelta(text));
+      }
+    }
+    if (blockNode.has("citations")) {
+      // start 已声明 citations 时，后续 citations_delta 依序追加在其后
+      accumulator.citations = requireCitationArray(blockNode.get("citations"));
+    }
+  }
+
+  /** thinking start：可携带初始 thinking 文本与签名。 */
+  private void startThinking(JsonNode blockNode, AnthropicWireBlock accumulator) {
+    if (blockNode.has("thinking")) {
+      if (!blockNode.get("thinking").isString()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "thinking content_block thinking must be string");
+      }
+      String thinking = blockNode.get("thinking").stringValue();
+      if (!thinking.isEmpty()) {
+        accumulator.thinkingBuffer.append(thinking);
+        bridge.emitEvent(new ProviderStreamEvent.ThinkingDelta(thinking));
+      }
+    }
+    if (blockNode.has("signature")) {
+      if (!blockNode.get("signature").isString()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "thinking signature must be string");
+      }
+      accumulator.signature = blockNode.get("signature").stringValue();
+    }
+  }
+
+  /** redacted_thinking start 一次携带完整不可读内容。 */
+  private void startRedactedThinking(JsonNode blockNode, AnthropicWireBlock accumulator) {
+    if (blockNode.has("data")) {
+      if (!blockNode.get("data").isString()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "redacted_thinking data must be string");
+      }
+      accumulator.redactedData = blockNode.get("data").stringValue();
+    }
+  }
+
+  /** tool_use start 分配 ordinal 并发布首个 ToolCallDelta；非空 input 视为参数已定稿。 */
+  private void startToolUse(JsonNode blockNode, AnthropicWireBlock accumulator) {
+    if (!blockNode.has("id")
+        || !blockNode.get("id").isString()
+        || !blockNode.has("name")
+        || !blockNode.get("name").isString()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "tool_use content_block missing valid id or name");
+    }
+    accumulator.toolId = blockNode.get("id").stringValue();
+    accumulator.toolName = blockNode.get("name").stringValue();
+    if (accumulator.toolId.isBlank() || accumulator.toolName.isBlank()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "tool_use content_block missing valid id or name");
+    }
+    accumulator.toolOrdinal = nextToolOrdinal++;
+    String initialArguments = initialToolArguments(blockNode, accumulator);
+    bridge.emitEvent(
+        new ProviderStreamEvent.ToolCallDelta(
+            accumulator.toolOrdinal, accumulator.toolId, accumulator.toolName, initialArguments));
+  }
+
+  /** 空 input 对象只是占位，允许后续 input_json_delta 累积；非空 input 直接定稿。 */
+  private static String initialToolArguments(JsonNode blockNode, AnthropicWireBlock accumulator) {
+    if (!blockNode.has("input")) {
+      return null;
+    }
+    JsonNode inputNode = blockNode.get("input");
+    if (!inputNode.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "tool_use input must be a JSON object");
+    }
+    if (inputNode.isEmpty()) {
+      accumulator.initialInputPlaceholder = true;
+      return null;
+    }
+    String initialArguments = inputNode.toString();
+    accumulator.toolArgsBuffer.append(initialArguments);
+    accumulator.initialArgumentsComplete = true;
+    return initialArguments;
   }
 
   void delta(JsonNode root) {
@@ -213,82 +225,91 @@ final class AnthropicContentBlocks {
   /** 按 block type 分派 delta；normalized block 只接受成对类型，未知 type 交给原生组装。 */
   private void applyDelta(AnthropicWireBlock block, String deltaType, JsonNode deltaNode) {
     switch (block.type) {
-      case "text" -> {
-        switch (deltaType) {
-          case "text_delta" -> {
-            if (!deltaNode.has("text") || !deltaNode.get("text").isString()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_RESPONSE, "text_delta text must be string");
-            }
-            String text = deltaNode.get("text").stringValue();
-            if (!text.isEmpty()) {
-              block.textBuffer.append(text);
-              bridge.emitEvent(new ProviderStreamEvent.TextDelta(text));
-            }
-          }
-          case "citations_delta" -> {
-            if (!deltaNode.has("citation") || !deltaNode.get("citation").isObject()) {
-              throw new ProviderException(
-                  ProviderErrorKind.INVALID_RESPONSE, "citations_delta citation must be an object");
-            }
-            if (block.citations == null) {
-              block.citations = NODES.arrayNode();
-            }
-            // citation 是官方可扩展结构：原样依序累积，不做字段白名单
-            block.citations.add(deltaNode.get("citation").deepCopy());
-          }
-          default -> throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "mismatched delta type for text block");
-        }
-      }
-      case "thinking" -> {
-        if ("thinking_delta".equals(deltaType)) {
-          if (!deltaNode.has("thinking") || !deltaNode.get("thinking").isString()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_RESPONSE, "thinking_delta thinking must be string");
-          }
-          String thinking = deltaNode.get("thinking").stringValue();
-          if (!thinking.isEmpty()) {
-            block.thinkingBuffer.append(thinking);
-            bridge.emitEvent(new ProviderStreamEvent.ThinkingDelta(thinking));
-          }
-        } else if ("signature_delta".equals(deltaType)) {
-          if (!deltaNode.has("signature") || !deltaNode.get("signature").isString()) {
-            throw new ProviderException(
-                ProviderErrorKind.INVALID_RESPONSE, "signature_delta signature must be string");
-          }
-          String sig = deltaNode.get("signature").stringValue();
-          if (block.signature == null) {
-            block.signature = sig;
-          } else {
-            block.signature += sig;
-          }
-        } else {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "mismatched delta type for thinking block");
-        }
-      }
-      case "tool_use" -> {
-        if (!"input_json_delta".equals(deltaType)) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "mismatched delta type for tool_use block");
-        }
-        if (block.initialArgumentsComplete) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "tool call arguments already finalized");
-        }
-        String partialJson =
-            requirePartialJson(deltaNode, "input_json_delta partial_json must be string");
-        if (!partialJson.isEmpty()) {
-          block.toolArgsBuffer.append(partialJson);
-          bridge.emitEvent(
-              new ProviderStreamEvent.ToolCallDelta(block.toolOrdinal, null, null, partialJson));
-        }
-      }
+      case "text" -> deltaText(block, deltaType, deltaNode);
+      case "thinking" -> deltaThinking(block, deltaType, deltaNode);
+      case "tool_use" -> deltaToolUse(block, deltaType, deltaNode);
       case "redacted_thinking" -> throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE,
           "redacted_thinking block must be complete and carries no delta");
       default -> applyNativeDelta(block, deltaType, deltaNode);
+    }
+  }
+
+  /** text block 只接受 text_delta 与 citations_delta。 */
+  private void deltaText(AnthropicWireBlock block, String deltaType, JsonNode deltaNode) {
+    switch (deltaType) {
+      case "text_delta" -> {
+        if (!deltaNode.has("text") || !deltaNode.get("text").isString()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "text_delta text must be string");
+        }
+        String text = deltaNode.get("text").stringValue();
+        if (!text.isEmpty()) {
+          block.textBuffer.append(text);
+          bridge.emitEvent(new ProviderStreamEvent.TextDelta(text));
+        }
+      }
+      case "citations_delta" -> {
+        if (!deltaNode.has("citation") || !deltaNode.get("citation").isObject()) {
+          throw new ProviderException(
+              ProviderErrorKind.INVALID_RESPONSE, "citations_delta citation must be an object");
+        }
+        if (block.citations == null) {
+          block.citations = NODES.arrayNode();
+        }
+        // citation 是官方可扩展结构：原样依序累积，不做字段白名单
+        block.citations.add(deltaNode.get("citation").deepCopy());
+      }
+      default -> throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "mismatched delta type for text block");
+    }
+  }
+
+  /** thinking block 只接受 thinking_delta 与 signature_delta，签名逐段累加。 */
+  private void deltaThinking(AnthropicWireBlock block, String deltaType, JsonNode deltaNode) {
+    if ("thinking_delta".equals(deltaType)) {
+      if (!deltaNode.has("thinking") || !deltaNode.get("thinking").isString()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "thinking_delta thinking must be string");
+      }
+      String thinking = deltaNode.get("thinking").stringValue();
+      if (!thinking.isEmpty()) {
+        block.thinkingBuffer.append(thinking);
+        bridge.emitEvent(new ProviderStreamEvent.ThinkingDelta(thinking));
+      }
+    } else if ("signature_delta".equals(deltaType)) {
+      if (!deltaNode.has("signature") || !deltaNode.get("signature").isString()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "signature_delta signature must be string");
+      }
+      String sig = deltaNode.get("signature").stringValue();
+      if (block.signature == null) {
+        block.signature = sig;
+      } else {
+        block.signature += sig;
+      }
+    } else {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "mismatched delta type for thinking block");
+    }
+  }
+
+  /** tool_use 只接受 input_json_delta，且参数定稿后不再接受新的 delta。 */
+  private void deltaToolUse(AnthropicWireBlock block, String deltaType, JsonNode deltaNode) {
+    if (!"input_json_delta".equals(deltaType)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "mismatched delta type for tool_use block");
+    }
+    if (block.initialArgumentsComplete) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "tool call arguments already finalized");
+    }
+    String partialJson =
+        requirePartialJson(deltaNode, "input_json_delta partial_json must be string");
+    if (!partialJson.isEmpty()) {
+      block.toolArgsBuffer.append(partialJson);
+      bridge.emitEvent(
+          new ProviderStreamEvent.ToolCallDelta(block.toolOrdinal, null, null, partialJson));
     }
   }
 
