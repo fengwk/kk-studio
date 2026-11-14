@@ -235,6 +235,8 @@
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseAgentTurnContextResolver</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.AgentTurnContext</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer*</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.model.ProviderInlineMediaReader*</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.model.ProviderResourceTextFormat</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderInlineBlobReader*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolExecutionGateway</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.tool.gateway.ToolErrorClassifier</include>
