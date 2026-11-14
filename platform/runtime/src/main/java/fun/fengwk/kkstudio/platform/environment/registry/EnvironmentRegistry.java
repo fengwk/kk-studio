@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.environment.registry;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.dao.DataAccessException;
-import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.PlatformTransactionManager;
@@ -15,16 +14,12 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadataCodec;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonLeaseStore;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifier;
-import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -36,7 +31,8 @@ import java.util.function.Supplier;
  * 的 lease-store 适配实现。
  *
  * <p>以 canonical {@link EnvironmentId} 为键。握手准入认证时通过单条 PostgreSQL upsert 语句原子抢占租约：缺少或过期路由以新 {@code
- * leaseToken} 接管；活跃路由返回 {@link LeaseBindResult.RetryLater}。断开连接时保留重连宽限期，允许原连接重新认领。
+ * leaseToken} 接管；活跃路由返回 {@link LeaseBindResult.RetryLater}。断开连接时保留重连宽限期，允许原连接重新认领。准入事务与连接行映射由同包
+ * {@link EnvironmentLeaseAdmission}、{@link EnvironmentConnectionRows} 承担，本类只保留围栏写的锁序与通知时机。
  *
  * <p>READY、HEARTBEAT 与断开连接均以 {@code (environment_id, owner_node_id, lease_token)} 为围栏更新，
  * 保证只有当前持有该路由租约的本地连接能推进状态；所有围栏更新在租约失效时返回 false（fail-closed）。
@@ -50,52 +46,6 @@ import java.util.function.Supplier;
 @Slf4j
 @Component
 public class EnvironmentRegistry implements DaemonLeaseStore {
-
-  private static final String TRY_ACQUIRE_SQL =
-      """
-      with locked_env as (
-          select id, (registration_token_hash = :tokenHash) as token_valid
-          from environment
-          where id = :environmentId
-          for update
-      ),
-      tried_upsert as (
-          insert into environment_connection (
-              environment_id, owner_node_id, lease_token,
-              status, ready_metadata, recent_events, last_seen_at, lease_until
-          )
-          select
-              id, :ownerNodeId, :leaseToken,
-              'CONNECTING', null, jsonb_build_array(:connectingEvent::jsonb), statement_timestamp(), statement_timestamp() + (:leaseMillis * interval '1 millisecond')
-          from locked_env
-          where token_valid = true
-          on conflict (environment_id) do update
-          set owner_node_id = excluded.owner_node_id,
-              lease_token = excluded.lease_token,
-              status = 'CONNECTING',
-              recent_events = case
-                  when jsonb_array_length(environment_connection.recent_events) >= :maxRecentEvents
-                      then (environment_connection.recent_events - 0) || excluded.recent_events
-                      else environment_connection.recent_events || excluded.recent_events
-                  end,
-              last_seen_at = statement_timestamp(),
-              lease_until = statement_timestamp() + (:leaseMillis * interval '1 millisecond')
-          where environment_connection.lease_until <= statement_timestamp()
-             or (environment_connection.status = 'CONNECTING' and environment_connection.owner_node_id = excluded.owner_node_id)
-          returning environment_connection.lease_token, true as acquired
-      )
-      select lease_token, true as acquired, 'ACQUIRED' as result_type
-      from tried_upsert
-      union all
-      select null::uuid as lease_token, false as acquired,
-             case
-                when not exists (select 1 from locked_env) then 'NOT_FOUND'
-                when not (select token_valid from locked_env) then 'INVALID_TOKEN'
-                else 'ACTIVE_ROUTE'
-             end as result_type
-      from (select 1) as dummy
-      where not exists (select 1 from tried_upsert)
-      """;
 
   /**
    * 围栏式登记 READY：推进行状态、写入最近一次被接受的宿主 metadata 并追加一条 READY 事件。
@@ -252,6 +202,8 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   private final EnvironmentChangeNotifier notifier;
   private final DaemonReadyMetadataCodec readyMetadataCodec = new DaemonReadyMetadataCodec();
   private final EnvironmentStateCodec stateCodec = new EnvironmentStateCodec();
+  private final EnvironmentConnectionRows connectionRows;
+  private final EnvironmentLeaseAdmission leaseAdmission;
 
   public EnvironmentRegistry(
       JdbcClient jdbcClient,
@@ -265,6 +217,10 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
     this.transactionTemplate =
         new TransactionTemplate(Objects.requireNonNull(transactionManager, "transactionManager"));
     this.notifier = Objects.requireNonNull(notifier, "notifier");
+    this.connectionRows = new EnvironmentConnectionRows(readyMetadataCodec, stateCodec);
+    this.leaseAdmission =
+        new EnvironmentLeaseAdmission(
+            jdbcClient, ownerNodeId, clock, transactionTemplate, notifier);
   }
 
   /**
@@ -304,64 +260,7 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
   @Override
   public LeaseBindResult tryAcquire(
       EnvironmentId environmentId, String registrationToken, Duration leaseDuration) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    Objects.requireNonNull(registrationToken, "registrationToken");
-    Objects.requireNonNull(leaseDuration, "leaseDuration");
-    UUID newLeaseToken = UUID.randomUUID();
-    long millis = leaseDuration.toMillis();
-    String connectingEvent =
-        stateCodec.encodeEvent(
-            lifecycleEvent(
-                EnvironmentEventLevel.INFO,
-                EnvironmentEventType.CONNECTING,
-                "daemon connection accepted"));
-    // 只有真实 upsert 成功（Acquired）才在提交前发布；认证拒绝与活跃租约抢占失败都不写行，保持静默。
-    Optional<AcquireRow> acquired =
-        transactionTemplate.execute(
-            status -> {
-              List<AcquireRow> rows =
-                  jdbcClient
-                      .sql(TRY_ACQUIRE_SQL)
-                      .param("tokenHash", RegistrationTokens.hash(registrationToken))
-                      .param("environmentId", environmentId.value())
-                      .param("ownerNodeId", ownerNodeId)
-                      .param("leaseToken", newLeaseToken)
-                      .param("connectingEvent", connectingEvent)
-                      .param("leaseMillis", millis)
-                      .param("maxRecentEvents", EnvironmentConnection.MAX_RECENT_EVENTS)
-                      .query(
-                          (rs, rowNum) ->
-                              new AcquireRow(
-                                  (UUID) rs.getObject("lease_token"),
-                                  rs.getBoolean("acquired"),
-                                  rs.getString("result_type")))
-                      .list();
-              if (rows.isEmpty()) {
-                return Optional.<AcquireRow>empty();
-              }
-              AcquireRow candidate = rows.get(0);
-              if (candidate.acquired() && candidate.leaseToken() != null) {
-                notifier.environmentChanged(environmentId.value());
-              }
-              return Optional.of(candidate);
-            });
-
-    if (acquired.isEmpty()) {
-      return new LeaseBindResult.RetryLater("route acquisition returned no row: " + environmentId);
-    }
-    AcquireRow row = acquired.get();
-    if (row.acquired() && row.leaseToken() != null) {
-      return new LeaseBindResult.Acquired(row.leaseToken());
-    }
-    return switch (row.resultType()) {
-      case "NOT_FOUND" -> new LeaseBindResult.Rejected("environment not found: " + environmentId);
-      case "INVALID_TOKEN" -> new LeaseBindResult.Rejected(
-          "invalid registration token for environment: " + environmentId);
-      case "ACTIVE_ROUTE" -> new LeaseBindResult.RetryLater(
-          "environment " + environmentId + " is actively held by another connection");
-      default -> new LeaseBindResult.RetryLater(
-          "route acquisition failed for environment: " + environmentId);
-    };
+    return leaseAdmission.bind(environmentId, registrationToken, leaseDuration);
   }
 
   /**
@@ -531,14 +430,14 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
         jdbcClient
             .sql(FIND_SQL)
             .param("environmentId", environmentId.value())
-            .query(new EnvironmentConnectionRowMapper())
+            .query(connectionRows.mapper())
             .list();
     return results.isEmpty() ? Optional.empty() : Optional.of(results.get(0));
   }
 
   /** 查询当前数据库中所有活跃环境的路由快照列表。 */
   public List<EnvironmentConnection> list() {
-    return jdbcClient.sql(LIST_SQL).query(new EnvironmentConnectionRowMapper()).list();
+    return jdbcClient.sql(LIST_SQL).query(connectionRows.mapper()).list();
   }
 
   /**
@@ -626,27 +525,5 @@ public class EnvironmentRegistry implements DaemonLeaseStore {
             .query(Boolean.class)
             .single();
     return Boolean.TRUE.equals(exists);
-  }
-
-  private record AcquireRow(UUID leaseToken, boolean acquired, String resultType) {}
-
-  private final class EnvironmentConnectionRowMapper implements RowMapper<EnvironmentConnection> {
-    @Override
-    public EnvironmentConnection mapRow(ResultSet rs, int rowNum) throws SQLException {
-      EnvironmentId id = EnvironmentId.of((UUID) rs.getObject("environment_id"));
-      UUID owner = (UUID) rs.getObject("owner_node_id");
-      UUID leaseToken = (UUID) rs.getObject("lease_token");
-      LiveEnvironmentStatus status = LiveEnvironmentStatus.valueOf(rs.getString("status"));
-      // 保留事实：任何非 null 的 ready_metadata 都可解码，与当前 status 无关。
-      String readyMetadataJson = rs.getString("ready_metadata");
-      DaemonReadyMetadata readyMetadata =
-          readyMetadataJson == null ? null : readyMetadataCodec.decode(readyMetadataJson);
-      // 事件记录与连接状态独立保留。
-      List<EnvironmentEvent> recentEvents = stateCodec.decodeEvents(rs.getString("recent_events"));
-      Instant lastSeenAt = rs.getObject("last_seen_at", OffsetDateTime.class).toInstant();
-      Instant leaseUntil = rs.getObject("lease_until", OffsetDateTime.class).toInstant();
-      return new EnvironmentConnection(
-          id, owner, leaseToken, status, readyMetadata, recentEvents, lastSeenAt, leaseUntil);
-    }
   }
 }
