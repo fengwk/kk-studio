@@ -7,7 +7,6 @@ import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
 import type {
   EnvironmentIdeChangeDirectoryDTO,
-  EnvironmentIdeCloseViewDTO,
   EnvironmentIdeViewBindingDTO,
 } from '@/shared/api/generated/contracts'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
@@ -19,11 +18,9 @@ import {
   type IdeTabLoadResult,
   type IdeTabStorage,
 } from '@/features/environment/ide/ide-tab-state'
-import type { IdeCloseResult } from '@/features/environment/ide/IdeOverlayPanel'
 import {
   applyIdeMobileLayout,
   changeIdeViewDirectory,
-  closeIdeView,
   focusIdeTerminal,
   openIdeView,
   readIdeView,
@@ -40,6 +37,7 @@ import { useIdeViewStore } from '@/features/environment/ide/useIdeViewStore'
 import { useIdeOperationQueue } from '@/features/environment/ide/useIdeOperationQueue'
 import { useIdeSnapshotCache } from '@/features/environment/ide/useIdeSnapshotCache'
 import { useIdePendingShellIntent } from '@/features/environment/ide/useIdePendingShellIntent'
+import { useIdeCloseCommands } from '@/features/environment/ide/useIdeCloseCommands'
 import {
   useIdeSessionWriter,
   useIdeUsageProof,
@@ -138,6 +136,16 @@ export function useIdeClaimReconciliation({
       pageSuspendedRef.current = suspended
     },
     registerUsage: (usage) => events.registerUsage(usage),
+  })
+  const { closeEnvironment, dismissCloseError } = useIdeCloseCommands({
+    viewsRef,
+    sessionRef,
+    updateView,
+    commitViews,
+    forgetView,
+    writeSession,
+    registerUsageNow,
+    registerUsageQuiet,
   })
 
   identityRef.current = identity
@@ -949,77 +957,6 @@ export function useIdeClaimReconciliation({
       return
     }
     void runTerminal(environmentId)
-  }
-
-  async function closeEnvironment(environmentId: string, discard: boolean): Promise<IdeCloseResult> {
-    const view = viewsRef.current[environmentId]
-    if (view == null) {
-      return { ok: true, dirty: false }
-    }
-    if (
-      view.bindingEpoch == null
-      || view.daemonInstanceId == null
-      || view.closeInFlight
-      || view.status === 'binding'
-      || view.status === 'reconciling'
-    ) {
-      return { ok: false, dirty: false, message: 'view-not-ready' }
-    }
-    updateView(environmentId, view.attempt, {
-      closeInFlight: true,
-      closeError: undefined,
-    })
-    try {
-      await registerUsageNow(usageOverride(
-        environmentId,
-        view.viewId,
-        view.claimId,
-        view.bindingEpoch,
-      ))
-      const body: EnvironmentIdeCloseViewDTO = {
-        browserSessionId: sessionRef.current.browserSessionId,
-        bindingEpoch: view.bindingEpoch,
-        expectedDaemonInstanceId: view.daemonInstanceId,
-        discard,
-      }
-      await closeIdeView(environmentId, view.viewId, body)
-      const current = viewsRef.current[environmentId]
-      if (!isSameBinding(current, view)) {
-        return { ok: false, dirty: false, message: 'binding-changed' }
-      }
-      const next = { ...viewsRef.current }
-      delete next[environmentId]
-      forgetView(view.daemonInstanceId, view.viewId)
-      commitViews(next)
-      writeSession()
-      registerUsageQuiet()
-      return { ok: true, dirty: false }
-    } catch (error) {
-      const current = viewsRef.current[environmentId]
-      if (!isSameBinding(current, view)) {
-        return { ok: false, dirty: false, message: 'binding-changed' }
-      }
-      const unknown = isUnknownIdeFailure(error) || ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN'
-      const dirty = !discard && unknown
-      const closeError = dirty
-        ? undefined
-        : unknown
-          ? 'close-result-unknown'
-          : safeIdeError(error) || 'close-failed'
-      updateView(environmentId, view.attempt, {
-        closeInFlight: false,
-        closeError,
-      })
-      return { ok: false, dirty, message: safeIdeError(error) }
-    }
-  }
-
-  function dismissCloseError(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
-    if (view == null || view.closeError == null) {
-      return
-    }
-    updateView(environmentId, view.attempt, { closeError: undefined })
   }
 
   async function changeDirectory(
