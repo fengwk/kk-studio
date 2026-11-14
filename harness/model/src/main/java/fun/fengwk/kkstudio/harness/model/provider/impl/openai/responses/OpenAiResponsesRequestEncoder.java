@@ -67,8 +67,6 @@ public final class OpenAiResponsesRequestEncoder {
   /** OpenAI Responses 拒绝低于 16 的 max_output_tokens；该下限只属于本 Provider。 */
   private static final int OPENAI_RESPONSES_MIN_OUTPUT_TOKENS = 16;
 
-  private static final Set<String> ALLOWED_PAYLOAD_FIELDS = Set.of("output");
-
   /** 可等价重建的 reasoning item 成员：超出这些成员的额外成员是 durable 语义无法表达的原生事实。 */
   private static final Set<String> REASONING_ITEM_FIELDS =
       Set.of("type", "id", "status", "summary");
@@ -1016,16 +1014,6 @@ public final class OpenAiResponsesRequestEncoder {
       }
     }
     return false;
-  }
-
-  private static void validateAllowedFields(
-      JsonNode node, Set<String> allowedFields, String context) {
-    for (String field : node.propertyNames()) {
-      if (!allowedFields.contains(field)) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "disallowed field '" + field + "' in " + context);
-      }
-    }
   }
 
   /**
