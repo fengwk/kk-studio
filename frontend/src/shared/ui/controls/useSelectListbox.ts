@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { RefObject } from 'react'
 import type { SelectOption } from './Select'
 
@@ -31,19 +31,25 @@ export function useSelectListbox({
   const [modalTouchOptions, setModalTouchOptions] = useState(false)
   const [activeIndex, setActiveIndex] = useState(selectedIndex)
 
-  const containsNode = (node: Node | null): boolean => {
-    if (node == null) {
-      return false
-    }
-    return rootRef.current?.contains(node) === true || menuRef.current?.contains(node) === true
-  }
+  const containsNode = useCallback(
+    (node: Node | null): boolean => {
+      if (node == null) {
+        return false
+      }
+      return rootRef.current?.contains(node) === true || menuRef.current?.contains(node) === true
+    },
+    [rootRef, menuRef],
+  )
 
-  const closeListbox = (focusTrigger = false) => {
-    setOpen(false)
-    if (focusTrigger) {
-      triggerRef.current?.focus()
-    }
-  }
+  const closeListbox = useCallback(
+    (focusTrigger = false) => {
+      setOpen(false)
+      if (focusTrigger) {
+        triggerRef.current?.focus()
+      }
+    },
+    [triggerRef],
+  )
 
   const openListbox = () => {
     setActiveIndex(selectedIndex)
@@ -79,7 +85,7 @@ export function useSelectListbox({
     const option = optionRefs.current[activeIndex]
     option?.focus({ preventScroll: true })
     option?.scrollIntoView({ block: 'nearest' })
-  }, [activeIndex, open])
+  }, [activeIndex, open, optionRefs])
 
   // 打开期间的外点点击、焦点移出与 Escape 都关闭菜单。
   useEffect(() => {
@@ -112,7 +118,7 @@ export function useSelectListbox({
       document.removeEventListener('focusin', handleFocusIn)
       document.removeEventListener('keydown', handleKeyDown)
     }
-  }, [open])
+  }, [open, containsNode, closeListbox])
 
   return {
     open,

@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react'
+import { useCallback, useLayoutEffect, useState } from 'react'
 import type { CSSProperties, RefObject } from 'react'
 import { computeMenuPosition } from './select-menu-position'
 
@@ -26,20 +26,20 @@ export function useSelectMenuPosition({
   const [menuPosition, setMenuPosition] = useState<CSSProperties | null>(null)
 
   /** 按当前触发按钮放置；菜单挂载后传入实测宽度以校正右对齐与最大宽高。 */
-  const placeMenu = () => {
+  const placeMenu = useCallback(() => {
     if (!triggerRef.current) {
       return
     }
     setMenuPosition(computeMenuPosition(triggerRef.current, compact, menuRef.current))
-  }
+  }, [compact, menuRef, triggerRef])
 
   /** 打开前菜单尚未挂载，只能按触发按钮估算。 */
-  const placeMenuBeforeOpen = () => {
+  const placeMenuBeforeOpen = useCallback(() => {
     if (!triggerRef.current) {
       return
     }
     setMenuPosition(computeMenuPosition(triggerRef.current, compact))
-  }
+  }, [compact, triggerRef])
 
   useLayoutEffect(() => {
     if (!open) {
@@ -52,7 +52,7 @@ export function useSelectMenuPosition({
       window.removeEventListener('resize', placeMenu)
       window.removeEventListener('scroll', placeMenu, true)
     }
-  }, [open, compact])
+  }, [open, compact, placeMenu])
 
   return { menuPosition, placeMenu, placeMenuBeforeOpen }
 }
