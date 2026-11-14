@@ -45,8 +45,11 @@ func TestDiscovery_SupportStates(t *testing.T) {
 // LSP-T-036 verifies empty configuration and empty commands remain unavailable.
 func TestDiscovery_EmptyConfig(t *testing.T) {
 	discovery, err := NewDiscovery(nil, ResolverOptions{})
-	if err != nil || len(discovery.Servers()) != 0 {
-		t.Fatalf("empty discovery = %#v, %v", discovery, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, found := discovery.Server("/tmp/main.go"); found {
+		t.Fatal("empty discovery resolved a server")
 	}
 	if got := discovery.Support("/tmp/main.go"); got.Supported || got.Available || got.Language != nil {
 		t.Fatalf("empty support = %#v", got)

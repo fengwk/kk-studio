@@ -33,8 +33,8 @@ func TestFacade_GenerationSwap(t *testing.T) {
 		t.Fatalf("disabled support = %#v", got)
 	}
 	facade.FileChanged("/tmp/a.go")
-	if facade.ActiveClientCount() != 0 {
-		t.Fatal("disabled facade reports active clients")
+	if facade.current.service != nil {
+		t.Fatal("disabled facade retained a service generation")
 	}
 	release()
 	select {
@@ -103,8 +103,8 @@ func TestFacade_PreparedGenerationLifecycle(t *testing.T) {
 	}
 
 	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
-	if err := facade.Update([]config.LSPServerConfig{{ID: "same", Command: []string{"a"}}, {ID: "same", Command: []string{"b"}}}); err == nil || err.Error() != "duplicate lsp server id: same" {
-		t.Fatalf("duplicate update error = %v", err)
+	if err := publishServers(t, facade, []config.LSPServerConfig{{ID: "same", Command: []string{"a"}}, {ID: "same", Command: []string{"b"}}}); err == nil || err.Error() != "duplicate lsp server id: same" {
+		t.Fatalf("duplicate configuration error = %v", err)
 	}
 	prepared, err := facade.Prepare(nil)
 	if err != nil {

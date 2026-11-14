@@ -98,14 +98,6 @@ func (f *Facade) FileChanged(path string) {
 		service.FileChanged(path)
 	}
 }
-func (f *Facade) ActiveClientCount() int {
-	service, release := f.currentService()
-	defer release()
-	if service == nil {
-		return 0
-	}
-	return service.ActiveClientCount()
-}
 
 // PreparedGeneration separates candidate construction from the atomic publish step.
 type PreparedGeneration struct {
@@ -147,16 +139,6 @@ func (p *PreparedGeneration) Retire() error {
 	p.generation.retire()
 	<-p.generation.done
 	return p.generation.closeErr
-}
-func (f *Facade) Update(servers []config.LSPServerConfig) error {
-	p, err := f.Prepare(servers)
-	if err != nil {
-		return err
-	}
-	if err = p.Publish(); err != nil {
-		return err
-	}
-	return nil
 }
 func (f *Facade) Close() error {
 	f.mu.Lock()

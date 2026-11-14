@@ -31,7 +31,7 @@ func TestService_ActiveClientCount(t *testing.T) {
 	if !support.Supported || !support.Available || support.Language == nil || *support.Language != "go" {
 		t.Fatalf("support = %#v", support)
 	}
-	if service.ActiveClientCount() != 0 {
+	if service.Pool.ActiveClientCount() != 0 {
 		t.Fatal("new service has an active client")
 	}
 	var confirmed int
@@ -39,14 +39,14 @@ func TestService_ActiveClientCount(t *testing.T) {
 	if err != nil || result != filepath.FromSlash("/tmp/target.go")+":3:5" {
 		t.Fatalf("definition = %q, %v", result, err)
 	}
-	if service.ActiveClientCount() != 1 || supervisor.starts != 1 || confirmed != 1 {
-		t.Fatalf("clients=%d starts=%d confirmations=%d", service.ActiveClientCount(), supervisor.starts, confirmed)
+	if service.Pool.ActiveClientCount() != 1 || supervisor.starts != 1 || confirmed != 1 {
+		t.Fatalf("clients=%d starts=%d confirmations=%d", service.Pool.ActiveClientCount(), supervisor.starts, confirmed)
 	}
 	service.FileChanged(file)
 	if err := service.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if service.ActiveClientCount() != 0 {
+	if service.Pool.ActiveClientCount() != 0 {
 		t.Fatal("closed service still reports active clients")
 	}
 }

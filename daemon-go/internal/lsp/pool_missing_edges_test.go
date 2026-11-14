@@ -18,7 +18,7 @@ func TestPool_SharedFailedBoot(t *testing.T) {
 	results := make(chan error, 2)
 	for range 2 {
 		go func() {
-			_, err := pool.Lease(context.Background(), file)
+			_, err := pool.LeaseWithExit(context.Background(), file, nil)
 			results <- err
 		}()
 	}
@@ -52,7 +52,7 @@ func TestPool_SharedFailedBoot(t *testing.T) {
 		t.Fatalf("failed boot errors=%v,%v starts=%d", first, second, supervisor.starts)
 	}
 	supervisor.startErr = nil
-	lease, err := pool.Lease(context.Background(), file)
+	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +174,7 @@ func TestPool_NonOverlappingRestart(t *testing.T) {
 		}
 	}
 	waitCtx, stopWait := context.WithTimeout(context.Background(), 20*time.Millisecond)
-	_, waitErr := pool.Lease(waitCtx, file)
+	_, waitErr := pool.LeaseWithExit(waitCtx, file, nil)
 	stopWait()
 	var timeout *LspTimeoutError
 	if !errors.As(waitErr, &timeout) || supervisor.starts != 1 {
@@ -204,7 +204,7 @@ func TestPool_NonOverlappingRestart(t *testing.T) {
 	if atomic.LoadInt32(&confirmed) != 1 {
 		t.Fatalf("cancelled owner confirmations=%d", confirmed)
 	}
-	second, err := pool.Lease(context.Background(), file)
+	second, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ func TestPool_InitializeFailureWaiters(t *testing.T) {
 	results := make(chan error, 2)
 	for range 2 {
 		go func() {
-			_, err := pool.Lease(context.Background(), file)
+			_, err := pool.LeaseWithExit(context.Background(), file, nil)
 			results <- err
 		}()
 	}

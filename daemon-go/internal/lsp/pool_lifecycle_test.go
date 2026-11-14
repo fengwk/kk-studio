@@ -62,7 +62,7 @@ func TestPool_CoalescesBoot(t *testing.T) {
 	results := make(chan result, callers)
 	for i := 0; i < callers; i++ {
 		go func() {
-			lease, err := pool.Lease(context.Background(), file)
+			lease, err := pool.LeaseWithExit(context.Background(), file, nil)
 			results <- result{lease: lease, err: err}
 		}()
 	}
@@ -125,7 +125,7 @@ func TestPool_CoalescesBoot(t *testing.T) {
 // LSP-T-041 evicts only an idle client and terminates its managed process.
 func TestPool_IdleEviction(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: 10 * time.Millisecond, ShutdownGrace: 10 * time.Millisecond})
-	lease, err := pool.Lease(context.Background(), file)
+	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -145,7 +145,7 @@ func TestPool_IdleEviction(t *testing.T) {
 // LSP-T-044 and LSP-T-058 report cleanup errors with an aggregate cause.
 func TestPool_CloseReportsCleanupFailure(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
-	lease, err := pool.Lease(context.Background(), file)
+	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func TestPool_IndependentWaiters(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("startup did not reach supervisor")
 	}
-	go func() { lease, _ := pool.Lease(context.Background(), file); secondResult <- lease }()
+	go func() { lease, _ := pool.LeaseWithExit(context.Background(), file, nil); secondResult <- lease }()
 	server, _ := pool.discovery.RequireServer(file)
 	root, _ := pool.discovery.WorkspaceRoot(server, file)
 	key := poolKey(root, server)
@@ -379,7 +379,7 @@ func TestPool_ConvergedRetry(t *testing.T) {
 		t.Fatalf("first lease error=%v confirmed=%d", firstErr, confirmed)
 	}
 	supervisor.startErr = nil
-	lease, err := pool.Lease(context.Background(), file)
+	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -414,7 +414,7 @@ func TestPool_UnconvergedIsolation(t *testing.T) {
 // LSP-T-055 rejects an already-cancelled lease without increasing its in-flight count.
 func TestPool_PreAbortedWarmLease(t *testing.T) {
 	pool, _, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
-	lease, err := pool.Lease(context.Background(), file)
+	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +450,7 @@ func TestPool_ClientLookupAndClosedLease(t *testing.T) {
 	if pool.Client(file) != nil {
 		t.Fatal("unstarted file returned a client")
 	}
-	lease, err := pool.Lease(context.Background(), file)
+	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

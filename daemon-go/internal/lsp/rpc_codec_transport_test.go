@@ -27,7 +27,7 @@ func TestLSPTransport_OversizedResponseTerminatesAndRebuilds(t *testing.T) {
 	}
 	supervisor := &fakeSupervisor{oversizedMethod: "textDocument/definition", oversizedStarts: 1}
 	service := NewService(discovery, supervisor, PoolOptions{IdleTimeout: time.Hour})
-	lease, err := service.Pool.Lease(context.Background(), source)
+	lease, err := service.Pool.LeaseWithExit(context.Background(), source, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

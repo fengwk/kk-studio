@@ -68,9 +68,6 @@ func poolKey(root string, server ServerConfig) string {
 	b, _ := json.Marshal([]any{root, server.ID, server.Command, server.Extensions, server.RootMarkers, server.FirstMatchMarkers})
 	return string(b)
 }
-func (p *Pool) Lease(ctx context.Context, path string) (*Lease, error) {
-	return p.LeaseWithExit(ctx, path, nil)
-}
 
 func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*Lease, error) {
 	if ctx.Err() != nil {
