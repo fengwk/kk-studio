@@ -7,7 +7,7 @@ import lombok.Data;
  *
  * <p>wire 层只保证 {@code name} 是 JSON string（missing / 显式 null 均保留为 null，非字符串 JSON primitive 直接抛
  * {@code DomainException}）；{@code null} 与空白 / 超长等规范化语义由请求 mapper 与 Core 的 {@code Names}
- * 权威判定，绝不在此复制长度逻辑。未知字段经 {@link #rejectUnknownField} 拒绝。
+ * 权威判定，绝不在此复制长度逻辑。未知字段由 HTTP 边界的严格 Jackson 反序列化拒绝。
  */
 @Data
 public class HarnessNameUpdateDTO {

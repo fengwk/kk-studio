@@ -170,13 +170,12 @@ public final class ToolExecutionGateway implements ToolGateway {
         return new ToolGateway.Deny(resolved.error());
       }
       ToolSettings settings = toolSettingsProvider.get();
-      PermissionEvaluator.Evaluation evaluation =
+      PermissionAction action =
           permissionEvaluator.evaluate(
               new PermissionEvaluationContext(
                   resolved.contribution().definition().descriptor().name(),
                   request.call().argumentsJson(),
                   settings));
-      PermissionAction action = evaluation.action();
       return switch (action) {
         case ALLOW -> new ToolGateway.Allow();
         case ASK -> {

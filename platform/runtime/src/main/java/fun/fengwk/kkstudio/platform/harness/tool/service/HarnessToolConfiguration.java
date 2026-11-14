@@ -7,19 +7,12 @@ import org.springframework.context.annotation.Configuration;
 import fun.fengwk.kkstudio.platform.harness.tool.configuration.SystemSettingsToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.BashSurfaceAnalyzer;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.PermissionEvaluator;
-import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsCodec;
 import fun.fengwk.kkstudio.platform.harness.tool.permission.ToolSettingsProvider;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
 /** Tool settings 与 permission evaluator 的生产装配。 */
 @Configuration(proxyBeanMethods = false)
 public class HarnessToolConfiguration {
-
-  @Bean
-  @ConditionalOnMissingBean
-  public ToolSettingsCodec toolSettingsCodec() {
-    return new ToolSettingsCodec();
-  }
 
   @Bean
   @ConditionalOnMissingBean

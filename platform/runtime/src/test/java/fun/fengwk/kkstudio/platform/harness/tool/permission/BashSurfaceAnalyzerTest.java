@@ -142,12 +142,10 @@ class BashSurfaceAnalyzerTest {
 
     assertEquals(
         PermissionAction.DENY,
-        evaluator.evaluate(new PermissionEvaluationContext(BASH, arguments, settings)).action());
+        evaluator.evaluate(new PermissionEvaluationContext(BASH, arguments, settings)));
     assertEquals(
         PermissionAction.DENY,
-        evaluator
-            .evaluate(new PermissionEvaluationContext(CUSTOM_BASH, arguments, settings))
-            .action());
+        evaluator.evaluate(new PermissionEvaluationContext(CUSTOM_BASH, arguments, settings)));
   }
 
   /** malformed surface ASK；若完整命令被 wildcard deny，则仍然确定性 DENY。 */
@@ -170,7 +168,7 @@ class BashSurfaceAnalyzerTest {
 
   private PermissionAction evaluate(String command, ToolSettings settings) {
     String arguments = "{\"command\":" + quote(command) + ",\"workdir\":\"/tmp/environment\"}";
-    return evaluator.evaluate(new PermissionEvaluationContext(BASH, arguments, settings)).action();
+    return evaluator.evaluate(new PermissionEvaluationContext(BASH, arguments, settings));
   }
 
   private String quote(String value) {

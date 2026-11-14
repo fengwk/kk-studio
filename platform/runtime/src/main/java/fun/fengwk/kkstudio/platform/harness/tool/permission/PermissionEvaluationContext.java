@@ -13,6 +13,9 @@ public record PermissionEvaluationContext(
 
   public PermissionEvaluationContext {
     toolName = Objects.requireNonNull(toolName, "toolName");
+    if (toolName.isBlank()) {
+      throw new IllegalArgumentException("toolName must not be blank");
+    }
     if (argumentsJson == null || argumentsJson.isBlank()) {
       throw new IllegalArgumentException("argumentsJson must not be blank");
     }
