@@ -18,6 +18,6 @@ export {
   useAttachmentUploads,
   type AttachmentUpload,
   type AttachmentUploadError,
-} from '@/features/thread/composer/use-attachment-uploads'
+} from '@/features/thread/composer/useAttachmentUploads'
 // 存储面类型经 composer 包中转：portable thread-panel 只允许依赖 composer 契约。
 export type { StorageService } from '@/shared/api/storage-service'

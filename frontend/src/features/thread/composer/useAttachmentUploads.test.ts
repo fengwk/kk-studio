@@ -34,7 +34,7 @@ import {
   isAmbiguousUploadOutcome,
   useAttachmentUploads,
   type AttachmentUploadError,
-} from './use-attachment-uploads'
+} from '@/features/thread/composer/useAttachmentUploads'
 
 type EventCallback = (event: unknown) => void
 

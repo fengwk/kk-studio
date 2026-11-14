@@ -17,7 +17,7 @@ import { mediaKindOf } from '@/shared/lib/upload-file'
 import {
   uploadOccurrence,
   type AttachmentUpload,
-} from '@/features/thread/composer/use-attachment-uploads'
+} from '@/features/thread/composer/useAttachmentUploads'
 import type {
   ComposerPart,
   ImageInputTier,
