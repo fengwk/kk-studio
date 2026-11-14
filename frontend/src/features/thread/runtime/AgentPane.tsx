@@ -16,6 +16,7 @@ import {
 } from '@/features/thread/runtime/useThreadNavigation'
 import { usePaneTarget } from '@/features/thread/runtime/usePaneTarget'
 import { useThreadProjection } from '@/features/thread/runtime/useThreadProjection'
+import { usePaneLayoutMode } from '@/features/thread/runtime/usePaneLayoutMode'
 import { isBoundTarget, samePaneTarget } from '@/features/thread/runtime/agent-pane'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { useOptionalIdePanel, type IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
@@ -93,26 +94,7 @@ export function AgentPane({
   const paneSectionRef = useRef<HTMLElement | null>(null)
   const { t } = useI18n()
   const idePanel = useOptionalIdePanel()
-  const [layoutMode, setLayoutMode] = useState<'wide' | 'narrow'>('wide')
-
-  useEffect(() => {
-    const el = paneSectionRef.current
-    if (!el || typeof ResizeObserver === 'undefined') {
-      return
-    }
-    const updateSize = (width: number) => {
-      setLayoutMode(width < 640 ? 'narrow' : 'wide')
-    }
-    updateSize(el.clientWidth)
-    const observer = new ResizeObserver((entries) => {
-      const entry = entries[0]
-      if (entry) {
-        updateSize(entry.contentRect.width)
-      }
-    })
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  const layoutMode = usePaneLayoutMode(paneSectionRef)
 
   const { target, targetRef, setTarget } = usePaneTarget({
     initialTarget: initialTarget
