@@ -15,12 +15,7 @@ import (
 var fileBuffers = sync.Pool{New: func() any { buffer := make([]byte, 0, 256*1024); return &buffer }}
 var foldedBuffers = sync.Pool{New: func() any { buffer := make([]byte, 0, 256*1024); return &buffer }}
 
-// readPooled performs one open and reuses the per-worker whole-file buffer.
-func readPooled(path string) ([]byte, func(), error) {
-	data, release, _, err := readPooledContext(context.Background(), path)
-	return data, release, err
-}
-
+// readPooledContext opens path once and reuses the per-worker whole-file buffer.
 func readPooledContext(ctx context.Context, path string) ([]byte, func(), bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -83,39 +78,37 @@ func releaseBuffer(buf []byte) {
 	}
 }
 
-func grepFile(data []byte, path, pattern string, literal, ignoreCase bool, re *regexp.Regexp, required []byte) []string {
+func grepFile(data []byte, path string, spec patternSpec) []string {
 	if len(data) == 0 {
 		return nil
 	}
 	lines := &lineCollector{data: data, path: path, number: 1, lastOutput: -1}
 	lines.end = lines.lineEnd(0)
-	if literal && !(ignoreCase && !ascii(pattern)) {
-		needle := []byte(pattern)
-		if ignoreCase {
+	if spec.literal && !(spec.ignoreCase && !ascii(spec.text)) {
+		needle := []byte(spec.text)
+		if spec.ignoreCase {
 			scanASCIIInsensitive(data, needle, lines.add)
 		} else {
 			scanLiteral(data, needle, lines.add)
 		}
 		return lines.out
 	}
-	if len(required) != 0 {
+	if len(spec.required) != 0 {
 		lastAttempt := -1
-		for from := 0; from+len(required) <= len(data); {
-			i := bytes.Index(data[from:], required)
+		for from := 0; from+len(spec.required) <= len(data); {
+			i := bytes.Index(data[from:], spec.required)
 			if i < 0 {
 				break
 			}
 			pos := from + i
 			start, end, _ := lines.bounds(pos)
 			if start != lastAttempt {
-				text := data[start:end]
-				text = bytes.TrimSuffix(text, []byte{'\r'})
-				if re.Match(text) {
+				if spec.re.Match(bytes.TrimSuffix(data[start:end], []byte{'\r'})) {
 					lines.add(pos)
 				}
 				lastAttempt = start
 			}
-			from = pos + len(required)
+			from = pos + len(spec.required)
 		}
 		return lines.out
 	}
@@ -124,7 +117,7 @@ func grepFile(data []byte, path, pattern string, literal, ignoreCase bool, re *r
 	normalized := stripCRLF(data)
 	lines.data = normalized
 	lines.end = lines.lineEnd(0)
-	for _, loc := range re.FindAllIndex(normalized, -1) {
+	for _, loc := range spec.re.FindAllIndex(normalized, -1) {
 		lines.add(loc[0])
 	}
 	return lines.out

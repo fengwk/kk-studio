@@ -37,10 +37,10 @@ printf launched > "$SEARCH_RG_MARKER"
 	}
 	t.Setenv("PATH", binaryDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	t.Setenv("SEARCH_RG_MARKER", marker)
-	if _, err := Find(root, "", 0); err != nil {
+	if _, err := FindContext(context.Background(), root, "", 0); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Grep(root, "needle", true, false, "", 0); err != nil {
+	if _, err := GrepContext(context.Background(), root, "needle", true, false, "", 0); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
@@ -118,7 +118,7 @@ func TestFindContextRejectsInvalidRootsPatternsAndLimits(t *testing.T) {
 	if _, err := FindContext(context.Background(), root, "", -1); err == nil {
 		t.Fatal("negative find limit accepted")
 	}
-	if _, err := Grep(root, "[", false, false, "", 10); err == nil || !strings.Contains(err.Error(), "invalid regex") {
+	if _, err := GrepContext(context.Background(), root, "[", false, false, "", 10); err == nil || !strings.Contains(err.Error(), "invalid regex") {
 		t.Fatalf("invalid regex error=%v", err)
 	}
 }
@@ -222,11 +222,11 @@ func TestGrepASCIIInsensitiveLongPatternAndNegativeLimit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "long.txt"), []byte(strings.ToLower(pattern)), 0600); err != nil {
 		t.Fatal(err)
 	}
-	results, err := Grep(root, pattern, true, true, "", 10)
-	if err != nil || !reflect.DeepEqual(results, []string{"long.txt:1:" + strings.ToLower(pattern)}) {
+	results, err := GrepContext(context.Background(), root, pattern, true, true, "", 10)
+	if err != nil || !reflect.DeepEqual(results.Results, []string{"long.txt:1:" + strings.ToLower(pattern)}) {
 		t.Fatalf("results=%v err=%v", results, err)
 	}
-	if _, err := Grep(root, pattern, true, false, "", -1); err == nil {
+	if _, err := GrepContext(context.Background(), root, pattern, true, false, "", -1); err == nil {
 		t.Fatal("negative grep limit accepted")
 	}
 }
@@ -518,13 +518,13 @@ func TestGrepLongUnicodeLineCenteredExcerpt(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := Grep(root, "needle", false, false, "", 0)
+	got, err := GrepContext(context.Background(), root, "needle", false, false, "", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := "unicode.txt:1:... " + strings.Repeat("界", 220) + "needle" + strings.Repeat("界", 214) + " ... (line truncated to 500 chars)"
-	if !reflect.DeepEqual(got, []string{want}) {
-		t.Fatalf("grep=%q want=%q", got, want)
+	if !reflect.DeepEqual(got.Results, []string{want}) {
+		t.Fatalf("grep=%q want=%q", got.Results, want)
 	}
 }
 

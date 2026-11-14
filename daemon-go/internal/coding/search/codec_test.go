@@ -61,9 +61,6 @@ func TestGrepContextReportsUndecodableDirectFile(t *testing.T) {
 	if err.Error() == "" {
 		t.Fatal("the codec failure is not reported")
 	}
-	if _, err := Grep(path, "x", true, false, "", 10); err != nil {
-		t.Fatalf("Grep: %v", err)
-	}
 }
 
 // COD-T-267: lone CR line breaks give the same line numbers and line text as read.

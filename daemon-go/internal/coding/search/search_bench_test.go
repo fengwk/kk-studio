@@ -1,6 +1,7 @@
 package search
 
 import (
+	"context"
 	"os"
 	"testing"
 )
@@ -22,7 +23,7 @@ func BenchmarkProfileGrep(b *testing.B) {
 	}
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		if _, err := Grep(root, pattern, literal, ignoreCase, "", 0); err != nil {
+		if _, err := GrepContext(context.Background(), root, pattern, literal, ignoreCase, "", 0); err != nil {
 			b.Fatal(err)
 		}
 	}
