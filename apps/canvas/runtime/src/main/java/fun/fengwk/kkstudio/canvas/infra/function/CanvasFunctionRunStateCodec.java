@@ -160,7 +160,7 @@ public final class CanvasFunctionRunStateCodec {
               definition(
                   JsonCodecSupport.object(required(plan, "definition"), "state.plan.definition")));
       CanvasFunctionDefinition definition = binding.definition();
-      // args 在 state 里是 JSON object（与 adapterState 一致），复用 Core 的严格解析与上限校验。
+      // args 在 state 里是 JSON object（与 adapterState 一致），复用 CanvasJson 的严格解析与上限校验。
       JsonObject args =
           args(
               JsonCodecSupport.object(required(plan, "args"), "state.plan.args").toString(),

@@ -11,7 +11,8 @@ import java.util.Map;
  * {@code canvas_node.function} JSONB 列与 {@link CanvasFunction} 的 base shape {@code {name,args}}
  * 编解码。
  *
- * <p>列的检查约束要求 name 是非空白字符串、args 是 object；这里使用 Core 的严格 JSON 模型，使读写共用同一套语义与转义规则， 不引入第二份 args 表示。
+ * <p>列的检查约束要求 name 是非空白字符串、args 是 object；这里使用 {@link CanvasJson} 的严格 JSON 模型，使读写共用同一套语义与转义规则，
+ * 不引入第二份 args 表示。
  */
 final class CanvasNodeFunctionJson {
 

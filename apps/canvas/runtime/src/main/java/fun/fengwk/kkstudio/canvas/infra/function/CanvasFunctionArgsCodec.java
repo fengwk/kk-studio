@@ -10,7 +10,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.Objects;
 
-/** Function args 的唯一严格 parser 与 canonical encoder。 */
+/** Function args 的唯一严格 parser。 */
 @Component
 public final class CanvasFunctionArgsCodec {
 
@@ -34,10 +34,5 @@ public final class CanvasFunctionArgsCodec {
     } catch (IllegalArgumentException error) {
       throw DomainException.validation("function.args", error.getMessage(), error);
     }
-  }
-
-  /** canonical 编码已校验的 args。 */
-  public String encode(JsonObject args) {
-    return Objects.requireNonNull(args, "args").write();
   }
 }

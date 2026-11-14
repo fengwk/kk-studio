@@ -126,6 +126,17 @@ abstract class CanvasFunctionRuntimeTestSupport extends PostgresCanvasInfraTestS
 
   /** 用给定 source 构造 Runtime transactions，复用真实 store/仓库与不触及 Blob ref_count 的释放替身。 */
   CanvasFunctionRunTransactions transactionsFor(PluginCanvasFunctionCatalogSource catalogSource) {
+    return transactionsFor(catalogSource, clock);
+  }
+
+  /** 用给定 Clock 构造 Runtime transactions，用于验证写入时间的精度契约。 */
+  CanvasFunctionRunTransactions transactionsFor(Clock clock) {
+    return transactionsFor(catalogSource.source(), clock);
+  }
+
+  /** 用给定 source 与 Clock 构造 Runtime transactions。 */
+  CanvasFunctionRunTransactions transactionsFor(
+      PluginCanvasFunctionCatalogSource catalogSource, Clock clock) {
     return new CanvasFunctionRunTransactions(
         canvasStore,
         resourceRepository,

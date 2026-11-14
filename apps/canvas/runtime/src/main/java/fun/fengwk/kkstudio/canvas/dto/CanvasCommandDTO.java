@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * Canvas typed command：与 canvas-core 的 {@code CanvasCommand} 一一对应，每条命令只修改一个语义组。
+ * Canvas typed command：与领域命令 {@code CanvasCommand} 一一对应，每条命令只修改一个语义组。
  *
  * <p>前置条件是编辑起点中该语义组的旧值，而不是整图版本：名称用 {@code expectedName}，资源数组用有序 Resource id 列表， Function 用完整 {@code
  * {name,args}}，布局可选携带 {@code expectedTransform} 以拒绝离线积压的位置重放。批内命令一起校验， 一起提交或一起回滚。命令只引用存储 blob 或既有

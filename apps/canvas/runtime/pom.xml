@@ -147,6 +147,11 @@
                                     <includes>
                                         <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunStateCodec</include>
                                         <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunTransactions</include>
+                                        <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunPersistence</include>
+                                        <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunPlan</include>
+                                        <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunOutputs</include>
+                                        <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunTexts</include>
+                                        <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunErrors</include>
                                         <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionService</include>
                                         <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker</include>
                                         <include>fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRuntimeConfiguration</include>

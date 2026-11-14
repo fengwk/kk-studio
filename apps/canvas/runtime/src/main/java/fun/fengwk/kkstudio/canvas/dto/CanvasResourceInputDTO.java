@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import java.util.UUID;
 
 /**
- * typed command 中节点资源数组的一个槽位意图，对应 canvas-core 的 {@code CanvasResourceInput}。
+ * typed command 中节点资源数组的一个槽位意图，对应领域模型 {@code CanvasResourceInput}。
  *
  * <p>KEEP 复用编辑起点列表中已有的 Resource，维持它在当前节点中的身份；TEXT 与 BLOB 创建新的不可变 Resource 行， 文字内联在命令里，媒体则引用既有
  * Storage blob。命令不携带存储 bucket 或对象 key。

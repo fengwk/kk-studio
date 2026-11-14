@@ -63,8 +63,8 @@ import java.util.UUID;
  * <p>媒体资源 DTO 的 kind/mediaType/宽高/时长来自 blob 行（blob 是媒体事实的权威源）；TEXT 资源没有 blob，kind 固定为 TEXT
  * 且媒体事实为空。blob 行缺失时抛出显式错误，绝不静默伪造媒体事实。
  *
- * <p>Function args 在 wire 是任意 JSON object，在领域是严格 {@link CanvasJson.JsonObject}：映射双向递归转换，并在入口触发 Core
- * 的深度与长度校验，保证 HTTP 输入不会绕过持久化形式的不变量。
+ * <p>Function args 在 wire 是任意 JSON object，在领域是严格 {@link CanvasJson.JsonObject}：映射双向递归转换，并在入口触发
+ * {@link CanvasJson} 的深度与长度校验，保证 HTTP 输入不会绕过持久化形式的不变量。
  */
 public class CanvasDtoMapper {
 
@@ -415,7 +415,7 @@ public class CanvasDtoMapper {
     return transform == null ? null : toTransform(transform);
   }
 
-  /** wire 的任意 JSON object 转成 Core 的严格 args 值模型，并复用 Core 的深度与长度上限。 */
+  /** wire 的任意 JSON object 转成 {@link CanvasJson} 的严格 args 值模型，并复用同一套深度与长度上限。 */
   private static CanvasJson.JsonObject toJsonObject(JsonNode args) {
     if (args == null) {
       throw DomainException.validation("function.args", "function args is required");
@@ -471,7 +471,7 @@ public class CanvasDtoMapper {
     throw DomainException.validation(field, field + " must contain only JSON values");
   }
 
-  /** Core 的严格 args 值模型转回 wire 的 JSON 树，数值保持精确十进制。 */
+  /** {@link CanvasJson} 的严格 args 值模型转回 wire 的 JSON 树，数值保持精确十进制。 */
   private static JsonNode toJsonNode(CanvasJson.JsonObject args) {
     return toJsonNode(args, 0);
   }

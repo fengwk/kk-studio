@@ -1,12 +1,11 @@
 package fun.fengwk.kkstudio.canvas;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.common.error.DomainException;
 
 import java.util.List;
 import java.util.UUID;
 
-/** 领域与命令的共享校验，保证 Core 各处对名称、正文、集合与 JSON 的处理一致。 */
+/** 领域与命令的共享校验，保证领域各处对名称、正文与集合的处理一致。 */
 final class CanvasValidation {
 
   /** 节点、group 与 function 名称的最大长度（与数据库列一致）。 */
@@ -74,23 +73,5 @@ final class CanvasValidation {
     if (values.stream().distinct().count() != values.size()) {
       throw DomainException.validation(field, field + " must not contain duplicates");
     }
-  }
-
-  /** 解析命令携带的 args JSON：必须严格合法且是 object。 */
-  static CanvasJson.JsonObject requireArgs(String argsJson, String field) {
-    if (argsJson == null) {
-      throw DomainException.validation(field, field + " must not be null");
-    }
-    CanvasJson value;
-    try {
-      value = CanvasJson.parse(argsJson);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation(
-          field, field + " must be strict JSON: " + error.getMessage(), error);
-    }
-    if (!(value instanceof CanvasJson.JsonObject object)) {
-      throw DomainException.validation(field, field + " must be a JSON object");
-    }
-    return object;
   }
 }

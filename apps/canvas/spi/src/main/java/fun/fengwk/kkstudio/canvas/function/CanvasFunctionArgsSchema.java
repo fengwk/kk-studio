@@ -21,15 +21,15 @@ import java.util.Set;
  *
  * <p>Schema 根必须是 object；每个 schema 节点只允许 {@code
  * type/description/properties/required/additionalProperties/enum/default/minimum/maximum/items/minItems/maxItems}，任何其它关键字都会在注册期
- * fail closed，插件无法声明核心不校验的约束。object 必须显式声明 {@code additionalProperties: false} 与 {@code
+ * fail closed，插件无法声明服务端不校验的约束。object 必须显式声明 {@code additionalProperties: false} 与 {@code
  * properties}，因此每一层 object 的未知字段都被拒绝。
  *
- * <p>object 与 array 可以任意递归嵌套（{@code MAX_DEPTH} 内），使 args 可以表达嵌套业务参数；嵌套深度与数组长度都有界，加上 Core 对 args 的
- * JSON 深度/长度上限，冻结计划不会无界增长。
+ * <p>object 与 array 可以任意递归嵌套（{@code MAX_DEPTH} 内），使 args 可以表达嵌套业务参数；嵌套深度与数组长度都有界，加上 {@link
+ * CanvasJson} 对 args 的 JSON 深度/长度上限，冻结计划不会无界增长。
  *
- * <p>核心保留的引用值用 {@code "type":"resourceReference"} 声明，它必须恰好是 {@code {type,nodeId,index}} 形状，与 {@link
- * fun.fengwk.kkstudio.canvas.CanvasFunction} 的引用投影一致，并且可以出现在任意嵌套位置。{@code number} 允许整数与小数，{@code
- * integer} 只允许整数值。
+ * <p>服务端保留的引用值用 {@code "type":"resourceReference"} 声明，它必须恰好是 {@code {type,nodeId,index}} 形状，与
+ * {@link fun.fengwk.kkstudio.canvas.CanvasFunction} 的引用投影一致，并且可以出现在任意嵌套位置。{@code number}
+ * 允许整数与小数，{@code integer} 只允许整数值。
  */
 public final class CanvasFunctionArgsSchema {
 

@@ -6,7 +6,7 @@ import java.util.UUID;
 /**
  * 命令批规划出的持久化步骤，按声明顺序执行。
  *
- * <p>规划在 Core 内完成并产出可比较的步骤序列，外层只负责按顺序落到 document 锁内的短事务：document → node/run → resource → blob。
+ * <p>规划在领域层完成并产出可比较的步骤序列，外层只负责按顺序落到 document 锁内的短事务：document → node/run → resource → blob。
  * 步骤只描述行级变化，不携带冲突语义。
  */
 public sealed interface CanvasMutation
