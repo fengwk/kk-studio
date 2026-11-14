@@ -133,66 +133,107 @@ func (r *InstallerRunner) prepare(ctx context.Context, command Command, daemonCo
 	if err := requireManagedInstallation(installerConfig, r.options.Home, r.options.Platform); err != nil {
 		return Outcome{}, err
 	}
-	environmentRoot := managedEnvironmentRoot(r.options.Home, daemonConfig.EnvironmentID)
-	work, err := os.MkdirTemp(r.options.TempDir, "kk-studio-update-")
+	work, cleanupWork, err := prepareJobDirectory(r.options.TempDir)
 	if err != nil {
-		return Outcome{}, errors.New("cannot create private update job directory")
-	}
-	if err = native.EnsurePrivateDirectory(work); err != nil {
-		if cleanupErr := os.RemoveAll(work); cleanupErr != nil {
-			return Outcome{}, errors.Join(errors.New("cannot protect update job directory"), errInstallerCleanup, cleanupErr)
-		}
-		return Outcome{}, errors.New("cannot protect update job directory")
+		return Outcome{}, err
 	}
 	jobRegistered := false
 	defer func() {
 		if !jobRegistered {
-			if cleanupErr := os.RemoveAll(work); cleanupErr != nil {
-				resultErr = errors.Join(resultErr, errInstallerCleanup, cleanupErr)
-			}
+			cleanupWork(&resultErr)
 		}
 	}()
-	installerName := "install.sh"
-	if r.options.Platform == "windows" {
-		installerName = "install.ps1"
-	}
-	installer := filepath.Join(work, installerName)
+	environmentRoot := managedEnvironmentRoot(r.options.Home, daemonConfig.EnvironmentID)
+	installer := filepath.Join(work, installerFileName(r.options.Platform))
 	if err := r.downloadInstaller(ctx, installerURL(r.options.Platform, command.TargetVersion), installer, daemonConfig.ProxyURL, report); err != nil {
 		return Outcome{}, err
 	}
 	unit := "kk-studio-daemon-update-" + command.OperationID
 	launchCtx, cancel := context.WithTimeout(ctx, jobReadyTimeout)
 	defer cancel()
-	if r.options.Platform == "windows" {
-		action := windowsActionScript(work, installer, environmentRoot, installerConfig, command.TargetVersion, command.OperationID, unit)
-		registration := windowsRegistrationScript(action, unit)
-		if err := r.options.Launch(launchCtx, "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(registration)}); err != nil {
-			return Outcome{}, errors.New("operating-system update job could not be started")
-		}
-		jobRegistered = true
-	} else {
-		runnerPath := filepath.Join(work, "run.sh")
-		if err := native.WritePrivateFile(runnerPath, []byte(unixRunner)); err != nil {
-			return Outcome{}, errors.New("cannot prepare private update job")
-		}
-		invocation := unixInvocation(work, installer, environmentRoot, installerConfig, command.TargetVersion, command.OperationID, r.options.Home, r.options.Environment)
-		var executable string
-		var args []string
-		if r.options.Platform == "darwin" {
-			executable = "launchctl"
-			args = append([]string{"submit", "-l", unit, "--"}, invocation...)
-		} else {
-			executable = "systemd-run"
-			args = append([]string{"--user", "--collect", "--unit=" + unit}, invocation...)
-		}
-		if err := r.options.Launch(launchCtx, executable, args); err != nil {
-			return Outcome{}, errors.New("operating-system update job could not be started")
-		}
-		jobRegistered = true
+	if err := r.launchJob(launchCtx, jobFiles{
+		work:            work,
+		installer:       installer,
+		environmentRoot: environmentRoot,
+		unit:            unit,
+	}, installerConfig, command); err != nil {
+		return Outcome{}, err
 	}
+	jobRegistered = true
 	if err := waitForReady(launchCtx, filepath.Join(work, "ready")); err != nil {
 		return Outcome{}, errors.New("operating-system update job did not become ready")
 	}
+	return preparedOutcome(work, environmentRoot, command), nil
+}
+
+// launchJob registers the OS job that runs the downloaded installer after the daemon releases the
+// update permit.
+func (r *InstallerRunner) launchJob(ctx context.Context, files jobFiles, installerConfig InstallerConfig, command Command) error {
+	if r.options.Platform == "windows" {
+		action := windowsActionScript(files.work, files.installer, files.environmentRoot, installerConfig, command.TargetVersion, command.OperationID, files.unit)
+		registration := windowsRegistrationScript(action, files.unit)
+		if err := r.options.Launch(ctx, "powershell.exe", []string{"-NoProfile", "-NonInteractive", "-EncodedCommand", encodePowerShell(registration)}); err != nil {
+			return errors.New("operating-system update job could not be started")
+		}
+		return nil
+	}
+	runnerPath := filepath.Join(files.work, "run.sh")
+	if err := native.WritePrivateFile(runnerPath, []byte(unixRunner)); err != nil {
+		return errors.New("cannot prepare private update job")
+	}
+	invocation := unixInvocation(files.work, files.installer, files.environmentRoot, installerConfig, command.TargetVersion, command.OperationID, r.options.Home, r.options.Environment)
+	executable, args := unixJobCommand(files.unit, invocation, r.options.Platform)
+	if err := r.options.Launch(ctx, executable, args); err != nil {
+		return errors.New("operating-system update job could not be started")
+	}
+	return nil
+}
+
+// jobFiles names the private files one update job operates on.
+type jobFiles struct {
+	work            string
+	installer       string
+	environmentRoot string
+	unit            string
+}
+
+func installerFileName(platform string) string {
+	if platform == "windows" {
+		return "install.ps1"
+	}
+	return "install.sh"
+}
+
+// prepareJobDirectory creates the private directory the installer job writes its progress into and
+// reports the failure if it cannot be removed again.
+func prepareJobDirectory(tempDir string) (string, func(*error), error) {
+	work, err := os.MkdirTemp(tempDir, "kk-studio-update-")
+	if err != nil {
+		return "", nil, errors.New("cannot create private update job directory")
+	}
+	if err = native.EnsurePrivateDirectory(work); err != nil {
+		if cleanupErr := os.RemoveAll(work); cleanupErr != nil {
+			return "", nil, errors.Join(errors.New("cannot protect update job directory"), errInstallerCleanup, cleanupErr)
+		}
+		return "", nil, errors.New("cannot protect update job directory")
+	}
+	return work, func(resultErr *error) {
+		if cleanupErr := os.RemoveAll(work); cleanupErr != nil {
+			*resultErr = errors.Join(*resultErr, errInstallerCleanup, cleanupErr)
+		}
+	}, nil
+}
+
+// unixJobCommand selects the user-scoped unit runner for the platform.
+func unixJobCommand(unit string, invocation []string, platform string) (string, []string) {
+	if platform == "darwin" {
+		return "launchctl", append([]string{"submit", "-l", unit, "--"}, invocation...)
+	}
+	return "systemd-run", append([]string{"--user", "--collect", "--unit=" + unit}, invocation...)
+}
+
+// preparedOutcome reports the started job, releasing the update permit at most once.
+func preparedOutcome(work, environmentRoot string, command Command) Outcome {
 	var permitMu sync.Mutex
 	permitReleased := false
 	lastOperation := filepath.Join(environmentRoot, "last-operation.json")
@@ -216,7 +257,7 @@ func (r *InstallerRunner) prepare(ctx context.Context, command Command, daemonCo
 		WatchFailure: func(reportFailure func(string)) func() {
 			return watchFailure(lastOperation, command.OperationID, reportFailure)
 		},
-	}, nil
+	}
 }
 
 func requireUpdatePlatform(platform, architecture string) error {
