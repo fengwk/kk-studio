@@ -232,15 +232,18 @@ class H3PromptWorkflowTest {
     return definition;
   }
 
-  /** 与生产 {@link H3WorkflowBuilder#LENGTH_EXPRESSION} 同义的帧长口径，只作为断言的独立算例。 */
-  private static int frameLength(int durationSeconds) {
-    int base = Math.max(5, Math.toIntExact(Math.round(durationSeconds * 24D)));
-    return base + Math.floorMod(5 - Math.floorMod(base, 17), 17);
-  }
-
   /** 生产默认预置图原文（同一资源入口）的已解析视图。 */
   private static ObjectNode defaultTemplate() {
     return (ObjectNode) JsonValues.readTree(H3WorkflowBuilder.defaultTemplateJson());
+  }
+
+  /**
+   * {@link H3WorkflowBuilder#LENGTH_EXPRESSION} 的整秒算例：表达式只在 ComfyUI 侧求值，生产 Java
+   * 不计算帧长，因此这里保留一份可执行的等价算例来固定 10 秒与 15 秒各自应有的帧数。
+   */
+  private static int frameLength(int durationSeconds) {
+    int base = Math.max(5, Math.toIntExact(Math.round(durationSeconds * 24D)));
+    return base + Math.floorMod(5 - Math.floorMod(base, 17), 17);
   }
 
   private static int occurrences(String text, String value) {
