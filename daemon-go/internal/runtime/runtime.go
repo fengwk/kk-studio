@@ -548,10 +548,6 @@ func (r *Runtime) dropActiveConnection() {
 	_ = r.closeActiveConnection()
 }
 
-func (r *Runtime) handle(ctx context.Context, e *protocol.Envelope) error {
-	return r.handleWithIDEContext(ctx, ctx, e)
-}
-
 func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.Envelope) error {
 	if e.MessageType == protocol.MessageType_SETTINGS {
 		return r.handleSettings(e)

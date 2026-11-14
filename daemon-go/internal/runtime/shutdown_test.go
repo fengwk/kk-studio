@@ -73,14 +73,13 @@ func TestShutdownDiagnosticFailureIsAggregatedWithoutRetry(t *testing.T) {
 	original := errors.New("private failure")
 
 	tracker.record("connection close", original)
-	tracker.collect("temporary resource sweep", errors.New("sweep failure"))
 
 	failures := tracker.snapshot()
-	if len(failures) != 3 || !errors.Is(failures[0], original) || !errors.Is(failures[1], writeErr) || !errors.Is(failures[2], writeErr) {
+	if len(failures) != 2 || !errors.Is(failures[0], original) || !errors.Is(failures[1], writeErr) {
 		t.Fatalf("shutdown failures = %v", failures)
 	}
-	if writer.calls != 2 {
-		t.Fatalf("diagnostic writes = %d, want one attempt for each failure", writer.calls)
+	if writer.calls != 1 {
+		t.Fatalf("diagnostic writes = %d, want one attempt", writer.calls)
 	}
 }
 

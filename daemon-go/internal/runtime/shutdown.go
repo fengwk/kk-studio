@@ -59,16 +59,6 @@ func (s *shutdownFailureTracker) record(phase string, failure any) {
 	}
 }
 
-func (s *shutdownFailureTracker) collect(phase string, failure any) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	failureType, _ := normalizeShutdownFailure(failure)
-	if err := writeShutdownDiagnostic(s.writer, phase, failureType); err != nil {
-		s.failures = append(s.failures, err)
-	}
-}
-
 func (s *shutdownFailureTracker) snapshot() []error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
