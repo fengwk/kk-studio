@@ -1003,7 +1003,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(container.textContent).not.toContain('后台执行')
   })
 
-  it('puts the canonical receipt link in the header without a UUID and falls back cleanly', async () => {
+  it('puts the canonical result link in the header without a UUID and falls back cleanly', async () => {
     const user = userEvent.setup()
     const resumeArguments = JSON.stringify({
       subagent_type: 'coder',
@@ -1023,10 +1023,11 @@ describe('ToolMessageBlock per-tool bodies', () => {
       rendererKey: 'task',
       arguments: resumeArguments,
       details: {
-        kind: 'task.accepted',
+        kind: 'task.result',
+        status: 'completed',
         thread_id: '00000000-0000-0000-0000-000000000002',
       },
-      contents: [text('Subagent accepted execution.')],
+      contents: [text('Subagent report.')],
     })
 
     const { container, unmount } = render(
@@ -1039,21 +1040,22 @@ describe('ToolMessageBlock per-tool bodies', () => {
       </MemoryRouter>,
     )
 
-    // 导航只使用收据指定的 threadId，Header 收起时不展示完整 UUID。
+    // 导航只使用 task.result 指定的 threadId，Header 收起时不展示完整 UUID。
     const link = screen.getByRole('link', { name: '查看 subagent 执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     expect(container.querySelector('.thread-disclosure-actions')).toContainElement(link)
     expect(container.querySelector('.thread-tool-summary-detail')).toHaveTextContent('coder')
     expect(container.querySelector('.thread-tool-summary-detail')).not.toHaveTextContent('thread_id')
     expect(screen.queryByText('continue working on subtask')).not.toBeInTheDocument()
-    // 自然语言正文在受理成功时被链接收敛，不重复展示
-    expect(screen.queryByText('Subagent accepted execution.')).not.toBeInTheDocument()
+    // 终态报告随正文收起，不重复展示在 Header 或 preview。
+    expect(screen.queryByText('Subagent report.')).not.toBeInTheDocument()
 
-    // 展开后完整参数仍保留原始 thread_id。
+    // 展开后完整参数仍保留原始 thread_id，同步报告作为正文展示。
     await user.click(expandButton()!)
     expect(container.querySelector('.thread-tool-summary-detail'))
       .toHaveTextContent('coder [thread_id=00000000-0000-0000-0000-000000000001]')
     expect(screen.getByText('continue working on subtask')).toBeInTheDocument()
+    expect(screen.getByText('Subagent report.')).toBeInTheDocument()
     unmount()
 
     // 缺少 details 时不伪造链接，展开后保留原始自然语言正文。
@@ -1079,12 +1081,12 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.getByText('Raw output without details receipt.')).toBeInTheDocument()
     unmount2()
 
-    // 非法 UUID 收据也不能借用调用参数伪造导航。
+    // 非法 UUID 也不能借用调用参数伪造导航。
     const { unmount: unmount3 } = render(
       <MemoryRouter>
         <ToolMessageBlock
           message={callMessage}
-          result={{ ...resultWithCanonicalDetails, details: { kind: 'task.accepted', thread_id: 'invalid' },
+          result={{ ...resultWithCanonicalDetails, details: { kind: 'task.result', status: 'completed', thread_id: 'invalid' },
             contents: [text('Invalid receipt output')] }}
           renderer={TaskToolRenderer}
         />
@@ -1096,7 +1098,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.getByText('Invalid receipt output')).toBeInTheDocument()
     unmount3()
 
-    // 失败（error）时：即使有 details 也不生成收据链接，错误原文完整保留
+    // 失败终态仍以 task.result 为导航依据：子 Thread 链接与错误原文同时保留。
     const failedResult = message({
       phase: 'result',
       status: 'error',
@@ -1105,7 +1107,8 @@ describe('ToolMessageBlock per-tool bodies', () => {
       rendererKey: 'task',
       arguments: resumeArguments,
       details: {
-        kind: 'task.accepted',
+        kind: 'task.result',
+        status: 'failed',
         thread_id: '00000000-0000-0000-0000-000000000003',
       },
       contents: [text('Failure explanation detail')],
@@ -1119,15 +1122,32 @@ describe('ToolMessageBlock per-tool bodies', () => {
         />
       </MemoryRouter>,
     )
-    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000003')
     expect(failed.container.querySelector('.thread-tool-error')).toHaveTextContent(
       'Subagent dispatch rejected: budget exceeded',
     )
     await user.click(expandButton()!)
     expect(screen.getByText('Failure explanation detail')).toBeInTheDocument()
+    failed.unmount()
+
+    // 通用工具错误的 details 为 {}：没有子 Thread 身份就不生成导航，错误原文仍保留。
+    const genericError = render(
+      <MemoryRouter>
+        <ToolMessageBlock
+          message={callMessage}
+          result={{ ...failedResult, details: {}, contents: [text('Generic failure detail')] }}
+          renderer={TaskToolRenderer}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(genericError.container.querySelector('.thread-tool-error')).toHaveTextContent(
+      'Subagent dispatch rejected: budget exceeded',
+    )
   })
 
-  it('keeps pending resume navigation absent and shows it in the header after acceptance', async () => {
+  it('keeps pending resume navigation absent and shows it in the header after completion', async () => {
     const user = userEvent.setup()
     const call = message({
       phase: 'call', toolName: 'task', rendererKey: 'task', invocationStatus: 'RUNNING',
@@ -1147,8 +1167,11 @@ describe('ToolMessageBlock per-tool bodies', () => {
       <MemoryRouter>
         <ToolMessageBlock message={call} renderer={TaskToolRenderer} result={message({
           phase: 'result', toolName: 'task', rendererKey: 'task',
-          details: { kind: 'task.accepted', thread_id: '00000000-0000-0000-0000-000000000002' },
-          contents: [text('accepted')],
+          details: {
+            kind: 'task.result', status: 'completed',
+            thread_id: '00000000-0000-0000-0000-000000000002',
+          },
+          contents: [text('subagent report')],
         })} />
       </MemoryRouter>,
     )
@@ -1157,7 +1180,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.queryByText('00000000-0000-0000-0000-000000000002')).not.toBeInTheDocument()
   })
 
-  it('keeps the task receipt action in the header and the prompt in the preview', async () => {
+  it('keeps the task result action in the header and the prompt in the preview', async () => {
     const user = userEvent.setup()
     const { container } = render(
       <MemoryRouter>
@@ -1166,8 +1189,11 @@ describe('ToolMessageBlock per-tool bodies', () => {
           arguments: JSON.stringify({ subagent_type: 'explorer', prompt: 'first task prompt' }),
         })} renderer={TaskToolRenderer} result={message({
           phase: 'result', toolName: 'task', rendererKey: 'task',
-          details: { kind: 'task.accepted', thread_id: '00000000-0000-0000-0000-000000000002' },
-          contents: [text('accepted')],
+          details: {
+            kind: 'task.result', status: 'completed',
+            thread_id: '00000000-0000-0000-0000-000000000002',
+          },
+          contents: [text('subagent report')],
         })} />
       </MemoryRouter>,
     )

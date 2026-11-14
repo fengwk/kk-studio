@@ -93,12 +93,7 @@ export function ToolMessageBlock({
   const isAskUser = normalizedName === 'ask_user'
   const isMutation = normalizedName === 'write' || normalizedName === 'edit'
   const showTextPreview = isBash || isMcp
-  const parsedTaskReceipt = isTask ? parseTaskReceipt(view.resultMessage?.details) : null
-  // 旧版通用工具错误可能携带过期受理详情；失败时只信任 task.result 终态回执中的子 Thread。
-  const taskReceipt: TaskToolReceipt | null =
-    view.executionState === 'failed' && parsedTaskReceipt?.status === 'accepted'
-      ? null
-      : parsedTaskReceipt
+  const taskReceipt = isTask ? parseTaskReceipt(view.resultMessage?.details) : null
   const stateLabel = view.executionState === 'environment'
     ? t('ai.runtime.tool.environment', { environment: message.requiredEnvironmentName ?? '' })
     : taskReceipt != null

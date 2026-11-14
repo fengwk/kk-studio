@@ -331,10 +331,11 @@ const toolCardHarness = {
           rendererKey: 'task',
           arguments: argumentsValue,
           details: {
-            kind: 'task.accepted',
+            kind: 'task.result',
+            status: 'completed',
             thread_id: '00000000-0000-4000-8000-000000000005',
           },
-          contents: [{ type: 'text', text: 'Subagent execution started.' }],
+          contents: [{ type: 'text', text: 'Subagent report.' }],
         },
       ],
       streaming: false,

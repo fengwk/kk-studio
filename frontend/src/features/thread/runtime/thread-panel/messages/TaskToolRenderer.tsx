@@ -4,7 +4,7 @@ import { parseTaskArguments, parseTaskReceipt } from '@/features/thread/runtime/
 import type { ToolRendererMessage, ToolRendererProps } from '@/platform/extensions/types'
 
 /**
- * task renderer：调用正文只展示 prompt；受理与运行状态由宿主 Header 展示，终态正文显示子任务报告或错误。
+ * task renderer：调用正文只展示 prompt；运行状态由宿主 Header 展示，同步终态正文显示子任务报告或错误。
  */
 export function TaskToolRenderer({ message }: ToolRendererProps) {
   if (message.phase === 'call') {
@@ -34,7 +34,7 @@ function TaskToolCall({ message }: { message: ToolRendererMessage }) {
 function TaskToolResult({ message }: { message: ToolRendererMessage }) {
   const isError = message.status === 'error' || Boolean(message.errorMessage)
   const receipt = isError ? null : parseTaskReceipt(message.details)
-  if (receipt?.status === 'accepted' || receipt?.status === 'running') {
+  if (receipt?.status === 'running') {
     // 导航入口与运行状态在宿主 Header 展示，不重复渲染进度回执正文。
     return null
   }
