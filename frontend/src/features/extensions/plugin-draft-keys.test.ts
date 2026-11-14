@@ -1,24 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { JSONPath } from 'jsonc-parser'
 import {
-  draftKeyPath,
   isDraftKeyUnderPath,
-  isStaleArrayDraftKey,
   withoutStaleDrafts,
 } from './plugin-draft-keys'
 
 const key = (path: JSONPath) => JSON.stringify(path)
 
 describe('plugin draft keys', () => {
-  it('treats the canonical stringified path as the only key representation', () => {
-    expect(draftKeyPath(key(['entries', 0, 'slot', 'index']))).toEqual([
-      'entries',
-      0,
-      'slot',
-      'index',
-    ])
-  })
-
   it('matches subtree membership by path segments, never by string prefix', () => {
     // 相似但不同的字段名不能被当成子树：promptX 不属于 prompt。
     expect(isDraftKeyUnderPath(key(['promptX']), ['prompt'])).toBe(false)
@@ -32,31 +21,26 @@ describe('plugin draft keys', () => {
     expect(isDraftKeyUnderPath(key(['entries', 0]), ['entries', '0'])).toBe(false)
   })
 
-  it('marks the removed item and every shifted item as stale', () => {
-    expect(isStaleArrayDraftKey(key(['entries', 0, 'slot', 'index']), ['entries'], 0)).toBe(true)
-    expect(isStaleArrayDraftKey(key(['entries', 2, 'slot', 'index']), ['entries'], 0)).toBe(true)
-    expect(isStaleArrayDraftKey(key(['entries', 1]), ['entries'], 1)).toBe(true)
-    // 索引更小的条目没有移动，草稿保持有效。
-    expect(isStaleArrayDraftKey(key(['entries', 0, 'slot', 'index']), ['entries'], 1)).toBe(false)
-    // 数组自身的键不是条目键。
-    expect(isStaleArrayDraftKey(key(['entries']), ['entries'], 0)).toBe(false)
-    // 其它数组/字段不受影响。
-    expect(isStaleArrayDraftKey(key(['outputs', 2, 'index']), ['entries'], 0)).toBe(false)
-    expect(isStaleArrayDraftKey(key(['name']), ['entries'], 0)).toBe(false)
-  })
-
   it('drops exactly the stale drafts and leaves the input untouched', () => {
     const drafts = {
-      [key(['entries', 0, 'slot', 'index'])]: 'kept',
-      [key(['entries', 1, 'slot', 'index'])]: 'moved',
+      // 被删条目自身与随后移位的条目都指向已不存在的条目。
+      [key(['entries', 1, 'slot', 'index'])]: 'removed-item',
+      [key(['entries', 2, 'slot', 'index'])]: 'shifted-item',
       [key(['entries', 1])]: 'removed-item-snippet',
+      // 索引更小的条目没有移动，草稿保持有效。
+      [key(['entries', 0, 'slot', 'index'])]: 'kept',
+      // 数组自身的键与其它数组/字段不受影响。
+      [key(['entries'])]: 'array-itself',
+      [key(['outputs', 2, 'index'])]: 'other-array',
       [key(['name'])]: 'unrelated',
     }
     const next = withoutStaleDrafts(drafts, ['entries'], 1)
     expect(next).toEqual({
       [key(['entries', 0, 'slot', 'index'])]: 'kept',
+      [key(['entries'])]: 'array-itself',
+      [key(['outputs', 2, 'index'])]: 'other-array',
       [key(['name'])]: 'unrelated',
     })
-    expect(Object.keys(drafts)).toHaveLength(4)
+    expect(Object.keys(drafts)).toHaveLength(7)
   })
 })

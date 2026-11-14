@@ -6,7 +6,7 @@ import type {
   EnvironmentRuntimeStatusDTO,
   EnvironmentUpdateStartDTO,
 } from '@/shared/api/generated/contracts'
-import { createEnvironmentService } from '@/features/environment/environment-service'
+import { environmentService as service } from '@/features/environment/environment-service'
 import {
   testDaemonConfig,
   testEnvironment,
@@ -19,7 +19,6 @@ vi.mock('@/shared/api/client', async (importOriginal) => {
 })
 
 const apiRequest = vi.mocked(request)
-const service = createEnvironmentService()
 
 afterEach(() => apiRequest.mockReset())
 

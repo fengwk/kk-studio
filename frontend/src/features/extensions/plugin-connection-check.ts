@@ -10,7 +10,7 @@ import type {
  * 坐标随状态一起保存，才能在任何时刻判断结果是否仍对应当前配置；结果只在身份与坐标都与本次请求核对
  * 一致后才进入 `done`，因此 `done` 之外的阶段绝不携带结果。
  */
-export type PluginConnectionCheckPhase = 'pending' | 'done' | 'mismatch' | 'conflict' | 'failed'
+type PluginConnectionCheckPhase = 'pending' | 'done' | 'mismatch' | 'conflict' | 'failed'
 
 /** canonical 正十进制：已应用配置版本的合法形态。 */
 const POSITIVE_DECIMAL = /^[1-9]\d*$/

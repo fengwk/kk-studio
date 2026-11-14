@@ -3,10 +3,13 @@ import { hasExactKeys, isRecord, utf8ByteLength } from '@/shared/lib/value'
 import {
   loadTabSnapshot, resolveTabStorage, serializeTabSnapshot, writeTabSnapshot,
   TAB_LAST_PREFIX, TAB_SESSION_PREFIX, TAB_STATE_MAX_BYTES,
-  type TabStorage, type TabStorageArea,
+  type TabStorage,
 } from '@/shared/lib/tab-storage'
 import type { EnvironmentIdeOpenMode } from '@/shared/api/generated/contracts'
-
+import {
+  CANONICAL_NON_NEGATIVE_DECIMAL,
+  CANONICAL_POSITIVE_DECIMAL,
+} from '@/features/environment/ide/ide-decimal'
 /** 每个浏览器 tab 唯一一份 IDE 呈现状态；local 只保存非运行态展示偏好。 */
 export interface IdePresentation {
   panelVisible: boolean
@@ -35,20 +38,19 @@ export interface IdeRecovery {
   pending?: IdePendingClaim
 }
 
-export interface IdeTabSnapshot {
+interface IdeTabSnapshot {
   browserSessionId: string
   presentation: IdePresentation
   recoveryByEnvironment: Record<string, IdeRecovery>
 }
 
-export interface IdeLastSnapshot {
+interface IdeLastSnapshot {
   presentation: IdePresentation
 }
 
-export type IdeTabStorageArea = TabStorageArea
 export type IdeTabStorage = TabStorage
 
-export type IdeSnapshotSource = 'session' | 'local' | 'default'
+type IdeSnapshotSource = 'session' | 'local' | 'default'
 
 export interface IdeTabLoadResult {
   browserSessionId: string
@@ -64,16 +66,12 @@ export interface IdeSaveResult {
   localSaved: boolean
 }
 
-export const IDE_TAB_STATE_MAX_BYTES = TAB_STATE_MAX_BYTES
 export const IDE_TAB_SESSION_KEY = `${TAB_SESSION_PREFIX}ide`
 export const IDE_TAB_LAST_KEY = `${TAB_LAST_PREFIX}ide`
 export const IDE_RECENT_DIRECTORIES_KEY = 'kk-studio.recent-directories:ide'
 export const IDE_MAX_OPEN_ENVIRONMENTS = 64
-export const IDE_MAX_DIRECTORY_CHARS = 4096
+const IDE_MAX_DIRECTORY_CHARS = 4096
 export const IDE_MAX_RECENT_DIRECTORIES = 8
-
-const CANONICAL_DECIMAL = /^(0|[1-9][0-9]*)$/
-const POSITIVE_DECIMAL = /^[1-9][0-9]*$/
 
 function hasControlCharacters(value: string): boolean {
   for (const character of value) {
@@ -146,7 +144,7 @@ function parsePending(value: unknown, viewId: string): IdePendingClaim | null {
     || value.viewId !== viewId
     || !isCanonicalUuid(value.claimId)
     || typeof value.expectedBindingEpoch !== 'string'
-    || !CANONICAL_DECIMAL.test(value.expectedBindingEpoch)
+    || !CANONICAL_NON_NEGATIVE_DECIMAL.test(value.expectedBindingEpoch)
     || !isCanonicalUuid(value.expectedDaemonInstanceId)
   ) {
     return null
@@ -154,7 +152,7 @@ function parsePending(value: unknown, viewId: string): IdePendingClaim | null {
   if (value.mode === 'create' && value.expectedBindingEpoch !== '0') {
     return null
   }
-  if (value.mode === 'resume' && !POSITIVE_DECIMAL.test(value.expectedBindingEpoch)) {
+  if (value.mode === 'resume' && !CANONICAL_POSITIVE_DECIMAL.test(value.expectedBindingEpoch)) {
     return null
   }
   if (value.directory !== null && !isIdeDirectory(value.directory)) {
@@ -183,7 +181,8 @@ function parseRecovery(value: unknown): IdeRecovery | null {
   }
   if (
     value.bindingEpoch !== null
-    && (typeof value.bindingEpoch !== 'string' || !CANONICAL_DECIMAL.test(value.bindingEpoch))
+    && (typeof value.bindingEpoch !== 'string'
+      || !CANONICAL_NON_NEGATIVE_DECIMAL.test(value.bindingEpoch))
   ) {
     return null
   }
@@ -364,7 +363,7 @@ export function saveIdeSession(
 }
 
 function parseRecentDirectories(raw: string | null): Record<string, string[]> {
-  if (raw == null || utf8ByteLength(raw) > IDE_TAB_STATE_MAX_BYTES) {
+  if (raw == null || utf8ByteLength(raw) > TAB_STATE_MAX_BYTES) {
     return {}
   }
   try {

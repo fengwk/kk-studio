@@ -2,7 +2,7 @@ import { ApiError, isNotFoundError } from '@/shared/api/client'
 import type { IdeViewStatus } from '@/features/environment/ide/ide-view-state'
 
 /** 服务端冻结的结构化 IDE 失败原因；客户端只读 reason，不解析 message/detail。 */
-export const IDE_FAILURE_REASONS = [
+const IDE_FAILURE_REASONS = [
   'DAEMON_NOT_READY',
   'VIEW_GONE',
   'VIEW_OWNED_BY_OTHER_SESSION',

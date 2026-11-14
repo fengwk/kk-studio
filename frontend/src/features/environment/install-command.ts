@@ -5,7 +5,7 @@ import {
 } from '@/shared/api/generated/contracts'
 
 /** 安装命令参数校验失败。只携带字段路径，不包含命令注入内容。 */
-export class InstallCommandError extends Error {
+class InstallCommandError extends Error {
   readonly field: string
 
   constructor(field: string) {
@@ -33,7 +33,7 @@ export const INSTALL_OPERATING_SYSTEMS: readonly InstallOperatingSystem[] =
     (operatingSystem): operatingSystem is InstallOperatingSystem => operatingSystem !== 'wsl',
   )
 
-export function isInstallOperatingSystem(value: unknown): value is InstallOperatingSystem {
+function isInstallOperatingSystem(value: unknown): value is InstallOperatingSystem {
   return (INSTALL_OPERATING_SYSTEMS as readonly unknown[]).includes(value)
 }
 

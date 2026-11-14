@@ -4,7 +4,6 @@ import {
   appendStrictJsonArrayItem,
   getNodeSafeValue,
   getNodeSlice,
-  getNodeAtPath,
   isValidJsonIntegerLiteral,
   isValidJsonNumberLiteral,
   MAX_PLUGIN_VALUES_UTF8_BYTES,
@@ -24,7 +23,7 @@ describe('plugin-config-json', () => {
     expect(res.ok).toBe(true)
     if (res.ok) {
       const tree = res.tree
-      const bigIntNode = getNodeAtPath(tree, ['bigInt'])!
+      const bigIntNode = findNodeAtLocation(tree, ['bigInt'])!
       expect(getNodeSlice(sampleWithBigNumbers, bigIntNode)).toBe('9007199254740993123456789')
       expect(getNodeSafeValue(bigIntNode, sampleWithBigNumbers)).toBe('9007199254740993123456789')
 

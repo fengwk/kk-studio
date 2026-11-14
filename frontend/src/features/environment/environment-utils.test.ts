@@ -7,7 +7,6 @@ import {
   isEnvironmentRuntimeUnavailableError,
   presentEnvironmentConfig,
   presentUpdateProgress,
-  updateDownloadPercent,
 } from '@/features/environment/environment-utils'
 import {
   testEnvironment,
@@ -29,12 +28,14 @@ describe('formatTimestamp', () => {
 describe('update progress formatting', () => {
   // 测试意图：未知总量不计算百分比；已知总量向下取整，未完成时不会提前显示 100%。
   it('computes percentages only from a known positive total', () => {
-    expect(updateDownloadPercent('524288', '1048576')).toBe(50)
-    expect(updateDownloadPercent('1048575', '1048576')).toBe(99)
-    expect(updateDownloadPercent('1048576', '1048576')).toBe(100)
-    expect(updateDownloadPercent('8388608', null)).toBeNull()
-    expect(updateDownloadPercent('0', '0')).toBeNull()
-    expect(updateDownloadPercent('bad', '100')).toBeNull()
+    const percent = (downloadedBytes: string, totalBytes: string | null) =>
+      presentUpdateProgress({ targetVersion: '1.3.0', downloadedBytes, totalBytes }).percent
+    expect(percent('524288', '1048576')).toBe(50)
+    expect(percent('1048575', '1048576')).toBe(99)
+    expect(percent('1048576', '1048576')).toBe(100)
+    expect(percent('8388608', null)).toBeNull()
+    expect(percent('0', '0')).toBeNull()
+    expect(percent('bad', '100')).toBeNull()
   })
 
   it('projects downloaded bytes, total and percent without inventing an unknown total', () => {

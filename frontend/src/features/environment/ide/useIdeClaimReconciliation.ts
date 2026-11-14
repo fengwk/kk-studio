@@ -1,5 +1,4 @@
 import {
-  useCallback,
   useEffect,
   useRef,
   useState,
@@ -7,47 +6,41 @@ import {
 import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
 import type {
-  EnvironmentIdeChangeDirectoryDTO,
-  EnvironmentIdeCloseViewDTO,
-  EnvironmentIdeViewBindingDTO,
-  EnvironmentIdeViewDTO,
-  EnvironmentIdeViewSnapshotDTO,
 } from '@/shared/api/generated/contracts'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import {
   readRecentDirectories,
-  saveIdeSession,
   type IdePendingClaim,
   type IdePresentation,
   type IdeTabLoadResult,
   type IdeTabStorage,
 } from '@/features/environment/ide/ide-tab-state'
-import type { IdeCloseResult } from '@/features/environment/ide/IdeOverlayPanel'
 import {
   applyIdeMobileLayout,
-  changeIdeViewDirectory,
-  closeIdeView,
-  focusIdeTerminal,
   openIdeView,
   readIdeView,
 } from '@/features/environment/ide/environment-ide-service'
 import {
   buildOpenRequest,
-  compareDecimal,
   IdeProtocolError,
   isIdeProtocolError,
-  validateCommandView,
   validateOpenResponse,
-  validateViewSnapshot,
-  viewFingerprint,
 } from '@/features/environment/ide/ide-contract'
+import { useIdeViewStore } from '@/features/environment/ide/useIdeViewStore'
+import { useIdeOperationQueue } from '@/features/environment/ide/useIdeOperationQueue'
+import { useIdeSnapshotCache } from '@/features/environment/ide/useIdeSnapshotCache'
+import { useIdePendingShellIntent } from '@/features/environment/ide/useIdePendingShellIntent'
+import { useIdeCloseCommands } from '@/features/environment/ide/useIdeCloseCommands'
+import { useIdeTerminalCommands } from '@/features/environment/ide/useIdeTerminalCommands'
+import { useIdeDirectoryCommand } from '@/features/environment/ide/useIdeDirectoryCommand'
 import {
-  buildUsageViews,
-  initialViews,
+  useIdeSessionWriter,
+  useIdeUsageProof,
+} from '@/features/environment/ide/useIdeUsageProof'
+import {
   isBoundToConnection,
-  recoveryFromViews,
-  type IdeViewState,
+  retainAvailableViews,
 } from '@/features/environment/ide/ide-view-state'
 import {
   failureStatus,
@@ -56,7 +49,10 @@ import {
   isViewGone,
   safeIdeError,
 } from '@/features/environment/ide/ide-failure'
-import type { IdeBrowserSessionState } from '@/features/environment/ide/ide-browser-session'
+import {
+  isIdeBrowserSessionReady,
+  type IdeBrowserSessionState,
+} from '@/features/environment/ide/ide-browser-session'
 
 export interface UseIdeClaimReconciliationOptions {
   storage?: IdeTabStorage
@@ -66,11 +62,6 @@ export interface UseIdeClaimReconciliationOptions {
   getPresentation: () => IdePresentation
   getEnvironmentMap: () => Map<string, IdeEnvironmentInfo>
   onStorageStatusChange: (unavailable: boolean) => void
-}
-
-interface SnapshotCacheEntry {
-  revision: string
-  fingerprint: string
 }
 
 interface ReconcileOptions {
@@ -98,33 +89,82 @@ export function useIdeClaimReconciliation({
   const [identity, setIdentity] = useState<ApplicationEventConnectionIdentity | null>(
     () => events.getIdentity(),
   )
-  const [views, setViews] = useState<Record<string, IdeViewState>>(
-    () => initialViews(initial.presentation, initial.recoveryByEnvironment),
-  )
 
-  const viewsRef = useRef(views)
   const identityRef = useRef(identity)
   const mountedRef = useRef(false)
   const pageSuspendedRef = useRef(false)
-  const revisionRef = useRef(0n)
-  const bindingRef = useRef(false)
-  const operationConnectionRef = useRef<string | null>(null)
-  const operationGenerationRef = useRef(0)
-  const operationQueueRef = useRef<Array<() => Promise<void>>>([])
   const sessionRef = useRef(session)
   const lastSessionStatusRef = useRef(session.status)
   const lastActiveEnvironmentRef = useRef(activeEnvironmentId)
   const lastIdentityRef = useRef<string | null>(null)
   const lastEnvironmentReadyRef = useRef(new Map<string, boolean>())
-  const snapshotCacheRef = useRef(new Map<string, SnapshotCacheEntry>())
-  const pendingShellEnvironmentsRef = useRef(new Set<string>())
   const actionsRef = useRef<{
     reconcileAll: () => void
     withdrawUsage: () => void
     restoreUsage: () => void
   } | null>(null)
 
+  const { views, viewsRef, commitViews, updateView, startAttempt, clearViews } =
+    useIdeViewStore(mountedRef, initial)
+  const { runExclusive, invalidateOperations } = useIdeOperationQueue(identityRef, mountedRef)
+  const { acceptSnapshot, forgetView, clearSnapshots } = useIdeSnapshotCache(sessionRef)
+  const {
+    remember: rememberPendingShellIntent,
+    take: takePendingShellIntent,
+  } = useIdePendingShellIntent()
+  const { writeSession } = useIdeSessionWriter({
+    storage,
+    sessionRef,
+    viewsRef,
+    mountedRef,
+    getPresentation,
+    onStorageStatusChange,
+  })
+  const { registerUsageNow, registerUsageQuiet, usageOverride, resetRevision, withdrawUsage: withdrawUsageProof } = useIdeUsageProof({
+    identityRef,
+    sessionRef,
+    viewsRef,
+    getPresentation,
+    sessionReady,
+    isPageSuspended: () => pageSuspendedRef.current,
+    setPageSuspended: (suspended) => {
+      pageSuspendedRef.current = suspended
+    },
+    registerUsage: (usage) => events.registerUsage(usage),
+  })
+  const { closeEnvironment, dismissCloseError } = useIdeCloseCommands({
+    viewsRef,
+    sessionRef,
+    updateView,
+    commitViews,
+    forgetView,
+    writeSession,
+    registerUsageNow,
+    registerUsageQuiet,
+  })
+  const { setPendingShell, maybeRunPendingShell } = useIdeTerminalCommands({
+    viewsRef,
+    sessionRef,
+    identityRef,
+    updateView,
+    registerUsageNow,
+    rememberPendingShellIntent,
+  })
+  const { changeDirectory } = useIdeDirectoryCommand({
+    viewsRef,
+    sessionRef,
+    identityRef,
+    updateView,
+    writeSession,
+    registerUsageNow,
+    reconcile,
+  })
+
+  // 事件处理器与串行队列在 effect 之外读取这两个镜像，必须在本次渲染期间就指向最新输入；
+  // 改为 effect 写入会让提交前的回调看到上一轮的会话/身份。
+  // eslint-disable-next-line react-hooks/refs -- 渲染期镜像，见上
   identityRef.current = identity
+  // eslint-disable-next-line react-hooks/refs -- 渲染期镜像，见上
   sessionRef.current = session
 
   useEffect(() => {
@@ -136,30 +176,8 @@ export function useIdeClaimReconciliation({
 
   useEffect(() => events.subscribeIdentity(setIdentity), [events])
 
-  const commitViews = useCallback((next: Record<string, IdeViewState>) => {
-    viewsRef.current = next
-    if (mountedRef.current) {
-      setViews(next)
-    }
-  }, [])
-
-  function updateView(
-    environmentId: string,
-    attempt: number,
-    patch: Partial<IdeViewState>,
-  ): IdeViewState | null {
-    const current = viewsRef.current[environmentId]
-    if (current == null || current.attempt !== attempt) {
-      return null
-    }
-    const next = { ...current, ...patch }
-    commitViews({ ...viewsRef.current, [environmentId]: next })
-    return next
-  }
-
   function sessionReady(): boolean {
-    const status = sessionRef.current.status
-    return status === 'ready' || status === 'cloned'
+    return isIdeBrowserSessionReady(sessionRef.current.status)
   }
 
   function canRun(environmentId: string): boolean {
@@ -167,107 +185,6 @@ export function useIdeClaimReconciliation({
       && identityRef.current != null
       && !pageSuspendedRef.current
       && getEnvironmentMap().get(environmentId)?.ready === true
-  }
-
-  function writeSession(): boolean {
-    const presentation = getPresentation()
-    const saved = saveIdeSession(
-      sessionRef.current.browserSessionId,
-      presentation,
-      recoveryFromViews(viewsRef.current, presentation.openedEnvironmentIds),
-      storage,
-    )
-    if (mountedRef.current) {
-      onStorageStatusChange(!saved)
-    }
-    return saved
-  }
-
-  function nextRevision(): string {
-    revisionRef.current += 1n
-    return revisionRef.current.toString()
-  }
-
-  function usageOverride(
-    environmentId: string,
-    viewId: string,
-    claimId: string,
-    bindingEpoch?: string,
-  ) {
-    return { environmentId, viewId, claimId, ...(bindingEpoch == null ? {} : { bindingEpoch }) }
-  }
-
-  function registerUsageNow(override?: {
-    environmentId: string
-    viewId: string
-    claimId: string
-    bindingEpoch?: string
-  }): Promise<unknown> {
-    const currentIdentity = identityRef.current
-    const browserSessionId = sessionRef.current.browserSessionId
-    if (currentIdentity == null || !sessionReady() || pageSuspendedRef.current) {
-      return Promise.reject(new Error('application event connection is not ready'))
-    }
-    const opened = getPresentation().openedEnvironmentIds
-    const environmentIds = override != null && !opened.includes(override.environmentId)
-      ? [...opened, override.environmentId]
-      : opened
-    return events.registerUsage({
-      browserSessionId,
-      revision: nextRevision(),
-      views: buildUsageViews(viewsRef.current, environmentIds, override),
-    })
-  }
-
-  function registerUsageQuiet(override?: {
-    environmentId: string
-    viewId: string
-    claimId: string
-    bindingEpoch?: string
-  }): void {
-    void registerUsageNow(override).catch(() => {
-      // 断线由 reject 明示；后续只由新的 connected 身份重新对账，不在这里重试。
-    })
-  }
-
-  function startAttempt(
-    environmentId: string,
-    seed: Omit<IdeViewState, 'environmentId' | 'attempt'>,
-  ): number {
-    const current = viewsRef.current[environmentId]
-    const attempt = (current?.attempt ?? 0) + 1
-    commitViews({
-      ...viewsRef.current,
-      [environmentId]: { ...seed, environmentId, attempt },
-    })
-    return attempt
-  }
-
-  /** 当前连接内只允许一个在途绑定操作；旧连接的在途操作不阻塞新连接立即对账。 */
-  function runExclusive(task: () => Promise<void>): void {
-    const connectionId = identityRef.current?.connectionId ?? null
-    if (bindingRef.current && operationConnectionRef.current === connectionId) {
-      operationQueueRef.current.push(task)
-      return
-    }
-    const generation = operationGenerationRef.current + 1
-    operationGenerationRef.current = generation
-    bindingRef.current = true
-    operationConnectionRef.current = connectionId
-    void (async () => {
-      try {
-        await task()
-      } finally {
-        if (operationGenerationRef.current === generation) {
-          bindingRef.current = false
-          operationConnectionRef.current = null
-          const next = operationQueueRef.current.shift()
-          if (next != null && mountedRef.current) {
-            runExclusive(next)
-          }
-        }
-      }
-    })()
   }
 
   function setWaitingReady(
@@ -663,45 +580,12 @@ export function useIdeClaimReconciliation({
       status: canRun(environmentId) ? 'reconciling' : 'waiting-ready',
       claimId,
       iframeLoaded: false,
-      pendingShell: pendingShellEnvironmentsRef.current.delete(environmentId),
+      pendingShell: takePendingShellIntent(environmentId),
     })
     if (!canRun(environmentId)) {
       return
     }
     runExclusive(() => runCreate(environmentId, attempt, viewId, claimId, directory))
-  }
-
-  function acceptSnapshot(
-    environmentId: string,
-    viewId: string,
-    snapshot: EnvironmentIdeViewSnapshotDTO,
-  ): { accepted: boolean; daemonInstanceId: string; view: EnvironmentIdeViewDTO | null } {
-    const validated = validateViewSnapshot(
-      environmentId,
-      viewId,
-      sessionRef.current.browserSessionId,
-      snapshot,
-    )
-    const cacheKey = `${validated.daemonInstanceId}:${viewId}`
-    const cached = snapshotCacheRef.current.get(cacheKey)
-    if (cached != null) {
-      const compare = compareDecimal(validated.revision, cached.revision)
-      if (compare < 0) {
-        return {
-          accepted: false,
-          daemonInstanceId: validated.daemonInstanceId,
-          view: null,
-        }
-      }
-      if (compare === 0 && cached.fingerprint !== viewFingerprint(validated.view)) {
-        throw new IdeProtocolError('Invalid IDE view snapshot: conflicting revision')
-      }
-    }
-    snapshotCacheRef.current.set(cacheKey, {
-      revision: validated.revision,
-      fingerprint: viewFingerprint(validated.view),
-    })
-    return { accepted: true, daemonInstanceId: validated.daemonInstanceId, view: validated.view }
   }
 
   async function runReconcile(
@@ -981,7 +865,7 @@ export function useIdeClaimReconciliation({
         status: 'waiting-ready',
         claimId: createUuid(),
         iframeLoaded: false,
-        pendingShell: pendingShellEnvironmentsRef.current.delete(environmentId),
+        pendingShell: takePendingShellIntent(environmentId),
       })
       setWaitingReady(environmentId, attempt)
     }
@@ -1011,263 +895,6 @@ export function useIdeClaimReconciliation({
       return
     }
     void reconcile(environmentId, 'retry')
-  }
-
-  function setPendingShell(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
-    if (view == null) {
-      pendingShellEnvironmentsRef.current.add(environmentId)
-      return
-    }
-    if (view.pendingShell && view.terminalError === undefined) {
-      return
-    }
-    updateView(environmentId, view.attempt, {
-      pendingShell: true,
-      terminalError: undefined,
-    })
-  }
-
-  async function runTerminal(environmentId: string): Promise<void> {
-    const view = viewsRef.current[environmentId]
-    if (
-      view == null
-      || view.status !== 'ready'
-      || view.bindingEpoch == null
-      || view.daemonInstanceId == null
-      || view.closeInFlight
-    ) {
-      return
-    }
-    updateView(environmentId, view.attempt, {
-      pendingShell: false,
-      terminalError: undefined,
-    })
-    const requestIdentity = identityRef.current
-    try {
-      await registerUsageNow(usageOverride(
-        environmentId,
-        view.viewId,
-        view.claimId,
-        view.bindingEpoch,
-      ))
-      const body: EnvironmentIdeViewBindingDTO = {
-        browserSessionId: sessionRef.current.browserSessionId,
-        bindingEpoch: view.bindingEpoch,
-        expectedDaemonInstanceId: view.daemonInstanceId,
-      }
-      await focusIdeTerminal(environmentId, view.viewId, body)
-    } catch (error) {
-      const current = viewsRef.current[environmentId]
-      const appliedIdentity = identityRef.current
-      if (
-        !bindingMatches(current, view)
-        || requestIdentity == null
-        || appliedIdentity == null
-        || appliedIdentity.eventNodeId !== requestIdentity.eventNodeId
-        || appliedIdentity.connectionId !== requestIdentity.connectionId
-      ) {
-        return
-      }
-      updateView(environmentId, view.attempt, {
-        terminalError: isUnknownIdeFailure(error)
-          ? 'terminal-result-unknown'
-          : safeIdeError(error) || 'terminal-failed',
-      })
-    }
-  }
-
-  function maybeRunPendingShell(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
-    if (
-      view == null
-      || !view.pendingShell
-      || !view.iframeLoaded
-      || view.status !== 'ready'
-      || view.closeInFlight
-    ) {
-      return
-    }
-    void runTerminal(environmentId)
-  }
-
-  function bindingMatches(
-    current: IdeViewState | undefined,
-    expected: Pick<IdeViewState, 'viewId' | 'daemonInstanceId' | 'bindingEpoch'>,
-  ): boolean {
-    return current != null
-      && current.viewId === expected.viewId
-      && current.daemonInstanceId === expected.daemonInstanceId
-      && current.bindingEpoch === expected.bindingEpoch
-  }
-
-  async function closeEnvironment(environmentId: string, discard: boolean): Promise<IdeCloseResult> {
-    const view = viewsRef.current[environmentId]
-    if (view == null) {
-      return { ok: true, dirty: false }
-    }
-    if (
-      view.bindingEpoch == null
-      || view.daemonInstanceId == null
-      || view.closeInFlight
-      || view.status === 'binding'
-      || view.status === 'reconciling'
-    ) {
-      return { ok: false, dirty: false, message: 'view-not-ready' }
-    }
-    updateView(environmentId, view.attempt, {
-      closeInFlight: true,
-      closeError: undefined,
-    })
-    try {
-      await registerUsageNow(usageOverride(
-        environmentId,
-        view.viewId,
-        view.claimId,
-        view.bindingEpoch,
-      ))
-      const body: EnvironmentIdeCloseViewDTO = {
-        browserSessionId: sessionRef.current.browserSessionId,
-        bindingEpoch: view.bindingEpoch,
-        expectedDaemonInstanceId: view.daemonInstanceId,
-        discard,
-      }
-      await closeIdeView(environmentId, view.viewId, body)
-      const current = viewsRef.current[environmentId]
-      if (!bindingMatches(current, view)) {
-        return { ok: false, dirty: false, message: 'binding-changed' }
-      }
-      const next = { ...viewsRef.current }
-      delete next[environmentId]
-      snapshotCacheRef.current.delete(`${view.daemonInstanceId}:${view.viewId}`)
-      commitViews(next)
-      writeSession()
-      registerUsageQuiet()
-      return { ok: true, dirty: false }
-    } catch (error) {
-      const current = viewsRef.current[environmentId]
-      if (!bindingMatches(current, view)) {
-        return { ok: false, dirty: false, message: 'binding-changed' }
-      }
-      const unknown = isUnknownIdeFailure(error) || ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN'
-      const dirty = !discard && unknown
-      const closeError = dirty
-        ? undefined
-        : unknown
-          ? 'close-result-unknown'
-          : safeIdeError(error) || 'close-failed'
-      updateView(environmentId, view.attempt, {
-        closeInFlight: false,
-        closeError,
-      })
-      return { ok: false, dirty, message: safeIdeError(error) }
-    }
-  }
-
-  function dismissCloseError(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
-    if (view == null || view.closeError == null) {
-      return
-    }
-    updateView(environmentId, view.attempt, { closeError: undefined })
-  }
-
-  async function changeDirectory(
-    environmentId: string,
-    directory: string,
-  ): Promise<{ ok: boolean; message?: string }> {
-    const view = viewsRef.current[environmentId]
-    if (
-      view == null
-      || view.status !== 'ready'
-      || view.bindingEpoch == null
-      || view.daemonInstanceId == null
-      || view.closeInFlight
-    ) {
-      return { ok: false, message: 'view-not-ready' }
-    }
-    const epoch = view.bindingEpoch
-    const requestIdentity = identityRef.current
-    try {
-      await registerUsageNow(usageOverride(
-        environmentId,
-        view.viewId,
-        view.claimId,
-        epoch,
-      ))
-      const body: EnvironmentIdeChangeDirectoryDTO = {
-        browserSessionId: sessionRef.current.browserSessionId,
-        bindingEpoch: epoch,
-        expectedDaemonInstanceId: view.daemonInstanceId,
-        directory,
-      }
-      const response = await changeIdeViewDirectory(environmentId, view.viewId, body)
-      const validated = validateCommandView(
-        environmentId,
-        sessionRef.current.browserSessionId,
-        view.viewId,
-        response,
-      )
-      if (
-        validated.daemonInstanceId !== view.daemonInstanceId
-        || compareDecimal(validated.bindingEpoch, epoch) < 0
-        || (validated.workspacePath !== view.workspacePath
-          && compareDecimal(validated.bindingEpoch, epoch) === 0)
-      ) {
-        throw new IdeProtocolError('Invalid IDE command response: binding regression')
-      }
-      const current = viewsRef.current[environmentId]
-      const appliedIdentity = identityRef.current
-      if (
-        requestIdentity == null
-        || appliedIdentity == null
-        || appliedIdentity.eventNodeId !== requestIdentity.eventNodeId
-        || appliedIdentity.connectionId !== requestIdentity.connectionId
-      ) {
-        if (appliedIdentity != null) {
-          reconcile(environmentId, 'connection')
-        }
-        return { ok: false, message: 'binding-changed' }
-      }
-      if (bindingMatches(current, view)) {
-        updateView(environmentId, view.attempt, {
-          daemonInstanceId: validated.daemonInstanceId,
-          bindingEpoch: validated.bindingEpoch,
-          eventNodeId: validated.eventNodeId,
-          connectionId: validated.connectionId,
-          directory: validated.directory,
-          workspacePath: validated.workspacePath,
-        })
-        writeSession()
-        if (validated.bindingEpoch !== epoch) {
-          reconcile(environmentId, 'directory', { allowRebind: true })
-        }
-      }
-      return { ok: true }
-    } catch (error) {
-      const current = viewsRef.current[environmentId]
-      if (bindingMatches(current, view)) {
-        if (isIdeProtocolError(error)) {
-          updateView(environmentId, view.attempt, {
-            status: 'error',
-            errorMessage: error.message,
-          })
-          return { ok: false, message: error.message }
-        }
-        const unknown = isUnknownIdeFailure(error)
-          || ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN'
-          || ideFailureReason(error) === 'STALE_BINDING'
-        if (unknown) {
-          reconcile(environmentId, 'directory', { allowRebind: false })
-          return { ok: false, message: 'directory-result-unknown' }
-        }
-        return {
-          ok: false,
-          message: safeIdeError(error) || 'directory-failed',
-        }
-      }
-      return { ok: false, message: 'binding-changed' }
-    }
   }
 
   function handleIframeLoaded(environmentId: string, entryUrl: string): void {
@@ -1308,14 +935,9 @@ export function useIdeClaimReconciliation({
   }
 
   function reconcileEnvironments(available: Set<string>): void {
-    const next: Record<string, IdeViewState> = {}
-    for (const [environmentId, view] of Object.entries(viewsRef.current)) {
-      if (available.has(environmentId)) {
-        next[environmentId] = view
-      }
-    }
-    if (Object.keys(next).length !== Object.keys(viewsRef.current).length) {
-      commitViews(next)
+    const retained = retainAvailableViews(viewsRef.current, available)
+    if (retained != null) {
+      commitViews(retained)
       writeSession()
     }
     const environmentMap = getEnvironmentMap()
@@ -1354,31 +976,17 @@ export function useIdeClaimReconciliation({
   }
 
   function resetForClone(): void {
-    viewsRef.current = {}
-    setViews({})
-    revisionRef.current = 0n
+    clearViews()
+    resetRevision()
     lastIdentityRef.current = null
-    snapshotCacheRef.current.clear()
-    operationQueueRef.current = []
-    operationGenerationRef.current += 1
-    bindingRef.current = false
-    operationConnectionRef.current = null
+    clearSnapshots()
+    invalidateOperations()
     pageSuspendedRef.current = false
   }
 
+
   function withdrawUsage(): void {
-    if (identityRef.current == null || !sessionReady()) {
-      return
-    }
-    pageSuspendedRef.current = true
-    const browserSessionId = sessionRef.current.browserSessionId
-    void events.registerUsage({
-      browserSessionId,
-      revision: nextRevision(),
-      views: [],
-    }).catch(() => {
-      // pagehide/断线后发送失败是预期路径；Daemon 按最后有效证明回收。
-    })
+    withdrawUsageProof(() => identityRef.current != null && sessionReady())
   }
 
   function restoreUsage(): void {
@@ -1388,6 +996,8 @@ export function useIdeClaimReconciliation({
     }
   }
 
+  // 父组件通过 ref 调用这三个动作；它们必须对应本次渲染的闭包，因此在渲染期写入。
+  // eslint-disable-next-line react-hooks/refs -- 渲染期闭包镜像，见上
   actionsRef.current = {
     reconcileAll,
     withdrawUsage,
@@ -1399,10 +1009,7 @@ export function useIdeClaimReconciliation({
       return
     }
     // 连接变化使旧连接的在途绑定立即失效；新连接不得排在旧请求后面。
-    operationGenerationRef.current += 1
-    bindingRef.current = false
-    operationConnectionRef.current = null
-    operationQueueRef.current = []
+    invalidateOperations()
   }, [identity?.connectionId])
 
   useEffect(() => {

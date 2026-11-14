@@ -1,6 +1,7 @@
 import type { EnvironmentIdeOpenMode } from '@/shared/api/generated/contracts'
 import type { ApplicationEventIdeUseView } from '@/shared/app-events/protocol'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { CANONICAL_POSITIVE_DECIMAL } from '@/features/environment/ide/ide-decimal'
 import type {
   IdePendingClaim,
   IdePresentation,
@@ -40,8 +41,6 @@ export interface IdeViewState {
   terminalError?: string
   errorMessage?: string
 }
-
-export const POSITIVE_DECIMAL = /^[1-9][0-9]*$/
 
 /** 从 session 恢复的运行身份进入统一对账；不预置任何“已绑定”结论。 */
 export function initialViews(
@@ -139,7 +138,7 @@ export function buildUsageViews(
     const bindingEpoch = isOverride ? override.bindingEpoch : view.bindingEpoch
     if (
       bindingEpoch != null
-      && POSITIVE_DECIMAL.test(bindingEpoch)
+      && CANONICAL_POSITIVE_DECIMAL.test(bindingEpoch)
       && (isOverride || view.status === 'ready')
     ) {
       entry.bindingEpoch = bindingEpoch
@@ -160,4 +159,36 @@ export function isBoundToConnection(
     && view.entryUrl != null
     && view.eventNodeId === eventNodeId
     && view.connectionId === connectionId
+}
+
+/** 视图仍是同一个绑定（同 view、同实例、同 bindingEpoch）时，迟到的命令回执才有意义。 */
+export function isSameBinding(
+  current: IdeViewState | undefined,
+  expected: Pick<IdeViewState, 'viewId' | 'daemonInstanceId' | 'bindingEpoch'>,
+): boolean {
+  return current != null
+    && current.viewId === expected.viewId
+    && current.daemonInstanceId === expected.daemonInstanceId
+    && current.bindingEpoch === expected.bindingEpoch
+}
+
+/**
+ * 只保留仍然存在的 environment 的视图。
+ *
+ * <p>返回 `null` 表示没有需要丢弃的视图，调用方据此跳过无意义的写入。
+ */
+export function retainAvailableViews(
+  views: Record<string, IdeViewState>,
+  available: Set<string>,
+): Record<string, IdeViewState> | null {
+  const next: Record<string, IdeViewState> = {}
+  for (const [environmentId, view] of Object.entries(views)) {
+    if (available.has(environmentId)) {
+      next[environmentId] = view
+    }
+  }
+  if (Object.keys(next).length === Object.keys(views).length) {
+    return null
+  }
+  return next
 }
