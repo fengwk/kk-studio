@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.gemini;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -51,8 +50,6 @@ import java.util.Set;
  * 而不是交付损坏的原生回放。
  */
 final class GeminiStreamAccumulator extends ProviderStreamState {
-
-  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> FILTERED_FINISH_REASONS =
       Set.of(

@@ -10,13 +10,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderErrorHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportException;
 
-import java.io.IOException;
-import java.net.ConnectException;
-import java.net.SocketTimeoutException;
-import java.nio.charset.StandardCharsets;
 import java.util.Locale;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.TimeoutException;
 
 /**
  * Gemini 异常映射器。
@@ -67,32 +61,6 @@ final class GeminiErrorMapper {
         node -> classify(extractStatusCode(node), extractErrorStatus(node)),
         GeminiErrorMapper::extractStatusCode,
         MSG_INVALID_RESPONSE);
-  }
-
-  static ProviderException fromHttp(int statusCode, String errorJson) {
-    String errorStatus =
-        extractErrorStatus(errorJson != null ? errorJson.getBytes(StandardCharsets.UTF_8) : null);
-    ProviderErrorKind kind = classify(statusCode, errorStatus);
-    String message =
-        ProviderErrorHelper.formatHttpErrorMessage(
-            statusCode, errorJson, false, FALLBACK_MESSAGES.fallbackForKind(kind));
-    return new ProviderException(kind, message, ProviderErrorHelper.httpErrorStatus(statusCode));
-  }
-
-  static ProviderException fromThrowable(Throwable throwable) {
-    if (throwable instanceof TransportException te) {
-      return mapTransportException(te);
-    }
-    if (throwable instanceof TimeoutException || throwable instanceof SocketTimeoutException) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, "Gemini request timed out");
-    }
-    if (throwable instanceof ConnectException || throwable instanceof IOException) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, "Gemini network error");
-    }
-    if (throwable instanceof CancellationException) {
-      return new ProviderException(ProviderErrorKind.CANCELLED, "Gemini request cancelled");
-    }
-    return new ProviderException(ProviderErrorKind.TRANSIENT, MSG_TRANSIENT);
   }
 
   private static ProviderErrorKind classifyHttp(TransportException exception) {
