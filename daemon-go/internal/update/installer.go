@@ -320,32 +320,41 @@ func clientForProxy(client *http.Client, proxyURL *string) (*http.Client, error)
 		return nil, errors.New("HTTP client is not configured")
 	}
 	configured := *client
-	transport := client.Transport
-	if transport == nil {
-		transport = http.DefaultTransport
+	transport, ok := client.Transport.(*http.Transport)
+	if client.Transport == nil {
+		transport, ok = http.DefaultTransport.(*http.Transport)
 	}
-	standardTransport, ok := transport.(*http.Transport)
 	if !ok {
 		if proxyURL != nil {
 			return nil, errors.New("configured proxy requires an HTTP transport")
 		}
 		return &configured, nil
 	}
-	transportCopy := standardTransport.Clone()
+	transportCopy := transport.Clone()
 	transportCopy.Proxy = nil
 	if proxyURL != nil {
-		proxy, err := url.Parse(*proxyURL)
+		proxy, err := standardProxyURL(*proxyURL)
 		if err != nil {
-			return nil, errors.New("invalid platform proxy")
-		}
-		port, portErr := strconv.Atoi(proxy.Port())
-		if proxy.Scheme != "http" || proxy.Host == "" || proxy.Hostname() == "" || portErr != nil || port < 1 || port > 65535 || proxy.User != nil || proxy.Path != "" || proxy.RawQuery != "" || proxy.ForceQuery || proxy.Fragment != "" || proxy.RawFragment != "" || proxy.Opaque != "" || strings.ContainsAny(*proxyURL, "?#") {
-			return nil, errors.New("invalid platform proxy")
+			return nil, err
 		}
 		transportCopy.Proxy = http.ProxyURL(proxy)
 	}
 	configured.Transport = transportCopy
 	return &configured, nil
+}
+
+// standardProxyURL accepts only a plain http proxy endpoint, the shape the official installer
+// receives through its environment.
+func standardProxyURL(value string) (*url.URL, error) {
+	proxy, err := url.Parse(value)
+	if err != nil {
+		return nil, errors.New("invalid platform proxy")
+	}
+	port, portErr := strconv.Atoi(proxy.Port())
+	if proxy.Scheme != "http" || proxy.Host == "" || proxy.Hostname() == "" || portErr != nil || port < 1 || port > 65535 || proxy.User != nil || proxy.Path != "" || proxy.RawQuery != "" || proxy.ForceQuery || proxy.Fragment != "" || proxy.RawFragment != "" || proxy.Opaque != "" || strings.ContainsAny(value, "?#") {
+		return nil, errors.New("invalid platform proxy")
+	}
+	return proxy, nil
 }
 
 func (r *InstallerRunner) downloadInstaller(ctx context.Context, source, destination string, proxyURL *string, report func(Progress)) error {
