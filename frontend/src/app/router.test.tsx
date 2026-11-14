@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { AppRouter } from '@/app/router'
 import { ApplicationContributionsProvider } from '@/platform/extensions/ApplicationContributionsContext'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { makeApplicationContributions } from '@/test-support/application-contributions'
 
 vi.mock('@/features/environment/ide/ChatIdeWorkspace', () => ({

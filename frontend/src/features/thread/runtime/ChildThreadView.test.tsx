@@ -10,7 +10,7 @@ import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjec
 import { extractQueuedCustomMessages } from '@/features/thread/runtime/queued-custom-messages'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { setLocale } from '@/shared/i18n'
 import type { HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
 

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
+import { createMockIDBFactory } from '@/test-support/mock-idb'
 
 
 import {

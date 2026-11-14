@@ -8,7 +8,7 @@ function sleep(ms: number): Promise<void> {
 }
 import { ApplicationEventProvider } from '@/shared/app-events'
 import * as apiClient from '@/shared/api/client'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { useHarnessThreadRealtime } from '@/features/thread/runtime/useHarnessThreadRealtime'
 import type { RealtimeFrameSchedulerOptions } from '@/features/thread/runtime/realtime-frame-scheduler'
 import type {

@@ -68,7 +68,7 @@ function makeMockProjection(threadId: string): ThreadProjection {
 }
 
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 
 const mockDefaults = {
   agentName: 'assistant',

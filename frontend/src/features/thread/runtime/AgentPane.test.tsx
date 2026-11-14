@@ -62,7 +62,7 @@ import {
 } from '@/features/thread/runtime/thread-draft-store'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { setLocale } from '@/shared/i18n'
-import { createMockIDBFactory } from '@/features/canvas/__tests__/mock-idb'
+import { createMockIDBFactory } from '@/test-support/mock-idb'
 import { entryPage } from '@/test-support/session-entry-page'
 import { testDaemonConfig } from '@/test-support/environment-test-fixtures'
 import type {

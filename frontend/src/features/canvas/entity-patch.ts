@@ -1,4 +1,4 @@
-import { compareCanvasRevisions } from '@/shared/lib/canvas-version'
+import { compareCanvasRevisions } from '@/features/canvas/canvas-version'
 import { deriveReferencesFromNodes } from '@/features/canvas/domain'
 import type {
   CanvasGroupDTO,

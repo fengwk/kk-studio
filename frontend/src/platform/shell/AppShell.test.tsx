@@ -13,7 +13,7 @@ import { ApplicationContributionsProvider } from '@/platform/extensions/Applicat
 import { ThreadComposer } from '@/features/thread/runtime/thread-panel/ThreadComposer'
 import { interactionService } from '@/shared/api/interaction-service'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { setLocale } from '@/shared/i18n'
 
 const FIXTURE_NAV_ITEMS: readonly PrimaryNavItem[] = [

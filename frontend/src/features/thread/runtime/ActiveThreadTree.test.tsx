@@ -9,7 +9,7 @@ import { useActiveThreadTree } from '@/features/thread/runtime/useActiveThreadTr
 import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
 import { harnessService } from '@/shared/api/harness-service'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { FakeWebSocketHarness } from '@/shared/app-events/__tests__/fake-websocket'
+import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { setLocale } from '@/shared/i18n'
 
 vi.mock('@/shared/api/harness-service', () => ({

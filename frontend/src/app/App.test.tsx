@@ -12,7 +12,7 @@ import { interactionService } from '@/shared/api/interaction-service'
 // 保留真实事件管理器及 IDE 身份契约，仅替换 WebSocket，避免连接真实服务。
 vi.mock('@/shared/app-events', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/app-events')>()
-  const { FakeWebSocketHarness } = await import('@/shared/app-events/__tests__/fake-websocket')
+  const { FakeWebSocketHarness } = await import('@/test-support/fake-websocket')
   const sockets = new FakeWebSocketHarness()
   return {
     ...actual,

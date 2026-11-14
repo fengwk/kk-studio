@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createMockIDBFactory } from './mock-idb'
+import { createMockIDBFactory } from '@/test-support/mock-idb'
 import {
   buildPendingOperation,
   createCanvasOperationStore,
