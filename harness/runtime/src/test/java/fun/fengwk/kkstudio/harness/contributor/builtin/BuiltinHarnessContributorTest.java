@@ -442,7 +442,7 @@ class BuiltinHarnessContributorTest {
 
   /** 五个真实 FileTool：名字、顺序与 capability 绑定必须与 Contributor 冻结的清单一致。 */
   private static List<Tool> stubFileTools() {
-    ResourceReadGateway vfsGateway = mock(ResourceReadGateway.class);
+    ResourceReadGateway resourceReadGateway = mock(ResourceReadGateway.class);
     return List.of(
         new FileTool(
             "read",
@@ -450,35 +450,35 @@ class BuiltinHarnessContributorTest {
             "read.md",
             EnvironmentCapabilityIds.FS_READ,
             ToolSideEffect.READ_ONLY,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "write",
             FileTool.Operation.WRITE,
             "write.md",
             EnvironmentCapabilityIds.FS_WRITE,
             ToolSideEffect.IDEMPOTENT,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "edit",
             FileTool.Operation.EDIT,
             "edit.md",
             EnvironmentCapabilityIds.FS_EDIT,
             ToolSideEffect.NON_IDEMPOTENT,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "grep",
             FileTool.Operation.GREP,
             "grep.md",
             EnvironmentCapabilityIds.FS_GREP,
             ToolSideEffect.READ_ONLY,
-            vfsGateway),
+            resourceReadGateway),
         new FileTool(
             "find",
             FileTool.Operation.FIND,
             "find.md",
             EnvironmentCapabilityIds.FS_FIND,
             ToolSideEffect.READ_ONLY,
-            vfsGateway));
+            resourceReadGateway));
   }
 
   private static Tool stubTool(String name, ToolRequirements requirements) {

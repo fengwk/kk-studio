@@ -418,7 +418,7 @@ class MiniMaxMavisToolFailureTest {
   }
 
   /**
-   * 参数中包含非法形态的 vfs 资源（大写 UUID、多余 path、非 resources 路径）： 即便调用请求携带了合法的 invocation
+   * 参数中包含非法形态的 Session 资源（大写 UUID、多余 path、非 resources 路径）： 即便调用请求携带了合法的 invocation
    * context，在发送请求前也必须因不满足规范 URI 形态而确定性失败； 结果为 MAVIS_RESOURCE_UNAVAILABLE，网关未被调用，transport 也未被调用。
    */
   @ParameterizedTest

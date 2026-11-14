@@ -384,9 +384,7 @@ class ResourceRefTest {
         () -> new ResourceRef(uri.toUpperCase(), "text/plain", null, 1L, sha256("a")));
   }
 
-  /**
-   * vfs Session 资源引用：必须精确 {@code resource://files/<canonical-uuid>} 且携带非空 size/sha，并回环解析出 blobId。
-   */
+  /** Session 资源引用：必须精确 {@code resource://files/<canonical-uuid>} 且携带非空 size/sha，并回环解析出 blobId。 */
   @Test
   void acceptsCanonicalSessionResourceUrisAndRoundTripsBlobId() {
     UUID blobId = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
