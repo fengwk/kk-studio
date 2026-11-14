@@ -219,6 +219,24 @@ class DaemonControlStreamTest {
     assertTrue(errEnv.getError().getMessage().contains("invalid inbound frame length"));
   }
 
+  /** 一旦本轮解帧判定违规，后续 DATA 帧不得再产出信封。 */
+  @Test
+  void stopsDecodingAfterFirstViolation() {
+    controlStream.bindSession(daemonSession);
+
+    byte[] invalidLength = ByteBuffer.allocate(Integer.BYTES).putInt(0).array();
+    byte[] validFrame = ControlProtocolCodec.encodeFrame(createCancelEnvelope(INVOCATION_1));
+    byte[] combined = new byte[invalidLength.length + validFrame.length];
+    System.arraycopy(invalidLength, 0, combined, 0, invalidLength.length);
+    System.arraycopy(validFrame, 0, combined, invalidLength.length, validFrame.length);
+
+    stream.inboundDataQueue.add(new TestData(ByteBuffer.wrap(combined), false));
+    controlStream.listener().onDataAvailable(stream);
+
+    assertTrue(daemonSession.received.isEmpty(), "frames after a violation must not be decoded");
+    assertEquals(1, stream.sentFrames.size());
+  }
+
   @Test
   void offerRejectsWhenClosedOrDraining() {
     controlStream.bindSession(daemonSession);

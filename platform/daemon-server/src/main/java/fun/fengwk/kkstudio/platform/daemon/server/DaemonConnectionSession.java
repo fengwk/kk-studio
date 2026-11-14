@@ -463,15 +463,9 @@ final class DaemonConnectionSession implements DaemonSession {
    * “已确认不存在”，由调用方按缺失配置处理。
    */
   private Optional<EnvironmentConfigSnapshot> lookupConfigOnReady() {
+    Optional<EnvironmentConfigSnapshot> latest;
     try {
-      Optional<EnvironmentConfigSnapshot> latest = configSource.find(environmentId);
-      if (latest.isEmpty()) {
-        throw new ControlProtocolException(
-            "environment configuration not found for " + environmentId);
-      }
-      return latest;
-    } catch (ControlProtocolException error) {
-      throw error;
+      latest = configSource.find(environmentId);
     } catch (RuntimeException error) {
       DaemonFailures.log(
           DaemonConnectionSession.class,
@@ -479,6 +473,11 @@ final class DaemonConnectionSession implements DaemonSession {
           error);
       return null;
     }
+    if (latest.isEmpty()) {
+      throw new ControlProtocolException(
+          "environment configuration not found for " + environmentId);
+    }
+    return latest;
   }
 
   private void handleHeartbeat(Envelope envelope, List<Runnable> deferred) {

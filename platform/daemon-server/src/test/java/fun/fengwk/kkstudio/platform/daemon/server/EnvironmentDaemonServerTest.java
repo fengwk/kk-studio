@@ -1884,6 +1884,22 @@ class EnvironmentDaemonServerTest {
     assertEquals(2L, channel.lastEnvelope().getEnvironmentConfig().getVersion());
   }
 
+  /**
+   * READY 期间配置回读抛 ControlProtocolException 也只记日志：READY 必须完成，连接保持。
+   *
+   * <p>回读是可选的增量对账，失败由后续心跳继续；不能把一次查询失败升级为协议错误。
+   */
+  @Test
+  void readyCompletesWhenConfigLookupThrowsProtocolException() {
+    Fixture fixture = new Fixture();
+    fixture.configLookupFailure = new ControlProtocolException("config source rejected the query");
+
+    FakeControlChannel channel = fixture.connectReady("config-protocol-failure");
+
+    assertFalse(channel.closed(), "READY must complete even if the optional config read fails");
+    assertTrue(fixture.server.isReady(ENVIRONMENT_ID));
+  }
+
   /** 卡片或配置缺失时必须明确关闭连接，不能把旧配置当成仍有效。 */
   @Test
   void missingEnvironmentConfigClosesExplicitly() {

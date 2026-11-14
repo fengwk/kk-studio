@@ -278,7 +278,12 @@ public class DaemonControlStream implements DaemonControlChannel {
         .build();
   }
 
-  /** 读出当前可用的全部 DATA 帧并解帧；遇到 endStream 或首个协议违规即停止。 */
+  /**
+   * 读出当前可用的全部 DATA 帧并解帧；遇到 endStream 或首个协议违规即停止。
+   *
+   * <p>解帧状态（长度缓冲、正文缓冲、已填充字节数）由 {@code lock} 保护：数据回调可能由不同线程先后执行，必须与其它持有同一把锁的路径保持可见性。 一旦本轮已发现违规，后续
+   * DATA 帧不再解析，直接丢弃。
+   */
   private InboundBatch readAvailable(Stream source) {
     List<Envelope> envelopes = new ArrayList<>();
     ControlFrameDecoder.ProtocolViolation violation = new ControlFrameDecoder.ProtocolViolation();
@@ -288,7 +293,11 @@ public class DaemonControlStream implements DaemonControlChannel {
       if (data == null) {
         break;
       }
-      envelopes.addAll(decoder.accept(data.frame().getByteBuffer(), violation));
+      synchronized (lock) {
+        if (violation.message() == null) {
+          envelopes.addAll(decoder.accept(data.frame().getByteBuffer(), violation));
+        }
+      }
       boolean endStream = data.frame().isEndStream();
       data.release();
       if (endStream) {
