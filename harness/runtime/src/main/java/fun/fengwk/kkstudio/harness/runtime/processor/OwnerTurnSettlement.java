@@ -213,10 +213,15 @@ final class OwnerTurnSettlement {
       ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
           tx, advanced, turnEndId, null, now, false);
     }
-    completeClaim(tx, claim);
+    // final fence 最后执行：损失抛内部信号整事务回滚，绝无带 mutation 的 LOST 提交。
+    if (tx.work().lockClaimed(claim).isEmpty()) {
+      throw new ClaimLostSignal();
+    }
+    // 先推进 wakeVersion 再 complete：既有 Work 行被保留，而不是删除后重建。
     if (requestThread) {
       tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
     }
+    tx.work().complete(claim);
   }
 
   /** 无待做动作的 claim 完成：final fence 后 completeWork。 */
