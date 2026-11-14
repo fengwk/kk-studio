@@ -42,50 +42,24 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 	defer func() {
 		err = normalizeUploadError(err)
 	}()
-	if u.Control == nil {
-		return runtimeapi.ResultContent{}, uploadFailure("request", "control-unavailable", true, nil)
-	}
-	if err := ctx.Err(); err != nil {
-		return runtimeapi.ResultContent{}, uploadFailure("request", "cancelled", true, err)
-	}
-	if !transferIDPattern.MatchString(invocationID) {
-		return runtimeapi.ResultContent{}, uploadFailure("request", "invalid-input", true, nil)
-	}
-	if len(content.Bytes) == 0 || u.MaxResourceBytes > 0 && int64(len(content.Bytes)) > u.MaxResourceBytes {
-		return runtimeapi.ResultContent{}, uploadFailure("request", "invalid-input", true, nil)
-	}
-	mediaParts := strings.Split(content.MediaType, "/")
-	if len(mediaParts) != 2 || strings.ToLower(content.MediaType) != content.MediaType || !validHeaderName(mediaParts[0]) || !validHeaderName(mediaParts[1]) {
-		return runtimeapi.ResultContent{}, uploadFailure("request", "invalid-input", true, nil)
-	}
-	if content.Name != nil && hasUnsafeHeaderCharacter(*content.Name) {
-		return runtimeapi.ResultContent{}, uploadFailure("request", "invalid-input", true, nil)
-	}
-	transferID := uuid.New()
-	digest := sha256.Sum256(content.Bytes)
-	request := &protocol.ResourceUploadRequest{TransferId: &transferID, MediaType: protoString(content.MediaType), Size: protoInt64(int64(len(content.Bytes))), Sha256: protoString(hex.EncodeToString(digest[:]))}
-	if content.Name != nil {
-		request.Name = content.Name
+	if err := u.validate(ctx, invocationID, content); err != nil {
+		return runtimeapi.ResultContent{}, err
 	}
 	ticketWait, retryBackoff, err := u.retryOptions()
 	if err != nil {
 		return runtimeapi.ResultContent{}, uploadFailure("request", "invalid-input", true, err)
 	}
+	transferID := uuid.New()
+	request := uploadRequest(transferID, content)
 	for {
-		ticket, requestErr := u.requestTicket(ctx, ticketWait, invocationID, request)
-		if requestErr != nil {
-			if err = retryAfter(ctx, retryBackoff); err != nil {
-				return runtimeapi.ResultContent{}, uploadFailure("request", "cancelled", true, err)
-			}
-			continue
+		ticket, err := u.acquireTicket(ctx, ticketWait, retryBackoff, invocationID, transferID, request)
+		if err != nil {
+			return runtimeapi.ResultContent{}, err
 		}
-		if ticket == nil || ticket.GetTransferId() != transferID {
-			return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
-		}
-		if ticket.GetState() == protocol.TicketState_TICKET_FAILED {
+		switch ticket.GetState() {
+		case protocol.TicketState_TICKET_FAILED:
 			return runtimeapi.ResultContent{}, &runtimeapi.ResourceUploadError{Stage: "request", Category: "ticket-failed", CleanupConfirmed: true}
-		}
-		if ticket.GetState() == protocol.TicketState_TICKET_READY {
+		case protocol.TicketState_TICKET_READY:
 			if !transferIDPattern.MatchString(ticket.GetUploadId()) {
 				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
 			}
@@ -94,44 +68,119 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 		if ticket.GetState() != protocol.TicketState_TICKET_PENDING || ticket.GetPresignedPut() == nil || !transferIDPattern.MatchString(ticket.GetUploadId()) || ticket.GetPresignedPut().GetMethod() != http.MethodPut {
 			return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
 		}
-		if err = u.put(ctx, ticket.GetPresignedPut().GetUrl(), ticket.GetPresignedPut().Headers, content.Bytes); err != nil {
-			var uploadErr *runtimeapi.ResourceUploadError
-			if errors.As(err, &uploadErr) && !uploadErr.CleanupConfirmed {
-				return runtimeapi.ResultContent{}, uploadErr
-			}
-			if ctx.Err() != nil || errors.Is(err, context.Canceled) {
-				return runtimeapi.ResultContent{}, uploadFailure("put", "cancelled", true, err)
-			}
-			if err = retryAfter(ctx, retryBackoff); err != nil {
-				return runtimeapi.ResultContent{}, uploadFailure("put", "cancelled", true, err)
+		requestAgain, err := u.putWithRetry(ctx, ticket, content.Bytes, retryBackoff)
+		if err != nil {
+			return runtimeapi.ResultContent{}, err
+		}
+		if requestAgain {
+			continue
+		}
+		uploadID, err := u.commitUntilReady(ctx, ticketWait, retryBackoff, invocationID, transferID, ticket.GetUploadId())
+		if err != nil {
+			return runtimeapi.ResultContent{}, err
+		}
+		return uploadedContent(content, uploadID), nil
+	}
+}
+
+// validate rejects an upload request the storage service can never accept.
+func (u *ResourceUploader) validate(ctx context.Context, invocationID string, content runtimeapi.ResultContent) error {
+	if u.Control == nil {
+		return uploadFailure("request", "control-unavailable", true, nil)
+	}
+	if err := ctx.Err(); err != nil {
+		return uploadFailure("request", "cancelled", true, err)
+	}
+	if !transferIDPattern.MatchString(invocationID) {
+		return uploadFailure("request", "invalid-input", true, nil)
+	}
+	if len(content.Bytes) == 0 || u.MaxResourceBytes > 0 && int64(len(content.Bytes)) > u.MaxResourceBytes {
+		return uploadFailure("request", "invalid-input", true, nil)
+	}
+	mediaParts := strings.Split(content.MediaType, "/")
+	if len(mediaParts) != 2 || strings.ToLower(content.MediaType) != content.MediaType || !validHeaderName(mediaParts[0]) || !validHeaderName(mediaParts[1]) {
+		return uploadFailure("request", "invalid-input", true, nil)
+	}
+	if content.Name != nil && hasUnsafeHeaderCharacter(*content.Name) {
+		return uploadFailure("request", "invalid-input", true, nil)
+	}
+	return nil
+}
+
+// acquireTicket requests an upload ticket and retries the control exchange until the storage
+// service answers for this transfer.
+func (u *ResourceUploader) acquireTicket(ctx context.Context, wait, backoff time.Duration, invocationID, transferID string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
+	for {
+		ticket, err := u.requestTicket(ctx, wait, invocationID, request)
+		if err != nil {
+			if err = retryAfter(ctx, backoff); err != nil {
+				return nil, uploadFailure("request", "cancelled", true, err)
 			}
 			continue
 		}
-		for {
-			committed, commitErr := u.commit(ctx, ticketWait, invocationID, transferID, ticket.GetUploadId())
-			if commitErr != nil {
-				if err = retryAfter(ctx, retryBackoff); err != nil {
-					return runtimeapi.ResultContent{}, uploadFailure("commit", "cancelled", true, err)
-				}
-				continue
+		if ticket == nil || ticket.GetTransferId() != transferID {
+			return nil, fmt.Errorf("resource upload ticket is invalid")
+		}
+		return ticket, nil
+	}
+}
+
+// putWithRetry uploads the payload for a pending ticket. It reports whether the ticket has to be
+// requested again, which is the retry path for a storage failure that confirmed its own cleanup.
+func (u *ResourceUploader) putWithRetry(ctx context.Context, ticket *protocol.ResourceUploadTicket, body []byte, backoff time.Duration) (bool, error) {
+	err := u.put(ctx, ticket.GetPresignedPut().GetUrl(), ticket.GetPresignedPut().Headers, body)
+	if err == nil {
+		return false, nil
+	}
+	var uploadErr *runtimeapi.ResourceUploadError
+	if errors.As(err, &uploadErr) && !uploadErr.CleanupConfirmed {
+		return false, uploadErr
+	}
+	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
+		return false, uploadFailure("put", "cancelled", true, err)
+	}
+	if err = retryAfter(ctx, backoff); err != nil {
+		return false, uploadFailure("put", "cancelled", true, err)
+	}
+	return true, nil
+}
+
+// commitUntilReady publishes the uploaded object and retries the commit exchange until the
+// storage service reports it ready.
+func (u *ResourceUploader) commitUntilReady(ctx context.Context, wait, backoff time.Duration, invocationID, transferID, uploadID string) (string, error) {
+	for {
+		committed, err := u.commit(ctx, wait, invocationID, transferID, uploadID)
+		if err != nil {
+			if err = retryAfter(ctx, backoff); err != nil {
+				return "", uploadFailure("commit", "cancelled", true, err)
 			}
-			if committed == nil || committed.GetTransferId() != transferID || committed.GetUploadId() != ticket.GetUploadId() {
-				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload commit ticket is invalid")
-			}
-			if committed.GetState() == protocol.TicketState_TICKET_FAILED {
-				return runtimeapi.ResultContent{}, &runtimeapi.ResourceUploadError{Stage: "commit", Category: "ticket-failed", CleanupConfirmed: true}
-			}
-			if committed.GetState() == protocol.TicketState_TICKET_READY {
-				return uploadedContent(content, committed.GetUploadId()), nil
-			}
-			if committed.GetState() != protocol.TicketState_TICKET_PENDING {
-				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload commit ticket is invalid")
-			}
-			if err = retryAfter(ctx, retryBackoff); err != nil {
-				return runtimeapi.ResultContent{}, uploadFailure("commit", "cancelled", true, err)
-			}
+			continue
+		}
+		if committed == nil || committed.GetTransferId() != transferID || committed.GetUploadId() != uploadID {
+			return "", fmt.Errorf("resource upload commit ticket is invalid")
+		}
+		switch committed.GetState() {
+		case protocol.TicketState_TICKET_FAILED:
+			return "", &runtimeapi.ResourceUploadError{Stage: "commit", Category: "ticket-failed", CleanupConfirmed: true}
+		case protocol.TicketState_TICKET_READY:
+			return committed.GetUploadId(), nil
+		case protocol.TicketState_TICKET_PENDING:
+		default:
+			return "", fmt.Errorf("resource upload commit ticket is invalid")
+		}
+		if err = retryAfter(ctx, backoff); err != nil {
+			return "", uploadFailure("commit", "cancelled", true, err)
 		}
 	}
+}
+
+func uploadRequest(transferID string, content runtimeapi.ResultContent) *protocol.ResourceUploadRequest {
+	digest := sha256.Sum256(content.Bytes)
+	request := &protocol.ResourceUploadRequest{TransferId: &transferID, MediaType: protoString(content.MediaType), Size: protoInt64(int64(len(content.Bytes))), Sha256: protoString(hex.EncodeToString(digest[:]))}
+	if content.Name != nil {
+		request.Name = content.Name
+	}
+	return request
 }
 
 func normalizeUploadError(err error) error {
