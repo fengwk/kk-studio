@@ -136,7 +136,7 @@ final class DaemonUpdateCoordinator {
           try {
             updateListener.onUpdateResult(environmentId, domainResult);
           } catch (RuntimeException error) {
-            DaemonConnectionSession.logFailure("update result notification", error);
+            DaemonFailures.log(DaemonConnectionSession.class, "update result notification", error);
           }
         });
   }

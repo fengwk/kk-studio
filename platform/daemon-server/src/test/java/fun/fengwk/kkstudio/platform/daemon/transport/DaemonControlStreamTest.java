@@ -18,7 +18,6 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Cancel;
-import fun.fengwk.kkstudio.platform.daemon.protocol.ControlFraming;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolCodec;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
@@ -30,6 +29,7 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.TimeUnit;
@@ -134,6 +134,26 @@ class DaemonControlStreamTest {
     assertEquals(INVOCATION_2, daemonSession.received.get(1).getInvocationId());
   }
 
+  /** 长度前缀完整、body 只到一半时必须等到下一次回调再交付。 */
+  @Test
+  void waitsForBodyAcrossCallbacks() {
+    controlStream.bindSession(daemonSession);
+
+    byte[] framed = ControlProtocolCodec.encodeFrame(createCancelEnvelope(INVOCATION_1));
+    int split = Integer.BYTES + (framed.length - Integer.BYTES) / 2;
+
+    stream.inboundDataQueue.add(
+        new TestData(ByteBuffer.wrap(Arrays.copyOfRange(framed, 0, split)), false));
+    controlStream.listener().onDataAvailable(stream);
+    assertEquals(0, daemonSession.received.size());
+
+    stream.inboundDataQueue.add(
+        new TestData(ByteBuffer.wrap(Arrays.copyOfRange(framed, split, framed.length)), false));
+    controlStream.listener().onDataAvailable(stream);
+    assertEquals(1, daemonSession.received.size());
+    assertEquals(INVOCATION_1, daemonSession.received.get(0).getInvocationId());
+  }
+
   @Test
   void triggersWriteTimeoutViaSchedulerWhenUnacknowledged() {
     controlStream.bindSession(daemonSession);
@@ -192,9 +212,29 @@ class DaemonControlStreamTest {
     DataFrame errorDataFrame = stream.sentFrames.get(0);
     byte[] errorBytes = new byte[errorDataFrame.getByteBuffer().remaining()];
     errorDataFrame.getByteBuffer().get(errorBytes);
-    Envelope errEnv = ControlProtocolCodec.decodeBinary(ControlFraming.unframe(errorBytes));
+    Envelope errEnv =
+        ControlProtocolCodec.decodeBinary(
+            Arrays.copyOfRange(errorBytes, Integer.BYTES, errorBytes.length));
     assertTrue(errEnv.hasError());
     assertTrue(errEnv.getError().getMessage().contains("invalid inbound frame length"));
+  }
+
+  /** 一旦本轮解帧判定违规，后续 DATA 帧不得再产出信封。 */
+  @Test
+  void stopsDecodingAfterFirstViolation() {
+    controlStream.bindSession(daemonSession);
+
+    byte[] invalidLength = ByteBuffer.allocate(Integer.BYTES).putInt(0).array();
+    byte[] validFrame = ControlProtocolCodec.encodeFrame(createCancelEnvelope(INVOCATION_1));
+    byte[] combined = new byte[invalidLength.length + validFrame.length];
+    System.arraycopy(invalidLength, 0, combined, 0, invalidLength.length);
+    System.arraycopy(validFrame, 0, combined, invalidLength.length, validFrame.length);
+
+    stream.inboundDataQueue.add(new TestData(ByteBuffer.wrap(combined), false));
+    controlStream.listener().onDataAvailable(stream);
+
+    assertTrue(daemonSession.received.isEmpty(), "frames after a violation must not be decoded");
+    assertEquals(1, stream.sentFrames.size());
   }
 
   @Test

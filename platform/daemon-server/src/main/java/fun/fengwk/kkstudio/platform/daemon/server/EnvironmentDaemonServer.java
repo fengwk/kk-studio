@@ -99,12 +99,6 @@ public final class EnvironmentDaemonServer
     this.configExecutor = Objects.requireNonNull(configExecutor, "configExecutor");
   }
 
-  private static void logFailure(String stage, Throwable failure) {
-    LOG.log(
-        Level.WARNING,
-        "environment daemon " + stage + " failed: " + failure.getClass().getSimpleName());
-  }
-
   @Override
   public DaemonAdmission admit(DaemonHandshake handshake) {
     Objects.requireNonNull(handshake, "handshake");
@@ -145,35 +139,41 @@ public final class EnvironmentDaemonServer
         if (previous != null) {
           previous.close();
         }
-        String replacedInstanceId = replaceDaemonInstance(environmentId, instanceId);
-        if (replacedInstanceId != null) {
-          List<ActiveInvocation> abandoned =
-              invocationTracker.takeAbandonedInvocations(environmentId);
-          for (ActiveInvocation active : abandoned) {
-            try {
-              active.listener.onError(
-                  new EnvironmentCapabilitySendUncertainException(
-                      "Environment daemon instance changed for "
-                          + environmentId
-                          + "; capability invocation outcome is uncertain."));
-            } catch (RuntimeException error) {
-              LOG.log(
-                  Level.WARNING,
-                  "failed to notify abandoned invocation "
-                      + active.invocationId
-                      + " on "
-                      + environmentId
-                      + ": "
-                      + error.getClass().getSimpleName());
-            }
-            transferCoordinator.releaseAllTransfers(active, ticketService);
-          }
+        if (replaceDaemonInstance(environmentId, instanceId) != null) {
+          abandonInvocationsForChangedInstance(environmentId);
         }
         DaemonAdmission.Admitted admitted = new DaemonAdmission.Admitted(environmentId, instanceId);
         pendingAdmissions.put(admitted, new PendingAdmission(acquired.leaseToken(), token));
         yield admitted;
       }
     };
+  }
+
+  /**
+   * Daemon 实例已更换：在途调用不可能再收到原实例的回执，逐个以“结果不确定”失败并释放其传输资源。
+   *
+   * <p>通知失败只记录告警，不影响其余调用与准入流程。
+   */
+  private void abandonInvocationsForChangedInstance(EnvironmentId environmentId) {
+    for (ActiveInvocation active : invocationTracker.takeAbandonedInvocations(environmentId)) {
+      try {
+        active.listener.onError(
+            new EnvironmentCapabilitySendUncertainException(
+                "Environment daemon instance changed for "
+                    + environmentId
+                    + "; capability invocation outcome is uncertain."));
+      } catch (RuntimeException error) {
+        LOG.log(
+            Level.WARNING,
+            "failed to notify abandoned invocation "
+                + active.invocationId
+                + " on "
+                + environmentId
+                + ": "
+                + error.getClass().getSimpleName());
+      }
+      transferCoordinator.releaseAllTransfers(active, ticketService);
+    }
   }
 
   @Override
@@ -296,7 +296,10 @@ public final class EnvironmentDaemonServer
       configExecutor.execute(() -> runConfigSync(environmentId, state));
     } catch (RuntimeException error) {
       configSyncs.rejected(environmentId, state);
-      logFailure("environment config scheduling for " + environmentId, error);
+      DaemonFailures.log(
+          EnvironmentDaemonServer.class,
+          "environment config scheduling for " + environmentId,
+          error);
     }
   }
 
@@ -308,7 +311,10 @@ public final class EnvironmentDaemonServer
           session.reconcileEnvironmentConfig();
         }
       } catch (RuntimeException error) {
-        logFailure("environment config reconciliation for " + environmentId, error);
+        DaemonFailures.log(
+            EnvironmentDaemonServer.class,
+            "environment config reconciliation for " + environmentId,
+            error);
       }
       if (!configSyncs.repeat(environmentId, state)) {
         return;
@@ -324,6 +330,54 @@ public final class EnvironmentDaemonServer
       return Optional.of(session.tunnel());
     }
     return Optional.empty();
+  }
+
+  /**
+   * 建立一条在途调用记录：心跳超时后由 {@code expire} 收尾，会话查找始终回到当前绑定。
+   *
+   * <p>此处只构造状态，不发帧；调用方在同一把会话锁内完成登记与发送。
+   */
+  private ActiveInvocation newActiveInvocation(
+      EnvironmentId environmentId,
+      UUID invocationId,
+      EnvironmentCapabilityExecutionListener listener,
+      DaemonConnectionSession session) {
+    return new ActiveInvocation(
+        environmentId,
+        invocationId,
+        listener,
+        settings().heartbeatTimeout(),
+        session.daemonInstanceId(),
+        this::expire,
+        () -> sessionOf(environmentId));
+  }
+
+  /** 取本环境已 READY 的会话；缺失或未就绪都视为该能力暂不可用。 */
+  private DaemonConnectionSession requireReadySession(
+      EnvironmentId environmentId, String capabilityId) {
+    DaemonConnectionSession session = sessionOf(environmentId);
+    if (session == null || !session.isReady()) {
+      throw unavailable(environmentId, capabilityId);
+    }
+    return session;
+  }
+
+  /**
+   * 确认会话仍持有权威 ready 租约。
+   *
+   * <p>租约查询失败视为环境暂不可用，不降级为“允许调用”：调用必须在权威租约成立时才下发。
+   */
+  private void requireHeldLease(EnvironmentId environmentId, UUID leaseToken, String capabilityId) {
+    boolean holdsReady;
+    try {
+      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
+    } catch (RuntimeException error) {
+      throw new EnvironmentCapabilityUnavailableException(
+          "database unavailable: " + error.getMessage(), error);
+    }
+    if (!holdsReady) {
+      throw unavailable(environmentId, capabilityId);
+    }
   }
 
   @Override
@@ -348,33 +402,12 @@ public final class EnvironmentDaemonServer
       throw new EnvironmentCapabilityBusyException(
           "environment " + environmentId + " is being updated");
     }
-    DaemonConnectionSession session = sessionOf(environmentId);
-    if (session == null || !session.isReady()) {
-      throw unavailable(environmentId, descriptor.id().value());
-    }
+    DaemonConnectionSession session = requireReadySession(environmentId, descriptor.id().value());
     validateRequiredWorkdirShape(session.daemonOperatingSystem(), descriptor, request.call());
-
     UUID leaseToken = session.leaseToken();
-    boolean holdsReady;
-    try {
-      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
-    } catch (RuntimeException error) {
-      throw new EnvironmentCapabilityUnavailableException(
-          "database unavailable: " + error.getMessage(), error);
-    }
-    if (!holdsReady) {
-      throw unavailable(environmentId, descriptor.id().value());
-    }
+    requireHeldLease(environmentId, leaseToken, descriptor.id().value());
 
-    ActiveInvocation active =
-        new ActiveInvocation(
-            environmentId,
-            invocationId,
-            listener,
-            settings().heartbeatTimeout(),
-            session.daemonInstanceId(),
-            this::expire,
-            () -> sessionOf(environmentId));
+    ActiveInvocation active = newActiveInvocation(environmentId, invocationId, listener, session);
     ResourceDownload download = request.resourceDownload();
     if (download != null) {
       active.downloadTransfers.put(download.transferId(), download.blobId());
@@ -392,29 +425,7 @@ public final class EnvironmentDaemonServer
       }
       invocationTracker.register(active);
 
-      EnvironmentServerSettings currentSettings = settings();
-      Invoke.Builder invokeBuilder =
-          Invoke.newBuilder()
-              .setCapabilityId(descriptor.id().value())
-              .setArgumentsJson(request.call().argumentsJson())
-              .setTimeoutMillis(request.timeout().toMillis())
-              .setMaxOutputBytes(currentSettings.maxOutputBytes())
-              .setImageInputTier(currentSettings.imageInputTier());
-      if (request.expectedFile() != null) {
-        ExpectedFile.Builder expectedFileBuilder =
-            ExpectedFile.newBuilder().setPath(request.expectedFile().path());
-        if (request.expectedFile().sha256() != null) {
-          expectedFileBuilder.setSha256(request.expectedFile().sha256());
-        }
-        invokeBuilder.setExpectedFile(expectedFileBuilder.build());
-      }
-      Envelope invokeEnvelope =
-          Envelope.newBuilder()
-              .setMessageType(MessageType.INVOKE)
-              .setEnvironmentId(environmentId.value().toString())
-              .setInvocationId(invocationId.toString())
-              .setInvoke(invokeBuilder.build())
-              .build();
+      Envelope invokeEnvelope = invokeEnvelope(environmentId, invocationId, request, settings());
       try {
         outcome = session.offerResult(invokeEnvelope);
         if (outcome == DaemonOfferResult.ACCEPTED) {
@@ -441,6 +452,35 @@ public final class EnvironmentDaemonServer
     throw unavailable(environmentId, descriptor.id().value());
   }
 
+  /** 组装 INVOKE：能力参数原样透传，输出上限与图片档位取自当前 settings。 */
+  private static Envelope invokeEnvelope(
+      EnvironmentId environmentId,
+      UUID invocationId,
+      EnvironmentCapabilityExecutionRequest request,
+      EnvironmentServerSettings currentSettings) {
+    Invoke.Builder invoke =
+        Invoke.newBuilder()
+            .setCapabilityId(request.descriptor().id().value())
+            .setArgumentsJson(request.call().argumentsJson())
+            .setTimeoutMillis(request.timeout().toMillis())
+            .setMaxOutputBytes(currentSettings.maxOutputBytes())
+            .setImageInputTier(currentSettings.imageInputTier());
+    if (request.expectedFile() != null) {
+      ExpectedFile.Builder expectedFile =
+          ExpectedFile.newBuilder().setPath(request.expectedFile().path());
+      if (request.expectedFile().sha256() != null) {
+        expectedFile.setSha256(request.expectedFile().sha256());
+      }
+      invoke.setExpectedFile(expectedFile.build());
+    }
+    return Envelope.newBuilder()
+        .setMessageType(MessageType.INVOKE)
+        .setEnvironmentId(environmentId.value().toString())
+        .setInvocationId(invocationId.toString())
+        .setInvoke(invoke.build())
+        .build();
+  }
+
   @Override
   public EnvironmentCapabilityExecutionHandle attach(
       EnvironmentId environmentId,
@@ -453,31 +493,12 @@ public final class EnvironmentDaemonServer
     if (draining) {
       throw unavailable(environmentId, "invocation " + invocationId);
     }
-    DaemonConnectionSession session = sessionOf(environmentId);
-    if (session == null || !session.isReady()) {
-      throw unavailable(environmentId, "invocation " + invocationId);
-    }
+    DaemonConnectionSession session =
+        requireReadySession(environmentId, "invocation " + invocationId);
     UUID leaseToken = session.leaseToken();
-    boolean holdsReady;
-    try {
-      holdsReady = leaseStore.holdsReadyLease(environmentId, leaseToken);
-    } catch (RuntimeException error) {
-      throw new EnvironmentCapabilityUnavailableException(
-          "database unavailable: " + error.getMessage(), error);
-    }
-    if (!holdsReady) {
-      throw unavailable(environmentId, "invocation " + invocationId);
-    }
+    requireHeldLease(environmentId, leaseToken, "invocation " + invocationId);
 
-    ActiveInvocation active =
-        new ActiveInvocation(
-            environmentId,
-            invocationId,
-            listener,
-            settings().heartbeatTimeout(),
-            session.daemonInstanceId(),
-            this::expire,
-            () -> sessionOf(environmentId));
+    ActiveInvocation active = newActiveInvocation(environmentId, invocationId, listener, session);
 
     DaemonOfferResult outcome = null;
     RuntimeException sendFailure = null;
@@ -524,14 +545,14 @@ public final class EnvironmentDaemonServer
       try {
         session.drain();
       } catch (RuntimeException error) {
-        logFailure("control drain", error);
+        DaemonFailures.log(EnvironmentDaemonServer.class, "control drain", error);
       }
       UUID leaseToken = session.leaseToken();
       if (leaseToken != null) {
         try {
           leaseStore.release(session.environmentId(), leaseToken);
         } catch (RuntimeException error) {
-          logFailure("lease release", error);
+          DaemonFailures.log(EnvironmentDaemonServer.class, "lease release", error);
         }
       }
     }

@@ -132,7 +132,7 @@ final class EnvironmentDaemonServerTestSupport {
                         .setArchitecture(Architecture.AMD64)
                         .build())
                 .setRuntimeStatus(
-                    DaemonConnectionSession.toProtoSnapshot(
+                    DaemonProtoFixtures.runtimeSnapshot(
                         new DaemonRuntimeSnapshot(revision, status)))
                 .build())
         .build();
@@ -155,8 +155,7 @@ final class EnvironmentDaemonServerTestSupport {
     Heartbeat.Builder builder =
         Heartbeat.newBuilder()
             .setRuntimeStatus(
-                DaemonConnectionSession.toProtoSnapshot(
-                    new DaemonRuntimeSnapshot(revision, status)));
+                DaemonProtoFixtures.runtimeSnapshot(new DaemonRuntimeSnapshot(revision, status)));
     if (ideLeaseRound != null) {
       builder.setIdeLeaseRound(ideLeaseRound);
     }
@@ -174,7 +173,7 @@ final class EnvironmentDaemonServerTestSupport {
         .setRuntimeStatus(
             RuntimeStatus.newBuilder()
                 .setRuntimeStatus(
-                    DaemonConnectionSession.toProtoSnapshot(
+                    DaemonProtoFixtures.runtimeSnapshot(
                         new DaemonRuntimeSnapshot(revision, status)))
                 .build())
         .build();
@@ -225,7 +224,7 @@ final class EnvironmentDaemonServerTestSupport {
         .setProgress(
             Progress.newBuilder()
                 .setResult(
-                    DaemonConnectionSession.toProtoResult(
+                    DaemonProtoFixtures.capabilityResult(
                         EnvironmentCapabilityResult.text(invocationId.toString(), text)))
                 .build())
         .build();
@@ -243,7 +242,7 @@ final class EnvironmentDaemonServerTestSupport {
         .setCompleted(
             Completed.newBuilder()
                 .setResult(
-                    DaemonConnectionSession.toProtoResult(
+                    DaemonProtoFixtures.capabilityResult(
                         EnvironmentCapabilityResult.text(invocationId.toString(), text)))
                 .build())
         .build();
@@ -263,7 +262,7 @@ final class EnvironmentDaemonServerTestSupport {
         .setCompleted(
             Completed.newBuilder()
                 .setResult(
-                    DaemonConnectionSession.toProtoResult(
+                    DaemonProtoFixtures.capabilityResult(
                         new EnvironmentCapabilityResult(
                             invocationId.toString(), contents, false, "{}")))
                 .build())
@@ -287,7 +286,7 @@ final class EnvironmentDaemonServerTestSupport {
         .setCompleted(
             Completed.newBuilder()
                 .setResult(
-                    DaemonConnectionSession.toProtoResult(
+                    DaemonProtoFixtures.capabilityResult(
                         new EnvironmentCapabilityResult(
                             invocationId.toString(), contents, false, "{}")))
                 .build())

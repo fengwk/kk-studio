@@ -43,8 +43,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /**
  * 承载单条 Daemon WebSocket 连接上的 HTTP/2 客户端会话。
  *
- * <p>按 X-DESIGN §2 配置：4 MiB 会话窗口、1 MiB 流窗口、32 KiB 响应头大小限制、15s PING / 30s ACK 超时、10s 控制流开启倒计时与
- * abandon 清理；提供 {@link #drain()} 发送 NO_ERROR GOAWAY 并通知隧道排空；连接关闭时使全部子流以 {@link IOException} 结束。
+ * <p>窗口与存活参数：4 MiB 会话窗口、1 MiB 流窗口、32 KiB 响应头大小限制、15s PING / 30s ACK 超时、10s 控制流开启倒计时与 abandon
+ * 清理；{@link #drain()} 发送 NO_ERROR GOAWAY 并通知隧道排空，连接关闭时使全部子流以 {@link IOException} 结束。
  */
 public class DaemonHttp2ClientSession implements AutoCloseable {
 

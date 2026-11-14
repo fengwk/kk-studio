@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.List;
 
 /** 控制消息的 binary golden 与应用层边界测试。 */
@@ -777,7 +778,8 @@ class ControlProtocolCodecTest {
       assertArrayEquals(
           golden,
           ControlProtocolCodec.encodeBinary(
-              ControlProtocolCodec.decodeBinary(ControlFraming.unframe(framed))));
+              ControlProtocolCodec.decodeBinary(
+                  Arrays.copyOfRange(framed, Integer.BYTES, framed.length))));
     }
   }
 

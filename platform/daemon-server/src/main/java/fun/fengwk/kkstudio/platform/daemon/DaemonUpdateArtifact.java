@@ -1,32 +1,17 @@
 package fun.fengwk.kkstudio.platform.daemon;
 
 import java.util.Objects;
-import java.util.regex.Pattern;
 
 /**
- * 官方 Daemon 发布制品的固定形状：仓库、tag、按 os/arch 的归档名、校验文件与 URL 模板。
+ * 官方 Daemon 发布制品的固定形状：仓库、tag、按 os/arch 的归档名、校验文件与 URL。
  *
- * <p>Platform 与 Daemon 共享这一事实源：Platform 用它构造受管更新目标，Daemon 用同一模式在下载前校验 URL 是否就是本机 os/arch 的官方归档。
- * 它刻意不提供 "latest" 或任意 URL 解析——目标版本与平台必须由 Platform 明确给出。
+ * <p>Platform 用它构造受管更新目标；发布工作流按同一形状产出 Release 资产。它刻意不提供 "latest" 或任意 URL 解析——目标版本与平台必须由 Platform
+ * 明确给出。
  */
 public final class DaemonUpdateArtifact {
 
   /** 官方 Release 下载基址；只允许该仓库。 */
   public static final String RELEASE_BASE = "https://github.com/fengwk/kk-studio/releases/download";
-
-  /**
-   * 官方 Daemon 制品 URL：固定仓库 + tag + 按 os/arch 的归档名，且只覆盖发布矩阵内的平台。
-   *
-   * <p>Release tag 与归档文件名中的版本必须是同一事实（反向引用 {@code \1} 强制两者逐字相等），未知平台同样不被接受。
-   */
-  public static final Pattern ARTIFACT_URL_PATTERN =
-      Pattern.compile(
-          "^https://github\\.com/fengwk/kk-studio/releases/download/v([0-9A-Za-z._+-]{1,64})/"
-              + "kk-studio-daemon-v\\1-"
-              + "((linux|macos)-(amd64|arm64)|windows-amd64)\\.tar\\.gz$");
-
-  /** SHA256 文本形状。 */
-  public static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-fA-F]{64}");
 
   private DaemonUpdateArtifact() {}
 
