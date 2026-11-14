@@ -22,10 +22,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 平台的 Agent 任务入口：子代理 task 工具、插件 Prompt 任务与 Issue 任务都经由它创建 Thread、接受首批输入并登记结果票据，再用同一张票据观察、停止与读取结果。
+ * 平台的 Agent 任务入口：子代理 task 工具、插件 Prompt 任务与 Issue 任务都经由它创建 Thread、接受首批输入并登记结果票据，再用同一张票据停止与读取结果。
  *
  * <p>提交委托运行时的统一创建原语 {@link HarnessRuntime#spawn}，并加入调用方已有的事务（Issue 在自己的产品事务内提交）。有父 Thread 的任务根据内部
- * {@code async} 选择通知交付或同步工具结果交付，并计入并发额度；无父任务以 {@code RECEIPT_ONLY} 只留回执。观察只投影票据已冻结的结果，绝不据子 Thread
+ * {@code async} 选择通知交付或同步工具结果交付，并计入并发额度；无父任务以 {@code RECEIPT_ONLY} 只留回执。读取结果只投影票据已冻结的回执，绝不据子 Thread
  * 当前 head 推测。
  *
  * <p>运行时以 {@link ObjectProvider} 惰性解析：只装配 Platform 的上下文不会因缺少运行时而启动失败，真正使用时确定失败。
@@ -79,36 +79,6 @@ public class AgentTaskService {
   /** 票据的固定凭据；不存在返回空。 */
   private Optional<ThreadJoin> findTicket(UUID ticketId) {
     return requireRuntime().findJoin(Objects.requireNonNull(ticketId, "ticketId"));
-  }
-
-  /** 任务当前状态：票据不存在返回空；有效票据在结果冻结前为 RUNNING，被接管的旧票据为 SUPERSEDED，其余带冻结回执。 */
-  public Optional<AgentTaskStatus> observe(UUID ticketId) {
-    HarnessRuntime runtime = requireRuntime();
-    Optional<ThreadJoin> join = runtime.findJoin(Objects.requireNonNull(ticketId, "ticketId"));
-    if (join.isEmpty()) {
-      return Optional.empty();
-    }
-    ThreadJoin ticket = join.get();
-    if (ticket.supersededByInvocationId() != null) {
-      return Optional.of(
-          new AgentTaskStatus(
-              ticketId,
-              ticket.childThreadId(),
-              ticket.agent(),
-              AgentTaskStatus.State.SUPERSEDED,
-              null));
-    }
-    ThreadJoinReceipt receipt = runtime.projectJoinReceipt(ticketId).orElse(null);
-    AgentTaskStatus.State state =
-        receipt == null
-            ? AgentTaskStatus.State.RUNNING
-            : switch (receipt.outcome()) {
-              case COMPLETED -> AgentTaskStatus.State.COMPLETED;
-              case ERROR -> AgentTaskStatus.State.ERROR;
-              case CANCELLED -> AgentTaskStatus.State.CANCELLED;
-            };
-    return Optional.of(
-        new AgentTaskStatus(ticketId, ticket.childThreadId(), ticket.agent(), state, receipt));
   }
 
   /** 任务的冻结结果回执；任务不存在或尚未结束返回空。 */

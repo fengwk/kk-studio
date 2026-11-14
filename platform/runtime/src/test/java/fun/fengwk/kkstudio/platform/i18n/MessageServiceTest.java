@@ -43,9 +43,7 @@ class MessageServiceTest {
         messageService.domainMessage(
             DomainErrorCode.VERSION_CONFLICT, Map.of("resource", "model")));
     assertEquals("The request is invalid.", messageService.httpMessage(400));
-    assertEquals("Bad Request", messageService.httpTitle(400));
     assertEquals("The server encountered an unexpected error.", messageService.httpMessage(500));
-    assertEquals("Internal Server Error", messageService.httpTitle(500));
 
     LocaleContextHolder.setLocale(Locale.SIMPLIFIED_CHINESE);
     assertEquals(
@@ -55,9 +53,7 @@ class MessageServiceTest {
     assertEquals("limit 参数为必填项。", messageService.validationRequired("limit"));
     assertEquals("limit 参数的值无效。", messageService.validationTypeMismatch("limit"));
     assertEquals("请求无效。", messageService.httpMessage(400));
-    assertEquals("请求错误", messageService.httpTitle(400));
     assertEquals("服务器发生意外错误。", messageService.httpMessage(500));
-    assertEquals("服务器错误", messageService.httpTitle(500));
   }
 
   @Test
@@ -96,25 +92,16 @@ class MessageServiceTest {
   }
 
   @Test
-  void preservesCommonErrorCodesAndProvidesUnknownStatusFallback() {
-    assertEquals("BAD_REQUEST", messageService.httpCode(400));
-    assertEquals("NOT_FOUND", messageService.httpCode(404));
-    assertEquals("SERVICE_UNAVAILABLE", messageService.httpCode(503));
+  void fallsBackToTheUnknownStatusMessageForUnknownAndUnregisteredStatuses() {
     assertEquals(
         "The request conflicts with the current resource state.", messageService.httpMessage(409));
-    assertEquals("Conflict", messageService.httpTitle(409));
     assertEquals("The service is temporarily unavailable.", messageService.httpMessage(503));
-    assertEquals("Service Unavailable", messageService.httpTitle(503));
 
-    assertEquals("599", messageService.httpCode(599));
     assertEquals("HTTP error (status 599).", messageService.httpMessage(599));
-    assertEquals("HTTP Error", messageService.httpTitle(599));
     assertFalse(messageService.httpMessage(599).isBlank());
 
     // 已识别但未登记文案的状态与未知状态使用同一兜底，直接返回统一的未知状态文案。
-    assertEquals("I_AM_A_TEAPOT", messageService.httpCode(418));
     assertEquals("HTTP error (status 418).", messageService.httpMessage(418));
-    assertEquals("HTTP Error", messageService.httpTitle(418));
   }
 
   /** 展示层按请求 locale 解析 resource 名称；未登记标识回退为下划线分隔的可读形式，空值原样返回。 */

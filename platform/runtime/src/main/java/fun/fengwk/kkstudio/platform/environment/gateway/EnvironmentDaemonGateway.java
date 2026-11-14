@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.environment.gateway;
 import org.springframework.stereotype.Service;
 
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 
 import java.util.Objects;
 
@@ -12,19 +11,12 @@ import java.util.Objects;
 public class EnvironmentDaemonGateway {
 
   private final EnvironmentDaemonServer server;
-  private final EnvironmentRegistry environmentRegistry;
 
-  public EnvironmentDaemonGateway(
-      EnvironmentDaemonServer server, EnvironmentRegistry environmentRegistry) {
+  public EnvironmentDaemonGateway(EnvironmentDaemonServer server) {
     this.server = Objects.requireNonNull(server, "server");
-    this.environmentRegistry = Objects.requireNonNull(environmentRegistry, "environmentRegistry");
   }
 
   public EnvironmentDaemonServer server() {
     return server;
-  }
-
-  public EnvironmentRegistry environmentRegistry() {
-    return environmentRegistry;
   }
 }

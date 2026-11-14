@@ -40,6 +40,8 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateResult;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentRuntimeStatusDTO;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateCommandStatus;
 import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentUpdateStartDTO;
@@ -100,7 +102,7 @@ class EnvironmentUpdateServiceTest {
 
   private EnvironmentUpdateService newService() {
     return new EnvironmentUpdateService(
-        new EnvironmentDaemonGateway(server, registry),
+        new EnvironmentDaemonGateway(server),
         registry,
         environmentRepository,
         releaseProvider,
@@ -264,8 +266,8 @@ class EnvironmentUpdateServiceTest {
 
     ArgumentCaptor<EnvironmentEvent> event = ArgumentCaptor.forClass(EnvironmentEvent.class);
     verify(registry).recordEvent(eq(ENV), any(), event.capture());
-    assertEquals(EnvironmentEvent.TYPE_UPDATE_FAILED, event.getValue().type());
-    assertEquals(EnvironmentEvent.LEVEL_WARN, event.getValue().level());
+    assertEquals(EnvironmentEventType.UPDATE_FAILED, event.getValue().type());
+    assertEquals(EnvironmentEventLevel.WARN, event.getValue().level());
     assertEquals("daemon update failed", event.getValue().message());
     verify(server, times(1)).endUpdate(eq(ENV), any());
   }

@@ -20,6 +20,8 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifier;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventLevel;
+import fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
 
 import java.sql.Connection;
@@ -345,8 +347,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     UUID token = assertInstanceOf(LeaseBindResult.Acquired.class, r1).leaseToken();
 
     EnvironmentConnection connecting = registry1.find(DEV).orElseThrow();
-    assertEquals(List.of(EnvironmentEvent.TYPE_CONNECTING), eventTypes(connecting.recentEvents()));
-    assertEquals(EnvironmentEvent.LEVEL_INFO, connecting.recentEvents().get(0).level());
+    assertEquals(List.of(EnvironmentEventType.CONNECTING), eventTypes(connecting.recentEvents()));
+    assertEquals(EnvironmentEventLevel.INFO, connecting.recentEvents().get(0).level());
 
     assertTrue(registry1.markReady(DEV, token, CAPABILITIES, LEASE_DURATION));
     assertTrue(registry1.disconnect(DEV, token, LEASE_DURATION));
@@ -354,16 +356,15 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     assertEquals(LiveEnvironmentStatus.CONNECTING, offline.status());
     assertEquals(
         List.of(
-            EnvironmentEvent.TYPE_CONNECTING,
-            EnvironmentEvent.TYPE_READY,
-            EnvironmentEvent.TYPE_DISCONNECTED),
+            EnvironmentEventType.CONNECTING,
+            EnvironmentEventType.READY,
+            EnvironmentEventType.DISCONNECTED),
         eventTypes(offline.recentEvents()));
-    assertEquals(EnvironmentEvent.LEVEL_WARN, offline.recentEvents().get(2).level());
+    assertEquals(EnvironmentEventLevel.WARN, offline.recentEvents().get(2).level());
     // 保留事实：断线不清空宿主 metadata 与事件窗口；历史 WARN 事件仍留在窗口内。
     assertNotNull(offline.readyMetadata());
     assertTrue(
-        offline.recentEvents().stream()
-            .anyMatch(e -> EnvironmentEvent.LEVEL_WARN.equals(e.level())));
+        offline.recentEvents().stream().anyMatch(e -> e.level() == EnvironmentEventLevel.WARN));
   }
 
   /** 测试意图：验证 recent_events 始终是 200 条以内的按时间正序窗口，最旧的先被淘汰。 */
@@ -377,8 +378,8 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
               token,
               new EnvironmentEvent(
                   Instant.now(),
-                  EnvironmentEvent.LEVEL_INFO,
-                  EnvironmentEvent.TYPE_READY,
+                  EnvironmentEventLevel.INFO,
+                  EnvironmentEventType.READY,
                   "event " + index)));
     }
 
@@ -399,25 +400,7 @@ class EnvironmentRegistryTest extends PostgresSchemaSupport {
     return leaseToken;
   }
 
-  private static List<String> eventTypes(List<EnvironmentEvent> events) {
+  private static List<EnvironmentEventType> eventTypes(List<EnvironmentEvent> events) {
     return events.stream().map(EnvironmentEvent::type).toList();
-  }
-
-  private static List<EnvironmentId> environmentIds(List<EnvironmentConnection> connections) {
-    return connections.stream().map(EnvironmentConnection::environmentId).toList();
-  }
-
-  /** 测试意图：验证 list 查询能列出不同环境的独立路由行。 */
-  @Test
-  void listAndDistinctEnvironments() {
-    LeaseBindResult r1 = registry1.tryAcquire(DEV, DEV_TOKEN, LEASE_DURATION);
-    LeaseBindResult r2 = registry2.tryAcquire(PROD, PROD_TOKEN, LEASE_DURATION);
-    assertInstanceOf(LeaseBindResult.Acquired.class, r1);
-    assertInstanceOf(LeaseBindResult.Acquired.class, r2);
-
-    List<EnvironmentConnection> list = registry1.list();
-    assertEquals(2, list.size());
-    assertEquals(DEV, list.get(0).environmentId());
-    assertEquals(PROD, list.get(1).environmentId());
   }
 }

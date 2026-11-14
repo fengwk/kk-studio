@@ -262,6 +262,8 @@
                                         <include>fun.fengwk.kkstudio.platform.pluginhost.resource.PublicAddressDnsResolver</include>
                                         <include>fun.fengwk.kkstudio.platform.pluginhost.resource.HttpRemoteMediaTransport</include>
                                         <include>fun.fengwk.kkstudio.platform.persistence.PostgresqlPersistenceConfiguration</include>
+                                        <include>fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnectionRows</include>
+                                        <include>fun.fengwk.kkstudio.platform.environment.registry.EnvironmentLeaseAdmission</include>
                                     </includes>
                                     <limits>
                                         <limit>

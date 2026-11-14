@@ -552,13 +552,13 @@ class EnvironmentServiceTest {
         List.of(
             new EnvironmentEvent(
                 NOW,
-                EnvironmentEvent.LEVEL_WARN,
-                EnvironmentEvent.TYPE_DISCONNECTED,
+                EnvironmentEventLevel.WARN,
+                EnvironmentEventType.DISCONNECTED,
                 "daemon connection lost"),
             new EnvironmentEvent(
                 NOW.plusSeconds(1),
-                EnvironmentEvent.LEVEL_INFO,
-                EnvironmentEvent.TYPE_READY,
+                EnvironmentEventLevel.INFO,
+                EnvironmentEventType.READY,
                 "environment ready"));
     when(registry.find(EnvironmentId.of(ENV_ID))).thenReturn(Optional.of(connection(history)));
 
@@ -601,13 +601,13 @@ class EnvironmentServiceTest {
                     List.of(
                         new EnvironmentEvent(
                             NOW,
-                            EnvironmentEvent.LEVEL_INFO,
-                            EnvironmentEvent.TYPE_CONNECTING,
+                            EnvironmentEventLevel.INFO,
+                            EnvironmentEventType.CONNECTING,
                             "daemon connection accepted"),
                         new EnvironmentEvent(
                             NOW.plusSeconds(1),
-                            EnvironmentEvent.LEVEL_WARN,
-                            EnvironmentEvent.TYPE_DISCONNECTED,
+                            EnvironmentEventLevel.WARN,
+                            EnvironmentEventType.DISCONNECTED,
                             "daemon connection lost")))));
 
     EnvironmentService service = new EnvironmentService(repo, registry, snapshot, CLOCK, "3.0.0");

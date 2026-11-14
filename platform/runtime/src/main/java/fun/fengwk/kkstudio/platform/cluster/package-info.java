@@ -15,8 +15,8 @@
  *       错误响应由宿主 Web advice 统一构造。
  *   <li>{@link fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService} 按 Thread
  *       维护本机订阅租约，并在发布路径判定其它节点是否存在订阅租约与 {@code cluster_node} 租约同时有效的订阅。
- *   <li>{@link fun.fengwk.kkstudio.ide.cluster.ClusterEnvironmentIdeService} 是既有 {@code
- *       EnvironmentIdeService} 的组合实现：本地 owner 直接委托本地 delegate，远端 owner 最多一次认证 HTTP 转发，绝不自动重放。
+ *   <li>{@link fun.fengwk.kkstudio.ide.cluster.ClusterEnvironmentIdeService} 实现 {@code
+ *       EnvironmentIdeService}：本地 owner 直接委托本地 delegate，远端 owner 最多一次认证 HTTP 转发，绝不自动重放。
  *   <li>{@link fun.fengwk.kkstudio.ide.cluster.IdeClusterClient} 只是小 metadata JSON 的简洁客户端，
  *       不承载大字节数据；反向数据面（HTTP/WS 逐 exchange）由 gateway 宿主自行流式实现并复用本包的头签名。
  * </ul>

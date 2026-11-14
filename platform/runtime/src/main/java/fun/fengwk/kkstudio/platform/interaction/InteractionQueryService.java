@@ -73,113 +73,28 @@ public class InteractionQueryService {
    * 两条流都耗尽时返回 {@code null}。
    */
   public InteractionPageDTO listInteractions(UUID rootThreadId, String cursor, int limit) {
-    if (limit < 1 || limit > MAX_LIMIT) {
-      throw DomainException.validation("interaction", "limit must be between 1 and " + MAX_LIMIT);
-    }
+    requireValidLimit(limit);
     HarnessRuntime runtime = rootResolver.requireRuntime();
     if (rootThreadId != null) {
       requireCanonicalRoot(rootThreadId);
     }
-    InteractionCursor decoded = parseCursor(cursor);
     QueryContext context = new QueryContext(runtime, rootThreadId);
-    List<InteractionDTO> items = new ArrayList<>(limit);
-    Instant consumedCreatedAt = decoded.createdAt();
-    UUID consumedId = decoded.id();
-    ArrayDeque<PendingInteraction> manualQueue = new ArrayDeque<>();
-    ArrayDeque<PendingEnvironmentWait> environmentQueue = new ArrayDeque<>();
-    Instant manualCursorCreatedAt = decoded.createdAt();
-    UUID manualCursorId = decoded.id();
-    Instant environmentCursorCreatedAt = decoded.createdAt();
-    UUID environmentCursorId = decoded.id();
-    boolean manualHasMore = true;
-    boolean environmentHasMore = true;
-    while (items.size() < limit) {
-      int remaining = limit - items.size();
-      if (manualQueue.isEmpty() && manualHasMore) {
-        PendingInteractionPage page =
-            runtime.listPendingInteractions(manualCursorCreatedAt, manualCursorId, remaining);
-        manualHasMore = page.hasMore();
-        if (!page.interactions().isEmpty()) {
-          manualQueue.addAll(page.interactions());
-          PendingInteraction last = page.interactions().get(page.interactions().size() - 1);
-          manualCursorCreatedAt = last.createdAt();
-          manualCursorId = last.invocationId();
-        }
-      }
-      if (environmentQueue.isEmpty() && environmentHasMore) {
-        PendingEnvironmentWaitPage page =
-            runtime.listEnvironmentWaitCandidates(
-                environmentCursorCreatedAt, environmentCursorId, remaining);
-        environmentHasMore = page.hasMore();
-        if (!page.waits().isEmpty()) {
-          environmentQueue.addAll(page.waits());
-          PendingEnvironmentWait last = page.waits().get(page.waits().size() - 1);
-          environmentCursorCreatedAt = last.representativeCreatedAt();
-          environmentCursorId = last.representativeInvocationId();
-        }
-      }
-      PendingInteraction manual = manualQueue.peek();
-      PendingEnvironmentWait environment = environmentQueue.peek();
-      if (manual == null && environment == null) {
-        break;
-      }
-      if (environment == null
-          || (manual != null
-              && compare(
-                      manual.createdAt(),
-                      manual.invocationId(),
-                      environment.representativeCreatedAt(),
-                      environment.representativeInvocationId())
-                  <= 0)) {
-        manualQueue.poll();
-        consumedCreatedAt = manual.createdAt();
-        consumedId = manual.invocationId();
-        ResolvedRoot resolved = context.resolveManual(manual);
-        if (resolved != null) {
-          items.add(toManualDto(manual, resolved, context));
-        }
-      } else {
-        environmentQueue.poll();
-        consumedCreatedAt = environment.representativeCreatedAt();
-        consumedId = environment.representativeInvocationId();
-        ResolvedRoot resolved = context.resolveEnvironment(environment);
-        if (resolved != null) {
-          items.add(toEnvironmentDto(environment, resolved, context));
-        }
-      }
-    }
+    PendingPage page = new PendingPage(context, parseCursor(cursor), limit);
+    page.collectVisibleItems();
     // 引擎候选包含在线环境；页满后排除尾部在线候选，避免为不存在的后续等待项产生空游标页。
-    while (items.size() == limit) {
-      if (environmentQueue.isEmpty() && environmentHasMore) {
-        PendingEnvironmentWaitPage page =
-            runtime.listEnvironmentWaitCandidates(
-                environmentCursorCreatedAt, environmentCursorId, COUNT_PAGE_SIZE);
-        environmentHasMore = page.hasMore();
-        if (!page.waits().isEmpty()) {
-          environmentQueue.addAll(page.waits());
-          PendingEnvironmentWait last = page.waits().getLast();
-          environmentCursorCreatedAt = last.representativeCreatedAt();
-          environmentCursorId = last.representativeInvocationId();
-        }
-      }
-      PendingEnvironmentWait candidate = environmentQueue.peek();
-      if (candidate == null || context.readyLease(candidate.environmentId()).isEmpty()) {
-        break;
-      }
-      environmentQueue.poll();
-    }
-    boolean moreRemaining =
-        !manualQueue.isEmpty()
-            || !environmentQueue.isEmpty()
-            || manualHasMore
-            || environmentHasMore;
+    page.dropTrailingReadyCandidates();
     InteractionPageDTO dto = new InteractionPageDTO();
-    dto.setItems(items);
-    dto.setNextCursor(
-        moreRemaining ? InteractionCursor.encode(consumedCreatedAt, consumedId) : null);
+    dto.setItems(page.items());
+    dto.setNextCursor(page.nextCursor());
     dto.setTotal(countVisibleInteractions(context));
     dto.setFreshnessAt(context.freshnessAt());
     return dto;
+  }
+
+  private static void requireValidLimit(int limit) {
+    if (limit < 1 || limit > MAX_LIMIT) {
+      throw DomainException.validation("interaction", "limit must be between 1 and " + MAX_LIMIT);
+    }
   }
 
   /**
@@ -187,54 +102,214 @@ public class InteractionQueryService {
    * 也不把待办复制成第二份台账，更不一次性读回全部源行。
    */
   private int countVisibleInteractions(QueryContext context) {
+    return countVisibleManual(context) + countVisibleEnvironment(context);
+  }
+
+  private int countVisibleManual(QueryContext context) {
     int total = 0;
     InteractionCursor start = InteractionCursor.start();
-    Instant manualCursorCreatedAt = start.createdAt();
-    UUID manualCursorId = start.id();
+    Instant cursorCreatedAt = start.createdAt();
+    UUID cursorId = start.id();
     while (true) {
       PendingInteractionPage page =
-          context
-              .runtime()
-              .listPendingInteractions(manualCursorCreatedAt, manualCursorId, COUNT_PAGE_SIZE);
+          context.runtime().listPendingInteractions(cursorCreatedAt, cursorId, COUNT_PAGE_SIZE);
       if (page.interactions().isEmpty()) {
-        break;
+        return total;
       }
       for (PendingInteraction row : page.interactions()) {
         if (context.resolveManual(row) != null) {
           total++;
         }
       }
-      PendingInteraction last = page.interactions().get(page.interactions().size() - 1);
-      manualCursorCreatedAt = last.createdAt();
-      manualCursorId = last.invocationId();
+      PendingInteraction last = page.interactions().getLast();
+      cursorCreatedAt = last.createdAt();
+      cursorId = last.invocationId();
       if (!page.hasMore()) {
-        break;
+        return total;
       }
     }
-    Instant environmentCursorCreatedAt = start.createdAt();
-    UUID environmentCursorId = start.id();
+  }
+
+  private int countVisibleEnvironment(QueryContext context) {
+    int total = 0;
+    InteractionCursor start = InteractionCursor.start();
+    Instant cursorCreatedAt = start.createdAt();
+    UUID cursorId = start.id();
     while (true) {
       PendingEnvironmentWaitPage page =
           context
               .runtime()
-              .listEnvironmentWaitCandidates(
-                  environmentCursorCreatedAt, environmentCursorId, COUNT_PAGE_SIZE);
+              .listEnvironmentWaitCandidates(cursorCreatedAt, cursorId, COUNT_PAGE_SIZE);
       if (page.waits().isEmpty()) {
-        break;
+        return total;
       }
       for (PendingEnvironmentWait row : page.waits()) {
         if (context.resolveEnvironment(row) != null) {
           total++;
         }
       }
-      PendingEnvironmentWait last = page.waits().get(page.waits().size() - 1);
-      environmentCursorCreatedAt = last.representativeCreatedAt();
-      environmentCursorId = last.representativeInvocationId();
+      PendingEnvironmentWait last = page.waits().getLast();
+      cursorCreatedAt = last.representativeCreatedAt();
+      cursorId = last.representativeInvocationId();
       if (!page.hasMore()) {
-        break;
+        return total;
       }
     }
-    return total;
+  }
+
+  /**
+   * 一页可见项的归并过程：人工等待与环境等待两条升序流各自持有独立分页游标，按 {@code (createdAt, id)} 取较早者消费。
+   *
+   * <p>两路游标只在各自的队列为空且确认还有更多时推进，因此被归属/根过滤掉的原始行同样算作「已消费」，{@code nextCursor} 可稳定续页。
+   */
+  private final class PendingPage {
+
+    private final QueryContext context;
+    private final int limit;
+    private final List<InteractionDTO> items;
+    private final ArrayDeque<PendingInteraction> manualQueue = new ArrayDeque<>();
+    private final ArrayDeque<PendingEnvironmentWait> environmentQueue = new ArrayDeque<>();
+    private boolean manualHasMore = true;
+    private boolean environmentHasMore = true;
+    private Instant manualCursorCreatedAt;
+    private UUID manualCursorId;
+    private Instant environmentCursorCreatedAt;
+    private UUID environmentCursorId;
+    private Instant consumedCreatedAt;
+    private UUID consumedId;
+
+    private PendingPage(QueryContext context, InteractionCursor cursor, int limit) {
+      this.context = context;
+      this.limit = limit;
+      this.items = new ArrayList<>(limit);
+      this.manualCursorCreatedAt = cursor.createdAt();
+      this.manualCursorId = cursor.id();
+      this.environmentCursorCreatedAt = cursor.createdAt();
+      this.environmentCursorId = cursor.id();
+      this.consumedCreatedAt = cursor.createdAt();
+      this.consumedId = cursor.id();
+    }
+
+    private List<InteractionDTO> items() {
+      return items;
+    }
+
+    /** 归并两条升序流直到页满或两路都耗尽。 */
+    private void collectVisibleItems() {
+      while (items.size() < limit) {
+        int remaining = limit - items.size();
+        fetchManualPage(remaining);
+        fetchEnvironmentPage(remaining);
+        if (!consumeEarlierItem()) {
+          return;
+        }
+      }
+    }
+
+    /** 消费两条流中较早的一项；两侧都为空表示本页已无更多候选。 */
+    private boolean consumeEarlierItem() {
+      PendingInteraction manual = manualQueue.peek();
+      PendingEnvironmentWait environment = environmentQueue.peek();
+      if (manual == null && environment == null) {
+        return false;
+      }
+      if (manualIsEarlier(manual, environment)) {
+        consumeManual(manual);
+      } else {
+        consumeEnvironment(environment);
+      }
+      return true;
+    }
+
+    private void consumeManual(PendingInteraction manual) {
+      manualQueue.poll();
+      consumedCreatedAt = manual.createdAt();
+      consumedId = manual.invocationId();
+      ResolvedRoot resolved = context.resolveManual(manual);
+      if (resolved != null) {
+        items.add(toManualDto(manual, resolved, context));
+      }
+    }
+
+    private void consumeEnvironment(PendingEnvironmentWait environment) {
+      environmentQueue.poll();
+      consumedCreatedAt = environment.representativeCreatedAt();
+      consumedId = environment.representativeInvocationId();
+      ResolvedRoot resolved = context.resolveEnvironment(environment);
+      if (resolved != null) {
+        items.add(toEnvironmentDto(environment, resolved, context));
+      }
+    }
+
+    /** 页满后跳过尾部仍在线（持有 READY 租约）的环境候选：它们不是待处理项，不应产生游标。 */
+    private void dropTrailingReadyCandidates() {
+      while (items.size() == limit) {
+        fetchEnvironmentPage(COUNT_PAGE_SIZE);
+        PendingEnvironmentWait candidate = environmentQueue.peek();
+        if (candidate == null || context.readyLease(candidate.environmentId()).isEmpty()) {
+          return;
+        }
+        environmentQueue.poll();
+      }
+    }
+
+    private String nextCursor() {
+      boolean moreRemaining =
+          !manualQueue.isEmpty()
+              || !environmentQueue.isEmpty()
+              || manualHasMore
+              || environmentHasMore;
+      return moreRemaining ? InteractionCursor.encode(consumedCreatedAt, consumedId) : null;
+    }
+
+    private void fetchManualPage(int pageSize) {
+      if (!manualQueue.isEmpty() || !manualHasMore) {
+        return;
+      }
+      PendingInteractionPage page =
+          context
+              .runtime()
+              .listPendingInteractions(manualCursorCreatedAt, manualCursorId, pageSize);
+      manualHasMore = page.hasMore();
+      if (page.interactions().isEmpty()) {
+        return;
+      }
+      manualQueue.addAll(page.interactions());
+      PendingInteraction last = page.interactions().getLast();
+      manualCursorCreatedAt = last.createdAt();
+      manualCursorId = last.invocationId();
+    }
+
+    private void fetchEnvironmentPage(int pageSize) {
+      if (!environmentQueue.isEmpty() || !environmentHasMore) {
+        return;
+      }
+      PendingEnvironmentWaitPage page =
+          context
+              .runtime()
+              .listEnvironmentWaitCandidates(
+                  environmentCursorCreatedAt, environmentCursorId, pageSize);
+      environmentHasMore = page.hasMore();
+      if (page.waits().isEmpty()) {
+        return;
+      }
+      environmentQueue.addAll(page.waits());
+      PendingEnvironmentWait last = page.waits().getLast();
+      environmentCursorCreatedAt = last.representativeCreatedAt();
+      environmentCursorId = last.representativeInvocationId();
+    }
+  }
+
+  private static boolean manualIsEarlier(
+      PendingInteraction manual, PendingEnvironmentWait environment) {
+    return environment == null
+        || (manual != null
+            && compare(
+                    manual.createdAt(),
+                    manual.invocationId(),
+                    environment.representativeCreatedAt(),
+                    environment.representativeInvocationId())
+                <= 0);
   }
 
   /** 游标形状非法与缺少参数同类：都是客户端请求形状错误。 */
