@@ -90,6 +90,9 @@
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiProviderAdapter</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiContentEncoder</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiAssistantReplay</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiAssistantReplay.ReplayPayloadSummary</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiAssistantReplay.ReplayPayloadCall</include>
+                                        <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiAssistantReplay.DurableSummary</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiUsageAccumulator</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.GeminiPartAccumulator</include>
                                         <include>fun.fengwk.kkstudio.harness.model.provider.impl.gemini.TrackedPart</include>
