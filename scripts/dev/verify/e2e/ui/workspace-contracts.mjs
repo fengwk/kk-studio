@@ -619,7 +619,7 @@ export async function runWorkspaceContractMatrix(ui) {
 
   await run(
     'ui.settings.notifications_single_entry',
-    '浏览器通知只在 Settings 暴露唯一开关，Thread Footer 不再提供入口',
+    '浏览器通知只在 Settings 暴露唯一开关',
     async (caseArt) => {
       await goto('/settings')
       const switches = page.getByRole('switch', { name: '浏览器通知' })

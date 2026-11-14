@@ -2,7 +2,7 @@ package runtime
 
 import "testing"
 
-// RUN-T-221 checks that journal start is atomic and duplicates reuse the running entry.
+// Checks that journal start is atomic and duplicates reuse the running entry.
 func TestJournalDeduplicatesRunning(t *testing.T) {
 	j, err := NewInvocationJournal(2)
 	if err != nil {
@@ -15,7 +15,7 @@ func TestJournalDeduplicatesRunning(t *testing.T) {
 	}
 }
 
-// RUN-T-225 ensures terminal retention is bounded without evicting active invocations.
+// Ensures terminal retention is bounded without evicting active invocations.
 func TestJournalEvictsOldestTerminalOnly(t *testing.T) {
 	j, _ := NewInvocationJournal(1)
 	j.Start("active")

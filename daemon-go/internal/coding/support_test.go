@@ -14,7 +14,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-F-014, COD-T-203
 func TestToErrorResultClassifiesStableFailures(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -45,7 +44,6 @@ func TestToErrorResultClassifiesStableFailures(t *testing.T) {
 	}
 }
 
-// COD-F-014, COD-T-206
 func TestFileSystemErrorsUseStableCodeAndSafeMessage(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -75,7 +73,6 @@ func TestFileSystemErrorsUseStableCodeAndSafeMessage(t *testing.T) {
 	}
 }
 
-// COD-F-014, COD-T-205
 func TestGuidePunctuation(t *testing.T) {
 	for _, test := range []struct {
 		what, fact, next, want string
@@ -95,7 +92,6 @@ func TestGuidePunctuation(t *testing.T) {
 	}
 }
 
-// COD-F-014
 func TestClassifySearchErrorMapsMalformedInputAndUnexpectedFailures(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -120,7 +116,6 @@ func TestClassifySearchErrorMapsMalformedInputAndUnexpectedFailures(t *testing.T
 	}
 }
 
-// COD-F-014
 func TestCodedErrorResultKeepsModelVisibleMessageVerbatim(t *testing.T) {
 	message := "Tool output is 1.000001 MiB; do not rewrite this contract."
 	result := codedErrorResult("limited", "FAILED", message)
@@ -133,7 +128,7 @@ func TestCodedErrorResultKeepsModelVisibleMessageVerbatim(t *testing.T) {
 	}
 }
 
-// COD-T-204: unexpected errors must not expose their private message.
+// Unexpected errors must not expose their private message.
 func TestUnknownError(t *testing.T) {
 	result := errorResult("call", errors.New("secret-path"))
 	want := "The capability failed while running and the underlying error is not repeated to avoid leaking details. Whether the tool took effect cannot be confirmed. Verify whether the intended effect already took place before deciding what to do next."
@@ -146,7 +141,7 @@ func TestUnknownError(t *testing.T) {
 	}
 }
 
-// COD-T-208: lexical Windows paths remain platform-independent while display paths use slashes.
+// Lexical Windows paths remain platform-independent while display paths use slashes.
 func TestPathHelpers(t *testing.T) {
 	for _, test := range []struct {
 		path string
@@ -200,7 +195,7 @@ func TestPathHelpers(t *testing.T) {
 	}
 }
 
-// COD-T-209: existing paths resolve to their canonical absolute filesystem paths.
+// Existing paths resolve to their canonical absolute filesystem paths.
 func TestResolveExisting(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "a.txt")
 	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
@@ -226,7 +221,7 @@ func TestResolveExisting(t *testing.T) {
 	}
 }
 
-// COD-T-210: writable paths may contain multiple missing suffix components.
+// Writable paths may contain multiple missing suffix components.
 func TestResolveWritable(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "new", "deep", "f.txt")
@@ -244,7 +239,7 @@ func TestResolveWritable(t *testing.T) {
 	}
 }
 
-// COD-T-211: isSymbolicLink distinguishes links from regular files and missing paths.
+// IsSymbolicLink distinguishes links from regular files and missing paths.
 func TestPathPredicates(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "a.txt")

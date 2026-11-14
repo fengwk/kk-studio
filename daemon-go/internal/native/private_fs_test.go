@@ -7,7 +7,6 @@ import (
 	"testing"
 )
 
-// NAT-T-096
 func TestPrivateFS_CreatePrivateDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -27,7 +26,6 @@ func TestPrivateFS_CreatePrivateDirectory(t *testing.T) {
 	}
 }
 
-// NAT-T-097
 func TestPrivateFS_TightenExistingDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := os.Mkdir(dir, 0755); err != nil {
@@ -48,7 +46,6 @@ func TestPrivateFS_TightenExistingDirectory(t *testing.T) {
 	}
 }
 
-// NAT-T-098
 func TestPrivateFS_RejectDirectorySymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevated Windows privileges")
@@ -67,7 +64,6 @@ func TestPrivateFS_RejectDirectorySymlink(t *testing.T) {
 	}
 }
 
-// NAT-T-099, NAT-T-103, NAT-T-106
 func TestPrivateFS_WritePrivateFile(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -96,7 +92,6 @@ func TestPrivateFS_WritePrivateFile(t *testing.T) {
 	}
 }
 
-// NAT-T-100
 func TestPrivateFS_RejectLooseFileMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows permissions use DACLs")
@@ -114,7 +109,7 @@ func TestPrivateFS_RejectLooseFileMode(t *testing.T) {
 	}
 }
 
-// NAT-T-102 verifies private-file validation rejects a symlink.
+// Verifies private-file validation rejects a symlink.
 func TestPrivateFS_VerifyRejectsSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevated Windows privileges")
@@ -136,7 +131,6 @@ func TestPrivateFS_VerifyRejectsSymlink(t *testing.T) {
 	}
 }
 
-// NAT-T-101
 func TestPrivateFS_RejectSymlinkTarget(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevated Windows privileges")
@@ -154,7 +148,7 @@ func TestPrivateFS_RejectSymlinkTarget(t *testing.T) {
 	}
 }
 
-// NAT-T-107 verifies private-file publication rejects a directory target.
+// Verifies private-file publication rejects a directory target.
 func TestPrivateFS_RejectDirectoryTarget(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -169,7 +163,6 @@ func TestPrivateFS_RejectDirectoryTarget(t *testing.T) {
 	}
 }
 
-// NAT-T-105
 func TestPrivateFS_RejectFileAsDirectory(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(path, nil, 0600); err != nil {
@@ -180,7 +173,6 @@ func TestPrivateFS_RejectFileAsDirectory(t *testing.T) {
 	}
 }
 
-// NAT-T-104
 func TestPrivateFS_MissingFile(t *testing.T) {
 	if err := verifyPrivateFile(filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("missing file verified")

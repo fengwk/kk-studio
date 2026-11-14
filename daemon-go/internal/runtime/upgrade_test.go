@@ -79,7 +79,7 @@ func upgradeRequired(targetVersion string) *protocol.UpgradeRequired {
 	return &protocol.UpgradeRequired{TargetVersion: stringPtr(targetVersion)}
 }
 
-// RUN-T-057 a 426 rejection with a target version runs the managed update for that version and keeps
+// A 426 rejection with a target version runs the managed update for that version and keeps
 // the daemon alive: the update is not aborted by the shutdown the rejection would otherwise trigger.
 func TestRuntimeRunsManagedUpdateOnUpgradeRequired(t *testing.T) {
 	runner := newUpgradeRunner()
@@ -154,7 +154,7 @@ func TestRuntimeRunsManagedUpdateOnUpgradeRequired(t *testing.T) {
 	}
 }
 
-// RUN-T-057 a 426 rejection without a parsable target version cannot be acted on: the daemon stops
+// A 426 rejection without a parsable target version cannot be acted on: the daemon stops
 // with the protocol-upgrade failure instead of retrying the same rejected handshake forever.
 func TestRuntimeStopsOnUpgradeRequiredWithoutTargetVersion(t *testing.T) {
 	for _, tc := range []struct {
@@ -199,7 +199,7 @@ func TestRuntimeStopsOnUpgradeRequiredWithoutTargetVersion(t *testing.T) {
 	}
 }
 
-// RUN-T-057 a 426 rejection while no managed updater is configured stops the daemon: there is no
+// A 426 rejection while no managed updater is configured stops the daemon: there is no
 // update path that could satisfy the required protocol upgrade.
 func TestRuntimeStopsOnUpgradeRequiredWithoutUpdater(t *testing.T) {
 	runner := newUpgradeRunner()
@@ -236,7 +236,7 @@ func TestRuntimeStopsOnUpgradeRequiredWithoutUpdater(t *testing.T) {
 	}
 }
 
-// RUN-T-057 a 426 rejection whose update never prepares stops the daemon, matching the TS
+// A 426 rejection whose update never prepares stops the daemon, matching the TS
 // onUnprepared callback, instead of leaving it connected to a platform it cannot talk to.
 func TestRuntimeStopsWhenUpgradeUpdateIsNotPrepared(t *testing.T) {
 	runner := newUpgradeRunner()
@@ -274,7 +274,7 @@ func TestRuntimeStopsWhenUpgradeUpdateIsNotPrepared(t *testing.T) {
 	}
 }
 
-// RUN-T-057 a non-426 handshake rejection keeps the ordinary reconnect behavior: only a protocol
+// A non-426 handshake rejection keeps the ordinary reconnect behavior: only a protocol
 // upgrade demand changes the recovery policy.
 func TestRuntimeReconnectsWithoutUpgradeForOtherRejections(t *testing.T) {
 	runner := newUpgradeRunner()

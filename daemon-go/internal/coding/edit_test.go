@@ -42,7 +42,6 @@ func replaceAll(oldString, newString string) map[string]any {
 	return map[string]any{"old_string": oldString, "new_string": newString, "replace_all": true}
 }
 
-// COD-T-055
 func TestEditPreviewDoesNotWriteAndApprovesSnapshot(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "edit.txt")
 	original := []byte("head\nold\ntail\n")
@@ -86,7 +85,6 @@ func TestEditPreviewDoesNotWriteAndApprovesSnapshot(t *testing.T) {
 	}
 }
 
-// COD-T-108
 func TestEditMultihunkDiffContext(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "multi.txt")
 	lines := []string{"old A"}
@@ -112,7 +110,6 @@ func TestEditMultihunkDiffContext(t *testing.T) {
 	}
 }
 
-// COD-T-016
 func TestEditMultilineInsert(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "insert.txt")
 	if err := os.WriteFile(path, []byte("a\r\nc\r\n"), 0o600); err != nil {
@@ -131,7 +128,6 @@ func TestEditMultilineInsert(t *testing.T) {
 	}
 }
 
-// COD-T-017
 func TestEditMultilineDelete(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "delete.txt")
 	if err := os.WriteFile(path, []byte("a\r\nb\r\nc\r\n"), 0o600); err != nil {
@@ -150,7 +146,6 @@ func TestEditMultilineDelete(t *testing.T) {
 	}
 }
 
-// COD-T-098
 func TestEditPreservesMixedLineEndings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mixed.txt")
 	if err := os.WriteFile(path, []byte("one\r\nold\nlast\r\n"), 0o600); err != nil {
@@ -169,7 +164,7 @@ func TestEditPreservesMixedLineEndings(t *testing.T) {
 	}
 }
 
-// COD-T-070: editing a file without a final newline reports the EOF marker in review details.
+// Editing a file without a final newline reports the EOF marker in review details.
 func TestEditNoNewlineEOFReview(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "noeol.txt")
 	if err := os.WriteFile(path, []byte("no newline"), 0o600); err != nil {
@@ -196,7 +191,7 @@ func TestEditNoNewlineEOFReview(t *testing.T) {
 	}
 }
 
-// COD-T-093: duplicate matches are rejected without changing the file.
+// Duplicate matches are rejected without changing the file.
 func TestEditMultipleMatchesAreRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "multiple.txt")
 	if err := os.WriteFile(path, []byte("old old"), 0o600); err != nil {
@@ -212,7 +207,7 @@ func TestEditMultipleMatchesAreRejected(t *testing.T) {
 	}
 }
 
-// COD-T-095 and COD-T-096: missing and empty search strings are rejected without writes.
+// Missing and empty search strings are rejected without writes.
 func TestEditMissingAndEmptyMatchesAreRejected(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "unchanged.txt")
 	const original = "source"
@@ -237,9 +232,8 @@ func TestEditMissingAndEmptyMatchesAreRejected(t *testing.T) {
 	}
 }
 
-// COD-T-097 is asserted by TestWriteCapabilityCreatesOverwritesAndRejectsDirectories.
+// Is asserted by TestWriteCapabilityCreatesOverwritesAndRejectsDirectories.
 
-// COD-N-021
 func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {
 	if staleWriteReviewMessage != "File changed since review; nothing was written. Review a new change before approving it." {
 		t.Fatalf("stale review message=%q", staleWriteReviewMessage)
@@ -268,7 +262,6 @@ func TestWriteApprovalPreviewAndStaleHash(t *testing.T) {
 	}
 }
 
-// COD-N-021
 func TestWriteApprovalPreviewNewTarget(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")
 	result := invokeCoding(t, Provider{}, "fs.write.preview", map[string]any{"path": path, "content": "new file\n"}, nil)

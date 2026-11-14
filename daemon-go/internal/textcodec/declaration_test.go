@@ -19,7 +19,7 @@ func encodeAs(t *testing.T, name, text string) []byte {
 	return data
 }
 
-// COD-T-232, COD-T-233: every standard declaration position names the encoding of its file.
+// Every standard declaration position names the encoding of its file.
 func TestDecodeReadsStandardDeclarations(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -125,7 +125,7 @@ func TestDecodeReadsStandardDeclarations(t *testing.T) {
 	}
 }
 
-// COD-T-233: declaration-like text outside the standard positions is not a declaration.
+// Declaration-like text outside the standard positions is not a declaration.
 func TestDecodeIgnoresDeclarationLookalikes(t *testing.T) {
 	gbk := encodeAs(t, "GBK", "中文")
 	for _, test := range []struct {
@@ -154,7 +154,7 @@ func TestDecodeIgnoresDeclarationLookalikes(t *testing.T) {
 	}
 }
 
-// COD-T-234: a coding comment in a file type that does not carry one stays ordinary text.
+// A coding comment in a file type that does not carry one stays ordinary text.
 func TestDecodeIgnoresCodingCommentsOutsideTheirFileTypes(t *testing.T) {
 	for _, name := range []string{"notes.md", "recipe.txt", "run.sh"} {
 		data, err := os.ReadFile(filepath.Join("testdata", name))
@@ -168,7 +168,7 @@ func TestDecodeIgnoresCodingCommentsOutsideTheirFileTypes(t *testing.T) {
 	}
 }
 
-// COD-T-235: a byte order mark wins over any declaration in the file.
+// A byte order mark wins over any declaration in the file.
 func TestDecodePrefersBOMOverDeclaration(t *testing.T) {
 	data := append([]byte{0xef, 0xbb, 0xbf}, []byte(`<html><head><meta charset="gb2312"></head><body>中文</body></html>`)...)
 	decoded, enc, err := Decode("/repo/page.html", data)
@@ -183,7 +183,7 @@ func TestDecodePrefersBOMOverDeclaration(t *testing.T) {
 	}
 }
 
-// COD-T-236: labels resolve through the index of their format.
+// Labels resolve through the index of their format.
 func TestDecodeLabelResolution(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -210,7 +210,7 @@ func TestDecodeLabelResolution(t *testing.T) {
 	}
 }
 
-// COD-T-237: unknown labels, UTF-16/32 labels without a byte order mark and conflicting
+// Unknown labels, UTF-16/32 labels without a byte order mark and conflicting
 // declarations each report their own typed error.
 func TestDecodeRejectsUnusableDeclarations(t *testing.T) {
 	var unsupported *UnsupportedLabelError
@@ -235,7 +235,7 @@ func TestDecodeRejectsUnusableDeclarations(t *testing.T) {
 	}
 }
 
-// COD-T-238: a legacy declaration over ASCII-only bytes stays lossless.
+// A legacy declaration over ASCII-only bytes stays lossless.
 func TestDecodeAcceptsASCIIOnlyLegacyFile(t *testing.T) {
 	decoded, enc, err := Decode("/repo/page.html", []byte(`<meta charset="gbk">plain`))
 	if err != nil || enc.Name != "GBK" || string(decoded) != `<meta charset="gbk">plain` {
@@ -243,7 +243,7 @@ func TestDecodeAcceptsASCIIOnlyLegacyFile(t *testing.T) {
 	}
 }
 
-// COD-T-239: decoding a declared encoding must reproduce the original bytes.
+// Decoding a declared encoding must reproduce the original bytes.
 func TestDecodeRejectsLossyLegacyBytes(t *testing.T) {
 	declaration := []byte(`<?xml encoding="gbk"?>`)
 	data := append(append([]byte(nil), declaration...), 0x81, 0x20)
@@ -253,7 +253,7 @@ func TestDecodeRejectsLossyLegacyBytes(t *testing.T) {
 	}
 }
 
-// COD-T-240: a whole-file decode of a declared legacy encoding is bounded.
+// A whole-file decode of a declared legacy encoding is bounded.
 func TestDecodeRejectsOversizedDeclaredFile(t *testing.T) {
 	data := append([]byte(`<?xml encoding="gbk"?>`), bytes.Repeat([]byte{'a'}, maxDeclaredSize)...)
 	var tooLarge *TooLargeError
@@ -262,7 +262,7 @@ func TestDecodeRejectsOversizedDeclaredFile(t *testing.T) {
 	}
 }
 
-// COD-T-241: declared legacy files decode and re-encode to exactly the original bytes.
+// Declared legacy files decode and re-encode to exactly the original bytes.
 func TestLegacyRoundTripIsExact(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -291,7 +291,7 @@ func TestLegacyRoundTripIsExact(t *testing.T) {
 	}
 }
 
-// COD-T-242: Declared reports the declaration of new content for write and edit.
+// Declared reports the declaration of new content for write and edit.
 func TestDeclaredReportsContentDeclaration(t *testing.T) {
 	for _, test := range []struct {
 		name     string
@@ -320,7 +320,7 @@ func TestDeclaredReportsContentDeclaration(t *testing.T) {
 	if _, _, err := Declared("/repo/page.html", []byte(`<meta charset="klingon">`)); !errors.As(err, &unsupported) {
 		t.Fatalf("err=%v", err)
 	}
-	// COD-T-242: a UTF-16/32 label is a normal declaration for new content; only decoding a file
+	// A UTF-16/32 label is a normal declaration for new content; only decoding a file
 	// without a byte order mark refuses it.
 	for label, want := range map[string]string{"utf-16": "UTF-16", "utf-16le": "UTF-16LE", "utf-32be": "UTF-32BE", "utf32": "UTF-32"} {
 		enc, found, err := Declared("/repo/page.html", []byte(`<meta charset="`+label+`">`))

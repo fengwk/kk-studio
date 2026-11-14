@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// NAT-T-022..026
 func TestDirectoryLock_ExclusiveAndClose(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -38,7 +37,6 @@ func TestDirectoryLock_ExclusiveAndClose(t *testing.T) {
 	}
 }
 
-// NAT-T-024
 func TestDirectoryLock_WaitRelease(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -56,7 +54,6 @@ func TestDirectoryLock_WaitRelease(t *testing.T) {
 	}
 }
 
-// NAT-T-017
 func TestDirectoryLock_WaitTimeout(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -74,7 +71,7 @@ func TestDirectoryLock_WaitTimeout(t *testing.T) {
 	}
 }
 
-// NAT-N-006 verifies the Go lock API applies only the timeout supplied by its caller.
+// Verifies the Go lock API applies only the timeout supplied by its caller.
 func TestDirectoryLockWait_RequiresExplicitTimeout(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -90,7 +87,6 @@ func TestDirectoryLockWait_RequiresExplicitTimeout(t *testing.T) {
 	}
 }
 
-// NAT-T-027
 func TestDirectoryLock_RejectSymlink(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink creation requires elevated Windows privileges")
@@ -107,7 +103,6 @@ func TestDirectoryLock_RejectSymlink(t *testing.T) {
 	}
 }
 
-// NAT-T-025
 func TestDirectoryLock_CloseIdempotent(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {

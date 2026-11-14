@@ -4,7 +4,7 @@ import (
 	"testing"
 )
 
-// RUN-N-001 verifies the authoritative tool message and precision escalation.
+// Verifies the authoritative tool message and precision escalation.
 func TestToolOutputLimitMessageUsesSharedMiBFormatting(t *testing.T) {
 	limit := int64(16) * bytesPerMiB
 	toolMessage := toolOutputExceededMessage(17_000_000, limit)

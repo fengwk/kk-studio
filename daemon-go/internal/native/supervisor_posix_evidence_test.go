@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// NAT-F-008 verifies failed-start cleanup uses its independent force-kill budget and retains evidence if proof fails.
+// Verifies failed-start cleanup uses its independent force-kill budget and retains evidence if proof fails.
 func TestPOSIXCleanupFailedStart_BudgetAndFailureEvidence(t *testing.T) {
 	for _, testCase := range []struct {
 		name          string
@@ -69,7 +69,7 @@ func TestPOSIXCleanupFailedStart_BudgetAndFailureEvidence(t *testing.T) {
 	}
 }
 
-// NAT-F-007 verifies failed POSIX termination is typed, cached, and does not repeat signalling.
+// Verifies failed POSIX termination is typed, cached, and does not repeat signalling.
 func TestPOSIXTerminate_FailureCachesConvergenceError(t *testing.T) {
 	stream, err := os.OpenFile(filepath.Join(t.TempDir(), "stream"), os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
@@ -104,7 +104,6 @@ func TestPOSIXTerminate_FailureCachesConvergenceError(t *testing.T) {
 	}
 }
 
-// NAT-T-001
 func TestPOSIXSupervisor_UnprovenConvergenceRetainsEvidence(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {

@@ -10,7 +10,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-T-093, COD-T-095, COD-T-096
 func TestEditCapabilityRejectsInvalidReplacementCases(t *testing.T) {
 	for _, test := range []struct {
 		name    string
@@ -44,7 +43,6 @@ func TestEditCapabilityRejectsInvalidReplacementCases(t *testing.T) {
 	}
 }
 
-// COD-F-008
 func TestEditCapabilityRejectsMissingPathAndDirectory(t *testing.T) {
 	root := t.TempDir()
 	missing := filepath.Join(root, "missing.txt")

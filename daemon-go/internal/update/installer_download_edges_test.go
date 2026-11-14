@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-// RUN-T-205 checks that transport, response-reader, and private-storage errors fail closed.
+// Checks that transport, response-reader, and private-storage errors fail closed.
 func TestInstallerDownloadTransportReaderAndStorageFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

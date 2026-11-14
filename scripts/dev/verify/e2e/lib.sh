@@ -14,6 +14,7 @@ SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../lib/http-wait.sh"
+source "$SCRIPT_DIR/../../lib/toolchain.sh"
 WORK_DIR=${E2E_WORK_DIR:-"$REPO_ROOT/runtime/e2e"}
 
 BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
@@ -99,10 +100,6 @@ export KK_STUDIO_STORAGE_S3_BUCKET="$STORAGE_S3_BUCKET"
 step() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "missing command: $1"
-}
-
 # Emit NUL-delimited `env -u` arguments for every live TEST_* input. Runtime process
 # isolation must not depend on a manually maintained list of provider credential names.
 test_env_unset_args() {
@@ -131,14 +128,6 @@ run_maven() {
       ;;
   esac
   env JAVA_HOME="$java_home" mvn "${offline_args[@]}" "$@"
-}
-
-resolve_java_home() {
-  local java_home=${JAVA_HOME_21:-${JAVA_HOME:-}}
-  if [ -z "$java_home" ] || [ ! -x "$java_home/bin/java" ]; then
-    die "JAVA_HOME_21 or JAVA_HOME must point to JDK 21"
-  fi
-  echo "$java_home"
 }
 
 wait_http() {

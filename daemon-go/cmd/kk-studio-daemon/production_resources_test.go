@@ -11,7 +11,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/lsp"
 )
 
-// RUN-F-029 prepares resource candidates only when their applied configuration changes.
+// Prepares resource candidates only when their applied configuration changes.
 func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {
 	executable, err := os.Executable()
 	if err != nil {
@@ -104,7 +104,7 @@ func TestProductionEnvironmentPreparationUsesResourceDeltas(t *testing.T) {
 	}
 }
 
-// RUN-F-029 publishes changed resource generations and retires the previous network after leases drain.
+// Publishes changed resource generations and retires the previous network after leases drain.
 func TestProductionEnvironmentPublishesAndRetiresNetworkCandidate(t *testing.T) {
 	proxyA, proxyB := "http://127.0.0.1:8081", "http://127.0.0.1:8082"
 	initial := networkForTest(t, proxyA)

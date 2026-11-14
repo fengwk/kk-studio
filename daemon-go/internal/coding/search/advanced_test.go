@@ -18,7 +18,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
-// COD-N-008
 func TestFindAndGrepDoNotLaunchRipgrep(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("the fake executable uses a POSIX shell script")
@@ -48,7 +47,6 @@ printf launched > "$SEARCH_RG_MARKER"
 	}
 }
 
-// COD-N-014
 func TestSearchContextsDoNotLeakWorkers(t *testing.T) {
 	defer goleak.VerifyNone(t)
 	root := t.TempDir()
@@ -67,7 +65,6 @@ func TestSearchContextsDoNotLeakWorkers(t *testing.T) {
 	}
 }
 
-// COD-N-014
 func TestGrepContextReportsResultsAndContextFailures(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("alpha\nbeta\n"), 0600); err != nil {
@@ -87,7 +84,6 @@ func TestGrepContextReportsResultsAndContextFailures(t *testing.T) {
 	}
 }
 
-// COD-F-010 COD-F-011 COD-T-165
 func TestFindContextRejectsInvalidRootsPatternsAndLimits(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "plain.txt")
@@ -123,7 +119,6 @@ func TestFindContextRejectsInvalidRootsPatternsAndLimits(t *testing.T) {
 	}
 }
 
-// COD-F-012
 func TestGrepContextSupportsRegexAndCaseFoldingModes(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "text.txt"), []byte("Alpha\nalpha\nÉcole\nécole\n"), 0600); err != nil {
@@ -153,7 +148,6 @@ func TestGrepContextSupportsRegexAndCaseFoldingModes(t *testing.T) {
 	}
 }
 
-// COD-N-015
 func TestGrepReaderErrorsPreserveCancellationAndContinueReadFailures(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"a.txt", "b.txt"} {
@@ -189,7 +183,6 @@ func TestGrepReaderErrorsPreserveCancellationAndContinueReadFailures(t *testing.
 	}
 }
 
-// COD-N-015
 func TestReadPooledContextHandlesOpenCancelDeadlineAndGrowth(t *testing.T) {
 	if _, _, _, err := readPooledContext(context.Background(), filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("missing file was opened")
@@ -215,7 +208,6 @@ func TestReadPooledContextHandlesOpenCancelDeadlineAndGrowth(t *testing.T) {
 	}
 }
 
-// COD-F-010
 func TestGrepASCIIInsensitiveLongPatternAndNegativeLimit(t *testing.T) {
 	root := t.TempDir()
 	pattern := strings.Repeat("A", 300)
@@ -231,7 +223,6 @@ func TestGrepASCIIInsensitiveLongPatternAndNegativeLimit(t *testing.T) {
 	}
 }
 
-// COD-F-012
 func TestLineEndHandlesEmptyAndUnterminatedLines(t *testing.T) {
 	for _, test := range []struct {
 		data  []byte
@@ -249,7 +240,6 @@ func TestLineEndHandlesEmptyAndUnterminatedLines(t *testing.T) {
 	}
 }
 
-// COD-N-009
 func TestRegexUnicodeCodePointsCaseFoldingAndRE2Syntax(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "unicode.txt"), []byte("é\nÉ\n"), 0600); err != nil {
@@ -273,7 +263,6 @@ func TestRegexUnicodeCodePointsCaseFoldingAndRE2Syntax(t *testing.T) {
 	}
 }
 
-// COD-N-010
 func TestRegexCRLFPreservesLineAnchorsAndOutput(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "crlf.txt"), []byte("before\r\nmatch\r\nafter\r\n"), 0600); err != nil {
@@ -295,7 +284,7 @@ func TestRegexCRLFPreservesLineAnchorsAndOutput(t *testing.T) {
 	}
 }
 
-// COD-N-010: crossing behavior is inferred only from syntax that can cross a newline.
+// Crossing behavior is inferred only from syntax that can cross a newline.
 func TestCrossLinePatternDetection(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -318,7 +307,7 @@ func TestCrossLinePatternDetection(t *testing.T) {
 	}
 }
 
-// COD-T-174 COD-T-240: a cross-line match prints every covered line, while limit counts matches.
+// A cross-line match prints every covered line, while limit counts matches.
 func TestMultilineGrepOutputAndMatchLimit(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "text.txt"), []byte("a\nb\na\nb\n"), 0o600); err != nil {
@@ -335,7 +324,7 @@ func TestMultilineGrepOutputAndMatchLimit(t *testing.T) {
 	}
 }
 
-// COD-N-017: a multiline scan skips files over the bounded whole-file size.
+// A multiline scan skips files over the bounded whole-file size.
 func TestMultilineGrepSkipsOversizeFile(t *testing.T) {
 	root := t.TempDir()
 	file, err := os.Create(filepath.Join(root, "large.txt"))
@@ -355,7 +344,7 @@ func TestMultilineGrepSkipsOversizeFile(t *testing.T) {
 	}
 }
 
-// COD-T-174: multiline matching normalizes CRLF without emitting carriage returns.
+// Multiline matching normalizes CRLF without emitting carriage returns.
 func TestMultilineGrepCRLF(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "crlf.txt"), []byte("foo\r\nbar\r\n"), 0o600); err != nil {
@@ -368,7 +357,7 @@ func TestMultilineGrepCRLF(t *testing.T) {
 	}
 }
 
-// COD-N-014: a deadline during a file read retains completed multiline results.
+// A deadline during a file read retains completed multiline results.
 func TestMultilineGrepTimeoutPreservesPartialResults(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"a.txt", "b.txt"} {
@@ -388,7 +377,7 @@ func TestMultilineGrepTimeoutPreservesPartialResults(t *testing.T) {
 	}
 }
 
-// COD-N-018: ignored directories and glob-matching ignored files are bounded hint entries.
+// Ignored directories and glob-matching ignored files are bounded hint entries.
 func TestFindCollectsIgnoreSkippedPaths(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, ".gitignore", "node_modules/\nsecret.txt\n")
@@ -409,7 +398,7 @@ func TestFindCollectsIgnoreSkippedPaths(t *testing.T) {
 	}
 }
 
-// COD-N-018: only structurally valid Git directories and gitdir pointers establish a repository root.
+// Only structurally valid Git directories and gitdir pointers establish a repository root.
 func TestGitMarkerRequiresValidRepository(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -459,14 +448,14 @@ func TestGitMarkerRequiresValidRepository(t *testing.T) {
 	}
 }
 
-// COD-N-017: malformed BOM-encoded text is rejected by the codec, so it is never searched.
+// Malformed BOM-encoded text is rejected by the codec, so it is never searched.
 func TestGrepUTF16RejectsOddByteCount(t *testing.T) {
 	if _, _, err := textcodec.Decode("/repo/odd.txt", []byte{0xff, 0xfe, 'x'}); err == nil {
 		t.Fatal("odd-length UTF-16 payload accepted")
 	}
 }
 
-// COD-N-017: UTF-16 BOM files are decoded for matching and preserve Unicode output.
+// UTF-16 BOM files are decoded for matching and preserve Unicode output.
 func TestGrepUTF16BOM(t *testing.T) {
 	for _, test := range []struct {
 		name  string
@@ -496,7 +485,7 @@ func TestGrepUTF16BOM(t *testing.T) {
 	}
 }
 
-// COD-N-017: overlong lines are excerpted around the matching code point.
+// Overlong lines are excerpted around the matching code point.
 func TestCenteredExcerpt(t *testing.T) {
 	line := strings.Repeat("a", 600)
 	got := centeredExcerpt(line, 300)
@@ -528,7 +517,7 @@ func TestGrepLongUnicodeLineCenteredExcerpt(t *testing.T) {
 	}
 }
 
-// COD-N-011: an invalid nested .git marker is ignored and Git remains the oracle.
+// An invalid nested .git marker is ignored and Git remains the oracle.
 func TestInvalidNestedGitMarkerKeepsOuterRepositoryScope(t *testing.T) {
 	root := t.TempDir()
 	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
@@ -566,7 +555,6 @@ func TestInvalidNestedGitMarkerKeepsOuterRepositoryScope(t *testing.T) {
 	}
 }
 
-// COD-N-012
 func TestRegexRequiredLiteralExtraction(t *testing.T) {
 	for _, test := range []struct {
 		pattern string

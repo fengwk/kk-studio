@@ -63,7 +63,6 @@ func (s *uploadControlStub) Commit(_ context.Context, _ string, transferID, uplo
 	return &protocol.ResourceUploadTicket{TransferId: proto.String(transferID), State: s.commitState, UploadId: proto.String(uploadID)}, nil
 }
 
-// TRN-F-005
 func TestUpload_RequestPutCommitAndReplaceBytes(t *testing.T) {
 	body := []byte("binary result")
 	var gotBody []byte
@@ -91,7 +90,6 @@ func TestUpload_RequestPutCommitAndReplaceBytes(t *testing.T) {
 	}
 }
 
-// TRN-T-002, TRN-T-013, TRN-T-016
 func TestUpload_RetriesControlFailureWithSameTransfer(t *testing.T) {
 	putAttempts := 0
 	client := &http.Client{Transport: transportRoundTripper(func(*http.Request) (*http.Response, error) {
@@ -114,7 +112,6 @@ func TestUpload_RetriesControlFailureWithSameTransfer(t *testing.T) {
 	}
 }
 
-// TRN-F-005
 func TestUpload_FailedTicketDoesNotUpload(t *testing.T) {
 	control := &uploadControlStub{requestState: protocol.TicketState_TICKET_FAILED}
 	uploader := &ResourceUploader{Control: control}
@@ -127,7 +124,6 @@ func TestUpload_FailedTicketDoesNotUpload(t *testing.T) {
 	}
 }
 
-// TRN-T-018
 func TestUpload_RedactsStorageError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusForbidden) }))
 	defer server.Close()

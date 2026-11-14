@@ -16,7 +16,7 @@ import (
 	"time"
 )
 
-// TRN-T-026, TRN-T-027, TRN-T-028, TRN-T-029, TRN-T-030, TRN-T-031 verify upstream validation boundaries.
+// Verify upstream validation boundaries.
 func TestTunnel_UpstreamValidationSpecMatrix(t *testing.T) {
 	base := ViewUpstream{Host: "127.0.0.1", Port: 8080, Path: "/base", Headers: make(http.Header), Cookie: "session=ok", Protocols: []string{"chat"}}
 	for _, host := range []string{"127.0.0.1", "127.1.2.3", "::1", "[::1]"} {
@@ -86,7 +86,7 @@ func TestTunnel_UpstreamValidationSpecMatrix(t *testing.T) {
 	}
 }
 
-// TRN-T-039 verifies a failed HTTP upstream returns 502 and releases its lease.
+// Verifies a failed HTTP upstream returns 502 and releases its lease.
 func TestHandleIDE_HTTPUpstreamFailureReleasesLease(t *testing.T) {
 	closed, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -114,7 +114,7 @@ func TestHandleIDE_HTTPUpstreamFailureReleasesLease(t *testing.T) {
 	}
 }
 
-// TRN-T-045 verifies request cancellation reaches the upstream and releases its lease.
+// Verifies request cancellation reaches the upstream and releases its lease.
 func TestHandleIDE_HTTPRequestCancellationReleasesLease(t *testing.T) {
 	started := make(chan struct{})
 	backend := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -158,7 +158,7 @@ func TestHandleIDE_HTTPRequestCancellationReleasesLease(t *testing.T) {
 	}
 }
 
-// TRN-T-047 verifies repeated upstream header values are forwarded individually.
+// Verifies repeated upstream header values are forwarded individually.
 func TestHandleIDE_ForwardsRepeatedUpstreamHeaders(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Values("X-Multi"); len(got) != 2 || got[0] != "one" || got[1] != "two" {
@@ -185,7 +185,7 @@ func TestHandleIDE_ForwardsRepeatedUpstreamHeaders(t *testing.T) {
 	}
 }
 
-// TRN-T-048 and TRN-T-049 verify CONNECT path validation and resolver error mapping.
+// Verify CONNECT path validation and resolver error mapping.
 func TestHandleIDE_ConnectRouteAndResolutionErrors(t *testing.T) {
 	called := false
 	connection := &ControlConnection{resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
@@ -219,7 +219,7 @@ func TestHandleIDE_ConnectRouteAndResolutionErrors(t *testing.T) {
 	}
 }
 
-// TRN-T-064 verifies the H2 extended-CONNECT marker is not treated as an upstream HTTP header.
+// Verifies the H2 extended-CONNECT marker is not treated as an upstream HTTP header.
 func TestHandleIDE_ConnectConsumesProtocolPseudoHeader(t *testing.T) {
 	resolved := false
 	connection := &ControlConnection{resolver: viewResolverFunc(func(_ context.Context, request ViewRequest) (ViewUpstream, error) {
@@ -242,7 +242,7 @@ func TestHandleIDE_ConnectConsumesProtocolPseudoHeader(t *testing.T) {
 	}
 }
 
-// TRN-T-058 and TRN-T-063 verify upgrade headers and closure after upstream EOF.
+// Verify upgrade headers and closure after upstream EOF.
 func TestTunnel_WebSocketExtensionsAndUpstreamEOF(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

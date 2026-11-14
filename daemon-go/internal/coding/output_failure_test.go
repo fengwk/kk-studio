@@ -24,7 +24,7 @@ func (f *syncFailureOutputFile) Close() error {
 	return f.File.Close()
 }
 
-// COD-T-121: fsync failure after budget truncation must not publish full output.
+// Fsync failure after budget truncation must not publish full output.
 func TestOutputFsyncFailure(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {

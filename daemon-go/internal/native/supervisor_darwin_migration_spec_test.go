@@ -36,7 +36,7 @@ func TestMacUntrackedEscapeFixture(t *testing.T) {
 	_ = child.Wait()
 }
 
-// NAT-T-124 verifies an unregistered child that leaves the managed session remains an explicit boundary.
+// Verifies an unregistered child that leaves the managed session remains an explicit boundary.
 func TestMacSupervisor_UntrackedEscapeBoundary(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {

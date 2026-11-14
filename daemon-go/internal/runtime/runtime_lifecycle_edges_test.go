@@ -14,7 +14,7 @@ func (emptyConnectionFactory) Connect(context.Context, ControlObserver) (Connect
 	return nil, nil
 }
 
-// RUN-F-011 prevents a stopped runtime from being entered again and rejects empty connections.
+// Prevents a stopped runtime from being entered again and rejects empty connections.
 func TestRuntimeRunLifecycleGuards(t *testing.T) {
 	o := runtimeOptionsForTest()
 	o.Connections = emptyConnectionFactory{}
@@ -35,7 +35,7 @@ func TestRuntimeRunLifecycleGuards(t *testing.T) {
 	}
 }
 
-// RUN-T-060 prevents a stale connection generation from mutating runtime state.
+// Prevents a stale connection generation from mutating runtime state.
 func TestRuntimeServeConnectionRejectsEmptyAndStaleFrames(t *testing.T) {
 	r, _ := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	first := newTestConnection()
@@ -53,7 +53,7 @@ func TestRuntimeServeConnectionRejectsEmptyAndStaleFrames(t *testing.T) {
 	}
 }
 
-// RUN-T-011 replays terminal state and its independent exit fact, while malformed terminal bytes fail closed.
+// Replays terminal state and its independent exit fact, while malformed terminal bytes fail closed.
 func TestRuntimeReplayAndTerminalEdges(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	if err := r.finish("missing", protocol.MessageType_FAILED, &protocol.Envelope_Failed{Failed: &protocol.Failed{}}, InvocationFailed); err != nil {
@@ -94,7 +94,7 @@ func TestRuntimeReplayAndTerminalEdges(t *testing.T) {
 	}
 }
 
-// RUN-T-068/073 confirms exit publication is delayed until the executor reports its scope exit.
+// Confirms exit publication is delayed until the executor reports its scope exit.
 func TestRuntimeExitConfirmationAfterTerminal(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	r.journal.Start("exit-after-terminal")
@@ -113,7 +113,7 @@ func TestRuntimeExitConfirmationAfterTerminal(t *testing.T) {
 	r.publishRequestedExit("no-exit")
 }
 
-// RUN-T-110 makes cancellation wait for a tracked invocation to return.
+// Makes cancellation wait for a tracked invocation to return.
 func TestRuntimeCancelAndWaitBlocksUntilCallReturns(t *testing.T) {
 	r, _ := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	started, release := make(chan struct{}), make(chan struct{})

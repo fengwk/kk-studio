@@ -61,7 +61,7 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
 
 | 语义组 | 前置条件 |
 | --- | --- |
-| 名称 | 旧名称 `expectedName` / `expectedTitle` |
+| 名称 | 名称与标题基线 `expectedName` / `expectedTitle` |
 | 资源数组 | 有序 Resource ID 列表 `expectedResourceIds`，槽位意图为 [`CanvasResourceInput`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceInput.java) 的 `Keep` / `Text` / `Blob` |
 | Function | 编辑起点的完整 [`CanvasFunction`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunction.java)，按 `CanvasJson` 严格语义比较 |
 | 删除节点 | 资源与 Function 基线，且无活跃 Run、无未解除的引用 |
@@ -130,7 +130,7 @@ Function 的能力契约（adapter、函数定义、冻结运行计划、执行�
 
 Run 启动时冻结的事实写在 [`CanvasFunctionFrozenRun`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenRun.java)：canvas/node 身份、保存完整函数定义的 [`CanvasFunctionBinding`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionBinding.java)、args、引用 manifest、按槽位预分配的 [`CanvasFunctionFrozenOutput`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenOutput.java)、[`CanvasFunctionSubmitState`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionSubmitState.java)、stage 与 adapter state。[`CanvasFunctionFrozenReference`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionFrozenReference.java) 保存启动瞬间的 source node、resource、blob 身份与权威媒体事实，图中的引用关系或源资源之后的变化不会改写它们。
 
-Adapter 两阶段执行：`submit` 提交外部异步任务并返回初始状态；`execute` 查询并按计划顺序物化输出、返回 `run.outputResourceIds()`。[`CanvasFunctionExecutionContext`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionExecutionContext.java) 只给最小能力：`checkpoint(stage, adapterState)`、`isRunning()`、只读冻结原件的 `openOriginal`/`presignOriginal`，以及只接受计划内槽位的 `materializeOutput`（媒体 Blob）与 `materializeTextOutput`（内联文本）；槽位身份或类型与冻结计划不一致时立即拒绝。`checkpoint` 只用于需要跨进程恢复外部任务身份或已完成外部产物的 adapter（ComfyUI/H3、OpenCLI 付费任务与引用上传）；本地确定且可重复执行的内置 fake 与 Media 插件的 `image.crop` 不写 checkpoint，提交事实由 Runtime 的 `SUBMITTING`/`SUBMITTED` 两阶段状态表达。外部结果无法确认时抛 [`CanvasFunctionUnknownException`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionUnknownException.java)，Run 转入人工决议而不是重试提交。adapter 看不到数据库、对象 key 或 pin 表。
+Adapter 两阶段执行：`submit` 提交外部异步任务并返回初始状态；`execute` 查询并按计划顺序物化输出、返回 `run.outputResourceIds()`。[`CanvasFunctionExecutionContext`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionExecutionContext.java) 只给最小能力：`checkpoint(stage, adapterState)`、`isRunning()`、只读冻结原件的 `openOriginal`，以及只接受计划内槽位的 `materializeOutput`（媒体 Blob）与 `materializeTextOutput`（内联文本）；槽位身份或类型与冻结计划不一致时立即拒绝。`checkpoint` 只用于需要跨进程恢复外部任务身份或已完成外部产物的 adapter（ComfyUI/H3、OpenCLI 付费任务与引用上传）；本地确定且可重复执行的内置 fake 与 Media 插件的 `image.crop` 不写 checkpoint，提交事实由 Runtime 的 `SUBMITTING`/`SUBMITTED` 两阶段状态表达。外部结果无法确认时抛 [`CanvasFunctionUnknownException`](../../apps/canvas/spi/src/main/java/fun/fengwk/kkstudio/canvas/function/CanvasFunctionUnknownException.java)，Run 转入人工决议而不是重试提交。adapter 看不到数据库、对象 key 或 pin 表。
 
 ### 目录冻结与插件投影
 

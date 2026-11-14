@@ -13,7 +13,6 @@ import (
 	"time"
 )
 
-// TRN-T-059
 func TestTunnel_WebSocketHandshakeHeadersAndDuplex(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

@@ -22,7 +22,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// RUN-T-055 proves the production assembly passes the runtime's per-attempt observer into the real
+// Proves the production assembly passes the runtime's per-attempt observer into the real
 // transport: a peer GOAWAY(NO_ERROR) makes the assembled daemon reconnect with a new generation, and
 // it stops on the journal/reconnect path instead of ignoring the drain.
 func TestProductionRuntimeReconnectsOnGoaway(t *testing.T) {
@@ -104,7 +104,7 @@ func TestProductionRuntimeReconnectsOnGoaway(t *testing.T) {
 	}
 }
 
-// RUN-T-057 proves the production assembly passes the runtime's observer into the real transport:
+// Proves the production assembly passes the runtime's observer into the real transport:
 // an HTTP 426 with an UpgradeRequired body makes the assembled daemon run the managed update with
 // that target version instead of treating the rejection as a terminal registration failure.
 func TestProductionRuntimeRunsManagedUpdateOnUpgradeRequired(t *testing.T) {

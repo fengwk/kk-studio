@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// LSP-T-046 coalesces concurrent failed boots and permits retry after the failure converges.
+// Coalesces concurrent failed boots and permits retry after the failure converges.
 func TestPool_SharedFailedBoot(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
 	spawnErr := errors.New("spawn rejected")
@@ -65,7 +65,7 @@ func TestPool_SharedFailedBoot(t *testing.T) {
 	}
 }
 
-// LSP-T-067 keeps the key closed when last-waiter cancellation cleanup fails.
+// Keeps the key closed when last-waiter cancellation cleanup fails.
 func TestPool_LastWaiterCleanupFailure(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour, ShutdownGrace: 5 * time.Millisecond})
 	supervisor.startEntered = make(chan struct{}, 1)
@@ -129,7 +129,7 @@ func TestPool_LastWaiterCleanupFailure(t *testing.T) {
 	}
 }
 
-// LSP-T-068 waits for cancelled boot cleanup before starting a non-overlapping replacement.
+// Waits for cancelled boot cleanup before starting a non-overlapping replacement.
 func TestPool_NonOverlappingRestart(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour, ShutdownGrace: 5 * time.Millisecond})
 	supervisor.startEntered = make(chan struct{}, 1)

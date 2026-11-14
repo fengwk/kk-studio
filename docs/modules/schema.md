@@ -25,7 +25,7 @@ V1 的 `system_setting` seed 行是默认聚合的唯一事实源；测试用 `S
 
 | V1 分段 | 表与事实 | 语义事实源 |
 | --- | --- | --- |
-| 1 共享基础 | storage_blob、storage_upload、storage_object_cleanup：全局内容寻址、上传契约与对象删除墓碑 | [Storage](platform.md#storageblob-与-resource) |
+| 1 共享基础 | storage_blob、storage_upload、storage_image_model_view、storage_object_cleanup：全局内容寻址、上传契约、图片档位模型视图与对象删除墓碑 | [Storage](platform.md#storageblob-与-resource) |
 | 2 平台内核存储 | environment、environment_connection、cluster_node、system_setting；harness_session/entry/thread/thread_command/realtime_subscription/tool_invocation/execution_exit/thread_join/thread_stop_receipt；durable_work；session_blob_ref | [Environment](harness-environment.md)、[Harness Runtime](harness-runtime.md)、[Durable Work](work.md)、[Storage](platform.md#storageblob-与-resource) |
 | 3 平台 Driver 存储 | provider、model（MODEL/GROUP 共用名称空间）、model_group_cooldown、agent、skill_package、skill_package_git_source；plugin_configuration、plugin_credential、plugin_auth_attempt；mcp_server、mcp_tool；builtin_model_invocation | [Platform Catalog](platform.md#catalog)、[Plugin 配置存储](platform.md#plugin-配置存储)、[Platform MCP](platform.md#mcp-server-与运行时工具目录) |
 | 4 产品 | Canvas：canvas_document/group/node/resource/function_run/function_resource_pin/command_dedup；Chat：chat、chat_session；Project：project、project_issue 与 agent_thread/stage_budget/run/activity/evidence | [Canvas](canvas.md)、[Project](project.md) |

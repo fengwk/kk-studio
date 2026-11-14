@@ -13,7 +13,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// IDE-T-100 validates live IDE replies against the generated protobuf wire contract.
+// Validates live IDE replies against the generated protobuf wire contract.
 func TestLiveRepliesProtocol(t *testing.T) {
 	root, err := CanonicalDirectory(t.TempDir())
 	if err != nil {

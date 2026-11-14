@@ -28,7 +28,7 @@ func newEncodingRuntime(t *testing.T, uploader ResourceUploader) *Runtime {
 	return r
 }
 
-// RUN-T-021 externalizes binary output and emits the returned resource reference.
+// Externalizes binary output and emits the returned resource reference.
 func TestRuntimeEncodesUploadedBinaryResult(t *testing.T) {
 	uploader := &testUploader{}
 	r := newEncodingRuntime(t, uploader)
@@ -41,7 +41,7 @@ func TestRuntimeEncodesUploadedBinaryResult(t *testing.T) {
 	}
 }
 
-// RUN-T-022 checks the full aggregate before performing any binary upload.
+// Checks the full aggregate before performing any binary upload.
 func TestRuntimeRejectsResultOverResourceBudgetBeforeUpload(t *testing.T) {
 	uploader := &testUploader{}
 	r := newEncodingRuntime(t, uploader)
@@ -55,7 +55,7 @@ func TestRuntimeRejectsResultOverResourceBudgetBeforeUpload(t *testing.T) {
 	}
 }
 
-// RUN-T-091 replaces blank capability errors with the fixed safe fallback.
+// Replaces blank capability errors with the fixed safe fallback.
 func TestSafeCapabilityErrorUsesFallbackForBlankMessages(t *testing.T) {
 	if got := safeCapabilityError(errors.New("  \t")); got != "capability execution failed" {
 		t.Fatalf("blank error fallback = %q", got)
@@ -68,7 +68,7 @@ func TestSafeCapabilityErrorUsesFallbackForBlankMessages(t *testing.T) {
 	}
 }
 
-// RUN-T-023 permits text and JSON progress but rejects binary content without uploading it.
+// Permits text and JSON progress but rejects binary content without uploading it.
 func TestRuntimeEncodesProgressAndRejectsBinaryProgress(t *testing.T) {
 	uploader := &testUploader{}
 	r := newEncodingRuntime(t, uploader)

@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// LSP-T-074 and LSP-T-075 exercise Location and LocationLink result formatting.
+// Exercise Location and LocationLink result formatting.
 func TestFormatLocations(t *testing.T) {
 	client := &Client{positionEncoding: "utf-16"}
 	got := client.formatDefinitionLocations(mustDefinitionResult(t, `[{"uri":"file:///tmp/a.go","range":{"start":{"line":0,"character":2}}},{"targetUri":"jdt://contents/java.base/java.lang/String.class","targetRange":{"start":{"line":1,"character":0}},"targetSelectionRange":{"start":{"line":2,"character":3}}}]`))
@@ -21,7 +21,7 @@ func TestFormatLocations(t *testing.T) {
 	}
 }
 
-// LSP-T-077 and LSP-T-104 cover symbol kinds, unknown metadata and output limits.
+// Cover symbol kinds, unknown metadata and output limits.
 func TestFormatSymbols(t *testing.T) {
 	result := mustWorkspaceSymbolsResult(t, `[{"name":"A","kind":5,"location":{"uri":"file:///tmp/a.java"}},{"name":"B","kind":"custom"}]`)
 	got, err := formatSymbols(result, 1)

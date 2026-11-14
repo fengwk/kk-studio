@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// NAT-T-103 verifies private-file publication preserves arbitrary bytes.
+// Verifies private-file publication preserves arbitrary bytes.
 func TestPrivateFS_BinaryPayload(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := EnsurePrivateDirectory(directory); err != nil {

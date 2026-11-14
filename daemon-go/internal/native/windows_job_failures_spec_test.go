@@ -45,7 +45,7 @@ func (api *fakeWindowsJobCreationAPI) CloseHandle(handle windows.Handle) error {
 	return api.closeErr
 }
 
-// NAT-T-166..167 assert Job creation/configuration errors and handle cleanup through an injectable Win32 seam.
+// Assert Job creation/configuration errors and handle cleanup through an injectable Win32 seam.
 func TestWindowsJobCreation_FailsClosedAndClosesOnConfigurationFailure(t *testing.T) {
 	apiError := errors.New("injected Job API error")
 	t.Run("missing job handle", func(t *testing.T) {
@@ -107,7 +107,7 @@ func (api *fakeWindowsMembershipAPI) CloseHandle(handle windows.Handle) error {
 	return api.closeErr
 }
 
-// NAT-T-186..187 verify process-open and membership-query failures fail closed and always close opened handles.
+// Verify process-open and membership-query failures fail closed and always close opened handles.
 func TestWindowsProcessInJob_FailureBranches(t *testing.T) {
 	apiError := errors.New("injected membership API error")
 	t.Run("process handle cannot open", func(t *testing.T) {
@@ -151,7 +151,7 @@ func (api *fakeWindowsJobAccountingAPI) QueryInformationJobObject(_ windows.Hand
 	return nil
 }
 
-// NAT-N-005 verifies unknown Job accounting remains an error and is never interpreted as an empty scope.
+// Verifies unknown Job accounting remains an error and is never interpreted as an empty scope.
 func TestNativeSyscallFakes_FailClosedOnUnknown(t *testing.T) {
 	queryErr := errors.New("injected accounting query failure")
 	t.Run("accounting query failure", func(t *testing.T) {
@@ -176,7 +176,7 @@ func TestNativeSyscallFakes_FailClosedOnUnknown(t *testing.T) {
 	})
 }
 
-// NAT-F-010/011 verifies the real Windows Job accounting structure reports a live managed command.
+// Verifies the real Windows Job accounting structure reports a live managed command.
 func TestWindowsJobAccounting_RealJobTracksManagedProcess(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -199,7 +199,7 @@ func TestWindowsJobAccounting_RealJobTracksManagedProcess(t *testing.T) {
 	}
 }
 
-// NAT-F-011 verifies a real closed Job handle is an accounting failure, never an empty Job.
+// Verifies a real closed Job handle is an accounting failure, never an empty Job.
 func TestWindowsJobAccounting_ClosedHandleIsUnknown(t *testing.T) {
 	job, err := createWindowsJob(jobNameFor(stateTestDir(t)))
 	if err != nil {
@@ -214,7 +214,7 @@ func TestWindowsJobAccounting_ClosedHandleIsUnknown(t *testing.T) {
 	}
 }
 
-// NAT-F-011 keeps the production Job drain budget aligned with the 2-second contract.
+// Keeps the production Job drain budget aligned with the 2-second contract.
 func TestWindowsSupervisor_DrainBudget(t *testing.T) {
 	if windowsDrainBudget != 2*time.Second {
 		t.Fatalf("Windows Job drain budget = %s, want 2s", windowsDrainBudget)
@@ -244,7 +244,7 @@ func (*pollingWindowsJobAPI) AwaitJobEmpty(context.Context, windows.Handle, time
 	return nil
 }
 
-// NAT-T-183 verifies command exit polling retries finite waits until the process is signaled.
+// Verifies command exit polling retries finite waits until the process is signaled.
 func TestWindowsJobProtocol_PollsUntilCommandExit(t *testing.T) {
 	api := &pollingWindowsJobAPI{statuses: []uint32{uint32(windows.WAIT_TIMEOUT), uint32(windows.WAIT_TIMEOUT), uint32(windows.WAIT_OBJECT_0)}}
 	ownerInput, ownerWriter := io.Pipe()
@@ -276,7 +276,7 @@ func (api *observedWindowsJobProtocolAPI) CloseHandle(handle windows.Handle) err
 	return api.fakeWindowsJobProtocolAPI.CloseHandle(handle)
 }
 
-// NAT-T-234 verifies the command exit report is durable before the helper closes any process handle.
+// Verifies the command exit report is durable before the helper closes any process handle.
 func TestWindowsJobProtocol_PublishesExitBeforeClosingHandles(t *testing.T) {
 	dir := stateTestDir(t)
 	if err := publishText(dir, permitFile, "permit"); err != nil {
@@ -292,7 +292,7 @@ func TestWindowsJobProtocol_PublishesExitBeforeClosingHandles(t *testing.T) {
 	}
 }
 
-// NAT-T-177 verifies a failed resume terminates the suspended Job and closes every handle despite close errors.
+// Verifies a failed resume terminates the suspended Job and closes every handle despite close errors.
 func TestWindowsJobProtocol_ResumeAndCloseFailuresStillCleanUp(t *testing.T) {
 	dir := stateTestDir(t)
 	if err := publishText(dir, permitFile, "permit"); err != nil {

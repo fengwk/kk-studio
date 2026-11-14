@@ -33,6 +33,22 @@ test('Go daemon CI builds all six static targets and is reusable by release and 
   assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-go-ci\.yml/)
 })
 
+test('Go CI watches its script suites and local composite actions for both push and pull requests', () => {
+  for (const dependency of [
+    'scripts/dev/lib/**',
+    'scripts/dev/verify/reliability/**',
+    'scripts/dev/verify/supply-chain/**',
+    '.github/actions/**',
+  ]) {
+    assert.equal(goCi.split(`- '${dependency}'`).length - 1, 2, `both events must watch ${dependency}`)
+  }
+})
+
+test('release history scanning requires the preceding release tag as its baseline', () => {
+  assert.ok(release.includes("previous=$(git describe --tags --abbrev=0 --match 'v*' 'HEAD^')"))
+  assert.match(release, /--remote-pr --fail-on-high --baseline "\$\{previous\}"/)
+})
+
 test('reusable Go CI runs the bundled IDE extension contract tests', () => {
   assert.match(goCi, /- name: Test IDE bridge extension\n\s+run: node --test daemon-go\/ide-extension\/extension\.test\.cjs/)
 })
@@ -71,17 +87,15 @@ test('Unix and Windows installers execute the Go binary and internal lock helper
   assert.match(install, /__lock-helper wait/)
   assert.match(install, /--config/)
   assert.match(install, /local arguments=\("\$daemon_binary" --config/)
-  assert.doesNotMatch(install, /main\.js|node_modules\/koffi|runtime\/code-server\/lib\/node/)
+  assert.doesNotMatch(install, /runtime\/code-server\/lib\/node/)
   assert.match(windowsInstall, /kk-studio-daemon\.exe/)
   assert.match(windowsInstall, /__lock-helper/)
-  assert.doesNotMatch(windowsInstall, /main\.js|node_modules\\koffi/)
   assert.ok(windowsInstall.includes(String.raw`runtime\code-server\lib\node.exe`))
 })
 
-test('archive smoke verifies the Go executable, bundled IDE runtime and excludes legacy payload', () => {
+test('archive smoke verifies the Go executable and bundled IDE runtime', () => {
   assert.match(smoke, /kk-studio-daemon/)
   assert.match(smoke, /runtime\/code-server\/out\/node\/entry\.js/)
   assert.match(smoke, /ide-extension\/extension\.cjs/)
-  assert.match(smoke, /node_modules/)
   assert.match(smoke, /--version/)
 })

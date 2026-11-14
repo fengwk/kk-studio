@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
 }
 
-// NAT-F-005 verifies completed command wait and exit publication precede session convergence and adopted-child reaping.
+// Verifies completed command wait and exit publication precede session convergence and adopted-child reaping.
 func TestPOSIXHelper_ExitBeforeAdoptedReaper(t *testing.T) {
 	events := []string{"command-wait-complete"}
 	status := completeHelperCommandLifecycle(
@@ -164,7 +164,7 @@ func TestPOSIXConvergence_InjectedFailureBranches(t *testing.T) {
 	}
 }
 
-// NAT-F-008 verifies convergence returns a distinct error when its independent four-second budget expires.
+// Verifies convergence returns a distinct error when its independent four-second budget expires.
 func TestPOSIXConvergence_IndependentBudgetExpires(t *testing.T) {
 	start := time.Unix(200, 0)
 	current := start
@@ -202,7 +202,7 @@ func TestPOSIXConvergence_IndependentBudgetExpires(t *testing.T) {
 	}
 }
 
-// NAT-F-008 verifies the deadline-driven transition from TERM through grace to KILL and re-observation.
+// Verifies the deadline-driven transition from TERM through grace to KILL and re-observation.
 func TestPOSIXConvergence_TermGraceKillAndReobserve(t *testing.T) {
 	start := time.Unix(100, 0)
 	current := start
@@ -260,7 +260,6 @@ func TestPOSIXConvergence_TermGraceKillAndReobserve(t *testing.T) {
 	}
 }
 
-// NAT-N-001, NAT-T-115
 func TestPOSIXSupervisor_NaturalExitDrains(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -293,7 +292,7 @@ func TestPOSIXSupervisor_NaturalExitDrains(t *testing.T) {
 	}
 }
 
-// NAT-T-114 verifies that environment values supplied to the daemon reach the command.
+// Verifies that environment values supplied to the daemon reach the command.
 func TestPOSIXSupervisor_InheritedEnvironment(t *testing.T) {
 	t.Setenv("KK_STUDIO_NATIVE_TEST_ENV", "inherited")
 	supervisor, err := NewSupervisor()
@@ -322,7 +321,7 @@ func TestPOSIXSupervisor_InheritedEnvironment(t *testing.T) {
 	}
 }
 
-// NAT-N-001 confirms POSIX scope helpers are launched by the daemon executable with only the helper subcommand and private state path.
+// Confirms POSIX scope helpers are launched by the daemon executable with only the helper subcommand and private state path.
 func TestPOSIXSupervisor_HelperUsesCurrentExecutable(t *testing.T) {
 	supervisorValue, err := NewSupervisor()
 	if err != nil {
@@ -360,7 +359,7 @@ func TestPOSIXSupervisor_HelperUsesCurrentExecutable(t *testing.T) {
 	}
 }
 
-// NAT-F-003 verifies the actual command environment drops Node's management descriptor.
+// Verifies the actual command environment drops Node's management descriptor.
 func TestPOSIXSupervisor_CommandEnvironmentDropsNodeChannelFD(t *testing.T) {
 	t.Setenv("NODE_CHANNEL_FD", "7")
 	supervisor, err := NewSupervisor()
@@ -389,7 +388,7 @@ func TestPOSIXSupervisor_CommandEnvironmentDropsNodeChannelFD(t *testing.T) {
 	}
 }
 
-// NAT-T-118 verifies that stdin EOF allows the command to exit with its own code.
+// Verifies that stdin EOF allows the command to exit with its own code.
 func TestPOSIXSupervisor_StdinEOF(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -417,7 +416,7 @@ func TestPOSIXSupervisor_StdinEOF(t *testing.T) {
 	}
 }
 
-// NAT-T-128 verifies terminating one process scope leaves another live scope untouched.
+// Verifies terminating one process scope leaves another live scope untouched.
 func TestPOSIXSupervisor_ScopeIsolation(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -447,7 +446,6 @@ func TestPOSIXSupervisor_ScopeIsolation(t *testing.T) {
 	}
 }
 
-// NAT-T-119
 func TestPOSIXSupervisor_DuplexStreams(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -489,7 +487,6 @@ func TestPOSIXSupervisor_DuplexStreams(t *testing.T) {
 	}
 }
 
-// NAT-T-133
 func TestPOSIXSupervisor_StartAfterClose(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -588,7 +585,6 @@ func TestPOSIXSupervisor_RejectsInvalidStartSpec(t *testing.T) {
 	}
 }
 
-// NAT-T-132
 func TestPOSIXSupervisor_ExecFailureHasUnknownExit(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -610,7 +606,6 @@ func TestPOSIXSupervisor_ExecFailureHasUnknownExit(t *testing.T) {
 	}
 }
 
-// NAT-T-116
 func TestPOSIXSupervisor_Terminate(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -628,7 +623,7 @@ func TestPOSIXSupervisor_Terminate(t *testing.T) {
 	}
 }
 
-// NAT-T-129, NAT-T-130 verify descendant tracking rejects unknown roots and foreign processes.
+// Verify descendant tracking rejects unknown roots and foreign processes.
 func TestPOSIXSupervisor_TrackDescendantRejectsForeignProcess(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -647,7 +642,7 @@ func TestPOSIXSupervisor_TrackDescendantRejectsForeignProcess(t *testing.T) {
 	}
 }
 
-// NAT-T-138 verifies that a descendant already in the managed session is accepted.
+// Verifies that a descendant already in the managed session is accepted.
 func TestPOSIXSupervisor_TrackExistingMember(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -668,7 +663,6 @@ func TestPOSIXSupervisor_TrackExistingMember(t *testing.T) {
 	}
 }
 
-// NAT-T-120
 func TestPOSIXSupervisor_PreCancelled(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {

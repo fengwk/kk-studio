@@ -7,7 +7,6 @@ import (
 	"time"
 )
 
-// TRN-T-032
 func TestTunnel_UpstreamContextCancellation(t *testing.T) {
 	parent, cancelParent := context.WithCancel(context.Background())
 	upstream, cancelUpstream := context.WithCancel(context.Background())
@@ -24,7 +23,6 @@ func TestTunnel_UpstreamContextCancellation(t *testing.T) {
 	}
 }
 
-// TRN-T-028, TRN-T-029, TRN-T-030, TRN-T-031
 func TestTunnel_UpstreamValidation(t *testing.T) {
 	base := ViewUpstream{Host: "127.0.0.1", Port: 8080, Path: "/", Headers: http.Header{}, Protocols: []string{"chat"}}
 	if err := validateViewUpstream(base); err != nil {
@@ -50,7 +48,6 @@ func TestTunnel_UpstreamValidation(t *testing.T) {
 	}
 }
 
-// TRN-T-034
 func TestTunnel_ParseRoute(t *testing.T) {
 	const id = "123e4567-e89b-12d3-a456-426614174000"
 	for _, tc := range []struct {

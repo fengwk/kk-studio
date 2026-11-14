@@ -8,7 +8,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// LSP-T-033 verifies support states distinguish unsupported, unavailable, and installed servers.
+// Verifies support states distinguish unsupported, unavailable, and installed servers.
 func TestDiscovery_SupportStates(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "installed")
@@ -42,7 +42,7 @@ func TestDiscovery_SupportStates(t *testing.T) {
 	}
 }
 
-// LSP-T-036 verifies empty configuration and empty commands remain unavailable.
+// Verifies empty configuration and empty commands remain unavailable.
 func TestDiscovery_EmptyConfig(t *testing.T) {
 	discovery, err := NewDiscovery(nil, ResolverOptions{})
 	if err != nil {
@@ -59,7 +59,7 @@ func TestDiscovery_EmptyConfig(t *testing.T) {
 	}
 }
 
-// LSP-F-028 verifies executable results are cached under their original command string.
+// Verifies executable results are cached under their original command string.
 func TestDiscovery_ExecutableCacheUsesOriginalCommand(t *testing.T) {
 	dir := t.TempDir()
 	binary := filepath.Join(dir, "cached-tool")
@@ -88,7 +88,7 @@ func TestDiscovery_ExecutableCacheUsesOriginalCommand(t *testing.T) {
 	}
 }
 
-// LSP-T-029 and LSP-T-031 cover shallow root-marker selection and first-match fallback.
+// Cover shallow root-marker selection and first-match fallback.
 func TestDiscovery_FirstMatchAndRootMarkerPrecedence(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "repo")

@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// LSP-T-062, LSP-T-063, and LSP-T-065 verify failed idle retirement isolates the key and is reported by close.
+// Verify failed idle retirement isolates the key and is reported by close.
 func TestPool_RetirementFailureIsIsolated(t *testing.T) {
 	cleanupErr := errors.New("retirement termination failed")
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: 10 * time.Millisecond, ShutdownGrace: 10 * time.Millisecond})
@@ -61,7 +61,7 @@ func TestPool_RetirementFailureIsIsolated(t *testing.T) {
 	}
 }
 
-// LSP-T-060 starts a new client after a previously leased client dies.
+// Starts a new client after a previously leased client dies.
 func TestPool_RestartDeadClient(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour, ShutdownGrace: 5 * time.Millisecond})
 	first, err := pool.LeaseWithExit(context.Background(), file, nil)
@@ -88,7 +88,7 @@ func TestPool_RestartDeadClient(t *testing.T) {
 	}
 }
 
-// LSP-T-064 cancellation and timeout reject waiters independently while retirement is held.
+// Cancellation and timeout reject waiters independently while retirement is held.
 func TestPool_RetirementWaiterAbort(t *testing.T) {
 	for _, tc := range []struct {
 		name      string

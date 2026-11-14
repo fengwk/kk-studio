@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// COD-T-123: crossing the inline threshold atomically publishes the exact full output.
+// Crossing the inline threshold atomically publishes the exact full output.
 func TestOutputSpillPublishesDurableFullContent(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -43,7 +43,7 @@ func TestOutputSpillPublishesDurableFullContent(t *testing.T) {
 	}
 }
 
-// COD-T-127: data-directory output storage and TTL cleanup operate on the same root.
+// Data-directory output storage and TTL cleanup operate on the same root.
 func TestOutputStoreDataDirRootIsTTLCleanupRoot(t *testing.T) {
 	dataDir := t.TempDir()
 	store, err := TextOutputStoreForDataDir(dataDir)

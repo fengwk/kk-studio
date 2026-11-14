@@ -38,7 +38,7 @@ func writeExecutableFixture(t *testing.T, name string) string {
 	return path
 }
 
-// RUN-T-189 applies a complete ordered snapshot without replacing daemon-local paths.
+// Applies a complete ordered snapshot without replacing daemon-local paths.
 func TestBuildEnvironmentConfigPreservesBaseAndServerOrder(t *testing.T) {
 	base := DaemonConfig{EnvironmentID: "env", ConfigPath: "/data/daemon.json", DataDir: "/data", TokenPath: "/data/daemon.token", DistributionDir: "/opt/daemon"}
 	input := validEnvironmentConfig(t)
@@ -125,7 +125,7 @@ func TestBuildEnvironmentConfigExpandsLSPHomeCommand(t *testing.T) {
 	}
 }
 
-// RUN-T-197 ADAPT rejects invalid candidates before returning any publishable configuration.
+// ADAPT rejects invalid candidates before returning any publishable configuration.
 func TestBuildEnvironmentConfigRejectsInvalidCandidateFields(t *testing.T) {
 	cases := []struct {
 		name   string

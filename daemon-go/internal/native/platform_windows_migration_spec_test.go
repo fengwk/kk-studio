@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// NAT-T-034 verifies Windows selects the Job supervisor and closes an empty scope.
+// Verifies Windows selects the Job supervisor and closes an empty scope.
 func TestPlatform_WindowsSupervisor(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {

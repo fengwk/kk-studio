@@ -99,7 +99,7 @@ func TestSkillInstallPropagatesTicketDownloadAndArchiveFailures(t *testing.T) {
 	}
 }
 
-// RUN-T-233 and RUN-T-234 reject unsafe archive paths and symlinks without publishing files.
+// Reject unsafe archive paths and symlinks without publishing files.
 // TestSkillInstallRejectsUnsafeAndSpecialArchiveEntries protects extraction against traversal and non-regular ZIP entries.
 func TestSkillInstallRejectsUnsafeAndSpecialArchiveEntries(t *testing.T) {
 	for _, name := range []string{"/absolute", `..\\escape`, "C:/drive", "demo//empty", "demo/../escape"} {

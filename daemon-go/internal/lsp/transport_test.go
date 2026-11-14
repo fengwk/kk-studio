@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// LSP-F-027 verifies an unexpected JSON-RPC disconnect terminates its supervised process.
+// Verifies an unexpected JSON-RPC disconnect terminates its supervised process.
 func TestClient_TransportFailureTerminatesProcess(t *testing.T) {
 	supervisor := &fakeSupervisor{}
 	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
@@ -34,7 +34,7 @@ func TestClient_TransportFailureTerminatesProcess(t *testing.T) {
 	}
 }
 
-// LSP-F-027 terminates a process when the JSON-RPC connection disconnects without a codec error.
+// Terminates a process when the JSON-RPC connection disconnects without a codec error.
 func TestClient_TransportCloseTerminatesProcess(t *testing.T) {
 	supervisor := &fakeSupervisor{}
 	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
@@ -61,7 +61,7 @@ func TestClient_TransportCloseTerminatesProcess(t *testing.T) {
 	_ = client.Stop(time.Millisecond)
 }
 
-// LSP-F-027 preserves both transport and process-cleanup failures.
+// Preserves both transport and process-cleanup failures.
 func TestClient_TransportCleanupFailureIsAggregated(t *testing.T) {
 	supervisor := &fakeSupervisor{}
 	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
@@ -89,7 +89,7 @@ func TestClient_TransportCleanupFailureIsAggregated(t *testing.T) {
 	_ = client.Stop(time.Millisecond)
 }
 
-// LSP-F-011 and LSP-T-082 preserve the exact banner-limit error through the client transport.
+// Preserve the exact banner-limit error through the client transport.
 func TestClient_BannerLimitErrorIsReported(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "initialize"}
 	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)

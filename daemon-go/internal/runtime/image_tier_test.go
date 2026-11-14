@@ -9,7 +9,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
-// RUN-T-006 maps each supported protocol tier to its capability contract value.
+// Maps each supported protocol tier to its capability contract value.
 func TestMapImageInputTier(t *testing.T) {
 	for _, test := range []struct {
 		wire protocol.ImageInputTier
@@ -26,7 +26,7 @@ func TestMapImageInputTier(t *testing.T) {
 	}
 }
 
-// RUN-T-006 rejects missing, unspecified, or unsupported image-input tiers before invoking a capability.
+// Rejects missing, unspecified, or unsupported image-input tiers before invoking a capability.
 func TestRuntimeRequiresSupportedImageInputTier(t *testing.T) {
 	unspecified := protocol.ImageInputTier_IMAGE_INPUT_TIER_UNSPECIFIED
 	unsupported := protocol.ImageInputTier(99)

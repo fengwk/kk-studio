@@ -186,7 +186,7 @@ func fixturePID(t *testing.T, path string) uint32 {
 	return 0
 }
 
-// NAT-T-108, NAT-T-115 (Windows behavior)
+// (Windows behavior)
 func TestWindowsSupervisor_NaturalExitDrainsJob(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -211,7 +211,7 @@ func TestWindowsSupervisor_NaturalExitDrainsJob(t *testing.T) {
 	waitWindowsPIDState(t, childPID, false, 3*time.Second)
 }
 
-// NAT-F-003 verifies CreateProcess receives and honors ProcessSpec.Directory on Windows.
+// Verifies CreateProcess receives and honors ProcessSpec.Directory on Windows.
 func TestWindowsSupervisor_CommandUsesConfiguredWorkingDirectory(t *testing.T) {
 	directory := t.TempDir()
 	supervisor, err := NewSupervisor()
@@ -241,7 +241,7 @@ func TestWindowsSupervisor_CommandUsesConfiguredWorkingDirectory(t *testing.T) {
 	}
 }
 
-// NAT-N-001 confirms the helper re-exec argv contains only the daemon path and private state directory.
+// Confirms the helper re-exec argv contains only the daemon path and private state directory.
 func TestWindowsHelperCommandLine_ExcludesUserCommandArguments(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private-state")
 	secret := "PRIVATE-COMMAND-ARG-SHOULD-NOT-LEAK"
@@ -253,7 +253,7 @@ func TestWindowsHelperCommandLine_ExcludesUserCommandArguments(t *testing.T) {
 	}
 }
 
-// NAT-F-002/N-003 verifies on Windows that the real helper keeps its command suspended until the parent confirms Job membership and publishes permit.
+// Verifies on Windows that the real helper keeps its command suspended until the parent confirms Job membership and publishes permit.
 func TestWindowsHelper_RequiresConfirmedScopePermitBeforeCommandResume(t *testing.T) {
 	dir := stateTestDir(t)
 	marker := filepath.Join(t.TempDir(), "command-started")
@@ -346,7 +346,6 @@ func TestWindowsHelper_RequiresConfirmedScopePermitBeforeCommandResume(t *testin
 	}
 }
 
-// NAT-T-109, NAT-T-110
 func TestWindowsSupervisor_StdinEOF(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -382,7 +381,6 @@ func TestWindowsSupervisor_StdinEOF(t *testing.T) {
 	}
 }
 
-// NAT-T-109
 func TestWindowsSupervisor_TerminateNestedTree(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -403,7 +401,6 @@ func TestWindowsSupervisor_TerminateNestedTree(t *testing.T) {
 	waitWindowsPIDState(t, childPID, false, 3*time.Second)
 }
 
-// NAT-T-112
 func TestWindowsSupervisor_OwnerDeath(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "owner-child.pid")
 	cmd := exec.Command(os.Args[0], "__native-owner", pidFile)
@@ -419,7 +416,6 @@ func TestWindowsSupervisor_OwnerDeath(t *testing.T) {
 	waitWindowsPIDState(t, childPID, false, 8*time.Second)
 }
 
-// NAT-T-111
 func TestWindowsSupervisor_TrackDescendantConfirmsJobMembership(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -450,7 +446,6 @@ func TestWindowsSupervisor_TrackDescendantConfirmsJobMembership(t *testing.T) {
 	waitWindowsPIDState(t, secondChild, true, time.Second)
 }
 
-// NAT-T-113
 func TestWindowsSupervisor_ScopeIsolation(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {

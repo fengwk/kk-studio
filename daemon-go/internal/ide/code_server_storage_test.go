@@ -9,7 +9,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
-// IDE-T-030 verifies code-server storage helpers apply private modes and fail on non-directory paths.
+// Verifies code-server storage helpers apply private modes and fail on non-directory paths.
 func TestPrivateStorageHelpers(t *testing.T) {
 	root := t.TempDir()
 	directory := filepath.Join(root, "private")
@@ -43,7 +43,7 @@ func TestPrivateStorageHelpers(t *testing.T) {
 	}
 }
 
-// IDE-T-030 verifies extension installation rejects symlinks and replaces stale digests atomically.
+// Verifies extension installation rejects symlinks and replaces stale digests atomically.
 func TestBridgeExtensionInstallBoundaries(t *testing.T) {
 	root := t.TempDir()
 	distribution := filepath.Join(root, "distribution")

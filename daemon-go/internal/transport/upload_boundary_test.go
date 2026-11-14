@@ -11,7 +11,7 @@ import (
 
 const uploadBoundaryInvocationID = "123e4567-e89b-12d3-a456-426614174000"
 
-// TRN-T-163 preserves a contract error that confirms cleanup.
+// Preserves a contract error that confirms cleanup.
 func TestUploadBoundary_Confirmed(t *testing.T) {
 	want := &runtimeapi.ResourceUploadError{Stage: "put", Category: "storage-rejected", CleanupConfirmed: true}
 	if got := normalizeUploadError(want); got != want {
@@ -19,7 +19,7 @@ func TestUploadBoundary_Confirmed(t *testing.T) {
 	}
 }
 
-// TRN-T-164 preserves a contract error when cleanup is unknown.
+// Preserves a contract error when cleanup is unknown.
 func TestUploadBoundary_Unknown(t *testing.T) {
 	want := &runtimeapi.ResourceUploadError{Stage: "put", Category: "cleanup-failed", CleanupConfirmed: false}
 	if got := normalizeUploadError(want); got != want {
@@ -27,7 +27,7 @@ func TestUploadBoundary_Unknown(t *testing.T) {
 	}
 }
 
-// TRN-T-165 converts an off-contract error into a conservative boundary violation.
+// Converts an off-contract error into a conservative boundary violation.
 func TestUploadBoundary_OffContract(t *testing.T) {
 	cause := errors.New("private uploader detail")
 	got := normalizeUploadError(cause)
@@ -37,7 +37,7 @@ func TestUploadBoundary_OffContract(t *testing.T) {
 	}
 }
 
-// TRN-T-166 returns the resource reference when upload succeeds.
+// Returns the resource reference when upload succeeds.
 func TestUploadBoundary_Success(t *testing.T) {
 	uploader := &ResourceUploader{Control: uploadExchangeStub{
 		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
@@ -56,7 +56,7 @@ func TestUploadBoundary_Success(t *testing.T) {
 	}
 }
 
-// TRN-T-167 describes upload failures without exposing the underlying cause.
+// Describes upload failures without exposing the underlying cause.
 func TestUploadBoundary_RedactedDescription(t *testing.T) {
 	cause := errors.New("private ticket and cleanup details")
 	uploadErr := normalizeUploadError(&runtimeapi.ResourceUploadError{Stage: "put", Category: "cleanup-failed", CleanupConfirmed: false, Cause: cause})

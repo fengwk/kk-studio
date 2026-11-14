@@ -12,7 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// RUN-T-002 closes a SETTINGS handshake with no environment scope and retries on a new connection.
+// Closes a SETTINGS handshake with no environment scope and retries on a new connection.
 func TestRuntimeRetriesSettingsWithoutEnvironment(t *testing.T) {
 	first, second := newTestConnection(), newTestConnection()
 	first.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
@@ -60,7 +60,7 @@ func (r *lateProgressUpdateRunner) HandleUpdate(_ context.Context, _ update.Comm
 	return update.Outcome{Phase: update.PhaseFailed, Message: "update failed"}, nil
 }
 
-// RUN-T-034 ignores a saved progress callback after the matching update has failed.
+// Ignores a saved progress callback after the matching update has failed.
 func TestRuntimeIgnoresLateUpdateProgressAfterFailure(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -91,7 +91,7 @@ func TestRuntimeIgnoresLateUpdateProgressAfterFailure(t *testing.T) {
 	}
 }
 
-// RUN-T-035 confirms failed update preparation releases the invocation admission gate.
+// Confirms failed update preparation releases the invocation admission gate.
 func TestRuntimeUpdateFailureReopensInvocationAdmission(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -117,7 +117,7 @@ func TestRuntimeUpdateFailureReopensInvocationAdmission(t *testing.T) {
 	}
 }
 
-// RUN-T-038 keeps update admission closed for protected work and preserves its exit fact for RECOVER.
+// Keeps update admission closed for protected work and preserves its exit fact for RECOVER.
 func TestRuntimeProtectedExecutionRejectsUpdateAndRecoversExit(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -175,7 +175,7 @@ func TestRuntimeProtectedExecutionRejectsUpdateAndRecoversExit(t *testing.T) {
 	}
 }
 
-// RUN-T-065 and RUN-T-080 verify shutdown waits for an invocation and Go's shutdown reason is cancelled.
+// Verify shutdown waits for an invocation and Go's shutdown reason is cancelled.
 func TestRuntimeShutdownCancelsAndWaitsForInvocation(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -233,7 +233,7 @@ func (u resourceUploadFailureUploader) Upload(context.Context, string, ResultCon
 	return ResultContent{}, u.err
 }
 
-// RUN-T-074/T-076 suppress execution-exit confirmation when failed upload cleanup is unproven.
+// Suppress execution-exit confirmation when failed upload cleanup is unproven.
 func TestRuntimeUnconfirmedUploadCleanupSuppressesExecutionExit(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -262,7 +262,7 @@ func TestRuntimeUnconfirmedUploadCleanupSuppressesExecutionExit(t *testing.T) {
 	}
 }
 
-// RUN-T-075 allows exit confirmation after an upload failure with explicit cleanup proof.
+// Allows exit confirmation after an upload failure with explicit cleanup proof.
 func TestRuntimeConfirmedUploadCleanupAllowsExecutionExit(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -309,7 +309,7 @@ func (u *controlledUploader) Upload(_ context.Context, _ string, content ResultC
 	return ResultContent{Type: "resource", UploadID: "upload-1", MediaType: content.MediaType, Size: int64(len(content.Bytes))}, nil
 }
 
-// RUN-T-078 confirms result delivery finishes before a successful upload's exit acknowledgement.
+// Confirms result delivery finishes before a successful upload's exit acknowledgement.
 func TestRuntimeSuccessfulUploadPrecedesExecutionExit(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -357,7 +357,7 @@ func TestRuntimeSuccessfulUploadPrecedesExecutionExit(t *testing.T) {
 	}
 }
 
-// RUN-T-062 verifies the Go runtime's environment gate and invocation journal component accessors.
+// Verifies the Go runtime's environment gate and invocation journal component accessors.
 func TestRuntimeGateAndJournalExposeCurrentScope(t *testing.T) {
 	r, _ := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	environmentID, bound := r.gate.BoundEnvironment()

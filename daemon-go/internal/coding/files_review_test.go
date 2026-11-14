@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// COD-N-021
 func TestWriteReviewAndExpectedFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "review.txt")
 	if err := os.WriteFile(path, []byte("first\nold\nlast\n"), 0o600); err != nil {
@@ -33,7 +32,7 @@ func TestWriteReviewAndExpectedFile(t *testing.T) {
 	}
 }
 
-// COD-F-008: a staging fsync failure leaves the destination unchanged and removes the temporary file.
+// A staging fsync failure leaves the destination unchanged and removes the temporary file.
 func TestAtomicWriteSyncFailureRemovesStaging(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "target.txt")
@@ -63,7 +62,6 @@ func TestAtomicWriteSyncFailureRemovesStaging(t *testing.T) {
 	}
 }
 
-// COD-F-007
 func TestWriteCreatesMissingParentDirectories(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "nested", "deeper", "new.txt")
 	if _, err := Write(path, "new contents\n", nil); err != nil {
@@ -75,7 +73,7 @@ func TestWriteCreatesMissingParentDirectories(t *testing.T) {
 	}
 }
 
-// COD-F-019: a missing write target resolves its existing symlinked parent to the real path.
+// A missing write target resolves its existing symlinked parent to the real path.
 func TestWriteCapabilityResolvesMissingTargetThroughSymlinkedParent(t *testing.T) {
 	root := t.TempDir()
 	realParent := filepath.Join(root, "real")
@@ -104,7 +102,6 @@ func TestWriteCapabilityResolvesMissingTargetThroughSymlinkedParent(t *testing.T
 	}
 }
 
-// COD-N-021
 func TestWriteReviewForNewFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")
 	review, err := PreviewWrite(path, "new contents\n")

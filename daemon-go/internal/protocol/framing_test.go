@@ -6,7 +6,6 @@ import (
 	"testing"
 )
 
-// TRN-T-156
 func TestFrame_BoundsAndRoundTrip(t *testing.T) {
 	for _, payload := range [][]byte{nil, bytes.Repeat([]byte{1}, MaxFrameSize+1)} {
 		if _, err := EncodeFrame(payload); err == nil {
@@ -32,7 +31,6 @@ func TestFrame_BoundsAndRoundTrip(t *testing.T) {
 	}
 }
 
-// TRN-T-156
 func TestFrame_StreamIO(t *testing.T) {
 	payload := []byte{0x7b, 0x7d}
 	var framed bytes.Buffer

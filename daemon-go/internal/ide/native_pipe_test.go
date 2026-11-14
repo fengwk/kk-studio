@@ -33,7 +33,7 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// IDE-T-040/155 verifies the native supervisor waits for an inherited-pipe descendant to leave scope.
+// Verifies the native supervisor waits for an inherited-pipe descendant to leave scope.
 func TestNativeSupervisorWaitsForInheritedPipes(t *testing.T) {
 	directory := t.TempDir()
 	gate := filepath.Join(directory, "release-descendant")
@@ -105,7 +105,7 @@ func TestNativeSupervisorWaitsForInheritedPipes(t *testing.T) {
 	awaitPipeTestResult(t, closeDone, "supervisor close")
 }
 
-// IDE-T-155 verifies a completed pipe drain preserves the direct child exit status.
+// Verifies a completed pipe drain preserves the direct child exit status.
 func TestNativeSupervisorWaitReturnsDirectChildExitAfterPipeDrain(t *testing.T) {
 	directory := t.TempDir()
 	gate := filepath.Join(directory, "release-descendant")

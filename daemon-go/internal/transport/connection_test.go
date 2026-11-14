@@ -23,7 +23,6 @@ import (
 
 const testEnvironment = "123e4567-e89b-12d3-a456-426614174000"
 
-// TRN-N-004, TRN-T-066, TRN-T-071, TRN-T-072, TRN-T-078, TRN-T-084
 func TestTransport_H2ControlRoundTripOverWebSocket(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -167,7 +166,6 @@ func TestTransport_H2ControlRoundTripOverWebSocket(t *testing.T) {
 	_ = bodyWriter.Close()
 }
 
-// TRN-T-068
 func TestTransport_DialDirectIgnoresEnvironmentProxy(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
 	t.Setenv("http_proxy", "http://127.0.0.1:1")
@@ -197,7 +195,6 @@ func TestTransport_DialDirectIgnoresEnvironmentProxy(t *testing.T) {
 	}
 }
 
-// TRN-T-067
 func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -276,7 +273,6 @@ func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 	}
 }
 
-// TRN-T-069, TRN-T-070, TRN-T-080, TRN-T-081
 func TestTransport_HandshakeRejection(t *testing.T) {
 	upgradeBytes, err := proto.Marshal(&protocol.UpgradeRequired{TargetVersion: proto.String("1.2.3")})
 	if err != nil {
@@ -327,7 +323,6 @@ func TestTransport_HandshakeRejection(t *testing.T) {
 	}
 }
 
-// TRN-T-083
 func TestTransport_TextFrameClosesWithUnsupportedData(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -394,14 +389,13 @@ func TestTransport_WebSocketReadLimitAfterNetConn(t *testing.T) {
 	_ = byteConn.Close()
 }
 
-// TRN-T-074 verifies the configured inbound idle timeout is exactly 45 seconds.
+// Verifies the configured inbound idle timeout is exactly 45 seconds.
 func TestTransport_InboundIdleTimeoutDefault(t *testing.T) {
 	if inboundIdleTimeout != 45*time.Second {
 		t.Fatalf("inbound idle timeout=%s, want 45s", inboundIdleTimeout)
 	}
 }
 
-// TRN-T-082
 func TestTransport_ControlStreamWaitTimeout(t *testing.T) {
 	ready, closed := make(chan struct{}), make(chan struct{})
 	if waitForControlStream(time.Millisecond, ready, closed) {
@@ -417,7 +411,6 @@ func TestTransport_ControlStreamWaitTimeout(t *testing.T) {
 	}
 }
 
-// TRN-T-074
 func TestTransport_InactivityDeadline(t *testing.T) {
 	left, right := net.Pipe()
 	defer left.Close()
@@ -429,7 +422,6 @@ func TestTransport_InactivityDeadline(t *testing.T) {
 	}
 }
 
-// TRN-T-011
 func TestTransport_ControlWaitHonorsContext(t *testing.T) {
 	cc := &ControlConnection{controlReady: make(chan struct{}), closed: make(chan struct{})}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)

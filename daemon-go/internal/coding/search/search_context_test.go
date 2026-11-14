@@ -13,7 +13,6 @@ import (
 	"github.com/charlievieth/fastwalk"
 )
 
-// COD-T-198
 func TestNoFilesReadAfterLimit(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0600); err != nil {
@@ -39,7 +38,7 @@ func TestNoFilesReadAfterLimit(t *testing.T) {
 	}
 }
 
-// COD-N-020: the limit notice is emitted at N without reading another file to look for N+1.
+// The limit notice is emitted at N without reading another file to look for N+1.
 func TestGrepExactLimitReportsLimitReached(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\nx\n"), 0600); err != nil {
@@ -54,7 +53,7 @@ func TestGrepExactLimitReportsLimitReached(t *testing.T) {
 	}
 }
 
-// COD-N-014: deadline checks stop pooled reads before requesting the next chunk.
+// Deadline checks stop pooled reads before requesting the next chunk.
 func TestReadPooledReaderStopsAtDeadlineChunkBoundary(t *testing.T) {
 	ctx := &deadlineAfterFirstCheckContext{Context: context.Background()}
 	reader := &deadlineChunkReader{}
@@ -92,7 +91,6 @@ func (reader *deadlineChunkReader) Read(p []byte) (int, error) {
 	return copy(p, "must not read"), nil
 }
 
-// COD-N-014
 func TestFindContextReturnsPartialOnDeadlineAndCancellationError(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x"), 0600); err != nil {
@@ -111,7 +109,7 @@ func TestFindContextReturnsPartialOnDeadlineAndCancellationError(t *testing.T) {
 	}
 }
 
-// COD-T-039: find preserves path-access failures for the capability summary.
+// Find preserves path-access failures for the capability summary.
 func TestFindCollectsUnreadablePathsAsSkipped(t *testing.T) {
 	root := t.TempDir()
 	blocked := filepath.Join(root, "blocked")
@@ -141,7 +139,6 @@ func TestFindCollectsUnreadablePathsAsSkipped(t *testing.T) {
 	}
 }
 
-// COD-T-197
 func TestSearchTimeoutPreservesCurrentFilePartialAndStopsScheduling(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), nil, 0600); err != nil {

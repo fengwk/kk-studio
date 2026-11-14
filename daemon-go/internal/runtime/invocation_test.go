@@ -64,7 +64,7 @@ func newInvocationRuntime(t *testing.T, c *testConnection, executor CapabilityEx
 	return r
 }
 
-// RUN-T-006 ignores an in-flight duplicate, emits replayed STARTED, and runs the executor once.
+// Ignores an in-flight duplicate, emits replayed STARTED, and runs the executor once.
 func TestRuntimeDeduplicatesRunningInvocation(t *testing.T) {
 	c := newTestConnection()
 	queueHandshake(c)
@@ -125,7 +125,7 @@ func TestRuntimeDeduplicatesRunningInvocation(t *testing.T) {
 	}
 }
 
-// RUN-T-007 replays a completed terminal frame without re-executing the capability.
+// Replays a completed terminal frame without re-executing the capability.
 func TestRuntimeReplaysCompletedInvocation(t *testing.T) {
 	c := newTestConnection()
 	queueHandshake(c)
@@ -176,7 +176,7 @@ func TestRuntimeReplaysCompletedInvocation(t *testing.T) {
 	}
 }
 
-// RUN-T-008 sends cancellation to an active invocation context and preserves its cancellation terminal.
+// Sends cancellation to an active invocation context and preserves its cancellation terminal.
 func TestRuntimeCancelsRunningInvocation(t *testing.T) {
 	c := newTestConnection()
 	queueHandshake(c)
@@ -245,7 +245,7 @@ func TestRuntimeCancelsRunningInvocation(t *testing.T) {
 	}
 }
 
-// RUN-T-233: an executor that cleans up after CANCEL and returns its partial result is delivered
+// An executor that cleans up after CANCEL and returns its partial result is delivered
 // as exactly one COMPLETED(error=true) carrying that result, never a CANCELLED terminal, which
 // the platform treats as a result-less failure; one exit confirmation follows.
 func TestRuntimeCancelledCapabilityResultIsCompletedWithError(t *testing.T) {

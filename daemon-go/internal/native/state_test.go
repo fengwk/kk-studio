@@ -16,7 +16,7 @@ func stateTestDir(t *testing.T) string {
 	return dir
 }
 
-// NAT-T-139..141 verify unreadable and non-object state payloads fail closed.
+// Verify unreadable and non-object state payloads fail closed.
 func TestState_ProtocolFailures(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "state")
 	if err := os.WriteFile(dir, nil, 0600); err != nil {
@@ -48,7 +48,6 @@ func TestState_ProtocolFailures(t *testing.T) {
 	}
 }
 
-// NAT-T-142
 func TestState_CreatePrivateDirectory(t *testing.T) {
 	dir, err := createStateDir()
 	if err != nil {
@@ -60,7 +59,6 @@ func TestState_CreatePrivateDirectory(t *testing.T) {
 	}
 }
 
-// NAT-T-143
 func TestState_PublishReadPrivate(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -78,7 +76,6 @@ func TestState_PublishReadPrivate(t *testing.T) {
 	}
 }
 
-// NAT-T-144
 func TestState_ReadMissing(t *testing.T) {
 	_, err := readState(stateTestDir(t), "missing")
 	if !os.IsNotExist(err) {
@@ -86,12 +83,10 @@ func TestState_ReadMissing(t *testing.T) {
 	}
 }
 
-// NAT-T-145
 func TestState_PublishQuietly(t *testing.T) {
 	publishQuietly(stateTestDir(t), "../escape", "sensitive")
 }
 
-// NAT-T-146
 func TestState_LaunchOneShot(t *testing.T) {
 	dir := stateTestDir(t)
 	if err := publish(dir, launchFile, []byte(`{"cwd":"/tmp","args":["cmd"]}`)); err != nil {
@@ -106,7 +101,6 @@ func TestState_LaunchOneShot(t *testing.T) {
 	}
 }
 
-// NAT-T-147
 func TestState_RejectNUL(t *testing.T) {
 	dir := stateTestDir(t)
 	if err := publish(dir, launchFile, []byte(`{"cwd":"/tmp","args":["bad\u0000arg"]}`)); err != nil {
@@ -117,7 +111,6 @@ func TestState_RejectNUL(t *testing.T) {
 	}
 }
 
-// NAT-T-148
 func TestState_CorruptLaunch(t *testing.T) {
 	dir := stateTestDir(t)
 	if err := publish(dir, launchFile, []byte("{")); err != nil {
@@ -128,7 +121,6 @@ func TestState_CorruptLaunch(t *testing.T) {
 	}
 }
 
-// NAT-T-149
 func TestState_IncompleteLaunch(t *testing.T) {
 	dir := stateTestDir(t)
 	if err := publish(dir, launchFile, []byte(`{"cwd":"/tmp"}`)); err != nil {
@@ -139,7 +131,6 @@ func TestState_IncompleteLaunch(t *testing.T) {
 	}
 }
 
-// NAT-T-150
 func TestState_ExitReport(t *testing.T) {
 	dir := stateTestDir(t)
 	code := 21
@@ -158,7 +149,6 @@ func TestState_ExitReport(t *testing.T) {
 	}
 }
 
-// NAT-T-151
 func TestState_CleanupTruth(t *testing.T) {
 	dir := stateTestDir(t)
 	for _, item := range []struct {
@@ -181,7 +171,6 @@ func TestState_CleanupTruth(t *testing.T) {
 	}
 }
 
-// NAT-T-152
 func TestState_RemoveDirectory(t *testing.T) {
 	dir := stateTestDir(t)
 	if err := publishText(dir, scopeFile, "123"); err != nil {
@@ -195,7 +184,6 @@ func TestState_RemoveDirectory(t *testing.T) {
 	}
 }
 
-// NAT-T-153
 func TestState_AtomicPublish(t *testing.T) {
 	dir := stateTestDir(t)
 	if err := publishText(dir, scopeFile, "session"); err != nil {

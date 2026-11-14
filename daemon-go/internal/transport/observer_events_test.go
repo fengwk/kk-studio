@@ -14,7 +14,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// TRN-T-073 / RUN-T-055 a peer GOAWAY frame read from the wire reaches the attempt observer with
+// A peer GOAWAY frame read from the wire reaches the attempt observer with
 // its error code, so the runtime can apply GOAWAY policy to the generation that observed it.
 func TestControlConnection_ReportsPeerGoawayFrameToObserver(t *testing.T) {
 	for _, code := range []uint32{0, 11} {
@@ -41,7 +41,7 @@ func TestControlConnection_ReportsPeerGoawayFrameToObserver(t *testing.T) {
 	}
 }
 
-// RUN-T-057 an HTTP 426 rejection with an UpgradeRequired body reports the parsed target version to
+// An HTTP 426 rejection with an UpgradeRequired body reports the parsed target version to
 // the attempt observer, and a 426 without a parsable body reports the status alone.
 func TestDial_ReportsUpgradeRejectionToAttemptObserver(t *testing.T) {
 	upgradeBytes, err := proto.Marshal(&protocol.UpgradeRequired{TargetVersion: proto.String("1.0.1")})

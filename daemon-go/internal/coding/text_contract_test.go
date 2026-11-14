@@ -10,7 +10,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
-// COD-T-099, COD-T-102: decoding keeps UTF-8 code points and UTF-16 surrogate pairs intact across tiny reads.
+// Decoding keeps UTF-8 code points and UTF-16 surrogate pairs intact across tiny reads.
 func TestReadTextWindowReaderPreservesMultibyteCharactersAcrossChunks(t *testing.T) {
 	utf16Data, err := encodeFixture("a中😀\n", "UTF-16LE", 2)
 	if err != nil {
@@ -42,7 +42,7 @@ func (r *singleByteReader) Read(buffer []byte) (int, error) {
 	return r.reader.Read(buffer)
 }
 
-// COD-T-212, COD-T-213: number only the projected lines and apply column offset to the first line.
+// Number only the projected lines and apply column offset to the first line.
 func TestReadTextWindowProjectionAndColumnOffset(t *testing.T) {
 	lines := make([]string, 10)
 	for i := range lines {
@@ -59,7 +59,7 @@ func TestReadTextWindowProjectionAndColumnOffset(t *testing.T) {
 	}
 }
 
-// COD-T-216: CRLF is one separator and is not retained in line content.
+// CRLF is one separator and is not retained in line content.
 func TestReadTextWindowCRLFFoldsSeparator(t *testing.T) {
 	window, err := readTextWindow("a\r\nb", WindowOptions{Offset: 1, Limit: 2})
 	if err != nil || window.Body != "1|a\n2|b" || window.EndsWithNewline == nil || *window.EndsWithNewline {
@@ -67,7 +67,7 @@ func TestReadTextWindowCRLFFoldsSeparator(t *testing.T) {
 	}
 }
 
-// COD-T-246, COD-T-247: a full line window stops before later data, including malformed bytes.
+// A full line window stops before later data, including malformed bytes.
 func TestReadTextWindowStopsAtRequestedWindow(t *testing.T) {
 	var content strings.Builder
 	for i := 1; i <= 2500; i++ {
@@ -102,7 +102,7 @@ func TestReadTextWindowStopsAtRequestedWindow(t *testing.T) {
 	}
 }
 
-// COD-T-245: the last requested row still reports EOF newline metadata when the window ends at EOF.
+// The last requested row still reports EOF newline metadata when the window ends at EOF.
 func TestReadTextWindowEOFMetadataAtRequestedOffset(t *testing.T) {
 	window, err := readTextWindow("a\nb\n", WindowOptions{Offset: 2, Limit: DefaultReadLimit})
 	if err != nil || window.Truncated || window.EndsWithNewline == nil || !*window.EndsWithNewline {
@@ -111,7 +111,7 @@ func TestReadTextWindowEOFMetadataAtRequestedOffset(t *testing.T) {
 }
 
 // Go receives UTF-8 bytes, so unpaired UTF-16 surrogate expectations are represented by their invalid UTF-8 encoding.
-// COD-T-219, COD-T-224, COD-T-226: UTF-8 rejects malformed encodings at all buffer splits and cannot encode surrogate bytes.
+// UTF-8 rejects malformed encodings at all buffer splits and cannot encode surrogate bytes.
 func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
 	sequences := [][]byte{
 		{0x80}, {0xe4, 0x41}, {0xe4}, {0xc0, 0x81}, {0xe0, 0x81, 0x81}, {0xf0, 0x8f, 0xbf, 0xbf},
@@ -136,7 +136,7 @@ func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
 	}
 }
 
-// COD-T-221: decoding removes the BOM from text while retaining charset and BOM byte count.
+// Decoding removes the BOM from text while retaining charset and BOM byte count.
 func TestDecodeReportsUTF8BOM(t *testing.T) {
 	text, decoded, err := decodeFixture([]byte{0xef, 0xbb, 0xbf, 'a'})
 	if err != nil || text != "a" || decoded.Name != "UTF-8" || !decoded.BOM {
@@ -144,7 +144,7 @@ func TestDecodeReportsUTF8BOM(t *testing.T) {
 	}
 }
 
-// COD-T-225: legal UTF-8 boundary code points decode without normalization.
+// Legal UTF-8 boundary code points decode without normalization.
 func TestTextCodecAcceptsUTF8BoundaryCodePoints(t *testing.T) {
 	want := string([]rune{0x7f, 0x80, 0x7ff, 0x800, 0xd7ff, 0xe000, 0xffff, 0x10000, 0x10ffff})
 	got, _, err := decodeFixture([]byte(want))
@@ -153,7 +153,7 @@ func TestTextCodecAcceptsUTF8BoundaryCodePoints(t *testing.T) {
 	}
 }
 
-// COD-T-228…231: only NUL is binary, the probe window is 8000 bytes, and control characters
+// Only NUL is binary, the probe window is 8000 bytes, and control characters
 // are text.
 func TestBinaryProbeBoundaryAndControlCharacters(t *testing.T) {
 	if _, _, err := textcodec.Decode("/repo/controls.txt", []byte("hello\tworld\r\n\f\x1b\x01\x1f")); err != nil {

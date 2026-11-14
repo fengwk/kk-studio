@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// TRN-R-001 verifies Extended CONNECT can be enabled without discarding existing GODEBUG settings.
+// Verifies Extended CONNECT can be enabled without discarding existing GODEBUG settings.
 func TestEnableExtendedConnect(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

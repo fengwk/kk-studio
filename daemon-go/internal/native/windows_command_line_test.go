@@ -2,7 +2,6 @@ package native
 
 import "testing"
 
-// NAT-T-159..165
 func TestWindowsCommandLine_Quoting(t *testing.T) {
 	cases := []struct {
 		name string

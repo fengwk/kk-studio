@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// COD-T-162: slash-containing globs are interpreted relative to the search root.
+// Slash-containing globs are interpreted relative to the search root.
 func TestFindSlashGlobIsRelativeToSearchRoot(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, "src/a.ts", "")
@@ -21,7 +21,7 @@ func TestFindSlashGlobIsRelativeToSearchRoot(t *testing.T) {
 	}
 }
 
-// COD-T-177: Go RE2 \w retains ASCII-only character-class semantics.
+// Go RE2 \w retains ASCII-only character-class semantics.
 func TestRegexWordClassASCIISemantics(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, "unicode.txt", "中文\nline\n")
@@ -31,7 +31,7 @@ func TestRegexWordClassASCIISemantics(t *testing.T) {
 	}
 }
 
-// COD-T-179, COD-T-180: binary files are ignored throughout directory searches, even before a NUL match.
+// Binary files are ignored throughout directory searches, even before a NUL match.
 func TestGrepDirectoryBinaryFilesAreSkipped(t *testing.T) {
 	for _, data := range [][]byte{{0, 1}, []byte("match\n\x00tail\n")} {
 		root := t.TempDir()
@@ -45,7 +45,7 @@ func TestGrepDirectoryBinaryFilesAreSkipped(t *testing.T) {
 	}
 }
 
-// COD-T-183: hidden files are searchable while Git metadata is never exposed.
+// Hidden files are searchable while Git metadata is never exposed.
 func TestGrepSearchesHiddenFilesAndSkipsGitMetadata(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, ".git/config", "needle\n")
@@ -56,7 +56,7 @@ func TestGrepSearchesHiddenFilesAndSkipsGitMetadata(t *testing.T) {
 	}
 }
 
-// COD-T-199: a file read failure is reported as skipped, not as an empty search.
+// A file read failure is reported as skipped, not as an empty search.
 func TestSearchRecordsUnreadablePathsAsSkipped(t *testing.T) {
 	root := t.TempDir()
 	put(t, root, "a.txt", "match\n")

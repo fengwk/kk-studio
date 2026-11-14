@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// COD-T-111: large output previews omit the middle while retaining both snapshots.
+// Large output previews omit the middle while retaining both snapshots.
 func TestOutputPreviewKeepsHeadAndTailAroundOmittedMiddle(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -29,7 +29,7 @@ func TestOutputPreviewKeepsHeadAndTailAroundOmittedMiddle(t *testing.T) {
 	}
 }
 
-// COD-T-112: staging names derived from untrusted call IDs stay inside the store root.
+// Staging names derived from untrusted call IDs stay inside the store root.
 func TestCreateStagingFileSanitizesUntrustedCallID(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {

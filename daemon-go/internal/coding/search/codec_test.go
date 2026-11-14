@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// COD-T-265: undecodable files are listed by absolute path, binary files are skipped silently
+// Undecodable files are listed by absolute path, binary files are skipped silently
 // and decoded text is matched.
 func TestGrepContextReportsUndecodableFiles(t *testing.T) {
 	// grep lists real paths; temp directories sit behind symlinks (macOS) or short names (Windows).
@@ -40,7 +40,7 @@ func TestGrepContextReportsUndecodableFiles(t *testing.T) {
 	}
 }
 
-// COD-T-266: a file given directly as path reports the codec failure and is never searched.
+// A file given directly as path reports the codec failure and is never searched.
 func TestGrepContextReportsUndecodableDirectFile(t *testing.T) {
 	dir, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -63,7 +63,7 @@ func TestGrepContextReportsUndecodableDirectFile(t *testing.T) {
 	}
 }
 
-// COD-T-267: lone CR line breaks give the same line numbers and line text as read.
+// Lone CR line breaks give the same line numbers and line text as read.
 func TestGrepLoneCRLineNumbersMatchRead(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "cr.txt")

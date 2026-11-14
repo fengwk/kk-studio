@@ -14,7 +14,7 @@ import (
 	"time"
 )
 
-// IDE-T-013 verifies loopback bridge authorization and route validation.
+// Verifies loopback bridge authorization and route validation.
 func TestBridgeAuthAndRoutes(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -58,7 +58,7 @@ func TestBridgeAuthAndRoutes(t *testing.T) {
 	}
 }
 
-// IDE-T-006 verifies a timed-out directory transition fails safely and never admits its target folder.
+// Verifies a timed-out directory transition fails safely and never admits its target folder.
 func TestDirectoryTransitionTimeoutRejectsTarget(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -115,7 +115,7 @@ func TestDirectoryTransitionTimeoutRejectsTarget(t *testing.T) {
 	}
 }
 
-// IDE-T-002 verifies native close prompts have no bridge command timer and remain answerable.
+// Verifies native close prompts have no bridge command timer and remain answerable.
 func TestNativeClosePromptHasNoTimeout(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -161,7 +161,7 @@ func TestNativeClosePromptHasNoTimeout(t *testing.T) {
 	}
 }
 
-// IDE-T-048 verifies explicit discard close requests are bounded even though normal native prompts are not.
+// Verifies explicit discard close requests are bounded even though normal native prompts are not.
 func TestDiscardClosePromptHasTimeout(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -199,7 +199,7 @@ func TestDiscardClosePromptHasTimeout(t *testing.T) {
 	}
 }
 
-// IDE-T-003 verifies a disconnected host identity remains retired after a replacement is admitted.
+// Verifies a disconnected host identity remains retired after a replacement is admitted.
 func TestLostRegistrationAckRetiresOldHost(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -245,7 +245,7 @@ func TestLostRegistrationAckRetiresOldHost(t *testing.T) {
 	}
 }
 
-// IDE-T-019 verifies NDJSON command delivery, command results, and PTY callbacks.
+// Verifies NDJSON command delivery, command results, and PTY callbacks.
 func TestBridgeCommandResultAndPTY(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -315,7 +315,7 @@ func TestBridgeCommandResultAndPTY(t *testing.T) {
 	}
 }
 
-// IDE-T-018 verifies malformed result and PTY payloads are rejected without binding an unknown workspace.
+// Verifies malformed result and PTY payloads are rejected without binding an unknown workspace.
 func TestValidateResultAndPTY(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -334,7 +334,7 @@ func TestValidateResultAndPTY(t *testing.T) {
 	}
 }
 
-// IDE-T-018 verifies result payload structure and directory fencing before settling an extension command.
+// Verifies result payload structure and directory fencing before settling an extension command.
 func TestBridgeResultRouteFencing(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -399,7 +399,7 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 	}
 }
 
-// IDE-T-018 verifies PTY validation and callback errors never disclose implementation failures.
+// Verifies PTY validation and callback errors never disclose implementation failures.
 func TestBridgePTYFailureBoundaries(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -421,7 +421,7 @@ func TestBridgePTYFailureBoundaries(t *testing.T) {
 	}
 }
 
-// IDE-T-051 verifies the current host identity may reconnect after an ordinary stream disconnect.
+// Verifies the current host identity may reconnect after an ordinary stream disconnect.
 func TestSameHostReconnectAfterDisconnect(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -467,7 +467,7 @@ func TestSameHostReconnectAfterDisconnect(t *testing.T) {
 	}
 }
 
-// IDE-T-014/022 verifies stream query, retired-host, and host-capacity admission rules.
+// Verifies stream query, retired-host, and host-capacity admission rules.
 func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -537,7 +537,7 @@ func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 	}
 }
 
-// IDE-T-014 verifies the bridge rejects non-loopback, unauthenticated, unknown, and post-close stream requests.
+// Verifies the bridge rejects non-loopback, unauthenticated, unknown, and post-close stream requests.
 func TestBridgeHandlerBoundaryResponses(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -579,7 +579,7 @@ func TestBridgeHandlerBoundaryResponses(t *testing.T) {
 	}
 }
 
-// IDE-T-014 verifies canonical path and loopback predicates reject unsafe bridge identities.
+// Verifies canonical path and loopback predicates reject unsafe bridge identities.
 func TestBridgePathAndLoopbackPredicates(t *testing.T) {
 	bridge := &Bridge{}
 	managed := filepath.Join(t.TempDir(), "managed")
@@ -623,7 +623,7 @@ func TestBridgePathAndLoopbackPredicates(t *testing.T) {
 	}
 }
 
-// IDE-T-022 confirms a directory transition only after a replacement host reports the target folder.
+// Confirms a directory transition only after a replacement host reports the target folder.
 func TestConfirmDirectoryOnReconnect(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -676,7 +676,7 @@ func TestConfirmDirectoryOnReconnect(t *testing.T) {
 	}
 }
 
-// IDE-T-014 verifies a view's registered stream is disconnected by an epoch-matched revoke.
+// Verifies a view's registered stream is disconnected by an epoch-matched revoke.
 func TestBindAndRevokeStream(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -698,7 +698,7 @@ func TestBindAndRevokeStream(t *testing.T) {
 	}
 }
 
-// IDE-T-017 verifies cancellation resolves a bridge command with the frozen safe message.
+// Verifies cancellation resolves a bridge command with the frozen safe message.
 func TestBridgeCommandCancellation(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {

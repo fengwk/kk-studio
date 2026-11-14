@@ -17,7 +17,7 @@ func TestResolveExecutableWithoutHome(t *testing.T) {
 	}
 }
 
-// RUN-T-187 checks the supported release keys and fails closed for unsupported targets.
+// Checks the supported release keys and fails closed for unsupported targets.
 func TestReleaseKey(t *testing.T) {
 	for _, tc := range []struct{ os, arch, want string }{{"linux", "amd64", "linux-amd64"}, {"linux", "arm64", "linux-arm64"}, {"darwin", "amd64", "macos-amd64"}, {"darwin", "arm64", "macos-arm64"}, {"windows", "amd64", "windows-amd64"}} {
 		got, err := ReleaseKey(tc.os, tc.arch)

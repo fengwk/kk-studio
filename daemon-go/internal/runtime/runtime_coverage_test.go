@@ -23,7 +23,7 @@ func runtimeOptionsForTest() RuntimeOptions {
 	}
 }
 
-// RUN-T-081 validates constructor constraints before a runtime can enter its run loop.
+// Validates constructor constraints before a runtime can enter its run loop.
 func TestNewRuntimeRejectsInvalidOptions(t *testing.T) {
 	valid := runtimeOptionsForTest()
 	cases := []struct {
@@ -96,7 +96,7 @@ func newReadyRuntimeForTest(t *testing.T, options RuntimeOptions) (*Runtime, *te
 	return r, connection
 }
 
-// RUN-T-059 verifies scope, server rejection, unsupported frames, and pre-READY control behavior.
+// Verifies scope, server rejection, unsupported frames, and pre-READY control behavior.
 func TestRuntimeHandleControlFrameEdges(t *testing.T) {
 	r, _ := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	r.mu.Lock()
@@ -144,7 +144,7 @@ func TestRuntimeHandleControlFrameEdges(t *testing.T) {
 	}
 }
 
-// RUN-T-021 exercises result encoding validation before any resource can be uploaded.
+// Exercises result encoding validation before any resource can be uploaded.
 func TestRuntimeEncodeResultRejectsInvalidPayloads(t *testing.T) {
 	r := newEncodingRuntime(t, nil)
 	cases := []struct {
@@ -188,7 +188,7 @@ type failingSendConnection struct {
 
 func (c *failingSendConnection) Send(context.Context, *protocol.Envelope) error { return c.err }
 
-// RUN-T-020 rejects malformed invocation fields and preserves one-execution admission limits.
+// Rejects malformed invocation fields and preserves one-execution admission limits.
 func TestRuntimeHandleInvokeRejectsMalformedCalls(t *testing.T) {
 	options := runtimeOptionsForTest()
 	options.MaxConcurrentInvocations = 1
@@ -307,7 +307,7 @@ func invokeWithTimeout(id string, timeout int64) *protocol.Envelope {
 	return e
 }
 
-// RUN-T-009 returns RECOVER_NOT_FOUND for a valid unknown recovery request and drops failed send connections.
+// Returns RECOVER_NOT_FOUND for a valid unknown recovery request and drops failed send connections.
 func TestRuntimeRecoveryAndSendFailureEdges(t *testing.T) {
 	r, c := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	if err := r.handleRecover(&protocol.Envelope{InvocationId: stringPtr("missing")}); err != nil {
@@ -330,7 +330,7 @@ func TestRuntimeRecoveryAndSendFailureEdges(t *testing.T) {
 	}
 }
 
-// RUN-T-068/073 verifies confirmed execution exits are published once after terminal completion.
+// Verifies confirmed execution exits are published once after terminal completion.
 func TestRuntimeLifecycleHelperBranches(t *testing.T) {
 	if waitReconnect(context.Background(), time.Millisecond) != true || waitReconnectAlreadyCancelled() {
 		t.Fatal("reconnect wait did not distinguish timeout from cancellation")

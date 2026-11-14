@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// NAT-T-246 verifies Linux selects the POSIX supervisor and closes an empty scope.
+// Verifies Linux selects the POSIX supervisor and closes an empty scope.
 func TestPlatform_LinuxSupervisor(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {

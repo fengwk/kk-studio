@@ -6,7 +6,11 @@ on:
     paths:
       - 'daemon-go/**'
       - 'scripts/daemon/**'
+      - 'scripts/dev/lib/**'
       - 'scripts/dev/verify/repository/**'
+      - 'scripts/dev/verify/reliability/**'
+      - 'scripts/dev/verify/supply-chain/**'
+      - '.github/actions/**'
       - '.github/workflows/daemon-go-ci.yml'
       - '.github/workflows/daemon-release.yml'
       - '.github/workflows/docker-publish.yml'
@@ -14,7 +18,11 @@ on:
     paths:
       - 'daemon-go/**'
       - 'scripts/daemon/**'
+      - 'scripts/dev/lib/**'
       - 'scripts/dev/verify/repository/**'
+      - 'scripts/dev/verify/reliability/**'
+      - 'scripts/dev/verify/supply-chain/**'
+      - '.github/actions/**'
       - '.github/workflows/daemon-go-ci.yml'
       - '.github/workflows/daemon-release.yml'
       - '.github/workflows/docker-publish.yml'

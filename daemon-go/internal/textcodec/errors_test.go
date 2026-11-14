@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// COD-T-250: every typed failure renders a message that names its cause.
+// Every typed failure renders a message that names its cause.
 func TestErrorMessages(t *testing.T) {
 	declared := declaredEncoding("GBK", declarationXML)
 	for _, test := range []struct {
@@ -41,7 +41,7 @@ func TestErrorMessages(t *testing.T) {
 	}
 }
 
-// COD-T-251: label helpers map every UTF-16/UTF-32 label spelling to a canonical name.
+// Label helpers map every UTF-16/UTF-32 label spelling to a canonical name.
 func TestLabelHelpers(t *testing.T) {
 	for label, want := range map[string]string{
 		"utf-16":   "UTF-16",
@@ -78,7 +78,7 @@ func TestLabelHelpers(t *testing.T) {
 	}
 }
 
-// COD-T-252: CPython's get_normal_name decides the Python and Ruby labels.
+// CPython's get_normal_name decides the Python and Ruby labels.
 func TestNormalizeCPythonName(t *testing.T) {
 	for label, want := range map[string]string{
 		"utf-8":            "utf-8",
@@ -99,7 +99,7 @@ func TestNormalizeCPythonName(t *testing.T) {
 	}
 }
 
-// COD-T-253: byte and line helpers used by the binary rule and by error offsets.
+// Byte and line helpers used by the binary rule and by error offsets.
 func TestByteAndLineHelpers(t *testing.T) {
 	if firstInvalidOffset([]byte("plain")) != len("plain") {
 		t.Fatal("valid UTF-8 reports an invalid offset")

@@ -163,15 +163,15 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 在仓库根运行 `node --test scripts/daemon/tests/*.test.mjs`，覆盖 Unix/Windows 安装器契约、受管更新、
 下载校验、发布打包和归档验收。Unix PTY 用例需要宿主 `python3`：它只用标准库 `pty` 让安装器在真实
 TTY stderr 下运行（stdin 仍重定向），属于测试依赖，产品运行时不依赖 Python。Fixtures 替代网络与服务管理命令，
-验证 SHA256 校验、文件替换、暂存输入校验、latest 与归档版本匹配、Go daemon `--check-config` 失败时保留现有
-安装、受管身份判定、覆盖安装备份与替换，以及卸载只移除受管服务与程序。安装器不构建 Daemon；真实发行归档由
+验证 SHA256 校验、文件替换、暂存输入校验、显式版本与归档版本匹配、Go daemon `--check-config` 失败时保留
+现有安装、受管身份判定、覆盖安装替换，以及卸载只移除受管服务与程序。安装器不构建 Daemon；真实发行归档由
 [scripts/daemon/prepare-release.sh](../../scripts/daemon/prepare-release.sh) 打包，再由 `daemon-release`
 工作流上传 GitHub Release。安装器不要求宿主 Go、Node 或 JDK；归档包含 Go 可执行文件及供 IDE 使用的冻结
 code-server 运行时。
 
 Windows 发行归档在 `windows-latest` smoke job 中运行
 [scripts/daemon/smoke-archive.ps1](../../scripts/daemon/smoke-archive.ps1)：解包归档，检查 Go executable、
-code-server runtime、IDE extension 与法律文件，执行 Go daemon `--version`，并拒绝旧应用入口与
+code-server runtime、IDE extension 与法律文件，执行 Go daemon `--version`，并拒绝 ripgrep binary 与
 ripgrep package。Windows 安装器与受管更新的源码契约也由上述 Node 测试覆盖；它们不注册真实 ScheduledTasks。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
@@ -184,7 +184,7 @@ Windows fixture 依赖真实的 Windows 安全主体与 ScheduledTasks cmdlet，
 
 ### 跨语言 UPDATE 命令
 
-Java 与 Node 使用共享控制协议 golden fixture 验证 UPDATE 编码；命令只包含操作 ID 和目标版本。
+Java 与 Go 使用共享控制协议 golden fixture 验证 UPDATE 编码；命令只包含操作 ID 和目标版本。
 
 ## Java 质量检查
 
@@ -339,8 +339,8 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 命中时只输出规则与 `path:line`，不要回显完整敏感值。该入口不扫描 Git 历史；历史由 Daemon Release 的
 [check-sensitive-history.mjs](../../scripts/dev/verify/repository/check-sensitive-history.mjs) 审计，覆盖全部 refs
 与公开 PR refs。上一个发布 tag 可达的历史已随该次发布通过门禁或人工复核，因此只有之后新出现的高置信度
-命中或扫描不完整才阻止发布；没有更早的发布 tag 时，基线是 workflow 中 `REVIEWED_HISTORY_BASELINE`
-指定的已复核历史末端提交。脱敏报告仍列出全部历史命中。
+命中或扫描不完整才阻止发布；工作流必须能解析到前一个发布 tag，缺失时拒绝继续发布。
+脱敏报告仍列出全部历史命中。
 
 ## E2E
 
@@ -645,7 +645,7 @@ Daemon。
 百分位是 nearest-rank，按 `ceil(p / 100 × n)` 取值；错误请求仍计入延迟，少于 20 个测量样本
 fail closed。Canvas warmup 和测量创建的行会保留，超时或中断的请求也可能已创建行；
 runner 不通过 HTTP 清理，直到隔离测试数据库/volume 清理时才消失。正常、失败、超时、INT、
-TERM 时脚本执行 `down --volumes --remove-orphans`。当前仅创建事务的结果不能与旧的
+TERM 时脚本执行 `down --volumes --remove-orphans`。只创建不删除的事务不能与包含删除的
 create+delete 工作负载结果比较。
 
 ## 供应链门禁

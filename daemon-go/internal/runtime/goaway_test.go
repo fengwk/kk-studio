@@ -70,7 +70,7 @@ func (c *closeCountingConnection) Close() error {
 	return c.testConnection.Close()
 }
 
-// RUN-T-055 retires the old generation on a graceful GOAWAY exactly once: the generation is closed,
+// Retires the old generation on a graceful GOAWAY exactly once: the generation is closed,
 // its IDE work is cancelled with CONTROL_DISCONNECTED while the in-flight Agent execution survives,
 // and the runtime reconnects immediately instead of waiting for the disconnect backoff.
 func TestRuntimeClosesOldGenerationOnceOnGoawayAndCancelsItsIDEWork(t *testing.T) {
@@ -197,7 +197,7 @@ func TestRuntimeClosesOldGenerationOnceOnGoawayAndCancelsItsIDEWork(t *testing.T
 	}
 }
 
-// RUN-T-055 a GOAWAY observed before the attempt's generation was bound still retires that
+// A GOAWAY observed before the attempt's generation was bound still retires that
 // generation once it is attached, instead of leaving it serving traffic.
 func TestRuntimeRetiresGenerationForGoawayBeforeBind(t *testing.T) {
 	first, second := newCloseCountingConnection(), newTestConnection()
@@ -238,7 +238,7 @@ func TestRuntimeRetiresGenerationForGoawayBeforeBind(t *testing.T) {
 	}
 }
 
-// RUN-T-055 a GOAWAY carrying an error code is not a graceful drain; it stays on the ordinary
+// A GOAWAY carrying an error code is not a graceful drain; it stays on the ordinary
 // disconnect/backoff path so the daemon does not treat a failed session as a clean handover.
 func TestRuntimeIgnoresNonZeroGoawayCode(t *testing.T) {
 	connection := newCloseCountingConnection()

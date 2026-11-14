@@ -184,7 +184,7 @@ func TestWindowsSupervisor_OpenWindowsJobRejectsInvalidNames(t *testing.T) {
 	}
 }
 
-// NAT-F-010 verifies state-directory hashing produces a stable name shared by CreateJobObject and OpenJobObject.
+// Verifies state-directory hashing produces a stable name shared by CreateJobObject and OpenJobObject.
 func TestWindowsJobName_HashAndOpenRoundTrip(t *testing.T) {
 	firstDir := filepath.Join(t.TempDir(), "scope-one")
 	secondDir := filepath.Join(t.TempDir(), "scope-two")

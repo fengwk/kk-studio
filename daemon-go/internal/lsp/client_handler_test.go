@@ -14,7 +14,7 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-// LSP-T-083 checks server-request responses and client notification handling.
+// Checks server-request responses and client notification handling.
 func checkNullResponse(name string) func(*testing.T, json.RawMessage) {
 	return func(t *testing.T, raw json.RawMessage) {
 		t.Helper()
@@ -93,7 +93,7 @@ func TestProtocol_ServerRequests(t *testing.T) {
 	}
 }
 
-// LSP-T-078 and LSP-T-097 verify static capabilities and JDTLS-specific support.
+// Verify static capabilities and JDTLS-specific support.
 func TestClient_StaticAndJDTLSSupport(t *testing.T) {
 	plain := &Client{capabilities: ServerCapabilities{DefinitionProvider: true}}
 	if !plain.Supports("textDocument/definition") || plain.Supports("textDocument/unknown") {
@@ -105,7 +105,7 @@ func TestClient_StaticAndJDTLSSupport(t *testing.T) {
 	}
 }
 
-// LSP-F-025 verifies exit reports are stable and distinguish live clients.
+// Verifies exit reports are stable and distinguish live clients.
 func TestClient_ExitErrorAndAliveStates(t *testing.T) {
 	client := &Client{server: ServerConfig{ID: "fake"}, exited: make(chan native.ProcessExit, 1), exitErr: make(chan error, 1)}
 	if got := client.exitError(); got.Error() != "LSP client stopped" {

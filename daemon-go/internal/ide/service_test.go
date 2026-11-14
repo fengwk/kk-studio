@@ -21,7 +21,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/transport"
 )
 
-// IDE-T-087 verifies malformed open commands are rejected before process or view registration work.
+// Verifies malformed open commands are rejected before process or view registration work.
 func TestValidateBeforeReserve(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -46,7 +46,7 @@ func TestValidateBeforeReserve(t *testing.T) {
 	}
 }
 
-// IDE-T-013 verifies service construction validates daemon identity and installs the PTY tracker boundary.
+// Verifies service construction validates daemon identity and installs the PTY tracker boundary.
 func TestServiceConstructionAndPTYTracker(t *testing.T) {
 	if _, err := NewService(config.DaemonConfig{}, nil, nil, ServiceOptions{DaemonInstanceID: "BAD"}); err == nil {
 		t.Fatal("invalid daemon identity accepted")
@@ -92,7 +92,7 @@ func TestServiceConstructionAndPTYTracker(t *testing.T) {
 	}
 }
 
-// IDE-T-118 verifies concurrent manager stops share one operation and cancelled waiters do not cancel it.
+// Verifies concurrent manager stops share one operation and cancelled waiters do not cancel it.
 func TestConcurrentManagerStopWaiterCancellation(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -140,7 +140,7 @@ func TestConcurrentManagerStopWaiterCancellation(t *testing.T) {
 	}
 }
 
-// IDE-T-123 verifies service shutdown aborts active streams and repeated close is convergent.
+// Verifies service shutdown aborts active streams and repeated close is convergent.
 func TestServiceCloseCancelsStreams(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -187,7 +187,7 @@ func TestServiceCloseCancelsStreams(t *testing.T) {
 	}
 }
 
-// IDE-T-135 verifies stream route validation and restore absence do not allocate work or leak service details.
+// Verifies stream route validation and restore absence do not allocate work or leak service details.
 func TestResolveRouteAndRestoreMissing(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -233,7 +233,7 @@ func TestResolveRouteAndRestoreMissing(t *testing.T) {
 	}
 }
 
-// IDE-T-087 verifies every binding identity and daemon fence is enforced before an open-view command.
+// Verifies every binding identity and daemon fence is enforced before an open-view command.
 func TestRequiredViewCommandValidation(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -291,7 +291,7 @@ func TestRequiredViewCommandValidation(t *testing.T) {
 	}
 }
 
-// IDE-T-087 verifies command validation and safe failure shapes precede any managed side effect.
+// Verifies command validation and safe failure shapes precede any managed side effect.
 func TestCommandValidationAndDispatch(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -353,7 +353,7 @@ func TestCommandValidationAndDispatch(t *testing.T) {
 	}
 }
 
-// IDE-T-105 verifies an identical claim is replayed once and request drift is rejected.
+// Verifies an identical claim is replayed once and request drift is rejected.
 func TestClaimReplayAndDrift(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -379,7 +379,7 @@ func TestClaimReplayAndDrift(t *testing.T) {
 	}
 }
 
-// IDE-T-107 verifies resume advances the epoch and an old close cannot touch the new binding.
+// Verifies resume advances the epoch and an old close cannot touch the new binding.
 func TestEpochCAS(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -418,7 +418,7 @@ func openCommandForTest(directory, viewID, claimID string) *protocol.IdeCommand 
 	return &protocol.IdeCommand{Action: protocol.IdeAction_OPEN_VIEW, ViewId: stringPointer(viewID), BrowserSessionId: stringPointer("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), EventNodeId: stringPointer("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), ConnectionId: stringPointer("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), ClaimId: stringPointer(claimID), Mode: protocol.IdeOpenMode_CREATE, Directory: stringPointer(directory), ExpectedBindingEpoch: int64Pointer(0), ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999")}
 }
 
-// IDE-T-104 verifies expiry defers when a connected view is dirty instead of discarding its state.
+// Verifies expiry defers when a connected view is dirty instead of discarding its state.
 func TestLeaseExpiryDefersDirtyView(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -457,7 +457,7 @@ func TestLeaseExpiryDefersDirtyView(t *testing.T) {
 	}
 }
 
-// IDE-T-104 verifies expiry defers while disconnected and a later connected lease expiry closes cleanly.
+// Verifies expiry defers while disconnected and a later connected lease expiry closes cleanly.
 func TestLeaseExpiryDefersUntilReachable(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -497,7 +497,7 @@ func TestLeaseExpiryDefersUntilReachable(t *testing.T) {
 	}
 }
 
-// IDE-T-104 verifies only newer identity-matching daemon lease proofs renew the view lease.
+// Verifies only newer identity-matching daemon lease proofs renew the view lease.
 func TestLeaseRenewalFreshProof(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -537,7 +537,7 @@ func TestLeaseRenewalFreshProof(t *testing.T) {
 	}
 }
 
-// IDE-T-104 verifies fresh lease proof preserves a view through 599 seconds and closes at 600.
+// Verifies fresh lease proof preserves a view through 599 seconds and closes at 600.
 func TestLeaseExpiryBoundary(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -575,7 +575,7 @@ func TestLeaseExpiryBoundary(t *testing.T) {
 	}
 }
 
-// IDE-T-108/110/113/120 verify owner fencing, capacity accounting, revision publication, and resume reuse.
+// Verify owner fencing, capacity accounting, revision publication, and resume reuse.
 func TestOwnerCapacityAndRevision(t *testing.T) {
 	root := t.TempDir()
 	otherDirectory := t.TempDir()
@@ -646,7 +646,7 @@ func TestOwnerCapacityAndRevision(t *testing.T) {
 	}
 }
 
-// IDE-T-108 verifies revision exhaustion rolls back the workspace before registration side effects.
+// Verifies revision exhaustion rolls back the workspace before registration side effects.
 func TestRevisionExhaustionRollsBackOpen(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -677,7 +677,7 @@ func TestRevisionExhaustionRollsBackOpen(t *testing.T) {
 	}
 }
 
-// IDE-T-121 verifies one claim ID cannot concurrently bind different view IDs.
+// Verifies one claim ID cannot concurrently bind different view IDs.
 func TestClaimIDSerializesAcrossViewIDs(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -723,7 +723,7 @@ func TestClaimIDSerializesAcrossViewIDs(t *testing.T) {
 	}
 }
 
-// IDE-T-105 verifies bounded claim replay cache refresh and oldest-claim eviction.
+// Verifies bounded claim replay cache refresh and oldest-claim eviction.
 func TestClaimCacheRefreshAndEviction(t *testing.T) {
 	service := &Service{claims: make(map[string]claimRecord)}
 	service.rememberClaimLocked("first", claimRecord{viewID: "first"})
@@ -743,7 +743,7 @@ func TestClaimCacheRefreshAndEviction(t *testing.T) {
 	}
 }
 
-// IDE-T-080 verifies rejected or drifted registration is removed only after native cleanup succeeds.
+// Verifies rejected or drifted registration is removed only after native cleanup succeeds.
 func TestFailedRegistrationConvergence(t *testing.T) {
 	for _, test := range []struct {
 		name, registerMode string
@@ -814,7 +814,7 @@ func TestFailedRegistrationConvergence(t *testing.T) {
 	}
 }
 
-// IDE-T-072 verifies a manager generation change during registration retains a CLOSING reservation and reports BUSY.
+// Verifies a manager generation change during registration retains a CLOSING reservation and reports BUSY.
 func TestCreateGenerationChangeDuringRegistration(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -858,7 +858,7 @@ func TestCreateGenerationChangeDuringRegistration(t *testing.T) {
 	}
 }
 
-// IDE-T-073 verifies a generation change during resume keeps the prior binding CLOSING until recovery converges.
+// Verifies a generation change during resume keeps the prior binding CLOSING until recovery converges.
 func TestResumeGenerationChangeDuringRegistration(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -910,7 +910,7 @@ func TestResumeGenerationChangeDuringRegistration(t *testing.T) {
 	}
 }
 
-// IDE-T-075/076/077 verifies resume reconciles lost management results from the authoritative registry.
+// Verifies resume reconciles lost management results from the authoritative registry.
 func TestResumeRegistrationReconciliation(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -959,7 +959,7 @@ func TestResumeRegistrationReconciliation(t *testing.T) {
 	}
 }
 
-// IDE-T-079 verifies a blocked resume does not block another command's canonical view snapshot.
+// Verifies a blocked resume does not block another command's canonical view snapshot.
 func TestSnapshotDuringBlockedResume(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -1017,7 +1017,7 @@ func TestSnapshotDuringBlockedResume(t *testing.T) {
 	}
 }
 
-// IDE-T-114 verifies failed native cleanup retains the CLOSING view and explicit retry removes it.
+// Verifies failed native cleanup retains the CLOSING view and explicit retry removes it.
 func TestRetryCloseAfterManagerCleanupFailure(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1052,7 +1052,7 @@ func TestRetryCloseAfterManagerCleanupFailure(t *testing.T) {
 	}
 }
 
-// IDE-T-116 verifies idle code-server stop is armed only after a complete last-view close.
+// Verifies idle code-server stop is armed only after a complete last-view close.
 func TestIdleStopBoundary(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1104,7 +1104,7 @@ func TestIdleStopBoundary(t *testing.T) {
 	}
 }
 
-// IDE-T-134 verifies an active stream prevents idle stop until release and the idle timer is armed once.
+// Verifies an active stream prevents idle stop until release and the idle timer is armed once.
 func TestIdleStopWaitsForFinalStreamRelease(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1169,7 +1169,7 @@ func TestIdleStopWaitsForFinalStreamRelease(t *testing.T) {
 	}
 }
 
-// IDE-T-118 verifies update admission is blocked by views and streams, then stops the empty manager.
+// Verifies update admission is blocked by views and streams, then stops the empty manager.
 func TestUpdateAdmission(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1203,7 +1203,7 @@ func TestUpdateAdmission(t *testing.T) {
 	}
 }
 
-// IDE-T-115 verifies process exit cancels old data streams and converges managed view state.
+// Verifies process exit cancels old data streams and converges managed view state.
 func TestProcessExitConvergence(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1242,7 +1242,7 @@ func TestProcessExitConvergence(t *testing.T) {
 	}
 }
 
-// IDE-T-133 verifies an unproven crash retains capacity until a later convergent stop succeeds.
+// Verifies an unproven crash retains capacity until a later convergent stop succeeds.
 func TestUnprovenCrashCleanup(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1313,7 +1313,7 @@ func TestUnprovenCrashCleanup(t *testing.T) {
 	}
 }
 
-// IDE-T-135 verifies a view rebind cancels the transport-facing stream context and release stays idempotent.
+// Verifies a view rebind cancels the transport-facing stream context and release stays idempotent.
 func TestViewRebindCancelsStreamContext(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1412,7 +1412,7 @@ func startBridgeReplyHostWith(t *testing.T, bridge *Bridge, workspace, viewID, d
 	return response, cancel
 }
 
-// IDE-T-098 verifies create and resume assign the confirmed directory and binding to the bridge.
+// Verifies create and resume assign the confirmed directory and binding to the bridge.
 func TestBridgeDirectoryBindingOnCreateAndResume(t *testing.T) {
 	root, err := CanonicalDirectory(t.TempDir())
 	if err != nil {
@@ -1455,7 +1455,7 @@ func TestBridgeDirectoryBindingOnCreateAndResume(t *testing.T) {
 	assertBinding(resumed)
 }
 
-// IDE-T-101 verifies canonical directory change is acknowledged only by a replacement host.
+// Verifies canonical directory change is acknowledged only by a replacement host.
 func TestChangeDirectoryReply(t *testing.T) {
 	root, err := CanonicalDirectory(t.TempDir())
 	if err != nil {
@@ -1534,7 +1534,7 @@ func TestChangeDirectoryReply(t *testing.T) {
 	}
 }
 
-// IDE-T-102 verifies missing tracker and cancelled connection waits fail without creating bridge waiters.
+// Verifies missing tracker and cancelled connection waits fail without creating bridge waiters.
 func TestUnconnectedCommandsReturnBusyAndUnavailable(t *testing.T) {
 	for _, test := range []struct {
 		name         string
@@ -1579,7 +1579,7 @@ func TestUnconnectedCommandsReturnBusyAndUnavailable(t *testing.T) {
 	}
 }
 
-// IDE-T-101/102 verifies bridge rejections and invalid directories never publish successful state.
+// Verifies bridge rejections and invalid directories never publish successful state.
 func TestBoundCommandRejections(t *testing.T) {
 	root := t.TempDir()
 	next := filepath.Join(root, "next")
@@ -1626,7 +1626,7 @@ func TestBoundCommandRejections(t *testing.T) {
 	}
 }
 
-// IDE-T-102 verifies focus and mobile-collapse acknowledgements are driven by bridge results.
+// Verifies focus and mobile-collapse acknowledgements are driven by bridge results.
 func TestBoundViewCommands(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1679,7 +1679,7 @@ func TestBoundViewCommands(t *testing.T) {
 	}
 }
 
-// IDE-T-125 verifies an unknown native close outcome preserves the OPEN binding and active stream.
+// Verifies an unknown native close outcome preserves the OPEN binding and active stream.
 func TestUnknownNativeClosePreservesStream(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1716,7 +1716,7 @@ func TestUnknownNativeClosePreservesStream(t *testing.T) {
 	}
 }
 
-// IDE-T-127 verifies late native success cannot close a binding after caller abort or bridge disconnect.
+// Verifies late native success cannot close a binding after caller abort or bridge disconnect.
 func TestLateNativeCloseSuccessIsIgnored(t *testing.T) {
 	for _, scenario := range []string{"caller abort", "bridge disconnect"} {
 		t.Run(scenario, func(t *testing.T) {
@@ -1800,7 +1800,7 @@ func TestLateNativeCloseSuccessIsIgnored(t *testing.T) {
 	}
 }
 
-// IDE-T-136 verifies shutdown reports child close failures without losing their error identity.
+// Verifies shutdown reports child close failures without losing their error identity.
 func TestShutdownAggregatesComponentCloseFailure(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -1820,7 +1820,7 @@ func TestShutdownAggregatesComponentCloseFailure(t *testing.T) {
 	}
 }
 
-// IDE-T-123 verifies native cancellation preserves the binding and disallows force close.
+// Verifies native cancellation preserves the binding and disallows force close.
 func TestCancelledNativeClosePreservesView(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1856,7 +1856,7 @@ func TestCancelledNativeClosePreservesView(t *testing.T) {
 	}
 }
 
-// IDE-T-089 verifies snapshot rejection, incomplete data, and quota exhaustion warn without blocking force-close.
+// Verifies snapshot rejection, incomplete data, and quota exhaustion warn without blocking force-close.
 func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -1908,7 +1908,7 @@ func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 	}
 }
 
-// IDE-T-085 verifies an unreachable view remains open until explicit force-close is authorized.
+// Verifies an unreachable view remains open until explicit force-close is authorized.
 func TestForceCloseUnreachableView(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1945,7 +1945,7 @@ func TestForceCloseUnreachableView(t *testing.T) {
 	}
 }
 
-// IDE-T-132 verifies force-close authorization does not survive a resumed binding epoch.
+// Verifies force-close authorization does not survive a resumed binding epoch.
 func TestForceAuthorizationDoesNotCrossEpoch(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -1983,7 +1983,7 @@ func TestForceAuthorizationDoesNotCrossEpoch(t *testing.T) {
 	}
 }
 
-// IDE-T-130 verifies an authorized force-close snapshot can be restored.
+// Verifies an authorized force-close snapshot can be restored.
 func TestForceCloseRecoveryRoundTrip(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -2049,7 +2049,7 @@ func (tracker *fakeDescendantTracker) TrackDescendant(_ context.Context, rootPID
 	return nil
 }
 
-// IDE-T-093 verifies restore rejects disconnected, rejected, corrupt, and closed-view cases without losing the backup.
+// Verifies restore rejects disconnected, rejected, corrupt, and closed-view cases without losing the backup.
 func TestRestoreBackupFailureBoundaries(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()
@@ -2111,7 +2111,7 @@ func TestRestoreBackupFailureBoundaries(t *testing.T) {
 	assertBackupPreserved()
 }
 
-// IDE-T-096 verifies the omitted directory defaults to host HOME and missing HOME is reported safely.
+// Verifies the omitted directory defaults to host HOME and missing HOME is reported safely.
 func TestDefaultDirectoryListingUsesHostHome(t *testing.T) {
 	root := t.TempDir()
 	canonicalRoot, err := CanonicalDirectory(root)
@@ -2145,7 +2145,7 @@ func TestDefaultDirectoryListingUsesHostHome(t *testing.T) {
 	}
 }
 
-// IDE-T-096 verifies directory listing is routed through the IDE command service.
+// Verifies directory listing is routed through the IDE command service.
 func TestDirectoryListingCommand(t *testing.T) {
 	root := t.TempDir()
 	canonicalRoot, err := CanonicalDirectory(root)
@@ -2175,7 +2175,7 @@ func TestDirectoryListingCommand(t *testing.T) {
 	}
 }
 
-// IDE-T-117 verifies concurrent create reservations enforce the configured 64-view limit before process work.
+// Verifies concurrent create reservations enforce the configured 64-view limit before process work.
 func TestConcurrentCreateReservationsHonorViewLimit(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -2490,7 +2490,7 @@ func stringPointer(value string) *string { return &value }
 func int64Pointer(value int64) *int64    { return &value }
 func boolPointer(value bool) *bool       { return &value }
 
-// IDE-T-013 verifies compact helper output omits empty optional values and reads manager generations safely.
+// Verifies compact helper output omits empty optional values and reads manager generations safely.
 func TestOptionalServiceHelpers(t *testing.T) {
 	if optionalStringPtr("") != nil {
 		t.Fatal("empty optional string was materialized")
@@ -2507,7 +2507,7 @@ func TestOptionalServiceHelpers(t *testing.T) {
 	}
 }
 
-// IDE-T-114 verifies workspace removal failure remains explicit and retryable.
+// Verifies workspace removal failure remains explicit and retryable.
 func TestWorkspaceRemovalFailureRetainsClosingView(t *testing.T) {
 	root := t.TempDir()
 	bridge, err := NewBridge()

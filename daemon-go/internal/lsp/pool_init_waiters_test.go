@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// LSP-T-057 delivers one initialization failure to every concurrent waiter without converting it to cancellation.
+// Delivers one initialization failure to every concurrent waiter without converting it to cancellation.
 func TestPool_InitializeFailureWaiters(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{InitializeTimeout: 30 * time.Millisecond, ShutdownGrace: 5 * time.Millisecond})
 	supervisor.blockMethod = "initialize"

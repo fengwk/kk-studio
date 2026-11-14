@@ -55,7 +55,7 @@ func TestSkillInstallEnforcesManifestSizeAndNoRetryKeepsRequiredFailuresBounded(
 	}
 }
 
-// RUN-N-002 cleanup tests verify startup removes abandoned staging but preserves immutable installations.
+// Cleanup tests verify startup removes abandoned staging but preserves immutable installations.
 func TestInstallerCleanupStagingRemovesOnlyInterruptedInstallDirectories(t *testing.T) {
 	root := t.TempDir()
 	skills := filepath.Join(root, "skills")
@@ -276,7 +276,7 @@ func (d *serialDownloader) Download(ctx context.Context, ticket DownloadTicket) 
 	return d.data, nil
 }
 
-// RUN-T-238 checks that overlapping installs share the package-version critical section.
+// Checks that overlapping installs share the package-version critical section.
 func TestSkillInstallSerializesSamePackage(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill"})
 	digest := sha256.Sum256(archive)

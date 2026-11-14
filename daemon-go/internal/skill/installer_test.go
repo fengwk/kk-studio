@@ -71,7 +71,7 @@ func expectedTarget(root string, archive []byte) string {
 	return filepath.Join(root, "skills", "pkg", "1.2", hex.EncodeToString(digest[:])[:12])
 }
 
-// RUN-N-002 and RUN-T-228 verify ticket-bound extraction and publication under the content-addressed path.
+// Verify ticket-bound extraction and publication under the content-addressed path.
 func TestSkillInstall_TicketHashAndSafeVersionedPublish(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill", "demo/readme.txt": "content"})
 	d := &fakeDownloader{data: archive}
@@ -108,7 +108,7 @@ func TestSkillInstall_TicketHashAndSafeVersionedPublish(t *testing.T) {
 	}
 }
 
-// RUN-T-229 checks that an existing digest target requests metadata but skips archive transfer.
+// Checks that an existing digest target requests metadata but skips archive transfer.
 func TestInstallerReusesExistingContentAddress(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill"})
 	d := &fakeDownloader{data: archive}
@@ -123,7 +123,7 @@ func TestInstallerReusesExistingContentAddress(t *testing.T) {
 	}
 }
 
-// RUN-T-233 rejects archive traversal and leaves the content-addressed target unpublished.
+// Rejects archive traversal and leaves the content-addressed target unpublished.
 func TestInstallerRejectsTraversal(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"../escaped": "x", "demo/SKILL.md": "ok"})
 	d := &fakeDownloader{data: archive}
@@ -137,7 +137,7 @@ func TestInstallerRejectsTraversal(t *testing.T) {
 	}
 }
 
-// RUN-T-231 rejects bytes that do not match the ticket's SHA-256 before publishing anything.
+// Rejects bytes that do not match the ticket's SHA-256 before publishing anything.
 func TestInstallerRejectsTicketDigestMismatch(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill"})
 	d := &fakeDownloader{data: archive, ticket: DownloadTicket{Size: int64(len(archive)), SHA256: "0000000000000000000000000000000000000000000000000000000000000000", Opaque: "ticket-token"}}
@@ -172,7 +172,7 @@ func TestSkillInstall_FailedMidDownloadLeavesNoTemporaryFiles(t *testing.T) {
 	}
 }
 
-// RUN-N-002 verifies installation failures are returned as errors rather than successful text-only results.
+// Verifies installation failures are returned as errors rather than successful text-only results.
 func TestSkillInstall_FailureIsReturned(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "skill"})
 	digest := sha256.Sum256(archive)
@@ -197,7 +197,7 @@ func TestSkillInstall_FailureIsReturned(t *testing.T) {
 	}
 }
 
-// RUN-T-236 reuses a concurrently published valid target when the staging rename loses the race.
+// Reuses a concurrently published valid target when the staging rename loses the race.
 func TestInstallerReusesTargetCreatedDuringDownload(t *testing.T) {
 	archive := zipBytes(t, map[string]string{"demo/SKILL.md": "ticket contents"})
 	root := t.TempDir()

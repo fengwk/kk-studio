@@ -13,7 +13,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
-// LSP-T-050 and LSP-T-051 protect structured keys and default initialization timeout.
+// Protect structured keys and default initialization timeout.
 func TestPool_StructuredKeyAndDefaults(t *testing.T) {
 	first := ServerConfig{ID: "a|b", Command: []string{"x", "y"}, Extensions: []string{".go"}}
 	second := ServerConfig{ID: "a", Command: []string{"b|x", "y"}, Extensions: []string{".go"}}
@@ -49,7 +49,7 @@ func testPool(t *testing.T, options PoolOptions) (*Pool, *fakeSupervisor, string
 	return NewPool(discovery, supervisor, options), supervisor, file
 }
 
-// LSP-T-040 coalesces simultaneous leases while a process launch is held open.
+// Coalesces simultaneous leases while a process launch is held open.
 func TestPool_CoalescesBoot(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
 	supervisor.startEntered = make(chan struct{}, 1)
@@ -122,7 +122,7 @@ func TestPool_CoalescesBoot(t *testing.T) {
 	}
 }
 
-// LSP-T-041 evicts only an idle client and terminates its managed process.
+// Evicts only an idle client and terminates its managed process.
 func TestPool_IdleEviction(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: 10 * time.Millisecond, ShutdownGrace: 10 * time.Millisecond})
 	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
@@ -142,7 +142,7 @@ func TestPool_IdleEviction(t *testing.T) {
 	}
 }
 
-// LSP-T-044 and LSP-T-058 report cleanup errors with an aggregate cause.
+// Report cleanup errors with an aggregate cause.
 func TestPool_CloseReportsCleanupFailure(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
 	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
@@ -163,7 +163,7 @@ func TestPool_CloseReportsCleanupFailure(t *testing.T) {
 	}
 }
 
-// LSP-T-053 preserves other waiters when one caller times out during a shared boot.
+// Preserves other waiters when one caller times out during a shared boot.
 func TestPool_IndependentWaiters(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
 	supervisor.startEntered = make(chan struct{}, 1)
@@ -236,7 +236,7 @@ func TestPool_IndependentWaiters(t *testing.T) {
 	}
 }
 
-// LSP-T-054 cancels a shared boot after its last waiter exits and confirms only after cleanup.
+// Cancels a shared boot after its last waiter exits and confirms only after cleanup.
 func TestPool_LastWaiterCancelsBoot(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{InitializeTimeout: time.Second, ShutdownGrace: time.Second})
 	supervisor.startEntered = make(chan struct{}, 1)
@@ -283,7 +283,7 @@ func TestPool_LastWaiterCancelsBoot(t *testing.T) {
 	}
 }
 
-// LSP-T-042, LSP-T-043, and LSP-T-045 close a pool while startup is blocked and await cleanup.
+// Close a pool while startup is blocked and await cleanup.
 func TestPool_CloseDuringBoot(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{InitializeTimeout: 20 * time.Millisecond, ShutdownGrace: time.Second})
 	supervisor.startEntered = make(chan struct{}, 1)
@@ -328,7 +328,7 @@ func TestPool_CloseDuringBoot(t *testing.T) {
 	}
 }
 
-// LSP-T-052 and LSP-T-057 clean up an initialization failure and return it to the lease.
+// Clean up an initialization failure and return it to the lease.
 func TestPool_InitializeFailureCleanup(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{InitializeTimeout: 20 * time.Millisecond, ShutdownGrace: time.Second})
 	supervisor.blockMethod = "initialize"
@@ -343,7 +343,7 @@ func TestPool_InitializeFailureCleanup(t *testing.T) {
 	}
 }
 
-// LSP-T-007 and LSP-T-066 keep a key isolated when initialize and cleanup both fail.
+// Keep a key isolated when initialize and cleanup both fail.
 func TestPool_InitializeCleanupFailure(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{InitializeTimeout: 20 * time.Millisecond, ShutdownGrace: time.Second})
 	cleanupErr := errors.New("managed process cleanup failed")
@@ -367,7 +367,7 @@ func TestPool_InitializeCleanupFailure(t *testing.T) {
 	}
 }
 
-// LSP-T-047 verifies a converged process-start failure can be retried.
+// Verifies a converged process-start failure can be retried.
 func TestPool_ConvergedRetry(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
 	spawnErr := errors.New("spawn rejected")
@@ -392,7 +392,7 @@ func TestPool_ConvergedRetry(t *testing.T) {
 	}
 }
 
-// LSP-T-048 retains an unconverged failure and does not confirm its owner.
+// Retains an unconverged failure and does not confirm its owner.
 func TestPool_UnconvergedIsolation(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
 	supervisor.startErr = native.ErrScopeNotConverged
@@ -411,7 +411,7 @@ func TestPool_UnconvergedIsolation(t *testing.T) {
 	}
 }
 
-// LSP-T-055 rejects an already-cancelled lease without increasing its in-flight count.
+// Rejects an already-cancelled lease without increasing its in-flight count.
 func TestPool_PreAbortedWarmLease(t *testing.T) {
 	pool, _, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
 	lease, err := pool.LeaseWithExit(context.Background(), file, nil)
@@ -441,7 +441,7 @@ func TestPool_PreAbortedWarmLease(t *testing.T) {
 	}
 }
 
-// LSP-T-059 and LSP-T-061 check client lookup and rejection after pool closure.
+// Check client lookup and rejection after pool closure.
 func TestPool_ClientLookupAndClosedLease(t *testing.T) {
 	pool, _, file := testPool(t, PoolOptions{IdleTimeout: time.Hour})
 	if pool.Client(filepath.Join(filepath.Dir(file), "unsupported.txt")) != nil {

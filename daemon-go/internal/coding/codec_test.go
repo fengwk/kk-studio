@@ -43,7 +43,7 @@ func writeFixture(t *testing.T, name string, data []byte) string {
 	return path
 }
 
-// COD-T-260: read reports the encoding of a declared file and decodes its text.
+// Read reports the encoding of a declared file and decodes its text.
 func TestReadReportsEncodingHeader(t *testing.T) {
 	path := writeFixture(t, "page.html", declaredBytes(t, "GBK", `<html><head><meta charset="gbk"></head><body>中文</body></html>`))
 	result := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": path}, nil)
@@ -63,7 +63,7 @@ func TestReadReportsEncodingHeader(t *testing.T) {
 	}
 }
 
-// COD-T-261: read explains undeclared, binary and conflicting files precisely.
+// Read explains undeclared, binary and conflicting files precisely.
 func TestReadReportsCodecFailures(t *testing.T) {
 	undecodable := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": writeFixture(t, "gbk.txt", []byte("\xd6\xd0\xce\xc4\n"))}, nil)
 	if !undecodable.Error || !strings.Contains(undecodable.Contents[0].Text, "is not UTF-8 text and declares no encoding, so it was not read") || !strings.Contains(undecodable.Contents[0].Text, "iconv -f GBK") {
@@ -82,7 +82,7 @@ func TestReadReportsCodecFailures(t *testing.T) {
 	}
 }
 
-// COD-T-262: write keeps the encoding of the existing file or adopts the declared one.
+// Write keeps the encoding of the existing file or adopts the declared one.
 func TestWriteKeepsOrAdoptsDeclaredEncoding(t *testing.T) {
 	converted := writeFixture(t, "page.html", declaredBytes(t, "GBK", `<meta charset="gbk">旧`))
 	updated := `<meta charset="gbk">新`
@@ -112,7 +112,7 @@ func TestWriteKeepsOrAdoptsDeclaredEncoding(t *testing.T) {
 	}
 }
 
-// COD-T-263: write refuses changes that would silently drop or contradict an encoding.
+// Write refuses changes that would silently drop or contradict an encoding.
 func TestWriteRefusesEncodingChanges(t *testing.T) {
 	declared := writeFixture(t, "page.html", declaredBytes(t, "GBK", `<meta charset="gbk">旧`))
 	if _, err := Write(declared, "no declaration", nil); err == nil || !strings.Contains(err.Error(), "removes the GBK declaration") {
@@ -151,7 +151,7 @@ func mustRead(t *testing.T, path string) []byte {
 	return data
 }
 
-// COD-T-264: grep searches decoded text and lists files it could not decode.
+// Grep searches decoded text and lists files it could not decode.
 func TestGrepDecodesAndListsUndecodableFiles(t *testing.T) {
 	// grep lists real paths; temp directories sit behind symlinks (macOS) or short names (Windows).
 	root, err := filepath.EvalSymlinks(t.TempDir())
@@ -210,7 +210,7 @@ func encodeFixture(text, charset string, bomBytes int) ([]byte, error) {
 	return textcodec.Encode(text, textcodec.Encoding{Name: charset, BOM: bomBytes > 0})
 }
 
-// COD-T-272: write accepts a BOM-marked file whose content declares its own UTF-16 family and
+// Write accepts a BOM-marked file whose content declares its own UTF-16 family and
 // keeps its byte order mark and bytes; another order and a new file without a mark are refused.
 func TestWriteKeepsBOMWithFamilyDeclaration(t *testing.T) {
 	content := `<?xml version="1.0" encoding="UTF-16"?><root>中文</root>`

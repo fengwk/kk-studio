@@ -12,7 +12,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
-// RUN-T-189 passes nil as the preparation predecessor until the first cache candidate is applied.
+// Passes nil as the preparation predecessor until the first cache candidate is applied.
 func TestEnvironmentConfigInitialPreparationUsesNilPrevious(t *testing.T) {
 	initial := initialRuntimeConfig()
 	preparer := &testConfigurationPreparer{}
@@ -81,7 +81,7 @@ func TestEnvironmentConfigTreatsEmptyLSPRepresentationsAsSameContent(t *testing.
 	})
 }
 
-// RUN-T-190 persists a version-only change without preparing or publishing a new resource generation.
+// Persists a version-only change without preparing or publishing a new resource generation.
 func TestEnvironmentConfigSameContentOnlyAdvancesVersion(t *testing.T) {
 	initial := initialRuntimeConfig()
 	preparer, cache := &testConfigurationPreparer{}, &testCacheWriter{}
@@ -112,7 +112,7 @@ func TestEnvironmentConfigSameContentOnlyAdvancesVersion(t *testing.T) {
 	}
 }
 
-// RUN-T-191 merges concurrent first-version work and retains only the highest pending snapshot.
+// Merges concurrent first-version work and retains only the highest pending snapshot.
 func TestEnvironmentConfigInitialQueueKeepsHighestPendingVersion(t *testing.T) {
 	initial := initialRuntimeConfig()
 	started, release := make(chan struct{}), make(chan struct{})
@@ -178,7 +178,7 @@ func TestEnvironmentConfigInitialQueueKeepsHighestPendingVersion(t *testing.T) {
 	}
 }
 
-// RUN-T-197 retains the applied snapshot after validation failure and records a repairable configuration error.
+// Retains the applied snapshot after validation failure and records a repairable configuration error.
 func TestEnvironmentConfigValidationFailureKeepsCurrentSnapshot(t *testing.T) {
 	initial := initialRuntimeConfig()
 	manager := newTestEnvironmentConfigRuntime(t, initial, (&testConfigurationPreparer{}).prepare, &testCacheWriter{})
@@ -200,7 +200,7 @@ func TestEnvironmentConfigValidationFailureKeepsCurrentSnapshot(t *testing.T) {
 	}
 }
 
-// RUN-T-195 retires prepared resources when the preparation result carries a different version.
+// Retires prepared resources when the preparation result carries a different version.
 func TestEnvironmentConfigPreparedVersionMismatchRetiresCandidate(t *testing.T) {
 	initial := initialRuntimeConfig()
 	candidate := initial
@@ -218,7 +218,7 @@ func TestEnvironmentConfigPreparedVersionMismatchRetiresCandidate(t *testing.T) 
 	}
 }
 
-// RUN-T-199 does not publish a prepared candidate if private cache persistence fails.
+// Does not publish a prepared candidate if private cache persistence fails.
 func TestEnvironmentConfigPersistenceFailureRetiresCandidate(t *testing.T) {
 	initial := initialRuntimeConfig()
 	prepared := &testPreparedConfiguration{config: initial}
@@ -234,7 +234,7 @@ func TestEnvironmentConfigPersistenceFailureRetiresCandidate(t *testing.T) {
 	}
 }
 
-// RUN-T-200 and RUN-T-201 make close wait for active preparation and reject work that has not started.
+// Make close wait for active preparation and reject work that has not started.
 func TestEnvironmentConfigCloseWaitsAndRejectsPendingWork(t *testing.T) {
 	initial := initialRuntimeConfig()
 	release, started := make(chan struct{}), make(chan struct{})

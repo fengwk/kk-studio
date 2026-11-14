@@ -9,7 +9,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/transport"
 )
 
-// IDE-F-010/IDE-T-135 verifies the frozen route, private-header filter, manager cookie, and WebSocket protocols.
+// Verifies the frozen route, private-header filter, manager cookie, and WebSocket protocols.
 func TestFrozenViewProxyResolution(t *testing.T) {
 	resolver := NewResolver()
 	resolver.BindView("123e4567-e89b-12d3-a456-426614174000", 1, 8123, "code-server-session=session")
@@ -48,7 +48,6 @@ func TestFrozenViewProxyResolution(t *testing.T) {
 	}
 }
 
-// IDE-T-135
 func TestResolverRejectsUnsafeAndStaleRequests(t *testing.T) {
 	resolver := NewResolver()
 	viewID := "123e4567-e89b-12d3-a456-426614174000"
@@ -68,7 +67,6 @@ func TestResolverRejectsUnsafeAndStaleRequests(t *testing.T) {
 	}
 }
 
-// IDE-T-088
 func TestResolverRejectsInvalidMetadataAndUnboundViews(t *testing.T) {
 	resolver := NewResolver()
 	viewID := "123e4567-e89b-12d3-a456-426614174000"

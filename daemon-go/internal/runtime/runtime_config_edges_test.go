@@ -10,7 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// RUN-T-087 closes malformed, stale, duplicated, and failed hot-configuration paths.
+// Closes malformed, stale, duplicated, and failed hot-configuration paths.
 func TestRuntimeEnvironmentConfigControlEdges(t *testing.T) {
 	base := runtimeOptionsForTest()
 	r, connection := newReadyRuntimeForTest(t, base)

@@ -8,7 +8,7 @@ import (
 	daemonruntime "github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-T-250 verifies skill.install also confirms its execution exit when the
+// Verifies skill.install also confirms its execution exit when the
 // capability fails before any protected execution scope exists.
 func TestSkillCapabilityConfirmsExecutionExitOnFailure(t *testing.T) {
 	confirmed := 0

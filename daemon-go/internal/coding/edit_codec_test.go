@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// COD-T-270: an edit keeps the file's encoding and refuses changes that would re-encode it.
+// An edit keeps the file's encoding and refuses changes that would re-encode it.
 func TestEditKeepsDeclaredEncodingAndRefusesChanges(t *testing.T) {
 	kept := writeFixture(t, "page.html", declaredBytes(t, "GBK", `<meta charset="gbk">旧`))
 	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(kept, replace("旧", "新")), nil)
@@ -35,7 +35,7 @@ func TestEditKeepsDeclaredEncodingAndRefusesChanges(t *testing.T) {
 	}
 }
 
-// COD-T-271: an edit refuses files the shared codec cannot decode, in both edit and preview.
+// An edit refuses files the shared codec cannot decode, in both edit and preview.
 func TestEditRefusesUndecodableFiles(t *testing.T) {
 	undeclared := writeFixture(t, "gbk.txt", []byte("\xd6\xd0\xce\xc4\n"))
 	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(undeclared, replace("\xd6\xd0", "\xd6\xd1")), nil)
@@ -59,7 +59,7 @@ func TestEditRefusesUndecodableFiles(t *testing.T) {
 	}
 }
 
-// COD-T-273: edit keeps a BOM-marked file whose content declares its own UTF-16 family, and
+// Edit keeps a BOM-marked file whose content declares its own UTF-16 family, and
 // refuses a declaration of the other byte order.
 func TestEditKeepsBOMWithFamilyDeclaration(t *testing.T) {
 	content := `<?xml version="1.0" encoding="UTF-16"?><root>旧</root>`

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// RUN-T-188 keeps the cached JSON shape stable and preserves ordered LSP declarations.
+// Keeps the cached JSON shape stable and preserves ordered LSP declarations.
 func TestSerializeDaemonCachePreservesConfigurationOrder(t *testing.T) {
 	got, err := SerializeDaemonCache(DaemonConfig{
 		EnvironmentID: "id",
@@ -25,7 +25,7 @@ func TestSerializeDaemonCachePreservesConfigurationOrder(t *testing.T) {
 	}
 }
 
-// RUN-T-188 serializes all optional LSP lists and non-null daemon settings.
+// Serializes all optional LSP lists and non-null daemon settings.
 func TestSerializeDaemonCacheEmitsOptionalValues(t *testing.T) {
 	bash := "/bin/bash"
 	proxy := "http://proxy.example:8080"

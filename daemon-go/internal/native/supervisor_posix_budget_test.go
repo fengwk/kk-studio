@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// NAT-F-008 verifies POSIX timing constants stay aligned with the shared supervisor contract.
+// Verifies POSIX timing constants stay aligned with the shared supervisor contract.
 func TestPOSIXSupervisorBudgets(t *testing.T) {
 	budgets := map[string]struct {
 		got  time.Duration
@@ -31,7 +31,7 @@ func TestPOSIXSupervisorBudgets(t *testing.T) {
 	}
 }
 
-// NAT-F-008 verifies Close routes through the specified one-second default grace.
+// Verifies Close routes through the specified one-second default grace.
 func TestPOSIXSupervisor_CloseUsesDefaultGrace(t *testing.T) {
 	stdinReader, stdinWriter, err := os.Pipe()
 	if err != nil {
@@ -81,7 +81,7 @@ func TestPOSIXSupervisor_CloseUsesDefaultGrace(t *testing.T) {
 	}
 }
 
-// NAT-F-008 exercises the real convergence timer rather than the fake-clock boundary.
+// Exercises the real convergence timer rather than the fake-clock boundary.
 func TestPOSIXConvergence_RealBudgetExpires(t *testing.T) {
 	api := nativePOSIXConvergenceAPI()
 	api.members = func(int) ([]sessionMember, error) {

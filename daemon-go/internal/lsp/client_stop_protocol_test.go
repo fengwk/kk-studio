@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// LSP-T-098 verifies shutdown uses null params, sends exit once, and waits for process exit within grace.
+// Verifies shutdown uses null params, sends exit once, and waits for process exit within grace.
 func TestClient_StopShutdownParametersAndGraceWait(t *testing.T) {
 	shutdownParams := make(chan json.RawMessage, 1)
 	exitSeen := make(chan struct{}, 1)
@@ -57,7 +57,7 @@ func TestClient_StopShutdownParametersAndGraceWait(t *testing.T) {
 	}
 }
 
-// LSP-T-098 verifies zero grace sends exit without waiting indefinitely for shutdown.
+// Verifies zero grace sends exit without waiting indefinitely for shutdown.
 func TestClient_StopWithoutGraceSkipsShutdown(t *testing.T) {
 	shutdownParams := make(chan json.RawMessage, 1)
 	supervisor := &fakeSupervisor{shutdownParams: shutdownParams}

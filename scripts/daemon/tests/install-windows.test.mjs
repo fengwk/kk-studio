@@ -258,7 +258,7 @@ describe('Windows installer security: card isolation, credentials and task owner
 
   it('passes the config path directly to the Go executable without a wrapper', () => {
     assertIncludesAll(functionBody('New-DaemonArgumentList'), ['return @("--config", $script:InstalledConfig)'])
-    assertIncludesNone(functionBody('New-DaemonArgumentList'), ['ToBase64String', 'main.js'])
+    assertIncludesNone(functionBody('New-DaemonArgumentList'), ['ToBase64String'])
     assertIncludesAll(functionBody('Invoke-InstallCommon'), ['-WorkingDirectory $script:InstalledLib', '-DaemonExecutable $script:InstalledDaemon'])
   })
 

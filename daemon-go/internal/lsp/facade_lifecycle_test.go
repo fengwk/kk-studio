@@ -7,7 +7,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// LSP-T-038 keeps an acquired generation alive until its calls release it.
+// Keeps an acquired generation alive until its calls release it.
 func TestFacade_GenerationSwap(t *testing.T) {
 	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
 	prepared, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{"missing"}, Extensions: []string{".go"}}})
@@ -50,7 +50,7 @@ func TestFacade_GenerationSwap(t *testing.T) {
 	}
 }
 
-// LSP-F-026 verifies publish swaps subsequent generation acquisitions while an old lease stays alive.
+// Verifies publish swaps subsequent generation acquisitions while an old lease stays alive.
 func TestFacade_PublishRoutesGenerations(t *testing.T) {
 	facade := NewFacade(&fakeSupervisor{}, PoolOptions{})
 	first, err := facade.Prepare([]config.LSPServerConfig{{ID: "go", Command: []string{"missing-go"}, Extensions: []string{".go"}}})
@@ -92,7 +92,7 @@ func TestFacade_PublishRoutesGenerations(t *testing.T) {
 	}
 }
 
-// LSP-T-038 validates prepared-generation retirement and rejects duplicate configurations.
+// Validates prepared-generation retirement and rejects duplicate configurations.
 func TestFacade_PreparedGenerationLifecycle(t *testing.T) {
 	var nilGeneration *PreparedGeneration
 	if err := nilGeneration.Publish(); err == nil || err.Error() != "invalid LSP generation" {

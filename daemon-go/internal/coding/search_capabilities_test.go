@@ -14,7 +14,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-T-189, COD-T-190
 func TestSearchTimeoutEmptyResultsAreNonError(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("hello\n"), 0600); err != nil {
@@ -60,7 +59,6 @@ func TestSearchTimeoutEmptyResultsAreNonError(t *testing.T) {
 	}
 }
 
-// COD-T-188
 func TestSearchCancellationReturnsCancelledError(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -84,7 +82,6 @@ func TestSearchCancellationReturnsCancelledError(t *testing.T) {
 	}
 }
 
-// COD-F-010, COD-T-178
 func TestSearchLimitNoticeContainsOnlyFirstNResults(t *testing.T) {
 	root := t.TempDir()
 	for name, content := range map[string]string{"a.txt": "x\nx\nx\n", "b.txt": "x\n"} {
@@ -120,7 +117,7 @@ func TestSearchLimitNoticeContainsOnlyFirstNResults(t *testing.T) {
 	}
 }
 
-// COD-N-020: reaching N stops content reads and emits the exact limit notice.
+// Reaching N stops content reads and emits the exact limit notice.
 func TestGrepExactLimitNoticeText(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0600); err != nil {
@@ -133,7 +130,6 @@ func TestGrepExactLimitNoticeText(t *testing.T) {
 	}
 }
 
-// COD-F-012, COD-F-014
 func TestInvalidSearchRegexIsInputRejection(t *testing.T) {
 	arguments, err := json.Marshal(map[string]any{"path": t.TempDir(), "pattern": "[", "literal": false})
 	if err != nil {
@@ -153,7 +149,7 @@ func TestInvalidSearchRegexIsInputRejection(t *testing.T) {
 	}
 }
 
-// COD-N-009: Go RE2's unsupported extended-mode diagnostic is visible to callers.
+// Go RE2's unsupported extended-mode diagnostic is visible to callers.
 func TestExtendedRegexModeDiagnosticIsModelVisible(t *testing.T) {
 	root := t.TempDir()
 	pattern := "(?x)é"
@@ -180,7 +176,7 @@ func TestExtendedRegexModeDiagnosticIsModelVisible(t *testing.T) {
 	}
 }
 
-// COD-N-012: invalid globs are rejected through both search capabilities.
+// Invalid globs are rejected through both search capabilities.
 func TestInvalidSearchGlobIsInputRejection(t *testing.T) {
 	for _, capability := range []string{"fs.find", "fs.grep"} {
 		t.Run(capability, func(t *testing.T) {
@@ -218,7 +214,7 @@ func TestInvalidSearchGlobIsInputRejection(t *testing.T) {
 	}
 }
 
-// COD-F-011 COD-F-012 COD-T-172 COD-T-173 COD-T-181 COD-T-184: glob filtering, direct files, binary errors, and Git metadata are asserted.
+// Glob filtering, direct files, binary errors, and Git metadata are asserted.
 func TestGrepGlobAndDirectFileBehavior(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, ".git"), 0o700); err != nil {
@@ -268,7 +264,7 @@ func TestGrepGlobAndDirectFileBehavior(t *testing.T) {
 	}
 }
 
-// COD-T-019, COD-T-020, COD-T-043: skipped paths are summarized without failing the result.
+// Skipped paths are summarized without failing the result.
 func TestFormatSearchSkippedPathSummary(t *testing.T) {
 	dataDir := t.TempDir()
 	for _, tc := range []struct {
@@ -288,7 +284,6 @@ func TestFormatSearchSkippedPathSummary(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestLargeSearchResultUsesDurableOutput(t *testing.T) {
 	dataDir := t.TempDir()
 	lines := make([]string, inlineOutputLines+1)
@@ -317,7 +312,7 @@ func TestLargeSearchResultUsesDurableOutput(t *testing.T) {
 	}
 }
 
-// COD-N-018: empty search results explain ignored paths, but matches stay uncluttered.
+// Empty search results explain ignored paths, but matches stay uncluttered.
 func TestEmptySearchResultIgnoreHint(t *testing.T) {
 	dataDir := t.TempDir()
 	outcome := search.SearchOutcome{IgnoreSkipped: []string{"/repo/.env"}, IgnoreSkippedCount: 1}
@@ -334,7 +329,7 @@ func TestEmptySearchResultIgnoreHint(t *testing.T) {
 	}
 }
 
-// COD-N-018: both capabilities attach the real ignored path when no match is found.
+// Both capabilities attach the real ignored path when no match is found.
 func TestEmptyFindAndGrepListIgnoredPaths(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("secret.txt\n"), 0o600); err != nil {
@@ -364,7 +359,7 @@ func TestEmptyFindAndGrepListIgnoredPaths(t *testing.T) {
 	}
 }
 
-// COD-N-018: the hint bounds visible paths and reports the exact omitted count.
+// The hint bounds visible paths and reports the exact omitted count.
 func TestEmptySearchResultIgnoreHintLimit(t *testing.T) {
 	paths := make([]string, 12)
 	for i := range paths {

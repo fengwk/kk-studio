@@ -14,7 +14,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// NAT-T-049 verifies deterministic parent-before-child session ordering.
+// Verifies deterministic parent-before-child session ordering.
 func TestDarwinSession_ParentFirst(t *testing.T) {
 	members := []sessionMember{
 		{PID: 30, Parent: 20},
@@ -62,7 +62,7 @@ func darwinKinfoProc(pid, parent int32, state int8, startSec int64, startUsec in
 	return proc
 }
 
-// NAT-F-006 verifies a PID that vanishes after the process snapshot is excluded rather than treated as a live member.
+// Verifies a PID that vanishes after the process snapshot is excluded rather than treated as a live member.
 func TestDarwinProcessMembersWithAPI_SnapshotRaceIgnoresVanishedPID(t *testing.T) {
 	api := &fakeDarwinProcessAPI{
 		procs:     []unix.KinfoProc{darwinKinfoProc(42, 9, 2, 11, 12)},
@@ -77,7 +77,7 @@ func TestDarwinProcessMembersWithAPI_SnapshotRaceIgnoresVanishedPID(t *testing.T
 	}
 }
 
-// NAT-F-006 verifies Darwin enumeration fails closed, ignores vanished PIDs, and freezes identity data.
+// Verifies Darwin enumeration fails closed, ignores vanished PIDs, and freezes identity data.
 func TestDarwinProcessMembersWithAPI_FailureAndSnapshotBranches(t *testing.T) {
 	apiError := errors.New("injected sysctl error")
 	if members, err := darwinProcessMembersWithAPI(&fakeDarwinProcessAPI{snapshotErr: apiError}); !errors.Is(err, apiError) || members != nil {
@@ -120,7 +120,7 @@ func deepDarwinSessionChain(size int) []sessionMember {
 	return members
 }
 
-// NAT-T-050 verifies that duplicate, cyclic, or overly deep snapshots cannot establish an order.
+// Verifies that duplicate, cyclic, or overly deep snapshots cannot establish an order.
 func TestDarwinSession_AmbiguousSnapshot(t *testing.T) {
 	for _, members := range [][]sessionMember{
 		{{PID: 10}, {PID: 10}},
@@ -133,7 +133,7 @@ func TestDarwinSession_AmbiguousSnapshot(t *testing.T) {
 	}
 }
 
-// NAT-T-048 verifies that the Darwin process snapshot carries fencing identity and parent data.
+// Verifies that the Darwin process snapshot carries fencing identity and parent data.
 func TestDarwinSessionSnapshotIncludesParentAndIdentity(t *testing.T) {
 	pid := os.Getpid()
 	sid, err := unix.Getsid(pid)
@@ -158,7 +158,7 @@ func TestDarwinSessionSnapshotIncludesParentAndIdentity(t *testing.T) {
 	t.Fatalf("process %d missing from session %d", pid, sid)
 }
 
-// NAT-T-036, NAT-T-037 verify Darwin's lack of Linux child-subreaper adoption.
+// Verify Darwin's lack of Linux child-subreaper adoption.
 func TestDarwinDoesNotAdoptOrphans(t *testing.T) {
 	if err := enableChildSubreaper(); err != nil {
 		t.Fatalf("Darwin subreaper capability check failed: %v", err)

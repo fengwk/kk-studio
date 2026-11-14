@@ -12,7 +12,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// NAT-N-001, NAT-N-002
 func TestShouldBootstrapH2XConnect(t *testing.T) {
 	for _, tc := range []struct {
 		args []string
@@ -51,7 +50,7 @@ func TestRunInternalCommand_LeavesPublicCommandsAlone(t *testing.T) {
 	}
 }
 
-// RUN-T-135 verifies that the single-argument help/version commands are side-effect free.
+// Verifies that the single-argument help/version commands are side-effect free.
 func TestInformationCommands(t *testing.T) {
 	for _, tc := range []struct{ arg, want string }{{"--help", "Usage:"}, {"--version", "kk-studio-daemon " + config.DaemonVersion}, {"-h", "Usage:"}} {
 		var out, errOut bytes.Buffer
@@ -61,7 +60,7 @@ func TestInformationCommands(t *testing.T) {
 	}
 }
 
-// RUN-T-153 verifies internal helper arguments are dispatched without being re-parsed as service flags.
+// Verifies internal helper arguments are dispatched without being re-parsed as service flags.
 func TestInternalHelperDispatch(t *testing.T) {
 	var out, errOut bytes.Buffer
 	called := false
@@ -77,7 +76,7 @@ func TestInternalHelperDispatch(t *testing.T) {
 	}
 }
 
-// RUN-T-136 pins the safe CLI diagnostic for malformed command forms.
+// Pins the safe CLI diagnostic for malformed command forms.
 func TestInvalidCommandsDoNotEchoArguments(t *testing.T) {
 	var out, stderr bytes.Buffer
 	code := RunCLI(context.Background(), []string{"--unknown", "sensitive"}, Dependencies{}, &out, &stderr)
@@ -86,7 +85,7 @@ func TestInvalidCommandsDoNotEchoArguments(t *testing.T) {
 	}
 }
 
-// RUN-T-137 validates config checks and contains safe diagnostics at the CLI boundary.
+// Validates config checks and contains safe diagnostics at the CLI boundary.
 func TestCheckConfigCommands(t *testing.T) {
 	path := commandConfigFixture(t)
 	var out, stderr bytes.Buffer
@@ -100,7 +99,7 @@ func TestCheckConfigCommands(t *testing.T) {
 	}
 }
 
-// RUN-T-138 pins CLI errors for malformed config arguments and requires a configured runtime.
+// Pins CLI errors for malformed config arguments and requires a configured runtime.
 func TestConfigRunRequiresConfiguredRuntime(t *testing.T) {
 	path := commandConfigFixture(t)
 	var out, stderr bytes.Buffer
@@ -123,7 +122,7 @@ func TestConfigRunRequiresConfiguredRuntime(t *testing.T) {
 	}
 }
 
-// RUN-T-136 rejects NUL argument transport and an unavailable private helper.
+// Rejects NUL argument transport and an unavailable private helper.
 func TestInvalidArgumentTransportAndUnavailableHelper(t *testing.T) {
 	var out, stderr bytes.Buffer
 	if code := RunCLI(context.Background(), []string{"--help\x00"}, Dependencies{}, &out, &stderr); code != 2 || stderr.String() != "invalid daemon argument transport\n" {

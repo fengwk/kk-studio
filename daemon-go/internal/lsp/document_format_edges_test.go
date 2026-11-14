@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// LSP-T-075 and LSP-T-077 exercise malformed and incomplete definition/symbol results.
+// Exercise malformed and incomplete definition/symbol results.
 func TestDocument_FormattingEdges(t *testing.T) {
 	client := &Client{positionEncoding: "utf-16"}
 	locations := client.formatDefinitionLocations(mustDefinitionResult(t, `[{"targetUri":"jdt://contents/module/Type.class","targetRange":{"start":{"line":2,"character":4}}},null,{"uri":"custom://host/path"},{"uri":""}]`))
@@ -35,7 +35,7 @@ func TestDocument_FormattingEdges(t *testing.T) {
 	}
 }
 
-// LSP-T-097 rejects JDT targets on other servers and maps an empty decompile response.
+// Rejects JDT targets on other servers and maps an empty decompile response.
 func TestDocument_JavaDecompileFailures(t *testing.T) {
 	plain := &Client{server: ServerConfig{ID: "plain"}}
 	if _, err := plain.JavaDecompile(context.Background(), "jdt://contents/java.base/java/lang/String.class"); err == nil || err.Error() != "lsp_java_decompile is only supported by jdtls." {

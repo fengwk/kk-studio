@@ -55,7 +55,7 @@ Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员
 
 ## MODEL Work 与流式执行
 
-[`ModelProcessor`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelProcessor.java) 消费 Dispatcher 已 claim 的 MODEL Work；该类型由 `BuiltinAgentDriver.works()` 注册，Web 组合根只把 `DriverRegistry` 汇总的处理器交给 Dispatcher。进程内执行治理组合复用 Work SPI 的 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimedExecutionSupport.java)：所有权校验、按 invocation 的准入与 execution 登记、派发前的租约 margin、本地取消 / 关闭与活跃执行查询都由骨架提供，本类只实现 Builtin 语义；事务内最终所有权围栏失败抛唯一的 [`ClaimLostSignal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimLostSignal.java)。短事务只锁 own Thread -> ModelInvocation -> Work，不取执行树锁、Session 锁或祖先锁。它先物化请求并调用 [`ModelGateway`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/ModelGateway.java) 的 `admit`：
+[`ModelProcessor`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelProcessor.java) 消费 Dispatcher 已 claim 的 MODEL Work；该类型由 `BuiltinAgentDriver.works()` 注册，Web 组合根只把 `DriverRegistry` 汇总的处理器交给 Dispatcher。进程内执行治理组合复用 Work SPI 的 [`ClaimedExecutionSupport`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimedExecutionSupport.java)：所有权校验、按 invocation 的准入与 execution 登记、派发前的租约 margin、本地取消 / 关闭与活跃执行查询都由骨架提供，本类只做编排：claim 准入后把 prepare 短事务交给 [`ModelClaimPreparer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelClaimPreparer.java)，把启动与阻塞执行交给 [`ModelExecutionLauncher`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelExecutionLauncher.java)；事务内最终所有权围栏失败抛唯一的 [`ClaimLostSignal`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/work/ClaimLostSignal.java)。短事务只锁 own Thread -> ModelInvocation -> Work，不取执行树锁、Session 锁或祖先锁。`ModelExecutionLauncher` 先物化请求并调用 [`ModelGateway`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/ModelGateway.java) 的 `admit`：
 
 - `Busy` 按 `retryAfter` 重排；
 - `Rejected` 与请求物化失败的确定性问题转 `FAILED`，都不曾发出请求；
@@ -108,7 +108,7 @@ Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员
 - 本模块测试只验证 Builtin 自身：Driver、私有状态、模型状态与请求物化、流式与重试、模型组、自动压缩和响应物化。测试入口都在 [`harness/agent-builtin/src/test`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/) 下。
 - ModelProcessor 的行为测试按关注点拆为 `ModelProcessorAdmissionTest`、`ModelProcessorStreamTest`、`ModelProcessorTerminalTest`、`ModelProcessorLifecycleTest` 与 `ModelProcessorGroupTest`；共享 fixture、Seed 和 fake 集中在 `ModelProcessorTestSupport`，Store 记录与失败注入统一使用 `RecordingStore`。
 - 测试通过 runtime test-jar 复用中立 kernel fixture（`InMemoryHarnessStore`、Store 契约基类、`FakeAgentDriver`）；本模块的 test-jar 仍导出 Builtin 私有模型契约/fixture，供 Platform 等消费者使用，但 Runtime 内核测试和共享 fixture 不回流到本模块。
-- 模块 `verify` 的 native `jacoco:check` 只校验本模块的 8 个关键类，逐类 `LINE` 覆盖率不低于 90%。Runtime 的关键类清单与门槛以 [`harness/runtime/pom.xml`](../../harness/runtime/pom.xml) 为准，由 runtime 自己的 check 负责，不存在跨模块 Ant report。
+- 模块 `verify` 的 native `jacoco:check` 只校验本模块的 critical 类，逐类 `LINE` 覆盖率不低于 90%，清单在 [`harness/agent-builtin/pom.xml`](../../harness/agent-builtin/pom.xml)。Runtime 的关键类清单与门槛以 [`harness/runtime/pom.xml`](../../harness/runtime/pom.xml) 为准，由 runtime 自己的 check 负责，不存在跨模块 Ant report。
 
 ---
 

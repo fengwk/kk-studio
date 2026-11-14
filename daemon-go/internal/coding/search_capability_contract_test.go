@@ -12,7 +12,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-T-167, COD-T-168, COD-T-185: capability roots and grep text arguments are preflighted.
+// Capability roots and grep text arguments are preflighted.
 func TestSearchCapabilityRejectsInvalidRootsAndNUL(t *testing.T) {
 	for _, capability := range []string{"fs.find", "fs.grep"} {
 		result := invokeCoding(t, Provider{}, capability, map[string]any{
@@ -52,7 +52,7 @@ func TestSearchCapabilityRejectsInvalidRootsAndNUL(t *testing.T) {
 	}
 }
 
-// COD-T-188: grep cancellation remains a CANCELLED error with incomplete search details.
+// Grep cancellation remains a CANCELLED error with incomplete search details.
 func TestGrepCancellationReturnsCancelledError(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, "a.txt"), []byte("x\n"), 0o600); err != nil {
@@ -83,7 +83,7 @@ func TestGrepCancellationReturnsCancelledError(t *testing.T) {
 	}
 }
 
-// COD-T-186: Git's local exclude applies to grep, while .ignore does not.
+// Git's local exclude applies to grep, while .ignore does not.
 func TestGrepIgnoreSources(t *testing.T) {
 	root := t.TempDir()
 	if output, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {

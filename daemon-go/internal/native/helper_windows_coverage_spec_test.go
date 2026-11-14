@@ -31,7 +31,7 @@ func TestWindowsHelper_RejectsInvalidInputs(t *testing.T) {
 	}
 }
 
-// NAT-F-012 verifies unreadable/foreign Windows state and launch records fail closed before process creation.
+// Verifies unreadable/foreign Windows state and launch records fail closed before process creation.
 func TestWindowsHelper_RejectsPrivateStateAndLaunchFailures(t *testing.T) {
 	t.Run("unverified state directory", func(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "not-private")

@@ -12,7 +12,6 @@ import (
 	"time"
 )
 
-// COD-T-122
 func TestOutputLimitsAndInlineThreshold(t *testing.T) {
 	if defaultCaptureBudget != 1<<30 {
 		t.Fatalf("default capture budget=%d want 1 GiB", defaultCaptureBudget)
@@ -40,7 +39,6 @@ func TestOutputLimitsAndInlineThreshold(t *testing.T) {
 	}
 }
 
-// COD-T-002
 func TestOutputLineCountHandlesCRLFOnce(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -58,7 +56,6 @@ func TestOutputLineCountHandlesCRLFOnce(t *testing.T) {
 	_ = spool.Close()
 }
 
-// COD-T-003
 func TestCaptureBudgetPublishesCapturedPrefixAndKeepsPreview(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -101,7 +98,7 @@ func TestCaptureBudgetPublishesCapturedPrefixAndKeepsPreview(t *testing.T) {
 	}
 }
 
-// COD-T-014: publishing and closing repeated spills must not leave descriptors open on Linux.
+// Publishing and closing repeated spills must not leave descriptors open on Linux.
 func TestPublishedFDClosed(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("/proc/self/fd is available only on Linux")
@@ -137,7 +134,6 @@ func TestPublishedFDClosed(t *testing.T) {
 	}
 }
 
-// COD-T-125
 func TestOutputLeaseProtectsWorkspaceFromSweep(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {

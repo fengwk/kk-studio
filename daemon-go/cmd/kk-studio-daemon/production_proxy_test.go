@@ -12,7 +12,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/transport"
 )
 
-// TRN-T-091 verifies production uploads use the currently applied proxy, including removal.
+// Verifies production uploads use the currently applied proxy, including removal.
 func TestDynamicResourceUploaderUsesCurrentProxy(t *testing.T) {
 	var firstRequests, secondRequests, directRequests int
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {

@@ -13,7 +13,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-T-023: an available language-support hook emits the LSP status header before the body.
+// An available language-support hook emits the LSP status header before the body.
 func TestReadLSPHeader(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "main.go")
 	if err := os.WriteFile(path, []byte("package main\n"), 0o600); err != nil {
@@ -38,7 +38,7 @@ func TestReadLSPHeader(t *testing.T) {
 	}
 }
 
-// COD-T-024: unavailable support and null languages omit the LSP status header.
+// Unavailable support and null languages omit the LSP status header.
 func TestReadNoLSPHeader(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "file")
 	if err := os.WriteFile(path, []byte("content\n"), 0o600); err != nil {
@@ -59,7 +59,7 @@ func TestReadNoLSPHeader(t *testing.T) {
 	}
 }
 
-// COD-T-021: limit values above 2000 are rejected before opening even a missing path.
+// Limit values above 2000 are rejected before opening even a missing path.
 func TestReadRejectsOversizeLimitBeforeFilesystemAccess(t *testing.T) {
 	missing := filepath.Join(t.TempDir(), "missing.txt")
 	result, err := readCapability(context.Background(), capabilityCall(t, "oversize-limit", map[string]any{"path": missing, "limit": 2001}), runtime.CapabilityContext{})
@@ -68,7 +68,7 @@ func TestReadRejectsOversizeLimitBeforeFilesystemAccess(t *testing.T) {
 	}
 }
 
-// COD-T-022: column_offset projects the first displayed line and its range header.
+// Column_offset projects the first displayed line and its range header.
 func TestReadColumnOffsetProjection(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "columns.txt")
 	if err := os.WriteFile(path, []byte("abcdef"), 0o600); err != nil {
@@ -80,7 +80,7 @@ func TestReadColumnOffsetProjection(t *testing.T) {
 	}
 }
 
-// COD-T-026: directory reads return the requested page and a stable continuation hint.
+// Directory reads return the requested page and a stable continuation hint.
 func TestDirectoryPagination(t *testing.T) {
 	root := t.TempDir()
 	listing := filepath.Join(root, "listing")
@@ -104,7 +104,7 @@ func TestDirectoryPagination(t *testing.T) {
 	}
 }
 
-// COD-T-028: special files are rejected before opening their device stream.
+// Special files are rejected before opening their device stream.
 func TestReadRejectsNonRegularFile(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("/dev/null is a POSIX character device")
@@ -119,7 +119,7 @@ func TestReadRejectsNonRegularFile(t *testing.T) {
 	}
 }
 
-// COD-T-030: replacing a read-only file preserves its original permission bits.
+// Replacing a read-only file preserves its original permission bits.
 func TestWritePreservesReadOnlyFilePermissions(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are required")
@@ -148,7 +148,7 @@ func TestWritePreservesReadOnlyFilePermissions(t *testing.T) {
 	}
 }
 
-// COD-T-033: editing a UTF-16LE file retains its BOM and charset.
+// Editing a UTF-16LE file retains its BOM and charset.
 func TestEditUTF16LEPreservesBOM(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "utf16.txt")
 	original, err := encodeFixture("a\nb\n", "UTF-16LE", 2)
@@ -175,7 +175,7 @@ func TestEditUTF16LEPreservesBOM(t *testing.T) {
 	}
 }
 
-// COD-T-034: edit review details hold the diff while the text result contains only the success message.
+// Edit review details hold the diff while the text result contains only the success message.
 func TestEditReviewOutputSeparatesDiff(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "review.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0o600); err != nil {
@@ -203,7 +203,7 @@ func TestEditReviewOutputSeparatesDiff(t *testing.T) {
 	}
 }
 
-// COD-T-040: directly specified binary files fail with the binary-file reason, not a subprocess error.
+// Directly specified binary files fail with the binary-file reason, not a subprocess error.
 func TestGrepDirectBinaryReportsBinaryReason(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "binary.bin")
 	if err := os.WriteFile(path, []byte{'x', 0, 'y'}, 0o600); err != nil {
@@ -215,7 +215,7 @@ func TestGrepDirectBinaryReportsBinaryReason(t *testing.T) {
 	}
 }
 
-// COD-T-042: grep glob patterns with a path separator are relative to the search root.
+// Grep glob patterns with a path separator are relative to the search root.
 func TestGrepGlobWithSubdirectory(t *testing.T) {
 	root := t.TempDir()
 	sub := filepath.Join(root, "sub")
@@ -236,7 +236,7 @@ func TestGrepGlobWithSubdirectory(t *testing.T) {
 	}
 }
 
-// COD-T-049: a final note is appended without clearing the failed result state.
+// A final note is appended without clearing the failed result state.
 func TestOutputFinishRetainsFailedState(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -256,7 +256,7 @@ func TestOutputFinishRetainsFailedState(t *testing.T) {
 	}
 }
 
-// COD-T-051: publishing a path with a non-staging suffix returns the stable error.
+// Publishing a path with a non-staging suffix returns the stable error.
 func TestPublishRejectsNonStagingSuffix(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {

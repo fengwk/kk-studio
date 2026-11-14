@@ -8,7 +8,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// LSP-T-027 through LSP-T-037 and LSP-T-110 through LSP-T-115 cover matching, roots and executable lookup.
+// Cover matching, roots and executable lookup.
 func TestDiscovery_MatchesAndResolves(t *testing.T) {
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "server")
@@ -44,7 +44,7 @@ func TestDiscovery_MatchesAndResolves(t *testing.T) {
 	}
 }
 
-// LSP-T-032 verifies the file's parent is the workspace fallback when no marker exists.
+// Verifies the file's parent is the workspace fallback when no marker exists.
 func TestDiscovery_WorkspaceRootFallsBackToFileParent(t *testing.T) {
 	file := filepath.Join(t.TempDir(), "nested", "src", "main.go")
 	if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
@@ -59,7 +59,7 @@ func TestDiscovery_WorkspaceRootFallsBackToFileParent(t *testing.T) {
 	}
 }
 
-// LSP-T-028 verifies duplicate IDs are rejected rather than silently replaced.
+// Verifies duplicate IDs are rejected rather than silently replaced.
 func TestDiscovery_DuplicateID(t *testing.T) {
 	_, err := NewDiscoveryFromServers([]ServerConfig{{ID: "x"}, {ID: "x"}}, ResolverOptions{})
 	if err == nil || err.Error() != "duplicate lsp server id: x" {

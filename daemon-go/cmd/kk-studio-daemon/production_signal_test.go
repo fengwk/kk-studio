@@ -27,7 +27,7 @@ import (
 
 // TestProductionRuntimeSignalCancelsInFlightProcess starts a long process.exec through the real
 // protocol-4 control stream, then sends SIGTERM to the compiled daemon. The daemon must leave its
-// process scope, exit cleanly and release the runtime lock (RUN-T-140 / RUN-T-158).
+// process scope, exit cleanly and release the runtime lock.
 func TestProductionRuntimeSignalCancelsInFlightProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("the signal fixture requires POSIX SIGTERM semantics and process accounting")

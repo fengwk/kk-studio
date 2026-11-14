@@ -34,7 +34,6 @@ func (w *recordedHTTPWriter) Header() http.Header         { return w.header }
 func (w *recordedHTTPWriter) WriteHeader(status int)      { w.status = status }
 func (w *recordedHTTPWriter) Write(p []byte) (int, error) { return w.body.Write(p) }
 
-// TRN-T-059
 func TestTunnel_WebSocketRejectedHandshakeAndUpstreamFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name, response string
@@ -87,7 +86,7 @@ func TestTunnel_WebSocketRejectedHandshakeAndUpstreamFailures(t *testing.T) {
 	}
 }
 
-// TRN-T-060, TRN-T-061 verify a failed downstream write is returned so the HTTP/2 handler can reset its stream.
+// Verify a failed downstream write is returned so the HTTP/2 handler can reset its stream.
 func TestBridgeDuplex_ReturnsStreamWriteFailure(t *testing.T) {
 	want := errors.New("stream write failed")
 	client := &tunnelTestConn{reader: strings.NewReader(""), writeErr: want}
@@ -97,7 +96,7 @@ func TestBridgeDuplex_ReturnsStreamWriteFailure(t *testing.T) {
 	}
 }
 
-// TRN-T-040 verifies an upstream body failure after response headers aborts the HTTP/2 stream.
+// Verifies an upstream body failure after response headers aborts the HTTP/2 stream.
 func TestTunnel_HTTPBodyFailureAfterHeadersAbortsStream(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -144,7 +143,6 @@ func TestResponseBodyWriterFlushesWrittenWebSocketData(t *testing.T) {
 	}
 }
 
-// TRN-T-059
 func TestResponseBodyWriterCloseHandlesNonClosableReader(t *testing.T) {
 	var output bytes.Buffer
 	writer := responseBodyWriter{reader: strings.NewReader("in"), writer: &output}

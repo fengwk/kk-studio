@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// TRN-T-073, TRN-T-085
 func TestH2FrameObserver_GoawayCodesAcrossReadBoundaries(t *testing.T) {
 	for _, code := range []uint32{0, 2} {
 		observer := new(h2FrameObserver)

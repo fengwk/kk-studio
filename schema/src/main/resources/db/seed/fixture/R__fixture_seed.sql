@@ -41,6 +41,4 @@ insert into agent (
     current_timestamp, current_timestamp, 0
 );
 
--- Harness runtime policy rows are gone: retry and realtime stream policy are
--- no longer database tables. The runtime owns execution state with
--- application-generated UUID ids, so the business sequence needs no seed alignment.
+-- Harness execution state uses application-generated UUIDs and needs no sequence alignment.

@@ -214,7 +214,6 @@ func (s fakeSupervisor) Start(_ context.Context, spec native.ProcessSpec) (nativ
 }
 func (fakeSupervisor) Close(context.Context) error { return nil }
 
-// COD-F-016 COD-T-128 COD-T-237
 func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	dataDir := t.TempDir()
 	output := strings.Repeat("x", 100*1024)
@@ -274,7 +273,6 @@ func TestProcessMergesOutputSpillsAndEmitsProgress(t *testing.T) {
 	}
 }
 
-// COD-F-016
 func TestProcessUnknownExitStatusDoesNotAssumeZero(t *testing.T) {
 	dataDir := t.TempDir()
 	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader("output")), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return native.ProcessExit{}, nil }}
@@ -292,7 +290,6 @@ func TestProcessUnknownExitStatusDoesNotAssumeZero(t *testing.T) {
 	}
 }
 
-// COD-T-131
 func TestProcessTimeoutTerminatesAndReportsTimeoutOutcome(t *testing.T) {
 	dataDir := t.TempDir()
 	started := make(chan struct{})
@@ -328,7 +325,7 @@ func TestProcessTimeoutTerminatesAndReportsTimeoutOutcome(t *testing.T) {
 	}
 }
 
-// COD-T-134: cancellation after the process starts terminates it and returns a cancelled result.
+// Cancellation after the process starts terminates it and returns a cancelled result.
 func TestProcessCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -373,7 +370,7 @@ func TestProcessCancel(t *testing.T) {
 	}
 }
 
-// COD-T-136: cancellation during Start waits for the late process handle and converges it.
+// Cancellation during Start waits for the late process handle and converges it.
 func TestProcessTerminateBeforeStart(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -419,7 +416,7 @@ func TestProcessTerminateBeforeStart(t *testing.T) {
 	}
 }
 
-// COD-T-147: a deadline during Start is propagated and the returned process is converged.
+// A deadline during Start is propagated and the returned process is converged.
 func TestProcessTimeoutDuringStartConvergesLateHandle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
 	defer cancel()
@@ -463,7 +460,7 @@ func TestProcessTimeoutDuringStartConvergesLateHandle(t *testing.T) {
 	}
 }
 
-// COD-T-135: a supervisor that cannot converge a cancelled start must not claim cancellation.
+// A supervisor that cannot converge a cancelled start must not claim cancellation.
 func TestProcessAbortStartFailure(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -493,7 +490,7 @@ func TestProcessAbortStartFailure(t *testing.T) {
 	}
 }
 
-// COD-T-141: a start call returning the cancelled context is reported as cancellation, not failure.
+// A start call returning the cancelled context is reported as cancellation, not failure.
 func TestProcessStartAwaitCancelledError(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -523,7 +520,7 @@ func TestProcessStartAwaitCancelledError(t *testing.T) {
 	}
 }
 
-// COD-T-238: the wrapper restores workdir after a login profile changes directories.
+// The wrapper restores workdir after a login profile changes directories.
 func TestProcessWorkdirRestoredAfterLoginProfile(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("the integration fixture requires POSIX bash")
@@ -549,7 +546,6 @@ func TestProcessWorkdirRestoredAfterLoginProfile(t *testing.T) {
 	}
 }
 
-// COD-T-143
 func TestProcessAlreadyCancelledHasTerminalDetails(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -580,7 +576,7 @@ func TestProcessAlreadyCancelledHasTerminalDetails(t *testing.T) {
 	}
 }
 
-// COD-T-132: TimeoutMillis is enforced by the caller context, not by a capability-owned timer.
+// TimeoutMillis is enforced by the caller context, not by a capability-owned timer.
 func TestProcessDoesNotCreateTimeoutTimer(t *testing.T) {
 	process := &fakeProcess{
 		stdout: io.NopCloser(strings.NewReader("done")),
@@ -598,7 +594,7 @@ func TestProcessDoesNotCreateTimeoutTimer(t *testing.T) {
 	}
 }
 
-// COD-T-133: an already-expired deadline returns TIMED_OUT without starting a process.
+// An already-expired deadline returns TIMED_OUT without starting a process.
 func TestProcessPreTimeoutDoesNotStartSupervisor(t *testing.T) {
 	started := 0
 	supervisor := startSupervisor{start: func(context.Context, native.ProcessSpec) (native.ManagedProcess, error) {
@@ -616,7 +612,6 @@ func TestProcessPreTimeoutDoesNotStartSupervisor(t *testing.T) {
 	}
 }
 
-// COD-T-145
 func TestProcessCapabilityRejectsMissingCommand(t *testing.T) {
 	call := runtime.CapabilityCall{InvocationID: "missing", Arguments: json.RawMessage(`{"command":" "}`)}
 	result, err := processCapability(context.Background(), call, runtime.CapabilityContext{})
@@ -625,7 +620,6 @@ func TestProcessCapabilityRejectsMissingCommand(t *testing.T) {
 	}
 }
 
-// COD-T-144
 func TestProcessCapabilityRejectsInvalidWorkdirBeforeStarting(t *testing.T) {
 	arguments, err := json.Marshal(map[string]string{"command": "true", "workdir": filepath.Join(t.TempDir(), "missing")})
 	if err != nil {
@@ -645,7 +639,6 @@ func TestProcessCapabilityRejectsInvalidWorkdirBeforeStarting(t *testing.T) {
 	}
 }
 
-// COD-T-149
 func TestProcessProgressFailureDoesNotStopOutputCapture(t *testing.T) {
 	dataDir := t.TempDir()
 	output := strings.Repeat("progress-failure\n", 6000)
@@ -675,7 +668,6 @@ func TestProcessProgressFailureDoesNotStopOutputCapture(t *testing.T) {
 	}
 }
 
-// COD-T-148
 func TestProcessEmitterAppendOffsetsAndSnapshot(t *testing.T) {
 	var partials []runtime.CapabilityResult
 	emitter := &processEmitter{callID: "partial", progress: func(result runtime.CapabilityResult) error {
@@ -703,7 +695,7 @@ func TestProcessEmitterAppendOffsetsAndSnapshot(t *testing.T) {
 	}
 }
 
-// COD-F-017: a write after the 150ms idle interval flushes pending live output.
+// A write after the 150ms idle interval flushes pending live output.
 func TestProcessEmitterFlushesAfterInterval(t *testing.T) {
 	if liveFlushInterval != 150*time.Millisecond {
 		t.Fatalf("live flush interval=%s want=150ms", liveFlushInterval)
@@ -724,7 +716,7 @@ func TestProcessEmitterFlushesAfterInterval(t *testing.T) {
 	}
 }
 
-// COD-T-153: live APPEND chunks preserve multibyte characters crossing the 64 KiB boundary.
+// Live APPEND chunks preserve multibyte characters crossing the 64 KiB boundary.
 func TestProcessUTF8Boundary(t *testing.T) {
 	for _, character := range []string{"é", "中", "🚀"} {
 		t.Run(character, func(t *testing.T) {
@@ -764,7 +756,6 @@ func TestProcessUTF8Boundary(t *testing.T) {
 	}
 }
 
-// COD-T-150
 func TestProcessConvergenceFailureDoesNotConfirmExecutionExit(t *testing.T) {
 	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader("")), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(0), nil }, terminateErr: errors.New("scope still active")}
 	confirmed := 0
@@ -777,7 +768,6 @@ func TestProcessConvergenceFailureDoesNotConfirmExecutionExit(t *testing.T) {
 	}
 }
 
-// COD-T-151
 func TestProcessReadErrorPreservesCapturedPrefix(t *testing.T) {
 	dataDir := t.TempDir()
 	process := &fakeProcess{
@@ -815,7 +805,7 @@ func TestProcessWaitClosedOutputStreamsAfterNaturalExit(t *testing.T) {
 	}
 }
 
-// COD-T-152: a stream closing because of caller cancellation preserves its captured prefix and CANCELLED outcome.
+// A stream closing because of caller cancellation preserves its captured prefix and CANCELLED outcome.
 func TestProcessCancellationToleratesPrematureStreamClose(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

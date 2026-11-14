@@ -19,7 +19,6 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// NAT-T-089
 func TestLinuxSupervisor_UnknownBaselineFailsBeforeStartingCommand(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -57,7 +56,7 @@ func linuxStatRecord(pid, parent, sid, threads int, start string) []byte {
 	return []byte(fmt.Sprintf("%d (command with ) delimiter) %s", pid, strings.Join(fields, " ")))
 }
 
-// NAT-F-006 verifies process snapshot errors and disappearing entries never become an empty successful snapshot.
+// Verifies process snapshot errors and disappearing entries never become an empty successful snapshot.
 func TestLinuxProcessMembersWithAPI_FailureAndSnapshotBranches(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"noise", "0", "-1", "10", "20", "30", "40", "50"} {
@@ -143,7 +142,7 @@ func TestLinuxProcessMembersWithAPI_FailureAndSnapshotBranches(t *testing.T) {
 	}
 }
 
-// NAT-T-049 verifies deterministic parent-before-child session ordering.
+// Verifies deterministic parent-before-child session ordering.
 func TestLinuxSession_ParentFirst(t *testing.T) {
 	members := []sessionMember{
 		{PID: 30, Parent: 20},
@@ -174,7 +173,7 @@ func deepSessionChain(size int) []sessionMember {
 	return members
 }
 
-// NAT-T-050 verifies that duplicate, cyclic, or overly deep snapshots cannot establish an order.
+// Verifies that duplicate, cyclic, or overly deep snapshots cannot establish an order.
 func TestLinuxSession_AmbiguousSnapshot(t *testing.T) {
 	for _, testCase := range []struct {
 		name    string
@@ -192,7 +191,6 @@ func TestLinuxSession_AmbiguousSnapshot(t *testing.T) {
 	}
 }
 
-// NAT-T-059
 func TestLinuxSession_DirectChildren(t *testing.T) {
 	child := exec.Command("/bin/sleep", "30")
 	if err := child.Start(); err != nil {
@@ -228,7 +226,6 @@ func TestLinuxSession_DirectChildren(t *testing.T) {
 	}
 }
 
-// NAT-T-057
 func TestLinuxSession_NoAdoptedChildren(t *testing.T) {
 	children, err := directChildren(os.Getpid(), nil)
 	if err != nil {
@@ -245,7 +242,7 @@ func TestLinuxSession_NoAdoptedChildren(t *testing.T) {
 	}
 }
 
-// NAT-T-051, NAT-T-121 verify explicitly tracked escaped sessions converge on terminate.
+// Verify explicitly tracked escaped sessions converge on terminate.
 func TestLinuxSupervisor_ConvergesTrackedEscapedSession(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -272,7 +269,6 @@ func TestLinuxSupervisor_ConvergesTrackedEscapedSession(t *testing.T) {
 	waitPIDGone(t, childPID, time.Second)
 }
 
-// NAT-T-122
 func TestLinuxSupervisor_ConvergesAdoptedSessionAfterNaturalExit(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -298,7 +294,6 @@ func TestLinuxSupervisor_ConvergesAdoptedSessionAfterNaturalExit(t *testing.T) {
 	waitPIDGone(t, childPID, time.Second)
 }
 
-// NAT-T-123
 func TestLinuxSupervisor_ConvergesAdoptedSessionAfterHelperDeath(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -367,7 +362,7 @@ func TestLinuxConvergeAdoptedChildrenRejectsUnknownOwner(t *testing.T) {
 	}
 }
 
-// NAT-F-005 excludes exec.Cmd.Wait's PID from the adopted-child Wait4 set.
+// Excludes exec.Cmd.Wait's PID from the adopted-child Wait4 set.
 func TestLinuxDirectChildrenExcludesCommandWaitPID(t *testing.T) {
 	all := []sessionMember{
 		{PID: 201, Parent: 42, Session: 101, Identity: "command"},

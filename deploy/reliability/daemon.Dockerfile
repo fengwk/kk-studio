@@ -90,7 +90,7 @@ ENV LANG=C.UTF-8 \
     PATH=/usr/local/bin:/usr/bin:/bin
 
 # 只刷新基础包并安装 Daemon 真正用到的宿主工具：bash（能力和用例脚本）、git（Git 能力与
-# reliability 快照）、libstdc++（koffi 原生模块）、ca-certificates（HTTPS 依赖下载）。
+# reliability 快照）、libstdc++（code-server 自带 Node 运行时的 C++ 运行库）、ca-certificates（HTTPS 依赖下载）。
 RUN set -eux; \
     apt-get update; \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade --yes; \

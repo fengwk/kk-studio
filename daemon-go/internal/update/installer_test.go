@@ -18,7 +18,7 @@ import (
 
 const installerTestEnvironmentID = "123e4567-e89b-42d3-a456-426614174000"
 
-// RUN-T-202/205 downloads the official installer, reports measured bytes, and hands off a gated OS job.
+// Downloads the official installer, reports measured bytes, and hands off a gated OS job.
 func TestInstallerRunnerPreparesAndGatesOfficialJob(t *testing.T) {
 	home, root, temp := installerFixture(t)
 	var mu sync.Mutex
@@ -108,7 +108,7 @@ func TestInstallerRunnerPreparesAndGatesOfficialJob(t *testing.T) {
 	stop()
 }
 
-// RUN-T-204/208 rejects untrusted commands and any installation outside the official environment layout.
+// Rejects untrusted commands and any installation outside the official environment layout.
 func TestInstallerRunnerRejectsUnsupportedAndUnmanagedUpdate(t *testing.T) {
 	home, _, temp := installerFixture(t)
 	for _, tc := range []struct {
@@ -142,7 +142,7 @@ func TestInstallerRunnerRejectsUnsupportedAndUnmanagedUpdate(t *testing.T) {
 	}
 }
 
-// RUN-T-205/206/207 refuses redirects, non-200 responses, empty scripts, and installer downloads over one MiB.
+// Refuses redirects, non-200 responses, empty scripts, and installer downloads over one MiB.
 func TestInstallerRunnerRejectsUnsafeDownloads(t *testing.T) {
 	home, _, temp := installerFixture(t)
 	cases := []struct {
@@ -177,7 +177,7 @@ func TestInstallerRunnerRejectsUnsafeDownloads(t *testing.T) {
 	}
 }
 
-// RUN-T-218/219 verifies Unix and Windows handoff arguments never carry inherited secrets.
+// Verifies Unix and Windows handoff arguments never carry inherited secrets.
 func TestInstallerJobArgumentConstruction(t *testing.T) {
 	proxy := "http://proxy.example:8080"
 	value := InstallerConfig{EnvironmentID: installerTestEnvironmentID, ProxyURL: &proxy}

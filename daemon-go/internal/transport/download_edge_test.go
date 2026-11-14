@@ -18,7 +18,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// TRN-N-002
 func TestDownload_TicketValidationErrors(t *testing.T) {
 	const id = "123e4567-e89b-12d3-a456-426614174000"
 	ready := testDownloadTicket(id, "http://storage.example/file", []byte("x"))
@@ -93,7 +92,7 @@ func (b *countedDownloadBody) Close() error {
 	return nil
 }
 
-// TRN-T-089 verifies a resource download can use the applied network runtime lifecycle.
+// Verifies a resource download can use the applied network runtime lifecycle.
 func TestDownload_UsesNetworkRuntime(t *testing.T) {
 	body := []byte("download")
 	digest := fmt.Sprintf("%x", sha256.Sum256(body))
@@ -109,7 +108,6 @@ func TestDownload_UsesNetworkRuntime(t *testing.T) {
 	}
 }
 
-// TRN-N-002, TRN-T-090
 func TestDownload_PresignedRequestFailuresAreRedacted(t *testing.T) {
 	const digest = "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
 	body := []byte("x")
@@ -163,7 +161,6 @@ func TestDownload_PresignedRequestFailuresAreRedacted(t *testing.T) {
 	}
 }
 
-// TRN-T-100
 func TestDownload_FailedRequestDoesNotLeakPresignedQuery(t *testing.T) {
 	const digest = "2d711642b726b04401627ca9fbac32f5c8530fb1903cc4db02258717921a4881"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusBadGateway) }))
@@ -179,7 +176,7 @@ func TestDownload_FailedRequestDoesNotLeakPresignedQuery(t *testing.T) {
 	}
 }
 
-// TRN-N-002 verifies download reads at most one byte beyond the declared size and rejects expired tickets without retrying.
+// Verifies download reads at most one byte beyond the declared size and rejects expired tickets without retrying.
 func TestDownload_EnforcesTicketSizeAndExpiry(t *testing.T) {
 	const transferID = "123e4567-e89b-12d3-a456-426614174000"
 	body := &countedDownloadBody{reader: bytes.NewReader([]byte("oversized"))}
@@ -237,7 +234,7 @@ func TestDownload_EnforcesTicketSizeAndExpiry(t *testing.T) {
 	}
 }
 
-// TRN-N-002 verifies no independent download-size ceiling rejects a ticket before the fetch.
+// Verifies no independent download-size ceiling rejects a ticket before the fetch.
 func TestDownload_DoesNotApplyAdditionalSizeLimit(t *testing.T) {
 	requests := 0
 	client := &http.Client{Transport: transportRoundTripper(func(*http.Request) (*http.Response, error) {

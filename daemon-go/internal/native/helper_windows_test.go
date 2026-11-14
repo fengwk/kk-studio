@@ -130,7 +130,7 @@ func (api *fakeWindowsCommandAPI) CloseHandle(handle windows.Handle) error {
 	return nil
 }
 
-// NAT-N-003 verifies suspended creation, Job membership, the inherited-handle allowlist, and environment termination.
+// Verifies suspended creation, Job membership, the inherited-handle allowlist, and environment termination.
 func TestCreateSuspendedWindowsCommand_UsesJobAndHandleLists(t *testing.T) {
 	api := &fakeWindowsCommandAPI{
 		stdout:      20,
@@ -169,7 +169,7 @@ func TestCreateSuspendedWindowsCommand_UsesJobAndHandleLists(t *testing.T) {
 	}
 }
 
-// NAT-T-176 verifies filtered, sorted UTF-16 environment entries and duplicate-key replacement.
+// Verifies filtered, sorted UTF-16 environment entries and duplicate-key replacement.
 func TestWindowsEnvironmentBlock_FiltersAndSortsEntries(t *testing.T) {
 	got := windowsEnvironmentBlock([]string{
 		"B=2",
@@ -187,7 +187,7 @@ func TestWindowsEnvironmentBlock_FiltersAndSortsEntries(t *testing.T) {
 	}
 }
 
-// NAT-N-005 verifies fail-closed results and cleanup for injectable Win32 API failures.
+// Verifies fail-closed results and cleanup for injectable Win32 API failures.
 func TestCreateSuspendedWindowsCommand_CleansUpOnAPIAndResultFailures(t *testing.T) {
 	apiError := errors.New("Win32 API failed")
 	tests := []struct {

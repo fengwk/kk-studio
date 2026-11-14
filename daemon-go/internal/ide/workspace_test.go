@@ -14,7 +14,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// IDE-T-140 verifies filesystem failures retain stable platform-neutral error codes.
+// Verifies filesystem failures retain stable platform-neutral error codes.
 func TestFilesystemErrorCodeMapping(t *testing.T) {
 	notDirectoryCode := "ENOTDIR"
 	if runtime.GOOS == "windows" {
@@ -38,7 +38,6 @@ func TestFilesystemErrorCodeMapping(t *testing.T) {
 	}
 }
 
-// IDE-T-140
 func TestIdentityAndEpochValidation(t *testing.T) {
 	if got, err := ValidateViewID("123e4567-e89b-12d3-a456-426614174000"); err != nil || got == "" {
 		t.Fatalf("valid UUID: got %q, err %v", got, err)
@@ -58,7 +57,6 @@ func TestIdentityAndEpochValidation(t *testing.T) {
 	}
 }
 
-// IDE-T-142
 func TestCanonicalDirectory(t *testing.T) {
 	root := t.TempDir()
 	dir := filepath.Join(root, "target")
@@ -93,7 +91,6 @@ func TestCanonicalDirectory(t *testing.T) {
 	}
 }
 
-// IDE-T-143
 func TestWorkspaceFileContent(t *testing.T) {
 	want := "{\n  \"folders\": [\n    {\n      \"path\": \"/work\"\n    }\n  ]\n}\n"
 	if got := WorkspaceFileContent("/work"); got != want {
@@ -101,7 +98,6 @@ func TestWorkspaceFileContent(t *testing.T) {
 	}
 }
 
-// IDE-T-138
 func TestListCanonicalDirectories(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"zeta", "alpha"} {
@@ -121,7 +117,6 @@ func TestListCanonicalDirectories(t *testing.T) {
 	}
 }
 
-// IDE-T-144
 func TestUnsafeDirectoryNames(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unsafe directory names are platform-specific")
@@ -141,7 +136,6 @@ func TestUnsafeDirectoryNames(t *testing.T) {
 	}
 }
 
-// IDE-T-141
 func TestHostHome(t *testing.T) {
 	if home, err := HostHome(map[string]string{"HOME": "/home/test"}); err != nil || home != "/home/test" {
 		t.Fatalf("HOME = %q, %v", home, err)
@@ -154,7 +148,6 @@ func TestHostHome(t *testing.T) {
 	}
 }
 
-// IDE-T-139
 func TestListingLimits(t *testing.T) {
 	var names []string
 	truncated := false
@@ -195,7 +188,6 @@ func TestListingLimits(t *testing.T) {
 	}
 }
 
-// IDE-T-152
 func TestSafeErrorMessages(t *testing.T) {
 	if got := FailureCode(ErrCancelled); got != "BUSY" {
 		t.Fatalf("cancel code = %q", got)
@@ -223,7 +215,6 @@ func TestSafeErrorMessages(t *testing.T) {
 	}
 }
 
-// IDE-T-146
 func TestRecoverySafeErrors(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
 	if got, err := ReadRecoveryBackup(cfg, "123e4567-e89b-12d3-a456-426614174000", 1024); err != nil || got != nil {
@@ -250,7 +241,6 @@ func TestRecoverySafeErrors(t *testing.T) {
 	}
 }
 
-// IDE-T-146
 func TestRecoveryFilesystemFailure(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
 	recovery := recoveryDirectory(cfg)
@@ -269,7 +259,6 @@ func TestRecoveryFilesystemFailure(t *testing.T) {
 	}
 }
 
-// IDE-T-147
 func TestDanglingRecoveryEntry(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("dangling symlink behavior differs on Windows")
@@ -288,7 +277,6 @@ func TestDanglingRecoveryEntry(t *testing.T) {
 	}
 }
 
-// IDE-T-145
 func TestRecoveryAggregateQuota(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
 	first := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "now", Documents: []RecoveryDocument{}}
@@ -309,7 +297,7 @@ func TestRecoveryAggregateQuota(t *testing.T) {
 	}
 }
 
-// IDE-T-150 verifies recovery record validation rejects invalid metadata and document fields.
+// Verifies recovery record validation rejects invalid metadata and document fields.
 func TestValidateRecoveryBackupFields(t *testing.T) {
 	workspace, err := filepath.Abs(filepath.Join(t.TempDir(), "workspace"))
 	if err != nil {
@@ -337,7 +325,6 @@ func TestValidateRecoveryBackupFields(t *testing.T) {
 	}
 }
 
-// IDE-T-150
 func TestCorruptRecoveryVariants(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
 	viewID := "123e4567-e89b-12d3-a456-426614174000"
@@ -355,7 +342,6 @@ func TestCorruptRecoveryVariants(t *testing.T) {
 	}
 }
 
-// IDE-T-149
 func TestRecoveryWriteAndReadLimits(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
 	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "now", Documents: []RecoveryDocument{{Path: filepath.Join(cfg.DataDir, "work", "file"), Text: "unsaved"}}}
@@ -386,7 +372,6 @@ func TestRecoveryWriteAndReadLimits(t *testing.T) {
 	}
 }
 
-// IDE-T-151
 func TestPrivateRecoveryBudget(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
 	backup := RecoveryBackup{ViewID: "123e4567-e89b-12d3-a456-426614174000", BindingEpoch: "1", Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "now", Documents: []RecoveryDocument{{Path: filepath.Join(cfg.DataDir, "work", "file"), Text: "unsaved"}}}
@@ -407,7 +392,6 @@ func TestPrivateRecoveryBudget(t *testing.T) {
 	}
 }
 
-// IDE-T-148
 func TestRecoveryRoundTrip(t *testing.T) {
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
 	backup := RecoveryBackup{

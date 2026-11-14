@@ -17,7 +17,7 @@ import (
 
 const outputLimitFailureMessage = "Tool output is 1.000001 MiB, which exceeds the tool output size limit of 1 MiB. The tool ran but its output was discarded; side effects may have occurred. Request a smaller result, for example a narrower read range or filtered command output, or ask the user to raise the limit in system settings."
 
-// TRN-N-001 verifies a runtime FAILED result following an over-limit INVOKE is invocation-scoped
+// Verifies a runtime FAILED result following an over-limit INVOKE is invocation-scoped
 // and leaves the HTTP/2 control stream usable for the next invocation.
 func TestTransport_OutputLimitFailureKeepsControlConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

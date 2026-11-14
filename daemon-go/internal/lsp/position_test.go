@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// LSP-T-079 verifies 1-based code-point input conversion to the negotiated LSP encoding and CRLF handling.
+// Verifies 1-based code-point input conversion to the negotiated LSP encoding and CRLF handling.
 func TestPosition_EncodingsAndBounds(t *testing.T) {
 	for _, test := range []struct {
 		encoding string
@@ -31,7 +31,7 @@ func TestPosition_EncodingsAndBounds(t *testing.T) {
 	}
 }
 
-// LSP-T-079 round-trips Unicode code-point columns through all negotiated encodings.
+// Round-trips Unicode code-point columns through all negotiated encodings.
 func TestPosition_UnicodeRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "unicode.go")
 	if err := os.WriteFile(path, []byte("first\n汉😀x\r\n"), 0600); err != nil {

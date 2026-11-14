@@ -16,7 +16,7 @@ import (
 	"unicode/utf16"
 )
 
-// RUN-T-204/218/219 exercises platform-specific job registration without launching an installer in tests.
+// Exercises platform-specific job registration without launching an installer in tests.
 func TestInstallerRunnerBuildsDarwinAndWindowsJobs(t *testing.T) {
 	for _, platform := range []string{"darwin", "windows"} {
 		t.Run(platform, func(t *testing.T) {
@@ -71,7 +71,7 @@ func TestInstallerRunnerBuildsDarwinAndWindowsJobs(t *testing.T) {
 	}
 }
 
-// RUN-T-207 keeps update adapters configured only with usable host boundaries and sanitizes launcher failures.
+// Keeps update adapters configured only with usable host boundaries and sanitizes launcher failures.
 func TestInstallerRunnerBoundariesAndSafeLauncherErrors(t *testing.T) {
 	var nilRunner *InstallerRunner
 	if nilRunner.Configured() {
@@ -108,7 +108,7 @@ func TestInstallerRunnerBoundariesAndSafeLauncherErrors(t *testing.T) {
 	}
 }
 
-// RUN-T-205 verifies timeout, content-size, and non-redirect behavior at the HTTP boundary.
+// Verifies timeout, content-size, and non-redirect behavior at the HTTP boundary.
 func TestInstallerDownloadContextAndRedirectPolicy(t *testing.T) {
 	home, _, temp := installerFixture(t)
 	requests := 0
@@ -137,7 +137,7 @@ func TestInstallerDownloadContextAndRedirectPolicy(t *testing.T) {
 	}
 }
 
-// RUN-T-211/213 reads only bounded diagnostics and stops after a matching successful operation.
+// Reads only bounded diagnostics and stops after a matching successful operation.
 func TestInstallerDiagnosticReadBoundsAndSuccess(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "last-operation.json")
 	if _, err := readBoundedFile(path, 4097); err == nil {
@@ -179,7 +179,7 @@ func TestInstallerDiagnosticReadBoundsAndSuccess(t *testing.T) {
 	stop()
 }
 
-// RUN-T-208 checks exact managed paths and Windows case-insensitive path identity.
+// Checks exact managed paths and Windows case-insensitive path identity.
 func TestManagedUpdatePathValidation(t *testing.T) {
 	home := t.TempDir()
 	value := installerConfig(home)
@@ -206,7 +206,7 @@ func TestManagedUpdatePathValidation(t *testing.T) {
 	}
 }
 
-// RUN-T-218 keeps the packaged Unix runner syntactically valid as a standalone Bash job.
+// Keeps the packaged Unix runner syntactically valid as a standalone Bash job.
 func TestUnixRunnerScriptParses(t *testing.T) {
 	bash, err := exec.LookPath("bash")
 	if err != nil {

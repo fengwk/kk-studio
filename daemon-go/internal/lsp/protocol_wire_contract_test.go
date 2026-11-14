@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// LSP-N-001 pins typed protocol payloads to the existing LSP wire contract.
+// Pins typed protocol payloads to the existing LSP wire contract.
 func TestProtocol_WirePayloadContracts(t *testing.T) {
 	root := t.TempDir()
 	source := filepath.Join(root, "sample.go")

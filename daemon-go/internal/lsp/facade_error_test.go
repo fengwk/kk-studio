@@ -13,7 +13,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// LSP-T-011 through LSP-T-014 verify cancellation, timeout, and safe capability error mapping.
+// Verify cancellation, timeout, and safe capability error mapping.
 func TestCapabilities_ErrorMapping(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "main.go")
 	if err := os.WriteFile(source, []byte("package main\n"), 0600); err != nil {

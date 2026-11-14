@@ -41,7 +41,6 @@ func (s startErrorSupervisor) Start(context.Context, native.ProcessSpec) (native
 }
 func (startErrorSupervisor) Close(context.Context) error { return nil }
 
-// COD-F-016
 func TestExecuteProcessClassifiesStartAndWaitFailures(t *testing.T) {
 	workdir := t.TempDir()
 	for _, test := range []struct {
@@ -78,7 +77,6 @@ func TestExecuteProcessClassifiesStartAndWaitFailures(t *testing.T) {
 	}
 }
 
-// COD-F-016
 func TestExecuteProcessReportsSignalAndUsesConfiguredShell(t *testing.T) {
 	workdir := t.TempDir()
 	signal := "SIGTERM"
@@ -92,7 +90,6 @@ func TestExecuteProcessReportsSignalAndUsesConfiguredShell(t *testing.T) {
 
 func stringPointer(value string) *string { return &value }
 
-// COD-F-016
 func TestExecuteProcessReportsNonzeroExitCode(t *testing.T) {
 	workdir := t.TempDir()
 	process := &fakeProcess{stdout: io.NopCloser(strings.NewReader("failed")), stderr: io.NopCloser(strings.NewReader("")), wait: func(context.Context) (native.ProcessExit, error) { return testProcessExit(7), nil }}
@@ -103,7 +100,6 @@ func TestExecuteProcessReportsNonzeroExitCode(t *testing.T) {
 	}
 }
 
-// COD-F-017
 func TestProcessSnapshotDisablesEmitterAfterProgressError(t *testing.T) {
 	calls := 0
 	emitter := &processEmitter{callID: "snapshot-error", progress: func(runtime.CapabilityResult) error { calls++; return errors.New("progress unavailable") }, stopped: func() bool { return false }, lastFlush: time.Now()}
@@ -114,7 +110,6 @@ func TestProcessSnapshotDisablesEmitterAfterProgressError(t *testing.T) {
 	}
 }
 
-// COD-F-017
 func TestProcessSnapshotSkipsStoppedAndEmptyUpdates(t *testing.T) {
 	calls := 0
 	emitter := &processEmitter{callID: "stopped", progress: func(runtime.CapabilityResult) error { calls++; return nil }, stopped: func() bool { return true }, lastFlush: time.Now()}
@@ -126,7 +121,6 @@ func TestProcessSnapshotSkipsStoppedAndEmptyUpdates(t *testing.T) {
 	}
 }
 
-// COD-F-017
 func TestProcessSnapshotNoOpsWithoutProgressEmitter(t *testing.T) {
 	emitter := &processEmitter{callID: "no-progress", lastFlush: time.Now()}
 	emitter.Snapshot("snapshot")

@@ -12,7 +12,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-N-003
 func TestParseImageTierAcceptsEveryTier(t *testing.T) {
 	for _, test := range []struct {
 		input runtime.ImageInputTier
@@ -29,7 +28,6 @@ func TestParseImageTierAcceptsEveryTier(t *testing.T) {
 	}
 }
 
-// COD-F-016
 func TestProcessCapabilityRequiresValidWorkdir(t *testing.T) {
 	root := t.TempDir()
 	file := filepath.Join(root, "file.txt")
@@ -66,7 +64,6 @@ func TestProcessCapabilityRequiresValidWorkdir(t *testing.T) {
 	}
 }
 
-// COD-F-008
 func TestEditAndWritePreviewRejectCancelledCalls(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

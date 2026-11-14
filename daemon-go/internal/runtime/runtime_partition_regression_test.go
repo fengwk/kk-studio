@@ -57,7 +57,7 @@ type TypeError struct{ message string }
 
 func (e *TypeError) Error() string { return e.message }
 
-// RUN-T-097 confirms an inconsistent bootstrap configuration terminates instead of reconnecting.
+// Confirms an inconsistent bootstrap configuration terminates instead of reconnecting.
 func TestRuntimeFatalConfigurationDoesNotReconnect(t *testing.T) {
 	initial := initialRuntimeConfig()
 	status := NewStatusTracker()
@@ -93,7 +93,7 @@ func TestRuntimeFatalConfigurationDoesNotReconnect(t *testing.T) {
 	}
 }
 
-// RUN-T-096 verifies a forbidden server frame receives a diagnostic and closes its generation.
+// Verifies a forbidden server frame receives a diagnostic and closes its generation.
 func TestRuntimeForbiddenInboundFrameDisconnects(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	active := r.connection
@@ -119,7 +119,7 @@ func TestRuntimeForbiddenInboundFrameDisconnects(t *testing.T) {
 	}
 }
 
-// RUN-T-043 rejects lease frames when no IDE service is configured.
+// Rejects lease frames when no IDE service is configured.
 func TestRuntimeReportsMissingIDELeaseHandler(t *testing.T) {
 	r, _ := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	if err := r.handle(context.Background(), ideLeaseEnvelope(1)); err == nil || err.Error() != "IDE lease requires a READY bound connection" {
@@ -127,7 +127,7 @@ func TestRuntimeReportsMissingIDELeaseHandler(t *testing.T) {
 	}
 }
 
-// RUN-T-090 rejects a temporary-resource policy until the environment is READY.
+// Rejects a temporary-resource policy until the environment is READY.
 func TestRuntimeTemporaryResourcePolicyRequiresReady(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	r.mu.Lock()
@@ -151,7 +151,7 @@ func TestRuntimeTemporaryResourcePolicyRequiresReady(t *testing.T) {
 	}
 }
 
-// RUN-T-130 retains the exact busy diagnostics provided by active IDE command and view state.
+// Retains the exact busy diagnostics provided by active IDE command and view state.
 func TestRuntimeUpdateRejectsBusyIDEWithExactReason(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -180,7 +180,7 @@ func TestRuntimeUpdateRejectsBusyIDEWithExactReason(t *testing.T) {
 	}
 }
 
-// RUN-T-107 validates READY and configuration-switch admission for IDE work.
+// Validates READY and configuration-switch admission for IDE work.
 func TestRuntimeSuspendsIDECommandAndLeaseDuringConfigurationSwitch(t *testing.T) {
 	ide := &blockingIDEAdmission{entered: make(chan struct{}, 1), release: make(chan struct{}), canUpdate: true}
 	options := runtimeOptionsForTest()
@@ -246,7 +246,7 @@ func TestRuntimeSuspendsIDECommandAndLeaseDuringConfigurationSwitch(t *testing.T
 	}
 }
 
-// RUN-T-107 verifies candidate suspension, abort recovery, and successful reconnect hold for IDE writes.
+// Verifies candidate suspension, abort recovery, and successful reconnect hold for IDE writes.
 func TestRuntimeConfigCandidateControlsIDEAdmission(t *testing.T) {
 	initial := initialRuntimeConfig()
 	status := NewStatusTracker()
@@ -362,7 +362,7 @@ func TestRuntimeConfigCandidateControlsIDEAdmission(t *testing.T) {
 	}
 }
 
-// RUN-T-042/052/130 verifies update admission, duplicate suppression, and OPEN_VIEW rejection.
+// Verifies update admission, duplicate suppression, and OPEN_VIEW rejection.
 func TestRuntimeDerivesUpdateAdmissionFromIDEService(t *testing.T) {
 	ide := &blockingIDEAdmission{entered: make(chan struct{}, 1), release: make(chan struct{}), canUpdate: true}
 	options := runtimeOptionsForTest()
@@ -473,7 +473,7 @@ func TestRuntimeIDECommandCancelsOnDisconnect(t *testing.T) {
 	}
 }
 
-// RUN-T-108 verifies shutdown cancels and waits for IDE commands before Run returns.
+// Verifies shutdown cancels and waits for IDE commands before Run returns.
 func TestRuntimeIDECommandCancelsAndWaitsForShutdown(t *testing.T) {
 	connection := newTestConnection()
 	ide := &blockingIDEAdmission{entered: make(chan struct{}, 1), release: make(chan struct{}), canUpdate: true}
@@ -516,7 +516,7 @@ func TestRuntimeIDECommandCancelsAndWaitsForShutdown(t *testing.T) {
 	}
 }
 
-// RUN-T-099/100 hot-updates the sweeper policy and reports failures without exposing their messages.
+// Hot-updates the sweeper policy and reports failures without exposing their messages.
 func TestRuntimeTemporaryResourceSweeperHotPolicyAndSafeFailure(t *testing.T) {
 	connection := newTestConnection()
 	connection.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{

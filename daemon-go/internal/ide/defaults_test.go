@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// IDE-T-041
 func TestBundledExtensionDefaults(t *testing.T) {
 	path := filepath.Join("..", "..", "ide-extension", "package.json")
 	data, err := os.ReadFile(path)

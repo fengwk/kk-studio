@@ -85,7 +85,7 @@ func (c *testConnection) sent(t protocol.MessageType) bool {
 	return false
 }
 
-// RUN-T-003 (ADAPT) rejects SETTINGS missing the current ResourceBudgets contract.
+// (ADAPT) rejects SETTINGS missing the current ResourceBudgets contract.
 func TestRuntimeSettingsRequireResourceBudgets(t *testing.T) {
 	c := newTestConnection()
 	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: fixedConnectionFactory{connection: c}, ApplyConfig: func(_ context.Context, _ int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
@@ -99,7 +99,7 @@ func TestRuntimeSettingsRequireResourceBudgets(t *testing.T) {
 	}
 }
 
-// RUN-T-086 does not send READY until the first environment snapshot has finished applying.
+// Does not send READY until the first environment snapshot has finished applying.
 func TestRuntimeSendsReadyAfterConfigurationApplication(t *testing.T) {
 	c := newTestConnection()
 	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
@@ -154,7 +154,7 @@ func TestRuntimeSendsReadyAfterConfigurationApplication(t *testing.T) {
 	}
 }
 
-// RUN-T-063 rejects inbound envelopes that declare a different bound environment.
+// Rejects inbound envelopes that declare a different bound environment.
 func TestRuntimeRejectsOtherEnvironmentScope(t *testing.T) {
 	c := newTestConnection()
 	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: fixedConnectionFactory{connection: c}, ApplyConfig: func(_ context.Context, _ int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
@@ -172,7 +172,7 @@ func TestRuntimeRejectsOtherEnvironmentScope(t *testing.T) {
 	}
 }
 
-// RUN-T-005 dispatches a valid INVOKE and sends STARTED before its terminal result.
+// Dispatches a valid INVOKE and sends STARTED before its terminal result.
 func TestRuntimeExecutesInvocation(t *testing.T) {
 	c := newTestConnection()
 	c.in <- &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: stringPtr("env"), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{}}}}
