@@ -14,18 +14,15 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.DirectoryIteratorException;
 import java.nio.file.DirectoryStream;
-import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.PosixFilePermission;
 import java.nio.file.attribute.PosixFilePermissions;
@@ -51,10 +48,10 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
 
   private static final String LOCK_FILE = ".lock";
   private static final String SUFFIX = ".json";
-  private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS =
-      PosixFilePermissions.fromString("rwx------");
   private static final Set<PosixFilePermission> FILE_PERMISSIONS =
       PosixFilePermissions.fromString("rw-------");
+  private static final Set<PosixFilePermission> DIRECTORY_PERMISSIONS =
+      PosixFilePermissions.fromString("rwx------");
   private static final ObjectMapper MAPPER = HarnessJson.STRICT;
 
   /**
@@ -82,11 +79,13 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   private final FileChannel lockChannel;
   private final FileLock lock;
   private final ReentrantLock writeLock = new ReentrantLock();
+  private final AtomicJournalFile files;
   private boolean closed;
   private boolean heldUntilProcessExit;
 
   public FileExecutionExitJournal(Path directory) {
     this.directory = Objects.requireNonNull(directory, "directory").toAbsolutePath();
+    this.files = new AtomicJournalFile(this.directory);
     createDirectory();
     FileChannel channel = null;
     FileLock acquired = null;
@@ -157,37 +156,20 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
         replaceDurably(target, record);
         return record;
       }
-      Path temporary = directory.resolve("." + UUID.randomUUID() + ".tmp");
-      boolean moved = false;
-      Throwable failure = null;
       try {
-        writeDurably(temporary, encode(record));
-        try {
-          Files.move(temporary, target, StandardCopyOption.ATOMIC_MOVE);
-        } catch (FileAlreadyExistsException error) {
-          throw new ExecutionExitJournalConflictException(
-              ExecutionExitJournalConflictException.Conflict.IDENTITY,
-              "execution exit journal identity conflict for " + record.executionId(),
-              error);
-        } catch (IOException error) {
-          throw new ExecutionExitJournalException(
-              "cannot persist execution exit journal entry for " + record.executionId(), error);
-        }
-        moved = true;
-        forceDirectoryForWrite();
-        return record;
-      } catch (IOException | RuntimeException error) {
-        failure = error;
-        if (error instanceof ExecutionExitJournalException journalError) {
-          throw journalError;
-        }
+        files.publishNew(
+            target,
+            encode(record),
+            () -> {
+              throw new ExecutionExitJournalConflictException(
+                  ExecutionExitJournalConflictException.Conflict.IDENTITY,
+                  "execution exit journal identity conflict for " + record.executionId());
+            });
+      } catch (IOException error) {
         throw new ExecutionExitJournalException(
             "cannot persist execution exit journal entry for " + record.executionId(), error);
-      } finally {
-        if (!moved) {
-          deleteTemporary(temporary, failure);
-        }
       }
+      return record;
     } finally {
       writeLock.unlock();
     }
@@ -195,31 +177,11 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
 
   /** 把同一身份的 PREPARED 原子推进到 EXIT_PROOF：写临时文件后原子替换，保留单一 canonical 文件。 */
   private void replaceDurably(Path target, ExecutionExitJournalRecord record) {
-    Path temporary = directory.resolve("." + UUID.randomUUID() + ".tmp");
-    boolean moved = false;
-    Throwable failure = null;
     try {
-      writeDurably(temporary, encode(record));
-      try {
-        Files.move(
-            temporary, target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
-      } catch (IOException error) {
-        throw new ExecutionExitJournalException(
-            "cannot persist execution exit journal entry for " + record.executionId(), error);
-      }
-      moved = true;
-      forceDirectoryForWrite();
-    } catch (IOException | RuntimeException error) {
-      failure = error;
-      if (error instanceof ExecutionExitJournalException journalError) {
-        throw journalError;
-      }
+      files.replace(target, encode(record));
+    } catch (IOException error) {
       throw new ExecutionExitJournalException(
           "cannot persist execution exit journal entry for " + record.executionId(), error);
-    } finally {
-      if (!moved) {
-        deleteTemporary(temporary, failure);
-      }
     }
   }
 
@@ -499,16 +461,9 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     return node.stringValue();
   }
 
-  private void writeDurably(Path file, String content) throws IOException {
-    byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
-    try (FileChannel channel =
-        FileChannel.open(file, StandardOpenOption.CREATE_NEW, StandardOpenOption.WRITE)) {
-      setFilePermissions(file);
-      ByteBuffer buffer = ByteBuffer.wrap(bytes);
-      while (buffer.hasRemaining()) {
-        channel.write(buffer);
-      }
-      channel.force(true);
+  private static void setDirectoryPermissions(Path path) throws IOException {
+    if (Files.getFileStore(path).supportsFileAttributeView("posix")) {
+      Files.setPosixFilePermissions(path, DIRECTORY_PERMISSIONS);
     }
   }
 
@@ -527,12 +482,6 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
     }
   }
 
-  private static void setDirectoryPermissions(Path path) throws IOException {
-    if (Files.getFileStore(path).supportsFileAttributeView("posix")) {
-      Files.setPosixFilePermissions(path, DIRECTORY_PERMISSIONS);
-    }
-  }
-
   private static void setFilePermissions(Path path) throws IOException {
     if (Files.getFileStore(path).supportsFileAttributeView("posix")) {
       Files.setPosixFilePermissions(path, FILE_PERMISSIONS);
@@ -542,16 +491,6 @@ public final class FileExecutionExitJournal implements ExecutionExitJournal {
   private void ensureOpen() {
     if (closed) {
       throw new ExecutionExitJournalException("execution exit journal is closed");
-    }
-  }
-
-  private void deleteTemporary(Path temporary, Throwable failure) {
-    try {
-      Files.deleteIfExists(temporary);
-    } catch (IOException error) {
-      if (failure != null) {
-        failure.addSuppressed(error);
-      }
     }
   }
 
