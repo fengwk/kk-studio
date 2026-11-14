@@ -162,33 +162,46 @@ final class OpenAiResponsesReplayValidator {
   }
 
   private static void collectFunctionCallFacts(ReplayFacts facts, JsonNode item) {
-    String callId = null;
-    if (item.has("call_id")) {
-      if (!item.get("call_id").isString() || item.get("call_id").stringValue().isBlank()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "function_call call_id must be non-blank string");
-      }
-      callId = item.get("call_id").stringValue();
-    }
-    if (item.has("id")) {
-      if (!item.get("id").isString() || item.get("id").stringValue().isBlank()) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "function_call id must be non-blank string");
-      }
-      if (callId == null) {
-        callId = item.get("id").stringValue();
-      }
-    }
+    String callId = functionCallId(item);
     if (callId == null || callId.isBlank()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "function_call missing call_id or id");
     }
+    String name = requireFunctionName(item);
+    String arguments = requireFunctionArguments(item);
+    facts.toolCalls.add(new ProviderToolCall(callId, name, arguments));
+  }
+
+  /** call_id 优先，缺失时回退到 item id；两者都存在时各自仍须是非空字符串。 */
+  private static String functionCallId(JsonNode item) {
+    String callId =
+        optionalNonBlank(item, "call_id", "function_call call_id must be non-blank string");
+    String id = optionalNonBlank(item, "id", "function_call id must be non-blank string");
+    return callId != null ? callId : id;
+  }
+
+  private static String optionalNonBlank(JsonNode item, String field, String errorMessage) {
+    if (!item.has(field)) {
+      return null;
+    }
+    JsonNode value = item.get(field);
+    if (!value.isString() || value.stringValue().isBlank()) {
+      throw new ProviderException(ProviderErrorKind.INVALID_REQUEST, errorMessage);
+    }
+    return value.stringValue();
+  }
+
+  private static String requireFunctionName(JsonNode item) {
     if (!item.has("name")
         || !item.get("name").isString()
         || item.get("name").stringValue().isBlank()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "function_call missing non-blank string name");
     }
+    return item.get("name").stringValue();
+  }
+
+  private static String requireFunctionArguments(JsonNode item) {
     if (!item.has("arguments") || !item.get("arguments").isString()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST, "function_call missing string arguments");
@@ -196,7 +209,7 @@ final class OpenAiResponsesReplayValidator {
     String arguments = item.get("arguments").stringValue();
     ProviderJsonHelper.parseStrictJsonObject(
         arguments, "function_call arguments must be a JSON object");
-    facts.toolCalls.add(new ProviderToolCall(callId, item.get("name").stringValue(), arguments));
+    return arguments;
   }
 
   private static DurableFacts collectDurableFacts(List<ProviderContentBlock> blocks) {

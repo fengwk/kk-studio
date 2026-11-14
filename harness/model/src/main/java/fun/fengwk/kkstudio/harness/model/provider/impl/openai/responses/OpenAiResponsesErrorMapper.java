@@ -68,23 +68,30 @@ final class OpenAiResponsesErrorMapper {
 
   private static ProviderErrorKind classify(int status, String codeOrType) {
     String lower = codeOrType != null ? codeOrType.toLowerCase(Locale.ROOT) : "";
-
     return ProviderErrorHelper.classify(
         status,
-        lower.contains("auth") || lower.contains("permission") || lower.contains("api_key"),
-        lower.contains("billing") || lower.contains("credit") || lower.contains("quota"),
-        lower.contains("context_length_exceeded")
-            || lower.contains("model_context_window_exceeded")
-            || lower.contains("tokens exceeded")
+        containsAny(lower, "auth", "permission", "api_key"),
+        containsAny(lower, "billing", "credit", "quota"),
+        containsAny(
+                lower,
+                "context_length_exceeded",
+                "model_context_window_exceeded",
+                "tokens exceeded")
             || (lower.contains("context") && lower.contains("overflow")),
         lower.contains("request_too_large"),
         lower.contains("invalid_request") || status == 400 || status == 422,
-        lower.contains("overloaded")
-            || lower.contains("rate_limit")
-            || lower.contains("server_error")
-            || lower.contains("tokens exceeded"),
+        containsAny(lower, "overloaded", "rate_limit", "server_error", "tokens exceeded"),
         false,
         false);
+  }
+
+  private static boolean containsAny(String value, String... needles) {
+    for (String needle : needles) {
+      if (value.contains(needle)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   private static String extractErrorCodeOrType(byte[] bodyBytes) {
@@ -103,30 +110,29 @@ final class OpenAiResponsesErrorMapper {
     if (node == null || !node.isObject()) {
       return null;
     }
-    JsonNode errorNode = node.get("error");
-    if (errorNode == null && node.has("response")) {
-      JsonNode respNode = node.get("response");
-      if (respNode.isObject() && respNode.has("error")) {
-        errorNode = respNode.get("error");
-      }
-    }
+    String fromError = firstText(errorNode(node), "code", "type", "message");
+    return fromError != null ? fromError : firstText(node, "code", "type");
+  }
 
-    if (errorNode != null && errorNode.isObject()) {
-      if (errorNode.has("code") && errorNode.get("code").isString()) {
-        return errorNode.get("code").asString("");
-      }
-      if (errorNode.has("type") && errorNode.get("type").isString()) {
-        return errorNode.get("type").asString("");
-      }
-      if (errorNode.has("message") && errorNode.get("message").isString()) {
-        return errorNode.get("message").asString("");
-      }
+  /** 同时接受顶层 error 与 Responses 事件信封里的 response.error。 */
+  private static JsonNode errorNode(JsonNode node) {
+    JsonNode errorNode = node.get("error");
+    if (errorNode != null) {
+      return errorNode;
     }
-    if (node.has("code") && node.get("code").isString()) {
-      return node.get("code").asString("");
+    JsonNode responseNode = node.get("response");
+    return responseNode != null && responseNode.isObject() ? responseNode.get("error") : null;
+  }
+
+  private static String firstText(JsonNode node, String... fields) {
+    if (node == null || !node.isObject()) {
+      return null;
     }
-    if (node.has("type") && node.get("type").isString()) {
-      return node.get("type").asString("");
+    for (String field : fields) {
+      JsonNode value = node.get(field);
+      if (value != null && value.isString()) {
+        return value.asString("");
+      }
     }
     return null;
   }

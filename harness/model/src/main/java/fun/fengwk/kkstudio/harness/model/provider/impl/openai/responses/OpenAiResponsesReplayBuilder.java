@@ -53,6 +53,19 @@ final class OpenAiResponsesReplayBuilder {
       String text,
       List<ReplayTool> tools) {
     ArrayNode array = NODES.arrayNode();
+    appendNormalizedItems(array, rawOutputItems, tools);
+    if (explicitTerminalOutputProcessed && rawOutputItems.isEmpty()) {
+      // 显式终态 output 为空（例如 output: []）表示权威输出清空了所有内容，不得回退合成草稿 replay。
+      return array;
+    }
+    if (array.isEmpty()) {
+      synthesizeFromDurable(array, thinking, text, tools);
+    }
+    return array;
+  }
+
+  private static void appendNormalizedItems(
+      ArrayNode array, List<JsonNode> rawOutputItems, List<ReplayTool> tools) {
     for (JsonNode item : rawOutputItems) {
       if (!item.isObject()) {
         continue;
@@ -71,54 +84,47 @@ final class OpenAiResponsesReplayBuilder {
         }
       }
     }
+  }
 
-    // 若显式处理了 terminal output 且 rawOutputItems 为空（例如 output: []），
-    // 则表示终端权威输出清空了所有内容，不得回退合成草稿 replay。
-    if (explicitTerminalOutputProcessed && rawOutputItems.isEmpty()) {
-      return array;
+  /** 没有原生 item 时，用 durable 文本、思考与工具快照合成标准 replay output。 */
+  private static void synthesizeFromDurable(
+      ArrayNode array, String thinking, String text, List<ReplayTool> tools) {
+    if (!thinking.isEmpty()) {
+      ObjectNode reasoning = array.addObject();
+      reasoning.put("type", "reasoning");
+      ArrayNode sum = reasoning.putArray("summary");
+      ObjectNode s = sum.addObject();
+      s.put("type", "summary_text");
+      s.put("text", thinking);
     }
-
-    // 若 rawOutputItems 为空但有文本或工具调用，合成标准的 replay output
-    if (array.isEmpty()) {
-      if (!thinking.isEmpty()) {
-        ObjectNode reasoning = array.addObject();
-        reasoning.put("type", "reasoning");
-        ArrayNode sum = reasoning.putArray("summary");
-        ObjectNode s = sum.addObject();
-        s.put("type", "summary_text");
-        s.put("text", thinking);
-      }
-      if (!text.isEmpty()) {
-        ObjectNode msg = array.addObject();
-        msg.put("type", "message");
-        msg.put("role", "assistant");
-        ArrayNode c = msg.putArray("content");
-        ObjectNode t = c.addObject();
-        t.put("type", "output_text");
-        t.put("text", text);
-      }
-      for (ReplayTool tool : tools) {
-        String effectiveCallId = nonBlank(tool.callId()) != null ? tool.callId() : tool.id();
-        String args = tool.arguments();
-        if (effectiveCallId == null
-            || effectiveCallId.isBlank()
-            || tool.name() == null
-            || tool.name().isBlank()
-            || args == null
-            || args.isBlank()
-            || ProviderJsonHelper.tryParseJsonObject(args) == null) {
-          throw new ProviderException(
-              ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
-        }
-        ObjectNode fc = array.addObject();
-        fc.put("type", "function_call");
-        fc.put("call_id", effectiveCallId);
-        fc.put("name", tool.name());
-        fc.put("arguments", args);
-      }
+    if (!text.isEmpty()) {
+      ObjectNode msg = array.addObject();
+      msg.put("type", "message");
+      msg.put("role", "assistant");
+      ArrayNode c = msg.putArray("content");
+      ObjectNode t = c.addObject();
+      t.put("type", "output_text");
+      t.put("text", text);
     }
-
-    return array;
+    for (ReplayTool tool : tools) {
+      String effectiveCallId = nonBlank(tool.callId()) != null ? tool.callId() : tool.id();
+      String args = tool.arguments();
+      if (effectiveCallId == null
+          || effectiveCallId.isBlank()
+          || tool.name() == null
+          || tool.name().isBlank()
+          || args == null
+          || args.isBlank()
+          || ProviderJsonHelper.tryParseJsonObject(args) == null) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_RESPONSE, "invalid function call in replay construction");
+      }
+      ObjectNode fc = array.addObject();
+      fc.put("type", "function_call");
+      fc.put("call_id", effectiveCallId);
+      fc.put("name", tool.name());
+      fc.put("arguments", args);
+    }
   }
 
   /**
