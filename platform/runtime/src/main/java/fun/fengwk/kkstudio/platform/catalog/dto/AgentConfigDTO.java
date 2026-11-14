@@ -19,6 +19,6 @@ public class AgentConfigDTO {
   /** 选中的 Skill 引用列表（{@code (packageName, name)}）；按声明顺序且不可重复。 */
   private List<SkillRefDTO> skills;
 
-  /** 当前 Agent 可通过 task 委派的 Agent 名称 allowlist；元素须为非空白短名、去重、≤64 字符。 */
+  /** 当前 Agent 可委派的子代理名称 allowlist；元素须为非空白短名、去重、≤64 字符。 */
   private List<String> subagents;
 }

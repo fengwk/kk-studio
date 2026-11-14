@@ -39,13 +39,9 @@ import java.util.TreeSet;
 import java.util.zip.CRC32;
 import java.util.zip.ZipEntry;
 
-/**
- * Bounded, in-memory construction of a canonical skill archive. No input path is written to disk.
- */
+/** 在内存内按上限构建规范化技能归档：任何输入路径都不落盘。 */
 public final class SkillArchiveBuilder {
-  /**
-   * Bounds derived from the measured local sample; Git readers must enforce them before loading.
-   */
+  /** 各项上限取自实测样本；Git 读取方必须在加载之前先用对象元信息执行这些上限。 */
   public static final long MAX_ARCHIVE_BYTES = 64L << 20;
 
   public static final long MAX_TOTAL_BYTES = 128L << 20;
@@ -71,15 +67,12 @@ public final class SkillArchiveBuilder {
     FILE,
     DIRECTORY,
     LINK,
-    SUBMODULE,
     SPECIAL
   }
 
   /**
-   * Git callers supply object contents, not checked-out filesystem paths. Before reading any
-   * object, callers must use its object metadata to enforce {@link #MAX_FILE_BYTES}, {@link
-   * #MAX_TOTAL_BYTES} and {@link #MAX_PATHS}. This builder cannot bound allocations already made by
-   * its caller.
+   * Git 调用方提供对象内容而不是检出后的文件系统路径。读取任何对象之前，调用方必须先用对象元信息执行 {@link #MAX_FILE_BYTES}、{@link
+   * #MAX_TOTAL_BYTES} 与 {@link #MAX_PATHS}；构建器无法约束调用方已经发生的分配。
    */
   public record InputEntry(String path, Type type, boolean executable, byte[] content) {}
 
@@ -94,7 +87,7 @@ public final class SkillArchiveBuilder {
 
   public Result fromZip(InputStream input) throws IOException {
     byte[] bytes = readBounded(input, limits.compressed(), "ZIP");
-    checkZipDirectory(bytes);
+    ZipCentralDirectory.verify(bytes, limits.entries());
     Accumulator acc = new Accumulator();
     try (ZipFile zip =
         ZipFile.builder().setSeekableByteChannel(new SeekableInMemoryByteChannel(bytes)).get()) {
@@ -129,96 +122,10 @@ public final class SkillArchiveBuilder {
     return build(acc);
   }
 
-  // ZipFile materializes the central directory before exposing entries. Count it first so a
-  // small archive with a huge number of empty entries cannot exhaust memory during construction.
-  private void checkZipDirectory(byte[] bytes) throws IOException {
-    int end = -1;
-    for (int p = bytes.length - 22; p >= Math.max(0, bytes.length - 65557); p--) {
-      if (u32(bytes, p) == 0x06054b50L && p + 22L + u16(bytes, p + 20) == bytes.length) {
-        end = p;
-        break;
-      }
-    }
-    if (end < 0 || u16(bytes, end + 4) != 0 || u16(bytes, end + 6) != 0) {
-      throw new IOException("Invalid or multi-disk ZIP");
-    }
-    long declared = u16(bytes, end + 10);
-    long start = u32(bytes, end + 16);
-    long size = u32(bytes, end + 12);
-    long directoryEnd = end;
-    if ((end >= 20 && u32(bytes, end - 20) == 0x07064b50L)
-        || declared == 0xffff
-        || start == 0xffffffffL
-        || size == 0xffffffffL) {
-      int locator = end - 20;
-      if (locator < 0
-          || u32(bytes, locator) != 0x07064b50L
-          || u32(bytes, locator + 4) != 0
-          || u32(bytes, locator + 16) != 1) {
-        throw new IOException("Invalid ZIP64 locator");
-      }
-      long record = u64(bytes, locator + 8);
-      if (record < 0 || record > locator - 56L) {
-        throw new IOException("Invalid ZIP64 offset");
-      }
-      int z = (int) record;
-      long recordSize = u64(bytes, z + 4);
-      if (u32(bytes, z) != 0x06064b50L
-          || recordSize < 44
-          || recordSize != locator - record - 12
-          || u32(bytes, z + 16) != 0
-          || u32(bytes, z + 20) != 0
-          || u64(bytes, z + 24) != u64(bytes, z + 32)) {
-        throw new IOException("Invalid ZIP64 directory");
-      }
-      declared = u64(bytes, z + 32);
-      size = u64(bytes, z + 40);
-      start = u64(bytes, z + 48);
-      directoryEnd = record;
-    } else if (declared != u16(bytes, end + 8)) {
-      throw new IOException("Invalid ZIP directory count");
-    }
-    if (declared < 0
-        || declared > limits.entries()
-        || size < 0
-        || start < 0
-        || start > directoryEnd
-        || size != directoryEnd - start) {
-      throw new IOException("Invalid or oversized ZIP directory");
-    }
-    int p = (int) start;
-    int count = 0;
-    while (p < directoryEnd) {
-      if (directoryEnd - p < 46 || u32(bytes, p) != 0x02014b50L) {
-        throw new IOException("Invalid ZIP directory entry");
-      }
-      long next = p + 46L + u16(bytes, p + 28) + u16(bytes, p + 30) + u16(bytes, p + 32);
-      if (next > directoryEnd || ++count > limits.entries()) {
-        throw new IOException("ZIP directory limit exceeded");
-      }
-      p = (int) next;
-    }
-    if (count != declared) {
-      throw new IOException("Invalid ZIP directory count");
-    }
-  }
-
-  private static int u16(byte[] bytes, int offset) {
-    return (bytes[offset] & 255) | (bytes[offset + 1] & 255) << 8;
-  }
-
-  private static long u32(byte[] bytes, int offset) {
-    return (u16(bytes, offset) & 0xffffL) | (long) u16(bytes, offset + 2) << 16;
-  }
-
-  private static long u64(byte[] bytes, int offset) {
-    return u32(bytes, offset) | u32(bytes, offset + 4) << 32;
-  }
-
   public Result fromTarGz(InputStream input) throws IOException {
     byte[] bytes = readBounded(input, limits.compressed(), "tar.gz");
     Accumulator acc = new Accumulator();
-    // Bound headers, PAX metadata and padding too, not just regular file payloads.
+    // 除普通文件负载外，header、PAX 元数据与填充字节同样计入上限。
     try (InputStream gzip =
             GzipCompressorInputStream.builder()
                 .setInputStream(new ByteArrayInputStream(bytes))
@@ -240,7 +147,7 @@ public final class SkillArchiveBuilder {
         byte[] data = readBounded(tar, limits.file(), entry.getName());
         acc.add(new InputEntry(entry.getName(), type, (entry.getMode() & 0111) != 0, data));
       }
-      // Force gzip trailer verification and account for trailing decompressed bytes.
+      // 读尽剩余字节：强制校验 gzip trailer，并把末尾解压出的字节计入上限。
       byte[] buffer = new byte[8192];
       while (bounded.read(buffer) != -1) {}
     }
@@ -279,6 +186,12 @@ public final class SkillArchiveBuilder {
       if (path.isEmpty()) {
         return;
       }
+      addParents(path);
+      putEntry(path, input);
+    }
+
+    /** 逐级补出隐式目录；隐式目录不得覆盖同名文件，否则形成路径冲突。 */
+    private void addParents(String path) throws IOException {
       String[] segments = path.split("/");
       String parent = "";
       for (int i = 0; i < segments.length - 1; i++) {
@@ -290,6 +203,10 @@ public final class SkillArchiveBuilder {
           throw new IOException("Path conflict: " + parent);
         }
       }
+    }
+
+    /** 写入正式条目；只有目录能覆盖已有目录，其余同名组合一律拒绝。 */
+    private void putEntry(String path, InputEntry input) throws IOException {
       checkPortable(path);
       InputEntry old = entries.get(path);
       if (old != null && (old.type() != Type.DIRECTORY || input.type() != Type.DIRECTORY)) {
@@ -311,7 +228,8 @@ public final class SkillArchiveBuilder {
     }
   }
 
-  private static String normalize(String path, boolean directory) throws IOException {
+  /** 拒绝绝对路径、盘符、控制字符与不可编码文本；长度上限单独检查，因为两者的拒绝文案不同。 */
+  private static void requirePortablePath(String path, boolean directory) throws IOException {
     if (path == null
         || path.isEmpty()
         || path.startsWith("/")
@@ -325,6 +243,24 @@ public final class SkillArchiveBuilder {
     if (path.length() > 4096) {
       throw new IOException("Path too long: " + path);
     }
+  }
+
+  /** 拒绝不跨平台的段：空段、`.` 之外的相对段、结尾点/空格、Windows 保留字符与设备名。 */
+  private static void requirePortableSegment(String part, String path) throws IOException {
+    String upper = part.toUpperCase(Locale.ROOT);
+    String stem = upper.split("\\.", 2)[0];
+    if (part.isEmpty()
+        || part.equals("..")
+        || part.endsWith(".")
+        || part.endsWith(" ")
+        || part.chars().anyMatch(c -> "<>:\"|?*".indexOf(c) >= 0)
+        || stem.matches("CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]")) {
+      throw new IOException("Invalid path: " + path);
+    }
+  }
+
+  private static String normalize(String path, boolean directory) throws IOException {
+    requirePortablePath(path, directory);
     String candidate =
         directory && path.endsWith("/") ? path.substring(0, path.length() - 1) : path;
     List<String> parts = new ArrayList<>();
@@ -332,16 +268,7 @@ public final class SkillArchiveBuilder {
       if (part.equals(".")) {
         continue;
       }
-      String upper = part.toUpperCase(Locale.ROOT);
-      String stem = upper.split("\\.", 2)[0];
-      if (part.isEmpty()
-          || part.equals("..")
-          || part.endsWith(".")
-          || part.endsWith(" ")
-          || part.chars().anyMatch(c -> "<>:\"|?*".indexOf(c) >= 0)
-          || stem.matches("CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9]")) {
-        throw new IOException("Invalid path: " + path);
-      }
+      requirePortableSegment(part, path);
       parts.add(part);
     }
     if (parts.isEmpty() && !directory) {
@@ -351,12 +278,8 @@ public final class SkillArchiveBuilder {
   }
 
   private Result build(Accumulator acc) throws IOException {
-    String root = "";
+    String root = resolveRoot(acc.entries);
     Set<String> dirs = childDirectories(acc.entries, root);
-    if (skillsAt(acc.entries, root, dirs).isEmpty() && dirs.size() == 1) {
-      root = dirs.iterator().next() + "/";
-      dirs = childDirectories(acc.entries, root);
-    }
     Set<String> skills = skillsAt(acc.entries, root, dirs);
     if (skills.isEmpty()) {
       throw new IOException("No skills found");
@@ -365,35 +288,71 @@ public final class SkillArchiveBuilder {
     ignored.removeAll(skills);
     List<SkillManifestEntry> manifest = new ArrayList<>();
     Map<String, InputEntry> output = new TreeMap<>();
+    collectSkills(acc.entries, root, skills, manifest, output);
+    byte[] bytes = writeArchive(output);
+    return new Result(bytes, List.copyOf(manifest), List.copyOf(ignored), index(bytes, output));
+  }
+
+  /** 仅有一个顶层目录且其下无技能时，把该目录当作归档根，兼容包了一层目录的上传。 */
+  private static String resolveRoot(Map<String, InputEntry> entries) {
+    Set<String> dirs = childDirectories(entries, "");
+    if (skillsAt(entries, "", dirs).isEmpty() && dirs.size() == 1) {
+      return dirs.iterator().next() + "/";
+    }
+    return "";
+  }
+
+  /** 逐个技能解析 manifest 并收集输出条目；SKILL.md 的解析失败统一换成带技能路径的 IOException。 */
+  private static void collectSkills(
+      Map<String, InputEntry> entries,
+      String root,
+      Set<String> skills,
+      List<SkillManifestEntry> manifest,
+      Map<String, InputEntry> output)
+      throws IOException {
     for (String skill : skills) {
       try {
         SkillNames.canonicalSkillName(skill);
-        byte[] content = acc.entries.get(root + skill + "/SKILL.md").content();
-        String text =
-            StandardCharsets.UTF_8
-                .newDecoder()
-                .onMalformedInput(CodingErrorAction.REPORT)
-                .onUnmappableCharacter(CodingErrorAction.REPORT)
-                .decode(ByteBuffer.wrap(content))
-                .toString();
-        manifest.add(SkillManifestScanner.parseFrontmatter(skill, text));
+        byte[] content = entries.get(root + skill + "/SKILL.md").content();
+        manifest.add(SkillManifestScanner.parseFrontmatter(skill, decodeUtf8(content)));
       } catch (IllegalArgumentException | SkillGitException | CharacterCodingException e) {
         throw new IOException("Invalid " + root + skill + "/SKILL.md: " + e.getMessage(), e);
       }
-      String prefix = root + skill;
-      for (InputEntry entry : acc.entries.values()) {
-        if (entry.path().equals(prefix) || entry.path().startsWith(prefix + "/")) {
-          if (entry.type() != Type.FILE && entry.type() != Type.DIRECTORY) {
-            throw new IOException("Forbidden entry type: " + entry.path());
-          }
-          String name = entry.path().substring(root.length());
-          if (Arrays.asList(name.split("/")).contains(".git")) {
-            continue;
-          }
-          output.put(name + (entry.type() == Type.DIRECTORY ? "/" : ""), entry);
-        }
-      }
+      collectSkillEntries(entries, root, skill, output);
     }
+  }
+
+  /** 严格按 UTF-8 解码；非法字节序列必须暴露给调用方，不能静默替换。 */
+  private static String decodeUtf8(byte[] content) throws CharacterCodingException {
+    return StandardCharsets.UTF_8
+        .newDecoder()
+        .onMalformedInput(CodingErrorAction.REPORT)
+        .onUnmappableCharacter(CodingErrorAction.REPORT)
+        .decode(ByteBuffer.wrap(content))
+        .toString();
+  }
+
+  /** 收集属于该技能的条目：目录保持尾斜杠，`.git` 目录整枝丢弃，链接等特殊类型拒绝。 */
+  private static void collectSkillEntries(
+      Map<String, InputEntry> entries, String root, String skill, Map<String, InputEntry> output)
+      throws IOException {
+    String prefix = root + skill;
+    for (InputEntry entry : entries.values()) {
+      if (!entry.path().equals(prefix) && !entry.path().startsWith(prefix + "/")) {
+        continue;
+      }
+      if (entry.type() != Type.FILE && entry.type() != Type.DIRECTORY) {
+        throw new IOException("Forbidden entry type: " + entry.path());
+      }
+      String name = entry.path().substring(root.length());
+      if (Arrays.asList(name.split("/")).contains(".git")) {
+        continue;
+      }
+      output.put(name + (entry.type() == Type.DIRECTORY ? "/" : ""), entry);
+    }
+  }
+
+  private byte[] writeArchive(Map<String, InputEntry> output) throws IOException {
     ByteArrayOutputStream buffer = new ByteArrayOutputStream();
     try (ZipArchiveOutputStream zip =
         new ZipArchiveOutputStream(new BoundedOutputStream(buffer, limits.compressed()))) {
@@ -411,9 +370,7 @@ public final class SkillArchiveBuilder {
         zip.closeArchiveEntry();
       }
     }
-    byte[] bytes = buffer.toByteArray();
-    List<IndexEntry> index = index(bytes, output);
-    return new Result(bytes, List.copyOf(manifest), List.copyOf(ignored), index);
+    return buffer.toByteArray();
   }
 
   private List<IndexEntry> index(byte[] bytes, Map<String, InputEntry> expected)

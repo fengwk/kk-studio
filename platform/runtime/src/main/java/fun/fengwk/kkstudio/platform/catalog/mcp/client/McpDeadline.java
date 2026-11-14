@@ -7,7 +7,7 @@ import java.util.Objects;
 /**
  * 封装 MCP 外层调用的总预算 deadline。
  *
- * <p>一个 operation deadline 覆盖 client 初始化以及后续 list/call；不重置单阶段预算。生产路径必须显式提供预算，因此没有 unlimited 形式。
+ * <p>一个 operation deadline 覆盖 client 初始化以及后续 list/call，不重置单阶段预算。调用方必须显式提供正预算，因此没有 unlimited 形式。
  */
 public final class McpDeadline {
 
@@ -24,16 +24,6 @@ public final class McpDeadline {
       throw new IllegalArgumentException("timeout must be positive");
     }
     return new McpDeadline(Instant.now().plus(timeout));
-  }
-
-  /** 基于绝对时间创建截止时间。 */
-  public static McpDeadline ofDeadline(Instant deadline) {
-    return new McpDeadline(deadline);
-  }
-
-  /** 截止时间戳。 */
-  public Instant deadline() {
-    return deadline;
   }
 
   /** 返回当前剩余时长；若已超时则返回 {@link Duration#ZERO}。 */

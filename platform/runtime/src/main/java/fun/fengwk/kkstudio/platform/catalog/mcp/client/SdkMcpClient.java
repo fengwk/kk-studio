@@ -39,11 +39,7 @@ import java.util.concurrent.TimeoutException;
  */
 final class SdkMcpClient implements McpClient {
 
-  /**
-   * 单个 client 上同时执行的 SDK 阻塞调用上限。
-   *
-   * <p>沿用外层 Harness 工具 admission 的默认并发 {@code 64}，不新增 MCP 配置项。
-   */
+  /** 单个 client 上同时执行的 SDK 阻塞调用上限；与外层 Harness 工具 admission 的默认并发一致，不提供 MCP 配置项。 */
   static final int MAX_CONCURRENT_OPERATIONS = 64;
 
   /** 空闲 worker 的回收时间：worker 数量在负载回落后收敛，池不会长期占着线程。 */
@@ -53,7 +49,7 @@ final class SdkMcpClient implements McpClient {
    * 模块自有 JSON（工具 schema）的 Jackson 3 mapper。
    *
    * <p>显式开启 {@link SerializationFeature#FAIL_ON_EMPTY_BEANS}：Jackson 3 默认关闭该开关，会把无可序列化属性的 value 写成
-   * {@code {}}；这里保持既有约定，让「无法编码的 schema」继续走失败回退，而不是产出看似合法的空对象 JSON。
+   * {@code {}}；开启后无法编码的 schema 走失败回退，而不是产出看似合法的空对象 JSON。
    */
   private static final ObjectMapper OBJECT_MAPPER =
       JsonMapper.builder().enable(SerializationFeature.FAIL_ON_EMPTY_BEANS).build();

@@ -44,21 +44,6 @@ public class JGitSkillRepository implements SkillGitRepository {
 
   private static final Set<String> SUPPORTED_REPOSITORY_SCHEMES = Set.of("http", "https", "file");
 
-  private final int connectMillis;
-  private final int readMillis;
-
-  public JGitSkillRepository() {
-    this(GitHttpConnectionFactory.CONNECT_MILLIS, GitHttpConnectionFactory.READ_MILLIS);
-  }
-
-  JGitSkillRepository(int connectMillis, int readMillis) {
-    if (connectMillis <= 0 || readMillis <= 0) {
-      throw new IllegalArgumentException("Git network timeouts must be positive");
-    }
-    this.connectMillis = connectMillis;
-    this.readMillis = readMillis;
-  }
-
   @Override
   public String resolveBranchHead(String repositoryUrl, String branch, String token) {
     validateRepositoryUrl(repositoryUrl);
@@ -71,8 +56,7 @@ public class JGitSkillRepository implements SkillGitRepository {
 
     String targetRefName = "refs/heads/" + branch;
     CredentialsProvider credentials = credentialsProvider(token);
-    try (GitHttpConnectionFactory network =
-        new GitHttpConnectionFactory(connectMillis, readMillis)) {
+    try (GitHttpConnectionFactory network = new GitHttpConnectionFactory()) {
       var lsRemoteCommand =
           Git.lsRemoteRepository()
               .setRemote(repositoryUrl)
@@ -162,8 +146,7 @@ public class JGitSkillRepository implements SkillGitRepository {
   /** 每次操作独立的 HTTP 保护：连接/读取超时与关闭断连由 factory 绑定的 transport 生效。 */
   private void fetchCommit(Git git, String repositoryUrl, String commit, String token) {
     CredentialsProvider credentials = credentialsProvider(token);
-    try (GitHttpConnectionFactory network =
-        new GitHttpConnectionFactory(connectMillis, readMillis)) {
+    try (GitHttpConnectionFactory network = new GitHttpConnectionFactory()) {
       var fetch =
           git.fetch()
               .setRemote(repositoryUrl)

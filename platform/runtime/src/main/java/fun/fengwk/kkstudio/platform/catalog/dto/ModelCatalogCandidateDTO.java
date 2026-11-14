@@ -5,7 +5,7 @@ import org.jspecify.annotations.Nullable;
 
 import java.util.List;
 
-/** 目录中的单个可填表候选；id 唯一包含 source/provider/model。 */
+/** 目录中的单个可填表候选；{@code id} 是 {@code models_dev:<provider>:<modelId>} 形式的唯一标识。 */
 @Data
 public class ModelCatalogCandidateDTO {
 

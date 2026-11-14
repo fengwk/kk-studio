@@ -57,15 +57,31 @@ public final class McpInputSchemaConverter {
 
   private static InputSchema convertObject(JsonNode node, String context) {
     String description = textOrNull(node.get("description"));
+    Map<String, SchemaElement> properties = convertProperties(node.get("properties"));
+    Set<String> required = convertRequired(node.get("required"), properties);
+    try {
+      return new InputSchema(description, properties, required, additionalProperties(node));
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation(
+          context, context + " input schema is invalid: " + error.getMessage(), error);
+    }
+  }
+
+  /** 逐字段转换；非 object 的 properties 直接当作没有声明，保持与宽松叶子一致的容错。 */
+  private static Map<String, SchemaElement> convertProperties(JsonNode propertiesNode) {
     Map<String, SchemaElement> properties = new LinkedHashMap<>();
-    Set<String> required = new LinkedHashSet<>();
-    JsonNode propertiesNode = node.get("properties");
     if (propertiesNode != null && propertiesNode.isObject()) {
       for (Map.Entry<String, JsonNode> field : propertiesNode.properties()) {
         properties.put(field.getKey(), convertElement(field.getValue()));
       }
     }
-    JsonNode requiredNode = node.get("required");
+    return properties;
+  }
+
+  /** 只保留声明为 required 且确实存在于 properties 的字段；未知字段名不得成为额外约束。 */
+  private static Set<String> convertRequired(
+      JsonNode requiredNode, Map<String, SchemaElement> properties) {
+    Set<String> required = new LinkedHashSet<>();
     if (requiredNode != null && requiredNode.isArray()) {
       for (JsonNode entry : requiredNode) {
         if (entry.isTextual() && properties.containsKey(entry.asText())) {
@@ -73,34 +89,20 @@ public final class McpInputSchemaConverter {
         }
       }
     }
-    boolean additionalProperties = true;
+    return required;
+  }
+
+  /** 标准 JSON Schema 默认允许 additional properties；只有显式布尔值才收紧。 */
+  private static boolean additionalProperties(JsonNode node) {
     JsonNode additional = node.get("additionalProperties");
-    if (additional != null && additional.isBoolean()) {
-      additionalProperties = additional.asBoolean();
-    } else if (additional == null && propertiesNode != null && propertiesNode.isObject()) {
-      // 标准 JSON Schema 默认允许 additional properties。
-      additionalProperties = true;
-    }
-    try {
-      return new InputSchema(description, properties, required, additionalProperties);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation(
-          context, context + " input schema is invalid: " + error.getMessage(), error);
-    }
+    return additional != null && additional.isBoolean() ? additional.asBoolean() : true;
   }
 
   private static SchemaElement convertElement(JsonNode node) {
     String description = textOrNull(node.get("description"));
-    if (node.has("enum") && node.get("enum").isArray()) {
-      List<String> values = new ArrayList<>();
-      for (JsonNode val : node.get("enum")) {
-        if (val.isTextual() && !val.asText().isBlank()) {
-          values.add(val.asText());
-        }
-      }
-      if (!values.isEmpty()) {
-        return new EnumSchema(description, values);
-      }
+    List<String> values = enumValues(node);
+    if (!values.isEmpty()) {
+      return new EnumSchema(description, values);
     }
     String type =
         node.has("type") && node.get("type").isTextual() ? node.get("type").asText() : null;
@@ -120,6 +122,19 @@ public final class McpInputSchemaConverter {
       // 无 type / 未识别组合结构统一收敛为宽松 string 叶子。
       new StringSchema(description);
     };
+  }
+
+  /** 枚举值只接受非空文本；过滤后为空则退回到 type 判定。 */
+  private static List<String> enumValues(JsonNode node) {
+    List<String> values = new ArrayList<>();
+    if (node.has("enum") && node.get("enum").isArray()) {
+      for (JsonNode val : node.get("enum")) {
+        if (val.isTextual() && !val.asText().isBlank()) {
+          values.add(val.asText());
+        }
+      }
+    }
+    return values;
   }
 
   /** 嵌套 object：Platform ObjectSchema 同为 SchemaElement，直接复用 object 转换。 */

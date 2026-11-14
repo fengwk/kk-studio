@@ -34,8 +34,7 @@ import java.util.concurrent.TimeoutException;
  * <p>超时统一映射为 {@link McpTimeoutException}，失败时幂等关闭底层传输，绝不泄漏半连接。 「初始化恰好与预算到期同时完成」的竞态由 {@link
  * ClientHandoff} 原子收敛：已构建的 client 要么被调用方领走，要么由构建方当场关闭，不存在无人关闭的中间态。
  *
- * <p>协议版本固定为 {@value #PROTOCOL_VERSION}：本模块与 Platform 属于同一套可复用 MCP 能力，不允许出现「同一仓库内两个 client
- * 声明不同协议版本」的分裂。
+ * <p>协议版本固定为 {@value #PROTOCOL_VERSION}，由本工厂唯一决定，配置不参与协商。
  */
 public final class McpClientFactory {
 
@@ -43,13 +42,13 @@ public final class McpClientFactory {
 
   private static final String CLIENT_VERSION = "1.0.0";
 
-  /** 协议版本，与 Platform 侧 reusable MCP client 保持一致。 */
+  /** 客户端唯一的协议版本声明。 */
   private static final String PROTOCOL_VERSION = "2025-11-25";
 
   /**
    * 传输预算容纳 64 MiB 内容最坏六倍 JSON 转义，加一份单条 JSON 预算用于信封与元数据。
    *
-   * <p>SDK 默认 16 MiB 报文和 Jackson 默认字符串上限不能缩小既有内容预算；最终内容仍由 {@link McpResultExtractor} 精确计量。
+   * <p>SDK 默认 16 MiB 报文与 Jackson 默认字符串上限都小于该预算，必须显式放大；最终内容仍由 {@link McpResultExtractor} 精确计量。
    */
   private static final int MAX_RESPONSE_BYTES =
       6 * McpResultExtractor.MAX_CONTENT_BUDGET_BYTES + JsonResultContent.MAX_JSON_UTF8_BYTES;

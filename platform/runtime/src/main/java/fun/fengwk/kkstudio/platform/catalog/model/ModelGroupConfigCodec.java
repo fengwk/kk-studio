@@ -81,7 +81,17 @@ public final class ModelGroupConfigCodec {
     if (group == null) {
       throw DomainException.validation("model", "group config is required");
     }
-    List<ModelGroupMemberDTO> members = group.getMembers();
+    group.setMembers(validateMembers(group.getMembers()));
+    group.setFallbackStatusCodes(validateFallbackStatusCodes(group.getFallbackStatusCodes()));
+    Integer cooldown = group.getCooldownSeconds();
+    if (cooldown == null || cooldown < 0) {
+      throw DomainException.validation(
+          "model", "group.cooldownSeconds must be a non-negative integer");
+    }
+  }
+
+  /** 有序成员非空、不超上限、引用字段 canonical 且同引用不重复；返回已规范化的副本。 */
+  private static List<ModelGroupMemberDTO> validateMembers(List<ModelGroupMemberDTO> members) {
     if (members == null || members.isEmpty()) {
       throw DomainException.validation("model", "group.members must not be empty");
     }
@@ -108,9 +118,11 @@ public final class ModelGroupConfigCodec {
       normalized.setVariant(variant);
       checked.add(normalized);
     }
-    group.setMembers(checked);
+    return checked;
+  }
 
-    List<Integer> rawCodes = group.getFallbackStatusCodes();
+  /** 状态码必须是 400–599 且不重复；返回不可变副本，防止调用方事后改回未经校验的列表。 */
+  private static List<Integer> validateFallbackStatusCodes(List<Integer> rawCodes) {
     if (rawCodes == null) {
       throw DomainException.validation("model", "group.fallbackStatusCodes is required");
     }
@@ -125,13 +137,7 @@ public final class ModelGroupConfigCodec {
             "model", "group.fallbackStatusCodes must not contain duplicate statuses");
       }
     }
-    group.setFallbackStatusCodes(List.copyOf(rawCodes));
-
-    Integer cooldown = group.getCooldownSeconds();
-    if (cooldown == null || cooldown < 0) {
-      throw DomainException.validation(
-          "model", "group.cooldownSeconds must be a non-negative integer");
-    }
+    return List.copyOf(rawCodes);
   }
 
   private static ModelGroupConfigDTO toDto(StoredGroup stored) {
