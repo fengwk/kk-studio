@@ -39,8 +39,10 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -122,18 +124,19 @@ class TracingWiringIntegrationTest {
 
   @Test
   void writesOneStructuredCompletionLogWithoutSensitiveRequestData() throws Exception {
-    traceAppender.list.clear();
+    String traceId = freshTraceId();
     send(
         HttpRequest.newBuilder(
                 URI.create("http://127.0.0.1:" + port + "/tracing/probe?secret=query-secret"))
+            .header("traceparent", traceParent(traceId))
             .header("X-Secret-Header", "header-secret")
             .header("baggage", "secret=baggage-secret")
             .GET()
             .build());
 
-    awaitTraceLog();
-    assertEquals(1, traceAppender.list.size());
-    String message = traceAppender.list.get(0).getFormattedMessage();
+    List<String> logs = awaitTraceLogs(traceId);
+    assertEquals(1, logs.size(), logs::toString);
+    String message = logs.get(0);
     assertTrue(message.contains("operation=GET /tracing/probe"), message);
     assertTrue(message.contains("status=200"), message);
     assertTrue(message.matches(".*durationMs=\\d+.*"), message);
@@ -144,18 +147,18 @@ class TracingWiringIntegrationTest {
 
   @Test
   void logsFailedRequestAndClearsObservation() throws Exception {
-    traceAppender.list.clear();
+    String traceId = freshTraceId();
     HttpResponse<String> response =
         send(
             HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + port + "/tracing/fail"))
-                .header("traceparent", TRACE_PARENT)
+                .header("traceparent", traceParent(traceId))
                 .GET()
                 .build());
 
     assertEquals(500, response.statusCode());
-    awaitTraceLog();
-    assertEquals(1, traceAppender.list.size());
-    String message = traceAppender.list.get(0).getFormattedMessage();
+    List<String> logs = awaitTraceLogs(traceId);
+    assertEquals(1, logs.size(), logs::toString);
+    String message = logs.get(0);
     assertTrue(message.contains("operation=GET /tracing/fail"), message);
     assertTrue(message.contains("status=500"), message);
     assertNull(MDC.get("traceId"), "test thread must not retain request MDC");
@@ -204,13 +207,34 @@ class TracingWiringIntegrationTest {
         .collect(Collectors.toMap(parts -> parts[0], parts -> parts[1]));
   }
 
-  private static void awaitTraceLog() throws InterruptedException {
+  private static String freshTraceId() {
+    return UUID.randomUUID().toString().replace("-", "");
+  }
+
+  private static String traceParent(String traceId) {
+    return "00-" + traceId + "-" + PARENT_SPAN_ID + "-01";
+  }
+
+  /** 收尾日志在响应发出后写入，其他用例的日志可能晚到；只统计本次请求 trace 的条目。等到第一条后再稍等， 便于发现同一请求被重复记录。 */
+  private static List<String> awaitTraceLogs(String traceId) throws InterruptedException {
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-    while (traceAppender.list.isEmpty() && System.nanoTime() < deadline) {
+    while (traceLogs(traceId).isEmpty() && System.nanoTime() < deadline) {
       Thread.sleep(10);
     }
-    // AsyncAppender 之外的普通 appender 是同步的；该 sleep 只吸收最后一次异步转发。
     Thread.sleep(50);
+    return traceLogs(traceId);
+  }
+
+  private static List<String> traceLogs(String traceId) {
+    List<ILoggingEvent> events;
+    // ListAppender 在服务线程上持有自身锁追加，读取时同样加锁取快照。
+    synchronized (traceAppender) {
+      events = new ArrayList<>(traceAppender.list);
+    }
+    return events.stream()
+        .map(ILoggingEvent::getFormattedMessage)
+        .filter(message -> message.contains("traceId=" + traceId))
+        .toList();
   }
 
   @SpringBootConfiguration
