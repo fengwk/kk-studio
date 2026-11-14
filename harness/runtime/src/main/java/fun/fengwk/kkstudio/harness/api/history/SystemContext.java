@@ -143,6 +143,32 @@ public record SystemContext(
   /** Produce a delta containing only changed sections and tool definitions when context differs. */
   public Optional<SystemPayload> changesTo(SystemContext next) {
     Objects.requireNonNull(next, "next");
+    Map<String, String> changedSections = changedSections(next);
+    List<String> removedSections =
+        sections.keySet().stream().filter(name -> !next.sections.containsKey(name)).toList();
+    ToolDelta toolsDelta = toolsDelta(next);
+    HostedToolDelta hostedToolsDelta = hostedToolsDelta(next);
+    if (changedSections.isEmpty()
+        && removedSections.isEmpty()
+        && toolsDelta.added().isEmpty()
+        && toolsDelta.removed().isEmpty()
+        && hostedToolsDelta.added().isEmpty()
+        && hostedToolsDelta.removed().isEmpty()) {
+      return Optional.empty();
+    }
+    return Optional.of(
+        new SystemPayload(
+            changedSections,
+            removedSections,
+            toolsDelta.added(),
+            toolsDelta.removed(),
+            hostedToolsDelta.added(),
+            hostedToolsDelta.removed(),
+            false));
+  }
+
+  /** 变更的 sections：顺序变化视为全部 section 变化；否则只取文本不同的项。 */
+  private Map<String, String> changedSections(SystemContext next) {
     Map<String, String> changed = new LinkedHashMap<>();
     boolean sectionOrderChanged =
         !new ArrayList<>(sections.keySet()).equals(new ArrayList<>(next.sections.keySet()));
@@ -152,16 +178,14 @@ public record SystemContext(
             changed.put(name, text);
           }
         });
-    List<String> removedSections =
-        sections.keySet().stream().filter(name -> !next.sections.containsKey(name)).toList();
+    return changed;
+  }
+
+  private ToolDelta toolsDelta(SystemContext next) {
     Map<String, ProviderToolDefinition> oldTools = byName(tools);
     Map<String, ProviderToolDefinition> newTools = byName(next.tools);
     List<ProviderToolDefinition> added = new ArrayList<>();
     List<String> removed = new ArrayList<>();
-    Map<String, SystemHostedTool> oldHostedTools = hostedByName(hostedTools);
-    Map<String, SystemHostedTool> newHostedTools = hostedByName(next.hostedTools);
-    List<SystemHostedTool> addedHosted = new ArrayList<>();
-    List<String> removedHosted = new ArrayList<>();
     next.tools.forEach(
         tool -> {
           if (!tool.equals(oldTools.get(tool.name()))) {
@@ -175,31 +199,35 @@ public record SystemContext(
             removed.add(tool.name());
           }
         });
+    return new ToolDelta(added, removed);
+  }
+
+  private HostedToolDelta hostedToolsDelta(SystemContext next) {
+    Map<String, SystemHostedTool> oldHostedTools = hostedByName(hostedTools);
+    Map<String, SystemHostedTool> newHostedTools = hostedByName(next.hostedTools);
+    List<SystemHostedTool> added = new ArrayList<>();
+    List<String> removed = new ArrayList<>();
     next.hostedTools.forEach(
         tool -> {
           if (!tool.equals(oldHostedTools.get(tool.name()))) {
-            addedHosted.add(tool);
+            added.add(tool);
           }
         });
     hostedTools.forEach(
         tool -> {
           SystemHostedTool replacement = newHostedTools.get(tool.name());
           if (replacement == null || !replacement.equals(tool)) {
-            removedHosted.add(tool.name());
+            removed.add(tool.name());
           }
         });
-    if (changed.isEmpty()
-        && removedSections.isEmpty()
-        && added.isEmpty()
-        && removed.isEmpty()
-        && addedHosted.isEmpty()
-        && removedHosted.isEmpty()) {
-      return Optional.empty();
-    }
-    return Optional.of(
-        new SystemPayload(
-            changed, removedSections, added, removed, addedHosted, removedHosted, false));
+    return new HostedToolDelta(added, removed);
   }
+
+  /** 工具定义增删：同名但定义变化同时出现在 added 与 removed。 */
+  private record ToolDelta(List<ProviderToolDefinition> added, List<String> removed) {}
+
+  /** Hosted tool 增删，语义同 {@link ToolDelta}。 */
+  private record HostedToolDelta(List<SystemHostedTool> added, List<String> removed) {}
 
   private static Map<String, SystemHostedTool> hostedByName(List<SystemHostedTool> tools) {
     Map<String, SystemHostedTool> result = new LinkedHashMap<>();
