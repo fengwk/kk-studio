@@ -171,3 +171,24 @@ export function isSameBinding(
     && current.daemonInstanceId === expected.daemonInstanceId
     && current.bindingEpoch === expected.bindingEpoch
 }
+
+/**
+ * 只保留仍然存在的 environment 的视图。
+ *
+ * <p>返回 `null` 表示没有需要丢弃的视图，调用方据此跳过无意义的写入。
+ */
+export function retainAvailableViews(
+  views: Record<string, IdeViewState>,
+  available: Set<string>,
+): Record<string, IdeViewState> | null {
+  const next: Record<string, IdeViewState> = {}
+  for (const [environmentId, view] of Object.entries(views)) {
+    if (available.has(environmentId)) {
+      next[environmentId] = view
+    }
+  }
+  if (Object.keys(next).length === Object.keys(views).length) {
+    return null
+  }
+  return next
+}

@@ -44,7 +44,7 @@ import {
 import {
   isBoundToConnection,
   isSameBinding,
-  type IdeViewState,
+  retainAvailableViews,
 } from '@/features/environment/ide/ide-view-state'
 import {
   failureStatus,
@@ -1024,14 +1024,9 @@ export function useIdeClaimReconciliation({
   }
 
   function reconcileEnvironments(available: Set<string>): void {
-    const next: Record<string, IdeViewState> = {}
-    for (const [environmentId, view] of Object.entries(viewsRef.current)) {
-      if (available.has(environmentId)) {
-        next[environmentId] = view
-      }
-    }
-    if (Object.keys(next).length !== Object.keys(viewsRef.current).length) {
-      commitViews(next)
+    const retained = retainAvailableViews(viewsRef.current, available)
+    if (retained != null) {
+      commitViews(retained)
       writeSession()
     }
     const environmentMap = getEnvironmentMap()
