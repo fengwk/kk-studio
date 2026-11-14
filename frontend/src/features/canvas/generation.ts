@@ -132,6 +132,49 @@ function hasUnsupportedPromptSchema(model?: CanvasFunctionDefinitionDTO | null):
   return (promptProp as Record<string, unknown>).type !== 'string'
 }
 
+/** 需要走完整 JSON 通道时的原始入参解释；各分支都保留 rawArgs，绝不静默丢弃无法表达的数据。 */
+function rawConfigFallback(args: Record<string, unknown>, rawError: string): CanvasFunctionConfig {
+  return { references: [], parameters: {}, rawArgs: args, rawError }
+}
+
+/**
+ * 入参无法用结构化表单表达时返回原因：schema 的 prompt 非字符串、入参 prompt 非常规、
+ * references 非数组/含非规范项，或模型不支持引用但入参带有引用。
+ * 返回 null 表示可以安全地走结构化表单。
+ */
+function rawConfigReason(
+  args: Record<string, unknown>,
+  model: CanvasFunctionDefinitionDTO,
+): string | null {
+  // 若 schema 声明的 prompt 并非字符串类型，不能默认为简单字符串表单，切换至完整 JSON 通道
+  if (hasUnsupportedPromptSchema(model)) {
+    return '模型定义的提示词并非字符串类型，已进入完整 JSON 模式。'
+  }
+
+  // 入参 prompt 包含非字符串结构（如对象、数组）：绝不能静默覆盖为 ''
+  if ('prompt' in args && typeof args.prompt !== 'string') {
+    return '入参 prompt 包含非字符串结构，已进入完整 JSON 模式以防止数据丢失。'
+  }
+
+  if (!('references' in args)) {
+    return null
+  }
+  // 入参 references 并非数组或包含非规范引用项：绝不能静默过滤删除
+  if (!Array.isArray(args.references)) {
+    return '入参 references 并非数组，已进入完整 JSON 模式以防止数据丢失。'
+  }
+  for (const item of args.references) {
+    if (!isCanonicalResourceReference(item)) {
+      return '入参 references 包含非规范项，已进入完整 JSON 模式以防止数据丢失。'
+    }
+  }
+  // 入参带有 reference 但 schema 不支持：不能剥离，必须 raw 保留以防保存时丢弃
+  if (args.references.length > 0 && !functionSupportsReferences(model)) {
+    return '当前模型不支持参考资源，但入参包含引用数据，已切换至完整 JSON 模式以防止数据丢失。'
+  }
+  return null
+}
+
 export function parseFunctionConfig(
   args: Record<string, unknown> | null | undefined,
   model: CanvasFunctionDefinitionDTO,
@@ -140,55 +183,9 @@ export function parseFunctionConfig(
     return createDefaultFunctionConfig(model)
   }
 
-  // 1. 若 schema 声明的 prompt 并非字符串类型，不能默认为简单字符串表单，切换至完整 JSON 通道
-  if (hasUnsupportedPromptSchema(model)) {
-    return {
-      references: [],
-      parameters: {},
-      rawArgs: args,
-      rawError: '模型定义的提示词并非字符串类型，已进入完整 JSON 模式。',
-    }
-  }
-
-  // 2. 若入参 prompt 包含非字符串结构（如对象、数组），绝不能静默覆盖为 ''，必须完整保留原始数据
-  if ('prompt' in args && typeof args.prompt !== 'string') {
-    return {
-      references: [],
-      parameters: {},
-      rawArgs: args,
-      rawError: '入参 prompt 包含非字符串结构，已进入完整 JSON 模式以防止数据丢失。',
-    }
-  }
-
-  // 3. 若入参 references 并非数组或包含非规范引用项，绝不能静默过滤删除，必须完整保留原始数据
-  if ('references' in args) {
-    if (!Array.isArray(args.references)) {
-      return {
-        references: [],
-        parameters: {},
-        rawArgs: args,
-        rawError: '入参 references 并非数组，已进入完整 JSON 模式以防止数据丢失。',
-      }
-    }
-    for (const item of args.references) {
-      if (!isCanonicalResourceReference(item)) {
-        return {
-          references: [],
-          parameters: {},
-          rawArgs: args,
-          rawError: '入参 references 包含非规范项，已进入完整 JSON 模式以防止数据丢失。',
-        }
-      }
-    }
-    // 4. 若入参包含 references 但当前模型 schema 不支持 references，不能剥离进 references，必须 raw 保留以防保存时丢弃
-    if (args.references.length > 0 && !functionSupportsReferences(model)) {
-      return {
-        references: [],
-        parameters: {},
-        rawArgs: args,
-        rawError: '当前模型不支持参考资源，但入参包含引用数据，已切换至完整 JSON 模式以防止数据丢失。',
-      }
-    }
+  const reason = rawConfigReason(args, model)
+  if (reason !== null) {
+    return rawConfigFallback(args, reason)
   }
 
   const prompt = typeof args.prompt === 'string' ? args.prompt : undefined
