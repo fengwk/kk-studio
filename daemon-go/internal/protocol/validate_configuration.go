@@ -6,9 +6,8 @@ import (
 )
 
 func validateDaemonConfig(c *DaemonConfiguration) error {
-	u, err := url.Parse(c.GetStudioUrl())
-	if err != nil || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
-		return invalid("environmentConfig.config.studioUrl has invalid syntax")
+	if err := validateStudioURL(c.GetStudioUrl()); err != nil {
+		return err
 	}
 	if c.BashExecutable != nil && (strings.TrimSpace(*c.BashExecutable) == "" || hasControl(*c.BashExecutable)) {
 		return invalid("environmentConfig.config.bashExecutable is invalid")
@@ -16,27 +15,49 @@ func validateDaemonConfig(c *DaemonConfiguration) error {
 	if c.Lsp != nil && len(c.Lsp.Servers) == 0 {
 		return invalid("environmentConfig.config.lsp.servers must declare at least one server")
 	}
+	if err := validateLSPServers(c.GetLsp().GetServers()); err != nil {
+		return err
+	}
+	if c.ProxyUrl != nil && !validProxyURL(*c.ProxyUrl) {
+		return invalid("environmentConfig.config.proxyUrl has invalid syntax")
+	}
+	return nil
+}
+
+func validateStudioURL(value string) error {
+	u, err := url.Parse(value)
+	if err != nil || (strings.ToLower(u.Scheme) != "http" && strings.ToLower(u.Scheme) != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
+		return invalid("environmentConfig.config.studioUrl has invalid syntax")
+	}
+	return nil
+}
+
+func validateLSPServers(servers []*LspServer) error {
 	seen := map[string]bool{}
-	for _, s := range c.GetLsp().GetServers() {
+	for _, s := range servers {
 		if s == nil || !serverIDPattern.MatchString(s.Id) || seen[s.Id] {
 			return invalid("environmentConfig.config.lsp.servers has invalid or duplicate id")
 		}
 		seen[s.Id] = true
-		if err := validateStringList(s.Command, true, false, false); err != nil {
-			return invalid("environmentConfig.config.lsp.server.command must be a nonempty array of strings")
-		}
-		if err := validateStringList(s.Extensions, true, true, false); err != nil {
-			return invalid("environmentConfig.config.lsp.server.extensions must be valid file extensions")
-		}
-		if err := validateStringList(s.RootMarkers, false, false, true); err != nil {
-			return invalid("environmentConfig.config.lsp.server.rootMarkers must be project-relative without traversal")
-		}
-		if err := validateStringList(s.FirstMatchMarkers, false, false, true); err != nil {
-			return invalid("environmentConfig.config.lsp.server.firstMatchMarkers must be project-relative without traversal")
+		if err := validateLSPServer(s); err != nil {
+			return err
 		}
 	}
-	if c.ProxyUrl != nil && !validProxyURL(*c.ProxyUrl) {
-		return invalid("environmentConfig.config.proxyUrl has invalid syntax")
+	return nil
+}
+
+func validateLSPServer(s *LspServer) error {
+	if err := validateStringList(s.Command, true, false, false); err != nil {
+		return invalid("environmentConfig.config.lsp.server.command must be a nonempty array of strings")
+	}
+	if err := validateStringList(s.Extensions, true, true, false); err != nil {
+		return invalid("environmentConfig.config.lsp.server.extensions must be valid file extensions")
+	}
+	if err := validateStringList(s.RootMarkers, false, false, true); err != nil {
+		return invalid("environmentConfig.config.lsp.server.rootMarkers must be project-relative without traversal")
+	}
+	if err := validateStringList(s.FirstMatchMarkers, false, false, true); err != nil {
+		return invalid("environmentConfig.config.lsp.server.firstMatchMarkers must be project-relative without traversal")
 	}
 	return nil
 }

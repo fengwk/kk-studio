@@ -10,30 +10,7 @@ func validateUploadTicket(t *ResourceUploadTicket) error {
 	}
 	switch t.State {
 	case TicketState_TICKET_PENDING:
-		if t.UploadId == nil || t.PresignedPut == nil || t.Message != nil {
-			return invalid("PENDING ticket requires uploadId and presignedPut only")
-		}
-		if err := uuid(t.GetUploadId(), "uploadTicket.uploadId"); err != nil {
-			return err
-		}
-		p := t.PresignedPut
-		if p.GetMethod() != "PUT" {
-			return invalid("presignedPut.method must be PUT")
-		}
-		if err := requireString(p.Url, "presignedPut.url", true, 4096); err != nil {
-			return err
-		}
-		if len(p.Headers) > 16 {
-			return invalid("presignedPut.headers must not exceed 16 entries")
-		}
-		for k, v := range p.Headers {
-			if strings.TrimSpace(k) == "" || len(k) > 1024 || strings.TrimSpace(v) == "" || len(v) > 1024 {
-				return invalid("presignedPut.header is invalid")
-			}
-		}
-		if p.ExpiresAtEpochMs == nil || p.GetExpiresAtEpochMs() <= 0 {
-			return invalid("presignedPut.expiresAtEpochMs must be positive")
-		}
+		return validatePendingUploadTicket(t)
 	case TicketState_TICKET_READY:
 		if t.UploadId == nil || t.PresignedPut != nil || t.Message != nil {
 			return invalid("READY ticket requires uploadId only")
@@ -46,6 +23,36 @@ func validateUploadTicket(t *ResourceUploadTicket) error {
 		return requireString(t.Message, "uploadTicket.message", true, 512)
 	default:
 		return invalid("uploadTicket.state is required")
+	}
+}
+
+func validatePendingUploadTicket(t *ResourceUploadTicket) error {
+	if t.UploadId == nil || t.PresignedPut == nil || t.Message != nil {
+		return invalid("PENDING ticket requires uploadId and presignedPut only")
+	}
+	if err := uuid(t.GetUploadId(), "uploadTicket.uploadId"); err != nil {
+		return err
+	}
+	return validatePresignedPut(t.PresignedPut)
+}
+
+func validatePresignedPut(p *PresignedPut) error {
+	if p.GetMethod() != "PUT" {
+		return invalid("presignedPut.method must be PUT")
+	}
+	if err := requireString(p.Url, "presignedPut.url", true, 4096); err != nil {
+		return err
+	}
+	if len(p.Headers) > 16 {
+		return invalid("presignedPut.headers must not exceed 16 entries")
+	}
+	for k, v := range p.Headers {
+		if strings.TrimSpace(k) == "" || len(k) > 1024 || strings.TrimSpace(v) == "" || len(v) > 1024 {
+			return invalid("presignedPut.header is invalid")
+		}
+	}
+	if p.ExpiresAtEpochMs == nil || p.GetExpiresAtEpochMs() <= 0 {
+		return invalid("presignedPut.expiresAtEpochMs must be positive")
 	}
 	return nil
 }
