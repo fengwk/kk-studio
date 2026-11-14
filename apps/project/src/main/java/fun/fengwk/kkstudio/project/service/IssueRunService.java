@@ -1,62 +1,35 @@
 package fun.fengwk.kkstudio.project.service;
 
 import lombok.AllArgsConstructor;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
-import fun.fengwk.kkstudio.harness.api.SpawnRequest;
-import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetEnvironmentCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.SetExecutionCommandPayload;
-import fun.fengwk.kkstudio.harness.api.command.ThreadCommandPayload;
-import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
-import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.history.EntryPath;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
-import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
-import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
-import fun.fengwk.kkstudio.platform.harness.task.AgentBranchSettingsMaterializer;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.IssueStateTransitions;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
-import fun.fengwk.kkstudio.project.domain.ProjectWorkflowReservedState;
-import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
 import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivity;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
-import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
 import fun.fengwk.kkstudio.project.model.Project;
-import fun.fengwk.kkstudio.project.platform.IssueRunTask;
-import fun.fengwk.kkstudio.project.platform.IssueThreadExecution;
-import fun.fengwk.kkstudio.project.platform.IssueThreadView;
 import fun.fengwk.kkstudio.project.repo.IssueActivityRepository;
-import fun.fengwk.kkstudio.project.repo.IssueAgentThreadRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRepository;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
-import fun.fengwk.kkstudio.project.repo.IssueStageBudgetRepository;
 import fun.fengwk.kkstudio.project.repo.ProjectRepository;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.Identity;
 import fun.fengwk.kkstudio.project.service.IssueActivityIdempotency.ReceiptLock;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -88,21 +61,15 @@ public class IssueRunService {
   /** 新接受 Run 的初始活动执行额度；安全等待不消耗活动时长。 */
   static final long DEFAULT_RUN_EXECUTION_BUDGET_MS = 30L * 60L * 1000L;
 
-  /** 任务消息模板：可信 Markdown，Issue 事实与阶段说明按原文渲染。 */
-  private static final String TASK_MESSAGE =
-      "fun/fengwk/kkstudio/project/prompts/messages/issue-task.md";
-
   private final ProjectRepository projectRepository;
   private final IssueRepository issueRepository;
   private final IssueRunRepository issueRunRepository;
-  private final IssueStageBudgetRepository stageBudgetRepository;
-  private final IssueAgentThreadRepository issueAgentThreadRepository;
   private final IssueActivityRepository issueActivityRepository;
   private final DurableWorkStore issueWorkQueue;
   private final ProjectWorkflowJsonCodec workflowCodec;
-  private final AgentBranchSettingsMaterializer agentBranchSettings;
-  private final ObjectProvider<IssueThreadExecution> threadExecutions;
   private final ObjectMapper objectMapper;
+  private final IssueRunAdmission admission;
+  private final IssueRunHarness harness;
 
   @Transactional
   public IssueRun acceptRun(UUID issueId, String requestKey) {
@@ -125,85 +92,9 @@ public class IssueRunService {
     }
     Project project = receipt.locked().project();
     Issue issue = receipt.locked().issue();
-    if (project.isArchived()) {
-      throw DomainException.validation("project", "Cannot accept a run in an archived project");
-    }
-    if (issue.isGateClosed()) {
-      throw DomainException.validation(
-          "issue", "Cannot accept a run while the issue gate is closed");
-    }
-    ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
-    ProjectStateCode stateCode = ProjectStateCode.of(issue.getState());
-    if (ProjectWorkflowReservedState.isReserved(stateCode)) {
-      throw DomainException.validation(
-          "issue_run", "Issue is not in an executable work stage: " + issue.getState());
-    }
-    ProjectWorkflowState stage = workflow.require(stateCode);
-    if (!stage.enabled() || !stage.hasAgent()) {
-      throw DomainException.validation(
-          "issue_run", "Stage " + issue.getState() + " has no enabled agent");
-    }
-    String agentName = stage.agent();
-    if (issueRunRepository.lockActiveByIssueId(issueId) != null) {
-      throw DomainException.validation("issue_run", "Issue already has an active run");
-    }
-
-    StageBudgetView budgetRow = stageBudgetRepository.get(issueId, issue.getState());
-    if (budgetRow == null) {
-      budgetRow = StageBudgetView.authorize(workflow, stateCode, stage.maxRuns());
-      if (!stageBudgetRepository.insert(issueId, budgetRow)) {
-        throw new IllegalStateException("failed to authorize initial stage budget");
-      }
-    }
-    if (budgetRow.usedRuns() >= budgetRow.maxRuns()) {
-      throw DomainException.validation(
-          "issue_run", "Stage budget is exhausted; a human must reset the stage budget");
-    }
-
-    IssueAgentThread binding =
-        issueAgentThreadRepository.findByIssueIdAndAgentName(issueId, agentName);
-    BranchSettings settings = agentBranchSettings.materialize(agentName);
-    // Run id 在接受源输入之前分配，同时作为 root Join ticket 的 invocationId；接受、Join 与 Run 记录在同一事务写入。
-    UUID runId = UUID.randomUUID();
-    UUID sessionId;
-    UUID threadId;
-    UUID existingHead = null;
-    SpawnRequest.Continuation continuation = null;
-    if (binding == null) {
-      sessionId = UUID.randomUUID();
-      threadId = UUID.randomUUID();
-    } else {
-      threadId = binding.threadId();
-      IssueThreadView view = requireThreadExecution().readThread(threadId);
-      sessionId = view.sessionId();
-      existingHead = view.headEntryId();
-      continuation = new SpawnRequest.Continuation(existingHead, view.nextCommandSequence());
-    }
-
-    List<NewThreadCommand> commands = buildRunCommands(settings, issue, stage, runId);
-    NewThreadCommand taskInput = commands.getLast();
-    AcceptedCommands accepted =
-        requireThreadExecution()
-            .submitRunTask(
-                new IssueRunTask(
-                    runId,
-                    threadId,
-                    binding == null ? sessionId : null,
-                    settings,
-                    binding == null && project.isYoloEnabled(),
-                    continuation,
-                    commands,
-                    taskInput.requestHash()));
-    UUID startEntryId;
-    if (binding == null) {
-      if (!issueAgentThreadRepository.insert(
-          new IssueAgentThread(issueId, agentName, sessionId, threadId))) {
-        throw new IllegalStateException("failed to bind issue agent thread");
-      }
-      startEntryId = accepted.rootEntry().id();
-    } else {
-      startEntryId = existingHead;
-    }
+    IssueRunAdmission.Admitted admitted = admission.admit(project, issue);
+    IssueRunHarness.Dispatched dispatched =
+        harness.dispatch(project, issue, admitted.stage(), admitted.agentName());
 
     long ordinal = issue.getNextRunOrdinal();
     // 指示游标沿用上一个 Run 的既有活动事实位置：上一个 Run 未在安全点观察到的业务指示不会被匹配收尾吞掉，会由本次 Run
@@ -215,14 +106,14 @@ public class IssueRunService {
             : issue.getNextActivitySequence() - 1;
     IssueRun run =
         IssueRun.builder()
-            .id(runId)
+            .id(dispatched.runId())
             .issueId(issueId)
             .ordinal(ordinal)
             .state(issue.getState())
-            .sessionId(sessionId)
-            .threadId(threadId)
+            .sessionId(dispatched.sessionId())
+            .threadId(dispatched.threadId())
             .status(IssueRunStatus.RUNNING)
-            .startEntryId(startEntryId)
+            .startEntryId(dispatched.startEntryId())
             .observedActivitySequence(observedActivitySequence)
             .remainingExecutionMs(DEFAULT_RUN_EXECUTION_BUDGET_MS)
             .activeSince(Instant.now())
@@ -322,55 +213,15 @@ public class IssueRunService {
       String error) {
     Objects.requireNonNull(runId, "runId");
     Objects.requireNonNull(endEntryId, "endEntryId");
-    String key = InputValidation.requireRequestKey(requestKey);
-    if (status != IssueRunStatus.COMPLETED
-        && status != IssueRunStatus.CANCELLED
-        && status != IssueRunStatus.FAILED) {
-      throw DomainException.validation("issue_run", "A terminal status is required");
-    }
-    if ((status != IssueRunStatus.COMPLETED && (finalAnswerEntryId != null || nextState != null))
-        || (status != IssueRunStatus.FAILED && error != null)) {
-      throw DomainException.validation("issue_run", "Invalid terminal inputs");
-    }
-    String validError =
-        status == IssueRunStatus.FAILED
-            ? InputValidation.requireUtf8Text(error, "error", InputValidation.MAX_LARGE_TEXT_BYTES)
-            : null;
-    boolean handoff = nextState != null;
-    Identity identity =
-        status == IssueRunStatus.CANCELLED
-            ? IssueActivityIdempotency.identity(
-                IssueActivityKind.CONTROL,
-                "CANCEL_RUN",
-                key,
-                runId,
-                endEntryId,
-                PauseReason.USER.name())
-            : status == IssueRunStatus.FAILED
-                ? IssueActivityIdempotency.identity(
-                    IssueActivityKind.CONTROL, "FAIL_RUN", key, runId, endEntryId, validError)
-                : handoff
-                    ? IssueActivityIdempotency.identity(
-                        IssueActivityKind.STATE_CHANGE,
-                        "HANDOFF",
-                        key,
-                        runId,
-                        endEntryId,
-                        finalAnswerEntryId,
-                        nextState)
-                    : IssueActivityIdempotency.identity(
-                        IssueActivityKind.CONTROL,
-                        "COMPLETE_RUN",
-                        key,
-                        runId,
-                        endEntryId,
-                        finalAnswerEntryId);
+    IssueRunTerminal terminal =
+        IssueRunTerminal.parse(
+            runId, requestKey, status, endEntryId, finalAnswerEntryId, nextState, error);
     IssueRun peek = requireRun(runId);
     ReceiptLock<RunLock> receipt =
         IssueActivityIdempotency.lockUnlessReplayed(
             issueActivityRepository,
             peek.getIssueId(),
-            identity,
+            terminal.identity(),
             () -> lockRun(runId),
             l -> l.issue().getId());
     if (receipt.activity() != null) {
@@ -380,23 +231,19 @@ public class IssueRunService {
     IssueRun run = locked.run();
     requireActive(run);
     requireVersion(run, expectedVersion);
-    requireWithinRunInterval(
-        entryPath(run.getThreadId()),
+    IssueRunInterval.requireWithin(
+        harness.entryPath(run.getThreadId()),
         run.getStartEntryId(),
         endEntryId,
         finalAnswerEntryId,
-        status == IssueRunStatus.COMPLETED);
-    if (status != IssueRunStatus.COMPLETED) {
-      terminate(run, status, endEntryId, validError, expectedVersion);
-      applyPauseGate(
-          locked,
-          identity,
-          status == IssueRunStatus.CANCELLED ? PauseReason.USER : PauseReason.ERROR,
-          status == IssueRunStatus.CANCELLED ? "Run was stopped by a human" : validError);
+        terminal.completed());
+    if (!terminal.completed()) {
+      terminate(run, terminal.status(), endEntryId, terminal.error(), expectedVersion);
+      applyPauseGate(locked, terminal.identity(), terminal.pauseReason(), terminal.pauseDetail());
       return issueRunRepository.getById(runId);
     }
     Issue issue = locked.issue();
-    if (handoff) {
+    if (terminal.handoff()) {
       ProjectWorkflow workflow = workflowCodec.decode(locked.project().getWorkflowJson());
       ProjectStateCode from = ProjectStateCode.of(run.getState());
       ProjectStateCode to = ProjectStateCode.of(nextState);
@@ -405,12 +252,14 @@ public class IssueRunService {
       data.put("action", "HANDOFF");
       data.put("from", from.value());
       data.put("to", to.value());
-      appendActivity(issue, identity, IssueActivityActorType.SYSTEM, null, null, null, data);
+      appendActivity(
+          issue, terminal.identity(), IssueActivityActorType.SYSTEM, null, null, null, data);
       issue.setState(to.value());
     } else {
       ObjectNode data = objectMapper.createObjectNode();
       data.put("action", "COMPLETE_RUN");
-      appendActivity(issue, identity, IssueActivityActorType.SYSTEM, null, runId, null, data);
+      appendActivity(
+          issue, terminal.identity(), IssueActivityActorType.SYSTEM, null, runId, null, data);
     }
     run.setStatus(IssueRunStatus.COMPLETED);
     run.setEndEntryId(endEntryId);
@@ -467,48 +316,6 @@ public class IssueRunService {
   private void persistIssue(Issue issue, long expectedVersion) {
     if (!issueRepository.updateById(issue, expectedVersion)) {
       throw DomainException.versionConflict("issue", expectedVersion, issue.getVersion());
-    }
-  }
-
-  /**
-   * 读取该 Thread 的 root-to-head 历史路径（设计 §4.5 区间解释依据）。
-   *
-   * <p>只读快照，不产生锁；部署缺少 Harness Runtime 时确定失败，绝不退化为"无区间校验"的接受。
-   */
-  private EntryPath entryPath(UUID threadId) {
-    return requireThreadExecution().readThread(threadId).entryPath();
-  }
-
-  /**
-   * 复验 {@code (startEntryId,endEntryId]} 落在该 Thread 的真实历史路径上：end 必须是 start 的后代，final answer
-   * 必须落在同一区间内。
-   *
-   * <p>外键只保证 Entry 属于同一 Session，因此必须沿父链判定，绝不能按时间排序或只看区间序号。{@code requireProgress} 为 true 时要求区间非空
-   * （正常收尾必须真的产出过历史），失败/取消/不明允许空区间：接受之后还没有产出任何 Entry 时也必须能安全收尾。
-   */
-  private static void requireWithinRunInterval(
-      EntryPath path,
-      UUID startEntryId,
-      UUID endEntryId,
-      UUID finalAnswerEntryId,
-      boolean requireProgress) {
-    List<UUID> entryIds = path.entries().stream().map(Entry::id).toList();
-    int start = entryIds.indexOf(startEntryId);
-    if (start < 0) {
-      throw DomainException.validation(
-          "issue_run", "Run start entry is not on the bounded thread history path");
-    }
-    int end = entryIds.indexOf(endEntryId);
-    if (end < start || (requireProgress && end == start)) {
-      throw DomainException.validation(
-          "issue_run", "Run end entry must be a descendant of the run start entry");
-    }
-    if (finalAnswerEntryId != null) {
-      int answer = entryIds.indexOf(finalAnswerEntryId);
-      if (answer <= start || answer > end) {
-        throw DomainException.validation(
-            "issue_run", "Run final answer must be inside the run interval (start, end]");
-      }
     }
   }
 
@@ -572,66 +379,6 @@ public class IssueRunService {
   }
 
   /**
-   * 每次 Run 显式提交的完整命令批：先按固定顺序设置 Agent/Execution/Environment，最后以恰一条 CUSTOM_MESSAGE（可信调用方输入，而非人类
-   * USER_MESSAGE）启动任务。
-   *
-   * <p>Environment 取当前 stage 的显式选择（含 null 清除），而不是 Agent 默认 settings 的 environmentName，否则工作流里配置的
-   * stage 环境会被 Agent 默认值悄悄覆盖；Agent 与 Model 仍以本 Run 明确物化的 run 配置为准。
-   *
-   * <p>任务消息是本次 Run 唯一的业务上下文来源：它在接受时由 Project 自己的模板渲染成 Markdown，不写入 branch custom state，不依赖 Harness
-   * 状态投影。
-   */
-  private List<NewThreadCommand> buildRunCommands(
-      BranchSettings settings, Issue issue, ProjectWorkflowState stage, UUID runId) {
-    return List.of(
-        command(new SetAgentCommandPayload(settings.agentName()), runId, "agent"),
-        command(new SetExecutionCommandPayload(settings.execution()), runId, "execution"),
-        command(new SetEnvironmentCommandPayload(stage.environment()), runId, "environment"),
-        command(new CustomMessageCommandPayload(taskInput(issue, stage)), runId, "task"));
-  }
-
-  private static NewThreadCommand command(ThreadCommandPayload payload, UUID runId, String role) {
-    return new NewThreadCommand(payload, commandKey(runId, role));
-  }
-
-  /** 命令幂等键由 Run id 与角色确定：同一 Run 的重复接受不会重复入队。 */
-  private static UUID commandKey(UUID runId, String role) {
-    return UUID.nameUUIDFromBytes(
-        ("issue-run:" + runId + ":" + role).getBytes(StandardCharsets.UTF_8));
-  }
-
-  /**
-   * 自动任务输入：Issue 要求、阶段说明与可选的下一阶段一次渲染成可信 Markdown。
-   *
-   * <p>事实以三花括号原样插入，Issue 正文与阶段说明里的 Markdown 不会被转义；这些文本是当前 Run 开始时的事实，不是授权来源—— 交接仍只由 {@code
-   * issue_transition} 在业务事务内按活动 Run 校验。
-   */
-  private static AgentMessage taskInput(Issue issue, ProjectWorkflowState stage) {
-    List<String> nextStates = stage.next().stream().map(ProjectStateCode::value).toList();
-    String description = issue.getDescription();
-    String instructions = stage.instructions();
-    String stageInstructions =
-        instructions == null || instructions.isBlank()
-            ? "(this stage declares no additional instructions)"
-            : instructions;
-    String text =
-        PromptRenderer.render(
-                TASK_MESSAGE,
-                Map.ofEntries(
-                    Map.entry("issueNumber", issue.getNumber()),
-                    Map.entry("issueTitle", issue.getTitle()),
-                    Map.entry("hasDescription", description != null && !description.isBlank()),
-                    Map.entry("issueDescription", description == null ? "" : description),
-                    Map.entry("stage", stage.state().value()),
-                    Map.entry("stageName", stage.name()),
-                    Map.entry("stageInstructions", stageInstructions),
-                    Map.entry("hasNext", !nextStates.isEmpty()),
-                    Map.entry("nextStates", String.join(", ", nextStates))))
-            .stripTrailing();
-    return new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text)));
-  }
-
-  /**
    * 追加一条业务活动（设计 §4.6 一个动作一条活动）：请求键与指纹来自调用方身份，正文与 Run 引用按动作填写。
    *
    * <p>调用方必须在 owner 锁内、版本/状态校验与 Harness 派发之前完成 {@link IssueActivityIdempotency#findApplied
@@ -663,14 +410,6 @@ public class IssueRunService {
       throw new IllegalStateException("failed to insert issue activity");
     }
     issue.setNextActivitySequence(sequence + 1);
-  }
-
-  private IssueThreadExecution requireThreadExecution() {
-    IssueThreadExecution port = threadExecutions.getIfAvailable();
-    if (port == null) {
-      throw new IllegalStateException("harness runtime is not available in this deployment");
-    }
-    return port;
   }
 
   private record OwnerLock(Project project, Issue issue) {}
