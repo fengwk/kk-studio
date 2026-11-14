@@ -13,13 +13,11 @@ import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelCheckpointRequester;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
-import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupProgress;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -596,7 +594,9 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
     if (decision.retry()) {
       Instant retryAt = now.plus(decision.delay());
       ModelInvocation retried =
-          model.retryReady(attemptFailure(model, model.attempt(), error, now, retryAt), now);
+          model.retryReady(
+              ModelAttemptFailures.fromCheckpoint(model, model.attempt(), error, now, retryAt),
+              now);
       if (group != null) {
         retried = retried.withGroupProgress(groupProgress.retryCurrent(), now);
       }
@@ -618,30 +618,12 @@ public final class ModelProcessor implements ModelCheckpointRequester, AutoClose
         group == null
             ? model.fail(error, now)
             : model.failAfterAttempt(
-                error, attemptFailure(model, model.attempt(), error, now, now), now));
+                error,
+                ModelAttemptFailures.fromCheckpoint(model, model.attempt(), error, now, now),
+                now));
     tx.threads().update(thread.touchVersion(now));
     tx.work().complete(claim);
     return new Prepare.Terminated();
-  }
-
-  /** 恢复失败尝试的审计快照：旧 partial（RUNNING 的安全 checkpoint）只留作尝试记录，不参与新 attempt。 */
-  private static ModelAttemptFailure attemptFailure(
-      ModelInvocation model,
-      int attempt,
-      ModelInvocationError error,
-      Instant failedAt,
-      Instant retryAt) {
-    StreamCheckpoint checkpoint = model.streamCheckpoint();
-    return new ModelAttemptFailure(
-        attempt,
-        checkpoint == null ? 0L : checkpoint.sequence(),
-        checkpoint == null ? "" : checkpoint.text(),
-        checkpoint == null ? "" : checkpoint.thinking(),
-        model.actualSelection(),
-        model.requestedAt(),
-        error,
-        failedAt,
-        retryAt);
   }
 
   /** terminal 行：resultEntryId 仍 null 时确保 THREAD Work 请求，然后 complete MODEL Work；不重复 bump version。 */
