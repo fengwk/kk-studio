@@ -65,8 +65,8 @@ func TestOutputStoreHandlesMissingPublishAndEmptyStaging(t *testing.T) {
 		t.Fatal(err)
 	}
 	spool.Write(nil)
-	if spool.TotalBytes() != 0 || spool.totalLines() != 0 {
-		t.Fatalf("empty spool bytes=%d lines=%d", spool.TotalBytes(), spool.totalLines())
+	if spool.total != 0 || spool.totalLines() != 0 {
+		t.Fatalf("empty spool bytes=%d lines=%d", spool.total, spool.totalLines())
 	}
 	result := spool.Finish(false, "note")
 	if result.Error || result.Contents[0].Text != "note" {

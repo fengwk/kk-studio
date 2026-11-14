@@ -52,7 +52,7 @@ func TestOutputLineCountHandlesCRLFOnce(t *testing.T) {
 	if got := spool.totalLines(); got != 3 {
 		t.Fatalf("line count=%d want=3", got)
 	}
-	if got := spool.TotalBytes(); got != 9 {
+	if got := spool.total; got != 9 {
 		t.Fatalf("byte count=%d want=9", got)
 	}
 	_ = spool.Close()
@@ -73,7 +73,7 @@ func TestCaptureBudgetPublishesCapturedPrefixAndKeepsPreview(t *testing.T) {
 	if !spool.IsCaptureTruncated() {
 		t.Fatal("expected capture to stop at budget")
 	}
-	if spool.TotalBytes() != int64(len(data)) || spool.CaptureTruncatedTailPreview() != string(data[len(data)-previewTailBytes:]) {
+	if spool.total != int64(len(data)) || spool.CaptureTruncatedTailPreview() != string(data[len(data)-previewTailBytes:]) {
 		t.Fatal("total bytes or truncated tail preview mismatch")
 	}
 	result := spool.Finish(false, "")
