@@ -229,17 +229,18 @@ class BashSurfaceAnalyzerCoverageTest {
   void tokenizesQuotedEscapedNestedAndCommentedInput() {
     assertEquals(
         List.of("A=1", "echo", "'a b'", "\"c d\"", "e\\ f", "(nested value)", "{x y}"),
-        analyzer.tokenize("A=1 echo 'a b' \"c d\" e\\ f (nested value) {x y} # ignored"));
-    assertEquals(List.of("echo", "`date`"), analyzer.tokenize("echo `date`"));
-    assertEquals(List.of("echo", "continued"), analyzer.tokenize("echo \\\r\ncontinued"));
+        BashTokenizer.tokenize("A=1 echo 'a b' \"c d\" e\\ f (nested value) {x y} # ignored"));
+    assertEquals(List.of("echo", "`date`"), BashTokenizer.tokenize("echo `date`"));
+    assertEquals(List.of("echo", "continued"), BashTokenizer.tokenize("echo \\\r\ncontinued"));
     assertTrue(analyzer.analyze("A=1 B=2").supported());
     assertTrue(analyzer.analyze("  ").segments().isEmpty());
     assertTrue(analyzer.buildCandidates(" ").isEmpty());
     // tokenizer 不展开运行时内容，quoted/nested 词各自成为一个 token（来源：pi-base bash-command-analyzer）。
     assertEquals(
-        List.of("bash", "-c", "\"$REAL_BASH\""), analyzer.tokenize("bash -c \"$REAL_BASH\""));
-    assertEquals(List.of("echo", "\"$(rm -rf tmp)\""), analyzer.tokenize("echo \"$(rm -rf tmp)\""));
-    assertEquals(List.of("echo", "$(rm -rf tmp)"), analyzer.tokenize("echo $(rm -rf tmp)"));
+        List.of("bash", "-c", "\"$REAL_BASH\""), BashTokenizer.tokenize("bash -c \"$REAL_BASH\""));
+    assertEquals(
+        List.of("echo", "\"$(rm -rf tmp)\""), BashTokenizer.tokenize("echo \"$(rm -rf tmp)\""));
+    assertEquals(List.of("echo", "$(rm -rf tmp)"), BashTokenizer.tokenize("echo $(rm -rf tmp)"));
   }
 
   /** executable-position expansion/redirection 与所有动态 launchers 被识别为 unsupported。 */

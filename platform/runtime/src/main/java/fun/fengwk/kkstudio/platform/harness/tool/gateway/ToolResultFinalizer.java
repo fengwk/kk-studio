@@ -2,37 +2,19 @@ package fun.fengwk.kkstudio.platform.harness.tool.gateway;
 
 import lombok.extern.slf4j.Slf4j;
 
-import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.common.result.BinaryResultContent;
-import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextArtifactMetadata;
-import fun.fengwk.kkstudio.common.result.TextResultContent;
-import fun.fengwk.kkstudio.common.result.ToolOutputLimit;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.contributor.builtin.environment.FileTool;
 import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
-import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
-import java.nio.ByteBuffer;
-import java.nio.CharBuffer;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CharsetDecoder;
-import java.nio.charset.CharsetEncoder;
-import java.nio.charset.CoderResult;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.util.ArrayList;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Objects;
-import java.util.UUID;
 import java.util.function.IntSupplier;
-import java.util.regex.Pattern;
 
 /**
  * Terminal {@link ToolResult} 的结果级统一终态化器（{@code ToolResultFinalizer}）。
@@ -52,6 +34,9 @@ import java.util.regex.Pattern;
  *       OUTPUT_TOO_LARGE}）、元数据规划与投影 canonical JSON 尺寸（&le; 1 MiB）验证；
  *   <li>存储失败或契约违反收敛为 {@code UNKNOWN / RESOURCE_STORE_FAILED}。
  * </ul>
+ *
+ * <p>只读规划（分类、测量与尺寸核验）由 {@link TerminalResultPlan} 承担，文本测量与严格 Unicode 校验由 {@link
+ * TerminalTextMetrics} 承担；本类只负责把计划落到资源存储，并在任一失败时按逆序放弃已写入的部分。
  */
 @Slf4j
 public final class ToolResultFinalizer {
@@ -92,9 +77,6 @@ public final class ToolResultFinalizer {
   private static final String RESOURCE_STORE_FAILED_MESSAGE =
       "Tool result resource persistence failed; outcome is unknown.";
 
-  private static final Pattern CANONICAL_MEDIA_TYPE =
-      Pattern.compile("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+");
-
   private final ToolResourceStager resourceStager;
   private final IntSupplier outputLimitBytes;
 
@@ -121,42 +103,48 @@ public final class ToolResultFinalizer {
     if (maxOutputBytes <= 0) {
       throw new IllegalStateException("tool output size limit must be positive");
     }
-    Plan plan;
+    TerminalResultPlan.Plan plan;
     try {
-      plan = plan(toolName, result, maxOutputBytes);
-    } catch (OutputTooLargeException tooLarge) {
+      plan = TerminalResultPlan.plan(toolName, result, maxOutputBytes);
+    } catch (TerminalResultPlan.OutputTooLargeException tooLarge) {
       return Outcome.outputTooLarge(tooLarge.getMessage());
     } catch (IllegalArgumentException invalid) {
       return Outcome.invalid(invalid.getMessage());
     }
+    return stage(plan, result, maxOutputBytes);
+  }
 
+  /** 逐个落实计划项；任一失败先逆序放弃已写入的上传，再收敛为确定性结果。 */
+  private Outcome stage(TerminalResultPlan.Plan plan, ToolResult result, int maxOutputBytes) {
     List<ResultContent> finalContents = new ArrayList<>(plan.items().size());
     List<ResourceRef> stagedResources = new ArrayList<>();
-    for (PlanItem item : plan.items()) {
-      if (item instanceof PlanItem.PassThrough pass) {
+    for (TerminalResultPlan.PlanItem item : plan.items()) {
+      if (item instanceof TerminalResultPlan.PlanItem.PassThrough pass) {
         finalContents.add(pass.content());
-      } else if (item instanceof PlanItem.StoreToResource store) {
-        ResourceRef returned;
-        try {
-          returned =
-              resourceStager.stage(
-                  store.planned().mediaType(), store.planned().name(), store.bytes());
-        } catch (ToolOutputLimitExceededException tooLarge) {
-          discard(stagedResources);
-          return Outcome.outputTooLarge(tooLarge.getMessage());
-        } catch (RuntimeException failure) {
-          discard(stagedResources);
-          return Outcome.storeFailed();
-        }
-        if (returned != null && returned.blobUploadId() != null) {
-          stagedResources.add(returned);
-        }
-        if (!sameContentFacts(store.planned(), returned, maxOutputBytes)) {
-          discard(stagedResources);
-          return Outcome.storeFailed();
-        }
-        finalContents.add(new ResourceResultContent(returned, store.preview(), store.metadata()));
+        continue;
       }
+      TerminalResultPlan.PlanItem.StoreToResource store =
+          (TerminalResultPlan.PlanItem.StoreToResource) item;
+      ResourceRef returned;
+      try {
+        returned =
+            resourceStager.stage(
+                store.planned().mediaType(), store.planned().name(), store.bytes());
+      } catch (ToolOutputLimitExceededException tooLarge) {
+        discard(stagedResources);
+        return Outcome.outputTooLarge(tooLarge.getMessage());
+      } catch (RuntimeException failure) {
+        discard(stagedResources);
+        return Outcome.storeFailed();
+      }
+      if (returned != null && returned.blobUploadId() != null) {
+        stagedResources.add(returned);
+      }
+      if (!sameContentFacts(store.planned(), returned, maxOutputBytes)) {
+        discard(stagedResources);
+        return Outcome.storeFailed();
+      }
+      finalContents.add(new ResourceResultContent(returned, store.preview(), store.metadata()));
     }
 
     return Outcome.success(
@@ -178,336 +166,29 @@ public final class ToolResultFinalizer {
     }
   }
 
-  /** 计划阶段：无副作用完成所有内容校验、文本聚合、尺寸与物理行测量、ResourceRef 规划及最终 ToolResult JSON 尺寸核验。 */
-  private Plan plan(String toolName, ToolResult result, int maxOutputBytes) {
-    List<ResultContent> source = result.contents();
-    List<TextPiece> textPieces = new ArrayList<>();
-    List<BinaryPiece> binaryPieces = new ArrayList<>();
-    List<ResourcePiece> resourcePieces = new ArrayList<>();
-
-    for (int index = 0; index < source.size(); index++) {
-      ResultContent content = source.get(index);
-      if (content instanceof TextResultContent text) {
-        validateStrictUnicode(text.text(), "content at index " + index);
-        textPieces.add(new TextPiece(index, text.text(), false));
-      } else if (content instanceof JsonResultContent json) {
-        validateStrictUnicode(json.json(), "content at index " + index);
-        textPieces.add(new TextPiece(index, json.json(), true));
-      } else if (content instanceof BinaryResultContent binary) {
-        requireCanonicalMediaType(binary.mediaType());
-        if (binary.size() > maxOutputBytes) {
-          throw new OutputTooLargeException(
-              ToolOutputLimit.exceededMessage(binary.size(), maxOutputBytes));
-        }
-        byte[] bytes = binary.content();
-        TextArtifact textArtifact =
-            binary.textMetadata() == null
-                ? null
-                : validateTextArtifact(
-                    bytes, binary.textMetadata(), "binary content at index " + index);
-        String name = resourceName(toolName, index + 1, null);
-        ResourceRef planned =
-            plannedReference(binary.mediaType(), name, (long) binary.size(), Sha256.hex(bytes));
-        binaryPieces.add(new BinaryPiece(index, planned, bytes, textArtifact));
-      } else if (content instanceof ResourceResultContent res) {
-        ResourceRef ref = res.resource();
-        requireCanonicalMediaType(ref.mediaType());
-        if (ref.size() == null || ref.sha256() == null) {
-          throw new IllegalArgumentException(
-              "resource at index " + index + " must declare size and sha256");
-        }
-        if (ref.sessionBlobId() != null) {
-          // 已授权的 Session Blob durable 引用：字节已在全局对象存储且已按 Session 引用鉴权，本阶段只做形状校验并原样透传。
-          if (res.textMetadata() != null) {
-            throw new IllegalArgumentException(
-                "session resource at index " + index + " must not declare text metadata");
-          }
-          resourcePieces.add(new ResourcePiece(index, res));
-          continue;
-        }
-        if (ref.blobUploadId() == null) {
-          throw new IllegalArgumentException(
-              "resource at index " + index + " must be a staged upload or a session resource");
-        }
-        if (ref.size() > maxOutputBytes) {
-          throw new OutputTooLargeException(
-              ToolOutputLimit.exceededMessage(ref.size(), maxOutputBytes));
-        }
-        // 已由 Daemon 或插件直传对象存储的上传引用：本阶段只做形状校验并原样透传。
-        if (res.textMetadata() != null) {
-          throw new IllegalArgumentException(
-              "canonical upload resource at index " + index + " must not declare text metadata");
-        }
-        resourcePieces.add(new ResourcePiece(index, res));
-      } else {
-        throw new IllegalArgumentException(
-            "unsupported tool content: " + content.getClass().getSimpleName());
-      }
-    }
-
-    // 处理文本投影
-    boolean externalizeText = false;
-    String joinedText = null;
-    long totalTextBytes = 0;
-    long totalTextLines = 0;
-    ResourceRef plannedTextRef = null;
-    String textPreview = null;
-    TextArtifactMetadata textMeta = null;
-    byte[] textBytes = null;
-
-    if (!textPieces.isEmpty()) {
-      StringBuilder sb = new StringBuilder();
-      for (int i = 0; i < textPieces.size(); i++) {
-        if (i > 0) {
-          sb.append("\n\n");
-        }
-        sb.append(textPieces.get(i).text());
-      }
-      joinedText = sb.toString();
-
-      // Measure without allocating an encoded copy so the error can report the exact byte count.
-      long utf8Length = utf8Length(joinedText);
-      if (utf8Length > maxOutputBytes) {
-        throw new OutputTooLargeException(
-            ToolOutputLimit.exceededMessage(utf8Length, maxOutputBytes));
-      }
-      totalTextBytes = utf8Length;
-      totalTextLines = countPhysicalLines(joinedText);
-
-      if (totalTextBytes > inlineMaxUtf8Bytes(toolName)
-          || totalTextLines > inlineMaxLines(toolName)) {
-        externalizeText = true;
-        boolean singleJson = textPieces.size() == 1 && textPieces.get(0).isJson();
-        String mediaType = singleJson ? "application/json" : "text/plain";
-        String ext = singleJson ? "json" : "txt";
-        String name = toolName + "-result." + ext;
-        String sha = sha256Utf8(joinedText, "tool output");
-        plannedTextRef = plannedReference(mediaType, name, totalTextBytes, sha);
-        textPreview = extractRawPreview(joinedText);
-        textMeta = new TextArtifactMetadata(totalTextBytes, totalTextLines);
-        textBytes = joinedText.getBytes(StandardCharsets.UTF_8);
-      }
-    }
-
-    // 组装投影内容与计划项
-    List<PlanItem> items = new ArrayList<>();
-    List<ResultContent> projected = new ArrayList<>();
-    int firstTextIndex = textPieces.isEmpty() ? -1 : textPieces.get(0).index();
-
-    for (int index = 0; index < source.size(); index++) {
-      if (index == firstTextIndex && externalizeText) {
-        PlanItem.StoreToResource storeItem =
-            new PlanItem.StoreToResource(plannedTextRef, textPreview, textMeta, textBytes);
-        items.add(storeItem);
-        projected.add(new ResourceResultContent(plannedTextRef, textPreview, textMeta));
-        continue;
-      }
-
-      int currentIndex = index;
-      boolean isTextPiece = textPieces.stream().anyMatch(tp -> tp.index() == currentIndex);
-      if (isTextPiece) {
-        if (!externalizeText) {
-          ResultContent orig = source.get(index);
-          items.add(new PlanItem.PassThrough(orig));
-          projected.add(orig);
-        }
-        // 若 externalizeText 为 true，则除 firstTextIndex 以外的文本块直接被移除
-        continue;
-      }
-
-      BinaryPiece bp =
-          binaryPieces.stream().filter(b -> b.index() == currentIndex).findFirst().orElse(null);
-      if (bp != null) {
-        PlanItem.StoreToResource storeItem =
-            new PlanItem.StoreToResource(
-                bp.planned(),
-                bp.textArtifact() == null ? null : bp.textArtifact().preview(),
-                bp.textArtifact() == null ? null : bp.textArtifact().metadata(),
-                bp.content());
-        items.add(storeItem);
-        projected.add(
-            new ResourceResultContent(
-                bp.planned(),
-                bp.textArtifact() == null ? null : bp.textArtifact().preview(),
-                bp.textArtifact() == null ? null : bp.textArtifact().metadata()));
-        continue;
-      }
-
-      ResourcePiece rp =
-          resourcePieces.stream().filter(r -> r.index() == currentIndex).findFirst().orElse(null);
-      if (rp != null) {
-        items.add(new PlanItem.PassThrough(rp.content()));
-        projected.add(rp.content());
-      }
-    }
-
-    // 验证投影结果的 canonical JSON 尺寸 <= 1 MiB
-    ToolResult projectedResult =
-        new ToolResult(result.toolCallId(), projected, result.error(), result.detailsJson());
-    if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
-        projectedResult, MAX_TERMINAL_RESULT_UTF8_BYTES)) {
-      throw new IllegalArgumentException(
-          "result must not exceed "
-              + MAX_TERMINAL_RESULT_UTF8_BYTES
-              + " bytes of canonical tool result JSON");
-    }
-
-    return new Plan(items);
-  }
-
   /**
    * 返回该工具身份适用的文本投影内联 UTF-8 字节上限。
    *
    * <p>只有可信内置 {@link FileTool#READ_NAME read} 身份使用 {@link #READ_INLINE_MAX_UTF8_BYTES}；其他工具保持
    * {@link #INLINE_MAX_UTF8_BYTES}。工具身份就是模型可见 name，同名冲突在运行时目录 fail-closed，因此该名称只能解析到内置 read。
    */
-  private static int inlineMaxUtf8Bytes(String toolName) {
+  static int inlineMaxUtf8Bytes(String toolName) {
     return FileTool.READ_NAME.equals(toolName) ? READ_INLINE_MAX_UTF8_BYTES : INLINE_MAX_UTF8_BYTES;
   }
 
   /** 返回该工具身份适用的文本投影内联物理行数上限；只有可信内置 {@code read} 身份使用加宽上限。 */
-  private static int inlineMaxLines(String toolName) {
+  static int inlineMaxLines(String toolName) {
     return FileTool.READ_NAME.equals(toolName) ? READ_INLINE_MAX_LINES : INLINE_MAX_LINES;
   }
 
   /** 严格计算物理行数：空文本为 0；否则为 LF 数量加上未以 LF 结尾时的最后一行。 */
   public static long countPhysicalLines(String text) {
-    if (text == null || text.isEmpty()) {
-      return 0;
-    }
-    long lfCount = 0;
-    for (int i = 0; i < text.length(); i++) {
-      if (text.charAt(i) == '\n') {
-        lfCount++;
-      }
-    }
-    return lfCount + (text.charAt(text.length() - 1) != '\n' ? 1 : 0);
+    return TerminalTextMetrics.countPhysicalLines(text);
   }
 
   /** 提取 UTF-8 安全且不拆行/码点的 raw preview 前缀（&le; 2 KiB 且 &le; 20 物理行）。 只保留前缀，无 tail，无截断标记。 */
   public static String extractRawPreview(String text) {
-    if (text == null || text.isEmpty()) {
-      return "";
-    }
-    StringBuilder sb = new StringBuilder();
-    int lines = 0;
-    int bytes = 0;
-    boolean lineStarted = false;
-
-    for (int i = 0; i < text.length(); ) {
-      int cp = text.codePointAt(i);
-      int charCount = Character.charCount(cp);
-      String cpStr = text.substring(i, i + charCount);
-      int cpBytes = utf8Bytes(cp);
-      if (bytes + cpBytes > TRUNCATED_PREVIEW_MAX_UTF8_BYTES) {
-        break;
-      }
-      if (cp == '\n') {
-        lines++;
-        sb.append(cpStr);
-        bytes += cpBytes;
-        lineStarted = false;
-        if (lines >= TRUNCATED_PREVIEW_MAX_LINES) {
-          break;
-        }
-      } else {
-        if (!lineStarted) {
-          if (lines >= TRUNCATED_PREVIEW_MAX_LINES) {
-            break;
-          }
-          lineStarted = true;
-        }
-        sb.append(cpStr);
-        bytes += cpBytes;
-      }
-      i += charCount;
-    }
-    return sb.toString();
-  }
-
-  private static int utf8Bytes(int codePoint) {
-    if (codePoint <= 0x7F) {
-      return 1;
-    }
-    if (codePoint <= 0x7FF) {
-      return 2;
-    }
-    if (codePoint <= 0xFFFF) {
-      return 3;
-    }
-    return 4;
-  }
-
-  private static long utf8Length(String text) {
-    long bytes = 0;
-    for (int index = 0; index < text.length(); ) {
-      char current = text.charAt(index);
-      if (Character.isHighSurrogate(current)) {
-        if (index + 1 >= text.length() || !Character.isLowSurrogate(text.charAt(index + 1))) {
-          throw new IllegalArgumentException("tool output must be valid Unicode");
-        }
-      } else if (Character.isLowSurrogate(current)) {
-        throw new IllegalArgumentException("tool output must be valid Unicode");
-      }
-      int codePoint = text.codePointAt(index);
-      bytes += utf8Bytes(codePoint);
-      index += Character.charCount(codePoint);
-    }
-    return bytes;
-  }
-
-  private static void validateStrictUnicode(String text, String name) {
-    try {
-      utf8Length(text);
-    } catch (IllegalArgumentException invalid) {
-      throw new IllegalArgumentException(name + " must be valid Unicode", invalid);
-    }
-  }
-
-  private TextArtifact validateTextArtifact(
-      byte[] bytes, TextArtifactMetadata declared, String context) {
-    if (declared.totalBytes() != bytes.length) {
-      throw new IllegalArgumentException(
-          context + " size does not match declared text artifact metadata");
-    }
-    String text = decodeStrictUtf8(bytes, context);
-    long totalLines = countPhysicalLines(text);
-    if (declared.totalLines() != totalLines) {
-      throw new IllegalArgumentException(
-          context + " line count does not match declared text artifact metadata");
-    }
-    return new TextArtifact(
-        extractRawPreview(text), new TextArtifactMetadata(bytes.length, totalLines));
-  }
-
-  private static String decodeStrictUtf8(byte[] bytes, String context) {
-    CharsetDecoder decoder =
-        StandardCharsets.UTF_8
-            .newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT);
-    try {
-      return decoder.decode(ByteBuffer.wrap(bytes)).toString();
-    } catch (CharacterCodingException invalid) {
-      throw new IllegalArgumentException(context + " must be valid UTF-8");
-    }
-  }
-
-  private static void requireCanonicalMediaType(String mediaType) {
-    if (mediaType == null || !CANONICAL_MEDIA_TYPE.matcher(mediaType).matches()) {
-      throw new IllegalArgumentException(
-          "mediaType must be canonical lowercase type/subtype without parameters");
-    }
-  }
-
-  private static String resourceName(String toolName, int callIndex, String extension) {
-    return toolName + "-result-" + callIndex + (extension == null ? "" : "." + extension);
-  }
-
-  private static ResourceRef plannedReference(
-      String mediaType, String name, Long size, String sha256) {
-    return new ResourceRef(
-        ResourceRef.blobUploadUri(new UUID(0L, 0L)), mediaType, name, size, sha256);
+    return TerminalTextMetrics.extractRawPreview(text);
   }
 
   private static boolean sameContentFacts(
@@ -519,40 +200,6 @@ public final class ToolResultFinalizer {
         && Objects.equals(expected.name(), actual.name())
         && Objects.equals(expected.size(), actual.size())
         && expected.sha256().equals(actual.sha256());
-  }
-
-  private static String sha256Utf8(String text, String name) {
-    MessageDigest digest = Sha256.newDigest();
-    CharsetEncoder encoder =
-        StandardCharsets.UTF_8
-            .newEncoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT);
-    CharBuffer chars = CharBuffer.wrap(text);
-    ByteBuffer bytes = ByteBuffer.allocate(8192);
-    try {
-      while (true) {
-        CoderResult result = encoder.encode(chars, bytes, true);
-        if (result.isError()) {
-          result.throwException();
-        }
-        bytes.flip();
-        digest.update(bytes);
-        bytes.clear();
-        if (result.isUnderflow()) {
-          break;
-        }
-      }
-      CoderResult flush = encoder.flush(bytes);
-      if (flush.isError()) {
-        flush.throwException();
-      }
-      bytes.flip();
-      digest.update(bytes);
-    } catch (CharacterCodingException error) {
-      throw new IllegalArgumentException(name + " must be valid Unicode", error);
-    }
-    return HexFormat.of().formatHex(digest.digest());
   }
 
   /** 终态化结果：Success 投递成功；Failed 确定性失败；StoreFailed 存储失败（收敛为 UNKNOWN）。 */
@@ -587,32 +234,6 @@ public final class ToolResultFinalizer {
     static Outcome storeFailed() {
       return new StoreFailed(
           new ToolInvocationError(RESOURCE_STORE_FAILED_KIND, RESOURCE_STORE_FAILED_MESSAGE));
-    }
-  }
-
-  private record TextPiece(int index, String text, boolean isJson) {}
-
-  private record BinaryPiece(
-      int index, ResourceRef planned, byte[] content, TextArtifact textArtifact) {}
-
-  private record ResourcePiece(int index, ResourceResultContent content) {}
-
-  private record TextArtifact(String preview, TextArtifactMetadata metadata) {}
-
-  private record Plan(List<PlanItem> items) {}
-
-  private sealed interface PlanItem permits PlanItem.PassThrough, PlanItem.StoreToResource {
-
-    record PassThrough(ResultContent content) implements PlanItem {}
-
-    record StoreToResource(
-        ResourceRef planned, String preview, TextArtifactMetadata metadata, byte[] bytes)
-        implements PlanItem {}
-  }
-
-  private static final class OutputTooLargeException extends RuntimeException {
-    OutputTooLargeException(String message) {
-      super(message);
     }
   }
 }
