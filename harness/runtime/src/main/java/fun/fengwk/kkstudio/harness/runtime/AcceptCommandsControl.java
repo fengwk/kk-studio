@@ -30,16 +30,12 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -78,16 +74,6 @@ final class AcceptCommandsControl {
     };
   }
 
-  static final class LockedAncestors {
-    final List<UUID> chain;
-    final Map<UUID, ThreadState> threads;
-
-    LockedAncestors(List<UUID> chain, Map<UUID, ThreadState> threads) {
-      this.chain = chain;
-      this.threads = threads;
-    }
-  }
-
   /**
    * NEW_ROOT_SESSION：在树锁内以调用方给定的根开关创建用户发起的独立执行根 Thread；从 root settings 初始化 Session 与 ROOT Entry。
    * 根开关只初始化该根自身，不来自任何既有执行树。带票据的任务创建走 {@link AgentSpawner}。
@@ -101,7 +87,8 @@ final class AcceptCommandsControl {
         driverRegistry, target.rootSettings(), commands);
     return store.transaction(
         tx -> {
-          LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
+          ThreadTreeLocking.LockedAncestors locked =
+              lockTreeAndAncestors(tx, target.threadId(), false, null);
           String creationRequestHash =
               ThreadCreationRequestHash.forNewSession(
                   target.sessionId(),
@@ -285,7 +272,8 @@ final class AcceptCommandsControl {
     return store.transaction(
         tx -> {
           // 与创建执行根相同：复用既有 Thread id 时先按真实执行树完成规范加锁，避免 replay 阶段逆序补锁。
-          LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
+          ThreadTreeLocking.LockedAncestors locked =
+              lockTreeAndAncestors(tx, target.threadId(), false, null);
           ThreadState existing = locked.threads.get(target.threadId());
           if (existing != null) {
             String creationRequestHash =
@@ -394,7 +382,8 @@ final class AcceptCommandsControl {
                   target.threadId(),
                   target.yoloEnabled(),
                   commands);
-          LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
+          ThreadTreeLocking.LockedAncestors locked =
+              lockTreeAndAncestors(tx, target.threadId(), false, null);
           ThreadState existing = locked.threads.get(target.threadId());
           if (existing != null) {
             return AcceptCommandsReplay.replayInitial(
@@ -502,7 +491,8 @@ final class AcceptCommandsControl {
       AcceptancePreflight preflight) {
     return store.transaction(
         tx -> {
-          LockedAncestors locked = lockTreeAndAncestors(tx, target.threadId(), false, null);
+          ThreadTreeLocking.LockedAncestors locked =
+              lockTreeAndAncestors(tx, target.threadId(), false, null);
           ThreadState thread = locked.threads.get(target.threadId());
           if (thread == null) {
             throw DomainException.notFound(
@@ -635,65 +625,13 @@ final class AcceptCommandsControl {
     return false;
   }
 
-  static LockedAncestors lockTreeAndAncestors(
+  static ThreadTreeLocking.LockedAncestors lockTreeAndAncestors(
       HarnessStore.Transaction tx,
       UUID anchorThreadId,
       boolean anchorIsParent,
       Set<UUID> additionalThreadIds) {
-    ThreadState anchor = tx.threads().find(anchorThreadId).orElse(null);
-    if (anchorIsParent && anchor == null) {
-      throw new IllegalArgumentException("join parent does not exist");
-    }
-    tx.threads().lockTree(anchor == null ? anchorThreadId : anchor.rootThreadId());
-    List<UUID> chain = tx.threads().findAncestorChain(anchorThreadId);
-    if (anchorIsParent && chain.isEmpty()) {
-      throw DomainException.notFound("thread", "join parent no longer exists");
-    }
-    Set<UUID> allThreadIds = new LinkedHashSet<>(chain);
-    if (additionalThreadIds != null) {
-      for (UUID id : additionalThreadIds) {
-        ThreadState existing = tx.threads().find(id).orElse(null);
-        if (existing != null) {
-          if (!Objects.equals(existing.parentThreadId(), anchorThreadId)) {
-            throw conflict(
-                HarnessConflictReason.THREAD_ID_REUSED,
-                "thread " + id + " already belongs to another execution parent");
-          }
-          allThreadIds.add(id);
-        }
-      }
-    }
-    // 先在树锁内确定完整行锁集合，再按 Session/Thread 排序。
-    Set<UUID> sessionIds = new LinkedHashSet<>();
-    for (UUID id : allThreadIds) {
-      ThreadState state =
-          tx.threads()
-              .find(id)
-              .orElseThrow(
-                  () ->
-                      anchorIsParent && chain.contains(id)
-                          ? new IllegalArgumentException("join parent does not exist")
-                          : DomainException.notFound("thread", "thread " + id + " does not exist"));
-      sessionIds.add(state.sessionId());
-    }
-    List<UUID> sortedSessionIds = sessionIds.stream().sorted(UuidOrder.COMPARATOR).toList();
-    for (UUID sessionId : sortedSessionIds) {
-      tx.sessions().lockForKeyShare(sessionId).orElseThrow();
-    }
-    List<UUID> sortedThreadIds = allThreadIds.stream().sorted(UuidOrder.COMPARATOR).toList();
-    Map<UUID, ThreadState> lockedThreads = new HashMap<>();
-    for (UUID id : sortedThreadIds) {
-      ThreadState locked =
-          tx.threads()
-              .lock(id)
-              .orElseThrow(
-                  () ->
-                      anchorIsParent && chain.contains(id)
-                          ? new IllegalArgumentException("join parent does not exist")
-                          : DomainException.notFound("thread", "thread " + id + " does not exist"));
-      lockedThreads.put(id, locked);
-    }
-    return new LockedAncestors(chain, lockedThreads);
+    return ThreadTreeLocking.lockTreeAndAncestors(
+        tx, anchorThreadId, anchorIsParent, additionalThreadIds);
   }
 
   /** 全新 batch 的共性写入：preflight、插入 Commands、推进 version/next sequence、请求 THREAD Work。 */
