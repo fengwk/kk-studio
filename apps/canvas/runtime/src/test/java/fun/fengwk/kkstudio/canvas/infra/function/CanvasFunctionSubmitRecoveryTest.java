@@ -18,7 +18,10 @@ import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionSubmitState;
 import fun.fengwk.kkstudio.common.error.DomainException;
 
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
 
@@ -351,6 +354,36 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
         transactions.execute(status -> runtimeTransactions.cancel(canvasId, nodeId, REQUEST_1));
     assertEquals(CanvasFunctionRunStatus.CANCELLED, cancelled.status());
     assertEquals(0, catalogSource.openLeases());
+  }
+
+  /**
+   * 落库时间统一来自同一个毫秒截断时钟：checkpoint 与终态都不能把子毫秒部分写进 {@code updated_at}。
+   *
+   * <p>列类型是 {@code timestamptz(3)}，未截断的纳秒会被 PostgreSQL 四舍五入，因此输入取 {@code .123789}：截断得 {@code
+   * .123}，四舍五入得 {@code .124}，两者可区分。
+   */
+  @Test
+  void persistedUpdatedAtIsTruncatedToMilliseconds() {
+    Instant truncated = Instant.parse("2024-05-06T07:08:09.123Z");
+    Clock nanosecondClock = Clock.fixed(truncated.plusNanos(789_000), ZoneOffset.UTC);
+    CanvasFunctionRunTransactions fixedClockTransactions = transactionsFor(nanosecondClock);
+    UUID canvasId = addDocument();
+    UUID nodeId = addFunctionNode(canvasId, "output", configWithoutReferences());
+    ClaimedRun claim = claimStartedRun(canvasId, nodeId, REQUEST_1, UUID.randomUUID());
+
+    fixedClockTransactions.checkpoint(
+        canvasId,
+        nodeId,
+        claim.requestId(),
+        claim.leaseToken(),
+        "SUBMITTED",
+        Map.of("jobId", "job"));
+    assertEquals(truncated, runRepository.findByNodeId(nodeId).orElseThrow().updatedAt());
+
+    CanvasFunctionRun cancelled =
+        transactions.execute(status -> fixedClockTransactions.cancel(canvasId, nodeId, REQUEST_1));
+    assertEquals(CanvasFunctionRunStatus.CANCELLED, cancelled.status());
+    assertEquals(truncated, runRepository.findByNodeId(nodeId).orElseThrow().updatedAt());
   }
 
   /** resolve 只接受当前 Run 的 requestId：不匹配必须冲突，避免把别的请求的冻结事实解除。 */

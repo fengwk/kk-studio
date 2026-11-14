@@ -88,12 +88,13 @@ public class CanvasFunctionRunTransactions {
     this.argsCodec = Objects.requireNonNull(argsCodec, "argsCodec");
     this.resourceLifecycle = Objects.requireNonNull(resourceLifecycle, "resourceLifecycle");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
+    // 毫秒精度是 Run 时间的既有契约（列类型 timestamptz(3)）：同一事务内多次 clock.instant() 必须可比，
+    // 且本类与持久化协作者必须共用同一个已截断时钟，否则 terminal/checkpoint 会把纳秒写进库。
+    this.clock = Clock.tick(Objects.requireNonNull(clock, "clock"), Duration.ofMillis(1));
     this.persistence =
-        new CanvasFunctionRunPersistence(canvasStore, runRepository, stateCodec, clock);
+        new CanvasFunctionRunPersistence(canvasStore, runRepository, stateCodec, this.clock);
     this.plan = new CanvasFunctionRunPlan(canvasStore, resourceRepository, blobAccess);
     this.outputs = new CanvasFunctionRunOutputs(resourceRepository, blobAccess);
-    // 毫秒精度是 Run 时间的既有契约：同一事务内多次 clock.instant() 必须可比。
-    this.clock = Clock.tick(Objects.requireNonNull(clock, "clock"), Duration.ofMillis(1));
   }
 
   /**
