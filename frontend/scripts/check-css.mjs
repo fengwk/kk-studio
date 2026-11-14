@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Style gate for the token contract described in docs/modules/frontend-design-language.md.
+ * Style gate for the token contract described in docs/modules/frontend.md.
  *
  * Scans every stylesheet and non-test TS/TSX file under <root>/src and fails on:
  *   - var(--x) referencing a custom property that is never declared;

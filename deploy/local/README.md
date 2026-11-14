@@ -94,9 +94,11 @@ docker compose -f deploy/local/compose.yaml logs -f minio
 
 PostgreSQL 是唯一 durable 数据库。空库由 `app` 在 `dev` profile 下用 Flyway 执行
 [V1__schema.sql](../../schema/src/main/resources/db/migration/V1__schema.sql)，不预置
-Provider、模型或 Agent，首次打开 Studio 时按引导添加。已执行版本记录在 `flyway_schema_history`。Compose 卷键为 `kk-studio-postgres` 与 `kk-studio-minio`；
+Provider、模型或 Agent，首次打开 Studio 时按引导添加。已执行版本记录在 `flyway_schema_history`。Compose 卷键为 `kk-studio-postgres`、`kk-studio-minio` 与
+`kk-studio-execution-exits`（App 实例独占的写前日志目录，不与其它实例共享）；
 默认 project `kk-studio-local` 下的 Docker 卷名分别为
-`kk-studio-local_kk-studio-postgres` 与 `kk-studio-local_kk-studio-minio`。
+`kk-studio-local_kk-studio-postgres`、`kk-studio-local_kk-studio-minio` 与
+`kk-studio-local_kk-studio-execution-exits`。
 普通启动与 `down` 都保留已有卷；启动不会重建健康的 PostgreSQL 或清空 S3 对象。
 `dev`/`e2e`/`canvas-test` 的 profile 与 seed 对应关系见
 [Schema 模块](../../docs/modules/schema.md)，生产 profile 见[部署与运行](../../docs/operations/deployment.md)。

@@ -12,13 +12,14 @@ Compose、Dockerfile 与容器内 entrypoint 留在 [deploy](../deploy/local/REA
 | Windows 10/11 | [daemon/install.ps1](daemon/install.ps1) | PowerShell 5.1/7、ScheduledTasks、可用的 Bash（Go Daemon 作为独立可执行文件发行，无需宿主安装 Go、Node 或 JDK；code-server 另带 Node 运行时）；当前用户交互登录期间运行 AtLogOn 计划任务，不是 Windows Service |
 
 正常入口是 Studio 的 Web 安装弹窗：保存配置后复制命令，脚本会自行暂存 `daemon.json` 与
-`daemon.token`、下载安装器并执行。安装器只有 `install` / `status` / `uninstall` / `help`
-四个动作，稳定契约是
-`bash install.sh install --config-file <绝对 daemon.json> --token-file <绝对 daemon.token>`
-（Windows 为 `-ConfigFile` / `-TokenFile`）。它默认下载官方 GitHub latest release
-的发行归档与 SHA 文件、用归档内置的运行时 `--check-config` 预检暂存输入，再整体替换程序/配置/token 并重启，
-保留数据；没有交互提示。`status` 只读；`uninstall`
-删除受管服务定义与程序发行目录，保留配置、token、数据与日志。详情与三平台排错见
+`daemon.token`、下载固定 tag 的安装器并执行。安装器有 `install` / `update` / `status` /
+`uninstall` / `help` 五个动作，每个动作都以卡片的环境 UUID 为作用域，稳定契约是
+`bash install.sh install --environment-id <UUID> --version <version> --config-file <绝对 daemon.json> --token-file <绝对 daemon.token>`
+（Windows 为 `-EnvironmentId` / `-Version` / `-ConfigFile` / `-TokenFile`）。发行版本必须由
+`--version` 显式给出，不解析可变的 latest release；安装器下载该 tag 的发行归档与 SHA 文件、
+用归档内置的运行时 `--check-config` 预检暂存输入，再整体替换程序/配置/token 并重启，保留数据；
+没有交互提示。`update` 只替换程序与服务定义并复用现有 `daemon.json`，不接收也不写配置或 token。
+`status` 只读；`uninstall` 删除受管服务定义与程序发行目录，保留配置、token、数据与日志。详情与三平台排错见
 [Environment Daemon 安装与运行](../docs/operations/environment-daemon.md)。
 
 从 checkout 运行安装脚本只属于开发/CI fixture，用来验证脚本契约，**不是用户安装路径**；安装器
