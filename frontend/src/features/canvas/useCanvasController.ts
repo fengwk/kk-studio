@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useCanvasUploadPipeline } from '@/features/canvas/canvas-upload'
 import {
   enterCanvasScope,
@@ -9,6 +9,7 @@ import {
 } from '@/features/canvas/canvas-controller-scope'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
 import { overlayNodeWithDraft, type CanvasNodeDraft } from '@/features/canvas/canvas-drafts'
+import { createInitialCanvasState } from '@/features/canvas/canvas-local-state'
 import { useFunctionConfigSync } from '@/features/canvas/function-config'
 import { useCanvasFunctionRun } from '@/features/canvas/function-run'
 import { configToFunctionArgs } from '@/features/canvas/generation'
@@ -16,22 +17,17 @@ import { useCanvasTransformBatch } from '@/features/canvas/transform-batch'
 import type {
   CanvasLocalState,
   CanvasNodeCallbacks,
-  StageMetrics,
 } from '@/features/canvas/types'
-import {
-  DEFAULT_CANVAS_VIEWPORT,
-  hasStoredCanvasViewport,
-  loadCanvasViewport,
-  saveCanvasViewport,
-  type StoredCanvasViewport,
-} from '@/features/canvas/viewport-storage'
 import { useCanvasCommandQueue } from '@/features/canvas/useCanvasCommandQueue'
 import { useCanvasDraftPersistence } from '@/features/canvas/useCanvasDraftPersistence'
 import { useCanvasKeyboard } from '@/features/canvas/useCanvasKeyboard'
+import { useCanvasNavigation } from '@/features/canvas/useCanvasNavigation'
 import { useCanvasNodeActions } from '@/features/canvas/useCanvasNodeActions'
 import { useCanvasNodePlacement } from '@/features/canvas/useCanvasNodePlacement'
 import { useCanvasReferenceLinks } from '@/features/canvas/useCanvasReferenceLinks'
+import { useCanvasStageSurface } from '@/features/canvas/useCanvasStageSurface'
 import { useCanvasTextEditor } from '@/features/canvas/useCanvasTextEditor'
+import { useCanvasToast } from '@/features/canvas/useCanvasToast'
 import {
   getCanvas,
   listCanvasFunctions,
@@ -39,44 +35,24 @@ import {
 import { queryKeys } from '@/shared/lib/query-keys'
 import type { CanvasFunctionVersionDTO } from '@/shared/api/generated/contracts'
 
-const DEFAULT_STAGE: StageMetrics = { width: 960, height: 640, dockTop: 520 }
-
 /**
  * 画布编辑器的组合根：持有渲染状态、权威快照与函数目录查询、视口与选区，并把草稿持久化、命令队列、节点落位、文本编辑、引用边与节点操作
  * 这些子 hook 接到同一个 {@link useCanvasScope} 作用域上。展示 = 权威快照 + 待确认操作 + 本地草稿。
  */
 export function useCanvasController(initialCanvasId?: string) {
   const queryClient = useQueryClient()
-  const [state, setState] = useState<CanvasLocalState>(() => ({
-    view: initialCanvasId ? 'editor' : 'library',
-    canvasId: initialCanvasId ?? null,
-    selectedIds: [],
-    selectedLinks: [],
-    positionDrafts: {},
-    drafts: {},
-    storageError: null,
-    viewport: initialCanvasId
-      ? loadCanvasViewport(initialCanvasId)
-      : { ...DEFAULT_CANVAS_VIEWPORT },
-    toast: null,
-    addMenuOpen: false,
-    addMenuIndex: 0,
-    uploadProgress: {},
-    commandPending: false,
-    draftPersistPending: false,
-    conflictMessage: null,
-    textEditor: null,
-  }))
-  const [initialFitPending, setInitialFitPending] = useState(
-    () => Boolean(initialCanvasId && !hasStoredCanvasViewport(initialCanvasId)),
-  )
-  const [stageMetrics, setStageMetrics] = useState(DEFAULT_STAGE)
-  const fitViewRef = useRef<(() => void) | null>(null)
-  const focusSelectionRef = useRef<(() => void) | null>(null)
-  const zoomRef = useRef<((scale: number) => void) | null>(null)
-  const stageElementRef = useRef<HTMLElement | null>(null)
-  const dockAddRef = useRef<HTMLButtonElement | null>(null)
-  const closeContextMenuRef = useRef<(() => void) | null>(null)
+  const [state, setState] = useState<CanvasLocalState>(() => createInitialCanvasState(initialCanvasId))
+  const stage = useCanvasStageSurface()
+  const {
+    stageMetrics,
+    setStageMetrics,
+    fitViewRef,
+    focusSelectionRef,
+    zoomRef,
+    stageElementRef,
+    dockAddRef,
+    closeContextMenuRef,
+  } = stage
   const scope = useCanvasScope(setState, initialCanvasId ?? null)
   const { isMountedRef, canvasEpochRef, activeCanvasIdRef, queueRef, queueCanvasIdRef, draftsRef } = scope
 
@@ -128,19 +104,12 @@ export function useCanvasController(initialCanvasId?: string) {
     applyDraftAcks: draftLayer.applyDraftAcks,
   })
 
-  useEffect(() => {
-    if (!state.toast) {
-      return undefined
-    }
-    const timer = window.setTimeout(() => {
-      setState((current) => (current.toast ? { ...current, toast: null } : current))
-    }, 2800)
-    return () => window.clearTimeout(timer)
-  }, [state.toast])
-
   const setToast = useCallback((toast: string) => {
     setState((current) => ({ ...current, toast }))
   }, [])
+  useCanvasToast(state.toast, useCallback(() => {
+    setState((current) => (current.toast ? { ...current, toast: null } : current))
+  }, []))
 
   const { scheduleFunctionConfig, flushFunctionConfig, resetPending: resetFunctionConfigDrafts } =
     useFunctionConfigSync({
@@ -232,77 +201,17 @@ export function useCanvasController(initialCanvasId?: string) {
     setToast,
   })
 
-  /** 离开当前画布前清空所有进行中的本地编辑流水线并进入新的作用域。 */
-  const leaveCanvas = useCallback((nextCanvasId: string | null) => {
-    resetTransformBatch()
-    resetUploads()
-    resetFunctionConfigDrafts()
-    clearReservedAliases()
-    enterCanvasScope(scope, nextCanvasId)
-  }, [clearReservedAliases, resetFunctionConfigDrafts, resetTransformBatch, resetUploads, scope])
-
-  const openEditor = useCallback((canvasId: string) => {
-    leaveCanvas(canvasId)
-    reloadDrafts()
-    setInitialFitPending(!hasStoredCanvasViewport(canvasId))
-    setState((current) => ({
-      ...current,
-      view: 'editor',
-      canvasId,
-      selectedIds: [],
-      selectedLinks: [],
-      positionDrafts: {},
-      drafts: {},
-      storageError: null,
-      viewport: loadCanvasViewport(canvasId),
-      conflictMessage: null,
-      textEditor: null,
-    }))
-  }, [leaveCanvas, reloadDrafts])
-
-  const openLibrary = useCallback(() => {
-    leaveCanvas(null)
-    setInitialFitPending(false)
-    setState((current) => ({
-      ...current,
-      view: 'library',
-      canvasId: null,
-      selectedIds: [],
-      selectedLinks: [],
-      positionDrafts: {},
-      drafts: {},
-      storageError: null,
-      addMenuOpen: false,
-      textEditor: null,
-      conflictMessage: null,
-    }))
-  }, [leaveCanvas])
-
-  const setViewport = useCallback((viewport: StoredCanvasViewport) => {
-    setState((current) => {
-      if (current.canvasId) {
-        saveCanvasViewport(current.canvasId, viewport)
-      }
-      return { ...current, viewport }
-    })
-  }, [])
-
-  const completeInitialFit = useCallback(() => {
-    setInitialFitPending(false)
-  }, [])
-
-  const setSelection = useCallback((
-    selectedIds: string[],
-    selectedLinks: CanvasLocalState['selectedLinks'] = [],
-  ) => {
-    setState((current) => {
-      if (sameSelection(current.selectedIds, selectedIds, current.selectedLinks, selectedLinks)) {
-        return current
-      }
-      return { ...current, selectedIds, selectedLinks }
-    })
-  }, [])
-
+  const navigation = useCanvasNavigation({
+    scope,
+    initialCanvasId: initialCanvasId ?? null,
+    setState,
+    reloadDrafts,
+    resetTransformBatch,
+    resetUploads,
+    resetFunctionConfigDrafts,
+    clearReservedAliases,
+  })
+  const { openEditor, openLibrary, setViewport, setSelection, completeInitialFit, initialFitPending } = navigation
   const dismissConflictMessage = useCallback(() => {
     setState((current) => ({ ...current, conflictMessage: null }))
   }, [])
@@ -438,21 +347,6 @@ export function useCanvasController(initialCanvasId?: string) {
     dismissConflictMessage,
     restoreDeletedDraftAsNewNode: nodeActions.saveDraftAsNewNode,
   }
-}
-
-function sameSelection(
-  currentIds: string[],
-  nextIds: string[],
-  currentLinks: CanvasLocalState['selectedLinks'],
-  nextLinks: CanvasLocalState['selectedLinks'],
-): boolean {
-  return currentIds.length === nextIds.length
-    && currentIds.every((id, index) => id === nextIds[index])
-    && currentLinks.length === nextLinks.length
-    && currentLinks.every((link, index) => (
-      link.sourceNodeId === nextLinks[index]?.sourceNodeId
-      && link.targetNodeId === nextLinks[index]?.targetNodeId
-    ))
 }
 
 export type CanvasController = ReturnType<typeof useCanvasController>
