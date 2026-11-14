@@ -19,6 +19,7 @@ import static fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolFields
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
+import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedGet;
 import fun.fengwk.kkstudio.platform.daemon.DaemonPresignedPut;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
 
@@ -283,7 +284,7 @@ final class ControlProtocolTransferChecks {
       throw new ControlProtocolException("presignedGet.method must be GET");
     }
     requireText(
-        get.hasUrl(), get.getUrl(), "presignedGet.url", DaemonPresignedPut.MAX_URL_CHARS, true);
+        get.hasUrl(), get.getUrl(), "presignedGet.url", DaemonPresignedGet.MAX_URL_CHARS, true);
     requirePositive(
         get.hasExpiresAtEpochMs(), get.getExpiresAtEpochMs(), "presignedGet.expiresAtEpochMs");
   }

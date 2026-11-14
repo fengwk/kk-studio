@@ -10,7 +10,11 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.TicketState;
 
 import java.util.UUID;
 
-/** Issues tickets only for archive transfers frozen into the matching live daemon invocation. */
+/**
+ * 只为冻结在对应活跃调用上的归档传输签发下载票据。
+ *
+ * <p>归档与 blob 的对应关系在调用建立时固定，因此票据只能签给同一代、同一 invocation 的请求；其余情况一律返回去敏的失败票据。
+ */
 final class DaemonDownloadCoordinator {
 
   private static final String FAILURE_MESSAGE = "resource download is unavailable";
