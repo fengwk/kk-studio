@@ -10,7 +10,7 @@ import (
 	"github.com/sourcegraph/jsonrpc2"
 )
 
-// LSP-T-099 verifies concurrent Stop calls share one delayed termination result.
+// Verifies concurrent Stop calls share one delayed termination result.
 func TestClient_ConcurrentStopSharesTermination(t *testing.T) {
 	left, right := net.Pipe()
 	process := newFakeProcess("")
@@ -59,7 +59,7 @@ func TestClient_ConcurrentStopSharesTermination(t *testing.T) {
 	}
 }
 
-// LSP-T-100 verifies connection disposal failure still terminates the process and remains the returned error.
+// Verifies connection disposal failure still terminates the process and remains the returned error.
 func TestClient_StopDisposalFailureStillTerminates(t *testing.T) {
 	left, right := net.Pipe()
 	disposeErr := errors.New("connection close failed")

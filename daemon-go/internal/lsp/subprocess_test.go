@@ -19,7 +19,7 @@ import (
 
 const subprocessHelperMode = "KK_LSP_SUBPROCESS_HELPER"
 
-// LSP-T-069 through LSP-T-072 use the Go test binary as an isolated supervised child.
+// Use the Go test binary as an isolated supervised child.
 func TestLSPSubprocessHelper(t *testing.T) {
 	switch os.Getenv(subprocessHelperMode) {
 	case "env":
@@ -214,7 +214,7 @@ func (s *execHelperSupervisor) Close(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-// LSP-T-069 checks child environment isolation without mutating the parent environment.
+// Checks child environment isolation without mutating the parent environment.
 func TestSubprocessSupervisor_Environment(t *testing.T) {
 	temp := t.TempDir()
 	keys := []string{"GOCOVERDIR", "KK_LSP_INHERITED", "KK_LSP_OVERRIDE"}
@@ -283,7 +283,7 @@ func TestSubprocessSupervisor_Environment(t *testing.T) {
 	}
 }
 
-// LSP-T-070 and LSP-T-072 verify a helper LSP process exits and inherits environment on stop.
+// Verify a helper LSP process exits and inherits environment on stop.
 func TestSubprocessSupervisor_LSPLifecycle(t *testing.T) {
 	const inherited = "go-lsp-helper-env"
 	previous, wasSet := os.LookupEnv("KK_LSP_INHERITED")
@@ -327,7 +327,7 @@ func TestSubprocessSupervisor_LSPLifecycle(t *testing.T) {
 	}
 }
 
-// LSP-T-071 ensures a failed spawn does not leave work for supervisor close to hang on.
+// Ensures a failed spawn does not leave work for supervisor close to hang on.
 func TestSubprocessSupervisor_FailedSpawnSettles(t *testing.T) {
 	supervisor := &execHelperSupervisor{}
 	missing := os.TempDir() + string(os.PathSeparator) + "missing-lsp-helper-executable"

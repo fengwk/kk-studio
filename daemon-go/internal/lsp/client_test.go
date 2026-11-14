@@ -247,7 +247,7 @@ func (p *fakeProcess) serve() {
 	}
 }
 
-// LSP-T-073, LSP-T-074, LSP-T-079 and LSP-T-098 validate the JSON-RPC handshake, position encoding and shutdown path.
+// Validate the JSON-RPC handshake, position encoding and shutdown path.
 func TestClient_HandshakeDefinitionAndStop(t *testing.T) {
 	dir := t.TempDir()
 	file := filepath.Join(dir, "sample.go")
@@ -294,7 +294,7 @@ func TestClient_HandshakeDefinitionAndStop(t *testing.T) {
 	}
 }
 
-// LSP-T-084 verifies timeout returns promptly and sends a cancellation notification.
+// Verifies timeout returns promptly and sends a cancellation notification.
 func TestClient_RequestTimeoutSendsCancel(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "slow/request"}
 	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)

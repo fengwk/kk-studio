@@ -13,7 +13,6 @@ import (
 	"unicode/utf8"
 )
 
-// COD-T-004
 func TestSpillFailureFallsBackToBoundedPreview(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -49,7 +48,6 @@ func TestSpillFailureFallsBackToBoundedPreview(t *testing.T) {
 	}
 }
 
-// COD-T-005
 func TestAppendFinalNoteToPublishedOutput(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -75,7 +73,6 @@ func TestAppendFinalNoteToPublishedOutput(t *testing.T) {
 	}
 }
 
-// COD-T-007
 func TestPublishUnregisteredPartFile(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -98,7 +95,6 @@ func TestPublishUnregisteredPartFile(t *testing.T) {
 	}
 }
 
-// COD-T-010
 func TestRepeatedAcquireLeasesShareWorkspaceCount(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -128,7 +124,6 @@ func TestRepeatedAcquireLeasesShareWorkspaceCount(t *testing.T) {
 	}
 }
 
-// COD-T-008
 func TestAcquireLeaseNoOpsForUnownedPath(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -141,7 +136,6 @@ func TestAcquireLeaseNoOpsForUnownedPath(t *testing.T) {
 	}
 }
 
-// COD-T-009
 func TestSweepRejectsInvalidTTLAndSkipsMalformedWorkspace(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -159,7 +153,6 @@ func TestSweepRejectsInvalidTTLAndSkipsMalformedWorkspace(t *testing.T) {
 	}
 }
 
-// COD-T-011
 func TestUTF8PreviewBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		value string
@@ -198,7 +191,6 @@ func TestUTF8PreviewBoundaries(t *testing.T) {
 	}
 }
 
-// COD-T-012
 func TestAcquireLeaseReleaseIsIdempotent(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -230,7 +222,7 @@ func TestAcquireLeaseReleaseIsIdempotent(t *testing.T) {
 	}
 }
 
-// COD-T-012: deleting staging twice is safe and removes its temporary workspace.
+// Deleting staging twice is safe and removes its temporary workspace.
 func TestDeleteStagingIsIdempotent(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -293,7 +285,6 @@ func TestOpenOutputStoreRejectsNonDirectoryRoot(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestOutputStoreDataDirCacheAndMissingRoots(t *testing.T) {
 	if _, err := TextOutputStoreForDataDir(""); err == nil {
 		t.Fatal("empty data directory accepted")
@@ -315,7 +306,6 @@ func TestOutputStoreDataDirCacheAndMissingRoots(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestOutputStoreAcquireRejectsUnregisteredWorkspace(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -333,7 +323,6 @@ func TestOutputStoreAcquireRejectsUnregisteredWorkspace(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestOutputSpoolKeepsShortOverlappingPreviewAndIgnoresWritesAfterTruncation(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -361,7 +350,6 @@ func TestOutputSpoolKeepsShortOverlappingPreviewAndIgnoresWritesAfterTruncation(
 	_ = limited.Close()
 }
 
-// COD-F-015
 func TestOutputSpoolFinishCleansUpAfterClosedStagingFile(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -385,7 +373,6 @@ func TestOutputSpoolFinishCleansUpAfterClosedStagingFile(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestOpenTextOutputStoreRejectsInvalidParent(t *testing.T) {
 	dataDir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dataDir, "tmp"), []byte("file"), 0600); err != nil {
@@ -396,7 +383,6 @@ func TestOpenTextOutputStoreRejectsInvalidParent(t *testing.T) {
 	}
 }
 
-// COD-T-001; COD-F-015
 func TestOutputSpoolReportsInvalidConfigurationAndStorageFailure(t *testing.T) {
 	if _, err := NewOutputSpool(nil, "invalid", 1); err == nil {
 		t.Fatal("nil output store accepted")
@@ -427,7 +413,7 @@ func TestOutputSpoolReportsInvalidConfigurationAndStorageFailure(t *testing.T) {
 	}
 }
 
-// COD-T-052: a staging-file failure removes the workspace and created-at registration.
+// A staging-file failure removes the workspace and created-at registration.
 func TestCreateStagingFileFailureRollsBackWorkspace(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -460,7 +446,6 @@ func TestCreateStagingFileFailureRollsBackWorkspace(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestOutputStoreRejectsInvalidPublishPathAndSanitizesName(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -477,7 +462,6 @@ func TestOutputStoreRejectsInvalidPublishPathAndSanitizesName(t *testing.T) {
 	}
 }
 
-// COD-T-013
 func TestWriteAllHandlesShortWritesAndNoProgress(t *testing.T) {
 	writer := &shortWriter{max: 2}
 	if err := writeAll(writer, []byte("abcdef")); err != nil || string(writer.bytes) != "abcdef" {

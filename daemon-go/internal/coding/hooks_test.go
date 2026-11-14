@@ -9,7 +9,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-T-025
 func TestMutationFileChangedHookRunsAfterSuccessfulWriteAndEdit(t *testing.T) {
 	for _, capabilityID := range []string{"fs.write", "fs.edit"} {
 		t.Run(capabilityID, func(t *testing.T) {

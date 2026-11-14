@@ -12,7 +12,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-T-076: deadline failures remain distinct from caller cancellation and do not write files.
+// Deadline failures remain distinct from caller cancellation and do not write files.
 func TestFileCapabilitiesKeepTimeoutDistinctFromCancellation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "before.txt")
 	if err := os.WriteFile(path, []byte("before\n"), 0o600); err != nil {
@@ -47,7 +47,7 @@ func TestFileCapabilitiesKeepTimeoutDistinctFromCancellation(t *testing.T) {
 	}
 }
 
-// COD-T-080: offsets beyond a non-empty file return an empty range.
+// Offsets beyond a non-empty file return an empty range.
 func TestReadPastEOFReturnsEmptyRange(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lines.txt")
 	if err := os.WriteFile(path, []byte("one\ntwo\n"), 0o600); err != nil {
@@ -59,7 +59,7 @@ func TestReadPastEOFReturnsEmptyRange(t *testing.T) {
 	}
 }
 
-// COD-T-081: UTF-16LE BOM detection folds CRLF into line records and reports the final newline state.
+// UTF-16LE BOM detection folds CRLF into line records and reports the final newline state.
 func TestReadUTF16LECRLFWindow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "utf16.txt")
 	data, err := encodeFixture("中\r\n文", "UTF-16LE", 2)
@@ -80,9 +80,9 @@ func TestReadUTF16LECRLFWindow(t *testing.T) {
 	}
 }
 
-// COD-T-083 is asserted by TestReadImageUsesRequestedTierAndReportsDimensions.
+// Is asserted by TestReadImageUsesRequestedTierAndReportsDimensions.
 
-// COD-T-084: recognized media returns the sniffed type, basename, and original bytes.
+// Recognized media returns the sniffed type, basename, and original bytes.
 func TestReadMediaReportsTypeNameAndOriginalBytes(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -115,7 +115,7 @@ func TestReadMediaReportsTypeNameAndOriginalBytes(t *testing.T) {
 	}
 }
 
-// COD-T-085: a media-looking extension does not make ordinary text binary.
+// A media-looking extension does not make ordinary text binary.
 func TestReadTextIgnoresMediaExtension(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "movie.mp4")
 	const source = "plain text, not a movie\n"
@@ -128,7 +128,7 @@ func TestReadTextIgnoresMediaExtension(t *testing.T) {
 	}
 }
 
-// COD-T-089: fs.write retains the UTF-8 BOM when overwriting an existing file.
+// Fs.write retains the UTF-8 BOM when overwriting an existing file.
 func TestWriteRetainsUTF8BOM(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "bom.txt")
 	before, err := encodeFixture("old", "UTF-8", 3)
@@ -151,7 +151,7 @@ func TestWriteRetainsUTF8BOM(t *testing.T) {
 	}
 }
 
-// COD-T-091: writes reject dangling symlinks instead of creating their targets.
+// Writes reject dangling symlinks instead of creating their targets.
 func TestWriteRejectsDanglingSymlink(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("creating symlinks requires platform privileges")
@@ -171,7 +171,7 @@ func TestWriteRejectsDanglingSymlink(t *testing.T) {
 	}
 }
 
-// COD-T-092: a single edit preserves CRLF throughout the file.
+// A single edit preserves CRLF throughout the file.
 func TestEditUniqueMatchPreservesCRLF(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "crlf.txt")
 	if err := os.WriteFile(path, []byte("one\r\nold\r\nthree\r\n"), 0o600); err != nil {
@@ -190,7 +190,7 @@ func TestEditUniqueMatchPreservesCRLF(t *testing.T) {
 	}
 }
 
-// COD-T-094: replace_all reports every replacement and writes the complete result.
+// Replace_all reports every replacement and writes the complete result.
 func TestEditReplaceAllReplacesEveryMatch(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "replace-all.txt")
 	if err := os.WriteFile(path, []byte("old old\n"), 0o600); err != nil {
@@ -209,7 +209,7 @@ func TestEditReplaceAllReplacesEveryMatch(t *testing.T) {
 	}
 }
 
-// COD-T-098: multiline edits preserve mixed EOLs and files without a final newline.
+// Multiline edits preserve mixed EOLs and files without a final newline.
 func TestEditMixedLineEndingsAndNoFinalNewline(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "mixed.txt")
 	if err := os.WriteFile(path, []byte("line1\r\nline2\nline3\r\n"), 0o600); err != nil {

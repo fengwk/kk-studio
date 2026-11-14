@@ -11,7 +11,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/update"
 )
 
-// RUN-T-031 validates update command framing, version idempotency, and protected-execution rejection.
+// Validates update command framing, version idempotency, and protected-execution rejection.
 func TestRuntimeHandleUpdateAdmissionEdges(t *testing.T) {
 	r, _ := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	for _, envelope := range []*protocol.Envelope{
@@ -46,7 +46,7 @@ func TestRuntimeHandleUpdateAdmissionEdges(t *testing.T) {
 	}
 }
 
-// RUN-T-125/126/127 exercises runner stop, error, and non-PREPARED completion paths.
+// Exercises runner stop, error, and non-PREPARED completion paths.
 func TestRuntimeExecuteUpdateFailureBranches(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -92,7 +92,7 @@ func TestRuntimeExecuteUpdateFailureBranches(t *testing.T) {
 	}
 }
 
-// RUN-T-132 resends the latest receipt and releases a prepared permit exactly through the permit boundary.
+// Resends the latest receipt and releases a prepared permit exactly through the permit boundary.
 func TestRuntimeResendsUpdateReceiptsAndReportsPermitErrors(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	if err := r.resendUpdateReceipt(); err != nil {

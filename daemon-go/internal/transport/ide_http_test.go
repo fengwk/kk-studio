@@ -24,7 +24,6 @@ type codedViewResolutionError struct{ code string }
 func (e codedViewResolutionError) Error() string     { return "view is not open for this binding epoch" }
 func (e codedViewResolutionError) ErrorCode() string { return e.code }
 
-// TRN-T-033, TRN-T-034, TRN-T-035
 func TestHandleIDE_HTTPForwardsAndFiltersHopHeaders(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RequestURI() != "/base/api?q=one" {
@@ -66,7 +65,6 @@ func TestHandleIDE_HTTPForwardsAndFiltersHopHeaders(t *testing.T) {
 	}
 }
 
-// TRN-T-033
 func TestHandleIDE_ResolutionAndRouteErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name, path string
@@ -101,7 +99,6 @@ func TestHandleIDE_ResolutionAndRouteErrors(t *testing.T) {
 	}
 }
 
-// TRN-T-033
 func TestHandleIDE_RejectsUnsupportedConnectProtocol(t *testing.T) {
 	connection := &ControlConnection{resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 		t.Fatal("resolver must not be called")
@@ -115,7 +112,6 @@ func TestHandleIDE_RejectsUnsupportedConnectProtocol(t *testing.T) {
 	}
 }
 
-// TRN-T-034
 func TestHandleIDE_RejectsMissingPathBeforeResolve(t *testing.T) {
 	for _, method := range []string{http.MethodGet, http.MethodConnect} {
 		t.Run(method, func(t *testing.T) {

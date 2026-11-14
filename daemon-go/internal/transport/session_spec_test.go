@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// TRN-T-023 verifies graceful connection close terminates the peer after HTTP server shutdown.
+// Verifies graceful connection close terminates the peer after HTTP server shutdown.
 func TestControlConnection_CloseTerminatesPeer(t *testing.T) {
 	local, peer := net.Pipe()
 	defer peer.Close()

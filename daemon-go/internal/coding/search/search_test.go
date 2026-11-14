@@ -37,7 +37,6 @@ func put(t *testing.T, root, name, content string) {
 	}
 }
 
-// COD-F-011, COD-N-011
 func TestIgnoreRulesAgainstGitOracle(t *testing.T) {
 	root := t.TempDir()
 	if out, err := exec.Command("git", "init", "-q", root).CombinedOutput(); err != nil {
@@ -129,7 +128,6 @@ func boolText(v bool) string {
 	return "false"
 }
 
-// COD-F-010, COD-F-011, COD-N-012, COD-N-013
 func TestSearchOrderingGlobAndParallelLimit(t *testing.T) {
 	rgPath, rgErr := exec.LookPath("rg")
 	root := t.TempDir()
@@ -256,7 +254,7 @@ func TestGrepMatchesRipgrep(t *testing.T) {
 	}
 }
 
-// COD-F-011 COD-N-018: repository discovery intentionally ignores GIT_CEILING_DIRECTORIES.
+// Repository discovery intentionally ignores GIT_CEILING_DIRECTORIES.
 func TestRepositoryDiscoveryIgnoresGitCeilingDirectories(t *testing.T) {
 	repo := t.TempDir()
 	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
@@ -275,7 +273,6 @@ func TestRepositoryDiscoveryIgnoresGitCeilingDirectories(t *testing.T) {
 	}
 }
 
-// COD-F-011, COD-N-011
 // This test verifies local ignore rules, explicit ignored roots, and symlink traversal.
 func TestIgnoreAncestorExplicitRootSymlinkAndNoGit(t *testing.T) {
 	repo := t.TempDir()
@@ -345,7 +342,6 @@ func TestIgnoreAncestorExplicitRootSymlinkAndNoGit(t *testing.T) {
 	}
 }
 
-// COD-F-011, COD-N-011
 // TestIgnoreBoundariesAgainstGit checks repository and linked-worktree ignore scopes.
 func TestIgnoreBoundariesAgainstGit(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
@@ -472,7 +468,6 @@ func TestIgnoreBoundariesAgainstGit(t *testing.T) {
 	})
 }
 
-// COD-F-011, COD-N-011
 func TestLinkedWorktreeCommonExclude(t *testing.T) {
 	main := t.TempDir()
 	commands := [][]string{{"init", "-q", main}, {"-C", main, "config", "user.email", "test@example.invalid"}, {"-C", main, "config", "user.name", "Test"}}

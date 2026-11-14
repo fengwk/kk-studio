@@ -8,7 +8,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
-// RUN-T-020 verifies the concurrent invocation ceiling rejects excess work with the contracted failure.
+// Verifies the concurrent invocation ceiling rejects excess work with the contracted failure.
 func TestRuntimeRejectsInvocationBeyondConcurrentLimit(t *testing.T) {
 	started := make(chan string, 1)
 	release := make(chan struct{})
@@ -57,7 +57,7 @@ func TestRuntimeRejectsInvocationBeyondConcurrentLimit(t *testing.T) {
 	})
 }
 
-// RUN-T-018 fails and cancels an invocation when its progress payload cannot be encoded safely.
+// Fails and cancels an invocation when its progress payload cannot be encoded safely.
 func TestRuntimeProgressEncodingFailureCancelsCallAndFails(t *testing.T) {
 	progressReturned := make(chan error, 1)
 	callCancelled := make(chan bool, 1)

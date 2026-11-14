@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-// IDE-T-018 verifies bridge request body limits map read failures to bounded HTTP responses.
+// Verifies bridge request body limits map read failures to bounded HTTP responses.
 func TestBridgeBodyLimits(t *testing.T) {
 	tooLarge := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(strings.Repeat("x", bridgeMaxBodyBytes+1)))
 	if data, status := bridgeReadBody(httptest.NewRecorder(), tooLarge); status != http.StatusRequestEntityTooLarge || data != nil {
@@ -33,7 +33,7 @@ type failingBridgeReader struct{}
 
 func (failingBridgeReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
 
-// IDE-T-018 verifies snapshot payload decoding enforces document, path, and byte limits.
+// Verifies snapshot payload decoding enforces document, path, and byte limits.
 func TestBridgeSnapshotPayloadValidation(t *testing.T) {
 	parse := func(value string) (BridgeResult, error) {
 		var raw map[string]json.RawMessage
@@ -87,7 +87,7 @@ func TestBridgeSnapshotPayloadValidation(t *testing.T) {
 	}
 }
 
-// IDE-T-017 verifies bridge requests reject stale, cancelled, oversized, and conflicting work before enqueue.
+// Verifies bridge requests reject stale, cancelled, oversized, and conflicting work before enqueue.
 func TestBridgeRequestAdmissionFailures(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -154,7 +154,7 @@ func cancelledBridgeContext() context.Context {
 	return ctx
 }
 
-// IDE-T-014 verifies bridge shutdown settles pending work and rejects connection waiters.
+// Verifies bridge shutdown settles pending work and rejects connection waiters.
 func TestBridgeCloseSettlesPendingAndWaiters(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -182,7 +182,7 @@ func TestBridgeCloseSettlesPendingAndWaiters(t *testing.T) {
 	}
 }
 
-// IDE-T-014 verifies connection waiters wake on admission and epoch revocation.
+// Verifies connection waiters wake on admission and epoch revocation.
 func TestBridgeConnectionWaiterLifecycle(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -236,7 +236,7 @@ func TestBridgeConnectionWaiterLifecycle(t *testing.T) {
 	}
 }
 
-// IDE-T-025/026 verifies connection waits return for admitted streams, cancellation, and bridge closure.
+// Verifies connection waits return for admitted streams, cancellation, and bridge closure.
 func TestWaitForConnectionBoundaries(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -284,7 +284,7 @@ func TestWaitForConnectionBoundaries(t *testing.T) {
 	}
 }
 
-// IDE-T-014 verifies assigning a replacement workspace retires old streams, waiters, pending commands, and indexes.
+// Verifies assigning a replacement workspace retires old streams, waiters, pending commands, and indexes.
 func TestAssignRebindFencesOldBinding(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -332,7 +332,7 @@ func TestAssignRebindFencesOldBinding(t *testing.T) {
 	}
 }
 
-// IDE-T-017 verifies a queued command resolves as VIEW_GONE when its stream is retired.
+// Verifies a queued command resolves as VIEW_GONE when its stream is retired.
 func TestRequestStreamRetirement(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -375,7 +375,7 @@ func TestRequestStreamRetirement(t *testing.T) {
 	}
 }
 
-// IDE-T-021 verifies pending bridge commands are fenced by epoch and directory-transition outcomes.
+// Verifies pending bridge commands are fenced by epoch and directory-transition outcomes.
 func TestBridgePendingLifecycleFences(t *testing.T) {
 	makeBridge := func(epoch int64) (*Bridge, *bridgeView, *bridgeStream) {
 		stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", retired: make(chan struct{})}

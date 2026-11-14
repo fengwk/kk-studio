@@ -14,7 +14,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-F-002, COD-F-014
 func TestReadRejectsInvalidWindowsBeforeOpeningFiles(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -35,7 +34,6 @@ func TestReadRejectsInvalidWindowsBeforeOpeningFiles(t *testing.T) {
 	}
 }
 
-// COD-F-002, COD-F-004
 func TestReadDirectoryAndBinaryFile(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"z.txt", "a.txt"} {
@@ -58,7 +56,6 @@ func TestReadDirectoryAndBinaryFile(t *testing.T) {
 	}
 }
 
-// COD-F-007, COD-F-014
 func TestWriteRequiresStringContent(t *testing.T) {
 	for _, value := range []any{nil, 1, false} {
 		result := invokeCoding(t, Provider{}, "fs.write", map[string]any{"path": filepath.Join(t.TempDir(), "write.txt"), "content": value}, nil)
@@ -72,7 +69,6 @@ func TestWriteRequiresStringContent(t *testing.T) {
 	}
 }
 
-// COD-F-008, COD-F-014
 func TestEditRequiresTypedStrings(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "edit.txt")
 	if err := os.WriteFile(path, []byte("before"), 0600); err != nil {
@@ -90,7 +86,6 @@ func TestEditRequiresTypedStrings(t *testing.T) {
 	}
 }
 
-// COD-F-014
 func TestImageTierRejectsUnknownValue(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "small.png")
 	var encoded bytes.Buffer

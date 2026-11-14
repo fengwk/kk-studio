@@ -16,7 +16,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-N-001
 func TestInvocationOutputLimitOverridesSettings(t *testing.T) {
 	call := runtime.CapabilityCall{InvocationID: "limited", MaxOutputBytes: 1 << 20}
 	handler := func(_ context.Context, call runtime.CapabilityCall, _ runtime.CapabilityContext) (runtime.CapabilityResult, error) {
@@ -35,7 +34,6 @@ func TestInvocationOutputLimitOverridesSettings(t *testing.T) {
 	}
 }
 
-// COD-N-001
 func TestOutputLimitMiBFormatting(t *testing.T) {
 	for _, tc := range []struct {
 		size, limit int64
@@ -53,7 +51,6 @@ func TestOutputLimitMiBFormatting(t *testing.T) {
 	}
 }
 
-// COD-N-002
 func TestReadMediaRejectsBeforeReadingWholeFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "media.dat")
 	data := append([]byte("%PDF"), bytes.Repeat([]byte("x"), 1<<20)...)
@@ -71,7 +68,6 @@ func TestReadMediaRejectsBeforeReadingWholeFile(t *testing.T) {
 	}
 }
 
-// COD-N-002
 func TestReadMediaAtLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "media.dat")
 	data := append([]byte("%PDF"), bytes.Repeat([]byte("x"), (1<<20)-4)...)
@@ -88,7 +84,6 @@ func TestReadMediaAtLimit(t *testing.T) {
 	}
 }
 
-// COD-N-002
 func TestReadImageRejectsInputOverOutputLimitBeforeDecode(t *testing.T) {
 	var encoded bytes.Buffer
 	if err := png.Encode(&encoded, image.NewNRGBA(image.Rect(0, 0, 2, 3))); err != nil {
@@ -106,7 +101,7 @@ func TestReadImageRejectsInputOverOutputLimitBeforeDecode(t *testing.T) {
 	}
 }
 
-// COD-N-002: each non-image media signature at exactly the input limit remains readable.
+// Each non-image media signature at exactly the input limit remains readable.
 func TestReadMediaAtLimitAcrossTypes(t *testing.T) {
 	const limit = 1 << 20
 	for _, tc := range []struct {
@@ -134,7 +129,6 @@ func TestReadMediaAtLimitAcrossTypes(t *testing.T) {
 	}
 }
 
-// COD-N-003
 func TestReadImageUsesRequestedTierAndReportsDimensions(t *testing.T) {
 	var encoded bytes.Buffer
 	original := image.NewNRGBA(image.Rect(0, 0, 2, 3))

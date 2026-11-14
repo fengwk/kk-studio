@@ -13,7 +13,7 @@ import (
 	"testing"
 )
 
-// TRN-T-111 verifies only an explicitly configured proxy is used and failures do not fall back.
+// Verifies only an explicitly configured proxy is used and failures do not fall back.
 func TestProxy_ExplicitNoFallback(t *testing.T) {
 	var targetHits, proxyHits atomic.Int32
 	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -47,7 +47,7 @@ func TestProxy_ExplicitNoFallback(t *testing.T) {
 	}
 }
 
-// TRN-T-093 verifies HTTPS CONNECT tunneling with normal certificate validation.
+// Verifies HTTPS CONNECT tunneling with normal certificate validation.
 func TestProxy_HTTPSConnectUsesDefaultTLSVerification(t *testing.T) {
 	var proxyHits atomic.Int32
 	connectTarget := make(chan string, 1)
@@ -133,7 +133,7 @@ func TestProxy_HTTPSConnectUsesDefaultTLSVerification(t *testing.T) {
 	}
 }
 
-// TRN-N-004, TRN-T-096, TRN-T-112 verify explicit proxies also apply to loopback destinations.
+// Verify explicit proxies also apply to loopback destinations.
 func TestProxy_ExplicitProxyAppliesToDestinations(t *testing.T) {
 	p, err := NewProxyPolicy("http://proxy.example:8080")
 	if err != nil {
@@ -159,7 +159,7 @@ func TestProxy_ExplicitProxyAppliesToDestinations(t *testing.T) {
 	}
 }
 
-// TRN-N-004, TRN-T-068 verify a direct policy ignores unusable process proxy settings.
+// Verify a direct policy ignores unusable process proxy settings.
 func TestProxy_DirectDialIgnoresEnvironmentProxy(t *testing.T) {
 	t.Setenv("HTTP_PROXY", "http://127.0.0.1:1")
 	t.Setenv("http_proxy", "http://127.0.0.1:1")
@@ -185,7 +185,7 @@ func TestProxy_DirectDialIgnoresEnvironmentProxy(t *testing.T) {
 	}
 }
 
-// TRN-N-004, TRN-T-099 verify an invalid proxy value cannot mutate an already-created policy.
+// Verify an invalid proxy value cannot mutate an already-created policy.
 func TestProxy_InvalidConfigurationDoesNotReplaceExistingPolicy(t *testing.T) {
 	policy, err := NewProxyPolicy("http://proxy.example:8080")
 	if err != nil {
@@ -208,7 +208,7 @@ func TestProxy_InvalidConfigurationDoesNotReplaceExistingPolicy(t *testing.T) {
 	}
 }
 
-// TRN-N-004, TRN-T-118 verify invalid proxy errors are redacted and have the Go wording.
+// Verify invalid proxy errors are redacted and have the Go wording.
 func TestProxy_InvalidRedacted(t *testing.T) {
 	for _, target := range []string{
 		"https://proxy.example:443",

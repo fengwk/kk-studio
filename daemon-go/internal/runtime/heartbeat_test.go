@@ -25,7 +25,7 @@ func (ide *leaseTrackingIDE) ApplyLease(_ *protocol.IdeLease, sentAt time.Time) 
 
 func (ide *leaseTrackingIDE) HasActiveViews() bool { return ide.active.Load() }
 
-// RUN-T-001 heartbeat publication requires a bound environment but not a completed READY handshake.
+// Heartbeat publication requires a bound environment but not a completed READY handshake.
 func TestRuntimeHeartbeatsAfterEnvironmentBinding(t *testing.T) {
 	c := newTestConnection()
 	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: fixedConnectionFactory{connection: c}, HeartbeatInterval: 5 * time.Millisecond, ApplyConfig: func(_ context.Context, v int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
@@ -69,7 +69,7 @@ func TestRuntimeHeartbeatsAfterEnvironmentBinding(t *testing.T) {
 	}
 }
 
-// RUN-T-045/046 covers READY-only lease rounds, active-view gating, expiry, single-use, and heartbeat start time.
+// Covers READY-only lease rounds, active-view gating, expiry, single-use, and heartbeat start time.
 // Every heartbeat with active views starts a new round, so the loop is paused before a lease is handled:
 // the round of the last heartbeat actually sent is then the runtime's current round.
 func TestRuntimePublishesAndConsumesFreshIDELeaseRounds(t *testing.T) {

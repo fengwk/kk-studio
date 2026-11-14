@@ -34,7 +34,7 @@ func readAllRunes(t *testing.T, reader *Reader) string {
 	return text
 }
 
-// COD-T-246: the streaming reader decodes UTF-8 and every BOM encoding to the same text.
+// The streaming reader decodes UTF-8 and every BOM encoding to the same text.
 func TestReaderDecodesStreams(t *testing.T) {
 	text := "first\n中😀\nlast"
 	for _, name := range bomEncodings {
@@ -59,7 +59,7 @@ func TestReaderDecodesStreams(t *testing.T) {
 	}
 }
 
-// COD-T-228: the streaming reader applies the binary rule before serving any text.
+// The streaming reader applies the binary rule before serving any text.
 func TestReaderRejectsBinaryBeforeReading(t *testing.T) {
 	stream := append(bytes.Repeat([]byte{'a'}, binaryProbeBytes-10), 0, 'b')
 	if _, err := NewReader("/repo/doc.txt", bytes.NewReader(stream)); !errors.Is(err, ErrBinary) {
@@ -78,7 +78,7 @@ func TestReaderRejectsBinaryBeforeReading(t *testing.T) {
 	}
 }
 
-// COD-T-247: a stream that stops being decodable reports a typed error.
+// A stream that stops being decodable reports a typed error.
 func TestReaderReportsUndecodableStreams(t *testing.T) {
 	var unknown *UnknownEncodingError
 	reader, err := NewReader("/repo/doc.txt", bytes.NewReader([]byte("ok\n\xd6\xd0")))
@@ -136,7 +136,7 @@ func mustReader(t *testing.T, path string, data []byte) *Reader {
 	return reader
 }
 
-// COD-T-248: a declared legacy encoding is decoded as a whole file before the first rune.
+// A declared legacy encoding is decoded as a whole file before the first rune.
 func TestReaderDecodesDeclaredLegacyFile(t *testing.T) {
 	data := encodeAs(t, "GBK", "# coding: gbk\nprint(\"中文\")\n")
 	reader, err := NewReader("/repo/script.py", bytes.NewReader(data))
@@ -163,7 +163,7 @@ func TestReaderDecodesDeclaredLegacyFile(t *testing.T) {
 	}
 }
 
-// COD-T-249: a reader that fails underneath the codec passes its own error through.
+// A reader that fails underneath the codec passes its own error through.
 func TestReaderPassesThroughReadErrors(t *testing.T) {
 	reader, err := NewReader("/repo/doc.txt", io.MultiReader(strings.NewReader("a"), errorReader{}))
 	if err != nil {

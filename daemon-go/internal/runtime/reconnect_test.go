@@ -11,7 +11,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
-// RUN-T-054 keeps an in-flight invocation alive across disconnect and replays its RUNNING fact after reconnect.
+// Keeps an in-flight invocation alive across disconnect and replays its RUNNING fact after reconnect.
 func TestRuntimeRetainsInFlightExecutionAcrossReconnect(t *testing.T) {
 	first, second := newTestConnection(), newTestConnection()
 	queueHandshake(first)
@@ -91,7 +91,7 @@ func TestRuntimeRetainsInFlightExecutionAcrossReconnect(t *testing.T) {
 	}
 }
 
-// RUN-T-056 treats an explicit registration rejection as terminal rather than retryable.
+// Treats an explicit registration rejection as terminal rather than retryable.
 func TestRuntimeDoesNotRetryRegistrationRejection(t *testing.T) {
 	factory := &rejectingConnectionFactory{}
 	r, err := NewRuntime(RuntimeOptions{EnvironmentID: "env", Connections: factory, ApplyConfig: func(_ context.Context, _ int64, _ *protocol.DaemonConfiguration) (config.DaemonConfig, error) {
@@ -115,7 +115,7 @@ func (f *rejectingConnectionFactory) Connect(context.Context, ControlObserver) (
 	return nil, ErrRegistrationRejected
 }
 
-// RUN-T-084 retries a transient connection attempt and establishes the injected channel on the next attempt.
+// Retries a transient connection attempt and establishes the injected channel on the next attempt.
 func TestRuntimeRetriesTransientConnectFailure(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)

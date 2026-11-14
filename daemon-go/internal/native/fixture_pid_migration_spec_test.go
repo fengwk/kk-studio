@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// NAT-T-002 verifies state publication leaves only the atomically published PID file.
+// Verifies state publication leaves only the atomically published PID file.
 func TestFixture_AtomicPIDPublish(t *testing.T) {
 	for _, test := range []struct {
 		name string

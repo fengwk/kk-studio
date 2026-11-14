@@ -2,7 +2,7 @@ package runtime
 
 import "testing"
 
-// RUN-T-222/223/224/226/227 asserts terminal transitions, state mapping, and independent exit evidence.
+// Asserts terminal transitions, state mapping, and independent exit evidence.
 func TestJournalTerminalStateAndExitEvidenceEdges(t *testing.T) {
 	if _, err := NewInvocationJournal(0); err == nil {
 		t.Fatal("journal accepted zero retention capacity")

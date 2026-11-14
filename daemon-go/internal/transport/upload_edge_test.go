@@ -41,7 +41,7 @@ type uploadCloseErrorBody struct{ io.Reader }
 
 func (uploadCloseErrorBody) Close() error { return errors.New("private cleanup detail") }
 
-// TRN-T-010 verifies invalid ticket and retry timings fail before sending upload control messages.
+// Verifies invalid ticket and retry timings fail before sending upload control messages.
 func TestUpload_RejectsNegativeTimingOptions(t *testing.T) {
 	control := uploadExchangeStub{
 		request: func(context.Context, string, *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
@@ -65,7 +65,7 @@ func TestUpload_RejectsNegativeTimingOptions(t *testing.T) {
 	}
 }
 
-// TRN-T-019 verifies a failed network release remains an explicit unknown cleanup fact.
+// Verifies a failed network release remains an explicit unknown cleanup fact.
 func TestUpload_NetworkCleanupFailureIsUnconfirmed(t *testing.T) {
 	control := uploadExchangeStub{
 		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
@@ -93,7 +93,6 @@ func TestUpload_NetworkCleanupFailureIsUnconfirmed(t *testing.T) {
 	}
 }
 
-// TRN-N-004, TRN-T-107
 func TestUpload_ShutdownAbortIsNotCleanupFailure(t *testing.T) {
 	control := uploadExchangeStub{
 		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
@@ -134,7 +133,6 @@ func TestUpload_ShutdownAbortIsNotCleanupFailure(t *testing.T) {
 	}
 }
 
-// TRN-F-005
 func TestUpload_ValidationAndTicketFailures(t *testing.T) {
 	const invocation = "123e4567-e89b-12d3-a456-426614174000"
 	valid := uploadExchangeStub{request: func(context.Context, string, *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
@@ -215,7 +213,6 @@ func TestUpload_ValidationAndTicketFailures(t *testing.T) {
 	}
 }
 
-// TRN-F-005
 func TestUpload_CommitAndPutFailureBoundaries(t *testing.T) {
 	const invocation = "123e4567-e89b-12d3-a456-426614174000"
 	request := func(_ context.Context, _ string, r *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {

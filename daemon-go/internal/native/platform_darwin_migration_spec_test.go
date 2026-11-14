@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// NAT-T-033 verifies Darwin selects the POSIX supervisor without subreaper setup.
+// Verifies Darwin selects the POSIX supervisor without subreaper setup.
 func TestPlatform_DarwinSupervisor(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {

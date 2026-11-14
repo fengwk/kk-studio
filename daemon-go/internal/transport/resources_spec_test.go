@@ -16,7 +16,7 @@ import (
 
 const specInvocationID = "123e4567-e89b-12d3-a456-426614174000"
 
-// TRN-T-003 verifies a FAILED commit ends the transfer without another request or commit.
+// Verifies a FAILED commit ends the transfer without another request or commit.
 func TestUpload_FailedCommitIsTerminal(t *testing.T) {
 	requestCount, commitCount := 0, 0
 	control := uploadExchangeStub{
@@ -50,7 +50,7 @@ func TestUpload_FailedCommitIsTerminal(t *testing.T) {
 	}
 }
 
-// TRN-T-005 verifies a failed ticket does not expose its message or presigned data.
+// Verifies a failed ticket does not expose its message or presigned data.
 func TestUpload_FailedTicketRedactsPresignedData(t *testing.T) {
 	control := uploadExchangeStub{
 		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
@@ -76,7 +76,7 @@ func TestUpload_FailedTicketRedactsPresignedData(t *testing.T) {
 	}
 }
 
-// TRN-T-012 verifies cancellation interrupts a ticket wait.
+// Verifies cancellation interrupts a ticket wait.
 func TestUpload_AbortedTicketWait(t *testing.T) {
 	started := make(chan struct{})
 	control := uploadExchangeStub{
@@ -110,7 +110,7 @@ func TestUpload_AbortedTicketWait(t *testing.T) {
 	}
 }
 
-// TRN-T-006 verifies an already-cancelled invocation fails without sending a request.
+// Verifies an already-cancelled invocation fails without sending a request.
 func TestUpload_AlreadyCancelledDoesNotRequestTicket(t *testing.T) {
 	called := false
 	control := uploadExchangeStub{
@@ -135,7 +135,7 @@ func TestUpload_AlreadyCancelledDoesNotRequestTicket(t *testing.T) {
 	}
 }
 
-// TRN-T-010 verifies zero-valued timing options select the Go defaults.
+// Verifies zero-valued timing options select the Go defaults.
 func TestUpload_ZeroTimingOptionsUseDefaults(t *testing.T) {
 	ticketWait, retryBackoff, err := (&ResourceUploader{}).retryOptions()
 	if err != nil {
@@ -146,7 +146,7 @@ func TestUpload_ZeroTimingOptionsUseDefaults(t *testing.T) {
 	}
 }
 
-// TRN-T-013 verifies a timed-out request retries with the original transfer ID.
+// Verifies a timed-out request retries with the original transfer ID.
 func TestUpload_TicketTimeoutRetriesTransfer(t *testing.T) {
 	var transferIDs []string
 	requestCount := 0
@@ -176,7 +176,7 @@ func TestUpload_TicketTimeoutRetriesTransfer(t *testing.T) {
 	}
 }
 
-// TRN-T-015 verifies a pending commit is retried without repeating the PUT.
+// Verifies a pending commit is retried without repeating the PUT.
 func TestUpload_PendingCommitRetriesWithoutPut(t *testing.T) {
 	requestCount, commitCount, putCount := 0, 0, 0
 	control := uploadExchangeStub{

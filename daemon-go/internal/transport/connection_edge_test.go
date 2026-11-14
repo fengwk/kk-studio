@@ -72,7 +72,6 @@ func (w *blockedControlWriter) Write(p []byte) (int, error) {
 	}
 }
 
-// TRN-T-066, TRN-T-069
 func TestDial_ConfigurationAndTokenFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -104,7 +103,6 @@ func TestDial_ConfigurationAndTokenFailures(t *testing.T) {
 	}
 }
 
-// TRN-N-004, TRN-T-011, TRN-T-086
 func TestControlConnection_StreamFailuresAndClose(t *testing.T) {
 	for _, data := range [][]byte{{0, 0, 0, 1}, {0, 0, 0, 1, 0xff}} {
 		left, right := net.Pipe()
@@ -132,7 +130,7 @@ func TestControlConnection_StreamFailuresAndClose(t *testing.T) {
 	}
 }
 
-// TRN-T-086 verifies the control handler waits for in-flight sends before returning.
+// Verifies the control handler waits for in-flight sends before returning.
 func TestControlConnection_HandlerWaitsForActiveSendBeforeClose(t *testing.T) {
 	left, right := net.Pipe()
 	defer right.Close()
@@ -220,7 +218,7 @@ func TestControlConnection_HandlerWaitsForActiveSendBeforeClose(t *testing.T) {
 	}
 }
 
-// TRN-T-086 verifies closing the WebSocket interrupts an active HTTP/2 handler.
+// Verifies closing the WebSocket interrupts an active HTTP/2 handler.
 func TestControlConnection_CloseInterruptsActiveHTTP2Handler(t *testing.T) {
 	clientConn, serverConn := net.Pipe()
 	defer clientConn.Close()
@@ -279,7 +277,6 @@ func TestControlConnection_CloseInterruptsActiveHTTP2Handler(t *testing.T) {
 	_ = clientConn.Close()
 }
 
-// TRN-T-082
 func TestControlConnection_ControlRouteAndGoaway(t *testing.T) {
 	cc := &ControlConnection{controlReady: make(chan struct{}), closed: make(chan struct{}), stopControl: make(chan struct{})}
 	close(cc.stopControl)
@@ -324,7 +321,6 @@ func TestControlConnection_ControlRouteAndGoaway(t *testing.T) {
 	}
 }
 
-// TRN-T-074
 func TestIdleConn_SetDeadlineFailure(t *testing.T) {
 	conn := &idleConn{Conn: deadlineErrorConn{}, timeout: time.Second}
 	if _, err := conn.Read(make([]byte, 1)); err == nil {
@@ -335,7 +331,7 @@ func TestIdleConn_SetDeadlineFailure(t *testing.T) {
 	}
 }
 
-// TRN-T-082 verifies the single-connection listener returns its one connection and terminates waiters.
+// Verifies the single-connection listener returns its one connection and terminates waiters.
 func TestSingleConnListener_AcceptAndClose(t *testing.T) {
 	left, right := net.Pipe()
 	defer left.Close()
@@ -367,7 +363,6 @@ func TestSingleConnListener_AcceptAndClose(t *testing.T) {
 	}
 }
 
-// TRN-T-011
 func TestControlConnection_CloseBeforeControlWait(t *testing.T) {
 	cc := &ControlConnection{controlReady: make(chan struct{}), closed: make(chan struct{})}
 	close(cc.controlReady)

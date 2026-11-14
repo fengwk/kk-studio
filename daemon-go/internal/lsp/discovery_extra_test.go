@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// LSP-T-034, LSP-T-035, LSP-T-037, and LSP-T-110 through LSP-T-115 exercise executable resolution rules.
+// Exercise executable resolution rules.
 func TestResolver_AbsoluteHomePATHAndPATHEXT(t *testing.T) {
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
@@ -56,7 +56,7 @@ func TestResolver_AbsoluteHomePATHAndPATHEXT(t *testing.T) {
 	}
 }
 
-// LSP-T-030 verifies a .git worktree file bounds root-marker traversal.
+// Verifies a .git worktree file bounds root-marker traversal.
 func TestDiscovery_GitFileBoundary(t *testing.T) {
 	base := t.TempDir()
 	outer := filepath.Join(base, "outer")

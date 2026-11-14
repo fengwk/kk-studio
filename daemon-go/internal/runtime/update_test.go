@@ -14,7 +14,7 @@ import (
 
 const testUpdateOperationID = "123e4567-e89b-42d3-a456-426614174000"
 
-// RUN-T-124 sends UPDATE_ACCEPTED before starting the runner and retains admission after UPDATE_PREPARED.
+// Sends UPDATE_ACCEPTED before starting the runner and retains admission after UPDATE_PREPARED.
 func TestRuntimeUpdateSendsAcceptedThenPreparedAndHoldsAdmission(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -59,7 +59,7 @@ func TestRuntimeUpdateSendsAcceptedThenPreparedAndHoldsAdmission(t *testing.T) {
 	}
 }
 
-// RUN-T-128/132 replay PREPARED on duplicate operation IDs without rerunning the update.
+// Replay PREPARED on duplicate operation IDs without rerunning the update.
 func TestRuntimeUpdateReplaysPreparedReceiptAndPermit(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -89,7 +89,7 @@ func TestRuntimeUpdateReplaysPreparedReceiptAndPermit(t *testing.T) {
 	}
 }
 
-// RUN-T-125 reports an UPDATE_FAILED receipt and releases the admission hold.
+// Reports an UPDATE_FAILED receipt and releases the admission hold.
 func TestRuntimeUpdateFailureClearsAdmission(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -119,7 +119,7 @@ func TestRuntimeUpdateFailureClearsAdmission(t *testing.T) {
 	}
 }
 
-// RUN-T-130 rejects an update when no managed updater is configured.
+// Rejects an update when no managed updater is configured.
 func TestRuntimeUpdateRejectsWhenNotConfigured(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -141,7 +141,7 @@ func TestRuntimeUpdateRejectsWhenNotConfigured(t *testing.T) {
 	}
 }
 
-// RUN-T-126/127 preserve thrown error messages and use the safe fallback for blank failures.
+// Preserve thrown error messages and use the safe fallback for blank failures.
 func TestRuntimeUpdateThrownErrorsUseSafeMessages(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -175,7 +175,7 @@ func TestRuntimeUpdateThrownErrorsUseSafeMessages(t *testing.T) {
 	}
 }
 
-// RUN-T-066 waits for an in-flight managed update to honor shutdown cancellation.
+// Waits for an in-flight managed update to honor shutdown cancellation.
 func TestRuntimeWaitsForUpdateShutdown(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
@@ -259,7 +259,7 @@ func TestRuntimeUpdateWatchedInstallerFailure(t *testing.T) {
 	}
 }
 
-// RUN-T-133 requires READY scope and environment identity before accepting UPDATE.
+// Requires READY scope and environment identity before accepting UPDATE.
 func TestRuntimeUpdateRequiresEnvironmentID(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)

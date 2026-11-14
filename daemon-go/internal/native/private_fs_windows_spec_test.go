@@ -74,7 +74,7 @@ func windowsPrivatePathOwner(path string) (*windows.SID, error) {
 	return owner, err
 }
 
-// NAT-F-013 exercises owner rejection against a real Windows security descriptor.
+// Exercises owner rejection against a real Windows security descriptor.
 func TestWindowsPrivateFS_RejectsRealForeignOwner(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(directory); err != nil {
@@ -186,7 +186,7 @@ func (api fakeWindowsPrivatePathAPI) Security(string) (*windows.SID, *windows.AC
 	return api.owner, api.dacl, api.protected, nil
 }
 
-// NAT-T-202 verifies a foreign owner is rejected by the same owner comparison used on real Windows paths.
+// Verifies a foreign owner is rejected by the same owner comparison used on real Windows paths.
 func TestWindowsPrivateFS_RejectsForeignOwner(t *testing.T) {
 	user, err := windows.StringToSid("S-1-5-18")
 	if err != nil {
@@ -230,7 +230,7 @@ func setWindowsTestLooseDACL(t *testing.T, path string) {
 	}
 }
 
-// NAT-F-013 and NAT-T-207..208 verify a real Windows foreign DACL ACE is rejected before private state can be replaced.
+// Verify a real Windows foreign DACL ACE is rejected before private state can be replaced.
 func TestWindowsPrivateFS_RejectsForeignACEWithoutOverwriting(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(directory); err != nil {
@@ -253,7 +253,7 @@ func TestWindowsPrivateFS_RejectsForeignACEWithoutOverwriting(t *testing.T) {
 	}
 }
 
-// NAT-T-213 verifies an owner-only file cannot be published below a directory with a foreign ACE.
+// Verifies an owner-only file cannot be published below a directory with a foreign ACE.
 func TestWindowsPrivateFS_RejectsLooseParent(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(directory); err != nil {
@@ -265,7 +265,7 @@ func TestWindowsPrivateFS_RejectsLooseParent(t *testing.T) {
 	}
 }
 
-// NAT-T-203 verifies concurrent creation accepts the winning owner-only directory and rejects other objects.
+// Verifies concurrent creation accepts the winning owner-only directory and rejects other objects.
 func TestWindowsPrivateFS_ConcurrentDirectoryCreation(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "raced")
 	var wait sync.WaitGroup
@@ -293,7 +293,7 @@ func TestWindowsPrivateFS_ConcurrentDirectoryCreation(t *testing.T) {
 	}
 }
 
-// NAT-T-210 verifies an actual Windows directory junction is rejected as a reparse-point lock path.
+// Verifies an actual Windows directory junction is rejected as a reparse-point lock path.
 func TestWindowsPrivateFS_RejectsReparseLock(t *testing.T) {
 	base := t.TempDir()
 	lockDir := filepath.Join(base, "locks")
@@ -339,7 +339,7 @@ func (api *zeroProgressWindowsPrivateFileAPI) Remove(path string) error {
 	return api.nativeWindowsPrivateFileAPI.Remove(path)
 }
 
-// NAT-T-197 ensures a short write aborts the private-file transaction without replacing the old target.
+// Ensures a short write aborts the private-file transaction without replacing the old target.
 func TestWindowsPrivateFS_ZeroWriteDoesNotRename(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(directory); err != nil {
@@ -366,7 +366,7 @@ func TestWindowsPrivateFS_ZeroWriteDoesNotRename(t *testing.T) {
 	}
 }
 
-// NAT-T-204 verifies an existing foreign-ACE lock file is rejected without rewriting its bytes.
+// Verifies an existing foreign-ACE lock file is rejected without rewriting its bytes.
 func TestWindowsDirectoryLock_RejectsForeignACEWithoutRewrite(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "locks")
 	if err := ensurePrivateDirectory(directory); err != nil {

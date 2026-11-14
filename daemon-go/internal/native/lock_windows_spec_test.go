@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// NAT-T-215 proves Windows kernel lock release when the process owning another handle is killed.
+// Proves Windows kernel lock release when the process owning another handle is killed.
 func TestWindowsDirectoryLock_ExternalHolderCrash(t *testing.T) {
 	if os.Getenv("KK_NATIVE_LOCK_HOLDER_DIR") != "" {
 		directory := os.Getenv("KK_NATIVE_LOCK_HOLDER_DIR")

@@ -8,7 +8,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// TRN-T-136
 func TestCodec_UnsafeValues(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -27,7 +26,6 @@ func TestCodec_UnsafeValues(t *testing.T) {
 	}
 }
 
-// TRN-T-138
 func TestCodec_WireBounds(t *testing.T) {
 	for _, b := range [][]byte{nil, {0, 0, 0, 0}, {0, 0, 0, 1, 0, 0}} {
 		if _, err := UnmarshalEnvelope(b); err == nil {
@@ -44,7 +42,6 @@ func TestCodec_WireBounds(t *testing.T) {
 	}
 }
 
-// TRN-T-138
 func TestCodec_EncodedEnvelopeFrameLimit(t *testing.T) {
 	arguments := `{"x":"` + strings.Repeat("x", MaxFrameSize-9) + `"}`
 	envelope := testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{CapabilityId: proto.String("fs.read"), ArgumentsJson: &arguments, TimeoutMillis: proto.Int64(0)}})
@@ -63,7 +60,6 @@ func TestCodec_EncodedEnvelopeFrameLimit(t *testing.T) {
 	}
 }
 
-// TRN-T-141
 func TestCodec_RuntimeConfigStatus(t *testing.T) {
 	s := &RuntimeSnapshot{Revision: proto.Int64(1), Status: &RuntimeBody{DaemonVersion: proto.String("1.0.0"), Configuration: &ConfigurationStatus{ProxyUrl: proto.String("http://proxy:8080")}}}
 	e := testEnvelope(MessageType_RUNTIME_STATUS, "", &Envelope_RuntimeStatus{RuntimeStatus: &RuntimeStatus{RuntimeStatus: s}})
@@ -72,7 +68,6 @@ func TestCodec_RuntimeConfigStatus(t *testing.T) {
 	}
 }
 
-// TRN-T-145
 func TestCodec_InvocationEvents(t *testing.T) {
 	for _, e := range []*Envelope{
 		testEnvelope(MessageType_PROGRESS, testInvocationID, &Envelope_Progress{Progress: &Progress{Result: &CapabilityResult{CallId: proto.String("call"), Error: proto.Bool(false), DetailsJson: proto.String(`{}`), Contents: []*Content{{Body: &Content_Resource{Resource: &ResourceContent{UploadId: proto.String(testEnvironmentID), MediaType: proto.String("application/zip"), Name: proto.String("a.zip"), Size: proto.Int64(1), Sha256: proto.String(testSHA256)}}}}}}}),
@@ -85,7 +80,6 @@ func TestCodec_InvocationEvents(t *testing.T) {
 	}
 }
 
-// TRN-T-147
 func TestCodec_Download(t *testing.T) {
 	e := testEnvelope(MessageType_RESOURCE_DOWNLOAD_TICKET, testInvocationID, &Envelope_ResourceDownloadTicket{ResourceDownloadTicket: &ResourceDownloadTicket{TransferId: proto.String(testEnvironmentID), State: TicketState_TICKET_READY, PresignedGet: &PresignedGet{Method: proto.String("GET"), Url: proto.String("https://store.example/object?token=x"), ExpiresAtEpochMs: proto.Int64(1)}, Size: proto.Int64(3), Sha256: proto.String(testSHA256)}})
 	if _, err := MarshalEnvelope(e); err != nil {
@@ -98,7 +92,6 @@ func TestCodec_Download(t *testing.T) {
 	}
 }
 
-// TRN-T-148
 func TestCodec_UpdatePolicy(t *testing.T) {
 	for _, e := range []*Envelope{
 		testEnvelope(MessageType_UPDATE, "", &Envelope_Update{Update: &Update{OperationId: proto.String(testEnvironmentID), TargetVersion: proto.String("1.0.0")}}),
@@ -114,7 +107,6 @@ func TestCodec_UpdatePolicy(t *testing.T) {
 	}
 }
 
-// TRN-T-149
 func TestCodec_IDEAndError(t *testing.T) {
 	bad := testEnvelope(MessageType_IDE_LEASE, "", &Envelope_IdeLease{IdeLease: &IdeLease{Round: proto.Int64(1), Bindings: []*IdeLeaseBinding{{ViewId: proto.String(testEnvironmentID), BrowserSessionId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1)}, {ViewId: proto.String(testEnvironmentID), BrowserSessionId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(2)}}}})
 	if _, err := MarshalEnvelope(bad); err == nil {
@@ -126,7 +118,6 @@ func TestCodec_IDEAndError(t *testing.T) {
 	}
 }
 
-// TRN-T-151
 func TestCodec_IDEActions(t *testing.T) {
 	valid := testEnvelope(MessageType_IDE_COMMAND, "invocation-1", &Envelope_IdeCommand{IdeCommand: &IdeCommand{Action: IdeAction_OPEN_VIEW, ViewId: proto.String(testEnvironmentID), BrowserSessionId: proto.String(testEnvironmentID), EventNodeId: proto.String(testEnvironmentID), ConnectionId: proto.String(testEnvironmentID), ClaimId: proto.String(testEnvironmentID), ExpectedBindingEpoch: proto.Int64(0), ExpectedDaemonInstanceId: proto.String(testEnvironmentID), Mode: IdeOpenMode_CREATE}})
 	if _, err := MarshalEnvelope(valid); err != nil {
@@ -158,7 +149,6 @@ func TestCodec_IDEActions(t *testing.T) {
 	}
 }
 
-// TRN-T-152
 func TestCodec_UploadTicketStates(t *testing.T) {
 	ready := testEnvelope(MessageType_RESOURCE_UPLOAD_TICKET, testInvocationID, &Envelope_ResourceUploadTicket{ResourceUploadTicket: &ResourceUploadTicket{TransferId: proto.String(testEnvironmentID), State: TicketState_TICKET_READY, UploadId: proto.String(testEnvironmentID)}})
 	if _, err := MarshalEnvelope(ready); err != nil {
@@ -177,7 +167,6 @@ func TestCodec_UploadTicketStates(t *testing.T) {
 	}
 }
 
-// TRN-T-155
 func TestCodec_TargetVersion(t *testing.T) {
 	if err := ValidateUpgrade(&UpgradeRequired{TargetVersion: proto.String("1.2.3")}); err != nil {
 		t.Fatal(err)
@@ -187,7 +176,6 @@ func TestCodec_TargetVersion(t *testing.T) {
 	}
 }
 
-// TRN-T-158
 func TestCodec_IDESnapshot(t *testing.T) {
 	views := []*IdeViewSummary{{ViewId: proto.String("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), BrowserSessionId: proto.String(testEnvironmentID), EventNodeId: proto.String(testEnvironmentID), ConnectionId: proto.String(testEnvironmentID), ClaimId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1), Directory: proto.String("/"), WorkspacePath: proto.String("/"), State: IdeViewState_OPEN}, {ViewId: proto.String("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), BrowserSessionId: proto.String(testEnvironmentID), EventNodeId: proto.String(testEnvironmentID), ConnectionId: proto.String(testEnvironmentID), ClaimId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1), Directory: proto.String("/"), WorkspacePath: proto.String("/"), State: IdeViewState_OPEN}}
 	e := testEnvelope(MessageType_IDE_RESULT, "invocation-1", &Envelope_IdeResult{IdeResult: &IdeResult{Ok: proto.Bool(true), Revision: proto.Int64(1), Views: views}})
@@ -201,7 +189,6 @@ func TestCodec_IDESnapshot(t *testing.T) {
 	}
 }
 
-// TRN-T-159
 func TestCodec_IDEBinding(t *testing.T) {
 	id := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 	view := &IdeViewSummary{ViewId: proto.String(id), BrowserSessionId: proto.String(testEnvironmentID), EventNodeId: proto.String(testEnvironmentID), ConnectionId: proto.String(testEnvironmentID), ClaimId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1), Directory: proto.String("/"), WorkspacePath: proto.String("/"), State: IdeViewState_OPEN}

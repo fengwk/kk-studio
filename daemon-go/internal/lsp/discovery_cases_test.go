@@ -8,7 +8,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// LSP-T-027 covers extension case folding, multi-extension matches, and extensionless files.
+// Covers extension case folding, multi-extension matches, and extensionless files.
 func TestDiscovery_ExtensionCases(t *testing.T) {
 	discovery, err := NewDiscovery([]config.LSPServerConfig{
 		{ID: "ts", Command: []string{"missing-ts"}, Extensions: []string{".ts", ".tsx"}},
@@ -27,7 +27,7 @@ func TestDiscovery_ExtensionCases(t *testing.T) {
 	}
 }
 
-// LSP-T-029 verifies the shallowest marker inside a git worktree wins over nested module markers.
+// Verifies the shallowest marker inside a git worktree wins over nested module markers.
 func TestDiscovery_ShallowestRootMarkerInGitWorktree(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "repo")

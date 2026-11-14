@@ -20,7 +20,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// NAT-T-003 verifies TERM before permit converges the helper session without running the command.
+// Verifies TERM before permit converges the helper session without running the command.
 func TestHelper_TermBeforePermit(t *testing.T) {
 	dir := stateTestDir(t)
 	marker := filepath.Join(t.TempDir(), "command-ran")
@@ -82,7 +82,7 @@ func TestHelper_TermBeforePermit(t *testing.T) {
 	}
 }
 
-// NAT-T-126 verifies the helper converges its command after its owner process disappears.
+// Verifies the helper converges its command after its owner process disappears.
 func TestPOSIXSupervisor_OwnerDeathFixtures(t *testing.T) {
 	dir := stateTestDir(t)
 	launch, err := json.Marshal(launchSpec{Cwd: t.TempDir(), Args: []string{"/bin/sleep", "30"}})
@@ -177,7 +177,7 @@ func TestPOSIXSupervisor_OwnerDeathFixtures(t *testing.T) {
 	_ = removeStateDir(dir)
 }
 
-// NAT-T-137 verifies cancellation after scope establishment cannot publish a permit.
+// Verifies cancellation after scope establishment cannot publish a permit.
 func TestPOSIXSupervisor_CancelAfterScope(t *testing.T) {
 	dir := stateTestDir(t)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -190,7 +190,7 @@ func TestPOSIXSupervisor_CancelAfterScope(t *testing.T) {
 	}
 }
 
-// NAT-T-004 verifies owner-channel EOF before permit converges without running the command.
+// Verifies owner-channel EOF before permit converges without running the command.
 func TestHelper_ParentDeathBeforePermit(t *testing.T) {
 	dir := stateTestDir(t)
 	marker := filepath.Join(t.TempDir(), "command-ran")
@@ -249,7 +249,7 @@ func waitForPOSIXMigrationHelperScope(stateDir string) error {
 	return errors.New("helper did not publish its scope")
 }
 
-// NAT-T-066 verifies a launch publication failure prevents helper creation and removes state.
+// Verifies a launch publication failure prevents helper creation and removes state.
 func TestPOSIXStart_LaunchWriteFailure(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -281,7 +281,7 @@ func TestPOSIXStart_LaunchWriteFailure(t *testing.T) {
 	}
 }
 
-// NAT-T-063 verifies a helper spawn failure releases all parent-owned resources.
+// Verifies a helper spawn failure releases all parent-owned resources.
 func TestPOSIXStart_CleansResourcesAfterSpawnFailure(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -311,7 +311,7 @@ func TestPOSIXStart_CleansResourcesAfterSpawnFailure(t *testing.T) {
 	}
 }
 
-// NAT-T-075 verifies failed startup kills only the known helper before scope confirmation.
+// Verifies failed startup kills only the known helper before scope confirmation.
 func TestPOSIXState_KillHelperOnly(t *testing.T) {
 	p := posixTestProcess(t)
 	p.pid = 42
@@ -338,7 +338,7 @@ func TestPOSIXState_KillHelperOnly(t *testing.T) {
 	}
 }
 
-// NAT-T-077 verifies an empty scope proves cleanup without helper cleanup-file evidence.
+// Verifies an empty scope proves cleanup without helper cleanup-file evidence.
 func TestPOSIXState_EmptySessionProof(t *testing.T) {
 	p := posixTestProcess(t)
 	close(p.done)
@@ -365,7 +365,7 @@ func TestPOSIXState_EmptySessionProof(t *testing.T) {
 	}
 }
 
-// NAT-T-074 verifies concurrent termination calls share one successful close.
+// Verifies concurrent termination calls share one successful close.
 func TestPOSIXState_ConcurrentClose(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -410,7 +410,7 @@ func TestPOSIXState_ConcurrentClose(t *testing.T) {
 	}
 }
 
-// NAT-T-116 verifies terminating a process scope also kills a nested child.
+// Verifies terminating a process scope also kills a nested child.
 func TestPOSIXSupervisor_TerminateNested(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -459,7 +459,7 @@ func TestPOSIXProcessGroupFixture(t *testing.T) {
 	time.Sleep(30 * time.Second)
 }
 
-// NAT-T-117 verifies session termination reaches a child in a distinct process group.
+// Verifies session termination reaches a child in a distinct process group.
 func TestPOSIXSupervisor_MultipleProcessGroups(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {

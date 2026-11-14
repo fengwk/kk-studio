@@ -45,7 +45,7 @@ func TestLockCommandHolderProcessFixture(t *testing.T) {
 	}
 }
 
-// NAT-T-030 verifies an external process holds the lock against this process.
+// Verifies an external process holds the lock against this process.
 func TestDirectoryLock_ExternalHolder(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(directory); err != nil {
@@ -64,7 +64,7 @@ func TestDirectoryLock_ExternalHolder(t *testing.T) {
 	}
 }
 
-// NAT-T-031 verifies the kernel releases a POSIX directory lock when its owner is killed.
+// Verifies the kernel releases a POSIX directory lock when its owner is killed.
 func TestDirectoryLock_KernelReleaseOnCrash(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(directory); err != nil {
@@ -89,7 +89,7 @@ func TestDirectoryLock_KernelReleaseOnCrash(t *testing.T) {
 	}
 }
 
-// NAT-T-015 verifies the install lock helper's kernel lock is released on process death.
+// Verifies the install lock helper's kernel lock is released on process death.
 func TestLockCommand_KernelReleaseOnCrash(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(directory); err != nil {

@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-// RUN-T-183 covers list, marker, control-character, and declaration-order validation branches.
+// Covers list, marker, control-character, and declaration-order validation branches.
 func TestConfigValidationHelpers(t *testing.T) {
 	if validStringList(nil, true) || !validStringList(nil, false) || !validStringList([]string{"a", "b"}, true) || validStringList([]string{" "}, false) || validStringList([]string{"bad\x00value"}, false) {
 		t.Fatal("string-list validation returned an unexpected result")
@@ -62,7 +62,7 @@ func TestConfigNestingDepthMatchesTypeScriptBoundary(t *testing.T) {
 	}
 }
 
-// RUN-T-165/176/185 exercise hot Bash resolution and executable path validation.
+// Exercise hot Bash resolution and executable path validation.
 func TestResolveExecutableBranches(t *testing.T) {
 	resolved, err := ResolveExecutable(os.Args[0])
 	if err != nil || !filepath.IsAbs(resolved) {
@@ -95,7 +95,7 @@ func TestResolveExecutableBranches(t *testing.T) {
 	}
 }
 
-// RUN-T-168/171/179 reject non-private, non-regular, and empty registration tokens.
+// Reject non-private, non-regular, and empty registration tokens.
 func TestReadRegistrationTokenFailures(t *testing.T) {
 	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{"studioUrl":"http://localhost","lsp":{"servers":{"x":{"command":["x"],"extensions":[".x"]}}}}}`)
 	tokenPath := filepath.Join(filepath.Dir(path), "daemon.token")
@@ -144,7 +144,7 @@ func TestReadRegistrationTokenFailures(t *testing.T) {
 	}
 }
 
-// RUN-T-160/166/167/182/183 exercise additional environment validation branches.
+// Exercise additional environment validation branches.
 func TestLoadRejectsInvalidConfigurationBranches(t *testing.T) {
 	base := `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{"studioUrl":"http://localhost","lsp":{"servers":{"x":{"command":["x"],"extensions":[".x"]}}}}}`
 	cases := []string{
@@ -168,7 +168,7 @@ func TestLoadRejectsInvalidConfigurationBranches(t *testing.T) {
 	}
 }
 
-// RUN-T-159/166/167/177 cover optional config values and derived executable paths.
+// Cover optional config values and derived executable paths.
 func TestLoadOptionalFieldsAndDistributionPaths(t *testing.T) {
 	bash := writeExecutableFixture(t, "bash")
 	bashJSON, err := json.Marshal(bash)
@@ -190,7 +190,7 @@ func TestLoadOptionalFieldsAndDistributionPaths(t *testing.T) {
 	}
 }
 
-// RUN-T-180 rejects an oversized configuration before parsing it.
+// Rejects an oversized configuration before parsing it.
 func TestLoadRejectsOversizedConfig(t *testing.T) {
 	path := writeConfigFixture(t, strings.Repeat(" ", maxConfigBytes+1))
 	if _, err := LoadDaemonConfig(path); err == nil {
@@ -198,7 +198,7 @@ func TestLoadRejectsOversizedConfig(t *testing.T) {
 	}
 }
 
-// RUN-T-161/162/163/167/181/182 cover malformed nested configuration fields.
+// Cover malformed nested configuration fields.
 func TestLoadRejectsInvalidConfigShapes(t *testing.T) {
 	base := `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{"studioUrl":"http://localhost","lsp":{"servers":{"x":{"command":["x"],"extensions":[".x"]}}}}}`
 	cases := []string{

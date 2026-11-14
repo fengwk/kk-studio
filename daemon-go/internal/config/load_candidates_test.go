@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// RUN-T-159 and RUN-T-165 allow startup config without LSP and preserve an unresolved Bash setting.
+// Allow startup config without LSP and preserve an unresolved Bash setting.
 func TestLoadOptionalLSPAndUnavailableBash(t *testing.T) {
 	t.Setenv("PATH", t.TempDir())
 	configured := filepath.Join(t.TempDir(), "missing-bash")
@@ -28,7 +28,7 @@ func TestLoadOptionalLSPAndUnavailableBash(t *testing.T) {
 	}
 }
 
-// RUN-T-161 normalizes extension case and surrounding whitespace in file configuration.
+// Normalizes extension case and surrounding whitespace in file configuration.
 func TestLoadNormalizesLSPLists(t *testing.T) {
 	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{"studioUrl":"https://studio.example","lsp":{"servers":{"go":{"command":["gopls"],"extensions":[" .GO "],"rootMarkers":[" go.mod "],"firstMatchMarkers":[" go.work "]}}}}}`)
 	got, err := LoadDaemonConfig(path)
@@ -41,7 +41,7 @@ func TestLoadNormalizesLSPLists(t *testing.T) {
 	}
 }
 
-// RUN-T-170 confirms check-config does not require Bash to resolve at startup.
+// Confirms check-config does not require Bash to resolve at startup.
 func TestCheckConfigAllowsUnresolvedBash(t *testing.T) {
 	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{"studioUrl":"https://studio.example","bashExecutable":"/no/such/bash"}}`)
 	t.Setenv("PATH", t.TempDir())

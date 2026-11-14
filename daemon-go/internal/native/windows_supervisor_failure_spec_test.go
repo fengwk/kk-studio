@@ -27,7 +27,7 @@ func newWindowsScopeTestProcess(t *testing.T) *windowsProcess {
 	}
 }
 
-// NAT-T-224..227 verify helper exit and persisted failure details are surfaced before scope publication.
+// Verify helper exit and persisted failure details are surfaced before scope publication.
 func TestWindowsSupervisor_AwaitScopeReportsHelperFailure(t *testing.T) {
 	t.Run("helper exits before scope", func(t *testing.T) {
 		process := newWindowsScopeTestProcess(t)
@@ -58,7 +58,7 @@ func TestWindowsSupervisor_AwaitScopeReportsHelperFailure(t *testing.T) {
 	})
 }
 
-// NAT-T-228 verifies cancellation after scope verification prevents the helper permit from being published.
+// Verifies cancellation after scope verification prevents the helper permit from being published.
 func TestWindowsSupervisor_CancelledAfterScopePublication(t *testing.T) {
 	process := newWindowsScopeTestProcess(t)
 	if err := publishText(process.stateDir, scopeFile, "1234"); err != nil {
@@ -74,7 +74,7 @@ func TestWindowsSupervisor_CancelledAfterScopePublication(t *testing.T) {
 	}
 }
 
-// NAT-T-239 verifies the scope-publication deadline returns a bounded failure.
+// Verifies the scope-publication deadline returns a bounded failure.
 func TestWindowsSupervisor_ScopePublicationTimeout(t *testing.T) {
 	process := newWindowsScopeTestProcess(t)
 	err := process.awaitScopeWithBudget(context.Background(), 10*time.Millisecond)
@@ -83,7 +83,7 @@ func TestWindowsSupervisor_ScopePublicationTimeout(t *testing.T) {
 	}
 }
 
-// NAT-T-223 verifies failed-start cleanup returns typed uncertainty instead of discarding the state directory.
+// Verifies failed-start cleanup returns typed uncertainty instead of discarding the state directory.
 func TestWindowsSupervisor_FailedStartCleanupPreservesUnprovenScope(t *testing.T) {
 	process := newWindowsScopeTestProcess(t)
 	process.job = windows.InvalidHandle
@@ -125,7 +125,7 @@ func (api *failingWindowsProcessTerminationAPI) CloseHandle(handle windows.Handl
 	return api.closeErr
 }
 
-// NAT-T-231..232,237..238 verify unproven termination is cached and aggregates injected drain/close errors.
+// Verify unproven termination is cached and aggregates injected drain/close errors.
 func TestWindowsSupervisor_UnprovenTerminationPreservesScopeAndAggregatesCleanupFailure(t *testing.T) {
 	process := newWindowsScopeTestProcess(t)
 	process.job = 42
@@ -175,7 +175,7 @@ func (survivingWindowsProcessAPI) AwaitJobEmpty(context.Context, windows.Handle,
 }
 func (survivingWindowsProcessAPI) CloseHandle(windows.Handle) error { return nil }
 
-// NAT-T-229 verifies descendant membership fails closed when a managed state has no open Job.
+// Verifies descendant membership fails closed when a managed state has no open Job.
 func TestWindowsSupervisor_TrackDescendantWithoutJob(t *testing.T) {
 	process := newWindowsScopeTestProcess(t)
 	process.supervisor.processes[process.pid] = process
@@ -185,7 +185,7 @@ func TestWindowsSupervisor_TrackDescendantWithoutJob(t *testing.T) {
 	}
 }
 
-// NAT-T-230 verifies pre-scope termination targets only the known helper process.
+// Verifies pre-scope termination targets only the known helper process.
 func TestWindowsSupervisor_TerminateBeforeScopeKillsHelper(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "__native-fixture", "hold")
 	if err := cmd.Start(); err != nil {
@@ -270,7 +270,7 @@ func TestWindowsSupervisor_TerminateConvergedJobReleasesOwnedResources(t *testin
 	}
 }
 
-// NAT-T-235 verifies the public process exposes its helper pid and managed standard streams.
+// Verifies the public process exposes its helper pid and managed standard streams.
 func TestWindowsSupervisor_ManagedProcessHelperFields(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -296,7 +296,7 @@ func TestWindowsSupervisor_ManagedProcessHelperFields(t *testing.T) {
 	}
 }
 
-// NAT-T-240 verifies a helper that survives the kill deadline cannot be reported as terminated.
+// Verifies a helper that survives the kill deadline cannot be reported as terminated.
 func TestWindowsSupervisor_SurvivingHelperIsNotConverged(t *testing.T) {
 	err := terminateWindowsProcessWithAPI(context.Background(), 42, 10*time.Millisecond, survivingWindowsProcessAPI{})
 	if err == nil || !strings.Contains(err.Error(), "could not be terminated") {
@@ -304,7 +304,7 @@ func TestWindowsSupervisor_SurvivingHelperIsNotConverged(t *testing.T) {
 	}
 }
 
-// NAT-T-236,241 verify malformed or failed helper reports use the documented empty/fallback exit result.
+// Verify malformed or failed helper reports use the documented empty/fallback exit result.
 func TestWindowsSupervisor_ExitFallbackWithoutValidReport(t *testing.T) {
 	process := newWindowsScopeTestProcess(t)
 	process.helperCode = 0

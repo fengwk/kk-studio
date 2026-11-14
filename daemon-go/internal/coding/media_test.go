@@ -2,7 +2,6 @@ package coding
 
 import "testing"
 
-// COD-F-004, COD-F-006
 func TestDetectImageTypeUsesSupportedMagicBytes(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -26,7 +25,6 @@ func TestDetectImageTypeUsesSupportedMagicBytes(t *testing.T) {
 	}
 }
 
-// COD-F-005
 func TestDetectMediaTypeHeaderRules(t *testing.T) {
 	for _, test := range []struct {
 		name string

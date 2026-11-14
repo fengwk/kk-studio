@@ -22,7 +22,7 @@ func TestOperationsRejectBusyUpdate(t *testing.T) {
 	}
 }
 
-// RUN-T-128 replays an active command and holds admission until a terminal failure.
+// Replays an active command and holds admission until a terminal failure.
 func TestOperationsReplayActiveAndPreparedReceipts(t *testing.T) {
 	operations := NewOperations()
 	command := Command{OperationID: "op-1", TargetVersion: "2.0.0"}
@@ -57,7 +57,7 @@ func TestOperationsFailPreparedActiveUpdate(t *testing.T) {
 	}
 }
 
-// RUN-T-128 protects operation IDs from argument drift and rejects a second target while active.
+// Protects operation IDs from argument drift and rejects a second target while active.
 func TestOperationsRejectDriftAndConcurrentTarget(t *testing.T) {
 	operations := NewOperations()
 	first := Command{OperationID: "op-1", TargetVersion: "2.0.0"}
@@ -71,7 +71,7 @@ func TestOperationsRejectDriftAndConcurrentTarget(t *testing.T) {
 	}
 }
 
-// RUN-T-131 caches at most eight receipts, evicting the oldest insertion.
+// Caches at most eight receipts, evicting the oldest insertion.
 func TestOperationsBoundReceiptCache(t *testing.T) {
 	operations := NewOperations()
 	for index := 0; index < 9; index++ {
@@ -91,7 +91,7 @@ func TestOperationsBoundReceiptCache(t *testing.T) {
 	}
 }
 
-// RUN-T-132 redelivers the active operation before completed cached receipts.
+// Redelivers the active operation before completed cached receipts.
 func TestOperationsResendActiveBeforeCached(t *testing.T) {
 	operations := NewOperations()
 	_, _ = operations.Decide(Command{OperationID: "op-1", TargetVersion: "2.0.0"}, "1.0.0", true, "")
@@ -143,7 +143,7 @@ func TestOperationsCompleteRejectsUnknownPhaseAndAbsentOperation(t *testing.T) {
 	}
 }
 
-// RUN-T-129 returns command drift errors for cached results as well as active work.
+// Returns command drift errors for cached results as well as active work.
 func TestOperationsRejectCachedArgumentDrift(t *testing.T) {
 	operations := NewOperations()
 	command := Command{OperationID: "op-1", TargetVersion: "2.0.0"}

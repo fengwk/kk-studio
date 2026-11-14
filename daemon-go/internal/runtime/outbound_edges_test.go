@@ -11,7 +11,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// RUN-T-119 verifies invocation and control frames require binding, while UPDATE_RESULT additionally requires READY.
+// Verifies invocation and control frames require binding, while UPDATE_RESULT additionally requires READY.
 func TestRuntimeOutboundFrameReadinessClasses(t *testing.T) {
 	connection := newTestConnection()
 	runtime, err := NewRuntime(RuntimeOptions{
@@ -75,7 +75,7 @@ func TestRuntimeOutboundFrameReadinessClasses(t *testing.T) {
 	}
 }
 
-// RUN-T-106 limits pre-READY recovery to real in-flight calls while still accepting cancellation of those calls.
+// Limits pre-READY recovery to real in-flight calls while still accepting cancellation of those calls.
 func TestRuntimeHandlesInFlightCancelAndRecoverBeforeReady(t *testing.T) {
 	connection := newTestConnection()
 	runtime, err := NewRuntime(RuntimeOptions{

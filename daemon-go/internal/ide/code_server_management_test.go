@@ -12,7 +12,7 @@ import (
 	"testing"
 )
 
-// IDE-F-009 verifies authenticated management operations preserve epoch and workspace fencing.
+// Verifies authenticated management operations preserve epoch and workspace fencing.
 func TestCodeServerViewManagementAPI(t *testing.T) {
 	const viewID = "11111111-1111-4111-8111-111111111111"
 	const workspace = "/private/workspaces/view.code-workspace"
@@ -93,7 +93,7 @@ func TestCodeServerViewManagementAPI(t *testing.T) {
 	}
 }
 
-// IDE-F-009 verifies malformed, oversized, cancelled, and unavailable management responses fail safely.
+// Verifies malformed, oversized, cancelled, and unavailable management responses fail safely.
 func TestCodeServerManagementFailurePaths(t *testing.T) {
 	const viewID = "11111111-1111-4111-8111-111111111111"
 	mux := http.NewServeMux()
@@ -145,7 +145,7 @@ func TestCodeServerManagementFailurePaths(t *testing.T) {
 	}
 }
 
-// IDE-F-009 verifies malformed authenticated management payloads are rejected by every response decoder.
+// Verifies malformed authenticated management payloads are rejected by every response decoder.
 func TestManagementResponsesRejectInvalidShapes(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if request.URL.Path == managementBase {
@@ -177,7 +177,7 @@ func TestManagementResponsesRejectInvalidShapes(t *testing.T) {
 	}
 }
 
-// IDE-T-039 verifies code-server close results require an explicit cleanup.complete boolean.
+// Verifies code-server close results require an explicit cleanup.complete boolean.
 func TestCloseViewRequiresCleanupComplete(t *testing.T) {
 	const viewID = "11111111-1111-4111-8111-111111111111"
 	validView := `"viewId":"` + viewID + `","bindingEpoch":"1","workspacePath":"/workspace","state":"CLOSED"`
@@ -214,7 +214,7 @@ func TestCloseViewRequiresCleanupComplete(t *testing.T) {
 	}
 }
 
-// IDE-F-009 verifies stable native error-code mapping and rejects malformed code fields.
+// Verifies stable native error-code mapping and rejects malformed code fields.
 func TestManagedFailureCodes(t *testing.T) {
 	cases := []struct {
 		status     int

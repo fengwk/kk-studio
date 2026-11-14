@@ -10,7 +10,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// LSP-T-015 verifies service-level client accounting and file refresh routing.
+// Verifies service-level client accounting and file refresh routing.
 func TestService_ActiveClientCount(t *testing.T) {
 	root := t.TempDir()
 	executable := filepath.Join(root, "fake-lsp")
@@ -51,7 +51,7 @@ func TestService_ActiveClientCount(t *testing.T) {
 	}
 }
 
-// LSP-T-015 covers optional callback selection and request timeout construction.
+// Covers optional callback selection and request timeout construction.
 func TestService_RequestHelpers(t *testing.T) {
 	if firstCallback(nil) != nil {
 		t.Fatal("missing callback returned a function")
@@ -77,7 +77,7 @@ func TestService_RequestHelpers(t *testing.T) {
 	}
 }
 
-// LSP-F-016 and LSP-F-024 retain stable path validation error text.
+// Retain stable path validation error text.
 func TestValidatePathErrors(t *testing.T) {
 	dir := t.TempDir()
 	missing := filepath.Join(dir, "missing")

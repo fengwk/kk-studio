@@ -8,7 +8,7 @@ import (
 	"golang.org/x/text/transform"
 )
 
-// COD-T-243: Encode restores every byte order mark and never substitutes characters.
+// Encode restores every byte order mark and never substitutes characters.
 func TestEncodeRestoresBOM(t *testing.T) {
 	for _, name := range bomEncodings {
 		enc := Encoding{Name: name, BOM: true, Source: SourceBOM}
@@ -38,7 +38,7 @@ func equalPrefix(data, prefix []byte) bool {
 	return true
 }
 
-// COD-T-244: unencodable text reports the character and its line.
+// Unencodable text reports the character and its line.
 func TestEncodeReportsUnrepresentableCharacter(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -60,7 +60,7 @@ func TestEncodeReportsUnrepresentableCharacter(t *testing.T) {
 	}
 }
 
-// COD-T-244: invalid UTF-8 in the text is unrepresentable in every target encoding.
+// Invalid UTF-8 in the text is unrepresentable in every target encoding.
 func TestEncodeRejectsInvalidUTF8(t *testing.T) {
 	invalid := string([]byte{'a', '\n', 0xed, 0xa0, 0x80})
 	var unrepresentable *UnrepresentableError
@@ -71,7 +71,7 @@ func TestEncodeRejectsInvalidUTF8(t *testing.T) {
 	}
 }
 
-// COD-T-244: an unknown encoding name is refused instead of guessed.
+// An unknown encoding name is refused instead of guessed.
 func TestEncodeRejectsUnknownEncoding(t *testing.T) {
 	var unsupported *UnsupportedLabelError
 	if _, err := Encode("x", Encoding{Name: "klingon"}); !errors.As(err, &unsupported) || unsupported.Label != "klingon" {
@@ -79,7 +79,7 @@ func TestEncodeRejectsUnknownEncoding(t *testing.T) {
 	}
 }
 
-// COD-T-243: UTF-16 and UTF-32 encode surrogate pairs and wide characters exactly.
+// UTF-16 and UTF-32 encode surrogate pairs and wide characters exactly.
 func TestEncodeWideEncodings(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -100,7 +100,7 @@ func TestEncodeWideEncodings(t *testing.T) {
 	}
 }
 
-// COD-T-244: U+0080 is outside US-ASCII, so ASCII encoding rejects it instead of emitting bytes.
+// U+0080 is outside US-ASCII, so ASCII encoding rejects it instead of emitting bytes.
 func TestEncodeASCIIRejectsU0080(t *testing.T) {
 	var unrepresentable *UnrepresentableError
 	if _, err := Encode("\u0080", Encoding{Name: "US-ASCII"}); !errors.As(err, &unrepresentable) || unrepresentable.Char != 0x80 {
@@ -111,7 +111,7 @@ func TestEncodeASCIIRejectsU0080(t *testing.T) {
 	}
 }
 
-// COD-T-244: a legacy encoder that maps several characters to one byte must be refused instead
+// A legacy encoder that maps several characters to one byte must be refused instead
 // of silently changing the text.
 func TestEncodeRejectsSubstitutingLegacyEncoder(t *testing.T) {
 	var unrepresentable *UnrepresentableError

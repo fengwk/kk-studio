@@ -10,7 +10,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-T-248 verifies every in-process filesystem capability confirms its execution
+// Verifies every in-process filesystem capability confirms its execution
 // exit; without this the platform keeps the invocation's exit fact unconfirmed and
 // the Thread remains EXIT_PENDING after a completed tool turn.
 func TestFilesystemCapabilitiesConfirmExecutionExit(t *testing.T) {
@@ -43,7 +43,7 @@ func TestFilesystemCapabilitiesConfirmExecutionExit(t *testing.T) {
 	}
 }
 
-// COD-T-249 covers the successful result path, where confirmation must also run
+// Covers the successful result path, where confirmation must also run
 // only after the capability has finished producing its result.
 func TestReadCapabilityConfirmsExecutionExitAfterSuccessfulResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "read.txt")

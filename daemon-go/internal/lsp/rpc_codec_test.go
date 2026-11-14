@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// LSP-T-080 and LSP-T-081 verify banner tolerance and fragmented Content-Length framing.
+// Verify banner tolerance and fragmented Content-Length framing.
 func TestLSPCodec_ReadFramedMessages(t *testing.T) {
 	body := `{"jsonrpc":"2.0","id":1,"result":{}}`
 	wire := "banner output\ncontent-length: " + string(rune('0'+len(body)/10)) + string(rune('0'+len(body)%10)) + "\r\nContent-Type: application/vscode-jsonrpc; charset=utf-8\r\n\r\n" + body
@@ -25,7 +25,7 @@ func TestLSPCodec_ReadFramedMessages(t *testing.T) {
 	}
 }
 
-// LSP-T-080 through LSP-T-082 validate malformed headers, bodies, and write failures.
+// Validate malformed headers, bodies, and write failures.
 func TestLSPCodec_RejectsOversizedMessageBeforeReadingBody(t *testing.T) {
 	declaredLength := maxMessageBytes + 1
 	wire := "Content-Length: " + strconv.Itoa(declaredLength) + "\r\n\r\n"
@@ -91,7 +91,7 @@ func (w *secondWriteFails) Write(data []byte) (int, error) {
 	return len(data), nil
 }
 
-// LSP-T-082 verifies that excessive bytes before the first protocol header fail closed.
+// Verifies that excessive bytes before the first protocol header fail closed.
 func TestLSPCodec_BoundedBanner(t *testing.T) {
 	codec := newLSPCodec()
 	var value any

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// LSP-F-028 verifies timeout errors retain their concrete type, LspError ancestry, and context cause.
+// Verifies timeout errors retain their concrete type, LspError ancestry, and context cause.
 func TestErrors_TimeoutIsLspError(t *testing.T) {
 	err := newLspTimeoutError("Operation timed out", context.DeadlineExceeded)
 	var timeout *LspTimeoutError
@@ -19,7 +19,7 @@ func TestErrors_TimeoutIsLspError(t *testing.T) {
 	}
 }
 
-// LSP-T-014 ensures arbitrary internal errors are mapped without leaking details.
+// Ensures arbitrary internal errors are mapped without leaking details.
 func TestCapabilityErrorMessage_SanitizesUnknownErrors(t *testing.T) {
 	const safe = "The capability failed while running and the underlying error is not repeated to avoid leaking details"
 	if got := capabilityErrorMessage(errors.New("private internal detail")); got != safe {

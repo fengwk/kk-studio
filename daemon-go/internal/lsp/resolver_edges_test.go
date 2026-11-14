@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// LSP-T-110 expands supported home prefixes without changing ordinary paths.
+// Expands supported home prefixes without changing ordinary paths.
 func TestResolver_ExpandHomePrefixes(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "home")
 	resolver := NewExecutableResolver(ResolverOptions{Home: home, HomeSet: true, Path: "", PathSet: true})
@@ -37,7 +37,7 @@ func TestResolver_ExpandHomePrefixes(t *testing.T) {
 	}
 }
 
-// LSP-T-111 and LSP-T-035 cover PATH empty elements and ordered POSIX search.
+// Cover PATH empty elements and ordered POSIX search.
 func TestResolver_POSIXPathSearch(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX PATH-list semantics are platform-specific")
@@ -69,7 +69,7 @@ func TestResolver_POSIXPathSearch(t *testing.T) {
 	}
 }
 
-// LSP-T-112 verifies POSIX executability checks and missing-command behavior.
+// Verifies POSIX executability checks and missing-command behavior.
 func TestResolver_POSIXExecutableBits(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX executable-bit checks are platform-specific")
@@ -101,7 +101,7 @@ func TestResolver_POSIXExecutableBits(t *testing.T) {
 	}
 }
 
-// LSP-T-113 and LSP-T-114 verify Windows PATHEXT defaults and relative command rejection.
+// Verify Windows PATHEXT defaults and relative command rejection.
 func TestResolver_WindowsPATHEXTDefaultsAndRelativePaths(t *testing.T) {
 	bin := t.TempDir()
 	bat := filepath.Join(bin, "tool.bat")

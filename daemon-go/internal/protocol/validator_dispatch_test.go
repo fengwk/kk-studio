@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// TRN-T-135 verifies each envelope payload reaches its corresponding field validator.
+// Verifies each envelope payload reaches its corresponding field validator.
 func TestValidateMessageDispatch(t *testing.T) {
 	fields := (&Envelope{}).ProtoReflect().Descriptor().Fields()
 	payload := (&Envelope{}).ProtoReflect().Descriptor().Oneofs().ByName("payload")
@@ -26,7 +26,7 @@ func TestValidateMessageDispatch(t *testing.T) {
 	}
 }
 
-// TRN-T-137 verifies invocation scope classification for every protocol message type.
+// Verifies invocation scope classification for every protocol message type.
 func TestValidateScopeMessageClassification(t *testing.T) {
 	for _, messageType := range []MessageType{
 		MessageType_SETTINGS, MessageType_READY, MessageType_HEARTBEAT, MessageType_RUNTIME_STATUS, MessageType_TEMPORARY_RESOURCE_POLICY, MessageType_UPDATE, MessageType_UPDATE_RESULT, MessageType_IDE_LEASE, MessageType_ENVIRONMENT_CONFIG,

@@ -10,7 +10,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
-// LSP-T-091 through LSP-T-094 verify launch exit and convergence error reporting.
+// Verify launch exit and convergence error reporting.
 func TestProtocol_LaunchFailureStates(t *testing.T) {
 	_, emptyErr := Launch(context.Background(), ServerConfig{ID: "empty"}, t.TempDir(), "", nil)
 	var emptyBootstrap *LspBootstrapError
@@ -40,7 +40,7 @@ func TestProtocol_LaunchFailureStates(t *testing.T) {
 	}
 }
 
-// LSP-T-095 checks initialize timeout cleanup for a server that never replies.
+// Checks initialize timeout cleanup for a server that never replies.
 func TestProtocol_InitializeTimeout(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "initialize"}
 	client, err := Launch(context.Background(), ServerConfig{ID: "slow", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
@@ -57,7 +57,7 @@ func TestProtocol_InitializeTimeout(t *testing.T) {
 	}
 }
 
-// LSP-T-096 reports a server crash only after its managed stop converges.
+// Reports a server crash only after its managed stop converges.
 func TestProtocol_Crash(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "slow/request"}
 	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
@@ -103,7 +103,7 @@ func TestProtocol_Crash(t *testing.T) {
 	}
 }
 
-// LSP-T-090 cancels a sent request without confirming process exit.
+// Cancels a sent request without confirming process exit.
 func TestProtocol_RequestCancellation(t *testing.T) {
 	supervisor := &fakeSupervisor{blockMethod: "slow/request"}
 	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
@@ -160,7 +160,7 @@ func waitForFakeRequest(t *testing.T, process *fakeProcess, want string) {
 	}
 }
 
-// LSP-T-076 and LSP-T-089 redact server details but mark a response as completed.
+// Redact server details but mark a response as completed.
 func TestProtocol_ServerErrorCompletesRequest(t *testing.T) {
 	supervisor := &fakeSupervisor{errorMethod: "test/error"}
 	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)
@@ -180,7 +180,7 @@ func TestProtocol_ServerErrorCompletesRequest(t *testing.T) {
 	}
 }
 
-// LSP-T-094 retains both the early-exit launch failure and managed cleanup failure.
+// Retains both the early-exit launch failure and managed cleanup failure.
 func TestProtocol_LaunchWaitFailure(t *testing.T) {
 	waitErr := errors.New("supervisor wait failed")
 	supervisor := &fakeSupervisor{waitErr: waitErr}
@@ -206,7 +206,7 @@ func TestProtocol_LaunchCleanupFailure(t *testing.T) {
 	}
 }
 
-// LSP-T-108 rejects already-cancelled and already-expired requests before sending JSON-RPC.
+// Rejects already-cancelled and already-expired requests before sending JSON-RPC.
 func TestProtocol_PreAbortedRequest(t *testing.T) {
 	client, err := Launch(context.Background(), ServerConfig{ID: "fake", Command: []string{"fake"}}, t.TempDir(), "/fake", &fakeSupervisor{})
 	if err != nil {
@@ -234,7 +234,7 @@ func TestProtocol_PreAbortedRequest(t *testing.T) {
 	}
 }
 
-// LSP-T-078 verifies definition and workspace-symbol requests require advertised capabilities.
+// Verifies definition and workspace-symbol requests require advertised capabilities.
 func TestProtocol_CapabilityRequired(t *testing.T) {
 	supervisor := &fakeSupervisor{}
 	client, err := Launch(context.Background(), ServerConfig{ID: "plain", Command: []string{"fake"}}, t.TempDir(), "/fake", supervisor)

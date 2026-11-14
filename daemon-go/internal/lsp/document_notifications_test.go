@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// LSP-T-014 verifies document synchronization notification payloads and ordering.
+// Verifies document synchronization notification payloads and ordering.
 func TestDocument_NotificationSequenceAndContent(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sample.go")
 	if err := os.WriteFile(path, []byte("first\n"), 0600); err != nil {

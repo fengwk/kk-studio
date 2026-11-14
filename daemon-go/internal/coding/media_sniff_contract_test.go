@@ -16,7 +16,7 @@ func mediaSample(t *testing.T, name string) []byte {
 	return data
 }
 
-// COD-T-116: the shared media fixtures are classified by their file headers.
+// The shared media fixtures are classified by their file headers.
 func TestMediaSniffPositive(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -37,7 +37,7 @@ func TestMediaSniffPositive(t *testing.T) {
 	}
 }
 
-// COD-T-117: mislabeled fixtures do not acquire a MIME type from their extension.
+// Mislabeled fixtures do not acquire a MIME type from their extension.
 func TestMediaSniffFalseExtension(t *testing.T) {
 	for _, test := range []struct {
 		name  string

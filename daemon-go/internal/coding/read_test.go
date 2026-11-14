@@ -12,7 +12,6 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
-// COD-F-002
 func TestReadTextHeaderFormatsRangeAndNewlineMetadata(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sample.txt")
 	if err := os.WriteFile(path, []byte("alpha\nbeta\ngamma\n"), 0600); err != nil {
@@ -33,7 +32,6 @@ func TestReadTextHeaderFormatsRangeAndNewlineMetadata(t *testing.T) {
 	}
 }
 
-// COD-T-021
 func TestReadWindowArgumentsAreValidatedBeforeFilesystemAccess(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing.txt")
 	arguments, err := json.Marshal(map[string]any{"path": path, "offset": 0})
@@ -47,7 +45,7 @@ func TestReadWindowArgumentsAreValidatedBeforeFilesystemAccess(t *testing.T) {
 	}
 }
 
-// COD-F-002 COD-T-246 COD-T-247: fs.read must not decode invalid bytes outside the requested first window.
+// Fs.read must not decode invalid bytes outside the requested first window.
 func TestReadCapabilityUsesBoundedTextWindow(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "large.txt")
 	data := append([]byte("first\n"), bytes.Repeat([]byte("later\n"), 100_000)...)
@@ -66,7 +64,7 @@ func TestReadCapabilityUsesBoundedTextWindow(t *testing.T) {
 	}
 }
 
-// COD-F-001: the maximum offset is accepted, larger offsets are rejected, and omitted limit uses 2000.
+// The maximum offset is accepted, larger offsets are rejected, and omitted limit uses 2000.
 func TestReadCapabilityOffsetBoundsAndDefaultLimit(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lines.txt")
 	if err := os.WriteFile(path, []byte(strings.Repeat("line\n", MaxReadLimit+1)), 0o600); err != nil {
@@ -93,7 +91,7 @@ func TestReadCapabilityOffsetBoundsAndDefaultLimit(t *testing.T) {
 	}
 }
 
-// COD-F-019: reading through a symlink resolves the reported path and LSP hook to the real file.
+// Reading through a symlink resolves the reported path and LSP hook to the real file.
 func TestReadCapabilityUsesResolvedExistingPath(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.txt")
@@ -122,7 +120,7 @@ func TestReadCapabilityUsesResolvedExistingPath(t *testing.T) {
 	}
 }
 
-// COD-F-002: cancellation is honored before stat or opening the requested path.
+// Cancellation is honored before stat or opening the requested path.
 func TestReadCapabilityChecksCancellationBeforeFilesystemAccess(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

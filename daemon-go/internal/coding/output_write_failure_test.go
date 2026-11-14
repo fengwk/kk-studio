@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// COD-T-120: a real /dev/full write failure must never publish a complete output.
+// A real /dev/full write failure must never publish a complete output.
 func TestOutputWriteFailure(t *testing.T) {
 	device, err := os.OpenFile("/dev/full", os.O_WRONLY, 0)
 	if errors.Is(err, os.ErrNotExist) || errors.Is(err, os.ErrPermission) {

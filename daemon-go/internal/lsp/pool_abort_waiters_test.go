@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// LSP-T-049 confirms cancelled and timed-out waiters only after the shared boot cleanup succeeds.
+// Confirms cancelled and timed-out waiters only after the shared boot cleanup succeeds.
 func TestPool_AbortWaitersConverge(t *testing.T) {
 	pool, supervisor, file := testPool(t, PoolOptions{IdleTimeout: time.Hour, ShutdownGrace: 5 * time.Millisecond})
 	supervisor.startEntered = make(chan struct{}, 1)

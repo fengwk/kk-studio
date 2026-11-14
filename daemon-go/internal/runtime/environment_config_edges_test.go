@@ -11,7 +11,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// RUN-T-189/194 validates bootstrap cache ordering and empty/missing configuration boundaries.
+// Validates bootstrap cache ordering and empty/missing configuration boundaries.
 func TestEnvironmentConfigConstructorAndSubmitEdges(t *testing.T) {
 	initial := initialRuntimeConfig()
 	if _, err := NewEnvironmentConfigRuntime(EnvironmentConfigOptions{Initial: initial}); err == nil {
@@ -37,7 +37,7 @@ func TestEnvironmentConfigConstructorAndSubmitEdges(t *testing.T) {
 	manager.Close()
 }
 
-// RUN-T-150/152 verifies candidate failure reports, retirement, and cleanup convergence.
+// Verifies candidate failure reports, retirement, and cleanup convergence.
 func TestEnvironmentConfigHooksAndCleanupErrors(t *testing.T) {
 	initial := initialRuntimeConfig()
 	prepareErr := errors.New("resource preparation failed")
@@ -96,7 +96,7 @@ func TestEnvironmentConfigHooksAndCleanupErrors(t *testing.T) {
 	}
 }
 
-// RUN-T-196 reports publish/retire failures and does not acknowledge a rejected resource generation.
+// Reports publish/retire failures and does not acknowledge a rejected resource generation.
 func TestEnvironmentConfigPublishAndRetireFailures(t *testing.T) {
 	initial := initialRuntimeConfig()
 	publishErr := errors.New("publish failed")
@@ -128,7 +128,7 @@ func TestEnvironmentConfigPublishAndRetireFailures(t *testing.T) {
 	manager.Close()
 }
 
-// RUN-T-123 surfaces status revision exhaustion instead of publishing a false configuration status.
+// Surfaces status revision exhaustion instead of publishing a false configuration status.
 func TestEnvironmentConfigReportsStatusRevisionExhaustion(t *testing.T) {
 	initial := initialRuntimeConfig()
 	status := NewStatusTracker()
@@ -156,7 +156,7 @@ func TestEnvironmentConfigReportsStatusRevisionExhaustion(t *testing.T) {
 	manager.Close()
 }
 
-// RUN-T-121 preserves a previous immutable snapshot when a new candidate is applied.
+// Preserves a previous immutable snapshot when a new candidate is applied.
 func TestEnvironmentConfigPreparationReceivesPreviousSnapshot(t *testing.T) {
 	initial := initialRuntimeConfig()
 	preparer := &testConfigurationPreparer{}

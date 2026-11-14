@@ -19,7 +19,7 @@ func encodeFixture(t *testing.T, text string, enc Encoding) []byte {
 	return data
 }
 
-// COD-T-220…224: every byte order mark is decoded, and a UTF-32LE mark wins over UTF-16LE.
+// Every byte order mark is decoded, and a UTF-32LE mark wins over UTF-16LE.
 func TestDecodeReadsEveryByteOrderMark(t *testing.T) {
 	text := "a中😀\n"
 	for _, name := range bomEncodings {
@@ -42,7 +42,7 @@ func TestDecodeReadsEveryByteOrderMark(t *testing.T) {
 	}
 }
 
-// COD-T-220: a byte order mark that is not followed by a valid sequence is undecodable.
+// A byte order mark that is not followed by a valid sequence is undecodable.
 func TestDecodeRejectsUndecodableBytesAfterBOM(t *testing.T) {
 	for _, test := range []struct {
 		name   string
@@ -70,7 +70,7 @@ func TestDecodeRejectsUndecodableBytesAfterBOM(t *testing.T) {
 	}
 }
 
-// COD-T-228…231: only NUL is binary, and the UTF-16/UTF-32 window counts decoded characters.
+// Only NUL is binary, and the UTF-16/UTF-32 window counts decoded characters.
 func TestDecodeBinaryRule(t *testing.T) {
 	if _, _, err := Decode("/repo/controls.txt", []byte("a\tb\r\n\f\x1b\x01\x1f")); err != nil {
 		t.Fatalf("control characters are text: %v", err)
@@ -97,7 +97,7 @@ func TestDecodeBinaryRule(t *testing.T) {
 	}
 }
 
-// COD-T-227: UTF-8 without a declaration is returned unchanged and aliases the input.
+// UTF-8 without a declaration is returned unchanged and aliases the input.
 func TestDecodeAliasesUTF8Input(t *testing.T) {
 	data := []byte("plain UTF-8\n")
 	decoded, enc, err := Decode("/repo/note.txt", data)
@@ -109,7 +109,7 @@ func TestDecodeAliasesUTF8Input(t *testing.T) {
 	}
 }
 
-// COD-T-232: undeclared bytes that are not UTF-8 are reported as an unknown encoding.
+// Undeclared bytes that are not UTF-8 are reported as an unknown encoding.
 func TestDecodeReportsUnknownEncoding(t *testing.T) {
 	var unknown *UnknownEncodingError
 	// "中文" in GBK holds bytes that are not valid UTF-8.
@@ -118,7 +118,7 @@ func TestDecodeReportsUnknownEncoding(t *testing.T) {
 	}
 }
 
-// COD-T-242: an empty document and a second byte order mark are ordinary text.
+// An empty document and a second byte order mark are ordinary text.
 func TestDecodeEmptyAndDoubleBOM(t *testing.T) {
 	decoded, enc, err := Decode("/repo/empty.txt", nil)
 	if err != nil || len(decoded) != 0 || enc.Name != "UTF-8" {
@@ -130,7 +130,7 @@ func TestDecodeEmptyAndDoubleBOM(t *testing.T) {
 	}
 }
 
-// COD-T-239: the lossy offset points at the first byte the declared encoding cannot reproduce,
+// The lossy offset points at the first byte the declared encoding cannot reproduce,
 // even after valid mixed ASCII and two-byte text.
 func TestDecodeReportsLossyOffsetAfterValidLegacyText(t *testing.T) {
 	declaration := []byte(`<?xml encoding="gbk"?>`)

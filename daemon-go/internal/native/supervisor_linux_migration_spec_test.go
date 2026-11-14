@@ -8,7 +8,7 @@ import (
 	"testing"
 )
 
-// NAT-T-154 verifies a failed prctl prevents Linux supervisor construction.
+// Verifies a failed prctl prevents Linux supervisor construction.
 func TestLinuxSubreaper_PrctlFailure(t *testing.T) {
 	injected := errors.New("injected prctl failure")
 	called := false
@@ -21,7 +21,7 @@ func TestLinuxSubreaper_PrctlFailure(t *testing.T) {
 	}
 }
 
-// NAT-T-155 verifies supervisor startup propagates subreaper failure with context.
+// Verifies supervisor startup propagates subreaper failure with context.
 func TestLinuxSupervisor_SubreaperFailure(t *testing.T) {
 	injected := errors.New("injected subreaper failure")
 	supervisor, err := newPOSIXSupervisor(func() error { return injected })

@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// LSP-F-014 verifies content-based document versions and language identifiers.
+// Verifies content-based document versions and language identifiers.
 func TestDocumentSyncVersionsAndLanguageID(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sample.unknown")
 	if err := os.WriteFile(path, []byte("first\n"), 0600); err != nil {
@@ -66,7 +66,7 @@ func TestDocumentSyncVersionsAndLanguageID(t *testing.T) {
 	client.Refresh(path)
 }
 
-// LSP-T-102 verifies an unchanged document does not emit didChange or didSave.
+// Verifies an unchanged document does not emit didChange or didSave.
 func TestDocument_UnchangedContentSendsNoNotifications(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "sample.go")
 	if err := os.WriteFile(path, []byte("package source\n"), 0600); err != nil {
@@ -101,7 +101,7 @@ func TestDocument_UnchangedContentSendsNoNotifications(t *testing.T) {
 	}
 }
 
-// LSP-T-097 verifies both JDT URI and local class-file decompilation paths.
+// Verifies both JDT URI and local class-file decompilation paths.
 func TestProtocol_JavaDecompile(t *testing.T) {
 	root := t.TempDir()
 	classFile := filepath.Join(root, "Example.class")

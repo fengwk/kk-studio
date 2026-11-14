@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// COD-F-003: write surfaces the exact charset and stable CODEC error for unencodable text.
-// COD-F-003: write surfaces the exact charset and stable CODEC error for unencodable text.
+// Write surfaces the exact charset and stable CODEC error for unencodable text.
+// Write surfaces the exact charset and stable CODEC error for unencodable text.
 func TestWriteEncodingFailureIncludesCharsetAndCodecCode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid.txt")
 	_, err := Write(path, string([]byte{0xff}), nil)
@@ -24,7 +24,6 @@ func TestWriteEncodingFailureIncludesCharsetAndCodecCode(t *testing.T) {
 	}
 }
 
-// COD-F-007, COD-T-027
 func TestWriteRejectsInvalidTargetsAndCreatesNewFile(t *testing.T) {
 	root := t.TempDir()
 	if _, err := Write("relative.txt", "x", nil); err == nil || err.Error() != "path must be absolute" {
@@ -45,7 +44,6 @@ func TestWriteRejectsInvalidTargetsAndCreatesNewFile(t *testing.T) {
 	}
 }
 
-// COD-F-007
 func TestWriteAndPreviewRejectSymlinkTargets(t *testing.T) {
 	root := t.TempDir()
 	target := filepath.Join(root, "target.txt")

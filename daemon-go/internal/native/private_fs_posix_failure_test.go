@@ -12,7 +12,7 @@ type privateFileInfoWithoutStat struct{ os.FileInfo }
 
 func (privateFileInfoWithoutStat) Sys() any { return nil }
 
-// NAT-F-013 verifies POSIX private-file helpers reject unverifiable paths and metadata.
+// Verifies POSIX private-file helpers reject unverifiable paths and metadata.
 func TestPrivateFS_POSIXFailurePaths(t *testing.T) {
 	root := t.TempDir()
 	filePath := filepath.Join(root, "regular-file")

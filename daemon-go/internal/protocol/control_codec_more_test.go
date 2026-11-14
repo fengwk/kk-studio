@@ -9,7 +9,6 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// TRN-T-129
 func TestCodec_PayloadRoundtrip(t *testing.T) {
 	e := testEnvelope(MessageType_IDE_RESULT, "invocation-1", &Envelope_IdeResult{IdeResult: &IdeResult{Ok: proto.Bool(true), DirectoryListing: &IdeDirectoryListing{Path: proto.String("/"), Truncated: proto.Bool(false), Children: []*IdeDirectoryEntry{{Name: proto.String("src"), Path: proto.String("/src")}}}}})
 	data, err := proto.Marshal(e)
@@ -48,7 +47,6 @@ func readGolden(t *testing.T) ([]string, map[string][]byte) {
 	return files, data
 }
 
-// TRN-T-130
 func TestCodec_GoldenEncode(t *testing.T) {
 	files, data := readGolden(t)
 	if len(files) != 28 {
@@ -71,7 +69,6 @@ func TestCodec_GoldenEncode(t *testing.T) {
 	}
 }
 
-// TRN-T-131
 func TestCodec_GoldenFramed(t *testing.T) {
 	files, data := readGolden(t)
 	for _, name := range files {
@@ -103,7 +100,6 @@ func TestCodec_GoldenFramed(t *testing.T) {
 	}
 }
 
-// TRN-T-133
 func TestCodec_EmptyText(t *testing.T) {
 	e := testEnvelope(MessageType_COMPLETED, testInvocationID, &Envelope_Completed{Completed: &Completed{Result: &CapabilityResult{CallId: proto.String("call"), Error: proto.Bool(false), DetailsJson: proto.String(`{}`), Contents: []*Content{{Body: &Content_Text{Text: &TextContent{Text: proto.String("")}}}}}}})
 	if _, err := MarshalEnvelope(e); err != nil {
@@ -111,7 +107,6 @@ func TestCodec_EmptyText(t *testing.T) {
 	}
 }
 
-// TRN-T-150
 func TestCodec_UnicodeJSON(t *testing.T) {
 	for _, s := range []string{`{"x":"é"}`, `{"x":"😀"}`, `["ok",null]`} {
 		if err := ValidateJSON(s, JSONLimits{MaxBytes: 64}); err != nil {
@@ -125,7 +120,6 @@ func TestCodec_UnicodeJSON(t *testing.T) {
 	}
 }
 
-// TRN-T-153
 func TestCodec_UnknownProtobufFields(t *testing.T) {
 	e := testEnvelope(MessageType_ERROR, "", &Envelope_Error{Error: &Error{Message: proto.String("failure")}})
 	e.GetError().ProtoReflect().SetUnknown([]byte{0xf8, 0x07, 0x01})
@@ -138,7 +132,6 @@ func TestCodec_UnknownProtobufFields(t *testing.T) {
 	}
 }
 
-// TRN-T-154
 func TestCodec_RuntimeHelpers(t *testing.T) {
 	for _, tc := range []struct {
 		value  any

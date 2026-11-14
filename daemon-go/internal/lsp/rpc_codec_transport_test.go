@@ -10,7 +10,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// LSP-N-001 verifies oversized transport failures stop the current process and allow a clean rebuild.
+// Verifies oversized transport failures stop the current process and allow a clean rebuild.
 func TestLSPTransport_OversizedResponseTerminatesAndRebuilds(t *testing.T) {
 	root := t.TempDir()
 	executable := filepath.Join(root, "fake-lsp")

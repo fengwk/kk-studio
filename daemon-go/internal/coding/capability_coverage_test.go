@@ -21,7 +21,6 @@ func capabilityCall(t *testing.T, id string, args any) runtime.CapabilityCall {
 	return runtime.CapabilityCall{InvocationID: id, Arguments: data}
 }
 
-// COD-N-001
 func TestFormatMiBUsesEnoughPrecisionToDistinguishLimit(t *testing.T) {
 	for _, test := range []struct {
 		size, limit int64
@@ -37,7 +36,6 @@ func TestFormatMiBUsesEnoughPrecisionToDistinguishLimit(t *testing.T) {
 	}
 }
 
-// COD-F-014
 func TestProcessCapabilityRejectsMalformedArguments(t *testing.T) {
 	result, err := processCapability(context.Background(), runtime.CapabilityCall{InvocationID: "invalid-json", Arguments: []byte("{")}, runtime.CapabilityContext{})
 	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "invalid arguments") {
@@ -45,7 +43,6 @@ func TestProcessCapabilityRejectsMalformedArguments(t *testing.T) {
 	}
 }
 
-// COD-F-001
 func TestReadCapabilityListsDirectoryAndRejectsMissingPath(t *testing.T) {
 	root := t.TempDir()
 	if err := os.Mkdir(filepath.Join(root, "a-dir"), 0700); err != nil {
@@ -65,7 +62,6 @@ func TestReadCapabilityListsDirectoryAndRejectsMissingPath(t *testing.T) {
 	}
 }
 
-// COD-F-002
 func TestFormatTextWindowCoversOptionalHeadersAndTruncation(t *testing.T) {
 	ended := true
 	got := formatTextWindow("dir/file.txt", TextWindow{Body: "1|one", StartLine: 1, StartColumn: 1, EndLine: 1, EndColumn: 4, EndsWithNewline: &ended, Truncated: true, TruncationReason: "line_limit", NextLine: 2, NextColumn: 1})
@@ -80,7 +76,6 @@ func TestFormatTextWindowCoversOptionalHeadersAndTruncation(t *testing.T) {
 	}
 }
 
-// COD-F-010
 func TestSearchCapabilitiesRejectLimitsAndReturnEmptyMessages(t *testing.T) {
 	root := t.TempDir()
 	for _, executor := range []struct {
@@ -111,7 +106,6 @@ func TestSearchCapabilitiesRejectLimitsAndReturnEmptyMessages(t *testing.T) {
 	}
 }
 
-// COD-F-007, COD-F-014
 func TestWriteCapabilityCreatesOverwritesAndRejectsDirectories(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")
 	resolvedParent, err := filepath.EvalSymlinks(filepath.Dir(path))
@@ -144,7 +138,6 @@ func TestWriteCapabilityCreatesOverwritesAndRejectsDirectories(t *testing.T) {
 	}
 }
 
-// COD-F-008
 func TestPreviewWriteCapabilityReturnsJSONWithoutWriting(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")
 	result, err := previewWriteCapability(context.Background(), capabilityCall(t, "preview", map[string]string{"path": path, "content": "new content\n"}), runtime.CapabilityContext{})
@@ -156,7 +149,6 @@ func TestPreviewWriteCapabilityReturnsJSONWithoutWriting(t *testing.T) {
 	}
 }
 
-// COD-F-017
 func TestExecuteProcessRejectsPreflightFailures(t *testing.T) {
 	workdir := t.TempDir()
 	for _, test := range []struct {
@@ -197,7 +189,6 @@ func TestExecuteProcessRejectsPreflightFailures(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestOutputNameAndUUIDValidationEdges(t *testing.T) {
 	if got := sanitizeOutputName(""); got != "output" {
 		t.Fatalf("empty name=%q", got)

@@ -20,7 +20,7 @@ import (
 	"github.com/disintegration/imaging"
 )
 
-// COD-N-007: exactly two scaling slots can be occupied before further work must wait.
+// Exactly two scaling slots can be occupied before further work must wait.
 func TestScalingConcurrencyLimitTwo(t *testing.T) {
 	if cap(scalingSlots) != 2 {
 		t.Fatalf("scaling slot capacity=%d want=2", cap(scalingSlots))
@@ -36,7 +36,7 @@ func TestScalingConcurrencyLimitTwo(t *testing.T) {
 	}
 }
 
-// COD-N-007: a third resize waits for an occupied slot and then completes when capacity opens.
+// A third resize waits for an occupied slot and then completes when capacity opens.
 func TestScaleContextWaitsForSlot(t *testing.T) {
 	scalingSlots <- struct{}{}
 	scalingSlots <- struct{}{}
@@ -58,7 +58,6 @@ func TestScaleContextWaitsForSlot(t *testing.T) {
 	<-scalingSlots
 }
 
-// COD-N-003
 func TestTierBoxesAndNoUpscale(t *testing.T) {
 	cases := []struct {
 		name         string
@@ -99,7 +98,6 @@ func TestTierBoxesAndNoUpscale(t *testing.T) {
 	}
 }
 
-// COD-N-006
 func TestScaleContextAppliesOutputLimitOnlyToResizedImage(t *testing.T) {
 	var source bytes.Buffer
 	if err := png.Encode(&source, patternImage(2000, 1000, false)); err != nil {
@@ -154,7 +152,6 @@ func TestEXIFOrientationsMapAllEightDirections(t *testing.T) {
 	}
 }
 
-// COD-N-003, COD-N-005
 func TestScaleReadsEXIFOrientationAndResizesDimensions(t *testing.T) {
 	for orientation := 1; orientation <= 8; orientation++ {
 		data := makeJPEGQuadrants(t, orientation)
@@ -186,7 +183,6 @@ func TestScaleReadsEXIFOrientationAndResizesDimensions(t *testing.T) {
 	}
 }
 
-// COD-N-004
 func TestAnimationMetadataMatchesJavaBehavior(t *testing.T) {
 	gifData := animatedGIFHeader()
 	if animated, err := gifAnimated(gifData); err != nil || !animated {
@@ -231,7 +227,6 @@ func TestAnimationMetadataMatchesJavaBehavior(t *testing.T) {
 	}
 }
 
-// COD-N-004
 func TestDeclaredPixelBudgetRejectedBeforeDecodeAllocation(t *testing.T) {
 	data := pngWithDeclaredDimensions(t, 10_000_001, 4)
 	var before, after runtime.MemStats
@@ -254,7 +249,6 @@ func TestDeclaredPixelBudgetRejectedBeforeDecodeAllocation(t *testing.T) {
 	}
 }
 
-// COD-N-006
 func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 	photo := patternImage(1600, 1000, false)
 	var jpegBytes bytes.Buffer
@@ -300,7 +294,6 @@ func TestJPEGQualityFormatAndPNGAlpha(t *testing.T) {
 	}
 }
 
-// COD-N-003, COD-N-004
 func TestMultiFrameGIFCanPassThroughButCannotBeResized(t *testing.T) {
 	data := animatedGIF(t)
 	if _, err := ScaleContext(context.Background(), "image/gif", data, P720, 0); err == nil {
@@ -311,7 +304,7 @@ func TestMultiFrameGIFCanPassThroughButCannotBeResized(t *testing.T) {
 	}
 }
 
-// COD-N-004: a static GIF is decoded and resized to the PNG output format.
+// A static GIF is decoded and resized to the PNG output format.
 func TestStaticGIFResizesToPNG(t *testing.T) {
 	frame := image.NewPaletted(image.Rect(0, 0, 1600, 1000), color.Palette{color.Black, color.White})
 	frame.SetColorIndex(0, 0, 1)
@@ -329,7 +322,7 @@ func TestStaticGIFResizesToPNG(t *testing.T) {
 	}
 }
 
-// COD-N-004: a static WebP is decoded, resized, and encoded as PNG.
+// A static WebP is decoded, resized, and encoded as PNG.
 func TestStaticWebPResizesToPNG(t *testing.T) {
 	data, err := os.ReadFile("testdata/large-static.webp")
 	if err != nil {
@@ -345,7 +338,7 @@ func TestStaticWebPResizesToPNG(t *testing.T) {
 	}
 }
 
-// COD-N-004: WebP metadata is recognized and an original-tier image passes through unchanged.
+// WebP metadata is recognized and an original-tier image passes through unchanged.
 func TestWebPOriginalPassThrough(t *testing.T) {
 	data, err := os.ReadFile("testdata/animated-2000x1000.webp")
 	if err != nil {

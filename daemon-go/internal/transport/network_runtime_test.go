@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// TRN-T-101, TRN-T-102 verify shutdown cancels active exchanges and waits for their scope to leave.
+// Verify shutdown cancels active exchanges and waits for their scope to leave.
 func TestNetworkRuntime_CloseCancelsActiveExchange(t *testing.T) {
 	started := make(chan struct{})
 	cancelled := make(chan struct{})
@@ -49,7 +49,7 @@ func TestNetworkRuntime_CloseCancelsActiveExchange(t *testing.T) {
 	}
 }
 
-// TRN-T-097, TRN-T-098 verify retirement drains admitted work and rejects work after the boundary.
+// Verify retirement drains admitted work and rejects work after the boundary.
 func TestNetworkRuntime_RetireWhenIdle(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, "ok") }))
 	defer server.Close()

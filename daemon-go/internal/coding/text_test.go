@@ -8,7 +8,6 @@ import (
 	"unicode/utf8"
 )
 
-// COD-T-222
 func TestTextUTF16RoundTrip(t *testing.T) {
 	for _, tc := range []struct {
 		charset string
@@ -26,7 +25,6 @@ func TestTextUTF16RoundTrip(t *testing.T) {
 	}
 }
 
-// COD-T-220
 func TestTextRejectsNULAndMalformedUTF8(t *testing.T) {
 	for _, data := range [][]byte{{'a', 0, 'b'}, {0xff}} {
 		if _, _, err := decodeFixture(data); err == nil {
@@ -35,7 +33,6 @@ func TestTextRejectsNULAndMalformedUTF8(t *testing.T) {
 	}
 }
 
-// COD-T-246
 func TestReadWindowStopsAtLineLimit(t *testing.T) {
 	text := strings.Repeat("line\n", 220) + string([]byte{0xff})
 	window, err := readTextWindow(text, WindowOptions{Offset: 1, Limit: 200})
@@ -44,7 +41,7 @@ func TestReadWindowStopsAtLineLimit(t *testing.T) {
 	}
 }
 
-// COD-T-246 COD-T-247: a bounded reader proves the first window neither consumes the file nor decodes invalid bytes beyond it.
+// A bounded reader proves the first window neither consumes the file nor decodes invalid bytes beyond it.
 func TestReadTextWindowReaderStopsAfterFirstWindowAndOnlyReportsEOFMetadataAtEOF(t *testing.T) {
 	data := append([]byte("first\n"), 0xff)
 	data = append(data, bytes.Repeat([]byte("later line\n"), 100_000)...)
@@ -77,7 +74,7 @@ func (r *countingReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// COD-T-053 COD-T-054: window reads must honor UTF-16 BOMs and reject malformed units inside the window.
+// Window reads must honor UTF-16 BOMs and reject malformed units inside the window.
 func TestReadTextWindowReaderHandlesUTF16AndRejectsMalformedUnits(t *testing.T) {
 	for _, charset := range []string{"UTF-16LE", "UTF-16BE"} {
 		encoded, err := encodeFixture("first\nsecond", charset, 2)
@@ -95,7 +92,7 @@ func TestReadTextWindowReaderHandlesUTF16AndRejectsMalformedUnits(t *testing.T) 
 	}
 }
 
-// COD-F-002 COD-T-246: the character budget counts Unicode code points and stops before later invalid bytes.
+// The character budget counts Unicode code points and stops before later invalid bytes.
 func TestReadTextWindowReaderStopsAtCodePointBudget(t *testing.T) {
 	data := append([]byte(strings.Repeat("🌍", MaxReadCodePoints)), 0xff)
 	window, err := ReadTextWindowReader(bytes.NewReader(data), WindowOptions{Offset: 1, Limit: 1})
@@ -110,7 +107,7 @@ func TestReadTextWindowReaderStopsAtCodePointBudget(t *testing.T) {
 	}
 }
 
-// COD-T-021 COD-T-053 COD-T-054: reader preflight, BOM, malformed encoding, and empty-range behavior remain strict.
+// Reader preflight, BOM, malformed encoding, and empty-range behavior remain strict.
 func TestReadTextWindowReaderValidatesRangesAndEncoding(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
@@ -165,7 +162,7 @@ type errorReader struct{}
 
 func (errorReader) Read([]byte) (int, error) { return 0, errors.New("read failed") }
 
-// COD-T-246: an additional blank line after a full character budget is still a truncated window.
+// An additional blank line after a full character budget is still a truncated window.
 func TestReadTextWindowReaderCharacterBudgetTakesPrecedenceAtLineBoundary(t *testing.T) {
 	text := strings.Repeat("x", MaxReadCodePoints) + "\n\n"
 	window, err := ReadTextWindowReader(strings.NewReader(text), WindowOptions{Offset: 1, Limit: 1})
@@ -174,7 +171,6 @@ func TestReadTextWindowReaderCharacterBudgetTakesPrecedenceAtLineBoundary(t *tes
 	}
 }
 
-// COD-T-022
 func TestReadWindowColumnOffsetUsesOneBasedColumnsAndCRSeparators(t *testing.T) {
 	window, err := readTextWindow("abcdef\rnext\r\n", WindowOptions{Offset: 1, Limit: 1, ColumnOffset: 3})
 	if err != nil {
@@ -185,7 +181,6 @@ func TestReadWindowColumnOffsetUsesOneBasedColumnsAndCRSeparators(t *testing.T) 
 	}
 }
 
-// COD-F-002
 func TestReadWindowEmptyRangeForEmptyFile(t *testing.T) {
 	window, err := readTextWindow("", WindowOptions{Offset: 1, Limit: 10})
 	if err != nil || !window.Empty || window.Body != "" || window.EndsWithNewline == nil || *window.EndsWithNewline {

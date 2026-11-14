@@ -20,7 +20,7 @@ func (c closeErrorConn) Close() error {
 	return c.err
 }
 
-// LSP-T-100 and LSP-T-101 ensure disposal failure does not skip termination and both failures aggregate.
+// Ensure disposal failure does not skip termination and both failures aggregate.
 func TestClient_StopAggregatesDisposalAndTerminationFailures(t *testing.T) {
 	left, right := net.Pipe()
 	disposeErr := errors.New("connection close failed")

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// RUN-T-121 checks revision changes only when status content changes and progress remains monotonic.
+// Checks revision changes only when status content changes and progress remains monotonic.
 func TestStatusRevisionAndProgress(t *testing.T) {
 	s := NewStatusTracker()
 	a, err := s.Update(map[string]any{"state": "ready"})
@@ -42,7 +42,7 @@ func TestStatusRevisionAndProgress(t *testing.T) {
 	}
 }
 
-// RUN-T-019 keeps the last applied configuration visible through failure and clears the error on repair.
+// Keeps the last applied configuration visible through failure and clears the error on repair.
 func TestStatusConfigurationFailurePreservesAppliedState(t *testing.T) {
 	s := NewStatusTracker()
 	if err := s.ApplyConfiguration(1, nil); err != nil {
@@ -67,7 +67,7 @@ func TestStatusConfigurationFailurePreservesAppliedState(t *testing.T) {
 	}
 }
 
-// RUN-T-122/123 exercises invalid progress, duplicate transitions, immutable snapshots, and revision exhaustion.
+// Exercises invalid progress, duplicate transitions, immutable snapshots, and revision exhaustion.
 func TestStatusRejectsInvalidProgressAndRevisionOverflow(t *testing.T) {
 	s := NewStatusTracker()
 	if err := s.UpdateProgress(UpdateProgress{}); err == nil || err.Error() != "no update is active" {

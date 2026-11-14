@@ -19,7 +19,6 @@ func testEnvelope(kind MessageType, invocation string, payload isEnvelope_Payloa
 	return e
 }
 
-// TRN-T-135
 func TestCodec_NilPayloadRejected(t *testing.T) {
 	e := testEnvelope(MessageType_SETTINGS, "", &Envelope_Settings{})
 	if _, err := MarshalEnvelope(e); err == nil {
@@ -27,14 +26,12 @@ func TestCodec_NilPayloadRejected(t *testing.T) {
 	}
 }
 
-// TRN-T-128
 func TestCodec_ProtocolV4(t *testing.T) {
 	if ControlProtocolVersion != 4 {
 		t.Fatalf("version=%d", ControlProtocolVersion)
 	}
 }
 
-// TRN-T-132
 func TestCodec_OpaqueJSON(t *testing.T) {
 	text := ` { "b" : 2, "a":1 } `
 	e := testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{CapabilityId: proto.String("fs.read"), ArgumentsJson: &text, TimeoutMillis: proto.Int64(0)}})
@@ -51,7 +48,6 @@ func TestCodec_OpaqueJSON(t *testing.T) {
 	}
 }
 
-// TRN-T-134
 func TestCodec_UnknownProtobuf(t *testing.T) {
 	e := testEnvelope(MessageType_ERROR, "", &Envelope_Error{Error: &Error{Message: proto.String("failure")}})
 	data, err := proto.Marshal(e)
@@ -97,7 +93,6 @@ func TestCodec_UnknownProtobuf(t *testing.T) {
 	}
 }
 
-// TRN-T-135
 func TestCodec_JSONRequired(t *testing.T) {
 	bad := testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{CapabilityId: proto.String("fs.read"), ArgumentsJson: proto.String(""), TimeoutMillis: proto.Int64(0)}})
 	if _, err := MarshalEnvelope(bad); err == nil {
@@ -109,7 +104,6 @@ func TestCodec_JSONRequired(t *testing.T) {
 	}
 }
 
-// TRN-T-137
 func TestCodec_ScopeMismatch(t *testing.T) {
 	valid := testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{CapabilityId: proto.String("fs.read"), ArgumentsJson: proto.String(`{}`), TimeoutMillis: proto.Int64(0)}})
 	if _, err := MarshalEnvelope(valid); err != nil {
@@ -126,7 +120,6 @@ func TestCodec_ScopeMismatch(t *testing.T) {
 	}
 }
 
-// TRN-T-139
 func TestCodec_Settings(t *testing.T) {
 	e := testEnvelope(MessageType_SETTINGS, "", &Envelope_Settings{Settings: &Settings{ResourceBudgets: &ResourceBudgets{TemporaryResourceTtlSeconds: proto.Int64(1), TemporaryResourceCleanupIntervalSeconds: proto.Int64(1)}}})
 	if _, err := MarshalEnvelope(e); err != nil {
@@ -140,7 +133,6 @@ func TestCodec_Settings(t *testing.T) {
 	}
 }
 
-// TRN-N-001
 func TestCodec_InvokeOutputBudget(t *testing.T) {
 	makeEnvelope := func(limit *int64) *Envelope {
 		return testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{CapabilityId: proto.String("fs.read"), ArgumentsJson: proto.String(`{}`), TimeoutMillis: proto.Int64(0), MaxOutputBytes: limit}})
@@ -157,7 +149,6 @@ func TestCodec_InvokeOutputBudget(t *testing.T) {
 	}
 }
 
-// TRN-T-140
 func TestCodec_EnvironmentConfig(t *testing.T) {
 	e := testEnvelope(MessageType_ENVIRONMENT_CONFIG, "", &Envelope_EnvironmentConfig{EnvironmentConfig: &EnvironmentConfig{Version: proto.Int64(0), Config: &DaemonConfiguration{StudioUrl: "https://studio.example"}}})
 	if _, err := MarshalEnvelope(e); err != nil {
@@ -179,7 +170,6 @@ func TestCodec_EnvironmentConfig(t *testing.T) {
 	}
 }
 
-// TRN-T-142
 func TestCodec_Ready(t *testing.T) {
 	e := testEnvelope(MessageType_READY, "", &Envelope_Ready{Ready: &Ready{DaemonVersion: proto.String("1.0.0"), HostInfo: &HostInfo{OperatingSystem: OperatingSystem_LINUX, Architecture: Architecture_AMD64}, RuntimeStatus: &RuntimeSnapshot{Revision: proto.Int64(1), Status: &RuntimeBody{DaemonVersion: proto.String("1.0.0"), Configuration: &ConfigurationStatus{AppliedVersion: proto.Int64(0)}}}}})
 	if _, err := MarshalEnvelope(e); err != nil {
@@ -191,7 +181,6 @@ func TestCodec_Ready(t *testing.T) {
 	}
 }
 
-// TRN-T-143
 func TestCodec_HeartbeatRuntimeStatus(t *testing.T) {
 	e := testEnvelope(MessageType_HEARTBEAT, "", &Envelope_Heartbeat{Heartbeat: &Heartbeat{RuntimeStatus: &RuntimeSnapshot{Revision: proto.Int64(1), Status: &RuntimeBody{DaemonVersion: proto.String("1.0.0")}}}})
 	if _, err := MarshalEnvelope(e); err != nil {
@@ -203,7 +192,6 @@ func TestCodec_HeartbeatRuntimeStatus(t *testing.T) {
 	}
 }
 
-// TRN-T-144
 func TestCodec_InvokeStarted(t *testing.T) {
 	valid := testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{CapabilityId: proto.String("fs.read"), ArgumentsJson: proto.String(`{"x":1}`), TimeoutMillis: proto.Int64(0)}})
 	if _, err := MarshalEnvelope(valid); err != nil {
@@ -215,7 +203,6 @@ func TestCodec_InvokeStarted(t *testing.T) {
 	}
 }
 
-// TRN-T-146
 func TestCodec_Upload(t *testing.T) {
 	e := testEnvelope(MessageType_RESOURCE_UPLOAD_REQUEST, testInvocationID, &Envelope_ResourceUploadRequest{ResourceUploadRequest: &ResourceUploadRequest{TransferId: proto.String(testEnvironmentID), MediaType: proto.String("application/zip"), Name: proto.String("skill.zip"), Size: proto.Int64(1), Sha256: proto.String(testSHA256)}})
 	if _, err := MarshalEnvelope(e); err != nil {
@@ -228,7 +215,6 @@ func TestCodec_Upload(t *testing.T) {
 	}
 }
 
-// TRN-T-156
 func TestCodec_MaxMessage(t *testing.T) {
 	payload := bytes.Repeat([]byte{1}, MaxFrameSize)
 	if _, err := EncodeFrame(payload); err != nil {
@@ -239,7 +225,6 @@ func TestCodec_MaxMessage(t *testing.T) {
 	}
 }
 
-// TRN-T-157
 func TestCodec_BigEndianPrefix(t *testing.T) {
 	frame, err := EncodeFrame([]byte{0xaa, 0xbb})
 	if err != nil {

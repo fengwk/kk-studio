@@ -40,7 +40,6 @@ func lockHelperReleaseFailureFixture(args []string) int {
 	})
 }
 
-// NAT-T-013, NAT-T-014
 func TestLockCommand_HoldUntilStdinEOF(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -76,7 +75,7 @@ func TestLockCommand_HoldUntilStdinEOF(t *testing.T) {
 	}
 }
 
-// NAT-T-014 verifies hold reports the prescribed busy status and message.
+// Verifies hold reports the prescribed busy status and message.
 func TestLockCommand_HoldBusy(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -96,7 +95,7 @@ func TestLockCommand_HoldBusy(t *testing.T) {
 	}
 }
 
-// NAT-T-016..018 verify wait success, timeout, and lock inspection failure are distinct.
+// Verify wait success, timeout, and lock inspection failure are distinct.
 func TestLockCommand_WaitResults(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {
@@ -137,8 +136,8 @@ func TestLockCommand_WaitResults(t *testing.T) {
 	}
 }
 
-// NAT-T-019 verifies malformed helper commands share the fixed usage error.
-// NAT-N-002/F-016 verifies the executable process contract, including stdin EOF, exit codes, and fixed errors.
+// Verifies malformed helper commands share the fixed usage error.
+// Verifies the executable process contract, including stdin EOF, exit codes, and fixed errors.
 func TestLockCommand_InternalSubcommandProcessCompatibility(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(dir); err != nil {

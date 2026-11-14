@@ -12,7 +12,7 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
-// RUN-T-069 ensures a terminal result is not an execution-exit confirmation.
+// Ensures a terminal result is not an execution-exit confirmation.
 func TestRuntimeDoesNotConfirmExitWithoutExecutorConfirmation(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	if !r.journal.Start("terminal-without-exit").Created {
@@ -52,7 +52,7 @@ func TestRuntimeTerminalReleasesProtectedExecution(t *testing.T) {
 	}
 }
 
-// RUN-T-071 replays the stored terminal and exit fact in response to CANCEL after completion.
+// Replays the stored terminal and exit fact in response to CANCEL after completion.
 func TestRuntimeCancelReplaysStoredExitAfterTerminal(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	if !r.journal.Start("cancel-after-terminal").Created {
@@ -89,7 +89,7 @@ func (u waitingUploader) Upload(ctx context.Context, _ string, _ ResultContent) 
 	return ResultContent{}, ctx.Err()
 }
 
-// RUN-T-077 ensures execution timeout remains active through result resource delivery.
+// Ensures execution timeout remains active through result resource delivery.
 func TestRuntimeResourceUploadUsesInvocationDeadline(t *testing.T) {
 	c := newTestConnection()
 	queueHandshake(c)
@@ -124,7 +124,7 @@ func TestRuntimeResourceUploadUsesInvocationDeadline(t *testing.T) {
 	}
 }
 
-// RUN-T-059 verifies an unknown inbound frame produces a safe ERROR response.
+// Verifies an unknown inbound frame produces a safe ERROR response.
 func TestRuntimeUnknownInboundFrameSendsError(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	if err := r.handle(context.Background(), &protocol.Envelope{MessageType: protocol.MessageType(999)}); err != nil {
@@ -136,7 +136,7 @@ func TestRuntimeUnknownInboundFrameSendsError(t *testing.T) {
 	}
 }
 
-// RUN-T-068 confirms exit is published only after the executor returns, even if it confirmed early.
+// Confirms exit is published only after the executor returns, even if it confirmed early.
 func TestRuntimeExecutionExitWaitsForExecutorReturn(t *testing.T) {
 	c := newTestConnection()
 	queueHandshake(c)
@@ -177,7 +177,7 @@ func TestRuntimeExecutionExitWaitsForExecutorReturn(t *testing.T) {
 	}
 }
 
-// RUN-T-011/T-070 verifies RECOVER and duplicate INVOKE replay terminal state and its separate exit fact.
+// Verifies RECOVER and duplicate INVOKE replay terminal state and its separate exit fact.
 func TestRuntimeRecoverAndDuplicateInvokeReplayTerminalExit(t *testing.T) {
 	r, connection := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	if !r.journal.Start(testInvocationID).Created {
@@ -227,7 +227,7 @@ func (f *pausedReconnectFactory) Connect(ctx context.Context, _ ControlObserver)
 	}
 }
 
-// RUN-T-012 replays a call completed while the control connection was down.
+// Replays a call completed while the control connection was down.
 func TestRuntimeReplaysTerminalCompletedWhileDisconnected(t *testing.T) {
 	first, second := newTestConnection(), newTestConnection()
 	queueHandshake(first)
@@ -304,7 +304,7 @@ func TestRuntimeReplaysTerminalCompletedWhileDisconnected(t *testing.T) {
 	}
 }
 
-// RUN-T-013 keeps an invocation RUNNING while its timed-out executor performs cooperative cleanup.
+// Keeps an invocation RUNNING while its timed-out executor performs cooperative cleanup.
 func TestRuntimeTimeoutDefersTerminalUntilExecutorReturns(t *testing.T) {
 	c := newTestConnection()
 	queueHandshake(c)
@@ -370,7 +370,7 @@ func TestRuntimeTimeoutDefersTerminalUntilExecutorReturns(t *testing.T) {
 	}
 }
 
-// RUN-T-014 preserves a successful result in each timeout/cancellation race after a committed side effect.
+// Preserves a successful result in each timeout/cancellation race after a committed side effect.
 func TestRuntimePreservesSuccessfulResultAcrossCancellationRaces(t *testing.T) {
 	for _, scenario := range []struct {
 		name              string
@@ -455,7 +455,7 @@ func TestRuntimePreservesSuccessfulResultAcrossCancellationRaces(t *testing.T) {
 	}
 }
 
-// RUN-T-033 confirms an already-installed target does not invoke the update runner.
+// Confirms an already-installed target does not invoke the update runner.
 func TestRuntimeSameVersionUpdateDoesNotRunUpdater(t *testing.T) {
 	r, _ := newReadyRuntimeForTest(t, runtimeOptionsForTest())
 	runner := &testUpdateRunner{}
@@ -469,7 +469,7 @@ func TestRuntimeSameVersionUpdateDoesNotRunUpdater(t *testing.T) {
 	}
 }
 
-// RUN-T-039 asserts the same update-progress snapshot appears in heartbeat, status, and reconnect READY frames.
+// Asserts the same update-progress snapshot appears in heartbeat, status, and reconnect READY frames.
 func TestRuntimeStatusProgressSnapshotsAcrossHeartbeatAndReconnect(t *testing.T) {
 	first, second := newTestConnection(), newTestConnection()
 	queueHandshake(first)
@@ -547,7 +547,7 @@ func TestRuntimeStatusProgressSnapshotsAcrossHeartbeatAndReconnect(t *testing.T)
 	}
 }
 
-// RUN-T-072 withholds EXECUTION_EXITED until a cancelled executor reports and completes its scope exit.
+// Withholds EXECUTION_EXITED until a cancelled executor reports and completes its scope exit.
 func TestRuntimeCancelledCallPublishesExitAfterExecutorReturns(t *testing.T) {
 	c := newTestConnection()
 	queueHandshake(c)

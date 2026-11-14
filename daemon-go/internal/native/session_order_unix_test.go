@@ -4,7 +4,7 @@ package native
 
 import "testing"
 
-// NAT-T-047 verifies descendant checks follow the parent chain and fail closed on ambiguous data.
+// Verifies descendant checks follow the parent chain and fail closed on ambiguous data.
 func TestSession_DescendantOf(t *testing.T) {
 	members := []sessionMember{{PID: 10, Parent: 1}, {PID: 20, Parent: 10}, {PID: 30, Parent: 20}}
 	if !isDescendantOf(members, 30, 1) {
@@ -18,7 +18,7 @@ func TestSession_DescendantOf(t *testing.T) {
 	}
 }
 
-// NAT-F-007 verifies ancestry accepts exactly 64 links and rejects duplicate or malformed snapshots.
+// Verifies ancestry accepts exactly 64 links and rejects duplicate or malformed snapshots.
 func TestSession_DescendantDepthAndIdentityBoundaries(t *testing.T) {
 	chain := func(edges int) []sessionMember {
 		members := make([]sessionMember, edges)

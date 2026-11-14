@@ -11,7 +11,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
-// RUN-T-113 collects a complete, supported set of host facts for READY.
+// Collects a complete, supported set of host facts for READY.
 func TestDetectHostInfoCollectsHostFacts(t *testing.T) {
 	info, err := detectHostInfo()
 	if err != nil {
@@ -25,7 +25,7 @@ func TestDetectHostInfoCollectsHostFacts(t *testing.T) {
 	}
 }
 
-// RUN-N-010 records Go's literal Local timezone identifier when TZ is unset.
+// Records Go's literal Local timezone identifier when TZ is unset.
 func TestDetectHostInfoUsesLocalIdentifierWhenTZUnset(t *testing.T) {
 	const probe = "KK_STUDIO_TEST_TZ_UNSET"
 	if os.Getenv(probe) == "1" {
@@ -51,7 +51,7 @@ func TestDetectHostInfoUsesLocalIdentifierWhenTZUnset(t *testing.T) {
 	}
 }
 
-// RUN-T-114 detects WSL from either environment markers or case-insensitive proc metadata.
+// Detects WSL from either environment markers or case-insensitive proc metadata.
 func TestIsWSLRecognizesMarkersAndProcMetadata(t *testing.T) {
 	readErr := func(string) ([]byte, error) { return nil, errors.New("not available") }
 	if !isWSL(func(key string) string {
@@ -83,7 +83,7 @@ func TestIsWSLRecognizesMarkersAndProcMetadata(t *testing.T) {
 	}
 }
 
-// RUN-T-113 verifies supported OS and architecture facts are mapped without losing WSL identity.
+// Verifies supported OS and architecture facts are mapped without losing WSL identity.
 func TestLocalHostInfoMapsSupportedPlatformFacts(t *testing.T) {
 	for _, tc := range []struct {
 		goos, goarch string
@@ -103,7 +103,7 @@ func TestLocalHostInfoMapsSupportedPlatformFacts(t *testing.T) {
 	}
 }
 
-// RUN-F-035 rejects unsupported platform facts.
+// Rejects unsupported platform facts.
 func TestLocalHostInfoRejectsUnsupportedPlatformAndArchitecture(t *testing.T) {
 	for _, test := range []struct{ name, goos, goarch string }{
 		{name: "unknown OS", goos: "plan9", goarch: "amd64"},

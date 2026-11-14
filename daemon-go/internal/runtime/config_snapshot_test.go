@@ -11,7 +11,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
-// RUN-T-088 and RUN-N-001 freeze config snapshots and preserve each INVOKE's independent output budget.
+// Freeze config snapshots and preserve each INVOKE's independent output budget.
 func TestRuntimeFreezesConfigurationPerInvocation(t *testing.T) {
 	c := newTestConnection()
 	queueHandshake(c)

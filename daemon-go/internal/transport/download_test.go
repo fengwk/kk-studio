@@ -25,7 +25,6 @@ func testDownloadTicket(id, url string, body []byte) *protocol.ResourceDownloadT
 	return &protocol.ResourceDownloadTicket{TransferId: proto.String(id), State: protocol.TicketState_TICKET_READY, PresignedGet: &protocol.PresignedGet{Method: proto.String(http.MethodGet), Url: proto.String(url), ExpiresAtEpochMs: proto.Int64(time.Now().Add(time.Hour).UnixMilli())}, Size: proto.Int64(int64(len(body))), Sha256: proto.String(fmt.Sprintf("%x", sum))}
 }
 
-// TRN-F-005
 func TestDownload_RequestTicketThenFetchAndVerify(t *testing.T) {
 	const transfer = "123e4567-e89b-12d3-a456-426614174000"
 	body := []byte("archive")
@@ -57,7 +56,6 @@ func TestDownload_RequestTicketThenFetchAndVerify(t *testing.T) {
 	}
 }
 
-// TRN-F-005
 func TestDownload_RejectsFailedTicketAndDoesNotFollowRedirect(t *testing.T) {
 	const transfer = "123e4567-e89b-12d3-a456-426614174000"
 	var targetHits atomic.Int32
@@ -89,7 +87,6 @@ func TestDownload_RejectsFailedTicketAndDoesNotFollowRedirect(t *testing.T) {
 	}
 }
 
-// TRN-F-005
 func TestDownload_RejectsInvalidSizeAndDigest(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("x")) }))
 	defer server.Close()

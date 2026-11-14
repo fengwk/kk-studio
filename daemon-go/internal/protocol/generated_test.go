@@ -9,7 +9,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoregistry"
 )
 
-// TRN-T-128 exercises generated protobuf message and enum APIs used by the codec.
+// Exercises generated protobuf message and enum APIs used by the codec.
 func TestGeneratedProtocolAPIs(t *testing.T) {
 	protoregistry.GlobalTypes.RangeMessages(func(messageType protoreflect.MessageType) bool {
 		message := messageType.New().Interface()

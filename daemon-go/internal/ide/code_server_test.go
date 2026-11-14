@@ -19,7 +19,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
-// IDE-T-031 verifies process creation, health, and login failures never expose a usable session.
+// Verifies process creation, health, and login failures never expose a usable session.
 func TestCodeServerStartupFailureBoundaries(t *testing.T) {
 	for _, test := range []struct {
 		name      string
@@ -50,7 +50,7 @@ func TestCodeServerStartupFailureBoundaries(t *testing.T) {
 	}
 }
 
-// IDE-T-031 verifies an early process exit aborts startup without leaving a managed process.
+// Verifies an early process exit aborts startup without leaving a managed process.
 func TestCodeServerExitDuringHealthCheck(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -82,7 +82,7 @@ func TestCodeServerExitDuringHealthCheck(t *testing.T) {
 	}
 }
 
-// IDE-T-031 verifies an unexpected process exit is reported once and the manager can restart.
+// Verifies an unexpected process exit is reported once and the manager can restart.
 func TestCodeServerUnexpectedExitRestart(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -115,7 +115,7 @@ func TestCodeServerUnexpectedExitRestart(t *testing.T) {
 	}
 }
 
-// IDE-T-030 verifies derived private paths and the fixed bundled Node entrypoint.
+// Verifies derived private paths and the fixed bundled Node entrypoint.
 func TestPathsAndLaunchResolution(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.DaemonConfig{DataDir: filepath.Join(root, "data"), DistributionDir: root}
@@ -161,7 +161,7 @@ func TestPathsAndLaunchResolution(t *testing.T) {
 	}
 }
 
-// IDE-T-029 verifies a short, private POSIX session socket directory and cleanup after close.
+// Verifies a short, private POSIX session socket directory and cleanup after close.
 func TestPrivateShortIPC(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix session socket is not used on Windows")
@@ -200,7 +200,7 @@ func TestPrivateShortIPC(t *testing.T) {
 	}
 }
 
-// IDE-T-031 verifies one shared loopback session, bounded diagnostics, and convergent close.
+// Verifies one shared loopback session, bounded diagnostics, and convergent close.
 func TestStartDiagnosticsClose(t *testing.T) {
 	root := t.TempDir()
 	cfg := fakeIDEConfig(root)
@@ -268,7 +268,7 @@ func waitForDiagnostics(t *testing.T, manager CodeServerManager, want string) {
 	}
 }
 
-// IDE-T-031 verifies diagnostic bounds count decoded characters rather than UTF-8 bytes.
+// Verifies diagnostic bounds count decoded characters rather than UTF-8 bytes.
 func TestDiagnosticTailUsesCharacterLimit(t *testing.T) {
 	var tail diagnosticTail
 	tail.push(strings.Repeat("界", 4*1024+1))

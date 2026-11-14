@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// TRN-T-120
 func TestStrictJSON_LoneSurrogates(t *testing.T) {
 	for _, input := range []string{string([]byte{34, 92, 117, 68, 56, 48, 48, 34}), string([]byte{34, 92, 117, 68, 67, 48, 48, 34}), string([]byte{34, 92, 117, 68, 56, 48, 48, 92, 117, 48, 48, 52, 49, 34})} {
 		if err := ValidateJSON(input, JSONLimits{}); err == nil {
@@ -19,42 +18,36 @@ func TestStrictJSON_LoneSurrogates(t *testing.T) {
 	}
 }
 
-// TRN-T-121
 func TestStrictJSON_RejectsNonString(t *testing.T) {
 	if err := ValidateJSON(42, JSONLimits{}); err == nil || !strings.Contains(err.Error(), "must be a string") {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-// TRN-T-122
 func TestStrictJSON_MaxBytes(t *testing.T) {
 	if err := ValidateJSON(`{"x":1}`, JSONLimits{MaxBytes: 6}); err == nil || err.Error() != "exceeds 6 UTF-8 bytes" {
 		t.Fatalf("err=%v", err)
 	}
 }
 
-// TRN-T-123
 func TestStrictJSON_DuplicateKeys(t *testing.T) {
 	if err := ValidateJSON([]byte(`{"x":1,"x":2}`), JSONLimits{}); err == nil {
 		t.Fatal("duplicate key accepted")
 	}
 }
 
-// TRN-T-124
 func TestStrictJSON_Depth(t *testing.T) {
 	if err := ValidateJSON([]byte(`[[[]]]`), JSONLimits{MaxNestingDepth: 2}); err == nil {
 		t.Fatal("excessive nesting accepted")
 	}
 }
 
-// TRN-T-125
 func TestStrictJSON_NumberLength(t *testing.T) {
 	if err := ValidateJSON([]byte(`12345`), JSONLimits{MaxNumberLength: 4}); err == nil {
 		t.Fatal("long number accepted")
 	}
 }
 
-// TRN-T-126
 func TestStrictJSON_SyntaxAndSurrogate(t *testing.T) {
 	for _, input := range []string{"", `{"x":}`, `{"x":"\uD800"}`, "// comment\n{}", "{\"x\":1,}"} {
 		if err := ValidateJSON([]byte(input), JSONLimits{}); err == nil {
@@ -63,7 +56,6 @@ func TestStrictJSON_SyntaxAndSurrogate(t *testing.T) {
 	}
 }
 
-// TRN-T-127
 func TestStrictJSON_ValidOpaque(t *testing.T) {
 	data := []byte(` { "x" : [1, true] } `)
 	if err := ValidateJSON(data, JSONLimits{MaxBytes: 64}); err != nil {

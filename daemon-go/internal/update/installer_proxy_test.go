@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// RUN-T-205 uses the applied proxy URL for installer requests and never inherits HTTP_PROXY when absent.
+// Uses the applied proxy URL for installer requests and never inherits HTTP_PROXY when absent.
 func TestClientForProxySelectsConfiguredProxyOrDirect(t *testing.T) {
 	proxyRequests := make(chan string, 2)
 	proxy := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
@@ -52,7 +52,7 @@ func TestClientForProxySelectsConfiguredProxyOrDirect(t *testing.T) {
 	}
 }
 
-// RUN-T-205 rejects malformed proxy settings and custom transports that cannot enforce the configured proxy.
+// Rejects malformed proxy settings and custom transports that cannot enforce the configured proxy.
 func TestClientForProxyRejectsInvalidOrUnenforceableProxy(t *testing.T) {
 	for _, value := range []string{"https://proxy.example:8080", "http://proxy.example", "http://user:pass@proxy.example:8080", "http://proxy.example:8080/path", "http://proxy.example:8080?", "http://proxy.example:8080#", "http://proxy.example:0"} {
 		t.Run(value, func(t *testing.T) {
@@ -71,7 +71,7 @@ func TestClientForProxyRejectsInvalidOrUnenforceableProxy(t *testing.T) {
 	}
 }
 
-// RUN-T-205 ensures the Unix update job explicitly clears inherited proxy variables for direct access.
+// Ensures the Unix update job explicitly clears inherited proxy variables for direct access.
 func TestUnixInvocationClearsInheritedProxyForDirectUpdate(t *testing.T) {
 	args := unixInvocation("/tmp/work", "/tmp/work/install.sh", "/home/user/.kk-studio/environments/env", InstallerConfig{EnvironmentID: installerTestEnvironmentID}, "2.0.0", installerTestEnvironmentID, "/home/user", map[string]string{
 		"PATH": "/usr/bin", "HTTP_PROXY": "http://inherited.example:8080", "https_proxy": "http://inherited.example:8080",
@@ -88,7 +88,7 @@ func TestUnixInvocationClearsInheritedProxyForDirectUpdate(t *testing.T) {
 	}
 }
 
-// RUN-T-205 ensures inherited proxy variables are not consulted when configuration explicitly selects direct access.
+// Ensures inherited proxy variables are not consulted when configuration explicitly selects direct access.
 func TestClientForProxyDirectIgnoresEnvironmentProxy(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

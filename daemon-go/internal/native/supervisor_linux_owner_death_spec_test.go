@@ -19,7 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// NAT-N-004 verifies helper startup leaves thread-bound Pdeathsig unset.
+// Verifies helper startup leaves thread-bound Pdeathsig unset.
 func TestPOSIXSupervisor_HelperLeavesPdeathsigUnset(t *testing.T) {
 	supervisorValue, err := NewSupervisor()
 	if err != nil {
@@ -55,7 +55,7 @@ func TestPOSIXSupervisor_HelperLeavesPdeathsigUnset(t *testing.T) {
 	}
 }
 
-// NAT-N-004 kills a real owner process and proves subreaper convergence does not depend on Pdeathsig.
+// Kills a real owner process and proves subreaper convergence does not depend on Pdeathsig.
 func TestLinuxOwnerSIGKILL_UsesSubreaperNotPdeathsig(t *testing.T) {
 	if err := enableChildSubreaper(); err != nil {
 		t.Fatal(err)

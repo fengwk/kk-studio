@@ -19,7 +19,7 @@ func writeConfigFixture(t *testing.T, document string) string {
 	return path
 }
 
-// RUN-T-159 validates the canonical envelope and derives data/token/gateway locations.
+// Validates the canonical envelope and derives data/token/gateway locations.
 func TestLoadCanonicalConfiguration(t *testing.T) {
 	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"4","daemonConfig":{"studioUrl":"https://studio.example/","bashExecutable":null,"lsp":{"servers":{"ts":{"command":["tsls"],"extensions":[".ts"],"rootMarkers":["package.json"],"firstMatchMarkers":[]},"go":{"command":["gopls","serve"],"extensions":[".go"],"rootMarkers":[],"firstMatchMarkers":[]}}},"proxyUrl":null}}`)
 	got, err := LoadDaemonConfig(path)
@@ -45,7 +45,7 @@ func TestLoadNormalizesBackslashMarkers(t *testing.T) {
 	}
 }
 
-// RUN-T-164 rejects duplicate keys rather than silently accepting a normalized JSON object.
+// Rejects duplicate keys rather than silently accepting a normalized JSON object.
 func TestLoadRejectsDuplicateKeys(t *testing.T) {
 	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{}}`)
 	if _, err := LoadDaemonConfig(path); err == nil {
@@ -53,7 +53,7 @@ func TestLoadRejectsDuplicateKeys(t *testing.T) {
 	}
 }
 
-// RUN-T-170 confirms check-config validates token without creating resources.
+// Confirms check-config validates token without creating resources.
 func TestCheckConfigIsReadOnly(t *testing.T) {
 	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{"studioUrl":"http://localhost","lsp":{"servers":{"x":{"command":["x"],"extensions":[".x"]}}}}}`)
 	if err := CheckConfig(path); err != nil {
@@ -64,7 +64,7 @@ func TestCheckConfigIsReadOnly(t *testing.T) {
 	}
 }
 
-// RUN-T-178 confirms invalid configuration diagnostics do not echo configuration contents.
+// Confirms invalid configuration diagnostics do not echo configuration contents.
 func TestLoadDiagnosticDoesNotEchoSecret(t *testing.T) {
 	path := writeConfigFixture(t, `{"environmentId":"secret-url-token","version":"0","daemonConfig":{}}`)
 	_, err := LoadDaemonConfig(path)

@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// LSP-T-037 rejects directory executables and keeps a filesystem root as its own workspace root.
+// Rejects directory executables and keeps a filesystem root as its own workspace root.
 func TestResolver_DirectoryAndWorkspaceRootInput(t *testing.T) {
 	resolver := NewExecutableResolver(ResolverOptions{})
 	if got, ok := resolver.Resolve(t.TempDir()); ok {

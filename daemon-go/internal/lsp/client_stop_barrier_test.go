@@ -9,7 +9,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
-// LSP-T-085 verifies a locally stopped request is rejected before confirmation until managed cleanup settles.
+// Verifies a locally stopped request is rejected before confirmation until managed cleanup settles.
 func TestProtocol_StopExitBarrier(t *testing.T) {
 	gate := make(chan struct{})
 	supervisor := &fakeSupervisor{blockMethod: "slow/request", terminateGate: gate}
@@ -52,7 +52,7 @@ func TestProtocol_StopExitBarrier(t *testing.T) {
 	}
 }
 
-// LSP-T-086 waits for the same managed stop after an external process exit before confirming the request.
+// Waits for the same managed stop after an external process exit before confirming the request.
 func TestProtocol_ExitWaitsForStop(t *testing.T) {
 	gate := make(chan struct{})
 	supervisor := &fakeSupervisor{blockMethod: "slow/request", terminateGate: gate}
@@ -107,7 +107,7 @@ func TestProtocol_ExitWaitsForStop(t *testing.T) {
 	}
 }
 
-// LSP-T-087 keeps an exit unconfirmed after managed termination fails and never retries the stop.
+// Keeps an exit unconfirmed after managed termination fails and never retries the stop.
 func TestProtocol_StopFailureNoRetry(t *testing.T) {
 	gate := make(chan struct{})
 	terminateErr := errors.New("termination unavailable")
@@ -155,7 +155,7 @@ func TestProtocol_StopFailureNoRetry(t *testing.T) {
 	}
 }
 
-// LSP-T-088 verifies explicit stop can observe an exit report without waiting on its own stop scope.
+// Verifies explicit stop can observe an exit report without waiting on its own stop scope.
 func TestProtocol_StopDoesNotSelfWait(t *testing.T) {
 	exitSeen := make(chan struct{}, 1)
 	allowExit := make(chan struct{})

@@ -8,7 +8,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
 
-// RUN-T-087 keeps the session CONNECTING after initial validation failure and becomes READY after a repaired snapshot.
+// Keeps the session CONNECTING after initial validation failure and becomes READY after a repaired snapshot.
 func TestRuntimeReportsInitialConfigurationFailureBeforeReady(t *testing.T) {
 	initial := initialRuntimeConfig()
 	status := NewStatusTracker()

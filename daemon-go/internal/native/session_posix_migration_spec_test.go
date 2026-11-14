@@ -16,7 +16,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// NAT-T-048 verifies a real session leader appears in its enumerated session.
+// Verifies a real session leader appears in its enumerated session.
 func TestPOSIXSession_RealLeader(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "leader.pid")
 	command := exec.Command("/bin/sh", "-c", "echo $$ > "+strconv.Quote(pidFile)+"; exec sleep 30")
@@ -47,7 +47,7 @@ func TestPOSIXSession_RealLeader(t *testing.T) {
 	t.Fatalf("session leader %d absent from members %+v", leaderPID, members)
 }
 
-// NAT-T-054 verifies an unknown session is a known-empty snapshot.
+// Verifies an unknown session is a known-empty snapshot.
 func TestPOSIXSession_UnknownIsEmpty(t *testing.T) {
 	members, err := sessionMembers(1 << 30)
 	if err != nil {
@@ -58,7 +58,7 @@ func TestPOSIXSession_UnknownIsEmpty(t *testing.T) {
 	}
 }
 
-// NAT-T-058 verifies descendant traversal against a real multi-generation process tree.
+// Verifies descendant traversal against a real multi-generation process tree.
 func TestPOSIXSession_RealDescendant(t *testing.T) {
 	pidFile := filepath.Join(t.TempDir(), "child.pid")
 	command := exec.Command("/bin/sh", "-c", "sleep 30 & echo $! > "+strconv.Quote(pidFile)+"; wait")
@@ -92,7 +92,7 @@ func (info foreignOwnerFileInfo) ModTime() time.Time { return time.Time{} }
 func (info foreignOwnerFileInfo) IsDir() bool        { return info.mode.IsDir() }
 func (info foreignOwnerFileInfo) Sys() any           { return &syscall.Stat_t{Uid: info.uid} }
 
-// NAT-T-093 verifies an owner-only POSIX file owned by another user is rejected.
+// Verifies an owner-only POSIX file owned by another user is rejected.
 func TestPrivateFS_RejectForeignFileOwner(t *testing.T) {
 	info := foreignOwnerFileInfo{mode: 0600, uid: uint32(os.Getuid()) + 1}
 	err := verifyPrivateFileWithLstat("/foreign", func(string) (os.FileInfo, error) { return info, nil })
@@ -101,7 +101,7 @@ func TestPrivateFS_RejectForeignFileOwner(t *testing.T) {
 	}
 }
 
-// NAT-T-094 verifies foreign-owner directories are rejected before chmod.
+// Verifies foreign-owner directories are rejected before chmod.
 func TestPrivateFS_NoChmodForeignDirectory(t *testing.T) {
 	info := foreignOwnerFileInfo{mode: os.ModeDir | 0755, uid: uint32(os.Getuid()) + 1}
 	chmodCalls := 0
@@ -121,7 +121,7 @@ func TestPrivateFS_NoChmodForeignDirectory(t *testing.T) {
 	}
 }
 
-// NAT-T-026 verifies a new POSIX directory lock has owner-only filesystem permissions.
+// Verifies a new POSIX directory lock has owner-only filesystem permissions.
 func TestDirectoryLock_PrivatePermissions(t *testing.T) {
 	directory := filepath.Join(t.TempDir(), "private")
 	if err := ensurePrivateDirectory(directory); err != nil {
@@ -146,7 +146,7 @@ func TestDirectoryLock_PrivatePermissions(t *testing.T) {
 	}
 }
 
-// NAT-T-091 verifies a tracked session with no members is already converged.
+// Verifies a tracked session with no members is already converged.
 func TestPOSIXState_OldSessionEmpty(t *testing.T) {
 	calls := 0
 	api := posixConvergenceAPI{
@@ -167,7 +167,7 @@ func TestPOSIXState_OldSessionEmpty(t *testing.T) {
 	}
 }
 
-// NAT-T-052 verifies zombie leaders with live worker threads remain live members.
+// Verifies zombie leaders with live worker threads remain live members.
 func TestLinuxSession_ZombieLeaderWithWorkers(t *testing.T) {
 	if runtime.GOOS != "linux" {
 		t.Skip("Linux process states are specific to Linux")
@@ -178,7 +178,7 @@ func TestLinuxSession_ZombieLeaderWithWorkers(t *testing.T) {
 	}
 }
 
-// NAT-T-127 verifies termination leaves an unrelated daemon child alive.
+// Verifies termination leaves an unrelated daemon child alive.
 func TestPOSIXSupervisor_LeavesUnrelatedChild(t *testing.T) {
 	unrelated := exec.Command("/bin/sleep", "30")
 	if err := unrelated.Start(); err != nil {

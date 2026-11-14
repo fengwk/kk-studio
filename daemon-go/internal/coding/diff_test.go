@@ -6,7 +6,6 @@ import (
 	"testing"
 )
 
-// COD-T-068
 func TestNumberedDiffNoNewlineMarker(t *testing.T) {
 	for _, test := range []struct {
 		name, old, new, want string
@@ -42,7 +41,7 @@ func TestNumberedDiffNoNewlineMarker(t *testing.T) {
 	}
 }
 
-// COD-T-018: changes at both ends retain their numbered replacement lines and middle omission.
+// Changes at both ends retain their numbered replacement lines and middle omission.
 func TestDiffEdgeContext(t *testing.T) {
 	oldLines := make([]string, 30)
 	newLines := make([]string, 30)
@@ -61,7 +60,6 @@ func TestDiffEdgeContext(t *testing.T) {
 	}
 }
 
-// COD-T-073
 func TestNumberedDiffMultihunkContextBoundary(t *testing.T) {
 	makeInput := func(gap int) (string, string) {
 		old := []string{"old one"}

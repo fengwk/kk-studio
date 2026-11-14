@@ -10,7 +10,6 @@ import (
 	"time"
 )
 
-// COD-F-007
 func TestSyncParentDirectoryReturnsOpenError(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows does not sync directory handles")
@@ -20,7 +19,6 @@ func TestSyncParentDirectoryReturnsOpenError(t *testing.T) {
 	}
 }
 
-// COD-F-007
 func TestAtomicWriteRejectsDirectoryDestination(t *testing.T) {
 	root := t.TempDir()
 	destination := filepath.Join(root, "directory")
@@ -32,7 +30,6 @@ func TestAtomicWriteRejectsDirectoryDestination(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestOpenTextOutputStoreRejectsSymlinkWorkspaceRoot(t *testing.T) {
 	dataDir := t.TempDir()
 	tmp := filepath.Join(dataDir, "tmp")
@@ -48,7 +45,6 @@ func TestOpenTextOutputStoreRejectsSymlinkWorkspaceRoot(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestOutputStoreHandlesMissingPublishAndEmptyStaging(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {
@@ -74,7 +70,6 @@ func TestOutputStoreHandlesMissingPublishAndEmptyStaging(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestOutputSpoolBoundsAndAlignsUTF8Helpers(t *testing.T) {
 	spool, err := NewOutputSpool(&TextOutputStore{}, "invalid", 1)
 	if err != nil {
@@ -105,7 +100,6 @@ func TestOutputSpoolBoundsAndAlignsUTF8Helpers(t *testing.T) {
 	}
 }
 
-// COD-F-015
 func TestSweepSkipsMalformedCreatedAtAndRecentlyCreatedOutput(t *testing.T) {
 	store, err := OpenTextOutputStore(t.TempDir())
 	if err != nil {

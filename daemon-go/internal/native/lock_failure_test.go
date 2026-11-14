@@ -28,7 +28,6 @@ func (h *fakeDirectoryLockHandle) Close() error {
 	return h.closeErr
 }
 
-// NAT-T-021
 func TestDirectoryLock_UnlockFailure(t *testing.T) {
 	unlockErr := errors.New("unlock failed")
 	handle := &fakeDirectoryLockHandle{unlockErr: unlockErr}
@@ -47,7 +46,6 @@ func TestDirectoryLock_UnlockFailure(t *testing.T) {
 	}
 }
 
-// NAT-T-198
 func TestDirectoryLock_CloseAggregates(t *testing.T) {
 	unlockErr := errors.New("unlock failed")
 	closeErr := errors.New("handle close failed")

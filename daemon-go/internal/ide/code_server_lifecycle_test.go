@@ -15,7 +15,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
-// IDE-T-028 verifies inherited environment is preserved and bridge credentials are injected on each launch.
+// Verifies inherited environment is preserved and bridge credentials are injected on each launch.
 func TestLaunchEnvironment(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -57,7 +57,7 @@ func TestLaunchEnvironment(t *testing.T) {
 	}
 }
 
-// IDE-T-032 verifies startup and close preserve the termination failure when the login step fails.
+// Verifies startup and close preserve the termination failure when the login step fails.
 func TestStartupTerminationFailure(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -78,7 +78,7 @@ func TestStartupTerminationFailure(t *testing.T) {
 	}
 }
 
-// IDE-T-033 verifies a reset login connection fails safely and terminates the startup process.
+// Verifies a reset login connection fails safely and terminates the startup process.
 func TestLoginReset(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -92,7 +92,7 @@ func TestLoginReset(t *testing.T) {
 	}
 }
 
-// IDE-T-034 verifies an already-cancelled caller never starts a supervised process.
+// Verifies an already-cancelled caller never starts a supervised process.
 func TestAlreadyCancelledStartup(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -111,7 +111,7 @@ func TestAlreadyCancelledStartup(t *testing.T) {
 	}
 }
 
-// IDE-T-035 verifies a cancelled startup waiter leaves the shared launch running for another caller.
+// Verifies a cancelled startup waiter leaves the shared launch running for another caller.
 func TestSharedStartupCancellation(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -146,7 +146,7 @@ func TestSharedStartupCancellation(t *testing.T) {
 	}
 }
 
-// IDE-T-036 verifies close cancels and joins startup before making the manager permanently closed.
+// Verifies close cancels and joins startup before making the manager permanently closed.
 func TestCloseDuringStartup(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -174,7 +174,7 @@ func TestCloseDuringStartup(t *testing.T) {
 	}
 }
 
-// IDE-T-037 verifies an exited process scope is terminated before a replacement process starts.
+// Verifies an exited process scope is terminated before a replacement process starts.
 func TestConvergeExitedScope(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -204,7 +204,7 @@ func TestConvergeExitedScope(t *testing.T) {
 	}
 }
 
-// IDE-T-038 verifies intentional stops stay quiet while unexpected exits notify exactly once.
+// Verifies intentional stops stay quiet while unexpected exits notify exactly once.
 func TestUnexpectedExitNotification(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -250,7 +250,7 @@ func TestUnexpectedExitNotification(t *testing.T) {
 	}
 }
 
-// IDE-T-036 verifies concurrent close callers share termination and cancellation only detaches the waiter.
+// Verifies concurrent close callers share termination and cancellation only detaches the waiter.
 func TestConcurrentStopWaiterCancellation(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)
@@ -282,7 +282,7 @@ func TestConcurrentStopWaiterCancellation(t *testing.T) {
 	}
 }
 
-// IDE-T-039 verifies close surfaces termination failures and preserves private IPC diagnostics for retry.
+// Verifies close surfaces termination failures and preserves private IPC diagnostics for retry.
 func TestTerminationFailureOnClose(t *testing.T) {
 	root := t.TempDir()
 	installFakeDistribution(t, root)

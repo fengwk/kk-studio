@@ -236,7 +236,7 @@ func TestPOSIXHelper_OwnerDeathBeforePermitDoesNotRunCommand(t *testing.T) {
 	}
 }
 
-// NAT-F-008 verifies the real helper fails closed when its configured 20-second permit budget expires.
+// Verifies the real helper fails closed when its configured 20-second permit budget expires.
 func TestPOSIXHelper_PermitBudgetExpires(t *testing.T) {
 	dir := stateTestDir(t)
 	marker := filepath.Join(t.TempDir(), "command-started")

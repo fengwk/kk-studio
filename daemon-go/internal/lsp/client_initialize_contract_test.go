@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// LSP-T-073 checks required initialize capability fields and the initialized notification.
+// Checks required initialize capability fields and the initialized notification.
 func TestProtocol_InitializeContract(t *testing.T) {
 	paramsCh := make(chan json.RawMessage, 1)
 	events := make(chan fakeRequest, 16)

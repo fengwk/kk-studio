@@ -10,7 +10,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 )
 
-// LSP-T-039 confirms repeated leases reuse one started process for the same key.
+// Confirms repeated leases reuse one started process for the same key.
 func TestPool_ReusesClient(t *testing.T) {
 	base := t.TempDir()
 	executable := filepath.Join(base, "fake-lsp")

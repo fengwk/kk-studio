@@ -21,7 +21,7 @@ type runtimeCloseErrorBody struct {
 
 func (b runtimeCloseErrorBody) Close() error { return b.err }
 
-// TRN-T-108 verifies response-handler and body-release failures are both retained.
+// Verifies response-handler and body-release failures are both retained.
 func TestNetworkRuntime_WithResponseReportsScopedFailures(t *testing.T) {
 	useErr := errors.New("callback failed")
 	closeErr := errors.New("private close failure")
@@ -45,7 +45,7 @@ func TestNetworkRuntime_WithResponseReportsScopedFailures(t *testing.T) {
 	}
 }
 
-// TRN-N-004, TRN-T-109, TRN-T-110 verify Go's explicit callback and cleanup error outcomes.
+// Verify Go's explicit callback and cleanup error outcomes.
 func TestNetworkRuntime_WithResponsePropagatesSingleFailures(t *testing.T) {
 	closeErr := errors.New("private close failure")
 	network := NewNetworkRuntime(nil)
@@ -71,7 +71,7 @@ func TestNetworkRuntime_WithResponsePropagatesSingleFailures(t *testing.T) {
 	}
 }
 
-// TRN-N-004, TRN-T-103 verify each Go retirement waiter receives its own context deadline.
+// Verify each Go retirement waiter receives its own context deadline.
 func TestNetworkRuntime_RetireWaitersHaveIndependentDeadlines(t *testing.T) {
 	type result struct {
 		id  int
@@ -122,7 +122,7 @@ func TestNetworkRuntime_RetireWaitersHaveIndependentDeadlines(t *testing.T) {
 	}
 }
 
-// TRN-T-101, TRN-T-102 verify Close returns its deadline when an admitted callback does not finish.
+// Verify Close returns its deadline when an admitted callback does not finish.
 func TestNetworkRuntime_CloseDeadlineAndAdmission(t *testing.T) {
 	network := NewNetworkRuntime(nil)
 	network.client = &http.Client{Transport: runtimeRoundTripper(func(*http.Request) (*http.Response, error) {
@@ -164,7 +164,7 @@ func TestNetworkRuntime_CloseDeadlineAndAdmission(t *testing.T) {
 	}
 }
 
-// TRN-T-098 verifies a timed-out retirement still rejects new work while admitted work drains.
+// Verifies a timed-out retirement still rejects new work while admitted work drains.
 func TestNetworkRuntime_RetireDeadline(t *testing.T) {
 	network := NewNetworkRuntime(nil)
 	network.active = 1

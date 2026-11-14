@@ -10,7 +10,6 @@ func readTextWindow(text string, options WindowOptions) (TextWindow, error) {
 	return ReadTextWindowReader(strings.NewReader(text), options)
 }
 
-// COD-F-003
 func TestTextCodecRejectsMalformedEncodingAndUnsupportedCharsets(t *testing.T) {
 	for _, data := range [][]byte{{0xff, 0xfe, 0x41}, {0xff, 0xfe, 0x00, 0xdc}, {0xfe, 0xff, 0xdc, 0x00}} {
 		if _, _, err := decodeFixture(data); err == nil || !strings.Contains(err.Error(), "not valid UTF-16") {
@@ -32,7 +31,6 @@ func TestTextCodecRejectsMalformedEncodingAndUnsupportedCharsets(t *testing.T) {
 	}
 }
 
-// COD-F-003
 func TestEncodeRestoresEachSupportedBOM(t *testing.T) {
 	for _, test := range []struct {
 		charset string
@@ -50,7 +48,6 @@ func TestEncodeRestoresEachSupportedBOM(t *testing.T) {
 	}
 }
 
-// COD-F-001
 func TestReadTextWindowCoversValidationOffsetsAndTruncation(t *testing.T) {
 	for _, options := range []WindowOptions{
 		{Offset: 0, Limit: 1, ColumnOffset: 1},

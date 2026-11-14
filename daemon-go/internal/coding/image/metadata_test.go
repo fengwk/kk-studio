@@ -8,7 +8,6 @@ import (
 	"testing"
 )
 
-// COD-F-004
 func TestImageMetadataRejectsMalformedContainers(t *testing.T) {
 	gifHeader := []byte("GIF89a\x01\x00\x01\x00\x00\x00\x00")
 	gifColorTable := append([]byte(nil), gifHeader...)
@@ -47,7 +46,6 @@ func TestImageMetadataRejectsMalformedContainers(t *testing.T) {
 	}
 }
 
-// COD-F-004
 func TestAnimationMetadataValidatesPNGAndWebPChunks(t *testing.T) {
 	pngHeader := []byte("\x89PNG\r\n\x1a\n")
 	pngTruncated := append(append([]byte(nil), pngHeader...), 0, 0, 0, 4, 'I', 'D', 'A', 'T', 0, 0, 0, 0)
@@ -88,7 +86,6 @@ func TestAnimationMetadataValidatesPNGAndWebPChunks(t *testing.T) {
 	}
 }
 
-// COD-F-003
 func TestParseOrientationSupportsBigEndianAndRejectsMalformedTIFF(t *testing.T) {
 	bigEndian := []byte{'M', 'M', 0, 42, 0, 0, 0, 8, 0, 1, 1, 0x12, 0, 3, 0, 0, 0, 1, 0, 6, 0, 0, 0, 0}
 	if orientation, err := parseOrientation(bigEndian); err != nil || orientation != 6 {
@@ -117,7 +114,6 @@ func TestParseOrientationSupportsBigEndianAndRejectsMalformedTIFF(t *testing.T) 
 	}
 }
 
-// COD-F-009
 func TestOrientedImageExposesSourceColorModel(t *testing.T) {
 	orientedImage := oriented{src: stdimage.NewRGBA(stdimage.Rect(0, 0, 1, 1)), orientation: 1}
 	if orientedImage.ColorModel() == nil {
@@ -125,7 +121,6 @@ func TestOrientedImageExposesSourceColorModel(t *testing.T) {
 	}
 }
 
-// COD-F-004
 func TestScaleRejectsEmptyAndUnparseableImages(t *testing.T) {
 	if _, err := ScaleContext(context.Background(), "image/png", nil, P720, 0); err == nil || err.Error() != "empty image" {
 		t.Fatalf("empty image error=%v", err)
@@ -135,7 +130,6 @@ func TestScaleRejectsEmptyAndUnparseableImages(t *testing.T) {
 	}
 }
 
-// COD-F-004
 func TestScaleRejectsUnknownTierAndMismatchedMedia(t *testing.T) {
 	data := tinyPNG(t)
 	if _, err := ScaleContext(context.Background(), "image/png", data, Tier(99), 0); err == nil || !strings.Contains(err.Error(), "unknown tier") {
@@ -146,7 +140,6 @@ func TestScaleRejectsUnknownTierAndMismatchedMedia(t *testing.T) {
 	}
 }
 
-// COD-N-006, COD-N-007
 func TestScaleContextReturnsWaitingCancellation(t *testing.T) {
 	scalingSlots <- struct{}{}
 	scalingSlots <- struct{}{}
@@ -161,7 +154,6 @@ func TestScaleContextReturnsWaitingCancellation(t *testing.T) {
 	}
 }
 
-// COD-F-003
 func TestJPEGOrientationRejectsMalformedSegments(t *testing.T) {
 	for _, test := range []struct {
 		name string

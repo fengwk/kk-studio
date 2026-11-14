@@ -23,7 +23,7 @@ func publishServers(t *testing.T, facade *Facade, servers []config.LSPServerConf
 	return prepared.Publish()
 }
 
-// LSP-T-001 ensures argument rejection precedes any server launch and confirms exit once.
+// Ensures argument rejection precedes any server launch and confirms exit once.
 func TestCapabilities_ValidateBeforeStart(t *testing.T) {
 	supervisor := &fakeSupervisor{}
 	facade := NewFacade(supervisor, PoolOptions{})
@@ -69,7 +69,7 @@ func TestCapabilities_ValidateBeforeStart(t *testing.T) {
 	}
 }
 
-// LSP-T-001 validates every capability's field constraints before acquiring a server.
+// Validates every capability's field constraints before acquiring a server.
 func TestCapabilities_ValidateCapabilityArguments(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "source.java")
 	if err := os.WriteFile(source, []byte("class Source {}\n"), 0600); err != nil {
@@ -98,7 +98,7 @@ func TestCapabilities_ValidateCapabilityArguments(t *testing.T) {
 	}
 }
 
-// LSP-T-006 preserves the configured-environment error for a valid request without a service.
+// Preserves the configured-environment error for a valid request without a service.
 func TestCapabilities_Unconfigured(t *testing.T) {
 	source := filepath.Join(t.TempDir(), "source.go")
 	if err := os.WriteFile(source, []byte("package source\n"), 0600); err != nil {
@@ -116,7 +116,7 @@ func TestCapabilities_Unconfigured(t *testing.T) {
 	}
 }
 
-// LSP-T-009 executes all three capabilities through one pooled JDTLS client.
+// Executes all three capabilities through one pooled JDTLS client.
 func TestCapabilities_SharedClient(t *testing.T) {
 	root := t.TempDir()
 	binary := filepath.Join(root, "jdtls")

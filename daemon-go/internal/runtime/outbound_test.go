@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-// RUN-T-118 ensures outbound environment-scoped work is blocked before SETTINGS binds scope.
+// Ensures outbound environment-scoped work is blocked before SETTINGS binds scope.
 func TestOutboundGateRequiresBindingAndReadiness(t *testing.T) {
 	g := &OutboundGate{}
 	if !errors.Is(g.RequireReadyFrame(), errUnbound) || !errors.Is(g.RequireControlFrame(), errUnbound) {
