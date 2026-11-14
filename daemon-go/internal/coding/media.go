@@ -17,19 +17,24 @@ func DetectMediaType(data []byte) string {
 		return "audio/mpeg"
 	}
 	if len(data) >= 12 && bytes.Equal(data[4:8], []byte("ftyp")) {
-		brand := bytes.ToLower(data[8:12])
-		if bytes.HasPrefix(brand, []byte("m4a")) || bytes.HasPrefix(brand, []byte("mp4a")) {
-			return ""
-		}
-		if bytes.HasPrefix(brand, []byte("qt")) {
-			return "video/quicktime"
-		}
-		return "video/mp4"
+		return isoBrandMediaType(bytes.ToLower(data[8:12]))
 	}
 	if data[0] == 0xff && (data[1] == 0xfb || data[1] == 0xf3 || data[1] == 0xf2) {
 		return "audio/mpeg"
 	}
 	return ""
+}
+
+// isoBrandMediaType maps an ISO base media brand to its container. An M4A brand is audio, which
+// this daemon does not expose as media, so it stays unrecognized.
+func isoBrandMediaType(brand []byte) string {
+	if bytes.HasPrefix(brand, []byte("m4a")) || bytes.HasPrefix(brand, []byte("mp4a")) {
+		return ""
+	}
+	if bytes.HasPrefix(brand, []byte("qt")) {
+		return "video/quicktime"
+	}
+	return "video/mp4"
 }
 
 // DetectImageType returns the MIME type of recognized image signatures.

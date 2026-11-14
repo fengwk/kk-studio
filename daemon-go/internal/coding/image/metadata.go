@@ -22,6 +22,14 @@ func validateAnimation(format string, data []byte) (bool, error) {
 	return animated, nil
 }
 
+// GIF block markers.
+const (
+	gifExtension       = 0x21
+	gifImageDescriptor = 0x2c
+	gifTrailer         = 0x3b
+)
+
+// gifAnimated reports whether the GIF holds more than one frame.
 func gifAnimated(data []byte) (bool, error) {
 	if len(data) < 13 || string(data[:3]) != "GIF" {
 		return false, errors.New("malformed GIF header")
@@ -35,44 +43,49 @@ func gifAnimated(data []byte) (bool, error) {
 	}
 	frames := 0
 	for p < len(data) {
+		var err error
 		switch data[p] {
-		case 0x3b:
+		case gifTrailer:
 			return frames > 1, nil
-		case 0x21:
-			p++
-			if p >= len(data) {
-				return false, errors.New("truncated GIF extension")
-			}
-			p++
-			var err error
-			p, err = skipGIFSubBlocks(data, p)
-			if err != nil {
-				return false, err
-			}
-		case 0x2c:
-			if p+10 > len(data) {
-				return false, errors.New("truncated GIF image descriptor")
-			}
+		case gifExtension:
+			p, err = skipGIFExtension(data, p)
+		case gifImageDescriptor:
 			frames++
-			packed := data[p+9]
-			p += 10
-			if packed&0x80 != 0 {
-				p += 3 * (1 << ((packed & 7) + 1))
-			}
-			if p > len(data) || p >= len(data) {
-				return false, errors.New("truncated GIF image data")
-			}
-			p++ // LZW minimum code size.
-			var err error
-			p, err = skipGIFSubBlocks(data, p)
-			if err != nil {
-				return false, err
-			}
+			p, err = skipGIFImage(data, p)
 		default:
 			return false, errors.New("invalid GIF block marker")
 		}
+		if err != nil {
+			return false, err
+		}
 	}
 	return false, errors.New("GIF trailer is missing")
+}
+
+// skipGIFExtension steps over a GIF extension block starting at its marker.
+func skipGIFExtension(data []byte, p int) (int, error) {
+	p++
+	if p >= len(data) {
+		return 0, errors.New("truncated GIF extension")
+	}
+	return skipGIFSubBlocks(data, p+1)
+}
+
+// skipGIFImage steps over a GIF image descriptor, its optional color table and its image data.
+func skipGIFImage(data []byte, p int) (int, error) {
+	if p+10 > len(data) {
+		return 0, errors.New("truncated GIF image descriptor")
+	}
+	packed := data[p+9]
+	p += 10
+	if packed&0x80 != 0 {
+		p += 3 * (1 << ((packed & 7) + 1))
+	}
+	if p >= len(data) {
+		return 0, errors.New("truncated GIF image data")
+	}
+	// Skip the LZW minimum code size before the sub-blocks.
+	return skipGIFSubBlocks(data, p+1)
 }
 
 func skipGIFSubBlocks(data []byte, p int) (int, error) {
@@ -146,37 +159,61 @@ func jpegOrientation(mediaType string, data []byte) (int, error) {
 		return 1, nil
 	}
 	for p := 2; p+4 <= len(data); {
-		if data[p] != 0xff {
-			return 1, nil
+		marker, next, err := nextJPEGMarker(data, p)
+		if err != nil || marker == 0 {
+			return 1, err
 		}
-		for p < len(data) && data[p] == 0xff {
-			p++
-		}
-		if p >= len(data) {
-			break
-		}
-		marker := data[p]
-		p++
-		if marker == 0xda || marker == 0xd9 {
+		if marker == jpegStartOfScan || marker == jpegEndOfImage {
 			return 1, nil
 		}
 		if marker == 0x01 || marker >= 0xd0 && marker <= 0xd7 {
+			p = next
 			continue
 		}
-		if p+2 > len(data) {
-			return 0, errors.New("truncated JPEG segment")
+		segment, after, err := jpegSegment(data, next)
+		if err != nil {
+			return 0, err
 		}
-		n := int(binary.BigEndian.Uint16(data[p : p+2]))
-		if n < 2 || p+n > len(data) {
-			return 0, errors.New("invalid JPEG segment length")
-		}
-		segment := data[p+2 : p+n]
-		if marker == 0xe1 && len(segment) >= 6 && string(segment[:6]) == "Exif\x00\x00" {
+		if marker == jpegApp1 && len(segment) >= 6 && string(segment[:6]) == "Exif\x00\x00" {
 			return parseOrientation(segment[6:])
 		}
-		p += n
+		p = after
 	}
 	return 1, nil
+}
+
+// JPEG markers the orientation scan has to recognise.
+const (
+	jpegApp1        = 0xe1
+	jpegStartOfScan = 0xda
+	jpegEndOfImage  = 0xd9
+)
+
+// nextJPEGMarker reads the marker at p and returns it with the offset of its payload. It returns
+// marker 0 when the segment chain ends without a marker to read.
+func nextJPEGMarker(data []byte, p int) (marker byte, payload int, err error) {
+	if data[p] != 0xff {
+		return 0, 0, nil
+	}
+	for p < len(data) && data[p] == 0xff {
+		p++
+	}
+	if p >= len(data) {
+		return 0, 0, nil
+	}
+	return data[p], p + 1, nil
+}
+
+// jpegSegment reads one segment payload and returns it with the offset of the next marker.
+func jpegSegment(data []byte, p int) ([]byte, int, error) {
+	if p+2 > len(data) {
+		return nil, 0, errors.New("truncated JPEG segment")
+	}
+	n := int(binary.BigEndian.Uint16(data[p : p+2]))
+	if n < 2 || p+n > len(data) {
+		return nil, 0, errors.New("invalid JPEG segment length")
+	}
+	return data[p+2 : p+n], p + n, nil
 }
 
 func parseOrientation(tiff []byte) (int, error) {
