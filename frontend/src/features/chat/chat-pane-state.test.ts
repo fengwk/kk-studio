@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  CHAT_TAB_STATE_MAX_BYTES,
   applyChatLayout,
   chatLayoutForPaneCount,
   chatPanePosition,
@@ -10,7 +9,6 @@ import {
   createDefaultChatPaneState,
   focusPane,
   loadChatPaneState,
-  parseChatPaneState,
   revealChatPane,
   saveChatPaneState,
   setChatPaneTarget,
@@ -18,6 +16,7 @@ import {
   type ChatPaneState,
   type ChatTabStorage,
 } from '@/features/chat/chat-pane-state'
+import { TAB_STATE_MAX_BYTES } from '@/shared/lib/tab-storage'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 
 function storage(): Storage {
@@ -50,6 +49,13 @@ function readSnapshot(store: Storage, chatId: string) {
   const raw = store.getItem(chatTabLastStorageKey(chatId))
     ?? store.getItem(chatTabSessionStorageKey(chatId))
   return raw == null ? null : JSON.parse(raw) as ReturnType<typeof snapshotOf>
+}
+
+/** 把任意快照写入本 tab 的恢复键后走生产读取入口，得到实际进入内存的状态。 */
+function loadStoredPaneState(snapshot: unknown): ChatPaneState {
+  const session = storage()
+  session.setItem(chatTabSessionStorageKey('chat-1'), JSON.stringify(snapshot))
+  return loadChatPaneState('chat-1', tabStorage(storage(), session)).state
 }
 
 describe('Chat tab presentation storage', () => {
@@ -160,9 +166,10 @@ describe('Chat tab presentation storage', () => {
       },
     ]
     for (const value of malformed) {
-      expect(parseChatPaneState(value)).toBeNull()
+      // 解析只经持久化入口发生：坏快照必须整体失效，而不是被部分采纳后进入内存。
+      expect(loadStoredPaneState(value)).toEqual(createDefaultChatPaneState())
     }
-    expect(parseChatPaneState(base)).toEqual(base)
+    expect(loadStoredPaneState(base)).toEqual(base)
   })
 
   it('rejects oversized snapshots before writing either storage', () => {
@@ -171,7 +178,7 @@ describe('Chat tab presentation storage', () => {
     const huge = setChatPaneTarget(
       createDefaultChatPaneState(),
       'pane-1',
-      bindThread('x'.repeat(CHAT_TAB_STATE_MAX_BYTES)),
+      bindThread('x'.repeat(TAB_STATE_MAX_BYTES)),
     )
     expect(saveChatPaneState('chat-1', huge, tabStorage(local, session))).toBe(false)
     expect(local.length).toBe(0)

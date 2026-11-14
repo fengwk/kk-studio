@@ -166,5 +166,3 @@ export function CreateChatModal({
     </Dialog>
   )
 }
-
-export { CreateChatModal as ChatFormModal }

@@ -1,8 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  clearUnknownUploads,
-  composerDraftStorageKey,
-  loadStoredComposerDraft,
   loadUnknownUploads,
   persistPendingUnknownUpload,
   removeStoredUnknownUpload,
@@ -17,6 +14,9 @@ import {
   partsToMessageContents,
   partsToText,
 } from '@/features/thread/composer/composer-parts'
+
+/** 与生产实现同构的持久化键：草稿正文存在 `kk-studio.composer-draft:<scope>`。 */
+const draftKey = (scope: string): string => `kk-studio.composer-draft:${scope}`
 
 class MemoryStorage implements Storage {
   private readonly values = new Map<string, string>()
@@ -54,10 +54,10 @@ describe('composer draft storage', () => {
     // 前后空白和换行属于用户草稿，持久化后必须逐字恢复。
     storeComposerDraft(scope, [createTextPart('  first\nsecond  ')], storage)
 
-    expect(JSON.parse(storage.getItem(composerDraftStorageKey(scope)) ?? '')).toEqual({
+    expect(JSON.parse(storage.getItem(draftKey(scope)) ?? '')).toEqual({
       parts: [{ type: 'text', text: '  first\nsecond  ' }],
     })
-    expect(partsToText(loadStoredComposerDraft(scope, storage))).toBe('  first\nsecond  ')
+    expect(partsToText(restoreComposerDraft(scope, [], storage))).toBe('  first\nsecond  ')
   })
 
   it('round-trips ordered text and durable resources with fresh part ids', () => {
@@ -70,7 +70,7 @@ describe('composer draft storage', () => {
     ]
 
     storeComposerDraft(scope, source, storage)
-    const restored = loadStoredComposerDraft(scope, storage)
+    const restored = restoreComposerDraft(scope, [], storage)
 
     expect(partsToMessageContents(restored)).toEqual([
       { type: 'TEXT', text: 'before' },
@@ -96,7 +96,7 @@ describe('composer draft storage', () => {
     ]
 
     storeComposerDraft(scope, source, storage)
-    const restored = loadStoredComposerDraft(scope, storage)
+    const restored = restoreComposerDraft(scope, [], storage)
 
     expect(partsToMessageContents(restored)).toEqual([
       {
@@ -129,10 +129,10 @@ describe('composer draft storage', () => {
       ],
       storage,
     )
-    expect(storage.getItem(composerDraftStorageKey(scope))).toBeNull()
+    expect(storage.getItem(draftKey(scope))).toBeNull()
 
     storeComposerDraft(scope, [createTextPart(' \n ')], storage)
-    expect(storage.getItem(composerDraftStorageKey(scope))).toBeNull()
+    expect(storage.getItem(draftKey(scope))).toBeNull()
   })
 
   it('prefers an explicit recovery draft over a stored draft', () => {
@@ -153,24 +153,24 @@ describe('composer draft storage', () => {
     const storage = new MemoryStorage()
     const scope = 'thread:t1'
     storage.setItem(
-      composerDraftStorageKey(scope),
+      draftKey(scope),
       '{"parts":[{"type":"resource","blobId":"b","name":"n","unknown":true}]}',
     )
 
-    expect(loadStoredComposerDraft(scope, storage)).toEqual([])
-    expect(storage.getItem(composerDraftStorageKey(scope))).toBeNull()
+    expect(restoreComposerDraft(scope, [], storage)).toEqual([])
+    expect(storage.getItem(draftKey(scope))).toBeNull()
   })
 
   it('fails closed and removes persisted drafts with unknown fields', () => {
     const storage = new MemoryStorage()
     const scope = 'thread:t1'
     storage.setItem(
-      composerDraftStorageKey(scope),
+      draftKey(scope),
       '{"parts":[],"extra":1}',
     )
 
-    expect(loadStoredComposerDraft(scope, storage)).toEqual([])
-    expect(storage.getItem(composerDraftStorageKey(scope))).toBeNull()
+    expect(restoreComposerDraft(scope, [], storage)).toEqual([])
+    expect(storage.getItem(draftKey(scope))).toBeNull()
   })
 
   it('stores and restores unknown uploads metadata without storing File bytes', () => {
@@ -188,11 +188,7 @@ describe('composer draft storage', () => {
     }
 
     storeUnknownUploads(scope, [unknownUpload], storage)
-    const loaded = loadUnknownUploads(scope, storage)
-    expect(loaded).toEqual([unknownUpload])
-
-    clearUnknownUploads(scope, storage)
-    expect(loadUnknownUploads(scope, storage)).toEqual([])
+    expect(loadUnknownUploads(scope, storage)).toEqual([unknownUpload])
   })
 
   it('fails closed on storage quota exceeded or write errors and preserves existing data', () => {

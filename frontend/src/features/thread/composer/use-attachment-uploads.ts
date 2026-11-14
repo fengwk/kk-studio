@@ -19,7 +19,7 @@ import { request } from '@/shared/api/client'
 import { scaleImageFile } from '@/features/thread/composer/image-scaler'
 import { isImageTier } from '@/features/thread/runtime/agent-pane/pane-target'
 
-export type AttachmentUploadStatus = 'uploading' | 'ready' | 'complete_unknown'
+type AttachmentUploadStatus = 'uploading' | 'ready' | 'complete_unknown'
 
 export function isAmbiguousUploadOutcome(error: unknown): boolean {
   if (error instanceof ApiError) {
