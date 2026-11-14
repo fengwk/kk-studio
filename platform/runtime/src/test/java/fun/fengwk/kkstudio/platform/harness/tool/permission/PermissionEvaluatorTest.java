@@ -2,17 +2,10 @@ package fun.fengwk.kkstudio.platform.harness.tool.permission;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
-import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 
-import fun.fengwk.kkstudio.common.json.JsonValues;
-
-import java.math.BigDecimal;
 import java.util.List;
 import java.util.Map;
 
@@ -22,7 +15,6 @@ class PermissionEvaluatorTest {
   private static final String BASH = "bash";
   private static final String CUSTOM_EXEC = "custom_exec";
 
-  private final ObjectMapper objectMapper = new ObjectMapper();
   private final PermissionEvaluator evaluator = new PermissionEvaluator(new BashSurfaceAnalyzer());
 
   /** 最后命中规则生效，且 tool-specific 必须在全局规则之后应用。 */
@@ -38,10 +30,8 @@ class PermissionEvaluatorTest {
                     new PermissionRule("*", PermissionAction.ASK),
                     new PermissionRule("src/*.java", PermissionAction.ALLOW))));
 
-    assertEquals(
-        PermissionAction.ALLOW, evaluate(WRITE, "{\"path\":\"src/Main.java\"}", settings).action());
-    assertEquals(
-        PermissionAction.ASK, evaluate(WRITE, "{\"path\":\"README.md\"}", settings).action());
+    assertEquals(PermissionAction.ALLOW, evaluate(WRITE, "{\"path\":\"src/Main.java\"}", settings));
+    assertEquals(PermissionAction.ASK, evaluate(WRITE, "{\"path\":\"README.md\"}", settings));
   }
 
   /** 任何工具只要包含 textual command 字段，均应用通用 command-surface 分析。 */
@@ -57,14 +47,11 @@ class PermissionEvaluatorTest {
                     new PermissionRule("git *", PermissionAction.ALLOW))));
 
     assertEquals(
-        PermissionAction.ALLOW,
-        evaluate(CUSTOM_EXEC, "{\"command\":\"git status\"}", settings).action());
+        PermissionAction.ALLOW, evaluate(CUSTOM_EXEC, "{\"command\":\"git status\"}", settings));
     assertEquals(
-        PermissionAction.DENY,
-        evaluate(CUSTOM_EXEC, "{\"command\":\"rm -rf target\"}", settings).action());
+        PermissionAction.DENY, evaluate(CUSTOM_EXEC, "{\"command\":\"rm -rf target\"}", settings));
     assertEquals(
-        PermissionAction.ASK,
-        evaluate(CUSTOM_EXEC, "{\"command\":\"npm install\"}", settings).action());
+        PermissionAction.ASK, evaluate(CUSTOM_EXEC, "{\"command\":\"npm install\"}", settings));
   }
 
   /**
@@ -117,11 +104,9 @@ class PermissionEvaluatorTest {
                     new PermissionRule("a.txt", PermissionAction.DENY))));
 
     assertEquals(
-        PermissionAction.DENY,
-        evaluateRaw(WRITE, "{\"path\":\"D:/other/a.txt\"}", settings).action());
+        PermissionAction.DENY, evaluateRaw(WRITE, "{\"path\":\"D:/other/a.txt\"}", settings));
     assertEquals(
-        PermissionAction.DENY,
-        evaluateRaw(WRITE, "{\"path\":\"//other/share/a.txt\"}", settings).action());
+        PermissionAction.DENY, evaluateRaw(WRITE, "{\"path\":\"//other/share/a.txt\"}", settings));
   }
 
   /** 绝对 target 以 filesystem root 为锚：只有 root-relative 坐标命中，使用其它锚点的规则不命中。 */
@@ -140,12 +125,10 @@ class PermissionEvaluatorTest {
     assertEquals(
         PermissionAction.ALLOW,
         evaluateRaw(
-                WRITE, "{\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}", settings)
-            .action());
+            WRITE, "{\"path\":\"/tmp/permission-environment/repo/src/Main.java\"}", settings));
     // 锚点不同的同名后缀不命中 root-relative 规则：坐标是 repo/src/Main.java。
     assertEquals(
-        PermissionAction.DENY,
-        evaluateRaw(WRITE, "{\"path\":\"/repo/src/Main.java\"}", settings).action());
+        PermissionAction.DENY, evaluateRaw(WRITE, "{\"path\":\"/repo/src/Main.java\"}", settings));
   }
 
   /** 绝对 path 按 filesystem-root 坐标匹配 path 规则；相对 path 与 URI 不是路径坐标，回落 wildcard 候选 `*`。 */
@@ -163,16 +146,14 @@ class PermissionEvaluatorTest {
 
     assertEquals(
         PermissionAction.ALLOW,
-        evaluateRaw(WRITE, "{\"path\":\"/srv/repo/src/Main.java\"}", settings).action());
+        evaluateRaw(WRITE, "{\"path\":\"/srv/repo/src/Main.java\"}", settings));
     // 相对 path 只命中 wildcard `*` → ASK，绝不按 `**/src/*.java` 放行。
     assertEquals(
         PermissionAction.ASK,
-        evaluateRaw(WRITE, "{\"workdir\":\"/srv/repo\",\"path\":\"src/Main.java\"}", settings)
-            .action());
+        evaluateRaw(WRITE, "{\"workdir\":\"/srv/repo\",\"path\":\"src/Main.java\"}", settings));
     assertEquals(
-        PermissionAction.ASK,
-        evaluateRaw(WRITE, "{\"path\":\"resource://files/abc\"}", settings).action());
-    assertEquals(PermissionAction.DENY, evaluateRaw(BROWSER, "{}", settings).action());
+        PermissionAction.ASK, evaluateRaw(WRITE, "{\"path\":\"resource://files/abc\"}", settings));
+    assertEquals(PermissionAction.DENY, evaluateRaw(BROWSER, "{}", settings));
   }
 
   /** 不展开 `~`/`$HOME`/`${HOME}`：它们不是绝对路径，回落 wildcard，绝不作 Backend HOME 展开。 */
@@ -188,23 +169,20 @@ class PermissionEvaluatorTest {
 
     assertFalse(LexicalTargetPath.isAbsolute("~/.ssh/id_rsa"));
     assertEquals(
-        PermissionAction.ASK,
-        evaluateRaw(WRITE, "{\"path\":\"~/.ssh/id_rsa\"}", settings).action());
+        PermissionAction.ASK, evaluateRaw(WRITE, "{\"path\":\"~/.ssh/id_rsa\"}", settings));
     assertEquals(
-        PermissionAction.ASK,
-        evaluateRaw(WRITE, "{\"path\":\"${HOME}/secret.txt\"}", settings).action());
+        PermissionAction.ASK, evaluateRaw(WRITE, "{\"path\":\"${HOME}/secret.txt\"}", settings));
     assertEquals(
-        PermissionAction.ASK,
-        evaluateRaw(WRITE, "{\"path\":\"$HOME/secret.txt\"}", settings).action());
+        PermissionAction.ASK, evaluateRaw(WRITE, "{\"path\":\"$HOME/secret.txt\"}", settings));
     // 绝对路径里的 basename 规则照常命中（gitignore 语义，与展开无关）。
     assertEquals(
         PermissionAction.DENY,
-        evaluateRaw(WRITE, "{\"path\":\"/home/user/secret.txt\"}", settings).action());
+        evaluateRaw(WRITE, "{\"path\":\"/home/user/secret.txt\"}", settings));
   }
 
-  /** 通用 Tool 恰好带 non-absolute path 字段时也回落 wildcard，preview 不虚构 workdir。 */
+  /** 通用 Tool 恰好带 non-absolute path 字段时也回落 wildcard，不套用 path 规则。 */
   @Test
-  void doesNotInferWorkdirSemanticsFromGenericPathField() {
+  void doesNotInferPathSemanticsFromGenericPathField() {
     ToolSettings settings =
         settings(
             Map.of(
@@ -213,23 +191,8 @@ class PermissionEvaluatorTest {
                 BROWSER,
                 List.of(new PermissionRule("*", PermissionAction.ASK))));
 
-    PermissionEvaluator.Evaluation generic =
-        evaluateRaw(BROWSER, "{\"path\":\"remote/object\"}", settings);
-    assertEquals(PermissionAction.ASK, generic.action());
-    assertNull(generic.promptPreview().workdir());
-  }
-
-  /** 没有 path/command 的工具（例如 MCP 工具）preview 不带 workdir，也不做任何目录推断。 */
-  @Test
-  void previewOmitsWorkdirWhenInvocationHasNone() {
-    PermissionEvaluator.Evaluation evaluation =
-        evaluate(
-            BROWSER,
-            "{\"skill\":\"web-search\"}",
-            settings(Map.of(BROWSER, List.of(new PermissionRule("*", PermissionAction.ASK)))));
-
-    assertEquals(PermissionAction.ASK, evaluation.action());
-    assertNull(evaluation.promptPreview().workdir());
+    assertEquals(
+        PermissionAction.ASK, evaluateRaw(BROWSER, "{\"path\":\"remote/object\"}", settings));
   }
 
   /**
@@ -239,133 +202,26 @@ class PermissionEvaluatorTest {
   @Test
   void appliesJGitGitignorePathSemantics() {
     assertEquals(
-        PermissionAction.ASK,
-        evaluate(WRITE, "{\"path\":\"docs/deep/a.md\"}", deny("docs/*.md")).action());
+        PermissionAction.ASK, evaluate(WRITE, "{\"path\":\"docs/deep/a.md\"}", deny("docs/*.md")));
+    assertEquals(
+        PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"docs/a.md\"}", deny("docs/*.md")));
+    assertEquals(
+        PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"docs/a.md\"}", deny("docs/**/*.md")));
     assertEquals(
         PermissionAction.DENY,
-        evaluate(WRITE, "{\"path\":\"docs/a.md\"}", deny("docs/*.md")).action());
+        evaluate(WRITE, "{\"path\":\"docs/deep/a.md\"}", deny("docs/**/*.md")));
+    assertEquals(PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"a/b.tmp\"}", deny("*.tmp")));
+    assertEquals(
+        PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"sub/README.md\"}", deny("README.md")));
     assertEquals(
         PermissionAction.DENY,
-        evaluate(WRITE, "{\"path\":\"docs/a.md\"}", deny("docs/**/*.md")).action());
-    assertEquals(
-        PermissionAction.DENY,
-        evaluate(WRITE, "{\"path\":\"docs/deep/a.md\"}", deny("docs/**/*.md")).action());
-    assertEquals(
-        PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"a/b.tmp\"}", deny("*.tmp")).action());
-    assertEquals(
-        PermissionAction.DENY,
-        evaluate(WRITE, "{\"path\":\"sub/README.md\"}", deny("README.md")).action());
-    assertEquals(
-        PermissionAction.DENY,
-        evaluate(WRITE, "{\"path\":\"root-only.txt\"}", deny("/root-only.txt")).action());
+        evaluate(WRITE, "{\"path\":\"root-only.txt\"}", deny("/root-only.txt")));
     assertEquals(
         PermissionAction.ASK,
-        evaluate(WRITE, "{\"path\":\"nested/root-only.txt\"}", deny("/root-only.txt")).action());
-    assertEquals(
-        PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"docs/a\"}", deny("docs/")).action());
-    assertEquals(
-        PermissionAction.ASK, evaluate(WRITE, "{\"path\":\"docs\"}", deny("docs/")).action());
-    assertEquals(
-        PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"docs/\"}", deny("docs/")).action());
-  }
-
-  /** permission prompt 参数必须单行且最多 120 字符，无 UI 时可原样持久等待。 */
-  @Test
-  void createsCompactPersistentPromptPreview() {
-    String command = "x".repeat(150) + "\nnext";
-    PermissionEvaluator.Evaluation evaluation =
-        evaluate(
-            BASH,
-            "{\"command\":\"" + command.replace("\n", "\\n") + "\"}",
-            settings(Map.of(BASH, List.of(new PermissionRule("*", PermissionAction.ASK)))));
-
-    assertEquals(PermissionAction.ASK, evaluation.action());
-    assertNull(evaluation.promptPreview().workdir());
-    assertEquals(120, evaluation.promptPreview().arguments().length());
-    assertTrue(evaluation.promptPreview().arguments().endsWith("..."));
-    // arguments preview 重新序列化为紧凑单行：输入中的空白不进入 preview。
-    assertEquals(
-        "{\"path\":\"README.md\"}",
-        evaluateRaw(
-                WRITE,
-                " { \"path\" : \"README.md\" } ",
-                settings(Map.of(WRITE, List.of(new PermissionRule("*", PermissionAction.ASK)))))
-            .promptPreview()
-            .arguments());
-  }
-
-  /** 规范的 ToolSettings 配置在 canonicalize 与 decode 时保持结构一致。 */
-  @Test
-  void canonicalizesAndDecodesToolSettings() throws Exception {
-    ToolSettingsCodec codec = new ToolSettingsCodec();
-    String canonical =
-        codec.canonicalize(
-            "{\"permission\":{\"write\":[{\"pattern\":\"*\",\"action\":\"ask\"}],"
-                + "\"bash\":[{\"pattern\":\"*\",\"action\":\"ask\"},{\"pattern\":\"git *\",\"action\":\"allow\"}]},"
-                + "\"unknownToolSetting\":true}");
-    JsonNode root = objectMapper.readTree(canonical);
-
-    // canonicalize 保留未知 Tool 设置，只规范化 permission。
-    assertTrue(root.path("unknownToolSetting").asBoolean());
-    assertTrue(root.path("permission").path("write").isArray());
-    assertEquals("*", root.path("permission").path("write").get(0).path("pattern").asText());
-    assertEquals("git *", root.path("permission").path("bash").get(1).path("pattern").asText());
-    assertEquals(PermissionAction.ALLOW, codec.decode(canonical).rulesFor(BASH).get(1).action());
-
-    JsonNode global =
-        objectMapper.readTree(
-            codec.canonicalize(
-                "{\"permission\":{\"*\":[{\"pattern\":\"*\",\"action\":\"ask\"}]}}"));
-    assertEquals("*", global.path("permission").path("*").get(0).path("pattern").asText());
-    assertEquals("ask", global.path("permission").path("*").get(0).path("action").asText());
-  }
-
-  /** 未知 Tool 设置里的自由数值按 BigDecimal 搬运：1e309/1e-324 与高精度小数既不变形也不被改成字符串。 */
-  @Test
-  void canonicalizePreservesUnknownSettingNumberPrecision() {
-    ToolSettingsCodec codec = new ToolSettingsCodec();
-    String canonical =
-        codec.canonicalize(
-            "{\"unknownToolSetting\":{\"big\":1e309,\"tiny\":1e-324,"
-                + "\"exact\":0.1234567890123456789012345678},"
-                + "\"permission\":{\"bash\":[{\"pattern\":\"*\",\"action\":\"ask\"}]}}");
-
-    assertTrue(canonical.contains("\"big\":1E+309"), canonical);
-    assertTrue(canonical.contains("\"tiny\":1E-324"), canonical);
-    assertTrue(canonical.contains("\"exact\":0.1234567890123456789012345678"), canonical);
-    assertFalse(canonical.contains("Infinity"), canonical);
-
-    JsonNode unknown = JsonValues.readTree(canonical).path("unknownToolSetting");
-    assertTrue(unknown.get("big").isNumber(), canonical);
-    assertTrue(unknown.get("tiny").isNumber(), canonical);
-    assertTrue(unknown.get("exact").isNumber(), canonical);
-    assertEquals(0, unknown.get("big").decimalValue().compareTo(new BigDecimal("1e309")));
-    assertEquals(0, unknown.get("tiny").decimalValue().compareTo(new BigDecimal("1e-324")));
-    assertEquals(PermissionAction.ASK, codec.decode(canonical).rulesFor(BASH).get(0).action());
-  }
-
-  /** permission preview 重新序列化 arguments 时不得把自由数值改写成 Infinity 或降低精度。 */
-  @Test
-  void previewRendersFreeFormNumbersWithoutFloatLoss() {
-    PermissionEvaluator.Evaluation evaluation =
-        evaluateRaw(
-            WRITE,
-            "{\"path\":\"/a.txt\",\"big\":1e309,\"tiny\":1e-324,"
-                + "\"exact\":0.1234567890123456789012345678}",
-            settings(Map.of(WRITE, List.of(new PermissionRule("*", PermissionAction.ASK)))));
-
-    String arguments = evaluation.promptPreview().arguments();
-    assertEquals(
-        "{\"path\":\"/a.txt\",\"big\":1E+309,\"tiny\":1E-324,"
-            + "\"exact\":0.1234567890123456789012345678}",
-        arguments);
-    assertFalse(arguments.contains("Infinity"), arguments);
-
-    JsonNode rendered = JsonValues.readTree(arguments);
-    assertTrue(rendered.get("big").isNumber(), arguments);
-    assertTrue(rendered.get("tiny").isNumber(), arguments);
-    assertEquals(0, rendered.get("big").decimalValue().compareTo(new BigDecimal("1e309")));
-    assertEquals(0, rendered.get("tiny").decimalValue().compareTo(new BigDecimal("1e-324")));
+        evaluate(WRITE, "{\"path\":\"nested/root-only.txt\"}", deny("/root-only.txt")));
+    assertEquals(PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"docs/a\"}", deny("docs/")));
+    assertEquals(PermissionAction.ASK, evaluate(WRITE, "{\"path\":\"docs\"}", deny("docs/")));
+    assertEquals(PermissionAction.DENY, evaluate(WRITE, "{\"path\":\"docs/\"}", deny("docs/")));
   }
 
   private static ToolSettings deny(String deniedPattern) {
@@ -378,8 +234,7 @@ class PermissionEvaluatorTest {
   }
 
   /** path 规则夹具：把相对 fixture 根到 filesystem root（坐标即 fixture 文本），让各用例只表达 pattern 关注点。 */
-  private PermissionEvaluator.Evaluation evaluate(
-      String toolName, String arguments, ToolSettings settings) {
+  private PermissionAction evaluate(String toolName, String arguments, ToolSettings settings) {
     if (arguments.startsWith("{\"path\":")) {
       return evaluateRaw(
           toolName, "{\"path\":\"/" + arguments.substring("{\"path\":\"".length()), settings);
@@ -387,9 +242,8 @@ class PermissionEvaluatorTest {
     return evaluateRaw(toolName, arguments, settings);
   }
 
-  /** 按原样评估：需要直接断言相对 path 回落或 preview workdir 的用例走这里。 */
-  private PermissionEvaluator.Evaluation evaluateRaw(
-      String toolName, String arguments, ToolSettings settings) {
+  /** 按原样评估：需要直接断言相对 path 回落或非 path 坐标的用例走这里。 */
+  private PermissionAction evaluateRaw(String toolName, String arguments, ToolSettings settings) {
     return evaluator.evaluate(new PermissionEvaluationContext(toolName, arguments, settings));
   }
 

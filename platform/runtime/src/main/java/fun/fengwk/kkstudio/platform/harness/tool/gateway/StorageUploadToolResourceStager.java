@@ -17,10 +17,6 @@ public final class StorageUploadToolResourceStager implements ToolResourceStager
   private final StorageUploadService uploadService;
   private final IntSupplier maxBytes;
 
-  public StorageUploadToolResourceStager(StorageUploadService uploadService, int maxBytes) {
-    this(uploadService, () -> maxBytes);
-  }
-
   public StorageUploadToolResourceStager(StorageUploadService uploadService, IntSupplier maxBytes) {
     this.uploadService = Objects.requireNonNull(uploadService, "uploadService");
     this.maxBytes = Objects.requireNonNull(maxBytes, "maxBytes");

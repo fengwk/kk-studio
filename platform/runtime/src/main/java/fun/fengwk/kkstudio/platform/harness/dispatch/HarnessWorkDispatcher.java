@@ -37,18 +37,13 @@ import java.util.function.Consumer;
  * <p>调度骨架（合并 wake 的单 drain、bounded handoff、stop 回收、容量计数与 fail-fast executor 契约）由共享的 {@link
  * BoundedWorkDispatcher} 提供；本类只注入 Harness 专有的 claim 轮转、Processor handoff 与 ownership-fenced 归还。
  *
- * <p>Processor handoff task 语义：task finally 总是释放本地 capacity 并再次 wake；Processor {@code process} 抛
+ * <p>handoff task 的收尾语义：task finally 总是释放本地 capacity 并再次 wake；Processor {@code process} 抛
  * RuntimeException 时只在 dispatcher 边界记录一条 ERROR（target type/id、lease token/deadline、claimed wake
  * version、required environment、原始异常栈），既不重复记录，也绝不猜测 complete / reschedule / delete（保留 lease
  * 待过期恢复）；Error 不吞但 finally 必须执行。{@link #stop} 不 shutdown 注入的 drain / worker / poll executor，不
  * interrupt 已接受 task，不等待 Processor task 完成；stop 后不启动新的 drain iteration，已进入数据库的 claim 若在 handoff
- * 前观察到 stop，则会被 ownership-fenced 所有权围栏归还。
- *
- * <p>三个注入 executor 全部由调用方持有生命周期；drainExecutor 必须串行执行任务（例如单线程池），workerExecutor 的队列 + 运行中 handoff
- * task 总数由 {@code maxDispatchTasks} 约束。两个 {@link Executor} 必须使用 fail-fast submission contract：成功
- * {@code execute} 必须恰好接受一次 task，无法接受时必须在接受前同步抛出；禁止 CallerRunsPolicy、DiscardPolicy、
- * DiscardOldestPolicy 或任何静默丢弃 / 替换已接受 task 的实现。生命周期关闭顺序必须先 {@link #stop} dispatcher，再 shutdown
- * executors。
+ * 前观察到 stop，则会被 ownership-fenced 所有权围栏归还。三个注入 executor 的生命周期与 fail-fast 提交契约见共享调度骨架 {@link
+ * BoundedWorkDispatcher}；关闭顺序必须先 {@link #stop} dispatcher，再 shutdown executors。
  */
 public final class HarnessWorkDispatcher implements AutoCloseable {
 

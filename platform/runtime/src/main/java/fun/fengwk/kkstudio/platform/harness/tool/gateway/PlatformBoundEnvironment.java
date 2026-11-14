@@ -80,116 +80,33 @@ final class PlatformBoundEnvironment implements BoundEnvironment {
     Objects.requireNonNull(progress, "progress");
     // 每次实际远端调用拥有独立身份；参数构造校验必须先于登记，登记成功才允许发送。
     UUID remoteExecutionId = UUID.randomUUID();
-    String remoteCallId = remoteExecutionId.toString();
-    EnvironmentCapabilityCall capabilityCall =
-        new EnvironmentCapabilityCall(remoteCallId, request.call().argumentsJson());
     EnvironmentCapabilityExecutionRequest capabilityRequest =
         new EnvironmentCapabilityExecutionRequest(
             capability,
-            capabilityCall,
+            new EnvironmentCapabilityCall(
+                remoteExecutionId.toString(), request.call().argumentsJson()),
             request.timeout(),
             expectedFile,
             request.resourceDownload());
     CompletableFuture<EnvironmentCapabilityResult> terminal = new CompletableFuture<>();
     EnvironmentCapabilityExecutionListener listener =
-        new EnvironmentCapabilityExecutionListener() {
-          @Override
-          public void onPartial(EnvironmentCapabilityResult partial) {
-            if (!terminal.isDone()) {
-              progress.accept(
-                  RemoteToolExecution.toToolResult(partial, remoteExecutionId, modelCallId));
-            }
-          }
-
-          @Override
-          public void onComplete(EnvironmentCapabilityResult result) {
-            terminal.complete(result);
-          }
-
-          @Override
-          public void onError(Throwable error) {
-            terminal.completeExceptionally(error);
-          }
-
-          @Override
-          public void onExitConfirmed() {
-            // 退出 ACK 独立于结果 future：即使结果已异常完成，迟到 ACK 仍必须确认本次远端执行。
-            remoteExecutions.confirmExit(remoteExecutionId);
-          }
-        };
+        listener(terminal, progress, remoteExecutionId);
     if (!remoteExecutions.tryStart(remoteExecutionId, environmentId)) {
       throw new EnvironmentCapabilityCancelledException(
           "remote execution was not started because the tool generation is stopped or no"
               + " longer owned");
     }
     long startNanos = System.nanoTime();
-    EnvironmentCapabilityExecutionHandle transportHandle;
-    try {
-      transportHandle = capabilityTransport.invoke(environmentId, capabilityRequest, listener);
-    } catch (EnvironmentCapabilityBusyException
-        | EnvironmentCapabilityUnavailableException notExecuted) {
-      // 只有传输端口明确保证的发送前 Busy / Unavailable 才能确认未启动；其它异常不构成未发送证据。
-      try {
-        remoteExecutions.confirmNotStarted(remoteExecutionId);
-      } catch (RuntimeException | Error confirmationFailure) {
-        confirmationFailure.addSuppressed(notExecuted);
-        if (confirmationFailure instanceof RuntimeException) {
-          // Unknown 分类会记录异常 message；只提供安全诊断，原始持久化失败仍作为 cause 保留。
-          throw new IllegalStateException(
-              "phase=REMOTE_NOT_STARTED_CONFIRM; exception="
-                  + confirmationFailure.getClass().getSimpleName(),
-              confirmationFailure);
-        }
-        throw confirmationFailure;
-      }
-      throw notExecuted;
-    }
+    EnvironmentCapabilityExecutionHandle transportHandle =
+        invoke(capabilityRequest, listener, remoteExecutionId);
+    // 句柄为 null 属于契约违反，不是已发送的在途执行，因此这里不进入下方的中止清理。
     if (transportHandle == null) {
       throw new IllegalStateException(
           "remote capability returned a null execution handle; outcome cannot be confirmed");
     }
     try {
-      Duration timeout = request.timeout();
-      Duration grace = transportHandle.terminalDeliveryGrace();
-      if (grace == null) {
-        throw new IllegalStateException(
-            "remote capability returned a null terminal delivery grace;"
-                + " outcome cannot be confirmed");
-      }
-      if (grace.isNegative()) {
-        throw new IllegalStateException(
-            "remote capability returned a negative terminal delivery grace: "
-                + grace
-                + "; outcome cannot be confirmed");
-      }
-      EnvironmentCapabilityResult result;
-      if (timeout.isZero()) {
-        // 0 是显式无界执行预算：grace 只描述恢复窗，不能把它缩短成有界等待。
-        result = terminal.get();
-      } else {
-        Duration waitBudget = timeout.plus(grace);
-        long remainingNanos = Math.max(0L, waitBudget.toNanos() - (System.nanoTime() - startNanos));
-        try {
-          result = terminal.get(remainingNanos, TimeUnit.NANOSECONDS);
-        } catch (TimeoutException timedOut) {
-          EnvironmentCapabilitySendUncertainException timeoutException =
-              new EnvironmentCapabilitySendUncertainException(
-                  "remote capability timed out waiting for terminal outcome after " + waitBudget,
-                  timedOut);
-          // 只有仍无终态时才由 runtime 抢占；若终态已在竞态中完成，优先交付真实结果或真实失败。
-          if (terminal.completeExceptionally(timeoutException)) {
-            RemoteToolExecution.terminate(
-                transportHandle, EnvironmentCapabilityTerminationCause.TIMED_OUT, timeoutException);
-            throw timeoutException;
-          }
-          result = terminal.get();
-        }
-      }
-      if (result == null) {
-        throw new IllegalStateException(
-            "remote capability completed without a result; outcome cannot be confirmed");
-      }
-      return RemoteToolExecution.toToolResult(result, remoteExecutionId, modelCallId);
+      return awaitTerminal(
+          terminal, transportHandle, request.timeout(), startNanos, remoteExecutionId);
     } catch (InterruptedException interrupted) {
       RemoteToolExecution.releaseInFlight(
           terminal, transportHandle, EnvironmentCapabilityTerminationCause.CANCELLED, interrupted);
@@ -206,5 +123,137 @@ final class PlatformBoundEnvironment implements BoundEnvironment {
           terminal, transportHandle, EnvironmentCapabilityTerminationCause.CANCELLED, failure);
       throw failure;
     }
+  }
+
+  /** partial 进度与终态收敛回调；退出 ACK 总是确认本次远端执行，即使结果已异常完成。 */
+  private EnvironmentCapabilityExecutionListener listener(
+      CompletableFuture<EnvironmentCapabilityResult> terminal,
+      Consumer<ToolResult> progress,
+      UUID remoteExecutionId) {
+    return new EnvironmentCapabilityExecutionListener() {
+      @Override
+      public void onPartial(EnvironmentCapabilityResult partial) {
+        if (!terminal.isDone()) {
+          progress.accept(
+              RemoteToolExecution.toToolResult(partial, remoteExecutionId, modelCallId));
+        }
+      }
+
+      @Override
+      public void onComplete(EnvironmentCapabilityResult result) {
+        terminal.complete(result);
+      }
+
+      @Override
+      public void onError(Throwable error) {
+        terminal.completeExceptionally(error);
+      }
+
+      @Override
+      public void onExitConfirmed() {
+        // 退出 ACK 独立于结果 future：即使结果已异常完成，迟到 ACK 仍必须确认本次远端执行。
+        remoteExecutions.confirmExit(remoteExecutionId);
+      }
+    };
+  }
+
+  /** 发送请求；只有传输端口明确保证的发送前 Busy / Unavailable 才能确认未启动，其它异常不构成未发送证据。 */
+  private EnvironmentCapabilityExecutionHandle invoke(
+      EnvironmentCapabilityExecutionRequest capabilityRequest,
+      EnvironmentCapabilityExecutionListener listener,
+      UUID remoteExecutionId) {
+    try {
+      return capabilityTransport.invoke(environmentId, capabilityRequest, listener);
+    } catch (EnvironmentCapabilityBusyException
+        | EnvironmentCapabilityUnavailableException notExecuted) {
+      confirmNotStarted(remoteExecutionId, notExecuted);
+      throw notExecuted;
+    }
+  }
+
+  /** 记录“确定未发送”；持久化失败只作为 suppressed 附加到原始失败，并以安全诊断替换抛出。 */
+  private void confirmNotStarted(UUID remoteExecutionId, RuntimeException notExecuted) {
+    try {
+      remoteExecutions.confirmNotStarted(remoteExecutionId);
+    } catch (RuntimeException | Error confirmationFailure) {
+      confirmationFailure.addSuppressed(notExecuted);
+      if (confirmationFailure instanceof RuntimeException) {
+        // Unknown 分类会记录异常 message；只提供安全诊断，原始持久化失败仍作为 cause 保留。
+        throw new IllegalStateException(
+            "phase=REMOTE_NOT_STARTED_CONFIRM; exception="
+                + confirmationFailure.getClass().getSimpleName(),
+            confirmationFailure);
+      }
+      throw confirmationFailure;
+    }
+  }
+
+  /**
+   * 等待真实终态。超时以 {@code TIMED_OUT} 抢占后抛出；若终态已在竞态中完成，优先交付真实结果或真实失败。
+   *
+   * <p>恢复窗必须是已声明的非负 Duration：缺失或负值属于契约违反，交由调用方按中止路径清理。
+   */
+  private ToolResult awaitTerminal(
+      CompletableFuture<EnvironmentCapabilityResult> terminal,
+      EnvironmentCapabilityExecutionHandle transportHandle,
+      Duration timeout,
+      long startNanos,
+      UUID remoteExecutionId)
+      throws InterruptedException, ExecutionException {
+    Duration grace = requireTerminalDeliveryGrace(transportHandle);
+    EnvironmentCapabilityResult result;
+    if (timeout.isZero()) {
+      // 0 是显式无界执行预算：grace 只描述恢复窗，不能把它缩短成有界等待。
+      result = terminal.get();
+    } else {
+      Duration waitBudget = timeout.plus(grace);
+      long remainingNanos = Math.max(0L, waitBudget.toNanos() - (System.nanoTime() - startNanos));
+      try {
+        result = terminal.get(remainingNanos, TimeUnit.NANOSECONDS);
+      } catch (TimeoutException timedOut) {
+        result = awaitAfterTimeout(terminal, transportHandle, waitBudget, timedOut);
+      }
+    }
+    if (result == null) {
+      throw new IllegalStateException(
+          "remote capability completed without a result; outcome cannot be confirmed");
+    }
+    return RemoteToolExecution.toToolResult(result, remoteExecutionId, modelCallId);
+  }
+
+  private static Duration requireTerminalDeliveryGrace(
+      EnvironmentCapabilityExecutionHandle transportHandle) {
+    Duration grace = transportHandle.terminalDeliveryGrace();
+    if (grace == null) {
+      throw new IllegalStateException(
+          "remote capability returned a null terminal delivery grace;"
+              + " outcome cannot be confirmed");
+    }
+    if (grace.isNegative()) {
+      throw new IllegalStateException(
+          "remote capability returned a negative terminal delivery grace: "
+              + grace
+              + "; outcome cannot be confirmed");
+    }
+    return grace;
+  }
+
+  /** 超时后只有在仍无终态时才由 runtime 抢占；否则重新取已完成的真实终态。 */
+  private static EnvironmentCapabilityResult awaitAfterTimeout(
+      CompletableFuture<EnvironmentCapabilityResult> terminal,
+      EnvironmentCapabilityExecutionHandle transportHandle,
+      Duration waitBudget,
+      TimeoutException timedOut)
+      throws InterruptedException, ExecutionException {
+    EnvironmentCapabilitySendUncertainException timeoutException =
+        new EnvironmentCapabilitySendUncertainException(
+            "remote capability timed out waiting for terminal outcome after " + waitBudget,
+            timedOut);
+    if (!terminal.completeExceptionally(timeoutException)) {
+      return terminal.get();
+    }
+    RemoteToolExecution.terminate(
+        transportHandle, EnvironmentCapabilityTerminationCause.TIMED_OUT, timeoutException);
+    throw timeoutException;
   }
 }

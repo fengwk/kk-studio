@@ -83,28 +83,6 @@ public final class ToolExecutionGateway implements ToolGateway {
       PermissionEvaluator permissionEvaluator,
       ToolSettingsProvider toolSettingsProvider,
       ToolResourceStager resourceStager,
-      int resourceMaxBytes,
-      Supplier<Duration> retryDelay,
-      Clock clock,
-      ConcurrencyAdmission admission) {
-    this(
-        toolCatalogSource,
-        capabilityTransport,
-        permissionEvaluator,
-        toolSettingsProvider,
-        resourceStager,
-        () -> resourceMaxBytes,
-        retryDelay,
-        clock,
-        admission);
-  }
-
-  public ToolExecutionGateway(
-      RuntimeToolCatalogSource toolCatalogSource,
-      EnvironmentCapabilityTransport capabilityTransport,
-      PermissionEvaluator permissionEvaluator,
-      ToolSettingsProvider toolSettingsProvider,
-      ToolResourceStager resourceStager,
       IntSupplier outputLimitBytes,
       Supplier<Duration> retryDelay,
       Clock clock,
@@ -192,13 +170,12 @@ public final class ToolExecutionGateway implements ToolGateway {
         return new ToolGateway.Deny(resolved.error());
       }
       ToolSettings settings = toolSettingsProvider.get();
-      PermissionEvaluator.Evaluation evaluation =
+      PermissionAction action =
           permissionEvaluator.evaluate(
               new PermissionEvaluationContext(
                   resolved.contribution().definition().descriptor().name(),
                   request.call().argumentsJson(),
                   settings));
-      PermissionAction action = evaluation.action();
       return switch (action) {
         case ALLOW -> new ToolGateway.Allow();
         case ASK -> {

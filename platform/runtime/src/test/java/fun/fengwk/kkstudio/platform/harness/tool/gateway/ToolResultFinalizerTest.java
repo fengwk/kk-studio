@@ -256,7 +256,7 @@ class ToolResultFinalizerTest {
   void hardLimitExceededReturnsOutputTooLarge() {
     RecordingStager store = new RecordingStager();
     int limit = 100;
-    ToolResultFinalizer finalizer = finalizer(store, limit);
+    ToolResultFinalizer finalizer = finalizer(store, () -> limit);
 
     ToolResult result =
         new ToolResult(
@@ -311,7 +311,7 @@ class ToolResultFinalizerTest {
                 (mediaType, name, content) -> {
                   throw new IllegalStateException("disk full");
                 }),
-            DEFAULT_RESOURCE_MAX_BYTES);
+            () -> DEFAULT_RESOURCE_MAX_BYTES);
 
     String largeText = "x".repeat(ToolResultFinalizer.INLINE_MAX_UTF8_BYTES + 1);
     ToolResult result =
@@ -328,7 +328,7 @@ class ToolResultFinalizerTest {
   @Test
   void binaryOversizedOrInvalidMediaTypeIsRejected() {
     RecordingStager store = new RecordingStager();
-    ToolResultFinalizer finalizer = finalizer(store, 100);
+    ToolResultFinalizer finalizer = finalizer(store, () -> 100);
 
     // 超过 100 字节的 binary
     ToolResult oversized =
@@ -428,7 +428,7 @@ class ToolResultFinalizerTest {
   @Test
   void daemonUploadReferencePassesThroughWithoutStaging() {
     RecordingStager store = new RecordingStager();
-    ToolResultFinalizer finalizer = finalizer(store, 100);
+    ToolResultFinalizer finalizer = finalizer(store, () -> 100);
     byte[] bytes = new byte[] {1, 2, 3};
     ResourceRef upload =
         new ResourceRef(
@@ -453,7 +453,7 @@ class ToolResultFinalizerTest {
   @Test
   void daemonUploadReferenceRejectsTextMetadataAndOversize() {
     RecordingStager store = new RecordingStager();
-    ToolResultFinalizer finalizer = finalizer(store, 100);
+    ToolResultFinalizer finalizer = finalizer(store, () -> 100);
     byte[] bytes = new byte[] {1, 2, 3};
     ResourceRef upload =
         new ResourceRef(
@@ -474,7 +474,7 @@ class ToolResultFinalizerTest {
                 false,
                 "{}"));
     ToolResultFinalizer.Outcome oversized =
-        finalizer(store, 2)
+        finalizer(store, () -> 2)
             .finalizeResult(
                 TOOL_NAME,
                 new ToolResult("call-2", List.of(new ResourceResultContent(upload)), false, "{}"));
@@ -495,7 +495,7 @@ class ToolResultFinalizerTest {
   void sessionResourceReferencePassesThroughWithoutStoreIoOrSizeLimit() {
     RecordingStager store = new RecordingStager();
     // 暂存上限刻意小于声明体积，证明该路径不受其约束。
-    ToolResultFinalizer finalizer = finalizer(store, 2);
+    ToolResultFinalizer finalizer = finalizer(store, () -> 2);
     ResourceRef session =
         new ResourceRef(
             ResourceRef.sessionResourceUri(UUID.randomUUID()),
@@ -519,7 +519,7 @@ class ToolResultFinalizerTest {
   @Test
   void sessionResourceReferenceRejectsTextMetadata() {
     RecordingStager store = new RecordingStager();
-    ToolResultFinalizer finalizer = finalizer(store, 100);
+    ToolResultFinalizer finalizer = finalizer(store, () -> 100);
     ResourceRef session =
         new ResourceRef(
             ResourceRef.sessionResourceUri(UUID.randomUUID()),
@@ -713,7 +713,7 @@ class ToolResultFinalizerTest {
     ToolResultFinalizer.Outcome.Failed failed =
         assertInstanceOf(
             ToolResultFinalizer.Outcome.Failed.class,
-            finalizer(store, 100).finalizeResult(FileTool.READ_NAME, oversized));
+            finalizer(store, () -> 100).finalizeResult(FileTool.READ_NAME, oversized));
 
     assertEquals(ToolResultFinalizer.OUTPUT_TOO_LARGE_KIND, failed.error().kind());
     assertTrue(store.puts.isEmpty());
@@ -763,11 +763,7 @@ class ToolResultFinalizerTest {
   }
 
   private static ToolResultFinalizer finalizer(RecordingStager store) {
-    return finalizer(store, DEFAULT_RESOURCE_MAX_BYTES);
-  }
-
-  private static ToolResultFinalizer finalizer(RecordingStager store, int resourceMaxBytes) {
-    return finalizer(store, () -> resourceMaxBytes);
+    return finalizer(store, () -> DEFAULT_RESOURCE_MAX_BYTES);
   }
 
   private static ToolResultFinalizer finalizer(
@@ -801,7 +797,8 @@ class ToolResultFinalizerTest {
                   (long) content.length,
                   sha256Hex(content));
             });
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(stager, DEFAULT_RESOURCE_MAX_BYTES);
+    ToolResultFinalizer finalizer =
+        new ToolResultFinalizer(stager, () -> DEFAULT_RESOURCE_MAX_BYTES);
 
     ToolResultFinalizer.Outcome outcome =
         finalizer.finalizeResult(
@@ -848,7 +845,8 @@ class ToolResultFinalizerTest {
             discarded.add(resource);
           }
         };
-    ToolResultFinalizer finalizer = new ToolResultFinalizer(stager, DEFAULT_RESOURCE_MAX_BYTES);
+    ToolResultFinalizer finalizer =
+        new ToolResultFinalizer(stager, () -> DEFAULT_RESOURCE_MAX_BYTES);
 
     ToolResultFinalizer.Outcome outcome =
         finalizer.finalizeResult(
@@ -903,7 +901,7 @@ class ToolResultFinalizerTest {
     logger.addAppender(logs);
     try {
       ToolResultFinalizer.Outcome outcome =
-          new ToolResultFinalizer(stager, DEFAULT_RESOURCE_MAX_BYTES)
+          new ToolResultFinalizer(stager, () -> DEFAULT_RESOURCE_MAX_BYTES)
               .finalizeResult(
                   TOOL_NAME,
                   new ToolResult(
@@ -942,7 +940,7 @@ class ToolResultFinalizerTest {
         new ResourceRef(
             ResourceRef.blobUploadUri(uploadId), "image/png", "image", 1L, "a".repeat(64));
     StorageUploadToolResourceStager stager =
-        new StorageUploadToolResourceStager(uploadService, 100);
+        new StorageUploadToolResourceStager(uploadService, () -> 100);
     Logger logger = (Logger) LoggerFactory.getLogger(StorageUploadToolResourceStager.class);
     ListAppender<ILoggingEvent> logs = new ListAppender<>();
     logs.start();

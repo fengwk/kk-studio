@@ -16,8 +16,6 @@ import java.util.regex.Pattern;
  * <p>其他非绝对 {@code path} 回落 wildcard 规则。路径合法性由执行方判定。
  */
 public final class PermissionEvaluator {
-  private static final int ARGUMENT_PREVIEW_LENGTH = 120;
-
   private final BashSurfaceAnalyzer bashAnalyzer;
   private final PermissionPathMatcher pathMatcher;
 
@@ -26,24 +24,17 @@ public final class PermissionEvaluator {
     this.pathMatcher = new PermissionPathMatcher();
   }
 
-  /** 按调用方冻结的权限上下文评估 Tool 调用，返回 action 与 prompt preview。 */
-  public Evaluation evaluate(PermissionEvaluationContext context) {
+  /** 按调用方冻结的权限上下文评估 Tool 调用，返回最终 action。 */
+  public PermissionAction evaluate(PermissionEvaluationContext context) {
     JsonNode input = readArguments(context.argumentsJson());
-    PermissionAction action;
     if (input.path("command").isString()) {
-      action = evaluateBash(input.path("command").asText(), context.settings(), context.toolName());
-    } else if (isAbsolutePathTarget(input.path("path"))) {
-      PathTarget target = describePathTarget(input.path("path").asText());
-      action = evaluatePathRules(target, context.settings(), context.toolName());
-    } else {
-      action =
-          evaluateWildcardRules(describeCandidates(input), context.settings(), context.toolName());
+      return evaluateBash(input.path("command").asText(), context.settings(), context.toolName());
     }
-    return new Evaluation(action, promptPreview(context, input));
-  }
-
-  public PermissionPromptPreview preview(PermissionEvaluationContext context) {
-    return promptPreview(context, readArguments(context.argumentsJson()));
+    if (isAbsolutePathTarget(input.path("path"))) {
+      return evaluatePathRules(
+          describePathTarget(input.path("path").asText()), context.settings(), context.toolName());
+    }
+    return evaluateWildcardRules(describeCandidates(input), context.settings(), context.toolName());
   }
 
   /** 绝对宿主文件路径参与路径规则；其他 URI 和相对文本不作为路径坐标。 */
@@ -123,22 +114,6 @@ public final class PermissionEvaluator {
     return action;
   }
 
-  /** prompt preview 只展示该调用真实携带的 workdir：没有该字段的工具（文件工具、{@code task}、MCP 等）不显示任何虚构默认目录。 */
-  private PermissionPromptPreview promptPreview(
-      PermissionEvaluationContext context, JsonNode input) {
-    JsonNode workdirNode = input.get("workdir");
-    String workdir;
-    if (workdirNode == null || workdirNode.isNull()) {
-      workdir = null;
-    } else if (!workdirNode.isString() || workdirNode.asText().trim().isEmpty()) {
-      workdir = "<invalid-workdir>";
-    } else {
-      workdir = singleLine(workdirNode.asText());
-    }
-    return new PermissionPromptPreview(
-        context.toolName(), workdir, truncate(singleLine(JsonValues.write(input))));
-  }
-
   private static JsonNode readArguments(String argumentsJson) {
     JsonNode node = JsonValues.readTree(argumentsJson);
     if (!node.isObject()) {
@@ -165,28 +140,10 @@ public final class PermissionEvaluator {
     return Pattern.compile(regex.toString()).matcher(normalizedCandidate).matches();
   }
 
-  private static String truncate(String value) {
-    if (value.length() <= ARGUMENT_PREVIEW_LENGTH) {
-      return value.isEmpty() ? "{}" : value;
-    }
-    return value.substring(0, ARGUMENT_PREVIEW_LENGTH - 3) + "...";
-  }
-
-  private static String singleLine(String value) {
-    return value.replaceAll("[\\r\\n\\t]+", " ").replaceAll(" {2,}", " ").trim();
-  }
-
   private static String display(String value) {
     return value.replace('\\', '/');
   }
 
   /** 单次调用绝对 {@code path} 的 filesystem-root 匹配坐标与 raw path 末尾分隔符表达的 directory hint。 */
   record PathTarget(String posixPath, boolean directory) {}
-
-  public record Evaluation(PermissionAction action, PermissionPromptPreview promptPreview) {
-    public Evaluation {
-      action = Objects.requireNonNull(action, "action");
-      promptPreview = Objects.requireNonNull(promptPreview, "promptPreview");
-    }
-  }
 }

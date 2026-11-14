@@ -14,15 +14,10 @@ import fun.fengwk.kkstudio.harness.api.history.AssistantError;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.SystemContext;
-import fun.fengwk.kkstudio.harness.api.history.SystemPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.TurnResolver;
-import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupExecution;
-import fun.fengwk.kkstudio.harness.builtin.port.store.ModelGroupMemberExecution;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
-import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
-import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderFactory;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
@@ -30,26 +25,18 @@ import fun.fengwk.kkstudio.harness.spi.TurnResolveTransientException;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionModelProvider;
 import fun.fengwk.kkstudio.harness.spi.compaction.RequestTokenEstimator;
-import fun.fengwk.kkstudio.platform.catalog.definition.Agent;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
-import fun.fengwk.kkstudio.platform.catalog.model.Model;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelGroupConfigCodec;
-import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRepository;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
-import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser.ParsedAgentModelConfig;
-import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
 import fun.fengwk.kkstudio.platform.harness.builtin.BuiltinModelBudget;
+import fun.fengwk.kkstudio.platform.harness.thread.command.TurnModelSelectionResolver.MemberRuntime;
+import fun.fengwk.kkstudio.platform.harness.thread.command.TurnModelSelectionResolver.SelectionSnapshot;
 
-import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -69,6 +56,9 @@ import java.util.UUID;
  *
  * <p>请求输入 token 估算只经内核端口 {@link RequestTokenEstimator} 注入；实现由组合根绑定到正式发送所用的同一估算算法，本类不复制算法、 不 import
  * 内核实现类型，也不依赖 {@code HarnessRuntime} 门面，因此 Resolver 在 platform 独立测试上下文里始终可以装配。
+ *
+ * <p>模型选择解析由 {@link TurnModelSelectionResolver} 承担，预算适配由 {@link TurnModelBudget} 承担，system message
+ * 投影由 {@link TurnSystemMessageProjector} 承担；本类只保留入口编排、压缩判定与 typed 拒绝投影。
  */
 @Slf4j
 @Component
@@ -78,11 +68,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
   public static final String REJECTION_CODE = "PLANNING_FAILED";
 
   private final AgentRepository agentRepository;
-  private final ModelRepository modelRepository;
-  private final ProviderRepository providerRepository;
-  private final ModelRuntimeConfigParser modelConfigParser;
-  private final ModelGroupConfigCodec groupConfigCodec;
-  private final Map<ProviderType, ProviderFactory> providerFactories;
+  private final TurnModelSelectionResolver selectionResolver;
   private final CompactionConfigProvider compactionConfigProvider;
   private final CompactionModelProvider compactionModelProvider;
   private final DatabaseAgentTurnContextResolver contextResolver;
@@ -100,12 +86,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
       DatabaseAgentTurnContextResolver contextResolver,
       RequestTokenEstimator requestTokenEstimator) {
     this.agentRepository = Objects.requireNonNull(agentRepository, "agentRepository");
-    this.modelRepository = Objects.requireNonNull(modelRepository, "modelRepository");
-    this.providerRepository = Objects.requireNonNull(providerRepository, "providerRepository");
-    this.modelConfigParser = Objects.requireNonNull(modelConfigParser, "modelConfigParser");
-    this.groupConfigCodec = Objects.requireNonNull(groupConfigCodec, "groupConfigCodec");
-    this.providerFactories =
-        Map.copyOf(Objects.requireNonNull(providerFactories, "providerFactories"));
+    this.selectionResolver =
+        new TurnModelSelectionResolver(
+            modelRepository,
+            providerRepository,
+            modelConfigParser,
+            groupConfigCodec,
+            providerFactories);
     this.compactionConfigProvider =
         Objects.requireNonNull(compactionConfigProvider, "compactionConfigProvider");
     this.compactionModelProvider =
@@ -139,7 +126,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
         return new CompactionRequired(planned.contextWindow());
       }
       return resolved(planned);
-    } catch (Rejection | AgentTurnContextException rejection) {
+    } catch (TurnRejection | AgentTurnContextException rejection) {
       // 只把显式构造的确定性拒绝转为 typed Rejected；repository/registry 等基础设施异常按类型分别处理。
       return rejected(rejection.getMessage());
     } catch (DataAccessException failure) {
@@ -155,7 +142,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(path, "path");
     try {
       return resolveCompactionBranch(path);
-    } catch (Rejection | AgentTurnContextException rejection) {
+    } catch (TurnRejection | AgentTurnContextException rejection) {
       return rejected(rejection.getMessage());
     } catch (DataAccessException failure) {
       throw new TurnResolveTransientException(
@@ -194,7 +181,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     Objects.requireNonNull(settings, "settings");
     try {
       return plan(threadId, rootSessionId, path, settings);
-    } catch (Rejection | AgentTurnContextException rejection) {
+    } catch (TurnRejection | AgentTurnContextException rejection) {
       return new LiveTurnPlan.Rejected(REJECTION_CODE, rejection.getMessage());
     }
   }
@@ -244,13 +231,13 @@ public final class DatabaseTurnResolver implements TurnResolver {
       UUID threadId, UUID rootSessionId, EntryPath path, BranchSettings settings) {
     // 一次上下文解析租用一份 catalog 快照：Agent/Environment/tools/skills/subagents/prompt 同源。
     AgentTurnContext context = contextResolver.resolve(threadId, rootSessionId, path, settings);
-    ResolvedSelection resolved =
-        resolveSelection(BuiltinExecution.model(settings.execution()), context.agent());
+    SelectionSnapshot resolved =
+        selectionResolver.resolve(BuiltinExecution.model(settings.execution()), context.agent());
     MemberRuntime first = resolved.members().getFirst();
 
     for (MemberRuntime member : resolved.members()) {
       if (!context.toolBindings().isEmpty() && !member.parsed().tools()) {
-        throw rejection("model does not support tools: " + member.modelName());
+        throw TurnRejection.of("model does not support tools: " + member.modelName());
       }
       requireReasoningSupport(member);
     }
@@ -258,7 +245,8 @@ public final class DatabaseTurnResolver implements TurnResolver {
     String systemInstruction = context.systemInstruction();
     int contextWindow = resolved.contextWindow();
     List<String> requestSystemMessages =
-        requestSystemMessages(path, context, first.providerType(), resolved.descriptor());
+        TurnSystemMessageProjector.project(
+            path, context, first.providerType(), resolved.descriptor());
     long estimatedInputTokens =
         requestTokenEstimator.estimateRequestTokens(path, requestSystemMessages);
     // 组内每个成员都必须容纳这次请求：输出预算取所有成员可提供预算的最小值。
@@ -266,8 +254,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
         resolved.members().stream()
             .mapToInt(
                 member ->
-                    outputTokens(
-                        member.parsed(), contextWindow(member.parsed()), estimatedInputTokens))
+                    TurnModelBudget.outputTokens(
+                        member.parsed(),
+                        TurnModelBudget.contextWindow(member.parsed()),
+                        estimatedInputTokens))
             .min()
             .orElseThrow();
     long conversationMaxOutputTokens =
@@ -295,205 +285,9 @@ public final class DatabaseTurnResolver implements TurnResolver {
         contextWindow);
   }
 
-  private static List<String> requestSystemMessages(
-      EntryPath path, AgentTurnContext context, ProviderType providerType, ModelDescriptor model) {
-    String currentBaseline = String.join("\n\n", context.systemSections().values());
-    if (path.requiresSystemBaseline()) {
-      return List.of(currentBaseline);
-    }
-    SystemContext existing = path.systemContext().orElse(null);
-    if (existing == null) {
-      return List.of(currentBaseline);
-    }
-    SystemContext next =
-        new SystemContext(context.systemSections(), existing.tools(), existing.hostedTools());
-    String pendingChange = existing.changesTo(next).map(SystemContext::renderChangeText).orElse("");
-    boolean incrementalSystemMessages =
-        providerType == ProviderType.ANTHROPIC && model.midConversationSystemMessages();
-    if (!incrementalSystemMessages) {
-      String collapsed = SystemContext.collapseSystemInstruction(path.entries());
-      return List.of(pendingChange.isEmpty() ? collapsed : collapsed + "\n\n" + pendingChange);
-    }
-
-    List<String> messages = new ArrayList<>();
-    for (Entry entry : path.entries()) {
-      if (!(entry.payload() instanceof SystemPayload system)) {
-        continue;
-      }
-      if (system.baseline()) {
-        messages.clear();
-        messages.add(String.join("\n\n", system.sections().values()));
-      } else if (!messages.isEmpty()) {
-        String changeText = SystemContext.renderChangeText(system);
-        if (!changeText.isEmpty()) {
-          messages.add(changeText);
-        }
-      }
-    }
-    if (!pendingChange.isEmpty()) {
-      messages.add(pendingChange);
-    }
-    return List.copyOf(messages);
-  }
-
-  /**
-   * 解析本 turn 实际调用的逻辑模型（MODEL 或 GROUP）：Thread 设置的模型存在时使用它；已从 catalog 移除时改用当前 Agent 的默认模型；二者都不可用时拒绝本
-   * turn。
-   *
-   * <p>Thread 设置不被改写：默认模型恢复或重新绑定后，下一 turn 立即生效。单 Model 的 variant 优先沿用原设置；目标模型没有该 variant
-   * 时，原模型改用自身的默认 variant，回退模型依次取 Agent 声明的 variant 与模型自身的默认 variant。只对模型回退，Agent 与 Environment
-   * 失效一律停止。
-   */
-  private ResolvedSelection resolveSelection(ModelSelection requested, Agent agent) {
-    Model model = modelRepository.getByName(requested.modelName());
-    if (model != null) {
-      return resolveLogical(model, requested.variant(), null);
-    }
-    ModelSelection defaultSelection = builtinAgentModel(agent);
-    String defaultModel = defaultSelection == null ? null : defaultSelection.modelName();
-    Model fallback =
-        defaultModel == null || defaultModel.equals(requested.modelName())
-            ? null
-            : modelRepository.getByName(defaultModel);
-    if (fallback == null) {
-      throw rejection(
-          "model "
-              + requested.modelName()
-              + " and the agent default model are both unavailable; bind an available model");
-    }
-    return resolveLogical(fallback, requested.variant(), defaultSelection.variant());
-  }
-
-  private static ModelSelection builtinAgentModel(Agent agent) {
-    ExecutionSelection execution = agent.execution();
-    if (execution == null || !BuiltinExecution.DRIVER.equals(execution.driver())) {
-      return null;
-    }
-    try {
-      return BuiltinExecution.model(execution);
-    } catch (IllegalArgumentException error) {
-      throw rejection(
-          "invalid agent builtin execution: " + agent.name() + ": " + messageOrClass(error));
-    }
-  }
-
-  /**
-   * 单 Model 按偏好依次取第一个由 config 声明的 variant（{@code preferredVariant}、{@code secondaryVariant}、默认
-   * variant）；GROUP 没有组级 variant，一次性冻结组版本与有序成员。
-   */
-  private ResolvedSelection resolveLogical(
-      Model model, String preferredVariant, String secondaryVariant) {
-    if (model.kind() == ModelKind.GROUP) {
-      if (preferredVariant != null) {
-        throw rejection("model group must not select a variant: " + model.name());
-      }
-      return resolveGroup(model);
-    }
-    ParsedAgentModelConfig parsed = parseModel(model);
-    String variantName =
-        findVariant(parsed, preferredVariant) != null
-            ? preferredVariant
-            : findVariant(parsed, secondaryVariant) != null
-                ? secondaryVariant
-                : parsed.defaultVariant();
-    MemberRuntime member = resolveMember(model, variantName);
-    return new ResolvedSelection(
-        member.descriptor(), contextWindow(member.parsed()), List.of(member), null);
-  }
-
-  /** 冻结组版本、有序成员及其 Provider/Descriptor/Variant：组能力取成员输入模态的交集、上下文取最小值，成员切换绝不重新读取 Catalog。 */
-  private ResolvedSelection resolveGroup(Model groupModel) {
-    ModelGroupConfigDTO group = groupConfigCodec.decode(groupModel.groupConfigJson());
-    List<MemberRuntime> members = new ArrayList<>(group.getMembers().size());
-    List<ModelGroupMemberExecution> executions = new ArrayList<>(group.getMembers().size());
-    Set<ModelInputModality> modalities = null;
-    boolean tools = true;
-    boolean reasoning = true;
-    boolean midConversationSystemMessages = true;
-    boolean messageLevelEffort = true;
-    int contextWindow = Integer.MAX_VALUE;
-    for (ModelGroupMemberDTO member : group.getMembers()) {
-      Model memberModel =
-          require(
-              modelRepository.getByName(member.getModelName()),
-              "group member model not found: " + member.getModelName());
-      if (memberModel.kind() != ModelKind.MODEL) {
-        throw rejection("group member is not a single model: " + member.getModelName());
-      }
-      MemberRuntime runtime = resolveMember(memberModel, member.getVariant());
-      members.add(runtime);
-      executions.add(
-          new ModelGroupMemberExecution(
-              runtime.providerType(), runtime.descriptor(), runtime.variant()));
-      tools &= runtime.descriptor().tools();
-      reasoning &= runtime.descriptor().reasoning();
-      midConversationSystemMessages &= runtime.descriptor().midConversationSystemMessages();
-      messageLevelEffort &= runtime.descriptor().messageLevelEffort();
-      if (modalities == null) {
-        modalities = new LinkedHashSet<>(runtime.descriptor().inputModalities());
-      } else {
-        modalities.retainAll(runtime.descriptor().inputModalities());
-      }
-      contextWindow = Math.min(contextWindow, contextWindow(runtime.parsed()));
-    }
-    if (modalities == null || modalities.isEmpty()) {
-      throw rejection("model group members have no common input modality: " + groupModel.name());
-    }
-    ModelDescriptor first = members.getFirst().descriptor();
-    ModelDescriptor groupDescriptor =
-        new ModelDescriptor(
-            first.providerName(),
-            groupModel.name(),
-            first.modelId(),
-            modalities,
-            tools,
-            reasoning,
-            midConversationSystemMessages,
-            messageLevelEffort);
-    ModelGroupExecution execution =
-        new ModelGroupExecution(
-            groupModel.name(),
-            groupModel.version(),
-            executions,
-            new LinkedHashSet<>(group.getFallbackStatusCodes()),
-            group.getCooldownSeconds());
-    return new ResolvedSelection(groupDescriptor, contextWindow, members, execution);
-  }
-
-  /** 解析单 Model 的执行身份；{@code variantName} 必须由该 Model 的 config 声明。 */
-  private MemberRuntime resolveMember(Model model, String variantName) {
-    Provider provider =
-        require(
-            providerRepository.getByName(model.providerName()),
-            "provider not found: " + model.providerName());
-    ProviderType providerType = provider.providerType();
-    if (providerType == null) {
-      throw rejection("provider type must not be null");
-    }
-    require(
-        providerFactories.get(providerType),
-        "provider factory not found for " + provider.name() + " (" + providerType + ")");
-    ParsedAgentModelConfig parsed = parseModel(model);
-    ModelVariant variant = findVariant(parsed, variantName);
-    if (variant == null) {
-      throw rejection("model variant not found: " + model.name() + " variant=" + variantName);
-    }
-    ModelDescriptor descriptor =
-        new ModelDescriptor(
-            model.providerName(),
-            model.name(),
-            model.modelId(),
-            parsed.inputModalities(),
-            parsed.tools(),
-            parsed.reasoning(),
-            parsed.midConversationSystemMessages(),
-            parsed.messageLevelEffort());
-    return new MemberRuntime(model.name(), provider, providerType, parsed, descriptor, variant);
-  }
-
   private static void requireReasoningSupport(MemberRuntime member) {
     if (member.variant().reasoningEffort() != null && !member.parsed().reasoning()) {
-      throw rejection("model does not support reasoning: " + member.modelName());
+      throw TurnRejection.of("model does not support reasoning: " + member.modelName());
     }
   }
 
@@ -509,7 +303,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
     ModelSelection conversation = BuiltinExecution.model(conversationSettings.execution());
     // 回退是设计行为，但只在真正执行压缩时告知一次配置与原因；请求前窗口判断不得重复刷日志。
     ModelSelection configured = compactionModelProvider.compactionModel();
-    ResolvedSelection resolved = null;
+    SelectionSnapshot resolved = null;
     if (configured != null) {
       ConfiguredCompactionSelection candidate = resolveConfiguredSelection(configured);
       if (candidate.resolved() == null) {
@@ -523,15 +317,16 @@ public final class DatabaseTurnResolver implements TurnResolver {
       resolved = candidate.resolved();
     }
     if (resolved == null) {
-      resolved = resolveLogicalModel(conversation);
+      resolved = selectionResolver.resolveExplicit(conversation);
     }
     for (MemberRuntime member : resolved.members()) {
       requireReasoningSupport(member);
     }
-    ExecutionSelection compactorExecution = BuiltinExecution.of(compactorSelection(resolved));
+    ExecutionSelection compactorExecution =
+        BuiltinExecution.of(TurnModelSelectionResolver.toSelection(resolved));
     int maxOutputTokens =
         resolved.members().stream()
-            .mapToInt(member -> outputTokens(member.parsed()))
+            .mapToInt(member -> TurnModelBudget.outputTokens(member.parsed()))
             .min()
             .orElseThrow();
     int outputBudget;
@@ -540,7 +335,7 @@ public final class DatabaseTurnResolver implements TurnResolver {
           BuiltinModelBudget.compactionOutputBudget(
               compactionConfigProvider.compactionConfig(), maxOutputTokens);
     } catch (IllegalArgumentException error) {
-      throw rejection(error.getMessage());
+      throw TurnRejection.of(error.getMessage());
     }
     // 分支继承 owner Agent 身份；压缩执行模型独立，环境与工具面来自切点处的 SYSTEM 基线而不是现场解析。
     BranchSettings childSettings =
@@ -556,13 +351,15 @@ public final class DatabaseTurnResolver implements TurnResolver {
    */
   private Result resolveCompactionBranch(EntryPath path) {
     BranchSettings settings = path.baseSettings();
-    ResolvedSelection resolved = resolveLogicalModel(BuiltinExecution.model(settings.execution()));
+    SelectionSnapshot resolved =
+        selectionResolver.resolveExplicit(BuiltinExecution.model(settings.execution()));
     for (MemberRuntime member : resolved.members()) {
       requireReasoningSupport(member);
     }
     SystemContext inherited =
         path.systemContext()
-            .orElseThrow(() -> rejection("compaction branch has no inherited SYSTEM baseline"));
+            .orElseThrow(
+                () -> TurnRejection.of("compaction branch has no inherited SYSTEM baseline"));
     String systemInstruction = inherited.systemInstruction();
     long estimatedInputTokens =
         requestTokenEstimator.estimateRequestTokens(path, List.of(systemInstruction));
@@ -570,8 +367,10 @@ public final class DatabaseTurnResolver implements TurnResolver {
         resolved.members().stream()
             .mapToInt(
                 member ->
-                    outputTokens(
-                        member.parsed(), contextWindow(member.parsed()), estimatedInputTokens))
+                    TurnModelBudget.outputTokens(
+                        member.parsed(),
+                        TurnModelBudget.contextWindow(member.parsed()),
+                        estimatedInputTokens))
             .min()
             .orElseThrow();
     MemberRuntime first = resolved.members().getFirst();
@@ -601,127 +400,30 @@ public final class DatabaseTurnResolver implements TurnResolver {
   }
 
   /** 已配置压缩模型的选择或不可用原因：引用缺失、Provider 删除/停用、组带 variant 都只影响本次回退。 */
-  private record ConfiguredCompactionSelection(ResolvedSelection resolved, String failureReason) {}
+  private record ConfiguredCompactionSelection(SelectionSnapshot resolved, String failureReason) {}
 
   private ConfiguredCompactionSelection resolveConfiguredSelection(ModelSelection configured) {
     try {
-      return new ConfiguredCompactionSelection(resolveLogicalModel(configured), null);
-    } catch (Rejection rejected) {
+      return new ConfiguredCompactionSelection(selectionResolver.resolveExplicit(configured), null);
+    } catch (TurnRejection rejected) {
       return new ConfiguredCompactionSelection(null, rejected.getMessage());
     }
   }
 
   /** 已配置的压缩模型（仅用于请求前窗口判断；无效配置静默沿用对话模型窗口）。 */
-  private ResolvedSelection configuredCompactionSelection() {
+  private SelectionSnapshot configuredCompactionSelection() {
     ModelSelection configured = compactionModelProvider.compactionModel();
     return configured == null ? null : resolveConfiguredSelection(configured).resolved();
   }
 
   /** 触发阈值使用的压缩模型窗口；无效配置沿用对话模型窗口，且不在这里记录回退日志。 */
   private int compactorContextWindow(int conversationContextWindow) {
-    ResolvedSelection configured = configuredCompactionSelection();
+    SelectionSnapshot configured = configuredCompactionSelection();
     return configured == null ? conversationContextWindow : configured.contextWindow();
   }
 
-  /** 按显式选择解析单个 MODEL 或 MODEL_GROUP；GROUP 必须不带 variant。 */
-  private ResolvedSelection resolveLogicalModel(ModelSelection selection) {
-    Objects.requireNonNull(selection, "selection");
-    Model model =
-        require(
-            modelRepository.getByName(selection.modelName()),
-            "model not found: " + selection.modelName());
-    return resolveLogical(model, selection.variant(), null);
-  }
-
-  private static ModelSelection compactorSelection(ResolvedSelection resolved) {
-    return resolved.group() == null
-        ? ModelSelection.model(
-            resolved.descriptor().modelName(), resolved.members().getFirst().variant().id())
-        : ModelSelection.group(resolved.descriptor().modelName());
-  }
-
-  /** Builtin 预算口径集中在 platform.harness.builtin；这里只把非法配置转换为确定性拒绝。 */
-  private static int contextWindow(ParsedAgentModelConfig parsedModel) {
-    try {
-      return BuiltinModelBudget.contextWindow(parsedModel);
-    } catch (IllegalArgumentException error) {
-      throw rejection(error.getMessage());
-    }
-  }
-
-  private static int outputTokens(
-      ParsedAgentModelConfig parsedModel, int contextWindow, long estimatedInputTokens) {
-    try {
-      return BuiltinModelBudget.outputTokens(parsedModel, contextWindow, estimatedInputTokens);
-    } catch (IllegalArgumentException error) {
-      throw rejection(error.getMessage());
-    }
-  }
-
-  private static int outputTokens(ParsedAgentModelConfig parsedModel) {
-    try {
-      return BuiltinModelBudget.outputTokens(parsedModel);
-    } catch (IllegalArgumentException error) {
-      throw rejection(error.getMessage());
-    }
-  }
-
-  private ParsedAgentModelConfig parseModel(Model model) {
-    try {
-      return modelConfigParser.parse(model.configJson());
-    } catch (IllegalArgumentException error) {
-      throw rejection("invalid model configuration: " + messageOrClass(error));
-    }
-  }
-
-  private static ModelVariant findVariant(ParsedAgentModelConfig model, String name) {
-    return model.variants().stream()
-        .filter(variant -> variant.id().equals(name))
-        .findFirst()
-        .orElse(null);
-  }
-
-  /** 一个单 Model 的已解析执行身份；模型组的每个成员各有一份。 */
-  private record MemberRuntime(
-      String modelName,
-      Provider provider,
-      ProviderType providerType,
-      ParsedAgentModelConfig parsed,
-      ModelDescriptor descriptor,
-      ModelVariant variant) {}
-
-  /** 逻辑模型的解析结果：单 Model 只有一个成员且 {@code group} 为 null；模型组按序列出全部成员与冻结的组执行快照。 */
-  private record ResolvedSelection(
-      ModelDescriptor descriptor,
-      int contextWindow,
-      List<MemberRuntime> members,
-      ModelGroupExecution group) {}
-
-  private static <T> T require(T value, String message) {
-    if (value == null) {
-      throw rejection(message);
-    }
-    return value;
-  }
-
   /** 确定性拒绝：只由显式调用产生，绝不捕获外部基础设施异常。 */
-  private static Rejection rejection(String message) {
-    return new Rejection(message);
-  }
-
   private static Result rejected(String message) {
     return new TurnResolver.Rejected(new AssistantError(REJECTION_CODE, message));
-  }
-
-  private static String messageOrClass(RuntimeException error) {
-    String detail = error.getMessage();
-    return detail == null || detail.isBlank() ? error.getClass().getSimpleName() : detail;
-  }
-
-  /** 内部确定性拒绝信号：只在显式拒绝点抛出，由 {@link #resolve} 转换为 {@link Result.Rejected}。 */
-  private static final class Rejection extends RuntimeException {
-    private Rejection(String message) {
-      super(message);
-    }
   }
 }

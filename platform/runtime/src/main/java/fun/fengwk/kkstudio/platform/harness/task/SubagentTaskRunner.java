@@ -55,7 +55,7 @@ import java.util.function.Supplier;
  * batch。这样并发重复调用（含目标 settings 期间变化）不会退化成「部分重放」错误，也不会因为重新物化默认 {@code maxTurns} 而改写原回执。
  *
  * <p>Runtime 的业务拒绝统一收敛为 {@link SubagentTaskRejectedException}（tool 得到明确失败而不是
- * NullPointerException）；Runtime 不可用时同样给出 明确错误。
+ * NullPointerException）；Runtime 不可用时同样给出明确错误。
  */
 public class SubagentTaskRunner implements SubagentRunner {
 

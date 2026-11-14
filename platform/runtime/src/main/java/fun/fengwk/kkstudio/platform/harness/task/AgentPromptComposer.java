@@ -36,7 +36,7 @@ public final class AgentPromptComposer {
     this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
   }
 
-  /** Returns each rendered section separately so the history can persist only changed sections. */
+  /** 逐个返回已渲染的段落，使 history 只持久化真正变化的段落。 */
   public Map<String, String> composeSections(AgentPromptInput input) {
     Objects.requireNonNull(input, "input");
     Capabilities capabilities = Capabilities.of(input.toolNames());

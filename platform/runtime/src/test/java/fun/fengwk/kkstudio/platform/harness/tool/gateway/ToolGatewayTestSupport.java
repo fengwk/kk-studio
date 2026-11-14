@@ -187,23 +187,6 @@ final class ToolGatewayTestSupport {
         INVOCATION_ID, scope(), 1, request, ToolApproval.notRequired(), remoteExecutions);
   }
 
-  /** 使用调用方提供的权限求值器与设置提供者装配网关。 */
-  static ToolExecutionGateway gatewayWith(
-      HarnessCatalog catalog,
-      PermissionEvaluator evaluator,
-      ToolSettingsProvider settingsProvider) {
-    return new ToolExecutionGateway(
-        TestRuntimeToolCatalogSource.of(catalog),
-        new FakeTransport(),
-        evaluator,
-        settingsProvider,
-        new FakeResourceStager(),
-        RESOURCE_MAX_BYTES,
-        OVERLOAD_RETRY_DELAY,
-        TEST_CLOCK,
-        new ConcurrencyAdmission(Integer.MAX_VALUE));
-  }
-
   static ToolExecutionGateway gateway(
       HarnessCatalog catalog, FakeTransport transport, FakeResourceStager store) {
     return gateway(catalog, transport, store, RESOURCE_MAX_BYTES, settings(PermissionAction.ALLOW));
@@ -213,8 +196,8 @@ final class ToolGatewayTestSupport {
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStager store,
-      int resourceMaxBytes) {
-    return gateway(catalog, transport, store, resourceMaxBytes, settings(PermissionAction.ALLOW));
+      int outputLimitBytes) {
+    return gateway(catalog, transport, store, outputLimitBytes, settings(PermissionAction.ALLOW));
   }
 
   static ToolExecutionGateway gateway(
@@ -229,13 +212,13 @@ final class ToolGatewayTestSupport {
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStager store,
-      int resourceMaxBytes,
+      int outputLimitBytes,
       ToolSettings settings) {
     return gateway(
         catalog,
         transport,
         store,
-        resourceMaxBytes,
+        outputLimitBytes,
         settings,
         new ConcurrencyAdmission(Integer.MAX_VALUE));
   }
@@ -244,14 +227,14 @@ final class ToolGatewayTestSupport {
       HarnessCatalog catalog,
       FakeTransport transport,
       FakeResourceStager store,
-      int resourceMaxBytes,
+      int outputLimitBytes,
       ToolSettings settings,
       ConcurrencyAdmission admission) {
     return gateway(
         TestRuntimeToolCatalogSource.of(catalog),
         transport,
         store,
-        resourceMaxBytes,
+        outputLimitBytes,
         settings,
         admission);
   }
@@ -267,7 +250,7 @@ final class ToolGatewayTestSupport {
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings(PermissionAction.ALLOW)),
         store,
-        RESOURCE_MAX_BYTES,
+        () -> RESOURCE_MAX_BYTES,
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         admission);
@@ -277,7 +260,7 @@ final class ToolGatewayTestSupport {
       RuntimeToolCatalogSource toolCatalogSource,
       FakeTransport transport,
       FakeResourceStager store,
-      int resourceMaxBytes,
+      int outputLimitBytes,
       ToolSettings settings,
       ConcurrencyAdmission admission) {
     return new ToolExecutionGateway(
@@ -286,7 +269,7 @@ final class ToolGatewayTestSupport {
         new PermissionEvaluator(new BashSurfaceAnalyzer()),
         new FixedToolSettingsProvider(settings),
         store,
-        resourceMaxBytes,
+        () -> outputLimitBytes,
         OVERLOAD_RETRY_DELAY,
         TEST_CLOCK,
         admission);
