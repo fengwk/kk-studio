@@ -226,7 +226,7 @@ export function IssueDetailModal({
     }
   }, [detail, isEditingSpec])
 
-  // 关闭时清理临时对话框与未提交草稿 (I09)
+  // 关闭时清理临时对话框与未提交草稿
   useEffect(() => {
     if (!isOpen) {
       setIsEditingSpec(false)

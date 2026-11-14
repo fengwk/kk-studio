@@ -124,7 +124,7 @@ export function IssueBoard({
 
         {/* 若有不在当前 workflow 定义里的其他历史状态 Issue，兜底展示 */}
         {issuesByState.unknownStateIssues.length > 0 && (
-          <div className="project-board-column other-states-column">
+          <div className="project-board-column">
             <div className="column-header">
               <div className="column-header-left">
                 <h3 className="column-title">{t('projects.board.otherStates')}</h3>

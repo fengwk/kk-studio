@@ -71,7 +71,7 @@ export function useIssueActionRunner({
     setPendingActionResult(safeLoadPendingAction(issueId))
   }, [issueId, isOpen])
 
-  // 关闭时清理执行状态与提示 (I09)
+  // 关闭时清理执行状态与提示
   useEffect(() => {
     if (!isOpen) {
       isActionPendingRef.current = false

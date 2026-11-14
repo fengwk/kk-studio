@@ -60,7 +60,7 @@ export function useIssueEvidence({
   const [isUploading, setIsUploading] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // 关闭时清理本地证据，重新打开以服务端事实为准 (I09)。
+  // 关闭时清理本地证据，重新打开以服务端事实为准。
   useEffect(() => {
     if (!isOpen) {
       setLocalEvidences([])
