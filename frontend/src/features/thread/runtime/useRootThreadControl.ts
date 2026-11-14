@@ -1,11 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import { useBoundBranchPanel } from '@/features/thread/runtime/useBoundBranchPanel'
 import { useBoundThreadPanelViews } from '@/features/thread/runtime/useBoundThreadPanelViews'
 import type { ThreadPanelComposerInput } from '@/features/thread/runtime/thread-panel/ThreadPanel'
-import { harnessService } from '@/shared/api/harness-service'
-import { queryKeys } from '@/shared/lib/query-keys'
 import {
   materializeAgentBranchDraft,
   type BranchDraft,
@@ -36,10 +33,7 @@ import {
   type PaneTarget,
   type PendingAcceptance,
 } from '@/features/thread/runtime/agent-pane'
-import {
-  threadCommandsForTarget,
-  type CommandCompactionState,
-} from '@/features/thread/runtime/thread-panel/thread-commands'
+import { threadCommandsForTarget } from '@/features/thread/runtime/thread-panel/thread-commands'
 import { useI18n } from '@/shared/i18n'
 import { paneTargetViewKey } from '@/features/thread/runtime/thread-presentation'
 import { cloneDraft } from '@/features/thread/runtime/root-thread/branch-draft-replay'
@@ -47,6 +41,7 @@ import {
   handlePaneCommand,
   type PaneCommandContext,
 } from '@/features/thread/runtime/root-thread/pane-command-handler'
+import { useCompactionAvailability } from '@/features/thread/runtime/root-thread/useCompactionAvailability'
 import { useLocalBranchDraft } from '@/features/thread/runtime/root-thread/useLocalBranchDraft'
 import { usePaneAcceptance } from '@/features/thread/runtime/root-thread/usePaneAcceptance'
 import { usePaneBackgroundProjection } from '@/features/thread/runtime/root-thread/usePaneBackgroundProjection'
@@ -501,29 +496,12 @@ export function useRootThreadControl({
     message.role === 'entry'
     && message.kind === 'compaction'
     && (message.compaction?.state === 'failed' || message.compaction?.state === 'stopped'))
-  const advisoryEnabled = Boolean(
-    (commandPaletteVisible || hasRetryableCompaction)
-    && isBoundTarget(target)
-    && boundThreadId
-    && !composerDisabled,
-  )
-
-  const compactionAdvisoryQuery = useQuery({
-    queryKey: queryKeys.threads.compactionAvailability(boundThreadId),
-    queryFn: ({ signal }) => harnessService.getCompactionAvailability(boundThreadId, { signal }),
-    enabled: advisoryEnabled,
+  // 失败/停止的压缩卡会显示“重新压缩”，与命令面板共用同一条可用性查询；没有卡片时不额外请求。
+  const compaction = useCompactionAvailability({
+    bound: isBoundTarget(target),
+    boundThreadId,
+    enabled: Boolean(commandPaletteVisible || hasRetryableCompaction) && !composerDisabled,
   })
-
-  let compaction: CommandCompactionState | null = null
-  if (isBoundTarget(target)) {
-    if (compactionAdvisoryQuery.isError) {
-      compaction = { status: 'failed' }
-    } else if (compactionAdvisoryQuery.data) {
-      compaction = { status: 'ready', availability: compactionAdvisoryQuery.data }
-    } else {
-      compaction = { status: 'checking' }
-    }
-  }
 
   const commands = threadCommandsForTarget(
     target,
