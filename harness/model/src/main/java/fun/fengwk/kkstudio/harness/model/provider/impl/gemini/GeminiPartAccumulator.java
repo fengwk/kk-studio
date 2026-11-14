@@ -81,40 +81,14 @@ final class GeminiPartAccumulator {
       return;
     }
 
-    // 2) 同一 slot 的累计快照替换：上游把同一 part 的完整累积形态再发一次，整体替换为上游事实。
-    if (text != null
-        && !functionCallPart
-        && signature == null
-        && slot != null
-        && slot.canAdoptCumulativeText(normalizedPart, text, thought)) {
-      String delta = text.substring(slot.text.length());
-      slot.replaceWith(normalizedPart, text);
-      emitTextDelta(delta, thought);
+    // 2) 同一 slot 的累计快照替换。
+    if (adoptCumulativeSnapshot(slot, normalizedPart, text, thought, functionCallPart, signature)) {
       return;
     }
 
-    // 3) 朴素 text/thought part 的增量累积：双方都只含 text/thought，累积不会丢失任何字段语义。
-    if (text != null
-        && signature == null
-        && !functionCallPart
-        && isPlainPartShape(partNode)
-        && singlePartFrame) {
-      TrackedPart lastPart = lastTrackedPart();
-      if (lastPart != null
-          && lastPart.plainShape
-          && lastPart.hasText
-          && lastPart.thought == thought) {
-        String accumulated = lastPart.text.toString();
-        String delta =
-            accumulated.isEmpty() || !text.startsWith(accumulated)
-                ? text
-                : text.substring(accumulated.length());
-        if (!delta.isEmpty()) {
-          lastPart.text.append(delta);
-          emitTextDelta(delta, thought);
-        }
-        return;
-      }
+    // 3) 朴素 text/thought part 的增量累积。
+    if (appendPlainDelta(partNode, text, thought, functionCallPart, signature, singlePartFrame)) {
+      return;
     }
 
     // 4) 完整原生 part 边界：原样保留，未知字段与未知 union 成员绝不合并、绝不丢弃。
@@ -128,6 +102,61 @@ final class GeminiPartAccumulator {
       captureFunctionCall(trackedPart, partNode.get("functionCall"));
       emitFunctionCall(trackedPart);
     }
+  }
+
+  /** 上游把同一 part 的完整累积形态再发一次时整体替换为上游事实；返回是否已消费该 part。 */
+  private boolean adoptCumulativeSnapshot(
+      TrackedPart slot,
+      ObjectNode normalizedPart,
+      String text,
+      boolean thought,
+      boolean functionCallPart,
+      String signature) {
+    if (text == null
+        || functionCallPart
+        || signature != null
+        || slot == null
+        || !slot.canAdoptCumulativeText(normalizedPart, text, thought)) {
+      return false;
+    }
+    String delta = text.substring(slot.text.length());
+    slot.replaceWith(normalizedPart, text);
+    emitTextDelta(delta, thought);
+    return true;
+  }
+
+  /** 双方都只含 text/thought 的朴素增量累积；返回是否已消费该 part。 */
+  private boolean appendPlainDelta(
+      JsonNode partNode,
+      String text,
+      boolean thought,
+      boolean functionCallPart,
+      String signature,
+      boolean singlePartFrame) {
+    if (text == null
+        || signature != null
+        || functionCallPart
+        || !isPlainPartShape(partNode)
+        || !singlePartFrame) {
+      return false;
+    }
+    TrackedPart lastPart = lastTrackedPart();
+    if (lastPart == null
+        || !lastPart.plainShape
+        || !lastPart.hasText
+        || lastPart.thought != thought) {
+      return false;
+    }
+    String accumulated = lastPart.text.toString();
+    String delta =
+        accumulated.isEmpty() || !text.startsWith(accumulated)
+            ? text
+            : text.substring(accumulated.length());
+    if (!delta.isEmpty()) {
+      lastPart.text.append(delta);
+      emitTextDelta(delta, thought);
+    }
+    return true;
   }
 
   /** 捕捉 functionCall 的规范化状态：id 缺失时补协议 id；name/args 已在 {@link #validateParts} 严格校验。 */
