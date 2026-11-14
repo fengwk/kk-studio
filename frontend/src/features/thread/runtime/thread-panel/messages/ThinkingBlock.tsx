@@ -6,7 +6,7 @@ import {
   projectThinkingLine,
   type ThinkingLineProjection,
 } from '@/features/thread/runtime/thread-panel/messages/thinking-text'
-import { announceTranscriptReading } from '@/features/thread/runtime/transcript-reading'
+import { announceTranscriptReading } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import { useI18n } from '@/shared/i18n'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import './thinking-block.css'

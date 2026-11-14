@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { parseTaskReceipt } from '@/features/thread/runtime/task-tool-parser'
+import { parseTaskReceipt } from '@/features/thread/runtime/state/task-tool-parser'
 import { buildToolMessageView } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
-import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline'
-import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
+import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type {
   HarnessSessionEntryDTO,
   ToolInvocationDTO,

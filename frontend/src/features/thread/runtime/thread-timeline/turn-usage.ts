@@ -1,10 +1,10 @@
-import { asRecord } from '@/features/thread/runtime/payload-json'
+import { asRecord } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { getString } from '@/shared/lib/value'
 import {
   accumulateTurnUsage,
   parseAssistantUsage,
 } from '@/features/thread/runtime/thread-timeline/turn-usage-format'
-import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
+import type { TurnUsage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 /**

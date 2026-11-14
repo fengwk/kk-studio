@@ -1,6 +1,6 @@
 import { ToolContentView } from '@/features/thread/runtime/thread-panel/messages/ToolContentView'
 import { ToolOutputViewport } from '@/features/thread/runtime/thread-panel/messages/ToolOutputViewport'
-import { parseTaskArguments, parseTaskReceipt } from '@/features/thread/runtime/task-tool-parser'
+import { parseTaskArguments, parseTaskReceipt } from '@/features/thread/runtime/state/task-tool-parser'
 import type { ToolRendererMessage, ToolRendererProps } from '@/platform/extensions/types'
 
 /**

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { EntryMessageBlock } from '@/features/thread/runtime/thread-panel/messages/EntryMessageBlock'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
 import { EntryBranchContext } from '@/features/thread/runtime/thread-panel/entry-branch-context'
-import type { DialogueMessage, EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { DialogueMessage, EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 function event(
   kind: EntryEventDialogueMessage['kind'],

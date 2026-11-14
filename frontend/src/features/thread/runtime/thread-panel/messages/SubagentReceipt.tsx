@@ -6,7 +6,7 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useState } from 'react'
-import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
+import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import {
   discloseText,
   disclosureHint,
@@ -21,8 +21,8 @@ import {
 import { subagentTaskPreview } from '@/features/thread/runtime/thread-panel/messages/subagent-receipt-preview'
 import { SystemMessageBody } from '@/features/thread/runtime/thread-panel/messages/SystemMessageBody'
 import { ThreadDisclosure } from '@/features/thread/runtime/thread-panel/messages/ThreadDisclosure'
-import { announceTranscriptReading } from '@/features/thread/runtime/transcript-reading'
-import type { EntryNotification } from '@/features/thread/runtime/thread-timeline-types'
+import { announceTranscriptReading } from '@/features/thread/runtime/thread-timeline/transcript-reading'
+import type { EntryNotification } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import './subagent-receipt.css'
 

@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { AssistantMessageBlock } from '@/features/thread/runtime/thread-panel/messages/AssistantMessageBlock'
-import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { copyTextToClipboard } from '@/shared/lib/clipboard'
 
 vi.mock('@/shared/lib/clipboard', () => ({

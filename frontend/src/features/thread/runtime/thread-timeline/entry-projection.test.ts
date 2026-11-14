@@ -3,7 +3,7 @@ import {
   projectDurableEntry,
   type EntryProjectionContext,
 } from '@/features/thread/runtime/thread-timeline/entry-projection'
-import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { getLocale, LOCALE_STORAGE_KEY, setLocale } from '@/shared/i18n'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'

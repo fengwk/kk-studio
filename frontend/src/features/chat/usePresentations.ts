@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useState, type RefObject } from 'react'
 import type { ChatPaneState } from '@/features/chat/chat-pane-state'
 import { visibleChatPanes } from '@/features/chat/chat-pane-state'
-import type { ThreadPresentation } from '@/features/thread/runtime/thread-presentation'
+import type { ThreadPresentation } from '@/features/thread/runtime/panes/thread-presentation'
 
 export interface DebugSource {
   paneId: string

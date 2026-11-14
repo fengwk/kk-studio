@@ -4,8 +4,8 @@ import {
   type TextDisclosure,
 } from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
 import type { ToolCallPreview as ToolCallPreviewData } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
-import type { ToolContent, ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
-import type { TaskToolReceipt } from '@/features/thread/runtime/task-tool-parser'
+import type { ToolContent, ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import type { TaskToolReceipt } from '@/features/thread/runtime/state/task-tool-parser'
 
 /** 正文与附件分离：文本类内容参与单文本窗口，resource 始终逐条渲染。 */
 export function splitContents(

@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 import type { useApplicationEvents } from '@/shared/app-events'
-import type { RealtimeFrameScheduler } from '@/features/thread/runtime/realtime-frame-scheduler'
+import type { RealtimeFrameScheduler } from '@/features/thread/runtime/thread-realtime/realtime-frame-scheduler'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { isActiveModelGeneration } from '@/features/thread/runtime/thread-realtime/model-recovery'
 import {

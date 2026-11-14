@@ -1,5 +1,5 @@
 import { AlertTriangle, ArrowLeft, Bot, FileText, X } from 'lucide-react'
-import { AgentPane } from '@/features/thread/runtime/AgentPane'
+import { AgentPane } from '@/features/thread/runtime/panes/AgentPane'
 import { useI18n } from '@/shared/i18n'
 import { Badge } from '@/shared/ui/data/Badge'
 import { Button } from '@/shared/ui/controls/Button'

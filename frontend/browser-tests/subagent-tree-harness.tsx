@@ -3,10 +3,10 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
-import { SubagentTreePanel } from '@/features/thread/runtime/SubagentTreePanel'
-import { ActiveThreadTree } from '@/features/thread/runtime/ActiveThreadTree'
+import { SubagentTreePanel } from '@/features/thread/runtime/panes/SubagentTreePanel'
+import { ActiveThreadTree } from '@/features/thread/runtime/panes/ActiveThreadTree'
 import { projectThreadTree, type ActiveThreadTreeNode } from '@/features/thread/runtime/thread-panel/active-thread-tree'
-import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
+import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import type { TurnEndOutcome } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')

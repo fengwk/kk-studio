@@ -1,8 +1,8 @@
 import type { RefObject } from 'react'
 import { ThreadTranscript } from '@/features/thread/runtime/thread-panel/ThreadTranscript'
-import { transcriptStreamRevision } from '@/features/thread/runtime/transcript-reading'
-import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/useChatTranscriptAutoScroll'
-import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import { transcriptStreamRevision } from '@/features/thread/runtime/thread-timeline/transcript-reading'
+import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/useChatTranscriptAutoScroll'
+import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 /**
  * Conversation 主视图：实际挂载的滚动容器（与 Event 视图互斥，各自拥有独立的

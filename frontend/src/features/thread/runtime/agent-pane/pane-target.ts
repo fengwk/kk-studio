@@ -1,6 +1,6 @@
 import type { ComposerPart } from '@/features/thread/composer/composer-parts'
 import type { BranchDraft } from '@/features/thread/branch-draft'
-import type { PendingAcceptance } from '@/features/thread/runtime/pending-request-store'
+import type { PendingAcceptance } from '@/features/thread/runtime/state/pending-request-store'
 import { isCanonicalThreadName } from '@/features/thread/thread-name'
 import { hasExactKeys, isRecord, nonBlank } from '@/shared/lib/value'
 import type {

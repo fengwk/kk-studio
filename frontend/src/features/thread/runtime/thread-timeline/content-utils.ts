@@ -3,7 +3,7 @@ import type {
   ToolAttachment,
   ToolAttachmentType,
   ToolContent,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 export function contentText(content: Record<string, unknown>): string {
   const type = getString(content.type)

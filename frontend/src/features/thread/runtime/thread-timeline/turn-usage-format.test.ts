@@ -8,7 +8,7 @@ import {
   mergeTurnUsage,
   parseAssistantUsage,
 } from '@/features/thread/runtime/thread-timeline/turn-usage-format'
-import type { TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
+import type { TurnUsage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
 
 function usage(overrides: Partial<TurnUsage> = {}): TurnUsage {

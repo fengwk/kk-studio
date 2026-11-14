@@ -1,4 +1,4 @@
-import type { DraftSaveOutcome } from '@/features/thread/runtime/thread-draft-store'
+import type { DraftSaveOutcome } from '@/features/thread/runtime/state/thread-draft-store'
 
 /** 单个草稿字段的写入屏障：最新 token + 是否有未落盘内容。 */
 export interface DraftWriteField {

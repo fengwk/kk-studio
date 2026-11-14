@@ -6,9 +6,9 @@ import '@/styles.css'
 // 不能复制一份布局，否则外层滚动区退化为不可滚动的普通块。
 import '@/features/thread/runtime/thread-panel/thread-conversation.css'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
-import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline'
-import { transcriptStreamRevision } from '@/features/thread/runtime/transcript-reading'
-import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/useChatTranscriptAutoScroll'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
+import { transcriptStreamRevision } from '@/features/thread/runtime/thread-timeline/transcript-reading'
+import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/useChatTranscriptAutoScroll'
 import { setLocale } from '@/shared/i18n'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import {

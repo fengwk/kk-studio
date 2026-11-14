@@ -6,7 +6,7 @@ import {
   isExitPendingStatus,
   isThreadActiveStatus,
 } from '@/features/thread/runtime/thread-panel/thread-status-format'
-import type { UsageCost } from '@/features/thread/runtime/thread-timeline-types'
+import type { UsageCost } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { setLocale, translate as t } from '@/shared/i18n'
 
 const EMPTY_USAGE = {

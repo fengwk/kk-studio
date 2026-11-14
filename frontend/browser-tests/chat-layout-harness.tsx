@@ -17,14 +17,14 @@ import { UserMessageBlock } from '@/features/thread/runtime/thread-panel/message
 import { MetaMessageBlock } from '@/features/thread/runtime/thread-panel/messages/MetaMessageBlock'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
 import { EntryBranchContext } from '@/features/thread/runtime/thread-panel/entry-branch-context'
-import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline-builder'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline-builder'
 import { Button } from '@/shared/ui/controls/Button'
 import { formatTurnUsageText } from '@/features/thread/runtime/thread-timeline/content-utils'
 import type {
   MetaDialogueMessage,
   TextDialogueMessage,
   TurnUsage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')

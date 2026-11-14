@@ -1,11 +1,11 @@
-import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { getString } from '@/shared/lib/value'
 import type {
   DialogueContent,
   DialogueMessage,
   ToolDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
-import { toolCallIdentity as strictToolCallIdentity } from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import { toolCallIdentity as strictToolCallIdentity } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import {
   contentText,
   toResourceAttachment,

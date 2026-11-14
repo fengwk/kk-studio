@@ -1,10 +1,10 @@
-import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { getString } from '@/shared/lib/value'
 import { parseCodecInstantMillis } from '@/shared/lib/date-format'
 import type {
   DialogueMessage,
   MetaDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { contentText } from '@/features/thread/runtime/thread-timeline/content-utils'
 import { createModelAttemptFailureMessage } from '@/features/thread/runtime/thread-timeline/model-attempt-failure'
 import {

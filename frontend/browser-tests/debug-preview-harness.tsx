@@ -5,7 +5,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router'
 import '@/styles.css'
 import { setLocale } from '@/shared/i18n'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import { AgentPane } from '@/features/thread/runtime/AgentPane'
+import { AgentPane } from '@/features/thread/runtime/panes/AgentPane'
 import type { AgentDTO } from '@/shared/api/generated/contracts'
 
 setLocale('zh-CN')

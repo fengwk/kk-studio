@@ -11,7 +11,7 @@ import {
 import { useDebugLayoutMode } from '@/features/thread/runtime/thread-panel/useDebugLayoutMode'
 import { useDebugViewNavigation } from '@/features/thread/runtime/thread-panel/useDebugViewNavigation'
 import { useEventListNavigation } from '@/features/thread/runtime/thread-panel/useEventListNavigation'
-import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/useChatTranscriptAutoScroll'
+import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/useChatTranscriptAutoScroll'
 import { useI18n } from '@/shared/i18n'
 import './thread-conversation.css'
 

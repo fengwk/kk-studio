@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
-import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
 
 export type ThreadPanelMainMode = 'conversation' | 'debug'
 

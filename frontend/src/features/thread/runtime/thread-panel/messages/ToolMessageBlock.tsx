@@ -29,10 +29,10 @@ import {
 } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
 import {
   parseTaskReceipt,
-} from '@/features/thread/runtime/task-tool-parser'
-import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
-import { announceTranscriptReading } from '@/features/thread/runtime/transcript-reading'
-import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/state/task-tool-parser'
+import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
+import { announceTranscriptReading } from '@/features/thread/runtime/thread-timeline/transcript-reading'
+import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { ToolRendererProps } from '@/platform/extensions/types'
 import { useI18n } from '@/shared/i18n'
 import { ResourceUriText } from '@/shared/ui/markdown/ResourceUriText'

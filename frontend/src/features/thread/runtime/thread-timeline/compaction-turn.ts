@@ -1,9 +1,9 @@
-import { asRecord } from '@/features/thread/runtime/payload-json'
+import { asRecord } from '@/features/thread/runtime/thread-timeline/payload-json'
 import type {
   CompactionCardFact,
   CompactionCardState,
   EntryEventDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { getString } from '@/shared/lib/value'
 import { translate, type TranslationKey } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'

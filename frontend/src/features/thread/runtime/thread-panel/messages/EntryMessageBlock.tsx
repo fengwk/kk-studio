@@ -2,7 +2,7 @@ import { CircleDot, FileWarning } from 'lucide-react'
 import { CompactionEntryBlock } from '@/features/thread/runtime/thread-panel/messages/CompactionEntryBlock'
 import { NotificationEntryBlock } from '@/features/thread/runtime/thread-panel/messages/NotificationEntryBlock'
 import { SystemMessageCard } from '@/features/thread/runtime/thread-panel/messages/SystemMessageCard'
-import type { EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 /**
  * 可复用的持久 Entry 审计块。它接收的是稳定的 timeline 契约，

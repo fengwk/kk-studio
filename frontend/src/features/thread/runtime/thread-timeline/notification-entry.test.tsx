@@ -1,10 +1,10 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
-import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
+import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { EntryMessageBlock } from '@/features/thread/runtime/thread-panel/messages/EntryMessageBlock'
-import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline'
-import type { EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
+import type { EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadCommandDTO,

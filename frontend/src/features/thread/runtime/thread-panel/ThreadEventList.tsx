@@ -1,6 +1,6 @@
 import type { KeyboardEvent, RefObject } from 'react'
 import { Button } from '@/shared/ui/controls/Button'
-import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
 import { formatBackendDateSeconds } from '@/shared/lib/date-format'
 import { useI18n } from '@/shared/i18n'
 

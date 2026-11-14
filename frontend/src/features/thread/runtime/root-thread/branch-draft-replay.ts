@@ -1,5 +1,5 @@
 import type { BranchDraft } from '@/features/thread/branch-draft'
-import { asRecord } from '@/features/thread/runtime/payload-json'
+import { asRecord } from '@/features/thread/runtime/thread-timeline/payload-json'
 import {
   copyExecutionSettings,
   createBuiltinExecution,

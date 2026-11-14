@@ -5,7 +5,7 @@ import {
   getBuiltinModelSelection,
   isSameExecution,
 } from '@/shared/api/contracts/ai-runtime'
-import { asRecord } from '@/features/thread/runtime/payload-json'
+import { asRecord } from '@/features/thread/runtime/thread-timeline/payload-json'
 import type {
   AgentDTO,
   HarnessBranchSettingsDTO,

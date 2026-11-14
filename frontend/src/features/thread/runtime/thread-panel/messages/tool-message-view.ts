@@ -6,7 +6,7 @@ import {
 import type {
   ToolContent,
   ToolDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 type ToolVisualState = 'pending' | 'success' | 'error'
 type ToolExecutionState =

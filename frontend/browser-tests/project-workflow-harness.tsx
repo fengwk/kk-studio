@@ -9,7 +9,7 @@ import { ProjectsInvalidationBridge } from '@/features/projects/extensions/proje
 import { ProjectDetailPage } from '@/features/projects/ProjectDetailPage'
 import { ProjectsPage } from '@/features/projects/ProjectsPage'
 import { IssueDetailModal } from '@/features/projects/components/IssueDetailModal'
-import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
+import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import '@/features/thread/runtime/thread-panel/messages/tool-card.css'
 
 setLocale('zh-CN')

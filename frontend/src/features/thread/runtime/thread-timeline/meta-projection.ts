@@ -1,4 +1,4 @@
-import type { MetaDialogueMessage, TurnUsage } from '@/features/thread/runtime/thread-timeline-types'
+import type { MetaDialogueMessage, TurnUsage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { formatTurnUsageText } from '@/features/thread/runtime/thread-timeline/turn-usage-format'
 
 /**

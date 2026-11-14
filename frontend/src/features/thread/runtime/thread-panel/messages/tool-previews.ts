@@ -1,4 +1,4 @@
-import type { EditReview } from '@/features/thread/runtime/mutation-review'
+import type { EditReview } from '@/features/thread/runtime/state/mutation-review'
 import { parseJsonPrefix } from '@/features/thread/runtime/thread-panel/messages/json-prefix'
 import { isRecord, getString } from '@/shared/lib/value'
 

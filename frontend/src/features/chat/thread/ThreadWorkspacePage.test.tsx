@@ -11,7 +11,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { interactionService } from '@/shared/api/interaction-service'
 import { createTextPart } from '@/features/thread/composer/composer-parts'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
-import { saveThreadDraftParts } from '@/features/thread/runtime/thread-draft-store'
+import { saveThreadDraftParts } from '@/features/thread/runtime/state/thread-draft-store'
 import { setLocale } from '@/shared/i18n'
 import type {
   HarnessSessionEntryDTO,

@@ -2,7 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { describe, expect, it, vi } from 'vitest'
 import { setLocale } from '@/shared/i18n'
-import { ThreadNavigationContext } from '@/features/thread/runtime/thread-navigation-context'
+import { ThreadNavigationContext } from '@/features/thread/runtime/panes/thread-navigation-context'
 import { InteractionOwnerSource } from './InteractionOwnerSource'
 import type { InteractionDTO } from '@/shared/api/generated/contracts'
 

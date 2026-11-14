@@ -6,8 +6,8 @@ import { setLocale } from '@/shared/i18n'
 import { ThreadEventView } from '@/features/thread/runtime/thread-panel/ThreadEventView'
 import { useThreadPanelViewState } from '@/features/thread/runtime/thread-panel/useThreadPanelViewState'
 import type { DebugInspectorSelection } from '@/features/thread/runtime/thread-panel/ThreadDebugInspector'
-import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events'
-import type { ThreadModelRequestDebugData } from '@/features/thread/runtime/thread-timeline-types'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
+import type { ThreadModelRequestDebugData } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 setLocale('zh-CN')
 

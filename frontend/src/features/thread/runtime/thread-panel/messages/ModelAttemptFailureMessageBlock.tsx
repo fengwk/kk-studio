@@ -3,7 +3,7 @@ import { ThinkingBlock } from '@/features/thread/runtime/thread-panel/messages/T
 import { retryCountdownSeconds } from '@/features/thread/runtime/thread-panel/messages/retry-countdown'
 import type {
   ModelAttemptFailureDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { CopyButton } from '@/shared/ui/markdown/CodeBlock'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { useI18n } from '@/shared/i18n'

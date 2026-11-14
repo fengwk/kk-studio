@@ -6,8 +6,8 @@ import { ThreadEventView } from '@/features/thread/runtime/thread-panel/ThreadEv
 import { ThreadEventDetail } from '@/features/thread/runtime/thread-panel/ThreadEventDetail'
 import { useThreadPanelViewState } from '@/features/thread/runtime/thread-panel/useThreadPanelViewState'
 import type { DebugInspectorSelection } from '@/features/thread/runtime/thread-panel/ThreadDebugInspector'
-import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events'
-import type { ThreadModelRequestDebugData } from '@/features/thread/runtime/thread-timeline-types'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
+import type { ThreadModelRequestDebugData } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
 
 function record(id: string, overrides: Partial<ThreadEventRecord> = {}): ThreadEventRecord {

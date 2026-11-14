@@ -1,6 +1,6 @@
 import { useI18n } from '@/shared/i18n'
 import { formatExecutionModelLabel } from '@/features/catalog'
-import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
+import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import { formatThreadStatusLabel } from './thread-status-format'
 import { threadTreeOutcome, type ActiveThreadTreeRow } from './active-thread-tree'
 import './thread-tree.css'

@@ -2,7 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { MemoryRouter } from 'react-router'
 import '@/styles.css'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
-import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
 import { setLocale } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 

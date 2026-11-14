@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ThinkingBlock } from '@/features/thread/runtime/thread-panel/messages/ThinkingBlock'
-import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/transcript-reading'
+import { TRANSCRIPT_READING_INTENT_EVENT } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 
 // jsdom 的测量 stub 为 7px/字符、容器宽 1200px：213 字符必然超宽，触发左侧省略。
 const LONG_THINKING = `HEAD-${'x'.repeat(200)}-TAILEND`

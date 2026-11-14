@@ -11,8 +11,8 @@ import type { ComposerPart } from '@/features/thread/composer/composer-parts'
 import type {
   DialogueMessage,
   QueuedThreadMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
-import type { QueuedCustomMessage } from '@/features/thread/runtime/queued-custom-messages'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import type { QueuedCustomMessage } from '@/features/thread/runtime/state/queued-custom-messages'
 import './thread-conversation.css'
 
 /**

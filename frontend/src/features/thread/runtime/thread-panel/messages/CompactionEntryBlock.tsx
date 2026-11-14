@@ -2,12 +2,12 @@ import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { SystemMessageBody } from '@/features/thread/runtime/thread-panel/messages/SystemMessageBody'
 import { SystemMessageCard } from '@/features/thread/runtime/thread-panel/messages/SystemMessageCard'
-import { ThreadLink } from '@/features/thread/runtime/ThreadLink'
+import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import {
   compactionRetryDisabledReasonKey,
   useCompactionActions,
 } from '@/features/thread/runtime/thread-panel/compaction-actions-context'
-import type { CompactionCardState, EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { CompactionCardState, EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import {
   compactionCardTitleKey,
   compactionFailureReasonKey,

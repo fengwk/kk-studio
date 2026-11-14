@@ -1,7 +1,7 @@
-import { AgentPane } from '@/features/thread/runtime/AgentPane'
+import { AgentPane } from '@/features/thread/runtime/panes/AgentPane'
 import type { BranchRequestInput, PaneReport } from '@/features/thread/runtime/root-thread/types'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
-import type { ThreadPresentation } from '@/features/thread/runtime/thread-presentation'
+import type { ThreadPresentation } from '@/features/thread/runtime/panes/thread-presentation'
 import { chatService } from '@/features/chat/chat-service'
 import { isNotFoundError } from '@/shared/api/client'
 import type {

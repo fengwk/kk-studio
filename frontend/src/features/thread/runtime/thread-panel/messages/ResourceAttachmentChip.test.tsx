@@ -6,7 +6,7 @@ import {
   ResourceBlobUrlContext,
   type ResourceBlobUrls,
 } from '@/features/thread/runtime/thread-panel/messages/ResourceBlobUrlContext'
-import type { ToolAttachment } from '@/features/thread/runtime/thread-timeline-types'
+import type { ToolAttachment } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 function attachment(overrides: Partial<ToolAttachment> = {}): ToolAttachment {
   return {

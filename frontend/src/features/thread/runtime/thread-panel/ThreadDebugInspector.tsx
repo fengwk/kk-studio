@@ -6,7 +6,7 @@ import type {
   ThreadModelRequestDebugSubagent,
   ThreadModelRequestDebugTool,
   ThreadProviderRequestPreviewData,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import {
   CacheSection,
   PreviewSection,

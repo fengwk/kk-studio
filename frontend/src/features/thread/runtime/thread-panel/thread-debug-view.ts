@@ -1,10 +1,10 @@
 import type { RefObject } from 'react'
 import type { DebugInspectorSelection } from '@/features/thread/runtime/thread-panel/ThreadDebugInspector'
-import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
 import type {
   ThreadModelRequestDebugData,
   ThreadProviderRequestPreviewData,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { TranslationKey } from '@/shared/i18n'
 
 /** Debug 主视图的三个互斥区域；宽面板并排展示，窄面板用 Tab 切换。 */

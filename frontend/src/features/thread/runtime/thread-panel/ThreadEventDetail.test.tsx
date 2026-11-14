@@ -1,7 +1,7 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { ThreadEventDetail } from '@/features/thread/runtime/thread-panel/ThreadEventDetail'
-import type { ThreadEventRecord } from '@/features/thread/runtime/thread-events'
+import type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events'
 
 function createRecord(overrides: Partial<ThreadEventRecord> = {}): ThreadEventRecord {
   return {

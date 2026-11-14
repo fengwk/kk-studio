@@ -1,7 +1,7 @@
 import type {
   EntryEventDialogueMessage,
   EntryEventKind,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { formatModelLabel } from '@/features/catalog'
 import {
   getBuiltinModelSelection,

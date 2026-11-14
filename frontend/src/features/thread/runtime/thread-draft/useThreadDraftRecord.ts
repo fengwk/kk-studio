@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react'
-import { prependCancelledMessages } from '@/features/thread/runtime/cancelled-message-parts'
-import type { BoundPendingMessage } from '@/features/thread/runtime/pending-request-store'
+import { prependCancelledMessages } from '@/features/thread/runtime/state/cancelled-message-parts'
+import type { BoundPendingMessage } from '@/features/thread/runtime/state/pending-request-store'
 import {
   applyStopReceipt,
   loadThreadDraft,
   restoreThreadDraftParts,
   saveThreadDraftParts,
   type ThreadDraftRecord,
-} from '@/features/thread/runtime/thread-draft-store'
+} from '@/features/thread/runtime/state/thread-draft-store'
 import { hasMessageContent, partsKey, type ComposerPart } from '@/features/thread/composer/composer-parts'
 import { persistDraftField } from '@/features/thread/runtime/thread-draft/draft-write-barrier'
 import { translate, useI18n } from '@/shared/i18n'

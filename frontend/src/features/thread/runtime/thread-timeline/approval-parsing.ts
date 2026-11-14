@@ -1,6 +1,6 @@
 import { isRecord } from '@/shared/lib/value'
-import type { ToolApprovalState } from '@/features/thread/runtime/thread-timeline-types'
-import { parseEditReview } from '@/features/thread/runtime/mutation-review'
+import type { ToolApprovalState } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import { parseEditReview } from '@/features/thread/runtime/state/mutation-review'
 
 export function parseApproval(approval: unknown): ToolApprovalState | null {
   const value = approval

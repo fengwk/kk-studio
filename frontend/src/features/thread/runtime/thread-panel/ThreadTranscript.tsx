@@ -3,7 +3,7 @@ import { Button } from '@/shared/ui/controls/Button'
 import type { RefObject } from 'react'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
 import { isVisibleDialogueMessage } from '@/features/thread/runtime/thread-panel/visibility'
-import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useI18n } from '@/shared/i18n'
 import '@/features/thread/thread-state.css'
 

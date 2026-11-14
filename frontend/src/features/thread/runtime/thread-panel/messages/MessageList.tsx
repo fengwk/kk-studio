@@ -8,7 +8,7 @@ import {
   sameToolCall,
   type DialogueMessage,
   type ToolDialogueMessage,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { useOptionalApplicationContributions } from '@/platform/extensions/ApplicationContributionsContext'
 import type { ApplicationContributions } from '@/platform/extensions/types'
 import type { ReactNode } from 'react'

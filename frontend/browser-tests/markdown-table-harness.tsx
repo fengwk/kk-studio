@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { AssistantMessageBlock } from '@/features/thread/runtime/thread-panel/messages/AssistantMessageBlock'
-import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { TextDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
 
 setLocale('zh-CN')

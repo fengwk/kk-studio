@@ -5,7 +5,7 @@ import {
   browserNotificationPermission,
   requestBrowserNotificationPermission,
   type BrowserNotificationPermission,
-} from '@/features/thread/runtime/thread-notifications'
+} from '@/features/thread/runtime/state/thread-notifications'
 import { useI18n } from '@/shared/i18n'
 
 /**

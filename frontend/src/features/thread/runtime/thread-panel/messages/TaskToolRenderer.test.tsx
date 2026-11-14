@@ -5,7 +5,7 @@ import { TaskToolRenderer } from '@/features/thread/runtime/thread-panel/message
 import {
   parseTaskArguments,
   parseTaskReceipt,
-} from '@/features/thread/runtime/task-tool-parser'
+} from '@/features/thread/runtime/state/task-tool-parser'
 import type { ToolRendererMessage } from '@/platform/extensions/types'
 
 function message(overrides: Partial<ToolRendererMessage> = {}): ToolRendererMessage {

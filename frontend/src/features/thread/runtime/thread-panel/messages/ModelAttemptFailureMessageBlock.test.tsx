@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ModelAttemptFailureMessageBlock } from '@/features/thread/runtime/thread-panel/messages/ModelAttemptFailureMessageBlock'
 import { retryCountdownSeconds } from '@/features/thread/runtime/thread-panel/messages/retry-countdown'
-import type { ModelAttemptFailureDialogueMessage } from '@/features/thread/runtime/thread-timeline-types'
+import type { ModelAttemptFailureDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 function message(
   overrides: Partial<ModelAttemptFailureDialogueMessage> = {},

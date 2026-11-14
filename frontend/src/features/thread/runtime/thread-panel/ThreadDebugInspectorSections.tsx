@@ -7,10 +7,10 @@ import type {
   ThreadModelRequestDebugSubagent,
   ThreadModelRequestDebugTool,
   ThreadProviderRequestPreviewData,
-} from '@/features/thread/runtime/thread-timeline-types'
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { formatByteCount } from '@/shared/lib/format-bytes'
 import { useI18n } from '@/shared/i18n'
-import { formatRawJsonText } from '@/features/thread/runtime/payload-json'
+import { formatRawJsonText } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { formatEnvSupport, formatJson } from '@/features/thread/runtime/thread-panel/thread-debug-json'
 
 /**
