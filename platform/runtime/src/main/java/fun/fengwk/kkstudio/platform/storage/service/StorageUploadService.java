@@ -21,7 +21,6 @@ import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenanceWakeup;
 import fun.fengwk.kkstudio.platform.storage.StorageMediaTypes;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
-import fun.fengwk.kkstudio.platform.storage.configuration.S3StorageProperties;
 import fun.fengwk.kkstudio.platform.storage.configuration.StorageMaintenanceProperties;
 import fun.fengwk.kkstudio.platform.storage.dto.StoragePresignedUrlDTO;
 import fun.fengwk.kkstudio.platform.storage.dto.StorageUploadDTO;
@@ -89,7 +88,6 @@ public class StorageUploadService {
   private final StorageBlobPreviewService blobPreviewService;
   private final StorageUploadOperationLock operationLock;
   private final ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups;
-  private final S3StorageProperties s3Properties;
   private final SystemSettingsSnapshot settingsSnapshot;
   private final Clock clock;
   private final TransactionTemplate transactionTemplate;
@@ -108,7 +106,6 @@ public class StorageUploadService {
       StorageObjectCleanupService objectCleanupService,
       StorageUploadOperationLock operationLock,
       ObjectProvider<StorageMaintenanceWakeup> maintenanceWakeups,
-      S3StorageProperties s3Properties,
       SystemSettingsSnapshot settingsSnapshot,
       StorageMaintenanceProperties maintenanceProperties,
       Clock clock,
@@ -122,7 +119,6 @@ public class StorageUploadService {
     this.blobPreviewService = Objects.requireNonNull(blobPreviewService, "blobPreviewService");
     this.operationLock = Objects.requireNonNull(operationLock, "operationLock");
     this.maintenanceWakeups = Objects.requireNonNull(maintenanceWakeups, "maintenanceWakeups");
-    this.s3Properties = Objects.requireNonNull(s3Properties, "s3Properties");
     this.settingsSnapshot = Objects.requireNonNull(settingsSnapshot, "settingsSnapshot");
     this.clock = Objects.requireNonNull(clock, "clock");
     Objects.requireNonNull(maintenanceProperties, "maintenanceProperties");
