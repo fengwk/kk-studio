@@ -135,11 +135,11 @@ func n001Invoke(invocationID string, maxOutputBytes int64) *protocol.Envelope {
 
 func writeN001Frame(t *testing.T, writer io.Writer, envelope *protocol.Envelope) {
 	t.Helper()
-	frame, err := protocol.EncodeEnvelopeFrame(envelope)
+	payload, err := protocol.MarshalEnvelope(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writer.Write(frame); err != nil {
+	if err := protocol.WriteFrame(writer, payload); err != nil {
 		t.Fatal(err)
 	}
 }

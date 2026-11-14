@@ -21,13 +21,13 @@ func TestFrame_BoundsAndRoundTrip(t *testing.T) {
 	if got := binary.BigEndian.Uint32(frame[:4]); got != 3 {
 		t.Fatalf("length=%d", got)
 	}
-	decoded, err := DecodeFrame(frame)
+	decoded, err := ReadFrame(bytes.NewReader(frame))
 	if err != nil || !bytes.Equal(decoded, payload) {
 		t.Fatalf("decode=%v err=%v", decoded, err)
 	}
-	for _, bad := range [][]byte{frame[:3], append(frame, 0), {0, 0, 0, 0}, {0, 0, 0, 1}} {
-		if _, err := DecodeFrame(bad); err == nil {
-			t.Fatalf("DecodeFrame accepted %x", bad)
+	for _, bad := range [][]byte{frame[:3], {0, 0, 0, 0}, {0, 0, 0, 1}} {
+		if _, err := ReadFrame(bytes.NewReader(bad)); err == nil {
+			t.Fatalf("ReadFrame accepted %x", bad)
 		}
 	}
 }

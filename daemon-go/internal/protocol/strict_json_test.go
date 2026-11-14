@@ -5,16 +5,6 @@ import (
 	"testing"
 )
 
-// TRN-T-119
-func TestStrictJSON_UTF8Length(t *testing.T) {
-	for input, want := range map[string]int{"ascii": 5, "你": 3, "😀": 4} {
-		got, err := UTF8ByteLength(input)
-		if err != nil || got != want {
-			t.Fatalf("UTF8ByteLength(%q) = %d, %v; want %d", input, got, err, want)
-		}
-	}
-}
-
 // TRN-T-120
 func TestStrictJSON_LoneSurrogates(t *testing.T) {
 	for _, input := range []string{string([]byte{34, 92, 117, 68, 56, 48, 48, 34}), string([]byte{34, 92, 117, 68, 67, 48, 48, 34}), string([]byte{34, 92, 117, 68, 56, 48, 48, 92, 117, 48, 48, 52, 49, 34})} {
@@ -26,9 +16,6 @@ func TestStrictJSON_LoneSurrogates(t *testing.T) {
 		if err := ValidateJSON(input, JSONLimits{}); err != nil {
 			t.Errorf("valid surrogate/string literal rejected %s: %v", input, err)
 		}
-	}
-	if _, err := UTF8ByteLength(string([]byte{0xff})); err == nil {
-		t.Fatal("invalid UTF-8 accepted")
 	}
 }
 

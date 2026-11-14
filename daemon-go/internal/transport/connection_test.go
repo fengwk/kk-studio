@@ -120,26 +120,14 @@ func TestTransport_H2ControlRoundTripOverWebSocket(t *testing.T) {
 	}
 
 	inbound := &protocol.Envelope{MessageType: protocol.MessageType_ERROR, EnvironmentId: proto.String(testEnvironment), Payload: &protocol.Envelope_Error{Error: &protocol.Error{Message: proto.String("ack")}}}
-	frame, err := protocol.EncodeEnvelopeFrame(inbound)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = bodyWriter.Write(frame); err != nil {
-		t.Fatal(err)
-	}
+	writeControlFrame(t, bodyWriter, inbound)
 	received, err := cc.Receive(ctx)
 	if err != nil || received.GetError().GetMessage() != "ack" {
 		t.Fatalf("received envelope=%v err=%v", received, err)
 	}
 
 	settings := &protocol.Envelope{MessageType: protocol.MessageType_SETTINGS, EnvironmentId: proto.String(testEnvironment), Payload: &protocol.Envelope_Settings{Settings: &protocol.Settings{ResourceBudgets: &protocol.ResourceBudgets{TemporaryResourceTtlSeconds: proto.Int64(1), TemporaryResourceCleanupIntervalSeconds: proto.Int64(1)}}}}
-	settingsFrame, err := protocol.EncodeEnvelopeFrame(settings)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = bodyWriter.Write(settingsFrame); err != nil {
-		t.Fatal(err)
-	}
+	writeControlFrame(t, bodyWriter, settings)
 	settingsReceived, err := cc.Receive(ctx)
 	if err != nil || settingsReceived.GetMessageType() != protocol.MessageType_SETTINGS {
 		t.Fatalf("settings envelope=%v err=%v", settingsReceived, err)
@@ -159,13 +147,7 @@ func TestTransport_H2ControlRoundTripOverWebSocket(t *testing.T) {
 
 	const invocationID = "123e4567-e89b-12d3-a456-426614174001"
 	recoverEnvelope := &protocol.Envelope{MessageType: protocol.MessageType_RECOVER, EnvironmentId: proto.String(testEnvironment), InvocationId: proto.String(invocationID), Payload: &protocol.Envelope_Recover{Recover: &protocol.Recover{}}}
-	recoverFrame, err := protocol.EncodeEnvelopeFrame(recoverEnvelope)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = bodyWriter.Write(recoverFrame); err != nil {
-		t.Fatal(err)
-	}
+	writeControlFrame(t, bodyWriter, recoverEnvelope)
 	recoverReceived, err := cc.Receive(ctx)
 	if err != nil || recoverReceived.GetMessageType() != protocol.MessageType_RECOVER || recoverReceived.GetInvocationId() != invocationID {
 		t.Fatalf("recover envelope=%v err=%v", recoverReceived, err)
@@ -454,5 +436,16 @@ func TestTransport_ControlWaitHonorsContext(t *testing.T) {
 	defer cancel()
 	if err := cc.awaitControl(ctx); err == nil {
 		t.Fatal("awaitControl ignored cancellation")
+	}
+}
+
+func writeControlFrame(t *testing.T, writer io.Writer, envelope *protocol.Envelope) {
+	t.Helper()
+	payload, err := protocol.MarshalEnvelope(envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.WriteFrame(writer, payload); err != nil {
+		t.Fatal(err)
 	}
 }

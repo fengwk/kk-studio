@@ -552,11 +552,11 @@ func assertStaleWriteReview(t *testing.T, result *protocol.CapabilityResult) {
 
 func writeControlEnvelope(t *testing.T, writer *io.PipeWriter, envelope *protocol.Envelope) {
 	t.Helper()
-	frame, err := protocol.EncodeEnvelopeFrame(envelope)
+	payload, err := protocol.MarshalEnvelope(envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writer.Write(frame); err != nil {
+	if err := protocol.WriteFrame(writer, payload); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -11,14 +11,6 @@ import (
 // JSONLimits configures optional strict JSON limits. A zero limit is unlimited.
 type JSONLimits struct{ MaxBytes, MaxNestingDepth, MaxNumberLength int }
 
-// UTF8ByteLength returns the byte length of valid UTF-8 text.
-func UTF8ByteLength(value string) (int, error) {
-	if !utf8.ValidString(value) {
-		return 0, fmt.Errorf("must be valid Unicode")
-	}
-	return len(value), nil
-}
-
 // ValidateJSON validates JSON text without changing its original representation.
 func ValidateJSON(input any, limits JSONLimits) error {
 	var data []byte

@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"io"
 	"strings"
 	"testing"
 
@@ -50,11 +51,15 @@ func TestCodec_EncodedEnvelopeFrameLimit(t *testing.T) {
 	if _, err := MarshalEnvelope(envelope); err == nil {
 		t.Fatal("envelope larger than the frame limit accepted")
 	}
-	if _, err := EncodeEnvelopeFrame(envelope); err == nil {
-		t.Fatal("oversized envelope frame accepted")
+	payload, err := proto.Marshal(envelope)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := DecodeEnvelopeFrame([]byte{0, 0, 0, 1, 0}); err == nil {
-		t.Fatal("invalid framed protobuf accepted")
+	if err := WriteFrame(io.Discard, payload); err == nil {
+		t.Fatal("oversized frame accepted")
+	}
+	if _, err := UnmarshalEnvelope([]byte{0}); err == nil {
+		t.Fatal("invalid protobuf payload accepted")
 	}
 }
 

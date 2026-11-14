@@ -19,21 +19,6 @@ func EncodeFrame(payload []byte) ([]byte, error) {
 	return frame, nil
 }
 
-// DecodeFrame accepts exactly one complete control frame.
-func DecodeFrame(frame []byte) ([]byte, error) {
-	if len(frame) < 4 {
-		return nil, fmt.Errorf("control frame must contain a 4-byte length prefix")
-	}
-	n := binary.BigEndian.Uint32(frame[:4])
-	if n < 1 || n > MaxFrameSize {
-		return nil, fmt.Errorf("control message length must be in 1..%d bytes", MaxFrameSize)
-	}
-	if uint64(len(frame)) != uint64(n)+4 {
-		return nil, fmt.Errorf("control frame length does not match its prefix")
-	}
-	return frame[4:], nil
-}
-
 // ReadFrame reads one frame without buffering beyond its declared payload.
 func ReadFrame(r io.Reader) ([]byte, error) {
 	var prefix [4]byte

@@ -80,11 +80,19 @@ func TestCodec_GoldenFramed(t *testing.T) {
 			if err := proto.Unmarshal(data[name], &e); err != nil {
 				t.Fatal(err)
 			}
-			frame, err := EncodeEnvelopeFrame(&e)
+			payload, err := MarshalEnvelope(&e)
 			if err != nil {
 				t.Fatal(err)
 			}
-			got, err := DecodeEnvelopeFrame(frame)
+			var frame bytes.Buffer
+			if err := WriteFrame(&frame, payload); err != nil {
+				t.Fatal(err)
+			}
+			framed, err := ReadFrame(&frame)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := UnmarshalEnvelope(framed)
 			if err != nil {
 				t.Fatal(err)
 			}
