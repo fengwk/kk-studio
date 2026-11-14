@@ -109,20 +109,11 @@ func upstreamContext(parent, upstream context.Context) (context.Context, context
 }
 
 func validateViewUpstream(up ViewUpstream) error {
-	host := up.Host
-	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
-		host = host[1 : len(host)-1]
-	}
-	ip := net.ParseIP(host)
-	loopback := host == "::1" || ip != nil && !strings.Contains(host, ":") && ip.To4() != nil && ip.IsLoopback()
-	if !loopback || up.Port < 1 || up.Port > 65535 {
+	if !isLoopbackUpstream(up.Host, up.Port) {
 		return fmt.Errorf("invalid loopback upstream")
 	}
-	if up.Path == "" || !strings.HasPrefix(up.Path, "/") || strings.HasPrefix(up.Path, "//") {
-		return fmt.Errorf("invalid upstream path")
-	}
-	if hasUnsafeHeaderCharacter(up.Path) {
-		return fmt.Errorf("invalid upstream path")
+	if err := validateUpstreamPath(up.Path); err != nil {
+		return err
 	}
 	for k, values := range up.Headers {
 		if !validHeaderName(k) {
@@ -141,6 +132,25 @@ func validateViewUpstream(up ViewUpstream) error {
 		if !validHeaderName(p) {
 			return fmt.Errorf("invalid protocol")
 		}
+	}
+	return nil
+}
+
+// isLoopbackUpstream accepts only an IPv4 loopback address and a usable port, so a resolved view can
+// never redirect the tunnel to another host.
+func isLoopbackUpstream(upstreamHost string, port int) bool {
+	host := upstreamHost
+	if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = host[1 : len(host)-1]
+	}
+	ip := net.ParseIP(host)
+	loopback := host == "::1" || ip != nil && !strings.Contains(host, ":") && ip.To4() != nil && ip.IsLoopback()
+	return loopback && port >= 1 && port <= 65535
+}
+
+func validateUpstreamPath(path string) error {
+	if path == "" || !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") || hasUnsafeHeaderCharacter(path) {
+		return fmt.Errorf("invalid upstream path")
 	}
 	return nil
 }
@@ -236,12 +246,37 @@ func (c *ControlConnection) tunnelIDEWebSocket(w http.ResponseWriter, r *http.Re
 		return
 	}
 	defer upstream.Close()
-	path := up.Path
-	targetURL := "http://" + addr + path
-	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, targetURL, nil)
+	if err := writeUpgradeRequest(upstream, r, up, addr); err != nil {
+		http.Error(w, "IDE upstream unavailable", http.StatusBadGateway)
+		return
+	}
+	br := bufio.NewReader(upstream)
+	response, err := http.ReadResponse(br, &http.Request{Method: http.MethodGet})
 	if err != nil {
 		http.Error(w, "IDE upstream unavailable", http.StatusBadGateway)
 		return
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols {
+		relayUpgradeRejection(w, response)
+		return
+	}
+	copyUpgradeResponseHeaders(w, response)
+	w.WriteHeader(http.StatusOK)
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	client := io.ReadWriteCloser(&responseBodyWriter{reader: r.Body, writer: w})
+	if err := bridgeDuplex(r.Context(), client, &bufferedConn{Conn: upstream, reader: br}); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// writeUpgradeRequest forwards the client's upgrade handshake to the resolved upstream, keeping the
+// platform's trusted headers and the subprotocols the IDE advertises.
+func writeUpgradeRequest(upstream io.Writer, r *http.Request, up ViewUpstream, addr string) error {
+	req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, "http://"+addr+up.Path, nil)
+	if err != nil {
+		return err
 	}
 	req.Host = addr
 	req.Header = cloneEndToEndHeaders(up.Headers)
@@ -259,42 +294,30 @@ func (c *ControlConnection) tunnelIDEWebSocket(w http.ResponseWriter, r *http.Re
 	if len(up.Protocols) > 0 && req.Header.Get("Sec-WebSocket-Protocol") == "" {
 		req.Header.Set("Sec-WebSocket-Protocol", strings.Join(up.Protocols, ", "))
 	}
-	if err = req.Write(upstream); err != nil {
-		http.Error(w, "IDE upstream unavailable", http.StatusBadGateway)
-		return
-	}
-	br := bufio.NewReader(upstream)
-	response, err := http.ReadResponse(br, &http.Request{Method: http.MethodGet})
-	if err != nil {
-		http.Error(w, "IDE upstream unavailable", http.StatusBadGateway)
-		return
-	}
-	if response.StatusCode != http.StatusSwitchingProtocols {
-		for k, vs := range response.Header {
-			if strings.EqualFold(k, "Set-Cookie") || strings.EqualFold(k, "Content-Type") {
-				for _, v := range vs {
-					w.Header().Add(k, v)
-				}
+	return req.Write(upstream)
+}
+
+// relayUpgradeRejection forwards the upstream's refusal, keeping only the headers a browser needs.
+func relayUpgradeRejection(w http.ResponseWriter, response *http.Response) {
+	for k, vs := range response.Header {
+		if strings.EqualFold(k, "Set-Cookie") || strings.EqualFold(k, "Content-Type") {
+			for _, v := range vs {
+				w.Header().Add(k, v)
 			}
 		}
-		w.WriteHeader(response.StatusCode)
-		if _, err = io.Copy(w, response.Body); err != nil {
-			panic(http.ErrAbortHandler)
-		}
-		return
 	}
+	w.WriteHeader(response.StatusCode)
+	if _, err := io.Copy(w, response.Body); err != nil {
+		panic(http.ErrAbortHandler)
+	}
+}
+
+// copyUpgradeResponseHeaders forwards the accepted handshake headers the client must see.
+func copyUpgradeResponseHeaders(w http.ResponseWriter, response *http.Response) {
 	for _, h := range []string{"Sec-WebSocket-Accept", "Sec-WebSocket-Protocol", "Sec-WebSocket-Extensions"} {
 		if v := response.Header.Values(h); len(v) > 0 {
 			w.Header()[http.CanonicalHeaderKey(h)] = v
 		}
-	}
-	w.WriteHeader(http.StatusOK)
-	if f, ok := w.(http.Flusher); ok {
-		f.Flush()
-	}
-	client := io.ReadWriteCloser(&responseBodyWriter{reader: r.Body, writer: w})
-	if err := bridgeDuplex(r.Context(), client, &bufferedConn{Conn: upstream, reader: br}); err != nil {
-		panic(http.ErrAbortHandler)
 	}
 }
 
