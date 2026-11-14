@@ -5,29 +5,18 @@ import lombok.extern.slf4j.Slf4j;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionPreparation;
-import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
-import fun.fengwk.kkstudio.harness.api.history.AssistantErrorPayload;
-import fun.fengwk.kkstudio.harness.api.history.CompactionPayload;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
-import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.SettingsPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
-import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
-import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -36,9 +25,7 @@ import fun.fengwk.kkstudio.harness.runtime.DriverCommits;
 import fun.fengwk.kkstudio.harness.runtime.ThreadInputDemand;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionHistory;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionResultEvaluator;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
@@ -134,6 +121,7 @@ public final class ThreadProcessor {
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final CompactionGate compactionGate;
   private final TurnCommitter turnCommitter = new TurnCommitter();
+  private final OwnerTurnSettlement ownerTurnSettlement;
   private final CommandHarvestReducer settingsReducer = new CommandHarvestReducer();
   private final ThreadAdmissionGuard admissionGuard = new ThreadAdmissionGuard();
   private final ThreadContextProbe threadContextProbe;
@@ -147,6 +135,7 @@ public final class ThreadProcessor {
     this.threadContextProbe = new ThreadContextProbe(driverRegistry);
     this.coordinator = new ThreadLifecycleCoordinator();
     this.compactionGate = new CompactionGate(config.compactionProvider());
+    this.ownerTurnSettlement = new OwnerTurnSettlement(driverRegistry);
   }
 
   /**
@@ -215,9 +204,10 @@ public final class ThreadProcessor {
     EntryPath path = tx.entries().loadPath(thread.headEntryId());
     Optional<Entry> openTurn = path.openTurnStart();
     if (openTurn.isPresent() && openTurn.get().payload() instanceof TurnStartPayload startPayload) {
-      UUID ticketId = ownerTicketId(thread, startPayload);
+      UUID ticketId = OwnerTurnSettlement.ticketId(thread, startPayload);
       if (ticketId != null) {
-        settleOwnerTurn(tx, claim, thread, path, startPayload, ticketId, openTurn.get(), now);
+        ownerTurnSettlement.settle(
+            tx, claim, thread, path, startPayload, ticketId, openTurn.get(), now);
         return;
       }
     }
@@ -436,152 +426,6 @@ public final class ThreadProcessor {
       if (!readyRequested) {
         requestThread = true;
       }
-    }
-    if (requestThread) {
-      tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
-    }
-    tx.work().complete(claim);
-  }
-
-  /**
-   * 开放 Turn 的结算票据 id：只有 owner 自身持有的 COMPACTION Turn 携带 {@link JoinDelivery#SETTLE_OWNER_TURN} 票据（由
-   * {@link CompactionStart#joinInvocationId()} 冻结）；其它 Turn 返回 null。
-   */
-  private static UUID ownerTicketId(ThreadState thread, TurnStartPayload start) {
-    if (start.reason() == TurnStartReason.COMPACTION
-        && start.ownerThreadId().equals(thread.id())
-        && start.compaction() != null) {
-      return start.compaction().joinInvocationId();
-    }
-    return null;
-  }
-
-  /** SETTLE_OWNER_TURN 交付的处理：票据冻结结果后，owner 的开放 Turn 按其 reason 消费它；票据尚未冻结时只完成 claim 继续等待。 */
-  private void settleOwnerTurn(
-      HarnessStore.Transaction tx,
-      ClaimedWork claim,
-      ThreadState thread,
-      EntryPath path,
-      TurnStartPayload start,
-      UUID ticketId,
-      Entry openTurn,
-      Instant now) {
-    ThreadJoin join =
-        tx.joins()
-            .find(ticketId)
-            .orElseThrow(
-                () -> new IllegalStateException("owner ticket " + ticketId + " not found"));
-    if (join.delivery() != JoinDelivery.SETTLE_OWNER_TURN) {
-      throw new IllegalStateException("ticket " + ticketId + " does not settle the owner turn");
-    }
-    if (!join.matched()) {
-      completeClaim(tx, claim, now);
-      return;
-    }
-    switch (start.reason()) {
-      case COMPACTION -> settleCompactionTurn(
-          tx, claim, thread, path, start.compaction(), join, openTurn, now);
-      default -> throw new IllegalStateException(
-          "turn reason " + start.reason() + " has no owner-settled ticket");
-    }
-  }
-
-  /** 压缩 Turn 的结算：评估冻结的摘要并推进父 Thread 历史；子执行失败则落 AssistantErrorPayload。 */
-  private void settleCompactionTurn(
-      HarnessStore.Transaction tx,
-      ClaimedWork claim,
-      ThreadState thread,
-      EntryPath path,
-      CompactionStart start,
-      ThreadJoin join,
-      Entry openTurn,
-      Instant now) {
-    ThreadJoinReceipt receipt =
-        ThreadJoinProjector.INSTANCE
-            .project(tx, join)
-            .orElseThrow(
-                () ->
-                    new IllegalStateException(
-                        "matched compaction join produced no receipt: " + join.invocationId()));
-    EntryPayload resultPayload;
-    TurnEndOutcome outcome;
-    boolean continueModel = false;
-    if (receipt.outcome() == ThreadJoinOutcome.CANCELLED) {
-      resultPayload =
-          new AssistantErrorPayload(
-              new AssistantError(AssistantError.CANCELLED_CODE, "compaction branch was stopped"),
-              null);
-      outcome = TurnEndOutcome.STOPPED;
-    } else if (receipt.outcome() != ThreadJoinOutcome.COMPLETED) {
-      String errorMessage =
-          receipt.error() != null ? receipt.error() : "compaction child thread failed";
-      resultPayload =
-          new AssistantErrorPayload(new AssistantError("COMPACTION_FAILED", errorMessage), null);
-      outcome = TurnEndOutcome.FAILED;
-    } else {
-      String summaryText = receipt.report();
-      AssistantMessageMetadata metadata = null;
-      if (join.terminalEntryId() != null && join.finalAnswerEntryId() != null) {
-        EntryPath childPath = tx.entries().loadPath(join.terminalEntryId());
-        for (Entry e : childPath.entries()) {
-          if (e.id().equals(join.finalAnswerEntryId())
-              && e.payload() instanceof MessagePayload msg) {
-            metadata = msg.assistantMetadata();
-            break;
-          }
-        }
-      }
-      resultPayload =
-          CompactionResultEvaluator.evaluate(summaryText, metadata, start.outputBudget());
-      if (resultPayload instanceof CompactionPayload) {
-        outcome = TurnEndOutcome.COMPLETED;
-        continueModel = true;
-      } else {
-        outcome = TurnEndOutcome.FAILED;
-      }
-    }
-    UUID resultEntryId = tx.nextId();
-    tx.entries()
-        .insert(
-            new Entry(
-                resultEntryId, path.root().sessionId(), path.head().id(), resultPayload, now));
-    UUID turnEndId = tx.nextId();
-    tx.entries()
-        .insert(
-            new Entry(
-                turnEndId,
-                path.root().sessionId(),
-                resultEntryId,
-                new TurnEndPayload(
-                    openTurn.id(),
-                    outcome,
-                    continueModel,
-                    outcome == TurnEndOutcome.FAILED
-                        ? TurnEndReason.TURN_FAILED
-                        : outcome == TurnEndOutcome.STOPPED ? TurnEndReason.USER_STOP : null,
-                    outcome == TurnEndOutcome.STOPPED ? join.invocationId() : null),
-                now));
-    ThreadState advanced = thread.advanceHead(turnEndId, now);
-    tx.threads().update(advanced);
-    // STOPPED 父 Thread 只固化压缩结果，不请求任何 Work、不续作：恢复仍由显式输入驱动（与已停止父的 task 回执交付一致）。
-    boolean stopped = thread.executionControl().isStopped();
-    boolean hasQueuedDemand =
-        ThreadInputDemand.hasQueuedDemand(tx.commands().loadQueued(thread.id()));
-    EntryPath endPath = tx.entries().loadPath(turnEndId);
-    AgentDriver driver = driverRegistry.of(endPath.baseSettings());
-    boolean compactionCancelled = outcome == TurnEndOutcome.STOPPED;
-    boolean mechanicalWake = !stopped && outcome == TurnEndOutcome.COMPLETED && continueModel;
-    boolean requestThread =
-        !compactionCancelled && ((hasQueuedDemand && !stopped) || mechanicalWake);
-    if (mechanicalWake) {
-      coordinator.remindSoftBudgetIfDue(tx, advanced, endPath, now);
-    }
-    if (outcome == TurnEndOutcome.FAILED && !requestThread) {
-      ThreadLifecycleCoordinator.matchAndDeliverTerminalJoins(
-          tx, advanced, turnEndId, null, now, false);
-    }
-    if (tx.work().lockClaimed(claim).isEmpty()) {
-      throw new ClaimLostSignal();
     }
     if (requestThread) {
       tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
