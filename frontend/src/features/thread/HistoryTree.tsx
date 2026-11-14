@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { CopyPlus, GitBranch } from 'lucide-react'
 import { ThreadInteractionPanel } from '@/features/thread/runtime/thread-panel/ThreadInteractionPanel'
 import {
   buildHistoryTree,
@@ -7,9 +6,9 @@ import {
   historySearchTokens,
 } from '@/features/thread/history-tree'
 import { HistoryTreeRowView } from '@/features/thread/HistoryTreeRow'
-import { resolveHistoryRowId } from '@/features/thread/history-tree-row-state'
+import { HistoryTreeFooter } from '@/features/thread/HistoryTreeFooter'
+import { useHistoryTreeSelection } from '@/features/thread/useHistoryTreeSelection'
 import { useI18n } from '@/shared/i18n'
-import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import '@/features/thread/history-tree.css'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
@@ -52,29 +51,19 @@ export function HistoryTree({
     () => new Set(rows.filter((row) => historyRowMatches(row, tokens)).map((row) => row.entry.entryId)),
     [rows, tokens],
   )
-  const [selectedId, setSelectedId] = useState<string | null>(null)
-  const selectedRef = useRef<HTMLButtonElement | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
-  const selectedRow = rows.find((row) => row.entry.entryId === selectedId) ?? null
-  const selectedIndex = selectedRow == null ? -1 : rows.indexOf(selectedRow)
+  const {
+    selectedId,
+    setSelectedId,
+    selectedRef,
+    selectedRow,
+    selectedIndex,
+    moveSelection,
+  } = useHistoryTreeSelection(rows, headEntryId ?? null)
 
-  useEffect(() => {
-    setSelectedId((current) => resolveHistoryRowId(rows, current, headEntryId ?? null))
-  }, [rows, headEntryId])
-  useEffect(() => {
-    selectedRef.current?.scrollIntoView?.({ block: 'nearest' })
-  }, [selectedId])
   useEffect(() => {
     searchRef.current?.focus({ preventScroll: true })
   }, [])
-
-  function moveSelection(delta: number) {
-    if (rows.length === 0) {
-      return
-    }
-    const index = Math.max(0, selectedIndex)
-    setSelectedId(rows[(index + delta + rows.length) % rows.length]?.entry.entryId ?? null)
-  }
 
   function onKeyDown(event: KeyboardEvent<HTMLElement>) {
     if (event.nativeEvent.isComposing || event.keyCode === 229) {
@@ -118,47 +107,15 @@ export function HistoryTree({
         </label>
       )}
       footer={(
-        <div className="history-tree-footer">
-          <span className="history-tree-hint">
-            {t('ai.chat.history.hint', {
-              current: selectedIndex < 0 ? 0 : selectedIndex + 1,
-              total: rows.length,
-            })}
-          </span>
-          {selectedRow != null && !selectedRow.canFork ? (
-            <span className="history-tree-disabled-reason" role="note">
-              {t('ai.chat.branch.notBoundary')}
-            </span>
-          ) : null}
-          <div className="history-tree-actions">
-            <Button variant="ghost" onClick={onClose}>
-              {t('ai.chat.history.cancel')}
-            </Button>
-            {onForkSession ? (
-              <Button
-                variant="ghost"
-                disabled={loading || selectedRow?.canFork !== true}
-                title={selectedRow?.canFork === false
-                  ? t('ai.chat.branch.notBoundary')
-                  : t('ai.chat.branch.forkSessionHint')}
-                onClick={() => selectedRow?.canFork && onForkSession(selectedRow.entry)}
-              >
-                <CopyPlus size={14} aria-hidden="true" />
-                <span>{t('ai.chat.branch.forkSession')}</span>
-              </Button>
-            ) : null}
-            <Button
-              disabled={loading || selectedRow?.canFork !== true}
-              title={selectedRow?.canFork === false
-                ? t('ai.chat.branch.notBoundary')
-                : t('ai.chat.branch.fromHereHint')}
-              onClick={() => selectedRow?.canFork && onFork(selectedRow.entry)}
-            >
-              <GitBranch size={14} aria-hidden="true" />
-              <span>{t('ai.chat.branch.fromHere')}</span>
-            </Button>
-          </div>
-        </div>
+        <HistoryTreeFooter
+          loading={loading}
+          selectedRow={selectedRow}
+          selectedIndex={selectedIndex}
+          rowCount={rows.length}
+          onClose={onClose}
+          onFork={onFork}
+          onForkSession={onForkSession}
+        />
       )}
     >
       {loading ? <div className="state-block">{t('ai.chat.history.loading')}</div> : null}
