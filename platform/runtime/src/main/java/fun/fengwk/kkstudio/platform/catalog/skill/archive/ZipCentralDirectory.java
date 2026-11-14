@@ -12,9 +12,7 @@ import java.io.IOException;
  */
 final class ZipCentralDirectory {
 
-  private static final int END_OF_DIRECTORY_LENGTH = 22;
   private static final int MAX_COMMENT_LENGTH = 65535;
-  private static final int CENTRAL_ENTRY_LENGTH = 46;
   private static final long END_OF_DIRECTORY_SIGNATURE = 0x06054b50L;
   private static final long ZIP64_LOCATOR_SIGNATURE = 0x07064b50L;
   private static final long ZIP64_END_SIGNATURE = 0x06064b50L;
@@ -39,10 +37,10 @@ final class ZipCentralDirectory {
 
   /** 从尾部向前扫描单条 EOCD 记录：注释长度必须刚好补齐到归档末尾，否则视为未找到。 */
   private static int locateEndOfDirectory(byte[] bytes) {
-    int last = Math.max(0, bytes.length - END_OF_DIRECTORY_LENGTH - MAX_COMMENT_LENGTH);
-    for (int p = bytes.length - END_OF_DIRECTORY_LENGTH; p >= last; p--) {
+    int last = Math.max(0, bytes.length - 22 - MAX_COMMENT_LENGTH);
+    for (int p = bytes.length - 22; p >= last; p--) {
       if (u32(bytes, p) == END_OF_DIRECTORY_SIGNATURE
-          && p + END_OF_DIRECTORY_LENGTH + u16(bytes, p + 20) == bytes.length) {
+          && p + 22L + u16(bytes, p + 20) == bytes.length) {
         return p;
       }
     }
@@ -113,13 +111,12 @@ final class ZipCentralDirectory {
     int position = (int) directory.start();
     int count = 0;
     while (position < directory.end()) {
-      if (directory.end() - position < CENTRAL_ENTRY_LENGTH
-          || u32(bytes, position) != CENTRAL_ENTRY_SIGNATURE) {
+      if (directory.end() - position < 46 || u32(bytes, position) != CENTRAL_ENTRY_SIGNATURE) {
         throw new IOException("Invalid ZIP directory entry");
       }
       long next =
           position
-              + CENTRAL_ENTRY_LENGTH
+              + 46L
               + u16(bytes, position + 28)
               + u16(bytes, position + 30)
               + u16(bytes, position + 32);
