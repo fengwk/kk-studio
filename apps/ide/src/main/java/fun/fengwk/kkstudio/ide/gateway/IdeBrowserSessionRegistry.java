@@ -38,10 +38,6 @@ public final class IdeBrowserSessionRegistry {
       }
       workspacePath = Objects.requireNonNull(workspacePath, "workspacePath");
     }
-
-    public EnvironmentId environmentId() {
-      return identity.environmentId();
-    }
   }
 
   private static final int TOKEN_BYTES = 32;
