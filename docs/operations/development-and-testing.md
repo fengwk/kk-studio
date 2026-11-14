@@ -645,7 +645,7 @@ Daemon。
 百分位是 nearest-rank，按 `ceil(p / 100 × n)` 取值；错误请求仍计入延迟，少于 20 个测量样本
 fail closed。Canvas warmup 和测量创建的行会保留，超时或中断的请求也可能已创建行；
 runner 不通过 HTTP 清理，直到隔离测试数据库/volume 清理时才消失。正常、失败、超时、INT、
-TERM 时脚本执行 `down --volumes --remove-orphans`。当前仅创建事务的结果不能与旧的
+TERM 时脚本执行 `down --volumes --remove-orphans`。只创建不删除的事务不能与包含删除的
 create+delete 工作负载结果比较。
 
 ## 供应链门禁

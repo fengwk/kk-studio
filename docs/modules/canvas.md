@@ -61,7 +61,7 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
 
 | 语义组 | 前置条件 |
 | --- | --- |
-| 名称 | 旧名称 `expectedName` / `expectedTitle` |
+| 名称 | 名称与标题基线 `expectedName` / `expectedTitle` |
 | 资源数组 | 有序 Resource ID 列表 `expectedResourceIds`，槽位意图为 [`CanvasResourceInput`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceInput.java) 的 `Keep` / `Text` / `Blob` |
 | Function | 编辑起点的完整 [`CanvasFunction`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunction.java)，按 `CanvasJson` 严格语义比较 |
 | 删除节点 | 资源与 Function 基线，且无活跃 Run、无未解除的引用 |
