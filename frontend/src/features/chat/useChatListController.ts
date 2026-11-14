@@ -97,11 +97,7 @@ export function useChatListController(
     invalidateQueryKeys: [queryKeys.chats.list],
     onSuccess: async (chat: ChatDTO) => {
       setModalOpen(false)
-      setTitle('')
-      setYoloEnabled(false)
-      setSelectedEnvironmentName(null)
-      setFormError('')
-      setNameError('')
+      clearFormFields()
       navigate(`/chats/${encodeURIComponent(chat.id)}`)
     },
   })
@@ -133,13 +129,24 @@ export function useChatListController(
     onSuccess: async () => {
       setModalOpen(false)
       setEditingChat(null)
-      setTitle('')
-      setYoloEnabled(false)
-      setSelectedEnvironmentName(null)
-      setFormError('')
-      setNameError('')
+      clearFormFields()
     },
   })
+
+  /** 关闭弹窗、切换创建/编辑、提交成功后都把表单字段归零（顺序与各调用点一致）。 */
+  function clearFormFields() {
+    setTitle('')
+    setYoloEnabled(false)
+    setSelectedEnvironmentName(null)
+    setFormError('')
+    setNameError('')
+  }
+
+  /** 用户修改任一字段后，旧请求的错误不再对应当前输入。 */
+  function clearMutationErrors() {
+    if (createChatMutation.error) createChatMutation.reset()
+    if (updateChatMutation.error) updateChatMutation.reset()
+  }
 
   const deleteChatMutation = useInvalidateMutation({
     mutationFn: ({ id, expectedVersion }: { id: string; expectedVersion: string }) =>
@@ -157,11 +164,7 @@ export function useChatListController(
     setEditingChat(null)
     const nextAgentName = resolveChatAgentName(agentName, selectedAgentName, agents)
     setSelectedAgentName(nextAgentName)
-    setTitle('')
-    setYoloEnabled(false)
-    setSelectedEnvironmentName(null)
-    setFormError('')
-    setNameError('')
+    clearFormFields()
     setModalOpen(true)
   }
 
@@ -200,38 +203,30 @@ export function useChatListController(
       setNameError('')
       setFormError('')
     }
-    if (createChatMutation.error) createChatMutation.reset()
-    if (updateChatMutation.error) updateChatMutation.reset()
+    clearMutationErrors()
   }
 
   function handleSelectAgent(agentName: string) {
     setSelectedAgentName(agentName)
-    if (createChatMutation.error) createChatMutation.reset()
-    if (updateChatMutation.error) updateChatMutation.reset()
+    clearMutationErrors()
   }
 
   function handleYoloChange(next: boolean) {
     setYoloEnabled(next)
     if (formError) setFormError('')
-    if (createChatMutation.error) createChatMutation.reset()
-    if (updateChatMutation.error) updateChatMutation.reset()
+    clearMutationErrors()
   }
 
   function handleSelectEnvironment(next: string | null) {
     setSelectedEnvironmentName(next)
     if (formError) setFormError('')
-    if (createChatMutation.error) createChatMutation.reset()
-    if (updateChatMutation.error) updateChatMutation.reset()
+    clearMutationErrors()
   }
 
   function closeModal() {
     setModalOpen(false)
     setEditingChat(null)
-    setTitle('')
-    setYoloEnabled(false)
-    setSelectedEnvironmentName(null)
-    setFormError('')
-    setNameError('')
+    clearFormFields()
     createChatMutation.reset()
     updateChatMutation.reset()
   }
