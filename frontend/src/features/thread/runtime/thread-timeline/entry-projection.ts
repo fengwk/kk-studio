@@ -1,23 +1,13 @@
-import { extractResultEditReview } from '@/features/thread/runtime/mutation-review'
-import { asRecord, getRecordList, parseRawJsonText } from '@/features/thread/runtime/payload-json'
+import { asRecord, getRecordList } from '@/features/thread/runtime/payload-json'
 import { getString } from '@/shared/lib/value'
 import { parseCodecInstantMillis } from '@/shared/lib/date-format'
 import type {
-  DialogueContent,
   DialogueMessage,
   MetaDialogueMessage,
-  ToolDialogueMessage,
-  TurnUsage,
 } from '@/features/thread/runtime/thread-timeline-types'
-import { toolCallIdentity as strictToolCallIdentity } from '@/features/thread/runtime/thread-timeline-types'
-import {
-  contentText,
-  toResourceAttachment,
-  toToolContents,
-} from '@/features/thread/runtime/thread-timeline/content-utils'
+import { contentText } from '@/features/thread/runtime/thread-timeline/content-utils'
 import { createModelAttemptFailureMessage } from '@/features/thread/runtime/thread-timeline/model-attempt-failure'
 import {
-  projectEmptyMessageEntry,
   projectForkEntry,
   projectInvalidSettings,
   projectRootSettings,
@@ -26,86 +16,40 @@ import {
   parseSettingsSnapshot,
   projectNotificationEntry,
   projectUnknownEntry,
-  projectUnsupportedMessageEntry,
 } from '@/features/thread/runtime/thread-timeline/entry-event-projection'
-import type { SettingsSnapshot } from '@/features/thread/runtime/thread-timeline/entry-event-projection'
-import {
-  createTurnUsageMetaMessage,
-} from '@/features/thread/runtime/thread-timeline/meta-projection'
-import {
-  accumulateTurnUsage,
-  parseAssistantUsage,
-} from '@/features/thread/runtime/thread-timeline/turn-usage-format'
+import { projectMessageEntry } from '@/features/thread/runtime/thread-timeline/entry-message-projection'
+import type { EntryProjectionContext } from '@/features/thread/runtime/thread-timeline/entry-projection-context'
 import { translate } from '@/shared/i18n'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
-/**
- * 逐 turn 的投影上下文。Turn usage 不紧跟 Assistant：summary 先挂起，在相应
- * TURN_END 之后才投影为 TurnSummary；新 turn 开始时丢弃未关闭 turn 的残留。
- */
-export interface EntryProjectionContext {
-  pendingTurnSummary: MetaDialogueMessage | null
-  lastSettings: SettingsSnapshot | null
-  pendingTurnUsage?: TurnUsage | null
-}
+export type { EntryProjectionContext } from '@/features/thread/runtime/thread-timeline/entry-projection-context'
 
+/** durable tool_call 已记录的 arguments，按调用身份排队等待同名 tool_result 配对。 */
+type DurableToolArguments = Map<string, string[]>
+
+/**
+ * 一条 durable Entry 投影到对话消息：
+ * 控制边界（TURN_START / COMPACTION / TURN_END）更新 turn 上下文但不产生对话行，
+ * 其余 Entry 类型各自投影。
+ */
 export function projectDurableEntry(
   entry: HarnessSessionEntryDTO,
   messages: DialogueMessage[],
-  durableToolArguments: Map<string, string[]>,
+  durableToolArguments: DurableToolArguments,
   context: EntryProjectionContext,
-) {
+): void {
   const payload = asRecord(entry.payload)
   const entryType = entry.entryType
   if (entryType === 'ROOT') {
-    const settings = parseSettingsSnapshot(payload.settings)
-    context.lastSettings = settings
-    messages.push(settings ? projectRootSettings(entry, settings) : projectInvalidSettings(entry))
+    projectRootEntry(entry, payload, messages, context)
     return
   }
   if (entryType === 'SETTINGS') {
-    // 安全点快照更新差值基准，不改变回合或用量上下文。
-    const settings = parseSettingsSnapshot(payload.settings)
-    if (settings === null) {
-      context.lastSettings = null
-      messages.push(projectInvalidSettings(entry))
-    } else {
-      if (context.lastSettings !== null) {
-        messages.push(...projectSettingsChanges(entry, context.lastSettings, settings))
-      }
-      context.lastSettings = settings
-    }
+    projectSettingsEntry(entry, payload, messages, context)
     return
   }
   if (entryType === 'TURN_START' || entryType === 'COMPACTION' || entryType === 'TURN_END') {
-    // 控制边界：不显示成 unknown entry，也不进入对话时间线。
-    if (entryType === 'TURN_END') {
-      // TurnSummary：usage 挂起至相应 TURN_END 之后投影（绝不紧跟 Assistant）。
-      const summary = context.pendingTurnSummary
-      context.pendingTurnSummary = null
-      context.pendingTurnUsage = null
-      // 无论该回合是否有 usage，TURN_END 都必须产出一条携带真实 TURN_END Entry id 的
-      // 结束 meta：回合 footer 的“从此处分支”只以这个 id 分叉（未消费 usage 的回合、
-      // 以及作为 head 的最新回合同样可用）。
-      messages.push(turnEndMeta(summary, entry))
-    } else {
-      // 新 turn 开始：丢弃上一 turn 未关闭的残留 usage。
-      context.pendingTurnSummary = null
-      context.pendingTurnUsage = null
-      if (entryType === 'TURN_START' && getString(payload.reason) !== 'COMPACTION') {
-        const settings = parseSettingsSnapshot(payload.settings)
-        if (settings === null) {
-          messages.push(projectInvalidSettings(entry))
-        } else if (context.lastSettings !== null) {
-          messages.push(...projectSettingsChanges(entry, context.lastSettings, settings))
-        }
-        if (settings !== null) {
-          const fallback = projectModelFallback(entry, settings, payload.executedSelection)
-          if (fallback !== null) messages.push(fallback)
-        }
-        context.lastSettings = settings
-      }
-    }
+    projectTurnBoundary(entry, payload, messages, context)
     return
   }
   if (entryType === 'MODEL_ATTEMPT_FAILURE') {
@@ -114,57 +58,11 @@ export function projectDurableEntry(
     return
   }
   if (entryType === 'ASSISTANT_ERROR') {
-    const error = asRecord(payload.error)
-    const attempt = parseAttemptSnapshot(payload.attempt)
-    if (attempt != null) {
-      messages.push(
-        createModelAttemptFailureMessage({
-          id: entry.entryId,
-          subjectEntryId: entry.entryId,
-          createdAt: entry.createdAt,
-          attempt: attempt.attempt,
-          sequence: attempt.sequence,
-          text: attempt.text,
-          thinking: attempt.thinking,
-          errorCode: getString(error.code),
-          errorMessage: getString(error.message) || translate('ai.runtime.message.assistantFailed'),
-          failedAt: entry.createdAt,
-          retryAt: null,
-          nextAttempt: null,
-        }),
-      )
-      return
-    }
-    messages.push({
-      id: entry.entryId,
-      role: 'assistant',
-      subjectEntryId: entry.entryId,
-      text: getString(error.message) || translate('ai.runtime.entry.assistantRequestFailed'),
-      createdAt: entry.createdAt,
-      status: 'error',
-    })
+    projectAssistantError(entry, payload, messages)
     return
   }
   if (entryType === 'ASSISTANT_ABORTED') {
-    const message = asRecord(payload.message)
-    const contents = getRecordList(message.contents)
-    const text = contents.filter((content) => getString(content.type) === 'text').map(contentText).join('')
-    const thinking = contents
-      .filter((content) => getString(content.type) === 'thinking')
-      .map(contentText)
-      .join('')
-    if (text || thinking) {
-      messages.push({
-        id: entry.entryId,
-        role: 'assistant',
-        subjectEntryId: entry.entryId,
-        text,
-        thinking: thinking || undefined,
-        createdAt: entry.createdAt,
-        status: 'done',
-        aborted: true,
-      })
-    }
+    projectAssistantAborted(entry, payload, messages)
     return
   }
   if (entryType === 'NOTIFICATION') {
@@ -179,98 +77,91 @@ export function projectDurableEntry(
     messages.push(projectUnknownEntry(entry))
     return
   }
+  projectMessageEntry(entry, payload, entryType, messages, durableToolArguments, context)
+}
 
-  const message = asRecord(payload.message)
-  const role = getString(message.role)
-  const contents = getRecordList(message.contents)
-  if (entryType === 'CUSTOM_MESSAGE' || role === 'USER') {
-    const text = contents.map(contentText).filter(Boolean).join('\n')
-    const displayContents = contents.flatMap<DialogueContent>((content) => {
-      const value = contentText(content)
-      if (value) {
-        return [{ type: 'text', text: value }]
-      }
-      return toResourceAttachment(content).map((attachment) => ({
-        type: 'resource',
-        attachment,
-      }))
-    })
-    if (displayContents.length > 0) {
-      messages.push({
-        id: entry.entryId,
-        role: 'user',
-        subjectEntryId: entry.entryId,
-        text,
-        contents: displayContents,
-        createdAt: entry.createdAt,
-        status: 'done',
-      })
-    } else {
-      messages.push(projectEmptyMessageEntry(entry, role || 'USER'))
-    }
+/** ROOT：建立首份 settings 基准。 */
+function projectRootEntry(
+  entry: HarnessSessionEntryDTO,
+  payload: Record<string, unknown>,
+  messages: DialogueMessage[],
+  context: EntryProjectionContext,
+): void {
+  const settings = parseSettingsSnapshot(payload.settings)
+  context.lastSettings = settings
+  messages.push(settings ? projectRootSettings(entry, settings) : projectInvalidSettings(entry))
+}
+
+/** SETTINGS：安全点快照更新差值基准，不改变回合或用量上下文。 */
+function projectSettingsEntry(
+  entry: HarnessSessionEntryDTO,
+  payload: Record<string, unknown>,
+  messages: DialogueMessage[],
+  context: EntryProjectionContext,
+): void {
+  const settings = parseSettingsSnapshot(payload.settings)
+  if (settings === null) {
+    context.lastSettings = null
+    messages.push(projectInvalidSettings(entry))
     return
   }
-  if (role === 'ASSISTANT') {
-    const toolCalls = contents.filter((candidate) => getString(candidate.type) === 'tool_call')
-    for (const content of toolCalls) {
-      const key = toolCallKey(getString(content.toolCallId))
-      if (!key) {
-        continue
-      }
-      const argumentsQueue = durableToolArguments.get(key) ?? []
-      argumentsQueue.push(getString(content.argumentsJson))
-      durableToolArguments.set(key, argumentsQueue)
-    }
-    const text = contents.filter((content) => getString(content.type) === 'text').map(contentText).join('')
-    const thinking = contents.filter((content) => getString(content.type) === 'thinking').map(contentText).join('')
-    if (text || thinking) {
-      messages.push({
-        id: entry.entryId,
-        role: 'assistant',
-        subjectEntryId: entry.entryId,
-        text,
-        thinking: thinking || undefined,
-        createdAt: entry.createdAt,
-        status: 'done',
-      })
-    }
-    toolCalls.forEach((content, index) => {
-      messages.push(projectToolCall(entry, content, index))
-    })
-    if (!text && !thinking && toolCalls.length === 0) {
-      messages.push(projectEmptyMessageEntry(entry, role))
-    }
-    // 价格是读取投影（entry.usageCost），不属于历史 payload；usage 的 token 事实仍来自
-    // assistantMetadata。保留原始形态，空对象和非法值不能先压成“无模型调用”。
-    const usage = parseAssistantUsage(payload.assistantMetadata, entry.usageCost)
-    if (usage != null) {
-      context.pendingTurnUsage = accumulateTurnUsage(context.pendingTurnUsage ?? null, usage)
-      context.pendingTurnSummary = createTurnUsageMetaMessage(
-        entry.entryId,
-        context.pendingTurnUsage,
-        entry.createdAt,
-      )
-    }
+  if (context.lastSettings !== null) {
+    messages.push(...projectSettingsChanges(entry, context.lastSettings, settings))
+  }
+  context.lastSettings = settings
+}
+
+/**
+ * 控制边界：不显示成 unknown entry，也不进入对话时间线。
+ *
+ * TURN_END 消费挂起的 TurnSummary；TURN_START / COMPACTION 丢弃上一 turn 未关闭的
+ * 残留 usage，非压缩的 TURN_START 还会投影设置差值与模型回退。
+ */
+function projectTurnBoundary(
+  entry: HarnessSessionEntryDTO,
+  payload: Record<string, unknown>,
+  messages: DialogueMessage[],
+  context: EntryProjectionContext,
+): void {
+  if (entry.entryType === 'TURN_END') {
+    // TurnSummary：usage 挂起至相应 TURN_END 之后投影（绝不紧跟 Assistant）。
+    const summary = context.pendingTurnSummary
+    context.pendingTurnSummary = null
+    context.pendingTurnUsage = null
+    // 无论该回合是否有 usage，TURN_END 都必须产出一条携带真实 TURN_END Entry id 的
+    // 结束 meta：回合 footer 的“从此处分支”只以这个 id 分叉（未消费 usage 的回合、
+    // 以及作为 head 的最新回合同样可用）。
+    messages.push(turnEndMeta(summary, entry))
     return
   }
-  if (role === 'TOOL') {
-    const toolResults = contents.filter((candidate) => getString(candidate.type) === 'tool_result')
-    const metadata = asRecord(payload.toolResultMetadata)
-    toolResults.forEach((content, index) => {
-      const key = toolCallKey(getString(content.toolCallId))
-      const argumentsQueue = durableToolArguments.get(key) ?? []
-      const argumentsJson = argumentsQueue.shift() ?? ''
-      if (argumentsQueue.length === 0) {
-        durableToolArguments.delete(key)
-      }
-      messages.push(projectToolResult(entry, content, argumentsJson, index, metadata))
-    })
-    if (toolResults.length === 0) {
-      messages.push(projectEmptyMessageEntry(entry, role))
-    }
-    return
+  // 新 turn 开始：丢弃上一 turn 未关闭的残留 usage。
+  context.pendingTurnSummary = null
+  context.pendingTurnUsage = null
+  if (entry.entryType === 'TURN_START' && getString(payload.reason) !== 'COMPACTION') {
+    projectTurnStartSettings(entry, payload, messages, context)
   }
-  messages.push(projectUnsupportedMessageEntry(entry, role))
+}
+
+/** 非压缩 TURN_START 的设置差值与模型回退，并推进 settings 基准。 */
+function projectTurnStartSettings(
+  entry: HarnessSessionEntryDTO,
+  payload: Record<string, unknown>,
+  messages: DialogueMessage[],
+  context: EntryProjectionContext,
+): void {
+  const settings = parseSettingsSnapshot(payload.settings)
+  if (settings === null) {
+    messages.push(projectInvalidSettings(entry))
+  } else if (context.lastSettings !== null) {
+    messages.push(...projectSettingsChanges(entry, context.lastSettings, settings))
+  }
+  if (settings !== null) {
+    const fallback = projectModelFallback(entry, settings, payload.executedSelection)
+    if (fallback !== null) {
+      messages.push(fallback)
+    }
+  }
+  context.lastSettings = settings
 }
 
 /** 回合页脚只展示用量；缺失时以 '-' 占位，分支始终绑定真实 TURN_END Entry id。 */
@@ -350,128 +241,66 @@ function integerValue(value: unknown): number | null {
   return typeof value === 'number' && Number.isSafeInteger(value) ? value : null
 }
 
-function projectToolCall(
+/** ASSISTANT_ERROR：有 attempt 快照时投影为可重试失败，否则是一条错误消息。 */
+function projectAssistantError(
   entry: HarnessSessionEntryDTO,
-  content: Record<string, unknown>,
-  callIndex: number,
-): ToolDialogueMessage {
-  return {
-    id: `${entry.entryId}:tool-call:${toolCallIdentity(content, callIndex)}`,
-    role: 'tool',
-    phase: 'call',
-    subjectEntryId: entry.entryId,
-    toolCallId: getString(content.toolCallId),
-    toolName: getString(content.toolName),
-    rendererKey: getString(content.rendererKey),
-    arguments: getString(content.argumentsJson),
-    contents: [],
-    createdAt: entry.createdAt,
-    status: 'done',
-    callIdentity: strictToolCallIdentity(entry.entryId, callIndex),
+  payload: Record<string, unknown>,
+  messages: DialogueMessage[],
+): void {
+  const error = asRecord(payload.error)
+  const attempt = parseAttemptSnapshot(payload.attempt)
+  if (attempt != null) {
+    messages.push(
+      createModelAttemptFailureMessage({
+        id: entry.entryId,
+        subjectEntryId: entry.entryId,
+        createdAt: entry.createdAt,
+        attempt: attempt.attempt,
+        sequence: attempt.sequence,
+        text: attempt.text,
+        thinking: attempt.thinking,
+        errorCode: getString(error.code),
+        errorMessage: getString(error.message) || translate('ai.runtime.message.assistantFailed'),
+        failedAt: entry.createdAt,
+        retryAt: null,
+        nextAttempt: null,
+      }),
+    )
+    return
   }
+  messages.push({
+    id: entry.entryId,
+    role: 'assistant',
+    subjectEntryId: entry.entryId,
+    text: getString(error.message) || translate('ai.runtime.entry.assistantRequestFailed'),
+    createdAt: entry.createdAt,
+    status: 'error',
+  })
 }
 
-function projectToolResult(
+/** ASSISTANT_ABORTED：只保留已产出的正文与思考，全空时不占位。 */
+function projectAssistantAborted(
   entry: HarnessSessionEntryDTO,
-  content: Record<string, unknown>,
-  argumentsJson: string,
-  callIndex: number,
-  metadata: Record<string, unknown>,
-): ToolDialogueMessage {
-  const canonicalContent = decodeDurableToolResultContent(content)
-  const projected = projectToolResultContent(canonicalContent, argumentsJson)
-  const assistantEntryId = getString(metadata.assistantEntryId)
-  const metadataCallIndex = integerValue(metadata.callIndex)
-  return {
-    id: `${entry.entryId}:tool-result:${toolCallIdentity(content, callIndex)}`,
-    role: 'tool',
-    phase: 'result',
-    subjectEntryId: entry.entryId,
-    toolCallId: getString(content.toolCallId),
-    toolName: getString(content.toolName),
-    rendererKey: getString(content.rendererKey),
-    arguments: projected.arguments,
-    contents: projected.contents,
-    details: projected.details,
-    errorMessage: projected.errorMessage,
-    createdAt: entry.createdAt,
-    status: projected.status,
-    editReview: projected.editReview,
-    // Invocation 行物化后会删除；终态身份只取 durable toolResultMetadata。
-    invocationStatus: ['SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN'].includes(getString(metadata.status))
-      ? getString(metadata.status) : undefined,
-    callIdentity: assistantEntryId && metadataCallIndex != null
-      ? strictToolCallIdentity(assistantEntryId, metadataCallIndex)
-      : undefined,
+  payload: Record<string, unknown>,
+  messages: DialogueMessage[],
+): void {
+  const message = asRecord(payload.message)
+  const contents = getRecordList(message.contents)
+  const text = contents.filter((content) => getString(content.type) === 'text').map(contentText).join('')
+  const thinking = contents
+    .filter((content) => getString(content.type) === 'thinking')
+    .map(contentText)
+    .join('')
+  if (text || thinking) {
+    messages.push({
+      id: entry.entryId,
+      role: 'assistant',
+      subjectEntryId: entry.entryId,
+      text,
+      thinking: thinking || undefined,
+      createdAt: entry.createdAt,
+      status: 'done',
+      aborted: true,
+    })
   }
-}
-
-/**
- * 在 durable Entry 边界将持久化的 ToolResultMessageContent 解码为规范共享结果语义。
- * durable 边界只认 detailsJson 字段；缺 detailsJson 或损坏时 details 均为 undefined，
- * 绝不透传或旁路未知的 details 对象。
- */
-function decodeDurableToolResultContent(content: Record<string, unknown>): Record<string, unknown> {
-  let details: Record<string, unknown> | undefined
-  const rawDetailsJson = content.detailsJson
-  if (typeof rawDetailsJson === 'string' && rawDetailsJson.trim()) {
-    try {
-      const parsed = JSON.parse(rawDetailsJson)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        details = parsed as Record<string, unknown>
-      }
-    } catch {
-      // 损坏的 detailsJson 解析失败，details 保持 undefined，不假造或旁路未知对象
-    }
-  }
-  return {
-    ...content,
-    // AgentMessageJsonCodec 的 durable content.json 是明确的 JSON 原文；
-    // ToolResultJsonCodec 的实时和 invocation content.json 则已是节点。
-    contents: getRecordList(content.contents).flatMap((item) => {
-      if (item.type !== 'json') {
-        return [item]
-      }
-      return typeof item.json === 'string'
-        ? [{ ...item, json: parseRawJsonText(item.json) }]
-        : []
-    }),
-    details,
-  }
-}
-
-/**
- * 从规范 ToolResult JSON 解析有序展示内容和错误。
- * durable Entry 与尚未物化的 invocation result 共用这一事实，避免两套结果格式。
- */
-export function projectToolResultContent(
-  content: Record<string, unknown>,
-  argumentsJson: string,
-): Pick<ToolDialogueMessage, 'arguments' | 'contents' | 'details' | 'errorMessage' | 'status' | 'editReview'> {
-  const error = content.error === true
-  const contents = toToolContents(getRecordList(content.contents))
-  // 错误直接使用工具结果原文：不再套用通用「工具执行失败」文案；没有可展示原文时
-  // 只有错误态（hasError 仍为 true），不伪造摘要。
-  const rawError = contents
-    .flatMap((item) => (item.type === 'text' ? [item.text] : []))
-    .join('\n')
-    .trim()
-  const editReview = extractResultEditReview(content) ?? undefined
-  return {
-    arguments: argumentsJson,
-    contents,
-    details: content.details != null && typeof content.details === 'object' && !Array.isArray(content.details)
-      ? content.details as Record<string, unknown> : undefined,
-    errorMessage: error && rawError ? rawError : undefined,
-    status: error ? 'error' : 'done',
-    editReview,
-  }
-}
-
-function toolCallIdentity(content: Record<string, unknown>, callIndex: number): string {
-  return `${getString(content.toolCallId) || 'unknown'}:${callIndex}`
-}
-
-function toolCallKey(toolCallId: string): string {
-  return toolCallId ? `call:${toolCallId}` : ''
 }

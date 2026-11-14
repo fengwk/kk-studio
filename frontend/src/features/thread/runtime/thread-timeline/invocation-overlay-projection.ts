@@ -8,7 +8,7 @@ import {
   type DialogueMessage,
   type ToolDialogueMessage,
 } from '@/features/thread/runtime/thread-timeline-types'
-import { projectToolResultContent } from '@/features/thread/runtime/thread-timeline/entry-projection'
+import { projectToolResultContent } from '@/features/thread/runtime/thread-timeline/tool-result-projection'
 import { parseApproval } from '@/features/thread/runtime/thread-timeline/approval-parsing'
 import type { ToolInvocationDTO } from '@/shared/api/generated/contracts'
 
