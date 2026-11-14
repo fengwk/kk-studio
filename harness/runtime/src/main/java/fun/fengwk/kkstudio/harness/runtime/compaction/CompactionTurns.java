@@ -52,10 +52,10 @@ public final class CompactionTurns {
     }
 
     public boolean complete() {
-      return result != null && end != null && end.outcome() == TurnEndOutcome.COMPLETED;
+      return result != null && completed();
     }
 
-    /** Whether the compaction turn has a completed TURN_END. */
+    /** 是否已有 outcome 为 COMPLETED 的 TURN_END（不要求 compression result）。 */
     public boolean completed() {
       return end != null && end.outcome() == TurnEndOutcome.COMPLETED;
     }
@@ -136,10 +136,5 @@ public final class CompactionTurns {
     }
     throw new IllegalStateException(
         "compaction result entry " + resultEntryId + " is not on the current path");
-  }
-
-  /** 返回 path 中指定索引处的 Entry id（供调用方获取 result Entry 本身）。 */
-  public static Entry entryAt(EntryPath path, int index) {
-    return path.entries().get(index);
   }
 }

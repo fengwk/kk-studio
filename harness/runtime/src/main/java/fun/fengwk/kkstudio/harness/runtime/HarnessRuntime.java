@@ -53,7 +53,6 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
-import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanPreview;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
@@ -886,11 +885,6 @@ public final class HarnessRuntime {
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(resultEntryId, "resultEntryId");
     return CompactionTurns.ofResult(path, resultEntryId).freezing();
-  }
-
-  private static Consumer<UUID> toolExecutionCanceller(ToolProcessor processor) {
-    Objects.requireNonNull(processor, "toolProcessor");
-    return processor::cancel;
   }
 
   /** 逐个 best-effort 取消本地执行；单个取消失败只记录日志，绝不中断其余取消，也不改变已 commit 的 Stop 结果。 */

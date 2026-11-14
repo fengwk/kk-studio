@@ -16,7 +16,6 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.codec.HistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.runtime.history.HistoryNormalization;
 import fun.fengwk.kkstudio.harness.runtime.thread.command.CommandHarvestReducer;
 
@@ -40,7 +39,6 @@ import java.util.function.Supplier;
  */
 final class TurnPlanBuilder {
 
-  private final HistoryPayloadMapper payloadMapper = new HistoryPayloadMapper();
   private final CommandHarvestReducer harvestReducer = new CommandHarvestReducer();
 
   TurnPlan build(

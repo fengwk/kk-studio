@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AudioMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ImageMessageContent;
@@ -81,23 +80,6 @@ public final class TokenEstimator {
     return tokens;
   }
 
-  /** 估算指定 Entry 之后仍会进入 Provider Context 的可见消息 token；Entry 缺失即分支损坏，fail closed。 */
-  public static long estimateVisibleTokensAfter(EntryPath path, UUID entryId) {
-    Objects.requireNonNull(path, "path");
-    Objects.requireNonNull(entryId, "entryId");
-    List<Entry> entries = path.entries();
-    int entryIndex = indexOfId(entries, entryId);
-    if (entryIndex < 0) {
-      throw new IllegalStateException("entryId is not on the current path: " + entryId);
-    }
-    boolean[] visible = visibilityMask(entries);
-    long tokens = 0L;
-    for (int i = entryIndex + 1; i < entries.size(); i++) {
-      tokens = Math.addExact(tokens, visible[i] ? estimateTokens(entries.get(i)) : 0L);
-    }
-    return tokens;
-  }
-
   /** 估计一条 Entry 的上下文 token：消息内容字符数之和 {@code ceil(chars / 4)}；非消息为 0。 */
   public static long estimateTokens(Entry entry) {
     if (entry.payload() instanceof MessagePayload message) {
@@ -118,15 +100,6 @@ public final class TokenEstimator {
   /** 估计一段文本的 token：{@code ceil(chars / 4)}。 */
   public static long estimateTextTokens(String text) {
     return (text.length() + 3L) / 4L;
-  }
-
-  /** 估计一组上下文消息的 token 之和。 */
-  public static long estimateMessages(List<AgentMessage> messages) {
-    long tokens = 0L;
-    for (AgentMessage message : messages) {
-      tokens = Math.addExact(tokens, contentTokens(message.contents()));
-    }
-    return tokens;
   }
 
   /**
