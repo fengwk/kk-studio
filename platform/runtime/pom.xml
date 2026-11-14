@@ -232,6 +232,10 @@
                                         <include>fun.fengwk.kkstudio.platform.notification.SubscriptionFanOut</include>
                                         <include>fun.fengwk.kkstudio.platform.settings.HttpProxySelector*</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.thread.command.TurnModelSelectionResolver*</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.thread.command.TurnModelBudget</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.thread.command.TurnRejection</include>
+                                        <include>fun.fengwk.kkstudio.platform.harness.thread.command.TurnSystemMessageProjector</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseAgentTurnContextResolver</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.thread.command.AgentTurnContext</include>
                                         <include>fun.fengwk.kkstudio.platform.harness.model.ProviderResourceMaterializer*</include>
