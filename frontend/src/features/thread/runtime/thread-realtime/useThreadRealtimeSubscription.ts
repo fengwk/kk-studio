@@ -127,6 +127,8 @@ export function useThreadRealtimeSubscription({
       scheduler.cancel()
       toolPartialSeenEventIdsRef.current = new Map()
     }
+    // 其余依赖都是本 Thread 生命周期内稳定的 ref 与 useCallback（与拆分前的 hook 相同）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     applicationEvents,
     clearModelRecovery,
