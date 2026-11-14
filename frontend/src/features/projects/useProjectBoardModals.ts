@@ -1,5 +1,4 @@
-import { useEffect, useState } from 'react'
-import { useLocation } from 'react-router'
+import { useCallback, useState } from 'react'
 import { useI18n } from '@/shared/i18n'
 import type { ProjectDTO } from '@/shared/api/generated/contracts'
 import type { ProjectsApi } from './projects-api'
@@ -7,26 +6,22 @@ import type { ProjectsApi } from './projects-api'
 /**
  * 看板上“当前打开的弹窗”与手动详情意图。
  *
- * <p>手动打开详情不进入 URL；路由或查询参数一变就收起，避免前进后退复活弹窗。
+ * <p>手动打开详情不进入 URL；收起它的时机由 useProjectBoardRoute 在读路由时统一处理，
+ * 避免前进后退复活弹窗。
  */
 export function useProjectBoardModals() {
-  const location = useLocation()
   const [isManualDetailOpen, setIsManualDetailOpen] = useState(false)
   const [isEditProjectOpen, setIsEditProjectOpen] = useState(false)
   const [isDeleteProjectOpen, setIsDeleteProjectOpen] = useState(false)
   const [isCreateIssueOpen, setIsCreateIssueOpen] = useState(false)
 
-  const dismissAll = () => setIsManualDetailOpen(false)
-
-  // 路由或参数变化时收起手动打开的详情弹窗。
-  useEffect(() => {
-    setIsManualDetailOpen(false)
-  }, [location.key])
+  // 路由 hook 的 action 与兜底 effect 都会调用它，保持引用稳定以免重复触发 effect。
+  const dismissManualDetail = useCallback(() => setIsManualDetailOpen(false), [])
 
   return {
     isManualDetailOpen,
     openManualDetail: () => setIsManualDetailOpen(true),
-    dismissManualDetail: dismissAll,
+    dismissManualDetail,
     isEditProjectOpen,
     openEditProject: () => setIsEditProjectOpen(true),
     closeEditProject: () => setIsEditProjectOpen(false),

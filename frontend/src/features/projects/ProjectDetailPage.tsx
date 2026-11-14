@@ -32,8 +32,8 @@ export interface ProjectDetailPageProps {
  */
 export function ProjectDetailPage({ projectId, onBack, api = projectsApi }: ProjectDetailPageProps) {
   const queryClient = useQueryClient()
-  const route = useProjectBoardRoute()
   const modals = useProjectBoardModals()
+  const route = useProjectBoardRoute({ onDismissManualDetail: modals.dismissManualDetail })
   const [searchQuery, setSearchQuery] = useState('')
 
   const {
@@ -62,12 +62,13 @@ export function ProjectDetailPage({ projectId, onBack, api = projectsApi }: Proj
     api,
   })
 
-  // 从线程视图关闭详情只退出线程，保留用户正在看的 issue。
+  // 从线程视图关闭详情只退出弹窗，保留用户正在看的 issue；普通模式关闭则清掉 URL 参数。
   const closeIssueDetail = () => {
-    modals.dismissManualDetail()
-    if (!route.threadId) {
-      route.selectIssue(null)
+    if (route.threadId) {
+      modals.dismissManualDetail()
+      return
     }
+    route.selectIssue(null)
   }
 
   if (!snapshot) {

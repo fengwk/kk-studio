@@ -29,6 +29,19 @@ vi.mock('@/shared/app-events', () => ({
 
 let capturedPaneProps: Record<string, unknown> | undefined
 
+// 记录每次 IssueDetailModal 渲染时的开关与 issue，用来观察“同一提交内关闭”而不只是一帧之后的净结果。
+const detailModalRenders = vi.hoisted(() => [] as Array<{ isOpen: boolean; issueId: string | null }>)
+
+vi.mock('./components/IssueDetailModal', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./components/IssueDetailModal')>()
+  return {
+    IssueDetailModal: (props: import('./components/IssueDetailModal').IssueDetailModalProps) => {
+      detailModalRenders.push({ isOpen: props.isOpen, issueId: props.issueId })
+      return <actual.IssueDetailModal {...props} />
+    },
+  }
+})
+
 vi.mock('@/features/thread/runtime/AgentPane', () => ({
   AgentPane: (props: Record<string, unknown>) => {
     capturedPaneProps = props
@@ -62,6 +75,7 @@ function NavigationProbe() {
 function renderPage(ui: React.ReactElement, client?: QueryClient, initialEntries: string[] = ['/']) {
   latestNav = undefined
   capturedPaneProps = undefined
+  detailModalRenders.length = 0
   const queryClient = client ?? new QueryClient({
     defaultOptions: {
       queries: {
@@ -546,6 +560,35 @@ describe('ProjectDetailPage', () => {
     })
     expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
     expect(getNav().location.search).toContain('issue=b0000000-0000-0000-0000-000000000001')
+  })
+
+  it('closes the manual detail in the same commit when selecting another issue from the dock', async () => {
+    // 测试意图：手动打开详情后再从看板选中另一个 issue 时，旧弹窗必须在同一提交内关闭，
+    // 不得先渲染一帧“新 issue 已打开”的弹窗；URL 也应指向新 issue。
+    const api = createMockApi()
+    const firstIssueId = mockSnapshot.issues[0].issue.id
+    const secondIssueId = mockSnapshot.issues[1].issue.id
+    const { getNav } = renderPage(
+      <ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />,
+      undefined,
+      [`/projects/${projectId}?issue=${firstIssueId}&thread=th-valid-101`],
+    )
+
+    await screen.findByTestId('agent-pane')
+    expect(screen.queryByLabelText('Issue #1 详情')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '查看完整 Issue 详情' }))
+    expect(await screen.findByLabelText('Issue #1 详情')).toBeInTheDocument()
+
+    detailModalRenders.length = 0
+    fireEvent.click(screen.getByRole('button', { name: /Issue #2 Implement REST API/ }))
+    // 看板选中新 issue 后，旧的“手动打开详情”意图不得在新 issue 上生效。
+    await waitFor(() => {
+      expect(new URLSearchParams(getNav().location.search).get('issue')).toBe(secondIssueId)
+    })
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    // 关键断言：选中新 issue 到 URL 生效之间不存在“手动详情已重开”的渲染。
+    expect(detailModalRenders.filter((render) => render.isOpen)).toEqual([])
   })
 
   it('navigates with MemoryRouter in dock mode: Back closes manual modal and Forward does not resurrect it', async () => {
