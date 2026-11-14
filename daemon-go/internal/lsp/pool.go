@@ -69,41 +69,141 @@ func poolKey(root string, server ServerConfig) string {
 	return string(b)
 }
 
+func leaseContextError(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return newLspTimeoutError("Operation timed out", ctx.Err())
+	}
+	return &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+}
+
+// leaseTarget resolves the server, executable and workspace root, confirming the exit on failure.
+func (p *Pool) leaseTarget(path string, onExit func()) (ServerConfig, string, string, string, error) {
+	fail := func(err error) (ServerConfig, string, string, string, error) {
+		if onExit != nil {
+			onExit()
+		}
+		return ServerConfig{}, "", "", "", err
+	}
+	server, err := p.discovery.RequireServer(path)
+	if err != nil {
+		return fail(err)
+	}
+	executable, err := p.discovery.RequireExecutable(server)
+	if err != nil {
+		return fail(err)
+	}
+	root, err := p.discovery.WorkspaceRoot(server, path)
+	if err != nil {
+		return fail(err)
+	}
+	return server, root, executable, poolKey(root, server), nil
+}
+
 func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*Lease, error) {
 	if ctx.Err() != nil {
 		if onExit != nil {
 			onExit()
 		}
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return nil, newLspTimeoutError("Operation timed out", ctx.Err())
-		}
-		return nil, &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
+		return nil, leaseContextError(ctx)
 	}
-	server, err := p.discovery.RequireServer(path)
+	server, root, executable, key, err := p.leaseTarget(path, onExit)
 	if err != nil {
-		if onExit != nil {
-			onExit()
-		}
 		return nil, err
 	}
-	executable, err := p.discovery.RequireExecutable(server)
-	if err != nil {
-		if onExit != nil {
-			onExit()
-		}
-		return nil, err
-	}
-	root, err := p.discovery.WorkspaceRoot(server, path)
-	if err != nil {
-		if onExit != nil {
-			onExit()
-		}
-		return nil, err
-	}
-	key := poolKey(root, server)
 	for {
-		rejectedBySettledBoot := false
+		lease, retry, err := p.awaitLease(ctx, key, server, root, executable, onExit)
+		if retry {
+			continue
+		}
+		return lease, err
+	}
+}
+
+// awaitLease runs one lease attempt; retry asks the caller to re-enter the loop.
+func (p *Pool) awaitLease(ctx context.Context, key string, server ServerConfig, root, executable string, onExit func()) (*Lease, bool, error) {
+	rejectedBySettledBoot := false
+	p.mu.Lock()
+	if p.closing {
+		done := p.closeDone
+		p.mu.Unlock()
+		<-done
+		if onExit != nil && p.closeErr == nil {
+			onExit()
+		}
+		return nil, false, &LspError{Message: "LSP service is closed"}
+	}
+	if old, ok := p.retiring[key]; ok {
+		p.mu.Unlock()
+		select {
+		case <-ctx.Done():
+			if onExit != nil {
+				onExit()
+			}
+			return nil, false, leaseContextError(ctx)
+		case <-old.done:
+			if old.err != nil {
+				if onExit != nil {
+					onExit()
+				}
+				return nil, false, old.err
+			}
+			return nil, true, nil
+		}
+	}
+	if entry := p.entries[key]; entry != nil {
+		if entry.client.IsAlive() {
+			if entry.timer != nil {
+				entry.timer.Stop()
+				entry.timer = nil
+			}
+			entry.inFlight++
+			p.mu.Unlock()
+			return &Lease{Client: entry.client, pool: p, entry: entry}, false, nil
+		}
+		delete(p.entries, key)
+	}
+	b := p.boots[key]
+	if b == nil {
+		bootCtx, cancel := context.WithCancel(context.Background())
+		b = &boot{done: make(chan struct{}), cancel: cancel}
+		p.boots[key] = b
+		go p.start(bootCtx, key, server, root, executable, b)
+	} else {
+		select {
+		case <-b.done:
+			rejectedBySettledBoot = true
+		default:
+		}
+	}
+	b.waiters++
+	p.mu.Unlock()
+	return p.awaitBoot(ctx, key, b, rejectedBySettledBoot, onExit)
+}
+
+// awaitBoot waits for the shared launch; retry asks the caller to re-enter the lease loop.
+func (p *Pool) awaitBoot(ctx context.Context, key string, b *boot, rejectedBySettledBoot bool, onExit func()) (*Lease, bool, error) {
+	select {
+	case <-ctx.Done():
 		p.mu.Lock()
+		b.waiters--
+		if b.waiters == 0 && p.boots[key] == b {
+			b.cancel()
+		}
+		p.mu.Unlock()
+		p.confirmAfterAbandonedBoot(b, onExit)
+		return nil, false, leaseContextError(ctx)
+	case <-b.done:
+		p.mu.Lock()
+		b.waiters--
+		if b.err != nil {
+			var bootstrap *LspBootstrapError
+			converged := (errors.As(b.err, &bootstrap) && bootstrap.Converged) || b.retryable
+			p.mu.Unlock()
+			if onExit != nil && (converged || rejectedBySettledBoot) {
+				onExit()
+			}
+			return nil, false, b.err
+		}
 		if p.closing {
 			done := p.closeDone
 			p.mu.Unlock()
@@ -111,119 +211,43 @@ func (p *Pool) LeaseWithExit(ctx context.Context, path string, onExit func()) (*
 			if onExit != nil && p.closeErr == nil {
 				onExit()
 			}
-			return nil, &LspError{Message: "LSP service is closed"}
+			return nil, false, &LspError{Message: "LSP service is closed"}
 		}
-		if old, ok := p.retiring[key]; ok {
+		entry := p.entries[key]
+		if entry == nil || !entry.client.IsAlive() {
 			p.mu.Unlock()
-			select {
-			case <-ctx.Done():
-				if onExit != nil {
-					onExit()
-				}
-				if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-					return nil, newLspTimeoutError("Operation timed out", ctx.Err())
-				}
-				return nil, &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
-			case <-old.done:
-				if old.err != nil {
-					if onExit != nil {
-						onExit()
-					}
-					return nil, old.err
-				}
-				continue
-			}
+			return nil, true, nil
 		}
-		if entry := p.entries[key]; entry != nil {
-			if entry.client.IsAlive() {
-				if entry.timer != nil {
-					entry.timer.Stop()
-					entry.timer = nil
-				}
-				entry.inFlight++
-				p.mu.Unlock()
-				return &Lease{Client: entry.client, pool: p, entry: entry}, nil
-			}
-			delete(p.entries, key)
+		entry.inFlight++
+		if entry.timer != nil {
+			entry.timer.Stop()
+			entry.timer = nil
 		}
-		b := p.boots[key]
-		if b == nil {
-			bootCtx, cancel := context.WithCancel(context.Background())
-			b = &boot{done: make(chan struct{}), cancel: cancel}
-			p.boots[key] = b
-			go p.start(bootCtx, key, server, root, executable, b)
-		} else {
-			select {
-			case <-b.done:
-				rejectedBySettledBoot = true
-			default:
-			}
-		}
-		b.waiters++
 		p.mu.Unlock()
-		select {
-		case <-ctx.Done():
-			p.mu.Lock()
-			b.waiters--
-			if b.waiters == 0 && p.boots[key] == b {
-				b.cancel()
-			}
-			p.mu.Unlock()
-			if onExit != nil {
-				go func() {
-					<-b.done
-					p.mu.Lock()
-					converged := b.err == nil && !p.closing || b.retryable
-					var bootstrap *LspBootstrapError
-					if errors.As(b.err, &bootstrap) && bootstrap.Converged {
-						converged = true
-					}
-					p.mu.Unlock()
-					if converged {
-						onExit()
-					}
-				}()
-			}
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				return nil, newLspTimeoutError("Operation timed out", ctx.Err())
-			}
-			return nil, &LspError{Message: "Operation cancelled", Cause: ctx.Err()}
-		case <-b.done:
-			p.mu.Lock()
-			b.waiters--
-			if b.err != nil {
-				var bootstrap *LspBootstrapError
-				converged := (errors.As(b.err, &bootstrap) && bootstrap.Converged) || b.retryable
-				p.mu.Unlock()
-				if onExit != nil && (converged || rejectedBySettledBoot) {
-					onExit()
-				}
-				return nil, b.err
-			}
-			if p.closing {
-				done := p.closeDone
-				p.mu.Unlock()
-				<-done
-				if onExit != nil && p.closeErr == nil {
-					onExit()
-				}
-				return nil, &LspError{Message: "LSP service is closed"}
-			}
-			entry := p.entries[key]
-			if entry == nil || !entry.client.IsAlive() {
-				p.mu.Unlock()
-				continue
-			}
-			entry.inFlight++
-			if entry.timer != nil {
-				entry.timer.Stop()
-				entry.timer = nil
-			}
-			p.mu.Unlock()
-			return &Lease{Client: entry.client, pool: p, entry: entry}, nil
-		}
+		return &Lease{Client: entry.client, pool: p, entry: entry}, false, nil
 	}
 }
+
+// confirmAfterAbandonedBoot verifies the shared launch without blocking the cancelled caller.
+func (p *Pool) confirmAfterAbandonedBoot(b *boot, onExit func()) {
+	if onExit == nil {
+		return
+	}
+	go func() {
+		<-b.done
+		p.mu.Lock()
+		converged := b.err == nil && !p.closing || b.retryable
+		var bootstrap *LspBootstrapError
+		if errors.As(b.err, &bootstrap) && bootstrap.Converged {
+			converged = true
+		}
+		p.mu.Unlock()
+		if converged {
+			onExit()
+		}
+	}()
+}
+
 func (p *Pool) start(ctx context.Context, key string, server ServerConfig, root, executable string, b *boot) {
 	client, err := Launch(ctx, server, root, executable, p.processes)
 	if err == nil {
@@ -321,34 +345,49 @@ func (p *Pool) Client(path string) *Client {
 	return e.client
 }
 func (p *Pool) ActiveClientCount() int { p.mu.Lock(); defer p.mu.Unlock(); return len(p.entries) }
-func (p *Pool) Close() error {
+
+// drainSnapshot captures the pool state that Close finishes outside the lock.
+type drainSnapshot struct {
+	boots       []*boot
+	entries     []*poolEntry
+	retirements []*retirement
+}
+
+// beginClose marks the pool closed and captures what must be drained; closed reports a repeat call.
+func (p *Pool) beginClose() (drainSnapshot, bool, error) {
 	p.mu.Lock()
 	if p.closing {
 		done := p.closeDone
 		p.mu.Unlock()
 		<-done
-		return p.closeErr
+		return drainSnapshot{}, true, p.closeErr
 	}
 	p.closing = true
-	boots := make([]*boot, 0, len(p.boots))
+	snapshot := drainSnapshot{
+		boots:       make([]*boot, 0, len(p.boots)),
+		entries:     make([]*poolEntry, 0, len(p.entries)),
+		retirements: make([]*retirement, 0, len(p.retiring)),
+	}
 	for _, b := range p.boots {
 		b.cancel()
-		boots = append(boots, b)
+		snapshot.boots = append(snapshot.boots, b)
 	}
-	entries := make([]*poolEntry, 0, len(p.entries))
 	for _, e := range p.entries {
 		if e.timer != nil {
 			e.timer.Stop()
 		}
-		entries = append(entries, e)
+		snapshot.entries = append(snapshot.entries, e)
 	}
-	retirements := make([]*retirement, 0, len(p.retiring))
 	for _, r := range p.retiring {
-		retirements = append(retirements, r)
+		snapshot.retirements = append(snapshot.retirements, r)
 	}
 	p.entries = map[string]*poolEntry{}
 	p.mu.Unlock()
+	return snapshot, false, nil
+}
 
+// drain stops every boot, entry and retirement once and reports distinct failures.
+func (p *Pool) drain(snapshot drainSnapshot) []error {
 	var failures []error
 	seenFailures := map[error]struct{}{}
 	addFailure := func(err error) {
@@ -362,7 +401,16 @@ func (p *Pool) Close() error {
 		failures = append(failures, err)
 	}
 	stopped := map[*Client]bool{}
-	for _, b := range boots {
+	stopOnce := func(client *Client) {
+		if client == nil || stopped[client] {
+			return
+		}
+		stopped[client] = true
+		if err := client.Stop(p.options.ShutdownGrace); err != nil {
+			addFailure(err)
+		}
+	}
+	for _, b := range snapshot.boots {
 		<-b.done
 		if b.err != nil {
 			var be *LspBootstrapError
@@ -371,28 +419,26 @@ func (p *Pool) Close() error {
 			}
 			continue
 		}
-		if b.client != nil && !stopped[b.client] {
-			stopped[b.client] = true
-			if err := b.client.Stop(p.options.ShutdownGrace); err != nil {
-				addFailure(err)
-			}
-		}
+		stopOnce(b.client)
 	}
-	for _, e := range entries {
-		if !stopped[e.client] {
-			stopped[e.client] = true
-			if err := e.client.Stop(p.options.ShutdownGrace); err != nil {
-				addFailure(err)
-			}
-		}
+	for _, e := range snapshot.entries {
+		stopOnce(e.client)
 	}
-	for _, r := range retirements {
+	for _, r := range snapshot.retirements {
 		<-r.done
 		if r.err != nil {
 			addFailure(r.err)
 		}
 	}
-	if len(failures) > 0 {
+	return failures
+}
+
+func (p *Pool) Close() error {
+	snapshot, closed, err := p.beginClose()
+	if closed {
+		return err
+	}
+	if failures := p.drain(snapshot); len(failures) > 0 {
 		p.closeErr = &LspCleanupError{Failures: failures}
 	}
 	p.mu.Lock()
