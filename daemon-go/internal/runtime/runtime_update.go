@@ -166,40 +166,17 @@ func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, comm
 		return updateRunFailed
 	}
 	if err := runner.StopForUpdate(ctx); err != nil {
-		if ctx.Err() == nil {
-			message := "capability execution failed"
-			if !errors.Is(err, context.Canceled) && strings.TrimSpace(err.Error()) != "" {
-				message = safeUpdateError(err)
-			}
-			r.finishUpdate(command.OperationID, update.PhaseFailed, message)
-		}
+		r.reportStopFailure(ctx, command, err)
 		return updateRunFailed
 	}
 	outcome, err := runner.HandleUpdate(ctx, command, configuration, func(progress update.Progress) {
-		if active, ok := r.updateOps.Active(); !ok || active.Command.OperationID != command.OperationID {
-			return
-		}
-		value := UpdateProgress{TargetVersion: command.TargetVersion, DownloadedBytes: progress.DownloadedBytes, TotalBytes: progress.TotalBytes}
-		if err := r.status.UpdateProgress(value); err == nil {
-			_ = r.sendStatus()
-		}
+		r.publishUpdateProgress(command, progress)
 	})
 	if ctx.Err() != nil {
 		return updateRunCancelled
 	}
-	if err != nil || outcome.Phase == update.PhaseFailed || outcome.Phase != update.PhasePrepared {
-		message := "capability execution failed"
-		if err != nil {
-			message = safeUpdateError(err)
-		} else if outcome.Phase == update.PhaseFailed {
-			message = outcome.Message
-			if message == "" {
-				message = "managed update failed"
-			} else {
-				message = safeUpdateError(errors.New(message))
-			}
-		}
-		r.finishUpdate(command.OperationID, update.PhaseFailed, message)
+	if err != nil || outcome.Phase != update.PhasePrepared {
+		r.finishUpdate(command.OperationID, update.PhaseFailed, updateFailureMessage(outcome, err))
 		return updateRunFailed
 	}
 	receipt, ok := r.updateOps.Complete(command.OperationID, update.PhasePrepared, outcome.Message)
@@ -227,6 +204,44 @@ func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, comm
 	_ = r.sendStatus()
 	_ = r.deliverUpdateReceipt(receipt)
 	return updateRunPrepared
+}
+
+// reportStopFailure records why the running work could not be stopped, unless the update context
+// itself was cancelled.
+func (r *Runtime) reportStopFailure(ctx context.Context, command update.Command, err error) {
+	if ctx.Err() != nil {
+		return
+	}
+	message := "capability execution failed"
+	if !errors.Is(err, context.Canceled) && strings.TrimSpace(err.Error()) != "" {
+		message = safeUpdateError(err)
+	}
+	r.finishUpdate(command.OperationID, update.PhaseFailed, message)
+}
+
+// publishUpdateProgress forwards runner progress for the operation that still holds admission.
+func (r *Runtime) publishUpdateProgress(command update.Command, progress update.Progress) {
+	if active, ok := r.updateOps.Active(); !ok || active.Command.OperationID != command.OperationID {
+		return
+	}
+	value := UpdateProgress{TargetVersion: command.TargetVersion, DownloadedBytes: progress.DownloadedBytes, TotalBytes: progress.TotalBytes}
+	if err := r.status.UpdateProgress(value); err == nil {
+		_ = r.sendStatus()
+	}
+}
+
+// updateFailureMessage turns a runner error or failed outcome into the receipt message.
+func updateFailureMessage(outcome update.Outcome, err error) string {
+	if err != nil {
+		return safeUpdateError(err)
+	}
+	if outcome.Phase != update.PhaseFailed {
+		return "capability execution failed"
+	}
+	if outcome.Message == "" {
+		return "managed update failed"
+	}
+	return safeUpdateError(errors.New(outcome.Message))
 }
 
 // updateRunResult distinguishes a prepared handover from a failure the daemon must react to and from
