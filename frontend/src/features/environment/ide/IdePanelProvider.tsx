@@ -30,7 +30,7 @@ import {
 import { IdeOverlayPanel, type IdeCloseResult } from '@/features/environment/ide/IdeOverlayPanel'
 import { IdeSplitShell } from '@/features/environment/ide/IdeSplitShell'
 import { recoveryFromViews } from '@/features/environment/ide/ide-view-state'
-import { useIdeClaimReconciliation } from '@/features/environment/ide/use-ide-claim-reconciliation'
+import { useIdeClaimReconciliation } from '@/features/environment/ide/useIdeClaimReconciliation'
 import { useIdeBrowserSession } from '@/features/environment/ide/ide-browser-session'
 
 interface IdePanelProviderProps {
