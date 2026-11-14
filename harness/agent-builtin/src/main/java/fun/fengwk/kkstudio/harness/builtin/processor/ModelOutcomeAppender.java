@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.builtin.processor;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
+import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
 import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
@@ -11,7 +12,6 @@ import fun.fengwk.kkstudio.harness.builtin.history.BuiltinHistoryPayloadMapper;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
-import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.history.FinalAnswerEntry;
 
 import java.time.Instant;
@@ -23,10 +23,9 @@ import java.util.UUID;
 /**
  * terminal ModelInvocation 的历史结果物化器。
  *
- * <p>只负责把已提交的 terminal 执行结果按既有 appender 落成不可变历史 Entry（ASSISTANT 结果 / 失败 attempt / TURN_END，或在
- * active Tool phase 仅插入 Tool siblings）并维护 Invocation 行的 attach-then-delete；返回落库事实供调用方决定下一步。绝不推进
- * Thread head、绝不 requestWork、绝不 complete Claim，也不参与 Stop 控制：这些仍由各自调用方（{@link ThreadProcessor} 的
- * claim 调度、Stop 的 收敛）掌握。
+ * <p>只负责把已提交的 terminal 执行结果落成不可变历史 Entry（ASSISTANT 结果 / 失败 attempt / TURN_END，或在 active Tool phase
+ * 仅插入 Tool siblings）并维护 Invocation 行的 attach-then-delete；返回落库事实供调用方决定下一步。绝不推进 Thread head、绝不
+ * requestWork、绝不 complete Claim，也不参与 Stop 控制：这些仍由 Runtime 的 claim 调度与 Stop 收敛掌握。
  *
  * <p>{@link #appendModel} 覆盖非 compaction turn 的 terminal Model（Complete / Continue / Failed /
  * ToolBatch / 非成功）。
@@ -59,6 +58,27 @@ public final class ModelOutcomeAppender {
     }
   }
 
+  /** 如何关闭本次 turn：写入的 TURN_END 事实、是否已到不可继续的终止边界、是否携带 continueModel 义务，以及结果是否为最终回答。 */
+  private record Closing(
+      boolean terminal,
+      boolean continueModel,
+      TurnEndOutcome outcome,
+      TurnEndReason reason,
+      boolean finalAnswer) {
+
+    static Closing completed() {
+      return new Closing(true, false, TurnEndOutcome.COMPLETED, null, true);
+    }
+
+    static Closing continued() {
+      return new Closing(false, true, TurnEndOutcome.COMPLETED, null, false);
+    }
+
+    static Closing failed(TurnEndReason reason) {
+      return new Closing(true, false, TurnEndOutcome.FAILED, reason, false);
+    }
+  }
+
   private final BuiltinHistoryPayloadMapper payloadMapper = new BuiltinHistoryPayloadMapper();
   private final ModelResponsePlanner responsePlanner = new ModelResponsePlanner();
 
@@ -74,105 +94,91 @@ public final class ModelOutcomeAppender {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(path, "path");
     Objects.requireNonNull(model, "model");
+    Entry resultEntry = appendResultEntry(tx, path, model, mutationNow);
+    if (model.status() != ModelInvocationStatus.SUCCEEDED) {
+      return closeTurn(
+          tx, model, resultEntry, Closing.failed(TurnEndReason.TURN_FAILED), mutationNow);
+    }
+    return switch (responsePlanner.plan(
+        model.result(), model.requestSpec().toolBindings(), compactionThread)) {
+      case ModelResponsePlan.Completed ignored -> closeTurn(
+          tx, model, resultEntry, Closing.completed(), mutationNow);
+      case ModelResponsePlan.Continue ignored -> closeTurn(
+          tx, model, resultEntry, Closing.continued(), mutationNow);
+      case ModelResponsePlan.Failed failed -> closeTurn(
+          tx, model, resultEntry, Closing.failed(failed.reason()), mutationNow);
+      case ModelResponsePlan.ToolBatch batch -> enterToolPhase(
+          tx, model, resultEntry, batch, mutationNow);
+    };
+  }
+
+  /** 先物化失败 attempt 前缀与本次结果 Entry；resultEntryId 仍是 invocation 上未链接的状态。 */
+  private Entry appendResultEntry(
+      BuiltinStore.Transaction tx, EntryPath path, ModelInvocation model, Instant mutationNow) {
     UUID sessionId = path.root().sessionId();
     UUID parentId =
         ModelAttemptFailureAppender.append(tx, sessionId, path.head().id(), model, false);
-    boolean succeeded = model.status() == ModelInvocationStatus.SUCCEEDED;
-    ProviderResponse response = model.result();
     Entry resultEntry =
-        new Entry(
-            tx.nextId(),
-            sessionId,
-            parentId,
-            succeeded
-                ? payloadMapper.assistantPayload(
-                    response,
-                    model.requestSpec().toolBindings(),
-                    model.actualSelection(),
-                    model.requestedAt(),
-                    model.actualEffort())
-                : payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model)),
-            mutationNow);
+        new Entry(tx.nextId(), sessionId, parentId, resultPayload(model), mutationNow);
     tx.entries().insert(resultEntry);
-    UUID resultEntryId = resultEntry.id();
-    if (!succeeded) {
-      UUID turnEndId =
-          appendTurnEnd(
-              tx,
-              sessionId,
-              resultEntryId,
-              model.turnStartEntryId(),
-              TurnEndOutcome.FAILED,
-              false,
-              TurnEndReason.TURN_FAILED,
-              mutationNow);
-      tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-      tx.deleteModelInvocation(model.id());
-      return new Applied(turnEndId, null, true, false, false, TurnEndOutcome.FAILED, List.of());
+    return resultEntry;
+  }
+
+  private EntryPayload resultPayload(ModelInvocation model) {
+    if (model.status() != ModelInvocationStatus.SUCCEEDED) {
+      return payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model));
     }
-    ModelResponsePlan plan =
-        responsePlanner.plan(response, model.requestSpec().toolBindings(), compactionThread);
-    return switch (plan) {
-      case ModelResponsePlan.Completed ignored -> {
-        UUID turnEndId =
-            appendTurnEnd(
-                tx,
-                sessionId,
-                resultEntryId,
-                model.turnStartEntryId(),
-                TurnEndOutcome.COMPLETED,
-                false,
-                null,
-                mutationNow);
-        tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-        tx.deleteModelInvocation(model.id());
-        yield new Applied(
-            turnEndId,
-            FinalAnswerEntry.resolve(TurnEndOutcome.COMPLETED, false, resultEntry),
-            true,
-            false,
-            false,
-            TurnEndOutcome.COMPLETED,
-            List.of());
-      }
-      case ModelResponsePlan.Continue ignored -> {
-        UUID turnEndId =
-            appendTurnEnd(
-                tx,
-                sessionId,
-                resultEntryId,
-                model.turnStartEntryId(),
-                TurnEndOutcome.COMPLETED,
-                true,
-                null,
-                mutationNow);
-        tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-        tx.deleteModelInvocation(model.id());
-        yield new Applied(turnEndId, null, false, true, false, TurnEndOutcome.COMPLETED, List.of());
-      }
-      case ModelResponsePlan.Failed failed -> {
-        UUID turnEndId =
-            appendTurnEnd(
-                tx,
-                sessionId,
-                resultEntryId,
-                model.turnStartEntryId(),
-                TurnEndOutcome.FAILED,
-                false,
-                failed.reason(),
-                mutationNow);
-        tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-        tx.deleteModelInvocation(model.id());
-        yield new Applied(turnEndId, null, true, false, false, TurnEndOutcome.FAILED, List.of());
-      }
-      case ModelResponsePlan.ToolBatch batch -> {
-        // active Tool phase：attach resultEntryId 并保留 parent，插入全部 sibling。
-        tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
-        List<ToolInvocation> invocations =
-            materializeSiblings(tx, model, resultEntryId, batch, mutationNow);
-        yield new Applied(resultEntryId, null, false, false, true, null, invocations);
-      }
-    };
+    return payloadMapper.assistantPayload(
+        model.result(),
+        model.requestSpec().toolBindings(),
+        model.actualSelection(),
+        model.requestedAt(),
+        model.actualEffort());
+  }
+
+  /** 关闭 turn：追加 TURN_END，链接结果 Entry 后删除临时 invocation 行。 */
+  private Applied closeTurn(
+      BuiltinStore.Transaction tx,
+      ModelInvocation model,
+      Entry resultEntry,
+      Closing closing,
+      Instant mutationNow) {
+    UUID resultEntryId = resultEntry.id();
+    UUID turnEndId =
+        appendTurnEnd(
+            tx,
+            resultEntry.sessionId(),
+            resultEntryId,
+            model.turnStartEntryId(),
+            closing.outcome(),
+            closing.continueModel(),
+            closing.reason(),
+            mutationNow);
+    tx.updateModelInvocation(model.attachResultEntry(resultEntryId, mutationNow));
+    tx.deleteModelInvocation(model.id());
+    return new Applied(
+        turnEndId,
+        closing.finalAnswer()
+            ? FinalAnswerEntry.resolve(closing.outcome(), closing.continueModel(), resultEntry)
+            : null,
+        closing.terminal(),
+        closing.continueModel(),
+        false,
+        closing.outcome(),
+        List.of());
+  }
+
+  /** active Tool phase：attach resultEntryId 并保留 parent，插入全部 sibling。 */
+  private Applied enterToolPhase(
+      BuiltinStore.Transaction tx,
+      ModelInvocation model,
+      Entry resultEntry,
+      ModelResponsePlan.ToolBatch batch,
+      Instant mutationNow) {
+    tx.updateModelInvocation(model.attachResultEntry(resultEntry.id(), mutationNow));
+    List<ToolInvocation> invocations =
+        materializeSiblings(tx, model, resultEntry.id(), batch, mutationNow);
+    return new Applied(resultEntry.id(), null, false, false, true, null, invocations);
   }
 
   private List<ToolInvocation> materializeSiblings(
@@ -184,10 +190,9 @@ public final class ModelOutcomeAppender {
     List<ToolInvocation> materialized = new ArrayList<>(batch.tools().size());
     for (int callIndex = 0; callIndex < batch.tools().size(); callIndex++) {
       ModelResponsePlan.ToolSlot slot = batch.tools().get(callIndex);
-      UUID toolId = tx.nextId();
       materialized.add(
           new ToolInvocation(
-              toolId,
+              tx.nextId(),
               model.threadId(),
               model.turnStartEntryId(),
               resultEntryId,
