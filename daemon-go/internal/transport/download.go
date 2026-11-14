@@ -84,44 +84,84 @@ func (d *ResourceDownloader) Download(ctx context.Context, ticket skill.Download
 
 // DownloadPresigned fetches an explicit presigned GET and verifies its declared metadata.
 func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL string, size int64, digest string) ([]byte, error) {
-	fail := func(stage string) ([]byte, error) { return nil, fmt.Errorf("resource download %s failed", stage) }
+	req, err := newDownloadRequest(ctx, targetURL, size, digest)
+	if err != nil {
+		return nil, err
+	}
+	if d.Network != nil {
+		return d.downloadThroughNetwork(ctx, req, size, digest)
+	}
+	return d.downloadThroughClient(req, size, digest)
+}
+
+// newDownloadRequest validates the presigned target and its declared metadata before any bytes move.
+func newDownloadRequest(ctx context.Context, targetURL string, size int64, digest string) (*http.Request, error) {
 	u, err := url.Parse(targetURL)
 	if err != nil || u.Host == "" || u.User != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return fail("request")
+		return nil, errDownload("request")
 	}
 	if size < 0 {
-		return fail("size")
+		return nil, errDownload("size")
 	}
 	if len(digest) != 64 || digest != strings.ToLower(digest) {
-		return fail("digest")
+		return nil, errDownload("digest")
 	}
 	if _, err = hex.DecodeString(digest); err != nil {
-		return fail("digest")
+		return nil, errDownload("digest")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, targetURL, nil)
 	if err != nil {
-		return fail("request")
+		return nil, errDownload("request")
 	}
-	if d.Network != nil {
-		var body []byte
-		var responseErr error
-		err := d.Network.WithResponse(ctx, req, func(resp *http.Response) error {
-			body, responseErr = verifyDownloadResponse(resp, size, digest)
-			return responseErr
-		})
-		if err != nil {
-			if responseErr != nil {
-				return nil, responseErr
-			}
-			return fail("request")
+	return req, nil
+}
+
+// errDownload reports a download stage failure without exposing the presigned URL.
+func errDownload(stage string) error { return fmt.Errorf("resource download %s failed", stage) }
+
+// downloadThroughNetwork fetches inside the applied network policy so a policy change drains it.
+func (d *ResourceDownloader) downloadThroughNetwork(ctx context.Context, req *http.Request, size int64, digest string) ([]byte, error) {
+	var body []byte
+	var responseErr error
+	err := d.Network.WithResponse(ctx, req, func(resp *http.Response) error {
+		body, responseErr = verifyDownloadResponse(resp, size, digest)
+		return responseErr
+	})
+	if err != nil {
+		if responseErr != nil {
+			return nil, responseErr
 		}
-		return body, nil
+		return nil, errDownload("request")
 	}
+	return body, nil
+}
+
+// downloadThroughClient fetches with the injected or policy-derived client, isolated from caller
+// cookies and redirects.
+func (d *ResourceDownloader) downloadThroughClient(req *http.Request, size int64, digest string) ([]byte, error) {
+	client, ownedClient, err := d.downloadClient()
+	if err != nil {
+		return nil, err
+	}
+	if ownedClient {
+		defer client.CloseIdleConnections()
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, errDownload("request")
+	}
+	defer resp.Body.Close()
+	return verifyDownloadResponse(resp, size, digest)
+}
+
+// downloadClient returns the HTTP client for one GET and whether its idle connections are owned by
+// this call.
+func (d *ResourceDownloader) downloadClient() (*http.Client, bool, error) {
 	client := d.Client
 	ownedClient := false
 	if client == nil {
 		if d.Policy == nil {
-			return fail("network")
+			return nil, false, errDownload("network")
 		}
 		client = d.Policy.HTTPClient()
 		ownedClient = true
@@ -135,20 +175,7 @@ func (d *ResourceDownloader) DownloadPresigned(ctx context.Context, targetURL st
 	}
 	copy := *client
 	copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-	client = &copy
-	if ownedClient {
-		defer client.CloseIdleConnections()
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fail("request")
-	}
-	defer resp.Body.Close()
-	body, err := verifyDownloadResponse(resp, size, digest)
-	if err != nil {
-		return nil, err
-	}
-	return body, nil
+	return &copy, ownedClient, nil
 }
 
 func verifyDownloadResponse(resp *http.Response, size int64, digest string) ([]byte, error) {
