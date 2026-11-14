@@ -20,7 +20,7 @@ const { createHostActions } = require('./host-actions.cjs')
 const DEFAULT_RECONNECT_MILLIS = 500
 /**
  * A command line is a bounded JSON object. Snapshot/restore carry ordinary dirty text,
- * so the line budget matches the daemon's fixed recovery quota rather than a control-only 16 KiB.
+ * so the line budget matches the daemon's fixed recovery quota.
  */
 const MAX_LINE_BYTES = 8 * 1024 * 1024
 /** Bounds how long a bridge POST may occupy the extension host. */
