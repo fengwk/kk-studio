@@ -18,21 +18,12 @@ import fun.fengwk.kkstudio.harness.api.ToolApprovalCommand;
 import fun.fengwk.kkstudio.harness.api.ToolInputAcceptance;
 import fun.fengwk.kkstudio.harness.api.ToolInputSubmissionCommand;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
-import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
-import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
-import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
-import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
-import fun.fengwk.kkstudio.harness.api.history.EntryCurrentState;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
-import fun.fengwk.kkstudio.harness.api.history.EntryPathMetrics;
-import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
 import fun.fengwk.kkstudio.harness.api.history.SessionEntryPage;
 import fun.fengwk.kkstudio.harness.api.interaction.EnvironmentToolWait;
-import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWait;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingEnvironmentWaitPage;
-import fun.fengwk.kkstudio.harness.api.interaction.PendingInteraction;
 import fun.fengwk.kkstudio.harness.api.interaction.PendingInteractionPage;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
@@ -40,8 +31,6 @@ import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadLiveState;
-import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
@@ -51,23 +40,17 @@ import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
-import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
+import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitAbandonment;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
 import fun.fengwk.kkstudio.harness.runtime.processor.TurnPlanPreview;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
-import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContextProbe;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.compaction.CompactionConfigProvider;
 import fun.fengwk.kkstudio.harness.spi.store.EnvironmentToolWaitRow;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
-import fun.fengwk.kkstudio.harness.spi.store.PendingEnvironmentWaitRow;
-import fun.fengwk.kkstudio.harness.spi.store.PendingToolInvocationRow;
-import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -105,6 +88,10 @@ public final class HarnessRuntime {
   private final StopControl stopControl;
   private final ToolInputControl toolInputControl;
   private final ManualCompactionControl manualCompactionControl;
+  private final ThreadSnapshotReader snapshotReader;
+  private final ThreadTreeProjector treeProjector;
+  private final ExecutionExitAbandonment exitAbandonment;
+  private final InteractionPages interactionPages;
   private final Consumer<UUID> driverExecutionCanceller;
   private final Consumer<UUID> toolExecutionCanceller;
 
@@ -126,6 +113,10 @@ public final class HarnessRuntime {
     this.store = Objects.requireNonNull(store, "store");
     this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
     this.acceptCommandsControl = new AcceptCommandsControl(store, driverRegistry);
+    this.snapshotReader = new ThreadSnapshotReader(driverRegistry);
+    this.treeProjector = new ThreadTreeProjector(store, driverRegistry);
+    this.exitAbandonment = new ExecutionExitAbandonment(store);
+    this.interactionPages = new InteractionPages(store);
     this.stopControl = new StopControl(store, driverRegistry);
     this.toolInputControl = new ToolInputControl(this.store);
     this.manualCompactionControl =
@@ -251,68 +242,9 @@ public final class HarnessRuntime {
         });
   }
 
-  /**
-   * 读取目标 Thread 所属执行树的窄摘要：按不可变 {@code rootThreadId} 取同根全部 Thread。
-   *
-   * <p>一次事务先取该根的树锁，再按 UUID 升序锁定全部 Thread 后生成节点；不按 Session 成员替代永久父子关系，也不装载历史 Entry。目标不存在抛 not-found
-   * {@link DomainException}。兄弟顺序为 {@code createdAt} 再 UUID。纯查询，不写入、不推进 version。
-   */
+  /** 读取目标 Thread 所属执行树的窄摘要：按不可变 {@code rootThreadId} 取同根全部 Thread。 */
   public List<ThreadTreeNode> getThreadTree(UUID threadId) {
-    Objects.requireNonNull(threadId, "threadId");
-    return store.transaction(
-        tx -> {
-          ThreadState target =
-              ThreadTreeLocks.lockForThread(tx, threadId)
-                  .orElseThrow(
-                      () ->
-                          DomainException.notFound(
-                              "thread", "thread " + threadId + " does not exist"));
-          List<UUID> lockOrder =
-              tx.threads().listByRoot(target.rootThreadId()).stream()
-                  .map(ThreadState::id)
-                  .sorted(UuidOrder.COMPARATOR)
-                  .toList();
-          List<ThreadState> locked = new ArrayList<>(lockOrder.size());
-          for (UUID id : lockOrder) {
-            locked.add(tx.threads().lock(id).orElseThrow());
-          }
-          ThreadContextProbe probe = new ThreadContextProbe(driverRegistry);
-          List<ThreadTreeNode> nodes = new ArrayList<>(locked.size());
-          for (ThreadState thread : locked) {
-            List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
-            EntryCurrentState state = tx.entries().loadCurrent(thread.headEntryId());
-            EntryPathMetrics metrics = tx.entries().loadPathMetrics(thread.headEntryId());
-            int incompleteChildJoins = tx.joins().countIncompleteChildren(thread.id());
-            boolean unconsumedAppliedNotifications =
-                ThreadInputDemand.hasUnconsumedNotification(tx, thread);
-            // 树锁串行化同树 Invocation 写入；只读探测不在多个节点间回退 Model/Tool 锁阶梯，也不装载历史。
-            ThreadContext context = probe.probe(tx, thread, state);
-            List<ExecutionExitFact> unconfirmed = tx.exits().loadUnconfirmed(thread.id());
-            boolean incompleteOwnerChild = tx.joins().hasIncompleteOwnerChild(thread.id());
-            ThreadRuntimeStatus status =
-                ThreadSnapshot.evaluateRuntimeStatus(
-                    thread.executionControl(),
-                    ThreadContext.liveStateOf(context),
-                    state,
-                    thread.id(),
-                    queued,
-                    unconsumedAppliedNotifications,
-                    incompleteChildJoins,
-                    incompleteOwnerChild,
-                    !unconfirmed.isEmpty());
-            nodes.add(
-                new ThreadTreeNode(
-                    thread,
-                    state.baseSettings(),
-                    status,
-                    ThreadSnapshot.evaluateOutcome(status, state),
-                    metrics));
-          }
-          nodes.sort(
-              Comparator.comparing((ThreadTreeNode node) -> node.thread().createdAt())
-                  .thenComparing(node -> node.thread().id(), UuidOrder.COMPARATOR));
-          return List.copyOf(nodes);
-        });
+    return treeProjector.project(threadId);
   }
 
   /**
@@ -466,50 +398,7 @@ public final class HarnessRuntime {
     if (expectedVersion < 0) {
       throw DomainException.validation("expectedVersion", "expectedVersion must not be negative");
     }
-    store.transaction(
-        tx -> {
-          ExecutionExitLedger.lockAncestorChain(tx, threadId);
-          ThreadState thread = tx.threads().lock(threadId).orElse(null);
-          if (thread == null) {
-            throw DomainException.notFound("thread", "thread " + threadId + " does not exist");
-          }
-          ExecutionExitFact stored = tx.exits().find(executionId).orElse(null);
-          if (stored == null) {
-            throw DomainException.notFound(
-                "execution", "execution " + executionId + " does not exist");
-          }
-          if (!stored.threadId().equals(threadId)) {
-            throw conflict(
-                HarnessConflictReason.EXIT_ABANDON_NOT_APPLICABLE,
-                "execution " + executionId + " does not belong to thread " + threadId);
-          }
-          if (stored.state() == ExecutionExitState.ABANDONED || stored.state().confirmed()) {
-            return null;
-          }
-          if (!thread.executionControl().isStopped()) {
-            throw conflict(
-                HarnessConflictReason.EXIT_ABANDON_NOT_APPLICABLE,
-                "thread " + threadId + " must be STOPPED before an exit can be abandoned");
-          }
-          if (thread.version() != expectedVersion) {
-            throw conflict(
-                HarnessConflictReason.STALE_VERSION,
-                "thread "
-                    + threadId
-                    + " version is "
-                    + thread.version()
-                    + ", expected "
-                    + expectedVersion);
-          }
-          ExecutionExitLedger.Confirmation confirmation =
-              ExecutionExitLedger.abandon(tx, stored, tx.now())
-                  .orElseThrow(
-                      () ->
-                          new IllegalStateException(
-                              "execution " + executionId + " remains unconfirmed"));
-          ExecutionExitLedger.advanceAfterConfirmation(tx, threadId, confirmation);
-          return null;
-        });
+    exitAbandonment.abandon(threadId, executionId, expectedVersion);
     return getThreadSnapshot(threadId);
   }
 
@@ -556,93 +445,19 @@ public final class HarnessRuntime {
   }
 
   /**
-   * 在单个短事务内读取一页待处理 Interaction（{@code WAITING_INPUT} / {@code WAITING_APPROVAL}），按 {@code
-   * (createdAt, id)} 稳定升序的 keyset 游标分页。
-   *
-   * <p>{@code afterCreatedAt} / {@code afterId} 是游标下界（严格大于），首屏使用 {@link Instant#EPOCH} 与全零 UUID；
-   * storage 多取一条判定 {@code hasMore}，因此调用方按 {@code hasMore} 翻页不会提前漏项。这里只投影 Invocation 自身事实，产品 owner 与
-   * Pane 跳转由上层按 Session/Thread 解析。
+   * 读取一页待处理 Interaction（{@code WAITING_INPUT} / {@code WAITING_APPROVAL}），按 {@code (createdAt, id)}
+   * 稳定升序的 keyset 游标分页。
    */
   public PendingInteractionPage listPendingInteractions(
       Instant afterCreatedAt, UUID afterId, int limit) {
-    Objects.requireNonNull(afterCreatedAt, "afterCreatedAt");
-    Objects.requireNonNull(afterId, "afterId");
-    if (limit <= 0) {
-      throw DomainException.validation("limit", "limit must be positive");
-    }
-    int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
-    return store.transaction(
-        tx -> {
-          List<PendingToolInvocationRow> rows =
-              tx.tools().listPending(afterCreatedAt, afterId, probeSize);
-          boolean hasMore = rows.size() > limit;
-          List<PendingInteraction> interactions = new ArrayList<>(Math.min(rows.size(), limit));
-          for (PendingToolInvocationRow row : rows) {
-            if (interactions.size() == limit) {
-              break;
-            }
-            interactions.add(toPendingInteraction(row));
-          }
-          return new PendingInteractionPage(interactions, hasMore);
-        });
+    return interactionPages.pendingInteractions(afterCreatedAt, afterId, limit);
   }
 
-  private static PendingInteraction toPendingInteraction(PendingToolInvocationRow row) {
-    ToolInvocation invocation = row.invocation();
-    ToolApproval approval = invocation.approval();
-    String approvalJson = approval == null ? null : APPROVAL_JSON.encode(approval);
-    return new PendingInteraction(
-        invocation.id(),
-        row.threadId(),
-        row.sessionId(),
-        invocation.status(),
-        invocation.call().id(),
-        invocation.call().toolName(),
-        invocation.call().argumentsJson(),
-        approvalJson,
-        invocation.createdAt());
-  }
-
-  /**
-   * 读取冻结环境的待领取调用候选：READY TOOL 调用及到期且无有效执行 lease 的 TOOL Work，先按根和环境分组，再按代表键分页。
-   *
-   * <p>{@code afterRepresentativeCreatedAt} / {@code afterRepresentativeInvocationId}
-   * 是游标下界（严格大于），首屏使用 {@link Instant#EPOCH} 与全零 UUID；storage 多取一条判定 {@code hasMore}。这里只暴露聚合事实，产品
-   * owner、环境在线状态与来源展示由上层解析。生产实现的 due / lease 判定使用数据库时钟。
-   */
+  /** 读取冻结环境的待领取调用候选，按根 + 环境聚合后按代表键分页。 */
   public PendingEnvironmentWaitPage listEnvironmentWaitCandidates(
       Instant afterRepresentativeCreatedAt, UUID afterRepresentativeInvocationId, int limit) {
-    Objects.requireNonNull(afterRepresentativeCreatedAt, "afterRepresentativeCreatedAt");
-    Objects.requireNonNull(afterRepresentativeInvocationId, "afterRepresentativeInvocationId");
-    if (limit <= 0) {
-      throw DomainException.validation("limit", "limit must be positive");
-    }
-    int probeSize = limit == Integer.MAX_VALUE ? limit : limit + 1;
-    return store.transaction(
-        tx -> {
-          List<PendingEnvironmentWaitRow> rows =
-              tx.tools()
-                  .listEnvironmentWaitCandidates(
-                      afterRepresentativeCreatedAt, afterRepresentativeInvocationId, probeSize);
-          boolean hasMore = rows.size() > limit;
-          List<PendingEnvironmentWait> waits = new ArrayList<>(Math.min(rows.size(), limit));
-          for (PendingEnvironmentWaitRow row : rows) {
-            if (waits.size() == limit) {
-              break;
-            }
-            waits.add(toPendingEnvironmentWait(row));
-          }
-          return new PendingEnvironmentWaitPage(waits, hasMore);
-        });
-  }
-
-  private static PendingEnvironmentWait toPendingEnvironmentWait(PendingEnvironmentWaitRow row) {
-    return new PendingEnvironmentWait(
-        row.rootThreadId(),
-        row.environmentId(),
-        row.representativeCreatedAt(),
-        row.representativeInvocationId(),
-        row.waitingCount());
+    return interactionPages.environmentWaitCandidates(
+        afterRepresentativeCreatedAt, afterRepresentativeInvocationId, limit);
   }
 
   /**
@@ -725,73 +540,8 @@ public final class HarnessRuntime {
                       () ->
                           DomainException.notFound(
                               "thread", "thread " + threadId + " does not exist"));
-          return snapshotLockedThread(tx, thread, afterEntryId);
+          return snapshotReader.read(tx, thread, afterEntryId);
         });
-  }
-
-  /** 已锁定 Thread 的完整当前快照；调用方必须已持有该 Thread 行锁。 */
-  private ThreadSnapshot snapshotLockedThread(HarnessStore.Transaction tx, ThreadState thread) {
-    return snapshotLockedThread(tx, thread, null);
-  }
-
-  /** 已锁定 Thread 的当前状态与指定切片；调用方必须已持有该 Thread 行锁。 */
-  private ThreadSnapshot snapshotLockedThread(
-      HarnessStore.Transaction tx, ThreadState thread, UUID afterEntryId) {
-    EntrySlice slice = tx.entries().loadSlice(thread.headEntryId(), afterEntryId);
-    List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
-    LockedThreadContext locked = ThreadContextLock.load(tx, thread, driverRegistry);
-    GenerationProjection generation = generationOf(locked.context());
-    if (generation != null) {
-      if (!tx.entries().isAncestor(thread.headEntryId(), generation.requestHeadEntryId())) {
-        throw new IllegalStateException(
-            "driver generation request head "
-                + generation.requestHeadEntryId()
-                + " is not on the thread path");
-      }
-      if (generation.resultEntryId() != null
-          && !tx.entries().isAncestor(thread.headEntryId(), generation.resultEntryId())) {
-        throw new IllegalStateException(
-            "driver generation result entry "
-                + generation.resultEntryId()
-                + " is not on the thread path");
-      }
-    }
-    List<ToolInvocation> toolSiblings = toolSiblingsOf(locked.context());
-    ThreadLiveState liveState = ThreadContext.liveStateOf(locked.context());
-    int incompleteChildJoins = tx.joins().countIncompleteChildren(thread.id());
-    boolean unconsumedAppliedNotifications =
-        ThreadInputDemand.hasUnconsumedNotification(tx, thread);
-    List<ExecutionExitFact> unconfirmedExecutions = tx.exits().loadUnconfirmed(thread.id());
-    boolean hasIncompleteOwnerChildJoin = tx.joins().hasIncompleteOwnerChild(thread.id());
-    return new ThreadSnapshot(
-        thread,
-        locked.entryState(),
-        slice,
-        queued,
-        generation,
-        toolSiblings,
-        liveState,
-        tx.stops().loadByThread(thread.id()),
-        incompleteChildJoins,
-        unconsumedAppliedNotifications,
-        unconfirmedExecutions,
-        hasIncompleteOwnerChildJoin);
-  }
-
-  private static GenerationProjection generationOf(ThreadContext context) {
-    return switch (context) {
-      case ThreadContext.GenerationActive active -> active.driverState().projection();
-      case ThreadContext.GenerationTerminalPending pending -> pending.driverState().projection();
-      default -> null;
-    };
-  }
-
-  private static List<ToolInvocation> toolSiblingsOf(ThreadContext context) {
-    return switch (context) {
-      case ThreadContext.ToolActive active -> active.siblings();
-      case ThreadContext.ToolTerminalPending pending -> pending.siblings();
-      default -> List.of();
-    };
   }
 
   /** 读取 Session 的全部不可变 Entry（含非当前 head 路径上的历史分支）；Session 不存在抛 NotFound。 */
