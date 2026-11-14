@@ -39,6 +39,7 @@ import { compareDecimal } from '@/features/environment/ide/ide-decimal'
 import { useIdeViewStore } from '@/features/environment/ide/useIdeViewStore'
 import { useIdeOperationQueue } from '@/features/environment/ide/useIdeOperationQueue'
 import { useIdeSnapshotCache } from '@/features/environment/ide/useIdeSnapshotCache'
+import { useIdePendingShellIntent } from '@/features/environment/ide/useIdePendingShellIntent'
 import {
   useIdeSessionWriter,
   useIdeUsageProof,
@@ -101,7 +102,6 @@ export function useIdeClaimReconciliation({
   const lastActiveEnvironmentRef = useRef(activeEnvironmentId)
   const lastIdentityRef = useRef<string | null>(null)
   const lastEnvironmentReadyRef = useRef(new Map<string, boolean>())
-  const pendingShellEnvironmentsRef = useRef(new Set<string>())
   const actionsRef = useRef<{
     reconcileAll: () => void
     withdrawUsage: () => void
@@ -112,6 +112,10 @@ export function useIdeClaimReconciliation({
     useIdeViewStore(mountedRef, initial)
   const { runExclusive, invalidateOperations } = useIdeOperationQueue(identityRef, mountedRef)
   const { acceptSnapshot, forgetView, clearSnapshots } = useIdeSnapshotCache(sessionRef)
+  const {
+    remember: rememberPendingShellIntent,
+    take: takePendingShellIntent,
+  } = useIdePendingShellIntent()
   const { writeSession } = useIdeSessionWriter({
     storage,
     sessionRef,
@@ -550,7 +554,7 @@ export function useIdeClaimReconciliation({
       status: canRun(environmentId) ? 'reconciling' : 'waiting-ready',
       claimId,
       iframeLoaded: false,
-      pendingShell: pendingShellEnvironmentsRef.current.delete(environmentId),
+      pendingShell: takePendingShellIntent(environmentId),
     })
     if (!canRun(environmentId)) {
       return
@@ -835,7 +839,7 @@ export function useIdeClaimReconciliation({
         status: 'waiting-ready',
         claimId: createUuid(),
         iframeLoaded: false,
-        pendingShell: pendingShellEnvironmentsRef.current.delete(environmentId),
+        pendingShell: takePendingShellIntent(environmentId),
       })
       setWaitingReady(environmentId, attempt)
     }
@@ -870,7 +874,7 @@ export function useIdeClaimReconciliation({
   function setPendingShell(environmentId: string): void {
     const view = viewsRef.current[environmentId]
     if (view == null) {
-      pendingShellEnvironmentsRef.current.add(environmentId)
+      rememberPendingShellIntent(environmentId)
       return
     }
     if (view.pendingShell && view.terminalError === undefined) {
