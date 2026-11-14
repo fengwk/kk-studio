@@ -35,19 +35,10 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 	if err != nil {
 		return nil, err
 	}
-	studio, err := url.Parse(c.Applied.StudioURL)
-	if err != nil || studio.Host == "" || studio.Opaque != "" {
-		return nil, fmt.Errorf("invalid studio URL")
+	wsURL, err := daemonWebSocketURL(c.Applied.StudioURL)
+	if err != nil {
+		return nil, err
 	}
-	scheme := "ws"
-	switch strings.ToLower(studio.Scheme) {
-	case "https":
-		scheme = "wss"
-	case "http":
-	default:
-		return nil, fmt.Errorf("invalid studio URL")
-	}
-	wsURL := scheme + "://" + studio.Host + "/ws/daemon"
 	proxyText := ""
 	if c.Applied.ProxyURL != nil {
 		proxyText = *c.Applied.ProxyURL
@@ -56,42 +47,74 @@ func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
 	if err != nil {
 		return nil, err
 	}
+	options := &websocket.DialOptions{HTTPHeader: registrationHeaders(c, token), CompressionMode: websocket.CompressionDisabled, HTTPClient: policy.HTTPClient()}
+	ws, resp, err := websocket.Dial(ctx, wsURL, options)
+	if err != nil {
+		return nil, handshakeFailure(c.Observer, resp, err)
+	}
+	conn := websocket.NetConn(ctx, ws, websocket.MessageBinary)
+	ws.SetReadLimit(1 << 20)
+	return newControlConnection(conn, c.Resolver, c.Observer), nil
+}
+
+// daemonWebSocketURL derives the control endpoint from the applied Studio URL.
+func daemonWebSocketURL(studioURL string) (string, error) {
+	studio, err := url.Parse(studioURL)
+	if err != nil || studio.Host == "" || studio.Opaque != "" {
+		return "", fmt.Errorf("invalid studio URL")
+	}
+	scheme := "ws"
+	switch strings.ToLower(studio.Scheme) {
+	case "https":
+		scheme = "wss"
+	case "http":
+	default:
+		return "", fmt.Errorf("invalid studio URL")
+	}
+	return scheme + "://" + studio.Host + "/ws/daemon", nil
+}
+
+// registrationHeaders carries the registration token and the daemon identity the platform
+// authenticates the control channel with.
+func registrationHeaders(c DialConfig, token string) http.Header {
 	hdr := make(http.Header)
 	hdr.Set("Authorization", "Bearer "+token)
 	hdr.Set("KK-Daemon-Protocol", "4")
 	hdr.Set("KK-Daemon-Instance", c.InstanceID)
 	hdr.Set("KK-Daemon-Platform", c.Platform)
 	hdr.Set("KK-Environment-Id", c.Applied.EnvironmentID)
-	options := &websocket.DialOptions{HTTPHeader: hdr, CompressionMode: websocket.CompressionDisabled}
-	client := policy.HTTPClient()
-	options.HTTPClient = client
-	ws, resp, err := websocket.Dial(ctx, wsURL, options)
-	if err != nil {
-		if resp != nil {
-			var upgrade *protocol.UpgradeRequired
-			if resp.StatusCode == http.StatusUpgradeRequired && resp.Body != nil {
-				body, readErr := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
-				if readErr == nil && len(body) > 0 && len(body) <= 1<<20 {
-					candidate := new(protocol.UpgradeRequired)
-					if proto.Unmarshal(body, candidate) == nil && protocol.ValidateUpgrade(candidate) == nil {
-						upgrade = candidate
-					}
-				}
-			}
-			if c.Observer != nil {
-				c.Observer.NotifyUpgradeFailed(resp.StatusCode, upgrade)
-			}
-			if resp.StatusCode == http.StatusUnauthorized {
-				return nil, runtimeapi.ErrRegistrationRejected
-			}
-			return nil, fmt.Errorf("daemon websocket handshake failed with status %d", resp.StatusCode)
-		}
-		return nil, fmt.Errorf("daemon websocket handshake failed: %w", err)
+	return hdr
+}
+
+// handshakeFailure reports a rejected handshake to the attempt observer and classifies it for the
+// runtime's retry policy.
+func handshakeFailure(observer runtimeapi.ControlObserver, resp *http.Response, dialErr error) error {
+	if resp == nil {
+		return fmt.Errorf("daemon websocket handshake failed: %w", dialErr)
 	}
-	conn := websocket.NetConn(ctx, ws, websocket.MessageBinary)
-	ws.SetReadLimit(1 << 20)
-	cc := newControlConnection(conn, c.Resolver, c.Observer)
-	return cc, nil
+	if observer != nil {
+		observer.NotifyUpgradeFailed(resp.StatusCode, upgradeRequiredBody(resp))
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		return runtimeapi.ErrRegistrationRejected
+	}
+	return fmt.Errorf("daemon websocket handshake failed with status %d", resp.StatusCode)
+}
+
+// upgradeRequiredBody reads the optional upgrade instruction a 426 response carries.
+func upgradeRequiredBody(resp *http.Response) *protocol.UpgradeRequired {
+	if resp.StatusCode != http.StatusUpgradeRequired || resp.Body == nil {
+		return nil
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, (1<<20)+1))
+	if err != nil || len(body) == 0 || len(body) > 1<<20 {
+		return nil
+	}
+	candidate := new(protocol.UpgradeRequired)
+	if proto.Unmarshal(body, candidate) != nil || protocol.ValidateUpgrade(candidate) != nil {
+		return nil
+	}
+	return candidate
 }
 
 func readRegistrationToken(path string, read func(string) (string, error)) (string, error) {
