@@ -140,33 +140,33 @@ public record ModelPricingCondition(
       type = Objects.requireNonNull(type, "requestBody.type");
       canonicalValue = Objects.requireNonNull(canonicalValue, "requestBody.value");
       validatePath(path);
-      canonicalValue =
-          switch (type) {
-            case STRING -> {
-              if (canonicalValue.getBytes(StandardCharsets.UTF_8).length > MAX_STRING_BYTES) {
-                throw new IllegalArgumentException(
-                    "requestBody.equals string must not exceed "
-                        + MAX_STRING_BYTES
-                        + " UTF-8 bytes");
-              }
-              yield canonicalValue;
-            }
-            case NUMBER -> canonicalNumber(canonicalValue);
-            case BOOLEAN -> {
-              if (!"true".equals(canonicalValue) && !"false".equals(canonicalValue)) {
-                throw new IllegalArgumentException(
-                    "requestBody.equals boolean must be true or false");
-              }
-              yield canonicalValue;
-            }
-            case NULL -> {
-              if (!canonicalValue.isEmpty()) {
-                throw new IllegalArgumentException(
-                    "requestBody.equals null must use an empty value");
-              }
-              yield "";
-            }
-          };
+      canonicalValue = canonicalize(type, canonicalValue);
+    }
+
+    /** 按标量类型校验并规范化条件值；不做大小写或类型转换。 */
+    private static String canonicalize(ScalarType type, String value) {
+      return switch (type) {
+        case STRING -> {
+          if (value.getBytes(StandardCharsets.UTF_8).length > MAX_STRING_BYTES) {
+            throw new IllegalArgumentException(
+                "requestBody.equals string must not exceed " + MAX_STRING_BYTES + " UTF-8 bytes");
+          }
+          yield value;
+        }
+        case NUMBER -> canonicalNumber(value);
+        case BOOLEAN -> {
+          if (!"true".equals(value) && !"false".equals(value)) {
+            throw new IllegalArgumentException("requestBody.equals boolean must be true or false");
+          }
+          yield value;
+        }
+        case NULL -> {
+          if (!value.isEmpty()) {
+            throw new IllegalArgumentException("requestBody.equals null must use an empty value");
+          }
+          yield "";
+        }
+      };
     }
 
     /** 已解码的 pointer token 序列；空属性名保留为空 token。 */
