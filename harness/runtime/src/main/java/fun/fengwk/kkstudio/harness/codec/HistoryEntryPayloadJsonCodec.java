@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
@@ -161,7 +164,8 @@ public final class HistoryEntryPayloadJsonCodec {
   /** 把 {@link EntryPayload} 编码为 canonical JSON 文本；覆盖全部 sealed payload。 */
   public String encode(EntryPayload payload) {
     Objects.requireNonNull(payload, "payload");
-    return write(encodeNode(payload));
+    return JsonCodecSupport.write(
+        MAPPER, encodeNode(payload), "cannot encode history entry payload JSON");
   }
 
   /** 把 {@link EntryPayload} 编码为 deterministic canonical {@link ObjectNode}；String API 委派此方法。 */
@@ -507,7 +511,7 @@ public final class HistoryEntryPayloadJsonCodec {
   // ---------- 解码器 ----------
 
   private static RootPayload decodeRoot(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "ROOT");
+    ObjectNode node = object(value, "ROOT");
     JsonCodecSupport.requireFields(node, ROOT_FIELDS, "ROOT");
     return new RootPayload(
         HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "ROOT.settings"));
@@ -515,10 +519,9 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static SystemPayload decodeSystem(JsonNode value) {
     String context = "SYSTEM";
-    ObjectNode node = HistoryValueCodecs.requireObject(value, context);
+    ObjectNode node = object(value, context);
     JsonCodecSupport.requireFields(node, SYSTEM_FIELDS, context);
-    ObjectNode sectionNode =
-        HistoryValueCodecs.requireObject(node.get("sections"), context + ".sections");
+    ObjectNode sectionNode = object(node.get("sections"), context + ".sections");
     Map<String, String> sections = new LinkedHashMap<>();
     sectionNode
         .properties()
@@ -558,8 +561,7 @@ public final class HistoryEntryPayloadJsonCodec {
             node.get("addedHostedTools"), context + ".addedHostedTools");
     List<SystemHostedTool> addedHostedTools = new ArrayList<>(addedHostedValues.size());
     for (JsonNode item : addedHostedValues) {
-      ObjectNode hostedTool =
-          HistoryValueCodecs.requireObject(item, context + ".addedHostedTools[]");
+      ObjectNode hostedTool = object(item, context + ".addedHostedTools[]");
       JsonCodecSupport.requireFields(
           hostedTool, SYSTEM_HOSTED_TOOL_FIELDS, context + ".addedHostedTools[]");
       addedHostedTools.add(
@@ -592,7 +594,7 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static TurnStartPayload decodeTurnStart(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START");
+    ObjectNode node = object(value, "TURN_START");
     JsonCodecSupport.requireFields(node, TURN_START_FIELDS, "TURN_START");
     return new TurnStartPayload(
         HistoryValueCodecs.readEnum(
@@ -612,7 +614,7 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static TurnCapabilities decodeTurnCapabilities(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.capabilities");
+    ObjectNode node = object(value, "TURN_START.capabilities");
     JsonCodecSupport.requireFields(node, TURN_CAPABILITIES_FIELDS, "TURN_START.capabilities");
     ArrayNode subagentValues =
         HistoryValueCodecs.requireArray(
@@ -620,7 +622,7 @@ public final class HistoryEntryPayloadJsonCodec {
     List<SubagentBinding> subagentBindings = new ArrayList<>(subagentValues.size());
     for (JsonNode subagentValue : subagentValues) {
       String context = "TURN_START.capabilities.subagentBindings[]";
-      ObjectNode subagent = HistoryValueCodecs.requireObject(subagentValue, context);
+      ObjectNode subagent = object(subagentValue, context);
       JsonCodecSupport.requireFields(subagent, SUBAGENT_BINDING_FIELDS, context);
       subagentBindings.add(
           new SubagentBinding(
@@ -633,7 +635,7 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static TurnMediaCapabilities decodeTurnMediaCapabilities(JsonNode value) {
     String context = "TURN_START.capabilities.mediaCapabilities";
-    ObjectNode node = HistoryValueCodecs.requireObject(value, context);
+    ObjectNode node = object(value, context);
     JsonCodecSupport.requireFields(node, TURN_MEDIA_CAPABILITIES_FIELDS, context);
     return new TurnMediaCapabilities(
         decodeModalities(node.get("inputModalities"), context + ".inputModalities"),
@@ -662,7 +664,7 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static MessagePayload decodeMessage(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "MESSAGE");
+    ObjectNode node = object(value, "MESSAGE");
     JsonCodecSupport.requireFields(node, MESSAGE_FIELDS, "MESSAGE");
     AgentMessage message = MESSAGE_CODEC.decodeNode(node.get("message"));
     JsonNode assistantMetadata = node.get("assistantMetadata");
@@ -677,7 +679,7 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static CustomMessagePayload decodeCustomMessage(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "CUSTOM_MESSAGE");
+    ObjectNode node = object(value, "CUSTOM_MESSAGE");
     JsonCodecSupport.requireFields(node, CUSTOM_MESSAGE_FIELDS, "CUSTOM_MESSAGE");
     return new CustomMessagePayload(
         CanonicalIdentifiers.requireCanonicalIdentifier(
@@ -687,15 +689,13 @@ public final class HistoryEntryPayloadJsonCodec {
         CanonicalIdentifiers.requireCanonicalIdentifier(
             HistoryValueCodecs.text(node, "rendererKey"), "rendererKey"),
         MESSAGE_CODEC.decodeNode(node.get("message")),
-        JsonObjects.write(
-            HistoryValueCodecs.requireObject(node.get("details"), "CUSTOM_MESSAGE.details")));
+        JsonObjects.write(object(node.get("details"), "CUSTOM_MESSAGE.details")));
   }
 
   private static ModelAttemptFailurePayload decodeModelAttemptFailure(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "MODEL_ATTEMPT_FAILURE");
+    ObjectNode node = object(value, "MODEL_ATTEMPT_FAILURE");
     JsonCodecSupport.requireFields(node, MODEL_ATTEMPT_FAILURE_FIELDS, "MODEL_ATTEMPT_FAILURE");
-    ObjectNode attemptNode =
-        HistoryValueCodecs.requireObject(node.get("attempt"), "MODEL_ATTEMPT_FAILURE.attempt");
+    ObjectNode attemptNode = object(node.get("attempt"), "MODEL_ATTEMPT_FAILURE.attempt");
     JsonCodecSupport.requireFields(
         attemptNode, ATTEMPT_SNAPSHOT_FIELDS, "MODEL_ATTEMPT_FAILURE.attempt");
     ModelAttemptSnapshot attempt =
@@ -706,8 +706,7 @@ public final class HistoryEntryPayloadJsonCodec {
                 attemptNode, "sequence", "MODEL_ATTEMPT_FAILURE.attempt"),
             HistoryValueCodecs.text(attemptNode, "text"),
             HistoryValueCodecs.text(attemptNode, "thinking"));
-    ObjectNode modelNode =
-        HistoryValueCodecs.requireObject(node.get("model"), "MODEL_ATTEMPT_FAILURE.model");
+    ObjectNode modelNode = object(node.get("model"), "MODEL_ATTEMPT_FAILURE.model");
     JsonCodecSupport.requireFields(
         modelNode, orderedSet("modelName", "variant"), "MODEL_ATTEMPT_FAILURE.model");
     ModelSelection model =
@@ -726,7 +725,7 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static NativeCompactionPayload decodeNativeCompaction(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "NATIVE_COMPACTION");
+    ObjectNode node = object(value, "NATIVE_COMPACTION");
     JsonCodecSupport.requireFields(node, NATIVE_COMPACTION_FIELDS, "NATIVE_COMPACTION");
     return new NativeCompactionPayload(
         nativeText(node, "trigger"),
@@ -770,13 +769,12 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static AssistantErrorPayload decodeAssistantError(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "ASSISTANT_ERROR");
+    ObjectNode node = object(value, "ASSISTANT_ERROR");
     JsonCodecSupport.requireFields(node, ASSISTANT_ERROR_FIELDS, "ASSISTANT_ERROR");
     JsonNode attempt = node.get("attempt");
     ModelAttemptSnapshot snapshot = null;
     if (!attempt.isNull()) {
-      ObjectNode snapshotNode =
-          HistoryValueCodecs.requireObject(attempt, "ASSISTANT_ERROR.attempt");
+      ObjectNode snapshotNode = object(attempt, "ASSISTANT_ERROR.attempt");
       JsonCodecSupport.requireFields(
           snapshotNode, ATTEMPT_SNAPSHOT_FIELDS, "ASSISTANT_ERROR.attempt");
       snapshot =
@@ -792,13 +790,13 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static AssistantAbortedPayload decodeAssistantAborted(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "ASSISTANT_ABORTED");
+    ObjectNode node = object(value, "ASSISTANT_ABORTED");
     JsonCodecSupport.requireFields(node, ASSISTANT_ABORTED_FIELDS, "ASSISTANT_ABORTED");
     return new AssistantAbortedPayload(MESSAGE_CODEC.decodeNode(node.get("message")));
   }
 
   private static CompactionPayload decodeCompaction(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "COMPACTION");
+    ObjectNode node = object(value, "COMPACTION");
     JsonCodecSupport.requireFields(node, COMPACTION_FIELDS, "COMPACTION");
     JsonNode assistantMetadata = node.get("assistantMetadata");
     AssistantMessageMetadata metadata =
@@ -848,7 +846,7 @@ public final class HistoryEntryPayloadJsonCodec {
     if (value.isNull()) {
       return null;
     }
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_START.compaction");
+    ObjectNode node = object(value, "TURN_START.compaction");
     JsonCodecSupport.requireFields(node, COMPACTION_START_FIELDS, "TURN_START.compaction");
     JsonNode executionNode = node.get("execution");
     ExecutionSelection execution =
@@ -868,7 +866,7 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static TurnEndPayload decodeTurnEnd(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "TURN_END");
+    ObjectNode node = object(value, "TURN_END");
     JsonCodecSupport.requireFields(node, TURN_END_FIELDS, "TURN_END");
     return new TurnEndPayload(
         HistoryValueCodecs.requiredPositiveId(node, "turnStartEntryId", "TURN_END"),
@@ -880,7 +878,7 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static NotificationPayload decodeNotification(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "NOTIFICATION");
+    ObjectNode node = object(value, "NOTIFICATION");
     JsonCodecSupport.requireFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
     return new NotificationPayload(
         HistoryValueCodecs.requiredPositiveId(node, "notificationId", "NOTIFICATION"),
@@ -891,7 +889,7 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static SettingsPayload decodeSettings(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "SETTINGS");
+    ObjectNode node = object(value, "SETTINGS");
     JsonCodecSupport.requireFields(node, SETTINGS_FIELDS, "SETTINGS");
     return new SettingsPayload(
         HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "SETTINGS.settings"),
@@ -899,7 +897,7 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static ForkPayload decodeFork(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "FORK");
+    ObjectNode node = object(value, "FORK");
     JsonCodecSupport.requireFields(node, FORK_FIELDS, "FORK");
     return new ForkPayload(
         HistoryValueCodecs.readEnum(
@@ -909,14 +907,14 @@ public final class HistoryEntryPayloadJsonCodec {
   }
 
   private static AssistantError decodeError(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "ASSISTANT_ERROR.error");
+    ObjectNode node = object(value, "ASSISTANT_ERROR.error");
     JsonCodecSupport.requireFields(node, ERROR_FIELDS, "ASSISTANT_ERROR.error");
     return new AssistantError(
         HistoryValueCodecs.text(node, "code"), HistoryValueCodecs.text(node, "message"));
   }
 
   private static ToolResultMetadata decodeToolResultMetadata(JsonNode value) {
-    ObjectNode node = HistoryValueCodecs.requireObject(value, "toolResultMetadata");
+    ObjectNode node = object(value, "toolResultMetadata");
     JsonCodecSupport.requireFields(node, TOOL_RESULT_METADATA_FIELDS, "toolResultMetadata");
     return new ToolResultMetadata(
         HistoryValueCodecs.nullablePositiveId(node, "invocationId", "toolResultMetadata"),
@@ -939,15 +937,4 @@ public final class HistoryEntryPayloadJsonCodec {
 
   // ---------- 通用工具方法 ----------
 
-  private static String write(ObjectNode node) {
-    try {
-      return MAPPER.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode history entry payload JSON", error);
-    }
-  }
-
-  private static Set<String> orderedSet(String... values) {
-    return HistoryValueCodecs.orderedSet(values);
-  }
 }

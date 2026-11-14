@@ -210,7 +210,7 @@ public final class ToolResultJsonCodec {
       return new ToolResult(
           text(node, "toolCallId"),
           contents,
-          bool(node, "error"),
+          JsonCodecSupport.bool(node, "error"),
           OBJECT_MAPPER.writeValueAsString(requireObject(node.get("details"), "details")));
     } catch (JacksonException exception) {
       throw new IllegalArgumentException("malformed tool result", exception);
@@ -304,6 +304,10 @@ public final class ToolResultJsonCodec {
     }
   }
 
+  /**
+   * 与 {@link JsonCodecSupport#object} 同判定，但保留 “must be an object” 文案：它经 ToolInvocationError
+   * 原样呈现给模型。
+   */
   private static ObjectNode requireObject(JsonNode value, String name) {
     if (!(value instanceof ObjectNode object)) {
       throw new IllegalArgumentException(name + " must be an object");
@@ -311,6 +315,7 @@ public final class ToolResultJsonCodec {
     return object;
   }
 
+  /** 与 {@link JsonCodecSupport#array} 同判定，但保留 “must be an array” 文案，理由同上。 */
   private static ArrayNode requireArray(JsonNode value, String name) {
     if (!(value instanceof ArrayNode array)) {
       throw new IllegalArgumentException(name + " must be an array");
@@ -356,18 +361,8 @@ public final class ToolResultJsonCodec {
     ObjectNode node = requireObject(value, "textMetadata");
     JsonCodecSupport.requireFields(node, TEXT_METADATA_FIELDS, "textMetadata");
     return new TextArtifactMetadata(
-        nonNegativeLong(node, "totalBytes"), nonNegativeLong(node, "totalLines"));
-  }
-
-  private static long nonNegativeLong(ObjectNode node, String name) {
-    JsonNode value = node.get(name);
-    if (value == null
-        || !value.isIntegralNumber()
-        || !value.canConvertToLong()
-        || value.longValue() < 0) {
-      throw new IllegalArgumentException(name + " must be a non-negative integer");
-    }
-    return value.longValue();
+        JsonCodecSupport.nonNegativeLong(node, "totalBytes"),
+        JsonCodecSupport.nonNegativeLong(node, "totalLines"));
   }
 
   private static void putNullableText(ObjectNode node, String name, String value) {
@@ -384,13 +379,5 @@ public final class ToolResultJsonCodec {
     } else {
       node.put(name, value.longValue());
     }
-  }
-
-  private static boolean bool(ObjectNode node, String name) {
-    JsonNode value = node.get(name);
-    if (value == null || !value.isBoolean()) {
-      throw new IllegalArgumentException(name + " must be boolean");
-    }
-    return value.booleanValue();
   }
 }

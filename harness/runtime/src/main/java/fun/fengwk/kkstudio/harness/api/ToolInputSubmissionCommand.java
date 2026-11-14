@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.api;
 
+import fun.fengwk.kkstudio.harness.api.entry.CanonicalNames;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -39,16 +41,6 @@ public record ToolInputSubmissionCommand(
   }
 
   private static String requireCanonicalActor(String actor) {
-    Objects.requireNonNull(actor, "actor");
-    if (actor.isBlank()) {
-      throw new IllegalArgumentException("actor must not be blank");
-    }
-    if (!actor.equals(actor.strip())) {
-      throw new IllegalArgumentException("actor must not contain surrounding whitespace");
-    }
-    if (actor.length() > 128) {
-      throw new IllegalArgumentException("actor must be <= 128 characters");
-    }
-    return actor;
+    return CanonicalNames.requireName(actor, "actor");
   }
 }

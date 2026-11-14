@@ -2,7 +2,10 @@ package fun.fengwk.kkstudio.harness.codec;
 
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.bool;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.decodeNullableText;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.write;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -37,7 +40,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.ArrayList;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
@@ -112,7 +114,7 @@ public final class AgentMessageJsonCodec {
   /** 把 {@link AgentMessage} 编码为 canonical JSON 文本。 */
   public String encode(AgentMessage message) {
     Objects.requireNonNull(message, "message");
-    return write(encodeNode(message));
+    return write(MAPPER, encodeNode(message), "cannot encode agent message JSON");
   }
 
   /** 把 {@link AgentMessage} 编码为 deterministic canonical {@link ObjectNode}；String API 委派此方法。 */
@@ -169,7 +171,7 @@ public final class AgentMessageJsonCodec {
   /** 从任意 {@link JsonNode} 解码 {@link AgentMessage}。 */
   public AgentMessage decodeNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
-    ObjectNode node = requireObject(value, "message");
+    ObjectNode node = object(value, "message");
     requireFields(node, MESSAGE_FIELDS, "message");
     AgentMessageRole role = readEnum(AgentMessageRole.class, text(node, "role"), "message.role");
     ArrayNode contentsNode = requireArray(node.get("contents"), "message.contents");
@@ -265,7 +267,7 @@ public final class AgentMessageJsonCodec {
   }
 
   private static AgentMessageContent decodeContent(JsonNode value) {
-    ObjectNode node = requireObject(value, "content");
+    ObjectNode node = object(value, "content");
     JsonNode typeNode = node.get("type");
     if (typeNode == null || !typeNode.isString()) {
       throw new IllegalArgumentException("content.type must be text");
@@ -375,7 +377,7 @@ public final class AgentMessageJsonCodec {
     if (!node.has("providerBlockData")) {
       return null;
     }
-    ObjectNode data = requireObject(node.get("providerBlockData"), "content.providerBlockData");
+    ObjectNode data = object(node.get("providerBlockData"), "content.providerBlockData");
     requireFields(
         data,
         orderedSet(
@@ -392,7 +394,7 @@ public final class AgentMessageJsonCodec {
             "nativeFields"),
         "content.providerBlockData");
     ProviderReplayFormat protocol = ProviderReplayFormat.fromWireValue(text(data, "protocol"));
-    ObjectNode affinity = requireObject(data.get("affinity"), "content.providerBlockData.affinity");
+    ObjectNode affinity = object(data.get("affinity"), "content.providerBlockData.affinity");
     requireFields(
         affinity,
         orderedSet("providerType", "providerName", "modelId"),
@@ -469,21 +471,6 @@ public final class AgentMessageJsonCodec {
   }
 
   // ---------- 通用工具方法 ----------
-
-  private static String write(ObjectNode node) {
-    try {
-      return MAPPER.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode agent message JSON", error);
-    }
-  }
-
-  private static ObjectNode requireObject(JsonNode value, String context) {
-    if (!(value instanceof ObjectNode object)) {
-      throw new IllegalArgumentException(context + " must be a JSON object");
-    }
-    return object;
-  }
 
   private static ArrayNode requireArray(JsonNode value, String context) {
     if (!(value instanceof ArrayNode array)) {
@@ -658,13 +645,5 @@ public final class AgentMessageJsonCodec {
               + name,
           error);
     }
-  }
-
-  private static Set<String> orderedSet(String... values) {
-    Set<String> set = new LinkedHashSet<>();
-    for (String value : values) {
-      set.add(value);
-    }
-    return Set.copyOf(set);
   }
 }

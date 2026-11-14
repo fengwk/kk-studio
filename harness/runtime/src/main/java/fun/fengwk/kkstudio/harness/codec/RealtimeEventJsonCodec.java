@@ -1,6 +1,9 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.write;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
@@ -18,7 +21,6 @@ import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
-import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -97,7 +99,7 @@ public final class RealtimeEventJsonCodec {
   /** 把 {@link RealtimeEvent} 编码为 canonical JSON 文本。 */
   public String encode(RealtimeEvent event) {
     Objects.requireNonNull(event, "event");
-    return write(encodeNode(event));
+    return write(MAPPER, encodeNode(event), "cannot encode realtime event JSON");
   }
 
   /** 把 {@link RealtimeEvent} 编码为 deterministic canonical {@link ObjectNode}。 */
@@ -130,7 +132,7 @@ public final class RealtimeEventJsonCodec {
   /** 从任意 {@link JsonNode} 解码为 {@link RealtimeEvent}。 */
   public RealtimeEvent decodeNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
-    ObjectNode node = requireObject(value, "realtimeEvent");
+    ObjectNode node = object(value, "realtimeEvent");
     String typeName = requiredText(node, "type", "realtimeEvent");
     RealtimeEventType type = readEnum(RealtimeEventType.class, typeName, "realtimeEvent.type");
     requireFields(
@@ -184,7 +186,9 @@ public final class RealtimeEventJsonCodec {
         throw new IllegalArgumentException(
             "TOOL_PARTIAL subjectKind must be TOOL_INVOCATION: " + subjectKindName);
       }
-      ToolResult partial = ToolResultJsonCodec.decode(write((ObjectNode) payloadNode));
+      ToolResult partial =
+          ToolResultJsonCodec.decode(
+              write(MAPPER, (ObjectNode) payloadNode, "cannot encode realtime event JSON"));
       UUID eventId = requiredCanonicalUuid(node, "eventId", "realtimeEvent");
       return new RealtimeEvent.ToolPartial(
           threadId, subjectId, attempt, eventId, partial, createdAt);
@@ -302,21 +306,6 @@ public final class RealtimeEventJsonCodec {
 
   // ---------- 工具方法 ----------
 
-  private static String write(ObjectNode node) {
-    try {
-      return MAPPER.writeValueAsString(node);
-    } catch (JacksonException error) {
-      throw new IllegalStateException("cannot encode realtime event JSON", error);
-    }
-  }
-
-  private static ObjectNode requireObject(JsonNode value, String context) {
-    if (!(value instanceof ObjectNode object)) {
-      throw new IllegalArgumentException(context + " must be a JSON object");
-    }
-    return object;
-  }
-
   private static String requiredText(ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value == null || !value.isString()) {
@@ -400,13 +389,5 @@ public final class RealtimeEventJsonCodec {
               + name,
           error);
     }
-  }
-
-  private static Set<String> orderedSet(String... values) {
-    Set<String> set = new LinkedHashSet<>();
-    for (String value : values) {
-      set.add(value);
-    }
-    return Set.copyOf(set);
   }
 }

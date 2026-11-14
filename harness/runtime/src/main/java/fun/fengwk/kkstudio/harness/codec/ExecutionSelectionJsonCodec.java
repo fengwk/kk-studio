@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -10,8 +12,6 @@ import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
-import java.util.Collections;
-import java.util.LinkedHashSet;
 import java.util.Objects;
 import java.util.Set;
 
@@ -64,13 +64,5 @@ public final class ExecutionSelectionJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be text");
     }
     return value.stringValue();
-  }
-
-  private static Set<String> orderedSet(String... values) {
-    Set<String> set = new LinkedHashSet<>();
-    for (String value : values) {
-      set.add(value);
-    }
-    return Collections.unmodifiableSet(set);
   }
 }
