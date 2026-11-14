@@ -55,7 +55,7 @@ export function emptyModelDraft(
 }
 
 /** 只借助 JSON.parse 校验语法与根节点；绝不序列化解析后的浮点数。 */
-export function parseProtocolOptionsJson(
+function parseProtocolOptionsJson(
   raw: string | undefined,
   variantId: string,
 ): string | undefined {
@@ -185,7 +185,7 @@ function serializeVariants(
   })
 }
 
-export function buildModelConfig(draft: ModelDraft): ModelConfigDTO {
+function buildModelConfig(draft: ModelDraft): ModelConfigDTO {
   const contextWindow = requirePositiveInt(draft.contextWindow, 'config.limit.context')
   const maxOutputTokens = requirePositiveInt(
     draft.maxOutputTokens,

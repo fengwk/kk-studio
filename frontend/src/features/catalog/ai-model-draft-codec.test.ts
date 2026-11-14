@@ -6,7 +6,6 @@ import {
   extractDefaultVariantFromModel,
   extractMaxOutputTokens,
   extractVariantIdsFromModel,
-  parseProtocolOptionsJson,
   toEditableModel,
   toModelDraft,
 } from '@/features/catalog/ai-model-draft-codec'
@@ -474,35 +473,43 @@ describe('ai-model-draft-codec', () => {
   })
 
   describe('protocolOptionsJson codec and validation', () => {
+    /** 通过生产入口提交单个 Variant，覆盖选项文本的归一化与校验。 */
+    function submitVariant(protocolOptionsJson: string) {
+      return buildModelConfig(draft({
+        variants: [{ ...emptyModelDraft().variants[0]!, protocolOptionsJson }],
+      })).variants[0]
+    }
+
     /** 只检查语法与根节点，绝不把被 JS 浮点舍入的数值序列化回请求。 */
     it('preserves arbitrary precision numeric JSON text across loading and submission', () => {
       const json = '{"large":9007199254740993,"beyond":9223372036854775808,"nested":{"decimal":0.123456789012345678901234567890,"exp":1.234567890123456789e+45}}'
-      expect(parseProtocolOptionsJson(` \n${json}\t`, 'quality')).toBe(json)
       const source = model({ ...fullConfig(), variants: [{ id: 'quality', promptCacheRetention: 'SHORT', protocolOptionsJson: json }] })
       const loaded = toModelDraft(source)
       expect(loaded.variants[0]?.protocolOptionsJson).toBe(json)
       expect(buildModelConfig(loaded).variants[0]?.protocolOptionsJson).toBe(json)
       expect(JSON.stringify(buildModelConfig(loaded))).toContain('9007199254740993')
+      // 提交时只去掉首尾空白，其余文本原样写出。
+      expect(submitVariant(` \n${json}\t`)?.protocolOptionsJson).toBe(json)
     })
 
     /** 空白交给后端默认空 object，显式空 object 保留为文本。 */
     it('accepts empty input and explicit empty object', () => {
-      expect(parseProtocolOptionsJson(' \n ', 'v1')).toBeUndefined()
-      expect(parseProtocolOptionsJson(' {} ', 'v1')).toBe('{}')
+      expect(submitVariant(' \n ')).not.toHaveProperty('protocolOptionsJson')
+      expect(submitVariant(' {} ')?.protocolOptionsJson).toBe('{}')
     })
 
     /** 格式错误、trailing tokens 与非 object 根在提交前被本地拒绝。 */
     it.each(['{bad}', '{} true'])('rejects invalid syntax %s', (raw) => {
-      expect(() => parseProtocolOptionsJson(raw, 'v1')).toThrow('protocolOptionsJson must be valid JSON')
+      expect(() => submitVariant(raw)).toThrow('protocolOptionsJson must be valid JSON')
     })
     it.each(['null', '[]', '1', '"text"', 'true'])('rejects non-object root %s', (raw) => {
-      expect(() => parseProtocolOptionsJson(raw, 'v1')).toThrow('protocolOptionsJson must be a JSON object')
+      expect(() => submitVariant(raw)).toThrow('protocolOptionsJson must be a JSON object')
     })
 
     /** 上限使用 UTF-8 字节而非 JS 字符个数；错误文案不携带原始值。 */
     it('rejects overlarge UTF-8 input without echoing the payload', () => {
       const raw = `{"x":"${'测'.repeat(22000)}"}`
-      expect(() => parseProtocolOptionsJson(raw, 'v1')).toThrow('protocolOptionsJson must not exceed 65536 UTF-8 bytes')
+      expect(() => submitVariant(raw)).toThrow('protocolOptionsJson must not exceed 65536 UTF-8 bytes')
     })
 
     /** reasoning 禁用也能保留选项，清空选项则省略该字段。 */

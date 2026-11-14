@@ -7,7 +7,6 @@ export {
 export {
   emptyModelDraft,
   extractContextWindow,
-  extractDefaultVariantFromModel,
   toEditableModel,
   toModelDraft,
 } from '@/features/catalog/ai-model-draft-codec'

@@ -17,7 +17,7 @@ export interface BrowserPreferences {
   notificationsEnabled: boolean
 }
 
-export const DEFAULT_BROWSER_PREFERENCES: BrowserPreferences = {
+const DEFAULT_BROWSER_PREFERENCES: BrowserPreferences = {
   notificationsEnabled: false,
 }
 
@@ -26,7 +26,7 @@ export const DEFAULT_BROWSER_PREFERENCES: BrowserPreferences = {
  * 非法 JSON、非对象、字段缺失/类型不符或携带未知字段一律回退默认（false），
  * 绝不把未知版本的数据误读为已知偏好。
  */
-export function decodeBrowserPreferences(value: string | null): BrowserPreferences {
+function decodeBrowserPreferences(value: string | null): BrowserPreferences {
   if (value == null) {
     return DEFAULT_BROWSER_PREFERENCES
   }

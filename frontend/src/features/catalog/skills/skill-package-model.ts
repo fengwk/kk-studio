@@ -56,9 +56,9 @@ export function isGitPackage(pkg: Pick<SkillPackageSummaryDTO, 'source'>): boole
 
 const PACKAGE_NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
 
-export const MAX_PACKAGE_NAME_CHARS = 64
-export const MAX_PACKAGE_VERSION_CHARS = 128
-export const MAX_DESCRIPTION_CHARS = 1024
+const MAX_PACKAGE_NAME_CHARS = 64
+const MAX_PACKAGE_VERSION_CHARS = 128
+const MAX_DESCRIPTION_CHARS = 1024
 
 export function isValidPackageName(value: string): boolean {
   return value.length > 0 && value.length <= MAX_PACKAGE_NAME_CHARS && PACKAGE_NAME.test(value)
@@ -173,7 +173,7 @@ export function buildPreviewTree(
   }
 }
 
-export function manifestNames(skills: SkillManifestEntryDTO[]): Set<string> {
+function manifestNames(skills: SkillManifestEntryDTO[]): Set<string> {
   return new Set(skills.map((skill) => skill.name))
 }
 

@@ -19,8 +19,8 @@ const DECIMAL_PATTERN = /^(?:0|[1-9]\d*)(?:\.\d+)?$/
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 const START_TIME_PATTERN = /^(?:[01]\d|2[0-3]):[0-5]\d$/
 const END_TIME_PATTERN = /^(?:(?:[01]\d|2[0-3]):[0-5]\d|24:00)$/
-export const MAX_CONDITION_DEPTH = 8
-export const MAX_CONDITION_CHILDREN = 64
+const MAX_CONDITION_DEPTH = 8
+const MAX_CONDITION_CHILDREN = 64
 
 /** 新建价格完整为零；reasoning=null 表示跟随 output。 */
 export function emptyPricingDraft(): ModelPricingDraft {
@@ -60,7 +60,7 @@ export function clonePricing(pricing: ModelPricingDTO): ModelPricingDraft {
   }
 }
 
-export function cloneCondition(condition: ModelPricingConditionDTO): ModelPricingConditionDTO {
+function cloneCondition(condition: ModelPricingConditionDTO): ModelPricingConditionDTO {
   return {
     ...(condition.context ? { context: { ...condition.context } } : {}),
     ...(condition.serviceTier ? { serviceTier: [...condition.serviceTier] } : {}),

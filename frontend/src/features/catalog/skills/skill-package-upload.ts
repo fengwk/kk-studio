@@ -12,7 +12,7 @@ export interface UploadProgress {
 }
 
 /** 归档的媒体类型按扩展名确定：某些浏览器给出的 File.type 为空或不稳定。 */
-export function skillArchiveMediaType(filename: string): string {
+function skillArchiveMediaType(filename: string): string {
   return filename.toLowerCase().endsWith('.zip') ? 'application/zip' : 'application/gzip'
 }
 
@@ -20,7 +20,7 @@ export function skillArchiveMediaType(filename: string): string {
  * 直传归档到预签名 URL。进度必须来自 XHR 的真实上传事件，
  * 因此这里不复用基于 fetch 的通用直传；禁止发送的请求头与共享直传使用同一份清单。
  */
-export function putFileWithProgress(
+function putFileWithProgress(
   presigned: StoragePresignedUrlDTO,
   file: File,
   onProgress: (progress: UploadProgress) => void,

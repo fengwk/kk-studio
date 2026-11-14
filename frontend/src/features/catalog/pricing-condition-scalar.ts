@@ -14,7 +14,6 @@ import {
 } from '@/shared/lib/lossless-json-number'
 
 export { isRawJsonNumber }
-export type { ExactJsonNumber }
 
 export type PricingScalar = string | boolean | null | ExactJsonNumber
 

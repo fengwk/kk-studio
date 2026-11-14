@@ -4,14 +4,16 @@ import type {
   ModelPricingDTO,
 } from '@/shared/api/generated/contracts'
 import {
-  MAX_CONDITION_CHILDREN,
-  MAX_CONDITION_DEPTH,
   clonePricing,
   describeCondition,
   emptyPricingDraft,
   normalizeCondition,
   normalizePricing,
 } from '@/features/catalog/ai-model-pricing-codec'
+
+/** 后端约定的条件嵌套与列表上限。 */
+const CONDITION_DEPTH_LIMIT = 8
+const CONDITION_CHILDREN_LIMIT = 64
 
 function pricing(): ModelPricingDTO {
   return {
@@ -124,14 +126,14 @@ describe('ai-model-pricing-codec', () => {
       }
       return condition
     }
-    const children = Array.from({ length: MAX_CONDITION_CHILDREN }, () => ({}))
-    const tiers = Array.from({ length: MAX_CONDITION_CHILDREN }, (_, index) => `tier-${index}`)
+    const children = Array.from({ length: CONDITION_CHILDREN_LIMIT }, () => ({}))
+    const tiers = Array.from({ length: CONDITION_CHILDREN_LIMIT }, (_, index) => `tier-${index}`)
 
-    expect(normalizeCondition(nestedNot(MAX_CONDITION_DEPTH)).not).toBeDefined()
-    expect(() => normalizeCondition(nestedNot(MAX_CONDITION_DEPTH + 1))).toThrow(/depth/)
-    expect(normalizeCondition({ any: children }).any).toHaveLength(MAX_CONDITION_CHILDREN)
+    expect(normalizeCondition(nestedNot(CONDITION_DEPTH_LIMIT)).not).toBeDefined()
+    expect(() => normalizeCondition(nestedNot(CONDITION_DEPTH_LIMIT + 1))).toThrow(/depth/)
+    expect(normalizeCondition({ any: children }).any).toHaveLength(CONDITION_CHILDREN_LIMIT)
     expect(() => normalizeCondition({ any: [...children, {}] })).toThrow(/child count/)
-    expect(normalizeCondition({ serviceTier: tiers }).serviceTier).toHaveLength(MAX_CONDITION_CHILDREN)
+    expect(normalizeCondition({ serviceTier: tiers }).serviceTier).toHaveLength(CONDITION_CHILDREN_LIMIT)
     expect(() => normalizeCondition({ serviceTier: [...tiers, 'overflow'] }))
       .toThrow(/serviceTier/)
   })

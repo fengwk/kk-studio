@@ -7,7 +7,7 @@ import type {
 } from '@/shared/api/generated/contracts'
 
 /** 前端 draft 的共享数字/文本基元。 */
-export type DraftNumericField = string
+type DraftNumericField = string
 
 export interface PermissionRuleDraft {
   pattern: string
@@ -20,7 +20,7 @@ export interface PermissionGroupDraft {
   rules: PermissionRuleDraft[]
 }
 
-export interface SystemSettingsToolDraft {
+interface SystemSettingsToolDraft {
   permission: PermissionGroupDraft[]
   maxOutputMib: DraftNumericField
   modelGatewayBusyRetryMillis: DraftNumericField
@@ -33,7 +33,7 @@ export interface ModelSelectionDraft {
   variant: string
 }
 
-export interface SystemSettingsAiRuntimeDraft {
+interface SystemSettingsAiRuntimeDraft {
   retryMaxRetries: DraftNumericField
   retryBackoffStrategy: string
   retryBaseDelayMillis: DraftNumericField
@@ -48,16 +48,16 @@ export interface SystemSettingsAiRuntimeDraft {
   modelHttpRetryStatusCodes: (number | string)[]
 }
 
-export interface SystemSettingsEnvironmentDraft {
+interface SystemSettingsEnvironmentDraft {
   heartbeatTimeoutMillis: DraftNumericField
 }
 
-export interface SystemSettingsBackendNetworkDraft {
+interface SystemSettingsBackendNetworkDraft {
   proxyUrl: string
   noProxyHosts: string
 }
 
-export interface SystemSettingsStorageMediaDraft {
+interface SystemSettingsStorageMediaDraft {
   uploadExpiresSeconds: DraftNumericField
   s3PresignDefaultExpiresSeconds: DraftNumericField
   s3PresignMaxExpiresSeconds: DraftNumericField
@@ -70,7 +70,7 @@ export interface SystemSettingsStorageMediaDraft {
   temporaryResourceCleanupIntervalSeconds: DraftNumericField
 }
 
-export interface SystemSettingsAdvancedDraft {
+interface SystemSettingsAdvancedDraft {
   processorLeaseDurationMillis: DraftNumericField
   processorHeartbeatIntervalMillis: DraftNumericField
   threadResolveFailureDelayMillis: DraftNumericField
@@ -344,7 +344,7 @@ function nullableText(value: string): string | null {
   return trimmed === '' ? null : trimmed
 }
 
-export function assembleHttpStatusList(items: unknown): number[] {
+function assembleHttpStatusList(items: unknown): number[] {
   try {
     return assembleHttpStatusCodeList(items)
   } catch (err: unknown) {
