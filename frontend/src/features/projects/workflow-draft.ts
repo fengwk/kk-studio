@@ -181,7 +181,19 @@ export function validateWorkflowDraft(
   if (states.length === 0) {
     return { code: 'empty' }
   }
+  return (
+    validateCodes(states, referencedStates)
+    ?? validateStageFields(states)
+    ?? validateEdges(states)
+    ?? validateReachability(states)
+  )
+}
 
+/** 编码集合本身：非空、格式、唯一性、保留阶段齐全、被引用阶段仍在、名称非空。 */
+function validateCodes(
+  states: WorkflowDraftState[],
+  referencedStates: ReadonlySet<string>,
+): WorkflowValidationError | null {
   for (const state of states) {
     const code = state.state.trim()
     if (!code) {
@@ -218,7 +230,11 @@ export function validateWorkflowDraft(
       return { code: 'blankName', state: state.state.trim() }
     }
   }
+  return null
+}
 
+/** 单个阶段的执行配置：保留阶段只允许固定形状，其余按手动/Agent 两种模式各自校验。 */
+function validateStageFields(states: WorkflowDraftState[]): WorkflowValidationError | null {
   for (const state of states) {
     const code = state.state.trim()
     if (isReservedStateCode(code)) {
@@ -246,7 +262,12 @@ export function validateWorkflowDraft(
       return { code: 'agentMaxRuns', state: code, max: MAX_RUNS }
     }
   }
+  return null
+}
 
+/** 后继边：不得指向 BLOCKED、不得自指或重复，且目标必须已声明。 */
+function validateEdges(states: WorkflowDraftState[]): WorkflowValidationError | null {
+  const codes = new Set(states.map((state) => state.state.trim()))
   for (const state of states) {
     const code = state.state.trim()
     const seen = new Set<string>()
@@ -266,7 +287,11 @@ export function validateWorkflowDraft(
       }
     }
   }
+  return null
+}
 
+/** 可达性：启用的业务阶段都必须能从 INIT 到达，且必须存在通往 DONE 的路径。 */
+function validateReachability(states: WorkflowDraftState[]): WorkflowValidationError | null {
   const reachable = reachableFromInit(states)
   for (const state of states) {
     const code = state.state.trim()
@@ -277,7 +302,6 @@ export function validateWorkflowDraft(
   if (!reachable.has('DONE')) {
     return { code: 'noDonePath' }
   }
-
   return null
 }
 
