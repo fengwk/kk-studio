@@ -32,7 +32,10 @@ import java.util.Objects;
  * </ul>
  *
  * <p>{@link #read} 使用调用方已解码、校验的字符流，不自行剥离 BOM 或关闭流。{@code format} 对受管文本执行严格 UTF-8 解码、首字符 BOM
- * 剥离和参数校验；调用方负责关闭输入流。IO 和非法内容映射为 {@link PlatformReadException}，存储超时等未检查异常原样传播。
+ * 剥离和参数校验；调用方负责关闭输入流。IO 映射为 {@link PlatformReadException}，存储超时等未检查异常原样传播。
+ *
+ * <p>非文本判定与 Daemon codec 一致：前 {@value #BINARY_PROBE_BYTES} 字节内出现 NUL 字节是二进制文件；其余无法按 UTF-8 解码的内容
+ * （含畸形代理对）明确报告不是 UTF-8 文本，不误报为二进制；{@value #BINARY_PROBE_BYTES} 字节之后的 NUL 按文本处理。
  */
 public final class TextReadWindow {
 
@@ -48,7 +51,8 @@ public final class TextReadWindow {
   /** 流式读取的字符缓冲区：决定驻留内存上界，与流长度无关。 */
   private static final int READ_BUFFER_CHARS = 8 * 1024;
 
-  private static final String BINARY_MESSAGE = "file appears to be binary";
+  /** 二进制探测窗口：只在前 8000 字节内把 NUL 当二进制证据，与 Daemon codec 一致。 */
+  private static final int BINARY_PROBE_BYTES = 8000;
 
   private TextReadWindow() {}
 
@@ -127,13 +131,27 @@ public final class TextReadWindow {
           lspStatus,
           checkpoint);
     } catch (CharacterCodingException error) {
-      throw PlatformReadException.notText(
-          "file appears to be binary: invalid text encoding " + displayPath, error);
+      throw notUtf8(displayPath, error);
     } catch (IOException error) {
       throw new PlatformReadException("file cannot be read: " + displayPath, error);
-    } catch (IllegalArgumentException error) {
-      throw PlatformReadException.notText(error.getMessage(), error);
     }
+  }
+
+  /** 二进制文件：只声明 NUL 证据与 read 的可用范围。 */
+  private static PlatformReadException binary(String displayPath) {
+    return PlatformReadException.notText(
+        displayPath
+            + " is a binary file (it contains NUL bytes); read supports text files, directories"
+            + " and supported media.");
+  }
+
+  /** 不是合法 UTF-8：受管资源不声明编码，因此只能读 UTF-8。 */
+  private static PlatformReadException notUtf8(String displayPath, Throwable cause) {
+    return PlatformReadException.notText(
+        displayPath
+            + " is not UTF-8 text, so it was not read. Managed resources are read as UTF-8; to read"
+            + " another encoding, convert it in an Environment, for example with bash iconv.",
+        cause);
   }
 
   private static Reader strictUtf8Reader(InputStream stream) {
@@ -155,8 +173,7 @@ public final class TextReadWindow {
    * @param displayPath header 展示的路径
    * @param lspStatus LSP 状态；{@code null} 或 {@code "unsupported"} 时省略该 header 行
    * @param checkpoint 每块读取前后执行的检查点；抛出异常即中止扫描，用于超时与中断映射
-   * @throws PlatformReadException 目标行越界列或位置超出可分页范围
-   * @throws IllegalArgumentException 内容看似二进制
+   * @throws PlatformReadException 内容含二进制证据、不是 UTF-8 文本、目标行越界列或位置超出可分页范围
    * @throws IOException 读取失败
    */
   public static String read(
@@ -172,7 +189,7 @@ public final class TextReadWindow {
     Objects.requireNonNull(displayPath, "displayPath");
     Objects.requireNonNull(checkpoint, "checkpoint");
     Scanner scanner = new Scanner(offset, limit, columnOffset == null ? 1 : columnOffset);
-    return format(scan(reader, scanner, checkpoint), displayPath, lspStatus);
+    return format(scan(reader, scanner, displayPath, checkpoint), displayPath, lspStatus);
   }
 
   /**
@@ -219,19 +236,21 @@ public final class TextReadWindow {
     return (int) value;
   }
 
-  private static Window scan(Reader reader, Scanner scanner, Runnable checkpoint)
-      throws IOException {
+  private static Window scan(
+      Reader reader, Scanner scanner, String displayPath, Runnable checkpoint) throws IOException {
     char[] buffer = new char[READ_BUFFER_CHARS];
     boolean skipLf = false;
     int pendingHigh = -1;
+    // 已解码内容的 UTF-8 字节偏移：严格解码下每个码点的字节长度就是它的 UTF-8 长度， 因此可与 Daemon codec 一样按前 8000 字节判定二进制。
+    long byteOffset = 0L;
     while (true) {
       checkpoint.run();
       int count;
       try {
         count = reader.read(buffer);
       } catch (CharacterCodingException error) {
-        // 严格解码器直接抛出编码异常（如非 UTF-8 的 8 位旧编码），在读取契约上统一为“看似二进制”。
-        throw new IllegalArgumentException(BINARY_MESSAGE + ": invalid text encoding", error);
+        // 严格解码器抛出的编码异常（如非 UTF-8 的 8 位旧编码）不是二进制证据。
+        throw notUtf8(displayPath, error);
       }
       if (count == -1) {
         break;
@@ -241,17 +260,18 @@ public final class TextReadWindow {
         char value = buffer[index];
         if (pendingHigh >= 0) {
           if (!Character.isLowSurrogate(value)) {
-            throw new IllegalArgumentException(BINARY_MESSAGE + ": malformed text encoding");
+            throw notUtf8(displayPath, null);
           }
           int codePoint = Character.toCodePoint((char) pendingHigh, value);
           pendingHigh = -1;
           skipLf = false;
-          scanner.onCodePoint(codePoint);
+          byteOffset = scanCodePoint(scanner, codePoint, byteOffset, displayPath);
           continue;
         }
         if (value == '\r') {
           scanner.onSeparator();
           skipLf = true;
+          byteOffset++;
           continue;
         }
         if (value == '\n') {
@@ -259,6 +279,7 @@ public final class TextReadWindow {
             scanner.onSeparator();
           }
           skipLf = false;
+          byteOffset++;
           continue;
         }
         skipLf = false;
@@ -266,10 +287,11 @@ public final class TextReadWindow {
           if (index + 1 < count) {
             char low = buffer[index + 1];
             if (!Character.isLowSurrogate(low)) {
-              throw new IllegalArgumentException(BINARY_MESSAGE + ": malformed text encoding");
+              throw notUtf8(displayPath, null);
             }
             index++;
-            scanner.onCodePoint(Character.toCodePoint(value, low));
+            byteOffset =
+                scanCodePoint(scanner, Character.toCodePoint(value, low), byteOffset, displayPath);
           } else {
             // 高代理项落在读取块末尾：留到下一块与低代理项合并，绝不以半个码点入正文。
             pendingHigh = value;
@@ -277,15 +299,40 @@ public final class TextReadWindow {
           continue;
         }
         if (Character.isLowSurrogate(value)) {
-          throw new IllegalArgumentException(BINARY_MESSAGE + ": malformed text encoding");
+          throw notUtf8(displayPath, null);
         }
-        scanner.onCodePoint(value);
+        byteOffset = scanCodePoint(scanner, value, byteOffset, displayPath);
       }
     }
     if (pendingHigh >= 0) {
-      throw new IllegalArgumentException(BINARY_MESSAGE + ": malformed text encoding");
+      throw notUtf8(displayPath, null);
     }
     return scanner.finish();
+  }
+
+  /**
+   * 一个码点入正文：前 8000 字节内的 NUL 是二进制证据，之后的 NUL 按文本处理。
+   *
+   * @return 该码点之后的 UTF-8 字节偏移
+   */
+  private static long scanCodePoint(
+      Scanner scanner, int codePoint, long byteOffset, String displayPath) {
+    if (codePoint == 0 && byteOffset < BINARY_PROBE_BYTES) {
+      throw binary(displayPath);
+    }
+    scanner.onCodePoint(codePoint);
+    return byteOffset + utf8Length(codePoint);
+  }
+
+  /** 码点的 UTF-8 字节长度：严格解码后这就是它在源字节里的实际占用。 */
+  private static int utf8Length(int codePoint) {
+    if (codePoint < 0x80) {
+      return 1;
+    }
+    if (codePoint < 0x800) {
+      return 2;
+    }
+    return codePoint < 0x10000 ? 3 : 4;
   }
 
   private static String format(Window window, String displayPath, String lspStatus) {
@@ -380,11 +427,8 @@ public final class TextReadWindow {
       this.columnStart = columnStart;
     }
 
-    /** 一个文件内容码点：计数、校验二进制特征，并在窗口内时追加到当前行。 */
+    /** 一个文件内容码点：计数并在窗口内时追加到当前行；二进制判定在扫描层按字节窗口完成。 */
     private void onCodePoint(int codePoint) {
-      if (codePoint == 0) {
-        throw new IllegalArgumentException(BINARY_MESSAGE + ": contains NUL character");
-      }
       columns++;
       endedWithNewline = false;
       if (line < offset || body.size() >= limit) {

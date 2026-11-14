@@ -14,6 +14,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.regex.Matcher;
@@ -250,30 +251,86 @@ class TextReadWindowFormatTest {
     return all;
   }
 
-  /** NUL 与非法 UTF-8 都判定为二进制并抛出可区分错误。 */
+  /**
+   * 前 8000 字节内的 NUL 判定为二进制，非法 UTF-8 报“不是 UTF-8 文本”：两者文案与类别严格区分，不互相误报。
+   *
+   * <p>测试意图：二进制探测只看开头 8000 字节，不合法 UTF-8 不能被说成二进制。
+   */
   @Test
-  void binaryAndMalformedUtf8AreRejected() {
-    assertTrue(
+  void binaryAndMalformedUtf8AreReportedDistinctly() {
+    PlatformReadException binary =
         assertThrows(
-                PlatformReadException.class,
-                () ->
-                    TextReadWindow.format(
-                        new byte[] {'a', 0, 'b'}, 1, 200, null, "test.bin", deadline()))
-            .getMessage()
-            .contains("binary"));
-    assertTrue(
+            PlatformReadException.class,
+            () ->
+                TextReadWindow.format(
+                    new byte[] {'a', 0, 'b'}, 1, 200, null, "test.bin", deadline()));
+    assertEquals(PlatformReadException.Kind.NOT_TEXT, binary.kind());
+    assertEquals(
+        "test.bin is a binary file (it contains NUL bytes); read supports text files, directories"
+            + " and supported media.",
+        binary.getMessage());
+
+    PlatformReadException invalidUtf8 =
         assertThrows(
-                PlatformReadException.class,
-                () ->
-                    TextReadWindow.format(
-                        new byte[] {(byte) 0xC0, (byte) 0xAF},
-                        1,
-                        200,
-                        null,
-                        "test.bin",
-                        deadline()))
-            .getMessage()
-            .contains("binary"));
+            PlatformReadException.class,
+            () ->
+                TextReadWindow.format(
+                    new byte[] {(byte) 0xC0, (byte) 0xAF}, 1, 200, null, "test.bin", deadline()));
+    assertEquals(PlatformReadException.Kind.NOT_TEXT, invalidUtf8.kind());
+    assertEquals(
+        "test.bin is not UTF-8 text, so it was not read. Managed resources are read as UTF-8; to"
+            + " read another encoding, convert it in an Environment, for example with bash iconv.",
+        invalidUtf8.getMessage());
+  }
+
+  /** 二进制探测窗口为前 8000 字节：窗口内的 NUL 是二进制，越过窗口的 NUL 按文本返回。 */
+  @Test
+  void nulIsBinaryOnlyInsideTheFirstEightThousandBytes() {
+    assertBinary("inside", 7999);
+    assertText("at-boundary", 8000);
+    assertText("after-boundary", 8001);
+  }
+
+  /** UTF-8 BOM 不影响文本读取：仍从首字符开始显示正文，且不参与二进制判定。 */
+  @Test
+  void byteOrderMarkKeepsWorking() {
+    String output =
+        TextReadWindow.format(withLeadingBom("bom-text\n"), 1, 200, null, "test.txt", deadline());
+    assertTrue(output.contains("range: 1:1-1:8"), output);
+    assertTrue(output.contains("1|bom-text"), output);
+
+    // BOM 自身不引入 NUL：窗口开头的 NUL 仍按二进制拒绝。
+    byte[] bomThenNul = new byte[UTF8_BOM.length + 1];
+    System.arraycopy(UTF8_BOM, 0, bomThenNul, 0, UTF8_BOM.length);
+    PlatformReadException failure =
+        assertThrows(
+            PlatformReadException.class,
+            () -> TextReadWindow.format(bomThenNul, 1, 200, null, "test.bin", deadline()));
+    assertTrue(failure.getMessage().contains("it contains NUL bytes"), failure.getMessage());
+  }
+
+  private static void assertBinary(String label, int prefixLength) {
+    byte[] bytes = withNulAt(prefixLength);
+    PlatformReadException failure =
+        assertThrows(
+            PlatformReadException.class,
+            () -> TextReadWindow.format(bytes, 1, 200, null, "probe.bin", deadline()),
+            label);
+    assertTrue(failure.getMessage().contains("is a binary file (it contains NUL bytes)"), label);
+  }
+
+  private static void assertText(String label, int prefixLength) {
+    byte[] bytes = withNulAt(prefixLength);
+    String output = TextReadWindow.format(bytes, 1, 2000, null, "probe.txt", deadline());
+    assertTrue(output.contains("\u0000"), label);
+  }
+
+  /** 在指定字节偏移处放置一个 NUL，其余位置为 ASCII。 */
+  private static byte[] withNulAt(int offset) {
+    byte[] bytes = new byte[offset + 4];
+    Arrays.fill(bytes, (byte) 'a');
+    bytes[offset] = 0;
+    return bytes;
   }
 
   /** 参数非法时抛出确定性错误，不进入内容读取。 */

@@ -12,6 +12,7 @@ import java.io.IOException;
 import java.io.Reader;
 import java.io.StringReader;
 import java.nio.charset.MalformedInputException;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -24,6 +25,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 class TextReadWindowTest {
 
   private static final Runnable NO_CHECKPOINT = () -> {};
+
+  /** 二进制文案：与 Daemon codec 一致，只声明 NUL 证据与 read 的可用范围。 */
+  private static final String BINARY_MESSAGE =
+      "p is a binary file (it contains NUL bytes); read supports text files, directories and"
+          + " supported media.";
+
+  /** 非 UTF-8 文案：受管资源不声明编码，只接受 UTF-8。 */
+  private static final String NOT_UTF8_MESSAGE =
+      "p is not UTF-8 text, so it was not read. Managed resources are read as UTF-8; to read"
+          + " another encoding, convert it in an Environment, for example with bash iconv.";
 
   private static String read(String content, Integer offset, Integer limit, Integer columnOffset) {
     try {
@@ -169,28 +180,48 @@ class TextReadWindowTest {
             .substring(2));
   }
 
-  /** 孤立或悬挂的代理项按二进制拒绝，绝不把半个码点写入正文。 */
+  /** 孤立或悬挂的代理项不是 UTF-8 文本，绝不把半个码点写入正文。 */
   @Test
-  void malformedSurrogatesAreRejected() {
-    assertThrows(IllegalArgumentException.class, () -> read("a\uD800b", 1, 200, null));
-    assertThrows(IllegalArgumentException.class, () -> read("a\uDC00b", 1, 200, null));
-    assertThrows(IllegalArgumentException.class, () -> read("a\uD800", 1, 200, null));
-    assertThrows(IllegalArgumentException.class, () -> readInChunks("a\uD800b", 2));
+  void malformedSurrogatesAreReportedAsNotUtf8() {
+    for (Runnable call :
+        List.<Runnable>of(
+            () -> read("a\uD800b", 1, 200, null),
+            () -> read("a\uDC00b", 1, 200, null),
+            () -> read("a\uD800", 1, 200, null),
+            () -> readInChunks("a\uD800b", 2),
+            () -> readInChunks("b".repeat(8191) + "\uD800", 8192))) {
+      PlatformReadException failure = assertThrows(PlatformReadException.class, call::run);
+      assertEquals(PlatformReadException.Kind.NOT_TEXT, failure.kind());
+      assertEquals(NOT_UTF8_MESSAGE, failure.getMessage());
+    }
+  }
+
+  /** 前 8000 字节内的 NUL 是二进制证据，与“空正文”区分。 */
+  @Test
+  void nulInsideTheProbeWindowIsBinary() {
+    PlatformReadException failure =
+        assertThrows(PlatformReadException.class, () -> read("hi\u0000x", 1, 200, null));
+    assertEquals(PlatformReadException.Kind.NOT_TEXT, failure.kind());
+    assertEquals(BINARY_MESSAGE, failure.getMessage());
+  }
+
+  /** 8000 字节之后的 NUL 按普通文本处理：二进制探测只看开头窗口。 */
+  @Test
+  void nulAfterTheProbeWindowIsText() {
+    String content = "b".repeat(8000) + "\u0000x\n";
+    String output = read(content, 1, 2000, null);
+    assertTrue(output.contains("\u0000x"), output);
+    assertTrue(output.contains("range: 1:1-1:8002"), output);
+
+    // 边界紧邻：第 8000 字节的 NUL 仍在窗口内，第 8001 字节的已在窗口外。
     assertThrows(
-        IllegalArgumentException.class, () -> readInChunks("b".repeat(8191) + "\uD800", 8192));
+        PlatformReadException.class, () -> read("b".repeat(7999) + "\u0000x", 1, 200, null));
+    assertTrue(read("b".repeat(8000) + "\u0000x", 1, 200, null).contains("\u0000x"));
   }
 
-  /** NUL 码点判定为二进制，与“空正文”区分。 */
+  /** 严格解码器抛出的编码异常不是二进制证据，而是“不是 UTF-8 文本”。 */
   @Test
-  void nulCodePointIsBinary() {
-    IllegalArgumentException failure =
-        assertThrows(IllegalArgumentException.class, () -> read("hi\u0000x", 1, 200, null));
-    assertTrue(failure.getMessage().contains("binary"), failure.getMessage());
-  }
-
-  /** 严格解码器抛出的编码异常在读取契约上统一为“看似二进制”。 */
-  @Test
-  void decoderFailuresAreReportedAsBinary() {
+  void decoderFailuresAreReportedAsNotUtf8() {
     Reader failing =
         new Reader() {
           @Override
@@ -202,11 +233,12 @@ class TextReadWindowTest {
           public void close() {}
         };
 
-    IllegalArgumentException failure =
+    PlatformReadException failure =
         assertThrows(
-            IllegalArgumentException.class,
+            PlatformReadException.class,
             () -> TextReadWindow.read(failing, 1, 200, null, "p", "unsupported", NO_CHECKPOINT));
-    assertTrue(failure.getMessage().contains("invalid text encoding"), failure.getMessage());
+    assertEquals(PlatformReadException.Kind.NOT_TEXT, failure.kind());
+    assertEquals(NOT_UTF8_MESSAGE, failure.getMessage());
   }
 
   /** 检查点在每块读取前后各执行一次，并且它抛出的异常原样中止扫描（超时/中断映射依赖该行为）。 */
