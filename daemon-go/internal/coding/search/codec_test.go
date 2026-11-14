@@ -11,7 +11,11 @@ import (
 // COD-T-265: undecodable files are listed by absolute path, binary files are skipped silently
 // and decoded text is matched.
 func TestGrepContextReportsUndecodableFiles(t *testing.T) {
-	root := t.TempDir()
+	// grep lists real paths; temp directories sit behind symlinks (macOS) or short names (Windows).
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	for name, data := range map[string][]byte{
 		"text.txt":   []byte("target\n"),
 		"gbk.txt":    {'x', 0xd6, 0xd0, 't', 'a', 'r', 'g', 'e', 't'},
@@ -38,11 +42,15 @@ func TestGrepContextReportsUndecodableFiles(t *testing.T) {
 
 // COD-T-266: a file given directly as path reports the codec failure and is never searched.
 func TestGrepContextReportsUndecodableDirectFile(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "gbk.txt")
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "gbk.txt")
 	if err := os.WriteFile(path, []byte{'x', 0xd6, 0xd0}, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := GrepContext(context.Background(), path, "x", true, false, "", 10)
+	_, err = GrepContext(context.Background(), path, "x", true, false, "", 10)
 	var undecodable *UndecodableError
 	if !errors.As(err, &undecodable) || undecodable.Path != path {
 		t.Fatalf("err=%v", err)

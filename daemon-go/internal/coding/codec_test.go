@@ -153,7 +153,11 @@ func mustRead(t *testing.T, path string) []byte {
 
 // COD-T-264: grep searches decoded text and lists files it could not decode.
 func TestGrepDecodesAndListsUndecodableFiles(t *testing.T) {
-	root := t.TempDir()
+	// grep lists real paths; temp directories sit behind symlinks (macOS) or short names (Windows).
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	gbk := filepath.Join(root, "page.html")
 	if err := os.WriteFile(gbk, declaredBytes(t, "GBK", `<meta charset="gbk">中文target`), 0o600); err != nil {
 		t.Fatal(err)
@@ -228,9 +232,13 @@ func TestWriteKeepsBOMWithFamilyDeclaration(t *testing.T) {
 	if _, err := Write(path, otherOrder, nil); err == nil || !strings.Contains(err.Error(), "byte order mark") || !strings.Contains(err.Error(), "UTF-16BE") {
 		t.Fatalf("other order err=%v", err)
 	}
-	created := filepath.Join(t.TempDir(), "new.xml")
-	_, err := Write(created, `<?xml version="1.0" encoding="UTF-16"?><root/>`, nil)
-	if err == nil || !strings.Contains(err.Error(), "byte order mark") || !strings.Contains(err.Error(), created) {
+	createdDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := filepath.Join(createdDir, "new.xml")
+	_, err = Write(created, `<?xml version="1.0" encoding="UTF-16"?><root/>`, nil)
+	if err == nil || !strings.Contains(err.Error(), "byte order mark") || !strings.Contains(err.Error(), filepath.ToSlash(created)) {
 		t.Fatalf("new file err=%v", err)
 	}
 }
