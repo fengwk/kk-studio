@@ -5,8 +5,6 @@ import {
 } from 'react'
 import { useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventConnectionIdentity } from '@/shared/app-events/protocol'
-import type {
-} from '@/shared/api/generated/contracts'
 import { createUuid, isCanonicalUuid } from '@/shared/lib/uuid'
 import type { IdeActionMode, IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
 import {
