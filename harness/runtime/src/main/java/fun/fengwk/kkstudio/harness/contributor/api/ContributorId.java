@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.contributor.api;
 import java.util.Objects;
 
 /**
- * Contributor 的 canonical durable 身份：小写 dotted/dashed 标识符（如 {@code core}、{@code com.example.goal}、
+ * Contributor 的 canonical durable 身份：小写 dotted/dashed 标识符（如 {@code core}、{@code com.example.notes}、
  * {@code pi-base}），长度有界。
  */
 public record ContributorId(String value) {

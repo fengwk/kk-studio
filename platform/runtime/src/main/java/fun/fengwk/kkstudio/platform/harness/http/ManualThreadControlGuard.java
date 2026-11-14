@@ -7,7 +7,7 @@ import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import java.util.UUID;
 
 /**
- * 人工 Thread 写入边界：自由输入、Goal、设置、YOLO、Stop、压缩、重命名与分支创建等人工控制只允许指向执行根。
+ * 人工 Thread 写入边界：自由输入、设置、YOLO、Stop、压缩、重命名与分支创建等人工控制只允许指向执行根。
  *
  * <p>用 {@link HarnessRuntime#findRootThreadId} 判定目标是否为根：执行根不是自身的子 Thread 以 409 拒绝，避免把根级输入或控制落到
  * 观察树内部。不存在的 Thread 不在此判定，交由后续 Runtime 调用按既有语义翻译为 404。

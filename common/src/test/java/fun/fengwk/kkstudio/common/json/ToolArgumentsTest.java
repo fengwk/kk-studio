@@ -35,8 +35,8 @@ class ToolArgumentsTest {
   @Test
   void textPreservesNonBlankTextVerbatim() {
     JsonNode arguments =
-        ToolArguments.parse("{\"name\":\"  goal  \",\"blank\":\"   \",\"count\":3,\"nil\":null}");
-    assertEquals("  goal  ", ToolArguments.text(arguments, "name"));
+        ToolArguments.parse("{\"name\":\"  notes  \",\"blank\":\"   \",\"count\":3,\"nil\":null}");
+    assertEquals("  notes  ", ToolArguments.text(arguments, "name"));
     assertNull(ToolArguments.text(arguments, "blank"));
     assertNull(ToolArguments.text(arguments, "count"));
     assertNull(ToolArguments.text(arguments, "nil"));

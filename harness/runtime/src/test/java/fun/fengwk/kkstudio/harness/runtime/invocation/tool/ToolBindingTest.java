@@ -221,6 +221,6 @@ class ToolBindingTest {
   }
 
   private static ContributorBinding declarativeProvenance() {
-    return new ContributorBinding("goal", "create");
+    return new ContributorBinding("acme", "create");
   }
 }

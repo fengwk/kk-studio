@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.storage.s3;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -221,7 +222,13 @@ class S3StorageDeadlineIntegrationTest {
     PlatformReadException failure =
         assertThrows(PlatformReadException.class, () -> readResourceText(contentService, blobId));
 
-    assertTrue(failure.getMessage().contains("binary"), "实际失败：" + failure.getMessage());
+    assertEquals(PlatformReadException.Kind.NOT_TEXT, failure.kind());
+    assertEquals(
+        "resource://files/"
+            + blobId
+            + " is a binary file (it contains NUL bytes); read supports text files, directories"
+            + " and supported media.",
+        failure.getMessage());
     assertTrue(awaitTrue(closedByClient, 5_000L), "提前退出必须 abort 连接而不是排空响应体");
     assertTrue(
         bodyBytesWritten.get() < 64L * 1024L * 1024L,

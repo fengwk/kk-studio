@@ -12,8 +12,8 @@ class ContributorIdTest {
   @Test
   void acceptsCanonicalIdentifiers() {
     assertEquals("core", new ContributorId("core").value());
-    assertEquals("goal", new ContributorId("goal").value());
-    assertEquals("com.example.goal", new ContributorId("com.example.goal").value());
+    assertEquals("acme", new ContributorId("acme").value());
+    assertEquals("com.example.acme", new ContributorId("com.example.acme").value());
     assertEquals("pi-base", new ContributorId("pi-base").value());
     assertEquals("a-1.b-2", new ContributorId("a-1.b-2").value());
     assertEquals("core", new ContributorId("core").toString());
@@ -46,8 +46,8 @@ class ContributorIdTest {
   /** 相同 value 的 ContributorId 在 value equality 与 hashCode 上等价。 */
   @Test
   void comparesByValue() {
-    ContributorId first = new ContributorId("com.example.goal");
-    ContributorId second = new ContributorId("com.example.goal");
+    ContributorId first = new ContributorId("com.example.acme");
+    ContributorId second = new ContributorId("com.example.acme");
     assertEquals(first, second);
     assertEquals(first.hashCode(), second.hashCode());
   }

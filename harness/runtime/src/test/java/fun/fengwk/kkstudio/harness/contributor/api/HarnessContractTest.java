@@ -34,7 +34,7 @@ import java.util.function.Consumer;
 /** Contributor API 统一定义、Tool 契约、执行请求与上下文测试。 */
 class HarnessContractTest {
 
-  private static final ContributorId CID = new ContributorId("goal");
+  private static final ContributorId CID = new ContributorId("acme");
   private static final InputSchema SCHEMA =
       new InputSchema(
           "Test schema",
@@ -58,9 +58,9 @@ class HarnessContractTest {
     ContributionId c1 = new ContributionId(CID, "create");
     ContributionId c2 = new ContributionId(CID, "create");
     ContributionId c3 = new ContributionId(CID, "delete");
-    ContributionId c4 = new ContributionId(new ContributorId("alpha"), "create");
+    ContributionId c4 = new ContributionId(new ContributorId("aaa"), "create");
 
-    assertEquals("goal:create", c1.toString());
+    assertEquals("acme:create", c1.toString());
     assertEquals(c1, c2);
     assertEquals(c1.hashCode(), c2.hashCode());
     assertTrue(c1.compareTo(c3) < 0);
@@ -69,7 +69,7 @@ class HarnessContractTest {
     assertThrows(NullPointerException.class, () -> new ContributionId(null, "create"));
     assertThrows(NullPointerException.class, () -> new ContributionId(CID, null));
     assertThrows(IllegalArgumentException.class, () -> new ContributionId(CID, "Create"));
-    assertThrows(IllegalArgumentException.class, () -> new ContributionId(CID, "create_goal"));
+    assertThrows(IllegalArgumentException.class, () -> new ContributionId(CID, "create_notes"));
   }
 
   /** 验证 ContributorDescriptor 依赖校验，包括拒绝自依赖与自动排序。 */
@@ -77,9 +77,9 @@ class HarnessContractTest {
   void contributorDescriptorValidatesRequires() {
     ContributorDescriptor desc =
         new ContributorDescriptor(
-            CID, "Goal Contributor", "1.0.0", Set.of(new ContributorId("core")));
+            CID, "Acme Contributor", "1.0.0", Set.of(new ContributorId("core")));
     assertEquals(CID, desc.id());
-    assertEquals("Goal Contributor", desc.name());
+    assertEquals("Acme Contributor", desc.name());
     assertEquals("1.0.0", desc.version());
     assertEquals(Set.of(new ContributorId("core")), desc.requires());
 

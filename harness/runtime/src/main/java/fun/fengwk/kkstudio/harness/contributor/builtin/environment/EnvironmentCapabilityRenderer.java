@@ -13,8 +13,8 @@ import java.util.Optional;
 /**
  * Environment capability 的历史动作渲染器：按 capability 语义生成 “动词 + 目标” 短语。
  *
- * <p>保留决定目标作用域的 {@code process.exec workdir}、{@code grep.include} 以及会改变解释的 {@code edit.replace_all}
- * / {@code grep} 匹配标志；省略 {@code timeout_seconds}、{@code limit}、{@code offset}、{@code column_offset}
+ * <p>保留决定目标作用域的 {@code process.exec workdir}、{@code grep.glob} 以及会改变解释的 {@code edit.replace_all} /
+ * {@code grep} 匹配标志；省略 {@code timeout_seconds}、{@code limit}、{@code offset}、{@code column_offset}
  * 等执行预算或结果窗口参数，具体结果仍由 ToolResult 表达。无法形成有意义动作时返回 empty，由 Runtime 中性回退（回退逐字保留全部 arguments）。
  */
 final class EnvironmentCapabilityRenderer implements ToolHistoryRenderer {
@@ -65,7 +65,7 @@ final class EnvironmentCapabilityRenderer implements ToolHistoryRenderer {
       if (pattern == null) {
         return null;
       }
-      // 大小写/字面量/多行直接改变匹配语义，属于语义标志而非执行控制。
+      // 大小写/字面量直接改变匹配语义，属于语义标志而非执行控制。
       StringBuilder action = new StringBuilder("search for ").append(pattern);
       if (ToolArguments.flag(args, "literal")) {
         action.append(" as literal text");
@@ -73,15 +73,12 @@ final class EnvironmentCapabilityRenderer implements ToolHistoryRenderer {
       if (ToolArguments.flag(args, "ignore_case")) {
         action.append(" ignoring case");
       }
-      if (ToolArguments.flag(args, "multiline")) {
-        action.append(" across lines");
-      }
       if (path != null) {
         action.append(" in ").append(path);
       }
-      String include = ToolArguments.text(args, "include");
-      if (include != null) {
-        action.append(" within files matching ").append(include);
+      String glob = ToolArguments.text(args, "glob");
+      if (glob != null) {
+        action.append(" within files matching ").append(glob);
       }
       return action.toString();
     }

@@ -181,7 +181,7 @@ class HistoryEntryPayloadTest {
             .message());
     assertEquals(
         AgentMessageRole.USER,
-        new CustomMessagePayload("com.example", "goal", "goal-renderer", user, "{\"priority\":1}")
+        new CustomMessagePayload("com.example", "acme", "acme-renderer", user, "{\"priority\":1}")
             .message()
             .role());
     assertThrows(

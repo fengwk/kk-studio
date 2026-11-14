@@ -110,26 +110,26 @@ class ToolBindingJsonCodecTest {
     assertEquals(ENVIRONMENT_ID, codec.decode(optionalWithEnvJson).environmentId());
     assertEquals("dev", codec.decode(optionalWithEnvJson).environmentName());
 
-    ToolBinding requiredWithGoalContributor =
+    ToolBinding requiredWithAcmeContributor =
         new ToolBinding(
             definition("fs"),
-            new ContributorBinding("goal", "create"),
+            new ContributorBinding("acme", "create"),
             EnvironmentSupport.REQUIRED,
             ENVIRONMENT_ID,
             "dev");
     String requiredJson =
         "{\"definition\":"
-            + definitionCodec.encode(requiredWithGoalContributor.definition())
+            + definitionCodec.encode(requiredWithAcmeContributor.definition())
             + ",\"contributor\":"
-            + "{\"contributorId\":\"goal\",\"localName\":\"create\"}"
+            + "{\"contributorId\":\"acme\",\"localName\":\"create\"}"
             + ",\"environmentSupport\":\"REQUIRED\""
             + ",\"environmentId\":"
             + environmentJson(ENVIRONMENT_ID)
             + ",\"environmentName\":\"dev\""
             + ",\"configuredSkills\":[]"
             + "}";
-    assertEquals(requiredJson, codec.encode(requiredWithGoalContributor));
-    assertEquals(requiredWithGoalContributor, codec.decode(requiredJson));
+    assertEquals(requiredJson, codec.encode(requiredWithAcmeContributor));
+    assertEquals(requiredWithAcmeContributor, codec.decode(requiredJson));
     assertEquals(EnvironmentSupport.REQUIRED, codec.decode(requiredJson).environmentSupport());
     assertEquals(ENVIRONMENT_ID, codec.decode(requiredJson).environmentId());
   }
@@ -274,7 +274,7 @@ class ToolBindingJsonCodecTest {
             codec.decode(
                 "{\"definition\":"
                     + definition
-                    + ",\"contributor\":{\"contributorId\":\"goal\",\"localName\":\"create\",\"stateAccesses\":[],\"unknown\":true}"
+                    + ",\"contributor\":{\"contributorId\":\"acme\",\"localName\":\"create\",\"stateAccesses\":[],\"unknown\":true}"
                     + ",\"environmentSupport\":\"NONE\""
                     + ",\"environmentId\":null"
                     + ",\"environmentName\":null"
@@ -287,7 +287,7 @@ class ToolBindingJsonCodecTest {
             codec.decode(
                 "{\"definition\":"
                     + definition
-                    + ",\"contributor\":{\"contributorId\":\"goal\"}"
+                    + ",\"contributor\":{\"contributorId\":\"acme\"}"
                     + ",\"environmentSupport\":\"NONE\""
                     + ",\"environmentId\":null"
                     + ",\"environmentName\":null"

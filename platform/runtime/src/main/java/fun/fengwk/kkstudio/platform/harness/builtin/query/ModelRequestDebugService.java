@@ -33,8 +33,8 @@ import java.util.UUID;
  * Thread Debug 的结构化模型请求投影：一次不可变 snapshot 上加一次共享规划。
  *
  * <p>顶层是现算的 {@code NEXT_REQUEST_PREVIEW}：model 来自本次草稿，执行根使用草稿环境，子线程使用执行根当前环境。其余事实来自 {@link
- * DatabaseTurnResolver#planLiveWithSettings} 的只读规划结果。Agent 引用与 Goal 仍取自 branch settings；预览不检查
- * branch HEAD、不做 CAS、不发布 Package、不触发 Daemon sync，也不产生任何写入。
+ * DatabaseTurnResolver#planLiveWithSettings} 的只读规划结果。Agent 引用仍取自 branch settings；预览不检查 branch
+ * HEAD、不做 CAS、不发布 Package、不触发 Daemon sync，也不产生任何写入。
  *
  * <p>确定性 planning 拒绝只回显稳定 error code，并给出安全的空投影；自由文本拒绝详情绝不外泄。repository / registry / projector
  * 等基础设施或编程异常照常传播，绝不伪装成 planning 失败。
@@ -79,8 +79,8 @@ public final class ModelRequestDebugService {
   /**
    * 按草稿 model / environment 现算一次结构化 Debug 投影；不存在的 Thread 由 {@link HarnessRuntime} 以 typed 异常拒绝。
    *
-   * <p>执行根的 {@code environmentName} 为 null 表示草稿未选择 Environment；子线程忽略草稿环境并读取执行根当前环境。 草稿保留 Agent 引用与
-   * Goal，且绝不写回 EntryPath。
+   * <p>执行根的 {@code environmentName} 为 null 表示草稿未选择 Environment；子线程忽略草稿环境并读取执行根当前环境。 草稿保留 Agent 引用，
+   * 且绝不写回 EntryPath。
    */
   public HarnessModelRequestDebugDTO getModelRequestDebug(
       UUID threadId, ModelSelection model, String environmentName) {

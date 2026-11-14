@@ -1188,7 +1188,6 @@ public abstract class HarnessStoreEntryTreeContract {
   @Test
   void loadBranchSettingsAppliesOpenTurnStartImmediately() {
     Baseline baseline = seedThreadBaseline(store);
-    UUID goal = TestIds.id(47L);
     UUID openTurnStart =
         store.transaction(
             tx -> {

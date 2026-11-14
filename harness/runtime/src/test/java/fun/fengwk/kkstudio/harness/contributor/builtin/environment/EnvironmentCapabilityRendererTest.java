@@ -147,8 +147,9 @@ class EnvironmentCapabilityRendererTest {
   }
 
   /**
-   * 验证 FS_GREP 动作渲染：保留 pattern，按严格顺序追加字面量 (" as literal text")、忽略大小写 (" ignoring case")、多行 ("
-   * across lines") 和路径 (" in " + path)，并省略 include、limit、timeout_seconds 等执行控制参数。
+   * 验证 FS_GREP 动作渲染：保留 pattern，按严格顺序追加字面量 (" as literal text")、忽略大小写 (" ignoring case")、路径 (" in "
+   * + path) 与 glob 作用域 (" within files matching " + glob)，并省略 limit、timeout_seconds 等执行控制参数。换行匹配由
+   * pattern 自身表达，没有独立开关。
    */
   @Test
   void fsGrepRendersPatternAndSemanticFlagsInStrictOrder() {
@@ -170,32 +171,30 @@ class EnvironmentCapabilityRendererTest {
         Optional.of("search for TODO ignoring case"),
         renderer.render(request("fs_grep", "{\"pattern\":\"TODO\",\"ignore_case\":true}")));
 
-    // pattern + multiline
-    assertEquals(
-        Optional.of("search for TODO across lines"),
-        renderer.render(request("fs_grep", "{\"pattern\":\"TODO\",\"multiline\":true}")));
-
     // pattern + path
     assertEquals(
         Optional.of("search for TODO in src"),
         renderer.render(request("fs_grep", "{\"pattern\":\"TODO\",\"path\":\"src\"}")));
 
-    // 全部语义标志与 include 作用域按严格顺序保留，同时忽略 limit/timeout_seconds
+    // 含换行的 pattern 逐字渲染：跨行匹配不再有独立开关。
+    assertEquals(
+        Optional.of("search for TODO\nFIXME"),
+        renderer.render(request("fs_grep", "{\"pattern\":\"TODO\\nFIXME\"}")));
+
+    // 全部语义标志与 glob 作用域按严格顺序保留，同时忽略 limit/timeout_seconds
     assertEquals(
         Optional.of(
-            "search for TODO as literal text ignoring case across lines in src within files matching *.java"),
+            "search for TODO as literal text ignoring case in src within files matching *.java"),
         renderer.render(
             request(
                 "fs_grep",
-                "{\"pattern\":\"TODO\",\"literal\":true,\"ignore_case\":true,\"multiline\":true,\"path\":\"src\",\"include\":\"*.java\",\"limit\":100,\"timeout_seconds\":30}")));
+                "{\"pattern\":\"TODO\",\"literal\":true,\"ignore_case\":true,\"path\":\"src\",\"glob\":\"*.java\",\"limit\":100,\"timeout_seconds\":30}")));
 
     // 显式为 false 的语义标志不被追加
     assertEquals(
         Optional.of("search for TODO"),
         renderer.render(
-            request(
-                "fs_grep",
-                "{\"pattern\":\"TODO\",\"literal\":false,\"ignore_case\":false,\"multiline\":false}")));
+            request("fs_grep", "{\"pattern\":\"TODO\",\"literal\":false,\"ignore_case\":false}")));
   }
 
   /**

@@ -74,7 +74,7 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。模�
 
 子代理运行中状态通过工具进度显示，结果卡可进入对应子 Thread。并发额度已满时任务不会启动，tool_result 明确返回 `not started: the subagent concurrency limit is reached; retry in a later batch`。父 Thread 停止会按执行树规则停止子代理，并将父 task 工具结果持久化为取消。
 
-`NOTIFY_PARENT`、异步受理回执及 `SUBAGENT_RESULT` 通知链仍保留给异步任务使用；同步 task 不走该通知交付路径。
+`NOTIFY_PARENT` 与 `SUBAGENT_RESULT` 通知链属于 `AgentTaskService` 对内部 `async` 请求的交付方式；模型可见的 task 工具始终同步等待子 Thread，结果经 `task.result` 返回，不走该通知路径。
 
 任务参数、Thread 续接、`max_turns` 软预算与 Join 幂等行为如下：新任务创建子 Thread；thread_id 在原历史上继续，允许切换 Agent，采用目标配置和权限。继续由子 Thread 的持久父发起，以不可变父子关系验证身份，并复验父 head 与停止边界。向仍执行的子追加输入会排队，等下一次 turn 边界。max_turns 是阶段汇报软预算：达到后由 Runtime 以 `TASK_BUDGET` 通知注入提醒。
 
@@ -84,13 +84,13 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。模�
 
 从历史边界 fork 的 Thread 是独立执行根：分支 fork 的 head 是一个只记录 `mode`/切点的新 `FORK` Entry，会话 fork 则把切点处的有效上下文复制到新 Session，两者都追加固定英文 FORK 通知（只陈述事实）。它不继承源 Thread 的待处理命令、子执行或 Join 订阅；原有子任务之后的回执仍交给原父 Thread，新分支不能通过旧 thread_id 接管原有子执行，已在分叉前进入共享历史的回执仍可见。
 
-异步委派仍保留 `task.accepted` 结构化回执（含 thread_id、session_id、subagent_type 与幂等元数据）；同步 task 的运行中进度与终态则以 `task.result` details 表达，状态为 running、completed、failed 或 cancelled。
+task 的进度与终态都经 `task.result` details 表达：运行中为 running，终态为 completed、failed 或 cancelled；details 携带 thread_id、session_id、subagent_type 与本次是否回放。
 
 完成消息结构包含 thread_id、本次 Agent、状态、本次任务原文及结果。失败时分离 error 和 partial_result。正文正确转义；模型的 `<error>` 详情最多 1000 个 Unicode 码点（含英文 ` [TRUNCATED]` 标记、转义前计数、不拆代理对），任务原文、成功报告与普通 partial_result 不截断；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
 
 同步 task 的最终 ToolResult 直接包含 Join 冻结的报告或错误，不另向父 Thread 注入 `SUBAGENT_RESULT`。Join 只有在子输入已应用、子本地流程结束、没有未完成直接子 Join、待处理输入或未确认退出时才冻结；停止路径也遵循同一收敛条件。终态冻结与父 Thread Work 唤醒在同一事务提交，等待中的工具执行线程通过子 Thread version change 订阅后重读 Join；订阅先于查询，避免错过终态唤醒。父停止会中断等待的工具执行，并在 Stop 事务中将运行中的 task Invocation 物化为 CANCELLED。
 
-异步通知交付仍把冻结结果与父 `NOTIFICATION` 命令在同一事务提交：父为 `RUNNABLE` 时请求 THREAD wake；父为 `STOPPED` 时通知直接固化进历史。
+`AgentTaskService` 对内部 `async` 请求以 `NOTIFY_PARENT` 交付：冻结结果与父 `NOTIFICATION` 命令在同一事务提交，父为 `RUNNABLE` 时请求 THREAD wake，父为 `STOPPED` 时通知直接固化进历史。
 
 ### 持久义务与交付
 

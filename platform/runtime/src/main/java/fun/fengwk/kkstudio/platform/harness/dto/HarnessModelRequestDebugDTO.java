@@ -17,7 +17,7 @@ import java.util.List;
  *
  * <p>顶层是现算的下一次请求预览（{@code kind = NEXT_REQUEST_PREVIEW}）：它与正式 Turn 复用同一套
  * Agent/Environment/Tool/Skill 解析纯函数，不检查 branch HEAD、不发布 Package、不触发 Daemon sync，也绝不冒充历史请求。顶层
- * {@code model}/{@code environmentName} 来自本次请求的草稿选择，Agent 引用与 Goal 仍取自 branch settings；规划结果只按草稿选择
+ * {@code model}/{@code environmentName} 来自本次请求的草稿选择，Agent 引用仍取自 branch settings；规划结果只按草稿选择
  * 现算，不写回任何持久事实。活动 ModelInvocation 的冻结 canonical ProviderRequest 只出现在可空的 {@link FrozenInvocationDTO}
  * 中，且始终按原始 snapshot 与原路径物化，与草稿选择无关；已结束 Turn 的 Invocation 行已被删除，因此那里 不会有残留。
  *

@@ -32,6 +32,6 @@ public class HarnessStoppedThreadReceiptDTO {
   /** 该 Thread 本次取消的命令总数（非负整数）。 */
   private Integer cancelledCommandCount;
 
-  /** 该 Thread 被取消的人工 USER_MESSAGE / GOAL，按 sequence 升序。 */
+  /** 该 Thread 被取消的人工 USER_MESSAGE，按 sequence 升序。 */
   private List<HarnessCancelledInputDTO> cancelledInputs = List.of();
 }

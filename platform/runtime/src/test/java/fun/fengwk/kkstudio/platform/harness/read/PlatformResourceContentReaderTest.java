@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.harness.read;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -137,10 +138,13 @@ class PlatformResourceContentReaderTest {
               Function<InputStream, String> callback = invocation.getArgument(2);
               return callback.apply(new ByteArrayInputStream(new byte[] {0}));
             });
-    assertTrue(
-        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId))
-            .getMessage()
-            .contains("binary"));
+    PlatformReadException binary =
+        assertThrows(PlatformReadException.class, () -> read(sessionId, blobId));
+    assertEquals(PlatformReadException.Kind.NOT_TEXT, binary.kind());
+    assertEquals(
+        "resource is a binary file (it contains NUL bytes); read supports text files, directories"
+            + " and supported media.",
+        binary.getMessage());
   }
 
   /** 测试意图：缺少 MIME 元数据时按普通文本读取，避免空类型触发媒体送达路径。 */
