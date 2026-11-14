@@ -292,3 +292,15 @@ func TestUpload_CommitAndPutFailureBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func waitUntil(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("condition not reached")
+}
