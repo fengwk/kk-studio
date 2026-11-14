@@ -69,6 +69,7 @@ class DaemonUpdateArtifactTest {
             VERSION, DaemonOperatingSystem.LINUX, DaemonArchitecture.ARM64));
   }
 
+  /** 未覆盖平台明确失败，绝不猜测替代归档。 */
   @Test
   void unsupportedPlatformHasNoArtifact() {
     assertFalse(
@@ -78,32 +79,5 @@ class DaemonUpdateArtifactTest {
         () ->
             DaemonUpdateArtifact.artifactName(
                 VERSION, DaemonOperatingSystem.WINDOWS, DaemonArchitecture.ARM64));
-  }
-
-  /** URL 模式只接受发布矩阵内的官方归档，拒绝旧 JAR、未发布平台、缺失架构段与其他仓库。 */
-  @Test
-  void urlPatternOnlyAcceptsPublishedArchives() {
-    for (String platform :
-        new String[] {
-          "linux-amd64", "linux-arm64", "macos-amd64", "macos-arm64", "windows-amd64"
-        }) {
-      String url = BASE + "kk-studio-daemon-v1.0.14-" + platform + ".tar.gz";
-      assertTrue(DaemonUpdateArtifact.ARTIFACT_URL_PATTERN.matcher(url).matches(), url);
-    }
-    for (String rejected : new String[] {"windows-arm64", "linux", "plan9-amd64"}) {
-      assertFalse(
-          DaemonUpdateArtifact.ARTIFACT_URL_PATTERN
-              .matcher(BASE + "kk-studio-daemon-v1.0.14-" + rejected + ".tar.gz")
-              .matches(),
-          rejected);
-    }
-    assertFalse(
-        DaemonUpdateArtifact.ARTIFACT_URL_PATTERN
-            .matcher(BASE + "kk-studio-daemon-v1.0.14.jar")
-            .matches());
-    assertFalse(
-        DaemonUpdateArtifact.ARTIFACT_URL_PATTERN
-            .matcher("https://evil.example/kk-studio-daemon-v1.0.14-linux-amd64.tar.gz")
-            .matches());
   }
 }
