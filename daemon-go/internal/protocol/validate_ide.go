@@ -226,12 +226,12 @@ func validateIDEResult(r *IdeResult) error {
 
 func validateFailedIDEResult(r *IdeResult) error {
 	if r.Revision != nil {
-		if hasIDESnapshotFields(r) {
+		if hasIDESnapshotState(r) {
 			return invalid("failed IDE result with a snapshot must only declare code, message, revision and views")
 		}
 	} else if len(r.Views) > 0 {
 		return invalid("ideResult.revision is required with views")
-	} else if hasIDESnapshotFields(r) {
+	} else if hasIDESnapshotState(r) {
 		return invalid("failed IDE result must only declare code and message")
 	}
 	if r.Code == nil || !ideCodePattern.MatchString(r.GetCode()) {
@@ -241,7 +241,7 @@ func validateFailedIDEResult(r *IdeResult) error {
 }
 
 func validateIDEDirectoryListing(r *IdeResult) error {
-	if r.Revision != nil || len(r.Views) > 0 || r.ViewId != nil || r.BrowserSessionId != nil || r.EventNodeId != nil || r.ConnectionId != nil || r.ClaimId != nil || r.BindingEpoch != nil || r.Directory != nil || r.WorkspacePath != nil {
+	if r.Revision != nil || len(r.Views) > 0 || hasIDEViewState(r) {
 		return invalid("directory listing result must not contain view or snapshot fields")
 	}
 	d := r.DirectoryListing
@@ -256,7 +256,11 @@ func validateIDEDirectoryListing(r *IdeResult) error {
 	if d.Truncated == nil || len(d.Children) > 1000 {
 		return invalid("directory listing requires truncated and at most 1000 children")
 	}
-	for _, child := range d.Children {
+	return validateDirectoryEntries(d.Children)
+}
+
+func validateDirectoryEntries(children []*IdeDirectoryEntry) error {
+	for _, child := range children {
 		if child == nil {
 			return invalid("directoryEntry is invalid")
 		}
@@ -330,9 +334,14 @@ func validateIDEBinding(r *IdeResult) error {
 	return nil
 }
 
-// hasIDESnapshotFields reports whether the result declares per-view snapshot or binding state.
-func hasIDESnapshotFields(r *IdeResult) bool {
-	return r.ViewId != nil || r.BrowserSessionId != nil || r.EventNodeId != nil || r.ConnectionId != nil || r.ClaimId != nil || r.BindingEpoch != nil || r.Directory != nil || r.WorkspacePath != nil || r.DirectoryListing != nil
+// hasIDEViewState reports whether the result declares view identity, binding or directory state.
+func hasIDEViewState(r *IdeResult) bool {
+	return r.ViewId != nil || r.BrowserSessionId != nil || r.EventNodeId != nil || r.ConnectionId != nil || r.ClaimId != nil || r.BindingEpoch != nil || r.Directory != nil || r.WorkspacePath != nil
+}
+
+// hasIDESnapshotState reports whether the result carries view state or a directory listing.
+func hasIDESnapshotState(r *IdeResult) bool {
+	return hasIDEViewState(r) || r.DirectoryListing != nil
 }
 
 // hasIDEBindingFields reports whether the result declares a view binding without its view id.
