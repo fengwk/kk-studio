@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -16,10 +17,12 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -93,8 +96,14 @@ class ConfigSyncApplierTest {
           new ConfigSyncFixtures.AgentDependencyPlugin(DEPENDENT_PLUGIN_ID),
           new ConfigSyncFixtures.FailingAgentDeclarationPlugin("broken.plugin"));
 
+  private final JdbcClient jdbcClient = mock(JdbcClient.class);
+  private final JdbcClient.StatementSpec importLock = mock(JdbcClient.StatementSpec.class);
+  private final JdbcClient.MappedQuerySpec<Boolean> importLockResult =
+      mock(JdbcClient.MappedQuerySpec.class);
+
   private final ConfigSyncApplier applier =
       new ConfigSyncApplier(
+          jdbcClient,
           providerService,
           modelRepository,
           modelService,
@@ -142,7 +151,14 @@ class ConfigSyncApplierTest {
         List.of());
   }
 
-  /** 合成依赖插件：普通值里的 Agent 名称字段由测试显式给出。 */
+  @BeforeEach
+  void allowImportLock() {
+    when(jdbcClient.sql(anyString())).thenReturn(importLock);
+    when(importLock.param(any())).thenReturn(importLock);
+    when(importLock.query(Boolean.class)).thenReturn(importLockResult);
+    when(importLockResult.single()).thenReturn(true);
+  }
+
   private static Agent existingAgent(String name) {
     Agent agent = Agent.builder().name(name).version(0L).build();
     return agent;
@@ -222,6 +238,13 @@ class ConfigSyncApplierTest {
         List.of());
 
     // 导入使用显式 upsert 命令恢复文件事实，不区分 create/update，不读取 repository 判断存在性。
+    // 固定导入锁必须先于任何资源 upsert：否则互逆数组顺序仍会先拿到互逆行锁。
+    InOrder order = Mockito.inOrder(jdbcClient, providerService);
+    order.verify(jdbcClient).sql(contains("pg_advisory_xact_lock"));
+    order.verify(providerService).importProvider(created.properties());
+    order.verify(providerService).importProvider(existing.properties());
+    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_NAMESPACE);
+    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_KEY);
     verify(providerService).importProvider(created.properties());
     verify(providerService).importProvider(existing.properties());
     verify(providerService, never()).createProvider(any());

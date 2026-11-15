@@ -182,6 +182,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
 
     applier =
         new ConfigSyncApplier(
+            jdbcClient,
             providerService,
             mock(ModelRepository.class),
             mock(ModelService.class),
