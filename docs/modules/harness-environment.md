@@ -179,7 +179,7 @@ Studio -> IDE_LEASE(round, bindings)
 - `ready_metadata`：最后接受的 READY 宿主 metadata，断线保留。实际 Daemon 版本只取此上报事实。
 - `recent_events`：最近 200 条去敏、有界运维事件，包括更新失败；不作为锁或完整审计账本。
 
-`READY` 携带宿主侧的环境元数据与当前运行状态。环境元数据（`HostInfo`）只包含目标操作系统、CPU 架构、时区、Daemon 进程用户、用户 HOME 与操作系统临时目录，不包含卡片备注或可编辑配置。运行状态（`RuntimeStatus`）由 revision 与状态详情组成：
+`READY` 携带宿主侧的环境元数据与当前运行状态。环境元数据（`HostInfo`）只包含目标操作系统、CPU 架构、时区、Daemon 进程用户、用户 HOME 与操作系统临时目录，不包含卡片备注或可编辑配置。时区是 IANA 区域名（如 `Asia/Shanghai`）或 UTC 偏移（`UTC`、`UTC+08:00`、`UTC-03:30` 这类 `UTC±HH:MM`，偏移不超过 18 小时）：Unix 上取自 `TZ` 或 `/etc/localtime` 指向的区域名，取不到时退回当前偏移；Windows 只上报当前偏移。运行状态（`RuntimeStatus`）由 revision 与状态详情组成：
 
 ```text
 runtimeStatus: {
