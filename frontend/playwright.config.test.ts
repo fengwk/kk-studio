@@ -147,7 +147,7 @@ describe('test file matching coverage and exclusivity', () => {
     return true
   }
 
-  // 验证 browser-tests 下全部 45 个测试文件被项目划分且互不重叠
+  // 验证 browser-tests 下全部 46 个测试文件被项目划分且互不重叠
   it('maps every browser test file to exactly one project with zero overlap or omission', () => {
     const browserTestsDir = path.resolve(__dirname, 'browser-tests')
     const allTestFiles = fs
@@ -155,13 +155,19 @@ describe('test file matching coverage and exclusivity', () => {
       .filter((file) => (file.endsWith('.pw.ts') || file.endsWith('.browser.ts')) && file !== 'fixture.ts')
       .sort()
 
-    expect(allTestFiles.length).toBe(45)
+    expect(allTestFiles.length).toBe(46)
     expect(allTestFiles).toContain('custom-message-queue.pw.ts')
+    expect(allTestFiles).toContain('mermaid.pw.ts')
 
     const projects = playwrightConfig.projects ?? []
     expect(
       projects
         .filter((project) => matchesProject('custom-message-queue.pw.ts', project))
+        .map((project) => project.name),
+    ).toEqual(['layout'])
+    expect(
+      projects
+        .filter((project) => matchesProject('mermaid.pw.ts', project))
         .map((project) => project.name),
     ).toEqual(['layout'])
     for (const testFile of allTestFiles) {
