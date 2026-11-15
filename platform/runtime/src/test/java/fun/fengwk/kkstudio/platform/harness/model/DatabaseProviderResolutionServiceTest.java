@@ -46,6 +46,8 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicProviderAdapter;
+import fun.fengwk.kkstudio.harness.model.provider.impl.transport.JdkHttpSseTransport;
 import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderConfigurationCodec;
 import fun.fengwk.kkstudio.platform.catalog.provider.ProviderRepository;
@@ -55,6 +57,7 @@ import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobContent;
 import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
@@ -577,6 +580,68 @@ class DatabaseProviderResolutionServiceTest {
             ProviderImageBlock.class,
             resolved.effectiveRequest().messages().get(0).contents().get(1));
     assertEquals("data:image/png;base64,AAEC", image.source());
+  }
+
+  /** 资源物化必须保留工具基线事实，否则真正发送的 Anthropic 请求会丢失 deferred-tool lane。 */
+  @Test
+  void resolvePreservesBaselineClientToolFactThroughResourceMaterialization() {
+    when(repository.getByName(PROVIDER_NAME))
+        .thenReturn(provider(ProviderType.ANTHROPIC, ENDPOINT));
+    ProviderAdapter adapter =
+        new AnthropicProviderAdapter(mock(JdkHttpSseTransport.class), "test-key");
+    DatabaseProviderResolutionService resolution =
+        resolution(factory(ProviderType.ANTHROPIC, PromptCacheRetention.NONE, adapter));
+    ModelDescriptor model =
+        new ModelDescriptor(
+            PROVIDER_NAME,
+            "model",
+            "model",
+            Set.of(ModelInputModality.TEXT),
+            true,
+            false,
+            true,
+            false);
+    ProviderMessage message =
+        new ProviderMessage(
+            ProviderMessageRole.USER,
+            List.of(
+                new ProviderResourceBlock(
+                    new UUID(0L, 1L),
+                    "scan.txt",
+                    null,
+                    null,
+                    "tiny preview",
+                    null,
+                    null,
+                    null,
+                    null,
+                    null)));
+    ProviderToolDefinition tool =
+        new ProviderToolDefinition("read", "Read a file", "{\"type\":\"object\"}");
+    for (boolean baseline : new boolean[] {true, false}) {
+      ProviderRequest persisted =
+          new ProviderRequest(
+              model,
+              new ModelVariant("default", null, PromptCacheRetention.NONE, null),
+              1024,
+              "Test system instruction.",
+              List.of(message),
+              List.of(tool),
+              ProviderCacheControl.none(),
+              baseline);
+      ProviderResolutionService.ResolvedExecution resolved =
+          resolution.resolve(ProviderType.ANTHROPIC, persisted);
+      assertEquals(baseline, resolved.effectiveRequest().baselineHasClientTools());
+      assertEquals(persisted.model(), resolved.effectiveRequest().model());
+      assertEquals(persisted.tools(), resolved.effectiveRequest().tools());
+      assertEquals(persisted.cacheControl(), resolved.effectiveRequest().cacheControl());
+      assertTrue(
+          resolved.effectiveRequest().messages().stream()
+              .flatMap(value -> value.contents().stream())
+              .noneMatch(ProviderResourceBlock.class::isInstance));
+      String body = new String(resolved.encodeRequestBody(), StandardCharsets.UTF_8);
+      assertEquals(baseline, body.contains("\"name\":\"__kk_deferred_placeholder__\""));
+    }
   }
 
   /** 意图：adapter 未声明能力时图片不得被降级成文本描述，必须在读取任何存储内容之前显式失败。 */
