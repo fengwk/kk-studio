@@ -63,7 +63,8 @@ function buildMessage(appendedRows: number): TextDialogueMessage {
       '普通段落。',
       '',
       '```mermaid',
-      'graph TD; A-->B',
+      // 允许浏览器用例在真实 Markdown → Mermaid 路径注入不同图源。
+      new URLSearchParams(window.location.search).get('mermaid') ?? 'graph TD; A-->B',
       '```',
       '',
       WIDE_TABLE,
