@@ -105,7 +105,7 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
             request.outputTokens(),
             request.systemInstruction(),
             // 每次 attempt 物化 durable Resource：durable 请求只含 blobId/name/preview，内联 media 仅存在于有效请求。
-            // 内联位置能力来自当前 adapter：协议或连接配置不支持的媒体一律退化为文本回退。
+            // 内联媒体能力来自当前 adapter，输入能力与大小校验必须在发送前完成。
             resourceMaterializer.materialize(
                 request.messages(), request.model().inputModalities(), adapter.mediaCapabilities()),
             request.tools(),

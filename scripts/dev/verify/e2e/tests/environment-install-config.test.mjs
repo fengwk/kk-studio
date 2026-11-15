@@ -70,6 +70,8 @@ test('environment card-config case exercises PUT CAS persistence, version advanc
           || Array.isArray(config)
           || Object.keys(config).some((key) => !['studioUrl', 'bashExecutable', 'lsp', 'proxyUrl'].includes(key))
           || config.studioUrl !== 'http://127.0.0.1:18081'
+          || (config.lsp != null && Object.values(config.lsp.servers).some((server) =>
+            !Array.isArray(server.extensions) || server.extensions.length === 0))
         ) {
           throw problemError(400, 'validation', 'environment daemonConfig is invalid', path)
         }
@@ -93,6 +95,11 @@ test('environment card-config case exercises PUT CAS persistence, version advanc
   await getCase(CASE_ID).run(ctx)
 
   assert.equal(version, '2', 'create starts at zero and both explicit PUTs advance exactly once')
+  const rejectedExtensions = requests
+    .filter((request) => request.method === 'PUT' && request.body?.daemonConfig?.lsp?.servers?.jdtls)
+    .map((request) => request.body.daemonConfig.lsp.servers.jdtls.extensions)
+    .filter((extensions) => !Array.isArray(extensions) || extensions.length === 0)
+  assert.deepEqual(rejectedExtensions, [undefined, null, []], 'matrix must exercise all empty-extension forms')
   assert.equal(saved.lsp.servers.jdtls.command[0], '/usr/bin/jdtls')
   assert.equal(note, 'e2e environment note')
   assert.equal(deleted, true, 'case must delete the environment it created')

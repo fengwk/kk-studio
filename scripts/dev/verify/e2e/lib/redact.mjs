@@ -6,10 +6,10 @@ const MASK = '[REDACTED]'
 
 // 凭据类键名（TEST_MINIMAX_*、各类 *_KEY/*_TOKEN/*_PASSWORD）。键名本身保留，
 // 只替换其后同一赋值/JSON 字段里的值；普通键（如 baseUrl）原样保留。
-const SECRET_KEY = '[A-Za-z0-9_]*(?:API_?KEY|ACCESS_?KEY|SECRET_?KEY|PASSWORD|GATEWAY_?TOKEN|DAEMON_?TOKEN|TOKEN)[A-Za-z0-9_]*'
+const SECRET_KEY = '[A-Za-z0-9_]*(?:API_?KEY|ACCESS_?KEY|SECRET_?KEY|PASSWORD|GATEWAY_?TOKEN|DAEMON_?TOKEN|TOKEN|AUTHORIZATION|CREDENTIAL|SECRET)[A-Za-z0-9_]*'
 const SECRET_KEY_PATTERN = new RegExp(`^${SECRET_KEY}$`, 'i')
 const SECRET_KEY_VALUE_PATTERN = new RegExp(
-  `("?${SECRET_KEY}"?)\\s*[:=]\\s*("[^"\\n]*"|[^\\s",}]+)`,
+  String.raw`("?${SECRET_KEY}"?)\s*[:=]\s*("(?:\\.|[^"\\\n])*"|[^\s",}]+)`,
   'gi',
 )
 const AUTHORIZATION_PATTERN = /(Authorization\s*:\s*)(Bearer\s+)?\S+/gi

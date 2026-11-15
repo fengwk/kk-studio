@@ -646,7 +646,7 @@ data（Badge、Mono/Code、KeyValue）、layout（Panel、Toolbar），
 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) portal 到 body，提供焦点陷阱与关闭后
 焦点归还、栈顶 Escape（含 IME 与 defaultPrevented 守卫）与遮罩点击关闭，pending 时禁止 Escape、
 遮罩与关闭按钮。普通确认使用 `ConfirmActionModal`，复杂表单使用 `Dialog` 的
-`modal-body` 与 `modal-footer`；Catalog 资源编辑与删除确认等已迁移的弹窗通过
+`modal-body` 与 `modal-footer`；Catalog 资源编辑与删除确认等弹窗通过
 `modal-touch-target` 在窄屏提供 44px 操作触区、
 安全区留白和正文滚动，弹窗内 Select 的 portal 选项也遵循相同触区。
 [`NumberInput`](../../frontend/src/shared/ui/controls/NumberInput.tsx) 是整数输入

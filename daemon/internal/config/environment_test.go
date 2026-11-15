@@ -65,6 +65,28 @@ func TestBuildEnvironmentConfigPreservesBaseAndServerOrder(t *testing.T) {
 	}
 }
 
+// Identity normalization must retain unknown fields and invalid server entries for validation.
+func TestCanonicalConfigurationPreservesRejectedSnapshotFields(t *testing.T) {
+	if CanonicalConfiguration(nil) != nil {
+		t.Fatal("an absent snapshot must stay absent")
+	}
+	input := &protocol.DaemonConfiguration{StudioUrl: "https://studio.example/", Lsp: &protocol.LspConfiguration{}}
+	unknown := []byte{0x80, 0x01, 0x01}
+	input.Lsp.ProtoReflect().SetUnknown(unknown)
+	canonical := CanonicalConfiguration(input)
+	if canonical.Lsp == nil || !slices.Equal(canonical.Lsp.ProtoReflect().GetUnknown(), unknown) {
+		t.Fatal("normalization discarded unknown LSP fields")
+	}
+	input.Lsp.ProtoReflect().SetUnknown(nil)
+	if CanonicalConfiguration(input).Lsp != nil || input.Lsp == nil {
+		t.Fatal("empty LSP identity must be absent without mutating the input")
+	}
+	input.Lsp.Servers = []*protocol.LspServer{nil}
+	if len(CanonicalConfiguration(input).GetLsp().GetServers()) != 1 {
+		t.Fatal("normalization discarded an invalid server entry")
+	}
+}
+
 // BuildEnvironmentConfig accepts a complete snapshot without an optional LSP block.
 func TestBuildEnvironmentConfigAllowsOptionalLSP(t *testing.T) {
 	input := validEnvironmentConfig(t)

@@ -76,7 +76,7 @@ test('test intent: neither the compose file nor the runner references TEST_MINIM
 
 test('test intent: container logs entering reports pass the redaction helper', () => {
   assert.ok(MATRIX_RUNNER.includes('maybeCopyDistributedContainerLogs(runDir)'))
-  assert.ok(MATRIX_RUNNER.includes('redactSecrets(logs)'))
+  assert.ok(MATRIX_RUNNER.includes('writeReportArtifact(path.join(dest, `distributed-${service}.log`), logs)'))
 })
 
 // The static validator plus compose must encode the A/B isolation.

@@ -24,13 +24,13 @@ test('report JSON masks nested strings before encoding and preserves numeric fac
   const secret = randomUUID()
   const file = path.join(directory, 'diagnostic.json')
   writeReportArtifact(file, JSON.stringify({
-    error: `upstream body: ${JSON.stringify({ API_KEY: secret })}`,
-    nested: [{ apiKey: secret, password: secret, inputTokens: 42, configured: false }],
+    error: `upstream body: ${JSON.stringify({ API_KEY: `prefix\"${secret}`, Authorization: `Bearer ${secret}` })}`,
+    nested: [{ apiKey: secret, Authorization: `Bearer ${secret}`, password: secret, inputTokens: 42, configured: false }],
   }))
   const text = readFileSync(file, 'utf8')
   assert.equal(text.includes(secret), false, 'JSON must not expose credential values')
   const value = JSON.parse(text)
-  assert.deepEqual(value.nested, [{ apiKey: '[REDACTED]', password: '[REDACTED]', inputTokens: 42, configured: false }])
+  assert.deepEqual(value.nested, [{ apiKey: '[REDACTED]', Authorization: '[REDACTED]', password: '[REDACTED]', inputTokens: 42, configured: false }])
   assert.match(value.error, /\[REDACTED\]/)
 
   const binary = Uint8Array.from([0, 255, 3, 128])

@@ -9,7 +9,7 @@ registerCase({
   id: 'environment.card_config_cas_roundtrip',
   level: 'L1',
   title: 'Environment 卡片 daemonConfig PUT CAS 持久化与往返',
-  docs: 'POST /api/platform/environments 必须携带 name/note/完整 daemonConfig；PUT /api/platform/environments/{id} 用 expectedVersion 整体替换 note+daemonConfig，stale 版本 409，显式成功 PUT（含相同内容）推进版本；非法/缺失 daemonConfig、未知字段、非法 studioUrl 400 且不写入、不回显提交值；GET 返回同一卡片配置且无旧 installConfig',
+  docs: 'POST /api/platform/environments 必须携带 name/note/完整 daemonConfig；PUT /api/platform/environments/{id} 用 expectedVersion 整体替换 note+daemonConfig，stale 版本 409，显式成功 PUT（含相同内容）推进版本；非法/缺失 daemonConfig、未知字段、非法 studioUrl、LSP server 缺失/null/空 extensions 返回 400 且不写入、不回显提交值；GET 返回同一卡片配置',
   async run(ctx) {
     const name = `e2e-card-cfg-${cid().slice(0, 8)}`
     const note = 'e2e environment note'
@@ -75,6 +75,13 @@ registerCase({
       assert(getJson.note === note, `note must round-trip: ${JSON.stringify(getJson)}`)
 
       const invalidBodies = [
+        ...[undefined, null, []].map((extensions) => ({
+          expectedVersion: version,
+          note,
+          daemonConfig: daemonConfigFixture({
+            lsp: { servers: { jdtls: { command: ['/usr/bin/jdtls'], extensions } } },
+          }),
+        })),
         { expectedVersion: version, note, daemonConfig: null },
         { expectedVersion: version, note },
         {
