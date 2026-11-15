@@ -18,6 +18,7 @@ type toolErrorKind uint8
 
 const (
 	toolInputRejected toolErrorKind = iota + 1
+	toolCodecRejected
 	toolRunFailed
 	toolServiceFailed
 )
@@ -38,6 +39,12 @@ func rejectInputWithCode(message, code string) error {
 	return &toolError{kind: toolInputRejected, code: code, message: message}
 }
 
+// failCodec reports content the text codec refuses. It is decided before the tool touches the
+// file, so the message carries its own guidance and no corrective next action is added.
+func failCodec(message string) error {
+	return &toolError{kind: toolCodecRejected, code: "CODEC", message: message}
+}
+
 func failRun(message, code string) error {
 	return &toolError{kind: toolRunFailed, code: code, message: message}
 }
@@ -55,6 +62,8 @@ func toCapabilityErrorResult(id string, err error) runtime.CapabilityResult {
 		switch typed.kind {
 		case toolInputRejected:
 			fact, next = "NOT_EXECUTED", "Correct the arguments to match the tool schema, then call the tool again"
+		case toolCodecRejected:
+			fact, next = "NOT_EXECUTED", ""
 		case toolRunFailed, toolServiceFailed:
 			fact = "UNCERTAIN"
 		}
@@ -77,7 +86,11 @@ func guideText(whatFailed, fact, next string) string {
 		"FAILED":       "The tool ran but failed; side effects may have occurred.",
 		"UNCERTAIN":    "Whether the tool took effect cannot be confirmed.",
 	}[fact]
-	return fmt.Sprintf("%s %s %s", errorSentence(whatFailed), factText, errorSentence(next))
+	text := fmt.Sprintf("%s %s", errorSentence(whatFailed), factText)
+	if next = errorSentence(next); next != "" {
+		text += " " + next
+	}
+	return text
 }
 
 func errorSentence(text string) string {
@@ -95,9 +108,9 @@ func errorSentence(text string) string {
 const verifyEffectNextAction = "Verify whether the intended effect already took place before deciding what to do next"
 
 func classifySearchError(err error) error {
-	var undecodable *search.UndecodableError
-	if errors.As(err, &undecodable) {
-		return codecError(undecodable.Path, undecodable.Err, codecSearch)
+	var rejected *search.RejectedError
+	if errors.As(err, &rejected) {
+		return codecError(rejected.Path, rejected.Err, codecSearch)
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || isFileSystemError(err) {
 		return err

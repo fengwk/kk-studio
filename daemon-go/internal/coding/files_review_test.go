@@ -32,8 +32,9 @@ func TestWriteReviewAndExpectedFile(t *testing.T) {
 	}
 }
 
-// A staging fsync failure leaves the destination unchanged and removes the temporary file.
-func TestAtomicWriteSyncFailureRemovesStaging(t *testing.T) {
+// A failed fsync is reported after the bytes were written: an in-place write leaves no staging
+// file and does not restore the previous content.
+func TestWriteInPlaceReportsSyncFailure(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "target.txt")
 	if err := os.WriteFile(path, []byte("old"), 0o600); err != nil {
@@ -41,12 +42,10 @@ func TestAtomicWriteSyncFailureRemovesStaging(t *testing.T) {
 	}
 	injected := errors.New("injected fsync failure")
 	calls := 0
-	staging := ""
-	err := atomicWriteWithSync(path, []byte("new"), 0o600, func(file *os.File) error {
+	err := writeInPlaceWithSync(path, []byte("new"), true, func(file *os.File) error {
 		calls++
-		staging = file.Name()
-		if err := file.Sync(); err != nil {
-			return err
+		if syncErr := file.Sync(); syncErr != nil {
+			return syncErr
 		}
 		return injected
 	})
@@ -54,11 +53,12 @@ func TestAtomicWriteSyncFailureRemovesStaging(t *testing.T) {
 		t.Fatalf("sync error=%v calls=%d", err, calls)
 	}
 	contents, err := os.ReadFile(path)
-	if err != nil || string(contents) != "old" {
-		t.Fatalf("target contents=%q err=%v", contents, err)
+	if err != nil || string(contents) != "new" {
+		t.Fatalf("contents=%q err=%v", contents, err)
 	}
-	if _, err := os.Stat(staging); !os.IsNotExist(err) {
-		t.Fatalf("staging file remains after fsync failure: %q err=%v", staging, err)
+	entries, err := os.ReadDir(dir)
+	if err != nil || len(entries) != 1 || entries[0].Name() != "target.txt" {
+		t.Fatalf("directory entries=%v err=%v", entries, err)
 	}
 }
 

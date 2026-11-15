@@ -13,8 +13,8 @@ import (
 type SearchOutcome struct {
 	Results            []string
 	Skipped            []string
-	Undecodable        []string
-	UndecodableCount   int
+	Rejected           []string
+	RejectedCount      int
 	IgnoreSkipped      []string
 	IgnoreSkippedCount int
 	Incomplete         bool
@@ -22,17 +22,17 @@ type SearchOutcome struct {
 	LimitReached       bool
 }
 
-// UndecodableError reports a file given directly as path whose text encoding the codec could
-// not decode.
-type UndecodableError struct {
+// RejectedError reports a file given directly as path whose declared text encoding the codec
+// cannot use.
+type RejectedError struct {
 	Path string
 	Err  error
 }
 
-func (e *UndecodableError) Error() string { return e.Err.Error() }
+func (e *RejectedError) Error() string { return e.Err.Error() }
 
 // Unwrap returns the codec failure.
-func (e *UndecodableError) Unwrap() error { return e.Err }
+func (e *RejectedError) Unwrap() error { return e.Err }
 
 // FindContext returns available paths when a deadline expires and a cancellation error when canceled.
 func FindContext(ctx context.Context, root, glob string, limit int) (SearchOutcome, error) {

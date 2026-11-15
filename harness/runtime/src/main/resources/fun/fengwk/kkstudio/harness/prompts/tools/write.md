@@ -6,13 +6,20 @@ Usage:
 - Provide complete content without placeholders such as `...` or omitted sections.
 - `content` replaces the file exactly as provided: line endings are never rewritten, and `write`
   never restores an older newline style.
-- Encoding: an existing file keeps its byte order mark and encoding. Without a byte order mark the
-  standard declaration in `content` decides (for example `<meta charset>` or `# coding:`), and
-  without either the file is written as UTF-8 without a BOM. A declaration that contradicts an
-  existing byte order mark is rejected, and so is dropping the declaration of an existing non-UTF-8
-  file: keep the declaration, or declare the new encoding explicitly to convert the file.
+- Encoding: content that starts with U+FEFF asks for a byte order mark; that character itself is
+  never written as content. An existing file keeps its byte order mark and encoding. Without a byte
+  order mark the standard declaration in `content`, detected after the U+FEFF, decides (for example
+  `<meta charset>` or `# coding:`). A UTF-16 or UTF-32 declaration writes that encoding (a generic
+  label uses little endian) and requires the leading U+FEFF; a legacy encoding must not have it; a
+  UTF-8 declaration or no declaration writes UTF-8, with a BOM only when you asked for one. A
+  declaration that contradicts an existing byte order mark is rejected, and so is dropping the
+  declaration of an existing non-UTF-8 file: keep the declaration, or declare the new encoding
+  explicitly to convert the file.
 - Content that cannot be represented in the target encoding is rejected instead of substituted, and
-  an existing file that `read` cannot decode is never overwritten.
+  an existing file whose declaration the codec cannot use is never overwritten.
+- When the original file could not be decoded losslessly and the saved text still contains U+FFFD
+  (�), the result adds a `Note:` line because those original bytes are lost, and the approval shows
+  the same warning above the diff.
 - `write` supports regular text files only. Directories, devices, FIFOs and binary files are
   rejected before any write.
 - `write` returns a success message only. If you need to inspect the resulting file content, use `read` afterward.

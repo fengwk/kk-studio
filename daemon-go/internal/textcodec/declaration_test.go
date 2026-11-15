@@ -111,12 +111,12 @@ func TestDecodeReadsStandardDeclarations(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			decoded, enc, err := Decode(test.path, test.data)
+			decoded, enc, replaced, err := Decode(test.path, test.data)
 			if err != nil {
 				t.Fatalf("Decode: %v", err)
 			}
-			if string(decoded) != test.wantText {
-				t.Fatalf("text=%q want=%q", decoded, test.wantText)
+			if string(decoded) != test.wantText || replaced != 0 {
+				t.Fatalf("text=%q replaced=%d want=%q", decoded, replaced, test.wantText)
 			}
 			if enc.Name != test.wantName || enc.Source != SourceDeclaration || enc.Declaration != test.declaration || enc.BOM {
 				t.Fatalf("encoding=%#v", enc)
@@ -125,7 +125,8 @@ func TestDecodeReadsStandardDeclarations(t *testing.T) {
 	}
 }
 
-// Declaration-like text outside the standard positions is not a declaration.
+// Declaration-like text outside the standard positions is not a declaration, so the file decodes
+// as the default UTF-8 and shows its undecodable bytes as U+FFFD.
 func TestDecodeIgnoresDeclarationLookalikes(t *testing.T) {
 	gbk := encodeAs(t, "GBK", "中文")
 	for _, test := range []struct {
@@ -146,9 +147,9 @@ func TestDecodeIgnoresDeclarationLookalikes(t *testing.T) {
 		{name: "jsp-after-window", path: "/repo/view.jsp", data: encodeAs(t, "EUC-JP", strings.Repeat("<!-- x -->", 120)+`<%@ page pageEncoding="euc-jp" %>日本語`)},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			var unknown *UnknownEncodingError
-			if _, _, err := Decode(test.path, test.data); !errors.As(err, &unknown) {
-				t.Fatalf("err=%v want an unknown encoding", err)
+			_, enc, _, err := Decode(test.path, test.data)
+			if err != nil || enc.Source != SourceUTF8 {
+				t.Fatalf("encoding=%#v err=%v", enc, err)
 			}
 		})
 	}
@@ -161,7 +162,7 @@ func TestDecodeIgnoresCodingCommentsOutsideTheirFileTypes(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, enc, err := Decode("/repo/"+name, data)
+		_, enc, _, err := Decode("/repo/"+name, data)
 		if err != nil || enc.Source != SourceUTF8 {
 			t.Fatalf("%s encoding=%#v err=%v", name, enc, err)
 		}
@@ -171,7 +172,7 @@ func TestDecodeIgnoresCodingCommentsOutsideTheirFileTypes(t *testing.T) {
 // A byte order mark wins over any declaration in the file.
 func TestDecodePrefersBOMOverDeclaration(t *testing.T) {
 	data := append([]byte{0xef, 0xbb, 0xbf}, []byte(`<html><head><meta charset="gb2312"></head><body>中文</body></html>`)...)
-	decoded, enc, err := Decode("/repo/page.html", data)
+	decoded, enc, _, err := Decode("/repo/page.html", data)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +200,7 @@ func TestDecodeLabelResolution(t *testing.T) {
 		{name: "html-iso-8859-1-is-windows-1252", path: "/repo/page.html", data: encodeAs(t, "windows-1252", `<meta charset="iso-8859-1">€`), wantName: "windows-1252", wantText: `<meta charset="iso-8859-1">€`},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			decoded, enc, err := Decode(test.path, test.data)
+			decoded, enc, _, err := Decode(test.path, test.data)
 			if err != nil {
 				t.Fatalf("Decode: %v", err)
 			}
@@ -210,46 +211,47 @@ func TestDecodeLabelResolution(t *testing.T) {
 	}
 }
 
-// Unknown labels, UTF-16/32 labels without a byte order mark and conflicting
-// declarations each report their own typed error.
+// A label no encoding implements, a label that cannot encode ASCII, and a UTF-16 or UTF-32 label
+// without a byte order mark each refuse the file with their own typed error.
 func TestDecodeRejectsUnusableDeclarations(t *testing.T) {
 	var unsupported *UnsupportedLabelError
-	if _, _, err := Decode("/repo/doc.xml", []byte(`<?xml encoding="klingon"?>x`)); !errors.As(err, &unsupported) || unsupported.Label != "klingon" || unsupported.Declaration != declarationXML {
+	if _, _, _, err := Decode("/repo/doc.xml", []byte(`<?xml encoding="klingon"?>x`)); !errors.As(err, &unsupported) || unsupported.Label != "klingon" || unsupported.Declaration != declarationXML {
 		t.Fatalf("unsupported label err=%v", err)
 	}
+	unsupported = nil
+	// EBCDIC encodings do not write ASCII as ASCII, so a declaration naming one cannot be found.
+	if _, _, _, err := Decode("/repo/doc.xml", []byte(`<?xml encoding="ibm037"?>x`)); !errors.As(err, &unsupported) || unsupported.Label != "ibm037" {
+		t.Fatalf("ASCII-incompatible label err=%v", err)
+	}
 	var conflict *DeclarationConflictError
-	if _, _, err := Decode("/repo/page.html", []byte(`<meta charset="utf-16le">x`)); !errors.As(err, &conflict) || conflict.Declared.Name != "UTF-16LE" {
+	if _, _, _, err := Decode("/repo/page.html", []byte(`<meta charset="Utf-16le">x`)); !errors.As(err, &conflict) || conflict.Declared.Name != "UTF-16LE" || conflict.Label != "Utf-16le" || !strings.Contains(err.Error(), `"Utf-16le"`) {
 		t.Fatalf("UTF-16 label err=%v", err)
 	}
 	conflict = nil
-	if _, _, err := Decode("/repo/page.html", []byte(`<meta charset="gb2312">中文`)); !errors.As(err, &conflict) || conflict.Declared.Name != "GBK" || conflict.Declared.Declaration != declarationHTML {
-		t.Fatalf("conflict err=%v", err)
+	if _, _, _, err := Decode("/repo/doc.xml", []byte(`<?xml encoding="UTF-16"?><root/>`)); !errors.As(err, &conflict) || conflict.Declared.Name != "UTF-16" || conflict.Declared.Declaration != declarationXML {
+		t.Fatalf("UTF-16 family label err=%v", err)
 	}
-	var undecodable *UndecodableError
-	if _, _, err := Decode("/repo/doc.xml", []byte(`<?xml encoding="utf-8"?>`+"\xff")); !errors.As(err, &undecodable) || undecodable.Offset != len(`<?xml encoding="utf-8"?>`) {
-		t.Fatalf("invalid UTF-8 err=%v", err)
-	}
-	undecodable = nil
-	if _, _, err := Decode("/repo/doc.xml", []byte(`<?xml encoding="ascii"?>`+"\x80")); !errors.As(err, &undecodable) || undecodable.Offset != len(`<?xml encoding="ascii"?>`) {
-		t.Fatalf("non-ASCII under an ASCII declaration err=%v", err)
+	// Valid UTF-8 under a legacy declaration is that encoding's text, not a conflict.
+	decoded, enc, _, err := Decode("/repo/page.html", []byte(`<meta charset="gb2312">中文`))
+	if err != nil || enc.Name != "GBK" || enc.Source != SourceDeclaration || !strings.HasPrefix(string(decoded), `<meta charset="gb2312">`) {
+		t.Fatalf("legacy declaration err=%v encoding=%#v text=%q", err, enc, decoded)
 	}
 }
 
 // A legacy declaration over ASCII-only bytes stays lossless.
 func TestDecodeAcceptsASCIIOnlyLegacyFile(t *testing.T) {
-	decoded, enc, err := Decode("/repo/page.html", []byte(`<meta charset="gbk">plain`))
+	decoded, enc, _, err := Decode("/repo/page.html", []byte(`<meta charset="gbk">plain`))
 	if err != nil || enc.Name != "GBK" || string(decoded) != `<meta charset="gbk">plain` {
 		t.Fatalf("text=%q encoding=%#v err=%v", decoded, enc, err)
 	}
 }
 
-// Decoding a declared encoding must reproduce the original bytes.
-func TestDecodeRejectsLossyLegacyBytes(t *testing.T) {
-	declaration := []byte(`<?xml encoding="gbk"?>`)
-	data := append(append([]byte(nil), declaration...), 0x81, 0x20)
-	var undecodable *UndecodableError
-	if _, _, err := Decode("/repo/doc.xml", data); !errors.As(err, &undecodable) || undecodable.Offset != len(declaration) {
-		t.Fatalf("err=%v want offset %d", err, len(declaration))
+// UTF-8 bytes that are not valid under a UTF-8 declaration are shown as U+FFFD, not rejected.
+func TestDecodeReplacesInvalidDeclaredUTF8(t *testing.T) {
+	declaration := []byte(`<?xml encoding="utf-8"?>`)
+	decoded, enc, replaced, err := Decode("/repo/doc.xml", append(append([]byte(nil), declaration...), 0xff))
+	if err != nil || enc.Name != "UTF-8" || string(decoded) != string(declaration)+"\uFFFD" || replaced != 1 {
+		t.Fatalf("err=%v encoding=%#v text=%q replaced=%d", err, enc, decoded, replaced)
 	}
 }
 
@@ -257,7 +259,7 @@ func TestDecodeRejectsLossyLegacyBytes(t *testing.T) {
 func TestDecodeRejectsOversizedDeclaredFile(t *testing.T) {
 	data := append([]byte(`<?xml encoding="gbk"?>`), bytes.Repeat([]byte{'a'}, maxDeclaredSize)...)
 	var tooLarge *TooLargeError
-	if _, _, err := Decode("/repo/doc.xml", data); !errors.As(err, &tooLarge) || tooLarge.Encoding.Name != "GBK" || tooLarge.Size != int64(len(data)) {
+	if _, _, _, err := Decode("/repo/doc.xml", data); !errors.As(err, &tooLarge) || tooLarge.Encoding.Name != "GBK" || tooLarge.Size != int64(len(data)) {
 		t.Fatalf("err=%v", err)
 	}
 }
@@ -276,7 +278,7 @@ func TestLegacyRoundTripIsExact(t *testing.T) {
 	} {
 		name, text := test.name, test.text
 		data := encodeAs(t, name, text)
-		decoded, enc, err := Decode("/repo/data.xml", append([]byte(`<?xml encoding="`+strings.ToLower(name)+`"?>`), data...))
+		decoded, enc, _, err := Decode("/repo/data.xml", append([]byte(`<?xml encoding="`+strings.ToLower(name)+`"?>`), data...))
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
@@ -329,7 +331,7 @@ func TestDeclaredReportsContentDeclaration(t *testing.T) {
 		}
 	}
 	var conflict *DeclarationConflictError
-	if _, _, err := Decode("/repo/page.html", []byte(`<meta charset="utf-16be">x`)); !errors.As(err, &conflict) || conflict.Declared.Name != "UTF-16BE" {
+	if _, _, _, err := Decode("/repo/page.html", []byte(`<meta charset="utf-16be">x`)); !errors.As(err, &conflict) || conflict.Declared.Name != "UTF-16BE" {
 		t.Fatalf("decode err=%v", err)
 	}
 }

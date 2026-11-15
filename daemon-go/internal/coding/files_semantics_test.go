@@ -12,7 +12,8 @@ import (
 func TestWriteEncodingFailureIncludesCharsetAndCodecCode(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "invalid.txt")
 	_, err := Write(path, string([]byte{0xff}), nil)
-	if err == nil || err.Error() != "The new text cannot be encoded in UTF-8: \"\ufffd\" (U+FFFD) on line 1." {
+	want := "The resulting text cannot be encoded in UTF-8: \"\ufffd\" (U+FFFD) on line 1. U+FFFD (�) marks bytes that could not be decoded; replace it with text that UTF-8 can encode."
+	if err == nil || err.Error() != want {
 		t.Fatalf("write encoding error=%v", err)
 	}
 	result := toCapabilityErrorResult("invalid-write", err)

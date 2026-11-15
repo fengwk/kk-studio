@@ -258,7 +258,11 @@ func writeCapability(ctx context.Context, call runtime.CapabilityCall, capabilit
 	if review.NewFile {
 		action = "Created "
 	}
-	result := textResult(call.InvocationID, action+review.Path+" successfully.")
+	message := action + review.Path + " successfully."
+	if review.LossyDecode != nil {
+		message += "\n" + lossyDecodeNote(review.LossyDecode)
+	}
+	result := textResult(call.InvocationID, message)
 	result.Details = mustJSON(map[string]any{"writeReview": review})
 	return result, nil
 }
@@ -400,8 +404,8 @@ func searchResultText(call runtime.CapabilityCall, outcome search.SearchOutcome,
 	if len(outcome.Results) == 0 && outcome.IgnoreSkippedCount > 0 {
 		text = appendNotice(text, "\n", formatHintList("No matches. Not searched because of ignore rules: ", outcome.IgnoreSkipped, outcome.IgnoreSkippedCount))
 	}
-	if outcome.UndecodableCount > 0 {
-		text = appendNotice(text, "\n", formatHintList("Not searched because the text encoding could not be determined: ", outcome.Undecodable, outcome.UndecodableCount))
+	if outcome.RejectedCount > 0 {
+		text = appendNotice(text, "\n", formatHintList("Search incomplete; not searched because the declared text encoding cannot be used: ", outcome.Rejected, outcome.RejectedCount))
 	}
 	return text
 }

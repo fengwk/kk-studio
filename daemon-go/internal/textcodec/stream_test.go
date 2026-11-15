@@ -78,49 +78,61 @@ func TestReaderRejectsBinaryBeforeReading(t *testing.T) {
 	}
 }
 
-// A stream that stops being decodable reports a typed error.
-func TestReaderReportsUndecodableStreams(t *testing.T) {
-	var unknown *UnknownEncodingError
-	reader, err := NewReader("/repo/doc.txt", bytes.NewReader([]byte("ok\n\xd6\xd0")))
-	if err != nil {
-		t.Fatal(err)
+// oneByteReader hands out a single byte per Read, so every sequence is split at its boundary.
+type oneByteReader struct {
+	data   []byte
+	offset int
+}
+
+func (r *oneByteReader) Read(buffer []byte) (int, error) {
+	if r.offset >= len(r.data) {
+		return 0, io.EOF
 	}
-	if got, readErr := readRunes(t, reader); got != "ok\n" || !errors.As(readErr, &unknown) {
-		t.Fatalf("text=%q err=%v", got, readErr)
+	if len(buffer) > 1 {
+		buffer = buffer[:1]
 	}
-	var undecodable *UndecodableError
-	declared := []byte("# coding: utf-8\nok\n\xff")
-	if reader, err = NewReader("/repo/doc.py", bytes.NewReader(declared)); err != nil {
-		t.Fatal(err)
+	buffer[0] = r.data[r.offset]
+	r.offset++
+	return 1, nil
+}
+
+// Streaming and whole-file decoding replace exactly the same sequences, whatever the read sizes.
+func TestReaderReplacesExactlyLikeDecode(t *testing.T) {
+	sequences := [][]byte{
+		{0xe4, 0xb8, 'A'},
+		{0xed, 0xa0, 0x80},
+		{0xc0, 0xaf},
+		{0xe0, 0x80, 0x80},
+		{0xf4, 0x90, 0x80, 0x80},
+		{0xf0, 0x9f},
+		{0x80, 'a'},
+		[]byte("ok\n\xd6\xd0"),
+		{0xff, 0xfe, 0x00, 0xd8, 'a', 0},
+		{0xff, 0xfe, 0x00, 0xd8, 'a'},
+		{0xff, 0xfe, 0x00, 0xdc},
+		{0xff, 0xfe, 'a'},
+		{0xfe, 0xff, 0xd8, 0x00, 0x00, 'a'},
+		{0x00, 0x00, 0xfe, 0xff, 0x00, 0x11, 0x00, 0x00},
+		append([]byte(`<?xml encoding="ascii"?>`), 0x80, 0xff),
+		append([]byte(`<?xml encoding="gbk"?>`), 0x81, 0x20),
 	}
-	for {
-		if _, _, err = reader.ReadRune(); err != nil {
-			break
+	for _, data := range sequences {
+		want, _, _, err := Decode("/repo/doc.txt", data)
+		if err != nil {
+			t.Fatalf("%x: Decode: %v", data, err)
 		}
-	}
-	if !errors.As(err, &undecodable) || undecodable.Offset != len(declared)-1 {
-		t.Fatalf("err=%v", err)
-	}
-	ascii := []byte(`<?xml encoding="us-ascii"?>` + "\x80")
-	if reader, err = NewReader("/repo/doc.xml", bytes.NewReader(ascii)); err != nil {
-		t.Fatal(err)
-	}
-	if got, readErr := readRunes(t, reader); got != `<?xml encoding="us-ascii"?>` || !errors.As(readErr, &undecodable) {
-		t.Fatalf("ASCII text=%q err=%v", got, readErr)
-	}
-	wide := []byte{0xff, 0xfe, 'a', 0, 0x00, 0xdc}
-	if reader, err = NewReader("/repo/doc.txt", bytes.NewReader(wide)); err != nil {
-		t.Fatal(err)
-	}
-	if got, readErr := readRunes(t, reader); got != "a" || !errors.As(readErr, &undecodable) || undecodable.Offset != 4 {
-		t.Fatalf("UTF-16 text=%q err=%v", got, readErr)
-	}
-	odd := []byte{0xfe, 0xff, 0x00, 'a', 0x00}
-	if reader, err = NewReader("/repo/doc.txt", bytes.NewReader(odd)); err != nil {
-		t.Fatal(err)
-	}
-	if got, readErr := readRunes(t, reader); got != "a" || !errors.As(readErr, &undecodable) || undecodable.Offset != 4 {
-		t.Fatalf("UTF-16BE text=%q err=%v", got, readErr)
+		for name, source := range map[string]io.Reader{
+			"buffered": bytes.NewReader(data),
+			"one-byte": &oneByteReader{data: data},
+		} {
+			reader, err := NewReader("/repo/doc.txt", source)
+			if err != nil {
+				t.Fatalf("%x %s: NewReader: %v", data, name, err)
+			}
+			if got := readAllRunes(t, reader); got != string(want) {
+				t.Fatalf("%x %s: text=%q want=%q", data, name, got, want)
+			}
+		}
 	}
 	if len(readAllRunes(t, mustReader(t, "/repo/doc.txt", []byte{0xff, 0xfe}))) != 0 {
 		t.Fatal("an empty UTF-16 document is not empty")
@@ -136,7 +148,8 @@ func mustReader(t *testing.T, path string, data []byte) *Reader {
 	return reader
 }
 
-// A declared legacy encoding is decoded as a whole file before the first rune.
+// A declared legacy encoding is decoded as a whole file before the first rune, and its undecodable
+// bytes are served as the decoder's U+FFFD output.
 func TestReaderDecodesDeclaredLegacyFile(t *testing.T) {
 	data := encodeAs(t, "GBK", "# coding: gbk\nprint(\"中文\")\n")
 	reader, err := NewReader("/repo/script.py", bytes.NewReader(data))
@@ -149,17 +162,25 @@ func TestReaderDecodesDeclaredLegacyFile(t *testing.T) {
 	if got := readAllRunes(t, reader); got != "# coding: gbk\nprint(\"中文\")\n" {
 		t.Fatalf("text=%q", got)
 	}
-	var conflict *DeclarationConflictError
-	if _, err = NewReader("/repo/page.html", strings.NewReader(`<meta charset="gb2312">中文`)); !errors.As(err, &conflict) {
-		t.Fatalf("conflict err=%v", err)
+	// Valid UTF-8 under a legacy declaration is that encoding's text, not a conflict.
+	utf8UnderGBK, err := NewReader("/repo/page.html", strings.NewReader(`<meta charset="gb2312">中文`))
+	if err != nil || utf8UnderGBK.Encoding().Name != "GBK" {
+		t.Fatalf("legacy declaration encoding=%#v err=%v", utf8UnderGBK.Encoding(), err)
 	}
-	var undecodable *UndecodableError
-	if _, err = NewReader("/repo/doc.xml", bytes.NewReader(append([]byte(`<?xml encoding="gbk"?>`), 0x81, 0x20))); !errors.As(err, &undecodable) {
-		t.Fatalf("lossy err=%v", err)
+	lossy, err := NewReader("/repo/doc.xml", bytes.NewReader(append([]byte(`<?xml encoding="gbk"?>`), 0x81, 0x20)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := readAllRunes(t, lossy); got != `<?xml encoding="gbk"?>`+"\uFFFD " {
+		t.Fatalf("lossy text=%q", got)
 	}
 	var unsupported *UnsupportedLabelError
 	if _, err = NewReader("/repo/doc.xml", strings.NewReader(`<?xml encoding="klingon"?>x`)); !errors.As(err, &unsupported) {
 		t.Fatalf("label err=%v", err)
+	}
+	var conflict *DeclarationConflictError
+	if _, err = NewReader("/repo/doc.xml", strings.NewReader(`<?xml encoding="utf-16"?><r/>`)); !errors.As(err, &conflict) {
+		t.Fatalf("conflict err=%v", err)
 	}
 }
 

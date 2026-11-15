@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
@@ -19,12 +20,20 @@ type ExpectedFile struct {
 	SHA256 string
 }
 
+// LossyDecode discloses that the original file could not be decoded losslessly and that the saved
+// text still shows U+FFFD, so the approval diff cannot show the bytes the save rewrites.
+type LossyDecode struct {
+	Encoding         string `json:"encoding"`
+	InvalidSequences int    `json:"invalidSequences"`
+}
+
 type WriteReview struct {
-	Path    string  `json:"path"`
-	Diff    string  `json:"diff"`
-	SHA256  *string `json:"sha256"`
-	NewFile bool    `json:"-"`
-	Content string  `json:"-"`
+	Path        string       `json:"path"`
+	Diff        string       `json:"diff"`
+	SHA256      *string      `json:"sha256"`
+	LossyDecode *LossyDecode `json:"lossyDecode,omitempty"`
+	NewFile     bool         `json:"-"`
+	Content     string       `json:"-"`
 }
 
 var pathLocks sync.Map
@@ -50,49 +59,28 @@ func PreviewWrite(path, content string) (WriteReview, error) {
 	}
 	unlock := lockPath(resolved)
 	defer unlock()
-	if err := rejectNonRegularTarget(resolved); err != nil {
-		return WriteReview{}, err
-	}
-	current, err := os.ReadFile(resolved)
-	if errors.Is(err, os.ErrNotExist) {
-		return previewNewFile(resolved, content)
-	}
+	exists, err := rejectNonRegularTarget(resolved)
 	if err != nil {
 		return WriteReview{}, err
 	}
-	info, err := os.Stat(resolved)
+	pending, err := planWrite(resolved, content, nil, exists)
 	if err != nil {
 		return WriteReview{}, err
 	}
-	if !info.Mode().IsRegular() {
-		return WriteReview{}, rejectInput(fmt.Sprintf("path is not a regular file: %s", resolved))
-	}
-	decoded, existing, err := textcodec.Decode(resolved, current)
-	if err != nil {
-		return WriteReview{}, codecError(resolved, err, codecWrite)
-	}
-	if _, err = encodeWriteContent(resolved, &existing, content); err != nil {
-		return WriteReview{}, err
-	}
-	diff, err := numberedDiff(normalizeEOL(string(decoded)), normalizeEOL(content))
-	if err != nil {
-		return WriteReview{}, err
-	}
-	hashText := sha256Hex(current)
-	return WriteReview{Path: resolved, SHA256: &hashText, Diff: diff}, nil
+	return pending.review, nil
 }
 
-// rejectNonRegularTarget refuses a symbolic link or anything that is not a regular file. A path
-// that does not exist yet is not an error here; the caller decides how to create it.
-func rejectNonRegularTarget(path string) error {
+// rejectNonRegularTarget refuses a symbolic link or anything that is not a regular file, and
+// reports whether the target exists.
+func rejectNonRegularTarget(path string) (bool, error) {
 	info, err := os.Lstat(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
-	return rejectNonRegularInfo(path, info)
+	return true, rejectNonRegularInfo(path, info)
 }
 
 // rejectNonRegularInfo refuses an existing target that write and preview cannot replace.
@@ -109,23 +97,52 @@ func rejectNonRegularInfo(path string, info os.FileInfo) error {
 	return nil
 }
 
-// previewNewFile renders the preview of content that would create path.
-func previewNewFile(path, content string) (WriteReview, error) {
-	if isSymbolicLink(path) {
-		return WriteReview{}, rejectInput(fmt.Sprintf("path is a symbolic link: %s", path))
-	}
-	if _, err := encodeWriteContent(path, nil, content); err != nil {
-		return WriteReview{}, err
-	}
-	diff, err := numberedDiff("", normalizeEOL(content))
-	if err != nil {
-		return WriteReview{}, err
-	}
-	return WriteReview{Path: path, Diff: diff, NewFile: true, Content: content}, nil
+// pendingWrite is one validated write: the review it shows, the bytes it commits and whether the
+// approval has to disclose a lossy decode.
+type pendingWrite struct {
+	review WriteReview
+	bytes  []byte
 }
 
-// Write creates or atomically replaces a regular text file. expected, when present,
-// binds the write to the exact file snapshot shown in an approval preview.
+// planWrite validates content against the current file and prepares the review and bytes of a
+// write. Nothing is modified here.
+func planWrite(path, content string, expected *ExpectedFile, exists bool) (pendingWrite, error) {
+	var original, decoded []byte
+	var existing *textcodec.Encoding
+	replacements := 0
+	if exists {
+		var err error
+		if original, err = os.ReadFile(path); err != nil {
+			return pendingWrite{}, err
+		}
+		if expected != nil && expected.SHA256 != sha256Hex(original) {
+			return pendingWrite{}, rejectInput(staleWriteReviewMessage)
+		}
+		var enc textcodec.Encoding
+		if decoded, enc, replacements, err = textcodec.Decode(path, original); err != nil {
+			return pendingWrite{}, codecError(path, err, codecWrite)
+		}
+		existing = &enc
+	}
+	written, err := encodeWriteContent(path, existing, content)
+	if err != nil {
+		return pendingWrite{}, err
+	}
+	diff, err := numberedDiff(normalizeEOL(string(decoded)), normalizeEOL(written.text))
+	if err != nil {
+		return pendingWrite{}, unchangedFileError(err)
+	}
+	review := WriteReview{Path: path, Diff: diff, NewFile: !exists, Content: written.text}
+	if exists {
+		hashText := sha256Hex(original)
+		review.SHA256 = &hashText
+		review.LossyDecode = lossyDecode(*existing, replacements, written.text)
+	}
+	return pendingWrite{review: review, bytes: written.bytes}, nil
+}
+
+// Write creates or rewrites a regular text file in place. expected, when present, binds the write
+// to the exact file snapshot shown in an approval preview.
 func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 	resolved, err := resolveWritePath(path)
 	if err != nil {
@@ -133,85 +150,43 @@ func Write(path, content string, expected *ExpectedFile) (WriteReview, error) {
 	}
 	unlock := lockPath(resolved)
 	defer unlock()
-	info, exists, err := existingTarget(resolved, expected)
+	exists, err := existingTarget(resolved, expected)
 	if err != nil {
 		return WriteReview{}, err
 	}
-	review, existing, err := writeReview(resolved, content, expected, exists)
-	if err != nil {
-		return WriteReview{}, err
-	}
-	encoded, err := encodeWriteContent(resolved, existing, content)
+	pending, err := planWrite(resolved, content, expected, exists)
 	if err != nil {
 		return WriteReview{}, err
 	}
 	if err = os.MkdirAll(filepath.Dir(resolved), 0o755); err != nil {
 		return WriteReview{}, err
 	}
-	if err = atomicWrite(resolved, encoded, writeMode(info, exists)); err != nil {
+	if err = writeInPlace(resolved, pending.bytes, exists); err != nil {
 		code, message := classifyFileSystemError(err)
 		return WriteReview{}, failRun(message, code)
 	}
-	return review, nil
+	return pending.review, nil
 }
 
 // existingTarget stats the write target and applies the rejections that do not need its content.
-func existingTarget(path string, expected *ExpectedFile) (os.FileInfo, bool, error) {
+func existingTarget(path string, expected *ExpectedFile) (bool, error) {
 	info, statErr := os.Lstat(path)
 	exists := statErr == nil
 	if statErr != nil && !errors.Is(statErr, os.ErrNotExist) {
-		return nil, false, statErr
+		return false, statErr
 	}
 	if expected != nil && expected.Path != path {
-		return nil, false, rejectInput(staleWriteReviewMessage)
+		return false, rejectInput(staleWriteReviewMessage)
 	}
 	if expected != nil && !exists && expected.SHA256 != "" {
-		return nil, false, rejectInput(staleWriteReviewMessage)
+		return false, rejectInput(staleWriteReviewMessage)
 	}
 	if exists {
 		if err := rejectNonRegularInfo(path, info); err != nil {
-			return nil, false, err
+			return false, err
 		}
 	}
-	return info, exists, nil
-}
-
-// writeReview builds the approval review of the pending write and reports the encoding the file
-// must keep.
-func writeReview(path, content string, expected *ExpectedFile, exists bool) (WriteReview, *textcodec.Encoding, error) {
-	if !exists {
-		diff, err := numberedDiff("", normalizeEOL(content))
-		if err != nil {
-			return WriteReview{}, nil, err
-		}
-		return WriteReview{Path: path, Diff: diff, NewFile: true, Content: content}, nil, nil
-	}
-	original, err := os.ReadFile(path)
-	if err != nil {
-		return WriteReview{}, nil, err
-	}
-	if expected != nil && expected.SHA256 != sha256Hex(original) {
-		return WriteReview{}, nil, rejectInput(staleWriteReviewMessage)
-	}
-	decoded, existing, decodeErr := textcodec.Decode(path, original)
-	if decodeErr != nil {
-		return WriteReview{}, nil, codecError(path, decodeErr, codecWrite)
-	}
-	diff, err := numberedDiff(normalizeEOL(string(decoded)), normalizeEOL(content))
-	if err != nil {
-		return WriteReview{}, nil, err
-	}
-	hashText := sha256Hex(original)
-	return WriteReview{Path: path, SHA256: &hashText, Diff: diff}, &existing, nil
-}
-
-// writeMode keeps the permissions of a replaced file and removes nothing from a new one.
-// info is nil when the target does not exist.
-func writeMode(info os.FileInfo, exists bool) os.FileMode {
-	if exists && info != nil {
-		return info.Mode().Perm()
-	}
-	return 0o644
+	return exists, nil
 }
 
 func resolveWritePath(path string) (string, error) {
@@ -257,32 +232,55 @@ func resolveExistingParent(path string) (string, error) {
 	}
 }
 
-func atomicWrite(path string, data []byte, mode os.FileMode) error {
-	return atomicWriteWithSync(path, data, mode, func(file *os.File) error { return file.Sync() })
+// writeInPlace writes data in place, so an existing file keeps its inode, owner, mode and hard
+// links, and a new file is created exclusively with 0644 (the umask applies). The file is synced;
+// a new file also syncs its parent directory. The write is not crash-atomic: a failed write leaves
+// the truncated or partial file behind and is reported as such.
+func writeInPlace(path string, data []byte, exists bool) error {
+	return writeInPlaceWithSync(path, data, exists, func(file *os.File) error { return file.Sync() })
 }
 
-func atomicWriteWithSync(path string, data []byte, mode os.FileMode, syncFile func(*os.File) error) error {
-	file, err := os.CreateTemp(filepath.Dir(path), ".kk-studio-*.part")
+func writeInPlaceWithSync(path string, data []byte, exists bool, syncFile func(*os.File) error) error {
+	flags := os.O_WRONLY | os.O_CREATE | os.O_EXCL
+	if exists {
+		flags = os.O_WRONLY | os.O_TRUNC
+	}
+	file, err := os.OpenFile(path, flags, 0o644)
 	if err != nil {
 		return err
 	}
-	temp := file.Name()
-	defer os.Remove(temp)
-	if err = file.Chmod(mode); err == nil {
-		_, err = file.Write(data)
-	}
-	if err == nil {
-		err = syncFile(file)
-	}
-	closeErr := file.Close()
-	if err != nil {
+	if _, err = file.Write(data); err != nil {
+		file.Close()
 		return err
 	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err = os.Rename(temp, path); err != nil {
+	if err = syncFile(file); err != nil {
+		file.Close()
 		return err
+	}
+	if err = file.Close(); err != nil {
+		return err
+	}
+	if exists {
+		return nil
 	}
 	return syncParentDirectory(filepath.Dir(path))
+}
+
+// lossyDecode reports the honest approval disclosure: the original file decoded with replacements,
+// the saved text still shows U+FFFD and it was encoded successfully.
+func lossyDecode(existing textcodec.Encoding, replacements int, text string) *LossyDecode {
+	if replacements == 0 || !strings.Contains(text, "\uFFFD") {
+		return nil
+	}
+	return &LossyDecode{Encoding: existing.Name, InvalidSequences: replacements}
+}
+
+// lossyDecodeNote renders the model-facing line that discloses a lossy save.
+func lossyDecodeNote(lossy *LossyDecode) string {
+	sequences := fmt.Sprintf("%d byte sequences that are", lossy.InvalidSequences)
+	if lossy.InvalidSequences == 1 {
+		sequences = "1 byte sequence that is"
+	}
+	return fmt.Sprintf("Note: the original file contains %s not valid %s, shown as U+FFFD (�); those still present were saved as U+FFFD, so their original bytes are lost.",
+		sequences, lossy.Encoding)
 }

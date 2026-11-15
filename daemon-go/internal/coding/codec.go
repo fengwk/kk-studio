@@ -4,9 +4,14 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 
 	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
+
+// bomRequest is the character that asks write to store a byte order mark. It is a request, never
+// content.
+const bomRequest = "\uFEFF"
 
 // codecContext selects the wording a text codec failure is reported with.
 type codecContext int
@@ -18,9 +23,10 @@ const (
 	codecEdit
 )
 
-// codecError converts a text codec failure into a tool error with the CODEC code.
+// codecError converts a text codec failure into a tool error with the CODEC code. Every codec
+// failure is decided before the tool touches the file, so the result reports that nothing ran.
 func codecError(path string, err error, context codecContext) error {
-	return failRun(codecErrorMessage(path, err, context), "CODEC")
+	return &toolError{kind: toolCodecRejected, code: "CODEC", message: codecErrorMessage(path, err, context)}
 }
 
 // isCodecFailure reports whether err is one of the typed failures of the text codec.
@@ -35,17 +41,12 @@ func codecErrorMessage(path string, err error, context codecContext) string {
 		return decodeTextMessage(err)
 	}
 	shown := filepath.ToSlash(path)
-	var unknown *textcodec.UnknownEncodingError
 	var unrepresentable *textcodec.UnrepresentableError
 	switch {
 	case errors.Is(err, textcodec.ErrBinary):
 		return fmt.Sprintf("%s is a binary file (it contains NUL bytes); %s", shown, binarySupport(context))
-	case errors.As(err, &unknown):
-		return fmt.Sprintf("%s is not UTF-8 text and declares no encoding, so it was not %s. If you know its encoding, view it with bash, for example iconv -f GBK -t UTF-8 '%s'.%s",
-			shown, codecPastTense(context), shown, codecUnknownTail(context))
 	case errors.As(err, &unrepresentable):
-		return fmt.Sprintf("The new text cannot be encoded in %s: %q (U+%04X) on line %d.",
-			unrepresentable.Encoding.Name, string(unrepresentable.Char), unrepresentable.Char, unrepresentable.Line)
+		return unrepresentable.Error()
 	}
 	return fmt.Sprintf("%s: %s", shown, err)
 }
@@ -63,38 +64,10 @@ func binarySupport(context codecContext) string {
 	return "read supports text files, directories and supported media."
 }
 
-// codecPastTense reports what did not happen to an undeclared file.
-func codecPastTense(context codecContext) string {
-	switch context {
-	case codecSearch:
-		return "searched"
-	case codecWrite:
-		return "rewritten"
-	case codecEdit:
-		return "edited"
-	}
-	return "read"
-}
-
-// codecUnknownTail tells the caller how to make the file usable by the tool.
-func codecUnknownTail(context codecContext) string {
-	switch context {
-	case codecSearch:
-		return ""
-	case codecWrite, codecEdit:
-		return " To rewrite it, convert it to UTF-8 or add a standard encoding declaration."
-	}
-	return " To use read, edit or write on it, convert it to UTF-8 or add a standard encoding declaration."
-}
-
 // decodeTextMessage renders a codec failure for a document whose path is not known.
 func decodeTextMessage(err error) string {
-	var unknown *textcodec.UnknownEncodingError
-	switch {
-	case errors.Is(err, textcodec.ErrBinary):
+	if errors.Is(err, textcodec.ErrBinary) {
 		return "file appears to be binary"
-	case errors.As(err, &unknown):
-		return "file is not UTF-8 text and declares no encoding"
 	}
 	return err.Error()
 }
@@ -108,49 +81,101 @@ func isUnicodeEncoding(name string) bool {
 	return false
 }
 
-// encodeWriteContent decides the encoding content is written with and encodes it. existing is
-// the encoding of the current file, or nil when the file does not exist yet.
-func encodeWriteContent(path string, existing *textcodec.Encoding, content string) ([]byte, error) {
-	declared, hasDeclaration, err := textcodec.Declared(path, []byte(content))
+// writtenContent is the text a write stores and the bytes it commits.
+type writtenContent struct {
+	text  string
+	bytes []byte
+}
+
+// encodeWriteContent strips a byte order mark request from content, decides the encoding the write
+// uses and encodes the text. existing is the encoding of the current file, or nil when the file
+// does not exist yet.
+func encodeWriteContent(path string, existing *textcodec.Encoding, content string) (writtenContent, error) {
+	text, request := splitBOMRequest(content)
+	target, err := writeEncoding(path, existing, request, text)
 	if err != nil {
-		return nil, codecError(path, err, codecWrite)
+		return writtenContent{}, err
 	}
-	target, err := writeEncoding(path, existing, declared, hasDeclaration)
+	encoded, err := textcodec.Encode(text, target)
 	if err != nil {
-		return nil, err
+		return writtenContent{}, codecError(path, err, codecWrite)
 	}
-	encoded, err := textcodec.Encode(content, target)
-	if err != nil {
-		return nil, codecError(path, err, codecWrite)
-	}
-	return encoded, nil
+	return writtenContent{text: text, bytes: encoded}, nil
+}
+
+// splitBOMRequest reports the content without a leading U+FEFF and whether the content asked for a
+// byte order mark.
+func splitBOMRequest(content string) (string, bool) {
+	text := strings.TrimPrefix(content, bomRequest)
+	return text, len(text) != len(content)
 }
 
 // writeEncoding reports the encoding a rewritten file must keep or adopt.
-func writeEncoding(path string, existing *textcodec.Encoding, declared textcodec.Encoding, hasDeclaration bool) (textcodec.Encoding, error) {
+func writeEncoding(path string, existing *textcodec.Encoding, request bool, text string) (textcodec.Encoding, error) {
+	declared, hasDeclaration, err := textcodec.Declared(path, []byte(text))
+	if err != nil {
+		return textcodec.Encoding{}, codecError(path, err, codecWrite)
+	}
 	shown := filepath.ToSlash(path)
 	if existing != nil && existing.BOM {
 		if hasDeclaration && !bomMatchesDeclaration(existing.Name, declared.Name) {
-			return textcodec.Encoding{}, failRun(fmt.Sprintf("%s starts with a %s byte order mark, but the new content declares %s.", shown, existing.Name, declared.Name), "CODEC")
+			return textcodec.Encoding{}, failCodec(fmt.Sprintf("%s starts with a %s byte order mark, but the new content declares %s.", shown, existing.Name, declared.Name))
 		}
 		return *existing, nil
 	}
 	if hasDeclaration {
-		if wideFamily(declared.Name) {
-			return textcodec.Encoding{}, failRun(fmt.Sprintf("%s: the new content declares %s, but that encoding needs a byte order mark and the file does not have one.", shown, declared.Name), "CODEC")
+		if order, ok := wideByteOrder(declared.Name); ok {
+			if !request {
+				return textcodec.Encoding{}, failCodec(fmt.Sprintf("%s: the new content declares %s, but that encoding needs a byte order mark. Start the content with U+FEFF to write it with a byte order mark.", shown, declared.Name))
+			}
+			return textcodec.Encoding{Name: order, BOM: true, Source: textcodec.SourceBOM}, nil
+		}
+		if declared.Name != "UTF-8" {
+			if request {
+				return textcodec.Encoding{}, failCodec(fmt.Sprintf("%s: the new content declares %s, which has no byte order mark; remove the leading U+FEFF to write it.", shown, declared.Name))
+			}
+			return declared, nil
+		}
+		if request {
+			return textcodec.Encoding{Name: "UTF-8", BOM: true, Source: textcodec.SourceBOM}, nil
 		}
 		return declared, nil
 	}
 	if existing != nil && existing.Source == textcodec.SourceDeclaration && !isUnicodeEncoding(existing.Name) {
-		return textcodec.Encoding{}, failRun(fmt.Sprintf("The new content removes the %s declaration of %s. Keep the declaration, or declare the new encoding explicitly to convert the file.", existing.Name, shown), "CODEC")
+		return textcodec.Encoding{}, failCodec(fmt.Sprintf("The new content removes the %s declaration of %s. Keep the declaration, or declare the new encoding explicitly to convert the file.", existing.Name, shown))
+	}
+	if request {
+		return textcodec.Encoding{Name: "UTF-8", BOM: true, Source: textcodec.SourceBOM}, nil
 	}
 	return textcodec.Encoding{Name: "UTF-8", Source: textcodec.SourceUTF8}, nil
+}
+
+// wideByteOrder reports the concrete byte order a UTF-16 or UTF-32 declaration selects; the generic
+// labels select little endian.
+func wideByteOrder(name string) (string, bool) {
+	switch name {
+	case "UTF-16", "UTF-16LE":
+		return "UTF-16LE", true
+	case "UTF-16BE":
+		return "UTF-16BE", true
+	case "UTF-32", "UTF-32LE":
+		return "UTF-32LE", true
+	case "UTF-32BE":
+		return "UTF-32BE", true
+	}
+	return "", false
 }
 
 // encodeEditContent encodes the result of an edit, which must keep the encoding of the file it
 // rewrites: a byte order mark stays authoritative, and otherwise the declaration of the result
 // has to resolve to the original encoding.
 func encodeEditContent(path string, existing textcodec.Encoding, content string) ([]byte, error) {
+	// A leading U+FEFF in a file without a byte order mark changes how the file is read: in UTF-8 it
+	// becomes the byte order mark and vanishes from the text, and in a declared encoding its bytes
+	// precede the declaration. Files with a BOM keep it as content after their BOM.
+	if !existing.BOM && strings.HasPrefix(content, bomRequest) {
+		return nil, failCodec(fmt.Sprintf("A leading U+FEFF cannot be written to %s without changing how the file is read: it would act as a byte order mark or precede the encoding declaration. Remove the leading U+FEFF; edit keeps the file's encoding.", filepath.ToSlash(path)))
+	}
 	declared, hasDeclaration, err := textcodec.Declared(path, []byte(content))
 	if err != nil {
 		return nil, codecError(path, err, codecEdit)
@@ -169,13 +194,13 @@ func encodeEditContent(path string, existing textcodec.Encoding, content string)
 func checkEditEncoding(path string, existing, declared textcodec.Encoding, hasDeclaration bool) error {
 	if existing.BOM {
 		if hasDeclaration && !bomMatchesDeclaration(existing.Name, declared.Name) {
-			return failRun(changeEncodingMessage(path, existing.Name, declared.Name), "CODEC")
+			return failCodec(changeEncodingMessage(path, existing.Name, declared.Name))
 		}
 		return nil
 	}
 	if !hasDeclaration {
 		if existing.Source == textcodec.SourceDeclaration && !isUnicodeEncoding(existing.Name) {
-			return failRun(changeEncodingMessage(path, existing.Name, "UTF-8"), "CODEC")
+			return failCodec(changeEncodingMessage(path, existing.Name, "UTF-8"))
 		}
 		return nil
 	}
@@ -184,7 +209,7 @@ func checkEditEncoding(path string, existing, declared textcodec.Encoding, hasDe
 		if wideFamily(declared.Name) {
 			message += " That declaration needs a byte order mark."
 		}
-		return failRun(message, "CODEC")
+		return failCodec(message)
 	}
 	return nil
 }
