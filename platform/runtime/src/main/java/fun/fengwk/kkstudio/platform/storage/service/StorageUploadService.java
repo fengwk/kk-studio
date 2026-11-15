@@ -83,7 +83,6 @@ public class StorageUploadService {
   private final StorageBlobRepository blobRepository;
   private final StorageBlobManager blobManager;
   private final S3StorageService s3StorageService;
-  private final S3PresignService s3PresignService;
   private final FfmpegStorageMediaProbe mediaProbe;
   private final StorageBlobPreviewService blobPreviewService;
   private final StorageUploadOperationLock operationLock;
@@ -114,7 +113,7 @@ public class StorageUploadService {
     this.blobRepository = Objects.requireNonNull(blobRepository, "blobRepository");
     this.blobManager = Objects.requireNonNull(blobManager, "blobManager");
     this.s3StorageService = Objects.requireNonNull(s3StorageService, "s3StorageService");
-    this.s3PresignService = Objects.requireNonNull(s3PresignService, "s3PresignService");
+    Objects.requireNonNull(s3PresignService, "s3PresignService");
     this.mediaProbe = Objects.requireNonNull(mediaProbe, "mediaProbe");
     this.blobPreviewService = Objects.requireNonNull(blobPreviewService, "blobPreviewService");
     this.operationLock = Objects.requireNonNull(operationLock, "operationLock");

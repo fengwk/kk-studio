@@ -325,10 +325,6 @@ final class ManualCompactionControl {
       Objects.requireNonNull(sourceHeadEntryId, "sourceHeadEntryId");
       Objects.requireNonNull(preparation, "preparation");
     }
-
-    private UUID threadId() {
-      return thread.id();
-    }
   }
 
   private record ManualDecision(

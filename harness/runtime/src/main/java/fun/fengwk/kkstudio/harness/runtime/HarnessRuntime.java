@@ -35,7 +35,6 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolFileMutationOrder;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
-import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionTurns;
 import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
@@ -77,7 +76,6 @@ import java.util.function.Consumer;
 public final class HarnessRuntime {
 
   private static final Consumer<UUID> NO_OP_CANCELLER = ignored -> {};
-  private static final ToolApprovalJsonCodec APPROVAL_JSON = new ToolApprovalJsonCodec();
 
   private final HarnessStore store;
   private final DriverRegistry driverRegistry;

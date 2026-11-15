@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.common.json;
 
 import tools.jackson.databind.JsonNode;
 
-import java.util.function.Function;
-
 /**
  * Tool 历史 action 渲染器读取 canonical arguments 的只读工具：把 arguments 文本解析为 JSON 对象，并按语义字段名取用。
  *
@@ -47,15 +45,5 @@ public final class ToolArguments {
     }
     JsonNode value = arguments.get(field);
     return value != null && value.isBoolean() && value.booleanValue();
-  }
-
-  /**
-   * 惰性渲染：把 arguments 文本解析与字段读取推迟到首次取值，供“一个工具只渲染一个字段”的简单映射使用。
-   *
-   * @param argumentsJson canonical arguments 文本
-   * @param builder 从解析出的 JSON 对象构造动作文本；必须对 null 输入返回 null 或回退文本
-   */
-  public static String render(String argumentsJson, Function<JsonNode, String> builder) {
-    return builder.apply(parse(argumentsJson));
   }
 }

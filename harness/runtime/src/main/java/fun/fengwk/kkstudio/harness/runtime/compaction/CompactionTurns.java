@@ -37,8 +37,7 @@ public final class CompactionTurns {
       CompactionPayload result,
       TurnEndPayload end,
       int startIndex,
-      int resultIndex,
-      int endIndex) {
+      int resultIndex) {
 
     public CompactionTurn {
       start = Objects.requireNonNull(start, "start");
@@ -89,7 +88,7 @@ public final class CompactionTurns {
       }
       if (payload instanceof TurnEndPayload end) {
         if (open != null) {
-          turns.add(new CompactionTurn(open, openResult, end, openIndex, openResultIndex, i));
+          turns.add(new CompactionTurn(open, openResult, end, openIndex, openResultIndex));
         }
         open = null;
         openIndex = -1;
@@ -107,7 +106,7 @@ public final class CompactionTurns {
       }
     }
     if (open != null) {
-      turns.add(new CompactionTurn(open, openResult, null, openIndex, openResultIndex, -1));
+      turns.add(new CompactionTurn(open, openResult, null, openIndex, openResultIndex));
     }
     return List.copyOf(turns);
   }
