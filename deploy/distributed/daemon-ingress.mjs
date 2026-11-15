@@ -60,24 +60,12 @@ function tryConnect(target, timeoutMs) {
 
 const server = net.createServer((clientSocket) => {
   clientSocket.pause()
-  const buffered = []
-  const onData = (chunk) => buffered.push(chunk)
-  clientSocket.on('data', onData)
-
-  let cleanedUp = false
-  const cleanup = () => {
-    if (cleanedUp) return
-    cleanedUp = true
-    clientSocket.off('data', onData)
-  }
-
   isAllowedClient(clientSocket.remoteAddress)
     .then(async (allowed) => {
       if (!allowed) {
         console.warn(
           `[daemon-ingress] Rejected connection from unauthorized source: ${clientSocket.remoteAddress}`,
         )
-        cleanup()
         clientSocket.destroy()
         return
       }
@@ -93,8 +81,6 @@ const server = net.createServer((clientSocket) => {
         }
       }
 
-      cleanup()
-
       if (!targetSocket) {
         clientSocket.destroy()
         return
@@ -107,10 +93,6 @@ const server = net.createServer((clientSocket) => {
 
       clientSocket.setKeepAlive(true, 1000)
       targetSocket.setKeepAlive(true, 1000)
-
-      for (const chunk of buffered) {
-        targetSocket.write(chunk)
-      }
 
       clientSocket.resume()
       clientSocket.pipe(targetSocket)
@@ -127,7 +109,6 @@ const server = net.createServer((clientSocket) => {
       targetSocket.on('close', closeBoth)
     })
     .catch(() => {
-      cleanup()
       clientSocket.destroy()
     })
 })
