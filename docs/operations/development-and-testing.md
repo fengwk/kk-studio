@@ -147,8 +147,6 @@ control protocol code 与提交产物一致。通过后上传仅含 `app.jar` �
 不重新构建源码，也不使用普通 verify 产生的无前端 JAR；`dev` 仍从源码 context 使用默认 `source` 阶段。
 前端必须通过 lint、测试与浏览器基座严格类型检查、覆盖率、生产构建与 Chromium 离线布局回归；任一失败均阻断发布。
 无论门禁是否成功，`frontend-diagnostics` artifact 都保留覆盖率与布局诊断产物 7 天。
-Windows 安装器回归在同一宿主上分别运行 Windows PowerShell 5.1 与 PowerShell 7；前一个失败不会遮蔽
-后一个，任一失败仍阻断正常发布。
 Unix 脚本回归在完整 repository 测试中以系统 Bash 运行；macOS 安装与归档契约由其矩阵的系统 Bash（macOS 为 3.2）
 步骤覆盖，不以 Homebrew Bash 的结果替代系统自带版本。
 Daemon 的持续集成由 [daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 负责，检查 Go 格式、vet、staticcheck、测试与目标平台构建；其平台清单和命令以 [`daemon/README.md`](../../daemon/README.md) 为准。扩展宿主测试使用 Node 内置 `node:test`。发行归档和发布门禁属于发布流程，详见 [Daemon 安装与运行](environment-daemon.md)。
@@ -169,18 +167,20 @@ TTY stderr 下运行（stdin 仍重定向），属于测试依赖，产品运行
 工作流上传 GitHub Release。安装器不要求宿主 Go、Node 或 JDK；归档包含 Go 可执行文件及供 IDE 使用的冻结
 code-server 运行时。
 
-Windows 发行归档在 `windows-latest` smoke job 中运行
-[scripts/daemon/smoke-archive.ps1](../../scripts/daemon/smoke-archive.ps1)：解包归档，检查 Daemon 可执行文件、
+Windows 发行归档在 `daemon-release` 的 `windows-latest` smoke job 中，用该 runner 默认的 Windows PowerShell
+运行 [scripts/daemon/smoke-archive.ps1](../../scripts/daemon/smoke-archive.ps1)：解包归档，检查 Daemon 可执行文件、
 code-server runtime、IDE extension 与法律文件，执行 daemon `--version`，并拒绝 ripgrep binary 与
-ripgrep package。Windows 安装器与受管更新的源码契约也由上述 Node 测试覆盖；它们不注册真实 ScheduledTasks。
+ripgrep package。该步骤只做归档烟测，不执行安装，也没有 Windows PowerShell 5.1 与 PowerShell 7 的双矩阵。
+Windows 安装器与受管更新的源码契约由上述 Node 测试覆盖；它们不注册真实 ScheduledTasks。
 
-Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
-失败传播与调用方作用域隔离；后端 `EnvironmentInstallScriptsTest` 在 PowerShell 5.1/7 中
-验证实际生成脚本的 owner-only 暂存、凭据字节与失败清理。夹具不注册任务或访问网络。
+`npm --prefix frontend run test:install:windows` 是 Windows 上的手动入口，验证一行下载命令的 UTF-8、
+失败传播与调用方作用域隔离；当前 CI 不调用它。后端 `EnvironmentInstallScriptsTest` 只断言生成脚本的
+文本契约（owner-only 暂存、凭据字节与失败清理），不在 PowerShell 中执行这些脚本，也不注册任务或访问网络，
+因此不覆盖真实受管安装。
 
-Windows fixture 依赖真实的 Windows 安全主体与 ScheduledTasks cmdlet，只能在 Windows 宿主运行；
-镜像与 Daemon 发布 CI 都在 `windows-latest` 上分别用 Windows PowerShell 5.1 与 PowerShell 7
-执行完整门禁。
+依赖真实 Windows 安全主体与 ScheduledTasks cmdlet 的安装夹具只能在 Windows 宿主上手动运行。
+`daemon-ci` 的 `windows-latest` job 跑 Go 测试；Daemon 发布的 Windows 门禁是上述归档 smoke，
+不是在 5.1 与 7 上各跑一遍安装。
 
 ### 跨语言 UPDATE 命令
 

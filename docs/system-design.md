@@ -106,7 +106,9 @@ daemon/kk-studio-daemon ──托管──▶ code-server（发行版包含受�
 构建期生成物各有唯一来源：`web` 测试源码中的契约生成器产出前端的
 [`contracts.ts`](../frontend/src/shared/api/generated/contracts.ts)；
 [`control.proto`](../platform/daemon-server/src/main/protocol/control.proto) 生成 `daemon/internal/protocol` 协议代码；
-`daemon/internal/capability/schemas` 是能力 Schema 基准，`harness/environment` 的镜像由一致性测试逐字节校验。
+能力 Schema 的源是 `harness/environment` 的 Java classpath 资源；[`capabilities.mjs`](../scripts/dev/verify/generated-contracts/capabilities.mjs)
+把它们同步到 `daemon/internal/capability/schemas`。脚本只比较去掉尾部空白并补上换行后的文本，
+Java 一致性测试再按字节校验两份资源。
 
 `check.mjs` 同时守护聚合 POM 的模块清单、插件只 import 插件 SPI 与产品 SPI、内核契约包不反向依赖 runtime
 内部实现、Harness 公开包访问边界、按表名前缀的表归属、Java 包跨模块唯一，以及平台组合根与无 Redis /
@@ -402,8 +404,10 @@ Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED
 `UPDATE`、`UPDATE_RESULT`、`IDE_COMMAND`、`IDE_RESULT`、`IDE_LEASE`、`SETTINGS`、`ENVIRONMENT_CONFIG`、
 `RUNTIME_STATUS`、`ERROR`。
 
-能力目录由 harness 定义、Daemon 实现：`FS_READ`、`FS_WRITE`、`FS_EDIT`、`FS_EDIT_PREVIEW`、`PROCESS_EXEC`、
-`FS_GREP`、`FS_FIND`、三个 LSP 能力。每个能力带输入 Schema 与默认超时，需要 `workdir` 的能力只从参数里取目录。
+能力目录由 harness 定义、Daemon 实现，共 12 项：`FS_READ`、`FS_WRITE`、`FS_EDIT`、`FS_EDIT_PREVIEW`、
+`FS_WRITE_PREVIEW`、`PROCESS_EXEC`、`FS_GREP`、`FS_FIND`、三个 LSP 能力与 `SKILL_INSTALL`。
+`FS_EDIT_PREVIEW`、`FS_WRITE_PREVIEW` 与 `SKILL_INSTALL` 只供内部调用，其余 9 项映射为模型工具。
+每个能力带输入 Schema 与默认超时，需要 `workdir` 的能力只从参数里取目录。
 调用契约区分「发送前一定未执行」（Busy、Unavailable）与「可能已被接受」（SendUncertain，禁止重放），成功启动后
 事件流严格是若干 partial 加一次 terminal，迟到事件静默丢弃。完整协议与租约见
 [Harness Environment](modules/harness-environment.md)。
@@ -541,7 +545,7 @@ subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> even
 
 | 段 | 内容 |
 | --- | --- |
-| 1 | 共享基础：全局 Blob（`storage_blob` 含 `archive_index`）、上传（`storage_upload`）与对象清理（`storage_object_cleanup`） |
+| 1 | 共享基础：全局 Blob（`storage_blob` 含 `archive_index`）、上传（`storage_upload`）、图片档位模型视图（`storage_image_model_view`）与对象清理（`storage_object_cleanup`） |
 | 2 | 平台内核存储：环境（`environment`、`environment_connection`、`cluster_node`）、单行 `system_setting`、Harness 执行协议（`harness_session`、`harness_entry`、`harness_thread`、`realtime_subscription`、`harness_thread_command`、`harness_tool_invocation`、`durable_work`、`harness_thread_join`、`harness_thread_stop_receipt`、`harness_execution_exit`）与 Session 引用（`session_blob_ref`） |
 | 3 | 平台 Driver 存储：目录（`provider`、`model`、`agent`、`model_group_cooldown`）、技能包（`skill_package`、`skill_package_git_source`）、插件（`plugin_configuration`、`plugin_credential`、`plugin_auth_attempt`）、MCP（`mcp_server`、`mcp_tool`）与 `builtin_model_invocation` |
 | 4 | 产品表：Canvas（`canvas_*`）、Chat（`chat`、`chat_session`）与 Project（`project_*`） |

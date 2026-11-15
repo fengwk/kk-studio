@@ -1,6 +1,6 @@
 # Harness Agent Builtin
 
-`harness-agent-builtin` 是第一方 Builtin Agent Driver。它实现 [Harness Runtime](harness-runtime.md) 的 `AgentDriver` 契约，拥有 Builtin 分支的模型生成状态、Turn 解析、请求物化与响应物化，以及 Builtin 专属的自动压缩策略。Runtime 只保留与执行后端无关的公共内核；Builtin 的模型调用、流式 checkpoint、重试与模型组推进都在本模块完成。
+`harness-agent-builtin` 是第一方 Builtin Agent Driver。它实现 [Harness Runtime](harness-runtime.md) 的 `AgentDriver` 契约，拥有 Builtin 分支的模型生成状态、Turn 解析、请求物化与响应物化。自动压缩的阈值判定与切点规划在平台 Turn 解析和 Runtime；Builtin 的模型调用、流式 checkpoint、重试与模型组推进都在本模块完成。
 
 模块内部生产依赖为 `kk-studio-common`、`kk-studio-harness-model` 与 `kk-studio-harness-runtime`，另依赖 SLF4J 和 Jackson；不依赖 Spring、JDBC、HTTP 或模型 SDK，也不依赖 Platform。依赖声明见 [`pom.xml`](../../harness/agent-builtin/pom.xml)，方向由仓库检查 [`check.mjs`](../../scripts/dev/verify/repository/check.mjs) 守护。
 
@@ -91,7 +91,6 @@ Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员
 
 | 包名 | 职责与边界 |
 | --- | --- |
-| `fun.fengwk.kkstudio.harness.builtin.compaction` | Builtin 自动压缩策略；复用 Runtime 的阈值与规划纯函数，不拥有压缩回合结构 |
 | `fun.fengwk.kkstudio.harness.builtin.driver` | `BuiltinAgentDriver`：Turn 解析、generation 锁定、响应物化、ToolBatch 收尾与 Stop |
 | `fun.fengwk.kkstudio.harness.builtin.history` | Builtin 响应到公共历史的投影 |
 | `fun.fengwk.kkstudio.harness.builtin.model` | 从冻结请求与 EntryPath 重建 Provider 请求 |

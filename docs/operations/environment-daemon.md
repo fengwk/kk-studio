@@ -234,10 +234,10 @@ Studio 保存的完整卡片配置：
 - `bashExecutable` 可选；空值保存为 `null`，表示使用宿主 PATH 中的 `bash`。非空值不能是空白或含
   控制字符；Daemon 应用配置时确认它能解析为可执行文件，解析失败上报 `VALIDATION_FAILED`。
   `daemon.json` 与运行快照保存的仍是配置里写下的字符串，真正的路径解析发生在执行时。
-- `lsp` 可选；`null` 表示禁用 LSP。一旦启用就必须声明至少一个 server，空表非法。server id 匹配
-  `[A-Za-z0-9_.-]+`，`command` 是非空字符串数组，`extensions` 必须带前导点且不含路径分隔符，
-  `rootMarkers` / `firstMatchMarkers` 是项目相对路径、不得为绝对路径或含 `..`。**未声明的字段
-  一律拒绝**。
+- `lsp` 可选；整个字段省略或 `null` 表示禁用 LSP。一旦声明就必须至少有一个 server，空表非法。server id 匹配
+  `[A-Za-z0-9_.-]+`。每个 server 的 `command` 必须是非空字符串数组。`extensions` 必须带前导点且不含路径分隔符；
+  Studio 卡片与控制协议允许省略或空数组，Daemon 加载配置时拒绝空数组。`rootMarkers` / `firstMatchMarkers` 可选，
+  若给出则是项目相对路径、不得为绝对路径或含 `..`。**未声明的字段一律拒绝**。
 - `proxyUrl` 可选；`null` 表示该 Daemon 的自身请求明确直连。非空只接受无认证的
   `http://host:port`，拒绝 userinfo、query、fragment 和非根 path。
 - `note` 是卡片备注，最多 512 字符，trim 后单行、不含控制字符；空值保存为 `null`。
@@ -350,10 +350,10 @@ Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径
 }
 ```
 
-`extensions` 必须带前导点，匹配不区分大小写，同一后缀由先声明的服务器负责。项目根从目标文件
-向上查找：优先最靠上的 `rootMarkers` 命中，其次最近的 `firstMatchMarkers`，否则用文件父目录；
-不越过最近的 `.git` 目录或 gitfile。服务器在该项目根启动；文件 `path` 必须为绝对路径，不用
-`workdir` 解析。
+`extensions` 带前导点，匹配不区分大小写。Daemon 只按文件后缀选择服务器，同一后缀由先声明的服务器负责；
+空的 `extensions` 不会按 `rootMarkers` 选中服务器，而且 Daemon 加载配置时就拒绝空数组。项目根从目标文件向上查找：优先最靠上的 `rootMarkers` 命中，
+其次最近的 `firstMatchMarkers`，否则用文件父目录；不越过最近的 `.git` 目录或 gitfile。这两组 marker 只定位项目根。
+服务器在该项目根启动；文件 `path` 必须为绝对路径，不用 `workdir` 解析。
 
 程序基名识别为 jdtls 后才提供 `java/classFileContents`，`jdt://` 反编译不能在其它服务器上使用。
 客户端连接按项目复用，调用超时或取消只取消请求并发送 `$/cancelRequest`，不杀掉其它调用共享的
