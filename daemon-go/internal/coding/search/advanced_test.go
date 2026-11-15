@@ -448,10 +448,11 @@ func TestGitMarkerRequiresValidRepository(t *testing.T) {
 	}
 }
 
-// Malformed BOM-encoded text is rejected by the codec, so it is never searched.
-func TestGrepUTF16RejectsOddByteCount(t *testing.T) {
-	if _, _, err := textcodec.Decode("/repo/odd.txt", []byte{0xff, 0xfe, 'x'}); err == nil {
-		t.Fatal("odd-length UTF-16 payload accepted")
+// A truncated final UTF-16 unit is searched as U+FFFD instead of refusing the file.
+func TestGrepUTF16ReplacesOddByteCount(t *testing.T) {
+	text, encoding, replaced, err := textcodec.Decode("/repo/odd.txt", []byte{0xff, 0xfe, 'x'})
+	if err != nil || encoding.Name != "UTF-16LE" || string(text) != "\uFFFD" || replaced != 1 {
+		t.Fatalf("odd-length UTF-16 text=%q encoding=%#v replaced=%d err=%v", text, encoding, replaced, err)
 	}
 }
 

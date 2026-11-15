@@ -10,10 +10,12 @@ func readTextWindow(text string, options WindowOptions) (TextWindow, error) {
 	return ReadTextWindowReader(strings.NewReader(text), options)
 }
 
-func TestTextCodecRejectsMalformedEncodingAndUnsupportedCharsets(t *testing.T) {
+// Malformed wide units decode to U+FFFD; an encoding the codec does not know or cannot write is
+// still refused by Encode.
+func TestTextCodecReplacesMalformedWideUnitsAndRejectsUnsupportedCharsets(t *testing.T) {
 	for _, data := range [][]byte{{0xff, 0xfe, 0x41}, {0xff, 0xfe, 0x00, 0xdc}, {0xfe, 0xff, 0xdc, 0x00}} {
-		if _, _, err := decodeFixture(data); err == nil || !strings.Contains(err.Error(), "not valid UTF-16") {
-			t.Fatalf("malformed UTF-16 %x error=%v", data, err)
+		if text, _, err := decodeFixture(data); err != nil || text != "\uFFFD" {
+			t.Fatalf("malformed UTF-16 %x text=%q error=%v", data, text, err)
 		}
 	}
 	for _, test := range []struct {
@@ -25,7 +27,7 @@ func TestTextCodecRejectsMalformedEncodingAndUnsupportedCharsets(t *testing.T) {
 		{"text", "UNKNOWN", 0},
 		{"text", "UNKNOWN", 1},
 	} {
-		if _, err := encodeFixture(test.text, test.charset, test.bom); err == nil || !strings.Contains(err.Error(), "cannot be encoded in") && !strings.Contains(err.Error(), "unknown encoding") {
+		if _, err := encodeFixture(test.text, test.charset, test.bom); err == nil || !strings.Contains(err.Error(), "cannot be encoded in") && !strings.Contains(err.Error(), "unsupported encoding") {
 			t.Fatalf("charset=%s bom=%d error=%v", test.charset, test.bom, err)
 		}
 	}

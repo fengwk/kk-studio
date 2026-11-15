@@ -1,6 +1,7 @@
 package coding
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 )
@@ -35,26 +36,41 @@ func TestEditKeepsDeclaredEncodingAndRefusesChanges(t *testing.T) {
 	}
 }
 
-// An edit refuses files the shared codec cannot decode, in both edit and preview.
-func TestEditRefusesUndecodableFiles(t *testing.T) {
-	undeclared := writeFixture(t, "gbk.txt", []byte("\xd6\xd0\xce\xc4\n"))
-	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(undeclared, replace("\xd6\xd0", "\xd6\xd1")), nil)
-	if !result.Error || !strings.Contains(result.Contents[0].Text, "is not UTF-8 text and declares no encoding") || !strings.Contains(result.Contents[0].Text, "it was not edited") {
-		t.Fatalf("undeclared=%#v", result)
+// An edit of a lossy file rewrites the U+FFFD view it showed and discloses the loss in the review;
+// binary files and declarations the codec cannot use are still refused before any write.
+func TestEditDisclosesLossyDecodeAndRefusesCodecFailures(t *testing.T) {
+	lossy := writeFixture(t, "lossy.txt", []byte("bad: \xff\n"))
+	preview := invokeCoding(t, Provider{}, "fs.edit.preview", editArgs(lossy, replace("\ufffd", "\ufffd!")), nil)
+	if preview.Error {
+		t.Fatalf("preview=%#v", preview)
 	}
-	if !strings.Contains(string(result.Details), `"code":"CODEC"`) {
-		t.Fatalf("details=%s", result.Details)
+	var review EditReview
+	if err := json.Unmarshal(preview.Contents[0].JSON, &review); err != nil {
+		t.Fatal(err)
+	}
+	if review.LossyDecode == nil || review.LossyDecode.Encoding != "UTF-8" || review.LossyDecode.InvalidSequences != 1 {
+		t.Fatalf("review=%#v", review)
+	}
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(lossy, replace("\ufffd", "\ufffd!")), nil)
+	if result.Error || !strings.Contains(result.Contents[0].Text, "Note: the original file contains 1 byte sequence that is not valid UTF-8, shown as U+FFFD (�); those still present were saved as U+FFFD, so their original bytes are lost.") {
+		t.Fatalf("result=%#v", result)
+	}
+	if written := mustRead(t, lossy); string(written) != "bad: \xef\xbf\xbd!\n" {
+		t.Fatalf("bytes=%x", written)
 	}
 	binary := writeFixture(t, "binary.dat", []byte{'a', 0, 'b'})
 	for _, capability := range []string{"fs.edit", "fs.edit.preview"} {
 		result = invokeCoding(t, Provider{}, capability, editArgs(binary, replace("a", "c")), nil)
-		if !result.Error || !strings.Contains(result.Contents[0].Text, "is a binary file (it contains NUL bytes); edit only rewrites text files.") {
+		if !result.Error || !strings.Contains(result.Contents[0].Text, "is a binary file (it contains NUL bytes); edit only rewrites text files.") || !strings.Contains(result.Contents[0].Text, "The tool was not executed.") {
 			t.Fatalf("%s binary=%#v", capability, result)
 		}
 	}
-	conflict := writeFixture(t, "conflict.html", []byte(`<meta charset="gb2312">中文`))
+	if written := mustRead(t, binary); string(written) != "a\x00b" {
+		t.Fatalf("refused edit rewrote the binary file: %x", written)
+	}
+	conflict := writeFixture(t, "conflict.html", []byte(`<meta charset="utf-16le">中文`))
 	result = invokeCoding(t, Provider{}, "fs.edit", editArgs(conflict, replace("中文", "英文")), nil)
-	if !result.Error || !strings.Contains(result.Contents[0].Text, "HTML meta charset") {
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "HTML meta charset") || !strings.Contains(string(result.Details), `"code":"CODEC"`) {
 		t.Fatalf("conflict=%#v", result)
 	}
 }

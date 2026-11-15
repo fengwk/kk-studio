@@ -24,7 +24,7 @@ func (c *Client) Sync(path string) error {
 	if err != nil {
 		return &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
 	}
-	decoded, _, decodeErr := textcodec.Decode(abs, data)
+	decoded, _, _, decodeErr := textcodec.Decode(abs, data)
 	if decodeErr != nil {
 		return &LspError{Message: "LSP request failed: the source file is not valid text", Cause: decodeErr}
 	}
@@ -222,7 +222,7 @@ func (c *Client) definitionColumn(uri string, line, character int) int {
 	if err != nil {
 		return fallback
 	}
-	decoded, _, decodeErr := textcodec.Decode(path, data)
+	decoded, _, _, decodeErr := textcodec.Decode(path, data)
 	if decodeErr != nil {
 		return fallback
 	}

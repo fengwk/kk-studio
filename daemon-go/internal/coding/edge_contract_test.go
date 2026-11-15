@@ -119,8 +119,8 @@ func TestReadRejectsNonRegularFile(t *testing.T) {
 	}
 }
 
-// Replacing a read-only file preserves its original permission bits.
-func TestWritePreservesReadOnlyFilePermissions(t *testing.T) {
+// A read-only file is not rewritten in place: the write fails and the file keeps its bytes.
+func TestWriteRefusesReadOnlyFile(t *testing.T) {
 	if goruntime.GOOS == "windows" {
 		t.Skip("POSIX permission bits are required")
 	}
@@ -132,19 +132,24 @@ func TestWritePreservesReadOnlyFilePermissions(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := invokeCoding(t, Provider{}, "fs.write", map[string]any{"path": path, "content": "after\n"}, nil)
-	if result.Error {
-		t.Fatalf("write failed: %#v", result)
-	}
-	info, err := os.Stat(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	content, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
+	if os.Geteuid() == 0 {
+		// Root bypasses the permission bits; the write succeeds and keeps them.
+		info, statErr := os.Stat(path)
+		if result.Error || statErr != nil || info.Mode().Perm() != 0o444 || string(content) != "after\n" || err != nil {
+			t.Fatalf("root write result=%#v content=%q err=%v", result, content, err)
+		}
+		return
 	}
-	if info.Mode().Perm() != 0o444 || string(content) != "after\n" {
-		t.Fatalf("mode=%#o content=%q", info.Mode().Perm(), content)
+	if !result.Error || !strings.Contains(string(result.Details), `"code":"PERMISSION_DENIED"`) {
+		t.Fatalf("result=%#v", result)
+	}
+	if err != nil || string(content) != "before\n" {
+		t.Fatalf("contents=%q err=%v", content, err)
+	}
+	info, statErr := os.Stat(path)
+	if statErr != nil || info.Mode().Perm() != 0o444 {
+		t.Fatalf("mode=%v err=%v", info, statErr)
 	}
 }
 

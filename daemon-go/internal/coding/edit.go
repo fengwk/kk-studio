@@ -67,12 +67,20 @@ type editSource struct {
 // editTarget is the locked, reviewed state of one file before any edit is applied.
 type editTarget struct {
 	path         string
-	info         os.FileInfo
 	original     []byte
 	hash         string
 	decoded      []byte
 	existing     textcodec.Encoding
+	replacements int
 	unlockTarget func()
+}
+
+// EditReview is the approval review of an edit.
+type EditReview struct {
+	Path        string       `json:"path"`
+	Diff        string       `json:"diff"`
+	SHA256      string       `json:"sha256"`
+	LossyDecode *LossyDecode `json:"lossyDecode,omitempty"`
 }
 
 func editFile(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext, preview bool) (runtime.CapabilityResult, error) {
@@ -102,7 +110,7 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	if bytes.Equal(encoded, target.original) {
 		return errorResult(call.InvocationID, rejectInput("No changes to apply: the edits would not change the file")), nil
 	}
-	review, completed, err := editReview(call.InvocationID, target.path, target.hash, source.text, updated, len(replacements))
+	review, completed, err := editReview(call.InvocationID, target.path, target.hash, source.text, updated, len(replacements), lossyDecode(target.existing, target.replacements, updated))
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
@@ -112,7 +120,7 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	if preview {
 		return runtime.CapabilityResult{CallID: call.InvocationID, Details: []byte(`{}`), Contents: []runtime.ResultContent{{Type: "json", JSON: mustJSON(review)}}}, nil
 	}
-	if err = atomicWrite(target.path, encoded, target.info.Mode().Perm()); err != nil {
+	if err = writeInPlace(target.path, encoded, true); err != nil {
 		code, message := classifyFileSystemError(err)
 		return errorResult(call.InvocationID, failRun(message, code)), nil
 	}
@@ -132,8 +140,7 @@ func openEditTarget(rawPath string, expected *runtime.ExpectedFile) (*editTarget
 		return nil, err
 	}
 	unlock := lockPath(path)
-	info, err := editableFileInfo(path)
-	if err != nil {
+	if err = editableFileInfo(path); err != nil {
 		unlock()
 		return nil, err
 	}
@@ -147,27 +154,27 @@ func openEditTarget(rawPath string, expected *runtime.ExpectedFile) (*editTarget
 		unlock()
 		return nil, rejectInput(staleWriteReviewMessage)
 	}
-	decoded, existing, err := textcodec.Decode(path, original)
+	decoded, existing, replacements, err := textcodec.Decode(path, original)
 	if err != nil {
 		unlock()
 		return nil, codecError(path, err, codecEdit)
 	}
-	return &editTarget{path: path, info: info, original: original, hash: hash, decoded: decoded, existing: existing, unlockTarget: unlock}, nil
+	return &editTarget{path: path, original: original, hash: hash, decoded: decoded, existing: existing, replacements: replacements, unlockTarget: unlock}, nil
 }
 
 // editableFileInfo stats the edit target and refuses anything but a regular file.
-func editableFileInfo(path string) (os.FileInfo, error) {
+func editableFileInfo(path string) error {
 	info, err := os.Lstat(path)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if info.IsDir() {
-		return nil, rejectInput(fmt.Sprintf("path must be a file: %s", path))
+		return rejectInput(fmt.Sprintf("path must be a file: %s", path))
 	}
 	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return nil, rejectInput(fmt.Sprintf("path is not a regular file: %s", path))
+		return rejectInput(fmt.Sprintf("path is not a regular file: %s", path))
 	}
-	return info, nil
+	return nil
 }
 
 // applyPlannedEdits validates the entries against the original snapshot and splices them in.
@@ -181,16 +188,20 @@ func applyPlannedEdits(path, decoded string, entries []editEntry) (string, *edit
 }
 
 // editReview renders the numbered diff an approval shows and the completed result that carries it.
-func editReview(invocationID, path, hash, before, after string, replacements int) (map[string]string, runtime.CapabilityResult, error) {
+func editReview(invocationID, path, hash, before, after string, replacements int, lossy *LossyDecode) (EditReview, runtime.CapabilityResult, error) {
 	diff, err := numberedDiff(before, normalizeEOL(after))
 	if err != nil {
-		return nil, runtime.CapabilityResult{}, err
+		return EditReview{}, runtime.CapabilityResult{}, err
 	}
-	review := map[string]string{"path": path, "diff": diff, "sha256": hash}
-	completed := textResult(invocationID, fmt.Sprintf("Edited successfully.\nReplacements: %d", replacements))
+	review := EditReview{Path: path, Diff: diff, SHA256: hash, LossyDecode: lossy}
+	message := fmt.Sprintf("Edited successfully.\nReplacements: %d", replacements)
+	if lossy != nil {
+		message += "\n" + lossyDecodeNote(lossy)
+	}
+	completed := textResult(invocationID, message)
 	resultJSON := mustJSON(map[string]any{"toolCallId": completed.CallID, "contents": completed.Contents, "error": completed.Error, "details": map[string]any{"editReview": review}})
 	if len(resultJSON) > maxReviewBytes {
-		return nil, runtime.CapabilityResult{}, rejectInput("Complete edit diff exceeds the review transport limit; split the change into several smaller edit calls.")
+		return EditReview{}, runtime.CapabilityResult{}, rejectInput("Complete edit diff exceeds the review transport limit; split the change into several smaller edit calls.")
 	}
 	return review, completed, nil
 }

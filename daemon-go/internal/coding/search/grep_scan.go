@@ -44,10 +44,10 @@ func (s *grepScan) scanFile(rel string) (bool, error) {
 		s.outcome.Skipped = append(s.outcome.Skipped, display)
 		return false, nil
 	}
-	decoded, _, decodeErr := textcodec.Decode(path, data)
+	decoded, _, _, decodeErr := textcodec.Decode(path, data)
 	if decodeErr != nil {
 		release()
-		return s.skipUndecodable(path, decodeErr)
+		return s.skipRejected(path, decodeErr)
 	}
 	matches, limitReached := s.matches(decoded, display)
 	release()
@@ -72,17 +72,17 @@ func (s *grepScan) fileAndDisplay(rel string) (path, display string) {
 	return filepath.Join(s.root, filepath.FromSlash(rel)), filepath.ToSlash(rel)
 }
 
-// skipUndecodable records a file the codec could not decode; a direct path reports the failure.
-func (s *grepScan) skipUndecodable(path string, decodeErr error) (bool, error) {
+// skipRejected records a file the codec refused; a direct path reports the failure.
+func (s *grepScan) skipRejected(path string, decodeErr error) (bool, error) {
 	if s.directFile {
-		return true, &UndecodableError{Path: path, Err: decodeErr}
+		return true, &RejectedError{Path: path, Err: decodeErr}
 	}
-	// A binary file is skipped silently; any other codec failure is reported.
+	// A binary file is skipped silently; a declaration the codec cannot use is reported.
 	if errors.Is(decodeErr, textcodec.ErrBinary) {
 		return false, nil
 	}
-	s.outcome.Undecodable = append(s.outcome.Undecodable, filepath.ToSlash(path))
-	s.outcome.UndecodableCount++
+	s.outcome.Rejected = append(s.outcome.Rejected, filepath.ToSlash(path))
+	s.outcome.RejectedCount++
 	return false, nil
 }
 

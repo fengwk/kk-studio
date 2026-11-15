@@ -110,24 +110,35 @@ func TestReadTextWindowEOFMetadataAtRequestedOffset(t *testing.T) {
 	}
 }
 
-// Go receives UTF-8 bytes, so unpaired UTF-16 surrogate expectations are represented by their invalid UTF-8 encoding.
-// UTF-8 rejects malformed encodings at all buffer splits and cannot encode surrogate bytes.
-func TestTextCodecRejectsMalformedUTF8Sequences(t *testing.T) {
-	sequences := [][]byte{
-		{0x80}, {0xe4, 0x41}, {0xe4}, {0xc0, 0x81}, {0xe0, 0x81, 0x81}, {0xf0, 0x8f, 0xbf, 0xbf},
-		{0xed, 0xa0, 0x80}, {0xf4, 0x90, 0x80, 0x80},
-	}
-	for _, data := range sequences {
-		if _, _, err := decodeFixture(data); err == nil {
-			t.Errorf("Decode accepted malformed UTF-8 %x", data)
+// Malformed UTF-8 is shown as U+FFFD by the whole-file decode and by the read window, at every
+// buffer split, and the maximal subpart rule decides how many replacements it takes.
+func TestTextCodecReplacesMalformedUTF8Sequences(t *testing.T) {
+	for _, test := range []struct {
+		data []byte
+		want string
+	}{
+		{[]byte{0x80}, "\uFFFD"},
+		{[]byte{0xe4, 0x41}, "\uFFFDA"},
+		{[]byte{0xe4}, "\uFFFD"},
+		{[]byte{0xc0, 0x81}, "\uFFFD\uFFFD"},
+		{[]byte{0xe0, 0x81, 0x81}, "\uFFFD\uFFFD\uFFFD"},
+		{[]byte{0xf0, 0x8f, 0xbf, 0xbf}, "\uFFFD\uFFFD\uFFFD\uFFFD"},
+		{[]byte{0xed, 0xa0, 0x80}, "\uFFFD\uFFFD\uFFFD"},
+		{[]byte{0xf4, 0x90, 0x80, 0x80}, "\uFFFD\uFFFD\uFFFD\uFFFD"},
+	} {
+		text, _, err := decodeFixture(test.data)
+		if err != nil || text != test.want {
+			t.Fatalf("Decode(%x)=%q err=%v want %q", test.data, text, err, test.want)
 		}
-		if _, err := ReadTextWindowReader(bytes.NewReader(data), WindowOptions{Offset: 1, Limit: 1}); err == nil {
-			t.Errorf("ReadTextWindowReader accepted malformed UTF-8 %x", data)
+		window, err := ReadTextWindowReader(bytes.NewReader(test.data), WindowOptions{Offset: 1, Limit: 1})
+		if err != nil || window.Body != "1|"+test.want || window.Truncated {
+			t.Fatalf("window(%x)=%#v err=%v", test.data, window, err)
 		}
-		for split := 1; split < len(data); split++ {
-			boundary := append(bytes.Repeat([]byte("a"), 8192-split), data...)
-			if _, err := ReadTextWindowReader(bytes.NewReader(boundary), WindowOptions{Offset: 1, Limit: 1}); err == nil {
-				t.Errorf("ReadTextWindowReader accepted malformed UTF-8 %x split at %d", data, split)
+		for split := 1; split < len(test.data); split++ {
+			boundary := append(bytes.Repeat([]byte("a"), 8192-split), test.data...)
+			window, err := ReadTextWindowReader(bytes.NewReader(boundary), WindowOptions{Offset: 1, Limit: 1})
+			if err != nil || !strings.HasSuffix(window.Body, test.want) {
+				t.Fatalf("window(%x) split at %d=%#v err=%v", test.data, split, window, err)
 			}
 		}
 	}
@@ -156,20 +167,20 @@ func TestTextCodecAcceptsUTF8BoundaryCodePoints(t *testing.T) {
 // Only NUL is binary, the probe window is 8000 bytes, and control characters
 // are text.
 func TestBinaryProbeBoundaryAndControlCharacters(t *testing.T) {
-	if _, _, err := textcodec.Decode("/repo/controls.txt", []byte("hello\tworld\r\n\f\x1b\x01\x1f")); err != nil {
+	if _, _, _, err := textcodec.Decode("/repo/controls.txt", []byte("hello\tworld\r\n\f\x1b\x01\x1f")); err != nil {
 		t.Fatalf("control characters were classified as binary: %v", err)
 	}
 	inside := bytes.Repeat([]byte{'a'}, 8000)
 	inside[7999] = 0
-	if _, _, err := textcodec.Decode("/repo/nul.txt", inside); !errors.Is(err, textcodec.ErrBinary) {
+	if _, _, _, err := textcodec.Decode("/repo/nul.txt", inside); !errors.Is(err, textcodec.ErrBinary) {
 		t.Fatalf("NUL within the probe window: err=%v", err)
 	}
 	outside := bytes.Repeat([]byte{'a'}, 8001)
 	outside[8000] = 0
-	if _, _, err := textcodec.Decode("/repo/late-nul.txt", outside); err != nil {
+	if _, _, _, err := textcodec.Decode("/repo/late-nul.txt", outside); err != nil {
 		t.Fatalf("NUL outside the probe window: err=%v", err)
 	}
-	if _, _, err := textcodec.Decode("/repo/utf16.txt", []byte{0xff, 0xfe, 'a', 0, 'b', 0}); err != nil {
+	if _, _, _, err := textcodec.Decode("/repo/utf16.txt", []byte{0xff, 0xfe, 'a', 0, 'b', 0}); err != nil {
 		t.Fatalf("UTF-16 data was classified as binary: %v", err)
 	}
 }

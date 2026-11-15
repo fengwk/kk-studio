@@ -19,14 +19,14 @@ func TestSyncParentDirectoryReturnsOpenError(t *testing.T) {
 	}
 }
 
-func TestAtomicWriteRejectsDirectoryDestination(t *testing.T) {
+func TestWriteInPlaceRejectsDirectoryDestination(t *testing.T) {
 	root := t.TempDir()
 	destination := filepath.Join(root, "directory")
 	if err := os.Mkdir(destination, 0700); err != nil {
 		t.Fatal(err)
 	}
-	if err := atomicWrite(destination, []byte("data"), 0600); err == nil {
-		t.Fatal("atomic write replaced a directory")
+	if err := writeInPlace(destination, []byte("data"), true); err == nil {
+		t.Fatal("in-place write replaced a directory")
 	}
 }
 

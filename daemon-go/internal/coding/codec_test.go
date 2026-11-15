@@ -2,6 +2,7 @@ package coding
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -63,22 +64,35 @@ func TestReadReportsEncodingHeader(t *testing.T) {
 	}
 }
 
-// Read explains undeclared, binary and conflicting files precisely.
+// Read shows bytes its encoding cannot decode as U+FFFD instead of refusing the file.
+func TestReadShowsUndecodableBytesAsReplacement(t *testing.T) {
+	undeclared := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": writeFixture(t, "gbk.txt", []byte("\xd6\xd0\xce\xc4\n"))}, nil)
+	if undeclared.Error || !strings.Contains(undeclared.Contents[0].Text, "1|\ufffd\ufffd\ufffd\ufffd") {
+		t.Fatalf("undeclared=%#v", undeclared)
+	}
+	declared := writeFixture(t, "page.html", append([]byte(`<meta charset="gbk">`), '\x81', ' '))
+	result := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": declared}, nil)
+	if result.Error || !strings.Contains(result.Contents[0].Text, "encoding: GBK\n") || !strings.Contains(result.Contents[0].Text, "\uFFFD") {
+		t.Fatalf("declared=%#v", result)
+	}
+}
+
+// Read refuses a declaration it cannot use, and reports that the tool did not run.
 func TestReadReportsCodecFailures(t *testing.T) {
-	undecodable := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": writeFixture(t, "gbk.txt", []byte("\xd6\xd0\xce\xc4\n"))}, nil)
-	if !undecodable.Error || !strings.Contains(undecodable.Contents[0].Text, "is not UTF-8 text and declares no encoding, so it was not read") || !strings.Contains(undecodable.Contents[0].Text, "iconv -f GBK") {
-		t.Fatalf("undeclared=%#v", undecodable)
-	}
-	if !strings.Contains(string(undecodable.Details), `"code":"CODEC"`) {
-		t.Fatalf("details=%s", undecodable.Details)
-	}
-	conflict := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": writeFixture(t, "page.html", []byte(`<html><head><meta charset="gb2312"></head><body>中文</body></html>`))}, nil)
-	if !conflict.Error || !strings.Contains(conflict.Contents[0].Text, "HTML meta charset") || !strings.Contains(conflict.Contents[0].Text, "GBK") {
+	conflict := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": writeFixture(t, "page.html", []byte(`<html><head><meta charset="utf-16le"></head><body>x</body></html>`))}, nil)
+	if !conflict.Error || !strings.Contains(conflict.Contents[0].Text, "HTML meta charset") || !strings.Contains(conflict.Contents[0].Text, "byte order mark") {
 		t.Fatalf("conflict=%#v", conflict)
+	}
+	if !strings.Contains(string(conflict.Details), `"code":"CODEC"`) || !strings.Contains(conflict.Contents[0].Text, "The tool was not executed.") || strings.Contains(conflict.Contents[0].Text, "Correct the arguments") {
+		t.Fatalf("conflict result=%#v", conflict)
 	}
 	unsupported := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": writeFixture(t, "doc.xml", []byte(`<?xml encoding="klingon"?>x`))}, nil)
 	if !unsupported.Error || !strings.Contains(unsupported.Contents[0].Text, "XML declaration") || !strings.Contains(unsupported.Contents[0].Text, "klingon") {
 		t.Fatalf("unsupported=%#v", unsupported)
+	}
+	binary := invokeCoding(t, Provider{}, "fs.read", map[string]any{"path": writeFixture(t, "binary.dat", []byte{'a', 0, 'b'})}, nil)
+	if !binary.Error || !strings.Contains(binary.Contents[0].Text, "is a binary file") || !strings.Contains(string(binary.Details), `"code":"CODEC"`) {
+		t.Fatalf("binary=%#v", binary)
 	}
 }
 
@@ -151,8 +165,8 @@ func mustRead(t *testing.T, path string) []byte {
 	return data
 }
 
-// Grep searches decoded text and lists files it could not decode.
-func TestGrepDecodesAndListsUndecodableFiles(t *testing.T) {
+// Grep searches decoded text and lists files whose declared encoding cannot be used.
+func TestGrepDecodesAndListsRejectedFiles(t *testing.T) {
 	// grep lists real paths; temp directories sit behind symlinks (macOS) or short names (Windows).
 	root, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
@@ -169,39 +183,50 @@ func TestGrepDecodesAndListsUndecodableFiles(t *testing.T) {
 	if text := result.Contents[0].Text; !strings.Contains(text, "page.html:1:") || !strings.Contains(text, "中文target") {
 		t.Fatalf("text=%q", text)
 	}
+	// Undeclared invalid UTF-8 is searched with U+FFFD in place of the bytes it cannot decode.
 	if err := os.WriteFile(filepath.Join(root, "gbk.txt"), []byte("x\xd6\xd0target"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A declaration the codec cannot use refuses the file instead.
+	rejected := filepath.Join(root, "utf16.html")
+	if err := os.WriteFile(rejected, []byte(`<meta charset="utf-16le">target`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "binary.dat"), []byte{'x', 0, 'y'}, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	result = invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": root, "pattern": "target", "literal": true}, nil)
-	if text := result.Contents[0].Text; !strings.Contains(text, "[Not searched because the text encoding could not be determined: "+filepath.ToSlash(filepath.Join(root, "gbk.txt"))+"]") {
+	text := result.Contents[0].Text
+	if !strings.Contains(text, "gbk.txt:1:x\ufffd\ufffdtarget") {
 		t.Fatalf("text=%q", text)
 	}
-	if strings.Contains(result.Contents[0].Text, "binary.dat") {
-		t.Fatalf("binary file was listed: %q", result.Contents[0].Text)
+	if !strings.Contains(text, "[Search incomplete; not searched because the declared text encoding cannot be used: "+filepath.ToSlash(rejected)+"]") {
+		t.Fatalf("text=%q", text)
 	}
-	direct := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": filepath.Join(root, "gbk.txt"), "pattern": "target", "literal": true}, nil)
-	if !direct.Error || !strings.Contains(direct.Contents[0].Text, "so it was not searched") || !strings.Contains(string(direct.Details), `"code":"CODEC"`) {
+	if strings.Contains(text, "binary.dat") {
+		t.Fatalf("binary file was listed: %q", text)
+	}
+	direct := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": rejected, "pattern": "target", "literal": true}, nil)
+	if !direct.Error || !strings.Contains(direct.Contents[0].Text, "byte order mark") || !strings.Contains(string(direct.Details), `"code":"CODEC"`) || !strings.Contains(direct.Contents[0].Text, "The tool was not executed.") {
 		t.Fatalf("direct=%#v", direct)
 	}
-	if _, err := search.GrepContext(context.Background(), filepath.Join(root, "gbk.txt"), "target", true, false, "", 10); err == nil || !strings.Contains(err.Error(), "not UTF-8 text") {
+	var rejectedErr *search.RejectedError
+	if _, err := search.GrepContext(context.Background(), rejected, "target", true, false, "", 10); !errors.As(err, &rejectedErr) || rejectedErr.Path != rejected {
 		t.Fatalf("search err=%v", err)
 	}
 	paths := make([]string, 12)
 	for index := range paths {
 		paths[index] = fmt.Sprintf("/repo/%02d", index)
 	}
-	summary := formatSearchResult(runtime.CapabilityCall{InvocationID: "undecodable"}, t.TempDir(), search.SearchOutcome{Undecodable: paths, UndecodableCount: len(paths)}, 10, "No matches found", "matches")
-	if text := summary.Contents[0].Text; !strings.HasPrefix(text, "No matches found\n[Not searched because the text encoding could not be determined: /repo/00") || !strings.Contains(text, "… and 2 more") {
+	summary := formatSearchResult(runtime.CapabilityCall{InvocationID: "rejected"}, t.TempDir(), search.SearchOutcome{Rejected: paths, RejectedCount: len(paths)}, 10, "No matches found", "matches")
+	if text := summary.Contents[0].Text; !strings.HasPrefix(text, "No matches found\n[Search incomplete; not searched because the declared text encoding cannot be used: /repo/00") || !strings.Contains(text, "… and 2 more") {
 		t.Fatalf("text=%q", text)
 	}
 }
 
 // decodeFixture decodes fixture bytes with the shared codec and reports the text.
 func decodeFixture(data []byte) (string, textcodec.Encoding, error) {
-	text, encoding, err := textcodec.Decode("", data)
+	text, encoding, _, err := textcodec.Decode("", data)
 	return string(text), encoding, err
 }
 
