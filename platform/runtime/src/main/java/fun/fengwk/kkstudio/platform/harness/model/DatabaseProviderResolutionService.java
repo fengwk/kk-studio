@@ -110,7 +110,8 @@ public final class DatabaseProviderResolutionService implements ProviderResoluti
                 request.messages(), request.model().inputModalities(), adapter.mediaCapabilities()),
             request.tools(),
             // cache control 已在规划期冻结（retention + session key）；执行期不按当前 capability 重新规范化。
-            request.cacheControl());
+            request.cacheControl(),
+            request.baselineHasClientTools());
     return new ResolvedExecution(
         effectiveRequest,
         timeoutPolicy,
