@@ -6,7 +6,6 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
@@ -25,20 +24,24 @@ func TestDetectHostInfoCollectsHostFacts(t *testing.T) {
 	}
 }
 
-// Records Go's literal Local timezone identifier when TZ is unset.
-func TestDetectHostInfoUsesLocalIdentifierWhenTZUnset(t *testing.T) {
+// A real host without TZ must report an identifier the control server accepts, on every platform.
+func TestDetectHostInfoReportsJavaZoneIDWhenTZUnset(t *testing.T) {
 	const probe = "KK_STUDIO_TEST_TZ_UNSET"
 	if os.Getenv(probe) == "1" {
 		info, err := detectHostInfo()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := info.GetTimeZone(); got != time.Local.String() || got != "Local" {
-			t.Fatalf("Go host time zone with TZ unset = %q, local location = %q; want Local", got, time.Local.String())
+		got := info.GetTimeZone()
+		if got == "Local" || got == "" {
+			t.Fatalf("host time zone with TZ unset = %q, want an IANA name or a UTC offset", got)
+		}
+		if err := protocol.ValidateEnvelope(&protocol.Envelope{MessageType: protocol.MessageType_READY, EnvironmentId: stringPtr("123e4567-e89b-42d3-a456-426614174000"), Payload: &protocol.Envelope_Ready{Ready: &protocol.Ready{DaemonVersion: stringPtr("1.0.0"), HostInfo: info, RuntimeStatus: &protocol.RuntimeSnapshot{Revision: int64Ptr(1), Status: &protocol.RuntimeBody{DaemonVersion: stringPtr("1.0.0"), Configuration: &protocol.ConfigurationStatus{AppliedVersion: int64Ptr(1)}}}}}}); err != nil {
+			t.Fatalf("host time zone %q failed READY validation: %v", got, err)
 		}
 		return
 	}
-	command := exec.Command(os.Args[0], "-test.run=^TestDetectHostInfoUsesLocalIdentifierWhenTZUnset$")
+	command := exec.Command(os.Args[0], "-test.run=^TestDetectHostInfoReportsJavaZoneIDWhenTZUnset$")
 	for _, value := range os.Environ() {
 		if strings.HasPrefix(value, "TZ=") || strings.HasPrefix(value, probe+"=") {
 			continue
@@ -48,6 +51,81 @@ func TestDetectHostInfoUsesLocalIdentifierWhenTZUnset(t *testing.T) {
 	command.Env = append(command.Env, probe+"=1")
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("time-zone probe with TZ unset failed: %v: %s", err, output)
+	}
+}
+
+// Covers every host time-zone source and its fallback to the current offset.
+func TestDetectTimeZoneSources(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		goos   string
+		env    map[string]string
+		link   string
+		offset int
+		want   string
+	}{
+		{name: "windows always offsets", goos: "windows", env: map[string]string{"TZ": "Asia/Shanghai"}, link: "/usr/share/zoneinfo/Asia/Shanghai", offset: 28800, want: "UTC+08:00"},
+		{name: "windows zero offset", goos: "windows", offset: 0, want: "UTC"},
+		{name: "TZ empty is UTC", goos: "linux", env: map[string]string{"TZ": ""}, offset: 28800, want: "UTC"},
+		{name: "TZ region name", goos: "linux", env: map[string]string{"TZ": "Asia/Shanghai"}, offset: 0, want: "Asia/Shanghai"},
+		{name: "TZ colon region name", goos: "linux", env: map[string]string{"TZ": ":Europe/Berlin"}, offset: 0, want: "Europe/Berlin"},
+		{name: "TZ absolute zoneinfo path", goos: "linux", env: map[string]string{"TZ": "/usr/share/zoneinfo/America/New_York"}, offset: 0, want: "America/New_York"},
+		{name: "TZ absolute posix path", goos: "linux", env: map[string]string{"TZ": ":/usr/share/zoneinfo/posix/Europe/Berlin"}, offset: 0, want: "Europe/Berlin"},
+		{name: "TZ right variant path", goos: "linux", env: map[string]string{"TZ": "/usr/share/zoneinfo/right/Asia/Tokyo"}, offset: 0, want: "Asia/Tokyo"},
+		{name: "TZ posix region name", goos: "linux", env: map[string]string{"TZ": "posix/Asia/Shanghai"}, offset: 0, want: "Asia/Shanghai"},
+		{name: "TZ colon right region name", goos: "linux", env: map[string]string{"TZ": ":right/Europe/Berlin"}, offset: 0, want: "Europe/Berlin"},
+		{name: "TZ double posix prefix is rejected", goos: "linux", env: map[string]string{"TZ": "posix/posix/Europe/Berlin"}, offset: 28800, want: "UTC+08:00"},
+		{name: "TZ localtime falls back to the link", goos: "linux", env: map[string]string{"TZ": "/etc/localtime"}, link: "/usr/share/zoneinfo/Asia/Shanghai", offset: 0, want: "Asia/Shanghai"},
+		{name: "unset TZ reads the link", goos: "linux", link: "/usr/share/zoneinfo/Asia/Shanghai", offset: 0, want: "Asia/Shanghai"},
+		{name: "relative link target", goos: "linux", link: "../usr/share/zoneinfo/Asia/Shanghai", offset: 0, want: "Asia/Shanghai"},
+		{name: "macOS link target", goos: "darwin", link: "/var/db/timezone/zoneinfo/America/New_York", offset: 0, want: "America/New_York"},
+		{name: "NixOS link target", goos: "linux", link: "/etc/zoneinfo/Europe/Berlin", offset: 0, want: "Europe/Berlin"},
+		{name: "unreadable link uses the offset", goos: "linux", offset: -12600, want: "UTC-03:30"},
+		{name: "link outside zoneinfo uses the offset", goos: "linux", link: "/usr/share/zoneinfo", offset: 20700, want: "UTC+05:45"},
+		{name: "unknown TZ region uses the offset", goos: "linux", env: map[string]string{"TZ": "Mars/Olympus"}, offset: 28800, want: "UTC+08:00"},
+		{name: "TZ abbreviation uses the offset", goos: "linux", env: map[string]string{"TZ": "CST"}, offset: 28800, want: "UTC+08:00"},
+		{name: "TZ posixrules uses the offset", goos: "linux", env: map[string]string{"TZ": "posixrules"}, offset: 0, want: "UTC"},
+		{name: "TZ localtime name uses the offset", goos: "linux", env: map[string]string{"TZ": "localtime"}, offset: 0, want: "UTC"},
+		{name: "TZ posix without a region uses the offset", goos: "linux", env: map[string]string{"TZ": "posix"}, offset: 0, want: "UTC"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lookupEnv := func(key string) (string, bool) {
+				value, ok := tc.env[key]
+				return value, ok
+			}
+			readlink := func(string) (string, error) {
+				if tc.link == "" {
+					return "", errors.New("no link")
+				}
+				return tc.link, nil
+			}
+			got := detectTimeZone(tc.goos, lookupEnv, readlink, func() int { return tc.offset })
+			if got != tc.want {
+				t.Fatalf("detectTimeZone(%s, %v, %q, %d) = %q, want %q", tc.goos, tc.env, tc.link, tc.offset, got, tc.want)
+			}
+			if len(got) > 128 || strings.ContainsAny(got, " \t") {
+				t.Fatalf("detected time zone %q is not a publishable identifier", got)
+			}
+		})
+	}
+}
+
+// Formats every offset shape the control server accepts.
+func TestOffsetTimeZoneName(t *testing.T) {
+	for _, tc := range []struct {
+		seconds int
+		want    string
+	}{
+		{0, "UTC"},
+		{28800, "UTC+08:00"},
+		{-12600, "UTC-03:30"},
+		{20700, "UTC+05:45"},
+		{-3600, "UTC-01:00"},
+		{3600 + 59, "UTC+01:00"},
+	} {
+		if got := offsetTimeZoneName(tc.seconds); got != tc.want {
+			t.Fatalf("offsetTimeZoneName(%d) = %q, want %q", tc.seconds, got, tc.want)
+		}
 	}
 }
 
