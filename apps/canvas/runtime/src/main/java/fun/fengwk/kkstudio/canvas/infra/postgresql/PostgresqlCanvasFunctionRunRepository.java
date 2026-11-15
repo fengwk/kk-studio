@@ -157,10 +157,11 @@ public class PostgresqlCanvasFunctionRunRepository {
     return true;
   }
 
+  /** 删除节点时清理其 Run 与 Work。没有 Run 也是成功；SQL 异常自然传播，不把更新行数当成失败。 */
   @Transactional
-  public boolean deleteByNodeId(UUID nodeId) {
+  public void deleteByNodeId(UUID nodeId) {
     canvasRunWorkQueue.delete(nodeId);
-    return runStore.deleteByNodeId(nodeId) >= 0;
+    runStore.deleteByNodeId(nodeId);
   }
 
   /** 持有者的 CAS 成功即证明它仍持有租约：Run 不再可执行，同一事务内删除它的 Work 行。 */

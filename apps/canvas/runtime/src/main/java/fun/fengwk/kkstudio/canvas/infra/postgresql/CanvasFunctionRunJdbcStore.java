@@ -302,8 +302,8 @@ public class CanvasFunctionRunJdbcStore {
         .update();
   }
 
-  public int deleteByNodeId(UUID nodeId) {
-    return jdbc.sql("delete from canvas_function_run where node_id = :nodeId")
+  public void deleteByNodeId(UUID nodeId) {
+    jdbc.sql("delete from canvas_function_run where node_id = :nodeId")
         .param("nodeId", nodeId)
         .update();
   }
