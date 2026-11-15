@@ -8,9 +8,9 @@ import type { TurnUsage } from '@/features/thread/runtime/thread-timeline/thread
  * TURN_END / COMPACTION）；活跃 model/tool invocation 是单条 synthetic 记录
  * （Provider delta token 绝不逐条成行），并锚定在所属 durable Entry 之后。
  */
-export type ThreadEventSource = 'entry' | 'active-model' | 'active-tool' | 'attempt-failure'
+type ThreadEventSource = 'entry' | 'active-model' | 'active-tool' | 'attempt-failure'
 
-export type ThreadEventKind =
+type ThreadEventKind =
   | 'ROOT'
   | 'TURN_START'
   | 'SETTINGS'

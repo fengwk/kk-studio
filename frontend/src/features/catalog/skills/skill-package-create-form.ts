@@ -1,4 +1,4 @@
-export type SkillPackageSource = 'GIT' | 'UPLOAD'
+type SkillPackageSource = 'GIT' | 'UPLOAD'
 
 /** 新建技能包的受控输入：两个来源共享包名与描述，各自再有一组专属字段。 */
 export interface SkillPackageFormState {

@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import '@/features/chat/chat-workspace.css'
 import { setLocale } from '@/shared/i18n'
-import { ChatLayoutSelector } from '@/features/chat/ChatWorkspacePage'
+import { ChatLayoutSelector } from '@/features/chat/ChatLayoutSelector'
 import {
   applyChatLayout,
   createDefaultChatPaneState,

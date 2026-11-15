@@ -12,6 +12,5 @@ export {
   inspectPendingAcceptanceSlot,
   loadPendingAcceptance,
   savePendingAcceptance,
-  type BoundPendingMessage,
   type PendingAcceptance,
 } from '@/features/thread/runtime/state/pending-request-store'

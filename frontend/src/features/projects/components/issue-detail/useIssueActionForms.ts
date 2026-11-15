@@ -38,7 +38,7 @@ function isLockedByPendingAction(
 /**
  * 活动发布表单：COMMENT 只进时间线，INSTRUCTION 投递给活跃 Run。
  */
-export function useActivityForm(context: IssueActionFormContext) {
+function useActivityForm(context: IssueActionFormContext) {
   const { issue, api, pendingUnknownAction, setActionError, executeIssueAction } = context
   const { t } = useI18n()
   const [kind, setKind] = useState<ActivityKind>('COMMENT')
@@ -94,7 +94,7 @@ export function useActivityForm(context: IssueActionFormContext) {
 }
 
 /** 阻塞原因表单：多行文本，空原因不允许提交。 */
-export function useBlockForm(context: IssueActionFormContext) {
+function useBlockForm(context: IssueActionFormContext) {
   const { issue, api, pendingUnknownAction, setActionError, executeIssueAction } = context
   const { t } = useI18n()
   const [isOpen, setIsOpen] = useState(false)
@@ -147,7 +147,7 @@ export function useBlockForm(context: IssueActionFormContext) {
 }
 
 /** 终止说明表单：说明可选，空说明提交为 null。 */
-export function useStopForm(context: IssueActionFormContext) {
+function useStopForm(context: IssueActionFormContext) {
   const { issue, api, pendingUnknownAction, setActionError, executeIssueAction } = context
   const { t } = useI18n()
   const [isOpen, setIsOpen] = useState(false)
@@ -196,7 +196,7 @@ export function useStopForm(context: IssueActionFormContext) {
 }
 
 /** 阶段预算重置表单：阶段编码必填，额度必须是 1..MAX_RUNS 的规范整数。 */
-export function useResetBudgetForm(context: IssueActionFormContext) {
+function useResetBudgetForm(context: IssueActionFormContext) {
   const { issue, api, pendingUnknownAction, setActionError, executeIssueAction } = context
   const { t } = useI18n()
   const [isOpen, setIsOpen] = useState(false)

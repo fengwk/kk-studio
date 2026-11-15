@@ -6,14 +6,9 @@ import { buildThreadEventTimeline } from '@/features/thread/runtime/thread-timel
 import { aggregateEntryUsage } from '@/features/thread/runtime/thread-timeline/turn-usage'
 import { useAgentThreadQueries } from '@/features/thread/runtime/queries/useAgentThreadQueries'
 import { useHarnessThreadRealtime } from '@/features/thread/runtime/thread-realtime/useHarnessThreadRealtime'
-import {
-  extractQueuedCustomMessages,
-  type QueuedCustomMessage,
-} from '@/features/thread/runtime/state/queued-custom-messages'
+import { extractQueuedCustomMessages } from '@/features/thread/runtime/state/queued-custom-messages'
 import { getBuiltinModelSelection } from '@/shared/api/contracts/ai-runtime'
 import { translate } from '@/shared/i18n'
-
-export type { QueuedCustomMessage }
 
 /** 只读 Thread 投影的完整形状：控制面（controller）是它的超集。 */
 export type ThreadProjection = ReturnType<typeof useThreadProjection>

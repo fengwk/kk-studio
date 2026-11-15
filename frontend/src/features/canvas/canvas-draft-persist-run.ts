@@ -5,7 +5,7 @@ import {
 } from '@/features/canvas/canvas-draft-storage'
 
 /** 一轮落盘的结果：完成（含无差集）、因画布已切换而放弃、或首条失败。 */
-export type DraftPersistOutcome = 'completed' | 'abandoned' | 'failed'
+type DraftPersistOutcome = 'completed' | 'abandoned' | 'failed'
 
 /** 持久基线与本轮目标草稿的差集：只有引用不同或已消失的条目需要落盘。 */
 interface DraftDiff {

@@ -1,5 +1,5 @@
 /** caret slot 的 DOM 标记；只有带该标记的节点才按 slot 处理。 */
-export const CARET_SLOT_ATTRIBUTE = 'data-caret-slot'
+const CARET_SLOT_ATTRIBUTE = 'data-caret-slot'
 
 /** 编辑器在 IME 组合期间的 DOM 标记：焦点状态机据此不触碰组合态。 */
 export const COMPOSING_ATTRIBUTE = 'data-composing'

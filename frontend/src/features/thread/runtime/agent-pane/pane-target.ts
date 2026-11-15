@@ -242,7 +242,6 @@ export function isPendingAcceptanceValue(value: unknown): value is PendingAccept
 }
 
 export {
-  isCommandBatchRequest,
   isThreadCommandBatchRequest,
   isBranchDraft,
   isComposerPart,

@@ -7,7 +7,7 @@ import { partsKey, trimMessageParts } from '@/features/thread/composer/composer-
 import { loadPendingAcceptance } from '@/features/thread/runtime/agent-pane'
 
 /** pane 的首次摘要：只看目标 pane 自己的本地草稿与待确认记录，不加载 Thread 快照。 */
-export function initialPaneReports(chatId: string, paneState: ChatPaneState): Record<string, PaneReport> {
+function initialPaneReports(chatId: string, paneState: ChatPaneState): Record<string, PaneReport> {
   return Object.fromEntries(
     paneState.panes.map((pane) => [pane.id, initialPaneReport(chatId, pane.id, pane.target)]),
   )

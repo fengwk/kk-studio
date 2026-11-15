@@ -3,7 +3,7 @@ import type { ChatPaneState } from '@/features/chat/chat-pane-state'
 import { visibleChatPanes } from '@/features/chat/chat-pane-state'
 import type { ThreadPresentation } from '@/features/thread/runtime/panes/thread-presentation'
 
-export interface DebugSource {
+interface DebugSource {
   paneId: string
   viewKey: string
 }

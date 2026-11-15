@@ -33,7 +33,7 @@ export function PreviewTarget({
 }
 
 /** 有损解码警示：只在审查 JSON 声明 lossyDecode 时显示在 diff 上方。 */
-export function LossyDecodeWarning({
+function LossyDecodeWarning({
   lossyDecode,
 }: {
   lossyDecode?: EditReviewLossyDecode

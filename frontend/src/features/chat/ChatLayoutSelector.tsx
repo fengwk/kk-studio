@@ -14,7 +14,7 @@ const LAYOUTS: Array<{ value: ChatLayout; label: string }> = [
   { value: 'grid-9', label: '9' },
 ]
 
-export interface ChatLayoutSelectorProps {
+interface ChatLayoutSelectorProps {
   layout: ChatLayout
   onChange: (layout: ChatLayout) => void
   selectId?: string

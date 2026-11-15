@@ -1,9 +1,6 @@
 import type { FormEventHandler } from 'react'
 import { buildResourceSubmitPlan } from '@/features/catalog/ai-resource-editor-submit-plans'
-import {
-  validateResourceDraft,
-  type ResourceFieldKey,
-} from '@/features/catalog/ai-resource-form-validation'
+import { validateResourceDraft } from '@/features/catalog/ai-resource-form-validation'
 import { useAiConsoleResourceMutations } from '@/features/catalog/useAiConsoleResourceMutations'
 import {
   useAiConsoleResourceQueries,
@@ -13,7 +10,6 @@ import { useResourceDeleteConfirm, useResourceFormErrors } from '@/features/cata
 import { useDraftResourceSync, useResourceMutationError } from '@/features/catalog/useResourceDraftSync'
 import { useResourceEditorNavigation } from '@/features/catalog/useResourceEditorNavigation'
 import type { AgentDraft, ModelDraft, ModelGroupDraft, ProviderDraft } from '@/features/catalog/ai-console-types'
-import type { ResourceEditorPlan } from '@/features/catalog/ai-resource-editor-plan-types'
 
 /** 校验失败时先滚到模态顶部，再滚到首个标红字段，便于看见具体哪一项。 */
 function revealFirstFieldError(form: HTMLFormElement) {
@@ -185,5 +181,3 @@ export function useAiConsoleResourceController(
     },
   }
 }
-
-export type { ResourceEditorPlan, ResourceFieldKey }

@@ -22,7 +22,7 @@ export const WEEKDAY_LABELS: Record<Weekday, TranslationKey> = {
 export const SCALAR_KINDS: PricingScalarKind[] = ['string', 'number', 'boolean', 'null']
 
 /** 时间条件的最小合法默认值：全天使用 wire 规定的 00:00-24:00。 */
-export const ALL_DAY_TIME = { start: '00:00', end: '24:00', timezone: 'UTC' } as const
+const ALL_DAY_TIME = { start: '00:00', end: '24:00', timezone: 'UTC' } as const
 
 type ConditionKey = keyof ModelPricingConditionDTO
 

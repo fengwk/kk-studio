@@ -7,11 +7,7 @@ import {
   normalizeUsageCost,
 } from '@/features/thread/runtime/thread-timeline/usage-cost'
 
-export {
-  addDecimalStrings,
-  formatUsageCost,
-  normalizeUsageCost,
-} from '@/features/thread/runtime/thread-timeline/usage-cost'
+export { formatUsageCost } from '@/features/thread/runtime/thread-timeline/usage-cost'
 
 function isNonNegativeSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0

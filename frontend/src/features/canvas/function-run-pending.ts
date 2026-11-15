@@ -30,7 +30,7 @@ function isValidCanvasFunctionVersion(value: unknown): value is CanvasFunctionVe
 }
 
 /** 存储读取失败（localStorage 不可用 / getItem 抛错）：原始字节必须保留，绝不删除。 */
-export class PendingRunStorageError extends Error {
+class PendingRunStorageError extends Error {
   constructor(message: string, options?: ErrorOptions) {
     super(message, options)
     this.name = 'PendingRunStorageError'
