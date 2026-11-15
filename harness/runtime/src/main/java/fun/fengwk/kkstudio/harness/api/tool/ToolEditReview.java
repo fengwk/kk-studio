@@ -9,7 +9,7 @@ import java.util.Objects;
  *
  * <p>完整 diff 用于用户审查；执行只从同一快照提取 expectedFile，不重新计算或接受客户端传回的审查正文。
  *
- * <p>{@link LossyDecode} 只在原文件以声明编码解码时替换过非法字节序列、且最终文本仍含 U+FFFD 时存在，向审批者披露保存后 这些位置会写成 U+FFFD。
+ * <p>{@link LossyDecode} 只在原文件以声明编码解码时替换过非法字节序列、且最终文本仍含 U+FFFD 时存在，向审批者披露保存后这些位置会写成 U+FFFD。
  */
 public record ToolEditReview(ExpectedFile expectedFile, String diff, LossyDecode lossyDecode) {
 

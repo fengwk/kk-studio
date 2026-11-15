@@ -27,7 +27,7 @@ import java.util.Objects;
  *   <li>行号与列号内部用 {@code long} 计数；超出参数协议 {@code int} 范围的位置显式拒绝，不伪造越界元数据。
  * </ul>
  *
- * <p>{@link #read} 使用调用方已解码的字符流，不自行剥离 BOM 或关闭流；未配对的代理项按 U+FFFD 替换。{@code format} 对受管文本执行 替换式 UTF-8
+ * <p>{@link #read} 使用调用方已解码的字符流，不自行剥离 BOM 或关闭流；未配对的代理项按 U+FFFD 替换。{@code format} 对受管文本执行替换式 UTF-8
  * 解码、首字符 BOM 剥离和参数校验；调用方负责关闭输入流。IO 映射为 {@link PlatformReadException}，存储超时等未检查异常原样传播。
  *
  * <p>非文本判定与 Daemon codec 一致：原始字节的前 {@value #BINARY_PROBE_BYTES} 字节内出现 NUL 字节是二进制文件；其余非法 UTF-8 按
