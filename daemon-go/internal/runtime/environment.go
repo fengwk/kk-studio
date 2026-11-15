@@ -5,16 +5,12 @@ import (
 	"fmt"
 	"os"
 	"os/user"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
-
-// zoneRegionName matches the IANA region identifiers Java's ZoneId resolves.
-var zoneRegionName = regexp.MustCompile(`^[A-Za-z]+(/[A-Za-z0-9_+-]+)+$`)
 
 func localHostInfo(goos, goarch string, wsl bool, timeZone, userName, home, temp string) (*protocol.HostInfo, error) {
 	var operatingSystem protocol.OperatingSystem
@@ -111,24 +107,10 @@ func stripZoneVariantPrefix(name string) string {
 	return name
 }
 
-// validTimeZoneName accepts the identifiers Java's ZoneId resolves, so a host name is published
-// only when the control server can read it. A name that still starts with a zoneinfo layout
-// directory is never published.
+// validTimeZoneName accepts a host-configured name only when the control server can read it. TZ
+// offset strings are never taken at face value because POSIX reverses their sign.
 func validTimeZoneName(name string) bool {
-	if name == "UTC" {
-		return true
-	}
-	if !zoneRegionName.MatchString(name) || hasZoneVariantPrefix(name) {
-		return false
-	}
-	_, err := time.LoadLocation(name)
-	return err == nil
-}
-
-// hasZoneVariantPrefix reports a region name whose first segment names a zoneinfo layout directory.
-func hasZoneVariantPrefix(name string) bool {
-	segment, _, _ := strings.Cut(name, "/")
-	return segment == "posix" || segment == "right"
+	return name == "UTC" || protocol.ValidRegionZoneID(name)
 }
 
 // offsetTimeZoneName renders a zone offset as the UTC±HH:MM identifier Java accepts.

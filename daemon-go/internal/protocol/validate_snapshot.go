@@ -42,8 +42,7 @@ func validateHost(h *HostInfo) error {
 }
 
 // validZoneID accepts the identifiers Java's ZoneId resolves: UTC, a UTC offset within 18:00, or a
-// region name the IANA database holds. A first segment of posix or right names a zoneinfo layout
-// directory, which Java rejects even though the location database resolves it.
+// region name the IANA database holds.
 func validZoneID(value string) bool {
 	if value == "UTC" {
 		return true
@@ -59,17 +58,21 @@ func validZoneID(value string) bool {
 		}
 		return true
 	}
-	if !zoneRegionPattern.MatchString(value) || hasZoneVariantPrefix(value) {
-		return false
-	}
-	_, err := time.LoadLocation(value)
-	return err == nil
+	return ValidRegionZoneID(value)
 }
 
-// hasZoneVariantPrefix reports a region name whose first segment names a zoneinfo layout directory.
-func hasZoneVariantPrefix(name string) bool {
-	segment, _, _ := strings.Cut(name, "/")
-	return segment == "posix" || segment == "right"
+// ValidRegionZoneID reports whether name is an IANA region identifier, such as Asia/Shanghai, that
+// both Java's ZoneId and the host location database resolve. A first segment of posix or right names
+// a zoneinfo layout directory, which Java rejects even though the location database resolves it.
+func ValidRegionZoneID(name string) bool {
+	if !zoneRegionPattern.MatchString(name) {
+		return false
+	}
+	if segment, _, _ := strings.Cut(name, "/"); segment == "posix" || segment == "right" {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
 }
 
 func validateSnapshot(s *RuntimeSnapshot, path string) error {
