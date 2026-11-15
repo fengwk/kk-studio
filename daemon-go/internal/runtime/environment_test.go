@@ -83,6 +83,7 @@ func TestDetectTimeZoneSources(t *testing.T) {
 		{name: "unreadable link uses the offset", goos: "linux", offset: -12600, want: "UTC-03:30"},
 		{name: "link outside zoneinfo uses the offset", goos: "linux", link: "/usr/share/zoneinfo", offset: 20700, want: "UTC+05:45"},
 		{name: "unknown TZ region uses the offset", goos: "linux", env: map[string]string{"TZ": "Mars/Olympus"}, offset: 28800, want: "UTC+08:00"},
+		{name: "wrong-case TZ region uses the offset", goos: "darwin", env: map[string]string{"TZ": "Asia/shanghai"}, offset: 28800, want: "UTC+08:00"},
 		{name: "TZ abbreviation uses the offset", goos: "linux", env: map[string]string{"TZ": "CST"}, offset: 28800, want: "UTC+08:00"},
 		{name: "TZ posixrules uses the offset", goos: "linux", env: map[string]string{"TZ": "posixrules"}, offset: 0, want: "UTC"},
 		{name: "TZ localtime name uses the offset", goos: "linux", env: map[string]string{"TZ": "localtime"}, offset: 0, want: "UTC"},

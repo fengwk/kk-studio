@@ -1,6 +1,8 @@
 package protocol
 
 import (
+	"os"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -71,8 +73,42 @@ func ValidRegionZoneID(name string) bool {
 	if segment, _, _ := strings.Cut(name, "/"); segment == "posix" || segment == "right" {
 		return false
 	}
-	_, err := time.LoadLocation(name)
-	return err == nil
+	if _, err := time.LoadLocation(name); err != nil {
+		return false
+	}
+	// Directory-backed location lookup follows the filesystem's case rules, whereas Java's
+	// ZoneId is always case-sensitive. Zip-backed lookup already compares names exactly.
+	for _, root := range []string{os.Getenv("ZONEINFO"), "/usr/share/zoneinfo", "/usr/share/lib/zoneinfo", "/usr/lib/locale/TZ", "/etc/zoneinfo"} {
+		if root == "" {
+			continue
+		}
+		if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(name))); err == nil {
+			return exactZonePath(root, name)
+		}
+	}
+	return true
+}
+
+// exactZonePath checks every component against directory entries, including on case-insensitive hosts.
+func exactZonePath(root, name string) bool {
+	for _, part := range strings.Split(name, "/") {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			return false
+		}
+		found := false
+		for _, entry := range entries {
+			if entry.Name() == part {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+		root = filepath.Join(root, part)
+	}
+	return true
 }
 
 func validateSnapshot(s *RuntimeSnapshot, path string) error {

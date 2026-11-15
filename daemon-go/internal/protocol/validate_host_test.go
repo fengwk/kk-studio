@@ -1,6 +1,8 @@
 package protocol
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"google.golang.org/protobuf/proto"
@@ -53,6 +55,9 @@ func TestValidateHostAcceptsExactlyJavaZoneIDs(t *testing.T) {
 		"GMT+8",
 		"Mars/Olympus",
 		"Asia/shanghai",
+		"asia/Shanghai",
+		"ASIA/Shanghai",
+		"Asia/SHANGHAI",
 		// posix/ and right/ name zoneinfo layout directories; Java rejects them even though the
 		// location database resolves the files behind them.
 		"posix/Europe/Berlin",
@@ -66,5 +71,21 @@ func TestValidateHostAcceptsExactlyJavaZoneIDs(t *testing.T) {
 	}
 	if err := validateHost(&HostInfo{OperatingSystem: OperatingSystem_LINUX, Architecture: Architecture_AMD64}); err != nil {
 		t.Fatalf("omitted time zone rejected: %v", err)
+	}
+}
+
+// Zone identifiers retain exact directory-entry spelling even on a case-insensitive filesystem.
+func TestExactZonePath(t *testing.T) {
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, "Asia"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Asia", "Shanghai"), []byte("fixture"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"Asia/Shanghai", "Asia/shanghai", "asia/Shanghai", "Asia/Missing", "Missing/Shanghai", "Asia/Shanghai/Child"} {
+		if got := exactZonePath(root, name); got != (name == "Asia/Shanghai") {
+			t.Errorf("exactZonePath(%q) = %t", name, got)
+		}
 	}
 }
