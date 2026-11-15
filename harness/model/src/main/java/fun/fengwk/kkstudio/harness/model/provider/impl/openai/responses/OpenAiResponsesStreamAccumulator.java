@@ -1,12 +1,9 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
-import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
-import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -44,14 +41,6 @@ import java.util.function.Consumer;
  * 上报原生事实；原生帧不进入 durable checkpoint、realtime 增量或任何内容缓冲。
  */
 public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState {
-
-  private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
-  private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
-
-  private static final String USAGE_INTEGER_FORMAT =
-      "invalid usage token count in field %s: must be an integral number within long range";
-  private static final String USAGE_NEGATIVE_FORMAT =
-      "invalid usage token count in field %s: must be non-negative";
 
   private static final Set<String> KNOWN_SSE_EVENTS =
       Set.of(

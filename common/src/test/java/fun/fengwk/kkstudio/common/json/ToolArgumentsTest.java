@@ -63,16 +63,4 @@ class ToolArgumentsTest {
     assertFalse(ToolArguments.flag(arguments, "missing"));
     assertFalse(ToolArguments.flag(null, "yes"));
   }
-
-  /** render 把解析与字段读取一起延后：builder 必须同时处理解析失败（null）与成功两种情况。 */
-  @Test
-  void renderDelegatesParsedArgumentsToBuilder() {
-    assertEquals(
-        "read /tmp/a",
-        ToolArguments.render(
-            "{\"path\":\"/tmp/a\"}", arguments -> "read " + ToolArguments.text(arguments, "path")));
-    assertEquals(
-        "read something",
-        ToolArguments.render("{", arguments -> "read " + (arguments == null ? "something" : "?")));
-  }
 }

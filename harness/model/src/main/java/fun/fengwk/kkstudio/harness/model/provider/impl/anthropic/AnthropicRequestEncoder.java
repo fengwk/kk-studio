@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.ObjectReader;
-import tools.jackson.databind.cfg.JsonNodeFeature;
 import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
@@ -40,10 +38,6 @@ public final class AnthropicRequestEncoder {
 
   private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
 
-  /** 语义比对专用读取器：数值按 scale 无关归一，只用于 replay 与 durable 的一致性比对，不参与 wire 输出。 */
-  private static final ObjectReader COMPARISON_READER =
-      OBJECT_MAPPER.reader().with(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES);
-
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   /**
@@ -52,10 +46,6 @@ public final class AnthropicRequestEncoder {
    */
   private static final List<String> RUNTIME_OWNED_OPTION_FIELDS =
       List.of("model", "max_tokens", "stream", "messages", "system", "cache_control");
-
-  private static final String OUTPUT_CONFIG_BETA = "mid-conversation-output-config-2026-07-01";
-  private static final String THINKING_BINDING_BETA = "thinking-binding-controls-2026-08-01";
-  private static final String INLINE_TOOLS_BETA = "inline-tools-2026-09-15";
 
   private final RequestBodySizeGuard bodySizeGuard;
 

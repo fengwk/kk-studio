@@ -49,45 +49,6 @@ public final class AgentMessageJsonCodec {
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> MESSAGE_FIELDS = orderedSet("role", "contents");
-  private static final Set<String> TEXT_FIELDS = orderedSet("type", "text");
-  private static final Set<String> TEXT_NATIVE_FIELDS =
-      orderedSet("type", "text", "providerBlockData");
-  private static final Set<String> THINKING_FIELDS = orderedSet("type", "text");
-  private static final Set<String> THINKING_NATIVE_FIELDS =
-      orderedSet("type", "text", "providerBlockData");
-  private static final Set<String> REDACTED_THINKING_FIELDS = orderedSet("type", "data");
-  private static final Set<String> REDACTED_THINKING_NATIVE_FIELDS =
-      orderedSet("type", "data", "providerBlockData");
-  private static final Set<String> NATIVE_BLOCK_FIELDS =
-      orderedSet("type", "blockType", "providerBlockData");
-  private static final Set<String> JSON_FIELDS = orderedSet("type", "json");
-  private static final Set<String> TOOL_CALL_FIELDS =
-      orderedSet("type", "toolCallId", "toolName", "rendererKey", "argumentsJson", "historyAction");
-  private static final Set<String> TOOL_CALL_NATIVE_FIELDS =
-      orderedSet(
-          "type",
-          "toolCallId",
-          "toolName",
-          "rendererKey",
-          "argumentsJson",
-          "historyAction",
-          "providerBlockData");
-  private static final Set<String> TOOL_RESULT_FIELDS =
-      orderedSet(
-          "type", "toolCallId", "toolName", "rendererKey", "contents", "error", "detailsJson");
-  private static final Set<String> RESOURCE_FIELDS =
-      orderedSet(
-          "type",
-          "blobId",
-          "name",
-          "totalBytes",
-          "totalLines",
-          "preview",
-          "imageTier",
-          "originalWidth",
-          "originalHeight",
-          "displayWidth",
-          "displayHeight");
 
   public AgentMessageJsonCodec() {}
 
