@@ -19,7 +19,7 @@ test('daemon CI is reusable and compiles all six supported static targets', () =
 test('release and Docker gates reuse Daemon CI', () => {
   for (const workflow of [release, docker]) {
     assert.match(workflow, /uses: \.\/\.github\/workflows\/daemon-ci\.yml/)
-    assert.doesNotMatch(workflow, /daemon-ci\.yml/)
+    assert.doesNotMatch(workflow, /^ {2}(quality|test):/m)
   }
 })
 

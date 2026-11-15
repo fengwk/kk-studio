@@ -66,7 +66,7 @@ test('release dispatch stages release archives and cannot publish', () => {
   assert.match(release, /workflow_dispatch:/)
   assert.match(release, /daemon\/release/)
   assert.match(release, /github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/'\)/)
-  assert.doesNotMatch(release, /daemon-ci\.yml/)
+  assert.doesNotMatch(release, /^ {2}(quality|test):/m)
 })
 
 test('release staging builds the Daemon executable and packages updater-compatible runtime layout', () => {
