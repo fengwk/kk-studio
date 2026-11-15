@@ -81,7 +81,7 @@ test('test intent: the E2E runtime work directory survives maven clean', () => {
 })
 
 test('test intent: E2E Maven is online by default and offline only by opt-in', () => {
-  // E2E 唯一的 Maven 重建路径（backend）必须共享显式离线开关；Daemon 不再走 Maven。
+  // E2E 唯一的 Maven 重建路径（backend）必须共享显式离线开关；Daemon 用 Go 工具链构建。
   let { result, calls } = runE2eBackendMaven('unset')
   assert.equal(result.status, 0, output(result))
   assert.equal(calls.length, 1)

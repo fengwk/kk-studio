@@ -37,8 +37,8 @@ func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
 
-// TestProtocol4ProductionRuntime exercises the assembled daemon against a real protocol-4 HTTP/2-over-WebSocket control channel.
-func TestProtocol4ProductionRuntime(t *testing.T) {
+// TestProductionRuntimeEndToEnd exercises the assembled daemon against a real production HTTP/2-over-WebSocket control channel.
+func TestProductionRuntimeEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	accepted := make(chan net.Conn, 1)
@@ -66,7 +66,7 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	if err := native.WritePrivateFile(configPath, []byte(configBody)); err != nil {
 		t.Fatal(err)
 	}
-	if err := native.WritePrivateFile(filepath.Join(directory, "daemon.token"), []byte("protocol4-test-token\n")); err != nil {
+	if err := native.WritePrivateFile(filepath.Join(directory, "daemon.token"), []byte("e2e-test-token\n")); err != nil {
 		t.Fatal(err)
 	}
 	initial, err := config.LoadDaemonConfig(configPath)
@@ -114,7 +114,7 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 	}
 	defer peer.Close()
 
-	controlTransport, bodyWriter, response := openProtocol4ControlStream(t, ctx, peer)
+	controlTransport, bodyWriter, response := openControlStream(t, ctx, peer)
 	defer controlTransport.CloseIdleConnections()
 	defer response.Body.Close()
 
@@ -233,7 +233,7 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		{"read", "fs.read", fmt.Sprintf(`{"path":%q}`, file), "123e4567-e89b-42d3-a456-426614174001", "needle original"},
 		{"grep", "fs.grep", fmt.Sprintf(`{"path":%q,"pattern":"needle","literal":true}`, directory), "123e4567-e89b-42d3-a456-426614174002", "needle original"},
 		{"edit", "fs.edit", fmt.Sprintf(`{"path":%q,"edits":[{"old_string":"original","new_string":"edited"}]}`, file), "123e4567-e89b-42d3-a456-426614174003", "edited"},
-		{"process", "process.exec", fmt.Sprintf(`{"command":"printf protocol4-e2e","workdir":%q}`, directory), "123e4567-e89b-42d3-a456-426614174004", "protocol4-e2e"},
+		{"process", "process.exec", fmt.Sprintf(`{"command":"printf e2e","workdir":%q}`, directory), "123e4567-e89b-42d3-a456-426614174004", "e2e"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -401,7 +401,7 @@ func TestProtocol4ProductionRuntime(t *testing.T) {
 		t.Fatal("production runtime did not reconnect")
 	}
 	defer reconnectPeer.Close()
-	reconnectTransport, reconnectWriter, reconnectResponse := openProtocol4ControlStream(t, ctx, reconnectPeer)
+	reconnectTransport, reconnectWriter, reconnectResponse := openControlStream(t, ctx, reconnectPeer)
 	defer reconnectTransport.CloseIdleConnections()
 	defer reconnectResponse.Body.Close()
 	bodyWriter = reconnectWriter
@@ -435,7 +435,7 @@ func (failingUpdateRunner) HandleUpdate(context.Context, update.Command, config.
 	return update.Outcome{Phase: update.PhaseFailed, Message: "test updater failed"}, nil
 }
 
-func openProtocol4ControlStream(t *testing.T, ctx context.Context, peer net.Conn) (*http.Transport, *io.PipeWriter, *http.Response) {
+func openControlStream(t *testing.T, ctx context.Context, peer net.Conn) (*http.Transport, *io.PipeWriter, *http.Response) {
 	t.Helper()
 	protocols := new(http.Protocols)
 	protocols.SetUnencryptedHTTP2(true)

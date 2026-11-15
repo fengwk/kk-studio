@@ -72,7 +72,7 @@ main() {
   curl -q --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --output "$runtime_archive" "$runtime_url"
   [ "$(sha256_of "$runtime_archive")" = "$runtime_sha" ] || die 'code-server SHA256 mismatch'
   tar -xzf "$runtime_archive" -C "$STAGING_DIR/runtime/code-server" --strip-components=1
-  # The daemon replaces the bundled search binary; keep code-server's own Node runtime but omit rg.
+  # Search is implemented by the daemon, so the archive keeps code-server's own Node runtime but omits rg.
   find "$STAGING_DIR/runtime/code-server" -type d -name 'ripgrep*' -prune -exec rm -rf -- {} +
   find "$STAGING_DIR/runtime/code-server" -type f \( -name rg -o -name rg.exe \) -delete
   cp "$WORK_DIR/$bin_name" "$STAGING_DIR/$bin_name"

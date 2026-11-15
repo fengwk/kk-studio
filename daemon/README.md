@@ -1,6 +1,6 @@
 # Daemon
 
-The Environment Daemon is the production daemon implementation. Java integration tests and E2E fixtures build its binary directly; the IDE extension remains JavaScript under `ide-extension/`. Protocol, capability, and runtime contracts are shared with Studio through generated protocol code and byte-identical capability schemas.
+The Environment Daemon is the production daemon. Java integration tests and E2E fixtures build its binary directly; the IDE extension is JavaScript under `ide-extension/`. Protocol, capability, and runtime contracts are shared with Studio through generated protocol code and byte-identical capability schemas.
 
 ## Development
 

@@ -151,7 +151,7 @@ Windows 安装器回归在同一宿主上分别运行 Windows PowerShell 5.1 与
 后一个，任一失败仍阻断正常发布。
 Unix 脚本回归在完整 repository 测试中以系统 Bash 运行；macOS 安装与归档契约由其矩阵的系统 Bash（macOS 为 3.2）
 步骤覆盖，不以 Homebrew Bash 的结果替代系统自带版本。
-Daemon 的持续集成由 [daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 负责，检查 Go 格式、vet、staticcheck、测试与目标平台构建；其平台清单和命令以 [`daemon/README.md`](../../daemon/README.md) 为准。真实扩展宿主仍使用 Node 内置 `node:test`。发行归档和发布门禁属于发布流程，详见 [Daemon 安装与运行](environment-daemon.md)。
+Daemon 的持续集成由 [daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 负责，检查 Go 格式、vet、staticcheck、测试与目标平台构建；其平台清单和命令以 [`daemon/README.md`](../../daemon/README.md) 为准。扩展宿主测试使用 Node 内置 `node:test`。发行归档和发布门禁属于发布流程，详见 [Daemon 安装与运行](environment-daemon.md)。
 
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，

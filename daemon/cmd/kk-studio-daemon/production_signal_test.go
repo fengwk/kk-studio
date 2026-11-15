@@ -26,7 +26,7 @@ import (
 )
 
 // TestProductionRuntimeSignalCancelsInFlightProcess starts a long process.exec through the real
-// protocol-4 control stream, then sends SIGTERM to the compiled daemon. The daemon must leave its
+// production control stream, then sends SIGTERM to the compiled daemon. The daemon must leave its
 // process scope, exit cleanly and release the runtime lock.
 func TestProductionRuntimeSignalCancelsInFlightProcess(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -86,7 +86,7 @@ func TestProductionRuntimeSignalCancelsInFlightProcess(t *testing.T) {
 		t.Fatalf("daemon did not open its control WebSocket, stderr=%q", daemonStderr.String())
 	}
 	defer peer.Close()
-	controlTransport, bodyWriter, response := openProtocol4ControlStream(t, ctx, peer)
+	controlTransport, bodyWriter, response := openControlStream(t, ctx, peer)
 	defer controlTransport.CloseIdleConnections()
 	defer response.Body.Close()
 	writeControlEnvelope(t, bodyWriter, &protocol.Envelope{

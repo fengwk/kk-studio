@@ -36,11 +36,11 @@ async function withTempDir(body) {
 }
 
 /**
- * 按 Go 发行布局写一个最小 Daemon 目录：静态可执行文件与 code-server 自带的 Node runtime。
- * Node runtime 执行配置缓存 helper；Go 可执行文件作为 stub 记录入口传入的参数与环境，
+ * 按发行布局写一个最小 Daemon 目录：静态可执行文件与 code-server 自带的 Node runtime。
+ * Node runtime 执行配置缓存 helper；Daemon 可执行文件作为 stub 记录入口传入的参数与环境，
  * 因此测试覆盖真实 entrypoint 的文件校验、配置生成及直接 exec 行为。
  */
-function writeGoDist(temporary) {
+function writeDaemonDist(temporary) {
   const dist = path.join(temporary, 'daemon-dist')
   mkdirSync(path.join(dist, 'runtime/code-server/lib'), { recursive: true })
   mkdirSync(path.join(dist, 'runtime/code-server/out/node'), { recursive: true })
@@ -132,7 +132,7 @@ test('test intent: the entrypoint launches the Daemon executable with --config o
   const server = await startCardServer({ name: 'docker-reliability', version: '0', daemonConfig: DAEMON_CONFIG })
   try {
     await withTempDir(async (temporary) => {
-      const { dist, argvFile, environFile } = writeGoDist(temporary)
+      const { dist, argvFile, environFile } = writeDaemonDist(temporary)
       const root = path.join(temporary, 'daemon-root')
       const secret = 'probe-secret-token'
 
@@ -204,7 +204,7 @@ test('test intent: the entrypoint does not rewrite an already reachable card', a
     server.calls.length = 0
 
     await withTempDir(async (temporary) => {
-      const { dist } = writeGoDist(temporary)
+      const { dist } = writeDaemonDist(temporary)
       const root = path.join(temporary, 'daemon-root')
       const result = await runEntrypoint(baseEnv({
         KK_STUDIO_DAEMON_DIST: dist,
@@ -267,7 +267,7 @@ test('test intent: the entrypoint rejects a relative root', async () => {
 test('test intent: a distribution without the daemon or bundled runtime is rejected', async () => {
   for (const missing of ['kk-studio-daemon', 'runtime/code-server/lib/node']) {
     await withTempDir(async (temporary) => {
-      const { dist } = writeGoDist(temporary)
+      const { dist } = writeDaemonDist(temporary)
       unlinkSync(path.join(dist, missing))
       const result = await runEntrypoint(baseEnv({
         KK_STUDIO_DAEMON_DIST: dist,
@@ -291,7 +291,7 @@ test('test intent: the config is created owner-only without relying on chmod', a
       // chmod 桩为 no-op：只有写目录的 umask 与写文件的显式 mode 能收敛权限。
       writeFileSync(path.join(probeDir, 'chmod'), '#!/bin/bash\nexit 0\n')
       chmodSync(path.join(probeDir, 'chmod'), 0o755)
-      const { dist } = writeGoDist(temporary)
+      const { dist } = writeDaemonDist(temporary)
 
       const root = path.join(temporary, 'daemon-root')
       const result = await runEntrypoint(

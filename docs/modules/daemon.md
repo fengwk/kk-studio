@@ -2,7 +2,7 @@
 
 Environment Daemon 是部署在目标宿主上的 Go 独立进程，负责把 Platform 的能力调用安全地执行在该主机的文件系统、进程与工具链中，并托管 code-server IDE。控制连接只承载协议与数据；连接中断后，进程内已接受的任务仍由同一 Daemon 管理。每个 Environment 使用自己的配置、注册凭据、运行数据与 Daemon 实例。安装与运行入口见 [Environment Daemon 安装与运行](../operations/environment-daemon.md)；模型工具契约见 [内置工具](builtin-tools.md)。
 
-Daemon 源码位于 [`daemon/`](../../daemon/)，由 Go 1.27.4 构建为独立可执行文件；扩展宿主桥接仍是 JavaScript，随 IDE 扩展目录一起分发。受管 code-server 自带其 Node 运行时，该 Node 仅用于启动 IDE，并非 Daemon 运行时。Go 侧优先使用标准库，不要求目标主机安装 Go、JDK 或 ripgrep；Bash 与配置中的语言服务器由宿主提供。
+Daemon 源码位于 [`daemon/`](../../daemon/)，由 Go 1.27.4 构建为独立可执行文件；扩展宿主桥接使用 JavaScript，随 IDE 扩展目录一起分发。发行归档中的 Node 运行时属于受管 code-server，只用于启动 IDE。Go 侧优先使用标准库，不要求目标主机安装 Go、JDK 或 ripgrep；Bash 与配置中的语言服务器由宿主提供。
 
 ## 启动与本地状态
 

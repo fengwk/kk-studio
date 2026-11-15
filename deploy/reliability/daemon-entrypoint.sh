@@ -1,8 +1,8 @@
 #!/bin/bash
 # kk-studio reliability/distributed Daemon container entrypoint.
 #
-# The Daemon executable is at the distribution root. A bundled Node runtime remains only
-# for the code-server IDE and the small configuration-cache helper.
+# The Daemon executable is at the distribution root. The bundled Node runtime belongs to the
+# managed code-server and is used only to start the IDE and run the configuration-cache helper.
 #
 # Container config serialization uses that bundled Node because jq/python are absent. The token
 # is written with shell builtins to an owner-only file:
