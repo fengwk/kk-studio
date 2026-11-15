@@ -75,6 +75,8 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
   private final AtomicBoolean abandonMarker = new AtomicBoolean(false);
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
+  private final Object controlStreamLock = new Object();
+
   private volatile Scheduler.Task abandonTimer;
   private volatile Scheduler.Task pingTask;
   private volatile Scheduler.Task ackTimeoutTask;
@@ -205,7 +207,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
     openControlStream(h2Session);
   }
 
-  private void openControlStream(Session h2Session) {
+  void openControlStream(Session h2Session) {
     HttpFields.Mutable fields = HttpFields.build();
     fields.add("content-type", "application/octet-stream");
     MetaData.Request meta =
@@ -217,14 +219,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
         new Promise<>() {
           @Override
           public void succeeded(Stream stream) {
-            DaemonControlStream ctrl =
-                new DaemonControlStream(
-                    identity,
-                    stream,
-                    DaemonHttp2ClientSession.this::close,
-                    DaemonHttp2ClientSession.this::drain,
-                    scheduler);
-            controlStream = ctrl;
+            ensureControlStream(stream);
           }
 
           @Override
@@ -238,7 +233,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
           public void onHeaders(Stream source, HeadersFrame frame) {
             if (frame.getMetaData() instanceof MetaData.Response response) {
               if (response.getStatus() == 200) {
-                onControlStreamHeaders200();
+                onControlStreamHeaders200(source);
               } else {
                 log.warn(
                     "POST /control returned non-200 status {} for {}",
@@ -280,14 +275,15 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
         });
   }
 
-  private void onControlStreamHeaders200() {
+  private void onControlStreamHeaders200(Stream source) {
     if (!sessionEstablishedMarker.compareAndSet(false, true)) {
       return;
     }
     cancelAbandonTimer();
+    DaemonControlStream ctrl = ensureControlStream(source);
     DaemonSession opened;
     try {
-      opened = sessions.open(admitted, controlStream, tunnel);
+      opened = sessions.open(admitted, ctrl, tunnel);
     } catch (RuntimeException error) {
       // 核心未建立会话：先释放准入并关闭连接，建立结果失败时调用方看到的已是关闭状态。
       log.error("Failed to open daemon session in core for {}", identity, error);
@@ -297,8 +293,33 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
       return;
     }
     daemonSession = opened;
-    controlStream.bindSession(opened);
+    ctrl.bindSession(opened);
     sessionEstablished.complete(opened);
+  }
+
+  /**
+   * 取得或创建唯一的控制流。
+   *
+   * <p>Jetty 的响应头回调由解析线程直接触发，而 {@code newStream} 的 promise 在请求 HEADERS 写出后才完成，两者没有硬性先后。先到者用自己的
+   * {@link Stream} 初始化控制流，迟到者复用同一实例，因此已绑定的控制流不会被替换。锁内只创建实例与赋值，不碰核心会话也不发送数据。
+   */
+  private DaemonControlStream ensureControlStream(Stream stream) {
+    DaemonControlStream current = controlStream;
+    if (current != null) {
+      return current;
+    }
+    synchronized (controlStreamLock) {
+      if (controlStream == null) {
+        controlStream =
+            new DaemonControlStream(
+                identity,
+                stream,
+                DaemonHttp2ClientSession.this::close,
+                DaemonHttp2ClientSession.this::drain,
+                scheduler);
+      }
+      return controlStream;
+    }
   }
 
   /** 发送 NO_ERROR 的 GOAWAY，让隧道拒绝新建流并优雅排空控制流。 */
