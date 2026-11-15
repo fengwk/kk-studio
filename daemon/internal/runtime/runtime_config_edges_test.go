@@ -17,7 +17,7 @@ func TestRuntimeEnvironmentConfigControlEdges(t *testing.T) {
 	wire := &protocol.DaemonConfiguration{StudioUrl: "https://studio.example", Lsp: &protocol.LspConfiguration{}}
 	r.mu.Lock()
 	r.config = config.DaemonConfig{EnvironmentID: "env", ConfigVersion: 2}
-	r.configProto = proto.Clone(wire).(*protocol.DaemonConfiguration)
+	r.configProto = config.CanonicalConfiguration(wire)
 	r.mu.Unlock()
 	if err := r.handleEnvironmentConfig(context.Background(), &protocol.Envelope{}); err != nil {
 		t.Fatal(err)

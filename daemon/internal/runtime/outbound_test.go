@@ -8,24 +8,24 @@ import (
 // Ensures outbound environment-scoped work is blocked before SETTINGS binds scope.
 func TestOutboundGateRequiresBindingAndReadiness(t *testing.T) {
 	g := &OutboundGate{}
-	if !errors.Is(g.RequireReadyFrame(), errUnbound) || !errors.Is(g.RequireControlFrame(), errUnbound) {
+	if !errors.Is(g.RequireReady(), errUnbound) || !errors.Is(g.RequireBound(), errUnbound) {
 		t.Fatal("unbound frames were admitted")
 	}
 	if err := g.Bind("env"); err != nil {
 		t.Fatal(err)
 	}
-	if err := g.RequireControlFrame(); err != nil {
+	if err := g.RequireBound(); err != nil {
 		t.Fatal(err)
 	}
-	if !errors.Is(g.RequireReadyFrame(), errNotReady) {
+	if !errors.Is(g.RequireReady(), errNotReady) {
 		t.Fatal("work frame admitted before READY")
 	}
 	g.MarkReady()
-	if err := g.RequireReadyFrame(); err != nil {
+	if err := g.RequireReady(); err != nil {
 		t.Fatal(err)
 	}
 	g.Clear()
-	if !errors.Is(g.RequireControlFrame(), errUnbound) {
+	if !errors.Is(g.RequireBound(), errUnbound) {
 		t.Fatal("frame admitted after scope cleared")
 	}
 	if err := g.Bind(""); err == nil {

@@ -70,7 +70,7 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 		return nil
 	}
 	if ready && version == previous.ConfigVersion {
-		if proto.Equal(previousProto, payload.EnvironmentConfig.Config) {
+		if proto.Equal(previousProto, config.CanonicalConfiguration(payload.EnvironmentConfig.Config)) {
 			return nil
 		}
 		return errors.New("the same environment config version must not change its content")
@@ -90,7 +90,7 @@ func (r *Runtime) handleEnvironmentConfig(ctx context.Context, e *protocol.Envel
 		return err
 	}
 	r.config = candidate
-	r.configProto = proto.Clone(payload.EnvironmentConfig.Config).(*protocol.DaemonConfiguration)
+	r.configProto = config.CanonicalConfiguration(payload.EnvironmentConfig.Config)
 	first := !r.ready
 	r.ready = true
 	r.mu.Unlock()

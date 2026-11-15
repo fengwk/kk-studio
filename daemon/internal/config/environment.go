@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
+	"google.golang.org/protobuf/proto"
 )
 
 const maxEnvironmentConfigVersion int64 = 1<<53 - 1
@@ -19,6 +20,37 @@ type EnvironmentConfigError struct {
 }
 
 func (e *EnvironmentConfigError) Error() string { return fmt.Sprintf("%s is invalid", e.Field) }
+
+// CanonicalConfiguration returns the snapshot used to compare configuration identity. It clones the
+// input and applies only the URL and LSP spelling rules that loading and building already accept,
+// leaving command text, declaration order, duplicates, and unknown fields unchanged. A value the
+// existing parsers reject stays untouched so validation can still reject it.
+func CanonicalConfiguration(input *protocol.DaemonConfiguration) *protocol.DaemonConfiguration {
+	if input == nil {
+		return nil
+	}
+	wire := proto.Clone(input).(*protocol.DaemonConfiguration)
+	if studio, err := parseStudioURL(wire.GetStudioUrl()); err == nil {
+		wire.StudioUrl = studio
+	}
+	if proxy, err := parseProxy(wire.ProxyUrl); err == nil {
+		wire.ProxyUrl = proxy
+	}
+	if wire.Lsp != nil && len(wire.Lsp.Servers) == 0 && len(wire.Lsp.ProtoReflect().GetUnknown()) == 0 {
+		wire.Lsp = nil
+	}
+	for _, server := range wire.GetLsp().GetServers() {
+		if server == nil {
+			continue
+		}
+		fields := lspServerFields{extensions: server.Extensions, rootMarkers: server.RootMarkers, firstMatchMarkers: server.FirstMatchMarkers}
+		fields.normalize()
+		server.Extensions = fields.extensions
+		server.RootMarkers = fields.rootMarkers
+		server.FirstMatchMarkers = fields.firstMatchMarkers
+	}
+	return wire
+}
 
 // BuildEnvironmentConfig validates a complete server snapshot and creates an immutable candidate over base paths.
 func BuildEnvironmentConfig(base DaemonConfig, version int64, input *protocol.DaemonConfiguration) (DaemonConfig, error) {

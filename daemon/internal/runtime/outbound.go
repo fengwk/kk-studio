@@ -59,9 +59,3 @@ func (g *OutboundGate) RequireBound() error {
 	}
 	return nil
 }
-
-// RequireReadyFrame applies the READY gate to update receipts and other explicitly READY-only frames.
-func (g *OutboundGate) RequireReadyFrame() error { return g.RequireReady() }
-
-// RequireControlFrame allows bound-scoped work, errors, heartbeat, and status after SETTINGS.
-func (g *OutboundGate) RequireControlFrame() error { return g.RequireBound() }

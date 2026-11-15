@@ -89,13 +89,6 @@ func resolverStatus(err error) int {
 			return http.StatusServiceUnavailable
 		}
 	}
-	s := strings.ToUpper(err.Error())
-	if strings.Contains(s, "VIEW_GONE") {
-		return http.StatusNotFound
-	}
-	if strings.Contains(s, "UNAVAILABLE") {
-		return http.StatusServiceUnavailable
-	}
 	return http.StatusBadGateway
 }
 

@@ -232,6 +232,12 @@ func parseStudioURL(s string) (string, error) {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
 		return "", errors.New("invalid")
 	}
+	if port := u.Port(); port != "" {
+		value, err := strconv.Atoi(port)
+		if err != nil || value < 1 || value > 65535 {
+			return "", errors.New("invalid")
+		}
+	}
 	return u.Scheme + "://" + u.Host, nil
 }
 func parseProxy(p *string) (*string, error) {

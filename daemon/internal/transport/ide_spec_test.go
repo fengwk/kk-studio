@@ -203,9 +203,11 @@ func TestHandleIDE_ConnectRouteAndResolutionErrors(t *testing.T) {
 		err  error
 		want int
 	}{
-		{"gone", errors.New("VIEW_GONE"), http.StatusNotFound},
-		{"unavailable", errors.New("UNAVAILABLE"), http.StatusServiceUnavailable},
+		{"gone", codedViewResolutionError{code: "VIEW_GONE"}, http.StatusNotFound},
+		{"unavailable", codedViewResolutionError{code: "UNAVAILABLE"}, http.StatusServiceUnavailable},
 		{"other", errors.New("failure"), http.StatusBadGateway},
+		{"unknown code", codedViewResolutionError{code: "UNKNOWN"}, http.StatusBadGateway},
+		{"uncoded text", errors.New("VIEW_GONE"), http.StatusBadGateway},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			connection := &ControlConnection{resolver: viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) { return ViewUpstream{}, tc.err })}
@@ -227,7 +229,7 @@ func TestHandleIDE_ConnectConsumesProtocolPseudoHeader(t *testing.T) {
 		if request.Headers.Get(":protocol") != "" {
 			t.Errorf("extended CONNECT pseudo-header reached resolver: %v", request.Headers)
 		}
-		return ViewUpstream{}, errors.New("UNAVAILABLE")
+		return ViewUpstream{}, codedViewResolutionError{code: "UNAVAILABLE"}
 	})}
 	request := &http.Request{
 		Method: http.MethodConnect,

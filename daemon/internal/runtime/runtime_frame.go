@@ -53,9 +53,9 @@ func (r *Runtime) sendStatus() error {
 func (r *Runtime) sendBound(e *protocol.Envelope, readyRequired bool) error {
 	var err error
 	if readyRequired {
-		err = r.gate.RequireReadyFrame()
+		err = r.gate.RequireReady()
 	} else {
-		err = r.gate.RequireControlFrame()
+		err = r.gate.RequireBound()
 	}
 	if err != nil {
 		return err
