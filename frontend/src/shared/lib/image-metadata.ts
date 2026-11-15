@@ -10,7 +10,7 @@ export interface OriginalImageMetadata {
 }
 
 /**
- * 用浏览器解码读取原始图片的 format 与像素尺寸。
+ * 按文件媒体类型填入 format，并用浏览器解码读取原始图片的像素尺寸。
  * 解码失败或超出可解码像素上限时抛错，调用方不得继续 reserve。
  */
 export async function readOriginalImageMetadata(file: File): Promise<OriginalImageMetadata> {
@@ -34,7 +34,7 @@ export async function readOriginalImageMetadata(file: File): Promise<OriginalIma
 }
 
 /** file.type 去掉 image/ 前缀；非图片或缺少子类型时返回空串。 */
-export function imageFormatOf(mediaType: string): string {
+function imageFormatOf(mediaType: string): string {
   if (!mediaType.startsWith('image/')) {
     return ''
   }

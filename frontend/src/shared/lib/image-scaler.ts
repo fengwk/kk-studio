@@ -1,4 +1,4 @@
-export type ImageScaleTier = '720P' | '1080P' | 'ORIGINAL'
+type ImageScaleTier = '720P' | '1080P' | 'ORIGINAL'
 
 export interface ImageDimensions {
   width: number

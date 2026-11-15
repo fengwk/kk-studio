@@ -224,7 +224,7 @@ describe('useCanvasUploadPipeline', () => {
       await result.current.uploadFiles([file])
     })
 
-    expect(storageService.reserveUpload).toHaveBeenCalledWith(expect.objectContaining({
+    expect(storageService.reserveUpload).toHaveBeenCalledWith({
       filename: 'upload.png',
       mediaType: 'image/png',
       sizeBytes: '3',
@@ -234,7 +234,7 @@ describe('useCanvasUploadPipeline', () => {
       originalHeight: 8,
       storedWidth: 12,
       storedHeight: 8,
-    }))
+    })
     expect(storageService.uploadFile).not.toHaveBeenCalled()
     expect(storageService.completeUpload).toHaveBeenCalledWith(UPLOAD_ID)
     expect(resourceNodeCommands(executeCommands)).toEqual([{
