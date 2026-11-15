@@ -7,7 +7,13 @@ import (
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/htmlindex"
 	"golang.org/x/text/encoding/ianaindex"
+	"golang.org/x/text/transform"
 )
+
+// asciiProbe is the ASCII text a declared encoding must reproduce byte for byte: a declaration is
+// found in the raw bytes of a file, so an encoding that does not encode ASCII as ASCII can never be
+// declared where the codec looks.
+const asciiProbe = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 \t\r\n!\"#%'*,-./:;<=>?@_"
 
 // format selects the label index a declaration is resolved with.
 type format int
@@ -19,11 +25,13 @@ const (
 	formatIANA
 )
 
-// resolved is a declaration resolved to an encoding implementation. xtext is nil for UTF-8
-// and US-ASCII, which the codec handles itself so that it stays strict.
+// resolved is a declaration resolved to an encoding implementation. xtext is nil for UTF-8 and
+// US-ASCII, which the codec handles itself; bomRequired is set for a UTF-16 or UTF-32 declaration,
+// which only a byte order mark can back.
 type resolved struct {
-	enc   Encoding
-	xtext encoding.Encoding
+	enc         Encoding
+	xtext       encoding.Encoding
+	bomRequired bool
 }
 
 // formatOf reports which label index applies to a declaration found in path.
@@ -55,7 +63,7 @@ func resolveLabel(label, where string, form format) (resolved, error) {
 		return resolved{enc: declaredEncoding("US-ASCII", where)}, nil
 	}
 	if isUTF16Or32Label(strings.ToUpper(normalized)) {
-		return resolved{}, &DeclarationConflictError{Declared: declaredEncoding(unicodeFamilyName(normalized), where)}
+		return resolved{enc: declaredEncoding(unicodeFamilyName(normalized), where), bomRequired: true}, nil
 	}
 	xtext, err := lookupEncoding(normalized, form)
 	if err != nil || xtext == nil {
@@ -66,9 +74,22 @@ func resolveLabel(label, where string, form format) (resolved, error) {
 		return resolved{}, &UnsupportedLabelError{Label: trimmed, Declaration: where}
 	}
 	if isUTF16Or32Label(name) {
-		return resolved{}, &DeclarationConflictError{Declared: declaredEncoding(name, where)}
+		return resolved{enc: declaredEncoding(name, where), bomRequired: true}, nil
+	}
+	switch name {
+	case "UTF-8", "US-ASCII":
+		return resolved{enc: declaredEncoding(name, where)}, nil
+	}
+	if !asciiCompatible(xtext) {
+		return resolved{}, &UnsupportedLabelError{Label: trimmed, Declaration: where}
 	}
 	return resolved{enc: declaredEncoding(name, where), xtext: xtext}, nil
+}
+
+// asciiCompatible reports whether an encoding writes ASCII as ASCII.
+func asciiCompatible(xtext encoding.Encoding) bool {
+	encoded, _, err := transform.Bytes(xtext.NewEncoder(), []byte(asciiProbe))
+	return err == nil && string(encoded) == asciiProbe
 }
 
 // lookupEncoding resolves an already trimmed, lower-case label in the index of its format.

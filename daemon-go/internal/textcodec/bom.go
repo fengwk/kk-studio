@@ -68,8 +68,8 @@ func isWideName(name string) bool {
 	return false
 }
 
-// isUTF16Or32Label reports whether a declared label selects a UTF-16/UTF-32 encoding,
-// which is refused without a byte order mark.
+// isUTF16Or32Label reports whether a declared label selects a UTF-16/UTF-32 encoding, which a
+// file can only use with a byte order mark.
 func isUTF16Or32Label(name string) bool {
 	switch name {
 	case "UTF-16", "UTF-16LE", "UTF-16BE", "UTF-32", "UTF-32LE", "UTF-32BE",

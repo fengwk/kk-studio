@@ -19,7 +19,7 @@ func TestEncodeRestoresBOM(t *testing.T) {
 		if want := bomPrefix(enc); len(want) == 0 || !equalPrefix(data, want) {
 			t.Fatalf("%s: bytes=%x", name, data)
 		}
-		decoded, got, err := Decode("/repo/doc.txt", data)
+		decoded, got, _, err := Decode("/repo/doc.txt", data)
 		if err != nil || got != enc || string(decoded) != "a\n" {
 			t.Fatalf("%s: encoding=%#v text=%q err=%v", name, got, decoded, err)
 		}

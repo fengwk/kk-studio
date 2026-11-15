@@ -2,7 +2,6 @@ package textcodec
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"path/filepath"
 	"regexp"
@@ -32,7 +31,8 @@ var codingComment = regexp.MustCompile(`^[ \t\f]*#.*?coding[:=][ \t]*([-_.a-zA-Z
 var jspPageDirective = regexp.MustCompile(`(?s)<%@\s*page\b(.*?)%>`)
 
 // Declared reports the standard declaration found in decoded text, for write content and
-// edit results.
+// edit results. A UTF-16 or UTF-32 label is a valid declaration of new content; the caller
+// decides whether a byte order mark backs it.
 func Declared(path string, text []byte) (Encoding, bool, error) {
 	label, where := findDeclaration(path, text)
 	if label == "" {
@@ -40,12 +40,6 @@ func Declared(path string, text []byte) (Encoding, bool, error) {
 	}
 	declared, err := resolveLabel(label, where, formatOf(path, where))
 	if err != nil {
-		var conflict *DeclarationConflictError
-		if errors.As(err, &conflict) {
-			// A UTF-16 or UTF-32 label is a valid declaration for new content; only decoding a
-			// file without a byte order mark cannot apply it.
-			return conflict.Declared, true, nil
-		}
 		return Encoding{}, false, err
 	}
 	return declared.enc, true, nil

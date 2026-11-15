@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 // Every typed failure renders a message that names its cause.
@@ -15,13 +16,12 @@ func TestErrorMessages(t *testing.T) {
 		want []string
 	}{
 		{name: "binary", err: ErrBinary, want: []string{"binary"}},
-		{name: "unknown", err: &UnknownEncodingError{Path: "/repo/gbk.txt"}, want: []string{"/repo/gbk.txt", "not UTF-8"}},
-		{name: "unsupported", err: &UnsupportedLabelError{Label: "klingon", Declaration: declarationHTML}, want: []string{"HTML meta charset", "klingon"}},
-		{name: "unsupported-without-declaration", err: &UnsupportedLabelError{Label: "klingon"}, want: []string{"unknown encoding", "klingon"}},
+		{name: "unsupported", err: &UnsupportedLabelError{Label: "klingon", Declaration: declarationHTML}, want: []string{"HTML meta charset", "klingon", "unsupported encoding"}},
+		{name: "unsupported-without-declaration", err: &UnsupportedLabelError{Label: "klingon"}, want: []string{"unsupported encoding", "klingon"}},
 		{name: "conflict", err: &DeclarationConflictError{Declared: declared}, want: []string{declarationXML, "GBK", "byte order mark"}},
-		{name: "undecodable", err: &UndecodableError{Encoding: declared, Offset: 42}, want: []string{"GBK", declarationXML, "offset 42"}},
-		{name: "undecodable-without-declaration", err: &UndecodableError{Encoding: Encoding{Name: "UTF-16LE"}, Offset: 0}, want: []string{"UTF-16LE", "offset 0"}},
-		{name: "unrepresentable", err: &UnrepresentableError{Encoding: Encoding{Name: "GBK"}, Char: '☃', Line: 7}, want: []string{"☃", "U+2603", "line 7", "GBK"}},
+		{name: "unrepresentable", err: &UnrepresentableError{Encoding: Encoding{Name: "GBK"}, Char: '☃', Line: 7}, want: []string{"The resulting text cannot be encoded in GBK", `"☃"`, "U+2603", "line 7"}},
+		{name: "unrepresentable-replacement", err: &UnrepresentableError{Encoding: Encoding{Name: "GBK"}, Char: utf8.RuneError, Line: 3}, want: []string{"U+FFFD", "replace it with text that GBK can encode"}},
+		{name: "unrepresentable-without-replacement", err: &UnrepresentableError{Encoding: Encoding{Name: "GBK"}, Char: '☃', Line: 7}, want: nil},
 		{name: "too-large", err: &TooLargeError{Encoding: declared, Size: 1 << 30}, want: []string{"1073741824", "GBK", "67108864"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -35,6 +35,9 @@ func TestErrorMessages(t *testing.T) {
 				t.Fatalf("%T is not reported as a codec failure", test.err)
 			}
 		})
+	}
+	if strings.Contains((&UnrepresentableError{Encoding: Encoding{Name: "GBK"}, Char: '☃', Line: 7}).Error(), "U+FFFD (�) marks bytes") {
+		t.Fatal("the U+FFFD hint is added for a character that is not a replacement")
 	}
 	if IsCodecError(errors.New("read failed")) {
 		t.Fatal("a foreign error is reported as a codec failure")
@@ -65,9 +68,9 @@ func TestLabelHelpers(t *testing.T) {
 		}
 	}
 	for _, label := range []string{"UTF-16", "utf-32be"} {
-		var conflict *DeclarationConflictError
-		if _, err := resolveLabel(label, declarationXML, formatIANA); !errors.As(err, &conflict) {
-			t.Fatalf("resolveLabel(%q) err=%v", label, err)
+		resolved, err := resolveLabel(label, declarationXML, formatIANA)
+		if err != nil || !resolved.bomRequired {
+			t.Fatalf("resolveLabel(%q)=%#v err=%v", label, resolved, err)
 		}
 	}
 	if isUTF16Or32Label("GBK") {
@@ -99,25 +102,30 @@ func TestNormalizeCPythonName(t *testing.T) {
 	}
 }
 
-// Byte and line helpers used by the binary rule and by error offsets.
-func TestByteAndLineHelpers(t *testing.T) {
-	if firstInvalidOffset([]byte("plain")) != len("plain") {
-		t.Fatal("valid UTF-8 reports an invalid offset")
+// A declaration is found in raw ASCII bytes, so an encoding that does not write ASCII as ASCII
+// cannot be declared.
+func TestAsciiCompatibility(t *testing.T) {
+	for label, want := range map[string]bool{"gbk": true, "big5": true, "windows-1252": true, "ibm037": false} {
+		xtext, err := lookupEncoding(label, formatIANA)
+		if err != nil || xtext == nil {
+			t.Fatalf("%s: lookup error %v", label, err)
+		}
+		if got := asciiCompatible(xtext); got != want {
+			t.Fatalf("asciiCompatible(%s)=%v want %v", label, got, want)
+		}
 	}
-	if offset := firstInvalidOffset([]byte("a\xff")); offset != 1 {
-		t.Fatalf("offset=%d", offset)
+}
+
+// Byte and line helpers used by the binary rule, the replacement count and error lines.
+func TestByteAndLineHelpers(t *testing.T) {
+	if countReplacements([]byte("a\uFFFDb")) != 1 || countReplacements([]byte("plain")) != 0 {
+		t.Fatal("countReplacements disagrees")
 	}
 	if !checkBinaryWindow([]byte{0}, 0) || checkBinaryWindow(nil, 0) || checkBinaryWindow([]byte{'a'}, 1) {
 		t.Fatal("binary window helper disagrees")
 	}
 	if !binaryUnits([]byte{0, 0}, 2) || binaryUnits([]byte{0, 1}, 2) || binaryUnits([]byte{1}, 2) || binaryUnits([]byte{0, 0, 0}, 4) {
 		t.Fatal("wide binary helper disagrees")
-	}
-	if !hasHighByte([]byte("é")) || hasHighByte([]byte("plain")) {
-		t.Fatal("hasHighByte disagrees")
-	}
-	if firstNonASCII([]byte("é")) != 0 || firstNonASCII([]byte("plain")) != -1 {
-		t.Fatal("firstNonASCII disagrees")
 	}
 	for text, want := range map[string]int{
 		"a":          1,
