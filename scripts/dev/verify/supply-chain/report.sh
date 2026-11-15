@@ -33,9 +33,7 @@ init_report() {
     mkdir -p \
         "$RUN_DIR/backend-sbom" \
         "$RUN_DIR/frontend-sbom" \
-        "$RUN_DIR/daemon-sbom" \
         "$RUN_DIR/frontend-audit" \
-        "$RUN_DIR/daemon-audit" \
         "$RUN_DIR/backend-audit" \
         "$RUN_DIR/image" \
         "$RUN_DIR/logs"
@@ -62,9 +60,7 @@ write_summary() {
         SUPPLY_CHAIN_STATUS="$status" \
         SUPPLY_CHAIN_BACKEND_SBOM_STATUS="$BACKEND_SBOM_STATUS" \
         SUPPLY_CHAIN_FRONTEND_SBOM_STATUS="$FRONTEND_SBOM_STATUS" \
-        SUPPLY_CHAIN_DAEMON_SBOM_STATUS="$DAEMON_SBOM_STATUS" \
         SUPPLY_CHAIN_NPM_AUDIT_STATUS="$NPM_AUDIT_STATUS" \
-        SUPPLY_CHAIN_DAEMON_AUDIT_STATUS="$DAEMON_AUDIT_STATUS" \
         SUPPLY_CHAIN_MAVEN_AUDIT_STATUS="$MAVEN_AUDIT_STATUS" \
         SUPPLY_CHAIN_APP_IMAGE_BUILD_STATUS="$APP_IMAGE_BUILD_STATUS" \
         SUPPLY_CHAIN_DAEMON_IMAGE_BUILD_STATUS="$DAEMON_IMAGE_BUILD_STATUS" \
@@ -109,24 +105,10 @@ const report = {
             log: 'logs/npm-sbom.log',
         },
         {
-            name: 'daemon-sbom',
-            status: env.SUPPLY_CHAIN_DAEMON_SBOM_STATUS,
-            artifact: null,
-            detail: 'SKIPPED: the Daemon is not an npm project',
-            log: null,
-        },
-        {
             name: 'npm-audit',
             status: env.SUPPLY_CHAIN_NPM_AUDIT_STATUS,
             artifact: 'frontend-audit/audit.json',
             log: 'logs/npm-audit.log',
-        },
-        {
-            name: 'daemon-audit',
-            status: env.SUPPLY_CHAIN_DAEMON_AUDIT_STATUS,
-            artifact: null,
-            detail: 'SKIPPED: the Daemon is not an npm project',
-            log: null,
         },
         {
             name: 'maven-dependency-check',
@@ -208,9 +190,7 @@ NODE
 | --- | --- | --- | --- |
 | Backend CycloneDX aggregate | $BACKEND_SBOM_STATUS | [backend-sbom/bom.json](backend-sbom/bom.json) | [logs/maven-sbom.log](logs/maven-sbom.log) |
 | Frontend CycloneDX | $FRONTEND_SBOM_STATUS | [frontend-sbom/bom.json](frontend-sbom/bom.json) | [logs/npm-sbom.log](logs/npm-sbom.log) |
-| Daemon npm SBOM (not applicable) | $DAEMON_SBOM_STATUS | — | — |
 | npm audit (low) | $NPM_AUDIT_STATUS | [frontend-audit/audit.json](frontend-audit/audit.json) | [logs/npm-audit.log](logs/npm-audit.log) |
-| Daemon npm audit (not applicable) | $DAEMON_AUDIT_STATUS | — | — |
 | Maven Dependency-Check | $MAVEN_AUDIT_STATUS | [HTML](backend-audit/dependency-check-report.html), [JSON](backend-audit/dependency-check-report.json), [SARIF](backend-audit/dependency-check-report.sarif) | [logs/maven-audit.log](logs/maven-audit.log) |
 | App image build | $APP_IMAGE_BUILD_STATUS | \`$APP_IMAGE\` | [logs/app-image-build.log](logs/app-image-build.log) |
 | App image smoke | $APP_IMAGE_SMOKE_STATUS | \`$APP_IMAGE\` | [logs/app-image-smoke.log](logs/app-image-smoke.log) |
@@ -225,7 +205,7 @@ EOF
         local success_note
         case "$MODE" in
             sbom)
-                success_note="The backend and frontend CycloneDX reports are non-empty and parseable. A standalone Daemon SBOM is not produced by this gate."
+                success_note="The backend and frontend CycloneDX reports are non-empty and parseable."
                 ;;
             audit)
                 success_note="The requested dependency audit checks completed successfully. npm audit reported no findings at the low threshold for the frontend, and Dependency-Check JSON contains zero non-suppressed vulnerabilities."
@@ -234,7 +214,7 @@ EOF
                 success_note="The requested image checks completed successfully. Both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
                 ;;
             all)
-                success_note="All requested checks completed successfully. The generated SBOMs are valid, frontend npm audit and Maven Dependency-Check contain zero non-suppressed vulnerabilities, both image functional smokes passed, and each Trivy image report contains zero fixable HIGH/CRITICAL vulnerabilities. No standalone Daemon SBOM is produced by this gate."
+                success_note="All requested checks completed successfully. The generated SBOMs are valid, frontend npm audit and Maven Dependency-Check contain zero non-suppressed vulnerabilities, both image functional smokes passed, and each Trivy image report contains zero fixable HIGH/CRITICAL vulnerabilities."
                 ;;
             *)
                 success_note="All requested checks completed successfully."

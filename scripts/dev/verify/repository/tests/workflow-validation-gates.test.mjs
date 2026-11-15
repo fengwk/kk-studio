@@ -4,15 +4,15 @@ import test from 'node:test'
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const root = repositoryRoot()
-const goCi = readFileSync(`${root}/.github/workflows/daemon-ci.yml`, 'utf8')
+const daemonCi = readFileSync(`${root}/.github/workflows/daemon-ci.yml`, 'utf8')
 const release = readFileSync(`${root}/.github/workflows/daemon-release.yml`, 'utf8')
 const docker = readFileSync(`${root}/.github/workflows/docker-publish.yml`, 'utf8')
 
 test('daemon CI is reusable and compiles all six supported static targets', () => {
-  assert.match(goCi, /workflow_call:/)
-  assert.match(goCi, /CGO_ENABLED=0 go build/)
+  assert.match(daemonCi, /workflow_call:/)
+  assert.match(daemonCi, /CGO_ENABLED=0 go build/)
   for (const target of ['linux/amd64', 'linux/arm64', 'darwin/amd64', 'darwin/arm64', 'windows/amd64', 'windows/arm64']) {
-    assert.ok(goCi.includes(target), `missing target ${target}`)
+    assert.ok(daemonCi.includes(target), `missing target ${target}`)
   }
 })
 

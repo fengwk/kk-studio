@@ -110,7 +110,6 @@ validate_dependency_check_reports() {
 npm_audit_output_file() {
     case "$1" in
         frontend) printf '%s' "$RUN_DIR/frontend-audit/audit.json" ;;
-        daemon) printf '%s' "$RUN_DIR/daemon-audit/audit.json" ;;
         *) die "unknown npm project: $1" ;;
     esac
 }
@@ -118,7 +117,6 @@ npm_audit_output_file() {
 npm_audit_log_file() {
     case "$1" in
         frontend) printf '%s' "$RUN_DIR/logs/npm-audit.log" ;;
-        daemon) printf '%s' "$RUN_DIR/logs/npm-daemon-audit.log" ;;
         *) die "unknown npm project: $1" ;;
     esac
 }
@@ -126,12 +124,11 @@ npm_audit_log_file() {
 set_npm_audit_status() {
     case "$1" in
         frontend) NPM_AUDIT_STATUS=$2 ;;
-        daemon) DAEMON_AUDIT_STATUS=$2 ;;
         *) die "unknown npm project: $1" ;;
     esac
 }
 
-# 每个 npm 项目各自审计、各自记录状态与报告；任一项目命中漏洞都让整体门禁失败。
+# 前端 npm 项目单独审计并记录状态与报告；命中漏洞让整体门禁失败。
 run_npm_audit() {
     local project=$1
     local output_file log_file

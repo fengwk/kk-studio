@@ -661,8 +661,8 @@ create+delete 工作负载结果比较。
 
 | 子命令 | 内容 |
 | --- | --- |
-| `sbom` | backend/frontend/daemon CycloneDX JSON SBOM，校验文件非空可解析 |
-| `audit` | frontend/daemon `npm audit` + Maven OWASP Dependency-Check |
+| `sbom` | backend/frontend CycloneDX JSON SBOM，校验文件非空可解析 |
+| `audit` | frontend `npm audit` + Maven OWASP Dependency-Check |
 | `image` | 构建 App/Daemon，运行功能 smoke，再用 pinned Trivy 扫描 |
 | `all` | `sbom`、`audit`、`image` 的合取结果 |
 | `test` | [supply-chain.test.mjs](../../scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs)，不联网 |
@@ -1027,13 +1027,13 @@ reports/reliability/
   LATEST_AGENT_RUN.txt
 
 reports/supply-chain/
-  <timestamp>-<pid>/{backend-sbom,frontend-sbom,daemon-sbom,frontend-audit,daemon-audit,backend-audit,image,logs/,summary.md,summary.json}
+  <timestamp>-<pid>/{backend-sbom,frontend-sbom,frontend-audit,backend-audit,image,logs/,summary.md,summary.json}
   latest/
   LATEST_RUN.txt
 ```
 
-`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend/daemon SBOM、
-frontend/daemon npm audit、Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、
+`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend SBOM、
+frontend npm audit、Dependency-Check HTML/JSON/SARIF、App/Daemon 镜像扫描的 Trivy JSON、image id/digest、
 smoke log 和 summary。
 
 分布式 E2E 在销毁栈前收集脱敏日志：`logs/distributed-<service>.log` 是容器标准输出，

@@ -6,7 +6,7 @@ import path from 'node:path'
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const root = repositoryRoot()
-const goCi = readFileSync(path.join(root, '.github/workflows/daemon-ci.yml'), 'utf8')
+const daemonCi = readFileSync(path.join(root, '.github/workflows/daemon-ci.yml'), 'utf8')
 const javaInterop = readFileSync(
   path.join(root, 'web/src/test/java/fun/fengwk/kkstudio/web/environment/DaemonCrossLanguageIntegrationTest.java'),
   'utf8',
@@ -19,15 +19,15 @@ const windowsInstall = readFileSync(path.join(root, 'scripts/daemon/install.ps1'
 const smoke = readFileSync(path.join(root, 'scripts/daemon/smoke-archive.sh'), 'utf8')
 
 test('daemon CI builds all six static targets and is reusable by release and Docker workflows', () => {
-  assert.match(goCi, /workflow_call:/)
-  assert.match(goCi, /POSTGRES_VERSION: '17'/)
-  assert.match(goCi, /go test -json \.\/\.\.\./)
-  assert.match(goCi, /go test -race \.\/\.\.\./)
-  assert.doesNotMatch(goCi, /go test -p\s+1/)
-  assert.match(goCi, /Install ripgrep for search parity tests[\s\S]*?if: runner\.os == 'Linux'[\s\S]*?sudo apt-get install -y ripgrep/)
-  assert.match(goCi, /CGO_ENABLED=0 go build/)
+  assert.match(daemonCi, /workflow_call:/)
+  assert.match(daemonCi, /POSTGRES_VERSION: '17'/)
+  assert.match(daemonCi, /go test -json \.\/\.\.\./)
+  assert.match(daemonCi, /go test -race \.\/\.\.\./)
+  assert.doesNotMatch(daemonCi, /go test -p\s+1/)
+  assert.match(daemonCi, /Install ripgrep for search parity tests[\s\S]*?if: runner\.os == 'Linux'[\s\S]*?sudo apt-get install -y ripgrep/)
+  assert.match(daemonCi, /CGO_ENABLED=0 go build/)
   for (const target of ['linux/amd64', 'linux/arm64', 'darwin/amd64', 'darwin/arm64', 'windows/amd64', 'windows/arm64']) {
-    assert.ok(goCi.includes(target), `missing cross-compile target ${target}`)
+    assert.ok(daemonCi.includes(target), `missing cross-compile target ${target}`)
   }
   assert.match(release, /uses: \.\/\.github\/workflows\/daemon-ci\.yml/)
   assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-ci\.yml/)
@@ -40,7 +40,7 @@ test('Daemon CI watches its script suites and local composite actions for both p
     'scripts/dev/verify/supply-chain/**',
     '.github/actions/**',
   ]) {
-    assert.equal(goCi.split(`- '${dependency}'`).length - 1, 2, `both events must watch ${dependency}`)
+    assert.equal(daemonCi.split(`- '${dependency}'`).length - 1, 2, `both events must watch ${dependency}`)
   }
 })
 
@@ -50,15 +50,15 @@ test('release history scanning requires the preceding release tag as its baselin
 })
 
 test('reusable Daemon CI runs the bundled IDE extension contract tests', () => {
-  assert.match(goCi, /- name: Test IDE bridge extension\n\s+run: node --test daemon\/ide-extension\/extension\.test\.cjs/)
+  assert.match(daemonCi, /- name: Test IDE bridge extension\n\s+run: node --test daemon\/ide-extension\/extension\.test\.cjs/)
 })
 
 test('reusable Daemon CI exercises Jetty interoperability with the Daemon binary', () => {
-  assert.match(goCi, /jetty-interop:/)
-  assert.match(goCi, /actions\/setup-go@/)
-  assert.match(goCi, /DaemonCrossLanguageIntegrationTest#dataPlaneRoutingHttpAndExtendedConnectReturn404ForNonexistentView/)
+  assert.match(daemonCi, /jetty-interop:/)
+  assert.match(daemonCi, /actions\/setup-go@/)
+  assert.match(daemonCi, /DaemonCrossLanguageIntegrationTest#dataPlaneRoutingHttpAndExtendedConnectReturn404ForNonexistentView/)
   assert.match(javaInterop, /DaemonBinary\.build\(repoRoot\(\)/)
-  assert.doesNotMatch(goCi, /DAEMON_BINARY/)
+  assert.doesNotMatch(daemonCi, /DAEMON_BINARY/)
 })
 
 test('release dispatch stages release archives and cannot publish', () => {
