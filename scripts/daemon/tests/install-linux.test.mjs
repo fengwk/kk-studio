@@ -78,7 +78,7 @@ function addRelease(fixture, version) {
 describe('install.sh on Linux', () => {
   it('installs a real Go build and runs its --version command', { skip: process.platform === 'win32' }, () =>
     withInstall(({ fixture, install }) => {
-      const daemonGo = path.join(process.cwd(), 'daemon-go')
+      const daemonGo = path.join(process.cwd(), 'daemon')
       const binary = path.join(fixture.root, 'actual-kk-studio-daemon')
       const go = process.env.GO_BIN ?? '/usr/local/opt/go/bin/go'
       const build = spawnSync(go, [

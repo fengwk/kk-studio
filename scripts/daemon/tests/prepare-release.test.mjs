@@ -18,7 +18,7 @@ const run = (args, env = {}) => spawnSync('bash', [SCRIPT, ...args], {
 test('prepare-release documents its target contract without staging artifacts', () => {
   const result = run(['--help'])
   assert.equal(result.status, 0, result.stderr)
-  assert.match(result.stdout, /daemon-go\/release/)
+  assert.match(result.stdout, /daemon\/release/)
 })
 
 test('prepare-release rejects unsupported targets before dependency resolution', () => {
@@ -31,5 +31,5 @@ test('prepare-release requires a version-matched tag before downloading runtime 
   const result = run(['v0.0.0', 'linux', 'amd64'])
   assert.notEqual(result.status, 0)
   assert.match(result.stderr, /release tag must equal Go daemon version/)
-  assert.equal(existsSync(path.join(ROOT, 'daemon-go/release')), false)
+  assert.equal(existsSync(path.join(ROOT, 'daemon/release')), false)
 })

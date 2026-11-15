@@ -39,8 +39,8 @@ env:
   # push tag 用真实 tag，workflow_dispatch 用输入 tag 做候选验收。资产名、版本门禁与
   # Release 命令都只通过它取值，input 绝不直接拼进 shell。
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-  # 每个平台在 daemon-go/release/<os>-<arch> 下产出一套资产；工作流的资产校验与上传只读这些目录。
-  RELEASE_ROOT: daemon-go/release
+  # 每个平台在 daemon/release/<os>-<arch> 下产出一套资产；工作流的资产校验与上传只读这些目录。
+  RELEASE_ROOT: daemon/release
   # 官方 Daemon 发行归档覆盖的平台矩阵（windows 只支持 amd64）。
   RELEASE_PLATFORMS: linux-amd64 linux-arm64 macos-amd64 macos-arm64 windows-amd64
 
@@ -48,9 +48,9 @@ jobs:
   # Formal tag releases and Docker builds share the Go daemon CI gates. Manual dispatch remains
   # a focused archive candidate: its script tests, staging and host smoke run without publishing.
   daemon_ci:
-    name: Go daemon CI
+    name: Daemon CI
     if: github.event_name == 'push'
-    uses: ./.github/workflows/daemon-go-ci.yml
+    uses: ./.github/workflows/daemon-ci.yml
 
   stage:
     name: build and stage daemon release
@@ -144,7 +144,7 @@ jobs:
           globs: scripts/daemon/tests/*.test.mjs scripts/dev/verify/repository/tests/check-version-alignment.test.mjs scripts/dev/verify/repository/tests/daemon-ci-contract.test.mjs scripts/dev/verify/repository/tests/workflow-action-pins.test.mjs scripts/dev/verify/repository/tests/workflow-validation-gates.test.mjs scripts/dev/verify/reliability/tests/daemon-entrypoint-contracts.test.mjs scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs
 
       # Go CI owns compilation and tests; release staging compiles each supported archive target.
-      # 唯一资产暂存实现：按平台矩阵产出归档，每个平台写进 daemon-go/release/<os>-<arch>。
+      # 唯一资产暂存实现：按平台矩阵产出归档，每个平台写进 daemon/release/<os>-<arch>。
       - name: Stage release assets
         run: |
           set -euo pipefail
@@ -156,7 +156,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: daemon-release-archives
-          path: daemon-go/release
+          path: daemon/release
           retention-days: 1
           if-no-files-found: error
 
@@ -187,7 +187,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: daemon-release-archives
-          path: daemon-go/release
+          path: daemon/release
       # code-server 的 MSAL native broker (microsoft-authentication/dist/msal-node-runtime.node)
       # 链接 libmsalruntime.so，后者需要 WebKitGTK/libsecret 等宿主库；headless runner 默认缺少这些库。
       # 这些只是本烟测宿主的依赖，不是 Daemon 启动的通用要求，因此只在 linux-amd64 安装，
@@ -202,7 +202,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          archive="daemon-go/release/${{ matrix.platform }}/kk-studio-daemon-${RELEASE_TAG}-${{ matrix.platform }}.tar.gz"
+          archive="daemon/release/${{ matrix.platform }}/kk-studio-daemon-${RELEASE_TAG}-${{ matrix.platform }}.tar.gz"
           test -f "${archive}"
           case "${{ matrix.platform }}" in
             windows-*)
@@ -233,7 +233,7 @@ jobs:
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           name: daemon-release-archives
-          path: daemon-go/release
+          path: daemon/release
       - name: Publish GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}

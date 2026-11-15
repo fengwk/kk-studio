@@ -10,10 +10,10 @@ else
   while [ "$REPO_ROOT" != "/" ] && [ ! -e "$REPO_ROOT/.git" ]; do REPO_ROOT=$(dirname "$REPO_ROOT"); done
   [ -e "$REPO_ROOT/.git" ] || { echo 'ERROR: cannot locate repository root' >&2; exit 1; }
 fi
-GO_DIR="$REPO_ROOT/daemon-go"
+GO_DIR="$REPO_ROOT/daemon"
 MANIFEST="$GO_DIR/runtime-manifest.json"
 EXTENSION="$GO_DIR/ide-extension"
-RELEASE_ROOT="$REPO_ROOT/daemon-go/release"
+RELEASE_ROOT="$REPO_ROOT/daemon/release"
 THIRD_PARTY_NOTICES="$GO_DIR/THIRD_PARTY_NOTICES"
 GO_BIN=${GO_BIN:-/usr/local/opt/go/bin/go}
 NODE_BIN=${NODE_BIN:-node}
@@ -23,7 +23,7 @@ trap 'if [ -n "$WORK_DIR" ]; then rm -rf -- "$WORK_DIR"; fi; if [ -n "$STAGING_D
 
 usage() {
   echo 'Usage: scripts/daemon/prepare-release.sh <tag> <os> <arch>'
-  echo 'Stages a Go Daemon tar.gz and its SHA256 and metadata under daemon-go/release/<os>-<arch>.'
+  echo 'Stages a Go Daemon tar.gz and its SHA256 and metadata under daemon/release/<os>-<arch>.'
 }
 die() { echo "ERROR: $*" >&2; exit 1; }
 sha256_of() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi; }
@@ -43,7 +43,7 @@ main() {
   [ -s "$REPO_ROOT/LICENSE" ] || die 'LICENSE is missing'
   [ -s "$THIRD_PARTY_NOTICES" ] || die 'THIRD_PARTY_NOTICES is missing'
   version=$(sed -n 's/^var DaemonVersion = "\([^"]*\)"$/\1/p' "$GO_DIR/internal/config/version.go")
-  [ -n "$version" ] || die 'cannot read daemon-go version'
+  [ -n "$version" ] || die 'cannot read daemon version'
   [ "$tag" = "v$version" ] || die "release tag must equal Go daemon version v$version"
   platform=$($NODE_BIN -e 'const m=require(process.argv[1]);const k=process.argv[2];const a=m.codeServer?.[k];if(!a)process.exit(2);process.stdout.write(JSON.stringify(a))' "$MANIFEST" "$release_key") || die "runtime manifest has no asset for $release_key"
   local runtime_url runtime_sha server_version

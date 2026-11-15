@@ -63,10 +63,10 @@ jobs:
 
   # Go Daemon 静态构建、跨平台测试与安装脚本门禁由可复用工作流提供。
   daemon_ci:
-    name: Go daemon CI
+    name: Daemon CI
     needs: preflight
     if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
-    uses: ./.github/workflows/daemon-go-ci.yml
+    uses: ./.github/workflows/daemon-ci.yml
 
   validate:
     name: validate repository
@@ -91,11 +91,11 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: daemon-go/go.mod
+          go-version-file: daemon/go.mod
       - name: Set up PostgreSQL client tools
         uses: ./.github/actions/postgres-client
       - name: Build Go daemon for Java integration tests
-        working-directory: daemon-go
+        working-directory: daemon
         env:
           CGO_ENABLED: '0'
         run: go build -o "$RUNNER_TEMP/kk-studio-daemon-go" ./cmd/kk-studio-daemon

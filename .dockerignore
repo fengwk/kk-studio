@@ -13,10 +13,10 @@ frontend/dist/
 frontend/coverage/
 
 # Daemon release and staging outputs (rebuilt from source)
-daemon-go/release/
-daemon-go/kk-studio-daemon
-daemon-go/kk-studio-daemon.exe
-daemon-go/.kk-studio-daemon-stage.*/
+daemon/release/
+daemon/kk-studio-daemon
+daemon/kk-studio-daemon.exe
+daemon/.kk-studio-daemon-stage.*/
 
 # Local reports and artifacts (never required for build)
 reports/

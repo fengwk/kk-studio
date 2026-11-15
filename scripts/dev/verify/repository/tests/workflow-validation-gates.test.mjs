@@ -4,7 +4,7 @@ import test from 'node:test'
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const root = repositoryRoot()
-const goCi = readFileSync(`${root}/.github/workflows/daemon-go-ci.yml`, 'utf8')
+const goCi = readFileSync(`${root}/.github/workflows/daemon-ci.yml`, 'utf8')
 const release = readFileSync(`${root}/.github/workflows/daemon-release.yml`, 'utf8')
 const docker = readFileSync(`${root}/.github/workflows/docker-publish.yml`, 'utf8')
 
@@ -18,16 +18,16 @@ test('Go daemon CI is reusable and compiles all six supported static targets', (
 
 test('release and Docker gates reuse Go daemon CI', () => {
   for (const workflow of [release, docker]) {
-    assert.match(workflow, /uses: \.\/\.github\/workflows\/daemon-go-ci\.yml/)
+    assert.match(workflow, /uses: \.\/\.github\/workflows\/daemon-ci\.yml/)
     assert.doesNotMatch(workflow, /daemon-ci\.yml/)
   }
 })
 
 test('manual release dispatch stages and smokes but does not publish', () => {
   assert.match(release, /workflow_dispatch:/)
-  assert.match(release, /daemon_ci:\n    name: Go daemon CI\n    if: github\.event_name == 'push'/)
+  assert.match(release, /daemon_ci:\n    name: Daemon CI\n    if: github\.event_name == 'push'/)
   assert.match(release, /stage:\n    name: build and stage daemon release\n    needs:\n      - daemon_ci\n    if: \$\{\{ always\(\) && \(github\.event_name == 'workflow_dispatch' \|\| needs\.daemon_ci\.result == 'success'\) \}\}/)
-  assert.match(release, /daemon-go\/release/)
+  assert.match(release, /daemon\/release/)
   assert.match(release, /if: \$\{\{ github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/'\) \}\}/)
   assert.match(release, /smoke_archives:\n    name: smoke staged archive[^\n]*\n    needs: stage\n    if: \$\{\{ always\(\) && needs\.stage\.result == 'success' \}\}/)
   assert.match(release, /name: Check documentation layout\n        if: github\.event_name != 'workflow_dispatch'/)

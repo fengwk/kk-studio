@@ -76,7 +76,7 @@ final class ProductionDaemonFixture implements AutoCloseable {
   /**
    * 启动生产 Daemon。
    *
-   * @param repoRoot 仓库根（提供 Go 源码与 {@code daemon-go/ide-extension}）
+   * @param repoRoot 仓库根（提供 Go 源码与 {@code daemon/ide-extension}）
    * @param codeServerRelease 只读的已构建 code-server 发行目录
    * @param environmentId 创建环境后由服务端返回的 canonical UUID
    * @param configVersion 创建环境后由服务端返回的配置 CAS 版本
@@ -108,7 +108,7 @@ final class ProductionDaemonFixture implements AutoCloseable {
               : "kk-studio-daemon";
       Path daemonBinary = GoDaemonBinary.build(repoRoot, distributionDir.resolve(binaryName));
       copyTree(
-          repoRoot.resolve("daemon-go").resolve("ide-extension"),
+          repoRoot.resolve("daemon").resolve("ide-extension"),
           distributionDir.resolve("ide-extension"));
 
       Path runtimeDir = distributionDir.resolve("runtime");

@@ -1904,7 +1904,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   private static Path repoRoot() {
     Path current = Path.of("").toAbsolutePath().normalize();
     while (current != null) {
-      if (Files.isDirectory(current.resolve("daemon-go"))
+      if (Files.isDirectory(current.resolve("daemon"))
           && Files.isDirectory(current.resolve("web"))) {
         return current;
       }

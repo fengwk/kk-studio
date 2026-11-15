@@ -52,7 +52,7 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 
 ## 执行与传输契约
 
-[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 是原子能力描述符与输入 schema 的唯一事实源，[`daemon-go/internal/capability/schemas`](../../daemon-go/internal/capability/schemas) 是同一批 schema 的生成副本。能力在 Daemon 本机执行（[`daemon-go/internal/coding`](../../daemon-go/internal/coding/) 与 [`daemon-go/internal/lsp`](../../daemon-go/internal/lsp/)），Java 侧只保留调用方契约：
+[`EnvironmentCapabilityCatalog`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalog.java) 是原子能力描述符与输入 schema 的唯一事实源，[`daemon/internal/capability/schemas`](../../daemon/internal/capability/schemas) 是同一批 schema 的生成副本。能力在 Daemon 本机执行（[`daemon/internal/coding`](../../daemon/internal/coding/) 与 [`daemon/internal/lsp`](../../daemon/internal/lsp/)），Java 侧只保留调用方契约：
 [`EnvironmentCapabilityExecutionRequest`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityExecutionRequest.java) 组合 descriptor、call（标识与 arguments）、timeout 与可选 `ExpectedFile`（仅 `fs.edit`，携带路径与原始字节 SHA-256），构造时按 descriptor schema 归一化并严格校验。`workdir` 只属于具体工具的 arguments（仅 `process.exec`）；timeout 是上游解析后的有效值，执行层原样采用，0 表示无限 execution deadline。
 
 [`EnvironmentCapabilityTransport`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransport.java) 是调用方的传输窄端口：

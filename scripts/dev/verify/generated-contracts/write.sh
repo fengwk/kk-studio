@@ -16,7 +16,7 @@ fi
 
 cd "$REPO_ROOT"
 node "$SCRIPT_DIR/capabilities.mjs"
-"$REPO_ROOT/daemon-go/scripts/generate-protocol.sh"
+"$REPO_ROOT/daemon/scripts/generate-protocol.sh"
 exec env JAVA_HOME="$JDK21" mvn -q -pl web -am \
   -Dtest=TsContractArtifactTest \
   -Dsurefire.failIfNoSpecifiedTests=false \

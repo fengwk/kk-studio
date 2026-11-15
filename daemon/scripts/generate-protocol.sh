@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 PROTO=platform/daemon-server/src/main/protocol/control.proto
-OUT_DIR=${1:-daemon-go}
+OUT_DIR=${1:-daemon}
 cd "$ROOT"
 mkdir -p "$OUT_DIR"
 protoc \

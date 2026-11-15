@@ -6,7 +6,7 @@ import path from 'node:path'
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
 
 const root = repositoryRoot()
-const goCi = readFileSync(path.join(root, '.github/workflows/daemon-go-ci.yml'), 'utf8')
+const goCi = readFileSync(path.join(root, '.github/workflows/daemon-ci.yml'), 'utf8')
 const javaInterop = readFileSync(
   path.join(root, 'web/src/test/java/fun/fengwk/kkstudio/web/environment/DaemonCrossLanguageIntegrationTest.java'),
   'utf8',
@@ -29,8 +29,8 @@ test('Go daemon CI builds all six static targets and is reusable by release and 
   for (const target of ['linux/amd64', 'linux/arm64', 'darwin/amd64', 'darwin/arm64', 'windows/amd64', 'windows/arm64']) {
     assert.ok(goCi.includes(target), `missing cross-compile target ${target}`)
   }
-  assert.match(release, /uses: \.\/\.github\/workflows\/daemon-go-ci\.yml/)
-  assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-go-ci\.yml/)
+  assert.match(release, /uses: \.\/\.github\/workflows\/daemon-ci\.yml/)
+  assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-ci\.yml/)
 })
 
 test('Go CI watches its script suites and local composite actions for both push and pull requests', () => {
@@ -50,7 +50,7 @@ test('release history scanning requires the preceding release tag as its baselin
 })
 
 test('reusable Go CI runs the bundled IDE extension contract tests', () => {
-  assert.match(goCi, /- name: Test IDE bridge extension\n\s+run: node --test daemon-go\/ide-extension\/extension\.test\.cjs/)
+  assert.match(goCi, /- name: Test IDE bridge extension\n\s+run: node --test daemon\/ide-extension\/extension\.test\.cjs/)
 })
 
 test('reusable Go CI exercises Jetty interoperability with the Go daemon binary', () => {
@@ -64,7 +64,7 @@ test('reusable Go CI exercises Jetty interoperability with the Go daemon binary'
 test('release dispatch stages Go archives and cannot publish', () => {
   assert.match(release, /GO_BIN: go/)
   assert.match(release, /workflow_dispatch:/)
-  assert.match(release, /daemon-go\/release/)
+  assert.match(release, /daemon\/release/)
   assert.match(release, /github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/'\)/)
   assert.doesNotMatch(release, /daemon-ci\.yml/)
 })

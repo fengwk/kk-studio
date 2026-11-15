@@ -35,7 +35,7 @@ function requiredText(xml, name, label) {
 function requiredGoDaemonVersion(source) {
   const matches = [...source.matchAll(GO_DAEMON_VERSION_DECLARATION)]
   if (matches.length !== 1) {
-    throw new Error('cannot read exactly one literal DaemonVersion declaration from daemon-go/internal/config/version.go')
+    throw new Error('cannot read exactly one literal DaemonVersion declaration from daemon/internal/config/version.go')
   }
   return matches[0][1]
 }
@@ -56,7 +56,7 @@ export function checkAlignment({ pomXml, ideExtensionPackageJson, frontendPackag
     if (typeof ideExtensionVersion !== 'string' || ideExtensionVersion.trim() === '') {
       throw new Error('cannot read the daemon IDE extension package version')
     }
-    sources['daemon-go/ide-extension/package.json version'] = ideExtensionVersion.trim()
+    sources['daemon/ide-extension/package.json version'] = ideExtensionVersion.trim()
   }
   if (frontendPackageJson !== undefined) {
     const frontendVersion = JSON.parse(frontendPackageJson).version
@@ -66,9 +66,9 @@ export function checkAlignment({ pomXml, ideExtensionPackageJson, frontendPackag
     sources['frontend/package.json version'] = frontendVersion.trim()
   }
   if (goConfig === undefined) {
-    throw new Error('cannot read Go daemon version from daemon-go/internal/config/version.go')
+    throw new Error('cannot read Go daemon version from daemon/internal/config/version.go')
   }
-  sources['daemon-go/internal/config/version.go DaemonVersion'] = requiredGoDaemonVersion(goConfig)
+  sources['daemon/internal/config/version.go DaemonVersion'] = requiredGoDaemonVersion(goConfig)
   if (tag !== undefined) {
     if (typeof tag !== 'string' || !/^v[0-9A-Za-z._+-]+$/.test(tag) || tag === 'v') {
       throw new Error(`invalid RELEASE_TAG ${JSON.stringify(tag)}`)
@@ -87,7 +87,7 @@ export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
   let ideExtensionChecked = false
   let frontendChecked = false
   try {
-    const ideExtensionPath = path.join(root, 'daemon-go/ide-extension/package.json')
+    const ideExtensionPath = path.join(root, 'daemon/ide-extension/package.json')
     const ideExtensionPackageJson = existsSync(ideExtensionPath)
       ? readFileSync(ideExtensionPath, 'utf8')
       : undefined
@@ -97,7 +97,7 @@ export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
       ? readFileSync(frontendPath, 'utf8')
       : undefined
     frontendChecked = frontendPackageJson !== undefined
-    const goDaemonPath = path.join(root, 'daemon-go/internal/config/version.go')
+    const goDaemonPath = path.join(root, 'daemon/internal/config/version.go')
     const goConfig = readFileSync(goDaemonPath, 'utf8')
     result = checkAlignment({
       pomXml: readFileSync(path.join(root, 'pom.xml'), 'utf8'),
@@ -117,9 +117,9 @@ export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
   const sourceList = [
     'pom.xml',
     'kk-studio.version',
-    ...(ideExtensionChecked ? ['daemon-go/ide-extension/package.json'] : []),
+    ...(ideExtensionChecked ? ['daemon/ide-extension/package.json'] : []),
     ...(frontendChecked ? ['frontend/package.json'] : []),
-    'daemon-go/internal/config/version.go',
+    'daemon/internal/config/version.go',
   ]
   const sources = `${sourceList.slice(0, -1).join(', ')} and ${sourceList[sourceList.length - 1]}`
   const tagSuffix = tag === undefined ? '' : ` and release tag ${tag}`

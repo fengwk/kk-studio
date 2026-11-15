@@ -32,7 +32,7 @@ public final class GoDaemonBinary {
     ProcessBuilder builder =
         new ProcessBuilder(
             go.toString(), "build", "-o", output.toString(), "./cmd/kk-studio-daemon");
-    builder.directory(repositoryRoot.resolve("daemon-go").toFile());
+    builder.directory(repositoryRoot.resolve("daemon").toFile());
     builder.environment().put("CGO_ENABLED", "0");
     Path log = Files.createTempFile(output.toAbsolutePath().getParent(), "go-build-", ".log");
     builder.redirectErrorStream(true).redirectOutput(log.toFile());

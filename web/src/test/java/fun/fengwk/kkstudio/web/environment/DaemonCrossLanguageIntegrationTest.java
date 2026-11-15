@@ -133,7 +133,7 @@ class DaemonCrossLanguageIntegrationTest {
 
   @BeforeEach
   void setUp() throws Exception {
-    binaryTempDir = Files.createTempDirectory("kk-daemon-go-bin-");
+    binaryTempDir = Files.createTempDirectory("kk-daemon-bin-");
     daemonBinary = GoDaemonBinary.build(repoRoot(), binaryTempDir.resolve("kk-studio-daemon"));
     daemonVersion = GoDaemonBinary.version(daemonBinary);
     scheduler = new ScheduledExecutorScheduler("test-transport-", false);
@@ -767,7 +767,7 @@ class DaemonCrossLanguageIntegrationTest {
     Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
     while (current != null) {
       if (Files.isRegularFile(current.resolve("pom.xml"))
-          && Files.isRegularFile(current.resolve("daemon-go/go.mod"))
+          && Files.isRegularFile(current.resolve("daemon/go.mod"))
           && Files.isDirectory(current.resolve("web"))) {
         return current;
       }

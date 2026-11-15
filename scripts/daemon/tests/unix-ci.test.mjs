@@ -15,7 +15,7 @@ function jobBlock(text, name) {
 }
 
 test('Go daemon CI owns the release script suite and is reusable', () => {
-  const ci = workflow('daemon-go-ci.yml')
+  const ci = workflow('daemon-ci.yml')
   assert.match(ci, /^  workflow_call:/m)
   const quality = jobBlock(ci, 'quality')
   assert.ok(quality.includes('actions/setup-node'))
@@ -40,7 +40,7 @@ test('release staging runs the script suite and host smoke includes Windows', ()
 
 test('Docker publishing waits for reusable Go Daemon CI before publishing', () => {
   const docker = workflow('docker-publish.yml')
-  assert.ok(jobBlock(docker, 'daemon_ci').includes('./.github/workflows/daemon-go-ci.yml'))
+  assert.ok(jobBlock(docker, 'daemon_ci').includes('./.github/workflows/daemon-ci.yml'))
   const publish = jobBlock(docker, 'publish')
   const needs = publish.split('needs:\n')[1].split('    if:')[0]
   for (const name of ['preflight', 'validate', 'validate_frontend', 'daemon_ci']) {

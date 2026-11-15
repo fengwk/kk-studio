@@ -313,7 +313,7 @@ class EnvironmentCapabilityCatalogTest {
   /** 测试意图：验证 Java classpath 中的每份 schema 与 Go Daemon 声明逐字节一致。 */
   @Test
   void javaSchemasMirrorGoCapabilitySchemas() throws IOException {
-    Path goCapabilitiesDir = findProjectRootDir().resolve("daemon-go/internal/capability/schemas");
+    Path goCapabilitiesDir = findProjectRootDir().resolve("daemon/internal/capability/schemas");
     Set<String> goSchemaNames = new TreeSet<>();
     try (var files = Files.list(goCapabilitiesDir)) {
       files
@@ -370,12 +370,12 @@ class EnvironmentCapabilityCatalogTest {
   private static Path findProjectRootDir() {
     Path current = Path.of("").toAbsolutePath();
     while (current != null) {
-      if (Files.isDirectory(current.resolve("daemon-go/internal/capability/schemas"))) {
+      if (Files.isDirectory(current.resolve("daemon/internal/capability/schemas"))) {
         return current;
       }
       current = current.getParent();
     }
     throw new IllegalStateException(
-        "cannot find project root containing daemon-go/internal/capability/schemas");
+        "cannot find project root containing daemon/internal/capability/schemas");
   }
 }

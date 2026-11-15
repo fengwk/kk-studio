@@ -207,11 +207,11 @@ package_daemon() {
   version=$("$GO_BIN" version)
   [[ "$version" == *"go1.27.4"* ]] || die "Go 1.27.4 is required; found: $version"
   (
-    cd "$REPO_ROOT/daemon-go"
+    cd "$REPO_ROOT/daemon"
     CGO_ENABLED=0 "$GO_BIN" build -o "$DAEMON_BINARY" ./cmd/kk-studio-daemon
   )
   rm -rf "$DAEMON_DIST/ide-extension"
-  cp -R "$REPO_ROOT/daemon-go/ide-extension" "$DAEMON_DIST/ide-extension"
+  cp -R "$REPO_ROOT/daemon/ide-extension" "$DAEMON_DIST/ide-extension"
   [ -x "$DAEMON_BINARY" ] || die "Go daemon binary missing: $DAEMON_BINARY"
 }
 

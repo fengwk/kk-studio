@@ -7,7 +7,7 @@ import { repositoryRoot } from '../../../lib/repo-root.mjs'
 const REPOSITORY_ROOT = repositoryRoot()
 
 const WORKFLOWS = [
-  '.github/workflows/daemon-go-ci.yml',
+  '.github/workflows/daemon-ci.yml',
   '.github/workflows/daemon-release.yml',
   '.github/workflows/docker-publish.yml',
 ]

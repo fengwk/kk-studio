@@ -7,9 +7,9 @@ hs_err_pid*
 target/
 
 # Go daemon build and release outputs
-/daemon-go/kk-studio-daemon
-/daemon-go/kk-studio-daemon.exe
-/daemon-go/release/
+/daemon/kk-studio-daemon
+/daemon/kk-studio-daemon.exe
+/daemon/release/
 
 # Frontend
 node_modules/

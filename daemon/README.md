@@ -9,21 +9,21 @@ Requirements: Go 1.27.4, `/usr/bin/protoc`, and `protoc-gen-go` v1.36.12 on `PAT
 From the repository root, generate the control protocol from the platform's single source schema:
 
 ```sh
-daemon-go/scripts/generate-protocol.sh
-daemon-go/scripts/check-generated.sh
+daemon/scripts/generate-protocol.sh
+daemon/scripts/check-generated.sh
 ```
 
 Run the local checks used by CI:
 
 ```sh
-cd daemon-go
+cd daemon
 test -z "$(gofmt -l $(find . -name '*.go'))"
 go vet ./...
 go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
 CGO_ENABLED=0 go test ./...
 ```
 
-The standard-library protobuf representation is also tested against all 28 binary fixtures under `platform/daemon-server/src/main/protocol/golden/`. Linux/macOS CI additionally runs `go test -race ./...`. The six cross-build targets are Linux amd64/arm64, macOS amd64/arm64, and Windows amd64/arm64. The GitHub Actions workflow `.github/workflows/daemon-go-ci.yml` runs these checks on the supported platform matrix.
+The standard-library protobuf representation is also tested against all 28 binary fixtures under `platform/daemon-server/src/main/protocol/golden/`. Linux/macOS CI additionally runs `go test -race ./...`. The six cross-build targets are Linux amd64/arm64, macOS amd64/arm64, and Windows amd64/arm64. The GitHub Actions workflow `.github/workflows/daemon-ci.yml` runs these checks on the supported platform matrix.
 
 The daemon executable retains CLI parsing, `--help`, `--version`, read-only `--check-config`, and internal helper commands. The `--config` production path assembles native supervision, the directory lock, LSP and IDE services, control transport, runtime capabilities, resource transfer, skill installation, and update handling. `internal/runtime` owns SETTINGS/ENVIRONMENT_CONFIG readiness, heartbeats, capability invocation, cancellation/replay, result encoding, and host facts; configuration candidates publish LSP generations before the new snapshot becomes active.
 
