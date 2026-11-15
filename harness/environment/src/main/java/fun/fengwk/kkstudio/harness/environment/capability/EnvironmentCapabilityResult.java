@@ -2,8 +2,6 @@ package fun.fengwk.kkstudio.harness.environment.capability;
 
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.resource.ResourceRef;
-import fun.fengwk.kkstudio.common.result.BinaryResultContent;
-import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 
@@ -44,32 +42,8 @@ public record EnvironmentCapabilityResult(
   }
 
   /** 创建纯文本成功结果。 */
-  public static EnvironmentCapabilityResult success(String callId, String text) {
-    return text(callId, text);
-  }
-
-  /** 创建纯文本成功结果。 */
   public static EnvironmentCapabilityResult text(String callId, String text) {
     return new EnvironmentCapabilityResult(
         callId, List.of(new TextResultContent(text)), false, "{}");
-  }
-
-  /** 创建纯错误结果（统一附加 "Error: " 前缀）。 */
-  public static EnvironmentCapabilityResult error(String callId, String message) {
-    String detail = message == null || message.isBlank() ? "capability execution failed" : message;
-    return new EnvironmentCapabilityResult(
-        callId, List.of(new TextResultContent("Error: " + detail)), true, "{}");
-  }
-
-  /** 创建结构化 JSON 成功结果。 */
-  public static EnvironmentCapabilityResult json(String callId, String json) {
-    return new EnvironmentCapabilityResult(
-        callId, List.of(new JsonResultContent(json)), false, "{}");
-  }
-
-  /** 创建内联 Binary 成功结果：字节在编码前由 Daemon 直传对象存储，wire 上只出现元数据。 */
-  public static EnvironmentCapabilityResult binary(String callId, byte[] bytes, String mediaType) {
-    return new EnvironmentCapabilityResult(
-        callId, List.of(new BinaryResultContent(mediaType, bytes)), false, "{}");
   }
 }

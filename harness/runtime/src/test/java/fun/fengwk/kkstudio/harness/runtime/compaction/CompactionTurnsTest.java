@@ -51,13 +51,13 @@ class CompactionTurnsTest {
     TurnStartPayload normal = new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, id(10L));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CompactionTurns.CompactionTurn(normal, null, null, 1, -1, -1));
+        () -> new CompactionTurns.CompactionTurn(normal, null, null, 1, -1));
     TurnStartPayload compaction = (TurnStartPayload) completedPath().entries().get(1).payload();
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new CompactionTurns.CompactionTurn(
-                compaction, new CompactionPayload("summary", null), null, 1, 2, -1));
+                compaction, new CompactionPayload("summary", null), null, 1, 2));
   }
 
   private static EntryPath completedPath() {
