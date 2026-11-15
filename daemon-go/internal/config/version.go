@@ -1,4 +1,4 @@
 package config
 
 // DaemonVersion is the release version of the Go daemon.
-var DaemonVersion = "1.0.2"
+var DaemonVersion = "1.0.3"
