@@ -148,12 +148,39 @@ class DaemonConfigCodecTest {
     DaemonConfigDTO configWithLsp =
         DaemonConfigCodec.parse(
             MAPPER.readTree(
-                "{\"studioUrl\":\"http://host\",\"lsp\":{\"servers\":{\"java\":{\"command\":[\"jdtls\"]}}}}"));
+                "{\"studioUrl\":\"http://host\",\"lsp\":{\"servers\":{\"java\":{\"command\":[\"jdtls\"],\"extensions\":[\" .JAVA \"]}}}}"));
     var lsp = configWithLsp.getLsp();
-    assertEquals(List.of(), lsp.getServers().get("java").getExtensions());
+    assertEquals(List.of(".java"), lsp.getServers().get("java").getExtensions());
     assertEquals(List.of(), lsp.getServers().get("java").getRootMarkers());
     assertEquals(List.of(), lsp.getServers().get("java").getFirstMatchMarkers());
     assertThrows(IllegalArgumentException.class, () -> DaemonConfigCodec.validate(null));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"command\":[\"jdtls\"]}",
+        "{\"command\":[\"jdtls\"],\"extensions\":null}",
+        "{\"command\":[\"jdtls\"],\"extensions\":[]}"
+      })
+  void rejectsMissingEmptyOrNullExtensions(String server) throws Exception {
+    var node =
+        MAPPER.readTree(
+            "{\"studioUrl\":\"http://host\",\"lsp\":{\"servers\":{\"java\":" + server + "}}}");
+    assertSafe(() -> DaemonConfigCodec.parse(node), "daemonConfig.lsp.servers.java.extensions");
+  }
+
+  @Test
+  void rejectsDirectlyConstructedEmptyExtensions() {
+    DaemonConfigDTO omitted = basic();
+    omitted.setLsp(lsp());
+    omitted.getLsp().getServers().get("java").setExtensions(null);
+    assertSafe(
+        () -> DaemonConfigCodec.validate(omitted), "daemonConfig.lsp.servers.java.extensions");
+    DaemonConfigDTO empty = basic();
+    empty.setLsp(lsp());
+    empty.getLsp().getServers().get("java").setExtensions(List.of());
+    assertSafe(() -> DaemonConfigCodec.validate(empty), "daemonConfig.lsp.servers.java.extensions");
   }
 
   @ParameterizedTest

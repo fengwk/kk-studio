@@ -168,6 +168,13 @@ func TestCodec_EnvironmentConfig(t *testing.T) {
 	if _, err := MarshalEnvelope(duplicate); err == nil {
 		t.Fatal("duplicate LSP server id accepted")
 	}
+	for _, extensions := range [][]string{nil, {}} {
+		empty := proto.Clone(withLsp).(*Envelope)
+		empty.GetEnvironmentConfig().Config.Lsp.Servers[0].Extensions = extensions
+		if _, err := MarshalEnvelope(empty); err == nil {
+			t.Fatalf("empty extensions %v accepted", extensions)
+		}
+	}
 }
 
 func TestCodec_Ready(t *testing.T) {

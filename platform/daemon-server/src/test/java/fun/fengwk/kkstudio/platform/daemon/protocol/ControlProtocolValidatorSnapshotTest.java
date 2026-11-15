@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.daemon.protocol;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -205,10 +206,27 @@ class ControlProtocolValidatorSnapshotTest {
                                     .setId("java")
                                     .addCommand("java")
                                     .addExtensions("java"))))));
+
+    // extensions 必须非空：protobuf 省略与显式空列表都是空 repeated
+    ControlProtocolException missingExtensions =
+        assertThrows(
+            ControlProtocolException.class,
+            () ->
+                ControlProtocolCodec.encodeBinary(
+                    environmentConfig(
+                        DaemonConfiguration.newBuilder()
+                            .setStudioUrl("https://studio.example.com")
+                            .setLsp(
+                                lsp(LspServer.newBuilder().setId("java").addCommand("java"))))));
+    assertTrue(
+        missingExtensions
+            .getMessage()
+            .contains("environmentConfig.config.lsp.servers[0].extensions"),
+        missingExtensions.getMessage());
   }
 
   @Test
-  void acceptsLspWithoutOptionalLists() {
+  void acceptsLspWithoutOptionalMarkers() {
     assertDoesNotThrow(
         () ->
             ControlProtocolCodec.encodeBinary(
@@ -216,7 +234,12 @@ class ControlProtocolValidatorSnapshotTest {
                     DaemonConfiguration.newBuilder()
                         .setStudioUrl("https://studio.example.com")
                         .setBashExecutable("/usr/bin/bash")
-                        .setLsp(lsp(LspServer.newBuilder().setId("java").addCommand("java"))))));
+                        .setLsp(
+                            lsp(
+                                LspServer.newBuilder()
+                                    .setId("java")
+                                    .addCommand("java")
+                                    .addExtensions(".JAVA"))))));
   }
 
   @Test

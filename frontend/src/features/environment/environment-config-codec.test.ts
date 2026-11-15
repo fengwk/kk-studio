@@ -185,36 +185,35 @@ describe('validateDaemonConfig', () => {
     ).toThrow(/^Invalid /)
   })
 
-  it('keeps command required while normalizing omitted or empty optional lists', () => {
+  it('keeps command and extensions required while markers stay optional', () => {
     expect(
       validateDaemonConfig({
         ...config(),
         lsp: {
           servers: {
-            server: { command: ['x'] },
-            empty: {
-              command: ['y'],
-              extensions: [],
-              rootMarkers: [],
-              firstMatchMarkers: [],
-            },
+            server: { command: ['x'], extensions: [' .TS '] },
           },
         },
-      }).lsp?.servers,
+      }).lsp?.servers.server,
     ).toEqual({
-      server: {
-        command: ['x'],
-        extensions: [],
-        rootMarkers: [],
-        firstMatchMarkers: [],
-      },
-      empty: {
-        command: ['y'],
-        extensions: [],
-        rootMarkers: [],
-        firstMatchMarkers: [],
-      },
+      command: ['x'],
+      extensions: ['.ts'],
+      rootMarkers: [],
+      firstMatchMarkers: [],
     })
+  })
+
+  it.each([
+    { command: ['x'] },
+    { command: ['x'], extensions: null },
+    { command: ['x'], extensions: [] },
+  ])('rejects omitted, null or empty extensions %#', (server) => {
+    expect(() =>
+      validateDaemonConfig({
+        ...config(),
+        lsp: { servers: { server } } as unknown as DaemonConfigDTO['lsp'],
+      }),
+    ).toThrow(/daemonConfig\.lsp\.servers\.server\.extensions$/)
   })
 
   it.each(['__proto__', 'constructor', 'toString'])(
