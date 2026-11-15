@@ -3,6 +3,7 @@ package coding
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -80,7 +81,7 @@ func TestEditDisclosesLossyDecodeAndRefusesCodecFailures(t *testing.T) {
 // checks require a normalized change, so the empty diff is reached by calling the review directly.
 func TestEditRejectsResultIdenticalToDecodedFile(t *testing.T) {
 	_, _, err := editReview("review", "/repo/file.txt", "hash", "same\n", "same\n", 1, nil)
-	if err == nil || err.Error() != "The content is identical to the current file; nothing was written." {
+	if !errors.Is(err, errUnchangedFile) {
 		t.Fatalf("review err=%v", err)
 	}
 	result := toCapabilityErrorResult("review", unchangedFileError(err))
@@ -92,12 +93,12 @@ func TestEditRejectsResultIdenticalToDecodedFile(t *testing.T) {
 	}
 }
 
-// A leading U+FEFF in a BOM-less file would become a UTF-8 byte order mark, so the edit is
-// refused before anything is written. A file that already has a BOM keeps the character as content.
+// A leading U+FEFF in a BOM-less file would change how the file is read, so the edit is refused
+// before anything is written. A file that already has a BOM keeps the character as content.
 func TestEditRefusesLeadingBOMRequest(t *testing.T) {
 	path := writeFixture(t, "plain.txt", []byte("alpha\n"))
 	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("alpha", "\uFEFFalpha")), nil)
-	if !result.Error || !strings.Contains(result.Contents[0].Text, "would add a byte order mark") || !strings.Contains(result.Contents[0].Text, "Remove the leading U+FEFF") {
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "cannot be written to") || !strings.Contains(result.Contents[0].Text, "Remove the leading U+FEFF") {
 		t.Fatalf("edit=%#v", result)
 	}
 	if !strings.Contains(result.Contents[0].Text, "The tool was not executed.") || !strings.Contains(string(result.Details), `"code":"CODEC"`) || strings.Contains(result.Contents[0].Text, "cannot be confirmed") {
@@ -111,7 +112,7 @@ func TestEditRefusesLeadingBOMRequest(t *testing.T) {
 	if !result.Error {
 		t.Fatalf("declared diff=%s", result.Contents[0].JSON)
 	}
-	if !result.Error || !strings.Contains(result.Contents[0].Text, "would add a byte order mark") {
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "cannot be written to") {
 		t.Fatalf("declared=%#v", result)
 	}
 	if written := mustRead(t, declared); !bytes.HasPrefix(written, []byte("<?xml")) {

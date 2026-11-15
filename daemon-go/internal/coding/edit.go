@@ -602,12 +602,14 @@ func diffLineCount(text string) []string {
 
 // errUnchangedFile reports a change whose normalized text is identical to the file, so there is
 // nothing to write. The caller reports it as an input rejection.
-const errUnchangedFile = "The content is identical to the current file; nothing was written."
+var errUnchangedFile = errors.New("content is identical to the current file")
+
+const unchangedFileMessage = "The content is identical to the current file; nothing was written."
 
 // unchangedFileError reports an empty diff as the no-change rejection and passes other errors on.
 func unchangedFileError(err error) error {
-	if err != nil && err.Error() == errUnchangedFile {
-		return rejectInput(errUnchangedFile)
+	if errors.Is(err, errUnchangedFile) {
+		return rejectInput(unchangedFileMessage)
 	}
 	return err
 }
@@ -624,7 +626,7 @@ func numberedDiff(oldText, newText string) (string, error) {
 		}
 	}
 	if !d.seen {
-		return "", errors.New(errUnchangedFile)
+		return "", errUnchangedFile
 	}
 	if d.oldCursor > 0 && d.oldCursor <= len(diffLineCount(oldText)) || d.newCursor > 0 && d.newCursor <= len(diffLineCount(newText)) {
 		d.out = append(d.out, "...")
