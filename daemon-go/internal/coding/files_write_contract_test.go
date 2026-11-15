@@ -46,8 +46,8 @@ func TestWriteCommitsInPlace(t *testing.T) {
 	if !os.SameFile(before, after) {
 		t.Fatal("the in-place write replaced the file instead of rewriting it")
 	}
-	if after.Mode().Perm() != 0o640 {
-		t.Fatalf("mode=%#o", after.Mode().Perm())
+	if after.Mode().Perm() != before.Mode().Perm() {
+		t.Fatalf("mode changed from %#o to %#o", before.Mode().Perm(), after.Mode().Perm())
 	}
 	linked, err := os.ReadFile(alias)
 	if err != nil || string(linked) != "beta\n" {

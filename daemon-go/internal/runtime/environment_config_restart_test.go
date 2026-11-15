@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -19,7 +20,11 @@ import (
 func TestEnvironmentConfigCacheKeepsServerSnapshotIdentity(t *testing.T) {
 	const environmentID = "123e4567-e89b-42d3-a456-426614174000"
 	home := filepath.Join(t.TempDir(), "home")
-	executable := filepath.Join(home, ".local", "share", "nvim", "mason", "bin", "jdtls")
+	name := "jdtls"
+	if goruntime.GOOS == "windows" {
+		name += ".exe"
+	}
+	executable := filepath.Join(home, ".local", "share", "nvim", "mason", "bin", name)
 	if err := os.MkdirAll(filepath.Dir(executable), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -28,7 +33,7 @@ func TestEnvironmentConfigCacheKeepsServerSnapshotIdentity(t *testing.T) {
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	configured := "~/.local/share/nvim/mason/bin/jdtls"
+	configured := "~/.local/share/nvim/mason/bin/" + name
 	directory := filepath.Join(t.TempDir(), "daemon")
 	if err := native.EnsurePrivateDirectory(directory); err != nil {
 		t.Fatal(err)
