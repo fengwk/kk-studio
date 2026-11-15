@@ -58,7 +58,8 @@ class ToolApprovalJsonCodecTest {
             new ExpectedFile(
                 "/srv/app.java",
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
-            "-old\n+new");
+            "-old\n+new",
+            null);
     ToolApproval undecidedWithReview = ToolApproval.request(REQUESTED_AT, "Review edit", review);
     assertEquals(
         "{\"required\":true,\"decision\":null,\"decisionId\":null,\"actor\":null,"
@@ -84,6 +85,32 @@ class ToolApprovalJsonCodecTest {
             + "\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}}",
         codec.encode(decidedWithReview));
     assertEquals(decidedWithReview, codec.decode(codec.encode(decidedWithReview)));
+  }
+
+  /** approval 持久化必须原样保留有损解码事实，供刷新后的审批卡片继续提示。 */
+  @Test
+  void persistsLossyDecodeReviewUnchanged() {
+    ToolEditReview review =
+        new ToolEditReview(
+            new ExpectedFile(
+                "/srv/app.java",
+                "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
+            "-old\n+new",
+            new ToolEditReview.LossyDecode("GB18030", 2));
+    ToolApproval approval = ToolApproval.request(REQUESTED_AT, "Review edit", review);
+
+    String json = codec.encode(approval);
+    assertEquals(
+        "{\"required\":true,\"decision\":null,\"decisionId\":null,\"actor\":null,"
+            + "\"reason\":\"Review edit\",\"requestedAt\":\"2026-08-04T00:00:00Z\","
+            + "\"decidedAt\":null,\"editReview\":{\"path\":\"/srv/app.java\","
+            + "\"diff\":\"-old\\n+new\","
+            + "\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\","
+            + "\"lossyDecode\":{\"encoding\":\"GB18030\",\"invalidSequences\":2}}}",
+        json);
+    ToolApproval decoded = codec.decode(json);
+    assertEquals(approval, decoded);
+    assertEquals(review, decoded.editReview());
   }
 
   /** 严格 parser 设置独立于 approval 语义拒绝畸形文档。 */

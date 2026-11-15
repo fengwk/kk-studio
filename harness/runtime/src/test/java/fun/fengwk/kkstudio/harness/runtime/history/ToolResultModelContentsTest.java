@@ -118,6 +118,40 @@ class ToolResultModelContentsTest {
   }
 
   @Test
+  void lossyDecodeEditReviewStillDerivesTheSameDiff() {
+    List<AgentMessageContent> original = List.of(new TextMessageContent("Edited successfully."));
+    String details =
+        "{\"editReview\":{\"path\":\"src/Main.java\",\"diff\":\"+new\",\"sha256\":\""
+            + SHA256
+            + "\",\"lossyDecode\":{\"encoding\":\"GB18030\",\"invalidSequences\":2}}}";
+    ToolResultMessageContent result =
+        new ToolResultMessageContent("call-1", "edit", "edit", original, false, details);
+
+    List<AgentMessageContent> contents = ToolResultModelContents.contentsOf(result);
+
+    assertEquals(2, contents.size());
+    assertEquals(
+        "\n\nFile: src/Main.java\nDiff:\n+new", ((TextMessageContent) contents.get(1)).text());
+  }
+
+  @Test
+  void malformedLossyDecodeEditReviewThrowsIae() {
+    List<AgentMessageContent> original = List.of(new TextMessageContent("Edited successfully."));
+    ToolResultMessageContent result =
+        new ToolResultMessageContent(
+            "call-1",
+            "edit",
+            "edit",
+            original,
+            false,
+            "{\"editReview\":{\"path\":\"a.txt\",\"diff\":\"+foo\",\"sha256\":\""
+                + SHA256
+                + "\",\"lossyDecode\":{\"encoding\":\"GB18030\",\"invalidSequences\":0}}}");
+
+    assertThrows(IllegalArgumentException.class, () -> ToolResultModelContents.contentsOf(result));
+  }
+
+  @Test
   void malformedDetailsJsonThrowsIae() {
     List<AgentMessageContent> original = List.of(new TextMessageContent("Edited successfully."));
     ToolResultMessageContent result =

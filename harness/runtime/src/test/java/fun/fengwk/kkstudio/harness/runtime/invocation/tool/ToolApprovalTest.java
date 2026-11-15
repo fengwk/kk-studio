@@ -105,7 +105,8 @@ class ToolApprovalTest {
                 new ToolEditReview(
                     new ExpectedFile(
                         "/a", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
-                    "diff")));
+                    "diff",
+                    null)));
   }
 
   @Test
@@ -205,7 +206,8 @@ class ToolApprovalTest {
             new ExpectedFile(
                 "/srv/app.java",
                 "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"),
-            "-old\n+new");
+            "-old\n+new",
+            null);
     ToolApproval requestedWithReview = ToolApproval.request(REQUESTED, "why", review);
     assertTrue(requestedWithReview.required());
     assertTrue(requestedWithReview.isUndecided());
