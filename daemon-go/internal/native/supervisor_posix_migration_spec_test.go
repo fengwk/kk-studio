@@ -459,7 +459,8 @@ func TestPOSIXProcessGroupFixture(t *testing.T) {
 	time.Sleep(30 * time.Second)
 }
 
-// Verifies session termination reaches a child in a distinct process group.
+// Verifies session termination reaches a child in a distinct process group and
+// only leaves the child behind as a non-live entry pending OS reclamation.
 func TestPOSIXSupervisor_MultipleProcessGroups(t *testing.T) {
 	supervisor, err := NewSupervisor()
 	if err != nil {
@@ -493,8 +494,67 @@ func TestPOSIXSupervisor_MultipleProcessGroups(t *testing.T) {
 	if err := process.Terminate(ctx, 10*time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
-	if err := unix.Kill(childPID, 0); !errors.Is(err, unix.ESRCH) {
-		t.Fatalf("different-group child %d survived termination: %v", childPID, err)
+	// Termination proves convergence when no live member remains, but macOS may
+	// briefly list the killed child as a zombie until launchd reaps it.
+	members, err := allProcessMembers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, childListed := sessionMember{}, false
+	liveMembers := make([]sessionMember, 0)
+	for _, member := range members {
+		if member.PID == childPID {
+			child, childListed = member, true
+		}
+		if member.Session == managed.sid && member.isLive() {
+			liveMembers = append(liveMembers, member)
+		}
+	}
+	if childListed {
+		t.Logf("different-group child %d still listed after termination: state=%s parent=%d session=%d", child.PID, child.State, child.Parent, child.Session)
+		if child.isLive() {
+			t.Fatalf("different-group child %d is still live after termination: state=%s parent=%d session=%d", child.PID, child.State, child.Parent, child.Session)
+		}
+	}
+	if len(liveMembers) != 0 {
+		t.Fatalf("session %d still has live members after termination: %+v", managed.sid, liveMembers)
+	}
+	reclaimWait := time.Now()
+	sawDormant := childListed
+	lastState := child.State
+	defer func() {
+		t.Logf("different-group child %d reclamation: non-live entry observed=%t, wait=%s", childPID, sawDormant, time.Since(reclaimWait))
+	}()
+	deadline := reclaimWait.Add(time.Second)
+	for {
+		members, err := allProcessMembers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, member := range members {
+			if member.PID != childPID {
+				continue
+			}
+			if member.isLive() {
+				t.Fatalf("different-group child %d became live while awaiting reclamation: state=%s parent=%d session=%d", member.PID, member.State, member.Parent, member.Session)
+			}
+			if !sawDormant || member.State != lastState {
+				t.Logf("different-group child %d still listed while awaiting reclamation: state=%s parent=%d session=%d", member.PID, member.State, member.Parent, member.Session)
+			}
+			sawDormant = true
+			lastState = member.State
+		}
+		probeErr := unix.Kill(childPID, 0)
+		if errors.Is(probeErr, unix.ESRCH) {
+			return
+		}
+		if probeErr != nil {
+			t.Fatalf("cannot inspect different-group child %d: %v", childPID, probeErr)
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("different-group child %d remained present after the reclamation window: %v", childPID, probeErr)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
