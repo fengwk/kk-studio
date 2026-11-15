@@ -176,12 +176,8 @@ public class CanvasCommandService {
         }
         case CanvasMutation.ReleaseNodePins release -> resourceLifecycle.releaseNodePins(
             canvasId, release.nodeId());
-        case CanvasMutation.DeleteFunctionRun delete -> {
-          if (!runRepository.deleteByNodeId(delete.nodeId())) {
-            throw new IllegalStateException(
-                "delete canvas function run failed: " + delete.nodeId());
-          }
-        }
+        case CanvasMutation.DeleteFunctionRun delete -> runRepository.deleteByNodeId(
+            delete.nodeId());
       }
     }
   }

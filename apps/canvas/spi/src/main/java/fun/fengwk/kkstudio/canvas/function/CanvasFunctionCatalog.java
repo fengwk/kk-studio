@@ -1,7 +1,5 @@
 package fun.fengwk.kkstudio.canvas.function;
 
-import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonArray;
-import fun.fengwk.kkstudio.canvas.function.CanvasJson.JsonObject;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.hash.Sha256;
 
@@ -83,7 +81,7 @@ public final class CanvasFunctionCatalog {
     MessageDigest digest = Sha256.newDigest();
     updateText(digest, definition.name());
     updateText(digest, definition.description());
-    updateText(digest, sortObjectKeys(definition.argsSchema()).write());
+    updateText(digest, definition.argsSchema().writeCanonical());
     updateCount(digest, definition.outputs().size());
     for (CanvasFunctionOutputSpec output : definition.outputs()) {
       updateText(digest, output.kind().name());
@@ -104,25 +102,6 @@ public final class CanvasFunctionCatalog {
       updateCount(digest, entry.getValue());
     }
     return HexFormat.of().formatHex(digest.digest());
-  }
-
-  /** 递归按对象键字典序重建 JSON 树；数组顺序与标量原样保留，因此输入顺序不改变摘要。 */
-  private static CanvasJson sortObjectKeys(CanvasJson value) {
-    if (value instanceof JsonObject object) {
-      Map<String, CanvasJson> ordered = new TreeMap<>();
-      for (Map.Entry<String, CanvasJson> entry : object.values().entrySet()) {
-        ordered.put(entry.getKey(), sortObjectKeys(entry.getValue()));
-      }
-      return new JsonObject(ordered);
-    }
-    if (value instanceof JsonArray array) {
-      List<CanvasJson> items = new ArrayList<>(array.values().size());
-      for (CanvasJson item : array.values()) {
-        items.add(sortObjectKeys(item));
-      }
-      return new JsonArray(items);
-    }
-    return value;
   }
 
   /** 文本字段以字节长度前缀消歧，避免相邻字段拼接出的字节流与另一种字段组合相同。 */

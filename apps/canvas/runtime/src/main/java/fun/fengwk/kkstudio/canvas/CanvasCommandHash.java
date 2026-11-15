@@ -135,7 +135,7 @@ public final class CanvasCommandHash {
       return;
     }
     appendText(out, function.name());
-    appendText(out, function.argsJson());
+    appendText(out, function.args().writeCanonical());
   }
 
   private static void appendTransform(StringBuilder out, CanvasTransform transform) {

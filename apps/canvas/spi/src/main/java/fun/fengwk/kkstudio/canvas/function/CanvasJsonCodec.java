@@ -23,6 +23,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.TreeMap;
 
 /**
  * {@link CanvasJson} 基于 Jackson 3 core/stream 的严格解析与规范序列化。
@@ -76,9 +77,22 @@ final class CanvasJsonCodec {
   }
 
   static String write(CanvasJson value) {
+    return write(value, false);
+  }
+
+  /**
+   * 与 {@link #write(CanvasJson)} 共用同一套数值、转义、深度和长度约束，但对象键按字典序递归写出。数组顺序保持不变。
+   *
+   * <p>指纹比较需要这个稳定文本：语义相等的对象不能因为插入顺序不同而产生不同摘要。持久化与 API 文本继续使用保留插入顺序的 {@link #write(CanvasJson)}。
+   */
+  static String writeCanonical(CanvasJson value) {
+    return write(value, true);
+  }
+
+  private static String write(CanvasJson value, boolean canonical) {
     BoundedWriter writer = new BoundedWriter();
     try (JsonGenerator generator = FACTORY.createGenerator(ObjectWriteContext.empty(), writer)) {
-      writeValue(generator, value, 0);
+      writeValue(generator, value, 0, canonical);
     } catch (JacksonException error) {
       throw new IllegalArgumentException("json is invalid: " + error.getMessage(), error);
     }
@@ -121,14 +135,17 @@ final class CanvasJsonCodec {
     return new JsonArray(values);
   }
 
-  private static void writeValue(JsonGenerator generator, CanvasJson value, int depth) {
+  private static void writeValue(
+      JsonGenerator generator, CanvasJson value, int depth, boolean canonical) {
     switch (value) {
       case JsonObject object -> {
         requireContainerDepth(depth);
         generator.writeStartObject();
-        for (Map.Entry<String, CanvasJson> entry : object.values().entrySet()) {
+        Map<String, CanvasJson> values =
+            canonical ? new TreeMap<>(object.values()) : object.values();
+        for (Map.Entry<String, CanvasJson> entry : values.entrySet()) {
           generator.writeName(entry.getKey());
-          writeValue(generator, entry.getValue(), depth + 1);
+          writeValue(generator, entry.getValue(), depth + 1, canonical);
         }
         generator.writeEndObject();
       }
@@ -136,7 +153,7 @@ final class CanvasJsonCodec {
         requireContainerDepth(depth);
         generator.writeStartArray();
         for (CanvasJson item : array.values()) {
-          writeValue(generator, item, depth + 1);
+          writeValue(generator, item, depth + 1, canonical);
         }
         generator.writeEndArray();
       }
