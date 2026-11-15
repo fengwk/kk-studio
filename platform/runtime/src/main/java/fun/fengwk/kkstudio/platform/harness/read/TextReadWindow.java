@@ -5,11 +5,7 @@ import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.Reader;
-import java.nio.charset.CharacterCodingException;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -31,11 +27,11 @@ import java.util.Objects;
  *   <li>行号与列号内部用 {@code long} 计数；超出参数协议 {@code int} 范围的位置显式拒绝，不伪造越界元数据。
  * </ul>
  *
- * <p>{@link #read} 使用调用方已解码、校验的字符流，不自行剥离 BOM 或关闭流。{@code format} 对受管文本执行严格 UTF-8 解码、首字符 BOM
- * 剥离和参数校验；调用方负责关闭输入流。IO 映射为 {@link PlatformReadException}，存储超时等未检查异常原样传播。
+ * <p>{@link #read} 使用调用方已解码的字符流，不自行剥离 BOM 或关闭流；未配对的代理项按 U+FFFD 替换。{@code format} 对受管文本执行 替换式 UTF-8
+ * 解码、首字符 BOM 剥离和参数校验；调用方负责关闭输入流。IO 映射为 {@link PlatformReadException}，存储超时等未检查异常原样传播。
  *
- * <p>非文本判定与 Daemon codec 一致：前 {@value #BINARY_PROBE_BYTES} 字节内出现 NUL 字节是二进制文件；其余无法按 UTF-8 解码的内容
- * （含畸形代理对）明确报告不是 UTF-8 文本，不误报为二进制；{@value #BINARY_PROBE_BYTES} 字节之后的 NUL 按文本处理。
+ * <p>非文本判定与 Daemon codec 一致：原始字节的前 {@value #BINARY_PROBE_BYTES} 字节内出现 NUL 字节是二进制文件；其余非法 UTF-8 按
+ * Unicode 3.9/WHATWG 的最大子部分规则各自替换为一个 U+FFFD，不再拒绝读取；{@value #BINARY_PROBE_BYTES} 字节之后的 NUL 按文本处理。
  */
 public final class TextReadWindow {
 
@@ -123,15 +119,13 @@ public final class TextReadWindow {
         };
     try {
       return read(
-          withoutLeadingBom(strictUtf8Reader(stream)),
+          withoutLeadingBom(new Utf8ReplacementReader(stream, displayPath)),
           resolvedOffset,
           resolvedLimit,
           columnOffset,
           displayPath,
           lspStatus,
           checkpoint);
-    } catch (CharacterCodingException error) {
-      throw notUtf8(displayPath, error);
     } catch (IOException error) {
       throw new PlatformReadException("file cannot be read: " + displayPath, error);
     }
@@ -145,35 +139,17 @@ public final class TextReadWindow {
             + " and supported media.");
   }
 
-  /** 不是合法 UTF-8：受管资源不声明编码，因此只能读 UTF-8。 */
-  private static PlatformReadException notUtf8(String displayPath, Throwable cause) {
-    return PlatformReadException.notText(
-        displayPath
-            + " is not UTF-8 text, so it was not read. Managed resources are read as UTF-8; to read"
-            + " another encoding, convert it in an Environment, for example with bash iconv.",
-        cause);
-  }
-
-  private static Reader strictUtf8Reader(InputStream stream) {
-    return new InputStreamReader(
-        stream,
-        StandardCharsets.UTF_8
-            .newDecoder()
-            .onMalformedInput(CodingErrorAction.REPORT)
-            .onUnmappableCharacter(CodingErrorAction.REPORT));
-  }
-
   /**
    * 在已解码字符流上投影一个窗口。
    *
-   * @param reader 已严格解码的字符流；调用方负责按需剥离首个 BOM 字符并关闭它
+   * @param reader 已解码的字符流；调用方负责按需剥离首个 BOM 字符并关闭它，未配对代理项按 U+FFFD 替换
    * @param offset 已校验的 1-based 起始行
    * @param limit 已校验的最大返回行数
    * @param columnOffset 已校验的起始行内 1-based 码点偏移，{@code null} 表示第 1 列
    * @param displayPath header 展示的路径
    * @param lspStatus LSP 状态；{@code null} 或 {@code "unsupported"} 时省略该 header 行
    * @param checkpoint 每块读取前后执行的检查点；抛出异常即中止扫描，用于超时与中断映射
-   * @throws PlatformReadException 内容含二进制证据、不是 UTF-8 文本、目标行越界列或位置超出可分页范围
+   * @throws PlatformReadException 目标行越界列或位置超出可分页范围
    * @throws IOException 读取失败
    */
   public static String read(
@@ -189,7 +165,7 @@ public final class TextReadWindow {
     Objects.requireNonNull(displayPath, "displayPath");
     Objects.requireNonNull(checkpoint, "checkpoint");
     Scanner scanner = new Scanner(offset, limit, columnOffset == null ? 1 : columnOffset);
-    return format(scan(reader, scanner, displayPath, checkpoint), displayPath, lspStatus);
+    return format(scan(reader, scanner, checkpoint), displayPath, lspStatus);
   }
 
   /**
@@ -236,22 +212,21 @@ public final class TextReadWindow {
     return (int) value;
   }
 
-  private static Window scan(
-      Reader reader, Scanner scanner, String displayPath, Runnable checkpoint) throws IOException {
+  private static final int REPLACEMENT_CODE_POINT = 0xFFFD;
+
+  /**
+   * 扫描已解码字符流：未配对的代理项各自替换为一个 U+FFFD，绝不以半个码点入正文。
+   *
+   * <p>二进制判定发生在 {@link Utf8ReplacementReader} 的原始字节入口；本方法只处理字符。
+   */
+  private static Window scan(Reader reader, Scanner scanner, Runnable checkpoint)
+      throws IOException {
     char[] buffer = new char[READ_BUFFER_CHARS];
     boolean skipLf = false;
     int pendingHigh = -1;
-    // 已解码内容的 UTF-8 字节偏移：严格解码下每个码点的字节长度就是它的 UTF-8 长度， 因此可与 Daemon codec 一样按前 8000 字节判定二进制。
-    long byteOffset = 0L;
     while (true) {
       checkpoint.run();
-      int count;
-      try {
-        count = reader.read(buffer);
-      } catch (CharacterCodingException error) {
-        // 严格解码器抛出的编码异常（如非 UTF-8 的 8 位旧编码）不是二进制证据。
-        throw notUtf8(displayPath, error);
-      }
+      int count = reader.read(buffer);
       if (count == -1) {
         break;
       }
@@ -259,19 +234,20 @@ public final class TextReadWindow {
       for (int index = 0; index < count; index++) {
         char value = buffer[index];
         if (pendingHigh >= 0) {
-          if (!Character.isLowSurrogate(value)) {
-            throw notUtf8(displayPath, null);
+          if (Character.isLowSurrogate(value)) {
+            int codePoint = Character.toCodePoint((char) pendingHigh, value);
+            pendingHigh = -1;
+            skipLf = false;
+            scanner.onCodePoint(codePoint);
+            continue;
           }
-          int codePoint = Character.toCodePoint((char) pendingHigh, value);
           pendingHigh = -1;
           skipLf = false;
-          byteOffset = scanCodePoint(scanner, codePoint, byteOffset, displayPath);
-          continue;
+          scanner.onCodePoint(REPLACEMENT_CODE_POINT);
         }
         if (value == '\r') {
           scanner.onSeparator();
           skipLf = true;
-          byteOffset++;
           continue;
         }
         if (value == '\n') {
@@ -279,60 +255,191 @@ public final class TextReadWindow {
             scanner.onSeparator();
           }
           skipLf = false;
-          byteOffset++;
           continue;
         }
         skipLf = false;
         if (Character.isHighSurrogate(value)) {
           if (index + 1 < count) {
             char low = buffer[index + 1];
-            if (!Character.isLowSurrogate(low)) {
-              throw notUtf8(displayPath, null);
+            if (Character.isLowSurrogate(low)) {
+              index++;
+              scanner.onCodePoint(Character.toCodePoint(value, low));
+            } else {
+              scanner.onCodePoint(REPLACEMENT_CODE_POINT);
             }
-            index++;
-            byteOffset =
-                scanCodePoint(scanner, Character.toCodePoint(value, low), byteOffset, displayPath);
           } else {
-            // 高代理项落在读取块末尾：留到下一块与低代理项合并，绝不以半个码点入正文。
+            // 高代理项落在读取块末尾：留到下一块与低代理项合并或替换，绝不以半个码点入正文。
             pendingHigh = value;
           }
           continue;
         }
         if (Character.isLowSurrogate(value)) {
-          throw notUtf8(displayPath, null);
+          scanner.onCodePoint(REPLACEMENT_CODE_POINT);
+          continue;
         }
-        byteOffset = scanCodePoint(scanner, value, byteOffset, displayPath);
+        scanner.onCodePoint(value);
       }
     }
     if (pendingHigh >= 0) {
-      throw notUtf8(displayPath, null);
+      scanner.onCodePoint(REPLACEMENT_CODE_POINT);
     }
     return scanner.finish();
   }
 
   /**
-   * 一个码点入正文：前 8000 字节内的 NUL 是二进制证据，之后的 NUL 按文本处理。
+   * 替换式 UTF-8 解码：非法序列按 Unicode 3.9 / WHATWG 的最大子部分规则各自输出一个 U+FFFD。
    *
-   * @return 该码点之后的 UTF-8 字节偏移
+   * <p>同时在原始字节层执行二进制探测：前 {@value #BINARY_PROBE_BYTES} 字节内的 NUL 立即判定为二进制。 该 Reader 不关闭调用方的输入流。
    */
-  private static long scanCodePoint(
-      Scanner scanner, int codePoint, long byteOffset, String displayPath) {
-    if (codePoint == 0 && byteOffset < BINARY_PROBE_BYTES) {
-      throw binary(displayPath);
-    }
-    scanner.onCodePoint(codePoint);
-    return byteOffset + utf8Length(codePoint);
-  }
+  private static final class Utf8ReplacementReader extends Reader {
 
-  /** 码点的 UTF-8 字节长度：严格解码后这就是它在源字节里的实际占用。 */
-  private static int utf8Length(int codePoint) {
-    if (codePoint < 0x80) {
-      return 1;
+    private final InputStream stream;
+    private final String displayPath;
+    private final byte[] input = new byte[READ_BUFFER_CHARS];
+    private int inputPos;
+    private int inputLimit;
+    private int pendingByte = -1;
+    private int byteOffset;
+    private int codePoint;
+    private int needed;
+    private int lower = 0x80;
+    private int upper = 0xBF;
+    private int pendingLow = -1;
+
+    private Utf8ReplacementReader(InputStream stream, String displayPath) {
+      this.stream = stream;
+      this.displayPath = displayPath;
     }
-    if (codePoint < 0x800) {
-      return 2;
+
+    @Override
+    public int read(char[] buffer, int offset, int length) throws IOException {
+      if (length == 0) {
+        return 0;
+      }
+      int count = 0;
+      if (pendingLow >= 0) {
+        buffer[offset++] = (char) pendingLow;
+        pendingLow = -1;
+        count++;
+      }
+      while (count < length) {
+        int next = nextCodePoint();
+        if (next < 0) {
+          break;
+        }
+        if (next < Character.MIN_SUPPLEMENTARY_CODE_POINT) {
+          buffer[offset++] = (char) next;
+          count++;
+          continue;
+        }
+        char[] pair = Character.toChars(next);
+        buffer[offset++] = pair[0];
+        count++;
+        if (count < length) {
+          buffer[offset++] = pair[1];
+          count++;
+        } else {
+          pendingLow = pair[1];
+        }
+      }
+      return count == 0 && pendingLow < 0 ? -1 : count;
     }
-    return codePoint < 0x10000 ? 3 : 4;
+
+    /** 返回下一个码点；EOF 返回 -1，截断的末尾序列返回一个 U+FFFD。 */
+    private int nextCodePoint() throws IOException {
+      while (true) {
+        int value = readByte();
+        if (value < 0) {
+          if (needed > 0) {
+            resetSequence();
+            return REPLACEMENT_CODE_POINT;
+          }
+          return -1;
+        }
+        if (needed == 0) {
+          if (value < 0x80) {
+            return value;
+          }
+          if (value >= 0xC2 && value <= 0xDF) {
+            codePoint = value & 0x1F;
+            needed = 1;
+            lower = 0x80;
+            upper = 0xBF;
+          } else if (value >= 0xE0 && value <= 0xEF) {
+            codePoint = value & 0x0F;
+            needed = 2;
+            lower = value == 0xE0 ? 0xA0 : 0x80;
+            upper = value == 0xED ? 0x9F : 0xBF;
+          } else if (value >= 0xF0 && value <= 0xF4) {
+            codePoint = value & 0x07;
+            needed = 3;
+            lower = value == 0xF0 ? 0x90 : 0x80;
+            upper = value == 0xF4 ? 0x8F : 0xBF;
+          } else {
+            return REPLACEMENT_CODE_POINT;
+          }
+          continue;
+        }
+        if (value < lower || value > upper) {
+          resetSequence();
+          unreadByte(value);
+          return REPLACEMENT_CODE_POINT;
+        }
+        codePoint = (codePoint << 6) | (value & 0x3F);
+        needed--;
+        lower = 0x80;
+        upper = 0xBF;
+        if (needed == 0) {
+          int result = codePoint;
+          codePoint = 0;
+          return result;
+        }
+      }
+    }
+
+    private int readByte() throws IOException {
+      if (pendingByte >= 0) {
+        int value = pendingByte;
+        pendingByte = -1;
+        return value;
+      }
+      if (inputPos >= inputLimit) {
+        int count;
+        do {
+          count = stream.read(input);
+        } while (count == 0);
+        if (count < 0) {
+          inputLimit = 0;
+          return -1;
+        }
+        inputPos = 0;
+        inputLimit = count;
+      }
+      int value = input[inputPos++] & 0xFF;
+      if (byteOffset < BINARY_PROBE_BYTES) {
+        if (value == 0) {
+          throw binary(displayPath);
+        }
+        byteOffset++;
+      }
+      return value;
+    }
+
+    private void unreadByte(int value) {
+      pendingByte = value;
+    }
+
+    private void resetSequence() {
+      needed = 0;
+      codePoint = 0;
+      lower = 0x80;
+      upper = 0xBF;
+    }
+
+    @Override
+    public void close() {
+      // 输入流由调用方持有；format 不关闭它，本 Reader 也没有独立资源。
+    }
   }
 
   private static String format(Window window, String displayPath, String lspStatus) {

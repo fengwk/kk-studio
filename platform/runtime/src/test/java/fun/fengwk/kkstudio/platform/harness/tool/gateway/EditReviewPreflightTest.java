@@ -5,12 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.node.JsonNodeFactory;
 
+import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.common.result.JsonResultContent;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
+import fun.fengwk.kkstudio.harness.codec.ToolEditReviewJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolContribution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
@@ -28,7 +31,10 @@ import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.ToolResultSizeLimits;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
+import fun.fengwk.kkstudio.harness.tool.ToolResult;
+import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
@@ -78,6 +84,12 @@ class EditReviewPreflightTest {
           + "\",\"diff\":\"-1|old\\n+1|new\",\"sha256\":\""
           + VALID_SHA
           + "\"}";
+  private static final String VALID_LOSSY_REVIEW_JSON =
+      "{\"path\":\""
+          + VALID_PATH
+          + "\",\"diff\":\"-1|old\\n+1|new\",\"sha256\":\""
+          + VALID_SHA
+          + "\",\"lossyDecode\":{\"encoding\":\"GB18030\",\"invalidSequences\":2}}";
 
   @Test
   void successfulPreviewReturnsAskWithFrozenReview() {
@@ -112,6 +124,67 @@ class EditReviewPreflightTest {
     ToolEditReview review = ask.editReview();
     assertEquals(new ExpectedFile(VALID_PATH, VALID_SHA), review.expectedFile());
     assertEquals(VALID_DIFF, review.diff());
+  }
+
+  @Test
+  void successfulPreviewCarriesLossyDecodeAndReservesItsNoteLine() {
+    EnvironmentCapabilityTransport transport =
+        transport(
+            (envId, request, listener) -> {
+              listener.onComplete(
+                  new EnvironmentCapabilityResult(
+                      request.call().id(),
+                      List.of(new JsonResultContent(VALID_LOSSY_REVIEW_JSON)),
+                      false,
+                      "{}"));
+              return new FakeHandle();
+            });
+
+    ToolGateway.PreflightResult result =
+        EditReviewPreflight.prepare(
+            transport, createRequest(), "reason", EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
+
+    ToolEditReview review = assertInstanceOf(ToolGateway.Ask.class, result).editReview();
+    assertEquals(new ToolEditReview.LossyDecode("GB18030", 2), review.lossyDecode());
+    assertEquals(
+        "Edited successfully.\nReplacements: "
+            + Long.MAX_VALUE
+            + "\nNote: the original file contains "
+            + Long.MAX_VALUE
+            + " byte sequences that are not valid GB18030, shown as U+FFFD (�); those still"
+            + " present were saved as U+FFFD, so their original bytes are lost.",
+        EditReviewPreflight.projectedResultText(review));
+  }
+
+  /** 有损解码说明也必须进入结果尺寸预算：同样的 diff 不含该行时可放下，含有时必须拒绝。 */
+  @Test
+  void lossyDecodeNoteLinePushesProjectedResultOverTheLimit() {
+    int limit = ToolResultSizeLimits.MAX_TERMINAL_RESULT_UTF8_BYTES;
+    ToolEditReview base = reviewOf(1, null);
+    int diffLength = limit - encodedLength(base) + 1;
+
+    assertTrue(encodedLength(reviewOf(diffLength, null)) <= limit);
+    ToolEditReview lossy = reviewOf(diffLength, new ToolEditReview.LossyDecode("GB18030", 2));
+    assertTrue(encodedLength(lossy) > limit);
+
+    String reviewJson = writeReviewJson(lossy);
+    EnvironmentCapabilityTransport transport =
+        transport(
+            (envId, request, listener) -> {
+              listener.onComplete(
+                  new EnvironmentCapabilityResult(
+                      request.call().id(),
+                      List.of(new JsonResultContent(reviewJson)),
+                      false,
+                      "{}"));
+              return new FakeHandle();
+            });
+
+    ToolGateway.PreflightResult result =
+        EditReviewPreflight.prepare(
+            transport, createRequest(), "reason", EnvironmentCapabilityIds.FS_EDIT_PREVIEW);
+    ToolGateway.Deny deny = assertInstanceOf(ToolGateway.Deny.class, result);
+    assertTrue(deny.error().message().contains("exceeds the result limit"));
   }
 
   @Test
@@ -356,6 +429,27 @@ class EditReviewPreflightTest {
       // 清除中断标记，避免影响后续测试
       Thread.interrupted();
     }
+  }
+
+  private static ToolEditReview reviewOf(int diffLength, ToolEditReview.LossyDecode lossyDecode) {
+    return new ToolEditReview(
+        new ExpectedFile(VALID_PATH, VALID_SHA), "+1|" + "x".repeat(diffLength), lossyDecode);
+  }
+
+  private static int encodedLength(ToolEditReview review) {
+    var details = JsonNodeFactory.instance.objectNode();
+    details.set("editReview", new ToolEditReviewJsonCodec().encodeNode(review));
+    ToolResult projected =
+        new ToolResult(
+            "call-1",
+            List.of(new TextResultContent(EditReviewPreflight.projectedResultText(review))),
+            false,
+            JsonValues.write(details));
+    return ToolResultJsonCodec.encode(projected).getBytes(StandardCharsets.UTF_8).length;
+  }
+
+  private static String writeReviewJson(ToolEditReview review) {
+    return new ToolEditReviewJsonCodec().encodeNode(review).toString();
   }
 
   private static ToolInvocationRequest createRequest() {

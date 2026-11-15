@@ -45,6 +45,9 @@ final class EditReviewPreflight {
   static final String FAILED_KIND = "EDIT_REVIEW_FAILED";
   private static final ToolEditReviewJsonCodec JSON = new ToolEditReviewJsonCodec();
 
+  /** 预览阶段还不知道真实替换数：用 long 最大值同时预留最长数字与复数文案。 */
+  private static final long MAX_REPLACEMENTS = Long.MAX_VALUE;
+
   private EditReviewPreflight() {}
 
   static ToolGateway.PreflightResult prepare(
@@ -104,8 +107,7 @@ final class EditReviewPreflight {
       ToolResult projected =
           new ToolResult(
               request.call().id(),
-              List.of(
-                  new TextResultContent("Edited successfully.\nReplacements: " + Long.MAX_VALUE)),
+              List.of(new TextResultContent(projectedResultText(review))),
               false,
               JsonValues.write(details));
       if (ToolResultJsonCodec.exceedsEncodedUtf8Bytes(
@@ -129,6 +131,25 @@ final class EditReviewPreflight {
     } catch (RuntimeException failure) {
       return denied(failure);
     }
+  }
+
+  /**
+   * 预览阶段的结果正文保守投影：真实替换数未知时同时预留最长数字与复数文案。
+   *
+   * <p>{@code lossyDecode} 存在时 Daemon 会在成功正文后追加有损保存说明，因此该行也必须进入结果尺寸预算。
+   */
+  static String projectedResultText(ToolEditReview review) {
+    String text = "Edited successfully.\nReplacements: " + MAX_REPLACEMENTS;
+    if (review.lossyDecode() == null) {
+      return text;
+    }
+    return text
+        + "\nNote: the original file contains "
+        + MAX_REPLACEMENTS
+        + " byte sequences that are not valid "
+        + review.lossyDecode().encoding()
+        + ", shown as U+FFFD (�); those still present were saved as U+FFFD, so their original"
+        + " bytes are lost.";
   }
 
   private static ToolEditReview decode(String previewId, EnvironmentCapabilityResult result) {
