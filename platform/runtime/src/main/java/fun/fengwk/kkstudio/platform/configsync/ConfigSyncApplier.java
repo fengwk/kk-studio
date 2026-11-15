@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
+import lombok.AllArgsConstructor;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
@@ -50,6 +51,7 @@ import java.util.Map;
  *
  * <p>已有资源按文件数组顺序更新，互逆顺序会拿到互逆行锁。写事务在任何资源行锁之前先取固定的配置导入事务锁，让不同实例串行写入。
  */
+@AllArgsConstructor
 @Component
 public class ConfigSyncApplier {
 
@@ -80,35 +82,6 @@ public class ConfigSyncApplier {
   private final SystemSettingsService systemSettingsService;
   private final PluginConfigurationService pluginConfigurationService;
   private final PluginAgentDependencies pluginAgentDependencies;
-
-  public ConfigSyncApplier(
-      JdbcClient jdbcClient,
-      ProviderService providerService,
-      ModelRepository modelRepository,
-      ModelService modelService,
-      SkillCatalogService skillCatalogService,
-      McpServerService mcpServerService,
-      AgentRepository agentRepository,
-      AgentService agentService,
-      EnvironmentRepository environmentRepository,
-      EnvironmentService environmentService,
-      SystemSettingsService systemSettingsService,
-      PluginConfigurationService pluginConfigurationService,
-      PluginAgentDependencies pluginAgentDependencies) {
-    this.jdbcClient = jdbcClient;
-    this.providerService = providerService;
-    this.modelRepository = modelRepository;
-    this.modelService = modelService;
-    this.skillCatalogService = skillCatalogService;
-    this.mcpServerService = mcpServerService;
-    this.agentRepository = agentRepository;
-    this.agentService = agentService;
-    this.environmentRepository = environmentRepository;
-    this.environmentService = environmentService;
-    this.systemSettingsService = systemSettingsService;
-    this.pluginConfigurationService = pluginConfigurationService;
-    this.pluginAgentDependencies = pluginAgentDependencies;
-  }
 
   /** 事务内写入计划中的全部事实。 */
   @Transactional
