@@ -749,6 +749,92 @@ describe('IssueDetailModal', () => {
     const downloadLink = screen.getByTitle('预览或下载')
     expect(downloadLink).toHaveAttribute('href', 'https://storage.example.com/download/blob-1')
     expect(downloadLink).not.toHaveAttribute('href', '/api/resources/blob-real-123')
+    expect(storageService.reserveUpload).toHaveBeenCalledWith({
+      filename: 'delivered-spec.pdf',
+      sizeBytes: String(file.size),
+      mediaType: 'application/pdf',
+      sha256: '0'.repeat(64),
+    })
+  })
+
+  it('reserves decoded image metadata and uploads the original evidence file', async () => {
+    // 图片证据必须上报浏览器解码出的 format 与四尺寸，直传字节仍是原 File。
+    const bitmapClose = vi.fn()
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({
+      width: 20,
+      height: 10,
+      close: bitmapClose,
+    })))
+    const api = createMockApi()
+    const storageService = createMockStorageService()
+    renderModal(
+      <IssueDetailModal
+        isOpen
+        issueId={issueId}
+        onClose={vi.fn()}
+        api={api}
+        storageService={storageService}
+        hashFile={async () => 'c'.repeat(64)}
+      />,
+    )
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByText(/公开证据/))
+    const file = new File([Uint8Array.from([1, 2, 3])], 'diagram.png', { type: 'image/png' })
+    fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [file] },
+    })
+
+    await screen.findByText('Architecture diagram')
+    expect(storageService.reserveUpload).toHaveBeenCalledWith({
+      filename: 'diagram.png',
+      sizeBytes: '3',
+      mediaType: 'image/png',
+      sha256: 'c'.repeat(64),
+      format: 'png',
+      originalWidth: 20,
+      originalHeight: 10,
+      storedWidth: 20,
+      storedHeight: 10,
+    })
+    expect(storageService.uploadFile).not.toHaveBeenCalled()
+    expect(bitmapClose).toHaveBeenCalledOnce()
+  })
+
+  it('does not hash or reserve an oversized or undecodable evidence file', async () => {
+    const api = createMockApi()
+    const storageService = createMockStorageService()
+    const hashFile = vi.fn(async () => 'd'.repeat(64))
+    renderModal(
+      <IssueDetailModal
+        isOpen
+        issueId={issueId}
+        onClose={vi.fn()}
+        api={api}
+        storageService={storageService}
+        hashFile={hashFile}
+      />,
+    )
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(screen.getByText(/公开证据/))
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement
+    const oversized = new File(['pdf'], 'huge.pdf', { type: 'application/pdf' })
+    Object.defineProperty(oversized, 'size', { value: 31 * 1024 * 1024 })
+    fireEvent.change(input, { target: { files: [oversized] } })
+
+    expect(await screen.findByText(/huge.pdf/)).toBeInTheDocument()
+    expect(hashFile).not.toHaveBeenCalled()
+    expect(storageService.reserveUpload).not.toHaveBeenCalled()
+
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => {
+      throw new Error('cannot decode evidence')
+    }))
+    fireEvent.change(input, {
+      target: { files: [new File(['png'], 'broken.png', { type: 'image/png' })] },
+    })
+
+    expect(await screen.findByText('cannot decode evidence')).toBeInTheDocument()
+    expect(hashFile).not.toHaveBeenCalled()
+    expect(storageService.reserveUpload).not.toHaveBeenCalled()
   })
 
   it('triggers onOpenThread callback when clicking open button in agent threads tab', async () => {

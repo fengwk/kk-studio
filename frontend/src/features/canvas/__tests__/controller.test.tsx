@@ -111,8 +111,28 @@ vi.mock('@/shared/api/storage-service', () => ({
 
 vi.mock('@/shared/lib/upload-file', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/lib/upload-file')>()
-  return { ...actual, createWorkerHasher: () => async () => FAKE_SHA256 }
+  return {
+    ...actual,
+    sharedWorkerHasher: () => async () => FAKE_SHA256,
+    createWorkerHasher: () => async () => FAKE_SHA256,
+  }
 })
+
+vi.mock('@/shared/lib/image-metadata', () => ({
+  readOriginalImageMetadata: vi.fn(async (file: File) => {
+    const format = file.type.startsWith('image/') ? file.type.slice('image/'.length) : ''
+    if (!format) {
+      throw new Error('unsupported image media type')
+    }
+    return {
+      format,
+      originalWidth: 2,
+      originalHeight: 3,
+      storedWidth: 2,
+      storedHeight: 3,
+    }
+  }),
+}))
 
 /** 模拟应用事件通道的 canvas revision 事件（携带 canonical 十进制 revision）。 */
 function emitCanvasRevision(revision: string) {
@@ -579,7 +599,7 @@ describe('useCanvasController real snapshot runtime', () => {
     await act(async () => {
       await result.current.uploadFiles([
         new File(['bad'], 'bad.bin', { type: 'application/octet-stream' }),
-        new File(['png'], 'upload.png'),
+        new File(['png'], 'upload.png', { type: 'image/png' }),
       ])
     })
     expect(storageService.reserveUpload).toHaveBeenCalledOnce()
@@ -588,6 +608,11 @@ describe('useCanvasController real snapshot runtime', () => {
       mediaType: 'image/png',
       sizeBytes: '3',
       sha256: FAKE_SHA256,
+      format: 'png',
+      originalWidth: 2,
+      originalHeight: 3,
+      storedWidth: 2,
+      storedHeight: 3,
     })
     expect(storageService.uploadFile).toHaveBeenCalledOnce()
     expect(storageService.completeUpload).toHaveBeenCalledOnce()

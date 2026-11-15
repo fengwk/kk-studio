@@ -1,5 +1,5 @@
 import { act, renderHook } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   useCanvasUploadPipeline,
   type CanvasUploadPipelineOptions,
@@ -117,7 +117,97 @@ function resourceNodeCommands(
     .filter((cmd): cmd is Extract<CanvasCommandDTO, { type: 'CREATE_NODE' }> => cmd?.type === 'CREATE_NODE')
 }
 
+const ONE_PIXEL_PNG = Uint8Array.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
+  0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
+  0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+  0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
+  0x42, 0x60, 0x82,
+])
+
+function imageFile(name: string): File {
+  return new File([ONE_PIXEL_PNG], name, { type: 'image/png' })
+}
+
 describe('useCanvasUploadPipeline', () => {
+  beforeEach(() => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => ({
+      width: 12,
+      height: 8,
+      close: vi.fn(),
+    })))
+  })
+
+  it('reserves image metadata for the original file bytes', async () => {
+    // 图片 reserve 必须带浏览器解码出的 format 与四尺寸，直传仍是原 File。
+    const { result, storageService, hashFile } = createHarness()
+    const file = imageFile('photo.png')
+
+    await act(async () => {
+      await result.current.uploadFiles([file])
+    })
+
+    expect(hashFile).toHaveBeenCalledWith(file)
+    expect(storageService.reserveUpload).toHaveBeenCalledWith({
+      filename: 'photo.png',
+      mediaType: 'image/png',
+      sizeBytes: String(file.size),
+      sha256: 'photo.png:sha256',
+      format: 'png',
+      originalWidth: 12,
+      originalHeight: 8,
+      storedWidth: 12,
+      storedHeight: 8,
+    })
+    expect(storageService.uploadFile).toHaveBeenCalledWith(PENDING_PUT, file)
+  })
+
+  it('does not hash or reserve an image the browser cannot decode', async () => {
+    vi.stubGlobal('createImageBitmap', vi.fn(async () => {
+      throw new Error('decode failed')
+    }))
+    const { result, storageService, hashFile, toasts } = createHarness()
+
+    await act(async () => {
+      await result.current.uploadFiles([imageFile('broken.png')])
+    })
+
+    expect(hashFile).not.toHaveBeenCalled()
+    expect(storageService.reserveUpload).not.toHaveBeenCalled()
+    expect(toasts).toEqual(['decode failed'])
+  })
+
+  it('omits image metadata for non-image uploads', async () => {
+    const { result, storageService } = createHarness()
+    const file = new File(['wav'], 'clip.wav', { type: 'audio/wav' })
+
+    await act(async () => {
+      await result.current.uploadFiles([file])
+    })
+
+    expect(storageService.reserveUpload).toHaveBeenCalledWith({
+      filename: 'clip.wav',
+      mediaType: 'audio/wav',
+      sizeBytes: String(file.size),
+      sha256: 'clip.wav:sha256',
+    })
+    expect(storageService.reserveUpload.mock.calls[0]?.[0]).not.toHaveProperty('format')
+  })
+
+  it('rejects an oversized file before hashing or reserving', async () => {
+    const { result, storageService, hashFile, toasts } = createHarness()
+    const file = imageFile('huge.png')
+    Object.defineProperty(file, 'size', { value: 31 * 1024 * 1024 })
+
+    await act(async () => {
+      await result.current.uploadFiles([file])
+    })
+
+    expect(hashFile).not.toHaveBeenCalled()
+    expect(storageService.reserveUpload).not.toHaveBeenCalled()
+    expect(toasts[0]).toContain('huge.png')
+  })
+
   it('skips the direct PUT for READY reservations (sha256 dedup) and completes with a node command', async () => {
     const {
       result,
@@ -127,19 +217,24 @@ describe('useCanvasUploadPipeline', () => {
     } = createHarness()
     storageService.reserveUpload.mockResolvedValue(readyReservation(UPLOAD_ID))
     storageService.completeUpload.mockResolvedValue(readyReservation(UPLOAD_ID))
-    const file = new File(['png'], 'upload.png')
+    const file = new File(['png'], 'upload.png', { type: 'image/png' })
     const localId = localIdOf(file)
 
     await act(async () => {
       await result.current.uploadFiles([file])
     })
 
-    expect(storageService.reserveUpload).toHaveBeenCalledWith({
+    expect(storageService.reserveUpload).toHaveBeenCalledWith(expect.objectContaining({
       filename: 'upload.png',
       mediaType: 'image/png',
       sizeBytes: '3',
       sha256: 'upload.png:sha256',
-    })
+      format: 'png',
+      originalWidth: 12,
+      originalHeight: 8,
+      storedWidth: 12,
+      storedHeight: 8,
+    }))
     expect(storageService.uploadFile).not.toHaveBeenCalled()
     expect(storageService.completeUpload).toHaveBeenCalledWith(UPLOAD_ID)
     expect(resourceNodeCommands(executeCommands)).toEqual([{
@@ -168,7 +263,7 @@ describe('useCanvasUploadPipeline', () => {
       executeCommands,
       progressCalls,
     } = createHarness()
-    const file = new File(['png'], 'pending.png')
+    const file = new File(['png'], 'pending.png', { type: 'image/png' })
     const localId = localIdOf(file)
 
     await act(async () => {
@@ -199,8 +294,8 @@ describe('useCanvasUploadPipeline', () => {
 
     await act(async () => {
       await result.current.uploadFiles([
-        new File(['one'], 'same.heic'),
-        new File(['two'], 'same.heic'),
+        new File(['one'], 'same.heic', { type: 'image/heic' }),
+        new File(['two'], 'same.heic', { type: 'image/heic' }),
       ])
     })
 
@@ -223,8 +318,8 @@ describe('useCanvasUploadPipeline', () => {
     storageService.uploadFile
       .mockRejectedValueOnce(new Error('direct upload failed'))
       .mockResolvedValue(undefined)
-    const failed = new File(['bad'], 'fail.png')
-    const ok = new File(['good'], 'ok.png')
+    const failed = new File(['bad'], 'fail.png', { type: 'image/png' })
+    const ok = new File(['good'], 'ok.png', { type: 'image/png' })
 
     await act(async () => {
       await result.current.uploadFiles([failed, ok])
@@ -245,7 +340,7 @@ describe('useCanvasUploadPipeline', () => {
     await act(async () => {
       await result.current.uploadFiles([
         new File(['bad'], 'bad.bin', { type: 'application/octet-stream' }),
-        new File(['png'], 'ok.png'),
+        new File(['png'], 'ok.png', { type: 'image/png' }),
       ])
     })
 
@@ -262,7 +357,7 @@ describe('useCanvasUploadPipeline', () => {
     const { result, storageService, executeCommands, reserveNodeAlias, progressCalls } = createHarness({
       hashFile: vi.fn(() => hashGate),
     })
-    const file = new File(['slow'], 'slow.png')
+    const file = new File(['slow'], 'slow.png', { type: 'image/png' })
     const localId = localIdOf(file)
 
     let uploadPromise!: Promise<void>
@@ -294,7 +389,7 @@ describe('useCanvasUploadPipeline', () => {
       result.current.resetUploads()
     })
     await act(async () => {
-      await result.current.uploadFiles([new File(['png'], 'after.png')])
+      await result.current.uploadFiles([new File(['png'], 'after.png', { type: 'image/png' })])
     })
 
     expect(storageService.reserveUpload).toHaveBeenCalledOnce()
@@ -312,8 +407,8 @@ describe('useCanvasUploadPipeline', () => {
         .mockImplementationOnce(() => firstGate)
         .mockResolvedValue('second:sha'),
     })
-    const first = new File(['a'], 'a.png')
-    const second = new File(['b'], 'b.png')
+    const first = new File(['a'], 'a.png', { type: 'image/png' })
+    const second = new File(['b'], 'b.png', { type: 'image/png' })
     let uploadPromise!: Promise<void>
     act(() => {
       uploadPromise = result.current.uploadFiles([first, second])
@@ -339,7 +434,7 @@ describe('useCanvasUploadPipeline', () => {
   it('releases the reserved alias and reports the error when the create command fails', async () => {
     const { result, executeCommands, releaseNodeAlias, toasts, progressCalls } = createHarness()
     executeCommands.mockRejectedValueOnce(new Error('命令冲突'))
-    const file = new File(['png'], 'cmd.png')
+    const file = new File(['png'], 'cmd.png', { type: 'image/png' })
     const localId = localIdOf(file)
 
     await act(async () => {
@@ -357,7 +452,7 @@ describe('useCanvasUploadPipeline', () => {
     storageService.completeUpload.mockResolvedValue({ ...readyReservation(), id: 'not-a-uuid' })
 
     await act(async () => {
-      await result.current.uploadFiles([new File(['x'], 'bad-handle.png')])
+      await result.current.uploadFiles([new File(['x'], 'bad-handle.png', { type: 'image/png' })])
     })
 
     expect(executeCommands).not.toHaveBeenCalled()
@@ -368,7 +463,7 @@ describe('useCanvasUploadPipeline', () => {
     const { result, storageService } = createHarness({ canvasId: null })
 
     await act(async () => {
-      await result.current.uploadFiles([new File(['x'], 'a.png')])
+      await result.current.uploadFiles([new File(['x'], 'a.png', { type: 'image/png' })])
     })
 
     expect(storageService.reserveUpload).not.toHaveBeenCalled()

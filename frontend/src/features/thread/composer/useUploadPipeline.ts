@@ -10,7 +10,7 @@ import {
   persistPendingUnknownUpload,
   removeStoredUnknownUpload,
 } from '@/features/thread/composer/composer-draft'
-import { scaleImageFile } from '@/features/thread/composer/image-scaler'
+import { scaleImageFile } from '@/shared/lib/image-scaler'
 import type { ImageInputTier } from '@/features/thread/composer/composer-parts'
 import type { UploadRegistry } from '@/features/thread/composer/useUploadRegistry'
 import { request } from '@/shared/api/client'

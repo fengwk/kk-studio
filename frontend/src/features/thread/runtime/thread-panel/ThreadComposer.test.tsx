@@ -15,7 +15,7 @@ vi.mock('@/shared/api/client', async (importOriginal) => {
     }),
   }
 })
-vi.mock('@/features/thread/composer/image-scaler', () => ({
+vi.mock('@/shared/lib/image-scaler', () => ({
   scaleImageFile: vi.fn(async (file: File) => ({
     file,
     format: file.type.slice('image/'.length),

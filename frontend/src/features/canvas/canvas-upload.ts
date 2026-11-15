@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef } from 'react'
 import { canvasFileDescriptor } from '@/features/canvas/canvas-file'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { readOriginalImageMetadata } from '@/shared/lib/image-metadata'
+import { translate } from '@/shared/i18n'
 import {
-  createWorkerHasher,
+  sharedWorkerHasher,
   validateUploadFile,
   type HashFile,
 } from '@/shared/lib/upload-file'
 import { storageService, type StorageService } from '@/shared/api/storage-service'
 import type { CanvasCommandDTO, CanvasTransformDTO } from '@/shared/api/generated/contracts'
 
-const canvasUploadHasher = createWorkerHasher()
+const canvasUploadHasher = sharedWorkerHasher()
 
 export interface CanvasUploadPipelineOptions {
   canvasId: string | null
@@ -70,7 +72,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
     }
     const descriptor = canvasFileDescriptor(file)
     if (!descriptor) {
-      setToast(`不支持的文件类型：${file.name}`)
+      setToast(translate('canvas.upload.unsupportedType', { name: file.name }))
       return
     }
     const sizeError = validateUploadFile(file)
@@ -83,6 +85,16 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
     const localId = `${file.name}:${file.lastModified}:${file.size}:${localIdSequenceRef.current++}`
     try {
       setUploadProgress(localId, 0.1)
+      // 保存原文件字节；图片事实按浏览器实际解码结果上报，失败则不哈希、不 reserve。
+      const imageMetadata = descriptor.kind === 'IMAGE'
+        ? await readOriginalImageMetadata(new File([file], file.name, {
+          type: descriptor.mediaType,
+          lastModified: file.lastModified,
+        }))
+        : null
+      if (!active()) {
+        return
+      }
       const sha256 = await hashFile(file)
       if (!active()) {
         return
@@ -93,6 +105,15 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
         mediaType: descriptor.mediaType,
         sizeBytes: String(file.size),
         sha256,
+        ...(imageMetadata
+          ? {
+            format: imageMetadata.format,
+            originalWidth: imageMetadata.originalWidth,
+            originalHeight: imageMetadata.originalHeight,
+            storedWidth: imageMetadata.storedWidth,
+            storedHeight: imageMetadata.storedHeight,
+          }
+          : {}),
       })
       if (!active()) {
         // 画布资源上传的句柄只由服务端过期回收：reserve/直传后作废不主动删除。
@@ -114,7 +135,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
       // 共享存储的 upload 句柄是服务端生成的 canonical UUID：命令引用前校验。
       const uploadId = completed.id
       if (!isCanonicalUuid(uploadId)) {
-        throw new Error('存储服务返回了无效的上传句柄')
+        throw new Error(translate('canvas.upload.invalidHandle'))
       }
       // 最终命令失败不删除已完成的句柄：它可能已被服务端资源引用，
       // 交由存储过期回收；绝不删除已消费（complete）的句柄。
@@ -135,7 +156,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
         if (!active()) {
           return
         }
-        setToast(`已上传 ${file.name}`)
+        setToast(translate('canvas.upload.uploaded', { name: file.name }))
       } finally {
         releaseNodeAlias(alias)
       }
@@ -143,7 +164,7 @@ export function useCanvasUploadPipeline(options: CanvasUploadPipelineOptions): C
       if (!active()) {
         return
       }
-      setToast(error instanceof Error ? error.message : `上传 ${file.name} 失败`)
+      setToast(error instanceof Error ? error.message : translate('canvas.upload.failed', { name: file.name }))
     } finally {
       // reset/unmount 已统一清过 progress，避免重复发 null 事件。
       if (active()) {
