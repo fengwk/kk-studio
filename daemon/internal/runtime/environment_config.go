@@ -96,7 +96,7 @@ func NewEnvironmentConfigRuntime(options EnvironmentConfigOptions) (*Environment
 	if options.Report == nil {
 		options.Report = func(error) {}
 	}
-	initial := configurationOf(options.Initial)
+	initial := config.CanonicalConfiguration(configurationOf(options.Initial))
 	content, err := configContent(initial)
 	if err != nil {
 		return nil, err
@@ -153,10 +153,7 @@ func (r *EnvironmentConfigRuntime) Submit(ctx context.Context, version int64, wi
 	if wire == nil {
 		return ConfigApplyResult{Kind: ConfigFailed, Version: version, Code: "VALIDATION_FAILED", Field: "config"}, nil
 	}
-	wire = proto.Clone(wire).(*protocol.DaemonConfiguration)
-	if wire.Lsp != nil && len(wire.Lsp.Servers) == 0 && len(wire.Lsp.ProtoReflect().GetUnknown()) == 0 {
-		wire.Lsp = nil
-	}
+	wire = config.CanonicalConfiguration(wire)
 	content, err := configContent(wire)
 	if err != nil {
 		return ConfigApplyResult{}, err
