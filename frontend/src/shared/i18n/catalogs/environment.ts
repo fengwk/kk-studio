@@ -439,8 +439,8 @@ export const environmentCatalog = {
     'zh-CN': '启用 LSP servers',
   },
   'ai.environment.form.lspHelp': {
-    'en-US': 'Declare installed language servers. Extensions, root markers and first-match markers are optional.',
-    'zh-CN': '声明已安装的语言服务器；extensions、root markers 与 first-match markers 均可选。',
+    'en-US': 'Declare installed language servers. Command and at least one dotted file extension are required; root markers and first-match markers are optional.',
+    'zh-CN': '声明已安装的语言服务器。command 和至少一个带点的合法文件后缀必填；root markers 与 first-match markers 可选。',
   },
   'ai.environment.form.proxyUrl': {
     'en-US': 'Daemon proxy',
@@ -491,8 +491,8 @@ export const environmentCatalog = {
     'zh-CN': 'Daemon 代理无效：请使用不含凭据、路径、查询参数或片段的 http://host:port。',
   },
   'ai.environment.form.invalidLsp': {
-    'en-US': 'LSP servers are invalid: check server IDs, command, extensions and markers; extensions are optional and must start with a dot when provided.',
-    'zh-CN': 'LSP servers 配置无效：请检查 server ID、command、extensions 和 markers；extensions 可省略，提供时须以 . 开头。',
+    'en-US': 'LSP servers are invalid: each server needs a valid ID, command and at least one dotted file extension; markers are optional.',
+    'zh-CN': 'LSP servers 配置无效：每个服务器需有合法 ID、command 和至少一个带点的文件后缀；markers 可选。',
   },
   'ai.environment.form.invalidConfig': {
     'en-US': 'The Daemon configuration is invalid.',

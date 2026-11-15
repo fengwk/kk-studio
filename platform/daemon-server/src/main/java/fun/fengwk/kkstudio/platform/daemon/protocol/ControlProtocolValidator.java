@@ -319,7 +319,7 @@ public final class ControlProtocolValidator {
         throw new ControlProtocolException(path + ".servers must not repeat id");
       }
       validateStringList(server.getCommandList(), serverPath + ".command", true, false);
-      validateStringList(server.getExtensionsList(), serverPath + ".extensions", false, true);
+      validateStringList(server.getExtensionsList(), serverPath + ".extensions", true, true);
       validateStringList(server.getRootMarkersList(), serverPath + ".rootMarkers", false, false);
       validateStringList(
           server.getFirstMatchMarkersList(), serverPath + ".firstMatchMarkers", false, false);

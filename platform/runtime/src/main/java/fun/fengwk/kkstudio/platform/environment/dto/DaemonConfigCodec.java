@@ -191,7 +191,7 @@ public final class DaemonConfigCodec {
           DaemonLspServerConfiguration value = new DaemonLspServerConfiguration();
           value.setCommand(list(server.getCommand(), path + ".command", true, false, false));
           value.setExtensions(
-              list(server.getExtensions(), path + ".extensions", false, true, false));
+              list(server.getExtensions(), path + ".extensions", true, true, false));
           value.setRootMarkers(
               list(server.getRootMarkers(), path + ".rootMarkers", false, false, true));
           value.setFirstMatchMarkers(

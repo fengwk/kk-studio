@@ -215,7 +215,7 @@ function stringList(
   })
 }
 
-/** LSP 声明与 DaemonConfigCodec 一致：command 必填，extensions/markers 缺省归一化为空数组。 */
+/** LSP 声明与 DaemonConfigCodec 一致：command 与 extensions 必填，markers 缺省归一化为空数组。 */
 function lspConfiguration(value: unknown): DaemonLspConfiguration | null {
   if (value === null || value === undefined) return null
   if (!isPlainObject(value) || hasUnknownField(value, ['servers'])) fail('daemonConfig.lsp')
@@ -231,7 +231,7 @@ function lspConfiguration(value: unknown): DaemonLspConfiguration | null {
     }
     servers[id] = {
       command: stringList(node.command, `${path}.command`, true, 'plain'),
-      extensions: stringList(node.extensions, `${path}.extensions`, false, 'extension'),
+      extensions: stringList(node.extensions, `${path}.extensions`, true, 'extension'),
       rootMarkers: stringList(node.rootMarkers, `${path}.rootMarkers`, false, 'marker'),
       firstMatchMarkers: stringList(
         node.firstMatchMarkers,
