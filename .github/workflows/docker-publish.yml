@@ -94,11 +94,6 @@ jobs:
           go-version-file: daemon/go.mod
       - name: Set up PostgreSQL client tools
         uses: ./.github/actions/postgres-client
-      - name: Build the daemon for Java integration tests
-        working-directory: daemon
-        env:
-          CGO_ENABLED: '0'
-        run: go build -o "$RUNNER_TEMP/kk-studio-daemon" ./cmd/kk-studio-daemon
       - name: Run repository script tests
         uses: ./.github/actions/repository-script-tests
         env:
@@ -108,7 +103,7 @@ jobs:
       - name: Verify Java sources, tests, coverage and package the distribution JAR
         # -Pdistribution 在同一个 reactor 中安装前端工具链并只打包一次带内嵌 React 产物的
         # 发行 Fat JAR；后续启动、decoder 与镜像发布都复用这个产物。
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify "-Ddaemon.bin=$RUNNER_TEMP/kk-studio-daemon"
+        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify
       - name: Resolve the distribution Fat JAR
         id: distribution
         run: |

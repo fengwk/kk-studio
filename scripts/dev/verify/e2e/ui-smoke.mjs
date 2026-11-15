@@ -17,13 +17,13 @@ import {
   readFileSync,
   readdirSync,
   statSync,
-  writeFileSync,
 } from 'node:fs'
 import path from 'node:path'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { missingUiCapabilities } from './lib/ui-capabilities.mjs'
 import { MINIMAX_ANTHROPIC_M3 } from './lib/real-models.mjs'
 import { createDurationTimer } from './lib/time.mjs'
+import { redactSecrets, writeReportArtifact } from './lib/redact.mjs'
 import { encodePathTail } from './lib/fixtures.mjs'
 import { listChats } from './lib/harness.mjs'
 import { ENVIRONMENT_CARD_ACTIONS } from './ui/environment-actions.mjs'
@@ -390,7 +390,7 @@ async function main(argv) {
         artifactPaths: listArtifacts(caseArt, reportDir),
       }
       results.push(result)
-      writeFileSync(path.join(reportDir, 'cases', `${id}.json`), `${JSON.stringify(result, null, 2)}\n`)
+      writeReportArtifact(path.join(reportDir, 'cases', `${id}.json`), `${JSON.stringify(result, null, 2)}\n`)
       console.log(`PASS ${id}`)
     } catch (err) {
       try {
@@ -398,7 +398,7 @@ async function main(argv) {
           path: path.join(caseArt, 'failure.png'),
           fullPage: true,
         })
-        writeFileSync(
+        writeReportArtifact(
           path.join(caseArt, 'failure-state.json'),
           `${JSON.stringify({
             url: page.url(),
@@ -409,24 +409,24 @@ async function main(argv) {
           }, null, 2)}\n`,
         )
       } catch (artifactError) {
-        writeFileSync(
+        writeReportArtifact(
           path.join(caseArt, 'failure-artifact-error.txt'),
           `${artifactError?.message || artifactError}\n`,
         )
       }
-      writeFileSync(path.join(caseArt, 'error.txt'), `${err?.message || err}\n${err?.stack || ''}\n`)
+      writeReportArtifact(path.join(caseArt, 'error.txt'), `${err?.message || err}\n${err?.stack || ''}\n`)
       const result = {
         id,
         level: 'L5',
         title,
         status: 'fail',
         durationMs: elapsed(),
-        error: String(err?.message || err),
-        traceback: err?.stack || null,
+        error: redactSecrets(String(err?.message || err)),
+        traceback: redactSecrets(err?.stack || null),
         artifactPaths: listArtifacts(caseArt, reportDir),
       }
       results.push(result)
-      writeFileSync(path.join(reportDir, 'cases', `${id}.json`), `${JSON.stringify(result, null, 2)}\n`)
+      writeReportArtifact(path.join(reportDir, 'cases', `${id}.json`), `${JSON.stringify(result, null, 2)}\n`)
       console.error(`FAIL ${id}: ${result.error}`)
     }
   }
@@ -1432,7 +1432,7 @@ async function main(argv) {
     failedCaseIds: failed.map((r) => r.id),
     results,
   }
-  writeFileSync(path.join(reportDir, 'ui-summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
+  writeReportArtifact(path.join(reportDir, 'ui-summary.json'), `${JSON.stringify(summary, null, 2)}\n`)
   const lines = [
     '# UI E2E Results',
     '',
@@ -1451,7 +1451,7 @@ async function main(argv) {
     'Screenshots: `artifacts/ui_*/`',
     '',
   ]
-  writeFileSync(path.join(reportDir, 'ui-report.md'), `${lines.join('\n')}\n`)
+  writeReportArtifact(path.join(reportDir, 'ui-report.md'), `${lines.join('\n')}\n`)
   console.log(`\nUI report: ${path.join(reportDir, 'ui-report.md')}`)
   console.log(`total=${results.length} pass=${summary.totals.pass} fail=${summary.totals.fail}`)
   return failed.length ? 1 : 0
@@ -1460,7 +1460,7 @@ async function main(argv) {
 main(process.argv.slice(2)).then(
   (code) => process.exit(code),
   (err) => {
-    console.error(err)
+    console.error(redactSecrets(err?.stack || String(err)))
     process.exit(2)
   },
 )

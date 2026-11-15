@@ -18,11 +18,11 @@
 
 import { execFileSync } from 'node:child_process'
 import {
-  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
   readdirSync,
+  readFileSync,
   rmSync,
   statSync,
   writeFileSync,
@@ -33,7 +33,7 @@ import { randomUUID } from 'node:crypto'
 import { httpJson, listResults } from './lib/http.mjs'
 import { assertProviderExecutionBoundary } from './lib/provider-boundary.mjs'
 import { copyDistributedAppLogs, createBaseUrls, createNodeCall, runDistributedCommand } from './lib/distributed.mjs'
-import { redactSecrets } from './lib/redact.mjs'
+import { redactSecrets, writeReportArtifact } from './lib/redact.mjs'
 import { findCase } from './lib/registry.mjs'
 import { createDurationTimer } from './lib/time.mjs'
 import { REPO_ROOT } from '../../lib/repo-root.mjs'
@@ -109,8 +109,7 @@ class CaseContext {
 
   writeArtifact(name, content) {
     const file = path.join(this.artifactsDir(), name)
-    if (Buffer.isBuffer(content) || content instanceof Uint8Array) writeFileSync(file, content)
-    else writeFileSync(file, String(content), 'utf8')
+    writeReportArtifact(file, content)
     return file
   }
 
@@ -149,10 +148,9 @@ function collectArtifactPaths(runDir, caseId) {
 }
 
 function writeCaseResult(runDir, result) {
-  writeFileSync(
+  writeReportArtifact(
     path.join(runDir, 'cases', `${result.id}.json`),
-    `${JSON.stringify(result, null, 2)}\n`,
-    'utf8',
+    JSON.stringify(result),
   )
 }
 
@@ -203,7 +201,7 @@ function writeSummaryAndReport(
     results,
     reportMarkdown: 'report.md',
   }
-  writeFileSync(path.join(runDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`, 'utf8')
+  writeReportArtifact(path.join(runDir, 'summary.json'), JSON.stringify(summary))
 
   const lines = []
   lines.push(`# E2E Report \`${runId}\``)
@@ -277,7 +275,7 @@ function writeSummaryAndReport(
     lines.push('')
   }
   const reportPath = path.join(runDir, 'report.md')
-  writeFileSync(reportPath, `${lines.join('\n')}\n`, 'utf8')
+  writeReportArtifact(reportPath, `${lines.join('\n')}\n`)
   return reportPath
 }
 
@@ -302,7 +300,9 @@ function maybeCopyRuntimeLogs(runDir) {
       'daemon-e2e.log',
     ]) {
       const src = path.join(base, name)
-      if (existsSync(src)) copyFileSync(src, path.join(dest, `${path.basename(base)}-${name}`))
+      if (existsSync(src)) {
+        writeReportArtifact(path.join(dest, `${path.basename(base)}-${name}`), readFileSync(src, 'utf8'))
+      }
     }
   }
 }
@@ -315,7 +315,7 @@ function maybeCopyDistributedContainerLogs(runDir) {
   for (const service of services) {
     const logs = distributedContainerLogs(service)
     if (logs === null) continue
-    writeFileSync(path.join(dest, `distributed-${service}.log`), redactSecrets(logs), 'utf8')
+    writeReportArtifact(path.join(dest, `distributed-${service}.log`), logs)
   }
   copyDistributedAppLogs(runDir)
 }
@@ -557,14 +557,14 @@ async function main(argv) {
       if (runDir) writeCaseResult(runDir, result)
       console.log(`PASS ${c.id}`)
     } catch (err) {
-      const tb = err?.stack || String(err)
+      const tb = redactSecrets(err?.stack || String(err))
       const result = {
         id: c.id,
         level: c.level,
         title: c.title,
         status: 'fail',
         durationMs: elapsed(),
-        error: String(err?.message || err),
+        error: redactSecrets(String(err?.message || err)),
         traceback: tb,
         artifactPaths: [],
       }
@@ -621,7 +621,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.ar
       process.exitCode = code
     },
     (err) => {
-      console.error(err)
+      console.error(redactSecrets(err?.stack || String(err)))
       process.exitCode = 2
     },
   )

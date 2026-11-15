@@ -23,6 +23,13 @@ test('release and Docker gates reuse Daemon CI', () => {
   }
 })
 
+test('Java integration tests build their own daemon with the configured Go toolchain', () => {
+  assert.match(docker, /uses: actions\/setup-go@/)
+  assert.match(docker, /go-version-file: daemon\/go\.mod/)
+  assert.match(docker, /mvn -B -ntp -Pdistribution verify/)
+  assert.doesNotMatch(docker, /-Ddaemon\.bin|RUNNER_TEMP\/kk-studio-daemon/)
+})
+
 test('manual release dispatch stages and smokes but does not publish', () => {
   assert.match(release, /workflow_dispatch:/)
   assert.match(release, /daemon_ci:\n    name: Daemon CI\n    if: github\.event_name == 'push'/)
