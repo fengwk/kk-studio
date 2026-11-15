@@ -235,8 +235,8 @@ Studio 保存的完整卡片配置：
   控制字符；Daemon 应用配置时确认它能解析为可执行文件，解析失败上报 `VALIDATION_FAILED`。
   `daemon.json` 与运行快照保存的仍是配置里写下的字符串，真正的路径解析发生在执行时。
 - `lsp` 可选；整个字段省略或 `null` 表示禁用 LSP。一旦声明就必须至少有一个 server，空表非法。server id 匹配
-  `[A-Za-z0-9_.-]+`。每个 server 的 `command` 必须是非空字符串数组。`extensions` 必须带前导点且不含路径分隔符；
-  Studio 卡片与控制协议允许省略或空数组，Daemon 加载配置时拒绝空数组。`rootMarkers` / `firstMatchMarkers` 可选，
+  `[A-Za-z0-9_.-]+`。每个 server 的 `command` 与 `extensions` 都必须是非空字符串数组；每个后缀须带前导点且不含路径分隔符。
+  Studio 卡片、控制协议与 Daemon 在输入边界统一校验。`rootMarkers` / `firstMatchMarkers` 可选，
   若给出则是项目相对路径、不得为绝对路径或含 `..`。**未声明的字段一律拒绝**。
 - `proxyUrl` 可选；`null` 表示该 Daemon 的自身请求明确直连。非空只接受无认证的
   `http://host:port`，拒绝 userinfo、query、fragment 和非根 path。
@@ -432,8 +432,9 @@ Backend 自身的模型、MCP、插件与 S3 SDK 请求由 Studio 的**系统设
 
 **改配置不需要重装。** 在卡片配置中修改 Studio 地址、Bash、LSP 或代理后保存，Studio 推进版本并
 通知当前 owner；Daemon 读取完整快照、准备新网络/LSP generation、原子写入本地缓存并同步切换运行
-快照。仅版本推进而内容相同的保存只更新确认版本，不重建客户端或 LSP。配置错误时已有可用快照继续
-运行，新版本报错并等待下一次保存或重连。
+快照。配置身份按 URL、后缀大小写与 marker 分隔符的规范化值比较，命令文本、声明顺序与重复项仍参与身份判定；
+缓存回读与 READY 重发采用相同规则，已接受版本不能改写实质内容。仅版本推进而内容相同的保存只更新确认版本，
+不重建客户端或 LSP。配置错误时已有可用快照继续运行，新版本报错并等待下一次保存或重连。
 
 **轮换 token** 会立即使旧令牌的下次握手失效。已安装 Daemon 需要新的 `daemon.token`：可在 Web 重新
 签发安装 code 并执行安装命令，或安全替换 `daemon.token` 文件后重启受管服务。Daemon 每次连接准入前
