@@ -2,10 +2,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import {
-  useAgentThreadController,
-  retireStaleStopPending,
-} from '@/features/thread/runtime/controllers/useAgentThreadController'
+import { useAgentThreadController } from '@/features/thread/runtime/controllers/useAgentThreadController'
+import { retireStaleStopPending } from '@/features/thread/runtime/thread-draft/useThreadStopOperation'
 import { useThreadProjection, type ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
 import { isCursorFreeThreadBatch } from '@/features/thread/runtime/agent-pane/agent-pane-pipeline'
 import {

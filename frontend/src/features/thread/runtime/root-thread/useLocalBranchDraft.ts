@@ -7,7 +7,6 @@ import { isBoundTarget } from '@/features/thread/runtime/agent-pane'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 import type {
   AgentDTO,
-  EnvironmentDTO,
   ModelDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -20,13 +19,11 @@ import type {
 export function useLocalBranchDraft({
   target,
   agents,
-  environments: _environments,
   defaults,
   models,
 }: {
   target: PaneTarget
   agents: AgentDTO[]
-  environments: EnvironmentDTO[]
   defaults: {
     agentName?: string
     yoloEnabled?: boolean

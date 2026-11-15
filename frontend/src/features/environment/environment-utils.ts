@@ -23,7 +23,6 @@ export function filterEnvironments(
     .sort((left, right) => naturalNameCompare(left.name, right.name))
 }
 
-/** 统一可用性规则（服务端 ready 标记：READY + 连接打开 + 心跳未过期）；过期/未连接一律不可选。 */
 /** 事件级别是封闭枚举，因此 class 映射只在这里定义一次，避免遗漏样式。 */
 export function environmentEventLevelClass(level: EnvironmentEventLevel): string {
   return `is-${level.toLowerCase()}`
