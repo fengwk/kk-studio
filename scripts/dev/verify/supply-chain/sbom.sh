@@ -1,7 +1,7 @@
 # scripts/dev/verify/supply-chain/sbom.sh — SBOM subcommand operations.
 #
-# Sourced by run.sh so the backend aggregate and both npm projects write into the
-# same RUN_DIR and contribute to one summary.
+# Sourced by run.sh so the backend aggregate and the frontend npm project write into
+# the same RUN_DIR and contribute to one summary.
 
 run_backend_sbom() {
     local output_dir="$RUN_DIR/backend-sbom"
@@ -31,7 +31,6 @@ run_backend_sbom() {
 npm_sbom_output_dir() {
     case "$1" in
         frontend) printf '%s' "$RUN_DIR/frontend-sbom" ;;
-        daemon) printf '%s' "$RUN_DIR/daemon-sbom" ;;
         *) die "unknown npm project: $1" ;;
     esac
 }
@@ -39,7 +38,6 @@ npm_sbom_output_dir() {
 npm_sbom_log_file() {
     case "$1" in
         frontend) printf '%s' "$RUN_DIR/logs/npm-sbom.log" ;;
-        daemon) printf '%s' "$RUN_DIR/logs/npm-daemon-sbom.log" ;;
         *) die "unknown npm project: $1" ;;
     esac
 }
@@ -47,12 +45,11 @@ npm_sbom_log_file() {
 set_npm_sbom_status() {
     case "$1" in
         frontend) FRONTEND_SBOM_STATUS=$2 ;;
-        daemon) DAEMON_SBOM_STATUS=$2 ;;
         *) die "unknown npm project: $1" ;;
     esac
 }
 
-# 每个 npm 项目各自生成、各自记录状态与产物；一个项目的失败不会掩盖另一个项目的结论。
+# 前端 npm 项目单独生成并记录状态与产物；失败不会被后端结论掩盖。
 run_npm_sbom() {
     local project=$1
     local output_dir log_file

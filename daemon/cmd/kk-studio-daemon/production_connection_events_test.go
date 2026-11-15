@@ -55,7 +55,7 @@ func TestProductionRuntimeReconnectsOnGoaway(t *testing.T) {
 		t.Fatal("assembled daemon did not establish its control WebSocket")
 	}
 	defer peer.Close()
-	controlTransport, bodyWriter, response := openProtocol4ControlStream(t, ctx, peer)
+	controlTransport, bodyWriter, response := openControlStream(t, ctx, peer)
 	defer controlTransport.CloseIdleConnections()
 	defer response.Body.Close()
 	writeControlEnvelope(t, bodyWriter, productionSettings())
@@ -82,7 +82,7 @@ func TestProductionRuntimeReconnectsOnGoaway(t *testing.T) {
 		t.Fatal("assembled daemon did not reconnect after GOAWAY")
 	}
 	defer reconnected.Close()
-	reconnectTransport, reconnectWriter, reconnectResponse := openProtocol4ControlStream(t, ctx, reconnected)
+	reconnectTransport, reconnectWriter, reconnectResponse := openControlStream(t, ctx, reconnected)
 	defer reconnectTransport.CloseIdleConnections()
 	defer reconnectResponse.Body.Close()
 	writeControlEnvelope(t, reconnectWriter, productionSettings())

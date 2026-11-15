@@ -38,9 +38,7 @@ JAVA_HOME_FOR_BUILD=
 TEMP_SETTINGS_FILE=
 BACKEND_SBOM_STATUS=SKIPPED
 FRONTEND_SBOM_STATUS=SKIPPED
-DAEMON_SBOM_STATUS=SKIPPED
 NPM_AUDIT_STATUS=SKIPPED
-DAEMON_AUDIT_STATUS=SKIPPED
 MAVEN_AUDIT_STATUS=SKIPPED
 APP_IMAGE_BUILD_STATUS=SKIPPED
 DAEMON_IMAGE_BUILD_STATUS=SKIPPED
@@ -78,8 +76,8 @@ usage() {
 Usage: scripts/dev/verify/supply-chain/run.sh <command>
 
 Commands:
-  sbom    Generate and validate backend, frontend and daemon CycloneDX SBOMs
-  audit   Run npm audit for every npm project and the Maven Dependency-Check gate
+  sbom    Generate and validate the backend and frontend CycloneDX SBOMs
+  audit   Run the frontend npm audit and the Maven Dependency-Check gate
   image   Build and scan the current app and daemon images with pinned Trivy
   all     Run sbom, dependency audit, and image scan in one report
   test    Run permanent supply-chain script tests only

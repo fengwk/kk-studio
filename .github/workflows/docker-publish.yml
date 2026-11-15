@@ -6,7 +6,7 @@
 # `:<branch>` 与 `:<commit-sha>` 两个 tag。
 #
 # 每次触发先跑低成本的版本/文档/敏感数据 preflight。`main` 随后并行执行 Java 仓库门禁、
-# 前端门禁与可复用 Go Daemon CI；Java 门禁只构建一次带内嵌前端的发行 Fat JAR，并把它
+# 前端门禁与可复用 Daemon CI；Java 门禁只构建一次带内嵌前端的发行 Fat JAR，并把它
 # 作为同 run artifact 交给 publish。`dev` 不跑全量门禁，直接从源码构建镜像。真实模型 E2E 与真实端到端 UI E2E 不在本文工作流内。
 #
 # Registry credential 只来自 Actions secrets，不作为 build arg、不进入 image layer
@@ -61,12 +61,12 @@ jobs:
       - name: Verify capability schema synchronization
         run: node scripts/dev/verify/generated-contracts/capabilities.mjs --check
 
-  # Go Daemon 静态构建、跨平台测试与安装脚本门禁由可复用工作流提供。
+  # Daemon 静态构建、跨平台测试与安装脚本门禁由可复用工作流提供。
   daemon_ci:
-    name: Go daemon CI
+    name: Daemon CI
     needs: preflight
     if: github.ref_name == 'main' || (github.event_name == 'workflow_dispatch' && inputs.validate_only)
-    uses: ./.github/workflows/daemon-go-ci.yml
+    uses: ./.github/workflows/daemon-ci.yml
 
   validate:
     name: validate repository
@@ -91,14 +91,14 @@ jobs:
           cache-dependency-path: frontend/package-lock.json
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: daemon-go/go.mod
+          go-version-file: daemon/go.mod
       - name: Set up PostgreSQL client tools
         uses: ./.github/actions/postgres-client
-      - name: Build Go daemon for Java integration tests
-        working-directory: daemon-go
+      - name: Build the daemon for Java integration tests
+        working-directory: daemon
         env:
           CGO_ENABLED: '0'
-        run: go build -o "$RUNNER_TEMP/kk-studio-daemon-go" ./cmd/kk-studio-daemon
+        run: go build -o "$RUNNER_TEMP/kk-studio-daemon" ./cmd/kk-studio-daemon
       - name: Run repository script tests
         uses: ./.github/actions/repository-script-tests
         env:
@@ -108,7 +108,7 @@ jobs:
       - name: Verify Java sources, tests, coverage and package the distribution JAR
         # -Pdistribution 在同一个 reactor 中安装前端工具链并只打包一次带内嵌 React 产物的
         # 发行 Fat JAR；后续启动、decoder 与镜像发布都复用这个产物。
-        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify "-Ddaemon.bin=$RUNNER_TEMP/kk-studio-daemon-go"
+        run: env JAVA_HOME="$JAVA_HOME" mvn -B -ntp -Pdistribution verify "-Ddaemon.bin=$RUNNER_TEMP/kk-studio-daemon"
       - name: Resolve the distribution Fat JAR
         id: distribution
         run: |

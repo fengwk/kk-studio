@@ -374,7 +374,7 @@ frozen=/opt/kk-studio/daemon/runtime/code-server/lib/node
 [ "$(readlink -f "$(command -v node)")" = "$(readlink -f "$frozen")" ] \
   || { echo "ERROR: node on PATH is not the frozen runtime" >&2; exit 1; }
 daemon=/opt/kk-studio/daemon/kk-studio-daemon
-[ -x "$daemon" ] || { echo "ERROR: Go daemon executable is missing: $daemon" >&2; exit 1; }
+[ -x "$daemon" ] || { echo "ERROR: Daemon executable is missing: $daemon" >&2; exit 1; }
 [ -f /opt/kk-studio/daemon/runtime/code-server/out/node/entry.js ] \
   || { echo "ERROR: code-server runtime entry is missing" >&2; exit 1; }
 "$daemon" --check-config /workspace/.kk-studio/daemon.json
@@ -394,7 +394,7 @@ smoke_tools() {
   require_cmd docker
   local container_id
   container_id=$(daemon_container_id)
-  step "running Go daemon CLI smoke inside the Daemon image"
+  step "running Daemon CLI smoke inside the Daemon image"
   docker exec --interactive --user 10001:10001 \
     "$container_id" /opt/kk-studio/daemon/kk-studio-daemon \
     --check-config /workspace/.kk-studio/daemon.json

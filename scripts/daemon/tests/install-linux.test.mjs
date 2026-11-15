@@ -76,16 +76,16 @@ function addRelease(fixture, version) {
 }
 
 describe('install.sh on Linux', () => {
-  it('installs a real Go build and runs its --version command', { skip: process.platform === 'win32' }, () =>
+  it('installs a real daemon build and runs its --version command', { skip: process.platform === 'win32' }, () =>
     withInstall(({ fixture, install }) => {
-      const daemonGo = path.join(process.cwd(), 'daemon-go')
+      const daemonDir = path.join(process.cwd(), 'daemon')
       const binary = path.join(fixture.root, 'actual-kk-studio-daemon')
       const go = process.env.GO_BIN ?? '/usr/local/opt/go/bin/go'
       const build = spawnSync(go, [
         'build', '-trimpath', '-ldflags',
         '-X github.com/fengwk/kk-studio/daemon/internal/config.DaemonVersion=1.1.1',
         '-o', binary, './cmd/kk-studio-daemon',
-      ], { cwd: daemonGo, encoding: 'utf8', env: { ...process.env, CGO_ENABLED: '0' } })
+      ], { cwd: daemonDir, encoding: 'utf8', env: { ...process.env, CGO_ENABLED: '0' } })
       assert.equal(build.status, 0, build.stderr)
       const archive = path.join(fixture.httpDir, fixture.asset)
       fixture.buildArchive(archive, null, '1.1.1', binary)

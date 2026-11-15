@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Validate and execute a Go daemon release archive on its native host.
+# Validate and execute a Daemon release archive on its native host.
 set -euo pipefail
 
 fail() { echo "ERROR: $*" >&2; exit 1; }
@@ -27,9 +27,9 @@ binary="$tmp/kk-studio-daemon"
 [ -f "$tmp/runtime-manifest.json" ] || fail 'archive is missing runtime manifest'
 [ -f "$tmp/LICENSE" ] && [ -f "$tmp/THIRD_PARTY_NOTICES" ] || fail 'archive is missing legal notices'
 ripgrep_binary=$(find "$tmp" -type f \( -name rg -o -name rg.exe \) -print -quit)
-[ -z "$ripgrep_binary" ] || fail "Go archive unexpectedly contains ripgrep binary: $ripgrep_binary"
+[ -z "$ripgrep_binary" ] || fail "release archive unexpectedly contains ripgrep binary: $ripgrep_binary"
 ripgrep_package=$(find "$tmp/runtime/code-server" -type d -name 'ripgrep*' -print -quit)
-[ -z "$ripgrep_package" ] || fail "Go archive unexpectedly contains ripgrep package: $ripgrep_package"
+[ -z "$ripgrep_package" ] || fail "release archive unexpectedly contains ripgrep package: $ripgrep_package"
 version=$($binary --version 2>&1) || fail 'daemon --version failed'
 [[ $version =~ ^kk-studio-daemon\ [0-9A-Za-z._+-]+$ ]] || fail "unexpected daemon version output: $version"
 if [ "$platform" = linux-amd64 ] || [ "$platform" = linux-arm64 ]; then

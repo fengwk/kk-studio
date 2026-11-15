@@ -8,7 +8,7 @@ card for the current Windows user.
 The canonical environment UUID scopes the installation directory, the scheduled task, the
 operation lock and the staged work directory; two cards of the same user never share a service,
 a program directory or an operation lock. The daemon runs as a per-user Scheduled Task while the
-installing user is logged in. The task executes the bundled Go daemon executable directly: no cmd.exe,
+installing user is logged in. The task executes the bundled Daemon executable directly: no cmd.exe,
 PowerShell runner, wrapper script, environment file or registry entry is created.
 #>
 [CmdletBinding(PositionalBinding = $false)]
@@ -98,7 +98,7 @@ Task: kk-studio-daemon-<current-user-SID>-<environment-id>
 
 Inputs must be sibling, nonempty regular files with current-user-only protected ACLs. Token
 bytes are copied only; they never enter task arguments or environment variables.
-The release archive bundles a static Go daemon executable; code-server retains its own Node runtime.
+The release archive bundles a static Daemon executable; code-server retains its own Node runtime.
 
 Installation operations are serialized by a kernel lock (install.lock) held by a separate
 temporary helper copy: no PID guessing, stale lock directory or loaded library is reused. A busy
@@ -966,7 +966,7 @@ function Assert-DownloadedArchive {
             Throw-Failure "downloaded daemon archive is missing $requiredPath"
         }
     }
-    # The Go executable receives the Unicode config path directly through argv.
+    # The Daemon executable receives the Unicode config path directly through argv.
     $result = Invoke-NativeProcess -Executable $daemon -Arguments @("--version") `
         -WorkingDirectory $script:StagedLib
     if ($result.ExitCode -ne 0) {

@@ -503,16 +503,27 @@ test('runs sbom, audit, and image into one report for all', () => {
         const summary = JSON.parse(readFileSync(path.join(reportRoot, 'latest/summary.json'), 'utf8'))
         assert.equal(summary.mode, 'all')
         assert.equal(summary.status, 'PASS')
-        assert.equal(summary.checks.length, 12)
-        for (const check of summary.checks.filter(check => !['daemon-sbom', 'daemon-audit'].includes(check.name))) {
+        assert.deepEqual(summary.checks.map(check => check.name), [
+            'backend-sbom',
+            'frontend-sbom',
+            'npm-audit',
+            'maven-dependency-check',
+            'app-image-build',
+            'app-image-smoke',
+            'app-image-scan',
+            'daemon-image-build',
+            'daemon-image-smoke',
+            'daemon-image-scan',
+        ])
+        for (const check of summary.checks) {
             assert.equal(check.status, 'PASS', check.name)
         }
-        assert.equal(summary.checks.find(check => check.name === 'daemon-sbom').status, 'SKIPPED')
-        assert.equal(summary.checks.find(check => check.name === 'daemon-audit').status, 'SKIPPED')
+        assert.equal(summary.checks.some(check => check.name === 'daemon-sbom' || check.name === 'daemon-audit'), false)
         assert.equal(existsSync(path.join(reportRoot, 'latest/backend-sbom/bom.json')), true)
         assert.equal(existsSync(path.join(reportRoot, 'latest/image/app.json')), true)
         const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
         assert.match(summaryMarkdown, /All requested checks completed successfully/)
+        assert.doesNotMatch(summaryMarkdown, /Daemon npm|not applicable|standalone Daemon SBOM/i)
     } finally {
         rmSync(toolchain.root, { recursive: true, force: true })
         rmSync(dockerToolchain.root, { recursive: true, force: true })
@@ -540,11 +551,10 @@ test('honors a custom report root and publishes timestamped and latest reports',
         assert.equal(summary.mode, 'sbom')
         assert.equal(summary.checks.find(check => check.name === 'backend-sbom').status, 'PASS')
         assert.equal(summary.checks.find(check => check.name === 'frontend-sbom').status, 'PASS')
-        assert.equal(summary.checks.find(check => check.name === 'daemon-sbom').status, 'SKIPPED')
-        assert.equal(summary.checks.find(check => check.name === 'daemon-sbom').artifact, null)
+        assert.equal(summary.checks.some(check => check.name === 'daemon-sbom' || check.name === 'daemon-audit'), false)
         const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
         assert.match(summaryMarkdown, /backend and frontend CycloneDX reports are non-empty/i)
-        assert.match(summaryMarkdown, /standalone Go Daemon SBOM is not produced/i)
+        assert.doesNotMatch(summaryMarkdown, /Daemon npm|not applicable|standalone Daemon SBOM/i)
         assert.doesNotMatch(summaryMarkdown, /Dependency-Check JSON contains zero/)
         assert.doesNotMatch(summaryMarkdown, /image functional smokes passed/)
     } finally {

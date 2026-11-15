@@ -125,11 +125,11 @@ Unix 的 `--config-file` / `--token-file` 必须指向现存、可读、属主�
    `kk-studio-daemon-<tag>-<os>-<arch>.tar.gz` 与 `.tar.gz.sha256`，核对 SHA256 摘要，并验证归档
    结构、平台清单与 `--version` 输出。下载/解包不进入卡片目录，取得操作锁之前不存在可被另一操作
    清理的暂存。
-3. 把安装输入复制为暂存目录内的同名 `daemon.json` / `daemon.token`，由发行归档中的 Go Daemon 执行
+3. 把安装输入复制为暂存目录内的同名 `daemon.json` / `daemon.token`，由发行归档中的 Daemon 执行
    `--check-config`，检查配置结构、取值与同目录凭据。它**不执行** Bash 或任何其它程序，不建数据目录、
    不加锁、不连接、不启动 LSP；Bash 与语言服务器的真实解析由 Daemon 在应用配置时完成，失败会保持连接
    并上报字段与规则。
-4. 由 Go Daemon 的内部安装锁 helper 取得 `install.lock` 内核锁；该卡片已有安装操作时立即报告 busy，不排队、不猜 PID。
+4. 由 Daemon 的内部安装锁 helper 取得 `install.lock` 内核锁；该卡片已有安装操作时立即报告 busy，不排队、不猜 PID。
 5. 取得锁后清理本卡片 `.work/` 残留，把新程序解包到目标文件系统的 `.work/lib`，保证发布是同
    文件系统 rename。
 6. 停止目标服务，并用同一内核锁确认运行进程已经退出；超时或无法确认时失败，不继续替换文件。
@@ -164,7 +164,7 @@ Linux 启动前清除本卡片受管服务的旧失败计数，避免上一次�
 | token | `daemon.token`（0600，与配置同目录） | `daemon.token`（owner-only ACL） |
 | 运行锁 | `daemon.lock`（内核独占建议锁） | `daemon.lock` |
 | 安装操作锁 | `install.lock`（内核锁，由独立 helper 持有） | `install.lock` |
-| 程序发行目录 | `lib/`（Go Daemon 可执行文件与 `ide-extension/`） | `lib\` |
+| 程序发行目录 | `lib/`（Daemon 可执行文件与 `ide-extension/`） | `lib\` |
 | IDE 数据与恢复 | `ide/` | `ide\` |
 | 技能 | `skills/` | `skills\` |
 | 操作暂存 | `.work/`（当前锁持有者） | `.work\` |
@@ -529,7 +529,7 @@ code 与带凭据的 URL；不要开启 shell 调试回显。
 
 ### 前台诊断
 
-先停止受管服务，避免数据锁冲突，再用该卡片安装目录中的 Go Daemon 与同一份 `daemon.json` 启动程序，
+先停止受管服务，避免数据锁冲突，再用该卡片安装目录中的 Daemon 与同一份 `daemon.json` 启动程序，
 输出直接写控制台；`Ctrl-C` 结束，不提供常驻守护。`daemon.token` 必须与配置同目录：
 
 Unix:

@@ -6,7 +6,7 @@ import (
 	"strconv"
 )
 
-// SerializeDaemonCache returns the private bootstrap cache with TypeScript-compatible field omission and LSP declaration order.
+// SerializeDaemonCache returns the private bootstrap cache, omitting unset optional fields and listing LSP servers in declaration order.
 func SerializeDaemonCache(value DaemonConfig) ([]byte, error) {
 	var output bytes.Buffer
 	output.WriteString(`{"environmentId":`)

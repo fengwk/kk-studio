@@ -86,13 +86,13 @@ Vite 默认只监听 `127.0.0.1` 并使用自带 Host allowlist。需要容器�
 | 触发关键类覆盖率门禁 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp verify` |
 | 空库启动与基线不一致数据库的拒绝验收（classpath 模式） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=WebApplicationStartupSubprocessTest -Dsurefire.failIfNoSpecifiedTests=false` |
 | 当前启动验收（Fat JAR 产物模式） | 同上追加 `'-Dkkstudio.startup.test.jar=<absolute web/target/kk-studio-web-<version>.jar>'`；两种模式都要求全部用例真实通过 |
-| Studio 与 Go Environment Daemon 跨语言集成测试（真实 WebSocket + HTTP/2） | Maven 测试中的 `GoDaemonBinary` 使用 Go 1.27.4 自动构建临时二进制；运行 `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=DaemonCrossLanguageIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` |
-| Go Daemon IDE 协议与视图生命周期 | `cd daemon-go && CGO_ENABLED=0 go test ./internal/protocol ./internal/ide`；扩展宿主测试运行 `node --test daemon-go/ide-extension/extension.test.cjs` |
-| Studio → Go Daemon → code-server 真实链路（需 Docker、受管 code-server 发行目录；默认跳过） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=IdeProductionChainAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false -Dkk-studio.it.ide.node=<absolute-Node-24-binary> -Dkk-studio.it.ide.code-server-release=<absolute-release-dir>`；追加 `-Dkk-studio.it.ide.playwright-module=<absolute-Playwright-module>` 运行真实 Chromium，再追加 `-Dkk-studio.it.ide.records-dir=<private-records-dir>` 保留日志；未设置发行目录时整组跳过 |
+| Studio 与 Environment Daemon 跨语言集成测试（真实 WebSocket + HTTP/2） | Maven 测试中的 `DaemonBinary` 使用 Go 1.27.4 自动构建临时二进制；运行 `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=DaemonCrossLanguageIntegrationTest -Dsurefire.failIfNoSpecifiedTests=false` |
+| Daemon IDE 协议与视图生命周期 | `cd daemon && CGO_ENABLED=0 go test ./internal/protocol ./internal/ide`；扩展宿主测试运行 `node --test daemon/ide-extension/extension.test.cjs` |
+| Studio → Daemon → code-server 真实链路（需 Docker、受管 code-server 发行目录；默认跳过） | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl web -am test -Dtest=IdeProductionChainAcceptanceTest -Dsurefire.failIfNoSpecifiedTests=false -Dkk-studio.it.ide.node=<absolute-Node-24-binary> -Dkk-studio.it.ide.code-server-release=<absolute-release-dir>`；追加 `-Dkk-studio.it.ide.playwright-module=<absolute-Playwright-module>` 运行真实 Chromium，再追加 `-Dkk-studio.it.ide.records-dir=<private-records-dir>` 保留日志；未设置发行目录时整组跳过 |
 | IDE 后端快照与服务定向测试 | `env JAVA_HOME="$JAVA_HOME_21" mvn -pl apps/ide -am test -Dtest=IdeViewSnapshotStoreTest,EnvironmentIdeServiceImplTest` |
 | 只格式化本次改动的 Java 文件 | `env JAVA_HOME="$JAVA_HOME_21" mvn -B -ntp -pl <module> spotless:apply '-DspotlessFiles=<file-regex>'` |
 | 前端单元测试 / lint / 类型与构建 / 覆盖率 | `npm --prefix frontend run test`、`run lint`、`run typecheck`、`run typecheck:test`、`run build`、`run coverage` |
-| Go Daemon 单元测试与覆盖率 | `cd daemon-go && CGO_ENABLED=0 go test ./...`；行覆盖率可用 `go test -cover ./...`；IDE 扩展运行 `node --test daemon-go/ide-extension/extension.test.cjs`
+| Daemon 单元测试与覆盖率 | `cd daemon && CGO_ENABLED=0 go test ./...`；行覆盖率可用 `go test -cover ./...`；IDE 扩展运行 `node --test daemon/ide-extension/extension.test.cjs`
 | Daemon 发行归档打包与验收 | `bash scripts/daemon/prepare-release.sh v<version> <os> <arch>`，再 `bash scripts/daemon/smoke-archive.sh <archive>`；归档只在同宿主平台上通过验收 |
 | 校验 Compose 配置 | `docker compose -f deploy/local/compose.yaml config --quiet` 等，见下文 |
 | 隔离栈 smoke | `./scripts/dev/verify/smoke/offline-chat.sh`；`--with-app` 增加应用契约，见 [deploy/test](../../deploy/test/README.md) |
@@ -114,10 +114,10 @@ E2E 自身的 L1–L5 是 API case 的 level 分组，含义见下文 E2E 章节
 
 ### 真实 IDE 与 Daemon 验收
 
-真实链路不使用 mock `/views`，也不依靠假时钟等待占用窗口。协议与 Daemon IDE 生命周期回归运行 `cd daemon-go && go test ./internal/protocol ./internal/ide`，扩展宿主行为运行 `node --test daemon-go/ide-extension/extension.test.cjs`；
+真实链路不使用 mock `/views`，也不依靠假时钟等待占用窗口。协议与 Daemon IDE 生命周期回归运行 `cd daemon && go test ./internal/protocol ./internal/ide`，扩展宿主行为运行 `node --test daemon/ide-extension/extension.test.cjs`；
 受管 code-server 的真实入口由下方 `IdeProductionChainAcceptanceTest` 验证，缺少发行目录时整组跳过，不能记作已通过。
 
-Studio → Go Daemon → code-server 的真实链路入口是
+Studio → Daemon → code-server 的真实链路入口是
 [`IdeProductionChainAcceptanceTest.java`](../../web/src/test/java/fun/fengwk/kkstudio/web/environment/ide/IdeProductionChainAcceptanceTest.java)，
 命令见上表。测试在临时目录构建 Go 1.27.4 Daemon；真实 Chromium 驱动另需显式 Node 24 的
 `-Dkk-studio.it.ide.node`、`-Dkk-studio.it.ide.playwright-module` 与受管 code-server 的
@@ -151,7 +151,7 @@ Windows 安装器回归在同一宿主上分别运行 Windows PowerShell 5.1 与
 后一个，任一失败仍阻断正常发布。
 Unix 脚本回归在完整 repository 测试中以系统 Bash 运行；macOS 安装与归档契约由其矩阵的系统 Bash（macOS 为 3.2）
 步骤覆盖，不以 Homebrew Bash 的结果替代系统自带版本。
-Go Daemon 的持续集成由 [daemon-go-ci.yml](../../.github/workflows/daemon-go-ci.yml) 负责，检查 Go 格式、vet、staticcheck、测试与目标平台构建；其平台清单和命令以 [`daemon-go/README.md`](../../daemon-go/README.md) 为准。真实扩展宿主仍使用 Node 内置 `node:test`。发行归档和发布门禁属于发布流程，详见 [Daemon 安装与运行](environment-daemon.md)。
+Daemon 的持续集成由 [daemon-ci.yml](../../.github/workflows/daemon-ci.yml) 负责，检查 Go 格式、vet、staticcheck、测试与目标平台构建；其平台清单和命令以 [`daemon/README.md`](../../daemon/README.md) 为准。扩展宿主测试使用 Node 内置 `node:test`。发行归档和发布门禁属于发布流程，详见 [Daemon 安装与运行](environment-daemon.md)。
 
 数据库维护脚本的集成测试使用独立的 PostgreSQL 17 容器。CI 显式安装 17 版客户端并将其
 bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scripts/ops/tests](../../scripts/ops/tests) 时，
@@ -163,15 +163,15 @@ bin 目录置于 PATH 首位，不依赖 runner 默认版本。本地运行 [scr
 在仓库根运行 `node --test scripts/daemon/tests/*.test.mjs`，覆盖 Unix/Windows 安装器契约、受管更新、
 下载校验、发布打包和归档验收。Unix PTY 用例需要宿主 `python3`：它只用标准库 `pty` 让安装器在真实
 TTY stderr 下运行（stdin 仍重定向），属于测试依赖，产品运行时不依赖 Python。Fixtures 替代网络与服务管理命令，
-验证 SHA256 校验、文件替换、暂存输入校验、显式版本与归档版本匹配、Go daemon `--check-config` 失败时保留
+验证 SHA256 校验、文件替换、暂存输入校验、显式版本与归档版本匹配、daemon `--check-config` 失败时保留
 现有安装、受管身份判定、覆盖安装替换，以及卸载只移除受管服务与程序。安装器不构建 Daemon；真实发行归档由
 [scripts/daemon/prepare-release.sh](../../scripts/daemon/prepare-release.sh) 打包，再由 `daemon-release`
 工作流上传 GitHub Release。安装器不要求宿主 Go、Node 或 JDK；归档包含 Go 可执行文件及供 IDE 使用的冻结
 code-server 运行时。
 
 Windows 发行归档在 `windows-latest` smoke job 中运行
-[scripts/daemon/smoke-archive.ps1](../../scripts/daemon/smoke-archive.ps1)：解包归档，检查 Go executable、
-code-server runtime、IDE extension 与法律文件，执行 Go daemon `--version`，并拒绝 ripgrep binary 与
+[scripts/daemon/smoke-archive.ps1](../../scripts/daemon/smoke-archive.ps1)：解包归档，检查 Daemon 可执行文件、
+code-server runtime、IDE extension 与法律文件，执行 daemon `--version`，并拒绝 ripgrep binary 与
 ripgrep package。Windows 安装器与受管更新的源码契约也由上述 Node 测试覆盖；它们不注册真实 ScheduledTasks。
 
 Windows 原生还运行 `npm --prefix frontend run test:install:windows`，验证一行下载命令的 UTF-8、
@@ -365,7 +365,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 
 | Flag | 语义 |
 | --- | --- |
-| `--rebuild` | Java 21 clean package 并重启 backend/frontend；带 tools 时也用 Go 1.27.4 构建并重启 Go Daemon |
+| `--rebuild` | Java 21 clean package 并重启 backend/frontend；带 tools 时也用 Go 1.27.4 构建并重启 Daemon |
 | `--real` | 启用真实 Provider case，要求四组完整 `TEST_*_BASE_URL` / `TEST_*_API_KEY` |
 | `--with-tools` | 启用 Daemon/Tool case |
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
@@ -581,8 +581,8 @@ XML 检查不是通用语法验证器，不能把这道门禁称为任意畸形 
 
 先把 `<case-id>` 替换为 inventory 中的实际值；`case-reset` 最后一项可选 `pi` 或 `pi-base`。
 `snapshot` 不猜测宿主目录，`PI_ANCHOR` 和 `PI_BASE_ANCHOR` 都必须显式指向 clean Git worktree。
-`tool-smoke` 在 Daemon 容器内用发行的 Go executable 对入口物化的配置运行
-`--check-config`，验证镜像中的可执行文件和运行配置；find/grep 与子进程行为由 Go daemon 单元测试覆盖。
+`tool-smoke` 在 Daemon 容器内用发行的 Daemon 可执行文件对入口物化的配置运行
+`--check-config`，验证镜像中的可执行文件和运行配置；find/grep 与子进程行为由 daemon 单元测试覆盖。
 
 真实 Agent runner 只在显式执行时调用 Provider：
 
@@ -661,8 +661,8 @@ create+delete 工作负载结果比较。
 
 | 子命令 | 内容 |
 | --- | --- |
-| `sbom` | backend/frontend/daemon CycloneDX JSON SBOM，校验文件非空可解析 |
-| `audit` | frontend/daemon `npm audit` + Maven OWASP Dependency-Check |
+| `sbom` | backend/frontend CycloneDX JSON SBOM，校验文件非空可解析 |
+| `audit` | frontend `npm audit` + Maven OWASP Dependency-Check |
 | `image` | 构建 App/Daemon，运行功能 smoke，再用 pinned Trivy 扫描 |
 | `all` | `sbom`、`audit`、`image` 的合取结果 |
 | `test` | [supply-chain.test.mjs](../../scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs)，不联网 |
@@ -704,7 +704,7 @@ Netty、Jackson 2/3 与 Kotlin BOM 在 Boot BOM 前导入，以 Maven 首次声�
 | App | [`deploy/local/Dockerfile`](../../deploy/local/Dockerfile) | `kk-studio-app:supply-chain` | `SUPPLY_CHAIN_APP_IMAGE` |
 | Daemon | [`deploy/reliability/daemon.Dockerfile`](../../deploy/reliability/daemon.Dockerfile) | `kk-studio-daemon:supply-chain` | `SUPPLY_CHAIN_DAEMON_IMAGE` |
 
-App 镜像 smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe` 与 `curl`。Go Daemon 的多平台编译、单元测试与 IDE 扩展测试见 [`daemon-go/README.md`](../../daemon-go/README.md) 和上方定向检查表。Daemon 发布归档、容器镜像与供应链 gate 由发布流程维护；其镜像资产和扫描报告不能替代当前 Go 源码树中的测试结果。
+App 镜像 smoke 在默认 non-root user 下检查 Java、`ffmpeg`、`ffprobe` 与 `curl`。Daemon 的多平台编译、单元测试与 IDE 扩展测试见 [`daemon/README.md`](../../daemon/README.md) 和上方定向检查表。Daemon 发布归档、容器镜像与供应链 gate 由发布流程维护；其镜像资产和扫描报告不能替代当前 Go 源码树中的测试结果。
 
 
 ## 本机 preview 与 NAS 自迭代
@@ -1027,13 +1027,13 @@ reports/reliability/
   LATEST_AGENT_RUN.txt
 
 reports/supply-chain/
-  <timestamp>-<pid>/{backend-sbom,frontend-sbom,daemon-sbom,frontend-audit,daemon-audit,backend-audit,image,logs/,summary.md,summary.json}
+  <timestamp>-<pid>/{backend-sbom,frontend-sbom,frontend-audit,backend-audit,image,logs/,summary.md,summary.json}
   latest/
   LATEST_RUN.txt
 ```
 
-`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend/daemon SBOM、
-frontend/daemon npm audit、Dependency-Check HTML/JSON/SARIF、App/Daemon Trivy JSON、image id/digest、
+`latest-agent` 是目录副本，不是 symlink。Supply-chain 报告包含 backend/frontend SBOM、
+frontend npm audit、Dependency-Check HTML/JSON/SARIF、App/Daemon 镜像扫描的 Trivy JSON、image id/digest、
 smoke log 和 summary。
 
 分布式 E2E 在销毁栈前收集脱敏日志：`logs/distributed-<service>.log` 是容器标准输出，

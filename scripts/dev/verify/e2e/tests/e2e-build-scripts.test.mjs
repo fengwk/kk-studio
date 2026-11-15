@@ -1,4 +1,4 @@
-/** Permanent guards for E2E clean package, runtime work directory, and Go daemon contracts. */
+/** Permanent guards for E2E clean package, runtime work directory, and daemon contracts. */
 
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
@@ -65,12 +65,12 @@ test('test intent: the E2E backend rebuild uses a clean package', () => {
   assert.match(functionBody(E2E_LIB, 'package_backend'), /(?:\bmvn\b|\brun_maven\b).*clean\b\s+\bpackage\b/)
 })
 
-test('test intent: the daemon rebuild compiles the Go product and stages its extension', () => {
+test('test intent: the daemon rebuild compiles the daemon and stages its extension', () => {
   const body = functionBody(E2E_LIB, 'package_daemon')
   assert.ok(body.includes('Go 1.27.4'))
   assert.ok(body.includes('CGO_ENABLED=0'))
   assert.ok(body.includes('"$GO_BIN" build -o "$DAEMON_BINARY" ./cmd/kk-studio-daemon'))
-  assert.ok(body.includes('daemon-go/ide-extension'))
+  assert.ok(body.includes('daemon/ide-extension'))
   assert.ok(!body.includes('mvn'))
 })
 
@@ -81,7 +81,7 @@ test('test intent: the E2E runtime work directory survives maven clean', () => {
 })
 
 test('test intent: E2E Maven is online by default and offline only by opt-in', () => {
-  // E2E 唯一的 Maven 重建路径（backend）必须共享显式离线开关；Daemon 不再走 Maven。
+  // E2E 唯一的 Maven 重建路径（backend）必须共享显式离线开关；Daemon 用 Go 工具链构建。
   let { result, calls } = runE2eBackendMaven('unset')
   assert.equal(result.status, 0, output(result))
   assert.equal(calls.length, 1)
@@ -98,7 +98,7 @@ test('test intent: E2E Maven is online by default and offline only by opt-in', (
   assert.ok(!daemonBody.includes('E2E_MAVEN_OFFLINE'))
 })
 
-test('test intent: the Go daemon distribution has no JVM or classpath machinery', () => {
+test('test intent: the daemon distribution has no JVM or classpath machinery', () => {
   const lib = readText(E2E_LIB)
   assert.ok(lib.includes('DAEMON_BINARY=${DAEMON_BINARY:-"$DAEMON_DIST/kk-studio-daemon"}'))
   for (const machinery of ['dependency:build-classpath', 'dependency:copy-dependencies']) {

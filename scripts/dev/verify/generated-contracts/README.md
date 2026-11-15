@@ -22,11 +22,11 @@ Java 侧是带 `type` 字段的扁平类（如 Harness 命令、交互、上传�
 控制协议的单一事实源是
 [control.proto](../../../../platform/daemon-server/src/main/protocol/control.proto)。Java 由 Maven 的官方 protoc 在编译期生成；Go
 类型由同一 proto 生成到
-[control.pb.go](../../../../daemon-go/internal/protocol/control.pb.go)。`daemon-go/scripts/check-generated.sh` 用相同生成器重跑并比较
+[control.pb.go](../../../../daemon/internal/protocol/control.pb.go)。`daemon/scripts/check-generated.sh` 用相同生成器重跑并比较
 生成结果；Go golden round-trip 测试继续校验所有协议样例。
 
 Capability JSON Schema 以 Java classpath 资源为唯一来源，
-[capabilities.mjs](capabilities.mjs) 把它们同步到 `daemon-go/internal/capability/schemas`。`check.sh` 发现内容或多余副本即失败，
+[capabilities.mjs](capabilities.mjs) 把它们同步到 `daemon/internal/capability/schemas`。`check.sh` 发现内容或多余副本即失败，
 `write.sh` 覆写副本。
 
 ## 校验（默认）

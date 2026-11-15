@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 重新生成前端传输契约与 Go Daemon 协议代码。会写文件，提交前必须人工审阅 diff；
+# 重新生成前端传输契约与 Daemon 协议代码。会写文件，提交前必须人工审阅 diff；
 # 日常校验用 check.sh。
 set -euo pipefail
 
@@ -16,7 +16,7 @@ fi
 
 cd "$REPO_ROOT"
 node "$SCRIPT_DIR/capabilities.mjs"
-"$REPO_ROOT/daemon-go/scripts/generate-protocol.sh"
+"$REPO_ROOT/daemon/scripts/generate-protocol.sh"
 exec env JAVA_HOME="$JDK21" mvn -q -pl web -am \
   -Dtest=TsContractArtifactTest \
   -Dsurefire.failIfNoSpecifiedTests=false \

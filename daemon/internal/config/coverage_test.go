@@ -51,7 +51,7 @@ func TestConfigValidationHelpers(t *testing.T) {
 	}
 }
 
-func TestConfigNestingDepthMatchesTypeScriptBoundary(t *testing.T) {
+func TestConfigNestingDepthBoundary(t *testing.T) {
 	withinLimit := []byte(strings.Repeat("[", 20) + "0" + strings.Repeat("]", 20))
 	if err := rejectDuplicateKeys(withinLimit); err != nil {
 		t.Fatalf("20 nested containers rejected: %v", err)

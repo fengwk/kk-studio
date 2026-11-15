@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# kk-studio reliability / distributed Go Daemon image.
-# Build the static Go daemon and package the same code-server/IDE runtime as the official archive.
+# kk-studio reliability / distributed Daemon image.
+# Build the static daemon and package the same code-server/IDE runtime as the official archive.
 # Node is included only as part of the managed code-server distribution and its bundled npm CLI.
 
 ARG NODE_IMAGE=node:24.21.0-bookworm-slim
@@ -51,11 +51,11 @@ RUN set -eux; \
       amd64 | arm64) ;; \
       *) echo "ERROR: unsupported target architecture: $arch" >&2; exit 1 ;; \
     esac; \
-    version=$(sed -n 's/^var DaemonVersion = "\([^"]*\)"$/\1/p' daemon-go/internal/config/version.go); \
+    version=$(sed -n 's/^var DaemonVersion = "\([^"]*\)"$/\1/p' daemon/internal/config/version.go); \
     test -n "$version"; \
     GO_BIN=/usr/local/go/bin/go scripts/daemon/prepare-release.sh "v$version" linux "$arch"; \
     mkdir -p /distribution; \
-    tar -xzf "daemon-go/release/linux-$arch/kk-studio-daemon-v$version-linux-$arch.tar.gz" \
+    tar -xzf "daemon/release/linux-$arch/kk-studio-daemon-v$version-linux-$arch.tar.gz" \
       -C /distribution; \
     test -x /distribution/kk-studio-daemon; \
     test -x /distribution/runtime/code-server/lib/node

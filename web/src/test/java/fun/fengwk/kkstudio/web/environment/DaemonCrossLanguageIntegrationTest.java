@@ -133,9 +133,9 @@ class DaemonCrossLanguageIntegrationTest {
 
   @BeforeEach
   void setUp() throws Exception {
-    binaryTempDir = Files.createTempDirectory("kk-daemon-go-bin-");
-    daemonBinary = GoDaemonBinary.build(repoRoot(), binaryTempDir.resolve("kk-studio-daemon"));
-    daemonVersion = GoDaemonBinary.version(daemonBinary);
+    binaryTempDir = Files.createTempDirectory("kk-daemon-bin-");
+    daemonBinary = DaemonBinary.build(repoRoot(), binaryTempDir.resolve("kk-studio-daemon"));
+    daemonVersion = DaemonBinary.version(daemonBinary);
     scheduler = new ScheduledExecutorScheduler("test-transport-", false);
     scheduler.start();
     executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -611,9 +611,9 @@ class DaemonCrossLanguageIntegrationTest {
   }
 
   /**
-   * 范围 7：跨实例 attach 恢复。 Go Daemon 正在执行耗时任务时，第一个 server 实例调用 drain() 优雅排空并释放租约； 第二个 server
+   * 范围 7：跨实例 attach 恢复。 Daemon 正在执行耗时任务时，第一个 server 实例调用 drain() 优雅排空并释放租约； 第二个 server
    * 实例与第一个实例共用同一个 leaseStore 接管路由准入并进入 READY； 第二个 server 实例通过 attach(environmentId, invocationId,
-   * listener) 挂接在途调用， 触发 RECOVER，真实 Go Daemon 查找到 journal 并重新交付 COMPLETED 终态。
+   * listener) 挂接在途调用， 触发 RECOVER，真实 Daemon 查找到 journal 并重新交付 COMPLETED 终态。
    */
   @Test
   void crossInstanceAttachReattachesInFlightCallAndCompletes() throws Exception {
@@ -676,7 +676,7 @@ class DaemonCrossLanguageIntegrationTest {
         newServer.attach(ENVIRONMENT_ID, inFlightInvocationId, attachListener);
     assertNotNull(handle);
 
-    // 验证新 server 向 Go daemon 发送了 RECOVER
+    // 验证新 server 向 daemon 发送了 RECOVER
     boolean sentRecover =
         recordingSessions.outboundEnvelopes().stream()
             .anyMatch(
@@ -685,7 +685,7 @@ class DaemonCrossLanguageIntegrationTest {
                         && inFlightInvocationId.toString().equals(env.getInvocationId()));
     assertTrue(sentRecover, "New server must emit RECOVER upon attach");
 
-    // 真实 Go daemon 收到 RECOVER 后完成并交付 COMPLETED
+    // 真实 daemon 收到 RECOVER 后完成并交付 COMPLETED
     EnvironmentCapabilityResult result = attachListener.awaitCompleted(TIMEOUT);
     assertNotNull(result, "In-flight invocation must complete via attach on new server");
     assertFalse(
@@ -767,7 +767,7 @@ class DaemonCrossLanguageIntegrationTest {
     Path current = Path.of(System.getProperty("user.dir")).toAbsolutePath().normalize();
     while (current != null) {
       if (Files.isRegularFile(current.resolve("pom.xml"))
-          && Files.isRegularFile(current.resolve("daemon-go/go.mod"))
+          && Files.isRegularFile(current.resolve("daemon/go.mod"))
           && Files.isDirectory(current.resolve("web"))) {
         return current;
       }
@@ -787,7 +787,7 @@ class DaemonCrossLanguageIntegrationTest {
     }
   }
 
-  /** 管理真实运行的 Go Daemon 子进程。 */
+  /** 管理真实运行的 Daemon 子进程。 */
   private static final class DaemonProcess implements AutoCloseable {
 
     private final Process process;
@@ -811,7 +811,7 @@ class DaemonCrossLanguageIntegrationTest {
       if (daemonBinary == null
           || daemonBinary.isBlank()
           || !Files.isRegularFile(Path.of(daemonBinary))) {
-        throw new IllegalStateException("Go daemon binary does not exist: " + daemonBinary);
+        throw new IllegalStateException("daemon binary does not exist: " + daemonBinary);
       }
 
       boolean isWindows = System.getProperty("os.name").toLowerCase().contains("win");

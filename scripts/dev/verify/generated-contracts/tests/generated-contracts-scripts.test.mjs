@@ -1,6 +1,6 @@
 /**
  * 独立 write/check 入口的契约回归：不得真正调用 Maven 或 protoc，只用 PATH 上的 stub 记录实际命令。
- * Go 生成物的真实一致性由 daemon-go/scripts/check-generated.sh 检查，golden round-trip 由 Go 测试覆盖。
+ * Go 生成物的真实一致性由 daemon/scripts/check-generated.sh 检查，golden round-trip 由 Go 测试覆盖。
  *
  * 这两个脚本是前端 HTTP 契约与 Go 协议生成的开发者入口；其失败路径与参数属于 CI 门禁本身。
  */
@@ -20,7 +20,7 @@ const CHECK_SCRIPT = path.join(CAPABILITY_DIR, 'check.sh')
 const WRITE_SCRIPT = path.join(CAPABILITY_DIR, 'write.sh')
 const ARTIFACT_TEST = '-Dtest=TsContractArtifactTest'
 const UPDATE_PROPERTY = '-Dkkstudio.contract.generation.update=true'
-const COMMITTED_PROTOCOL = path.join(REPOSITORY_ROOT, 'daemon-go/internal/protocol/control.pb.go')
+const COMMITTED_PROTOCOL = path.join(REPOSITORY_ROOT, 'daemon/internal/protocol/control.pb.go')
 
 /** Write an executable stub script into `dir`. */
 function writeStub(dir, name, body) {

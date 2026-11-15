@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-The Go Daemon distribution includes the Go Daemon, the managed `fengwk/code-server` runtime,
+The Daemon distribution includes the Daemon, the managed `fengwk/code-server` runtime,
 and the JavaScript IDE extension. The Daemon executable is built with `CGO_ENABLED=0`.
 
 Go modules are listed with pinned versions in `go.mod` and retain their license files at their

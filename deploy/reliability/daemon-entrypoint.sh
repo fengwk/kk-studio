@@ -1,8 +1,8 @@
 #!/bin/bash
-# kk-studio reliability/distributed Go Daemon container entrypoint.
+# kk-studio reliability/distributed Daemon container entrypoint.
 #
-# The Go daemon executable is at the distribution root. A bundled Node runtime remains only
-# for the code-server IDE and the small configuration-cache helper.
+# The Daemon executable is at the distribution root. The bundled Node runtime belongs to the
+# managed code-server and is used only to start the IDE and run the configuration-cache helper.
 #
 # Container config serialization uses that bundled Node because jq/python are absent. The token
 # is written with shell builtins to an owner-only file:
@@ -14,7 +14,7 @@
 # 数据目录；根默认在唯一的 /workspace named volume 下，因此不引入额外挂载。daemon 只接收
 # 唯一的 `--config <绝对路径>`。
 #
-# `KK_STUDIO_DAEMON_DIST` defaults to /opt/kk-studio/daemon and points to the Go distribution root.
+# `KK_STUDIO_DAEMON_DIST` defaults to /opt/kk-studio/daemon and points to the Daemon distribution root.
 set -euo pipefail
 
 # 显式 PATH：入口自身、node/npm 包装与能力子进程都解析到同一份冻结运行时。
@@ -54,7 +54,7 @@ case "$root" in
     ;;
 esac
 if [ ! -x "$entry" ]; then
-  echo "ERROR: the Go Daemon executable is missing or not executable: $entry" >&2
+  echo "ERROR: the Daemon executable is missing or not executable: $entry" >&2
   exit 1
 fi
 if [ ! -x "$node_bin" ]; then

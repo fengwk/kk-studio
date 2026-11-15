@@ -1,29 +1,29 @@
-name: daemon-go-ci
+name: daemon-ci
 
 on:
   workflow_call:
   push:
     paths:
-      - 'daemon-go/**'
+      - 'daemon/**'
       - 'scripts/daemon/**'
       - 'scripts/dev/lib/**'
       - 'scripts/dev/verify/repository/**'
       - 'scripts/dev/verify/reliability/**'
       - 'scripts/dev/verify/supply-chain/**'
       - '.github/actions/**'
-      - '.github/workflows/daemon-go-ci.yml'
+      - '.github/workflows/daemon-ci.yml'
       - '.github/workflows/daemon-release.yml'
       - '.github/workflows/docker-publish.yml'
   pull_request:
     paths:
-      - 'daemon-go/**'
+      - 'daemon/**'
       - 'scripts/daemon/**'
       - 'scripts/dev/lib/**'
       - 'scripts/dev/verify/repository/**'
       - 'scripts/dev/verify/reliability/**'
       - 'scripts/dev/verify/supply-chain/**'
       - '.github/actions/**'
-      - '.github/workflows/daemon-go-ci.yml'
+      - '.github/workflows/daemon-ci.yml'
       - '.github/workflows/daemon-release.yml'
       - '.github/workflows/docker-publish.yml'
 
@@ -43,7 +43,7 @@ jobs:
           node-version: '24.21.0'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: daemon-go/go.mod
+          go-version-file: daemon/go.mod
       - name: Set up PostgreSQL client tools
         uses: ./.github/actions/postgres-client
       - name: Run repository script tests
@@ -59,21 +59,21 @@ jobs:
           go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
       - name: Verify generated protocol
-        run: daemon-go/scripts/check-generated.sh
+        run: daemon/scripts/check-generated.sh
       - name: Verify formatting
-        run: test -z "$(gofmt -l $(find daemon-go -name '*.go'))"
+        run: test -z "$(gofmt -l $(find daemon -name '*.go'))"
       - name: Test IDE bridge extension
-        run: node --test daemon-go/ide-extension/extension.test.cjs
+        run: node --test daemon/ide-extension/extension.test.cjs
       - name: Vet
-        working-directory: daemon-go
+        working-directory: daemon
         run: go vet ./...
       - name: Staticcheck
-        working-directory: daemon-go
+        working-directory: daemon
         run: go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 ./...
       - name: Version alignment
         run: node scripts/dev/verify/repository/check-version-alignment.mjs
       - name: Cross-compile six targets
-        working-directory: daemon-go
+        working-directory: daemon
         run: |
           set -eu
           for target in linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do
@@ -86,7 +86,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: daemon-go/go.mod
+          go-version-file: daemon/go.mod
       - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4
         with:
           distribution: temurin
@@ -113,12 +113,12 @@ jobs:
           node-version: '24.21.0'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: daemon-go/go.mod
+          go-version-file: daemon/go.mod
       - name: Install ripgrep for search parity tests
         if: runner.os == 'Linux'
         run: sudo apt-get install -y ripgrep
       - name: Test
-        working-directory: daemon-go
+        working-directory: daemon
         shell: bash
         env:
           CGO_ENABLED: '0'
@@ -140,7 +140,7 @@ jobs:
             }
           ' "$test_json"
       - name: Native coverage
-        working-directory: daemon-go
+        working-directory: daemon
         shell: bash
         run: |
           coverage_file="$RUNNER_TEMP/native-coverage.out"
@@ -154,7 +154,7 @@ jobs:
           if-no-files-found: error
       - name: Race test
         if: runner.os == 'Linux' || runner.os == 'macOS'
-        working-directory: daemon-go
+        working-directory: daemon
         env:
           CGO_ENABLED: '1'
         run: go test -race ./...
@@ -169,13 +169,13 @@ jobs:
           node-version: '24.21.0'
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version-file: daemon-go/go.mod
+          go-version-file: daemon/go.mod
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: native-coverage-*
           path: coverage
       - name: Merge native coverage profiles
-        working-directory: daemon-go
+        working-directory: daemon
         shell: bash
         run: |
           set -eu

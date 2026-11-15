@@ -1,5 +1,5 @@
 /**
- * Local fixtures for Go daemon release archives and Unix installation tests. No fixture contacts
+ * Local fixtures for Daemon release archives and Unix installation tests. No fixture contacts
  * the network or registers a real service: curl and service managers are replaced by local shims.
  */
 
@@ -176,7 +176,7 @@ esac
       writeText(path.join(work, 'ide-extension/extension.cjs'), '// IDE extension\\n', 0o644)
       writeText(path.join(work, 'runtime-manifest.json'), `{"daemonVersion":"${version}","codeServer":{"${key}":{}}}\n`, 0o644)
       writeText(path.join(work, 'LICENSE'), 'Apache License\\n', 0o644)
-      writeText(path.join(work, 'THIRD_PARTY_NOTICES'), 'Go daemon notices\\n', 0o644)
+      writeText(path.join(work, 'THIRD_PARTY_NOTICES'), 'daemon notices\\n', 0o644)
       const entries = treeEntries(work, '.').slice(1).map((entry) => ({ ...entry, name: entry.name.replace(/^\.\//, '') }))
       writeTarGz(file, entries)
     } finally {
