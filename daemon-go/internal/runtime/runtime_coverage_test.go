@@ -120,8 +120,19 @@ func TestRuntimeHandleControlFrameEdges(t *testing.T) {
 	if err := r.handle(context.Background(), wrong); err == nil || err.Error() != "envelope is bound to a different environment" {
 		t.Fatalf("wrong scope error = %v", err)
 	}
-	if err := r.handle(context.Background(), &protocol.Envelope{MessageType: protocol.MessageType_ERROR}); err == nil || err.Error() != "control server rejected the connection" {
-		t.Fatalf("server error frame = %v", err)
+	for _, rejection := range []struct {
+		name     string
+		envelope *protocol.Envelope
+		want     string
+	}{
+		{name: "with reason", envelope: &protocol.Envelope{MessageType: protocol.MessageType_ERROR, Payload: &protocol.Envelope_Error{Error: &protocol.Error{Message: stringPtr("ready.hostInfo.timeZone must be a valid ZoneId")}}}, want: "control server rejected the connection: ready.hostInfo.timeZone must be a valid ZoneId"},
+		{name: "without reason", envelope: &protocol.Envelope{MessageType: protocol.MessageType_ERROR, Payload: &protocol.Envelope_Error{Error: &protocol.Error{Message: stringPtr("")}}}, want: "control server rejected the connection"},
+	} {
+		t.Run(rejection.name, func(t *testing.T) {
+			if err := r.handle(context.Background(), rejection.envelope); err == nil || err.Error() != rejection.want {
+				t.Fatalf("server error frame = %v, want %q", err, rejection.want)
+			}
+		})
 	}
 	if err := r.handle(context.Background(), &protocol.Envelope{MessageType: protocol.MessageType_READY}); !errors.Is(err, ErrForbiddenInboundFrame) {
 		t.Fatalf("forbidden READY frame error = %v", err)
