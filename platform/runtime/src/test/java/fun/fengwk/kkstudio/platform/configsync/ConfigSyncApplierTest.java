@@ -8,6 +8,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
@@ -20,6 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 import org.mockito.Mockito;
+import org.springframework.jdbc.core.simple.JdbcClient;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
@@ -93,8 +95,14 @@ class ConfigSyncApplierTest {
           new ConfigSyncFixtures.AgentDependencyPlugin(DEPENDENT_PLUGIN_ID),
           new ConfigSyncFixtures.FailingAgentDeclarationPlugin("broken.plugin"));
 
+  private final JdbcClient jdbcClient = mock(JdbcClient.class);
+  private final JdbcClient.StatementSpec importLock = mock(JdbcClient.StatementSpec.class);
+  private final JdbcClient.MappedQuerySpec<Boolean> importLockResult =
+      mock(JdbcClient.MappedQuerySpec.class);
+
   private final ConfigSyncApplier applier =
       new ConfigSyncApplier(
+          jdbcClient,
           providerService,
           modelRepository,
           modelService,
@@ -143,6 +151,13 @@ class ConfigSyncApplierTest {
   }
 
   /** 合成依赖插件：普通值里的 Agent 名称字段由测试显式给出。 */
+  private void allowImportLock() {
+    when(jdbcClient.sql(anyString())).thenReturn(importLock);
+    when(importLock.param(any())).thenReturn(importLock);
+    when(importLock.query(Boolean.class)).thenReturn(importLockResult);
+    when(importLockResult.single()).thenReturn(true);
+  }
+
   private static Agent existingAgent(String name) {
     Agent agent = Agent.builder().name(name).version(0L).build();
     return agent;
@@ -159,6 +174,7 @@ class ConfigSyncApplierTest {
 
   @Test
   void agentTwoStageWriteResolvesCyclicSubagents() {
+    allowImportLock();
     Agent existingA = Agent.builder().name("a").version(0L).build();
     Agent existingB = Agent.builder().name("b").version(0L).build();
     // 阶段一每个名字返回 null（尚不存在），阶段二返回已创建的行。
@@ -207,6 +223,7 @@ class ConfigSyncApplierTest {
 
   @Test
   void providersAreImportedViaExplicitUpsertCommand() {
+    allowImportLock();
     ConfigSyncParser.ProviderSpec created = providerSpec("new");
     ConfigSyncParser.ProviderSpec existing = providerSpec("old");
 
@@ -222,6 +239,13 @@ class ConfigSyncApplierTest {
         List.of());
 
     // 导入使用显式 upsert 命令恢复文件事实，不区分 create/update，不读取 repository 判断存在性。
+    // 固定导入锁必须先于任何资源 upsert：否则互逆数组顺序仍会先拿到互逆行锁。
+    InOrder order = Mockito.inOrder(jdbcClient, providerService);
+    order.verify(jdbcClient).sql(contains("pg_advisory_xact_lock"));
+    order.verify(providerService).importProvider(created.properties());
+    order.verify(providerService).importProvider(existing.properties());
+    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_NAMESPACE);
+    verify(importLock).param(ConfigSyncApplier.IMPORT_LOCK_KEY);
     verify(providerService).importProvider(created.properties());
     verify(providerService).importProvider(existing.properties());
     verify(providerService, never()).createProvider(any());
@@ -230,6 +254,7 @@ class ConfigSyncApplierTest {
 
   @Test
   void environmentCreateUsesImportAndExistingUsesTokenCas() {
+    allowImportLock();
     when(environmentRepository.getByName("new")).thenReturn(null);
     Environment existing = new Environment();
     existing.setId(UUID.randomUUID());
@@ -260,6 +285,7 @@ class ConfigSyncApplierTest {
 
   @Test
   void settingsUpdateUsesPlanVersionInsteadOfReadingNewVersion() {
+    allowImportLock();
     SystemSettingsSectionsDTO sections =
         new SystemSettingsCodec().toSections(SystemSettingsTestFixture.DEFAULT);
     sections.getBackendNetwork().setProxyUrl("http://127.0.0.1:9");
@@ -281,6 +307,7 @@ class ConfigSyncApplierTest {
 
   @Test
   void modelImportCreatesNewModel() {
+    allowImportLock();
     when(modelRepository.getByName("m")).thenReturn(null);
     SingleModelCreateDTO properties = new SingleModelCreateDTO();
     properties.setProviderName("p");
@@ -303,6 +330,7 @@ class ConfigSyncApplierTest {
   /** 意图：插件按计划顺序经唯一写入口保存，各自比较计划期修订。 */
   @Test
   void pluginsAreAppliedInOrderWithTheirPlannedRevisions() {
+    allowImportLock();
     String values = "{\"promptAgentName\":\"h3\"}";
     when(definitionRepository.getByNameForUpdate("h3")).thenReturn(existingAgent("h3"));
 
@@ -328,6 +356,7 @@ class ConfigSyncApplierTest {
   /** 意图：插件提交冲突必须原样上抛（不吞异常），由外层事务整体回滚；不携带任何秘密补丁。 */
   @Test
   void pluginCommitFailurePropagatesWithoutSecretPatch() {
+    allowImportLock();
     when(pluginConfigurationService.configure(anyString(), anyLong(), anyString(), any()))
         .thenThrow(DomainException.versionConflict("plugin", 1L, 2L));
 
@@ -355,6 +384,7 @@ class ConfigSyncApplierTest {
    */
   @Test
   void pluginAgentDependenciesAreRecheckedBeforeAnyPluginWrite() {
+    allowImportLock();
     String values = "{\"promptAgentName\":\"dep-agent\"}";
     when(definitionRepository.getByNameForUpdate("dep-agent")).thenReturn(null);
 
@@ -381,6 +411,7 @@ class ConfigSyncApplierTest {
   /** 意图：依赖池里的既有 Agent 满足插件依赖；重检按稳定顺序去重，每个名称只锁一次。 */
   @Test
   void pluginAgentDependenciesAcceptExistingAgentsInStableOrder() {
+    allowImportLock();
     when(definitionRepository.getByNameForUpdate(anyString()))
         .thenAnswer(invocation -> existingAgent(invocation.getArgument(0)));
     String values = "{\"promptAgentName\":\"%s\"}";
@@ -410,6 +441,7 @@ class ConfigSyncApplierTest {
   /** 意图：重检发生在 Agent 两阶段写入之后、任何 plugin configure 之前。 */
   @Test
   void pluginAgentDependenciesAreRecheckedAfterAgentsAndBeforePlugins() {
+    allowImportLock();
     Agent existing = existingAgent("dep-agent");
     when(definitionRepository.getByName("dep-agent")).thenReturn(existing);
     when(definitionRepository.getByNameForUpdate("dep-agent")).thenReturn(existing);
@@ -444,6 +476,7 @@ class ConfigSyncApplierTest {
   /** 意图：插件拒绝自身普通配置（已知输入边界）收敛为固定去敏校验失败，不回显配置值、不串联 cause。 */
   @Test
   void pluginDeclarationInputErrorBecomesSafeValidationFailure() {
+    allowImportLock();
     String values = "{\"promptAgentName\":\"!secret-marker\"}";
 
     DomainException error =
@@ -470,6 +503,7 @@ class ConfigSyncApplierTest {
   /** 意图：插件声明解析抛出的未知/致命错误绝不伪装成校验失败或 skip，必须原样上抛。 */
   @Test
   void unexpectedPluginDeclarationErrorPropagates() {
+    allowImportLock();
     assertThrows(
         IllegalStateException.class,
         () ->
@@ -500,6 +534,7 @@ class ConfigSyncApplierTest {
   /** 意图：Skill 与 MCP 导入按计划直接委托，Skill 委托给 publishPreparedGitImport。 */
   @Test
   void skillAndMcpImportsAreDelegatedWithPreparedPayloads() {
+    allowImportLock();
     ConfigSyncPlan.SkillImport skill =
         new ConfigSyncPlan.SkillImport("pkg", "d", "https://example.com/pkg.git", "main", null);
     SkillCatalogService.PreparedGitImport prepared =
@@ -539,6 +574,7 @@ class ConfigSyncApplierTest {
 
   @Test
   void skillImportFailureBubblesUpAsValidationError() {
+    allowImportLock();
     ConfigSyncPlan.SkillImport skill =
         new ConfigSyncPlan.SkillImport("pkg", "d", "https://example.com/pkg.git", "main", null);
     SkillCatalogService.PreparedGitImport prepared =
@@ -566,6 +602,7 @@ class ConfigSyncApplierTest {
   /** 意图：既有 Model 走 CAS 更新并携带既有版本，绝不重复创建。 */
   @Test
   void existingModelIsUpdatedWithExistingVersionCas() {
+    allowImportLock();
     Model existing =
         Model.builder().kind(ModelKind.MODEL).providerName("p").name("m").version(4L).build();
     when(modelRepository.getByName("m")).thenReturn(existing);
@@ -590,6 +627,7 @@ class ConfigSyncApplierTest {
   /** 意图：已存在的 Agent 不再创建，直接进入第二阶段用既有版本 CAS 更新完整配置。 */
   @Test
   void existingAgentIsUpdatedWithoutCreate() {
+    allowImportLock();
     Agent existing = Agent.builder().name("a").version(7L).build();
     when(definitionRepository.getByName("a")).thenReturn(existing);
     ConfigSyncParser.AgentSpec spec =

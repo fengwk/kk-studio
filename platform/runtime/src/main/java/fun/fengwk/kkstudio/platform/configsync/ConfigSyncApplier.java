@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.platform.configsync;
 
-import lombok.AllArgsConstructor;
+import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -47,11 +47,27 @@ import java.util.Map;
  * <p>插件复用唯一写入口 {@link PluginConfigurationService}：每项都比较该插件计划期的配置版本；任一项冲突或失败都让整份导入回滚，提交后才在本节点应用。
  *
  * <p>计划在写事务外形成，因此事务内先按同一份插件声明重新核验依赖的 Agent 仍然存在（行锁读取，锁持有到外层事务结束），避免提交悬空依赖。
+ *
+ * <p>已有资源按文件数组顺序更新，互逆顺序会拿到互逆行锁。写事务在任何资源行锁之前先取固定的配置导入事务锁，让不同实例串行写入。
  */
-@AllArgsConstructor
 @Component
 public class ConfigSyncApplier {
 
+  /**
+   * 仅配置导入写事务使用的双 int advisory namespace 与 key。
+   *
+   * <p>双 int 键空间与 harness 树锁的单 bigint {@code hashtextextended} 键空间天然隔离，也不同于 storage upload 的 {@code
+   * 0x53544C4B} 和 harness join 的 {@code 0x6B6B5354}。这对值只标记配置导入，不得复用于其他互斥。
+   */
+  static final int IMPORT_LOCK_NAMESPACE = 0x4346_4753;
+
+  static final int IMPORT_LOCK_KEY = 0x494D_5054;
+
+  // void 返回的事务级锁不能直接取值：用常量 true 选行，同时保留阻塞语义；提交或回滚时由 PostgreSQL 释放。
+  private static final String IMPORT_LOCK_SQL =
+      "select true from pg_advisory_xact_lock(?::int, ?::int)";
+
+  private final JdbcClient jdbcClient;
   private final ProviderService providerService;
   private final ModelRepository modelRepository;
   private final ModelService modelService;
@@ -65,9 +81,39 @@ public class ConfigSyncApplier {
   private final PluginConfigurationService pluginConfigurationService;
   private final PluginAgentDependencies pluginAgentDependencies;
 
+  public ConfigSyncApplier(
+      JdbcClient jdbcClient,
+      ProviderService providerService,
+      ModelRepository modelRepository,
+      ModelService modelService,
+      SkillCatalogService skillCatalogService,
+      McpServerService mcpServerService,
+      AgentRepository agentRepository,
+      AgentService agentService,
+      EnvironmentRepository environmentRepository,
+      EnvironmentService environmentService,
+      SystemSettingsService systemSettingsService,
+      PluginConfigurationService pluginConfigurationService,
+      PluginAgentDependencies pluginAgentDependencies) {
+    this.jdbcClient = jdbcClient;
+    this.providerService = providerService;
+    this.modelRepository = modelRepository;
+    this.modelService = modelService;
+    this.skillCatalogService = skillCatalogService;
+    this.mcpServerService = mcpServerService;
+    this.agentRepository = agentRepository;
+    this.agentService = agentService;
+    this.environmentRepository = environmentRepository;
+    this.environmentService = environmentService;
+    this.systemSettingsService = systemSettingsService;
+    this.pluginConfigurationService = pluginConfigurationService;
+    this.pluginAgentDependencies = pluginAgentDependencies;
+  }
+
   /** 事务内写入计划中的全部事实。 */
   @Transactional
   public void apply(ConfigSyncPlan plan, List<PreparedGitImport> preparedSkills) {
+    lockImport();
     applyProviders(plan.providers());
     applyModels(plan.models());
     for (PreparedGitImport skill : preparedSkills) {
@@ -88,6 +134,16 @@ public class ConfigSyncApplier {
     if (plan.settings() != null) {
       applySettings(plan.settings());
     }
+  }
+
+  /** 在本写事务内、任何资源行锁之前获取跨实例共享的配置导入锁。 */
+  private void lockImport() {
+    jdbcClient
+        .sql(IMPORT_LOCK_SQL)
+        .param(IMPORT_LOCK_NAMESPACE)
+        .param(IMPORT_LOCK_KEY)
+        .query(Boolean.class)
+        .single();
   }
 
   private void applyProviders(List<ConfigSyncParser.ProviderSpec> providers) {
