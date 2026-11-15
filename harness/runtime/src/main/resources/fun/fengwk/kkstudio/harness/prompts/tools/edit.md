@@ -11,6 +11,9 @@ Usage:
   newline-normalized view, so CRLF/CR/LF spelling alone is not a change. An edit that would
   change the effective encoding is rejected: keep the file's declaration as it is, or use `write`
   with the complete content to convert the file.
+- Bytes the encoding cannot decode appear as U+FFFD (�) in `read` and in matching. An edit that
+  keeps such text rewrites it as U+FFFD, so the result adds a `Note:` line and the approval warns
+  that the original bytes are lost.
 - `edit` supports regular text files only. Directories, devices, FIFOs and binary files are
   rejected before any write.
 - Put all independent changes to one file into one call, one `edits` entry per change. Every entry matches the original file content, not the result of earlier entries, and entries must not overlap.
