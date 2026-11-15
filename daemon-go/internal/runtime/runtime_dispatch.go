@@ -19,7 +19,7 @@ func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.
 	}
 	switch e.MessageType {
 	case protocol.MessageType_ERROR:
-		return errors.New("control server rejected the connection")
+		return serverRejection(e)
 	case protocol.MessageType_ENVIRONMENT_CONFIG:
 		return r.handleEnvironmentConfig(ctx, e)
 	case protocol.MessageType_INVOKE:
@@ -102,6 +102,16 @@ func (r *Runtime) handleIDELease(e *protocol.Envelope) error {
 	}
 	r.admissionMu.Unlock()
 	return err
+}
+
+// serverRejection reports the reason the control server closed the connection, so the daemon log
+// names the rejected field instead of hiding it.
+func serverRejection(e *protocol.Envelope) error {
+	message := e.GetError().GetMessage()
+	if message == "" {
+		return errors.New("control server rejected the connection")
+	}
+	return fmt.Errorf("control server rejected the connection: %s", message)
 }
 
 // admitEnvelope applies the scope gates every control message after SETTINGS must pass, and reports

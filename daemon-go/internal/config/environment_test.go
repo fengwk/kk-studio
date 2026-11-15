@@ -42,7 +42,7 @@ func writeExecutableFixture(t *testing.T, name string) string {
 func TestBuildEnvironmentConfigPreservesBaseAndServerOrder(t *testing.T) {
 	base := DaemonConfig{EnvironmentID: "env", ConfigPath: "/data/daemon.json", DataDir: "/data", TokenPath: "/data/daemon.token", DistributionDir: "/opt/daemon"}
 	input := validEnvironmentConfig(t)
-	expectedExecutable := input.Lsp.Servers[0].Command[0]
+	expectedCommand := input.Lsp.Servers[0].Command[0]
 	got, err := BuildEnvironmentConfig(base, 17, input)
 	if err != nil {
 		t.Fatal(err)
@@ -56,11 +56,11 @@ func TestBuildEnvironmentConfigPreservesBaseAndServerOrder(t *testing.T) {
 	if len(got.LSP) != 2 || got.LSP[0].ID != "typescript" || got.LSP[1].ID != "go" {
 		t.Fatalf("LSP declaration order lost: %+v", got.LSP)
 	}
-	if got.LSP[0].Command[0] != expectedExecutable || got.LSP[0].Extensions[0] != ".ts" || got.LSP[0].RootMarkers[0] != "package.json" {
+	if got.LSP[0].Command[0] != expectedCommand || got.LSP[0].Extensions[0] != ".ts" || got.LSP[0].RootMarkers[0] != "package.json" {
 		t.Fatalf("LSP executable or normalized rules differ: %+v", got.LSP[0])
 	}
 	input.Lsp.Servers[0].Command[0] = "mutated"
-	if got.LSP[0].Command[0] != expectedExecutable {
+	if got.LSP[0].Command[0] != expectedCommand {
 		t.Fatal("candidate retained mutable input slices")
 	}
 }
@@ -78,8 +78,9 @@ func TestBuildEnvironmentConfigAllowsOptionalLSP(t *testing.T) {
 	}
 }
 
-// The documented Mason command must pass hot configuration validation, not just LSP discovery.
-func TestBuildEnvironmentConfigExpandsLSPHomeCommand(t *testing.T) {
+// Applying a server snapshot keeps the configured LSP command verbatim, so the accepted snapshot,
+// the private cache and the server's raw snapshot stay identical across restarts.
+func TestBuildEnvironmentConfigKeepsConfiguredLSPCommand(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "daemon home")
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -96,23 +97,23 @@ func TestBuildEnvironmentConfigExpandsLSPHomeCommand(t *testing.T) {
 	}
 	for _, prefix := range []string{"~/", "$HOME/", "${HOME}/"} {
 		t.Run(prefix, func(t *testing.T) {
-			command := []string{prefix + ".local/share/nvim/mason/bin/" + name, "--stdio", "$HOME/literal-argument"}
+			configured := prefix + ".local/share/nvim/mason/bin/" + name
+			command := []string{configured, "--stdio", "$HOME/literal-argument"}
 			input := validEnvironmentConfig(t)
 			input.Lsp.Servers = []*protocol.LspServer{{Id: "jdtls", Command: command, Extensions: []string{".java"}, RootMarkers: []string{"pom.xml", "build.gradle", "settings.gradle"}, FirstMatchMarkers: []string{".git"}}}
 			got, err := BuildEnvironmentConfig(DaemonConfig{}, 1, input)
 			if err != nil {
 				t.Fatal(err)
 			}
-			want := []string{executable, "--stdio", "$HOME/literal-argument"}
-			if len(got.LSP) != 1 || !slices.Equal(got.LSP[0].Command, want) {
-				t.Fatalf("resolved LSP configuration = %+v; want command %q", got.LSP, want)
+			if len(got.LSP) != 1 || !slices.Equal(got.LSP[0].Command, command) {
+				t.Fatalf("applied LSP configuration = %+v; want the configured command %q", got.LSP, command)
 			}
-			if input.Lsp.Servers[0].Command[0] != prefix+".local/share/nvim/mason/bin/"+name {
-				t.Fatal("home expansion mutated the server snapshot")
+			if input.Lsp.Servers[0].Command[0] != configured {
+				t.Fatal("candidate mutated the server snapshot")
 			}
 		})
 	}
-	// Expansion must not turn a missing server into an accepted configuration.
+	// Validation still requires the configured server to resolve at its home-relative location.
 	if err := os.Remove(executable); err != nil {
 		t.Fatal(err)
 	}

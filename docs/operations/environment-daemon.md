@@ -232,7 +232,8 @@ Studio 保存的完整卡片配置：
   Daemon 由它派生统一连接入口 `ws(s)://<authority>/ws/daemon`。单条物理连接通过 HTTP/2 复用
   Protobuf 控制流，IDE HTTP 请求与 WebSocket 隧道（RFC 8441 Extended CONNECT）在同一连接上直通。
 - `bashExecutable` 可选；空值保存为 `null`，表示使用宿主 PATH 中的 `bash`。非空值不能是空白或含
-  控制字符；Daemon 应用配置时把它解析为实际可执行路径，解析失败上报 `VALIDATION_FAILED`。
+  控制字符；Daemon 应用配置时确认它能解析为可执行文件，解析失败上报 `VALIDATION_FAILED`。
+  `daemon.json` 与运行快照保存的仍是配置里写下的字符串，真正的路径解析发生在执行时。
 - `lsp` 可选；`null` 表示禁用 LSP。一旦启用就必须声明至少一个 server，空表非法。server id 匹配
   `[A-Za-z0-9_.-]+`，`command` 是非空字符串数组，`extensions` 必须带前导点且不含路径分隔符，
   `rootMarkers` / `firstMatchMarkers` 是项目相对路径、不得为绝对路径或含 `..`。**未声明的字段
@@ -314,8 +315,10 @@ npm install -g typescript typescript-language-server
 ```
 
 Neovim 用户常经 Mason 管理语言服务器，可直接引用其安装路径。`command` 首元素支持 `~/`、`$HOME/`
-和 `${HOME}/` 前缀，均相对于 **Daemon 运行用户的主目录**展开；后续参数保持字面值，不展开变量。
-不带路径的命令名按服务进程的 PATH 查找：
+和 `${HOME}/` 前缀，均相对于 **Daemon 运行用户的主目录**解析；后续参数保持字面值，不解析变量。
+不带路径的命令名按服务进程的 PATH 查找。应用配置时只确认首元素当时能解析到可执行文件，找不到
+上报 `VALIDATION_FAILED`；被接受的快照与 `daemon.json` 保存的仍是配置里写下的命令，`~/`、`$HOME/`
+和 `${HOME}/` 原样保留，主目录与 PATH 的解析发生在启动语言服务器时：
 
 ```json
 {

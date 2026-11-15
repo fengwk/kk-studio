@@ -1,8 +1,21 @@
 package protocol
 
 import (
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
+)
+
+// maxZoneOffsetSeconds is the largest offset Java's ZoneId accepts for a UTC-based identifier.
+const maxZoneOffsetSeconds = 18 * 60 * 60
+
+var (
+	// zoneOffsetPattern matches the UTC±HH:MM identifier Java's ZoneId accepts.
+	zoneOffsetPattern = regexp.MustCompile(`^UTC([+-])([0-9]{2}):([0-9]{2})$`)
+	// zoneRegionPattern matches region identifiers such as Asia/Shanghai; the location database
+	// decides whether one exists.
+	zoneRegionPattern = regexp.MustCompile(`^[A-Za-z]+(/[A-Za-z0-9_+-]+)+$`)
 )
 
 func validateHost(h *HostInfo) error {
@@ -16,7 +29,7 @@ func validateHost(h *HostInfo) error {
 		if len(*h.TimeZone) == 0 || len(*h.TimeZone) > 128 {
 			return invalid("ready.hostInfo.timeZone has invalid syntax")
 		}
-		if _, err := time.LoadLocation(*h.TimeZone); err != nil {
+		if !validZoneID(*h.TimeZone) {
 			return invalid("ready.hostInfo.timeZone must be a valid ZoneId")
 		}
 	}
@@ -26,6 +39,40 @@ func validateHost(h *HostInfo) error {
 		}
 	}
 	return nil
+}
+
+// validZoneID accepts the identifiers Java's ZoneId resolves: UTC, a UTC offset within 18:00, or a
+// region name the IANA database holds.
+func validZoneID(value string) bool {
+	if value == "UTC" {
+		return true
+	}
+	if match := zoneOffsetPattern.FindStringSubmatch(value); match != nil {
+		hours, err := strconv.Atoi(match[2])
+		if err != nil {
+			return false
+		}
+		minutes, err := strconv.Atoi(match[3])
+		if err != nil || minutes > 59 || hours*3600+minutes*60 > maxZoneOffsetSeconds {
+			return false
+		}
+		return true
+	}
+	return ValidRegionZoneID(value)
+}
+
+// ValidRegionZoneID reports whether name is an IANA region identifier, such as Asia/Shanghai, that
+// both Java's ZoneId and the host location database resolve. A first segment of posix or right names
+// a zoneinfo layout directory, which Java rejects even though the location database resolves it.
+func ValidRegionZoneID(name string) bool {
+	if !zoneRegionPattern.MatchString(name) {
+		return false
+	}
+	if segment, _, _ := strings.Cut(name, "/"); segment == "posix" || segment == "right" {
+		return false
+	}
+	_, err := time.LoadLocation(name)
+	return err == nil
 }
 
 func validateSnapshot(s *RuntimeSnapshot, path string) error {
