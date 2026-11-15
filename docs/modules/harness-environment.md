@@ -19,7 +19,7 @@ Environment 资源、daemon envelope scope、分支执行路由与 Harness Work 
 id / inputSchema / defaultTimeout
 ```
 
-目录按固定 canonical 顺序排列，共 10 项：
+目录按固定 canonical 顺序排列，共 12 项：
 
 | capabilityId | 默认超时 | `workdir` | 模型映射 |
 | --- | --- | --- | --- |
@@ -27,14 +27,16 @@ id / inputSchema / defaultTimeout
 | `fs.write` | 1 分钟 | 无 | `write` |
 | `fs.edit` | 1 分钟 | 无 | `edit` |
 | `fs.edit.preview` | 1 分钟 | 无 | 内部只读审查 |
+| `fs.write.preview` | 1 分钟 | 无 | 内部只读审查 |
 | `process.exec` | 5 分钟 | 必填 | `bash` |
 | `fs.grep` | 15 秒 | 无 | `grep` |
 | `fs.find` | 15 秒 | 无 | `find` |
 | `lsp.goto-definition` | 3 分钟 | 无 | `lsp_goto_definition` |
 | `lsp.workspace-symbols` | 3 分钟 | 无 | `lsp_workspace_symbols` |
 | `lsp.java-decompile` | 3 分钟 | 无 | `lsp_java_decompile` |
+| `skill.install` | 5 分钟 | 无 | 内部技能安装 |
 
-`fs.edit.preview` 由内部调用，不映射为模型工具；其余 9 项由 Contributor 映射为模型工具。
+`fs.edit.preview`、`fs.write.preview` 与 `skill.install` 只由内部调用，不映射为模型工具；其余 9 项由 Contributor 映射为模型工具。
 [`EnvironmentCapabilityIds`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIds.java)
 固化标识；Contributor 的 visibility 决定模型选择面。
 
@@ -42,7 +44,7 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
-`workdir`；`fs.read`、`fs.write`、`fs.edit`、`fs.edit.preview`、`fs.grep` 与 `fs.find` 的 `path`
+`workdir`；`fs.read`、`fs.write`、`fs.write.preview`、`fs.edit`、`fs.edit.preview`、`fs.grep` 与 `fs.find` 的 `path`
 在 Daemon 执行时只接受目标主机上的绝对路径，相对路径直接拒绝，且不接受 `workdir`。Harness 的 `read` 工具会先拦截 `resource://` URI 并交给平台读取器，只有本地绝对路径才发送给 `fs.read`；其他文件工具也只接受 Environment 绝对路径。三个 `lsp.*` 能力的本地 `path`
 必须是绝对路径，相对路径直接拒绝，也不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI。
 `process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
@@ -409,7 +411,7 @@ Skill Package 对账与远端退出对账，三者失败彼此隔离，也不回
 测试守卫：
 
 - [`EnvironmentIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/EnvironmentIdTest.java) 与 [`EnvironmentCapabilityIdTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityIdTest.java)：身份与 capability id 的 canonical 解析与拒绝规则。
-- [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：10 项能力的固定顺序、workdir schema 边界与模型/内部能力映射。
+- [`EnvironmentCapabilityCatalogTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityCatalogTest.java)：12 项能力的固定顺序、workdir schema 边界与模型/内部能力映射。
 - [`EnvironmentCapabilityContractTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityContractTest.java) 与 [`EnvironmentCapabilityTransportTest.java`](../../harness/environment/src/test/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilityTransportTest.java)：请求归一化与 timeout 原样传递、结果体积边界、发送异常分类、事件顺序与终态唯一。
 - [`ControlProtocolCodecTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/protocol/ControlProtocolCodecTest.java)：成帧大端长度、超限防爆（16 MiB 上限）、强类型 Protobuf 消息往返与各消息类型字段校验。
 - [`DaemonReadyMetadataCodecTest.java`](../../platform/daemon-server/src/test/java/fun/fengwk/kkstudio/platform/daemon/DaemonReadyMetadataCodecTest.java)：宿主 metadata 只接受 `{daemonVersion, hostInfo}` wire 形状，未知字段、缺失字段与非法值都被拒绝。

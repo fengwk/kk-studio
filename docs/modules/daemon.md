@@ -24,7 +24,7 @@ Studio 是卡片配置的权威，本地 JSON 是最后接受配置的缓存。�
 
 ## 能力与宿主资源
 
-Go 能力实现位于 [`internal/coding`](../../daemon/internal/coding/)、[`internal/lsp`](../../daemon/internal/lsp/) 与 [`internal/skill`](../../daemon/internal/skill/)。文件读写与编辑、查找与检索、命令执行及 LSP 查询均在 Daemon 侧执行。检索由 Go 实现，不依赖外部 ripgrep；能力 Schema 与 Go 代码同在 `internal/capability/`，Java 资源由一致性测试校验。完整模型可见说明见 [内置工具](builtin-tools.md)。
+Go 能力实现位于 [`internal/coding`](../../daemon/internal/coding/)、[`internal/lsp`](../../daemon/internal/lsp/) 与 [`internal/skill`](../../daemon/internal/skill/)。文件读写与编辑、查找与检索、命令执行及 LSP 查询均在 Daemon 侧执行。检索由 Go 实现，不依赖外部 ripgrep。能力 Schema 的源是 harness 的 Java classpath 资源，`internal/capability/schemas` 是生成副本；同步脚本比较去掉尾部空白后的文本，Java 一致性测试再按字节校验。完整模型可见说明见 [内置工具](builtin-tools.md)。
 
 ### 原生进程监管
 

@@ -64,7 +64,7 @@ Provider、MCP 与 Git 技能包的创建请求把密钥放在可空 `SecretUpda
 非空时只接受 `SET`；编辑请求的密钥字段必填，`KEEP` / `CLEAR` 必须显式提交。
 编辑已配置凭据的 Provider 时，表单提供清除已保存凭据的选项，选中后提交 `CLEAR`。
 生成物不手改；漂移由 [`check.sh`](../../scripts/dev/verify/generated-contracts/check.sh)
-（`mvn verify` 内执行同一测试）拦截，更新走同目录
+拦截，`mvn verify` 只跑其中的 Java 产物测试，不执行这个 shell。更新走同目录
 [`write.sh`](../../scripts/dev/verify/generated-contracts/write.sh)。
 
 [`contracts`](../../frontend/src/shared/api/contracts) 保留前端细化、便捷类型和选择逻辑；
