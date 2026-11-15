@@ -310,7 +310,7 @@ class EnvironmentCapabilityCatalogTest {
     assertTrue(findDescription.contains("Defaults to 15."), findDescription);
   }
 
-  /** 测试意图：验证 Java classpath 中的每份 schema 与 Go Daemon 声明逐字节一致。 */
+  /** 测试意图：验证 Java classpath 中的每份 schema 与 Daemon 声明逐字节一致。 */
   @Test
   void javaSchemasMirrorGoCapabilitySchemas() throws IOException {
     Path goCapabilitiesDir = findProjectRootDir().resolve("daemon/internal/capability/schemas");

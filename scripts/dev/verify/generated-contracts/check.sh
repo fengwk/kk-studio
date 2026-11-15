@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 校验前端传输契约（frontend/src/shared/api/generated/contracts.ts）、Go Daemon 控制协议代码
+# 校验前端传输契约（frontend/src/shared/api/generated/contracts.ts）、Daemon 控制协议代码
 # （daemon/internal/protocol/control.pb.go）与能力 schema 是否漂移。
 set -euo pipefail
 

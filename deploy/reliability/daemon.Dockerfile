@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 #
-# kk-studio reliability / distributed Go Daemon image.
-# Build the static Go daemon and package the same code-server/IDE runtime as the official archive.
+# kk-studio reliability / distributed Daemon image.
+# Build the static daemon and package the same code-server/IDE runtime as the official archive.
 # Node is included only as part of the managed code-server distribution and its bundled npm CLI.
 
 ARG NODE_IMAGE=node:24.21.0-bookworm-slim

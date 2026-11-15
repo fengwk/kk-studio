@@ -367,7 +367,7 @@ git --version
 reported_version="$("$daemon" --version)"
 printf 'daemon=%s\n' "$reported_version"
 if [[ ! "$reported_version" =~ ^kk-studio-daemon\ [0-9A-Za-z._+-]+$ ]]; then
-    printf 'unexpected Go daemon --version output: %s\n' "$reported_version" >&2
+    printf 'unexpected daemon --version output: %s\n' "$reported_version" >&2
     exit 1
 fi
 smoke_dir="$(mktemp -d /workspace/kk-studio-supply-chain-smoke.XXXXXX)"

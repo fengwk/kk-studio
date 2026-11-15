@@ -30,6 +30,6 @@ test('prepare-release rejects unsupported targets before dependency resolution',
 test('prepare-release requires a version-matched tag before downloading runtime assets', () => {
   const result = run(['v0.0.0', 'linux', 'amd64'])
   assert.notEqual(result.status, 0)
-  assert.match(result.stderr, /release tag must equal Go daemon version/)
+  assert.match(result.stderr, /release tag must equal the daemon version/)
   assert.equal(existsSync(path.join(ROOT, 'daemon/release')), false)
 })

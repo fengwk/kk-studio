@@ -31,7 +31,7 @@ harness 只提供执行引擎与能力契约，平台实现持久化与宿主适
 | L1 共享 | [`common`](../common/pom.xml) | 值契约：领域错误、严格 JSON、URI 编码、资源引用、结果内容、输入 Schema、Work 状态 |
 | L1 共享 | [`work`](../work/pom.xml) | `durable_work` 的 claim、租约 SQL 与有界调度骨架 |
 | L1 共享 | [`schema`](../schema/pom.xml) | 唯一的 [`V1__schema.sql`](../schema/src/main/resources/db/migration/V1__schema.sql)，按归属模块分段 |
-| 宿主 | [`daemon`](../daemon/README.md) | Go Environment Daemon：文件、进程、LSP 与 IDE 服务；代理来自所属卡片；扩展宿主代码位于 `daemon/ide-extension/` |
+| 宿主 | [`daemon`](../daemon/README.md) | Environment Daemon：文件、进程、LSP 与 IDE 服务；代理来自所属卡片；扩展宿主代码位于 `daemon/ide-extension/` |
 | 前端 | [`frontend`](../frontend/package.json) | `app` → `platform`、`features` → `shared` 的浏览器工作台 |
 
 依赖只能向下，模块依赖由 [`check.mjs`](../scripts/dev/verify/repository/check.mjs) 守护：

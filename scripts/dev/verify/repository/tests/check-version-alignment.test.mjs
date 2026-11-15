@@ -29,7 +29,7 @@ const inputs = (
   pomXml: POM(version, property),
   ideExtensionPackageJson: IDE_EXTENSION_PACKAGE(ideExtensionPackageVersion),
   frontendPackageJson: FRONTEND_PACKAGE(frontendPackageVersion),
-  goConfig: GO_CONFIG(goVersion),
+  daemonConfig: GO_CONFIG(goVersion),
 })
 
 test('test intent: aligned Go and application versions pass and the tag must carry a v prefix', () => {
@@ -55,17 +55,17 @@ test('test intent: missing or ambiguous Go and package versions and invalid tags
   assert.throws(() => checkAlignment({ ...inputs('1'), ideExtensionPackageJson: '{}' }), /daemon IDE extension package version/)
   assert.throws(() => checkAlignment({ ...inputs('1'), frontendPackageJson: '{}' }), /frontend package version/)
   assert.throws(
-    () => checkAlignment({ ...inputs('1'), goConfig: undefined }),
-    /cannot read Go daemon version from daemon\/internal\/config\/version\.go/,
+    () => checkAlignment({ ...inputs('1'), daemonConfig: undefined }),
+    /cannot read the daemon version from daemon\/internal\/config\/version\.go/,
   )
-  assert.throws(() => checkAlignment({ ...inputs('1'), goConfig: 'const DaemonVersion = version\n' }), /exactly one literal/)
-  assert.throws(() => checkAlignment({ ...inputs('1'), goConfig: `${GO_CONFIG('1')}${GO_CONFIG('1')}` }), /exactly one literal/)
+  assert.throws(() => checkAlignment({ ...inputs('1'), daemonConfig: 'const DaemonVersion = version\n' }), /exactly one literal/)
+  assert.throws(() => checkAlignment({ ...inputs('1'), daemonConfig: `${GO_CONFIG('1')}${GO_CONFIG('1')}` }), /exactly one literal/)
   for (const tag of ['', ' ', ' v1.2.3', 'v1.2.3 ', 'refs/heads/1.2.3', 'v', '1.2.3']) {
     assert.throws(() => checkAlignment({ ...inputs('1.2.3'), tag }), /invalid RELEASE_TAG/, JSON.stringify(tag))
   }
 })
 
-test('test intent: CLI lists only Go daemon sources and available optional package sources', () => {
+test('test intent: CLI lists only daemon sources and available optional package sources', () => {
   const root = repositoryRoot()
   const version = /<version>([^<]+)<\/version>/.exec(readFileSync(path.join(root, 'pom.xml'), 'utf8'))[1]
   const env = { ...process.env }

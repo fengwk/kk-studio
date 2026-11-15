@@ -1,7 +1,7 @@
 # kk-studio Daemon GitHub Release.
 #
-# 推送 `v*` tag 时发布 Go Environment Daemon 的多平台可运行发行归档及其校验和、确定性元数据
-# 与法律文件。发布前必须通过仓库质量门禁与 Go daemon CI，且 tag 必须落在 `main` 的历史上，
+# 推送 `v*` tag 时发布 Environment Daemon 的多平台可运行发行归档及其校验和、确定性元数据
+# 与法律文件。发布前必须通过仓库质量门禁与 Daemon CI，且 tag 必须落在 `main` 的历史上，
 # 确保发布物对应已经合入主分支、可精确追溯的提交。
 #
 # 上传只使用 workflow 自带的 `github.token`（`contents: write`），不使用 PAT，也不读取
@@ -45,7 +45,7 @@ env:
   RELEASE_PLATFORMS: linux-amd64 linux-arm64 macos-amd64 macos-arm64 windows-amd64
 
 jobs:
-  # Formal tag releases and Docker builds share the Go daemon CI gates. Manual dispatch remains
+  # Formal tag releases and Docker builds share the Daemon CI gates. Manual dispatch remains
   # a focused archive candidate: its script tests, staging and host smoke run without publishing.
   daemon_ci:
     name: Daemon CI
@@ -143,7 +143,7 @@ jobs:
         with:
           globs: scripts/daemon/tests/*.test.mjs scripts/dev/verify/repository/tests/check-version-alignment.test.mjs scripts/dev/verify/repository/tests/daemon-ci-contract.test.mjs scripts/dev/verify/repository/tests/workflow-action-pins.test.mjs scripts/dev/verify/repository/tests/workflow-validation-gates.test.mjs scripts/dev/verify/reliability/tests/daemon-entrypoint-contracts.test.mjs scripts/dev/verify/supply-chain/tests/supply-chain.test.mjs
 
-      # Go CI owns compilation and tests; release staging compiles each supported archive target.
+      # Daemon CI owns compilation and tests; release staging compiles each supported archive target.
       # 唯一资产暂存实现：按平台矩阵产出归档，每个平台写进 daemon/release/<os>-<arch>。
       - name: Stage release assets
         run: |

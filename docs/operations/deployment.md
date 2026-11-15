@@ -337,9 +337,9 @@ Daemon 不发布宿主端口，只经 `ws://app:8080/ws/daemon` 连接 App。
 `KK_STUDIO_DAEMON_ENVIRONMENT_NAME`）从 Studio 读取卡片，必要时把 `studioUrl` 修正为
 `http://app:8080`，写出 `{environmentId, version, daemonConfig}` 形式的
 `/workspace/.kk-studio/daemon.json`；注册凭证单独写入同目录的 `daemon.token`
-（目录 0700、文件 0600），随后直接启动 Go Daemon，并只传入
+（目录 0700、文件 0600），随后直接启动 Daemon，并只传入
 `--config /workspace/.kk-studio/daemon.json`。凭证文本既不进入 argv（`ps` 不可见），也不残留在
-`/proc/<pid>/environ`；Go Daemon 从配置的 `studioUrl` 派生 gateway。数据目录取配置文件的父目录。
+`/proc/<pid>/environ`；Daemon 从配置的 `studioUrl` 派生 gateway。数据目录取配置文件的父目录。
 相关入口环境变量为 `KK_STUDIO_DAEMON_STUDIO_URL`、`KK_STUDIO_DAEMON_ENVIRONMENT_ID` / `_NAME`、
 `KK_STUDIO_DAEMON_REGISTRATION_TOKEN`、可选的 `KK_STUDIO_DAEMON_ROOT` 与
 `KK_STUDIO_DAEMON_DIST`。
@@ -349,7 +349,7 @@ Daemon 不发布宿主端口，只经 `ws://app:8080/ws/daemon` 连接 App。
 24.21.0 builder 负责归档与 npm CLI 依赖准备。运行镜像基于 `debian:bookworm-slim`，安装 bash、
 ca-certificates、git、libstdc++，**不安装系统 Node 或 JRE**。唯一的 Node 二进制来自归档内冻结的
 code-server 运行时（`runtime/code-server/lib/node`，链接为 `/usr/local/bin/node`）；`npm`/`npx`
-包装脚本也使用该运行时。Go Daemon 位于 `/opt/kk-studio/daemon/kk-studio-daemon`，归档运行时和 IDE
+包装脚本也使用该运行时。Daemon 位于 `/opt/kk-studio/daemon/kk-studio-daemon`，归档运行时和 IDE
 扩展与二进制并列，容器用户为 uid/gid `10001`。Daemon 只挂载一个 `/workspace` named volume，
 `workspace-init` 完成 owner 初始化（`chown 10001:10001`）后才启动。
 
@@ -358,7 +358,7 @@ code-server 运行时（`runtime/code-server/lib/node`，链接为 `/usr/local/b
 
 - Daemon uid 不是 root（10001）；
 - mount 只有 `volume -> /workspace` 且可写、没有 bind mount，且恰好只有一个挂载卷；
-- Go Daemon 可执行，code-server Node 是归档内的冻结运行时，`rg`/`fd` 不存在，且**不含任何 JRE**；
+- Daemon 可执行，code-server Node 是归档内的冻结运行时，`rg`/`fd` 不存在，且**不含任何 JRE**；
 - workspace 可写、Environment `READY`；
 - Compose config 不含 provider credential 或 bind mount。
 

@@ -112,7 +112,7 @@ const report = {
             name: 'daemon-sbom',
             status: env.SUPPLY_CHAIN_DAEMON_SBOM_STATUS,
             artifact: null,
-            detail: 'SKIPPED: the Go Daemon is not an npm project',
+            detail: 'SKIPPED: the Daemon is not an npm project',
             log: null,
         },
         {
@@ -125,7 +125,7 @@ const report = {
             name: 'daemon-audit',
             status: env.SUPPLY_CHAIN_DAEMON_AUDIT_STATUS,
             artifact: null,
-            detail: 'SKIPPED: the Go Daemon is not an npm project',
+            detail: 'SKIPPED: the Daemon is not an npm project',
             log: null,
         },
         {
@@ -208,9 +208,9 @@ NODE
 | --- | --- | --- | --- |
 | Backend CycloneDX aggregate | $BACKEND_SBOM_STATUS | [backend-sbom/bom.json](backend-sbom/bom.json) | [logs/maven-sbom.log](logs/maven-sbom.log) |
 | Frontend CycloneDX | $FRONTEND_SBOM_STATUS | [frontend-sbom/bom.json](frontend-sbom/bom.json) | [logs/npm-sbom.log](logs/npm-sbom.log) |
-| Go Daemon npm SBOM (not applicable) | $DAEMON_SBOM_STATUS | — | — |
+| Daemon npm SBOM (not applicable) | $DAEMON_SBOM_STATUS | — | — |
 | npm audit (low) | $NPM_AUDIT_STATUS | [frontend-audit/audit.json](frontend-audit/audit.json) | [logs/npm-audit.log](logs/npm-audit.log) |
-| Go Daemon npm audit (not applicable) | $DAEMON_AUDIT_STATUS | — | — |
+| Daemon npm audit (not applicable) | $DAEMON_AUDIT_STATUS | — | — |
 | Maven Dependency-Check | $MAVEN_AUDIT_STATUS | [HTML](backend-audit/dependency-check-report.html), [JSON](backend-audit/dependency-check-report.json), [SARIF](backend-audit/dependency-check-report.sarif) | [logs/maven-audit.log](logs/maven-audit.log) |
 | App image build | $APP_IMAGE_BUILD_STATUS | \`$APP_IMAGE\` | [logs/app-image-build.log](logs/app-image-build.log) |
 | App image smoke | $APP_IMAGE_SMOKE_STATUS | \`$APP_IMAGE\` | [logs/app-image-smoke.log](logs/app-image-smoke.log) |
@@ -225,7 +225,7 @@ EOF
         local success_note
         case "$MODE" in
             sbom)
-                success_note="The backend and frontend CycloneDX reports are non-empty and parseable. A standalone Go Daemon SBOM is not produced by this gate."
+                success_note="The backend and frontend CycloneDX reports are non-empty and parseable. A standalone Daemon SBOM is not produced by this gate."
                 ;;
             audit)
                 success_note="The requested dependency audit checks completed successfully. npm audit reported no findings at the low threshold for the frontend, and Dependency-Check JSON contains zero non-suppressed vulnerabilities."
@@ -234,7 +234,7 @@ EOF
                 success_note="The requested image checks completed successfully. Both image functional smokes passed, and each Trivy report contains zero fixable HIGH/CRITICAL vulnerabilities."
                 ;;
             all)
-                success_note="All requested checks completed successfully. The generated SBOMs are valid, frontend npm audit and Maven Dependency-Check contain zero non-suppressed vulnerabilities, both image functional smokes passed, and each Trivy image report contains zero fixable HIGH/CRITICAL vulnerabilities. No standalone Go Daemon SBOM is produced by this gate."
+                success_note="All requested checks completed successfully. The generated SBOMs are valid, frontend npm audit and Maven Dependency-Check contain zero non-suppressed vulnerabilities, both image functional smokes passed, and each Trivy image report contains zero fixable HIGH/CRITICAL vulnerabilities. No standalone Daemon SBOM is produced by this gate."
                 ;;
             *)
                 success_note="All requested checks completed successfully."

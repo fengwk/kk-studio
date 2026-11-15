@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * Verify that the repository version is aligned: the root POM `<version>`, its
- * `kk-studio.version` property, the Go daemon version, the daemon IDE extension package version,
+ * `kk-studio.version` property, the daemon version, the daemon IDE extension package version,
  * the frontend package version and, when `RELEASE_TAG` is provided, the release tag must match.
  * No version is hard-coded here, so bumping the version never requires editing this script or the
  * workflow that runs it.
@@ -19,7 +19,7 @@ import { pathToFileURL } from 'node:url'
 
 import { repositoryRoot } from '../../lib/repo-root.mjs'
 
-const GO_DAEMON_VERSION_DECLARATION = /^var DaemonVersion\s*=\s*"([^"\r\n]+)"\s*$/gm
+const DAEMON_VERSION_DECLARATION = /^var DaemonVersion\s*=\s*"([^"\r\n]+)"\s*$/gm
 
 /** The text of the first `<name>` element, or throws when it is absent or blank. */
 function requiredText(xml, name, label) {
@@ -32,8 +32,8 @@ function requiredText(xml, name, label) {
 }
 
 /** 版本常量必须恰好声明一次字面量；缺失、重复或非字面量都无法可靠判定，直接失败。 */
-function requiredGoDaemonVersion(source) {
-  const matches = [...source.matchAll(GO_DAEMON_VERSION_DECLARATION)]
+function requiredDaemonVersion(source) {
+  const matches = [...source.matchAll(DAEMON_VERSION_DECLARATION)]
   if (matches.length !== 1) {
     throw new Error('cannot read exactly one literal DaemonVersion declaration from daemon/internal/config/version.go')
   }
@@ -41,7 +41,7 @@ function requiredGoDaemonVersion(source) {
 }
 
 /** 返回 `{ expected, mismatches }`；未提供 tag 时只比较仓库内部版本。 */
-export function checkAlignment({ pomXml, ideExtensionPackageJson, frontendPackageJson, goConfig, tag }) {
+export function checkAlignment({ pomXml, ideExtensionPackageJson, frontendPackageJson, daemonConfig, tag }) {
   // The project's own coordinates come before its dependencies; the parent block carries a different version.
   const withoutParent = pomXml.replace(/<!--[\s\S]*?-->/g, '').replace(/<parent>[\s\S]*?<\/parent>/, '')
   const expected = requiredText(withoutParent, 'version', 'the root <version>')
@@ -65,10 +65,10 @@ export function checkAlignment({ pomXml, ideExtensionPackageJson, frontendPackag
     }
     sources['frontend/package.json version'] = frontendVersion.trim()
   }
-  if (goConfig === undefined) {
-    throw new Error('cannot read Go daemon version from daemon/internal/config/version.go')
+  if (daemonConfig === undefined) {
+    throw new Error('cannot read the daemon version from daemon/internal/config/version.go')
   }
-  sources['daemon/internal/config/version.go DaemonVersion'] = requiredGoDaemonVersion(goConfig)
+  sources['daemon/internal/config/version.go DaemonVersion'] = requiredDaemonVersion(daemonConfig)
   if (tag !== undefined) {
     if (typeof tag !== 'string' || !/^v[0-9A-Za-z._+-]+$/.test(tag) || tag === 'v') {
       throw new Error(`invalid RELEASE_TAG ${JSON.stringify(tag)}`)
@@ -97,13 +97,13 @@ export function main(root = repositoryRoot(), tag = process.env.RELEASE_TAG) {
       ? readFileSync(frontendPath, 'utf8')
       : undefined
     frontendChecked = frontendPackageJson !== undefined
-    const goDaemonPath = path.join(root, 'daemon/internal/config/version.go')
-    const goConfig = readFileSync(goDaemonPath, 'utf8')
+    const daemonVersionPath = path.join(root, 'daemon/internal/config/version.go')
+    const daemonConfig = readFileSync(daemonVersionPath, 'utf8')
     result = checkAlignment({
       pomXml: readFileSync(path.join(root, 'pom.xml'), 'utf8'),
       ideExtensionPackageJson,
       frontendPackageJson,
-      goConfig,
+      daemonConfig,
       tag,
     })
   } catch (error) {

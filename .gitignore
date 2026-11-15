@@ -6,7 +6,7 @@
 hs_err_pid*
 target/
 
-# Go daemon build and release outputs
+# Daemon build and release outputs
 /daemon/kk-studio-daemon
 /daemon/kk-studio-daemon.exe
 /daemon/release/

@@ -1,4 +1,4 @@
-/** Permanent guards for the reliability stack's Go daemon bootstrap and token boundary. */
+/** Permanent guards for the reliability stack's Daemon bootstrap and token boundary. */
 
 import assert from 'node:assert/strict'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
@@ -90,7 +90,7 @@ test('test intent: compose injects only environment; the entrypoint materializes
   assert.ok(compose.includes('daemon-workspace:/workspace'))
 })
 
-test('test intent: the daemon image runs a Go executable with the bundled code-server runtime', () => {
+test('test intent: the daemon image runs the Daemon executable with the bundled code-server runtime', () => {
   // The daemon is static Go; its Node dependency belongs only to the bundled code-server runtime.
   const dockerfile = text(RELIABILITY_DOCKERFILE)
 
@@ -102,7 +102,7 @@ test('test intent: the daemon image runs a Go executable with the bundled code-s
     '配置 helper 只能被 COPY 一次',
   )
   assert.ok(dockerfile.includes('/usr/local/bin/daemon-config-cache.mjs'))
-  // The distribution is produced by the shared archive builder and contains the Go daemon directly.
+  // The distribution is produced by the shared archive builder and contains the daemon directly.
   assert.ok(dockerfile.includes('scripts/daemon/prepare-release.sh'))
   assert.ok(dockerfile.includes('/distribution/kk-studio-daemon'))
   assert.ok(dockerfile.includes('runtime/code-server/lib/node'))
@@ -121,14 +121,14 @@ test('test intent: runtime user creation uses absolute system commands', () => {
   assert.ok(runtime.includes('/usr/sbin/useradd --uid 10001'))
 })
 
-test('test intent: reliability inspection and smoke validate the Go daemon distribution', () => {
+test('test intent: reliability inspection and smoke validate the Daemon distribution', () => {
   const stack = text(RELIABILITY_STACK)
   assert.ok(stack.includes('/opt/kk-studio/daemon/kk-studio-daemon'))
   assert.ok(stack.includes('/opt/kk-studio/daemon/runtime/code-server/out/node/entry.js'))
   assert.ok(stack.includes('--check-config /workspace/.kk-studio/daemon.json'))
 })
 
-test('test intent: the entrypoint launches the Go executable with --config only', async () => {
+test('test intent: the entrypoint launches the Daemon executable with --config only', async () => {
   const server = await startCardServer({ name: 'docker-reliability', version: '0', daemonConfig: DAEMON_CONFIG })
   try {
     await withTempDir(async (temporary) => {
@@ -264,7 +264,7 @@ test('test intent: the entrypoint rejects a relative root', async () => {
   assert.ok(result.stderr.includes('absolute'))
 })
 
-test('test intent: a distribution without the Go daemon or bundled runtime is rejected', async () => {
+test('test intent: a distribution without the daemon or bundled runtime is rejected', async () => {
   for (const missing of ['kk-studio-daemon', 'runtime/code-server/lib/node']) {
     await withTempDir(async (temporary) => {
       const { dist } = writeGoDist(temporary)

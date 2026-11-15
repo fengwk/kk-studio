@@ -18,7 +18,7 @@ const install = readFileSync(path.join(root, 'scripts/daemon/install.sh'), 'utf8
 const windowsInstall = readFileSync(path.join(root, 'scripts/daemon/install.ps1'), 'utf8')
 const smoke = readFileSync(path.join(root, 'scripts/daemon/smoke-archive.sh'), 'utf8')
 
-test('Go daemon CI builds all six static targets and is reusable by release and Docker workflows', () => {
+test('daemon CI builds all six static targets and is reusable by release and Docker workflows', () => {
   assert.match(goCi, /workflow_call:/)
   assert.match(goCi, /POSTGRES_VERSION: '17'/)
   assert.match(goCi, /go test -json \.\/\.\.\./)
@@ -33,7 +33,7 @@ test('Go daemon CI builds all six static targets and is reusable by release and 
   assert.match(docker, /uses: \.\/\.github\/workflows\/daemon-ci\.yml/)
 })
 
-test('Go CI watches its script suites and local composite actions for both push and pull requests', () => {
+test('Daemon CI watches its script suites and local composite actions for both push and pull requests', () => {
   for (const dependency of [
     'scripts/dev/lib/**',
     'scripts/dev/verify/reliability/**',
@@ -49,19 +49,19 @@ test('release history scanning requires the preceding release tag as its baselin
   assert.match(release, /--remote-pr --fail-on-high --baseline "\$\{previous\}"/)
 })
 
-test('reusable Go CI runs the bundled IDE extension contract tests', () => {
+test('reusable Daemon CI runs the bundled IDE extension contract tests', () => {
   assert.match(goCi, /- name: Test IDE bridge extension\n\s+run: node --test daemon\/ide-extension\/extension\.test\.cjs/)
 })
 
-test('reusable Go CI exercises Jetty interoperability with the Go daemon binary', () => {
+test('reusable Daemon CI exercises Jetty interoperability with the Daemon binary', () => {
   assert.match(goCi, /jetty-interop:/)
   assert.match(goCi, /actions\/setup-go@/)
   assert.match(goCi, /DaemonCrossLanguageIntegrationTest#dataPlaneRoutingHttpAndExtendedConnectReturn404ForNonexistentView/)
-  assert.match(javaInterop, /GoDaemonBinary\.build\(repoRoot\(\)/)
+  assert.match(javaInterop, /DaemonBinary\.build\(repoRoot\(\)/)
   assert.doesNotMatch(goCi, /DAEMON_BINARY/)
 })
 
-test('release dispatch stages Go archives and cannot publish', () => {
+test('release dispatch stages release archives and cannot publish', () => {
   assert.match(release, /GO_BIN: go/)
   assert.match(release, /workflow_dispatch:/)
   assert.match(release, /daemon\/release/)
@@ -69,7 +69,7 @@ test('release dispatch stages Go archives and cannot publish', () => {
   assert.doesNotMatch(release, /daemon-ci\.yml/)
 })
 
-test('release staging builds the Go executable and packages updater-compatible runtime layout', () => {
+test('release staging builds the Daemon executable and packages updater-compatible runtime layout', () => {
   assert.match(prepare, /GOOS="\$goos" GOARCH="\$arch" CGO_ENABLED=0/)
   assert.match(prepare, /-trimpath/)
   assert.match(prepare, /-ldflags/)
@@ -82,7 +82,7 @@ test('release staging builds the Go executable and packages updater-compatible r
   assert.doesNotMatch(prepare, /node_modules|@vscode\/ripgrep/)
 })
 
-test('Unix and Windows installers execute the Go binary and internal lock helper', () => {
+test('Unix and Windows installers execute the Daemon binary and internal lock helper', () => {
   assert.match(install, /__lock-helper hold/)
   assert.match(install, /__lock-helper wait/)
   assert.match(install, /--config/)
@@ -93,7 +93,7 @@ test('Unix and Windows installers execute the Go binary and internal lock helper
   assert.ok(windowsInstall.includes(String.raw`runtime\code-server\lib\node.exe`))
 })
 
-test('archive smoke verifies the Go executable and bundled IDE runtime', () => {
+test('archive smoke verifies the Daemon executable and bundled IDE runtime', () => {
   assert.match(smoke, /kk-studio-daemon/)
   assert.match(smoke, /runtime\/code-server\/out\/node\/entry\.js/)
   assert.match(smoke, /ide-extension\/extension\.cjs/)

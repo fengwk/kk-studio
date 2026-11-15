@@ -6,13 +6,13 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
 
-/** Builds and inspects the production Go daemon for process-level integration tests. */
-public final class GoDaemonBinary {
+/** Builds and inspects the production daemon for process-level integration tests. */
+public final class DaemonBinary {
 
   private static final Duration COMMAND_TIMEOUT = Duration.ofSeconds(120);
   private static final String REQUIRED_GO_VERSION = "go1.27.4";
 
-  private GoDaemonBinary() {}
+  private DaemonBinary() {}
 
   public static Path build(Path repositoryRoot, Path output) throws IOException {
     String configured = System.getProperty("go.bin");
@@ -40,15 +40,15 @@ public final class GoDaemonBinary {
     try {
       if (!process.waitFor(COMMAND_TIMEOUT.toMillis(), TimeUnit.MILLISECONDS)) {
         process.destroyForcibly();
-        throw new IllegalStateException("Go daemon build timed out after " + COMMAND_TIMEOUT);
+        throw new IllegalStateException("daemon build timed out after " + COMMAND_TIMEOUT);
       }
       if (process.exitValue() != 0) {
-        throw new IllegalStateException("Go daemon build failed: " + Files.readString(log));
+        throw new IllegalStateException("daemon build failed: " + Files.readString(log));
       }
       return output;
     } catch (InterruptedException interrupted) {
       Thread.currentThread().interrupt();
-      throw new IllegalStateException("interrupted while building Go daemon", interrupted);
+      throw new IllegalStateException("interrupted while building daemon", interrupted);
     } finally {
       Files.deleteIfExists(log);
     }

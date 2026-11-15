@@ -6,7 +6,7 @@
  * shipped `install.ps1` so per-card isolation, the operation-lock helper, update-without-config
  * and stop/publication ordering stay verifiable everywhere.
  *
- * The release workflow executes the actual Windows Go archive on a Windows host; these source
+ * The release workflow executes the actual Windows release archive on a Windows host; these source
  * contracts keep installer ownership, permissions and direct Go-daemon argv behavior verifiable on
  * every development host.
  */
@@ -61,7 +61,7 @@ describe('Windows installer surface: public entry, UUID helper and PowerShell 5.
       'daemon.json, daemon.token, daemon.lock, install.lock, lib, ide, skills, .work',
       'last-operation.json',
       'install.lock',
-      'static Go daemon executable',
+      'static Daemon executable',
       'no mutable "latest" release',
       'no backup',
       'no automatic rollback',
@@ -93,7 +93,7 @@ describe('Windows installer surface: public entry, UUID helper and PowerShell 5.
     assert.ok(!scriptText().includes('releases/latest'))
   })
 
-  it('needs no user JRE or Node to execute the Go daemon', () => {
+  it('needs no user JRE or Node to execute the daemon', () => {
     const text = scriptText()
     assert.ok(!text.includes('Get-Command "node.exe"'))
     assert.ok(text.includes('kk-studio-daemon.exe'))
@@ -230,7 +230,7 @@ describe('Windows installer security: card isolation, credentials and task owner
     assertIncludesNone(body, ['Stop-ScheduledTask', 'Unregister-ScheduledTask', 'Remove-Item', 'Register-ScheduledTask'])
   })
 
-  it('executes the Go daemon directly in the scheduled action, without wrapper or redirection', () => {
+  it('executes the daemon directly in the scheduled action, without wrapper or redirection', () => {
     const body = functionBody('New-DaemonScheduledTaskDefinition')
     assertIncludesAll(body, [
       'New-ScheduledTaskAction -Execute $DaemonExecutable',
@@ -256,7 +256,7 @@ describe('Windows installer security: card isolation, credentials and task owner
     assertIncludesNone(serializer, ['notmatch', 'return $Argument'])
   })
 
-  it('passes the config path directly to the Go executable without a wrapper', () => {
+  it('passes the config path directly to the Daemon executable without a wrapper', () => {
     assertIncludesAll(functionBody('New-DaemonArgumentList'), ['return @("--config", $script:InstalledConfig)'])
     assertIncludesNone(functionBody('New-DaemonArgumentList'), ['ToBase64String'])
     assertIncludesAll(functionBody('Invoke-InstallCommon'), ['-WorkingDirectory $script:InstalledLib', '-DaemonExecutable $script:InstalledDaemon'])
@@ -278,7 +278,7 @@ describe('Windows installer security: card isolation, credentials and task owner
     )
   })
 
-  it('unpacks the Go archive privately and verifies its daemon and runtime layout', () => {
+  it('unpacks the release archive privately and verifies its daemon and runtime layout', () => {
     const body = functionBody('Assert-DownloadedArchive')
     assertIncludesAll(body, [
       'Get-Command "tar.exe"',
@@ -470,7 +470,7 @@ describe('Windows installer lifecycle: validation and lock ownership precede eve
   })
 })
 
-test('Windows installer fails closed on missing archive members and directly launches the Go executable', () => {
+test('Windows installer fails closed on missing archive members and directly launches the Daemon executable', () => {
   const archive = functionBody('Assert-DownloadedArchive')
   assertIncludesAll(archive, [
     'kk-studio-daemon.exe',

@@ -104,7 +104,7 @@ test('test intent: the E2E seed pre-seeds exactly five disposable Environments a
   assert.ok(!match[0].includes('11111111-1111-1111-1111-111111111111'))
 })
 
-test('test intent: bootstrap materializes the card cache and launches the Go binary with --config only', async () => {
+test('test intent: bootstrap materializes the card cache and launches the Daemon binary with --config only', async () => {
   const lib = readText(E2E_LIB_SH)
   const bootstrap = readText(BOOTSTRAP)
 

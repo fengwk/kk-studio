@@ -1,6 +1,6 @@
 package fun.fengwk.kkstudio.web.environment.ide;
 
-import fun.fengwk.kkstudio.web.environment.GoDaemonBinary;
+import fun.fengwk.kkstudio.web.environment.DaemonBinary;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -21,9 +21,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 /**
- * 生产 Go Daemon 子进程夹具：私有临时发行根 + 临时构建的真实 Go 二进制。
+ * 生产 Daemon 子进程夹具：私有临时发行根 + 临时构建的真实 Go 二进制。
  *
- * <p>Go Daemon 从可执行文件的父目录解析发行根。临时发行根包含 daemon 二进制、IDE 扩展副本，以及指向只读 code-server 产物的 {@code
+ * <p>Daemon 从可执行文件的父目录解析发行根。临时发行根包含 daemon 二进制、IDE 扩展副本，以及指向只读 code-server 产物的 {@code
  * runtime/code-server} 软链。
  *
  * <p>注册凭据只写进临时数据目录的 {@code daemon.token}（0600），进程 stdout/stderr 落在工作区 {@code records} 目录（0700）内的
@@ -106,7 +106,7 @@ final class ProductionDaemonFixture implements AutoCloseable {
           System.getProperty("os.name").toLowerCase().contains("win")
               ? "kk-studio-daemon.exe"
               : "kk-studio-daemon";
-      Path daemonBinary = GoDaemonBinary.build(repoRoot, distributionDir.resolve(binaryName));
+      Path daemonBinary = DaemonBinary.build(repoRoot, distributionDir.resolve(binaryName));
       copyTree(
           repoRoot.resolve("daemon").resolve("ide-extension"),
           distributionDir.resolve("ide-extension"));

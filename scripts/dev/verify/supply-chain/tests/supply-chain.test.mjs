@@ -544,7 +544,7 @@ test('honors a custom report root and publishes timestamped and latest reports',
         assert.equal(summary.checks.find(check => check.name === 'daemon-sbom').artifact, null)
         const summaryMarkdown = readFileSync(path.join(reportRoot, 'latest/summary.md'), 'utf8')
         assert.match(summaryMarkdown, /backend and frontend CycloneDX reports are non-empty/i)
-        assert.match(summaryMarkdown, /standalone Go Daemon SBOM is not produced/i)
+        assert.match(summaryMarkdown, /standalone Daemon SBOM is not produced/i)
         assert.doesNotMatch(summaryMarkdown, /Dependency-Check JSON contains zero/)
         assert.doesNotMatch(summaryMarkdown, /image functional smokes passed/)
     } finally {

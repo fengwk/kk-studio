@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # scripts/dev/verify/e2e/lib/daemon-bootstrap.sh
 #
-# 在隔离的 DAEMON_ROOT 下物化唯一 daemon.json 本地缓存与同目录 daemon.token，然后启动 Go Daemon 二进制。
+# 在隔离的 DAEMON_ROOT 下物化唯一 daemon.json 本地缓存与同目录 daemon.token，然后启动 Daemon 二进制。
 #
 # daemon.json 固定为 {environmentId,version:string,daemonConfig:{studioUrl,bashExecutable,lsp,proxyUrl}}：
 # 卡片由 DAEMON_ENVIRONMENT_ID 或 DAEMON_ENVIRONMENT_NAME 定位，Studio 数据库是配置权威；若卡片
@@ -17,7 +17,7 @@ root=${DAEMON_ROOT:?DAEMON_ROOT (absolute daemon root) is required}
 studio_url=${DAEMON_STUDIO_URL:?DAEMON_STUDIO_URL (http(s) origin) is required}
 environment_id=${DAEMON_ENVIRONMENT_ID:-}
 environment_name=${DAEMON_ENVIRONMENT_NAME:-}
-daemon_binary=${DAEMON_BINARY:?DAEMON_BINARY (absolute Go daemon executable) is required}
+daemon_binary=${DAEMON_BINARY:?DAEMON_BINARY (absolute Daemon executable) is required}
 node_bin=${DAEMON_NODE:-node}
 
 # 凭证先取出再立即从环境移除；daemon 只通过同目录文件读取。
@@ -44,7 +44,7 @@ command -v "$node_bin" >/dev/null 2>&1 || {
   exit 1
 }
 if [ ! -x "$daemon_binary" ]; then
-  echo "ERROR: Go daemon binary is missing or not executable: $daemon_binary" >&2
+  echo "ERROR: Daemon binary is missing or not executable: $daemon_binary" >&2
   exit 1
 fi
 if [ ! -f "$config_helper" ]; then

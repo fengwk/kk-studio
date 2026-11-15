@@ -14,7 +14,7 @@ function jobBlock(text, name) {
   return match[1]
 }
 
-test('Go daemon CI owns the release script suite and is reusable', () => {
+test('daemon CI owns the release script suite and is reusable', () => {
   const ci = workflow('daemon-ci.yml')
   assert.match(ci, /^  workflow_call:/m)
   const quality = jobBlock(ci, 'quality')
@@ -38,7 +38,7 @@ test('release staging runs the script suite and host smoke includes Windows', ()
   assert.ok(smoke.includes('smoke-archive.ps1'))
 })
 
-test('Docker publishing waits for reusable Go Daemon CI before publishing', () => {
+test('Docker publishing waits for reusable Daemon CI before publishing', () => {
   const docker = workflow('docker-publish.yml')
   assert.ok(jobBlock(docker, 'daemon_ci').includes('./.github/workflows/daemon-ci.yml'))
   const publish = jobBlock(docker, 'publish')

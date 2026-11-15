@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Official-release-only, per-environment installer for the Go Environment Daemon.
+# Official-release-only, per-environment installer for the Environment Daemon.
 # One installation is one Studio card: every managed path and OS service is scoped by its
 # canonical environment UUID. Bash 3.2 / GNU and BSD utilities. JSON semantics belong to the
 # downloaded daemon preflight; this script enforces the installation envelope only.
@@ -465,7 +465,7 @@ extract_release() {
   mkdir -p "$BOOTSTRAP_DIR/extract"
   tar -xzf "$DOWNLOADED_ARCHIVE" -C "$BOOTSTRAP_DIR/extract" || fail "校验失败：发行归档无法解包。"
   STAGED_BINARY="$BOOTSTRAP_DIR/extract/kk-studio-daemon"
-  [ -x "$STAGED_BINARY" ] || fail "校验失败：发行归档缺少 Go daemon。"
+  [ -x "$STAGED_BINARY" ] || fail "校验失败：发行归档缺少 Daemon 可执行文件。"
   [ -f "$BOOTSTRAP_DIR/extract/runtime/code-server/out/node/entry.js" ] ||
     fail "校验失败：发行归档缺少 code-server 入口。"
   [ -f "$BOOTSTRAP_DIR/extract/runtime-manifest.json" ] || fail "校验失败：发行归档缺少运行时清单。"

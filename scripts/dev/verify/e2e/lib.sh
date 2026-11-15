@@ -212,7 +212,7 @@ package_daemon() {
   )
   rm -rf "$DAEMON_DIST/ide-extension"
   cp -R "$REPO_ROOT/daemon/ide-extension" "$DAEMON_DIST/ide-extension"
-  [ -x "$DAEMON_BINARY" ] || die "Go daemon binary missing: $DAEMON_BINARY"
+  [ -x "$DAEMON_BINARY" ] || die "daemon binary missing: $DAEMON_BINARY"
 }
 
 ensure_s3_storage() {
