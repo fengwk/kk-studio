@@ -120,7 +120,7 @@ func (r *InstallerRunner) prepare(ctx context.Context, command Command, daemonCo
 	if !canonicalEnvironmentID.MatchString(daemonConfig.EnvironmentID) {
 		return Outcome{}, errors.New("the daemon configuration has no canonical environment identity")
 	}
-	if err := requireUpdatePlatform(r.options.Platform, r.options.Architecture); err != nil {
+	if _, err := config.ReleaseKey(r.options.Platform, r.options.Architecture); err != nil {
 		return Outcome{}, err
 	}
 	installerConfig := InstallerConfig{
@@ -258,17 +258,6 @@ func preparedOutcome(work, environmentRoot string, command Command) Outcome {
 			return watchFailure(lastOperation, command.OperationID, reportFailure)
 		},
 	}
-}
-
-func requireUpdatePlatform(platform, architecture string) error {
-	key, err := config.ReleaseKey(platform, architecture)
-	if err != nil {
-		return err
-	}
-	if key == "windows-arm64" {
-		return errors.New("platform is not covered by the official release matrix")
-	}
-	return nil
 }
 
 func managedEnvironmentRoot(home, environmentID string) string {

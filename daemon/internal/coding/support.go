@@ -124,8 +124,6 @@ func classifySearchError(err error) error {
 	case strings.HasPrefix(lower, "invalid glob:"):
 		diagnostic := strings.TrimSpace(message[len("invalid glob:"):])
 		return rejectInput("Invalid glob: " + diagnostic)
-	case lower == "root is not a directory":
-		return rejectInput("path is not a directory")
 	default:
 		return failRun("search failed; results are incomplete", "FAILED")
 	}

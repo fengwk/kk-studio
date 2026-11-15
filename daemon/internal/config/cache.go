@@ -56,7 +56,7 @@ func appendLSPCache(output *bytes.Buffer, servers []LSPServerConfig) error {
 	return nil
 }
 
-// appendLSPServerCache writes one server entry, omitting empty marker and extension lists.
+// appendLSPServerCache writes the required command/extensions and omits empty marker lists.
 func appendLSPServerCache(output *bytes.Buffer, server LSPServerConfig) error {
 	if err := appendJSON(output, server.ID); err != nil {
 		return err
@@ -65,10 +65,14 @@ func appendLSPServerCache(output *bytes.Buffer, server LSPServerConfig) error {
 	if err := appendJSON(output, server.Command); err != nil {
 		return err
 	}
+	output.WriteString(`,"extensions":`)
+	if err := appendJSON(output, server.Extensions); err != nil {
+		return err
+	}
 	for _, field := range []struct {
 		name   string
 		values []string
-	}{{"extensions", server.Extensions}, {"rootMarkers", server.RootMarkers}, {"firstMatchMarkers", server.FirstMatchMarkers}} {
+	}{{"rootMarkers", server.RootMarkers}, {"firstMatchMarkers", server.FirstMatchMarkers}} {
 		if len(field.values) == 0 {
 			continue
 		}

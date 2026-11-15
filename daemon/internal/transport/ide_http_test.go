@@ -74,13 +74,13 @@ func TestHandleIDE_ResolutionAndRouteErrors(t *testing.T) {
 		{"bad route", "/ide/not-a-uuid/1", nil, http.StatusBadRequest},
 		{"missing resolver", "/ide/" + ideTestID + "/1/", nil, http.StatusServiceUnavailable},
 		{"gone", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
-			return ViewUpstream{}, fmt.Errorf("VIEW_GONE")
+			return ViewUpstream{}, fmt.Errorf("resolve view: %w", codedViewResolutionError{code: "VIEW_GONE"})
 		}), http.StatusNotFound},
 		{"gone with safe message", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
 			return ViewUpstream{}, codedViewResolutionError{code: "VIEW_GONE"}
 		}), http.StatusNotFound},
 		{"unavailable", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {
-			return ViewUpstream{}, fmt.Errorf("UNAVAILABLE")
+			return ViewUpstream{}, fmt.Errorf("resolve view: %w", codedViewResolutionError{code: "UNAVAILABLE"})
 		}), http.StatusServiceUnavailable},
 		{"resolution failure", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) { return ViewUpstream{}, fmt.Errorf("other") }), http.StatusBadGateway},
 		{"invalid upstream", "/ide/" + ideTestID + "/1/", viewResolverFunc(func(context.Context, ViewRequest) (ViewUpstream, error) {

@@ -98,7 +98,7 @@ func failedIDEResult(code, message string) *protocol.IdeResult {
 }
 
 func (r *Runtime) sendIDEResultFor(active *activeConnection, invocationID string, result *protocol.IdeResult) error {
-	if err := r.gate.RequireReadyFrame(); err != nil {
+	if err := r.gate.RequireReady(); err != nil {
 		return err
 	}
 	frame := &protocol.Envelope{
