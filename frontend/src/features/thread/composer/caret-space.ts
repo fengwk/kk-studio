@@ -17,7 +17,7 @@ export { isCaretSlot, isPillElement, mergeAdjacentTextNodes, slotLogicalText, st
  */
 
 /** 把 slot 的子树提升到父级（逻辑文本不变），用于离开 pill 边界的 slot。 */
-export function unwrapCaretSlot(root: HTMLElement, slot: HTMLElement): void {
+function unwrapCaretSlot(root: HTMLElement, slot: HTMLElement): void {
   const parent = slot.parentNode
   if (!parent) {
     slot.remove()
@@ -254,7 +254,7 @@ export function placeCaretAtLogicalOffset(root: HTMLElement, offset: number): vo
   applyCaretPoint(root, caretPointAt(root, offset))
 }
 
-export function logicalTextOf(node: Node): string {
+function logicalTextOf(node: Node): string {
   if (node.nodeType === Node.TEXT_NODE) {
     return node.textContent ?? ''
   }

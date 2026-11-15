@@ -21,7 +21,6 @@ export {
   boundProcessOutputText,
   isProcessOutputPartial,
   parseProcessOutputDetails,
-  type ProcessOutputDetails,
 } from '@/features/thread/runtime/thread-realtime/process-output-stream'
 
 interface RealtimeToolPartial {

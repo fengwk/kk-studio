@@ -12,7 +12,7 @@ export interface CreateMcpServerFormState {
 }
 
 /** headers 从不回读；这里只记录“已配置”的事实与脏检查所需的已加载快照。 */
-export interface LoadedMcpServerForm {
+interface LoadedMcpServerForm {
   url: string
   enabled: boolean
   timeoutMillis: string

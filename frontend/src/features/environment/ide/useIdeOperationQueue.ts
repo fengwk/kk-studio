@@ -50,5 +50,5 @@ export function useIdeOperationQueue(
     operationQueueRef.current = []
   }
 
-  return { bindingRef, operationQueueRef, runExclusive, invalidateOperations }
+  return { runExclusive, invalidateOperations }
 }

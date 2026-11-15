@@ -19,7 +19,6 @@ import { createWorkerHasher, mediaKindOf, validateUploadFile, type HashFile } fr
 export type {
   AttachmentUpload,
   AttachmentUploadError,
-  AttachmentUploadStatus,
 } from '@/features/thread/composer/attachment-uploads'
 export {
   canSubmitParts,

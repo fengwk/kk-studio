@@ -178,7 +178,7 @@ export function useRootThreadControl({
     localDraftEdited,
     setLocalDraftEdited,
     localDraftRef,
-  } = useLocalBranchDraft({ target, agents, environments, defaults, models })
+  } = useLocalBranchDraft({ target, agents, defaults, models })
 
   const activeDraft = isBoundTarget(target) ? branchPanel.draft ?? null : localDraft
   const boundThreadName = isBoundTarget(target) && controller.thread?.threadId === target.threadId

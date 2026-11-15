@@ -5,7 +5,6 @@ import {
   serializeSelectionText,
 } from '@/features/thread/composer/composer-dom'
 import {
-  canNavigateHistoryFromCaret,
   clipboardFiles,
   normalizePastedText,
 } from '@/features/thread/runtime/thread-panel/composer-editor-dom'
@@ -111,5 +110,3 @@ export function useComposerClipboard({
 
   return { handlePaste, handleDrop, handleCopy, handleCut }
 }
-
-export { canNavigateHistoryFromCaret }

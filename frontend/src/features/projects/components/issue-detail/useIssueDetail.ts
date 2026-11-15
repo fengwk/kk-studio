@@ -145,5 +145,3 @@ export function useIssueDetail({
     evidence,
   }
 }
-
-export type IssueDetailState = ReturnType<typeof useIssueDetail>

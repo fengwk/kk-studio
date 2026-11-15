@@ -32,9 +32,6 @@ import type { AgentDTO, ChatDTO, EnvironmentDTO } from '@/shared/api/generated/c
 import type { PaneReport } from '@/features/thread/runtime/root-thread/types'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane'
 
-// 布局选择器有自己的模块；路由页面仍作为导入入口，避免破坏既有引用方。
-export { ChatLayoutSelector, type ChatLayoutSelectorProps } from '@/features/chat/ChatLayoutSelector'
-
 interface ChatWorkspaceContentProps {
   chat: ChatDTO
   agents: AgentDTO[]

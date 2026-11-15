@@ -15,7 +15,7 @@ import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/use
 import { useI18n } from '@/shared/i18n'
 import './thread-conversation.css'
 
-export type { DebugViewTab, ThreadEventViewProps } from '@/features/thread/runtime/thread-panel/thread-debug-view'
+export type { ThreadEventViewProps } from '@/features/thread/runtime/thread-panel/thread-debug-view'
 
 /**
  * Debug 主视图：支持 3 区响应式布局。

@@ -27,7 +27,7 @@ import type {
 } from '@/shared/api/generated/contracts'
 
 /** 面板需要展示的本地未决记录异常，按 nodeId 索引。 */
-export type LocalPendingErrors = Record<string, { message: string; raw: string | null }>
+type LocalPendingErrors = Record<string, { message: string; raw: string | null }>
 
 export interface FunctionRunActions {
   startFunctionRun: (nodeId: string) => Promise<void>

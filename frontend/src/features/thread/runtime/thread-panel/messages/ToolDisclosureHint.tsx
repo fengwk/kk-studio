@@ -1,5 +1,4 @@
 import type { ReactNode } from 'react'
-import { CircleX } from 'lucide-react'
 import { disclosureHint } from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
 import type {
   DisclosureEdge,
@@ -41,28 +40,4 @@ export function DisclosureHint({
     return button
   }
   return placement === 'before' ? <>{button}{children}</> : <>{children}{button}</>
-}
-
-/** 固定可见的失败摘要块：正文已含同一文本时不渲染（由调用方判断）。 */
-export function ToolErrorBlock({
-  errorWindow,
-  onExpand,
-}: {
-  errorWindow: TextDisclosure
-  onExpand: (element: HTMLElement) => void
-}) {
-  return (
-    <div className="thread-disclosure-error thread-tool-error">
-      <CircleX className="thread-disclosure-error-icon" size={12} aria-hidden="true" />
-      <div>
-        <p className="thread-disclosure-error-text">{errorWindow.text}</p>
-        <DisclosureHint
-          disclosure={errorWindow}
-          edge="start"
-          onExpand={onExpand}
-          placement="after"
-        />
-      </div>
-    </div>
-  )
 }

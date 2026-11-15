@@ -22,7 +22,7 @@ export interface ThreadComposerModelOption {
   } | null
 }
 
-export interface ThreadComposerEnvironmentOption {
+interface ThreadComposerEnvironmentOption {
   name: string
 }
 

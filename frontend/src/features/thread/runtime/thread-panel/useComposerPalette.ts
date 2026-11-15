@@ -9,7 +9,7 @@ import type { ThreadComposerControlMenu } from '@/features/thread/runtime/thread
 import type { ComposerPart } from '@/features/thread/composer/composer-parts'
 
 /** 命令表的可见形态：menu 由 plus 按钮打开，slash 由草稿的 slash 查询打开。 */
-export type ComposerPaletteMode = 'menu' | 'slash' | null
+type ComposerPaletteMode = 'menu' | 'slash' | null
 
 interface ComposerPaletteOptions {
   active: boolean

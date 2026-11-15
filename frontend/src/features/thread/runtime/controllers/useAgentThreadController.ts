@@ -30,8 +30,6 @@ import {
   type ConflictPresentation,
 } from '@/shared/conflict/conflict-presenter'
 
-export { retireStaleStopPending } from '@/features/thread/runtime/thread-draft/useThreadStopOperation'
-
 function errorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message
