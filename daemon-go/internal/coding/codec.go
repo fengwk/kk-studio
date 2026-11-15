@@ -170,6 +170,12 @@ func wideByteOrder(name string) (string, bool) {
 // rewrites: a byte order mark stays authoritative, and otherwise the declaration of the result
 // has to resolve to the original encoding.
 func encodeEditContent(path string, existing textcodec.Encoding, content string) ([]byte, error) {
+	// A leading U+FEFF in a file that has no byte order mark would be written as the UTF-8 byte
+	// order mark, so the character would vanish from the text and the file would gain a BOM.
+	// Files that already have one keep the character: it round-trips as content after their BOM.
+	if !existing.BOM && strings.HasPrefix(content, bomRequest) {
+		return nil, failCodec(fmt.Sprintf("This change would add a byte order mark to %s: a leading U+FEFF is written as the UTF-8 byte order mark and then disappears from the text. Remove the leading U+FEFF; edit keeps the file's encoding.", filepath.ToSlash(path)))
+	}
 	declared, hasDeclaration, err := textcodec.Declared(path, []byte(content))
 	if err != nil {
 		return nil, codecError(path, err, codecEdit)

@@ -211,6 +211,38 @@ func TestWriteDisclosesLossyDecode(t *testing.T) {
 	}
 }
 
+// Content identical to the decoded file changes nothing, so the write is refused before it runs.
+// A lossy file makes this reachable: its decoded text round-trips to different bytes.
+func TestWriteRejectsContentIdenticalToDecodedFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lossy.txt")
+	if err := os.WriteFile(path, []byte("bad: \xff\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before := mustRead(t, path)
+	result := invokeCoding(t, Provider{}, "fs.write", map[string]any{"path": path, "content": "bad: \ufffd\n"}, nil)
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "identical to the current file") || !strings.Contains(result.Contents[0].Text, "nothing was written") {
+		t.Fatalf("write=%#v", result)
+	}
+	if !strings.Contains(result.Contents[0].Text, "The tool was not executed.") || !strings.Contains(string(result.Details), `"code":"INVALID_ARGUMENT"`) || strings.Contains(result.Contents[0].Text, "cannot be confirmed") {
+		t.Fatalf("write result=%#v", result)
+	}
+	if after := mustRead(t, path); string(after) != string(before) {
+		t.Fatalf("refused write changed the file: %x", after)
+	}
+	preview := invokeCoding(t, Provider{}, "fs.write.preview", map[string]any{"path": path, "content": "bad: \ufffd\n"}, nil)
+	if !preview.Error || !strings.Contains(string(preview.Details), `"code":"INVALID_ARGUMENT"`) {
+		t.Fatalf("preview=%#v", preview)
+	}
+	clean := filepath.Join(filepath.Dir(path), "clean.txt")
+	if err := os.WriteFile(clean, []byte("same\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	result = invokeCoding(t, Provider{}, "fs.write", map[string]any{"path": clean, "content": "same\n"}, nil)
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "The tool was not executed.") {
+		t.Fatalf("clean=%#v", result)
+	}
+}
+
 // A new file never carries the disclosure, and a lossless write never carries it either.
 func TestWriteOmitsLossyDecodeWithoutLoss(t *testing.T) {
 	dir := t.TempDir()

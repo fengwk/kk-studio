@@ -130,7 +130,7 @@ func planWrite(path, content string, expected *ExpectedFile, exists bool) (pendi
 	}
 	diff, err := numberedDiff(normalizeEOL(string(decoded)), normalizeEOL(written.text))
 	if err != nil {
-		return pendingWrite{}, err
+		return pendingWrite{}, unchangedFileError(err)
 	}
 	review := WriteReview{Path: path, Diff: diff, NewFile: !exists, Content: written.text}
 	if exists {

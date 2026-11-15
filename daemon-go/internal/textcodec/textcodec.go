@@ -65,13 +65,19 @@ func (e *UnsupportedLabelError) Error() string {
 }
 
 // DeclarationConflictError reports a UTF-16 or UTF-32 declaration without a byte order mark.
+// Label is the label as it was written in the file.
 type DeclarationConflictError struct {
 	Declared Encoding
+	Label    string
 }
 
 func (e *DeclarationConflictError) Error() string {
-	return fmt.Sprintf("the %s declares %s, but the file does not start with a byte order mark; %s files must start with one",
-		e.Declared.Declaration, e.Declared.Name, e.Declared.Name)
+	label := e.Label
+	if label == "" {
+		label = e.Declared.Name
+	}
+	return fmt.Sprintf("the %s declares %q, which is %s, but the file does not start with a byte order mark; %s files must start with one",
+		e.Declared.Declaration, label, e.Declared.Name, e.Declared.Name)
 }
 
 // UnrepresentableError reports text the target encoding cannot hold.

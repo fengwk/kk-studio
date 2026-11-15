@@ -1,6 +1,7 @@
 package coding
 
 import (
+	"bytes"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -72,6 +73,57 @@ func TestEditDisclosesLossyDecodeAndRefusesCodecFailures(t *testing.T) {
 	result = invokeCoding(t, Provider{}, "fs.edit", editArgs(conflict, replace("中文", "英文")), nil)
 	if !result.Error || !strings.Contains(result.Contents[0].Text, "HTML meta charset") || !strings.Contains(string(result.Details), `"code":"CODEC"`) {
 		t.Fatalf("conflict=%#v", result)
+	}
+}
+
+// An edit whose rendered diff is empty changes nothing and is refused before it runs. The entry
+// checks require a normalized change, so the empty diff is reached by calling the review directly.
+func TestEditRejectsResultIdenticalToDecodedFile(t *testing.T) {
+	_, _, err := editReview("review", "/repo/file.txt", "hash", "same\n", "same\n", 1, nil)
+	if err == nil || err.Error() != "The content is identical to the current file; nothing was written." {
+		t.Fatalf("review err=%v", err)
+	}
+	result := toCapabilityErrorResult("review", unchangedFileError(err))
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "identical to the current file") || !strings.Contains(result.Contents[0].Text, "nothing was written") {
+		t.Fatalf("result=%#v", result)
+	}
+	if !strings.Contains(result.Contents[0].Text, "The tool was not executed.") || !strings.Contains(string(result.Details), `"code":"INVALID_ARGUMENT"`) || strings.Contains(result.Contents[0].Text, "cannot be confirmed") {
+		t.Fatalf("result fact=%#v", result)
+	}
+}
+
+// A leading U+FEFF in a BOM-less file would become a UTF-8 byte order mark, so the edit is
+// refused before anything is written. A file that already has a BOM keeps the character as content.
+func TestEditRefusesLeadingBOMRequest(t *testing.T) {
+	path := writeFixture(t, "plain.txt", []byte("alpha\n"))
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, replace("alpha", "\uFEFFalpha")), nil)
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "would add a byte order mark") || !strings.Contains(result.Contents[0].Text, "Remove the leading U+FEFF") {
+		t.Fatalf("edit=%#v", result)
+	}
+	if !strings.Contains(result.Contents[0].Text, "The tool was not executed.") || !strings.Contains(string(result.Details), `"code":"CODEC"`) || strings.Contains(result.Contents[0].Text, "cannot be confirmed") {
+		t.Fatalf("edit result=%#v", result)
+	}
+	if written := mustRead(t, path); string(written) != "alpha\n" {
+		t.Fatalf("refused edit rewrote the file: %x", written)
+	}
+	declared := writeFixture(t, "declared.xml", []byte("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<r/>\n"))
+	result = invokeCoding(t, Provider{}, "fs.edit.preview", editArgs(declared, replace("<?xml", "\uFEFF<?xml")), nil)
+	if !result.Error {
+		t.Fatalf("declared diff=%s", result.Contents[0].JSON)
+	}
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "would add a byte order mark") {
+		t.Fatalf("declared=%#v", result)
+	}
+	if written := mustRead(t, declared); !bytes.HasPrefix(written, []byte("<?xml")) {
+		t.Fatalf("refused preview rewrote the file: %x", written)
+	}
+	withBOM := writeFixture(t, "bom.txt", append([]byte{0xef, 0xbb, 0xbf}, []byte("alpha\n")...))
+	result = invokeCoding(t, Provider{}, "fs.edit", editArgs(withBOM, replace("alpha", "\uFEFFalpha")), nil)
+	if result.Error {
+		t.Fatalf("BOM file=%#v", result)
+	}
+	if written := mustRead(t, withBOM); string(written) != "\xef\xbb\xbf\ufeffalpha\n" {
+		t.Fatalf("BOM file bytes=%x", written)
 	}
 }
 

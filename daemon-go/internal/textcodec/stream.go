@@ -45,7 +45,7 @@ func NewReader(path string, source io.Reader) (*Reader, error) {
 		return nil, err
 	}
 	if declared.bomRequired {
-		return nil, &DeclarationConflictError{Declared: declared.enc}
+		return nil, &DeclarationConflictError{Declared: declared.enc, Label: declared.label}
 	}
 	if declared.xtext == nil {
 		return &Reader{enc: declared.enc, source: newUTF8Source(buffered, strictASCII(declared.enc.Name))}, nil

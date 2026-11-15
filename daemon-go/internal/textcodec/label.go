@@ -31,6 +31,7 @@ const (
 type resolved struct {
 	enc         Encoding
 	xtext       encoding.Encoding
+	label       string
 	bomRequired bool
 }
 
@@ -63,7 +64,7 @@ func resolveLabel(label, where string, form format) (resolved, error) {
 		return resolved{enc: declaredEncoding("US-ASCII", where)}, nil
 	}
 	if isUTF16Or32Label(strings.ToUpper(normalized)) {
-		return resolved{enc: declaredEncoding(unicodeFamilyName(normalized), where), bomRequired: true}, nil
+		return resolved{enc: declaredEncoding(unicodeFamilyName(normalized), where), label: trimmed, bomRequired: true}, nil
 	}
 	xtext, err := lookupEncoding(normalized, form)
 	if err != nil || xtext == nil {
@@ -74,7 +75,7 @@ func resolveLabel(label, where string, form format) (resolved, error) {
 		return resolved{}, &UnsupportedLabelError{Label: trimmed, Declaration: where}
 	}
 	if isUTF16Or32Label(name) {
-		return resolved{enc: declaredEncoding(name, where), bomRequired: true}, nil
+		return resolved{enc: declaredEncoding(name, where), label: trimmed, bomRequired: true}, nil
 	}
 	switch name {
 	case "UTF-8", "US-ASCII":

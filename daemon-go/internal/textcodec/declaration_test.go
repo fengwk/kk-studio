@@ -224,7 +224,7 @@ func TestDecodeRejectsUnusableDeclarations(t *testing.T) {
 		t.Fatalf("ASCII-incompatible label err=%v", err)
 	}
 	var conflict *DeclarationConflictError
-	if _, _, _, err := Decode("/repo/page.html", []byte(`<meta charset="utf-16le">x`)); !errors.As(err, &conflict) || conflict.Declared.Name != "UTF-16LE" {
+	if _, _, _, err := Decode("/repo/page.html", []byte(`<meta charset="Utf-16le">x`)); !errors.As(err, &conflict) || conflict.Declared.Name != "UTF-16LE" || conflict.Label != "Utf-16le" || !strings.Contains(err.Error(), `"Utf-16le"`) {
 		t.Fatalf("UTF-16 label err=%v", err)
 	}
 	conflict = nil

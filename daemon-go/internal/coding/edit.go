@@ -112,7 +112,7 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	}
 	review, completed, err := editReview(call.InvocationID, target.path, target.hash, source.text, updated, len(replacements), lossyDecode(target.existing, target.replacements, updated))
 	if err != nil {
-		return errorResult(call.InvocationID, err), nil
+		return errorResult(call.InvocationID, unchangedFileError(err)), nil
 	}
 	if err = ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -600,6 +600,18 @@ func diffLineCount(text string) []string {
 	return lines
 }
 
+// errUnchangedFile reports a change whose normalized text is identical to the file, so there is
+// nothing to write. The caller reports it as an input rejection.
+const errUnchangedFile = "The content is identical to the current file; nothing was written."
+
+// unchangedFileError reports an empty diff as the no-change rejection and passes other errors on.
+func unchangedFileError(err error) error {
+	if err != nil && err.Error() == errUnchangedFile {
+		return rejectInput(errUnchangedFile)
+	}
+	return err
+}
+
 func numberedDiff(oldText, newText string) (string, error) {
 	patch, err := udiff.ToUnified("old", "new", oldText, udiff.Lines(oldText, newText), 4)
 	if err != nil {
@@ -612,7 +624,7 @@ func numberedDiff(oldText, newText string) (string, error) {
 		}
 	}
 	if !d.seen {
-		return "", errors.New("edit produced an empty diff")
+		return "", errors.New(errUnchangedFile)
 	}
 	if d.oldCursor > 0 && d.oldCursor <= len(diffLineCount(oldText)) || d.newCursor > 0 && d.newCursor <= len(diffLineCount(newText)) {
 		d.out = append(d.out, "...")

@@ -40,7 +40,7 @@ func Decode(path string, data []byte) ([]byte, Encoding, int, error) {
 		return nil, Encoding{}, 0, err
 	}
 	if declared.bomRequired {
-		return nil, Encoding{}, 0, &DeclarationConflictError{Declared: declared.enc}
+		return nil, Encoding{}, 0, &DeclarationConflictError{Declared: declared.enc, Label: declared.label}
 	}
 	return decodeDeclared(declared, data)
 }
