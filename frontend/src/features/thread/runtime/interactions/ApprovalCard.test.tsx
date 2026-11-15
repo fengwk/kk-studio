@@ -66,8 +66,8 @@ it('write 覆盖审批卡片展示哈希保护的变更而非整文件输入', (
   expect(document.querySelector('.thread-tool-lossy-warning')).not.toBeInTheDocument()
 })
 
-it('write 审批卡片在 diff 上方显示有损解码警示', () => {
-  const renderCard = () => (
+it('write 审批卡片在 diff 上方显示有损解码警示的单复数文案', () => {
+  const renderCard = (invalidSequences: number) => (
     <ApprovalCard
       {...props}
       toolName="write"
@@ -78,12 +78,12 @@ it('write 审批卡片在 diff 上方显示有损解码警示', () => {
           path: '/canonical/a.txt',
           diff: '@@ -1 +1 @@\n-1|before\n+1|after',
           sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
-          lossyDecode: { encoding: 'GB18030', invalidSequences: 2 },
+          lossyDecode: { encoding: 'GB18030', invalidSequences },
         },
       }}
     />
   )
-  const { container, rerender } = render(renderCard(), { wrapper })
+  const { container, rerender } = render(renderCard(2), { wrapper })
 
   const warning = container.querySelector('.thread-tool-lossy-warning')
   expect(warning).toHaveTextContent(
@@ -94,9 +94,10 @@ it('write 审批卡片在 diff 上方显示有损解码警示', () => {
   expect(container.querySelector('.is-removed')?.textContent).toBe('-1|before\n')
 
   setLocale('en-US')
-  rerender(renderCard())
+  rerender(renderCard(1))
   expect(container.querySelector('.thread-tool-lossy-warning')).toHaveTextContent(
-    'The original file contains 2 byte sequence(s) that are not valid GB18030',
+    'The original file contains 1 byte sequence that is not valid GB18030, shown as �.'
+      + ' If it is still present, it is saved as U+FFFD, so its original bytes cannot be recovered.',
   )
 })
 

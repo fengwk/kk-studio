@@ -46,10 +46,12 @@ export function LossyDecodeWarning({
     <div className="thread-tool-lossy-warning" role="note">
       <AlertTriangle size={14} aria-hidden="true" />
       <span>
-        {t('ai.runtime.mutation.lossyDecode', {
-          count: lossyDecode.invalidSequences,
-          encoding: lossyDecode.encoding,
-        })}
+        {lossyDecode.invalidSequences === 1
+          ? t('ai.runtime.mutation.lossyDecode.one', { encoding: lossyDecode.encoding })
+          : t('ai.runtime.mutation.lossyDecode.other', {
+            count: lossyDecode.invalidSequences,
+            encoding: lossyDecode.encoding,
+          })}
       </span>
     </div>
   )
