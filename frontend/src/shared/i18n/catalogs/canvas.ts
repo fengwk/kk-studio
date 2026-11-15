@@ -577,4 +577,20 @@ export const canvasCatalog = {
     'en-US': 'Video generation',
     'zh-CN': '视频生成',
   },
+  'canvas.upload.unsupportedType': {
+    'en-US': 'Unsupported file type: {{name}}',
+    'zh-CN': '不支持的文件类型：{{name}}',
+  },
+  'canvas.upload.uploaded': {
+    'en-US': 'Uploaded {{name}}',
+    'zh-CN': '已上传 {{name}}',
+  },
+  'canvas.upload.failed': {
+    'en-US': 'Failed to upload {{name}}',
+    'zh-CN': '上传 {{name}} 失败',
+  },
+  'canvas.upload.invalidHandle': {
+    'en-US': 'The storage service returned an invalid upload handle',
+    'zh-CN': '存储服务返回了无效的上传句柄',
+  },
 } satisfies LocaleCatalog

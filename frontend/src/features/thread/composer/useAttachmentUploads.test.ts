@@ -6,7 +6,7 @@ import type { StorageService } from '@/shared/api/storage-service'
 import { createAttachmentPart } from '@/features/thread/composer/composer-parts'
 import { loadUnknownUploads, persistPendingUnknownUpload } from '@/features/thread/composer/composer-draft'
 import { createWorkerHasher } from '@/shared/lib/upload-file'
-import { scaleImageFile } from '@/features/thread/composer/image-scaler'
+import { scaleImageFile } from '@/shared/lib/image-scaler'
 vi.mock('@/shared/api/client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/shared/api/client')>()
   return {
@@ -19,7 +19,7 @@ vi.mock('@/shared/api/client', async (importOriginal) => {
     }),
   }
 })
-vi.mock('./image-scaler', () => ({
+vi.mock('@/shared/lib/image-scaler', () => ({
   scaleImageFile: vi.fn(async (file: File) => ({
     file,
     format: file.type.slice('image/'.length),

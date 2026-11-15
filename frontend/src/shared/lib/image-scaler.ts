@@ -1,4 +1,4 @@
-import type { ImageInputTier } from '@/features/thread/composer/composer-parts'
+type ImageScaleTier = '720P' | '1080P' | 'ORIGINAL'
 
 export interface ImageDimensions {
   width: number
@@ -21,7 +21,7 @@ const SUPPORTED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/gif', '
 export function computeScaledDimensions(
   width: number,
   height: number,
-  tier: ImageInputTier,
+  tier: ImageScaleTier,
 ): ImageDimensions {
   if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) {
     throw new Error('Image dimensions must be positive integers')
@@ -49,7 +49,7 @@ export function computeScaledDimensions(
 }
 
 /** Uses browser decoding (including EXIF orientation) and preserves source bytes when in bounds. */
-export async function scaleImageFile(file: File, tier: ImageInputTier): Promise<ScaledImageFile> {
+export async function scaleImageFile(file: File, tier: ImageScaleTier): Promise<ScaledImageFile> {
   if (!SUPPORTED_IMAGE_TYPES.has(file.type)) {
     throw new Error(`unsupported image media type for resizing: ${file.type}`)
   }

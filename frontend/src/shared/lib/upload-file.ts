@@ -45,6 +45,17 @@ interface PendingHash {
   signal?: AbortSignal
 }
 
+let sharedHasher: HashFile | null = null
+
+/**
+ * 全局共享一个哈希 Worker。多次调用复用同一实例，
+ * 避免每个文件都新建且不释放的 Worker。
+ */
+export function sharedWorkerHasher(): HashFile {
+  sharedHasher ??= createWorkerHasher()
+  return sharedHasher
+}
+
 /** 专用 Worker + Web Crypto SHA-256，处理 Worker 错误及请求取消。 */
 export function createWorkerHasher(): HashFile {
   let worker: Worker | null = null

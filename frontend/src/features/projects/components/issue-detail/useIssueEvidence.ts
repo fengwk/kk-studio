@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { useQuery, useQueryClient, type QueryKey } from '@tanstack/react-query'
-import { validateUploadFile, type HashFile } from '@/shared/lib/upload-file'
+import { readOriginalImageMetadata } from '@/shared/lib/image-metadata'
+import { mediaKindOf, validateUploadFile, type HashFile } from '@/shared/lib/upload-file'
 import type { StorageService } from '@/shared/api/storage-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
@@ -76,10 +77,9 @@ export function useIssueEvidence({
       setActionError(t('projects.issue.uploadEvidenceBlockedByPending'))
       return
     }
-    try {
-      validateUploadFile(file)
-    } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('projects.issue.fileValidationFailed'))
+    const sizeError = validateUploadFile(file)
+    if (sizeError) {
+      setActionError(sizeError)
       return
     }
 
@@ -87,12 +87,26 @@ export function useIssueEvidence({
     setIsUploading(true)
     setActionError(null)
     try {
+      const mediaType = file.type || 'application/octet-stream'
+      // 原文件字节直接上传；图片必须先解码出真实尺寸，失败时不得 reserve。
+      const imageMetadata = mediaKindOf(mediaType) === 'image'
+        ? await readOriginalImageMetadata(file)
+        : null
       const sha256 = await calculateFileSha256(file, hashFile)
       const upload = await storageService.reserveUpload({
         filename: file.name,
         sizeBytes: String(file.size),
-        mediaType: file.type || 'application/octet-stream',
+        mediaType,
         sha256,
+        ...(imageMetadata
+          ? {
+            format: imageMetadata.format,
+            originalWidth: imageMetadata.originalWidth,
+            originalHeight: imageMetadata.originalHeight,
+            storedWidth: imageMetadata.storedWidth,
+            storedHeight: imageMetadata.storedHeight,
+          }
+          : {}),
       })
       if (upload.type === 'PENDING') {
         await storageService.uploadFile(upload.presignedPut, file)
