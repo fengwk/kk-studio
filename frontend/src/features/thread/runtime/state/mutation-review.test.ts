@@ -63,6 +63,37 @@ describe('mutation-review parser and extractor', () => {
     expect(parseEditReview([])).toBeNull()
   })
 
+  it('accepts only a well-formed lossyDecode disclosure on a review', () => {
+    const lossyDecode = { encoding: 'GB18030', invalidSequences: 3 }
+    expect(parseEditReview({
+      path: '/foo', diff: '+a', sha256: validSha, lossyDecode,
+    })).toEqual({
+      path: '/foo', diff: '+a', sha256: validSha, lossyDecode,
+    })
+
+    // 缺失时属性不存在，绝不补 null 或空对象。
+    expect(parseEditReview({ path: '/foo', diff: '+a', sha256: validSha }))
+      .not.toHaveProperty('lossyDecode')
+
+    for (const malformed of [
+      null,
+      [],
+      { encoding: 'GB18030' },
+      { invalidSequences: 3 },
+      { encoding: '   ', invalidSequences: 3 },
+      { encoding: 'GB18030', invalidSequences: 0 },
+      { encoding: 'GB18030', invalidSequences: -1 },
+      { encoding: 'GB18030', invalidSequences: 1.5 },
+      { encoding: 'GB18030', invalidSequences: '3' },
+      { encoding: 7, invalidSequences: 3 },
+      { encoding: 'GB18030', invalidSequences: 3, extra: true },
+    ]) {
+      expect(parseEditReview({
+        path: '/foo', diff: '+a', sha256: validSha, lossyDecode: malformed,
+      })).toBeNull()
+    }
+  })
+
   it('extracts editReview from an approval node', () => {
     const approval = {
       required: true,
@@ -132,6 +163,28 @@ describe('mutation-review parser and extractor', () => {
           sha256: validSha,
         },
       }),
+    ).toBeNull()
+
+    // write 的终态结果把同一审查存在 details.writeReview。
+    expect(
+      extractResultEditReview({
+        details: {
+          writeReview: {
+            path: '/file.ts',
+            diff: '+added',
+            sha256: validSha,
+            lossyDecode: { encoding: 'GB18030', invalidSequences: 2 },
+          },
+        },
+      }),
+    ).toEqual({
+      path: '/file.ts',
+      diff: '+added',
+      sha256: validSha,
+      lossyDecode: { encoding: 'GB18030', invalidSequences: 2 },
+    })
+    expect(
+      extractResultEditReview({ writeReview: { path: '/file.ts', diff: '+a', sha256: null } }),
     ).toBeNull()
 
     expect(

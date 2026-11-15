@@ -1083,6 +1083,12 @@ export const chatCatalog = {
     'en-US': 'Edit review missing or invalid; cannot allow.',
     'zh-CN': '未获取到有效的编辑审查信息，无法允许。',
   },
+  'ai.runtime.mutation.lossyDecode': {
+    'en-US': 'The original file contains {{count}} byte sequence(s) that are not valid'
+      + ' {{encoding}}, shown as �. Those still present are saved as U+FFFD, so their original'
+      + ' bytes cannot be recovered.',
+    'zh-CN': '原文件有 {{count}} 处字节序列不是有效的 {{encoding}}，显示为 �；保存后仍保留的这些位置会写为 U+FFFD，原始字节无法恢复。',
+  },
   'ai.interaction.viewSource': { 'en-US': 'View source', 'zh-CN': '查看来源' },
   'ai.interaction.subagentSource': { 'en-US': 'subagent', 'zh-CN': 'subagent' },
   'ai.interaction.openSubagent': { 'en-US': 'Open subagent', 'zh-CN': '打开 subagent' },

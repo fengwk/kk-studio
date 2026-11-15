@@ -175,7 +175,7 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   threadId?: string
   /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */
   approval?: ToolApprovalState
-  /** 经权威审查产生的真实 diff（来源自 approval 或终态 result details.editReview）。 */
+  /** 经权威审查产生的真实 diff（来源自 approval.editReview 或终态 result details.editReview/writeReview）。 */
   editReview?: EditReview | null
   /**
    * 一次工具调用的严格身份：`${assistantEntryId}:${callIndex}`。

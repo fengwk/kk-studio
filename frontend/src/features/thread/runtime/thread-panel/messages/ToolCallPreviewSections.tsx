@@ -1,4 +1,6 @@
+import { AlertTriangle } from 'lucide-react'
 import { useI18n } from '@/shared/i18n'
+import type { EditReviewLossyDecode } from '@/features/thread/runtime/state/mutation-review'
 import { ToolOutputViewport } from '@/features/thread/runtime/thread-panel/messages/ToolOutputViewport'
 import { diffLineClass } from '@/features/thread/runtime/thread-panel/messages/tool-preview-diff'
 import type { ToolCallPreview as ToolCallPreviewData } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
@@ -30,6 +32,29 @@ export function PreviewTarget({
   )
 }
 
+/** 有损解码警示：只在审查 JSON 声明 lossyDecode 时显示在 diff 上方。 */
+export function LossyDecodeWarning({
+  lossyDecode,
+}: {
+  lossyDecode?: EditReviewLossyDecode
+}) {
+  const { t } = useI18n()
+  if (!lossyDecode) {
+    return null
+  }
+  return (
+    <div className="thread-tool-lossy-warning" role="note">
+      <AlertTriangle size={14} aria-hidden="true" />
+      <span>
+        {t('ai.runtime.mutation.lossyDecode', {
+          count: lossyDecode.invalidSequences,
+          encoding: lossyDecode.encoding,
+        })}
+      </span>
+    </div>
+  )
+}
+
 /** write 的审批审查 diff：后端冻结的 review diff，有界滚动。 */
 export function WriteReviewSection({ preview }: { preview: Extract<ToolCallPreviewData, { kind: 'write' }> }) {
   const review = preview.review
@@ -37,14 +62,17 @@ export function WriteReviewSection({ preview }: { preview: Extract<ToolCallPrevi
     return null
   }
   return (
-    <ToolOutputViewport bounded className="thread-tool-preview-body is-edit">
-      {review.diff.split('\n').map((line, index, lines) => (
-        <span key={`diff-${index}`} className={diffLineClass(line)}>
-          {line}
-          {index < lines.length - 1 ? '\n' : ''}
-        </span>
-      ))}
-    </ToolOutputViewport>
+    <>
+      <LossyDecodeWarning lossyDecode={review.lossyDecode} />
+      <ToolOutputViewport bounded className="thread-tool-preview-body is-edit">
+        {review.diff.split('\n').map((line, index, lines) => (
+          <span key={`diff-${index}`} className={diffLineClass(line)}>
+            {line}
+            {index < lines.length - 1 ? '\n' : ''}
+          </span>
+        ))}
+      </ToolOutputViewport>
+    </>
   )
 }
 
@@ -159,7 +187,7 @@ export function EditDiffSection({
   streaming,
   bounded,
 }: {
-  preview: Extract<ToolCallPreviewData, { lines: string[] }>
+  preview: Extract<ToolCallPreviewData, { kind: 'edit'; mode: 'review' }>
   streaming: boolean
   bounded: boolean
 }) {
@@ -167,24 +195,27 @@ export function EditDiffSection({
     return null
   }
   return (
-    <ToolOutputViewport
-      bounded={bounded}
-      className={[
-        'thread-tool-preview-body',
-        'is-edit',
-        streaming ? 'is-streaming' : '',
-      ].filter(Boolean).join(' ')}
-    >
-      {preview.lines.map((line, index) => (
-        <span
-          key={`diff-${index}`}
-          className={diffLineClass(line)}
-        >
-          {line}
-          {index < preview.lines.length - 1 ? '\n' : ''}
-        </span>
-      ))}
-    </ToolOutputViewport>
+    <>
+      <LossyDecodeWarning lossyDecode={preview.lossyDecode} />
+      <ToolOutputViewport
+        bounded={bounded}
+        className={[
+          'thread-tool-preview-body',
+          'is-edit',
+          streaming ? 'is-streaming' : '',
+        ].filter(Boolean).join(' ')}
+      >
+        {preview.lines.map((line, index) => (
+          <span
+            key={`diff-${index}`}
+            className={diffLineClass(line)}
+          >
+            {line}
+            {index < preview.lines.length - 1 ? '\n' : ''}
+          </span>
+        ))}
+      </ToolOutputViewport>
+    </>
   )
 }
 

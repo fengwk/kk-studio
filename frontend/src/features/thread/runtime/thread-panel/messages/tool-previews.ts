@@ -1,4 +1,4 @@
-import type { EditReview } from '@/features/thread/runtime/state/mutation-review'
+import type { EditReview, EditReviewLossyDecode } from '@/features/thread/runtime/state/mutation-review'
 import { parseJsonPrefix } from '@/features/thread/runtime/thread-panel/messages/json-prefix'
 import { isRecord, getString } from '@/shared/lib/value'
 
@@ -43,6 +43,7 @@ type EditCallPreview =
       path: string
       diff: string
       sha256: string | null
+      lossyDecode?: EditReviewLossyDecode
       lines: string[]
     }
 
@@ -112,6 +113,7 @@ function formatEditPreview(
       path: options.editReview.path,
       diff,
       sha256: options.editReview.sha256,
+      lossyDecode: options.editReview.lossyDecode,
       lines: diff.split('\n'),
     }
   }
