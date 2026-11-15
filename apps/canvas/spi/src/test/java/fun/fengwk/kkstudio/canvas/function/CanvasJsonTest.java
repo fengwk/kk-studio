@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.canvas.function;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -32,6 +33,56 @@ class CanvasJsonTest {
     assertEquals(first.hashCode(), second.hashCode());
     assertEquals("{\"b\":1,\"a\":[1,200,true,null]}", first.write());
     assertEquals(first, CanvasJson.parse(first.write()));
+  }
+
+  /** 规范文本只重排对象键：嵌套对象与数组中的对象按字典序，数组顺序保持，数值与 {@link CanvasJson#write()} 一样规范化。插入顺序文本不变。 */
+  @Test
+  void writeCanonicalSortsObjectKeysWithoutReorderingArrays() {
+    CanvasJson value =
+        CanvasJson.parse(
+            "{\"z\":1.0,\"items\":[{\"b\":2e1,\"a\":true},1],\"a\":{\"y\":null,\"x\":\"q\"}}");
+    CanvasJson reordered =
+        CanvasJson.parse(
+            "{\"a\":{\"x\":\"q\",\"y\":null},\"items\":[{\"a\":true,\"b\":20},1],\"z\":1}");
+
+    assertEquals(
+        "{\"a\":{\"x\":\"q\",\"y\":null},\"items\":[{\"a\":true,\"b\":20},1],\"z\":1}",
+        value.writeCanonical());
+    assertEquals(value.writeCanonical(), reordered.writeCanonical());
+    assertEquals(
+        "{\"z\":1,\"items\":[{\"b\":20,\"a\":true},1],\"a\":{\"y\":null,\"x\":\"q\"}}",
+        value.write());
+    // 数组顺序是内容的一部分，规范文本不得为了键序把它打平。
+    assertNotEquals(
+        value.writeCanonical(),
+        CanvasJson.parse(
+                "{\"z\":1,\"items\":[1,{\"b\":20,\"a\":true}],\"a\":{\"y\":null,\"x\":\"q\"}}")
+            .writeCanonical());
+  }
+
+  /** 规范写出与普通写出共用深度和长度预算，不能因为排序另开一套更宽或更窄的限制。 */
+  @Test
+  void writeCanonicalUsesTheSameDepthAndLengthBudget() {
+    String allowedObjects =
+        "{\"b\":".repeat(CanvasJson.MAX_DEPTH) + "1" + "}".repeat(CanvasJson.MAX_DEPTH);
+    assertEquals(
+        "{\"b\":".repeat(CanvasJson.MAX_DEPTH) + "1" + "}".repeat(CanvasJson.MAX_DEPTH),
+        CanvasJson.parse(allowedObjects).writeCanonical());
+    CanvasJson nested = new CanvasJson.JsonNull();
+    for (int depth = 0; depth < CanvasJson.MAX_DEPTH; depth++) {
+      nested = new CanvasJson.JsonObject(Map.of("b", nested));
+    }
+    CanvasJson allowed = nested;
+    assertDoesNotThrow(allowed::writeCanonical);
+    assertThrows(
+        IllegalArgumentException.class,
+        new CanvasJson.JsonObject(Map.of("b", allowed))::writeCanonical);
+
+    CanvasJson exact = CanvasJson.parse("{\"n\":1e-65528}");
+    assertEquals(CanvasJson.MAX_LENGTH, exact.writeCanonical().length());
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> new CanvasJson.JsonNumber(new BigDecimal("1e65536")).writeCanonical());
   }
 
   /** 压缩文本保留插入顺序并转义控制字符，保证持久化文本与 API 文本一致。 */

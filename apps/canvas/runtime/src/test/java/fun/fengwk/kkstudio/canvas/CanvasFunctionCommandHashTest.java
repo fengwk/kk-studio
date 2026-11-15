@@ -80,6 +80,34 @@ class CanvasFunctionCommandHashTest {
                 .references());
   }
 
+  /** 函数 args 的对象键序不参与指纹：语义相等的嵌套对象与数值必须同指纹，否则同一命令会因插入顺序不同被当成冲突。数组顺序与真实内容变化仍要区分。 */
+  @Test
+  void commandHashCanonicalizesFunctionArgsObjectKeys() {
+    CanvasCommand first =
+        setFunction("{\"z\":1.0,\"nested\":{\"b\":[{\"y\":2},{\"x\":true}],\"a\":null},\"n\":2e2}");
+    CanvasCommand reordered =
+        setFunction("{\"n\":200,\"nested\":{\"a\":null,\"b\":[{\"y\":2.0},{\"x\":true}]},\"z\":1}");
+    CanvasCommand sameKeysDifferentArray =
+        setFunction("{\"z\":1,\"nested\":{\"b\":[{\"x\":true},{\"y\":2}],\"a\":null},\"n\":200}");
+    CanvasCommand differentValue = setFunction("{\"z\":1,\"nested\":{\"a\":null},\"n\":200}");
+
+    assertEquals(CanvasCommandHash.of(List.of(first)), CanvasCommandHash.of(List.of(reordered)));
+    assertNotEquals(
+        CanvasCommandHash.of(List.of(first)),
+        CanvasCommandHash.of(List.of(sameKeysDifferentArray)));
+    assertNotEquals(
+        CanvasCommandHash.of(List.of(first)), CanvasCommandHash.of(List.of(differentValue)));
+    // 持久化与 API 文本仍保留插入顺序，不因指纹规范化而改写回。
+    assertEquals(
+        "{\"z\":1,\"nested\":{\"b\":[{\"y\":2},{\"x\":true}],\"a\":null},\"n\":200}",
+        ((CanvasCommand.SetNodeFunction) first).function().argsJson());
+  }
+
+  private static CanvasCommand setFunction(String args) {
+    return new CanvasCommand.SetNodeFunction(
+        UUID_ZERO, null, new CanvasFunction("video.generate", CanvasJson.parseObject(args)));
+  }
+
   /** 请求指纹必须稳定（同一批重试沿用原请求）且区分不同批。 */
   @Test
   void commandHashIsStableAndBatchSensitive() {

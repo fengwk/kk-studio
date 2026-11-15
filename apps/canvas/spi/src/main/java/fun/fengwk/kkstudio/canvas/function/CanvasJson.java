@@ -42,8 +42,15 @@ public sealed interface CanvasJson
     return object;
   }
 
-  /** 压缩序列化：无多余空白，对象保留插入顺序，是持久化与比较的唯一文本形式。 */
+  /** 压缩序列化：无多余空白，对象保留插入顺序，是持久化与 API 的唯一文本形式。 */
   String write();
+
+  /**
+   * 与 {@link #write()} 相同的压缩文本，但对象键按字典序递归写出，数组顺序保持不变。
+   *
+   * <p>只用于需要稳定比较的指纹；持久化与 API 文本仍使用 {@link #write()}，不因键序规范化而改变。
+   */
+  String writeCanonical();
 
   /** JSON object；null 值必须用 {@link JsonNull} 表达。 */
   record JsonObject(Map<String, CanvasJson> values) implements CanvasJson {
@@ -67,6 +74,11 @@ public sealed interface CanvasJson
     public String write() {
       return CanvasJsonCodec.write(this);
     }
+
+    @Override
+    public String writeCanonical() {
+      return CanvasJsonCodec.writeCanonical(this);
+    }
   }
 
   /** JSON array。 */
@@ -81,6 +93,11 @@ public sealed interface CanvasJson
     public String write() {
       return CanvasJsonCodec.write(this);
     }
+
+    @Override
+    public String writeCanonical() {
+      return CanvasJsonCodec.writeCanonical(this);
+    }
   }
 
   /** JSON string。 */
@@ -93,6 +110,11 @@ public sealed interface CanvasJson
     @Override
     public String write() {
       return CanvasJsonCodec.write(this);
+    }
+
+    @Override
+    public String writeCanonical() {
+      return CanvasJsonCodec.writeCanonical(this);
     }
   }
 
@@ -108,6 +130,11 @@ public sealed interface CanvasJson
     public String write() {
       return CanvasJsonCodec.write(this);
     }
+
+    @Override
+    public String writeCanonical() {
+      return CanvasJsonCodec.writeCanonical(this);
+    }
   }
 
   /** JSON boolean。 */
@@ -117,6 +144,11 @@ public sealed interface CanvasJson
     public String write() {
       return CanvasJsonCodec.write(this);
     }
+
+    @Override
+    public String writeCanonical() {
+      return CanvasJsonCodec.writeCanonical(this);
+    }
   }
 
   /** JSON null。 */
@@ -125,6 +157,11 @@ public sealed interface CanvasJson
     @Override
     public String write() {
       return CanvasJsonCodec.write(this);
+    }
+
+    @Override
+    public String writeCanonical() {
+      return CanvasJsonCodec.writeCanonical(this);
     }
   }
 }
