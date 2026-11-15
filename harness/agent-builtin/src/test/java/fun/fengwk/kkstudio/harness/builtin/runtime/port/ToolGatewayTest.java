@@ -119,7 +119,7 @@ class ToolGatewayTest {
     ExpectedFile expectedFile =
         new ExpectedFile(
             "/tmp/file.txt", "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-    ToolEditReview review = new ToolEditReview(expectedFile, "diff");
+    ToolEditReview review = new ToolEditReview(expectedFile, "diff", null);
     ToolApproval reviewedApproval =
         new ToolApproval(
             true,

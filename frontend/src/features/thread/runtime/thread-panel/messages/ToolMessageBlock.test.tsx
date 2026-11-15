@@ -847,6 +847,41 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(within(preview as HTMLElement).getByText('-six')).toBeInTheDocument()
   })
 
+  it('shows the localized lossy-decode warning above the edit diff', () => {
+    setLocale('zh-CN')
+    const reviewFor = (invalidSequences: number) => ({
+      phase: 'call' as const,
+      toolName: 'edit',
+      rendererKey: 'edit',
+      arguments: JSON.stringify({
+        path: 'App.java',
+        edits: [{ old_string: 'one', new_string: 'ONE' }],
+      }),
+      editReview: {
+        path: 'App.java',
+        diff: '-one\n+ONE',
+        sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        lossyDecode: { encoding: 'GB18030', invalidSequences },
+      },
+    })
+    const { container, rerender } = render(
+      <ToolMessageBlock message={message(reviewFor(1))} />,
+    )
+
+    const warning = container.querySelector('.thread-tool-lossy-warning')
+    expect(warning).toHaveTextContent(
+      '原文件有 1 处字节序列不是有效的 GB18030，显示为 �；保存后若仍保留，该位置会写为 U+FFFD，原始字节无法恢复。',
+    )
+    expect(warning?.nextElementSibling).toHaveClass('thread-tool-preview-body', 'is-edit')
+
+    setLocale('en-US')
+    rerender(<ToolMessageBlock message={message(reviewFor(3))} />)
+    expect(container.querySelector('.thread-tool-lossy-warning')).toHaveTextContent(
+      'The original file contains 3 byte sequences that are not valid GB18030, shown as �.'
+        + ' Those still present are saved as U+FFFD, so their original bytes cannot be recovered.',
+    )
+  })
+
   it('collapses bash to the last ten logical lines and expands without an inner scroll', async () => {
     const user = userEvent.setup()
     const output = Array.from({ length: 30 }, (_, index) => `build step ${index + 1}`).join('\n')

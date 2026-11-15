@@ -449,7 +449,7 @@ class ToolProcessorPreflightTest {
         new ExpectedFile(
             "/workspace/src/App.java",
             "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
-    ToolEditReview editReview = new ToolEditReview(expectedFile, "-old\n+new");
+    ToolEditReview editReview = new ToolEditReview(expectedFile, "-old\n+new", null);
     fixture.gateway.queuePreflightAsk("needs review", editReview);
 
     assertEquals(

@@ -23,7 +23,7 @@ import java.util.regex.Pattern;
 /**
  * 受管文本格式化的契约测试：受管文本与本地 {@code fs.read} 必须同契约，窗口状态机由 {@link TextReadWindow} 提供。
  *
- * <p>本类覆盖适配器职责：严格 UTF-8 解码、首个字符 BOM 剥离、参数校验、扫描超时/中断与 IO 失败的映射，以及受管入口的端到端窗口结果，包括空范围、 60000
+ * <p>本类覆盖适配器职责：替换式 UTF-8 解码、首个字符 BOM 剥离、参数校验、扫描超时/中断与 IO 失败的映射，以及受管入口的端到端窗口结果，包括空范围、 60000
  * 码点正文预算、截断元数据与“续读位置可无损重构全部源内容”。
  */
 class TextReadWindowFormatTest {
@@ -252,12 +252,12 @@ class TextReadWindowFormatTest {
   }
 
   /**
-   * 前 8000 字节内的 NUL 判定为二进制，非法 UTF-8 报“不是 UTF-8 文本”：两者文案与类别严格区分，不互相误报。
+   * 前 8000 字节内的 NUL 判定为二进制；非法 UTF-8 不再拒绝，而是按最大子部分替换为 U+FFFD。
    *
-   * <p>测试意图：二进制探测只看开头 8000 字节，不合法 UTF-8 不能被说成二进制。
+   * <p>测试意图：二进制探测只看原始字节开头 8000 字节，不合法 UTF-8 不能被说成二进制，也不能阻止读取。
    */
   @Test
-  void binaryAndMalformedUtf8AreReportedDistinctly() {
+  void binaryAndInvalidUtf8AreHandledDistinctly() {
     PlatformReadException binary =
         assertThrows(
             PlatformReadException.class,
@@ -270,17 +270,125 @@ class TextReadWindowFormatTest {
             + " and supported media.",
         binary.getMessage());
 
-    PlatformReadException invalidUtf8 =
+    String replaced =
+        TextReadWindow.format(
+            new byte[] {(byte) 0xC0, (byte) 0xAF}, 1, 200, null, "test.txt", deadline());
+    assertTrue(replaced.contains("1|\uFFFD\uFFFD"), replaced);
+  }
+
+  /** 非法 UTF-8 按 Unicode 3.9 / WHATWG 的最大子部分规则替换，与 Daemon codec 示例一致。 */
+  @Test
+  void invalidUtf8IsReplacedPerMaximalSubpart() {
+    assertEquals(
+        "\uFFFDA",
+        body(
+            TextReadWindow.format(
+                new byte[] {(byte) 0xE4, (byte) 0xB8, 0x41},
+                1,
+                200,
+                null,
+                "test.txt",
+                deadline())));
+    assertEquals(
+        "\uFFFD\uFFFD\uFFFD",
+        body(
+            TextReadWindow.format(
+                new byte[] {(byte) 0xED, (byte) 0xA0, (byte) 0x80},
+                1,
+                200,
+                null,
+                "test.txt",
+                deadline())));
+    assertEquals(
+        "\uFFFD\uFFFD",
+        body(
+            TextReadWindow.format(
+                new byte[] {(byte) 0xC0, (byte) 0xAF}, 1, 200, null, "test.txt", deadline())));
+    // 末尾被截断的序列整体替换为一个 U+FFFD。
+    assertEquals(
+        "\uFFFD",
+        body(
+            TextReadWindow.format(
+                new byte[] {(byte) 0xE4, (byte) 0xB8}, 1, 200, null, "test.txt", deadline())));
+  }
+
+  /** 逐字节读取与整块读取得到完全相同的替换结果，解码状态可跨读取块续接。 */
+  @Test
+  void streamingAndWholeFileReplacementAgree() {
+    byte[] bytes =
+        new byte[] {
+          (byte) 0xE4,
+          (byte) 0xB8,
+          0x41,
+          (byte) 0xED,
+          (byte) 0xA0,
+          (byte) 0x80,
+          (byte) 0xC0,
+          (byte) 0xAF,
+          (byte) 0xF0,
+          (byte) 0x9F,
+          0x41
+        };
+
+    String whole = TextReadWindow.format(bytes, 1, 200, null, "test.txt", deadline());
+    String streamed =
+        TextReadWindow.format(
+            chunkedBytes(bytes, 1), 1, 200, null, "test.txt", "unsupported", deadline());
+
+    assertEquals(whole, streamed);
+    assertEquals("\uFFFDA" + "\uFFFD".repeat(6) + "A", body(whole));
+  }
+
+  /** 二进制窗口按原始字节计数：非法序列的替换不会改变后续 NUL 的真实偏移。 */
+  @Test
+  void nulProbeUsesRawByteOffsetsAcrossInvalidSequences() {
+    byte[] text = new byte[8001];
+    Arrays.fill(text, (byte) 'a');
+    text[7999] = (byte) 0x80;
+    text[8000] = 0;
+    assertTrue(
+        TextReadWindow.format(text, 1, 200, null, "probe.txt", deadline()).contains("\u0000"));
+
+    byte[] binary = new byte[8001];
+    Arrays.fill(binary, (byte) 'a');
+    binary[7998] = (byte) 0x80;
+    binary[7999] = 0;
+    PlatformReadException failure =
         assertThrows(
             PlatformReadException.class,
-            () ->
-                TextReadWindow.format(
-                    new byte[] {(byte) 0xC0, (byte) 0xAF}, 1, 200, null, "test.bin", deadline()));
-    assertEquals(PlatformReadException.Kind.NOT_TEXT, invalidUtf8.kind());
-    assertEquals(
-        "test.bin is not UTF-8 text, so it was not read. Managed resources are read as UTF-8; to"
-            + " read another encoding, convert it in an Environment, for example with bash iconv.",
-        invalidUtf8.getMessage());
+            () -> TextReadWindow.format(binary, 1, 200, null, "probe.bin", deadline()));
+    assertTrue(failure.getMessage().contains("it contains NUL bytes"), failure.getMessage());
+  }
+
+  private static String body(String output) {
+    return output
+        .lines()
+        .filter(line -> line.startsWith("1|"))
+        .findFirst()
+        .orElseThrow()
+        .substring(2);
+  }
+
+  private static InputStream chunkedBytes(byte[] bytes, int chunk) {
+    return new InputStream() {
+      private int index;
+
+      @Override
+      public int read(byte[] buffer, int offset, int length) {
+        if (index >= bytes.length) {
+          return -1;
+        }
+        int count = Math.min(Math.min(length, chunk), bytes.length - index);
+        System.arraycopy(bytes, index, buffer, offset, count);
+        index += count;
+        return count;
+      }
+
+      @Override
+      public int read() {
+        return index < bytes.length ? bytes[index++] & 0xFF : -1;
+      }
+    };
   }
 
   /** 二进制探测窗口为前 8000 字节：窗口内的 NUL 是二进制，越过窗口的 NUL 按文本返回。 */

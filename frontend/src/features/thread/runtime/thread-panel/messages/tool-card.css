@@ -77,6 +77,27 @@
   margin-bottom: 0;
 }
 
+/* 有损解码警示：审查 diff 上方的事实说明，不参与收起窗口。 */
+.thread-tool-lossy-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--warning);
+  font-size: var(--font-size-xs);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.thread-tool-lossy-warning svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
 .thread-tool-text-preview {
   display: flex;
   flex-direction: column;

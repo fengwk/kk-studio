@@ -390,7 +390,7 @@ class ToolExecutionGatewayAdmitTest {
                         ToolGatewayTestSupport.scope(),
                         1,
                         request,
-                        approved(new ToolEditReview(expectedFile, "-old\n+new")),
+                        approved(new ToolEditReview(expectedFile, "-old\n+new", null)),
                         new ToolGatewayTestSupport.RecordingRemoteExecutions())))
             .run();
     reviewed.execute(partial -> {});
@@ -426,7 +426,7 @@ class ToolExecutionGatewayAdmitTest {
                         ToolGatewayTestSupport.scope(),
                         1,
                         request,
-                        approved(new ToolEditReview(expectedFile, "+1|new")),
+                        approved(new ToolEditReview(expectedFile, "+1|new", null)),
                         new ToolGatewayTestSupport.RecordingRemoteExecutions())))
             .run();
     reviewed.execute(partial -> {});
@@ -457,7 +457,7 @@ class ToolExecutionGatewayAdmitTest {
                         ToolGatewayTestSupport.scope(),
                         1,
                         request,
-                        approved(new ToolEditReview(expectedFile, "-1|old\\n+1|new")),
+                        approved(new ToolEditReview(expectedFile, "-1|old\\n+1|new", null)),
                         new ToolGatewayTestSupport.RecordingRemoteExecutions())))
             .run();
     reviewed.execute(partial -> {});

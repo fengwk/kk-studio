@@ -63,6 +63,42 @@ it('write 覆盖审批卡片展示哈希保护的变更而非整文件输入', (
   expect(document.querySelector('.is-removed')?.textContent).toBe('-1|before\n')
   expect(document.querySelector('.is-added')?.textContent).toBe('+1|after')
   expect(screen.queryByText('whole replacement')).not.toBeInTheDocument()
+  expect(document.querySelector('.thread-tool-lossy-warning')).not.toBeInTheDocument()
+})
+
+it('write 审批卡片在 diff 上方显示有损解码警示的单复数文案', () => {
+  const renderCard = (invalidSequences: number) => (
+    <ApprovalCard
+      {...props}
+      toolName="write"
+      argumentsJson={'{"path":"/workspace/a.txt","content":"whole replacement"}'}
+      approval={{
+        required: true,
+        editReview: {
+          path: '/canonical/a.txt',
+          diff: '@@ -1 +1 @@\n-1|before\n+1|after',
+          sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+          lossyDecode: { encoding: 'GB18030', invalidSequences },
+        },
+      }}
+    />
+  )
+  const { container, rerender } = render(renderCard(2), { wrapper })
+
+  const warning = container.querySelector('.thread-tool-lossy-warning')
+  expect(warning).toHaveTextContent(
+    '原文件有 2 处字节序列不是有效的 GB18030，显示为 �；保存后仍保留的这些位置会写为 U+FFFD，原始字节无法恢复。',
+  )
+  // 警示必须位于真实审查 diff 上方，而不是替换或藏在 diff 之后。
+  expect(warning?.nextElementSibling).toHaveClass('thread-tool-preview-body', 'is-edit')
+  expect(container.querySelector('.is-removed')?.textContent).toBe('-1|before\n')
+
+  setLocale('en-US')
+  rerender(renderCard(1))
+  expect(container.querySelector('.thread-tool-lossy-warning')).toHaveTextContent(
+    'The original file contains 1 byte sequence that is not valid GB18030, shown as �.'
+      + ' If it is still present, it is saved as U+FFFD, so its original bytes cannot be recovered.',
+  )
 })
 
 it('显示同文件后续审批数量并本地化单复数文案', () => {
