@@ -67,6 +67,9 @@ public final class PluginManagementService {
   private static final String RESOURCE = "plugin";
   private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
 
+  /** 交互式认证 attempt（prepare 到 complete）的统一有效窗口。 */
+  private static final Duration AUTH_ATTEMPT_TTL = Duration.ofMinutes(10);
+
   private final PluginRegistry registry;
   private final Supplier<PluginCatalogRuntime> catalogRuntime;
   private final PluginConfigurationRepository configurations;
@@ -74,7 +77,6 @@ public final class PluginManagementService {
   private final PluginConfigurationService configurationService;
   private final PluginFunctionNamesProjection functionNamesProjection;
   private final PluginAuthAttemptRepository authAttempts;
-  private final Duration authAttemptTtl;
   private final Clock clock;
 
   public PluginManagementService(
@@ -85,7 +87,6 @@ public final class PluginManagementService {
       PluginConfigurationService configurationService,
       PluginFunctionNamesProjection functionNamesProjection,
       PluginAuthAttemptRepository authAttempts,
-      Duration authAttemptTtl,
       Clock clock) {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.catalogRuntime = Objects.requireNonNull(catalogRuntime, "catalogRuntime");
@@ -96,10 +97,6 @@ public final class PluginManagementService {
     this.functionNamesProjection =
         Objects.requireNonNull(functionNamesProjection, "functionNamesProjection");
     this.authAttempts = Objects.requireNonNull(authAttempts, "authAttempts");
-    if (authAttemptTtl.isZero() || authAttemptTtl.isNegative()) {
-      throw new IllegalArgumentException("authAttemptTtl must be a positive duration");
-    }
-    this.authAttemptTtl = authAttemptTtl;
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -173,7 +170,7 @@ public final class PluginManagementService {
             PluginAuthNonce.hash(authAttemptId),
             requireConfiguration(pluginId).version(),
             region,
-            clock.instant().plus(authAttemptTtl)));
+            clock.instant().plus(AUTH_ATTEMPT_TTL)));
     PluginAuthPrepareDTO response = new PluginAuthPrepareDTO();
     response.setAuthAttemptId(authAttemptId);
     response.setLoginUrl(loginUrl);

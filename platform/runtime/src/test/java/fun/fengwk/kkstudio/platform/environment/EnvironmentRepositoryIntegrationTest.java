@@ -21,7 +21,7 @@ import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.UUID;
 
-/** {@code environment} 读取路径与两种行锁的真实 SQL 覆盖：按名/按注册令牌查询、排序与 KEY SHARE 读取。 */
+/** {@code environment} 读取路径与行锁的真实 SQL 覆盖：按名/按注册令牌查询、排序与 FOR UPDATE 读取。 */
 class EnvironmentRepositoryIntegrationTest {
 
   private static JdbcClient jdbcClient;
@@ -50,7 +50,7 @@ class EnvironmentRepositoryIntegrationTest {
     repository = new EnvironmentRepository(jdbcClient, new EnvironmentChangeNotifier(jdbcClient));
   }
 
-  /** listAll 按 name 升序；按主键/名称/注册令牌的读取与两种行锁返回权威行。 */
+  /** listAll 按 name 升序；按主键/名称/注册令牌的读取与行锁返回权威行。 */
   @Test
   void readPathsAndLocksReturnAuthoritativeRows() {
     UUID alpha = insert("alpha", "token-alpha");
@@ -64,7 +64,6 @@ class EnvironmentRepositoryIntegrationTest {
             repository.getByRegistrationTokenHash(RegistrationTokens.hash("token-alpha")).getId())
         .isEqualTo(alpha);
     assertThat(repository.lockById(beta).getName()).isEqualTo("beta");
-    assertThat(repository.lockForKeyShare(alpha).getName()).isEqualTo("alpha");
     assertThat(repository.existsByName("alpha")).isTrue();
     assertThat(repository.existsByName("missing")).isFalse();
     assertThat(repository.listAll())

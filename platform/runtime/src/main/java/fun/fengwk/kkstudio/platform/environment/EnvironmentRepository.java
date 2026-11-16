@@ -134,11 +134,6 @@ public class EnvironmentRepository {
     return findOne("select " + COLUMNS + " from environment where id = :id for update", "id", id);
   }
 
-  public Environment lockForKeyShare(UUID id) {
-    return findOne(
-        "select " + COLUMNS + " from environment where id = :id for key share", "id", id);
-  }
-
   public boolean existsByName(String name) {
     return jdbcClient
         .sql("select count(1) > 0 from environment where name = :name")

@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.platform.pluginhost.credential;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
@@ -166,13 +165,18 @@ class PluginCredentialRefreshServiceTest {
     assertEquals(Optional.of(NOW.plusSeconds(5)), service.earliestRefreshAt());
   }
 
-  /** 错误摘要去除首尾空白与换行，并按 UTF-8 字节截断。 */
+  /** 错误摘要去除首尾空白与换行，并按 UTF-8 字节截断；多字节字符与代理对不被截成半个码点。 */
   @Test
   void boundedErrorNormalizesAndTruncates() {
     assertEquals("a b", PluginCredentialRefreshService.boundedError(" a\nb ", "fallback"));
     assertEquals("fallback", PluginCredentialRefreshService.boundedError(null, "fallback"));
     String bounded = PluginCredentialRefreshService.boundedError("界".repeat(2000), "fallback");
-    assertTrue(bounded.getBytes(StandardCharsets.UTF_8).length <= 4096);
+    assertEquals(4095, bounded.getBytes(StandardCharsets.UTF_8).length);
+    // 4 字节代理对不会被一分为二：整段只保留能完整编码的前缀。
+    String emoji = "😀";
+    String mixed = PluginCredentialRefreshService.boundedError(emoji.repeat(2000), "fallback");
+    assertEquals(4096, mixed.getBytes(StandardCharsets.UTF_8).length);
+    assertEquals(1024, mixed.length() / 2);
   }
 
   private void assertFailure(

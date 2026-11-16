@@ -90,8 +90,7 @@ public class PluginConfiguration {
       PluginCredentialRepository credentials,
       PluginConfigurationService configurationService,
       ObjectProvider<PluginFunctionNamesProjection> functionNamesProjections,
-      PluginAuthAttemptRepository authAttempts,
-      PluginProperties properties) {
+      PluginAuthAttemptRepository authAttempts) {
     return new PluginManagementService(
         registry,
         catalogRuntime::getObject,
@@ -100,7 +99,6 @@ public class PluginConfiguration {
         configurationService,
         functionNamesProjections.getIfAvailable(() -> PluginFunctionNamesProjection.NONE),
         authAttempts,
-        properties.getAuthAttemptTtl(),
         Clock.systemUTC());
   }
 

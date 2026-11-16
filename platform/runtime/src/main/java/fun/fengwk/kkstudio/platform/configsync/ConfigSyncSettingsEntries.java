@@ -40,11 +40,6 @@ final class ConfigSyncSettingsEntries {
     if (!(node instanceof Map<?, ?> rawMap)) {
       throw DomainException.validation(RESOURCE, "settings must be an object");
     }
-    if (rawMap.containsKey("network")) {
-      // network 不属于当前六节契约：必须在导入前置契约检查中明确拒绝，不能按未知字段跳过。
-      throw DomainException.validation(
-          RESOURCE, "settings.network is no longer supported; use backendNetwork");
-    }
     Map<String, Object> raw = new LinkedHashMap<>();
     for (Map.Entry<?, ?> entry : rawMap.entrySet()) {
       raw.put(String.valueOf(entry.getKey()), entry.getValue());

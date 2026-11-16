@@ -78,7 +78,7 @@ final class AiRuntimeSettingsSchema {
             599));
   }
 
-  /** 上下文压缩：模型引用、保留最近 token 与回复预留 token（PLAN 14.2 文案）。 */
+  /** 上下文压缩：压缩使用的模型引用与保留的最近 token 数。 */
   private static SystemSettingsSchemaDTO.GroupDTO compactionGroup() {
     return SystemSettingsSchemaDsl.group(
         "aiRuntime.compaction",

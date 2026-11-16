@@ -79,7 +79,6 @@ import java.net.InetSocketAddress;
 import java.net.ProxySelector;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -593,7 +592,6 @@ class OpenCliPluginPostgresIntegrationTest {
         configuration,
         PluginCanvasFunctionCatalog::functionNames,
         mock(PluginAuthAttemptRepository.class),
-        Duration.ofMinutes(5),
         Clock.systemUTC());
   }
 

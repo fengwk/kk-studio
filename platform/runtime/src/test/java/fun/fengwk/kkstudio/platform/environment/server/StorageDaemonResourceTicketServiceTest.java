@@ -149,7 +149,14 @@ class StorageDaemonResourceTicketServiceTest {
     StorageUploadService uploadService = mock(StorageUploadService.class);
     StorageUploadDTO malformed =
         new StorageUploadReadyDTO(
-            UUID.randomUUID().toString(), null, Instant.parse("2026-07-28T10:01:00Z"));
+            UUID.randomUUID().toString(),
+            null,
+            Instant.parse("2026-07-28T10:01:00Z"),
+            null,
+            null,
+            null,
+            null,
+            null);
     when(uploadService.reserve(any())).thenReturn(malformed);
     StorageDaemonResourceTicketService service = newService(uploadService);
 
@@ -209,12 +216,26 @@ class StorageDaemonResourceTicketServiceTest {
 
   private static StorageUploadDTO pendingUpload(UUID uploadId) {
     return new StorageUploadPendingDTO(
-        uploadId.toString(), presignedPut(), Instant.parse("2026-07-28T10:01:00Z"));
+        uploadId.toString(),
+        presignedPut(),
+        Instant.parse("2026-07-28T10:01:00Z"),
+        null,
+        null,
+        null,
+        null,
+        null);
   }
 
   private static StorageUploadDTO readyUpload(UUID uploadId, UUID blobId) {
     return new StorageUploadReadyDTO(
-        uploadId.toString(), blobId.toString(), Instant.parse("2026-07-28T10:01:00Z"));
+        uploadId.toString(),
+        blobId.toString(),
+        Instant.parse("2026-07-28T10:01:00Z"),
+        null,
+        null,
+        null,
+        null,
+        null);
   }
 
   private static StoragePresignedUrlDTO presignedPut() {

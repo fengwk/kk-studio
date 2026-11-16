@@ -14,7 +14,7 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * 意图：官方发布解析必须只接受「非草稿、tag 匹配、目标 os/arch 五件套资产齐全、制品地址就是官方地址」的完整发布，并从官方校验文件取 SHA256；
+ * 意图：官方发布解析必须只接受「非草稿、tag 匹配、目标 os/arch 五件套资产齐全、制品地址就是官方地址」的完整发布，且官方校验文件必须可读并能解析出摘要（摘要不对外输出）；
  * 任何不完整、平台不匹配或可疑的元数据都收敛为不可用，绝不回退到任意版本、任意 URL 或其他平台归档。
  */
 class OfficialDaemonReleaseProviderTest {
@@ -47,8 +47,6 @@ class OfficialDaemonReleaseProviderTest {
 
     assertTrue(target.isPresent());
     assertEquals(VERSION, target.get().targetVersion());
-    assertEquals(ARTIFACT_URL, target.get().artifactUrl());
-    assertEquals(SHA, target.get().artifactSha256());
     assertEquals(TAG, feed.requestedTag);
   }
 

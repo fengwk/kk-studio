@@ -26,8 +26,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 设置同步编排：inventory / export 在单一只读快照上完成，确保跨集合一致；import 把校验与外部准备放在事务外，写事务委托给 {@link
- * ConfigSyncApplier}。
+ * 设置同步编排：inventory 与 export 在单一只读快照上完成，确保跨集合一致；checkImport 与 import 的计划快照同样取自 {@link
+ * ConfigSyncSnapshotReader#read()}，MCP 发现与 Git 准备全程在任何事务之外，写事务委托给 {@link ConfigSyncApplier}。
  */
 @AllArgsConstructor
 @Service

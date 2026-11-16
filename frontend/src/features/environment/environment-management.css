@@ -106,10 +106,6 @@
   border-color: var(--warning-border);
 }
 
-.env-event-item.is-error {
-  border-color: var(--danger-border);
-}
-
 .env-event-header {
   display: flex;
   align-items: center;
@@ -140,12 +136,6 @@
   color: var(--warning);
   border-color: var(--warning-border);
   background: var(--warning-soft);
-}
-
-.env-event-level.is-error {
-  color: var(--danger);
-  border-color: var(--danger-border);
-  background: var(--danger-soft);
 }
 
 .env-event-type {

@@ -776,12 +776,10 @@ export interface EnvironmentEventDTO {
 export type EnvironmentEventLevel =
   | 'INFO'
   | 'WARN'
-  | 'ERROR'
 
 export const ENVIRONMENT_EVENT_LEVEL_VALUES: readonly EnvironmentEventLevel[] = [
   'INFO',
   'WARN',
-  'ERROR',
 ]
 
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentEventType */

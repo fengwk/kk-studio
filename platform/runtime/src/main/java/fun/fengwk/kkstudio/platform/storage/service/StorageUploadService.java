@@ -64,8 +64,9 @@ import java.util.UUID;
  * 非阻塞尝试同一把锁并跳过忙的行，因此删除证据（临时对象、候选对象、上传行）永远不可能与写对象交错。锁在任何业务事务之前取得，绝不在事务或行锁内做 S3 I/O。
  *
  * <p>complete 先校验并探针临时对象，再复制候选 blob 的最终对象，最后才在事务内去重插入/并发消解并绑定上传 —— DB 绝不引用缺失的最终对象； 同一上传的并发 complete
- * 通过 {@code setBlobIdIfNull} 只成功一次。READY 重试路径幂等并自愈（最终对象缺失时从临时对象补复制），并清理残留的临时/未使用候选对象。绑定失败时只依赖上传行
- * （{@code candidate_blob_id}）作为耐久锚点，任何对象清理都留给后台按行事实执行，绝不按异常分支盲目删除候选对象。
+ * 通过 {@code setBlobIdIfNull} 只成功一次。READY 重试路径幂等并自愈（最终对象缺失时从临时对象补复制）。
+ * 绑定提交后临时对象与未使用候选对象的删除是尽力而为：删除失败只记录日志，不否定已提交的 READY 事实；残留对象由过期/清理路径按上传行事实
+ * （临时键与未绑定候选键）幂等回收。绑定失败时只依赖上传行（{@code candidate_blob_id}）作为耐久锚点，任何对象清理都留给后台按行事实执行， 绝不按异常分支盲目删除候选对象。
  *
  * <p>过期没有持久化的权威列：未请求清理且未被 claim 的上传在 {@code created_at + 当前 upload TTL} 之后过期，{@code created_at}
  * 与所有「当下」判定都由同一注入 {@link Clock} 写入/换算，避免节点时钟漂移。上传契约只负责在 reserve/stage/complete/consume 时读取当前 TTL
@@ -180,10 +181,10 @@ public class StorageUploadService {
     }
     requireCleanupAvailable(upload, uploadTtl);
     if (upload.getBlobId() != null) {
-      // READY 重试：幂等并自愈最终对象，随后清理残留的临时对象与未使用的候选对象。
+      // READY 重试：幂等并自愈最终对象，随后尽力清理残留的临时对象与未使用的候选对象。
       ensureBlobOriginal(upload.getBlobId(), uploadId);
-      s3StorageService.deleteObjectIfExists(StorageObjectKeys.uploadOriginal(uploadId));
-      expiryService.cleanupUnusedCandidate(upload);
+      expiryService.deleteObjectBestEffort(StorageObjectKeys.uploadOriginal(uploadId));
+      expiryService.cleanupUnusedCandidateBestEffort(upload);
       generatePreviewBestEffort(upload.getBlobId());
       return toDTO(upload, upload.getBlobId(), expiresAt(upload.getCreatedAt(), uploadTtl), null);
     }
@@ -199,7 +200,7 @@ public class StorageUploadService {
                 upload.getStoredWidth().longValue(),
                 upload.getStoredHeight().longValue(),
                 null);
-    UUID blobId = materializeAndBind(upload, facts, false, uploadTtl);
+    UUID blobId = materializeAndBind(upload, facts, uploadTtl);
     return toDTO(upload, blobId, expiresAt(upload.getCreatedAt(), uploadTtl), null);
   }
 
@@ -300,7 +301,7 @@ public class StorageUploadService {
         S3ObjectMetadata head = headObjectWithChecksumOrFail(uploadId, tempKey);
         verifyObject(head, upload);
         StorageMediaFacts facts = mediaProbe.probe(tempKey, head);
-        UUID blobId = materializeAndBind(upload, facts, true, uploadTtl);
+        UUID blobId = materializeAndBind(upload, facts, uploadTtl);
         StorageBlob blob = blobManager.getBlob(blobId);
         if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
           throw new IllegalStateException("staged upload resolved to a missing blob");
@@ -314,11 +315,13 @@ public class StorageUploadService {
     }
   }
 
-  private UUID materializeAndBind(
-      StorageUpload upload,
-      StorageMediaFacts facts,
-      boolean bestEffortObjectCleanup,
-      long uploadTtl) {
+  /**
+   * 物化候选 blob、提交绑定并尽力清理不再需要的对象。
+   *
+   * <p>READY 已在本方法内的短事务提交，因此之后的删除失败只能记录日志并留给过期/清理路径：{@code candidate_blob_id} 与临时键是后台按行事实
+   * 回收的证据，删除成功与否都不改变 READY 结果。
+   */
+  private UUID materializeAndBind(StorageUpload upload, StorageMediaFacts facts, long uploadTtl) {
     String tempKey = StorageObjectKeys.uploadOriginal(upload.getId());
     // 先物化候选 blob 的最终对象，再让 DB 引用它：DB 绝不引用缺失的最终对象。
     s3StorageService.copyObject(
@@ -326,19 +329,11 @@ public class StorageUploadService {
     UUID blobId =
         transactionTemplate.execute(status -> resolveBlobAndBindUpload(upload, facts, uploadTtl));
     if (!blobId.equals(upload.getCandidateBlobId())) {
-      // 去重落败：未使用的候选对象幂等清理（预览先于原始）；READY 上传行（candidate_blob_id）
-      // 是崩溃窗口的恢复证据。
-      if (bestEffortObjectCleanup) {
-        expiryService.cleanupCandidateObjectsBestEffort(upload.getCandidateBlobId());
-      } else {
-        expiryService.cleanupCandidateObjects(upload.getCandidateBlobId());
-      }
+      // 去重落败：未使用的候选对象尽力清理（预览先于原始）；READY 上传行（candidate_blob_id）
+      // 是崩溃窗口的恢复证据，也是残留对象的后台回收依据。
+      expiryService.cleanupCandidateObjectsBestEffort(upload.getCandidateBlobId());
     }
-    if (bestEffortObjectCleanup) {
-      expiryService.deleteObjectBestEffort(tempKey);
-    } else {
-      s3StorageService.deleteObjectIfExists(tempKey);
-    }
+    expiryService.deleteObjectBestEffort(tempKey);
     generatePreviewBestEffort(blobId);
     return blobId;
   }
@@ -666,8 +661,6 @@ public class StorageUploadService {
         upload.getStoredWidth(),
         upload.getStoredHeight());
   }
-
-  private record ReserveOutcome(StorageUpload upload, UUID blobId) {}
 
   /** 服务端 staging 完成后的权威事实；媒体类型来自探针，不信任调用方声明。 */
   public record StagedUpload(

@@ -700,7 +700,14 @@ class StoragePluginResourceGatewayTest {
 
     StorageUploadDTO completed =
         new StorageUploadReadyDTO(
-            uploadId.toString(), blobId.toString(), Instant.parse("2026-07-28T10:01:00Z"));
+            uploadId.toString(),
+            blobId.toString(),
+            Instant.parse("2026-07-28T10:01:00Z"),
+            null,
+            null,
+            null,
+            null,
+            null);
     when(storageUploadService.complete(uploadId)).thenReturn(completed);
 
     transport.setGetResponse(
@@ -832,7 +839,14 @@ class StoragePluginResourceGatewayTest {
     when(storageUploadService.complete(uploadId))
         .thenReturn(
             new StorageUploadPendingDTO(
-                uploadId.toString(), null, Instant.parse("2026-07-28T10:01:00Z")));
+                uploadId.toString(),
+                null,
+                Instant.parse("2026-07-28T10:01:00Z"),
+                null,
+                null,
+                null,
+                null,
+                null));
     assertThrows(
         PluginResourceUnavailableException.class,
         () -> stageRemoteMedia(uri, PluginMediaFamily.IMAGE, "pic.png"));
@@ -1188,7 +1202,9 @@ class StoragePluginResourceGatewayTest {
         200, Map.of("content-length", List.of(String.valueOf(pngData.length))), pngData);
 
     when(storageUploadService.reserveStaged(any()))
-        .thenReturn(new StorageUploadPendingDTO(null, null, Instant.parse("2026-07-28T10:01:00Z")));
+        .thenReturn(
+            new StorageUploadPendingDTO(
+                null, null, Instant.parse("2026-07-28T10:01:00Z"), null, null, null, null, null));
     PluginResourceUnavailableException noId =
         assertThrows(
             PluginResourceUnavailableException.class,
@@ -1201,7 +1217,15 @@ class StoragePluginResourceGatewayTest {
 
     when(storageUploadService.reserveStaged(any()))
         .thenReturn(
-            new StorageUploadPendingDTO("not-a-uuid", null, Instant.parse("2026-07-28T10:01:00Z")));
+            new StorageUploadPendingDTO(
+                "not-a-uuid",
+                null,
+                Instant.parse("2026-07-28T10:01:00Z"),
+                null,
+                null,
+                null,
+                null,
+                null));
     PluginResourceUnavailableException badId =
         assertThrows(
             PluginResourceUnavailableException.class,
@@ -1295,14 +1319,28 @@ class StoragePluginResourceGatewayTest {
   private void mockReserveReady(UUID uploadId, UUID blobId) {
     StorageUploadDTO upload =
         new StorageUploadReadyDTO(
-            uploadId.toString(), blobId.toString(), Instant.parse("2026-07-28T10:01:00Z"));
+            uploadId.toString(),
+            blobId.toString(),
+            Instant.parse("2026-07-28T10:01:00Z"),
+            null,
+            null,
+            null,
+            null,
+            null);
     when(storageUploadService.reserveStaged(any())).thenReturn(upload);
   }
 
   private void mockReservePending(UUID uploadId, StoragePresignedUrlDTO presignedPut) {
     StorageUploadDTO upload =
         new StorageUploadPendingDTO(
-            uploadId.toString(), presignedPut, Instant.parse("2026-07-28T10:01:00Z"));
+            uploadId.toString(),
+            presignedPut,
+            Instant.parse("2026-07-28T10:01:00Z"),
+            null,
+            null,
+            null,
+            null,
+            null);
     when(storageUploadService.reserveStaged(any())).thenReturn(upload);
   }
 

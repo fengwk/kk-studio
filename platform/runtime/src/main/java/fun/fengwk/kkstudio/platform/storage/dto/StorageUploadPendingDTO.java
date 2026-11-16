@@ -32,9 +32,4 @@ public final class StorageUploadPendingDTO implements StorageUploadDTO {
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable Integer storedHeight;
-
-  public StorageUploadPendingDTO(
-      String id, StoragePresignedUrlDTO presignedPut, Instant expiresAt) {
-    this(id, presignedPut, expiresAt, null, null, null, null, null);
-  }
 }
