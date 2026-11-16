@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.transport;
 
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 
 import java.io.ByteArrayOutputStream;
@@ -98,9 +99,24 @@ public class JdkHttpSseTransport {
     } catch (HttpTimeoutException e) {
       // 请求 timeout 就是响应头期限：连接阶段到期（HttpConnectTimeoutException）同样属于超时。
       throw new TransportException(
-          TransportErrorKind.TIMEOUT, "Timed out waiting for response headers", e);
+          TransportErrorKind.TIMEOUT,
+          "Timed out waiting for response headers",
+          0,
+          null,
+          false,
+          null,
+          e,
+          ModelFailureMetadata.TransportStage.BEFORE_HEADERS);
     } catch (IOException e) {
-      throw new TransportException(TransportErrorKind.IO, "Connection or network I/O failed", e);
+      throw new TransportException(
+          TransportErrorKind.IO,
+          "Connection or network I/O failed",
+          0,
+          null,
+          false,
+          null,
+          e,
+          ModelFailureMetadata.TransportStage.BEFORE_HEADERS);
     }
   }
 
@@ -122,7 +138,8 @@ public class JdkHttpSseTransport {
           error.bodyBytes(),
           error.truncated(),
           headers,
-          null);
+          null,
+          ModelFailureMetadata.TransportStage.BEFORE_HEADERS);
     }
     String contentType = response.headers().firstValue("Content-Type").orElse("");
     if (!isValidEventStreamContentType(contentType)) {
@@ -132,8 +149,10 @@ public class JdkHttpSseTransport {
           "Invalid Content-Type for SSE stream; expected text/event-stream",
           statusCode,
           null,
+          false,
           headers,
-          null);
+          null,
+          ModelFailureMetadata.TransportStage.STREAM);
     }
 
     IncrementalSseParser parser =
@@ -162,7 +181,14 @@ public class JdkHttpSseTransport {
         throw new TransportException(TransportErrorKind.CANCELLED, "Stream read interrupted", e);
       }
       throw new TransportException(
-          TransportErrorKind.IO, "I/O failure while reading SSE stream", e);
+          TransportErrorKind.IO,
+          "I/O failure while reading SSE stream",
+          0,
+          null,
+          false,
+          null,
+          e,
+          ModelFailureMetadata.TransportStage.STREAM);
     }
   }
 
@@ -275,7 +301,15 @@ public class JdkHttpSseTransport {
     void throwIfExpired() {
       String reason = expiredReason;
       if (reason != null) {
-        throw new TransportException(TransportErrorKind.TIMEOUT, reason);
+        throw new TransportException(
+            TransportErrorKind.TIMEOUT,
+            reason,
+            0,
+            null,
+            false,
+            null,
+            null,
+            ModelFailureMetadata.TransportStage.STREAM);
       }
     }
 

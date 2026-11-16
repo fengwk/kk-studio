@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 
+import java.time.Duration;
+
 /**
  * 一次模型失败的普通重试资格：候选判定来自 {@link ModelInvocationError#retryCandidate()}，带 HTTP 状态时再由现读的 {@link
  * fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy} 唯一决定；其余非 HTTP 失败走共享 {@link
@@ -12,6 +14,15 @@ import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 final class ModelFailureRetry {
 
   private ModelFailureRetry() {}
+
+  static Duration delay(ModelInvocationError error, Duration backoff, Duration maxDelay) {
+    Long retryAfterMillis = error.metadata() == null ? null : error.metadata().retryAfterMillis();
+    if (retryAfterMillis == null) {
+      return backoff;
+    }
+    long mergedMillis = Math.max(backoff.toMillis(), retryAfterMillis);
+    return Duration.ofMillis(Math.min(mergedMillis, maxDelay.toMillis()));
+  }
 
   static boolean isRetryable(
       ModelInvocationError error, ModelProcessorConfig config, String providerName) {

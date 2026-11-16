@@ -30,7 +30,7 @@ READY   -> RUNNING（准入通过）/ FAILED（准入拒绝或请求物化失败
 RUNNING -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
 ```
 
-`attempt` 只在 `READY -> RUNNING` 上 +1，且该转换在请求发出之前持久化。失败 attempt 以 [`ModelAttemptFailure`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelAttemptFailure.java) 追加审计，下一次 attempt 用同一冻结请求重新发起；`CONTEXT_LIMIT` 与 `CANCELLED` 不进入可重试失败审计。
+`attempt` 只在 `READY -> RUNNING` 上 +1，且该转换在请求发出之前持久化。失败 attempt 以 [`ModelAttemptFailure`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelAttemptFailure.java) 追加审计，下一次 attempt 用同一冻结请求重新发起；`CONTEXT_LIMIT`、`CANCELLED`、认证/计费终态与上游明确 `retryable:false` 不会因 HTTP 状态白名单而重试。
 
 [`ModelRequestSpec`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelRequestSpec.java) 冻结一次调用不可变的请求契约：
 
@@ -75,7 +75,7 @@ Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员
 
 模型组在逻辑调用开始时把组名、组版本、有序成员执行快照、降级状态码与冷却秒数冻结进 [`ModelGroupExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelGroupExecution.java)。成员切换只使用冻结快照，绝不重新读取 Catalog 混入新配置。当前成员与成员内普通尝试次数由 [`ModelGroupProgress`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelGroupProgress.java) 推进；全局 `ModelInvocation.attempt` 仍是所有真实上游 attempt 的审计序号。
 
-[`ModelGroupFailureDecider`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelGroupFailureDecider.java) 是唯一失败决策点：`CANCELLED` 与 `CONTEXT_LIMIT` 保留专用终止/压缩语义；命中组配置的 `fallbackStatusCodes`、普通重试预算耗尽，或本次失败本身不可重试（未命中 Provider 的 HTTP 重试白名单）时推进到下一成员；只有可重试且预算仍允许时才重试当前成员。成员冷却属于平台模型目录，经 `ModelGateway` 在调用方已有的事务内读写，不进入请求 Spec。候选读取与游标更新共同提交；冷却写入与 invocation、work 更新共同提交或回滚。平台用事务数据库时间判断冷却，写入时锁定组版本，拒绝旧版本结果且仅延长截止时间。
+[`ModelGroupFailureDecider`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelGroupFailureDecider.java) 是唯一失败决策点：`CANCELLED` 与 `CONTEXT_LIMIT` 保留专用终止/压缩语义；命中组配置的 `fallbackStatusCodes`、普通重试预算耗尽，或本次失败本身不可重试（未命中 Provider 的 HTTP 重试白名单）时推进到下一成员；只有可重试且预算仍允许时才重试当前成员。明确不可重试语义不会被相同成员的 HTTP 白名单覆盖；显式配置的模型组换成员仍遵循该组既有 fallback 契约。Retry-After 仅对已获准的重试生效，与策略退避取较大值，秒数上限为一小时，不改变 attempt 预算。失败 attempt 与终态 AssistantError 历史写入有限 `ModelFailureMetadata`；原始正文继续按文本契约保留，旧历史缺少可选 metadata 时仍可解码。成员冷却属于平台模型目录，经 `ModelGateway` 在调用方已有的事务内读写，不进入请求 Spec。候选读取与游标更新共同提交；冷却写入与 invocation、work 更新共同提交或回滚。平台用事务数据库时间判断冷却，写入时锁定组版本，拒绝旧版本结果且仅延长截止时间。
 
 ## 自动压缩
 

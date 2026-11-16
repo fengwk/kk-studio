@@ -81,7 +81,9 @@ public final class ModelAttemptMaterialization {
         || !entry.createdAt().equals(expected.failedAt())
         || !actual.retryAt().equals(expected.retryAt())
         || !actual.error().code().equals(expected.error().kind().name())
-        || !actual.error().message().equals(expected.error().message())) {
+        || !actual.error().message().equals(expected.error().message())
+        || !Objects.equals(actual.error().providerErrorCode(), expected.error().providerErrorCode())
+        || !Objects.equals(actual.error().metadata(), expected.error().metadata())) {
       throw new IllegalArgumentException(
           "materialized model attempt failure must match the invocation audit fact");
     }
@@ -175,7 +177,10 @@ public final class ModelAttemptMaterialization {
 
   private static boolean sameError(ModelInvocation invocation, AssistantErrorPayload payload) {
     return payload.error().code().equals(invocation.error().kind().name())
-        && payload.error().message().equals(invocation.error().message());
+        && payload.error().message().equals(invocation.error().message())
+        && Objects.equals(
+            payload.error().providerErrorCode(), invocation.error().providerErrorCode())
+        && Objects.equals(payload.error().metadata(), invocation.error().metadata());
   }
 
   private static AssistantAbortedPayload aborted(StreamCheckpoint checkpoint) {

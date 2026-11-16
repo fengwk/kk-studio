@@ -61,6 +61,18 @@ class OpenAiChatErrorMapperTest {
             .httpStatus());
   }
 
+  @Test
+  void propagatesExplicitRetryDirective() {
+    ProviderException failure =
+        OpenAiChatErrorMapper.mapTransportException(
+            httpStatus(
+                503,
+                "{\"error\":{\"type\":\"server_error\",\"code\":\"server_error\",\"retryable\":false}}"));
+    assertFalse(failure.metadata().retryable());
+    assertEquals("server_error", failure.providerErrorCode());
+    assertEquals(503, failure.httpStatus());
+  }
+
   private static TransportException httpStatus(int status, String body) {
     return new TransportException(
         TransportErrorKind.HTTP_STATUS,

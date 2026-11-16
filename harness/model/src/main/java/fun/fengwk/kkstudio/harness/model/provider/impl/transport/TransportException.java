@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.transport;
 
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
+
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -27,6 +29,7 @@ public final class TransportException extends RuntimeException {
   private final byte[] errorBodyBytes;
   private final boolean errorBodyTruncated;
   private final Map<String, List<String>> safeHeaders;
+  private final ModelFailureMetadata.TransportStage transportStage;
 
   public TransportException(
       TransportErrorKind kind,
@@ -36,12 +39,25 @@ public final class TransportException extends RuntimeException {
       boolean errorBodyTruncated,
       Map<String, List<String>> headers,
       Throwable cause) {
+    this(kind, safeMessage, statusCode, errorBodyBytes, errorBodyTruncated, headers, cause, null);
+  }
+
+  public TransportException(
+      TransportErrorKind kind,
+      String safeMessage,
+      int statusCode,
+      byte[] errorBodyBytes,
+      boolean errorBodyTruncated,
+      Map<String, List<String>> headers,
+      Throwable cause,
+      ModelFailureMetadata.TransportStage transportStage) {
     super(sanitizeMessage(safeMessage), sanitizeCause(cause));
     this.kind = Objects.requireNonNull(kind, "kind must not be null");
     this.statusCode = statusCode;
     this.errorBodyBytes = errorBodyBytes == null ? EMPTY_BYTES : errorBodyBytes.clone();
     this.errorBodyTruncated = errorBodyTruncated;
     this.safeHeaders = HeaderSanitizer.sanitizeHeaders(headers);
+    this.transportStage = transportStage;
   }
 
   public TransportException(
@@ -101,6 +117,10 @@ public final class TransportException extends RuntimeException {
   /** 返回清洗后的安全响应头映射。 */
   public Map<String, List<String>> safeHeaders() {
     return safeHeaders;
+  }
+
+  public ModelFailureMetadata.TransportStage transportStage() {
+    return transportStage;
   }
 
   @Override

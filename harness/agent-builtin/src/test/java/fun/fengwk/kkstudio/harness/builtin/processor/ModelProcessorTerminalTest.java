@@ -15,6 +15,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -26,6 +27,7 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -198,7 +200,7 @@ class ModelProcessorTerminalTest extends ModelProcessorTestSupport {
                 1,
                 InvocationRetryBackoffStrategy.FIXED,
                 Duration.ofSeconds(5),
-                Duration.ofSeconds(5)),
+                Duration.ofSeconds(30)),
             providerName -> new ModelHttpErrorPolicy(List.of(408, 429)));
     fixture.gateway.queueControlled();
     assertEquals(
@@ -206,7 +208,13 @@ class ModelProcessorTerminalTest extends ModelProcessorTestSupport {
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.fail(new ModelInvocationError(ProviderErrorKind.BILLING, "quota exceeded", 429));
+    listener.fail(
+        new ModelInvocationError(
+            ProviderErrorKind.BILLING,
+            "quota exceeded",
+            429,
+            "rate_limit",
+            new ModelFailureMetadata(null, null, true, 20_000L, null, null, null)));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.READY, model.status());
@@ -214,6 +222,9 @@ class ModelProcessorTerminalTest extends ModelProcessorTestSupport {
     ModelInvocationError recorded = model.failedAttempts().getFirst().error();
     assertEquals(ProviderErrorKind.BILLING, recorded.kind());
     assertEquals(429, recorded.httpStatus());
+    assertEquals(
+        Instant.parse("2026-07-01T00:00:20Z"), model.failedAttempts().getFirst().retryAt());
+    assertEquals(20_000L, recorded.metadata().retryAfterMillis());
   }
 
   /** 未列入白名单的 HTTP 失败立即失败，不消耗重试预算、不新增 failed attempt。 */
@@ -241,6 +252,39 @@ class ModelProcessorTerminalTest extends ModelProcessorTestSupport {
     assertTrue(model.failedAttempts().isEmpty());
     assertEquals(ProviderErrorKind.TRANSIENT, model.error().kind());
     assertEquals(500, model.error().httpStatus());
+  }
+
+  /** 认证终态与上游明确 retryable=false 都先于 503 状态白名单。 */
+  @Test
+  void terminalAndExplicitNonRetryable503DoNotRetry() {
+    InvocationRetryPolicy retryPolicy =
+        new InvocationRetryPolicy(
+            3, InvocationRetryBackoffStrategy.FIXED, Duration.ofSeconds(5), Duration.ofSeconds(5));
+    Fixture auth = fixture(retryPolicy, providerName -> ModelHttpErrorPolicy.DEFAULT);
+    auth.gateway.queueControlled();
+    auth.processor.process(claim(auth.store, auth.invocationId));
+    auth.gateway
+        .controlled(auth.invocationId)
+        .fail(new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "terminal auth", 503));
+    assertEquals(ModelInvocationStatus.FAILED, model(auth.store, auth.invocationId).status());
+    assertEquals(1, model(auth.store, auth.invocationId).attempt());
+
+    Fixture explicit = fixture(retryPolicy, providerName -> ModelHttpErrorPolicy.DEFAULT);
+    explicit.gateway.queueControlled();
+    explicit.processor.process(claim(explicit.store, explicit.invocationId));
+    explicit
+        .gateway
+        .controlled(explicit.invocationId)
+        .fail(
+            new ModelInvocationError(
+                ProviderErrorKind.TRANSIENT,
+                "upstream denied retry",
+                503,
+                null,
+                new ModelFailureMetadata(null, null, false, null, null, null, null)));
+    assertEquals(
+        ModelInvocationStatus.FAILED, model(explicit.store, explicit.invocationId).status());
+    assertEquals(1, model(explicit.store, explicit.invocationId).attempt());
   }
 
   /** 空白名单禁用 HTTP 重试：即使还有预算也直接失败。 */
@@ -351,7 +395,7 @@ class ModelProcessorTerminalTest extends ModelProcessorTestSupport {
         fixture.processor.process(claim(fixture.store, fixture.invocationId)));
     ControlledRun listener = fixture.gateway.controlled(fixture.invocationId);
 
-    listener.fail(new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 401));
+    listener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "down", 503));
 
     assertEquals(ModelInvocationStatus.READY, model(fixture.store, fixture.invocationId).status());
 
@@ -361,15 +405,14 @@ class ModelProcessorTerminalTest extends ModelProcessorTestSupport {
     assertEquals(ProcessResult.STARTED, fixture.processor.process(second));
     ControlledRun secondListener = fixture.gateway.controlled(fixture.invocationId);
 
-    secondListener.fail(new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 401));
+    secondListener.fail(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "down", 503));
 
     ModelInvocation model = model(fixture.store, fixture.invocationId);
     assertEquals(ModelInvocationStatus.FAILED, model.status());
     assertEquals(2, model.attempt());
     assertEquals(1, model.failedAttempts().size());
-    assertEquals(
-        ProviderErrorKind.AUTHENTICATION, model.failedAttempts().getFirst().error().kind());
-    assertEquals(401, model.failedAttempts().getFirst().error().httpStatus());
+    assertEquals(ProviderErrorKind.TRANSIENT, model.failedAttempts().getFirst().error().kind());
+    assertEquals(503, model.failedAttempts().getFirst().error().httpStatus());
   }
 
   /** onUnknown：RUNNING 保留 attempt 转 UNKNOWN，即使错误是 TRANSIENT 也不 retry。 */

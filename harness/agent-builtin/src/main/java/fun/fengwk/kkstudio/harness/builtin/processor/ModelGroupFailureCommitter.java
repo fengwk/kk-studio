@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.BuiltinStore;
@@ -111,16 +112,21 @@ final class ModelGroupFailureCommitter {
     }
     ModelGroupProgress progress = requireValidProgress(model, group);
     boolean retryable = ModelFailureRetry.isRetryable(error, config, providerName);
+    InvocationRetryPolicy retryPolicy = config.retryPolicyProvider().get();
     InvocationRetryDecision retryDecision =
         InvocationRetryDecision.decide(
-            config.retryPolicyProvider().get(),
-            retryable,
-            Math.addExact(progress.memberAttempts(), 1));
+            retryPolicy, retryable, Math.addExact(progress.memberAttempts(), 1));
     return switch (ModelGroupFailureDecider.decide(
         error, group, retryable, retryDecision.retry())) {
       case DEDICATED_TERMINAL -> null;
       case RETRY_CURRENT -> retryCurrent(
-          tx, thread, model, progress, retryDecision.delay(), error, now);
+          tx,
+          thread,
+          model,
+          progress,
+          ModelFailureRetry.delay(error, retryDecision.delay(), retryPolicy.maxDelay()),
+          error,
+          now);
       case ADVANCE -> advance(core, tx, thread, model, group, progress, error, now);
     };
   }

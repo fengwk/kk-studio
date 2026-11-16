@@ -120,7 +120,9 @@ public final class BuiltinHistoryPayloadMapper {
       ModelInvocationError error, ModelAttemptSnapshot attempt) {
     Objects.requireNonNull(error, "error");
     return new AssistantErrorPayload(
-        new AssistantError(error.kind().name(), error.message()), attempt);
+        new AssistantError(
+            error.kind().name(), error.message(), error.providerErrorCode(), error.metadata()),
+        attempt);
   }
 
   private static ToolBinding boundedBinding(String toolName, List<ToolBinding> bindings) {

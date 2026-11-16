@@ -50,6 +50,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
@@ -248,6 +249,30 @@ class HistoryEntryPayloadJsonCodecTest {
 
     assertEquals(payload, CODEC.decode(payload.type(), CODEC.encode(payload)));
     assertEquals(payload, CODEC.decodeNode(payload.type(), CODEC.encodeNode(payload)));
+  }
+
+  /** 失败安全元数据随 attempt/终态历史往返，旧的仅 code/message 历史仍可读取。 */
+  @Test
+  void roundTripsFailureMetadataAndReadsLegacyAssistantError() {
+    ModelFailureMetadata metadata =
+        new ModelFailureMetadata(
+            "openai",
+            "model-1",
+            false,
+            120_000L,
+            "request-1",
+            "ray-1",
+            ModelFailureMetadata.TransportStage.BEFORE_HEADERS);
+    EntryPayload withMetadata =
+        new AssistantErrorPayload(
+            new AssistantError("TRANSIENT", "HTTP 503", "server_error", metadata), null);
+    assertEquals(withMetadata, CODEC.decode(withMetadata.type(), CODEC.encode(withMetadata)));
+
+    String oldPayload =
+        "{\"error\":{\"code\":\"TRANSIENT\",\"message\":\"HTTP 503\"},\"attempt\":null}";
+    EntryPayload legacy = CODEC.decode(EntryType.ASSISTANT_ERROR, oldPayload);
+    assertNull(((AssistantErrorPayload) legacy).error().metadata());
+    assertEquals(oldPayload, CODEC.encode(legacy));
   }
 
   /** ASSISTANT metadata 的流式生成计时可选可空：带计时精确往返，省略时解码为 null。 */

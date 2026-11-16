@@ -46,6 +46,7 @@ import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 
 import java.time.Instant;
@@ -113,6 +114,17 @@ public final class HistoryEntryPayloadJsonCodec {
   private static final Set<String> TURN_END_FIELDS =
       orderedSet("turnStartEntryId", "outcome", "continueModel", "reason", "closeRequestId");
   private static final Set<String> ERROR_FIELDS = orderedSet("code", "message");
+  private static final Set<String> ERROR_OPTIONAL_FIELDS =
+      orderedSet("providerErrorCode", "metadata");
+  private static final Set<String> FAILURE_METADATA_FIELDS =
+      orderedSet(
+          "provider",
+          "model",
+          "retryable",
+          "retryAfterMillis",
+          "requestId",
+          "cfRay",
+          "transportStage");
   private static final Set<String> TOOL_RESULT_METADATA_FIELDS =
       orderedSet(
           "assistantEntryId",
@@ -394,6 +406,28 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = NODES.objectNode();
     node.put("code", error.code());
     node.put("message", error.message());
+    if (error.providerErrorCode() != null) {
+      node.put("providerErrorCode", error.providerErrorCode());
+    }
+    if (error.metadata() != null) {
+      ModelFailureMetadata metadata = error.metadata();
+      ObjectNode diagnostic = NODES.objectNode();
+      putNullable(diagnostic, "provider", metadata.provider());
+      putNullable(diagnostic, "model", metadata.model());
+      putNullable(diagnostic, "retryable", metadata.retryable());
+      if (metadata.retryAfterMillis() == null) {
+        diagnostic.putNull("retryAfterMillis");
+      } else {
+        diagnostic.put("retryAfterMillis", metadata.retryAfterMillis());
+      }
+      putNullable(diagnostic, "requestId", metadata.requestId());
+      putNullable(diagnostic, "cfRay", metadata.cfRay());
+      putNullable(
+          diagnostic,
+          "transportStage",
+          metadata.transportStage() == null ? null : metadata.transportStage().name());
+      node.set("metadata", diagnostic);
+    }
     return node;
   }
 
@@ -641,9 +675,37 @@ public final class HistoryEntryPayloadJsonCodec {
 
   private static AssistantError decodeError(JsonNode value) {
     ObjectNode node = object(value, "ASSISTANT_ERROR.error");
-    JsonCodecSupport.requireFields(node, ERROR_FIELDS, "ASSISTANT_ERROR.error");
+    JsonCodecSupport.requireFields(
+        node, ERROR_FIELDS, ERROR_OPTIONAL_FIELDS, "ASSISTANT_ERROR.error");
     return new AssistantError(
-        HistoryValueCodecs.text(node, "code"), HistoryValueCodecs.text(node, "message"));
+        HistoryValueCodecs.text(node, "code"),
+        HistoryValueCodecs.text(node, "message"),
+        HistoryValueCodecs.nullableText(node, "providerErrorCode"),
+        node.has("metadata") && !node.get("metadata").isNull()
+            ? decodeFailureMetadata(node.get("metadata"))
+            : null);
+  }
+
+  private static ModelFailureMetadata decodeFailureMetadata(JsonNode value) {
+    ObjectNode node = object(value, "ASSISTANT_ERROR.error.metadata");
+    JsonCodecSupport.requireFields(node, FAILURE_METADATA_FIELDS, "ASSISTANT_ERROR.error.metadata");
+    return HarnessJson.STRICT.treeToValue(node, ModelFailureMetadata.class);
+  }
+
+  private static void putNullable(ObjectNode node, String field, String value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
+  }
+
+  private static void putNullable(ObjectNode node, String field, Boolean value) {
+    if (value == null) {
+      node.putNull(field);
+    } else {
+      node.put(field, value);
+    }
   }
 
   private static ToolResultMetadata decodeToolResultMetadata(JsonNode value) {
