@@ -76,7 +76,8 @@ main() {
   find "$STAGING_DIR/runtime/code-server" -type d -name 'ripgrep*' -prune -exec rm -rf -- {} +
   find "$STAGING_DIR/runtime/code-server" -type f \( -name rg -o -name rg.exe \) -delete
   cp "$WORK_DIR/$bin_name" "$STAGING_DIR/$bin_name"
-  find "$EXTENSION" -maxdepth 1 -type f \( -name '*.cjs' -o -name package.json \) ! -name '*.test.cjs' -exec cp {} "$STAGING_DIR/ide-extension/" \;
+  cp -R "$EXTENSION/." "$STAGING_DIR/ide-extension/"
+  find "$STAGING_DIR/ide-extension" -type f -name '*.test.cjs' -delete
   cp "$REPO_ROOT/LICENSE" "$STAGING_DIR/LICENSE"
   cp "$THIRD_PARTY_NOTICES" "$STAGING_DIR/THIRD_PARTY_NOTICES"
   "$NODE_BIN" -e 'const fs=require("node:fs");const manifest=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));const key=process.argv[2];fs.writeFileSync(process.argv[3],JSON.stringify({daemonVersion:process.argv[4],codeServerVersion:manifest.codeServerVersion,codeServer:{[key]:manifest.codeServer[key]}},null,2)+"\n")' "$MANIFEST" "$release_key" "$STAGING_DIR/runtime-manifest.json" "$version"

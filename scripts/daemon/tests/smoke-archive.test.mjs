@@ -15,13 +15,14 @@ const HOST = os.platform() === 'darwin' ? 'macos' : 'linux'
 const ARCH = ['arm64', 'aarch64'].includes(os.arch()) ? 'arm64' : 'amd64'
 const ARCHIVE_NAME = `kk-studio-daemon-v1.0.0-${HOST}-${ARCH}.tar.gz`
 const UNIX_HOST = ['linux', 'darwin'].includes(os.platform())
+const EXTENSION_FILES = ['extension.cjs', 'bridge.cjs', 'documents.cjs', 'framing.cjs', 'host-actions.cjs', 'package.json']
 
-function withArchive(body, { ripgrep = false, ripgrepPackage = false, testSuite = false, binary = true } = {}) {
+function withArchive(body, { ripgrep = false, ripgrepPackage = false, testSuite = false, missingExtensionFile = null, binary = true } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'kk-daemon-smoke-test-'))
   try {
     const members = [
       { name: 'runtime/code-server/out/node/entry.js', content: '// bundled runtime\n' },
-      { name: 'ide-extension/extension.cjs', content: '// extension\n' },
+      ...EXTENSION_FILES.map((name) => ({ name: `ide-extension/${name}`, content: `// ${name}\n` })),
       { name: 'runtime-manifest.json', content: '{"daemonVersion":"1.0.0"}\n' },
       { name: 'LICENSE', content: 'license\n' },
       { name: 'THIRD_PARTY_NOTICES', content: 'notices\n' },
@@ -34,6 +35,9 @@ function withArchive(body, { ripgrep = false, ripgrepPackage = false, testSuite 
     }
     if (ripgrep) {
       members.push({ name: 'runtime/code-server/lib/vscode/node_modules/@vscode/ripgrep-universal/bin/linux-x64/rg', content: 'binary' })
+    }
+    if (missingExtensionFile) {
+      members.splice(members.findIndex((entry) => entry.name === `ide-extension/${missingExtensionFile}`), 1)
     }
     if (testSuite) {
       members.push({ name: 'ide-extension/extension.test.cjs', content: '// tests\n' })
@@ -85,4 +89,8 @@ test('smoke archive checks platform and refuses a non-Go payload', { skip: !UNIX
     const result = run(archive)
     assert.match(result.stderr, /unexpectedly contains the IDE extension test suite/)
   }, { testSuite: true })
+  withArchive(({ archive }) => {
+    const result = run(archive)
+    assert.match(result.stderr, /archive is missing IDE extension runtime file: package.json/)
+  }, { missingExtensionFile: 'package.json' })
 })
