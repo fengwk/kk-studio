@@ -487,7 +487,7 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
                           turn.userEntryId(),
                           new BuiltinHistoryPayloadMapper()
                               .assistantPayload(
-                                  response, requestSpec.toolBindings(), selection, NOW),
+                                  response, requestSpec.toolBindings(), selection, NOW, null),
                           NOW));
               tx.threads().update(thread.advanceHead(id, NOW));
               return id;
@@ -892,7 +892,8 @@ class ThreadProcessorToolBatchTest extends ThreadProcessorTestBase {
                     requestSpec.toolBindings(),
                     ModelSelection.model(
                         requestSpec.model().modelName(), requestSpec.variant().id()),
-                    NOW));
+                    NOW,
+                    null));
     transitionModel(
         fixture.store, modelId, model -> model.attachResultEntry(assistantEntryId, NOW));
     List<UUID> invocationIds =

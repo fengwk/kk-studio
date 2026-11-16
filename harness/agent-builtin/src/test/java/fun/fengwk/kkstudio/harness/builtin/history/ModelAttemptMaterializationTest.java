@@ -264,7 +264,9 @@ class ModelAttemptMaterializationTest {
             null,
             List.of(),
             base.createdAt(),
-            base.updatedAt());
+            base.updatedAt(),
+            null,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelAttemptMaterialization.validateAttached(running, path));
@@ -287,7 +289,9 @@ class ModelAttemptMaterializationTest {
                     null,
                     List.of(),
                     base.createdAt(),
-                    base.updatedAt()),
+                    base.updatedAt(),
+                    null,
+                    null),
                 path));
   }
 
@@ -333,7 +337,9 @@ class ModelAttemptMaterializationTest {
             attached.resultEntryId(),
             attached.failedAttempts(),
             attached.createdAt(),
-            attached.updatedAt());
+            attached.updatedAt(),
+            null,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -361,7 +367,9 @@ class ModelAttemptMaterializationTest {
             id(4L),
             List.of(),
             T2,
-            T6);
+            T6,
+            null,
+            null);
     EntryPath path = attachedToolPath(assistantToolMessage(id(4L), id(3L)));
     assertThrows(
         IllegalArgumentException.class,
@@ -383,7 +391,9 @@ class ModelAttemptMaterializationTest {
             id(3L),
             List.of(),
             T2,
-            T6);
+            T6,
+            null,
+            null);
     EntryPath userHead = new EntryPath(List.of(root(), turnStart(), userMessage()));
     assertThrows(
         IllegalArgumentException.class,
@@ -439,7 +449,9 @@ class ModelAttemptMaterializationTest {
             attached.resultEntryId(),
             attached.failedAttempts(),
             attached.createdAt(),
-            attached.updatedAt());
+            attached.updatedAt(),
+            null,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelAttemptMaterialization.validateAttached(mismatchedArgs, path));
@@ -569,7 +581,9 @@ class ModelAttemptMaterializationTest {
             null,
             List.of(),
             T2,
-            T6);
+            T6,
+            null,
+            null);
     Entry exactResult = assistantToolMessage(id(4L), id(3L));
     assertDoesNotThrow(
         () ->
@@ -737,7 +751,9 @@ class ModelAttemptMaterializationTest {
         null,
         List.of(),
         T2,
-        T6);
+        T6,
+        null,
+        null);
   }
 
   private static ModelInvocation failedInvocation(List<ModelAttemptFailure> failures) {
@@ -771,7 +787,9 @@ class ModelAttemptMaterializationTest {
         null,
         failures,
         T2,
-        T6);
+        T6,
+        null,
+        null);
   }
 
   private static ModelAttemptFailure failure() {
@@ -897,7 +915,9 @@ class ModelAttemptMaterializationTest {
         id(4L),
         List.of(),
         T2,
-        T6);
+        T6,
+        null,
+        null);
   }
 
   /** SUCCEEDED tool phase 的冻结请求：携带 rendererKey=bash 的 bash binding，使映射的 assistant payload 可复现。 */

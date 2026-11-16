@@ -465,7 +465,7 @@ public final class ToolProcessorTestSupport {
                       userEntryId,
                       new BuiltinHistoryPayloadMapper()
                           .assistantPayload(
-                              response, modelRequest.toolBindings(), actualSelection, now),
+                              response, modelRequest.toolBindings(), actualSelection, now, null),
                       now.plusMillis(3)));
           tx.threads()
               .insert(
@@ -567,7 +567,7 @@ public final class ToolProcessorTestSupport {
                         userEntryId,
                         new BuiltinHistoryPayloadMapper()
                             .assistantPayload(
-                                response, modelRequest.toolBindings(), actualSelection, now),
+                                response, modelRequest.toolBindings(), actualSelection, now, null),
                         now.plusMillis(3)));
           }
           tx.threads()
@@ -687,7 +687,9 @@ public final class ToolProcessorTestSupport {
                       null,
                       List.of(),
                       now,
-                      now));
+                      now,
+                      null,
+                      null));
           ModelInvocation current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
           builtin(store, tx).updateModelInvocation(current.markRunning(now));
           current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
@@ -697,6 +699,7 @@ public final class ToolProcessorTestSupport {
                       scenario == null
                           ? successResponse(request.call().id())
                           : successResponse(scenario, request.call().id()),
+                      null,
                       now));
           current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
           builtin(store, tx)

@@ -43,6 +43,7 @@ final class ModelGroupFailureCommitter {
   private final UUID invocationId;
   private final int attempt;
   private final String providerName;
+  private final boolean groupInvocation;
   private final ModelStreamPublisher stream;
 
   ModelGroupFailureCommitter(
@@ -55,6 +56,7 @@ final class ModelGroupFailureCommitter {
       UUID invocationId,
       int attempt,
       String providerName,
+      boolean groupInvocation,
       ModelStreamPublisher stream) {
     this.store = Objects.requireNonNull(store, "store");
     this.builtinStore = Objects.requireNonNull(builtinStore, "builtinStore");
@@ -65,16 +67,20 @@ final class ModelGroupFailureCommitter {
     this.invocationId = Objects.requireNonNull(invocationId, "invocationId");
     this.attempt = attempt;
     this.providerName = Objects.requireNonNull(providerName, "providerName");
+    this.groupInvocation = groupInvocation;
     this.stream = Objects.requireNonNull(stream, "stream");
   }
 
   /**
    * 提交一次模型组失败推进。
    *
-   * <p>返回 {@code null} 表示当前 invocation 不是模型组，或失败属于取消、上下文溢出等专用终止，调用方继续单模型路径；返回 LOST
-   * 表示所有权/状态围栏失败或事务无法提交。
+   * <p>返回 {@code null} 表示当前 invocation 不是模型组（冻结请求没有 groupExecution），或失败属于取消、上下文溢出等专用终止，
+   * 调用方继续单模型路径；返回 LOST 表示所有权/状态围栏失败或事务无法提交。非组调用不开启事务、不加锁。
    */
   ModelTerminalCommitter.Applied commit(ModelInvocationError error) {
+    if (!groupInvocation) {
+      return null;
+    }
     try {
       return store.transaction(core -> commitLocked(core, builtinStore.in(core), error));
     } catch (ClaimLostSignal ignored) {

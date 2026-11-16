@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.Session;
@@ -935,8 +936,14 @@ class ModelExecutionStreamFlushTest {
             false,
             List.of(),
             new ModelProcessorConfig(
-                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, flushConfig),
+                () -> LEASE_CONFIG,
+                () -> NO_RETRY,
+                () -> FALLBACK_DELAY,
+                flushConfig,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             "test-provider",
+            false,
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
@@ -1008,8 +1015,14 @@ class ModelExecutionStreamFlushTest {
             false,
             List.of(),
             new ModelProcessorConfig(
-                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, flushConfig),
+                () -> LEASE_CONFIG,
+                () -> NO_RETRY,
+                () -> FALLBACK_DELAY,
+                flushConfig,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             "test-provider",
+            false,
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
@@ -1070,8 +1083,14 @@ class ModelExecutionStreamFlushTest {
             false,
             List.of(),
             new ModelProcessorConfig(
-                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, flushConfig),
+                () -> LEASE_CONFIG,
+                () -> NO_RETRY,
+                () -> FALLBACK_DELAY,
+                flushConfig,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             "test-provider",
+            false,
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
@@ -1275,8 +1294,14 @@ class ModelExecutionStreamFlushTest {
             false,
             requestSpec.toolBindings(),
             new ModelProcessorConfig(
-                () -> LEASE_CONFIG, () -> retryPolicy, () -> FALLBACK_DELAY, flushConfig),
+                () -> LEASE_CONFIG,
+                () -> retryPolicy,
+                () -> FALLBACK_DELAY,
+                flushConfig,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             "provider",
+            false,
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
@@ -1570,7 +1595,9 @@ class ModelExecutionStreamFlushTest {
                       null,
                       List.of(),
                       now,
-                      now));
+                      now,
+                      null,
+                      null));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
           tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
           return id;

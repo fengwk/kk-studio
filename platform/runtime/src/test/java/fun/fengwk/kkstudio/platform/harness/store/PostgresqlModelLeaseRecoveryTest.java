@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
@@ -27,6 +28,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
@@ -181,7 +183,10 @@ class PostgresqlModelLeaseRecoveryTest {
         new ModelProcessorConfig(
             () -> new ProcessorLeaseConfig(LEASE, Duration.ofSeconds(5)),
             () -> policy,
-            () -> Duration.ofSeconds(5)),
+            () -> Duration.ofSeconds(5),
+            ModelStreamConfig.DEFAULT,
+            null,
+            providerName -> ModelHttpErrorPolicy.DEFAULT),
         Clock.systemUTC(),
         scheduler,
         Runnable::run,
@@ -229,7 +234,9 @@ class PostgresqlModelLeaseRecoveryTest {
                       null,
                       List.of(),
                       T2,
-                      T2));
+                      T2,
+                      null,
+                      null));
           return id;
         });
   }

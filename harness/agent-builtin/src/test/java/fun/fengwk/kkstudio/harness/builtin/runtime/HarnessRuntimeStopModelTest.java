@@ -403,7 +403,7 @@ class HarnessRuntimeStopModelTest {
               builtin(store, tx)
                   .updateModelInvocation(
                       running.succeed(
-                          HarnessRuntimeTestSupport.responseWithToolCalls("call-1"), T5));
+                          HarnessRuntimeTestSupport.responseWithToolCalls("call-1"), null, T5));
               return new HarnessRuntimeTestSupport.ModelBaseline(
                   sessionId, rootId, turnId, threadId, modelId);
             });

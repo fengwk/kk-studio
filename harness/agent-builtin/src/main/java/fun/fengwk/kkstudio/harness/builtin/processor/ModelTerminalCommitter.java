@@ -71,6 +71,7 @@ final class ModelTerminalCommitter {
       boolean ownerSettledSummary,
       List<ToolBinding> bindings,
       String providerName,
+      boolean groupInvocation,
       ModelStreamPublisher stream) {
     this.store = Objects.requireNonNull(store, "store");
     this.builtinStore = Objects.requireNonNull(builtinStore, "builtinStore");
@@ -94,6 +95,7 @@ final class ModelTerminalCommitter {
             invocationId,
             attempt,
             providerName,
+            groupInvocation,
             stream);
   }
 

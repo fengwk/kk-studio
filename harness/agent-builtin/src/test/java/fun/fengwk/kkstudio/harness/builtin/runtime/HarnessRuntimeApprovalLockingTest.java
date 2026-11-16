@@ -346,7 +346,9 @@ class HarnessRuntimeApprovalLockingTest {
             model.resultEntryId(),
             model.failedAttempts(),
             model.createdAt(),
-            model.updatedAt());
+            model.updatedAt(),
+            null,
+            null);
     List<String> locks = new ArrayList<>();
     ToolInvocation replay =
         HarnessRuntimeTestSupport.runtime(

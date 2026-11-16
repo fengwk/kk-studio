@@ -327,7 +327,9 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
             null,
             List.of(),
             now,
-            now);
+            now,
+            null,
+            null);
     builtin(store, tx).insertModelInvocation(model);
     succeedModel(tx, model, assistantResponse(), now);
   }
@@ -336,7 +338,8 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
       HarnessStore.Transaction tx, ModelInvocation model, ProviderResponse response, Instant now) {
     ModelInvocation running = model.markRunning(now);
     builtin(store, tx).updateModelInvocation(running);
-    builtin(store, tx).updateModelInvocation(running.succeed(response, now));
+    builtin(store, tx)
+        .updateModelInvocation(running.succeed(response, running.streamCheckpoint(), now));
   }
 
   /** 不调用外部 Gateway，沿真实模型状态转换提交响应，再让 Processor 应用终态。 */

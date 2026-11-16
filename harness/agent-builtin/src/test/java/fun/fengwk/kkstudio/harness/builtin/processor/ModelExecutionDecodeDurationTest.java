@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -301,7 +302,9 @@ class ModelExecutionDecodeDurationTest {
                             null,
                             List.of(),
                             NOW,
-                            NOW));
+                            NOW,
+                            null,
+                            null));
                 tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
                 return id;
               });
@@ -330,8 +333,11 @@ class ModelExecutionDecodeDurationTest {
                   () -> ThreadProcessorTestSupport.LEASE_CONFIG,
                   () -> retryPolicy,
                   () -> FALLBACK_DELAY,
-                  FLUSH_CONFIG),
+                  FLUSH_CONFIG,
+                  null,
+                  providerName -> ModelHttpErrorPolicy.DEFAULT),
               "test-provider",
+              false,
               Clock.fixed(NOW, ZoneOffset.UTC),
               scheduler,
               Runnable::run,

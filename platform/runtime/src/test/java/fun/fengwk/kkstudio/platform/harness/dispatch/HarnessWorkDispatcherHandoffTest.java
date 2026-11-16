@@ -32,6 +32,7 @@ import org.slf4j.LoggerFactory;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
@@ -40,6 +41,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
@@ -451,7 +453,13 @@ class HarnessWorkDispatcherHandoffTest {
             store,
             modelGateway,
             sink,
-            new ModelProcessorConfig(() -> leaseConfig, () -> noRetry, () -> Duration.ofSeconds(5)),
+            new ModelProcessorConfig(
+                () -> leaseConfig,
+                () -> noRetry,
+                () -> Duration.ofSeconds(5),
+                ModelStreamConfig.DEFAULT,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             clock,
             processorScheduler,
             Runnable::run,
@@ -563,7 +571,13 @@ class HarnessWorkDispatcherHandoffTest {
             store,
             modelGateway,
             sink,
-            new ModelProcessorConfig(() -> leaseConfig, () -> noRetry, () -> Duration.ofSeconds(5)),
+            new ModelProcessorConfig(
+                () -> leaseConfig,
+                () -> noRetry,
+                () -> Duration.ofSeconds(5),
+                ModelStreamConfig.DEFAULT,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             clock,
             processorScheduler,
             Runnable::run,

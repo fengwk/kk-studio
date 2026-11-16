@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.builtin.port.store;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
@@ -61,40 +62,6 @@ public record ModelInvocation(
     updatedAt = Objects.requireNonNull(updatedAt, "updatedAt");
   }
 
-  public ModelInvocation(
-      UUID id,
-      UUID threadId,
-      UUID turnStartEntryId,
-      UUID requestHeadEntryId,
-      ModelRequestSpec requestSpec,
-      ModelInvocationStatus status,
-      int attempt,
-      StreamCheckpoint streamCheckpoint,
-      ProviderResponse result,
-      ModelInvocationError error,
-      UUID resultEntryId,
-      List<ModelAttemptFailure> failedAttempts,
-      Instant createdAt,
-      Instant updatedAt) {
-    this(
-        id,
-        threadId,
-        turnStartEntryId,
-        requestHeadEntryId,
-        requestSpec,
-        status,
-        attempt,
-        streamCheckpoint,
-        result,
-        error,
-        resultEntryId,
-        failedAttempts,
-        createdAt,
-        updatedAt,
-        null,
-        null);
-  }
-
   private static void requireConsecutiveFailures(
       List<ModelAttemptFailure> failedAttempts, int attempt) {
     for (int index = 0; index < failedAttempts.size(); index++) {
@@ -106,6 +73,26 @@ public record ModelInvocation(
         throw new IllegalArgumentException("failed attempt must not exceed invocation attempt");
       }
     }
+  }
+
+  /**
+   * terminal 失败结果要呈现的 attempt partial 快照。
+   *
+   * <p>只有 terminal 失败携带该快照。本 attempt 的失败已被审计（{@code failedAttempts} 覆盖到当前 attempt）时没有待呈现的
+   * partial；否则以 durable stream checkpoint 为准，没有 checkpoint 时为零进度的空快照。
+   */
+  public ModelAttemptSnapshot terminalAttemptSnapshot() {
+    if (error == null || failedAttempts.size() == attempt) {
+      return null;
+    }
+    if (streamCheckpoint == null) {
+      return new ModelAttemptSnapshot(attempt, 0, "", "");
+    }
+    return new ModelAttemptSnapshot(
+        streamCheckpoint.attempt(),
+        streamCheckpoint.sequence(),
+        streamCheckpoint.text(),
+        streamCheckpoint.thinking());
   }
 
   /** 当前成功回复实际声明的 reasoning effort；未声明或关闭时为 null。 */
@@ -148,20 +135,16 @@ public record ModelInvocation(
         && status != ModelInvocationStatus.SUCCEEDED) {
       throw new IllegalArgumentException("group progress exhausted all members");
     }
-    ModelInvocation next =
-        copy(
-            status,
-            attempt,
-            streamCheckpoint,
-            result,
-            error,
-            resultEntryId,
-            failedAttempts,
-            now,
-            progress,
-            requestedAt);
-    validateTransition(this, next);
-    return next;
+    return withState(
+        status,
+        attempt,
+        streamCheckpoint,
+        result,
+        error,
+        resultEntryId,
+        failedAttempts,
+        progress,
+        now);
   }
 
   /**
@@ -218,7 +201,7 @@ public record ModelInvocation(
     if (groupProgress == null || progress.memberIndex() <= groupProgress.memberIndex()) {
       throw new IllegalArgumentException("advanceGroupReady requires a later group member");
     }
-    return copy(
+    return withState(
         ModelInvocationStatus.READY,
         attempt,
         null,
@@ -226,9 +209,8 @@ public record ModelInvocation(
         null,
         null,
         appendFailure(failure),
-        now,
         progress,
-        requestedAt);
+        now);
   }
 
   /** RUNNING -&gt; FAILED：保留最后一次真实失败审计，供组全部成员耗尽后的终止事实使用。 */
@@ -293,11 +275,6 @@ public record ModelInvocation(
         now);
   }
 
-  /** RUNNING -&gt; SUCCEEDED，保留当前 streamCheckpoint；attempt 必须为正数。 */
-  public ModelInvocation succeed(ProviderResponse result, Instant now) {
-    return succeed(result, streamCheckpoint, now);
-  }
-
   /**
    * READY / RUNNING -&gt; FAILED，并附带 terminal error 与可选 streamCheckpoint；attempt 不变。READY
    * 用于启动前的明确拒绝。
@@ -357,10 +334,6 @@ public record ModelInvocation(
         now);
   }
 
-  public ModelInvocation unknown(ModelInvocationError error, Instant now) {
-    return unknown(error, streamCheckpoint, now);
-  }
-
   /** 只有 RUNNING 会把 partial 带入 terminal；READY 从未执行，不能携带 checkpoint。 */
   private StreamCheckpoint runningCheckpoint(StreamCheckpoint checkpoint) {
     return status == ModelInvocationStatus.RUNNING ? checkpoint : null;
@@ -388,6 +361,32 @@ public record ModelInvocation(
       ModelInvocationError error,
       UUID resultEntryId,
       List<ModelAttemptFailure> failedAttempts,
+      Instant now) {
+    return withState(
+        status,
+        attempt,
+        streamCheckpoint,
+        result,
+        error,
+        resultEntryId,
+        failedAttempts,
+        groupProgress,
+        now);
+  }
+
+  /**
+   * 同 {@link #withState(ModelInvocationStatus, int, StreamCheckpoint, ProviderResponse,
+   * ModelInvocationError, UUID, List, Instant)}，但把组进度一并作为待校验的下一状态。
+   */
+  private ModelInvocation withState(
+      ModelInvocationStatus status,
+      int attempt,
+      StreamCheckpoint streamCheckpoint,
+      ProviderResponse result,
+      ModelInvocationError error,
+      UUID resultEntryId,
+      List<ModelAttemptFailure> failedAttempts,
+      ModelGroupProgress groupProgress,
       Instant now) {
     ModelInvocation next =
         copy(

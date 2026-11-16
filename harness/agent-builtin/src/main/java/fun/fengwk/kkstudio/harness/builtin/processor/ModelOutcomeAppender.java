@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.EntryPath;
 import fun.fengwk.kkstudio.harness.api.history.EntryPayload;
-import fun.fengwk.kkstudio.harness.api.history.ModelAttemptSnapshot;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
@@ -116,8 +115,7 @@ public final class ModelOutcomeAppender {
   private Entry appendResultEntry(
       BuiltinStore.Transaction tx, EntryPath path, ModelInvocation model, Instant mutationNow) {
     UUID sessionId = path.root().sessionId();
-    UUID parentId =
-        ModelAttemptFailureAppender.append(tx, sessionId, path.head().id(), model, false);
+    UUID parentId = ModelAttemptFailureAppender.append(tx, sessionId, path.head().id(), model);
     Entry resultEntry =
         new Entry(tx.nextId(), sessionId, parentId, resultPayload(model), mutationNow);
     tx.entries().insert(resultEntry);
@@ -126,7 +124,7 @@ public final class ModelOutcomeAppender {
 
   private EntryPayload resultPayload(ModelInvocation model) {
     if (model.status() != ModelInvocationStatus.SUCCEEDED) {
-      return payloadMapper.assistantErrorPayload(model.error(), modelAttemptSnapshot(model));
+      return payloadMapper.assistantErrorPayload(model.error(), model.terminalAttemptSnapshot());
     }
     return payloadMapper.assistantPayload(
         model.result(),
@@ -230,19 +228,5 @@ public final class ModelOutcomeAppender {
                 new TurnEndPayload(turnStartEntryId, outcome, continueModel, reason, null),
                 now));
     return turnEndId;
-  }
-
-  private static ModelAttemptSnapshot modelAttemptSnapshot(ModelInvocation model) {
-    if (model.failedAttempts().size() == model.attempt()) {
-      return null;
-    }
-    if (model.streamCheckpoint() == null) {
-      return new ModelAttemptSnapshot(model.attempt(), 0, "", "");
-    }
-    return new ModelAttemptSnapshot(
-        model.streamCheckpoint().attempt(),
-        model.streamCheckpoint().sequence(),
-        model.streamCheckpoint().text(),
-        model.streamCheckpoint().thinking());
   }
 }

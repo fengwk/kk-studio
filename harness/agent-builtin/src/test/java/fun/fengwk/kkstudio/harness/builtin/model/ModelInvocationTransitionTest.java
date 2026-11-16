@@ -87,7 +87,9 @@ class ModelInvocationTransitionTest {
         resultEntryId,
         failures(status, attempt),
         CREATED,
-        CREATED);
+        CREATED,
+        null,
+        null);
   }
 
   private static List<ModelAttemptFailure> failures(ModelInvocationStatus status, int attempt) {
@@ -151,14 +153,15 @@ class ModelInvocationTransitionTest {
   @Test
   void succeedCompletesRunningKeepingAttemptAndCheckpoint() {
     ModelInvocation withCheckpoint = running(1, checkpoint(1)).checkpoint(checkpoint(1), T1);
-    ModelInvocation next = withCheckpoint.succeed(response(), T2);
+    ModelInvocation next =
+        withCheckpoint.succeed(response(), withCheckpoint.streamCheckpoint(), T2);
     assertEquals(ModelInvocationStatus.SUCCEEDED, next.status());
     assertEquals(1, next.attempt());
     assertEquals(response(), next.result());
     assertEquals(checkpoint(1), next.streamCheckpoint());
     assertNull(next.error());
-    assertThrows(IllegalArgumentException.class, () -> ready(0).succeed(response(), T1));
-    assertThrows(IllegalArgumentException.class, () -> ready(0).succeed(response(), T1));
+    assertThrows(IllegalArgumentException.class, () -> ready(0).succeed(response(), null, T1));
+    assertThrows(IllegalArgumentException.class, () -> ready(0).succeed(response(), null, T1));
   }
 
   @Test
@@ -235,7 +238,9 @@ class ModelInvocationTransitionTest {
             secondRetry.resultEntryId(),
             List.of(rewritten, second),
             secondRetry.createdAt(),
-            secondRetry.updatedAt());
+            secondRetry.updatedAt(),
+            null,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(secondRetry, rewrittenHistory));
@@ -396,11 +401,11 @@ class ModelInvocationTransitionTest {
 
   @Test
   void unknownTerminatesOnlyFromRunningKeepingAttempt() {
-    ModelInvocation fromRunning = running(2, null).unknown(error(), T1);
+    ModelInvocation fromRunning = running(2, null).unknown(error(), null, T1);
     assertEquals(ModelInvocationStatus.UNKNOWN, fromRunning.status());
     assertEquals(2, fromRunning.attempt());
-    assertThrows(IllegalArgumentException.class, () -> ready(0).unknown(error(), T1));
-    assertThrows(IllegalArgumentException.class, () -> failed(1).unknown(error(), T1));
+    assertThrows(IllegalArgumentException.class, () -> ready(0).unknown(error(), null, T1));
+    assertThrows(IllegalArgumentException.class, () -> failed(1).unknown(error(), null, T1));
   }
 
   @Test
@@ -423,7 +428,9 @@ class ModelInvocationTransitionTest {
             null,
             failures(ModelInvocationStatus.SUCCEEDED, 1),
             CREATED,
-            CREATED);
+            CREATED,
+            null,
+            null);
     ModelInvocation attachedWithCheckpoint = terminalWithCheckpoint.attachResultEntry(id(99L), T2);
     assertEquals(id(99L), attachedWithCheckpoint.resultEntryId());
     assertNull(attachedWithCheckpoint.streamCheckpoint());
@@ -458,7 +465,9 @@ class ModelInvocationTransitionTest {
             stored.resultEntryId(),
             stored.failedAttempts(),
             stored.createdAt(),
-            stored.updatedAt());
+            stored.updatedAt(),
+            null,
+            null);
     ModelInvocation.validateTransition(stored, replay);
     // 终态行仍可更新 updatedAt 而不改变终态事实
     ModelInvocation terminal = succeeded(1);
@@ -477,7 +486,9 @@ class ModelInvocationTransitionTest {
             terminal.resultEntryId(),
             terminal.failedAttempts(),
             terminal.createdAt(),
-            T1);
+            T1,
+            null,
+            null);
     ModelInvocation.validateTransition(terminal, touched);
   }
 
@@ -566,7 +577,9 @@ class ModelInvocationTransitionTest {
             succeeded.resultEntryId(),
             succeeded.failedAttempts(),
             succeeded.createdAt(),
-            T1);
+            T1,
+            null,
+            null);
     ModelInvocation changedError =
         new ModelInvocation(
             failed.id(),
@@ -582,7 +595,9 @@ class ModelInvocationTransitionTest {
             failed.resultEntryId(),
             failed.failedAttempts(),
             failed.createdAt(),
-            T1);
+            T1,
+            null,
+            null);
     assertThrows(
         IllegalArgumentException.class,
         () -> ModelInvocation.validateTransition(succeeded, changedResult));
@@ -669,7 +684,9 @@ class ModelInvocationTransitionTest {
         source.resultEntryId(),
         source.failedAttempts(),
         source.createdAt(),
-        source.updatedAt());
+        source.updatedAt(),
+        null,
+        null);
   }
 
   private static ModelInvocation withThread(ModelInvocation source, UUID threadId) {
@@ -687,7 +704,9 @@ class ModelInvocationTransitionTest {
         source.resultEntryId(),
         source.failedAttempts(),
         source.createdAt(),
-        source.updatedAt());
+        source.updatedAt(),
+        null,
+        null);
   }
 
   private static ModelInvocation withTurnStart(ModelInvocation source, UUID turnStartEntryId) {
@@ -705,7 +724,9 @@ class ModelInvocationTransitionTest {
         source.resultEntryId(),
         source.failedAttempts(),
         source.createdAt(),
-        source.updatedAt());
+        source.updatedAt(),
+        null,
+        null);
   }
 
   private static ModelInvocation withBasis(ModelInvocation source, UUID requestHeadEntryId) {
@@ -723,7 +744,9 @@ class ModelInvocationTransitionTest {
         source.resultEntryId(),
         source.failedAttempts(),
         source.createdAt(),
-        source.updatedAt());
+        source.updatedAt(),
+        null,
+        null);
   }
 
   private static ModelInvocation withRequest(ModelInvocation source) {
@@ -741,7 +764,9 @@ class ModelInvocationTransitionTest {
         source.resultEntryId(),
         source.failedAttempts(),
         source.createdAt(),
-        source.updatedAt());
+        source.updatedAt(),
+        null,
+        null);
   }
 
   private static ModelInvocation withCreatedAt(ModelInvocation source) {
@@ -759,7 +784,9 @@ class ModelInvocationTransitionTest {
         source.resultEntryId(),
         source.failedAttempts(),
         T1,
-        T1);
+        T1,
+        null,
+        null);
   }
 
   private static ModelInvocation withUpdatedAt(ModelInvocation source, Instant updatedAt) {
@@ -777,7 +804,9 @@ class ModelInvocationTransitionTest {
         source.resultEntryId(),
         source.failedAttempts(),
         source.createdAt(),
-        updatedAt);
+        updatedAt,
+        null,
+        null);
   }
 
   private static ModelInvocation withResultEntry(ModelInvocation source, UUID resultEntryId) {
@@ -795,6 +824,8 @@ class ModelInvocationTransitionTest {
         resultEntryId,
         source.failedAttempts(),
         source.createdAt(),
-        source.updatedAt());
+        source.updatedAt(),
+        null,
+        null);
   }
 }

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
@@ -304,7 +305,9 @@ class ExecutionConcurrentDeletionTest {
                           null,
                           List.of(),
                           ThreadProcessorTestSupport.NOW,
-                          ThreadProcessorTestSupport.NOW));
+                          ThreadProcessorTestSupport.NOW,
+                          null,
+                          null));
               tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
               return id;
             });
@@ -368,8 +371,11 @@ class ExecutionConcurrentDeletionTest {
                   () -> ThreadProcessorTestSupport.LEASE_CONFIG,
                   () -> ToolProcessorTestSupport.NO_RETRY,
                   () -> Duration.ofSeconds(1),
-                  new ModelStreamConfig(Duration.ofMillis(1), 1, 1, Duration.ofMinutes(10))),
+                  new ModelStreamConfig(Duration.ofMillis(1), 1, 1, Duration.ofMinutes(10)),
+                  null,
+                  providerName -> ModelHttpErrorPolicy.DEFAULT),
               "test-provider",
+              false,
               Clock.fixed(ThreadProcessorTestSupport.NOW, ZoneOffset.UTC),
               scheduler,
               Runnable::run,

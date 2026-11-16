@@ -512,7 +512,9 @@ class BuiltinAgentDriverContractTest {
         null,
         List.of(),
         T1,
-        T1);
+        T1,
+        null,
+        null);
   }
 
   private static ModelRequestSpec modelRequest() {

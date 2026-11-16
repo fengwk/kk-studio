@@ -37,39 +37,4 @@ public record ModelProcessorConfig(
     httpErrorPolicyProvider =
         Objects.requireNonNull(httpErrorPolicyProvider, "httpErrorPolicyProvider");
   }
-
-  public ModelProcessorConfig(
-      Supplier<ProcessorLeaseConfig> leaseConfigProvider,
-      Supplier<InvocationRetryPolicy> retryPolicyProvider,
-      Supplier<Duration> admitFailureDelayProvider,
-      ModelStreamConfig streamConfig,
-      ToolHistoryActionResolver toolHistoryActionResolver) {
-    this(
-        leaseConfigProvider,
-        retryPolicyProvider,
-        admitFailureDelayProvider,
-        streamConfig,
-        toolHistoryActionResolver,
-        providerName -> ModelHttpErrorPolicy.DEFAULT);
-  }
-
-  public ModelProcessorConfig(
-      Supplier<ProcessorLeaseConfig> leaseConfigProvider,
-      Supplier<InvocationRetryPolicy> retryPolicyProvider,
-      Supplier<Duration> admitFailureDelayProvider,
-      ModelStreamConfig streamConfig) {
-    this(leaseConfigProvider, retryPolicyProvider, admitFailureDelayProvider, streamConfig, null);
-  }
-
-  public ModelProcessorConfig(
-      Supplier<ProcessorLeaseConfig> leaseConfigProvider,
-      Supplier<InvocationRetryPolicy> retryPolicyProvider,
-      Supplier<Duration> admitFailureDelayProvider) {
-    this(
-        leaseConfigProvider,
-        retryPolicyProvider,
-        admitFailureDelayProvider,
-        ModelStreamConfig.DEFAULT,
-        null);
-  }
 }

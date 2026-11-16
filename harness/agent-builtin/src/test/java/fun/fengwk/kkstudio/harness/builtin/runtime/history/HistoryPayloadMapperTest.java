@@ -96,6 +96,7 @@ class HistoryPayloadMapperTest {
                     null,
                     null)),
             null,
+            null,
             null);
     assertEquals(4, payload.message().contents().size());
     assertEquals(
@@ -123,7 +124,7 @@ class HistoryPayloadMapperTest {
 
     AssistantMessageMetadata metadata =
         BUILTIN_MAPPER
-            .assistantPayload(response, List.of(), model, requestedAt)
+            .assistantPayload(response, List.of(), model, requestedAt, null)
             .assistantMetadata();
 
     assertEquals(model, metadata.model());
@@ -148,7 +149,7 @@ class HistoryPayloadMapperTest {
             "{}",
             List.of(diagnostic));
 
-    MessagePayload payload = BUILTIN_MAPPER.assistantPayload(response, List.of(), null, null);
+    MessagePayload payload = BUILTIN_MAPPER.assistantPayload(response, List.of(), null, null, null);
     assertEquals(2, payload.message().contents().size());
     assertEquals("part 1", ((TextMessageContent) payload.message().contents().get(0)).text());
     JsonMessageContent jsonContent = (JsonMessageContent) payload.message().contents().get(1);
@@ -178,7 +179,7 @@ class HistoryPayloadMapperTest {
             List.of(diag2));
 
     MessagePayload payload =
-        BUILTIN_MAPPER.assistantPayload(response, List.of(binding()), null, null);
+        BUILTIN_MAPPER.assistantPayload(response, List.of(binding()), null, null, null);
     assertEquals(4, payload.message().contents().size());
     assertEquals("result", ((TextMessageContent) payload.message().contents().get(0)).text());
     assertEquals(
@@ -207,6 +208,7 @@ class HistoryPayloadMapperTest {
                 "{}"),
             List.of(),
             null,
+            null,
             null);
     assertEquals(1, thinkingOnly.message().contents().size());
     assertTrue(thinkingOnly.message().contents().get(0) instanceof ThinkingMessageContent);
@@ -216,6 +218,7 @@ class HistoryPayloadMapperTest {
             new ProviderResponse(
                 "", "", List.of(), GenerationStopReason.COMPLETE, usage(), null, null, "{}"),
             List.of(),
+            null,
             null,
             null);
     assertEquals(1, empty.message().contents().size());
@@ -236,7 +239,7 @@ class HistoryPayloadMapperTest {
             "{}");
 
     MessagePayload payload =
-        BUILTIN_MAPPER.assistantPayload(response, List.of(binding()), null, null);
+        BUILTIN_MAPPER.assistantPayload(response, List.of(binding()), null, null, null);
     ToolCallMessageContent call = (ToolCallMessageContent) payload.message().contents().get(0);
     assertEquals("shell-command", call.rendererKey());
     // 无匹配 binding（unknown tool 槽位）时 renderer fallback 固定为 "tool"。
@@ -250,6 +253,7 @@ class HistoryPayloadMapperTest {
                     EnvironmentSupport.NONE,
                     null,
                     null)),
+            null,
             null,
             null);
     ToolCallMessageContent unboundCall =
@@ -281,7 +285,7 @@ class HistoryPayloadMapperTest {
             "dev");
 
     MessagePayload payload =
-        BUILTIN_MAPPER.assistantPayload(response, List.of(environmentBinding), null, null);
+        BUILTIN_MAPPER.assistantPayload(response, List.of(environmentBinding), null, null, null);
 
     ToolCallMessageContent frozen = (ToolCallMessageContent) payload.message().contents().get(0);
     assertEquals("read a.txt", frozen.historyAction());

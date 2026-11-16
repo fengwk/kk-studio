@@ -178,6 +178,7 @@ class ModelInvocationGroupTest {
     ModelInvocation unknown =
         running.unknown(
             new ModelInvocationError(ProviderErrorKind.TRANSIENT, "unknown"),
+            null,
             CREATED.plusSeconds(1));
 
     assertEquals(ModelInvocationStatus.UNKNOWN, unknown.status());

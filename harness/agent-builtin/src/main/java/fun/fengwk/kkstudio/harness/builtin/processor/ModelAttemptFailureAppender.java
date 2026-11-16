@@ -23,18 +23,11 @@ public final class ModelAttemptFailureAppender {
    * Assistant/AssistantError/AssistantAborted 结果和 TURN_END。
    */
   public static UUID append(
-      BuiltinStore.Transaction tx,
-      UUID sessionId,
-      UUID parentEntryId,
-      ModelInvocation invocation,
-      boolean compaction) {
+      BuiltinStore.Transaction tx, UUID sessionId, UUID parentEntryId, ModelInvocation invocation) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(sessionId, "sessionId");
     Objects.requireNonNull(parentEntryId, "parentEntryId");
     Objects.requireNonNull(invocation, "invocation");
-    if (compaction) {
-      return parentEntryId;
-    }
     UUID parent = parentEntryId;
     for (ModelAttemptFailure failure : invocation.failedAttempts()) {
       UUID entryId = tx.nextId();

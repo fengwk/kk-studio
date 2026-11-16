@@ -478,7 +478,7 @@ public final class ThreadProcessorTestSupport {
             store,
             turn,
             new BuiltinHistoryPayloadMapper()
-                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW));
+                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW, null));
     if (modelStatus == ModelInvocationStatus.SUCCEEDED) {
       transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     }
@@ -558,7 +558,7 @@ public final class ThreadProcessorTestSupport {
             store,
             turn,
             new BuiltinHistoryPayloadMapper()
-                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW));
+                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW, null));
     transitionModel(store, modelId, m -> m.attachResultEntry(assistantEntryId, NOW));
     return new SeededToolPhase(modelId, assistantEntryId);
   }
@@ -597,20 +597,22 @@ public final class ThreadProcessorTestSupport {
                           null,
                           List.of(),
                           NOW,
-                          NOW));
+                          NOW,
+                          null,
+                          null));
               return id;
             });
     switch (status) {
       case READY -> {}
       case SUCCEEDED -> {
         transitionModel(store, modelId, m -> m.markRunning(NOW));
-        transitionModel(store, modelId, m -> m.succeed(response, null, NOW));
+        transitionModel(store, modelId, m -> m.succeed(response, m.streamCheckpoint(), NOW));
       }
       case FAILED -> transitionModel(store, modelId, m -> m.fail(error, NOW));
       case CANCELLED -> transitionModel(store, modelId, m -> m.cancel(error, NOW));
       case UNKNOWN -> {
         transitionModel(store, modelId, m -> m.markRunning(NOW));
-        transitionModel(store, modelId, m -> m.unknown(error, NOW));
+        transitionModel(store, modelId, m -> m.unknown(error, m.streamCheckpoint(), NOW));
       }
       default -> throw new IllegalArgumentException("unsupported seeded status " + status);
     }
@@ -1128,7 +1130,7 @@ public final class ThreadProcessorTestSupport {
                       sessionId,
                       secondUserEntryId,
                       new BuiltinHistoryPayloadMapper()
-                          .assistantPayload(response, List.of(), null, null),
+                          .assistantPayload(response, List.of(), null, null, null),
                       NOW));
           tx.entries()
               .insert(
