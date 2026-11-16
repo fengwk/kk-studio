@@ -124,8 +124,7 @@ up_stack() {
   wait_app
   wait_environment
   step "synchronizing optional MiniMax E2E credentials (secret values are never printed)"
-  BACKEND_URL="$APP_URL" \
-    node "$SYNC_MINIMAX_CREDENTIALS" --backend-url "$APP_URL"
+  node "$SYNC_MINIMAX_CREDENTIALS" --backend-url "$APP_URL"
 }
 
 require_clean_anchor() {
