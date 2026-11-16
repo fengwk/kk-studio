@@ -1,12 +1,16 @@
 # 内置工具与异步委派
 
-本文说明内置工具的使用与执行契约：环境工具由 Daemon 执行，task 在 Harness 中持久接受委派。工具说明、参数 schema 和实现共同给出一次调用所需的输入。模块分工见[系统设计](../system-design.md)。
+本文说明内置工具的使用与执行契约：环境工具由 Daemon 执行，内部 `load_skill` 从技能归档取出正文，task 在 Harness 中持久接受委派。工具说明、参数 schema 和实现共同给出一次调用所需的输入。模块分工见[系统设计](../system-design.md)。
 
 ## 环境与路径
 
 Environment 提供 OS、用户、HOME 等宿主事实。任务路径由用户、Issue 或委派提示词给出；`read` 的 `path` 可以是 `resource://files/<uuid>`、`resource://skills/<package>/<version>/<skill>/<relativePath>`，也可以是 Environment 上的绝对本地路径；两个 URI 命名空间都由平台读取，本地路径需要 Environment。`write`、`edit`、`grep`、`find` 只接受 Environment 绝对路径。LSP 的 `path` 必须是绝对本地路径，相对路径直接拒绝；bash 要求显式绝对 `workdir`。子 Agent 使用执行根当前 Environment，并从自己的对话历史执行；并行 Thread 共享所选宿主文件系统，文件隔离由任务安排与部署决定。
 
 宿主文件能力由 Environment Daemon 实现；`write` 与 `edit` 分别承担完整写入和精确替换。参数使用 snake_case，Schema、提示词、实现和错误说明保持一致。
+
+## 技能加载
+
+Agent 配置了技能时，工具面自动加入 `read` 与内部 `load_skill`：`load_skill` 只接受当时冻结在 binding 里的技能名，先校验包仍是该版本且包含该技能，再从归档中只读取 `<skill>/SKILL.md`。所在回合绑定了 Environment 时，它随 `skill.install` 请求附上归档 Blob 与 transferId，Daemon 换取预签名下载地址、校验大小与摘要后解压发布，返回的 `skill_dir` 是解析相对路径的根；未绑定 Environment 时直接返回正文，并给 `resource://skills/<package>/<version>/<skill>/<relativePath>` 基准 URI，由 `read` 取其余文件。技能不在 binding 内、包版本已变或技能已不再发布都以明确错误结束。
 
 ## 文件读取
 

@@ -449,7 +449,7 @@ Environment 或注入工具——Issue Run 的 `SET_AGENT` / `SET_EXECUTION` / `
 并在 `TURN_START.fallbackModel` 记录实际型号供界面提示与计价；branch 设置本身不被改写，默认模型也不可用时拒绝本回合。
 设置的 variant 已从模型中移除时，同一模型改用自身默认 variant。Agent 与 Environment 失效一律停止，不做回退。
 `NONE`、`ROUTED` 与 `REQUIRED` 工具都进入模型工具面；未选 Environment 时 `REQUIRED` 以无环境 binding 声明，
-调用返回确定性的 needs-Environment 未执行结果。配置 Skill 时加入统一 `read`，
+调用返回确定性的 needs-Environment 未执行结果。配置 Skill 时加入统一 `read` 与内部 `load_skill`，
 subagent allowlist 非空时加入内部 `task`。System prompt 按实际工具、Environment、Skill 与
 subagent 生成，并保留稳定具名 sections；技能按 Agent 配置顺序列出名称与描述，不依赖 Environment 的连接或安装状态。
 每条 Thread 路径以 `SYSTEM` Entry 保存初始 prompt、模型可见 client-tool 定义与 vendor-hosted-tool baseline，后续 prompt 或工具定义变化作为 append-only delta 与使用该上下文的 `TURN_START` 同事务提交；无变化复用既有基线，分支继承其路径上的上下文。Claude capability 开启且 baseline 含 client tools 时，请求始终启用 deferred-tool lane，在 tools 末尾追加 encoder-only placeholder 并保持此前工具前缀可缓存；其中变化以有序 system messages 表达，其它协议折叠基线和变更文本。历史工具调用与结果始终按已存记录投影，不因当前 Environment 或 binding 变化而改写。
