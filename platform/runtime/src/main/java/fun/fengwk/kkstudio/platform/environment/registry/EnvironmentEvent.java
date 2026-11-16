@@ -20,7 +20,7 @@ public record EnvironmentEvent(
 
   public EnvironmentEvent {
     time = Objects.requireNonNull(time, "time");
-    // 级别与类型是封闭枚举，null 仍按旧行为以 NPE 拒绝，且先于 message 校验。
+    // 级别与类型是封闭枚举，null 一律以 NPE 拒绝，且先于 message 校验。
     level = Objects.requireNonNull(level, "level");
     type = Objects.requireNonNull(type, "type");
     message = requireMessage(message);

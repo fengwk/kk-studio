@@ -105,7 +105,7 @@ describe('EnvironmentManagementModal', () => {
   })
 
   /**
-   * 测试意图：验证事件列表在有记录时正确渲染时间、级别、类型和说明，且高亮 WARN/ERROR 级别。
+   * 测试意图：验证事件列表在有记录时正确渲染时间、级别、类型和说明，且高亮 WARN 级别。
    */
   it('renders events list with distinguishable levels and empty state when none', async () => {
     const mockEvents: EnvironmentEventDTO[] = [
