@@ -77,7 +77,11 @@ func TestServiceConstructionAndPTYTracker(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	body, err := json.Marshal(map[string]any{"workspacePath": opened.GetWorkspacePath(), "pid": 123})
+	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	stream, cancelStream := openTestBridgeStream(t, bridge, opened.GetViewId(), opened.GetWorkspacePath(), hostID)
+	defer cancelStream()
+	defer stream.Body.Close()
+	body, err := json.Marshal(map[string]any{"viewId": opened.GetViewId(), "bindingEpoch": strconv.FormatInt(opened.GetBindingEpoch(), 10), "hostId": hostID, "pid": 123})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1411,7 +1415,15 @@ func startBridgeReplyHostWith(t *testing.T, bridge *Bridge, workspace, viewID, d
 	}
 	directory = canonicalDirectory
 	ctx, cancel := context.WithCancel(context.Background())
-	response, reader := openManualBridgeStream(t, ctx, bridge, workspace, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", directory)
+	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	response, reader := openManualBridgeStream(t, ctx, bridge, workspace, hostID, directory)
+	bridge.mu.Lock()
+	view := bridge.views[viewID]
+	epoch := int64(0)
+	if view != nil {
+		epoch = view.epoch
+	}
+	bridge.mu.Unlock()
 	if _, err := reader.ReadString('\n'); err != nil {
 		cancel()
 		response.Body.Close()
@@ -1427,7 +1439,7 @@ func startBridgeReplyHostWith(t *testing.T, bridge *Bridge, workspace, viewID, d
 			if err := decoder.Decode(&command); err != nil {
 				return
 			}
-			result := map[string]any{"id": command.ID, "ok": true}
+			result := map[string]any{"id": command.ID, "viewId": viewID, "bindingEpoch": strconv.FormatInt(epoch, 10), "hostId": hostID, "ok": true}
 			if command.Op == "inspect" {
 				result["clean"] = true
 			}
@@ -1497,8 +1509,8 @@ func TestBridgeDirectoryBindingOnCreateAndResume(t *testing.T) {
 	assertBinding(resumed)
 }
 
-// Verifies canonical directory change is acknowledged only by a replacement host.
-func TestChangeDirectoryReply(t *testing.T) {
+// Verifies cancellation stops waiting but a same-epoch target host still reconciles all directory state.
+func TestCancelledChangeDirectoryReconcilesOnReplacementHost(t *testing.T) {
 	root, err := CanonicalDirectory(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1529,8 +1541,9 @@ func TestChangeDirectoryReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	command := &protocol.IdeCommand{Action: protocol.IdeAction_CHANGE_DIRECTORY, ViewId: stringPointer(opened.GetViewId()), BrowserSessionId: stringPointer(opened.GetBrowserSessionId()), BindingEpoch: int64Pointer(opened.GetBindingEpoch()), Directory: stringPointer(next), ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999")}
+	commandCtx, cancelCommand := context.WithCancel(context.Background())
 	resultChannel := make(chan *protocol.IdeResult, 1)
-	go func() { resultChannel <- service.HandleCommand(context.Background(), command) }()
+	go func() { resultChannel <- service.HandleCommand(commandCtx, command) }()
 	var nativeCommand struct {
 		ID        string `json:"id"`
 		Op        string `json:"op"`
@@ -1542,18 +1555,33 @@ func TestChangeDirectoryReply(t *testing.T) {
 	if nativeCommand.Op != "changeDirectory" || nativeCommand.Directory != next {
 		t.Fatalf("native directory command=%+v", nativeCommand)
 	}
+	cancelCommand()
+	defer cancelCommand()
+	select {
+	case result := <-resultChannel:
+		if result.GetOk() || result.GetCode() != "OUTCOME_UNKNOWN" {
+			t.Fatalf("cancelled directory reply=%v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled directory request did not stop waiting")
+	}
 	newStream, newReader := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", next)
 	defer newStream.Body.Close()
 	if _, err := newReader.ReadString('\n'); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case result := <-resultChannel:
-		if !result.GetOk() || result.GetDirectory() != next {
-			t.Fatalf("directory reply=%v", result)
+	deadline := time.Now().Add(time.Second)
+	for {
+		service.mu.Lock()
+		viewDirectory := service.views[opened.GetViewId()].directory
+		service.mu.Unlock()
+		if viewDirectory == next {
+			break
 		}
-	case <-time.After(time.Second):
-		t.Fatal("replacement host did not confirm directory")
+		if time.Now().After(deadline) {
+			t.Fatalf("service directory did not reconcile: %q", viewDirectory)
+		}
+		time.Sleep(time.Millisecond)
 	}
 	bridge.mu.Lock()
 	binding := bridge.views[opened.GetViewId()]
@@ -1822,16 +1850,13 @@ func TestLateNativeCloseSuccessIsIgnored(t *testing.T) {
 			}
 			select {
 			case result := <-closeResult:
-				if result.GetOk() || result.GetCode() != "UNAVAILABLE" {
+				if result.GetOk() || result.GetCode() != "OUTCOME_UNKNOWN" {
 					t.Fatalf("interrupted close=%v", result)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("interrupted close remained pending")
 			}
-			lateSuccess, err := json.Marshal(map[string]any{"id": command.ID, "ok": true, "clean": true})
-			if err != nil {
-				t.Fatal(err)
-			}
+			lateSuccess := bridgeTestResultBody(command.ID, opened.GetViewId(), opened.GetBindingEpoch(), hostID, map[string]any{"ok": true, "clean": true})
 			if status := postBridge(t, bridge, "/bridge/result", lateSuccess); status != http.StatusNoContent {
 				t.Fatalf("late result status=%d", status)
 			}
@@ -1895,6 +1920,39 @@ func TestCancelledNativeClosePreservesView(t *testing.T) {
 	force := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
 	if force.GetOk() || force.GetCode() != "BUSY" {
 		t.Fatalf("unauthorized force close=%v", force)
+	}
+}
+
+// Verifies a dirty normal-close rejection does not authorize destructive force close.
+func TestDirtyNativeCloseDoesNotAllowForce(t *testing.T) {
+	root := t.TempDir()
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{
+		"closeView": {"ok": false, "code": "DIRTY", "message": "unsaved changes remain"},
+	})
+	defer cancelHost()
+	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+	if closed.GetOk() || closed.GetCode() != "DIRTY" || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("dirty close=%v state=%v", closed, service.GetViewState(opened.GetViewId()))
+	}
+	forced := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
+	if forced.GetOk() || forced.GetCode() != "BUSY" || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("dirty close authorized force: result=%v state=%v", forced, service.GetViewState(opened.GetViewId()))
 	}
 }
 
@@ -1970,7 +2028,7 @@ func TestForceCloseUnreachableView(t *testing.T) {
 		t.Fatalf("open reply=%v", opened)
 	}
 	normal := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
-	if normal.GetOk() || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+	if normal.GetOk() || normal.GetCode() != "CONTROL_UNAVAILABLE" || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
 		t.Fatalf("unreachable normal close=%v state=%v", normal, service.GetViewState(opened.GetViewId()))
 	}
 	force := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
@@ -2007,7 +2065,7 @@ func TestForceAuthorizationDoesNotCrossEpoch(t *testing.T) {
 		t.Fatalf("open reply=%v", opened)
 	}
 	unknown := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
-	if unknown.GetOk() || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+	if unknown.GetOk() || unknown.GetCode() != "CONTROL_UNAVAILABLE" || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
 		t.Fatalf("disconnected close=%v state=%v", unknown, service.GetViewState(opened.GetViewId()))
 	}
 	resume := openCommandForTest(root, opened.GetViewId(), "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")

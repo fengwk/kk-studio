@@ -21,7 +21,8 @@ func TestLaunchEnvironment(t *testing.T) {
 	installFakeDistribution(t, root)
 	t.Setenv("http_proxy", "http://host.invalid:1")
 	supervisor := &fakeSupervisor{}
-	manager := NewCodeServerManager(fakeIDEConfig(root), supervisor, BridgeCredentials{URL: "http://127.0.0.1:9000/bridge", Token: "bridge-secret"})
+	cfg := fakeIDEConfig(root)
+	manager := NewCodeServerManager(cfg, supervisor, BridgeCredentials{URL: "http://127.0.0.1:9000/bridge", Token: "bridge-secret"})
 	if _, err := manager.EnsureStarted(context.Background()); err != nil {
 		t.Fatal(err)
 	}
@@ -45,12 +46,16 @@ func TestLaunchEnvironment(t *testing.T) {
 				environment[key] = value
 			}
 		}
-		if environment["http_proxy"] != "http://host.invalid:1" || environment["KK_STUDIO_IDE_BRIDGE_URL"] != "http://127.0.0.1:9000/bridge" || environment["KK_STUDIO_IDE_BRIDGE_TOKEN"] != "bridge-secret" || environment["KK_STUDIO_IDE_MANAGEMENT_TOKEN"] == "" {
+		if environment["http_proxy"] != "http://host.invalid:1" || environment["KK_STUDIO_IDE_BRIDGE_URL"] != "http://127.0.0.1:9000/bridge" || environment["KK_STUDIO_IDE_BRIDGE_TOKEN"] != "bridge-secret" || environment["KK_STUDIO_IDE_MANAGEMENT_TOKEN"] == "" || environment["KK_STUDIO_CODE_SERVER_DATA_DIR"] != IDEPathsFor(cfg).RuntimeDir {
 			t.Fatalf("launch %d environment missing inherited or bridge values: %#v", index, environment)
 		}
 		if environment["KK_STUDIO_IDE_MANAGEMENT_TOKEN"] == environment["KK_STUDIO_IDE_BRIDGE_TOKEN"] {
 			t.Fatalf("launch %d reused bridge token as management token", index)
 		}
+	}
+	info, err := os.Stat(IDEPathsFor(cfg).RuntimeDir)
+	if err != nil || info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("managed runtime data directory permissions: info=%v err=%v", info, err)
 	}
 	if err := manager.Close(context.Background()); err != nil {
 		t.Fatal(err)
