@@ -67,7 +67,7 @@ func TestDial_ReportsUpgradeRejectionToAttemptObserver(t *testing.T) {
 				upgrade *protocol.UpgradeRequired
 			}, 1)
 			_, dialErr := Dial(context.Background(), DialConfig{
-				Applied:  config.DaemonConfig{TokenPath: writeTokenFile(t, "token"), StudioURL: server.URL, EnvironmentID: testEnvironment},
+				Applied: config.DaemonConfig{TokenPath: writeTokenFile(t, "token"), StudioURL: server.URL, EnvironmentID: testEnvironment},
 				Observer: recordingObserver{upgradeFailed: func(status int, upgrade *protocol.UpgradeRequired) {
 					reported <- struct {
 						status  int
