@@ -81,4 +81,4 @@
   [`scripts/dev/verify/e2e/run-matrix.mjs`](../scripts/dev/verify/e2e/run-matrix.mjs) 的 `--list` / `--docs`
   输出生成，文档只说明如何选择和运行矩阵。
 - 从仓库根目录执行 [`scripts/dev/verify/repository/check.mjs`](../scripts/dev/verify/repository/check.mjs) 检查固定布局、
-  标题、链接、模块拓扑和禁止的旧引用。
+  标题、链接、模块依赖与表归属。

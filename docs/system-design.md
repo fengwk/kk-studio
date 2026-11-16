@@ -311,9 +311,9 @@ Canvas，平台只按类型转交。凭据经 `PluginCredentialAccess` 在上游
 
 ## Resource URI 与 Session 持有
 
-`resource://files/<uuid>` 指向全局 Blob，`resource://skills/<package>/<version>/<skill>/<relativePath>` 指向已发布技能包当前版本归档中的文件，两者都由平台的 `read` 读取；本地绝对路径交给绑定的 Environment。URI 只是定位标识，不含存储键或预签名地址，浏览器也不能把它当作导航地址。读取技能文件时包版本必须是当前版本，取得的 Blob 登记为当前 Session 的持有，删除 Session 时释放。
+`resource://files/<uuid>` 指向全局 Blob，`resource://skills/<package>/<version>/<skill>/<relativePath>` 指向技能包当前版本归档中的文件，两者都由平台的 `read` 读取；本地绝对路径交给绑定的 Environment。URI 只是定位标识，不含存储键或预签名地址，浏览器也不能把它当作导航地址。
 
-URI 编码与解析、持有与释放的完整契约见 [Common：Resource 引用与 URI 校验](modules/common.md#resource-引用与-uri-校验)与
+URI 编码与解析、读取鉴权、Session 持有与释放见 [Common：Resource 引用与 URI 校验](modules/common.md#resource-引用与-uri-校验)与
 [Platform：Resource URI 与 Session 持有](modules/platform.md#resource-uri-与-session-持有)。
 
 ## 技能包
@@ -361,8 +361,7 @@ command 与幂等键、资源 pin、`CANVAS_RUN` Work 与版本通知，并按�
 
 **IDE**：`apps/ide` 拥有视图服务与 `IdeCommandTransport` 端口、唯一权威快照缓存、同源数据面代理（HTTP 转发与
 WebSocket 隧道）、浏览器会话与使用身份、跨节点路由，以及 IDE 的 HTTP 接口与 DTO；`web` 只保留组合装配与全局
-错误映射。视图生命周期为幂等创建或恢复、切换目录、关闭与强制关闭；每个 Daemon 进程最多 64 个视图，快照 revision
-与绑定 epoch 由同一序列推进，目录列举只返回直接子目录，详见 [IDE](modules/ide.md)。
+错误映射。视图生命周期、64 个视图上限与 revision/绑定 epoch 见下文[IDE 服务](#ide-服务)与 [IDE](modules/ide.md)。
 
 **插件**：构建期注册安装定义与配置 Schema，实例按类型交出 Harness 贡献与产品贡献；插件目录快照在启动时校验依赖
 与名称并冻结，失败候选释放资源。MCP 不通过插件接入，由平台用 Streamable HTTP 发现与执行，预算与取消见

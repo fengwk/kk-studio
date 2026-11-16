@@ -366,10 +366,11 @@ Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字
 校验全部 Skill 与 Agent 引用后原子替换当前版本和 Skill 列表。
 检查失败保留已发布内容；详情返回检查时间、错误与 `updateAvailable`。
 
-技能归档的规范资源 URI 为 `resource://skills/<package>/<version>/<skill>/<relativePath>`，路径段使用 UTF-8 百分号编码，`read` 按它读取当前版本归档中的文件。
 发布时使用临时 bare 仓库浅拉取目标 commit 并生成 Skill 归档，完成后立即清理临时仓库，
 平台服务端不保留本地 Git 缓存。
-系统提示按 Agent 技能配置顺序列出名称与描述；正文与附属文件不在规划期下发，`load_skill` 按需从归档取出。
+系统提示按 Agent 技能配置顺序列出名称与描述；正文与附属文件不在规划期下发，`load_skill` 按需从归档取出，
+归档内的单个文件也通过 `resource://skills/<package>/<version>/<skill>/<relativePath>` 由 `read` 读取
+（见 [Resource URI 与 Session 持有](#resource-uri-与-session-持有)）。
 
 ### MCP server 与运行时工具目录
 
