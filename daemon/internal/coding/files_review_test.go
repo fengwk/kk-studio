@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
 func TestWriteReviewAndExpectedFile(t *testing.T) {
@@ -102,13 +104,38 @@ func TestWriteCapabilityResolvesMissingTargetThroughSymlinkedParent(t *testing.T
 	}
 }
 
+// A write whose review cannot travel in one result frame is refused before the target is touched,
+// so the approval never shows a diff the call could not deliver.
+func TestWriteReviewTransportLimitRefusesBeforeWriting(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "large.txt")
+	original := []byte(strings.Repeat("a", 600*1024) + "\n")
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	const limitMessage = "Complete write diff exceeds the review transport limit; split the change into several smaller write calls."
+	content := strings.Repeat("b", 600*1024) + "\n"
+	preview := invokeCoding(t, Provider{}, "fs.write.preview", map[string]any{"path": path, "content": content}, nil)
+	if !preview.Error || !strings.Contains(preview.Contents[0].Text, limitMessage) {
+		t.Fatalf("preview=%#v", preview)
+	}
+	hash := sha256Hex(original)
+	commit := invokeCoding(t, Provider{}, "fs.write", map[string]any{"path": path, "content": content}, &runtime.ExpectedFile{Path: resolvedTestPath(t, path), SHA256: hash})
+	if !commit.Error || !strings.Contains(commit.Contents[0].Text, limitMessage) {
+		t.Fatalf("commit=%#v", commit)
+	}
+	actual, err := os.ReadFile(path)
+	if err != nil || string(actual) != string(original) {
+		t.Fatalf("refused write changed file: err=%v len=%d", err, len(actual))
+	}
+}
+
 func TestWriteReviewForNewFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "new.txt")
 	review, err := PreviewWrite(path, "new contents\n")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !review.NewFile || review.Content != "new contents\n" || !strings.Contains(review.Diff, "+ 1|new contents") || review.SHA256 != nil {
+	if !review.NewFile || !strings.Contains(review.Diff, "+ 1|new contents") || review.SHA256 != nil {
 		t.Fatalf("unexpected new-file review: %#v", review)
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {

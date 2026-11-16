@@ -22,7 +22,6 @@ func TestShouldBootstrapH2XConnect(t *testing.T) {
 		{args: []string{h2xconnectBootstrapArg}, want: false},
 		{args: []string{"__native-helper", "/tmp/state"}, want: false},
 		{args: []string{"__lock-helper", "/tmp/state"}, want: false},
-		{args: []string{"--internal-install-lock", "/tmp/state"}, want: false},
 	} {
 		if got := shouldBootstrapH2XConnect(tc.args); got != tc.want {
 			t.Errorf("shouldBootstrapH2XConnect(%q) = %t, want %t", tc.args, got, tc.want)
@@ -71,7 +70,7 @@ func TestInternalHelperDispatch(t *testing.T) {
 		}
 		return 7
 	}}
-	if code := RunCLI(context.Background(), []string{"--internal-install-lock", "raw value"}, deps, &out, &errOut); code != 7 || !called || out.Len() != 0 || errOut.Len() != 0 {
+	if code := RunCLI(context.Background(), []string{"__lock-helper", "raw value"}, deps, &out, &errOut); code != 7 || !called || out.Len() != 0 || errOut.Len() != 0 {
 		t.Fatalf("helper dispatch code=%d called=%t stdout=%q stderr=%q", code, called, out.String(), errOut.String())
 	}
 }
@@ -129,7 +128,7 @@ func TestInvalidArgumentTransportAndUnavailableHelper(t *testing.T) {
 		t.Fatalf("NUL argument code=%d stderr=%q", code, stderr.String())
 	}
 	stderr.Reset()
-	if code := RunCLI(context.Background(), []string{"--internal-update"}, Dependencies{}, &out, &stderr); code != 1 || stderr.String() != "daemon: internal helper is unavailable\n" {
+	if code := RunCLI(context.Background(), []string{"__native-helper"}, Dependencies{}, &out, &stderr); code != 1 || stderr.String() != "daemon: internal helper is unavailable\n" {
 		t.Fatalf("helper code=%d stderr=%q", code, stderr.String())
 	}
 }
@@ -145,34 +144,6 @@ func TestConfigRunInvokesRuntimeAndContainsFailures(t *testing.T) {
 	stderr.Reset()
 	if code := RunCLI(context.Background(), []string{"--config", path}, Dependencies{Runtime: runner}, &out, &stderr); code != 1 || stderr.String() != "daemon failed: runtime execution failed\n" {
 		t.Fatalf("runtime failure code=%d stderr=%q", code, stderr.String())
-	}
-}
-
-func TestWithH2XConnectSetsDebugBeforeReexecution(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		env  []string
-		want string
-	}{
-		{"missing", []string{"PATH=/bin"}, "GODEBUG=http2xconnect=1"},
-		{"append", []string{"GODEBUG=netdns=go", "PATH=/bin"}, "GODEBUG=netdns=go,http2xconnect=1"},
-		{"existing", []string{"GODEBUG=netdns=go,http2xconnect=1"}, "GODEBUG=netdns=go,http2xconnect=1"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			got := withH2XConnect(tc.env)
-			found := false
-			for _, entry := range got {
-				if strings.HasPrefix(entry, "GODEBUG=") {
-					if entry != tc.want {
-						t.Fatalf("GODEBUG=%q, want %q", entry, tc.want)
-					}
-					found = true
-				}
-			}
-			if !found {
-				t.Fatalf("GODEBUG missing from %#v", got)
-			}
-		})
 	}
 }
 

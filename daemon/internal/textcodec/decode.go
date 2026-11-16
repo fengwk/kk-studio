@@ -85,7 +85,7 @@ func decodeDeclared(declared resolved, data []byte) ([]byte, Encoding, int, erro
 }
 
 // readAll decodes a whole document and reports how many sequences the source replaced.
-func readAll(source runeSource) ([]byte, int, error) {
+func readAll(source countingSource) ([]byte, int, error) {
 	var text []byte
 	for {
 		value, err := source.readRune()
@@ -102,7 +102,11 @@ func readAll(source runeSource) ([]byte, int, error) {
 // runeSource is the incremental decoder behind Reader.
 type runeSource interface {
 	readRune() (rune, error)
-	// replacements reports how many ill-formed sequences the source decoded to U+FFFD.
+}
+
+// countingSource is a runeSource that also reports the ill-formed sequences it decoded to U+FFFD.
+type countingSource interface {
+	runeSource
 	replacements() int
 }
 
@@ -306,9 +310,8 @@ func readUnit(body []byte, width int, bigEndian bool) uint32 {
 
 // memorySource serves runes of a whole-file decode.
 type memorySource struct {
-	text     []byte
-	offset   int
-	replaced int
+	text   []byte
+	offset int
 }
 
 func (s *memorySource) readRune() (rune, error) {
@@ -318,8 +321,4 @@ func (s *memorySource) readRune() (rune, error) {
 	value, size := utf8.DecodeRune(s.text[s.offset:])
 	s.offset += size
 	return value, nil
-}
-
-func (s *memorySource) replacements() int {
-	return s.replaced
 }

@@ -1,8 +1,6 @@
 package coding
 
 import (
-	"crypto/rand"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -11,6 +9,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/fengwk/kk-studio/daemon/internal/uuid"
 )
 
 var (
@@ -69,20 +69,18 @@ func (s *TextOutputStore) Root() string { return s.root }
 
 // CreateStagingFile creates a private .part file and holds its workspace lease.
 func (s *TextOutputStore) CreateStagingFile(callID string) (*os.File, string, error) {
-	id, err := randomUUID()
-	if err != nil {
-		return nil, "", err
-	}
+	id := uuid.New()
 	workspace := filepath.Join(s.root, id)
-	if err = os.Mkdir(workspace, 0o700); err != nil {
+	if err := os.Mkdir(workspace, 0o700); err != nil {
 		return nil, "", err
 	}
-	if err = os.WriteFile(filepath.Join(workspace, "created-at"), []byte(strconv.FormatInt(time.Now().Unix(), 10)), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(workspace, "created-at"), []byte(strconv.FormatInt(time.Now().Unix(), 10)), 0o600); err != nil {
 		_ = os.RemoveAll(workspace)
 		return nil, "", err
 	}
 	path := filepath.Join(workspace, sanitizeOutputName(callID)+"-"+id[:8]+".part")
 	var file *os.File
+	var err error
 	if s.openStagingFile != nil {
 		file, err = s.openStagingFile(path)
 	} else {
@@ -145,7 +143,7 @@ func (s *TextOutputStore) Acquire(path string) func() {
 		return func() {}
 	}
 	parts := strings.Split(rel, string(filepath.Separator))
-	if len(parts) < 2 || !canonicalUUID(parts[0]) {
+	if len(parts) < 2 || !uuid.Canonical(parts[0]) {
 		return func() {}
 	}
 	s.mu.Lock()
@@ -189,7 +187,7 @@ func (s *TextOutputStore) Sweep(ttl time.Duration) (int, error) {
 	cutoff := time.Now().Add(-ttl).Unix()
 	removed := 0
 	for _, entry := range entries {
-		if !canonicalUUID(entry.Name()) || !entry.IsDir() {
+		if !uuid.Canonical(entry.Name()) || !entry.IsDir() {
 			continue
 		}
 		s.mu.Lock()
@@ -235,35 +233,6 @@ func (s *TextOutputStore) releaseWorkspaceLocked(workspace string) {
 	if s.leases[id] <= 0 {
 		delete(s.leases, id)
 	}
-}
-
-func randomUUID() (string, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	b[6] = b[6]&0x0f | 0x40
-	b[8] = b[8]&0x3f | 0x80
-	h := hex.EncodeToString(b)
-	return h[:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:], nil
-}
-
-func canonicalUUID(value string) bool {
-	if len(value) != 36 {
-		return false
-	}
-	for i, c := range value {
-		if i == 8 || i == 13 || i == 18 || i == 23 {
-			if c != '-' {
-				return false
-			}
-			continue
-		}
-		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
-			return false
-		}
-	}
-	return true
 }
 
 func sanitizeOutputName(value string) string {

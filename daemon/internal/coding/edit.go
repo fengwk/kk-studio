@@ -171,7 +171,8 @@ func editableFileInfo(path string) error {
 	if info.IsDir() {
 		return rejectInput(fmt.Sprintf("path must be a file: %s", path))
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	// os.Lstat reports a symbolic link as a link, never as a regular file, so one check covers both.
+	if !info.Mode().IsRegular() {
 		return rejectInput(fmt.Sprintf("path is not a regular file: %s", path))
 	}
 	return nil
@@ -194,16 +195,14 @@ func editReview(invocationID, path, hash, before, after string, replacements int
 		return EditReview{}, runtime.CapabilityResult{}, err
 	}
 	review := EditReview{Path: path, Diff: diff, SHA256: hash, LossyDecode: lossy}
+	if err := checkReviewBudget("edit", review); err != nil {
+		return EditReview{}, runtime.CapabilityResult{}, err
+	}
 	message := fmt.Sprintf("Edited successfully.\nReplacements: %d", replacements)
 	if lossy != nil {
 		message += "\n" + lossyDecodeNote(lossy)
 	}
-	completed := textResult(invocationID, message)
-	resultJSON := mustJSON(map[string]any{"toolCallId": completed.CallID, "contents": completed.Contents, "error": completed.Error, "details": map[string]any{"editReview": review}})
-	if len(resultJSON) > maxReviewBytes {
-		return EditReview{}, runtime.CapabilityResult{}, rejectInput("Complete edit diff exceeds the review transport limit; split the change into several smaller edit calls.")
-	}
-	return review, completed, nil
+	return review, textResult(invocationID, message), nil
 }
 
 // decodeEditArguments rejects unknown fields at both levels, so a misspelled entry field fails

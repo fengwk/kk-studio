@@ -6,19 +6,20 @@ import (
 	"testing"
 )
 
-// Checks revision changes only when status content changes and progress remains monotonic.
+// Checks revision changes only when tracked facts change and progress remains monotonic.
 func TestStatusRevisionAndProgress(t *testing.T) {
 	s := NewStatusTracker()
-	a, err := s.Update(map[string]any{"state": "ready"})
-	if err != nil {
+	if err := s.ApplyConfiguration(1, nil); err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.Update(map[string]any{"state": "ready"})
-	if err != nil {
+	if revision := s.Revision(); revision != 2 {
+		t.Fatalf("applied configuration revision=%d, want 2", revision)
+	}
+	if err := s.ApplyConfiguration(1, nil); err != nil {
 		t.Fatal(err)
 	}
-	if a.Revision != 2 || b.Revision != 2 {
-		t.Fatalf("revisions %d, %d", a.Revision, b.Revision)
+	if revision := s.Revision(); revision != 2 {
+		t.Fatalf("duplicate configuration revision=%d, want 2", revision)
 	}
 	if err := s.BeginUpdate("2.0.0"); err != nil {
 		t.Fatal(err)
@@ -61,13 +62,12 @@ func TestStatusConfigurationFailurePreservesAppliedState(t *testing.T) {
 	if _, ok := s.ConfigurationError(); ok {
 		t.Fatal("successful configuration did not clear failure status")
 	}
-	status := s.Snapshot()
-	if status.Status["appliedVersion"] != int64(3) {
-		t.Fatalf("successful repair did not advance applied version: %+v", status.Status)
+	if revision := s.Revision(); revision != 4 {
+		t.Fatalf("successful repair revision=%d, want 4", revision)
 	}
 }
 
-// Exercises invalid progress, duplicate transitions, immutable snapshots, and revision exhaustion.
+// Exercises invalid progress, duplicate transitions, immutable progress and revision exhaustion.
 func TestStatusRejectsInvalidProgressAndRevisionOverflow(t *testing.T) {
 	s := NewStatusTracker()
 	if err := s.UpdateProgress(UpdateProgress{}); err == nil || err.Error() != "no update is active" {
@@ -76,9 +76,9 @@ func TestStatusRejectsInvalidProgressAndRevisionOverflow(t *testing.T) {
 	if err := s.BeginUpdate("2.0.0"); err != nil {
 		t.Fatal(err)
 	}
-	initialRevision := s.Snapshot().Revision
-	if err := s.BeginUpdate("2.0.0"); err != nil || s.Snapshot().Revision != initialRevision {
-		t.Fatalf("duplicate begin changed revision: err=%v status=%+v", err, s.Snapshot())
+	initialRevision := s.Revision()
+	if err := s.BeginUpdate("2.0.0"); err != nil || s.Revision() != initialRevision {
+		t.Fatalf("duplicate begin changed revision: err=%v revision=%d", err, s.Revision())
 	}
 	for _, progress := range []UpdateProgress{
 		{TargetVersion: "3.0.0"},
@@ -95,9 +95,9 @@ func TestStatusRejectsInvalidProgressAndRevisionOverflow(t *testing.T) {
 	if err := s.UpdateProgress(valid); err != nil {
 		t.Fatal(err)
 	}
-	revision := s.Snapshot().Revision
-	if err := s.UpdateProgress(valid); err != nil || s.Snapshot().Revision != revision {
-		t.Fatalf("duplicate progress advanced revision: err=%v", err)
+	revision := s.Revision()
+	if err := s.UpdateProgress(valid); err != nil || s.Revision() != revision {
+		t.Fatalf("duplicate progress advanced revision: err=%v revision=%d", err, s.Revision())
 	}
 	valid.TotalBytes = int64Ptr(8)
 	stored, ok := s.Progress()
@@ -112,10 +112,6 @@ func TestStatusRejectsInvalidProgressAndRevisionOverflow(t *testing.T) {
 	}
 
 	for _, transition := range []func(*StatusTracker) error{
-		func(tracker *StatusTracker) error {
-			_, err := tracker.Update(map[string]any{"changed": true})
-			return err
-		},
 		func(tracker *StatusTracker) error { return tracker.ApplyConfiguration(1, nil) },
 		func(tracker *StatusTracker) error {
 			_, err := tracker.FailConfiguration(ConfigurationError{Version: 2, Code: "FAILED"})
@@ -141,24 +137,19 @@ func TestStatusRejectsInvalidProgressAndRevisionOverflow(t *testing.T) {
 		}
 	}
 	tracker := NewStatusTracker()
-	tracker.revision = math.MaxInt64
-	if _, err := tracker.Update(map[string]any{}); err != nil {
-		t.Fatalf("unchanged status at max revision = %v", err)
-	}
-	tracker = NewStatusTracker()
 	failure := ConfigurationError{Version: 2, Code: "VALIDATION_FAILED"}
 	if changed, err := tracker.FailConfiguration(failure); err != nil || !changed {
 		t.Fatalf("first configuration failure changed=%t err=%v", changed, err)
 	}
-	revision = tracker.Snapshot().Revision
-	if changed, err := tracker.FailConfiguration(failure); err != nil || changed || tracker.Snapshot().Revision != revision {
-		t.Fatalf("duplicate configuration failure changed=%t err=%v status=%+v", changed, err, tracker.Snapshot())
+	revision = tracker.Revision()
+	if changed, err := tracker.FailConfiguration(failure); err != nil || changed || tracker.Revision() != revision {
+		t.Fatalf("duplicate configuration failure changed=%t err=%v revision=%d", changed, err, tracker.Revision())
 	}
 	if err := tracker.ApplyConfiguration(0, nil); err != nil {
 		t.Fatal(err)
 	}
-	revision = tracker.Snapshot().Revision
-	if err := tracker.ApplyConfiguration(0, nil); err != nil || tracker.Snapshot().Revision != revision {
-		t.Fatalf("idempotent configuration advanced revision: err=%v status=%+v", err, tracker.Snapshot())
+	revision = tracker.Revision()
+	if err := tracker.ApplyConfiguration(0, nil); err != nil || tracker.Revision() != revision {
+		t.Fatalf("idempotent configuration advanced revision: err=%v revision=%d", err, tracker.Revision())
 	}
 }

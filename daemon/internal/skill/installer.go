@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+
+	"github.com/fengwk/kk-studio/daemon/internal/uuid"
 )
 
 const (
@@ -117,7 +119,7 @@ func (i *Installer) Install(ctx context.Context, input json.RawMessage) (json.Ra
 // decodeInstallArgs decodes the install request and rejects incomplete or unsafe arguments.
 func decodeInstallArgs(input json.RawMessage) (installArgs, error) {
 	var a installArgs
-	if err := jsonv2.Unmarshal(input, &a, jsonv2.RejectUnknownMembers(true)); err != nil || a.TransferID == "" || !validUUID(a.TransferID) || !safeSegment(a.Package) || !safeSegment(a.Version) || !safeSegment(a.Skill) {
+	if err := jsonv2.Unmarshal(input, &a, jsonv2.RejectUnknownMembers(true)); err != nil || a.TransferID == "" || !uuid.Canonical(a.TransferID) || !safeSegment(a.Package) || !safeSegment(a.Version) || !safeSegment(a.Skill) {
 		return a, errors.New("skill.install: invalid arguments")
 	}
 	return a, nil
@@ -247,23 +249,6 @@ func safeSegment(s string) bool {
 	}
 	for _, r := range s {
 		if unicode.IsControl(r) {
-			return false
-		}
-	}
-	return true
-}
-func validUUID(s string) bool {
-	if len(s) != 36 || strings.ToLower(s) != s {
-		return false
-	}
-	for n, c := range s {
-		if n == 8 || n == 13 || n == 18 || n == 23 {
-			if c != '-' {
-				return false
-			}
-			continue
-		}
-		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
 			return false
 		}
 	}

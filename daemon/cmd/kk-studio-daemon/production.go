@@ -394,7 +394,6 @@ func (r *productionUpdateRunner) Configured() bool {
 	runner := r.runner()
 	return runner != nil && runner.Configured()
 }
-func (r *productionUpdateRunner) BusyReason() string                      { return "" }
 func (r *productionUpdateRunner) StopForUpdate(ctx context.Context) error { return r.stop(ctx) }
 func (r *productionUpdateRunner) HandleUpdate(ctx context.Context, command update.Command, applied config.DaemonConfig, report func(update.Progress)) (update.Outcome, error) {
 	policy, err := proxyPolicy(applied)

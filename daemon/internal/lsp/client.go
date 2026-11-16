@@ -30,6 +30,7 @@ type Client struct {
 	exitErr              chan error
 	closed               atomic.Bool
 	exitReported         atomic.Bool
+	parkedConfirmations  atomic.Int64
 	requestID            atomic.Uint64
 	stopOnce             sync.Once
 	stopDone             chan struct{}
@@ -253,7 +254,9 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 
 func (c *Client) call(ctx context.Context, method string, params, result any, onSent, onFinished func()) error {
 	var finishOnce sync.Once
+	var settled atomic.Bool
 	finish := func() {
+		settled.Store(true)
 		if onFinished != nil {
 			finishOnce.Do(onFinished)
 		}
@@ -272,10 +275,20 @@ func (c *Client) call(ctx context.Context, method string, params, result any, on
 	if onSent != nil {
 		onSent()
 	}
-	if onFinished != nil && c.exitSignal != nil {
-		go c.confirmWhenProcessStops(finish)
-	}
 	done := make(chan error, 1)
+	if onFinished != nil && c.exitSignal != nil {
+		// A request the server did not answer may still run, so its confirmation waits for process exit.
+		defer func() {
+			if settled.Load() {
+				return
+			}
+			c.parkedConfirmations.Add(1)
+			go func() {
+				defer c.parkedConfirmations.Add(-1)
+				c.confirmWhenProcessStops(finish)
+			}()
+		}()
+	}
 	go func() { done <- c.conn.Call(requestCtx, method, params, result, jsonrpc2.PickID(jsonrpc2.ID{Num: id})) }()
 	select {
 	case err := <-done:

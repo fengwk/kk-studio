@@ -366,6 +366,27 @@ func validateRegistrationTokenFile(path string) error {
 	return nil
 }
 
+// MaxRegistrationTokenBytes bounds the registration token file the daemon and its installers accept.
+const MaxRegistrationTokenBytes = 16384
+
+// ReadRegistrationTokenFile returns the trimmed token stored at the applied token path.
+func ReadRegistrationTokenFile(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", errors.New("daemon.token: cannot read registration token file")
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, MaxRegistrationTokenBytes+1))
+	if err != nil || len(b) > MaxRegistrationTokenBytes {
+		return "", errors.New("daemon.token: cannot read registration token file")
+	}
+	token := strings.TrimSpace(string(b))
+	if token == "" {
+		return "", errors.New("daemon.token: registration token file must not be empty")
+	}
+	return token, nil
+}
+
 // ReadRegistrationToken reads and trims the sibling registration token without retaining it in config.
 func ReadRegistrationToken(path string) (string, error) {
 	c, err := LoadDaemonConfig(path)
@@ -375,15 +396,7 @@ func ReadRegistrationToken(path string) (string, error) {
 	if err := validateRegistrationTokenFile(c.TokenPath); err != nil {
 		return "", err
 	}
-	b, err := os.ReadFile(c.TokenPath)
-	if err != nil {
-		return "", errors.New("daemon.token: cannot read registration token file")
-	}
-	token := strings.TrimSpace(string(b))
-	if token == "" {
-		return "", errors.New("daemon.token: registration token file must not be empty")
-	}
-	return token, nil
+	return ReadRegistrationTokenFile(c.TokenPath)
 }
 
 // maxConfigDepth bounds JSON nesting so an adversarially deep document cannot exhaust the stack.

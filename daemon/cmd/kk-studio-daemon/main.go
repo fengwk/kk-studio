@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
+	"github.com/fengwk/kk-studio/daemon/internal/h2xconnect"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
@@ -42,7 +43,7 @@ func main() {
 }
 
 func shouldBootstrapH2XConnect(args []string) bool {
-	return len(args) == 0 || (args[0] != h2xconnectBootstrapArg && !strings.HasPrefix(args[0], "__") && !strings.HasPrefix(args[0], "--internal-"))
+	return len(args) == 0 || (args[0] != h2xconnectBootstrapArg && !strings.HasPrefix(args[0], "__"))
 }
 
 func bootstrapH2XConnect(args []string) {
@@ -53,7 +54,7 @@ func bootstrapH2XConnect(args []string) {
 	}
 	childArgs := append([]string{h2xconnectBootstrapArg}, args...)
 	command := exec.Command(executable, childArgs...)
-	command.Env = withH2XConnect(os.Environ())
+	command.Env = h2xconnect.WithEnvironment(os.Environ())
 	command.Stdin, command.Stdout, command.Stderr = os.Stdin, os.Stdout, os.Stderr
 	if err := command.Start(); err != nil {
 		fmt.Fprintln(os.Stderr, "daemon failed: bootstrap process could not be started")
@@ -81,39 +82,6 @@ func bootstrapH2XConnect(args []string) {
 		os.Exit(1)
 	}
 	os.Exit(0)
-}
-
-func withH2XConnect(environment []string) []string {
-	result := make([]string, 0, len(environment)+1)
-	found := false
-	for _, entry := range environment {
-		if strings.HasPrefix(entry, "GODEBUG=") {
-			found = true
-			value := strings.TrimPrefix(entry, "GODEBUG=")
-			if !hasH2XConnect(value) {
-				if value != "" {
-					value += ","
-				}
-				value += "http2xconnect=1"
-			}
-			result = append(result, "GODEBUG="+value)
-		} else {
-			result = append(result, entry)
-		}
-	}
-	if !found {
-		result = append(result, "GODEBUG=http2xconnect=1")
-	}
-	return result
-}
-
-func hasH2XConnect(value string) bool {
-	for _, option := range strings.Split(value, ",") {
-		if option == "http2xconnect=1" {
-			return true
-		}
-	}
-	return false
 }
 
 func runNativeHelper(args []string) int {
@@ -145,7 +113,7 @@ func RunCLI(ctx context.Context, args []string, deps Dependencies, stdout, stder
 			return 2
 		}
 	}
-	if len(args) > 0 && (strings.HasPrefix(args[0], "--internal-") || strings.HasPrefix(args[0], "__")) {
+	if len(args) > 0 && strings.HasPrefix(args[0], "__") {
 		if deps.HelperMain == nil {
 			fmt.Fprintln(stderr, "daemon: internal helper is unavailable")
 			return 1

@@ -46,15 +46,15 @@ func ExecuteProcess(ctx context.Context, call runtime.CapabilityCall, capability
 		return terminatedBeforeStart(call, err)
 	}
 	if capability.Processes == nil {
-		return errorResult(call.InvocationID, failService("process supervisor is unavailable")), nil
+		return errorResult(call.InvocationID, failServiceUnavailable("process supervisor is unavailable")), nil
 	}
 	store, err := TextOutputStoreForDataDir(capability.Config.DataDir)
 	if err != nil {
-		return errorResult(call.InvocationID, failService("temporary output storage is unavailable")), nil
+		return errorResult(call.InvocationID, failServiceUnavailable("temporary output storage is unavailable")), nil
 	}
 	spool, err = NewOutputSpool(store, call.InvocationID, defaultCaptureBudget)
 	if err != nil {
-		return errorResult(call.InvocationID, failService("temporary output storage is unavailable")), nil
+		return errorResult(call.InvocationID, failServiceUnavailable("temporary output storage is unavailable")), nil
 	}
 	process, err := capability.Processes.Start(ctx, processSpec(capability.Config.BashExecutable, command, workdir))
 	if err != nil {

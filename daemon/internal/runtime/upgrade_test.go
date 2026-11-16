@@ -36,8 +36,7 @@ func newUpgradeRunner() *upgradeRunner {
 	}
 }
 
-func (r *upgradeRunner) Configured() bool   { return r.configured }
-func (r *upgradeRunner) BusyReason() string { return "" }
+func (r *upgradeRunner) Configured() bool { return r.configured }
 func (r *upgradeRunner) StopForUpdate(context.Context) error {
 	r.stopCalls.Add(1)
 	return nil

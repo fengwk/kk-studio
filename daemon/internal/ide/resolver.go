@@ -102,7 +102,7 @@ func (r *Resolver) ResolveView(ctx context.Context, request transport.ViewReques
 		return transport.ViewUpstream{}, NewError("IDE service is unavailable", "UNAVAILABLE")
 	}
 	streamID := r.nextID.Add(1)
-	streamCtx, cancel := context.WithCancel(ctx)
+	_, cancel := context.WithCancel(ctx)
 	binding.streams[streamID] = cancel
 	port, cookie := binding.port, binding.cookie
 	r.mu.Unlock()
@@ -117,8 +117,6 @@ func (r *Resolver) ResolveView(ctx context.Context, request transport.ViewReques
 			r.mu.Unlock()
 		})
 	}
-	// Retain the stream context through the cancel closure registered above until release.
-	_ = streamCtx
 	return transport.ViewUpstream{
 		Host: "127.0.0.1", Port: port, Path: path, Headers: headers, Cookie: cookie,
 		Protocols: protocols, Release: release,
@@ -146,11 +144,7 @@ func upstreamPath(request transport.ViewRequest, viewID, epoch string) (string, 
 			return "", NewError("stream path is invalid", "UNAVAILABLE")
 		}
 	}
-	base := "/__kk/ide/view/" + viewID + "/" + epoch
-	if pathname == "/" {
-		return base + path, nil
-	}
-	return base + path, nil
+	return "/__kk/ide/view/" + viewID + "/" + epoch + path, nil
 }
 
 func upstreamHeaders(input http.Header) (http.Header, []string, error) {

@@ -10,6 +10,8 @@ import (
 	"net/http/httptest"
 	"net/http/httputil"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -22,6 +24,16 @@ import (
 )
 
 const testEnvironment = "123e4567-e89b-12d3-a456-426614174000"
+
+// writeTokenFile stores a registration token the dialer reads from the applied configuration.
+func writeTokenFile(t *testing.T, token string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "token")
+	if err := os.WriteFile(path, []byte(token+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
 
 func TestTransport_H2ControlRoundTripOverWebSocket(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -45,9 +57,8 @@ func TestTransport_H2ControlRoundTripOverWebSocket(t *testing.T) {
 	defer platform.Close()
 	defer close(shutdownPlatform)
 	cc, err := Dial(ctx, DialConfig{
-		Applied:    config.DaemonConfig{TokenPath: "token", StudioURL: platform.URL, EnvironmentID: testEnvironment},
+		Applied:    config.DaemonConfig{TokenPath: writeTokenFile(t, "secret-token"), StudioURL: platform.URL, EnvironmentID: testEnvironment},
 		InstanceID: "daemon-instance", Platform: "linux",
-		ReadToken: func(string) (string, error) { return "secret-token", nil },
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -183,7 +194,7 @@ func TestTransport_DialDirectIgnoresEnvironmentProxy(t *testing.T) {
 		_, _, _ = ws.Read(r.Context())
 	}))
 	defer server.Close()
-	connection, err := Dial(ctx, DialConfig{Applied: config.DaemonConfig{TokenPath: "token", StudioURL: server.URL, EnvironmentID: testEnvironment}, ReadToken: func(string) (string, error) { return "token", nil }})
+	connection, err := Dial(ctx, DialConfig{Applied: config.DaemonConfig{TokenPath: writeTokenFile(t, "token"), StudioURL: server.URL, EnvironmentID: testEnvironment}})
 	if err != nil {
 		t.Fatalf("direct dial with unusable environment proxy failed: %v", err)
 	}
@@ -234,7 +245,7 @@ func TestTransport_RedialUsesCurrentGatewayAndPreservesInstance(t *testing.T) {
 	secondProxy, secondProxySeen := startProxy(secondServer.URL)
 	defer secondProxy.Close()
 	firstProxyURL := firstProxy.URL
-	config := DialConfig{Applied: config.DaemonConfig{TokenPath: "token", StudioURL: firstServer.URL, ProxyURL: &firstProxyURL, EnvironmentID: testEnvironment}, InstanceID: "stable-instance", ReadToken: func(string) (string, error) { return "token", nil }}
+	config := DialConfig{Applied: config.DaemonConfig{TokenPath: writeTokenFile(t, "token"), StudioURL: firstServer.URL, ProxyURL: &firstProxyURL, EnvironmentID: testEnvironment}, InstanceID: "stable-instance"}
 	first, err := Dial(ctx, config)
 	if err != nil {
 		t.Fatal(err)
@@ -296,7 +307,7 @@ func TestTransport_HandshakeRejection(t *testing.T) {
 				status  int
 				upgrade *protocol.UpgradeRequired
 			}, 1)
-			_, err := Dial(context.Background(), DialConfig{Applied: config.DaemonConfig{TokenPath: "token", StudioURL: server.URL, EnvironmentID: testEnvironment}, ReadToken: func(string) (string, error) { return "token", nil }, Observer: recordingObserver{upgradeFailed: func(status int, u *protocol.UpgradeRequired) {
+			_, err := Dial(context.Background(), DialConfig{Applied: config.DaemonConfig{TokenPath: writeTokenFile(t, "token"), StudioURL: server.URL, EnvironmentID: testEnvironment}, Observer: recordingObserver{upgradeFailed: func(status int, u *protocol.UpgradeRequired) {
 				called <- struct {
 					status  int
 					upgrade *protocol.UpgradeRequired

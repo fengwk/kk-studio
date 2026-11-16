@@ -173,7 +173,9 @@ esac
 `
       writeExecutable(path.join(work, binary), binaryPath ? readFileSync(binaryPath) : fakeDaemon)
       writeText(path.join(work, 'runtime/code-server/out/node/entry.js'), '// bundled IDE runtime\\n', 0o644)
-      writeText(path.join(work, 'ide-extension/extension.cjs'), '// IDE extension\\n', 0o644)
+      for (const name of ['extension.cjs', 'bridge.cjs', 'documents.cjs', 'framing.cjs', 'host-actions.cjs', 'package.json']) {
+        writeText(path.join(work, `ide-extension/${name}`), `// IDE extension ${name}\\n`, 0o644)
+      }
       writeText(path.join(work, 'runtime-manifest.json'), `{"daemonVersion":"${version}","codeServer":{"${key}":{}}}\n`, 0o644)
       writeText(path.join(work, 'LICENSE'), 'Apache License\\n', 0o644)
       writeText(path.join(work, 'THIRD_PARTY_NOTICES'), 'daemon notices\\n', 0o644)

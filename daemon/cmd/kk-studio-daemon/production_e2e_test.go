@@ -429,7 +429,6 @@ func TestProductionRuntimeEndToEnd(t *testing.T) {
 type failingUpdateRunner struct{}
 
 func (failingUpdateRunner) Configured() bool                    { return true }
-func (failingUpdateRunner) BusyReason() string                  { return "" }
 func (failingUpdateRunner) StopForUpdate(context.Context) error { return nil }
 func (failingUpdateRunner) HandleUpdate(context.Context, update.Command, config.DaemonConfig, func(update.Progress)) (update.Outcome, error) {
 	return update.Outcome{Phase: update.PhaseFailed, Message: "test updater failed"}, nil

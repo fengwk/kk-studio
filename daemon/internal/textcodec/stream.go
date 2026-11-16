@@ -54,11 +54,11 @@ func NewReader(path string, source io.Reader) (*Reader, error) {
 	if readErr != nil {
 		return nil, readErr
 	}
-	text, enc, replacements, decodeErr := decodeDeclared(declared, all)
+	text, enc, _, decodeErr := decodeDeclared(declared, all)
 	if decodeErr != nil {
 		return nil, decodeErr
 	}
-	return &Reader{enc: enc, source: &memorySource{text: text, replaced: replacements}}, nil
+	return &Reader{enc: enc, source: &memorySource{text: text}}, nil
 }
 
 // Encoding reports the encoding NewReader established.

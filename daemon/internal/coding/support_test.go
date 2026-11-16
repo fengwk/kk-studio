@@ -24,6 +24,7 @@ func TestToErrorResultClassifiesStableFailures(t *testing.T) {
 		{name: "input", err: rejectInput("  bad arguments  "), code: "INVALID_ARGUMENT", text: "bad arguments. The tool was not executed. Correct the arguments to match the tool schema, then call the tool again."},
 		{name: "run", err: failRun("operation failed!", "FAILED"), code: "FAILED", text: "operation failed! Whether the tool took effect cannot be confirmed. Verify whether the intended effect already took place before deciding what to do next."},
 		{name: "service", err: failService("service unavailable"), code: "SERVICE_FAILURE", text: "service unavailable. Whether the tool took effect cannot be confirmed. Verify whether the intended effect already took place before deciding what to do next."},
+		{name: "service unavailable", err: failServiceUnavailable("process supervisor is unavailable"), code: "SERVICE_FAILURE", text: "process supervisor is unavailable. The tool was not executed. Restore the daemon service, then call the tool again."},
 		{name: "cancelled", err: context.Canceled, code: "CANCELLED", text: "Operation cancelled. Whether the tool took effect cannot be confirmed. Check whether the operation already took effect before deciding what to do next."},
 		{name: "timeout", err: context.DeadlineExceeded, code: "TIMEOUT", text: "Operation timed out. Whether the tool took effect cannot be confirmed. Check whether the operation already took effect before deciding what to do next."},
 		{name: "unknown", err: errors.New("private secret"), code: "INTERNAL", text: "The capability failed while running and the underlying error is not repeated to avoid leaking details. Whether the tool took effect cannot be confirmed. Verify whether the intended effect already took place before deciding what to do next."},
@@ -236,25 +237,6 @@ func TestResolveWritable(t *testing.T) {
 	want := filepath.Join(resolvedRoot, "new", "deep", "f.txt")
 	if got != want {
 		t.Fatalf("resolved=%q want=%q", got, want)
-	}
-}
-
-// IsSymbolicLink distinguishes links from regular files and missing paths.
-func TestPathPredicates(t *testing.T) {
-	root := t.TempDir()
-	file := filepath.Join(root, "a.txt")
-	if err := os.WriteFile(file, []byte("x"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if isSymbolicLink(file) || isSymbolicLink(filepath.Join(root, "missing")) {
-		t.Fatal("a regular file or a missing path was reported as a symbolic link")
-	}
-	link := filepath.Join(root, "link")
-	if err := os.Symlink(file, link); err != nil {
-		t.Skipf("symlink creation unavailable: %v", err)
-	}
-	if !isSymbolicLink(link) {
-		t.Fatal("symlink predicate returned false for an existing link")
 	}
 }
 

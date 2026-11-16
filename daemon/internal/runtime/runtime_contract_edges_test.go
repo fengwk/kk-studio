@@ -47,9 +47,6 @@ func TestRuntimeTerminalReleasesProtectedExecution(t *testing.T) {
 	if active {
 		t.Fatal("terminal invocation remained protected")
 	}
-	if reason := r.updateBusyReason(nil); reason != "" {
-		t.Fatalf("update busy reason=%q after terminal", reason)
-	}
 }
 
 // Replays the stored terminal and exit fact in response to CANCEL after completion.

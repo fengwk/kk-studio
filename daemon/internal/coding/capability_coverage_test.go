@@ -189,14 +189,11 @@ func TestExecuteProcessRejectsPreflightFailures(t *testing.T) {
 	}
 }
 
-func TestOutputNameAndUUIDValidationEdges(t *testing.T) {
+func TestOutputNameValidationEdges(t *testing.T) {
 	if got := sanitizeOutputName(""); got != "output" {
 		t.Fatalf("empty name=%q", got)
 	}
 	if got := sanitizeOutputName(strings.Repeat("a", 100)); len(got) != 64 {
 		t.Fatalf("name length=%d name=%q", len(got), got)
-	}
-	if !canonicalUUID("11111111-1111-4111-8111-111111111111") || canonicalUUID("11111111-1111-4111-8111-11111111111x") {
-		t.Fatal("UUID validation mismatch")
 	}
 }

@@ -128,7 +128,4 @@ func TestRuntimeResendsUpdateReceiptsAndReportsPermitErrors(t *testing.T) {
 	if firstError(nil, nil) != nil || firstError(nil, permitErr) != permitErr {
 		t.Fatal("firstError did not preserve the first failure")
 	}
-	if got := r.updateBusyReason(&testUpdateRunner{}); got != "" {
-		t.Fatalf("empty runner busy reason = %q", got)
-	}
 }

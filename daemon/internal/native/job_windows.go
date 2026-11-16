@@ -135,10 +135,6 @@ func (nativeWindowsJobAccountingAPI) QueryInformationJobObject(job windows.Handl
 	return windows.QueryInformationJobObject(job, windows.JobObjectBasicAccountingInformation, uintptr(unsafe.Pointer(accounting)), uint32(unsafe.Sizeof(*accounting)), nil)
 }
 
-func jobActiveProcesses(job windows.Handle) (uint32, error) {
-	return jobActiveProcessesWithAPI(job, nativeWindowsJobAccountingAPI{})
-}
-
 func jobActiveProcessesWithAPI(job windows.Handle, api windowsJobAccountingAPI) (uint32, error) {
 	var accounting windowsJobAccounting
 	if err := api.QueryInformationJobObject(job, &accounting); err != nil {

@@ -26,12 +26,6 @@ func TestCodec_NilPayloadRejected(t *testing.T) {
 	}
 }
 
-func TestCodec_ProtocolV4(t *testing.T) {
-	if ControlProtocolVersion != 4 {
-		t.Fatalf("version=%d", ControlProtocolVersion)
-	}
-}
-
 func TestCodec_OpaqueJSON(t *testing.T) {
 	text := ` { "b" : 2, "a":1 } `
 	e := testEnvelope(MessageType_INVOKE, testInvocationID, &Envelope_Invoke{Invoke: &Invoke{CapabilityId: proto.String("fs.read"), ArgumentsJson: &text, TimeoutMillis: proto.Int64(0)}})

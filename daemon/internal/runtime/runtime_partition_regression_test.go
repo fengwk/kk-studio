@@ -169,7 +169,7 @@ func TestRuntimeUpdateRejectsBusyIDEWithExactReason(t *testing.T) {
 			options.IDECommandCount = func() int { return tc.commandNum }
 			options.IDECanStartUpdate = func() bool { return tc.canStart }
 			r, _ := newReadyRuntimeForTest(t, options)
-			decision, err := r.updateOps.Decide(updateCommandForTest(), "1.0.0", true, r.updateBusyReason(options.Update))
+			decision, err := r.updateOps.Decide(updateCommandForTest(), "1.0.0", true, r.updateBusyReason())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -391,7 +391,7 @@ func TestRuntimeDerivesUpdateAdmissionFromIDEService(t *testing.T) {
 	if got := r.options.IDECommandCount(); got != 1 {
 		t.Fatalf("active IDE command count = %d, want 1", got)
 	}
-	if got := r.updateBusyReason(nil); got != "IDE command is in progress" {
+	if got := r.updateBusyReason(); got != "IDE command is in progress" {
 		t.Fatalf("active IDE command busy reason = %q", got)
 	}
 	if err := r.handle(context.Background(), updateEnvelope(testUpdateOperationID, "2.0.0")); err != nil {
@@ -437,7 +437,7 @@ func TestRuntimeDerivesUpdateAdmissionFromIDEService(t *testing.T) {
 		t.Fatalf("IDE commands executed = %d, want 1", ide.calls.Load())
 	}
 	ide.canUpdate = false
-	if got := r.updateBusyReason(nil); got != "IDE views, cleanup or data streams are active" {
+	if got := r.updateBusyReason(); got != "IDE views, cleanup or data streams are active" {
 		t.Fatalf("IDE service busy reason = %q", got)
 	}
 }

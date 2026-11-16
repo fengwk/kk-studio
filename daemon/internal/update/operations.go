@@ -38,7 +38,6 @@ type Outcome struct {
 
 type Runner interface {
 	Configured() bool
-	BusyReason() string
 	StopForUpdate(context.Context) error
 	HandleUpdate(context.Context, Command, config.DaemonConfig, func(Progress)) (Outcome, error)
 }

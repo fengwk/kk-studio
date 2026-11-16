@@ -24,6 +24,10 @@ binary="$tmp/kk-studio-daemon"
 [ -x "$binary" ] || fail 'archive is missing executable kk-studio-daemon'
 [ -f "$tmp/runtime/code-server/out/node/entry.js" ] || fail 'archive is missing bundled code-server'
 [ -f "$tmp/ide-extension/extension.cjs" ] || fail 'archive is missing IDE extension'
+for name in bridge.cjs documents.cjs framing.cjs host-actions.cjs package.json; do
+  [ -f "$tmp/ide-extension/$name" ] || fail "archive is missing IDE extension runtime file: $name"
+done
+[ -z "$(find "$tmp/ide-extension" -name '*.test.cjs' -print -quit)" ] || fail 'release archive unexpectedly contains the IDE extension test suite'
 [ -f "$tmp/runtime-manifest.json" ] || fail 'archive is missing runtime manifest'
 [ -f "$tmp/LICENSE" ] && [ -f "$tmp/THIRD_PARTY_NOTICES" ] || fail 'archive is missing legal notices'
 ripgrep_binary=$(find "$tmp" -type f \( -name rg -o -name rg.exe \) -print -quit)

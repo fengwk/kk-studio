@@ -107,7 +107,7 @@ func TestBridgeRequestAdmissionFailures(t *testing.T) {
 	bridge.mu.Lock()
 	view := bridge.views[viewID]
 	view.hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	view.stream = &bridgeStream{hostID: view.hostID, messages: make(chan []byte), retired: make(chan struct{})}
+	view.stream = &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
 	stream := view.stream
 	bridge.mu.Unlock()
 	checks := []struct {
@@ -295,12 +295,12 @@ func TestAssignRebindFencesOldBinding(t *testing.T) {
 	oldWorkspace := "/managed/old.code-workspace"
 	newWorkspace := "/managed/new.code-workspace"
 	bridge.Assign(viewID, oldWorkspace, 1, "/managed")
-	stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte), retired: make(chan struct{})}
+	stream := &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
 	pending := make(chan BridgeResult, 1)
 	waiter := make(chan error, 1)
 	bridge.mu.Lock()
 	bridge.views[viewID].stream = stream
-	bridge.views[viewID].hostID = stream.hostID
+	bridge.views[viewID].hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	bridge.pending["old"] = &bridgePending{viewID: viewID, epoch: 1, result: pending}
 	bridge.waiters[viewID] = map[chan error]struct{}{waiter: {}}
 	bridge.mu.Unlock()
@@ -378,8 +378,8 @@ func TestRequestStreamRetirement(t *testing.T) {
 // Verifies pending bridge commands are fenced by epoch and directory-transition outcomes.
 func TestBridgePendingLifecycleFences(t *testing.T) {
 	makeBridge := func(epoch int64) (*Bridge, *bridgeView, *bridgeStream) {
-		stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", retired: make(chan struct{})}
-		view := &bridgeView{epoch: epoch, stream: stream, hostID: stream.hostID, directory: "/workspace/old"}
+		stream := &bridgeStream{retired: make(chan struct{})}
+		view := &bridgeView{epoch: epoch, stream: stream, hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", directory: "/workspace/old"}
 		bridge := &Bridge{views: map[string]*bridgeView{"11111111-1111-4111-8111-111111111111": view}, pending: make(map[string]*bridgePending), waiters: make(map[string]map[chan error]struct{})}
 		return bridge, view, stream
 	}
@@ -388,7 +388,7 @@ func TestBridgePendingLifecycleFences(t *testing.T) {
 	t.Run("missing pending and stale stream are ignored", func(t *testing.T) {
 		bridge, view, stream := makeBridge(3)
 		bridge.resolvePending("missing", BridgeResult{OK: true})
-		other := &bridgeStream{hostID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", retired: make(chan struct{})}
+		other := &bridgeStream{retired: make(chan struct{})}
 		view.stream = other
 		bridge.streamDisconnected(viewID, stream)
 		if view.stream != other {

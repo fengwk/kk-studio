@@ -88,8 +88,6 @@ func (r *InstallerRunner) Configured() bool {
 	return r != nil && r.options.Home != "" && r.options.TempDir != "" && r.options.Launch != nil
 }
 
-func (r *InstallerRunner) BusyReason() string { return "" }
-
 func (r *InstallerRunner) StopForUpdate(ctx context.Context) error {
 	if r.options.Stop == nil {
 		return nil

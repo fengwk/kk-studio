@@ -12,10 +12,6 @@ type UpdateProgress struct {
 	DownloadedBytes int64  `json:"downloadedBytes"`
 	TotalBytes      *int64 `json:"totalBytes"`
 }
-type RuntimeStatus struct {
-	Revision int64          `json:"revision"`
-	Status   map[string]any `json:"status"`
-}
 
 type ConfigurationError struct {
 	Version int64
@@ -23,55 +19,39 @@ type ConfigurationError struct {
 	Field   string
 }
 
-// StatusTracker publishes monotonically revised runtime status and update progress.
+// StatusTracker publishes a monotonically revised runtime status and update progress. Only the facts
+// the runtime reports are retained: the applied configuration, its failure, and update progress.
 type StatusTracker struct {
 	mu                 sync.Mutex
 	revision           int64
-	status             map[string]any
+	appliedVersion     *int64
+	proxyURL           *string
 	progress           *UpdateProgress
 	updating           bool
 	configurationError *ConfigurationError
 	updateTarget       string
 }
 
-func NewStatusTracker() *StatusTracker { return &StatusTracker{revision: 1, status: map[string]any{}} }
-func (s *StatusTracker) Snapshot() RuntimeStatus {
+func NewStatusTracker() *StatusTracker { return &StatusTracker{revision: 1} }
+
+// Revision returns the current revision the runtime reports with every status frame.
+func (s *StatusTracker) Revision() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return RuntimeStatus{Revision: s.revision, Status: cloneMap(s.status)}
+	return s.revision
 }
-func (s *StatusTracker) Update(values map[string]any) (RuntimeStatus, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if reflect.DeepEqual(s.status, values) {
-		return RuntimeStatus{Revision: s.revision, Status: cloneMap(s.status)}, nil
-	}
-	if s.revision == math.MaxInt64 {
-		return RuntimeStatus{}, errors.New("runtime status revision exceeds the Java long range")
-	}
-	s.revision++
-	s.status = cloneMap(values)
-	return RuntimeStatus{Revision: s.revision, Status: cloneMap(s.status)}, nil
-}
+
 func (s *StatusTracker) ApplyConfiguration(version int64, proxyURL *string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	updated := cloneMap(s.status)
-	updated["appliedVersion"] = version
-	if proxyURL == nil {
-		updated["proxyUrl"] = nil
-	} else {
-		updated["proxyUrl"] = *proxyURL
-	}
-	delete(updated, "configurationError")
-	if reflect.DeepEqual(s.status, updated) && s.configurationError == nil {
+	if s.configurationError == nil && s.appliedVersion != nil && *s.appliedVersion == version && equalOptionalString(s.proxyURL, proxyURL) {
 		return nil
 	}
-	if s.revision == math.MaxInt64 {
-		return errors.New("runtime status revision exceeds the Java long range")
+	if err := s.advanceLocked(); err != nil {
+		return err
 	}
-	s.revision++
-	s.status = updated
+	s.appliedVersion = &version
+	s.proxyURL = cloneString(proxyURL)
 	s.configurationError = nil
 	return nil
 }
@@ -82,17 +62,9 @@ func (s *StatusTracker) FailConfiguration(failure ConfigurationError) (bool, err
 	if s.configurationError != nil && *s.configurationError == failure {
 		return false, nil
 	}
-	updated := cloneMap(s.status)
-	failureStatus := map[string]any{"version": failure.Version, "code": failure.Code}
-	if failure.Field != "" {
-		failureStatus["field"] = failure.Field
+	if err := s.advanceLocked(); err != nil {
+		return false, err
 	}
-	updated["configurationError"] = failureStatus
-	if s.revision == math.MaxInt64 {
-		return false, errors.New("runtime status revision exceeds the Java long range")
-	}
-	s.revision++
-	s.status = updated
 	copy := failure
 	s.configurationError = &copy
 	return true, nil
@@ -188,10 +160,14 @@ func (s *StatusTracker) advanceLocked() error {
 	return nil
 }
 
-func cloneMap(m map[string]any) map[string]any {
-	out := make(map[string]any, len(m))
-	for k, v := range m {
-		out[k] = v
+func cloneString(value *string) *string {
+	if value == nil {
+		return nil
 	}
-	return out
+	copy := *value
+	return &copy
+}
+
+func equalOptionalString(left, right *string) bool {
+	return left == nil && right == nil || left != nil && right != nil && *left == *right
 }

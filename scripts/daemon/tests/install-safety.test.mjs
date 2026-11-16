@@ -10,6 +10,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { spawnSync } from 'node:child_process'
 
+import { repositoryRoot } from '../../dev/lib/repo-root.mjs'
 import {
   ENVIRONMENT_ID,
   InstallFixture,
@@ -19,6 +20,7 @@ import {
   writeExecutable,
 } from './support/release-fixture.mjs'
 
+const ROOT = repositoryRoot()
 const mode = (file) => statSync(file).mode & 0o777
 const bytes = (file) => readFileSync(file)
 const unitPath = (fixture) => fixture.unitPath
@@ -45,6 +47,24 @@ function withInstall(body) {
     return body(context)
   })
 }
+
+describe('installer input bounds', () => {
+  // The token file bound is one fact: both installers and the daemon must accept the same size.
+  it('bounds the token file identically in both installers and the daemon', () => {
+    const lines = (file) => readFileSync(path.join(ROOT, file), 'utf8').split('\n')
+    const bounds = (matched, pattern) => matched.map((line) => Number(pattern.exec(line)?.[1]))
+    const shellChecks = lines('scripts/daemon/install.sh').filter((line) => /check_input(_size)?\b.*token/i.test(line))
+    assert.equal(shellChecks.length, 3)
+    const windowsChecks = lines('scripts/daemon/install.ps1').filter((line) => /TokenFile.*MaximumBytes/.test(line))
+    assert.equal(windowsChecks.length, 2)
+    const declared = lines('daemon/internal/config/load.go').filter((line) => line.startsWith('const MaxRegistrationTokenBytes'))
+    assert.equal(declared.length, 1)
+    const daemonBound = bounds(declared, /=\s*(\d+)/)[0]
+    assert.deepEqual(bounds(shellChecks, /(\d+)\s*$/), [daemonBound, daemonBound, daemonBound])
+    assert.deepEqual(bounds(windowsChecks, /MaximumBytes\s+(\d+)/), [daemonBound, daemonBound])
+    assert.equal(daemonBound, 16384)
+  })
+})
 
 describe('install.sh safety', () => {
   it('rejects inputs mutated during the download before publication', () =>

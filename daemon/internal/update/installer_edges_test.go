@@ -78,7 +78,7 @@ func TestInstallerRunnerBoundariesAndSafeLauncherErrors(t *testing.T) {
 		t.Fatal("nil runner reports configured")
 	}
 	runner := NewInstallerRunner(InstallerRunnerOptions{Home: t.TempDir(), TempDir: t.TempDir()})
-	if !runner.Configured() || runner.BusyReason() != "" {
+	if !runner.Configured() {
 		t.Fatal("default runner boundaries were not configured")
 	}
 	if err := runner.StopForUpdate(context.Background()); err != nil {

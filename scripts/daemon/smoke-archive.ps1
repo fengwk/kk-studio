@@ -14,9 +14,12 @@ try {
     & $tarPath -xzf $Archive -C $temp
     if ($LASTEXITCODE -ne 0) { throw 'cannot extract daemon archive' }
     $binary = Join-Path $temp 'kk-studio-daemon.exe'
-    foreach ($required in @($binary, (Join-Path $temp 'runtime\code-server\out\node\entry.js'), (Join-Path $temp 'ide-extension\extension.cjs'), (Join-Path $temp 'runtime-manifest.json'), (Join-Path $temp 'LICENSE'), (Join-Path $temp 'THIRD_PARTY_NOTICES'))) {
+    foreach ($required in @($binary, (Join-Path $temp 'runtime\code-server\out\node\entry.js'), (Join-Path $temp 'ide-extension\extension.cjs'), (Join-Path $temp 'ide-extension\bridge.cjs'), (Join-Path $temp 'ide-extension\documents.cjs'), (Join-Path $temp 'ide-extension\framing.cjs'), (Join-Path $temp 'ide-extension\host-actions.cjs'), (Join-Path $temp 'ide-extension\package.json'), (Join-Path $temp 'runtime-manifest.json'), (Join-Path $temp 'LICENSE'), (Join-Path $temp 'THIRD_PARTY_NOTICES'))) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "archive entry missing: $required" }
     }
+    $extensionTests = Get-ChildItem -LiteralPath (Join-Path $temp 'ide-extension') -Recurse -File -Filter '*.test.cjs' |
+        Select-Object -First 1
+    if ($null -ne $extensionTests) { throw 'release archive unexpectedly contains the IDE extension test suite' }
     $ripgrepBinary = Get-ChildItem -LiteralPath $temp -Recurse -File |
         Where-Object { $_.Name -in @('rg', 'rg.exe') } |
         Select-Object -First 1

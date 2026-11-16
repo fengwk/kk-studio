@@ -188,7 +188,7 @@ func TestWindowsJobAccounting_RealJobTracksManagedProcess(t *testing.T) {
 		t.Fatal(err)
 	}
 	managed := process.(*windowsProcess)
-	active, err := jobActiveProcesses(managed.job)
+	active, err := jobActiveProcessesWithAPI(managed.job, nativeWindowsJobAccountingAPI{})
 	if err != nil || active == 0 {
 		t.Fatalf("live Job active count = %d, %v; want at least one process", active, err)
 	}

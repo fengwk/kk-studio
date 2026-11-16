@@ -839,7 +839,7 @@ function Resolve-InstallInputs {
     $config = Assert-PrivateFile -Path $ConfigFile -ExpectedOwnerSid $script:CurrentSid `
         -Name "-ConfigFile" -MaximumBytes 1048576
     $token = Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid `
-        -Name "-TokenFile" -MaximumBytes 65536
+        -Name "-TokenFile" -MaximumBytes 16384
     if (-not [string]::Equals((Split-Path -Parent $config), (Split-Path -Parent $token),
         [StringComparison]::OrdinalIgnoreCase) -or
         (Split-Path -Leaf $config) -cne "daemon.json" -or
@@ -983,7 +983,7 @@ function Prepare-StagedArchive {
     # Copy inputs to the private download directory, independent of any live installation.
     # Revalidate after the download; never copy from a path that became unsafe during preflight.
     $null = Assert-PrivateFile -Path $ConfigFile -ExpectedOwnerSid $script:CurrentSid -MaximumBytes 1048576
-    $null = Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid -MaximumBytes 65536
+    $null = Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid -MaximumBytes 16384
     Copy-PrivateFile -Source $ConfigFile -Destination (Join-Path $script:DownloadDirectory "daemon.json")
     Copy-PrivateFile -Source $TokenFile -Destination (Join-Path $script:DownloadDirectory "daemon.token")
     $stagedConfig = Join-Path $script:DownloadDirectory "daemon.json"

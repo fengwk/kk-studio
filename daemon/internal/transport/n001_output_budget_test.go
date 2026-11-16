@@ -41,9 +41,8 @@ func TestTransport_OutputLimitFailureKeepsControlConnection(t *testing.T) {
 	defer close(shutdownPlatform)
 
 	cc, err := Dial(ctx, DialConfig{
-		Applied:    config.DaemonConfig{TokenPath: "token", StudioURL: platform.URL, EnvironmentID: testEnvironment},
+		Applied:    config.DaemonConfig{TokenPath: writeTokenFile(t, "secret-token"), StudioURL: platform.URL, EnvironmentID: testEnvironment},
 		InstanceID: "daemon-instance", Platform: "linux",
-		ReadToken: func(string) (string, error) { return "secret-token", nil },
 	})
 	if err != nil {
 		t.Fatal(err)

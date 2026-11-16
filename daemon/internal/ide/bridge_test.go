@@ -125,10 +125,10 @@ func TestNativeClosePromptHasNoTimeout(t *testing.T) {
 	const viewID = "11111111-1111-4111-8111-111111111111"
 	workspace := filepath.Join(t.TempDir(), "view.code-workspace")
 	bridge.Assign(viewID, workspace, 1, filepath.Dir(workspace))
-	stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte, 1), retired: make(chan struct{})}
+	stream := &bridgeStream{messages: make(chan []byte, 1), retired: make(chan struct{})}
 	bridge.mu.Lock()
 	view := bridge.views[viewID]
-	view.hostID, view.stream = stream.hostID, stream
+	view.hostID, view.stream = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", stream
 	bridge.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -172,9 +172,9 @@ func TestDiscardClosePromptHasTimeout(t *testing.T) {
 	const viewID = "11111111-1111-4111-8111-111111111111"
 	workspace := filepath.Join(t.TempDir(), "view.code-workspace")
 	bridge.Assign(viewID, workspace, 1, filepath.Dir(workspace))
-	stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte, 1), retired: make(chan struct{})}
+	stream := &bridgeStream{messages: make(chan []byte, 1), retired: make(chan struct{})}
 	bridge.mu.Lock()
-	bridge.views[viewID].hostID, bridge.views[viewID].stream = stream.hostID, stream
+	bridge.views[viewID].hostID, bridge.views[viewID].stream = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", stream
 	bridge.mu.Unlock()
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
@@ -358,9 +358,9 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"unknown","ok":true}`)); status != http.StatusNoContent {
 		t.Fatalf("unknown ID status=%d", status)
 	}
-	stream := &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte), retired: make(chan struct{})}
+	stream := &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
 	bridge.mu.Lock()
-	bridge.views[viewID].hostID = stream.hostID
+	bridge.views[viewID].hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	bridge.views[viewID].stream = stream
 	result := make(chan BridgeResult, 1)
 	bridge.pending["change"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", expectedDirectory: "/managed/new", stream: stream, result: result}
@@ -372,8 +372,8 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 		t.Fatalf("mismatched directory result=%+v", got)
 	}
 	bridge.mu.Lock()
-	stream = &bridgeStream{hostID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", messages: make(chan []byte), retired: make(chan struct{})}
-	bridge.views[viewID].hostID = stream.hostID
+	stream = &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
+	bridge.views[viewID].hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 	bridge.views[viewID].stream = stream
 	initiatorEcho := make(chan BridgeResult, 1)
 	bridge.pending["initiator-echo"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", expectedDirectory: "/managed/new", stream: stream, result: initiatorEcho}
@@ -387,7 +387,7 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 	bridge.mu.Lock()
 	stale := make(chan BridgeResult, 1)
 	bridge.pending["stale"] = &bridgePending{viewID: viewID, epoch: 1, op: "inspect", stream: stream, result: stale}
-	bridge.views[viewID].stream = &bridgeStream{hostID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", messages: make(chan []byte), retired: make(chan struct{})}
+	bridge.views[viewID].stream = &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
 	bridge.mu.Unlock()
 	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"stale","ok":true}`)); status != http.StatusNoContent {
 		t.Fatalf("stale result status=%d", status)
