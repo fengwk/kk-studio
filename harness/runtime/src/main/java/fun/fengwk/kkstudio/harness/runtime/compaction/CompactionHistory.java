@@ -167,7 +167,7 @@ public final class CompactionHistory {
     return compactionTurnAtStart(path, previousTurn.start().id()).complete();
   }
 
-  /** 判断是否达到上下文边界/溢出墙（ProviderErrorKind.OVERFLOW 或 ContextPressureDetector 判定）。 */
+  /** 判断是否达到上下文边界/溢出墙（ProviderErrorKind.CONTEXT_LIMIT 或 ContextPressureDetector 判定）。 */
   public static boolean isContextWall(TurnStartPayload start, Entry resultEntry) {
     if (resultEntry == null) {
       return false;

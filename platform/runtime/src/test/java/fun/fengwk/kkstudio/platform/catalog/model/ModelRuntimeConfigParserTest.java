@@ -782,10 +782,18 @@ class ModelRuntimeConfigParserTest {
     assertTrue(encoded.contains("\"multipliers\":[]"), encoded);
 
     ModelUsage usage = new ModelUsage(1_000_000, 1_000_000, 0, 0, Map.of(), null, null);
+    ModelCost zeroCost =
+        new ModelCost(
+            "USD",
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO,
+            BigDecimal.ZERO);
+    assertEquals(zeroCost, ModelCost.calculate(parser.parse(missing).pricing(), usage, null, null));
     assertEquals(
-        ModelCost.zero(), ModelCost.calculate(parser.parse(missing).pricing(), usage, null, null));
-    assertEquals(
-        ModelCost.zero(), ModelCost.calculate(parser.parse(explicit).pricing(), usage, null, null));
+        zeroCost, ModelCost.calculate(parser.parse(explicit).pricing(), usage, null, null));
     assertThrows(
         IllegalArgumentException.class,
         () -> parser.decode(configWithPricing("{\"base\":{\"input\":1.1}}")));
