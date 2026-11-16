@@ -59,8 +59,9 @@ func TestRuntimeUpdateSendsAcceptedThenPreparedAndHoldsAdmission(t *testing.T) {
 	}
 }
 
-// Replay PREPARED on duplicate operation IDs without rerunning the update.
-func TestRuntimeUpdateReplaysPreparedReceiptAndPermit(t *testing.T) {
+// Replays PREPARED on duplicate operation IDs without rerunning the update or re-releasing the permit
+// the first delivery already consumed.
+func TestRuntimeUpdateReplaysPreparedReceiptWithoutReleasingPermitTwice(t *testing.T) {
 	connection := newTestConnection()
 	queueHandshake(connection)
 	connection.in <- updateEnvelope(testUpdateOperationID, "2.0.0")
@@ -79,7 +80,7 @@ func TestRuntimeUpdateReplaysPreparedReceiptAndPermit(t *testing.T) {
 	connection.waitFor(t, func(frames []*protocol.Envelope) bool {
 		return countUpdatePhase(frames, protocol.UpdatePhase_UPDATE_PREPARED) == 2
 	})
-	if runner.runCalls.Load() != 1 || releases.Load() != 2 {
+	if runner.runCalls.Load() != 1 || releases.Load() != 1 {
 		cancel()
 		t.Fatalf("runner calls=%d permit releases=%d", runner.runCalls.Load(), releases.Load())
 	}
@@ -209,7 +210,6 @@ type blockingUpdateRunner struct {
 }
 
 func (r *blockingUpdateRunner) Configured() bool                    { return true }
-func (r *blockingUpdateRunner) BusyReason() string                  { return "" }
 func (r *blockingUpdateRunner) StopForUpdate(context.Context) error { return nil }
 func (r *blockingUpdateRunner) HandleUpdate(ctx context.Context, _ update.Command, _ config.DaemonConfig, _ func(update.Progress)) (update.Outcome, error) {
 	close(r.started)
@@ -309,8 +309,7 @@ type testUpdateRunner struct {
 	runCalls  atomic.Int32
 }
 
-func (r *testUpdateRunner) Configured() bool   { return true }
-func (r *testUpdateRunner) BusyReason() string { return "" }
+func (r *testUpdateRunner) Configured() bool { return true }
 func (r *testUpdateRunner) StopForUpdate(context.Context) error {
 	r.stopCalls.Add(1)
 	return r.stopError

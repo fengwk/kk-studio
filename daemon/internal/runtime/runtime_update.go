@@ -26,7 +26,7 @@ func (r *Runtime) handleUpdate(ctx context.Context, envelope *protocol.Envelope)
 	runner := r.options.Update
 	configured := runner != nil && runner.Configured()
 	r.admissionMu.Lock()
-	decision, err := r.updateOps.Decide(command, r.options.DaemonVersion, configured, r.updateBusyReason(runner))
+	decision, err := r.updateOps.Decide(command, r.options.DaemonVersion, configured, r.updateBusyReason())
 	if err != nil {
 		r.admissionMu.Unlock()
 		return err
@@ -126,12 +126,12 @@ func (r *Runtime) beginManagedUpdate(ctx context.Context, targetVersion string) 
 // executeUpgradeUpdate runs one rejection-triggered update and stops the daemon when the installer
 // never accepted the handover, mirroring the TS onUnprepared callback.
 func (r *Runtime) executeUpgradeUpdate(ctx context.Context, cancel context.CancelFunc, command update.Command, configuration config.DaemonConfig) {
-	if r.runUpdate(ctx, cancel, command, configuration) == updateRunFailed {
+	if r.runUpdate(ctx, cancel, command, configuration) {
 		r.stopRun(errProtocolUpgradeRequired)
 	}
 }
 
-func (r *Runtime) updateBusyReason(runner update.Runner) string {
+func (r *Runtime) updateBusyReason() string {
 	r.callsMu.Lock()
 	protected := len(r.calls) > 0
 	r.callsMu.Unlock()
@@ -144,9 +144,6 @@ func (r *Runtime) updateBusyReason(runner update.Runner) string {
 	if r.options.IDECanStartUpdate != nil && !r.options.IDECanStartUpdate() {
 		return "IDE views, cleanup or data streams are active"
 	}
-	if runner != nil {
-		return runner.BusyReason()
-	}
 	return ""
 }
 
@@ -155,33 +152,33 @@ func (r *Runtime) executeUpdate(ctx context.Context, cancel context.CancelFunc, 
 }
 
 // runUpdate drives one admitted managed update through the runner and publishes its receipts. It
-// reports whether the installer accepted the handover, which the 426 path uses to decide whether the
-// daemon may keep running.
-func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, command update.Command, configuration config.DaemonConfig) updateRunResult {
+// reports whether the daemon must stop because the installer never accepted the handover; a
+// shutdown cancellation is not a failure.
+func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, command update.Command, configuration config.DaemonConfig) (stopDaemon bool) {
 	defer r.wg.Done()
 	defer cancel()
 	runner := r.options.Update
 	if runner == nil {
 		r.finishUpdate(command.OperationID, update.PhaseFailed, "managed update is not configured")
-		return updateRunFailed
+		return true
 	}
 	if err := runner.StopForUpdate(ctx); err != nil {
 		r.reportStopFailure(ctx, command, err)
-		return updateRunFailed
+		return true
 	}
 	outcome, err := runner.HandleUpdate(ctx, command, configuration, func(progress update.Progress) {
 		r.publishUpdateProgress(command, progress)
 	})
 	if ctx.Err() != nil {
-		return updateRunCancelled
+		return false
 	}
 	if err != nil || outcome.Phase != update.PhasePrepared {
 		r.finishUpdate(command.OperationID, update.PhaseFailed, updateFailureMessage(outcome, err))
-		return updateRunFailed
+		return true
 	}
 	receipt, ok := r.updateOps.Complete(command.OperationID, update.PhasePrepared, outcome.Message)
 	if !ok {
-		return updateRunFailed
+		return true
 	}
 	var stopWatching func()
 	if outcome.WatchFailure != nil {
@@ -195,7 +192,7 @@ func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, comm
 		if stopWatching != nil {
 			stopWatching()
 		}
-		return updateRunFailed
+		return true
 	}
 	r.updateCancel = nil
 	r.updatePermit = outcome.ReleasePermit
@@ -203,7 +200,7 @@ func (r *Runtime) runUpdate(ctx context.Context, cancel context.CancelFunc, comm
 	r.updateMu.Unlock()
 	_ = r.sendStatus()
 	_ = r.deliverUpdateReceipt(receipt)
-	return updateRunPrepared
+	return false
 }
 
 // reportStopFailure records why the running work could not be stopped, unless the update context
@@ -243,16 +240,6 @@ func updateFailureMessage(outcome update.Outcome, err error) string {
 	}
 	return safeUpdateError(errors.New(outcome.Message))
 }
-
-// updateRunResult distinguishes a prepared handover from a failure the daemon must react to and from
-// an update the shutdown cancelled, which is not a failure.
-type updateRunResult int
-
-const (
-	updateRunPrepared updateRunResult = iota
-	updateRunFailed
-	updateRunCancelled
-)
 
 func (r *Runtime) finishUpdate(operationID string, phase update.Phase, message string) {
 	receipt, ok := r.updateOps.Complete(operationID, phase, message)
@@ -328,7 +315,13 @@ func (r *Runtime) releaseUpdatePermit() error {
 		if r.options.ReportError != nil {
 			r.options.ReportError(err)
 		}
+		return nil
 	}
+	// A later update command must not observe or re-run the permit this release already consumed; a
+	// failed release keeps it so the receipt replay can retry.
+	r.updateMu.Lock()
+	r.updatePermit = nil
+	r.updateMu.Unlock()
 	return nil
 }
 
