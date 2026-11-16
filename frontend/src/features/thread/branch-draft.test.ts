@@ -575,7 +575,8 @@ describe('compareDecimalStrings', () => {
     expect(compareDecimalStrings('42', '42')).toBe(0)
   })
 
-  it('treats non-numeric sequences as equal', () => {
-    expect(compareDecimalStrings('abc', '42')).toBe(0)
+  it('rejects non-canonical sequences instead of ordering them silently', () => {
+    // 输入只来自服务端 canonical 十进制字符串；非法值必须暴露，而不是当成相等。
+    expect(() => compareDecimalStrings('abc', '42')).toThrow()
   })
 })

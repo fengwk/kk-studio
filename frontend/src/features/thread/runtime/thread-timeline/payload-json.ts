@@ -4,6 +4,11 @@ export function asRecord(value: unknown): Record<string, unknown> {
   return isRecord(value) ? value : {}
 }
 
+/** 安全整数事实：只有真实数字且未超出 IEEE 安全范围时才接受。 */
+export function integerValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null
+}
+
 export function getRecordList(value: unknown): Record<string, unknown>[] {
   if (!Array.isArray(value)) {
     return []

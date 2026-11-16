@@ -192,7 +192,7 @@ export function ToolMessageBlock({
   }
   if (mutation != null && (mutation.preview != null || mutation.window?.truncated)) {
     mainPreview.push(
-      <span key="mutation-preview" className="thread-tool-mutation-preview">
+      <span key="mutation-preview">
         {mutation.preview != null ? (
           <ToolCallPreview
             preview={mutation.preview}
@@ -259,7 +259,7 @@ export function ToolMessageBlock({
       view.isMutationSuccess ? (
         <>
           <div className="thread-tool-mutation-success">
-            <Check size={14} aria-hidden="true" className="mutation-success-icon" />
+            <Check size={14} aria-hidden="true" />
             <span>{normalizedName === 'write'
               ? t('ai.runtime.mutation.writeSuccess')
               : t('ai.runtime.mutation.editSuccess')}</span>

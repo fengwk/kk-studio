@@ -93,7 +93,7 @@ export function buildHistoryTree(
   options: BuildHistoryTreeOptions = {},
 ): HistoryTreeRow[] {
   const childrenByParent = childrenIndex(entries)
-  const ancestry = activeAncestry(entries, options.headEntryId ?? null)
+  const ancestry = new Set(activeAncestry(entries, options.headEntryId ?? null))
   const headEntryId = options.headEntryId ?? null
   const rows: HistoryTreeRow[] = []
   const laneById = new Map<string, number>()
@@ -128,7 +128,7 @@ export function buildHistoryTree(
       startsLane: parentId != null && laneById.get(parentId) !== lane,
       isFork: children.length > 1,
       canFork: isForkBoundary(entry),
-      onActivePath: ancestry.includes(entry.entryId),
+      onActivePath: ancestry.has(entry.entryId),
       isHead: entry.entryId === headEntryId,
     })
     for (const child of children) {

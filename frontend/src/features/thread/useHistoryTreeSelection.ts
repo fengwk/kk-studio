@@ -14,8 +14,8 @@ export interface HistoryTreeSelection {
 /**
  * 历史树的查看焦点：只表达“当前看哪一行”，不触动 durable control。
  *
- * 行集合变化时尽量保留原选中行，否则回落到 head，再否则回落到首行；
- * 选中变化后把该行滚入可见范围。
+ * 行集合变化时优先保留仍然存在的选中行，其次回落到 head，最后回落到最后一行
+ * （即最新一行）；选中变化后把该行滚入可见范围。
  */
 export function useHistoryTreeSelection(
   rows: HistoryTreeRow[],

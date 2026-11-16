@@ -329,20 +329,10 @@ export function samePaneTarget(left: PaneTarget, right: PaneTarget): boolean {
   return false
 }
 
-export function isNewSessionTarget(target: PaneTarget): target is { kind: 'NEW_SESSION_DRAFT' } {
-  return target.kind === 'NEW_SESSION_DRAFT'
-}
-
 export function isNewThreadTarget(
   target: PaneTarget,
 ): target is { kind: 'NEW_THREAD_DRAFT'; sessionId: string; startEntryId: string; threadName: string } {
   return target.kind === 'NEW_THREAD_DRAFT'
-}
-
-export function isForkSessionTarget(
-  target: PaneTarget,
-): target is { kind: 'FORK_SESSION_DRAFT'; sessionId: string; sourceThreadId: string; startEntryId: string } {
-  return target.kind === 'FORK_SESSION_DRAFT'
 }
 
 /**
@@ -361,18 +351,5 @@ export function isBoundTarget(
   target: PaneTarget,
 ): target is { kind: 'BOUND_THREAD'; threadId: string } {
   return target.kind === 'BOUND_THREAD'
-}
-
-export function targetIdentity(target: PaneTarget): string {
-  if (target.kind === 'NEW_SESSION_DRAFT') {
-    return 'new-session'
-  }
-  if (target.kind === 'NEW_THREAD_DRAFT') {
-    return `thread-draft:${target.sessionId}:${target.startEntryId}:${target.threadName}`
-  }
-  if (target.kind === 'FORK_SESSION_DRAFT') {
-    return `fork-session-draft:${target.sessionId}:${target.sourceThreadId}:${target.startEntryId}`
-  }
-  return `thread:${target.threadId}`
 }
 

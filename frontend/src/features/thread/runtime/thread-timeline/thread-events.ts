@@ -29,8 +29,6 @@ import {
 
 export type { ThreadEventRecord } from '@/features/thread/runtime/thread-timeline/thread-events-types'
 
-export { eventStatusText } from '@/features/thread/runtime/thread-timeline/thread-events-types'
-
 interface ThreadEventTimelineInput {
   entries: HarnessSessionEntryDTO[]
   activeAssistantOutput: HarnessActiveAssistantOutputDTO | null

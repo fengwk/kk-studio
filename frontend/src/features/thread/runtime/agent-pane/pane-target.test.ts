@@ -8,12 +8,9 @@ import {
 } from '@/features/thread/runtime/agent-pane'
 import {
   isCommandContent,
-  isForkSessionTarget,
   isImageTier,
-  isNewSessionTarget,
   isPaneTarget,
   normalizePaneTarget,
-  targetIdentity,
 } from '@/features/thread/runtime/agent-pane/pane-target'
 import {
   clearBoundPendingMessage,
@@ -89,18 +86,11 @@ describe('PaneTarget durable-local FSM', () => {
     })
     expect(normalizePaneTarget({ kind: 'BOUND_THREAD', threadId: '' }))
       .toEqual({ kind: 'NEW_SESSION_DRAFT' })
-    expect(isNewSessionTarget({ kind: 'NEW_SESSION_DRAFT' })).toBe(true)
     expect(isNewThreadTarget({
       kind: 'NEW_THREAD_DRAFT',
       sessionId: 's1',
       startEntryId: 'e1',
       threadName: 'branch-1',
-    })).toBe(true)
-    expect(isForkSessionTarget({
-      kind: 'FORK_SESSION_DRAFT',
-      sessionId: 's1',
-      sourceThreadId: 't-source',
-      startEntryId: 'e1',
     })).toBe(true)
     expect(isDraftHistoryTarget({
       kind: 'NEW_THREAD_DRAFT',
@@ -152,7 +142,6 @@ describe('PaneTarget durable-local FSM', () => {
     expect(normalizePaneTarget(draft)).toEqual(draft)
     // 同一个 start entry 但不同名称是不同的本地草稿目标。
     expect(samePaneTarget(draft, { ...draft, threadName: 'branch-2' })).toBe(false)
-    expect(targetIdentity(draft)).toBe('thread-draft:s1:e1:branch-1')
     const forkDraft: PaneTarget = {
       kind: 'FORK_SESSION_DRAFT',
       sessionId: 's1',
@@ -161,7 +150,6 @@ describe('PaneTarget durable-local FSM', () => {
     }
     expect(samePaneTarget(forkDraft, { ...forkDraft })).toBe(true)
     expect(samePaneTarget(forkDraft, { ...forkDraft, startEntryId: 'e2' })).toBe(false)
-    expect(targetIdentity(forkDraft)).toBe('fork-session-draft:s1:t-source:e1')
   })
 
   it('persists an exact pending request independently from the presentation target', () => {

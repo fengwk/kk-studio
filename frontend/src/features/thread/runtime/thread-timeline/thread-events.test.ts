@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import {
   buildThreadEventTimeline,
-  eventStatusText,
   type ThreadEventRecord,
 } from '@/features/thread/runtime/thread-timeline/thread-events'
+import { eventStatusText } from '@/features/thread/runtime/thread-timeline/thread-events-types'
 import type {
   RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'

@@ -16,7 +16,7 @@ import {
   createAttachmentPart,
   createTextPart,
   type ComposerPart,
-} from '@/features/thread/composer'
+} from '@/features/thread/composer/composer-parts'
 
 /** 稳定空数组：避免默认参数每次渲染生成新引用触发同步 effect 死循环。 */
 const EMPTY_PARTS: ComposerPart[] = []

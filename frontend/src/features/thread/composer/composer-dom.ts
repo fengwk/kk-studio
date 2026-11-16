@@ -20,9 +20,7 @@
  * - editor-normalize：浏览器 DOM 规范化与光标处插入。
  */
 export {
-  isCaretSlot,
   isEditorComposing,
-  isPillElement,
   COMPOSING_ATTRIBUTE,
 } from '@/features/thread/composer/caret-slots'
 export {
