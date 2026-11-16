@@ -22,7 +22,20 @@ for (const scenario of ['pane-root', 'pane-child']) {
     await page.routeWebSocket(/\/ws\/events$/, (ws) => {
       socket = ws
       socketCount += 1
+      let connected = false
       ws.onMessage((raw) => {
+        // 与真实服务端一样完成 connected 握手，否则 15s 握手预算到期后连接持续退避重连。
+        // 不回 subscribed：订阅确认会触发快照回读，而本测试精确计数 reads。
+        // 60s heartbeat 使 3 倍失联预算覆盖整段假时钟推进。
+        if (!connected) {
+          connected = true
+          ws.send(JSON.stringify({
+            type: 'connected',
+            eventNodeId: 'a1000000-0000-4000-8000-0000000000e1',
+            connectionId: 'a1000000-0000-4000-8000-0000000000e2',
+            heartbeatIntervalMillis: '60000',
+          }))
+        }
         const message = JSON.parse(String(raw))
         if (message.type === 'subscribe') subscriptions.add(message.resource.kind)
       })
@@ -153,6 +166,8 @@ for (const scenario of ['pane-root', 'pane-child']) {
       await page.locator('.interaction-feed-item').getByRole('button', { name: 'Chat', exact: true }).click()
       await expect(page).toHaveURL(`/chats/chat-wait?thread=${ROOT}`)
     }
+    // 整段假时钟推进始终复用同一条已握手连接，回读只由事件和等待截止时间驱动。
+    expect(socketCount).toBe(1)
     expect(writes).toEqual([])
   })
 }
