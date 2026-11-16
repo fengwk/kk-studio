@@ -47,20 +47,6 @@ final class SkillPackageInputs {
     }
   }
 
-  /** 描述可为空：空值表示没有描述。 */
-  static String requireDescription(String raw) {
-    String description = raw == null ? null : raw.strip();
-    if (description == null || description.isEmpty()) {
-      return null;
-    }
-    try {
-      return SkillNames.canonicalDescription(description);
-    } catch (IllegalArgumentException error) {
-      throw DomainException.validation(
-          RESOURCE, "invalid description: " + error.getMessage(), error);
-    }
-  }
-
   /** 上传渠道版本号：去环绕空白后 1–128 字符，不得包含控制字符。 */
   static String requireVersionText(String raw) {
     String version = raw == null ? null : raw.strip();

@@ -103,11 +103,6 @@ public class JdbcClusterNodeRegistry implements ClusterNodeRegistry {
     this.properties = Objects.requireNonNull(properties, "properties");
   }
 
-  /** 本节点的实例身份，供路由判定与生命周期使用。 */
-  public UUID localNodeId() {
-    return localNodeId;
-  }
-
   @Override
   public Optional<URI> liveInternalOrigin(UUID nodeInstanceId) {
     if (nodeInstanceId == null || !properties.remoteRoutingConfigured()) {

@@ -280,12 +280,4 @@ public final class RealtimeBus implements RealtimeEventSink, RealtimeEventSource
       }
     }
   }
-
-  /**
-   * 本节点实例身份，与 {@code cluster_node.instance_id}、{@link PostgresqlRealtimeEventSink} 的 envelope
-   * origin 一致。
-   */
-  public UUID originNodeId() {
-    return originNodeId;
-  }
 }
