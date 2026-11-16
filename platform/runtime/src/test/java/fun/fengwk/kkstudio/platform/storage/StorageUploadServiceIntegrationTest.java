@@ -583,6 +583,33 @@ class StorageUploadServiceIntegrationTest extends PostgresSpringTestSupport {
     assertEquals("upload", error.resource());
   }
 
+  /** 测试意图：绑定提交后的临时对象删除是尽力而为 —— 一次性删除失败不得否定已提交的 READY，遗留对象由上传行的过期/清理路径回收。 */
+  @Test
+  void completeKeepsReadyWhenPostCommitCleanupFails() {
+    byte[] content = "keep-ready".getBytes(StandardCharsets.UTF_8);
+    StorageUploadDTO pending =
+        reserve("keep-ready.bin", "application/octet-stream", content.length, sha256Hex(content));
+    putUploadContent(pending.getId(), content, "application/octet-stream");
+    String tempKey = StorageObjectKeys.uploadOriginal(UUID.fromString(pending.getId()));
+    s3Storage.failNextDelete(tempKey, new IllegalStateException("temporary delete failure"));
+
+    StorageUploadReadyDTO ready =
+        readyOf(storageUploadService.complete(UUID.fromString(pending.getId())));
+
+    assertEquals(1L, blobRefCount(ready.getBlobId()));
+    assertTrue(
+        s3Storage.hasObject(StorageObjectKeys.blobOriginal(UUID.fromString(ready.getBlobId()))),
+        "binding must still materialize the final object");
+    assertTrue(
+        s3Storage.hasObject(tempKey), "failed cleanup must leave the object for the sweeper");
+
+    // 耐久锚点仍在：显式删除上传后，临时对象由清理路径幂等回收。
+    storageUploadService.delete(UUID.fromString(ready.getId()));
+    assertEquals(1, storageUploadService.expireOnce());
+    assertFalse(
+        s3Storage.hasObject(tempKey), "the upload row facts must drive later object cleanup");
+  }
+
   @Test
   void completeIsIdempotentOnRetry() {
     byte[] content = "retry".getBytes(StandardCharsets.UTF_8);

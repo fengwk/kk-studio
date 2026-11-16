@@ -176,9 +176,21 @@ final class StorageUploadExpiryService {
 
   /** 幂等清理未使用的候选对象：仅当候选 id 未被绑定为最终 blob 时删除。 */
   void cleanupUnusedCandidate(StorageUpload upload) {
-    if (upload.getBlobId() == null || !upload.getBlobId().equals(upload.getCandidateBlobId())) {
+    if (hasUnusedCandidate(upload)) {
       cleanupCandidateObjects(upload.getCandidateBlobId());
     }
+  }
+
+  /** 尽力清理未使用的候选对象：失败只记录日志，残留对象由后台按上传行事实收敛。 */
+  void cleanupUnusedCandidateBestEffort(StorageUpload upload) {
+    if (hasUnusedCandidate(upload)) {
+      cleanupCandidateObjectsBestEffort(upload.getCandidateBlobId());
+    }
+  }
+
+  /** 候选对象是否未被绑定为最终 blob：一旦绑定为自身 blob，它就是 ACTIVE blob 的对象，由 blob 生命周期负责。 */
+  private static boolean hasUnusedCandidate(StorageUpload upload) {
+    return upload.getBlobId() == null || !upload.getBlobId().equals(upload.getCandidateBlobId());
   }
 
   /** 幂等清理候选对象的预览与原始内容：预览先于原始，与两阶段删除顺序一致。 */
