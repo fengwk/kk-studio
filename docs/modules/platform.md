@@ -46,7 +46,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅容器、通用版本推送与 NOTIFY 失效分发基座，供 Harness、Canvas、Project 与 Environment 生产方组合 |
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
-| [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、观察与停止 |
+| [agenttask](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/agenttask) | 子代理与独立任务的票据接受、结果观察与按 Thread 停止 |
 | [orchestration](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/orchestration) | 会话归属 SPI 与通用编排：owner-aware 命令接受、Session 查询与深删除；[Chat](chat.md) 与 [Project](project.md) 各自实现归属、锁与写钩子 |
 | [interaction](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/interaction) | 人工输入/审批与只读环境等待的统一投影、人工提交 |
 | [storage](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage) | 上传、Blob owner 引用、S3、媒体探针与预览、耐久对象清理 |
@@ -518,6 +518,8 @@ DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fen
 complete 在专用会话级 upload advisory lock 内做事务外 checksum HEAD 与 copy，再短事务绑定 Blob；
 上传对象大小或 checksum 不匹配、checksum 不可用等存储校验失败以 `conflict` 返回，
 稳定 `reason` 为 `STORAGE_VERIFICATION`（HTTP 409）。
+绑定提交后，临时对象与未使用候选对象的删除是尽力而为：删除失败只记录日志，complete 仍返回 READY；
+残留对象由上传过期清理按上传行记录的临时键与候选键回收。
 服务端 `stage` 有界落盘、计算摘要，复用上传生命周期。清理先取得同一操作锁、
 登记耐久对象 key，再在事务外删除，避免与 complete/stage 的对象写入交错。
 
@@ -715,8 +717,9 @@ Skill Package 私有仓库访问令牌与 Provider 凭据采用同一策略：�
 运行态、数据库身份、版本和时间戳不进入文件。
 
 导入检查复用写入路径的字段与 codec 校验，在一次计划快照上分类新增、覆盖和跳过，不写数据库。
+计划快照在单个只读 REPEATABLE READ 短事务内读取；MCP 发现与 Git 准备都在数据库事务之外执行。
 未知或不支持内容、依赖不满足和外部准备失败可明确跳过：条目的未知字段按条目级跳过并报告
-（包括 Agent 的旧顶层 `model` / `variant`），已知字段仍先按写入路径校验，未知字段不能绕过硬错误；必填缺失、结构/类型/有效值错误、
+（例如 Agent 条目顶层的 `model` / `variant`），已知字段仍先按写入路径校验，未知字段不能绕过硬错误；必填缺失、结构/类型/有效值错误、
 Environment 令牌摘要冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
 Environment 条目的 `daemonConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
 条目级跳过。卡片配置只来自 `daemonConfig`：条目缺少它，或携带 `installConfig` / `operatingSystem`，

@@ -56,7 +56,7 @@ Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，�
 Daemon 使用 Go diff 实现计算变更，保留变更行与上下文；行尾与 EOF 缺失换行标记纳入 review 结果，新文件 diff 将全部内容显示为新增行，由统一的 review 传输预算约束。
 原始文件解码出现替换时，审批 diff 只反映解码后的文本，看不到保存会重写的原始字节。因此当原文件解码替换次数大于 0、最终文本仍含 U+FFFD 且编码成功时，review 追加 `lossyDecode`（`encoding` 是原文件的解码名称，`invalidSequences` 是替换次数）：预览与提交的 review 以及 `editReview`/`writeReview` details 都携带它，新建文件从不携带。此时 edit 与 write 的模型可见成功文本追加一行 `Note:` 说明原始字节无法恢复，审批卡片在 diff 上方显示同样的警告；格式错误的 `lossyDecode` 与格式错误的 editReview 一样使 review 无效。
 
-完整 review 连同结果超过 1 MiB UTF-8 预算时，在预览或提交前明确拒绝，不截断变更行。协议和验证入口见 [Harness Environment](harness-environment.md) 与[开发与测试](../operations/development-and-testing.md)。
+完整 review 连同结果超过 1 MiB UTF-8 预算时明确拒绝，不截断变更行：预览直接拒绝，提交在写入目标文件之前拒绝，文件保持不变。协议和验证入口见 [Harness Environment](harness-environment.md) 与[开发与测试](../operations/development-and-testing.md)。
 
 Daemon 在进程内实现 `find` 与 `grep`，不调用随包或宿主安装的 ripgrep。两项工具都可用 `glob` 限定相对搜索根的路径；grep 的 `pattern` 可包含换行，跨行匹配不另设 `multiline` 开关。检索默认超时 15 秒，可由正数 `timeout_seconds` 覆盖；超时保留已收集的 partial 匹配并显式标记 `search.incomplete`，取消则只返回 `[Search cancelled; results are incomplete.]` 与 `CANCELLED` 事实，不携带已收集的结果。grep 的 `limit` 按匹配数计算；多行匹配返回该匹配展开的行，结果仍受有界输出保护。正则或 glob 错误作为输入拒绝，无法读取的路径作为 skipped 报告。grep 匹配解码后的文本（非法字节按 U+FFFD 匹配），行号与 read 一致；二进制文件静默跳过，声明无法使用的文件在结果末尾按绝对路径列出，最多 10 个，形如 `[Search incomplete; not searched because the declared text encoding cannot be used: /abs/a, … and N more]`；直接以这样的文件为 `path` 时返回错误。
 
@@ -116,7 +116,7 @@ Work 通知只降低延迟，周期 claim 扫描兜底进程重启和通知丢�
 
 模型可见的失败统一为三段式英文文案：发生了什么、执行事实、下一步。执行事实只有三种，且必须与真实状态一致：
 
-- 派发前校验拒绝（参数/schema、未知工具、权限、未绑定 Environment、路径或 `workdir` 不合法）声明 `The tool was not executed.`；
+- 派发前校验拒绝（参数/schema、未知工具、权限、未绑定 Environment、路径或 `workdir` 不合法），以及命令启动前 Daemon 的进程监管或输出存储不可用，声明 `The tool was not executed.`；
 - 已进入执行后的确定失败声明 `The tool ran but failed; side effects may have occurred.`；
 - 超时、取消、提交不明或远程断开声明 `Whether the tool took effect cannot be confirmed.`，不得声称未执行；bash 的取消与超时仍保留真实的进程终态事实（`EXITED` / `TIMED_OUT` / `CANCELLED`）。
 

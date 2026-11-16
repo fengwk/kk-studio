@@ -59,8 +59,7 @@ test -f web/target/kk-studio-web-1.0.4.jar
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
 
-`server.port` 默认 `8080`，gzip 压缩开启。Actuator 实际只提供 `/actuator/health`；镜像不引入
-Prometheus registry，没有可 scrape 的 `/actuator/prometheus`。
+`server.port` 默认 `8080`，gzip 压缩开启，Actuator 只暴露 `/actuator/health`。
 SPA BrowserRouter 的刷新路径由 Web app fallback 到 `index.html`，因此不需要额外的 Nginx 或前端容器。
 
 ### 运行 App 容器
