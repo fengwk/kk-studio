@@ -28,7 +28,7 @@ func TestProxy_HTTPClientAndDoDoNotFollowRedirects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := policy.Do(context.Background(), request)
+	response, err := policy.HTTPClient().Do(request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestProxy_HTTPClientAndDoDoNotFollowRedirects(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	request, _ = http.NewRequest(http.MethodGet, target.URL, nil)
-	if _, err := policy.Do(ctx, request); err == nil {
+	if _, err := policy.HTTPClient().Do(request.WithContext(ctx)); err == nil {
 		t.Fatal("canceled request succeeded")
 	}
 }

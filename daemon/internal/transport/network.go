@@ -1,7 +1,6 @@
 package transport
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -40,9 +39,4 @@ func (p *ProxyPolicy) HTTPClient() *http.Client {
 		tr.Proxy = http.ProxyURL(p.proxy)
 	}
 	return &http.Client{Transport: tr, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
-}
-
-// Do executes an outbound request with request cancellation and explicit proxy semantics.
-func (p *ProxyPolicy) Do(ctx context.Context, req *http.Request) (*http.Response, error) {
-	return p.HTTPClient().Do(req.WithContext(ctx))
 }

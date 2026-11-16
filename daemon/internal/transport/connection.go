@@ -25,14 +25,13 @@ import (
 type DialConfig struct {
 	Applied              config.DaemonConfig
 	InstanceID, Platform string
-	ReadToken            func(string) (string, error)
 	Observer             runtimeapi.ControlObserver
 	Resolver             ViewResolver
 }
 
 // Dial opens the configured WSS channel and serves its multiplexed HTTP/2 routes.
 func Dial(ctx context.Context, c DialConfig) (*ControlConnection, error) {
-	token, err := readRegistrationToken(c.Applied.TokenPath, c.ReadToken)
+	token, err := readRegistrationToken(c.Applied.TokenPath)
 	if err != nil {
 		return nil, err
 	}
@@ -118,14 +117,7 @@ func upgradeRequiredBody(resp *http.Response) *protocol.UpgradeRequired {
 	return candidate
 }
 
-func readRegistrationToken(path string, read func(string) (string, error)) (string, error) {
-	if read != nil {
-		v, err := read(path)
-		if err != nil {
-			return "", fmt.Errorf("cannot read registration token: %w", err)
-		}
-		return strings.TrimSpace(v), nil
-	}
+func readRegistrationToken(path string) (string, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return "", fmt.Errorf("cannot read registration token: %w", err)

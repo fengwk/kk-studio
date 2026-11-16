@@ -8,7 +8,6 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -73,32 +72,29 @@ func (w *blockedControlWriter) Write(p []byte) (int, error) {
 }
 
 func TestDial_ConfigurationAndTokenFailures(t *testing.T) {
+	tokenPath := writeTokenFile(t, "token")
 	for _, tc := range []struct {
 		name   string
 		config config.DaemonConfig
-		read   func(string) (string, error)
 	}{
-		{"token read error", config.DaemonConfig{TokenPath: "token", StudioURL: "http://studio.example"}, func(string) (string, error) { return "", errors.New("secret") }},
-		{"invalid URL", config.DaemonConfig{TokenPath: "token", StudioURL: "not a URL"}, func(string) (string, error) { return "token", nil }},
-		{"unsupported scheme", config.DaemonConfig{TokenPath: "token", StudioURL: "ftp://studio.example"}, func(string) (string, error) { return "token", nil }},
-		{"missing host", config.DaemonConfig{TokenPath: "token", StudioURL: "https:"}, func(string) (string, error) { return "token", nil }},
-		{"invalid proxy", config.DaemonConfig{TokenPath: "token", StudioURL: "http://studio.example", ProxyURL: protoString("ftp://proxy.example")}, func(string) (string, error) { return "token", nil }},
+		{"token read error", config.DaemonConfig{TokenPath: filepath.Join(t.TempDir(), "missing"), StudioURL: "http://studio.example"}},
+		{"invalid URL", config.DaemonConfig{TokenPath: tokenPath, StudioURL: "not a URL"}},
+		{"unsupported scheme", config.DaemonConfig{TokenPath: tokenPath, StudioURL: "ftp://studio.example"}},
+		{"missing host", config.DaemonConfig{TokenPath: tokenPath, StudioURL: "https:"}},
+		{"invalid proxy", config.DaemonConfig{TokenPath: tokenPath, StudioURL: "http://studio.example", ProxyURL: protoString("ftp://proxy.example")}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := Dial(context.Background(), DialConfig{Applied: tc.config, ReadToken: tc.read}); err == nil {
+			if _, err := Dial(context.Background(), DialConfig{Applied: tc.config}); err == nil {
 				t.Fatal("invalid dial config accepted")
 			}
 		})
 	}
-	path := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(path, []byte(" token-value \n"), 0600); err != nil {
-		t.Fatal(err)
-	}
-	token, err := readRegistrationToken(path, nil)
+	path := writeTokenFile(t, " token-value ")
+	token, err := readRegistrationToken(path)
 	if err != nil || token != "token-value" {
 		t.Fatalf("token=%q err=%v", token, err)
 	}
-	if _, err := readRegistrationToken(filepath.Join(t.TempDir(), "missing"), nil); err == nil {
+	if _, err := readRegistrationToken(filepath.Join(t.TempDir(), "missing")); err == nil {
 		t.Fatal("missing token accepted")
 	}
 }
