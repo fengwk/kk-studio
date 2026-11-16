@@ -47,8 +47,6 @@ class OfficialDaemonReleaseProviderTest {
 
     assertTrue(target.isPresent());
     assertEquals(VERSION, target.get().targetVersion());
-    assertEquals(ARTIFACT_URL, target.get().artifactUrl());
-    assertEquals(SHA, target.get().artifactSha256());
     assertEquals(TAG, feed.requestedTag);
   }
 

@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeSnapshot;
 import fun.fengwk.kkstudio.platform.daemon.DaemonRuntimeStatus;
-import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateArtifact;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateCommand;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdatePhase;
 import fun.fengwk.kkstudio.platform.daemon.DaemonUpdateProgress;
@@ -71,7 +70,6 @@ class EnvironmentUpdateServiceTest {
   private static final Clock CLOCK = Clock.fixed(NOW, ZoneOffset.UTC);
   private static final String CURRENT = "1.0.8";
   private static final String TARGET = "1.0.9";
-  private static final String SHA256 = "a".repeat(64);
 
   private EnvironmentDaemonServer server;
   private EnvironmentRegistry registry;
@@ -85,12 +83,7 @@ class EnvironmentUpdateServiceTest {
     registry = mock(EnvironmentRegistry.class);
     environmentRepository = mock(EnvironmentRepository.class);
     releaseProvider =
-        (operatingSystem, architecture) ->
-            Optional.of(
-                new DaemonReleaseTarget(
-                    TARGET,
-                    DaemonUpdateArtifact.artifactUrl(TARGET, operatingSystem, architecture),
-                    SHA256));
+        (operatingSystem, architecture) -> Optional.of(new DaemonReleaseTarget(TARGET));
     service = newService();
     when(environmentRepository.getById(ENV.value())).thenReturn(new Environment());
     when(registry.find(ENV)).thenReturn(Optional.of(connection(CURRENT)));

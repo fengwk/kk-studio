@@ -233,11 +233,7 @@ class EnvironmentDaemonAdmissionControllerTest {
 
   @Test
   void protocolMismatchWithReleaseReturns426WithTargetVersion() throws Exception {
-    testReleaseProvider.target =
-        new DaemonReleaseTarget(
-            "1.0.0",
-            "https://github.com/fengwk/kk-studio/releases/download/v1.0.0/kk-daemon-linux-amd64.tar.gz",
-            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef");
+    testReleaseProvider.target = new DaemonReleaseTarget("1.0.0");
 
     MockHttpServletRequest request = newRequest();
     request.removeHeader("KK-Daemon-Protocol");

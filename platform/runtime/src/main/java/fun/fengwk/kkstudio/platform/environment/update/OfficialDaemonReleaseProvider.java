@@ -23,8 +23,8 @@ import java.util.regex.Pattern;
  * 生产用官方发布解析器：目标版本取运行中 Platform 的打包版本，只接受官方 GitHub tag Release，且必须是完整、非草稿的发布。
  *
  * <p>完整性来自官方 tag 元数据（{@code api.github.com/repos/fengwk/kk-studio/releases/tags/<tag>}）：草稿、tag
- * 不匹配或五件套资产（本机 os/arch 归档、其校验文件、该平台元数据、LICENSE 与 THIRD_PARTY_NOTICES） 缺一都判定为不可用。制品 URL 与 SHA256
- * 只取自该元数据与官方校验文件，绝不接受任意版本、任意 URL 或 "latest"。
+ * 不匹配或五件套资产（本机 os/arch 归档、其校验文件、该平台元数据、LICENSE 与 THIRD_PARTY_NOTICES） 缺一都判定为不可用。制品下载地址只取自该元数据并与 官方
+ * URL 逐字比对，摘要只从官方校验文件解析后用于判定发布可用，绝不接受任意版本、任意 URL 或 "latest"。
  *
  * <p>没有可用打包版本或目标平台不在官方发布矩阵内时同样判定为不可用；Platform 升级时只需重新打包，无需在代码里重复维护版本号。
  */
@@ -74,14 +74,14 @@ public class OfficialDaemonReleaseProvider implements DaemonReleaseProvider {
         || !artifactAssetMatches(release, artifactUrl)) {
       return Optional.empty();
     }
+    // 校验文件是发布完整性的固定资产之一：可读取且能解析出摘要才认为版本可下发。
     Optional<String> checksumText =
         feed.readAsset(
             DaemonUpdateArtifact.checksumUrl(targetVersion, operatingSystem, architecture));
-    Optional<String> digest = checksumText.flatMap(OfficialDaemonReleaseProvider::parseDigest);
-    if (digest.isEmpty()) {
+    if (checksumText.flatMap(OfficialDaemonReleaseProvider::parseDigest).isEmpty()) {
       return Optional.empty();
     }
-    return Optional.of(new DaemonReleaseTarget(targetVersion, artifactUrl, digest.get()));
+    return Optional.of(new DaemonReleaseTarget(targetVersion));
   }
 
   /** 五件套资产必须齐全：本机 os/arch 归档、其校验文件、该平台元数据、LICENSE 与 THIRD_PARTY_NOTICES。 */
