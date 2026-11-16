@@ -180,7 +180,7 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 | 包 | 内容 |
 | --- | --- |
 | `api` | 命令、会话、线程、历史、工具、执行、压缩、交互、Join、realtime、retry 等公开值；`HarnessChangeSubscriptions` 是变更订阅入口 |
-| `spi` | `ToolGateway`、`RealtimeEventSink`、`RealtimePayloadFetcher`、`AcceptancePreflight`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ResourceReadGateway` |
+| `spi` | `ToolGateway`、`RealtimeEventSink`、`RealtimePayloadFetcher`、`AcceptancePreflight`、`ToolResultHistoryMaterializer`、`ToolHistoryActionResolver`、`ResourceReadGateway`、`SkillLoadGateway` |
 | `spi.store` | `HarnessStore` 与 `SessionStore`、`EntryStore`、`ThreadStore`、`CommandStore`、`ToolStore`、`WorkStore`、`JoinStore`、`StopReceiptStore`、`ExecutionExitStore` |
 | `spi.driver` | `AgentDriver`、`DriverWork`、`DriverThreadDeletion`、`LockedDriverState` 与进程外 Driver 的公共构件 |
 | `spi.work` | Work 值契约，以及 claim 后的 `ClaimedExecutionSupport`、租约与心跳 |
@@ -212,7 +212,7 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
   `readState`、`lockState`、`applyResponse`、`completeToolBatch`、`stop`），
   并通过 `works()` 交出 `DriverWork(type, handler)`、通过 `cancelWork()` 与 `hasActiveWork()` 参与停止与排空。
 - Work 类型由定义方声明：内核只有 `WorkTargetType.THREAD` 与 `TOOL`；Driver 用
-  `WorkTargetType.driver(value, rank)` 定义自己的类型；环境亲和性目前只有内核 `TOOL` 声明。`rank` 决定调度顺序与锁阶梯，Builtin 的
+  `WorkTargetType.driver(value, rank)` 定义自己的类型；环境亲和性只有内核 `TOOL` 声明。`rank` 决定调度顺序与锁阶梯，Builtin 的
   `MODEL` 位于 THREAD 与 TOOL 之间。`DriverRegistry` 拒绝内核类型与重复类型，并把各 Driver 的处理器交给平台分发。
 - 执行退出只有三种：`ExecutionExitKind.DRIVER`、`TOOL`、`REMOTE`；结果不明的外部执行收敛为未确认事实，不重放。
 - 线程深删由两阶段 Driver 生命周期完成：`DriverRegistry` 按 Driver id 顺序调用
@@ -298,9 +298,7 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 | `tunnel` | 传输无关的数据面隧道端口 |
 
 `EnvironmentDaemonServer` 同时实现 `DaemonSessions`、`EnvironmentTunnels` 与 harness 的
-`EnvironmentCapabilityTransport`，由组合根装配进 harness；平台环境管理经它的开放接口与租约持久化端口工作。会话以
-`(environment_id, owner_node_id, lease_token)` 围栏推进状态：READY、HEARTBEAT 与断开只接受当前租约，心跳只续租
-不发布通知，状态、宿主信息与运维事件的围栏写与 `environment_changed` 在同一事务提交。
+`EnvironmentCapabilityTransport`，由组合根装配进 harness；平台环境管理经它的开放接口与租约持久化端口工作。会话围栏与状态写回的细节见[环境注册与对账](#环境注册与对账)。
 
 ### 插件 SPI
 
@@ -313,13 +311,10 @@ Canvas，平台只按类型转交。凭据经 `PluginCredentialAccess` 在上游
 
 ## Resource URI 与 Session 持有
 
-文件工具的 `read` 在平台资源和 Environment 本地文件之间分流：`resource://files/<uuid>` 由平台读取，普通本地绝对路径交给绑定的 Environment；没有 Environment 时明确报告需要 Environment。其他本地文件工具始终只接受 Environment 绝对路径。URI 不携带存储键或预签名地址。
+`resource://files/<uuid>` 指向全局 Blob，`resource://skills/<package>/<version>/<skill>/<relativePath>` 指向技能包当前版本归档中的文件，两者都由平台的 `read` 读取；本地绝对路径交给绑定的 Environment。URI 只是定位标识，不含存储键或预签名地址，浏览器也不能把它当作导航地址。
 
-技能资源使用 `resource://skills/<package>/<version>/<skill>/<relativePath>`，路径段按 UTF-8 百分号编码。当前 `read` 对 skills URI 返回明确的不可用错误；技能内容加载由后续能力提供。
-
-`session_blob_ref(session_id, blob_id)` 的 `(session_id, blob_id)` 唯一键表示一个 Session 对全局 Blob 的持有，一条关系对应一次 `storage_blob.ref_count` retain。资源被读取或通过用户消息、工具结果传递时，当前 Session 建立持有；Session fork 为复制的资源分别建立关系。删除 Session 时释放其关系，最后一个持有者离开后 Blob 转入 `DELETING` 并由后台清理对象。重复建立和释放关系均幂等。
-
-浏览器通过 Session 资源接口获取资源预览或下载，仅持有该资源的 Session 可访问；资源 URI 被前端拦截，不能作为浏览器导航地址。图片以内联方式预览，其他资源提供预览或下载，复制文本仍保留原始 URI。
+URI 编码与解析、读取鉴权、Session 持有与释放见 [Common：Resource 引用与 URI 校验](modules/common.md#resource-引用与-uri-校验)与
+[Platform：Resource URI 与 Session 持有](modules/platform.md#resource-uri-与-session-持有)。
 
 ## 技能包
 
@@ -337,7 +332,7 @@ Canvas，平台只按类型转交。凭据经 `PluginCredentialAccess` 在上游
   工作区。上传渠道沿用预签名上传，服务端读取原始压缩包后走同一个构建器。
 - 预览与发布：构建结果作为暂存上传保留给用户预览；发布在短事务内校验乐观锁与 Agent 引用、切换当前版本并释放旧
   归档；取消或超期的暂存对象由存储清理回收。配置导入导出只包含 Git 渠道的包，上传的包可在详情页下载归档备份。
-- Agent 的系统提示按技能配置顺序列出名称与描述。技能内容通过 Platform 按需读取，不推送到 Environment。
+- Agent 的系统提示按技能配置顺序列出名称与描述。`load_skill` 按技能名返回 `SKILL.md` 正文：所在回合已选择 Environment 时，平台再以 `skill.install` 让 Daemon 凭平台签发的下载票据取到包归档并解压，返回 `skill_dir`；未选择时返回 `resource://skills/...` 基准 URI，附属文件由平台的 `read` 读取。
 
 ## 产品纵向切片
 
@@ -366,8 +361,7 @@ command 与幂等键、资源 pin、`CANVAS_RUN` Work 与版本通知，并按�
 
 **IDE**：`apps/ide` 拥有视图服务与 `IdeCommandTransport` 端口、唯一权威快照缓存、同源数据面代理（HTTP 转发与
 WebSocket 隧道）、浏览器会话与使用身份、跨节点路由，以及 IDE 的 HTTP 接口与 DTO；`web` 只保留组合装配与全局
-错误映射。视图生命周期为幂等创建或恢复、切换目录、关闭与强制关闭；每个 Daemon 进程最多 64 个视图，快照 revision
-与绑定 epoch 由同一序列推进，目录列举只返回直接子目录，详见 [IDE](modules/ide.md)。
+错误映射。视图生命周期、64 个视图上限与 revision/绑定 epoch 见下文[IDE 服务](#ide-服务)与 [IDE](modules/ide.md)。
 
 **插件**：构建期注册安装定义与配置 Schema，实例按类型交出 Harness 贡献与产品贡献；插件目录快照在启动时校验依赖
 与名称并冻结，失败候选释放资源。MCP 不通过插件接入，由平台用 Streamable HTTP 发现与执行，预算与取消见
@@ -400,7 +394,8 @@ WebSocket 隧道）、浏览器会话与使用身份、跨节点路由，以及 
 Studio 与每个 Daemon 之间只有一条 WSS 连接承载 HTTP/2：`POST /control` 建立控制流，IDE 数据面使用独立流。控制流使用 Protobuf（控制协议 v4）
 Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED`、`PROGRESS`、`COMPLETED`、`FAILED`、
 `CANCEL`、`CANCELLED`、`RECOVER`、`RECOVER_NOT_FOUND`、`EXECUTION_EXITED`、资源上传三段式
-（`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）、`TEMPORARY_RESOURCE_POLICY`、
+（`RESOURCE_UPLOAD_REQUEST`、`RESOURCE_UPLOAD_TICKET`、`RESOURCE_UPLOAD_COMMIT`）、资源下载两段式
+（`RESOURCE_DOWNLOAD_REQUEST`、`RESOURCE_DOWNLOAD_TICKET`）、`TEMPORARY_RESOURCE_POLICY`、
 `UPDATE`、`UPDATE_RESULT`、`IDE_COMMAND`、`IDE_RESULT`、`IDE_LEASE`、`SETTINGS`、`ENVIRONMENT_CONFIG`、
 `RUNTIME_STATUS`、`ERROR`。
 
@@ -414,10 +409,6 @@ Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED
 
 大文本落在 Daemon 本地并回传有界 tail，Agent 分页读取；资源上传由平台分配预签名 PUT，Daemon 直连 S3 上传后提交，
 重试只重放同一 transfer。
-
-### Agent 技能
-
-Agent 的系统提示按配置顺序列出所选技能的名称与描述。技能内容由 Platform 按需读取，不依赖 Environment 的安装状态或推送同步。
 
 ### IDE 服务
 
