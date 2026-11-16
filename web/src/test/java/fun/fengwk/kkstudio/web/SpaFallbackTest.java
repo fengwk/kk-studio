@@ -4,6 +4,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
@@ -20,7 +21,8 @@ import org.springframework.test.web.servlet.MockMvc;
  * <ul>
  *   <li>Controller/API（如 {@code /api/platform/settings/schema}）正常返回；
  *   <li>真实静态资源（如 {@code /assets/index.js}）由 {@code PathResourceResolver} 正常返回；
- *   <li>不存在的 {@code /api/**}、{@code /actuator/**}、{@code /ws/**} 与 {@code /ide/**} 返回 404；
+ *   <li>不存在的 {@code /api/**}、{@code /actuator/**}、{@code /ws/**}、{@code /ide/**} 与 {@code
+ *       /internal/**} 返回 404；
  *   <li>不存在且带文件扩展名的资源返回 404 而不是 {@code index.html}；
  *   <li>不存在且无扩展名的前端 GET（如 {@code /chats/123}、{@code /canvas}）返回 {@code index.html}；
  *   <li>非 GET 请求不会触发 fallback。
@@ -64,6 +66,18 @@ public class SpaFallbackTest extends WebPostgresTestSupport {
           .perform(get(path))
           .andExpect(status().isOk())
           .andExpect(content().string(containsString(INDEX_BODY_FRAGMENT)));
+    }
+  }
+
+  /** 未映射的 {@code /internal/**} 是集群内部面，必须保持 problem+json 404，不能回退为 SPA。 */
+  @Test
+  public void shouldReturnJson404ForMissingInternalRoute() throws Exception {
+    for (String path : new String[] {"/internal", "/internal/ide/missing"}) {
+      mockMvc
+          .perform(get(path))
+          .andExpect(status().isNotFound())
+          .andExpect(jsonPath("$.code").value("not_found"))
+          .andExpect(jsonPath("$.status").value(404));
     }
   }
 
