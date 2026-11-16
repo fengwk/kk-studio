@@ -84,6 +84,8 @@ Thread/Canvas 先读取 Snapshot，再订阅 `/ws/events`。
 同一资源无论多少消费者只有一条 wire 订阅，重连后自动重发全部订阅，恢复在线或回到前台立即重试。
 连接建立后服务端先发 `connected` 帧，manager 用它给出本次物理连接的 `eventNodeId` 与 `connectionId`；
 每次重连都是新身份，需要绑定到连接的 IDE 视图必须按新身份重新登记，旧身份不续用。
+断线按 250ms..10s 退避重连，只有完成 `connected` 握手才重置退避序列：
+接受连接却不发 `connected`（或立即关闭）的服务端会继续退避，不会以最小间隔无限重试。
 资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
 projects/thread-tree/interactions/environments 只发 changed 提示、不携带 cursor。
 subscribed（含重连）、resync、资源 error 和版本提示触发回读；
@@ -546,6 +548,8 @@ Settings 的 General 保存本地偏好；server tabs 由 settings schema 驱动
 硬错误用错误提示拒绝；部分可导入时由用户明确选择“仅导入可用配置”，没有可用项则不提供执行按钮。
 确认后提交原文件和部分导入授权，实际结果展示已导入及跳过原因，不渲染文件内容。
 成功后刷新配置目录；已有未保存设置草稿时保留原样，由用户明确重新加载。
+“重新加载设置”重新读取权威聚合，并以新响应的 sections 与 version 重捕草稿快照，
+因此后续保存不再携带导入前的版本。
 完整范围与恢复操作见[配置导入与导出](../operations/development-and-testing.md#配置导入与导出)。
 
 ### Plugin 设置
