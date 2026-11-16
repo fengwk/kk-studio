@@ -63,4 +63,4 @@ class LineFramer {
   }
 }
 
-module.exports = { CONSUMED, INVALID, LineFramer, STOPPED }
+module.exports = { INVALID, LineFramer }
