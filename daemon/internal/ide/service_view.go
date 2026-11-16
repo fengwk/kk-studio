@@ -300,7 +300,7 @@ func (s *Service) beginResume(command parsedOpen, view *viewRecord) (resumeBindi
 	s.clearExpiryLocked(view)
 	newEpoch, err := s.commitRevisionLocked()
 	if err != nil {
-		s.restoreLeaseExpiryLocked(view)
+		s.mu.Unlock()
 		return resumeBinding{}, err
 	}
 	binding.newEpoch = newEpoch
@@ -309,7 +309,9 @@ func (s *Service) beginResume(command parsedOpen, view *viewRecord) (resumeBindi
 	session := s.manager.Session()
 	if session == nil {
 		s.mu.Lock()
-		s.restoreLeaseExpiryLocked(view)
+		view.bindingPending = false
+		s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
+		s.mu.Unlock()
 		return resumeBinding{}, NewError("code-server is not running", "UNAVAILABLE")
 	}
 	binding.session = session
@@ -344,7 +346,9 @@ func (s *Service) reconcileResume(binding resumeBinding, registerErr error) (*pr
 		}
 		if nativeView.BindingEpoch == strconv.FormatInt(binding.oldEpoch, 10) {
 			s.mu.Lock()
-			s.restoreLeaseExpiryLocked(binding.view)
+			binding.view.bindingPending = false
+			s.scheduleExpiryLocked(binding.view, s.scheduler.Now().Add(viewLeaseDuration))
+			s.mu.Unlock()
 			return nil, registerErr
 		}
 	}
@@ -389,13 +393,6 @@ func (s *Service) commitResumedBinding(binding resumeBinding, assignDirectory bo
 	s.rememberClaimLocked(command.claimID, claimRecord{shape: openShape(command), viewID: view.viewID, epoch: newEpoch})
 	s.mu.Unlock()
 	return openReply(view, s.snapshot())
-}
-
-// restoreLeaseExpiryLocked releases the pending flag and restarts the lease window.
-func (s *Service) restoreLeaseExpiryLocked(view *viewRecord) {
-	view.bindingPending = false
-	s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
-	s.mu.Unlock()
 }
 
 // markResumeUnverified retains the view as a cleanup failure that needs an explicit close.

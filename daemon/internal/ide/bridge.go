@@ -77,8 +77,6 @@ type bridgeView struct {
 }
 
 type bridgeStream struct {
-	id           uint64
-	hostID       string
 	messages     chan []byte
 	retired      chan struct{}
 	retiredFrame bool
@@ -116,7 +114,6 @@ type Bridge struct {
 	pending        map[string]*bridgePending
 	waiters        map[string]map[chan error]struct{}
 	ptyListeners   []func(string, int) error
-	nextStreamID   uint64
 	closed         bool
 	closeDone      chan struct{}
 	closeErr       error
@@ -447,8 +444,6 @@ func (b *Bridge) reclaimDirectoryChangeLocked(viewID string, epoch int64, hostID
 // installStreamLocked replaces the view's host stream and settles its superseded requests.
 func (b *Bridge) installStreamLocked(viewID string, view *bridgeView, stream *bridgeStream, hostID, targetID, targetDirectory string) {
 	previous, previousHost := view.stream, view.hostID
-	b.nextStreamID++
-	stream.id, stream.hostID = b.nextStreamID, hostID
 	view.hosts[hostID] = struct{}{}
 	view.hostID, view.stream = hostID, stream
 	for id, pending := range b.pending {

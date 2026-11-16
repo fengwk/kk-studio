@@ -370,7 +370,7 @@ func (m *codeServerManager) launchProcess(ctx context.Context, launch CodeServer
 	m.mu.Unlock()
 	go m.drain(process.Stdout())
 	go m.drain(process.Stderr())
-	go m.watchExit(process, generation, false)
+	go m.watchExit(process, generation)
 	return process, generation, processExit, nil
 }
 
@@ -478,7 +478,7 @@ func (m *codeServerManager) login(ctx context.Context, port int, password string
 	return "", NewError("code-server login failed", "UNAVAILABLE")
 }
 
-func (m *codeServerManager) watchExit(process native.ManagedProcess, generation uint64, intentional bool) {
+func (m *codeServerManager) watchExit(process native.ManagedProcess, generation uint64) {
 	_, err := process.Wait(context.Background())
 	m.mu.Lock()
 	if m.process != process {
@@ -494,7 +494,7 @@ func (m *codeServerManager) watchExit(process native.ManagedProcess, generation 
 		m.processExitedDuringStartup = true
 	}
 	listeners := append([]func(uint64){}, m.listeners...)
-	shouldNotify := err == nil && !intentional && !m.intentional && m.starting == nil && !m.closed
+	shouldNotify := err == nil && !m.intentional && m.starting == nil && !m.closed
 	m.mu.Unlock()
 	if shouldNotify {
 		for _, listener := range listeners {
@@ -811,11 +811,12 @@ func randomToken() (string, error) {
 	}
 	return base64.RawURLEncoding.EncodeToString(value), nil
 }
+
 func mergeEnvironment(in []string, values map[string]string) []string {
 	result := make([]string, 0, len(in)+len(values))
 	for _, entry := range in {
 		key, _, ok := strings.Cut(entry, "=")
-		if _, replace := values[key]; ok && !replace {
+		if _, present := values[key]; ok && !present {
 			result = append(result, entry)
 		}
 	}
