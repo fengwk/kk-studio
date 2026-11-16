@@ -85,7 +85,7 @@ export function SettingsPage({
             ) : effectiveActiveTab === PLUGINS_SETTINGS_TAB.id ? (
               <PluginsTab />
             ) : effectiveActiveTab === SYNC_SETTINGS_TAB.id ? (
-              <SyncTab reloadSettings={editor.retryLoad} settingsDirty={editor.dirty} />
+              <SyncTab reloadSettings={editor.reload} settingsDirty={editor.dirty} />
             ) : (
               <ServerTabPane editor={editor} section={activeSection} />
             )}

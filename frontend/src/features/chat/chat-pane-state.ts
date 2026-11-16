@@ -188,8 +188,8 @@ export function loadChatPaneState(
 }
 
 /**
- * 用户事件的唯一提交入口：完整快照写本 tab 的 sessionStorage，剔除运行身份后的
- * 可复用呈现写 localStorage。Chat 快照本身不含运行身份，两份结构一致。
+ * 用户事件的唯一提交入口：同一份完整呈现快照同时写本 tab 的 sessionStorage 与全局
+ * localStorage。Chat 快照不含运行身份，因此两份内容完全一致。
  */
 export function saveChatPaneState(
   chatId: string,

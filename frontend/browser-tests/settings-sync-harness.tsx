@@ -135,7 +135,7 @@ export function HarnessApp() {
             <option value="fail">fail</option>
           </select>
         </div>
-        <SyncTab reloadSettings={() => undefined} settingsDirty={dirty} />
+        <SyncTab reloadSettings={async () => undefined} settingsDirty={dirty} />
       </div>
     </QueryClientProvider>
   )

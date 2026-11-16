@@ -182,11 +182,9 @@ function aiRuntimeToDraft(
     compactionKeepRecentTokens: String(dto.compactionKeepRecentTokens),
     subagentMaxDepth: String(dto.subagentMaxDepth),
     subagentMaxConcurrency: String(dto.subagentMaxConcurrency),
-    subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency ?? 0),
+    subagentMaxTotalConcurrency: String(dto.subagentMaxTotalConcurrency),
     subagentMaxTurns: String(dto.subagentMaxTurns),
-    modelHttpRetryStatusCodes: Array.isArray(dto.modelHttpRetryStatusCodes)
-      ? [...dto.modelHttpRetryStatusCodes]
-      : [],
+    modelHttpRetryStatusCodes: [...dto.modelHttpRetryStatusCodes],
   }
 }
 

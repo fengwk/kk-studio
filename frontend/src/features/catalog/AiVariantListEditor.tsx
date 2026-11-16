@@ -157,7 +157,7 @@ export function VariantListEditor({
                 <span className="inline-hint">{t('ai.catalog.form.protocolOptionsHint')}</span>
               </label>
 
-              <div className="variant-editor-actions">
+              <div>
                 <Button
                   variant="inline"
                   danger

@@ -6,14 +6,6 @@ import {
 } from '@/shared/api/contracts/ai-catalog'
 import type { ModelInputModality, ProviderDTO } from '@/shared/api/generated/contracts'
 
-export const AGENT_MODEL_INPUT_MODALITIES: ModelInputModality[] = [
-  'TEXT',
-  'IMAGE',
-  'AUDIO',
-  'VIDEO',
-  'DOCUMENT',
-]
-
 export interface ProviderOption {
   value: string
   label: string

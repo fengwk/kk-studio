@@ -159,6 +159,29 @@ export function useSystemSettingsEditor() {
     ])
   }, [queryClient])
 
+  /**
+   * 用户明确的「重新加载」：放弃当前 draft，重新读取权威聚合并以新响应的
+   * sections + version 重捕快照。导入后服务端已有新值，只 refetch 不会让 draft 跟上
+   * （快照只在 null 时派生），保存会继续拿旧 baseVersion 撞 409。
+   *
+   * 读取失败时保留现有 draft 与原 baseVersion 并向上抛错，由触发方就地展示。
+   */
+  const reload = useCallback(async () => {
+    const settings = await queryClient.fetchQuery({
+      queryKey: queryKeys.systemSettings.all,
+      queryFn: () => systemSettingsService.get(),
+      staleTime: 0,
+    })
+    recapture({
+      sections: settingsSectionsToDraft(settings),
+      baseVersion: settings.version,
+    })
+    setSaveError(null)
+    setFieldErrors({})
+    setConflict(null)
+    setDraftError(null)
+  }, [queryClient, recapture])
+
   // 权威数据缺失（初始加载失败）才视为整页加载错误；draft 存在时后台刷新失败不打断编辑。
   const loadError = useMemo(() => {
     if ((query.isError || schemaQuery.isError) && draft === null) {
@@ -183,6 +206,7 @@ export function useSystemSettingsEditor() {
     loadError,
     schemaError,
     retryLoad,
+    reload,
     dirty,
     saving: mutation.isPending,
     save,

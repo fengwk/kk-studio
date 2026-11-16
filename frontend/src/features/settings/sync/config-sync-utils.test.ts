@@ -10,6 +10,7 @@ import {
   computeExportScope,
 } from '@/features/settings/sync/config-sync-utils'
 import type { ConfigSyncItem } from '@/shared/api/generated/contracts'
+import { CONFIG_SYNC_KIND_VALUES } from '@/shared/api/generated/contracts'
 
 function item(
   kind: ConfigSyncItem['kind'],
@@ -46,7 +47,7 @@ describe('sync selection grouping', () => {
     ])
   })
 
-  // 插件配置是固定第八类：类别顺序与分组都由前端白名单决定，未知类别不会进入展示。
+  // 插件配置是固定第八类：展示顺序由前端名次表决定，未知类别不会进入展示。
   it('keeps plugin configurations as the eighth kind at a fixed position', () => {
     expect(CONFIG_SYNC_KIND_ORDER).toHaveLength(8)
     expect(CONFIG_SYNC_KIND_ORDER.at(-1)).toBe('plugins')
@@ -56,6 +57,12 @@ describe('sync selection grouping', () => {
       labelKey: 'settings.sync.kind.plugins',
     })
     expect(configSyncKindLabelKey('plugins')).toBe('settings.sync.kind.plugins')
+  })
+
+  // 展示顺序直接取自契约种类：后端新增类别必然出现在列表里，不会静默消失。
+  it('covers every generated contract kind in the display order', () => {
+    expect([...CONFIG_SYNC_KIND_ORDER].sort()).toEqual([...CONFIG_SYNC_KIND_VALUES].sort())
+    expect(new Set(CONFIG_SYNC_KIND_ORDER).size).toBe(CONFIG_SYNC_KIND_ORDER.length)
   })
 })
 

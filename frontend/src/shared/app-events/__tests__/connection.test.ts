@@ -164,6 +164,29 @@ describe('ApplicationEventConnection', () => {
     }
   })
 
+  it('keeps backing off when the server accepts the transport but never completes the handshake', () => {
+    vi.useFakeTimers()
+    const { connection, harness } = openConnection()
+    connection.connect()
+
+    // 每轮：transport open 后服务端立即以 1013 关闭，不发 connected。
+    // 服务端从未可用，退避必须继续推进，不能每次都回到 250ms。
+    const expectedDelays = [250, 500, 1000]
+    for (const [attempt, delay] of expectedDelays.entries()) {
+      harness.openLatest()
+      harness.latest?.closeWith(1013)
+      expect(connection.getStatus()).toBe('backoff')
+      expect(connection.getState().reason).toMatchObject({
+        cause: 'transport-lost',
+        retryAt: Date.now() + delay,
+      })
+      vi.advanceTimersByTime(delay - 1)
+      expect(harness.sockets).toHaveLength(attempt + 1)
+      vi.advanceTimersByTime(1)
+      expect(harness.sockets).toHaveLength(attempt + 2)
+    }
+  })
+
   it('applies deterministic jitter of at most 20% of the current base', () => {
     vi.useFakeTimers()
     const { connection, harness } = openConnection()
@@ -187,7 +210,7 @@ describe('ApplicationEventConnection', () => {
       vi.advanceTimersByTime(1)
       expectedSockets += 1
       expect(harness.sockets).toHaveLength(expectedSockets)
-      // open 新 socket 以重置退避序列（每次用例都从 base=250 开始）。
+      // 完成 connected 握手才能重置退避序列（每个用例都从 base=250 开始）。
       readyLatest(harness)
     }
   })
@@ -339,7 +362,8 @@ describe('ApplicationEventConnection', () => {
     expect(vi.getTimerCount()).toBe(1)
     vi.advanceTimersByTime(250)
     expect(harness.sockets).toHaveLength(2)
-    const second = harness.openLatest()
+    // 完成 connected 握手会重置退避序列，因此 send 失败后的重连重新从 250ms 起算。
+    const second = readyLatest(harness)
 
     // send 失败路径：send 与 close 都同步抛错；同样进入 backoff 并重连。
     second.sendThrows = true

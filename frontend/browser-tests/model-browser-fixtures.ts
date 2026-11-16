@@ -24,7 +24,7 @@ export const FIXTURE_PROVIDER: ProviderDTO = {
   updatedAt: 1792454400,
 }
 
-export const FIXTURE_MAIN_MODEL: ModelDTO = {
+const FIXTURE_MAIN_MODEL: ModelDTO = {
   name: 'main',
   type: 'MODEL',
   description: 'Primary fixture model',
@@ -53,7 +53,7 @@ export const FIXTURE_MAIN_MODEL: ModelDTO = {
   updatedAt: 1792454400,
 }
 
-export const FIXTURE_BACKUP_MODEL: ModelDTO = {
+const FIXTURE_BACKUP_MODEL: ModelDTO = {
   name: 'backup',
   type: 'MODEL',
   description: 'Backup fixture model',
@@ -82,7 +82,7 @@ export const FIXTURE_BACKUP_MODEL: ModelDTO = {
   updatedAt: 1792454400,
 }
 
-export const FIXTURE_GROUP: ModelDTO = {
+const FIXTURE_GROUP: ModelDTO = {
   name: 'coding',
   type: 'GROUP',
   description: 'Ordered coding fallback',
@@ -111,7 +111,7 @@ export const FIXTURE_MODELS: ModelDTO[] = [
   FIXTURE_GROUP,
 ]
 
-export const FIXTURE_CANDIDATES: ModelCatalogCandidateDTO[] = [
+const FIXTURE_CANDIDATES: ModelCatalogCandidateDTO[] = [
   {
     id: 'models_dev_v2/acme/catalog-a',
     provider: 'acme',

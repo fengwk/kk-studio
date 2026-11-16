@@ -12,7 +12,8 @@ import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import type { ConfigSyncImportCheckDTO } from '@/shared/api/generated/contracts'
 
 interface SyncTabProps {
-  reloadSettings: () => void
+  /** 重新读取权威设置并重建 draft 快照；失败时 reject。 */
+  reloadSettings: () => Promise<void>
   settingsDirty: boolean
 }
 
@@ -102,10 +103,6 @@ export function SyncTab({ reloadSettings, settingsDirty }: SyncTabProps) {
       queryClient.invalidateQueries({ queryKey: queryKeys.plugins.all }),
       queryClient.invalidateQueries({ queryKey: queryKeys.configSync.inventory }),
     ])
-    // 存在未保存 draft 时保持原样，由用户在结果中显式重新加载设置。
-    if (!settingsDirty) {
-      reloadSettings()
-    }
   }
 
   const handleExported = (filename: string) => {

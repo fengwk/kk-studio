@@ -9,6 +9,7 @@ import {
   normalizePricing,
 } from '@/features/catalog/ai-model-pricing-codec'
 import { defaultPromptCacheRetention } from '@/shared/api/contracts/ai-catalog'
+import { MODEL_INPUT_MODALITY_VALUES } from '@/shared/api/generated/contracts'
 import type {
   ModelConfigDTO,
   ModelDTO,
@@ -20,14 +21,7 @@ import type {
   SingleModelDTO,
 } from '@/shared/api/generated/contracts'
 
-const AGENT_MODEL_MODALITIES: ModelInputModality[] = [
-  'TEXT',
-  'IMAGE',
-  'AUDIO',
-  'VIDEO',
-  'DOCUMENT',
-]
-const AGENT_MODEL_MODALITY_SET = new Set<string>(AGENT_MODEL_MODALITIES)
+const AGENT_MODEL_MODALITY_SET = new Set<string>(MODEL_INPUT_MODALITY_VALUES)
 
 export function emptyModelDraft(
   provider?: ({ name: string } & Partial<Pick<ProviderDTO, 'promptCacheRetentions'>>) | null,

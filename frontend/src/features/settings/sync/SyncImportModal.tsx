@@ -4,7 +4,6 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import { configSyncService } from '@/features/settings/config-sync-service'
 import {
-  CONFIG_SYNC_KIND_ORDER,
   configSyncErrorMessage,
   configSyncImportMode,
   configSyncKindLabelKey,
@@ -22,7 +21,8 @@ interface SyncImportModalProps {
   settingsDirty: boolean
   onClose: () => void
   onImported: () => void
-  onReloadSettings: () => void
+  /** 重新读取权威设置并重建 draft 快照；失败时 reject。 */
+  onReloadSettings: () => Promise<void>
 }
 
 /**
@@ -45,8 +45,17 @@ export function SyncImportModal({
   const [result, setResult] = useState<ConfigSyncImportResultDTO | null>(null)
 
   const mode = configSyncImportMode(preview)
-  const kindLabel = (kind: ConfigSyncKind): string =>
-    CONFIG_SYNC_KIND_ORDER.includes(kind) ? t(configSyncKindLabelKey(kind)) : kind
+  const kindLabel = (kind: ConfigSyncKind): string => t(configSyncKindLabelKey(kind))
+
+  /** 导入成功后的重新加载失败只在本弹窗报错：draft 与 baseVersion 保持原样。 */
+  const reloadSettings = async () => {
+    setError(null)
+    try {
+      await onReloadSettings()
+    } catch {
+      setError(t('settings.error.load'))
+    }
+  }
 
   const handleImport = async (allowPartial: boolean) => {
     setPending(true)
@@ -56,6 +65,10 @@ export function SyncImportModal({
       setResult(response)
       if (response.imported.length > 0) {
         onImported()
+        // 无未保存草稿时立即采用导入后的权威；有草稿时保留原样，由用户显式重新加载。
+        if (!settingsDirty) {
+          await reloadSettings()
+        }
       }
     } catch (importError) {
       setError(configSyncErrorMessage(importError, t('settings.sync.import.failed')))
@@ -98,7 +111,9 @@ export function SyncImportModal({
               result={result}
               kindLabel={kindLabel}
               settingsDirty={settingsDirty}
-              onReloadSettings={onReloadSettings}
+              onReloadSettings={() => {
+                void reloadSettings()
+              }}
             />
           ) : (
             <>
@@ -107,13 +122,13 @@ export function SyncImportModal({
                 {t('settings.sync.import.fileName', { name: fileName })}
               </p>
               <ImportPreview preview={preview} mode={mode} kindLabel={kindLabel} />
-              {error ? (
-                <div className="settings-error-banner" role="alert">
-                  {error}
-                </div>
-              ) : null}
             </>
           )}
+          {error ? (
+            <div className="settings-error-banner" role="alert">
+              {error}
+            </div>
+          ) : null}
         </div>
         <div className="modal-footer">
           {result ? (

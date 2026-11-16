@@ -12,14 +12,10 @@ import type {
  *
  * 前端不做默认值兜底：GET 返回的权威聚合是唯一事实源，draft 只从它派生。
  */
-export function createSystemSettingsService() {
-  return {
-    get: (): Promise<SystemSettingsDTO> => request('GET /api/platform/settings', {}),
-    getSchema: (): Promise<SystemSettingsSchemaDTO> =>
-      request('GET /api/platform/settings/schema', {}),
-    update: (update: SystemSettingsUpdateDTO): Promise<SystemSettingsDTO> =>
-      request('PUT /api/platform/settings', { body: update }),
-  }
+export const systemSettingsService = {
+  get: (): Promise<SystemSettingsDTO> => request('GET /api/platform/settings', {}),
+  getSchema: (): Promise<SystemSettingsSchemaDTO> =>
+    request('GET /api/platform/settings/schema', {}),
+  update: (update: SystemSettingsUpdateDTO): Promise<SystemSettingsDTO> =>
+    request('PUT /api/platform/settings', { body: update }),
 }
-
-export const systemSettingsService = createSystemSettingsService()

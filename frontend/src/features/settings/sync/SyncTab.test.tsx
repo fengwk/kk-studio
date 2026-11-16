@@ -19,12 +19,6 @@ vi.mock('@/features/settings/config-sync-service', () => ({
     checkImport: mocks.checkImport,
     importConfig: mocks.importConfig,
   },
-  createConfigSyncService: () => ({
-    getInventory: vi.fn(),
-    exportConfig: vi.fn(),
-    checkImport: vi.fn(),
-    importConfig: vi.fn(),
-  }),
 }))
 
 const INVENTORY_ITEMS: ConfigSyncItem[] = [
