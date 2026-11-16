@@ -61,20 +61,28 @@ class IssueStageBudgetTest {
         () -> StageBudgetView.authorize(null, ProjectStateCode.of("DESIGN"), 1));
   }
 
-  /** 重置高水位只能前进：nextRunOrdinal 必须为正，不能回退而重新授权历史 Run。 */
+  /** 重置高水位只能前进到 nextRunOrdinal - 1；nextRunOrdinal 必须为正，不能回退而重新授权历史 Run。 */
   @Test
   void resetsHighWaterMarkForwardOnly() {
-    StageBudgetView budget = StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 3, 2);
-
     assertEquals(
-        StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 5, 3), budget.reset(workflow, 5, 4));
-    assertThrows(IllegalArgumentException.class, () -> budget.reset(workflow, 5, 2));
-    assertThrows(IllegalArgumentException.class, () -> budget.reset(workflow, 5, 0));
-    assertThrows(DomainException.class, () -> budget.reset(workflow, 0, 4));
-    assertThrows(NullPointerException.class, () -> budget.reset(null, 5, 4));
-
-    StageBudgetView manual = StageBudgetView.budget(ProjectStateCode.of("MANUAL"), 1, 0);
+        StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 5, 3),
+        StageBudgetView.reset(workflow, ProjectStateCode.of("DESIGN"), 5, 4));
+    assertEquals(
+        StageBudgetView.budget(ProjectStateCode.of("DESIGN"), 3, 1),
+        StageBudgetView.reset(workflow, ProjectStateCode.of("DESIGN"), 3, 2));
     assertThrows(
-        DomainException.class, () -> manual.reset(ProjectDomainFixtures.manualWorkflow(), 2, 1));
+        IllegalArgumentException.class,
+        () -> StageBudgetView.reset(workflow, ProjectStateCode.of("DESIGN"), 5, 0));
+    assertThrows(
+        DomainException.class,
+        () -> StageBudgetView.reset(workflow, ProjectStateCode.of("DESIGN"), 0, 4));
+    assertThrows(
+        NullPointerException.class,
+        () -> StageBudgetView.reset(null, ProjectStateCode.of("DESIGN"), 5, 4));
+    assertThrows(
+        DomainException.class,
+        () ->
+            StageBudgetView.reset(
+                ProjectDomainFixtures.manualWorkflow(), ProjectStateCode.of("MANUAL"), 2, 1));
   }
 }

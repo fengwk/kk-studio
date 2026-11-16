@@ -26,9 +26,4 @@ public enum IssueRunStatus {
   public boolean isActive() {
     return this == RUNNING || this == WAITING;
   }
-
-  /** 是否为终态。 */
-  public boolean isTerminal() {
-    return !isActive();
-  }
 }

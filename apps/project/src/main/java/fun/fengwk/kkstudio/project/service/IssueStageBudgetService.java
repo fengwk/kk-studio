@@ -55,12 +55,8 @@ public class IssueStageBudgetService {
     StageBudgetView existing = stageBudgetRepository.get(issueId, state);
     long previousMax = existing != null ? existing.maxRuns() : 0;
     long previousAfter = existing != null ? existing.budgetAfterOrdinal() : 0;
-    StageBudgetView currentBudget =
-        existing == null
-            ? StageBudgetView.authorize(locked.workflow(), code, maxRuns)
-            : StageBudgetView.budget(code, existing.maxRuns(), existing.budgetAfterOrdinal());
     StageBudgetView reset =
-        currentBudget.reset(locked.workflow(), maxRuns, locked.issue().getNextRunOrdinal());
+        StageBudgetView.reset(locked.workflow(), code, maxRuns, locked.issue().getNextRunOrdinal());
     boolean applied =
         existing == null
             ? stageBudgetRepository.insert(issueId, reset)
