@@ -442,7 +442,7 @@ const pluginImportPrefixes = [
 ]
 
 /** 内核里的 SPI 与内置工具包只依赖契约，绝不触碰 runtime 内部实现。 */
-const kernelContractPackages = ['tool', 'contributor', 'prompt']
+const kernelContractPackages = ['api', 'tool', 'contributor', 'prompt']
 
 function pomDependencies(pomRelativePath) {
   const source = read(pomRelativePath).replace(/<!--[\s\S]*?-->/gu, '')

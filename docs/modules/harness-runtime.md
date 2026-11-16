@@ -394,6 +394,7 @@ environmentSupport       NONE / ROUTED / REQUIRED
 | `bash` | Environment（REQUIRED） | SELECTABLE | `process.exec`，NON_IDEMPOTENT |
 | `lsp_goto_definition` / `lsp_workspace_symbols` / `lsp_java_decompile` | Environment | SELECTABLE | 对应 `lsp.*` 能力，READ_ONLY |
 | `task` | 无 | INTERNAL | 委派 Subagent 任务，NON_IDEMPOTENT |
+| `load_skill` | 无 | INTERNAL | 读取已配置 skill 的完整说明；未配置 skill 时不注册 |
 | `ask_user` | 无 | SELECTABLE | 冻结问卷并等待人工回答 |
 | `compact` | 无 | INTERNAL | 请求在批次结束后整理上下文，只返回排队回执 |
 
@@ -441,10 +442,10 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 | `api.retry` | Invocation 自动重试的公开配置值：`InvocationRetryPolicy`（最大重试次数、退避算法与延迟区间，含纯退避计算）、`InvocationRetryBackoffStrategy`（`FIXED` / `EXPONENTIAL`）与只判定 400–599 HTTP 失败是否进入预算的 `ModelHttpErrorPolicy`；不读时钟、不持久化，判定实现在 `runtime.retry`，部署配置以 JDK `Supplier` / `Function` 现读 |
 | `api.session` | Session 聚合、sealed 消息内容家族与 `AssistantMessageMetadata`；`SystemReminder` 用精确定界符构造与判别运行时注入的 USER 上下文提醒；wire codec 在 `codec` |
 | `api.thread` | Thread 级公开值：`ThreadState`、`ThreadSnapshot`、`ThreadExecutionControl`、`ThreadRuntimeStatus`、`ThreadExecutionFacts` 与记录 live 分类的 `ThreadLiveState`、创建时冻结的 `ThreadKind` / `ThreadConstraints`，以及停止 / 执行根开关 / 手动压缩的控制请求形状；不引用 Store、Driver 或 `runtime` 内部类型 |
-| `api.tool` | Tool invocation 的公开值：`ToolInvocation` 与 `ToolInvocationStatus`、`ToolBinding` / `ContributorBinding` 及 `ToolBindingIdentifiers`、审批与输入回执、`ToolInvocationError`；只含不变量与纯状态转换，执行、调度在 `runtime`，wire 编解码在 `codec` |
+| `api.tool` | Tool invocation 的公开值：`ToolInvocation` 与 `ToolInvocationStatus`、`ToolBinding` / `ContributorBinding`（标识符复用 `CanonicalIdentifiers`）、审批与输入回执、`ToolInvocationError`；只含不变量与纯状态转换，执行、调度在 `runtime`，wire 编解码在 `codec` |
 | `codec` | api 值类型的严格确定性 JSON wire codec 与由此派生的 request hash：`AgentMessageJsonCodec` 定义消息与 durable 内容记录的形态，`ThreadCommandPayloadJsonCodec` 在其上定义 typed command payload 并用 canonical 信封计算 hash，`RealtimeEventJsonCodec` 定义 `api.realtime` 投影事件的 live overlay 形态；`HistoryEntryPayloadJsonCodec` 按 `EntryType` 定义 Entry payload 的 durable 形态（子树委派包私有 `HistoryValueCodecs` 与 `AgentMessageJsonCodec`），`HistoryPayloadMapper` 只做终态 ToolInvocation / history normalization 到 payload 的纯映射；Tool 持久化列与 Daemon 预览共用的 `ToolBindingJsonCodec` / `ToolApprovalJsonCodec` / `ToolEditReviewJsonCodec` 共享 `InvocationJsonSupport` 的严格 JSON 原语，Builtin 的 `ModelRequestSpec` 列 codec 在 harness/agent-builtin；不含状态机、持久化与 mailbox 归约 |
-| `runtime` | 同步控制面 `HarnessRuntime` 与包私有控制事务（接受、停止、手工压缩、人工输入）、spawn、执行树锁与 Session 删除 / fork 复制；守卫锁序，执行状态流转委托 `spi.driver` 契约与 `runtime.processor`；门面同时只读转发 `runtime.processor` / `runtime.compaction` 的规划事实（candidate 路径、压缩 turn 冻结元数据） |
-| `runtime.compaction` | 切分规划、prompt、摘要装配与结果评估、子执行 spawn；规划与评估是纯函数。自动阈值由平台 Turn 解析返回 `CompactionRequired`，溢出与 `compact` 工具排队由 `CompactionGate` 判定，切点由 `CompactionPlanner` 选择；配置 provider 在 `spi.compaction`，公开值类型在 `api.compaction`。`TokenEstimator` 是不读 Store、不读时钟的 token 估算唯一实现，切分、no-gain 判定、自动压缩阈值与请求估算端口共用它 |
+| `runtime` | 同步控制面 `HarnessRuntime` 与包私有控制事务（接受、停止、手工压缩、人工输入）、spawn、执行树锁与 Session 删除 / fork 复制；守卫锁序，执行状态流转委托 `spi.driver` 契约与 `runtime.processor`；门面只读转发已提交的压缩回合冻结元数据 |
+| `runtime.compaction` | 切分规划、prompt、摘要装配与结果评估、子执行 spawn；规划与评估是纯函数。自动阈值由平台 Turn 解析返回 `CompactionRequired`，溢出与 `compact` 工具排队由 `CompactionGate` 判定，切点由唯一的 `CompactionPlanner` 选择；配置 provider 在 `spi.compaction`，公开值类型在 `api.compaction`。`TokenEstimator` 是不读 Store、不读时钟的 token 估算唯一实现，切分、no-gain 判定、自动压缩阈值与请求估算端口共用它 |
 | `runtime.driver` | Driver 的注册与路由装配：`DriverRegistry` 与未安装 Driver 替身 `UninstalledAgentDriver`；契约在 `spi.driver`，generation 投影在 `api.generation` |
 | `runtime.execution` | 具体执行代次的窄退出账本：物理句柄与 PREPARED/EXIT_PROOF 两阶段日志、身份登记、单向真实 ACK、显式放弃、旧 PREPARED 的 `OWNER_EXITED` 恢复、跨实例远端退出对账与确认后的 Join 结算推进；证据形状在 `api.execution`，不复制 Invocation 状态机 |
 | `spi.execution` | 本地物理执行端口：`LocalExecutionLifecycle`、`LocalExecutionIdentity`、`LocalExecutionHandle`、`LocalExecutionDrain` 与上一进程恢复结果；Builtin Driver 与 Tool Processor 只经此登记、取消、证明退出和排空，不访问 Driver 私有表 |
