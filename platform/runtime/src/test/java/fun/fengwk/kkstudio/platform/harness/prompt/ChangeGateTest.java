@@ -48,11 +48,15 @@ class ChangeGateTest {
   }
 
   @Test
-  void awaitChangeWakesOnAnyCategoryAndMergesSignals() throws Exception {
+  void awaitChangeWakesOnlyAfterVersionSignal() throws Exception {
     ChangeGate gate = new ChangeGate();
     ChangeGate.State since = gate.snapshot();
-    gate.cancel();
-    assertTrue(gate.awaitChange(since, 0L), "cancel signal must wake");
+    assertFalse(gate.awaitChange(since, 0L), "no signal yet");
+    gate.version();
+    assertTrue(gate.awaitChange(since, 0L), "version signal must wake");
+    // 已消费的信号不应重复唤醒：同一个 since 为过去态，新快照与即时检查必须回到 false。
+    ChangeGate.State current = gate.snapshot();
+    assertFalse(gate.awaitChange(current, 0L), "no further signal yet");
   }
 
   @Test

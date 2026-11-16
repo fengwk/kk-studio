@@ -25,6 +25,7 @@ import org.springframework.dao.DuplicateKeyException;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
@@ -269,6 +270,30 @@ class ModelServiceUnitTest {
     verify(repository, never()).deleteByName(any(), anyLong());
   }
 
+  /** 组更新的存在性与版本检查先于请求体名称规范化：过期版本不得先报名称错误，版本匹配后才校验名称。 */
+  @Test
+  void staleVersionWinsOverGroupUpdateNameValidation() {
+    Model group = Model.builder().name("group").kind(ModelKind.GROUP).version(2L).build();
+    when(repository.getByName("group")).thenReturn(group);
+    when(repository.getByNameForUpdate("group")).thenReturn(group);
+
+    DomainException stale =
+        assertThrows(
+            DomainException.class,
+            () ->
+                service.updateModel(
+                    "group", groupUpdate(" invalid ", 1L, member("member", "default"))));
+    assertEquals(DomainErrorCode.VERSION_CONFLICT, stale.code());
+
+    DomainException invalidName =
+        assertThrows(
+            DomainException.class,
+            () ->
+                service.updateModel(
+                    "group", groupUpdate(" invalid ", 2L, member("member", "default"))));
+    assertEquals("model name must not contain surrounding whitespace", invalidName.getMessage());
+  }
+
   /** 测试意图：组只接受已存在单 Model 声明的 Variant，不能嵌套组，成员输入模态必须有交集，且不携带 MODEL 字段。 */
   @Test
   void validatesGroupMembersAndDerivedModalities() {
@@ -473,6 +498,15 @@ class ModelServiceUnitTest {
     create.setName(name);
     create.setGroup(group(members));
     return create;
+  }
+
+  private static ModelGroupUpdateDTO groupUpdate(
+      String name, long expectedVersion, ModelGroupMemberDTO... members) {
+    ModelGroupUpdateDTO update = new ModelGroupUpdateDTO();
+    update.setName(name);
+    update.setGroup(group(members));
+    update.setExpectedVersion(expectedVersion);
+    return update;
   }
 
   private static ModelGroupConfigDTO group(ModelGroupMemberDTO... members) {

@@ -10,7 +10,6 @@ import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
@@ -22,7 +21,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 平台的 Agent 任务入口：子代理 task 工具、插件 Prompt 任务与 Issue 任务都经由它创建 Thread、接受首批输入并登记结果票据，再用同一张票据停止与读取结果。
+ * 平台的 Agent 任务入口：子代理 task 工具、插件 Prompt 任务与 Issue 任务都经由它创建 Thread、接受首批输入并登记结果票据，之后按 Thread
+ * 停止与读取票据结果。
  *
  * <p>提交委托运行时的统一创建原语 {@link HarnessRuntime#spawn}，并加入调用方已有的事务（Issue 在自己的产品事务内提交）。有父 Thread 的任务根据内部
  * {@code async} 选择通知交付或同步工具结果交付，并计入并发额度；无父任务以 {@code RECEIPT_ONLY} 只留回执。读取结果只投影票据已冻结的回执，绝不据子 Thread
@@ -76,71 +76,9 @@ public class AgentTaskService {
     return new AgentTaskHandle(accepted.thread().id(), request.ticketId(), accepted);
   }
 
-  /** 票据的固定凭据；不存在返回空。 */
-  private Optional<ThreadJoin> findTicket(UUID ticketId) {
-    return requireRuntime().findJoin(Objects.requireNonNull(ticketId, "ticketId"));
-  }
-
-  /** 任务的冻结结果回执；任务不存在或尚未结束返回空。 */
+  /** 票据的冻结结果回执；任务不存在或尚未结束返回空。 */
   public Optional<ThreadJoinReceipt> result(UUID ticketId) {
     return requireRuntime().projectJoinReceipt(Objects.requireNonNull(ticketId, "ticketId"));
-  }
-
-  /**
-   * 按票据停止执行它的 Thread（含其子树）；票据不存在时抛 not-found {@link DomainException}。
-   *
-   * <p>已冻结结果或被后续 Run supersede 的票据是历史事实，必须 no-op：否则同一个 Thread 上的后续 Run 会被旧票据误停。每次 CAS 重试都在 取得新
-   * snapshot 后复核票据状态；后续 Run 改写 Thread 会让旧 version 的 stop 失败，从而回到复核。
-   */
-  public void stop(UUID ticketId) {
-    ThreadJoin initial =
-        findTicket(ticketId)
-            .orElseThrow(
-                () ->
-                    DomainException.notFound(
-                        "agent_task", "agent task " + ticketId + " does not exist"));
-    if (isTerminal(initial)) {
-      return;
-    }
-    stopTicketed(ticketId, initial.childThreadId());
-  }
-
-  private static boolean isTerminal(ThreadJoin ticket) {
-    return ticket.matched() || ticket.supersededByInvocationId() != null;
-  }
-
-  /** 票据仍有效时才停止其 child；snapshot 与 stop 之间票据完成/被接管时，后续 Thread version 变化触发复核并 no-op。 */
-  private void stopTicketed(UUID ticketId, UUID threadId) {
-    HarnessRuntime runtime = requireRuntime();
-    for (int attempt = 0; attempt < STOP_ATTEMPTS; attempt++) {
-      ThreadSnapshot snapshot;
-      try {
-        snapshot = runtime.getThreadSnapshot(threadId);
-      } catch (DomainException gone) {
-        if (gone.code() != DomainErrorCode.NOT_FOUND || !"thread".equals(gone.resource())) {
-          throw gone;
-        }
-        return;
-      }
-      Optional<ThreadJoin> current = runtime.findJoin(ticketId);
-      if (current.isEmpty() || isTerminal(current.get())) {
-        return;
-      }
-      try {
-        runtime.stop(new StopCommand(threadId, UUID.randomUUID(), snapshot.thread().version()));
-        return;
-      } catch (DomainException failure) {
-        if (failure.code() == DomainErrorCode.NOT_FOUND && "thread".equals(failure.resource())) {
-          return;
-        }
-        if (failure.code() != DomainErrorCode.CONFLICT
-            || !HarnessConflictReason.STALE_VERSION.name().equals(failure.reason())) {
-          throw failure;
-        }
-      }
-    }
-    throw new IllegalStateException(
-        "agent task stop did not converge after " + STOP_ATTEMPTS + " stale version retries");
   }
 
   /** 停止指定 Thread（含其子树）：Thread 已不存在时容忍，stale version 在有界次数内重读重试。 */
@@ -171,7 +109,7 @@ public class AgentTaskService {
       }
     }
     throw new IllegalStateException(
-        "agent task stop did not converge after " + STOP_ATTEMPTS + " stale version retries");
+        "thread stop did not converge after " + STOP_ATTEMPTS + " stale version retries");
   }
 
   private HarnessRuntime requireRuntime() {

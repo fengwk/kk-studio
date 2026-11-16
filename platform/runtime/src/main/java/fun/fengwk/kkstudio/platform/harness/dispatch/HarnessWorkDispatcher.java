@@ -114,10 +114,6 @@ public final class HarnessWorkDispatcher implements AutoCloseable {
             this::returnClaim);
   }
 
-  public UUID nodeInstanceId() {
-    return nodeInstanceId;
-  }
-
   /**
    * 启动调度：注册 fixed-delay periodic poll 并触发首次 wake。幂等（重复调用只注册一次）；已 stop 后调用抛 {@link
    * IllegalStateException}。

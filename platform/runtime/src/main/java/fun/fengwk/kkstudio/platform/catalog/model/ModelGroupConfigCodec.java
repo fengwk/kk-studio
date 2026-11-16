@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
-import com.fasterxml.jackson.annotation.JsonAnySetter;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -75,9 +74,10 @@ public final class ModelGroupConfigCodec {
   /**
    * 组结构校验：有序成员非空、引用字段 canonical、同引用不重复；状态码 400–599 且不重复；冷却为非负整数秒。
    *
-   * <p>成员是否真实存在、是否为单 MODEL 以及 Variant 是否存在由写入服务在持锁事务内另行校验。
+   * <p>成员是否真实存在、是否为单 MODEL 以及 Variant 是否存在由写入服务在持锁事务内另行校验。写入服务在成员加锁前校验结构， 随后由 {@link #encode}
+   * 在写入时再校验一次；两处都必需：前者决定加锁范围，后者保证 codec 只编码有效配置。
    */
-  public void validateShape(ModelGroupConfigDTO group) {
+  void validateShape(ModelGroupConfigDTO group) {
     if (group == null) {
       throw DomainException.validation("model", "group config is required");
     }
@@ -165,21 +165,9 @@ public final class ModelGroupConfigCodec {
   }
 
   private record StoredGroup(
-      List<StoredMember> members, List<Integer> fallbackStatusCodes, Integer cooldownSeconds) {
-    /** Jackson 反序列化回调：异常会被包装成 DatabindException，再由 decode 统一翻译为 validation。 */
-    @JsonAnySetter
-    public void rejectUnknownField(String name, Object value) {
-      throw new IllegalArgumentException("unknown model group field: " + name);
-    }
-  }
+      List<StoredMember> members, List<Integer> fallbackStatusCodes, Integer cooldownSeconds) {}
 
-  private record StoredMember(String modelName, String variant) {
-    /** Jackson 反序列化回调：异常会被包装成 DatabindException，再由 decode 统一翻译为 validation。 */
-    @JsonAnySetter
-    public void rejectUnknownField(String name, Object value) {
-      throw new IllegalArgumentException("unknown model group member field: " + name);
-    }
-  }
+  private record StoredMember(String modelName, String variant) {}
 
   private static String requireCanonical(String value, String field) {
     if (value == null || value.isBlank()) {
