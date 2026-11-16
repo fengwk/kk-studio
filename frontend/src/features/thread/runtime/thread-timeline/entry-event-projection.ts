@@ -1,6 +1,7 @@
 import type {
-  EntryEventDialogueMessage,
-  EntryEventKind,
+  EntryAuditMessage,
+  EntryForkMessage,
+  EntryNotificationMessage,
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { formatModelLabel } from '@/features/catalog'
 import {
@@ -52,12 +53,12 @@ export function parseSettingsSnapshot(value: unknown): SettingsSnapshot | null {
 export function projectRootSettings(
   entry: HarnessSessionEntryDTO,
   settings: SettingsSnapshot,
-): EntryEventDialogueMessage {
+): EntryAuditMessage {
   const builtin = getBuiltinModelSelection(settings.execution)
   const modelText = builtin
     ? formatModelLabel(builtin.modelName, builtin.variant)
     : settings.execution.driver
-  return event(
+  return auditEvent(
     entry,
     'root',
     translate('ai.runtime.entry.rootSettings', {
@@ -69,31 +70,31 @@ export function projectRootSettings(
   )
 }
 
-export function projectInvalidSettings(entry: HarnessSessionEntryDTO): EntryEventDialogueMessage {
-  return event(entry, 'invalid_settings', translate('ai.runtime.entry.invalidSettings'), '')
+export function projectInvalidSettings(entry: HarnessSessionEntryDTO): EntryAuditMessage {
+  return auditEvent(entry, 'invalid_settings', translate('ai.runtime.entry.invalidSettings'), '')
 }
 
 export function projectSettingsChanges(
   entry: HarnessSessionEntryDTO,
   before: SettingsSnapshot,
   after: SettingsSnapshot,
-): EntryEventDialogueMessage[] {
-  const changes: EntryEventDialogueMessage[] = []
+): EntryAuditMessage[] {
+  const changes: EntryAuditMessage[] = []
   if (before.agentName !== after.agentName) {
-    changes.push({ ...event(entry, 'settings_change', translate('ai.runtime.entry.agentChanged', {
+    changes.push({ ...auditEvent(entry, 'settings_change', translate('ai.runtime.entry.agentChanged', {
       agent: after.agentName,
     }), ''), id: `entry:${entry.entryId}:agent` })
   }
   if (!isSameExecution(before.execution, after.execution)) {
     const afterBuiltin = getBuiltinModelSelection(after.execution)
     if (afterBuiltin) {
-      changes.push({ ...event(entry, 'settings_change', translate('ai.runtime.entry.modelChanged', {
+      changes.push({ ...auditEvent(entry, 'settings_change', translate('ai.runtime.entry.modelChanged', {
         model: formatModelLabel(afterBuiltin.modelName, afterBuiltin.variant),
       }), ''), id: `entry:${entry.entryId}:model` })
     }
   }
   if (before.environmentName !== after.environmentName) {
-    changes.push({ ...event(entry, 'settings_change', after.environmentName === null
+    changes.push({ ...auditEvent(entry, 'settings_change', after.environmentName === null
       ? translate('ai.runtime.entry.environmentDetached')
       : translate('ai.runtime.entry.environmentChanged', {
         environment: after.environmentName,
@@ -110,7 +111,7 @@ export function projectModelFallback(
   entry: HarnessSessionEntryDTO,
   settings: SettingsSnapshot,
   executedSelection: unknown,
-): EntryEventDialogueMessage | null {
+): EntryAuditMessage | null {
   const currentModel = getBuiltinModelSelection(settings.execution)
   const executedModel = getBuiltinModelSelection(executedSelection)
   if (currentModel == null || executedModel == null) {
@@ -123,7 +124,7 @@ export function projectModelFallback(
     return null
   }
   return {
-    ...event(entry, 'settings_change', translate('ai.runtime.entry.modelFallback', {
+    ...auditEvent(entry, 'settings_change', translate('ai.runtime.entry.modelFallback', {
       model: formatModelLabel(currentModel.modelName, currentModel.variant),
       fallback: formatModelLabel(executedModel.modelName, executedModel.variant),
     }), ''),
@@ -134,8 +135,8 @@ export function projectModelFallback(
 export function projectEmptyMessageEntry(
   entry: HarnessSessionEntryDTO,
   role: string,
-): EntryEventDialogueMessage {
-  return event(
+): EntryAuditMessage {
+  return auditEvent(
     entry,
     'empty_message',
     translate(role === 'ASSISTANT'
@@ -148,8 +149,8 @@ export function projectEmptyMessageEntry(
 export function projectUnsupportedMessageEntry(
   entry: HarnessSessionEntryDTO,
   role: string,
-): EntryEventDialogueMessage {
-  return event(
+): EntryAuditMessage {
+  return auditEvent(
     entry,
     'unsupported_message',
     translate('ai.runtime.entry.unsupportedTitle'),
@@ -159,8 +160,8 @@ export function projectUnsupportedMessageEntry(
   )
 }
 
-export function projectUnknownEntry(entry: HarnessSessionEntryDTO): EntryEventDialogueMessage {
-  return event(
+export function projectUnknownEntry(entry: HarnessSessionEntryDTO): EntryAuditMessage {
+  return auditEvent(
     entry,
     'unknown_entry',
     translate('ai.runtime.entry.unknownTitle', {
@@ -194,7 +195,7 @@ const FORK_TITLE_KEYS: Record<string, TranslationKey> = {
 export function projectForkEntry(
   entry: HarnessSessionEntryDTO,
   payload: unknown,
-): EntryEventDialogueMessage {
+): EntryForkMessage {
   const record = payload != null && typeof payload === 'object' && !Array.isArray(payload)
     ? payload as Record<string, unknown>
     : {}
@@ -207,12 +208,8 @@ export function projectForkEntry(
     : null
   const titleKey = FORK_TITLE_KEYS[mode] ?? 'ai.runtime.entry.forkTitle'
   return {
-    ...event(
-      entry,
-      'fork',
-      translate(titleKey),
-      FORK_NOTICE_TEXT,
-    ),
+    ...eventFields(entry, translate(titleKey), FORK_NOTICE_TEXT),
+    kind: 'fork',
     fork: { mode, sourceEntryId, sourceThreadId },
   }
 }
@@ -225,7 +222,7 @@ export function projectForkEntry(
 export function projectNotificationEntry(
   entry: HarnessSessionEntryDTO,
   payload: unknown,
-): EntryEventDialogueMessage {
+): EntryNotificationMessage {
   const record = payload != null && typeof payload === 'object' && !Array.isArray(payload)
     ? payload as Record<string, unknown>
     : {}
@@ -239,14 +236,14 @@ export function projectNotificationEntry(
     : ''
   const titleKey = NOTIFICATION_TITLE_KEYS[kind]
   return {
-    ...event(
+    ...eventFields(
       entry,
-      'notification',
       titleKey != null
         ? translate(titleKey)
         : translate('ai.runtime.notification.entry.unknownTitle'),
       text || translate('ai.runtime.notification.entry.emptyText'),
     ),
+    kind: 'notification',
     notification: { kind, sourceThreadId },
   }
 }
@@ -272,20 +269,28 @@ function messageContentsText(contents: unknown): string {
     .trim()
 }
 
-function event(
+/** 每条 Entry 事实共享的稳定身份与展示字段；具体 kind 与结构化事实由调用方补上。 */
+function eventFields(
   entry: HarnessSessionEntryDTO,
-  kind: EntryEventKind,
   title: string,
   text: string,
-): EntryEventDialogueMessage {
+): Omit<EntryAuditMessage, 'kind'> {
   return {
     id: `entry:${entry.entryId}`,
     role: 'entry',
-    kind,
     title,
     text,
     subjectEntryId: entry.entryId,
     createdAt: entry.createdAt,
     status: 'done',
   }
+}
+
+function auditEvent(
+  entry: HarnessSessionEntryDTO,
+  kind: EntryAuditMessage['kind'],
+  title: string,
+  text: string,
+): EntryAuditMessage {
+  return { ...eventFields(entry, title, text), kind }
 }

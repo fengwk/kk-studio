@@ -211,7 +211,7 @@ export interface EntryNotification {
  * FORK Entry 的来源事实：mode 为 BRANCH 或 SESSION，sourceEntryId 为切点 Entry，
  * sourceThreadId 仅在 SESSION fork 时非 null。
  */
-interface EntryFork {
+export interface EntryFork {
   mode: string
   sourceEntryId: string | null
   sourceThreadId: string | null
@@ -233,23 +233,46 @@ export interface CompactionCardFact {
   errorCode: string | null
 }
 
+interface EntryEventBase extends BaseDialogueMessage {
+  role: 'entry'
+  title: string
+  text: string
+}
+
+/** 只陈述自身事实的审计 Entry（会话起点、设置变更、未知/不支持内容等）。 */
+export interface EntryAuditMessage extends EntryEventBase {
+  kind: Exclude<EntryEventKind, 'notification' | 'fork' | 'compaction'>
+}
+
+/** NOTIFICATION Entry：kind 与来源保留原文，原始 payload 不再进入会话时间线。 */
+export interface EntryNotificationMessage extends EntryEventBase {
+  kind: 'notification'
+  notification: EntryNotification
+}
+
+/** FORK Entry：真实复制模式与来源切点。 */
+export interface EntryForkMessage extends EntryEventBase {
+  kind: 'fork'
+  fork: EntryFork
+}
+
+/** 压缩卡：回合事实由压缩回合投影始终填满。 */
+export interface EntryCompactionMessage extends EntryEventBase {
+  kind: 'compaction'
+  compaction: CompactionCardFact
+}
+
 /**
  * 持久 Entry 的独立投影，其语义并非对话回合。
  *
  * 让该形态独立于 Harness DTO，可被任何能提供稳定 timeline 契约的调用方复用 transcript。
+ * 三种携带结构化事实的 Entry 各自成一支，消费方按 kind 收窄后直接读取事实。
  */
-export interface EntryEventDialogueMessage extends BaseDialogueMessage {
-  role: 'entry'
-  kind: EntryEventKind
-  title: string
-  text: string
-  /** 仅 NOTIFICATION Entry 携带的 kind 与来源；原始 payload 不再进入会话时间线。 */
-  notification?: EntryNotification
-  /** 仅 FORK Entry 携带的真实来源事实。 */
-  fork?: EntryFork
-  /** 仅压缩卡携带的回合事实；缺失表示旧投影，按已压缩摘要渲染。 */
-  compaction?: CompactionCardFact
-}
+export type EntryEventDialogueMessage =
+  | EntryAuditMessage
+  | EntryNotificationMessage
+  | EntryForkMessage
+  | EntryCompactionMessage
 
 export type DialogueMessage =
   | TextDialogueMessage

@@ -495,7 +495,7 @@ export function useRootThreadControl({
   const hasRetryableCompaction = controller.timeline.messages.some((message) =>
     message.role === 'entry'
     && message.kind === 'compaction'
-    && (message.compaction?.state === 'failed' || message.compaction?.state === 'stopped'))
+    && (message.compaction.state === 'failed' || message.compaction.state === 'stopped'))
   // 失败/停止的压缩卡会显示“重新压缩”，与命令面板共用同一条可用性查询；没有卡片时不额外请求。
   const compaction = useCompactionAvailability({
     bound: isBoundTarget(target),

@@ -3,12 +3,16 @@ import { describe, expect, it, vi } from 'vitest'
 import { EntryMessageBlock } from '@/features/thread/runtime/thread-panel/messages/EntryMessageBlock'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
 import { EntryBranchContext } from '@/features/thread/runtime/thread-panel/entry-branch-context'
-import type { DialogueMessage, EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import type {
+  DialogueMessage,
+  EntryAuditMessage,
+  EntryForkMessage,
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
 function event(
-  kind: EntryEventDialogueMessage['kind'],
+  kind: EntryAuditMessage['kind'],
   title: string,
-): EntryEventDialogueMessage {
+): EntryAuditMessage {
   return {
     id: `entry-${kind}`,
     role: 'entry',
@@ -18,6 +22,24 @@ function event(
     subjectEntryId: `entry-${kind}`,
     createdAt: 1785232800000,
     status: 'done',
+  }
+}
+
+function forkEvent(
+  title: string,
+  fork: EntryForkMessage['fork'],
+  text: string,
+): EntryForkMessage {
+  return {
+    id: 'entry-fork',
+    role: 'entry',
+    kind: 'fork',
+    title,
+    text,
+    subjectEntryId: 'entry-fork',
+    createdAt: 1785232800000,
+    status: 'done',
+    fork,
   }
 }
 
@@ -97,11 +119,11 @@ describe('EntryMessageBlock', () => {
     const notice = 'This thread was forked. Earlier tool calls and background tasks will not resume or report here. Subagent thread IDs inherited from history are no longer valid.'
     const { container } = render(
       <EntryMessageBlock
-        message={{
-          ...event('fork', '已从历史切点复制为新会话'),
-          text: notice,
-          fork: { mode: 'SESSION', sourceEntryId: 'e-cut', sourceThreadId: 't-src' },
-        }}
+        message={forkEvent(
+          '已从历史切点复制为新会话',
+          { mode: 'SESSION', sourceEntryId: 'e-cut', sourceThreadId: 't-src' },
+          notice,
+        )}
       />,
     )
 

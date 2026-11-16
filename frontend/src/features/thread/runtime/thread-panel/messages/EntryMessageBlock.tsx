@@ -18,13 +18,13 @@ export function EntryMessageBlock({ message }: { message: EntryEventDialogueMess
     )
   }
   if (message.kind === 'compaction') {
-    return <CompactionEntryBlock message={message} />
+    return <CompactionEntryBlock message={message} fact={message.compaction} />
   }
   if (message.kind === 'notification') {
     return (
       <NotificationEntryBlock
         message={message}
-        notification={message.notification ?? { kind: '', sourceThreadId: null }}
+        notification={message.notification}
       />
     )
   }
@@ -33,7 +33,7 @@ export function EntryMessageBlock({ message }: { message: EntryEventDialogueMess
       <SystemMessageCard
         className="thread-notification thread-fork-entry"
         data-entry-kind="fork"
-        data-fork-mode={message.fork?.mode ?? ''}
+        data-fork-mode={message.fork.mode}
         title={message.title}
       >
         <div className="thread-notification-body thread-notification-text">

@@ -17,7 +17,15 @@ import {
   UNSAFE_COMPACTION_SUMMARY,
 } from '@/test-support/resources/compaction-summary'
 
-function compactionMessage(text: string, id = 'entry-comp1'): EntryEventDialogueMessage {
+function compactionFact(overrides: Partial<CompactionCardFact> = {}): CompactionCardFact {
+  return { state: 'compacted', childThreadId: null, cutEntryId: null, errorCode: null, ...overrides }
+}
+
+function compactionMessage(
+  text: string,
+  id = 'entry-comp1',
+  fact: CompactionCardFact = compactionFact(),
+): EntryEventDialogueMessage {
   return {
     id: `entry:${id}`,
     role: 'entry',
@@ -27,17 +35,15 @@ function compactionMessage(text: string, id = 'entry-comp1'): EntryEventDialogue
     subjectEntryId: id,
     createdAt: 1785232800000,
     status: 'done',
+    compaction: fact,
   }
 }
 
 function compactionCard(fact: CompactionCardFact, text = ''): EntryEventDialogueMessage {
   return {
-    ...compactionMessage(text),
-    id: 'entry:turn-start-1',
+    ...compactionMessage(text, 'turn-start-1', fact),
     title: 'ignored',
-    subjectEntryId: 'turn-start-1',
     createdAt: 1767225600000,
-    compaction: fact,
   }
 }
 
