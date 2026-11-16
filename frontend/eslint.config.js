@@ -13,9 +13,8 @@ const featureDependencies = {
     'thread/runtime/state/thread-notifications',
     'extensions/PluginsTab',
     'catalog/agent-capability-candidates',
-    'catalog/ai-draft-variant-options',
   ],
-  chat: ['thread/*', 'catalog', 'environment/ide/ide-panel-context', 'environment/environment-service'],
+  chat: ['thread/*', 'environment/ide/ide-panel-context', 'environment/environment-service'],
   thread: ['catalog', 'environment/ide/ide-panel-context'],
   catalog: ['environment/environment-service'],
 }
