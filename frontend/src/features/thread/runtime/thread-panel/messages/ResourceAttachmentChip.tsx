@@ -1,4 +1,5 @@
 import { useContext, useEffect, useState } from 'react'
+import { resourceAttachmentType } from '@/features/thread/runtime/thread-timeline/content-utils'
 import type { ToolAttachment } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { AttachmentMediaPreview } from '@/features/thread/runtime/thread-panel/messages/AttachmentMediaPreview'
 import {
@@ -49,10 +50,10 @@ export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachm
 
   const authoritativeMediaType = urls?.mediaType?.trim() || null
   const mediaType = authoritativeMediaType ?? attachment.mime
-  const type = attachmentType(
-    mediaType,
-    authoritativeMediaType == null ? attachment.type : 'file',
-  )
+  // 权威解析出的 MIME 决定展示形态；解析失败时保留投影阶段的类型。
+  const type = authoritativeMediaType == null
+    ? attachment.type
+    : resourceAttachmentType(authoritativeMediaType)
   const label =
     attachment.name
     || mediaType
@@ -96,17 +97,4 @@ export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachm
       {unavailable ? <span className="resource-attachment-failed">{t('ai.runtime.message.resourceUnavailable')}</span> : null}
     </span>
   )
-}
-
-function attachmentType(mediaType: string, fallback: ToolAttachment['type']): ToolAttachment['type'] {
-  if (mediaType.startsWith('image/')) {
-    return 'image'
-  }
-  if (mediaType.startsWith('audio/')) {
-    return 'audio'
-  }
-  if (mediaType.startsWith('video/')) {
-    return 'video'
-  }
-  return fallback
 }

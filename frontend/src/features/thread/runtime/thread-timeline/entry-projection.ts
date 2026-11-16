@@ -1,4 +1,8 @@
-import { asRecord, getRecordList } from '@/features/thread/runtime/thread-timeline/payload-json'
+import {
+  asRecord,
+  getRecordList,
+  integerValue,
+} from '@/features/thread/runtime/thread-timeline/payload-json'
 import { getString } from '@/shared/lib/value'
 import { parseCodecInstantMillis } from '@/shared/lib/date-format'
 import type {
@@ -235,10 +239,6 @@ function parseAttemptSnapshot(value: unknown): {
     return null
   }
   return { attempt, sequence: String(sequence), text, thinking }
-}
-
-function integerValue(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null
 }
 
 /** ASSISTANT_ERROR：有 attempt 快照时投影为可重试失败，否则是一条错误消息。 */

@@ -238,13 +238,9 @@ function applySettingCommand(base: BranchDraft, command: HarnessThreadCommandDTO
   }
 }
 
-/** 用于 command sequence 排序的十进制字符串比较。 */
+/** 用于 command sequence 排序的 canonical 十进制字符串比较。 */
 export function compareDecimalStrings(left: string, right: string): number {
-  try {
-    const l = BigInt(left)
-    const r = BigInt(right)
-    return l < r ? -1 : l > r ? 1 : 0
-  } catch {
-    return 0
-  }
+  const l = BigInt(left)
+  const r = BigInt(right)
+  return l < r ? -1 : l > r ? 1 : 0
 }

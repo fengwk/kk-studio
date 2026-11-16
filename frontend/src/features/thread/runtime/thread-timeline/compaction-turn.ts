@@ -2,7 +2,8 @@ import { asRecord } from '@/features/thread/runtime/thread-timeline/payload-json
 import type {
   CompactionCardFact,
   CompactionCardState,
-  EntryEventDialogueMessage,
+  EntryAuditMessage,
+  EntryCompactionMessage,
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { getString } from '@/shared/lib/value'
 import { translate, type TranslationKey } from '@/shared/i18n'
@@ -19,7 +20,7 @@ export interface CompactionTurnProjection {
   errorCode: string | null
   cutEntryId: string | null
   childThreadId: string | null
-  message: EntryEventDialogueMessage
+  message: EntryCompactionMessage
 }
 
 const COMPACTION_TITLE_KEYS: Record<CompactionCardState, TranslationKey> = {
@@ -185,7 +186,7 @@ export function latestRetainedAnchor(
 export function projectCompactionSeparator(
   cutEntryId: string,
   createdAt: number,
-): EntryEventDialogueMessage {
+): EntryAuditMessage {
   const label = translate('ai.runtime.entry.compactionSeparator')
   return {
     id: `compaction-separator:${cutEntryId}`,

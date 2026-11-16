@@ -16,6 +16,7 @@ import { useI18n } from '@/shared/i18n'
  *
  * 三种来源互斥且顺序固定：历史预览（只读、由事件列表按需读取）优先于 inspector
  * 选择，inspector 选择优先于事件详情；都没有时给出「未选择」占位。
+ * 只有 cache/request 两个 section 读取请求快照，Tool/Skill/Subagent 选择因此不等待它。
  */
 export function ThreadDebugDetailColumn({
   tabId,
@@ -64,7 +65,7 @@ export function ThreadDebugDetailColumn({
           closeButtonRef={closeButtonRef}
           autoFocusCloseButton={!wide}
         />
-      ) : selection && (debug || selection.type === 'preview') ? (
+      ) : selection && (!selectionNeedsDebug(selection) || debug != null) ? (
         <ThreadDebugInspector
           selection={selection}
           debug={debug}
@@ -96,4 +97,9 @@ export function ThreadDebugDetailColumn({
       )}
     </section>
   )
+}
+
+/** cache/request section 直接读取请求快照；其余 inspector 选择只读自身携带的事实。 */
+function selectionNeedsDebug(selection: DebugInspectorSelection): boolean {
+  return selection.type === 'cache' || selection.type === 'request'
 }

@@ -210,7 +210,5 @@ export function useThreadStopOperation({
     stopThread,
     stopPending: stopMutation.isPending,
     stopReplayPending,
-    pendingStopRef,
-    setStopReplayPending,
   }
 }

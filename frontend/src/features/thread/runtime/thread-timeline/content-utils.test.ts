@@ -83,7 +83,8 @@ describe('toResourceAttachment', () => {
         name: '',
       }),
     ).toEqual([])
-    expect(toResourceAttachment({ type: 'RESOURCE', name: 'missing-blob' })).toEqual([])
+    // Content type 由 codec 写为小写 `resource`；大写变体不是合法投影，按未知类型丢弃。
+    expect(toResourceAttachment({ type: 'RESOURCE', blobId: 'blob-1', name: 'x.png' })).toEqual([])
     expect(toResourceAttachment({ type: 'unknown', uri: 'https://example.test/x' })).toEqual([])
     expect(toResourceAttachment({ type: 'resource', uri: '' })).toEqual([])
   })

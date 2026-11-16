@@ -1,4 +1,8 @@
-import { asRecord, getRecordList } from '@/features/thread/runtime/thread-timeline/payload-json'
+import {
+  asRecord,
+  getRecordList,
+  integerValue,
+} from '@/features/thread/runtime/thread-timeline/payload-json'
 import { getString } from '@/shared/lib/value'
 import type {
   DialogueContent,
@@ -232,6 +236,3 @@ function toolCallKey(toolCallId: string): string {
   return toolCallId ? `call:${toolCallId}` : ''
 }
 
-function integerValue(value: unknown): number | null {
-  return typeof value === 'number' && Number.isSafeInteger(value) ? value : null
-}

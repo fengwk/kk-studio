@@ -193,14 +193,18 @@ export function useHarnessThreadRealtime(
   })
 
   const visibleModelStream = modelStream?.threadId === threadId ? modelStream : null
-  const visibleToolStreams =
-    toolStreams.size > 0
+  // toolStreams 可能仍持有上一个 Thread 的条目；过滤结果按输入身份缓存，使
+  // 未变化时下游 timeline/events 的 useMemo 与 effect 保持稳定引用。
+  const visibleToolStreams = useMemo(
+    () => (toolStreams.size > 0
       ? new Map(
           [...toolStreams.entries()].filter(
             ([, stream]) => stream.threadId === threadId,
           ),
         )
-      : toolStreams
+      : toolStreams),
+    [threadId, toolStreams],
+  )
   return {
     modelStream: visibleModelStream,
     toolStreams: visibleToolStreams,

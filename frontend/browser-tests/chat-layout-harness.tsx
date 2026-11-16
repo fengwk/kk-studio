@@ -20,7 +20,7 @@ import { MessageList } from '@/features/thread/runtime/thread-panel/messages/Mes
 import { EntryBranchContext } from '@/features/thread/runtime/thread-panel/entry-branch-context'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline-builder'
 import { Button } from '@/shared/ui/controls/Button'
-import { formatTurnUsageText } from '@/features/thread/runtime/thread-timeline/content-utils'
+import { formatTurnUsageText } from '@/features/thread/runtime/thread-timeline/turn-usage-format'
 import type {
   MetaDialogueMessage,
   TextDialogueMessage,

@@ -1616,6 +1616,37 @@ describe('useHarnessThreadRealtime', () => {
     expect(result.current.toolStreams.get('inv-tool-1')?.text).toBe('tool partial data')
   })
 
+  it('keeps the published tool stream map reference while overlays are unchanged', () => {
+    // 下游 timeline/events 的 useMemo 与 selected 跟随 effect 依赖这个 Map：
+    // 无关重渲染不得换引用，真实 partial 则必须产生新 Map 并更新内容。
+    const raf = vi.fn((_cb: FrameRequestCallback) => 106)
+    const caf = vi.fn()
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const toolInv = toolInvocation({ toolName: 'testTool', rendererKey: 'testTool' })
+    const props = { activeAssistantOutput: activeAssistantOutput(), invocations: [toolInv] }
+    const { result, rerender, sockets } = renderRealtime(client, {
+      ...props,
+      schedulerOptions: { raf, caf },
+    })
+    sockets.openLatest()
+
+    // 未到帧的 partial 由 snapshot 对账立即发布。
+    emitRealtime(sockets, toolPartial('first chunk', 'inv-tool-1', 1))
+    rerender({ ...props, invocations: [toolInv] })
+    const published = result.current.toolStreams
+    expect(published.get('inv-tool-1')?.text).toBe('first chunk')
+
+    rerender({ ...props, invocations: [toolInv] })
+    expect(result.current.toolStreams).toBe(published)
+
+    emitRealtime(sockets, toolPartial('second chunk', 'inv-tool-1', 1))
+    rerender({ ...props, invocations: [toolInv] })
+    expect(result.current.toolStreams).not.toBe(published)
+    expect(result.current.toolStreams.get('inv-tool-1')?.text).toBe('first chunksecond chunk')
+    // 已发布的旧 Map 不被原地修改。
+    expect(published.get('inv-tool-1')?.text).toBe('first chunk')
+  })
+
   it('cancels pending frame on thread change and unmount so future frame cannot resurrect state', () => {
     const raf = vi.fn((_cb: FrameRequestCallback) => 105)
     const caf = vi.fn()

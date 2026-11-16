@@ -31,6 +31,7 @@ import {
 import {
   createAttachmentPart,
   createTextPart,
+  partsToMessageContents,
   slashQueryOf,
   type ComposerPart,
 } from '@/features/thread/composer/composer-parts'
@@ -42,7 +43,7 @@ import {
 } from '@/features/thread/runtime/thread-panel/thread-commands'
 import { firstEnabledCommandIndex } from '@/features/thread/runtime/thread-panel/thread-command-navigation'
 import { storeUnknownUploads } from '@/features/thread/composer/composer-draft'
-import { partsToMessageContents, type StorageService } from '@/features/thread/composer'
+import type { StorageService } from '@/features/thread/composer'
 import { ThreadCommandPalette } from '@/features/thread/runtime/thread-panel/ThreadCommandPalette'
 import { ThreadWidgetStack } from '@/features/thread/runtime/thread-panel/ThreadWidgetStack'
 import type { ThreadComposerSettingsInput } from '@/features/thread/runtime/thread-panel/ThreadComposerControls'

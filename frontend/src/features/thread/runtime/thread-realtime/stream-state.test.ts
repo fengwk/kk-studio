@@ -15,13 +15,15 @@ import {
 import {
   boundProcessOutputText,
   isProcessOutputPartial,
-  isRealtimeToolStreamActive,
   parseProcessOutputDetails,
-  parseRealtimeToolPartial,
-  parseToolErrorText,
   PROCESS_OUTPUT_MAX_CHARS,
   PROCESS_OUTPUT_MAX_LINES,
   PROCESS_OUTPUT_OMISSION_MARKER,
+} from '@/features/thread/runtime/thread-realtime/process-output-stream'
+import {
+  isRealtimeToolStreamActive,
+  parseRealtimeToolPartial,
+  parseToolErrorText,
   reduceRealtimeToolStream,
   snapshotToolStream,
 } from '@/features/thread/runtime/thread-realtime/tool-stream'

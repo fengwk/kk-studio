@@ -7,7 +7,11 @@ import {
   compactionRetryDisabledReasonKey,
   useCompactionActions,
 } from '@/features/thread/runtime/thread-panel/compaction-actions-context'
-import type { CompactionCardState, EntryEventDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import type {
+  CompactionCardFact,
+  CompactionCardState,
+  EntryEventDialogueMessage,
+} from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import {
   compactionCardTitleKey,
   compactionFailureReasonKey,
@@ -27,19 +31,24 @@ const CARD_TONES = {
  * 一句结果说明。带分支 Thread id 的卡片提供“查看执行”，失败与停止卡片在主对话内
  * 提供与命令面板同源可用性的“重新压缩”。
  */
-export function CompactionEntryBlock({ message }: { message: EntryEventDialogueMessage }) {
+export function CompactionEntryBlock({
+  message,
+  fact,
+}: {
+  message: EntryEventDialogueMessage
+  fact: CompactionCardFact
+}) {
   const { t } = useI18n()
   const actions = useCompactionActions()
-  const fact = message.compaction
-  const state: CompactionCardState = fact?.state ?? 'compacted'
+  const state: CompactionCardState = fact.state
   const titleText = t(compactionCardTitleKey(state))
   const noteKey = state === 'failed'
-    ? compactionFailureReasonKey(fact?.errorCode ?? null)
+    ? compactionFailureReasonKey(fact.errorCode)
     : state === 'stopped'
       ? 'ai.runtime.entry.compactionStoppedHint'
       : state === 'running' ? 'ai.runtime.entry.compactionRunningHint' : null
-  const childThreadId = fact?.childThreadId ?? null
-  const cutEntryId = fact?.cutEntryId ?? null
+  const childThreadId = fact.childThreadId
+  const cutEntryId = fact.cutEntryId
   const showRetry = actions != null && (state === 'failed' || state === 'stopped')
   const retryDisabledReason = actions != null && showRetry
     ? compactionRetryDisabledReasonKey(actions)

@@ -2,6 +2,7 @@ import type { RealtimeFrameScheduler } from '@/features/thread/runtime/thread-re
 import {
   isRealtimeModelDeltaGap,
   mergeRealtimeModelStreamAfterCheckpoint,
+  mergeSnapshotToolCalls,
   parseRealtimeModelCheckpoint,
   parseRealtimeModelDelta,
   reduceRealtimeModelStream,
@@ -10,13 +11,13 @@ import {
   type RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'
 import {
-  isProcessOutputPartial,
   isRealtimeToolStreamActive,
   parseRealtimeToolPartial,
   reduceRealtimeToolStream,
   snapshotToolStream,
   type RealtimeToolStream,
 } from '@/features/thread/runtime/thread-realtime/tool-stream'
+import { isProcessOutputPartial } from '@/features/thread/runtime/thread-realtime/process-output-stream'
 import {
   TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT,
   bufferModelDelta,
@@ -27,7 +28,6 @@ import {
   type ModelRecovery,
 } from '@/features/thread/runtime/thread-realtime/model-recovery'
 import {
-  mergeSnapshotToolCalls,
   sameModelStreamNullable,
   sameToolStreamMap,
 } from '@/features/thread/runtime/thread-realtime/stream-equality'
@@ -47,6 +47,14 @@ export interface RealtimeStreamContext {
   threadId: string
   scheduler: RealtimeFrameScheduler
   modelStreamRef: Ref<RealtimeModelStream | null>
+  /**
+   * 已发布的 tool overlay 快照，按 ToolInvocation id 索引。
+   *
+   * 不变量：这个 Map 是不可变快照——每次变化都替换为新的 Map，绝不原地 set/delete。
+   * 对账用 sameToolStreamMap 判断是否需要发布，而 ref 与已发布 state 在发布后指向同一个
+   * Map：同一对象与自身比较必然相等，原地修改会让变更被判为“未变化”而抑制发布，
+   * 下游 timeline/events 的 useMemo 也会因引用不变而跳过重算。
+   */
   toolStreamsRef: Ref<Map<string, RealtimeToolStream>>
   snapshotModelStreamRef: Ref<RealtimeModelStream | null>
   activeOutputRef: Ref<HarnessActiveAssistantOutputDTO | null>
@@ -467,12 +475,16 @@ function handleToolPartial(ctx: RealtimeStreamContext, data: unknown): void {
     }
     seenEventIds.add(partial.eventId)
   }
+  // 不变量：toolStreamsRef 里的 Map 是不可变快照，聚合永远产生新 Map。
+  // ref 与已发布 state 在发布后指向同一个 Map，而 sameToolStreamMap 比较（含同一对象与
+  // 自身的比较）无法察觉原地修改——原地 set 会把变更当成“未变化”，不再发布新 state。
   const streams = toolStreamsRef.current
   const current = streams.get(partial.invocationId) ?? null
   const next = reduceRealtimeToolStream(current, partial)
   if (next !== current) {
-    streams.set(partial.invocationId, next)
-    toolStreamsRef.current = streams
+    const updated = new Map(streams)
+    updated.set(partial.invocationId, next)
+    toolStreamsRef.current = updated
     scheduler.notifyToolDirty()
   }
 }

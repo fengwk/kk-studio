@@ -84,7 +84,7 @@ function stringifyJsonContent(value: unknown): string {
 export function toResourceAttachment(content: Record<string, unknown>): ToolAttachment[] {
   const type = getString(content.type)
   const blobId = getString(content.blobId)
-  if ((type === 'resource' || type === 'RESOURCE') && blobId.trim()) {
+  if (type === 'resource' && blobId.trim()) {
     const name = getString(content.name)
     if (!name.trim()) {
       return []
@@ -173,12 +173,3 @@ export function formatCompactTokens(count: number): string {
   }
   return `${(count / 1_000_000).toFixed(1)}M`
 }
-
-// 冻结契约：thread-panel 与 browser-tests 按本模块路径引用这些用量投影，实现见
-// turn-usage-format / usage-cost，新增调用方请直接引用实现模块。
-export {
-  calculateCacheHitRate,
-  calculateDecodeTokensPerSecond,
-  formatTurnUsageText,
-} from '@/features/thread/runtime/thread-timeline/turn-usage-format'
-export { formatUsageCost } from '@/features/thread/runtime/thread-timeline/usage-cost'

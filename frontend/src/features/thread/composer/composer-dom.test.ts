@@ -6,14 +6,13 @@ import {
   findAdjacentPill,
   insertPillsAtCaret,
   insertTextAtCaret,
-  isCaretSlot,
-  isPillElement,
   normalizeEditorDom,
   placeCaretAtEnd,
   renderPartsToEditor,
   selectionTouchesCaretSlot,
   serializeSelectionText,
 } from '@/features/thread/composer/composer-dom'
+import { isCaretSlot, isPillElement } from '@/features/thread/composer/caret-slots'
 import {
   createAttachmentPart,
   createResourcePart,

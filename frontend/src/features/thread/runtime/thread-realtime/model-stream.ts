@@ -236,7 +236,11 @@ export function reduceRealtimeModelStream(
   }
 }
 
-function mergeSnapshotToolCalls(
+/**
+ * HTTP snapshot 不携带流式 tool-call 片段：同一 attempt 已聚合的 draft 必须保留，
+ * 否则每次快照对账都会清空仍在流式输出的工具调用参数。
+ */
+export function mergeSnapshotToolCalls(
   snapshot: RealtimeModelStream,
   current: RealtimeModelStream | null,
 ): RealtimeModelStream {
