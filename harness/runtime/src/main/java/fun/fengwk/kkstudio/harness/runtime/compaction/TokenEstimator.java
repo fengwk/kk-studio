@@ -61,7 +61,7 @@ public final class TokenEstimator {
   }
 
   /** 以最新 complete 压缩 projection 估算当前 provider 上下文 token（wrapper summary + cut 后保留段）。 */
-  public static long estimateProjectionTokens(EntryPath path) {
+  private static long estimateProjectionTokens(EntryPath path) {
     Objects.requireNonNull(path, "path");
     List<Entry> entries = path.entries();
     boolean[] visible = visibilityMask(entries);
@@ -131,7 +131,7 @@ public final class TokenEstimator {
   }
 
   /** 对话消息（USER/ASSISTANT/TOOL 的 MESSAGE、CUSTOM_MESSAGE、NOTIFICATION、AssistantAborted）——摘要范围在此停止。 */
-  public static boolean isConversationMessage(Entry entry) {
+  private static boolean isConversationMessage(Entry entry) {
     return entry.payload() instanceof MessagePayload
         || entry.payload() instanceof CustomMessagePayload
         || entry.payload() instanceof NotificationPayload

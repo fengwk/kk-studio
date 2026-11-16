@@ -90,7 +90,7 @@ import java.util.function.Function;
 public final class HarnessRuntimeTestSupport {
 
   static final CompactionConfigProvider DEFAULT_COMPACTION_PROVIDER =
-      () -> CompactionConfig.DEFAULT;
+      () -> new CompactionConfig(20_000);
 
   static final UUID OWNER_THREAD_ID = new UUID(0L, 1L);
   static final Instant T0 = Instant.ofEpochMilli(1_000);

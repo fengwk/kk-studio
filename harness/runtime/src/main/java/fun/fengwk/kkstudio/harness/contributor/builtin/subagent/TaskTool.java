@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.harness.contributor.builtin.subagent;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.id.Uuids;
@@ -62,10 +61,6 @@ public final class TaskTool implements Tool {
 
   private final SubagentRunner runner;
   private final ObjectMapper objectMapper;
-
-  public TaskTool(SubagentRunner runner) {
-    this(runner, JsonMapper.builder().build());
-  }
 
   public TaskTool(SubagentRunner runner, ObjectMapper objectMapper) {
     this.runner = Objects.requireNonNull(runner, "runner");

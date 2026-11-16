@@ -109,7 +109,7 @@ class PostgresqlJoinQuiescenceConcurrencyTest {
         new HarnessRuntime(
             store,
             builtinRegistry(store, (threadId, rootSessionId, path, preparation) -> null),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
   }
 
   private record Tree(

@@ -65,7 +65,7 @@ class PostgresqlForkContractTest {
         new HarnessRuntime(
             store,
             builtinRegistry(store, (threadId, rootSessionId, path, preparation) -> null),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
   }
 
   /** 会话 fork：ROOT + FORK 往返保真，branch settings 从来源切点推导，且 initial creation replay 幂等。 */

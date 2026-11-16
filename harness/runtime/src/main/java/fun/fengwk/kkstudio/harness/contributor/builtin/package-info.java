@@ -1,9 +1,10 @@
 /**
  * 第一方内置功能包 Contributor 及内置工具定义。
  *
- * <p>本模块承载唯一的 {@link BuiltinHarnessContributor} 贡献者入口，集中注册系统 内置的 11 个统一工具（统一 {@code read}、8 个
- * Environment capability 工具、1 个内部工具 {@code task}、1 个人工输入工具 {@code ask_user}）。 其中 5 个文件工具声明 ROUTED
- * 环境关系，{@code bash} 与 3 个 LSP 工具声明 REQUIRED 环境关系，{@code task} 与 {@code ask_user} 声明 NONE。
+ * <p>本模块承载唯一的 {@link BuiltinHarnessContributor} 贡献者入口，集中注册系统内置的 13 个统一工具（5 个文件工具、1 个 {@code bash}、3
+ * 个 LSP 工具、内部工具 {@code task} 与 {@code load_skill}、人工输入工具 {@code ask_user}、上下文整理工具 {@code
+ * compact}）。其中 5 个文件工具声明 ROUTED 环境关系，{@code bash} 与 3 个 LSP 工具声明 REQUIRED 环境关系，{@code task}、{@code
+ * ask_user} 与 {@code compact} 声明 NONE。
  *
  * <p>依赖与边界：
  *
@@ -16,6 +17,7 @@
  * </ul>
  *
  * <p>关键不变量：每个内置工具的模型可见 name（{@code read}/{@code write}/{@code edit}/{@code bash}/{@code
- * grep}/{@code find}/{@code lsp_*}/{@code task}/{@code ask_user}）是全局唯一产品身份，并在系统 启动时一次性装配冻结。
+ * grep}/{@code find}/{@code lsp_*}/{@code task}/{@code load_skill}/{@code ask_user}/{@code
+ * compact}）是全局唯一产品身份，并在系统启动时一次性装配冻结。
  */
 package fun.fengwk.kkstudio.harness.contributor.builtin;

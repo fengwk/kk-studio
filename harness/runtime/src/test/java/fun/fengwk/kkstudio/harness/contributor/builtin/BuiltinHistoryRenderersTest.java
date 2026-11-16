@@ -6,6 +6,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderRequest;
@@ -105,7 +106,7 @@ class BuiltinHistoryRenderersTest {
             mock(ResourceReadGateway.class));
 
     // 构造 3: TaskTool（依赖轻量接口，使用 mock 构造）
-    Tool taskTool = new TaskTool(mock(SubagentRunner.class));
+    Tool taskTool = new TaskTool(mock(SubagentRunner.class), JsonMapper.builder().build());
 
     List<Tool> tools = List.of(envTool, readTool, taskTool);
 

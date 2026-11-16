@@ -405,7 +405,7 @@ class HarnessRuntimeManualCompactionTest {
         new HarnessRuntime(
             runtimeStore,
             new DriverRegistry(List.of(new FakeAgentDriver(resolver::resolve))),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
     return new Fixture(store, resolver, runtime);
   }
 

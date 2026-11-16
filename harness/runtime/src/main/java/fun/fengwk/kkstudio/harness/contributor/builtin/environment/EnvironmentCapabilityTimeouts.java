@@ -18,7 +18,7 @@ import java.util.Objects;
 final class EnvironmentCapabilityTimeouts {
 
   /** Environment capability arguments 中的显式超时字段；它是该调用唯一被识别的显式超时来源。 */
-  static final String TIMEOUT_SECONDS_ARGUMENT = "timeout_seconds";
+  private static final String TIMEOUT_SECONDS_ARGUMENT = "timeout_seconds";
 
   private EnvironmentCapabilityTimeouts() {}
 

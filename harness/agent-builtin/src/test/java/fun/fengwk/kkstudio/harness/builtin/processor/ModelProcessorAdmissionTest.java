@@ -198,7 +198,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
                       HarnessRuntimeTestSupport.driver(
                           fixture.store, (threadId, rootSessionId, path, preparation) -> null))),
               new ThreadProcessorConfig(
-                  () -> Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
+                  () -> Duration.ofSeconds(1), () -> new CompactionConfig(20_000)));
       assertEquals(
           ThreadProcessResult.COMPLETED,
           threadProcessor.process(
@@ -306,7 +306,7 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
                     HarnessRuntimeTestSupport.driver(
                         fixture.store,
                         (threadId, rootSessionId, candidatePath, preparation) -> null))),
-            () -> CompactionConfig.DEFAULT,
+            () -> new CompactionConfig(20_000),
             processor::cancel,
             mock(ToolProcessor.class)::cancel);
 

@@ -445,7 +445,8 @@ class HarnessWorkDispatcherHandoffTest {
                 (threadId, rootSessionId, path, preparation) -> {
                   throw new AssertionError("resolver must not be called for a quiescent thread");
                 }),
-            new ThreadProcessorConfig(() -> Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
+            new ThreadProcessorConfig(
+                () -> Duration.ofSeconds(1), () -> new CompactionConfig(20_000)));
     ModelProcessor modelProcessor =
         new ModelProcessor(
             store,

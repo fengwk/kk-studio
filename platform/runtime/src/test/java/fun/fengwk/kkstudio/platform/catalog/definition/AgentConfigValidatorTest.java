@@ -261,7 +261,7 @@ class AgentConfigValidatorTest {
       when(dummyTask.descriptor()).thenReturn(hostDescriptor("task"));
       when(dummyTask.requirements()).thenReturn(ToolRequirements.none());
       contributors.add(
-          new BuiltinHarnessContributor(BuiltinFileToolsTestSupport.fileTools(), dummyTask));
+          new BuiltinHarnessContributor(BuiltinFileToolsTestSupport.fileTools(), dummyTask, null));
 
       if (!tools.isEmpty()) {
         contributors.add(

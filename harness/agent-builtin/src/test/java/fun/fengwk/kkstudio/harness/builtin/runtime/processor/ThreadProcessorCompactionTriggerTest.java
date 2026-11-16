@@ -14,6 +14,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -171,6 +172,26 @@ class ThreadProcessorCompactionTriggerTest extends ThreadProcessorTestBase {
             AssistantErrorPayload.class, path.entries().get(path.entries().size() - 2).payload());
     assertEquals("CONTEXT_LIMIT", error.error().code());
     assertTrue(inTx(fixture, tx -> tx.threads().listChildren(threadId).isEmpty()).booleanValue());
+  }
+
+  /** 压缩 turn 本身要求再次压缩是 Driver 契约违背：立即失败，绝不在同一路径上无限重规划。 */
+  @Test
+  void compactionTurnRequestingAnotherCompactionFailsFast() {
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline =
+        seedCompactionReadyClosedTurn(fixture.store, overThresholdUsage());
+    UUID threadId = baseline.threadId();
+    seedCommand(
+        fixture.store, threadId, new UserMessageCommandPayload(userMessage("queued input")));
+    requestThreadWork(fixture.store, threadId);
+    // 第一次预算不足触发压缩；压缩 turn 自己再要求压缩必须被 Runtime 拒绝。
+    fixture.resolver.results.add(new TurnResolver.CompactionRequired(CONTEXT_WINDOW));
+    fixture.resolver.results.add(new TurnResolver.CompactionRequired(CONTEXT_WINDOW));
+
+    IllegalStateException error =
+        assertThrows(IllegalStateException.class, () -> fixture.nextClaim(threadId));
+
+    assertTrue(error.getMessage().contains("COMPACTION turn"), error.getMessage());
   }
 
   /** 追加一个以 compact 成功回执结束、仍要求续作的普通 INPUT 回合。 */

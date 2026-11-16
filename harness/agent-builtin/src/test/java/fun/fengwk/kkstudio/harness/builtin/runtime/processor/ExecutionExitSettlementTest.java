@@ -252,7 +252,7 @@ class ExecutionExitSettlementTest {
                         HarnessRuntimeTestSupport.driver(
                             fixture.store,
                             (threadId, rootSessionId, candidatePath, preparation) -> null))),
-                () -> CompactionConfig.DEFAULT,
+                () -> new CompactionConfig(20_000),
                 ignored -> {},
                 processor::cancel);
         UUID leafId = fixture.baseline.threadId();
@@ -405,7 +405,7 @@ class ExecutionExitSettlementTest {
             List.of(
                 HarnessRuntimeTestSupport.driver(
                     fixture.store, (threadId, rootSessionId, path, preparation) -> null))),
-        () -> CompactionConfig.DEFAULT,
+        () -> new CompactionConfig(20_000),
         ignored -> {},
         fixture.processor::cancel);
   }
@@ -465,7 +465,8 @@ class ExecutionExitSettlementTest {
                 List.of(
                     HarnessRuntimeTestSupport.driver(
                         fixture.store, (threadId1, rootSessionId, path, preparation) -> null))),
-            new ThreadProcessorConfig(() -> Duration.ofSeconds(1), () -> CompactionConfig.DEFAULT));
+            new ThreadProcessorConfig(
+                () -> Duration.ofSeconds(1), () -> new CompactionConfig(20_000)));
     ClaimedWork claim = ThreadProcessorTestSupport.claimThreadWork(fixture.store, threadId, NOW);
     assertEquals(ThreadProcessResult.COMPLETED, processor.process(claim));
   }

@@ -243,7 +243,11 @@ class HarnessRuntimeStopLocalCancellationTest {
     // 两个兄弟工具均被取消并物化；本地取消回调按调用顺序执行。
     assertEquals(ids, cancelledTools);
     for (UUID toolId : ids) {
-      var outcome = new ToolOutcomeQuery(store).find(baseline.threadId(), toolId);
+      var outcome =
+          store.transaction(
+              tx ->
+                  ToolOutcomeQuery.find(
+                      tx, tx.threads().find(baseline.threadId()).orElseThrow(), toolId));
       assertTrue(outcome.isPresent());
       assertEquals(ToolResultStatus.CANCELLED, outcome.get().status());
     }

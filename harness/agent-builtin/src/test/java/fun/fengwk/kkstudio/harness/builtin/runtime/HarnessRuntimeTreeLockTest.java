@@ -603,7 +603,7 @@ class HarnessRuntimeTreeLockTest {
           return new TurnResolver.Resolved(
               HarnessRuntimeTestSupport.modelRequest(), 100_000, 16_384);
         };
-    CompactionConfigProvider provider = () -> CompactionConfig.DEFAULT;
+    CompactionConfigProvider provider = () -> new CompactionConfig(20_000);
     return new Fixture(store, clock, resolver, provider);
   }
 

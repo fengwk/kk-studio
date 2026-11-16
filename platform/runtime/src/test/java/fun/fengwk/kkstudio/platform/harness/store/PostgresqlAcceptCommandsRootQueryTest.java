@@ -60,7 +60,7 @@ class PostgresqlAcceptCommandsRootQueryTest {
         new HarnessRuntime(
             store,
             builtinRegistry(store, (threadId, rootSessionId, path, prep) -> null),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
   }
 
   /** 测试意图：具有非 ROOT head 的 Thread 接受全新 batch 或 exact ordered replay 时只查询 ROOT，不回溯完整 EntryPath。 */

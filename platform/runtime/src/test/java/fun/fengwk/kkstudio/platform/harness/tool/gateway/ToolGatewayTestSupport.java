@@ -111,7 +111,7 @@ final class ToolGatewayTestSupport {
   }
 
   static BuiltinHarnessContributor builtinContributor() {
-    return new BuiltinHarnessContributor(dummyFileTools(), dummyTaskTool());
+    return new BuiltinHarnessContributor(dummyFileTools(), dummyTaskTool(), null);
   }
 
   static HarnessCatalog defaultCatalog(Tool... tools) {

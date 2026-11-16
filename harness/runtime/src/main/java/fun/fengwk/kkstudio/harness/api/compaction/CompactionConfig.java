@@ -3,7 +3,7 @@ package fun.fengwk.kkstudio.harness.api.compaction;
 /**
  * 自动对话压缩的部署级配置。
  *
- * <p>{@code keepRecentTokens} 是压缩后保留最近上下文的 token 上限（默认 20_000）。
+ * <p>{@code keepRecentTokens} 是压缩后保留最近上下文的 token 上限。
  *
  * <ul>
  *   <li>{@code effectiveKeep = min(keepRecentTokens, C / 2)}——C 为本次请求的对话模型 contextWindow。
@@ -12,8 +12,6 @@ package fun.fengwk.kkstudio.harness.api.compaction;
  * </ul>
  */
 public record CompactionConfig(int keepRecentTokens) {
-
-  public static final CompactionConfig DEFAULT = new CompactionConfig(20_000);
 
   /** effectiveReserve 的上限常量。 */
   public static final long EFFECTIVE_RESERVE_CAP = 16_384L;

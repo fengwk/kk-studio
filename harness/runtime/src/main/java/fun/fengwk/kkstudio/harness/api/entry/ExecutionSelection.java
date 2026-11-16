@@ -32,11 +32,6 @@ public record ExecutionSelection(String driver, String settingsJson) {
     settingsJson = normalizeSettingsJson(settingsJson, "settingsJson");
   }
 
-  /** settingsJson 的简写别名。 */
-  public String settings() {
-    return settingsJson;
-  }
-
   private static String requireCanonicalDriver(String value, String field) {
     Objects.requireNonNull(value, field);
     if (!DRIVER_PATTERN.matcher(value).matches()) {

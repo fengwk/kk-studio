@@ -1180,8 +1180,12 @@ class ToolProcessorExecutionTest {
 
     // ToolOutcomeQuery.find 读到该终态
     var outcome =
-        new ToolOutcomeQuery(fixture.store)
-            .find(fixture.baseline.threadId(), fixture.toolInvocationId);
+        fixture.store.transaction(
+            tx ->
+                ToolOutcomeQuery.find(
+                    tx,
+                    tx.threads().find(fixture.baseline.threadId()).orElseThrow(),
+                    fixture.toolInvocationId));
     assertTrue(outcome.isPresent());
     assertEquals(ToolResultStatus.SUCCEEDED, outcome.get().status());
   }

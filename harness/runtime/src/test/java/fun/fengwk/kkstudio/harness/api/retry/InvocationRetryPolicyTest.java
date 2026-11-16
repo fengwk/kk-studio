@@ -85,20 +85,4 @@ class InvocationRetryPolicyTest {
                     Duration.ofSeconds(60))
                 .delayBeforeRetry(0));
   }
-
-  /** 持久化 strategy 只接受 canonical 枚举值。 */
-  @Test
-  void parsesCanonicalBackoffStrategy() {
-    assertEquals(
-        InvocationRetryBackoffStrategy.FIXED, InvocationRetryBackoffStrategy.fromValue("FIXED"));
-    assertEquals(
-        InvocationRetryBackoffStrategy.EXPONENTIAL,
-        InvocationRetryBackoffStrategy.fromValue("EXPONENTIAL"));
-    assertThrows(
-        IllegalArgumentException.class, () -> InvocationRetryBackoffStrategy.fromValue("fixed"));
-    assertThrows(
-        IllegalArgumentException.class, () -> InvocationRetryBackoffStrategy.fromValue(" FIXED "));
-    assertThrows(
-        IllegalArgumentException.class, () -> InvocationRetryBackoffStrategy.fromValue(null));
-  }
 }

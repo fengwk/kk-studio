@@ -11,7 +11,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -41,13 +40,13 @@ public final class EnvironmentCapabilityCatalog {
     return DESCRIPTORS;
   }
 
-  public static Optional<EnvironmentCapabilityDescriptor> find(EnvironmentCapabilityId id) {
-    return Optional.ofNullable(BY_ID.get(Objects.requireNonNull(id, "id")));
-  }
-
+  /** 按 id 取唯一的 capability descriptor；未知 id 立即拒绝。 */
   public static EnvironmentCapabilityDescriptor require(EnvironmentCapabilityId id) {
-    return find(id)
-        .orElseThrow(() -> new IllegalArgumentException("unknown Environment capability: " + id));
+    EnvironmentCapabilityDescriptor descriptor = BY_ID.get(Objects.requireNonNull(id, "id"));
+    if (descriptor == null) {
+      throw new IllegalArgumentException("unknown Environment capability: " + id);
+    }
+    return descriptor;
   }
 
   private static List<EnvironmentCapabilityDescriptor> createDescriptors() {

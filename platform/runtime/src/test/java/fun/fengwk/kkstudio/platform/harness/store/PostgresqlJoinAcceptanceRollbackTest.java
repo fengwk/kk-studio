@@ -96,7 +96,7 @@ class PostgresqlJoinAcceptanceRollbackTest {
         new HarnessRuntime(
             store,
             builtinRegistry(store, (threadId, rootSessionId, path, prep) -> null),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
     jdbcTemplate = new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource());
   }
 
