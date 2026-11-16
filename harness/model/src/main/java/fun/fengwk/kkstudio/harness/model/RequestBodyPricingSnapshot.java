@@ -42,9 +42,4 @@ public record RequestBodyPricingSnapshot(Map<String, Boolean> matches) {
     }
     matches = Collections.unmodifiableMap(sorted);
   }
-
-  /** 未记录任何条件结果；仍需与「没有快照」区分时由调用方保留 null。 */
-  public boolean isEmpty() {
-    return matches.isEmpty();
-  }
 }

@@ -106,18 +106,6 @@ public record ModelCost(
     return new ModelCost(USD, input, output, cacheRead, cacheWrite, reasoning, total);
   }
 
-  /** 已知的完整零费用；不用于表示缺价或缺少计价事实。 */
-  public static ModelCost zero() {
-    return new ModelCost(
-        USD,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO,
-        BigDecimal.ZERO);
-  }
-
   private static BigDecimal cacheWriteCost(
       ModelPricingResolver.ResolvedRates rates, ModelUsage usage) {
     BigDecimal total = BigDecimal.ZERO;

@@ -64,12 +64,16 @@ class ModelRequestBodyPricingTest {
     ModelRequestBodyPricing.Plan plan =
         ModelRequestBodyPricing.plan(pricing("bounds", condition, "9"));
 
-    assertTrue(plan.evaluate(null).isEmpty());
-    assertTrue(plan.evaluate(new byte[0]).isEmpty());
-    assertTrue(plan.evaluate(new byte[ModelRequestBodyPricing.MAX_BODY_BYTES + 1]).isEmpty());
+    assertTrue(plan.evaluate(null).matches().isEmpty());
+    assertTrue(plan.evaluate(new byte[0]).matches().isEmpty());
+    assertTrue(
+        plan.evaluate(new byte[ModelRequestBodyPricing.MAX_BODY_BYTES + 1]).matches().isEmpty());
     assertFalse(
         plan.evaluate(nestedBody(ModelRequestBodyPricing.MAX_NESTING_DEPTH)).matches().isEmpty());
-    assertTrue(plan.evaluate(nestedBody(ModelRequestBodyPricing.MAX_NESTING_DEPTH + 1)).isEmpty());
+    assertTrue(
+        plan.evaluate(nestedBody(ModelRequestBodyPricing.MAX_NESTING_DEPTH + 1))
+            .matches()
+            .isEmpty());
   }
 
   /** 数组只在 canonical 十进制下标上求值；对象属性名 "01" 仍是独立 key，不发生数组键转换。 */
@@ -140,10 +144,13 @@ class ModelRequestBodyPricingTest {
 
     assertTrue(
         plan.evaluate("{\"speed\":\"fast\",\"speed\":\"fast\"}".getBytes(StandardCharsets.UTF_8))
+            .matches()
             .isEmpty());
     assertTrue(
-        plan.evaluate("{\"speed\":\"fast\"} trailing".getBytes(StandardCharsets.UTF_8)).isEmpty());
-    assertTrue(plan.evaluate("not json".getBytes(StandardCharsets.UTF_8)).isEmpty());
+        plan.evaluate("{\"speed\":\"fast\"} trailing".getBytes(StandardCharsets.UTF_8))
+            .matches()
+            .isEmpty());
+    assertTrue(plan.evaluate("not json".getBytes(StandardCharsets.UTF_8)).matches().isEmpty());
     assertTrue(
         plan.evaluate("{\"speed\":\"slow\"}".getBytes(StandardCharsets.UTF_8))
             .matches()
@@ -285,6 +292,7 @@ class ModelRequestBodyPricingTest {
     assertTrue(
         ModelRequestBodyPricing.plan(ModelPricing.ZERO)
             .evaluate("not json".getBytes(StandardCharsets.UTF_8))
+            .matches()
             .isEmpty());
 
     List<ModelPricingCondition> groups = new ArrayList<>();
