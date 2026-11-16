@@ -97,6 +97,7 @@ public final class PlatformModelGateway implements ModelGateway {
               ProviderErrorKind.INVALID_REQUEST,
               message(setupFailure, "cannot resolve provider for model invocation")));
     }
+    String modelName = execution.request().model().modelName();
     Optional<ConcurrencyAdmission.Lease> acquired = admission.tryAcquire();
     if (acquired.isEmpty()) {
       return new Busy(busyRetryDelay.get());
@@ -105,7 +106,7 @@ public final class PlatformModelGateway implements ModelGateway {
     ModelRequestBodyPricing.Plan plan;
     try {
       // 计划按 attempt 冻结：组回退或并发执行各自使用当前实际模型的 pricing，不共享条件集合。
-      plan = pricingPlans.plan(execution.request().model().modelName());
+      plan = pricingPlans.plan(modelName);
     } catch (RuntimeException | Error pricingFailure) {
       // 定价读取不是准入条件，失败原样传播，但已取得的名额必须先归还。
       lease.close();
