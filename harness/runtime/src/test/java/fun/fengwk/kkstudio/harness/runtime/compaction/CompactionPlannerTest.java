@@ -67,15 +67,13 @@ class CompactionPlannerTest {
             .orElseThrow();
 
     assertEquals(id(5L), preparation.cutEntryId());
+    // 切点必须是完整 turn 的边界，而不是 turn 内部。
     assertInstanceOf(
         TurnEndPayload.class,
-        path.path()
-            .entries()
-            .get(
-                new CompactionCutPlanner(new CompactionConfig(75))
-                    .plan(path.path(), CONTEXT_WINDOW)
-                    .orElseThrow()
-                    .pathIndex())
+        path.path().entries().stream()
+            .filter(entry -> entry.id().equals(preparation.cutEntryId()))
+            .findFirst()
+            .orElseThrow()
             .payload());
   }
 
@@ -112,7 +110,9 @@ class CompactionPlannerTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CompactionCutPlanner(new CompactionConfig(1)).plan(path.path(), CONTEXT_WINDOW));
+        () ->
+            new CompactionPlanner(new CompactionConfig(1))
+                .prepare(path.path(), CompactionTrigger.THRESHOLD, CONTEXT_WINDOW));
   }
 
   @Test
@@ -129,15 +129,15 @@ class CompactionPlannerTest {
 
     assertEquals(
         id(16L),
-        new CompactionCutPlanner(new CompactionConfig(75))
-            .plan(path.path(), CONTEXT_WINDOW)
+        new CompactionPlanner(new CompactionConfig(75))
+            .prepare(path.path(), CompactionTrigger.THRESHOLD, CONTEXT_WINDOW)
             .orElseThrow()
-            .entryId());
+            .cutEntryId());
     // keepRecent = min(20,000, 200 / 2) keeps everything after the previous cut: nothing to
     // compact.
     assertTrue(
-        new CompactionCutPlanner(new CompactionConfig(20_000))
-            .plan(path.path(), CONTEXT_WINDOW)
+        new CompactionPlanner(new CompactionConfig(20_000))
+            .prepare(path.path(), CompactionTrigger.THRESHOLD, CONTEXT_WINDOW)
             .isEmpty());
   }
 
@@ -150,8 +150,8 @@ class CompactionPlannerTest {
     path.compaction(id(9L));
 
     assertTrue(
-        new CompactionCutPlanner(new CompactionConfig(1))
-            .plan(path.path(), CONTEXT_WINDOW)
+        new CompactionPlanner(new CompactionConfig(1))
+            .prepare(path.path(), CompactionTrigger.THRESHOLD, CONTEXT_WINDOW)
             .isEmpty());
   }
 
@@ -162,7 +162,9 @@ class CompactionPlannerTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> new CompactionCutPlanner(new CompactionConfig(1)).plan(path.path(), 0L));
+        () ->
+            new CompactionPlanner(new CompactionConfig(1))
+                .prepare(path.path(), CompactionTrigger.THRESHOLD, 0L));
   }
 
   @Test

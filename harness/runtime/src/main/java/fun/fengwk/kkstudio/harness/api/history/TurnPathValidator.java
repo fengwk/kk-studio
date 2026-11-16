@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionBranchContract;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
@@ -8,7 +9,6 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -471,7 +471,7 @@ final class TurnPathValidator {
     }
     AgentMessageContent content = custom.message().contents().getFirst();
     return content instanceof TextMessageContent text
-        && text.text().startsWith("[Compaction mode]\n");
+        && text.text().startsWith(CompactionBranchContract.INSTRUCTION_PREFIX);
   }
 
   private static void requireCompactionToolError(MessagePayload message) {
@@ -482,7 +482,7 @@ final class TurnPathValidator {
         || !result.error()
         || result.contents().size() != 1
         || !(result.contents().getFirst() instanceof TextMessageContent text)
-        || !CompactionBranchPrompts.TOOL_ERROR.equals(text.text())) {
+        || !CompactionBranchContract.TOOL_ERROR.equals(text.text())) {
       throw new IllegalArgumentException(
           "COMPACTION branches only allow the fixed platform tool error result");
     }

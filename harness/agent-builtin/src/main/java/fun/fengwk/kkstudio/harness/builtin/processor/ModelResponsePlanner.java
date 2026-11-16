@@ -1,12 +1,12 @@
 package fun.fengwk.kkstudio.harness.builtin.processor;
 
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionBranchContract;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 import fun.fengwk.kkstudio.harness.spi.driver.ToolDeclarationPlanner;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolErrorGuidance;
@@ -67,7 +67,7 @@ public final class ModelResponsePlanner {
                   declaration.binding(),
                   ToolInvocationStatus.FAILED,
                   new ToolInvocationError(
-                      "COMPACTION_TOOL_DISABLED", CompactionBranchPrompts.TOOL_ERROR))
+                      "COMPACTION_TOOL_DISABLED", CompactionBranchContract.TOOL_ERROR))
               : new ModelResponsePlan.ToolSlot(
                   declaration.call(),
                   declaration.binding(),

@@ -9,6 +9,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionBranchContract;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -1311,7 +1312,7 @@ class EntryPathTest {
                         callId,
                         toolName,
                         toolName,
-                        List.of(new TextMessageContent(CompactionBranchPrompts.TOOL_ERROR)),
+                        List.of(new TextMessageContent(CompactionBranchContract.TOOL_ERROR)),
                         true,
                         "{}"))),
             null,

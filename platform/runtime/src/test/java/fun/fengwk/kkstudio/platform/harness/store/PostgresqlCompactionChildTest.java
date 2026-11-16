@@ -34,6 +34,7 @@ import fun.fengwk.kkstudio.harness.api.command.SetAgentCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionBranchContract;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -485,12 +486,14 @@ class PostgresqlCompactionChildTest {
               resolvedOutputTokens != null ? resolvedOutputTokens : MAX_OUTPUT_TOKENS);
         };
     runtime =
-        new HarnessRuntime(store, builtinRegistry(store, resolver), () -> CompactionConfig.DEFAULT);
+        new HarnessRuntime(
+            store, builtinRegistry(store, resolver), () -> new CompactionConfig(20_000));
     processor =
         new ThreadProcessor(
             store,
             builtinRegistry(store, resolver),
-            new ThreadProcessorConfig(() -> Duration.ofSeconds(5), () -> CompactionConfig.DEFAULT));
+            new ThreadProcessorConfig(
+                () -> Duration.ofSeconds(5), () -> new CompactionConfig(20_000)));
     gateway = new ScriptedChildGateway();
     modelProcessor =
         new ModelProcessor(
@@ -1288,7 +1291,7 @@ class PostgresqlCompactionChildTest {
           new HarnessRuntime(
               store,
               builtinRegistry(store, resolver),
-              () -> CompactionConfig.DEFAULT,
+              () -> new CompactionConfig(20_000),
               stoppingModelProcessor::cancel,
               toolProcessor::cancel);
       runtime = stoppingRuntime;
@@ -1675,7 +1678,7 @@ class PostgresqlCompactionChildTest {
                                       "bash",
                                       List.of(
                                           new TextMessageContent(
-                                              CompactionBranchPrompts.TOOL_ERROR)),
+                                              CompactionBranchContract.TOOL_ERROR)),
                                       true,
                                       "{}"))),
                           null,

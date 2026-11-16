@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionBranchContract;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndReason;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -21,7 +22,6 @@ import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCall;
-import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
@@ -81,7 +81,7 @@ class ModelResponsePlannerTest {
       assertEquals("call-" + (index + 1), slot.call().id());
       assertEquals(ToolInvocationStatus.FAILED, slot.status());
       assertEquals("COMPACTION_TOOL_DISABLED", slot.error().kind());
-      assertEquals(CompactionBranchPrompts.TOOL_ERROR, slot.error().message());
+      assertEquals(CompactionBranchContract.TOOL_ERROR, slot.error().message());
     }
   }
 
