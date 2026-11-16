@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import '@/features/chat/chat-workspace.css'
+import '@/features/thread/runtime/thread-panel/thread-conversation.css'
 import { setLocale } from '@/shared/i18n'
 import { ChatLayoutSelector } from '@/features/chat/ChatLayoutSelector'
 import {

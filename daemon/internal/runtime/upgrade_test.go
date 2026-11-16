@@ -332,11 +332,22 @@ func (f *firstRejectThenServe) Connect(ctx context.Context, observer ControlObse
 	return f.connection, nil
 }
 
-// waitForUpgradeReceipt waits until the runtime published a receipt for the given update phase.
+// The runner's finished signal precedes HandleUpdate returning; wait for the runtime's own receipt
+// publication rather than assuming the signal already completed the caller's state transition.
 func waitForUpgradeReceipt(t *testing.T, r *Runtime, phase update.Phase) {
 	t.Helper()
-	receipt, ok := r.updateOps.ReceiptToResend()
-	if !ok || receipt.Phase != phase {
-		t.Fatalf("update receipt=%+v ok=%t, want phase %s", receipt, ok, phase)
+	deadline := time.After(time.Second)
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	for {
+		receipt, ok := r.updateOps.ReceiptToResend()
+		if ok && receipt.Phase == phase {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("update receipt=%+v ok=%t, want phase %s", receipt, ok, phase)
+		case <-ticker.C:
+		}
 	}
 }
