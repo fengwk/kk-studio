@@ -774,9 +774,10 @@ Environment Daemon 不属于 NAS App 容器。需要在某台主机上执行文�
 
 可导出 Provider、Model、Agent、Skill Package（仅限 Git 渠道）、Environment、MCP 服务、插件普通配置与系统设置。上传渠道的本地归档技能包不进入配置导出，升级或重建后须在平台重新上传发布。
 配置同步 YAML 使用 YAML 数字，与 HTTP 中 64 位整数的字符串表示分别处理。
-Environment 条目把完整卡片配置 `daemonConfig`、可空 `note` 与 `name`、`registrationTokenHash` 并列嵌套；
-文件省略 `note` 表示清空备注，缺失 `daemonConfig` 或仍含旧安装设置字段（`installConfig`、`operatingSystem`）
-时拒绝。Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
+Environment 条目必须带完整卡片配置 `daemonConfig`，与可空 `note`、`name`、`registrationTokenHash` 并列嵌套；
+`daemonConfig` 缺失或不是对象时整份拒绝，不会清空已保存的卡片配置；文件省略 `note` 即清空备注。
+条目出现 `installConfig` 或 `operatingSystem` 同样整份拒绝，不降级为条目级跳过，也不回显提交值。
+Agent 自动包含 Model、Provider、引用的 Skill Package、MCP 服务和 Subagent；
 Model 包含 Provider；插件条目只带 `pluginId` 与普通值，并按插件在代码里声明的所需 Agent 补齐依赖。
 系统持有身份的 Agent 只满足依赖，不作为条目导出。
 系统设置是有界的六节核心设置，不引用任何模型或提示词 Agent。
@@ -893,7 +894,7 @@ dump 之后、冻结之前提交的写入。冻结后的 `<db>_pre_<UTCstamp>` �
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)。这一步不属于维护
 脚本。随后仅向维护人员开放产品入口，Worker 保持停止。
 
-4. 在“设置 → 同步”导入之前保存的 YAML。系统预检区分文件级错误与条目级可跳过项：语法错误、错误类型、必填项缺失或已知字段非法值会整份拒绝；未知条目字段（包括旧版 Agent `model` / `variant`）、未知顶层类别与未知系统设置项会被跳过并列出原因，用户可选择“仅导入可用配置”。可跳过条目的已知字段仍先按写入路径校验，非法值不会因同时含未知字段而降级。Git 渠道技能包在导入时会向远端重新解析分支 HEAD，须确保远端 Git 网络连通。检查已导入和跳过的条目，在平台“技能包”重新上传发布上传渠道技能包，并在平台“系统设置 → 网络”核对 Backend 代理与各卡片的 `daemonConfig.proxyUrl`，补齐目标部署的 Git/MCP 访问条件与 Plugin 认证后再恢复 Worker、Daemon 和对外访问。
+4. 在“设置 → 同步”导入之前保存的 YAML。系统预检区分文件级错误与条目级可跳过项：语法错误、错误类型、必填项缺失或已知字段非法值会整份拒绝；未知条目字段（如 Agent 条目里的 `model` / `variant`）、未知顶层类别与未知系统设置项会被跳过并列出原因，用户可选择“仅导入可用配置”。可跳过条目的已知字段仍先按写入路径校验，非法值不会因同时含未知字段而降级。Git 渠道技能包在导入时会向远端重新解析分支 HEAD，须确保远端 Git 网络连通。检查已导入和跳过的条目，在平台“技能包”重新上传发布上传渠道技能包，并在平台“系统设置 → 网络”核对 Backend 代理与各卡片的 `daemonConfig.proxyUrl`，补齐目标部署的 Git/MCP 访问条件与 Plugin 认证后再恢复 Worker、Daemon 和对外访问。
 
 5. 检查 App 健康、配置、Daemon 重连、关键业务和既有 bucket。
    验收结束前保留完整备份、冻结库和对象存储数据；失败时保持停写，按部署恢复流程决定回退。
