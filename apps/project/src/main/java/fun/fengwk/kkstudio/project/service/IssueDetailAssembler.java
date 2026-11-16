@@ -6,7 +6,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
-import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflow;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowState;
@@ -23,7 +22,6 @@ import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
 
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -90,40 +88,9 @@ public class IssueDetailAssembler {
       runDtos.add(mapper.toDto(run, threadToAgent.get(run.getThreadId())));
     }
 
-    IssueRun activeRun =
-        runs.stream()
-            .filter(
-                run ->
-                    run.getStatus() == IssueRunStatus.RUNNING
-                        || run.getStatus() == IssueRunStatus.WAITING)
-            .findFirst()
-            .orElse(null);
-    IssueRunDTO currentRunDto =
-        activeRun != null
-            ? mapper.toDto(activeRun, threadToAgent.get(activeRun.getThreadId()))
-            : null;
-
-    IssueRun latestRun =
-        runs.stream().max(Comparator.comparingLong(IssueRun::getOrdinal)).orElse(null);
-    IssueRunDTO latestRunDto =
-        latestRun != null
-            ? mapper.toDto(latestRun, threadToAgent.get(latestRun.getThreadId()))
-            : null;
-
     List<IssueStageBudgetDTO> stageBudgets = new ArrayList<>();
-    Project project;
-    try {
-      project = projectService.getProject(issue.getProjectId());
-    } catch (DomainException error) {
-      if (error.code() != DomainErrorCode.NOT_FOUND || !"project".equals(error.resource())) {
-        throw error;
-      }
-      // 项目未找到时跳过
-      project = null;
-    }
-    if (project != null
-        && project.getWorkflowJson() != null
-        && !project.getWorkflowJson().isBlank()) {
+    Project project = projectService.getProject(issue.getProjectId());
+    if (project.getWorkflowJson() != null && !project.getWorkflowJson().isBlank()) {
       ProjectWorkflow workflow = workflowCodec.decode(project.getWorkflowJson());
       for (ProjectWorkflowState state : workflow.workStages()) {
         try {
@@ -145,8 +112,6 @@ public class IssueDetailAssembler {
         .activities(activityDtos)
         .nextActivityCursor(nextActivityCursor)
         .runs(runDtos)
-        .currentRun(currentRunDto)
-        .latestRun(latestRunDto)
         .stageBudgets(stageBudgets)
         .agentThreads(agentThreadDtos)
         .build();

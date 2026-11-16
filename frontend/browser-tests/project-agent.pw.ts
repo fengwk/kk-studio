@@ -67,8 +67,6 @@ function createIssueDetail() {
       activities: [],
       nextActivityCursor: null,
       runs: [],
-      currentRun: null,
-      latestRun: null,
       stageBudgets: [],
       agentThreads: [
         {

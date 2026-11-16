@@ -16,7 +16,7 @@ const detail: IssueDetailDTO = {
     blockedFromState: null, blockReason: null, pauseReason: null, pauseDetail: null,
     version: '1', createdAt: STAMP, updatedAt: STAMP,
   },
-  activities: [], nextActivityCursor: null, agentThreads: [], currentRun: null, latestRun: null,
+  activities: [], nextActivityCursor: null, agentThreads: [],
   runs: [{
     id: RUN, issueId: ISSUE, ordinal: '1', state: 'WORK', agentName: null,
     sessionId: RUN, threadId: RUN, status: 'COMPLETED', startEntryId: RUN,

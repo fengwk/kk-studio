@@ -24,12 +24,6 @@ public class IssueDetailDTO {
 
   private List<IssueRunDTO> runs;
 
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable IssueRunDTO currentRun;
-
-  @JsonInclude(JsonInclude.Include.ALWAYS)
-  private @Nullable IssueRunDTO latestRun;
-
   private List<IssueStageBudgetDTO> stageBudgets;
   private List<IssueAgentThreadDTO> agentThreads;
 }

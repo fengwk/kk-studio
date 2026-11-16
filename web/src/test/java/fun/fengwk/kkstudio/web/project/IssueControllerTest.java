@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.web.project;
 
-import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -48,6 +47,7 @@ import fun.fengwk.kkstudio.project.model.IssueAgentThread;
 import fun.fengwk.kkstudio.project.model.IssueEvidence;
 import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.PauseReason;
+import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.service.IssueDetailAssembler;
 import fun.fengwk.kkstudio.project.service.IssueEditingService;
 import fun.fengwk.kkstudio.project.service.IssueEvidenceService;
@@ -181,16 +181,18 @@ class IssueControllerTest {
             .startedAt(now)
             .build();
     when(issueRunService.listRuns(issueId)).thenReturn(List.of(run));
+    // 详情聚合现在总是读取项目以枚举阶段额度；未配置 workflow 的项目不查询额度。
+    when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
 
     mockMvc
         .perform(get("/api/project/issues/" + issueId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.issue.id").value(issueId.toString().toLowerCase()))
-        .andExpect(jsonPath("$.currentRun.agentName").value("coder"))
+        .andExpect(jsonPath("$.runs[0].agentName").value("coder"))
         .andExpect(jsonPath("$.agentThreads[0].agentName").value("coder"));
   }
 
-  /** 无 Run 的 Issue 详情仍可读取，缺失的 Run 投影保持 null，不调用精确查询接口。 */
+  /** 无 Run 的 Issue 详情仍可读取，runs 为空数组。 */
   @Test
   void testGetIssueDetailWithoutRun() throws Exception {
     Issue issue =
@@ -208,14 +210,13 @@ class IssueControllerTest {
     when(issueEditingService.listActivities(issueId, 0L, 50)).thenReturn(List.of());
     when(issueEditingService.listAgentThreads(issueId)).thenReturn(List.of());
     when(issueRunService.listRuns(issueId)).thenReturn(List.of());
+    when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
 
     mockMvc
         .perform(get("/api/project/issues/" + issueId))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.issue.id").value(issueId.toString()))
-        .andExpect(jsonPath("$.runs").isEmpty())
-        .andExpect(jsonPath("$.currentRun").value(nullValue()))
-        .andExpect(jsonPath("$.latestRun").value(nullValue()));
+        .andExpect(jsonPath("$.runs").isEmpty());
   }
 
   @Test
@@ -242,6 +243,7 @@ class IssueControllerTest {
             .build();
     when(issueEditingService.getIssue(issueId)).thenReturn(issue);
     when(issueEditingService.listActivities(issueId, 0L, 1)).thenReturn(List.of(act));
+    when(projectService.getProject(projectId)).thenReturn(Project.builder().id(projectId).build());
 
     mockMvc
         .perform(get("/api/project/issues/" + issueId).param("limit", "1"))

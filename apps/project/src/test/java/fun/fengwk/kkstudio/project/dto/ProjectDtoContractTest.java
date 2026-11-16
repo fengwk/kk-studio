@@ -38,8 +38,6 @@ class ProjectDtoContractTest {
     "IssueDTO.pauseReason",
     "IssueDTO.pauseDetail",
     "IssueDetailDTO.nextActivityCursor",
-    "IssueDetailDTO.currentRun",
-    "IssueDetailDTO.latestRun",
     "IssueActivityDTO.actorAgentName",
     "IssueActivityDTO.runId",
     "IssueActivityDTO.body",
@@ -136,15 +134,7 @@ class ProjectDtoContractTest {
         getInstanceFieldNames(IssueDTO.class));
 
     assertEquals(
-        Set.of(
-            "issue",
-            "activities",
-            "nextActivityCursor",
-            "runs",
-            "currentRun",
-            "latestRun",
-            "stageBudgets",
-            "agentThreads"),
+        Set.of("issue", "activities", "nextActivityCursor", "runs", "stageBudgets", "agentThreads"),
         getInstanceFieldNames(IssueDetailDTO.class));
 
     assertEquals(
@@ -426,8 +416,6 @@ class ProjectDtoContractTest {
             .activities(List.of(activity))
             .nextActivityCursor(null)
             .runs(List.of(run))
-            .currentRun(run)
-            .latestRun(run)
             .stageBudgets(List.of(budget))
             .agentThreads(List.of(thread))
             .build();

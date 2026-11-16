@@ -173,8 +173,6 @@ describe('ProjectDetailPage', () => {
       },
     ],
     nextActivityCursor: null,
-    currentRun: null,
-    latestRun: null,
   }
 
   const createMockApi = (overrides: Partial<ProjectsApi> = {}): ProjectsApi => ({

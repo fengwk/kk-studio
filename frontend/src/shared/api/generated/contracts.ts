@@ -1759,8 +1759,6 @@ export interface IssueDetailDTO {
   activities: IssueActivityDTO[]
   nextActivityCursor: string | null
   runs: IssueRunDTO[]
-  currentRun: IssueRunDTO | null
-  latestRun: IssueRunDTO | null
   stageBudgets: IssueStageBudgetDTO[]
   agentThreads: IssueAgentThreadDTO[]
 }
