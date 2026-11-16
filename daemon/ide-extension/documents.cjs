@@ -89,7 +89,6 @@ const hasHiddenDirtyDocuments = (vscode, closedTabs) => {
 }
 
 module.exports = {
-  hasDirtyDocuments,
   hasUnknownEditorState,
   canProveClean,
   ordinaryDirtyDocuments,

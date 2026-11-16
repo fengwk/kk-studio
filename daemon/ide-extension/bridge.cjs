@@ -14,7 +14,6 @@
  */
 
 const { INVALID, LineFramer } = require('./framing.cjs')
-const documents = require('./documents.cjs')
 const { createHostActions } = require('./host-actions.cjs')
 
 const DEFAULT_RECONNECT_MILLIS = 500
