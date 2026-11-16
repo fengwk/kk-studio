@@ -13,6 +13,7 @@ function runStack(args, overrides = {}) {
   const env = { ...process.env }
   delete env.PI_ANCHOR
   delete env.PI_BASE_ANCHOR
+  delete env.BACKEND_URL
   Object.assign(env, overrides)
   return spawnSync('bash', [STACK_SCRIPT, ...args], {
     cwd: REPO_ROOT,
@@ -94,7 +95,7 @@ test('up passes exported credentials to the synchronizer without printing them',
       '  */stack-probe.mjs) cat >/dev/null ;;',
       '  */sync-minimax-credentials.mjs)',
       '    [ "$#" = 3 ] && [ "$2" = --backend-url ] && [ "$3" = "$EXPECTED_URL" ] || exit 1',
-      '    [ "$BACKEND_URL" = "$EXPECTED_URL" ] || exit 2',
+      '    [ -z "${BACKEND_URL+x}" ] || exit 2',
       '    [ "$TEST_MINIMAX_BASE_URL" = fixture-url ] && [ "$TEST_MINIMAX_API_KEY" = fixture-key ] || exit 3',
       '    printf "sync-called\\n" >> "$SYNC_LOG" ;;',
       '  *) exit 4 ;;',

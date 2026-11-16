@@ -10,6 +10,7 @@ import { REPOSITORY_ROOT, functionBody, runBash } from '../../../tests/support/s
 const E2E_ROOT = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e')
 const E2E_LIB = path.join(E2E_ROOT, 'lib.sh')
 const E2E_ENTRY = path.join(E2E_ROOT, 'run.sh')
+const E2E_CREDENTIALS_LIB = path.join(REPOSITORY_ROOT, 'scripts/dev/lib/e2e-credentials.sh')
 
 const CREDENTIAL_NAMES = [
   'TEST_GOOGLE_BASE_URL',
@@ -60,7 +61,8 @@ test('test intent: every E2E start path and its scrubber exclude all current and
     assert.ok(functionBody(E2E_LIB, name).includes('"${test_env_unsets[@]}"'), name)
   }
 
-  const scrubber = functionBody(E2E_LIB, 'test_env_unset_args')
+  // The scrubber is shared by the dev lifecycle and the E2E harness.
+  const scrubber = functionBody(E2E_CREDENTIALS_LIB, 'test_env_unset_args')
   assert.ok(scrubber.includes('TEST_*)'))
   assert.ok(scrubber.includes("printf '%s\\0' -u"))
   assert.ok(scrubber.includes('compgen -e'))
@@ -92,7 +94,7 @@ test('test intent: the E2E scrubber emits every TEST_ name and leaves unrelated 
 })
 
 test('test intent: shared sync exports shell credentials without passing MiniMax credentials or printing secrets', () => {
-  const shared = path.join(REPOSITORY_ROOT, 'scripts/dev/lib/e2e-credentials.sh')
+  const shared = E2E_CREDENTIALS_LIB
   const result = runBash(`
     REPO_ROOT='${REPOSITORY_ROOT}'
     BACKEND_URL=http://localhost

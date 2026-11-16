@@ -10,6 +10,8 @@ import { REPOSITORY_ROOT, cleanEnvironment, functionBody, readText, runBash, she
 
 const APP_SCRIPT = path.join(REPOSITORY_ROOT, 'scripts/dev/app.sh')
 const ROOT_LIB = path.join(REPOSITORY_ROOT, 'scripts/dev/lib/repo-root.sh')
+const LIB_DIR = path.join(REPOSITORY_ROOT, 'scripts/dev/lib')
+const E2E_CREDENTIALS_LIB = path.join(LIB_DIR, 'e2e-credentials.sh')
 const MATRIX_RUNNER = path.join(REPOSITORY_ROOT, 'scripts/dev/verify/e2e/run-matrix.mjs')
 
 // Deleted classes must not survive a dev-requested backend rebuild.
@@ -66,16 +68,17 @@ test('test intent: root discovery is depth independent and overridable', () => {
     mkdirSync(path.dirname(nested), { recursive: true })
     writeFileSync(nested, source)
     mkdirSync(path.join(path.dirname(nested), 'lib'))
-    copyFileSync(ROOT_LIB, path.join(path.dirname(nested), 'lib/repo-root.sh'))
-    copyFileSync(path.join(path.dirname(ROOT_LIB), 'http-wait.sh'), path.join(path.dirname(nested), 'lib/http-wait.sh'))
+    for (const name of ['repo-root.sh', 'http-wait.sh', 'toolchain.sh', 'port-cleanup.sh']) {
+      copyFileSync(path.join(LIB_DIR, name), path.join(path.dirname(nested), 'lib', name))
+    }
     mkdirSync(path.join(checkout, 'scripts/dev/lib'), { recursive: true })
-    copyFileSync(path.join(REPOSITORY_ROOT, 'scripts/dev/lib/e2e-credentials.sh'), path.join(checkout, 'scripts/dev/lib/e2e-credentials.sh'))
+    copyFileSync(E2E_CREDENTIALS_LIB, path.join(checkout, 'scripts/dev/lib/e2e-credentials.sh'))
 
     assert.equal(resolvedRoot(nested, cleanEnvironment()), checkout)
 
     const override = path.join(temporary, 'elsewhere')
     mkdirSync(path.join(override, 'scripts/dev/lib'), { recursive: true })
-    copyFileSync(path.join(REPOSITORY_ROOT, 'scripts/dev/lib/e2e-credentials.sh'), path.join(override, 'scripts/dev/lib/e2e-credentials.sh'))
+    copyFileSync(E2E_CREDENTIALS_LIB, path.join(override, 'scripts/dev/lib/e2e-credentials.sh'))
     assert.equal(resolvedRoot(nested, { ...cleanEnvironment(), KK_STUDIO_REPO_ROOT: override }), override)
   } finally {
     rmSync(temporary, { recursive: true, force: true })
@@ -89,7 +92,9 @@ test('test intent: an unresolvable root fails closed before any lifecycle comman
     mkdirSync(path.dirname(orphan), { recursive: true })
     writeFileSync(orphan, readText(APP_SCRIPT))
     mkdirSync(path.join(path.dirname(orphan), 'lib'))
-    copyFileSync(ROOT_LIB, path.join(path.dirname(orphan), 'lib/repo-root.sh'))
+    for (const name of ['repo-root.sh', 'http-wait.sh', 'toolchain.sh', 'port-cleanup.sh']) {
+      copyFileSync(path.join(LIB_DIR, name), path.join(path.dirname(orphan), 'lib', name))
+    }
 
     const result = runBash(`source ${shellQuote(orphan)}`, { cwd: '/', env: cleanEnvironment() })
     assert.notEqual(result.status, 0)
@@ -132,7 +137,8 @@ test('test intent: long-lived runtime processes scrub every TEST_ input', () => 
   assert.ok(startAll.includes('sync_e2e_provider_credentials'))
   assert.ok(startAll.includes('"${test_env_unsets[@]}"'))
 
-  const scrubber = functionBody(APP_SCRIPT, 'test_env_unset_args')
+  // The scrubber lives in the shared credentials library the lifecycle sources.
+  const scrubber = functionBody(E2E_CREDENTIALS_LIB, 'test_env_unset_args')
   assert.ok(scrubber.includes('TEST_*)'))
   assert.ok(scrubber.includes("printf '%s\\0' -u"))
   assert.ok(scrubber.includes('compgen -e'))

@@ -58,6 +58,16 @@ test('test intent: partial distributed arguments fail closed', () => {
   }
 })
 
+test('test intent: distributed image reuse depends on the images existing, not on a failed start', () => {
+  // A failed `up --skip-build` must surface as the real failure; rebuilding everything afterwards
+  // would hide it and pay for an unnecessary image build on every broken start.
+  assert.ok(E2E_ENTRY.includes('docker image inspect \\'))
+  assert.ok(E2E_ENTRY.includes('"${DISTRIBUTED_APP_IMAGE:-kk-studio-app:distributed}"'))
+  assert.ok(E2E_ENTRY.includes('"${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}"'))
+  assert.ok(E2E_ENTRY.includes('"$DISTRIBUTED_RUNNER" up --skip-build'))
+  assert.ok(!E2E_ENTRY.includes('up --skip-build ||'))
+})
+
 test('test intent: distributed stays a free mock topology and rejects paid or host-stack capabilities', () => {
   assert.ok(
     E2E_ENTRY.includes(

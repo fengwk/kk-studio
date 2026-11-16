@@ -72,9 +72,9 @@ test('test intent: frontend dependencies are reinstalled only when the lock chan
     mkdirSync(path.join(appHome, '.git'))
     copyFileSync(DEV_SCRIPT, path.join(appHome, 'scripts/dev/app.sh'))
     mkdirSync(path.join(appHome, 'scripts/dev/lib'))
-    copyFileSync(path.join(path.dirname(DEV_SCRIPT), 'lib/repo-root.sh'), path.join(appHome, 'scripts/dev/lib/repo-root.sh'))
-    copyFileSync(path.join(path.dirname(DEV_SCRIPT), 'lib/http-wait.sh'), path.join(appHome, 'scripts/dev/lib/http-wait.sh'))
-    copyFileSync(path.join(path.dirname(DEV_SCRIPT), 'lib/e2e-credentials.sh'), path.join(appHome, 'scripts/dev/lib/e2e-credentials.sh'))
+    for (const name of ['repo-root.sh', 'http-wait.sh', 'toolchain.sh', 'port-cleanup.sh', 'e2e-credentials.sh']) {
+      copyFileSync(path.join(path.dirname(DEV_SCRIPT), 'lib', name), path.join(appHome, 'scripts/dev/lib', name))
+    }
     const frontend = path.join(appHome, 'frontend')
     mkdirSync(frontend)
     const lock = path.join(frontend, 'package-lock.json')

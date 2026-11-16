@@ -91,6 +91,9 @@ Environment:
   JAVA_HOME_21               JDK 21 used for Maven (JAVA_HOME is a fallback)
   SUPPLY_CHAIN_APP_IMAGE    App image tag (default: kk-studio-app:supply-chain)
   SUPPLY_CHAIN_DAEMON_IMAGE Daemon image tag (default: kk-studio-daemon:supply-chain)
+  SUPPLY_CHAIN_MAVEN_BUILD_OPTS
+                            Extra Maven options for the App image build,
+                            forwarded as KK_STUDIO_MAVEN_BUILD_OPTS; never printed
   SUPPLY_CHAIN_TRIVY_CACHE_VOLUME
                             Named Trivy cache volume (default: kk-studio-trivy-cache)
   SUPPLY_CHAIN_TRIVY_NETWORK

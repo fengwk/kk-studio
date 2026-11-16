@@ -59,9 +59,9 @@ test -f web/target/kk-studio-web-1.0.4.jar
 curl -fsS http://127.0.0.1:8080/actuator/health
 ```
 
-`server.port` 默认 `8080`，gzip 压缩开启，Actuator 暴露 `health,prometheus,offline,online`。
-SPA BrowserRouter 的刷新路径由 Web app fallback 到 `index.html`，因此不需要额外的
-Nginx 或前端容器。
+`server.port` 默认 `8080`，gzip 压缩开启。Actuator 实际只提供 `/actuator/health`；镜像不引入
+Prometheus registry，没有可 scrape 的 `/actuator/prometheus`。
+SPA BrowserRouter 的刷新路径由 Web app fallback 到 `index.html`，因此不需要额外的 Nginx 或前端容器。
 
 ### 运行 App 容器
 
@@ -390,7 +390,7 @@ PI_BASE_ANCHOR=/path/to/pi-base \
 | test | S3/media/fake runtime | `KK_STUDIO_STORAGE_S3_*`、`KK_STUDIO_STORAGE_MEDIA_*`、`KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED`（仅测试栈使用；生产部署不得设置） |
 | distributed | node identity/ports | `DISTRIBUTED_*` |
 | reliability | stack identity | `RELIABILITY_APP_PORT`、`RELIABILITY_MINIO_PORT`、`RELIABILITY_ENV_NAME`、`RELIABILITY_REGISTRATION_TOKEN` |
-| supply-chain | reports/images/cache/network | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`SUPPLY_CHAIN_TRIVY_NETWORK`、`TRIVY_SKIP_DB_UPDATE` |
+| supply-chain | reports/images/cache/network | `SUPPLY_CHAIN_REPORT_ROOT`、`SUPPLY_CHAIN_APP_IMAGE`、`SUPPLY_CHAIN_DAEMON_IMAGE`、`SUPPLY_CHAIN_MAVEN_BUILD_OPTS`、`SUPPLY_CHAIN_TRIVY_CACHE_VOLUME`、`SUPPLY_CHAIN_TRIVY_NETWORK`、`TRIVY_SKIP_DB_UPDATE` |
 | 显式 `--real` E2E | 仅宿主 credential 同步 | `TEST_GOOGLE_*`、`TEST_OPENAI_RESPONSES_*`、`TEST_ANTHROPIC_*`、`TEST_OPENAI_*` |
 | reliability Agent 矩阵 | 仅宿主 credential 同步 | `TEST_MINIMAX_BASE_URL`、`TEST_MINIMAX_API_KEY` |
 | 显式 Seedance prepare-only | 确认与外部 Hub/workspace | `RUN_REAL_SEEDANCE_PREPARE_SMOKE=1`、`OPENCLI_HUB_BASE_URL`、`SEEDANCE_WORKSPACE_ID`、`OPENCLI_API_KEY`、可选 `OPENCLI_HUB_INSTANCE_ID` / `SEEDANCE_PREPARE_SMOKE_PROMPT`；另需唯一参数 `--confirm-prepare-only`，见 [deploy/test](../../deploy/test/README.md#真实-seedance-prepare-only-边界) |
@@ -428,7 +428,9 @@ Canvas Function runtime 变量也只在启动期读取。
 `KK_STUDIO_MAVEN_BUILD_OPTS`；[scripts/dev/verify/smoke/offline-chat.sh](../../scripts/dev/verify/smoke/offline-chat.sh) 与
 [scripts/dev/verify/performance/run.sh](../../scripts/dev/verify/performance/run.sh) 会从宿主 proxy 变量生成 build 参数，
 离线 smoke 对可解析的 HTTP(S) proxy 默认使用 host build network，performance 则只自动处理
-loopback proxy。这些 build 参数不会自动进入 App/Daemon runtime。
+loopback proxy。供应链镜像扫描从宿主 `HTTP(S)_PROXY`/`ALL_PROXY`/`NO_PROXY`（含小写）生成 App 镜像的
+build 参数，并在设置 `SUPPLY_CHAIN_MAVEN_BUILD_OPTS` 时把它作为 `KK_STUDIO_MAVEN_BUILD_OPTS` 一并传入；
+报告中的这些值会被脱敏。这些 build 参数不会自动进入 App/Daemon runtime。
 
 Backend 的运行代理在 **系统设置 → 网络**（`backendNetwork`）保存，只配置一个无认证 HTTP 代理地址
 `http://host:port`；HTTPS 请求通过 CONNECT。地址留空即强制直连，不继承宿主环境变量。
@@ -510,16 +512,14 @@ tag 不同：
 `KK_STUDIO_EXIT_CONFIRMATION_DIRECTORY`（例如 `/app/execution-exits`），保证挂载后的 POSIX 目录及既有
 `.lock` 文件归应用 UID `10001` 所有，并允许应用设置目录 `0700`、文件 `0600`；仅 group 或 ACL 可写不足，
 镜像自身的 `chown` 也不代替挂载卷的初始化。该卷不与任何其它 Studio 实例共享，保存退出确认 journal
-供重启后重放，但 journal 存在本身不是宿主进程已退出的证明。外部 Compose 还需设置
-`SPRING_LIFECYCLE_TIMEOUT_PER_SHUTDOWN_PHASE=100s` 与 `stop_grace_period: 120s`，让 `60s + 30s`
-的 Harness deadline 在容器被强制终止前完成；首次新增 bind mount 不会搬运旧容器内的 journal。
+供重启后重放，但 journal 存在本身不是宿主进程已退出的证明。首次新增 bind mount 不会搬运旧容器内的 journal；
+停机预算按[升级](#升级)的 deadline 配置。
 
 镜像创建了 UID/GID `10001` 可写的 `/app/logs` 与 `/app/execution-exits`，日志由 Platform 的
 [`logback-spring.xml`](../../platform/runtime/src/main/resources/logback-spring.xml) 与运行环境共同配置。
-排查时先看 `docker logs vps-kk-studio` 与实际日志配置；
-控制台只有 JVM 或启动横幅不代表没有应用错误。若日志写文件，按运行配置定位文件，再读取并脱敏。
-需要跨容器替换保留日志时，由外部 Compose 为日志目录设置持久挂载与 UID/GID `10001` 的写权限，
-宿主权限按部署策略收紧；首次挂载不会自动迁移旧容器里的文件，需在替换前另行保存。
+排查时先看 `docker logs vps-kk-studio` 与实际日志配置；控制台只有 JVM 或启动横幅不代表没有应用错误。
+需要跨容器替换保留日志时，由外部 Compose 为日志目录设置持久挂载与 UID/GID `10001` 的写权限；
+首次挂载不会自动迁移旧容器里的文件，需在替换前另行保存。
 共享 PostgreSQL 与 S3/MinIO 已在各自容器持久化；App 的媒体转码与上传暂存目录仍是可清理的临时空间，
 不应挂成跨容器重启保留的数据卷。
 

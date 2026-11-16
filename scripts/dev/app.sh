@@ -5,6 +5,8 @@ SCRIPT_HOME=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_HOME/lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_HOME"
 source "$SCRIPT_HOME/lib/http-wait.sh"
+source "$SCRIPT_HOME/lib/toolchain.sh"
+source "$SCRIPT_HOME/lib/port-cleanup.sh"
 WORK_DIR=${DEV_WORK_DIR:-"$REPO_ROOT/runtime/dev"}
 
 # 本机 preview 的外部数据面配置：只有调用方显式给出 SHARED_PREVIEW_ENV_FILE 时才读取（见 usage），
@@ -24,7 +26,7 @@ SHARED_PREVIEW_ENV_REQUIRED_KEYS=(
   KK_STUDIO_STORAGE_S3_SECRET_KEY
 )
 
-fail() {
+die() {
   echo "ERROR: $1" >&2
   exit 1
 }
@@ -60,24 +62,24 @@ load_shared_preview_env_file() {
   local owner mode
   case "$file" in
     /*) ;;
-    *) fail "SHARED_PREVIEW_ENV_FILE must be an absolute path" ;;
+    *) die "SHARED_PREVIEW_ENV_FILE must be an absolute path" ;;
   esac
   if [ ! -f "$file" ]; then
-    fail "SHARED_PREVIEW_ENV_FILE must be an existing regular file"
+    die "SHARED_PREVIEW_ENV_FILE must be an existing regular file"
   fi
   if [ -L "$file" ]; then
-    fail "SHARED_PREVIEW_ENV_FILE must not be a symbolic link"
+    die "SHARED_PREVIEW_ENV_FILE must not be a symbolic link"
   fi
-  owner=$(file_owner_uid "$file") || fail "cannot read the SHARED_PREVIEW_ENV_FILE owner"
+  owner=$(file_owner_uid "$file") || die "cannot read the SHARED_PREVIEW_ENV_FILE owner"
   if [ "$owner" != "$(id -u)" ]; then
-    fail "SHARED_PREVIEW_ENV_FILE must be owned by the current user"
+    die "SHARED_PREVIEW_ENV_FILE must be owned by the current user"
   fi
-  mode=$(file_mode "$file") || fail "cannot read the SHARED_PREVIEW_ENV_FILE permissions"
+  mode=$(file_mode "$file") || die "cannot read the SHARED_PREVIEW_ENV_FILE permissions"
   case "$mode" in
-    *[!0-7]*) fail "cannot interpret the SHARED_PREVIEW_ENV_FILE permissions" ;;
+    *[!0-7]*) die "cannot interpret the SHARED_PREVIEW_ENV_FILE permissions" ;;
   esac
   if (( (8#$mode & 8#077) != 0 )); then
-    fail "SHARED_PREVIEW_ENV_FILE must not grant group or other permissions"
+    die "SHARED_PREVIEW_ENV_FILE must not grant group or other permissions"
   fi
 
   # 配置文件是这组键的唯一事实源，不能与调用 shell 偶然继承的同名变量混用。先清空，再把
@@ -94,12 +96,12 @@ load_shared_preview_env_file() {
     esac
     case "$trimmed" in
       *=*) ;;
-      *) fail "malformed SHARED_PREVIEW_ENV_FILE line $line_number: expected KEY=VALUE" ;;
+      *) die "malformed SHARED_PREVIEW_ENV_FILE line $line_number: expected KEY=VALUE" ;;
     esac
     key=${trimmed%%=*}
     value=${trimmed#*=}
     if ! shared_preview_env_key_allowed "$key"; then
-      fail "unknown key on SHARED_PREVIEW_ENV_FILE line $line_number: $key"
+      die "unknown key on SHARED_PREVIEW_ENV_FILE line $line_number: $key"
     fi
     printf -v "$key" '%s' "$value"
   done < "$file"
@@ -124,24 +126,24 @@ KK_STUDIO_SHARED_PREVIEW=${KK_STUDIO_SHARED_PREVIEW:-false}
 require_external_data_plane() {
   local key
   if [ -z "$SHARED_PREVIEW_ENV_FILE" ]; then
-    fail "KK_STUDIO_SHARED_PREVIEW=true requires SHARED_PREVIEW_ENV_FILE"
+    die "KK_STUDIO_SHARED_PREVIEW=true requires SHARED_PREVIEW_ENV_FILE"
   fi
   for key in "${SHARED_PREVIEW_ENV_REQUIRED_KEYS[@]}"; do
     if [ -z "${!key:-}" ]; then
-      fail "SHARED_PREVIEW_ENV_FILE must define a value for $key"
+      die "SHARED_PREVIEW_ENV_FILE must define a value for $key"
     fi
   done
   if [[ ! "$KK_STUDIO_DB_URL" =~ ^jdbc:postgresql://[^/]+/[^/?#]+([?].*)?$ ]]; then
-    fail "KK_STUDIO_DB_URL must be a PostgreSQL JDBC URL with an explicit database name"
+    die "KK_STUDIO_DB_URL must be a PostgreSQL JDBC URL with an explicit database name"
   fi
   if [ "$SPRING_PROFILE" != "prod" ]; then
-    fail "external data-plane preview requires SPRING_PROFILES_ACTIVE=prod"
+    die "external data-plane preview requires SPRING_PROFILES_ACTIVE=prod"
   fi
   if [ "${SPRING_FLYWAY_ENABLED:-}" != "false" ]; then
-    fail "external data-plane preview requires SPRING_FLYWAY_ENABLED=false"
+    die "external data-plane preview requires SPRING_FLYWAY_ENABLED=false"
   fi
   if [ "${KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED:-}" != "false" ]; then
-    fail "external data-plane preview requires KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false"
+    die "external data-plane preview requires KK_STUDIO_HARNESS_RUNTIME_WORKERS_ENABLED=false"
   fi
 }
 
@@ -249,22 +251,6 @@ Environment:
 EOF
 }
 
-require_cmd() {
-  if ! command -v "$1" >/dev/null 2>&1; then
-    echo "Missing command: $1" >&2
-    exit 1
-  fi
-}
-
-resolve_java_home() {
-  local java_home=${JAVA_HOME_21:-${JAVA_HOME:-}}
-  if [ -z "$java_home" ] || [ ! -x "$java_home/bin/java" ]; then
-    echo "JAVA_HOME_21 or JAVA_HOME must point to JDK 21" >&2
-    exit 1
-  fi
-  echo "$java_home"
-}
-
 profile_enabled() {
   local profile=$1
   case ",$SPRING_PROFILE," in
@@ -275,19 +261,6 @@ profile_enabled() {
       return 1
       ;;
   esac
-}
-
-# Build `env -u` arguments from the live environment so every current and future TEST_*
-# input is excluded from long-lived processes without maintaining a provider-name allowlist.
-test_env_unset_args() {
-  local name
-  while IFS= read -r name; do
-    case "$name" in
-      TEST_*)
-        printf '%s\0' -u "$name"
-        ;;
-    esac
-  done < <(compgen -e)
 }
 
 source "$REPO_ROOT/scripts/dev/lib/e2e-credentials.sh"
@@ -311,22 +284,6 @@ stop_pid_file() {
     fi
   fi
   rm -f "$pid_file"
-}
-
-kill_port_listeners() {
-  local port=$1
-  local pids
-  pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
-  if [ -z "$pids" ]; then
-    return
-  fi
-  step "Stopping listeners on port $port: $pids"
-  kill $pids 2>/dev/null || true
-  sleep 0.5
-  pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
-  if [ -n "$pids" ]; then
-    kill -9 $pids 2>/dev/null || true
-  fi
 }
 
 assert_port_free() {
@@ -440,8 +397,8 @@ stop_all() {
   stop_pid_file "$FRONTEND_PID_FILE" frontend
   stop_pid_file "$BACKEND_PID_FILE" backend
   if [ "$KILL_PORTS" = "true" ]; then
-    kill_port_listeners "$FRONTEND_PORT"
-    kill_port_listeners "$BACKEND_PORT"
+    kill_port "$FRONTEND_PORT"
+    kill_port "$BACKEND_PORT"
   fi
 }
 

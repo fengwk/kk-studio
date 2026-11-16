@@ -77,6 +77,9 @@ Env:
   E2E_MAVEN_OFFLINE=true  # opt into Maven -o; default is online
   E2E_WORK_DIR=...        # default: $REPO_ROOT/runtime/e2e
   DAEMON_ENV_ROOT=...     # optional tool-case work directory; default: $E2E_WORK_DIR/environment
+  DAEMON_ENV_NAME=tool-e2e  # card name passed as --daemon-env to the matrix
+  DAEMON_ENVIRONMENT_NAME=...  # card selector for the started Daemon; default: $DAEMON_ENV_NAME
+  DAEMON_ENVIRONMENT_ID=...    # card UUID selector; wins over DAEMON_ENVIRONMENT_NAME
 EOF
 }
 
@@ -154,7 +157,14 @@ if [ "$DISTRIBUTED" = "true" ]; then
   command -v docker >/dev/null 2>&1 || die "docker is required for --distributed"
   [ -x "$DISTRIBUTED_RUNNER" ] || die "missing distributed runner: $DISTRIBUTED_RUNNER"
   step "Ensuring distributed two-node stack"
-  "$DISTRIBUTED_RUNNER" up --skip-build || "$DISTRIBUTED_RUNNER" up
+  # 两个镜像都已存在才复用；任一缺失就完整构建，不用「失败后重建」掩盖真实启动错误。
+  if docker image inspect \
+    "${DISTRIBUTED_APP_IMAGE:-kk-studio-app:distributed}" \
+    "${DISTRIBUTED_DAEMON_IMAGE:-kk-studio-daemon:distributed}" >/dev/null 2>&1; then
+    "$DISTRIBUTED_RUNNER" up --skip-build
+  else
+    "$DISTRIBUTED_RUNNER" up
+  fi
   APP_A_PORT=${DISTRIBUTED_APP_A_PORT:-18082}
   APP_B_PORT=${DISTRIBUTED_APP_B_PORT:-18083}
   BACKEND_URL="http://127.0.0.1:$APP_A_PORT"

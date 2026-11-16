@@ -15,6 +15,7 @@ source "$SCRIPT_DIR/../../lib/repo-root.sh"
 resolve_repo_root "$SCRIPT_DIR"
 source "$SCRIPT_DIR/../../lib/http-wait.sh"
 source "$SCRIPT_DIR/../../lib/toolchain.sh"
+source "$SCRIPT_DIR/../../lib/port-cleanup.sh"
 WORK_DIR=${E2E_WORK_DIR:-"$REPO_ROOT/runtime/e2e"}
 
 BACKEND_HOST=${BACKEND_HOST:-127.0.0.1}
@@ -100,18 +101,7 @@ export KK_STUDIO_STORAGE_S3_BUCKET="$STORAGE_S3_BUCKET"
 step() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }
 
-# Emit NUL-delimited `env -u` arguments for every live TEST_* input. Runtime process
-# isolation must not depend on a manually maintained list of provider credential names.
-test_env_unset_args() {
-  local name
-  while IFS= read -r name; do
-    case "$name" in
-      TEST_*)
-        printf '%s\0' -u "$name"
-        ;;
-    esac
-  done < <(compgen -e)
-}
+source "$REPO_ROOT/scripts/dev/lib/e2e-credentials.sh"
 
 run_maven() {
   local java_home=$1
@@ -160,23 +150,6 @@ wait_http_process() {
     tail -n 120 "$log_file" >&2 || true
   fi
   exit 1
-}
-
-kill_port() {
-  local port=$1
-  local pids
-  pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
-  if [ -n "$pids" ]; then
-    step "Stopping listeners on :$port ($pids)"
-    # shellcheck disable=SC2086
-    kill $pids 2>/dev/null || true
-    sleep 0.4
-    pids=$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)
-    if [ -n "$pids" ]; then
-      # shellcheck disable=SC2086
-      kill -9 $pids 2>/dev/null || true
-    fi
-  fi
 }
 
 kill_daemon() {
@@ -293,16 +266,15 @@ start_backend() {
   ensure_dedicated_s3_bucket
   : >"$WORK_DIR/backend.log"
   step "Starting backend $BACKEND_URL profile=$SPRING_PROFILE"
-  # Pass PostgreSQL connection overrides when set; e2e profile defaults are only for local loops.
-  # Explicitly scrub every TEST_* input from the backend Java process.
+  # Backend always connects to the dedicated E2E database and bucket; scrub every TEST_* input.
   local -a test_env_unsets=()
   mapfile -d '' -t test_env_unsets < <(test_env_unset_args)
   nohup env \
     "${test_env_unsets[@]}" \
     JAVA_HOME="$java_home" \
-    ${KK_STUDIO_DB_URL:+KK_STUDIO_DB_URL="$KK_STUDIO_DB_URL"} \
-    ${KK_STUDIO_DB_USER:+KK_STUDIO_DB_USER="$KK_STUDIO_DB_USER"} \
-    ${KK_STUDIO_DB_PASSWORD:+KK_STUDIO_DB_PASSWORD="$KK_STUDIO_DB_PASSWORD"} \
+    KK_STUDIO_DB_URL="$KK_STUDIO_DB_URL" \
+    KK_STUDIO_DB_USER="$KK_STUDIO_DB_USER" \
+    KK_STUDIO_DB_PASSWORD="$KK_STUDIO_DB_PASSWORD" \
     KK_STUDIO_STORAGE_S3_ENDPOINT="$STORAGE_S3_ENDPOINT" \
     KK_STUDIO_STORAGE_S3_PUBLIC_ENDPOINT="$STORAGE_S3_PUBLIC_ENDPOINT" \
     KK_STUDIO_STORAGE_S3_REGION="$STORAGE_S3_REGION" \
@@ -323,8 +295,6 @@ start_backend() {
     "$WORK_DIR/backend.log" \
     120
 }
-
-source "$REPO_ROOT/scripts/dev/lib/e2e-credentials.sh"
 
 start_frontend() {
   mkdir -p "$WORK_DIR"

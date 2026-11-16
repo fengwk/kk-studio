@@ -663,13 +663,6 @@ const webForbiddenImportAllowlist = new Map([
 const webPluginImportPrefix = 'fun.fengwk.kkstudio.plugin.'
 const webControllerSourcePrefix = 'web/src/main/java/fun/fengwk/kkstudio/web/controller/'
 const webHarnessProcessorPrefix = 'fun.fengwk.kkstudio.harness.runtime.processor.'
-const webForbiddenSourceTokens = [
-  'TrustedJarContributorLoader',
-  'URLClassLoader',
-  'ServiceLoader',
-  'kk-studio.harness.contributors.directory',
-  'KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY',
-]
 const webForbiddenPomArtifacts = ['kk-studio-common']
 const webRequiredPomArtifacts = [
   'kk-studio-platform-plugin-api',
@@ -686,6 +679,9 @@ const webRequiredPluginConfigurationLines = [
 ]
 const webBusinessSqlPattern =
   /["'`](?:select\s+.+?\s+from|insert\s+into|update\s+.+?\s+set|delete\s+from)\s+/isu
+
+/** Plugin 只能是构建期依赖：从运行目录或 classpath 之外动态发现插件一律不接受。 */
+const dynamicDiscoveryTokens = ['URLClassLoader', 'ServiceLoader']
 
 function checkWebArchitecture() {
   const webMainRoot = path.join(repositoryRoot, webMainJavaRoot)
@@ -750,9 +746,9 @@ function checkWebArchitecture() {
   for (const file of walkFiles(webMainRoot).filter((file) => file.endsWith('.java'))) {
     const relativePath = relativeFromRoot(file)
     const source = read(relativePath)
-    for (const token of webForbiddenSourceTokens) {
+    for (const token of dynamicDiscoveryTokens) {
       if (source.includes(token)) {
-        addError(`${relativePath}: contains forbidden trusted-JAR remnant '${token}'`)
+        addError(`${relativePath}: must not discover plugins dynamically (${token})`)
       }
     }
     if (relativePath.startsWith(webControllerSourcePrefix)) {
@@ -1239,14 +1235,6 @@ function checkExecutionAdmissionBoundary() {
   }
 }
 
-const platformCompositionForbiddenTokens = [
-  'TrustedJarContributorLoader',
-  'URLClassLoader',
-  'ServiceLoader',
-  'kk-studio.harness.contributors.directory',
-  'KK_STUDIO_TRUSTED_CONTRIBUTOR_DIRECTORY',
-]
-
 /** platform 不是组合根，且全仓不接受 LangChain4j；环境网关只实现能力传输。 */
 function checkPlatformCompositionBoundary() {
   const platformMain = path.join(repositoryRoot, 'platform/runtime/src/main/java')
@@ -1257,9 +1245,9 @@ function checkPlatformCompositionBoundary() {
       if (trimmed.startsWith('@SpringBootApplication') || trimmed.startsWith('SpringApplication.run(')) {
         addError(`${relativePath}:${line}: platform must not be the Spring Boot entry point`)
       }
-      for (const token of platformCompositionForbiddenTokens) {
+      for (const token of dynamicDiscoveryTokens) {
         if (text.includes(token)) {
-          addError(`${relativePath}:${line}: platform must not load trusted contributor JARs (${token})`)
+          addError(`${relativePath}:${line}: platform must not discover plugins dynamically (${token})`)
         }
       }
     }
