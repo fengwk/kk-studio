@@ -889,13 +889,6 @@ export const ENVIRONMENT_IDE_VIEW_STATE_VALUES: readonly EnvironmentIdeViewState
   'CLOSING',
 ]
 
-/** Java：fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO */
-export interface EnvironmentIdeViewsDTO {
-  daemonInstanceId: string
-  revision: string
-  views: EnvironmentIdeViewDTO[]
-}
-
 /** Java：fun.fengwk.kkstudio.platform.environment.dto.EnvironmentInstallCodeDTO */
 export interface EnvironmentInstallCodeDTO {
   code: string

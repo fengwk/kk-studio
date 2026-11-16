@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Thread join 集成测试使用的受控 {@link ModelGateway}：把请求中最后一条 USER 消息的文本原样回显为助手报告。
@@ -30,8 +29,6 @@ public final class EchoModelGateway extends SingleModelGateway {
 
   private static final String NO_INPUT = "(no user input)";
 
-  private final List<ProviderRequest> requests = new CopyOnWriteArrayList<>();
-
   @Override
   public Admission admit(Execution execution) {
     Objects.requireNonNull(execution, "execution");
@@ -40,18 +37,12 @@ public final class EchoModelGateway extends SingleModelGateway {
       @Override
       public Outcome run(Sink sink) {
         // 脚本化响应是同步内存交付：没有外部执行需要中断或释放。
-        requests.add(request);
         return new Succeeded(new ProviderCompletion(respond(request)));
       }
 
       @Override
       public void close() {}
     };
-  }
-
-  /** 已交付的 Provider 请求数（含 ToolResult continuation turn），供测试观测真实 Runtime 的调用次数。 */
-  public int requestCount() {
-    return requests.size();
   }
 
   private static ProviderResponse respond(ProviderRequest request) {

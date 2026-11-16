@@ -12,14 +12,7 @@ import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseClient;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewState;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
@@ -223,57 +216,25 @@ class IdeLeaseCoordinatorTest {
 
   private record Group(UUID eventNodeId, UUID connectionId, UUID browserSessionId) {}
 
-  private static final class FakeViews implements EnvironmentIdeService {
+  /** 只覆盖续租轮次使用的快照读取；其余命令路径在续租中不会被调用。 */
+  private static final class FakeViews extends EnvironmentIdeServiceImpl {
 
     private EnvironmentIdeViewsDTO response;
     private int calls;
+
+    private FakeViews() {
+      super(
+          mock(IdeCommandTransport.class),
+          new IdeBootstrapTicketService(),
+          mock(IdeBrowserUseGateway.class),
+          mock(IdeViewSnapshotStore.class),
+          EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT);
+    }
 
     @Override
     public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId) {
       calls++;
       return response;
-    }
-
-    @Override
-    public EnvironmentIdeViewDTO openView(
-        EnvironmentId environmentId, EnvironmentIdeOpenViewDTO request) {
-      throw new AssertionError("unexpected open");
-    }
-
-    @Override
-    public EnvironmentIdeViewDTO changeDirectory(
-        EnvironmentId environmentId, String viewId, EnvironmentIdeChangeDirectoryDTO request) {
-      throw new AssertionError("unexpected change");
-    }
-
-    @Override
-    public void focusTerminal(
-        EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-      throw new AssertionError("unexpected focus");
-    }
-
-    @Override
-    public void collapseMobile(
-        EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
-      throw new AssertionError("unexpected mobile layout");
-    }
-
-    @Override
-    public EnvironmentIdeDirectoryListingDTO listDirectories(
-        EnvironmentId environmentId, String path) {
-      throw new AssertionError("unexpected directory listing");
-    }
-
-    @Override
-    public EnvironmentIdeViewSnapshotDTO readView(
-        EnvironmentId environmentId, String viewId, EnvironmentIdeReadViewDTO request) {
-      throw new AssertionError("unexpected read");
-    }
-
-    @Override
-    public void closeView(
-        EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request) {
-      throw new AssertionError("unexpected close");
     }
   }
 

@@ -114,28 +114,6 @@ public final class IdeBrowserSessionRegistry {
     }
   }
 
-  /** 只删除该 Daemon 进程该视图该 epoch 的 cookie，不触碰新绑定。 */
-  public void remove(DaemonConnectionIdentity identity, String viewId, long bindingEpoch) {
-    Objects.requireNonNull(identity, "identity");
-    Objects.requireNonNull(viewId, "viewId");
-    synchronized (lock) {
-      sessions
-          .entrySet()
-          .removeIf(
-              entry -> {
-                SessionState session = entry.getValue();
-                boolean remove =
-                    session.identity.equals(identity)
-                        && session.viewId.equals(viewId)
-                        && session.bindingEpoch == bindingEpoch;
-                if (remove) {
-                  tokenBySessionKey.remove(session.key());
-                }
-                return remove;
-              });
-    }
-  }
-
   private void removeSession(String token) {
     SessionState removed = sessions.remove(token);
     if (removed != null) {

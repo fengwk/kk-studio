@@ -88,7 +88,7 @@ public class ApplicationEventConfiguration {
     return new PostgresqlNotificationLoop(
         dataSource,
         List.of(
-            // 1. Durable Work 唤醒：payload 是就绪行的 target type，只唤醒负责该类型的调度器；调度器通过 FOR UPDATE SKIP
+            // Durable Work 唤醒：payload 是就绪行的 target type，只唤醒负责该类型的调度器；调度器通过 FOR UPDATE SKIP
             // LOCKED
             // 并发抢占。重连后无法得知漏掉了哪些类型，全部唤醒一次。
             new PostgresqlNotificationHandler(
@@ -105,23 +105,23 @@ public class ApplicationEventConfiguration {
                   issueReconcileDispatcher.wake();
                   canvasFunctionDispatcher.wake();
                 }),
-            // 2. 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
+            // 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
             new PostgresqlNotificationHandler(
                 threadVersions.channel(),
                 threadVersions.onNotification(),
                 threadVersions.onResync()),
-            // 3. 画布版本失效：Canvas 拥有 canvas_revision 通道、payload 协议与 revision fan-out；Web 只建立 LISTEN
+            // 画布版本失效：Canvas 拥有 canvas_revision 通道、payload 协议与 revision fan-out；Web 只建立 LISTEN
             // 并把信号转发给浏览器事件通道以触发图谱更新
             new PostgresqlNotificationHandler(
                 CanvasVersionNotifications.CHANNEL,
                 canvasVersionNotifications::onNotification,
                 canvasVersionNotifications::broadcastResync),
-            // 4. Project/Issue 失效：生产方拥有通道与订阅入口，数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
+            // Project/Issue 失效：生产方拥有通道与订阅入口，数据库事实提交后按 projectId 提示浏览器回读权威 Snapshot
             new PostgresqlNotificationHandler(
                 ProjectChangeNotifications.CHANNEL,
                 projectChangeNotifications::onNotification,
                 projectChangeNotifications::broadcastResync),
-            // 5. 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
+            // 系统设置同步：集群任一节点修改全局设置提交后，广播通知所有节点原子回读最新快照
             new PostgresqlNotificationHandler(
                 SystemSettingsChangeHandler.CHANNEL,
                 payload -> {
@@ -132,13 +132,13 @@ public class ApplicationEventConfiguration {
                   systemSettingsChangeHandler.onResync();
                   daemonServerProvider.ifAvailable(EnvironmentDaemonServer::resyncSettings);
                 }),
-            // 6. 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
+            // 执行树失效：Thread 写事务内由写入口把 payload 聚合为真实执行根 id，浏览器回读该根的树
             new PostgresqlNotificationHandler(
                 executionTree.channel(), executionTree.onNotification(), executionTree.onResync()),
-            // 8. 待处理交互失效：ToolInvocation 进出审批/人工输入等待后提交，payload 是真实执行根 id
+            // 待处理交互失效：ToolInvocation 进出审批/人工输入等待后提交，payload 是真实执行根 id
             new PostgresqlNotificationHandler(
                 interactions.channel(), interactions.onNotification(), interactions.onResync()),
-            // 9. 环境连接变更：payload 是环境 id，不是执行根；环境精准失效，交互全量对账。
+            // 环境连接变更：payload 是环境 id，不是执行根；环境精准失效，交互全量对账。
             new PostgresqlNotificationHandler(
                 EnvironmentChangeNotifications.CHANNEL,
                 payload -> {
@@ -149,7 +149,7 @@ public class ApplicationEventConfiguration {
                   environmentChangeNotifications.broadcastResync();
                   interactions.onResync().run();
                 }),
-            // 10. Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
+            // Plugin 目录变更：集群任一节点提交配置后广播提示其它节点立即回读权威目录；payload 只作提示、不能作为可信状态，
             // 建连/重连时同样 resync，通知丢失由周期对账追平
             pluginCatalogNotificationHandler),
         () ->
@@ -192,7 +192,7 @@ public class ApplicationEventConfiguration {
                 PostgresqlRealtimeEventSource.CHANNEL,
                 realtimeBus::onNotification,
                 realtimeBus::onResync),
-            // 2. 跨节点流式追帧：每条通知只让接收节点对 active owner 做一次 attempt fence。重连不重放历史追帧，
+            // 跨节点流式追帧：每条通知只让接收节点对 active owner 做一次 attempt fence。重连不重放历史追帧，
             // 也不回查 head；没有 active owner 时下一次真实请求或 checkpoint 自然收敛。
             new PostgresqlNotificationHandler(
                 HarnessStreamCatchupService.CHANNEL,

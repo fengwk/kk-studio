@@ -15,7 +15,7 @@ import java.util.List;
  *
  * <ul>
  *   <li>HTTP 方法为 GET；
- *   <li>路径不以 {@code /api/}、{@code /actuator/}、{@code /ws/} 或 {@code /ide/} 开头；
+ *   <li>路径不以 {@code /api/}、{@code /actuator/}、{@code /ws/}、{@code /ide/} 或 {@code /internal/} 开头；
  *   <li>路径最后一段不包含点号（即无文件扩展名）。
  * </ul>
  *
@@ -30,6 +30,7 @@ public class SpaFallbackResourceResolver implements ResourceResolver {
   private static final String ACTUATOR_PREFIX = "/actuator/";
   private static final String WS_PREFIX = "/ws/";
   private static final String IDE_PREFIX = "/ide/";
+  private static final String INTERNAL_PREFIX = "/internal/";
   private static final String INDEX_HTML_LOCATION = "static/index.html";
   private static final ClassPathResource INDEX_HTML = new ClassPathResource(INDEX_HTML_LOCATION);
 
@@ -75,7 +76,9 @@ public class SpaFallbackResourceResolver implements ResourceResolver {
         || path.startsWith(WS_PREFIX)
         || path.equals("/ws")
         || path.startsWith(IDE_PREFIX)
-        || path.equals("/ide")) {
+        || path.equals("/ide")
+        || path.startsWith(INTERNAL_PREFIX)
+        || path.equals("/internal")) {
       return false;
     }
     return !hasExtension(path);

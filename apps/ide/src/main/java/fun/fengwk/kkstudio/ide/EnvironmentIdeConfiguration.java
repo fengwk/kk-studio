@@ -65,7 +65,7 @@ public class EnvironmentIdeConfiguration {
   @Bean
   @ConditionalOnMissingBean
   public IdeLeaseCoordinator ideLeaseCoordinator(
-      @Qualifier("localEnvironmentIdeService") EnvironmentIdeService localEnvironmentIdeService,
+      @Qualifier("localEnvironmentIdeService") EnvironmentIdeServiceImpl localEnvironmentIdeService,
       IdeCommandTransport ideCommandTransport,
       IdeBrowserUseGateway browserUse,
       @Qualifier("ideLeaseExecutor") ExecutorService ideLeaseExecutor) {

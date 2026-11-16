@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.ide;
 
-import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
@@ -25,9 +24,5 @@ public record IdeRequest(
     identity = Objects.requireNonNull(identity, "identity");
     invocationId = Objects.requireNonNull(invocationId, "invocationId");
     reply = Objects.requireNonNull(reply, "reply");
-  }
-
-  public EnvironmentId environmentId() {
-    return identity.environmentId();
   }
 }

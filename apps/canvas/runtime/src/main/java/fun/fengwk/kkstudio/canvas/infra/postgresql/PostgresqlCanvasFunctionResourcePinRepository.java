@@ -49,8 +49,8 @@ public class PostgresqlCanvasFunctionResourcePinRepository {
     return pinStore.countByResource(canvasId, resourceId);
   }
 
-  public boolean deleteByRun(UUID canvasId, UUID nodeId, UUID requestId) {
-    return pinStore.deleteByRun(canvasId, nodeId, requestId) >= 0;
+  public void deleteByRun(UUID canvasId, UUID nodeId, UUID requestId) {
+    pinStore.deleteByRun(canvasId, nodeId, requestId);
   }
 
   public int deleteByNode(UUID canvasId, UUID nodeId) {

@@ -9,7 +9,6 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 
 /**
  * IDE 视图控制服务：把 Studio API 的 view 请求翻译为 {@code IDE_COMMAND}，经既有 lease/READY 围栏下发到 owner。
@@ -33,9 +32,6 @@ public interface EnvironmentIdeService {
   EnvironmentIdeDirectoryListingDTO listDirectories(EnvironmentId environmentId, String path);
 
   void closeView(EnvironmentId environmentId, String viewId, EnvironmentIdeCloseViewDTO request);
-
-  /** owner 的当前视图快照；不创建视图，也不续租。 */
-  EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId);
 
   /** 纯读单个视图：只返回当前 owner 的权威资源和绑定，不创建、不续租、不发票据。 */
   EnvironmentIdeViewSnapshotDTO readView(

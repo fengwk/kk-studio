@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeOpenViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthenticationException;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
@@ -469,11 +468,6 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             exchange,
             200,
             objectMapper.writeValueAsString(nodeBLocal.openView(environmentId, request)));
-        return;
-      }
-      if ("GET".equals(method) && path.endsWith("/views")) {
-        EnvironmentIdeViewsDTO views = nodeBLocal.listViews(environmentId);
-        respond(exchange, 200, objectMapper.writeValueAsString(views));
         return;
       }
       if ("GET".equals(method) && segments.length == 7 && "views".equals(segments[5])) {

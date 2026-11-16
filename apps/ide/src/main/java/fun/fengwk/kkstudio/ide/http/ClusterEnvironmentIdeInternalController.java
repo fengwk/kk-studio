@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalRequests;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
@@ -47,8 +46,8 @@ import java.util.UUID;
  * qualifier），绝不递归回组合实现。 任何认证失败都在 401 处 fail-closed，未认证的大请求体不会进入解析，也不会有任何本地副作用；回执只有 ViewDTO，不含完整
  * cookie 或注册 token。
  *
- * <p>只有本 controller 自己的元数据路径受此约束；gateway 宿主的 {@code /http} 与 {@code /ws} 反向数据面不经过本 controller，也不受
- * 16KiB 限制。
+ * <p>只有本 controller 自己的元数据路径受此约束；gateway 宿主的 {@code /data-http} 与 {@code /data-ws} 反向数据面由 {@link
+ * ClusterEnvironmentIdeInternalDataPlaneController} 处理，不受 16KiB 限制。
  */
 @RestController
 @RequestMapping(IdeInternalPaths.INTERNAL_IDE_PREFIX + "/{environmentId}")
@@ -56,10 +55,7 @@ public class ClusterEnvironmentIdeInternalController {
 
   private static final int MAX_METADATA_BODY_BYTES = IdeInternalPaths.MAX_METADATA_BODY_BYTES;
 
-  /**
-   * viewId 的路径约束：只匹配 UUID 形状，避免把同前缀下的其它内部子资源（如 {@code /views} 或 {@code /directories}）误判为 viewId 并返回
-   * 405。
-   */
+  /** viewId 的路径约束：只匹配 UUID 形状，避免把同前缀下的其它内部子资源（如 {@code /directories}）误判为 viewId 并返回 405。 */
   private static final String VIEW_ID =
       "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}";
 
@@ -89,13 +85,6 @@ public class ClusterEnvironmentIdeInternalController {
     EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
     EnvironmentIdeOpenViewDTO body = readBody(request, EnvironmentIdeOpenViewDTO.class);
     return localEnvironmentIdeService.openView(environment, body);
-  }
-
-  @GetMapping("/views")
-  public EnvironmentIdeViewsDTO listViews(
-      @PathVariable UUID environmentId, HttpServletRequest request) {
-    EnvironmentId environment = authenticateAndAuthorize(request, environmentId);
-    return localEnvironmentIdeService.listViews(environment);
   }
 
   @GetMapping("/views/{viewId:" + VIEW_ID + "}")

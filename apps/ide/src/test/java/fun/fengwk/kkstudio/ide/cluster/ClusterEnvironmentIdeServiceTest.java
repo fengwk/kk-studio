@@ -29,7 +29,6 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 import fun.fengwk.kkstudio.platform.cluster.HmacClusterInternalAuthentication;
@@ -110,7 +109,6 @@ class ClusterEnvironmentIdeServiceTest {
     service.focusTerminal(ENV, VIEW, binding);
     service.collapseMobile(ENV, VIEW, binding);
     service.closeView(ENV, VIEW, close);
-    service.listViews(ENV);
     service.listDirectories(ENV, "/tmp");
     service.readView(ENV, VIEW, read);
 
@@ -118,7 +116,6 @@ class ClusterEnvironmentIdeServiceTest {
     verify(delegate).focusTerminal(ENV, VIEW, binding);
     verify(delegate).collapseMobile(ENV, VIEW, binding);
     verify(delegate).closeView(ENV, VIEW, close);
-    verify(delegate).listViews(ENV);
     verify(delegate).listDirectories(ENV, "/tmp");
     verify(delegate).readView(ENV, VIEW, read);
     verifyNoInteractions(remote);
@@ -196,17 +193,10 @@ class ClusterEnvironmentIdeServiceTest {
     service.focusTerminal(ENV, VIEW, binding);
     service.collapseMobile(ENV, VIEW, binding);
     service.closeView(ENV, VIEW, close);
-    service.listViews(ENV);
     service.readView(ENV, VIEW, readViewRequest());
 
     assertEquals(
-        List.of(
-            "changeDirectory",
-            "focusTerminal",
-            "collapseMobile",
-            "closeView",
-            "listViews",
-            "readView"),
+        List.of("changeDirectory", "focusTerminal", "collapseMobile", "closeView", "readView"),
         client.calls);
   }
 
@@ -317,12 +307,6 @@ class ClusterEnvironmentIdeServiceTest {
         String viewId,
         EnvironmentIdeViewBindingDTO request) {
       calls.add("collapseMobile");
-    }
-
-    @Override
-    public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId, ClusterOwnerRoute owner) {
-      calls.add("listViews");
-      return new EnvironmentIdeViewsDTO();
     }
 
     @Override

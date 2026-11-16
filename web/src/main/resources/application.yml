@@ -51,7 +51,7 @@ management:
   endpoints:
     web:
       exposure:
-        include: "health,prometheus,offline,online"
+        include: "health"
   tracing:
     # 本地链路追踪只创建 span 与 MDC，不上报外部 collector。
     sampling:

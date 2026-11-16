@@ -309,7 +309,7 @@ Flyway 加载 Schema 的 canonical baseline，各 profile 选择受控 seed，�
 
 Web 的 distribution profile 在 prepare-package 执行 npm ci/Vite build，将产物写入 target
 再复制到 classes/static，由 Boot repackage 嵌入 Fat JAR。
-SPA fallback 仅适用于 GET、非 API/actuator/ws/ide 且末段无扩展名的路径；真实 asset/Controller 优先。
+SPA fallback 仅适用于 GET、非 API/actuator/ws/ide/internal 且末段无扩展名的路径；真实 asset/Controller 优先，未映射的 `/internal/**` 保持 problem+json 404。
 
 部署参数、secret 与启动操作见 [部署与运行](../operations/deployment.md)，
 跨模块配置归属见 [Platform 配置](platform.md#配置)。
