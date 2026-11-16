@@ -21,3 +21,16 @@ sync_e2e_provider_credentials() (
   unset TEST_MINIMAX_BASE_URL TEST_MINIMAX_API_KEY
   node "$REPO_ROOT/scripts/dev/verify/e2e/sync-provider-credentials.mjs" --backend-url "$BACKEND_URL"
 )
+
+# Emit NUL-delimited `env -u` arguments for every live TEST_* input. Runtime process
+# isolation must not depend on a manually maintained list of provider credential names.
+test_env_unset_args() {
+  local name
+  while IFS= read -r name; do
+    case "$name" in
+      TEST_*)
+        printf '%s\0' -u "$name"
+        ;;
+    esac
+  done < <(compgen -e)
+}
