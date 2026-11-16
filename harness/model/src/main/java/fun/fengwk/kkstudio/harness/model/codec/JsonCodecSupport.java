@@ -124,6 +124,23 @@ public final class JsonCodecSupport {
     }
   }
 
+  /** 按枚举 {@code name()} 精确读取值；未知名称回显期望值类别、常量数与原始输入，不猜测大小写或空白。 */
+  public static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
+    try {
+      return Enum.valueOf(kind, name);
+    } catch (IllegalArgumentException error) {
+      throw new IllegalArgumentException(
+          context
+              + " must be one of "
+              + kind.getEnumConstants().length
+              + " "
+              + kind.getSimpleName()
+              + " values: "
+              + name,
+          error);
+    }
+  }
+
   public static Set<String> orderedSet(String... values) {
     Set<String> set = new LinkedHashSet<>();
     for (String value : values) {

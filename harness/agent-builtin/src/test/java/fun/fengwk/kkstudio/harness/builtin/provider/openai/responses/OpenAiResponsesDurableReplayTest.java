@@ -128,7 +128,8 @@ class OpenAiResponsesDurableReplayTest {
     }
     AgentMessageJsonCodec codec = new AgentMessageJsonCodec();
     AgentMessage durableAssistant =
-        codec.decode(codec.encode(new AgentMessage(AgentMessageRole.ASSISTANT, durableContents)));
+        codec.decodeNode(
+            codec.encodeNode(new AgentMessage(AgentMessageRole.ASSISTANT, durableContents)));
     List<ProviderMessage> projected =
         new ProviderMessageProjector()
             .projectSources(

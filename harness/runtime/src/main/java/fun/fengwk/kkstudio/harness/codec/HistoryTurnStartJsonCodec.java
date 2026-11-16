@@ -1,7 +1,9 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.array;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.readEnum;
 
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.ArrayNode;
@@ -77,8 +79,7 @@ final class HistoryTurnStartJsonCodec {
     ObjectNode node = object(value, "TURN_START.capabilities");
     JsonCodecSupport.requireFields(node, TURN_CAPABILITIES_FIELDS, "TURN_START.capabilities");
     ArrayNode subagentValues =
-        HistoryValueCodecs.requireArray(
-            node.get("subagentBindings"), "TURN_START.capabilities.subagentBindings");
+        array(node.get("subagentBindings"), "TURN_START.capabilities.subagentBindings");
     List<SubagentBinding> subagentBindings = new ArrayList<>(subagentValues.size());
     for (JsonNode subagentValue : subagentValues) {
       String context = "TURN_START.capabilities.subagentBindings[]";
@@ -104,7 +105,7 @@ final class HistoryTurnStartJsonCodec {
   }
 
   static Set<ModelInputModality> decodeModalities(JsonNode value, String context) {
-    ArrayNode array = HistoryValueCodecs.requireArray(value, context);
+    ArrayNode array = array(value, context);
     Set<ModelInputModality> modalities = new LinkedHashSet<>();
     for (JsonNode item : array) {
       if (!item.isString()) {
@@ -162,7 +163,7 @@ final class HistoryTurnStartJsonCodec {
             ? null
             : ExecutionSelectionJsonCodec.decode(executionNode, "TURN_START.compaction.execution");
     return new CompactionStart(
-        HistoryValueCodecs.readEnum(
+        readEnum(
             CompactionTrigger.class,
             HistoryValueCodecs.text(node, "trigger"),
             "TURN_START.compaction.trigger"),

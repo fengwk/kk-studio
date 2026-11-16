@@ -7,6 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
 
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
@@ -30,12 +33,34 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /** Shared 严格 AgentMessage/content codec：canonical 顺序、round-trip 与 boundary 拒绝。 */
 class AgentMessageJsonCodecTest {
 
+  private static final ObjectMapper MAPPER = HarnessJson.STRICT;
+
   private final AgentMessageJsonCodec codec = new AgentMessageJsonCodec();
+
+  /** 文本输入按严格 mapper 读成节点再走 node API：duplicate field、trailing token 与空白输入都被拒绝。 */
+  private static AgentMessage decode(String json) {
+    Objects.requireNonNull(json, "json");
+    JsonNode root;
+    try {
+      root = MAPPER.readTree(json);
+    } catch (JacksonException error) {
+      throw new IllegalArgumentException("malformed agent message JSON", error);
+    }
+    if (root == null || root.isMissingNode()) {
+      throw new IllegalArgumentException("malformed agent message JSON");
+    }
+    return new AgentMessageJsonCodec().decodeNode(root);
+  }
+
+  private static String encode(AgentMessage message) {
+    return MAPPER.writeValueAsString(new AgentMessageJsonCodec().encodeNode(message));
+  }
 
   private static final UUID TIER_BLOB_ID = UUID.fromString("0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01");
 
@@ -60,7 +85,7 @@ class AgentMessageJsonCodecTest {
                     5L,
                     "preview")));
 
-    assertEquals(message, codec.decode(codec.encode(message)));
+    assertEquals(message, decode(encode(message)));
     assertEquals(message, codec.decodeNode(codec.encodeNode(message)));
   }
 
@@ -94,7 +119,7 @@ class AgentMessageJsonCodecTest {
                         false,
                         HarnessJson.STRICT.createObjectNode()))));
 
-    AgentMessage decoded = codec.decode(codec.encode(message));
+    AgentMessage decoded = decode(encode(message));
     assertEquals(message, decoded);
     ProviderBlockData decodedThinkingData =
         ((ThinkingMessageContent) decoded.contents().getFirst()).providerBlockData();
@@ -129,21 +154,20 @@ class AgentMessageJsonCodecTest {
                     false,
                     "{\"exitCode\":0}")));
 
-    assertEquals(message, codec.decode(codec.encode(message)));
+    assertEquals(message, decode(encode(message)));
   }
 
   @Test
   void encodesCanonicalFieldOrder() {
     assertEquals(
         "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"hello\"}]}",
-        codec.encode(
-            new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))));
+        encode(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("hello")))));
     assertEquals(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"call-1\","
             + "\"toolName\":\"read\",\"rendererKey\":\"read\","
             + "\"argumentsJson\":\"{\\\"path\\\":\\\"README.md\\\"}\","
             + "\"historyAction\":null}]}",
-        codec.encode(
+        encode(
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
                 List.of(
@@ -154,7 +178,7 @@ class AgentMessageJsonCodecTest {
             + "\"toolName\":\"read\",\"rendererKey\":\"read\","
             + "\"contents\":[{\"type\":\"text\",\"text\":\"ok\"}],"
             + "\"error\":false,\"detailsJson\":\"{}\"}]}",
-        codec.encode(
+        encode(
             new AgentMessage(
                 AgentMessageRole.TOOL,
                 List.of(
@@ -172,7 +196,7 @@ class AgentMessageJsonCodecTest {
             + "\"name\":\"a.txt\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null,"
             + "\"imageTier\":null,\"originalWidth\":null,\"originalHeight\":null,"
             + "\"displayWidth\":null,\"displayHeight\":null}]}",
-        codec.encode(
+        encode(
             new AgentMessage(
                 AgentMessageRole.ASSISTANT,
                 List.of(
@@ -191,24 +215,23 @@ class AgentMessageJsonCodecTest {
                 new ToolCallMessageContent(
                     "call-1", "fs_read", "fs.read", "{\"path\":\"a.txt\"}", "read a.txt"),
                 new ToolCallMessageContent("call-2", "bash", "bash", "{}")));
-    String encoded = codec.encode(message);
+    String encoded = encode(message);
     assertFalse(encoded.contains("environmentName"));
-    assertEquals(message, codec.decode(encoded));
-    ToolCallMessageContent decoded =
-        (ToolCallMessageContent) codec.decode(encoded).contents().get(0);
+    assertEquals(message, decode(encoded));
+    ToolCallMessageContent decoded = (ToolCallMessageContent) decode(encoded).contents().get(0);
     assertEquals("read a.txt", decoded.historyAction());
 
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\","
                     + "\"toolCallId\":\"c\",\"toolName\":\"t\",\"rendererKey\":\"t\","
                     + "\"argumentsJson\":\"{}\",\"historyAction\":null,\"environmentName\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"tool_call\","
                     + "\"toolCallId\":\"c\",\"toolName\":\"t\",\"rendererKey\":\"t\","
                     + "\"argumentsJson\":\"{}\",\"historyAction\":\" \"}]}"));
@@ -229,8 +252,8 @@ class AgentMessageJsonCodecTest {
             AgentMessageRole.ASSISTANT,
             List.of(new TextMessageContent(""), new ThinkingMessageContent("")));
 
-    assertEquals(resource, codec.decode(codec.encode(resource)));
-    assertEquals(emptyText, codec.decode(codec.encode(emptyText)));
+    assertEquals(resource, decode(encode(resource)));
+    assertEquals(emptyText, decode(encode(emptyText)));
   }
 
   /** 意图：档位是 durable 事实，必须用 wire 名称无损往返；未知名称、枚举名与缺失字段都显式拒绝（绝不静默套用默认档位）。 */
@@ -242,12 +265,12 @@ class AgentMessageJsonCodecTest {
               AgentMessageRole.ASSISTANT,
               List.of(ResourceMessageContent.media(TIER_BLOB_ID, "photo.png", "preview", tier)));
 
-      String json = codec.encode(message);
+      String json = encode(message);
 
       assertTrue(
           json.contains("\"imageTier\":\"" + tier.wireName() + "\""),
           "durable JSON 必须写出档位 wire 名称：" + json);
-      assertEquals(message, codec.decode(json));
+      assertEquals(message, decode(json));
       assertEquals(message, codec.decodeNode(codec.encodeNode(message)));
     }
 
@@ -261,7 +284,7 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
                     + "\"name\":\"photo.png\",\"totalBytes\":null,\"totalLines\":null,"
@@ -272,7 +295,7 @@ class AgentMessageJsonCodecTest {
   @Test
   void durableEncodingCarriesNoInlineMedia() {
     String json =
-        codec.encode(
+        encode(
             new AgentMessage(
                 AgentMessageRole.USER,
                 List.of(
@@ -306,7 +329,7 @@ class AgentMessageJsonCodecTest {
 
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.encode(attachmentMessage(uploadId, ImageInputTier.P720)));
+        () -> encode(attachmentMessage(uploadId, ImageInputTier.P720)));
     assertThrows(
         IllegalArgumentException.class, () -> codec.encodeNode(attachmentMessage(uploadId, null)));
   }
@@ -317,7 +340,7 @@ class AgentMessageJsonCodecTest {
   }
 
   private AgentMessage decodeResourceWithTier(String imageTierJsonValue) {
-    return codec.decode(
+    return decode(
         "{\"role\":\"ASSISTANT\",\"contents\":[{\"type\":\"resource\","
             + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
             + "\"name\":\"photo.png\",\"totalBytes\":null,\"totalLines\":null,"
@@ -344,11 +367,11 @@ class AgentMessageJsonCodecTest {
                     1280,
                     960)));
 
-    String encoded = codec.encode(image);
+    String encoded = encode(image);
 
     assertTrue(encoded.contains("\"originalWidth\":4032"), encoded);
     assertTrue(encoded.contains("\"displayHeight\":960"), encoded);
-    assertEquals(image, codec.decode(encoded));
+    assertEquals(image, decode(encoded));
   }
 
   @Test
@@ -356,21 +379,21 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.encode(
+            encode(
                 new AgentMessage(
                     AgentMessageRole.USER,
                     List.of(new ImageMessageContent("image/png", "data:image/png;base64,AA==")))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.encode(
+            encode(
                 new AgentMessage(
                     AgentMessageRole.USER,
                     List.of(new AudioMessageContent("audio/wav", "https://example.test/a.wav")))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.encode(
+            encode(
                 new AgentMessage(
                     AgentMessageRole.USER,
                     List.of(new VideoMessageContent("video/mp4", "https://example.test/v.mp4")))));
@@ -381,19 +404,19 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"image\",\"mediaType\":\"image/png\","
                     + "\"source\":\"data:image/png;base64,AA==\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"audio\",\"mediaType\":\"audio/wav\","
                     + "\"source\":\"https://example.test/a.wav\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"video\",\"mediaType\":\"video/mp4\","
                     + "\"source\":\"https://example.test/v.mp4\"}]}"));
   }
@@ -403,23 +426,21 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]} {}"));
+        () -> decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]} {}"));
   }
 
   @Test
   void rejectsMalformedNullOrWrongRootJson() {
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("{"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode(""));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("null"));
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("[]"));
-    assertThrows(NullPointerException.class, () -> codec.decode(null));
-    assertThrows(NullPointerException.class, () -> codec.encode(null));
+    assertThrows(IllegalArgumentException.class, () -> decode("{"));
+    assertThrows(IllegalArgumentException.class, () -> decode(""));
+    assertThrows(IllegalArgumentException.class, () -> decode("null"));
+    assertThrows(IllegalArgumentException.class, () -> decode("[]"));
+    assertThrows(NullPointerException.class, () -> decode(null));
+    assertThrows(NullPointerException.class, () -> encode(null));
     assertThrows(NullPointerException.class, () -> codec.encodeNode(null));
     assertThrows(NullPointerException.class, () -> codec.decodeNode(null));
   }
@@ -428,34 +449,32 @@ class AgentMessageJsonCodecTest {
   void rejectsUnknownRoleAndContentType() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"role\":\"FOO\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}"));
+        () -> decode("{\"role\":\"FOO\",\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"document\",\"url\":\"x\"}]}"));
+        () -> decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"document\",\"url\":\"x\"}]}"));
   }
 
   @Test
   void rejectsMissingOrWrongTypedMessageFields() {
-    assertThrows(IllegalArgumentException.class, () -> codec.decode("{\"role\":\"USER\"}"));
+    assertThrows(IllegalArgumentException.class, () -> decode("{\"role\":\"USER\"}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"role\":1,\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}"));
+        () -> decode("{\"role\":1,\"contents\":[{\"type\":\"text\",\"text\":\"x\"}]}"));
     assertThrows(
-        IllegalArgumentException.class, () -> codec.decode("{\"role\":\"USER\",\"contents\":{}}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> codec.decode("{\"role\":\"USER\",\"contents\":[{\"text\":\"x\"}]}"));
+        IllegalArgumentException.class, () -> decode("{\"role\":\"USER\",\"contents\":{}}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"role\":\"USER\",\"contents\":[{\"type\":5,\"text\":\"x\"}]}"));
+        () -> decode("{\"role\":\"USER\",\"contents\":[{\"text\":\"x\"}]}"));
     assertThrows(
-        IllegalArgumentException.class, () -> codec.decode("{\"role\":\"USER\",\"contents\":[]}"));
+        IllegalArgumentException.class,
+        () -> decode("{\"role\":\"USER\",\"contents\":[{\"type\":5,\"text\":\"x\"}]}"));
+    assertThrows(
+        IllegalArgumentException.class, () -> decode("{\"role\":\"USER\",\"contents\":[]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":\"x\",\"extra\":1}]}"));
   }
 
@@ -463,52 +482,51 @@ class AgentMessageJsonCodecTest {
   void rejectsWrongTypedOrBlankContentFields() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"text\"}]}"));
+        () -> decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"text\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> codec.decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":5}]}"));
+        () -> decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"text\",\"text\":5}]}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"thinking\",\"text\":5}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"thinking\",\"text\":5}]}"));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\",\"blobId\":\"x\","
                     + "\"name\":\"a\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
                     + "\"name\":null,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
                     + "\"name\":\"\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
                     + "\"name\":5,\"totalBytes\":null,\"totalLines\":null,\"preview\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
                     + "\"name\":\"a\",\"totalBytes\":null,\"totalLines\":null,\"preview\":5}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
                     + "\"name\":\"a\",\"totalBytes\":null,\"totalLines\":null,\"preview\":null,\"extra\":1}]}"));
@@ -516,7 +534,7 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"resource\","
                     + "\"blobId\":\"0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01\","
                     + "\"name\":\"a\",\"preview\":null}]}"));
@@ -526,20 +544,18 @@ class AgentMessageJsonCodecTest {
   void rejectsInvalidRawJsonOnDecode() {
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            codec.decode(
-                "{\"role\":\"USER\",\"contents\":[{\"type\":\"json\",\"json\":\"{bad\"}]}"));
+        () -> decode("{\"role\":\"USER\",\"contents\":[{\"type\":\"json\",\"json\":\"{bad\"}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c\","
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"argumentsJson\":\"[1]\","
                     + "\"historyAction\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\","
                     + "\"contents\":[{\"type\":\"text\",\"text\":\"x\"}],"
@@ -551,19 +567,19 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.encode(
+            encode(
                 new AgentMessage(AgentMessageRole.USER, List.of(new JsonMessageContent("{bad")))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.encode(
+            encode(
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT,
                     List.of(new ToolCallMessageContent("c", "t", "t", "[1]")))));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.encode(
+            encode(
                 new AgentMessage(
                     AgentMessageRole.TOOL,
                     List.of(
@@ -576,7 +592,7 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.encode(
+            encode(
                 new AgentMessage(
                     AgentMessageRole.TOOL,
                     List.of(
@@ -590,7 +606,7 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.encode(
+            encode(
                 new AgentMessage(
                     AgentMessageRole.TOOL,
                     List.of(
@@ -611,7 +627,7 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\","
                     + "\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c2\","
@@ -621,7 +637,7 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\","
                     + "\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c2\","
@@ -635,14 +651,14 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"USER\",\"contents\":[{\"type\":\"tool_call\",\"toolCallId\":\"c\","
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"argumentsJson\":\"{}\","
                     + "\"historyAction\":null}]}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\","
                     + "\"contents\":[{\"type\":\"text\",\"text\":\"x\"}],"
@@ -650,7 +666,7 @@ class AgentMessageJsonCodecTest {
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            codec.decode(
+            decode(
                 "{\"role\":\"TOOL\",\"contents\":[{\"type\":\"tool_result\",\"toolCallId\":\"c\","
                     + "\"toolName\":\"t\",\"rendererKey\":\"t\",\"contents\":{},"
                     + "\"error\":false,\"detailsJson\":\"{}\"}]}"));
@@ -664,12 +680,12 @@ class AgentMessageJsonCodecTest {
             AgentMessageRole.USER,
             List.of(new JsonMessageContent("{\"big\":1e309,\"tiny\":1e-324}")));
 
-    String encoded = codec.encode(message);
+    String encoded = encode(message);
 
     assertTrue(encoded.contains("1e309"), encoded);
     assertTrue(encoded.contains("1e-324"), encoded);
     assertFalse(encoded.contains("Infinity"), encoded);
-    assertEquals(message, codec.decode(encoded));
+    assertEquals(message, decode(encoded));
   }
 
   /**
@@ -682,7 +698,7 @@ class AgentMessageJsonCodecTest {
       String jsonContent =
           "{\"role\":\"USER\",\"contents\":[{\"type\":\"json\",\"json\":\"" + raw + "\"}]}";
       IllegalArgumentException jsonError =
-          assertThrows(IllegalArgumentException.class, () -> codec.decode(jsonContent));
+          assertThrows(IllegalArgumentException.class, () -> decode(jsonContent));
       assertTrue(jsonError.getMessage().contains("content.json"), jsonError.getMessage());
 
       String toolCall =
@@ -692,7 +708,7 @@ class AgentMessageJsonCodecTest {
               + raw
               + "\",\"historyAction\":null}]}";
       IllegalArgumentException argumentsError =
-          assertThrows(IllegalArgumentException.class, () -> codec.decode(toolCall));
+          assertThrows(IllegalArgumentException.class, () -> decode(toolCall));
       assertTrue(
           argumentsError.getMessage().contains("content.argumentsJson"),
           argumentsError.getMessage());

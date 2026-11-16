@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.array;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.bool;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.decodeNullableText;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
@@ -28,7 +29,6 @@ import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.VideoMessageContent;
 import fun.fengwk.kkstudio.harness.model.ImageInputTier;
-import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayFormat;
@@ -165,14 +165,6 @@ final class AgentMessageContentJsonCodec {
         data.get("nativeFields"));
   }
 
-  /** 与 {@link JsonCodecSupport#array} 同判定，但保留 “must be a JSON array” 文案。 */
-  static ArrayNode requireArray(JsonNode value, String context) {
-    if (!(value instanceof ArrayNode array)) {
-      throw new IllegalArgumentException(context + " must be a JSON array");
-    }
-    return array;
-  }
-
   static ObjectNode encodeContent(AgentMessageContent content) {
     ObjectNode node = NODES.objectNode();
     switch (content) {
@@ -226,11 +218,7 @@ final class AgentMessageContentJsonCodec {
         node.put("rendererKey", value.rendererKey());
         ArrayNode nested = node.putArray("contents");
         for (AgentMessageContent child : value.contents()) {
-          if (child instanceof ToolCallMessageContent
-              || child instanceof ToolResultMessageContent) {
-            throw new IllegalArgumentException(
-                "tool result contents cannot nest tool call or tool result");
-          }
+          // ToolResultMessageContent 构造器已拒绝嵌套；encode 端直接按同一事实写出。
           nested.add(encodeContent(child));
         }
         node.put("error", value.error());
@@ -301,16 +289,11 @@ final class AgentMessageContentJsonCodec {
       }
       case "tool_result" -> {
         requireFields(node, TOOL_RESULT_FIELDS, "content");
-        ArrayNode contentsArray = requireArray(node.get("contents"), "content.contents");
+        ArrayNode contentsArray = array(node.get("contents"), "content.contents");
         List<AgentMessageContent> nestedContents = new ArrayList<>(contentsArray.size());
         for (JsonNode element : contentsArray) {
-          AgentMessageContent nested = decodeContent(element);
-          if (nested instanceof ToolCallMessageContent
-              || nested instanceof ToolResultMessageContent) {
-            throw new IllegalArgumentException(
-                "tool result contents cannot nest tool call or tool result");
-          }
-          nestedContents.add(nested);
+          // 嵌套拒绝由 ToolResultMessageContent 构造器唯一承担。
+          nestedContents.add(decodeContent(element));
         }
         yield new ToolResultMessageContent(
             requiredText(node, "toolCallId", "content"),

@@ -249,13 +249,14 @@ class ProviderReplayMaterializationTransportTest {
 
     AgentMessageJsonCodec messages = new AgentMessageJsonCodec();
     String durableUserJson =
-        messages.encode(
-            new AgentMessage(
-                AgentMessageRole.USER,
-                List.of(ResourceMessageContent.media(BLOB_ID, "document.pdf"))));
+        MAPPER.writeValueAsString(
+            messages.encodeNode(
+                new AgentMessage(
+                    AgentMessageRole.USER,
+                    List.of(ResourceMessageContent.media(BLOB_ID, "document.pdf")))));
     assertTrue(durableUserJson.contains(BLOB_ID.toString()));
     assertFalse(durableUserJson.contains("base64"));
-    AgentMessage durableUser = messages.decode(durableUserJson);
+    AgentMessage durableUser = messages.decodeNode(MAPPER.readTree(durableUserJson));
     ProviderMessageProjector projector = new ProviderMessageProjector();
     Set<ModelInputModality> modalities =
         Set.of(ModelInputModality.TEXT, ModelInputModality.DOCUMENT);
@@ -271,7 +272,7 @@ class ProviderReplayMaterializationTransportTest {
     assertEquals(ANSWER, completion.response().text());
 
     AgentMessage durableAssistant =
-        messages.decode(messages.encode(durableAssistant(completion.response().blocks())));
+        messages.decodeNode(messages.encodeNode(durableAssistant(completion.response().blocks())));
     List<ProviderMessage> secondMessages =
         projector.projectSources(
             List.of(

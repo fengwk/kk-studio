@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.array;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.readEnum;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
-import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.write;
 
-import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
@@ -40,7 +40,7 @@ import java.util.Set;
  * 可携带其 Provider 身份与原生字段。瞬时 Provider 投影类型 Image / Audio / Video（携带 attempt-only source）在 encode 与
  * decode 两端都确定性拒绝，绝不进入持久化 JSON。
  *
- * <p>String API 与 node API 都用于组合 codec（如 Entry payload / Thread command payload codec）。
+ * <p>只提供 node API：Entry payload 与 Thread command payload codec 在自己的信封里嵌放 message 子树。
  */
 public final class AgentMessageJsonCodec {
 
@@ -52,13 +52,7 @@ public final class AgentMessageJsonCodec {
 
   public AgentMessageJsonCodec() {}
 
-  /** 把 {@link AgentMessage} 编码为 canonical JSON 文本。 */
-  public String encode(AgentMessage message) {
-    Objects.requireNonNull(message, "message");
-    return write(MAPPER, encodeNode(message), "cannot encode agent message JSON");
-  }
-
-  /** 把 {@link AgentMessage} 编码为 deterministic canonical {@link ObjectNode}；String API 委派此方法。 */
+  /** 把 {@link AgentMessage} 编码为 deterministic canonical {@link ObjectNode}。 */
   public ObjectNode encodeNode(AgentMessage message) {
     Objects.requireNonNull(message, "message");
     ObjectNode node = NODES.objectNode();
@@ -94,22 +88,6 @@ public final class AgentMessageJsonCodec {
     return node;
   }
 
-  /** 把 canonical JSON 文本解码为 {@link AgentMessage}；任何非法结构抛 {@link IllegalArgumentException}。 */
-  public AgentMessage decode(String json) {
-    Objects.requireNonNull(json, "json");
-    JsonNode root;
-    try {
-      root = MAPPER.readTree(json);
-    } catch (JacksonException error) {
-      throw new IllegalArgumentException("malformed agent message JSON", error);
-    }
-    // Jackson 3 空白输入返回 MissingNode（Jackson 2 返回 null），两者都必须判为 malformed。
-    if (root == null || root.isMissingNode()) {
-      throw new IllegalArgumentException("malformed agent message JSON");
-    }
-    return decodeNode(root);
-  }
-
   /** 从任意 {@link JsonNode} 解码 {@link AgentMessage}。 */
   public AgentMessage decodeNode(JsonNode value) {
     Objects.requireNonNull(value, "value");
@@ -120,30 +98,11 @@ public final class AgentMessageJsonCodec {
             AgentMessageRole.class,
             AgentMessageContentJsonCodec.text(node, "role"),
             "message.role");
-    ArrayNode contentsNode =
-        AgentMessageContentJsonCodec.requireArray(node.get("contents"), "message.contents");
+    ArrayNode contentsNode = array(node.get("contents"), "message.contents");
     List<AgentMessageContent> contents = new ArrayList<>(contentsNode.size());
     for (JsonNode element : contentsNode) {
       contents.add(AgentMessageContentJsonCodec.decodeContent(element));
     }
     return new AgentMessage(role, contents);
-  }
-
-  // ---------- 通用工具方法 ----------
-
-  private static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
-    try {
-      return Enum.valueOf(kind, name);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          context
-              + " must be one of "
-              + kind.getEnumConstants().length
-              + " "
-              + kind.getSimpleName()
-              + " values: "
-              + name,
-          error);
-    }
   }
 }

@@ -4,7 +4,6 @@ import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
 
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.node.ArrayNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
@@ -162,7 +161,7 @@ final class HistoryValueCodecs {
     JsonCodecSupport.requireFields(
         node, METADATA_FIELDS, METADATA_OPTIONAL_FIELDS, "assistantMetadata");
     GenerationStopReason stopReason =
-        readEnum(
+        JsonCodecSupport.readEnum(
             GenerationStopReason.class, text(node, "stopReason"), "assistantMetadata.stopReason");
     ObjectNode usageNode = object(node.get("usage"), "assistantMetadata.usage");
     JsonCodecSupport.requireFields(usageNode, USAGE_FIELDS, "assistantMetadata.usage");
@@ -246,13 +245,6 @@ final class HistoryValueCodecs {
       tokens.put(ttl, value.longValue());
     }
     return Map.copyOf(tokens);
-  }
-
-  static ArrayNode requireArray(JsonNode value, String context) {
-    if (!(value instanceof ArrayNode array)) {
-      throw new IllegalArgumentException(context + " must be a JSON array");
-    }
-    return array;
   }
 
   static String text(ObjectNode node, String field) {
@@ -348,29 +340,13 @@ final class HistoryValueCodecs {
     return value.longValue();
   }
 
-  static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
-    try {
-      return Enum.valueOf(kind, name);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          context
-              + " must be one of "
-              + kind.getEnumConstants().length
-              + " "
-              + kind.getSimpleName()
-              + " values: "
-              + name,
-          error);
-    }
-  }
-
   static <E extends Enum<E>> E nullableEnum(
       Class<E> kind, ObjectNode node, String field, String context) {
     JsonNode value = node.get(field);
     if (value.isNull()) {
       return null;
     }
-    return readEnum(kind, text(node, field), context);
+    return JsonCodecSupport.readEnum(kind, text(node, field), context);
   }
 
   static String nullableText(ObjectNode node, String field) {

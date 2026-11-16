@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.codec;
 
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.array;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
 
@@ -112,8 +113,7 @@ final class HistorySystemJsonCodec {
   }
 
   static List<ProviderToolDefinition> decodeAddedTools(ObjectNode node, String context) {
-    ArrayNode added =
-        HistoryValueCodecs.requireArray(node.get("addedTools"), context + ".addedTools");
+    ArrayNode added = array(node.get("addedTools"), context + ".addedTools");
     List<ProviderToolDefinition> addedTools = new ArrayList<>(added.size());
     for (JsonNode item : added) {
       addedTools.add(PROVIDER_TOOL_DEFINITION_CODEC.decodeNode(item));
@@ -123,9 +123,7 @@ final class HistorySystemJsonCodec {
 
   static List<SystemHostedTool> decodeAddedHostedTools(ObjectNode node, String context) {
     String itemContext = context + ".addedHostedTools[]";
-    ArrayNode values =
-        HistoryValueCodecs.requireArray(
-            node.get("addedHostedTools"), context + ".addedHostedTools");
+    ArrayNode values = array(node.get("addedHostedTools"), context + ".addedHostedTools");
     List<SystemHostedTool> addedHostedTools = new ArrayList<>(values.size());
     for (JsonNode item : values) {
       ObjectNode hostedTool = object(item, itemContext);
@@ -140,7 +138,7 @@ final class HistorySystemJsonCodec {
 
   /** removedSections / removedTools / removedHostedTools 都是 string 数组。 */
   static List<String> decodeTextArray(JsonNode value, String context) {
-    ArrayNode values = HistoryValueCodecs.requireArray(value, context);
+    ArrayNode values = array(value, context);
     List<String> texts = new ArrayList<>(values.size());
     for (JsonNode item : values) {
       if (!item.isString()) {
