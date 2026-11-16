@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.catalog.model;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
@@ -58,6 +59,26 @@ class ModelGroupConfigCodecTest {
             "{\"members\":[],\"members\":[],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}")) {
       assertThrows(DomainException.class, () -> codec.decode(json), json);
     }
+  }
+
+  /** 未知字段由 FAIL_ON_UNKNOWN_PROPERTIES 统一拒绝，错误消息保留具体字段名。 */
+  @Test
+  void rejectsUnknownFieldsThroughStrictDeserialization() {
+    DomainException groupError =
+        assertThrows(
+            DomainException.class,
+            () ->
+                codec.decode(
+                    "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\"}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0,\"extra\":1}"));
+    assertTrue(groupError.getMessage().contains("extra"), groupError.getMessage());
+
+    DomainException memberError =
+        assertThrows(
+            DomainException.class,
+            () ->
+                codec.decode(
+                    "{\"members\":[{\"modelName\":\"a\",\"variant\":\"v\",\"extra\":1}],\"fallbackStatusCodes\":[],\"cooldownSeconds\":0}"));
+    assertTrue(memberError.getMessage().contains("extra"), memberError.getMessage());
   }
 
   /** 写入 DTO 同样拒绝无效引用和超长成员列表，而不是序列化成不可读取的记录。 */

@@ -108,15 +108,22 @@ public class ModelService {
     }
     String name = canonicalName(modelName);
     Model snapshot = repository.getByName(name);
+    Mutation mutation = null;
     if (snapshot != null
         && snapshot.kind() == ModelKind.GROUP
         && updateDTO instanceof ModelGroupUpdateDTO groupUpdate) {
+      // 组配置在这里校验并编码一次：成员锁与引用校验复用同一份已规范化结果。
+      mutation =
+          groupMutation(
+              groupUpdate.getName(), groupUpdate.getDescription(), groupUpdate.getGroup());
       // 先锁成员再锁组行：成员改名/删除走同一模型行锁，避免组配置引用已删除的成员或 Variant。
-      lockMembers(snapshot, groupUpdate.getGroup());
+      lockMembers(snapshot, mutation.group());
     }
     Model current = requireModelForUpdate(name);
     ensureExpectedVersion(current, expected);
-    Mutation mutation = mutation(updateDTO);
+    if (mutation == null) {
+      mutation = mutation(updateDTO);
+    }
     if (current.kind() != mutation.kind()) {
       throw DomainException.validation(RESOURCE, "model type cannot be changed");
     }
@@ -266,16 +273,12 @@ public class ModelService {
       validateVariantRetentions(
           provider.name(), provider.providerType(), decodeConfig(mutation.configJson()));
     } else {
-      validateMembers(groupCodec.decode(mutation.groupConfigJson()));
+      validateMembers(mutation.group());
     }
   }
 
   /** 在锁定组自身行之前按 canonical 名称顺序锁定旧、新成员行。组更新与成员改名/删除共用同一把成员行锁，避免旧成员在更新期间被改名导致 JSON 失效，也避免新成员被并发删除。 */
   private void lockMembers(Model existing, ModelGroupConfigDTO group) {
-    if (group == null) {
-      return;
-    }
-    groupCodec.validateShape(group);
     Set<String> names = new TreeSet<>();
     if (existing.groupConfigJson() != null) {
       decodeStoredGroup(existing, existing.groupConfigJson())
@@ -483,6 +486,7 @@ public class ModelService {
         modelId,
         editableSupport.trimToNull(rawDescription),
         configJson,
+        null,
         null);
   }
 
@@ -500,7 +504,8 @@ public class ModelService {
         null,
         editableSupport.trimToNull(rawDescription),
         null,
-        groupConfigJson);
+        groupConfigJson,
+        group);
   }
 
   private static String canonicalName(String name) {
@@ -514,6 +519,7 @@ public class ModelService {
     return name;
   }
 
+  /** 已规范化的写入内容；GROUP 额外携带已通过结构校验的组 DTO，避免后续再从 JSON 解码重复校验。 */
   private record Mutation(
       String name,
       ModelKind kind,
@@ -521,5 +527,6 @@ public class ModelService {
       String modelId,
       String description,
       String configJson,
-      String groupConfigJson) {}
+      String groupConfigJson,
+      ModelGroupConfigDTO group) {}
 }
