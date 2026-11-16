@@ -40,6 +40,14 @@ final class ToolInvocationValidation {
               "READY must not carry an undecided or denied approval");
         }
       }
+      case WAITING_CHILD -> {
+        if (!"task".equals(call.toolName()) || attempt <= 0) {
+          throw new IllegalArgumentException("WAITING_CHILD requires a running task attempt");
+        }
+        requireNoTerminalFacts(status, result, error);
+        requireNoInputReceipt(status, inputReceipt);
+        requireCompletedPreflightApproval(status, approval);
+      }
       case RUNNING -> {
         if (attempt <= 0) {
           throw new IllegalArgumentException("RUNNING requires a positive attempt");
@@ -269,6 +277,10 @@ final class ToolInvocationValidation {
           case WAITING_INPUT -> next == ToolInvocationStatus.WAITING_INPUT
               || next == ToolInvocationStatus.SUCCEEDED
               || next == ToolInvocationStatus.CANCELLED;
+          case WAITING_CHILD -> next == ToolInvocationStatus.WAITING_CHILD
+              || next == ToolInvocationStatus.SUCCEEDED
+              || next == ToolInvocationStatus.FAILED
+              || next == ToolInvocationStatus.CANCELLED;
           case READY -> next == ToolInvocationStatus.READY
               || next == ToolInvocationStatus.WAITING_APPROVAL
               || next == ToolInvocationStatus.WAITING_INPUT
@@ -280,7 +292,8 @@ final class ToolInvocationValidation {
               || next == ToolInvocationStatus.SUCCEEDED
               || next == ToolInvocationStatus.FAILED
               || next == ToolInvocationStatus.CANCELLED
-              || next == ToolInvocationStatus.UNKNOWN;
+              || next == ToolInvocationStatus.UNKNOWN
+              || next == ToolInvocationStatus.WAITING_CHILD;
           case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> next == stored;
         };
     if (!allowed) {

@@ -144,6 +144,14 @@ public record ToolInvocation(
     return withState(ToolInvocationStatus.WAITING_INPUT, attempt, null, null, null, now);
   }
 
+  /** RUNNING -&gt; WAITING_CHILD：task Join 已接受，释放执行线程，等待持久 Join 结果。 */
+  public ToolInvocation waitForChild(Instant now) {
+    if (status != ToolInvocationStatus.RUNNING || !"task".equals(call.toolName())) {
+      throw new IllegalArgumentException("waitForChild requires a running task invocation");
+    }
+    return withState(ToolInvocationStatus.WAITING_CHILD, attempt, approval, null, null, now);
+  }
+
   /**
    * WAITING_INPUT -&gt; SUCCEEDED：用户已提交冻结问卷的答案（或明确拒答），结果与 durable 回执同事务落盘。
    *
@@ -219,16 +227,18 @@ public record ToolInvocation(
    */
   public ToolInvocation fail(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");
-    if (status != ToolInvocationStatus.READY && status != ToolInvocationStatus.RUNNING) {
+    if (status != ToolInvocationStatus.READY
+        && status != ToolInvocationStatus.RUNNING
+        && status != ToolInvocationStatus.WAITING_CHILD) {
       throw new IllegalArgumentException(
-          "fail requires READY or RUNNING status; WAITING_APPROVAL must be decided or stopped");
+          "fail requires READY, RUNNING, or WAITING_CHILD status; WAITING_APPROVAL must be decided or stopped");
     }
     return withState(ToolInvocationStatus.FAILED, attempt, approval, null, error, now);
   }
 
   /**
-   * WAITING_APPROVAL / WAITING_INPUT / READY / RUNNING -&gt; CANCELLED，并附带一个 terminal error；attempt
-   * 不变。
+   * WAITING_APPROVAL / WAITING_INPUT / WAITING_CHILD / READY / RUNNING -&gt; CANCELLED，并附带一个
+   * terminal error；attempt 不变。
    */
   public ToolInvocation cancel(ToolInvocationError error, Instant now) {
     Objects.requireNonNull(error, "error");

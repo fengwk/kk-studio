@@ -64,6 +64,12 @@ final class GatewayRun extends AbstractToolRun {
   }
 
   private ToolGateway.Completion complete(ToolOutcome outcome) {
-    return completion(outcome == null ? null : outcome.result());
+    if (outcome == null) {
+      return completion(null);
+    }
+    if (outcome.waitingForChild()) {
+      return new ToolGateway.WaitingForChild();
+    }
+    return completion(outcome.result());
   }
 }

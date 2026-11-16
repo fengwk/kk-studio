@@ -523,6 +523,7 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   private void apply(ToolGateway.Completion completion) {
     switch (completion) {
       case ToolGateway.Succeeded succeeded -> finishSuccess(succeeded.success());
+      case ToolGateway.WaitingForChild ignored -> safeTerminal(this::commitWaitingForChild);
       case ToolGateway.Failed failed -> finishFailure(failed.error(), failed.retryable());
       case ToolGateway.Cancelled cancelled -> safeTerminal(
           () -> commitTerminal(ToolTerminalWrites.TerminalKind.CANCELLED, cancelled.error()));
@@ -617,6 +618,11 @@ public final class ToolExecution implements ClaimAdmissionGuard.GuardedExecution
   /** RUNNING -&gt; READY + version+1 + reschedule；不 request THREAD。 */
   private boolean commitRetry(Duration delay) {
     return terminalWrites.retry(claim, threadId, invocationId, attempt, delay);
+  }
+
+  /** RUNNING -&gt; WAITING_CHILD：Join 已接受；complete claim 后由 Join 匹配重新请求 TOOL Work。 */
+  private boolean commitWaitingForChild() {
+    return terminalWrites.waitingForChild(claim, threadId, invocationId, attempt);
   }
 
   /** RUNNING -&gt; SUCCEEDED：先把结果物化为 Session 稳定引用，再保存该唯一稳定结果；物化永久失败时以独立的无资源 UNKNOWN 收敛。 */

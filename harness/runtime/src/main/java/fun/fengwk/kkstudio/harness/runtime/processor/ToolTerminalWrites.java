@@ -7,6 +7,8 @@ import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
@@ -138,6 +140,54 @@ final class ToolTerminalWrites {
               tx.tools().update(List.of(tool.retryReady(now)));
               tx.threads().update(thread.touchVersion(now));
               tx.work().reschedule(claim, delay);
+              return true;
+            }));
+  }
+
+  /** RUNNING -&gt; WAITING_CHILD：已接受的 task Join 成为唯一等待事实，并立即释放 TOOL claim。 */
+  boolean waitingForChild(ClaimedWork claim, UUID threadId, UUID invocationId, int attempt) {
+    return Boolean.TRUE.equals(
+        store.transaction(
+            tx -> {
+              Instant now = tx.now();
+              ThreadState thread = tx.threads().lock(threadId).orElse(null);
+              if (thread == null) {
+                return false;
+              }
+              ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
+              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
+                return false;
+              }
+              if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
+                return false;
+              }
+              ThreadJoin join = tx.joins().find(invocationId).orElse(null);
+              if (join == null
+                  || join.delivery() != JoinDelivery.SETTLE_TOOL_RESULT
+                  || !threadId.equals(join.parentThreadId())) {
+                tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
+                tx.tools()
+                    .update(
+                        List.of(
+                            tool.fail(
+                                new ToolInvocationError(
+                                    "TASK_JOIN_MISSING",
+                                    "task execution completed without its accepted Join"),
+                                now)));
+              } else if (thread.executionControl().isStopped()) {
+                tx.tools()
+                    .update(
+                        List.of(
+                            tool.cancel(
+                                new ToolInvocationError(
+                                    "PARENT_STOPPED",
+                                    "parent thread stopped while task was accepted"),
+                                now)));
+              } else {
+                tx.tools().update(List.of(tool.waitForChild(now)));
+              }
+              tx.threads().update(thread.touchVersion(now));
+              tx.work().complete(claim);
               return true;
             }));
   }

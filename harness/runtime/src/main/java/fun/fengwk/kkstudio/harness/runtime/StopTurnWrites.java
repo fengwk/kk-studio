@@ -298,7 +298,7 @@ final class StopTurnWrites {
     for (ToolInvocation sibling : active.siblings()) {
       ToolInvocation terminal =
           switch (sibling.status()) {
-            case WAITING_APPROVAL, WAITING_INPUT, READY -> sibling.cancel(
+            case WAITING_APPROVAL, WAITING_INPUT, WAITING_CHILD, READY -> sibling.cancel(
                 TOOL_CANCELLED_ERROR, now);
             case RUNNING -> sibling.call().toolName().equals("task")
                 ? sibling.cancel(TOOL_CANCELLED_ERROR, now)
