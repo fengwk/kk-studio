@@ -397,6 +397,105 @@ public final class ToolProcessorTestSupport {
     return new Fixture(NO_RETRY, false, newScheduler(), askUserScenario(argumentsJson));
   }
 
+  /** Durable task fixture whose explicit child identity is supplied by the test. */
+  static Baseline seedBareTaskChild(
+      InMemoryBuiltinHarnessStore store, Baseline parent, UUID childThreadId, Instant now) {
+    return store.transaction(
+        tx -> {
+          ThreadState parentThread = tx.threads().find(parent.threadId()).orElseThrow();
+          UUID sessionId = tx.nextId();
+          UUID rootEntryId = tx.nextId();
+          UUID turnStartEntryId = tx.nextId();
+          UUID userEntryId = tx.nextId();
+          tx.sessions().insert(new Session(sessionId, "session-" + sessionId, now));
+          tx.entries()
+              .insert(
+                  new Entry(rootEntryId, sessionId, null, new RootPayload(branchSettings()), now));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      turnStartEntryId,
+                      sessionId,
+                      rootEntryId,
+                      new TurnStartPayload(
+                          TurnStartReason.INPUT,
+                          branchSettings(),
+                          childThreadId,
+                          100_000,
+                          16_384,
+                          null,
+                          null,
+                          new TurnCapabilities(
+                              List.of(),
+                              new TurnMediaCapabilities(
+                                  Set.of(ModelInputModality.TEXT), Set.of(), Set.of()))),
+                      now.plusMillis(1)));
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userEntryId,
+                      sessionId,
+                      turnStartEntryId,
+                      userMessagePayload(),
+                      now.plusMillis(2)));
+          tx.threads()
+              .insert(
+                  new ThreadState(
+                      childThreadId,
+                      sessionId,
+                      parent.threadId(),
+                      userEntryId,
+                      ThreadProcessorTestSupport.CREATION_REQUEST_HASH,
+                      "task-child",
+                      parentThread.rootThreadId(),
+                      false,
+                      ThreadKind.SUBAGENT,
+                      ThreadConstraints.NONE,
+                      ThreadExecutionControl.RUNNABLE,
+                      0L,
+                      1L,
+                      0L,
+                      now,
+                      now));
+          return new Baseline(
+              sessionId, rootEntryId, turnStartEntryId, userEntryId, null, childThreadId);
+        });
+  }
+
+  static Fixture taskFixture(UUID childThreadId) {
+    String argumentsJson =
+        "{\"subagent_type\":\"alpha\",\"prompt\":\"do the work\",\"thread_id\":\""
+            + childThreadId
+            + "\"}";
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "task",
+            "delegate work",
+            "task",
+            new InputSchema(
+                "task arguments",
+                Map.of(
+                    "subagent_type", new StringSchema("subagent type"),
+                    "prompt", new StringSchema("task prompt"),
+                    "thread_id", new StringSchema("existing child thread")),
+                Set.of("subagent_type", "prompt"),
+                false),
+            ToolSideEffect.NON_IDEMPOTENT,
+            Duration.ZERO);
+    ToolBinding binding =
+        new ToolBinding(
+            new AgentToolDefinition(descriptor, ToolVisibility.INTERNAL),
+            new ContributorBinding("builtin", "task"),
+            EnvironmentSupport.NONE,
+            null,
+            null);
+    return new Fixture(
+        NO_RETRY,
+        false,
+        newScheduler(),
+        new Scenario("task", argumentsJson, ToolSideEffect.NON_IDEMPOTENT, binding));
+  }
+
   static Baseline seedToolBaseline(InMemoryBuiltinHarnessStore store, Instant now) {
     return seedToolBaseline(store, now, false);
   }

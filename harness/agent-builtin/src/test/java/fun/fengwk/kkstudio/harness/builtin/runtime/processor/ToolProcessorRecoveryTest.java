@@ -12,14 +12,31 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
+import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
+import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.runtime.execution.TestExecutionExitConfirmer;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolExecution;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolExecutionTestSupport;
@@ -36,6 +53,7 @@ import java.lang.reflect.Proxy;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.RejectedExecutionException;
@@ -51,6 +69,103 @@ import java.util.concurrent.atomic.AtomicReference;
 class ToolProcessorRecoveryTest {
 
   private static final UUID OLD_LEASE = UUID.randomUUID();
+
+  private static void seedTaskJoin(
+      ToolProcessorTestSupport.Fixture fixture,
+      ToolProcessorTestSupport.Baseline child,
+      boolean matched) {
+    SubagentTaskRequest request =
+        new SubagentTaskRequest(
+            fixture.toolInvocationId,
+            fixture.baseline.threadId(),
+            "do the work",
+            "alpha",
+            null,
+            child.threadId());
+    fixture.store.transaction(
+        tx -> {
+          ThreadState childThread = tx.threads().lock(child.threadId()).orElseThrow();
+          UserMessageCommandPayload payload =
+              new UserMessageCommandPayload(AgentMessage.user("do the work"));
+          tx.commands()
+              .insert(
+                  List.of(
+                      new ThreadCommand(
+                          child.threadId(),
+                          1L,
+                          payload,
+                          UUID.randomUUID(),
+                          ThreadCommandPayloadJsonCodec.requestHash(payload),
+                          null,
+                          null,
+                          null,
+                          ToolProcessorTestSupport.NOW)));
+          ThreadJoin join =
+              new ThreadJoin(
+                  fixture.toolInvocationId,
+                  request.requestHash(),
+                  fixture.baseline.threadId(),
+                  child.threadId(),
+                  1L,
+                  "alpha",
+                  10,
+                  0L,
+                  null,
+                  null,
+                  null,
+                  ToolProcessorTestSupport.NOW,
+                  ToolProcessorTestSupport.NOW,
+                  JoinDelivery.SETTLE_TOOL_RESULT,
+                  null);
+          tx.joins().insert(join);
+          if (matched) {
+            tx.commands().loadQueued(child.threadId());
+            tx.commands()
+                .update(
+                    List.of(
+                        tx.commands()
+                            .find(child.threadId(), 1L)
+                            .orElseThrow()
+                            .markApplied(child.turnStartEntryId())));
+            UUID answerId = tx.nextId();
+            tx.entries()
+                .insert(
+                    new Entry(
+                        answerId,
+                        child.sessionId(),
+                        child.userEntryId(),
+                        new MessagePayload(
+                            new AgentMessage(
+                                AgentMessageRole.ASSISTANT,
+                                List.of(new TextMessageContent("child answer"))),
+                            new AssistantMessageMetadata(
+                                GenerationStopReason.COMPLETE,
+                                new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                            null),
+                        ToolProcessorTestSupport.NOW.plusMillis(3)));
+            UUID terminalId = tx.nextId();
+            tx.entries()
+                .insert(
+                    new Entry(
+                        terminalId,
+                        child.sessionId(),
+                        answerId,
+                        new TurnEndPayload(
+                            child.turnStartEntryId(), TurnEndOutcome.COMPLETED, false, null, null),
+                        ToolProcessorTestSupport.NOW.plusMillis(4)));
+            ThreadJoin current = tx.joins().find(fixture.toolInvocationId).orElseThrow();
+            tx.joins()
+                .update(
+                    current.match(
+                        terminalId, answerId, ToolProcessorTestSupport.NOW.plusMillis(4)));
+            tx.threads()
+                .update(
+                    childThread.advanceHead(
+                        terminalId, ToolProcessorTestSupport.NOW.plusMillis(4)));
+          }
+          return null;
+        });
+  }
 
   private final List<ScheduledExecutorService> schedulers = new ArrayList<>();
 
@@ -105,6 +220,60 @@ class ToolProcessorRecoveryTest {
             .wakeVersion());
     assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
     assertFalse(fixture.processor.hasActiveExecution());
+  }
+
+  /** Existing accepted Join recovers RUNNING into WAITING_CHILD without re-invoking the gateway. */
+  @Test
+  void runningAcceptedTaskRecoversToWaitingChildWithoutGatewayReplay() throws Exception {
+    UUID childThreadId = UUID.randomUUID();
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.taskFixture(childThreadId);
+    schedulers.add(fixture.scheduler);
+    ToolProcessorTestSupport.Baseline child =
+        ToolProcessorTestSupport.seedBareTaskChild(
+            fixture.store, fixture.baseline, childThreadId, ToolProcessorTestSupport.NOW);
+    seedTaskJoin(fixture, child, false);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+
+    assertEquals(
+        ProcessResult.TERMINATED,
+        fixture.processor.process(
+            ToolProcessorTestSupport.claim(
+                fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
+
+    assertEquals(
+        ToolInvocationStatus.WAITING_CHILD,
+        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId).status());
+    assertNull(ToolProcessorTestSupport.toolWork(fixture.store, fixture.toolInvocationId));
+    assertEquals(0, fixture.gateway.admitCalls);
+  }
+
+  /** A Join already matched before RUNNING recovery is delivered from its frozen receipt. */
+  @Test
+  void matchedTaskJoinBeforeWaitingStateIsDeliveredWithoutGatewayReplay() throws Exception {
+    UUID childThreadId = UUID.randomUUID();
+    ToolProcessorTestSupport.Fixture fixture = ToolProcessorTestSupport.taskFixture(childThreadId);
+    schedulers.add(fixture.scheduler);
+    ToolProcessorTestSupport.Baseline child =
+        ToolProcessorTestSupport.seedBareTaskChild(
+            fixture.store, fixture.baseline, childThreadId, ToolProcessorTestSupport.NOW);
+    seedTaskJoin(fixture, child, true);
+    ToolProcessorTestSupport.toRunning(
+        fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW);
+
+    assertEquals(
+        ProcessResult.TERMINATED,
+        fixture.processor.process(
+            ToolProcessorTestSupport.claim(
+                fixture.store, fixture.toolInvocationId, ToolProcessorTestSupport.NOW)));
+
+    ToolInvocation completed =
+        ToolProcessorTestSupport.tool(fixture.store, fixture.toolInvocationId);
+    assertEquals(ToolInvocationStatus.SUCCEEDED, completed.status());
+    assertEquals("call-1", completed.result().toolCallId());
+    assertEquals(
+        "child answer", ((TextResultContent) completed.result().contents().getFirst()).text());
+    assertEquals(0, fixture.gateway.admitCalls);
   }
 
   /** WAITING_APPROVAL 不应执行：仅在 ownership 有效时 complete TOOL Work，不 bump version、不 request THREAD。 */

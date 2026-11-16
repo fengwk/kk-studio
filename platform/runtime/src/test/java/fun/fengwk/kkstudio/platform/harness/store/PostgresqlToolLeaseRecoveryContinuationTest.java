@@ -17,6 +17,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
@@ -29,7 +30,11 @@ import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -43,6 +48,8 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
@@ -62,6 +69,7 @@ import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -105,6 +113,110 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
   @AfterEach
   void tearDown() {
     scheduler.shutdownNow();
+  }
+
+  /**
+   * WAITING_CHILD and a requested TOOL wake survive store recreation and can be claimed after
+   * restart.
+   */
+  @Test
+  void waitingChildAndToolWakeSurviveStoreRecreation() {
+    StoreTestSupport.TurnBaseline turn = StoreTestSupport.seedTurnBaseline(store);
+    String argumentsJson = "{\"subagent_type\":\"alpha\",\"prompt\":\"work\"}";
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "task",
+            "delegate work",
+            "task",
+            new InputSchema(
+                "task arguments",
+                Map.of(
+                    "subagent_type",
+                    new StringSchema("type"),
+                    "prompt",
+                    new StringSchema("prompt")),
+                Set.of("subagent_type", "prompt"),
+                false),
+            ToolSideEffect.NON_IDEMPOTENT,
+            Duration.ZERO);
+    ToolBinding taskBinding =
+        new ToolBinding(
+            new AgentToolDefinition(descriptor, ToolVisibility.INTERNAL),
+            new ContributorBinding("builtin", "task"),
+            EnvironmentSupport.NONE,
+            null,
+            null);
+    ToolCall call = new ToolCall("call-task", "task", argumentsJson);
+    UUID toolId = UUID.randomUUID();
+    store.transaction(
+        tx -> {
+          var thread = tx.threads().lock(turn.threadId()).orElseThrow();
+          UUID userId = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userId,
+                      turn.sessionId(),
+                      turn.turnStartEntryId(),
+                      StoreTestSupport.userMessagePayload(),
+                      T2));
+          UUID assistantId = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantId,
+                      turn.sessionId(),
+                      userId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new ToolCallMessageContent(
+                                      "call-task", "task", "task", argumentsJson),
+                                  new TextMessageContent("assistant"))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE,
+                              new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                          null),
+                      T3));
+          tx.threads().update(thread.advanceHead(assistantId, T3));
+          ToolInvocation ready =
+              new ToolInvocation(
+                  toolId,
+                  turn.threadId(),
+                  turn.turnStartEntryId(),
+                  assistantId,
+                  0,
+                  call,
+                  taskBinding,
+                  ToolInvocationStatus.READY,
+                  0,
+                  null,
+                  null,
+                  null,
+                  T3,
+                  T3);
+          tx.tools().insert(List.of(ready));
+          ToolInvocation allowed = ready.markApprovalNotRequired(T3);
+          tx.tools().update(List.of(allowed));
+          ToolInvocation running = allowed.markRunning(T3);
+          tx.tools().update(List.of(running));
+          tx.tools().update(List.of(running.waitForChild(T3)));
+          return null;
+        });
+
+    assertEquals(ToolInvocationStatus.WAITING_CHILD, findTool(toolId).status());
+    requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), turn.threadId());
+
+    HarnessStore restartedStore = PostgresqlHarnessStoreFixture.create();
+    assertEquals(
+        ToolInvocationStatus.WAITING_CHILD,
+        restartedStore.transaction(tx -> tx.tools().find(toolId).orElseThrow().status()));
+    ClaimedWork recovered =
+        restartedStore
+            .transaction(tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE))
+            .orElseThrow();
+    assertEquals(new WorkTarget(WorkTargetType.TOOL, toolId), recovered.target());
   }
 
   @Test

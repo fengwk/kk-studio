@@ -195,9 +195,9 @@ class SubagentTaskRunnerTest {
     // 执行父关系由 Runtime 建立：请求携带父 Thread，ROOT settings 只由本次物化结果决定。
     assertEquals(parentThreadId, accepted1.parentThreadId());
     assertEquals(target, accepted1.settings());
-    // 模型发起的子代理：通知父 Thread，票据即 invocation。
+    // 模型 task 的同步 tool_result 由父 TOOL Work 交付。
     assertEquals(ThreadKind.SUBAGENT, accepted1.kind());
-    assertEquals(JoinDelivery.NOTIFY_PARENT, accepted1.delivery());
+    assertEquals(JoinDelivery.SETTLE_TOOL_RESULT, accepted1.delivery());
     assertEquals(invocationId, accepted1.ticketId());
     // 源 prompt 与票据同一批命令：恰好一条可信调用方 CUSTOM_MESSAGE。
     assertEquals(1, accepted1.commands().size());
@@ -868,7 +868,7 @@ class SubagentTaskRunnerTest {
         null,
         NOW,
         NOW,
-        JoinDelivery.NOTIFY_PARENT,
+        JoinDelivery.SETTLE_TOOL_RESULT,
         null);
   }
 

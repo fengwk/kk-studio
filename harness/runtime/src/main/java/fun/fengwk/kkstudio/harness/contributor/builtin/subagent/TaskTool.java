@@ -8,9 +8,11 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.SpawnQuotaExceededException;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
@@ -119,6 +121,11 @@ public final class TaskTool implements Tool {
 
   private SubagentTaskRequest parseArguments(
       UUID invocationId, UUID parentThreadId, ToolCall call) {
+    return parseArguments(objectMapper, invocationId, parentThreadId, call);
+  }
+
+  private static SubagentTaskRequest parseArguments(
+      ObjectMapper objectMapper, UUID invocationId, UUID parentThreadId, ToolCall call) {
     JsonNode value;
     try {
       value = objectMapper.readTree(call.argumentsJson() == null ? "{}" : call.argumentsJson());
@@ -181,6 +188,33 @@ public final class TaskTool implements Tool {
   private ToolResult running(
       String callId, String subagentType, SubagentTaskAcceptance acceptance) {
     return statusResult(callId, subagentType, acceptance, "running", "Subagent is running.", false);
+  }
+
+  /** 校验 task 工具行与其唯一可接受的 Join 身份；不一致表示 durable 不变量损坏。 */
+  public static void requireMatchingJoin(ToolInvocation invocation, ThreadJoin join) {
+    Objects.requireNonNull(invocation, "invocation");
+    Objects.requireNonNull(join, "join");
+    if (!NAME.equals(invocation.call().toolName())) {
+      throw new IllegalStateException("child-wait state belongs to a non-task invocation");
+    }
+    SubagentTaskRequest request;
+    try {
+      request =
+          parseArguments(
+              new ObjectMapper(), invocation.id(), invocation.threadId(), invocation.call());
+    } catch (RuntimeException invalid) {
+      throw new IllegalStateException("persisted task invocation has invalid arguments", invalid);
+    }
+    if (!join.invocationId().equals(invocation.id())
+        || !Objects.equals(join.parentThreadId(), invocation.threadId())
+        || join.delivery() != JoinDelivery.SETTLE_TOOL_RESULT
+        || !join.childThreadId().equals(request.childThreadId())
+        || !join.requestHash().equals(request.requestHash())
+        || !join.agent().equals(request.subagentType())
+        || (request.maxTurns() != null && !request.maxTurns().equals(join.maxTurns()))) {
+      throw new IllegalStateException(
+          "task Join does not match its durable Tool invocation " + invocation.id());
+    }
   }
 
   /** 从持久 Join receipt 重建与同步 task 相同的模型结果，不依赖已退出的工具执行实例。 */

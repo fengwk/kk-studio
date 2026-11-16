@@ -33,7 +33,9 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -133,17 +135,28 @@ class ThreadLifecycleCoordinatorJoinTest {
 
   /** 同步 task Join 冻结结果时唤醒父 Work，但不创建异步通知命令。 */
   @Test
-  void synchronousTaskSettlementWakesParentWithoutNotification() {
-    UUID syncChildId = UUID.randomUUID();
+  void synchronousTaskSettlementWakesParentToolWithoutNotification() {
+    HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline taskBaseline =
+        HarnessRuntimeTestSupport.seedModelFreeToolBaseline(store, 1, "task");
+    root =
+        new HarnessRuntimeTestSupport.Baseline(
+            taskBaseline.sessionId(), taskBaseline.rootEntryId(), taskBaseline.threadId());
+    UUID taskToolId = taskBaseline.toolIds().getFirst();
+    setWaitingChild(taskToolId);
+    UUID syncChildId =
+        new SubagentTaskRequest(taskToolId, root.threadId(), "task", "agent", null, null)
+            .childThreadId();
     SeededChild syncChild = seedQuiescentChild(syncChildId, root.threadId(), 81L);
-    UUID syncJoinId = UUID.randomUUID();
-    insertUnmatchedJoin(syncJoinId, root.threadId(), syncChildId, JoinDelivery.SETTLE_TOOL_RESULT);
+    childId = syncChildId;
+    turnStartEntryId = syncChild.turnStartId();
+    terminalEntryId = syncChild.turnEndId();
+    insertUnmatchedTaskJoin(taskToolId, root.threadId(), syncChildId);
+    markSourceApplied();
     store.transaction(
         tx -> {
-          tx.threads().lock(syncChildId);
-          tx.commands().loadQueued(syncChildId);
-          ThreadCommand source = tx.commands().find(syncChildId, 1L).orElseThrow();
-          tx.commands().update(List.of(source.markApplied(syncChild.turnStartId())));
+          tx.threads().lock(root.threadId());
+          tx.work().delete(new WorkTarget(WorkTargetType.THREAD, root.threadId()));
+          tx.work().delete(new WorkTarget(WorkTargetType.TOOL, taskToolId));
           return null;
         });
 
@@ -166,16 +179,40 @@ class ThreadLifecycleCoordinatorJoinTest {
           return null;
         });
 
-    ThreadJoin matched = join(syncJoinId);
+    ThreadJoin matched = join(taskToolId);
     assertTrue(matched.matched());
     assertNull(matched.deliveryCommandSequence());
     assertEquals(0, rootCommandCount());
     assertTrue(
         store.<Boolean>transaction(
+            tx -> tx.work().find(new WorkTarget(WorkTargetType.TOOL, taskToolId)).isPresent()));
+    assertTrue(
+        store.<Boolean>transaction(
             tx ->
-                tx.work()
-                    .find(new WorkTarget(WorkTargetType.THREAD, root.threadId()))
-                    .isPresent()));
+                tx.work().find(new WorkTarget(WorkTargetType.THREAD, root.threadId())).isEmpty()));
+    assertEquals(
+        1L,
+        store
+            .<Long>transaction(
+                tx ->
+                    tx.work()
+                        .find(new WorkTarget(WorkTargetType.TOOL, taskToolId))
+                        .orElseThrow()
+                        .wakeVersion())
+            .longValue());
+
+    // A repeated terminal notification does not enqueue a second task delivery.
+    matchTerminal(false);
+    assertEquals(
+        1L,
+        store
+            .<Long>transaction(
+                tx ->
+                    tx.work()
+                        .find(new WorkTarget(WorkTargetType.TOOL, taskToolId))
+                        .orElseThrow()
+                        .wakeVersion())
+            .longValue());
   }
 
   /** J3：本 Thread 仍有 QUEUED 输入时不得结算上游 Join。 */
@@ -445,6 +482,34 @@ class ThreadLifecycleCoordinatorJoinTest {
   /** 在给定父 Thread 下插入一个尚未冻结结果的直接子 Join。 */
   private void insertUnmatchedJoin(UUID newJoinId, UUID parentThreadId, UUID childThreadId) {
     insertUnmatchedJoin(newJoinId, parentThreadId, childThreadId, JoinDelivery.NOTIFY_PARENT);
+  }
+
+  private void insertUnmatchedTaskJoin(UUID invocationId, UUID parentThreadId, UUID childThreadId) {
+    SubagentTaskRequest request =
+        new SubagentTaskRequest(invocationId, parentThreadId, "task", "agent", null, null);
+    store.transaction(
+        tx -> {
+          tx.threads().lock(childThreadId);
+          tx.joins()
+              .insert(
+                  new ThreadJoin(
+                      invocationId,
+                      request.requestHash(),
+                      parentThreadId,
+                      childThreadId,
+                      1L,
+                      "agent",
+                      10,
+                      0L,
+                      null,
+                      null,
+                      null,
+                      T0,
+                      T0,
+                      JoinDelivery.SETTLE_TOOL_RESULT,
+                      null));
+          return null;
+        });
   }
 
   private void insertUnmatchedJoin(
@@ -719,6 +784,30 @@ class ThreadLifecycleCoordinatorJoinTest {
         store
             .<Integer>transaction(tx -> tx.joins().countIncompleteChildren(root.threadId()))
             .intValue());
+  }
+
+  private void setWaitingChild(UUID toolId) {
+    store.transaction(
+        tx -> {
+          tx.threads().lock(root.threadId());
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
+          tx.tools().update(List.of(tool.markApprovalNotRequired(T1)));
+          return null;
+        });
+    store.transaction(
+        tx -> {
+          tx.threads().lock(root.threadId());
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
+          tx.tools().update(List.of(tool.markRunning(T1)));
+          return null;
+        });
+    store.transaction(
+        tx -> {
+          tx.threads().lock(root.threadId());
+          ToolInvocation tool = tx.tools().lock(toolId).orElseThrow();
+          tx.tools().update(List.of(tool.waitForChild(T1)));
+          return null;
+        });
   }
 
   private int rootCommandCount() {

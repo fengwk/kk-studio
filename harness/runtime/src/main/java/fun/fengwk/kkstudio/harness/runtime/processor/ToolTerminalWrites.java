@@ -7,12 +7,12 @@ import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
-import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
@@ -155,26 +155,26 @@ final class ToolTerminalWrites {
                 return false;
               }
               ToolInvocation tool = tx.tools().lock(invocationId).orElse(null);
-              if (tool == null || tx.work().lockClaimed(claim).isEmpty()) {
+              if (tool == null
+                  || tool.status() != ToolInvocationStatus.RUNNING
+                  || tool.attempt() != attempt) {
                 return false;
               }
-              if (tool.status() != ToolInvocationStatus.RUNNING || tool.attempt() != attempt) {
-                return false;
-              }
-              ThreadJoin join = tx.joins().find(invocationId).orElse(null);
-              if (join == null
-                  || join.delivery() != JoinDelivery.SETTLE_TOOL_RESULT
-                  || !threadId.equals(join.parentThreadId())) {
+              ThreadJoin join =
+                  tx.joins()
+                      .find(invocationId)
+                      .orElseThrow(
+                          () ->
+                              new IllegalStateException(
+                                  "accepted task has no durable Join " + invocationId));
+              TaskTool.requireMatchingJoin(tool, join);
+              if (join.supersededByInvocationId() != null) {
                 tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
-                tx.tools()
-                    .update(
-                        List.of(
-                            tool.fail(
-                                new ToolInvocationError(
-                                    "TASK_JOIN_MISSING",
-                                    "task execution completed without its accepted Join"),
-                                now)));
-              } else if (thread.executionControl().isStopped()) {
+              }
+              if (tx.work().lockClaimed(claim).isEmpty()) {
+                return false;
+              }
+              if (thread.executionControl().isStopped()) {
                 tx.tools()
                     .update(
                         List.of(
@@ -182,6 +182,15 @@ final class ToolTerminalWrites {
                                 new ToolInvocationError(
                                     "PARENT_STOPPED",
                                     "parent thread stopped while task was accepted"),
+                                now)));
+              } else if (join.supersededByInvocationId() != null) {
+                tx.tools()
+                    .update(
+                        List.of(
+                            tool.fail(
+                                new ToolInvocationError(
+                                    "TASK_SUPERSEDED",
+                                    "task Join was superseded by a later delegation"),
                                 now)));
               } else {
                 tx.tools().update(List.of(tool.waitForChild(now)));
