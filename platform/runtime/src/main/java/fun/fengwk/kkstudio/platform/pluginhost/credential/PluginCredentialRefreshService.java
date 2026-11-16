@@ -15,7 +15,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
@@ -180,11 +179,27 @@ public final class PluginCredentialRefreshService {
     if (normalized.isEmpty()) {
       return fallback;
     }
-    int length = normalized.length();
-    while (normalized.substring(0, length).getBytes(StandardCharsets.UTF_8).length
-        > MAX_ERROR_BYTES) {
-      length--;
+    int bytes = 0;
+    int index = 0;
+    while (index < normalized.length()) {
+      int codePoint = normalized.codePointAt(index);
+      int width = utf8Width(codePoint);
+      if (bytes + width > MAX_ERROR_BYTES) {
+        break;
+      }
+      bytes += width;
+      index += Character.charCount(codePoint);
     }
-    return normalized.substring(0, length);
+    return normalized.substring(0, index);
+  }
+
+  private static int utf8Width(int codePoint) {
+    if (codePoint < 0x80) {
+      return 1;
+    }
+    if (codePoint < 0x800) {
+      return 2;
+    }
+    return codePoint < 0x10000 ? 3 : 4;
   }
 }

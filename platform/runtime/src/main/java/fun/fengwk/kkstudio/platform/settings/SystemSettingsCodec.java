@@ -208,8 +208,8 @@ public class SystemSettingsCodec {
     return new SystemSettings.Tool(
         toPermission(dto.getPermission()),
         requiredInt(dto.getMaxOutputMib(), "tool.maxOutputMib"),
-        requiredMillis(dto.getModelGatewayBusyRetryMillis(), "tool.modelGatewayBusyRetryMillis"),
-        requiredMillis(
+        requiredLong(dto.getModelGatewayBusyRetryMillis(), "tool.modelGatewayBusyRetryMillis"),
+        requiredLong(
             dto.getToolGatewayOverloadRetryMillis(), "tool.toolGatewayOverloadRetryMillis"));
   }
 
@@ -222,8 +222,8 @@ public class SystemSettingsCodec {
     return new SystemSettings.AiRuntime(
         requiredInt(dto.getRetryMaxRetries(), "aiRuntime.retryMaxRetries"),
         strategy,
-        requiredMillis(dto.getRetryBaseDelayMillis(), "aiRuntime.retryBaseDelayMillis"),
-        requiredMillis(dto.getRetryMaxDelayMillis(), "aiRuntime.retryMaxDelayMillis"),
+        requiredLong(dto.getRetryBaseDelayMillis(), "aiRuntime.retryBaseDelayMillis"),
+        requiredLong(dto.getRetryMaxDelayMillis(), "aiRuntime.retryMaxDelayMillis"),
         toModelSelection(dto.getCompactionModel(), "aiRuntime.compactionModel"),
         requiredInt(dto.getCompactionKeepRecentTokens(), "aiRuntime.compactionKeepRecentTokens"),
         requiredInt(dto.getSubagentMaxDepth(), "aiRuntime.subagentMaxDepth"),
@@ -265,7 +265,7 @@ public class SystemSettingsCodec {
       throw new IllegalArgumentException("environment is required");
     }
     return new SystemSettings.Environment(
-        requiredMillis(dto.getHeartbeatTimeoutMillis(), "environment.heartbeatTimeoutMillis"));
+        requiredLong(dto.getHeartbeatTimeoutMillis(), "environment.heartbeatTimeoutMillis"));
   }
 
   private static SystemSettings.BackendNetwork toBackendNetwork(
@@ -289,20 +289,20 @@ public class SystemSettingsCodec {
       throw new IllegalArgumentException("storageMedia is required");
     }
     return new SystemSettings.StorageMedia(
-        requiredMillis(dto.getUploadExpiresSeconds(), "storageMedia.uploadExpiresSeconds"),
-        requiredMillis(
+        requiredLong(dto.getUploadExpiresSeconds(), "storageMedia.uploadExpiresSeconds"),
+        requiredLong(
             dto.getS3PresignDefaultExpiresSeconds(), "storageMedia.s3PresignDefaultExpiresSeconds"),
-        requiredMillis(
+        requiredLong(
             dto.getS3PresignMaxExpiresSeconds(), "storageMedia.s3PresignMaxExpiresSeconds"),
-        requiredMillis(
+        requiredLong(
             dto.getCanvasMediaProcessTimeoutMillis(),
             "storageMedia.canvasMediaProcessTimeoutMillis"),
         requiredInt(dto.getThumbnailMaxDimension(), "storageMedia.thumbnailMaxDimension"),
         requiredInt(dto.getThumbnailQuality(), "storageMedia.thumbnailQuality"),
         requiredImageTier(dto.getImageTier(), "storageMedia.imageTier"),
-        requiredMillis(
+        requiredLong(
             dto.getTemporaryResourceTtlSeconds(), "storageMedia.temporaryResourceTtlSeconds"),
-        requiredMillis(
+        requiredLong(
             dto.getTemporaryResourceCleanupIntervalSeconds(),
             "storageMedia.temporaryResourceCleanupIntervalSeconds"),
         requiredInt(dto.getMaxImagesPerRequest(), "storageMedia.maxImagesPerRequest"));
@@ -313,33 +313,33 @@ public class SystemSettingsCodec {
       throw new IllegalArgumentException("advanced is required");
     }
     return new SystemSettings.Advanced(
-        requiredMillis(
+        requiredLong(
             dto.getProcessorLeaseDurationMillis(), "advanced.processorLeaseDurationMillis"),
-        requiredMillis(
+        requiredLong(
             dto.getProcessorHeartbeatIntervalMillis(), "advanced.processorHeartbeatIntervalMillis"),
-        requiredMillis(
+        requiredLong(
             dto.getThreadResolveFailureDelayMillis(), "advanced.threadResolveFailureDelayMillis"),
-        requiredMillis(
+        requiredLong(
             dto.getModelDispatchBusyFallbackDelayMillis(),
             "advanced.modelDispatchBusyFallbackDelayMillis"),
-        requiredMillis(
+        requiredLong(
             dto.getToolPreflightFailureDelayMillis(), "advanced.toolPreflightFailureDelayMillis"),
-        requiredMillis(
+        requiredLong(
             dto.getToolDispatchBusyFallbackDelayMillis(),
             "advanced.toolDispatchBusyFallbackDelayMillis"),
         requiredInt(
             dto.getApplicationEventQueueCapacity(), "advanced.applicationEventQueueCapacity"),
-        requiredMillis(dto.getApplicationEventMaxBytes(), "advanced.applicationEventMaxBytes"),
-        requiredMillis(
+        requiredLong(dto.getApplicationEventMaxBytes(), "advanced.applicationEventMaxBytes"),
+        requiredLong(
             dto.getApplicationEventSendTimeoutMillis(),
             "advanced.applicationEventSendTimeoutMillis"),
-        requiredMillis(
+        requiredLong(
             dto.getApplicationEventHeartbeatIntervalMillis(),
             "advanced.applicationEventHeartbeatIntervalMillis"),
-        requiredMillis(
+        requiredLong(
             dto.getPostgresqlWorkNotificationPollMillis(),
             "advanced.postgresqlWorkNotificationPollMillis"),
-        requiredMillis(
+        requiredLong(
             dto.getPostgresqlWorkReconnectBackoffMillis(),
             "advanced.postgresqlWorkReconnectBackoffMillis"));
   }
@@ -455,7 +455,7 @@ public class SystemSettingsCodec {
     return dto;
   }
 
-  private static long requiredMillis(Long value, String field) {
+  private static long requiredLong(Long value, String field) {
     if (value == null) {
       throw new IllegalArgumentException(field + " is required");
     }
