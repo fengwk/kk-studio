@@ -66,8 +66,6 @@ function upgradeDrafts(db: IDBDatabase): void {
   if (!db.objectStoreNames.contains(STORE_NAME)) {
     const store = db.createObjectStore(STORE_NAME, { keyPath: 'id' })
     store.createIndex(SESSION_INDEX, 'sessionKey', { unique: false })
-    store.createIndex('canvasId', 'canvasId', { unique: false })
-    store.createIndex('userId', 'userId', { unique: false })
   }
 }
 
