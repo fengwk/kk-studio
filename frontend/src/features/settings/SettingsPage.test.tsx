@@ -384,4 +384,43 @@ describe('settings sync tab', () => {
     await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1))
     expect((mocks.update.mock.calls[0]![0] as { expectedVersion: string }).expectedVersion).toBe('1')
   })
+
+  // 导入后自动重新加载失败：错误必须出现在触发它的弹窗里，且不丢草稿与原版本。
+  it('reports a reload failure inside the import modal and keeps the draft untouched', async () => {
+    const user = userEvent.setup()
+    syncMocks.checkImport.mockResolvedValue({
+      created: [{ kind: 'settings', name: 'settings' }],
+      updated: [],
+      skipped: [],
+    })
+    syncMocks.importConfig.mockResolvedValue({
+      imported: [{ kind: 'settings', name: 'settings' }],
+      skipped: [],
+    })
+    const { container } = renderSettings()
+
+    // 初次加载已成功；导入后的重新加载 GET 失败。
+    mocks.get.mockRejectedValue(new Error('offline'))
+    await user.click(await tabByName('同步'))
+    const fileInput = container.querySelector('input[type="file"]')
+    expect(fileInput).not.toBeNull()
+    await user.upload(fileInput as HTMLInputElement, new File(['a: 1'], 'kk.yaml'))
+    const dialog = await screen.findByRole('dialog', { name: '导入配置' })
+    await user.click(within(dialog).getByRole('button', { name: '确认导入' }))
+
+    // 失败就地呈现在弹窗错误条里，而不是只能去服务端设置页才能看到。
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('设置加载失败。')
+
+    // draft 与 baseVersion 保持导入前的状态：页面仍无未保存更改，保存仍用版本 0。
+    await user.click(await tabByName('AI 运行时'))
+    const delay = await screen.findByLabelText('基础延迟（毫秒）')
+    expect(delay).toHaveValue('2000')
+    expect(screen.getByText('已是最新')).toBeInTheDocument()
+    await user.clear(delay)
+    await user.type(delay, '4000')
+    mocks.update.mockImplementation(async (update) => ({ ...makeSettingsDto(), ...update, version: '1' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1))
+    expect((mocks.update.mock.calls[0]![0] as { expectedVersion: string }).expectedVersion).toBe('0')
+  })
 })
