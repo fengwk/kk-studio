@@ -5,7 +5,8 @@ import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
 import { useI18n } from '@/shared/i18n'
 import type { ModelInputModality } from '@/shared/api/generated/contracts'
-import { AGENT_MODEL_INPUT_MODALITIES, toggleInputModality } from './ai-model-form-rules'
+import { MODEL_INPUT_MODALITY_VALUES } from '@/shared/api/generated/contracts'
+import { toggleInputModality } from './ai-model-form-rules'
 
 /** 上下文窗口 / 输入上限 / 最大输出长度；三者都保持字符串型草稿。 */
 export function ModelLimitFields({
@@ -137,7 +138,7 @@ export function ModelInputModalityField({
       </legend>
       <p className="inline-hint">{t('ai.catalog.form.inputModalityHint')}</p>
       <div className="capability-options">
-        {AGENT_MODEL_INPUT_MODALITIES.map((item) => {
+        {MODEL_INPUT_MODALITY_VALUES.map((item) => {
           const checked = draft.inputModalities.includes(item)
           return (
             <Checkbox
