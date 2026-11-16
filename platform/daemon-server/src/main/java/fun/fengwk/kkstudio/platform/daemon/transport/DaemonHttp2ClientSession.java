@@ -34,7 +34,6 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -70,8 +69,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
   private final HTTP2Session session;
   private final DaemonEnvironmentTunnel tunnel;
 
-  private final CompletableFuture<DaemonSession> sessionEstablished = new CompletableFuture<>();
-  private final AtomicBoolean sessionEstablishedMarker = new AtomicBoolean(false);
+  private final AtomicBoolean sessionEstablished = new AtomicBoolean(false);
   private final AtomicBoolean abandonMarker = new AtomicBoolean(false);
   private final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -147,10 +145,6 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
     return tunnel;
   }
 
-  CompletableFuture<DaemonSession> whenSessionEstablished() {
-    return sessionEstablished;
-  }
-
   public boolean isClosed() {
     return closed.get() || session.isClosed();
   }
@@ -176,7 +170,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
     abandonTimer =
         scheduler.schedule(
             () -> {
-              if (!sessionEstablishedMarker.get()) {
+              if (!sessionEstablished.get()) {
                 log.warn(
                     "Daemon control stream handshake timed out after 10s for {}, abandoning",
                     identity);
@@ -276,7 +270,7 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
   }
 
   private void onControlStreamHeaders200(Stream source) {
-    if (!sessionEstablishedMarker.compareAndSet(false, true)) {
+    if (!sessionEstablished.compareAndSet(false, true)) {
       return;
     }
     cancelAbandonTimer();
@@ -289,12 +283,10 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
       log.error("Failed to open daemon session in core for {}", identity, error);
       doAbandon();
       onSessionFailed(error);
-      sessionEstablished.completeExceptionally(error);
       return;
     }
     daemonSession = opened;
     ctrl.bindSession(opened);
-    sessionEstablished.complete(opened);
   }
 
   /**
@@ -326,9 +318,8 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
   public void drain() {
     tunnel.drain();
     try {
-      session.goAway(
-          new GoAwayFrame(session.getStreams().size() * 2 + 1, ErrorCode.NO_ERROR.code, null),
-          Callback.NOOP);
+      // 客户端发起的 GOAWAY 中 last-stream-id 指服务端发起的流；daemon 从不主动建流，因此恒为 0。
+      session.goAway(new GoAwayFrame(0, ErrorCode.NO_ERROR.code, null), Callback.NOOP);
     } catch (RuntimeException ex) {
       log.warn("Failed to send GOAWAY to daemon {}", identity, ex);
     }
@@ -388,9 +379,8 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
       return;
     }
     cancelTimers();
-    if (!sessionEstablishedMarker.get()) {
+    if (!sessionEstablished.get()) {
       doAbandon();
-      sessionEstablished.completeExceptionally(failure);
     }
     DaemonSession ds = daemonSession;
     if (ds != null) {
@@ -424,9 +414,8 @@ public class DaemonHttp2ClientSession implements AutoCloseable {
       return;
     }
     cancelTimers();
-    if (!sessionEstablishedMarker.get()) {
+    if (!sessionEstablished.get()) {
       doAbandon();
-      sessionEstablished.completeExceptionally(new IOException("session closed before handshake"));
     }
     try {
       session.close(ErrorCode.NO_ERROR.code, "session closed", Callback.NOOP);

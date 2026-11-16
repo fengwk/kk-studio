@@ -71,8 +71,7 @@ class MavisStatusTest {
         MavisStatus.raise(json("402"), "web_search", "quota exhausted");
     MavisBusinessException business =
         assertInstanceOf(MavisBusinessException.class, insufficientCredits);
-    assertEquals("402", business.code());
-    assertEquals("web_search", business.context());
+    assertTrue(business.getMessage().contains("web_search failed with code 402"));
     assertTrue(business.getMessage().contains("quota exhausted"));
     assertTrue(business.getMessage().contains("Do not retry until credits are available."));
   }
@@ -85,22 +84,22 @@ class MavisStatusTest {
     MavisBusinessException containerError =
         assertInstanceOf(
             MavisBusinessException.class, MavisStatus.raise(container, "ctx", "detail"));
-    assertEquals("unexpected-status", containerError.code());
+    assertTrue(containerError.getMessage().contains("code unexpected-status"));
 
     MavisBusinessException nullError =
         assertInstanceOf(
             MavisBusinessException.class, MavisStatus.raise(json("null"), "ctx", "detail"));
-    assertEquals("", nullError.code());
+    assertTrue(nullError.getMessage().contains("code : detail"));
 
     MavisBusinessException quotaError =
         assertInstanceOf(
             MavisBusinessException.class, MavisStatus.raise(json("402"), "ctx", "detail"));
-    assertEquals("402", quotaError.code());
+    assertTrue(quotaError.getMessage().contains("code 402"));
 
     MavisBusinessException textCodeError =
         assertInstanceOf(
             MavisBusinessException.class, MavisStatus.raise(json("\"2001\""), "ctx", "detail"));
-    assertEquals("2001", textCodeError.code());
+    assertTrue(textCodeError.getMessage().contains("code 2001"));
     assertTrue(MavisStatus.isAuthCode(json("\"1004\"")));
 
     String secret = "header.payload.signature";
@@ -108,7 +107,7 @@ class MavisStatusTest {
     assertFalse(MavisStatus.isAuthCode(echoed));
     MavisBusinessException error =
         assertInstanceOf(MavisBusinessException.class, MavisStatus.raise(echoed, "ctx", "detail"));
-    assertEquals("unexpected-status", error.code());
+    assertTrue(error.getMessage().contains("code unexpected-status"));
     assertFalse(error.getMessage().contains(secret));
   }
 }

@@ -1,9 +1,7 @@
 package fun.fengwk.kkstudio.platform.plugin.credential;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
@@ -26,11 +24,10 @@ class PluginCredentialProjectionTest {
     assertNull(projection.nextRefreshAt());
     assertNull(projection.lastRefreshedAt());
     assertNull(projection.lastRefreshError());
-    assertFalse(projection.connected());
   }
 
   @Test
-  void connectedOnlyForConnectedStatus() {
+  void projectsCredentialStatusAndMetadata() {
     PluginCredentialProjection connected =
         new PluginCredentialProjection(
             PluginCredentialStatus.CONNECTED, "CN", EXPIRES_AT, EXPIRES_AT, null, null);
@@ -38,7 +35,13 @@ class PluginCredentialProjectionTest {
         new PluginCredentialProjection(
             PluginCredentialStatus.REAUTH_REQUIRED, "CN", EXPIRES_AT, EXPIRES_AT, null, "rejected");
 
-    assertTrue(connected.connected());
-    assertFalse(rejected.connected());
+    assertEquals(PluginCredentialStatus.CONNECTED, connected.status());
+    assertEquals("CN", connected.region());
+    assertEquals(EXPIRES_AT, connected.expiresAt());
+    assertEquals(EXPIRES_AT, connected.nextRefreshAt());
+    assertNull(connected.lastRefreshedAt());
+    assertNull(connected.lastRefreshError());
+    assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, rejected.status());
+    assertEquals("rejected", rejected.lastRefreshError());
   }
 }

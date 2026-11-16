@@ -7,9 +7,6 @@ package fun.fengwk.kkstudio.plugin.minimaxmavis;
  */
 public class MavisBusinessException extends MavisException {
 
-  private final String context;
-  private final String code;
-
   public MavisBusinessException(String context, String code, String serverMessage) {
     super(
         context
@@ -18,17 +15,5 @@ public class MavisBusinessException extends MavisException {
             + ": "
             + serverMessage
             + ("402".equals(code) ? " Do not retry until credits are available." : ""));
-    this.context = context;
-    this.code = code;
-  }
-
-  /** 出错的 Mavis 操作名，例如 MCP endpoint 名。 */
-  public String context() {
-    return context;
-  }
-
-  /** 服务端业务状态码文本。 */
-  public String code() {
-    return code;
   }
 }

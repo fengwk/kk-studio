@@ -24,7 +24,7 @@ public final class PluginRedaction {
   private PluginRedaction() {}
 
   /** 用占位文本替换全部非空秘密。 */
-  public static String redact(String text, String... secrets) {
+  private static String redact(String text, String... secrets) {
     if (text == null) {
       return "";
     }

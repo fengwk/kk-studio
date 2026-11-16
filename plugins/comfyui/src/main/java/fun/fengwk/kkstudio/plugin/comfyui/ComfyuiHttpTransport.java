@@ -313,7 +313,7 @@ final class ComfyuiHttpTransport implements Closeable {
     PluginHttpSupport.rejectUsed(credentialAccess, snapshot, AUTH_REJECTED_ERROR);
   }
 
-  private static Duration requirePositive(Duration duration, String field) {
+  static Duration requirePositive(Duration duration, String field) {
     Objects.requireNonNull(duration, field);
     if (duration.isNegative() || duration.isZero()) {
       throw new IllegalArgumentException(field + " must be strictly positive");
@@ -340,7 +340,7 @@ final class ComfyuiHttpTransport implements Closeable {
   }
 
   /** body 读取失败：超时仍是 HttpTimeoutException，其余只给固定信息，不回显远端正文或原始 cause。 */
-  private static RuntimeException readFailure(IOException error) {
+  static RuntimeException readFailure(IOException error) {
     if (error instanceof HttpTimeoutException) {
       return new UncheckedIOException(
           new HttpTimeoutException("ComfyUI response read exceeded the request deadline"));

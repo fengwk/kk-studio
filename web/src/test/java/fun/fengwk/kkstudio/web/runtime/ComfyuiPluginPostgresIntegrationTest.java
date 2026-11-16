@@ -157,7 +157,11 @@ class ComfyuiPluginPostgresIntegrationTest {
             context -> {
               try (PluginCatalogRuntime.Lease lease = runtime(context).acquire()) {
                 PluginCatalogSnapshot snapshot = lease.snapshot();
-                assertEquals(List.of(COMFYUI), context.getBean(PluginRegistry.class).pluginIds());
+                assertEquals(
+                    List.of(COMFYUI),
+                    context.getBean(PluginRegistry.class).plugins().stream()
+                        .map(plugin -> plugin.descriptor().pluginId())
+                        .toList());
                 assertTrue(
                     PluginCanvasFunctionCatalog.of(snapshot).functionNames(COMFYUI).isEmpty());
                 assertTrue(

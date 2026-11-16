@@ -2332,6 +2332,22 @@ class EnvironmentDaemonServerTest {
     assertEquals(List.of(MessageType.SETTINGS, MessageType.INVOKE), channel.messageTypes());
   }
 
+  /** 测试意图：会话已关闭或被移除时开始更新必须报环境不可用（而不是把 null 会话变成运行时异常），与 invoke 一致。 */
+  @Test
+  void updateAdmissionWithoutReadySessionIsUnavailable() {
+    Fixture fixture = new Fixture();
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.beginUpdate(ENVIRONMENT_ID, UUID.randomUUID().toString()));
+
+    FakeControlChannel channel = fixture.connectReady("channel-update-no-session");
+    fixture.close(channel);
+    assertThrows(
+        EnvironmentCapabilityUnavailableException.class,
+        () -> fixture.server.beginUpdate(ENVIRONMENT_ID, UUID.randomUUID().toString()));
+    assertFalse(fixture.server.isUpdating(ENVIRONMENT_ID));
+  }
+
   /** 测试意图：存在在途普通调用时不得开始更新（busy），避免替换二进制打断执行。 */
   @Test
   void updateAdmissionRejectsWhenInvocationInFlight() {
@@ -3016,6 +3032,51 @@ class EnvironmentDaemonServerTest {
             CALL_ONE, uploadedRef(UUID.randomUUID(), "text/plain", "a.txt", "abc"), null));
     assertTrue(channel.closed());
     assertEquals(0, fixture.ticketService.reserves.size());
+  }
+
+  /**
+   * 测试意图：终态本身违规时，已迁移到墓碑的调用必须收到一次「结果不确定」通知并释放按 uploadId 绑定的上传；回收不得在接收锁内执行。
+   *
+   * <p>用两次钩子无等待地观察顺序：ERROR 帧被受理时监听器与票据服务都还没被调用（说明回收被推迟到锁外）；释放发生时连接已关闭。
+   */
+  @Test
+  void protocolViolatingCompletedNotifiesAndReleasesOutsideReceiveLock() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-completed-protocol-release");
+    RecordingListener listener = new RecordingListener();
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+
+    fixture.receive(
+        channel,
+        resourceUploadRequestEnvelope(
+            CALL_ONE.toString(), TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+    AtomicInteger listenerErrorsAtErrorOffer = new AtomicInteger(-1);
+    AtomicInteger releasesAtErrorOffer = new AtomicInteger(-1);
+    channel.afterOffer =
+        () -> {
+          listenerErrorsAtErrorOffer.set(listener.errorCount);
+          releasesAtErrorOffer.set(fixture.ticketService.releases.size());
+        };
+    AtomicBoolean closedAtRelease = new AtomicBoolean();
+    fixture.ticketService.onRelease = () -> closedAtRelease.set(channel.closed());
+
+    // 伪造的 uploadId 不属于本调用：终态被拒绝，但调用方必须收到一次结果不确定，且已绑定的上传不得泄漏。
+    fixture.receive(
+        channel,
+        completedResourceEnvelope(
+            CALL_ONE, uploadedRef(UUID.randomUUID(), "text/plain", "a.txt", "abc"), null));
+
+    assertTrue(channel.closed(), "forged terminal must close the connection");
+    assertEquals(0, listenerErrorsAtErrorOffer.get(), "ERROR 受理时不得已在接收锁内回调监听器");
+    assertEquals(0, releasesAtErrorOffer.get(), "ERROR 受理时不得已在接收锁内释放上传");
+    assertTrue(closedAtRelease.get(), "释放必须发生在协议错误收尾之后");
+    assertEquals(1, listener.errorCount, "终态违规必须恰好通知一次");
+    EnvironmentCapabilitySendUncertainException error =
+        assertInstanceOf(EnvironmentCapabilitySendUncertainException.class, listener.error);
+    assertTrue(error.getMessage().contains("invalid COMPLETED"), error.getMessage());
+    assertEquals(List.of(uploadId), fixture.ticketService.releases);
   }
 
   /** 测试意图：终态重复声明同一 uploadId 属于协议违规。 */

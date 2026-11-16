@@ -65,8 +65,6 @@ public final class MiniMaxMavisTool implements Tool {
   /** 无凭据行。 */
   private static final String CODE_NOT_CONNECTED = "MAVIS_CREDENTIAL_NOT_CONNECTED";
 
-  /** 主密钥不可用或密文不可解。 */
-
   /** 刷新在途，稍后可重试。 */
   private static final String CODE_AUTH_REFRESHING = "MAVIS_CREDENTIAL_AUTH_REFRESHING";
 

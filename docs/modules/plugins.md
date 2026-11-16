@@ -117,7 +117,7 @@
 
 - **ComfyUI**：[`plugins/comfyui/src/test/java`](../../plugins/comfyui/src/test/java/fun/fengwk/kkstudio/plugin/comfyui/)
   - [`ComfyuiPluginTest.java`](../../plugins/comfyui/src/test/java/fun/fengwk/kkstudio/plugin/comfyui/ComfyuiPluginTest.java)：安装期 Schema、默认值与认证规范校验；
-  - [`StandardComfyuiClientTest.java`](../../plugins/comfyui/src/test/java/fun/fengwk/kkstudio/plugin/comfyui/StandardComfyuiClientTest.java)：HTTP/WebSocket 客户端契约与解析；
+  - [`StandardComfyuiClientTest.java`](../../plugins/comfyui/src/test/java/fun/fengwk/kkstudio/plugin/comfyui/StandardComfyuiClientTest.java)：HTTP 客户端契约与解析；
   - [`H3PromptWorkflowTest.java`](../../plugins/comfyui/src/test/java/fun/fengwk/kkstudio/plugin/comfyui/H3PromptWorkflowTest.java)：MiniMax H3 工作流生成与 JSON 映射校验。
 - **Media**：[`plugins/media/src/test/java`](../../plugins/media/src/test/java/fun/fengwk/kkstudio/plugin/media/)
   - [`MediaPluginTest.java`](../../plugins/media/src/test/java/fun/fengwk/kkstudio/plugin/media/MediaPluginTest.java)：无凭据插件安装与开关装配；

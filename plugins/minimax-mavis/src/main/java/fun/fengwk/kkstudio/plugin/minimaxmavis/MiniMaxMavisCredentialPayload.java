@@ -83,13 +83,7 @@ public record MiniMaxMavisCredentialPayload(
     if (!token.isTextual() || !clientUuid.isTextual() || !obtainedAt.isIntegralNumber()) {
       throw new MavisValidationException("MiniMax Mavis credential payload has invalid fields");
     }
-    Instant obtained;
-    try {
-      obtained = Instant.ofEpochMilli(obtainedAt.longValue());
-    } catch (RuntimeException error) {
-      throw new MavisValidationException(
-          "MiniMax Mavis credential payload has an invalid obtained time", error);
-    }
+    Instant obtained = Instant.ofEpochMilli(obtainedAt.longValue());
     return new MiniMaxMavisCredentialPayload(token.textValue(), clientUuid.textValue(), obtained);
   }
 

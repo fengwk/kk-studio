@@ -330,7 +330,7 @@ class StandardComfyuiClientTest {
   @Test
   void exactUploadContentChecksSingleBulkAndZeroReadsOnce() throws Exception {
     InputStream content =
-        StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[] {1, 2, 3}), 2L)
+        ComfyuiHttpTransport.contentSupplier(new ByteArrayInputStream(new byte[] {1, 2, 3}), 2L)
             .get();
     assertEquals(1, content.read());
     byte[] bulk = new byte[4];
@@ -340,16 +340,16 @@ class StandardComfyuiClientTest {
     assertThrows(IOException.class, () -> content.read(bulk, 0, 1));
 
     InputStream empty =
-        StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[0]), 1L).get();
+        ComfyuiHttpTransport.contentSupplier(new ByteArrayInputStream(new byte[0]), 1L).get();
     assertEquals(0, empty.read(new byte[2], 0, 0));
     assertThrows(IOException.class, () -> empty.read());
 
     InputStream exact =
-        StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[] {7}), 1L).get();
+        ComfyuiHttpTransport.contentSupplier(new ByteArrayInputStream(new byte[] {7}), 1L).get();
     assertEquals(7, exact.read());
     assertEquals(-1, exact.read());
 
-    var again = StandardComfyuiClient.contentSupplier(new ByteArrayInputStream(new byte[] {9}), 1L);
+    var again = ComfyuiHttpTransport.contentSupplier(new ByteArrayInputStream(new byte[] {9}), 1L);
     again.get();
     IllegalStateException replay = assertThrows(IllegalStateException.class, again::get);
     assertTrue(replay.getMessage().contains("already open"));

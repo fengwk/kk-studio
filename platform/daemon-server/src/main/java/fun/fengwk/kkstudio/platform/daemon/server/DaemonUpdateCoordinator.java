@@ -33,7 +33,7 @@ final class DaemonUpdateCoordinator {
       throw new IllegalArgumentException("operationId must not be blank");
     }
     synchronized (lock) {
-      if (session == null || !session.isReady()) {
+      if (!session.isReady()) {
         throw new EnvironmentCapabilityUnavailableException(
             environmentId + " is not ready for update");
       }

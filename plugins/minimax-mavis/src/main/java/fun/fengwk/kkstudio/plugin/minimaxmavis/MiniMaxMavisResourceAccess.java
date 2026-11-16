@@ -108,15 +108,7 @@ public final class MiniMaxMavisResourceAccess {
   private static List<URI> mediaUris(JsonNode payload) {
     Set<String> collected = new LinkedHashSet<>();
     collectUrls(payload, collected);
-    List<URI> uris = new ArrayList<>(collected.size());
-    for (String candidate : collected) {
-      try {
-        uris.add(URI.create(candidate));
-      } catch (IllegalArgumentException error) {
-        // 收集阶段已经要求可解析的绝对 URL，这里只是防御性跳过。
-      }
-    }
-    return uris.subList(0, Math.min(uris.size(), MAX_STAGED_MEDIA));
+    return collected.stream().map(URI::create).toList();
   }
 
   private static void collectUrls(JsonNode node, Set<String> collected) {
