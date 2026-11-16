@@ -177,10 +177,11 @@ final class DaemonInvocationTracker {
         return true;
       }
     }
+    // Keep the tombstone table bounded even if every retained callback is currently claimed.
     Iterator<ExitConfirmation> oldest = tombstones.values().iterator();
     while (oldest.hasNext()) {
       ExitConfirmation confirmation = oldest.next();
-      if (confirmation != protectedConfirmation && !confirmation.claimed) {
+      if (confirmation != protectedConfirmation) {
         oldest.remove();
         return true;
       }

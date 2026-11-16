@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.daemon.server;
 
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.ENVIRONMENT_ID;
 import static fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServerTestSupport.INSTANCE_ID;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -38,7 +39,7 @@ class DaemonInvocationTrackerExitConfirmationTest {
   }
 
   @Test
-  void tombstonesAreTrimmedAfterClaimsReleaseInsteadOfRemainingOverCapacity() {
+  void claimedTombstonesCannotPreventTheTrackerCapacityBound() {
     DaemonInvocationTracker tracker = new DaemonInvocationTracker();
     List<UUID> invocationIds = new ArrayList<>();
     List<ExitConfirmation> claims = new ArrayList<>();
@@ -53,17 +54,16 @@ class DaemonInvocationTrackerExitConfirmationTest {
       claims.add(claim);
     }
 
-    assertTrue(
-        tracker.completeExitConfirmation(
-            ENVIRONMENT_ID, invocationIds.getFirst(), claims.getFirst(), false));
-    assertTrue(tracker.hasTombstone(ENVIRONMENT_ID, invocationIds.getFirst()));
-    assertTrue(
-        tracker.completeExitConfirmation(
-            ENVIRONMENT_ID, invocationIds.get(1), claims.get(1), false));
+    long retained =
+        invocationIds.stream().filter(id -> tracker.hasTombstone(ENVIRONMENT_ID, id)).count();
+    assertEquals(DaemonInvocationTracker.MAX_INVOCATION_TOMBSTONES, retained);
     assertFalse(
-        tracker.hasTombstone(ENVIRONMENT_ID, invocationIds.getFirst()),
-        "releasing claims must resume bounded eviction");
-    assertTrue(tracker.hasTombstone(ENVIRONMENT_ID, invocationIds.get(1)));
+        tracker.completeExitConfirmation(
+            ENVIRONMENT_ID, invocationIds.getFirst(), claims.getFirst(), false),
+        "an evicted claim cannot later deliver or acknowledge an exit fact");
+    assertTrue(
+        tracker.completeExitConfirmation(
+            ENVIRONMENT_ID, invocationIds.getLast(), claims.getLast(), false));
   }
 
   private static ActiveInvocation active(UUID invocationId, String daemonInstanceId) {
