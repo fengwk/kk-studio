@@ -49,22 +49,20 @@ function withInstall(body) {
 }
 
 describe('installer input bounds', () => {
-  // The token file bound is one fact, so both installers must accept the same credentials.
-  it('bounds the token file identically in both installers', () => {
-    const tokenBounds = (file) =>
-      readFileSync(path.join(ROOT, file), 'utf8')
-        .split('\n')
-        .filter((line) => line.includes('16384'))
-        .map((line) => line.trim())
-    assert.deepEqual(tokenBounds('scripts/daemon/install.sh'), [
-      'check_input "$source_token" 16384',
-      'check_input_size "$STAGED_TOKEN" 16384',
-      'check_input "$TOKEN_FILE" 16384',
-    ])
-    assert.deepEqual(tokenBounds('scripts/daemon/install.ps1'), [
-      '-Name "-TokenFile" -MaximumBytes 16384',
-      '$null = Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid -MaximumBytes 16384',
-    ])
+  // The token file bound is one fact: both installers and the daemon must accept the same size.
+  it('bounds the token file identically in both installers and the daemon', () => {
+    const lines = (file) => readFileSync(path.join(ROOT, file), 'utf8').split('\n')
+    const bounds = (matched, pattern) => matched.map((line) => Number(pattern.exec(line)?.[1]))
+    const shellChecks = lines('scripts/daemon/install.sh').filter((line) => /check_input(_size)?\b.*token/i.test(line))
+    assert.equal(shellChecks.length, 3)
+    const windowsChecks = lines('scripts/daemon/install.ps1').filter((line) => /TokenFile.*MaximumBytes/.test(line))
+    assert.equal(windowsChecks.length, 2)
+    const declared = lines('daemon/internal/config/load.go').filter((line) => line.startsWith('const MaxRegistrationTokenBytes'))
+    assert.equal(declared.length, 1)
+    const daemonBound = bounds(declared, /=\s*(\d+)/)[0]
+    assert.deepEqual(bounds(shellChecks, /(\d+)\s*$/), [daemonBound, daemonBound, daemonBound])
+    assert.deepEqual(bounds(windowsChecks, /MaximumBytes\s+(\d+)/), [daemonBound, daemonBound])
+    assert.equal(daemonBound, 16384)
   })
 })
 
