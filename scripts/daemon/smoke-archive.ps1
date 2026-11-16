@@ -17,6 +17,7 @@ try {
     foreach ($required in @($binary, (Join-Path $temp 'runtime\code-server\out\node\entry.js'), (Join-Path $temp 'ide-extension\extension.cjs'), (Join-Path $temp 'runtime-manifest.json'), (Join-Path $temp 'LICENSE'), (Join-Path $temp 'THIRD_PARTY_NOTICES'))) {
         if (-not (Test-Path -LiteralPath $required -PathType Leaf)) { throw "archive entry missing: $required" }
     }
+    if (Test-Path -LiteralPath (Join-Path $temp 'ide-extension\extension.test.cjs')) { throw 'release archive unexpectedly contains the IDE extension test suite' }
     $ripgrepBinary = Get-ChildItem -LiteralPath $temp -Recurse -File |
         Where-Object { $_.Name -in @('rg', 'rg.exe') } |
         Select-Object -First 1

@@ -16,7 +16,7 @@ const ARCH = ['arm64', 'aarch64'].includes(os.arch()) ? 'arm64' : 'amd64'
 const ARCHIVE_NAME = `kk-studio-daemon-v1.0.0-${HOST}-${ARCH}.tar.gz`
 const UNIX_HOST = ['linux', 'darwin'].includes(os.platform())
 
-function withArchive(body, { ripgrep = false, ripgrepPackage = false, binary = true } = {}) {
+function withArchive(body, { ripgrep = false, ripgrepPackage = false, testSuite = false, binary = true } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'kk-daemon-smoke-test-'))
   try {
     const members = [
@@ -34,6 +34,9 @@ function withArchive(body, { ripgrep = false, ripgrepPackage = false, binary = t
     }
     if (ripgrep) {
       members.push({ name: 'runtime/code-server/lib/vscode/node_modules/@vscode/ripgrep-universal/bin/linux-x64/rg', content: 'binary' })
+    }
+    if (testSuite) {
+      members.push({ name: 'ide-extension/extension.test.cjs', content: '// tests\n' })
     }
     if (ripgrepPackage) {
       members.push({ name: 'runtime/code-server/lib/vscode/node_modules/@vscode/ripgrep-universal/package.json', content: '{}\n' })
@@ -78,4 +81,8 @@ test('smoke archive checks platform and refuses a non-Go payload', { skip: !UNIX
     const result = run(archive)
     assert.match(result.stderr, /unexpectedly contains ripgrep package/)
   }, { ripgrepPackage: true })
+  withArchive(({ archive }) => {
+    const result = run(archive)
+    assert.match(result.stderr, /unexpectedly contains the IDE extension test suite/)
+  }, { testSuite: true })
 })
