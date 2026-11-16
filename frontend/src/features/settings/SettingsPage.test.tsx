@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -13,7 +13,6 @@ const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.f
 
 vi.mock('@/features/settings/system-settings-service', () => ({
   systemSettingsService: { get: mocks.get, getSchema: mocks.getSchema, update: mocks.update },
-  createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))
 
 vi.mock('@/shared/api/agent-service', () => ({
@@ -37,12 +36,6 @@ vi.mock('@/features/settings/config-sync-service', () => ({
     checkImport: syncMocks.checkImport,
     importConfig: syncMocks.importConfig,
   },
-  createConfigSyncService: () => ({
-    getInventory: vi.fn(),
-    exportConfig: vi.fn(),
-    checkImport: vi.fn(),
-    importConfig: vi.fn(),
-  }),
 }))
 
 const STORAGE_KEY = 'kk-studio.browser-preferences'
@@ -340,5 +333,55 @@ describe('settings sync tab', () => {
     expect(screen.getByRole('button', { name: '导出' })).toBeInTheDocument()
     // 同步只走 /api/platform/config-sync，不触发 system settings 的 CAS 保存。
     expect(mocks.update).not.toHaveBeenCalled()
+  })
+
+  // 导入后服务端已有新值：明确的「重新加载设置」必须重捕快照，否则保存仍带导入前的版本。
+  it('recaptures the draft snapshot when reloading settings after an import', async () => {
+    const user = userEvent.setup()
+    const imported = makeSettingsDto({ version: '1' })
+    imported.aiRuntime.retryBaseDelayMillis = '7000'
+    syncMocks.checkImport.mockResolvedValue({
+      created: [{ kind: 'settings', name: 'settings' }],
+      updated: [],
+      skipped: [],
+    })
+    syncMocks.importConfig.mockResolvedValue({
+      imported: [{ kind: 'settings', name: 'settings' }],
+      skipped: [],
+    })
+    const { container } = renderSettings()
+
+    // 先留下一份未保存 draft（与导入前的权威不同）。
+    await user.click(await tabByName('AI 运行时'))
+    const delay = await screen.findByLabelText('基础延迟（毫秒）')
+    await user.clear(delay)
+    await user.type(delay, '3000')
+    expect(screen.getByText('有未保存的更改')).toBeInTheDocument()
+
+    // 导入期间服务端换成导入后的权威值。
+    mocks.get.mockResolvedValue(imported)
+    await user.click(await tabByName('同步'))
+    const fileInput = container.querySelector('input[type="file"]')
+    expect(fileInput).not.toBeNull()
+    await user.upload(fileInput as HTMLInputElement, new File(['a: 1'], 'kk.yaml'))
+    const dialog = await screen.findByRole('dialog', { name: '导入配置' })
+    await user.click(within(dialog).getByRole('button', { name: '确认导入' }))
+    await within(dialog).findByText('重新加载设置')
+
+    await user.click(within(dialog).getByRole('button', { name: '重新加载设置' }))
+
+    // draft 以导入后的权威重建，脏状态清除，显示服务端新值。
+    await user.click(await tabByName('AI 运行时'))
+    await waitFor(() => expect(screen.getByLabelText('基础延迟（毫秒）')).toHaveValue('7000'))
+    expect(screen.getByText('已是最新')).toBeInTheDocument()
+
+    // 下一次保存携带重新加载后捕获的版本，而不是导入前的 0。
+    const reloaded = screen.getByLabelText('基础延迟（毫秒）')
+    await user.clear(reloaded)
+    await user.type(reloaded, '8000')
+    mocks.update.mockImplementation(async (update) => ({ ...imported, ...update, version: '2' }))
+    await user.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(mocks.update).toHaveBeenCalledTimes(1))
+    expect((mocks.update.mock.calls[0]![0] as { expectedVersion: string }).expectedVersion).toBe('1')
   })
 })
