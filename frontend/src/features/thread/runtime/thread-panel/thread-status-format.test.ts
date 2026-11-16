@@ -114,16 +114,6 @@ describe('thread status formatting', () => {
     expect(usage?.title).not.toContain('累计')
   })
 
-  // 没有任何 usage 事实时整行读数为未知；缺失不能被伪装成真实的 0 计数。
-  it.each([undefined, null])('reports every usage metric as unknown when branchUsage is %s', (branchUsage) => {
-    const usage = buildThreadStatusModel({ branchUsage }, t).segments
-      .find((segment) => segment.key === 'usage')
-
-    expect(usage?.text).toBe('↑— · ↓— · R— · W— · — · cache — · — tok/s')
-    expect(usage?.title).toContain('未缓存输入：— tokens；输出：— tokens；推理：— tokens')
-    expect(usage?.title).toContain('缓存读取：— tokens；缓存写入：— tokens')
-  })
-
   // 缺费用与速率不可显示 0；hover 仍区分未计量的事实。
   it('displays no-data for missing cost and speed metrics while preserving real zero', () => {
     const usage = buildThreadStatusModel({

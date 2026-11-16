@@ -37,7 +37,7 @@ export interface ThreadStatusModelInput {
   environment?: EnvironmentStatusIdentity | null
   /** 实时可用标记；false 时展示 unavailable 事实。 */
   environmentReady?: boolean
-  /** 当前 root-to-head 累计 usage；缺失费用与测速样本保持未知。 */
+  /** 当前 root-to-head 累计 usage；null 表示 branch 上没有模型调用。 */
   branchUsage?: TurnUsage | null
   contextWindow?: number
 }
@@ -79,8 +79,8 @@ export function buildThreadStatusModel(
     })
   }
 
-  // 没有任何 usage 事实时读数为全未知：Footer 绝不能把缺失的用量显示成真实 0。
-  const usage = input.branchUsage ?? UNKNOWN_USAGE
+  // 没有模型调用时 token 累计是真实的 0；费用与测速没有样本，保持未知。
+  const usage = input.branchUsage ?? NO_MODEL_CALL_USAGE
 
   // 上下文只使用最新调用的输入估计；缺失时不能用分支累计量替代。
   const contextWindow = positiveFinite(input.contextWindow)
@@ -144,11 +144,11 @@ export function formatUsageDetails(usage: TurnUsage, t: TranslateFn): string {
   ].join('\n')
 }
 
-const UNKNOWN_USAGE: TurnUsage = {
-  input: null,
-  output: null,
-  cacheRead: null,
-  cacheWrite: null,
+const NO_MODEL_CALL_USAGE: TurnUsage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
   reasoning: null,
   providerTotal: null,
   cost: null,

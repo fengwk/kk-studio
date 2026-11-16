@@ -40,8 +40,8 @@ describe('ThreadStatusFooter', () => {
     const footer = screen.getByLabelText('会话状态')
     const lines = [...footer.querySelectorAll('.thread-status-line')]
     expect(lines).toHaveLength(1)
-    // 没有用量事实时全部计数未知；绝不能显示成真实的 0。
-    expect(lines[0].textContent).toBe('未选择环境 ∣ ↑— · ↓— · R— · W— · — · cache — · — tok/s')
+    // 没有模型调用时 token 计数是真实的 0；费用与速率没有样本，不显示 0。
+    expect(lines[0].textContent).toBe('未选择环境 ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s')
     expect(footer).not.toHaveTextContent('ctx')
     expect(footer.querySelector('button')).toBeNull()
   })
@@ -189,7 +189,7 @@ describe('ThreadStatusFooter', () => {
     act(() => setLocale('en-US'))
     const line = lineOf(screen.getByLabelText('Thread status'))
     expect(line.textContent).toBe(
-      'dev · unavailable ∣ ctx —/128k ∣ ↑— · ↓— · R— · W— · — · cache — · — tok/s',
+      'dev · unavailable ∣ ctx —/128k ∣ ↑0 · ↓0 · R0 · W0 · — · cache 0.00% · — tok/s',
     )
     const unavailableTitle = hoverLines(line)
     expect(unavailableTitle).toHaveLength(5)
