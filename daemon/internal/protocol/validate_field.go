@@ -107,8 +107,6 @@ func jsonField(s, name string, max int, object bool) error {
 	if err := ValidateJSON([]byte(s), JSONLimits{MaxBytes: max}); err != nil {
 		return invalid(name + " " + err.Error())
 	}
-	if object && (s[0] != '{' || strings.TrimSpace(s) == "{}") { /* object checked below */
-	}
 	if object {
 		var first byte
 		for i := 0; i < len(s); i++ {

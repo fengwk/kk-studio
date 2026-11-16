@@ -26,8 +26,6 @@ type lspServerViolation int
 
 const (
 	lspServerOK lspServerViolation = iota
-	lspServerInvalidID
-	lspServerInvalidCommand
 	lspServerInvalidLists
 	lspServerInvalidExtension
 	lspServerInvalidMarker

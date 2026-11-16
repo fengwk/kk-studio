@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -79,7 +80,7 @@ func daemonWebSocketURL(studioURL string) (string, error) {
 func registrationHeaders(c DialConfig, token string) http.Header {
 	hdr := make(http.Header)
 	hdr.Set("Authorization", "Bearer "+token)
-	hdr.Set("KK-Daemon-Protocol", "4")
+	hdr.Set("KK-Daemon-Protocol", strconv.Itoa(protocol.ControlProtocolVersion))
 	hdr.Set("KK-Daemon-Instance", c.InstanceID)
 	hdr.Set("KK-Daemon-Platform", c.Platform)
 	hdr.Set("KK-Environment-Id", c.Applied.EnvironmentID)
