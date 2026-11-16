@@ -32,7 +32,7 @@ public record StageBudgetView(
     return budget(state, maxRuns, 0);
   }
 
-  /** 重置额度：高水位取 {@code nextRunOrdinal - 1}，不得回退而重新授权历史 Run。 */
+  /** 重置额度：高水位取 {@code nextRunOrdinal - 1}；该计数器只增不减，高水位因此不会回退到已消耗的历史 Run。 */
   public static StageBudgetView reset(
       ProjectWorkflow workflow, ProjectStateCode state, int maxRuns, long nextRunOrdinal) {
     requireEnabledAgentStage(workflow, state);

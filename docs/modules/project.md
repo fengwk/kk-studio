@@ -125,9 +125,10 @@ Run ordinal 在 Issue 内单调分配。新 Run 的失败和取消都消耗一�
 仍使用同一阶段预算。workflow 默认额度用于首次授权，既有额度由人工重置维护。
 
 [`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)
-承载阶段额度的读取与人工重置：首次授权由 Run 接受路径按 workflow 默认额度完成，重置高水位只能推进到
-`nextRunOrdinal - 1`，不能回退而重新授权历史 Run。消耗由持久化按本 Issue、本阶段、序号超过高水位的全部
-Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，不限制已接受 Run 的恢复。
+承载阶段额度的读取与人工重置：首次授权由 Run 接受路径按 workflow 默认额度完成，重置高水位取
+`nextRunOrdinal - 1`；该计数器只增不减，高水位因此不会回退到已消耗的历史 Run。消耗由持久化
+按本 Issue、本阶段、序号超过高水位的全部 Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，
+不限制已接受 Run 的恢复。
 人工重置要求无活动 Run，高水位取服务端 `next_run_ordinal - 1`，前后额度与高水位写入 CONTROL
 活动。used/remaining 在读取时计算，Agent 通过受控执行使用额度。已接受 Run 还受
 持久活动时长余额与模型、工具安全上限约束，安全等待暂停活动计时。
@@ -172,7 +173,8 @@ Agent 使用 `issue_transition`（参数 `to_state`）请求交接，目标先�
 接受 next_state
   -> 处理剩余输入、问答与在途调用，到安全点
   -> root Join 冻结 terminalEntryId / finalAnswerEntryId
-  -> 复验门禁：门禁关闭则 Run=WAITING 并保留 next_state，不提交阶段推进
+  -> 复验门禁：关闭则保留 next_state 停在安全点，不提交阶段推进
+     （RUNNING 且仍有活动额度时转 WAITING；额度已耗尽则保持 RUNNING）
   -> 门禁打开后事务复验 Run ID/version、历史区间与合法边
   -> 冻结报告，Run=COMPLETED
   -> 更新 Issue.state，记录活动，发布证据，请求后继 Work
