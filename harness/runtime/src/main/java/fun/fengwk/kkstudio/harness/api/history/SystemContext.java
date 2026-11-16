@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.TreeMap;
 
 /** Current system-prompt sections and model-visible tools reduced from SYSTEM entries on a path. */
 public record SystemContext(
@@ -18,8 +19,7 @@ public record SystemContext(
 
   public SystemContext {
     sections =
-        Collections.unmodifiableMap(
-            new LinkedHashMap<>(Objects.requireNonNull(sections, "sections")));
+        Collections.unmodifiableMap(new TreeMap<>(Objects.requireNonNull(sections, "sections")));
     tools = List.copyOf(Objects.requireNonNull(tools, "tools"));
     hostedTools = List.copyOf(Objects.requireNonNull(hostedTools, "hostedTools"));
   }
@@ -64,7 +64,7 @@ public record SystemContext(
         sections, new ArrayList<>(tools.values()), new ArrayList<>(hostedTools.values()));
   }
 
-  /** Compose named sections in insertion order, separated by one blank line. */
+  /** Compose named sections in natural key order, independent of JSON object field order. */
   public String systemInstruction() {
     return String.join("\n\n", sections.values());
   }
@@ -97,34 +97,12 @@ public record SystemContext(
     return baseline;
   }
 
-  /** Collapse a SYSTEM history into baseline text followed by every append-only change in order. */
+  /** Fold named updates into the current instruction; repeated values never grow the prefix. */
   public static String collapseSystemInstruction(List<Entry> entries) {
-    String baseline = null;
-    List<String> changes = new ArrayList<>();
-    for (Entry entry : entries) {
-      if (!(entry.payload() instanceof SystemPayload system)) {
-        continue;
-      }
-      if (system.baseline()) {
-        baseline = String.join("\n\n", system.sections().values());
-        changes.clear();
-      } else {
-        String changeText = renderChangeText(system);
-        if (!changeText.isEmpty()) {
-          changes.add(changeText);
-        }
-      }
-    }
-    if (baseline == null) {
-      throw new IllegalArgumentException("Entry path has no SYSTEM baseline");
-    }
-    List<String> all = new ArrayList<>(changes.size() + 1);
-    all.add(baseline);
-    all.addAll(changes);
-    return String.join("\n\n", all);
+    return reduce(entries).systemInstruction();
   }
 
-  /** Render the exact text portion of one SYSTEM change in its stored section order. */
+  /** Render one incremental SYSTEM change in canonical section order. */
   public static String renderChangeText(SystemPayload change) {
     List<String> texts = new ArrayList<>();
     change
@@ -167,14 +145,12 @@ public record SystemContext(
             false));
   }
 
-  /** 变更的 sections：顺序变化视为全部 section 变化；否则只取文本不同的项。 */
+  /** Sections are named values: object field order is not a context change. */
   private Map<String, String> changedSections(SystemContext next) {
     Map<String, String> changed = new LinkedHashMap<>();
-    boolean sectionOrderChanged =
-        !new ArrayList<>(sections.keySet()).equals(new ArrayList<>(next.sections.keySet()));
     next.sections.forEach(
         (name, text) -> {
-          if (sectionOrderChanged || !Objects.equals(sections.get(name), text)) {
+          if (!Objects.equals(sections.get(name), text)) {
             changed.put(name, text);
           }
         });

@@ -1071,16 +1071,16 @@ class DatabaseTurnResolverTest {
     // 系统指令不再以 SYSTEM 消息进入会话投影：它只在 systemInstruction 中，messages 只含对话。
     String instruction = requestSpec.systemInstruction();
     assertTrue(instruction.startsWith("[agent]\nagent system prompt"), instruction);
-    // 固定顺序：Agent 正文 → harness → paths → environment → skills，段间恰为空行分隔。
+    // 具名段落按自然键排序，内存规划与 JSONB 冷读使用同一顺序。
     int harnessAt = instruction.indexOf("[harness]");
     int pathsAt = instruction.indexOf("[paths]");
     int environmentAt = instruction.indexOf("[environment]");
     int skillsAt = instruction.indexOf("[skills]");
-    assertTrue(harnessAt > "agent system prompt".length(), instruction);
+    assertTrue(environmentAt > "agent system prompt".length(), instruction);
+    assertTrue(harnessAt > environmentAt, instruction);
     assertTrue(pathsAt > harnessAt, instruction);
-    assertTrue(environmentAt > pathsAt, instruction);
-    assertTrue(skillsAt > environmentAt, instruction);
-    assertTrue(instruction.contains("</current_environment>\n\n[skills]"), instruction);
+    assertTrue(skillsAt > pathsAt, instruction);
+    assertTrue(instruction.contains("</current_environment>\n\n[harness]"), instruction);
     assertTrue(instruction.contains("<name>dev</name>"), instruction);
     assertFalse(instruction.contains("<path>"), instruction);
 
@@ -1909,25 +1909,28 @@ class DatabaseTurnResolverTest {
   }
 
   @Test
-  void estimatesCollapsedSystemContextInsteadOfCurrentFlatPrompt() {
+  void estimatesCurrentNamedSectionsWithoutAppendingObsoleteSystemText() {
     Fixture fixture = new Fixture(List.of(), List.of(), List.of());
     EntryPath path = systemHistoryPath(settings("default"));
 
     LiveTurnPlan.Planned planned = fixture.planned(path);
-    SystemContext existing = path.systemContext().orElseThrow();
-    SystemPayload pending =
-        existing
-            .changesTo(
-                new SystemContext(
-                    planned.spec().systemSections(), existing.tools(), existing.hostedTools()))
-            .orElseThrow();
-    String expected =
-        SystemContext.collapseSystemInstruction(path.entries())
-            + "\n\n"
-            + SystemContext.renderChangeText(pending);
+    SystemContext current =
+        new SystemContext(planned.spec().systemSections(), List.of(), List.of());
 
-    assertEquals(List.of(expected), fixture.estimatedSystemMessages);
-    assertNotEquals(List.of(planned.spec().systemInstruction()), fixture.estimatedSystemMessages);
+    assertEquals(List.of(current.systemInstruction()), fixture.estimatedSystemMessages);
+    assertEquals(List.of(planned.spec().systemInstruction()), fixture.estimatedSystemMessages);
+    assertNotEquals(
+        List.of(SystemContext.collapseSystemInstruction(path.entries())),
+        fixture.estimatedSystemMessages);
+
+    // Match the request after its pending SYSTEM delta is durably attached before TURN_START.
+    SystemContext existing = path.systemContext().orElseThrow();
+    SystemPayload pending = existing.changesTo(current).orElseThrow();
+    List<Entry> committed = new ArrayList<>(path.entries());
+    committed.add(new Entry(id(1000), SESSION_ID, path.head().id(), pending, NOW));
+    ProviderRequest request =
+        new ModelRequestMaterializer().materialize(new EntryPath(committed), planned.spec());
+    assertEquals(List.of(request.systemInstruction()), fixture.estimatedSystemMessages);
   }
 
   @Test

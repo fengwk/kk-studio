@@ -40,13 +40,13 @@ systemInstruction / systemSections / toolBindings / subagentBindings
 groupExecution?
 ```
 
-完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称与描述已进入命名 system sections，`systemInstruction` 是这些 sections 的拼接视图。SYSTEM 历史只保存模型可见工具定义；Environment、Contributor 等执行路由保留在冻结的 `ModelRequestSpec` / `ToolBinding` 中。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。存在完成压缩时，以摘要 wrapper 替代切点前历史，并从切点原样回放保留段；Claude 保留段的 thinking 因签名绑定旧前缀而被移除。分支第一次请求在切点前最后一条 assistant 之前写唯一只读缓存断点（具体模型不同或缓存留存过期时不写）。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩沿用压缩执行模型自己的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
+完整历史、Provider tools、YOLO、凭证与端点都留在各自事实源里；Skill 的名称与描述已进入命名 system sections，`systemInstruction` 是这些 sections 按名称自然排序、以空行连接的当前值视图。SYSTEM 历史只保存模型可见工具定义；Environment、Contributor 等执行路由保留在冻结的 `ModelRequestSpec` / `ToolBinding` 中。[`ModelRequestMaterializer`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/model/ModelRequestMaterializer.java) 每次 attempt 从不可变 `EntryPath` 与冻结 Spec 纯内存重建供应商中立的 `ProviderRequest`。存在完成压缩时，以摘要 wrapper 替代切点前历史，并从切点原样回放保留段；Claude 保留段的 thinking 因签名绑定旧前缀而被移除。分支第一次请求在切点前最后一条 assistant 之前写唯一只读缓存断点（具体模型不同或缓存留存过期时不写）。缓存留存档位唯一取自冻结的 `ModelVariant.promptCacheRetention`，Session UUID 用作缓存键；压缩沿用压缩执行模型自己的 variant。协议映射由 [Harness Model](harness-model.md) 承担。
 
 Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员及其所选 Variant，成员切换时整体使用该成员快照。assistant 回复持久化本次请求实际声明的 effort（未声明或 `off` 时为空）；后续回放读取该历史事实，不根据当前模型 variants 反查。新 invocation 使用最新配置，重试与重启沿用冻结请求。
 
 [`ProviderMessageProjector`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/request/ProviderMessageProjector.java) 把语义上下文投影为 `ProviderMessage`，投影只影响本次请求，从不改写 durable 历史：
 
-- 对话历史投影为 `USER`、`ASSISTANT`、`TOOL`；system baseline 由顶层 `systemInstruction` 承载，后续 SYSTEM context changes 由 materializer 作为有序 `SYSTEM` messages 追加。
+- 对话历史投影为 `USER`、`ASSISTANT`、`TOOL`。支持中途 system message 的 Anthropic 模型由顶层 `systemInstruction` 承载最新 baseline，后续 SYSTEM 变更按历史位置投影为 `SYSTEM` messages；其它模型按段落名规约 baseline 与增量，只发送当前有效正文，不拼接历史替换说明。重复的段落值不累积，删除移除对应段落，新 baseline 重置上下文。
 - 历史工具调用与结果始终按 durable Entry 投影；当前 `toolBindings`、Environment 或工具定义变化不会把它们降级为 USER 文本。
 - 未配对的历史调用在本次请求中补 error 结果 `No result provided`，不写历史；assistant 保留时透传内部 effort 元数据，整个 assistant 被移除时元数据也随之移除。
 - 编辑类结果的模型可见 diff 从持久化的 `details.editReview` 纯内存派生；投影、压缩预算估算与请求预览共用同一派生内容。

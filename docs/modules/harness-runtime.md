@@ -23,7 +23,7 @@ Join                         一次子执行委派的票据，只记凭据与冻
 
 [`HarnessRuntime`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/HarnessRuntime.java) 是外部与内核交互的同步命令与控制入口，覆盖命令接受与 spawn、Stop、审批与人工输入、YOLO 与重命名、手工压缩，以及快照、执行树与 Join 查询。
 
-同一个门面还承担只读压缩事实，调用方无需接触实现类：`findCompactionTurnStart` 按结果 Entry 返回已关闭压缩 turn 冻结的元数据（缺失即 fail closed）。它是纯委托，不写 durable 状态，也不复制算法。请求输入 token 估算不经过门面：算法作为 [`runtime.compaction.TokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/TokenEstimator.java) 留在实现层，内核外部只经 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 端口消费，端口接收当前请求实际发送的 system message 列表（collapsed 协议为折叠后的 baseline 与变更文本，增量协议为独立的 baseline / change messages），实现由组合根以方法引用绑定，因此既没有第二份口径，也不需要任何 Runtime bean 参与装配。
+同一个门面还承担只读压缩事实，调用方无需接触实现类：`findCompactionTurnStart` 按结果 Entry 返回已关闭压缩 turn 冻结的元数据（缺失即 fail closed）。它是纯委托，不写 durable 状态，也不复制算法。请求输入 token 估算不经过门面：算法作为 [`runtime.compaction.TokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/TokenEstimator.java) 留在实现层，内核外部只经 [`spi.compaction.RequestTokenEstimator`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/compaction/RequestTokenEstimator.java) 端口消费，端口接收当前请求实际发送的 system message 列表（非增量协议为具名段落的当前值，增量协议为独立的 baseline / change messages），实现由组合根以方法引用绑定，因此既没有第二份口径，也不需要任何 Runtime bean 参与装配。
 
 每个控制操作在**一个** [`HarnessStore.Transaction`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/store/HarnessStore.java) 内完成全部写入并原子提交；手工压缩也只用一个短事务（锁内复验、同步 resolve、提交）。查询同样走 Store 事务，快照查询会加锁。Stop 的本地取消登记在 `afterCommit` 上，只在物理事务真正提交后执行，外层回滚即不取消，取消失败也不回滚已提交的事实。
 
@@ -406,7 +406,7 @@ environmentSupport       NONE / ROUTED / REQUIRED
 
 [`PromptRenderer`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/prompt/PromptRenderer.java) 从 classpath 读取 UTF-8 Markdown，以 JMustache 编译并缓存模板；变量或条件缺失时失败。双花括号默认执行 XML 转义，三花括号显式插入原文，插入的值不会再次执行。工具 JSON schema 作为资源原样读取，不作为模板执行。Harness 的模板按 system、tools、messages、compaction 分目录；Platform 和 Project 的消息资源由各模块持有。Agent 用户正文不作为模板执行。
 
-System prompt 固定按 `[agent]` → `[harness]` → `[paths]` → `[environment]` → `[skills]` → `[subagents]` 排列，段间空一行。文案只存在于 Markdown 模板中，Platform 的 composer 只准备视图数据：`[agent]` 在 Agent 正文非空时出现；`[harness]` 始终出现；`[paths]`、`[environment]` 与其中的绝对路径、平台资源和宿主字段说明按本轮实际注入的工具生成；未选 Environment 时仍说明 `REQUIRED` 操作不会执行，且 `read` 仍可读取 `resource://` URI。`[skills]` 与 `[subagents]` 分别只在有可注入技能或已配置子 Agent 时出现。Prompt 不含日期或上层产品上下文，Issue 等任务内容只进入任务消息。
+System prompt 的具名段落按名称自然排序：`[agent]` → `[environment]` → `[harness]` → `[paths]` → `[skills]` → `[subagents]`，段间空一行。段落以名称和正文判断变化，JSON 对象的键顺序不属于上下文语义；内存规划、持久化读回与请求重建使用同一渲染顺序。文案只存在于 Markdown 模板中，Platform 的 composer 只准备视图数据：`[agent]` 在 Agent 正文非空时出现；`[harness]` 始终出现；`[paths]`、`[environment]` 与其中的绝对路径、平台资源和宿主字段说明按本轮实际注入的工具生成；未选 Environment 时仍说明 `REQUIRED` 操作不会执行，且 `read` 仍可读取 `resource://` URI。`[skills]` 与 `[subagents]` 分别只在有可注入技能或已配置子 Agent 时出现。Prompt 不含日期或上层产品上下文，Issue 等任务内容只进入任务消息。
 
 
 `[skills]` 按 Agent 配置顺序列出技能名称与描述，不包含文件路径、交付方式、摘要或 Environment 安装状态。

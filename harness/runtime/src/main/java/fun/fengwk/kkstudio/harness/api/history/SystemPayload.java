@@ -3,12 +3,14 @@ package fun.fengwk.kkstudio.harness.api.history;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 
 import java.util.Collections;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.TreeMap;
 
-/** Immutable baseline or append-only delta of the model request context. */
+/**
+ * Immutable baseline or delta; named sections render in natural key order, not JSON field order.
+ */
 public record SystemPayload(
     Map<String, String> sections,
     List<String> removedSections,
@@ -38,7 +40,7 @@ public record SystemPayload(
 
   public SystemPayload {
     Objects.requireNonNull(sections, "sections");
-    LinkedHashMap<String, String> copiedSections = new LinkedHashMap<>();
+    Map<String, String> copiedSections = new TreeMap<>();
     sections.forEach(
         (name, text) -> {
           if (name == null || name.isBlank() || text == null || text.isBlank()) {

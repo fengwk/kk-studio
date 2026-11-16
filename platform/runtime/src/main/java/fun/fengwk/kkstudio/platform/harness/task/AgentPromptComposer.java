@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 
 /** 只按实际注入能力组合 system prompt 各段落；全部文案来自 Markdown 模板。 */
@@ -36,11 +37,11 @@ public final class AgentPromptComposer {
     this.configProvider = Objects.requireNonNull(configProvider, "configProvider");
   }
 
-  /** 逐个返回已渲染的段落，使 history 只持久化真正变化的段落。 */
+  /** 按段落名的自然顺序返回正文，使内存规划与持久化后重建使用同一前缀。 */
   public Map<String, String> composeSections(AgentPromptInput input) {
     Objects.requireNonNull(input, "input");
     Capabilities capabilities = Capabilities.of(input.toolNames());
-    Map<String, String> sections = new LinkedHashMap<>();
+    Map<String, String> sections = new TreeMap<>();
     if (hasText(input.agentInstructions())) {
       sections.put("agent", render("agent.md", Map.of("agent", input.agentInstructions())));
     }

@@ -1,9 +1,3 @@
-[harness]
-You are working in the KK Studio harness. A session is a tree of messages; you are a thread working on one branch of it. Subagents run in their own threads, do not share messages, and see only the task prompt they are given.
-
-[paths]
-- Absolute paths are files on the selected Environment's machine. Use them with `read`.
-
 [environment]
 The environment is the machine where host files live. The user can switch it during the session, so absolute paths in earlier messages may refer to another machine.
 
@@ -14,6 +8,12 @@ The environment is the machine where host files live. The user can switch it dur
   <user>dev&amp;user</user>
   <home>/home/&lt;dev&gt;</home>
 </current_environment>
+
+[harness]
+You are working in the KK Studio harness. A session is a tree of messages; you are a thread working on one branch of it. Subagents run in their own threads, do not share messages, and see only the task prompt they are given.
+
+[paths]
+- Absolute paths are files on the selected Environment's machine. Use them with `read`.
 
 [skills]
 The following skills are configured for this agent, in configuration order. Their names and descriptions indicate the tasks they cover. Call `load_skill` with a skill's exact name when you need its full instructions.

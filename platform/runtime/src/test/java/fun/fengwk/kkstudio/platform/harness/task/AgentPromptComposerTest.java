@@ -30,7 +30,7 @@ class AgentPromptComposerTest {
         input("Agent instructions.", environment(), List.of("read"), List.of(), List.of());
 
     assertEquals(
-        List.of("agent", "harness", "paths", "environment"),
+        List.of("agent", "environment", "harness", "paths"),
         List.copyOf(composer.composeSections(input).keySet()));
   }
 

@@ -13,19 +13,18 @@ import java.util.List;
 /**
  * 请求 system message 的冻结基线生成与增量变化投影。
  *
- * <p>两条路径由 provider 能力决定：不支持对话中途插入 system message 的 provider 得到一条折叠后的基线（可选追加本次变化）； 支持的 provider 得到按
- * candidate path 顺序重放的基线 + 变化序列，便于缓存命中。
- *
- * <p>投影只读 candidate path 上已持久化的 SYSTEM facts，不重新解析 Agent、Environment 或提示词模板。
+ * <p>不支持中途 system message 的 provider 使用本轮当前段落；支持的 provider 按 candidate path 重放基线与增量，再加入本轮待提交变化。
+ * 段落渲染不依赖 JSON 对象键顺序；预算估算与最终请求使用相同投影，不累积被替换的正文。
  */
 final class TurnSystemMessageProjector {
 
   private TurnSystemMessageProjector() {}
 
-  /** 生成该 provider 与模型适用的 system messages；顺序与折叠点逐字对应 candidate path 的历史事实。 */
+  /** 生成当前请求的 system 文本列表；待提交变化也计入预算，增量协议保留历史位置。 */
   static List<String> project(
       EntryPath path, AgentTurnContext context, ProviderType providerType, ModelDescriptor model) {
-    String currentBaseline = String.join("\n\n", context.systemSections().values());
+    String currentBaseline =
+        new SystemContext(context.systemSections(), List.of(), List.of()).systemInstruction();
     if (path.requiresSystemBaseline()) {
       return List.of(currentBaseline);
     }
@@ -33,15 +32,14 @@ final class TurnSystemMessageProjector {
     if (existing == null) {
       return List.of(currentBaseline);
     }
-    SystemContext next =
-        new SystemContext(context.systemSections(), existing.tools(), existing.hostedTools());
-    String pendingChange = existing.changesTo(next).map(SystemContext::renderChangeText).orElse("");
     boolean incrementalSystemMessages =
         providerType == ProviderType.ANTHROPIC && model.midConversationSystemMessages();
     if (!incrementalSystemMessages) {
-      String collapsed = SystemContext.collapseSystemInstruction(path.entries());
-      return List.of(pendingChange.isEmpty() ? collapsed : collapsed + "\n\n" + pendingChange);
+      return List.of(currentBaseline);
     }
+    SystemContext next =
+        new SystemContext(context.systemSections(), existing.tools(), existing.hostedTools());
+    String pendingChange = existing.changesTo(next).map(SystemContext::renderChangeText).orElse("");
 
     List<String> messages = new ArrayList<>();
     for (Entry entry : path.entries()) {

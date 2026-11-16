@@ -31,6 +31,38 @@ import java.util.UUID;
 /** PostgreSQL verifies SYSTEM context reuse, deltas, and branch path inheritance. */
 class PostgresqlSystemContextTest {
 
+  /** A cold JSONB read must not turn key reordering into a SYSTEM update. */
+  @Test
+  void coldJsonbRoundTripPreservesPrefixAndDoesNotCreateAChange() {
+    HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();
+    Baseline baseline = seedThreadBaseline(store);
+    Map<String, String> sections = new LinkedHashMap<>();
+    sections.put("agent", "Agent");
+    sections.put("harness", "Harness");
+    sections.put("paths", "Paths");
+    sections.put("environment", "Environment");
+    SystemContext current = new SystemContext(sections, List.of(), List.of());
+    UUID entryId = appendSystemEntry(store, baseline, baseline(current));
+
+    // New store/cache: exercise PostgreSQL's object representation, not the inserted Java object.
+    EntryPath coldPath = path(PostgresqlHarnessStoreFixture.create(), baseline.threadId());
+    SystemContext restored = coldPath.systemContext().orElseThrow();
+    assertTrue(restored.changesTo(current).isEmpty());
+    assertEquals(current.systemInstruction(), restored.systemInstruction());
+    assertEquals("Agent\n\nEnvironment\n\nHarness\n\nPaths", restored.systemInstruction());
+    assertEquals(entryId, coldPath.head().id());
+    assertEquals(1, systemEntries(coldPath));
+
+    SystemPayload duplicate = new SystemPayload(sections, List.of(), List.of(), false);
+    appendSystemEntry(store, baseline, duplicate);
+    EntryPath duplicatePath = path(PostgresqlHarnessStoreFixture.create(), baseline.threadId());
+    assertEquals(2, systemEntries(duplicatePath));
+    assertEquals(
+        current.systemInstruction(),
+        SystemContext.collapseSystemInstruction(duplicatePath.entries()));
+    assertTrue(duplicatePath.systemContext().orElseThrow().changesTo(current).isEmpty());
+  }
+
   @Test
   void environmentSwitchNoneToAAndBAppendsOnlySectionChanges() {
     HarnessStore store = PostgresqlHarnessStoreFixture.resetAndCreate();

@@ -9,7 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.SchemaJsonCodec;
@@ -57,6 +59,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpecJsonCodec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
@@ -64,7 +67,9 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
+import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderReplayAffinity;
@@ -76,6 +81,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderThinkingBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.harness.model.provider.impl.anthropic.AnthropicRequestEncoder;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionBranchPrompts;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
@@ -87,6 +93,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -127,10 +134,17 @@ class ModelRequestMaterializerTest {
   }
 
   @Test
-  void collapsesBaselineAndEverySystemChangeInPathOrder() {
+  void collapsesSystemChangesIntoCurrentNamedSections() {
     Entry root = entry(1, 0, new RootPayload(SETTINGS));
     Entry baseline =
-        entry(2, 1, new SystemPayload(Map.of("agent", "[agent]\nold"), List.of(), List.of(), true));
+        entry(
+            2,
+            1,
+            new SystemPayload(
+                Map.of("agent", "[agent]\nold", "harness", "[harness]\nremoved"),
+                List.of(),
+                List.of(),
+                true));
     Entry change =
         entry(
             3,
@@ -150,14 +164,86 @@ class ModelRequestMaterializerTest {
                 List.of(),
                 List.of()));
 
-    assertEquals(
-        "[agent]\nold\n\n"
-            + "This section replaces the earlier [agent] section.\n\n"
-            + "[agent]\nnew\n\n"
-            + "The [harness] section has been removed.",
-        request.systemInstruction());
+    assertEquals("[agent]\nnew", request.systemInstruction());
     assertTrue(request.tools().isEmpty());
     assertTrue(request.messages().isEmpty());
+  }
+
+  /** Repeated stored SYSTEM deltas must leave the real wire prefix and prior messages intact. */
+  @Test
+  void repeatedSystemHistoryKeepsAnthropicWirePrefixStable() {
+    LinkedHashMap<String, String> sections = new LinkedHashMap<>();
+    sections.put("agent", "Agent");
+    sections.put("harness", "Harness");
+    sections.put("paths", "Paths");
+    sections.put("environment", "Environment");
+    ModelRequestSpec spec =
+        spec(
+            ProviderType.ANTHROPIC,
+            new ModelDescriptor(
+                "anthropic",
+                "model",
+                "model",
+                Set.of(ModelInputModality.TEXT),
+                true,
+                true,
+                false,
+                false),
+            new ModelVariant("v1", null, PromptCacheRetention.SHORT, null),
+            1024,
+            "Agent\n\nEnvironment\n\nHarness\n\nPaths",
+            List.of(bashBinding()),
+            List.of(),
+            null,
+            sections);
+    ProviderDescriptor provider =
+        new ProviderDescriptor(
+            "anthropic",
+            ProviderType.ANTHROPIC,
+            "http://127.0.0.1",
+            ModelCallTimeoutPolicy.DEFAULT);
+    AnthropicRequestEncoder encoder = new AnthropicRequestEncoder();
+    List<Entry> entries = new ArrayList<>();
+    entries.add(entry(1, 0, new RootPayload(SETTINGS)));
+    entries.add(
+        entry(
+            2,
+            1,
+            new SystemPayload(sections, List.of(definitionOf(bashBinding())), List.of(), true)));
+    JsonNode previous = null;
+    for (int turn = 0; turn < 4; turn++) {
+      if (turn > 0) {
+        appendHistory(entries, new SystemPayload(sections.reversed(), List.of(), List.of(), false));
+      }
+      long start = entries.size() + 1L;
+      appendHistory(entries, new TurnStartPayload(TurnStartReason.INPUT, SETTINGS, OWNER));
+      appendHistory(entries, user("Question " + turn));
+      ProviderRequest request = MATERIALIZER.materialize(new EntryPath(entries), spec);
+      JsonNode wire =
+          HarnessJson.STRICT_DECIMAL.readTree(encoder.encode(request, provider).bodyUtf8Bytes());
+      assertEquals("Agent\n\nEnvironment\n\nHarness\n\nPaths", request.systemInstruction());
+      assertEquals(2 * turn + 1, wire.path("messages").size());
+      assertTrue(wire.path("system").get(0).has("cache_control"));
+      assertTrue(wire.path("tools").get(0).has("cache_control"));
+      // Dynamic conversation endpoints move; compare durable message content, not these markers.
+      for (JsonNode message : wire.path("messages")) {
+        for (JsonNode block : message.path("content")) {
+          ((ObjectNode) block).remove("cache_control");
+        }
+      }
+      if (previous != null) {
+        assertEquals(previous.path("system").toString(), wire.path("system").toString());
+        assertEquals(previous.path("tools").toString(), wire.path("tools").toString());
+        for (int i = 0; i < previous.path("messages").size(); i++) {
+          assertEquals(
+              previous.path("messages").get(i).toString(), wire.path("messages").get(i).toString());
+        }
+      }
+      previous = wire;
+      appendHistory(entries, assistant("Answer " + turn));
+      appendHistory(
+          entries, new TurnEndPayload(id(start), TurnEndOutcome.COMPLETED, false, null, null));
+    }
   }
 
   @Test
@@ -1000,6 +1086,11 @@ class ModelRequestMaterializerTest {
 
   private static ModelVariant variant() {
     return new ModelVariant("v1", null, PromptCacheRetention.NONE, null);
+  }
+
+  private static void appendHistory(List<Entry> entries, EntryPayload payload) {
+    long sequence = entries.size() + 1L;
+    entries.add(entry(sequence, sequence - 1L, payload));
   }
 
   private static Entry entry(long id, long parent, EntryPayload payload) {
