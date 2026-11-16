@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation
 import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertVersionConflict;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -92,6 +93,37 @@ class ProjectWorkflowServiceIntegrationTest extends ProjectTestSupport {
         () ->
             projectService.updateWorkflow(
                 project.getId(), project.getVersion(), workflowJson(agent, agent, 5)));
+  }
+
+  /**
+   * 阶段停用后仍有 Issue 停在那里或从其阻塞：workflow 保存只要求保留声明，因此阻塞中的 Issue 仍必须能显式恢复到该停用阶段。
+   *
+   * <p>旧行为要求恢复目标仍然启用，导致这类 Issue 只能删除；现在恢复只校验编码仍被声明。
+   */
+  @Test
+  void recoverBlockedIssueIntoDisabledDeclaredStage() {
+    String agent = createAgent();
+    Project project = projectService.createProject("停用阶段恢复", "描述", true);
+    projectService.updateWorkflow(
+        project.getId(), project.getVersion(), workflowJson(agent, agent, 3));
+    Issue issue = createIssue(project.getId());
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    Issue inDesign = issueEditingService.getIssue(issue.getId());
+    Issue blocked =
+        issueLifecycleService.blockIssue(
+            inDesign.getId(), inDesign.getVersion(), key("block"), "等待外部");
+    Project current = projectService.getProject(project.getId());
+    // DESIGN 仍被 Issue 引用，因此只能停用而不能删除。
+    String disabledDesign =
+        workflowJson(agent, agent, 3).replace("\"maxRuns\":3,", "\"maxRuns\":3,\"enabled\":false,");
+    projectService.updateWorkflow(current.getId(), current.getVersion(), disabledDesign);
+
+    Issue recovered =
+        issueLifecycleService.recoverIssue(blocked.getId(), blocked.getVersion(), key("recover"));
+
+    assertEquals("DESIGN", recovered.getState());
+    assertNull(recovered.getBlockedFromState());
+    assertNull(recovered.getBlockReason());
   }
 
   /**

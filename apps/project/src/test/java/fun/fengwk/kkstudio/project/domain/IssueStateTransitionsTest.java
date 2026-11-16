@@ -57,17 +57,18 @@ class IssueStateTransitionsTest {
     assertThrows(DomainException.class, () -> transitions.requireBlock(code("DESIGN"), null));
   }
 
-  /** 恢复只能显式回到仍然启用的阻塞前阶段：BLOCKED、DONE 与已停用阶段都不是有效恢复点。 */
+  /** 恢复只能显式回到仍然声明的阻塞前阶段：BLOCKED、DONE 与未知阶段都不是有效恢复点；停用阶段仍可恢复。 */
   @Test
-  void recoversOnlyIntoEnabledStages() {
+  void recoversOnlyIntoDeclaredStages() {
     assertEquals(code("INIT"), transitions.requireRecover(code("INIT")));
     assertEquals(code("DESIGN"), transitions.requireRecover(code("DESIGN")));
     assertThrows(DomainException.class, () -> transitions.requireRecover(code("BLOCKED")));
     assertThrows(DomainException.class, () -> transitions.requireRecover(code("DONE")));
     assertThrows(DomainException.class, () -> transitions.requireRecover(code("GHOST")));
+    // 阶段停用后 Issue 仍停在该阶段，因此恢复只要求编码仍声明。
     IssueStateTransitions disabled =
         new IssueStateTransitions(ProjectDomainFixtures.disabledStageWorkflow());
-    assertThrows(DomainException.class, () -> disabled.requireRecover(code("WORK")));
+    assertEquals(code("WORK"), disabled.requireRecover(code("WORK")));
   }
 
   /** DONE 只能由显式重开操作回到 INIT，其他阶段不能重开。 */
