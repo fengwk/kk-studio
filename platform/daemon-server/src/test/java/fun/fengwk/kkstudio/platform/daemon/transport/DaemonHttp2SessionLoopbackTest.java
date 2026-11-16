@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 import org.eclipse.jetty.http.HttpFields;
 import org.eclipse.jetty.http.HttpStatus;
@@ -15,6 +16,7 @@ import org.eclipse.jetty.http2.api.Session;
 import org.eclipse.jetty.http2.api.Stream;
 import org.eclipse.jetty.http2.api.server.ServerSessionListener;
 import org.eclipse.jetty.http2.frames.DataFrame;
+import org.eclipse.jetty.http2.frames.GoAwayFrame;
 import org.eclipse.jetty.http2.frames.HeadersFrame;
 import org.eclipse.jetty.http2.server.RawHTTP2ServerConnectionFactory;
 import org.eclipse.jetty.io.ArrayByteBufferPool;
@@ -52,10 +54,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.BooleanSupplier;
 
 class DaemonHttp2SessionLoopbackTest {
 
@@ -126,10 +130,6 @@ class DaemonHttp2SessionLoopbackTest {
     assertNotNull(openResult);
     assertEquals(ADMITTED, openResult.admitted);
 
-    DaemonSession daemonSession =
-        fixture.clientSession.whenSessionEstablished().get(5, TimeUnit.SECONDS);
-    assertNotNull(daemonSession);
-
     // 发送 control envelope
     Envelope cancelEnv =
         Envelope.newBuilder()
@@ -156,6 +156,48 @@ class DaemonHttp2SessionLoopbackTest {
 
     fixture.clientSession.close();
     assertTrue(fixture.clientSession.isClosed());
+  }
+
+  /** 测试意图：客户端 drain 发出的 GOAWAY 必须是 NO_ERROR，且 last-stream-id 为 0（daemon 从不主动建流）。 */
+  @Test
+  void drainSendsGoAwayWithZeroLastStreamId() throws Exception {
+    CompletableFuture<GoAwayFrame> receivedGoAway = new CompletableFuture<>();
+
+    ServerSessionListener listener =
+        new ServerSessionListener() {
+          @Override
+          public void onAccept(Session session) {}
+
+          @Override
+          public void onGoAway(Session session, GoAwayFrame frame) {
+            receivedGoAway.complete(frame);
+          }
+
+          @Override
+          public Stream.Listener onNewStream(Stream stream, HeadersFrame frame) {
+            MetaData meta = frame.getMetaData();
+            if (meta instanceof MetaData.Request req
+                && "/control".equals(req.getHttpURI().getPath())) {
+              MetaData.Response response =
+                  new MetaData.Response(
+                      HttpStatus.OK_200, "OK", HttpVersion.HTTP_2, HttpFields.EMPTY);
+              stream.headers(new HeadersFrame(stream.getId(), response, null, false), NOOP);
+              byte[] ready = loadReadyFrame(ADMITTED.environmentId().value().toString());
+              stream.data(new DataFrame(stream.getId(), ByteBuffer.wrap(ready), false), NOOP);
+              return new Stream.Listener() {};
+            }
+            return new Stream.Listener() {};
+          }
+        };
+
+    LoopbackFixture fixture = startFixture(listener, scheduler);
+    fixture.sessions.openFuture.get(5, TimeUnit.SECONDS);
+
+    fixture.clientSession.drain();
+
+    GoAwayFrame goAway = receivedGoAway.get(5, TimeUnit.SECONDS);
+    assertEquals(0, goAway.getLastStreamId());
+    assertEquals(ErrorCode.NO_ERROR.code, goAway.getError());
   }
 
   @Test
@@ -187,8 +229,7 @@ class DaemonHttp2SessionLoopbackTest {
     LoopbackFixture fixture = startFixture(listener, controlledScheduler);
 
     // 等待握手完成并建立会话
-    fixture.sessions.openFuture.get(5, TimeUnit.SECONDS);
-    assertNotNull(fixture.clientSession.whenSessionEstablished().get(5, TimeUnit.SECONDS));
+    assertNotNull(fixture.sessions.openFuture.get(5, TimeUnit.SECONDS));
 
     // 断开 server → client 方向：Jetty 服务端会自动回 PING ACK，本测试要求 ACK 永不到达客户端，
     // 否则 ACK 可能在两次调度之间取消 30 秒超时任务，使断言随执行时序抖动。
@@ -238,7 +279,6 @@ class DaemonHttp2SessionLoopbackTest {
     LoopbackFixture fixture = startFixture(listener, scheduler);
 
     fixture.sessions.openFuture.get(5, TimeUnit.SECONDS);
-    fixture.clientSession.whenSessionEstablished().get(5, TimeUnit.SECONDS);
 
     // 打开一个流并读取
     TunnelExchange exchange =
@@ -284,10 +324,9 @@ class DaemonHttp2SessionLoopbackTest {
 
     LoopbackFixture fixture = startFixture(listener, scheduler);
 
-    assertThrows(
-        ExecutionException.class,
-        () -> fixture.clientSession.whenSessionEstablished().get(5, TimeUnit.SECONDS));
-    assertTrue(fixture.clientSession.isClosed());
+    awaitAbandoned(fixture.sessions);
+    awaitClosed(fixture.clientSession);
+    assertEquals(List.of(ADMITTED), fixture.sessions.abandoned);
   }
 
   @Test
@@ -343,12 +382,35 @@ class DaemonHttp2SessionLoopbackTest {
     pair.serverPipe.link(clientSession.endPoint(), pair.serverEndPoint);
     clientSession.start();
 
-    assertThrows(
-        ExecutionException.class,
-        () -> clientSession.whenSessionEstablished().get(5, TimeUnit.SECONDS));
-    // 建立结果失败时连接已关闭，准入分配也已释放。
-    assertTrue(clientSession.isClosed());
+    // 建立结果失败时准入已释放、连接已关闭。
+    awaitAbandoned(faultySessions);
+    awaitClosed(clientSession);
     assertEquals(List.of(ADMITTED), faultySessions.abandoned);
+  }
+
+  /** 握手完成与失败都是异步发生的：这里用有界轮询观察公开的连接状态。 */
+  private static void awaitClosed(DaemonHttp2ClientSession clientSession) {
+    awaitCondition(clientSession::isClosed, "client session must be closed within 5s");
+  }
+
+  /** 准入释放发生在连接关闭标记之后，因此必须单独等它落地。 */
+  private static void awaitAbandoned(TestSessions sessions) {
+    awaitCondition(() -> !sessions.abandoned.isEmpty(), "admission must be released within 5s");
+  }
+
+  private static void awaitCondition(BooleanSupplier condition, String message) {
+    long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+    while (!condition.getAsBoolean()) {
+      if (System.nanoTime() >= deadline) {
+        fail(message);
+      }
+      try {
+        Thread.sleep(10);
+      } catch (InterruptedException error) {
+        Thread.currentThread().interrupt();
+        fail("interrupted while waiting: " + message, error);
+      }
+    }
   }
 
   private LoopbackFixture startFixture(
@@ -436,7 +498,7 @@ class DaemonHttp2SessionLoopbackTest {
 
   private static class TestSessions implements DaemonSessions {
     final CompletableFuture<OpenResult> openFuture = new CompletableFuture<>();
-    final List<DaemonAdmission.Admitted> abandoned = new ArrayList<>();
+    final List<DaemonAdmission.Admitted> abandoned = new CopyOnWriteArrayList<>();
 
     record OpenResult(
         DaemonAdmission.Admitted admitted,

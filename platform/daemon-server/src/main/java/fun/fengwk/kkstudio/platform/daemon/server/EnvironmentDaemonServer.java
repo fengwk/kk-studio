@@ -620,8 +620,11 @@ public final class EnvironmentDaemonServer
 
   public void beginUpdate(EnvironmentId environmentId, String operationId) {
     DaemonConnectionSession session = sessionOf(environmentId);
-    int inFlight = invocationTracker.activeInvocationCount(environmentId);
-    updateCoordinator.beginUpdate(environmentId, operationId, session, inFlight);
+    // 与 invoke 使用同一把会话锁：计数与更新窗口注册对 register/检查必须原子，否则调用可在两者之间登记。
+    synchronized (session.stateLock()) {
+      int inFlight = invocationTracker.activeInvocationCount(environmentId);
+      updateCoordinator.beginUpdate(environmentId, operationId, session, inFlight);
+    }
   }
 
   public void endUpdate(EnvironmentId environmentId, String operationId) {

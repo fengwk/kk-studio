@@ -3018,6 +3018,29 @@ class EnvironmentDaemonServerTest {
     assertEquals(0, fixture.ticketService.reserves.size());
   }
 
+  /** 测试意图：终态本身违规时，已迁移到墓碑的调用也必须释放按 uploadId 绑定的上传，不留 PENDING 行。 */
+  @Test
+  void protocolViolatingCompletedReleasesBoundUploads() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-completed-protocol-release");
+    fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+
+    fixture.receive(
+        channel,
+        resourceUploadRequestEnvelope(
+            CALL_ONE.toString(), TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A));
+    UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+
+    // 伪造的 uploadId 不属于本调用：终态被拒绝，但已绑定的上传不得随之泄漏。
+    fixture.receive(
+        channel,
+        completedResourceEnvelope(
+            CALL_ONE, uploadedRef(UUID.randomUUID(), "text/plain", "a.txt", "abc"), null));
+
+    assertTrue(channel.closed(), "forged terminal must close the connection");
+    assertEquals(List.of(uploadId), fixture.ticketService.releases);
+  }
+
   /** 测试意图：终态重复声明同一 uploadId 属于协议违规。 */
   @Test
   void completedRejectsDuplicateUploadIds() {

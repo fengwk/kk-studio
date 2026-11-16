@@ -12,18 +12,15 @@ import fun.fengwk.kkstudio.platform.plugin.support.DeadlineResponseBody;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.net.ProxySelector;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
-import java.net.http.HttpTimeoutException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /**
  * 只使用标准 ComfyUI HTTP API 的有界、流式客户端。
@@ -53,7 +50,7 @@ public final class StandardComfyuiClient implements Closeable {
         credentialAccess,
         HttpClient.newBuilder()
             .proxy(ProxySelector.getDefault())
-            .connectTimeout(requirePositive(connectTimeout, "connectTimeout"))
+            .connectTimeout(ComfyuiHttpTransport.requirePositive(connectTimeout, "connectTimeout"))
             .followRedirects(HttpClient.Redirect.NEVER)
             .build(),
         true);
@@ -255,7 +252,7 @@ public final class StandardComfyuiClient implements Closeable {
       }
       ComfyuiHttpTransport.readBounded(content, ComfyuiHttpTransport.MAX_JSON_BYTES);
     } catch (IOException error) {
-      throw readFailure(error);
+      throw ComfyuiHttpTransport.readFailure(error);
     }
     return true;
   }
@@ -264,14 +261,6 @@ public final class StandardComfyuiClient implements Closeable {
   @Override
   public void close() {
     transport.close();
-  }
-
-  static URI normalizeBaseUrl(String raw) {
-    return ComfyuiHttpTransport.normalizeBaseUrl(raw);
-  }
-
-  static Supplier<InputStream> contentSupplier(InputStream content, long contentLength) {
-    return ComfyuiHttpTransport.contentSupplier(content, contentLength);
   }
 
   private static byte[] multipartHeader(
@@ -310,15 +299,6 @@ public final class StandardComfyuiClient implements Closeable {
     return false;
   }
 
-  /** 响应体读取失败：超时仍是 HttpTimeoutException，其余只给固定信息，不回显远端正文或原始 cause。 */
-  private static RuntimeException readFailure(IOException error) {
-    if (error instanceof HttpTimeoutException) {
-      return new UncheckedIOException(
-          new HttpTimeoutException("ComfyUI response read exceeded the request deadline"));
-    }
-    return new UncheckedIOException(new IOException("cannot read ComfyUI response body"));
-  }
-
   private static String text(ObjectNode node, String field) {
     JsonNode value = required(node, field);
     if (!value.isTextual() || value.textValue().isBlank()) {
@@ -348,14 +328,6 @@ public final class StandardComfyuiClient implements Closeable {
       throw new IllegalArgumentException(field + " must be an array");
     }
     return array;
-  }
-
-  private static Duration requirePositive(Duration duration, String field) {
-    Objects.requireNonNull(duration, field);
-    if (duration.isNegative() || duration.isZero()) {
-      throw new IllegalArgumentException(field + " must be strictly positive");
-    }
-    return duration;
   }
 
   private static void requireFilename(String filename) {

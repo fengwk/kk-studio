@@ -77,7 +77,12 @@ class MediaPluginPostgresIntegrationTest {
         .run(
             context -> {
               PluginRegistry registry = context.getBean(PluginRegistry.class);
-              assertEquals(1, registry.size(), "media must be the only installed Plugin");
+              assertEquals(
+                  List.of(PLUGIN_ID),
+                  registry.plugins().stream()
+                      .map(plugin -> plugin.descriptor().pluginId())
+                      .toList(),
+                  "media must be the only installed Plugin");
               assertTrue(
                   context.getBeansOfType(CanvasFunctionAdapter.class).isEmpty(),
                   "media must not also publish a builtin adapter bean");

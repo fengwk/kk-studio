@@ -16,10 +16,10 @@ class PluginRedactionTest {
   void redactsKnownSecrets() {
     assertEquals(
         "token " + PluginRedaction.REDACTED + " and " + PluginRedaction.REDACTED,
-        PluginRedaction.redact("token " + SECRET + " and " + SECRET, SECRET));
-    assertEquals("plain", PluginRedaction.redact("plain", ""));
-    assertEquals("plain", PluginRedaction.redact("plain", (String) null));
-    assertEquals("", PluginRedaction.redact(null, SECRET));
+        PluginRedaction.diagnostic("token " + SECRET + " and " + SECRET, SECRET));
+    assertEquals("plain", PluginRedaction.diagnostic("plain", ""));
+    assertEquals("plain", PluginRedaction.diagnostic("plain", (String) null));
+    assertEquals("", PluginRedaction.diagnostic(null, SECRET));
   }
 
   /** 安全 URL 只保留 scheme、host、port 与 path。 */

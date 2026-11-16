@@ -207,7 +207,7 @@ class MavisClientTest {
                         new RecordingTransport()
                             .responder("{\"statusInfo\":{\"code\":500,\"message\":\"boom\"}}"))
                     .fetchCatalog(OPAQUE_TOKEN, MavisRegion.CN));
-    assertEquals("500", business.code());
+    assertTrue(business.getMessage().contains("code 500"));
   }
 
   /** catalog 结果只包含文本 endpoint，用于判断能力是否仍在线上目录中。 */
@@ -360,7 +360,7 @@ class MavisClientTest {
             () ->
                 client(new RecordingTransport().responder("{\"code\":402,\"message\":\"quota\"}"))
                     .invoke(credential, MavisCapability.TTS, json("{}")));
-    assertEquals("402", insufficientCredits.code());
+    assertTrue(insufficientCredits.getMessage().contains("code 402"));
     assertTrue(insufficientCredits.getMessage().contains("Do not retry"));
 
     MavisBusinessException leaked =
@@ -376,7 +376,7 @@ class MavisClientTest {
                                     + credential.token()
                                     + "\"}"))
                     .invoke(credential, MavisCapability.TTS, json("{}")));
-    assertEquals("500", leaked.code());
+    assertTrue(leaked.getMessage().contains("code 500"));
     assertFalse(leaked.getMessage().contains(credential.token()));
     assertFalse(leaked.getMessage().contains("?token="));
     assertTrue(leaked.getMessage().contains("token [REDACTED] see https://agent.minimaxi.com/x"));
@@ -393,7 +393,7 @@ class MavisClientTest {
                 client(new RecordingTransport().responder("{\"code\":\"" + marker + "\"}"))
                     .invoke(credential(), MavisCapability.TTS, json("{}")));
 
-    assertEquals("unexpected-status", error.code());
+    assertTrue(error.getMessage().contains("code unexpected-status"));
     assertFalse(error.getMessage().contains(marker));
   }
 

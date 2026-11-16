@@ -67,8 +67,7 @@ final class H3PromptEnhancer {
       H3AdapterState state) {
     checkpoint(context, ComfyuiCanvasFunctionAdapter.PROMPT_SUBMITTING, state);
     // 提交前的确定性输入校验与准备：失败必须保持 FAILED，绝不进入 UNKNOWN 保守窗口。
-    String promptAgentName =
-        ComfyuiTexts.requireText(settings.promptAgentName(), "promptAgentName");
+    String promptAgentName = settings.promptAgentName();
     String systemPrompt = promptBuilder.systemPrompt();
     List<PluginPromptContent> contents = promptStaging.prepare(context, run, manifest);
     UUID taskId;

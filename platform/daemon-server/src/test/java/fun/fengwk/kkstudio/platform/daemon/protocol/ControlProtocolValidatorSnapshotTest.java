@@ -17,8 +17,12 @@ class ControlProtocolValidatorSnapshotTest {
         .build();
   }
 
+  private static RuntimeBody.Builder body() {
+    return RuntimeBody.newBuilder().setDaemonVersion("1.2.3");
+  }
+
   private static RuntimeSnapshot.Builder snapshot() {
-    return RuntimeSnapshot.newBuilder().setRevision(1).setStatus(RuntimeBody.newBuilder());
+    return RuntimeSnapshot.newBuilder().setRevision(1).setStatus(body());
   }
 
   private static RuntimeSnapshot.Builder withConfiguration(
@@ -133,18 +137,20 @@ class ControlProtocolValidatorSnapshotTest {
     RuntimeSnapshot snapshot =
         snapshot()
             .setStatus(
-                RuntimeBody.newBuilder()
+                body()
                     .setUpdate(
                         UpdateProgress.newBuilder()
                             .setTargetVersion("1.2.3")
                             .setDownloadedBytes(10)
                             .setTotalBytes(5)))
             .build();
-    assertThrows(
-        ControlProtocolException.class,
-        () ->
-            ControlProtocolCodec.encodeBinary(
-                runtimeStatus(RuntimeStatus.newBuilder().setRuntimeStatus(snapshot).build())));
+    ControlProtocolException error =
+        assertThrows(
+            ControlProtocolException.class,
+            () ->
+                ControlProtocolCodec.encodeBinary(
+                    runtimeStatus(RuntimeStatus.newBuilder().setRuntimeStatus(snapshot).build())));
+    assertTrue(error.getMessage().contains("status.update.totalBytes"), error.getMessage());
   }
 
   @Test

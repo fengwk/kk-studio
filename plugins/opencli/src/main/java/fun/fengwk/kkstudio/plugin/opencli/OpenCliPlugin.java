@@ -9,18 +9,15 @@ import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.common.schema.ObjectSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
-import fun.fengwk.kkstudio.platform.plugin.PluginAuthHandler;
 import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginConfigSchema;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
-import fun.fengwk.kkstudio.platform.plugin.PluginCredentialRefresher;
 import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -159,15 +156,5 @@ public final class OpenCliPlugin implements Plugin {
     String resolved = CONFIGURATION_SCHEMA.resolveValues(config.valuesJson());
     OpenCliSettings settings = OpenCliSettings.parse(resolved);
     return OpenCliInstance.create(settings, mapper, context);
-  }
-
-  @Override
-  public Optional<PluginAuthHandler> authHandler() {
-    return Optional.empty();
-  }
-
-  @Override
-  public Optional<PluginCredentialRefresher> refresher() {
-    return Optional.empty();
   }
 }

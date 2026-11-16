@@ -577,9 +577,16 @@ final class DaemonConnectionSession implements DaemonSession {
       logUnknown("COMPLETED", invocationId);
       return;
     }
-    EnvironmentCapabilityResult result =
-        DaemonProtoMapping.toDomainResult(envelope.getCompleted().getResult());
-    Set<UUID> referenced = transferCoordinator.requireCompletedUploads(active, result);
+    EnvironmentCapabilityResult result;
+    Set<UUID> referenced;
+    try {
+      result = DaemonProtoMapping.toDomainResult(envelope.getCompleted().getResult());
+      referenced = transferCoordinator.requireCompletedUploads(active, result);
+    } catch (RuntimeException error) {
+      // 调用已迁移到墓碑，后续 expire 不再收尾它；终态本身违规时上传仍须在本路径释放。
+      transferCoordinator.releaseAllTransfers(active, ticketService);
+      throw error;
+    }
     deferred.add(() -> active.listener.onComplete(result));
     deferred.add(
         () -> transferCoordinator.releaseUnreferencedTransfers(active, referenced, ticketService));

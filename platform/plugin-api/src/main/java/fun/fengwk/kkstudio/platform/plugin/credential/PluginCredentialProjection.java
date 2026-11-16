@@ -26,9 +26,4 @@ public record PluginCredentialProjection(
     return new PluginCredentialProjection(
         PluginCredentialStatus.NOT_CONNECTED, null, null, null, null, null);
   }
-
-  /** 投影是否为「已持有可用凭据」状态。 */
-  public boolean connected() {
-    return status == PluginCredentialStatus.CONNECTED;
-  }
 }

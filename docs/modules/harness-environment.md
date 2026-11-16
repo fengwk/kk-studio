@@ -128,7 +128,7 @@ Protobuf `Envelope` 的固定字段为：
 message_type / environment_id / invocation_id? / payload (oneof body)
 ```
 
-`environment_id` 是规范小写 UUID 字符串作用域。调用、资源上传与资源下载消息通过非空 `invocation_id`（UUID 字符串）关联具体执行；IDE 命令与回执同样携带请求 UUID；而 `SETTINGS`、`READY`、`HEARTBEAT`、`RUNTIME_STATUS`、`TEMPORARY_RESOURCE_POLICY` 与 `IDE_LEASE` 作用于整个连接作用域，不携带 `invocation_id`。
+`environment_id` 是规范小写 UUID 字符串作用域。调用、资源上传与资源下载消息通过非空 `invocation_id`（UUID 字符串）关联具体执行；IDE 命令与回执同样携带请求 UUID；而 `SETTINGS`、`READY`、`HEARTBEAT`、`RUNTIME_STATUS`、`TEMPORARY_RESOURCE_POLICY`、`UPDATE`、`UPDATE_RESULT`、`IDE_LEASE` 与 `ENVIRONMENT_CONFIG` 作用于整个连接作用域，不携带 `invocation_id`。
 
 重连恢复按 `invocationId` 以不终止执行的 `RECOVER` 取回在途调用（Daemon 回放 STARTED，或重放冻结的终态与退出确认），只有调用方已表达取消意图的调用才重放 `CANCEL`；各调用沿自己的 STARTED/PROGRESS/终态推进。
 
@@ -175,7 +175,7 @@ Studio -> IDE_LEASE(round, bindings)
 
 ## 载荷与编解码
 
-控制协议各帧的载荷均为 Protobuf 强类型消息，集中定义于 `control.proto`。传输层入站解码由 `ControlFraming` 处理成帧，`ControlProtocolCodec.decodeBinary` 解析 protobuf 并调用 `ControlProtocolValidator` 施加一次性的应用层语义校验；服务端核心 `DaemonSession.receive` 假定输入帧已通过 wire 校验，只执行会话语义与状态机校验（如 `READY` 仅允许一次、环境标识匹配等）。
+控制协议各帧的载荷均为 Protobuf 强类型消息，集中定义于 `control.proto`。传输层入站解码由 [`ControlFrameDecoder`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/transport/ControlFrameDecoder.java) 按长度前缀增量成帧，`ControlProtocolCodec.decodeBinary` 解析 protobuf 并调用 `ControlProtocolValidator` 施加一次性的应用层语义校验；服务端核心 `DaemonSession.receive` 假定输入帧已通过 wire 校验，只执行会话语义与状态机校验（如 `READY` 仅允许一次、环境标识匹配等）。出站方向由 `ControlProtocolCodec.encodeFrame` 经 `ControlFraming` 成帧。
 
 宿主环境元数据持久化：[`DaemonReadyMetadataCodec`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonReadyMetadataCodec.java) 编解码 `daemonVersion + hostInfo`，由 Server 持久化到 `ready_metadata`。当前运行状态仅保存在连接会话内存中，不持久化。`environment_connection` 保留：
 - `ready_metadata`：最后接受的 READY 宿主 metadata，断线保留。实际 Daemon 版本只取此上报事实。
@@ -219,7 +219,7 @@ runtimeStatus: {
 - **背压与并发**：流式数据传输直接受两端 TCP 与 HTTP/2 流控协议的背压约束，流量在两端原生背压控制下流转，不进行私有二进制切帧封装。物理连接失联时中止所有活跃交换。
 - **非 owner 转发**：浏览器不要求粘性路由；非 owner 节点 B 收到 IDE 流量时，从 `environment_connection` 和 `cluster_node` 找到 owner 节点 A，通过内部单跳代理转发给 A，只有 owner 节点直接操作环境隧道。owner 变化或内部转发失败时终结请求，不改投另一节点重放副作用。
 
-`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 MiB 字节，FAILED 与 ERROR 说明至多 4096 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；过期时刻的规范 `Instant` 文本由 `ControlProtocolValidator` 校验。协议验证未知字段、必填字段、canonical UUID/Instant、摘要与 ticket 状态；嵌入的 JSON 文本严格校验重复键和尾随内容。
+`transferId` 是同一 invocation 内一次资源传输的稳定关联键。控制面只承载元数据：单条控制消息至多 16 MiB 字节，FAILED 与 ERROR 说明至多 4096 字符。[`DaemonPresignedPut`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/DaemonPresignedPut.java) 限制方法只能是 `PUT`、URL 至多 4096 字符、header 至多 16 条且名与值各至多 1024 字符；预签名票据的 `expiresAtEpochMs` 是正整数 epoch 毫秒，由 `ControlProtocolValidator` 校验，协议中不存在 `Instant` 文本。协议验证未知字段、必填字段、canonical UUID、摘要与 ticket 状态；嵌入的 JSON 文本严格校验重复键和尾随内容。
 
 上传资源的字节不进入控制通道：控制面只描述 transfer、预签名 PUT 与终态 upload 元数据，实际 PUT 由 Daemon 直接请求对象存储。控制流和 IDE 数据流通过承载在 WebSocket 上的 HTTP/2 会话多路复用；所有能力统一通过通用 INVOKE 与结果协议交互。
 
@@ -348,7 +348,7 @@ COMPLETED
 
 #### 优雅排空与路由释放
 
-[`DaemonControlChannel`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonControlChannel.java) 的 `drain()` 由传输层实现，依次使隧道拒绝新流、向对端发送 `NO_ERROR` 的 HTTP/2 `GOAWAY`、并执行控制流 `closeAfterFlush`，已建立的在途流可正常完成。
+[`DaemonControlChannel`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonControlChannel.java) 的 `drain()` 由传输层实现，依次使隧道拒绝新流、向对端发送 `NO_ERROR` 的 HTTP/2 `GOAWAY`、并执行控制流 `closeAfterFlush`，已建立的在途流可正常完成。会话由 Studio 作为 HTTP/2 客户端发起，Daemon 从不主动建流，因此客户端 GOAWAY 的 `last-stream-id` 恒为 `0`。
 
 [`EnvironmentDaemonServer`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentDaemonServer.java) 的 `drain()` 编排节点退出：对当前全部活动会话调用 `control.drain()`，并以各自的 `leaseToken` 调用 [`DaemonLeaseStore.release(...)`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonLeaseStore.java) 主动释放路由租约，供新节点接管；排空开始后，准入请求返回 `RetryLater`，`attach` 判定环境不可用；`invoke` 校验会话状态与 READY 租约。排空期间调用方放弃在途执行时（`expire`）只做本地退场与释放 transfer，不向 Daemon 发送 `CANCEL` 帧，远端调用留给下一个 owner 重新挂接。
 
@@ -356,7 +356,7 @@ COMPLETED
 
 `DaemonSession.receive` 不要求调用方串行化同一连接的多帧。核心的保证是：状态推进在 `gate` 内按到达顺序完成，回调批次在该顺序下入队，再由单一 drainer 在锁外同步执行，因此并发 `receive` 不会让同一连接上的 `PARTIAL*` 越过其后的 terminal。批次的执行不走任何异步 executor，drain 就发生在投递该帧的调用线程上：回调耗时直接构成该调用方的背压，而不是转嫁给另一个线程池形成无界积压。
 
-等待执行的批次以每连接固定上界 `MAX_PENDING_CALLBACK_BATCHES = 64` 约束（入站排队本身由传输适配器拥有，核心不感知其容量）。达到上界即 fail-closed：丢弃该帧、关闭连接，并把该 Environment 仍在途的调用一次性回收为 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java)，与实例接管同语义（回收回调追加在同一队列尾部，因此不会迟到于已入队的 partial）。
+等待执行的批次以每连接固定上界 `DaemonCallbackQueue.MAX_PENDING_BATCHES = 64` 约束（入站排队本身由传输适配器拥有，核心不感知其容量）。达到上界即 fail-closed：丢弃该帧、关闭连接，并把该 Environment 仍在途的调用一次性回收为 [`EnvironmentCapabilitySendUncertainException`](../../harness/environment/src/main/java/fun/fengwk/kkstudio/harness/environment/capability/EnvironmentCapabilitySendUncertainException.java)，与实例接管同语义（回收回调追加在同一队列尾部，因此不会迟到于已入队的 partial）。
 
 跨连接代际的精确边界：被接管或回收的 invocation 不再活动，因此旧连接队列里**尚未开始**的 partial 会在 drain 时复核活动性并静默丢弃，不会在新连接的 terminal 之后投递；已经进入 listener 的 partial 回调不做撤销承诺。
 
@@ -381,7 +381,7 @@ COMPLETED
 
 ### 注入端口与宿主设置
 
-构造器接收六个依赖：`DaemonLeaseStore`、`DaemonRegistrationDirectory`、`EnvironmentSessionListener`、`EnvironmentUpdateListener`、`DaemonResourceTicketService` 与 `Supplier<EnvironmentServerSettings>`。
+构造器接收八个依赖：`DaemonLeaseStore`、`DaemonRegistrationDirectory`、`EnvironmentConfigSource`、`EnvironmentSessionListener`、`EnvironmentUpdateListener`、`DaemonResourceTicketService`、`Supplier<EnvironmentServerSettings>` 与负责配置对账的 `Executor`。
 
 [`EnvironmentServerSettings`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/EnvironmentServerSettings.java)
 携带心跳超时（同时用作租约期限）、资源字节上限与临时资源 TTL/扫描间隔，以 supplier 注入并在每个判定点现读，因此宿主修改配置立即

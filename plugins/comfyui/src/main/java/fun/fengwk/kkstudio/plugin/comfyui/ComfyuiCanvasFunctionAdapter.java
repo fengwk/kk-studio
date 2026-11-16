@@ -163,9 +163,7 @@ public final class ComfyuiCanvasFunctionAdapter implements CanvasFunctionAdapter
           "ComfyUI promptId is missing; automatic resubmission is forbidden");
     }
     if (state.outputs() == null) {
-      List<H3OutputDescriptor> outputs =
-          materializer.awaitOutputs(
-              context, ComfyuiTexts.requireText(state.promptId(), "promptId"));
+      List<H3OutputDescriptor> outputs = materializer.awaitOutputs(context, state.promptId());
       state = state.withOutputs(outputs);
       checkpoint(context, COMFY_READY, state);
       stage = COMFY_READY;

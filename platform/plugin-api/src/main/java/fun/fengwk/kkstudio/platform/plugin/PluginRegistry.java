@@ -39,7 +39,7 @@ public final class PluginRegistry {
                 + ")");
       }
     }
-    // 必须保留插入顺序：安装目录的遍历顺序（升序 pluginId）是管理面与 dispatcher 的稳定契约。
+    // 必须保留插入顺序：安装目录的遍历顺序（升序 pluginId）是管理面的稳定契约。
     this.pluginsById = Collections.unmodifiableMap(indexed);
   }
 
@@ -48,17 +48,8 @@ public final class PluginRegistry {
     return List.copyOf(pluginsById.values());
   }
 
-  /** 已安装 Plugin 的 {@code pluginId} 快照，供刷新 dispatcher 限定领取范围。 */
-  public List<String> pluginIds() {
-    return List.copyOf(pluginsById.keySet());
-  }
-
   /** 按安装身份查找；未安装的 id 返回空，绝不加载或合成 Plugin。 */
   public Optional<Plugin> find(String pluginId) {
     return pluginId == null ? Optional.empty() : Optional.ofNullable(pluginsById.get(pluginId));
-  }
-
-  public int size() {
-    return pluginsById.size();
   }
 }

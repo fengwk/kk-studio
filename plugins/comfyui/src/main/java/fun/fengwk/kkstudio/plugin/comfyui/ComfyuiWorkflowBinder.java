@@ -57,7 +57,7 @@ final class ComfyuiWorkflowBinder {
       return H3WorkflowBuilder.build(
           graph,
           selector.nodeId(),
-          ComfyuiTexts.requireText(state.enhancedPrompt(), "enhancedPrompt"),
+          state.enhancedPrompt(),
           extractText(run.args(), "ratio", "16:9"),
           extractInt(run.args(), "duration", 5),
           requireNonnegative(state.seed(), "seed"),

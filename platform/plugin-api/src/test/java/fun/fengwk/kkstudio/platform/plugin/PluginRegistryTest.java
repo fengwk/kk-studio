@@ -63,20 +63,18 @@ class PluginRegistryTest {
     };
   }
 
-  /** 空列表可正常构造，size() 为 0，查询均返回 empty。 */
+  /** 空列表可正常构造，插件快照为空且查询均返回 empty。 */
   @Test
   void constructsWithEmptyList() {
     PluginRegistry registry = new PluginRegistry(List.of());
 
-    assertEquals(0, registry.size());
     assertTrue(registry.plugins().isEmpty());
-    assertTrue(registry.pluginIds().isEmpty());
     assertTrue(registry.find("any-plugin").isEmpty());
     assertTrue(registry.find(null).isEmpty());
   }
 
   /**
-   * 安装目录的遍历顺序是管理面与刷新 dispatcher 的稳定契约：三个集合都必须按 {@code pluginId} 升序，而不是哈希顺序。
+   * 安装目录的遍历顺序是管理面的稳定契约：插件必须按 {@code pluginId} 升序，而不是哈希顺序。
    *
    * <p>用 10 个哈希顺序与字典序明显不同的 id：如果实现用 {@code Map.copyOf} 之类不保留插入顺序的包装，断言会立即失败。
    */
@@ -111,12 +109,10 @@ class PluginRegistryTest {
 
     PluginRegistry registry = new PluginRegistry(plugins);
 
-    assertEquals(expected, registry.pluginIds(), "pluginIds() must be ascending by pluginId");
     assertEquals(
         expected,
         registry.plugins().stream().map(plugin -> plugin.descriptor().pluginId()).toList(),
-        "plugins() must follow pluginIds() order");
-    assertEquals(declared.size(), registry.size());
+        "plugins() must be in ascending pluginId order");
   }
 
   /** find() 命中时返回对应 Plugin，未命中或为 null 时返回 Optional.empty()。 */

@@ -536,10 +536,8 @@ public final class ControlProtocolValidator {
     }
   }
 
-  /** 下载申请只提供 transferId；归档由 invocation 对应的服务端冻结记录决定。 */
-
-  /** 下载票据：READY 携带预签名 GET、大小与摘要；FAILED 只携带去敏说明。 */
-  public static void validateUpdate(Update update) {
+  /** 更新指令：operationId 必须是规范 UUID，targetVersion 为合法的 daemon 版本。 */
+  static void validateUpdate(Update update) {
     requireNoUnknown(update, "update");
     String operationId =
         requireText(
