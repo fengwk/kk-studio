@@ -1,10 +1,10 @@
+import { formatCompactTokens } from '@/features/thread/runtime/thread-timeline/content-utils'
 import {
   calculateCacheHitRate,
   calculateDecodeTokensPerSecond,
-  formatCompactTokens,
   formatTurnUsageText,
-  formatUsageCost,
-} from '@/features/thread/runtime/thread-timeline/content-utils'
+} from '@/features/thread/runtime/thread-timeline/turn-usage-format'
+import { formatUsageCost } from '@/features/thread/runtime/thread-timeline/usage-cost'
 import type { TurnUsage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { translate, type TranslationKey } from '@/shared/i18n'
 
@@ -79,7 +79,8 @@ export function buildThreadStatusModel(
     })
   }
 
-  const usage = input.branchUsage ?? EMPTY_USAGE
+  // 没有任何 usage 事实时读数为全未知：Footer 绝不能把缺失的用量显示成真实 0。
+  const usage = input.branchUsage ?? UNKNOWN_USAGE
 
   // 上下文只使用最新调用的输入估计；缺失时不能用分支累计量替代。
   const contextWindow = positiveFinite(input.contextWindow)
@@ -143,11 +144,11 @@ export function formatUsageDetails(usage: TurnUsage, t: TranslateFn): string {
   ].join('\n')
 }
 
-const EMPTY_USAGE: TurnUsage = {
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheWrite: 0,
+const UNKNOWN_USAGE: TurnUsage = {
+  input: null,
+  output: null,
+  cacheRead: null,
+  cacheWrite: null,
   reasoning: null,
   providerTotal: null,
   cost: null,
