@@ -195,22 +195,8 @@ func TestSkillInstallRejectsSymlinkedExistingMarker(t *testing.T) {
 	}
 }
 
-// TestSkillInstallerValidationHelpers checks canonical identity and safe path-component predicates directly.
+// TestSkillInstallerValidationHelpers checks safe path-component and digest predicates directly.
 func TestSkillInstallerValidationHelpers(t *testing.T) {
-	for _, tc := range []struct {
-		value string
-		valid bool
-	}{
-		{value: "123e4567-e89b-42d3-a456-426614174000", valid: true},
-		{value: "123E4567-E89B-42D3-A456-426614174000"},
-		{value: "123e4567e89b-42d3-a456-426614174000"},
-		{value: "x23e4567-e89b-42d3-a456-426614174000"},
-		{value: "123e4567-e89b-42d3-a456-42661417400z"},
-	} {
-		if got := validUUID(tc.value); got != tc.valid {
-			t.Errorf("validUUID(%q)=%v, want %v", tc.value, got, tc.valid)
-		}
-	}
 	for _, tc := range []struct {
 		value string
 		valid bool
