@@ -26,8 +26,6 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   private static final String IMAGE_FIXTURE =
       "fun/fengwk/kkstudio/canvas/infra/function/fake/tiny.png";
-  private static final String VIDEO_FIXTURE =
-      "fun/fengwk/kkstudio/canvas/infra/function/fake/tiny.mp4";
 
   private static final JsonObject IMAGE_ARGS_SCHEMA =
       CanvasJson.parseObject(
@@ -46,45 +44,6 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
                 "description": "Ratio",
                 "enum": ["AUTO", "1:1", "3:4", "9:16", "4:3", "16:9"],
                 "default": "AUTO"
-              },
-              "references": {
-                "type": "array",
-                "description": "References",
-                "items": {
-                  "type": "resourceReference",
-                  "description": "Resource reference"
-                },
-                "minItems": 0,
-                "maxItems": 12
-              }
-            }
-          }
-          """);
-
-  private static final JsonObject VIDEO_ARGS_SCHEMA =
-      CanvasJson.parseObject(
-          """
-          {
-            "type": "object",
-            "description": "Fake video parameters",
-            "additionalProperties": false,
-            "properties": {
-              "prompt": {
-                "type": "string",
-                "description": "Prompt text"
-              },
-              "ratio": {
-                "type": "string",
-                "description": "Ratio",
-                "enum": ["1:1", "3:4", "16:9", "4:3", "9:16", "21:9"],
-                "default": "16:9"
-              },
-              "duration": {
-                "type": "integer",
-                "description": "Duration",
-                "minimum": 4,
-                "maximum": 15,
-                "default": 5
               },
               "references": {
                 "type": "array",
@@ -124,17 +83,6 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
           CanvasResourceKind.IMAGE,
           new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 12, Map.of()));
 
-  private static final CanvasFunctionDefinition VIDEO_FUNCTION =
-      CanvasFunctionDefinition.of(
-          "fake-video",
-          "Fake Video",
-          VIDEO_ARGS_SCHEMA,
-          CanvasResourceKind.VIDEO,
-          new CanvasFunctionReferencePolicy(
-              Set.of(CanvasResourceKind.IMAGE, CanvasResourceKind.VIDEO, CanvasResourceKind.AUDIO),
-              12,
-              Map.of(CanvasResourceKind.VIDEO, 3, CanvasResourceKind.AUDIO, 3)));
-
   private static final CanvasFunctionDefinition REPORT_FUNCTION =
       new CanvasFunctionDefinition(
           "fake-report",
@@ -147,7 +95,7 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public List<CanvasFunctionDefinition> functions() {
-    return List.of(IMAGE_FUNCTION, VIDEO_FUNCTION, REPORT_FUNCTION);
+    return List.of(IMAGE_FUNCTION, REPORT_FUNCTION);
   }
 
   @Override
@@ -163,7 +111,6 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
   @Override
   public void preflight(CanvasFunctionFrozenRun run) {
     if (!run.definition().name().equals(IMAGE_FUNCTION.name())
-        && !run.definition().name().equals(VIDEO_FUNCTION.name())
         && !run.definition().name().equals(REPORT_FUNCTION.name())) {
       throw new IllegalArgumentException("unsupported fake function: " + run.definition().name());
     }
@@ -188,17 +135,12 @@ public final class FakeCanvasFunctionAdapter implements CanvasFunctionAdapter {
         throw new UncheckedIOException("failed to read fake Canvas Function fixture", exception);
       }
     }
-    String fixture = fixture(run);
-    ClassPathResource resource = new ClassPathResource(fixture);
+    ClassPathResource resource = new ClassPathResource(IMAGE_FIXTURE);
     try (InputStream content = resource.getInputStream()) {
       UUID resourceId = context.materializeOutput(run.output(0), content);
       return List.of(resourceId);
     } catch (IOException exception) {
       throw new UncheckedIOException("failed to read fake Canvas Function fixture", exception);
     }
-  }
-
-  private static String fixture(CanvasFunctionFrozenRun run) {
-    return run.output(0).kind() == CanvasResourceKind.IMAGE ? IMAGE_FIXTURE : VIDEO_FIXTURE;
   }
 }

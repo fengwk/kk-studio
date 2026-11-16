@@ -35,7 +35,6 @@ class FakeCanvasFunctionAdapterTest {
   private static final UUID NODE = UUID.fromString("00000000-0000-0000-0000-000000000002");
   private static final UUID REQUEST = UUID.fromString("00000000-0000-0000-0000-000000000003");
   private static final UUID IMAGE_TARGET = UUID.fromString("00000000-0000-0000-0000-000000000004");
-  private static final UUID VIDEO_TARGET = UUID.fromString("00000000-0000-0000-0000-000000000005");
   private static final UUID REPORT_TEXT = UUID.fromString("00000000-0000-0000-0000-000000000006");
   private static final UUID REPORT_IMAGE = UUID.fromString("00000000-0000-0000-0000-000000000007");
 
@@ -43,19 +42,13 @@ class FakeCanvasFunctionAdapterTest {
   void exposesExactFunctionsAndExecutesMainResourceFixture() {
     FakeCanvasFunctionAdapter adapter = new FakeCanvasFunctionAdapter();
     assertEquals(
-        3, new FakeCanvasFunctionConfiguration().fakeCanvasFunctionAdapter().functions().size());
+        2, new FakeCanvasFunctionConfiguration().fakeCanvasFunctionAdapter().functions().size());
     assertTrue(adapter.enabled());
     assertNull(adapter.unavailableReason());
     CanvasFunctionDefinition image = adapter.functions().get(0);
-    CanvasFunctionDefinition video = adapter.functions().get(1);
-    CanvasFunctionDefinition report = adapter.functions().get(2);
+    CanvasFunctionDefinition report = adapter.functions().get(1);
     assertEquals("fake-image", image.name());
     assertEquals(List.of(CanvasFunctionOutputSpec.of(CanvasResourceKind.IMAGE)), image.outputs());
-    assertEquals("fake-video", video.name());
-    assertEquals(List.of(CanvasFunctionOutputSpec.of(CanvasResourceKind.VIDEO)), video.outputs());
-    assertEquals(12, video.referencePolicy().maxReferences());
-    assertEquals(3, video.referencePolicy().maxFor(CanvasResourceKind.VIDEO));
-    assertEquals(3, video.referencePolicy().maxFor(CanvasResourceKind.AUDIO));
 
     assertEquals("fake-report", report.name());
     assertEquals(
@@ -86,25 +79,6 @@ class FakeCanvasFunctionAdapterTest {
     assertEquals(List.of(IMAGE_TARGET), adapter.execute(context, run));
     assertTrue(context.stages.isEmpty(), "execute must not checkpoint local fake work");
     assertEquals(IMAGE_TARGET, context.materializedBlobId);
-
-    RecordingContext videoContext = new RecordingContext();
-    CanvasFunctionFrozenOutput videoOutput =
-        new CanvasFunctionFrozenOutput(VIDEO_TARGET, 0, CanvasResourceKind.VIDEO, "output.mp4");
-    CanvasFunctionFrozenRun videoRun =
-        new CanvasFunctionFrozenRun(
-            CANVAS,
-            NODE,
-            "output",
-            REQUEST,
-            binding(video),
-            CanvasJson.parseObject("{\"prompt\":\"test\",\"ratio\":\"16:9\",\"duration\":5}"),
-            List.of(),
-            List.of(videoOutput),
-            CanvasFunctionSubmitState.SUBMITTED,
-            "QUEUED",
-            Map.of());
-    adapter.submit(videoContext, videoRun);
-    assertEquals(List.of(VIDEO_TARGET), adapter.execute(videoContext, videoRun));
 
     RecordingContext reportContext = new RecordingContext();
     CanvasFunctionFrozenOutput reportTextOutput =
