@@ -85,12 +85,16 @@ IDE 边界保留精确原因，所有本地/Daemon 错误都按已知 code 映�
 | `STALE_BINDING` | expected epoch、claim、实例或回执已过期 | 先纯读权威状态再对账 |
 | `CLAIM_CONFLICT` | 同 claim 被用于不同操作 | 协议错误，不能自动重试 |
 | `IDE_CAPACITY_EXCEEDED` | 创建容量不足 | 管理已有 view；已有 view 的 resume 不受此分支影响 |
+| `DIRTY` | 切换目录前 Daemon 判定编辑器仍有未保存修改 | 不写工作区，等用户保存或放弃后再显式重试 |
+| `IDE_UNAVAILABLE` | Daemon 侧 `UNAVAILABLE`/`BUSY`/`VIEW_IN_USE` 拒绝，或使用意图查询不可达 | 保留当前绑定与真实原因，稍后按原意图重试，不视作已执行 |
 | `IDE_OUTCOME_UNKNOWN` | 命令可能已执行 | 纯读对账，不创建新 view，不重放终端/目录副作用 |
 | `IDE_CLEANUP_FAILED` | 资源清理未完成 | 保留 CLOSING 与容量，等待显式重试或人工处理 |
 | `IDE_PROTOCOL_ERROR` | 回执或快照破坏协议不变量 | 失败本调用并保留上一个已接受快照，不自行修补 |
 | `IDE_CLOSE_CANCELLED` | 用户在 IDE 原生关闭中选择取消 | 视图保持原绑定，不触发外层放弃确认 |
+| `IDE_UNAUTHORIZED` | 跨节点内部调用被目标节点以 401 `unauthorized` 拒绝（HMAC 或目标实例不匹配） | 不重试；先对账集群密钥与时钟 |
+| `IDE_CONFLICT` | 目标节点返回 409 但未携带可识别 reason 的兜底映射 | 不自动重试，按失败回读权威快照 |
 
-继续使用 Problem+JSON 与统一 `DomainException` HTTP 映射，不借 IDE 改全仓错误体系。409 本身不决定重试策略，reason 与确定的执行阶段才决定；网络断线或 5xx 只表示结果可能未知。
+继续使用 Problem+JSON 与统一 `DomainException` HTTP 映射，不借 IDE 改全仓错误体系。409 本身不决定重试策略，reason 与确定的执行阶段才决定；网络断线或 5xx 只表示结果可能未知。`DIRTY` 与 `IDE_CLOSE_CANCELLED` 是 `validation`（400），其余结构化失败统一映射为 409。`IDE_UNAUTHORIZED` 与 `IDE_CONFLICT` 只在本节点的请求被路由到远端 owner 时出现：前者是真实的认证失败，后者是内部 409 丢失 reason 时的兜底。
 
 结果未知时先纯读该 view 与当前 `daemonInstanceId`，按以下顺序处理：
 
@@ -117,7 +121,7 @@ iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。b
 
 ## 跨节点
 
-多节点部署时，Environment 的 Daemon 连接只在一个 owner 节点上。元数据请求、快照读取与使用意图查询由 [`ClusterEnvironmentIdeService`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/cluster/ClusterEnvironmentIdeService.java) 按 owner 快照路由。所有内部路径都参与 HMAC 签名并核对本节点 owner 归属；没有 READY 租约、路由为空或认证失败时立即失败，不改投其它节点、不自动重放。
+多节点部署时，Environment 的 Daemon 连接只在一个 owner 节点上。元数据请求、快照读取与使用意图查询由 [`ClusterEnvironmentIdeService`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/cluster/ClusterEnvironmentIdeService.java) 按 owner 快照路由；目录入参在路由前由 [`IdeInputs.requireDirectory`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeInputs.java) 统一校验，非法请求不会被转发。所有内部路径都参与 HMAC 签名并核对本节点 owner 归属；没有 READY 租约、路由为空或认证失败时立即失败，不改投其它节点、不自动重放。租约续租只在 owner 本地读取 `LIST_VIEWS` 快照，不走内部 HTTP，因此内部面只暴露 view 命令、单 view 纯读与数据面转发。
 
 [`ClusterEnvironmentIdeInternalController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/http/ClusterEnvironmentIdeInternalController.java)、
 [`ClusterEnvironmentIdeInternalDataPlaneController`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/http/ClusterEnvironmentIdeInternalDataPlaneController.java)
