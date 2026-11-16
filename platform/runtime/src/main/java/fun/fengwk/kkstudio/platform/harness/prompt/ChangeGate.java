@@ -1,9 +1,9 @@
 package fun.fengwk.kkstudio.platform.harness.prompt;
 
 /**
- * 观察循环的信号门：按类别计数并支持带超时的等待。
+ * 观察循环的信号门：计数信号并支持带超时的等待。
  *
- * <p>计数而非布尔位，保证「先 signal 后 wait」的 wake 不丢失；多个信号合并为一次唤醒，由调用方在唤醒后按类别计数差决定重读哪类事实。{@link #awaitChange}
+ * <p>计数而非布尔位，保证「先 signal 后 wait」的 wake 不丢失；多个信号合并为一次唤醒，由调用方在唤醒后按计数差决定是否重读事实。{@link #awaitChange}
  * 只做限时睡眠，不读取任何 durable 事实；唤醒后是否重读 snapshot 完全由调用方依据计数差决定。
  *
  * <p>Platform 的 prompt 任务观察循环内部工具类，不对外承诺 API 稳定性。
@@ -11,7 +11,6 @@ package fun.fengwk.kkstudio.platform.harness.prompt;
 public final class ChangeGate {
 
   private long version;
-  private long cancel;
 
   /** durable version / resync 唤醒。 */
   public synchronized void version() {
@@ -19,18 +18,12 @@ public final class ChangeGate {
     notifyAll();
   }
 
-  /** 取消唤醒（主动打断等待，使观察循环尽快检查取消标记）。 */
-  public synchronized void cancel() {
-    cancel++;
-    notifyAll();
-  }
-
   public synchronized State snapshot() {
-    return new State(version, cancel);
+    return new State(version);
   }
 
   /**
-   * 等待任意类别计数相对 {@code since} 前进；返回 false 表示 timeoutNanos 内无信号（调用方按自家 deadline 结束）。
+   * 等待计数相对 {@code since} 前进；返回 false 表示 timeoutNanos 内无信号（调用方按自家 deadline 结束）。
    *
    * <p>timeoutNanos 非正时只做一次立即检查（不等待）；计时用相对 elapsed（wait 实际流逝累减），无绝对 deadline，避免 nanoTime + timeout
    * 溢出；spurious wake 后按剩余时间继续等待，不 busy-loop。
@@ -55,8 +48,8 @@ public final class ChangeGate {
   }
 
   private boolean changed(State since) {
-    return version != since.version || cancel != since.cancel;
+    return version != since.version;
   }
 
-  public record State(long version, long cancel) {}
+  public record State(long version) {}
 }
