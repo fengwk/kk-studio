@@ -68,6 +68,22 @@ func TestCodec_RuntimeConfigStatus(t *testing.T) {
 	}
 }
 
+func TestCodec_ExecutionExitAckRequiresInvocationIdentity(t *testing.T) {
+	valid := testEnvelope(MessageType_EXECUTION_EXIT_ACK, testInvocationID, &Envelope_ExecutionExitAck{ExecutionExitAck: &ExecutionExitAck{}})
+	encoded, err := MarshalEnvelope(valid)
+	if err != nil {
+		t.Fatalf("valid exit acknowledgement rejected: %v", err)
+	}
+	decoded, err := UnmarshalEnvelope(encoded)
+	if err != nil || decoded.MessageType != MessageType_EXECUTION_EXIT_ACK {
+		t.Fatalf("exit acknowledgement round trip: envelope=%v err=%v", decoded, err)
+	}
+	missingID := testEnvelope(MessageType_EXECUTION_EXIT_ACK, "", &Envelope_ExecutionExitAck{ExecutionExitAck: &ExecutionExitAck{}})
+	if _, err := MarshalEnvelope(missingID); err == nil {
+		t.Fatal("exit acknowledgement without invocationId accepted")
+	}
+}
+
 func TestCodec_InvocationEvents(t *testing.T) {
 	for _, e := range []*Envelope{
 		testEnvelope(MessageType_PROGRESS, testInvocationID, &Envelope_Progress{Progress: &Progress{Result: &CapabilityResult{CallId: proto.String("call"), Error: proto.Bool(false), DetailsJson: proto.String(`{}`), Contents: []*Content{{Body: &Content_Resource{Resource: &ResourceContent{UploadId: proto.String(testEnvironmentID), MediaType: proto.String("application/zip"), Name: proto.String("a.zip"), Size: proto.Int64(1), Sha256: proto.String(testSHA256)}}}}}}}),

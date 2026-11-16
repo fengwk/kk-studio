@@ -28,6 +28,8 @@ func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.
 		return r.handleCancel(e)
 	case protocol.MessageType_RECOVER:
 		return r.handleRecover(e)
+	case protocol.MessageType_EXECUTION_EXIT_ACK:
+		return r.handleExecutionExitAck(e)
 	case protocol.MessageType_UPDATE:
 		if !ready || e.EnvironmentId == nil || *e.EnvironmentId == "" {
 			return r.sendBoundError(e.InvocationId, "UPDATE requires a READY bound connection")

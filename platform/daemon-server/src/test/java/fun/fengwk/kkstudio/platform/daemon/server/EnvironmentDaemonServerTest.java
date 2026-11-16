@@ -1005,7 +1005,9 @@ class EnvironmentDaemonServerTest {
     assertEquals(
         List.of(MessageType.SETTINGS), other.messageTypes(), "不同 daemon 身份不重放未确认退出确认的 CANCEL");
     fixture.receive(other, executionExitedEnvelope(CALL_ONE.toString()));
+    fixture.receive(other, executionExitedEnvelope(new UUID(0L, 9199L).toString()));
     assertEquals(0, listener.exitConfirmations, "其它 daemon 身份不能替原调用确认退出");
+    assertEquals(0, other.countOf(MessageType.EXECUTION_EXIT_ACK), "未知和错误实例都不应收到 ACK");
     assertNull(listener.error);
     assertFalse(other.closed());
     fixture.close(other.connectionId());
@@ -1019,22 +1021,66 @@ class EnvironmentDaemonServerTest {
     fixture.receive(reconnected, executionExitedEnvelope(CALL_ONE.toString()));
     fixture.receive(reconnected, executionExitedEnvelope(CALL_ONE.toString()));
     assertEquals(1, listener.exitConfirmations);
+    assertEquals(2, reconnected.countOf(MessageType.EXECUTION_EXIT_ACK));
     assertNull(listener.completed);
     assertNull(listener.error);
     assertFalse(reconnected.closed());
 
     fixture.close(reconnected.connectionId());
+    FakeControlChannel changedInstance =
+        fixture.connectReady("channel-exit-changed-instance", OTHER_INSTANCE_ID);
+    fixture.receive(changedInstance, executionExitedEnvelope(CALL_ONE.toString()));
+    assertEquals(0, changedInstance.countOf(MessageType.EXECUTION_EXIT_ACK));
+    assertEquals(
+        1,
+        listener.exitConfirmations,
+        "an ACK replay cannot confirm an exit for a new daemon instance");
+    fixture.close(changedInstance.connectionId());
+
     FakeControlChannel afterConfirmed =
         fixture.connectReady("channel-exit-after-confirmed", INSTANCE_ID);
     assertEquals(
         List.of(MessageType.SETTINGS),
         afterConfirmed.messageTypes(),
         "已交付的退出确认不再随 READY 重放 CANCEL");
+    fixture.receive(afterConfirmed, executionExitedEnvelope(CALL_ONE.toString()));
+    assertEquals(1, listener.exitConfirmations, "ACK 丢失后的退出重放不得重复消费回调");
+    assertEquals(1, afterConfirmed.countOf(MessageType.EXECUTION_EXIT_ACK));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            fixture.server.invoke(
+                ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()),
+        "ACK 后不允许同一 invocationId 再次派发 INVOKE");
+    assertEquals(0, afterConfirmed.countOf(MessageType.INVOKE));
   }
 
-  /** 账本确认抛错仍须留下脱敏诊断；重复 ACK 不重试失败写入，也不阻断后续调用的独立退出确认。 */
+  /** ACK 出站被拒绝时断开连接；重放仍 ACK 已交付事实但不重复回调。 */
   @Test
-  void exitConfirmationFailureIsLoggedSafelyWithoutBlockingLaterCallbacks() {
+  void rejectedExitAckIsRetriedAfterReconnectWithoutRepeatingCallback() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-exit-ack-busy");
+    RecordingListener listener = new RecordingListener();
+    EnvironmentCapabilityExecutionHandle handle =
+        fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), listener);
+    handle.terminate(EnvironmentCapabilityTerminationCause.CANCELLED);
+    channel.busyNextOffer = true;
+
+    fixture.receive(channel, executionExitedEnvelope(CALL_ONE.toString()));
+    assertEquals(1, listener.exitConfirmations);
+    assertEquals(0, channel.countOf(MessageType.EXECUTION_EXIT_ACK));
+    assertTrue(channel.closed(), "a rejected ACK must force a reconnect for replay");
+
+    FakeControlChannel reconnected = fixture.connectReady("channel-exit-ack-retry", INSTANCE_ID);
+    assertEquals(List.of(MessageType.SETTINGS), reconnected.messageTypes());
+    fixture.receive(reconnected, executionExitedEnvelope(CALL_ONE.toString()));
+    assertEquals(1, listener.exitConfirmations, "replay only resends the ACK");
+    assertEquals(1, reconnected.countOf(MessageType.EXECUTION_EXIT_ACK));
+  }
+
+  /** 回调失败释放 claim 以便退出事实重放；成功重试只消费一次副作用并发送 ACK。 */
+  @Test
+  void exitConfirmationFailureIsLoggedSafelyAndRetriedWithoutDuplicateSideEffect() {
     Fixture fixture = new Fixture();
     FakeControlChannel channel = fixture.connectReady("channel-exit-failure");
     AtomicInteger attempts = new AtomicInteger();
@@ -1042,8 +1088,12 @@ class EnvironmentDaemonServerTest {
         new SerialListener() {
           @Override
           public void onExitConfirmed() {
-            attempts.incrementAndGet();
-            throw new IllegalStateException("exit persistence failed: " + SYNTHETIC_SECRET);
+            assertEquals(0, channel.countOf(MessageType.EXECUTION_EXIT_ACK));
+            if (attempts.incrementAndGet() == 1) {
+              throw new IllegalStateException("exit persistence failed: " + SYNTHETIC_SECRET);
+            }
+            super.onExitConfirmed();
+            assertEquals(0, channel.countOf(MessageType.EXECUTION_EXIT_ACK));
           }
         };
     EnvironmentCapabilityExecutionHandle handle =
@@ -1057,8 +1107,17 @@ class EnvironmentDaemonServerTest {
       fixture.receive(channel, executionExitedEnvelope(CALL_ONE.toString()));
       fixture.receive(channel, executionExitedEnvelope(CALL_TWO.toString()));
 
-      assertEquals(1, attempts.get(), "failed persistence must not be retried on a duplicate ACK");
-      assertTrue(failing.events().isEmpty(), "a failed callback must not fabricate another result");
+      assertEquals(2, attempts.get(), "a failed callback claim must be retryable on replay");
+      assertEquals(
+          List.of("exit"), failing.events(), "the successful retry commits the callback once");
+      assertEquals(2, channel.countOf(MessageType.EXECUTION_EXIT_ACK));
+      assertEquals(
+          List.of(CALL_ONE.toString(), CALL_TWO.toString()),
+          channel.envelopes().stream()
+              .filter(envelope -> envelope.getMessageType() == MessageType.EXECUTION_EXIT_ACK)
+              .map(Envelope::getInvocationId)
+              .toList(),
+          "the failed first callback is not acknowledged; both successful deliveries are");
       assertEquals(1, following.exitConfirmations, "later callbacks must still drain");
       assertNull(following.completed);
       assertNull(following.error);

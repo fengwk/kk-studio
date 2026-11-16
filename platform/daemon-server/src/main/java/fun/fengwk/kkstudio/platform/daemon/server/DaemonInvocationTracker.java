@@ -40,8 +40,7 @@ final class DaemonInvocationTracker {
   }
 
   /**
-   * 挂接在途能力调用：如果已有在途登记抛 {@link IllegalArgumentException}； 如果已有 tombstone 则允许替换（删除该 tombstone
-   * 再登记新的在途记录）。
+   * 挂接在途能力调用：已有在途登记或正在交付退出确认的 tombstone 会抛 {@link IllegalArgumentException}；其它 tombstone 可由新登记替换。
    */
   void registerAttach(ActiveInvocation active) {
     synchronized (lock) {
@@ -55,9 +54,22 @@ final class DaemonInvocationTracker {
                 + ": "
                 + active.invocationId);
       }
+      ExitConfirmation tombstone = tombstoneLocked(active.environmentId, active.invocationId);
+      if (tombstone != null && tombstone.claimed) {
+        throw new IllegalArgumentException(
+            "invocationId exit confirmation is being delivered for environment "
+                + active.environmentId
+                + ": "
+                + active.invocationId);
+      }
       removeTombstoneLocked(active.environmentId, active.invocationId);
       invocations.put(active.invocationId, active);
     }
+  }
+
+  private ExitConfirmation tombstoneLocked(EnvironmentId environmentId, UUID invocationId) {
+    LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
+    return tombstones == null ? null : tombstones.get(invocationId);
   }
 
   private void removeTombstoneLocked(EnvironmentId environmentId, UUID invocationId) {
@@ -142,29 +154,38 @@ final class DaemonInvocationTracker {
     LinkedHashMap<UUID, ExitConfirmation> tombstones =
         invocationTombstones.computeIfAbsent(
             active.environmentId, ignored -> new LinkedHashMap<>());
-    ExitConfirmation retained = new ExitConfirmation(active.listener, active.daemonInstanceId);
-    if (active.exitConfirmed.get()) {
-      retained.delivered.set(true);
-    }
+    ExitConfirmation retained = active.exitConfirmation;
     tombstones.put(active.invocationId, retained);
-    while (tombstones.size() > MAX_INVOCATION_TOMBSTONES) {
-      evictOneTombstoneLocked(tombstones);
-    }
+    trimTombstonesLocked(tombstones, null);
   }
 
-  private static void evictOneTombstoneLocked(LinkedHashMap<UUID, ExitConfirmation> tombstones) {
+  private static void trimTombstonesLocked(
+      LinkedHashMap<UUID, ExitConfirmation> tombstones, ExitConfirmation protectedConfirmation) {
+    while (tombstones.size() > MAX_INVOCATION_TOMBSTONES
+        && evictOneTombstoneLocked(tombstones, protectedConfirmation)) {}
+  }
+
+  private static boolean evictOneTombstoneLocked(
+      LinkedHashMap<UUID, ExitConfirmation> tombstones, ExitConfirmation protectedConfirmation) {
     Iterator<ExitConfirmation> retained = tombstones.values().iterator();
     while (retained.hasNext()) {
-      if (retained.next().delivered.get()) {
+      ExitConfirmation confirmation = retained.next();
+      if (confirmation != protectedConfirmation
+          && confirmation.delivered
+          && !confirmation.claimed) {
         retained.remove();
-        return;
+        return true;
       }
     }
-    Iterator<UUID> oldest = tombstones.keySet().iterator();
-    if (oldest.hasNext()) {
-      oldest.next();
-      oldest.remove();
+    Iterator<ExitConfirmation> oldest = tombstones.values().iterator();
+    while (oldest.hasNext()) {
+      ExitConfirmation confirmation = oldest.next();
+      if (confirmation != protectedConfirmation && !confirmation.claimed) {
+        oldest.remove();
+        return true;
+      }
     }
+    return false;
   }
 
   ActiveInvocation registeredInvocation(EnvironmentId environmentId, UUID invocationId) {
@@ -230,8 +251,8 @@ final class DaemonInvocationTracker {
         if (!active.daemonInstanceId.equals(daemonInstanceId)) {
           return Optional.empty();
         }
-        if (active.claimExit()) {
-          return Optional.of(new ExitConfirmation(active.listener, daemonInstanceId, true));
+        if (active.exitConfirmation.claim()) {
+          return Optional.of(active.exitConfirmation);
         }
         return Optional.empty();
       }
@@ -245,6 +266,46 @@ final class DaemonInvocationTracker {
         }
       }
       return Optional.empty();
+    }
+  }
+
+  boolean completeExitConfirmation(
+      EnvironmentId environmentId,
+      UUID invocationId,
+      ExitConfirmation confirmation,
+      boolean succeeded) {
+    synchronized (lock) {
+      ActiveInvocation active = registeredInvocationLocked(environmentId, invocationId);
+      if (active != null && active.exitConfirmation == confirmation) {
+        confirmation.complete(succeeded);
+        return true;
+      }
+      LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
+      if (tombstones != null && tombstones.get(invocationId) == confirmation) {
+        confirmation.complete(succeeded);
+        // Refresh recency and trim any temporary overflow after an in-flight claim is released.
+        tombstones.remove(invocationId);
+        tombstones.put(invocationId, confirmation);
+        trimTombstonesLocked(tombstones, confirmation);
+        return true;
+      }
+      return false;
+    }
+  }
+
+  boolean hasDeliveredExitConfirmation(
+      EnvironmentId environmentId, UUID invocationId, String daemonInstanceId) {
+    synchronized (lock) {
+      ActiveInvocation active = registeredInvocationLocked(environmentId, invocationId);
+      if (active != null) {
+        return active.daemonInstanceId.equals(daemonInstanceId)
+            && active.exitConfirmation.delivered;
+      }
+      LinkedHashMap<UUID, ExitConfirmation> tombstones = invocationTombstones.get(environmentId);
+      ExitConfirmation confirmation = tombstones == null ? null : tombstones.get(invocationId);
+      return confirmation != null
+          && confirmation.daemonInstanceId.equals(daemonInstanceId)
+          && confirmation.delivered;
     }
   }
 
@@ -264,8 +325,7 @@ final class DaemonInvocationTracker {
       }
       for (Map.Entry<UUID, ExitConfirmation> entry : tombstones.entrySet()) {
         ExitConfirmation confirmation = entry.getValue();
-        if (!confirmation.delivered.get()
-            && confirmation.daemonInstanceId.equals(daemonInstanceId)) {
+        if (!confirmation.delivered && confirmation.daemonInstanceId.equals(daemonInstanceId)) {
           pending.add(entry.getKey());
         }
       }

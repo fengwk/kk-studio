@@ -25,7 +25,7 @@ final class ActiveInvocation implements EnvironmentCapabilityExecutionHandle {
   final EnvironmentCapabilityExecutionListener listener;
   final Duration terminalDeliveryGrace;
   final AtomicBoolean terminal = new AtomicBoolean();
-  final AtomicBoolean exitConfirmed = new AtomicBoolean();
+  final ExitConfirmation exitConfirmation;
   final String daemonInstanceId;
   private final Consumer<ActiveInvocation> onTerminate;
   private final Supplier<DaemonConnectionSession> sessionLookup;
@@ -60,6 +60,7 @@ final class ActiveInvocation implements EnvironmentCapabilityExecutionHandle {
     this.terminalDeliveryGrace =
         Objects.requireNonNull(terminalDeliveryGrace, "terminalDeliveryGrace");
     this.daemonInstanceId = Objects.requireNonNull(daemonInstanceId, "daemonInstanceId");
+    this.exitConfirmation = new ExitConfirmation(listener, daemonInstanceId);
     this.onTerminate = Objects.requireNonNull(onTerminate, "onTerminate");
     this.sessionLookup = Objects.requireNonNull(sessionLookup, "sessionLookup");
   }
@@ -104,10 +105,6 @@ final class ActiveInvocation implements EnvironmentCapabilityExecutionHandle {
       terminal.set(true);
       downloadTransfers.clear();
     }
-  }
-
-  boolean claimExit() {
-    return exitConfirmed.compareAndSet(false, true);
   }
 
   void deliverCancel(DaemonConnectionSession offered) {

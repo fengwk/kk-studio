@@ -38,7 +38,19 @@ func (r *Runtime) sendReady() error {
 	r.configReconnectPending = false
 	r.candidateSuspension = nil
 	r.admissionMu.Unlock()
+	if err := r.resendUnacknowledgedExits(); err != nil {
+		return err
+	}
 	return r.resendUpdateReceipt()
+}
+
+func (r *Runtime) resendUnacknowledgedExits() error {
+	for _, entry := range r.journal.UnacknowledgedExits() {
+		if err := r.sendExecutionExited(entry.InvocationID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Runtime) sendStatus() error {

@@ -10,7 +10,7 @@ import (
 // A restarted journal suppresses re-execution and preserves only replayable rejection evidence.
 func TestPersistentInvocationJournalRebuildsFactsWithoutPersistingResults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state", "invocations.json")
-	journal, err := NewPersistentInvocationJournal(path, 1)
+	journal, err := NewPersistentInvocationJournal(path, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,17 +37,48 @@ func TestPersistentInvocationJournalRebuildsFactsWithoutPersistingResults(t *tes
 		t.Fatal("non-replayable execution result was written to the journal")
 	}
 
-	restarted, err := NewPersistentInvocationJournal(path, 1)
+	restarted, err := NewPersistentInvocationJournal(path, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if start := restarted.Start("rejected"); start.Err != nil || start.Created || !start.Entry.Recovered || !start.Entry.Exited || string(start.Entry.Terminal) != "replayable failure" {
+	if start := restarted.Start("rejected"); start.Err != nil || start.Created || !start.Entry.Recovered || !start.Entry.Exited || start.Entry.Acknowledged || string(start.Entry.Terminal) != "replayable failure" {
 		t.Fatalf("rejected invocation facts were not restored: %+v", start)
+	}
+	if acknowledged, err := restarted.AcknowledgeExit("rejected"); err != nil || !acknowledged {
+		t.Fatalf("acknowledge restored exit proof: acknowledged=%t err=%v", acknowledged, err)
+	}
+	if _, exists := restarted.Get("rejected"); exists {
+		t.Fatal("terminal, exit, and acknowledgement did not release the durable record")
 	}
 	if start := restarted.Start("uncertain"); start.Err != nil || start.Created || !start.Entry.Recovered || start.Entry.State != InvocationRunning {
 		t.Fatalf("in-flight receipt was not restored as uncertain: %+v", start)
 	}
-	if start := restarted.Start("result"); start.Err != nil || start.Created || !start.Entry.Recovered || len(start.Entry.Terminal) != 0 {
+	if acknowledged, err := restarted.AcknowledgeExit("uncertain"); err != nil || acknowledged {
+		t.Fatalf("unknown exit fact was acknowledged: acknowledged=%t err=%v", acknowledged, err)
+	}
+	if exited, err := restarted.ConfirmExitDurable("uncertain"); err != nil || !exited {
+		t.Fatalf("record early exit fact: exited=%t err=%v", exited, err)
+	}
+	if acknowledged, err := restarted.AcknowledgeExit("uncertain"); err != nil || !acknowledged {
+		t.Fatalf("record early acknowledgement: acknowledged=%t err=%v", acknowledged, err)
+	}
+	afterEarlyAck, err := NewPersistentInvocationJournal(path, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start := afterEarlyAck.Start("uncertain"); start.Err != nil || start.Created || !start.Entry.Acknowledged || !start.Entry.Exited {
+		t.Fatalf("early acknowledgement was not restored before terminal: %+v", start)
+	}
+	if completed, err := afterEarlyAck.CompleteDurable("uncertain", InvocationFailed, nil, false); err != nil || !completed {
+		t.Fatalf("complete after early ACK: completed=%t err=%v", completed, err)
+	}
+	if _, exists := afterEarlyAck.Get("uncertain"); exists {
+		t.Fatal("early ACK did not wait for terminal before releasing its record")
+	}
+	if start := afterEarlyAck.Start("result"); start.Err != nil || start.Created || !start.Entry.Recovered || len(start.Entry.Terminal) != 0 {
 		t.Fatalf("non-replayable terminal was not restored as a tombstone: %+v", start)
+	}
+	if acknowledged, err := afterEarlyAck.AcknowledgeExit("result"); err != nil || acknowledged {
+		t.Fatalf("terminal without exit was acknowledged: acknowledged=%t err=%v", acknowledged, err)
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sort"
 	"sync"
 
 	"github.com/fengwk/kk-studio/daemon/internal/native"
@@ -19,11 +20,14 @@ const (
 	InvocationCancelled InvocationState = "CANCELLED"
 )
 
+var errInvocationJournalFull = errors.New("invocation journal is full awaiting execution-exit acknowledgements")
+
 type JournalEntry struct {
 	InvocationID string
 	State        InvocationState
 	Terminal     []byte
 	Exited       bool
+	Acknowledged bool
 	Replayable   bool
 	Recovered    bool `json:"-"`
 }
@@ -33,14 +37,13 @@ type JournalStart struct {
 	Err     error
 }
 
-// InvocationJournal deduplicates invocations in memory and, when configured, durably records the
-// invocation identity and terminal evidence needed across daemon process restarts.
+// InvocationJournal durably retains each accepted invocation until its terminal result, exit proof,
+// and Studio acknowledgement are all recorded. Unconfirmed facts are never evicted for capacity.
 type InvocationJournal struct {
-	mu            sync.Mutex
-	capacity      int
-	entries       map[string]JournalEntry
-	terminalOrder []string
-	path          string
+	mu       sync.Mutex
+	capacity int
+	entries  map[string]JournalEntry
+	path     string
 }
 
 func NewInvocationJournal(capacity int) (*InvocationJournal, error) {
@@ -80,11 +83,11 @@ func newInvocationJournal(capacity int, path string) (*InvocationJournal, error)
 		if entry.InvocationID == "" || journal.entries[entry.InvocationID].InvocationID != "" {
 			return nil, errors.New("persistent invocation journal contains an invalid identity")
 		}
+		if entry.Acknowledged && !entry.Exited {
+			return nil, errors.New("persistent invocation journal contains an invalid exit acknowledgement")
+		}
 		entry.Recovered = true
 		journal.entries[entry.InvocationID] = cloneEntry(entry)
-		if entry.State != InvocationRunning {
-			journal.terminalOrder = append(journal.terminalOrder, entry.InvocationID)
-		}
 	}
 	return journal, nil
 }
@@ -94,6 +97,9 @@ func (j *InvocationJournal) Start(id string) JournalStart {
 	defer j.mu.Unlock()
 	if entry, ok := j.entries[id]; ok {
 		return JournalStart{Entry: cloneEntry(entry)}
+	}
+	if len(j.entries) >= j.capacity {
+		return JournalStart{Err: errInvocationJournalFull}
 	}
 	entry := JournalEntry{InvocationID: id, State: InvocationRunning}
 	j.entries[id] = entry
@@ -110,31 +116,14 @@ func (j *InvocationJournal) Complete(id string, state InvocationState, terminal 
 }
 
 func (j *InvocationJournal) CompleteDurable(id string, state InvocationState, terminal []byte, replayable bool) (bool, error) {
-	if state != InvocationCompleted && state != InvocationFailed && state != InvocationCancelled {
-		return false, nil
-	}
-	j.mu.Lock()
-	defer j.mu.Unlock()
-	entry, ok := j.entries[id]
-	if !ok || entry.State != InvocationRunning {
-		return false, nil
-	}
-	previous := cloneEntry(entry)
-	entry.State = state
-	entry.Terminal = append([]byte(nil), terminal...)
-	entry.Replayable = replayable
-	j.entries[id] = entry
-	j.terminalOrder = append(j.terminalOrder, id)
-	if err := j.persistLocked(); err != nil {
-		j.entries[id] = previous
-		j.terminalOrder = j.terminalOrder[:len(j.terminalOrder)-1]
-		return false, err
-	}
-	j.evict()
-	return true, nil
+	return j.completeDurable(id, state, terminal, replayable, false)
 }
 
 func (j *InvocationJournal) CompleteWithExitDurable(id string, state InvocationState, terminal []byte, replayable bool) (bool, error) {
+	return j.completeDurable(id, state, terminal, replayable, true)
+}
+
+func (j *InvocationJournal) completeDurable(id string, state InvocationState, terminal []byte, replayable, exited bool) (bool, error) {
 	if state != InvocationCompleted && state != InvocationFailed && state != InvocationCancelled {
 		return false, nil
 	}
@@ -148,15 +137,16 @@ func (j *InvocationJournal) CompleteWithExitDurable(id string, state InvocationS
 	entry.State = state
 	entry.Terminal = append([]byte(nil), terminal...)
 	entry.Replayable = replayable
-	entry.Exited = true
-	j.entries[id] = entry
-	j.terminalOrder = append(j.terminalOrder, id)
+	entry.Exited = entry.Exited || exited
+	if entry.Exited && entry.Acknowledged {
+		delete(j.entries, id)
+	} else {
+		j.entries[id] = entry
+	}
 	if err := j.persistLocked(); err != nil {
 		j.entries[id] = previous
-		j.terminalOrder = j.terminalOrder[:len(j.terminalOrder)-1]
 		return false, err
 	}
-	j.evict()
 	return true, nil
 }
 
@@ -172,11 +162,38 @@ func (j *InvocationJournal) ConfirmExitDurable(id string) (bool, error) {
 	if !ok || entry.Exited {
 		return false, nil
 	}
+	previous := cloneEntry(entry)
 	entry.Exited = true
-	j.entries[id] = entry
-	if err := j.persistLocked(); err != nil {
-		entry.Exited = false
+	if entry.State != InvocationRunning && entry.Acknowledged {
+		delete(j.entries, id)
+	} else {
 		j.entries[id] = entry
+	}
+	if err := j.persistLocked(); err != nil {
+		j.entries[id] = previous
+		return false, err
+	}
+	return true, nil
+}
+
+// AcknowledgeExit records only an acknowledgement for an exit fact already durably recorded.
+// The entry remains reserved until its terminal fact is also present.
+func (j *InvocationJournal) AcknowledgeExit(id string) (bool, error) {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	entry, ok := j.entries[id]
+	if !ok || !entry.Exited || entry.Acknowledged {
+		return false, nil
+	}
+	previous := cloneEntry(entry)
+	entry.Acknowledged = true
+	if entry.State != InvocationRunning {
+		delete(j.entries, id)
+	} else {
+		j.entries[id] = entry
+	}
+	if err := j.persistLocked(); err != nil {
+		j.entries[id] = previous
 		return false, err
 	}
 	return true, nil
@@ -187,6 +204,19 @@ func (j *InvocationJournal) Get(id string) (JournalEntry, bool) {
 	defer j.mu.Unlock()
 	entry, ok := j.entries[id]
 	return cloneEntry(entry), ok
+}
+
+func (j *InvocationJournal) UnacknowledgedExits() []JournalEntry {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	entries := make([]JournalEntry, 0)
+	for _, entry := range j.entries {
+		if entry.Exited && !entry.Acknowledged {
+			entries = append(entries, cloneEntry(entry))
+		}
+	}
+	sort.Slice(entries, func(i, k int) bool { return entries[i].InvocationID < entries[k].InvocationID })
+	return entries
 }
 
 func (j *InvocationJournal) persistLocked() error {
@@ -207,19 +237,6 @@ func (j *InvocationJournal) persistLocked() error {
 		return err
 	}
 	return native.WritePrivateFile(j.path, data)
-}
-
-func (j *InvocationJournal) evict() {
-	if j.path != "" {
-		return
-	}
-	for len(j.terminalOrder) > j.capacity {
-		id := j.terminalOrder[0]
-		j.terminalOrder = j.terminalOrder[1:]
-		if entry, ok := j.entries[id]; ok && entry.State != InvocationRunning {
-			delete(j.entries, id)
-		}
-	}
 }
 
 func cloneEntry(entry JournalEntry) JournalEntry {

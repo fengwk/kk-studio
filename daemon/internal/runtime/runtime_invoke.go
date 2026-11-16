@@ -378,12 +378,26 @@ func (r *Runtime) handleRecover(e *protocol.Envelope) error {
 	return r.replay(entry)
 }
 
+func (r *Runtime) handleExecutionExitAck(e *protocol.Envelope) error {
+	r.mu.RLock()
+	ready := r.ready
+	r.mu.RUnlock()
+	if !ready {
+		return errors.New("EXECUTION_EXIT_ACK requires a READY bound connection")
+	}
+	if e.InvocationId == nil || *e.InvocationId == "" {
+		return errors.New("EXECUTION_EXIT_ACK invocationId is required")
+	}
+	_, err := r.journal.AcknowledgeExit(*e.InvocationId)
+	return err
+}
+
 func (r *Runtime) replay(entry JournalEntry) error {
 	if entry.Recovered && (entry.State == InvocationRunning || len(entry.Terminal) == 0) {
 		if err := r.sendRecoverNotFound(entry.InvocationID); err != nil {
 			return err
 		}
-		if entry.Exited {
+		if entry.Exited && !entry.Acknowledged {
 			return r.sendExecutionExited(entry.InvocationID)
 		}
 		return nil
