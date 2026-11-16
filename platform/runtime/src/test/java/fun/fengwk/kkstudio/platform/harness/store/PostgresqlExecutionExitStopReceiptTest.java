@@ -72,7 +72,7 @@ class PostgresqlExecutionExitStopReceiptTest {
         new HarnessRuntime(
             store,
             builtinRegistry(store, (threadId, rootSessionId, path, preparation) -> null),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
   }
 
   @Test

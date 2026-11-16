@@ -48,7 +48,7 @@ class TaskToolTest {
   @Test
   void descriptorKeepsCanonicalTaskArgumentSchema() {
     TaskTool tool =
-        new TaskTool(
+        taskTool(
             (request, async, accepted) ->
                 execution(ThreadJoinOutcome.COMPLETED, "done", null, null));
     ToolDescriptor descriptor = tool.descriptor();
@@ -71,12 +71,12 @@ class TaskToolTest {
   void rejectsMalformedAndInvalidTaskArgumentsBeforeStartingRunner() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> createRequest(new TaskTool((request, async, accepted) -> null), "not json"));
+        () -> createRequest(taskTool((request, async, accepted) -> null), "not json"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> createRequest(new TaskTool((request, async, accepted) -> null), "[\"coder\"]"));
+        () -> createRequest(taskTool((request, async, accepted) -> null), "[\"coder\"]"));
     TaskTool tool =
-        new TaskTool(
+        taskTool(
             (request, async, accepted) -> {
               throw new AssertionError("invalid arguments must not start a subagent");
             });
@@ -105,7 +105,7 @@ class TaskToolTest {
   @Test
   void requiresDurableToolExecutionContext() {
     TaskTool tool =
-        new TaskTool(
+        taskTool(
             (request, async, accepted) ->
                 execution(ThreadJoinOutcome.COMPLETED, "done", null, null));
     ToolExecutionRequest request =
@@ -121,7 +121,7 @@ class TaskToolTest {
   @Test
   void validationRejectionExplainsThatTaskWasNotExecuted() {
     TaskTool tool =
-        new TaskTool(
+        taskTool(
             (request, async, accepted) -> {
               throw new AssertionError("rejected task must not be executed");
             });
@@ -142,7 +142,7 @@ class TaskToolTest {
     AtomicReference<Boolean> async = new AtomicReference<>();
     AtomicReference<ToolResult> running = new AtomicReference<>();
     TaskTool tool =
-        new TaskTool(
+        taskTool(
             (request, asyncMode, accepted) -> {
               async.set(asyncMode);
               accepted.accept(acceptance());
@@ -199,7 +199,7 @@ class TaskToolTest {
   @Test
   void concurrencyLimitReturnsExplicitNotStartedError() {
     TaskTool tool =
-        new TaskTool(
+        taskTool(
             (request, async, accepted) -> {
               throw new IllegalStateException(
                   "admission failed", new SpawnQuotaExceededException("any wording"));
@@ -220,7 +220,7 @@ class TaskToolTest {
     CountDownLatch releaseFirst = new CountDownLatch(1);
     CountDownLatch releaseSecond = new CountDownLatch(1);
     TaskTool tool =
-        new TaskTool(
+        taskTool(
             (request, async, accepted) -> {
               assertFalse(async);
               accepted.accept(acceptance());
@@ -262,7 +262,7 @@ class TaskToolTest {
   @Test
   void reportsRunnerFailureWithCause() {
     TaskTool tool =
-        new TaskTool(
+        taskTool(
             (request, async, accepted) -> {
               throw new IllegalStateException("subagent failed unexpectedly");
             });
@@ -276,7 +276,7 @@ class TaskToolTest {
   @Test
   void invalidArgumentsAreReportedWithoutStartingSubagent() {
     TaskTool tool =
-        new TaskTool(
+        taskTool(
             (request, async, accepted) ->
                 execution(ThreadJoinOutcome.COMPLETED, "done", null, null));
 
@@ -290,9 +290,14 @@ class TaskToolTest {
     assertTrue(text(result).contains("prompt is required"));
   }
 
+  /** 测试统一用生产构造器：runner + 默认 ObjectMapper；工具行为只由 runner 与 arguments 决定。 */
+  private static TaskTool taskTool(SubagentRunner runner) {
+    return new TaskTool(runner, JsonMapper.builder().build());
+  }
+
   private static TaskTool tool(
       ThreadJoinOutcome outcome, String report, String error, String partial) {
-    return new TaskTool((request, async, accepted) -> execution(outcome, report, error, partial));
+    return taskTool((request, async, accepted) -> execution(outcome, report, error, partial));
   }
 
   private static SubagentTaskResult execution(

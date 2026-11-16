@@ -172,7 +172,6 @@ final class InMemoryHarnessLocks {
   }
 
   void requireCanClaimWork() {
-    requireCanLockRank(LockRank.WORK);
     if (highestWorkTarget != null) {
       throw new IllegalStateException(
           "claimNextWork must be the first Work lock acquisition in a transaction");

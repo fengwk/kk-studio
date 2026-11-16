@@ -15,8 +15,7 @@ class ExecutionSelectionTest {
     ExecutionSelection selection =
         new ExecutionSelection("builtin", "{\"modelName\":\"claude\",\"variant\":\"v1\"}");
     assertEquals("builtin", selection.driver());
-    assertEquals("{\"modelName\":\"claude\",\"variant\":\"v1\"}", selection.settings());
-    assertEquals(selection.settingsJson(), selection.settings());
+    assertEquals("{\"modelName\":\"claude\",\"variant\":\"v1\"}", selection.settingsJson());
 
     // 键乱序及空白会被规范化为字典序且无空白
     ExecutionSelection unsorted =
@@ -24,14 +23,14 @@ class ExecutionSelectionTest {
             "builtin", "{\n  \"variant\" : \"v1\" ,\n  \"modelName\" : \"claude\"\n}");
     assertEquals(selection, unsorted);
     assertEquals(selection.hashCode(), unsorted.hashCode());
-    assertEquals("{\"modelName\":\"claude\",\"variant\":\"v1\"}", unsorted.settings());
+    assertEquals("{\"modelName\":\"claude\",\"variant\":\"v1\"}", unsorted.settingsJson());
   }
 
   @Test
   void acceptsEmptyObject() {
     ExecutionSelection empty = new ExecutionSelection("fake", "{}");
     assertEquals("fake", empty.driver());
-    assertEquals("{}", empty.settings());
+    assertEquals("{}", empty.settingsJson());
   }
 
   @Test

@@ -11,12 +11,6 @@ import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 class CompactionConfigTest {
 
   @Test
-  void defaultsExposeOnlyKeep() {
-    // 部署配置仅暴露 keepRecentTokens。
-    assertEquals(20_000, CompactionConfig.DEFAULT.keepRecentTokens());
-  }
-
-  @Test
   void computesKeepAndReserveFromWindowAndOutput() {
     CompactionConfig config = new CompactionConfig(20_000);
 

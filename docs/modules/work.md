@@ -28,7 +28,7 @@ reschedule(claim, delay) -> 释放租约，下一次处理推迟 delay；有新 
 - Harness 的 Work 嵌在 Runtime 的强类型事务里，需要锁序校验与环境亲和性，因此由 [Platform](platform.md#work-的-claim--lease--wake) 用同一 `DurableWorkStore` 读写同一张表，SQL 与事务状态由 Harness 提供的 JDBC 钩子承载。
 - 请求、完成与重排在调用方已有事务时加入，无外层事务时自开短事务，保证事实与提示在同一事务内原子提交。
 - `lockClaimed(claim)` 仅允许在调用方的活动事务中调用，否则抛出 `IllegalStateException`；匹配 token 且租约有效时锁住 Work 行直到事务结束并返回该行，不匹配或过期返回空且不产生锁。调用方先锁业务行，再锁 Work，避免反转锁序；此方法不自行开启事务。Issue 调度归还租约时先在短事务中确认 `lockClaimed` 仍持有，再 `reschedule`。
-- [`WorkDispatcherLifecycle`](../../work/src/main/java/fun/fengwk/kkstudio/work/WorkDispatcherLifecycle.java) 是 Canvas 与 Issue 共用的 Spring 生命周期：按 `enabled` 决定是否启动，start 失败回滚，stop 失败保持 running；`BoundedWorkDispatcher` 保持为纯调度组件由其受控托管。
+- [`WorkDispatcherLifecycle`](../../work/src/main/java/fun/fengwk/kkstudio/work/WorkDispatcherLifecycle.java) 是 Canvas 与 Issue 共用的 Spring 生命周期：按 `enabled` 决定是否启动，start 失败关闭 dispatcher 并复位 running，start 与 stop 串行；`BoundedWorkDispatcher` 保持为纯调度组件由其受控托管。
 
 ## 测试
 

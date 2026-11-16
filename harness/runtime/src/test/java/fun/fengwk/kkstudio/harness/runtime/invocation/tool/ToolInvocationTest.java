@@ -342,11 +342,28 @@ class ToolInvocationTest {
                 UPDATED));
   }
 
-  /** durable 不变量：除 immediate FAILED 外的状态必须通过 binding schema（codec 解码的 READY 无法携带非法参数）。 */
+  /** 值对象只守住 binding 名称身份：arguments 与冻结 schema 的兼容性由声明规划器在写入前校验，构造与状态转换不重复做 schema 检查。 */
   @Test
-  void rejectsSchemaInvalidArgumentsOnExecutableStates() {
-    ToolCall schemaInvalidCall = call("bash", "{\"unexpected\":1}");
-    ToolBinding schemaInvalidBinding = host("bash");
+  void checksBindingNameIdentityWithoutRevalidatingFrozenArguments() {
+    ToolInvocation executable =
+        new ToolInvocation(
+            id(1L),
+            id(2L),
+            id(3L),
+            id(1L),
+            0,
+            call("bash", "{\"unexpected\":1}"),
+            host("bash"),
+            ToolInvocationStatus.READY,
+            0,
+            null,
+            null,
+            null,
+            CREATED,
+            UPDATED);
+    assertEquals(ToolInvocationStatus.READY, executable.status());
+
+    // 名称身份仍是 durable 不变量：binding descriptor 与 call toolName 不一致必须拒绝。
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -356,31 +373,13 @@ class ToolInvocationTest {
                 id(3L),
                 id(1L),
                 0,
-                schemaInvalidCall,
-                schemaInvalidBinding,
+                call("bash", "{}"),
+                host("other"),
                 ToolInvocationStatus.READY,
                 0,
                 null,
                 null,
                 null,
-                CREATED,
-                UPDATED));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            new ToolInvocation(
-                id(1L),
-                id(2L),
-                id(3L),
-                id(1L),
-                0,
-                schemaInvalidCall,
-                schemaInvalidBinding,
-                ToolInvocationStatus.FAILED,
-                1,
-                null,
-                null,
-                error(),
                 CREATED,
                 UPDATED));
   }

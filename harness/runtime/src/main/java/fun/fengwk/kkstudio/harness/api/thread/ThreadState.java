@@ -1,11 +1,11 @@
 package fun.fengwk.kkstudio.harness.api.thread;
 
+import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.api.Names;
 
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * 持久化 Thread 当前状态。
@@ -46,8 +46,6 @@ public record ThreadState(
     Instant createdAt,
     Instant updatedAt) {
 
-  private static final Pattern CREATION_REQUEST_HASH_PATTERN = Pattern.compile("[0-9a-f]{64}");
-
   public ThreadState {
     Objects.requireNonNull(id, "id");
     Objects.requireNonNull(sessionId, "sessionId");
@@ -55,11 +53,7 @@ public record ThreadState(
       throw new IllegalArgumentException("parentThreadId must not equal id");
     }
     Objects.requireNonNull(headEntryId, "headEntryId");
-    if (creationRequestHash == null
-        || !CREATION_REQUEST_HASH_PATTERN.matcher(creationRequestHash).matches()) {
-      throw new IllegalArgumentException(
-          "creationRequestHash must be 64 lowercase hexadecimal characters");
-    }
+    creationRequestHash = Sha256.requireHex(creationRequestHash, "creationRequestHash");
     name = Names.normalize(name);
     Objects.requireNonNull(rootThreadId, "rootThreadId");
     if ((parentThreadId == null) != rootThreadId.equals(id)) {

@@ -51,12 +51,6 @@ public final class ThreadContextProbe {
     return classifier.classify(thread, state, driverState, siblings);
   }
 
-  public ThreadContext probe(HarnessStore.Transaction tx, ThreadState thread) {
-    Objects.requireNonNull(tx, "tx");
-    Objects.requireNonNull(thread, "thread");
-    return probe(tx, thread, tx.entries().loadCurrent(thread.headEntryId()));
-  }
-
   private static boolean assistantHead(EntryCurrentState state) {
     return state.head().payload() instanceof MessagePayload message
         && message.message().role() == AgentMessageRole.ASSISTANT;

@@ -105,7 +105,7 @@ class PostgresqlSubagentContinuationTest {
           return new TurnResolver.Resolved(succeededRequest(), 100_000, 16_384);
         };
     DriverRegistry registry = new DriverRegistry(List.of(builtinDriver(store, resolver)));
-    runtime = new HarnessRuntime(store, registry, () -> CompactionConfig.DEFAULT);
+    runtime = new HarnessRuntime(store, registry, () -> new CompactionConfig(20_000));
     scheduler = Executors.newSingleThreadScheduledExecutor();
     processor =
         new ThreadProcessor(

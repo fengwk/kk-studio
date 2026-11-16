@@ -307,9 +307,9 @@ class ThreadJoinTest {
 
   @Test
   void rejectsInvalidRequestHash() {
-    // 测试意图：验证 requestHash 校验（null、大写、非法字符、长度不符）。
+    // 测试意图：requestHash 缺失是 null 契约失败，其它形态（大写、非法字符、长度不符）是非法参数。
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
             new ThreadJoin(
                 id(1),

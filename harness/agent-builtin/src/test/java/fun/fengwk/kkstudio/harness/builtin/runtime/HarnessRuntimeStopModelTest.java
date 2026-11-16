@@ -171,7 +171,7 @@ class HarnessRuntimeStopModelTest {
                 });
     HarnessRuntime missingBarrier =
         new HarnessRuntime(
-            store, new DriverRegistry(List.of(driver)), () -> CompactionConfig.DEFAULT);
+            store, new DriverRegistry(List.of(driver)), () -> new CompactionConfig(20_000));
     ThreadState before =
         store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
 
@@ -304,7 +304,7 @@ class HarnessRuntimeStopModelTest {
                 });
     HarnessRuntime failingRuntime =
         new HarnessRuntime(
-            store, new DriverRegistry(List.of(failing)), () -> CompactionConfig.DEFAULT);
+            store, new DriverRegistry(List.of(failing)), () -> new CompactionConfig(20_000));
     ThreadState before =
         store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
     List<Entry> beforeEntries =

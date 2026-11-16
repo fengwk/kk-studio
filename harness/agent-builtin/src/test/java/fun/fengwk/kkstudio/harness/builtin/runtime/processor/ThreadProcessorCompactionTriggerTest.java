@@ -173,6 +173,31 @@ class ThreadProcessorCompactionTriggerTest extends ThreadProcessorTestBase {
     assertTrue(inTx(fixture, tx -> tx.threads().listChildren(threadId).isEmpty()).booleanValue());
   }
 
+  /** 压缩 turn 本身要求再次压缩是 Driver 契约违背：落 durable FAILED，绝不在同一路径上无限重规划。 */
+  @Test
+  void compactionTurnRequestingAnotherCompactionWritesDurableFailedTurn() {
+    Fixture fixture = fixture();
+    ClosedTurnBaseline baseline =
+        seedCompactionReadyClosedTurn(fixture.store, overThresholdUsage());
+    UUID threadId = baseline.threadId();
+    seedCommand(
+        fixture.store, threadId, new UserMessageCommandPayload(userMessage("queued input")));
+    requestThreadWork(fixture.store, threadId);
+    // 第一次预算不足触发压缩；压缩 turn 自己再要求压缩必须被 Runtime 拒绝。
+    fixture.resolver.results.add(new TurnResolver.CompactionRequired(CONTEXT_WINDOW));
+    fixture.resolver.results.add(new TurnResolver.CompactionRequired(CONTEXT_WINDOW));
+
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(threadId));
+
+    EntryPath path = path(fixture.store, threadId);
+    AssistantErrorPayload error =
+        assertInstanceOf(
+            AssistantErrorPayload.class, path.entries().get(path.entries().size() - 2).payload());
+    assertEquals("TURN_RESOLVE_FAILED", error.error().code());
+    TurnEndPayload end = assertInstanceOf(TurnEndPayload.class, path.head().payload());
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
+  }
+
   /** 追加一个以 compact 成功回执结束、仍要求续作的普通 INPUT 回合。 */
   private static void seedCompactToolTurn(Fixture fixture, ClosedTurnBaseline baseline) {
     fixture.store.transaction(

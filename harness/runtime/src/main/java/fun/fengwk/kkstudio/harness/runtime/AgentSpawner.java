@@ -8,6 +8,7 @@ import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
@@ -40,30 +41,42 @@ public final class AgentSpawner {
       tx.joins().lockAdmission();
     }
     if (request.continuation() != null) {
-      AcceptCommandsControl.lockTreeAndAncestors(tx, request.threadId(), false, null);
+      ThreadTreeLocking.lockTreeAndAncestors(tx, request.threadId(), false, null);
     } else if (request.parentThreadId() != null) {
       // 子身份必须在树锁内复读：并发重放可能在等待锁期间才看到第一次接受。
-      AcceptCommandsControl.lockTreeAndAncestors(
+      ThreadTreeLocking.lockTreeAndAncestors(
           tx, request.parentThreadId(), true, Set.of(request.threadId()));
     } else {
-      AcceptCommandsControl.lockTreeAndAncestors(tx, request.threadId(), false, null);
+      ThreadTreeLocking.lockTreeAndAncestors(tx, request.threadId(), false, null);
     }
   }
 
-  /** 在调用方事务内创建（或续用）Thread、写入首批命令并登记票据；{@code preflight} 只作用于本批全新命令。 */
+  /**
+   * 在调用方事务内创建（或续用）Thread、写入首批命令并登记票据；{@code preflight} 只作用于本批全新命令。
+   *
+   * <p>与用户直接输入共用同一套 Driver 校验：续用既有 Thread 时按当前分支设置校验 SET_EXECUTION，全新执行根与子 Thread 按请求设置校验。
+   */
   public static AcceptedCommands spawn(
-      HarnessStore.Transaction tx, SpawnRequest request, AcceptancePreflight preflight) {
+      HarnessStore.Transaction tx,
+      SpawnRequest request,
+      AcceptancePreflight preflight,
+      DriverRegistry driverRegistry) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(request, "request");
     Objects.requireNonNull(preflight, "preflight");
+    Objects.requireNonNull(driverRegistry, "driverRegistry");
     // 统一创建路径复用 accept 的 batch 形状规则，且在任何写入之前拒绝非法请求（含 settings-only / 多输入 / SET 乱序）。
     AcceptCommandsValidation.validateBatchShape("SpawnRequest", request.commands(), true);
+    if (request.continuation() == null) {
+      AcceptCommandsValidation.validateExecutionCommandsOnNewRoot(
+          driverRegistry, request.settings(), request.commands());
+    }
     if (request.sameSessionBranch() != null) {
       return spawnSameSessionBranch(tx, request, preflight);
     }
     return request.continuation() == null
         ? spawnNew(tx, request, preflight)
-        : spawnOnExisting(tx, request, preflight);
+        : spawnOnExisting(tx, request, preflight, driverRegistry);
   }
 
   private static AcceptedCommands spawnNew(
@@ -160,7 +173,10 @@ public final class AgentSpawner {
   }
 
   private static AcceptedCommands spawnOnExisting(
-      HarnessStore.Transaction tx, SpawnRequest request, AcceptancePreflight preflight) {
+      HarnessStore.Transaction tx,
+      SpawnRequest request,
+      AcceptancePreflight preflight,
+      DriverRegistry driverRegistry) {
     ThreadState thread =
         tx.threads()
             .lock(request.threadId())
@@ -180,7 +196,8 @@ public final class AgentSpawner {
             request.continuation().expectedNextCommandSequence()),
         request.commands(),
         preflight,
-        request);
+        request,
+        driverRegistry);
   }
 
   private static boolean countsAsSubagent(JoinDelivery delivery) {

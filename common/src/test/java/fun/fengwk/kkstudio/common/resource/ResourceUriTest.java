@@ -39,7 +39,7 @@ class ResourceUriTest {
   @Test
   void encodesFileIdsAndRejectsMalformedUris() {
     UUID id = UUID.fromString("0f8fad5b-d9cb-469f-a165-70867728950e");
-    assertEquals(id, ResourceUri.parse(ResourceUri.files(id)).fileId());
+    assertEquals(id, ResourceUri.parse(ResourceRef.sessionResourceUri(id)).fileId());
     for (String uri :
         new String[] {
           "resource://files/not-a-uuid",

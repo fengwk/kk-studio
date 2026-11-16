@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.common.resource;
 
+import fun.fengwk.kkstudio.common.hash.Sha256;
+
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
@@ -44,7 +46,6 @@ public record ResourceRef(String uri, String mediaType, String name, Long size, 
 
   private static final Pattern MEDIA_TYPE_PATTERN =
       Pattern.compile("[a-z0-9!#$&^_.+-]+/[a-z0-9!#$&^_.+-]+");
-  private static final Pattern SHA256_PATTERN = Pattern.compile("[0-9a-f]{64}");
 
   /** {@code blob-upload} scheme 名。 */
   private static final String BLOB_UPLOAD_SCHEME = "blob-upload";
@@ -92,8 +93,8 @@ public record ResourceRef(String uri, String mediaType, String name, Long size, 
     if (size != null && size < 0) {
       throw new IllegalArgumentException("size must not be negative");
     }
-    if (sha256 != null && !SHA256_PATTERN.matcher(sha256).matches()) {
-      throw new IllegalArgumentException("sha256 must be 64 lowercase hex digits");
+    if (sha256 != null) {
+      sha256 = Sha256.requireHex(sha256, "sha256");
     }
     // URI 校验（含 data 解码与 size/sha 验证）；data URI 返回解码字节，其余返回 null。
     ResourceUriValidator.validate(uri, mediaType, size, sha256);

@@ -135,7 +135,8 @@ class ToolCatalogQueryServiceTest {
             selectable("edit", "edit files"),
             selectable("grep", "grep files"),
             selectable("find", "find files")),
-        task);
+        task,
+        null);
   }
 
   private static HarnessContributor hostContributor(String id) {

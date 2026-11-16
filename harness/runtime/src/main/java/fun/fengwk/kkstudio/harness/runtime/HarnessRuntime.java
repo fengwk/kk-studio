@@ -168,7 +168,7 @@ public final class HarnessRuntime {
     return store.transaction(
         tx -> {
           AgentSpawner.lockForSpawn(tx, request);
-          return AgentSpawner.spawn(tx, request, preflight);
+          return AgentSpawner.spawn(tx, request, preflight, driverRegistry);
         });
   }
 
@@ -625,9 +625,5 @@ public final class HarnessRuntime {
           invocationId,
           error);
     }
-  }
-
-  private static DomainException conflict(HarnessConflictReason reason, String message) {
-    return DomainException.conflict(reason.name(), message);
   }
 }

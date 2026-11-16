@@ -120,7 +120,7 @@ public final class ThreadProcessor {
   private final ThreadProcessorConfig config;
   private final TurnPlanBuilder planBuilder = new TurnPlanBuilder();
   private final CompactionGate compactionGate;
-  private final TurnCommitter turnCommitter = new TurnCommitter();
+  private final TurnCommitter turnCommitter;
   private final OwnerTurnSettlement ownerTurnSettlement;
   private final CommandHarvestReducer settingsReducer = new CommandHarvestReducer();
   private final ThreadAdmissionGuard admissionGuard = new ThreadAdmissionGuard();
@@ -132,6 +132,7 @@ public final class ThreadProcessor {
     this.store = Objects.requireNonNull(store, "store");
     this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
     this.config = Objects.requireNonNull(config, "config");
+    this.turnCommitter = new TurnCommitter(driverRegistry);
     this.threadContextProbe = new ThreadContextProbe(driverRegistry);
     this.coordinator = new ThreadLifecycleCoordinator();
     this.compactionGate = new CompactionGate(config.compactionProvider());
@@ -594,17 +595,28 @@ public final class ThreadProcessor {
       resolution = new TurnResolution.Rejected(DETERMINISTIC_FAILURE);
     }
     if (resolution instanceof TurnResolution.CompactionRequired required) {
-      // 请求预算不足：先压缩同一历史；压缩后的请求只重试一次，仍放不下则直接失败，绝不递归压缩。
-      CompactionPreparation preparation =
-          compactionGate.preparation(
-              path, CompactionTrigger.THRESHOLD, required.conversationContextWindow());
-      if (preparation != null
-          && thread.constraints().allowAutoCompaction()
-          && !CompactionHistory.isImmediatePostCompactionRetry(path)) {
-        planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
-        return;
+      if (plan.reason() == TurnStartReason.COMPACTION) {
+        // 压缩 turn 已运行在压缩子执行内：再次要求压缩会让同一路径无限重规划，属于 Driver 契约违背。
+        // 与其它确定性 resolver 失败一样落 durable FAILED，避免 lease 过期后反复重试同一请求。
+        log.warn(
+            "driver {} returned CompactionRequired for a COMPACTION turn on thread {};"
+                + " failing the turn",
+            driver.id(),
+            thread.id());
+        resolution = new TurnResolution.Rejected(DETERMINISTIC_FAILURE);
+      } else {
+        // 请求预算不足：先压缩同一历史；压缩后的请求只重试一次，仍放不下则直接失败，绝不递归压缩。
+        CompactionPreparation preparation =
+            compactionGate.preparation(
+                path, CompactionTrigger.THRESHOLD, required.conversationContextWindow());
+        if (preparation != null
+            && thread.constraints().allowAutoCompaction()
+            && !CompactionHistory.isImmediatePostCompactionRetry(path)) {
+          planStep(tx, claim, thread, path, TurnStartReason.COMPACTION, preparation, now);
+          return;
+        }
+        resolution = new TurnResolution.Rejected(CONTEXT_BUDGET_EXCEEDED);
       }
-      resolution = new TurnResolution.Rejected(CONTEXT_BUDGET_EXCEEDED);
     }
     turnCommitter.commit(tx, claim, thread, plan, resolution);
   }

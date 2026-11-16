@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
+import fun.fengwk.kkstudio.harness.api.entry.CanonicalNames;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 
 import java.util.Objects;
@@ -34,17 +35,18 @@ public record ToolResultMetadata(
     ToolInputReceipt inputReceipt,
     String toolName) {
 
+  /** Tool call id 与 tool name 的字符上限。 */
   private static final int TOOL_CALL_ID_MAX_LENGTH = 256;
 
   public ToolResultMetadata {
     assistantEntryId = Objects.requireNonNull(assistantEntryId, "assistantEntryId");
-    toolCallId = requireCanonicalName(toolCallId, "toolCallId");
+    toolCallId = CanonicalNames.requireName(toolCallId, "toolCallId", TOOL_CALL_ID_MAX_LENGTH);
     if (callIndex < 0) {
       throw new IllegalArgumentException("callIndex must not be negative");
     }
     status = Objects.requireNonNull(status, "status");
     if (toolName != null) {
-      toolName = requireCanonicalName(toolName, "toolName");
+      toolName = CanonicalNames.requireName(toolName, "toolName", TOOL_CALL_ID_MAX_LENGTH);
     }
     if (synthetic) {
       if (status != ToolResultStatus.UNKNOWN || reason != ToolResultReason.HISTORY_CUT) {
@@ -71,20 +73,5 @@ public record ToolResultMetadata(
         throw new IllegalArgumentException("non-synthetic tool results must not carry a reason");
       }
     }
-  }
-
-  private static String requireCanonicalName(String value, String field) {
-    Objects.requireNonNull(value, field);
-    if (value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
-    }
-    if (value.length() > TOOL_CALL_ID_MAX_LENGTH) {
-      throw new IllegalArgumentException(
-          field + " must be <= " + TOOL_CALL_ID_MAX_LENGTH + " characters");
-    }
-    return value;
   }
 }

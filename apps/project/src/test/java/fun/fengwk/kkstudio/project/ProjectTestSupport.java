@@ -535,7 +535,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
     public HarnessRuntime harnessRuntime(JdbcTemplate jdbc, HarnessStore store) {
       HarnessRuntime runtime = mock(HarnessRuntime.class);
       HarnessRuntime deletionRuntime =
-          new HarnessRuntime(store, new DriverRegistry(), () -> CompactionConfig.DEFAULT);
+          new HarnessRuntime(store, new DriverRegistry(), () -> new CompactionConfig(20_000));
       doAnswer(
               invocation -> {
                 deletionRuntime.deleteSessions(

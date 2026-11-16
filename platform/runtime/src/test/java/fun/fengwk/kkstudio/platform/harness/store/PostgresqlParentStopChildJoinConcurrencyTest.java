@@ -109,7 +109,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         new HarnessRuntime(
             store,
             builtinRegistry(store, (threadId, rootSessionId, path, prep) -> null),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
   }
 
   private static EntryPayload userMessagePayload(String text) {
@@ -368,7 +368,7 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
         new HarnessRuntime(
             latchingStore,
             builtinRegistry(latchingStore, (t, rootSessionId, p, c) -> null),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
 
     ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     try (ExecutorService executor = Executors.newFixedThreadPool(2)) {

@@ -213,9 +213,6 @@ public final class ThreadJoinProjector {
   }
 
   private static String extractPrompt(ThreadCommand command) {
-    if (command == null) {
-      return "";
-    }
     if (command.payload() instanceof UserMessageCommandPayload user) {
       return extractMessageText(user.message());
     }
@@ -262,9 +259,6 @@ public final class ThreadJoinProjector {
   }
 
   private static String extractMessageText(AgentMessage message) {
-    if (message == null || message.contents() == null) {
-      return "";
-    }
     List<String> parts = new ArrayList<>();
     for (AgentMessageContent content : message.contents()) {
       if (content instanceof TextMessageContent text) {

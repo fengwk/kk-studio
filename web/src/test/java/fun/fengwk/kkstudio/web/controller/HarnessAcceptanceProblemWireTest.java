@@ -72,7 +72,9 @@ class HarnessAcceptanceProblemWireTest {
     store = new InMemoryHarnessStore();
     runtime =
         new HarnessRuntime(
-            store, new DriverRegistry(new FakeAgentDriver("fake")), () -> CompactionConfig.DEFAULT);
+            store,
+            new DriverRegistry(new FakeAgentDriver("fake")),
+            () -> new CompactionConfig(20_000));
     root =
         runtime.acceptCommands(
             new AcceptCommandsCommand(

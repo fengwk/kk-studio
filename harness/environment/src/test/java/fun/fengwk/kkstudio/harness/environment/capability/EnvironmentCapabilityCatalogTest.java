@@ -4,7 +4,6 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -161,15 +160,12 @@ class EnvironmentCapabilityCatalogTest {
     }
   }
 
-  /** descriptor 是 execution 的唯一事实源；可通过 find 与 require 查询。 */
+  /** descriptor 是 execution 的唯一事实源；require 返回注册实例，未知 id 立即拒绝。 */
   @Test
-  void resolvesDescriptors() {
-    assertSame(
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ),
-        EnvironmentCapabilityCatalog.find(EnvironmentCapabilityIds.FS_READ).orElseThrow());
-    assertTrue(
-        EnvironmentCapabilityCatalog.find(new EnvironmentCapabilityId("unknown.capability"))
-            .isEmpty());
+  void rejectsUnknownDescriptorIds() {
+    assertEquals(
+        EnvironmentCapabilityIds.FS_READ,
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ).id());
     assertThrows(
         IllegalArgumentException.class,
         () ->

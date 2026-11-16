@@ -52,7 +52,7 @@ class BranchSettingsTest {
     assertEquals(base.execution(), rebound.execution());
     // withExecution 只换执行选择：agentName 保持上游 withAgentName 的结果，不回退为 base。
     assertEquals("reviewer", remodelled.agentName());
-    assertEquals("{\"model\":\"claude-opus\"}", remodelled.execution().settings());
+    assertEquals("{\"model\":\"claude-opus\"}", remodelled.execution().settingsJson());
     // withAgentName / withExecution 都不得隐式改变环境选择。
     assertEquals("local", rebound.environmentName());
     assertEquals("local", remodelled.environmentName());

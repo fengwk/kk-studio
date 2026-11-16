@@ -8,8 +8,8 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 已 claim Work 行的不可变快照：target、worker 必须随 lease token 一同回传到 {@link Work#complete(UUID, long,
- * Instant)} / {@link Work#reschedule(String, long, Instant, Instant)} 的 claimed wakeVersion，以及
+ * 已 claim Work 行的不可变快照：target 与 lease token 必须随 claimed wakeVersion 一同回传到 {@link
+ * Work#complete(UUID, long, Instant)} / {@link Work#reschedule(UUID, long, Instant, Instant)}，并携带
  * lease horizon 与可选环境亲和性（{@code requiredEnvironmentId} 仅允许声明环境亲和性的类型非空）。
  */
 public record ClaimedWork(

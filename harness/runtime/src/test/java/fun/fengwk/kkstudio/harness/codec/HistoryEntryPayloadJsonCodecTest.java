@@ -1355,7 +1355,7 @@ class HistoryEntryPayloadJsonCodecTest {
                             + "\"baseline\":true}"))
             .getMessage());
     assertEquals(
-        "SYSTEM.removedSections must be a JSON array",
+        "SYSTEM.removedSections must be an array",
         assertThrows(
                 IllegalArgumentException.class,
                 () ->

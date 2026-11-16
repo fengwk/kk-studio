@@ -13,6 +13,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.AgentSpawner;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -37,11 +38,13 @@ public final class CompactionChildSpawn {
       HarnessStore.Transaction tx,
       ThreadState parentThread,
       CompactionResolution resolved,
-      CompactionPreparation preparation) {
+      CompactionPreparation preparation,
+      DriverRegistry driverRegistry) {
     Objects.requireNonNull(tx, "tx");
     Objects.requireNonNull(parentThread, "parentThread");
     Objects.requireNonNull(resolved, "resolved");
     Objects.requireNonNull(preparation, "preparation");
+    Objects.requireNonNull(driverRegistry, "driverRegistry");
 
     UUID sessionId = parentThread.sessionId();
     UUID threadId = tx.nextId();
@@ -73,7 +76,8 @@ public final class CompactionChildSpawn {
             ticketId,
             requestHash,
             new SpawnRequest.SameSessionBranch(preparation.cutEntryId())),
-        AcceptancePreflight.IDENTITY);
+        AcceptancePreflight.IDENTITY,
+        driverRegistry);
 
     return new CompactionStart(
         preparation.trigger(),

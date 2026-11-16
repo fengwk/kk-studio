@@ -18,8 +18,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 
-import fun.fengwk.kkstudio.common.error.DomainErrorCode;
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.ToolOutcomeView;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
@@ -44,26 +42,11 @@ import fun.fengwk.kkstudio.harness.spi.driver.ToolOutcomeAppender;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 
 /** 统一结果查询：terminal Invocation 与已物化 Entry 拥有相同投影，且绝不跨 Thread 泄漏。 */
 class ToolOutcomeQueryTest {
-
-  @Test
-  void missingThreadIsReportedAsNotFound() {
-    // 工具结果查询对不存在的 Thread 明确报告 not_found，不伪装成空结果。
-    UUID threadId = UUID.randomUUID();
-    DomainException error =
-        assertThrows(
-            DomainException.class,
-            () ->
-                new ToolOutcomeQuery(new InMemoryBuiltinHarnessStore())
-                    .find(threadId, UUID.randomUUID()));
-    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
-    assertEquals("thread", error.resource());
-    assertEquals("thread " + threadId + " does not exist", error.getMessage());
-    assertNull(error.reason());
-  }
 
   @Test
   void terminalInvocationAndMaterializedEntryProjectTheSameOutcome() {
@@ -80,14 +63,13 @@ class ToolOutcomeQueryTest {
         toolId,
         new ToolResult("call-1", List.of(new TextResultContent("stable result")), false, "{}"));
 
-    ToolOutcomeView current =
-        new ToolOutcomeQuery(store).find(chain.turn().threadId(), toolId).orElseThrow();
+    ToolOutcomeView current = find(store, chain.turn().threadId(), toolId).orElseThrow();
     assertEquals(ToolResultStatus.SUCCEEDED, current.status());
     assertFalse(current.resultError());
     assertEquals(List.of(new TextMessageContent("stable result")), current.contents());
     assertEquals("call-1", current.toolCallId());
     assertEquals(0, current.callIndex());
-    assertFalse(current.materialized());
+    assertNull(current.resultEntryId());
 
     UUID sessionId = path(store, chain.turn().threadId()).root().sessionId();
     var invocation = tool(store, toolId);
@@ -104,8 +86,7 @@ class ToolOutcomeQueryTest {
           return null;
         });
 
-    ToolOutcomeView historical =
-        new ToolOutcomeQuery(store).find(chain.turn().threadId(), toolId).orElseThrow();
+    ToolOutcomeView historical = find(store, chain.turn().threadId(), toolId).orElseThrow();
     assertEquals(resultEntryId, historical.resultEntryId());
     assertEquals(current.status(), historical.status());
     assertFalse(historical.resultError());
@@ -113,7 +94,6 @@ class ToolOutcomeQueryTest {
     assertEquals(current.assistantEntryId(), historical.assistantEntryId());
     assertEquals(current.toolCallId(), historical.toolCallId());
     assertEquals(current.callIndex(), historical.callIndex());
-    assertTrue(historical.materialized());
   }
 
   @Test
@@ -131,13 +111,12 @@ class ToolOutcomeQueryTest {
         store,
         toolId,
         new ToolResult("call-1", List.of(new TextResultContent("file not found")), true, "{}"));
-    ToolOutcomeView current =
-        new ToolOutcomeQuery(store).find(chain.turn().threadId(), toolId).orElseThrow();
+    ToolOutcomeView current = find(store, chain.turn().threadId(), toolId).orElseThrow();
     assertEquals(ToolResultStatus.SUCCEEDED, current.status());
     assertTrue(current.resultError());
     assertNull(current.error());
     assertEquals(List.of(new TextMessageContent("file not found")), current.contents());
-    assertFalse(current.materialized());
+    assertNull(current.resultEntryId());
 
     UUID sessionId = path(store, chain.turn().threadId()).root().sessionId();
     var invocation = tool(store, toolId);
@@ -154,8 +133,7 @@ class ToolOutcomeQueryTest {
           return null;
         });
 
-    ToolOutcomeView historical =
-        new ToolOutcomeQuery(store).find(chain.turn().threadId(), toolId).orElseThrow();
+    ToolOutcomeView historical = find(store, chain.turn().threadId(), toolId).orElseThrow();
     assertEquals(ToolResultStatus.SUCCEEDED, historical.status());
     assertTrue(historical.resultError());
     assertNull(historical.error());
@@ -167,7 +145,6 @@ class ToolOutcomeQueryTest {
     assertEquals(current.contents(), historical.contents());
     assertEquals(current.toolCallId(), historical.toolCallId());
     assertEquals(resultEntryId, historical.resultEntryId());
-    assertTrue(historical.materialized());
   }
 
   @Test
@@ -181,8 +158,7 @@ class ToolOutcomeQueryTest {
             ModelInvocationStatus.SUCCEEDED,
             List.of(ToolInvocationStatus.FAILED));
     UUID toolId = chain.toolInvocationIds().getFirst();
-    ToolOutcomeView live =
-        new ToolOutcomeQuery(store).find(chain.turn().threadId(), toolId).orElseThrow();
+    ToolOutcomeView live = find(store, chain.turn().threadId(), toolId).orElseThrow();
     assertEquals(ToolResultStatus.FAILED, live.status());
     assertTrue(live.resultError());
     assertEquals(new ToolInvocationError("FAILED", "tool failed"), live.error());
@@ -222,8 +198,7 @@ class ToolOutcomeQueryTest {
 
     IllegalStateException error =
         assertThrows(
-            IllegalStateException.class,
-            () -> new ToolOutcomeQuery(store).find(chain.turn().threadId(), toolId));
+            IllegalStateException.class, () -> find(store, chain.turn().threadId(), toolId));
     assertTrue(error.getMessage().contains("does not match its assistant tool call"));
   }
 
@@ -249,9 +224,7 @@ class ToolOutcomeQueryTest {
             List.of(ToolInvocationStatus.READY));
 
     assertTrue(
-        new ToolOutcomeQuery(store)
-            .find(chain.turn().threadId(), chain.toolInvocationIds().getFirst())
-            .isEmpty());
+        find(store, chain.turn().threadId(), chain.toolInvocationIds().getFirst()).isEmpty());
   }
 
   @Test
@@ -275,7 +248,7 @@ class ToolOutcomeQueryTest {
         toolId,
         new ToolResult("call-1", List.of(new TextResultContent("stable result")), false, "{}"));
 
-    assertTrue(new ToolOutcomeQuery(store).find(other.turn().threadId(), toolId).isEmpty());
+    assertTrue(find(store, other.turn().threadId(), toolId).isEmpty());
 
     UUID sessionId = path(store, chain.turn().threadId()).root().sessionId();
     var invocation = tool(store, toolId);
@@ -288,7 +261,7 @@ class ToolOutcomeQueryTest {
           return null;
         });
 
-    assertTrue(new ToolOutcomeQuery(store).find(other.turn().threadId(), toolId).isEmpty());
+    assertTrue(find(store, other.turn().threadId(), toolId).isEmpty());
   }
 
   @Test
@@ -299,25 +272,16 @@ class ToolOutcomeQueryTest {
     ChildOutcome second = seedChildToolOutcome(store, parent, "child-2", "call-2");
 
     // 父 Thread 的实际 head 路径在共享历史之后结束，不能看到任一子 Thread 自己的结果。
-    assertTrue(new ToolOutcomeQuery(store).find(parent.threadId(), first.invocationId()).isEmpty());
-    assertTrue(
-        new ToolOutcomeQuery(store).find(parent.threadId(), second.invocationId()).isEmpty());
+    assertTrue(find(store, parent.threadId(), first.invocationId()).isEmpty());
+    assertTrue(find(store, parent.threadId(), second.invocationId()).isEmpty());
     // 同一父历史下的 sibling fork 也不能互相读取对方分支上的结果。
-    assertTrue(new ToolOutcomeQuery(store).find(first.threadId(), second.invocationId()).isEmpty());
-    assertTrue(new ToolOutcomeQuery(store).find(second.threadId(), first.invocationId()).isEmpty());
+    assertTrue(find(store, first.threadId(), second.invocationId()).isEmpty());
+    assertTrue(find(store, second.threadId(), first.invocationId()).isEmpty());
     // 子 Thread 自己的 head 可达路径仍能读到属于它的结果。
     assertEquals(
-        "call-1",
-        new ToolOutcomeQuery(store)
-            .find(first.threadId(), first.invocationId())
-            .orElseThrow()
-            .toolCallId());
+        "call-1", find(store, first.threadId(), first.invocationId()).orElseThrow().toolCallId());
     assertEquals(
-        "call-2",
-        new ToolOutcomeQuery(store)
-            .find(second.threadId(), second.invocationId())
-            .orElseThrow()
-            .toolCallId());
+        "call-2", find(store, second.threadId(), second.invocationId()).orElseThrow().toolCallId());
   }
 
   private static ChildOutcome seedChildToolOutcome(
@@ -383,6 +347,13 @@ class ToolOutcomeQueryTest {
                       NOW));
           return new ChildOutcome(childThreadId, invocationId, assistantEntryId, resultEntryId);
         });
+  }
+
+  /** 测试直接走生产静态入口：先取目标 Thread 快照，再按同一事务读取结果。 */
+  private static Optional<ToolOutcomeView> find(
+      InMemoryBuiltinHarnessStore store, UUID threadId, UUID invocationId) {
+    return store.transaction(
+        tx -> ToolOutcomeQuery.find(tx, tx.threads().find(threadId).orElseThrow(), invocationId));
   }
 
   private static ToolOutcomeView view(

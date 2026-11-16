@@ -54,7 +54,8 @@ class BuiltinHarnessContributorTest {
   @Test
   void contributorDescriptorMatchesSpecification() {
     BuiltinHarnessContributor contributor =
-        new BuiltinHarnessContributor(stubFileTools(), stubTool("task", ToolRequirements.none()));
+        new BuiltinHarnessContributor(
+            stubFileTools(), stubTool("task", ToolRequirements.none()), null);
     ContributorDescriptor descriptor = contributor.descriptor();
 
     assertEquals(new ContributorId("builtin"), descriptor.id());
@@ -67,9 +68,10 @@ class BuiltinHarnessContributorTest {
   void nullConstructorArgumentsAreRejected() {
     assertThrows(
         NullPointerException.class,
-        () -> new BuiltinHarnessContributor(null, stubTool("task", ToolRequirements.none())));
+        () -> new BuiltinHarnessContributor(null, stubTool("task", ToolRequirements.none()), null));
     assertThrows(
-        NullPointerException.class, () -> new BuiltinHarnessContributor(stubFileTools(), null));
+        NullPointerException.class,
+        () -> new BuiltinHarnessContributor(stubFileTools(), null, null));
   }
 
   @Test
@@ -86,7 +88,7 @@ class BuiltinHarnessContributorTest {
         IllegalArgumentException.class,
         () ->
             new BuiltinHarnessContributor(
-                wrongFileTools, stubTool("task", ToolRequirements.none())));
+                wrongFileTools, stubTool("task", ToolRequirements.none()), null));
 
     // 文件工具数量不足同样被拒绝
     assertThrows(
@@ -94,28 +96,29 @@ class BuiltinHarnessContributorTest {
         () ->
             new BuiltinHarnessContributor(
                 List.of(stubTool("read", ToolRequirements.routed())),
-                stubTool("task", ToolRequirements.none())));
+                stubTool("task", ToolRequirements.none()),
+                null));
 
     // 传错 taskTool 名字
     assertThrows(
         IllegalArgumentException.class,
         () ->
             new BuiltinHarnessContributor(
-                stubFileTools(), stubTool("other", ToolRequirements.none())));
+                stubFileTools(), stubTool("other", ToolRequirements.none()), null));
 
     // taskTool descriptor 为 null
     Tool nullDescTask = mock(Tool.class);
     when(nullDescTask.descriptor()).thenReturn(null);
     assertThrows(
         IllegalArgumentException.class,
-        () -> new BuiltinHarnessContributor(stubFileTools(), nullDescTask));
+        () -> new BuiltinHarnessContributor(stubFileTools(), nullDescTask, null));
   }
 
   @Test
   void catalogFreezesExactInventoryOf12ToolsAndAssociatedCapabilities() {
     List<Tool> fileTools = stubFileTools();
     Tool task = stubTool("task", ToolRequirements.none());
-    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(fileTools, task);
+    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(fileTools, task, null);
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
@@ -225,7 +228,7 @@ class BuiltinHarnessContributorTest {
 
     List<Tool> fileTools = stubFileTools();
     Tool task = stubTool("task", ToolRequirements.none());
-    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(fileTools, task);
+    BuiltinHarnessContributor contributor = new BuiltinHarnessContributor(fileTools, task, null);
 
     HarnessCatalog catalog = HarnessCatalog.from(List.of(contributor));
 
@@ -430,7 +433,7 @@ class BuiltinHarnessContributorTest {
         HarnessCatalog.from(
             List.of(
                 new BuiltinHarnessContributor(
-                    stubFileTools(), stubTool("task", ToolRequirements.none()))));
+                    stubFileTools(), stubTool("task", ToolRequirements.none()), null)));
 
     String description =
         catalog.findTool("bash").orElseThrow().definition().descriptor().description();

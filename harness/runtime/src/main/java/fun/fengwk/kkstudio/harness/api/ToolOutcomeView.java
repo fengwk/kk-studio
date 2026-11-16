@@ -62,9 +62,4 @@ public record ToolOutcomeView(
       throw new IllegalArgumentException("non-succeeded tool outcome requires resultError");
     }
   }
-
-  /** 是否已经物化为 ToolResult Entry。 */
-  public boolean materialized() {
-    return resultEntryId != null;
-  }
 }

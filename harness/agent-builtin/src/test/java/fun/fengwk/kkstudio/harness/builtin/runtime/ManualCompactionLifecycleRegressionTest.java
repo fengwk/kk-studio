@@ -80,7 +80,7 @@ class ManualCompactionLifecycleRegressionTest {
         new HarnessRuntime(
             store,
             new DriverRegistry(List.of(HarnessRuntimeTestSupport.driver(store, resolver))),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
 
     TwoLevelBaseline baseline = seedTwoLevelTree(store);
 
@@ -123,7 +123,7 @@ class ManualCompactionLifecycleRegressionTest {
         new HarnessRuntime(
             store,
             new DriverRegistry(List.of(HarnessRuntimeTestSupport.driver(store, resolver))),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
 
     ThreeLevelBaseline baseline = seedThreeLevelTree(store);
 

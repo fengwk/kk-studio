@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.codec;
 
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.readEnum;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.requireFields;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.write;
 
@@ -164,36 +165,38 @@ public final class RealtimeEventJsonCodec {
           "realtimeEvent.createdAt must be an ISO-8601 instant string", error);
     }
 
-    if (type == RealtimeEventType.MODEL_DELTA) {
-      if (subjectKind != RealtimeEvent.SubjectKind.MODEL_INVOCATION) {
-        throw new IllegalArgumentException(
-            "MODEL_DELTA subjectKind must be MODEL_INVOCATION: " + subjectKindName);
+    return switch (type) {
+      case MODEL_DELTA -> {
+        if (subjectKind != RealtimeEvent.SubjectKind.MODEL_INVOCATION) {
+          throw new IllegalArgumentException(
+              "MODEL_DELTA subjectKind must be MODEL_INVOCATION: " + subjectKindName);
+        }
+        long sequence = requiredPositiveIntegralLong(node, "sequence", "realtimeEvent");
+        ProviderStreamEvent delta = decodePayload((ObjectNode) payloadNode);
+        yield new RealtimeEvent.ModelDelta(
+            threadId, subjectId, attempt, sequence, delta, createdAt);
       }
-      long sequence = requiredPositiveIntegralLong(node, "sequence", "realtimeEvent");
-      ProviderStreamEvent delta = decodePayload((ObjectNode) payloadNode);
-      return new RealtimeEvent.ModelDelta(threadId, subjectId, attempt, sequence, delta, createdAt);
-    }
-    if (type == RealtimeEventType.MODEL_CHECKPOINT) {
-      if (subjectKind != RealtimeEvent.SubjectKind.MODEL_INVOCATION) {
-        throw new IllegalArgumentException(
-            "MODEL_CHECKPOINT subjectKind must be MODEL_INVOCATION: " + subjectKindName);
+      case MODEL_CHECKPOINT -> {
+        if (subjectKind != RealtimeEvent.SubjectKind.MODEL_INVOCATION) {
+          throw new IllegalArgumentException(
+              "MODEL_CHECKPOINT subjectKind must be MODEL_INVOCATION: " + subjectKindName);
+        }
+        long sequence = requiredPositiveIntegralLong(node, "sequence", "realtimeEvent");
+        yield new RealtimeEvent.ModelCheckpoint(threadId, subjectId, attempt, sequence, createdAt);
       }
-      long sequence = requiredPositiveIntegralLong(node, "sequence", "realtimeEvent");
-      return new RealtimeEvent.ModelCheckpoint(threadId, subjectId, attempt, sequence, createdAt);
-    }
-    if (type == RealtimeEventType.TOOL_PARTIAL) {
-      if (subjectKind != RealtimeEvent.SubjectKind.TOOL_INVOCATION) {
-        throw new IllegalArgumentException(
-            "TOOL_PARTIAL subjectKind must be TOOL_INVOCATION: " + subjectKindName);
+      case TOOL_PARTIAL -> {
+        if (subjectKind != RealtimeEvent.SubjectKind.TOOL_INVOCATION) {
+          throw new IllegalArgumentException(
+              "TOOL_PARTIAL subjectKind must be TOOL_INVOCATION: " + subjectKindName);
+        }
+        ToolResult partial =
+            ToolResultJsonCodec.decode(
+                write(MAPPER, (ObjectNode) payloadNode, "cannot encode realtime event JSON"));
+        UUID eventId = requiredCanonicalUuid(node, "eventId", "realtimeEvent");
+        yield new RealtimeEvent.ToolPartial(
+            threadId, subjectId, attempt, eventId, partial, createdAt);
       }
-      ToolResult partial =
-          ToolResultJsonCodec.decode(
-              write(MAPPER, (ObjectNode) payloadNode, "cannot encode realtime event JSON"));
-      UUID eventId = requiredCanonicalUuid(node, "eventId", "realtimeEvent");
-      return new RealtimeEvent.ToolPartial(
-          threadId, subjectId, attempt, eventId, partial, createdAt);
-    }
-    throw new IllegalArgumentException("unsupported realtimeEvent.type: " + typeName);
+    };
   }
 
   // ---------- 编码器 ----------
@@ -364,30 +367,5 @@ public final class RealtimeEventJsonCodec {
       throw new IllegalArgumentException(context + "." + field + " must be a non-negative integer");
     }
     return value.intValue();
-  }
-
-  private static <E extends Enum<E>> E readEnum(Class<E> kind, String name, String context) {
-    if (name == null) {
-      throw new IllegalArgumentException(
-          context
-              + " must be one of "
-              + kind.getEnumConstants().length
-              + " "
-              + kind.getSimpleName()
-              + " values: null");
-    }
-    try {
-      return Enum.valueOf(kind, name);
-    } catch (IllegalArgumentException error) {
-      throw new IllegalArgumentException(
-          context
-              + " must be one of "
-              + kind.getEnumConstants().length
-              + " "
-              + kind.getSimpleName()
-              + " values: "
-              + name,
-          error);
-    }
   }
 }

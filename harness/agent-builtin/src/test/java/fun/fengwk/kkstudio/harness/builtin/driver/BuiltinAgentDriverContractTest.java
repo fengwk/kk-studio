@@ -267,7 +267,7 @@ class BuiltinAgentDriverContractTest {
     Seed other = seedOtherThread(owner.sessionId(), owner.rootEntryId());
     HarnessRuntime runtime =
         new HarnessRuntime(
-            store, new DriverRegistry(List.of(driver)), () -> CompactionConfig.DEFAULT);
+            store, new DriverRegistry(List.of(driver)), () -> new CompactionConfig(20_000));
 
     ThreadSnapshot ownerSnapshot = runtime.getThreadSnapshot(owner.threadId());
     assertNotNull(ownerSnapshot.generation());
@@ -288,7 +288,7 @@ class BuiltinAgentDriverContractTest {
     assertNotNull(foreign);
     HarnessRuntime runtime =
         new HarnessRuntime(
-            store, new DriverRegistry(List.of(driver)), () -> CompactionConfig.DEFAULT);
+            store, new DriverRegistry(List.of(driver)), () -> new CompactionConfig(20_000));
     ThreadSnapshot otherSnapshot = runtime.getThreadSnapshot(other.threadId());
 
     assertThrows(

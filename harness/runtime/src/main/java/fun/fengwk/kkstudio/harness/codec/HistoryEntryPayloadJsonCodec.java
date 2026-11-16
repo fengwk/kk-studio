@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.codec;
 
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.object;
 import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.orderedSet;
+import static fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport.readEnum;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -439,7 +440,7 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = object(value, "TURN_START");
     JsonCodecSupport.requireFields(node, TURN_START_FIELDS, "TURN_START");
     return new TurnStartPayload(
-        HistoryValueCodecs.readEnum(
+        readEnum(
             TurnStartReason.class, HistoryValueCodecs.text(node, "reason"), "TURN_START.reason"),
         HistoryValueCodecs.decodeBranchSettings(node.get("settings"), "TURN_START.settings"),
         HistoryValueCodecs.requiredPositiveId(node, "ownerThreadId", "TURN_START"),
@@ -603,7 +604,7 @@ public final class HistoryEntryPayloadJsonCodec {
     JsonCodecSupport.requireFields(node, TURN_END_FIELDS, "TURN_END");
     return new TurnEndPayload(
         HistoryValueCodecs.requiredPositiveId(node, "turnStartEntryId", "TURN_END"),
-        HistoryValueCodecs.readEnum(
+        readEnum(
             TurnEndOutcome.class, HistoryValueCodecs.text(node, "outcome"), "TURN_END.outcome"),
         HistoryValueCodecs.requiredBoolean(node, "continueModel", "TURN_END"),
         HistoryValueCodecs.nullableEnum(TurnEndReason.class, node, "reason", "TURN_END.reason"),
@@ -615,7 +616,7 @@ public final class HistoryEntryPayloadJsonCodec {
     JsonCodecSupport.requireFields(node, NOTIFICATION_FIELDS, "NOTIFICATION");
     return new NotificationPayload(
         HistoryValueCodecs.requiredPositiveId(node, "notificationId", "NOTIFICATION"),
-        HistoryValueCodecs.readEnum(
+        readEnum(
             NotificationKind.class, HistoryValueCodecs.text(node, "kind"), "NOTIFICATION.kind"),
         HistoryValueCodecs.requiredPositiveId(node, "sourceThreadId", "NOTIFICATION"),
         MESSAGE_CODEC.decodeNode(node.get("message")));
@@ -633,8 +634,7 @@ public final class HistoryEntryPayloadJsonCodec {
     ObjectNode node = object(value, "FORK");
     JsonCodecSupport.requireFields(node, FORK_FIELDS, "FORK");
     return new ForkPayload(
-        HistoryValueCodecs.readEnum(
-            ForkMode.class, HistoryValueCodecs.text(node, "mode"), "FORK.mode"),
+        readEnum(ForkMode.class, HistoryValueCodecs.text(node, "mode"), "FORK.mode"),
         HistoryValueCodecs.requiredPositiveId(node, "sourceEntryId", "FORK"),
         HistoryValueCodecs.nullablePositiveId(node, "sourceThreadId", "FORK"));
   }
@@ -654,7 +654,7 @@ public final class HistoryEntryPayloadJsonCodec {
         HistoryValueCodecs.requiredPositiveId(node, "assistantEntryId", "toolResultMetadata"),
         HistoryValueCodecs.text(node, "toolCallId"),
         HistoryValueCodecs.requiredNonNegativeInt(node, "callIndex", "toolResultMetadata"),
-        HistoryValueCodecs.readEnum(
+        readEnum(
             ToolResultStatus.class,
             HistoryValueCodecs.text(node, "status"),
             "toolResultMetadata.status"),

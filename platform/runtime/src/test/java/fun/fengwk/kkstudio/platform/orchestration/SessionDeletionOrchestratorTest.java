@@ -109,7 +109,7 @@ class SessionDeletionOrchestratorTest {
     when(transaction.joins()).thenReturn(joinStore);
     when(runtimes.getIfAvailable())
         .thenReturn(
-            new HarnessRuntime(store, new DriverRegistry(), () -> CompactionConfig.DEFAULT));
+            new HarnessRuntime(store, new DriverRegistry(), () -> new CompactionConfig(20_000)));
     when(store.transaction(any()))
         .thenAnswer(
             invocation -> {

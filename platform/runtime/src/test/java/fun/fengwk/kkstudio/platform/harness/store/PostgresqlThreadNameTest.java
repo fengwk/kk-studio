@@ -38,7 +38,7 @@ class PostgresqlThreadNameTest {
         new HarnessRuntime(
             store,
             builtinRegistry(store, (threadId, rootSessionId, path, prep) -> null),
-            () -> CompactionConfig.DEFAULT);
+            () -> new CompactionConfig(20_000));
     UUID createdId = UUID.randomUUID();
     var commands =
         List.of(

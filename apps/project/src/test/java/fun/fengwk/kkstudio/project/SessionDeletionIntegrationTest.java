@@ -95,7 +95,7 @@ class SessionDeletionIntegrationTest extends OwnerTestSupport {
     ObjectProvider<HarnessRuntime> runtimes = mock(ObjectProvider.class);
     when(runtimes.getIfAvailable())
         .thenReturn(
-            new HarnessRuntime(store, new DriverRegistry(), () -> CompactionConfig.DEFAULT));
+            new HarnessRuntime(store, new DriverRegistry(), () -> new CompactionConfig(20_000)));
     orchestrator = new SessionDeletionOrchestrator(ownerships, runtimes, refManager);
     transactions = new TransactionTemplate(transactionManager);
   }

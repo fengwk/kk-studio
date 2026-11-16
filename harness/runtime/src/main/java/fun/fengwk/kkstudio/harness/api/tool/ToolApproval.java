@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.api.tool;
 
+import fun.fengwk.kkstudio.harness.api.entry.CanonicalNames;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
@@ -13,7 +15,7 @@ import java.util.UUID;
  *   <li>{@code required=false}：所有其他字段都为 null。
  *   <li>{@code required=true} 且 undecided：{@code requestedAt} 存在，{@code reason} 可选， 决策相关事实缺失。
  *   <li>{@code required=true} 且 decided：decision、{@code decisionId}、{@code actor}、 {@code
- *       requestedAt} 与 {@code decidedAt} 均存在，{@code decidedAt >= requestedAt}， {@code reason} 可选。
+ *       requestedAt} 与 {@code decidedAt} 均存在，{@code reason} 可选。
  * </ul>
  */
 public record ToolApproval(
@@ -25,6 +27,9 @@ public record ToolApproval(
     Instant requestedAt,
     Instant decidedAt,
     ToolEditReview editReview) {
+
+  /** approval reason 的字符上限。 */
+  private static final int REASON_MAX_CHARS = 1024;
 
   /** 不带文件审查的普通工具审批。 */
   public ToolApproval(
@@ -57,12 +62,12 @@ public record ToolApproval(
       requestedAt = Objects.requireNonNull(requestedAt, "requestedAt");
     } else {
       Objects.requireNonNull(decisionId, "decisionId");
-      actor = requireCanonical(actor, "actor");
+      actor = CanonicalNames.requireName(actor, "actor");
       requestedAt = Objects.requireNonNull(requestedAt, "requestedAt");
       decidedAt = Objects.requireNonNull(decidedAt, "decidedAt");
     }
     if (reason != null) {
-      reason = requireCanonical(reason, "reason", 1024);
+      reason = CanonicalNames.requireName(reason, "reason", REASON_MAX_CHARS);
     }
   }
 
@@ -118,22 +123,5 @@ public record ToolApproval(
         "approval decision conflict: decisionId "
             + decisionId
             + " does not replay the stored decision");
-  }
-
-  private static String requireCanonical(String value, String field) {
-    return requireCanonical(value, field, 128);
-  }
-
-  private static String requireCanonical(String value, String field, int maxLength) {
-    if (value == null || value.isBlank()) {
-      throw new IllegalArgumentException(field + " must not be blank");
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
-    }
-    if (value.length() > maxLength) {
-      throw new IllegalArgumentException(field + " must be <= " + maxLength + " characters");
-    }
-    return value;
   }
 }

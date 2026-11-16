@@ -13,7 +13,7 @@
  *
  * <p>{@link fun.fengwk.kkstudio.harness.codec.AgentMessageContentJsonCodec} 承载单个 content 的
  * discriminator 分派、raw JSON 严格校验与 Provider block 投影，{@link
- * fun.fengwk.kkstudio.harness.codec.AgentMessageJsonCodec} 只负责 message 信封与 string API。
+ * fun.fengwk.kkstudio.harness.codec.AgentMessageJsonCodec} 只负责 message 信封的 node API。
  *
  * <p>Entry payload 的 durable 形态由 {@link
  * fun.fengwk.kkstudio.harness.codec.HistoryEntryPayloadJsonCodec} 按 {@link

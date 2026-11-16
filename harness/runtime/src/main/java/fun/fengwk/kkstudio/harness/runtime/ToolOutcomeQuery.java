@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.StrictJson;
 import fun.fengwk.kkstudio.harness.api.ToolOutcomeView;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
@@ -35,26 +34,6 @@ import java.util.UUID;
 public final class ToolOutcomeQuery {
 
   private static final HistoryPayloadMapper PAYLOAD_MAPPER = new HistoryPayloadMapper();
-
-  private final HarnessStore store;
-
-  public ToolOutcomeQuery(HarnessStore store) {
-    this.store = Objects.requireNonNull(store, "store");
-  }
-
-  public Optional<ToolOutcomeView> find(UUID threadId, UUID invocationId) {
-    return store.transaction(
-        tx -> {
-          ThreadState thread =
-              tx.threads()
-                  .find(threadId)
-                  .orElseThrow(
-                      () ->
-                          DomainException.notFound(
-                              "thread", "thread " + threadId + " does not exist"));
-          return find(tx, thread, invocationId);
-        });
-  }
 
   /** 供已锁定 Thread 的控制路径复用；调用方仍须传入真实 owner Thread。 */
   public static Optional<ToolOutcomeView> find(

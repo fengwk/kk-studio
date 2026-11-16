@@ -73,11 +73,7 @@ class ThreadContextProbeTest {
           return null;
         });
 
-    ThreadContext context =
-        store.transaction(
-            tx ->
-                new ThreadContextProbe(new DriverRegistry(List.of(new FakeAgentDriver())))
-                    .probe(tx, tx.threads().lock(THREAD_ID).orElseThrow()));
+    ThreadContext context = probe(store, THREAD_ID);
 
     assertInstanceOf(ThreadContext.IdleOrHistorical.class, context);
   }
@@ -88,12 +84,18 @@ class ThreadContextProbeTest {
     InMemoryHarnessStore store = new InMemoryHarnessStore();
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
 
-    ThreadContext context =
-        store.transaction(
-            tx ->
-                new ThreadContextProbe(new DriverRegistry(List.of(new FakeAgentDriver())))
-                    .probe(tx, tx.threads().lock(baseline.threadId()).orElseThrow()));
+    ThreadContext context = probe(store, baseline.threadId());
 
     assertInstanceOf(ThreadContext.ToolActive.class, context);
+  }
+
+  /** 在单个事务内锁定 Thread 并按当前 head 投影上下文，与生产调用的入参形状一致。 */
+  private static ThreadContext probe(InMemoryHarnessStore store, UUID threadId) {
+    return store.transaction(
+        tx -> {
+          ThreadState thread = tx.threads().lock(threadId).orElseThrow();
+          return new ThreadContextProbe(new DriverRegistry(List.of(new FakeAgentDriver())))
+              .probe(tx, thread, tx.entries().loadCurrent(thread.headEntryId()));
+        });
   }
 }

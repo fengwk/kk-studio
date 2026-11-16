@@ -110,7 +110,7 @@ class HarnessRuntimeStopExitContractTest {
                         HarnessRuntimeTestSupport.driver(
                             fixture.store,
                             (threadId, rootSessionId, candidatePath, preparation) -> null))),
-                () -> CompactionConfig.DEFAULT,
+                () -> new CompactionConfig(20_000),
                 ignored -> {},
                 fixture.processor::cancel);
         parentId = insertSourceAndJoin(fixture, joinId);
@@ -289,7 +289,7 @@ class HarnessRuntimeStopExitContractTest {
                         HarnessRuntimeTestSupport.driver(
                             fixture.store,
                             (threadId, rootSessionId, candidatePath, preparation) -> null))),
-                () -> CompactionConfig.DEFAULT,
+                () -> new CompactionConfig(20_000),
                 ignored -> {},
                 fixture.processor::cancel);
         UUID leafId = fixture.baseline.threadId();

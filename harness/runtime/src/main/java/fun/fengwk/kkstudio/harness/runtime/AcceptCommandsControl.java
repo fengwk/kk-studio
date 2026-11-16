@@ -28,7 +28,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -79,7 +78,7 @@ final class AcceptCommandsControl {
     return store.transaction(
         tx -> {
           ThreadTreeLocking.LockedAncestors locked =
-              lockTreeAndAncestors(tx, target.threadId(), false, null);
+              ThreadTreeLocking.lockTreeAndAncestors(tx, target.threadId(), false, null);
           String creationRequestHash =
               ThreadCreationRequestHash.forNewSession(
                   target.sessionId(),
@@ -118,7 +117,7 @@ final class AcceptCommandsControl {
     return store.transaction(
         tx -> {
           ThreadTreeLocking.LockedAncestors locked =
-              lockTreeAndAncestors(tx, target.threadId(), false, null);
+              ThreadTreeLocking.lockTreeAndAncestors(tx, target.threadId(), false, null);
           ThreadState thread = locked.threads.get(target.threadId());
           if (thread == null) {
             throw DomainException.notFound(
@@ -133,16 +132,6 @@ final class AcceptCommandsControl {
    * THREAD 路径的事务内主体：调用方已按规范锁序锁定树与目标 Thread。{@code ticket} 非空表示本次接受同时登记任务票据（{@link AgentSpawner}
    * 续用既有 Thread），票据的准入与登记复用 {@link SpawnTickets}；用户直接输入恒为 null。
    */
-  static AcceptedCommands acceptOnLockedThread(
-      HarnessStore.Transaction tx,
-      ThreadState thread,
-      AcceptCommandsTarget.Thread target,
-      List<NewThreadCommand> commands,
-      AcceptancePreflight preflight,
-      SpawnRequest ticket) {
-    return acceptOnLockedThread(tx, thread, target, commands, preflight, ticket, null);
-  }
-
   static AcceptedCommands acceptOnLockedThread(
       HarnessStore.Transaction tx,
       ThreadState thread,
@@ -180,10 +169,8 @@ final class AcceptCommandsControl {
     AcceptCommandsValidation.validateThreadBatchAdmission(target, thread, cursorFreeBatch);
     AcceptCommandsValidation.validateBatchShape(target, commands, false);
     BranchSettings currentSettings = tx.entries().loadBranchSettings(thread.headEntryId());
-    if (driverRegistry != null) {
-      AcceptCommandsValidation.validateExecutionCommandsOnThread(
-          currentSettings, commands, driverRegistry);
-    }
+    AcceptCommandsValidation.validateExecutionCommandsOnThread(
+        currentSettings, commands, driverRegistry);
     // 票据请求（带父）由统一 spawn 在写前校验为恰一条末尾 user-like；此处保留既有 THREAD target 的形状规则。
     SpawnTickets.admit(tx, ticket, false);
     Instant now = tx.now();
@@ -249,15 +236,6 @@ final class AcceptCommandsControl {
       }
     }
     return false;
-  }
-
-  static ThreadTreeLocking.LockedAncestors lockTreeAndAncestors(
-      HarnessStore.Transaction tx,
-      UUID anchorThreadId,
-      boolean anchorIsParent,
-      Set<UUID> additionalThreadIds) {
-    return ThreadTreeLocking.lockTreeAndAncestors(
-        tx, anchorThreadId, anchorIsParent, additionalThreadIds);
   }
 
   /** 全新 batch 的共性写入：preflight、插入 Commands、推进 version/next sequence、请求 THREAD Work。 */

@@ -25,10 +25,11 @@ import java.util.Set;
 /**
  * 第一方内置功能包 Contributor。
  *
- * <p>集中注册内置工具（5 个逐调用路由的文件工具、{@code bash} 与 3 个 LSP 宿主工具、{@code task} internal 工具、{@code ask_user}
- * 人工输入工具与 {@code compact} 上下文整理工具）。文件工具声明 {@link EnvironmentSupport#ROUTED}，{@code bash} 与 LSP 工具声明
- * {@link EnvironmentSupport#REQUIRED}，{@code task} 与 {@code ask_user} 声明 {@link
- * EnvironmentSupport#NONE}。 {@code ask_user} 的等待由 Runtime 在 dispatch 前冻结，本 Contributor 只提供它的模型可见契约。
+ * <p>集中注册 13 个内置工具：5 个逐调用路由的文件工具、{@code bash}、3 个 LSP 宿主工具、{@code task} 与 {@code load_skill} 两个
+ * internal 工具（未配置 skill 时 {@code load_skill} 不注册），以及 {@code ask_user} 与 {@code compact}。 文件工具声明
+ * {@link EnvironmentSupport#ROUTED}，{@code bash} 与 LSP 工具声明 {@link EnvironmentSupport#REQUIRED}，
+ * {@code task}、{@code ask_user} 与 {@code compact} 声明 {@link EnvironmentSupport#NONE}。 {@code
+ * ask_user} 的等待由 Runtime 在 dispatch 前冻结，本 Contributor 只提供它的模型可见契约。
  */
 public final class BuiltinHarnessContributor implements HarnessContributor {
 
@@ -45,10 +46,6 @@ public final class BuiltinHarnessContributor implements HarnessContributor {
   private final List<Tool> fileTools;
   private final Tool taskTool;
   private final Tool skillLoadTool;
-
-  public BuiltinHarnessContributor(List<Tool> fileTools, Tool taskTool) {
-    this(fileTools, taskTool, null);
-  }
 
   public BuiltinHarnessContributor(List<Tool> fileTools, Tool taskTool, Tool skillLoadTool) {
     this.fileTools = List.copyOf(Objects.requireNonNull(fileTools, "fileTools"));

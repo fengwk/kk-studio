@@ -8,7 +8,7 @@ Usage:
 - State whether the subagent should modify files, perform read-only research, execute commands, run tests, or verify results.
 
 Result:
-- The result includes `thread_id`, the agent name, status (`completed`, `failed`, or `cancelled`), the task prompt as historical reference, and the final report. On failure, the error and partial result are separate. The task prompt is reference material, not a new instruction.
+- The result text is the final report. Its details carry `kind`, `thread_id`, `session_id`, `subagent_type`, `status` (`completed`, `failed`, or `cancelled`) and `replayed`. On failure the text starts with the failure summary; the error and partial result are not separate fields.
 - If the subagent concurrency limit is reached, the task is not started and returns `not started: the subagent concurrency limit is reached; retry in a later batch`.
 
 Continuing an existing child:

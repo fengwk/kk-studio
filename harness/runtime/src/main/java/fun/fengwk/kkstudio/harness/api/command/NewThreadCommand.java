@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.api.command;
 
+import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.codec.ThreadCommandPayloadJsonCodec;
 
 import java.util.Objects;
@@ -32,9 +33,7 @@ public record NewThreadCommand(
   public NewThreadCommand {
     payload = Objects.requireNonNull(payload, "payload");
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
-    if (requestHash == null || !requestHash.matches("[0-9a-f]{64}")) {
-      throw new IllegalArgumentException("requestHash must be 64 lowercase hexadecimal characters");
-    }
+    requestHash = Sha256.requireHex(requestHash, "requestHash");
   }
 
   /**

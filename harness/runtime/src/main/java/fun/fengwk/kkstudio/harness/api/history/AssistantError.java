@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
 import java.util.Objects;
+import java.util.regex.Pattern;
 
 /**
  * Assistant-side 失败审计 Entry 的最小快照：stable error code 与人类可读 message。
@@ -14,6 +15,8 @@ public record AssistantError(String code, String message) {
   /** Stop 写入取消屏障时使用的稳定 error code。 */
   public static final String CANCELLED_CODE = "CANCELLED";
 
+  private static final Pattern CODE_PATTERN = Pattern.compile("[A-Z][A-Z0-9_]*");
+
   private static final int CODE_MAX_LENGTH = 64;
 
   public AssistantError {
@@ -23,7 +26,7 @@ public record AssistantError(String code, String message) {
 
   private static String requireErrorCode(String value) {
     Objects.requireNonNull(value, "code");
-    if (!value.matches("[A-Z][A-Z0-9_]*")) {
+    if (!CODE_PATTERN.matcher(value).matches()) {
       throw new IllegalArgumentException("code must match [A-Z][A-Z0-9_]*");
     }
     if (value.length() > CODE_MAX_LENGTH) {

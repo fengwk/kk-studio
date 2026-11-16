@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.harness.api.join;
 
+import fun.fengwk.kkstudio.common.hash.Sha256;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * 一次源命令接受后的不可变 join 凭据。执行终止边界冻结一次结果；父交付引用其 command sequence，不能从后续的子 Thread head 重新推导先前结果。
@@ -33,8 +34,6 @@ public record ThreadJoin(
     JoinDelivery delivery,
     UUID supersededByInvocationId) {
 
-  private static final Pattern HASH = Pattern.compile("[0-9a-f]{64}");
-
   public ThreadJoin {
     Objects.requireNonNull(invocationId, "invocationId");
     Objects.requireNonNull(childThreadId, "childThreadId");
@@ -44,9 +43,7 @@ public record ThreadJoin(
     if ((delivery == JoinDelivery.RECEIPT_ONLY) != (parentThreadId == null)) {
       throw new IllegalArgumentException("only a parentless join is receipt-only");
     }
-    if (requestHash == null || !HASH.matcher(requestHash).matches()) {
-      throw new IllegalArgumentException("requestHash must be a lowercase SHA-256 hex string");
-    }
+    requestHash = Sha256.requireHex(requestHash, "requestHash");
     if (parentThreadId != null && parentThreadId.equals(childThreadId)) {
       throw new IllegalArgumentException("join parent and child must differ");
     }

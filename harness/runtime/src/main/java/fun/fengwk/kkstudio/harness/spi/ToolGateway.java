@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.spi;
 
 import fun.fengwk.kkstudio.common.time.MillisecondTime;
+import fun.fengwk.kkstudio.harness.api.entry.CanonicalNames;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolEditReview;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
@@ -164,12 +165,15 @@ public interface ToolGateway {
   /** 需要用户确认；reason 是人类可读的 canonical 提示。 */
   record Ask(String reason, ToolEditReview editReview) implements PreflightResult {
 
+    /** 审批提示的字符上限。 */
+    private static final int REASON_MAX_CHARS = 1024;
+
     public Ask(String reason) {
       this(reason, null);
     }
 
     public Ask {
-      reason = requireCanonicalReason(reason);
+      reason = CanonicalNames.requireName(reason, "reason", REASON_MAX_CHARS);
     }
   }
 
@@ -255,19 +259,5 @@ public interface ToolGateway {
     public Unknown {
       error = Objects.requireNonNull(error, "error");
     }
-  }
-
-  private static String requireCanonicalReason(String value) {
-    Objects.requireNonNull(value, "reason");
-    if (value.isBlank()) {
-      throw new IllegalArgumentException("reason must not be blank");
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException("reason must not contain surrounding whitespace");
-    }
-    if (value.length() > 1024) {
-      throw new IllegalArgumentException("reason must be <= 1024 characters");
-    }
-    return value;
   }
 }

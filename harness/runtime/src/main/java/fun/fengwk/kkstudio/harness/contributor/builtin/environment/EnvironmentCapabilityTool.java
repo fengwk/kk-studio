@@ -59,8 +59,9 @@ public final class EnvironmentCapabilityTool implements Tool {
    * 只有本工具声明了 arguments 级超时契约：归一化 arguments 携带显式 {@code timeout_seconds} 时严格使用该值，缺省时使用 capability
    * 的默认超时。显式值可以比默认值更短或更长，两者不取最小值，也不存在产品上限。
    *
-   * <p>{@code timeout_seconds} 按 schema 声明必须是正数：非正数既不是合法覆盖，也不表示「无 deadline」，而是 fail closed 的非法请求，由
-   * Gateway 收敛为确定性的 {@code INVALID_REQUEST} 失败。
+   * <p>{@code timeout_seconds} 的 schema 只声明 {@code integer}；正数约束由 {@link
+   * EnvironmentCapabilityTimeouts#resolve} 在执行前强制。非正数既不是合法覆盖，也不表示「无 deadline」，而是 fail closed
+   * 的非法请求，由 Gateway 收敛为确定性的 {@code INVALID_REQUEST} 失败。
    */
   @Override
   public Duration resolveTimeout(ToolCall call) {
