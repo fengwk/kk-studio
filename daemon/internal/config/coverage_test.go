@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -141,6 +142,18 @@ func TestReadRegistrationTokenFailures(t *testing.T) {
 	}
 	if _, err := ReadRegistrationToken(path); err == nil {
 		t.Fatal("accepted a directory as the token file")
+	}
+}
+
+// Rejects a registration token file larger than the installer bound.
+func TestReadRegistrationTokenRejectsOversizedFile(t *testing.T) {
+	path := writeConfigFixture(t, `{"environmentId":"123e4567-e89b-42d3-a456-426614174000","version":"0","daemonConfig":{"studioUrl":"http://localhost","lsp":{"servers":{"x":{"command":["x"],"extensions":[".x"]}}}}}`)
+	tokenPath := filepath.Join(filepath.Dir(path), "daemon.token")
+	if err := os.WriteFile(tokenPath, bytes.Repeat([]byte("a"), MaxRegistrationTokenBytes+1), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ReadRegistrationToken(path); err == nil {
+		t.Fatal("accepted a token file above the installer bound")
 	}
 }
 

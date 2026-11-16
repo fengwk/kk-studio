@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,11 +117,11 @@ func upgradeRequiredBody(resp *http.Response) *protocol.UpgradeRequired {
 }
 
 func readRegistrationToken(path string) (string, error) {
-	b, err := os.ReadFile(path)
+	token, err := config.ReadRegistrationTokenFile(path)
 	if err != nil {
 		return "", fmt.Errorf("cannot read registration token: %w", err)
 	}
-	return strings.TrimSpace(string(b)), nil
+	return token, nil
 }
 
 const (

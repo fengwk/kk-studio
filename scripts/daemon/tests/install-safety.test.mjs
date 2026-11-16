@@ -10,6 +10,7 @@ import path from 'node:path'
 import { describe, it } from 'node:test'
 import { spawnSync } from 'node:child_process'
 
+import { repositoryRoot } from '../../dev/lib/repo-root.mjs'
 import {
   ENVIRONMENT_ID,
   InstallFixture,
@@ -19,6 +20,7 @@ import {
   writeExecutable,
 } from './support/release-fixture.mjs'
 
+const ROOT = repositoryRoot()
 const mode = (file) => statSync(file).mode & 0o777
 const bytes = (file) => readFileSync(file)
 const unitPath = (fixture) => fixture.unitPath
@@ -45,6 +47,26 @@ function withInstall(body) {
     return body(context)
   })
 }
+
+describe('installer input bounds', () => {
+  // The token file bound is one fact, so both installers must accept the same credentials.
+  it('bounds the token file identically in both installers', () => {
+    const tokenBounds = (file) =>
+      readFileSync(path.join(ROOT, file), 'utf8')
+        .split('\n')
+        .filter((line) => line.includes('16384'))
+        .map((line) => line.trim())
+    assert.deepEqual(tokenBounds('scripts/daemon/install.sh'), [
+      'check_input "$source_token" 16384',
+      'check_input_size "$STAGED_TOKEN" 16384',
+      'check_input "$TOKEN_FILE" 16384',
+    ])
+    assert.deepEqual(tokenBounds('scripts/daemon/install.ps1'), [
+      '-Name "-TokenFile" -MaximumBytes 16384',
+      '$null = Assert-PrivateFile -Path $TokenFile -ExpectedOwnerSid $script:CurrentSid -MaximumBytes 16384',
+    ])
+  })
+})
 
 describe('install.sh safety', () => {
   it('rejects inputs mutated during the download before publication', () =>
