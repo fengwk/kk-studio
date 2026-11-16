@@ -85,7 +85,7 @@ class ConfigSyncParserTest {
   }
 
   @Test
-  void removedOldInstallShapeAndSettingsNetworkAreValidationFailures() {
+  void removedOldInstallShapeIsValidationFailureAndUnknownSettingsSectionsAreSkipped() {
     String oldEnvironment =
         "environments:\n"
             + "  - name: env\n"
@@ -96,9 +96,23 @@ class ConfigSyncParserTest {
     assertThrows(
         DomainException.class,
         () -> parser.parse(oldEnvironment.replace("installConfig:", "daemonConfig:")));
+    // 未知设置段与其他未知字段同规则：报告为条目级 skip；只剩未知段时剩余结构必然不满足六节契约而被拒绝。
     assertThrows(
         DomainException.class,
         () -> parser.parse("settings:\n  network:\n    proxyUrl: http://127.0.0.1:7890\n"));
+    Map<String, Object> settings =
+        (Map<String, Object>) yaml.toMap(ConfigSyncFixtures.defaultSettings(), "settings");
+    settings.put("network", Map.of("proxyUrl", "http://127.0.0.1:7890"));
+    ConfigSyncParser.ParsedDocument settingsSkipped =
+        parser.parse(yaml.dump(Map.of("settings", settings)));
+    assertNotNull(settingsSkipped.settings());
+    assertTrue(
+        settingsSkipped.skipped().stream()
+            .anyMatch(
+                skip ->
+                    skip.getKind() == ConfigSyncKind.SETTINGS
+                        && skip.getReason().contains("network")),
+        settingsSkipped.skipped().toString());
     // 一般未知字段仍保持条目级 skip 语义，不扩大为所有未知字段都硬错。
     ConfigSyncParser.ParsedDocument skipped =
         parser.parse(

@@ -2,6 +2,8 @@ package fun.fengwk.kkstudio.platform.configsync;
 
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Isolation;
+import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
@@ -38,8 +40,12 @@ public class ConfigSyncSnapshotReader {
   /**
    * 读取全部八类配置的当前事实。
    *
+   * <p>整个读取在一个只读 REPEATABLE_READ 事务中完成：inventory/export/checkImport 的同类注解会直接加入，import 以 {@code
+   * Propagation.NEVER} 运行时由本方法自己起一个短事务，使计划快照一致；Git/MCP 准备发生在本方法返回之后，绝不在该事务内执行。
+   *
    * <p>插件配置取自已安装插件的当前配置行，只含 pluginId、修订与普通值。
    */
+  @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
   public ConfigSyncSnapshot read() {
     SystemSettingsRepository.SystemSettingsRecord settings = systemSettingsRepository.get();
     if (settings == null) {
