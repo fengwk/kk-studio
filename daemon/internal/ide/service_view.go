@@ -453,7 +453,7 @@ func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeComm
 }
 
 // reconcileDirectoryChange converges service metadata and the managed workspace after a late host confirmation.
-func (s *Service) reconcileDirectoryChange(viewID string, epoch int64, directory string) {
+func (s *Service) reconcileDirectoryChange(viewID string, epoch int64, operationID, directory string) {
 	lock := s.keyedLock(s.viewLocks, viewID)
 	lock.Lock()
 	defer lock.Unlock()
@@ -461,27 +461,28 @@ func (s *Service) reconcileDirectoryChange(viewID string, epoch int64, directory
 	view := s.views[viewID]
 	current := view != nil && view.state == viewOpen && view.bindingEpoch == epoch
 	s.mu.Unlock()
-	if !current {
+	if !current || !s.bridge.IsCurrentDirectoryOperation(viewID, epoch, operationID, directory) {
 		return
 	}
 	if err := s.writeManagedWorkspace(view.workspacePath, directory); err != nil {
-		s.mu.Lock()
-		if s.views[viewID] == view && view.bindingEpoch == epoch && view.state == viewOpen {
-			_, _ = s.commitRevisionLocked()
-			view.state, view.cleanupFailed, view.forceAllowed = viewClosing, true, true
-			s.clearExpiryLocked(view)
-		}
-		s.mu.Unlock()
-		s.emit(IdeServiceEvent{Kind: "cleanup-failed", ViewID: viewID, Message: "directory reconciliation failed"})
+		s.cleanupFailed(view, NewError("directory reconciliation failed", "CLEANUP_FAILED"))
 		return
 	}
+	if !s.bridge.IsCurrentDirectoryOperation(viewID, epoch, operationID, directory) {
+		return
+	}
+	var commitErr error
 	s.mu.Lock()
 	if s.views[viewID] == view && view.bindingEpoch == epoch && view.state == viewOpen && view.directory != directory {
-		if _, err := s.commitRevisionLocked(); err == nil {
+		_, commitErr = s.commitRevisionLocked()
+		if commitErr == nil {
 			view.directory = directory
 		}
 	}
 	s.mu.Unlock()
+	if commitErr != nil {
+		s.cleanupFailed(view, NewError("directory reconciliation state could not be committed", "CLEANUP_FAILED"))
+	}
 }
 
 func (s *Service) focusTerminal(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
@@ -665,7 +666,7 @@ func (s *Service) requestNativeClose(ctx context.Context, view *viewRecord, epoc
 		s.deferUnknownOutcome(view)
 		code := "OUTCOME_UNKNOWN"
 		var bridgeErr *Error
-		if (requestErr == nil && result.Code == "VIEW_GONE") || (errors.As(requestErr, &bridgeErr) && bridgeErr.Code == "UNAVAILABLE") {
+		if !result.sent && (result.Code == "VIEW_GONE" || (errors.As(requestErr, &bridgeErr) && bridgeErr.Code == "UNAVAILABLE")) {
 			code = "CONTROL_UNAVAILABLE"
 		}
 		if code == "CONTROL_UNAVAILABLE" {

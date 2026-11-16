@@ -56,6 +56,7 @@ type BridgeRequestOptions struct {
 // BridgeResult is a safe response from the in-window extension host.
 type BridgeResult struct {
 	OK        bool             `json:"ok"`
+	sent      bool             // true once the bridge stream accepts the command frame
 	Code      string           `json:"code,omitempty"`
 	Message   string           `json:"message,omitempty"`
 	Directory string           `json:"directory,omitempty"`
@@ -68,12 +69,13 @@ type BridgeResult struct {
 }
 
 type bridgeView struct {
-	workspacePath string
-	epoch         int64
-	directory     string
-	hosts         map[string]struct{}
-	hostID        string
-	stream        *bridgeStream
+	workspacePath       string
+	epoch               int64
+	directory           string
+	latestDirectoryOpID string
+	hosts               map[string]struct{}
+	hostID              string
+	stream              *bridgeStream
 }
 
 type bridgeStream struct {
@@ -114,7 +116,7 @@ type Bridge struct {
 	pending               map[string]*bridgePending
 	waiters               map[string]map[chan error]struct{}
 	ptyListeners          []func(string, int) error
-	onDirectoryReconciled func(string, int64, string)
+	onDirectoryReconciled func(string, int64, string, string)
 	closed                bool
 	closeDone             chan struct{}
 	closeErr              error
@@ -192,10 +194,18 @@ func (b *Bridge) OnPTY(listener func(string, int) error) {
 }
 
 // OnDirectoryReconciled receives successful late confirmations after the caller stopped waiting.
-func (b *Bridge) OnDirectoryReconciled(listener func(string, int64, string)) {
+func (b *Bridge) OnDirectoryReconciled(listener func(string, int64, string, string)) {
 	b.mu.Lock()
 	b.onDirectoryReconciled = listener
 	b.mu.Unlock()
+}
+
+// IsCurrentDirectoryOperation reports whether an operation still owns the confirmed bridge directory.
+func (b *Bridge) IsCurrentDirectoryOperation(viewID string, epoch int64, operationID, directory string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	view := b.views[viewID]
+	return view != nil && view.epoch == epoch && view.latestDirectoryOpID == operationID && view.directory == directory
 }
 
 // WaitForConnection waits for this view's window stream, or returns on cancellation/revocation.
@@ -234,6 +244,7 @@ func (b *Bridge) WaitForConnection(ctx context.Context, viewID string) error {
 }
 
 // Request sends one command and waits for its matching extension-host result.
+// The internal sent flag records whether the stream accepted the frame.
 func (b *Bridge) Request(ctx context.Context, viewID string, command BridgeCommand, options BridgeRequestOptions) (BridgeResult, error) {
 	b.mu.Lock()
 	view := b.views[viewID]
@@ -318,14 +329,19 @@ func (b *Bridge) Request(ctx context.Context, viewID string, command BridgeComma
 	}
 	select {
 	case result := <-pending.result:
+		result.sent = true
 		return result, nil
 	case <-ctx.Done():
 		if command.Op == "changeDirectory" {
 			b.markUnknown(id)
-			return <-pending.result, nil
+			result := <-pending.result
+			result.sent = true
+			return result, nil
 		}
 		b.resolvePending(id, BridgeResult{Code: "OUTCOME_UNKNOWN", Message: "ide request outcome is unknown"})
-		return <-pending.result, nil
+		result := <-pending.result
+		result.sent = true
+		return result, nil
 	}
 }
 
@@ -704,12 +720,13 @@ func (b *Bridge) resolvePendingLocked(id string, result BridgeResult) {
 		result = BridgeResult{Code: "VIEW_GONE", Message: "view binding changed"}
 	} else if result.OK && pending.op == "changeDirectory" && pending.expectedDirectory != "" {
 		view.directory = pending.expectedDirectory
+		view.latestDirectoryOpID = id
 		if pending.notified {
 			slog.Info("IDE bridge directory outcome reconciled", "viewId", pending.viewID, "bindingEpoch", pending.epoch, "hostId", view.hostID, "reason", "target_host_confirmed", "operationId", id)
 		}
 		if pending.notified && b.onDirectoryReconciled != nil {
 			listener := b.onDirectoryReconciled
-			go listener(pending.viewID, pending.epoch, pending.expectedDirectory)
+			go listener(pending.viewID, pending.epoch, id, pending.expectedDirectory)
 		}
 	} else if !result.OK && result.Code != "OUTCOME_UNKNOWN" && pending.op == "changeDirectory" && result.Code != "DIRTY" && view.stream == pending.stream {
 		view.hostID = ""
