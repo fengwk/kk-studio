@@ -8,7 +8,7 @@ public enum IssueReconcileOutcome {
   /** 当前阶段是保留阶段、停用阶段或人工阶段：不产生 Run，结束本次 claim。 */
   CONVERGED_NO_AGENT,
 
-  /** 阶段额度已用尽：只展示待人工重置，不继续调用模型，结束本次 claim。 */
+  /** 阶段额度已用尽：只展示待人工重置，不继续调用模型；保留 mailbox 按 blockedDelay 轮询，重置后立即推进。 */
   CONVERGED_BUDGET_EXHAUSTED,
 
   /** 存在无法派发的确定性拒绝（暂停门禁、缺失 Agent 等）：结束本次 claim，等待显式恢复。 */
