@@ -171,7 +171,8 @@ func editableFileInfo(path string) error {
 	if info.IsDir() {
 		return rejectInput(fmt.Sprintf("path must be a file: %s", path))
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+	// os.Lstat reports a symbolic link as a link, never as a regular file, so one check covers both.
+	if !info.Mode().IsRegular() {
 		return rejectInput(fmt.Sprintf("path is not a regular file: %s", path))
 	}
 	return nil
