@@ -119,7 +119,6 @@ class PluginManagementServiceTest {
             configurationService,
             FUNCTION_NAMES,
             authAttempts,
-            Duration.ofMinutes(10),
             Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
@@ -362,7 +361,6 @@ class PluginManagementServiceTest {
               configurationService,
               FUNCTION_NAMES,
               authAttempts,
-              Duration.ofMinutes(10),
               Clock.fixed(NOW, ZoneOffset.UTC));
 
       DomainException error =

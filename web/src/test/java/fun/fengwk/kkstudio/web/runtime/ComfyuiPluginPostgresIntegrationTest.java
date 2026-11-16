@@ -77,7 +77,6 @@ import java.net.InetSocketAddress;
 import java.net.ProxySelector;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -267,7 +266,6 @@ class ComfyuiPluginPostgresIntegrationTest {
                       configurationService(context, runtime),
                       PluginCanvasFunctionCatalog::functionNames,
                       mock(PluginAuthAttemptRepository.class),
-                      Duration.ofMinutes(5),
                       Clock.systemUTC());
 
               assertSame(HTTP_MAPPER, HTTP_CONVERTER.getMapper());
