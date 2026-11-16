@@ -5,14 +5,13 @@ import {
 } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { getString } from '@/shared/lib/value'
 import type {
-  DialogueContent,
   DialogueMessage,
   ToolDialogueMessage,
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { toolCallIdentity as strictToolCallIdentity } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import {
   contentText,
-  toResourceAttachment,
+  toDialogueContents,
 } from '@/features/thread/runtime/thread-timeline/content-utils'
 import {
   projectEmptyMessageEntry,
@@ -68,16 +67,7 @@ function projectUserMessage(
   role: string,
 ): void {
   const text = contents.map(contentText).filter(Boolean).join('\n')
-  const displayContents = contents.flatMap<DialogueContent>((content) => {
-    const value = contentText(content)
-    if (value) {
-      return [{ type: 'text', text: value }]
-    }
-    return toResourceAttachment(content).map((attachment) => ({
-      type: 'resource',
-      attachment,
-    }))
-  })
+  const displayContents = toDialogueContents(contents)
   if (displayContents.length > 0) {
     messages.push({
       id: entry.entryId,

@@ -224,6 +224,33 @@ describe('thread timeline edge branches', () => {
     expect(timeline.queuedMessages.some((message) => message.text === 'queued custom')).toBe(false)
   })
 
+  it('preserves pure and mixed resource order from queued commands to durable dialogue contents', () => {
+    const blobId = '00a00000-0000-4000-8000-000000000001'
+    const contents = [
+      { type: 'text', text: 'before' },
+      { type: 'resource', blobId, name: 'asset.png', mediaType: 'image/png' },
+      { type: 'text', text: 'after' },
+    ]
+    const queued = buildThreadTimeline([], [
+      command('queued-resource', '1', 'USER_MESSAGE', messagePayload('USER', contents), 'QUEUED'),
+      command('queued-pure', '2', 'USER_MESSAGE', messagePayload('USER', [contents[1]!]), 'QUEUED'),
+    ], [])
+    const durable = buildThreadTimeline([
+      entry('durable-resource', 'MESSAGE', messagePayload('USER', contents)),
+      entry('durable-pure', 'MESSAGE', messagePayload('USER', [contents[1]!])),
+    ], [], [])
+
+    expect(queued.queuedMessages[0]?.contents).toEqual(durable.messages[0]?.role === 'user'
+      ? durable.messages[0].contents
+      : undefined)
+    expect(queued.queuedMessages[1]?.contents).toEqual(durable.messages[1]?.role === 'user'
+      ? durable.messages[1].contents
+      : undefined)
+    expect(queued.queuedMessages[1]?.contents).toEqual([
+      { type: 'resource', attachment: expect.objectContaining({ blobId, name: 'asset.png' }) },
+    ])
+  })
+
   it('projects durable blob resources from lowercase runtime message contents', () => {
     const blobId = '0fb32eb4-2635-46ed-8e2e-4a4c3f5e1d01'
     const timeline = buildThreadTimeline(

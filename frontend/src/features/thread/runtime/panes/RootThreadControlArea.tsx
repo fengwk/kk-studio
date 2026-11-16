@@ -8,9 +8,11 @@ import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { interactionIdentity, manualInteractions } from '@/shared/lib/interactions'
 import type {
+  DialogueContent,
   DialogueMessage,
   QueuedThreadMessage,
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import { createResourcePart, createTextPart } from '@/features/thread/composer/composer-parts'
 import '@/features/thread/runtime/panes/root-thread-control-area.css'
 
 /**
@@ -58,15 +60,25 @@ export function RootThreadControlArea({
   } = composer
   const interactionOpen = interactionPanel != null
   const historicalUserMessages = useMemo(
-    () => messages.flatMap((message) =>
-      message.role === 'user' && message.text.length > 0 ? [message.text] : [],
-    ),
+    () => messages.flatMap((message) => {
+      if (message.role !== 'user') {
+        return []
+      }
+      const contents = message.contents ?? [{ type: 'text', text: message.text }]
+      const parts = composerParts(contents)
+      return message.text.length > 0 || parts.length > 0 ? [{ text: message.text, parts }] : []
+    }),
     [messages],
   )
   const queuedUserMessages = useMemo(
-    () => queuedMessages.flatMap((message) =>
-      message.role === 'user' && message.text.length > 0 ? [message.text] : [],
-    ),
+    () => queuedMessages.flatMap((message) => {
+      if (message.role !== 'user') {
+        return []
+      }
+      const contents = message.contents ?? [{ type: 'text', text: message.text }]
+      const parts = composerParts(contents)
+      return message.text.length > 0 || parts.length > 0 ? [{ text: message.text, parts }] : []
+    }),
     [queuedMessages],
   )
   return (
@@ -110,6 +122,21 @@ export function RootThreadControlArea({
  * 只在全局待处理页与工具状态行（W3 切片）呈现。过滤后仍保留 `loadMore`，避免首页只有环境等待时
  * 把后续页的人工等待一并藏起来。
  */
+function composerParts(contents: DialogueContent[]) {
+  return contents.flatMap((content) => {
+    if (content.type === 'text') {
+      return [createTextPart(content.text)]
+    }
+    return content.attachment.blobId
+      ? [createResourcePart(
+        content.attachment.blobId,
+        content.attachment.name,
+        content.attachment.preview,
+      )]
+      : []
+  })
+}
+
 function RootInteractionList({ rootThreadId }: { rootThreadId: string }) {
   const { t } = useI18n()
   const {

@@ -1,11 +1,13 @@
 import { asRecord, getRecordList } from '@/features/thread/runtime/thread-timeline/payload-json'
-import { getString } from '@/shared/lib/value'
+import { contentText, toDialogueContents } from '@/features/thread/runtime/thread-timeline/content-utils'
+import type { DialogueContent } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { HarnessThreadCommandDTO } from '@/shared/api/generated/contracts'
 
 export interface QueuedCustomMessage {
   id: string
   sequence: string
   text: string
+  contents: DialogueContent[]
 }
 
 /**
@@ -24,31 +26,26 @@ export function extractQueuedCustomMessages(
     if (command.state !== 'QUEUED' || command.type !== 'CUSTOM_MESSAGE') {
       continue
     }
-    const text = extractCustomMessageText(command.payload)
-    if (!text.trim()) {
+    const { text, contents } = extractCustomMessage(command.payload)
+    if (contents.length === 0) {
       continue
     }
     result.push({
       id: command.idempotencyKey,
       sequence: command.sequence,
       text,
+      contents,
     })
   }
   return result
 }
 
-function extractCustomMessageText(payloadValue: unknown): string {
+function extractCustomMessage(payloadValue: unknown): { text: string; contents: DialogueContent[] } {
   const payload = asRecord(payloadValue)
   const message = asRecord(payload.message)
-  const contents = getRecordList(message.contents)
-  const textParts: string[] = []
-  for (const item of contents) {
-    if (item.type === 'text') {
-      const text = getString(item.text)
-      if (text) {
-        textParts.push(text)
-      }
-    }
+  const rawContents = getRecordList(message.contents)
+  return {
+    text: rawContents.map(contentText).filter(Boolean).join('\n'),
+    contents: toDialogueContents(rawContents),
   }
-  return textParts.join('\n')
 }

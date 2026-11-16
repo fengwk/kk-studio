@@ -10,6 +10,7 @@ const IDE_FAILURE_REASONS = [
   'CLAIM_CONFLICT',
   'IDE_CAPACITY_EXCEEDED',
   'IDE_OUTCOME_UNKNOWN',
+  'IDE_CONTROL_UNAVAILABLE',
   'IDE_CLEANUP_FAILED',
 ] as const
 
@@ -26,6 +27,10 @@ export function ideFailureReason(error: unknown): IdeFailureReason | null {
 
 /** 结果可能已执行：只有结构化 IDE_OUTCOME_UNKNOWN、超时、网络错误或 5xx/无状态。 */
 export function isUnknownIdeFailure(error: unknown): boolean {
+  if (error instanceof ApiError
+    && (error.reason === 'IDE_CONTROL_UNAVAILABLE' || error.reason === 'IDE_UNAVAILABLE')) {
+    return false
+  }
   if (ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN') {
     return true
   }
@@ -74,6 +79,8 @@ export function failureStatus(error: unknown): {
     case 'STALE_BINDING':
     case 'IDE_OUTCOME_UNKNOWN':
       return { status: 'reconciling' }
+    case 'IDE_CONTROL_UNAVAILABLE':
+      return { status: 'error', message: safeIdeError(error) || 'IDE_CONTROL_UNAVAILABLE' }
     case 'IDE_CLEANUP_FAILED':
       return { status: 'error', message: safeIdeError(error) || 'IDE_CLEANUP_FAILED' }
     case 'CLAIM_CONFLICT':

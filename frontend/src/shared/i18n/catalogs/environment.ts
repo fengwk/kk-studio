@@ -126,13 +126,21 @@ export const environmentCatalog = {
     'en-US': 'The IDE binding changed, so the result was not applied.',
     'zh-CN': 'IDE 绑定已变化，结果未应用。',
   },
-  'ai.ide.dirtyDiscardTitle': {
+  'ai.ide.forceCloseTitle': {
     'en-US': 'Force close IDE view?',
     'zh-CN': '强制关闭 IDE 视图？',
   },
-  'ai.ide.dirtyDiscardMessage': {
-    'en-US': 'The IDE state is unknown or unreachable. Force closing may discard unsaved changes. Continue?',
-    'zh-CN': 'IDE 状态未知或无法连接。强制关闭可能丢失未保存的修改，是否继续？',
+  'ai.ide.forceCloseUnknownMessage': {
+    'en-US': 'The close result is unknown. Force closing may discard unsaved changes. Continue?',
+    'zh-CN': '关闭结果未知。强制关闭可能丢失未保存的修改，是否继续？',
+  },
+  'ai.ide.forceCloseControlUnavailableMessage': {
+    'en-US': 'The IDE control channel was unavailable, so the close was not sent. Force closing may discard unsaved changes. Continue?',
+    'zh-CN': 'IDE 控制通道不可用，关闭请求未发送。强制关闭可能丢失未保存的修改，是否继续？',
+  },
+  'ai.ide.closeControlUnavailable': {
+    'en-US': 'The IDE control channel is unavailable; the close request was not sent.',
+    'zh-CN': 'IDE 控制通道不可用，关闭请求未发送。',
   },
   'ai.ide.discardAndClose': {
     'en-US': 'Force Close',

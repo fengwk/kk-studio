@@ -3,6 +3,7 @@ import { ThreadWorkingStatus } from '@/features/thread/runtime/thread-panel/Thre
 import type { QueuedThreadMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import type { QueuedCustomMessage } from '@/features/thread/runtime/state/queued-custom-messages'
 import { useI18n } from '@/shared/i18n'
+import { ResourceAttachmentChip } from '@/features/thread/runtime/thread-panel/messages/ResourceAttachmentChip'
 import '@/features/thread/runtime/thread-panel/thread-widgets.css'
 
 /**
@@ -58,7 +59,11 @@ export function ThreadWidgetStack({
           {queuedMessages.map((message) => (
             <li key={message.idempotencyKey} className="thread-input-queue-item">
               <span className="thread-input-queue-label">{t('ai.runtime.thread.queued')}</span>
-              <span className="thread-input-queue-content">{message.text}</span>
+              <span className="thread-input-queue-content">
+                {(message.contents ?? [{ type: 'text', text: message.text }]).map((content, index) => content.type === 'text'
+                  ? <span key={index}>{content.text}</span>
+                  : <ResourceAttachmentChip key={index} attachment={content.attachment} />)}
+              </span>
             </li>
           ))}
         </ol>
@@ -74,7 +79,11 @@ export function ThreadWidgetStack({
               <span className="thread-input-queue-label">
                 {t('ai.runtime.thread.queuedCustomMessage')}
               </span>
-              <span className="thread-input-queue-content">{message.text}</span>
+              <span className="thread-input-queue-content">
+                {(message.contents ?? [{ type: 'text', text: message.text }]).map((content, index) => content.type === 'text'
+                  ? <span key={index}>{content.text}</span>
+                  : <ResourceAttachmentChip key={index} attachment={content.attachment} />)}
+              </span>
             </li>
           ))}
         </ol>

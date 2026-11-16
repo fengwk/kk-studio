@@ -30,6 +30,7 @@ import {
 } from '@/features/thread/runtime/thread-panel/ThreadComposer'
 import {
   createAttachmentPart,
+  createResourcePart,
   createTextPart,
   partsToMessageContents,
   slashQueryOf,
@@ -41,6 +42,7 @@ import {
   THREAD_COMMANDS,
   type ThreadCommand,
 } from '@/features/thread/runtime/thread-panel/thread-commands'
+import type { ComposerHistoryMessage } from '@/features/thread/runtime/thread-panel/thread-composer-contract'
 import { firstEnabledCommandIndex } from '@/features/thread/runtime/thread-panel/thread-command-navigation'
 import { storeUnknownUploads } from '@/features/thread/composer/composer-draft'
 import type { StorageService } from '@/features/thread/composer'
@@ -78,8 +80,8 @@ function InteractionComposer({
   onSubmit: () => void
   onCommand: (command: ThreadCommand) => void
   initial?: ComposerPart[]
-  historicalUserMessages?: readonly string[]
-  queuedUserMessages?: readonly string[]
+  historicalUserMessages?: readonly (string | ComposerHistoryMessage)[]
+  queuedUserMessages?: readonly (string | ComposerHistoryMessage)[]
   focusOnEscape?: boolean
   settings?: ThreadComposerSettingsInput
 }) {
@@ -792,6 +794,33 @@ describe('ThreadComposer interactions', () => {
     expect(editor.textContent).toBe('current draft')
     await user.keyboard('{ArrowDown}')
     expect(editor.textContent).toBe('current draft')
+  })
+
+  it('recalls a queued resource-only message and resubmits its stable resource identity', async () => {
+    const user = userEvent.setup()
+    const onSubmit = vi.fn()
+    const blobId = 'f2000000-0000-4000-8000-000000000001'
+    render(
+      <InteractionComposer
+        queuedUserMessages={[{
+          text: '',
+          parts: [createResourcePart(blobId, 'queued.png')],
+        }]}
+        onSubmit={onSubmit}
+        onCommand={vi.fn()}
+      />,
+    )
+    const editor = screen.getByLabelText('给 AI 发送消息')
+    await user.click(editor)
+    await user.keyboard('{ArrowUp}')
+    expect(editor.querySelector('[data-part-type="resource"]')).not.toBeNull()
+
+    await user.keyboard('{Enter}')
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled())
+    const submitted = onSubmit.mock.calls[0]?.[0] as ComposerPart[]
+    expect(partsToMessageContents(submitted)).toEqual([
+      { type: 'RESOURCE', blobId, name: 'queued.png' },
+    ])
   })
 
   it('promotes an edited recalled message to the new draft slot', async () => {

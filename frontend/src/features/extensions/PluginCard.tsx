@@ -63,7 +63,7 @@ export function PluginCard({
 
   // 配置版本不同或存在 applicationError 即为待应用状态，不能展示为全局已生效
   const isPendingApplication =
-    plugin.applicationError !== null ||
+    plugin.applicationError != null ||
     plugin.configuration.version !== plugin.appliedVersion
 
   // 能力来自实例 metadata；未应用或坐标缺失时不提供可提交的检查坐标。

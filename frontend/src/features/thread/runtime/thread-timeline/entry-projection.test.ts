@@ -6,7 +6,7 @@ import {
 import type { DialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { getLocale, LOCALE_STORAGE_KEY, setLocale } from '@/shared/i18n'
 import { createBuiltinExecution } from '@/shared/api/contracts/ai-runtime'
-import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
+import { ENTRY_TYPE_VALUES, type HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
 function projectionContext(): EntryProjectionContext {
   return { pendingTurnSummary: null, lastSettings: null }
@@ -123,5 +123,35 @@ describe('TURN_START executedSelection fallback projection', () => {
   it('stays silent when the turn ran on the thread model', () => {
     expect(project(turnStart(null))).toEqual([])
     expect(project(turnStart({ driver: 'builtin', settings: {} }))).toEqual([])
+  })
+})
+
+describe('authoritative EntryType coverage', () => {
+  it.each(ENTRY_TYPE_VALUES)('%s has an explicit dialogue projection', (entryType) => {
+    const payload: Record<string, unknown> = {
+      message: { role: 'USER', contents: [{ type: 'text', text: 'input' }] },
+    }
+    if (entryType === 'MODEL_ATTEMPT_FAILURE') {
+      Object.assign(payload, {
+        attempt: { attempt: 1, sequence: 0, text: '', thinking: '' },
+        error: { code: 'TRANSIENT', message: 'failed' },
+        retryAt: '2026-01-01T00:00:05Z',
+      })
+    }
+    const messages: DialogueMessage[] = []
+    projectDurableEntry({
+      entryId: `entry-${entryType}`,
+      sessionId: 'session-1',
+      parentEntryId: null,
+      entryType,
+      payload,
+      createdAt: 1782864000000,
+      usageCost: null,
+    }, messages, new Map(), projectionContext())
+
+    expect(messages.some((message) => message.role === 'entry' && message.kind === 'unknown_entry')).toBe(false)
+    if (entryType === 'SYSTEM' || entryType === 'NATIVE_COMPACTION') {
+      expect(messages).toEqual([])
+    }
   })
 })

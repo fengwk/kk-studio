@@ -23,7 +23,8 @@ import './ide-overlay-panel.css'
 
 export interface IdeCloseResult {
   ok: boolean
-  dirty: boolean
+  /** 强制关闭前需要用户确认；不代表已确认存在未保存修改。 */
+  requiresForceConfirmation: boolean
   message?: string
 }
 
@@ -66,6 +67,7 @@ const COMMAND_MESSAGES: Record<string, TranslationKey> = {
   'directory-failed': 'ai.ide.changeDirectoryFailed',
   'binding-changed': 'ai.ide.bindingChanged',
   'close-result-unknown': 'ai.ide.commandResultUnknown',
+  'close-control-unavailable': 'ai.ide.closeControlUnavailable',
   'close-failed': 'ai.ide.error',
 }
 
@@ -102,7 +104,8 @@ export function IdeOverlayPanel({
   const [directoryPending, setDirectoryPending] = useState(false)
   const [directoryError, setDirectoryError] = useState<string | null>(null)
   const [recentDirectories, setRecentDirectories] = useState<string[]>([])
-  const [dirtyCloseEnvironmentId, setDirtyCloseEnvironmentId] = useState<string | null>(null)
+  const [forceCloseEnvironmentId, setForceCloseEnvironmentId] = useState<string | null>(null)
+  const [forceCloseReason, setForceCloseReason] = useState<'unknown' | 'control-unavailable' | null>(null)
   const [discarding, setDiscarding] = useState(false)
   const lastSelectedRef = useRef(selectedEnvironmentId)
   const viewsRef = useRef(views)
@@ -121,7 +124,8 @@ export function IdeOverlayPanel({
     setDirectoryError(null)
     setRecentDirectories([])
     setDirectoryPending(false)
-    setDirtyCloseEnvironmentId(null)
+    setForceCloseEnvironmentId(null)
+    setForceCloseReason(null)
   }, [selectedEnvironmentId])
 
   const selectedView = selectedEnvironmentId == null
@@ -179,36 +183,41 @@ export function IdeOverlayPanel({
     const view = viewsRef.current[selectedEnvironmentId]
     void onCloseEnvironment(selectedEnvironmentId, false).then((result) => {
       const current = viewsRef.current[selectedEnvironmentId]
-      if (!result.ok && result.dirty && view?.bindingEpoch != null
+      if (!result.ok && result.requiresForceConfirmation && view?.bindingEpoch != null
         && current?.viewId === view.viewId && current.bindingEpoch === view.bindingEpoch
         && lastSelectedRef.current === selectedEnvironmentId) {
         forceBindingRef.current = { viewId: view.viewId, bindingEpoch: view.bindingEpoch }
-        setDirtyCloseEnvironmentId(selectedEnvironmentId)
+        setForceCloseEnvironmentId(selectedEnvironmentId)
+        setForceCloseReason(result.message === 'close-control-unavailable'
+          ? 'control-unavailable'
+          : 'unknown')
       }
     })
   }, [onCloseEnvironment, selectedEnvironmentId])
 
   const handleDiscardClose = useCallback(async () => {
-    if (dirtyCloseEnvironmentId == null || discarding) {
+    if (forceCloseEnvironmentId == null || discarding) {
       return
     }
-    const current = viewsRef.current[dirtyCloseEnvironmentId]
+    const current = viewsRef.current[forceCloseEnvironmentId]
     if (current?.viewId !== forceBindingRef.current?.viewId
       || current?.bindingEpoch !== forceBindingRef.current?.bindingEpoch) {
-      setDirtyCloseEnvironmentId(null)
+      setForceCloseEnvironmentId(null)
+      setForceCloseReason(null)
       return
     }
     setDiscarding(true)
     try {
-      const result = await onCloseEnvironment(dirtyCloseEnvironmentId, true)
-      if (!result.ok && result.dirty) {
+      const result = await onCloseEnvironment(forceCloseEnvironmentId, true)
+      if (!result.ok && result.requiresForceConfirmation) {
         return
       }
-      setDirtyCloseEnvironmentId(null)
+      setForceCloseEnvironmentId(null)
+      setForceCloseReason(null)
     } finally {
       setDiscarding(false)
     }
-  }, [dirtyCloseEnvironmentId, discarding, onCloseEnvironment])
+  }, [forceCloseEnvironmentId, discarding, onCloseEnvironment])
 
   const handleDirectoryConfirm = useCallback(async (directory: string) => {
     const environmentId = selectedEnvironmentId
@@ -248,14 +257,14 @@ export function IdeOverlayPanel({
       && !event.nativeEvent.isComposing
       && event.keyCode !== 229
     ) {
-      if (directoryOpen || dirtyCloseEnvironmentId != null) {
+      if (directoryOpen || forceCloseEnvironmentId != null) {
         return
       }
       event.preventDefault()
       event.stopPropagation()
       onCollapse()
     }
-  }, [directoryOpen, dirtyCloseEnvironmentId, onCollapse])
+  }, [directoryOpen, forceCloseEnvironmentId, onCollapse])
 
   const terminalError = selectedView?.terminalError
   const closeError = selectedView?.closeError
@@ -531,12 +540,14 @@ export function IdeOverlayPanel({
         />
       ) : null}
 
-      {dirtyCloseEnvironmentId != null ? (
+      {forceCloseEnvironmentId != null ? (
         <ConfirmActionModal
           className="ide-confirm-modal"
           modal={{
-            title: t('ai.ide.dirtyDiscardTitle'),
-            description: t('ai.ide.dirtyDiscardMessage'),
+            title: t('ai.ide.forceCloseTitle'),
+            description: t(forceCloseReason === 'control-unavailable'
+              ? 'ai.ide.forceCloseControlUnavailableMessage'
+              : 'ai.ide.forceCloseUnknownMessage'),
             confirmLabel: t('ai.ide.discardAndClose'),
             tone: 'danger',
             onConfirm: () => { void handleDiscardClose() },
@@ -544,7 +555,8 @@ export function IdeOverlayPanel({
           pending={discarding}
           onClose={() => {
             if (!discarding) {
-              setDirtyCloseEnvironmentId(null)
+              setForceCloseEnvironmentId(null)
+              setForceCloseReason(null)
             }
           }}
         />

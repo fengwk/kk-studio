@@ -338,6 +338,10 @@ describe('IdePanelProvider recovery state machine', () => {
 
     await user.click(screen.getByTestId('toggle-a'))
     expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
+    // Returning to Chat re-associates the environment without reopening a user-collapsed panel.
+    await user.click(screen.getByTestId('activate-a'))
+    expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
+    expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
     await user.click(screen.getByTestId('toggle-a'))
     expect(screen.getByTestId('ide-overlay-panel')).not.toHaveAttribute('hidden')
     expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()

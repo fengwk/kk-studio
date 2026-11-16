@@ -4,11 +4,12 @@ import {
   partsKey,
   type ComposerPart,
 } from '@/features/thread/composer/composer-parts'
+import type { ComposerHistoryMessage } from '@/features/thread/runtime/thread-panel/thread-composer-contract'
 
 interface ComposerMessageHistoryOptions {
   parts: ComposerPart[]
-  historicalUserMessages: readonly string[]
-  queuedUserMessages: readonly string[]
+  historicalUserMessages: readonly (string | ComposerHistoryMessage)[]
+  queuedUserMessages: readonly (string | ComposerHistoryMessage)[]
   onPartsChange: (parts: ComposerPart[]) => void
   onHistoryPartsChange: (parts: ComposerPart[]) => void
 }
@@ -28,7 +29,10 @@ export function useComposerMessageHistory({
 }: ComposerMessageHistoryOptions) {
   const messages = useMemo(
     () => [...historicalUserMessages, ...queuedUserMessages]
-      .filter((message) => message.length > 0),
+      .map((message) => typeof message === 'string'
+        ? { text: message, parts: [createTextPart(message)] }
+        : message)
+      .filter((message) => message.text.length > 0 || message.parts.some((part) => part.type !== 'text')),
     [historicalUserMessages, queuedUserMessages],
   )
   const messagesRef = useRef(messages)
@@ -101,7 +105,7 @@ export function useComposerMessageHistory({
 
     const next = nextIndex === scratchIndex
       ? scratchRef.current
-      : [createTextPart(currentMessages[nextIndex] ?? '')]
+      : currentMessages[nextIndex]?.parts ?? [createTextPart('')]
     cursorRef.current = nextIndex
     const nextKey = partsKey(next)
     if (nextKey !== partsKey(partsRef.current)) {

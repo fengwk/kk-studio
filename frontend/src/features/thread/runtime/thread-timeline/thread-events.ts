@@ -361,7 +361,9 @@ function withRawPayload(
 ): ThreadEventRecord {
   return {
     ...record,
-    summary: compactJson(entry.payload),
+    summary: entry.entryType === 'SYSTEM' || entry.entryType === 'NATIVE_COMPACTION'
+      ? record.summary
+      : compactJson(entry.payload),
     rawJson: prettyJson(entry.payload),
   }
 }

@@ -1,9 +1,22 @@
 import { getString } from '@/shared/lib/value'
 import type {
+  DialogueContent,
   ToolAttachment,
   ToolAttachmentType,
   ToolContent,
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+
+export function toDialogueContents(
+  contents: readonly Record<string, unknown>[],
+): DialogueContent[] {
+  return contents.flatMap<DialogueContent>((content) => {
+    const text = contentText(content)
+    if (text.trim()) {
+      return [{ type: 'text', text }]
+    }
+    return toResourceAttachment(content).map((attachment) => ({ type: 'resource', attachment }))
+  })
+}
 
 export function contentText(content: Record<string, unknown>): string {
   const type = getString(content.type)

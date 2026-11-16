@@ -241,7 +241,7 @@ export function IdePanelProvider({
       // Chat 选择不是打开操作；不把未打开的环境写成已打开面板的选择。
       return
     }
-    commitPresentation(ensureOpened(current, environment.id, true), 'both')
+    commitPresentation(ensureOpened(current, environment.id, current.panelVisible), 'both')
     claimReconciliation.startOrFocus(environment.id, environment, 'files')
   }
 

@@ -2294,4 +2294,44 @@ export const chatCatalog = {
     'en-US': 'This resource cannot be previewed inline',
     'zh-CN': '此资源无法内联预览',
   },
+  'ai.runtime.event.system.baseline': {
+    'en-US': 'Baseline · {{sections}}',
+    'zh-CN': '基线 · {{sections}}',
+  },
+  'ai.runtime.event.system.sectionUpdated': {
+    'en-US': 'Section updated: {{name}}',
+    'zh-CN': '分区已更新：{{name}}',
+  },
+  'ai.runtime.event.system.sectionRemoved': {
+    'en-US': 'Section removed: {{name}}',
+    'zh-CN': '分区已移除：{{name}}',
+  },
+  'ai.runtime.event.system.toolAdded': {
+    'en-US': 'Tool added: {{name}}',
+    'zh-CN': '工具已添加：{{name}}',
+  },
+  'ai.runtime.event.system.toolRemoved': {
+    'en-US': 'Tool removed: {{name}}',
+    'zh-CN': '工具已移除：{{name}}',
+  },
+  'ai.runtime.event.system.hostedToolAdded': {
+    'en-US': 'Hosted tool added: {{name}}',
+    'zh-CN': '托管工具已添加：{{name}}',
+  },
+  'ai.runtime.event.system.hostedToolRemoved': {
+    'en-US': 'Hosted tool removed: {{name}}',
+    'zh-CN': '托管工具已移除：{{name}}',
+  },
+  'ai.runtime.event.nativeCompaction.tokens': {
+    'en-US': 'Tokens {{before}} → {{after}}',
+    'zh-CN': 'Tokens {{before}} → {{after}}',
+  },
+  'ai.runtime.event.nativeCompaction.dropped': {
+    'en-US': 'Dropped {{count}} tokens',
+    'zh-CN': '已丢弃 {{count}} tokens',
+  },
+  'ai.runtime.event.nativeCompaction.duration': {
+    'en-US': '{{duration}} ms',
+    'zh-CN': '{{duration}} 毫秒',
+  },
 } satisfies LocaleCatalog

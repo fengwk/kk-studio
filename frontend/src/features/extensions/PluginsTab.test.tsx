@@ -227,6 +227,28 @@ describe('PluginsTab', () => {
     ).toBeInTheDocument()
   })
 
+  it('treats an omitted applicationError as an applied plugin when versions match', async () => {
+    const wirePlugin = samplePlugin()
+    delete wirePlugin.applicationError
+    vi.mocked(client.listPlugins).mockResolvedValue([wirePlugin])
+    renderTab()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('plugin-app-status-minimax-mavis')).toHaveTextContent('已生效')
+    })
+    expect(screen.queryByTestId('plugin-app-error-minimax-mavis')).not.toBeInTheDocument()
+  })
+
+  it('treats an explicit null applicationError as applied when versions match', async () => {
+    vi.mocked(client.listPlugins).mockResolvedValue([samplePlugin({ applicationError: null })])
+    renderTab()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('plugin-app-status-minimax-mavis')).toHaveTextContent('已生效')
+    })
+    expect(screen.queryByTestId('plugin-app-error-minimax-mavis')).not.toBeInTheDocument()
+  })
+
   it('shows pending application warning when coordinates differ or applicationError is present', async () => {
     vi.mocked(client.listPlugins).mockResolvedValue([
       samplePlugin({

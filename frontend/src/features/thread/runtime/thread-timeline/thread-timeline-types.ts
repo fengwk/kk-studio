@@ -311,6 +311,8 @@ export interface QueuedThreadMessage {
   idempotencyKey: string
   role: 'user'
   text: string
+  /** 原始文本与资源的有序展示投影；资源保留 blobId，不提前解析 URL。 */
+  contents?: DialogueContent[]
   sequence: string
 }
 

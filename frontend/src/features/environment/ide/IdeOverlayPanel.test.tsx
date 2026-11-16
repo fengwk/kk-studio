@@ -56,7 +56,7 @@ function baseProps(overrides: Partial<IdeOverlayPanelProps> = {}): IdeOverlayPan
     connectionState: { status: 'ready', reason: null },
     onSelectEnvironment: vi.fn(),
     onCollapse: vi.fn(),
-    onCloseEnvironment: vi.fn().mockResolvedValue({ ok: true, dirty: false }),
+    onCloseEnvironment: vi.fn().mockResolvedValue({ ok: true, requiresForceConfirmation: false }),
     onDismissCloseError: vi.fn(),
     onChangeDirectory: vi.fn().mockResolvedValue({ ok: true }),
     onOpenTerminal: vi.fn(),
@@ -207,16 +207,31 @@ describe('IdeOverlayPanel', () => {
     }
   })
 
+  it('distinguishes unknown and unavailable control in explicit force-close confirmation', async () => {
+    const user = userEvent.setup()
+    const onCloseEnvironment = vi.fn().mockResolvedValueOnce({
+      ok: false,
+      requiresForceConfirmation: true,
+      message: 'close-control-unavailable',
+    })
+    render(<IdeOverlayPanel {...baseProps({ onCloseEnvironment })} />)
+
+    await user.click(screen.getByTestId('ide-close-btn'))
+    expect(await screen.findByRole('alertdialog')).toHaveTextContent('IDE 控制通道不可用，关闭请求未发送。')
+    expect(onCloseEnvironment).toHaveBeenCalledWith(ENV_A, false)
+  })
+
   it('keeps the iframe after an unknown close and only forces from explicit confirmation', async () => {
     const user = userEvent.setup()
     const onCloseEnvironment = vi.fn()
-      .mockResolvedValueOnce({ ok: false, dirty: true })
-      .mockResolvedValueOnce({ ok: true, dirty: false })
+      .mockResolvedValueOnce({ ok: false, requiresForceConfirmation: true })
+      .mockResolvedValueOnce({ ok: true, requiresForceConfirmation: false })
     render(<IdeOverlayPanel {...baseProps({ onCloseEnvironment })} />)
 
     await user.click(screen.getByTestId('ide-close-btn'))
 
     const dialog = await screen.findByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
+    expect(dialog).toHaveTextContent('关闭结果未知。')
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
     expect(onCloseEnvironment).toHaveBeenNthCalledWith(1, ENV_A, false)
 
