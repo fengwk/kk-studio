@@ -38,10 +38,7 @@ const TINY_IMAGE = readFileSync(
   ),
 )
 const TINY_VIDEO = readFileSync(
-  path.join(
-    REPO_ROOT,
-    'apps/canvas/runtime/src/main/resources/fun/fengwk/kkstudio/canvas/infra/function/fake/tiny.mp4',
-  ),
+  path.join(REPO_ROOT, 'scripts/dev/verify/e2e/ui/fixtures/tiny.mp4'),
 )
 
 /**
