@@ -59,6 +59,11 @@ public final class ModelGroupConfigCodec {
 
   public String encode(ModelGroupConfigDTO group) {
     validateShape(group);
+    return encodeValidated(group);
+  }
+
+  /** 序列化已通过 {@link #validateShape} 并就地规范化的组配置，不再重复校验结构。 */
+  String encodeValidated(ModelGroupConfigDTO group) {
     try {
       List<StoredMember> members =
           group.getMembers().stream()
@@ -74,9 +79,10 @@ public final class ModelGroupConfigCodec {
   /**
    * 组结构校验：有序成员非空、引用字段 canonical、同引用不重复；状态码 400–599 且不重复；冷却为非负整数秒。
    *
-   * <p>成员是否真实存在、是否为单 MODEL 以及 Variant 是否存在由写入服务在持锁事务内另行校验。
+   * <p>成员是否真实存在、是否为单 MODEL 以及 Variant 是否存在由写入服务在持锁事务内另行校验。 写入服务在成员加锁前调用本方法，并用 {@link
+   * #encodeValidated} 序列化已规范化的结果。
    */
-  private void validateShape(ModelGroupConfigDTO group) {
+  void validateShape(ModelGroupConfigDTO group) {
     if (group == null) {
       throw DomainException.validation("model", "group config is required");
     }

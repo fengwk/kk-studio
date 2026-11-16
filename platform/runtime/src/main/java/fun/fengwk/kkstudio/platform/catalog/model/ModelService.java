@@ -108,22 +108,20 @@ public class ModelService {
     }
     String name = canonicalName(modelName);
     Model snapshot = repository.getByName(name);
-    Mutation mutation = null;
+    boolean groupShapeValidated = false;
     if (snapshot != null
         && snapshot.kind() == ModelKind.GROUP
-        && updateDTO instanceof ModelGroupUpdateDTO groupUpdate) {
-      // 组配置在这里校验并编码一次：成员锁与引用校验复用同一份已规范化结果。
-      mutation =
-          groupMutation(
-              groupUpdate.getName(), groupUpdate.getDescription(), groupUpdate.getGroup());
+        && updateDTO instanceof ModelGroupUpdateDTO groupUpdate
+        && groupUpdate.getGroup() != null) {
       // 先锁成员再锁组行：成员改名/删除走同一模型行锁，避免组配置引用已删除的成员或 Variant。
-      lockMembers(snapshot, mutation.group());
+      // 结构只在这里校验一次，写入复用同一份已规范化结果；名称规范化仍留在版本检查之后。
+      groupCodec.validateShape(groupUpdate.getGroup());
+      lockMembers(snapshot, groupUpdate.getGroup());
+      groupShapeValidated = true;
     }
     Model current = requireModelForUpdate(name);
     ensureExpectedVersion(current, expected);
-    if (mutation == null) {
-      mutation = mutation(updateDTO);
-    }
+    Mutation mutation = mutation(updateDTO, groupShapeValidated);
     if (current.kind() != mutation.kind()) {
       throw DomainException.validation(RESOURCE, "model type cannot be changed");
     }
@@ -426,11 +424,11 @@ public class ModelService {
           single.getModelId(),
           single.getConfig());
       case ModelGroupCreateDTO group -> groupMutation(
-          group.getName(), group.getDescription(), group.getGroup());
+          group.getName(), group.getDescription(), group.getGroup(), false);
     };
   }
 
-  private Mutation mutation(ModelUpdateDTO properties) {
+  private Mutation mutation(ModelUpdateDTO properties, boolean groupShapeValidated) {
     if (properties == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " body must not be null");
     }
@@ -442,7 +440,7 @@ public class ModelService {
           single.getModelId(),
           single.getConfig());
       case ModelGroupUpdateDTO group -> groupMutation(
-          group.getName(), group.getDescription(), group.getGroup());
+          group.getName(), group.getDescription(), group.getGroup(), groupShapeValidated);
     };
   }
 
@@ -490,13 +488,16 @@ public class ModelService {
         null);
   }
 
-  private Mutation groupMutation(String rawName, String rawDescription, ModelGroupConfigDTO group) {
+  /** 组写入内容。{@code shapeValidated} 表示结构已在成员加锁前校验并就地规范化，这里只编码，不重复校验。 */
+  private Mutation groupMutation(
+      String rawName, String rawDescription, ModelGroupConfigDTO group, boolean shapeValidated) {
     String name = canonicalName(rawName);
     editableSupport.validateMaxLength(RESOURCE, "name", name, NAME_MAX_LENGTH);
     if (group == null) {
       throw DomainException.validation(RESOURCE, RESOURCE + " group must not be null");
     }
-    String groupConfigJson = groupCodec.encode(group);
+    String groupConfigJson =
+        shapeValidated ? groupCodec.encodeValidated(group) : groupCodec.encode(group);
     return new Mutation(
         name,
         ModelKind.GROUP,
