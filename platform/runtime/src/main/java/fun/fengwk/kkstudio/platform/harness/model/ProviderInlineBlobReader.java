@@ -156,7 +156,7 @@ final class ProviderInlineBlobReader {
     return inline;
   }
 
-  /** 已缓存的 data URI 条目数（测试与诊断用；权重淘汰可能滞后于写入，使用前可先 {@link #cleanUp()}）。 */
+  /** 测试观测点：已缓存的 data URI 条目数（权重淘汰可能滞后于写入，使用前可先 {@link #cleanUp()}）。 */
   long cachedEntryCount() {
     return cache.estimatedSize();
   }
@@ -166,7 +166,7 @@ final class ProviderInlineBlobReader {
     return limits;
   }
 
-  /** 立即执行 Caffeine 的挂起维护（测试与诊断用），让权重淘汰结果可观测。 */
+  /** 测试观测点：立即执行 Caffeine 的挂起维护，让权重淘汰结果可观测。 */
   void cleanUp() {
     cache.cleanUp();
   }

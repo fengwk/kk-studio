@@ -218,9 +218,8 @@ final class PostgresqlHarnessLocks {
     return lockedTrees.contains(root);
   }
 
-  /** 验证当前事务是否允许执行 claimNextWork：必须先达到 WORK 锁阶梯，且在此之前不能持有任何其他 Work 锁。 */
+  /** 验证当前事务是否允许执行 claimNextWork：claim 必须是事务中的首个 Work 锁。 */
   void requireCanClaimWork() {
-    requireCanLockRank(LockRank.WORK);
     if (highestWorkTarget != null) {
       throw new IllegalStateException(
           "claimNextWork must be the first Work lock acquisition in a transaction");

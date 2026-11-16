@@ -305,9 +305,6 @@ final class PostgresqlToolStore implements ToolStore {
         interactionRoots.add(tx.executionRootOfToolInvocation(toolInvocationId));
       }
     }
-    if (copied.isEmpty()) {
-      return 0;
-    }
     for (UUID toolInvocationId : copied) {
       int deleted =
           tx.updateJdbc("delete from harness_tool_invocation where id = ?", toolInvocationId);
