@@ -23,10 +23,7 @@ func (r *Runtime) handleWithIDEContext(ctx, ideCtx context.Context, e *protocol.
 	case protocol.MessageType_ENVIRONMENT_CONFIG:
 		return r.handleEnvironmentConfig(ctx, e)
 	case protocol.MessageType_INVOKE:
-		if !ready {
-			return r.sendBoundError(e.InvocationId, "INVOKE requires a READY bound connection")
-		}
-		return r.handleInvoke(ctx, e)
+		return r.handleInvoke(ctx, e, ready)
 	case protocol.MessageType_CANCEL:
 		return r.handleCancel(e)
 	case protocol.MessageType_RECOVER:

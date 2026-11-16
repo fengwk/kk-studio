@@ -20,14 +20,20 @@ type runningCall struct {
 	progressError  string
 }
 
-func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope) error {
+func (r *Runtime) handleInvoke(ctx context.Context, e *protocol.Envelope, readiness ...bool) error {
 	if e.InvocationId == nil || *e.InvocationId == "" {
 		return r.sendError(nil, "invocationId is required")
 	}
 	id := *e.InvocationId
 	start := r.journal.Start(id)
+	if start.Err != nil {
+		return fmt.Errorf("invocation journal could not record receipt: %w", start.Err)
+	}
 	if !start.Created {
 		return r.replay(start.Entry)
+	}
+	if len(readiness) > 0 && !readiness[0] {
+		return r.rejectCall(id, "INVOKE requires a READY bound connection")
 	}
 	call, executor, admitted, err := r.admitInvoke(id, e)
 	if !admitted {
@@ -353,16 +359,18 @@ func (r *Runtime) handleRecover(e *protocol.Envelope) error {
 	r.mu.RUnlock()
 	entry, ok := r.journal.Get(id)
 	if !ready {
-		if !ok || entry.State != InvocationRunning {
-			return nil
+		if ok && entry.State == InvocationRunning {
+			r.callsMu.Lock()
+			_, active := r.calls[id]
+			r.callsMu.Unlock()
+			if active {
+				return r.replay(entry)
+			}
 		}
-		r.callsMu.Lock()
-		_, active := r.calls[id]
-		r.callsMu.Unlock()
-		if !active {
-			return nil
+		if err := r.sendBoundError(nil, "RECOVER requires a READY bound connection; reconnect and retry recovery"); err != nil {
+			return err
 		}
-		return r.replay(entry)
+		return errors.New("RECOVER requires a READY bound connection")
 	}
 	if !ok {
 		return r.sendRecoverNotFound(id)
@@ -371,6 +379,15 @@ func (r *Runtime) handleRecover(e *protocol.Envelope) error {
 }
 
 func (r *Runtime) replay(entry JournalEntry) error {
+	if entry.Recovered && (entry.State == InvocationRunning || len(entry.Terminal) == 0) {
+		if err := r.sendRecoverNotFound(entry.InvocationID); err != nil {
+			return err
+		}
+		if entry.Exited {
+			return r.sendExecutionExited(entry.InvocationID)
+		}
+		return nil
+	}
 	if entry.State == InvocationRunning {
 		return r.sendStarted(entry.InvocationID, true)
 	}
@@ -388,16 +405,22 @@ func (r *Runtime) replay(entry JournalEntry) error {
 }
 
 func (r *Runtime) rejectCall(id, msg string) error {
-	frame := &protocol.Envelope{MessageType: protocol.MessageType_FAILED, InvocationId: stringPtr(id), Payload: &protocol.Envelope_Failed{Failed: &protocol.Failed{Message: stringPtr(msg)}}}
-	sendErr := r.finish(id, protocol.MessageType_FAILED, frame.Payload, InvocationFailed)
-	if r.journal.ConfirmExit(id) {
-		exitErr := r.sendExecutionExited(id)
-		if sendErr != nil {
-			return sendErr
-		}
-		return exitErr
+	frame := &protocol.Envelope{MessageType: protocol.MessageType_FAILED, EnvironmentId: stringPtr(r.options.EnvironmentID), InvocationId: stringPtr(id), Payload: &protocol.Envelope_Failed{Failed: &protocol.Failed{Message: stringPtr(msg)}}}
+	data, err := proto.Marshal(frame)
+	if err != nil {
+		return err
 	}
-	return sendErr
+	completed, err := r.journal.CompleteWithExitDurable(id, InvocationFailed, data, true)
+	if err != nil {
+		return err
+	}
+	if !completed {
+		return nil
+	}
+	if err := r.sendBound(frame, false); err != nil {
+		return err
+	}
+	return r.sendExecutionExited(id)
 }
 
 func (r *Runtime) finish(id string, kind protocol.MessageType, payload any, state InvocationState) error {
@@ -421,7 +444,11 @@ func (r *Runtime) finish(id string, kind protocol.MessageType, payload any, stat
 	if err != nil {
 		return err
 	}
-	if !r.journal.Complete(id, state, data) {
+	completed, err := r.journal.CompleteDurable(id, state, data, false)
+	if err != nil {
+		return err
+	}
+	if !completed {
 		return nil
 	}
 	return r.sendBound(frame, false)
@@ -486,8 +513,17 @@ func (r *Runtime) publishRequestedExit(id string) {
 	delete(r.exitRequested, id)
 	delete(r.exitCleanupUnconfirmed, id)
 	r.callsMu.Unlock()
-	if requested && !cleanupUnconfirmed && r.journal.ConfirmExit(id) {
-		_ = r.sendExecutionExited(id)
+	if requested && !cleanupUnconfirmed {
+		confirmed, err := r.journal.ConfirmExitDurable(id)
+		if err != nil {
+			if r.options.ReportError != nil {
+				r.options.ReportError(fmt.Errorf("invocation exit proof could not be persisted: %w", err))
+			}
+			return
+		}
+		if confirmed {
+			_ = r.sendExecutionExited(id)
+		}
 	}
 }
 
