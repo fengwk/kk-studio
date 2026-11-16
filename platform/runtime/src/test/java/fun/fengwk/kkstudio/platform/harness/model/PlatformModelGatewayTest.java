@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -333,6 +334,30 @@ class PlatformModelGatewayTest {
 
     ModelGateway.Succeeded second = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
     assertNull(second.completion().response().requestBodyPricing());
+  }
+
+  /** pricing 读取失败不是准入条件：异常向 Processor 传播，且已取得的并发名额立即归还。 */
+  @Test
+  void pricingFailurePropagatesAndReleasesThePermit() {
+    Resolution resolution = new Resolution(scripted((request, handler) -> {}));
+    IllegalStateException failure = new IllegalStateException("catalog unavailable");
+    AtomicBoolean failed = new AtomicBoolean();
+    PlatformModelGateway gateway =
+        new PlatformModelGateway(
+            resolution,
+            () -> BUSY_DELAY,
+            new ConcurrencyAdmission(1),
+            pricingSource(
+                modelName -> {
+                  if (failed.compareAndSet(false, true)) {
+                    throw failure;
+                  }
+                  return ModelRequestBodyPricing.plan(ModelPricing.ZERO);
+                }));
+
+    assertSame(failure, assertThrows(IllegalStateException.class, () -> gateway.admit(EXECUTION)));
+    // 名额已归还：容量 1 的下一次准入必须成功。
+    assertInstanceOf(ModelGateway.Admitted.class, gateway.admit(EXECUTION)).close();
   }
 
   /** 未实现观察回调的 adapter 不产生定价事实；伪造的 completion 快照会被 gateway 清除。 */

@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.harness.model;
 
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
-import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
@@ -102,14 +101,17 @@ public final class PlatformModelGateway implements ModelGateway {
     if (acquired.isEmpty()) {
       return new Busy(busyRetryDelay.get());
     }
-    // 计划按 attempt 冻结：组回退或并发执行各自使用当前实际模型的 pricing，不共享条件集合。
+    ConcurrencyAdmission.Lease lease = acquired.orElseThrow();
     ModelRequestBodyPricing.Plan plan;
     try {
+      // 计划按 attempt 冻结：组回退或并发执行各自使用当前实际模型的 pricing，不共享条件集合。
       plan = pricingPlans.plan(execution.request().model().modelName());
-    } catch (RuntimeException pricingFailure) {
-      plan = ModelRequestBodyPricing.plan(ModelPricing.ZERO);
+    } catch (RuntimeException | Error pricingFailure) {
+      // 定价读取不是准入条件，失败原样传播，但已取得的名额必须先归还。
+      lease.close();
+      throw pricingFailure;
     }
-    return new AdmittedExecution(resolved, acquired.orElseThrow(), plan);
+    return new AdmittedExecution(resolved, lease, plan);
   }
 
   /** 持有并发名额的准入；{@link #run} 与 {@link #close} 都释放它。 */

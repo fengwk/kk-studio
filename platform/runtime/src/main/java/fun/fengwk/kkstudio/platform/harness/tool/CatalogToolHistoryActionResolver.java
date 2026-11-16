@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.harness.tool;
 
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
@@ -18,9 +17,9 @@ import java.util.Optional;
 /**
  * 基于当前目录的 {@link ToolHistoryActionResolver}：按 binding 严格取回其 Tool，再调用可选渲染器。
  *
- * <p>工具已不存在或定义与 binding 不一致时返回 empty，让 Runtime 回退到中性描述；没有渲染器的工具同样返回 empty。
+ * <p>工具已不存在或定义与 binding 不一致时返回 empty，让 Runtime 回退到中性描述；没有渲染器的工具同样返回 empty。目录读取、
+ * 渲染器自身的未分类失败不属于降级范围，原样上抛。
  */
-@Slf4j
 @Component
 public class CatalogToolHistoryActionResolver implements ToolHistoryActionResolver {
 
@@ -44,10 +43,7 @@ public class CatalogToolHistoryActionResolver implements ToolHistoryActionResolv
         return Optional.empty();
       }
       return renderer.get().render(new ToolHistoryRenderRequest(call, binding.environmentName()));
-    } catch (ToolBindingMismatchException mismatch) {
-      return Optional.empty();
-    } catch (RuntimeException failure) {
-      log.warn("cannot render tool history action for {}: {}", call.toolName(), failure.toString());
+    } catch (ToolBindingMismatchException ignored) {
       return Optional.empty();
     }
   }

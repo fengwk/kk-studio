@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.platform.harness.tool;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -50,7 +51,7 @@ import java.util.UUID;
  *   <li>验证 renderer 返回 empty 时 resolver 原样返回 empty；
  *   <li>验证贡献身份不匹配（contributorId 不同或 localName 不同）时返回 empty 且绝不调用 renderer；
  *   <li>验证工具不在目录中时返回 empty；
- *   <li>验证 findTool 抛出 RuntimeException 时安全捕获并返回 empty（不上抛异常）；
+ *   <li>验证目录读取与渲染器的未分类失败原样上抛；
  *   <li>验证目录返回的贡献未提供 renderer（Tool.historyRenderer() 返回 empty）时返回 empty；
  *   <li>验证传递给 ToolHistoryRenderRequest 的 call 与 binding 冻结的 environmentName（含 null 与非 null）完全保真。
  * </ul>
@@ -142,17 +143,18 @@ class CatalogToolHistoryActionResolverTest {
     assertTrue(action.isEmpty());
   }
 
-  /** Contributor renderer 违反纯函数契约抛异常时，Platform 边界安全回退。 */
+  /** 渲染器失败不在 resolver 的降级范围内：异常原样上抛，由 Runtime 的统一边界处理。 */
   @Test
-  void rendererFailureReturnsEmpty() {
+  void rendererFailurePropagates() {
     SourceFixture fixture = new SourceFixture();
     CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolRequirements requirements = ToolRequirements.none();
+    IllegalStateException failure = new IllegalStateException("renderer failed");
     ToolHistoryRenderer renderer =
         request -> {
-          throw new IllegalStateException("renderer failed");
+          throw failure;
         };
     Tool tool = mock(Tool.class);
     when(tool.descriptor()).thenReturn(descriptor);
@@ -164,9 +166,10 @@ class CatalogToolHistoryActionResolverTest {
 
     ToolBinding binding =
         createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
-    Optional<String> action = resolver.resolve(binding, new ToolCall("call-1", TOOL_NAME, "{}"));
+    ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
-    assertTrue(action.isEmpty());
+    assertSame(
+        failure, assertThrows(IllegalStateException.class, () -> resolver.resolve(binding, call)));
   }
 
   @Test
@@ -286,21 +289,21 @@ class CatalogToolHistoryActionResolverTest {
   }
 
   @Test
-  void findToolThrowingRuntimeExceptionReturnsEmptyWithoutRethrowing() {
-    // 验证 findTool 抛出 RuntimeException 时安全降级返回 empty，绝不上抛
+  void unclassifiedCatalogFailurePropagates() {
+    // 只有 binding 不一致可降级：目录读取的其他失败原样上抛，不被静默吞掉。
     SourceFixture fixture = new SourceFixture();
     CatalogToolHistoryActionResolver resolver = fixture.resolver();
 
-    fixture.requireFails(new RuntimeException("Catalog lookup failed"));
+    RuntimeException failure = new RuntimeException("Catalog lookup failed");
+    fixture.requireFails(failure);
 
     ToolDescriptor descriptor = testDescriptor(TOOL_NAME);
     ToolBinding binding =
         createBinding(CONTRIBUTOR_ID, LOCAL_NAME, descriptor, EnvironmentSupport.NONE, null, null);
     ToolCall call = new ToolCall("call-1", TOOL_NAME, "{}");
 
-    Optional<String> action = resolver.resolve(binding, call);
-
-    assertTrue(action.isEmpty());
+    assertSame(
+        failure, assertThrows(RuntimeException.class, () -> resolver.resolve(binding, call)));
   }
 
   @Test
