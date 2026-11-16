@@ -1,4 +1,5 @@
 import type { TranslationKey } from '@/shared/i18n'
+import { CONFIG_SYNC_KIND_VALUES } from '@/shared/api/generated/contracts'
 import type {
   ConfigSyncImportCheckDTO,
   ConfigSyncItem,
@@ -6,17 +7,30 @@ import type {
   ConfigSyncRef,
 } from '@/shared/api/generated/contracts'
 
-/** 库存种类展示顺序：与契约的八类一致，Agent 在模型/提供商之前便于依赖自解释。 */
-export const CONFIG_SYNC_KIND_ORDER: ConfigSyncKind[] = [
-  'agents',
-  'models',
-  'providers',
-  'skillPackages',
-  'environments',
-  'mcpServers',
-  'settings',
-  'plugins',
-]
+/**
+ * 库存种类的展示顺序：Agent 排在模型/提供商之前，便于依赖链自解释。
+ *
+ * `Record<ConfigSyncKind, number>` 让新增的后端种类必须在这里给出名次才能通过类型检查，
+ * 因此不会在升级契约后静默消失。
+ */
+const CONFIG_SYNC_KIND_DISPLAY_ORDER: Record<ConfigSyncKind, number> = {
+  agents: 0,
+  models: 1,
+  providers: 2,
+  skillPackages: 3,
+  environments: 4,
+  mcpServers: 5,
+  settings: 6,
+  plugins: 7,
+}
+
+/** 契约全部种类按展示顺序排列。 */
+export const CONFIG_SYNC_KIND_ORDER: readonly ConfigSyncKind[] = [
+  ...CONFIG_SYNC_KIND_VALUES,
+].sort(
+  (left, right) =>
+    CONFIG_SYNC_KIND_DISPLAY_ORDER[left] - CONFIG_SYNC_KIND_DISPLAY_ORDER[right],
+)
 
 export interface ConfigSyncKindGroup {
   key: string

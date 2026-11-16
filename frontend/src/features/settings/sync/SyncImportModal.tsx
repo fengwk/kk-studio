@@ -4,7 +4,6 @@ import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import { configSyncService } from '@/features/settings/config-sync-service'
 import {
-  CONFIG_SYNC_KIND_ORDER,
   configSyncErrorMessage,
   configSyncImportMode,
   configSyncKindLabelKey,
@@ -45,8 +44,7 @@ export function SyncImportModal({
   const [result, setResult] = useState<ConfigSyncImportResultDTO | null>(null)
 
   const mode = configSyncImportMode(preview)
-  const kindLabel = (kind: ConfigSyncKind): string =>
-    CONFIG_SYNC_KIND_ORDER.includes(kind) ? t(configSyncKindLabelKey(kind)) : kind
+  const kindLabel = (kind: ConfigSyncKind): string => t(configSyncKindLabelKey(kind))
 
   const handleImport = async (allowPartial: boolean) => {
     setPending(true)
