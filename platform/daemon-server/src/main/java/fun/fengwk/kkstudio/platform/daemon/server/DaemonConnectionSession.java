@@ -357,6 +357,8 @@ final class DaemonConnectionSession implements DaemonSession {
     }
     if (protocolError != null) {
       handleProtocolError(protocolError);
+      // 协议违规时已入队的回收（例如非法 COMPLETED 的上传释放）必须在锁外执行。
+      drainCallbacks();
       return;
     }
     drainCallbacks();
@@ -583,13 +585,26 @@ final class DaemonConnectionSession implements DaemonSession {
       result = DaemonProtoMapping.toDomainResult(envelope.getCompleted().getResult());
       referenced = transferCoordinator.requireCompletedUploads(active, result);
     } catch (RuntimeException error) {
-      // 调用已迁移到墓碑，后续 expire 不再收尾它；终态本身违规时上传仍须在本路径释放。
-      transferCoordinator.releaseAllTransfers(active, ticketService);
+      // 调用已迁移到墓碑：expire 不再收尾它，而协议错误会丢弃 deferred，因此回收必须直接排入回调队列。
+      reclaimInvalidCompleted(active);
       throw error;
     }
     deferred.add(() -> active.listener.onComplete(result));
     deferred.add(
         () -> transferCoordinator.releaseUnreferencedTransfers(active, referenced, ticketService));
+  }
+
+  /** 终态本身违规时的回收：先以结果不确定通知调用方，再释放它名下的上传；两者都在 drain 时于锁外执行。 */
+  private void reclaimInvalidCompleted(ActiveInvocation active) {
+    callbacks.enqueue(
+        List.of(
+            () ->
+                active.listener.onError(
+                    new EnvironmentCapabilitySendUncertainException(
+                        "daemon sent an invalid COMPLETED result for "
+                            + environmentId
+                            + "; capability invocation outcome is uncertain.")),
+            () -> transferCoordinator.releaseAllTransfers(active, ticketService)));
   }
 
   private void handleFailed(Envelope envelope, List<Runnable> deferred) {

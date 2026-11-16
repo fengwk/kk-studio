@@ -1050,6 +1050,9 @@ final class EnvironmentDaemonServerTestSupport {
     UUID pendingUploadId;
     RuntimeException releaseFailure;
 
+    /** 可选：在真正执行释放前回调一次，供测试观察释放发生时的连接状态。 */
+    Runnable onRelease;
+
     @Override
     public Ticket reserve(
         EnvironmentId environmentId, String invocationId, TransferRequest request) {
@@ -1086,6 +1089,9 @@ final class EnvironmentDaemonServerTestSupport {
 
     @Override
     public void release(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+      if (onRelease != null) {
+        onRelease.run();
+      }
       if (releaseFailure != null) {
         throw releaseFailure;
       }

@@ -619,7 +619,8 @@ public final class EnvironmentDaemonServer
   }
 
   public void beginUpdate(EnvironmentId environmentId, String operationId) {
-    DaemonConnectionSession session = sessionOf(environmentId);
+    // 与 invoke 一致：会话缺失或未就绪都收敛为 capability 不可用，而不是把 null 会话泄漏成运行时异常。
+    DaemonConnectionSession session = requireReadySession(environmentId, "update");
     // 与 invoke 使用同一把会话锁：计数与更新窗口注册对 register/检查必须原子，否则调用可在两者之间登记。
     synchronized (session.stateLock()) {
       int inFlight = invocationTracker.activeInvocationCount(environmentId);
