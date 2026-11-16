@@ -32,8 +32,4 @@ public final class StorageUploadReadyDTO implements StorageUploadDTO {
 
   @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable Integer storedHeight;
-
-  public StorageUploadReadyDTO(String id, String blobId, Instant expiresAt) {
-    this(id, blobId, expiresAt, null, null, null, null, null);
-  }
 }
