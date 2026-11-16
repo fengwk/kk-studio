@@ -95,7 +95,7 @@ OpenAI Chat 的 `reasoning_content` 与 `reasoning_details` 保存在对应 assi
 
 能力声明只描述本编码器能表达的 schema，不承诺具体上游模型支持该模态，也不替代编码器自己的 MIME / 格式校验。Chat 用户消息的单个纯文本块保持字符串，多块或含媒体时使用数组；Responses 工具结果的单个文本或 JSON 保持字符串，含媒体时使用 `output` 数组。
 
-请求体的最终 UTF-8 字节上限在序列化完成后统一收口：[`RequestBodySizeGuard`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/RequestBodySizeGuard.java) 的 `MAX_REQUEST_BODY_BYTES` 是 **192 MiB**，Chat、Responses 与 Gemini 都走它；Anthropic 保留更严格的 **32 MiB** 协议级上限。超限一律以 `INVALID_REQUEST` 明确失败，不静默截断、不降级、不改写请求；厂商仍可能有自己的更严格限制。
+请求体的最终 UTF-8 字节上限在序列化完成后统一收口：[`RequestBodySizeGuard`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/RequestBodySizeGuard.java) 的 `MAX_REQUEST_BODY_BYTES` 是 **192 MiB**，四个协议都使用 `RequestBodySizeGuard.DEFAULT`。在此之上，编码后的最终 body 还会按端点已知限制再检查一次：Anthropic 直连 `api.anthropic.com` 时 [`RequestLimitsPresets.CLAUDE_DIRECT`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/limits/RequestLimitsPresets.java) 的 `bodyMaxBytes` 是 **128,000,000 bytes**，由 [`PreparedProviderRequest.limitViolation()`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/PreparedProviderRequest.java) 在发送前判定。两项超限分别以 `INVALID_REQUEST`（本地 192 MiB 守卫）与 `REQUEST_BODY_LIMIT`（端点限制）明确失败，不静默截断、不降级、不改写请求；代理与私有网关未命中预设，厂商仍可能有自己的更严格限制。
 
 ## 原生事件与流式聚合
 
@@ -230,7 +230,7 @@ Anthropic 的 `usage.output_tokens_details.thinking_tokens` 是输出的只读�
 | `fun.fengwk.kkstudio.harness.model.codec` | `ModelDescriptor` / `ModelVariant` 的权威严格 JSON codec，以及跨模块共享的 [`JsonCodecSupport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/codec/JsonCodecSupport.java)（object 判定、精确字段集合与标量原语） | 拒绝未知字段、重复键、错误类型与 trailing token；Provider replay 的持久化 UUID 在模块内做无回显 canonical 校验（本模块不依赖 Common）；不接触持久化或网络 |
 | `fun.fengwk.kkstudio.harness.model.provider` | Provider 中立请求、响应、消息、内容块与块级原生 metadata、流事件、`ProviderAdapter`、context-pressure 判定 | 不出现 SDK 类型；wire 编码与 I/O 位于同模块的 `harness.model.provider.impl` |
 | `fun.fengwk.kkstudio.harness.model.provider.codec` | Provider 响应、工具调用诊断的严格 JSON codec | 仅依赖 Jackson 与同模块模型值 |
-| `fun.fengwk.kkstudio.harness.model.provider.impl` | 跨协议共享的流式生命周期桥接 `ProviderStreamBridge`、阻塞调用骨架 `ProviderSseCall`、HTTP 错误格式化与分类骨架 `ProviderErrorHelper`、严格 JSON 与 usage 解析 `ProviderJsonHelper`、媒体白名单与 Base64 data URI 校验 `ProviderMediaValidator`、请求体上限守卫 `RequestBodySizeGuard` 与模型列表发现 `ProviderModelDiscovery` | 不修改原始响应正文；厂商特有错误关键词、文案与媒体策略留在各协议包；桥接器只承载 terminal-once 与 handler 失败封口 |
+| `fun.fengwk.kkstudio.harness.model.provider.impl` | 跨协议共享的流式生命周期桥接 `ProviderStreamBridge`、四协议共用的累积器终止态基类 `ProviderStreamState`、阻塞调用骨架 `ProviderSseCall`、HTTP 错误格式化与分类骨架 `ProviderErrorHelper`、严格 JSON 与 usage 解析 `ProviderJsonHelper`、媒体白名单与 Base64 data URI 校验 `ProviderMediaValidator`、请求体上限守卫 `RequestBodySizeGuard` 与模型列表发现 `ProviderModelDiscovery` | 不修改原始响应正文；厂商特有错误关键词、文案与媒体策略留在各协议包；桥接器只承载 terminal-once 与 handler 失败封口；终止态基类只保存中立的 stop reason 与 service tier |
 | `fun.fengwk.kkstudio.harness.model.provider.impl.transport` | `JdkHttpSseTransport`、`IncrementalSseParser`、`HttpSseLimits`、`HeaderSanitizer`、`TransportErrorKind`、`TransportException`、`ServerSentEvent` | 只依赖同模块模型契约与 JDK；不暴露凭据，不保留未清洗的异常上下文 |
 | `fun.fengwk.kkstudio.harness.model.provider.impl.anthropic` | Messages wire 编码、流式聚合、Prompt Cache 断点、thinking 编码、错误映射与 adapter | 只经 transport 发起 I/O；opaque replay 不进入公共 DTO、日志或异常 |
 | `fun.fengwk.kkstudio.harness.model.provider.impl.gemini` | GenerateContent wire 编码、流式聚合、隐式 Prompt Cache 与 adapter | 只经 transport 发起 I/O；仅接受 `NONE` retention（服务端隐式缓存） |
@@ -240,7 +240,7 @@ Anthropic 的 `usage.output_tokens_details.thinking_tokens` 是输出的只读�
 ## 源码与测试
 
 - 协议实现：[`transport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/transport/) 与四个协议包 [`anthropic`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/anthropic/)、[`gemini`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/gemini/)、[`openai.chat`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/openai/chat/)、[`openai.responses`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/openai/responses/)，各自含一套 `*ProviderAdapter`、`*ModelProvider`、`*RequestEncoder`、`*StreamAccumulator`、`*ErrorMapper` 与 `*Endpoints`。Provider 内部配置只包含超时与重试。
-- 共享契约：[`provider.impl`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/) 根包的 `ProviderStreamBridge`、`ProviderErrorHelper`、`ProviderJsonHelper`、`ProviderMediaValidator` 与 `RequestBodySizeGuard`；测试 fixtures 放在 [`test/resources` 目录](../../harness/model/src/test/resources/fun/fengwk/kkstudio/harness/model/provider/impl/) 下。
+- 共享契约：[`provider.impl`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/) 根包的 `ProviderStreamBridge`、`ProviderStreamState`、`ProviderErrorHelper`、`ProviderJsonHelper`、`ProviderMediaValidator` 与 `RequestBodySizeGuard`；测试 fixtures 放在 [`test/resources` 目录](../../harness/model/src/test/resources/fun/fengwk/kkstudio/harness/model/provider/impl/) 下。
 
 按维护任务分组的测试入口（每组先给目录，再给代表文件）：
 
