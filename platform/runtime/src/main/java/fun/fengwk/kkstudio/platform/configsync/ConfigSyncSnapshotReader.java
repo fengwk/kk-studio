@@ -40,8 +40,9 @@ public class ConfigSyncSnapshotReader {
   /**
    * 读取全部八类配置的当前事实。
    *
-   * <p>整个读取在一个只读 REPEATABLE_READ 事务中完成：inventory/export/checkImport 的同类注解会直接加入，import 以 {@code
-   * Propagation.NEVER} 运行时由本方法自己起一个短事务，使计划快照一致；Git/MCP 准备发生在本方法返回之后，绝不在该事务内执行。
+   * <p>整个读取在一个只读 REPEATABLE_READ 事务中完成，使 inventory/export 的注解直接加入，checkImport 与 import 各自获得一致的计划快照。
+   *
+   * <p>MCP 发现与 Git 准备都在本方法返回之后执行，绝不在该事务内。
    *
    * <p>插件配置取自已安装插件的当前配置行，只含 pluginId、修订与普通值。
    */

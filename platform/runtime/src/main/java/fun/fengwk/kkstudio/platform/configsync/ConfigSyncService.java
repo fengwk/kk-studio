@@ -26,8 +26,8 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 设置同步编排：inventory / export / checkImport 各自在单一只读快照上完成，确保跨集合一致；import 把校验、计划与外部准备放在 事务外（计划快照由
- * {@link ConfigSyncSnapshotReader#read()} 自己的短只读事务保证一致），写事务委托给 {@link ConfigSyncApplier}。
+ * 设置同步编排：inventory 与 export 在单一只读快照上完成，确保跨集合一致；checkImport 与 import 的计划快照同样取自 {@link
+ * ConfigSyncSnapshotReader#read()}，MCP 发现与 Git 准备全程在任何事务之外，写事务委托给 {@link ConfigSyncApplier}。
  */
 @AllArgsConstructor
 @Service
@@ -65,12 +65,7 @@ public class ConfigSyncService {
     return new ConfigSyncExportDTO(exporter.export(snapshot, expanded));
   }
 
-  /**
-   * 不写数据库，预览将新增、覆盖与跳过的条目；非法文件直接拒绝。
-   *
-   * <p>与 export 一样整体包在一个只读 REPEATABLE_READ 事务里，使新增/覆盖判定与依赖池基于同一份计划快照。
-   */
-  @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+  /** 不写数据库，预览将新增、覆盖与跳过的条目；非法文件直接拒绝。 */
   public ConfigSyncImportCheckDTO checkImport(ConfigSyncImportCheckRequestDTO request) {
     ConfigSyncParser.ParsedDocument document =
         parser.parse(request == null ? null : request.getYaml());
