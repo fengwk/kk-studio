@@ -50,23 +50,6 @@ function sameProcessOutput(
     && left.gapPending === right.gapPending
 }
 
-export function mergeSnapshotToolCalls(
-  snapshot: RealtimeModelStream,
-  current: RealtimeModelStream | null,
-): RealtimeModelStream {
-  if (
-    snapshot.toolCalls.length > 0
-    || current == null
-    || current.threadId !== snapshot.threadId
-    || current.invocationId !== snapshot.invocationId
-    || current.attempt !== snapshot.attempt
-    || current.toolCalls.length === 0
-  ) {
-    return snapshot
-  }
-  return { ...snapshot, toolCalls: current.toolCalls }
-}
-
 function sameToolCallDrafts(
   left: RealtimeModelStream['toolCalls'],
   right: RealtimeModelStream['toolCalls'],

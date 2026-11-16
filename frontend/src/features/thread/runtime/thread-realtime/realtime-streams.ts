@@ -2,6 +2,7 @@ import type { RealtimeFrameScheduler } from '@/features/thread/runtime/thread-re
 import {
   isRealtimeModelDeltaGap,
   mergeRealtimeModelStreamAfterCheckpoint,
+  mergeSnapshotToolCalls,
   parseRealtimeModelCheckpoint,
   parseRealtimeModelDelta,
   reduceRealtimeModelStream,
@@ -10,13 +11,13 @@ import {
   type RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'
 import {
-  isProcessOutputPartial,
   isRealtimeToolStreamActive,
   parseRealtimeToolPartial,
   reduceRealtimeToolStream,
   snapshotToolStream,
   type RealtimeToolStream,
 } from '@/features/thread/runtime/thread-realtime/tool-stream'
+import { isProcessOutputPartial } from '@/features/thread/runtime/thread-realtime/process-output-stream'
 import {
   TOOL_PARTIAL_SEEN_EVENT_ID_LIMIT,
   bufferModelDelta,
@@ -27,7 +28,6 @@ import {
   type ModelRecovery,
 } from '@/features/thread/runtime/thread-realtime/model-recovery'
 import {
-  mergeSnapshotToolCalls,
   sameModelStreamNullable,
   sameToolStreamMap,
 } from '@/features/thread/runtime/thread-realtime/stream-equality'
@@ -467,12 +467,15 @@ function handleToolPartial(ctx: RealtimeStreamContext, data: unknown): void {
     }
     seenEventIds.add(partial.eventId)
   }
+  // ref 持有不可变快照：聚合产生新 Map，已发布的 React state 不会被原地修改，
+  // 下游 useMemo 才能按引用判断是否重算。
   const streams = toolStreamsRef.current
   const current = streams.get(partial.invocationId) ?? null
   const next = reduceRealtimeToolStream(current, partial)
   if (next !== current) {
-    streams.set(partial.invocationId, next)
-    toolStreamsRef.current = streams
+    const updated = new Map(streams)
+    updated.set(partial.invocationId, next)
+    toolStreamsRef.current = updated
     scheduler.notifyToolDirty()
   }
 }
