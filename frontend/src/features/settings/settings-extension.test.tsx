@@ -14,7 +14,6 @@ import { makeApplicationContributions } from '@/test-support/application-contrib
 
 vi.mock('@/features/settings/system-settings-service', () => ({
   systemSettingsService: { get: vi.fn(), getSchema: vi.fn(), update: vi.fn() },
-  createSystemSettingsService: () => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }),
 }))
 
 vi.mock('@/shared/api/agent-service', () => ({

@@ -16,20 +16,16 @@ import type {
  *
  * 同步只读写服务端已保存的配置，不触碰客户端 Settings draft。
  */
-export function createConfigSyncService() {
-  return {
-    getInventory: (): Promise<ConfigSyncInventoryDTO> =>
-      request('GET /api/platform/config-sync', {}),
+export const configSyncService = {
+  getInventory: (): Promise<ConfigSyncInventoryDTO> =>
+    request('GET /api/platform/config-sync', {}),
 
-    exportConfig: (items: ConfigSyncRef[]): Promise<ConfigSyncExportDTO> =>
-      request('POST /api/platform/config-sync/export', { body: { items } }),
+  exportConfig: (items: ConfigSyncRef[]): Promise<ConfigSyncExportDTO> =>
+    request('POST /api/platform/config-sync/export', { body: { items } }),
 
-    checkImport: (yaml: string): Promise<ConfigSyncImportCheckDTO> =>
-      request('POST /api/platform/config-sync/check-import', { body: { yaml } }),
+  checkImport: (yaml: string): Promise<ConfigSyncImportCheckDTO> =>
+    request('POST /api/platform/config-sync/check-import', { body: { yaml } }),
 
-    importConfig: (yaml: string, allowPartial = false): Promise<ConfigSyncImportResultDTO> =>
-      request('POST /api/platform/config-sync/import', { body: { yaml, allowPartial } }),
-  }
+  importConfig: (yaml: string, allowPartial = false): Promise<ConfigSyncImportResultDTO> =>
+    request('POST /api/platform/config-sync/import', { body: { yaml, allowPartial } }),
 }
-
-export const configSyncService = createConfigSyncService()

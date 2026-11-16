@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { request } from '@/shared/api/client'
-import { createConfigSyncService } from '@/features/settings/config-sync-service'
+import { configSyncService } from '@/features/settings/config-sync-service'
 import type {
   ConfigSyncImportCheckDTO,
   ConfigSyncImportResultDTO,
@@ -28,9 +28,8 @@ describe('configSyncService', () => {
       ],
     }
     apiRequest.mockResolvedValue(inventory)
-    const service = createConfigSyncService()
 
-    await expect(service.getInventory()).resolves.toBe(inventory)
+    await expect(configSyncService.getInventory()).resolves.toBe(inventory)
     expect(apiRequest).toHaveBeenCalledWith('GET /api/platform/config-sync', {})
   })
 
@@ -40,9 +39,8 @@ describe('configSyncService', () => {
       { kind: 'settings' as const, name: 'settings' },
     ]
     apiRequest.mockResolvedValue({ yaml: 'providers: []' })
-    const service = createConfigSyncService()
 
-    await expect(service.exportConfig(items)).resolves.toEqual({ yaml: 'providers: []' })
+    await expect(configSyncService.exportConfig(items)).resolves.toEqual({ yaml: 'providers: []' })
     expect(apiRequest).toHaveBeenCalledWith('POST /api/platform/config-sync/export', {
       body: { items },
     })
@@ -54,17 +52,16 @@ describe('configSyncService', () => {
       skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
     }
     apiRequest.mockResolvedValue(response)
-    const service = createConfigSyncService()
 
     // 缺省不授权部分导入。
-    await expect(service.importConfig('providers: []')).resolves.toBe(response)
+    await expect(configSyncService.importConfig('providers: []')).resolves.toBe(response)
     expect(apiRequest).toHaveBeenCalledWith('POST /api/platform/config-sync/import', {
       body: { yaml: 'providers: []', allowPartial: false },
     })
 
     // 显式授权部分导入。
     apiRequest.mockClear()
-    await expect(service.importConfig('providers: []', true)).resolves.toBe(response)
+    await expect(configSyncService.importConfig('providers: []', true)).resolves.toBe(response)
     expect(apiRequest).toHaveBeenCalledWith('POST /api/platform/config-sync/import', {
       body: { yaml: 'providers: []', allowPartial: true },
     })
@@ -77,9 +74,8 @@ describe('configSyncService', () => {
       skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
     }
     apiRequest.mockResolvedValue(response)
-    const service = createConfigSyncService()
 
-    await expect(service.checkImport('providers: []')).resolves.toBe(response)
+    await expect(configSyncService.checkImport('providers: []')).resolves.toBe(response)
     expect(apiRequest).toHaveBeenCalledWith('POST /api/platform/config-sync/check-import', {
       body: { yaml: 'providers: []' },
     })
