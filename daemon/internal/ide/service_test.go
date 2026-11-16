@@ -677,6 +677,48 @@ func TestRevisionExhaustionRollsBackOpen(t *testing.T) {
 	}
 }
 
+// Verifies revision exhaustion on resume leaves the view schedulable and resumable.
+func TestRevisionExhaustionRollsBackResume(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	scheduler := newFakeIdeScheduler(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	manager := &fakeCodeServerManager{}
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, Scheduler: scheduler})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	root := t.TempDir()
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	resume := openCommandForTest(root, opened.GetViewId(), "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")
+	resume.Mode = protocol.IdeOpenMode_RESUME
+	resume.ExpectedBindingEpoch = int64Pointer(opened.GetBindingEpoch())
+	service.mu.Lock()
+	service.revision = math.MaxInt64
+	service.mu.Unlock()
+	if result := service.HandleCommand(context.Background(), resume); result.GetCode() != "BUSY" {
+		t.Fatalf("exhausted resume=%v", result)
+	}
+	service.mu.Lock()
+	view := service.views[opened.GetViewId()]
+	pending, scheduled := view.bindingPending, view.expiryTimer != nil
+	// A resume commits once to take the new epoch and once to publish it.
+	service.revision = math.MaxInt64 - 2
+	service.mu.Unlock()
+	if pending || !scheduled {
+		t.Fatalf("failed resume left the view pending=%v with an expiry timer=%v", pending, scheduled)
+	}
+	if retried := service.HandleCommand(context.Background(), resume); !retried.GetOk() {
+		t.Fatalf("resume after revision recovery=%v", retried)
+	}
+}
+
 // Verifies one claim ID cannot concurrently bind different view IDs.
 func TestClaimIDSerializesAcrossViewIDs(t *testing.T) {
 	bridge, err := NewBridge()

@@ -300,6 +300,8 @@ func (s *Service) beginResume(command parsedOpen, view *viewRecord) (resumeBindi
 	s.clearExpiryLocked(view)
 	newEpoch, err := s.commitRevisionLocked()
 	if err != nil {
+		view.bindingPending = false
+		s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
 		s.mu.Unlock()
 		return resumeBinding{}, err
 	}
