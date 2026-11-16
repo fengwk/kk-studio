@@ -19,10 +19,10 @@ Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方�
 
 | 包 | 内容 |
 | --- | --- |
-| [domain](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置、阶段流转与阶段预算授权规则 |
-| [model](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model) | Project、Issue、Run、Activity、Evidence、Work、Agent Thread 绑定、阶段预算行与暂停原因等值 |
+| [domain](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置与严格编解码、阶段流转规则、状态编码与 Run 状态枚举 |
+| [model](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model) | Project、Issue、IssueRun、IssueActivity、IssueEvidence、IssueAgentThread 行与 PauseReason/Activity 种类/操作者枚举 |
 | [repo](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/repo) | 按实体拆分的具体 `JdbcClient` Repository（直接承载 SQL、参数绑定与 RowMapper）及项目变更通知 |
-| [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project、Issue 编辑/生命周期/阶段预算、Run、Evidence 与 Work 邮箱；`ProjectSnapshotAssembler` 与 `IssueDetailAssembler` 聚合快照；`IssueMutationSupport` 共用 owner 锁与幂等回执 |
+| [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project、Issue 编辑/生命周期/阶段预算、Run、Evidence 与 Work 邮箱；`StageBudgetView` 额度视图；`ProjectSnapshotAssembler` 与 `IssueDetailAssembler` 聚合快照；`IssueMutationSupport` 共用 owner 锁与幂等回执 |
 | [reconcile](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile) | Issue 调度的部署级配置与确定性推进 |
 | [platform](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform) | 对运行时与全局 Blob 的窄适配：Issue/Run 执行所需的 Thread 事实与命令控制、证据 Blob |
 | [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 业务工具 |
@@ -84,7 +84,8 @@ Agent、Environment 与 Run 额度，由人工显式推进。
 INIT 可达，INIT 须存在到 DONE 的正常路径。
 
 workflow 整体保存时锁定 Project、检查版本，并要求项目无活动 Run。保存校验编码、
-合法边、可达性与引用；所有现存 Issue 的当前阶段及阻塞恢复点都须保留。保存成功后按新
+合法边、可达性与引用；所有现存 Issue 的当前阶段及阻塞恢复点都须保留。仍声明的阶段停用后，
+停在该阶段或从其阻塞的 Issue 仍可显式恢复（恢复只要求编码仍存在，不要求阶段启用）。保存成功后按新
 workflow 为当前未暂停且可执行的 Issue 重新登记 Work；恢复归档复用同一动作。
 工作流编辑读取 Project Snapshot 的 `referencedStateCodes` 实施相同引用保护，
 不依赖可见看板列表。后台推送刷新约束而不覆盖打开中的草稿。
@@ -171,7 +172,8 @@ Agent 使用 `issue_transition`（参数 `to_state`）请求交接，目标先�
 接受 next_state
   -> 处理剩余输入、问答与在途调用，到安全点
   -> root Join 冻结 terminalEntryId / finalAnswerEntryId
-  -> 事务复验 Run ID/version、历史区间、合法边与门禁
+  -> 复验门禁：门禁关闭则 Run=WAITING 并保留 next_state，不提交阶段推进
+  -> 门禁打开后事务复验 Run ID/version、历史区间与合法边
   -> 冻结报告，Run=COMPLETED
   -> 更新 Issue.state，记录活动，发布证据，请求后继 Work
 ```
