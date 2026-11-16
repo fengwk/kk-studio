@@ -19,7 +19,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 
-import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.AcceptedCommands;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
@@ -28,7 +27,6 @@ import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
@@ -48,9 +46,9 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 平台 Agent 任务入口的行为契约：提交只翻译为统一 spawn（交付方式由父关系决定），结果只投影票据冻结回执，停止按票据收敛。
+ * 平台 Agent 任务入口的行为契约：提交只翻译为统一 spawn（交付方式由父关系决定），结果只投影票据冻结回执。
  *
- * <p>Runtime 以窄 mock 表达；本测试断言服务自己的翻译、回执投影与 CAS 重试语义，不重复 Runtime 的事务/额度测试。
+ * <p>Runtime 以窄 mock 表达；本测试断言服务自己的翻译与回执投影语义，不重复 Runtime 的事务/额度测试。
  */
 class AgentTaskServiceTest {
 
@@ -138,82 +136,13 @@ class AgentTaskServiceTest {
   }
 
   @Test
-  void unknownTicketReturnsEmptyResultAndStopFailsNotFound() {
+  void unknownTicketReturnsEmptyResult() {
     UUID ticketId = UUID.randomUUID();
-    when(runtime.findJoin(ticketId)).thenReturn(Optional.empty());
+    when(runtime.projectJoinReceipt(ticketId)).thenReturn(Optional.empty());
 
     assertTrue(service.result(ticketId).isEmpty());
-    DomainException error = assertThrows(DomainException.class, () -> service.stop(ticketId));
-    assertEquals(DomainErrorCode.NOT_FOUND, error.code());
-    assertEquals("agent_task", error.resource());
-    assertEquals("agent task " + ticketId + " does not exist", error.getMessage());
+    verify(runtime, never()).findJoin(any());
     verify(runtime, never()).getThreadSnapshot(any());
-  }
-
-  @Test
-  void stopStopsTheTicketedChildAndRetriesOnlyStaleVersionWithFreshSnapshots() {
-    UUID ticketId = UUID.randomUUID();
-    UUID childId = UUID.randomUUID();
-    when(runtime.findJoin(ticketId)).thenReturn(Optional.of(join(ticketId, childId, false, false)));
-    ThreadSnapshot first = mock(ThreadSnapshot.class);
-    when(first.thread()).thenReturn(thread(childId, 0L));
-    ThreadSnapshot second = mock(ThreadSnapshot.class);
-    when(second.thread()).thenReturn(thread(childId, 1L));
-    when(runtime.getThreadSnapshot(childId)).thenReturn(first).thenReturn(second);
-    when(runtime.stop(any(StopCommand.class)))
-        .thenThrow(DomainException.conflict("STALE_VERSION", "stale"))
-        .thenReturn(null);
-
-    service.stop(ticketId);
-
-    ArgumentCaptor<StopCommand> stop = ArgumentCaptor.forClass(StopCommand.class);
-    verify(runtime, times(2)).stop(stop.capture());
-    assertEquals(childId, stop.getValue().threadId());
-    assertEquals(1L, stop.getValue().expectedVersion());
-    verify(runtime, times(2)).getThreadSnapshot(childId);
-  }
-
-  @Test
-  void stopIsNoOpForMatchedOrSupersededTickets() {
-    UUID matchedId = UUID.randomUUID();
-    UUID matchedChild = UUID.randomUUID();
-    when(runtime.findJoin(matchedId))
-        .thenReturn(Optional.of(join(matchedId, matchedChild, true, false)));
-    service.stop(matchedId);
-
-    UUID supersededId = UUID.randomUUID();
-    UUID supersededChild = UUID.randomUUID();
-    when(runtime.findJoin(supersededId))
-        .thenReturn(Optional.of(join(supersededId, supersededChild, false, true)));
-    service.stop(supersededId);
-
-    verify(runtime, never()).getThreadSnapshot(any());
-    verify(runtime, never()).stop(any(StopCommand.class));
-  }
-
-  @Test
-  void stopSkipsWhenTicketFinishesOrIsSupersededBetweenSnapshotAndStop() {
-    UUID completedId = UUID.randomUUID();
-    UUID completedChild = UUID.randomUUID();
-    when(runtime.findJoin(completedId))
-        .thenReturn(Optional.of(join(completedId, completedChild, false, false)))
-        .thenReturn(Optional.of(join(completedId, completedChild, true, false)));
-    ThreadSnapshot completedSnapshot = mock(ThreadSnapshot.class);
-    when(completedSnapshot.thread()).thenReturn(thread(completedChild, 0L));
-    when(runtime.getThreadSnapshot(completedChild)).thenReturn(completedSnapshot);
-    service.stop(completedId);
-
-    UUID supersededId = UUID.randomUUID();
-    UUID supersededChild = UUID.randomUUID();
-    when(runtime.findJoin(supersededId))
-        .thenReturn(Optional.of(join(supersededId, supersededChild, false, false)))
-        .thenReturn(Optional.of(join(supersededId, supersededChild, false, true)));
-    ThreadSnapshot supersededSnapshot = mock(ThreadSnapshot.class);
-    when(supersededSnapshot.thread()).thenReturn(thread(supersededChild, 0L));
-    when(runtime.getThreadSnapshot(supersededChild)).thenReturn(supersededSnapshot);
-    service.stop(supersededId);
-
-    verify(runtime, never()).stop(any(StopCommand.class));
   }
 
   @Test
@@ -260,34 +189,6 @@ class AgentTaskServiceTest {
   }
 
   @Test
-  void stopTicketedHandlesDomainNotFoundAndDoesNotSwallowOtherReasons() {
-    UUID ticketId = UUID.randomUUID();
-    UUID childId = UUID.randomUUID();
-    when(runtime.findJoin(ticketId)).thenReturn(Optional.of(join(ticketId, childId, false, false)));
-    ThreadSnapshot snapshot = mock(ThreadSnapshot.class);
-    when(snapshot.thread()).thenReturn(thread(childId, 0L));
-    when(runtime.getThreadSnapshot(childId)).thenReturn(snapshot);
-    when(runtime.stop(any(StopCommand.class)))
-        .thenThrow(DomainException.conflict("STALE_VERSION", "stale"))
-        .thenThrow(DomainException.notFound("thread", "gone"));
-    service.stop(ticketId);
-    verify(runtime, times(2)).stop(any(StopCommand.class));
-
-    DomainException other = DomainException.conflict("STOP_REQUEST_ID_REUSED", "other");
-    doThrow(other).when(runtime).stop(any(StopCommand.class));
-    assertSame(other, assertThrows(DomainException.class, () -> service.stop(ticketId)));
-
-    DomainException invalid = DomainException.validation("thread", "invalid");
-    doThrow(invalid).when(runtime).getThreadSnapshot(childId);
-    assertSame(invalid, assertThrows(DomainException.class, () -> service.stop(ticketId)));
-    DomainException unrelatedMissing = DomainException.notFound("session", "gone");
-    doThrow(unrelatedMissing).when(runtime).getThreadSnapshot(childId);
-    assertSame(unrelatedMissing, assertThrows(DomainException.class, () -> service.stop(ticketId)));
-    doThrow(DomainException.notFound("thread", "gone")).when(runtime).getThreadSnapshot(childId);
-    service.stop(ticketId);
-  }
-
-  @Test
   @SuppressWarnings("unchecked")
   void missingRuntimeFailsDeterministically() {
     ObjectProvider<HarnessRuntime> missing = mock(ObjectProvider.class);
@@ -298,7 +199,7 @@ class AgentTaskServiceTest {
         assertThrows(IllegalStateException.class, () -> unbound.submit(request(null, null, null)));
     assertEquals("harness runtime is not available in this deployment", failure.getMessage());
     assertThrows(IllegalStateException.class, () -> unbound.result(UUID.randomUUID()));
-    assertThrows(IllegalStateException.class, () -> unbound.stop(UUID.randomUUID()));
+    assertThrows(IllegalStateException.class, () -> unbound.stopThread(UUID.randomUUID()));
   }
 
   @Test
@@ -384,24 +285,5 @@ class AgentTaskServiceTest {
         version,
         NOW,
         NOW);
-  }
-
-  private static ThreadJoin join(UUID ticketId, UUID childId, boolean matched, boolean superseded) {
-    return new ThreadJoin(
-        ticketId,
-        HASH,
-        UUID.randomUUID(),
-        childId,
-        1,
-        "worker",
-        null,
-        0,
-        matched ? UUID.randomUUID() : null,
-        null,
-        null,
-        NOW,
-        NOW,
-        JoinDelivery.NOTIFY_PARENT,
-        superseded ? UUID.randomUUID() : null);
   }
 }
