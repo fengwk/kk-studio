@@ -74,7 +74,6 @@ public final class ModelExecution
   private final UUID executionId = UUID.randomUUID();
   private final UUID threadId;
   private final int attempt;
-  private final boolean groupInvocation;
 
   /** PREPARED 之后、登记事务提交后由生命周期端口返回的物理句柄。 */
   private volatile LocalExecutionHandle localHandle;
@@ -161,7 +160,6 @@ public final class ModelExecution
     this.invocationId = claim.target().id();
     this.threadId = Objects.requireNonNull(threadId, "threadId");
     this.attempt = attempt;
-    this.groupInvocation = groupInvocation;
     this.ownerRelease = Objects.requireNonNull(ownerRelease, "ownerRelease");
     this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
     this.heartbeat = createHeartbeat(config, scheduler, heartbeatWorker);

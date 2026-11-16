@@ -80,6 +80,7 @@ final class AnthropicModelProvider implements ModelProvider {
     return jsonType != null ? jsonType : DEFAULT_PROTOCOL_EVENT_TYPE;
   }
 
+  /** 仅用于从原生 payload 推导事件名；payload 本体不落日志、不进入 normalized 事件或 {@code ProviderResponse}。 */
   private static String jsonTypeOf(String data) {
     if (data == null || data.isBlank()) {
       return null;
