@@ -84,8 +84,9 @@ Thread/Canvas 先读取 Snapshot，再订阅 `/ws/events`。
 同一资源无论多少消费者只有一条 wire 订阅，重连后自动重发全部订阅，恢复在线或回到前台立即重试。
 连接建立后服务端先发 `connected` 帧，manager 用它给出本次物理连接的 `eventNodeId` 与 `connectionId`；
 每次重连都是新身份，需要绑定到连接的 IDE 视图必须按新身份重新登记，旧身份不续用。
-断线按 250ms..10s 退避重连，只有完成 `connected` 握手才重置退避序列：
+断线按 250ms..10s 退避重连，退避序列在完成 `connected` 握手后重置：
 接受连接却不发 `connected`（或立即关闭）的服务端会继续退避，不会以最小间隔无限重试。
+浏览器 online 或页面重新可见时立即重连，并同时重置退避序列（用户侧恢复信号）。
 资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
 projects/thread-tree/interactions/environments 只发 changed 提示、不携带 cursor。
 subscribed（含重连）、resync、资源 error 和版本提示触发回读；

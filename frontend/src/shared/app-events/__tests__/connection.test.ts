@@ -362,7 +362,7 @@ describe('ApplicationEventConnection', () => {
     expect(vi.getTimerCount()).toBe(1)
     vi.advanceTimersByTime(250)
     expect(harness.sockets).toHaveLength(2)
-    // 完成握手才能重置退避序列：send 失败后的重连仍按 250ms 起算。
+    // 完成 connected 握手会重置退避序列，因此 send 失败后的重连重新从 250ms 起算。
     const second = readyLatest(harness)
 
     // send 失败路径：send 与 close 都同步抛错；同样进入 backoff 并重连。
