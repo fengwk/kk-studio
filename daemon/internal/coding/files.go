@@ -33,7 +33,6 @@ type WriteReview struct {
 	SHA256      *string      `json:"sha256"`
 	LossyDecode *LossyDecode `json:"lossyDecode,omitempty"`
 	NewFile     bool         `json:"-"`
-	Content     string       `json:"-"`
 }
 
 var pathLocks sync.Map
@@ -132,13 +131,26 @@ func planWrite(path, content string, expected *ExpectedFile, exists bool) (pendi
 	if err != nil {
 		return pendingWrite{}, unchangedFileError(err)
 	}
-	review := WriteReview{Path: path, Diff: diff, NewFile: !exists, Content: written.text}
+	review := WriteReview{Path: path, Diff: diff, NewFile: !exists}
 	if exists {
 		hashText := sha256Hex(original)
 		review.SHA256 = &hashText
 		review.LossyDecode = lossyDecode(*existing, replacements, written.text)
 	}
+	if err := checkReviewBudget("write", review); err != nil {
+		return pendingWrite{}, err
+	}
 	return pendingWrite{review: review, bytes: written.bytes}, nil
+}
+
+// checkReviewBudget refuses a review that cannot travel in one result frame, so the refusal happens
+// before the target is touched.
+func checkReviewBudget(tool string, review any) error {
+	details := mustJSON(map[string]any{tool + "Review": review})
+	if len(details) > maxReviewBytes {
+		return rejectInput(fmt.Sprintf("Complete %s diff exceeds the review transport limit; split the change into several smaller %s calls.", tool, tool))
+	}
+	return nil
 }
 
 // Write creates or rewrites a regular text file in place. expected, when present, binds the write
