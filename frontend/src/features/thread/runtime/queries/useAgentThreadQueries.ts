@@ -4,6 +4,7 @@ import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { readInteractionsChangedRoot } from '@/shared/app-events'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
+import { coordinateQuerySync } from '@/shared/app-events/query-sync-coordinator'
 import { useReadModelFreshnessRecheck } from '@/shared/lib/useReadModelFreshnessRecheck'
 import { fetchThreadSnapshot } from '@/features/thread/runtime/state/thread-snapshot-cache'
 
@@ -58,9 +59,9 @@ export function useAgentThreadQueries(threadId: string) {
   const earliest = deadlines.length > 0 ? Math.min(...deadlines) : null
   useReadModelFreshnessRecheck(queryKeys.threads.snapshot(threadId), earliest)
   useResourceSync(hasEnvironmentTools && rootThreadId ? { kind: 'interactions' } : null, {
-    sync: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
-    },
+    sync: () => coordinateQuerySync(queryClient, queryKeys.threads.snapshot(threadId), () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
+    ),
     syncOn: (name, data) => name === 'changed' && readInteractionsChangedRoot(data) === rootThreadId,
   })
 

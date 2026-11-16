@@ -26,7 +26,7 @@
  *
  * <pre>{@code
  * {"type":"subscribed","resource":{...},"cursor":"<canonical decimal>"}
- * {"type":"event","resource":{...},"name":"version"|"realtime"|"changed"|"revision","data":{...},"cursor":"<optional canonical decimal>"}
+ * {"type":"event","resource":{...},"name":"version"|"realtime"|"changed"|"revision"|"snapshot","data":{...},"cursor":"<optional canonical decimal>"}
  * {"type":"resync","resource":{...}}
  * {"type":"heartbeat"}
  * {"type":"ide-use-accepted","revision":"<positive decimal>"}
@@ -34,9 +34,10 @@
  * }</pre>
  *
  * <p>{@code subscribed} 的 {@code cursor} 是订阅建立瞬间的 durable cursor（Thread version / Canvas
- * revision）；该 cursor 之后的事件保证送达，之前的由客户端随后拉取的 snapshot 覆盖。事件帧在 ack 帧之后才发送。非法帧（{@code
- * INVALID_FRAME}）或发送过载 （{@code BACKPRESSURE}）时发送连接级 error 帧并关闭连接；未知资源只回资源级 {@code
- * RESOURCE_NOT_FOUND} 并保持连接。{@code ide-use} 冲突回连接级 {@code IDE_USE_REJECTED} 并保持连接。服务端每 15 秒发送原生
- * ping，45 秒没有有效 pong 即撤销该连接的 IDE 使用证明并关闭连接。
+ * revision）；该 cursor 之后的事件保证送达，之前的由客户端随后拉取的 snapshot 覆盖。thread-tree 使用无 cursor 的 {@code snapshot}
+ * 事件，{@code data} 固定为 {@code {nodes:[HarnessThreadTreeNodeDTO]}} 完整小快照；变化由服务端按执行根串行投影并合并尾随更新。事件帧在
+ * ack 帧之后才发送。非法帧（{@code INVALID_FRAME}）或发送过载 （{@code BACKPRESSURE}）时发送连接级 error 帧并关闭连接；未知资源只回资源级
+ * {@code RESOURCE_NOT_FOUND} 并保持连接。{@code ide-use} 冲突回连接级 {@code IDE_USE_REJECTED} 并保持连接。服务端每 15
+ * 秒发送原生 ping，45 秒没有有效 pong 即撤销该连接的 IDE 使用证明并关闭连接。
  */
 package fun.fengwk.kkstudio.web.events;

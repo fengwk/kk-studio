@@ -21,7 +21,8 @@
  *     绝不携带 cursor。
  *   - canvas revision：data {"revision":"N"}，cursor 必带且与 data.revision 完全相等。
  *   - projects changed：data {"projectId":"<UUID>"}，只提示回读 Project Snapshot，不带 cursor。
- *   - thread-tree changed：resource 带真实执行根 id，data 恒为 {}，只提示回读该根的执行树，不带 cursor。
+ *   - thread-tree snapshot：resource 带真实执行根 id，data 为完整小树 {nodes:[HarnessThreadTreeNodeDTO]}，不带 Thread.version cursor。
+ *   - thread-tree changed：仅旧版内部提示，不用于浏览器数据流。
  *   - interactions changed：data {"rootThreadId":"<UUID>"}，只提示回读待处理交互与全局角标，不带 cursor。
  *   - environments changed：data 恒为 {}，只提示回读环境列表，不带 cursor。
  * - {"type":"resync","resource":{...}}：需要整体替换为全量快照。
@@ -33,7 +34,7 @@
  * resource 精确只有 kind+id 且 id 必须是 canonical UUID（小写十六进制）；
  * 全局 projects/interactions/environments resource 不带 id；
  * resource/name 组合必须合法（thread 仅 version|realtime，canvas 仅 revision，
- * projects|interactions|environments 仅 changed，thread-tree 仅 changed）；cursor 与
+ * projects|interactions|environments 仅 changed，thread-tree 仅 snapshot|changed）；cursor 与
  * version data 必须是 canonical 非负十进制字符串，durable 事件的 cursor 必须
  * 存在且与 data 值完全相等，提示型资源（projects/thread-tree/interactions/environments）
  * 的 ack cursor 恒为 '0' 且事件绝不携带 cursor；realtime data 必须是非数组 JSON
@@ -43,6 +44,13 @@
  * 到达 listeners。
  */
 
+import {
+  THREAD_EXECUTION_CONTROL_VALUES,
+  THREAD_KIND_VALUES,
+  THREAD_RUNTIME_STATUS_VALUES,
+  TURN_END_OUTCOME_VALUES,
+} from '@/shared/api/generated/contracts'
+import type { HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { isRecord } from '@/shared/lib/value'
 
@@ -62,7 +70,7 @@ export type ApplicationEventResource =
   | { kind: 'interactions' }
   | { kind: 'environments' }
 
-export type ApplicationEventName = 'version' | 'realtime' | 'changed' | 'revision'
+export type ApplicationEventName = 'version' | 'realtime' | 'changed' | 'revision' | 'snapshot'
 
 /** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
 type ApplicationEventCursor = string
@@ -137,6 +145,13 @@ type ApplicationEventProjectChangedEvent = {
 }
 
 /** thread-tree 的提示型 changed 事件：根 id 已在 resource 上，data 恒为空对象且绝不携带 cursor。 */
+type ApplicationEventTreeSnapshotEvent = {
+  type: 'event'
+  resource: ApplicationEventResource & { kind: 'thread-tree' }
+  name: 'snapshot'
+  data: { nodes: HarnessThreadTreeNodeDTO[] }
+}
+
 type ApplicationEventTreeChangedEvent = {
   type: 'event'
   resource: ApplicationEventResource & { kind: 'thread-tree' }
@@ -182,6 +197,7 @@ export type ApplicationEventServerMessage =
   | ApplicationEventThreadRealtimeEvent
   | ApplicationEventCanvasRevisionEvent
   | ApplicationEventProjectChangedEvent
+  | ApplicationEventTreeSnapshotEvent
   | ApplicationEventTreeChangedEvent
   | ApplicationEventInteractionsChangedEvent
   | ApplicationEventEnvironmentsChangedEvent
@@ -337,6 +353,9 @@ function decodeEvent(parsed: Record<string, unknown>): ApplicationEventServerMes
     case 'projects':
       return name === 'changed' ? decodeProjectChangedEvent(parsed, resource) : null
     case 'thread-tree':
+      if (name === 'snapshot') {
+        return decodeTreeSnapshotEvent(parsed, resource)
+      }
       return name === 'changed' ? decodeTreeChangedEvent(parsed, resource) : null
     case 'interactions':
       return name === 'changed' ? decodeInteractionsChangedEvent(parsed, resource) : null
@@ -392,6 +411,56 @@ function decodeProjectChangedEvent(
 }
 
 /** thread-tree 的提示型事件：根 id 在 resource 上，data 恒为空对象且绝不携带 cursor。 */
+function decodeTreeSnapshotEvent(
+  parsed: Record<string, unknown>,
+  resource: ApplicationEventResource & { kind: 'thread-tree' },
+): ApplicationEventServerMessage | null {
+  if (!hasExactFields(parsed.data, ['nodes']) || parsed.cursor !== undefined) {
+    return null
+  }
+  const data = parsed.data as Record<string, unknown>
+  if (!Array.isArray(data.nodes) || !data.nodes.every(isThreadTreeNode)) {
+    return null
+  }
+  return {
+    type: 'event',
+    resource,
+    name: 'snapshot',
+    data: { nodes: data.nodes as HarnessThreadTreeNodeDTO[] },
+  }
+}
+
+function isThreadTreeNode(value: unknown): value is HarnessThreadTreeNodeDTO {
+  if (!isRecord(value)) {
+    return false
+  }
+  const requiredFields = [
+    'threadId', 'kind', 'parentThreadId', 'name', 'agentName', 'execution', 'status',
+    'executionControl', 'turnCount', 'toolCallCount', 'outcome', 'updatedAt',
+  ]
+  return hasExactFields(value, requiredFields)
+    && isCanonicalUuid(value.threadId)
+    && (value.parentThreadId === null || isCanonicalUuid(value.parentThreadId))
+    && THREAD_KIND_VALUES.includes(value.kind as HarnessThreadTreeNodeDTO['kind'])
+    && typeof value.name === 'string'
+    && typeof value.agentName === 'string'
+    && isRecord(value.execution)
+    && hasExactFields(value.execution, ['driver', 'settings'])
+    && typeof value.execution.driver === 'string'
+    && THREAD_RUNTIME_STATUS_VALUES.includes(value.status as HarnessThreadTreeNodeDTO['status'])
+    && THREAD_EXECUTION_CONTROL_VALUES.includes(
+      value.executionControl as HarnessThreadTreeNodeDTO['executionControl'],
+    )
+    && Number.isSafeInteger(value.turnCount)
+    && Number.isSafeInteger(value.toolCallCount)
+    && (value.outcome === null
+      || TURN_END_OUTCOME_VALUES.includes(
+        value.outcome as NonNullable<HarnessThreadTreeNodeDTO['outcome']>,
+      ))
+    && typeof value.updatedAt === 'number'
+    && Number.isFinite(value.updatedAt)
+}
+
 function decodeTreeChangedEvent(
   parsed: Record<string, unknown>,
   resource: ApplicationEventResource & { kind: 'thread-tree' },
@@ -457,7 +526,11 @@ function isHintResourceKind(kind: ApplicationEventResourceKind): boolean {
 }
 
 function isEventName(value: unknown): value is ApplicationEventName {
-  return value === 'version' || value === 'realtime' || value === 'changed' || value === 'revision'
+  return value === 'version'
+    || value === 'realtime'
+    || value === 'changed'
+    || value === 'revision'
+    || value === 'snapshot'
 }
 
 function parseCursor(value: unknown): ApplicationEventCursor | null {

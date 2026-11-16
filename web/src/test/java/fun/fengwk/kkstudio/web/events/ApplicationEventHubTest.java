@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
@@ -36,9 +37,11 @@ import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Sink;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Subscription;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -57,6 +60,8 @@ class ApplicationEventHubTest {
   private static final UUID CANVAS = new UUID(0L, 2L);
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
+  private static final ResourceKey THREAD_TREE_KEY =
+      new ResourceKey(ResourceKind.THREAD_TREE, THREAD);
   private static final ResourceKey PROJECTS_KEY = new ResourceKey(ResourceKind.PROJECTS, null);
 
   /** Hub 构造注入的缓冲上限：足够小以便测试溢出折叠路径，同时 > 1 覆盖多信号缓冲。 */
@@ -117,6 +122,54 @@ class ApplicationEventHubTest {
             throw new IllegalStateException("cannot close subscription", error);
           }
         });
+  }
+
+  @Test
+  void treeSubscriptionsPushInitialAndResyncSnapshotsButSuppressUnchangedInvalidations() {
+    Queue<Runnable> tasks = new ArrayDeque<>();
+    AtomicReference<Consumer<HarnessInvalidationChanges.Event>> changes = new AtomicReference<>();
+    when(executionTreeChangeSource.subscribe(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              changes.set(invocation.getArgument(1));
+              return subscribed(0L, () -> {});
+            });
+    HarnessThreadTreeNodeDTO node = new HarnessThreadTreeNodeDTO();
+    node.setThreadId(THREAD.toString());
+    node.setName("root");
+    List<HarnessThreadTreeNodeDTO> nodes = List.of(node);
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(tasks::add, ignored -> nodes);
+    ApplicationEventHub snapshotHub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            projectChangeSource,
+            environmentChangeSource,
+            () -> BUFFER_CAPACITY,
+            publisher);
+    List<Signal> received = new ArrayList<>();
+    Subscription subscription = snapshotHub.subscribe(THREAD_TREE_KEY, received::add);
+
+    tasks.remove().run();
+    assertTrue(received.isEmpty());
+    subscription.activate();
+    assertEquals(List.of(new Signal.ThreadTreeSnapshot(nodes)), received);
+
+    changes.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
+    tasks.remove().run();
+    assertEquals(1, received.size());
+
+    changes.get().accept(new HarnessInvalidationChanges.Event.Resync());
+    tasks.remove().run();
+    assertEquals(
+        List.of(new Signal.ThreadTreeSnapshot(nodes), new Signal.ThreadTreeSnapshot(nodes)),
+        received);
+
+    subscription.close();
+    snapshotHub.close();
   }
 
   @Test

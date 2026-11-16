@@ -255,9 +255,8 @@ attempt fence，不回广播、不回查 head；连接重连不重放追帧提�
 浏览器据此把 IDE 视图绑定到当前连接，而不是沿用旧代际。
 资源为 `{kind:thread|canvas|thread-tree,id}` 或全局 `{kind:projects|interactions|environments}`；
 Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` 是唯一的真负载事件，
-`projects` / `thread-tree` / `interactions` / `environments` 只发失效提示，由客户端回读权威事实。
-订阅先注册上游再读 cursor，sender 先排 subscribed ack 后 activate，
-过滤陈旧版本；缓冲溢出折叠为 resync。
+`projects` / `interactions` / `environments` 发失效提示；thread-tree 订阅、重连与 resync 发送 `{nodes:[HarnessThreadTreeNodeDTO]}` 完整小快照，`snapshot` 不带伪造 Thread.version cursor。执行树变化按 root 共用一个异步在途投影，变化期间只标记 dirty 并在完成后补一次尾随投影；内容未变不重复发送。投影在线程池中查询，不阻塞 PostgreSQL listener；队列有界，退订释放投影，投影失败发送 resync。
+订阅先注册上游再读 cursor，sender 先排 subscribed ack 后 activate，首帧通过既有激活缓冲保证 ack 在前；缓冲溢出折叠为 resync。
 
 Thread 的首个本地订阅同时向平台订阅服务登记 `(threadId, nodeInstanceId)` 租约，末个订阅释放或 Hub close
 时注销；登记失败只影响跨节点投递，本机 realtime 上游照常建立，并向该 Thread 缓冲一次 resync。租约随节点

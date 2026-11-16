@@ -5,6 +5,7 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.DateTimeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
@@ -50,6 +51,8 @@ final class EventFrameCodec {
       JsonMapper.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+          .disable(DateTimeFeature.WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS)
           .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
@@ -192,6 +195,15 @@ final class EventFrameCodec {
       node.put("name", "changed");
       ObjectNode data = NODES.objectNode();
       data.put("projectId", projectChanged.projectId().toString());
+      node.set("data", data);
+    } else if (signal instanceof Signal.ThreadTreeSnapshot snapshot) {
+      if (resource.kind() != ResourceKind.THREAD_TREE) {
+        throw new IllegalArgumentException(
+            "thread-tree snapshot signal requires the thread-tree resource");
+      }
+      node.put("name", "snapshot");
+      ObjectNode data = NODES.objectNode();
+      data.set("nodes", MAPPER.valueToTree(snapshot.nodes()));
       node.set("data", data);
     } else if (signal instanceof Signal.ThreadTreeChanged) {
       if (resource.kind() != ResourceKind.THREAD_TREE) {

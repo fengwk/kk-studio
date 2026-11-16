@@ -159,6 +159,34 @@ describe('decodeServerMessage', () => {
     }
   })
 
+  it('decodes authoritative thread-tree snapshots without a cursor', () => {
+    const node = {
+      threadId: THREAD_ID,
+      kind: 'USER',
+      parentThreadId: null,
+      name: 'root',
+      agentName: 'agent',
+      execution: { driver: 'builtin', settings: {} },
+      status: 'IDLE',
+      executionControl: 'RUNNABLE',
+      turnCount: 0,
+      toolCallCount: 0,
+      outcome: null,
+      updatedAt: 0,
+    }
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [node] },
+    }))).toEqual({
+      type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [node] },
+    })
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [node] }, cursor: '1',
+    }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [{ ...node, extra: true }] },
+    }))).toBeNull()
+  })
+
   it('decodes hint-resource changed events without a cursor', () => {
     expect(
       decodeServerMessage(

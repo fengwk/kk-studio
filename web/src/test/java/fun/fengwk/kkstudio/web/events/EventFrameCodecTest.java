@@ -3,8 +3,10 @@ package fun.fengwk.kkstudio.web.events;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
@@ -14,6 +16,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
@@ -298,6 +301,28 @@ class EventFrameCodecTest {
             + THREAD
             + "\"}}",
         CODEC.event(INTERACTIONS_KEY, new Signal.InteractionsChanged(THREAD)));
+  }
+
+  @Test
+  void encodesAuthoritativeTreeSnapshotWithoutInventingVersionCursor() {
+    HarnessThreadTreeNodeDTO treeNode = new HarnessThreadTreeNodeDTO();
+    treeNode.setThreadId("00000000-0000-0000-0000-000000000001");
+    treeNode.setName("root");
+    treeNode.setUpdatedAt(Instant.parse("2026-08-05T00:00:00Z"));
+
+    var frame =
+        JsonMapper.builder()
+            .build()
+            .readTree(
+                CODEC.event(THREAD_TREE_KEY, new Signal.ThreadTreeSnapshot(List.of(treeNode))));
+
+    assertEquals("event", frame.path("type").asText());
+    assertEquals("thread-tree", frame.path("resource").path("kind").asText());
+    assertEquals("snapshot", frame.path("name").asText());
+    assertEquals(1, frame.path("data").path("nodes").size());
+    assertEquals("root", frame.path("data").path("nodes").get(0).path("name").asText());
+    assertTrue(frame.path("data").path("nodes").get(0).path("updatedAt").isNumber());
+    assertTrue(frame.path("cursor").isMissingNode());
   }
 
   @Test

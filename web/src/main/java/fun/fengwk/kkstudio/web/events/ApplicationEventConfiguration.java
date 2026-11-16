@@ -10,12 +10,16 @@ import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
+import fun.fengwk.kkstudio.harness.api.ThreadTreeNode;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifications;
 import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationBinding;
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
@@ -38,8 +42,12 @@ import javax.sql.DataSource;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 /** 事件通道组合：严格帧 codec 与传输无关的 {@link ApplicationEventHub}。 */
@@ -219,7 +227,8 @@ public class ApplicationEventConfiguration {
       CanvasVersionEventSource canvasVersionSource,
       ProjectChangeNotifications projectChangeNotifications,
       EnvironmentChangeNotifications environmentChangeNotifications,
-      Supplier<ApplicationEventSettings> settingsProvider) {
+      Supplier<ApplicationEventSettings> settingsProvider,
+      ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher) {
     return new ApplicationEventHub(
         harnessChanges,
         realtimeSource,
@@ -227,7 +236,41 @@ public class ApplicationEventConfiguration {
         canvasVersionSource,
         projectChangeNotifications,
         environmentChangeNotifications,
-        () -> settingsProvider.get().queueCapacity());
+        () -> settingsProvider.get().queueCapacity(),
+        threadTreeSnapshotPublisher);
+  }
+
+  @Bean(name = "applicationEventTreeExecutor", destroyMethod = "shutdownNow")
+  public ThreadPoolExecutor applicationEventTreeExecutor() {
+    return new ThreadPoolExecutor(
+        2,
+        2,
+        0,
+        TimeUnit.MILLISECONDS,
+        new ArrayBlockingQueue<>(128),
+        Thread.ofPlatform().name("application-event-tree-", 0).daemon(true).factory(),
+        new ThreadPoolExecutor.AbortPolicy());
+  }
+
+  @Bean
+  public ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher(
+      HarnessRuntime runtime, @Qualifier("applicationEventTreeExecutor") Executor executor) {
+    return new ThreadTreeSnapshotPublisher(
+        executor,
+        rootThreadId -> {
+          List<ThreadTreeNode> nodes = runtime.getThreadTree(rootThreadId);
+          if (nodes.stream()
+              .anyMatch(
+                  node ->
+                      node.thread().id().equals(rootThreadId)
+                          && node.thread().kind() == ThreadKind.COMPACTION)) {
+            throw new IllegalArgumentException("thread tree root is not publicly addressable");
+          }
+          return HarnessRuntimeResponseMapper.toThreadTreeDtos(
+              nodes.stream()
+                  .filter(node -> node.thread().kind() != ThreadKind.COMPACTION)
+                  .toList());
+        });
   }
 
   /** 全应用事件连接共享一个 heartbeat scheduler；每次 tick 只做异步发送队列入队。 */

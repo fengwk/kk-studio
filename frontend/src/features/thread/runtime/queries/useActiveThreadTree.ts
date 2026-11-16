@@ -3,6 +3,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { useResourceSync } from '@/shared/app-events/useResourceSync'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { coordinateQuerySync } from '@/shared/app-events/query-sync-coordinator'
+import type { HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
 import { projectThreadTree } from '@/features/thread/runtime/thread-panel/active-thread-tree'
 
 /**
@@ -13,14 +15,14 @@ import { projectThreadTree } from '@/features/thread/runtime/thread-panel/active
  * 最新数据：无数据时给出错误与重试，有旧数据时保留并标记刷新失败。
  *
  * 执行树变化由服务端按真实执行根聚合后推送（子代理写入也会聚合到 root），因此这里没有固定轮询：
- * subscribed（首订与每次重连重订阅）与 resync 都回读，changed 只回读本根。
+ * subscribed（首订与每次重连重订阅）及 resync 回读，正常变化直接应用权威小快照。
  */
 export function useActiveThreadTree(boundThreadId: string | null) {
   const queryClient = useQueryClient()
   const treeQuery = useQuery({
     queryKey: queryKeys.threads.tree(boundThreadId ?? ''),
-    queryFn: async () => {
-      const nodes = await harnessService.getThreadTree(boundThreadId ?? '')
+    queryFn: async ({ signal }) => {
+      const nodes = await harnessService.getThreadTree(boundThreadId ?? '', { signal })
       // 非法树不进入缓存：React Query 保留上一次成功结果，并单独暴露失败。
       const tree = projectThreadTree(nodes)
       if (tree.root == null) {
@@ -39,11 +41,36 @@ export function useActiveThreadTree(boundThreadId: string | null) {
     if (boundThreadId == null) {
       return
     }
-    void queryClient.invalidateQueries({ queryKey: queryKeys.threads.tree(boundThreadId) })
+    void coordinateQuerySync(queryClient, queryKeys.threads.tree(boundThreadId), () =>
+      queryClient.invalidateQueries({ queryKey: queryKeys.threads.tree(boundThreadId) }),
+    )
   }, [queryClient, boundThreadId])
   useResourceSync(actualRootThreadId == null ? null : { kind: 'thread-tree', id: actualRootThreadId }, {
     sync: invalidateTree,
-    syncOn: (name) => name === 'changed',
+    onEvent: (name, data) => {
+      if (name !== 'snapshot' || boundThreadId == null || data == null || typeof data !== 'object') {
+        return
+      }
+      const nodes = (data as { nodes?: unknown }).nodes
+      if (!Array.isArray(nodes)) {
+        return
+      }
+      const typedNodes = nodes as HarnessThreadTreeNodeDTO[]
+      let tree
+      try {
+        tree = projectThreadTree(typedNodes)
+      } catch {
+        invalidateTree()
+        return
+      }
+      if (tree.root?.threadId !== actualRootThreadId || !tree.nodesById.has(boundThreadId)) {
+        invalidateTree()
+        return
+      }
+      const key = queryKeys.threads.tree(boundThreadId)
+      void queryClient.cancelQueries({ queryKey: key })
+      queryClient.setQueryData(key, typedNodes)
+    },
   })
   const { rows, historyRows, nodesById, root } = projection
   const activeCount = useMemo(

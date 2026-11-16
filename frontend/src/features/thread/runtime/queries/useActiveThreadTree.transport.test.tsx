@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import { SubagentTreePanel } from '../panes/SubagentTreePanel'
@@ -11,11 +12,12 @@ const transport = vi.fn()
 
 const ROOT = '00000000-0000-4000-8000-000000000001'
 const CHILD = '00000000-0000-4000-8000-000000000002'
-function node(threadId: string, parentThreadId: string | null) {
+const OTHER_ROOT = '00000000-0000-4000-8000-000000000003'
+function node(threadId: string, parentThreadId: string | null): HarnessThreadTreeNodeDTO {
   return {
-    threadId, parentThreadId, name: 'main', agentName: 'Explorer',
+    threadId, kind: parentThreadId == null ? 'USER' : 'SUBAGENT', parentThreadId,
+    name: 'main', agentName: 'Explorer', execution: { driver: 'builtin', settings: {} },
     updatedAt: 1774958400.125,
-    model: { modelName: 'm', variant: 'default' },
     executionControl: 'RUNNABLE', status: 'IDLE', turnCount: 3, toolCallCount: 5, outcome: 'COMPLETED',
   }
 }
@@ -76,6 +78,60 @@ describe('execution tree HTTP Instant contract', () => {
     await act(async () => { await Promise.resolve() })
     expect(socket.sentMessages()).toEqual([])
     expect(screen.queryByRole('link')).not.toBeInTheDocument()
+  })
+
+  it('applies authoritative tree snapshots directly without an event-triggered GET', async () => {
+    const initial = [node(ROOT, null), node(CHILD, ROOT)]
+    reply(initial)
+    const { client, sockets } = renderPanel()
+    await screen.findByRole('link')
+    const socket = sockets.openLatest()
+    await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
+    socket.emitServer({
+      type: 'subscribed', resource: { kind: 'thread-tree', id: ROOT }, cursor: '0',
+    })
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
+    const callsBeforeSnapshot = transport.mock.calls.length
+    const pushed = [node(ROOT, null), { ...node(CHILD, ROOT), name: 'pushed latest' }]
+
+    socket.emitServer({
+      type: 'event', resource: { kind: 'thread-tree', id: ROOT }, name: 'snapshot',
+      data: { nodes: pushed },
+    })
+
+    await waitFor(() => expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(pushed))
+    expect(transport).toHaveBeenCalledTimes(callsBeforeSnapshot)
+    expect(screen.getByRole('link')).toHaveTextContent('pushed latest')
+  })
+
+  it('does not write a snapshot from an old root scope into the bound cache', async () => {
+    const initial = [node(ROOT, null), node(CHILD, ROOT)]
+    reply(initial)
+    const { client, sockets } = renderPanel()
+    await screen.findByRole('link')
+    const socket = sockets.openLatest()
+    await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
+    let resolveRefresh!: (response: Response) => void
+    transport.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => { resolveRefresh = resolve }),
+    )
+    const oldScope = [node(OTHER_ROOT, null), node(CHILD, OTHER_ROOT)]
+
+    act(() => socket.emitServer({
+      type: 'event',
+      resource: { kind: 'thread-tree', id: ROOT },
+      name: 'snapshot',
+      data: { nodes: oldScope },
+    }))
+
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
+    expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(initial)
+    await act(async () => {
+      resolveRefresh(
+        new Response(JSON.stringify(initial), { headers: { 'Content-Type': 'application/json' } }),
+      )
+      await Promise.resolve()
+    })
   })
 
   it('keeps the valid cached tree and root subscription when a refresh returns a foreign tree', async () => {

@@ -98,8 +98,11 @@ describe('useHarnessThreadRealtime', () => {
     // realtime 事件只走 overlay reducer，绝不触发 invalidate。
     act(() => emitRealtime(sockets, realtime(1, 'partial')))
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('partial'))
+    expect(invalidate).not.toHaveBeenCalled()
+
+    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
     act(() => {
-      socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' })
       socket.emitServer({
         type: 'event',
         resource: threadResource,
@@ -110,10 +113,12 @@ describe('useHarnessThreadRealtime', () => {
       socket.emitServer({ type: 'resync', resource: threadResource })
       socket.emitServer({ type: 'error', resource: threadResource, code: 'SUBSCRIBE_FAILED', message: 'boom' })
     })
+    // 多个 durable 信号可合并为一个在途/尾随对账，但不会被 realtime overlay 代替。
+    await waitFor(() => expect(invalidate.mock.calls.length).toBeGreaterThan(1))
+    expect(invalidate.mock.calls.length).toBeLessThanOrEqual(3)
     // version 前进不重建订阅：wire 上始终只有一条 subscribe。
     rerender({ version: '43' })
     expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
-    expect(invalidate).toHaveBeenCalledTimes(4)
   })
 
   it('requests one catchup per subscription and reconnect while the model is RUNNING', async () => {
@@ -1098,10 +1103,15 @@ describe('useHarnessThreadRealtime', () => {
     await waitFor(() => expect(result.current?.modelStream?.attempt).toBe(2))
     emitRealtime(sockets, realtime(5, 'five', THREAD_ID, 'inv-1', 2))
     emitRealtime(sockets, checkpoint(4, THREAD_ID, 'inv-1', 2))
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
+    await act(async () => {
+      await sleep(0)
+    })
+    // attempt 2 的同 query 读取先排在 attempt 1 在途读取之后，不并发取消旧请求。
+    expect(invalidate).toHaveBeenCalledTimes(1)
 
-    // 旧 attempt 的 promise 完成不得释放新 attempt 的 in-flight。
     firstRefresh.resolve()
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(2))
+    // 旧 attempt 的 promise 完成不得释放新 attempt 的 in-flight。
     await act(async () => {
       await sleep(20)
     })
