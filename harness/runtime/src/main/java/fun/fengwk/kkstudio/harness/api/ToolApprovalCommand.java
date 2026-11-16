@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.api;
 
+import fun.fengwk.kkstudio.harness.api.entry.CanonicalNames;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApprovalDecision;
 
 import java.util.Objects;
@@ -17,30 +18,19 @@ public record ToolApprovalCommand(
     String actor,
     String reason) {
 
+  /** 决策说明的字符上限。 */
+  private static final int REASON_MAX_CHARS = 1024;
+
   public ToolApprovalCommand {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(toolInvocationId, "toolInvocationId");
     decision = Objects.requireNonNull(decision, "decision");
     Objects.requireNonNull(decisionId, "decisionId");
-    actor = requireCanonical(actor, "actor", 128);
-    reason = reason == null || reason.isBlank() ? null : nullableCanonical(reason, "reason", 1024);
-  }
-
-  private static String requireCanonical(String value, String field, int maxLength) {
-    Objects.requireNonNull(value, field);
-    return nullableCanonical(value, field, maxLength);
-  }
-
-  private static String nullableCanonical(String value, String field, int maxLength) {
-    if (value == null) {
-      return null;
-    }
-    if (!value.equals(value.strip())) {
-      throw new IllegalArgumentException(field + " must not contain surrounding whitespace");
-    }
-    if (value.length() > maxLength) {
-      throw new IllegalArgumentException(field + " must be <= " + maxLength + " characters");
-    }
-    return value;
+    actor = CanonicalNames.requireName(actor, "actor");
+    // 空白 reason 与缺失同义：都不记录决策说明。
+    reason =
+        reason == null || reason.isBlank()
+            ? null
+            : CanonicalNames.requireName(reason, "reason", REASON_MAX_CHARS);
   }
 }

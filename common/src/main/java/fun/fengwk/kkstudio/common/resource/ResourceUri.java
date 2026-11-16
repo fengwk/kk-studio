@@ -46,10 +46,6 @@ public final class ResourceUri {
     return List.copyOf(ids);
   }
 
-  public static String files(UUID id) {
-    return "resource://files/" + Objects.requireNonNull(id, "id");
-  }
-
   public static String skills(
       String packageName, String version, String skill, String relativePath) {
     List<String> segments = new ArrayList<>();

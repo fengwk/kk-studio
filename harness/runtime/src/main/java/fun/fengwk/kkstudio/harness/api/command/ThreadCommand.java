@@ -1,9 +1,10 @@
 package fun.fengwk.kkstudio.harness.api.command;
 
+import fun.fengwk.kkstudio.common.hash.Sha256;
+
 import java.time.Instant;
 import java.util.Objects;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * 不可变的 durable Thread mailbox command aggregate。
@@ -26,8 +27,6 @@ public record ThreadCommand(
     Instant cancelledAt,
     Instant createdAt) {
 
-  private static final Pattern REQUEST_HASH_PATTERN = Pattern.compile("[0-9a-f]{64}");
-
   public ThreadCommand {
     Objects.requireNonNull(threadId, "threadId");
     if (sequence <= 0) {
@@ -35,9 +34,7 @@ public record ThreadCommand(
     }
     payload = Objects.requireNonNull(payload, "payload");
     Objects.requireNonNull(idempotencyKey, "idempotencyKey");
-    if (requestHash == null || !REQUEST_HASH_PATTERN.matcher(requestHash).matches()) {
-      throw new IllegalArgumentException("requestHash must be 64 lowercase hexadecimal characters");
-    }
+    requestHash = Sha256.requireHex(requestHash, "requestHash");
     if (appliedEntryId != null && stopRequestId != null) {
       throw new IllegalArgumentException(
           "appliedEntryId and stopRequestId must not both be present");

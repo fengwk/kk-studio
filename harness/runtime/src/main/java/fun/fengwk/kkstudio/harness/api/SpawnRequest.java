@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.api;
 
+import fun.fengwk.kkstudio.common.hash.Sha256;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommandType;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
@@ -12,7 +13,6 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
-import java.util.regex.Pattern;
 
 /**
  * 统一的 Agent 创建请求（子代理 task、插件 Prompt 任务、Issue 任务与压缩共用）：一次「创建（或续用）Agent Thread + 首批输入 + 票据」的全部事实。
@@ -80,8 +80,6 @@ public record SpawnRequest(
         null);
   }
 
-  private static final Pattern HASH = Pattern.compile("[0-9a-f]{64}");
-
   public SpawnRequest {
     Objects.requireNonNull(threadId, "threadId");
     Objects.requireNonNull(settings, "settings");
@@ -94,9 +92,7 @@ public record SpawnRequest(
     if (kind == ThreadKind.USER) {
       throw new IllegalArgumentException("user-created threads are accepted via acceptCommands");
     }
-    if (requestHash == null || !HASH.matcher(requestHash).matches()) {
-      throw new IllegalArgumentException("requestHash must be lowercase SHA-256 hex");
-    }
+    requestHash = Sha256.requireHex(requestHash, "requestHash");
     if ((continuation == null) == (sessionId == null)) {
       throw new IllegalArgumentException(
           "a new thread needs a sessionId and a continued thread must not carry one");
