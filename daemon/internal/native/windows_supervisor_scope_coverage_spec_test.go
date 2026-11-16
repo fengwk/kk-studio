@@ -205,7 +205,7 @@ func TestWindowsJobName_HashAndOpenRoundTrip(t *testing.T) {
 		t.Fatalf("open Job created under same hashed name: %v", err)
 	}
 	defer windows.CloseHandle(opened)
-	if active, err := jobActiveProcesses(opened); err != nil || active != 0 {
+	if active, err := jobActiveProcessesWithAPI(opened, nativeWindowsJobAccountingAPI{}); err != nil || active != 0 {
 		t.Fatalf("newly created named Job accounting = %d, %v; want empty", active, err)
 	}
 }

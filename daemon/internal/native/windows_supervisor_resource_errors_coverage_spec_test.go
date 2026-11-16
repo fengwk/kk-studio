@@ -93,16 +93,6 @@ func TestWindowsSupervisor_CloseResourcesAggregatesHandleFailures(t *testing.T) 
 	}
 }
 
-// TestWindowsSupervisor_NativeWindowsPipeWrapperCreatesPipe verifies the default native pipe path remains wired.
-func TestWindowsSupervisor_NativeWindowsPipeWrapperCreatesPipe(t *testing.T) {
-	file, child, err := windowsPipe(true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer file.Close()
-	defer windows.CloseHandle(child)
-}
-
 // TestWindowsSupervisor_NativeJobCloseReportsInvalidHandle verifies native Job handle closure surfaces Win32 errors.
 func TestWindowsSupervisor_NativeJobCloseReportsInvalidHandle(t *testing.T) {
 	if err := (nativeWindowsJobCreationAPI{}).CloseHandle(windows.Handle(0x12345678)); err == nil {

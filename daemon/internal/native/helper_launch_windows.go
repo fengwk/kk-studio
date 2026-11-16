@@ -84,10 +84,6 @@ func (nativeWindowsPipeAPI) NewFile(handle uintptr, name string) *os.File {
 	return os.NewFile(handle, name)
 }
 
-func windowsPipe(parentWrites bool) (*os.File, windows.Handle, error) {
-	return windowsPipeWithAPI(parentWrites, nativeWindowsPipeAPI{})
-}
-
 func windowsPipeWithAPI(parentWrites bool, api windowsPipeAPI) (*os.File, windows.Handle, error) {
 	sa := windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), InheritHandle: 1}
 	var readHandle, writeHandle windows.Handle
