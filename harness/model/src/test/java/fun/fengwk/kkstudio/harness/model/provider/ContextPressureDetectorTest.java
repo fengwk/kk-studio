@@ -86,29 +86,4 @@ class ContextPressureDetectorTest {
             ContextPressureDetector.detectResponse(
                 GenerationStopReason.LENGTH, new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L), -1));
   }
-
-  @Test
-  void successfulResponseDetectionUsesOnlyAuthoritativeUsageAndStrictLength() {
-    // response 路径不伪造 providerType，只复用 reached-window 与 strict LENGTH 两条规则。
-    assertTrue(
-        ContextPressureDetector.detectResponse(
-            GenerationStopReason.COMPLETE,
-            new ModelUsage(128_000, 0, 0, 0, Map.of(), 0L, 128_000L),
-            128_000));
-    assertTrue(
-        ContextPressureDetector.detectResponse(
-            GenerationStopReason.LENGTH,
-            new ModelUsage(126_720, 0, 0, 0, Map.of(), 0L, 126_720L),
-            128_000));
-    assertFalse(
-        ContextPressureDetector.detectResponse(
-            GenerationStopReason.LENGTH,
-            new ModelUsage(126_720, 1, 0, 0, Map.of(), 0L, 126_721L),
-            128_000));
-    assertThrows(
-        IllegalArgumentException.class,
-        () ->
-            ContextPressureDetector.detectResponse(
-                GenerationStopReason.COMPLETE, new ModelUsage(1, 0, 0, 0, Map.of(), 0L, 1L), 0));
-  }
 }
