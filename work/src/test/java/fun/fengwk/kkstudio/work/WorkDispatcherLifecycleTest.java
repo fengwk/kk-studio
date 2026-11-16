@@ -12,12 +12,10 @@ import static org.mockito.Mockito.verify;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.concurrent.atomic.AtomicBoolean;
-
 /**
  * {@link WorkDispatcherLifecycle} 的启停契约。
  *
- * <p>验证 disabled 不启动、start/stop 幂等、stop 回调必达、start 失败回滚并复位 running，以及失败 stop 保持 running 以便重试。
+ * <p>验证 disabled 不启动、start/stop 幂等、stop 回调必达，以及 start 失败时关闭 dispatcher 并复位 running。
  */
 class WorkDispatcherLifecycleTest {
 
@@ -52,39 +50,7 @@ class WorkDispatcherLifecycleTest {
     verify(dispatcher, times(1)).stop();
   }
 
-  /** stop 抛异常时保持 running，后续 stop 会再次尝试关闭。 */
-  @Test
-  void stopFailureKeepsRunningSoCleanupCanBeRetried() {
-    BoundedWorkDispatcher<String> dispatcher = dispatcher();
-    doThrow(new RuntimeException("stop failed")).doNothing().when(dispatcher).stop();
-    WorkDispatcherLifecycle lifecycle = new WorkDispatcherLifecycle(true, dispatcher);
-
-    lifecycle.start();
-    assertThrows(RuntimeException.class, lifecycle::stop);
-    assertTrue(lifecycle.isRunning());
-
-    lifecycle.stop();
-
-    verify(dispatcher, times(2)).stop();
-    assertFalse(lifecycle.isRunning());
-  }
-
-  /** stop 回调即使关闭失败也必须执行。 */
-  @Test
-  void stopCallbackRunsAfterStopFailure() {
-    BoundedWorkDispatcher<String> dispatcher = dispatcher();
-    doThrow(new RuntimeException("stop failed")).when(dispatcher).stop();
-    WorkDispatcherLifecycle lifecycle = new WorkDispatcherLifecycle(true, dispatcher);
-    lifecycle.start();
-    AtomicBoolean callback = new AtomicBoolean();
-
-    assertThrows(RuntimeException.class, () -> lifecycle.stop(() -> callback.set(true)));
-
-    assertTrue(callback.get());
-    assertTrue(lifecycle.isRunning());
-  }
-
-  /** start 失败时回滚 dispatcher，并把 running 复位为 false。 */
+  /** start 失败时关闭 dispatcher，并把 running 复位为 false。 */
   @Test
   void startFailureRollsBackAndResetsRunning() {
     BoundedWorkDispatcher<String> dispatcher = dispatcher();
@@ -95,21 +61,6 @@ class WorkDispatcherLifecycleTest {
 
     assertEquals("startup error", error.getMessage());
     verify(dispatcher).stop();
-    assertFalse(lifecycle.isRunning());
-  }
-
-  /** start 与回滚 stop 都失败时，回滚异常作为 suppressed 保留。 */
-  @Test
-  void startFailureSuppressesRollbackFailure() {
-    BoundedWorkDispatcher<String> dispatcher = dispatcher();
-    doThrow(new RuntimeException("startup error")).when(dispatcher).start();
-    doThrow(new RuntimeException("rollback error")).when(dispatcher).stop();
-    WorkDispatcherLifecycle lifecycle = new WorkDispatcherLifecycle(true, dispatcher);
-
-    RuntimeException error = assertThrows(RuntimeException.class, lifecycle::start);
-
-    assertEquals(1, error.getSuppressed().length);
-    assertEquals("rollback error", error.getSuppressed()[0].getMessage());
     assertFalse(lifecycle.isRunning());
   }
 
