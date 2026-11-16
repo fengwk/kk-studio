@@ -160,7 +160,6 @@ export class ApplicationEventConnection {
         return
       }
       this.socketOpen = true
-      this.backoffIndex = 0
       this.setState('connecting', { kind: 'connecting', transportOpen: true })
       this.onOpen?.()
     }
@@ -262,6 +261,9 @@ export class ApplicationEventConnection {
 
   private completeHandshake(heartbeatIntervalMillis: number): void {
     this.clearHandshakeTimer()
+    // 只有握手完成才证明服务端可用：transport open 后立即关闭/不发 connected 的
+    // 服务端必须继续退避，否则每 250ms 无限重试。
+    this.backoffIndex = 0
     this.heartbeatIntervalMillis = heartbeatIntervalMillis
     this.lastReceivedAt = Date.now()
     this.setState('ready', null)
