@@ -14,7 +14,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
@@ -174,9 +173,9 @@ class ThreadProcessorCompactionTriggerTest extends ThreadProcessorTestBase {
     assertTrue(inTx(fixture, tx -> tx.threads().listChildren(threadId).isEmpty()).booleanValue());
   }
 
-  /** 压缩 turn 本身要求再次压缩是 Driver 契约违背：立即失败，绝不在同一路径上无限重规划。 */
+  /** 压缩 turn 本身要求再次压缩是 Driver 契约违背：落 durable FAILED，绝不在同一路径上无限重规划。 */
   @Test
-  void compactionTurnRequestingAnotherCompactionFailsFast() {
+  void compactionTurnRequestingAnotherCompactionWritesDurableFailedTurn() {
     Fixture fixture = fixture();
     ClosedTurnBaseline baseline =
         seedCompactionReadyClosedTurn(fixture.store, overThresholdUsage());
@@ -188,10 +187,15 @@ class ThreadProcessorCompactionTriggerTest extends ThreadProcessorTestBase {
     fixture.resolver.results.add(new TurnResolver.CompactionRequired(CONTEXT_WINDOW));
     fixture.resolver.results.add(new TurnResolver.CompactionRequired(CONTEXT_WINDOW));
 
-    IllegalStateException error =
-        assertThrows(IllegalStateException.class, () -> fixture.nextClaim(threadId));
+    assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(threadId));
 
-    assertTrue(error.getMessage().contains("COMPACTION turn"), error.getMessage());
+    EntryPath path = path(fixture.store, threadId);
+    AssistantErrorPayload error =
+        assertInstanceOf(
+            AssistantErrorPayload.class, path.entries().get(path.entries().size() - 2).payload());
+    assertEquals("TURN_RESOLVE_FAILED", error.error().code());
+    TurnEndPayload end = assertInstanceOf(TurnEndPayload.class, path.head().payload());
+    assertEquals(TurnEndOutcome.FAILED, end.outcome());
   }
 
   /** 追加一个以 compact 成功回执结束、仍要求续作的普通 INPUT 回合。 */
