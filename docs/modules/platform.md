@@ -542,7 +542,7 @@ Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harne
 
 全局资源以 `resource://files/<uuid>` 标识；技能内容使用 `resource://skills/<package>/<version>/<skill>/<relativePath>`。路径段按 UTF-8 百分号编码，解析时也接受未编码的路径段。URI 不含对象存储键、预签名地址或内部网络位置。
 
-`read` 的 URI 由平台读取器处理，本地绝对路径交给所选 Environment；没有 Environment 时本地路径返回明确错误。文件资源按 Blob UUID 与 Session 引用鉴权。技能 URI 先校验包的当前版本与技能存在，把归档 Blob 登记为当前 Session 的持有，再只下载归档索引中目标条目的压缩范围并解压，解压后的大小与 CRC32 必须与索引一致；文本沿用 `TextReadWindow` 的窗口契约，`.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` 以二进制内容返回。
+`read` 的 URI 由平台读取器处理，本地绝对路径交给所选 Environment；没有 Environment 时本地路径返回明确错误。`resource://files/<uuid>` 必须是 ACTIVE Blob，读取时登记为当前 Session 的持有。技能 URI 先校验包的当前版本与技能存在，把归档 Blob 登记为当前 Session 的持有，再只下载归档索引中目标条目的压缩范围并解压，解压后的大小与 CRC32 必须与索引一致；文本沿用 `TextReadWindow` 的窗口契约，`.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` 以二进制内容返回。
 
 `session_blob_ref(session_id, blob_id)` 以 `(session_id, blob_id)` 唯一记录每个 Session 对 Blob 的持有。一条引用对应 Blob `ref_count` 的一次 retain：资源在 `read`、用户消息或工具输出传递时登记到当前 Session，图片和其他媒体结果仍保留原始 `resource://` URI；重复登记幂等，Session fork 为复制的资源各自登记持有；删除 Session 时在删除 Session 行前释放全部引用。只有最后一个持有引用释放后，Blob 才转入 `DELETING`，由异步对象回收处理。
 

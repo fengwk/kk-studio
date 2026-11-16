@@ -88,7 +88,7 @@ task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。模�
 
 task 的进度与终态都经 `task.result` details 表达：运行中为 running，终态为 completed、failed 或 cancelled；details 固定为 `{kind, thread_id, status, session_id, subagent_type, replayed}`，正文是 Join 冻结的报告，失败与取消时为 `Subagent failed: ...` / `Subagent cancelled: ...`，有 partial result 时追加在正文末尾。
 
-`NOTIFY_PARENT` 交付的 `SUBAGENT_RESULT` 通知是 `<subagent_result>` 信封（属性为 thread_id、agent 与 state），依次包含本次任务原文、结果或分离的 error 与 partial_result。正文正确转义；模型的 `<error>` 详情最多 1000 个 Unicode 码点（含英文 ` [TRUNCATED]` 标记、转义前计数、不拆代理对），任务原文、成功报告与普通 partial_result 不截断；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
+`NOTIFY_PARENT` 交付的 `SUBAGENT_RESULT` 通知是 `<subagent_result>` 信封（属性为 thread_id、agent 与 state），依次包含一段历史说明、本次任务原文、结果或分离的 error 与 partial_result；失败与取消时末尾还有继续既有子 Thread 的恢复提示。正文正确转义；模型的 `<error>` 详情最多 1000 个 Unicode 码点（含英文 ` [TRUNCATED]` 标记、转义前计数、不拆代理对），任务原文、成功报告与普通 partial_result 不截断；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
 
 同步 task 的最终 ToolResult 直接包含 Join 冻结的报告或错误，不另向父 Thread 注入 `SUBAGENT_RESULT`。Join 只有在子输入已应用、子本地流程结束、没有未完成直接子 Join、待处理输入或未确认退出时才冻结；停止路径也遵循同一收敛条件。终态冻结与父 Thread Work 唤醒在同一事务提交，等待中的工具执行线程通过子 Thread version change 订阅后重读 Join；订阅先于查询，避免错过终态唤醒。父停止会中断等待的工具执行，并在 Stop 事务中将运行中的 task Invocation 物化为 CANCELLED。
 
