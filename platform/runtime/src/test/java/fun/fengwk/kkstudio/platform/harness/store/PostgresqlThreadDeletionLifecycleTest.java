@@ -75,7 +75,9 @@ class PostgresqlThreadDeletionLifecycleTest {
                       null,
                       List.of(),
                       T1,
-                      T1));
+                      T1,
+                      null,
+                      null));
           ToolInvocation tool =
               toolInvocation(
                   toolId,

@@ -104,7 +104,9 @@ class PostgresqlAssistantErrorSettlementTest {
                           null,
                           List.of(),
                           T2,
-                          T2));
+                          T2,
+                          null,
+                          null));
               // 与生产一致：dispatch 已开始、上游返回 HTTP 404，invocation 终结为 FAILED(INVALID_REQUEST)。
               var model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
               builtin(store, tx).updateModelInvocation(model.markRunning(T2));

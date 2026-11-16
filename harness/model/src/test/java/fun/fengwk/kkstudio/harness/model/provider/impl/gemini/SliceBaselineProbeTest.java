@@ -90,7 +90,7 @@ class SliceBaselineProbeTest {
     out.append('\n');
   }
 
-  private void streamCase(StringBuilder out, String name, List<String[]> events) {
+  private void streamCase(StringBuilder out, String name, List<String> events) {
     out.append("== stream ").append(name).append('\n');
     List<String> handled = new ArrayList<>();
     ProviderStreamBridge bridge =
@@ -111,9 +111,9 @@ class SliceBaselineProbeTest {
             });
     GeminiStreamAccumulator accumulator =
         new GeminiStreamAccumulator(plainRequest(), descriptor(), bridge);
-    for (String[] event : events) {
+    for (String event : events) {
       try {
-        accumulator.handleEvent(event[0], event[1]);
+        accumulator.handleEvent(event);
       } catch (ProviderException error) {
         out.append("handleError ")
             .append(error.kind())
@@ -186,62 +186,41 @@ class SliceBaselineProbeTest {
         ProviderCacheControl.none());
   }
 
-  private static List<String[]> textToolEvents() {
+  private static List<String> textToolEvents() {
     return List.of(
-        new String[] {
-          "message",
-          "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
-              + "{\"text\":\"answer\"}]},\"index\":0}],\"usageMetadata\":"
-              + "{\"promptTokenCount\":5,\"candidatesTokenCount\":7,\"totalTokenCount\":12}}"
-        },
-        new String[] {
-          "message",
-          "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
-              + "{\"functionCall\":{\"name\":\"read_file\",\"args\":{\"path\":\"a\"}}}]},"
-              + "\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":5,"
-              + "\"candidatesTokenCount\":9,\"totalTokenCount\":14,"
-              + "\"thoughtsTokenCount\":2}}"
-        },
-        new String[] {
-          "message",
-          "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},"
-              + "\"finishReason\":\"STOP\",\"index\":0}],\"usageMetadata\":"
-              + "{\"promptTokenCount\":5,\"candidatesTokenCount\":9,\"totalTokenCount\":14,"
-              + "\"thoughtsTokenCount\":2,\"cachedContentTokenCount\":3}}"
-        });
+        "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
+            + "{\"text\":\"answer\"}]},\"index\":0}],\"usageMetadata\":"
+            + "{\"promptTokenCount\":5,\"candidatesTokenCount\":7,\"totalTokenCount\":12}}",
+        "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
+            + "{\"functionCall\":{\"name\":\"read_file\",\"args\":{\"path\":\"a\"}}}]},"
+            + "\"index\":0}],\"usageMetadata\":{\"promptTokenCount\":5,"
+            + "\"candidatesTokenCount\":9,\"totalTokenCount\":14,"
+            + "\"thoughtsTokenCount\":2}}",
+        "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},"
+            + "\"finishReason\":\"STOP\",\"index\":0}],\"usageMetadata\":"
+            + "{\"promptTokenCount\":5,\"candidatesTokenCount\":9,\"totalTokenCount\":14,"
+            + "\"thoughtsTokenCount\":2,\"cachedContentTokenCount\":3}}");
   }
 
-  private static List<String[]> snapshotEvents() {
+  private static List<String> snapshotEvents() {
     return List.of(
-        new String[] {
-          "message",
-          "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
-              + "{\"text\":\"hel\"}]},\"index\":0}],\"usageMetadata\":"
-              + "{\"promptTokenCount\":1,\"candidatesTokenCount\":1,\"totalTokenCount\":2}}"
-        },
-        new String[] {
-          "message",
-          "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
-              + "{\"text\":\"hello\"}]},\"index\":0}],\"usageMetadata\":"
-              + "{\"promptTokenCount\":1,\"candidatesTokenCount\":2,\"totalTokenCount\":3}}"
-        },
-        new String[] {
-          "message",
-          "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},"
-              + "\"finishReason\":\"MAX_TOKENS\",\"index\":0}],\"usageMetadata\":"
-              + "{\"promptTokenCount\":1,\"candidatesTokenCount\":2,\"totalTokenCount\":3}}"
-        });
+        "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
+            + "{\"text\":\"hel\"}]},\"index\":0}],\"usageMetadata\":"
+            + "{\"promptTokenCount\":1,\"candidatesTokenCount\":1,\"totalTokenCount\":2}}",
+        "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
+            + "{\"text\":\"hello\"}]},\"index\":0}],\"usageMetadata\":"
+            + "{\"promptTokenCount\":1,\"candidatesTokenCount\":2,\"totalTokenCount\":3}}",
+        "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},"
+            + "\"finishReason\":\"MAX_TOKENS\",\"index\":0}],\"usageMetadata\":"
+            + "{\"promptTokenCount\":1,\"candidatesTokenCount\":2,\"totalTokenCount\":3}}");
   }
 
-  private static List<String[]> blockedEvents() {
-    return List.<String[]>of(
-        new String[] {
-          "message",
-          "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},"
-              + "\"finishReason\":\"SAFETY\",\"index\":0}],\"promptFeedback\":"
-              + "{\"blockReason\":\"SAFETY\"},\"usageMetadata\":{\"promptTokenCount\":4,"
-              + "\"candidatesTokenCount\":0,\"totalTokenCount\":4}}"
-        });
+  private static List<String> blockedEvents() {
+    return List.of(
+        "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},"
+            + "\"finishReason\":\"SAFETY\",\"index\":0}],\"promptFeedback\":"
+            + "{\"blockReason\":\"SAFETY\"},\"usageMetadata\":{\"promptTokenCount\":4,"
+            + "\"candidatesTokenCount\":0,\"totalTokenCount\":4}}");
   }
 
   private ProviderMessage userWithMedia() {

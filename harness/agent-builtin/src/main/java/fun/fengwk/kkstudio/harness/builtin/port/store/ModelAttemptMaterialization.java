@@ -101,7 +101,7 @@ public final class ModelAttemptMaterialization {
     EntryPayload resultPayload = resultPath.head().payload();
     if (!(resultPayload instanceof AssistantErrorPayload actual)
         || !sameError(invocation, actual)
-        || !Objects.equals(terminalAttempt(invocation), actual.attempt())) {
+        || !Objects.equals(invocation.terminalAttemptSnapshot(), actual.attempt())) {
       throw new IllegalArgumentException(
           "materialized terminal error must match the invocation error and checkpoint");
     }
@@ -187,20 +187,6 @@ public final class ModelAttemptMaterialization {
       contents.add(new TextMessageContent(checkpoint.text()));
     }
     return new AssistantAbortedPayload(new AgentMessage(AgentMessageRole.ASSISTANT, contents));
-  }
-
-  private static ModelAttemptSnapshot terminalAttempt(ModelInvocation invocation) {
-    if (invocation.error() == null || invocation.failedAttempts().size() == invocation.attempt()) {
-      return null;
-    }
-    if (invocation.streamCheckpoint() == null) {
-      return new ModelAttemptSnapshot(invocation.attempt(), 0, "", "");
-    }
-    return new ModelAttemptSnapshot(
-        invocation.streamCheckpoint().attempt(),
-        invocation.streamCheckpoint().sequence(),
-        invocation.streamCheckpoint().text(),
-        invocation.streamCheckpoint().thinking());
   }
 
   /**

@@ -2,10 +2,8 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.limits.RequestLimitsPresets;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.PreparedProviderRequest;
@@ -40,10 +38,6 @@ final class AnthropicModelProvider implements ModelProvider {
 
   private static final String DONE_DATA = "[DONE]";
   private static final String DONE_PROTOCOL_EVENT_TYPE = "done";
-
-  /** 仅用于从原生 payload 推导事件名；payload 本体不落到日志、normalized event 或 ProviderResponse。 */
-  private static final ObjectMapper PROTOCOL_EVENT_MAPPER =
-      JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   private final JdkHttpSseTransport transport;
   private final ProviderDescriptor descriptor;
@@ -86,13 +80,14 @@ final class AnthropicModelProvider implements ModelProvider {
     return jsonType != null ? jsonType : DEFAULT_PROTOCOL_EVENT_TYPE;
   }
 
+  /** 仅用于从原生 payload 推导事件名；payload 本体不落日志、不进入 normalized 事件或 {@code ProviderResponse}。 */
   private static String jsonTypeOf(String data) {
     if (data == null || data.isBlank()) {
       return null;
     }
     JsonNode payload;
     try {
-      payload = PROTOCOL_EVENT_MAPPER.readTree(data);
+      payload = HarnessJson.LENIENT_DECIMAL.readTree(data);
     } catch (JacksonException exception) {
       return null;
     }

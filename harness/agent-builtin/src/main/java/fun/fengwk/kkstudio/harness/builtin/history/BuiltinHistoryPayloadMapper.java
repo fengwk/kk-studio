@@ -46,14 +46,6 @@ public final class BuiltinHistoryPayloadMapper {
       ProviderResponse response,
       List<ToolBinding> bindings,
       ModelSelection model,
-      Instant requestedAt) {
-    return assistantPayload(response, bindings, model, requestedAt, null);
-  }
-
-  public MessagePayload assistantPayload(
-      ProviderResponse response,
-      List<ToolBinding> bindings,
-      ModelSelection model,
       Instant requestedAt,
       String effort) {
     Objects.requireNonNull(response, "response");

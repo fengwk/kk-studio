@@ -102,7 +102,7 @@ final class GeminiRequestEncoder {
   }
 
   private static void validateCacheControl(ProviderCacheControl cacheControl) {
-    if (cacheControl != null && cacheControl.retention() != PromptCacheRetention.NONE) {
+    if (cacheControl.retention() != PromptCacheRetention.NONE) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "Gemini only supports automatic prompt caching; explicit cacheControl is not allowed");
@@ -198,7 +198,7 @@ final class GeminiRequestEncoder {
     JsonNode nativeNode = root.get("tools");
     ArrayNode toolsArray;
     if (nativeNode == null) {
-      if (tools == null || tools.isEmpty()) {
+      if (tools.isEmpty()) {
         return null;
       }
       toolsArray = root.putArray("tools");
@@ -222,7 +222,7 @@ final class GeminiRequestEncoder {
           ProviderErrorKind.INVALID_REQUEST, "Gemini protocol options tools must be a JSON array");
     }
 
-    if (tools == null || tools.isEmpty()) {
+    if (tools.isEmpty()) {
       return toolsArray;
     }
 

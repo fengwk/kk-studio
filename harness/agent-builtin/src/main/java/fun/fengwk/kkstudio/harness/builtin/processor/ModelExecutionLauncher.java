@@ -91,7 +91,10 @@ final class ModelExecutionLauncher {
       ClaimAdmissionGuard.Ticket<ModelExecution> ticket,
       ProcessorLeaseConfig leaseConfig,
       Duration admitFailureDelay) {
-    ModelExecution execution = newExecution(claim, dispatched, leaseConfig);
+    // 本次真实执行身份只在此处派生一次：组调用按 durable 成员游标取成员快照，attempt 是该次 READY->RUNNING 的目标值。
+    ModelRequestSpec request = actualRequest(dispatched);
+    int attempt = Math.addExact(dispatched.attempt(), 1);
+    ModelExecution execution = newExecution(claim, dispatched, request, attempt, leaseConfig);
     if (!ticket.attach(execution)) {
       execution.abandon();
       return executions.isClosed()
@@ -108,7 +111,8 @@ final class ModelExecutionLauncher {
         // 实际结果返回。
         return abortStart(claim, admitFailureDelay);
       }
-      ProcessResult result = admitAndRun(execution, claim, dispatched, ticket, admitFailureDelay);
+      ProcessResult result =
+          admitAndRun(execution, claim, dispatched, request, attempt, ticket, admitFailureDelay);
       if (result == ProcessResult.STARTED) {
         started = true;
       }
@@ -123,19 +127,21 @@ final class ModelExecutionLauncher {
   private ModelExecution newExecution(
       ClaimedWork claim,
       ModelClaimPreparer.Result.Dispatched dispatched,
+      ModelRequestSpec request,
+      int attempt,
       ProcessorLeaseConfig leaseConfig) {
-    ModelRequestSpec request = actualRequest(dispatched);
     return new ModelExecution(
         store,
         gateway,
         realtimeEventSink,
         claim,
         dispatched.threadId(),
-        Math.addExact(dispatched.attempt(), 1),
+        attempt,
         dispatched.ownerSettledSummary(),
         request.toolBindings(),
         executionConfig(leaseConfig),
         request.model().providerName(),
+        request.groupExecution() != null,
         clock,
         scheduler,
         heartbeatWorker,
@@ -159,11 +165,13 @@ final class ModelExecutionLauncher {
       ModelExecution execution,
       ClaimedWork claim,
       ModelClaimPreparer.Result.Dispatched dispatched,
+      ModelRequestSpec request,
+      int attempt,
       ClaimAdmissionGuard.Ticket<ModelExecution> ticket,
       Duration admitFailureDelay) {
     ProviderRequest providerRequest;
     try {
-      providerRequest = materializeRequest(claim, dispatched);
+      providerRequest = materializeRequest(claim, dispatched, request);
     } catch (ClaimLostSignal lost) {
       return ProcessResult.LOST_OWNERSHIP;
     } catch (ProviderException setupFailure) {
@@ -188,10 +196,7 @@ final class ModelExecutionLauncher {
       admission =
           gateway.admit(
               new ModelGateway.Execution(
-                  claim.target().id(),
-                  Math.addExact(dispatched.attempt(), 1),
-                  actualRequest(dispatched).providerType(),
-                  providerRequest));
+                  claim.target().id(), attempt, request.providerType(), providerRequest));
     } catch (RuntimeException failure) {
       // 契约：admit 抛异常表示尚未占用任何名额也未发出请求，按兜底延迟重排。
       log.warn(
@@ -214,7 +219,9 @@ final class ModelExecutionLauncher {
 
   /** 在 MODEL claim 仍 owned 期间加载不可变 basis EntryPath，并纯重建内存 ProviderRequest。 */
   private ProviderRequest materializeRequest(
-      ClaimedWork claim, ModelClaimPreparer.Result.Dispatched dispatched) {
+      ClaimedWork claim,
+      ModelClaimPreparer.Result.Dispatched dispatched,
+      ModelRequestSpec request) {
     EntryPath path =
         inTransaction(
             tx -> {
@@ -223,7 +230,7 @@ final class ModelExecutionLauncher {
               }
               return tx.entries().loadPath(dispatched.requestHeadEntryId());
             });
-    return materializer.materialize(path, actualRequest(dispatched));
+    return materializer.materialize(path, request);
   }
 
   /** 先持久化 RUNNING（陈旧启动围栏），再把阻塞运行与终态提交交给执行线程。 */

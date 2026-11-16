@@ -66,6 +66,7 @@ import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
@@ -91,6 +92,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessor;
 import fun.fengwk.kkstudio.harness.builtin.processor.ModelProcessorConfig;
+import fun.fengwk.kkstudio.harness.builtin.processor.ModelStreamConfig;
 import fun.fengwk.kkstudio.harness.builtin.store.testing.SingleModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -503,7 +505,10 @@ class PostgresqlCompactionChildTest {
             new ModelProcessorConfig(
                 () -> new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                 () -> retryPolicy,
-                () -> Duration.ofSeconds(5)),
+                () -> Duration.ofSeconds(5),
+                ModelStreamConfig.DEFAULT,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             clock,
             scheduler,
             Runnable::run,
@@ -1281,7 +1286,10 @@ class PostgresqlCompactionChildTest {
               new ModelProcessorConfig(
                   () -> new ProcessorLeaseConfig(Duration.ofSeconds(30), Duration.ofSeconds(5)),
                   () -> NO_RETRY,
-                  () -> Duration.ofSeconds(5)),
+                  () -> Duration.ofSeconds(5),
+                  ModelStreamConfig.DEFAULT,
+                  null,
+                  providerName -> ModelHttpErrorPolicy.DEFAULT),
               Clock.fixed(T1, ZoneOffset.UTC),
               scheduler,
               Runnable::run,
@@ -2195,7 +2203,8 @@ class PostgresqlCompactionChildTest {
                   "req-compaction-child",
                   null,
                   "{}");
-          builtin(store, tx).updateModelInvocation(model.succeed(response, T1));
+          builtin(store, tx)
+              .updateModelInvocation(model.succeed(response, model.streamCheckpoint(), T1));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });

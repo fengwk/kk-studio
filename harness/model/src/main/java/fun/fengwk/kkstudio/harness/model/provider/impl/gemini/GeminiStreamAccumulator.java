@@ -92,7 +92,7 @@ final class GeminiStreamAccumulator extends ProviderStreamState {
   }
 
   /** 处理单个 SSE 事件。 */
-  void handleEvent(String eventName, String data) {
+  void handleEvent(String data) {
     if (bridge.isClosed()) {
       return;
     }

@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
@@ -137,8 +138,14 @@ class ExecutionTreeLockRegressionTest {
             false,
             List.of(),
             new ModelProcessorConfig(
-                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, IMMEDIATE_STREAM),
+                () -> LEASE_CONFIG,
+                () -> NO_RETRY,
+                () -> FALLBACK_DELAY,
+                IMMEDIATE_STREAM,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             "test-provider",
+            false,
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,
@@ -243,8 +250,14 @@ class ExecutionTreeLockRegressionTest {
             false,
             List.of(),
             new ModelProcessorConfig(
-                () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, flushConfig),
+                () -> LEASE_CONFIG,
+                () -> NO_RETRY,
+                () -> FALLBACK_DELAY,
+                flushConfig,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             "test-provider",
+            false,
             Clock.fixed(NOW, ZoneOffset.UTC),
             scheduler,
             Runnable::run,

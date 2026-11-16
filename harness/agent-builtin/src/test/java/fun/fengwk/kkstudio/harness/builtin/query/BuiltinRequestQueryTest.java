@@ -134,7 +134,9 @@ class BuiltinRequestQueryTest {
                         null,
                         List.of(),
                         NOW,
-                        NOW));
+                        NOW,
+                        null,
+                        null));
           }
           return new Seed(threadId, modelId);
         });

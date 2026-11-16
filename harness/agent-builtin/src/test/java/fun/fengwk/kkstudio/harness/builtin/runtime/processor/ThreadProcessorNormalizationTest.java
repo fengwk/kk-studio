@@ -291,7 +291,7 @@ class ThreadProcessorNormalizationTest extends ThreadProcessorTestBase {
             fixture.store,
             baseline,
             new BuiltinHistoryPayloadMapper()
-                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW));
+                .assistantPayload(response, requestSpec.toolBindings(), selection, NOW, null));
     transitionModel(fixture.store, modelId, m -> m.attachResultEntry(assistantId, NOW));
     seedCommand(
         fixture.store, baseline.threadId(), new UserMessageCommandPayload(userMessage("hi")));

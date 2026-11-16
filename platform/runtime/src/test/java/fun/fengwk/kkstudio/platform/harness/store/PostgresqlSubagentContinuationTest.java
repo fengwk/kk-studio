@@ -658,7 +658,8 @@ class PostgresqlSubagentContinuationTest {
                   template.requestId(),
                   template.serviceTier(),
                   template.rawUsageJson());
-          builtin(store, tx).updateModelInvocation(model.succeed(response, T1));
+          builtin(store, tx)
+              .updateModelInvocation(model.succeed(response, model.streamCheckpoint(), T1));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
           return null;
         });

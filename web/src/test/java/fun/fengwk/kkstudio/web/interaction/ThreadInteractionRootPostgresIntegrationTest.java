@@ -1123,7 +1123,9 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
             null,
             List.of(),
             now,
-            now);
+            now,
+            null,
+            null);
     ModelInvocation running = model.markRunning(now);
     // 结果 Entry 必须精确等于按执行事实重放的 assistant payload：实际型号与请求起始时间来自 RUNNING 调用。
     UUID assistantEntryId = tx.nextId();
@@ -1138,15 +1140,19 @@ class ThreadInteractionRootPostgresIntegrationTest extends WebPostgresTestSuppor
                         response,
                         requestSpec.toolBindings(),
                         running.actualSelection(),
-                        running.requestedAt()),
+                        running.requestedAt(),
+                        running.actualEffort()),
                 now));
 
     builtin(store, tx).insertModelInvocation(model);
     builtin(store, tx).updateModelInvocation(running);
-    builtin(store, tx).updateModelInvocation(running.succeed(response, now));
+    builtin(store, tx)
+        .updateModelInvocation(running.succeed(response, running.streamCheckpoint(), now));
     builtin(store, tx)
         .updateModelInvocation(
-            running.succeed(response, now).attachResultEntry(assistantEntryId, now));
+            running
+                .succeed(response, running.streamCheckpoint(), now)
+                .attachResultEntry(assistantEntryId, now));
 
     UUID toolId = tx.nextId();
     ToolInvocation ready =

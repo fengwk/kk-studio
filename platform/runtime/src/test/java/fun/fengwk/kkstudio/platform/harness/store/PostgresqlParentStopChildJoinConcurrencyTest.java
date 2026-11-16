@@ -227,12 +227,14 @@ class PostgresqlParentStopChildJoinConcurrencyTest {
                   null,
                   List.of(),
                   now,
-                  now);
+                  now,
+                  null,
+                  null);
           builtin(store, tx).insertModelInvocation(model);
           var running = model.markRunning(now);
           builtin(store, tx).updateModelInvocation(running);
           if (modelSucceeded) {
-            var succeeded = running.succeed(response, now);
+            var succeeded = running.succeed(response, running.streamCheckpoint(), now);
             builtin(store, tx).updateModelInvocation(succeeded);
           }
 

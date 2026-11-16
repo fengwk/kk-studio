@@ -73,7 +73,7 @@ class GeminiWireTest {
       String trimmed = line.trim();
       if (trimmed.startsWith("data:")) {
         String json = trimmed.substring(5).trim();
-        accumulator.handleEvent("message", json);
+        accumulator.handleEvent(json);
       }
     }
   }

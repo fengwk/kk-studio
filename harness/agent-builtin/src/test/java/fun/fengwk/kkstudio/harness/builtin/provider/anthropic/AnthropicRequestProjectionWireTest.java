@@ -111,7 +111,7 @@ class AnthropicRequestProjectionWireTest {
     // 2. 使用 BuiltinHistoryPayloadMapper 将 ProviderResponse 投影为 Assistant MessagePayload
     BuiltinHistoryPayloadMapper mapper = new BuiltinHistoryPayloadMapper();
     MessagePayload assistantPayload =
-        mapper.assistantPayload(lengthResponse, List.of(), null, null);
+        mapper.assistantPayload(lengthResponse, List.of(), null, null, null);
     AgentMessage asstAgentMsg = assistantPayload.message();
 
     // 3. 使用 ProviderMessageProjector 将 Session 历史投影为 ProviderMessage

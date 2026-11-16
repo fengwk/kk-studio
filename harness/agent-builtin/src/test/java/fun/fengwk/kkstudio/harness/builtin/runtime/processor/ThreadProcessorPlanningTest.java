@@ -690,7 +690,7 @@ class ThreadProcessorPlanningTest extends ThreadProcessorTestBase {
     transitionModel(
         fixture.store,
         planned.id(),
-        model -> model.succeed(successResponse(List.of(), "bash"), NOW));
+        model -> model.succeed(successResponse(List.of(), "bash"), model.streamCheckpoint(), NOW));
     requestThreadWork(fixture.store, baseline.threadId());
     assertEquals(ThreadProcessResult.COMPLETED, fixture.nextClaim(baseline.threadId()));
     EntryPath finalPath = path(fixture.store, baseline.threadId());

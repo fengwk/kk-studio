@@ -90,7 +90,7 @@ final class GeminiModelProvider implements ModelProvider {
           // 每条 transport SSE frame 先原样交付原生通道，再进入规范化累积器：两条通道独立且互补
           bridge.emitProtocolEvent(
               new ProviderProtocolEvent(resolveProtocolEventType(event), event.data()));
-          accumulator.handleEvent(event.event(), event.data());
+          accumulator.handleEvent(event.data());
         },
         accumulator::finish,
         GeminiErrorMapper::mapTransportException);

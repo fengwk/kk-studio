@@ -782,7 +782,13 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
             interleaved,
             fixture.gateway,
             fixture.sink,
-            new ModelProcessorConfig(() -> LEASE_CONFIG, () -> policy, () -> FALLBACK_DELAY),
+            new ModelProcessorConfig(
+                () -> LEASE_CONFIG,
+                () -> policy,
+                () -> FALLBACK_DELAY,
+                ModelStreamConfig.DEFAULT,
+                null,
+                providerName -> ModelHttpErrorPolicy.DEFAULT),
             fixture.clock,
             newScheduler(),
             Runnable::run,
@@ -806,7 +812,9 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
     transition(
         fixture.store,
         fixture.invocationId,
-        model -> model.succeed(response("ok", GenerationStopReason.COMPLETE), NOW));
+        model ->
+            model.succeed(
+                response("ok", GenerationStopReason.COMPLETE), model.streamCheckpoint(), NOW));
     ClaimedWork claimed = claim(fixture.store, fixture.invocationId);
 
     assertEquals(ProcessResult.TERMINATED, fixture.processor.process(claimed));
@@ -832,7 +840,9 @@ class ModelProcessorAdmissionTest extends ModelProcessorTestSupport {
     transition(
         fixture.store,
         fixture.invocationId,
-        model -> model.succeed(response("ok", GenerationStopReason.COMPLETE), NOW));
+        model ->
+            model.succeed(
+                response("ok", GenerationStopReason.COMPLETE), model.streamCheckpoint(), NOW));
     UUID assistantEntryId =
         fixture.store.transaction(
             tx -> {

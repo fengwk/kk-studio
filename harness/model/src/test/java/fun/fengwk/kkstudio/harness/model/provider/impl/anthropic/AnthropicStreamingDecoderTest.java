@@ -182,13 +182,12 @@ class AnthropicStreamingDecoderTest {
     assertEquals(1, opaque.providerBlockData().nativeFields().size());
     assertEquals("Known text.", ((ProviderTextBlock) response.blocks().get(1)).text());
 
-    // Anthropic 未报告原生 total/reasoning，保留 null；分类求和独立校验。
+    // Anthropic 未报告原生 total/reasoning，保留 null。
     ModelUsage usage = response.usage();
     assertEquals(10, usage.inputTokens());
     assertEquals(5, usage.outputTokens());
     assertNull(usage.providerTotalTokens());
     assertNull(usage.reasoningTokens());
-    assertEquals(15, usage.categorizedTokens());
   }
 
   /** 测试意图：未知 block 收到不可安全组装的 delta 时，解析器必须显式失败而不是把 delta 猜测性合并进 raw block， 也不允许静默丢弃该 delta。 */
@@ -362,7 +361,6 @@ class AnthropicStreamingDecoderTest {
     assertEquals(5, usage.cacheWriteByTtl().get(3600L));
     assertNull(usage.providerTotalTokens());
     assertNull(usage.reasoningTokens());
-    assertEquals(175, usage.categorizedTokens());
 
     // Provider-native information remains attached to the corresponding ordered assistant blocks.
     List<ProviderContentBlock> blocks = completion.response().blocks();
@@ -538,7 +536,6 @@ class AnthropicStreamingDecoderTest {
     assertEquals(30, usage.cacheWriteByTtl().get(3600L));
     assertNull(usage.providerTotalTokens());
     assertNull(usage.reasoningTokens());
-    assertEquals(415, usage.categorizedTokens());
 
     assertNotNull(response.rawUsageJson());
     assertTrue(response.rawUsageJson().contains("\"ephemeral_5m_input_tokens\":70"));

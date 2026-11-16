@@ -690,7 +690,9 @@ class PostgresqlJoinAcceptanceRollbackTest {
                 builtin(store, tx).updateModelInvocation(model.markRunning(T2));
                 model = builtin(store, tx).lockModelInvocation(found.id()).orElseThrow();
                 builtin(store, tx)
-                    .updateModelInvocation(model.succeed(StoreTestSupport.assistantResponse(), T2));
+                    .updateModelInvocation(
+                        model.succeed(
+                            StoreTestSupport.assistantResponse(), model.streamCheckpoint(), T2));
                 tx.work().request(new WorkTarget(WorkTargetType.THREAD, childThreadId));
                 return found.id();
               });

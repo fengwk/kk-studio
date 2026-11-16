@@ -173,7 +173,9 @@ final class DispatcherTestSupport {
                       null,
                       List.of(),
                       NOW,
-                      NOW));
+                      NOW,
+                      null,
+                      null));
           tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, modelId));
           return new ModelSeed(threadId, modelId);
         });
@@ -233,7 +235,9 @@ final class DispatcherTestSupport {
                   null,
                   List.of(),
                   NOW,
-                  NOW);
+                  NOW,
+                  null,
+                  null);
           tx.entries()
               .insert(
                   assistantEntry(
@@ -243,7 +247,8 @@ final class DispatcherTestSupport {
           ModelInvocation current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
           builtin(store, tx).updateModelInvocation(current.markRunning(NOW));
           current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(store, tx).updateModelInvocation(current.succeed(response, NOW));
+          builtin(store, tx)
+              .updateModelInvocation(current.succeed(response, current.streamCheckpoint(), NOW));
           current = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
           builtin(store, tx)
               .updateModelInvocation(current.attachResultEntry(assistantEntryId, NOW));
@@ -649,7 +654,8 @@ final class DispatcherTestSupport {
                 response,
                 running.requestSpec().toolBindings(),
                 running.actualSelection(),
-                running.requestedAt()),
+                running.requestedAt(),
+                null),
         NOW);
   }
 

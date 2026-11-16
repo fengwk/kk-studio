@@ -452,7 +452,7 @@ public final class HarnessRuntimeTestSupport {
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
           builtin(store, tx).insertModelInvocation(model);
-          ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
+          ModelInvocation succeeded = model.markRunning(T2).succeed(response, null, T2);
           builtin(store, tx).updateModelInvocation(model.markRunning(T2));
           builtin(store, tx).updateModelInvocation(succeeded);
           builtin(store, tx)
@@ -645,7 +645,7 @@ public final class HarnessRuntimeTestSupport {
               modelInvocationWithRequest(
                   modelId, threadId, turnStartEntryId, turnStartEntryId, requestSpec, T1);
           builtin(store, tx).insertModelInvocation(model);
-          ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
+          ModelInvocation succeeded = model.markRunning(T2).succeed(response, null, T2);
           builtin(store, tx).updateModelInvocation(model.markRunning(T2));
           builtin(store, tx).updateModelInvocation(succeeded);
           builtin(store, tx)
@@ -1263,7 +1263,9 @@ public final class HarnessRuntimeTestSupport {
         null,
         List.of(),
         createdAt,
-        createdAt);
+        createdAt,
+        null,
+        null);
   }
 
   /**
@@ -1290,7 +1292,9 @@ public final class HarnessRuntimeTestSupport {
         null,
         List.of(),
         createdAt,
-        createdAt);
+        createdAt,
+        null,
+        null);
   }
 
   /** live tool baseline 的 tooled 冻结请求：按 {@code toolNames} 构造 host bindings。 */
@@ -1342,7 +1346,11 @@ public final class HarnessRuntimeTestSupport {
         parentId,
         new BuiltinHistoryPayloadMapper()
             .assistantPayload(
-                response, requestSpec.toolBindings(), actualSelection(requestSpec), requestedAt),
+                response,
+                requestSpec.toolBindings(),
+                actualSelection(requestSpec),
+                requestedAt,
+                null),
         createdAt);
   }
 

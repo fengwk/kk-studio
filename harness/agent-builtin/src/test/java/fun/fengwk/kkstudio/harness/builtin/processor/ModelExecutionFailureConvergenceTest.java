@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.retry.ModelHttpErrorPolicy;
 import fun.fengwk.kkstudio.harness.builtin.port.BuiltinWorkType;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
@@ -87,14 +88,11 @@ class ModelExecutionFailureConvergenceTest {
     }
   }
 
-  /** 冻结 Provider 身份与运行 store 资格在进入任何执行前校验：空白名称与非 Builtin store 都不得建立 execution。 */
+  /** 运行 store 资格在进入任何执行前校验：非 Builtin store 不得建立 execution。 */
   @Test
-  void constructorRejectsMissingProviderIdentityAndNonBuiltinStore() {
+  void constructorRejectsNonBuiltinStore() {
     Fixture fixture = fixture();
 
-    assertThrows(
-        IllegalArgumentException.class,
-        () -> fixture.execution(fixture.lifecycle, 1, " ", ignored -> {}));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -440,7 +438,12 @@ class ModelExecutionFailureConvergenceTest {
     final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor();
     final ModelProcessorConfig config =
         new ModelProcessorConfig(
-            () -> LEASE_CONFIG, () -> NO_RETRY, () -> FALLBACK_DELAY, FLUSH_CONFIG);
+            () -> LEASE_CONFIG,
+            () -> NO_RETRY,
+            () -> FALLBACK_DELAY,
+            FLUSH_CONFIG,
+            null,
+            providerName -> ModelHttpErrorPolicy.DEFAULT);
     final ModelGateway gateway =
         SingleModelGateway.of(
             execution -> {
@@ -474,7 +477,9 @@ class ModelExecutionFailureConvergenceTest {
                             null,
                             List.of(),
                             NOW,
-                            NOW));
+                            NOW,
+                            null,
+                            null));
                 tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
                 return id;
               });
@@ -514,6 +519,7 @@ class ModelExecutionFailureConvergenceTest {
           ThreadProcessorTestSupport.plainRequest().toolBindings(),
           config,
           providerName,
+          false,
           CLOCK,
           scheduler,
           Runnable::run,

@@ -595,7 +595,8 @@ class HarnessRuntimeStopSubtreeTest {
           builtin(store, tx).insertModelInvocation(model);
           ProviderResponse response = responseWithToolCalls();
           builtin(store, tx).updateModelInvocation(model.markRunning(T2));
-          builtin(store, tx).updateModelInvocation(model.markRunning(T2).succeed(response, T2));
+          builtin(store, tx)
+              .updateModelInvocation(model.markRunning(T2).succeed(response, null, T2));
 
           tx.joins()
               .insert(

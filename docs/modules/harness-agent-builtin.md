@@ -75,7 +75,7 @@ Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员
 
 模型组在逻辑调用开始时把组名、组版本、有序成员执行快照、降级状态码与冷却秒数冻结进 [`ModelGroupExecution`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelGroupExecution.java)。成员切换只使用冻结快照，绝不重新读取 Catalog 混入新配置。当前成员与成员内普通尝试次数由 [`ModelGroupProgress`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/port/store/ModelGroupProgress.java) 推进；全局 `ModelInvocation.attempt` 仍是所有真实上游 attempt 的审计序号。
 
-[`ModelGroupFailureDecider`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelGroupFailureDecider.java) 是唯一失败决策点：`CANCELLED` 与 `CONTEXT_LIMIT` 保留专用终止/压缩语义；命中组配置的 `fallbackStatusCodes` 或普通重试预算耗尽时推进到下一成员；否则重试当前成员。成员冷却属于平台模型目录，经 `ModelGateway` 在调用方已有的事务内读写，不进入请求 Spec。候选读取与游标更新共同提交；冷却写入与 invocation、work 更新共同提交或回滚。平台用事务数据库时间判断冷却，写入时锁定组版本，拒绝旧版本结果且仅延长截止时间。
+[`ModelGroupFailureDecider`](../../harness/agent-builtin/src/main/java/fun/fengwk/kkstudio/harness/builtin/processor/ModelGroupFailureDecider.java) 是唯一失败决策点：`CANCELLED` 与 `CONTEXT_LIMIT` 保留专用终止/压缩语义；命中组配置的 `fallbackStatusCodes`、普通重试预算耗尽，或本次失败本身不可重试（未命中 Provider 的 HTTP 重试白名单）时推进到下一成员；只有可重试且预算仍允许时才重试当前成员。成员冷却属于平台模型目录，经 `ModelGateway` 在调用方已有的事务内读写，不进入请求 Spec。候选读取与游标更新共同提交；冷却写入与 invocation、work 更新共同提交或回滚。平台用事务数据库时间判断冷却，写入时锁定组版本，拒绝旧版本结果且仅延长截止时间。
 
 ## 自动压缩
 
@@ -104,7 +104,13 @@ Invocation 冻结所选 Model 与 Variant；模型组按顺序冻结每个成员
 
 ## 源码与测试
 
-- 本模块测试只验证 Builtin 自身：Driver、私有状态、模型状态与请求物化、流式与重试、模型组、自动压缩和响应物化。测试入口都在 [`harness/agent-builtin/src/test`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/) 下。
+- 本模块测试验证 Builtin 自身的行为：Driver、私有状态、模型状态与请求物化、流式与重试、模型组、自动压缩和响应物化；此外 `runtime/` 子树在真实 Runtime 内核上回归 Builtin 参与的执行链（claim、执行退出、锁序、Stop、历史写入）。测试入口都在 [`harness/agent-builtin/src/test`](../../harness/agent-builtin/src/test/java/fun/fengwk/kkstudio/harness/builtin/) 下，按包与生产代码对齐：
+  - `driver/`、`history/`、`model/`、`port/`、`query/`、`request/`：Driver 契约与校验、payload 投影、私有模型状态与请求物化、端口语义、只读查询、消息投影与冻结请求校验；
+  - `processor/`：`ModelProcessor` / `ModelExecution` / `ModelTerminalCommitter` 的准入、流式节奏、终态与结果物化；
+  - `provider/`：携带真实历史投影与 `ModelInvocation` 载体的跨层 wire 测试；
+  - `store/testing/`：Builtin Store（`BuiltinStore`，运行在 `HarnessStore` 之上）的契约测试 `InMemoryBuiltinHarnessStoreContractTest`，以及内存实现与模型网关 fake；
+  - `invocation/codec/`：invocation 值 codec 的共享测试 fixture；
+  - `runtime/`：Runtime 内核集成。`runtime/processor/` 覆盖 Thread/Tool Processor 与 Builtin MODEL 执行的交汇（claim、租约恢复、执行退出、锁序）；`runtime/store/testing/` 提供 Runtime `HarnessStore` 契约（`HarnessStoreInvocationContract`、`HarnessStoreDeletionContract`、`HarnessStoreWorkContract`）、其内存实现与中立 store fixture；`runtime/history/`、`runtime/invocation/`、`runtime/port/`、`runtime/thread/` 覆盖 payload 映射、值 JSON、工具网关与上下文分类。
 - ModelProcessor 的行为测试按关注点拆为 `ModelProcessorAdmissionTest`、`ModelProcessorStreamTest`、`ModelProcessorTerminalTest`、`ModelProcessorLifecycleTest` 与 `ModelProcessorGroupTest`；共享 fixture、Seed 和 fake 集中在 `ModelProcessorTestSupport`，Store 记录与失败注入统一使用 `RecordingStore`。
 - 测试通过 runtime test-jar 复用中立 kernel fixture（`InMemoryHarnessStore`、Store 契约基类、`FakeAgentDriver`）；本模块的 test-jar 仍导出 Builtin 私有模型契约/fixture，供 Platform 等消费者使用，但 Runtime 内核测试和共享 fixture 不回流到本模块。
 - 模块 `verify` 的 native `jacoco:check` 只校验本模块的 critical 类，逐类 `LINE` 覆盖率不低于 90%，清单在 [`harness/agent-builtin/pom.xml`](../../harness/agent-builtin/pom.xml)。Runtime 的关键类清单与门槛以 [`harness/runtime/pom.xml`](../../harness/runtime/pom.xml) 为准，由 runtime 自己的 check 负责，不存在跨模块 Ant report。

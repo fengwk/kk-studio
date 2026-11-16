@@ -212,7 +212,7 @@ public final class OpenAiResponsesRequestEncoder {
    * 时才追加对应 include。原生 {@code effort} 与 runtime 冲突时明确拒绝且不回显值。
    */
   private static void applyReasoningParameters(ObjectNode root, ModelVariant variant) {
-    if (variant == null || variant.reasoningEffort() == null) {
+    if (variant.reasoningEffort() == null) {
       return;
     }
     ObjectNode reasoning =
@@ -323,7 +323,7 @@ public final class OpenAiResponsesRequestEncoder {
   }
 
   private static ArrayNode encodeTools(List<ProviderToolDefinition> tools) {
-    if (tools == null || tools.isEmpty()) {
+    if (tools.isEmpty()) {
       return null;
     }
     ArrayNode array = NODES.arrayNode();

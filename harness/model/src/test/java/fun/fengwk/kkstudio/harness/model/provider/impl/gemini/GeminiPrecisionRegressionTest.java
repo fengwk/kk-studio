@@ -107,7 +107,6 @@ class GeminiPrecisionRegressionTest {
     GeminiStreamAccumulator accumulator =
         new GeminiStreamAccumulator(request(List.of(user("Hi")), List.of()), descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\","
             + "\"vendor_opaque\":{\"big\":1e309,\"tiny\":1e-324,"
             + "\"exact\":0.1234567890123456789012345678,\"ratio\":1.10}}]},"
@@ -142,10 +141,8 @@ class GeminiPrecisionRegressionTest {
     GeminiStreamAccumulator accumulator =
         new GeminiStreamAccumulator(request(List.of(user("Hi")), List.of()), descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]},\"finishReason\":null}]}");
     accumulator.handleEvent(
-        "message",
         "{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}");
 
     ProviderCompletion completion = accumulator.finish();

@@ -453,7 +453,6 @@ class OpenAiResponsesStreamAccumulatorTest {
     assertEquals(5L, usage.reasoningTokens());
     // 关键：缺失 total_tokens 时保持 unknown，不合成 60
     assertNull(usage.providerTotalTokens());
-    assertEquals(60L, usage.categorizedTokens());
 
     // 验证 rawUsageJson 保真不包含 total_tokens
     JsonNode rawUsage = MAPPER.readTree(resp.rawUsageJson());
@@ -2051,7 +2050,6 @@ class OpenAiResponsesStreamAccumulatorTest {
     ProviderCompletion completion = accumulator.finish();
     assertEquals(40L, completion.response().usage().inputTokens());
     assertEquals(30L, completion.response().usage().outputTokens());
-    assertEquals(70L, completion.response().usage().categorizedTokens());
     assertNull(completion.response().usage().providerTotalTokens());
     assertEquals(12L, completion.response().usage().reasoningTokens());
   }

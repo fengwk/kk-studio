@@ -64,7 +64,9 @@ public final class StoreTestSupport {
         resultEntryId,
         List.of(),
         createdAt,
-        createdAt);
+        createdAt,
+        null,
+        null);
   }
 
   public static ModelRequestSpec modelRequest() {
@@ -128,7 +130,7 @@ public final class StoreTestSupport {
       ModelRequestSpec requestSpec, ProviderResponse response, Instant requestedAt) {
     return new BuiltinHistoryPayloadMapper()
         .assistantPayload(
-            response, requestSpec.toolBindings(), actualSelection(requestSpec), requestedAt);
+            response, requestSpec.toolBindings(), actualSelection(requestSpec), requestedAt, null);
   }
 
   private static ModelInvocationError modelError() {

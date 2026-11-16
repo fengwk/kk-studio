@@ -508,7 +508,7 @@ public abstract class HarnessRuntimeThreadTreeContract {
     ModelInvocation model =
         modelInvocationWithRequest(modelId, threadId, startId, startId, request, T1);
     builtin(store, tx).insertModelInvocation(model);
-    ModelInvocation succeeded = model.markRunning(T2).succeed(response, T2);
+    ModelInvocation succeeded = model.markRunning(T2).succeed(response, null, T2);
     builtin(store, tx).updateModelInvocation(model.markRunning(T2));
     builtin(store, tx).updateModelInvocation(succeeded);
     builtin(store, tx).updateModelInvocation(succeeded.attachResultEntry(assistantId, T2));

@@ -550,11 +550,14 @@ class PostgresqlHarnessStoreConcurrencyTest {
                       null,
                       List.of(),
                       T1,
-                      T1));
+                      T1,
+                      null,
+                      null));
           ModelInvocation model = builtin(store, tx).lockModelInvocation(id(1L)).orElseThrow();
           builtin(store, tx).updateModelInvocation(model.markRunning(T1));
           model = builtin(store, tx).lockModelInvocation(id(1L)).orElseThrow();
-          builtin(store, tx).updateModelInvocation(model.succeed(response, T1));
+          builtin(store, tx)
+              .updateModelInvocation(model.succeed(response, model.streamCheckpoint(), T1));
           model = builtin(store, tx).lockModelInvocation(id(1L)).orElseThrow();
           builtin(store, tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
         });

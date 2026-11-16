@@ -436,7 +436,9 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                           null,
                           List.of(),
                           T2,
-                          T2));
+                          T2,
+                          null,
+                          null));
               return id;
             });
     store.transaction(
@@ -525,7 +527,9 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
                           null,
                           List.of(),
                           T2,
-                          T2));
+                          T2,
+                          null,
+                          null));
               return id;
             });
     store.transaction(

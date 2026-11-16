@@ -171,7 +171,8 @@ public abstract class HarnessStoreInvocationContract {
               builtin(store, tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
           builtin(store, tx).updateModelInvocation(current.markRunning(T2));
           current = builtin(store, tx).lockModelInvocation(TestIds.id(101)).orElseThrow();
-          builtin(store, tx).updateModelInvocation(current.succeed(response, null, T2));
+          builtin(store, tx)
+              .updateModelInvocation(current.succeed(response, current.streamCheckpoint(), T2));
         });
 
     ModelInvocation foundModel =
@@ -257,7 +258,9 @@ public abstract class HarnessStoreInvocationContract {
             model.resultEntryId(),
             List.of(),
             model.createdAt().plusNanos(1),
-            model.updatedAt().plusNanos(1));
+            model.updatedAt().plusNanos(1),
+            model.groupProgress(),
+            model.requestedAt());
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -950,7 +953,9 @@ public abstract class HarnessStoreInvocationContract {
                   current = builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
                   builtin(store, tx)
                       .updateModelInvocation(
-                          current.succeed(successResponse(), T2).attachResultEntry(assistantA, T2));
+                          current
+                              .succeed(successResponse(), current.streamCheckpoint(), T2)
+                              .attachResultEntry(assistantA, T2));
                 }));
   }
 
@@ -985,7 +990,8 @@ public abstract class HarnessStoreInvocationContract {
               builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
           builtin(store, tx).updateModelInvocation(current.markRunning(T2));
           current = builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-          builtin(store, tx).updateModelInvocation(current.succeed(response, T2));
+          builtin(store, tx)
+              .updateModelInvocation(current.succeed(response, current.streamCheckpoint(), T2));
         });
     ModelInvocation committed =
         store.transaction(
@@ -1077,7 +1083,8 @@ public abstract class HarnessStoreInvocationContract {
               builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
           builtin(store, tx).updateModelInvocation(current.markRunning(T2));
           current = builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
-          builtin(store, tx).updateModelInvocation(current.succeed(response, T2));
+          builtin(store, tx)
+              .updateModelInvocation(current.succeed(response, current.streamCheckpoint(), T2));
           current = builtin(store, tx).lockModelInvocation(TestIds.id(1)).orElseThrow();
           builtin(store, tx).updateModelInvocation(current.attachResultEntry(assistantEntryId, T2));
         });
@@ -1293,7 +1300,9 @@ public abstract class HarnessStoreInvocationContract {
                               stored.resultEntryId(),
                               stored.failedAttempts(),
                               stored.createdAt(),
-                              T2));
+                              T2,
+                              stored.groupProgress(),
+                              stored.requestedAt()));
                 }));
     // 修改了 createdAt
     assertThrows(
@@ -1319,7 +1328,9 @@ public abstract class HarnessStoreInvocationContract {
                               stored.resultEntryId(),
                               stored.failedAttempts(),
                               T2,
-                              T2));
+                              T2,
+                              stored.groupProgress(),
+                              stored.requestedAt()));
                 }));
   }
 
@@ -1389,7 +1400,9 @@ public abstract class HarnessStoreInvocationContract {
                                       T1,
                                       T1)),
                               T1,
-                              T1));
+                              T1,
+                              null,
+                              null));
                 }));
     // tool insert 时拒绝非 READY status / 正 attempt / 非 null approval
     UUID assistantEntryId = seedAssistantAndModel();
@@ -1767,12 +1780,16 @@ public abstract class HarnessStoreInvocationContract {
                       null,
                       List.of(),
                       createdAt,
-                      createdAt));
+                      createdAt,
+                      null,
+                      null));
           ModelInvocation current = builtin(store, tx).lockModelInvocation(id).orElseThrow();
           if (status == ModelInvocationStatus.SUCCEEDED) {
             builtin(store, tx).updateModelInvocation(current.markRunning(createdAt));
             current = builtin(store, tx).lockModelInvocation(id).orElseThrow();
-            builtin(store, tx).updateModelInvocation(current.succeed(response, createdAt));
+            builtin(store, tx)
+                .updateModelInvocation(
+                    current.succeed(response, current.streamCheckpoint(), createdAt));
           } else if (status == ModelInvocationStatus.FAILED) {
             builtin(store, tx)
                 .updateModelInvocation(
@@ -2588,7 +2605,9 @@ public abstract class HarnessStoreInvocationContract {
                       null,
                       List.of(),
                       T2,
-                      T2));
+                      T2,
+                      null,
+                      null));
           return modelId;
         });
   }
@@ -2769,7 +2788,8 @@ public abstract class HarnessStoreInvocationContract {
                       current =
                           builtin(store, tx).lockModelInvocation(succeededModelId).orElseThrow();
                       builtin(store, tx)
-                          .updateModelInvocation(current.succeed(successResponse(), T3));
+                          .updateModelInvocation(
+                              current.succeed(successResponse(), current.streamCheckpoint(), T3));
                       current =
                           builtin(store, tx).lockModelInvocation(succeededModelId).orElseThrow();
                       builtin(store, tx)

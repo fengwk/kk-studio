@@ -204,7 +204,7 @@ final class OpenAiChatRequestEncoder {
   }
 
   private static ArrayNode encodeTools(List<ProviderToolDefinition> tools) {
-    if (tools == null || tools.isEmpty()) {
+    if (tools.isEmpty()) {
       return null;
     }
     ArrayNode toolsArray = NODES.arrayNode();
@@ -248,7 +248,7 @@ final class OpenAiChatRequestEncoder {
    */
   private static void applyReasoningParameters(
       ObjectNode root, ModelDescriptor model, ModelVariant variant) {
-    String effort = variant == null ? null : variant.reasoningEffort();
+    String effort = variant.reasoningEffort();
     if (effort == null) {
       return;
     }
@@ -332,7 +332,7 @@ final class OpenAiChatRequestEncoder {
    * 按档位映射为协议值。 {@code NONE} 不发送任何 cache hint。
    */
   private static void applyPromptCache(ObjectNode root, ProviderCacheControl cacheControl) {
-    if (cacheControl == null || cacheControl.retention() == PromptCacheRetention.NONE) {
+    if (cacheControl.retention() == PromptCacheRetention.NONE) {
       return;
     }
     root.put("prompt_cache_key", cacheControl.key());

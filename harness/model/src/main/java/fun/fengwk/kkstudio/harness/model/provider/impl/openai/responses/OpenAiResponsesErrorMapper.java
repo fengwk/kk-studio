@@ -1,10 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderErrorHelper;
@@ -19,9 +17,6 @@ import java.util.Locale;
  * URI、请求标头、请求凭证或原始底层异常原因。
  */
 final class OpenAiResponsesErrorMapper {
-
-  private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   static final String MSG_AUTH = "OpenAI Responses authentication failed";
   static final String MSG_BILLING = "OpenAI Responses billing or quota error";
@@ -80,7 +75,7 @@ final class OpenAiResponsesErrorMapper {
             || (lower.contains("context") && lower.contains("overflow")),
         lower.contains("request_too_large"),
         lower.contains("invalid_request") || status == 400 || status == 422,
-        containsAny(lower, "overloaded", "rate_limit", "server_error", "tokens exceeded"),
+        containsAny(lower, "overloaded", "rate_limit", "server_error"),
         false,
         false);
   }
@@ -99,7 +94,7 @@ final class OpenAiResponsesErrorMapper {
       return null;
     }
     try {
-      JsonNode node = OBJECT_MAPPER.readTree(bodyBytes);
+      JsonNode node = HarnessJson.LENIENT_DECIMAL.readTree(bodyBytes);
       return extractErrorCodeOrType(node);
     } catch (Exception ignored) {
       return null;

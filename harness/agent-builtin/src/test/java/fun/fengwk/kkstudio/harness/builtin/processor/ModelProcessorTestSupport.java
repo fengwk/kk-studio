@@ -514,6 +514,7 @@ abstract class ModelProcessorTestSupport {
                                       new ProviderToolCall("call-1", "bash", "{\"secret\":1}")),
                                   requestWithTool().toolBindings(),
                                   null,
+                                  null,
                                   null),
                           NOW.plusMillis(3)));
               tx.threads()
@@ -539,7 +540,9 @@ abstract class ModelProcessorTestSupport {
                           null,
                           List.of(),
                           NOW,
-                          NOW));
+                          NOW,
+                          null,
+                          null));
               tx.work().request(new WorkTarget(WorkTargetType.THREAD, basis.threadId()));
               tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
               return id;
@@ -557,7 +560,8 @@ abstract class ModelProcessorTestSupport {
             () -> NO_RETRY,
             () -> FALLBACK_DELAY,
             ModelStreamConfig.DEFAULT,
-            null),
+            null,
+            providerName -> ModelHttpErrorPolicy.DEFAULT),
         Clock.fixed(NOW, ZoneOffset.UTC),
         newScheduler(),
         Runnable::run,
@@ -669,7 +673,9 @@ abstract class ModelProcessorTestSupport {
                       null,
                       List.of(),
                       now,
-                      now));
+                      now,
+                      null,
+                      null));
           tx.work().request(new WorkTarget(WorkTargetType.THREAD, baseline.threadId()));
           tx.work().request(new WorkTarget(BuiltinWorkType.MODEL, id));
           return id;
@@ -1029,7 +1035,8 @@ abstract class ModelProcessorTestSupport {
             response("ok", GenerationStopReason.COMPLETE),
             requestWithTool().toolBindings(),
             ModelSelection.model("model", "v1"),
-            NOW);
+            NOW,
+            null);
   }
 
   static BranchSettings branchSettings() {

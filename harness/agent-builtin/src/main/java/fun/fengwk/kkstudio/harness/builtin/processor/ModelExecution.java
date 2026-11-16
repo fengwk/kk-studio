@@ -91,8 +91,9 @@ public final class ModelExecution
   private final ModelTerminalCommitter terminal;
 
   /**
-   * 完整构造器：{@code providerName} 是本次 Invocation 冻结的 Provider 身份；{@code nanoTime} 是采集流式生成计时的单调时间源
-   * （checkpoint 节奏固定用 System.nanoTime）， 生产默认 {@link System#nanoTime}，测试可注入可控来源。
+   * 完整构造器：{@code providerName} 是本次 Invocation 冻结的 Provider 身份，{@code groupInvocation} 表示冻结请求来自模型组；
+   * {@code nanoTime} 是采集流式生成计时的单调时间源（checkpoint 节奏固定用 System.nanoTime）， 生产默认 {@link
+   * System#nanoTime}，测试可注入可控来源。
    */
   public ModelExecution(
       HarnessStore store,
@@ -105,6 +106,7 @@ public final class ModelExecution
       List<ToolBinding> bindings,
       ModelProcessorConfig config,
       String providerName,
+      boolean groupInvocation,
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
@@ -122,6 +124,7 @@ public final class ModelExecution
         bindings,
         config,
         providerName,
+        groupInvocation,
         clock,
         scheduler,
         heartbeatWorker,
@@ -142,6 +145,7 @@ public final class ModelExecution
       List<ToolBinding> bindings,
       ModelProcessorConfig config,
       String providerName,
+      boolean groupInvocation,
       Clock clock,
       ScheduledExecutorService scheduler,
       Executor heartbeatWorker,
@@ -166,7 +170,9 @@ public final class ModelExecution
             MillisecondTime.millisecondClock(clock),
             scheduler,
             flushExecutor);
-    this.terminal = createTerminal(gateway, config, ownerSettledSummary, bindings, providerName);
+    this.terminal =
+        createTerminal(
+            gateway, config, ownerSettledSummary, bindings, providerName, groupInvocation);
   }
 
   /** lease heartbeat 在每次 tick 时读取部署配置；停止或丢失 lease 即 abandon。 */
@@ -208,7 +214,8 @@ public final class ModelExecution
       ModelProcessorConfig config,
       boolean ownerSettledSummary,
       List<ToolBinding> bindings,
-      String providerName) {
+      String providerName,
+      boolean groupInvocation) {
     return new ModelTerminalCommitter(
         store,
         builtinStore,
@@ -220,17 +227,9 @@ public final class ModelExecution
         attempt,
         ownerSettledSummary,
         Objects.requireNonNull(bindings, "bindings"),
-        requireProviderName(providerName),
+        Objects.requireNonNull(providerName, "providerName"),
+        groupInvocation,
         stream);
-  }
-
-  /** 冻结的 Provider 身份必须非空白：未知名称在策略层按“继承系统名单”处理，但 null/blank 不得进入 live 路径。 */
-  private static String requireProviderName(String providerName) {
-    Objects.requireNonNull(providerName, "providerName");
-    if (providerName.isBlank()) {
-      throw new IllegalArgumentException("providerName must not be blank");
-    }
-    return providerName;
   }
 
   private static BuiltinStore requireBuiltinStore(HarnessStore store) {

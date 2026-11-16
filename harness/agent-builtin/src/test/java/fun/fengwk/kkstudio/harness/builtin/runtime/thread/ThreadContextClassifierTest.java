@@ -968,7 +968,9 @@ class ThreadContextClassifierTest {
             resultEntryId,
             List.of(),
             NOW,
-            NOW);
+            NOW,
+            null,
+            null);
     return new TestLockedState(model, cancelsToolBatch);
   }
 

@@ -57,7 +57,7 @@ final class BuiltinStop {
         new ModelInvocationError(ProviderErrorKind.CANCELLED, CANCELLED_MESSAGE);
     UUID parentId =
         ModelAttemptFailureAppender.append(
-            store.in(core), path.root().sessionId(), path.head().id(), model, false);
+            store.in(core), path.root().sessionId(), path.head().id(), model);
     UUID barrierId = commit.nextId();
     commit.insertEntry(
         new Entry(

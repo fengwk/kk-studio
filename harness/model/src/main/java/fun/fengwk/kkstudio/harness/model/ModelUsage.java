@@ -32,15 +32,6 @@ public record ModelUsage(
     providerTotalTokens = optionalNonNegative(providerTotalTokens, "providerTotalTokens");
   }
 
-  /** 返回归一化后互斥的 token 总量（output 已包含 reasoning，不重复相加）。 */
-  public long categorizedTokens() {
-    long sum = inputTokens;
-    sum = Math.addExact(sum, outputTokens);
-    sum = Math.addExact(sum, cacheReadTokens);
-    sum = Math.addExact(sum, cacheWriteTokens);
-    return sum;
-  }
-
   /** 计入 context 条件的输入总量：未缓存输入 + 缓存读 + 所有缓存写。 */
   public long contextTokens() {
     long sum = Math.addExact(inputTokens, cacheReadTokens);

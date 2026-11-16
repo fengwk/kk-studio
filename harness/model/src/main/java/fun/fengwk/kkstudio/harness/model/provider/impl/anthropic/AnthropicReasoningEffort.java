@@ -130,7 +130,7 @@ final class AnthropicReasoningEffort {
     if (!request.model().reasoning()) {
       return;
     }
-    if (request.variant() != null && request.variant().reasoningOff()) {
+    if (request.variant().reasoningOff()) {
       if (root.has("thinking")) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,

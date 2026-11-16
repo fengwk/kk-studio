@@ -192,13 +192,18 @@ class PostgresqlThreadProcessorReplayTest {
                       null,
                       List.of(),
                       T2,
-                      T2);
+                      T2,
+                      null,
+                      null);
               builtin(store, tx).insertModelInvocation(model);
               var running = model.markRunning(T2);
               builtin(store, tx).updateModelInvocation(running);
               builtin(store, tx)
                   .updateModelInvocation(
-                      running.succeed(StoreTestSupport.assistantResponse("call-0"), T2));
+                      running.succeed(
+                          StoreTestSupport.assistantResponse("call-0"),
+                          running.streamCheckpoint(),
+                          T2));
               return id;
             });
     var before = store.transaction(tx -> tx.threads().find(baseline.threadId()).orElseThrow());
@@ -286,11 +291,14 @@ class PostgresqlThreadProcessorReplayTest {
                           null,
                           List.of(),
                           T2,
-                          T2));
+                          T2,
+                          null,
+                          null));
               var model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
               builtin(store, tx).updateModelInvocation(model.markRunning(T2));
               model = builtin(store, tx).lockModelInvocation(id).orElseThrow();
-              builtin(store, tx).updateModelInvocation(model.succeed(response, T2));
+              builtin(store, tx)
+                  .updateModelInvocation(model.succeed(response, model.streamCheckpoint(), T2));
               return id;
             });
 

@@ -161,7 +161,9 @@ class ModelInvocationTest {
                 null,
                 List.of(),
                 CREATED,
-                UPDATED));
+                UPDATED,
+                null,
+                null));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -179,7 +181,9 @@ class ModelInvocationTest {
                 null,
                 List.of(),
                 CREATED,
-                UPDATED));
+                UPDATED,
+                null,
+                null));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -197,7 +201,9 @@ class ModelInvocationTest {
                 null,
                 List.of(),
                 CREATED,
-                UPDATED));
+                UPDATED,
+                null,
+                null));
     assertThrows(
         NullPointerException.class,
         () ->
@@ -215,7 +221,9 @@ class ModelInvocationTest {
                 null,
                 List.of(),
                 null,
-                UPDATED));
+                UPDATED,
+                null,
+                null));
   }
 
   @Test
@@ -348,7 +356,9 @@ class ModelInvocationTest {
         resultEntryId,
         failures(status, attempt),
         CREATED,
-        UPDATED);
+        UPDATED,
+        null,
+        null);
   }
 
   private static ModelInvocation invocation(
@@ -373,7 +383,9 @@ class ModelInvocationTest {
         resultEntryId,
         failedAttempts,
         CREATED,
-        UPDATED);
+        UPDATED,
+        null,
+        null);
   }
 
   private static List<ModelAttemptFailure> failures(ModelInvocationStatus status, int attempt) {

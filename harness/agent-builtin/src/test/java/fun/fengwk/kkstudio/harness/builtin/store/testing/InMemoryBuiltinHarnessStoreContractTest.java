@@ -288,7 +288,9 @@ class InMemoryBuiltinHarnessStoreContractTest {
             canonical.resultEntryId(),
             canonical.failedAttempts(),
             canonical.createdAt().plusNanos(1),
-            canonical.updatedAt().plusNanos(1));
+            canonical.updatedAt().plusNanos(1),
+            null,
+            null);
 
     IllegalArgumentException failure =
         assertThrows(

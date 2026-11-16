@@ -932,7 +932,7 @@ class HarnessRuntimeToolInputTest {
                   modelId, stale.threadId(), turnStartId, turnStartId, requestSpec, T3);
           builtin(store, tx).insertModelInvocation(model);
           builtin(store, tx).updateModelInvocation(model.markRunning(T3));
-          ModelInvocation succeeded = model.markRunning(T3).succeed(response, T3);
+          ModelInvocation succeeded = model.markRunning(T3).succeed(response, null, T3);
           builtin(store, tx).updateModelInvocation(succeeded);
           builtin(store, tx)
               .updateModelInvocation(succeeded.attachResultEntry(assistantEntryId, T3));
