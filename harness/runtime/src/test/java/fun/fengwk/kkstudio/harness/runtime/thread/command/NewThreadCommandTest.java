@@ -85,7 +85,7 @@ class NewThreadCommandTest {
         IllegalArgumentException.class,
         () -> new NewThreadCommand(durablePayload, TestIds.id(1), "not-a-hash"));
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () -> new NewThreadCommand(durablePayload, TestIds.id(1), null));
   }
 

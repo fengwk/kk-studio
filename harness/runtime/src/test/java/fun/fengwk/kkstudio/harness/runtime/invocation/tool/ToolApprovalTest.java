@@ -133,7 +133,7 @@ class ToolApprovalTest {
             new ToolApproval(
                 true, ToolApprovalDecision.ALLOWED, null, "actor", null, REQUESTED, DECIDED));
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
             new ToolApproval(
                 true, ToolApprovalDecision.ALLOWED, id(1L), null, null, REQUESTED, DECIDED));

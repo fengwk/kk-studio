@@ -202,9 +202,23 @@ class SpawnRequestTest {
 
   @Test
   void rejectsMissingOrMalformedRequestHash() {
-    // 票据指纹必须是 64 位小写 SHA-256 hex。
+    // 票据指纹必须是 64 位小写 SHA-256 hex；缺失是 null 契约失败，格式错误是非法参数。
+    assertThrows(
+        NullPointerException.class,
+        () ->
+            request(
+                SESSION,
+                null,
+                null,
+                null,
+                false,
+                ThreadKind.CONTROLLER_TASK,
+                JoinDelivery.RECEIPT_ONLY,
+                SpawnRequest.Budget.unlimited(),
+                List.of(command(21, "hash")),
+                null));
     for (String hash :
-        new String[] {null, "A".repeat(64), "a".repeat(63), "a".repeat(65), "g".repeat(64)}) {
+        new String[] {"A".repeat(64), "a".repeat(63), "a".repeat(65), "g".repeat(64)}) {
       assertThrows(
           IllegalArgumentException.class,
           () ->

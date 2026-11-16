@@ -10,9 +10,6 @@ import java.util.regex.Pattern;
 /** SHA-256 摘要工具：JDK 必定提供该算法，缺失视为环境损坏。 */
 public final class Sha256 {
 
-  /** 小写十六进制 SHA-256 文本的字数。 */
-  public static final int HEX_LENGTH = 64;
-
   private static final Pattern CANONICAL_HEX = Pattern.compile("[0-9a-f]{64}");
 
   private Sha256() {}
@@ -49,8 +46,7 @@ public final class Sha256 {
   public static String requireHex(String value, String field) {
     Objects.requireNonNull(value, field);
     if (!CANONICAL_HEX.matcher(value).matches()) {
-      throw new IllegalArgumentException(
-          field + " must be a lowercase SHA-256 hex string: " + value);
+      throw new IllegalArgumentException(field + " must be a lowercase SHA-256 hex string");
     }
     return value;
   }

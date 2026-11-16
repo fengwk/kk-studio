@@ -134,9 +134,9 @@ class ThreadStateTest {
                 0L,
                 CREATED,
                 CREATED));
-    // 拒绝非法的 creationRequestHash
+    // creationRequestHash 缺失是 null 契约失败，格式错误是非法参数。
     assertThrows(
-        IllegalArgumentException.class,
+        NullPointerException.class,
         () ->
             new ThreadState(
                 id(7),
