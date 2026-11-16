@@ -62,8 +62,6 @@ const ISSUE_DETAIL_FIELDS = [
   'activities',
   'nextActivityCursor',
   'runs',
-  'currentRun',
-  'latestRun',
   'stageBudgets',
   'agentThreads',
 ]
@@ -408,8 +406,6 @@ registerCase({
         detail.activities.length === 0
           && detail.nextActivityCursor === null
           && detail.runs.length === 0
-          && detail.currentRun === null
-          && detail.latestRun === null
           && detail.stageBudgets.length === 0
           && detail.agentThreads.length === 0,
         JSON.stringify(detail),

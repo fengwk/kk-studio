@@ -4,7 +4,6 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Isolation;
 import org.springframework.transaction.annotation.Transactional;
 
-import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
 import fun.fengwk.kkstudio.project.dto.ProjectIssueSnapshotDTO;
@@ -29,8 +28,6 @@ import java.util.UUID;
  *
  * <p>整个组装在同一个只读 {@code REPEATABLE_READ} 事务内完成（声明式，由 Spring 代理生效）：否则多个独立查询之间可能有其它事务提交， 从而拼出旧 Project
  * + 新 Issue/Run 的撕裂响应。
- *
- * <p>对所有跨表实体严格执行 {@code projectId} 与 {@code issueId} 归属校验，任何不一致立即 fail-closed 抛出异常，绝不泄漏外国实体。
  */
 @Component
 public class ProjectSnapshotAssembler {
@@ -56,24 +53,13 @@ public class ProjectSnapshotAssembler {
     Objects.requireNonNull(projectId, "projectId");
 
     Project project = projectService.getProject(projectId);
-    if (project == null) {
-      throw DomainException.notFound("project");
-    }
-    if (!project.getId().equals(projectId)) {
-      throw new IllegalStateException("Foreign project returned for snapshot");
-    }
 
     List<Issue> issues = issueEditingService.listIssues(projectId);
     Set<String> referencedStateCodes = new TreeSet<>();
-    collectReferencedStates(projectId, issues, referencedStateCodes);
+    collectReferencedStates(issues, referencedStateCodes);
     List<ProjectIssueSnapshotDTO> issueSnapshots = new ArrayList<>(issues.size());
     for (Issue issue : issues) {
       List<IssueRun> runs = issueRunService.listRuns(issue.getId());
-      for (IssueRun run : runs) {
-        if (!run.getIssueId().equals(issue.getId())) {
-          throw new IllegalStateException("Foreign run returned for issue snapshot");
-        }
-      }
       IssueRun currentOrLatest =
           runs.stream()
               .filter(
@@ -112,12 +98,8 @@ public class ProjectSnapshotAssembler {
         .build();
   }
 
-  private void collectReferencedStates(
-      UUID projectId, List<Issue> issues, Set<String> referencedStateCodes) {
+  private void collectReferencedStates(List<Issue> issues, Set<String> referencedStateCodes) {
     for (Issue issue : issues) {
-      if (!issue.getProjectId().equals(projectId)) {
-        throw new IllegalStateException("Foreign issue returned for project snapshot");
-      }
       referencedStateCodes.add(issue.getState());
       if (issue.getBlockedFromState() != null) {
         referencedStateCodes.add(issue.getBlockedFromState());

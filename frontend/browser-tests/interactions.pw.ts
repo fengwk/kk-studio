@@ -243,8 +243,6 @@ async function mockPendingApi(page: Page, options: PendingApiOptions = {}): Prom
               activities: [],
               nextActivityCursor: null,
               runs: [],
-              currentRun: null,
-              latestRun: null,
               stageBudgets: [],
               agentThreads: [],
           },

@@ -67,8 +67,6 @@ const issueDetail: IssueDetailDTO = {
   activities: [],
   nextActivityCursor: null,
   runs: [],
-  currentRun: null,
-  latestRun: null,
   stageBudgets: [],
   agentThreads: [],
 }

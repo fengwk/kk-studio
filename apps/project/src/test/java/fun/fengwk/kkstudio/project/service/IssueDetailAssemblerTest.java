@@ -34,16 +34,14 @@ class IssueDetailAssemblerTest {
       new IssueDetailAssembler(issues, budgets, runs, projects, mapper, codec);
 
   @Test
-  void missingProjectIsSkippedButOtherProjectErrorsPropagate() {
-    // 仅 project not-found 可跳过；其他 code 或 resource 必须原样上抛。
+  void missingProjectPropagates() {
+    // 详情聚合不把不存在的项目当作可忽略事实：Project 用例的 not-found 原样上抛。
     when(issues.getIssue(issueId))
         .thenReturn(Issue.builder().id(issueId).projectId(projectId).build());
-    doThrow(DomainException.notFound("project")).when(projects).getProject(projectId);
-    assertNotNull(assembler.assemble(issueId, 0, 10));
-    DomainException unrelated = DomainException.notFound("issue");
-    doThrow(unrelated).when(projects).getProject(projectId);
+    DomainException missing = DomainException.notFound("project");
+    doThrow(missing).when(projects).getProject(projectId);
     assertSame(
-        unrelated, assertThrows(DomainException.class, () -> assembler.assemble(issueId, 0, 10)));
+        missing, assertThrows(DomainException.class, () -> assembler.assemble(issueId, 0, 10)));
     DomainException conflict = DomainException.conflict("BUSY", "busy");
     doThrow(conflict).when(projects).getProject(projectId);
     assertSame(
@@ -52,7 +50,7 @@ class IssueDetailAssemblerTest {
 
   @Test
   void missingBudgetIsSkippedButOtherBudgetErrorsPropagate() {
-    // 即使错误 resource 为 project，也不能被外层 Project 查找的 not-found 分支吞掉。
+    // 阶段尚未授权时跳过该阶段额度；其他错误必须原样上抛。
     when(issues.getIssue(issueId))
         .thenReturn(Issue.builder().id(issueId).projectId(projectId).build());
     when(projects.getProject(projectId)).thenReturn(Project.builder().workflowJson("{}").build());

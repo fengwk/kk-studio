@@ -4,7 +4,6 @@ import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertNotFound;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -20,6 +19,7 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.module.SimpleModule;
 import tools.jackson.databind.ser.std.ToStringSerializer;
 
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.IssueRunStatus;
 import fun.fengwk.kkstudio.project.domain.ProjectWorkflowJsonCodec;
 import fun.fengwk.kkstudio.project.dto.ProjectDtoMapper;
@@ -38,7 +38,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-/** 验证 ProjectSnapshotAssembler 的权威组装与 fail-closed 跨实体隔离校验。 */
+/** 验证 ProjectSnapshotAssembler 的权威组装：Issue 排序、当前/最近 Run 投影与引用集合。 */
 class ProjectSnapshotAssemblerTest {
 
   private ProjectService projectService;
@@ -201,83 +201,9 @@ class ProjectSnapshotAssemblerTest {
 
   @Test
   void testProjectNotFoundFails() {
-    // 测试意图：项目不存在时抛出 404
-    when(projectService.getProject(projectId)).thenReturn(null);
+    // 项目不存在由 Project 用例确定报 404，快照不在本地重复判定。
+    when(projectService.getProject(projectId)).thenThrow(DomainException.notFound("project"));
     assertNotFound(() -> assembler.assemble(projectId));
-  }
-
-  @Test
-  void testFailClosedOnForeignIssue() {
-    // 测试意图：若查询结果中混入了非本项目 Issue，必须 fail-closed 抛异常
-    Project project =
-        Project.builder()
-            .id(projectId)
-            .title("Proj")
-            .version(0L)
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    when(projectService.getProject(projectId)).thenReturn(project);
-
-    UUID foreignIssueId = UUID.randomUUID();
-    Issue foreignIssue =
-        Issue.builder()
-            .id(foreignIssueId)
-            .projectId(UUID.randomUUID()) // 属于另外一个项目
-            .number(1L)
-            .title("Foreign")
-            .state("INIT")
-            .version(0L)
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    when(issueEditingService.listIssues(projectId)).thenReturn(List.of(foreignIssue));
-
-    IllegalStateException ex =
-        assertThrows(IllegalStateException.class, () -> assembler.assemble(projectId));
-    assertTrue(ex.getMessage().contains("Foreign issue"));
-  }
-
-  @Test
-  void testFailClosedOnForeignRun() {
-    // 测试意图：若 IssueRun 的 issueId 与当前 Issue 不一致，抛异常
-    Project project =
-        Project.builder()
-            .id(projectId)
-            .title("Proj")
-            .version(0L)
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    when(projectService.getProject(projectId)).thenReturn(project);
-
-    UUID issueId = UUID.randomUUID();
-    Issue issue =
-        Issue.builder()
-            .id(issueId)
-            .projectId(projectId)
-            .number(1L)
-            .title("Issue")
-            .state("INIT")
-            .version(0L)
-            .createdAt(now)
-            .updatedAt(now)
-            .build();
-    when(issueEditingService.listIssues(projectId)).thenReturn(List.of(issue));
-
-    IssueRun foreignRun =
-        IssueRun.builder()
-            .id(UUID.randomUUID())
-            .issueId(UUID.randomUUID()) // 不等于 issueId
-            .ordinal(1L)
-            .version(0L)
-            .startedAt(now)
-            .build();
-    when(issueRunService.listRuns(issueId)).thenReturn(List.of(foreignRun));
-
-    IllegalStateException ex =
-        assertThrows(IllegalStateException.class, () -> assembler.assemble(projectId));
-    assertTrue(ex.getMessage().contains("Foreign run"));
   }
 
   private static JsonMapper httpMapper() {

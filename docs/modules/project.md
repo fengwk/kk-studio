@@ -19,10 +19,10 @@ Reconcile 的执行器、生命周期由 [Web](web.md) 组装。模块依赖方�
 
 | 包 | 内容 |
 | --- | --- |
-| [domain](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置、阶段流转与阶段预算授权规则 |
-| [model](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model) | Project、Issue、Run、Activity、Evidence、Work、Agent Thread 绑定、阶段预算行与暂停原因等值 |
+| [domain](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/domain) | workflow 配置与严格编解码、阶段流转规则、状态编码与 Run 状态枚举 |
+| [model](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/model) | Project、Issue、IssueRun、IssueActivity、IssueEvidence、IssueAgentThread 行与 PauseReason/Activity 种类/操作者枚举 |
 | [repo](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/repo) | 按实体拆分的具体 `JdbcClient` Repository（直接承载 SQL、参数绑定与 RowMapper）及项目变更通知 |
-| [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project、Issue 编辑/生命周期/阶段预算、Run、Evidence 与 Work 邮箱；`ProjectSnapshotAssembler` 与 `IssueDetailAssembler` 聚合快照；`IssueMutationSupport` 共用 owner 锁与幂等回执 |
+| [service](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service) | 用例级事务边界：Project、Issue 编辑/生命周期/阶段预算、Run、Evidence 与 Work 邮箱；`StageBudgetView` 额度视图；`ProjectSnapshotAssembler` 与 `IssueDetailAssembler` 聚合快照；`IssueMutationSupport` 共用 owner 锁与幂等回执 |
 | [reconcile](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/reconcile) | Issue 调度的部署级配置与确定性推进 |
 | [platform](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/platform) | 对运行时与全局 Blob 的窄适配：Issue/Run 执行所需的 Thread 事实与命令控制、证据 Blob |
 | [tool](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/tool) | Project Harness Contributor：`issue_transition` 业务工具 |
@@ -84,7 +84,8 @@ Agent、Environment 与 Run 额度，由人工显式推进。
 INIT 可达，INIT 须存在到 DONE 的正常路径。
 
 workflow 整体保存时锁定 Project、检查版本，并要求项目无活动 Run。保存校验编码、
-合法边、可达性与引用；所有现存 Issue 的当前阶段及阻塞恢复点都须保留。保存成功后按新
+合法边、可达性与引用；所有现存 Issue 的当前阶段及阻塞恢复点都须保留。仍声明的阶段停用后，
+停在该阶段或从其阻塞的 Issue 仍可显式恢复（恢复只要求编码仍存在，不要求阶段启用）。保存成功后按新
 workflow 为当前未暂停且可执行的 Issue 重新登记 Work；恢复归档复用同一动作。
 工作流编辑读取 Project Snapshot 的 `referencedStateCodes` 实施相同引用保护，
 不依赖可见看板列表。后台推送刷新约束而不覆盖打开中的草稿。
@@ -124,9 +125,10 @@ Run ordinal 在 Issue 内单调分配。新 Run 的失败和取消都消耗一�
 仍使用同一阶段预算。workflow 默认额度用于首次授权，既有额度由人工重置维护。
 
 [`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)
-承载阶段额度的读取与人工重置：首次授权由 Run 接受路径按 workflow 默认额度完成，重置高水位只能推进到
-`nextRunOrdinal - 1`，不能回退而重新授权历史 Run。消耗由持久化按本 Issue、本阶段、序号超过高水位的全部
-Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，不限制已接受 Run 的恢复。
+承载阶段额度的读取与人工重置：首次授权由 Run 接受路径按 workflow 默认额度完成，重置高水位取
+`nextRunOrdinal - 1`；该计数器只增不减，高水位因此不会回退到已消耗的历史 Run。消耗由持久化
+按本 Issue、本阶段、序号超过高水位的全部 Run 计数，失败和取消也消耗一次；额度只限制**新 Run**，
+不限制已接受 Run 的恢复。
 人工重置要求无活动 Run，高水位取服务端 `next_run_ordinal - 1`，前后额度与高水位写入 CONTROL
 活动。used/remaining 在读取时计算，Agent 通过受控执行使用额度。已接受 Run 还受
 持久活动时长余额与模型、工具安全上限约束，安全等待暂停活动计时。
@@ -171,7 +173,9 @@ Agent 使用 `issue_transition`（参数 `to_state`）请求交接，目标先�
 接受 next_state
   -> 处理剩余输入、问答与在途调用，到安全点
   -> root Join 冻结 terminalEntryId / finalAnswerEntryId
-  -> 事务复验 Run ID/version、历史区间、合法边与门禁
+  -> 复验门禁：关闭则保留 next_state 停在安全点，不提交阶段推进
+     （RUNNING 且仍有活动额度时转 WAITING；额度已耗尽则保持 RUNNING）
+  -> 门禁打开后事务复验 Run ID/version、历史区间与合法边
   -> 冻结报告，Run=COMPLETED
   -> 更新 Issue.state，记录活动，发布证据，请求后继 Work
 ```

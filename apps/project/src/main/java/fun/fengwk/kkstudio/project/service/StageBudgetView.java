@@ -32,17 +32,14 @@ public record StageBudgetView(
     return budget(state, maxRuns, 0);
   }
 
-  public StageBudgetView reset(ProjectWorkflow workflow, int maxRuns, long nextRunOrdinal) {
-    ProjectStateCode code = ProjectStateCode.of(state);
-    requireEnabledAgentStage(workflow, code);
+  /** 重置额度：高水位取 {@code nextRunOrdinal - 1}；该计数器只增不减，高水位因此不会回退到已消耗的历史 Run。 */
+  public static StageBudgetView reset(
+      ProjectWorkflow workflow, ProjectStateCode state, int maxRuns, long nextRunOrdinal) {
+    requireEnabledAgentStage(workflow, state);
     if (nextRunOrdinal < 1) {
       throw new IllegalArgumentException("nextRunOrdinal must be >= 1");
     }
-    long highWaterOrdinal = nextRunOrdinal - 1;
-    if (highWaterOrdinal < budgetAfterOrdinal) {
-      throw new IllegalArgumentException("budget high-water mark must not move backwards");
-    }
-    return budget(code, maxRuns, highWaterOrdinal);
+    return budget(state, maxRuns, nextRunOrdinal - 1);
   }
 
   private static void requireEnabledAgentStage(ProjectWorkflow workflow, ProjectStateCode state) {

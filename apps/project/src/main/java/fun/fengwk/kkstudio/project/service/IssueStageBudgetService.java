@@ -30,7 +30,7 @@ public class IssueStageBudgetService {
   private final IssueRunRepository issueRunRepository;
   private final IssueMutationSupport mutationSupport;
 
-  /** 重置阶段额度：高水位取服务端当前 {@code nextRunOrdinal - 1}，不得回退而重新授权历史 Run。 */
+  /** 重置阶段额度：高水位取服务端当前 {@code nextRunOrdinal - 1}；该计数器只增不减，重置不会重新授权历史 Run。 */
   @Transactional
   public StageBudgetView resetStageBudget(
       UUID issueId, long expectedVersion, String requestKey, String state, int maxRuns) {
@@ -55,12 +55,8 @@ public class IssueStageBudgetService {
     StageBudgetView existing = stageBudgetRepository.get(issueId, state);
     long previousMax = existing != null ? existing.maxRuns() : 0;
     long previousAfter = existing != null ? existing.budgetAfterOrdinal() : 0;
-    StageBudgetView currentBudget =
-        existing == null
-            ? StageBudgetView.authorize(locked.workflow(), code, maxRuns)
-            : StageBudgetView.budget(code, existing.maxRuns(), existing.budgetAfterOrdinal());
     StageBudgetView reset =
-        currentBudget.reset(locked.workflow(), maxRuns, locked.issue().getNextRunOrdinal());
+        StageBudgetView.reset(locked.workflow(), code, maxRuns, locked.issue().getNextRunOrdinal());
     boolean applied =
         existing == null
             ? stageBudgetRepository.insert(issueId, reset)

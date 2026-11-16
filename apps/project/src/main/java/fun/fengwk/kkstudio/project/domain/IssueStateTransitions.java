@@ -7,8 +7,8 @@ import java.util.Objects;
 /**
  * Issue 阶段流转策略：以 workflow 的 {@code next} 白名单为唯一依据，并显式区分正常边、业务阻塞/恢复与 DONE 重开。
  *
- * <p>正常边只能进入启用阶段；BLOCKED 由专用阻塞操作进入并记录原阶段与原因；恢复只能显式回到阻塞前阶段； DONE 只能由显式重开操作回到 INIT。依赖说明写在 Issue
- * 正文，这里不做依赖图、自动唤醒或门禁判定。
+ * <p>正常边只能进入启用阶段；BLOCKED 由专用阻塞操作进入并记录原阶段与原因；恢复只能显式回到仍声明的阻塞前阶段，阶段停用不阻止恢复； DONE 只能由显式重开操作回到
+ * INIT。依赖说明写在 Issue 正文，这里不做依赖图、自动唤醒或门禁判定。
  */
 public final class IssueStateTransitions {
 
@@ -53,12 +53,12 @@ public final class IssueStateTransitions {
     return source.state();
   }
 
-  /** 恢复：只能显式回到阻塞前阶段，且该阶段必须是仍启用的 INIT 或工作阶段。 */
+  /** 恢复：只能显式回到仍声明的 INIT 或工作阶段；阶段停用后既有 Issue 仍需回到原阶段。 */
   public ProjectStateCode requireRecover(ProjectStateCode blockedFromState) {
     ProjectWorkflowState stage = workflow.require(blockedFromState);
     ProjectStateCode blocked = ProjectWorkflowReservedState.BLOCKED.code();
     ProjectStateCode done = ProjectWorkflowReservedState.DONE.code();
-    if (blocked.equals(stage.state()) || done.equals(stage.state()) || !stage.enabled()) {
+    if (blocked.equals(stage.state()) || done.equals(stage.state())) {
       throw DomainException.validation(
           "issue", "state " + blockedFromState + " cannot be a blocked recovery target");
     }

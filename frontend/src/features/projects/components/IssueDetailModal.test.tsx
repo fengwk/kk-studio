@@ -104,8 +104,6 @@ describe('IssueDetailModal', () => {
         budgetAfterOrdinal: '0',
       },
     ],
-    currentRun: null,
-    latestRun: null,
     nextActivityCursor: null,
   }
 
