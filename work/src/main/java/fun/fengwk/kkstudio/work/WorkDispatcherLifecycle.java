@@ -51,15 +51,6 @@ public final class WorkDispatcherLifecycle implements SmartLifecycle {
   }
 
   @Override
-  public void stop(Runnable callback) {
-    try {
-      stop();
-    } finally {
-      callback.run();
-    }
-  }
-
-  @Override
   public boolean isRunning() {
     synchronized (lifecycleLock) {
       return running;

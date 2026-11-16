@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 /**
  * {@link WorkDispatcherLifecycle} 的启停契约。
  *
- * <p>验证 disabled 不启动、start/stop 幂等、stop 回调必达，以及 start 失败时关闭 dispatcher 并复位 running。
+ * <p>验证 disabled 不启动、start/stop 幂等、start 失败时关闭 dispatcher 并复位 running，以及 phase 与自动启动契约。
  */
 class WorkDispatcherLifecycleTest {
 
