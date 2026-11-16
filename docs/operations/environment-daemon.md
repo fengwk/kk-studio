@@ -106,9 +106,10 @@ powershell -NoProfile -ExecutionPolicy Bypass -File install.ps1 help
 直接失败。
 
 Unix 的 `--config-file` / `--token-file` 必须指向现存、可读、属主私有、不是符号链接且有界的普通
-文件，且必须是同目录的兄弟文件 `daemon.json` / `daemon.token`。Windows 的 `-ConfigFile` /
+文件，且必须是同目录的兄弟文件 `daemon.json` / `daemon.token`。配置上限为 1 MiB，token 上限为
+16384 字节，两者在 Unix 与 Windows 安装器中相同。Windows 的 `-ConfigFile` /
 `-TokenFile` 必须由当前 SID 拥有、禁用 ACL 继承、不含其它 SID 的 Allow ACE，且不是 reparse point。
-安装器只校验文件元数据并复制 token 内容，自身不解析 token 文本；发行归档的 `--check-config` 预检会读取同目录凭据以确认其存在且可读。
+安装器只校验文件元数据并复制 token 内容，自身不解析 token 文本；发行归档的 `--check-config` 预检会读取同目录凭据以确认其存在且可读。Daemon 读取凭据时应用同一个 16384 字节上限，超限文件不会被当作有效凭据。
 
 `DAEMON_VERIFY_TIMEOUT_SECONDS`
 （默认 30）与 `DAEMON_VERIFY_STABLE_SECONDS`（默认 3）可覆盖启动与稳定性验证窗口，均须十进制
@@ -123,8 +124,9 @@ Unix 的 `--config-file` / `--token-file` 必须指向现存、可读、属主�
    受管定义会在下载或写入前被拒绝。
 2. 解析本机平台到官方归档命名，在**本操作独占的系统临时目录**下载目标 tag 的发行归档
    `kk-studio-daemon-<tag>-<os>-<arch>.tar.gz` 与 `.tar.gz.sha256`，核对 SHA256 摘要，并验证归档
-   结构、平台清单与 `--version` 输出。下载/解包不进入卡片目录，取得操作锁之前不存在可被另一操作
-   清理的暂存。
+   结构、平台清单与 `--version` 输出。归档只包含运行所需内容：Daemon 可执行文件、受管 code-server
+   运行时、IDE 扩展的运行文件（不含其测试套件）、运行时清单与法律声明。下载/解包不进入卡片目录，
+   取得操作锁之前不存在可被另一操作清理的暂存。
 3. 把安装输入复制为暂存目录内的同名 `daemon.json` / `daemon.token`，由发行归档中的 Daemon 执行
    `--check-config`，检查配置结构、取值与同目录凭据。它**不执行** Bash 或任何其它程序，不建数据目录、
    不加锁、不连接、不启动 LSP；Bash 与语言服务器的真实解析由 Daemon 在应用配置时完成，失败会保持连接
