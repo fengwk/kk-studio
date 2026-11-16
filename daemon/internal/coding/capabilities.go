@@ -27,7 +27,6 @@ type arguments struct {
 	Workdir      string `json:"workdir"`
 	Path         string `json:"path"`
 	Content      string `json:"content"`
-	Preview      bool   `json:"preview"`
 	Pattern      string `json:"pattern"`
 	Glob         string `json:"glob"`
 	Limit        int    `json:"limit"`
@@ -230,18 +229,6 @@ func writeCapability(ctx context.Context, call runtime.CapabilityCall, capabilit
 	}
 	if err = ctx.Err(); err != nil {
 		return errorResult(call.InvocationID, err), nil
-	}
-	if _, err := os.Lstat(args.Path); err == nil {
-		info, statErr := os.Lstat(args.Path)
-		if statErr == nil && info.Mode()&os.ModeSymlink != 0 {
-			return errorResult(call.InvocationID, rejectInput("path is a symbolic link: "+filepath.ToSlash(args.Path))), nil
-		}
-		if statErr == nil && !info.Mode().IsRegular() {
-			if info.IsDir() {
-				return errorResult(call.InvocationID, rejectInput("path is a directory: "+filepath.ToSlash(args.Path))), nil
-			}
-			return errorResult(call.InvocationID, rejectInput("path is not a regular file: "+filepath.ToSlash(args.Path))), nil
-		}
 	}
 	var expected *ExpectedFile
 	if call.ExpectedFile != nil {

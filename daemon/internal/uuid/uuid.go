@@ -1,5 +1,6 @@
-// Package uuid mints the random identifiers the daemon creates itself: its instance identity,
-// resource transfer ids and locally demanded update operations.
+// Package uuid mints and recognizes the canonical identifiers the daemon exchanges: its instance
+// identity, resource transfer ids, temporary workspace directories and locally demanded update
+// operations.
 package uuid
 
 import (
@@ -16,4 +17,27 @@ func New() string {
 	id[8] = id[8]&0x3f | 0x80
 	text := hex.EncodeToString(id[:])
 	return text[:8] + "-" + text[8:12] + "-" + text[12:16] + "-" + text[16:20] + "-" + text[20:]
+}
+
+// Canonical reports whether value is a lower-case hexadecimal UUID in the 8-4-4-4-12 form.
+func Canonical(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for index := 0; index < len(value); index++ {
+		if index == 8 || index == 13 || index == 18 || index == 23 {
+			if value[index] != '-' {
+				return false
+			}
+			continue
+		}
+		if !lowerHex(value[index]) {
+			return false
+		}
+	}
+	return true
+}
+
+func lowerHex(char byte) bool {
+	return char >= '0' && char <= '9' || char >= 'a' && char <= 'f'
 }
