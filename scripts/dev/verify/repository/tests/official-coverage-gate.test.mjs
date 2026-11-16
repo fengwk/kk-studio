@@ -36,7 +36,7 @@ const RUNTIME_CRITICAL_CLASSES = [
   'fun.fengwk.kkstudio.harness.api.SpawnRequest.Budget',
   'fun.fengwk.kkstudio.harness.runtime.SpawnTickets',
   'fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn',
-  'fun.fengwk.kkstudio.harness.runtime.compaction.CompactionCutPlanner',
+  'fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPlanner',
   'fun.fengwk.kkstudio.harness.api.join.ThreadJoin',
   'fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints',
   'fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl',
