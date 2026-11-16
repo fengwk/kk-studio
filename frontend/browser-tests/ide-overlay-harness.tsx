@@ -1,12 +1,11 @@
 /* eslint-disable react-refresh/only-export-components */
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Link, MemoryRouter, Navigate, Route, Routes, useLocation } from 'react-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@/styles.css'
 import {
   ApplicationEventProvider,
-  useApplicationEventIdentity,
   useApplicationEvents,
 } from '@/shared/app-events'
 import { setLocale } from '@/shared/i18n'
@@ -67,8 +66,14 @@ const queryClient = new QueryClient({
 
 function ChatPage() {
   const { activateChatEnvironment, openEnvironment, togglePanel } = useIdePanel()
-  const identity = useApplicationEventIdentity()
   const events = useApplicationEvents()
+  // 连接身份只在 connected 帧后存在；harness 用它显示事件通道是否就绪。
+  const subscribeIdentity = useCallback(
+    (listener: () => void) => events.subscribeIdentity(listener),
+    [events],
+  )
+  const readIdentity = useCallback(() => events.getIdentity(), [events])
+  const identity = useSyncExternalStore(subscribeIdentity, readIdentity, readIdentity)
   const [pane1Draft, setPane1Draft] = useState('pane 1 initial text')
   const [pane2Draft, setPane2Draft] = useState('pane 2 initial text')
   const activatedRef = useRef<string | null>(null)
