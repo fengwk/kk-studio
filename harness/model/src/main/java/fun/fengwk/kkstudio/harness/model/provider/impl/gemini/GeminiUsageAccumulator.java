@@ -41,7 +41,7 @@ final class GeminiUsageAccumulator {
       }
     }
     if (usageNode.has("serviceTier")) {
-      serviceTier(usageNode);
+      requireServiceTierShape(usageNode);
     }
     // 保留最新原始快照；终态才解释 proto3 省略零，不跨快照补字段。
     latestUsageSnapshot = usageNode.deepCopy();
@@ -80,16 +80,21 @@ final class GeminiUsageAccumulator {
         ordinaryInput, outputTotal, cached, 0L, Map.of(), reasoning, providerTotal);
   }
 
-  private static String serviceTier(JsonNode usageNode) {
-    if (!usageNode.has("serviceTier")) {
-      return null;
-    }
+  /** 校验本帧的 serviceTier 形状；档位本身在终态从最新快照统一取值。 */
+  private static void requireServiceTierShape(JsonNode usageNode) {
     JsonNode value = usageNode.get("serviceTier");
     if (!value.isString() || value.stringValue().isBlank()) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "invalid usage field: serviceTier");
     }
-    return value.stringValue();
+  }
+
+  private static String serviceTier(JsonNode usageNode) {
+    if (!usageNode.has("serviceTier")) {
+      return null;
+    }
+    requireServiceTierShape(usageNode);
+    return usageNode.get("serviceTier").stringValue();
   }
 
   private static long proto3ZeroDefaultCount(JsonNode usageNode, String field) {

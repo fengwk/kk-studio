@@ -99,8 +99,8 @@ class GeminiStreamingDecoderTest {
         }
         """;
 
-    accumulator.handleEvent("message", c1);
-    accumulator.handleEvent("message", c2);
+    accumulator.handleEvent(c1);
+    accumulator.handleEvent(c2);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 
@@ -144,7 +144,7 @@ class GeminiStreamingDecoderTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 

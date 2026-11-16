@@ -131,8 +131,8 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk1);
-    accumulator.handleEvent("message", chunk2);
+    accumulator.handleEvent(chunk1);
+    accumulator.handleEvent(chunk2);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 
@@ -164,7 +164,6 @@ class GeminiStreamAccumulatorTest {
   void rejectsInconsistentOrOverflowingUsage(String usage, String expectedMessage) {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"done\"}]},\"finishReason\":\"STOP\"}],"
             + "\"usageMetadata\":"
             + usage
@@ -179,12 +178,10 @@ class GeminiStreamAccumulatorTest {
   void multiPartFramesKeepIndependentSlots() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates":[{"content":{"role":"model","parts":[{"text":"A"},{"text":"B"}]}}]}
         """);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates":[{"content":{"role":"model","parts":[{"text":"AC"},{"text":"BD"}]},"finishReason":"STOP"}],
          "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
@@ -201,12 +198,10 @@ class GeminiStreamAccumulatorTest {
   void terminalAllowsUsageOnlyAndRejectsLaterContent() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates":[{"content":{"parts":[{"text":"done"}]},"finishReason":"STOP"}]}
         """);
     accumulator.handleEvent(
-        "message",
         """
         {"usageMetadata":{"promptTokenCount":3,"candidatesTokenCount":1,"totalTokenCount":4},"candidates":[]}
         """);
@@ -215,7 +210,6 @@ class GeminiStreamAccumulatorTest {
             ProviderException.class,
             () ->
                 accumulator.handleEvent(
-                    "message",
                     """
                     {"candidates":[{"content":{"parts":[{"text":"tail"}]}}]}
                     """));
@@ -259,9 +253,9 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk1);
-    accumulator.handleEvent("message", chunk2);
-    accumulator.handleEvent("message", chunk3);
+    accumulator.handleEvent(chunk1);
+    accumulator.handleEvent(chunk2);
+    accumulator.handleEvent(chunk3);
     ProviderCompletion completion = accumulator.finish();
 
     assertEquals("Hello world!", completion.response().text());
@@ -308,8 +302,8 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk1);
-    accumulator.handleEvent("message", chunk2);
+    accumulator.handleEvent(chunk1);
+    accumulator.handleEvent(chunk2);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 
@@ -361,7 +355,7 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 
@@ -403,7 +397,7 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
 
     assertEquals(GenerationStopReason.LENGTH, completion.response().stopReason());
@@ -429,7 +423,7 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
 
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
@@ -458,7 +452,7 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
 
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
@@ -484,7 +478,7 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
 
     assertEquals(GenerationStopReason.FILTERED, completion.response().stopReason());
@@ -507,7 +501,7 @@ class GeminiStreamAccumulatorTest {
         """;
 
     ProviderException ex =
-        assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+        assertThrows(ProviderException.class, () -> accumulator.handleEvent(chunk));
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
     assertTrue(ex.getMessage().contains("MALFORMED_FUNCTION_CALL"));
   }
@@ -531,7 +525,7 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
     assertEquals("Gemini stream completed without terminal finish reason", ex.getMessage());
@@ -543,7 +537,6 @@ class GeminiStreamAccumulatorTest {
   void unspecifiedFinishReasonPreservesTextUntilStop(String finishReason) throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates":[{"content":{"parts":[{"text":"Hello "}]},
         "finishReason":"%s"}]}
@@ -552,7 +545,6 @@ class GeminiStreamAccumulatorTest {
     assertEquals(List.of(new ProviderStreamEvent.TextDelta("Hello ")), emittedEvents);
 
     accumulator.handleEvent(
-        "message",
         """
         {"candidates":[{"content":{"parts":[{"text":"world!"}]},"finishReason":"STOP"}],
          "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
@@ -580,7 +572,6 @@ class GeminiStreamAccumulatorTest {
   void unspecifiedFinishReasonAtEofFailsWithoutAdditionalEvents(String finishReason) {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates":[{"content":{"parts":[{"text":"partial"}]},
         "finishReason":"%s"}],
@@ -619,7 +610,7 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 
@@ -643,7 +634,6 @@ class GeminiStreamAccumulatorTest {
   void retainsLatestLargeUsageSnapshot() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         "{\"usageMetadata\":{\"promptTokenCount\":1,\"candidatesTokenCount\":1,\"serviceTier\":\"old\"}}");
     String latest =
         """
@@ -654,7 +644,6 @@ class GeminiStreamAccumulatorTest {
         "unknown":{"flag":true}}
         """;
     accumulator.handleEvent(
-        "message",
         "{\"usageMetadata\":" + latest + ",\"candidates\":[{\"finishReason\":\"STOP\"}]}");
     ProviderResponse response = accumulator.finish().response();
     assertEquals(1_000_000_000L, response.usage().inputTokens());
@@ -675,7 +664,7 @@ class GeminiStreamAccumulatorTest {
       ProviderException error =
           assertThrows(
               ProviderException.class,
-              () -> accumulator.handleEvent("message", "{\"usageMetadata\":" + value + "}"));
+              () -> accumulator.handleEvent("{\"usageMetadata\":" + value + "}"));
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
     }
     for (String field :
@@ -700,14 +689,13 @@ class GeminiStreamAccumulatorTest {
                 + "}}";
         if ("null".equals(value)) {
           // finish 的无关前提保持合法，显式 null 必须命中当前字段，而不是缺少终态。
-          accumulator.handleEvent("message", payload);
+          accumulator.handleEvent(payload);
           ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
           assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
           assertEquals("invalid usage field: " + field, error.getMessage());
         } else {
           ProviderException error =
-              assertThrows(
-                  ProviderException.class, () -> accumulator.handleEvent("message", payload));
+              assertThrows(ProviderException.class, () -> accumulator.handleEvent(payload));
           assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind(), field + ":" + value);
         }
       }
@@ -718,9 +706,7 @@ class GeminiStreamAccumulatorTest {
       ProviderException error =
           assertThrows(
               ProviderException.class,
-              () ->
-                  accumulator.handleEvent(
-                      "message", "{\"usageMetadata\":{\"serviceTier\":" + value + "}}"));
+              () -> accumulator.handleEvent("{\"usageMetadata\":{\"serviceTier\":" + value + "}}"));
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
     }
   }
@@ -730,10 +716,8 @@ class GeminiStreamAccumulatorTest {
   void doesNotInheritOptionalUsageFields() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         "{\"usageMetadata\":{\"serviceTier\":\"old\",\"promptTokenCount\":10,\"candidatesTokenCount\":5}}");
     accumulator.handleEvent(
-        "message",
         "{\"usageMetadata\":{\"promptTokenCount\":3,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":3},"
             + "\"candidates\":[{\"finishReason\":\"STOP\"}]}");
     ProviderResponse response = accumulator.finish().response();
@@ -778,7 +762,7 @@ class GeminiStreamAccumulatorTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 
@@ -818,7 +802,7 @@ class GeminiStreamAccumulatorTest {
         """;
 
     ProviderException ex =
-        assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+        assertThrows(ProviderException.class, () -> accumulator.handleEvent(chunk));
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
   }
 
@@ -838,7 +822,7 @@ class GeminiStreamAccumulatorTest {
               + "}}]}, \"finishReason\": \"STOP\"}]}";
 
       ProviderException ex =
-          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent(chunk));
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
       assertFalse(
           ex.getMessage().contains("sensitive_password_12345"),
@@ -869,7 +853,7 @@ class GeminiStreamAccumulatorTest {
               + "}}]}, \"finishReason\": \"STOP\"}]}";
 
       ProviderException ex =
-          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent(chunk));
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
     }
   }
@@ -894,7 +878,7 @@ class GeminiStreamAccumulatorTest {
               + "}}]}, \"finishReason\": \"STOP\"}]}";
 
       ProviderException ex =
-          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent(chunk));
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
     }
 
@@ -924,7 +908,7 @@ class GeminiStreamAccumulatorTest {
           }
         }
         """;
-    validNullIdAcc.handleEvent("message", validNullIdChunk);
+    validNullIdAcc.handleEvent(validNullIdChunk);
     ProviderCompletion comp = validNullIdAcc.finish();
     assertEquals("call_0", comp.response().toolCalls().get(0).id());
   }
@@ -945,7 +929,7 @@ class GeminiStreamAccumulatorTest {
               + "}]}, \"finishReason\": \"STOP\"}]}";
 
       ProviderException ex =
-          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent(chunk));
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
       assertFalse(
           ex.getMessage().contains("sensitive_secret_blob_123"),
@@ -960,7 +944,6 @@ class GeminiStreamAccumulatorTest {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1031,7 +1014,6 @@ class GeminiStreamAccumulatorTest {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1046,7 +1028,6 @@ class GeminiStreamAccumulatorTest {
         }
         """);
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1061,7 +1042,6 @@ class GeminiStreamAccumulatorTest {
         }
         """);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates": [{"content": {"role": "model", "parts": [{"text": "!"}]},
           "finishReason": "STOP"}],
@@ -1115,11 +1095,10 @@ class GeminiStreamAccumulatorTest {
           { "inlineData": { "mimeType": "image/png", "data": "QQ==" } }
         ]}}]}
         """;
-    accumulator.handleEvent("message", textAndUnknown);
+    accumulator.handleEvent(textAndUnknown);
     // 同一快照重复发送：完全一致的原生 part 不得重复保留
-    accumulator.handleEvent("message", textAndUnknown);
+    accumulator.handleEvent(textAndUnknown);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates": [{"content": {"role": "model", "parts": [
           { "text": "answer", "futurePartField": { "trace": "t-1" } },
@@ -1173,7 +1152,6 @@ class GeminiStreamAccumulatorTest {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message",
         """
         {"candidates": [{"content": {"role": "model", "parts": [
           { "text": "partial ", "functionCall": { "id": "c1", "name": "fn", "args": { "k": 1 } } }
@@ -1210,7 +1188,7 @@ class GeminiStreamAccumulatorTest {
           "{\"candidates\": [{\"content\": {\"role\": \"model\", \"parts\": [" + part + "]}}]}";
 
       ProviderException ex =
-          assertThrows(ProviderException.class, () -> accumulator.handleEvent("message", chunk));
+          assertThrows(ProviderException.class, () -> accumulator.handleEvent(chunk));
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
       assertFalse(ex.getMessage().contains("think"), "exception must not leak part payload");
     }
@@ -1224,11 +1202,10 @@ class GeminiStreamAccumulatorTest {
           { "text": null, "thoughtSignature": null, "inlineData": { "mimeType": "image/png", "data": "QQ==" } }
         ]}}]}
         """;
-    valuelessKnownFieldAccumulator.handleEvent("message", valuelessFieldParts);
+    valuelessKnownFieldAccumulator.handleEvent(valuelessFieldParts);
     // 同一快照重复发送：即使存在空白签名 / null 已知字段，也必须按可证明重复去重，绝不重复计入文本
-    valuelessKnownFieldAccumulator.handleEvent("message", valuelessFieldParts);
+    valuelessKnownFieldAccumulator.handleEvent(valuelessFieldParts);
     valuelessKnownFieldAccumulator.handleEvent(
-        "message",
         """
         {"candidates": [{"content": {"role": "model", "parts": [
           { "text": "answer", "thoughtSignature": "   " },
@@ -1260,7 +1237,6 @@ class GeminiStreamAccumulatorTest {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1273,7 +1249,6 @@ class GeminiStreamAccumulatorTest {
         }
         """);
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1323,7 +1298,6 @@ class GeminiStreamAccumulatorTest {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1355,7 +1329,6 @@ class GeminiStreamAccumulatorTest {
   void missingUsageMetadataThrowsInvalidResponseOnFinish() {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates":[{"content":{"parts":[{"text":"Done"}]},"finishReason":"STOP"}]}
         """);
@@ -1370,7 +1343,6 @@ class GeminiStreamAccumulatorTest {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     String usage = "{\"promptTokenCount\":12,\"thoughtsTokenCount\":8,\"totalTokenCount\":20}";
     accumulator.handleEvent(
-        "message",
         "{\"candidates\":[{\"finishReason\":\"MAX_TOKENS\"}],\"usageMetadata\":" + usage + "}");
     ProviderResponse response = accumulator.finish().response();
     assertEquals(GenerationStopReason.LENGTH, response.stopReason());
@@ -1386,7 +1358,6 @@ class GeminiStreamAccumulatorTest {
   void omittedCandidatesAreZeroWhenPromptIsBlocked() {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         "{\"promptFeedback\":{\"blockReason\":\"SAFETY\"},\"usageMetadata\":{\"promptTokenCount\":9}}");
     ProviderResponse response = accumulator.finish().response();
     assertEquals(GenerationStopReason.FILTERED, response.stopReason());
@@ -1404,7 +1375,6 @@ class GeminiStreamAccumulatorTest {
     String usage =
         "{\"promptTokenCount\":0,\"candidatesTokenCount\":0,\"cachedContentTokenCount\":0}";
     accumulator.handleEvent(
-        "message",
         "{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":" + usage + "}");
     ProviderResponse response = accumulator.finish().response();
     assertEquals(0L, response.usage().inputTokens());
@@ -1419,7 +1389,6 @@ class GeminiStreamAccumulatorTest {
   void explicitNullProto3CountIsInvalid(String field) {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         "{\"candidates\":[{\"finishReason\":\"STOP\"}],\"usageMetadata\":{\""
             + field
             + "\":null}}");
@@ -1432,7 +1401,6 @@ class GeminiStreamAccumulatorTest {
   void realZeroTokensCompletesSuccessfully() {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates":[{"content":{"parts":[{"text":"Zero"}]},"finishReason":"STOP"}],
          "usageMetadata":{"promptTokenCount":0,"candidatesTokenCount":0,"totalTokenCount":0}}
@@ -1447,7 +1415,6 @@ class GeminiStreamAccumulatorTest {
   void nullableTotalAndThoughtsTokenCount() {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {"candidates":[{"content":{"parts":[{"text":"Result"}]},"finishReason":"STOP"}],
          "usageMetadata":{"promptTokenCount":30,"candidatesTokenCount":20,"thoughtsTokenCount":8}}
@@ -1468,7 +1435,6 @@ class GeminiStreamAccumulatorTest {
   void intermediateUsageWithOnlyPromptSucceedsWhenFinalUsageIsComplete() {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1480,7 +1446,6 @@ class GeminiStreamAccumulatorTest {
         }
         """);
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1511,7 +1476,6 @@ class GeminiStreamAccumulatorTest {
     // 场景 A：前帧有 candidatesTokenCount，最终帧缺少 candidatesTokenCount
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1524,7 +1488,6 @@ class GeminiStreamAccumulatorTest {
         }
         """);
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1545,7 +1508,6 @@ class GeminiStreamAccumulatorTest {
     // 场景 B：前帧有 promptTokenCount，最终帧缺少 promptTokenCount
     GeminiStreamAccumulator accumulator2 = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator2.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1558,7 +1520,6 @@ class GeminiStreamAccumulatorTest {
         }
         """);
     accumulator2.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -1600,7 +1561,7 @@ class GeminiStreamAccumulatorTest {
     ProviderException ex =
         assertThrows(
             ProviderException.class,
-            () -> accumulator.handleEvent("message", "{\"usageMetadata\":" + partialUsage + "}"));
+            () -> accumulator.handleEvent("{\"usageMetadata\":" + partialUsage + "}"));
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
   }
 
@@ -1625,7 +1586,6 @@ class GeminiStreamAccumulatorTest {
         }
         """;
     accumulator.handleEvent(
-        "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"Hello\"}]},\"finishReason\":\"STOP\"}],"
             + "\"usageMetadata\":"
             + finalUsageJson
@@ -1650,10 +1610,8 @@ class GeminiStreamAccumulatorTest {
         MAPPER.readTree(
             GeminiStreamAccumulatorTest.class.getResourceAsStream("gemini-usage-2026-10-24.json"));
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
-    accumulator.handleEvent(
-        "message", syntheticGeminiFrame(fixture.path("first"), null).toString());
-    accumulator.handleEvent(
-        "message", syntheticGeminiFrame(fixture.path("last"), "STOP").toString());
+    accumulator.handleEvent(syntheticGeminiFrame(fixture.path("first"), null).toString());
+    accumulator.handleEvent(syntheticGeminiFrame(fixture.path("last"), "STOP").toString());
     ProviderResponse response = accumulator.finish().response();
     assertEquals(143L, response.usage().inputTokens());
     assertEquals(111L, response.usage().outputTokens());

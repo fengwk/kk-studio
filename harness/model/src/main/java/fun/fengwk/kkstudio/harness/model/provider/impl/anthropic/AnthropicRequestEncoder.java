@@ -158,8 +158,8 @@ public final class AnthropicRequestEncoder {
       String topLevelEffort) {
 
     static EffortPlan resolve(ProviderRequest request) {
-      String currentEffort = request.variant() == null ? null : request.variant().reasoningEffort();
-      boolean currentEffortOff = request.variant() != null && request.variant().reasoningOff();
+      String currentEffort = request.variant().reasoningEffort();
+      boolean currentEffortOff = request.variant().reasoningOff();
       String firstStoredEffort = AnthropicReasoningEffort.firstStoredEffort(request.messages());
       boolean messageLevelThinking =
           request.model().reasoning() && request.model().messageLevelEffort() && !currentEffortOff;

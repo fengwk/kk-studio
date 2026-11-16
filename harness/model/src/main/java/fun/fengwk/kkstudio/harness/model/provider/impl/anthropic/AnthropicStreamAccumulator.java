@@ -222,12 +222,9 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "unexpected message_delta state");
     }
-    for (AnthropicWireBlock block : blocks.ordered()) {
-      if (block.state != AnthropicWireBlock.Lifecycle.STOPPED) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE,
-            "message_delta received while content block active");
-      }
+    if (!blocks.allStopped()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "message_delta received while content block active");
     }
     JsonNode deltaNode = root.get("delta");
     if (deltaNode == null || !deltaNode.isObject()) {
@@ -260,12 +257,10 @@ final class AnthropicStreamAccumulator extends ProviderStreamState {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "message_stop received without stop reason");
     }
-    for (AnthropicWireBlock block : blocks.ordered()) {
-      if (block.state != AnthropicWireBlock.Lifecycle.STOPPED) {
-        throw new ProviderException(
-            ProviderErrorKind.INVALID_RESPONSE,
-            "message_stop received while content block still active");
-      }
+    if (!blocks.allStopped()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE,
+          "message_stop received while content block still active");
     }
     stopped = true;
   }

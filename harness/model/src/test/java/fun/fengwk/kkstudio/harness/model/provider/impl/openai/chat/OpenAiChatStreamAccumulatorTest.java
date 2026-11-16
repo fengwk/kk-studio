@@ -363,7 +363,6 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(0, usage.cacheWriteTokens());
     assertNull(usage.reasoningTokens());
     assertEquals(15L, usage.providerTotalTokens());
-    assertEquals(15, usage.categorizedTokens());
 
     // 响应文本块保留 Chat provider 身份。
     ProviderTextBlock textBlock = (ProviderTextBlock) completion.response().blocks().get(0);
@@ -870,7 +869,6 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(60L, usage.inputTokens());
     assertEquals(30L, usage.outputTokens());
     assertEquals(130L, usage.providerTotalTokens());
-    assertEquals(130L, usage.categorizedTokens());
 
     JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
     assertEquals(40L, rawUsage.path("prompt_tokens_details").path("cached_tokens").asLong(0L));
@@ -906,7 +904,6 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(25L, usage.inputTokens());
     assertEquals(20L, usage.outputTokens());
     assertEquals(120L, usage.providerTotalTokens());
-    assertEquals(120L, usage.categorizedTokens());
 
     JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
     assertEquals(75L, rawUsage.path("prompt_cache_hit_tokens").asLong(0L));
@@ -941,7 +938,6 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(50L, usage.inputTokens());
     assertEquals(15L, usage.outputTokens());
     assertEquals(95L, usage.providerTotalTokens());
-    assertEquals(95L, usage.categorizedTokens());
 
     JsonNode rawUsage = MAPPER.readTree(completion.response().rawUsageJson());
     assertEquals(30L, rawUsage.path("cached_tokens").asLong(0L));
@@ -1116,7 +1112,6 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(25L, usage.outputTokens());
     // 关键断言：缺失 total_tokens 时保持 unknown，不合成 40
     assertNull(usage.providerTotalTokens());
-    assertEquals(40L, usage.categorizedTokens());
 
     // 验证 rawUsageJson 原样保留，未合成 total_tokens 字段
     String rawJson = completion.response().rawUsageJson();

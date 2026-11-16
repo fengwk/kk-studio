@@ -149,7 +149,6 @@ class ModelContractTest {
     ModelCost cost = ModelCost.calculate(pricing, usage);
 
     assertEquals(1_900_000L, usage.providerTotalTokens());
-    assertEquals(1_900_000, usage.categorizedTokens());
     assertEquals("USD", cost.currency());
     assertEquals(new BigDecimal("1.6"), cost.input());
     assertEquals(new BigDecimal("2"), cost.output());
@@ -208,24 +207,6 @@ class ModelContractTest {
         IllegalArgumentException.class, () -> new ModelUsage(1, 1, 1, 1, Map.of(), 1L, -1L));
     assertThrows(
         IllegalArgumentException.class, () -> new ModelUsage(1, 1, 0, 1, Map.of(300L, 2L), 0L, 3L));
-  }
-
-  /** categorizedTokens 只累加互斥的输入/输出/缓存读写；reasoning 已包含在 output 中，绝不重复相加。 */
-  @Test
-  void categorizedTokensSumsOnlyMutuallyExclusiveCategories() {
-    ModelUsage usage = new ModelUsage(1, 6, 3, 4, Map.of(), 6L, 100L);
-
-    assertEquals(14, usage.categorizedTokens());
-    assertEquals(100L, usage.providerTotalTokens());
-    assertEquals(86L, usage.providerTotalTokens() - usage.categorizedTokens());
-  }
-
-  /** categorizedTokens 在 Long 溢出时必须 fail fast。 */
-  @Test
-  void categorizedTokensRejectsOverflow() {
-    ModelUsage usage = new ModelUsage(Long.MAX_VALUE, 1, 0, 0, Map.of(), 0L, 1L);
-
-    assertThrows(ArithmeticException.class, usage::categorizedTokens);
   }
 
   /** multiplier 在指定分项上独立应用并全链路精确计算；total 恒等于精确分项之和。 */

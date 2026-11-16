@@ -122,7 +122,7 @@ class GeminiThinkingTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 
@@ -172,8 +172,8 @@ class GeminiThinkingTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk1);
-    accumulator.handleEvent("message", chunk2);
+    accumulator.handleEvent(chunk1);
+    accumulator.handleEvent(chunk2);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 
@@ -214,7 +214,7 @@ class GeminiThinkingTest {
         }
         """;
 
-    accumulator.handleEvent("message", chunk);
+    accumulator.handleEvent(chunk);
     ProviderCompletion completion = accumulator.finish();
     ProviderResponse response = completion.response();
 
@@ -236,7 +236,6 @@ class GeminiThinkingTest {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -248,7 +247,6 @@ class GeminiThinkingTest {
         }
         """);
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -307,7 +305,6 @@ class GeminiThinkingTest {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -319,7 +316,6 @@ class GeminiThinkingTest {
         """);
     // 快照重复发送：第一个签名 part 与后续分片完全一致时不得重复保留
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -361,7 +357,6 @@ class GeminiThinkingTest {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -372,7 +367,6 @@ class GeminiThinkingTest {
         }
         """);
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{
@@ -411,7 +405,6 @@ class GeminiThinkingTest {
 
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
-        "message",
         """
         {
           "candidates": [{

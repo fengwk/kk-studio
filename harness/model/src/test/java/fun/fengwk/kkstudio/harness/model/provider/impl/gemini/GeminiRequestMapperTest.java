@@ -207,7 +207,6 @@ class GeminiRequestMapperTest {
     GeminiStreamAccumulator accStop =
         new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accStop.handleEvent(
-        "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"STOP\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}");
     assertEquals(GenerationStopReason.COMPLETE, accStop.finish().response().stopReason());
 
@@ -215,7 +214,6 @@ class GeminiRequestMapperTest {
     GeminiStreamAccumulator accLength =
         new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accLength.handleEvent(
-        "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"MAX_TOKENS\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}");
     assertEquals(GenerationStopReason.LENGTH, accLength.finish().response().stopReason());
 
@@ -223,7 +221,6 @@ class GeminiRequestMapperTest {
     GeminiStreamAccumulator accSafety =
         new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accSafety.handleEvent(
-        "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"SAFETY\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}");
     assertEquals(GenerationStopReason.FILTERED, accSafety.finish().response().stopReason());
 
@@ -231,7 +228,6 @@ class GeminiRequestMapperTest {
     GeminiStreamAccumulator accRecitation =
         new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accRecitation.handleEvent(
-        "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"RECITATION\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}");
     assertEquals(GenerationStopReason.FILTERED, accRecitation.finish().response().stopReason());
 
@@ -239,7 +235,6 @@ class GeminiRequestMapperTest {
     GeminiStreamAccumulator accImageRecitation =
         new GeminiStreamAccumulator(req, descriptor(), new ProviderStreamBridge(noop));
     accImageRecitation.handleEvent(
-        "message",
         "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"ok\"}]},\"finishReason\":\"IMAGE_RECITATION\"}],\"usageMetadata\":{\"promptTokenCount\":10,\"candidatesTokenCount\":5,\"totalTokenCount\":15}}");
     assertEquals(
         GenerationStopReason.FILTERED, accImageRecitation.finish().response().stopReason());

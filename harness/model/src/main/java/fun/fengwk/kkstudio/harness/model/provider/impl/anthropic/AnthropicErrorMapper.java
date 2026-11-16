@@ -1,10 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.anthropic;
 
 import tools.jackson.databind.JsonNode;
-import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.JsonNodeFeature;
-import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderErrorHelper;
@@ -19,9 +17,6 @@ import java.util.Locale;
  * URI、请求标头、请求凭证或原始底层异常原因。
  */
 final class AnthropicErrorMapper {
-
-  private static final ObjectMapper OBJECT_MAPPER =
-      JsonMapper.builder().enable(JsonNodeFeature.USE_BIG_DECIMAL_FOR_FLOATS).build();
 
   static final String MSG_AUTH = "Anthropic authentication failed";
   static final String MSG_BILLING = "Anthropic billing or quota error";
@@ -90,7 +85,7 @@ final class AnthropicErrorMapper {
       return null;
     }
     try {
-      JsonNode node = OBJECT_MAPPER.readTree(bodyBytes);
+      JsonNode node = HarnessJson.LENIENT_DECIMAL.readTree(bodyBytes);
       return extractErrorType(node);
     } catch (Exception ignored) {
       return null;

@@ -211,7 +211,7 @@ class GeminiSecurityTest {
     ProviderException sseEx =
         assertThrows(
             ProviderException.class,
-            () -> accumulator.handleEvent("message", "invalid_json_with_secret_" + sensitiveData));
+            () -> accumulator.handleEvent("invalid_json_with_secret_" + sensitiveData));
     assertEquals("malformed SSE data JSON", sseEx.getMessage());
     assertFalse(sseEx.getMessage().contains(sensitiveData));
 
