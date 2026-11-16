@@ -140,12 +140,6 @@ public final class IdeViewSnapshotStore {
     }
   }
 
-  /** 本节点当前 READY 进程的快照；没有 READY 连接时为空。 */
-  public Optional<Snapshot> current(EnvironmentId environmentId) {
-    Objects.requireNonNull(environmentId, "environmentId");
-    return currentGenerations.current(environmentId).flatMap(this::snapshot);
-  }
-
   private static List<View> canonical(List<View> views) {
     Objects.requireNonNull(views, "views");
     if (views.size() > MAX_VIEWS) {

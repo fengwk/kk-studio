@@ -6,15 +6,19 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 
 import java.util.UUID;
 
-/** IDE 控制面客户端入参校验：字段缺失、形态错误与 CREATE/RESUME 的显式实例/epoch 约束。 */
-final class IdeInputs {
+/**
+ * IDE 控制面客户端入参校验：字段缺失、形态错误与 CREATE/RESUME 的显式实例/epoch 约束。
+ *
+ * <p>{@link #requireDirectory(String)} 同时作为跨节点组合服务在路由前对目录入参的唯一校验，避免把非法请求转发到 owner。
+ */
+public final class IdeInputs {
 
   private static final int MAX_DIRECTORY_LENGTH = 4096;
 
   private IdeInputs() {}
 
   /** 目录：null 表示未指定；非 null 必须非空白、不超过 4096 字符且不含控制字符。 */
-  static String requireDirectory(String value) {
+  public static String requireDirectory(String value) {
     if (value == null) {
       return null;
     }

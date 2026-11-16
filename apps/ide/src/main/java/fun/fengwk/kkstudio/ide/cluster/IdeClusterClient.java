@@ -14,7 +14,6 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.BoundedBodySubscriber;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalAuthentication;
 import fun.fengwk.kkstudio.platform.cluster.ClusterInternalErrors;
@@ -117,15 +116,6 @@ public class IdeClusterClient {
         owner,
         request,
         EnvironmentIdeViewDTO.class);
-  }
-
-  public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId, ClusterOwnerRoute owner) {
-    return exchange(
-        "GET",
-        IdeInternalPaths.viewsPath(environmentId),
-        owner,
-        null,
-        EnvironmentIdeViewsDTO.class);
   }
 
   public EnvironmentIdeViewSnapshotDTO readView(

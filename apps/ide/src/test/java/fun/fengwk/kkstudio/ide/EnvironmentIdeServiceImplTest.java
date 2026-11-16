@@ -409,7 +409,7 @@ class EnvironmentIdeServiceImplTest {
     DomainException error = assertThrows(DomainException.class, () -> service.listViews(ENV));
 
     assertEquals("STALE_BINDING", error.reason());
-    assertTrue(snapshots.current(ENV).isEmpty());
+    assertTrue(snapshotIfPresent().isEmpty());
   }
 
   @Test
@@ -428,7 +428,7 @@ class EnvironmentIdeServiceImplTest {
             DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
 
     assertEquals("STALE_BINDING", error.reason());
-    IdeViewSnapshotStore.Snapshot current = snapshots.current(ENV).orElseThrow();
+    IdeViewSnapshotStore.Snapshot current = snapshot();
     assertEquals(5L, current.revision());
     assertEquals(7L, current.find(VIEW).orElseThrow().bindingEpoch());
   }
@@ -541,7 +541,7 @@ class EnvironmentIdeServiceImplTest {
         assertThrows(DomainException.class, () -> service.closeView(ENV, VIEW.toString(), close));
 
     assertEquals("IDE_CLOSE_CANCELLED", error.reason());
-    assertTrue(snapshots.current(ENV).orElseThrow().find(VIEW).isPresent());
+    assertTrue(snapshot().find(VIEW).isPresent());
   }
 
   @Test
@@ -574,7 +574,7 @@ class EnvironmentIdeServiceImplTest {
     transport.replies.add(openSnapshot(5L, 7L));
     service.openView(ENV, openRequest("create", 0L, null));
     int before = transport.commands.size();
-    assertTrue(snapshots.current(ENV).orElseThrow().find(VIEW).isPresent());
+    assertTrue(snapshot().find(VIEW).isPresent());
     assertEquals(1, tickets.pendingCount());
 
     browserUse.matched = false;
@@ -585,7 +585,7 @@ class EnvironmentIdeServiceImplTest {
 
     assertEquals("STALE_BINDING", error.reason());
     assertEquals(before, transport.commands.size());
-    assertTrue(snapshots.current(ENV).orElseThrow().find(VIEW).isPresent());
+    assertTrue(snapshot().find(VIEW).isPresent());
     assertEquals(1, tickets.pendingCount());
   }
 
@@ -600,7 +600,7 @@ class EnvironmentIdeServiceImplTest {
 
     assertEquals("STALE_BINDING", error.reason());
     assertEquals(0, tickets.pendingCount());
-    assertTrue(snapshots.current(ENV).isEmpty());
+    assertTrue(snapshotIfPresent().isEmpty());
   }
 
   @Test
@@ -651,8 +651,7 @@ class EnvironmentIdeServiceImplTest {
 
     assertEquals("IDE_OUTCOME_UNKNOWN", error.reason());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.CHANGE_DIRECTORY), actions());
-    assertEquals(
-        "/daemon/dir", snapshots.current(ENV).orElseThrow().find(VIEW).orElseThrow().directory());
+    assertEquals("/daemon/dir", snapshot().find(VIEW).orElseThrow().directory());
   }
 
   @Test
@@ -672,7 +671,7 @@ class EnvironmentIdeServiceImplTest {
             DomainException.class, () -> service.changeDirectory(ENV, VIEW.toString(), change));
 
     assertEquals("STALE_BINDING", error.reason());
-    IdeViewSnapshotStore.Snapshot current = snapshots.current(ENV).orElseThrow();
+    IdeViewSnapshotStore.Snapshot current = snapshot();
     assertEquals(5L, current.revision());
     assertEquals(CLAIM, current.find(VIEW).orElseThrow().claimId());
   }
@@ -756,6 +755,16 @@ class EnvironmentIdeServiceImplTest {
 
   private static IdeResult openSnapshot(long revision, long epoch) {
     return snapshot(revision, summary(epoch, CLAIM));
+  }
+
+  /** 测试按当前 READY 身份读取权威快照，避免为测试保留生产无用的入口。 */
+  private IdeViewSnapshotStore.Snapshot snapshot() {
+    return snapshotIfPresent()
+        .orElseThrow(() -> new AssertionError("expected an accepted IDE snapshot"));
+  }
+
+  private Optional<IdeViewSnapshotStore.Snapshot> snapshotIfPresent() {
+    return transport.connectionIdentity(ENV).flatMap(snapshots::snapshot);
   }
 
   private static IdeResult snapshot(long revision, IdeViewSummary... views) {

@@ -22,7 +22,7 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** 意图：SessionRegistry 只管理 cookie 生命周期，按完整绑定身份复用，并按精确 epoch 撤销。 */
+/** 意图：SessionRegistry 只管理 cookie 生命周期，按完整绑定身份复用并独立过期。 */
 class IdeBrowserSessionRegistryTest {
 
   private static final EnvironmentId ENV =
@@ -95,19 +95,6 @@ class IdeBrowserSessionRegistryTest {
     assertNotEquals(first, nextEpoch);
     assertTrue(registry.lookup(first, ENV, viewId).isPresent());
     assertTrue(registry.lookup(nextEpoch, ENV, viewId).isPresent());
-  }
-
-  @Test
-  void removeOnlyExactEpoch() {
-    IdeBrowserSessionRegistry registry = registry();
-    String viewId = UUID.randomUUID().toString();
-    String first = registry.open(IDENTITY, viewId, 1L, "/workspace");
-    String second = registry.open(IDENTITY, viewId, 2L, "/workspace");
-
-    registry.remove(IDENTITY, viewId, 1L);
-
-    assertFalse(registry.lookup(first, ENV, viewId).isPresent());
-    assertTrue(registry.lookup(second, ENV, viewId).isPresent());
   }
 
   @Test

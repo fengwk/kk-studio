@@ -4,6 +4,7 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeInputs;
 import fun.fengwk.kkstudio.ide.IdeUuids;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
@@ -13,7 +14,6 @@ import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeReadViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewBindingDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewSnapshotDTO;
-import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeViewsDTO;
 import fun.fengwk.kkstudio.platform.cluster.ClusterNodeRegistry;
 import fun.fengwk.kkstudio.platform.cluster.ClusterOwnerRoute;
 
@@ -87,11 +87,11 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
   @Override
   public EnvironmentIdeDirectoryListingDTO listDirectories(
       EnvironmentId environmentId, String path) {
-    EnvironmentIdeServiceImpl.parseDirectory(path);
+    String directory = IdeInputs.requireDirectory(path);
     return route(
         environmentId,
-        () -> local.listDirectories(environmentId, path),
-        owner -> client.listDirectories(environmentId, owner, path));
+        () -> local.listDirectories(environmentId, directory),
+        owner -> client.listDirectories(environmentId, owner, directory));
   }
 
   @Override
@@ -103,14 +103,6 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
         environmentId,
         () -> local.closeView(environmentId, parsedViewId, request),
         owner -> client.closeView(environmentId, owner, parsedViewId, request));
-  }
-
-  @Override
-  public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId) {
-    return route(
-        environmentId,
-        () -> local.listViews(environmentId),
-        owner -> client.listViews(environmentId, owner));
   }
 
   @Override

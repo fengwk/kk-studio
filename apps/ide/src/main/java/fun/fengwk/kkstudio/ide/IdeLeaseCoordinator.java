@@ -35,14 +35,14 @@ public final class IdeLeaseCoordinator {
 
   private static final Logger log = LoggerFactory.getLogger(IdeLeaseCoordinator.class);
 
-  private final EnvironmentIdeService localEnvironmentIdeService;
+  private final EnvironmentIdeServiceImpl localEnvironmentIdeService;
   private final IdeCommandTransport transport;
   private final IdeBrowserUseGateway browserUse;
   private final Executor executor;
   private final Map<EnvironmentId, AtomicBoolean> inFlight = new ConcurrentHashMap<>();
 
   public IdeLeaseCoordinator(
-      EnvironmentIdeService localEnvironmentIdeService,
+      EnvironmentIdeServiceImpl localEnvironmentIdeService,
       IdeCommandTransport transport,
       IdeBrowserUseGateway browserUse,
       Executor executor) {

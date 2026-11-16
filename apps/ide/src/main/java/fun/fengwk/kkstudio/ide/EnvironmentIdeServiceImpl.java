@@ -290,7 +290,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     IdeViewSnapshotStore.Snapshot snapshot =
         snapshotBoundary.requireReplySnapshotForBinding(result, binding.view());
     IdeViewSnapshotStore.View current =
-        requireCurrentView(snapshot, binding.view(), parsedViewId, browserSessionId, bindingEpoch);
+        requireCurrentView(snapshot, binding.view(), parsedViewId, browserSessionId);
     return IdeProtocol.toDto(binding.identity(), current);
   }
 
@@ -403,7 +403,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     return IdeProtocol.toDirectoryListing(reply);
   }
 
-  @Override
+  /** owner 的当前视图快照；不创建视图，也不续租。只供本节点 lease 续租读取，不经跨节点转发。 */
   public EnvironmentIdeViewsDTO listViews(EnvironmentId environmentId) {
     Objects.requireNonNull(environmentId, "environmentId");
     DaemonConnectionIdentity identity = bindings.requireReady(environmentId);
@@ -484,8 +484,7 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
       IdeViewSnapshotStore.Snapshot snapshot,
       IdeViewSnapshotStore.View expected,
       UUID viewId,
-      UUID browserSessionId,
-      long bindingEpoch) {
+      UUID browserSessionId) {
     IdeViewSnapshotStore.View view =
         snapshot
             .find(viewId)
@@ -497,19 +496,11 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     if (!IdeSnapshots.sameBinding(view, expected)) {
       throw IdeProtocol.staleBinding("IDE view binding has been replaced");
     }
-    if (view.bindingEpoch() != bindingEpoch) {
-      throw IdeProtocol.staleBinding("IDE view binding has been replaced");
-    }
     return view;
   }
 
   private void revokeExactBinding(
       DaemonConnectionIdentity identity, UUID viewId, long bindingEpoch) {
     bootstrapTickets.revoke(identity, viewId.toString(), bindingEpoch);
-  }
-
-  /** 客户端提交的目录：null 表示未指定，否则必须非空白、有界且不含控制字符。 */
-  public static String parseDirectory(String value) {
-    return IdeInputs.requireDirectory(value);
   }
 }

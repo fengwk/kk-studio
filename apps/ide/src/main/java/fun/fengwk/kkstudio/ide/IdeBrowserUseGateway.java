@@ -93,9 +93,6 @@ public class IdeBrowserUseGateway {
       proofs.add(
           new Proof(view.environmentId(), view.viewId(), usage.browserSessionId(), bindingEpoch));
     }
-    if (proofs.isEmpty()) {
-      throw unavailable("browser event node returned no active binding proof", null);
-    }
     return new Proofs(usage.browserSessionId(), usage.revision(), proofs);
   }
 
