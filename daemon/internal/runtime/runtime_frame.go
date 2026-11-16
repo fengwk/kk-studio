@@ -8,7 +8,6 @@ import (
 )
 
 func (r *Runtime) runtimeSnapshot() *protocol.RuntimeSnapshot {
-	status := r.status.Snapshot()
 	body := &protocol.RuntimeBody{DaemonVersion: stringPtr(r.options.DaemonVersion)}
 	r.mu.RLock()
 	ready, snapshot := r.ready, r.config
@@ -30,7 +29,7 @@ func (r *Runtime) runtimeSnapshot() *protocol.RuntimeSnapshot {
 	if progress, ok := r.status.Progress(); ok {
 		body.Update = &protocol.UpdateProgress{TargetVersion: stringPtr(progress.TargetVersion), DownloadedBytes: int64Ptr(progress.DownloadedBytes), TotalBytes: progress.TotalBytes}
 	}
-	return &protocol.RuntimeSnapshot{Revision: int64Ptr(status.Revision), Status: body}
+	return &protocol.RuntimeSnapshot{Revision: int64Ptr(r.status.Revision()), Status: body}
 }
 
 func (r *Runtime) sendReady() error {

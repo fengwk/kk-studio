@@ -53,7 +53,6 @@ type lateProgressUpdateRunner struct {
 }
 
 func (r *lateProgressUpdateRunner) Configured() bool                    { return true }
-func (r *lateProgressUpdateRunner) BusyReason() string                  { return "" }
 func (r *lateProgressUpdateRunner) StopForUpdate(context.Context) error { return nil }
 func (r *lateProgressUpdateRunner) HandleUpdate(_ context.Context, _ update.Command, _ config.DaemonConfig, report func(update.Progress)) (update.Outcome, error) {
 	r.callback <- report
@@ -74,16 +73,15 @@ func TestRuntimeIgnoresLateUpdateProgressAfterFailure(t *testing.T) {
 		return countUpdatePhase(frames, protocol.UpdatePhase_UPDATE_FAILED) == 1
 	})
 	callback := <-runner.callback
-	before := r.status.Snapshot()
+	before := r.status.Revision()
 	callback(update.Progress{DownloadedBytes: 7})
-	after := r.status.Snapshot()
-	if before.Revision != after.Revision {
+	if after := r.status.Revision(); before != after {
 		cancel()
-		t.Fatalf("late progress changed status revision from %d to %d", before.Revision, after.Revision)
+		t.Fatalf("late progress changed status revision from %d to %d", before, after)
 	}
 	if progress, ok := r.status.Progress(); ok {
 		cancel()
-		t.Fatalf("late progress restored a cleared snapshot: %+v", progress)
+		t.Fatalf("late progress restored cleared progress: %+v", progress)
 	}
 	cancel()
 	if err := <-done; err != nil {
