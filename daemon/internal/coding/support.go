@@ -21,6 +21,7 @@ const (
 	toolCodecRejected
 	toolRunFailed
 	toolServiceFailed
+	toolServiceUnavailable
 )
 
 type toolError struct {
@@ -53,6 +54,11 @@ func failService(message string) error {
 	return &toolError{kind: toolServiceFailed, code: "SERVICE_FAILURE", message: message}
 }
 
+// failServiceUnavailable reports a service the tool needs before it can start executing anything.
+func failServiceUnavailable(message string) error {
+	return &toolError{kind: toolServiceUnavailable, code: "SERVICE_FAILURE", message: message}
+}
+
 func toCapabilityErrorResult(id string, err error) runtime.CapabilityResult {
 	code, message, fact, next := "INTERNAL", "The capability failed while running and the underlying error is not repeated to avoid leaking details", "UNCERTAIN", verifyEffectNextAction
 	var typed *toolError
@@ -64,6 +70,8 @@ func toCapabilityErrorResult(id string, err error) runtime.CapabilityResult {
 			fact, next = "NOT_EXECUTED", "Correct the arguments to match the tool schema, then call the tool again"
 		case toolCodecRejected:
 			fact, next = "NOT_EXECUTED", ""
+		case toolServiceUnavailable:
+			fact, next = "NOT_EXECUTED", "Restore the daemon service, then call the tool again"
 		case toolRunFailed, toolServiceFailed:
 			fact = "UNCERTAIN"
 		}
@@ -290,9 +298,4 @@ func resolveExistingPath(path string) (string, error) {
 		return "", err
 	}
 	return resolved, nil
-}
-
-func isSymbolicLink(path string) bool {
-	info, err := os.Lstat(path)
-	return err == nil && info.Mode()&os.ModeSymlink != 0
 }
