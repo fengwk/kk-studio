@@ -12,6 +12,7 @@
 | 核对 Environment、Daemon、Chat IDE 与会话恢复状态 | [Harness Environment](modules/harness-environment.md) 与 [IDE](modules/ide.md) |
 | 修改源码并选择合适的检查 | [开发与测试](operations/development-and-testing.md) |
 | 修改页面或共享 UI，保持紧凑与一致 | [Frontend：视觉与交互语言](modules/frontend.md#视觉与交互语言) |
+| 核对 Resource URI、技能内容与 Session 持有关系 | [Platform：Resource URI 与 Session 持有](modules/platform.md#resource-uri-与-session-持有) |
 | 核对内置工具与异步委派的行为契约 | [内置工具与异步委派](modules/builtin-tools.md) |
 | 运行仓库脚本，先确认命令、前置条件与副作用 | [脚本入口索引](../scripts/README.md) |
 | 新增构建期 Plugin 并判断是否需要修改 Settings 前端 | [Platform：新增 Plugin](modules/platform.md#新增-plugin)，随后查看 [Plugins](modules/plugins.md) 与 [Frontend：Plugin 设置](modules/frontend.md#plugin-设置) |
@@ -34,7 +35,7 @@
 | [Harness Agent Builtin](modules/harness-agent-builtin.md) | Builtin Driver 如何冻结并物化模型请求、推进 MODEL Work、处理流式、重试、模型组与自动压缩？ |
 | [Platform：Harness 持久化与调度](modules/platform.md#harness-持久化与调度) | Runtime 状态如何映射到 PostgreSQL，并通过 claim、lease 和 realtime 恢复？ |
 | [Harness Model](modules/harness-model.md) | 模型契约、Provider 请求、SSE、reasoning replay、用量与计价和上游错误如何处理？ |
-| [内置工具与异步委派](modules/builtin-tools.md) | 文件窗口读取、LSP 生命周期和持久 task 委派使用什么统一契约？ |
+| [内置工具与异步委派](modules/builtin-tools.md) | 文件与技能资源读取、LSP 生命周期和持久 task 委派使用什么统一契约？ |
 | [Common](modules/common.md) | 领域错误、严格 JSON、URI 编码、ResourceRef、ResultContent 与 InputSchema 共享哪些契约？ |
 
 ### Environment 与主机能力

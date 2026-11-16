@@ -183,9 +183,9 @@ wake_version；认领后存在新 wake 时保留较早的 available_at。
 环境亲和性绑定后冻结：插入冲突时先锁定已有行，再由
 [`WorkState.request`](../../common/src/main/java/fun/fengwk/kkstudio/common/work/WorkState.java)
 比较环境需求；新的非空环境 ID 与已冻结值不同即拒绝本次请求，null 表示不改变亲和性。
-`WorkStore.claimNext` 使用独立短事务和 `FOR UPDATE SKIP LOCKED`，
-以数据库 `statement_timestamp()` 判断到期，按 `available_at, target_id` 排序并签发租约。
-claim 与 heartbeat 是唯一只取单条 Work 行锁的调度事务，claim 必须是事务内首次 Work 加锁。
+`WorkStore.claimNext` 与其他 Work 操作一样加入调用方已有的事务，以 `FOR UPDATE SKIP LOCKED`
+选取单条候选，用数据库 `statement_timestamp()` 判断到期，按 `available_at, target_id` 排序并签发租约；
+Dispatcher 为每次 claim 开一个独立短事务，因此 claim 与 heartbeat 是只锁单条 Work 行的调度事务，且 claim 必须是事务内首次 Work 加锁。
 
 环境路由围栏嵌入 claim：没有 `required_environment_id` 时任一活跃 Dispatcher 可认领；
 否则必须存在匹配环境、`owner_node_id` 为当前 Dispatcher `nodeInstanceId`、状态 `READY` 且
@@ -366,10 +366,10 @@ Package 名和 Skill 名均为 1–64 个小写字母或数字，以单个连字
 校验全部 Skill 与 Agent 引用后原子替换当前版本和 Skill 列表。
 检查失败保留已发布内容；详情返回检查时间、错误与 `updateAvailable`。
 
-技能归档的规范资源 URI 为 `resource://skills/<package>/<version>/<skill>/<relativePath>`，路径段使用 UTF-8 百分号编码；当前 `read` 对该命名空间返回明确的不可用错误，实际技能加载由后续能力提供。
+技能归档的规范资源 URI 为 `resource://skills/<package>/<version>/<skill>/<relativePath>`，路径段使用 UTF-8 百分号编码，`read` 按它读取当前版本归档中的文件。
 发布时使用临时 bare 仓库浅拉取目标 commit 并生成 Skill 归档，完成后立即清理临时仓库，
 平台服务端不保留本地 Git 缓存。
-系统提示按 Agent 技能配置顺序列出名称与描述；其内容不会推送到 Environment。
+系统提示按 Agent 技能配置顺序列出名称与描述；正文与附属文件不在规划期下发，`load_skill` 按需从归档取出。
 
 ### MCP server 与运行时工具目录
 
@@ -480,7 +480,7 @@ ACK。远端结果的 call id 映射回原模型 call id。审批前 edit 预览
 类型与字节不符直接失败。媒体模态在 TOOL 与 USER 位置都不支持时对全部模态显式失败；仅 USER 普通内容位置的非图片保留说明文本回退。
 原生推理回放与协议请求上限见 [Harness Model](harness-model.md)。
 
-统一 `read` 按 path 路由。受管 Blob 必须由执行上下文中的 Session 持有引用；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用 `TURN_START` 冻结的消费者媒体能力与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，受管 Blob 流扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；非文本判定沿用 Daemon codec 的二进制规则：前 8000 字节内的 NUL 字节报二进制文件（`read supports text files, directories and supported media.`），8000 字节之后的 NUL 按文本返回；其余非法 UTF-8 按 Unicode 3.9/WHATWG 的最大子部分规则各自替换为一个 U+FFFD，不再拒绝读取（受管资源不声明编码，按 UTF-8 解码）；UTF-8 BOM 照常剔除。Daemon 侧本地实现是 [`daemon/internal/coding/text.go`](../../daemon/internal/coding/text.go)，检测到窗口外仍有内容后停止扫描，因此窗口后的内容不会影响当前读取。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
+统一 `read` 按 path 路由。`resource://files/<uuid>` 的受管 Blob 必须由执行上下文中的 Session 持有引用，`resource://skills/...` 读取当前版本归档（见 [Resource URI 与 Session 持有](#resource-uri-与-session-持有)）；权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前，用 `TURN_START` 冻结的消费者媒体能力与 MIME 及内联预算校验，不支持则明确失败；通过后返回指向同一已授权 Blob 的真实媒体（不是上传成功文本），由 Provider 物化进模型。读取预算覆盖 S3 握手和响应体。本地文件与受管 Blob 共用 [`TextReadWindow`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read/TextReadWindow.java)：`offset` 与 `column_offset` 从 1 起，至多 2000 行、60000 个码点，受管 Blob 流扫描到 EOF 以给出准确的截断结论，但只保留窗口正文；非文本判定沿用 Daemon codec 的二进制规则：前 8000 字节内的 NUL 字节报二进制文件（`read supports text files, directories and supported media.`），8000 字节之后的 NUL 按文本返回；其余非法 UTF-8 按 Unicode 3.9/WHATWG 的最大子部分规则各自替换为一个 U+FFFD，不再拒绝读取（受管资源不声明编码，按 UTF-8 解码）；UTF-8 BOM 照常剔除。Daemon 侧本地实现是 [`daemon/internal/coding/text.go`](../../daemon/internal/coding/text.go)，检测到窗口外仍有内容后停止扫描，因此窗口后的内容不会影响当前读取。本地路径交给 BoundEnvironment，URI 路径拒绝 workdir。
 
 结构化 Debug 区分 `NEXT_REQUEST_PREVIEW` 与活动 `FROZEN_INVOCATION`，排除 credential
 与 Base64 正文。公开的只读入口为 Thread 模型请求调试与历史 Provider 请求重建，
@@ -503,7 +503,8 @@ Storage 不 import Harness，存储设施与执行资源边界各自装配。
 upload、Session、Canvas 和 Issue Evidence 通过各自 owner 边持有引用。
 retain/release 加入调用方事务；引用减至零时切为 DELETING，后台清理 preview、original 和行。
 `storage/persistence` 的实体仓库直接持有 `JdbcClient`，SQL、行映射与条件 CAS 全部内联；
-`storage/service` 是具体的生命周期服务，不存在单实现接口或 `service/impl` 层。
+`storage/service` 是具体的生命周期服务，不存在单实现接口或 `service/impl` 层，只有两个窄缝是接口：
+`StorageBlobPreviewService` 把预览生成交给媒体实现，`StorageLockConnections` 把上传操作锁的专用物理连接交给组合根提供。
 
 HTTP 边界是 [`StorageController`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/http/StorageController.java)，
 挂在 `/api/platform/storage`：`POST /uploads` 返回 201，`POST /uploads/{uploadId}/complete` 与两个 blob URL 端点返回 200，
@@ -541,11 +542,11 @@ Daemon 字节走对象存储直传，控制协议见 [Harness Environment](harne
 
 全局资源以 `resource://files/<uuid>` 标识；技能内容使用 `resource://skills/<package>/<version>/<skill>/<relativePath>`。路径段按 UTF-8 百分号编码，解析时也接受未编码的路径段。URI 不含对象存储键、预签名地址或内部网络位置。
 
-`session_blob_ref(session_id, blob_id)` 以 `(session_id, blob_id)` 唯一记录每个 Session 对 Blob 的持有。一条引用对应 Blob `ref_count` 的一次 retain：重复登记幂等；Session fork 为复制的资源各自登记持有；删除 Session 时在删除 Session 行前释放全部引用。只有最后一个持有引用释放后，Blob 才转入 `DELETING`，由异步对象回收处理。
+`read` 的 URI 由平台读取器处理，本地绝对路径交给所选 Environment；没有 Environment 时本地路径返回明确错误。文件资源按 Blob UUID 与 Session 引用鉴权。技能 URI 先校验包的当前版本与技能存在，把归档 Blob 登记为当前 Session 的持有，再只下载归档索引中目标条目的压缩范围并解压，解压后的大小与 CRC32 必须与索引一致；文本沿用 `TextReadWindow` 的窗口契约，`.png` / `.jpg` / `.jpeg` / `.gif` / `.webp` 以二进制内容返回。
 
-资源在 `read` 或用户消息／工具输出传递时登记到当前 Session；图片和其他媒体结果引用仍保留原始 `resource://` URI。资源读取与本地文件读取分流：`read` 的 resource URI 由平台读取器处理，本地绝对路径交给所选 Environment；没有 Environment 时本地路径返回明确错误。skills 命名空间目前返回明确的不可用错误。
+`session_blob_ref(session_id, blob_id)` 以 `(session_id, blob_id)` 唯一记录每个 Session 对 Blob 的持有。一条引用对应 Blob `ref_count` 的一次 retain：资源在 `read`、用户消息或工具输出传递时登记到当前 Session，图片和其他媒体结果仍保留原始 `resource://` URI；重复登记幂等，Session fork 为复制的资源各自登记持有；删除 Session 时在删除 Session 行前释放全部引用。只有最后一个持有引用释放后，Blob 才转入 `DELETING`，由异步对象回收处理。
 
-前端使用 Session 持有关系调用鉴权的预览／下载接口，接口不返回预签名 URL。读取及持有生命周期测试见 platform storage、Harness command acceptance 与 Session deletion 集成测试。
+前端使用 Session 持有关系调用鉴权的预览／下载接口，接口不返回预签名 URL；资源 URI 被前端拦截，不能作为浏览器导航地址。读取及持有生命周期测试见 platform storage、Harness command acceptance 与 Session deletion 集成测试。
 
 ## Environment
 
@@ -717,8 +718,8 @@ Skill Package 私有仓库访问令牌与 Provider 凭据采用同一策略：�
 （包括 Agent 的旧顶层 `model` / `variant`），已知字段仍先按写入路径校验，未知字段不能绕过硬错误；必填缺失、结构/类型/有效值错误、
 Environment 令牌摘要冲突、Skill 仓库身份变化和移除仍被引用的 Skill/MCP 工具整份拒绝。
 Environment 条目的 `daemonConfig` 在未知字段跳过判断之前就用同一 codec 深度校验，已知非法设置不会被
-条目级跳过。条目仍含旧安装设置字段（`installConfig` 或 `operatingSystem`）时整份拒绝，不做别名或双读；
-条目省略 `note` 表示清空备注。
+条目级跳过。卡片配置只来自 `daemonConfig`：条目缺少它，或携带 `installConfig` / `operatingSystem`，
+都整份拒绝；条目省略 `note` 表示清空备注。
 Agent 使用 `execution: {driver, settings}` 往返，不接受顶层 `model` / `variant`。
 Builtin Agent 的依赖边与显式 Variant 按导入后将生效的 Model 配置检查，文件内同名 Model
 优先；未知 Variant 整份拒绝。其他 Driver 的 settings 不被解释为模型引用。
@@ -776,7 +777,7 @@ Daemon；浏览器的网络策略独立。
 | `kk-studio.storage.s3` | S3 端点/凭据/bucket 与公网 endpoint 映射 |
 | `kk-studio.storage.maintenance` | 后台轮询与过期上传对象清理 lease |
 | `kk-studio.storage.media` | ffprobe/ffmpeg 可执行文件与临时目录 |
-| `kk-studio.plugins` | 认证尝试有效期、refresh 与远端媒体预算 |
+| `kk-studio.plugins` | 凭据刷新节奏与 Plugin 资源端口预算 |
 | `kk-studio.cluster` | 节点注册与节点间内部认证 |
 
 应用模块各自拥有部署参数：`kk-studio.project.reconcile` 属于 [Project](project.md)，`kk-studio.canvas.function.runtime`
