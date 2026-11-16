@@ -669,6 +669,65 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
             issue.getId()));
   }
 
+  /**
+   * 测试意图：已登记交接、root Join 已冻结时人为阻塞 Issue，Join 不得越过关闭的门禁推进阶段；Run 转 WAITING 并保留 next_state，
+   * 恢复后下一次调谐才按同一 Join 完成交接并清理阻塞字段。
+   */
+  @Test
+  void matchedHandoffWaitsForClosedGateAndAppliesAfterRecover() {
+    String agent = createAgent();
+    UUID projectId = createProjectWithStages("交接遇到阻塞", agent, agent, 3);
+    Issue issue = createIssue(projectId);
+    issueLifecycleService.transition(issue.getId(), issue.getVersion(), key("t"), "DESIGN");
+    IssueRun run = issueRunService.acceptRun(issue.getId(), key("accept"));
+    UUID assistantEntryId = appendHandoffAssistant(run.getThreadId());
+    issueTransitionService.accept(run.getThreadId(), assistantEntryId, "REVIEW");
+    UUID terminal = appendHistoryEntry(run.getThreadId());
+    matchRunJoin(run.getId(), terminal);
+    Issue blocked =
+        issueLifecycleService.blockIssue(
+            issue.getId(),
+            issueEditingService.getIssue(issue.getId()).getVersion(),
+            key("block"),
+            "人工暂停交接");
+    long stateChangesBefore =
+        count(
+            "select count(*) from project_issue_activity where issue_id = ? and kind ="
+                + " 'STATE_CHANGE'",
+            issue.getId());
+
+    IssueReconcileOutcome outcome = reconciler.reconcile(claimWork(issue.getId()));
+
+    assertEquals(IssueReconcileOutcome.WAITING_FOR_GATE, outcome);
+    Issue stillBlocked = issueEditingService.getIssue(issue.getId());
+    assertEquals("BLOCKED", stillBlocked.getState());
+    assertEquals("DESIGN", stillBlocked.getBlockedFromState());
+    IssueRun waiting = issueRunRepository.getById(run.getId());
+    assertEquals(IssueRunStatus.WAITING, waiting.getStatus());
+    assertEquals("REVIEW", waiting.getNextState());
+    assertNull(waiting.getEndEntryId());
+    // 门禁关闭时只停在安全点：不写交接活动，也不推进 Issue.state。
+    assertEquals(
+        stateChangesBefore,
+        count(
+            "select count(*) from project_issue_activity where issue_id = ? and kind ="
+                + " 'STATE_CHANGE'",
+            issue.getId()));
+
+    issueLifecycleService.recoverIssue(blocked.getId(), blocked.getVersion(), key("recover"));
+    IssueReconcileOutcome resumed = reconciler.reconcile(claimWork(issue.getId()));
+
+    assertEquals(IssueReconcileOutcome.RUN_HANDED_OFF, resumed);
+    IssueRun completed = issueRunRepository.getById(run.getId());
+    assertEquals(IssueRunStatus.COMPLETED, completed.getStatus());
+    assertEquals("REVIEW", completed.getNextState());
+    assertEquals(terminal, completed.getEndEntryId());
+    Issue handedOff = issueEditingService.getIssue(issue.getId());
+    assertEquals("REVIEW", handedOff.getState());
+    assertNull(handedOff.getBlockedFromState());
+    assertNull(handedOff.getBlockReason());
+  }
+
   /** 测试意图：已冻结 root Join 的 Run 必须收尾；本 Thread 之后又出现的普通对话与在途模型不能把它重新拉回 DEFERRED_PROCESSING。 */
   @Test
   void matchedJoinClosesRunEvenWhenThreadIsBusyAgain() {
