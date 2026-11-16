@@ -31,21 +31,10 @@
 ./scripts/dev/app.sh stop
 ```
 
-| 项 | 默认值 |
-| --- | --- |
-| Backend | `http://127.0.0.1:18080`，`SPRING_PROFILES_ACTIVE=e2e` |
-| Frontend | `http://127.0.0.1:5173` |
-| 工作目录 | `runtime/dev`，可由 `DEV_WORK_DIR` 覆盖 |
-| Backend log / JAR | `runtime/dev/backend.log`、`web/target/kk-studio-web-1.0.4.jar` |
-
-`start` 会先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
-Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`，`logs` 与 `tail` 接受可选
-目标 `backend`、`frontend`、`all`。
-
-默认 `DEV_KILL_PORTS=true`：`start`、`restart` 和 `stop` 都会终止 dev 端口上的**任意监听进程**，
-不局限于本脚本启动的进程，温和终止后仍存活会强杀。运行前确认端口归属；
-不允许清理其他进程时设 `DEV_KILL_PORTS=false`，端口冲突将由启动检查报错。
-PID 文件也应只属于当前受管实例，不要复用其他工作区的运行目录。
+`start` 先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
+Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`；`logs` 与 `tail` 接受可选
+目标 `backend`、`frontend`、`all`。Backend 产物是 `web/target/kk-studio-web-1.0.4.jar`，
+log 与 PID 文件都在 `DEV_WORK_DIR` 下。
 
 可用环境变量：
 
@@ -62,6 +51,10 @@ PID 文件也应只属于当前受管实例，不要复用其他工作区的运�
 | `LOG_LINES` | `120` | `logs` 与 `tail` 打印的最近行数 |
 | `JAVA_OPTS` | 空 | 传给 Backend JVM |
 | `SHARED_PREVIEW_ENV_FILE` | 未设置 | 显式给出时按字面量读取外部数据面配置；见[本机 preview 的外部数据面](#本机-preview-的外部数据面) |
+
+`DEV_KILL_PORTS=true` 会温和终止端口上的任意监听进程，仍存活则强杀，运行前确认端口归属；
+不允许清理其他进程时设为 `false`，端口冲突将由启动检查报错。PID 文件只属于当前受管实例，
+不要复用其他工作区的运行目录。
 
 `e2e` profile 启用时，宿主同步器会按需读取 Google、OpenAI Responses、MiniMax Anthropic 和
 DeepSeek 四组完整 credential pair，经 backend API 写入 E2E database 中对应的 seed Provider
@@ -378,50 +371,19 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | `--list` / `--docs` | 只列出 API case，或只打印 case 标题、requires 与契约文档 |
 
 矩阵分成 L1 免费 API 契约、L2 真实文本与推理、L3 真实分支、L4 Environment/Tool/approval、L5
-双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题与 `requires` 只由
-`node scripts/dev/verify/e2e/run-matrix.mjs --list` 与 `--docs` 生成，不要把它们抄进文档；默认执行哪些 case
-由 flag 组合和 case 的 `requires` 共同决定。所有 HTTP 4xx 断言必须显式给出 problem `code`；
-`code=conflict` 必须同时给出精确 `reason`，其他 reason 一旦断言也按完整字符串匹配，不能只检查状态码。
+双节点分布式，外加独立的 UI 矩阵。每个 level 的 case 数、标题、输入、期望 wire 与覆盖边界
+只由 `--list` / `--docs` 输出，不要复制到文档；默认执行哪些 case 由 flag 组合和 case 的
+`requires` 共同决定。所有 HTTP 4xx 断言必须显式给出 problem `code`；`code=conflict` 必须同时给出
+精确 `reason`，其他 reason 一旦断言也按完整字符串匹配，不能只检查状态码。
 
-Agent execution 的读取与 CRUD 属于免费 L1：Agent 目录项没有类型字段，execution 使用
-`{driver, settings}`，Builtin settings 包含 `modelName` 与可空 `variant`；Agent config
-矩阵检查 `tools`、`skills`、`subagents` 的形状及未知字段拒绝。这些 case 不调用真实模型。
-更改 Agent 契约时同步 case、fixture 与生成的前端契约。
+阅读 case 结果时还需保留两个边界：
 
-Project 的 UUID 与版本输入属于免费 L1 契约：`project.issue_lifecycle` 验证大写 UUID 和带前后空白的版本
-返回 `400` / `code: validation`，不把它们归一后写入业务状态。合法 ID 必须与 `UUID.toString()` 一致，
-版本必须是无前导零的非负十进制 long。
-用例验证空闲 Issue 的 STOP 产生 USER 暂停、暂停期间禁止合法流转且显式 resume 解除门禁；
-活动流通过详情接口的 `afterSequence`、`limit` 和 `nextActivityCursor` 验证有界分页。
+- 无 READY owner 的 IDE 拒绝路径证明路由层 fail closed，不证明已 READY 时的 exact-intent 校验、
+  视图占用或续租；API 契约断言也不替代真实 Agent 的 Issue 接受与阶段交接。
+- `node --test scripts/dev/verify/e2e/tests/*.test.mjs` 只验证 case 与 HTTP mock 的脚本契约，
+  不能替代对真实服务执行对应 case。
 
-Thread 快照增量读取属于免费 L1：`thread_snapshot.incremental_read` 用缺失 Agent 的回合快速收敛，不调用模型，
-验证非法 `afterEntryId` 返回 400、祖先游标只返回其后的 Entry、游标即 head 时为空增量、非祖先游标回退完整历史。
-
-卡片配置与安装码兑换属于免费 L1 API 契约。可用
-`node scripts/dev/verify/e2e/run-matrix.mjs --only environment.install_script_code_roundtrip`
-定向验证五分钟一次性安装码、重签替换、未消费码的轮换失效，以及兑换生成 fresh token 和推进版本。
-Linux 脚本只下载并检查保存配置与响应头，不执行安装；卸载脚本检查不携带 secret。
-该入口需要真实测试服务；`node --test scripts/dev/verify/e2e/tests/environment-install-config.test.mjs`
-只验证用例与 HTTP mock 的契约，不能替代真实 HTTP L1 验收。
-
-运行快照与 IDE 拒绝路径也属于免费 L1：
-`environment.runtime_absent_unavailable` 验证无本代 READY 时返回
-`409` / `code: unavailable` / `reason: ENVIRONMENT_UNAVAILABLE`，而不是伪造空快照；
-`environment.ide_view_no_ready_owner_rejected` 使用合法视图命令输入验证打开、纯读恢复、目录列举与切换、终端、移动布局及关闭
-在无 READY owner 时的 `409` / `code: unavailable` / `reason: DAEMON_NOT_READY`，并验证非 canonical
-environmentId 返回 `400` / `code: validation`。二者均创建并清理独立 Environment，不连接 Daemon 或模型。
-无 owner 时请求先被路由拒绝，因此这不证明已 READY 场景的 exact-intent 校验、
-视图占用、续租或真实数据面行为。脚本 fixture 测试也不替代对真实测试服务执行这些 L1 case。
-
-事件 L1 使用 `/ws/events`：heartbeat case 校验首帧 `connected` 的
-`eventNodeId` / `connectionId` / `heartbeatIntervalMillis`（十进制正整数字符串）与保活帧，Project case 验证全局失效通知。
-L4 `daemon.ready` 与 L5 租约投影校验能力目录（含内部 `fs.edit.preview` / `fs.write.preview` / `skill.install`）；
-它们分别要求 tools / distributed，不进入默认免费 L1 的真实 Daemon 路径。
-
-case 的 `requires` 决定默认是否执行：`real`、`tools`、`branch`、`canvas-storage`、`canvas-function` 与
-`distributed` 分别对应上表的 flag；`host-mock` 表示 case 在宿主 `127.0.0.1` 自建 mock Provider，不读取真实凭据，
-但在 distributed 容器拓扑下不可用。API 契约断言不能替代真实 Agent 的 Issue 接受与阶段交接，
-这些需在真实 Runtime 上验收。
+更改 API 契约、首发顺序或 usage 语义时，同步 case、fixture、生成的前端契约与本节的分类说明。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。
 runner 会复用已有服务，或杀掉上述端口监听后启动服务；执行前须确认端口为独立可丢弃环境。
@@ -435,10 +397,24 @@ runner 启动后端时会自动重建该专用空库（由 Flyway 初始化当�
 其次使用本地 compose 的 postgres 容器；环境缺少工具或重置失败时明确报错停止。
 Backend 启动要求有效的 `KK_STUDIO_STORAGE_S3_*` 配置及可达的 bucket；即使只跑免费 L1 API
 矩阵，也需要独立的 S3/MinIO 环境。不能用共享或生产存储桶充当测试基础设施。
-`--rebuild` 默认允许 Maven 在线解析依赖，只有 `E2E_MAVEN_OFFLINE=true` 时才加 `-o`；
-`E2E_WORK_DIR` 默认 `runtime/e2e`，工具 case 的任务工作目录默认是其下的 `environment`（fixture
-路径与 Tool 调用的 `workdir` 都由它派生，不是 Daemon 配置），可由 `DAEMON_ENV_ROOT` 覆盖。执行
-`--ui` 前必须完成 `npm --prefix frontend ci`，因为 Playwright 从
+`--rebuild` 默认允许 Maven 在线解析依赖，只有 `E2E_MAVEN_OFFLINE=true` 时才加 `-o`。
+`E2E_WORK_DIR` 默认 `runtime/e2e`；工具 case 的任务工作目录默认是其下的 `environment`（fixture
+路径与 Tool 调用的 `workdir` 都由它派生，不是 Daemon 配置），可由 `DAEMON_ENV_ROOT` 覆盖。
+
+`--with-tools` 会启动一个绑定卡片的 Daemon，卡片选择器与矩阵参数是两个开关：
+
+| 变量 | 默认 | 作用 |
+| --- | --- | --- |
+| `DAEMON_ENV_NAME` | `tool-e2e` | 矩阵的 `--daemon-env`：tool case 断言卡片名，并作为未显式指定选择器时的默认卡片名 |
+| `DAEMON_ENVIRONMENT_NAME` | `$DAEMON_ENV_NAME` | Daemon 启动时按名字定位卡片 |
+| `DAEMON_ENVIRONMENT_ID` | 空 | 按卡片 UUID 定位；与 `DAEMON_ENVIRONMENT_NAME` 同时给出时以它为准 |
+
+三者指向同一张卡片才能让 `daemon.ready` 与真实 Tool case 对上；只改 `DAEMON_ENV_NAME` 而不改
+选择器，Daemon 会从另一张卡片启动，矩阵读不到 READY。Daemon 的配置缓存由
+`lib/daemon-bootstrap.sh` 在 `runtime/e2e/daemon` 物化，安装与容器内选择器的区别见
+[Environment Daemon](environment-daemon.md)。
+
+执行 `--ui` 前必须完成 `npm --prefix frontend ci`，因为 Playwright 从
 [frontend/package.json](../../frontend/package.json) 加载。
 
 ### 真实 Provider 与付费边界
