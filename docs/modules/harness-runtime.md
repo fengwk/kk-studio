@@ -431,7 +431,7 @@ Harness 的严格读取配置集中在模型模块的 [`HarnessJson`](../../harn
 | --- | --- |
 | `api` | 对外公开的消费契约与公开值类型：`HarnessChangeSubscriptions` 暴露 Thread version、执行树与待处理交互的变更订阅，事件与句柄不可变，不泄漏 Store 或 channel 协议；同一根包承载控制面入参与查询结果的形状（`AcceptCommandsCommand`、`SpawnRequest`、`StopResult`、`StoppedThreadReceipt`、`ThreadTreeNode`、`ToolOutcomeView`、`ManualCompactionAvailability`、`Names`）及冲突原因名称 `HarnessConflictReason`；实现由平台提供 |
 | `api.command` | 命令邮箱的公开值类型：`ThreadCommand`、封闭 payload 族与派生的 `ThreadCommandState`；只做不变量校验与纯派生，JSON 形态与 request hash 在 `codec`，harvest 归约在 `runtime.thread.command` |
-| `api.compaction` | 压缩的公开值类型：`CompactionConfig`（`keepRecentTokens` 与预算换算）、`CompactionTrigger`、切点事实 `CompactionPreparation` 与 `TURN_START` 上冻结的 `CompactionStart` |
+| `api.compaction` | 压缩的公开值类型：`CompactionConfig`（`keepRecentTokens` 与预算换算）、`CompactionTrigger`、切点事实 `CompactionPreparation`、`TURN_START` 上冻结的 `CompactionStart`，以及压缩分支文本契约 `CompactionBranchContract`（指令前缀与固定的工具禁用错误文本） |
 | `api.entry` | 分支配置与回合边界值：`BranchSettings`、`ExecutionSelection`、`ModelSelection`、`TurnStartReason` 与 `TurnEndOutcome` |
 | `api.execution` | 具体执行代次的退出证据：`ExecutionExitFact`、`ExecutionExitState` 与 `ExecutionExitKind`（只有 `DRIVER` / `TOOL` / `REMOTE`，Driver 私有模型调用统一归 `DRIVER`）；真实证据含本地 `STUDIO_EXITED` / `OWNER_EXITED`、远端 `REMOTE_ACKNOWLEDGED` 与 `NOT_STARTED`，`OWNER_EXITED` 只允许本地 `DRIVER` / `TOOL`；登记、确认、journal 与恢复扫描在 `runtime.execution` |
 | `api.generation` | Thread 快照中 generation 部分的公开投影：`GenerationProjection` 承载稳定身份、`GenerationStatus` 生命周期状态、已完成的文本/思考输出与结构化错误，`FailureProjection` 描述未物化的失败 attempt；消费方读快照无需依赖 `spi.driver`，包内不暴露 Driver 私有调用实体与 Provider 协议 |
