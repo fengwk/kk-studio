@@ -35,7 +35,10 @@ public sealed interface TurnResolution
     }
   }
 
-  /** 请求预算不足：Runtime 必须先执行压缩，再以同一输入重试；不产生 ModelInvocation。 */
+  /**
+   * 请求预算不足：Runtime 必须先执行压缩，再以同一输入重试；不产生 ModelInvocation。COMPACTION turn 本身不得返回本结果——它已经
+   * 是压缩子执行，Runtime 会把它视为 Driver 契约违背并立即失败。
+   */
   record CompactionRequired(int conversationContextWindow) implements TurnResolution {
     public CompactionRequired {
       if (conversationContextWindow <= 0) {

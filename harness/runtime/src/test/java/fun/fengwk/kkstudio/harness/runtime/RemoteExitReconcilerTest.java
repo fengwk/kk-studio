@@ -89,9 +89,9 @@ class RemoteExitReconcilerTest {
   }
 
   @Test
-  void skipsRemoteFactsWhoseParentIsAgentExecution() {
+  void skipsRemoteFactsWhoseParentIsDriverExecution() {
     ToolBaseline baseline = seedToolBaseline(store);
-    UUID remoteExecId = registerAgentRemoteFact(baseline.threadId(), baseline.toolId());
+    UUID remoteExecId = registerDriverRemoteFact(baseline.threadId(), baseline.toolId());
 
     RemoteExitReconciler reconciler =
         new RemoteExitReconciler(store, transport, confirmer, Runnable::run);
@@ -99,7 +99,7 @@ class RemoteExitReconcilerTest {
 
     assertTrue(
         transport.attachedInvocations.isEmpty(),
-        "Remote exit with AGENT parent must be skipped by reconciler");
+        "Remote exit with DRIVER parent must be skipped by reconciler");
     ExecutionExitFact stored = store.transaction(tx -> tx.exits().find(remoteExecId).orElseThrow());
     assertEquals(ExecutionExitState.UNCONFIRMED, stored.state());
   }
@@ -286,14 +286,14 @@ class RemoteExitReconcilerTest {
         });
   }
 
-  private UUID registerAgentRemoteFact(UUID threadId, UUID invocationId) {
+  private UUID registerDriverRemoteFact(UUID threadId, UUID invocationId) {
     return store.transaction(
         tx -> {
           tx.threads().lock(threadId).orElseThrow();
-          UUID agentExecId = tx.nextId();
+          UUID driverExecId = tx.nextId();
           ExecutionExitLedger.register(
               tx,
-              agentExecId,
+              driverExecId,
               threadId,
               invocationId,
               1,
@@ -309,7 +309,7 @@ class RemoteExitReconcilerTest {
               1,
               OWNER_LEASE,
               ExecutionExitKind.REMOTE,
-              agentExecId,
+              driverExecId,
               ENV_ID);
           return remoteExecId;
         });

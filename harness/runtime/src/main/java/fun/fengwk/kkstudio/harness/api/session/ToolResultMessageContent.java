@@ -21,6 +21,14 @@ public record ToolResultMessageContent(
     if (contents.isEmpty()) {
       throw new IllegalArgumentException("contents must not be empty");
     }
+    for (AgentMessageContent content : contents) {
+      // 结果内容不能再嵌回调用或结果：嵌套会把一次调用的终态伪装成多层协议事实。
+      if (content instanceof ToolCallMessageContent
+          || content instanceof ToolResultMessageContent) {
+        throw new IllegalArgumentException(
+            "tool result contents cannot nest tool call or tool result");
+      }
+    }
     if (detailsJson == null || detailsJson.isBlank()) {
       throw new IllegalArgumentException("detailsJson must not be blank");
     }

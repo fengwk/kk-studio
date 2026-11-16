@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.runtime.ThreadLifecycleCoordinator;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
+import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.spi.driver.CompactionResolution;
 import fun.fengwk.kkstudio.harness.spi.driver.TurnResolution;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -25,6 +26,7 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -35,6 +37,12 @@ import java.util.UUID;
  * <p>本类只负责把已解析的计划落库并完成 claim；解析、锁序与状态分类由 {@link ThreadProcessor} 承担。
  */
 final class TurnCommitter {
+
+  private final DriverRegistry driverRegistry;
+
+  TurnCommitter(DriverRegistry driverRegistry) {
+    this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
+  }
 
   /**
    * 在调用方事务内提交一次已解析的 turn plan。
@@ -62,7 +70,8 @@ final class TurnCommitter {
       compaction = compactionTurn.resolution();
       contextWindow = compaction.contextWindow();
       maxOutputTokens = compaction.maxOutputTokens();
-      compactionStart = CompactionChildSpawn.start(tx, thread, compaction, plan.preparation());
+      compactionStart =
+          CompactionChildSpawn.start(tx, thread, compaction, plan.preparation(), driverRegistry);
     }
     List<Entry> candidateEntries = plan.candidateEntries();
     if (accepted != null && accepted.systemChange() != null) {

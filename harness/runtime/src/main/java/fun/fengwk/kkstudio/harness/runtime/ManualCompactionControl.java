@@ -189,12 +189,13 @@ final class ManualCompactionControl {
   }
 
   /** resolved：写入带冻结压缩元数据的 TURN_START，推进 head，并交回新压缩子执行身份。 */
-  private static CompactThreadResult commitAccepted(
+  private CompactThreadResult commitAccepted(
       HarnessStore.Transaction tx, ManualPlan plan, CompactionResolution compactionResolved) {
     Instant now = tx.now();
     ThreadState thread = plan.thread();
     CompactionStart frozenStart =
-        CompactionChildSpawn.start(tx, thread, compactionResolved, plan.preparation());
+        CompactionChildSpawn.start(
+            tx, thread, compactionResolved, plan.preparation(), driverRegistry);
     TurnStartPayload startPayload = (TurnStartPayload) plan.candidateTurnStartEntry().payload();
     TurnStartPayload resolvedPayload =
         new TurnStartPayload(

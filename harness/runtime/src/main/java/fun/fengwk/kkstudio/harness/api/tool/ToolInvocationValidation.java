@@ -162,7 +162,13 @@ final class ToolInvocationValidation {
     requireNoInputReceipt(status, inputReceipt);
   }
 
-  /** busy/binding 的 durable 约束：binding 只在 immediate FAILED（attempt 0）槽位可空。 */
+  /**
+   * busy/binding 的 durable 约束：binding 只在 immediate FAILED（attempt 0）槽位可空，非空时其 descriptor 名称必须与 call
+   * 一致。
+   *
+   * <p>arguments 与冻结 descriptor 的 schema 兼容性不在这里复查：每个构造入口要么从已按同一 frozen binding 校验过的声明写入 （{@code
+   * ToolDeclarationPlanner}），要么 rehydrate 已落盘的行或转换同一行的状态，因此值对象只守住名称身份。
+   */
   static void validateBindingConstraint(
       ToolInvocationStatus status, int attempt, ToolCall call, ToolBinding binding) {
     if (binding == null) {
@@ -174,14 +180,6 @@ final class ToolInvocationValidation {
     }
     if (!binding.descriptor().name().equals(call.toolName())) {
       throw new IllegalArgumentException("binding descriptor name must match the call toolName");
-    }
-    if (status != ToolInvocationStatus.FAILED || attempt != 0) {
-      try {
-        call.validateFor(binding.descriptor());
-      } catch (IllegalArgumentException schemaFailure) {
-        throw new IllegalArgumentException(
-            "call arguments must conform to the binding tool schema", schemaFailure);
-      }
     }
   }
 

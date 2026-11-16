@@ -4,7 +4,6 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.entry.ExecutionSelection;
 import fun.fengwk.kkstudio.harness.spi.driver.AgentDriver;
-import fun.fengwk.kkstudio.harness.spi.driver.DriverCapabilities;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.driver.DriverWork;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -64,15 +63,6 @@ public final class DriverRegistry implements DriverThreadDeletion {
           "execution", "driver is not installed: " + selection.driver());
     }
     driver.validateSettings(selection.settingsJson());
-  }
-
-  public DriverCapabilities capabilities(String driverId) {
-    Objects.requireNonNull(driverId, "driverId");
-    AgentDriver driver = drivers.get(driverId);
-    if (driver == null) {
-      throw new IllegalArgumentException("driver is not installed: " + driverId);
-    }
-    return driver.capabilities();
   }
 
   /** 汇总全部 Driver 注册的 Work 处理器；内核 THREAD / TOOL 由组合根另行装配。 */
