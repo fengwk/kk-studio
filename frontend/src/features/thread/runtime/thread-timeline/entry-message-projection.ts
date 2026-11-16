@@ -235,4 +235,3 @@ function toolCallIdentity(content: Record<string, unknown>, callIndex: number): 
 function toolCallKey(toolCallId: string): string {
   return toolCallId ? `call:${toolCallId}` : ''
 }
-
