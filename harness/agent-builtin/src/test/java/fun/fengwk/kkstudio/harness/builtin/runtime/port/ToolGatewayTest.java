@@ -50,9 +50,10 @@ class ToolGatewayTest {
   }
 
   @Test
-  void completionIsSealedWithExactlyFourTerminalOutcomes() {
+  void completionIsSealedWithFourTerminalOutcomesAndDurableChildWait() {
     List<Class<?>> permitted = List.of(ToolGateway.Completion.class.getPermittedSubclasses());
-    assertEquals(4, permitted.size());
+    assertEquals(5, permitted.size());
+    assertTrue(permitted.contains(ToolGateway.WaitingForChild.class));
     assertTrue(permitted.contains(ToolGateway.Succeeded.class));
     assertTrue(permitted.contains(ToolGateway.Failed.class));
     assertTrue(permitted.contains(ToolGateway.Cancelled.class));

@@ -214,7 +214,7 @@ public interface ToolGateway {
    */
   interface Run extends AutoCloseable {
 
-    /** 阻塞执行并返回唯一终态；{@code progress} 接收已校验的非 terminal partial。 */
+    /** 阻塞执行并返回唯一决议；{@code progress} 接收已校验的非 terminal partial。 */
     Completion execute(Consumer<ToolResult> progress);
 
     /** 释放本次执行持有的本地资源（并发配额与目录租用）；幂等。释放失败必须传播，不能据此确认退出。 */
@@ -222,7 +222,7 @@ public interface ToolGateway {
     void close();
   }
 
-  /** 一次执行的唯一终态。 */
+  /** 一次执行的唯一决议：交付终态结果，或释放本地执行后等待持久子任务结果。 */
   sealed interface Completion
       permits ToolGateway.Succeeded,
           ToolGateway.WaitingForChild,
