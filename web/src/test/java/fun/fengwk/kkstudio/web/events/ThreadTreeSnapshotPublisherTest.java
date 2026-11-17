@@ -45,6 +45,7 @@ class ThreadTreeSnapshotPublisherTest {
             });
     handleRef[0] =
         publisher.subscribe(UUID.randomUUID(), ignored -> snapshots.incrementAndGet(), () -> {});
+    handleRef[0].request(true);
 
     assertEquals(1, pending.size());
     pending.remove().run();
@@ -56,7 +57,7 @@ class ThreadTreeSnapshotPublisherTest {
   }
 
   @Test
-  void retriesUnchangedSnapshotAfterDeliveryFailureAndRequestsResync() {
+  void retriesUnchangedSnapshotAfterDeliveryFailureAndReportsFailure() {
     Queue<Runnable> pending = new ArrayDeque<>();
     AtomicInteger deliveries = new AtomicInteger();
     AtomicInteger failures = new AtomicInteger();
@@ -72,6 +73,7 @@ class ThreadTreeSnapshotPublisherTest {
               }
             },
             failures::incrementAndGet);
+    handle.request(true);
 
     pending.remove().run();
     assertEquals(1, failures.get());
@@ -81,6 +83,34 @@ class ThreadTreeSnapshotPublisherTest {
     assertEquals(2, deliveries.get());
     assertEquals(1, failures.get());
     handle.close();
+  }
+
+  @Test
+  void changeDuringFailedDeliveryGetsOneTrailingAttempt() {
+    Queue<Runnable> pending = new ArrayDeque<>();
+    AtomicInteger deliveries = new AtomicInteger();
+    AtomicInteger failures = new AtomicInteger();
+    ThreadTreeSnapshotPublisher.Handle[] handleRef = new ThreadTreeSnapshotPublisher.Handle[1];
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(pending::add, ignored -> List.of(node("root")));
+    handleRef[0] =
+        publisher.subscribe(
+            UUID.randomUUID(),
+            ignored -> {
+              if (deliveries.incrementAndGet() == 1) {
+                handleRef[0].request();
+                throw new IllegalStateException("partial delivery");
+              }
+            },
+            failures::incrementAndGet);
+
+    handleRef[0].request(true);
+    pending.remove().run();
+
+    assertEquals(2, deliveries.get());
+    assertEquals(1, failures.get());
+    assertTrue(pending.isEmpty());
+    handleRef[0].close();
   }
 
   @Test
@@ -119,6 +149,7 @@ class ThreadTreeSnapshotPublisherTest {
                 Thread.currentThread().interrupt();
               }
             });
+    handleRef[0].request(true);
 
     pending.remove().run();
     handleRef[0].request();
@@ -140,6 +171,7 @@ class ThreadTreeSnapshotPublisherTest {
             });
     ThreadTreeSnapshotPublisher.Handle handle =
         publisher.subscribe(UUID.randomUUID(), ignored -> snapshots.incrementAndGet(), () -> {});
+    handle.request(true);
 
     handle.close();
     pending.remove().run();
@@ -171,6 +203,7 @@ class ThreadTreeSnapshotPublisherTest {
             });
     ThreadTreeSnapshotPublisher.Handle handle =
         publisher.subscribe(UUID.randomUUID(), ignored -> snapshots.incrementAndGet(), () -> {});
+    handle.request(true);
     Thread worker = new Thread(pending.remove());
     worker.start();
     boolean projectionStarted = projecting.await(5, TimeUnit.SECONDS);

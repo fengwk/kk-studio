@@ -1930,7 +1930,7 @@ registerCase({
   id: 'thread_tree.query_contract',
   level: 'L1',
   title: 'Agent 关系树 HTTP 投影与 WebSocket 权威快照',
-  docs: 'GET /api/harness/threads/{id}/tree 投影精确 DTO 字段且不推进 Thread 版本；/ws/events 首订先 ack 后推无 cursor 的 snapshot(data.nodes)，重命名后推送新的权威整树；缺失 Agent 确定性失败，不调用真实 Provider',
+  docs: 'GET /api/harness/threads/{id}/tree 仅用于 bootstrap 并投影精确 DTO 字段；/ws/events 每个新订阅先 ack 后推无 cursor 的 snapshot(data.nodes)，同 root 第二客户端静止时也收到首快照；refresh 不新增订阅并强制推当前快照；重命名后推送新的权威整树；缺失 Agent 确定性失败，不调用真实 Provider',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -1941,6 +1941,8 @@ registerCase({
     const threadId = cid()
     let socket
     let collect
+    let secondSocket
+    let secondCollect
     try {
       await createNewSession(ctx, {
         owner: chatOwner(chat.id),
@@ -2022,6 +2024,60 @@ registerCase({
       assert(observedFrames.indexOf(ack) < observedFrames.indexOf(initialSnapshot), 'snapshot must follow subscribed ack')
       assert(isDeepStrictEqual(initialSnapshot.data.nodes, nodes), JSON.stringify(initialSnapshot))
 
+      secondSocket = new WebSocket(threadTreeEventUrl(ctx.baseUrl))
+      const secondFrames = []
+      const secondObservedFrames = []
+      secondCollect = (event) => {
+        try {
+          const frame = JSON.parse(String(event.data))
+          secondFrames.push(frame)
+          secondObservedFrames.push(frame)
+        } catch {
+          // Ignore non-JSON frames; protocol frames are asserted below.
+        }
+      }
+      secondSocket.addEventListener('message', secondCollect)
+      await waitForEventSocketOpen(secondSocket, 5_000)
+      secondSocket.send(JSON.stringify({
+        type: 'refresh',
+        resource: { kind: 'thread-tree', id: threadId },
+      }))
+      const invalidRefresh = await takeEventFrame(
+        secondFrames,
+        (frame) => frame?.type === 'error' && frame?.code === 'INVALID_REFRESH_RESOURCE',
+        5_000,
+      )
+      assert(invalidRefresh.resource?.kind === 'projects', JSON.stringify(invalidRefresh))
+      secondSocket.send(JSON.stringify({
+        type: 'refresh',
+        resource: { kind: 'thread-tree', id: threadId },
+      }))
+      const unsubscribedRefresh = await takeEventFrame(
+        secondFrames,
+        (frame) => frame?.type === 'error' && frame?.code === 'RESOURCE_NOT_SUBSCRIBED',
+        5_000,
+      )
+      assert(unsubscribedRefresh.resource?.id === threadId, JSON.stringify(unsubscribedRefresh))
+      secondSocket.send(JSON.stringify({
+        type: 'subscribe',
+        resource: { kind: 'thread-tree', id: threadId },
+      }))
+      const secondAck = await takeEventFrame(
+        secondFrames,
+        (frame) => frame?.type === 'subscribed' && frame?.resource?.kind === 'thread-tree',
+        5_000,
+      )
+      const secondSnapshot = await takeEventFrame(
+        secondFrames,
+        (frame) => frame?.type === 'event'
+          && frame?.resource?.kind === 'thread-tree'
+          && frame?.resource?.id === threadId
+          && frame?.name === 'snapshot',
+        10_000,
+      )
+      assert(secondObservedFrames.indexOf(secondAck) < secondObservedFrames.indexOf(secondSnapshot))
+      assert(isDeepStrictEqual(secondSnapshot.data.nodes, nodes), JSON.stringify(secondSnapshot))
+
       const renamedName = `e2e-pushed-${cid().slice(0, 8)}`
       await renameThread(ctx, threadId, renamedName)
       const changedSnapshot = await takeEventFrame(
@@ -2036,6 +2092,26 @@ registerCase({
       assertExactFields(changedSnapshot, ['type', 'resource', 'name', 'data'], 'changed tree snapshot')
       assertExactFields(changedSnapshot.data, ['nodes'], 'changed tree snapshot data')
 
+      const subscribedCount = observedFrames.filter((frame) => frame?.type === 'subscribed').length
+      socket.send(JSON.stringify({
+        type: 'refresh',
+        resource: { kind: 'thread-tree', id: threadId },
+      }))
+      const refreshedSnapshot = await takeEventFrame(
+        frames,
+        (frame) => frame?.type === 'event'
+          && frame?.resource?.kind === 'thread-tree'
+          && frame?.resource?.id === threadId
+          && frame?.name === 'snapshot'
+          && frame?.data?.nodes?.[0]?.name === renamedName,
+        10_000,
+      )
+      assert(isDeepStrictEqual(refreshedSnapshot.data.nodes, changedSnapshot.data.nodes))
+      assert(
+        observedFrames.filter((frame) => frame?.type === 'subscribed').length === subscribedCount,
+        'refresh must not create a new subscription',
+      )
+
       const afterRename = await getThreadSnapshot(ctx, threadId)
       assert(
         afterRename.thread.version === (BigInt(before.thread.version) + 1n).toString(),
@@ -2049,6 +2125,12 @@ registerCase({
           socket.removeEventListener('message', collect)
         }
         socket.close(1000, 'E2E complete')
+      }
+      if (secondSocket) {
+        if (secondCollect) {
+          secondSocket.removeEventListener('message', secondCollect)
+        }
+        secondSocket.close(1000, 'E2E complete')
       }
       await ctx.call(
         'DELETE',

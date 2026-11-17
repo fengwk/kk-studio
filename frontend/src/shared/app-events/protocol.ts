@@ -5,6 +5,7 @@
  * - {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"thread-tree","id":"<UUID>"}}
  * - {"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
  * - {"type":"unsubscribe","resource":{...}}
+ * - {"type":"refresh","resource":{"kind":"thread-tree","id":"<UUID>"}}（已订阅执行树的强制快照）
  * - {"type":"ide-use","browserSessionId":"<UUID>","revision":"<positive decimal>",
  *    "views":[{"environmentId":"<UUID>","viewId":"<UUID>","claimId":"<UUID>","bindingEpoch":"<positive decimal>"}]}
  *
@@ -104,6 +105,7 @@ export interface ApplicationEventIdeUse {
 export type ApplicationEventClientMessage =
   | { type: 'subscribe'; resource: ApplicationEventResource }
   | { type: 'unsubscribe'; resource: ApplicationEventResource }
+  | { type: 'refresh'; resource: ApplicationEventResource }
   | {
       type: 'ide-use'
       browserSessionId: string

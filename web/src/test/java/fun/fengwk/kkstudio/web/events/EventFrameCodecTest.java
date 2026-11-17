@@ -75,6 +75,15 @@ class EventFrameCodecTest {
                 + THREAD
                 + "\"}}"));
     assertEquals(
+        new EventFrameCodec.RefreshFrame(THREAD_TREE_KEY),
+        CODEC.decode(
+            "{\"type\":\"refresh\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
+    assertEquals(
+        new EventFrameCodec.RefreshFrame(PROJECTS_KEY),
+        CODEC.decode("{\"type\":\"refresh\",\"resource\":{\"kind\":\"projects\"}}"));
+    assertEquals(
         new EventFrameCodec.SubscriptionFrame(
             EventFrameCodec.SubscriptionType.SUBSCRIBE, INTERACTIONS_KEY),
         CODEC.decode("{\"type\":\"subscribe\",\"resource\":{\"kind\":\"interactions\"}}"));
@@ -93,6 +102,17 @@ class EventFrameCodecTest {
                 "{\"action\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                     + THREAD
                     + "\"}}"));
+  }
+
+  @Test
+  void rejectsUnknownRefreshFields() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"type\":\"refresh\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                    + THREAD
+                    + "\"},\"requestId\":\"1\"}"));
   }
 
   @Test
@@ -516,6 +536,16 @@ class EventFrameCodecTest {
                         + invalidDocument
                         + "\",\"revision\":\"1\",\"views\":[]}"));
     assertEquals("frame ide-use is invalid", documentError.getMessage());
+  }
+
+  @Test
+  void snapshotFailureUsesResourceLevelErrorFrame() {
+    assertEquals(
+        "{\"type\":\"error\",\"code\":\"TREE_SNAPSHOT_FAILED\",\"message\":\"failed\","
+            + "\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+            + THREAD
+            + "\"}}",
+        CODEC.error(EventFrameCodec.TREE_SNAPSHOT_FAILED, "failed", THREAD_TREE_KEY));
   }
 
   @Test

@@ -77,6 +77,7 @@ final class ApplicationEventHub implements AutoCloseable {
           Signal.ProjectChanged,
           Signal.ThreadTreeChanged,
           Signal.ThreadTreeSnapshot,
+          Signal.ThreadTreeSnapshotFailed,
           Signal.InteractionsChanged,
           Signal.EnvironmentChanged,
           Signal.Resync {
@@ -99,6 +100,9 @@ final class ApplicationEventHub implements AutoCloseable {
         nodes = List.copyOf(nodes);
       }
     }
+
+    /** 执行树权威快照生成或投递失败；保留客户端旧缓存，不触发自动 resync。 */
+    record ThreadTreeSnapshotFailed() implements Signal {}
 
     /** 执行根的待处理交互需要回读（全局资源，data 携带真实执行根）。 */
     record InteractionsChanged(UUID rootThreadId) implements Signal {
@@ -217,6 +221,8 @@ final class ApplicationEventHub implements AutoCloseable {
                 (key, existing) ->
                     existing != null ? existing : new ApplicationEventResourceState(key));
       }
+      ApplicationEventLocalSubscription subscription;
+      ThreadTreeSnapshotPublisher.Handle snapshotHandle;
       synchronized (state) {
         if (state.retired) {
           // 状态已被并发最后释放/hub close 淘汰并移出 map：放弃，重取新状态，绝不在 detached state 上重建上游。
@@ -236,7 +242,7 @@ final class ApplicationEventHub implements AutoCloseable {
         if (maxSignals <= 0) {
           throw new IllegalStateException("application event queue capacity must be positive");
         }
-        ApplicationEventLocalSubscription subscription =
+        subscription =
             new ApplicationEventLocalSubscription(
                 resource, state.cursor, sink, maxSignals, this::release);
         state.subscribers.add(subscription);
@@ -246,9 +252,37 @@ final class ApplicationEventHub implements AutoCloseable {
         }
         state.early.clear();
         state.earlyCollapsed = false;
-        return subscription;
+        snapshotHandle = state.threadTreeSnapshotHandle;
       }
+      // 每个本地 thread-tree listener 都需首帧；同 root 的 publisher 会合并并只 fan-out 一份快照。
+      if (snapshotHandle != null) {
+        snapshotHandle.request(true);
+      }
+      return subscription;
     }
+  }
+
+  /** 请求当前已订阅执行树的强制权威快照；不创建订阅，重复请求由 root publisher 合并。 */
+  boolean requestThreadTreeSnapshot(ResourceKey resource) {
+    if (resource.kind() != ResourceKind.THREAD_TREE) {
+      return false;
+    }
+    ApplicationEventResourceState state = resources.get(resource);
+    if (state == null) {
+      return false;
+    }
+    ThreadTreeSnapshotPublisher.Handle handle;
+    synchronized (state) {
+      if (state.retired || state.subscribers.isEmpty()) {
+        return false;
+      }
+      handle = state.threadTreeSnapshotHandle;
+    }
+    if (handle == null) {
+      return false;
+    }
+    handle.request(true);
+    return true;
   }
 
   /**
@@ -318,7 +352,7 @@ final class ApplicationEventHub implements AutoCloseable {
               threadTreeSnapshotPublisher.subscribe(
                   state.key.id(),
                   nodes -> fanout(state, new Signal.ThreadTreeSnapshot(nodes)),
-                  () -> fanout(state, new Signal.Resync()));
+                  () -> fanout(state, new Signal.ThreadTreeSnapshotFailed()));
         }
       }
       case INTERACTIONS -> {

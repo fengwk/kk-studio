@@ -125,15 +125,8 @@ class ApplicationEventHubTest {
   }
 
   @Test
-  void treeSubscriptionsPushInitialAndResyncSnapshotsButSuppressUnchangedInvalidations() {
+  void eachLocalTreeSubscriberGetsAForcedSnapshotAndRefreshesShareThePublisher() {
     Queue<Runnable> tasks = new ArrayDeque<>();
-    AtomicReference<Consumer<HarnessInvalidationChanges.Event>> changes = new AtomicReference<>();
-    when(executionTreeChangeSource.subscribe(any(), any()))
-        .thenAnswer(
-            invocation -> {
-              changes.set(invocation.getArgument(1));
-              return subscribed(0L, () -> {});
-            });
     HarnessThreadTreeNodeDTO node = new HarnessThreadTreeNodeDTO();
     node.setThreadId(THREAD.toString());
     node.setName("root");
@@ -150,24 +143,59 @@ class ApplicationEventHubTest {
             environmentChangeSource,
             () -> BUFFER_CAPACITY,
             publisher);
+    List<Signal> firstReceived = new ArrayList<>();
+    Subscription first = snapshotHub.subscribe(THREAD_TREE_KEY, firstReceived::add);
+    tasks.remove().run();
+    first.activate();
+    assertEquals(List.of(new Signal.ThreadTreeSnapshot(nodes)), firstReceived);
+
+    List<Signal> secondReceived = new ArrayList<>();
+    Subscription second = snapshotHub.subscribe(THREAD_TREE_KEY, secondReceived::add);
+    assertEquals(1, tasks.size(), "a local subscriber forces a snapshot on the shared publisher");
+    tasks.remove().run();
+    second.activate();
+    assertEquals(List.of(new Signal.ThreadTreeSnapshot(nodes)), secondReceived);
+
+    assertTrue(snapshotHub.requestThreadTreeSnapshot(THREAD_TREE_KEY));
+    assertTrue(snapshotHub.requestThreadTreeSnapshot(THREAD_TREE_KEY));
+    assertEquals(1, tasks.size(), "concurrent refreshes share the in-flight publisher task");
+    tasks.remove().run();
+    assertEquals(
+        3, firstReceived.size(), "the queued refreshes coalesce into one current snapshot");
+    assertEquals(2, secondReceived.size());
+
+    first.close();
+    second.close();
+    snapshotHub.close();
+  }
+
+  @Test
+  void treeProjectionFailureIsReportedWithoutResync() {
+    Queue<Runnable> tasks = new ArrayDeque<>();
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(
+            tasks::add,
+            ignored -> {
+              throw new IllegalStateException("projection failed");
+            });
+    ApplicationEventHub snapshotHub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            projectChangeSource,
+            environmentChangeSource,
+            () -> BUFFER_CAPACITY,
+            publisher);
     List<Signal> received = new ArrayList<>();
     Subscription subscription = snapshotHub.subscribe(THREAD_TREE_KEY, received::add);
 
     tasks.remove().run();
-    assertTrue(received.isEmpty());
     subscription.activate();
-    assertEquals(List.of(new Signal.ThreadTreeSnapshot(nodes)), received);
 
-    changes.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
-    tasks.remove().run();
-    assertEquals(1, received.size());
-
-    changes.get().accept(new HarnessInvalidationChanges.Event.Resync());
-    tasks.remove().run();
-    assertEquals(
-        List.of(new Signal.ThreadTreeSnapshot(nodes), new Signal.ThreadTreeSnapshot(nodes)),
-        received);
-
+    assertEquals(List.of(new Signal.ThreadTreeSnapshotFailed()), received);
+    assertTrue(tasks.isEmpty(), "failure must not schedule an automatic retry");
     subscription.close();
     snapshotHub.close();
   }

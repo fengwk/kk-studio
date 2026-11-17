@@ -25,9 +25,7 @@ final class ThreadTreeSnapshotPublisher {
 
   Handle subscribe(
       UUID rootThreadId, Consumer<List<HarnessThreadTreeNodeDTO>> onSnapshot, Runnable onFailure) {
-    Handle handle = new Handle(rootThreadId, onSnapshot, onFailure);
-    handle.request(true);
-    return handle;
+    return new Handle(rootThreadId, onSnapshot, onFailure);
   }
 
   final class Handle implements AutoCloseable {
@@ -65,17 +63,35 @@ final class ThreadTreeSnapshotPublisher {
         }
         running = true;
       }
+      submit();
+    }
+
+    private void submit() {
       try {
         executor.execute(this::projectUntilClean);
       } catch (RuntimeException rejected) {
-        boolean notifyFailure;
         synchronized (this) {
-          notifyFailure = active;
-          running = false;
+          if (!active) {
+            running = false;
+            dirty = false;
+            return;
+          }
           dirty = false;
         }
-        if (notifyFailure) {
-          onFailure.run();
+        onFailure.run();
+        boolean retry;
+        synchronized (this) {
+          if (!active) {
+            running = false;
+            return;
+          }
+          retry = dirty;
+          if (!retry) {
+            running = false;
+          }
+        }
+        if (retry) {
+          submit();
         }
       }
     }
@@ -101,10 +117,19 @@ final class ThreadTreeSnapshotPublisher {
             if (dirty) {
               continue;
             }
-            running = false;
           }
           onFailure.run();
-          return;
+          synchronized (this) {
+            if (!active) {
+              running = false;
+              return;
+            }
+            if (dirty) {
+              continue;
+            }
+            running = false;
+            return;
+          }
         }
         boolean publish;
         synchronized (this) {
@@ -121,18 +146,26 @@ final class ThreadTreeSnapshotPublisher {
           try {
             onSnapshot.accept(snapshot);
           } catch (RuntimeException deliveryFailure) {
-            // A partial fan-out is uncertain; ask every live client to replace state via HTTP.
+            // A partial fan-out is uncertain; report failure without creating a refresh loop.
             synchronized (this) {
               if (!active) {
                 running = false;
                 return;
               }
-              running = false;
-              dirty = false;
               forcePublish = true;
             }
             onFailure.run();
-            return;
+            synchronized (this) {
+              if (!active) {
+                running = false;
+                return;
+              }
+              if (dirty) {
+                continue;
+              }
+              running = false;
+              return;
+            }
           }
           synchronized (this) {
             if (!active) {

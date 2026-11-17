@@ -38,6 +38,9 @@ describe('encodeClientMessage', () => {
       JSON.parse(encodeClientMessage({ type: 'subscribe', resource: treeResource })),
     ).toEqual({ type: 'subscribe', resource: treeResource })
     expect(
+      JSON.parse(encodeClientMessage({ type: 'refresh', resource: treeResource })),
+    ).toEqual({ type: 'refresh', resource: treeResource })
+    expect(
       JSON.parse(
         encodeClientMessage({ type: 'subscribe', resource: interactionsResource }),
       ),
@@ -305,6 +308,20 @@ describe('decodeServerMessage', () => {
       resource: projectsResource,
       name: 'changed',
       data: { projectId: THREAD_ID },
+    })
+  })
+
+  it('decodes the resource-scoped thread-tree snapshot failure signal', () => {
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'error',
+      resource: treeResource,
+      code: 'TREE_SNAPSHOT_FAILED',
+      message: 'authoritative thread-tree snapshot failed',
+    }))).toEqual({
+      type: 'error',
+      resource: treeResource,
+      code: 'TREE_SNAPSHOT_FAILED',
+      message: 'authoritative thread-tree snapshot failed',
     })
   })
 

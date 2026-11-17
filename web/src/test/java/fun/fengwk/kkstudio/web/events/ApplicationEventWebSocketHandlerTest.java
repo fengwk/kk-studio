@@ -8,6 +8,7 @@ import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -31,6 +32,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscription;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
+import fun.fengwk.kkstudio.harness.api.HarnessInvalidationChanges;
 import fun.fengwk.kkstudio.harness.api.HarnessThreadVersionChanges;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
 import fun.fengwk.kkstudio.ide.browser.ConnectionIdentity;
@@ -44,8 +46,10 @@ import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 
 import java.nio.ByteBuffer;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -70,6 +74,8 @@ class ApplicationEventWebSocketHandlerTest {
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY =
       new ResourceKey(ResourceKind.CANVAS, new UUID(0L, 2L));
+  private static final ResourceKey THREAD_TREE_KEY =
+      new ResourceKey(ResourceKind.THREAD_TREE, THREAD);
   private static final int DEFAULT_SENDER_CAPACITY = 512;
 
   // 测试 fixture 显式提供事件软策略：只注入发送队列容量以驱动 backpressure，
@@ -436,6 +442,103 @@ class ApplicationEventWebSocketHandlerTest {
             + THREAD
             + "\"},\"cursor\":\"5\"}",
         recorder.sent.get(1));
+  }
+
+  @Test
+  void snapshotFailureIsReportedAsResourceErrorWithoutResync() throws Exception {
+    Queue<Runnable> tasks = new ArrayDeque<>();
+    HarnessInvalidationChanges executionTree = mock(HarnessInvalidationChanges.class);
+    when(harnessChanges.executionTree()).thenReturn(executionTree);
+    when(executionTree.subscribe(any(), any())).thenReturn(subscribed(0L, () -> {}));
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(
+            tasks::add,
+            ignored -> {
+              throw new IllegalStateException("projection failed");
+            });
+    hub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            projectChangeSource,
+            environmentChangeSource,
+            () -> 512,
+            publisher);
+    rebuildHandler(DEFAULT_SENDER_CAPACITY);
+    handler.afterConnectionEstablished(springSession);
+
+    handler.handleTextMessage(
+        springSession,
+        textMessage(
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
+    assertEquals(1, recorder.sent.size(), "ack must be sent before the initial snapshot failure");
+    tasks.remove().run();
+    recorder.complete(0);
+
+    assertEquals(2, recorder.sent.size());
+    assertTrue(recorder.sent.get(1).contains("\"code\":\"TREE_SNAPSHOT_FAILED\""));
+    assertTrue(recorder.sent.get(1).contains("\"type\":\"error\""));
+    assertFalse(recorder.sent.get(1).contains("\"type\":\"resync\""));
+  }
+
+  @Test
+  void refreshRejectsUnsupportedAndUnsubscribedResources() throws Exception {
+    handler.afterConnectionEstablished(springSession);
+
+    handler.handleTextMessage(
+        springSession, textMessage("{\"type\":\"refresh\",\"resource\":{\"kind\":\"projects\"}}"));
+    handler.handleTextMessage(
+        springSession,
+        textMessage(
+            "{\"type\":\"refresh\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
+
+    assertEquals(1, recorder.sent.size());
+    assertTrue(recorder.sent.get(0).contains("\"code\":\"INVALID_REFRESH_RESOURCE\""));
+    recorder.complete(0);
+    assertEquals(2, recorder.sent.size());
+    assertTrue(recorder.sent.get(1).contains("\"code\":\"RESOURCE_NOT_SUBSCRIBED\""));
+    assertTrue(recorder.sent.get(1).contains("\"kind\":\"thread-tree\""));
+    verify(springSession, never()).close(any());
+  }
+
+  @Test
+  void refreshRequiresExistingSubscriptionAndRequestsTheSharedPublisher() throws Exception {
+    HarnessInvalidationChanges executionTree = mock(HarnessInvalidationChanges.class);
+    when(harnessChanges.executionTree()).thenReturn(executionTree);
+    when(executionTree.subscribe(any(), any())).thenReturn(subscribed(0L, () -> {}));
+    hub = spy(hub);
+    doReturn(true).when(hub).requestThreadTreeSnapshot(THREAD_TREE_KEY);
+    rebuildHandler(DEFAULT_SENDER_CAPACITY);
+    handler.afterConnectionEstablished(springSession);
+
+    handler.handleTextMessage(
+        springSession,
+        textMessage(
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
+    handler.handleTextMessage(
+        springSession,
+        textMessage(
+            "{\"type\":\"refresh\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
+    handler.handleTextMessage(
+        springSession,
+        textMessage(
+            "{\"type\":\"refresh\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
+
+    verify(hub, times(2)).requestThreadTreeSnapshot(THREAD_TREE_KEY);
+    verify(executionTree).subscribe(any(), any());
+    assertEquals(1, recorder.sent.size(), "refresh does not enqueue another subscribed ack");
   }
 
   @Test

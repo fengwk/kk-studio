@@ -138,6 +138,9 @@ export class ApplicationEventManager {
     if (previous === 0 && entry.refs.size === 1) {
       // 首 ref：listener 已登记，此时才发首 subscribe（wire 响应可同步到达）。
       this.connection.send({ type: 'subscribe', resource })
+    } else if (previous === 0 && resource.kind === 'thread-tree') {
+      // 同 root 的新 listener 复用 wire ref，但仍需一份当前权威快照。
+      this.requestResourceRefresh(resource)
     }
     return () => {
       const current = this.subscriptions.get(key)
@@ -158,6 +161,15 @@ export class ApplicationEventManager {
         this.connection.send({ type: 'unsubscribe', resource })
       }
     }
+  }
+
+  /** 请求已订阅执行树资源的强制权威快照；不增减本地或 wire refcount。 */
+  requestResourceRefresh(resource: Extract<ApplicationEventResource, { kind: 'thread-tree' }>): boolean {
+    const entry = this.subscriptions.get(resourceKey(resource))
+    if (entry == null || entry.refs.size === 0) {
+      return false
+    }
+    return this.connection.send({ type: 'refresh', resource })
   }
 
   /**

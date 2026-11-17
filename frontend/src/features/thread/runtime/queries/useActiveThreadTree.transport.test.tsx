@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
@@ -27,7 +27,13 @@ function reply(nodes: unknown[]) {
   }))
 }
 function Panel() {
-  return <SubagentTreePanel tree={useActiveThreadTree(CHILD)} currentThreadId={CHILD} />
+  const tree = useActiveThreadTree(CHILD)
+  return (
+    <>
+      <SubagentTreePanel tree={tree} currentThreadId={CHILD} />
+      <button onClick={tree.refetch}>refresh tree</button>
+    </>
+  )
 }
 function renderPanel() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -47,9 +53,13 @@ describe('execution tree HTTP Instant contract', () => {
     transport.mockReset()
     vi.stubGlobal('fetch', transport)
   })
-  afterEach(() => vi.unstubAllGlobals())
+  afterEach(() => {
+    vi.useRealTimers()
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+  })
 
-  it('passes JSON epoch seconds through the real service and subscribes to the actual root', async () => {
+  it('uses HTTP for bootstrap then subscribes to the actual root without subscribed reread', async () => {
     reply([node(ROOT, null), node(CHILD, ROOT)])
     const { client, sockets } = renderPanel()
     expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('turns: 3 · tools: 5')
@@ -60,6 +70,11 @@ describe('execution tree HTTP Instant contract', () => {
     await waitFor(() => expect(socket.sentMessages()).toEqual([
       { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT } },
     ]))
+    socket.emitServer({
+      type: 'subscribed', resource: { kind: 'thread-tree', id: ROOT }, cursor: '0',
+    })
+    await act(async () => { await Promise.resolve() })
+    expect(transport).toHaveBeenCalledTimes(1)
   })
 
   it.each([
@@ -90,7 +105,13 @@ describe('execution tree HTTP Instant contract', () => {
     socket.emitServer({
       type: 'subscribed', resource: { kind: 'thread-tree', id: ROOT }, cursor: '0',
     })
-    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
+    await act(async () => { await Promise.resolve() })
+    expect(transport).toHaveBeenCalledTimes(1)
+    fireEvent.click(screen.getByRole('button', { name: 'refresh tree' }))
+    expect(socket.sentMessages()).toEqual([
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT } },
+      { type: 'refresh', resource: { kind: 'thread-tree', id: ROOT } },
+    ])
     const callsBeforeSnapshot = transport.mock.calls.length
     const pushed = [node(ROOT, null), { ...node(CHILD, ROOT), name: 'pushed latest' }]
 
@@ -104,17 +125,13 @@ describe('execution tree HTTP Instant contract', () => {
     expect(screen.getByRole('link')).toHaveTextContent('pushed latest')
   })
 
-  it('does not write a snapshot from an old root scope into the bound cache', async () => {
+  it('keeps the cache and reports a malformed-scope snapshot without an HTTP second writer', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)
     const { client, sockets } = renderPanel()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
-    let resolveRefresh!: (response: Response) => void
-    transport.mockImplementationOnce(
-      () => new Promise<Response>((resolve) => { resolveRefresh = resolve }),
-    )
     const oldScope = [node(OTHER_ROOT, null), node(CHILD, OTHER_ROOT)]
 
     act(() => socket.emitServer({
@@ -124,30 +141,130 @@ describe('execution tree HTTP Instant contract', () => {
       data: { nodes: oldScope },
     }))
 
-    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
+    await screen.findByRole('alert')
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(initial)
-    await act(async () => {
-      resolveRefresh(
-        new Response(JSON.stringify(initial), { headers: { 'Content-Type': 'application/json' } }),
-      )
-      await Promise.resolve()
-    })
+    expect(transport).toHaveBeenCalledTimes(1)
+    expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT } }])
   })
 
-  it('keeps the valid cached tree and root subscription when a refresh returns a foreign tree', async () => {
+  it('does not auto-retry snapshot failure and lets an explicit refresh recover over WS', async () => {
     const valid = [node(ROOT, null), node(CHILD, ROOT)]
     reply(valid)
     const { client, sockets } = renderPanel()
     await screen.findByRole('link')
     const socket = sockets.openLatest()
     await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
-    reply([node('foreign-root', null)])
-    await act(async () => { await client.invalidateQueries({ queryKey: ['threads', 'tree', CHILD] }) })
+
+    socket.emitServer({
+      type: 'error',
+      resource: { kind: 'thread-tree', id: ROOT },
+      code: 'TREE_SNAPSHOT_FAILED',
+      message: 'snapshot failed',
+    })
     await screen.findByRole('alert')
     expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(valid)
-    expect(screen.getByRole('link')).toBeInTheDocument()
+    expect(transport).toHaveBeenCalledTimes(1)
     expect(socket.sentMessages()).toEqual([
       { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT } },
     ])
+
+    fireEvent.click(screen.getByRole('button', { name: 'refresh tree' }))
+    expect(socket.sentMessages().at(-1)).toEqual({
+      type: 'refresh', resource: { kind: 'thread-tree', id: ROOT },
+    })
+    expect(transport).toHaveBeenCalledTimes(1)
+
+    socket.emitServer({
+      type: 'event',
+      resource: { kind: 'thread-tree', id: ROOT },
+      name: 'snapshot',
+      data: { nodes: valid },
+    })
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument())
+  })
+
+  it('resubscribes after reconnect and accepts the new scope snapshot without HTTP', async () => {
+    const initial = [node(ROOT, null), node(CHILD, ROOT)]
+    reply(initial)
+    const { client, sockets } = renderPanel()
+    await screen.findByRole('link')
+    expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(initial)
+    vi.useFakeTimers()
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    const firstSocket = sockets.openLatest()
+    expect(firstSocket.sentMessages()).toEqual([
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT } },
+    ])
+
+    act(() => firstSocket.fail())
+    await act(async () => {
+      vi.advanceTimersByTime(500)
+      await Promise.resolve()
+    })
+    const reconnected = sockets.openLatest()
+    expect(reconnected.sentMessages()).toEqual([
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT } },
+    ])
+    act(() => reconnected.emitServer({
+      type: 'subscribed', resource: { kind: 'thread-tree', id: ROOT }, cursor: '0',
+    }))
+    const recovered = [node(ROOT, null), { ...node(CHILD, ROOT), name: 'reconnected' }]
+    act(() => reconnected.emitServer({
+      type: 'event', resource: { kind: 'thread-tree', id: ROOT }, name: 'snapshot',
+      data: { nodes: recovered },
+    }))
+
+    expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(recovered)
+    expect(transport).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps bootstrap failure visible and retries it with HTTP on explicit refetch', async () => {
+    reply([])
+    const { client } = renderPanel()
+    await screen.findByRole('alert')
+    expect(client.getQueryData(['threads', 'tree', CHILD])).toBeUndefined()
+    expect(transport).toHaveBeenCalledTimes(1)
+
+    reply([node(ROOT, null), node(CHILD, ROOT)])
+    fireEvent.click(screen.getByRole('button', { name: 'refresh tree' }))
+    await screen.findByRole('link')
+    expect(transport).toHaveBeenCalledTimes(2)
+  })
+
+  it('cancels a stale HTTP response when WS becomes live and keeps the pushed tree', async () => {
+    const initial = [node(ROOT, null), node(CHILD, ROOT)]
+    reply(initial)
+    const { client, sockets } = renderPanel()
+    await screen.findByRole('link')
+    const socket = sockets.openLatest()
+    await waitFor(() => expect(socket.sentMessages()).toHaveLength(1))
+
+    let resolveLate!: (response: Response) => void
+    transport.mockImplementationOnce(
+      () => new Promise<Response>((resolve) => { resolveLate = resolve }),
+    )
+    void client.invalidateQueries({ queryKey: ['threads', 'tree', CHILD] })
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
+    act(() => socket.emitServer({
+      type: 'subscribed', resource: { kind: 'thread-tree', id: ROOT }, cursor: '0',
+    }))
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ['threads', 'tree', CHILD] })
+    })
+    expect(transport).toHaveBeenCalledTimes(2)
+
+    const pushed = [node(ROOT, null), { ...node(CHILD, ROOT), name: 'WS latest' }]
+    socket.emitServer({
+      type: 'event', resource: { kind: 'thread-tree', id: ROOT }, name: 'snapshot',
+      data: { nodes: pushed },
+    })
+    await waitFor(() => expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(pushed))
+    await act(async () => {
+      resolveLate(new Response(JSON.stringify(initial), { headers: { 'Content-Type': 'application/json' } }))
+      await Promise.resolve()
+    })
+
+    expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(pushed)
+    expect(transport).toHaveBeenCalledTimes(2)
   })
 })

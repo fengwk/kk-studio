@@ -6,6 +6,7 @@ const URL = 'ws://test/ws/events'
 const THREAD_A = { kind: 'thread', id: 'aaaaaaaa-0000-4000-8000-000000000001' } as const
 const THREAD_B = { kind: 'thread', id: 'bbbbbbbb-0000-4000-8000-000000000002' } as const
 const CANVAS_A = { kind: 'canvas', id: 'cccccccc-0000-4000-8000-000000000003' } as const
+const TREE_A = { kind: 'thread-tree', id: 'aaaaaaaa-0000-4000-8000-000000000001' } as const
 const PROJECTS = { kind: 'projects' } as const
 const EVENT_NODE_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const EVENT_NODE_B = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaab'
@@ -85,6 +86,26 @@ describe('ApplicationEventManager', () => {
       type: 'unsubscribe',
       resource: THREAD_B,
     })
+  })
+
+  it('refreshes a tree for a new listener without changing wire refcounts', () => {
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    const releaseFirst = manager.subscribe(TREE_A, {})
+    const releaseSecond = manager.subscribe(TREE_A, {})
+
+    expect(socket.sentMessages()).toEqual([
+      { type: 'subscribe', resource: TREE_A },
+      { type: 'refresh', resource: TREE_A },
+    ])
+    expect(manager.requestResourceRefresh(TREE_A)).toBe(true)
+    expect(socket.sentMessages().at(-1)).toEqual({ type: 'refresh', resource: TREE_A })
+
+    releaseFirst()
+    expect(socket.sentMessages()).toHaveLength(3)
+    releaseSecond()
+    expect(socket.sentMessages().at(-1)).toEqual({ type: 'unsubscribe', resource: TREE_A })
+    expect(manager.requestResourceRefresh(TREE_A)).toBe(false)
   })
 
   it('refcounts the same listener on one resource: first release keeps the wire subscription', () => {
