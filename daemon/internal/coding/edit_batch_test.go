@@ -1,10 +1,12 @@
 package coding
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -233,6 +235,43 @@ func TestEditAllowsNoOpEntryWithChangedEntry(t *testing.T) {
 	}
 }
 
+// No-op replace_all matches are counted, and normalized no-op spans preserve mixed line endings.
+func TestEditNoOpEntriesWithEffectiveEdits(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		original string
+		edits    []map[string]any
+		want     string
+		count    int
+	}{
+		{
+			name:     "replace-all-counts-every-no-op-match",
+			original: "same same change\n",
+			edits:    []map[string]any{replaceAll("same", "same"), replace("change", "changed")},
+			want:     "same same changed\n",
+			count:    3,
+		},
+		{
+			name:     "mixed-newline-no-op-span-is-preserved",
+			original: "a\r\nb\nc\rd\r\n",
+			edits:    []map[string]any{replace("a\r\nb\nc\r", "a\nb\nc\n"), replace("d", "D")},
+			want:     "a\r\nb\nc\rD\r\n",
+			count:    2,
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := writeEditFile(t, "no-op.txt", test.original)
+			result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path, test.edits...), nil)
+			if result.Error || result.Contents[0].Text != fmt.Sprintf("Edited successfully.\nReplacements: %d", test.count) {
+				t.Fatalf("edit=%#v", result)
+			}
+			if written := readEditFile(t, path); written != test.want {
+				t.Fatalf("written=%q want=%q", written, test.want)
+			}
+		})
+	}
+}
+
 // Touching entries whose combined effect rebuilds the original decoded text do not write.
 func TestEditRejectsNoOpCall(t *testing.T) {
 	path := writeEditFile(t, "noop.txt", "ab")
@@ -266,6 +305,40 @@ func TestEditNoOpDoesNotRewriteLossyFile(t *testing.T) {
 	}
 	if content := readEditFile(t, path); content != "bad: \xff\n" || !after.ModTime().Equal(before.ModTime()) || changed != 0 {
 		t.Fatalf("content=%q before=%v after=%v fileChanged=%d", content, before.ModTime(), after.ModTime(), changed)
+	}
+}
+
+// Two real edits can cancel in decoded text; the gate must preserve the original invalid bytes.
+func TestEditCancellingEffectsOnLossyFileDoesNotWrite(t *testing.T) {
+	original := []byte("bad: \xffleft/right")
+	path := writeFixture(t, "lossy-cancel.txt", original)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	edits := []map[string]any{replace("left/", ""), replace("right", "left/right")}
+	updated, _, replacements, err := applyPlannedEdits(path, "bad: \ufffdleft/right", []editEntry{
+		{OldString: stringPointer("left/"), NewString: stringPointer("")},
+		{OldString: stringPointer("right"), NewString: stringPointer("left/right")},
+	})
+	if err != nil || updated != "bad: \ufffdleft/right" || len(replacements) != 2 {
+		t.Fatalf("updated=%q replacements=%d err=%v", updated, len(replacements), err)
+	}
+	call, err := json.Marshal(editArgs(path, edits...))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := 0
+	result, err := editCapability(context.Background(), runtime.CapabilityCall{InvocationID: "lossy-cancel", Arguments: call}, runtime.CapabilityContext{FileChanged: func(string) { changed++ }})
+	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "No changes to apply: the edits would not change the file") {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if written := []byte(readEditFile(t, path)); !bytes.Equal(written, original) || !after.ModTime().Equal(before.ModTime()) || changed != 0 {
+		t.Fatalf("written=%q before=%v after=%v fileChanged=%d", written, before.ModTime(), after.ModTime(), changed)
 	}
 }
 
