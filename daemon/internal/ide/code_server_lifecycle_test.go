@@ -53,9 +53,13 @@ func TestLaunchEnvironment(t *testing.T) {
 			t.Fatalf("launch %d reused bridge token as management token", index)
 		}
 	}
-	info, err := os.Stat(IDEPathsFor(cfg).RuntimeDir)
-	if err != nil || info.Mode().Perm()&0o077 != 0 {
-		t.Fatalf("managed runtime data directory permissions: info=%v err=%v", info, err)
+	// prepareStart enforces owner-only ACLs through EnsurePrivateDirectory; POSIX mode bits are checked only where they represent that contract.
+	info, err := os.Lstat(IDEPathsFor(cfg).RuntimeDir)
+	if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatalf("managed runtime data directory is not a real directory: info=%v err=%v", info, err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+		t.Fatalf("managed runtime data directory permissions: info=%v", info)
 	}
 	if err := manager.Close(context.Background()); err != nil {
 		t.Fatal(err)

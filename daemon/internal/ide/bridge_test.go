@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -435,8 +436,13 @@ func TestBridgePTYFailureBoundaries(t *testing.T) {
 			t.Errorf("invalid PTY body %s status=%d", body, status)
 		}
 	}
-	bridge.Assign("11111111-1111-4111-8111-111111111111", "/managed/view.code-workspace", 1, "/managed")
-	stream, cancel := openTestBridgeStream(t, bridge, "11111111-1111-4111-8111-111111111111", "/managed/view.code-workspace", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	managed, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspace := filepath.Join(managed, "view.code-workspace")
+	bridge.Assign("11111111-1111-4111-8111-111111111111", workspace, 1, managed)
+	stream, cancel := openTestBridgeStream(t, bridge, "11111111-1111-4111-8111-111111111111", workspace, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
 	defer cancel()
 	defer stream.Body.Close()
 	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"viewId":"11111111-1111-4111-8111-111111111111","bindingEpoch":"1","hostId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","pid":42}`)); status != http.StatusForbidden {
@@ -630,25 +636,47 @@ func TestBridgeHandlerBoundaryResponses(t *testing.T) {
 
 // Verifies folder matching remains a directory check, not a bridge identity.
 func TestBridgeDirectoryAndLoopbackPredicates(t *testing.T) {
-	managed := filepath.Join(t.TempDir(), "managed")
-	other := filepath.Join(t.TempDir(), "other")
-	for _, test := range []struct {
+	reportedDirectory := t.TempDir()
+	managed, err := CanonicalDirectory(reportedDirectory)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	pathCases := []struct {
 		path, expected string
 		want           bool
 	}{
-		{managed, managed, true}, {managed, other, false}, {"relative", managed, false}, {"", managed, false},
-	} {
+		{managed, managed, true}, {reportedDirectory, managed, true}, {managed, other, false}, {"relative", managed, false}, {"", managed, false},
+	}
+	if runtime.GOOS == "windows" {
+		pathCases = append(pathCases, struct {
+			path, expected string
+			want           bool
+		}{strings.ToUpper(managed), managed, true})
+	}
+	for _, test := range pathCases {
 		if got := validDirectoryExpectation(test.path, test.expected); got != test.want {
 			t.Errorf("validDirectoryExpectation(%q,%q)=%v", test.path, test.expected, got)
 		}
 	}
-	for _, test := range []struct {
+	folderCases := []struct {
 		folders   []string
 		directory string
 		want      bool
 	}{
-		{[]string{managed}, managed, true}, {[]string{managed, managed}, managed, false}, {[]string{"relative"}, managed, false},
-	} {
+		{[]string{managed}, managed, true}, {[]string{reportedDirectory}, managed, true}, {[]string{managed, managed}, managed, false}, {[]string{"relative"}, managed, false},
+	}
+	if runtime.GOOS == "windows" {
+		folderCases = append(folderCases, struct {
+			folders   []string
+			directory string
+			want      bool
+		}{[]string{strings.ToUpper(managed)}, managed, true})
+	}
+	for _, test := range folderCases {
 		if got := matchesBridgeDirectory(test.folders, test.directory); got != test.want {
 			t.Errorf("matchesBridgeDirectory(%v,%q)=%v", test.folders, test.directory, got)
 		}
