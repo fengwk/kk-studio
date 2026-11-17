@@ -109,10 +109,11 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 READY            -> WAITING_INPUT（ask_user）/ WAITING_APPROVAL（Ask）/ RUNNING（Allow 且准入通过）/ FAILED / CANCELLED
 WAITING_APPROVAL -> READY（Allowed）/ FAILED（Denied）/ CANCELLED
 WAITING_INPUT    -> SUCCEEDED（已作答或明确拒答）/ CANCELLED
-RUNNING          -> SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
+RUNNING          -> WAITING_CHILD（已接受 task Join）/ SUCCEEDED / FAILED / CANCELLED / UNKNOWN / READY（重试）
+WAITING_CHILD    -> SUCCEEDED（Join receipt）/ FAILED（Join superseded）/ CANCELLED（父 Stop）
 ```
 
-`attempt` 同样在副作用之前持久化；RUNNING 工具的旧租约恢复绝不重放，只在能够重新挂接在途远端调用时继续等待结果，否则收敛为 `UNKNOWN`（见下文）。`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答，两者都只占 durable 行，不占 Worker。`ToolBinding` 冻结执行所需的工具定义、Contributor 归属、环境支持级别与 Environment id/name；branch 未选择 Environment 时 `REQUIRED` binding 仍以空环境身份冻结并保留在模型工具面，调用返回确定性的 needs-Environment 未执行结果。网关对已移除或定义已变化的 binding 返回确定性失败。真实工具的终态在结果 metadata 中保留 `toolName`；模型可见工具定义由 SYSTEM 历史承载，执行路由由调用时的冻结 binding 保留，删除临时行或 fork 不会丢失调用时定义。
+`attempt` 同样在副作用之前持久化；普通 RUNNING 工具的旧租约恢复绝不重放，只在能够重新挂接在途远端调用时继续等待结果，否则收敛为 `UNKNOWN`（见下文）。已存在对应持久 Join 的 `task` 是例外：RUNNING 恢复只重读 Join，不重放委派，并进入 `WAITING_CHILD` 或从冻结 receipt 结算。`WAITING_CHILD` 持久记录已接受的 task、没有执行租约；Join 匹配请求父 TOOL Work，丢失通知由持久状态和 Work 扫描恢复。`WAITING_INPUT` 与 `WAITING_APPROVAL` 刻意分离：问卷不能授权工具，审批也不能代替回答，两者都只占 durable 行，不占 Worker。`ToolBinding` 冻结执行所需的工具定义、Contributor 归属、环境支持级别与 Environment id/name；branch 未选择 Environment 时 `REQUIRED` binding 仍以空环境身份冻结并保留在模型工具面，调用返回确定性的 needs-Environment 未执行结果。网关对已移除或定义已变化的 binding 返回确定性失败。真实工具的终态在结果 metadata 中保留 `toolName`；模型可见工具定义由 SYSTEM 历史承载，执行路由由调用时的冻结 binding 保留，删除临时行或 fork 不会丢失调用时定义。
 
 [`ToolOutcomeQuery`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/ToolOutcomeQuery.java) 按 Thread 和 invocation 身份查询稳定终态：调用行仍在时读取 terminal Invocation，物化后从当前路径的 ToolResult Entry 读取，并校验所属 Thread 与 Turn。返回的 [`ToolOutcomeView`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ToolOutcomeView.java) 保留调用身份、终态与稳定内容；`resultError` 是模型可见的业务错误标志，与生命周期 `status` 正交，执行 `SUCCEEDED` 也可能携带业务错误。
 
@@ -400,7 +401,7 @@ environmentSupport       NONE / ROUTED / REQUIRED
 
 每次请求的工具面由平台从目录与 Agent 配置解析：配置了子代理时加入 INTERNAL `task`，所有配置的工具都声明给模型，候选与冻结 binding 按 Agent 配置顺序排列；未选 Environment 时 `bash` 与 LSP 仍可见，但调用不会执行。五个文件工具由 [`FileTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/FileTool.java) 实现：schema 与默认超时取自同名能力描述符，`read` 的 `resource://` URI 调用 [`ResourceReadGateway`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/spi/ResourceReadGateway.java)，本地绝对路径委托 `BoundEnvironment`，没有绑定环境时本地路径返回明确的 Environment 错误。`bash` 与 LSP 由 [`EnvironmentCapabilityTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/environment/EnvironmentCapabilityTool.java) 绑定能力执行；没有绑定时返回同一确定性未执行错误。
 
-[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/TaskTool.java) 把参数交给 [`SubagentRunner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentRunner.java)，以本次调用为幂等键；模型固定以 `async=false` 等待 Join 冻结结果。等待仅发生在独立工具执行线程：Join 终态事务通过子 Thread version change 唤醒该线程，线程重读固定 Join 并投影 ToolResult，不阻塞事务或调度线程。父 Stop 中断等待并将 task Invocation 持久结算为 CANCELLED。[`SubagentConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentConfig.java) 的深度、单父并发、全局并发与轮数软预算在每个决策点现读。文件窗口读取、LSP 生命周期、task 与异步通知契约见 [内置工具](builtin-tools.md)。
+[`TaskTool`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/TaskTool.java) 把参数交给 [`SubagentRunner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentRunner.java)，以本次调用为幂等键。Join 接受后工具执行立即退出，父 TOOL Invocation 持久进入 `WAITING_CHILD` 并释放租约；模型仍在原工具批次等待该调用的 tool_result，不会收到提前受理回执。Join 终态事务请求父 TOOL Work，TOOL Processor 从同一 Join 的冻结 receipt 重建原调用结果；父线程随后正常应用工具批次。父 Stop 将等待中的 task Invocation 收敛为 CANCELLED。[`SubagentConfig`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/contributor/builtin/subagent/SubagentConfig.java) 的深度、单父并发、全局并发与轮数软预算在每个决策点现读。文件窗口读取、LSP 生命周期、task 与异步通知契约见 [内置工具](builtin-tools.md)。
 
 ## Prompt 模板
 

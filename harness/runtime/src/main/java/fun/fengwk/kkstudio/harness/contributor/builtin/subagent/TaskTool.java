@@ -8,8 +8,11 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.harness.api.SpawnQuotaExceededException;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.contributor.api.Tool;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionRequest;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolHistoryRenderer;
@@ -32,8 +35,7 @@ import java.util.function.Consumer;
 /**
  * 以普通 durable Harness Thread 运行隔离 Subagent 的内部 {@code task} 工具适配器。
  *
- * <p>本工具以内部 {@code async=false} 委派任务，并等待 Join 冻结结果后才返回对应
- * tool_result。等待发生在独立工具执行线程中，不占用事务或调度线程；并发批次仍由父 Thread 的 Work 状态机统一结算。
+ * <p>本工具持久接受委派 Join 后立即退出；Join 匹配时由父 TOOL Work 投影冻结结果为原调用的 tool_result。
  *
  * <p>参数被拒或 Runner 抛异常都收敛为错误结果，绝不抛出。
  */
@@ -101,13 +103,10 @@ public final class TaskTool implements Tool {
                   TASK_CONTINUATION_NEXT_ACTION)));
     }
     try {
-      SubagentTaskResult taskResult =
-          runner.run(
-              taskRequest,
-              false,
-              acceptance ->
-                  progress.accept(running(callId, taskRequest.subagentType(), acceptance)));
-      return new ToolOutcome(result(callId, taskRequest.subagentType(), taskResult));
+      runner.accept(
+          taskRequest,
+          acceptance -> progress.accept(running(callId, taskRequest.subagentType(), acceptance)));
+      return ToolOutcome.deferredForChild();
     } catch (RuntimeException failure) {
       if (quotaExceeded(failure)) {
         return new ToolOutcome(error(callId, QUOTA_EXCEEDED));
@@ -122,6 +121,11 @@ public final class TaskTool implements Tool {
 
   private SubagentTaskRequest parseArguments(
       UUID invocationId, UUID parentThreadId, ToolCall call) {
+    return parseArguments(objectMapper, invocationId, parentThreadId, call);
+  }
+
+  private static SubagentTaskRequest parseArguments(
+      ObjectMapper objectMapper, UUID invocationId, UUID parentThreadId, ToolCall call) {
     JsonNode value;
     try {
       value = objectMapper.readTree(call.argumentsJson() == null ? "{}" : call.argumentsJson());
@@ -186,11 +190,40 @@ public final class TaskTool implements Tool {
     return statusResult(callId, subagentType, acceptance, "running", "Subagent is running.", false);
   }
 
-  private ToolResult result(String callId, String subagentType, SubagentTaskResult taskResult) {
-    ThreadJoinReceipt receipt = taskResult.receipt();
-    if (receipt == null) {
-      throw new IllegalArgumentException("synchronous task result has no Join receipt");
+  /** 校验 task 工具行与其唯一可接受的 Join 身份；不一致表示 durable 不变量损坏。 */
+  public static void requireMatchingJoin(ToolInvocation invocation, ThreadJoin join) {
+    Objects.requireNonNull(invocation, "invocation");
+    Objects.requireNonNull(join, "join");
+    if (!NAME.equals(invocation.call().toolName())) {
+      throw new IllegalStateException("child-wait state belongs to a non-task invocation");
     }
+    SubagentTaskRequest request;
+    try {
+      request =
+          parseArguments(
+              new ObjectMapper(), invocation.id(), invocation.threadId(), invocation.call());
+    } catch (RuntimeException invalid) {
+      throw new IllegalStateException("persisted task invocation has invalid arguments", invalid);
+    }
+    if (!join.invocationId().equals(invocation.id())
+        || !Objects.equals(join.parentThreadId(), invocation.threadId())
+        || join.delivery() != JoinDelivery.SETTLE_TOOL_RESULT
+        || !join.childThreadId().equals(request.childThreadId())
+        || !join.requestHash().equals(request.requestHash())
+        || !join.agent().equals(request.subagentType())
+        || (request.maxTurns() != null && !request.maxTurns().equals(join.maxTurns()))) {
+      throw new IllegalStateException(
+          "task Join does not match its durable Tool invocation " + invocation.id());
+    }
+  }
+
+  /** 从持久 Join receipt 重建与同步 task 相同的模型结果，不依赖已退出的工具执行实例。 */
+  public static ToolResult resultFromJoin(
+      ObjectMapper objectMapper,
+      String callId,
+      UUID sessionId,
+      ThreadJoin join,
+      ThreadJoinReceipt receipt) {
     boolean error = receipt.outcome() != ThreadJoinOutcome.COMPLETED;
     String status =
         switch (receipt.outcome()) {
@@ -209,7 +242,30 @@ public final class TaskTool implements Tool {
       error = true;
       text = "Subagent ended without a final answer.";
     }
-    return statusResult(callId, subagentType, taskResult.acceptance(), status, text, error);
+    ObjectNode details = objectMapper.createObjectNode();
+    details.put("kind", "task.result");
+    details.put("thread_id", join.childThreadId().toString());
+    details.put("status", status);
+    details.put("session_id", sessionId.toString());
+    details.put("subagent_type", join.agent());
+    details.put("replayed", false);
+    return new ToolResult(
+        callId,
+        List.of(new TextResultContent(text == null ? "" : text)),
+        error,
+        details.toString());
+  }
+
+  private static String failureText(String prefix, ThreadJoinReceipt receipt) {
+    StringBuilder text = new StringBuilder(prefix).append(": ");
+    text.append(
+        receipt.error() == null || receipt.error().isBlank()
+            ? "no reason provided"
+            : receipt.error());
+    if (receipt.partialResult() != null && !receipt.partialResult().isBlank()) {
+      text.append("\nPartial result:\n").append(receipt.partialResult());
+    }
+    return text.toString();
   }
 
   private ToolResult statusResult(
@@ -231,18 +287,6 @@ public final class TaskTool implements Tool {
         List.of(new TextResultContent(text == null ? "" : text)),
         error,
         details.toString());
-  }
-
-  private static String failureText(String prefix, ThreadJoinReceipt receipt) {
-    StringBuilder text = new StringBuilder(prefix).append(": ");
-    text.append(
-        receipt.error() == null || receipt.error().isBlank()
-            ? "no reason provided"
-            : receipt.error());
-    if (receipt.partialResult() != null && !receipt.partialResult().isBlank()) {
-      text.append("\nPartial result:\n").append(receipt.partialResult());
-    }
-    return text.toString();
   }
 
   private static ToolResult error(String callId, String message) {

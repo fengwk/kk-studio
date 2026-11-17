@@ -13,6 +13,9 @@ public enum ToolInvocationStatus {
    */
   WAITING_INPUT,
 
+  /** 已持久接受 task 子调用，等待 Join 冻结子结果；不占用 Worker 或 Work 租约。 */
+  WAITING_CHILD,
+
   /** 工具调用已就绪，等待分派执行。 */
   READY,
 

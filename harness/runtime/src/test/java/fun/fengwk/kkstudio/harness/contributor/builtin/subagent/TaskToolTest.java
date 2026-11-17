@@ -1,7 +1,6 @@
 package fun.fengwk.kkstudio.harness.contributor.builtin.subagent;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -14,6 +13,8 @@ import fun.fengwk.kkstudio.common.schema.InputSchema;
 import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.SpawnQuotaExceededException;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.contributor.api.ToolExecutionContext;
@@ -30,10 +31,6 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 class TaskToolTest {
@@ -47,10 +44,7 @@ class TaskToolTest {
 
   @Test
   void descriptorKeepsCanonicalTaskArgumentSchema() {
-    TaskTool tool =
-        taskTool(
-            (request, async, accepted) ->
-                execution(ThreadJoinOutcome.COMPLETED, "done", null, null));
+    TaskTool tool = taskTool((request, accepted) -> acceptance());
     ToolDescriptor descriptor = tool.descriptor();
     InputSchema schema = descriptor.inputSchema();
 
@@ -71,13 +65,13 @@ class TaskToolTest {
   void rejectsMalformedAndInvalidTaskArgumentsBeforeStartingRunner() {
     assertThrows(
         IllegalArgumentException.class,
-        () -> createRequest(taskTool((request, async, accepted) -> null), "not json"));
+        () -> createRequest(taskTool((request, accepted) -> null), "not json"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> createRequest(taskTool((request, async, accepted) -> null), "[\"coder\"]"));
+        () -> createRequest(taskTool((request, accepted) -> null), "[\"coder\"]"));
     TaskTool tool =
         taskTool(
-            (request, async, accepted) -> {
+            (request, accepted) -> {
               throw new AssertionError("invalid arguments must not start a subagent");
             });
 
@@ -104,10 +98,7 @@ class TaskToolTest {
 
   @Test
   void requiresDurableToolExecutionContext() {
-    TaskTool tool =
-        taskTool(
-            (request, async, accepted) ->
-                execution(ThreadJoinOutcome.COMPLETED, "done", null, null));
+    TaskTool tool = taskTool((request, accepted) -> acceptance());
     ToolExecutionRequest request =
         new ToolExecutionRequest(
             tool.descriptor(),
@@ -122,7 +113,7 @@ class TaskToolTest {
   void validationRejectionExplainsThatTaskWasNotExecuted() {
     TaskTool tool =
         taskTool(
-            (request, async, accepted) -> {
+            (request, accepted) -> {
               throw new AssertionError("rejected task must not be executed");
             });
 
@@ -138,61 +129,59 @@ class TaskToolTest {
   }
 
   @Test
-  void taskHidesAsyncAndReturnsOnlyAfterSuccessfulJoinResult() {
-    AtomicReference<Boolean> async = new AtomicReference<>();
+  void taskPersistsChildWaitAndReturnsWithoutAResult() {
     AtomicReference<ToolResult> running = new AtomicReference<>();
     TaskTool tool =
         taskTool(
-            (request, asyncMode, accepted) -> {
-              async.set(asyncMode);
+            (request, accepted) -> {
               accepted.accept(acceptance());
-              return execution(ThreadJoinOutcome.COMPLETED, "done", null, null);
+              return acceptance();
             });
 
     ToolOutcome outcome =
         tool.execute(
             createRequest(tool, "{\"subagent_type\":\"coder\",\"prompt\":\"work\"}"), running::set);
 
-    assertFalse(async.get());
     assertEquals("running", status(running.get()));
-    assertFalse(outcome.result().error());
-    assertEquals("done", text(outcome.result()));
-    assertEquals("completed", status(outcome.result()));
-    assertTrue(outcome.result().detailsJson().contains(CHILD_THREAD_ID.toString()));
+    assertTrue(outcome.waitingForChild());
+    assertEquals(null, outcome.result());
   }
 
   @Test
-  void reportsSubagentFailureAndPartialWorkAsToolError() {
-    TaskTool tool = tool(ThreadJoinOutcome.ERROR, null, "compiler failed", "partial output");
+  void materializesTaskReceiptsFromJoinWithoutRetainingAnExecutionThread() {
+    ThreadJoin join = join();
+    ToolResult failure =
+        TaskTool.resultFromJoin(
+            JsonMapper.builder().build(),
+            "call-task",
+            CHILD_SESSION_ID,
+            join,
+            receipt(ThreadJoinOutcome.ERROR, null, "compiler failed", "partial output"));
+    ToolResult cancellation =
+        TaskTool.resultFromJoin(
+            JsonMapper.builder().build(),
+            "call-task",
+            CHILD_SESSION_ID,
+            join,
+            receipt(ThreadJoinOutcome.CANCELLED, null, "Cancelled by parent.", null));
+    ToolResult noAnswer =
+        TaskTool.resultFromJoin(
+            JsonMapper.builder().build(),
+            "call-task",
+            CHILD_SESSION_ID,
+            join,
+            receipt(ThreadJoinOutcome.COMPLETED, null, null, null));
 
-    ToolResult result = execute(tool);
-
-    assertTrue(result.error());
-    assertEquals("failed", status(result));
-    assertTrue(text(result).contains("compiler failed"));
-    assertTrue(text(result).contains("partial output"));
-  }
-
-  @Test
-  void reportsSubagentCancellationAsToolError() {
-    TaskTool tool = tool(ThreadJoinOutcome.CANCELLED, null, "Cancelled by parent.", null);
-
-    ToolResult result = execute(tool);
-
-    assertTrue(result.error());
-    assertEquals("cancelled", status(result));
-    assertTrue(text(result).contains("Cancelled by parent."));
-  }
-
-  @Test
-  void rejectsCompletedJoinWithoutFinalAnswer() {
-    TaskTool tool = tool(ThreadJoinOutcome.COMPLETED, null, null, null);
-
-    ToolResult result = execute(tool);
-
-    assertTrue(result.error());
-    assertEquals("failed", status(result));
-    assertTrue(text(result).contains("without a final answer"));
+    assertTrue(failure.error());
+    assertEquals("failed", status(failure));
+    assertTrue(text(failure).contains("compiler failed"));
+    assertTrue(text(failure).contains("partial output"));
+    assertTrue(cancellation.error());
+    assertEquals("cancelled", status(cancellation));
+    assertTrue(text(cancellation).contains("Cancelled by parent."));
+    assertTrue(noAnswer.error());
+    assertEquals("failed", status(noAnswer));
+    assertTrue(text(noAnswer).contains("without a final answer"));
   }
 
   /** 额度满由类型判定（可被调用链包装），不依赖异常文本。 */
@@ -200,7 +189,7 @@ class TaskToolTest {
   void concurrencyLimitReturnsExplicitNotStartedError() {
     TaskTool tool =
         taskTool(
-            (request, async, accepted) -> {
+            (request, accepted) -> {
               throw new IllegalStateException(
                   "admission failed", new SpawnQuotaExceededException("any wording"));
             });
@@ -215,55 +204,25 @@ class TaskToolTest {
   }
 
   @Test
-  void parallelTasksReturnOnlyAfterBothJoinResultsAreReady() throws Exception {
-    CountDownLatch started = new CountDownLatch(2);
-    CountDownLatch releaseFirst = new CountDownLatch(1);
-    CountDownLatch releaseSecond = new CountDownLatch(1);
-    TaskTool tool =
-        taskTool(
-            (request, async, accepted) -> {
-              assertFalse(async);
-              accepted.accept(acceptance());
-              started.countDown();
-              CountDownLatch release = request.prompt().equals("a") ? releaseFirst : releaseSecond;
-              try {
-                if (!release.await(2, TimeUnit.SECONDS)) {
-                  throw new IllegalStateException("test Join was not released");
-                }
-              } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                throw new IllegalStateException("test Join wait was interrupted", interrupted);
-              }
-              return execution(ThreadJoinOutcome.COMPLETED, "done-" + request.prompt(), null, null);
-            });
+  void eachAcceptedSubagentReturnsADeferredOutcome() {
+    TaskTool tool = taskTool((request, accepted) -> acceptance());
 
-    try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
-      Future<ToolOutcome> first =
-          workers.submit(
-              () ->
-                  tool.execute(
-                      createRequest(tool, "{\"subagent_type\":\"coder\",\"prompt\":\"a\"}"),
-                      ignored -> {}));
-      Future<ToolOutcome> second =
-          workers.submit(
-              () ->
-                  tool.execute(
-                      createRequest(tool, "{\"subagent_type\":\"coder\",\"prompt\":\"b\"}"),
-                      ignored -> {}));
-      assertTrue(started.await(1, TimeUnit.SECONDS));
-      releaseFirst.countDown();
-      assertEquals("done-a", text(first.get(1, TimeUnit.SECONDS).result()));
-      assertFalse(second.isDone());
-      releaseSecond.countDown();
-      assertEquals("done-b", text(second.get(1, TimeUnit.SECONDS).result()));
-    }
+    ToolOutcome first =
+        tool.execute(
+            createRequest(tool, "{\"subagent_type\":\"coder\",\"prompt\":\"a\"}"), ignored -> {});
+    ToolOutcome second =
+        tool.execute(
+            createRequest(tool, "{\"subagent_type\":\"coder\",\"prompt\":\"b\"}"), ignored -> {});
+
+    assertTrue(first.waitingForChild());
+    assertTrue(second.waitingForChild());
   }
 
   @Test
   void reportsRunnerFailureWithCause() {
     TaskTool tool =
         taskTool(
-            (request, async, accepted) -> {
+            (request, accepted) -> {
               throw new IllegalStateException("subagent failed unexpectedly");
             });
 
@@ -275,10 +234,7 @@ class TaskToolTest {
 
   @Test
   void invalidArgumentsAreReportedWithoutStartingSubagent() {
-    TaskTool tool =
-        taskTool(
-            (request, async, accepted) ->
-                execution(ThreadJoinOutcome.COMPLETED, "done", null, null));
+    TaskTool tool = taskTool((request, accepted) -> acceptance());
 
     ToolResult result =
         tool.execute(
@@ -295,17 +251,29 @@ class TaskToolTest {
     return new TaskTool(runner, JsonMapper.builder().build());
   }
 
-  private static TaskTool tool(
-      ThreadJoinOutcome outcome, String report, String error, String partial) {
-    return taskTool((request, async, accepted) -> execution(outcome, report, error, partial));
+  private static ThreadJoin join() {
+    return new ThreadJoin(
+        INVOCATION_ID,
+        "0".repeat(64),
+        PARENT_THREAD_ID,
+        CHILD_THREAD_ID,
+        1L,
+        "coder",
+        10,
+        0L,
+        null,
+        null,
+        null,
+        Instant.parse("2026-06-01T00:00:00Z"),
+        Instant.parse("2026-06-01T00:00:00Z"),
+        JoinDelivery.SETTLE_TOOL_RESULT,
+        null);
   }
 
-  private static SubagentTaskResult execution(
+  private static ThreadJoinReceipt receipt(
       ThreadJoinOutcome outcome, String report, String error, String partial) {
-    ThreadJoinReceipt receipt =
-        new ThreadJoinReceipt(
-            INVOCATION_ID, CHILD_THREAD_ID, "coder", outcome, "work", report, partial, error);
-    return new SubagentTaskResult(acceptance(), receipt);
+    return new ThreadJoinReceipt(
+        INVOCATION_ID, CHILD_THREAD_ID, "coder", outcome, "work", report, partial, error);
   }
 
   private static SubagentTaskAcceptance acceptance() {

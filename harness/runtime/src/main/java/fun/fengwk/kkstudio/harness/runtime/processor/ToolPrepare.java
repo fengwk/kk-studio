@@ -1,16 +1,22 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import tools.jackson.databind.ObjectMapper;
+
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
+import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway.ExecutionScope;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -42,6 +48,7 @@ final class ToolPrepare {
   private static final String INVALID_QUESTIONNAIRE_KIND = "INVALID_QUESTIONNAIRE";
 
   private static final HumanInputJsonCodec INPUT_JSON = new HumanInputJsonCodec();
+  private static final ObjectMapper TASK_RESULT_JSON = new ObjectMapper();
 
   private final HarnessStore store;
   private final ClaimedExecutionSupport<ToolExecution> executions;
@@ -78,6 +85,17 @@ final class ToolPrepare {
     return switch (tool.status()) {
       case READY -> prepareReady(tx, claim, thread, tool, leaseConfig);
       case WAITING_APPROVAL, WAITING_INPUT -> waitingForHuman(tx, claim);
+      case WAITING_CHILD -> {
+        ThreadJoin join =
+            tx.joins()
+                .find(tool.id())
+                .orElseThrow(
+                    () ->
+                        new IllegalStateException(
+                            "WAITING_CHILD task lost its durable Join " + tool.id()));
+        TaskTool.requireMatchingJoin(tool, join);
+        yield settleTaskJoin(tx, claim, thread, tool, join, now);
+      }
       case RUNNING -> prepareRunning(tx, claim, thread, tool, now, leaseConfig);
       case SUCCEEDED, FAILED, CANCELLED, UNKNOWN -> cleanupTerminal(tx, claim, thread);
     };
@@ -207,6 +225,13 @@ final class ToolPrepare {
       ToolInvocation tool,
       Instant now,
       ProcessorLeaseConfig leaseConfig) {
+    if ("task".equals(tool.call().toolName())) {
+      ThreadJoin join = tx.joins().find(tool.id()).orElse(null);
+      if (join != null) {
+        TaskTool.requireMatchingJoin(tool, join);
+        return settleTaskJoin(tx, claim, thread, tool, join, now);
+      }
+    }
     if (tool.binding().environmentId() != null) {
       List<ExecutionExitFact> remotes = tx.exits().loadRemote(tool.id(), tool.attempt());
       if (remotes.size() == 1) {
@@ -225,6 +250,95 @@ final class ToolPrepare {
       }
     }
     return recoverUnknown(tx, claim, thread, tool, now);
+  }
+
+  /**
+   * RUNNING recovery and WAITING_CHILD share one Join-driven settle path; only RUNNING must be
+   * parked.
+   */
+  private static Step settleTaskJoin(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      ToolInvocation tool,
+      ThreadJoin join,
+      Instant now) {
+    if (thread.executionControl().isStopped()) {
+      if (tx.work().lockClaimed(claim).isEmpty()) {
+        return new Step.Lost();
+      }
+      tx.tools()
+          .update(
+              List.of(
+                  tool.cancel(
+                      new ToolInvocationError(
+                          "PARENT_STOPPED", "parent thread stopped while task was waiting"),
+                      now)));
+      tx.threads().update(thread.touchVersion(now));
+      tx.work().complete(claim);
+      return new Step.Terminated();
+    }
+    if (join.supersededByInvocationId() != null) {
+      tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+      if (tx.work().lockClaimed(claim).isEmpty()) {
+        throw new ClaimLostSignal();
+      }
+      tx.tools()
+          .update(
+              List.of(
+                  tool.fail(
+                      new ToolInvocationError(
+                          "TASK_SUPERSEDED", "task Join was superseded by a later delegation"),
+                      now)));
+      tx.threads().update(thread.touchVersion(now));
+      tx.work().complete(claim);
+      return new Step.Terminated();
+    }
+    if (join.matched()) {
+      ThreadJoinReceipt receipt =
+          ThreadJoinProjector.INSTANCE
+              .project(tx, join)
+              .orElseThrow(() -> new IllegalStateException("matched task Join has no receipt"));
+      return settleMatchedTask(tx, claim, thread, tool, join, receipt, now);
+    }
+    if (tx.work().lockClaimed(claim).isEmpty()) {
+      return new Step.Lost();
+    }
+    if (tool.status() == ToolInvocationStatus.RUNNING) {
+      tx.tools().update(List.of(tool.waitForChild(now)));
+      tx.threads().update(thread.touchVersion(now));
+    }
+    tx.work().complete(claim);
+    return new Step.Terminated();
+  }
+
+  private static Step settleMatchedTask(
+      HarnessStore.Transaction tx,
+      ClaimedWork claim,
+      ThreadState thread,
+      ToolInvocation tool,
+      ThreadJoin join,
+      ThreadJoinReceipt receipt,
+      Instant now) {
+    tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+    if (tx.work().lockClaimed(claim).isEmpty()) {
+      throw new ClaimLostSignal();
+    }
+    UUID sessionId =
+        tx.threads()
+            .find(join.childThreadId())
+            .orElseThrow(() -> new IllegalStateException("task child Thread disappeared"))
+            .sessionId();
+    tx.tools()
+        .update(
+            List.of(
+                tool.succeed(
+                    TaskTool.resultFromJoin(
+                        TASK_RESULT_JSON, tool.call().id(), sessionId, join, receipt),
+                    now)));
+    tx.threads().update(thread.touchVersion(now));
+    tx.work().complete(claim);
+    return new Step.Terminated();
   }
 
   /** 过期租约恢复：执行持有者已失效，绝不重放 Tool。RUNNING 表示可能已产生副作用；如实给出中断原因与最后已知状态，并明确外部效果未知， 交给下一轮模型自行决定查询或重试。 */

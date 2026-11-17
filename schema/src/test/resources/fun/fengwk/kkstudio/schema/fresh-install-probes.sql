@@ -792,6 +792,10 @@ insert into harness_tool_invocation (id, thread_id, turn_start_entry_id, assista
 select pg_temp.rejects('invalid tool status is rejected',
     $$update harness_tool_invocation set status='INVALID_STATUS' where id=pg_temp.uid(1200)$$,
     '23514', 'ck_harness_tool_invocation_status');
+update harness_tool_invocation set status = 'WAITING_CHILD' where id = pg_temp.uid(1200);
+select pg_temp.assert_true('WAITING_CHILD is a persisted nonterminal tool state',
+    (select status = 'WAITING_CHILD' from harness_tool_invocation where id = pg_temp.uid(1200)));
+update harness_tool_invocation set status = 'WAITING_INPUT' where id = pg_temp.uid(1200);
 select pg_temp.assert_true('waiting tools remain queryable after their model has succeeded',
     (select status = 'WAITING_INPUT' from harness_tool_invocation where id = pg_temp.uid(1200))
     and (select status = 'SUCCEEDED' from builtin_model_invocation where id = pg_temp.uid(1100)));

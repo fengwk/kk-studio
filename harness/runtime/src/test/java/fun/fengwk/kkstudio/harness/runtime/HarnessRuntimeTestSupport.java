@@ -751,7 +751,8 @@ public final class HarnessRuntimeTestSupport {
   private static MessagePayload assistantPayload(String toolName, String... toolCallIds) {
     List<AgentMessageContent> contents = new ArrayList<>();
     for (String toolCallId : toolCallIds) {
-      contents.add(new ToolCallMessageContent(toolCallId, toolName, toolName, "{}"));
+      contents.add(
+          new ToolCallMessageContent(toolCallId, toolName, toolName, toolArguments(toolName)));
     }
     contents.add(new TextMessageContent("assistant reply"));
     GenerationStopReason stopReason =
@@ -760,6 +761,10 @@ public final class HarnessRuntimeTestSupport {
         new AgentMessage(AgentMessageRole.ASSISTANT, contents),
         assistantMetadata(stopReason),
         null);
+  }
+
+  private static String toolArguments(String toolName) {
+    return "task".equals(toolName) ? "{\"subagent_type\":\"agent\",\"prompt\":\"task\"}" : "{}";
   }
 
   static Entry turnEndEntry(
@@ -871,7 +876,7 @@ public final class HarnessRuntimeTestSupport {
         turnStartEntryId,
         assistantEntryId,
         callIndex,
-        new ToolCall(toolCallId, toolName, "{}"),
+        new ToolCall(toolCallId, toolName, toolArguments(toolName)),
         new ToolBinding(
             toolDefinition(toolName),
             new ContributorBinding("core", toolName),

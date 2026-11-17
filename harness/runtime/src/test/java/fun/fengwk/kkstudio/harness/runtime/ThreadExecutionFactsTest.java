@@ -36,6 +36,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionFacts;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadRuntimeStatus;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 import fun.fengwk.kkstudio.harness.runtime.testing.FakeAgentDriver;
@@ -129,6 +130,24 @@ class ThreadExecutionFactsTest {
     HarnessRuntimeTestSupport.ToolBaseline baseline = seedToolBaseline(store);
     setWaitingApproval(store, baseline);
     assertEquals(new ThreadExecutionFacts(false, true, false), facts(baseline.threadId()));
+  }
+
+  @Test
+  void waitingChildToolIsWorkButNotHumanWait() {
+    // 测试意图：持久 Join 等待仍需收敛 task 结果，不得被投影成可结束或人工等待。
+    HarnessRuntimeTestSupport.ModelFreeMultiToolBaseline baseline =
+        HarnessRuntimeTestSupport.seedModelFreeToolBaseline(store, 1, "task");
+    UUID toolId = baseline.toolIds().getFirst();
+    approveTool(store, toolId);
+    markRunningTool(store, toolId);
+    store.transaction(
+        tx -> {
+          ToolInvocation running = tx.tools().lock(toolId).orElseThrow();
+          tx.tools().update(List.of(running.waitForChild(T5)));
+          return null;
+        });
+
+    assertEquals(new ThreadExecutionFacts(true, false, false), facts(baseline.threadId()));
   }
 
   @Test

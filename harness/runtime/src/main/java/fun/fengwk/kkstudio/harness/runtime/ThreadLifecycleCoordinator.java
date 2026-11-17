@@ -9,11 +9,14 @@ import fun.fengwk.kkstudio.harness.api.history.NotificationKind;
 import fun.fengwk.kkstudio.harness.api.history.NotificationPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.prompt.PromptRenderer;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinCompletion;
@@ -26,12 +29,14 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
 /**
@@ -308,8 +313,8 @@ public final class ThreadLifecycleCoordinator {
   }
 
   /**
-   * 对一批刚冻结的结算型 Join 唤醒父 Thread Work：结果只冻结 receipt，不构造 SUBAGENT_RESULT 通知、不分配父序列。Owner-turn 由开放 Turn
-   * 消费冻结结果；同步 task 由等待中的工具执行线程重读 Join。STOPPED 父只推进一次 version，不请求 Work、不自动恢复执行。
+   * 对一批刚冻结的结算型 Join 唤醒父侧交付 Work：Owner-turn 请求父 THREAD，task 请求 invocation 对应的 TOOL。结果只冻结 receipt，不构造
+   * SUBAGENT_RESULT 通知、不分配父序列。STOPPED 父只推进一次 version，不请求 Work、不自动恢复执行。
    */
   private static void wakeSettleParents(
       HarnessStore.Transaction tx, List<ThreadJoin> settleMatches) {
@@ -319,13 +324,41 @@ public final class ThreadLifecycleCoordinator {
         parents.add(join.parentThreadId());
       }
     }
+    Set<UUID> threadParents = new LinkedHashSet<>();
+    for (ThreadJoin join : settleMatches) {
+      if (join.delivery() == JoinDelivery.SETTLE_OWNER_TURN) {
+        threadParents.add(join.parentThreadId());
+      }
+    }
+    Set<UUID> stoppedParents = new LinkedHashSet<>();
+    Set<WorkTarget> targets =
+        new TreeSet<>(
+            Comparator.comparingInt((WorkTarget target) -> target.type().rank())
+                .thenComparing(target -> target.type().value())
+                .thenComparing(WorkTarget::id, UuidOrder.COMPARATOR));
     for (UUID parentId : parents) {
       ThreadState parent = tx.threads().lock(parentId).orElseThrow();
       if (parent.executionControl().isStopped()) {
         tx.threads().update(parent.touchVersion(tx.now()));
-      } else {
-        tx.work().request(new WorkTarget(WorkTargetType.THREAD, parentId));
+        stoppedParents.add(parentId);
+      } else if (threadParents.contains(parentId)) {
+        targets.add(new WorkTarget(WorkTargetType.THREAD, parentId));
       }
+    }
+    for (ThreadJoin join : settleMatches) {
+      if (join.delivery() != JoinDelivery.SETTLE_TOOL_RESULT
+          || stoppedParents.contains(join.parentThreadId())) {
+        continue;
+      }
+      ToolInvocation tool = tx.tools().find(join.invocationId()).orElse(null);
+      if (tool != null
+          && (tool.status() == ToolInvocationStatus.RUNNING
+              || tool.status() == ToolInvocationStatus.WAITING_CHILD)) {
+        targets.add(new WorkTarget(WorkTargetType.TOOL, join.invocationId()));
+      }
+    }
+    for (WorkTarget target : targets) {
+      tx.work().request(target);
     }
   }
 

@@ -36,8 +36,8 @@ public class ToolInvocationDTO {
   private Integer callIndex;
 
   /**
-   * 状态，取 {@code ToolInvocationStatus} 枚举名：WAITING_APPROVAL / WAITING_INPUT / READY / RUNNING /
-   * SUCCEEDED / FAILED / CANCELLED / UNKNOWN。
+   * 状态，取 {@code ToolInvocationStatus} 枚举名：WAITING_APPROVAL / WAITING_INPUT / WAITING_CHILD / READY
+   * / RUNNING / SUCCEEDED / FAILED / CANCELLED / UNKNOWN。
    */
   private ToolInvocationStatus status;
 

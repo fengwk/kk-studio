@@ -9,14 +9,22 @@ import static fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.common.error.DomainErrorCode;
+import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.result.TextResultContent;
 import fun.fengwk.kkstudio.common.schema.InputSchema;
+import fun.fengwk.kkstudio.common.schema.StringSchema;
+import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
+import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionConfig;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
@@ -27,10 +35,19 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultMetadata;
 import fun.fengwk.kkstudio.harness.api.history.ToolResultStatus;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryBackoffStrategy;
 import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
+import fun.fengwk.kkstudio.harness.api.session.ToolCallMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ToolResultMessageContent;
+import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
+import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ContributorBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
@@ -41,16 +58,22 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.contributor.api.EnvironmentSupport;
+import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityUnavailableException;
+import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessResult;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ThreadProcessorConfig;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessor;
 import fun.fengwk.kkstudio.harness.runtime.processor.ToolProcessorConfig;
+import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
+import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.harness.spi.ToolGateway;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.ToolSuccess;
@@ -62,6 +85,7 @@ import fun.fengwk.kkstudio.harness.spi.work.Work;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.harness.tool.AgentToolDefinition;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
@@ -74,8 +98,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
@@ -105,6 +134,245 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
   @AfterEach
   void tearDown() {
     scheduler.shutdownNow();
+  }
+
+  /**
+   * This narrow persistence probe checks only that status and Work rows survive Store recreation.
+   */
+  @Test
+  void waitingChildStatusAndToolWorkRowsSurviveStoreRecreation() {
+    StoreTestSupport.TurnBaseline turn = StoreTestSupport.seedTurnBaseline(store);
+    String argumentsJson = "{\"subagent_type\":\"alpha\",\"prompt\":\"work\"}";
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "task",
+            "delegate work",
+            "task",
+            new InputSchema(
+                "task arguments",
+                Map.of(
+                    "subagent_type",
+                    new StringSchema("type"),
+                    "prompt",
+                    new StringSchema("prompt")),
+                Set.of("subagent_type", "prompt"),
+                false),
+            ToolSideEffect.NON_IDEMPOTENT,
+            Duration.ZERO);
+    ToolBinding taskBinding =
+        new ToolBinding(
+            new AgentToolDefinition(descriptor, ToolVisibility.INTERNAL),
+            new ContributorBinding("builtin", "task"),
+            EnvironmentSupport.NONE,
+            null,
+            null);
+    ToolCall call = new ToolCall("call-task", "task", argumentsJson);
+    UUID toolId = UUID.randomUUID();
+    store.transaction(
+        tx -> {
+          var thread = tx.threads().lock(turn.threadId()).orElseThrow();
+          UUID userId = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      userId,
+                      turn.sessionId(),
+                      turn.turnStartEntryId(),
+                      StoreTestSupport.userMessagePayload(),
+                      T2));
+          UUID assistantId = tx.nextId();
+          tx.entries()
+              .insert(
+                  new Entry(
+                      assistantId,
+                      turn.sessionId(),
+                      userId,
+                      new MessagePayload(
+                          new AgentMessage(
+                              AgentMessageRole.ASSISTANT,
+                              List.of(
+                                  new ToolCallMessageContent(
+                                      "call-task", "task", "task", argumentsJson),
+                                  new TextMessageContent("assistant"))),
+                          new AssistantMessageMetadata(
+                              GenerationStopReason.COMPLETE,
+                              new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                          null),
+                      T3));
+          tx.threads().update(thread.advanceHead(assistantId, T3));
+          ToolInvocation ready =
+              new ToolInvocation(
+                  toolId,
+                  turn.threadId(),
+                  turn.turnStartEntryId(),
+                  assistantId,
+                  0,
+                  call,
+                  taskBinding,
+                  ToolInvocationStatus.READY,
+                  0,
+                  null,
+                  null,
+                  null,
+                  T3,
+                  T3);
+          tx.tools().insert(List.of(ready));
+          ToolInvocation allowed = ready.markApprovalNotRequired(T3);
+          tx.tools().update(List.of(allowed));
+          ToolInvocation running = allowed.markRunning(T3);
+          tx.tools().update(List.of(running));
+          tx.tools().update(List.of(running.waitForChild(T3)));
+          return null;
+        });
+
+    assertEquals(ToolInvocationStatus.WAITING_CHILD, findTool(toolId).status());
+    requestWork(new WorkTarget(WorkTargetType.TOOL, toolId), turn.threadId());
+
+    HarnessStore restartedStore = PostgresqlHarnessStoreFixture.create();
+    assertEquals(
+        ToolInvocationStatus.WAITING_CHILD,
+        restartedStore.transaction(tx -> tx.tools().find(toolId).orElseThrow().status()));
+    ClaimedWork recovered =
+        restartedStore
+            .transaction(tx -> tx.work().claimNext(WorkTargetType.TOOL, UUID.randomUUID(), LEASE))
+            .orElseThrow();
+    assertEquals(new WorkTarget(WorkTargetType.TOOL, toolId), recovered.target());
+  }
+
+  @Test
+  void matchedTaskJoinIsDeliveredExactlyOnceByRecreatedProcessor() {
+    AcceptedTask task = acceptWaitingTask();
+    HarnessRuntime parentRuntime = runtimeFor(store);
+
+    // A real child Stop freezes its accepted SETTLE_TOOL_RESULT Join and requests the parent's TOOL
+    // work.
+    UUID stopRequestId = UUID.randomUUID();
+    var child = store.transaction(tx -> tx.threads().find(task.childThreadId()).orElseThrow());
+    parentRuntime.stop(new StopCommand(task.childThreadId(), stopRequestId, child.version()));
+    ThreadJoin matched = store.transaction(tx -> tx.joins().find(task.toolId()).orElseThrow());
+    assertTrue(matched.matched());
+    assertEquals(JoinDelivery.SETTLE_TOOL_RESULT, matched.delivery());
+    assertEquals(ToolInvocationStatus.WAITING_CHILD, findTool(task.toolId()).status());
+    assertTrue(findWork(new WorkTarget(WorkTargetType.TOOL, task.toolId())).isPresent());
+
+    // Recreate both store and processor; the frozen Join receipt, not a replayed task execution,
+    // settles the original invocation.
+    store = PostgresqlHarnessStoreFixture.create();
+    ToolProcessor recreatedProcessor = newToolProcessor();
+    ClaimedWork recovered = claim(WorkTargetType.TOOL, UUID.randomUUID()).orElseThrow();
+    assertEquals(ProcessResult.TERMINATED, recreatedProcessor.process(recovered));
+    assertEquals(ToolInvocationStatus.SUCCEEDED, findTool(task.toolId()).status());
+    assertTrue(findWork(new WorkTarget(WorkTargetType.TOOL, task.toolId())).isEmpty());
+    assertEquals(
+        task.childThreadId(),
+        store.transaction(tx -> tx.joins().find(task.toolId()).orElseThrow().childThreadId()));
+    assertEquals(0, toolGateway.startCalls(), "Join settlement must not replay external tool work");
+
+    // A duplicate TOOL wake after terminal settlement is cleanup-only and cannot append another
+    // result.
+    requestWork(new WorkTarget(WorkTargetType.TOOL, task.toolId()), task.parentThreadId());
+    assertEquals(
+        ProcessResult.TERMINATED,
+        recreatedProcessor.process(claim(WorkTargetType.TOOL, UUID.randomUUID()).orElseThrow()));
+    assertEquals(ToolInvocationStatus.SUCCEEDED, findTool(task.toolId()).status());
+    assertTrue(findWork(new WorkTarget(WorkTargetType.TOOL, task.toolId())).isEmpty());
+
+    ThreadProcessor threadProcessor = newThreadProcessor();
+    assertEquals(
+        ThreadProcessResult.COMPLETED,
+        threadProcessor.process(claim(WorkTargetType.THREAD, UUID.randomUUID()).orElseThrow()));
+    List<MessagePayload> results = toolResults(threadHead(task.parentThreadId()), "call-task");
+    assertEquals(
+        1, results.size(), "the original task invocation materializes exactly one tool_result");
+    ToolResultMetadata result = results.getFirst().toolResultMetadata();
+    assertEquals(0, result.callIndex());
+    assertEquals(ToolResultStatus.SUCCEEDED, result.status());
+    assertTrue(findWork(new WorkTarget(WorkTargetType.THREAD, task.parentThreadId())).isPresent());
+    assertEquals(0, toolGateway.startCalls(), "result application must not re-execute the task");
+  }
+
+  @Test
+  void joinMatchWhileOldToolClaimIsHeldSurvivesOldClaimCompletion() {
+    AcceptedTask task = acceptWaitingTask();
+    requestWork(new WorkTarget(WorkTargetType.TOOL, task.toolId()), task.parentThreadId());
+    ClaimedWork oldClaim = claim(WorkTargetType.TOOL, UUID.randomUUID()).orElseThrow();
+
+    HarnessRuntime parentRuntime = runtimeFor(store);
+    var child = store.transaction(tx -> tx.threads().find(task.childThreadId()).orElseThrow());
+    parentRuntime.stop(new StopCommand(task.childThreadId(), UUID.randomUUID(), child.version()));
+    ThreadJoin matched = store.transaction(tx -> tx.joins().find(task.toolId()).orElseThrow());
+    assertTrue(matched.matched());
+
+    store.transaction(
+        tx -> {
+          tx.threads().lock(task.parentThreadId());
+          tx.work().complete(oldClaim);
+          return null;
+        });
+    Work newer = findWork(new WorkTarget(WorkTargetType.TOOL, task.toolId())).orElseThrow();
+    assertEquals(2L, newer.wakeVersion());
+    assertTrue(newer.leaseToken() == null, "completing the stale claim must release its lease");
+    ClaimedWork retry = claim(WorkTargetType.TOOL, UUID.randomUUID()).orElseThrow();
+    assertEquals(2L, retry.claimedWakeVersion());
+  }
+
+  @Test
+  void parentStopRacesTaskChildTerminalWithoutLeavingToolWork() throws Exception {
+    AcceptedTask task = acceptWaitingTask();
+    ClaimedWork childClaim = claim(WorkTargetType.THREAD, UUID.randomUUID()).orElseThrow();
+    assertEquals(task.childThreadId(), childClaim.target().id());
+
+    ThreadState parent =
+        store.transaction(tx -> tx.threads().find(task.parentThreadId()).orElseThrow());
+    ThreadProcessor childProcessor = newThreadProcessor();
+    HarnessRuntime stopRuntime = runtimeFor(store);
+    UUID stopRequestId = UUID.randomUUID();
+    CountDownLatch start = new CountDownLatch(1);
+
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<StopResult> parentStop =
+          executor.submit(
+              () -> {
+                start.await();
+                return stopRuntime.stop(
+                    new StopCommand(task.parentThreadId(), stopRequestId, parent.version()));
+              });
+      Future<ThreadProcessResult> childTerminal =
+          executor.submit(
+              () -> {
+                start.await();
+                return childProcessor.process(childClaim);
+              });
+      start.countDown();
+
+      try {
+        assertNotNull(parentStop.get(10, TimeUnit.SECONDS));
+      } catch (ExecutionException failure) {
+        DomainException conflict = assertInstanceOf(DomainException.class, failure.getCause());
+        assertEquals(DomainErrorCode.CONFLICT, conflict.code());
+        assertEquals(HarnessConflictReason.STALE_VERSION.name(), conflict.reason());
+        ThreadState current =
+            store.transaction(tx -> tx.threads().find(task.parentThreadId()).orElseThrow());
+        assertNotNull(
+            stopRuntime.stop(
+                new StopCommand(task.parentThreadId(), stopRequestId, current.version())));
+      }
+      assertNotNull(childTerminal.get(10, TimeUnit.SECONDS));
+    }
+
+    ThreadState stoppedParent =
+        store.transaction(tx -> tx.threads().find(task.parentThreadId()).orElseThrow());
+    assertEquals(ThreadExecutionControl.STOPPED, stoppedParent.executionControl());
+    assertTrue(
+        store.<Boolean>transaction(tx -> tx.joins().find(task.toolId()).orElseThrow().matched()));
+    assertTrue(store.<Boolean>transaction(tx -> tx.tools().find(task.toolId()).isEmpty()));
+    assertTrue(findWork(new WorkTarget(WorkTargetType.TOOL, task.toolId())).isEmpty());
+    assertTrue(findWork(new WorkTarget(WorkTargetType.THREAD, task.parentThreadId())).isEmpty());
+    assertEquals(
+        1,
+        toolResults(stoppedParent.headEntryId(), "call-task").size(),
+        "Stop/child settlement race must materialize the task result exactly once");
+    assertEquals(0, toolGateway.startCalls(), "the non-idempotent task must not be replayed");
   }
 
   @Test
@@ -491,6 +759,146 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
     return modelId;
   }
 
+  private record AcceptedTask(UUID parentThreadId, UUID childThreadId, UUID toolId) {}
+
+  /** Accept a genuine SETTLE_TOOL_RESULT Join matching a durable task invocation. */
+  private AcceptedTask acceptWaitingTask() {
+    StoreTestSupport.TurnBaseline turn = StoreTestSupport.seedTurnBaseline(store);
+    String prompt = "work";
+    String argumentsJson = "{\"subagent_type\":\"alpha\",\"prompt\":\"work\"}";
+    ToolBinding binding = taskBinding();
+    ToolCall call = new ToolCall("call-task", "task", argumentsJson);
+    UUID toolId = UUID.randomUUID();
+    UUID assistantId =
+        store.transaction(
+            tx -> {
+              var thread = tx.threads().lock(turn.threadId()).orElseThrow();
+              UUID userId = tx.nextId();
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          userId,
+                          turn.sessionId(),
+                          turn.turnStartEntryId(),
+                          StoreTestSupport.userMessagePayload(),
+                          T2));
+              UUID assistant = tx.nextId();
+              tx.entries()
+                  .insert(
+                      new Entry(
+                          assistant,
+                          turn.sessionId(),
+                          userId,
+                          new MessagePayload(
+                              new AgentMessage(
+                                  AgentMessageRole.ASSISTANT,
+                                  List.of(
+                                      new ToolCallMessageContent(
+                                          call.id(), "task", "task", argumentsJson))),
+                              new AssistantMessageMetadata(
+                                  GenerationStopReason.COMPLETE,
+                                  new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L)),
+                              null),
+                          T3));
+              tx.threads().update(thread.advanceHead(assistant, T3));
+              ToolInvocation ready =
+                  new ToolInvocation(
+                      toolId,
+                      turn.threadId(),
+                      turn.turnStartEntryId(),
+                      assistant,
+                      0,
+                      call,
+                      binding,
+                      ToolInvocationStatus.READY,
+                      0,
+                      null,
+                      null,
+                      null,
+                      T3,
+                      T3);
+              tx.tools().insert(List.of(ready));
+              ToolInvocation allowed = ready.markApprovalNotRequired(T3);
+              tx.tools().update(List.of(allowed));
+              tx.tools().update(List.of(allowed.markRunning(T3)));
+              return assistant;
+            });
+
+    SubagentTaskRequest request =
+        new SubagentTaskRequest(toolId, turn.threadId(), prompt, "alpha", null, null);
+    UUID childSessionId = UUID.randomUUID();
+    UUID childThreadId = request.childThreadId();
+    SpawnTestSupport.Child source =
+        new SpawnTestSupport.Child(
+            childSessionId,
+            childThreadId,
+            turn.threadId(),
+            List.of(
+                new NewThreadCommand(
+                    new UserMessageCommandPayload(AgentMessage.user(prompt)), UUID.randomUUID())));
+    SpawnTestSupport.Ticket ticket =
+        new SpawnTestSupport.Ticket(
+            toolId,
+            turn.threadId(),
+            assistantId,
+            request.requestHash(),
+            "alpha",
+            null,
+            3,
+            4,
+            8,
+            JoinDelivery.SETTLE_TOOL_RESULT);
+    SpawnTestSupport.acceptAndJoin(
+        runtimeFor(store),
+        source,
+        StoreTestSupport.branchSettings(),
+        ticket,
+        AcceptancePreflight.IDENTITY);
+
+    store.transaction(
+        tx -> {
+          ToolInvocation running = tx.tools().lock(toolId).orElseThrow();
+          tx.tools().update(List.of(running.waitForChild(T3)));
+          return null;
+        });
+    assertEquals(
+        JoinDelivery.SETTLE_TOOL_RESULT,
+        store.transaction(tx -> tx.joins().find(toolId).orElseThrow().delivery()));
+    return new AcceptedTask(turn.threadId(), childThreadId, toolId);
+  }
+
+  private static ToolBinding taskBinding() {
+    ToolDescriptor descriptor =
+        new ToolDescriptor(
+            "task",
+            "delegate work",
+            "task",
+            new InputSchema(
+                "task arguments",
+                Map.of(
+                    "subagent_type",
+                    new StringSchema("type"),
+                    "prompt",
+                    new StringSchema("prompt")),
+                Set.of("subagent_type", "prompt"),
+                false),
+            ToolSideEffect.NON_IDEMPOTENT,
+            Duration.ZERO);
+    return new ToolBinding(
+        new AgentToolDefinition(descriptor, ToolVisibility.INTERNAL),
+        new ContributorBinding("builtin", "task"),
+        EnvironmentSupport.NONE,
+        null,
+        null);
+  }
+
+  private HarnessRuntime runtimeFor(HarnessStore targetStore) {
+    return new HarnessRuntime(
+        targetStore,
+        builtinRegistry(targetStore, (threadId, rootSessionId, path, prep) -> null),
+        () -> new CompactionConfig(20_000));
+  }
+
   private void requestWork(WorkTarget target, UUID ownerThreadId) {
     store.transaction(
         tx -> {
@@ -597,6 +1005,18 @@ class PostgresqlToolLeaseRecoveryContinuationTest {
 
   private Optional<Work> findWork(WorkTarget target) {
     return store.transaction(tx -> tx.work().find(target));
+  }
+
+  private List<MessagePayload> toolResults(UUID headEntryId, String toolCallId) {
+    return loadPath(headEntryId).entries().stream()
+        .map(Entry::payload)
+        .filter(MessagePayload.class::isInstance)
+        .map(MessagePayload.class::cast)
+        .filter(
+            payload ->
+                payload.toolResultMetadata() != null
+                    && toolCallId.equals(payload.toolResultMetadata().toolCallId()))
+        .toList();
   }
 
   private UUID threadHead(UUID threadId) {

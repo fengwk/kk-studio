@@ -225,9 +225,13 @@ public interface ToolGateway {
   /** 一次执行的唯一终态。 */
   sealed interface Completion
       permits ToolGateway.Succeeded,
+          ToolGateway.WaitingForChild,
           ToolGateway.Failed,
           ToolGateway.Cancelled,
           ToolGateway.Unknown {}
+
+  /** task 已持久接受对应 Join；ToolProcessor 必须释放当前执行租约并持久化 WAITING_CHILD。 */
+  record WaitingForChild() implements Completion {}
 
   /** 已确认成功：模型可见结果与同一次 durable terminal success 的 branch effects。 */
   record Succeeded(ToolSuccess success) implements Completion {

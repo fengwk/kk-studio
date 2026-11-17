@@ -230,7 +230,10 @@ public record ThreadSnapshot(
     boolean hasUnknownToolOutcome = false;
     for (ToolInvocation sibling : toolSiblings) {
       ToolInvocationStatus status = sibling.status();
-      hasWork |= status == ToolInvocationStatus.READY || status == ToolInvocationStatus.RUNNING;
+      hasWork |=
+          status == ToolInvocationStatus.READY
+              || status == ToolInvocationStatus.RUNNING
+              || status == ToolInvocationStatus.WAITING_CHILD;
       waitingForHuman |=
           status == ToolInvocationStatus.WAITING_APPROVAL
               || status == ToolInvocationStatus.WAITING_INPUT;

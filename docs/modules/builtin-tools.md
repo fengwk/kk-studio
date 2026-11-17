@@ -76,11 +76,11 @@ LSP 客户端按项目根、server ID 和配置指纹复用，去重并发初始
 
 ## 同步 task 与异步通知
 
-task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。模型调用固定使用内部 `async=false`：工具在隔离的子 Thread 上追加任务后等待对应 Join 冻结，再把最终报告或明确的失败/取消原因作为本次 tool_result 返回。并行工具批次中的 task 可同时运行；父 Thread 在批次全部结算后才继续模型请求。工具执行线程负责等待，事务与调度线程不阻塞。
+task 接受 subagent_type、prompt、可选 max_turns、可选 thread_id。模型调用固定使用内部 `async=false`：持久接受对应 Join 后，工具执行立即退出并将原 ToolInvocation 写为 `WAITING_CHILD`，释放 Worker 与 Work 租约；模型仍在原工具批次等待该调用的最终 tool_result，不会收到提前受理回执。Join 冻结后父 TOOL Work 从同一持久 receipt 重建 ToolResult，父 Thread 再按普通批次流程继续。并行工具批次中的 task 可同时运行。
 
 子代理运行中状态通过工具进度显示，结果卡可进入对应子 Thread。并发额度已满时任务不会启动，tool_result 明确返回 `not started: the subagent concurrency limit is reached; retry in a later batch`。父 Thread 停止会按执行树规则停止子代理，并将父 task 工具结果持久化为取消。
 
-`NOTIFY_PARENT` 与 `SUBAGENT_RESULT` 通知链属于 `AgentTaskService` 对内部 `async` 请求的交付方式；模型可见的 task 工具始终同步等待子 Thread，结果经 `task.result` 返回，不走该通知路径。
+`NOTIFY_PARENT` 与 `SUBAGENT_RESULT` 通知链属于 `AgentTaskService` 对内部 `async` 请求的交付方式；模型可见的 task 保持同步 tool_result 契约，结果经 `task.result` 返回，不走该通知路径。
 
 任务参数、Thread 续接、`max_turns` 软预算与 Join 幂等行为如下：新任务创建子 Thread；thread_id 在原历史上继续，允许切换 Agent，采用目标配置和权限。继续由子 Thread 的持久父发起，以不可变父子关系验证身份，并复验父 head 与停止边界。向仍执行的子追加输入会排队，等下一次 turn 边界。max_turns 是阶段汇报软预算：达到后由 Runtime 以 `TASK_BUDGET` 通知注入提醒。
 
@@ -94,7 +94,7 @@ task 的进度与终态都经 `task.result` details 表达：运行中为 runnin
 
 `NOTIFY_PARENT` 交付的 `SUBAGENT_RESULT` 通知是 `<subagent_result>` 信封（属性为 thread_id、agent 与 state），依次包含一段历史说明、本次任务原文、结果或分离的 error 与 partial_result；失败与取消时末尾还有继续既有子 Thread 的恢复提示。正文正确转义；模型的 `<error>` 详情最多 1000 个 Unicode 码点（含英文 ` [TRUNCATED]` 标记、转义前计数、不拆代理对），任务原文、成功报告与普通 partial_result 不截断；task 原文是历史引用不是给父的新指令。任务原文绑定本次调用，不使用首次创建时的任务。长文本沿用资源化，保留完整访问入口。
 
-同步 task 的最终 ToolResult 直接包含 Join 冻结的报告或错误，不另向父 Thread 注入 `SUBAGENT_RESULT`。Join 只有在子输入已应用、子本地流程结束、没有未完成直接子 Join、待处理输入或未确认退出时才冻结；停止路径也遵循同一收敛条件。终态冻结与父 Thread Work 唤醒在同一事务提交，等待中的工具执行线程通过子 Thread version change 订阅后重读 Join；订阅先于查询，避免错过终态唤醒。父停止会中断等待的工具执行，并在 Stop 事务中将运行中的 task Invocation 物化为 CANCELLED。
+task 的最终 ToolResult 直接包含 Join 冻结的报告或错误，不另向父 Thread 注入 `SUBAGENT_RESULT`。Join 只有在子输入已应用、子本地流程结束、没有未完成直接子 Join、待处理输入或未确认退出时才冻结；停止路径也遵循同一收敛条件。终态冻结与父 TOOL Work 唤醒在同一事务提交。若 Join 在 ToolInvocation 写入 `WAITING_CHILD` 前已匹配，RUNNING 恢复会重读 Join 并直接结算；否则持久等待行由父 TOOL Work 重新接回，周期 Work 扫描兜底通知丢失和平台重启。父停止会将等待中的 task Invocation 收敛为 CANCELLED。
 
 `AgentTaskService` 对内部 `async` 请求以 `NOTIFY_PARENT` 交付：冻结结果与父 `NOTIFICATION` 命令在同一事务提交，父为 `RUNNABLE` 时请求 THREAD wake，父为 `STOPPED` 时通知直接固化进历史。
 

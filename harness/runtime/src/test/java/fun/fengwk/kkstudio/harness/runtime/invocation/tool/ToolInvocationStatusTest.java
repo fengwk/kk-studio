@@ -20,6 +20,7 @@ class ToolInvocationStatusTest {
         Set.of(
             ToolInvocationStatus.WAITING_APPROVAL,
             ToolInvocationStatus.WAITING_INPUT,
+            ToolInvocationStatus.WAITING_CHILD,
             ToolInvocationStatus.READY,
             ToolInvocationStatus.RUNNING,
             ToolInvocationStatus.SUCCEEDED,
@@ -33,6 +34,7 @@ class ToolInvocationStatusTest {
     assertTrue(ToolInvocationStatus.UNKNOWN.isTerminal());
     assertFalse(ToolInvocationStatus.WAITING_APPROVAL.isTerminal());
     assertFalse(ToolInvocationStatus.WAITING_INPUT.isTerminal());
+    assertFalse(ToolInvocationStatus.WAITING_CHILD.isTerminal());
     assertFalse(ToolInvocationStatus.READY.isTerminal());
     assertFalse(ToolInvocationStatus.RUNNING.isTerminal());
   }

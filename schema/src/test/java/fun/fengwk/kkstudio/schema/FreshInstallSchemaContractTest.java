@@ -20,8 +20,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * 全新安装基线契约：在测试自己拥有的临时 PostgreSQL 里经 Flyway（生产建库的同一条路径）对空库执行 {@code V1__schema.sql}， 再用 SQL
- * 探针（{@code fresh-install-probes.sql}）逐条验证约束对非法写入的拒绝。
+ * 全新安装 Schema 契约：在测试自己拥有的临时 PostgreSQL 里经 Flyway（生产建库的同一条路径）执行全部版本迁移，再用 SQL 探针（{@code
+ * fresh-install-probes.sql}）验证约束对非法写入的拒绝。
  */
 class FreshInstallSchemaContractTest {
 
@@ -32,7 +32,7 @@ class FreshInstallSchemaContractTest {
   private static final String PROBE_RESOURCE =
       "fun/fengwk/kkstudio/schema/fresh-install-probes.sql";
   private static final String PROBE_CONTAINER_PATH = "/tmp/fresh-install-probes.sql";
-  private static final int PROBE_ASSERTION_COUNT = 200;
+  private static final int PROBE_ASSERTION_COUNT = 201;
 
   @SuppressWarnings("resource")
   private static final PostgreSQLContainer POSTGRES =
@@ -55,7 +55,7 @@ class FreshInstallSchemaContractTest {
   }
 
   @Test
-  void freshInstallAppliesExactlyOneVersionedBaseline() throws SQLException {
+  void freshInstallAppliesAllVersionedMigrations() throws SQLException {
     try (Connection connection =
             DriverManager.getConnection(
                 POSTGRES.getJdbcUrl(), POSTGRES.getUsername(), POSTGRES.getPassword());
@@ -67,7 +67,11 @@ class FreshInstallSchemaContractTest {
       assertEquals(
           "1|SQL|t",
           rows.getString(1) + "|" + rows.getString(2) + "|" + (rows.getBoolean(3) ? "t" : "f"));
-      assertTrue(!rows.next(), "exactly one versioned baseline must be applied");
+      assertTrue(rows.next());
+      assertEquals(
+          "2|SQL|t",
+          rows.getString(1) + "|" + rows.getString(2) + "|" + (rows.getBoolean(3) ? "t" : "f"));
+      assertTrue(!rows.next(), "all versioned migrations must be applied exactly once");
     }
   }
 

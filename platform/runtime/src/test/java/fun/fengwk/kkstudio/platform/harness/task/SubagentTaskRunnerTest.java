@@ -36,8 +36,6 @@ import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
-import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
@@ -49,20 +47,13 @@ import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskAcceptance;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
-import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskResult;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
-import fun.fengwk.kkstudio.harness.spi.HarnessThreadChangeSource;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Executors;
-import java.util.concurrent.Future;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 平台侧 task 委派接受的回归基线：权限校验、稳定身份、幂等回放、忙碌子线程追加与错误收敛。
@@ -74,9 +65,6 @@ class SubagentTaskRunnerTest {
   private static final String AGENT = "alpha";
   private static final Instant NOW = Instant.parse("2026-06-01T00:00:00Z");
   private static final ModelSelection MODEL = new ModelSelection("model", "v1");
-  private static final HarnessThreadChangeSource NO_THREAD_CHANGES =
-      (threadId, onChange) -> () -> {};
-
   private final UUID parentThreadId = UUID.randomUUID();
   private final UUID invocationId = UUID.randomUUID();
   private final UUID parentHeadEntryId = UUID.randomUUID();
@@ -88,16 +76,12 @@ class SubagentTaskRunnerTest {
 
   private SubagentTaskRunner runner(SubagentConfig config) {
     return new SubagentTaskRunner(
-        () -> runtime,
-        NO_THREAD_CHANGES,
-        new AgentTaskService(provider(runtime)),
-        materializer,
-        () -> config);
+        () -> runtime, new AgentTaskService(provider(runtime)), materializer, () -> config);
   }
 
   private static SubagentTaskAcceptance acceptAsync(
       SubagentTaskRunner runner, SubagentTaskRequest request) {
-    return runner.run(request, true, ignored -> {}).acceptance();
+    return runner.accept(request, ignored -> {});
   }
 
   @SuppressWarnings("unchecked")
@@ -167,76 +151,19 @@ class SubagentTaskRunnerTest {
   }
 
   @Test
-  void synchronousRunWaitsForJoinChangeAndReturnsFrozenReceipt() throws Exception {
+  void acceptsTaskWithoutWaitingForJoinCompletion() {
     stubParent(List.of(AGENT));
     UUID sessionId = UUID.randomUUID();
     UUID childThreadId =
         SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/");
     AcceptedCommands accepted = accepted(sessionId, childThreadId, false);
     when(runtime.spawn(any(), any())).thenReturn(accepted);
-    SubagentTaskRequest request = request(null, null);
-    UUID terminalId = UUID.randomUUID();
-    ThreadJoin pending =
-        new ThreadJoin(
-            invocationId,
-            SubagentTaskRunner.requestHash(request),
-            parentThreadId,
-            childThreadId,
-            1L,
-            AGENT,
-            10,
-            0L,
-            null,
-            null,
-            null,
-            NOW,
-            NOW,
-            JoinDelivery.SETTLE_TOOL_RESULT,
-            null);
-    ThreadJoin matched = pending.match(terminalId, null, NOW.plusSeconds(1));
-    ThreadJoinReceipt receipt =
-        new ThreadJoinReceipt(
-            invocationId,
-            childThreadId,
-            AGENT,
-            ThreadJoinOutcome.COMPLETED,
-            "do the work",
-            "done",
-            null,
-            null);
-    when(runtime.findJoin(invocationId))
-        .thenReturn(Optional.empty(), Optional.empty(), Optional.of(pending), Optional.of(matched));
-    when(runtime.projectJoinReceipt(invocationId)).thenReturn(Optional.of(receipt));
-    CountDownLatch subscribed = new CountDownLatch(1);
-    AtomicReference<Runnable> wake = new AtomicReference<>();
-    HarnessThreadChangeSource changes =
-        (threadId, onChange) -> {
-          assertEquals(childThreadId, threadId);
-          wake.set(onChange);
-          subscribed.countDown();
-          return () -> {};
-        };
-    SubagentTaskRunner runner =
-        new SubagentTaskRunner(
-            () -> runtime,
-            changes,
-            new AgentTaskService(provider(runtime)),
-            materializer,
-            SubagentTaskRunnerTest::config);
+    when(runtime.findJoin(invocationId)).thenReturn(Optional.empty());
 
-    try (var workers = Executors.newVirtualThreadPerTaskExecutor()) {
-      CountDownLatch acceptedSignal = new CountDownLatch(1);
-      Future<SubagentTaskResult> running =
-          workers.submit(() -> runner.run(request, false, ignored -> acceptedSignal.countDown()));
-      if (!acceptedSignal.await(1, TimeUnit.SECONDS)) {
-        running.get();
-        throw new AssertionError("task was neither accepted nor failed");
-      }
-      assertTrue(subscribed.await(1, TimeUnit.SECONDS));
-      assertFalse(running.isDone());
-      wake.get().run();
-      assertEquals(receipt, running.get(1, TimeUnit.SECONDS).receipt());
-    }
+    SubagentTaskAcceptance result = runner(config()).accept(request(null, null), ignored -> {});
+
+    assertEquals(childThreadId, result.childThreadId());
+    verify(runtime, never()).projectJoinReceipt(invocationId);
     ArgumentCaptor<SpawnRequest> spawn = ArgumentCaptor.forClass(SpawnRequest.class);
     verify(runtime).spawn(spawn.capture(), any());
     assertEquals(JoinDelivery.SETTLE_TOOL_RESULT, spawn.getValue().delivery());
@@ -268,9 +195,9 @@ class SubagentTaskRunnerTest {
     // 执行父关系由 Runtime 建立：请求携带父 Thread，ROOT settings 只由本次物化结果决定。
     assertEquals(parentThreadId, accepted1.parentThreadId());
     assertEquals(target, accepted1.settings());
-    // 模型发起的子代理：通知父 Thread，票据即 invocation。
+    // 模型 task 的同步 tool_result 由父 TOOL Work 交付。
     assertEquals(ThreadKind.SUBAGENT, accepted1.kind());
-    assertEquals(JoinDelivery.NOTIFY_PARENT, accepted1.delivery());
+    assertEquals(JoinDelivery.SETTLE_TOOL_RESULT, accepted1.delivery());
     assertEquals(invocationId, accepted1.ticketId());
     // 源 prompt 与票据同一批命令：恰好一条可信调用方 CUSTOM_MESSAGE。
     assertEquals(1, accepted1.commands().size());
@@ -880,7 +807,6 @@ class SubagentTaskRunnerTest {
     SubagentTaskRunner offline =
         new SubagentTaskRunner(
             () -> null,
-            NO_THREAD_CHANGES,
             new AgentTaskService(provider(null)),
             materializer,
             SubagentTaskRunnerTest::config);
@@ -942,7 +868,7 @@ class SubagentTaskRunnerTest {
         null,
         NOW,
         NOW,
-        JoinDelivery.NOTIFY_PARENT,
+        JoinDelivery.SETTLE_TOOL_RESULT,
         null);
   }
 
