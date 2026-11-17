@@ -2,7 +2,7 @@ import { expect, test, type Page } from './fixture'
 import type { Route, WebSocketRoute } from '@playwright/test'
 import type { ChatLayout, ChatPaneState, ChatTabSnapshot } from '@/features/chat/chat-pane-state'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
-import type { EntryType, HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
+import type { EntryType, HarnessSessionEntryDTO, HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
 
 /**
  * 新建分支流程真实浏览器回归（独立基座、独立端口 5184）。
@@ -159,6 +159,30 @@ async function installChatApi(
   let boundVersion = 0
   let queuedCommands: Array<Record<string, unknown>> = []
   let grandCompleted = false
+  const currentTree = (): HarnessThreadTreeNodeDTO[] => [
+    {
+      threadId: THREAD_ID, kind: 'USER', parentThreadId: null, name: boundThread.name, agentName: 'assistant',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
+      status: 'IDLE', executionControl: 'RUNNABLE', turnCount: 1, toolCallCount: 0,
+      outcome: 'COMPLETED', updatedAt: 1790812800,
+    },
+    {
+      threadId: CHILD_ID, kind: 'SUBAGENT', parentThreadId: THREAD_ID, name: 'direct parent', agentName: 'worker',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'default' } },
+      status: 'IDLE', executionControl: 'RUNNABLE', turnCount: 2, toolCallCount: 3,
+      outcome: 'COMPLETED', updatedAt: 1790812860,
+    },
+    {
+      threadId: GRANDCHILD_ID, kind: 'SUBAGENT', parentThreadId: CHILD_ID, name: 'nested grandchild', agentName: 'researcher',
+      execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'deep' } },
+      status: grandCompleted ? 'IDLE' : 'RUNNING', executionControl: 'RUNNABLE', turnCount: 4, toolCallCount: 5,
+      outcome: grandCompleted ? 'COMPLETED' : null, updatedAt: 1790812920,
+    },
+  ]
+  const sendTreeSnapshot = (socket: WebSocketRoute) => socket.send(JSON.stringify({
+    type: 'event', resource: { kind: 'thread-tree', id: THREAD_ID },
+    name: 'snapshot', data: { nodes: currentTree() },
+  }))
   const sockets: WebSocketRoute[] = []
   const recorded: Recorded = {
     commandBatches: [], branchPreviews: [], modelRequestDebug: [], treeReads: 0,
@@ -169,10 +193,7 @@ async function installChatApi(
           type: 'event', resource: { kind: 'thread', id: GRANDCHILD_ID },
           name: 'version', data: { version: '1' }, cursor: '1',
         }))
-        socket.send(JSON.stringify({
-          type: 'event', resource: { kind: 'thread-tree', id: THREAD_ID },
-          name: 'changed', data: {},
-        }))
+        sendTreeSnapshot(socket)
       }
     },
   }
@@ -182,6 +203,12 @@ async function installChatApi(
       const frame = JSON.parse(String(message))
       if (frame.type === 'subscribe') {
         socket.send(JSON.stringify({ type: 'subscribed', resource: frame.resource, cursor: '0' }))
+        if (frame.resource.kind === 'thread-tree' && frame.resource.id === THREAD_ID) {
+          sendTreeSnapshot(socket)
+        }
+      } else if (frame.type === 'refresh' && frame.resource.kind === 'thread-tree'
+        && frame.resource.id === THREAD_ID) {
+        sendTreeSnapshot(socket)
       }
     })
   })
@@ -359,18 +386,7 @@ async function installChatApi(
     }
     if (path === `/api/harness/threads/${THREAD_ID}/tree`) {
       recorded.treeReads += 1
-      await route.fulfill({ json: [
-        { threadId: THREAD_ID, parentThreadId: null, name: boundThread.name, agentName: 'assistant',
-          model: { modelName: 'MiniMax', variant: 'default' }, status: 'IDLE', executionControl: 'RUNNABLE',
-          turnCount: 1, toolCallCount: 0, outcome: 'COMPLETED', updatedAt: 1790812800 },
-        { threadId: CHILD_ID, parentThreadId: THREAD_ID, name: 'direct parent', agentName: 'worker',
-          model: { modelName: 'MiniMax', variant: 'default' }, status: 'IDLE', executionControl: 'RUNNABLE',
-          turnCount: 2, toolCallCount: 3, outcome: 'COMPLETED', updatedAt: 1790812860 },
-        { threadId: GRANDCHILD_ID, parentThreadId: CHILD_ID, name: 'nested grandchild', agentName: 'researcher',
-          model: { modelName: 'MiniMax', variant: 'deep' },
-          status: grandCompleted ? 'IDLE' : 'RUNNING', executionControl: 'RUNNABLE',
-          turnCount: 4, toolCallCount: 5, outcome: grandCompleted ? 'COMPLETED' : null, updatedAt: 1790812920 },
-      ] })
+      await route.fulfill({ json: currentTree() })
       return
     }
     if (path.endsWith('/command-batches') && method === 'POST') {
@@ -957,7 +973,7 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     const treeReads = recorded.treeReads
     recorded.completeGrandchild()
     await expect(childLog).toContainText('Background completion persisted')
-    await expect.poll(() => recorded.treeReads).toBeGreaterThan(treeReads)
+    await expect.poll(() => recorded.treeReads).toBe(treeReads)
     await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · MiniMax (deep)')
     await expect(source.locator('.chat-pane-layer:not([hidden]) .thread-composer')).toHaveCount(0)
     await expect(page.locator('.agent-pane-thread-heading:visible')).toHaveCount(0)
@@ -974,6 +990,14 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     await header.getByRole('button', { name: '回到父 agent' }).click()
     await expect(sourceEditor).toBeVisible()
     await expect(sourceEditor).toContainText('root source draft')
+    await source.getByRole('button', { name: '打开命令表' }).click()
+    await source.getByRole('option', { name: /subagent/ }).click()
+    const completedTree = source.locator('.subagent-tree-panel')
+    const completedGrandchild = completedTree.locator(`[data-thread-id="${GRANDCHILD_ID}"]`)
+    await expect(completedGrandchild).toHaveAttribute('data-status', 'IDLE')
+    await expect(completedGrandchild.locator('[data-outcome="COMPLETED"]')).toBeVisible()
+    await page.keyboard.press('Escape')
+    await expect(completedTree).toHaveCount(0)
     await expect.poll(() => rootLog.evaluate((element) => element.scrollTop)).toBe(rootScroll)
     expect(recorded.commandBatches).toEqual([])
     expect(writes).toEqual([])
