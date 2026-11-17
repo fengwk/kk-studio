@@ -1027,10 +1027,18 @@ class EnvironmentDaemonServerTest {
     assertFalse(reconnected.closed());
 
     fixture.close(reconnected.connectionId());
+    AtomicInteger receiptLookups = new AtomicInteger();
+    fixture.exitReceiptLookup =
+        (environmentId, invocationId) -> {
+          receiptLookups.incrementAndGet();
+          return true;
+        };
     FakeControlChannel changedInstance =
         fixture.connectReady("channel-exit-changed-instance", OTHER_INSTANCE_ID);
     fixture.receive(changedInstance, executionExitedEnvelope(CALL_ONE.toString()));
     assertEquals(0, changedInstance.countOf(MessageType.EXECUTION_EXIT_ACK));
+    assertEquals(
+        0, receiptLookups.get(), "a durable receipt cannot bypass a tracked old daemon generation");
     assertEquals(
         1,
         listener.exitConfirmations,
@@ -1053,6 +1061,46 @@ class EnvironmentDaemonServerTest {
                 ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener()),
         "ACK 后不允许同一 invocationId 再次派发 INVOKE");
     assertEquals(0, afterConfirmed.countOf(MessageType.INVOKE));
+  }
+
+  /** Daemon server 重启后 tracker 为空时，只用持久回执恢复丢失的 ACK。 */
+  @Test
+  void durableReceiptRestoresAckAfterServerRestart() {
+    Fixture fixture = new Fixture();
+    AtomicInteger receiptLookups = new AtomicInteger();
+    fixture.exitReceiptLookup =
+        (environmentId, invocationId) -> {
+          assertEquals(ENVIRONMENT_ID, environmentId);
+          assertEquals(CALL_ONE, invocationId);
+          receiptLookups.incrementAndGet();
+          return true;
+        };
+    FakeControlChannel channel = fixture.connectReady("channel-restarted-exit-receipt");
+
+    fixture.receive(channel, executionExitedEnvelope(CALL_ONE.toString()));
+
+    assertEquals(1, receiptLookups.get());
+    assertEquals(1, channel.countOf(MessageType.EXECUTION_EXIT_ACK));
+    assertFalse(channel.closed());
+  }
+
+  /** Durable receipt lookup failure remains conservative: unknown EXIT receives no ACK. */
+  @Test
+  void failedDurableReceiptLookupDoesNotAcknowledgeUnknownExit() {
+    Fixture fixture = new Fixture();
+    fixture.exitReceiptLookup =
+        (environmentId, invocationId) -> {
+          throw new IllegalStateException("receipt store unavailable");
+        };
+    FakeControlChannel channel = fixture.connectReady("channel-failed-exit-receipt");
+
+    try (CoreLogCapture logs = new CoreLogCapture()) {
+      fixture.receive(channel, executionExitedEnvelope(CALL_ONE.toString()));
+
+      assertEquals(0, channel.countOf(MessageType.EXECUTION_EXIT_ACK));
+      assertFalse(channel.closed());
+      logs.assertOnlySafeFailures(1, "execution exit receipt lookup");
+    }
   }
 
   /** ACK 出站被拒绝时断开连接；重放仍 ACK 已交付事实但不重复回调。 */

@@ -400,7 +400,7 @@ Backend 自身的模型、MCP、插件与 S3 SDK 请求由 Studio 的**系统设
 失败，连接保持 CONNECTING，Daemon 仍可通过同一连接上报配置错误并等待修正；未 READY 时不接受能力
 调用或 IDE 命令。同一连接后续收到 SETTINGS 时只刷新资源预算，不撤销 READY、不重新发送 READY；已应用配置的同版本内容仍不可漂移。
 
-运行状态快照中的每次内容变化都会推进 revision，Studio 对同 revision 的快照要求内容完全一致。确定在派发前拒绝的调用会先记录调用身份，再发送可重放的 FAILED 与真实未启动的 EXECUTION_EXITED 证明。Studio 仅在 listener 成功接受该退出事实后发送 `EXECUTION_EXIT_ACK`；ACK 确认的是退出事实已可靠接收，不表示工具结果已被消费。Daemon 只有终态、真实退出事实和 ACK 均已持久记录后才回收调用记录；未 ACK 的退出事实会在 READY 后重放，未知调用不产生 ACK。调用记录上限为 1024 项，未确认记录不会被驱逐，容量耗尽时新调用暂不准入，待事实确认并回收后恢复。READY 前收到 RECOVER 时 Daemon 返回连接级错误并关闭连接，调用方可在重连 READY 后重新恢复；真正未知的调用仍以不确定结果处理，不会伪造未执行证明。
+运行状态快照中的每次内容变化都会推进 revision，Studio 对同 revision 的快照要求内容完全一致。确定在派发前拒绝的调用会先记录调用身份，再发送可重放的 FAILED 与真实未启动的 EXECUTION_EXITED 证明。Studio 仅在 listener 成功接受该退出事实后发送 `EXECUTION_EXIT_ACK`；ACK 确认的是退出事实已可靠接收，不表示工具结果已被消费。Daemon 只有终态、真实退出事实和 ACK 均已持久记录后才回收调用记录；未 ACK 的退出事实会在 READY 后重放。Studio 重启或本地跟踪淘汰后，仅当持久账本存在同环境、REMOTE 且状态为 REMOTE_ACKNOWLEDGED 的退出凭证时才补发 ACK；没有该凭证的未知调用不会被确认，已登记的不同 Daemon 代次也不能绕过实例围栏。调用记录上限为 1024 项，未确认记录不会被驱逐，容量耗尽时新调用暂不准入，待事实确认并回收后恢复。READY 前收到 RECOVER 时 Daemon 返回连接级错误并关闭连接，调用方可在重连 READY 后重新恢复；真正未知的调用仍以不确定结果处理，不会伪造未执行证明。
 
 连接状态与配置状态是两件事，页面分开显示：
 

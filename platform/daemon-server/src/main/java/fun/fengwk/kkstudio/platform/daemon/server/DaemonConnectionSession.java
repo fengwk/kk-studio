@@ -53,6 +53,7 @@ final class DaemonConnectionSession implements DaemonSession {
   private final EnvironmentUpdateListener updateListener;
   private final DaemonResourceTicketService ticketService;
   private final Supplier<EnvironmentServerSettings> settingsSupplier;
+  private final ExecutionExitReceiptLookup exitReceiptLookup;
   private final DaemonInvocationTracker invocationTracker;
   private final DaemonTransferCoordinator transferCoordinator;
   private final DaemonDownloadCoordinator downloadCoordinator = new DaemonDownloadCoordinator();
@@ -83,6 +84,7 @@ final class DaemonConnectionSession implements DaemonSession {
       EnvironmentUpdateListener updateListener,
       DaemonResourceTicketService ticketService,
       Supplier<EnvironmentServerSettings> settingsSupplier,
+      ExecutionExitReceiptLookup exitReceiptLookup,
       DaemonInvocationTracker invocationTracker,
       DaemonTransferCoordinator transferCoordinator,
       DaemonIdeCoordinator ideCoordinator,
@@ -100,6 +102,7 @@ final class DaemonConnectionSession implements DaemonSession {
     this.updateListener = Objects.requireNonNull(updateListener, "updateListener");
     this.ticketService = Objects.requireNonNull(ticketService, "ticketService");
     this.settingsSupplier = Objects.requireNonNull(settingsSupplier, "settingsSupplier");
+    this.exitReceiptLookup = Objects.requireNonNull(exitReceiptLookup, "exitReceiptLookup");
     this.invocationTracker = Objects.requireNonNull(invocationTracker, "invocationTracker");
     this.transferCoordinator = Objects.requireNonNull(transferCoordinator, "transferCoordinator");
     this.ideCoordinator = Objects.requireNonNull(ideCoordinator, "ideCoordinator");
@@ -680,13 +683,32 @@ final class DaemonConnectionSession implements DaemonSession {
       sendExecutionExitAck(invocationId);
       return;
     }
-    if (!invocationTracker.isKnown(environmentId, invocationId)) {
-      LOG.log(
-          Level.DEBUG,
-          "ignoring EXECUTION_EXITED for unknown invocation {0} on {1}",
-          invocationId,
-          environmentId);
+    if (invocationTracker.isKnown(environmentId, invocationId)) {
+      return;
     }
+    deferred.add(
+        () -> {
+          if (invocationTracker.isKnown(environmentId, invocationId)) {
+            return;
+          }
+          try {
+            if (exitReceiptLookup.isAcknowledged(environmentId, invocationId)) {
+              if (!invocationTracker.isKnown(environmentId, invocationId)) {
+                sendExecutionExitAck(invocationId);
+              }
+              return;
+            }
+          } catch (RuntimeException failure) {
+            DaemonFailures.log(
+                DaemonConnectionSession.class, "execution exit receipt lookup", failure);
+            return;
+          }
+          LOG.log(
+              Level.DEBUG,
+              "ignoring EXECUTION_EXITED without durable receipt for invocation {0} on {1}",
+              invocationId,
+              environmentId);
+        });
   }
 
   private void sendExecutionExitAck(UUID invocationId) {

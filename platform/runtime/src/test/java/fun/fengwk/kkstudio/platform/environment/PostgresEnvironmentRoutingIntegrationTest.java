@@ -22,6 +22,7 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
@@ -42,13 +43,16 @@ import fun.fengwk.kkstudio.platform.daemon.server.DaemonSession;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentConfigSource;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
+import fun.fengwk.kkstudio.platform.daemon.server.ExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.daemon.server.LeaseBindResult;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentConnection;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.server.DatabaseEnvironmentConfigSource;
 import fun.fengwk.kkstudio.platform.environment.server.EnvironmentServerConfiguration;
+import fun.fengwk.kkstudio.platform.harness.builtin.store.PostgresqlBuiltinHarnessStore;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
+import fun.fengwk.kkstudio.platform.harness.store.HarnessStoreExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
@@ -165,6 +169,10 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     EnvironmentSessionListener sessionListener = env -> {};
     EnvironmentConfigSource configSource = new DatabaseEnvironmentConfigSource(reads);
     this.configExecutor = Executors.newSingleThreadExecutor();
+    HarnessStore harnessStore =
+        new PostgresqlBuiltinHarnessStore(ds, transactionManager, UUID::randomUUID);
+    ExecutionExitReceiptLookup exitReceiptLookup =
+        new HarnessStoreExecutionExitReceiptLookup(harnessStore);
     EnvironmentServerConfiguration serverConfiguration = new EnvironmentServerConfiguration();
     this.serverNode1 =
         serverConfiguration.environmentDaemonServer(
@@ -175,6 +183,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
             new StaticObjectProvider<>(null),
             UNUSED_TICKET_SERVICE,
             snapshot,
+            exitReceiptLookup,
             configExecutor);
     this.serverNode2 =
         serverConfiguration.environmentDaemonServer(
@@ -185,6 +194,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
             new StaticObjectProvider<>(null),
             UNUSED_TICKET_SERVICE,
             snapshot,
+            exitReceiptLookup,
             configExecutor);
   }
 
