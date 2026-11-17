@@ -1,4 +1,4 @@
-package fun.fengwk.kkstudio.harness.contributor.builtin.subagent;
+package fun.fengwk.kkstudio.harness.api.join;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;

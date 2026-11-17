@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
 import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
@@ -23,7 +24,6 @@ import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfigProvider;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentRunner;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskAcceptance;
-import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.harness.spi.AcceptancePreflight;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskRequest;
@@ -87,8 +87,8 @@ public class SubagentTaskRunner implements SubagentRunner {
 
   private SubagentTaskAcceptance accept(SubagentTaskRequest request) {
     HarnessRuntime runtime = requireRuntime();
-    UUID childThreadId = childThreadId(request);
-    String requestHash = requestHash(request);
+    UUID childThreadId = request.childThreadId();
+    String requestHash = request.requestHash();
     // 已接受的回放不依赖父调用是否仍在执行，因此先于父快照校验完成。
     SubagentTaskAcceptance replayed = replay(runtime, request, childThreadId, requestHash);
     if (replayed != null) {
@@ -354,10 +354,6 @@ public class SubagentTaskRunner implements SubagentRunner {
     }
   }
 
-  private static UUID childThreadId(SubagentTaskRequest request) {
-    return request.childThreadId();
-  }
-
   private static UUID sessionIdOf(HarnessRuntime runtime, UUID childThreadId) {
     try {
       return runtime.getThreadSnapshot(childThreadId).thread().sessionId();
@@ -380,15 +376,6 @@ public class SubagentTaskRunner implements SubagentRunner {
         payload,
         derive(invocationId, COMMAND_NAMESPACE_PREFIX + index + "/"),
         ThreadCommandPayloadJsonCodec.requestHash(payload));
-  }
-
-  /**
-   * 规范请求身份：长度分隔拼接，区分「省略 maxTurns」与显式值，且不含运行期默认值。
-   *
-   * <p>因此目标 agent 的目录 settings 或进程默认 {@code maxTurns} 变化都不会改写已接受 join 的请求指纹。
-   */
-  static String requestHash(SubagentTaskRequest request) {
-    return request.requestHash();
   }
 
   /** 由父 Tool invocation 稳定派生子身份：同一次调用重放得到同一 UUID。 */

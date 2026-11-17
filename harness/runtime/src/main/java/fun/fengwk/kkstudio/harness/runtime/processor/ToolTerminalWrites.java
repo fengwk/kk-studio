@@ -7,12 +7,12 @@ import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.common.result.ResultContent;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
+import fun.fengwk.kkstudio.harness.api.join.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.spi.ToolInvocationRequest;
 import fun.fengwk.kkstudio.harness.spi.ToolOutcomeMaterializationException;
@@ -167,7 +167,7 @@ final class ToolTerminalWrites {
                           () ->
                               new IllegalStateException(
                                   "accepted task has no durable Join " + invocationId));
-              TaskTool.requireMatchingJoin(tool, join);
+              SubagentTaskRequest.requireMatchingJoin(tool, join);
               if (join.supersededByInvocationId() != null) {
                 tx.work().request(new WorkTarget(WorkTargetType.THREAD, threadId));
               }

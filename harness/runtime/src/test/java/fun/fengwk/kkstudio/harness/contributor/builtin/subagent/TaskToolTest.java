@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.common.schema.IntegerSchema;
 import fun.fengwk.kkstudio.common.schema.StringSchema;
 import fun.fengwk.kkstudio.harness.api.SpawnQuotaExceededException;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinOutcome;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
@@ -151,21 +152,21 @@ class TaskToolTest {
   void materializesTaskReceiptsFromJoinWithoutRetainingAnExecutionThread() {
     ThreadJoin join = join();
     ToolResult failure =
-        TaskTool.resultFromJoin(
+        SubagentTaskRequest.resultFromJoin(
             JsonMapper.builder().build(),
             "call-task",
             CHILD_SESSION_ID,
             join,
             receipt(ThreadJoinOutcome.ERROR, null, "compiler failed", "partial output"));
     ToolResult cancellation =
-        TaskTool.resultFromJoin(
+        SubagentTaskRequest.resultFromJoin(
             JsonMapper.builder().build(),
             "call-task",
             CHILD_SESSION_ID,
             join,
             receipt(ThreadJoinOutcome.CANCELLED, null, "Cancelled by parent.", null));
     ToolResult noAnswer =
-        TaskTool.resultFromJoin(
+        SubagentTaskRequest.resultFromJoin(
             JsonMapper.builder().build(),
             "call-task",
             CHILD_SESSION_ID,
