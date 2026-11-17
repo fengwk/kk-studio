@@ -44,6 +44,7 @@ type IDEPaths struct {
 	CodeServerDir string
 	UserDataDir   string
 	ExtensionsDir string
+	RuntimeDir    string
 	ConfigFile    string
 	ViewsDir      string
 }
@@ -134,6 +135,7 @@ func IDEPathsFor(cfg config.DaemonConfig) IDEPaths {
 		IDEDir: ideDir, CodeServerDir: codeServerDir,
 		UserDataDir:   filepath.Join(codeServerDir, "user-data"),
 		ExtensionsDir: filepath.Join(codeServerDir, "extensions"),
+		RuntimeDir:    filepath.Join(codeServerDir, "runtime"),
 		ConfigFile:    filepath.Join(codeServerDir, "config.yaml"),
 		ViewsDir:      filepath.Join(ideDir, "views"),
 	}
@@ -315,7 +317,7 @@ func (m *codeServerManager) prepareStart() (CodeServerLaunch, int, string, strin
 	if err != nil {
 		return CodeServerLaunch{}, 0, "", "", err
 	}
-	for _, dir := range []string{m.paths.IDEDir, m.paths.CodeServerDir, m.paths.UserDataDir, m.paths.ExtensionsDir, m.paths.ViewsDir} {
+	for _, dir := range []string{m.paths.IDEDir, m.paths.CodeServerDir, m.paths.UserDataDir, m.paths.ExtensionsDir, m.paths.RuntimeDir, m.paths.ViewsDir} {
 		if err := native.EnsurePrivateDirectory(dir); err != nil {
 			return CodeServerLaunch{}, 0, "", "", NewError("code-server storage is unavailable", "UNAVAILABLE")
 		}
@@ -354,6 +356,7 @@ func (m *codeServerManager) launchProcess(ctx context.Context, launch CodeServer
 			"KK_STUDIO_IDE_BRIDGE_URL":       m.bridge.URL,
 			"KK_STUDIO_IDE_BRIDGE_TOKEN":     m.bridge.Token,
 			"KK_STUDIO_IDE_MANAGEMENT_TOKEN": managementToken,
+			"KK_STUDIO_CODE_SERVER_DATA_DIR": m.paths.RuntimeDir,
 		}),
 	})
 	if err != nil {

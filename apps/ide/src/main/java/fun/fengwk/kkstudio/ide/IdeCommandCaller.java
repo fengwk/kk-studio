@@ -41,6 +41,11 @@ final class IdeCommandCaller {
     } catch (EnvironmentCapabilitySendUncertainException error) {
       throw new IdeOutcomeUnknownException("environment IDE command outcome is uncertain", error);
     } catch (EnvironmentCapabilityUnavailableException | EnvironmentCapabilityBusyException error) {
+      if (command.getAction() == IdeAction.CLOSE_VIEW
+          && (!command.hasDiscard() || !command.getDiscard())) {
+        throw DomainException.unavailable(
+            "IDE_CONTROL_UNAVAILABLE", "IDE control channel is unavailable", error);
+      }
       throw DomainException.unavailable(
           "DAEMON_NOT_READY", "environment daemon is not ready", error);
     }

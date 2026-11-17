@@ -150,6 +150,8 @@ final class IdeProtocol {
       case "CLEANUP_FAILED" -> DomainException.unavailable("IDE_CLEANUP_FAILED", message);
       case "CANCELLED" -> DomainException.validationReason("IDE_CLOSE_CANCELLED", message);
       case "DIRTY" -> DomainException.validationReason("DIRTY", message);
+      case "OUTCOME_UNKNOWN" -> DomainException.unavailable("IDE_OUTCOME_UNKNOWN", message);
+      case "CONTROL_UNAVAILABLE" -> DomainException.unavailable("IDE_CONTROL_UNAVAILABLE", message);
       case "UNAVAILABLE", "BUSY", "VIEW_IN_USE" -> DomainException.unavailable(
           "IDE_UNAVAILABLE", message);
       default -> DomainException.validation("environment", message);

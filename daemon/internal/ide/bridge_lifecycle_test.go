@@ -284,7 +284,7 @@ func TestWaitForConnectionBoundaries(t *testing.T) {
 	}
 }
 
-// Verifies assigning a replacement workspace retires old streams, waiters, pending commands, and indexes.
+// Verifies assigning a replacement binding retires old streams, waiters, and pending commands.
 func TestAssignRebindFencesOldBinding(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
@@ -317,17 +317,16 @@ func TestAssignRebindFencesOldBinding(t *testing.T) {
 		t.Fatal("old stream was not retired")
 	}
 	bridge.mu.Lock()
-	oldID, newID := bridge.byKey[bridge.pathKey(oldWorkspace)], bridge.byKey[bridge.pathKey(newWorkspace)]
 	view := bridge.views[viewID]
 	bridge.mu.Unlock()
-	if oldID != "" || newID != viewID || view.epoch != 2 {
-		t.Fatalf("old route=%q new route=%q view=%+v", oldID, newID, view)
+	if view.epoch != 2 || view.workspacePath != newWorkspace {
+		t.Fatalf("rebound view=%+v", view)
 	}
 	bridge.Assign(viewID, newWorkspace, 3, "/managed")
 	bridge.mu.Lock()
 	view = bridge.views[viewID]
 	bridge.mu.Unlock()
-	if view.epoch != 3 || bridge.pathKey(newWorkspace) != view.key {
+	if view.epoch != 3 || view.workspacePath != newWorkspace {
 		t.Fatalf("same-path rebind=%+v", view)
 	}
 }
@@ -468,4 +467,35 @@ func TestBridgePendingLifecycleFences(t *testing.T) {
 			t.Fatalf("transition result=%+v", got)
 		}
 	})
+}
+
+// Verifies a previously trusted extension host cannot reconnect with an old binding epoch.
+func TestBridgeRejectsRetiredBindingEpoch(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	const workspacePath = "/managed/view.code-workspace"
+	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	bridge.Assign(viewID, workspacePath, 1, "/managed")
+	stream, cancel := openTestBridgeStream(t, bridge, viewID, workspacePath, hostID)
+	defer cancel()
+	defer stream.Body.Close()
+	bridge.Assign(viewID, workspacePath, 2, "/managed")
+
+	request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?viewId="+viewID+"&bindingEpoch=1&hostId="+hostID+"&folder=%2Fmanaged", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Authorization", "Bearer "+bridge.Secret)
+	response, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusGone {
+		t.Fatalf("old binding epoch status=%d, want 410", response.StatusCode)
+	}
 }

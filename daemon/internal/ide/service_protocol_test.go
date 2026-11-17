@@ -114,7 +114,7 @@ func TestLiveRepliesProtocol(t *testing.T) {
 
 	normalCloseUnknown := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
 	validateLiveIDEReply(t, normalCloseUnknown, true)
-	if normalCloseUnknown.GetOk() || normalCloseUnknown.GetCode() != "UNAVAILABLE" {
+	if normalCloseUnknown.GetOk() || normalCloseUnknown.GetCode() != "CONTROL_UNAVAILABLE" {
 		t.Fatalf("unexpected normal close reply: %v", normalCloseUnknown)
 	}
 	manager.closeFailures = 1

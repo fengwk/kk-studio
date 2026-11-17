@@ -29,7 +29,15 @@ function createBridgeHost(vscode, options) {
   const config = options || {}
   const url = config.url || process.env.KK_STUDIO_IDE_BRIDGE_URL
   const token = config.token || process.env.KK_STUDIO_IDE_BRIDGE_TOKEN
+  const viewId = config.viewId || process.env.KK_STUDIO_IDE_VIEW_ID
+  const bindingEpoch = config.bindingEpoch || process.env.KK_STUDIO_IDE_BINDING_EPOCH
   const hostId = require('node:crypto').randomUUID()
+  const epochText = String(bindingEpoch)
+  const validIdentity =
+    typeof viewId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(viewId) &&
+    /^[1-9][0-9]*$/.test(epochText) &&
+    BigInt(epochText) <= 9223372036854775807n
   const http = config.http || require('node:http')
   const reconnectMillis = config.reconnectMillis || DEFAULT_RECONNECT_MILLIS
 
@@ -82,7 +90,7 @@ function createBridgeHost(vscode, options) {
   }
 
   const isInactive = () => disposed || retired
-  const canReachDaemon = () => !isInactive() && Boolean(url) && Boolean(token)
+  const canReachDaemon = () => !isInactive() && Boolean(url) && Boolean(token) && validIdentity
 
   // Resolves with the HTTP status code, or 0 when the bridge is unreachable or times out.
   const post = (path, payload) => {
@@ -138,7 +146,8 @@ function createBridgeHost(vscode, options) {
     })
   }
 
-  const reply = (id, result) => post('/bridge/result', Object.assign({ id }, result))
+  const reply = (id, result) =>
+    post('/bridge/result', Object.assign({ id, viewId, bindingEpoch: epochText, hostId }, result))
 
   const clearReconnectTimer = () => {
     if (reconnectTimer) {
@@ -190,6 +199,9 @@ function createBridgeHost(vscode, options) {
     isInactive,
     folderPaths,
     workspacePath,
+    viewId,
+    bindingEpoch,
+    hostId,
   })
 
   // A registration describes live folders, even when they change after a cancelled command.
@@ -243,9 +255,10 @@ function createBridgeHost(vscode, options) {
     }
   }
 
-  const streamTarget = (path) => {
+  const streamTarget = () => {
     const params = new URLSearchParams()
-    params.set('workspacePath', path)
+    params.set('viewId', viewId)
+    params.set('bindingEpoch', epochText)
     params.set('hostId', hostId)
     for (const folder of folderPaths()) {
       params.append('folder', folder)
@@ -288,14 +301,10 @@ function createBridgeHost(vscode, options) {
     if (!canReachDaemon()) {
       return
     }
-    const path = workspacePath()
-    if (!path) {
-      return
-    }
     // Drop any partial line from a previous connection.
     framer.reset()
     const request = http.get(
-      streamTarget(path),
+      streamTarget(),
       { headers: { authorization: `Bearer ${token}` } },
       (response) => onStreamResponse(request, response),
     )

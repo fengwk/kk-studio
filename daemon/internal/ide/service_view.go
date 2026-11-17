@@ -452,6 +452,39 @@ func (s *Service) changeDirectory(ctx context.Context, command *protocol.IdeComm
 	return changedDirectoryReply(view, s.snapshot()), nil
 }
 
+// reconcileDirectoryChange converges service metadata and the managed workspace after a late host confirmation.
+func (s *Service) reconcileDirectoryChange(viewID string, epoch int64, operationID, directory string) {
+	lock := s.keyedLock(s.viewLocks, viewID)
+	lock.Lock()
+	defer lock.Unlock()
+	s.mu.Lock()
+	view := s.views[viewID]
+	current := view != nil && view.state == viewOpen && view.bindingEpoch == epoch
+	s.mu.Unlock()
+	if !current || !s.bridge.IsCurrentDirectoryOperation(viewID, epoch, operationID, directory) {
+		return
+	}
+	if err := s.writeManagedWorkspace(view.workspacePath, directory); err != nil {
+		s.cleanupFailed(view, NewError("directory reconciliation failed", "CLEANUP_FAILED"))
+		return
+	}
+	if !s.bridge.IsCurrentDirectoryOperation(viewID, epoch, operationID, directory) {
+		return
+	}
+	var commitErr error
+	s.mu.Lock()
+	if s.views[viewID] == view && view.bindingEpoch == epoch && view.state == viewOpen && view.directory != directory {
+		_, commitErr = s.commitRevisionLocked()
+		if commitErr == nil {
+			view.directory = directory
+		}
+	}
+	s.mu.Unlock()
+	if commitErr != nil {
+		s.cleanupFailed(view, NewError("directory reconciliation state could not be committed", "CLEANUP_FAILED"))
+	}
+}
+
 func (s *Service) focusTerminal(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
 	if s.tracker == nil {
 		return nil, NewError("terminal supervision is unavailable", "UNAVAILABLE")
@@ -579,7 +612,7 @@ func (s *Service) closeView(ctx context.Context, command *protocol.IdeCommand) (
 	if mode == ManagedViewCloseNormal {
 		if !s.bridge.IsConnected(viewID, epoch) {
 			s.deferUnknownOutcome(view)
-			return nil, NewError("IDE window is not connected; close outcome is unknown", "UNAVAILABLE")
+			return nil, NewError("IDE control channel is unavailable; confirm force close to continue", "CONTROL_UNAVAILABLE")
 		}
 		result, err := s.requestNativeClose(ctx, view, epoch)
 		if err != nil || result == nil {
@@ -587,7 +620,7 @@ func (s *Service) closeView(ctx context.Context, command *protocol.IdeCommand) (
 		}
 		if !result.OK {
 			s.mu.Lock()
-			view.forceAllowed = result.Code != "CANCELLED"
+			view.forceAllowed = result.Code == "OUTCOME_UNKNOWN" || result.Code == "CONTROL_UNAVAILABLE"
 			s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
 			s.mu.Unlock()
 			code := result.Code
@@ -626,9 +659,20 @@ func (s *Service) requestNativeClose(ctx context.Context, view *viewRecord, epoc
 	s.mu.Lock()
 	view.nativeClosePending = false
 	s.mu.Unlock()
+	if requestErr == nil && result.Code == "CANCELLED" {
+		return &result, nil
+	}
 	if requestErr != nil || ctx.Err() != nil || !s.bridge.IsConnected(view.viewID, epoch) {
 		s.deferUnknownOutcome(view)
-		return nil, NewError("IDE close outcome is unknown", "UNAVAILABLE")
+		code := "OUTCOME_UNKNOWN"
+		var bridgeErr *Error
+		if !result.sent && (result.Code == "VIEW_GONE" || (errors.As(requestErr, &bridgeErr) && bridgeErr.Code == "UNAVAILABLE")) {
+			code = "CONTROL_UNAVAILABLE"
+		}
+		if code == "CONTROL_UNAVAILABLE" {
+			return nil, NewError("IDE control channel is unavailable; confirm force close to continue", code)
+		}
+		return nil, NewError("IDE close outcome is unknown", code)
 	}
 	return &result, nil
 }

@@ -146,6 +146,7 @@ func NewService(cfg config.DaemonConfig, processes native.Supervisor, tracker na
 		lifetime: lifetime, cancelLifetime: cancel,
 	}
 	manager.OnUnexpectedExit(s.processExited)
+	bridge.OnDirectoryReconciled(s.reconcileDirectoryChange)
 	bridge.OnPTY(func(_ string, pid int) error {
 		if tracker == nil {
 			return NewError("terminal supervision is unavailable", "UNAVAILABLE")

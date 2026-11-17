@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"math"
 	"net"
 	"net/http"
@@ -55,6 +56,7 @@ type BridgeRequestOptions struct {
 // BridgeResult is a safe response from the in-window extension host.
 type BridgeResult struct {
 	OK        bool             `json:"ok"`
+	sent      bool             // true once the bridge stream accepts the command frame
 	Code      string           `json:"code,omitempty"`
 	Message   string           `json:"message,omitempty"`
 	Directory string           `json:"directory,omitempty"`
@@ -67,13 +69,13 @@ type BridgeResult struct {
 }
 
 type bridgeView struct {
-	workspacePath string
-	key           string
-	epoch         int64
-	directory     string
-	hosts         map[string]struct{}
-	hostID        string
-	stream        *bridgeStream
+	workspacePath       string
+	epoch               int64
+	directory           string
+	latestDirectoryOpID string
+	hosts               map[string]struct{}
+	hostID              string
+	stream              *bridgeStream
 }
 
 type bridgeStream struct {
@@ -99,6 +101,7 @@ type bridgePending struct {
 	expectedDirectory string
 	result            chan BridgeResult
 	timer             *time.Timer
+	notified          bool
 }
 
 // Bridge is the authenticated, loopback-only HTTP/NDJSON connection to extension hosts.
@@ -108,16 +111,16 @@ type Bridge struct {
 	server   *http.Server
 	listener net.Listener
 
-	mu             sync.Mutex
-	views          map[string]*bridgeView
-	byKey          map[string]string
-	pending        map[string]*bridgePending
-	waiters        map[string]map[chan error]struct{}
-	ptyListeners   []func(string, int) error
-	closed         bool
-	closeDone      chan struct{}
-	closeErr       error
-	commandTimeout time.Duration
+	mu                    sync.Mutex
+	views                 map[string]*bridgeView
+	pending               map[string]*bridgePending
+	waiters               map[string]map[chan error]struct{}
+	ptyListeners          []func(string, int) error
+	onDirectoryReconciled func(string, int64, string, string)
+	closed                bool
+	closeDone             chan struct{}
+	closeErr              error
+	commandTimeout        time.Duration
 }
 
 // NewBridge starts a token-protected HTTP service on an ephemeral loopback port.
@@ -132,7 +135,7 @@ func NewBridge() (*Bridge, error) {
 	}
 	bridge := &Bridge{
 		URL: "http://" + listener.Addr().String(), Secret: secret, listener: listener,
-		views: make(map[string]*bridgeView), byKey: make(map[string]string),
+		views:   make(map[string]*bridgeView),
 		pending: make(map[string]*bridgePending), waiters: make(map[string]map[chan error]struct{}),
 		closeDone: make(chan struct{}), commandTimeout: bridgeCommandTimeout,
 	}
@@ -141,9 +144,8 @@ func NewBridge() (*Bridge, error) {
 	return bridge, nil
 }
 
-// Assign binds an exact workspace file and confirmed directory to a view epoch.
+// Assign binds a managed view identity and confirmed directory to a binding epoch.
 func (b *Bridge) Assign(viewID, workspacePath string, epoch int64, directory string) {
-	key := b.pathKey(workspacePath)
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if old := b.views[viewID]; old != nil {
@@ -151,17 +153,13 @@ func (b *Bridge) Assign(viewID, workspacePath string, epoch int64, directory str
 			old.stream.close(true)
 		}
 		b.rejectWaitersLocked(viewID, NewError("view binding changed", "VIEW_GONE"))
-		if old.key != key {
-			delete(b.byKey, old.key)
-		}
 		b.settleViewLocked(viewID, BridgeResult{Code: "VIEW_GONE", Message: "view binding changed"})
 	}
 	hosts := make(map[string]struct{})
 	if old := b.views[viewID]; old != nil {
 		hosts = old.hosts
 	}
-	b.views[viewID] = &bridgeView{workspacePath: workspacePath, key: key, epoch: epoch, directory: directory, hosts: hosts}
-	b.byKey[key] = viewID
+	b.views[viewID] = &bridgeView{workspacePath: workspacePath, epoch: epoch, directory: directory, hosts: hosts}
 }
 
 // Revoke removes only the matching epoch when one is supplied.
@@ -177,7 +175,6 @@ func (b *Bridge) Revoke(viewID string, expectedEpoch int64) {
 	if view.stream != nil {
 		view.stream.close(false)
 	}
-	delete(b.byKey, view.key)
 	delete(b.views, viewID)
 }
 
@@ -194,6 +191,21 @@ func (b *Bridge) OnPTY(listener func(string, int) error) {
 	b.mu.Lock()
 	b.ptyListeners = append(b.ptyListeners, listener)
 	b.mu.Unlock()
+}
+
+// OnDirectoryReconciled receives successful late confirmations after the caller stopped waiting.
+func (b *Bridge) OnDirectoryReconciled(listener func(string, int64, string, string)) {
+	b.mu.Lock()
+	b.onDirectoryReconciled = listener
+	b.mu.Unlock()
+}
+
+// IsCurrentDirectoryOperation reports whether an operation still owns the confirmed bridge directory.
+func (b *Bridge) IsCurrentDirectoryOperation(viewID string, epoch int64, operationID, directory string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	view := b.views[viewID]
+	return view != nil && view.epoch == epoch && view.latestDirectoryOpID == operationID && view.directory == directory
 }
 
 // WaitForConnection waits for this view's window stream, or returns on cancellation/revocation.
@@ -232,6 +244,7 @@ func (b *Bridge) WaitForConnection(ctx context.Context, viewID string) error {
 }
 
 // Request sends one command and waits for its matching extension-host result.
+// The internal sent flag records whether the stream accepted the frame.
 func (b *Bridge) Request(ctx context.Context, viewID string, command BridgeCommand, options BridgeRequestOptions) (BridgeResult, error) {
 	b.mu.Lock()
 	view := b.views[viewID]
@@ -245,7 +258,11 @@ func (b *Bridge) Request(ctx context.Context, viewID string, command BridgeComma
 	}
 	if err := ctx.Err(); err != nil {
 		b.mu.Unlock()
-		return BridgeResult{Message: "ide request was cancelled"}, nil
+		code := "BUSY"
+		if command.Op == "closeView" {
+			code = "CANCELLED"
+		}
+		return BridgeResult{Code: code, Message: "ide request was cancelled"}, nil
 	}
 	if len(command.Documents) > bridgeMaxCommandDocuments {
 		b.mu.Unlock()
@@ -278,25 +295,53 @@ func (b *Bridge) Request(ctx context.Context, viewID string, command BridgeComma
 		return BridgeResult{}, NewError("ide bridge command failed", "UNAVAILABLE")
 	}
 	pending := &bridgePending{viewID: viewID, epoch: view.epoch, op: command.Op, stream: view.stream, hostID: view.hostID, expectedDirectory: options.ExpectedDirectory, result: make(chan BridgeResult, 1)}
-	if command.Op != "closeView" || command.Discard {
-		pending.timer = time.AfterFunc(b.commandTimeout, func() { b.resolvePending(id, BridgeResult{Message: "ide window did not respond"}) })
-	}
 	b.pending[id] = pending
 	stream := view.stream
 	b.mu.Unlock()
+	delivered := false
 	select {
 	case stream.messages <- append(encoded, '\n'):
+		delivered = true
 	case <-stream.retired:
 		b.resolvePending(id, BridgeResult{Code: "VIEW_GONE", Message: "ide window was closed"})
 	case <-ctx.Done():
-		b.resolvePending(id, BridgeResult{Message: "ide request was cancelled"})
+		code := "BUSY"
+		if command.Op == "closeView" {
+			code = "CANCELLED"
+		}
+		b.resolvePending(id, BridgeResult{Code: code, Message: "ide request was cancelled"})
+	}
+	if !delivered {
+		return <-pending.result, nil
+	}
+	if command.Op != "closeView" || command.Discard {
+		b.mu.Lock()
+		if b.pending[id] == pending {
+			pending.timer = time.AfterFunc(b.commandTimeout, func() {
+				if command.Op == "changeDirectory" {
+					b.markUnknown(id)
+				} else {
+					b.resolvePending(id, BridgeResult{Code: "OUTCOME_UNKNOWN", Message: "ide window did not respond"})
+				}
+			})
+		}
+		b.mu.Unlock()
 	}
 	select {
 	case result := <-pending.result:
+		result.sent = true
 		return result, nil
 	case <-ctx.Done():
-		b.resolvePending(id, BridgeResult{Message: "ide request was cancelled"})
-		return <-pending.result, nil
+		if command.Op == "changeDirectory" {
+			b.markUnknown(id)
+			result := <-pending.result
+			result.sent = true
+			return result, nil
+		}
+		b.resolvePending(id, BridgeResult{Code: "OUTCOME_UNKNOWN", Message: "ide request outcome is unknown"})
+		result := <-pending.result
+		result.sent = true
+		return result, nil
 	}
 }
 
@@ -323,14 +368,15 @@ func (b *Bridge) Close(ctx context.Context) error {
 		if pending.timer != nil {
 			pending.timer.Stop()
 		}
-		pending.result <- BridgeResult{Message: "ide bridge closed"}
+		if !pending.notified {
+			pending.result <- BridgeResult{Message: "ide bridge closed"}
+		}
 		delete(b.pending, id)
 	}
 	for viewID := range b.waiters {
 		b.rejectWaitersLocked(viewID, NewError("ide bridge closed", "UNAVAILABLE"))
 	}
 	b.views = make(map[string]*bridgeView)
-	b.byKey = make(map[string]string)
 	b.ptyListeners = nil
 	b.mu.Unlock()
 	err := b.server.Close()
@@ -364,14 +410,19 @@ func (b *Bridge) handle(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (b *Bridge) handleStream(writer http.ResponseWriter, request *http.Request) {
-	workspacePath, ok := oneQuery(request.URL.Query(), "workspacePath")
-	if !ok {
-		bridgeRespond(writer, http.StatusBadRequest, "workspacePath is required")
+	viewID, ok := oneQuery(request.URL.Query(), "viewId")
+	if !ok || !validUUID(viewID) {
+		bridgeRespond(writer, http.StatusBadRequest, "viewId must be a canonical lowercase UUID")
 		return
 	}
-	viewID := b.assignedView(workspacePath)
-	if viewID == "" {
-		bridgeRespond(writer, http.StatusForbidden, "workspace is not assigned")
+	epochValues := request.URL.Query()["bindingEpoch"]
+	if len(epochValues) != 1 {
+		bridgeRespond(writer, http.StatusBadRequest, "bindingEpoch is required")
+		return
+	}
+	epoch, err := parseBridgeEpoch(epochValues[0])
+	if err != nil {
+		bridgeRespond(writer, http.StatusBadRequest, "bindingEpoch must be a positive integer")
 		return
 	}
 	hostIDs := request.URL.Query()["hostId"]
@@ -379,7 +430,7 @@ func (b *Bridge) handleStream(writer http.ResponseWriter, request *http.Request)
 		bridgeRespond(writer, http.StatusBadRequest, "hostId must be a canonical lowercase UUID")
 		return
 	}
-	stream, status, message := b.admitStream(viewID, hostIDs[0], request.URL.Query()["folder"])
+	stream, status, message := b.admitStream(viewID, epoch, hostIDs[0], request.URL.Query()["folder"])
 	if stream == nil {
 		bridgeRespond(writer, status, message)
 		return
@@ -387,19 +438,8 @@ func (b *Bridge) handleStream(writer http.ResponseWriter, request *http.Request)
 	b.serveStream(writer, request, viewID, stream)
 }
 
-// assignedView resolves the view bound to a client-supplied workspace path.
-func (b *Bridge) assignedView(workspacePath string) string {
-	key := b.pathKey(workspacePath)
-	if key == "" {
-		return ""
-	}
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	return b.byKey[key]
-}
-
-// admitStream registers the host stream against the view, or returns the rejection status.
-func (b *Bridge) admitStream(viewID, hostID string, folders []string) (*bridgeStream, int, string) {
+// admitStream registers the host stream against the managed view identity, or rejects it.
+func (b *Bridge) admitStream(viewID string, epoch int64, hostID string, folders []string) (*bridgeStream, int, string) {
 	stream := &bridgeStream{messages: make(chan []byte, 16), retired: make(chan struct{})}
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -408,7 +448,11 @@ func (b *Bridge) admitStream(viewID, hostID string, folders []string) (*bridgeSt
 	}
 	view := b.views[viewID]
 	if view == nil {
-		return nil, http.StatusForbidden, "workspace is not assigned"
+		return nil, http.StatusForbidden, "view is not assigned"
+	}
+	if view.epoch != epoch {
+		slog.Warn("IDE bridge rejected retired binding", "viewId", viewID, "bindingEpoch", epoch, "hostId", hostID, "reason", "stale_epoch")
+		return nil, http.StatusGone, "view binding is retired"
 	}
 	_, knownHost := view.hosts[hostID]
 	if hostID != view.hostID && knownHost {
@@ -541,20 +585,33 @@ func (b *Bridge) handleResult(writer http.ResponseWriter, request *http.Request)
 		bridgeRespond(writer, http.StatusBadRequest, "invalid result")
 		return
 	}
-	var id string
-	if rawID, exists := raw["id"]; !exists || string(rawID) == "null" || json.Unmarshal(rawID, &id) != nil {
-		bridgeRespond(writer, http.StatusBadRequest, "invalid result")
+	var identity struct {
+		ID           string `json:"id"`
+		ViewID       string `json:"viewId"`
+		BindingEpoch string `json:"bindingEpoch"`
+		HostID       string `json:"hostId"`
+	}
+	if err := json.Unmarshal(data, &identity); err != nil || identity.ID == "" || !validUUID(identity.ViewID) || !validUUID(identity.HostID) {
+		bridgeRespond(writer, http.StatusBadRequest, "invalid result identity")
+		return
+	}
+	epoch, err := parseBridgeEpoch(identity.BindingEpoch)
+	if err != nil {
+		bridgeRespond(writer, http.StatusBadRequest, "invalid result identity")
 		return
 	}
 	b.mu.Lock()
-	pending := b.pending[id]
-	if pending != nil {
-		view := b.views[pending.viewID]
-		if view == nil || view.stream != pending.stream {
-			b.mu.Unlock()
-			bridgeRespond(writer, http.StatusNoContent, "")
-			return
-		}
+	view := b.views[identity.ViewID]
+	if view == nil || view.epoch != epoch || view.hostID != identity.HostID || view.stream == nil {
+		b.mu.Unlock()
+		bridgeRespond(writer, http.StatusNoContent, "")
+		return
+	}
+	pending := b.pending[identity.ID]
+	if pending != nil && (pending.viewID != identity.ViewID || pending.epoch != epoch || pending.hostID != identity.HostID || pending.stream != view.stream) {
+		b.mu.Unlock()
+		bridgeRespond(writer, http.StatusNoContent, "")
+		return
 	}
 	result, err := bridgeResultFromJSON(raw)
 	if err != nil {
@@ -563,13 +620,13 @@ func (b *Bridge) handleResult(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	if pending != nil && pending.op == "changeDirectory" && result.OK && (result.Directory == "" || !matchesBridgeDirectory([]string{result.Directory}, pending.expectedDirectory) || !matchesBridgeDirectory([]string{result.Directory}, b.views[pending.viewID].directory)) {
-		b.resolvePendingLocked(id, BridgeResult{Message: "directory change was not applied"})
+		b.resolvePendingLocked(identity.ID, BridgeResult{Message: "directory change was not applied"})
 		b.mu.Unlock()
 		bridgeRespond(writer, http.StatusNoContent, "")
 		return
 	}
 	if pending != nil {
-		b.resolvePendingLocked(id, result)
+		b.resolvePendingLocked(identity.ID, result)
 	}
 	b.mu.Unlock()
 	bridgeRespond(writer, http.StatusNoContent, "")
@@ -586,20 +643,27 @@ func (b *Bridge) handlePTY(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	var event struct {
-		WorkspacePath string          `json:"workspacePath"`
-		PID           json.RawMessage `json:"pid"`
+		ViewID       string          `json:"viewId"`
+		BindingEpoch string          `json:"bindingEpoch"`
+		HostID       string          `json:"hostId"`
+		PID          json.RawMessage `json:"pid"`
 	}
 	if err := json.Unmarshal(data, &event); err != nil {
 		bridgeRespond(writer, http.StatusBadRequest, "invalid json")
 		return
 	}
+	epoch, epochErr := parseBridgeEpoch(event.BindingEpoch)
 	pidValue, err := strconv.ParseFloat(string(event.PID), 64)
-	if event.WorkspacePath == "" || err != nil || math.IsNaN(pidValue) || math.IsInf(pidValue, 0) || math.Trunc(pidValue) != pidValue || pidValue <= 0 || pidValue > float64(math.MaxInt) {
+	if !validUUID(event.ViewID) || epochErr != nil || !validUUID(event.HostID) || err != nil || math.IsNaN(pidValue) || math.IsInf(pidValue, 0) || math.Trunc(pidValue) != pidValue || pidValue <= 0 || pidValue > float64(math.MaxInt) {
 		bridgeRespond(writer, http.StatusBadRequest, "invalid pty event")
 		return
 	}
 	b.mu.Lock()
-	viewID := b.byKey[b.pathKey(event.WorkspacePath)]
+	view := b.views[event.ViewID]
+	viewID := ""
+	if view != nil && view.epoch == epoch && view.hostID == event.HostID && view.stream != nil {
+		viewID = event.ViewID
+	}
 	listeners := append([]func(string, int) error(nil), b.ptyListeners...)
 	b.mu.Unlock()
 	if viewID == "" {
@@ -618,6 +682,22 @@ func (b *Bridge) handlePTY(writer http.ResponseWriter, request *http.Request) {
 		}
 	}
 	bridgeRespond(writer, http.StatusNoContent, "")
+}
+
+func (b *Bridge) markUnknown(id string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	pending := b.pending[id]
+	if pending == nil || pending.notified {
+		return
+	}
+	pending.notified = true
+	slog.Warn("IDE bridge directory outcome unknown", "viewId", pending.viewID, "bindingEpoch", pending.epoch, "hostId", pending.hostID, "reason", "caller_stopped_waiting", "operationId", id)
+	pending.result <- BridgeResult{Code: "OUTCOME_UNKNOWN", Message: "directory change outcome is unknown"}
+	if pending.timer != nil {
+		pending.timer.Stop()
+		pending.timer = nil
+	}
 }
 
 func (b *Bridge) resolvePending(id string, result BridgeResult) {
@@ -640,13 +720,23 @@ func (b *Bridge) resolvePendingLocked(id string, result BridgeResult) {
 		result = BridgeResult{Code: "VIEW_GONE", Message: "view binding changed"}
 	} else if result.OK && pending.op == "changeDirectory" && pending.expectedDirectory != "" {
 		view.directory = pending.expectedDirectory
-	} else if !result.OK && pending.op == "changeDirectory" && result.Code != "DIRTY" && view.stream == pending.stream {
+		view.latestDirectoryOpID = id
+		if pending.notified {
+			slog.Info("IDE bridge directory outcome reconciled", "viewId", pending.viewID, "bindingEpoch", pending.epoch, "hostId", view.hostID, "reason", "target_host_confirmed", "operationId", id)
+		}
+		if pending.notified && b.onDirectoryReconciled != nil {
+			listener := b.onDirectoryReconciled
+			go listener(pending.viewID, pending.epoch, id, pending.expectedDirectory)
+		}
+	} else if !result.OK && result.Code != "OUTCOME_UNKNOWN" && pending.op == "changeDirectory" && result.Code != "DIRTY" && view.stream == pending.stream {
 		view.hostID = ""
 		stream := view.stream
 		view.stream = nil
 		stream.close(true)
 	}
-	pending.result <- result
+	if !pending.notified {
+		pending.result <- result
+	}
 }
 
 func (b *Bridge) settleViewLocked(viewID string, result BridgeResult) {
@@ -668,21 +758,6 @@ func (b *Bridge) notifyConnectedLocked(viewID string) {
 		waiter <- nil
 	}
 	delete(b.waiters, viewID)
-}
-
-func (b *Bridge) pathKey(path string) string {
-	if path == "" {
-		return ""
-	}
-	resolved, err := filepath.Abs(path)
-	if err != nil {
-		return ""
-	}
-	resolved = filepath.Clean(resolved)
-	if runtime.GOOS == "windows" {
-		resolved = strings.ToLower(resolved)
-	}
-	return resolved
 }
 
 func bridgeResultFromJSON(raw map[string]json.RawMessage) (BridgeResult, error) {
@@ -759,6 +834,14 @@ func rawIntegerPointer(raw map[string]json.RawMessage, key string) (*int64, bool
 	integer := int64(value)
 	return &integer, true
 }
+func parseBridgeEpoch(value string) (int64, error) {
+	epoch, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || epoch <= 0 || strconv.FormatInt(epoch, 10) != value {
+		return 0, errors.New("invalid binding epoch")
+	}
+	return epoch, nil
+}
+
 func oneQuery(values url.Values, key string) (string, bool) {
 	items, ok := values[key]
 	return func() (string, bool) {

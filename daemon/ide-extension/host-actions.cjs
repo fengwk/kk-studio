@@ -15,7 +15,7 @@ const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
 const MAX_SNAPSHOT_DOCUMENTS = 256
 
 function createHostActions(host) {
-  const { vscode, post, reply, retire, isInactive, folderPaths, workspacePath } = host
+  const { vscode, post, reply, retire, isInactive, folderPaths, workspacePath, viewId, bindingEpoch, hostId } = host
 
   let terminal = null
   const terminals = []
@@ -211,7 +211,7 @@ function createHostActions(host) {
       await reply(message.id, { ok: false, message: 'terminal supervision is unavailable' })
       return
     }
-    const status = await post('/bridge/pty', { workspacePath: path, pid })
+    const status = await post('/bridge/pty', { viewId, bindingEpoch, hostId, pid })
     if (isInactive()) {
       return
     }

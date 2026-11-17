@@ -77,7 +77,11 @@ func TestServiceConstructionAndPTYTracker(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	body, err := json.Marshal(map[string]any{"workspacePath": opened.GetWorkspacePath(), "pid": 123})
+	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	stream, cancelStream := openTestBridgeStream(t, bridge, opened.GetViewId(), opened.GetWorkspacePath(), hostID)
+	defer cancelStream()
+	defer stream.Body.Close()
+	body, err := json.Marshal(map[string]any{"viewId": opened.GetViewId(), "bindingEpoch": strconv.FormatInt(opened.GetBindingEpoch(), 10), "hostId": hostID, "pid": 123})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1411,7 +1415,15 @@ func startBridgeReplyHostWith(t *testing.T, bridge *Bridge, workspace, viewID, d
 	}
 	directory = canonicalDirectory
 	ctx, cancel := context.WithCancel(context.Background())
-	response, reader := openManualBridgeStream(t, ctx, bridge, workspace, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", directory)
+	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	response, reader := openManualBridgeStream(t, ctx, bridge, workspace, hostID, directory)
+	bridge.mu.Lock()
+	view := bridge.views[viewID]
+	epoch := int64(0)
+	if view != nil {
+		epoch = view.epoch
+	}
+	bridge.mu.Unlock()
 	if _, err := reader.ReadString('\n'); err != nil {
 		cancel()
 		response.Body.Close()
@@ -1427,7 +1439,7 @@ func startBridgeReplyHostWith(t *testing.T, bridge *Bridge, workspace, viewID, d
 			if err := decoder.Decode(&command); err != nil {
 				return
 			}
-			result := map[string]any{"id": command.ID, "ok": true}
+			result := map[string]any{"id": command.ID, "viewId": viewID, "bindingEpoch": strconv.FormatInt(epoch, 10), "hostId": hostID, "ok": true}
 			if command.Op == "inspect" {
 				result["clean"] = true
 			}
@@ -1497,8 +1509,8 @@ func TestBridgeDirectoryBindingOnCreateAndResume(t *testing.T) {
 	assertBinding(resumed)
 }
 
-// Verifies canonical directory change is acknowledged only by a replacement host.
-func TestChangeDirectoryReply(t *testing.T) {
+// Verifies cancellation stops waiting but a same-epoch target host still reconciles all directory state.
+func TestCancelledChangeDirectoryReconcilesOnReplacementHost(t *testing.T) {
 	root, err := CanonicalDirectory(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1529,8 +1541,9 @@ func TestChangeDirectoryReply(t *testing.T) {
 		t.Fatal(err)
 	}
 	command := &protocol.IdeCommand{Action: protocol.IdeAction_CHANGE_DIRECTORY, ViewId: stringPointer(opened.GetViewId()), BrowserSessionId: stringPointer(opened.GetBrowserSessionId()), BindingEpoch: int64Pointer(opened.GetBindingEpoch()), Directory: stringPointer(next), ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999")}
+	commandCtx, cancelCommand := context.WithCancel(context.Background())
 	resultChannel := make(chan *protocol.IdeResult, 1)
-	go func() { resultChannel <- service.HandleCommand(context.Background(), command) }()
+	go func() { resultChannel <- service.HandleCommand(commandCtx, command) }()
 	var nativeCommand struct {
 		ID        string `json:"id"`
 		Op        string `json:"op"`
@@ -1542,18 +1555,33 @@ func TestChangeDirectoryReply(t *testing.T) {
 	if nativeCommand.Op != "changeDirectory" || nativeCommand.Directory != next {
 		t.Fatalf("native directory command=%+v", nativeCommand)
 	}
+	cancelCommand()
+	defer cancelCommand()
+	select {
+	case result := <-resultChannel:
+		if result.GetOk() || result.GetCode() != "OUTCOME_UNKNOWN" {
+			t.Fatalf("cancelled directory reply=%v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled directory request did not stop waiting")
+	}
 	newStream, newReader := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", next)
 	defer newStream.Body.Close()
 	if _, err := newReader.ReadString('\n'); err != nil {
 		t.Fatal(err)
 	}
-	select {
-	case result := <-resultChannel:
-		if !result.GetOk() || result.GetDirectory() != next {
-			t.Fatalf("directory reply=%v", result)
+	deadline := time.Now().Add(time.Second)
+	for {
+		service.mu.Lock()
+		viewDirectory := service.views[opened.GetViewId()].directory
+		service.mu.Unlock()
+		if viewDirectory == next {
+			break
 		}
-	case <-time.After(time.Second):
-		t.Fatal("replacement host did not confirm directory")
+		if time.Now().After(deadline) {
+			t.Fatalf("service directory did not reconcile: %q", viewDirectory)
+		}
+		time.Sleep(time.Millisecond)
 	}
 	bridge.mu.Lock()
 	binding := bridge.views[opened.GetViewId()]
@@ -1573,6 +1601,204 @@ func TestChangeDirectoryReply(t *testing.T) {
 	}
 	if err != nil || len(workspace.Folders) != 1 || workspace.Folders[0].Path != next {
 		t.Fatalf("workspace=%q err=%v", workspaceBytes, err)
+	}
+}
+
+// Verifies a paused older reconciliation cannot overwrite a newer confirmed directory operation.
+func TestLateDirectoryReconciliationCannotOverwriteNewerOperation(t *testing.T) {
+	root := t.TempDir()
+	directoryB := filepath.Join(root, "B")
+	directoryC := filepath.Join(root, "C")
+	for _, directory := range []string{directoryB, directoryC} {
+		if err := os.Mkdir(directory, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	oldStream, oldReader := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", root)
+	defer oldStream.Body.Close()
+	if _, err := oldReader.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	commandFor := func(directory string) *protocol.IdeCommand {
+		return &protocol.IdeCommand{Action: protocol.IdeAction_CHANGE_DIRECTORY, ViewId: stringPointer(opened.GetViewId()), BrowserSessionId: stringPointer(opened.GetBrowserSessionId()), BindingEpoch: int64Pointer(opened.GetBindingEpoch()), Directory: stringPointer(directory), ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999")}
+	}
+	commandCtx, cancelCommand := context.WithCancel(context.Background())
+	defer cancelCommand()
+	bResult := make(chan *protocol.IdeResult, 1)
+	go func() { bResult <- service.HandleCommand(commandCtx, commandFor(directoryB)) }()
+	var nativeCommand struct {
+		ID        string `json:"id"`
+		Op        string `json:"op"`
+		Directory string `json:"directory"`
+	}
+	if err := json.NewDecoder(oldReader).Decode(&nativeCommand); err != nil {
+		t.Fatal(err)
+	}
+	if nativeCommand.Op != "changeDirectory" || nativeCommand.Directory != directoryB {
+		t.Fatalf("native directory command=%+v", nativeCommand)
+	}
+	cancelCommand()
+	select {
+	case result := <-bResult:
+		if result.GetOk() || result.GetCode() != "OUTCOME_UNKNOWN" {
+			t.Fatalf("cancelled B directory result=%v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("cancelled B directory request did not stop waiting")
+	}
+
+	callbackStarted := make(chan struct{})
+	releaseCallback := make(chan struct{})
+	callbackFinished := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() { releaseOnce.Do(func() { close(releaseCallback) }) }
+	defer release()
+	bridge.OnDirectoryReconciled(func(viewID string, epoch int64, operationID, directory string) {
+		if directory == directoryB {
+			close(callbackStarted)
+			<-releaseCallback
+		}
+		service.reconcileDirectoryChange(viewID, epoch, operationID, directory)
+		if directory == directoryB {
+			close(callbackFinished)
+		}
+	})
+	streamB, readerB := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", directoryB)
+	defer streamB.Body.Close()
+	if _, err := readerB.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-callbackStarted:
+	case <-time.After(time.Second):
+		t.Fatal("late B reconciliation callback did not pause")
+	}
+
+	cContext, cancelC := context.WithCancel(context.Background())
+	defer cancelC()
+	cResult := make(chan *protocol.IdeResult, 1)
+	go func() { cResult <- service.HandleCommand(cContext, commandFor(directoryC)) }()
+	var cCommand struct {
+		Op        string `json:"op"`
+		Directory string `json:"directory"`
+	}
+	if err := json.NewDecoder(readerB).Decode(&cCommand); err != nil {
+		t.Fatal(err)
+	}
+	if cCommand.Op != "changeDirectory" || cCommand.Directory != directoryC {
+		t.Fatalf("native C directory command=%+v", cCommand)
+	}
+	streamC, readerC := openManualBridgeStream(t, ctx, bridge, opened.GetWorkspacePath(), "cccccccc-cccc-4ccc-8ccc-cccccccccccc", directoryC)
+	defer streamC.Body.Close()
+	if _, err := readerC.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case result := <-cResult:
+		if !result.GetOk() || result.GetDirectory() != directoryC {
+			t.Fatalf("confirmed C directory result=%v", result)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("C directory operation did not complete")
+	}
+	assertDirectoryC := func() {
+		t.Helper()
+		service.mu.Lock()
+		serviceDirectory := service.views[opened.GetViewId()].directory
+		service.mu.Unlock()
+		bridge.mu.Lock()
+		bridgeDirectory := bridge.views[opened.GetViewId()].directory
+		bridge.mu.Unlock()
+		data, err := os.ReadFile(opened.GetWorkspacePath())
+		var workspace struct {
+			Folders []struct {
+				Path string `json:"path"`
+			} `json:"folders"`
+		}
+		if err == nil {
+			err = json.Unmarshal(data, &workspace)
+		}
+		if serviceDirectory != directoryC || bridgeDirectory != directoryC || err != nil || len(workspace.Folders) != 1 || workspace.Folders[0].Path != directoryC {
+			t.Fatalf("directory state service=%q bridge=%q workspace=%q err=%v", serviceDirectory, bridgeDirectory, data, err)
+		}
+	}
+	assertDirectoryC()
+	release()
+	select {
+	case <-callbackFinished:
+	case <-time.After(time.Second):
+		t.Fatal("paused B reconciliation callback did not finish")
+	}
+	assertDirectoryC()
+}
+
+// Verifies a revision commit failure preserves the view in explicit cleanup state instead of reporting reconciliation success.
+func TestDirectoryReconciliationRevisionFailureMarksCleanupFailed(t *testing.T) {
+	root, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(root, "target")
+	if err := os.Mkdir(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	const operationID = "late-directory-operation"
+	bridge.mu.Lock()
+	binding := bridge.views[opened.GetViewId()]
+	binding.directory = target
+	binding.latestDirectoryOpID = operationID
+	bridge.mu.Unlock()
+	service.mu.Lock()
+	service.revision = math.MaxInt64
+	service.mu.Unlock()
+
+	service.reconcileDirectoryChange(opened.GetViewId(), opened.GetBindingEpoch(), operationID, target)
+
+	service.mu.Lock()
+	view := service.views[opened.GetViewId()]
+	serviceDirectory, state, cleanupFailed := view.directory, view.state, view.cleanupFailed
+	service.mu.Unlock()
+	workspaceBytes, err := os.ReadFile(opened.GetWorkspacePath())
+	var workspace struct {
+		Folders []struct {
+			Path string `json:"path"`
+		} `json:"folders"`
+	}
+	if err == nil {
+		err = json.Unmarshal(workspaceBytes, &workspace)
+	}
+	if serviceDirectory != root || state != viewClosing || !cleanupFailed || err != nil || len(workspace.Folders) != 1 || workspace.Folders[0].Path != target {
+		t.Fatalf("revision failure service=%q state=%v cleanupFailed=%v workspace=%q err=%v", serviceDirectory, state, cleanupFailed, workspaceBytes, err)
 	}
 }
 
@@ -1822,16 +2048,13 @@ func TestLateNativeCloseSuccessIsIgnored(t *testing.T) {
 			}
 			select {
 			case result := <-closeResult:
-				if result.GetOk() || result.GetCode() != "UNAVAILABLE" {
+				if result.GetOk() || result.GetCode() != "OUTCOME_UNKNOWN" {
 					t.Fatalf("interrupted close=%v", result)
 				}
 			case <-time.After(time.Second):
 				t.Fatal("interrupted close remained pending")
 			}
-			lateSuccess, err := json.Marshal(map[string]any{"id": command.ID, "ok": true, "clean": true})
-			if err != nil {
-				t.Fatal(err)
-			}
+			lateSuccess := bridgeTestResultBody(command.ID, opened.GetViewId(), opened.GetBindingEpoch(), hostID, map[string]any{"ok": true, "clean": true})
 			if status := postBridge(t, bridge, "/bridge/result", lateSuccess); status != http.StatusNoContent {
 				t.Fatalf("late result status=%d", status)
 			}
@@ -1895,6 +2118,73 @@ func TestCancelledNativeClosePreservesView(t *testing.T) {
 	force := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
 	if force.GetOk() || force.GetCode() != "BUSY" {
 		t.Fatalf("unauthorized force close=%v", force)
+	}
+}
+
+// Verifies an unavailable bridge request is classified as control-unavailable before any frame is sent.
+func TestRequestNativeCloseUnavailableBeforeSend(t *testing.T) {
+	root := t.TempDir()
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	service.mu.Lock()
+	view := service.views[opened.GetViewId()]
+	service.mu.Unlock()
+	_, err = service.requestNativeClose(context.Background(), view, opened.GetBindingEpoch())
+	if FailureCode(err) != "CONTROL_UNAVAILABLE" || !view.forceAllowed {
+		t.Fatalf("unsent native close error=%v forceAllowed=%v", err, view.forceAllowed)
+	}
+	bridge.mu.Lock()
+	pendingCount := len(bridge.pending)
+	bridge.mu.Unlock()
+	if pendingCount != 0 {
+		t.Fatalf("unsent close created %d bridge requests", pendingCount)
+	}
+}
+
+// Verifies a dirty normal-close rejection does not authorize destructive force close.
+func TestDirtyNativeCloseDoesNotAllowForce(t *testing.T) {
+	root := t.TempDir()
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{
+		"closeView": {"ok": false, "code": "DIRTY", "message": "unsaved changes remain"},
+	})
+	defer cancelHost()
+	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
+	if closed.GetOk() || closed.GetCode() != "DIRTY" || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("dirty close=%v state=%v", closed, service.GetViewState(opened.GetViewId()))
+	}
+	forced := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
+	if forced.GetOk() || forced.GetCode() != "BUSY" || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("dirty close authorized force: result=%v state=%v", forced, service.GetViewState(opened.GetViewId()))
 	}
 }
 
@@ -1970,7 +2260,7 @@ func TestForceCloseUnreachableView(t *testing.T) {
 		t.Fatalf("open reply=%v", opened)
 	}
 	normal := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
-	if normal.GetOk() || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+	if normal.GetOk() || normal.GetCode() != "CONTROL_UNAVAILABLE" || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
 		t.Fatalf("unreachable normal close=%v state=%v", normal, service.GetViewState(opened.GetViewId()))
 	}
 	force := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
@@ -2007,7 +2297,7 @@ func TestForceAuthorizationDoesNotCrossEpoch(t *testing.T) {
 		t.Fatalf("open reply=%v", opened)
 	}
 	unknown := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false))
-	if unknown.GetOk() || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
+	if unknown.GetOk() || unknown.GetCode() != "CONTROL_UNAVAILABLE" || service.GetViewState(opened.GetViewId()).GetState() != protocol.IdeViewState_OPEN {
 		t.Fatalf("disconnected close=%v state=%v", unknown, service.GetViewState(opened.GetViewId()))
 	}
 	resume := openCommandForTest(root, opened.GetViewId(), "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee")

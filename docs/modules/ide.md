@@ -71,7 +71,9 @@ OPEN/CHANGE_DIRECTORY/CLOSE/LIST_VIEWS 的可见状态回执提供 `{revision, v
 
 目录查询只列直接真实子目录，不跟随子目录符号链接；输入目录自身按宿主 `realpath` 规范化。结果按名称排序，最多 1000 项，响应字节达到上限也会截断并设置 `truncated`。不可访问或不存在的目录返回错误，不返回伪造的空列表。HTTP 中 64 位整数在请求与响应中使用规范十进制字符串；元数据业务输入错误由产生处抛出 `DomainException`，由宿主统一映射为 problem 响应。
 
-正常关闭由桥接调用工作台 `vscode.window.tabGroups.close`，等待原生保存/不保存/取消，不设命令超时；取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。控制连接中断时结果未知，不回放副作用或采用迟到结果；用户可在状态未知时显式确认强制关闭。
+正常关闭由桥接调用工作台 `vscode.window.tabGroups.close`，等待原生保存/不保存/取消，不设命令超时；用户取消以 `validation` / `IDE_CLOSE_CANCELLED` 返回，视图保持打开，也不触发外层放弃确认。已发送但未确认的关闭以 `IDE_OUTCOME_UNKNOWN` 返回并保留视图；命令未发送或控制通道不可用时以 `IDE_CONTROL_UNAVAILABLE` 返回，用户可以显式确认强制关闭。强制关闭不伪装成原生退出成功，仍须取得 code-server 的资源清理证明。
+
+Daemon 与托管 extension host 通过 `viewId`、`bindingEpoch` 和随机 `hostId` 建立 bridge 身份；前两个值只能来自 code-server 验证过的 managed-view context。工作区 folder 只用于同代目录切换的旧/目标候选对账，不参与身份判定。bridge ready 只表示控制流已连接，不等同于原生 view 已打开。目录切换命令发送后，取消或超时仅停止调用方等待：未确认意图按每个活动 view 最多一条保留，直到同代对账或 view 关闭/重绑；期间不会接受新的目录切换。只有同一 bindingEpoch、且 folder 与目标目录匹配的新 host 能确认迟到操作；旧 host、旧 epoch 或不匹配的 folder 不能夺回控制权。确认后 Daemon 收敛 bridge 目录、视图快照与受管 `.code-workspace` 文件。code-server 的托管数据根为 `<Environment>/ide/code-server/runtime`，不改变进程全局 HOME/XDG/LOCALAPPDATA。
 
 ## 结构化失败与结果对账
 
@@ -79,7 +81,7 @@ IDE 边界保留精确原因，所有本地/Daemon 错误都按已知 code 映�
 
 | reason | 表达的事实 | 客户端行为 |
 | --- | --- | --- |
-| `DAEMON_NOT_READY` | 本次命令确认未发送或当前无 READY 代次 | 等 READY 后按原意图恢复，不伪造已执行 |
+| `DAEMON_NOT_READY` | 普通 IDE 命令确认未发送或当前无 READY 代次 | 等 READY 后按原意图恢复，不伪造已执行 |
 | `VIEW_GONE` | 本代次资源不存在，或 Daemon 已换代 | 保留目录线索，明确提示重新打开，不用旧 epoch/token 复活 |
 | `VIEW_OWNED_BY_OTHER_SESSION` | 不是当前 browserSession 的 view | 不抢占，用户可显式打开独立 view |
 | `STALE_BINDING` | expected epoch、claim、实例或回执已过期 | 先纯读权威状态再对账 |
@@ -87,10 +89,11 @@ IDE 边界保留精确原因，所有本地/Daemon 错误都按已知 code 映�
 | `IDE_CAPACITY_EXCEEDED` | 创建容量不足 | 管理已有 view；已有 view 的 resume 不受此分支影响 |
 | `DIRTY` | 切换目录前 Daemon 判定编辑器仍有未保存修改 | 不写工作区，等用户保存或放弃后再显式重试 |
 | `IDE_UNAVAILABLE` | Daemon 侧 `UNAVAILABLE`/`BUSY`/`VIEW_IN_USE` 拒绝，或使用意图查询不可达 | 保留当前绑定与真实原因，稍后按原意图重试，不视作已执行 |
-| `IDE_OUTCOME_UNKNOWN` | 命令可能已执行 | 纯读对账，不创建新 view，不重放终端/目录副作用 |
+| `IDE_OUTCOME_UNKNOWN` | 命令已发送但没有结果确认；目录操作意图仍在同代 bridge 中等待目标 host 对账 | 纯读对账，不重放命令；待目录状态收敛前不覆盖该意图 |
 | `IDE_CLEANUP_FAILED` | 资源清理未完成 | 保留 CLOSING 与容量，等待显式重试或人工处理 |
 | `IDE_PROTOCOL_ERROR` | 回执或快照破坏协议不变量 | 失败本调用并保留上一个已接受快照，不自行修补 |
 | `IDE_CLOSE_CANCELLED` | 用户在 IDE 原生关闭中选择取消 | 视图保持原绑定，不触发外层放弃确认 |
+| `IDE_CONTROL_UNAVAILABLE` | 正常关闭未发送或没有控制通道，无法检查编辑器 dirty 状态 | 保留 view，只有用户显式确认后才可强制关闭 |
 | `IDE_UNAUTHORIZED` | 跨节点内部调用被目标节点以 401 `unauthorized` 拒绝（HMAC 或目标实例不匹配） | 不重试；先对账集群密钥与时钟 |
 | `IDE_CONFLICT` | 目标节点返回 409 但未携带可识别 reason 的兜底映射 | 不自动重试，按失败回读权威快照 |
 

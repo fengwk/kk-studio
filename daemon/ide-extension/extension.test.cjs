@@ -9,6 +9,7 @@ const path = require('node:path')
 const { createBridgeHost } = require('./bridge.cjs')
 
 const VIEW_ID = '11111111-1111-4111-8111-111111111111'
+const BINDING_EPOCH = '7'
 const WORKSPACE = '/managed/one.code-workspace'
 
 class FakeTabInputText {
@@ -207,6 +208,8 @@ function setup(fake = fakeVscode(), options = {}) {
   const host = createBridgeHost(fake.vscode, {
     url: options.url || 'http://127.0.0.1:43210',
     token: options.token || 'bridge-secret',
+    viewId: options.viewId || VIEW_ID,
+    bindingEpoch: options.bindingEpoch || BINDING_EPOCH,
     reconnectMillis: options.reconnectMillis === undefined ? 5 : options.reconnectMillis,
     http: network.http,
   })
@@ -229,6 +232,11 @@ async function command(context, op, fields = {}) {
 }
 
 async function focus(context) { return command(context, 'focusTerminal') }
+
+function expectedReply(context, id, result) {
+  const hostId = new URL(context.network.streams[0].url).searchParams.get('hostId')
+  return Object.assign({ id, viewId: VIEW_ID, bindingEpoch: BINDING_EPOCH, hostId }, result)
+}
 
 test('bundled manifest activates the bridge and contributes IDE defaults', () => {
   const manifest = JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8'))
@@ -269,11 +277,23 @@ test('registers the assigned workspace, live folders, and bearer credential', as
     const stream = context.network.streams[0]
     const url = new URL(stream.url)
     assert.equal(url.pathname, '/bridge/stream')
-    assert.equal(url.searchParams.get('workspacePath'), WORKSPACE)
+    assert.equal(url.searchParams.get('viewId'), VIEW_ID)
+    assert.equal(url.searchParams.get('bindingEpoch'), BINDING_EPOCH)
+    assert.equal(url.searchParams.has('workspacePath'), false)
     assert.deepEqual(url.searchParams.getAll('folder'), ['/home/user', '/workspace'])
     assert.match(url.searchParams.get('hostId'), /^[0-9a-f-]{36}$/)
     assert.equal(stream.requestOptions.headers.authorization, 'Bearer bridge-secret')
   } finally { context.host.dispose() }
+})
+
+test('does not connect without a valid trusted managed view identity', async () => {
+  for (const identity of [{ viewId: 'not-a-view', bindingEpoch: '7' }, { viewId: VIEW_ID, bindingEpoch: '07' }]) {
+    const context = setup(fakeVscode(), identity)
+    try {
+      await new Promise((resolve) => setImmediate(resolve))
+      assert.equal(context.network.streams.length, 0)
+    } finally { context.host.dispose() }
+  }
 })
 
 test('registers the first workspace folder when no workspace file is open', async () => {
@@ -282,7 +302,7 @@ test('registers the first workspace folder when no workspace file is open', asyn
   const context = setup(fake)
   try {
     await connected(context)
-    assert.equal(new URL(context.network.streams[0].url).searchParams.get('workspacePath'), '/home/user')
+    assert.equal(new URL(context.network.streams[0].url).searchParams.get('viewId'), VIEW_ID)
     assert.equal((await focus(context)).ok, true)
     assert.deepEqual(context.fake.calls.createTerminal, [{ name: 'kk-studio', cwd: '/home/user' }])
   } finally { context.host.dispose() }
@@ -295,8 +315,13 @@ test('creates and focuses a terminal through public APIs and reports its pid for
     assert.equal(result.ok, true)
     assert.deepEqual(context.fake.calls.createTerminal, [{ name: 'kk-studio', cwd: '/home/user' }])
     assert.equal(context.fake.terminals[0].shown, true)
+    const hostId = new URL(context.network.streams[0].url).searchParams.get('hostId')
     const pty = context.network.posts.find((post) => post.pathname === '/bridge/pty')
-    assert.deepEqual(pty.payload, { workspacePath: WORKSPACE, pid: 4242 })
+    assert.deepEqual(pty.payload, { viewId: VIEW_ID, bindingEpoch: BINDING_EPOCH, hostId, pid: 4242 })
+    const postedResult = context.network.posts.find((post) => post.pathname === '/bridge/result')
+    assert.equal(postedResult.payload.viewId, VIEW_ID)
+    assert.equal(postedResult.payload.bindingEpoch, BINDING_EPOCH)
+    assert.equal(postedResult.payload.hostId, hostId)
     assert.equal(pty.requestOptions.headers.authorization, 'Bearer bridge-secret')
   } finally { context.host.dispose() }
 })
@@ -347,7 +372,7 @@ test('confirms a no-op directory change without restarting the extension host', 
   const context = setup()
   try {
     const result = await command(context, 'changeDirectory', { directory: '/home/user' })
-    assert.deepEqual(result, { id: 'cmd-1', ok: true, directory: '/home/user' })
+    assert.deepEqual(result, expectedReply(context, 'cmd-1', { ok: true, directory: '/home/user' }))
     assert.deepEqual(context.fake.calls.updateWorkspaceFolders, [])
     assert.equal(context.network.streams[0].request.destroyed, false)
   } finally { context.host.dispose() }
@@ -459,7 +484,7 @@ test('does not prove a custom editor clean', async () => {
   const context = setup(fakeVscode(WORKSPACE, ['/home/user'], { tabGroups: [{ tabs: [{ input: new TabInputCustom() }] }] }))
   context.fake.vscode.TabInputCustom = TabInputCustom
   try {
-    assert.deepEqual(await command(context, 'inspect'), { id: 'cmd-1', ok: true, clean: false })
+    assert.deepEqual(await command(context, 'inspect'), expectedReply(context, 'cmd-1', { ok: true, clean: false }))
   } finally { context.host.dispose() }
 })
 
@@ -522,7 +547,7 @@ test('reports unsupported commands without exposing internal errors', async () =
   const context = setup()
   try {
     const result = await command(context, 'unknown')
-    assert.deepEqual(result, { id: 'cmd-1', ok: false, message: 'unsupported command' })
+    assert.deepEqual(result, expectedReply(context, 'cmd-1', { ok: false, message: 'unsupported command' }))
   } finally { context.host.dispose() }
 })
 
@@ -619,7 +644,7 @@ test('retries a rejected handshake without crashing the extension host', async (
     await waitFor(() => context.network.streams.length >= 2)
     assert.equal(context.network.streams[0].status, 401)
     assert.equal(context.network.streams[1].status, 200)
-    assert.equal(new URL(context.network.streams[1].url).searchParams.get('workspacePath'), WORKSPACE)
+    assert.equal(new URL(context.network.streams[1].url).searchParams.get('viewId'), VIEW_ID)
   } finally { context.host.dispose() }
 })
 

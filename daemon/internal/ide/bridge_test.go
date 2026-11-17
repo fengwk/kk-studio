@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -58,8 +59,8 @@ func TestBridgeAuthAndRoutes(t *testing.T) {
 	}
 }
 
-// Verifies a timed-out directory transition fails safely and never admits its target folder.
-func TestDirectoryTransitionTimeoutRejectsTarget(t *testing.T) {
+// Verifies a timed-out directory transition remains reconcilable by a same-epoch target host.
+func TestDirectoryTransitionTimeoutReconcilesTarget(t *testing.T) {
 	bridge, err := NewBridge()
 	if err != nil {
 		t.Fatal(err)
@@ -93,13 +94,16 @@ func TestDirectoryTransitionTimeoutRejectsTarget(t *testing.T) {
 	}
 	select {
 	case result := <-commandResult:
-		if result.OK || result.Message != "ide window did not respond" {
+		if result.OK || result.Code != "OUTCOME_UNKNOWN" {
 			t.Fatalf("timed-out result=%+v", result)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("directory command did not time out")
 	}
-	params := url.Values{"workspacePath": {workspace}, "hostId": {targetHost}, "folder": {targetDirectory}}
+	if _, err := bridge.Request(context.Background(), viewID, BridgeCommand{Op: "changeDirectory", Directory: directory}, BridgeRequestOptions{ExpectedEpoch: 1, ExpectedDirectory: directory}); FailureCode(err) != "BUSY" {
+		t.Fatalf("second directory command error=%v, want BUSY", err)
+	}
+	params := bridgeTestStreamParams(bridge, workspace, targetHost, targetDirectory)
 	request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -110,8 +114,14 @@ func TestDirectoryTransitionTimeoutRejectsTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer denied.Body.Close()
-	if denied.StatusCode != http.StatusGone {
-		t.Fatalf("target folder status=%d, want 410", denied.StatusCode)
+	if denied.StatusCode != http.StatusOK {
+		t.Fatalf("target folder status=%d, want 200", denied.StatusCode)
+	}
+	bridge.mu.Lock()
+	confirmedDirectory := bridge.views[viewID].directory
+	bridge.mu.Unlock()
+	if confirmedDirectory != targetDirectory {
+		t.Fatalf("reconciled directory=%q, want %q", confirmedDirectory, targetDirectory)
 	}
 }
 
@@ -229,7 +239,7 @@ func TestLostRegistrationAckRetiresOldHost(t *testing.T) {
 	current, stopCurrent := openTestBridgeStream(t, bridge, viewID, workspace, replacementHost)
 	defer stopCurrent()
 	defer current.Body.Close()
-	params := url.Values{"workspacePath": {workspace}, "hostId": {oldHost}, "folder": {directory}}
+	params := bridgeTestStreamParams(bridge, workspace, oldHost, directory)
 	request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -259,7 +269,7 @@ func TestBridgeCommandResultAndPTY(t *testing.T) {
 	bridge.Assign(viewID, workspace, 1, directory)
 	streamCtx, stopStream := context.WithCancel(context.Background())
 	defer stopStream()
-	params := url.Values{"workspacePath": {workspace}, "hostId": {hostID}, "folder": {directory}}
+	params := bridgeTestStreamParams(bridge, workspace, hostID, directory)
 	req, _ := http.NewRequestWithContext(streamCtx, http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
 	req.Header.Set("Authorization", "Bearer "+bridge.Secret)
 	response, err := http.DefaultClient.Do(req)
@@ -291,7 +301,7 @@ func TestBridgeCommandResultAndPTY(t *testing.T) {
 	if command.Op != "inspect" || command.ID == "" {
 		t.Fatalf("command = %#v", command)
 	}
-	body, _ := json.Marshal(map[string]any{"id": command.ID, "ok": true, "clean": true})
+	body := bridgeTestResultBody(command.ID, viewID, 1, hostID, map[string]any{"ok": true, "clean": true})
 	resultResponse := postBridge(t, bridge, "/bridge/result", body)
 	if resultResponse != http.StatusNoContent {
 		t.Fatalf("result status = %d", resultResponse)
@@ -306,7 +316,7 @@ func TestBridgeCommandResultAndPTY(t *testing.T) {
 	}
 	pty := make(chan string, 1)
 	bridge.OnPTY(func(id string, pid int) error { pty <- fmt.Sprintf("%s:%d", id, pid); return nil })
-	body, _ = json.Marshal(map[string]any{"workspacePath": workspace, "pid": 42})
+	body, _ = json.Marshal(map[string]any{"viewId": viewID, "bindingEpoch": "1", "hostId": hostID, "pid": 42})
 	if status := postBridge(t, bridge, "/bridge/pty", body); status != http.StatusNoContent {
 		t.Fatalf("pty status = %d", status)
 	}
@@ -325,11 +335,11 @@ func TestValidateResultAndPTY(t *testing.T) {
 	if status := postBridge(t, bridge, "/bridge/result", []byte("not-json")); status != http.StatusBadRequest {
 		t.Fatalf("invalid result status = %d", status)
 	}
-	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"workspacePath":"/unknown","pid":4}`)); status != http.StatusForbidden {
+	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"viewId":"11111111-1111-4111-8111-111111111111","bindingEpoch":"1","hostId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","pid":4}`)); status != http.StatusForbidden {
 		t.Fatalf("unknown PTY workspace status = %d", status)
 	}
 	bridge.Assign("11111111-1111-4111-8111-111111111111", "/managed/view.code-workspace", 1, "/managed")
-	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"workspacePath":"/managed/view.code-workspace","pid":0}`)); status != http.StatusBadRequest {
+	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"viewId":"11111111-1111-4111-8111-111111111111","bindingEpoch":"1","hostId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","pid":0}`)); status != http.StatusBadRequest {
 		t.Fatalf("invalid PTY pid status = %d", status)
 	}
 }
@@ -343,6 +353,12 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 	defer bridge.Close(context.Background())
 	const viewID = "11111111-1111-4111-8111-111111111111"
 	bridge.Assign(viewID, "/managed/view.code-workspace", 1, "/managed/old")
+	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	stream := &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
+	bridge.mu.Lock()
+	bridge.views[viewID].hostID = hostID
+	bridge.views[viewID].stream = stream
+	bridge.mu.Unlock()
 	if status := postBridge(t, bridge, "/bridge/result", []byte(`null`)); status != http.StatusBadRequest {
 		t.Fatalf("null result status=%d", status)
 	}
@@ -352,20 +368,28 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":3}`)); status != http.StatusBadRequest {
 		t.Fatalf("non-string ID status=%d", status)
 	}
+	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"missing-identity","ok":true}`)); status != http.StatusBadRequest {
+		t.Fatalf("missing result identity status=%d", status)
+	}
 	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"invalid-documents","documents":"bad"}`)); status != http.StatusBadRequest {
 		t.Fatalf("invalid result shape status=%d", status)
 	}
-	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"unknown","ok":true}`)); status != http.StatusNoContent {
+	if status := postBridge(t, bridge, "/bridge/result", bridgeTestResultBody("unknown", viewID, 1, hostID, map[string]any{"ok": true})); status != http.StatusNoContent {
 		t.Fatalf("unknown ID status=%d", status)
 	}
-	stream := &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
-	bridge.mu.Lock()
-	bridge.views[viewID].hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	bridge.views[viewID].stream = stream
 	result := make(chan BridgeResult, 1)
-	bridge.pending["change"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", expectedDirectory: "/managed/new", stream: stream, result: result}
+	bridge.mu.Lock()
+	bridge.pending["change"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", hostID: hostID, expectedDirectory: "/managed/new", stream: stream, result: result}
 	bridge.mu.Unlock()
-	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"change","ok":true,"directory":"/managed/wrong"}`)); status != http.StatusNoContent {
+	if status := postBridge(t, bridge, "/bridge/result", bridgeTestResultBody("change", viewID, 1, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", map[string]any{"ok": true, "directory": "/managed/new"})); status != http.StatusNoContent {
+		t.Fatalf("wrong-host result status=%d", status)
+	}
+	select {
+	case got := <-result:
+		t.Fatalf("wrong host settled pending result: %+v", got)
+	default:
+	}
+	if status := postBridge(t, bridge, "/bridge/result", bridgeTestResultBody("change", viewID, 1, hostID, map[string]any{"ok": true, "directory": "/managed/wrong"})); status != http.StatusNoContent {
 		t.Fatalf("directory mismatch status=%d", status)
 	}
 	if got := <-result; got.OK || got.Message != "directory change was not applied" {
@@ -373,12 +397,12 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 	}
 	bridge.mu.Lock()
 	stream = &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
-	bridge.views[viewID].hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	bridge.views[viewID].hostID = hostID
 	bridge.views[viewID].stream = stream
 	initiatorEcho := make(chan BridgeResult, 1)
-	bridge.pending["initiator-echo"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", expectedDirectory: "/managed/new", stream: stream, result: initiatorEcho}
+	bridge.pending["initiator-echo"] = &bridgePending{viewID: viewID, epoch: 1, op: "changeDirectory", hostID: hostID, expectedDirectory: "/managed/new", stream: stream, result: initiatorEcho}
 	bridge.mu.Unlock()
-	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"initiator-echo","ok":true,"directory":"/managed/new"}`)); status != http.StatusNoContent {
+	if status := postBridge(t, bridge, "/bridge/result", bridgeTestResultBody("initiator-echo", viewID, 1, hostID, map[string]any{"ok": true, "directory": "/managed/new"})); status != http.StatusNoContent {
 		t.Fatalf("initiator echo status=%d", status)
 	}
 	if got := <-initiatorEcho; got.OK || got.Message != "directory change was not applied" {
@@ -386,10 +410,10 @@ func TestBridgeResultRouteFencing(t *testing.T) {
 	}
 	bridge.mu.Lock()
 	stale := make(chan BridgeResult, 1)
-	bridge.pending["stale"] = &bridgePending{viewID: viewID, epoch: 1, op: "inspect", stream: stream, result: stale}
+	bridge.pending["stale"] = &bridgePending{viewID: viewID, epoch: 1, op: "inspect", hostID: hostID, stream: stream, result: stale}
 	bridge.views[viewID].stream = &bridgeStream{messages: make(chan []byte), retired: make(chan struct{})}
 	bridge.mu.Unlock()
-	if status := postBridge(t, bridge, "/bridge/result", []byte(`{"id":"stale","ok":true}`)); status != http.StatusNoContent {
+	if status := postBridge(t, bridge, "/bridge/result", bridgeTestResultBody("stale", viewID, 1, hostID, map[string]any{"ok": true})); status != http.StatusNoContent {
 		t.Fatalf("stale result status=%d", status)
 	}
 	select {
@@ -412,11 +436,17 @@ func TestBridgePTYFailureBoundaries(t *testing.T) {
 		}
 	}
 	bridge.Assign("11111111-1111-4111-8111-111111111111", "/managed/view.code-workspace", 1, "/managed")
-	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"workspacePath":"/managed/view.code-workspace","pid":42}`)); status != http.StatusNoContent {
+	stream, cancel := openTestBridgeStream(t, bridge, "11111111-1111-4111-8111-111111111111", "/managed/view.code-workspace", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	defer cancel()
+	defer stream.Body.Close()
+	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"viewId":"11111111-1111-4111-8111-111111111111","bindingEpoch":"1","hostId":"bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb","pid":42}`)); status != http.StatusForbidden {
+		t.Fatalf("PTY with wrong host status=%d", status)
+	}
+	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"viewId":"11111111-1111-4111-8111-111111111111","bindingEpoch":"1","hostId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","pid":42}`)); status != http.StatusNoContent {
 		t.Fatalf("PTY event without listeners status=%d", status)
 	}
 	bridge.OnPTY(func(string, int) error { return fmt.Errorf("internal path should not cross boundary") })
-	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"workspacePath":"/managed/view.code-workspace","pid":42}`)); status != http.StatusInternalServerError {
+	if status := postBridge(t, bridge, "/bridge/pty", []byte(`{"viewId":"11111111-1111-4111-8111-111111111111","bindingEpoch":"1","hostId":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","pid":42}`)); status != http.StatusInternalServerError {
 		t.Fatalf("PTY callback failure status=%d", status)
 	}
 }
@@ -478,7 +508,30 @@ func TestBridgeStreamAdmissionBoundaries(t *testing.T) {
 	workspace := filepath.Join(t.TempDir(), "managed", "view.code-workspace")
 	directory := filepath.Dir(workspace)
 	bridge.Assign(viewID, workspace, 1, directory)
+	legacyRequest, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?workspacePath="+url.QueryEscape(workspace)+"&hostId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyRequest.Header.Set("Authorization", "Bearer "+bridge.Secret)
+	legacyResponse, err := http.DefaultClient.Do(legacyRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyResponse.Body.Close()
+	if legacyResponse.StatusCode != http.StatusBadRequest {
+		t.Fatalf("workspace-path-only stream status=%d, want 400", legacyResponse.StatusCode)
+	}
 	status := func(values url.Values) int {
+		if paths, exists := values["workspacePath"]; exists {
+			delete(values, "workspacePath")
+			viewID, epoch := bridgeTestIdentity(bridge, paths[0])
+			if len(paths) > 1 {
+				values["viewId"] = []string{viewID, viewID}
+			} else {
+				values.Set("viewId", viewID)
+			}
+			values.Set("bindingEpoch", strconv.FormatInt(epoch, 10))
+		}
 		request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?"+values.Encode(), nil)
 		if err != nil {
 			t.Fatal(err)
@@ -566,30 +619,19 @@ func TestBridgeHandlerBoundaryResponses(t *testing.T) {
 	if got := request("127.0.0.1:1234", path, "Bearer "+bridge.Secret).Code; got != http.StatusNotFound {
 		t.Fatalf("unknown route status=%d", got)
 	}
-	key := bridge.pathKey(workspace)
 	if err := bridge.Close(context.Background()); err != nil {
 		t.Fatal(err)
 	}
-	bridge.mu.Lock()
-	bridge.byKey[key] = viewID
-	bridge.mu.Unlock()
-	stream := "/bridge/stream?workspacePath=" + url.QueryEscape(workspace) + "&hostId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa&folder=%2Fmanaged"
+	stream := "/bridge/stream?viewId=" + viewID + "&bindingEpoch=1&hostId=aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa&folder=%2Fmanaged"
 	if got := request("127.0.0.1:1234", stream, "Bearer "+bridge.Secret).Code; got != http.StatusServiceUnavailable {
 		t.Fatalf("closed bridge status=%d", got)
 	}
 }
 
-// Verifies canonical path and loopback predicates reject unsafe bridge identities.
-func TestBridgePathAndLoopbackPredicates(t *testing.T) {
-	bridge := &Bridge{}
+// Verifies folder matching remains a directory check, not a bridge identity.
+func TestBridgeDirectoryAndLoopbackPredicates(t *testing.T) {
 	managed := filepath.Join(t.TempDir(), "managed")
 	other := filepath.Join(t.TempDir(), "other")
-	if bridge.pathKey("") != "" {
-		t.Fatal("empty path was canonicalized")
-	}
-	if bridge.pathKey("relative/path") == "" {
-		t.Fatal("relative path did not resolve")
-	}
 	for _, test := range []struct {
 		path, expected string
 		want           bool
@@ -719,9 +761,34 @@ func TestBridgeCommandCancellation(t *testing.T) {
 	}
 }
 
+func bridgeTestIdentity(bridge *Bridge, workspace string) (string, int64) {
+	bridge.mu.Lock()
+	defer bridge.mu.Unlock()
+	for viewID, view := range bridge.views {
+		if view.workspacePath == workspace {
+			return viewID, view.epoch
+		}
+	}
+	return "ffffffff-ffff-4fff-8fff-ffffffffffff", 1
+}
+
+func bridgeTestResultBody(id, viewID string, epoch int64, hostID string, result map[string]any) []byte {
+	payload := map[string]any{"id": id, "viewId": viewID, "bindingEpoch": strconv.FormatInt(epoch, 10), "hostId": hostID}
+	for key, value := range result {
+		payload[key] = value
+	}
+	body, _ := json.Marshal(payload)
+	return body
+}
+
+func bridgeTestStreamParams(bridge *Bridge, workspace, hostID, folder string) url.Values {
+	viewID, epoch := bridgeTestIdentity(bridge, workspace)
+	return url.Values{"viewId": {viewID}, "bindingEpoch": {strconv.FormatInt(epoch, 10)}, "hostId": {hostID}, "folder": {folder}}
+}
+
 func openManualBridgeStream(t *testing.T, ctx context.Context, bridge *Bridge, workspace, hostID, folder string) (*http.Response, *bufio.Reader) {
 	t.Helper()
-	params := url.Values{"workspacePath": {workspace}, "hostId": {hostID}, "folder": {folder}}
+	params := bridgeTestStreamParams(bridge, workspace, hostID, folder)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
 	if err != nil {
 		t.Fatal(err)
@@ -748,7 +815,7 @@ func openTestBridgeStream(t *testing.T, bridge *Bridge, viewID, workspace, hostI
 		folder = view.directory
 	}
 	bridge.mu.Unlock()
-	params := url.Values{"workspacePath": {workspace}, "hostId": {hostID}, "folder": {folder}}
+	params := bridgeTestStreamParams(bridge, workspace, hostID, folder)
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
 	if err != nil {
 		cancel()

@@ -134,6 +134,9 @@ class IdeProtocolTest {
     assertEquals("IDE_CLEANUP_FAILED", IdeProtocol.rejection(code("CLEANUP_FAILED")).reason());
     assertEquals("IDE_CLOSE_CANCELLED", IdeProtocol.rejection(code("CANCELLED")).reason());
     assertEquals("DIRTY", IdeProtocol.rejection(code("DIRTY")).reason());
+    assertEquals("IDE_OUTCOME_UNKNOWN", IdeProtocol.rejection(code("OUTCOME_UNKNOWN")).reason());
+    assertEquals(
+        "IDE_CONTROL_UNAVAILABLE", IdeProtocol.rejection(code("CONTROL_UNAVAILABLE")).reason());
     assertEquals("IDE_UNAVAILABLE", IdeProtocol.rejection(code("BUSY")).reason());
     assertEquals("environment", IdeProtocol.rejection(code("SOMETHING_ELSE")).resource());
     assertEquals(

@@ -78,6 +78,22 @@ class IdeCommandCallerTest {
   }
 
   @Test
+  void unavailableNormalCloseHasARecoverableControlReason() {
+    RecordingTransport transport = new RecordingTransport();
+    transport.sendFailure = new EnvironmentCapabilityUnavailableException("unavailable");
+    IdeCommand close =
+        IdeCommand.newBuilder().setAction(IdeAction.CLOSE_VIEW).setDiscard(false).build();
+
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () -> new IdeCommandCaller(transport, TIMEOUT).callConfirmed(ENV, close));
+
+    assertEquals("IDE_CONTROL_UNAVAILABLE", error.reason());
+    assertEquals(transport.sendFailure, error.getCause());
+  }
+
+  @Test
   void timeoutAbandonsTheInvocationAndReportsUnknownOutcome() {
     RecordingTransport transport = new RecordingTransport();
     IdeCommandCaller caller = new IdeCommandCaller(transport, TIMEOUT);
