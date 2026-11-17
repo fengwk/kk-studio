@@ -64,11 +64,17 @@ final class ThreadTreeSnapshotPublisher {
           return;
         }
         running = true;
-        try {
-          executor.execute(this::projectUntilClean);
-        } catch (RuntimeException rejected) {
+      }
+      try {
+        executor.execute(this::projectUntilClean);
+      } catch (RuntimeException rejected) {
+        boolean notifyFailure;
+        synchronized (this) {
+          notifyFailure = active;
           running = false;
           dirty = false;
+        }
+        if (notifyFailure) {
           onFailure.run();
         }
       }

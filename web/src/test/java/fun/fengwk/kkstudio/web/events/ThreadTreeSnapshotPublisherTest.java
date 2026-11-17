@@ -14,7 +14,9 @@ import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 class ThreadTreeSnapshotPublisherTest {
@@ -79,6 +81,49 @@ class ThreadTreeSnapshotPublisherTest {
     assertEquals(2, deliveries.get());
     assertEquals(1, failures.get());
     handle.close();
+  }
+
+  @Test
+  void executorRejectionCallsFailureOutsideHandleLock() throws InterruptedException {
+    // A cross-thread close must proceed while the rejection callback is running.
+    Queue<Runnable> pending = new ArrayDeque<>();
+    AtomicInteger executions = new AtomicInteger();
+    Executor executor =
+        command -> {
+          if (executions.getAndIncrement() == 0) {
+            pending.add(command);
+          } else {
+            throw new RejectedExecutionException();
+          }
+        };
+    ThreadTreeSnapshotPublisher.Handle[] handleRef = new ThreadTreeSnapshotPublisher.Handle[1];
+    CountDownLatch closedFromFailure = new CountDownLatch(1);
+    AtomicBoolean callbackCouldAcquireHandle = new AtomicBoolean();
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(executor, ignored -> List.of(node("root")));
+    handleRef[0] =
+        publisher.subscribe(
+            UUID.randomUUID(),
+            ignored -> {},
+            () -> {
+              Thread closer =
+                  new Thread(
+                      () -> {
+                        handleRef[0].close();
+                        closedFromFailure.countDown();
+                      });
+              closer.start();
+              try {
+                callbackCouldAcquireHandle.set(closedFromFailure.await(1, TimeUnit.SECONDS));
+              } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+              }
+            });
+
+    pending.remove().run();
+    handleRef[0].request();
+    assertTrue(callbackCouldAcquireHandle.get());
+    assertTrue(closedFromFailure.await(1, TimeUnit.SECONDS));
   }
 
   @Test

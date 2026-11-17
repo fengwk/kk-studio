@@ -47,6 +47,32 @@ describe('coordinateQuerySync', () => {
       { status: 'rejected', reason: undefined },
       { status: 'rejected', reason: undefined },
     ])
+    await coordinateQuerySync(client, key, sync)
+    expect(sync).toHaveBeenCalledTimes(3)
+    client.clear()
+  })
+
+  it('starts a new reconciliation in the microtask after a clean pass', async () => {
+    // Re-enter after the run ends but before promise-finally cleanup used to run.
+    const client = new QueryClient()
+    let followup!: Promise<void>
+    const firstResult = {
+      then(resolve: (value: undefined) => void) {
+        resolve(undefined)
+        queueMicrotask(() => {
+          followup = coordinateQuerySync(client, ['threads', 'snapshot', 'root'], sync)
+        })
+      },
+    } as unknown as Promise<unknown>
+    const sync = vi.fn()
+      .mockImplementationOnce(() => firstResult)
+      .mockResolvedValue(undefined)
+    const first = coordinateQuerySync(client, ['threads', 'snapshot', 'root'], sync)
+
+    await first
+    await followup
+
+    expect(sync).toHaveBeenCalledTimes(2)
     client.clear()
   })
 

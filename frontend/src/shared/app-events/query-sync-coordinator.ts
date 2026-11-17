@@ -19,21 +19,22 @@ export function coordinateQuerySync(
     queries = new Map()
     reconciliations.set(queryClient, queries)
   }
+  const queryMap = queries
   const key = hashKey(queryKey)
-  let reconciliation = queries.get(key)
+  let reconciliation = queryMap.get(key)
   if (reconciliation == null) {
     reconciliation = { running: null, dirty: false }
-    queries.set(key, reconciliation)
+    queryMap.set(key, reconciliation)
   }
   if (reconciliation.running != null) {
     reconciliation.dirty = true
     return reconciliation.running
   }
   const state = reconciliation
-  state.running = (async () => {
+  const run = async (): Promise<void> => {
     let failure: unknown
     let failed = false
-    do {
+    while (true) {
       state.dirty = false
       try {
         await sync()
@@ -43,15 +44,19 @@ export function coordinateQuerySync(
           failed = true
         }
       }
-    } while (state.dirty)
-    if (failed) {
-      throw failure
+      if (state.dirty) {
+        continue
+      }
+      state.running = null
+      if (queryMap.get(key) === state) {
+        queryMap.delete(key)
+      }
+      if (failed) {
+        throw failure
+      }
+      return
     }
-  })().finally(() => {
-    state.running = null
-    if (queries?.get(key) === state && !state.dirty) {
-      queries.delete(key)
-    }
-  })
+  }
+  state.running = run()
   return state.running
 }
