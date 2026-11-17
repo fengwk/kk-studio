@@ -459,7 +459,7 @@ func TestPreviewRejectsNoChangeWithoutEmptyDiff(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := invokeCoding(t, Provider{}, "fs.edit.preview", editArgs(path, replace("b", "b")), nil)
-	if !result.Error || !strings.Contains(result.Contents[0].Text, "Edit 1: old_string and new_string must differ after line-ending normalization") {
+	if !result.Error || !strings.Contains(result.Contents[0].Text, "No changes to apply: the edits would not change the file") {
 		t.Fatalf("result=%#v", result)
 	}
 }

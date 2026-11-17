@@ -103,6 +103,9 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
+	if updated == string(target.decoded) {
+		return errorResult(call.InvocationID, rejectInput("No changes to apply: the edits would not change the file")), nil
+	}
 	encoded, err := encodeEditContent(target.path, target.existing, updated)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
@@ -280,10 +283,6 @@ func planEdits(path string, source *editSource, entries []editEntry) ([]editRepl
 			problems = append(problems, editProblem(number, "old_string must not be empty"))
 			continue
 		}
-		if oldText == newText {
-			problems = append(problems, editProblem(number, "old_string and new_string must differ after line-ending normalization"))
-			continue
-		}
 		starts := findOverlappingText(source.text, oldText)
 		if len(starts) == 0 {
 			problems = append(problems, editProblem(number, missingOldStringMessage(path, source, oldText)))
@@ -319,7 +318,11 @@ func applyEdits(text string, source *editSource, replacements []editReplacement)
 		start := source.originalOffset(replacement.start)
 		end := source.originalOffset(replacement.end)
 		builder.WriteString(text[previous:start])
-		builder.WriteString(replaceLineBreaks(replacement.newText, source.spanLineBreak(text, replacement, start, end)))
+		if source.text[replacement.start:replacement.end] != replacement.newText {
+			builder.WriteString(replaceLineBreaks(replacement.newText, source.spanLineBreak(text, replacement, start, end)))
+		} else {
+			builder.WriteString(text[start:end])
+		}
 		previous = end
 	}
 	builder.WriteString(text[previous:])

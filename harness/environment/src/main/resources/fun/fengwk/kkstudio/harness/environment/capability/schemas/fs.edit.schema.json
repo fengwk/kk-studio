@@ -7,7 +7,7 @@
     },
     "edits": {
       "type": "array",
-      "description": "One or more independent exact replacements, all matched against the original file content. Use one entry for a single change.",
+      "description": "One or more independent exact replacements, all matched and validated against the original file content. A replacement that is unchanged after newline normalization is allowed alongside other changes but is skipped when applying the edits. Use one entry for a single change.",
       "items": {
         "type": "object",
         "properties": {
@@ -17,7 +17,7 @@
           },
           "new_string": {
             "type": "string",
-            "description": "Replacement text. It must differ from old_string and may be empty to delete the matched text."
+            "description": "Replacement text. It may be empty to delete the matched text, or unchanged after newline normalization; unchanged replacements are still validated and counted but not applied."
           },
           "replace_all": {
             "type": "boolean",

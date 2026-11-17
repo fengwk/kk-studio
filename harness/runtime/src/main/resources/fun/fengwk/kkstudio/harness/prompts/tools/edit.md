@@ -17,8 +17,10 @@ Usage:
 - `edit` supports regular text files only. Directories, devices, FIFOs and binary files are
   rejected before any write.
 - Put all independent changes to one file into one call, one `edits` entry per change. Every entry matches the original file content, not the result of earlier entries, and entries must not overlap.
-- An entry fails if `old_string` is not found, or is found more than once without `replace_all`. Add surrounding context to make it unique, or set `replace_all` to change every occurrence, for example to rename an identifier.
+- An entry fails if `old_string` is not found, or is found more than once without `replace_all`. Add surrounding context to make it unique, or set `replace_all` to change every occurrence, for example to rename an identifier. `replace_all` matches must not overlap each other.
+- Every entry is validated against the original file, including entries whose replacement is unchanged after newline normalization. Unchanged entries may be included with changed entries and do not alter their matched bytes; they still count in the replacement total. All expanded entry ranges must be non-overlapping.
 - If any entry fails, nothing is written and the error lists every failing entry with hints, such as text that matches when whitespace is ignored or the lines of duplicate matches. Fix those entries and send the whole call again.
+- If all entries together leave the complete decoded text unchanged, the call reports no changes and does not write the file.
 - Separate `edit` and `write` calls on the same file run in order; each starts from the file left by the previous call, and a later failure does not undo an earlier success. Issue a change that depends on another call's result only after that call has returned.
 - `path` must be an absolute path on the target Environment's file system. A relative path is rejected; no call inherits a previous directory, session default, cwd, or home directory. On Windows targets use a drive-rooted or UNC path such as `C:/src/project`.
 
