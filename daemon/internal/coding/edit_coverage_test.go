@@ -20,7 +20,7 @@ func TestEditCapabilityRejectsInvalidReplacementCases(t *testing.T) {
 		want    string
 	}{
 		{name: "empty-old", content: "abc", old: "", new: "x", want: "Edit 1: old_string must not be empty"},
-		{name: "identical", content: "abc", old: "a\r\nb", new: "a\nb", want: "Edit 1: old_string and new_string must differ after line-ending normalization"},
+		{name: "identical", content: "a\r\nb", old: "a\r\nb", new: "a\nb", want: "No changes to apply: the edits would not change the file"},
 		{name: "not-found", content: "abc", old: "missing", new: "x", want: "Could not find old_string"},
 		{name: "multiple", content: "a a", old: "a", new: "x", want: "Found 2 exact matches"},
 		{name: "overlap", content: "aaa", old: "aa", new: "x", all: true, want: "Found overlapping exact matches for old_string"},

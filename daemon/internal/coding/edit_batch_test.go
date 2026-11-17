@@ -82,12 +82,12 @@ func TestEditReportsAllProblemsInOneResult(t *testing.T) {
 	requireEditProblem(t, path, "keep this line\n", editArgs(path,
 		replace("", "x"),
 		replace("absent", "y"),
-		replace("keep this line", "keep this line"),
+		replace("another missing value", "another missing value"),
 	), func(resolved string) string {
 		return strings.Join([]string{
 			"Edit 1: old_string must not be empty",
 			"Edit 2: Could not find old_string in " + resolved + ".",
-			"Edit 3: old_string and new_string must differ after line-ending normalization",
+			"Edit 3: Could not find old_string in " + resolved + ".",
 		}, "\n")
 	})
 }
@@ -136,7 +136,7 @@ func TestEditHintForDuplicateMatchesCapsLineList(t *testing.T) {
 	}
 	content := strings.Join(lines, "\n") + "\n"
 	path := writeEditFile(t, "duplicates.txt", content)
-	requireEditProblem(t, path, content, editArgs(path, replace("dup = 1", "dup = 2")), func(resolved string) string {
+	requireEditProblem(t, path, content, editArgs(path, replace("dup = 1", "dup = 1")), func(resolved string) string {
 		return "Edit 1: Found 13 exact matches for old_string in " + resolved +
 			" at lines 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 and 3 more. Add surrounding context to make it unique, or set replace_all to true."
 	})
@@ -145,7 +145,7 @@ func TestEditHintForDuplicateMatchesCapsLineList(t *testing.T) {
 // replace_all refuses self-overlapping occurrences instead of dropping replacements.
 func TestEditReplaceAllRejectsSelfOverlap(t *testing.T) {
 	path := writeEditFile(t, "overlap.txt", "aaa\n")
-	requireEditProblem(t, path, "aaa\n", editArgs(path, replaceAll("aa", "x")), func(resolved string) string {
+	requireEditProblem(t, path, "aaa\n", editArgs(path, replaceAll("aa", "aa")), func(resolved string) string {
 		return "Edit 1: Found overlapping exact matches for old_string in " + resolved +
 			" at lines 1, 1; replace_all cannot apply overlapping replacements. Use a more specific old_string."
 	})
@@ -155,7 +155,7 @@ func TestEditReplaceAllRejectsSelfOverlap(t *testing.T) {
 func TestEditReportsCrossEntryOverlap(t *testing.T) {
 	path := writeEditFile(t, "cross.txt", "abab\n")
 	requireEditProblem(t, path, "abab\n", editArgs(path,
-		replaceAll("ab", "XY"),
+		replaceAll("ab", "ab"),
 		replace("aba", "ABA"),
 	), func(resolved string) string {
 		return "Edits 1 and 2 overlap at line 1 in " + resolved + ". Entries must change separate parts of the original file."
@@ -217,18 +217,23 @@ func TestEditRejectsTrailingArguments(t *testing.T) {
 	}
 }
 
-// Entries that normalize to the same text are rejected, so no entry can silently do nothing.
-func TestEditRejectsEntryWithOnlyLineEndingChanges(t *testing.T) {
-	path := writeEditFile(t, "eol-only.txt", "one\r\ntwo\r\n")
-	requireEditProblem(t, path, "one\r\ntwo\r\n", editArgs(path,
+// A normalized no-op still validates and counts, but does not rewrite its original CRLF bytes.
+func TestEditAllowsNoOpEntryWithChangedEntry(t *testing.T) {
+	original := "one\r\ntwo\r\n"
+	path := writeEditFile(t, "eol-noop.txt", original)
+	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path,
 		replace("one\r\n", "one\n"),
 		replace("two", "TWO"),
-	), func(string) string {
-		return "Edit 1: old_string and new_string must differ after line-ending normalization"
-	})
+	), nil)
+	if result.Error || result.Contents[0].Text != "Edited successfully.\nReplacements: 2" {
+		t.Fatalf("edit=%#v", result)
+	}
+	if written := readEditFile(t, path); written != "one\r\nTWO\r\n" {
+		t.Fatalf("written=%q", written)
+	}
 }
 
-// Touching entries whose combined effect rebuilds the original bytes are rejected as no change.
+// Touching entries whose combined effect rebuilds the original decoded text do not write.
 func TestEditRejectsNoOpCall(t *testing.T) {
 	path := writeEditFile(t, "noop.txt", "ab")
 	requireEditProblem(t, path, "ab", editArgs(path,
@@ -237,6 +242,72 @@ func TestEditRejectsNoOpCall(t *testing.T) {
 	), func(string) string {
 		return "No changes to apply: the edits would not change the file"
 	})
+}
+
+// A whole-text no-op is detected before encoding, preserving lossy bytes and avoiding observers.
+func TestEditNoOpDoesNotRewriteLossyFile(t *testing.T) {
+	path := writeFixture(t, "lossy-noop.txt", []byte("bad: \xff\n"))
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := json.Marshal(editArgs(path, replace("\ufffd", "\ufffd")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := 0
+	result, err := editCapability(context.Background(), runtime.CapabilityCall{InvocationID: "noop", Arguments: call}, runtime.CapabilityContext{FileChanged: func(string) { changed++ }})
+	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "No changes to apply: the edits would not change the file") {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content := readEditFile(t, path); content != "bad: \xff\n" || !after.ModTime().Equal(before.ModTime()) || changed != 0 {
+		t.Fatalf("content=%q before=%v after=%v fileChanged=%d", content, before.ModTime(), after.ModTime(), changed)
+	}
+}
+
+// Cancellation at the final checkpoint leaves a multi-entry edit completely unapplied.
+func TestEditCancellationAfterReviewDoesNotWriteOrNotify(t *testing.T) {
+	original := "alpha beta\n"
+	path := writeEditFile(t, "cancelled.txt", original)
+	before, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	call, err := json.Marshal(editArgs(path, replace("alpha", "ALPHA"), replace("beta", "BETA")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	changed := 0
+	ctx := &cancelOnNthErrContext{Context: context.Background(), cancelAt: 2}
+	result, err := editCapability(ctx, runtime.CapabilityCall{InvocationID: "cancelled", Arguments: call}, runtime.CapabilityContext{FileChanged: func(string) { changed++ }})
+	if err != nil || !result.Error || !strings.Contains(result.Contents[0].Text, "Operation cancelled") {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	after, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content := readEditFile(t, path); content != original || !after.ModTime().Equal(before.ModTime()) || changed != 0 {
+		t.Fatalf("content=%q before=%v after=%v fileChanged=%d", content, before.ModTime(), after.ModTime(), changed)
+	}
+}
+
+type cancelOnNthErrContext struct {
+	context.Context
+	errChecks int
+	cancelAt  int
+}
+
+func (ctx *cancelOnNthErrContext) Err() error {
+	ctx.errChecks++
+	if ctx.errChecks >= ctx.cancelAt {
+		return context.Canceled
+	}
+	return nil
 }
 
 // Mixed CRLF, LF and CR preserve every untouched byte and use the span's line break for new lines.
@@ -262,17 +333,17 @@ func TestEditPreservesBOMAndUTF16AcrossEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := invokeCoding(t, Provider{}, "fs.edit", editArgs(path,
-		replace("one", "ONE"),
+		replace("one\r\n", "one\n"),
 		replace("three", "THREE"),
 	), nil)
-	if result.Error {
+	if result.Error || result.Contents[0].Text != "Edited successfully.\nReplacements: 2" {
 		t.Fatalf("edit failed: %#v", result)
 	}
 	decoded, encoding, err := decodeFixture([]byte(readEditFile(t, path)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if encoding.Name != "UTF-16LE" || !encoding.BOM || decoded != "ONE\r\ntwo\r\nTHREE\r\n" {
+	if encoding.Name != "UTF-16LE" || !encoding.BOM || decoded != "one\r\ntwo\r\nTHREE\r\n" {
 		t.Fatalf("decoded=%q encoding=%#v", decoded, encoding)
 	}
 }
@@ -280,7 +351,7 @@ func TestEditPreservesBOMAndUTF16AcrossEntries(t *testing.T) {
 // Preview and execution compute the same review for a multi-entry call.
 func TestEditPreviewDiffMatchesExecution(t *testing.T) {
 	path := writeEditFile(t, "review.txt", "one\ntwo\nthree\n")
-	args := editArgs(path, replace("one", "ONE"), replace("three", "THREE"))
+	args := editArgs(path, replace("one", "ONE"), replace("two", "two"), replace("three", "THREE"))
 	preview := invokeCoding(t, Provider{}, "fs.edit.preview", args, nil)
 	if preview.Error {
 		t.Fatalf("preview=%#v", preview)
@@ -290,7 +361,7 @@ func TestEditPreviewDiffMatchesExecution(t *testing.T) {
 		t.Fatal(err)
 	}
 	commit := invokeCoding(t, Provider{}, "fs.edit", args, &runtime.ExpectedFile{Path: review.Path, SHA256: review.SHA256})
-	if commit.Error {
+	if commit.Error || commit.Contents[0].Text != "Edited successfully.\nReplacements: 3" {
 		t.Fatalf("commit=%#v", commit)
 	}
 	var details struct {
