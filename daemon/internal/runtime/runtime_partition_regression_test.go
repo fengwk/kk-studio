@@ -78,7 +78,9 @@ func TestRuntimeFatalConfigurationDoesNotReconnect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	// The deadline is only a deadlock watchdog, not a runtime latency requirement.
+	// Race-enabled cross-platform runners may take longer than one scheduling slice to start.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := r.Run(ctx); !errors.Is(err, ErrRuntimeFatal) || err.Error() != "runtime entered a fatal state: environment configuration is inconsistent" {
 		t.Fatalf("fatal configuration run error = %v", err)
