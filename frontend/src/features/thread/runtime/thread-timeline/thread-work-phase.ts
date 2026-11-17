@@ -71,6 +71,10 @@ export function deriveThreadWorkPhase(snapshot: ThreadWorkSnapshot): ThreadWorkP
     return { kind: 'waiting', reason: 'exit-confirmation' }
   }
 
+  if (snapshot.toolInvocations.some((tool) => tool.status === 'WAITING_CHILD')) {
+    return { kind: 'waiting', reason: 'async-result' }
+  }
+
   if (
     output?.status === 'READY'
     || snapshot.toolInvocations.some((tool) => tool.status === 'READY')

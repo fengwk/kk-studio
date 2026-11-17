@@ -95,7 +95,9 @@ export function ToolMessageBlock({
   const taskReceipt = isTask ? parseTaskReceipt(view.resultMessage?.details) : null
   const stateLabel = view.executionState === 'environment'
     ? t('ai.runtime.tool.environment', { environment: message.requiredEnvironmentName ?? '' })
-    : taskReceipt != null
+    : view.executionState === 'waiting-child'
+      ? t('ai.runtime.tool.waitingChild')
+      : taskReceipt != null
       ? t(`ai.runtime.tool.task.${taskReceipt.status}`)
       : t(`ai.runtime.tool.${view.executionState}`)
 
@@ -330,7 +332,7 @@ export function ToolMessageBlock({
         header={(
           <span className="thread-tool-summary">
             <span className="thread-tool-name">{summary.name}</span>
-            {view.executionState === 'environment'
+            {view.executionState === 'environment' || view.executionState === 'waiting-child'
               ? <span className="thread-tool-state-label"> · {stateLabel}</span> : null}
             {message.invocationStatus === 'READY' && message.queuedBehindToolCallUnfinished
               ? (

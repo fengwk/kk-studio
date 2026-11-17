@@ -39,6 +39,10 @@ describe('deriveThreadWorkPhase', () => {
     expect(phase({ outputStatus: 'SUCCEEDED' })).toEqual({ kind: 'materializing-result' })
     expect(phase({ outputStatus: 'READY' })).toEqual({ kind: 'next-step' })
     expect(phase({ threadStatus: 'WAITING' })).toEqual({ kind: 'waiting', reason: 'async-result' })
+    expect(phase({ threadStatus: 'RUNNING', toolStatus: 'WAITING_CHILD' }))
+      .toEqual({ kind: 'waiting', reason: 'async-result' })
+    expect(phase({ threadStatus: 'RUNNING', toolStatus: 'WAITING_CHILD', outputStatus: 'RUNNING' }))
+      .toEqual({ kind: 'model-running' })
     expect(phase()).toEqual({ kind: 'none' })
   })
 
