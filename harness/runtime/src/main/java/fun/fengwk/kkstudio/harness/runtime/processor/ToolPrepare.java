@@ -6,6 +6,7 @@ import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitFact;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
 import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
+import fun.fengwk.kkstudio.harness.api.join.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoinReceipt;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
@@ -13,7 +14,6 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolApproval;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
-import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputJsonCodec;
 import fun.fengwk.kkstudio.harness.runtime.input.HumanInputTool;
 import fun.fengwk.kkstudio.harness.runtime.join.ThreadJoinProjector;
@@ -93,7 +93,7 @@ final class ToolPrepare {
                     () ->
                         new IllegalStateException(
                             "WAITING_CHILD task lost its durable Join " + tool.id()));
-        TaskTool.requireMatchingJoin(tool, join);
+        SubagentTaskRequest.requireMatchingJoin(tool, join);
         yield settleTaskJoin(tx, claim, thread, tool, join, now);
       }
       case RUNNING -> prepareRunning(tx, claim, thread, tool, now, leaseConfig);
@@ -228,7 +228,7 @@ final class ToolPrepare {
     if ("task".equals(tool.call().toolName())) {
       ThreadJoin join = tx.joins().find(tool.id()).orElse(null);
       if (join != null) {
-        TaskTool.requireMatchingJoin(tool, join);
+        SubagentTaskRequest.requireMatchingJoin(tool, join);
         return settleTaskJoin(tx, claim, thread, tool, join, now);
       }
     }
@@ -333,7 +333,7 @@ final class ToolPrepare {
         .update(
             List.of(
                 tool.succeed(
-                    TaskTool.resultFromJoin(
+                    SubagentTaskRequest.resultFromJoin(
                         TASK_RESULT_JSON, tool.call().id(), sessionId, join, receipt),
                     now)));
     tx.threads().update(thread.touchVersion(now));

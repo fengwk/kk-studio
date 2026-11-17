@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.harness.api.history.SubagentBinding;
 import fun.fengwk.kkstudio.harness.api.history.TurnCapabilities;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
+import fun.fengwk.kkstudio.harness.api.join.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.api.join.ThreadJoin;
 import fun.fengwk.kkstudio.harness.api.session.Session;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
@@ -46,7 +47,6 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentConfig;
 import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskAcceptance;
-import fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest;
 import fun.fengwk.kkstudio.harness.runtime.HarnessRuntime;
 import fun.fengwk.kkstudio.platform.agenttask.AgentTaskService;
 
@@ -207,7 +207,7 @@ class SubagentTaskRunnerTest {
     assertEquals(parentHeadEntryId, accepted1.expectedParentHeadEntryId());
     assertEquals(AGENT, accepted1.agent());
     assertEquals(10, accepted1.budget().maxTurns().intValue());
-    assertEquals(SubagentTaskRunner.requestHash(request(null, null)), accepted1.requestHash());
+    assertEquals(request(null, null).requestHash(), accepted1.requestHash());
     assertEquals(3, accepted1.budget().maxDepth());
     assertEquals(4, accepted1.budget().maxConcurrentChildren());
     assertEquals(Integer.MAX_VALUE, accepted1.budget().maxConcurrentThreads());
@@ -260,12 +260,7 @@ class SubagentTaskRunnerTest {
     when(runtime.findJoin(invocationId))
         .thenReturn(
             Optional.of(
-                join(
-                    parentThreadId,
-                    childThreadId,
-                    SubagentTaskRunner.requestHash(request(null, null)),
-                    AGENT,
-                    10)));
+                join(parentThreadId, childThreadId, request(null, null).requestHash(), AGENT, 10)));
 
     SubagentTaskAcceptance acceptance = acceptAsync(runner(config()), request(null, null));
 
@@ -283,12 +278,7 @@ class SubagentTaskRunnerTest {
     when(runtime.findJoin(invocationId))
         .thenReturn(
             Optional.of(
-                join(
-                    parentThreadId,
-                    childThreadId,
-                    SubagentTaskRunner.requestHash(request(7, null)),
-                    AGENT,
-                    7)));
+                join(parentThreadId, childThreadId, request(7, null).requestHash(), AGENT, 7)));
 
     List<SubagentTaskRequest> otherDelegations =
         List.of(
@@ -320,12 +310,7 @@ class SubagentTaskRunnerTest {
     when(runtime.findJoin(invocationId))
         .thenReturn(
             Optional.of(
-                join(
-                    parentThreadId,
-                    childThreadId,
-                    SubagentTaskRunner.requestHash(request(null, null)),
-                    AGENT,
-                    10)));
+                join(parentThreadId, childThreadId, request(null, null).requestHash(), AGENT, 10)));
     ThreadSnapshot child = mock(ThreadSnapshot.class);
     when(child.thread())
         .thenReturn(
@@ -393,13 +378,7 @@ class SubagentTaskRunnerTest {
     SubagentTaskRequest original = request(null, childThreadId);
     when(runtime.findJoin(invocationId))
         .thenReturn(
-            Optional.of(
-                join(
-                    parentThreadId,
-                    childThreadId,
-                    SubagentTaskRunner.requestHash(original),
-                    AGENT,
-                    10)));
+            Optional.of(join(parentThreadId, childThreadId, original.requestHash(), AGENT, 10)));
     SubagentTaskRequest changedAgent =
         new SubagentTaskRequest(
             invocationId, parentThreadId, "do the work", "beta", null, childThreadId);
@@ -531,12 +510,7 @@ class SubagentTaskRunnerTest {
         .thenReturn(Optional.empty())
         .thenReturn(
             Optional.of(
-                join(
-                    parentThreadId,
-                    childThreadId,
-                    SubagentTaskRunner.requestHash(request(null, null)),
-                    AGENT,
-                    10)));
+                join(parentThreadId, childThreadId, request(null, null).requestHash(), AGENT, 10)));
     ThreadSnapshot child = mock(ThreadSnapshot.class);
     when(child.thread())
         .thenReturn(
@@ -636,12 +610,7 @@ class SubagentTaskRunnerTest {
     when(runtime.findJoin(invocationId))
         .thenReturn(
             Optional.of(
-                join(
-                    parentThreadId,
-                    childThreadId,
-                    SubagentTaskRunner.requestHash(request(null, null)),
-                    AGENT,
-                    10)));
+                join(parentThreadId, childThreadId, request(null, null).requestHash(), AGENT, 10)));
     doThrow(DomainException.notFound("thread", "child gone"))
         .when(runtime)
         .getThreadSnapshot(childThreadId);
@@ -705,12 +674,7 @@ class SubagentTaskRunnerTest {
     when(runtime.findJoin(invocationId))
         .thenReturn(
             Optional.of(
-                join(
-                    parentThreadId,
-                    childThreadId,
-                    SubagentTaskRunner.requestHash(request(null, null)),
-                    AGENT,
-                    10)));
+                join(parentThreadId, childThreadId, request(null, null).requestHash(), AGENT, 10)));
     DomainException missing = DomainException.notFound("thread", "gone");
     doThrow(missing).when(runtime).getThreadSnapshot(childThreadId);
     SubagentTaskRejectedException rejected =
@@ -842,14 +806,10 @@ class SubagentTaskRunnerTest {
     assertNotEquals(
         SubagentTaskRunner.derive(invocationId, "kk-studio/harness/subagent/thread/"),
         SubagentTaskRunner.derive(other, "kk-studio/harness/subagent/thread/"));
-    assertEquals(64, SubagentTaskRunner.requestHash(request(null, null)).length());
+    assertEquals(64, request(null, null).requestHash().length());
     // 省略 max_turns 与显式值必须是不同身份；同一请求必须稳定。
-    assertEquals(
-        SubagentTaskRunner.requestHash(request(null, null)),
-        SubagentTaskRunner.requestHash(request(null, null)));
-    assertNotEquals(
-        SubagentTaskRunner.requestHash(request(null, null)),
-        SubagentTaskRunner.requestHash(request(10, null)));
+    assertEquals(request(null, null).requestHash(), request(null, null).requestHash());
+    assertNotEquals(request(null, null).requestHash(), request(10, null).requestHash());
   }
 
   private static ThreadJoin join(

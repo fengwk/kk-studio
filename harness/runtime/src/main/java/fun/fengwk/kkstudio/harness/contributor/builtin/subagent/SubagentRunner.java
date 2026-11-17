@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.harness.contributor.builtin.subagent;
 
+import fun.fengwk.kkstudio.harness.api.join.SubagentTaskRequest;
+
 import java.util.function.Consumer;
 
 /**

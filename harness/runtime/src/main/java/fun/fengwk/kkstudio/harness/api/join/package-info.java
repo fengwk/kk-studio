@@ -8,6 +8,9 @@
  * fun.fengwk.kkstudio.harness.api.join.ThreadJoinCompletionRenderer} 把该凭据渲染为父 Thread 接收的 subagent
  * completion XML 消息。
  *
- * <p>持久化、入队与交付标记、历史投影都在 runtime 侧实现；本包只描述状态与证据的形状，不接触 Store、Driver 或 Work。
+ * <p>{@link fun.fengwk.kkstudio.harness.api.join.SubagentTaskRequest} 定义 task Join
+ * 的规范参数解析、幂等身份、durable Join 校验与 receipt 结果投影。该协议只依赖持久事实与值类型，不调用 Store、Driver、Tool 或 Work。
+ *
+ * <p>持久化、入队与交付标记、历史投影都在 runtime 侧实现；本包不接触 Store、Driver 或 Work。
  */
 package fun.fengwk.kkstudio.harness.api.join;

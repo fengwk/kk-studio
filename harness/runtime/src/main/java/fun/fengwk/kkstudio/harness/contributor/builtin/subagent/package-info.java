@@ -3,7 +3,7 @@
  *
  * <p>{@link fun.fengwk.kkstudio.harness.contributor.builtin.subagent.TaskTool} 作为内部（{@code
  * ToolVisibility.INTERNAL}）工具注册， 负责解析模型委派调用的参数契约并转化为 {@link
- * fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentTaskRequest}， 委托 {@link
+ * fun.fengwk.kkstudio.harness.api.join.SubagentTaskRequest}， 委托 {@link
  * fun.fengwk.kkstudio.harness.contributor.builtin.subagent.SubagentRunner} 在独立的 Subagent Session 与
  * Thread 中执行任务。
  *
