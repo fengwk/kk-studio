@@ -8,8 +8,9 @@ import { eventStatusText } from '@/features/thread/runtime/thread-timeline/threa
 import type {
   RealtimeModelStream,
 } from '@/features/thread/runtime/thread-realtime/model-stream'
-import type { HarnessActiveAssistantOutputDTO, HarnessGenerationFailureDTO, HarnessSessionEntryDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
+import { ENTRY_TYPE_VALUES, type HarnessActiveAssistantOutputDTO, type HarnessGenerationFailureDTO, type HarnessSessionEntryDTO, type ToolInvocationDTO } from '@/shared/api/generated/contracts'
 import type { GenerationStatus } from '@/shared/api/generated/contracts'
+import { translate } from '@/shared/i18n'
 
 /**
  * Event 投影矩阵（冻结方案）：每个 durable Entry 恰好一条 ThreadEventRecord；
@@ -140,6 +141,46 @@ function build(
 }
 
 describe('buildThreadEventTimeline', () => {
+  it.each(ENTRY_TYPE_VALUES)('%s is projected without falling through to unknown', (entryType) => {
+    const payload: Record<string, unknown> = {
+      message: { role: 'USER', contents: [{ type: 'text', text: 'input' }] },
+    }
+    if (entryType === 'MODEL_ATTEMPT_FAILURE') {
+      Object.assign(payload, {
+        attempt: { attempt: 1, sequence: 0, text: 'partial', thinking: '' },
+        error: { code: 'TRANSIENT', message: 'failed' },
+        retryAt: '2026-01-01T00:00:05Z',
+      })
+    }
+    const [record] = build([entry(`entry-${entryType}`, entryType, payload)])
+    expect(record).toBeDefined()
+    expect(record?.kind).not.toBe('UNKNOWN_ENTRY')
+    if (entryType === 'SYSTEM') {
+      expect(record).toMatchObject({ kind: 'SYSTEM', title: 'SYSTEM' })
+    }
+    if (entryType === 'NATIVE_COMPACTION') {
+      expect(record).toMatchObject({ kind: 'NATIVE_COMPACTION', title: 'NATIVE_COMPACTION' })
+    }
+  })
+  it('summarizes SYSTEM section and tool changes instead of exposing its payload as the summary', () => {
+    const [event] = build([entry('system-delta', 'SYSTEM', {
+      sections: { updated: 'content' },
+      removedSections: ['removed'],
+      addedTools: [{ name: 'added' }],
+      removedTools: ['deleted'],
+      addedHostedTools: [{ name: 'hosted' }],
+      removedHostedTools: ['unhosted'],
+    })])
+
+    expect(event?.kind).toBe('SYSTEM')
+    expect(event?.summary).toContain(translate('ai.runtime.event.system.sectionUpdated', { name: 'updated' }))
+    expect(event?.summary).toContain(translate('ai.runtime.event.system.sectionRemoved', { name: 'removed' }))
+    expect(event?.summary).toContain(translate('ai.runtime.event.system.toolAdded', { name: 'added' }))
+    expect(event?.summary).toContain(translate('ai.runtime.event.system.toolRemoved', { name: 'deleted' }))
+    expect(event?.summary).toContain(translate('ai.runtime.event.system.hostedToolAdded', { name: 'hosted' }))
+    expect(event?.summary).toContain(translate('ai.runtime.event.system.hostedToolRemoved', { name: 'unhosted' }))
+  })
+
   it('projects every durable Entry kind exactly once with turn identity and valid rawJson', () => {
     const entries: HarnessSessionEntryDTO[] = [
       entry('root-1', 'ROOT', {}),
@@ -167,6 +208,11 @@ describe('buildThreadEventTimeline', () => {
         },
         ownerThreadId: 't1',
       }),
+      entry('system-1', 'SYSTEM', { baseline: true, sections: { base: 'system text' } }),
+      entry('native-compact-1', 'NATIVE_COMPACTION', {
+        trigger: 'CONTEXT_LIMIT', preTokens: 100, postTokens: 40,
+        cumulativeDroppedTokens: 60, durationMs: 12,
+      }),
       entry('unknown-1', 'UNKNOWN_TYPE' as EntryType, {}),
     ]
 
@@ -183,6 +229,8 @@ describe('buildThreadEventTimeline', () => {
       'entry:compact-1',
       'entry:end-1',
       'entry:settings-1',
+      'entry:system-1',
+      'entry:native-compact-1',
       'entry:unknown-1',
     ])
     // 每个 durable Entry 恰好一条记录。
@@ -198,8 +246,16 @@ describe('buildThreadEventTimeline', () => {
       'COMPACTION',
       'TURN_END',
       'SETTINGS',
+      'SYSTEM',
+      'NATIVE_COMPACTION',
       'UNKNOWN_ENTRY',
     ])
+    expect(events[10]?.summary).toContain(translate('ai.runtime.event.system.baseline', { sections: 'base' }))
+    expect(events[11]?.summary).toContain(translate('ai.runtime.event.nativeCompaction.tokens', {
+      before: '100',
+      after: '40',
+    }))
+    expect(events[11]?.summary).toContain(translate('ai.runtime.event.nativeCompaction.dropped', { count: '60' }))
     expect(events.map((event) => event.status)).toEqual([
       'completed',
       'completed',
@@ -208,6 +264,8 @@ describe('buildThreadEventTimeline', () => {
       'failed',
       'failed',
       'stopped',
+      'completed',
+      'completed',
       'completed',
       'completed',
       'completed',
@@ -231,6 +289,8 @@ describe('buildThreadEventTimeline', () => {
       'COMPACTION',
       'TURN_END',
       'SETTINGS',
+      'SYSTEM',
+      'NATIVE_COMPACTION',
       '未知条目：UNKNOWN_TYPE',
     ])
     expect(events[2]!.summary).toBe(JSON.stringify(messagePayload('USER', [{ type: 'text', text: 'hi' }])))

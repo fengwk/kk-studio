@@ -433,7 +433,7 @@ for (const scenario of ['thread-child', 'pane-child']) {
     const copy = header.getByRole('button', { name: '复制 thread ID' })
     const title = header.locator(scenario === 'thread-child' ? 'h1' : '.agent-pane-thread-title')
 
-    for (const width of [1280, 480, 390, 320]) {
+    for (const width of [1440, 480, 390, 320]) {
       await page.setViewportSize({ width, height: 820 })
       await expect(shortId).toHaveText(CHILD_ID.slice(0, 8))
       await expect(shortId).toHaveAttribute('title', CHILD_ID)

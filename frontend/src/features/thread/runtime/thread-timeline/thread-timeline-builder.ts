@@ -165,6 +165,7 @@ function projectQueuedMessages(
       idempotencyKey: command.idempotencyKey,
       role: queuedMessage.role,
       text: queuedMessage.text,
+      contents: queuedMessage.contents,
       sequence: command.sequence,
     })
   }

@@ -62,6 +62,53 @@ export function projectEntryRecord(
   }
 
   switch (entry.entryType) {
+    case 'SYSTEM': {
+      const baseline = payload.baseline === true
+      const sectionNames = Object.keys(asRecord(payload.sections))
+      const removedSections = stringList(payload.removedSections)
+      const addedTools = namedList(payload.addedTools)
+      const removedTools = stringList(payload.removedTools)
+      const addedHostedTools = namedList(payload.addedHostedTools)
+      const removedHostedTools = stringList(payload.removedHostedTools)
+      const changes = [
+        ...sectionNames.map((name) => translate('ai.runtime.event.system.sectionUpdated', { name })),
+        ...removedSections.map((name) => translate('ai.runtime.event.system.sectionRemoved', { name })),
+        ...addedTools.map((name) => translate('ai.runtime.event.system.toolAdded', { name })),
+        ...removedTools.map((name) => translate('ai.runtime.event.system.toolRemoved', { name })),
+        ...addedHostedTools.map((name) => translate('ai.runtime.event.system.hostedToolAdded', { name })),
+        ...removedHostedTools.map((name) => translate('ai.runtime.event.system.hostedToolRemoved', { name })),
+      ]
+      return {
+        ...base,
+        kind: 'SYSTEM',
+        status: 'completed',
+        title: 'SYSTEM',
+        summary: baseline
+          ? translate('ai.runtime.event.system.baseline', { sections: sectionNames.join(', ') })
+          : changes.join(' · '),
+        details: withTime(base.details, entry.createdAt),
+      }
+    }
+    case 'NATIVE_COMPACTION': {
+      const values = [
+        getString(payload.trigger),
+        tokenSummary(payload.preTokens, payload.postTokens),
+        scalarText(payload.cumulativeDroppedTokens)
+          ? translate('ai.runtime.event.nativeCompaction.dropped', { count: scalarText(payload.cumulativeDroppedTokens) })
+          : '',
+        scalarText(payload.durationMs)
+          ? translate('ai.runtime.event.nativeCompaction.duration', { duration: scalarText(payload.durationMs) })
+          : '',
+      ].filter(Boolean)
+      return {
+        ...base,
+        kind: 'NATIVE_COMPACTION',
+        status: 'completed',
+        title: 'NATIVE_COMPACTION',
+        summary: values.join(' · '),
+        details: withTime(base.details, entry.createdAt),
+      }
+    }
     case 'ROOT':
       return {
         ...base,
@@ -301,6 +348,30 @@ export function projectEntryRecord(
         details: withTime(base.details, entry.createdAt),
       }
   }
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string' && item.length > 0)
+    : []
+}
+
+function namedList(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map((item) => getString(asRecord(item).name)).filter(Boolean)
+    : []
+}
+
+function tokenSummary(before: unknown, after: unknown): string {
+  const beforeText = scalarText(before)
+  const afterText = scalarText(after)
+  if (!beforeText && !afterText) {
+    return ''
+  }
+  return translate('ai.runtime.event.nativeCompaction.tokens', {
+    before: beforeText || '?',
+    after: afterText || '?',
+  })
 }
 
 function projectMessageRecord(

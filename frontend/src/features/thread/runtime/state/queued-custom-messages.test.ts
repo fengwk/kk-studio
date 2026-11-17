@@ -59,11 +59,16 @@ describe('extractQueuedCustomMessages', () => {
         id: 'key-10',
         sequence: '10',
         text: '请优先补充单测',
+        contents: [{ type: 'text', text: '请优先补充单测' }],
       },
       {
         id: 'key-11',
         sequence: '11',
         text: '第一行要求\n第二行要求',
+        contents: [
+          { type: 'text', text: '第一行要求' },
+          { type: 'text', text: '第二行要求' },
+        ],
       },
     ])
   })
@@ -103,6 +108,43 @@ describe('extractQueuedCustomMessages', () => {
 
     expect(result).toHaveLength(1)
     expect(result[0]?.sequence).toBe('4')
+  })
+
+  it('keeps resource-only and mixed CUSTOM_MESSAGE content in stable order', () => {
+    const blobId = 'blob-stable-1'
+    const result = extractQueuedCustomMessages([
+      createCommand({
+        payload: {
+          message: {
+            role: 'USER',
+            contents: [
+              { type: 'text', text: 'before' },
+              { type: 'resource', blobId, name: 'asset.png', mediaType: 'image/png' },
+              { type: 'text', text: 'after' },
+            ],
+          },
+        },
+      }),
+      createCommand({
+        idempotencyKey: 'resource-only',
+        sequence: '2',
+        payload: {
+          message: {
+            role: 'USER',
+            contents: [{ type: 'resource', blobId, name: 'asset.png', mediaType: 'image/png' }],
+          },
+        },
+      }),
+    ])
+
+    expect(result.map((message) => message.contents)).toEqual([
+      [
+        { type: 'text', text: 'before' },
+        { type: 'resource', attachment: expect.objectContaining({ blobId, name: 'asset.png' }) },
+        { type: 'text', text: 'after' },
+      ],
+      [{ type: 'resource', attachment: expect.objectContaining({ blobId, name: 'asset.png' }) }],
+    ])
   })
 
   it('忽略空文本或空 contents，不生成空项', () => {
@@ -164,6 +206,7 @@ describe('extractQueuedCustomMessages', () => {
         id: 'cmd-1',
         sequence: '7',
         text: '规范文本',
+        contents: [{ type: 'text', text: '规范文本' }],
       },
     ])
   })

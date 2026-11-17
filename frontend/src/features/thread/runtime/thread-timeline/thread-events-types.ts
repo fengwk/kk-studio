@@ -12,6 +12,8 @@ type ThreadEventSource = 'entry' | 'active-model' | 'active-tool' | 'attempt-fai
 
 type ThreadEventKind =
   | 'ROOT'
+  | 'SYSTEM'
+  | 'NATIVE_COMPACTION'
   | 'TURN_START'
   | 'SETTINGS'
   | 'USER_MESSAGE'

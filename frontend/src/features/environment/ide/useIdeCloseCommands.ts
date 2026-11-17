@@ -46,7 +46,7 @@ export function useIdeCloseCommands({
   async function closeEnvironment(environmentId: string, discard: boolean): Promise<IdeCloseResult> {
     const view = viewsRef.current[environmentId]
     if (view == null) {
-      return { ok: true, dirty: false }
+      return { ok: true, requiresForceConfirmation: false }
     }
     if (
       view.bindingEpoch == null
@@ -55,7 +55,7 @@ export function useIdeCloseCommands({
       || view.status === 'binding'
       || view.status === 'reconciling'
     ) {
-      return { ok: false, dirty: false, message: 'view-not-ready' }
+      return { ok: false, requiresForceConfirmation: false, message: 'view-not-ready' }
     }
     updateView(environmentId, view.attempt, {
       closeInFlight: true,
@@ -77,7 +77,7 @@ export function useIdeCloseCommands({
       await closeIdeView(environmentId, view.viewId, body)
       const current = viewsRef.current[environmentId]
       if (!isSameBinding(current, view)) {
-        return { ok: false, dirty: false, message: 'binding-changed' }
+        return { ok: false, requiresForceConfirmation: false, message: 'binding-changed' }
       }
       const next = { ...viewsRef.current }
       delete next[environmentId]
@@ -85,24 +85,32 @@ export function useIdeCloseCommands({
       commitViews(next)
       writeSession()
       registerUsageQuiet()
-      return { ok: true, dirty: false }
+      return { ok: true, requiresForceConfirmation: false }
     } catch (error) {
       const current = viewsRef.current[environmentId]
       if (!isSameBinding(current, view)) {
-        return { ok: false, dirty: false, message: 'binding-changed' }
+        return { ok: false, requiresForceConfirmation: false, message: 'binding-changed' }
       }
-      const unknown = isUnknownIdeFailure(error) || ideFailureReason(error) === 'IDE_OUTCOME_UNKNOWN'
-      const dirty = !discard && unknown
-      const closeError = dirty
+      const reason = ideFailureReason(error)
+      const outcomeUnknown = isUnknownIdeFailure(error) || reason === 'IDE_OUTCOME_UNKNOWN'
+      const controlUnavailable = reason === 'IDE_CONTROL_UNAVAILABLE'
+      const requiresForceConfirmation = !discard && (outcomeUnknown || controlUnavailable)
+      const closeError = requiresForceConfirmation
         ? undefined
-        : unknown
+        : outcomeUnknown
           ? 'close-result-unknown'
           : safeIdeError(error) || 'close-failed'
       updateView(environmentId, view.attempt, {
         closeInFlight: false,
         closeError,
       })
-      return { ok: false, dirty, message: safeIdeError(error) }
+      return {
+        ok: false,
+        requiresForceConfirmation,
+        message: requiresForceConfirmation
+          ? (controlUnavailable ? 'close-control-unavailable' : 'close-result-unknown')
+          : safeIdeError(error),
+      }
     }
   }
 

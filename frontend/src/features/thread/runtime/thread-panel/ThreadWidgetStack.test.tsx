@@ -24,6 +24,41 @@ describe('ThreadWidgetStack', () => {
     expect(workingBox).not.toContainElement(queueBox)
   })
 
+  it('renders pure and mixed queued resources in their original order', () => {
+    render(
+      <ThreadWidgetStack
+        working={false}
+        queuedMessages={[{
+          idempotencyKey: 'input-resource',
+          role: 'user',
+          text: 'before after',
+          sequence: '1',
+          contents: [
+            { type: 'text', text: 'before' },
+            {
+              type: 'resource',
+              attachment: {
+                type: 'image',
+                name: 'asset.png',
+                mime: 'image/png',
+                data: '',
+                blobId: 'f2000000-0000-4000-8000-000000000001',
+              },
+            },
+            { type: 'text', text: 'after' },
+          ],
+        }]}
+      />,
+    )
+
+    const content = screen.getByText('queued').closest('li')?.querySelector('.thread-input-queue-content')
+    expect(content?.children).toHaveLength(3)
+    expect(content?.children[0]).toHaveTextContent('before')
+    expect(content?.children[1]).toHaveClass('resource-attachment-link')
+    expect(content?.children[1]).toHaveTextContent('[asset.png]')
+    expect(content?.children[2]).toHaveTextContent('after')
+  })
+
   it('localizes the working strip copy (zh-CN 执行中 / en-US Working...)', () => {
     render(<ThreadWidgetStack working />)
     expect(screen.getByText('执行中')).toBeInTheDocument()

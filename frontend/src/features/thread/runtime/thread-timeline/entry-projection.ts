@@ -77,6 +77,11 @@ export function projectDurableEntry(
     messages.push(projectForkEntry(entry, payload))
     return
   }
+  if (entryType === 'SYSTEM' || entryType === 'NATIVE_COMPACTION') {
+    // SYSTEM 是模型上下文审计事实，不能作为可编辑/可见的大段 prompt 插入对话。
+    // 原生压缩只在 Event 审计视图展示，不改写当前对话 transcript。
+    return
+  }
   if (entryType !== 'MESSAGE' && entryType !== 'CUSTOM_MESSAGE') {
     messages.push(projectUnknownEntry(entry))
     return

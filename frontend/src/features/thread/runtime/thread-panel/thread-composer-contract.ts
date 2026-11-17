@@ -10,6 +10,12 @@ export interface ThreadComposerHandle {
   focus: () => void
 }
 
+/** A recalled message retains its ordered resource parts as well as its text summary. */
+export interface ComposerHistoryMessage {
+  text: string
+  parts: ComposerPart[]
+}
+
 /**
  * Composer 的输入契约。
  *
@@ -32,8 +38,8 @@ export interface ThreadComposerProps {
   onSubmit: (payload: ComposerPart[], localDraft: ComposerPart[]) => void
   onCommand: (command: ThreadCommand) => void
   commands?: ThreadCommand[]
-  historicalUserMessages?: readonly string[]
-  queuedUserMessages?: readonly string[]
+  historicalUserMessages?: readonly (string | ComposerHistoryMessage)[]
+  queuedUserMessages?: readonly (string | ComposerHistoryMessage)[]
   storageService?: StorageService
   hashFile?: HashFile
   /** 当前交互作用域是否允许全局 Escape 把焦点恢复到此 Composer。 */
