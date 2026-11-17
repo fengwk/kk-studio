@@ -107,8 +107,11 @@ func TestRuntimeHandlesInFlightCancelAndRecoverBeforeReady(t *testing.T) {
 	if !connection.sent(protocol.MessageType_STARTED) || connection.sent(protocol.MessageType_RECOVER_NOT_FOUND) {
 		t.Fatal("pre-READY recovery did not replay only the known in-flight call")
 	}
-	if err := runtime.handleRecover(&protocol.Envelope{InvocationId: stringPtr("unknown")}); err != nil {
-		t.Fatal(err)
+	if err := runtime.handleRecover(&protocol.Envelope{InvocationId: stringPtr("unknown")}); err == nil {
+		t.Fatal("pre-READY recovery was silently accepted")
+	}
+	if !connection.sent(protocol.MessageType_ERROR) || connection.sent(protocol.MessageType_RECOVER_NOT_FOUND) {
+		t.Fatal("pre-READY recovery did not return a retryable connection error")
 	}
 	if err := runtime.handleCancel(&protocol.Envelope{InvocationId: stringPtr("in-flight")}); err != nil {
 		t.Fatalf("pre-READY in-flight cancellation failed: %v", err)

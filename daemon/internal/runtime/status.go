@@ -19,6 +19,14 @@ type ConfigurationError struct {
 	Field   string
 }
 
+type RuntimeStatusSnapshot struct {
+	Revision           int64
+	AppliedVersion     *int64
+	ProxyURL           *string
+	Progress           *UpdateProgress
+	ConfigurationError *ConfigurationError
+}
+
 // StatusTracker publishes a monotonically revised runtime status and update progress. Only the facts
 // the runtime reports are retained: the applied configuration, its failure, and update progress.
 type StatusTracker struct {
@@ -39,6 +47,30 @@ func (s *StatusTracker) Revision() int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.revision
+}
+
+// Snapshot reads status content and its revision under the same lock.
+func (s *StatusTracker) Snapshot() RuntimeStatusSnapshot {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snapshot := RuntimeStatusSnapshot{
+		Revision:       s.revision,
+		AppliedVersion: cloneInt64(s.appliedVersion),
+		ProxyURL:       cloneString(s.proxyURL),
+	}
+	if s.progress != nil {
+		progress := *s.progress
+		if progress.TotalBytes != nil {
+			total := *progress.TotalBytes
+			progress.TotalBytes = &total
+		}
+		snapshot.Progress = &progress
+	}
+	if s.configurationError != nil {
+		failure := *s.configurationError
+		snapshot.ConfigurationError = &failure
+	}
+	return snapshot
 }
 
 func (s *StatusTracker) ApplyConfiguration(version int64, proxyURL *string) error {
@@ -158,6 +190,14 @@ func (s *StatusTracker) advanceLocked() error {
 	}
 	s.revision++
 	return nil
+}
+
+func cloneInt64(value *int64) *int64 {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func cloneString(value *string) *string {

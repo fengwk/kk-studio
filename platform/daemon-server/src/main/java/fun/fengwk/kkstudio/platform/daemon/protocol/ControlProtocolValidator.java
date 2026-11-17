@@ -55,6 +55,7 @@ public final class ControlProtocolValidator {
           MessageType.RECOVER,
           MessageType.RECOVER_NOT_FOUND,
           MessageType.EXECUTION_EXITED,
+          MessageType.EXECUTION_EXIT_ACK,
           MessageType.RESOURCE_UPLOAD_REQUEST,
           MessageType.RESOURCE_UPLOAD_TICKET,
           MessageType.RESOURCE_UPLOAD_COMMIT,
@@ -81,6 +82,7 @@ public final class ControlProtocolValidator {
           MessageType.RECOVER,
           MessageType.RECOVER_NOT_FOUND,
           MessageType.EXECUTION_EXITED,
+          MessageType.EXECUTION_EXIT_ACK,
           MessageType.RESOURCE_UPLOAD_REQUEST,
           MessageType.RESOURCE_UPLOAD_TICKET,
           MessageType.RESOURCE_UPLOAD_COMMIT,
@@ -131,7 +133,8 @@ public final class ControlProtocolValidator {
           CANCELLED,
           RECOVER,
           RECOVER_NOT_FOUND,
-          EXECUTION_EXITED -> validateInvocationPayload(envelope, messageType);
+          EXECUTION_EXITED,
+          EXECUTION_EXIT_ACK -> validateInvocationPayload(envelope, messageType);
       case RESOURCE_UPLOAD_REQUEST,
           RESOURCE_UPLOAD_TICKET,
           RESOURCE_UPLOAD_COMMIT,
@@ -223,6 +226,9 @@ public final class ControlProtocolValidator {
       }
       case EXECUTION_EXITED -> {
         requirePayload(envelope, Envelope.PayloadCase.EXECUTION_EXITED, "EXECUTION_EXITED");
+      }
+      case EXECUTION_EXIT_ACK -> {
+        requirePayload(envelope, Envelope.PayloadCase.EXECUTION_EXIT_ACK, "EXECUTION_EXIT_ACK");
       }
     }
   }

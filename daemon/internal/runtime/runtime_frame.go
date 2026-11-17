@@ -9,27 +9,24 @@ import (
 
 func (r *Runtime) runtimeSnapshot() *protocol.RuntimeSnapshot {
 	body := &protocol.RuntimeBody{DaemonVersion: stringPtr(r.options.DaemonVersion)}
-	r.mu.RLock()
-	ready, snapshot := r.ready, r.config
-	r.mu.RUnlock()
-	configurationStatus := &protocol.ConfigurationStatus{}
-	if ready {
-		configurationStatus.AppliedVersion = int64Ptr(snapshot.ConfigVersion)
-		configurationStatus.ProxyUrl = snapshot.ProxyURL
+	status := r.status.Snapshot()
+	configurationStatus := &protocol.ConfigurationStatus{
+		AppliedVersion: status.AppliedVersion,
+		ProxyUrl:       status.ProxyURL,
 	}
-	if failure, ok := r.status.ConfigurationError(); ok {
+	if failure := status.ConfigurationError; failure != nil {
 		configurationStatus.Error = &protocol.ConfigurationError{Version: int64Ptr(failure.Version), Code: failure.Code}
 		if failure.Field != "" {
 			configurationStatus.Error.Field = stringPtr(failure.Field)
 		}
 	}
-	if ready || configurationStatus.Error != nil {
+	if configurationStatus.AppliedVersion != nil || configurationStatus.Error != nil {
 		body.Configuration = configurationStatus
 	}
-	if progress, ok := r.status.Progress(); ok {
+	if progress := status.Progress; progress != nil {
 		body.Update = &protocol.UpdateProgress{TargetVersion: stringPtr(progress.TargetVersion), DownloadedBytes: int64Ptr(progress.DownloadedBytes), TotalBytes: progress.TotalBytes}
 	}
-	return &protocol.RuntimeSnapshot{Revision: int64Ptr(r.status.Revision()), Status: body}
+	return &protocol.RuntimeSnapshot{Revision: int64Ptr(status.Revision), Status: body}
 }
 
 func (r *Runtime) sendReady() error {
@@ -41,7 +38,19 @@ func (r *Runtime) sendReady() error {
 	r.configReconnectPending = false
 	r.candidateSuspension = nil
 	r.admissionMu.Unlock()
+	if err := r.resendUnacknowledgedExits(); err != nil {
+		return err
+	}
 	return r.resendUpdateReceipt()
+}
+
+func (r *Runtime) resendUnacknowledgedExits() error {
+	for _, entry := range r.journal.UnacknowledgedExits() {
+		if err := r.sendExecutionExited(entry.InvocationID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Runtime) sendStatus() error {

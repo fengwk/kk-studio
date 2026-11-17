@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"path/filepath"
 	"runtime"
 	"time"
 
@@ -210,19 +211,20 @@ func (r productionRuntime) assembleRuntime(initial config.DaemonConfig, assembly
 		}}
 	}
 	core, err := daemonruntime.NewRuntime(daemonruntime.RuntimeOptions{
-		EnvironmentID:      initial.EnvironmentID,
-		DaemonVersion:      config.DaemonVersion,
-		Connections:        connections,
-		Capabilities:       capabilities,
-		Processes:          assembly.processes,
-		FileChanged:        assembly.lspFacade.FileChanged,
-		Resources:          dynamicResourceUploader{networks: assembly.networks, control: resourceControl},
-		TemporaryResources: assembly.temporaryResources,
-		EnvironmentConfig:  environmentConfig,
-		Status:             environmentConfig.StatusTracker(),
-		Update:             updateRunner,
-		IDE:                assembly.ideService,
-		ReportError:        func(err error) { slog.Error("daemon runtime operation failed", "error", err) },
+		EnvironmentID:         initial.EnvironmentID,
+		DaemonVersion:         config.DaemonVersion,
+		Connections:           connections,
+		Capabilities:          capabilities,
+		Processes:             assembly.processes,
+		FileChanged:           assembly.lspFacade.FileChanged,
+		Resources:             dynamicResourceUploader{networks: assembly.networks, control: resourceControl},
+		TemporaryResources:    assembly.temporaryResources,
+		EnvironmentConfig:     environmentConfig,
+		Status:                environmentConfig.StatusTracker(),
+		InvocationJournalPath: filepath.Join(initial.DataDir, "runtime-invocations.json"),
+		Update:                updateRunner,
+		IDE:                   assembly.ideService,
+		ReportError:           func(err error) { slog.Error("daemon runtime operation failed", "error", err) },
 	})
 	if err != nil {
 		return nil, nil, productionFailure("daemon runtime could not be initialized", err)

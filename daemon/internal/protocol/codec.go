@@ -100,7 +100,7 @@ func validateScope(e *Envelope) error {
 		if e.InvocationId != nil {
 			return fmt.Errorf("%s must not declare invocationId", e.MessageType)
 		}
-	case MessageType_INVOKE, MessageType_STARTED, MessageType_PROGRESS, MessageType_COMPLETED, MessageType_FAILED, MessageType_CANCEL, MessageType_CANCELLED, MessageType_RECOVER, MessageType_RECOVER_NOT_FOUND, MessageType_EXECUTION_EXITED, MessageType_RESOURCE_UPLOAD_REQUEST, MessageType_RESOURCE_UPLOAD_TICKET, MessageType_RESOURCE_UPLOAD_COMMIT, MessageType_RESOURCE_DOWNLOAD_REQUEST, MessageType_RESOURCE_DOWNLOAD_TICKET, MessageType_IDE_COMMAND, MessageType_IDE_RESULT:
+	case MessageType_INVOKE, MessageType_STARTED, MessageType_PROGRESS, MessageType_COMPLETED, MessageType_FAILED, MessageType_CANCEL, MessageType_CANCELLED, MessageType_RECOVER, MessageType_RECOVER_NOT_FOUND, MessageType_EXECUTION_EXITED, MessageType_EXECUTION_EXIT_ACK, MessageType_RESOURCE_UPLOAD_REQUEST, MessageType_RESOURCE_UPLOAD_TICKET, MessageType_RESOURCE_UPLOAD_COMMIT, MessageType_RESOURCE_DOWNLOAD_REQUEST, MessageType_RESOURCE_DOWNLOAD_TICKET, MessageType_IDE_COMMAND, MessageType_IDE_RESULT:
 		if e.InvocationId == nil {
 			return fmt.Errorf("%s requires invocationId", e.MessageType)
 		}

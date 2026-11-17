@@ -17,7 +17,7 @@ func TestValidateMessageDispatch(t *testing.T) {
 		envelope := new(Envelope)
 		message := envelope.ProtoReflect()
 		message.Set(field, message.NewField(field))
-		if err := validateMessage(envelope); err == nil && field.Name() != "cancel" && field.Name() != "started" && field.Name() != "recover" && field.Name() != "recover_not_found" && field.Name() != "execution_exited" {
+		if err := validateMessage(envelope); err == nil && field.Name() != "cancel" && field.Name() != "started" && field.Name() != "recover" && field.Name() != "recover_not_found" && field.Name() != "execution_exited" && field.Name() != "execution_exit_ack" {
 			t.Errorf("empty %s payload passed validation", field.Name())
 		}
 	}
@@ -39,7 +39,7 @@ func TestValidateScopeMessageClassification(t *testing.T) {
 		}
 	}
 	for _, messageType := range []MessageType{
-		MessageType_INVOKE, MessageType_STARTED, MessageType_PROGRESS, MessageType_COMPLETED, MessageType_FAILED, MessageType_CANCEL, MessageType_CANCELLED, MessageType_RECOVER, MessageType_RECOVER_NOT_FOUND, MessageType_EXECUTION_EXITED, MessageType_RESOURCE_UPLOAD_REQUEST, MessageType_RESOURCE_UPLOAD_TICKET, MessageType_RESOURCE_UPLOAD_COMMIT, MessageType_RESOURCE_DOWNLOAD_REQUEST, MessageType_RESOURCE_DOWNLOAD_TICKET, MessageType_IDE_COMMAND, MessageType_IDE_RESULT,
+		MessageType_INVOKE, MessageType_STARTED, MessageType_PROGRESS, MessageType_COMPLETED, MessageType_FAILED, MessageType_CANCEL, MessageType_CANCELLED, MessageType_RECOVER, MessageType_RECOVER_NOT_FOUND, MessageType_EXECUTION_EXITED, MessageType_EXECUTION_EXIT_ACK, MessageType_RESOURCE_UPLOAD_REQUEST, MessageType_RESOURCE_UPLOAD_TICKET, MessageType_RESOURCE_UPLOAD_COMMIT, MessageType_RESOURCE_DOWNLOAD_REQUEST, MessageType_RESOURCE_DOWNLOAD_TICKET, MessageType_IDE_COMMAND, MessageType_IDE_RESULT,
 	} {
 		if err := validateScope(&Envelope{MessageType: messageType}); err == nil {
 			t.Errorf("%s accepted missing invocation id", messageType)

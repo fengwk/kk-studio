@@ -56,6 +56,7 @@ const (
 	MessageType_RESOURCE_DOWNLOAD_REQUEST MessageType = 25
 	MessageType_RESOURCE_DOWNLOAD_TICKET  MessageType = 26
 	MessageType_ENVIRONMENT_CONFIG        MessageType = 27
+	MessageType_EXECUTION_EXIT_ACK        MessageType = 28
 )
 
 // Enum value maps for MessageType.
@@ -89,6 +90,7 @@ var (
 		25: "RESOURCE_DOWNLOAD_REQUEST",
 		26: "RESOURCE_DOWNLOAD_TICKET",
 		27: "ENVIRONMENT_CONFIG",
+		28: "EXECUTION_EXIT_ACK",
 	}
 	MessageType_value = map[string]int32{
 		"MESSAGE_TYPE_UNSPECIFIED":  0,
@@ -119,6 +121,7 @@ var (
 		"RESOURCE_DOWNLOAD_REQUEST": 25,
 		"RESOURCE_DOWNLOAD_TICKET":  26,
 		"ENVIRONMENT_CONFIG":        27,
+		"EXECUTION_EXIT_ACK":        28,
 	}
 )
 
@@ -605,6 +608,7 @@ type Envelope struct {
 	//	*Envelope_ResourceDownloadRequest
 	//	*Envelope_ResourceDownloadTicket
 	//	*Envelope_EnvironmentConfig
+	//	*Envelope_ExecutionExitAck
 	Payload       isEnvelope_Payload `protobuf_oneof:"payload"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -911,6 +915,15 @@ func (x *Envelope) GetEnvironmentConfig() *EnvironmentConfig {
 	return nil
 }
 
+func (x *Envelope) GetExecutionExitAck() *ExecutionExitAck {
+	if x != nil {
+		if x, ok := x.Payload.(*Envelope_ExecutionExitAck); ok {
+			return x.ExecutionExitAck
+		}
+	}
+	return nil
+}
+
 type isEnvelope_Payload interface {
 	isEnvelope_Payload()
 }
@@ -1023,6 +1036,10 @@ type Envelope_EnvironmentConfig struct {
 	EnvironmentConfig *EnvironmentConfig `protobuf:"bytes,30,opt,name=environment_config,json=environmentConfig,proto3,oneof"`
 }
 
+type Envelope_ExecutionExitAck struct {
+	ExecutionExitAck *ExecutionExitAck `protobuf:"bytes,31,opt,name=execution_exit_ack,json=executionExitAck,proto3,oneof"`
+}
+
 func (*Envelope_Settings) isEnvelope_Payload() {}
 
 func (*Envelope_Ready) isEnvelope_Payload() {}
@@ -1076,6 +1093,8 @@ func (*Envelope_ResourceDownloadRequest) isEnvelope_Payload() {}
 func (*Envelope_ResourceDownloadTicket) isEnvelope_Payload() {}
 
 func (*Envelope_EnvironmentConfig) isEnvelope_Payload() {}
+
+func (*Envelope_ExecutionExitAck) isEnvelope_Payload() {}
 
 // HTTP 426 升级拒绝的 protobuf 载荷；只携带 Studio 当前 Daemon 目标版本。
 type UpgradeRequired struct {
@@ -2831,6 +2850,43 @@ func (*ExecutionExited) Descriptor() ([]byte, []int) {
 	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{32}
 }
 
+// Studio 已持久接受该调用的执行退出事实；不表示调用结果已被消费。
+type ExecutionExitAck struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExecutionExitAck) Reset() {
+	*x = ExecutionExitAck{}
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExecutionExitAck) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExecutionExitAck) ProtoMessage() {}
+
+func (x *ExecutionExitAck) ProtoReflect() protoreflect.Message {
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExecutionExitAck.ProtoReflect.Descriptor instead.
+func (*ExecutionExitAck) Descriptor() ([]byte, []int) {
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{33}
+}
+
 type ResourceUploadRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TransferId    *string                `protobuf:"bytes,1,opt,name=transfer_id,json=transferId,proto3,oneof" json:"transfer_id,omitempty"`
@@ -2844,7 +2900,7 @@ type ResourceUploadRequest struct {
 
 func (x *ResourceUploadRequest) Reset() {
 	*x = ResourceUploadRequest{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[33]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2856,7 +2912,7 @@ func (x *ResourceUploadRequest) String() string {
 func (*ResourceUploadRequest) ProtoMessage() {}
 
 func (x *ResourceUploadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[33]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2869,7 +2925,7 @@ func (x *ResourceUploadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceUploadRequest.ProtoReflect.Descriptor instead.
 func (*ResourceUploadRequest) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{33}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ResourceUploadRequest) GetTransferId() string {
@@ -2920,7 +2976,7 @@ type ResourceUploadTicket struct {
 
 func (x *ResourceUploadTicket) Reset() {
 	*x = ResourceUploadTicket{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[34]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2932,7 +2988,7 @@ func (x *ResourceUploadTicket) String() string {
 func (*ResourceUploadTicket) ProtoMessage() {}
 
 func (x *ResourceUploadTicket) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[34]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2945,7 +3001,7 @@ func (x *ResourceUploadTicket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceUploadTicket.ProtoReflect.Descriptor instead.
 func (*ResourceUploadTicket) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{34}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ResourceUploadTicket) GetTransferId() string {
@@ -2995,7 +3051,7 @@ type PresignedPut struct {
 
 func (x *PresignedPut) Reset() {
 	*x = PresignedPut{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[35]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3007,7 +3063,7 @@ func (x *PresignedPut) String() string {
 func (*PresignedPut) ProtoMessage() {}
 
 func (x *PresignedPut) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[35]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3020,7 +3076,7 @@ func (x *PresignedPut) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PresignedPut.ProtoReflect.Descriptor instead.
 func (*PresignedPut) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{35}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *PresignedPut) GetMethod() string {
@@ -3062,7 +3118,7 @@ type PresignedGet struct {
 
 func (x *PresignedGet) Reset() {
 	*x = PresignedGet{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[36]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3074,7 +3130,7 @@ func (x *PresignedGet) String() string {
 func (*PresignedGet) ProtoMessage() {}
 
 func (x *PresignedGet) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[36]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3087,7 +3143,7 @@ func (x *PresignedGet) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PresignedGet.ProtoReflect.Descriptor instead.
 func (*PresignedGet) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{36}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *PresignedGet) GetMethod() string {
@@ -3121,7 +3177,7 @@ type ResourceDownloadRequest struct {
 
 func (x *ResourceDownloadRequest) Reset() {
 	*x = ResourceDownloadRequest{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[37]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3133,7 +3189,7 @@ func (x *ResourceDownloadRequest) String() string {
 func (*ResourceDownloadRequest) ProtoMessage() {}
 
 func (x *ResourceDownloadRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[37]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3146,7 +3202,7 @@ func (x *ResourceDownloadRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceDownloadRequest.ProtoReflect.Descriptor instead.
 func (*ResourceDownloadRequest) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{37}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *ResourceDownloadRequest) GetTransferId() string {
@@ -3171,7 +3227,7 @@ type ResourceDownloadTicket struct {
 
 func (x *ResourceDownloadTicket) Reset() {
 	*x = ResourceDownloadTicket{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[38]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3183,7 +3239,7 @@ func (x *ResourceDownloadTicket) String() string {
 func (*ResourceDownloadTicket) ProtoMessage() {}
 
 func (x *ResourceDownloadTicket) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[38]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3196,7 +3252,7 @@ func (x *ResourceDownloadTicket) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceDownloadTicket.ProtoReflect.Descriptor instead.
 func (*ResourceDownloadTicket) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{38}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *ResourceDownloadTicket) GetTransferId() string {
@@ -3251,7 +3307,7 @@ type ResourceUploadCommit struct {
 
 func (x *ResourceUploadCommit) Reset() {
 	*x = ResourceUploadCommit{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[39]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3263,7 +3319,7 @@ func (x *ResourceUploadCommit) String() string {
 func (*ResourceUploadCommit) ProtoMessage() {}
 
 func (x *ResourceUploadCommit) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[39]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3276,7 +3332,7 @@ func (x *ResourceUploadCommit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceUploadCommit.ProtoReflect.Descriptor instead.
 func (*ResourceUploadCommit) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{39}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ResourceUploadCommit) GetTransferId() string {
@@ -3303,7 +3359,7 @@ type TemporaryResourcePolicy struct {
 
 func (x *TemporaryResourcePolicy) Reset() {
 	*x = TemporaryResourcePolicy{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[40]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3315,7 +3371,7 @@ func (x *TemporaryResourcePolicy) String() string {
 func (*TemporaryResourcePolicy) ProtoMessage() {}
 
 func (x *TemporaryResourcePolicy) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[40]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3328,7 +3384,7 @@ func (x *TemporaryResourcePolicy) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TemporaryResourcePolicy.ProtoReflect.Descriptor instead.
 func (*TemporaryResourcePolicy) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{40}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *TemporaryResourcePolicy) GetTemporaryResourceTtlSeconds() int64 {
@@ -3355,7 +3411,7 @@ type Update struct {
 
 func (x *Update) Reset() {
 	*x = Update{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[41]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3367,7 +3423,7 @@ func (x *Update) String() string {
 func (*Update) ProtoMessage() {}
 
 func (x *Update) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[41]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3380,7 +3436,7 @@ func (x *Update) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Update.ProtoReflect.Descriptor instead.
 func (*Update) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{41}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *Update) GetOperationId() string {
@@ -3408,7 +3464,7 @@ type UpdateResult struct {
 
 func (x *UpdateResult) Reset() {
 	*x = UpdateResult{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[42]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[43]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3420,7 +3476,7 @@ func (x *UpdateResult) String() string {
 func (*UpdateResult) ProtoMessage() {}
 
 func (x *UpdateResult) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[42]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[43]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3433,7 +3489,7 @@ func (x *UpdateResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateResult.ProtoReflect.Descriptor instead.
 func (*UpdateResult) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{42}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{43}
 }
 
 func (x *UpdateResult) GetOperationId() string {
@@ -3479,7 +3535,7 @@ type IdeCommand struct {
 
 func (x *IdeCommand) Reset() {
 	*x = IdeCommand{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[43]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[44]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3491,7 +3547,7 @@ func (x *IdeCommand) String() string {
 func (*IdeCommand) ProtoMessage() {}
 
 func (x *IdeCommand) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[43]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[44]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3504,7 +3560,7 @@ func (x *IdeCommand) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeCommand.ProtoReflect.Descriptor instead.
 func (*IdeCommand) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{43}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{44}
 }
 
 func (x *IdeCommand) GetAction() IdeAction {
@@ -3614,7 +3670,7 @@ type IdeResult struct {
 
 func (x *IdeResult) Reset() {
 	*x = IdeResult{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[44]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[45]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3626,7 +3682,7 @@ func (x *IdeResult) String() string {
 func (*IdeResult) ProtoMessage() {}
 
 func (x *IdeResult) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[44]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[45]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3639,7 +3695,7 @@ func (x *IdeResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeResult.ProtoReflect.Descriptor instead.
 func (*IdeResult) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{44}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{45}
 }
 
 func (x *IdeResult) GetOk() bool {
@@ -3752,7 +3808,7 @@ type IdeDirectoryListing struct {
 
 func (x *IdeDirectoryListing) Reset() {
 	*x = IdeDirectoryListing{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[45]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[46]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3764,7 +3820,7 @@ func (x *IdeDirectoryListing) String() string {
 func (*IdeDirectoryListing) ProtoMessage() {}
 
 func (x *IdeDirectoryListing) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[45]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[46]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3777,7 +3833,7 @@ func (x *IdeDirectoryListing) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeDirectoryListing.ProtoReflect.Descriptor instead.
 func (*IdeDirectoryListing) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{45}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{46}
 }
 
 func (x *IdeDirectoryListing) GetPath() string {
@@ -3818,7 +3874,7 @@ type IdeDirectoryEntry struct {
 
 func (x *IdeDirectoryEntry) Reset() {
 	*x = IdeDirectoryEntry{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[46]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[47]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3830,7 +3886,7 @@ func (x *IdeDirectoryEntry) String() string {
 func (*IdeDirectoryEntry) ProtoMessage() {}
 
 func (x *IdeDirectoryEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[46]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[47]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3843,7 +3899,7 @@ func (x *IdeDirectoryEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeDirectoryEntry.ProtoReflect.Descriptor instead.
 func (*IdeDirectoryEntry) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{46}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{47}
 }
 
 func (x *IdeDirectoryEntry) GetName() string {
@@ -3877,7 +3933,7 @@ type IdeViewSummary struct {
 
 func (x *IdeViewSummary) Reset() {
 	*x = IdeViewSummary{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[47]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3889,7 +3945,7 @@ func (x *IdeViewSummary) String() string {
 func (*IdeViewSummary) ProtoMessage() {}
 
 func (x *IdeViewSummary) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[47]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -3902,7 +3958,7 @@ func (x *IdeViewSummary) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeViewSummary.ProtoReflect.Descriptor instead.
 func (*IdeViewSummary) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{47}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{48}
 }
 
 func (x *IdeViewSummary) GetViewId() string {
@@ -3978,7 +4034,7 @@ type IdeLease struct {
 
 func (x *IdeLease) Reset() {
 	*x = IdeLease{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -3990,7 +4046,7 @@ func (x *IdeLease) String() string {
 func (*IdeLease) ProtoMessage() {}
 
 func (x *IdeLease) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4003,7 +4059,7 @@ func (x *IdeLease) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeLease.ProtoReflect.Descriptor instead.
 func (*IdeLease) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{48}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{49}
 }
 
 func (x *IdeLease) GetRound() int64 {
@@ -4031,7 +4087,7 @@ type IdeLeaseBinding struct {
 
 func (x *IdeLeaseBinding) Reset() {
 	*x = IdeLeaseBinding{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[50]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4043,7 +4099,7 @@ func (x *IdeLeaseBinding) String() string {
 func (*IdeLeaseBinding) ProtoMessage() {}
 
 func (x *IdeLeaseBinding) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[50]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4056,7 +4112,7 @@ func (x *IdeLeaseBinding) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IdeLeaseBinding.ProtoReflect.Descriptor instead.
 func (*IdeLeaseBinding) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{49}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{50}
 }
 
 func (x *IdeLeaseBinding) GetViewId() string {
@@ -4089,7 +4145,7 @@ type Error struct {
 
 func (x *Error) Reset() {
 	*x = Error{}
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[50]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[51]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -4101,7 +4157,7 @@ func (x *Error) String() string {
 func (*Error) ProtoMessage() {}
 
 func (x *Error) ProtoReflect() protoreflect.Message {
-	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[50]
+	mi := &file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[51]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -4114,7 +4170,7 @@ func (x *Error) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Error.ProtoReflect.Descriptor instead.
 func (*Error) Descriptor() ([]byte, []int) {
-	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{50}
+	return file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP(), []int{51}
 }
 
 func (x *Error) GetMessage() string {
@@ -4128,7 +4184,7 @@ var File_platform_daemon_server_src_main_protocol_control_proto protoreflect.Fil
 
 const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\n" +
-	"6platform/daemon-server/src/main/protocol/control.proto\x12\x1ckkstudio.environment.control\"\x8a\x13\n" +
+	"6platform/daemon-server/src/main/protocol/control.proto\x12\x1ckkstudio.environment.control\"\xea\x13\n" +
 	"\bEnvelope\x12L\n" +
 	"\fmessage_type\x18\x01 \x01(\x0e2).kkstudio.environment.control.MessageTypeR\vmessageType\x12*\n" +
 	"\x0eenvironment_id\x18\x02 \x01(\tH\x01R\renvironmentId\x88\x01\x01\x12(\n" +
@@ -4162,7 +4218,8 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\x05error\x18\x1b \x01(\v2#.kkstudio.environment.control.ErrorH\x00R\x05error\x12s\n" +
 	"\x19resource_download_request\x18\x1c \x01(\v25.kkstudio.environment.control.ResourceDownloadRequestH\x00R\x17resourceDownloadRequest\x12p\n" +
 	"\x18resource_download_ticket\x18\x1d \x01(\v24.kkstudio.environment.control.ResourceDownloadTicketH\x00R\x16resourceDownloadTicket\x12`\n" +
-	"\x12environment_config\x18\x1e \x01(\v2/.kkstudio.environment.control.EnvironmentConfigH\x00R\x11environmentConfigB\t\n" +
+	"\x12environment_config\x18\x1e \x01(\v2/.kkstudio.environment.control.EnvironmentConfigH\x00R\x11environmentConfig\x12^\n" +
+	"\x12execution_exit_ack\x18\x1f \x01(\v2..kkstudio.environment.control.ExecutionExitAckH\x00R\x10executionExitAckB\t\n" +
 	"\apayloadB\x11\n" +
 	"\x0f_environment_idB\x10\n" +
 	"\x0e_invocation_id\"{\n" +
@@ -4328,7 +4385,8 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\a_reason\"\t\n" +
 	"\aRecover\"\x11\n" +
 	"\x0fRecoverNotFound\"\x11\n" +
-	"\x0fExecutionExited\"\xec\x01\n" +
+	"\x0fExecutionExited\"\x12\n" +
+	"\x10ExecutionExitAck\"\xec\x01\n" +
 	"\x15ResourceUploadRequest\x12$\n" +
 	"\vtransfer_id\x18\x01 \x01(\tH\x00R\n" +
 	"transferId\x88\x01\x01\x12\"\n" +
@@ -4523,7 +4581,7 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\x05Error\x12\x1d\n" +
 	"\amessage\x18\x01 \x01(\tH\x00R\amessage\x88\x01\x01B\n" +
 	"\n" +
-	"\b_message*\xa1\x04\n" +
+	"\b_message*\xb9\x04\n" +
 	"\vMessageType\x12\x1c\n" +
 	"\x18MESSAGE_TYPE_UNSPECIFIED\x10\x00\x12\f\n" +
 	"\bSETTINGS\x10\x01\x12\t\n" +
@@ -4558,7 +4616,8 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\x05ERROR\x10\x18\x12\x1d\n" +
 	"\x19RESOURCE_DOWNLOAD_REQUEST\x10\x19\x12\x1c\n" +
 	"\x18RESOURCE_DOWNLOAD_TICKET\x10\x1a\x12\x16\n" +
-	"\x12ENVIRONMENT_CONFIG\x10\x1b*U\n" +
+	"\x12ENVIRONMENT_CONFIG\x10\x1b\x12\x16\n" +
+	"\x12EXECUTION_EXIT_ACK\x10\x1c*U\n" +
 	"\x0eImageInputTier\x12 \n" +
 	"\x1cIMAGE_INPUT_TIER_UNSPECIFIED\x10\x00\x12\b\n" +
 	"\x04P720\x10\x01\x12\t\n" +
@@ -4620,7 +4679,7 @@ func file_platform_daemon_server_src_main_protocol_control_proto_rawDescGZIP() [
 }
 
 var file_platform_daemon_server_src_main_protocol_control_proto_enumTypes = make([]protoimpl.EnumInfo, 9)
-var file_platform_daemon_server_src_main_protocol_control_proto_msgTypes = make([]protoimpl.MessageInfo, 52)
+var file_platform_daemon_server_src_main_protocol_control_proto_msgTypes = make([]protoimpl.MessageInfo, 53)
 var file_platform_daemon_server_src_main_protocol_control_proto_goTypes = []any{
 	(MessageType)(0),                // 0: kkstudio.environment.control.MessageType
 	(ImageInputTier)(0),             // 1: kkstudio.environment.control.ImageInputTier
@@ -4664,25 +4723,26 @@ var file_platform_daemon_server_src_main_protocol_control_proto_goTypes = []any{
 	(*Recover)(nil),                 // 39: kkstudio.environment.control.Recover
 	(*RecoverNotFound)(nil),         // 40: kkstudio.environment.control.RecoverNotFound
 	(*ExecutionExited)(nil),         // 41: kkstudio.environment.control.ExecutionExited
-	(*ResourceUploadRequest)(nil),   // 42: kkstudio.environment.control.ResourceUploadRequest
-	(*ResourceUploadTicket)(nil),    // 43: kkstudio.environment.control.ResourceUploadTicket
-	(*PresignedPut)(nil),            // 44: kkstudio.environment.control.PresignedPut
-	(*PresignedGet)(nil),            // 45: kkstudio.environment.control.PresignedGet
-	(*ResourceDownloadRequest)(nil), // 46: kkstudio.environment.control.ResourceDownloadRequest
-	(*ResourceDownloadTicket)(nil),  // 47: kkstudio.environment.control.ResourceDownloadTicket
-	(*ResourceUploadCommit)(nil),    // 48: kkstudio.environment.control.ResourceUploadCommit
-	(*TemporaryResourcePolicy)(nil), // 49: kkstudio.environment.control.TemporaryResourcePolicy
-	(*Update)(nil),                  // 50: kkstudio.environment.control.Update
-	(*UpdateResult)(nil),            // 51: kkstudio.environment.control.UpdateResult
-	(*IdeCommand)(nil),              // 52: kkstudio.environment.control.IdeCommand
-	(*IdeResult)(nil),               // 53: kkstudio.environment.control.IdeResult
-	(*IdeDirectoryListing)(nil),     // 54: kkstudio.environment.control.IdeDirectoryListing
-	(*IdeDirectoryEntry)(nil),       // 55: kkstudio.environment.control.IdeDirectoryEntry
-	(*IdeViewSummary)(nil),          // 56: kkstudio.environment.control.IdeViewSummary
-	(*IdeLease)(nil),                // 57: kkstudio.environment.control.IdeLease
-	(*IdeLeaseBinding)(nil),         // 58: kkstudio.environment.control.IdeLeaseBinding
-	(*Error)(nil),                   // 59: kkstudio.environment.control.Error
-	nil,                             // 60: kkstudio.environment.control.PresignedPut.HeadersEntry
+	(*ExecutionExitAck)(nil),        // 42: kkstudio.environment.control.ExecutionExitAck
+	(*ResourceUploadRequest)(nil),   // 43: kkstudio.environment.control.ResourceUploadRequest
+	(*ResourceUploadTicket)(nil),    // 44: kkstudio.environment.control.ResourceUploadTicket
+	(*PresignedPut)(nil),            // 45: kkstudio.environment.control.PresignedPut
+	(*PresignedGet)(nil),            // 46: kkstudio.environment.control.PresignedGet
+	(*ResourceDownloadRequest)(nil), // 47: kkstudio.environment.control.ResourceDownloadRequest
+	(*ResourceDownloadTicket)(nil),  // 48: kkstudio.environment.control.ResourceDownloadTicket
+	(*ResourceUploadCommit)(nil),    // 49: kkstudio.environment.control.ResourceUploadCommit
+	(*TemporaryResourcePolicy)(nil), // 50: kkstudio.environment.control.TemporaryResourcePolicy
+	(*Update)(nil),                  // 51: kkstudio.environment.control.Update
+	(*UpdateResult)(nil),            // 52: kkstudio.environment.control.UpdateResult
+	(*IdeCommand)(nil),              // 53: kkstudio.environment.control.IdeCommand
+	(*IdeResult)(nil),               // 54: kkstudio.environment.control.IdeResult
+	(*IdeDirectoryListing)(nil),     // 55: kkstudio.environment.control.IdeDirectoryListing
+	(*IdeDirectoryEntry)(nil),       // 56: kkstudio.environment.control.IdeDirectoryEntry
+	(*IdeViewSummary)(nil),          // 57: kkstudio.environment.control.IdeViewSummary
+	(*IdeLease)(nil),                // 58: kkstudio.environment.control.IdeLease
+	(*IdeLeaseBinding)(nil),         // 59: kkstudio.environment.control.IdeLeaseBinding
+	(*Error)(nil),                   // 60: kkstudio.environment.control.Error
+	nil,                             // 61: kkstudio.environment.control.PresignedPut.HeadersEntry
 }
 var file_platform_daemon_server_src_main_protocol_control_proto_depIdxs = []int32{
 	0,  // 0: kkstudio.environment.control.Envelope.message_type:type_name -> kkstudio.environment.control.MessageType
@@ -4700,59 +4760,60 @@ var file_platform_daemon_server_src_main_protocol_control_proto_depIdxs = []int3
 	39, // 12: kkstudio.environment.control.Envelope.recover:type_name -> kkstudio.environment.control.Recover
 	40, // 13: kkstudio.environment.control.Envelope.recover_not_found:type_name -> kkstudio.environment.control.RecoverNotFound
 	41, // 14: kkstudio.environment.control.Envelope.execution_exited:type_name -> kkstudio.environment.control.ExecutionExited
-	42, // 15: kkstudio.environment.control.Envelope.resource_upload_request:type_name -> kkstudio.environment.control.ResourceUploadRequest
-	43, // 16: kkstudio.environment.control.Envelope.resource_upload_ticket:type_name -> kkstudio.environment.control.ResourceUploadTicket
-	48, // 17: kkstudio.environment.control.Envelope.resource_upload_commit:type_name -> kkstudio.environment.control.ResourceUploadCommit
-	49, // 18: kkstudio.environment.control.Envelope.temporary_resource_policy:type_name -> kkstudio.environment.control.TemporaryResourcePolicy
-	50, // 19: kkstudio.environment.control.Envelope.update:type_name -> kkstudio.environment.control.Update
-	51, // 20: kkstudio.environment.control.Envelope.update_result:type_name -> kkstudio.environment.control.UpdateResult
-	52, // 21: kkstudio.environment.control.Envelope.ide_command:type_name -> kkstudio.environment.control.IdeCommand
-	53, // 22: kkstudio.environment.control.Envelope.ide_result:type_name -> kkstudio.environment.control.IdeResult
-	57, // 23: kkstudio.environment.control.Envelope.ide_lease:type_name -> kkstudio.environment.control.IdeLease
-	59, // 24: kkstudio.environment.control.Envelope.error:type_name -> kkstudio.environment.control.Error
-	46, // 25: kkstudio.environment.control.Envelope.resource_download_request:type_name -> kkstudio.environment.control.ResourceDownloadRequest
-	47, // 26: kkstudio.environment.control.Envelope.resource_download_ticket:type_name -> kkstudio.environment.control.ResourceDownloadTicket
+	43, // 15: kkstudio.environment.control.Envelope.resource_upload_request:type_name -> kkstudio.environment.control.ResourceUploadRequest
+	44, // 16: kkstudio.environment.control.Envelope.resource_upload_ticket:type_name -> kkstudio.environment.control.ResourceUploadTicket
+	49, // 17: kkstudio.environment.control.Envelope.resource_upload_commit:type_name -> kkstudio.environment.control.ResourceUploadCommit
+	50, // 18: kkstudio.environment.control.Envelope.temporary_resource_policy:type_name -> kkstudio.environment.control.TemporaryResourcePolicy
+	51, // 19: kkstudio.environment.control.Envelope.update:type_name -> kkstudio.environment.control.Update
+	52, // 20: kkstudio.environment.control.Envelope.update_result:type_name -> kkstudio.environment.control.UpdateResult
+	53, // 21: kkstudio.environment.control.Envelope.ide_command:type_name -> kkstudio.environment.control.IdeCommand
+	54, // 22: kkstudio.environment.control.Envelope.ide_result:type_name -> kkstudio.environment.control.IdeResult
+	58, // 23: kkstudio.environment.control.Envelope.ide_lease:type_name -> kkstudio.environment.control.IdeLease
+	60, // 24: kkstudio.environment.control.Envelope.error:type_name -> kkstudio.environment.control.Error
+	47, // 25: kkstudio.environment.control.Envelope.resource_download_request:type_name -> kkstudio.environment.control.ResourceDownloadRequest
+	48, // 26: kkstudio.environment.control.Envelope.resource_download_ticket:type_name -> kkstudio.environment.control.ResourceDownloadTicket
 	13, // 27: kkstudio.environment.control.Envelope.environment_config:type_name -> kkstudio.environment.control.EnvironmentConfig
-	12, // 28: kkstudio.environment.control.Settings.resource_budgets:type_name -> kkstudio.environment.control.ResourceBudgets
-	14, // 29: kkstudio.environment.control.EnvironmentConfig.config:type_name -> kkstudio.environment.control.DaemonConfiguration
-	15, // 30: kkstudio.environment.control.DaemonConfiguration.lsp:type_name -> kkstudio.environment.control.LspConfiguration
-	16, // 31: kkstudio.environment.control.LspConfiguration.servers:type_name -> kkstudio.environment.control.LspServer
-	18, // 32: kkstudio.environment.control.Ready.host_info:type_name -> kkstudio.environment.control.HostInfo
-	21, // 33: kkstudio.environment.control.Ready.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
-	2,  // 34: kkstudio.environment.control.HostInfo.operating_system:type_name -> kkstudio.environment.control.OperatingSystem
-	3,  // 35: kkstudio.environment.control.HostInfo.architecture:type_name -> kkstudio.environment.control.Architecture
-	21, // 36: kkstudio.environment.control.Heartbeat.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
-	21, // 37: kkstudio.environment.control.RuntimeStatus.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
-	22, // 38: kkstudio.environment.control.RuntimeSnapshot.status:type_name -> kkstudio.environment.control.RuntimeBody
-	25, // 39: kkstudio.environment.control.RuntimeBody.update:type_name -> kkstudio.environment.control.UpdateProgress
-	23, // 40: kkstudio.environment.control.RuntimeBody.configuration:type_name -> kkstudio.environment.control.ConfigurationStatus
-	24, // 41: kkstudio.environment.control.ConfigurationStatus.error:type_name -> kkstudio.environment.control.ConfigurationError
-	27, // 42: kkstudio.environment.control.Invoke.expected_file:type_name -> kkstudio.environment.control.ExpectedFile
-	1,  // 43: kkstudio.environment.control.Invoke.image_input_tier:type_name -> kkstudio.environment.control.ImageInputTier
-	31, // 44: kkstudio.environment.control.Progress.result:type_name -> kkstudio.environment.control.CapabilityResult
-	31, // 45: kkstudio.environment.control.Completed.result:type_name -> kkstudio.environment.control.CapabilityResult
-	32, // 46: kkstudio.environment.control.CapabilityResult.contents:type_name -> kkstudio.environment.control.Content
-	33, // 47: kkstudio.environment.control.Content.text:type_name -> kkstudio.environment.control.TextContent
-	34, // 48: kkstudio.environment.control.Content.json:type_name -> kkstudio.environment.control.JsonContent
-	35, // 49: kkstudio.environment.control.Content.resource:type_name -> kkstudio.environment.control.ResourceContent
-	4,  // 50: kkstudio.environment.control.ResourceUploadTicket.state:type_name -> kkstudio.environment.control.TicketState
-	44, // 51: kkstudio.environment.control.ResourceUploadTicket.presigned_put:type_name -> kkstudio.environment.control.PresignedPut
-	60, // 52: kkstudio.environment.control.PresignedPut.headers:type_name -> kkstudio.environment.control.PresignedPut.HeadersEntry
-	4,  // 53: kkstudio.environment.control.ResourceDownloadTicket.state:type_name -> kkstudio.environment.control.TicketState
-	45, // 54: kkstudio.environment.control.ResourceDownloadTicket.presigned_get:type_name -> kkstudio.environment.control.PresignedGet
-	5,  // 55: kkstudio.environment.control.UpdateResult.phase:type_name -> kkstudio.environment.control.UpdatePhase
-	6,  // 56: kkstudio.environment.control.IdeCommand.action:type_name -> kkstudio.environment.control.IdeAction
-	7,  // 57: kkstudio.environment.control.IdeCommand.mode:type_name -> kkstudio.environment.control.IdeOpenMode
-	56, // 58: kkstudio.environment.control.IdeResult.views:type_name -> kkstudio.environment.control.IdeViewSummary
-	54, // 59: kkstudio.environment.control.IdeResult.directory_listing:type_name -> kkstudio.environment.control.IdeDirectoryListing
-	55, // 60: kkstudio.environment.control.IdeDirectoryListing.children:type_name -> kkstudio.environment.control.IdeDirectoryEntry
-	8,  // 61: kkstudio.environment.control.IdeViewSummary.state:type_name -> kkstudio.environment.control.IdeViewState
-	58, // 62: kkstudio.environment.control.IdeLease.bindings:type_name -> kkstudio.environment.control.IdeLeaseBinding
-	63, // [63:63] is the sub-list for method output_type
-	63, // [63:63] is the sub-list for method input_type
-	63, // [63:63] is the sub-list for extension type_name
-	63, // [63:63] is the sub-list for extension extendee
-	0,  // [0:63] is the sub-list for field type_name
+	42, // 28: kkstudio.environment.control.Envelope.execution_exit_ack:type_name -> kkstudio.environment.control.ExecutionExitAck
+	12, // 29: kkstudio.environment.control.Settings.resource_budgets:type_name -> kkstudio.environment.control.ResourceBudgets
+	14, // 30: kkstudio.environment.control.EnvironmentConfig.config:type_name -> kkstudio.environment.control.DaemonConfiguration
+	15, // 31: kkstudio.environment.control.DaemonConfiguration.lsp:type_name -> kkstudio.environment.control.LspConfiguration
+	16, // 32: kkstudio.environment.control.LspConfiguration.servers:type_name -> kkstudio.environment.control.LspServer
+	18, // 33: kkstudio.environment.control.Ready.host_info:type_name -> kkstudio.environment.control.HostInfo
+	21, // 34: kkstudio.environment.control.Ready.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
+	2,  // 35: kkstudio.environment.control.HostInfo.operating_system:type_name -> kkstudio.environment.control.OperatingSystem
+	3,  // 36: kkstudio.environment.control.HostInfo.architecture:type_name -> kkstudio.environment.control.Architecture
+	21, // 37: kkstudio.environment.control.Heartbeat.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
+	21, // 38: kkstudio.environment.control.RuntimeStatus.runtime_status:type_name -> kkstudio.environment.control.RuntimeSnapshot
+	22, // 39: kkstudio.environment.control.RuntimeSnapshot.status:type_name -> kkstudio.environment.control.RuntimeBody
+	25, // 40: kkstudio.environment.control.RuntimeBody.update:type_name -> kkstudio.environment.control.UpdateProgress
+	23, // 41: kkstudio.environment.control.RuntimeBody.configuration:type_name -> kkstudio.environment.control.ConfigurationStatus
+	24, // 42: kkstudio.environment.control.ConfigurationStatus.error:type_name -> kkstudio.environment.control.ConfigurationError
+	27, // 43: kkstudio.environment.control.Invoke.expected_file:type_name -> kkstudio.environment.control.ExpectedFile
+	1,  // 44: kkstudio.environment.control.Invoke.image_input_tier:type_name -> kkstudio.environment.control.ImageInputTier
+	31, // 45: kkstudio.environment.control.Progress.result:type_name -> kkstudio.environment.control.CapabilityResult
+	31, // 46: kkstudio.environment.control.Completed.result:type_name -> kkstudio.environment.control.CapabilityResult
+	32, // 47: kkstudio.environment.control.CapabilityResult.contents:type_name -> kkstudio.environment.control.Content
+	33, // 48: kkstudio.environment.control.Content.text:type_name -> kkstudio.environment.control.TextContent
+	34, // 49: kkstudio.environment.control.Content.json:type_name -> kkstudio.environment.control.JsonContent
+	35, // 50: kkstudio.environment.control.Content.resource:type_name -> kkstudio.environment.control.ResourceContent
+	4,  // 51: kkstudio.environment.control.ResourceUploadTicket.state:type_name -> kkstudio.environment.control.TicketState
+	45, // 52: kkstudio.environment.control.ResourceUploadTicket.presigned_put:type_name -> kkstudio.environment.control.PresignedPut
+	61, // 53: kkstudio.environment.control.PresignedPut.headers:type_name -> kkstudio.environment.control.PresignedPut.HeadersEntry
+	4,  // 54: kkstudio.environment.control.ResourceDownloadTicket.state:type_name -> kkstudio.environment.control.TicketState
+	46, // 55: kkstudio.environment.control.ResourceDownloadTicket.presigned_get:type_name -> kkstudio.environment.control.PresignedGet
+	5,  // 56: kkstudio.environment.control.UpdateResult.phase:type_name -> kkstudio.environment.control.UpdatePhase
+	6,  // 57: kkstudio.environment.control.IdeCommand.action:type_name -> kkstudio.environment.control.IdeAction
+	7,  // 58: kkstudio.environment.control.IdeCommand.mode:type_name -> kkstudio.environment.control.IdeOpenMode
+	57, // 59: kkstudio.environment.control.IdeResult.views:type_name -> kkstudio.environment.control.IdeViewSummary
+	55, // 60: kkstudio.environment.control.IdeResult.directory_listing:type_name -> kkstudio.environment.control.IdeDirectoryListing
+	56, // 61: kkstudio.environment.control.IdeDirectoryListing.children:type_name -> kkstudio.environment.control.IdeDirectoryEntry
+	8,  // 62: kkstudio.environment.control.IdeViewSummary.state:type_name -> kkstudio.environment.control.IdeViewState
+	59, // 63: kkstudio.environment.control.IdeLease.bindings:type_name -> kkstudio.environment.control.IdeLeaseBinding
+	64, // [64:64] is the sub-list for method output_type
+	64, // [64:64] is the sub-list for method input_type
+	64, // [64:64] is the sub-list for extension type_name
+	64, // [64:64] is the sub-list for extension extendee
+	0,  // [0:64] is the sub-list for field type_name
 }
 
 func init() { file_platform_daemon_server_src_main_protocol_control_proto_init() }
@@ -4788,6 +4849,7 @@ func file_platform_daemon_server_src_main_protocol_control_proto_init() {
 		(*Envelope_ResourceDownloadRequest)(nil),
 		(*Envelope_ResourceDownloadTicket)(nil),
 		(*Envelope_EnvironmentConfig)(nil),
+		(*Envelope_ExecutionExitAck)(nil),
 	}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[1].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[3].OneofWrappers = []any{}
@@ -4817,7 +4879,6 @@ func file_platform_daemon_server_src_main_protocol_control_proto_init() {
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[26].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[27].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[29].OneofWrappers = []any{}
-	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[33].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[34].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[35].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[36].OneofWrappers = []any{}
@@ -4835,13 +4896,14 @@ func file_platform_daemon_server_src_main_protocol_control_proto_init() {
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[48].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[49].OneofWrappers = []any{}
 	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[50].OneofWrappers = []any{}
+	file_platform_daemon_server_src_main_protocol_control_proto_msgTypes[51].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_platform_daemon_server_src_main_protocol_control_proto_rawDesc), len(file_platform_daemon_server_src_main_protocol_control_proto_rawDesc)),
 			NumEnums:      9,
-			NumMessages:   52,
+			NumMessages:   53,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

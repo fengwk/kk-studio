@@ -15,22 +15,37 @@ func TestJournalDeduplicatesRunning(t *testing.T) {
 	}
 }
 
-// Ensures terminal retention is bounded without evicting active invocations.
-func TestJournalEvictsOldestTerminalOnly(t *testing.T) {
-	j, _ := NewInvocationJournal(1)
-	j.Start("active")
-	j.Start("old")
-	if !j.Complete("old", InvocationCompleted, []byte("done")) {
+// Capacity backpressure keeps unacknowledged facts, then frees a slot only after all exit facts arrive.
+func TestJournalCapacityWaitsForExitAcknowledgement(t *testing.T) {
+	journal, err := NewInvocationJournal(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if start := journal.Start("active"); !start.Created || start.Err != nil {
+		t.Fatalf("start active: %+v", start)
+	}
+	if start := journal.Start("old"); !start.Created || start.Err != nil {
+		t.Fatalf("start old: %+v", start)
+	}
+	if !journal.Complete("old", InvocationCompleted, []byte("done")) {
 		t.Fatal("completion failed")
 	}
-	j.Start("new")
-	if !j.Complete("new", InvocationFailed, []byte("bad")) {
-		t.Fatal("completion failed")
+	if start := journal.Start("new"); start.Err != errInvocationJournalFull {
+		t.Fatalf("unacknowledged terminal did not backpressure new invocation: %+v", start)
 	}
-	if _, ok := j.Get("old"); ok {
-		t.Fatal("old terminal retained")
+	if confirmed, err := journal.ConfirmExitDurable("old"); err != nil || !confirmed {
+		t.Fatalf("record exit: confirmed=%t err=%v", confirmed, err)
 	}
-	if e, ok := j.Get("active"); !ok || e.State != InvocationRunning {
-		t.Fatal("running entry evicted")
+	if acknowledged, err := journal.AcknowledgeExit("old"); err != nil || !acknowledged {
+		t.Fatalf("record acknowledgement: acknowledged=%t err=%v", acknowledged, err)
+	}
+	if _, exists := journal.Get("old"); exists {
+		t.Fatal("fully confirmed invocation retained its journal slot")
+	}
+	if start := journal.Start("new"); !start.Created || start.Err != nil {
+		t.Fatalf("released journal slot was not reused: %+v", start)
+	}
+	if entry, exists := journal.Get("active"); !exists || entry.State != InvocationRunning {
+		t.Fatal("running entry was evicted")
 	}
 }

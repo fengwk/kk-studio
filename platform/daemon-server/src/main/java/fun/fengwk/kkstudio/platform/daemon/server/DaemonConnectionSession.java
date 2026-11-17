@@ -2,7 +2,6 @@ package fun.fengwk.kkstudio.platform.daemon.server;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCancelledException;
-import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityFailedException;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilitySendUncertainException;
@@ -14,6 +13,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.Cancel;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolException;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Envelope;
 import fun.fengwk.kkstudio.platform.daemon.protocol.EnvironmentConfig;
+import fun.fengwk.kkstudio.platform.daemon.protocol.ExecutionExitAck;
 import fun.fengwk.kkstudio.platform.daemon.protocol.MessageType;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Ready;
 import fun.fengwk.kkstudio.platform.daemon.protocol.Recover;
@@ -53,6 +53,7 @@ final class DaemonConnectionSession implements DaemonSession {
   private final EnvironmentUpdateListener updateListener;
   private final DaemonResourceTicketService ticketService;
   private final Supplier<EnvironmentServerSettings> settingsSupplier;
+  private final ExecutionExitReceiptLookup exitReceiptLookup;
   private final DaemonInvocationTracker invocationTracker;
   private final DaemonTransferCoordinator transferCoordinator;
   private final DaemonDownloadCoordinator downloadCoordinator = new DaemonDownloadCoordinator();
@@ -83,6 +84,7 @@ final class DaemonConnectionSession implements DaemonSession {
       EnvironmentUpdateListener updateListener,
       DaemonResourceTicketService ticketService,
       Supplier<EnvironmentServerSettings> settingsSupplier,
+      ExecutionExitReceiptLookup exitReceiptLookup,
       DaemonInvocationTracker invocationTracker,
       DaemonTransferCoordinator transferCoordinator,
       DaemonIdeCoordinator ideCoordinator,
@@ -100,6 +102,7 @@ final class DaemonConnectionSession implements DaemonSession {
     this.updateListener = Objects.requireNonNull(updateListener, "updateListener");
     this.ticketService = Objects.requireNonNull(ticketService, "ticketService");
     this.settingsSupplier = Objects.requireNonNull(settingsSupplier, "settingsSupplier");
+    this.exitReceiptLookup = Objects.requireNonNull(exitReceiptLookup, "exitReceiptLookup");
     this.invocationTracker = Objects.requireNonNull(invocationTracker, "invocationTracker");
     this.transferCoordinator = Objects.requireNonNull(transferCoordinator, "transferCoordinator");
     this.ideCoordinator = Objects.requireNonNull(ideCoordinator, "ideCoordinator");
@@ -655,27 +658,75 @@ final class DaemonConnectionSession implements DaemonSession {
     UUID invocationId = parseInvocationId(envelope);
     Optional<ExitConfirmation> confirmation =
         invocationTracker.claimExitConfirmation(environmentId, invocationId, daemonInstanceId);
-    boolean known =
-        confirmation.isPresent() || invocationTracker.isKnown(environmentId, invocationId);
     if (confirmation.isPresent()) {
-      EnvironmentCapabilityExecutionListener listener = confirmation.get().listener;
+      ExitConfirmation claimed = confirmation.get();
       deferred.add(
           () -> {
             try {
-              listener.onExitConfirmed();
+              claimed.listener.onExitConfirmed();
             } catch (RuntimeException failure) {
+              invocationTracker.completeExitConfirmation(
+                  environmentId, invocationId, claimed, false);
               DaemonFailures.log(
                   DaemonConnectionSession.class, "execution exit confirmation", failure);
+              return;
+            }
+            if (invocationTracker.completeExitConfirmation(
+                environmentId, invocationId, claimed, true)) {
+              sendExecutionExitAck(invocationId);
             }
           });
       return;
     }
-    if (!known) {
-      LOG.log(
-          Level.DEBUG,
-          "ignoring EXECUTION_EXITED for unknown invocation {0} on {1}",
-          invocationId,
-          environmentId);
+    if (invocationTracker.hasDeliveredExitConfirmation(
+        environmentId, invocationId, daemonInstanceId)) {
+      sendExecutionExitAck(invocationId);
+      return;
+    }
+    if (invocationTracker.isKnown(environmentId, invocationId)) {
+      return;
+    }
+    deferred.add(
+        () -> {
+          if (invocationTracker.isKnown(environmentId, invocationId)) {
+            return;
+          }
+          try {
+            if (exitReceiptLookup.isAcknowledged(environmentId, invocationId)) {
+              if (!invocationTracker.isKnown(environmentId, invocationId)) {
+                sendExecutionExitAck(invocationId);
+              }
+              return;
+            }
+          } catch (RuntimeException failure) {
+            DaemonFailures.log(
+                DaemonConnectionSession.class, "execution exit receipt lookup", failure);
+            return;
+          }
+          LOG.log(
+              Level.DEBUG,
+              "ignoring EXECUTION_EXITED without durable receipt for invocation {0} on {1}",
+              invocationId,
+              environmentId);
+        });
+  }
+
+  private void sendExecutionExitAck(UUID invocationId) {
+    Envelope acknowledgement =
+        Envelope.newBuilder()
+            .setMessageType(MessageType.EXECUTION_EXIT_ACK)
+            .setEnvironmentId(environmentId.value().toString())
+            .setInvocationId(invocationId.toString())
+            .setExecutionExitAck(ExecutionExitAck.getDefaultInstance())
+            .build();
+    DaemonOfferResult outcome;
+    try {
+      outcome = offerResult(acknowledgement);
+    } catch (RuntimeException transportFailure) {
+      outcome = null;
+    }
+    if (outcome != DaemonOfferResult.ACCEPTED) {
+      close();
     }
   }
 

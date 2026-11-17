@@ -28,7 +28,15 @@ func (r *Runtime) handleSettings(e *protocol.Envelope) error {
 		return errors.New("settings.resourceBudgets is invalid")
 	}
 	ttl, interval := time.Duration(budgets.GetTemporaryResourceTtlSeconds())*time.Second, time.Duration(budgets.GetTemporaryResourceCleanupIntervalSeconds())*time.Second
-	r.setTemporaryResourcePolicy(ttl, interval, false)
+	r.mu.RLock()
+	bound, ready := r.bound, r.ready
+	r.mu.RUnlock()
+	if bound {
+		// SETTINGS may refresh resource budgets while this connection is already READY.
+		// It does not repeat the environment binding handshake.
+		r.setTemporaryResourcePolicy(ttl, interval, ready)
+		return nil
+	}
 	if err := r.gate.Bind(r.options.EnvironmentID); err != nil {
 		return err
 	}
@@ -36,6 +44,7 @@ func (r *Runtime) handleSettings(e *protocol.Envelope) error {
 	r.bound = true
 	r.ready = false
 	r.mu.Unlock()
+	r.setTemporaryResourcePolicy(ttl, interval, false)
 	return nil
 }
 

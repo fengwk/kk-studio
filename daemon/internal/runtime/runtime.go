@@ -41,6 +41,7 @@ type RuntimeOptions struct {
 	ApplyConfig              ConfigApplier
 	EnvironmentConfig        *EnvironmentConfigRuntime
 	Status                   *StatusTracker
+	InvocationJournalPath    string
 	MaxConcurrentInvocations int
 	HeartbeatInterval        time.Duration
 	IDECommandTimeout        time.Duration
@@ -50,7 +51,7 @@ type RuntimeOptions struct {
 	IDE                      IDEService
 }
 
-// Runtime owns one bound control connection, its handshake gate, in-flight calls and in-memory journal.
+// Runtime owns one bound control connection, its handshake gate, in-flight calls and invocation journal.
 type Runtime struct {
 	options                RuntimeOptions
 	hostInfo               *protocol.HostInfo
@@ -103,7 +104,7 @@ type Runtime struct {
 	shutdown               *shutdownFailureTracker
 }
 
-// NewRuntime validates the required injectable boundaries and creates an in-memory session runtime.
+// NewRuntime validates required boundaries and creates a runtime with an optional durable invocation journal.
 func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if options.EnvironmentID == "" || options.Connections == nil || options.ApplyConfig == nil && options.EnvironmentConfig == nil {
 		return nil, errors.New("runtime requires environmentId, connection factory, and configuration applier")
@@ -115,7 +116,12 @@ func NewRuntime(options RuntimeOptions) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	journal, err := NewInvocationJournal(1024)
+	var journal *InvocationJournal
+	if options.InvocationJournalPath == "" {
+		journal, err = NewInvocationJournal(1024)
+	} else {
+		journal, err = NewPersistentInvocationJournal(options.InvocationJournalPath, 1024)
+	}
 	if err != nil {
 		return nil, err
 	}

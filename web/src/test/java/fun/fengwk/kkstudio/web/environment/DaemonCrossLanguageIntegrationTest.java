@@ -187,7 +187,8 @@ class DaemonCrossLanguageIntegrationTest {
             updateListener,
             ticketService,
             settingsSupplier,
-            Runnable::run);
+            Runnable::run,
+            (environmentId, invocationId) -> false);
 
     recordingSessions = new RecordingSessions(daemonServer);
 
@@ -659,7 +660,8 @@ class DaemonCrossLanguageIntegrationTest {
             () ->
                 new EnvironmentServerSettings(
                     Duration.ofSeconds(60), 16L * 1024 * 1024, ImageInputTier.P720, 259200L, 1800L),
-            Runnable::run);
+            Runnable::run,
+            (environmentId, invocationId) -> false);
     recordingSessions.setDelegate(newServer);
 
     // 第一个 server 实例执行 drain()：排空控制流并释放 FakeLeaseStore 租约

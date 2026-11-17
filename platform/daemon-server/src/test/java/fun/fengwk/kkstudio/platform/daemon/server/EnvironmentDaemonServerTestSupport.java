@@ -521,6 +521,7 @@ final class EnvironmentDaemonServerTestSupport {
     Throwable updateNotificationFailure;
     RuntimeException settingsFailure;
     volatile Consumer<EnvironmentId> configLookupHook;
+    volatile ExecutionExitReceiptLookup exitReceiptLookup = (environmentId, invocationId) -> false;
 
     Fixture() {
       this(Runnable::run);
@@ -577,7 +578,9 @@ final class EnvironmentDaemonServerTestSupport {
                 }
                 return settings.get();
               },
-              configExecutor);
+              configExecutor,
+              (environmentId, invocationId) ->
+                  exitReceiptLookup.isAcknowledged(environmentId, invocationId));
     }
 
     private Optional<EnvironmentConfigSnapshot> findConfig(EnvironmentId environmentId) {

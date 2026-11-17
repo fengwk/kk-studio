@@ -64,6 +64,7 @@ public final class EnvironmentDaemonServer
   private final Supplier<EnvironmentServerSettings> settingsSupplier;
   private final EnvironmentConfigSource configSource;
   private final Executor configExecutor;
+  private final ExecutionExitReceiptLookup exitReceiptLookup;
 
   private final DaemonInvocationTracker invocationTracker = new DaemonInvocationTracker();
   private final DaemonTransferCoordinator transferCoordinator = new DaemonTransferCoordinator();
@@ -87,7 +88,8 @@ public final class EnvironmentDaemonServer
       EnvironmentUpdateListener updateListener,
       DaemonResourceTicketService ticketService,
       Supplier<EnvironmentServerSettings> settings,
-      Executor configExecutor) {
+      Executor configExecutor,
+      ExecutionExitReceiptLookup exitReceiptLookup) {
     this.leaseStore = Objects.requireNonNull(leaseStore, "leaseStore");
     this.registrationDirectory =
         Objects.requireNonNull(registrationDirectory, "registrationDirectory");
@@ -97,6 +99,7 @@ public final class EnvironmentDaemonServer
     this.ticketService = Objects.requireNonNull(ticketService, "ticketService");
     this.settingsSupplier = Objects.requireNonNull(settings, "settings");
     this.configExecutor = Objects.requireNonNull(configExecutor, "configExecutor");
+    this.exitReceiptLookup = Objects.requireNonNull(exitReceiptLookup, "exitReceiptLookup");
   }
 
   @Override
@@ -218,6 +221,7 @@ public final class EnvironmentDaemonServer
             updateListener,
             ticketService,
             settingsSupplier,
+            exitReceiptLookup,
             invocationTracker,
             transferCoordinator,
             ideCoordinator,

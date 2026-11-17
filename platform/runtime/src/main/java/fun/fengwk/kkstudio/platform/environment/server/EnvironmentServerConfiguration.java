@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentServerSettings;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentSessionListener;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentUpdateListener;
+import fun.fengwk.kkstudio.platform.daemon.server.ExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
@@ -64,6 +65,7 @@ public class EnvironmentServerConfiguration {
       ObjectProvider<EnvironmentUpdateListener> updateListenerProvider,
       DaemonResourceTicketService ticketService,
       SystemSettingsSnapshot snapshot,
+      ExecutionExitReceiptLookup exitReceiptLookup,
       @Qualifier("environmentConfigExecutor") ExecutorService environmentConfigExecutor) {
     return new EnvironmentDaemonServer(
         environmentRegistry,
@@ -78,7 +80,8 @@ public class EnvironmentServerConfiguration {
         },
         ticketService,
         () -> toSettings(snapshot.get()),
-        environmentConfigExecutor);
+        environmentConfigExecutor,
+        exitReceiptLookup);
   }
 
   private static Optional<DaemonRegistration> toRegistration(

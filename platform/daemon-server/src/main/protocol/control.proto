@@ -40,6 +40,7 @@ enum MessageType {
   RESOURCE_DOWNLOAD_REQUEST = 25;
   RESOURCE_DOWNLOAD_TICKET = 26;
   ENVIRONMENT_CONFIG = 27;
+  EXECUTION_EXIT_ACK = 28;
 }
 
 enum ImageInputTier {
@@ -135,6 +136,7 @@ message Envelope {
     ResourceDownloadRequest resource_download_request = 28;
     ResourceDownloadTicket resource_download_ticket = 29;
     EnvironmentConfig environment_config = 30;
+    ExecutionExitAck execution_exit_ack = 31;
   }
 }
 
@@ -313,6 +315,9 @@ message Recover {}
 message RecoverNotFound {}
 
 message ExecutionExited {}
+
+// Studio 已持久接受该调用的执行退出事实；不表示调用结果已被消费。
+message ExecutionExitAck {}
 
 message ResourceUploadRequest {
   optional string transfer_id = 1;
