@@ -217,7 +217,8 @@ func TestStartDiagnosticsClose(t *testing.T) {
 	if err != nil || *first != *second || first.Host != "127.0.0.1" || first.Port < 1 || first.Cookie != "code-server-session=fake" {
 		t.Fatalf("session = %#v, second = %#v, err = %v", first, second, err)
 	}
-	wantDiagnostics := strings.Repeat("diagnostic", 800)
+	// A unique final marker prevents a periodic intermediate tail from looking fully drained.
+	wantDiagnostics := fakeProcessDiagnostics()
 	wantDiagnostics = wantDiagnostics[len(wantDiagnostics)-4*1024:]
 	waitForDiagnostics(t, manager, wantDiagnostics)
 	if got := supervisor.count(); got != 1 {
@@ -345,7 +346,7 @@ func (s *fakeSupervisor) Start(ctx context.Context, spec native.ProcessSpec) (na
 	}
 	stdoutR, stdoutW := io.Pipe()
 	stderrR, stderrW := io.Pipe()
-	go func() { _, _ = stdoutW.Write([]byte(strings.Repeat("diagnostic", 800))) }()
+	go func() { _, _ = stdoutW.Write([]byte(fakeProcessDiagnostics())) }()
 	password := ""
 	configPath := ""
 	for i, arg := range spec.Args {
@@ -404,6 +405,10 @@ func (s *fakeSupervisor) Close(context.Context) error { return nil }
 func (s *fakeSupervisor) count() int                  { s.mu.Lock(); defer s.mu.Unlock(); return s.countN }
 
 func intPointer(value int) *int { return &value }
+
+func fakeProcessDiagnostics() string {
+	return strings.Repeat("diagnostic", 800) + "\nDIAGNOSTIC_STREAM_COMPLETE\n"
+}
 
 type fakeProcess struct {
 	pid              int
