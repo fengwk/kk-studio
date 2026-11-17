@@ -132,6 +132,27 @@ describe('ToolMessageBlock shell', () => {
     expect(screen.queryByText('· 成功')).not.toBeInTheDocument()
   })
 
+  it('shows WAITING_CHILD as a static localized subagent-result wait', () => {
+    const { container, rerender } = render(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'task', invocationStatus: 'WAITING_CHILD',
+    })} />)
+    const disclosure = container.querySelector('.thread-block-tool')
+    expect(disclosure).toHaveAttribute('data-invocation-state', 'waiting-child')
+    expect(disclosure).toHaveAttribute('title', 'task: 等待子代理结果')
+    expect(container.querySelector('.thread-tool-state-label')).toHaveTextContent('等待子代理结果')
+    expect(disclosure).toHaveAttribute('aria-busy', 'false')
+    expect(container.querySelector('.animate-spin')).toBeNull()
+
+    setLocale('en-US')
+    rerender(<ToolMessageBlock message={message({
+      phase: 'call', toolName: 'task', invocationStatus: 'WAITING_CHILD',
+    })} />)
+    expect(container.querySelector('.thread-tool-state-label'))
+      .toHaveTextContent('Waiting for subagent result')
+    expect(container.querySelector('.animate-spin')).toBeNull()
+    setLocale('zh-CN')
+  })
+
   it('does not label a SUCCEEDED invocation with an error result as a successful tool operation', () => {
     const { container } = render(<ToolMessageBlock
       message={message({ phase: 'call', invocationStatus: 'SUCCEEDED' })}

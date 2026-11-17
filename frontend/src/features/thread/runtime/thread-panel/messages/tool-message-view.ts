@@ -10,7 +10,7 @@ import type {
 
 type ToolVisualState = 'pending' | 'success' | 'error'
 type ToolExecutionState =
-  | 'preparing' | 'queued' | 'environment' | 'approval' | 'input'
+  | 'preparing' | 'queued' | 'environment' | 'approval' | 'input' | 'waiting-child'
   | 'running' | 'succeeded' | 'failed' | 'cancelled' | 'unknown'
 
 /** 状态仅取 durable invocation；模型流里的 call.done 只是参数完整。 */
@@ -21,6 +21,7 @@ function toolExecutionState(
     case 'READY': return message.waitingForEnvironment ? 'environment' : 'queued'
     case 'WAITING_APPROVAL': return 'approval'
     case 'WAITING_INPUT': return 'input'
+    case 'WAITING_CHILD': return 'waiting-child'
     case 'RUNNING': return 'running'
     case 'SUCCEEDED': return 'succeeded'
     case 'FAILED': return 'failed'
@@ -38,7 +39,7 @@ function toolExecutionState(
  * settled：成功、失败、已停止、结果未知。
  */
 export function toolDisclosurePhase(state: ToolExecutionState): DisclosurePhase {
-  return ['preparing', 'queued', 'environment', 'approval', 'input', 'running'].includes(state)
+  return ['preparing', 'queued', 'environment', 'approval', 'input', 'waiting-child', 'running'].includes(state)
     ? 'active'
     : 'settled'
 }
