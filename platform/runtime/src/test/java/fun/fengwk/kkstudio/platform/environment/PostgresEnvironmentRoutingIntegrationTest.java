@@ -22,7 +22,6 @@ import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
-import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.platform.daemon.DaemonHostInfo;
 import fun.fengwk.kkstudio.platform.daemon.DaemonOperatingSystem;
 import fun.fengwk.kkstudio.platform.daemon.DaemonReadyMetadata;
@@ -50,9 +49,8 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.server.DatabaseEnvironmentConfigSource;
 import fun.fengwk.kkstudio.platform.environment.server.EnvironmentServerConfiguration;
-import fun.fengwk.kkstudio.platform.harness.builtin.store.PostgresqlBuiltinHarnessStore;
+import fun.fengwk.kkstudio.platform.environment.server.PostgresqlExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
-import fun.fengwk.kkstudio.platform.harness.store.HarnessStoreExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 
@@ -169,10 +167,8 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
     EnvironmentSessionListener sessionListener = env -> {};
     EnvironmentConfigSource configSource = new DatabaseEnvironmentConfigSource(reads);
     this.configExecutor = Executors.newSingleThreadExecutor();
-    HarnessStore harnessStore =
-        new PostgresqlBuiltinHarnessStore(ds, transactionManager, UUID::randomUUID);
     ExecutionExitReceiptLookup exitReceiptLookup =
-        new HarnessStoreExecutionExitReceiptLookup(harnessStore);
+        new PostgresqlExecutionExitReceiptLookup(jdbcTemplate);
     EnvironmentServerConfiguration serverConfiguration = new EnvironmentServerConfiguration();
     this.serverNode1 =
         serverConfiguration.environmentDaemonServer(

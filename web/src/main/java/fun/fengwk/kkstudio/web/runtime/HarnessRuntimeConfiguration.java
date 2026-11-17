@@ -31,7 +31,6 @@ import fun.fengwk.kkstudio.platform.catalog.mcp.runtime.McpToolCatalog;
 import fun.fengwk.kkstudio.platform.catalog.tool.PluginRuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.catalog.tool.RuntimeToolCatalogSource;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
-import fun.fengwk.kkstudio.platform.daemon.server.ExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ModelRequestDebugService;
 import fun.fengwk.kkstudio.platform.harness.builtin.query.ProviderRequestPreviewService;
 import fun.fengwk.kkstudio.platform.harness.builtin.store.PostgresqlBuiltinHarnessStore;
@@ -42,7 +41,6 @@ import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcherConfig;
 import fun.fengwk.kkstudio.platform.harness.model.DatabaseProviderResolutionService;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
-import fun.fengwk.kkstudio.platform.harness.store.HarnessStoreExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.harness.thread.command.DatabaseTurnResolver;
 import fun.fengwk.kkstudio.platform.plugin.resource.PluginResourceGateway;
 import fun.fengwk.kkstudio.platform.pluginhost.PluginProperties;
@@ -101,11 +99,6 @@ public class HarnessRuntimeConfiguration {
   public PostgresqlBuiltinHarnessStore harnessStore(
       DataSource dataSource, PlatformTransactionManager transactionManager) {
     return new PostgresqlBuiltinHarnessStore(dataSource, transactionManager, UUID::randomUUID);
-  }
-
-  @Bean
-  public ExecutionExitReceiptLookup executionExitReceiptLookup(HarnessStore store) {
-    return new HarnessStoreExecutionExitReceiptLookup(store);
   }
 
   /**
