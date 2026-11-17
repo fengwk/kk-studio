@@ -131,9 +131,23 @@ describe('ActiveThreadTree', () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, false, 'root'), { ...worker, status: 'IDLE', outcome: 'STOPPED' },
     ])
-    act(() => socket.emitServer({ type: 'event', resource: { kind: 'thread-tree', id: ROOT_ID }, name: 'changed', data: {} }))
+    act(() => socket.emitServer({
+      type: 'event',
+      resource: { kind: 'thread-tree', id: ROOT_ID },
+      name: 'snapshot',
+      data: {
+        nodes: [
+          treeNode(ROOT_ID, null, false, 'root'),
+          { ...worker, status: 'IDLE', outcome: 'STOPPED' },
+        ],
+      },
+    }))
     await waitFor(() => expect(screen.getByRole('link', { name: /Explorer/ })).toHaveTextContent('停止'))
-    expect(harnessService.getThreadTree).toHaveBeenLastCalledWith(WORKER_ID)
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+    expect(harnessService.getThreadTree).toHaveBeenLastCalledWith(
+      WORKER_ID,
+      { signal: expect.any(AbortSignal) },
+    )
     expect(queryClient.getQueryData(['threads', 'tree', WORKER_ID])).toBeDefined()
     expect(queryClient.getQueryData(['threads', 'tree', ROOT_ID])).toBeUndefined()
   })
@@ -183,10 +197,13 @@ describe('ActiveThreadTree', () => {
       treeNode(IDLE_ID, ROOT_ID, false, 'idle-child'),
     ])
 
-    const { container, sockets } = renderTree(ROOT_ID)
+    const { container, sockets, queryClient } = renderTree(ROOT_ID)
 
     await waitFor(() => {
-      expect(harnessService.getThreadTree).toHaveBeenCalledWith(ROOT_ID)
+      expect(harnessService.getThreadTree).toHaveBeenCalledWith(
+        ROOT_ID,
+        { signal: expect.any(AbortSignal) },
+      )
     })
     expect(container.querySelector('.thread-widget-panel')).toBeNull()
     const socket = sockets.openLatest()
@@ -194,24 +211,25 @@ describe('ActiveThreadTree', () => {
       { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
     ]))
 
-    // 子代理写入由服务端聚合到真实执行根后推送：changed 只提示回读该根，不需要固定轮询。
-    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+    // 子代理写入由服务端聚合到真实执行根后推送权威快照；changed 不负责触发 GET。
+    const pushed = [
       treeNode(ROOT_ID, null, true, 'root'),
       treeNode(IDLE_ID, ROOT_ID, false, 'idle-child'),
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
-    ])
+    ]
     act(() => {
       socket.emitServer({
         type: 'event',
         resource: { kind: 'thread-tree', id: ROOT_ID },
-        name: 'changed',
-        data: {},
+        name: 'snapshot',
+        data: { nodes: pushed },
       })
     })
 
     expect(await screen.findByRole('link', { name: /worker/ })).toBeInTheDocument()
     expect(screen.getByText('1 个活跃')).toBeInTheDocument()
-    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(2)
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+    expect(queryClient.getQueryData(['threads', 'tree', ROOT_ID])).toEqual(pushed)
   })
 
   it('intercepts ordinary row clicks through the pane navigation provider', async () => {
@@ -327,7 +345,7 @@ describe('ActiveThreadTree', () => {
     }
   }
 
-  it('reads back the root tree when a reconnect re-subscribes and acks', async () => {
+  it('accepts the server snapshot when a reconnect re-subscribes and acks', async () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, true, 'root'),
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
@@ -340,8 +358,7 @@ describe('ActiveThreadTree', () => {
       { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
     ])
 
-    // 断线后管理器按退避重连：重连必须重新订阅同一执行根，并在服务端 ack 后回读，
-    // 否则面板会永远停在断线前的执行树状态。
+    // 断线后重新订阅同一执行根；服务端 ack 后推送权威快照，不触发第二个 HTTP writer。
     vi.useFakeTimers()
     try {
       first.closeWith()
@@ -364,29 +381,56 @@ describe('ActiveThreadTree', () => {
         })
       })
       await flushApplicationEvents()
-      expect(harnessService.getThreadTree).toHaveBeenCalledTimes(2)
+      expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+      const pushed = [
+        treeNode(ROOT_ID, null, true, 'root'),
+        treeNode(WORKER_ID, ROOT_ID, true, 'reconnected worker'),
+      ]
+      act(() => reconnected.emitServer({
+        type: 'event',
+        resource: { kind: 'thread-tree', id: ROOT_ID },
+        name: 'snapshot',
+        data: { nodes: pushed },
+      }))
+      await flushApplicationEvents()
+      expect(screen.getByRole('link', { name: /reconnected worker/ })).toBeInTheDocument()
+      expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     } finally {
       vi.useRealTimers()
     }
   })
 
-  it('reads back the root tree on resync', async () => {
+  it('requests and accepts a root snapshot over WS on resync', async () => {
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(ROOT_ID, null, true, 'root'),
       treeNode(WORKER_ID, ROOT_ID, true, 'worker'),
     ])
-    const { sockets } = renderTree(ROOT_ID)
+    const { sockets, queryClient } = renderTree(ROOT_ID)
     await screen.findByRole('link', { name: /worker/ })
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
     const socket = sockets.openLatest()
 
-    // resync 表示服务端要求整体回读：此时不能装作本地状态仍然权威。
+    // resync 要求在同一 WS 资源上 refresh；恢复内容经服务端快照推送，不发 HTTP GET。
     act(() => {
       socket.emitServer({ type: 'resync', resource: { kind: 'thread-tree', id: ROOT_ID } })
     })
-    await waitFor(() => {
-      expect(harnessService.getThreadTree).toHaveBeenCalledTimes(2)
-    })
+    await waitFor(() => expect(socket.sentMessages()).toEqual([
+      { type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT_ID } },
+      { type: 'refresh', resource: { kind: 'thread-tree', id: ROOT_ID } },
+    ]))
+    const pushed = [
+      treeNode(ROOT_ID, null, true, 'root'),
+      treeNode(WORKER_ID, ROOT_ID, true, 'resynced worker'),
+    ]
+    act(() => socket.emitServer({
+      type: 'event',
+      resource: { kind: 'thread-tree', id: ROOT_ID },
+      name: 'snapshot',
+      data: { nodes: pushed },
+    }))
+    expect(await screen.findByRole('link', { name: /resynced worker/ })).toBeInTheDocument()
+    expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
+    expect(queryClient.getQueryData(['threads', 'tree', ROOT_ID])).toEqual(pushed)
   })
 
   it('refcounts panes on one root and ignores events after the last release', async () => {

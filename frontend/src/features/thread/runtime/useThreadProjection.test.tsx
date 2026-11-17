@@ -116,6 +116,7 @@ describe('useThreadProjection queuedCustomMessages derivation', () => {
         id: 'custom-1',
         sequence: '1',
         text: '补充要求：增加边界测试',
+        contents: [{ type: 'text', text: '补充要求：增加边界测试' }],
       },
     ])
 

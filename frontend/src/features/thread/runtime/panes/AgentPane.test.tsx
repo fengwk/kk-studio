@@ -1767,7 +1767,7 @@ describe('AgentPane orchestration', () => {
       expect(harnessService.renameThread).toHaveBeenCalledWith(THREAD_ID, { name: 'renamed thread' }))
     await waitFor(() => expect(screen.queryByRole('region', { name: '重命名 thread' })).not.toBeInTheDocument())
     expect(composer).toBeInTheDocument()
-    expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID)
+    expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID, { signal: expect.any(AbortSignal) })
   })
 
   it('auto-mounts the active subagent tree for a bound root without a manual toggle', async () => {
@@ -1809,7 +1809,10 @@ describe('AgentPane orchestration', () => {
     ])
     const bound = renderPane({ kind: 'CHAT', id: CHAT_ID })
     expect(screen.queryByRole('button', { name: 'Agent 关系' })).not.toBeInTheDocument()
-    await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID))
+    await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(
+      THREAD_ID,
+      { signal: expect.any(AbortSignal) },
+    ))
     expect(await screen.findByRole('region', { name: '活跃子代理' })).toBeInTheDocument()
     expect(await screen.findByRole('link', { name: /worker/ })).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: '给 AI 发送消息' })).toBeInTheDocument()
@@ -1832,7 +1835,10 @@ describe('AgentPane orchestration', () => {
       },
     ])
     const idle = renderPane({ kind: 'CHAT', id: 'chat-idle' })
-    await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID))
+    await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(
+      THREAD_ID,
+      { signal: expect.any(AbortSignal) },
+    ))
     expect(screen.queryByRole('region', { name: '活跃子代理' })).not.toBeInTheDocument()
     idle.unmount()
 
@@ -1913,7 +1919,7 @@ describe('AgentPane orchestration', () => {
 
     expect(await screen.findByRole('link', { name: /active B/ })).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /active A/ })).not.toBeInTheDocument()
-    expect(harnessService.getThreadTree).toHaveBeenCalledWith(threadB)
+    expect(harnessService.getThreadTree).toHaveBeenCalledWith(threadB, { signal: expect.any(AbortSignal) })
   })
 
   it('renames the bound Thread from the /rename-thread slash command', async () => {
@@ -5094,7 +5100,10 @@ describe('AgentPane root control mounting', () => {
 
     renderPane({ kind: 'CHAT', id: CHAT_ID })
     const composer = await screen.findByLabelText('给 AI 发送消息')
-    await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(THREAD_ID))
+    await waitFor(() => expect(harnessService.getThreadTree).toHaveBeenCalledWith(
+      THREAD_ID,
+      { signal: expect.any(AbortSignal) },
+    ))
     await user.click(composer)
     await user.keyboard('/stop{Enter}')
 
