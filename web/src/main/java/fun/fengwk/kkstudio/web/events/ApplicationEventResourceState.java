@@ -23,6 +23,7 @@ final class ApplicationEventResourceState {
   AutoCloseable realtimeHandle;
   AutoCloseable canvasVersionHandle;
   Runnable invalidationRelease;
+  ThreadTreeSnapshotPublisher.Handle threadTreeSnapshotHandle;
   long cursor;
 
   /** 已淘汰（最后释放/建立失败/hub close）：上游回调一律丢弃；只在状态锁内读写。 */

@@ -22,6 +22,7 @@ import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Subscription;
 import fun.fengwk.kkstudio.web.events.EventFrameCodec.ClientFrame;
 import fun.fengwk.kkstudio.web.events.EventFrameCodec.IdeUseFrame;
+import fun.fengwk.kkstudio.web.events.EventFrameCodec.RefreshFrame;
 import fun.fengwk.kkstudio.web.events.EventFrameCodec.SubscriptionFrame;
 
 import java.util.Map;
@@ -319,6 +320,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
             unsubscribe(subscription.resource());
           }
         }
+        case RefreshFrame refresh -> refresh(refresh.resource());
         case IdeUseFrame ideUse -> acceptIdeUse(ideUse.use());
       }
     }
@@ -361,6 +363,41 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
+    /** Explicit thread-tree refresh never changes the connection's subscription refcount. */
+    private void refresh(ResourceKey resource) {
+      synchronized (closeLock) {
+        if (closed) {
+          return;
+        }
+        if (resource.kind() != ApplicationEventHub.ResourceKind.THREAD_TREE) {
+          enqueueResourceError(
+              EventFrameCodec.INVALID_REFRESH_RESOURCE,
+              "refresh is only supported for thread-tree resources",
+              resource);
+          return;
+        }
+        if (!subscriptions.containsKey(resource)) {
+          enqueueResourceError(
+              EventFrameCodec.RESOURCE_NOT_SUBSCRIBED,
+              "thread-tree resource is not subscribed on this connection",
+              resource);
+          return;
+        }
+        if (!hub.requestThreadTreeSnapshot(resource)) {
+          enqueueResourceError(
+              EventFrameCodec.TREE_SNAPSHOT_FAILED,
+              "thread-tree snapshot could not be requested",
+              resource);
+        }
+      }
+    }
+
+    private void enqueueResourceError(String code, String message, ResourceKey resource) {
+      if (!sender.enqueue(codec.error(code, message, resource))) {
+        fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
+      }
+    }
+
     /** ide-use 的裁决与 ack 在同一 closeLock 内完成；拒绝是连接级 error，不关闭连接。 */
     private void acceptIdeUse(IdeBrowserUse usage) {
       synchronized (closeLock) {
@@ -393,8 +430,18 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
 
     /** 资源信号编码为帧后入队；队列满视为过载，发 BACKPRESSURE 后关闭连接。 */
     private void enqueueSignal(ResourceKey resource, Signal signal) {
-      String frame =
-          signal instanceof Signal.Resync ? codec.resync(resource) : codec.event(resource, signal);
+      String frame;
+      if (signal instanceof Signal.Resync) {
+        frame = codec.resync(resource);
+      } else if (signal instanceof Signal.ThreadTreeSnapshotFailed) {
+        frame =
+            codec.error(
+                EventFrameCodec.TREE_SNAPSHOT_FAILED,
+                "authoritative thread-tree snapshot failed",
+                resource);
+      } else {
+        frame = codec.event(resource, signal);
+      }
       if (!sender.enqueue(frame)) {
         fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
       }

@@ -16,6 +16,7 @@
  * {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"thread-tree","id":"<canonical UUID>"}}
  * {"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
  * {"type":"unsubscribe","resource":{...}}
+ * {"type":"refresh","resource":{"kind":"thread-tree","id":"<canonical UUID>"}}
  * {"type":"ide-use","browserSessionId":"<canonical UUID>","revision":"<positive decimal>","views":[{"environmentId":"<canonical UUID>","viewId":"<canonical UUID>","claimId":"<canonical UUID>","bindingEpoch":"<positive decimal>"}]}
  * }</pre>
  *
@@ -26,7 +27,7 @@
  *
  * <pre>{@code
  * {"type":"subscribed","resource":{...},"cursor":"<canonical decimal>"}
- * {"type":"event","resource":{...},"name":"version"|"realtime"|"changed"|"revision","data":{...},"cursor":"<optional canonical decimal>"}
+ * {"type":"event","resource":{...},"name":"version"|"realtime"|"changed"|"revision"|"snapshot","data":{...},"cursor":"<optional canonical decimal>"}
  * {"type":"resync","resource":{...}}
  * {"type":"heartbeat"}
  * {"type":"ide-use-accepted","revision":"<positive decimal>"}
@@ -34,7 +35,11 @@
  * }</pre>
  *
  * <p>{@code subscribed} 的 {@code cursor} 是订阅建立瞬间的 durable cursor（Thread version / Canvas
- * revision）；该 cursor 之后的事件保证送达，之前的由客户端随后拉取的 snapshot 覆盖。事件帧在 ack 帧之后才发送。非法帧（{@code
+ * revision）；该 cursor 之后的事件保证送达，之前的由客户端随后拉取的 snapshot 覆盖。thread-tree 使用无 cursor 的 {@code snapshot}
+ * 事件，{@code data} 固定为 {@code {nodes:[HarnessThreadTreeNodeDTO]}} 完整小快照；变化由服务端按执行根串行投影并合并尾随更新。每个本地
+ * thread-tree 订阅登记后都强制请求当前完整快照，事件帧在 {@code subscribed} ack 帧之后才发送。{@code refresh} 只允许对当前连接已订阅的
+ * thread-tree 资源使用，不改变引用计数；不支持的资源回 {@code INVALID_REFRESH_RESOURCE}，未订阅资源回 {@code
+ * RESOURCE_NOT_SUBSCRIBED}。 快照投影或投递失败回资源级 {@code TREE_SNAPSHOT_FAILED}，不自动 resync 重试。非法帧（{@code
  * INVALID_FRAME}）或发送过载 （{@code BACKPRESSURE}）时发送连接级 error 帧并关闭连接；未知资源只回资源级 {@code
  * RESOURCE_NOT_FOUND} 并保持连接。{@code ide-use} 冲突回连接级 {@code IDE_USE_REJECTED} 并保持连接。服务端每 15 秒发送原生
  * ping，45 秒没有有效 pong 即撤销该连接的 IDE 使用证明并关闭连接。

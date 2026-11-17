@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
@@ -36,9 +37,11 @@ import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Sink;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Subscription;
 
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Queue;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -57,6 +60,8 @@ class ApplicationEventHubTest {
   private static final UUID CANVAS = new UUID(0L, 2L);
   private static final ResourceKey THREAD_KEY = new ResourceKey(ResourceKind.THREAD, THREAD);
   private static final ResourceKey CANVAS_KEY = new ResourceKey(ResourceKind.CANVAS, CANVAS);
+  private static final ResourceKey THREAD_TREE_KEY =
+      new ResourceKey(ResourceKind.THREAD_TREE, THREAD);
   private static final ResourceKey PROJECTS_KEY = new ResourceKey(ResourceKind.PROJECTS, null);
 
   /** Hub 构造注入的缓冲上限：足够小以便测试溢出折叠路径，同时 > 1 覆盖多信号缓冲。 */
@@ -117,6 +122,82 @@ class ApplicationEventHubTest {
             throw new IllegalStateException("cannot close subscription", error);
           }
         });
+  }
+
+  @Test
+  void eachLocalTreeSubscriberGetsAForcedSnapshotAndRefreshesShareThePublisher() {
+    Queue<Runnable> tasks = new ArrayDeque<>();
+    HarnessThreadTreeNodeDTO node = new HarnessThreadTreeNodeDTO();
+    node.setThreadId(THREAD.toString());
+    node.setName("root");
+    List<HarnessThreadTreeNodeDTO> nodes = List.of(node);
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(tasks::add, ignored -> nodes);
+    ApplicationEventHub snapshotHub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            projectChangeSource,
+            environmentChangeSource,
+            () -> BUFFER_CAPACITY,
+            publisher);
+    List<Signal> firstReceived = new ArrayList<>();
+    Subscription first = snapshotHub.subscribe(THREAD_TREE_KEY, firstReceived::add);
+    tasks.remove().run();
+    first.activate();
+    assertEquals(List.of(new Signal.ThreadTreeSnapshot(nodes)), firstReceived);
+
+    List<Signal> secondReceived = new ArrayList<>();
+    Subscription second = snapshotHub.subscribe(THREAD_TREE_KEY, secondReceived::add);
+    assertEquals(1, tasks.size(), "a local subscriber forces a snapshot on the shared publisher");
+    tasks.remove().run();
+    second.activate();
+    assertEquals(List.of(new Signal.ThreadTreeSnapshot(nodes)), secondReceived);
+
+    assertTrue(snapshotHub.requestThreadTreeSnapshot(THREAD_TREE_KEY));
+    assertTrue(snapshotHub.requestThreadTreeSnapshot(THREAD_TREE_KEY));
+    assertEquals(1, tasks.size(), "concurrent refreshes share the in-flight publisher task");
+    tasks.remove().run();
+    assertEquals(
+        3, firstReceived.size(), "the queued refreshes coalesce into one current snapshot");
+    assertEquals(2, secondReceived.size());
+
+    first.close();
+    second.close();
+    snapshotHub.close();
+  }
+
+  @Test
+  void treeProjectionFailureIsReportedWithoutResync() {
+    Queue<Runnable> tasks = new ArrayDeque<>();
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(
+            tasks::add,
+            ignored -> {
+              throw new IllegalStateException("projection failed");
+            });
+    ApplicationEventHub snapshotHub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            projectChangeSource,
+            environmentChangeSource,
+            () -> BUFFER_CAPACITY,
+            publisher);
+    List<Signal> received = new ArrayList<>();
+    Subscription subscription = snapshotHub.subscribe(THREAD_TREE_KEY, received::add);
+
+    tasks.remove().run();
+    subscription.activate();
+
+    assertEquals(List.of(new Signal.ThreadTreeSnapshotFailed()), received);
+    assertTrue(tasks.isEmpty(), "failure must not schedule an automatic retry");
+    subscription.close();
+    snapshotHub.close();
   }
 
   @Test

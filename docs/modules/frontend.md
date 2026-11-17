@@ -88,11 +88,8 @@ Thread/Canvas 先读取 Snapshot，再订阅 `/ws/events`。
 接受连接却不发 `connected`（或立即关闭）的服务端会继续退避，不会以最小间隔无限重试。
 浏览器 online 或页面重新可见时立即重连，并同时重置退避序列（用户侧恢复信号）。
 资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
-projects/thread-tree/interactions/environments 只发 changed 提示、不携带 cursor。
-subscribed（含重连）、resync、资源 error 和版本提示触发回读；
-Thread checkpoint 可在相同 version 内更新，因此同 version Snapshot 仍参与对账，
-Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 codec 层拒绝、不到达 listener；
-没有 EventSource，也不用固定轮询兜底。
+projects/interactions/environments 发 changed 提示、不携带 cursor；thread-tree 推完整 `snapshot`（`data.nodes` 为权威节点 DTO 数组，不附带 Thread.version cursor），客户端直接验证并写入对应 root/bound query 缓存。执行树 HTTP 只 bootstrap 真实 root；成功订阅后关闭自动 HTTP focus/reconnect 回读，`subscribed` 只确认 wire 状态，服务端强制 snapshot 完成初始化与重连恢复。执行树 `resync` 和用户显式刷新经 `{type:'refresh',resource}` 请求同 root publisher，不新增订阅；其他资源仍按既有规则回读。
+执行树 projector/delivery 失败通过资源级 `TREE_SNAPSHOT_FAILED` 报错，保留旧缓存并显示刷新失败，不自动重试；用户显式刷新、真实变化或重连才再次请求。bootstrap 无数据失败时重试仍走 HTTP。Thread checkpoint 可在相同 version 内更新，因此同 version Snapshot 仍参与对账，Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 codec 层拒绝、不到达 listener；没有 EventSource，也不用固定轮询兜底。
 
 Thread Snapshot 只有一份 query 缓存，所有读取都经
 [`thread-snapshot-cache.ts`](../../frontend/src/features/thread/runtime/state/thread-snapshot-cache.ts) 的同一 fetcher。
@@ -104,7 +101,7 @@ Thread Snapshot 只有一份 query 缓存，所有读取都经
 `/api/harness/threads/{threadId}/compaction-availability`，检查中与检查失败分别显示不可用原因。
 它只影响命令提示与卡片按钮的可用性，压缩提交仍由服务端按 `expectedVersion` 判断。
 
-执行树按执行根订阅，服务端聚合后代写入后推送 changed，只回读该根，根本地空闲也保持订阅。
+执行树按执行根订阅，HTTP 只建立 bootstrap；根确认后相同 WS publisher 是唯一 live 来源，重连和 resync 请求完整快照，手动刷新也发送 `refresh` 控制帧，不通过 HTTP 并行写缓存。服务端为 root 串行合并投影，并在每个新本地订阅后强制发首快照；根本地空闲也保持订阅。
 交互待办变化订阅全局 interactions；导航角标读服务端返回的真实 total，不用首页长度伪装计数。
 环境注册表与连接租约订阅 environments：changed、subscribed 与 resync 都回读权威列表；
 连接失效是时间事实而非写入事实，客户端只按最早的 `statusExpiresAt` 排一次回读（越过截止点一个短容差），

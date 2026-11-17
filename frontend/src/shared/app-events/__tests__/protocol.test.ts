@@ -38,6 +38,9 @@ describe('encodeClientMessage', () => {
       JSON.parse(encodeClientMessage({ type: 'subscribe', resource: treeResource })),
     ).toEqual({ type: 'subscribe', resource: treeResource })
     expect(
+      JSON.parse(encodeClientMessage({ type: 'refresh', resource: treeResource })),
+    ).toEqual({ type: 'refresh', resource: treeResource })
+    expect(
       JSON.parse(
         encodeClientMessage({ type: 'subscribe', resource: interactionsResource }),
       ),
@@ -159,6 +162,34 @@ describe('decodeServerMessage', () => {
     }
   })
 
+  it('decodes authoritative thread-tree snapshots without a cursor', () => {
+    const node = {
+      threadId: THREAD_ID,
+      kind: 'USER',
+      parentThreadId: null,
+      name: 'root',
+      agentName: 'agent',
+      execution: { driver: 'builtin', settings: {} },
+      status: 'IDLE',
+      executionControl: 'RUNNABLE',
+      turnCount: 0,
+      toolCallCount: 0,
+      outcome: null,
+      updatedAt: 0,
+    }
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [node] },
+    }))).toEqual({
+      type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [node] },
+    })
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [node] }, cursor: '1',
+    }))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [{ ...node, extra: true }] },
+    }))).toBeNull()
+  })
+
   it('decodes hint-resource changed events without a cursor', () => {
     expect(
       decodeServerMessage(
@@ -277,6 +308,20 @@ describe('decodeServerMessage', () => {
       resource: projectsResource,
       name: 'changed',
       data: { projectId: THREAD_ID },
+    })
+  })
+
+  it('decodes the resource-scoped thread-tree snapshot failure signal', () => {
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'error',
+      resource: treeResource,
+      code: 'TREE_SNAPSHOT_FAILED',
+      message: 'authoritative thread-tree snapshot failed',
+    }))).toEqual({
+      type: 'error',
+      resource: treeResource,
+      code: 'TREE_SNAPSHOT_FAILED',
+      message: 'authoritative thread-tree snapshot failed',
     })
   })
 

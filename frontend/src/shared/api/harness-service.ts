@@ -35,6 +35,10 @@ interface ListSessionEntriesOptions {
   signal?: AbortSignal
 }
 
+interface GetThreadTreeOptions {
+  signal?: AbortSignal
+}
+
 interface GetCompactionAvailabilityOptions {
   signal?: AbortSignal
 }
@@ -108,8 +112,15 @@ export const harnessService = {
       { signal: options?.signal },
     ),
 
-  getThreadTree: (threadId: string): Promise<HarnessThreadTreeNodeDTO[]> =>
-    request('GET /api/harness/threads/{threadId}/tree', { path: { threadId } }),
+  getThreadTree: (
+    threadId: string,
+    options?: GetThreadTreeOptions,
+  ): Promise<HarnessThreadTreeNodeDTO[]> =>
+    request(
+      'GET /api/harness/threads/{threadId}/tree',
+      { path: { threadId } },
+      { signal: options?.signal },
+    ),
 
   renameThread: (threadId: string, data: HarnessNameUpdateDTO): Promise<HarnessThreadDTO> =>
     request('PUT /api/harness/threads/{threadId}/name', {

@@ -3,6 +3,7 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { useApplicationEvents } from '@/shared/app-events'
 import type { RealtimeFrameScheduler } from '@/features/thread/runtime/thread-realtime/realtime-frame-scheduler'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { coordinateQuerySync } from '@/shared/app-events/query-sync-coordinator'
 import { isActiveModelGeneration } from '@/features/thread/runtime/thread-realtime/model-recovery'
 import {
   createRealtimeEventHandler,
@@ -77,7 +78,9 @@ export function useThreadRealtimeSubscription({
     }
 
     const refetchSnapshot = (): Promise<void> =>
-      queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) })
+      coordinateQuerySync(queryClient, queryKeys.threads.snapshot(threadId), () =>
+        queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
+      )
     // 订阅/version/resync/error 的对账是 best-effort；失败只由下一次 durable
     // 信号重试，绝不能变成 unhandled rejection。
     const invalidateSnapshot = (): Promise<void> =>

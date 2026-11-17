@@ -9,6 +9,7 @@ import {
   httpJson,
   listResults,
   cid,
+  sleep,
 } from '../lib/http.mjs'
 import {
   acceptCommandBatch,
@@ -1928,8 +1929,8 @@ registerCase({
 registerCase({
   id: 'thread_tree.query_contract',
   level: 'L1',
-  title: 'Agent 关系树最小只读投影',
-  docs: 'GET /api/harness/threads/{id}/tree：节点精确投影 threadId/kind/parentThreadId/name/agentName/execution/status/executionControl/turnCount/toolCallCount/outcome/updatedAt；真实根 kind=USER 与 parentThreadId 可空，未结束 outcome 显式可空；状态、回合与工具数来源于当前 head，查询不推进版本；updatedAt 为只读的 Thread 权威更新时刻且与 Thread 快照一致；缺失 Agent 确定性失败，无真实 Provider 调用',
+  title: 'Agent 关系树 HTTP 投影与 WebSocket 权威快照',
+  docs: 'GET /api/harness/threads/{id}/tree 仅用于 bootstrap 并投影精确 DTO 字段；/ws/events 每个新订阅先 ack 后推无 cursor 的 snapshot(data.nodes)，同 root 第二客户端静止时也收到首快照；refresh 不新增订阅并强制推当前快照；重命名后推送新的权威整树；缺失 Agent 确定性失败，不调用真实 Provider',
   async run(ctx) {
     const target = await resolveAnyCatalogTarget(ctx)
     const chat = await createChat(ctx, {
@@ -1938,6 +1939,10 @@ registerCase({
       yoloEnabled: false,
     })
     const threadId = cid()
+    let socket
+    let collect
+    let secondSocket
+    let secondCollect
     try {
       await createNewSession(ctx, {
         owner: chatOwner(chat.id),
@@ -1973,11 +1978,160 @@ registerCase({
           && root.updatedAt === before.thread.updatedAt,
         JSON.stringify({ root: root.updatedAt, thread: before.thread.updatedAt }),
       )
-      const after = await getThreadSnapshot(ctx, threadId)
-      assert(after.thread.version === before.thread.version, 'tree query must not change version')
-      assert(after.thread.headEntryId === before.thread.headEntryId, 'tree query must not change head')
-      assert(after.thread.updatedAt === before.thread.updatedAt, 'tree query must not change updatedAt')
+      const afterTreeQuery = await getThreadSnapshot(ctx, threadId)
+      assert(afterTreeQuery.thread.version === before.thread.version, 'tree query must not change version')
+      assert(afterTreeQuery.thread.headEntryId === before.thread.headEntryId, 'tree query must not change head')
+      assert(afterTreeQuery.thread.updatedAt === before.thread.updatedAt, 'tree query must not change updatedAt')
+
+      socket = new WebSocket(threadTreeEventUrl(ctx.baseUrl))
+      const frames = []
+      const observedFrames = []
+      collect = (event) => {
+        try {
+          const frame = JSON.parse(String(event.data))
+          frames.push(frame)
+          observedFrames.push(frame)
+        } catch {
+          // Ignore non-JSON frames; protocol frames are asserted below.
+        }
+      }
+      socket.addEventListener('message', collect)
+      await waitForEventSocketOpen(socket, 5_000)
+      socket.send(JSON.stringify({
+        type: 'subscribe',
+        resource: { kind: 'thread-tree', id: threadId },
+      }))
+      const ack = await takeEventFrame(
+        frames,
+        (frame) => frame?.type === 'subscribed' && frame?.resource?.kind === 'thread-tree',
+        5_000,
+      )
+      assertExactFields(ack, ['type', 'resource', 'cursor'], 'thread-tree subscribed frame')
+      assertExactFields(ack.resource, ['kind', 'id'], 'thread-tree subscribed resource')
+      assert(ack.resource.id === threadId && ack.cursor === '0', JSON.stringify(ack))
+
+      const initialSnapshot = await takeEventFrame(
+        frames,
+        (frame) => frame?.type === 'event'
+          && frame?.resource?.kind === 'thread-tree'
+          && frame?.resource?.id === threadId
+          && frame?.name === 'snapshot',
+        10_000,
+      )
+      assertExactFields(initialSnapshot, ['type', 'resource', 'name', 'data'], 'tree snapshot frame')
+      assertExactFields(initialSnapshot.resource, ['kind', 'id'], 'tree snapshot resource')
+      assertExactFields(initialSnapshot.data, ['nodes'], 'tree snapshot data')
+      assert(observedFrames.indexOf(ack) < observedFrames.indexOf(initialSnapshot), 'snapshot must follow subscribed ack')
+      assert(isDeepStrictEqual(initialSnapshot.data.nodes, nodes), JSON.stringify(initialSnapshot))
+
+      secondSocket = new WebSocket(threadTreeEventUrl(ctx.baseUrl))
+      const secondFrames = []
+      const secondObservedFrames = []
+      secondCollect = (event) => {
+        try {
+          const frame = JSON.parse(String(event.data))
+          secondFrames.push(frame)
+          secondObservedFrames.push(frame)
+        } catch {
+          // Ignore non-JSON frames; protocol frames are asserted below.
+        }
+      }
+      secondSocket.addEventListener('message', secondCollect)
+      await waitForEventSocketOpen(secondSocket, 5_000)
+      secondSocket.send(JSON.stringify({
+        type: 'refresh',
+        resource: { kind: 'thread-tree', id: threadId },
+      }))
+      const invalidRefresh = await takeEventFrame(
+        secondFrames,
+        (frame) => frame?.type === 'error' && frame?.code === 'INVALID_REFRESH_RESOURCE',
+        5_000,
+      )
+      assert(invalidRefresh.resource?.kind === 'projects', JSON.stringify(invalidRefresh))
+      secondSocket.send(JSON.stringify({
+        type: 'refresh',
+        resource: { kind: 'thread-tree', id: threadId },
+      }))
+      const unsubscribedRefresh = await takeEventFrame(
+        secondFrames,
+        (frame) => frame?.type === 'error' && frame?.code === 'RESOURCE_NOT_SUBSCRIBED',
+        5_000,
+      )
+      assert(unsubscribedRefresh.resource?.id === threadId, JSON.stringify(unsubscribedRefresh))
+      secondSocket.send(JSON.stringify({
+        type: 'subscribe',
+        resource: { kind: 'thread-tree', id: threadId },
+      }))
+      const secondAck = await takeEventFrame(
+        secondFrames,
+        (frame) => frame?.type === 'subscribed' && frame?.resource?.kind === 'thread-tree',
+        5_000,
+      )
+      const secondSnapshot = await takeEventFrame(
+        secondFrames,
+        (frame) => frame?.type === 'event'
+          && frame?.resource?.kind === 'thread-tree'
+          && frame?.resource?.id === threadId
+          && frame?.name === 'snapshot',
+        10_000,
+      )
+      assert(secondObservedFrames.indexOf(secondAck) < secondObservedFrames.indexOf(secondSnapshot))
+      assert(isDeepStrictEqual(secondSnapshot.data.nodes, nodes), JSON.stringify(secondSnapshot))
+
+      const renamedName = `e2e-pushed-${cid().slice(0, 8)}`
+      await renameThread(ctx, threadId, renamedName)
+      const changedSnapshot = await takeEventFrame(
+        frames,
+        (frame) => frame?.type === 'event'
+          && frame?.resource?.kind === 'thread-tree'
+          && frame?.resource?.id === threadId
+          && frame?.name === 'snapshot'
+          && frame?.data?.nodes?.[0]?.name === renamedName,
+        10_000,
+      )
+      assertExactFields(changedSnapshot, ['type', 'resource', 'name', 'data'], 'changed tree snapshot')
+      assertExactFields(changedSnapshot.data, ['nodes'], 'changed tree snapshot data')
+
+      const subscribedCount = observedFrames.filter((frame) => frame?.type === 'subscribed').length
+      socket.send(JSON.stringify({
+        type: 'refresh',
+        resource: { kind: 'thread-tree', id: threadId },
+      }))
+      const refreshedSnapshot = await takeEventFrame(
+        frames,
+        (frame) => frame?.type === 'event'
+          && frame?.resource?.kind === 'thread-tree'
+          && frame?.resource?.id === threadId
+          && frame?.name === 'snapshot'
+          && frame?.data?.nodes?.[0]?.name === renamedName,
+        10_000,
+      )
+      assert(isDeepStrictEqual(refreshedSnapshot.data.nodes, changedSnapshot.data.nodes))
+      assert(
+        observedFrames.filter((frame) => frame?.type === 'subscribed').length === subscribedCount,
+        'refresh must not create a new subscription',
+      )
+
+      const afterRename = await getThreadSnapshot(ctx, threadId)
+      assert(
+        afterRename.thread.version === (BigInt(before.thread.version) + 1n).toString(),
+        'rename should change the Thread version once',
+      )
+      assert(afterRename.thread.headEntryId === before.thread.headEntryId, 'rename must not change the head')
+      assert(afterRename.thread.name === renamedName, JSON.stringify(afterRename.thread))
     } finally {
+      if (socket) {
+        if (collect) {
+          socket.removeEventListener('message', collect)
+        }
+        socket.close(1000, 'E2E complete')
+      }
+      if (secondSocket) {
+        if (secondCollect) {
+          secondSocket.removeEventListener('message', secondCollect)
+        }
+        secondSocket.close(1000, 'E2E complete')
+      }
       await ctx.call(
         'DELETE',
         `/api/chat/chats/${encodeURIComponent(chat.id)}?expectedVersion=${encodeURIComponent(chat.version)}`,
@@ -2151,4 +2305,52 @@ async function resolveAnyCatalogTarget(ctx) {
   throw new Error(
     `no resolvable Agent/Model in current Catalog: ${JSON.stringify({ agents, models })}`,
   )
+}
+
+function threadTreeEventUrl(baseUrl) {
+  const url = new URL(baseUrl)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = '/ws/events'
+  url.search = ''
+  url.hash = ''
+  return url.toString()
+}
+
+async function waitForEventSocketOpen(socket, timeoutMs) {
+  if (socket.readyState === WebSocket.OPEN) {
+    return
+  }
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error(`timed out waiting ${timeoutMs}ms for event WebSocket open`))
+    }, timeoutMs)
+    const onOpen = () => {
+      cleanup()
+      resolve()
+    }
+    const onError = () => {
+      cleanup()
+      reject(new Error('event WebSocket failed before open'))
+    }
+    function cleanup() {
+      clearTimeout(timer)
+      socket.removeEventListener('open', onOpen)
+      socket.removeEventListener('error', onError)
+    }
+    socket.addEventListener('open', onOpen)
+    socket.addEventListener('error', onError)
+  })
+}
+
+async function takeEventFrame(frames, predicate, timeoutMs) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const index = frames.findIndex(predicate)
+    if (index >= 0) {
+      return frames.splice(index, 1)[0]
+    }
+    await sleep(25)
+  }
+  throw new Error(`timed out waiting ${timeoutMs}ms for thread-tree event frame`)
 }

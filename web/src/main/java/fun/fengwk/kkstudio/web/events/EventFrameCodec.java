@@ -5,6 +5,7 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.cfg.DateTimeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
@@ -30,9 +31,9 @@ import java.util.UUID;
 /**
  * 事件通道帧的严格 JSON codec：客户端帧手工字段校验（duplicate/trailing/unknown/missing/wrong-type 全部拒绝），服务端帧确定性编码。
  *
- * <p>客户端帧 {@code {type:'subscribe'|'unsubscribe',resource}} 与 {@code
- * {type:'ide-use',browserSessionId,revision,views}} 字段集精确。服务端帧 {@code
- * connected{eventNodeId,connectionId,heartbeatIntervalMillis}} / {@code
+ * <p>客户端帧 {@code {type:'subscribe'|'unsubscribe'|'refresh',resource}} 与 {@code
+ * {type:'ide-use',browserSessionId,revision,views}} 字段集精确。refresh 只允许 thread-tree
+ * 资源，服务端校验资源已订阅。服务端帧 {@code connected{eventNodeId,connectionId,heartbeatIntervalMillis}} / {@code
  * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
  * {@code heartbeat} / {@code ide-use-accepted{revision}} / {@code
  * error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）；revision
@@ -45,15 +46,21 @@ final class EventFrameCodec {
   static final String BACKPRESSURE = "BACKPRESSURE";
   static final String SEND_FAILED = "SEND_FAILED";
   static final String IDE_USE_REJECTED = "IDE_USE_REJECTED";
+  static final String INVALID_REFRESH_RESOURCE = "INVALID_REFRESH_RESOURCE";
+  static final String RESOURCE_NOT_SUBSCRIBED = "RESOURCE_NOT_SUBSCRIBED";
+  static final String TREE_SNAPSHOT_FAILED = "TREE_SNAPSHOT_FAILED";
 
   private static final ObjectMapper MAPPER =
       JsonMapper.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+          .enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+          .disable(DateTimeFeature.WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS)
           .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private static final Set<String> SUBSCRIPTION_FIELDS = orderedSet("type", "resource");
+  private static final Set<String> REFRESH_FIELDS = orderedSet("type", "resource");
   private static final Set<String> IDE_USE_FIELDS =
       orderedSet("type", "browserSessionId", "revision", "views");
   private static final Set<String> IDE_USE_VIEW_REQUIRED_FIELDS =
@@ -75,8 +82,8 @@ final class EventFrameCodec {
     this.realtimeCodec = Objects.requireNonNull(realtimeCodec, "realtimeCodec");
   }
 
-  /** 客户端帧：订阅帧或完整 IDE 使用列表帧。 */
-  sealed interface ClientFrame permits SubscriptionFrame, IdeUseFrame {}
+  /** 客户端帧：资源订阅、执行树 refresh 或完整 IDE 使用列表。 */
+  sealed interface ClientFrame permits SubscriptionFrame, RefreshFrame, IdeUseFrame {}
 
   enum SubscriptionType {
     SUBSCRIBE,
@@ -84,6 +91,8 @@ final class EventFrameCodec {
   }
 
   record SubscriptionFrame(SubscriptionType type, ResourceKey resource) implements ClientFrame {}
+
+  record RefreshFrame(ResourceKey resource) implements ClientFrame {}
 
   record IdeUseFrame(IdeBrowserUse use) implements ClientFrame {}
 
@@ -109,12 +118,16 @@ final class EventFrameCodec {
         yield new SubscriptionFrame(
             SubscriptionType.UNSUBSCRIBE, parseResource(node.get("resource")));
       }
+      case "refresh" -> {
+        JsonCodecSupport.requireFields(node, REFRESH_FIELDS, "frame");
+        yield new RefreshFrame(parseResource(node.get("resource")));
+      }
       case "ide-use" -> {
         JsonCodecSupport.requireFields(node, IDE_USE_FIELDS, "frame");
         yield new IdeUseFrame(parseIdeUse(node));
       }
       default -> throw new IllegalArgumentException(
-          "frame.type must be subscribe, unsubscribe, or ide-use");
+          "frame.type must be subscribe, unsubscribe, refresh, or ide-use");
     };
   }
 
@@ -192,6 +205,15 @@ final class EventFrameCodec {
       node.put("name", "changed");
       ObjectNode data = NODES.objectNode();
       data.put("projectId", projectChanged.projectId().toString());
+      node.set("data", data);
+    } else if (signal instanceof Signal.ThreadTreeSnapshot snapshot) {
+      if (resource.kind() != ResourceKind.THREAD_TREE) {
+        throw new IllegalArgumentException(
+            "thread-tree snapshot signal requires the thread-tree resource");
+      }
+      node.put("name", "snapshot");
+      ObjectNode data = NODES.objectNode();
+      data.set("nodes", MAPPER.valueToTree(snapshot.nodes()));
       node.set("data", data);
     } else if (signal instanceof Signal.ThreadTreeChanged) {
       if (resource.kind() != ResourceKind.THREAD_TREE) {
