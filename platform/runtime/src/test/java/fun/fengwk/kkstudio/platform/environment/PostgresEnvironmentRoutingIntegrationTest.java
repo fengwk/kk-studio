@@ -49,8 +49,8 @@ import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
 import fun.fengwk.kkstudio.platform.environment.registry.LiveEnvironmentStatus;
 import fun.fengwk.kkstudio.platform.environment.server.DatabaseEnvironmentConfigSource;
 import fun.fengwk.kkstudio.platform.environment.server.EnvironmentServerConfiguration;
-import fun.fengwk.kkstudio.platform.environment.server.PostgresqlExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
+import fun.fengwk.kkstudio.platform.harness.store.PostgresqlExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsTestFixture;
 

@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.RegistrationTokens;
 import fun.fengwk.kkstudio.platform.environment.registry.EnvironmentRegistry;
+import fun.fengwk.kkstudio.platform.harness.store.PostgresqlExecutionExitReceiptLookup;
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 

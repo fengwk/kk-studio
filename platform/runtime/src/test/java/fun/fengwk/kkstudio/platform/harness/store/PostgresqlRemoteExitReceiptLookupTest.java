@@ -13,7 +13,6 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
-import fun.fengwk.kkstudio.platform.environment.server.PostgresqlExecutionExitReceiptLookup;
 
 import java.util.UUID;
 
