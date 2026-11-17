@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -477,15 +478,20 @@ func TestBridgeRejectsRetiredBindingEpoch(t *testing.T) {
 	}
 	defer bridge.Close(context.Background())
 	const viewID = "11111111-1111-4111-8111-111111111111"
-	const workspacePath = "/managed/view.code-workspace"
 	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
-	bridge.Assign(viewID, workspacePath, 1, "/managed")
+	managed, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspacePath := filepath.Join(managed, "view.code-workspace")
+	bridge.Assign(viewID, workspacePath, 1, managed)
 	stream, cancel := openTestBridgeStream(t, bridge, viewID, workspacePath, hostID)
 	defer cancel()
 	defer stream.Body.Close()
-	bridge.Assign(viewID, workspacePath, 2, "/managed")
+	bridge.Assign(viewID, workspacePath, 2, managed)
 
-	request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?viewId="+viewID+"&bindingEpoch=1&hostId="+hostID+"&folder=%2Fmanaged", nil)
+	params := url.Values{"viewId": {viewID}, "bindingEpoch": {"1"}, "hostId": {hostID}, "folder": {managed}}
+	request, err := http.NewRequest(http.MethodGet, bridge.URL+"/bridge/stream?"+params.Encode(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

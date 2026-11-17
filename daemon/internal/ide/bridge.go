@@ -509,7 +509,9 @@ func (b *Bridge) installStreamLocked(viewID string, view *bridgeView, stream *br
 }
 
 // serveStream streams NDJSON frames until the window retires or disconnects.
+// Every handler exit detaches its stream if it is still the view's active connection.
 func (b *Bridge) serveStream(writer http.ResponseWriter, request *http.Request, viewID string, stream *bridgeStream) {
+	defer b.streamDisconnected(viewID, stream)
 	writer.Header().Set("Content-Type", "application/x-ndjson")
 	writer.Header().Set("Cache-Control", "no-store")
 	writer.Header().Set("Connection", "keep-alive")
@@ -536,7 +538,6 @@ func (b *Bridge) serveStream(writer http.ResponseWriter, request *http.Request, 
 			}
 			return
 		case <-request.Context().Done():
-			b.streamDisconnected(viewID, stream)
 			return
 		}
 	}
@@ -871,6 +872,9 @@ func matchesBridgeDirectory(folders []string, directory string) bool {
 }
 func bridgePathKey(path string) string {
 	clean := filepath.Clean(path)
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		clean = resolved
+	}
 	if runtime.GOOS == "windows" {
 		clean = strings.ToLower(clean)
 	}

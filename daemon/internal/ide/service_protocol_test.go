@@ -101,11 +101,14 @@ func TestLiveRepliesProtocol(t *testing.T) {
 	_ = oldStream.Body.Close()
 	_ = nextStream.Body.Close()
 	deadline := time.Now().Add(time.Second)
-	for service.ActiveStreamCount() != 0 && time.Now().Before(deadline) {
+	for time.Now().Before(deadline) {
+		if service.ActiveStreamCount() == 0 && !bridge.IsConnected(opened.GetViewId(), opened.GetBindingEpoch()) {
+			break
+		}
 		time.Sleep(time.Millisecond)
 	}
-	if service.ActiveStreamCount() != 0 {
-		t.Fatal("bridge streams remained active after host cancellation")
+	if count := service.ActiveStreamCount(); count != 0 || bridge.IsConnected(opened.GetViewId(), opened.GetBindingEpoch()) {
+		t.Fatalf("host cancellation did not detach both service and bridge streams: count=%d connected=%v", count, bridge.IsConnected(opened.GetViewId(), opened.GetBindingEpoch()))
 	}
 	validateLiveIDEReply(t, changed, true)
 	if !changed.GetOk() || changed.GetDirectory() != next {

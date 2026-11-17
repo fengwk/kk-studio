@@ -1606,12 +1606,19 @@ func TestCancelledChangeDirectoryReconcilesOnReplacementHost(t *testing.T) {
 
 // Verifies a paused older reconciliation cannot overwrite a newer confirmed directory operation.
 func TestLateDirectoryReconciliationCannotOverwriteNewerOperation(t *testing.T) {
-	root := t.TempDir()
+	root, err := CanonicalDirectory(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
 	directoryB := filepath.Join(root, "B")
 	directoryC := filepath.Join(root, "C")
 	for _, directory := range []string{directoryB, directoryC} {
 		if err := os.Mkdir(directory, 0o700); err != nil {
 			t.Fatal(err)
+		}
+		canonical, err := CanonicalDirectory(directory)
+		if err != nil || canonical != directory {
+			t.Fatalf("directory fixture is not canonical: %q canonical=%q err=%v", directory, canonical, err)
 		}
 	}
 	bridge, err := NewBridge()
