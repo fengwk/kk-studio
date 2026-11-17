@@ -2941,6 +2941,7 @@ export interface ToolInvocationDTO {
 export type ToolInvocationStatus =
   | 'WAITING_APPROVAL'
   | 'WAITING_INPUT'
+  | 'WAITING_CHILD'
   | 'READY'
   | 'RUNNING'
   | 'SUCCEEDED'
@@ -2951,6 +2952,7 @@ export type ToolInvocationStatus =
 export const TOOL_INVOCATION_STATUS_VALUES: readonly ToolInvocationStatus[] = [
   'WAITING_APPROVAL',
   'WAITING_INPUT',
+  'WAITING_CHILD',
   'READY',
   'RUNNING',
   'SUCCEEDED',

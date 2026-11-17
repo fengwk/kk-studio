@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { ThreadWidgetStack } from '@/features/thread/runtime/thread-panel/ThreadWidgetStack'
 import { formatThreadStatusLabel } from '@/features/thread/runtime/thread-panel/thread-status-format'
 import { setLocale } from '@/shared/i18n'
+import type { QueuedCustomMessage } from '@/features/thread/runtime/state/queued-custom-messages'
 
 describe('ThreadWidgetStack', () => {
   it('shows the generic working strip when working without custom retry copy', () => {
@@ -181,11 +182,12 @@ describe('ThreadWidgetStack', () => {
 
   it('展示只读待处理补充要求，支持中英 i18n 且无任何写/删重排操作入口', () => {
     // 测试意图：QUEUED CUSTOM_MESSAGE 派生的补充要求按只读呈现，展示真实文本并带有稳定 sequence，无删除重排等写交互。
-    const customMessages = [
+    const customMessages: QueuedCustomMessage[] = [
       {
         id: 'cmd-custom-1',
         sequence: '5',
         text: '请优先补充单元测试',
+        contents: [{ type: 'text', text: '请优先补充单元测试' }],
       },
     ]
 

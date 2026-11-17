@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { useIdeCloseCommands } from '@/features/environment/ide/useIdeCloseCommands'
 import type { IdeViewState } from '@/features/environment/ide/ide-view-state'
+import type { IdeBrowserSessionState } from '@/features/environment/ide/ide-browser-session'
 
 const closeIdeView = vi.hoisted(() => vi.fn())
 vi.mock('@/features/environment/ide/environment-ide-service', () => ({ closeIdeView }))
@@ -35,7 +36,11 @@ describe('useIdeCloseCommands', () => {
   it('asks for explicit force confirmation only for outcome-unknown or missing control channel', async () => {
     const { result } = renderHook(() => {
       const viewsRef = useRef<Record<string, IdeViewState>>({ [ENVIRONMENT_ID]: readyView() })
-      const sessionRef = useRef({ browserSessionId: 'b1000000-0000-4000-8000-000000000001' })
+      const sessionRef = useRef<IdeBrowserSessionState>({
+        browserSessionId: 'b1000000-0000-4000-8000-000000000001',
+        status: 'ready',
+        sessionSaved: true,
+      })
       return useIdeCloseCommands({
         viewsRef,
         sessionRef,

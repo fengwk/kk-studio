@@ -62,6 +62,7 @@ describe('execution tree HTTP Instant contract', () => {
   it('uses HTTP for bootstrap then subscribes to the actual root without subscribed reread', async () => {
     reply([node(ROOT, null), node(CHILD, ROOT)])
     const { client, sockets } = renderPanel()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(await screen.findByRole('link', { name: /Explorer/ })).toHaveTextContent('turns: 3 · tools: 5')
     expect(transport).toHaveBeenCalledTimes(1)
     expect(transport.mock.calls[0][0]).toBe(`/api/harness/threads/${CHILD}/tree`)
@@ -147,7 +148,7 @@ describe('execution tree HTTP Instant contract', () => {
     expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: { kind: 'thread-tree', id: ROOT } }])
   })
 
-  it('does not auto-retry snapshot failure and lets an explicit refresh recover over WS', async () => {
+  it.each(['TREE_SNAPSHOT_FAILED', 'RESOURCE_NOT_FOUND'])('reports %s without auto-retry and lets an explicit refresh recover over WS', async (code) => {
     const valid = [node(ROOT, null), node(CHILD, ROOT)]
     reply(valid)
     const { client, sockets } = renderPanel()
@@ -158,7 +159,7 @@ describe('execution tree HTTP Instant contract', () => {
     socket.emitServer({
       type: 'error',
       resource: { kind: 'thread-tree', id: ROOT },
-      code: 'TREE_SNAPSHOT_FAILED',
+      code,
       message: 'snapshot failed',
     })
     await screen.findByRole('alert')
@@ -197,6 +198,8 @@ describe('execution tree HTTP Instant contract', () => {
     ])
 
     act(() => firstSocket.fail())
+    fireEvent.click(screen.getByRole('button', { name: 'refresh tree' }))
+    expect(screen.getByRole('alert')).toBeInTheDocument()
     await act(async () => {
       vi.advanceTimersByTime(500)
       await Promise.resolve()

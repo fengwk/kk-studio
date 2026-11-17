@@ -2040,7 +2040,7 @@ registerCase({
       await waitForEventSocketOpen(secondSocket, 5_000)
       secondSocket.send(JSON.stringify({
         type: 'refresh',
-        resource: { kind: 'thread-tree', id: threadId },
+        resource: { kind: 'projects' },
       }))
       const invalidRefresh = await takeEventFrame(
         secondFrames,

@@ -43,7 +43,9 @@ export function useActiveThreadTree(boundThreadId: string | null) {
   const boundQueryKey = queryKeys.threads.tree(boundThreadId ?? '')
   const requestTreeRefresh = useCallback(() => {
     if (actualRootThreadId != null) {
-      applicationEvents.requestResourceRefresh({ kind: 'thread-tree', id: actualRootThreadId })
+      if (!applicationEvents.requestResourceRefresh({ kind: 'thread-tree', id: actualRootThreadId })) {
+        setSnapshotFailedRootId(actualRootThreadId)
+      }
     }
   }, [applicationEvents, actualRootThreadId])
   useResourceSync(actualRootThreadId == null ? null : { kind: 'thread-tree', id: actualRootThreadId }, {
@@ -57,8 +59,8 @@ export function useActiveThreadTree(boundThreadId: string | null) {
       }
       void queryClient.cancelQueries({ queryKey: boundQueryKey })
     },
-    onError: (code) => {
-      if (code === 'TREE_SNAPSHOT_FAILED' && actualRootThreadId != null) {
+    onError: () => {
+      if (actualRootThreadId != null) {
         setSnapshotFailedRootId(actualRootThreadId)
       }
     },
@@ -103,7 +105,7 @@ export function useActiveThreadTree(boundThreadId: string | null) {
   // Thread name/agent identity are facts of the tree snapshot, not duplicated in interaction DTOs.
   const bootstrapFailed = treeQuery.isError && treeQuery.data == null
   const refreshFailed = (treeQuery.isError && treeQuery.data != null)
-    || snapshotFailedRootId === actualRootThreadId
+    || (actualRootThreadId != null && snapshotFailedRootId === actualRootThreadId)
   const bootstrapData = treeQuery.data
   const refetchHttp = treeQuery.refetch
   const refetch = useCallback(() => {
