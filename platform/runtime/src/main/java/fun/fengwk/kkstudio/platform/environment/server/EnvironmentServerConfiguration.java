@@ -4,6 +4,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.platform.daemon.protocol.ImageInputTier;
@@ -54,6 +55,11 @@ public class EnvironmentServerConfiguration {
         new LinkedBlockingQueue<>(2 * CONFIG_QUEUE_PER_SLOT),
         Thread.ofVirtual().name("environment-config-", 0L).factory(),
         new ThreadPoolExecutor.AbortPolicy());
+  }
+
+  @Bean
+  public ExecutionExitReceiptLookup executionExitReceiptLookup(JdbcTemplate jdbcTemplate) {
+    return new PostgresqlExecutionExitReceiptLookup(jdbcTemplate);
   }
 
   @Bean

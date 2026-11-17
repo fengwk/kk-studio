@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitKind;
 import fun.fengwk.kkstudio.harness.api.execution.ExecutionExitState;
@@ -12,6 +13,7 @@ import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.runtime.execution.ExecutionExitLedger;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.StoreTestSupport;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
+import fun.fengwk.kkstudio.platform.environment.server.PostgresqlExecutionExitReceiptLookup;
 
 import java.util.UUID;
 
@@ -26,12 +28,14 @@ class PostgresqlRemoteExitReceiptLookupTest {
       EnvironmentId.parse("22222222-2222-2222-2222-222222222222");
 
   private HarnessStore store;
-  private HarnessStoreExecutionExitReceiptLookup lookup;
+  private PostgresqlExecutionExitReceiptLookup lookup;
 
   @BeforeEach
   void setUp() {
     store = PostgresqlHarnessStoreFixture.resetAndCreate();
-    lookup = new HarnessStoreExecutionExitReceiptLookup(store);
+    lookup =
+        new PostgresqlExecutionExitReceiptLookup(
+            new JdbcTemplate(PostgresqlHarnessStoreFixture.dataSource()));
   }
 
   @Test
