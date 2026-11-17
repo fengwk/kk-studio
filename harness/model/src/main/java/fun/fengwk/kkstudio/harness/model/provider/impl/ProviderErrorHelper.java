@@ -341,19 +341,37 @@ public final class ProviderErrorHelper {
             null,
             retryable,
             retryAfterMillis,
-            firstHeader(headers, "x-request-id", "request-id") != null
-                ? firstHeader(headers, "x-request-id", "request-id")
-                : firstText(source, "request_id", "requestId"),
-            firstHeader(headers, "cf-ray") != null
-                ? firstHeader(headers, "cf-ray")
-                : firstText(source, "cf_ray", "cfRay"),
+            boundedExternalText(
+                firstHeader(headers, "x-request-id", "request-id") != null
+                    ? firstHeader(headers, "x-request-id", "request-id")
+                    : firstText(source, "request_id", "requestId"),
+                256),
+            boundedExternalText(
+                firstHeader(headers, "cf-ray") != null
+                    ? firstHeader(headers, "cf-ray")
+                    : firstText(source, "cf_ray", "cfRay"),
+                256),
             stage);
     return new FailureDetails(safeProviderCode(source), metadata);
   }
 
   private static String safeProviderCode(JsonNode node) {
     String code = safeProviderCode(firstText(node, "code"));
-    return code != null ? code : safeProviderCode(firstText(node, "type"));
+    if (code == null) {
+      code = safeProviderCode(firstText(node, "type"));
+    }
+    return code != null ? code : safeProviderCode(firstText(node, "status"));
+  }
+
+  private static String boundedExternalText(String value, int maxLength) {
+    if (value == null) {
+      return null;
+    }
+    String clean = value.replace("\r", "").replace("\n", "").trim();
+    if (clean.isEmpty()) {
+      return null;
+    }
+    return clean.length() > maxLength ? clean.substring(0, maxLength) : clean;
   }
 
   private static String safeProviderCode(String value) {

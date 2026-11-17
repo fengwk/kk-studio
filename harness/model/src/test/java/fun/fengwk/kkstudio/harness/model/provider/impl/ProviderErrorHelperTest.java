@@ -292,4 +292,63 @@ class ProviderErrorHelperTest {
     assertEquals("upstream_error", sse.providerErrorCode());
     assertEquals(ModelFailureMetadata.TransportStage.STREAM, sse.metadata().transportStage());
   }
+
+  @Test
+  @DisplayName("Unsafe external IDs are bounded without replacing HTTP or SSE failures")
+  void unsafeExternalIdsDoNotMaskFailures() throws Exception {
+    ProviderErrorHelper.FallbackMessages fallbacks =
+        new ProviderErrorHelper.FallbackMessages(
+            "auth", "billing", "context", "body_limit", "invalid_req", "transient", "invalid_resp");
+    String longId = "r".repeat(300);
+    byte[] body =
+        "{\"error\":{\"code\":\"server_error\",\"retryable\":false}}"
+            .getBytes(StandardCharsets.UTF_8);
+    TransportException transport =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "safe",
+            503,
+            body,
+            false,
+            Map.of("X-Request-Id", List.of(longId + "\r\nInjected")),
+            null);
+
+    ProviderException http =
+        ProviderErrorHelper.mapTransportException(
+            transport, "provider", ignored -> ProviderErrorKind.TRANSIENT, fallbacks);
+    assertEquals(ProviderErrorKind.TRANSIENT, http.kind());
+    assertEquals(503, http.httpStatus());
+    assertEquals("server_error", http.providerErrorCode());
+    assertEquals(false, http.metadata().retryable());
+    assertEquals("r".repeat(256), http.metadata().requestId());
+
+    ObjectMapper mapper = JsonMapper.builder().build();
+    JsonNode event =
+        mapper
+            .createObjectNode()
+            .putObject("error")
+            .put("code", "server_error")
+            .put("retryable", false)
+            .put("request_id", "req\r\n" + longId);
+    ProviderException sse =
+        ProviderErrorHelper.mapSseErrorEnvelope(
+            event, ignored -> ProviderErrorKind.TRANSIENT, ignored -> 503, "invalid");
+    assertEquals(ProviderErrorKind.TRANSIENT, sse.kind());
+    assertEquals(503, sse.httpStatus());
+    assertEquals("server_error", sse.providerErrorCode());
+    assertEquals(false, sse.metadata().retryable());
+    assertEquals(256, sse.metadata().requestId().length());
+    assertFalse(sse.metadata().requestId().contains("\r"));
+    assertFalse(sse.metadata().requestId().contains("\n"));
+  }
+
+  @Test
+  @DisplayName("withIdentity bounds external provider and model names before strict construction")
+  void withIdentityBoundsExternalNames() {
+    ModelFailureMetadata metadata =
+        new ModelFailureMetadata(null, null, null, null, null, null, null)
+            .withIdentity("provider\r\nname", "m".repeat(300));
+    assertEquals("providername", metadata.provider());
+    assertEquals(256, metadata.model().length());
+  }
 }

@@ -56,6 +56,28 @@ class GeminiErrorMapperTest {
   }
 
   @Test
+  void usesGeminiStatusAsLastProviderCodeFallback() {
+    ProviderException http =
+        httpError(503, "{\"error\":{\"code\":503,\"status\":\"UNAVAILABLE\",\"retryable\":false}}");
+    assertEquals(ProviderErrorKind.TRANSIENT, http.kind());
+    assertEquals(503, http.httpStatus());
+    assertEquals("UNAVAILABLE", http.providerErrorCode());
+    assertFalse(http.metadata().retryable());
+
+    ObjectNode event = MAPPER.createObjectNode();
+    event.putObject("error").put("code", 503).put("status", "UNAVAILABLE").put("retryable", false);
+    ProviderException sse = GeminiErrorMapper.mapSseErrorEnvelope(event);
+    assertEquals(ProviderErrorKind.TRANSIENT, sse.kind());
+    assertEquals(503, sse.httpStatus());
+    assertEquals("UNAVAILABLE", sse.providerErrorCode());
+    assertFalse(sse.metadata().retryable());
+
+    ObjectNode numericOnly = MAPPER.createObjectNode();
+    numericOnly.putObject("error").put("code", 503);
+    assertNull(GeminiErrorMapper.mapSseErrorEnvelope(numericOnly).providerErrorCode());
+  }
+
+  @Test
   void propagatesExplicitRetryDirective() {
     ProviderException failure =
         GeminiErrorMapper.mapTransportException(

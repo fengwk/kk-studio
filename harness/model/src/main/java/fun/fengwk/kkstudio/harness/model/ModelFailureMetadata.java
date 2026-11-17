@@ -22,7 +22,24 @@ public record ModelFailureMetadata(
 
   public ModelFailureMetadata withIdentity(String providerName, String modelName) {
     return new ModelFailureMetadata(
-        providerName, modelName, retryable, retryAfterMillis, requestId, cfRay, transportStage);
+        externalText(providerName, 128),
+        externalText(modelName, 256),
+        retryable,
+        retryAfterMillis,
+        requestId,
+        cfRay,
+        transportStage);
+  }
+
+  private static String externalText(String value, int maxLength) {
+    if (value == null) {
+      return null;
+    }
+    String clean = value.replace("\r", "").replace("\n", "").trim();
+    if (clean.isEmpty()) {
+      return null;
+    }
+    return clean.length() > maxLength ? clean.substring(0, maxLength) : clean;
   }
 
   private static String bounded(String value, int maxLength, String name) {
