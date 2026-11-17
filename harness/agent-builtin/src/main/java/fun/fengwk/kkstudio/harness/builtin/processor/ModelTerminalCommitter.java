@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.builtin.processor;
 
 import lombok.extern.slf4j.Slf4j;
 
+import fun.fengwk.kkstudio.harness.api.retry.InvocationRetryPolicy;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
@@ -231,13 +232,12 @@ final class ModelTerminalCommitter {
       }
       return groupApplied;
     }
+    InvocationRetryPolicy retryPolicy = config.retryPolicyProvider().get();
     InvocationRetryDecision decision =
         InvocationRetryDecision.decide(
-            config.retryPolicyProvider().get(),
-            ModelFailureRetry.isRetryable(error, config, providerName),
-            attempt);
+            retryPolicy, ModelFailureRetry.isRetryable(error, config, providerName), attempt);
     if (decision.retry()) {
-      Duration delay = decision.delay();
+      Duration delay = ModelFailureRetry.delay(error, decision.delay(), retryPolicy.maxDelay());
       boolean committed = safeTerminal(() -> commitRetry(delay, error));
       if (committed) {
         log.info(

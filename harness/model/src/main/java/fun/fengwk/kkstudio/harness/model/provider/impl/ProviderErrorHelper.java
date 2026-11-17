@@ -1,12 +1,23 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl;
 
+import tools.jackson.core.JacksonException;
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
+import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportException;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 import java.util.function.ToIntFunction;
 
@@ -198,22 +209,40 @@ public final class ProviderErrorHelper {
       return null;
     }
     if (exception.kind() == TransportErrorKind.TIMEOUT) {
+      FailureDetails details = transportFailure(exception);
       return new ProviderException(
-          ProviderErrorKind.TRANSIENT, providerPrefix + " request timed out");
+          ProviderErrorKind.TRANSIENT,
+          providerPrefix + " request timed out",
+          null,
+          details.providerErrorCode(),
+          details.metadata());
     }
     if (exception.kind() == TransportErrorKind.IO) {
-      return new ProviderException(ProviderErrorKind.TRANSIENT, providerPrefix + " I/O error");
+      FailureDetails details = transportFailure(exception);
+      return new ProviderException(
+          ProviderErrorKind.TRANSIENT,
+          providerPrefix + " I/O error",
+          null,
+          details.providerErrorCode(),
+          details.metadata());
     }
     if (exception.kind() == TransportErrorKind.INVALID_RESPONSE) {
+      FailureDetails details = transportFailure(exception);
       return new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, fallbacks.invalidResponseMessage());
+          ProviderErrorKind.INVALID_RESPONSE,
+          fallbacks.invalidResponseMessage(),
+          null,
+          details.providerErrorCode(),
+          details.metadata());
     }
     if (exception.kind() == TransportErrorKind.HTTP_STATUS) {
       int status = exception.statusCode();
       ProviderErrorKind kind = httpClassifier.apply(exception);
       String fallback = fallbacks.fallbackForKind(kind);
       String message = formatHttpErrorMessage(exception, fallback);
-      return new ProviderException(kind, message, httpErrorStatus(status));
+      FailureDetails details = transportFailure(exception);
+      return new ProviderException(
+          kind, message, httpErrorStatus(status), details.providerErrorCode(), details.metadata());
     }
     return new ProviderException(ProviderErrorKind.TRANSIENT, fallbacks.transientMessage());
   }
@@ -255,6 +284,166 @@ public final class ProviderErrorHelper {
     }
     int statusCode = statusCodeExtractor.applyAsInt(errorEventNode);
     ProviderErrorKind kind = classifier.apply(errorEventNode);
-    return new ProviderException(kind, errorEventNode.toString(), httpErrorStatus(statusCode));
+    FailureDetails details =
+        failureDetails(errorEventNode, null, ModelFailureMetadata.TransportStage.STREAM);
+    return new ProviderException(
+        kind,
+        errorEventNode.toString(),
+        httpErrorStatus(statusCode),
+        details.providerErrorCode(),
+        details.metadata());
+  }
+
+  private static FailureDetails transportFailure(TransportException exception) {
+    ModelFailureMetadata.TransportStage stage = exception.transportStage();
+    if (stage == null) {
+      stage =
+          exception.kind() == TransportErrorKind.HTTP_STATUS
+              ? ModelFailureMetadata.TransportStage.BEFORE_HEADERS
+              : ModelFailureMetadata.TransportStage.STREAM;
+    }
+    return failureDetails(exception.errorBodyBytes(), exception.safeHeaders(), stage);
+  }
+
+  private static FailureDetails failureDetails(
+      byte[] body, Map<String, List<String>> headers, ModelFailureMetadata.TransportStage stage) {
+    JsonNode node = null;
+    if (body != null && body.length > 0) {
+      try {
+        node = HarnessJson.LENIENT_DECIMAL.readTree(body);
+      } catch (JacksonException ignored) {
+        node = null;
+      }
+    }
+    return failureDetails(node, headers, stage);
+  }
+
+  private static FailureDetails failureDetails(
+      JsonNode root, Map<String, List<String>> headers, ModelFailureMetadata.TransportStage stage) {
+    JsonNode error = root != null && root.isObject() ? root.get("error") : null;
+    if ((error == null || !error.isObject()) && root != null && root.isObject()) {
+      JsonNode response = root.get("response");
+      error = response != null && response.isObject() ? response.get("error") : null;
+    }
+    JsonNode source = error != null && error.isObject() ? error : root;
+    Boolean retryable = booleanField(source, "retryable");
+    if (retryable == null) {
+      retryable = booleanField(source, "retry");
+    }
+    if (Boolean.TRUE.equals(booleanField(source, "terminal"))) {
+      retryable = false;
+    }
+    String retryAfter = firstHeader(headers, "retry-after");
+    Long retryAfterMillis = parseRetryAfter(retryAfter);
+    ModelFailureMetadata metadata =
+        new ModelFailureMetadata(
+            null,
+            null,
+            retryable,
+            retryAfterMillis,
+            boundedExternalText(
+                firstHeader(headers, "x-request-id", "request-id") != null
+                    ? firstHeader(headers, "x-request-id", "request-id")
+                    : firstText(source, "request_id", "requestId"),
+                256),
+            boundedExternalText(
+                firstHeader(headers, "cf-ray") != null
+                    ? firstHeader(headers, "cf-ray")
+                    : firstText(source, "cf_ray", "cfRay"),
+                256),
+            stage);
+    return new FailureDetails(safeProviderCode(source), metadata);
+  }
+
+  private static String safeProviderCode(JsonNode node) {
+    String code = safeProviderCode(firstText(node, "code"));
+    if (code == null) {
+      code = safeProviderCode(firstText(node, "type"));
+    }
+    return code != null ? code : safeProviderCode(firstText(node, "status"));
+  }
+
+  private static String boundedExternalText(String value, int maxLength) {
+    if (value == null) {
+      return null;
+    }
+    String clean = value.replace("\r", "").replace("\n", "").trim();
+    if (clean.isEmpty()) {
+      return null;
+    }
+    return clean.length() > maxLength ? clean.substring(0, maxLength) : clean;
+  }
+
+  private static String safeProviderCode(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    String code = value.trim();
+    if (!code.matches("[A-Za-z0-9_.:-]+")) {
+      return null;
+    }
+    return code.length() > ModelInvocationError.MAX_PROVIDER_CODE_LENGTH
+        ? code.substring(0, ModelInvocationError.MAX_PROVIDER_CODE_LENGTH)
+        : code;
+  }
+
+  private static String firstText(JsonNode node, String... fields) {
+    if (node == null || !node.isObject()) {
+      return null;
+    }
+    for (String field : fields) {
+      JsonNode value = node.get(field);
+      if (value != null && value.isString()) {
+        return value.asString("");
+      }
+    }
+    return null;
+  }
+
+  private static Boolean booleanField(JsonNode node, String field) {
+    if (node == null || !node.isObject()) {
+      return null;
+    }
+    JsonNode value = node.get(field);
+    return value != null && value.isBoolean() ? value.asBoolean() : null;
+  }
+
+  private static String firstHeader(Map<String, List<String>> headers, String... names) {
+    if (headers == null) {
+      return null;
+    }
+    for (String name : names) {
+      for (var entry : headers.entrySet()) {
+        if (entry.getKey().equalsIgnoreCase(name) && !entry.getValue().isEmpty()) {
+          return entry.getValue().getFirst();
+        }
+      }
+    }
+    return null;
+  }
+
+  private record FailureDetails(String providerErrorCode, ModelFailureMetadata metadata) {}
+
+  private static Long parseRetryAfter(String value) {
+    if (value == null) {
+      return null;
+    }
+    String normalized = value.trim();
+    try {
+      long seconds = Long.parseLong(normalized);
+      return seconds < 0 ? 0L : Math.min(seconds, 3600L) * 1000L;
+    } catch (NumberFormatException ignored) {
+      try {
+        long millis =
+            Duration.between(
+                    Instant.now(),
+                    ZonedDateTime.parse(normalized, DateTimeFormatter.RFC_1123_DATE_TIME)
+                        .toInstant())
+                .toMillis();
+        return Math.max(0L, Math.min(millis, 3_600_000L));
+      } catch (DateTimeParseException | ArithmeticException invalid) {
+        return null;
+      }
+    }
   }
 }

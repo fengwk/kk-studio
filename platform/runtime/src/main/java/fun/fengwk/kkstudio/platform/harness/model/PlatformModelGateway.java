@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.platform.harness.model;
 
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
@@ -112,7 +113,8 @@ public final class PlatformModelGateway implements ModelGateway {
       lease.close();
       throw pricingFailure;
     }
-    return new AdmittedExecution(resolved, lease, plan);
+    return new AdmittedExecution(
+        resolved, lease, plan, execution.providerType().wireValue(), modelName);
   }
 
   /** 持有并发名额的准入；{@link #run} 与 {@link #close} 都释放它。 */
@@ -121,14 +123,20 @@ public final class PlatformModelGateway implements ModelGateway {
     private final ProviderResolutionService.ResolvedExecution resolved;
     private final ConcurrencyAdmission.Lease lease;
     private final ModelRequestBodyPricing.Plan plan;
+    private final String providerName;
+    private final String modelName;
 
     private AdmittedExecution(
         ProviderResolutionService.ResolvedExecution resolved,
         ConcurrencyAdmission.Lease lease,
-        ModelRequestBodyPricing.Plan plan) {
+        ModelRequestBodyPricing.Plan plan,
+        String providerName,
+        String modelName) {
       this.resolved = resolved;
       this.lease = lease;
       this.plan = plan;
+      this.providerName = providerName;
+      this.modelName = modelName;
     }
 
     @Override
@@ -155,11 +163,11 @@ public final class PlatformModelGateway implements ModelGateway {
             "cannot create provider for model invocation: "
                 + message(setupFailure, "setup failure"));
       }
-      OutcomeHandler handler = new OutcomeHandler(sink, plan);
+      OutcomeHandler handler = new OutcomeHandler(sink, plan, providerName, modelName);
       try {
         provider.stream(resolved.effectiveRequest(), handler);
       } catch (ProviderException classified) {
-        return new Failed(toInvocationError(classified));
+        return new Failed(toInvocationError(classified, providerName, modelName));
       } catch (RuntimeException unclassified) {
         // 未分类异常的消息可能携带请求细节或凭据，只记录异常类型。
         return unknown(
@@ -182,12 +190,17 @@ public final class PlatformModelGateway implements ModelGateway {
 
     private final Sink sink;
     private final ModelRequestBodyPricing.Plan plan;
+    private final String providerName;
+    private final String modelName;
     private RequestBodyPricingSnapshot requestBodyPricing;
     private Outcome outcome;
 
-    private OutcomeHandler(Sink sink, ModelRequestBodyPricing.Plan plan) {
+    private OutcomeHandler(
+        Sink sink, ModelRequestBodyPricing.Plan plan, String providerName, String modelName) {
       this.sink = sink;
       this.plan = plan;
+      this.providerName = providerName;
+      this.modelName = modelName;
     }
 
     @Override
@@ -232,11 +245,14 @@ public final class PlatformModelGateway implements ModelGateway {
       if (outcome != null) {
         return;
       }
-      outcome = error == null ? invalid("provider returned a null failure") : failed(error);
+      outcome =
+          error == null
+              ? invalid("provider returned a null failure")
+              : failed(error, providerName, modelName);
     }
 
-    private static Outcome failed(ProviderException error) {
-      return new Failed(toInvocationError(error));
+    private static Outcome failed(ProviderException error, String providerName, String modelName) {
+      return new Failed(toInvocationError(error, providerName, modelName));
     }
   }
 
@@ -248,9 +264,18 @@ public final class PlatformModelGateway implements ModelGateway {
     return new Unknown(new ModelInvocationError(ProviderErrorKind.TRANSIENT, message));
   }
 
-  private static ModelInvocationError toInvocationError(ProviderException error) {
+  private static ModelInvocationError toInvocationError(
+      ProviderException error, String providerName, String modelName) {
+    var metadata =
+        error.metadata() == null
+            ? new ModelFailureMetadata(providerName, modelName, null, null, null, null, null)
+            : error.metadata().withIdentity(providerName, modelName);
     return new ModelInvocationError(
-        error.kind(), message(error, "provider failure"), error.httpStatus());
+        error.kind(),
+        message(error, "provider failure"),
+        error.httpStatus(),
+        error.providerErrorCode(),
+        metadata);
   }
 
   /** 非抛出的消息提取：adversarial getMessage 只影响 detail，绝不 bypass 状态转换。 */

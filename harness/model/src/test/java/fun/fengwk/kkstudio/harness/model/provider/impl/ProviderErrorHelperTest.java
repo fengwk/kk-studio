@@ -12,12 +12,15 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.IntNode;
 
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.TransportException;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 
 /** 测试意图：验证 ProviderErrorHelper 的 HTTP 错误消息格式化、截断标记与静默错误判断逻辑。 */
 class ProviderErrorHelperTest {
@@ -246,5 +249,106 @@ class ProviderErrorHelperTest {
     assertEquals(ProviderErrorKind.TRANSIENT, exStatus.kind());
     assertEquals("{\"message\":\"custom_err\"}", exStatus.getMessage());
     assertEquals(429, exStatus.httpStatus());
+  }
+
+  @Test
+  @DisplayName("HTTP/SSE failure metadata retains only bounded safe diagnostic fields")
+  void failureMetadataIsPropagatedAndSanitized() {
+    ProviderErrorHelper.FallbackMessages fallbacks =
+        new ProviderErrorHelper.FallbackMessages(
+            "auth", "billing", "context", "body_limit", "invalid_req", "transient", "invalid_resp");
+    byte[] body =
+        "{\"error\":{\"code\":\"server_error\",\"retryable\":false}}"
+            .getBytes(StandardCharsets.UTF_8);
+    TransportException transport =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "safe",
+            503,
+            body,
+            false,
+            Map.of(
+                "Retry-After", List.of("120"),
+                "X-Request-Id", List.of("req-123"),
+                "CF-Ray", List.of("ray-456"),
+                "Authorization", List.of("secret")),
+            null);
+    ProviderException http =
+        ProviderErrorHelper.mapTransportException(
+            transport, "provider", ignored -> ProviderErrorKind.TRANSIENT, fallbacks);
+    assertEquals(false, http.metadata().retryable());
+    assertEquals(120_000L, http.metadata().retryAfterMillis());
+    assertEquals("req-123", http.metadata().requestId());
+    assertEquals("ray-456", http.metadata().cfRay());
+    assertEquals("server_error", http.providerErrorCode());
+    assertTrue(http.getMessage().contains(new String(body, StandardCharsets.UTF_8)));
+
+    ObjectMapper mapper = JsonMapper.builder().build();
+    JsonNode event = mapper.readTree("{\"error\":{\"type\":\"upstream_error\",\"retry\":false}}");
+    ProviderException sse =
+        ProviderErrorHelper.mapSseErrorEnvelope(
+            event, ignored -> ProviderErrorKind.TRANSIENT, "invalid");
+    assertEquals(false, sse.metadata().retryable());
+    assertEquals("upstream_error", sse.providerErrorCode());
+    assertEquals(ModelFailureMetadata.TransportStage.STREAM, sse.metadata().transportStage());
+  }
+
+  @Test
+  @DisplayName("Unsafe external IDs are bounded without replacing HTTP or SSE failures")
+  void unsafeExternalIdsDoNotMaskFailures() throws Exception {
+    ProviderErrorHelper.FallbackMessages fallbacks =
+        new ProviderErrorHelper.FallbackMessages(
+            "auth", "billing", "context", "body_limit", "invalid_req", "transient", "invalid_resp");
+    String longId = "r".repeat(300);
+    byte[] body =
+        "{\"error\":{\"code\":\"server_error\",\"retryable\":false}}"
+            .getBytes(StandardCharsets.UTF_8);
+    TransportException transport =
+        new TransportException(
+            TransportErrorKind.HTTP_STATUS,
+            "safe",
+            503,
+            body,
+            false,
+            Map.of("X-Request-Id", List.of(longId + "\r\nInjected")),
+            null);
+
+    ProviderException http =
+        ProviderErrorHelper.mapTransportException(
+            transport, "provider", ignored -> ProviderErrorKind.TRANSIENT, fallbacks);
+    assertEquals(ProviderErrorKind.TRANSIENT, http.kind());
+    assertEquals(503, http.httpStatus());
+    assertEquals("server_error", http.providerErrorCode());
+    assertEquals(false, http.metadata().retryable());
+    assertEquals("r".repeat(256), http.metadata().requestId());
+
+    ObjectMapper mapper = JsonMapper.builder().build();
+    JsonNode event =
+        mapper
+            .createObjectNode()
+            .putObject("error")
+            .put("code", "server_error")
+            .put("retryable", false)
+            .put("request_id", "req\r\n" + longId);
+    ProviderException sse =
+        ProviderErrorHelper.mapSseErrorEnvelope(
+            event, ignored -> ProviderErrorKind.TRANSIENT, ignored -> 503, "invalid");
+    assertEquals(ProviderErrorKind.TRANSIENT, sse.kind());
+    assertEquals(503, sse.httpStatus());
+    assertEquals("server_error", sse.providerErrorCode());
+    assertEquals(false, sse.metadata().retryable());
+    assertEquals(256, sse.metadata().requestId().length());
+    assertFalse(sse.metadata().requestId().contains("\r"));
+    assertFalse(sse.metadata().requestId().contains("\n"));
+  }
+
+  @Test
+  @DisplayName("withIdentity bounds external provider and model names before strict construction")
+  void withIdentityBoundsExternalNames() {
+    ModelFailureMetadata metadata =
+        new ModelFailureMetadata(null, null, null, null, null, null, null)
+            .withIdentity("provider\r\nname", "m".repeat(300));
+    assertEquals("providername", metadata.provider());
+    assertEquals(256, metadata.model().length());
   }
 }

@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.builtin.runtime.invocation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import org.junit.jupiter.api.Test;
@@ -11,6 +12,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInputReceipt;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelAttemptFailure;
 import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelInvocationError;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.tool.ToolCall;
@@ -103,6 +105,41 @@ class InvocationValueJsonTest {
       ModelInvocationError value = new ModelInvocationError(kind, "message", 503);
       assertEquals(value, roundTrip(value, ModelInvocationError.class));
     }
+    ModelFailureMetadata metadata =
+        new ModelFailureMetadata(
+            "openai",
+            "model-1",
+            false,
+            120_000L,
+            "request-1",
+            "ray-1",
+            ModelFailureMetadata.TransportStage.BEFORE_HEADERS);
+    ModelInvocationError detailed =
+        new ModelInvocationError(
+            ProviderErrorKind.TRANSIENT, "HTTP 503", 503, "server_error", metadata);
+    assertEquals(detailed, roundTrip(detailed, ModelInvocationError.class));
+    String legacyJson =
+        "{\"kind\":\"TRANSIENT\",\"message\":\"HTTP 503\",\"httpStatus\":503,"
+            + "\"providerErrorCode\":\"server_error\"}";
+    ModelInvocationError legacy =
+        JSON.read(legacyJson, ModelInvocationError.class, "modelInvocationError");
+    assertEquals(503, legacy.httpStatus());
+    assertEquals("server_error", legacy.providerErrorCode());
+    assertNull(legacy.metadata());
+    assertRejected(legacyJson.replace("\"kind\":\"TRANSIENT\",", ""), ModelInvocationError.class);
+    assertRejected(legacyJson.replace("\"message\":\"HTTP 503\",", ""), ModelInvocationError.class);
+    assertRejected(legacyJson.replace("\"httpStatus\":503,", ""), ModelInvocationError.class);
+    assertRejected(
+        legacyJson.replace("\"providerErrorCode\":\"server_error\"", ""),
+        ModelInvocationError.class);
+    assertRejected(
+        legacyJson.substring(0, legacyJson.length() - 1) + ",\"extra\":true}",
+        ModelInvocationError.class);
+    assertRejected(
+        legacyJson.replace(
+            "\"providerErrorCode\":\"server_error\"",
+            "\"providerErrorCode\":\"server_error\",\"metadata\":\"invalid\""),
+        ModelInvocationError.class);
     assertRejected(canonical.replace("null", "600"), ModelInvocationError.class);
     assertRejected(canonical.replace("TRANSIENT", "NETWORK"), ModelInvocationError.class);
     assertRejected(
@@ -126,7 +163,7 @@ class InvocationValueJsonTest {
         "[{\"attempt\":1,\"sequence\":7,\"text\":\"partial\",\"thinking\":\"thinking\","
             + "\"model\":{\"modelName\":\"model\",\"variant\":\"v1\"},\"requestedAt\":null,"
             + "\"error\":{\"kind\":\"TRANSIENT\",\"message\":\"provider unavailable\","
-            + "\"httpStatus\":null,\"providerErrorCode\":null},"
+            + "\"httpStatus\":null,\"providerErrorCode\":null,\"metadata\":null},"
             + "\"failedAt\":\"2026-01-01T00:00:00.123Z\","
             + "\"retryAt\":\"2026-01-01T00:00:02.123Z\"}]";
 

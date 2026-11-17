@@ -29,7 +29,8 @@ final class HeaderSanitizer {
           "x-ratelimit-reset-requests",
           "x-ratelimit-reset-tokens",
           "x-request-id",
-          "request-id");
+          "request-id",
+          "cf-ray");
 
   private static final Set<String> SENSITIVE_KEYWORDS =
       Set.of("token", "key", "auth", "cookie", "secret", "credential");

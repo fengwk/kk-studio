@@ -44,7 +44,11 @@ public final class ModelAttemptFailureAppender {
             failure.attempt(), failure.sequence(), failure.text(), failure.thinking()),
         failure.model(),
         failure.requestedAt(),
-        new AssistantError(failure.error().kind().name(), failure.error().message()),
+        new AssistantError(
+            failure.error().kind().name(),
+            failure.error().message(),
+            failure.error().providerErrorCode(),
+            failure.error().metadata()),
         failure.retryAt());
   }
 }

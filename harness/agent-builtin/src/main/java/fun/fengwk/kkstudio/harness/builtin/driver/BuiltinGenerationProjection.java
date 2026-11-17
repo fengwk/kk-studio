@@ -44,7 +44,11 @@ final class BuiltinGenerationProjection {
         outputContents(checkpoint),
         model.error() == null
             ? null
-            : new AssistantError(model.error().kind().name(), model.error().message()),
+            : new AssistantError(
+                model.error().kind().name(),
+                model.error().message(),
+                model.error().providerErrorCode(),
+                model.error().metadata()),
         model.resultEntryId(),
         model.createdAt(),
         model.updatedAt(),

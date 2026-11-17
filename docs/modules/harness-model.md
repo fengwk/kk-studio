@@ -21,7 +21,7 @@
 - 换行同时支持 CRLF、LF 与孤立 CR；`data:` 后仅紧邻的一个空格被剔除，多余前导空格与尾随空白完整保留；多行 `data:` 以 `\n` 合并。
 - 每个空行边界无条件重置事件缓冲与事件字节计数（无论该行是否有 data）；流 EOF 时 `flush()` 交付未以空行闭合的尾随事件。
 
-`TransportException` 的安全标头使用 [`HeaderSanitizer`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/transport/HeaderSanitizer.java) 的单一清洗规则：只放行固定白名单 `content-type`、`content-length`、`retry-after`、`x-request-id`、`request-id`，以及 `x-ratelimit-limit`、`x-ratelimit-remaining`、`x-ratelimit-reset`、`x-ratelimit-reset-requests`、`x-ratelimit-reset-tokens`，不是按前缀放行任意限流标头。未知标头一律丢弃；白名单内命中 `token`、`key`、`auth`、`cookie`、`secret`、`credential` 关键词的标头值整体替换为 `[REDACTED]`，其余值剔除 CR/LF 并修剪周边空白，输出按大小写不敏感排序的不可变 Map。
+`TransportException` 的安全标头使用 [`HeaderSanitizer`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/transport/HeaderSanitizer.java) 的单一清洗规则：只放行固定白名单 `content-type`、`content-length`、`retry-after`、`x-request-id`、`request-id`、`cf-ray`，以及 `x-ratelimit-limit`、`x-ratelimit-remaining`、`x-ratelimit-reset`、`x-ratelimit-reset-requests`、`x-ratelimit-reset-tokens`，不是按前缀放行任意限流标头。未知标头一律丢弃；白名单内命中 `token`、`key`、`auth`、`cookie`、`secret`、`credential` 关键词的标头值整体替换为 `[REDACTED]`，其余值剔除 CR/LF 并修剪周边空白，输出按大小写不敏感排序的不可变 Map。
 
 [`TransportErrorKind`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/transport/TransportErrorKind.java) 是封闭的五元集合 `IO`、`TIMEOUT`、`INVALID_RESPONSE`、`HTTP_STATUS`、`CANCELLED`。[`TransportException`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/transport/TransportException.java) 是安全信道：`getMessage()` / `toString()` 只含 kind、状态码等类名级信息（换行被清洗），绝不输出 URI、token、请求体或错误正文；cause 被替换为只保留类名的安全异常；经过有界截断的诊断正文只能通过 `errorBodyBytes()` 防御性副本读取，`isErrorBodyTruncated()` 明确告知是否被截断。[`ServerSentEvent`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/transport/ServerSentEvent.java) 的 `toString()` 也只输出 `eventLength` / `dataLength`，避免日常调试日志打印上游正文。
 
@@ -32,10 +32,11 @@
 - HTTP 错误消息是 `HTTP <status>\n<原始 UTF-8 响应正文>`，保留空白、非 JSON 正文、厂商扩展字段、请求 ID 与上游给出的全部错误详情，不做字段白名单过滤。
 - 正文受 `maxErrorBodyBytes` 限制；一旦传输层截断，消息末尾明确追加 ` [TRUNCATED]`。正文为空时才回退到 `HTTP <status>: <fallback>` 或纯 fallback 文案。
 - SSE 协议错误保留完整解析后的 JSON envelope，用 `JsonNode.toString()` 序列化（不保证原始 JSON 排版或 wire 字节一致）。
-- 消息刻意不含请求标头、请求 URI、配置凭据与底层异常 cause；错误分类、重试与取消语义不因透传而改变。
+- 消息刻意不含请求标头、请求 URI、配置凭据与底层异常 cause；错误分类、重试与取消语义由结构化字段判定，不解析英文消息。
+- 安全的 [`ModelFailureMetadata`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/ModelFailureMetadata.java) 从 HTTP/SSE mapper 传递，保留冻结 provider/model 身份、明确 retry 指令、解析后最多一小时的 Retry-After、安全 request-id/cf-ray 与传输阶段；HTTP 状态与 Provider code/type 保持各自既有标量字段，不在 metadata 重复。未知响应标头、凭据与完整 URL 不进入此对象。传输标头只按严格白名单清洗，SSE 原生字段也只接受有限结构化值。
 - 只有 `CANCELLED` 是静默传输错误，不映射为上游错误，由调用方根据线程中断状态收敛。
 
-同一消息沿 Runtime 落入 `ModelInvocationError`，持久化为 `builtin_model_invocation.error`，再经产品 DTO 原样送达客户端；对话错误卡片与调试详情按纯文本展示，不把上游 HTML 当页面执行。需要注意：如果上游正文自身回显了敏感内容，它同样会进入错误记录与客户端，访问、保存与分享这些诊断时应按敏感数据处理。
+同一消息沿 Runtime 落入 `ModelInvocationError`，原有 `kind`、`message`、`httpStatus` 与 `providerErrorCode` wire 字段保持不变；新增有限诊断只放在可选 `metadata` 中，旧记录缺少该字段时仍可读取。错误持久化为 `builtin_model_invocation.error`，再经产品 DTO 原样送达客户端；对话错误卡片与调试详情按纯文本展示，不把上游 HTML 当页面执行。失败正文仍遵守原始文本契约；如果上游正文自身回显敏感内容，它同样会进入错误记录与客户端，访问、保存与分享时应按敏感数据处理。结构化元数据不含正文。
 
 ## 请求、回放与媒体
 

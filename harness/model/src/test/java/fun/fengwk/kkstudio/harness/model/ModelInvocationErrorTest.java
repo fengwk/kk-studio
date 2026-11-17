@@ -29,10 +29,19 @@ class ModelInvocationErrorTest {
   }
 
   @Test
-  void httpStatusMakesAnyKindACandidate() {
-    assertTrue(
-        new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 401).retryCandidate());
+  void terminalKindsOverrideHttpStatusRetryCandidates() {
+    assertFalse(
+        new ModelInvocationError(ProviderErrorKind.AUTHENTICATION, "auth", 503).retryCandidate());
+    assertFalse(new ModelInvocationError(ProviderErrorKind.BILLING, "quota", 402).retryCandidate());
     assertTrue(new ModelInvocationError(ProviderErrorKind.BILLING, "quota", 429).retryCandidate());
+    assertFalse(
+        new ModelInvocationError(
+                ProviderErrorKind.TRANSIENT,
+                "server error",
+                503,
+                null,
+                new ModelFailureMetadata(null, null, false, null, null, null, null))
+            .retryCandidate());
     assertTrue(
         new ModelInvocationError(ProviderErrorKind.INVALID_REQUEST, "bad", 400).retryCandidate());
     assertTrue(
@@ -74,6 +83,9 @@ class ModelInvocationErrorTest {
     assertNull(new ModelInvocationError(ProviderErrorKind.TRANSIENT, "m").providerErrorCode());
     assertNull(
         new ModelInvocationError(ProviderErrorKind.TRANSIENT, "m", null, "  ").providerErrorCode());
+    assertNull(
+        new ModelInvocationError(ProviderErrorKind.TRANSIENT, "m", null, "unsafe\ncode")
+            .providerErrorCode());
   }
 
   @Test

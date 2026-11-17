@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 
 import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
@@ -184,9 +185,26 @@ class PlatformModelGatewayTest {
                             (request, handler) ->
                                 handler.onError(
                                     new ProviderException(
-                                        ProviderErrorKind.TRANSIENT, "rate limited")))),
+                                        ProviderErrorKind.TRANSIENT,
+                                        "rate limited",
+                                        503,
+                                        "server_error",
+                                        new ModelFailureMetadata(
+                                            null,
+                                            null,
+                                            false,
+                                            120_000L,
+                                            "request-1",
+                                            "ray-1",
+                                            ModelFailureMetadata.TransportStage.BEFORE_HEADERS))))),
                     new ConcurrencyAdmission(1))));
     assertEquals(ProviderErrorKind.TRANSIENT, viaCallback.error().kind());
+    assertEquals(503, viaCallback.error().httpStatus());
+    assertEquals("server_error", viaCallback.error().providerErrorCode());
+    assertEquals("openai", viaCallback.error().metadata().provider());
+    assertEquals("frozen-model", viaCallback.error().metadata().model());
+    assertEquals("request-1", viaCallback.error().metadata().requestId());
+    assertEquals(false, viaCallback.error().metadata().retryable());
 
     ModelGateway.Failed thrown =
         assertInstanceOf(
@@ -201,6 +219,8 @@ class PlatformModelGatewayTest {
                             })),
                     new ConcurrencyAdmission(1))));
     assertEquals(ProviderErrorKind.INVALID_REQUEST, thrown.error().kind());
+    assertEquals("openai", thrown.error().metadata().provider());
+    assertEquals("frozen-model", thrown.error().metadata().model());
   }
 
   /** 未分类异常（含 sink 抛出）无法确认结果：Unknown，且只记录异常类型，不泄露可能含请求细节或凭据的消息。 */
