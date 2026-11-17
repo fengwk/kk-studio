@@ -502,7 +502,7 @@ class PostgresqlHarnessSchemaTest {
     // 未收尾 ToolInvocation 的公共查找路径必须只覆盖全部非终态（含人工输入等待），且按 thread_id 建键。
     assertTrue(toolNonterminal.contains("(thread_id)"));
     assertEquals(
-        Set.of("WAITING_APPROVAL", "WAITING_INPUT", "READY", "RUNNING"),
+        Set.of("WAITING_APPROVAL", "WAITING_INPUT", "WAITING_CHILD", "READY", "RUNNING"),
         Pattern.compile("'([^']+)'")
             .matcher(toolNonterminal)
             .results()
