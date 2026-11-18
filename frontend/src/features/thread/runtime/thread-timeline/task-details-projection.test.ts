@@ -34,6 +34,7 @@ function toolInvocation(
   return {
     id,
     threadId: 'thread-1',
+    childThreadId: null,
     turnStartEntryId: 'turn-1',
     assistantEntryId,
     callIndex: 0,
@@ -156,9 +157,42 @@ describe('task canonical details projection', () => {
     expect(parseTaskReceipt(resultMessage?.details)).toBeNull()
   })
 
+  it('keeps child-thread identities isolated for parallel task invocations', () => {
+    const firstThreadId = '00000000-0000-4000-8000-000000000011'
+    const secondThreadId = '00000000-0000-4000-8000-000000000012'
+    const timeline = buildThreadTimeline(
+      [entry('assistant-parallel', 'ASSISTANT', [
+        {
+          type: 'tool_call', toolCallId: 'call-task-first', toolName: 'task', rendererKey: 'task',
+          argumentsJson: '{"subagent_type":"coder","prompt":"first"}',
+        },
+        {
+          type: 'tool_call', toolCallId: 'call-task-second', toolName: 'task', rendererKey: 'task',
+          argumentsJson: '{"subagent_type":"coder","prompt":"second"}',
+        },
+      ])],
+      [],
+      [
+        toolInvocation('inv-first', 'assistant-parallel', {
+          callIndex: 0, toolCallId: 'call-task-first', childThreadId: firstThreadId,
+          status: 'RUNNING',
+        }),
+        toolInvocation('inv-second', 'assistant-parallel', {
+          callIndex: 1, toolCallId: 'call-task-second', childThreadId: secondThreadId,
+          status: 'RUNNING',
+        }),
+      ],
+    )
+    const calls = timeline.messages.filter(
+      (message): message is ToolDialogueMessage => message.role === 'tool' && message.phase === 'call',
+    )
+    expect(calls.map((call) => call.childThreadId)).toEqual([firstThreadId, secondThreadId])
+  })
+
   it('projects live invocation result with details into transient result', () => {
     const threadId = '00000000-0000-4000-8000-000000000002'
     const invocation = toolInvocation('inv-1', 'asst-live', {
+      childThreadId: threadId,
       status: 'SUCCEEDED',
       result: {
         details: {
@@ -185,6 +219,11 @@ describe('task canonical details projection', () => {
       [],
       [invocation],
     )
+
+    const projectedCall = timeline.messages.find(
+      (m): m is ToolDialogueMessage => m.role === 'tool' && m.phase === 'call',
+    )
+    expect(projectedCall?.childThreadId).toBe(threadId)
 
     const transientResult = timeline.messages.find(
       (m): m is ToolDialogueMessage =>

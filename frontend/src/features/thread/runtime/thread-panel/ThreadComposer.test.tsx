@@ -1210,6 +1210,47 @@ describe('ThreadComposer interactions', () => {
 })
 
 describe('ThreadCommandPalette', () => {
+  it('does not scroll the palette in response to pointer selection changes', async () => {
+    const originalDescriptor = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+    const scrollIntoView = vi.fn()
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    })
+
+    function PaletteHarness() {
+      const [activeIndex, setActiveIndex] = useState(0)
+      const commands: ThreadCommand[] = [
+        { id: 'thread', label: 'thread', description: activeIndex === 0 ? 'initial' : 'updated' },
+        { id: 'agent', label: 'agent', description: 'agent' },
+      ]
+      return (
+        <ThreadCommandPalette
+          open
+          query=""
+          commands={commands}
+          activeIndex={activeIndex}
+          onActiveIndexChange={setActiveIndex}
+          onSelect={vi.fn()}
+        />
+      )
+    }
+
+    try {
+      render(<PaletteHarness />)
+      scrollIntoView.mockClear()
+      fireEvent.mouseEnter(screen.getByRole('option', { name: /^agent/ }))
+      await waitFor(() => expect(screen.getByRole('option', { name: /^agent/ })).toHaveAttribute('aria-selected', 'true'))
+      expect(scrollIntoView).not.toHaveBeenCalled()
+    } finally {
+      if (originalDescriptor == null) {
+        Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
+      } else {
+        Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalDescriptor)
+      }
+    }
+  })
+
   it('filters and selects a slash command', async () => {
     const user = userEvent.setup()
     const onSelect = vi.fn()

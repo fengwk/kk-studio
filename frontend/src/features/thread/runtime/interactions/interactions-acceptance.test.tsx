@@ -222,6 +222,7 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
     const decideSpy = vi.spyOn(harnessService, 'decideApproval').mockResolvedValue({
       id: 'inv-app-1',
       threadId: 'thread-1',
+      childThreadId: null,
       turnStartEntryId: 'turn-1',
       assistantEntryId: 'a-1',
       callIndex: 0,

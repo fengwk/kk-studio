@@ -123,6 +123,7 @@ export function InteractionsPage() {
                             ? undefined : () => removeItem(item.toolInvocationId)}
                         />
                       </div>
+                      <InteractionOwnerSource item={item} showOwnerSource={false} />
                     </div>
                   ))}
                 </div>

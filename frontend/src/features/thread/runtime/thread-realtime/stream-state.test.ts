@@ -266,6 +266,7 @@ describe('thread realtime state', () => {
     const base: ToolInvocationDTO = {
       id: 'inv-t',
       threadId: 'thread-1',
+      childThreadId: null,
       turnStartEntryId: 'turn-1',
       assistantEntryId: 'e-1',
       callIndex: 0,
@@ -338,6 +339,7 @@ describe('thread realtime state', () => {
     const base: ToolInvocationDTO = {
       id: 'inv-t2',
       threadId: 'thread-1',
+      childThreadId: null,
       turnStartEntryId: 'turn-1',
       assistantEntryId: 'e-1',
       callIndex: 0,
@@ -801,7 +803,7 @@ describe('thread realtime state', () => {
     // tool result 是数组：非 record 回退为空文本 base（error 保持 false）。
     expect(
       snapshotToolStream(
-        { ...toolInvocation(), result: '[1]' } as ToolInvocationDTO,
+        { ...toolInvocation(), result: '[1]' },
         '7',
       ),
     ).toMatchObject({ text: '', error: false })
@@ -858,6 +860,7 @@ describe('thread realtime state', () => {
     const invocation = (attempt: number): ToolInvocationDTO => ({
       id: 'inv-t',
       threadId: 'thread-1',
+      childThreadId: null,
       turnStartEntryId: 'turn-1',
       assistantEntryId: 'e-1',
       callIndex: 0,
@@ -1693,6 +1696,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
   return {
     id: 'inv-t',
     threadId: 'thread-1',
+    childThreadId: null,
     turnStartEntryId: 'turn-1',
     assistantEntryId: 'e-1',
     callIndex: 0,

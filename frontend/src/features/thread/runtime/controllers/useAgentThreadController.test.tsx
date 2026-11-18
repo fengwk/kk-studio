@@ -179,6 +179,7 @@ function toolInvocationFixture(overrides: Partial<ToolInvocationDTO> = {}): Tool
   return {
     id: 'tool-1',
     threadId: 'thread-1',
+    childThreadId: null,
     turnStartEntryId: 'turn-1',
     assistantEntryId: 'a1',
     callIndex: 0,

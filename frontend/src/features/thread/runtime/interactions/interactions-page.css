@@ -152,6 +152,10 @@
   min-width: 0;
 }
 
+.interaction-feed-item > .interaction-subagent-source {
+  margin-top: 8px;
+}
+
 .interactions-load-more-row {
   display: flex;
   justify-content: center;

@@ -315,6 +315,23 @@ export function ToolCardHarnessApp() {
 }
 
 const toolCardHarness = {
+  taskRunning() {
+    const argumentsValue = JSON.stringify({
+      subagent_type: 'Explorer',
+      prompt: 'inspect the live child task',
+    })
+    publish({
+      messages: [{
+        ...bashTool('task-running', 1, false),
+        toolName: 'task',
+        rendererKey: 'task',
+        invocationStatus: 'RUNNING',
+        childThreadId: '00000000-0000-4000-8000-000000000006',
+        arguments: argumentsValue,
+      }],
+      streaming: false,
+    })
+  },
   task() {
     const argumentsValue = JSON.stringify({
       subagent_type: 'Explorer', max_turns: 4,

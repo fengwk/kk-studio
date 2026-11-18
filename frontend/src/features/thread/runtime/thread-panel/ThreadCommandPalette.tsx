@@ -26,7 +26,7 @@ export function ThreadCommandPalette({
   onSelect: (command: ThreadCommand) => void
 }) {
   const { t } = useI18n()
-  const commandSignature = JSON.stringify(commandSource)
+  const commandSignature = JSON.stringify(commandSource.map(({ id, disabled }) => [id, Boolean(disabled)]))
   const commands = useMemo(() => filterThreadCommands(query, commandSource), [commandSource, query])
   const listRef = useRef<HTMLUListElement>(null)
   const enabledCount = useMemo(

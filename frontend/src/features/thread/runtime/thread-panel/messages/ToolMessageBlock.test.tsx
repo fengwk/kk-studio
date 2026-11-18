@@ -1072,6 +1072,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
       rendererKey: 'task',
       arguments: resumeArguments,
       invocationStatus: 'SUCCEEDED',
+      childThreadId: '00000000-0000-4000-8000-000000000004',
     })
     const resultWithCanonicalDetails = message({
       phase: 'result',
@@ -1114,7 +1115,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.getByText('Subagent report.')).toBeInTheDocument()
     unmount()
 
-    // 缺少 details 时不伪造链接，展开后保留原始自然语言正文。
+    // 有结果但缺少 details 时不回退到 invocation 子线程 ID，展开后保留原始正文。
     const resultWithoutDetails = message({
       phase: 'result',
       toolName: 'task',
@@ -1137,7 +1138,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.getByText('Raw output without details receipt.')).toBeInTheDocument()
     unmount2()
 
-    // 非法 UUID 也不能借用调用参数伪造导航。
+    // 有结果但回执 UUID 非法时，也不得回退到调用参数或 invocation 子线程 ID。
     const { unmount: unmount3 } = render(
       <MemoryRouter>
         <ToolMessageBlock
@@ -1187,7 +1188,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.getByText('Failure explanation detail')).toBeInTheDocument()
     failed.unmount()
 
-    // 通用工具错误的 details 为 {}：没有子 Thread 身份就不生成导航，错误原文仍保留。
+    // 通用错误 details 没有回执时不使用 invocation 子线程 ID，错误原文仍保留。
     const genericError = render(
       <MemoryRouter>
         <ToolMessageBlock
@@ -1203,19 +1204,31 @@ describe('ToolMessageBlock per-tool bodies', () => {
     )
   })
 
-  it('keeps pending resume navigation absent and shows it in the header after completion', async () => {
+  it('links to the durable child before a result and prefers the completed receipt', async () => {
     const user = userEvent.setup()
     const call = message({
       phase: 'call', toolName: 'task', rendererKey: 'task', invocationStatus: 'RUNNING',
+      childThreadId: '00000000-0000-0000-0000-000000000001',
       arguments: JSON.stringify({
         subagent_type: 'coder', prompt: 'resume pending',
-        thread_id: '00000000-0000-0000-0000-000000000001',
+        thread_id: '00000000-0000-0000-0000-000000000099',
       }),
     })
     const { rerender } = render(
       <MemoryRouter><ToolMessageBlock message={call} renderer={TaskToolRenderer} /></MemoryRouter>,
     )
-    expect(screen.queryByRole('link')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
+    rerender(
+      <MemoryRouter>
+        <ToolMessageBlock
+          message={{ ...call, invocationStatus: 'CANCELLED' }}
+          renderer={TaskToolRenderer}
+        />
+      </MemoryRouter>,
+    )
+    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000001')
     expect(screen.queryByText('resume pending')).not.toBeInTheDocument()
     await user.click(expandButton()!)
     expect(screen.getByText('resume pending')).toBeInTheDocument()
@@ -1234,6 +1247,33 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
       .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     expect(screen.queryByText('00000000-0000-0000-0000-000000000002')).not.toBeInTheDocument()
+  })
+
+  it('does not create an empty task result body', () => {
+    const result = message({
+      phase: 'result', toolName: 'task', rendererKey: 'task',
+      details: {
+        kind: 'task.result', status: 'completed',
+        thread_id: '00000000-0000-0000-0000-000000000021',
+      },
+      contents: [],
+    })
+    const { container } = render(
+      <MemoryRouter>
+        <ToolMessageBlock
+          message={message({
+            phase: 'call', toolName: 'task', rendererKey: 'task',
+            arguments: '{"subagent_type":"coder","prompt":"done"}',
+          })}
+          result={result}
+          renderer={TaskToolRenderer}
+        />
+      </MemoryRouter>,
+    )
+
+    expect(screen.getByRole('link', { name: '查看 subagent 执行' }))
+      .toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000021')
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
   })
 
   it('keeps the task result action in the header and the prompt in the preview', async () => {

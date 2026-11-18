@@ -83,6 +83,7 @@ export function projectInvocationOverlays(
         : (failed ? 'error' : 'done'),
       invocationId: invocation.id,
       invocationStatus: invocation.status,
+      childThreadId: invocation.childThreadId,
       queuedBehindToolCallId: invocation.queuedBehindToolCallId,
       queuedBehindToolCallUnfinished:
         queuedPredecessor != null && !isTerminalInvocationStatus(queuedPredecessor.status),

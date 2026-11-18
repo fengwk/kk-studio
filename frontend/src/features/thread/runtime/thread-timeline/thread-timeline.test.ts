@@ -1322,6 +1322,7 @@ describe('thread timeline', () => {
       {
         id: 'inv-1',
         threadId: 'thread-1',
+        childThreadId: null,
         turnStartEntryId: 'turn-1',
         assistantEntryId: '40',
         callIndex: 0,
@@ -1393,6 +1394,7 @@ describe('thread timeline', () => {
     const invocation: ToolInvocationDTO = {
       id: 'inv-2',
       threadId: 'thread-1',
+      childThreadId: null,
       turnStartEntryId: 'turn-1',
       assistantEntryId: '41',
       callIndex: 0,
@@ -1487,6 +1489,7 @@ describe('thread timeline', () => {
     const invocation: ToolInvocationDTO = {
       id: 'inv-3',
       threadId: 'thread-1',
+      childThreadId: null,
       turnStartEntryId: 'turn-1',
       assistantEntryId: '42',
       callIndex: 0,
@@ -2521,6 +2524,7 @@ function invocation(
   return {
     id,
     threadId: 'thread-1',
+    childThreadId: null,
     turnStartEntryId: 'turn-1',
     assistantEntryId,
     callIndex: 0,

@@ -128,6 +128,7 @@ function snapshotWithPendingTool(targetThreadId: string): HarnessThreadSnapshotD
       {
         id: 'inv-bash-1',
         threadId: 'thread-1',
+        childThreadId: null,
         turnStartEntryId: 'turn-1',
         assistantEntryId: 'entry-tool-1',
         callIndex: 0,
