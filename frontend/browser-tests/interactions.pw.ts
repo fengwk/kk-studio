@@ -331,12 +331,12 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       await expect(card).toBeVisible()
       await expect(card.locator('.interaction-status-tag')).toHaveCount(0)
       await expect(card.locator('time')).toHaveCount(0)
-      await expect(card.locator('.interaction-approval-reason-text')).toContainText('bash requires approval')
+      await expect(card.locator('.interaction-approval-reason')).toContainText('bash requires approval')
       await expect(card.locator('.thread-tool-approval-field')).toHaveCount(3)
       await expect(card.locator('.thread-tool-approval-field').filter({ has: page.locator('dt', { hasText: 'command' }) }).locator('pre'))
         .toContainText('npm --prefix frontend run test')
       await expect(page.getByRole('heading', { name: '迁移审批' })).toBeVisible()
-      await expect(page.getByRole('link', { name: '会话: 迁移审批' })).toHaveAttribute('href', `/threads/${APPROVAL_ROOT_ID}`)
+      await expect(page.getByRole('button', { name: 'Chat · 迁移审批' })).toBeVisible()
 
       const [
         surface,
@@ -355,7 +355,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       // 卡片、审批原因与原始参数必须落在现行暗色 token 上，不能残留浅色回退。
       const cardStyle = await card.evaluate((el) => {
         const style = window.getComputedStyle(el)
-        const reason = el.querySelector<HTMLElement>('.interaction-approval-reason-text')!
+        const reason = el.querySelector<HTMLElement>('.interaction-approval-reason')!
         const pre = el.querySelector<HTMLElement>('.thread-tool-approval-field pre')!
         const icon = el.querySelector<HTMLElement>('.interaction-approval-icon')!
         return {
@@ -381,7 +381,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       expect(contrastRatio(cardStyle.reasonColor, cardStyle.cardBackground)).toBeGreaterThanOrEqual(4.5)
 
       // 长原因、完整 command 与 workdir 必须可读，未展示原始 JSON。
-      await expect(card.locator('.interaction-approval-reason-text')).toHaveText(LONG_REASON)
+      await expect(card.locator('.interaction-approval-reason')).toHaveText(LONG_REASON)
       await expect(card.locator('.thread-tool-approval-field').filter({ has: page.locator('dt', { hasText: 'command' }) }).locator('pre'))
         .toHaveText(JSON.parse(LONG_ARGUMENTS).command)
       expect((await card.textContent())?.split('/srv/kk-studio/frontend/browser-tests/nested/deeply/')).toHaveLength(2)
@@ -414,17 +414,11 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
       expect(allowStyle.color).toBe(await tokenColor(page, '--fg-on-accent'))
       expect(allowStyle.border).toBe(await tokenColor(page, '--accent-border'))
       const denyStyle = await card.locator('.interaction-deny-btn').evaluate((el) => {
-        const probe = document.createElement('span')
-        probe.style.background = 'var(--danger-gradient)'
-        document.body.appendChild(probe)
-        const expected = getComputedStyle(probe).backgroundImage
-        probe.remove()
         const style = getComputedStyle(el)
-        return { background: style.backgroundImage, expected, border: style.borderTopColor }
+        return { background: style.backgroundImage, border: style.borderTopColor }
       })
-      expect(denyStyle.background).toBe(denyStyle.expected)
-      expect(denyStyle.background).not.toBe('none')
-      expect(denyStyle.border).toBe(await tokenColor(page, '--danger-strong'))
+      expect(denyStyle.background).toBe('none')
+      expect(denyStyle.border).toBe(await tokenColor(page, '--border'))
 
       await expectNoHorizontalOverflow(page)
 
@@ -449,7 +443,8 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await expect(card.locator('.interaction-status-tag')).toHaveCount(0)
     await expect(card.locator('.interaction-allow-btn, .interaction-deny-btn, .interaction-submit-btn')).toHaveCount(0)
     await expect(card.getByRole('textbox')).toHaveCount(0)
-    await expect(card.getByRole('button', { name: 'Chat · 等待迁移环境' })).toBeVisible()
+    const group = page.locator('.interactions-session-group').filter({ has: card })
+    await expect(group.getByRole('button', { name: 'Chat · 等待迁移环境' })).toBeVisible()
     const refresh = page.getByRole('button', { name: '刷新', exact: true })
     const refreshed = page.waitForResponse((response) =>
       new URL(response.url()).pathname === '/api/harness/interactions'
@@ -469,7 +464,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await mockPendingApi(page, { approvals, submissions })
     await page.goto(HARNESS_URL)
 
-    const source = page.locator('.interaction-feed-item').first()
+    const source = page.locator('.interactions-session-group').first()
       .getByRole('button', { name: 'Chat · 迁移审批' })
     await expect(source).toContainText('Chat · 迁移审批')
     await source.click()
@@ -484,7 +479,7 @@ test.describe('Pending Interactions real browser appearance and decisions', () =
     await mockPendingApi(page, { approvals, submissions })
     await page.goto(HARNESS_URL)
 
-    const source = page.locator('.interaction-feed-item').nth(1)
+    const source = page.locator('.interactions-session-group').nth(1)
       .getByRole('button', { name: 'Issue · 迁移策略' })
     await expect(source).toContainText('Issue · 迁移策略')
     await source.click()

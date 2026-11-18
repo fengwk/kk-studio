@@ -1029,7 +1029,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
 
     await user.click(screen.getByRole('button', { name: '… 30 more lines' }))
     expect(container.querySelector('.thread-tool-preview-body')).toHaveTextContent('line-40')
-    expect(screen.getByText('写入成功')).toBeInTheDocument()
+    expect(screen.queryByText('写入成功')).not.toBeInTheDocument()
   })
 
   it('hides the task prompt while collapsed and renders it without acceptance copy', async () => {
@@ -1641,7 +1641,7 @@ describe('ToolMessageBlock resources and approvals', () => {
 
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '拒绝' })).not.toBeInTheDocument()
-    expect(screen.getByText(/此工具调用需要审批/)).toBeInTheDocument()
+    expect(screen.queryByText(/此工具调用需要审批/)).not.toBeInTheDocument()
 
     rerender(
       <ToolMessageBlock
@@ -1652,8 +1652,8 @@ describe('ToolMessageBlock resources and approvals', () => {
         })}
       />,
     )
-    expect(screen.getByText(/已允许/)).toBeInTheDocument()
-    expect(screen.getByText(/looks safe/)).toBeInTheDocument()
+    expect(screen.queryByText(/已允许/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/looks safe/)).not.toBeInTheDocument()
 
     rerender(
       <ToolMessageBlock
@@ -1664,7 +1664,7 @@ describe('ToolMessageBlock resources and approvals', () => {
         })}
       />,
     )
-    expect(screen.getByText(/已拒绝/)).toBeInTheDocument()
+    expect(screen.queryByText(/已拒绝/)).not.toBeInTheDocument()
     expect(card()).toBeInTheDocument()
   })
 })
@@ -1730,7 +1730,8 @@ describe('ToolMessageBlock integrated disclosure boundaries', () => {
     })} />)
     expect(screen.queryByRole('link')).toBeNull()
     await user.click(expandButton()!)
-    expect(container.querySelector('.thread-tool-mutation-success')).toHaveTextContent('写入成功')
+    expect(container.querySelector('.thread-tool-mutation-success')).toBeNull()
+    expect(container.querySelector('.thread-tool-success-icon')).not.toBeNull()
     expect(screen.getByRole('link', { name: '下载 artifact.txt' })).toBeInTheDocument()
     expect(container).not.toHaveTextContent('written hello')
   })

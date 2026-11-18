@@ -132,6 +132,7 @@ async function installPreviewApiMock(
     cursor: () => Cursor
     agentSelection?: boolean
     entries?: unknown[]
+    pending?: unknown[]
   },
 ): Promise<RecordedRequest[]> {
   const recorded: RecordedRequest[] = []
@@ -224,7 +225,7 @@ async function installPreviewApiMock(
       }
       if (path === '/api/harness/interactions' && method === 'GET') {
         await route.fulfill({
-          json: { items: [], nextCursor: null, total: 0, freshnessAt: null },
+          json: { items: options.pending ?? [], nextCursor: null, total: options.pending?.length ?? 0, freshnessAt: null }
         })
         return
       }
@@ -302,7 +303,24 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
     },
     createdAt: 1790812805,
   }
-  const recorded = await installPreviewApiMock(page, { cursor: () => INITIAL_CURSOR, entries: [notificationEntry] })
+  const recorded = await installPreviewApiMock(page, {
+    cursor: () => INITIAL_CURSOR,
+    entries: [notificationEntry],
+    pending: [{
+      toolInvocationId: 'cold-chat-approval',
+      type: 'APPROVAL',
+      threadId: THREAD_ID,
+      rootThreadId: THREAD_ID,
+      sessionId: 'cold-chat-session',
+      owner: { kind: 'CHAT', id: 'cold-chat', title: 'Cold approvals', link: '/chats/cold-chat' },
+      toolCallId: 'cold-chat-call',
+      toolName: 'bash',
+      argumentsJson: '{"command":"git status --short","workdir":"/workspace"}',
+      approval: { required: true, reason: 'Permission rules require approval' },
+      queuedSameFileCount: 0,
+      createdAt: 1790812800,
+    }],
+  })
   const writes: string[] = []
   page.on('request', (request) => {
     if (new URL(request.url()).pathname.startsWith('/api/') && request.method() !== 'GET') {
@@ -311,6 +329,25 @@ test('owner-free bound thread renders a NOTIFICATION entry as a system card', as
   })
   await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto('/browser-tests/debug-preview-harness.html')
+
+  const chatApproval = page.locator('.thread-root-interactions .interaction-approval-card')
+  await expect(chatApproval).toBeVisible()
+  await expect(chatApproval).not.toContainText('Chat · Cold approvals')
+  const approvalStyles = await chatApproval.evaluate((element) => ({
+    footerDisplay: getComputedStyle(element.querySelector('.interaction-approval-footer')!).display,
+    inputBorderStyle: getComputedStyle(element.querySelector('input')!).borderTopStyle,
+    inputPadding: getComputedStyle(element.querySelector('input')!).padding,
+  }))
+  expect(approvalStyles).toEqual({ footerDisplay: 'flex', inputBorderStyle: 'solid', inputPadding: '6px 8px' })
+  await page.setViewportSize({ width: 360, height: 900 })
+  const narrowFooter = await chatApproval.locator('.interaction-approval-footer').evaluate((footer) => {
+    const input = footer.querySelector('input')!.getBoundingClientRect()
+    const actions = footer.querySelector('.interaction-actions-bar')!.getBoundingClientRect()
+    return { inputBottom: input.bottom, actionsTop: actions.top, scrollWidth: footer.scrollWidth, clientWidth: footer.clientWidth }
+  })
+  expect(narrowFooter.actionsTop).toBeGreaterThanOrEqual(narrowFooter.inputBottom)
+  expect(narrowFooter.scrollWidth).toBeLessThanOrEqual(narrowFooter.clientWidth + 1)
+  await page.setViewportSize({ width: 1440, height: 900 })
 
   const card = page.locator('[data-entry-kind="notification"]')
   await expect(card).toBeVisible()

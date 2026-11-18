@@ -50,6 +50,8 @@ export function ComposerHarnessApp() {
   const [modalOpen, setModalOpen] = useState(false)
   const [lastCommand, setLastCommand] = useState<string | null>(null)
   const [submitPayloads, setSubmitPayloads] = useState<string[]>([])
+  const [commandRevision, setCommandRevision] = useState(0)
+  const commands = THREAD_COMMANDS.map((command) => ({ ...command }))
 
   const handleCommand = useCallback((cmd: ThreadCommand) => {
     setLastCommand(cmd.id)
@@ -105,6 +107,12 @@ export function ComposerHarnessApp() {
     onEnvironmentChange: setEnvironmentName,
   }
 
+  useEffect(() => {
+    const refreshCommands = () => setCommandRevision((revision) => revision + 1)
+    window.addEventListener('command-revision', refreshCommands)
+    return () => window.removeEventListener('command-revision', refreshCommands)
+  }, [])
+
   // 模态弹窗自身的 Escape 处理：上层 Modal 优先
   useEffect(() => {
     if (!modalOpen) return
@@ -120,7 +128,7 @@ export function ComposerHarnessApp() {
   }, [modalOpen])
 
   return (
-    <div className="harness-container">
+    <div className="harness-container" data-command-revision={commandRevision}>
       <div className="harness-topbar">
         <button id="outside-btn" type="button">
           外部按钮 (Outside)
@@ -186,7 +194,7 @@ export function ComposerHarnessApp() {
             onPartsChange={setPane1Parts}
             onSubmit={handleSubmit}
             onCommand={handleCommand}
-            commands={THREAD_COMMANDS}
+            commands={commands}
             settings={settings}
           />
         </div>
@@ -211,7 +219,7 @@ export function ComposerHarnessApp() {
               setPane2Parts([])
             }}
             onCommand={handleCommand}
-            commands={THREAD_COMMANDS}
+            commands={commands}
           />
         </div>
       </div>

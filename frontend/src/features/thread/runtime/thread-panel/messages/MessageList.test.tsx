@@ -116,7 +116,7 @@ describe('MessageList tool renderer dispatch', () => {
     )
 
     // 时间线只读：人工决策在根交互区完成，卡片不提供 ALLOW/DENY 写入路径。
-    expect(screen.getByText(/此工具调用需要审批/)).toBeInTheDocument()
+    expect(screen.queryByText(/此工具调用需要审批/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '拒绝' })).not.toBeInTheDocument()
     expect(container.querySelectorAll('.thread-turn-tool')).toHaveLength(1)
@@ -301,7 +301,7 @@ describe('MessageList tool renderer dispatch', () => {
     expect(screen.getByText('listed files failed')).toBeInTheDocument()
     expect(screen.getByText('listed files')).toBeInTheDocument()
     expect(screen.getAllByText('listed files')).toHaveLength(1)
-    expect(screen.getByText(/此工具调用需要审批/)).toBeInTheDocument()
+    expect(screen.queryByText(/此工具调用需要审批/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
   })
 
@@ -421,7 +421,7 @@ describe('MessageList tool renderer dispatch', () => {
       />,
     )
 
-    expect(screen.getByText(/已允许/)).toBeInTheDocument()
+    expect(screen.queryByText(/已允许/)).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: '允许' })).not.toBeInTheDocument()
     expect(onDecideApproval).not.toHaveBeenCalled()
     expect(container.querySelectorAll('.thread-turn-tool')).toHaveLength(1)

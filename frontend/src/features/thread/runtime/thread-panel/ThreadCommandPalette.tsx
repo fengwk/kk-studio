@@ -12,6 +12,7 @@ export function ThreadCommandPalette({
   query,
   commands: commandSource = THREAD_COMMANDS,
   activeIndex,
+  scrollVersion = 0,
   onActiveIndexChange,
   onSelect,
 }: {
@@ -20,10 +21,12 @@ export function ThreadCommandPalette({
   commands?: ThreadCommand[]
   /** 过滤后列表的索引（父组件跳过禁用项时，可能指向一个已禁用的行）。 */
   activeIndex: number
+  scrollVersion?: number
   onActiveIndexChange: (index: number) => void
   onSelect: (command: ThreadCommand) => void
 }) {
   const { t } = useI18n()
+  const commandSignature = JSON.stringify(commandSource)
   const commands = useMemo(() => filterThreadCommands(query, commandSource), [commandSource, query])
   const listRef = useRef<HTMLUListElement>(null)
   const enabledCount = useMemo(
@@ -38,7 +41,7 @@ export function ThreadCommandPalette({
     }
     const active = listRef.current?.querySelector<HTMLElement>('[aria-selected="true"]')
     active?.scrollIntoView({ block: 'nearest' })
-  }, [activeIndex, open, commands])
+  }, [open, query, commandSignature, scrollVersion])
 
   if (!open) {
     return null

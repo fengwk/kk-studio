@@ -6,7 +6,7 @@ import {
 import { Button } from '@/shared/ui/controls/Button'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { useI18n } from '@/shared/i18n'
-import { interactionIdentity, interactionOwnerLabel } from '@/shared/lib/interactions'
+import { interactionIdentity, interactionOwnerLabel, interactionOwnerLink } from '@/shared/lib/interactions'
 import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import { InteractionCardBody } from '@/features/thread/runtime/interactions/InteractionCardBody'
 import { InteractionOwnerSource } from '@/features/thread/runtime/interactions/InteractionOwnerSource'
@@ -35,7 +35,7 @@ export function InteractionsPage() {
   }
   const groups = Array.from(sessionGroups.entries()).map(([key, group]) => ({
     key,
-    items: [...group].sort((left, right) => right.createdAt - left.createdAt),
+    items: [...group].sort((left, right) => left.createdAt - right.createdAt),
     title: group[0]?.owner.title?.trim() || interactionOwnerLabel(group[0]!.owner, t),
     threadId: group[0]?.rootThreadId,
   }))
@@ -100,7 +100,10 @@ export function InteractionsPage() {
               <section className="interactions-session-group" key={group.key}>
                 <header className="interactions-session-header">
                   <h2>{group.title}</h2>
-                  {group.threadId ? (
+                  {group.items[0] && interactionOwnerLink(group.items[0].owner) ? (
+                    <InteractionOwnerSource item={group.items[0]} showSubagentSource={false} />
+                  ) : null}
+                  {group.items[0] && group.threadId && !interactionOwnerLink(group.items[0].owner) ? (
                     <ThreadLink
                       threadId={group.threadId}
                       className="interactions-session-link"
@@ -113,12 +116,6 @@ export function InteractionsPage() {
                 <div className="interactions-session-items">
                   {group.items.map((item) => (
                     <div key={interactionIdentity(item)} className="interaction-feed-item">
-                      <header className="interaction-item-header">
-                        <div className="interaction-item-meta">
-                          <InteractionOwnerSource item={item} />
-                        </div>
-                      </header>
-
                       <div className="interaction-item-body">
                         <InteractionCardBody
                           item={item}

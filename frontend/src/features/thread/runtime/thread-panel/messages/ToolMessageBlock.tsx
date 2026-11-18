@@ -70,21 +70,6 @@ export function ToolMessageBlock({
   const expanded = userExpanded ?? toolDefaultExpanded({ toolName: view.toolName, phase })
   const summary = formatToolCallSummary(view.toolName, view.arguments, { expanded })
 
-  const approval = view.callMessage?.approval ?? message.approval
-  const approvalState = !approval?.required
-    ? null
-    : approval.decision === 'ALLOWED'
-      ? t('ai.runtime.approval.allowed')
-      : approval.decision === 'DENIED'
-        ? t('ai.runtime.approval.denied')
-        : t('ai.runtime.approval.requested')
-  const rawState = approvalState ? approvalState.replace(/[:：]\s*$/, '') : ''
-  const translatedReason = approval?.reason === 'Permission rules require approval'
-    ? t('ai.interaction.defaultApprovalReason')
-    : approval?.reason
-  const notice = approvalState
-    ? (translatedReason ? `${rawState} — ${translatedReason}` : approvalState)
-    : null
   const normalizedName = view.toolName.trim().toLowerCase()
   const isBash = normalizedName === 'bash'
   const isMcp = isMcpToolName(normalizedName)
@@ -227,9 +212,6 @@ export function ToolMessageBlock({
   }
 
   const previewParts: ReactNode[] = []
-  if (notice != null) {
-    previewParts.push(<p key="approval" className="thread-tool-approval-note">{notice}</p>)
-  }
   if (isAskUser && view.executionState === 'input') {
     previewParts.push(
       <p key="answer" className="thread-tool-approval-note">
@@ -259,15 +241,7 @@ export function ToolMessageBlock({
   const body = expanded && hasBody ? (
     isMutation ? (
       view.isMutationSuccess ? (
-        <>
-          <div className="thread-tool-mutation-success">
-            <Check size={14} aria-hidden="true" />
-            <span>{normalizedName === 'write'
-              ? t('ai.runtime.mutation.writeSuccess')
-              : t('ai.runtime.mutation.editSuccess')}</span>
-          </div>
-          {bodyContents.length > 0 ? <ToolContentView contents={bodyContents} /> : null}
-        </>
+        bodyContents.length > 0 ? <ToolContentView contents={bodyContents} /> : undefined
       ) : (
         <ToolContentView contents={bodyContents} />
       )
@@ -347,6 +321,9 @@ export function ToolMessageBlock({
                   {summary.detail}
                 </span>
               </>
+            ) : null}
+            {view.executionState === 'succeeded' ? (
+              <Check className="thread-tool-success-icon" size={14} aria-hidden="true" />
             ) : null}
           </span>
         )}

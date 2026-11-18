@@ -357,15 +357,16 @@ html[lang="en-US"] .topnav a small {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 18px;
-  height: 18px;
-  padding: 0 5px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
   margin-left: 6px;
   font-size: var(--font-size-xs);
-  font-weight: 700;
+  font-weight: 600;
   line-height: 1;
-  color: var(--bg);
-  background: var(--danger);
+  color: var(--fg-muted);
+  background: var(--surface-hover);
+  border: 1px solid var(--border);
   border-radius: var(--radius-pill);
 }
 
