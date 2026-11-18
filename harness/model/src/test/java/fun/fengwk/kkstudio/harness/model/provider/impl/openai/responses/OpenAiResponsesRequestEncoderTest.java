@@ -475,7 +475,7 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals(sessionKey, first.path("prompt_cache_key").asString(""));
     assertEquals(
         first.path("prompt_cache_key").asString(""), second.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", first.path("prompt_cache_retention").asString(""));
+    assertFalse(first.has("prompt_cache_retention"));
 
     ProviderCacheControl otherSession =
         ProviderCacheControl.session(
@@ -594,7 +594,7 @@ class OpenAiResponsesRequestEncoderTest {
             new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
 
-    // SHORT -> in_memory
+    // SHORT -> key only
     JsonNode shortRoot =
         MAPPER.readTree(
             encoder
@@ -605,7 +605,7 @@ class OpenAiResponsesRequestEncoderTest {
                     desc)
                 .bodyUtf8Bytes());
     assertEquals("session-uuid", shortRoot.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", shortRoot.path("prompt_cache_retention").asString(""));
+    assertFalse(shortRoot.has("prompt_cache_retention"));
     assertFalse(shortRoot.has("prompt_cache_options"));
 
     // LONG -> 24h
@@ -622,7 +622,7 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals("24h", longRoot.path("prompt_cache_retention").asString(""));
     assertFalse(longRoot.has("prompt_cache_options"));
 
-    // NONE：完全不发 cache hint，明确表达禁用
+    // NONE：请求不携带 cache hint
     JsonNode noneRoot = MAPPER.readTree(encoder.encode(request(messages), desc).bodyUtf8Bytes());
     assertFalse(noneRoot.has("prompt_cache_key"));
     assertFalse(noneRoot.has("prompt_cache_retention"));
@@ -1230,9 +1230,9 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode plain =
         MAPPER.readTree(encoder.encode(request(history), createDescriptor()).bodyUtf8Bytes());
 
-    // 顶层只多出 cache key/retention，input 逐字一致
+    // 顶层只多出 cache key，input 逐字一致
     assertEquals("key", cached.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", cached.path("prompt_cache_retention").asString(""));
+    assertFalse(cached.has("prompt_cache_retention"));
     assertEquals(plain.path("input"), cached.path("input"));
     assertEquals(0, cached.findValues("prompt_cache_breakpoint").size());
 

@@ -6,6 +6,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -304,7 +305,7 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
     if (!resolved.diagnostics().isEmpty()) {
       canReplay = false;
     }
-    ModelUsage modelUsage = usage.toModelUsage();
+    ModelUsage modelUsage = usage.toModelUsage(cacheWriteTtlSeconds());
 
     List<ProviderContentBlock> blocks = new ArrayList<>();
     addSemanticBlocks(blocks, resolved.calls(), canReplay);
@@ -323,6 +324,16 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
             null,
             null);
     return new ProviderCompletion(response);
+  }
+
+  private Long cacheWriteTtlSeconds() {
+    if (request.cacheControl().retention() == PromptCacheRetention.SHORT
+        && OpenAiChatOfficialCapabilities.isOfficialEndpoint(descriptor)
+        && OpenAiChatOfficialCapabilities.hasThirtyMinuteDefaultCacheWrite(
+            request.model().modelId())) {
+      return 1800L;
+    }
+    return null;
   }
 
   private void requireCompleteStreamFacts() {

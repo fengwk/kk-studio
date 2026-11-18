@@ -28,6 +28,7 @@ final class OpenAiResponsesStreamUsage {
   private boolean hasRawTotalTokens = false;
   private long cachedTokens = 0L;
   private long cacheWriteTokens = 0L;
+  private Map<Long, Long> cacheWriteByTtl = Map.of();
   private Long reasoningTokens = null;
 
   /** 缺失 usage 字段保留此前观测值；显式 null 与损坏结构分别重置或拒绝。 */
@@ -61,6 +62,7 @@ final class OpenAiResponsesStreamUsage {
     rawTotalTokens = 0L;
     cachedTokens = 0L;
     cacheWriteTokens = 0L;
+    cacheWriteByTtl = Map.of();
     reasoningTokens = null;
   }
 
@@ -110,6 +112,34 @@ final class OpenAiResponsesStreamUsage {
         details.has("cache_write_tokens")
             ? parseUsage(details.get("cache_write_tokens"), "cache_write_tokens")
             : 0L;
+    applyCacheWriteTokenDetails(details.get("cache_write_tokens_details"));
+  }
+
+  private void applyCacheWriteTokenDetails(JsonNode details) {
+    if (details == null || details.isNull()) {
+      return;
+    }
+    if (!details.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "cache_write_tokens_details is not a JSON object");
+    }
+    if (!details.has("ttl_30m_tokens") || !details.has("ttl_12h_tokens")) {
+      return;
+    }
+    long ttl30m = parseUsage(details.get("ttl_30m_tokens"), "ttl_30m_tokens");
+    long ttl12h = parseUsage(details.get("ttl_12h_tokens"), "ttl_12h_tokens");
+    long total;
+    try {
+      total = Math.addExact(ttl30m, ttl12h);
+    } catch (ArithmeticException overflow) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "provider usage values overflow");
+    }
+    if (total != cacheWriteTokens) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "cache write TTL breakdown does not match total");
+    }
+    cacheWriteByTtl = Map.of(1800L, ttl30m, 43200L, ttl12h);
   }
 
   private void applyOutputTokenDetails(JsonNode details) {
@@ -140,7 +170,7 @@ final class OpenAiResponsesStreamUsage {
           rawOutputTokens,
           cachedTokens,
           cacheWriteTokens,
-          Map.of(),
+          cacheWriteByTtl,
           reasoningTokens,
           providerTotalTokens);
     } catch (IllegalArgumentException invalidUsage) {

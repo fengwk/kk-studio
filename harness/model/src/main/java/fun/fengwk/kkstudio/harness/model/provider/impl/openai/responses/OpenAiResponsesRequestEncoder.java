@@ -361,14 +361,11 @@ public final class OpenAiResponsesRequestEncoder {
     return OpenAiResponsesStrictSchema.normalize((ObjectNode) schemaNode);
   }
 
-  /**
-   * 将 runtime 冻结的缓存控制映射为本协议 wire 字段：{@code retention = NONE} 不下发任何 cache hint；否则以会话 UUID 原样作为
-   * {@code prompt_cache_key}，并把留存档位映射为 {@code prompt_cache_retention}。
-   */
+  /** 将 runtime 冻结的缓存控制映射到 wire：SHORT 发 key、不声明旧 retention；LONG 保留 24h 字段，NONE 不发缓存提示。 */
   private static void applyCacheControl(ObjectNode root, ProviderCacheControl cacheControl) {
     switch (cacheControl.retention()) {
       case NONE -> {}
-      case SHORT -> applyPromptCache(root, cacheControl.key(), "in_memory");
+      case SHORT -> root.put("prompt_cache_key", cacheControl.key());
       case LONG -> applyPromptCache(root, cacheControl.key(), "24h");
     }
   }

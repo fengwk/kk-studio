@@ -248,6 +248,38 @@ class OpenAiChatRequestEncoderTest {
 
     JsonNode root = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
     assertEquals(100, root.path("max_tokens").asInt(0));
+    assertFalse(root.has("max_completion_tokens"));
+  }
+
+  /** 只有官方端点上的已知 o-series 才使用 max_completion_tokens。 */
+  @Test
+  void outputBudgetUsesOfficialOSeriesFieldOnly() throws Exception {
+    ModelDescriptor o3 =
+        new ModelDescriptor("openai", "o3", "o3", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest request =
+        new ProviderRequest(
+            o3,
+            defaultVariant,
+            100,
+            "system",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode official = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
+    assertEquals(100, official.path("max_completion_tokens").asInt(0));
+    assertFalse(official.has("max_tokens"));
+
+    ProviderDescriptor custom =
+        new ProviderDescriptor(
+            "proxy",
+            ProviderType.OPENAI,
+            "https://proxy.example/v1",
+            descriptor.modelCallTimeoutPolicy());
+    JsonNode compatible = MAPPER.readTree(encoder.encode(request, custom).bodyUtf8Bytes());
+    assertEquals(100, compatible.path("max_tokens").asInt(0));
+    assertFalse(compatible.has("max_completion_tokens"));
   }
 
   @Test
@@ -432,7 +464,7 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
-  @DisplayName("Prompt Cache 留存档位映射：NONE 不发，SHORT/LONG 发 key + retention")
+  @DisplayName("Prompt Cache 映射：SHORT 官方端点仅发 key，LONG 保留 24h")
   void testPromptCacheRetentionMapping() throws Exception {
     ProviderMessage userMsg =
         new ProviderMessage(
@@ -446,19 +478,29 @@ class OpenAiChatRequestEncoderTest {
     assertFalse(rootNone.has("prompt_cache_retention"));
     assertFalse(rootNone.has("prompt_cache_options"));
 
-    // 2. SHORT: key 直接使用运行时会话 key，retention=in_memory
+    // 2. SHORT: 官方端点只发送运行时会话 key，不发送旧 retention
     ProviderCacheControl cacheControlShort =
         ProviderCacheControl.session(PromptCacheRetention.SHORT, "my-key-short");
     ProviderRequest reqShort =
         cacheRequest("Test system instruction.", List.of(userMsg), cacheControlShort);
     JsonNode rootShort = MAPPER.readTree(encoder.encode(reqShort, descriptor).bodyUtf8Bytes());
     assertEquals("my-key-short", rootShort.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", rootShort.path("prompt_cache_retention").asString(""));
+    assertFalse(rootShort.has("prompt_cache_retention"));
     assertFalse(rootShort.has("prompt_cache_options"));
+    ProviderDescriptor customDescriptor =
+        new ProviderDescriptor(
+            "proxy",
+            ProviderType.OPENAI,
+            "https://api.openai.com.attacker.example/v1",
+            descriptor.modelCallTimeoutPolicy());
+    JsonNode customShort =
+        MAPPER.readTree(encoder.encode(reqShort, customDescriptor).bodyUtf8Bytes());
+    assertFalse(customShort.has("prompt_cache_key"));
+    assertFalse(customShort.has("prompt_cache_retention"));
     // 不再改写 content 形态或注入 breakpoint
     assertEquals("User prompt", rootShort.path("messages").get(1).path("content").asString(""));
 
-    // 3. LONG: retention=24h
+    // 3. LONG: 保留当前 24h 字段
     ProviderCacheControl cacheControlLong =
         ProviderCacheControl.session(PromptCacheRetention.LONG, "my-key-long");
     ProviderRequest reqLong =
@@ -687,7 +729,7 @@ class OpenAiChatRequestEncoderTest {
     JsonNode rootBreak =
         MAPPER.readTree(encoder.encode(reqLastToolBreak, descriptor).bodyUtf8Bytes());
     assertEquals("session-key", rootBreak.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", rootBreak.path("prompt_cache_retention").asString(""));
+    assertFalse(rootBreak.has("prompt_cache_retention"));
     ArrayNode messages = (ArrayNode) rootBreak.path("messages");
     // 0 号是合成的系统指令消息，user 消息紧随其后
     JsonNode userNode = messages.get(1);
