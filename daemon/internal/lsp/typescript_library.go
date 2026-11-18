@@ -21,7 +21,8 @@ import (
 const (
 	typescriptLanguageServerVersion = "4.3.4"
 	typescriptVersion               = "5.8.3"
-	typescriptProfileID             = "typescript-language-server-4.3.4_typescript-5.8.3"
+	TypeScriptProfileID             = "typescript-language-server-4.3.4_typescript-5.8.3"
+	typescriptProfileID             = TypeScriptProfileID
 )
 
 //go:embed typescript/package.json
@@ -75,10 +76,16 @@ func (l TypeScriptLibrary) Install(ctx context.Context) (installed string, retEr
 	}()
 
 	target := filepath.Join(root, typescriptProfileID)
-	if err := validateTypeScriptInstall(target); err == nil {
+	if info, err := os.Lstat(target); err == nil {
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return "", errors.New("installed TypeScript LSP profile is not a private directory")
+		}
+		if err := validateTypeScriptInstall(target); err != nil {
+			return "", fmt.Errorf("installed TypeScript LSP profile is invalid: %w", err)
+		}
 		return target, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
-		return "", err
+		return "", errors.New("installed TypeScript LSP profile cannot be inspected")
 	}
 	stage, err := os.MkdirTemp(root, ".typescript-staging-")
 	if err != nil {
@@ -96,13 +103,28 @@ func (l TypeScriptLibrary) Install(ctx context.Context) (installed string, retEr
 		return "", errors.New("TypeScript LSP package lock cannot be staged")
 	}
 	cacheDir := filepath.Join(stage, ".npm-cache")
-	cmd := exec.CommandContext(ctx, l.NPM, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--no-progress", "--cache="+cacheDir, "--logs-max=0")
+	npmHome := filepath.Join(stage, ".npm-home")
+	npmConfig := filepath.Join(stage, ".npmrc")
+	if err := os.Mkdir(npmHome, 0700); err != nil {
+		return "", errors.New("temporary TypeScript LSP npm home cannot be created")
+	}
+	if err := os.WriteFile(npmConfig, nil, 0600); err != nil {
+		return "", errors.New("temporary TypeScript LSP npm configuration cannot be created")
+	}
+	cmd := exec.CommandContext(ctx, l.NPM, "ci", "--ignore-scripts", "--no-audit", "--no-fund", "--no-progress", "--cache="+cacheDir, "--userconfig="+npmConfig, "--logs-max=0")
 	cmd.Dir = stage
+	cmd.Env = isolatedNPMEnvironment(stage)
 	if err := cmd.Run(); err != nil {
 		return "", errors.New("TypeScript LSP dependencies could not be installed from the pinned lockfile")
 	}
 	if err := os.RemoveAll(cacheDir); err != nil {
 		return "", errors.New("temporary TypeScript LSP npm cache could not be removed")
+	}
+	if err := os.Remove(npmConfig); err != nil {
+		return "", errors.New("temporary TypeScript LSP npm configuration could not be removed")
+	}
+	if err := os.RemoveAll(npmHome); err != nil {
+		return "", errors.New("temporary TypeScript LSP npm home could not be removed")
 	}
 	if err := validateTypeScriptInstall(stage); err != nil {
 		return "", fmt.Errorf("TypeScript LSP installation failed validation: %w", err)
@@ -127,6 +149,10 @@ func TypeScriptServerConfig(libraryDirectory string) (config.LSPServerConfig, er
 		return config.LSPServerConfig{}, errors.New("TypeScript LSP library directory cannot be resolved")
 	}
 	profileDir := filepath.Join(target, typescriptProfileID)
+	profileInfo, err := os.Lstat(profileDir)
+	if err != nil || !profileInfo.IsDir() || profileInfo.Mode()&os.ModeSymlink != 0 {
+		return config.LSPServerConfig{}, errors.New("installed TypeScript LSP profile is unavailable")
+	}
 	if err := validateTypeScriptInstall(profileDir); err != nil {
 		return config.LSPServerConfig{}, err
 	}
@@ -144,12 +170,32 @@ func TypeScriptServerConfig(libraryDirectory string) (config.LSPServerConfig, er
 	}, nil
 }
 
+func isolatedNPMEnvironment(stage string) []string {
+	var env []string
+	for _, item := range os.Environ() {
+		key, _, _ := strings.Cut(item, "=")
+		switch strings.ToUpper(key) {
+		case "HOME", "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "NPM_CONFIG_USERCONFIG":
+			continue
+		default:
+			env = append(env, item)
+		}
+	}
+	return append(env,
+		"HOME="+filepath.Join(stage, ".npm-home"),
+		"XDG_CONFIG_HOME="+filepath.Join(stage, ".npm-home", ".config"),
+		"XDG_CACHE_HOME="+filepath.Join(stage, ".npm-home", ".cache"),
+	)
+}
+
 func verifiedNodeExecutable() (string, error) {
 	node, err := exec.LookPath("node")
 	if err != nil {
 		return "", errors.New("TypeScript LSP requires Node.js 18 or later")
 	}
-	output, err := exec.Command(node, "--version").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	output, err := exec.CommandContext(ctx, node, "--version").Output()
 	if err != nil {
 		return "", errors.New("TypeScript LSP requires Node.js 18 or later")
 	}
@@ -167,6 +213,20 @@ func verifiedNodeExecutable() (string, error) {
 }
 
 func validateTypeScriptInstall(directory string) error {
+	for _, path := range []string{
+		filepath.Join(directory, "node_modules"),
+		filepath.Join(directory, "node_modules", "typescript-language-server"),
+		filepath.Join(directory, "node_modules", "typescript-language-server", "lib"),
+		filepath.Join(directory, "node_modules", "typescript"),
+	} {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return err
+		}
+		if !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
+			return errors.New("installed TypeScript LSP package directory is invalid")
+		}
+	}
 	versions := []struct {
 		path, version string
 	}{
@@ -174,6 +234,13 @@ func validateTypeScriptInstall(directory string) error {
 		{filepath.Join(directory, "node_modules", "typescript", "package.json"), typescriptVersion},
 	}
 	for _, item := range versions {
+		info, err := os.Lstat(item.path)
+		if err != nil {
+			return err
+		}
+		if !info.Mode().IsRegular() {
+			return errors.New("installed TypeScript LSP package metadata is not a regular file")
+		}
 		data, err := os.ReadFile(item.path)
 		if err != nil {
 			return err
@@ -194,7 +261,7 @@ func validateTypeScriptInstall(directory string) error {
 		return errors.New("installed TypeScript LSP command is not executable")
 	}
 	cli := filepath.Join(directory, "node_modules", "typescript-language-server", "lib", "cli.mjs")
-	info, err = os.Stat(cli)
+	info, err = os.Lstat(cli)
 	if err != nil || !info.Mode().IsRegular() {
 		return errors.New("installed TypeScript LSP entrypoint is unavailable")
 	}

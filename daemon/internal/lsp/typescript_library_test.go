@@ -2,6 +2,7 @@ package lsp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/native"
+	daemonruntime "github.com/fengwk/kk-studio/daemon/internal/runtime"
 )
 
 func fakeNPM(t *testing.T, fail bool) string {
@@ -265,6 +267,51 @@ func TestTypeScriptLibrary_RejectsIncompleteAndCorruptInstalledProfiles(t *testi
 	}
 }
 
+// An existing but incomplete target is corruption, not permission to run npm and publish over it.
+func TestTypeScriptLibrary_DoesNotReinstallOverIncompleteTarget(t *testing.T) {
+	requireLinuxTSProfile(t)
+	root := t.TempDir()
+	target := filepath.Join(root, typescriptProfileID)
+	if err := os.MkdirAll(filepath.Join(target, "node_modules"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	counter := filepath.Join(t.TempDir(), "npm-invocations")
+	npm := filepath.Join(t.TempDir(), "npm")
+	if err := os.WriteFile(npm, []byte("#!/bin/sh\nprintf x >> '"+counter+"'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (TypeScriptLibrary{Directory: root, NPM: npm}).Install(context.Background()); err == nil {
+		t.Fatal("incomplete installed profile was accepted")
+	}
+	if _, err := os.Stat(counter); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("npm ran for incomplete installed profile: %v", err)
+	}
+	if info, err := os.Stat(target); err != nil || !info.IsDir() {
+		t.Fatalf("existing target was changed: info=%v err=%v", info, err)
+	}
+}
+
+// A profile-root symlink is neither installed material nor a safe target for execution.
+func TestTypeScriptLibrary_RejectsProfileSymlink(t *testing.T) {
+	requireLinuxTSProfile(t)
+	root := t.TempDir()
+	external := t.TempDir()
+	target := filepath.Join(root, typescriptProfileID)
+	if err := os.Symlink(external, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := (TypeScriptLibrary{Directory: root, NPM: fakeNPM(t, false)}).Install(context.Background()); err == nil {
+		t.Fatal("symlinked profile target was accepted")
+	}
+	if _, err := TypeScriptServerConfig(root); err == nil {
+		t.Fatal("symlinked profile target was configured")
+	}
+	info, err := os.Lstat(target)
+	if err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatalf("profile symlink was replaced: info=%v err=%v", info, err)
+	}
+}
+
 func fakeNPMIncomplete(t *testing.T, includeBinary, includeEntrypoint bool) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "npm")
@@ -361,8 +408,8 @@ func TestTypeScriptProfile_TwoWorkspaceSessionsStayIsolated(t *testing.T) {
 	}
 }
 
-// Opt-in integration verifies that the pinned packages install and the resulting command handshakes.
-func TestTypeScriptProfile_RealInstallAndLSPHandshake(t *testing.T) {
+// Opt-in integration installs pinned packages, queries a real symbol through Facade, and exits cleanly.
+func TestTypeScriptProfile_RealInstallQueryAndExit(t *testing.T) {
 	requireLinuxTSProfile(t)
 	if os.Getenv("KK_STUDIO_TEST_TS_LSP") != "1" {
 		t.Skip("set KK_STUDIO_TEST_TS_LSP=1 to install pinned npm packages and run the real server")
@@ -381,40 +428,58 @@ func TestTypeScriptProfile_RealInstallAndLSPHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := t.TempDir()
-	resolver := NewExecutableResolver(ResolverOptions{})
-	executable, ok := resolver.Resolve(profile.Command[0])
-	if !ok {
-		t.Fatal("installed language server executable did not resolve")
+	if err := os.WriteFile(filepath.Join(root, "tsconfig.json"), []byte(`{"compilerOptions":{}}`), 0600); err != nil {
+		t.Fatal(err)
 	}
-	server := ServerConfig{ID: profile.ID, Command: profile.Command, Extensions: profile.Extensions, RootMarkers: profile.RootMarkers, FirstMatchMarkers: profile.FirstMatchMarkers}
+	if err := os.WriteFile(filepath.Join(root, "index.ts"), []byte("function kkStudioVerifiedSymbol() { return 1; }\nkkStudioVerifiedSymbol();\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 	processes := &execHelperSupervisor{}
+	facade := NewFacade(processes, PoolOptions{})
 	closed := false
 	defer func() {
 		if !closed {
+			if err := facade.Close(); err != nil {
+				t.Errorf("LSP facade cleanup failed: %v", err)
+			}
 			if err := processes.Close(context.Background()); err != nil {
 				t.Errorf("server cleanup failed: %v", err)
 			}
 		}
 	}()
-	client, err := Launch(ctx, server, root, executable, processes)
+	prepared, err := facade.Prepare([]config.LSPServerConfig{profile})
 	if err != nil {
-		var bootstrap *LspBootstrapError
-		if errors.As(err, &bootstrap) {
-			t.Fatalf("server launch failed: %v; cause: %v", err, bootstrap.Cause)
-		}
 		t.Fatal(err)
 	}
-	if err := client.Initialize(ctx, 60*time.Second); err != nil {
+	if err := prepared.Publish(); err != nil {
 		t.Fatal(err)
 	}
-	if err := client.Stop(time.Second); err != nil {
+	confirmed := 0
+	call := daemonruntime.CapabilityCall{
+		InvocationID:  "real-typescript-definition-query",
+		Arguments:     json.RawMessage(`{"path":"` + filepath.ToSlash(filepath.Join(root, "index.ts")) + `","line":2,"character":5}`),
+		TimeoutMillis: 60000,
+	}
+	result, err := facade.Capabilities()["lsp.goto-definition"](ctx, call, daemonruntime.CapabilityContext{ConfirmExecutionExit: func() { confirmed++ }})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := processes.processes[0].Wait(ctx); err != nil {
+	if result.Error || len(result.Contents) != 1 || !strings.Contains(result.Contents[0].Text, "index.ts:1:") {
+		t.Fatalf("real TypeScript definition query result = %#v", result)
+	}
+	if confirmed != 1 {
+		t.Fatalf("execution exit confirmations = %d, want 1", confirmed)
+	}
+	if err := facade.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := processes.Close(ctx); err != nil {
 		t.Fatal(err)
+	}
+	for _, process := range processes.processes {
+		if _, err := process.Wait(ctx); err != nil {
+			t.Fatal(err)
+		}
 	}
 	closed = true
 }
