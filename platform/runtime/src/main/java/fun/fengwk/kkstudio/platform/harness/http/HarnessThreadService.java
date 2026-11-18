@@ -6,6 +6,7 @@ import org.springframework.stereotype.Service;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.api.RenameThreadCommand;
 import fun.fengwk.kkstudio.harness.api.StopResult;
+import fun.fengwk.kkstudio.harness.api.history.Entry;
 import fun.fengwk.kkstudio.harness.api.thread.CompactThreadCommand;
 import fun.fengwk.kkstudio.harness.api.thread.SetThreadYoloCommand;
 import fun.fengwk.kkstudio.harness.api.thread.StopCommand;
@@ -20,6 +21,9 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessUsageCostDTO;
 import fun.fengwk.kkstudio.platform.harness.thread.query.EnvironmentWaitProjectionService;
 import fun.fengwk.kkstudio.platform.harness.thread.query.UsageCostProjectionService;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -43,6 +47,33 @@ public class HarnessThreadService {
             ? runtime.getThreadSnapshot(threadId)
             : runtime.getThreadSnapshot(threadId, afterEntryId);
     return snapshotResponse(snapshot);
+  }
+
+  /**
+   * 同一读取事务内按输入顺序投影多份快照；结果与游标列表等长，每份仅 Entry 切片不同。
+   *
+   * <p>游标列表必须非 null，但允许其中元素为 null：null 返回完整历史，祖先游标返回其后增量，head 游标返回空增量，未知或非祖先游标回退为完整历史。空列表返回空列表。
+   * 费用与环境等待投影在读取事务外执行，不构成该事务快照一致性的一部分。
+   */
+  public List<HarnessThreadSnapshotDTO> getSnapshots(UUID threadId, List<UUID> afterEntryIds) {
+    List<ThreadSnapshot> snapshots = runtime.getThreadSnapshots(threadId, afterEntryIds);
+    if (snapshots.isEmpty()) {
+      return List.of();
+    }
+    Map<UUID, Entry> entries = new LinkedHashMap<>();
+    for (ThreadSnapshot snapshot : snapshots) {
+      for (var entry : snapshot.entrySlice().entries()) {
+        entries.putIfAbsent(entry.id(), entry);
+      }
+    }
+    Map<UUID, HarnessUsageCostDTO> usageCosts =
+        usageCostProjectionService.project(new ArrayList<>(entries.values()));
+    List<HarnessThreadSnapshotDTO> responses = new ArrayList<>(snapshots.size());
+    for (ThreadSnapshot snapshot : snapshots) {
+      responses.add(HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, usageCosts));
+    }
+    environmentWaitProjectionService.project(responses);
+    return List.copyOf(responses);
   }
 
   /** 显式放弃一个执行代次；与读取快照使用相同的投影语义。 */
@@ -85,7 +116,7 @@ public class HarnessThreadService {
     Map<UUID, HarnessUsageCostDTO> usageCosts =
         usageCostProjectionService.project(snapshot.entrySlice().entries());
     HarnessThreadSnapshotDTO dto = HarnessRuntimeResponseMapper.toSnapshotDto(snapshot, usageCosts);
-    environmentWaitProjectionService.project(dto);
+    environmentWaitProjectionService.project(List.of(dto));
     return dto;
   }
 }
