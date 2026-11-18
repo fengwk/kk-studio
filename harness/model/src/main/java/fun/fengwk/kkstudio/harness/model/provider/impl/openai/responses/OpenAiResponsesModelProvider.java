@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.limits.RequestLimitsPresets;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.PreparedProviderRequest;
@@ -81,6 +82,11 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
               .header("Accept", "text/event-stream");
       if (apiKey != null && !apiKey.isBlank()) {
         requestBuilder.header(AUTHORIZATION_HEADER, "Bearer " + apiKey);
+      }
+      if (request.cacheControl().retention() == PromptCacheRetention.SHORT) {
+        requestBuilder
+            .header("session-id", request.cacheControl().key())
+            .header("x-client-request-id", request.cacheControl().key());
       }
       httpRequest = requestBuilder.build();
     } catch (IllegalArgumentException ex) {

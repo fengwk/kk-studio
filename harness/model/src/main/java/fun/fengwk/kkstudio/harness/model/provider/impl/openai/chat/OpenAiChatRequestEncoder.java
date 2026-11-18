@@ -85,14 +85,19 @@ final class OpenAiChatRequestEncoder {
     applyStreamOptions(root);
 
     applyReasoningParameters(root, request.model(), request.variant());
-    // 输出预算只来自 Model 级 limit.output（普通请求再按剩余上下文收敛），不来自 variant。
-    root.put("max_tokens", request.outputTokens());
+    // 输出预算只来自 Model 级 limit.output；官方 o-series 要求使用 max_completion_tokens。
+    if (OpenAiChatOfficialCapabilities.isOfficialEndpoint(descriptor)
+        && OpenAiChatOfficialCapabilities.usesMaxCompletionTokens(request.model().modelId())) {
+      root.put("max_completion_tokens", request.outputTokens());
+    } else {
+      root.put("max_tokens", request.outputTokens());
+    }
 
     // native 只能声明空 tools；运行时 function tools 构成最终数组
     mergeTools(root, request.tools());
 
     // 应用 Prompt Cache 策略：key 直接使用运行时提供的会话 key
-    applyPromptCache(root, request.cacheControl());
+    applyPromptCache(root, request.cacheControl(), descriptor);
 
     root.set("messages", encodeMessages(request, descriptor));
 
@@ -327,18 +332,18 @@ final class OpenAiChatRequestEncoder {
     return text.toString();
   }
 
-  /**
-   * 映射 {@link ProviderCacheControl} 到 wire cache 字段：key 直接作为 {@code prompt_cache_key}，retention
-   * 按档位映射为协议值。 {@code NONE} 不发送任何 cache hint。
-   */
-  private static void applyPromptCache(ObjectNode root, ProviderCacheControl cacheControl) {
+  /** 将 runtime 缓存意图映射到协议字段：SHORT 官方主机仅发 key，NONE 无提示，LONG 保留 24h。 */
+  private static void applyPromptCache(
+      ObjectNode root, ProviderCacheControl cacheControl, ProviderDescriptor descriptor) {
     if (cacheControl.retention() == PromptCacheRetention.NONE) {
       return;
     }
+    if (cacheControl.retention() == PromptCacheRetention.SHORT
+        && !OpenAiChatOfficialCapabilities.isOfficialEndpoint(descriptor)) {
+      return;
+    }
     root.put("prompt_cache_key", cacheControl.key());
-    if (cacheControl.retention() == PromptCacheRetention.SHORT) {
-      root.put("prompt_cache_retention", "in_memory");
-    } else if (cacheControl.retention() == PromptCacheRetention.LONG) {
+    if (cacheControl.retention() == PromptCacheRetention.LONG) {
       root.put("prompt_cache_retention", "24h");
     }
   }

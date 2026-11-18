@@ -358,7 +358,7 @@ class OpenAiResponsesWireTest {
     assertEquals("Test system instruction.", root.path("instructions").asString(""));
     assertEquals("user", root.get("input").get(0).path("role").asString(""));
     assertEquals(cacheControl.key(), root.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", root.path("prompt_cache_retention").asString(""));
+    assertFalse(root.has("prompt_cache_retention"));
     assertEquals("medium", root.path("reasoning").path("effort").asString(""));
 
     JsonNode parameters = root.get("tools").get(0).path("parameters");
