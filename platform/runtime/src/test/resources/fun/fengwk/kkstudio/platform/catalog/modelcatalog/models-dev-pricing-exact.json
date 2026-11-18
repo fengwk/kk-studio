@@ -1,0 +1,87 @@
+{
+  "fixture": {
+    "id": "fixture",
+    "models": {
+      "exact-ranges-and-factors": {
+        "cost": {
+          "text": {
+            "input": {
+              "price": 2,
+              "cache": { "read": 0.25, "write": 0.5 },
+              "overrides": [
+                { "when": { "context": { "gt": 100 } }, "price": 4 }
+              ]
+            },
+            "output": {
+              "price": 5,
+              "overrides": [
+                { "when": { "context": { "gte": 101 } }, "price": 10 }
+              ]
+            }
+          },
+          "multipliers": [
+            {
+              "when": { "service_tier": { "in": ["priority", "flex"] } },
+              "factor": {
+                "text": {
+                  "input": { "price": 2, "cache": { "read": 3, "write": 4 } },
+                  "output": { "price": 5, "reasoning": 6 }
+                }
+              }
+            },
+            {
+              "when": {
+                "utc_days": { "in": ["mon", "wed"] },
+                "utc_hours": { "gte": "01:00", "lt": "03:00" }
+              },
+              "factor": 0.333333333333333333
+            }
+          ]
+        }
+      },
+      "unrepresentable-cache-override": {
+        "cost": {
+          "text": {
+            "input": {
+              "price": 2,
+              "cache": { "read": 0.25 },
+              "overrides": [
+                {
+                  "when": { "context": { "gt": 100 } },
+                  "price": 4,
+                  "cache": { "read": 0.5 }
+                }
+              ]
+            },
+            "output": { "price": 5 }
+          }
+        }
+      },
+      "date-rate-and-tier-changes": {
+        "cost": {
+          "text": { "input": { "price": 2 }, "output": { "price": 5 } },
+          "multipliers": [
+            {
+              "when": { "date": { "gte": "2027-01-01" } },
+              "factor": { "text": { "input": 1.25, "output": 1.5 } }
+            },
+            {
+              "when": {
+                "date": { "gte": "2027-02-01" },
+                "service_tier": { "equals": "priority" }
+              },
+              "factor": 2
+            },
+            {
+              "when": {
+                "date": { "gte": "2027-03-01" },
+                "service_tier": { "equals": "priority" }
+              },
+              "factor": 3
+            }
+          ]
+        }
+      }
+    }
+  }
+}
