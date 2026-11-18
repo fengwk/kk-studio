@@ -74,8 +74,8 @@
   --accent-glow: color-mix(in srgb, var(--palette-green-400) 20%, transparent);
   --accent-border: var(--palette-moss-700);
   --accent-deep: var(--palette-green-900);
-  --focus: var(--accent);
-  --focus-ring: color-mix(in srgb, var(--palette-green-400) 18%, transparent);
+  --focus: var(--palette-ink-50);
+  --focus-ring: color-mix(in srgb, var(--palette-ink-50) 24%, transparent);
 
   /* Status */
   --success: var(--palette-green-400);
@@ -143,10 +143,22 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* Keyboard-first: every focusable element gets a visible ring unless a component supplies its own. */
+/* Keyboard-first: focus-visible rings are enabled by the active input modality. */
 :where(a, button, input, select, textarea, summary, [tabindex]):focus-visible {
   outline: 2px solid var(--focus);
   outline-offset: 2px;
+}
+
+:root[data-focus-modality='pointer'] :focus-visible {
+  outline: none;
+  box-shadow: none;
+}
+
+:root[data-focus-modality='pointer'] .ui-checkbox-input:focus-visible + .ui-checkbox-box,
+:root[data-focus-modality='pointer'] .searchbox:has(.ui-search-input:focus-visible),
+:root[data-focus-modality='pointer'] .ui-tag-input:has(.ui-tag-input-field:focus-visible) {
+  outline: none;
+  box-shadow: none;
 }
 
 * {
@@ -523,8 +535,14 @@ div.is-error {
 .form-group input:not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field):focus,
 .form-group select:focus,
 .form-group textarea:not(.ui-textarea):focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  border-color: var(--border-hover);
+}
+
+.form-group input:not(.ui-text-input):not(.number-input-field):not(.ui-search-input):not(.ui-tag-input-field):focus-visible,
+.form-group select:focus-visible,
+.form-group textarea:not(.ui-textarea):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .ghost-inline-btn {

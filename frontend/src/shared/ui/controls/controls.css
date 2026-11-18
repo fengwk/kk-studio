@@ -69,7 +69,12 @@
 }
 
 .searchbox:focus-within {
-  border-color: var(--accent-border);
+  border-color: var(--border-hover);
+}
+
+.searchbox:has(.ui-search-input:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .searchbox svg {
@@ -158,7 +163,7 @@
 
 .ui-select-trigger:focus-visible {
   outline: none;
-  border-color: var(--accent);
+  border-color: var(--border-hover);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
@@ -299,8 +304,16 @@
 }
 
 .number-input-field:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  border-color: var(--border-hover);
+}
+
+.number-input-field:focus-visible,
+.ui-text-input:focus-visible,
+.ui-textarea:focus-visible,
+.ui-search-input:focus-visible,
+.ui-tag-input-field:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .number-input[data-invalid='true'] .number-input-field {
@@ -405,7 +418,7 @@
 }
 
 .ui-checkbox-input:focus-visible + .ui-checkbox-box {
-  border-color: var(--accent);
+  border-color: var(--border-hover);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
@@ -473,8 +486,7 @@
 
 .ui-text-input:focus,
 .ui-textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--focus-ring);
+  border-color: var(--border-hover);
 }
 
 .ui-text-input[data-invalid='true'],
@@ -571,8 +583,12 @@
 }
 
 .ui-tag-input:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 2px var(--focus-ring);
+  border-color: var(--border-hover);
+}
+
+.ui-tag-input:has(.ui-tag-input-field:focus-visible) {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .ui-tag-input[data-invalid='true'] {
@@ -684,7 +700,7 @@
   background: var(--accent);
 }
 
-/* 统一的 ? 帮助提示：图标按钮可键盘聚焦，展开文本保持在同一布局流中。 */
+/* 统一的 ? 帮助提示 */
 .model-selection-variant-label {
   display: block;
   margin-top: 8px;
@@ -702,8 +718,6 @@
 .ui-help-hint {
   display: inline-flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
   min-width: 0;
 }
 
@@ -733,9 +747,24 @@
   box-shadow: 0 0 0 2px var(--focus-ring);
 }
 
-.ui-help-hint-text {
-  min-width: 0;
+.ui-help-hint-panel {
+  position: fixed;
+  z-index: var(--z-popover);
+  max-height: calc(100vh - 16px);
+  overflow: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-overlay);
+  box-shadow: var(--shadow-md);
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
-  line-height: 1.4;
+  font-weight: 400;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.ui-help-hint-panel.is-interactive {
+  color: var(--fg);
+  cursor: auto;
 }

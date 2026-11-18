@@ -1,5 +1,6 @@
 import { HelpCircle } from 'lucide-react'
-import { useId, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import './controls.css'
 
 export interface HelpHintProps {
@@ -7,32 +8,175 @@ export interface HelpHintProps {
   label: string
   children: ReactNode
   className?: string
+  /** 内容含链接或操作时使用 popover 语义，避免把交互控件放进 tooltip。 */
+  interactive?: boolean
 }
 
-/**
- * 统一的 `?` 帮助提示：按钮可聚焦并用 Enter/Space 展开，说明文本通过
- * aria-controls/aria-describedby 关联，键盘与读屏用户均可获取。
- */
-export function HelpHint({ label, children, className }: HelpHintProps) {
+/** 聚焦或悬停时展示简短说明；交互内容以 popover 语义呈现。 */
+export function HelpHint({ label, children, className, interactive = false }: HelpHintProps) {
   const id = `help-hint-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const [open, setOpen] = useState(false)
+  const [position, setPosition] = useState<CSSProperties>({})
+  const rootRef = useRef<HTMLSpanElement>(null)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const panelRef = useRef<HTMLDivElement>(null)
+  const pointerTypeRef = useRef<string>('')
+  const closeTimerRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    if (!open) {
+      return
+    }
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target
+      if (
+        target instanceof Node &&
+        !rootRef.current?.contains(target) &&
+        !panelRef.current?.contains(target)
+      ) {
+        if (closeTimerRef.current !== null) {
+          window.clearTimeout(closeTimerRef.current)
+          closeTimerRef.current = null
+        }
+        setOpen(false)
+      }
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        if (closeTimerRef.current !== null) {
+          window.clearTimeout(closeTimerRef.current)
+          closeTimerRef.current = null
+        }
+        event.preventDefault()
+        triggerRef.current?.focus()
+        setOpen(false)
+      }
+    }
+    document.addEventListener('pointerdown', handlePointerDown)
+    document.addEventListener('keydown', handleKeyDown)
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown)
+      document.removeEventListener('keydown', handleKeyDown)
+      if (closeTimerRef.current !== null) {
+        window.clearTimeout(closeTimerRef.current)
+        closeTimerRef.current = null
+      }
+    }
+  }, [open])
+
+  useLayoutEffect(() => {
+    if (!open || !triggerRef.current || !panelRef.current) {
+      return
+    }
+    const updatePosition = () => {
+      const anchor = triggerRef.current?.getBoundingClientRect()
+      const panel = panelRef.current?.getBoundingClientRect()
+      if (!anchor || !panel) {
+        return
+      }
+      const margin = 8
+      const width = Math.min(320, window.innerWidth - margin * 2)
+      const left = Math.max(margin, Math.min(anchor.left, window.innerWidth - width - margin))
+      const below = window.innerHeight - anchor.bottom - margin
+      const top = below >= panel.height || below >= anchor.top ? anchor.bottom + margin : anchor.top - panel.height - margin
+      setPosition({ left, top: Math.max(margin, Math.min(top, window.innerHeight - panel.height - margin)), width })
+    }
+    updatePosition()
+    window.addEventListener('resize', updatePosition)
+    window.addEventListener('scroll', updatePosition, true)
+    return () => {
+      window.removeEventListener('resize', updatePosition)
+      window.removeEventListener('scroll', updatePosition, true)
+    }
+  }, [open])
+
+  const cancelPointerClose = () => {
+    if (closeTimerRef.current !== null) {
+      window.clearTimeout(closeTimerRef.current)
+      closeTimerRef.current = null
+    }
+  }
+
+  const closeOnPointerLeave = () => {
+    if (!rootRef.current?.contains(document.activeElement) && !panelRef.current?.contains(document.activeElement)) {
+      cancelPointerClose()
+      closeTimerRef.current = window.setTimeout(() => {
+        closeTimerRef.current = null
+        setOpen(false)
+      }, 120)
+    }
+  }
 
   return (
-    <span className={['ui-help-hint', className].filter(Boolean).join(' ')}>
-      <button
-        type="button"
-        className="ui-help-hint-trigger"
-        aria-label={label}
-        aria-expanded={open}
-        aria-controls={id}
-        aria-describedby={open ? id : undefined}
-        onClick={() => setOpen((value) => !value)}
+    <>
+      <span
+        ref={rootRef}
+        className={['ui-help-hint', className].filter(Boolean).join(' ')}
+        onMouseEnter={() => {
+          cancelPointerClose()
+          if (pointerTypeRef.current !== 'touch' && !window.matchMedia('(hover: none)').matches) {
+            setOpen(true)
+          }
+        }}
+        onMouseLeave={closeOnPointerLeave}
       >
-        <HelpCircle size={14} aria-hidden="true" />
-      </button>
-      <span id={id} className="ui-help-hint-text" role="note" hidden={!open}>
-        {children}
+        <button
+          ref={triggerRef}
+          type="button"
+          className="ui-help-hint-trigger"
+          aria-label={label}
+          aria-expanded={open}
+          aria-controls={id}
+          aria-haspopup={interactive ? 'dialog' : undefined}
+          aria-describedby={open && !interactive ? id : undefined}
+          onPointerDown={(event) => {
+            pointerTypeRef.current = event.pointerType
+          }}
+          onFocus={() => {
+            if (pointerTypeRef.current !== 'touch') {
+              setOpen(true)
+            }
+          }}
+          onBlur={(event) => {
+            if (!rootRef.current?.contains(event.relatedTarget) && !panelRef.current?.contains(event.relatedTarget)) {
+              setOpen(false)
+            }
+          }}
+          onClick={(event) => {
+            if (pointerTypeRef.current === 'touch') {
+              setOpen((value) => !value)
+            } else {
+              setOpen(true)
+            }
+            pointerTypeRef.current = ''
+            if (event.detail === 0) {
+              setOpen(true)
+            }
+          }}
+        >
+          <HelpCircle size={14} aria-hidden="true" />
+        </button>
       </span>
-    </span>
+      {open
+        ? createPortal(
+            <div
+              ref={panelRef}
+              id={id}
+              className={`ui-help-hint-panel${interactive ? ' is-interactive' : ''}`}
+              role={interactive ? 'dialog' : 'tooltip'}
+              aria-label={interactive ? label : undefined}
+              style={position}
+              onMouseEnter={() => {
+                cancelPointerClose()
+                setOpen(true)
+              }}
+              onMouseLeave={closeOnPointerLeave}
+            >
+              {children}
+            </div>,
+            document.body,
+          )
+        : null}
+    </>
   )
 }
