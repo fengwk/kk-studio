@@ -40,8 +40,7 @@ import java.util.Set;
 /**
  * 断言完整请求体的逐字节输出。
  *
- * <p>编码器被重组为同包协作者时，JSON 字段写入顺序、判断顺序与错误抛出顺序都必须保持不变；逐字段断言无法发现顺序变化，因此这里锁定整段 UTF-8
- * 文本。期望值是在重构前的基准提交上用同一组输入运行编码器得到的输出。
+ * <p>逐字段断言无法发现顺序变化，因此这里锁定整段 UTF-8 文本；Gemini thinking wire contract 的有意变化同步更新对应期望值，其余请求字段保持稳定。
  */
 class GeminiRequestEncoderBodySnapshotTest {
 
@@ -193,7 +192,7 @@ class GeminiRequestEncoderBodySnapshotTest {
 
   private static final String EXPECTED_FULL_BODY =
       "{\"systemInstruction\":{\"parts\":[{\"text\":\"Test system instruction.\"}]},\"generationConfig\":{\"maxOutputTokens\":409"
-          + "6,\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingLevel\":\"high\"}},\"tools\":[{\"functionDeclarations\":[{\"name\":"
+          + "6,\"thinkingConfig\":{\"includeThoughts\":true,\"thinkingBudget\":24576}},\"tools\":[{\"functionDeclarations\":[{\"name\":"
           + "\"read_file\",\"description\":\"Read a file from disk\",\"parameters\":{\"type\":\"object\",\"properties\":{}}},{\"name\":\"wri"
           + "te_file\",\"description\":\"Write a file\",\"parameters\":{\"type\":\"object\",\"properties\":{}}}]}],\"contents\":[{\"role\":\""
           + "user\",\"parts\":[{\"text\":\"look\"},{\"inlineData\":{\"mimeType\":\"image/png\",\"data\":\"AQIDBA==\"}},{\"fileData\":{\"mimeTyp"

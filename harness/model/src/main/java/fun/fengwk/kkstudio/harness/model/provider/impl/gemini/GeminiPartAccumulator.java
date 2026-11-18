@@ -12,24 +12,14 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Set;
 
 /**
  * Gemini candidate parts 的原生边界状态机。
  *
- * <p>官方协议没有定义跨 chunk 的通用 Part 合并算法，因此只执行两类可证明安全的文本合并，其余 part 一律作为完整原生边界原样保留：
- *
- * <ul>
- *   <li>同一 slot 的累计快照替换：上游再次发送同一 slot part 的完整累积形态，且形状为超集、双方都无签名、文本严格扩展；
- *   <li>朴素 text/thought part 的增量累积：双方都只含 text/thought，累积不会丢失任何字段语义。
- * </ul>
- *
- * <p>带 thoughtSignature 的 part（包括空文本签名 part）绝不参与字段级合并，签名绝不跨 part 迁移。未知字段既不递归合并也不拼接，未知 part 绝不静默丢弃。
+ * <p>每个 SSE part 按官方流式增量语义追加，不通过文本相等或前缀关系猜测快照。相邻的朴素 text/thought 单 part 事件累积到同一块；签名、工具和 opaque part
+ * 保持原生边界。
  */
 final class GeminiPartAccumulator {
-
-  /** 只含 text/thought 的朴素 part：仅这种形状允许增量文本累积。 */
-  private static final Set<String> PLAIN_PART_FIELDS = Set.of("text", "thought");
 
   private final ProviderStreamBridge bridge;
 
@@ -57,41 +47,30 @@ final class GeminiPartAccumulator {
     validateParts(partsArray);
 
     for (int i = 0; i < partsArray.size(); i++) {
-      processPart(i, partsArray.get(i), partsArray.size() == 1);
+      processPart(partsArray.get(i), partsArray.size() == 1);
     }
   }
 
   /**
    * 累积单个原生 part。
    *
-   * <p>官方协议没有定义跨 chunk 的通用 Part 合并算法，因此这里只承认两类可证明安全的文本合并：同一 slot 上「形状为超集 + 文本严格扩展 +
-   * 双方均无签名」的累计快照替换，以及双方都仅含 text/thought 的朴素增量累积。其余 part（functionCall、inlineData / toolResponse 等
-   * union 成员，以及任何带未知字段的 part）一律作为完整原生边界原样保留，绝不递归、拼接或猜测未知字段，也绝不跨 part 迁移或改写 thoughtSignature。
+   * <p>每个 SSE part 都按增量事件处理，不根据相等、前缀或字段形状猜测累计快照。只有相邻的朴素 text/thought 单 part 事件会累积到同一文本块；带签名、工具和
+   * opaque part 保持完整原生边界。
    */
-  private void processPart(int index, JsonNode partNode, boolean singlePartFrame) {
+  private void processPart(JsonNode partNode, boolean singlePartFrame) {
     boolean functionCallPart = partNode.has("functionCall");
     String signature = readThoughtSignature(partNode);
     String text = readPartText(partNode);
     boolean thought = isThoughtPart(partNode);
     ObjectNode normalizedPart = normalizedRawPart(partNode);
-    TrackedPart slot = index < trackedParts.size() ? trackedParts.get(index) : null;
 
-    // 1) 与同一 slot 已记录的原生 part 完全相等：同一快照重复发送的可证明证据，无需重复保留也不重复计入文本。
-    if (slot != null && slot.rawPart.equals(normalizedPart)) {
-      return;
-    }
-
-    // 2) 同一 slot 的累计快照替换。
-    if (adoptCumulativeSnapshot(slot, normalizedPart, text, thought, functionCallPart, signature)) {
-      return;
-    }
-
-    // 3) 朴素 text/thought part 的增量累积。
+    // Each SSE part is an event: never infer cumulative snapshots from equal or prefix-related
+    // contents.
     if (appendPlainDelta(partNode, text, thought, functionCallPart, signature, singlePartFrame)) {
       return;
     }
 
-    // 4) 完整原生 part 边界：原样保留，未知字段与未知 union 成员绝不合并、绝不丢弃。
+    // Keep each native boundary intact, including signatures, tools, and opaque parts.
     TrackedPart trackedPart = new TrackedPart(normalizedPart, signature, thought);
     trackedParts.add(trackedPart);
     if (text != null) {
@@ -102,27 +81,6 @@ final class GeminiPartAccumulator {
       captureFunctionCall(trackedPart, partNode.get("functionCall"));
       emitFunctionCall(trackedPart);
     }
-  }
-
-  /** 上游把同一 part 的完整累积形态再发一次时整体替换为上游事实；返回是否已消费该 part。 */
-  private boolean adoptCumulativeSnapshot(
-      TrackedPart slot,
-      ObjectNode normalizedPart,
-      String text,
-      boolean thought,
-      boolean functionCallPart,
-      String signature) {
-    if (text == null
-        || functionCallPart
-        || signature != null
-        || slot == null
-        || !slot.canAdoptCumulativeText(normalizedPart, text, thought)) {
-      return false;
-    }
-    String delta = text.substring(slot.text.length());
-    slot.replaceWith(normalizedPart, text);
-    emitTextDelta(delta, thought);
-    return true;
   }
 
   /** 双方都只含 text/thought 的朴素增量累积；返回是否已消费该 part。 */
@@ -147,15 +105,8 @@ final class GeminiPartAccumulator {
         || lastPart.thought != thought) {
       return false;
     }
-    String accumulated = lastPart.text.toString();
-    String delta =
-        accumulated.isEmpty() || !text.startsWith(accumulated)
-            ? text
-            : text.substring(accumulated.length());
-    if (!delta.isEmpty()) {
-      lastPart.text.append(delta);
-      emitTextDelta(delta, thought);
-    }
+    lastPart.text.append(text);
+    emitTextDelta(text, thought);
     return true;
   }
 
@@ -184,20 +135,10 @@ final class GeminiPartAccumulator {
     return trackedParts.isEmpty() ? null : trackedParts.get(trackedParts.size() - 1);
   }
 
-  /** 判断 part 的字段集合是否只含 text/thought，即可安全增量累积的朴素形状。 */
+  /** 只有不含未知字段或其它 union 成员的 text/thought part 才能安全累积到纯文本块。 */
   static boolean isPlainPartShape(JsonNode partNode) {
     for (String fieldName : partNode.propertyNames()) {
-      if (!PLAIN_PART_FIELDS.contains(fieldName)) {
-        return false;
-      }
-    }
-    return true;
-  }
-
-  /** 判断 candidate 是否声明了 base 的全部字段名：只有超集形状的替换才可能不丢字段。 */
-  static boolean carriesAllFieldNames(JsonNode candidate, JsonNode base) {
-    for (String fieldName : base.propertyNames()) {
-      if (!candidate.has(fieldName)) {
+      if (!fieldName.equals("text") && !fieldName.equals("thought")) {
         return false;
       }
     }

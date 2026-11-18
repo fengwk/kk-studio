@@ -108,35 +108,6 @@ class GeminiWireTest {
     assertEquals(15L, response.usage().providerTotalTokens());
   }
 
-  /** 验证快照重复 SSE fixture 解析去重，不双计。 */
-  @Test
-  void parsesSnapshotSseFixture() throws Exception {
-    String sse = loadFixture("stream-snapshot.sse");
-    List<ProviderStreamEvent> events = new ArrayList<>();
-    ProviderStreamHandler handler =
-        new ProviderStreamHandler() {
-          @Override
-          public void onEvent(ProviderStreamEvent event) {
-            events.add(event);
-          }
-
-          @Override
-          public void onError(ProviderException error) {}
-
-          @Override
-          public void onComplete(ProviderCompletion completion) {}
-        };
-
-    GeminiStreamAccumulator accumulator =
-        new GeminiStreamAccumulator(request(), descriptor(), new ProviderStreamBridge(handler));
-    feedSse(accumulator, sse);
-    ProviderCompletion completion = accumulator.finish();
-    ProviderResponse response = completion.response();
-
-    assertEquals(GenerationStopReason.COMPLETE, response.stopReason());
-    assertEquals("Hello world from Gemini!", response.text());
-  }
-
   /** 验证思考过程 SSE fixture 提取 thinking 与 thoughtSignature。 */
   @Test
   void parsesThinkingSseFixture() throws Exception {

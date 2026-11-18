@@ -44,29 +44,4 @@ final class TrackedPart {
   boolean isFunctionCall() {
     return rawPart.has("functionCall");
   }
-
-  /**
-   * 判断上游再次给出的同一 slot part 是否可证明为该 part 的完整累积形态。
-   *
-   * <p>成立条件：本地 part 无签名且非 functionCall 边界、双方 thought 语义一致、双方都声明 text、上游字段名是本地字段名的超集（替换不会静默丢字段），
-   * 且上游文本严格扩展本地累积文本。带签名的 part 绝不参与该替换，因此签名永远不会被跨 part 迁移或改写。
-   */
-  boolean canAdoptCumulativeText(
-      ObjectNode incomingPart, String incomingText, boolean incomingThought) {
-    if (signature != null || isFunctionCall() || !hasText || thought != incomingThought) {
-      return false;
-    }
-    if (!GeminiPartAccumulator.carriesAllFieldNames(incomingPart, rawPart)) {
-      return false;
-    }
-    return incomingText.startsWith(text.toString()) && incomingText.length() > text.length();
-  }
-
-  /** 以同一 slot 的上游完整累积形态整体替换本地 part：只做原样替换，绝不逐字段递归合并未知字段。 */
-  void replaceWith(ObjectNode incomingPart, String accumulatedText) {
-    this.rawPart = incomingPart;
-    this.plainShape = GeminiPartAccumulator.isPlainPartShape(this.rawPart);
-    this.text.setLength(0);
-    this.text.append(accumulatedText);
-  }
 }

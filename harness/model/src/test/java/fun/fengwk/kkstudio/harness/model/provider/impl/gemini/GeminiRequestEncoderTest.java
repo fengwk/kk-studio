@@ -88,13 +88,12 @@ class GeminiRequestEncoderTest {
   }
 
   private static ModelDescriptor model(boolean reasoning) {
+    return model("gemini-2.5-flash", reasoning);
+  }
+
+  private static ModelDescriptor model(String modelId, boolean reasoning) {
     return new ModelDescriptor(
-        "google-test",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        reasoning);
+        "google-test", modelId, modelId, Set.of(ModelInputModality.TEXT), true, reasoning);
   }
 
   /** 验证基本的用户文本消息能够正确编码为 Gemini contents wire 格式。 */
@@ -213,16 +212,14 @@ class GeminiRequestEncoderTest {
     assertFalse(gen.has("stopSequences"));
   }
 
-  /** 验证厂商定义的 reasoning effort 原样映射到 thinkingLevel，包括大写与混合大小写（不做大小写归一化）。 */
+  /** 验证 2.5 按官方思考预算映射，Gemini 3 按受支持的 thinking level 编码。 */
   @Test
-  void encodesProviderDefinedThinkingLevels() throws Exception {
-    for (String effort : List.of("low", "medium", "high", "max", "xhigh", "HIGH", "xHigh")) {
-      ModelVariant variant =
-          new ModelVariant("v-" + effort, effort, PromptCacheRetention.NONE, null);
+  void encodesThinkingUsingModelFamilyWireContract() throws Exception {
+    for (String effort : List.of("minimal", "low", "medium", "high")) {
       ProviderRequest request =
           new ProviderRequest(
               model(true),
-              variant,
+              new ModelVariant("v-" + effort, effort, PromptCacheRetention.NONE, null),
               1024,
               "Test system instruction.",
               List.of(
@@ -230,14 +227,71 @@ class GeminiRequestEncoderTest {
                       ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")))),
               List.of(),
               ProviderCacheControl.none());
-
-      GeminiEncodedRequest encoded = encoder.encode(request, descriptor());
-      JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
-
-      JsonNode thinkingConfig = json.path("generationConfig").path("thinkingConfig");
+      JsonNode thinkingConfig =
+          MAPPER
+              .readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes())
+              .path("generationConfig")
+              .path("thinkingConfig");
       assertTrue(thinkingConfig.path("includeThoughts").asBoolean(false));
-      assertEquals(effort, thinkingConfig.path("thinkingLevel").asString(""));
+      assertEquals(
+          switch (effort) {
+            case "minimal" -> 128;
+            case "low" -> 2048;
+            case "medium" -> 8192;
+            default -> 24576;
+          },
+          thinkingConfig.path("thinkingBudget").asInt());
+      assertFalse(thinkingConfig.has("thinkingLevel"));
     }
+
+    assertEquals(
+        32768,
+        encodedThinkingBudget("gemini-2.5-pro", "high"),
+        "Gemini 2.5 Pro uses its documented high budget");
+    assertEquals(
+        512,
+        encodedThinkingBudget("gemini-2.5-flash-lite", "minimal"),
+        "Gemini 2.5 Flash Lite uses its documented minimal budget");
+
+    ProviderRequest gemini3Request =
+        new ProviderRequest(
+            model("gemini-3-pro-preview", true),
+            new ModelVariant("high", "high", PromptCacheRetention.NONE, null),
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode gemini3Thinking =
+        MAPPER
+            .readTree(encoder.encode(gemini3Request, descriptor()).bodyUtf8Bytes())
+            .path("generationConfig")
+            .path("thinkingConfig");
+    assertTrue(gemini3Thinking.path("includeThoughts").asBoolean(false));
+    assertEquals("high", gemini3Thinking.path("thinkingLevel").asString());
+    assertFalse(gemini3Thinking.has("thinkingBudget"));
+  }
+
+  private int encodedThinkingBudget(String modelId, String effort) throws Exception {
+    ProviderRequest request =
+        new ProviderRequest(
+            model(modelId, true),
+            new ModelVariant("v1", effort, PromptCacheRetention.NONE, null),
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")))),
+            List.of(),
+            ProviderCacheControl.none());
+    return MAPPER
+        .readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes())
+        .path("generationConfig")
+        .path("thinkingConfig")
+        .path("thinkingBudget")
+        .asInt();
   }
 
   /** 验证 off 显式关闭推理：includeThoughts=false 且 thinkingBudget=0，不发 thinkingLevel。 */
@@ -263,6 +317,40 @@ class GeminiRequestEncoderTest {
     assertFalse(thinkingConfig.path("includeThoughts").asBoolean(false));
     assertEquals(0, thinkingConfig.path("thinkingBudget").asInt(0));
     assertFalse(thinkingConfig.has("thinkingLevel"));
+  }
+
+  /** 验证 Gemini 3 与未识别模型不会被错误套用 2.5 的 off 或思考控制。 */
+  @Test
+  void rejectsUnsupportedThinkingOffAndUnknownModel() {
+    ProviderRequest gemini3Off =
+        new ProviderRequest(
+            model("gemini-3-flash-preview", true),
+            new ModelVariant("off", "off", PromptCacheRetention.NONE, null),
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException offError =
+        assertThrows(ProviderException.class, () -> encoder.encode(gemini3Off, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, offError.kind());
+
+    ProviderRequest unknown =
+        new ProviderRequest(
+            model("gemini-4-pro", true),
+            new ModelVariant("high", "high", PromptCacheRetention.NONE, null),
+            1024,
+            "Test system instruction.",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")))),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException unknownError =
+        assertThrows(ProviderException.class, () -> encoder.encode(unknown, descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, unknownError.kind());
   }
 
   /** 验证当模型不支持推理且无 reasoning effort 时，不生成 thinkingConfig。 */

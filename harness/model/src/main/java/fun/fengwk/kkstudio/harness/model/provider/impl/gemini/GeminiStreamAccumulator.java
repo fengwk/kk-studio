@@ -33,18 +33,9 @@ import java.util.Set;
 /**
  * Google AI Gemini streamGenerateContent SSE 流式事件状态机与响应累积器。
  *
- * <p>按原生 candidate 0 维护 ordered parts 状态机。官方协议没有定义跨 chunk 的通用 Part 合并算法，因此累积只执行两类可证明安全的文本合并， 其余
- * part 一律作为完整原生边界原样保留：
- *
- * <ul>
- *   <li>同一 slot 的累计快照替换：上游再次发送同一 slot part 的完整累积形态，且形状为超集、双方都无签名、文本严格扩展；
- *   <li>朴素 text/thought part 的增量累积：双方都只含 text/thought，累积不会丢失任何字段语义。
- * </ul>
- *
- * <p>带 thoughtSignature 的 part（包括空文本签名 part）绝不参与字段级合并，签名绝不跨 part 迁移，只有与同一 slot 已记录的保真化 part
- * 完全相等时才视为 可证明的重复；functionCall 与 inlineData / toolResponse 等未知 union 成员同样按完整边界保留。未知字段既不递归合并也不拼接，未知
- * Part 绝不静默丢弃；若某个 part 无法写入合法 replay（同一 data oneof 同时声明 text 与 functionCall），则显式不冻结 replay
- * 而不是交付损坏的原生回放。
+ * <p>按原生 candidate 0 维护有序 parts 状态机。文本 part 按 SSE 增量事件追加，不根据相等、前缀或字段形状猜测累计快照；签名、工具调用与 opaque union
+ * 成员保持完整原生边界和顺序，不迁移 thoughtSignature，也不递归合并未知字段。未知 Part 绝不静默丢弃；若某个 part 无法写入合法 replay（同一 data oneof
+ * 同时声明 text 与 functionCall），则显式不冻结 replay 而不是交付损坏的原生回放。
  */
 final class GeminiStreamAccumulator extends ProviderStreamState {
 
