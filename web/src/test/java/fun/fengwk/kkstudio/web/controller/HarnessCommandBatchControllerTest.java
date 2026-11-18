@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.web.StrictHttpJsonMapperTestSupport;
 import fun.fengwk.kkstudio.web.advice.ProblemAdvice;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -541,6 +542,7 @@ class HarnessCommandBatchControllerTest {
         List.of(),
         null,
         List.of(),
+        Map.of(),
         ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,

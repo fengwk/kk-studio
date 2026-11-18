@@ -51,36 +51,6 @@ public record ThreadSnapshot(
     List<ExecutionExitFact> unconfirmedExecutions,
     boolean hasIncompleteOwnerChildJoin) {
 
-  /** 用于不含子 Thread 导航关系的快照；权威运行时读取显式传入同事务查询到的 Join 投影。 */
-  public ThreadSnapshot(
-      ThreadState thread,
-      EntryCurrentState entryState,
-      EntrySlice entrySlice,
-      List<ThreadCommand> queuedCommands,
-      GenerationProjection generation,
-      List<ToolInvocation> toolSiblings,
-      ThreadLiveState liveState,
-      List<StoppedThreadReceipt> stopReceipts,
-      int incompleteChildJoins,
-      boolean unconsumedAppliedNotifications,
-      List<ExecutionExitFact> unconfirmedExecutions,
-      boolean hasIncompleteOwnerChildJoin) {
-    this(
-        thread,
-        entryState,
-        entrySlice,
-        queuedCommands,
-        generation,
-        toolSiblings,
-        Map.of(),
-        liveState,
-        stopReceipts,
-        incompleteChildJoins,
-        unconsumedAppliedNotifications,
-        unconfirmedExecutions,
-        hasIncompleteOwnerChildJoin);
-  }
-
   public ThreadSnapshot {
     thread = Objects.requireNonNull(thread, "thread");
     entryState = Objects.requireNonNull(entryState, "entryState");

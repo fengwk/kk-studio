@@ -103,7 +103,7 @@ class HarnessRuntimeJoinAcceptanceTest {
 
     Child firstChild = child(25, 26, baseline.threadId());
     Ticket firstTicket =
-        Ticket.task(
+        new Ticket(
             firstInvocationId,
             baseline.threadId(),
             baseline.assistantEntryId(),
@@ -112,12 +112,13 @@ class HarnessRuntimeJoinAcceptanceTest {
             3,
             3,
             2,
-            3);
+            3,
+            JoinDelivery.SETTLE_TOOL_RESULT);
     AcceptedCommands first =
         acceptAndJoin(runtime, firstChild, firstTicket, AcceptancePreflight.IDENTITY);
     Child secondChild = child(27, 28, baseline.threadId());
     Ticket secondTicket =
-        Ticket.task(
+        new Ticket(
             secondInvocationId,
             baseline.threadId(),
             baseline.assistantEntryId(),
@@ -126,7 +127,8 @@ class HarnessRuntimeJoinAcceptanceTest {
             3,
             3,
             2,
-            3);
+            3,
+            JoinDelivery.SETTLE_TOOL_RESULT);
     AcceptedCommands second =
         acceptAndJoin(runtime, secondChild, secondTicket, AcceptancePreflight.IDENTITY);
     store.transaction(
@@ -137,8 +139,12 @@ class HarnessRuntimeJoinAcceptanceTest {
           return null;
         });
 
-    assertFalse(runtime.findJoin(firstInvocationId).orElseThrow().matched());
-    assertFalse(runtime.findJoin(secondInvocationId).orElseThrow().matched());
+    ThreadJoin firstJoin = runtime.findJoin(firstInvocationId).orElseThrow();
+    ThreadJoin secondJoin = runtime.findJoin(secondInvocationId).orElseThrow();
+    assertFalse(firstJoin.matched());
+    assertFalse(secondJoin.matched());
+    assertEquals(baseline.threadId(), firstJoin.parentThreadId());
+    assertEquals(JoinDelivery.SETTLE_TOOL_RESULT, firstJoin.delivery());
     assertEquals(
         Map.of(firstInvocationId, first.thread().id(), secondInvocationId, second.thread().id()),
         runtime.getThreadSnapshot(baseline.threadId()).toolChildThreadIds());

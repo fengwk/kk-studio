@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
@@ -45,11 +46,13 @@ final class ThreadSnapshotReader {
     List<ToolInvocation> toolSiblings = toolSiblingsOf(locked.context());
     Map<UUID, UUID> toolChildThreadIds = new HashMap<>();
     for (ToolInvocation invocation : toolSiblings) {
-      if ("task".equals(invocation.call().toolName())) {
-        tx.joins()
-            .find(invocation.id())
-            .ifPresent(join -> toolChildThreadIds.put(join.invocationId(), join.childThreadId()));
-      }
+      tx.joins()
+          .find(invocation.id())
+          .filter(
+              join ->
+                  thread.id().equals(join.parentThreadId())
+                      && join.delivery() == JoinDelivery.SETTLE_TOOL_RESULT)
+          .ifPresent(join -> toolChildThreadIds.put(join.invocationId(), join.childThreadId()));
     }
     return new ThreadSnapshot(
         thread,

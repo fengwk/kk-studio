@@ -301,6 +301,7 @@ class BuiltinAgentDriverContractTest {
                 List.of(),
                 foreign,
                 List.of(),
+                Map.of(),
                 ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 0,

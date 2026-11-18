@@ -249,7 +249,6 @@ public final class HarnessRuntimeResponseMapper {
     ToolInvocationDTO dto = new ToolInvocationDTO();
     dto.setId(invocation.id().toString());
     dto.setThreadId(invocation.threadId().toString());
-    dto.setChildThreadId(null);
     dto.setTurnStartEntryId(invocation.turnStartEntryId().toString());
     dto.setAssistantEntryId(invocation.assistantEntryId().toString());
     dto.setCallIndex(invocation.callIndex());
