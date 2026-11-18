@@ -649,17 +649,17 @@ class AnthropicModelProviderIntegrationTest {
             cache));
     assertEquals(3, received.size());
     assertEquals(3, markerCount(received.get(0)));
-    assertEquals(4, markerCount(received.get(1)));
-    assertEquals(4, markerCount(received.get(2)));
+    assertEquals(3, markerCount(received.get(1)));
+    assertEquals(3, markerCount(received.get(2)));
     JsonNode roundTwo = received.get(1).path("messages");
-    assertTrue(roundTwo.get(0).path("content").get(0).has("cache_control"));
+    assertFalse(roundTwo.get(0).path("content").get(0).has("cache_control"));
     assertTrue(roundTwo.get(3).path("content").get(24).has("cache_control"));
     assertEquals(
         "fixture-signature", roundTwo.get(1).path("content").get(0).path("signature").asString(""));
     assertFalse(roundTwo.get(1).path("content").get(0).has("cache_control"));
     JsonNode roundThree = received.get(2).path("messages");
     assertFalse(roundThree.get(0).path("content").get(0).has("cache_control"));
-    assertTrue(roundThree.get(3).path("content").get(24).has("cache_control"));
+    assertFalse(roundThree.get(3).path("content").get(24).has("cache_control"));
     assertTrue(roundThree.get(5).path("content").get(0).has("cache_control"));
     assertEquals(roundTwo.get(1).path("content"), roundThree.get(1).path("content"));
   }

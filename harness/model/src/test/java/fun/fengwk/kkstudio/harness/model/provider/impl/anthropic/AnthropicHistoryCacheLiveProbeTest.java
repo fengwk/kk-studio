@@ -52,7 +52,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 
 /**
- * 显式付费门禁的历史端点 A/B 测量；仅访问 TEST_ANTHROPIC 凭据指向的线路，不重试。
+ * 显式付费门禁的当前尾部缓存标记 A/B 测量；仅访问 TEST_ANTHROPIC 凭据指向的线路，不重试。
  *
  * <p>两个独立 nonce session 各两次请求，避免 OLD 增量预热 NEW。stdout 只含固定分类、wire model、 marker 索引与数字
  * usage，可由运行者重定向到仓库外临时 artifact。缓存命中是观测而非协议保证。
@@ -64,7 +64,7 @@ class AnthropicHistoryCacheLiveProbeTest {
   private static final ModelCallTimeoutPolicy TIMEOUT =
       new ModelCallTimeoutPolicy(Duration.ofSeconds(120), Duration.ofSeconds(120));
 
-  // 免费验证真实 encoder 的历史端点、20-block 窗口之外的增量及字节级 OLD 对照。
+  // 免费验证真实 encoder 只标当前尾部、20-block 窗口之外的增量及字节级无标记对照。
   @Test
   void offlineShape() throws Exception {
     ProviderDescriptor descriptor = descriptor("https://example.invalid");
@@ -82,9 +82,9 @@ class AnthropicHistoryCacheLiveProbeTest {
     byte[] old = oldBody(current);
     verify(old, true, false);
     JsonNode expected = JSON.readTree(current);
-    ((ObjectNode) expected.path("messages").get(0).path("content").get(0)).remove("cache_control");
+    ((ObjectNode) expected.path("messages").get(2).path("content").get(23)).remove("cache_control");
     assertEquals(expected, JSON.readTree(old));
-    // 字节级 OLD 对照：OLD 体与 NEW 体只差被移除的 pre-assistant 历史端点 marker。
+    // 字节级 OLD 对照：OLD 体与 NEW 体只差当前尾部 marker。
     assertEquals(
         withoutHistoryMarker(new String(current, StandardCharsets.UTF_8)),
         new String(old, StandardCharsets.UTF_8));
@@ -265,14 +265,14 @@ class AnthropicHistoryCacheLiveProbeTest {
     assertEquals("disabled", root.path("thinking").path("type").asString(""));
     JsonNode system = root.path("system").get(0);
     assertEquals("answer OK only", system.path("text").asString(""));
-    // 新契约：SHORT 留存固定给 system 文本块打 ephemeral marker；请求没有 tools 也就不存在 tools marker。
+    // SHORT 留存仍标记 system；无 tools 时不产生工具标记。
     assertEquals("ephemeral", system.path("cache_control").path("type").asString(""));
     assertFalse(system.path("cache_control").has("ttl"));
     assertFalse(root.has("tools"));
     List<Integer> positions = markers(root);
-    // 历史端点 marker 加 system 固定 marker 不得超过原生 4 个上限。
-    assertTrue(positions.size() + 1 <= 4, () -> "markers=" + positions);
-    assertEquals(warm ? List.of(0) : old ? List.of(25) : List.of(0, 25), positions);
+    // 对话区只有当前尾部一个 marker；OLD 控制体移除该标记，warm 请求从位置 0 开始。
+    assertTrue(positions.size() <= 1, () -> "markers=" + positions);
+    assertEquals(warm ? List.of(0) : old ? List.of() : List.of(25), positions);
   }
 
   private static byte[] oldBody(byte[] current) {
@@ -285,14 +285,12 @@ class AnthropicHistoryCacheLiveProbeTest {
     return body.substring(0, first) + body.substring(first + MARKER.length());
   }
 
-  /** 历史端点 marker 位于 messages 段内；system 段上的固定 marker 不参与 OLD 对照。 */
+  /** 对话尾部 marker 位于 messages 段内；system 段上的固定 marker 不参与 OLD 对照。 */
   private static int historyMarkerIndex(String body) {
     int messages = body.indexOf("\"messages\"");
     assertTrue(messages >= 0, "classification=MISSING_MESSAGES");
     int first = body.indexOf(MARKER, messages);
-    assertTrue(
-        first >= 0 && body.indexOf(MARKER, first + MARKER.length()) >= 0,
-        "classification=MISSING_HISTORY_MARKER");
+    assertTrue(first >= 0, "classification=MISSING_TAIL_MARKER");
     return first;
   }
 

@@ -438,8 +438,48 @@ class AnthropicRequestEncoderTest {
     assertEquals("response text", nativeAsst.path("content").get(1).path("text").asString(""));
   }
 
+  /** 意图：没有合格 system block 或 tools 时，多轮对话仍只标记当前尾部并遵守各 retention 档位。 */
+  @ParameterizedTest
+  @MethodSource("conversationRetentionCases")
+  void marksOnlyCurrentTailWithoutSystemOrTools(PromptCacheRetention retention, String expectedTtl)
+      throws IOException {
+    ProviderCacheControl cacheControl =
+        retention == PromptCacheRetention.NONE
+            ? ProviderCacheControl.none()
+            : ProviderCacheControl.session(retention, "test-affinity");
+    ArrayNode messages = NODES.arrayNode();
+    ObjectNode oldTail = messages.addObject().put("role", "user").putArray("content").addObject();
+    oldTail.put("type", "text").put("text", "first");
+    ObjectNode currentMessage =
+        messages.addObject().put("role", "user").putArray("content").addObject();
+    currentMessage.put("type", "text").put("text", "second");
+    ObjectNode currentTail = currentMessage;
+
+    AnthropicCacheMarkers.apply(
+        cacheControl, messages, NODES.arrayNode(), NODES.arrayNode(), currentTail, false);
+    assertFalse(oldTail.has("cache_control"));
+    assertEquals(retention != PromptCacheRetention.NONE, currentTail.has("cache_control"));
+    if (retention == PromptCacheRetention.NONE) {
+      assertEquals(0, countCacheMarkers(messages));
+    } else if (expectedTtl == null) {
+      assertEquals("ephemeral", currentTail.path("cache_control").path("type").asString(""));
+      assertFalse(currentTail.path("cache_control").has("ttl"));
+      assertEquals(1, countCacheMarkers(messages));
+    } else {
+      assertEquals(expectedTtl, currentTail.path("cache_control").path("ttl").asString(""));
+      assertEquals(1, countCacheMarkers(messages));
+    }
+  }
+
+  private static Stream<Arguments> conversationRetentionCases() {
+    return Stream.of(
+        Arguments.of(PromptCacheRetention.NONE, null),
+        Arguments.of(PromptCacheRetention.SHORT, null),
+        Arguments.of(PromptCacheRetention.LONG, "1h"));
+  }
+
   @Test
-  void appliesCacheMarkersInToolsSystemMessagesOrder() throws IOException {
+  void appliesCacheMarkersToToolsSystemAndOnlyCurrentTail() throws IOException {
     ProviderToolDefinition tool =
         new ProviderToolDefinition("calc", "calc desc", "{\"type\":\"object\"}");
 
@@ -467,17 +507,17 @@ class AnthropicRequestEncoderTest {
         "ephemeral", root.path("system").get(0).path("cache_control").path("type").asString(""));
     assertEquals("1h", root.path("system").get(0).path("cache_control").path("ttl").asString(""));
 
-    // CONVERSATION: 剩余两个名额给最近的两个历史端点（User 2 与 User 1），assistant 文本不是请求边界
+    // CONVERSATION: 只标记当前尾部 User 2，不回填历史 User 1
     JsonNode lastMsgBlock = root.path("messages").get(2).path("content").get(0);
     assertEquals("ephemeral", lastMsgBlock.path("cache_control").path("type").asString(""));
     assertEquals("1h", lastMsgBlock.path("cache_control").path("ttl").asString(""));
-    assertTrue(root.path("messages").get(0).path("content").get(0).has("cache_control"));
+    assertFalse(root.path("messages").get(0).path("content").get(0).has("cache_control"));
     assertFalse(root.path("messages").get(1).path("content").get(0).has("cache_control"));
-    assertEquals(4, countCacheMarkers(root));
+    assertEquals(3, countCacheMarkers(root));
   }
 
   /**
-   * 意图：cacheControl 只表达留存档位，不需要（也不再接受）显式断点集合；SHORT 会话请求在 tools/system/最近历史端点写入 ephemeral 标记且不带
+   * 意图：cacheControl 只表达留存档位，不需要（也不再接受）显式断点集合；SHORT 会话请求在 tools/system/当前对话尾部写入 ephemeral 标记且不带
    * ttl，会话 key 不进入请求体。
    */
   @Test
@@ -492,7 +532,7 @@ class AnthropicRequestEncoderTest {
     AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
-    // TOOLS 与 SYSTEM 各占一个名额，最后一个名额给唯一历史端点 User；SHORT 不带 ttl
+    // tools、system 与当前尾部 User 都标记；SHORT 不带 ttl
     assertEquals(
         "ephemeral", root.path("tools").get(0).path("cache_control").path("type").asString(""));
     assertFalse(root.path("tools").get(0).path("cache_control").has("ttl"));
@@ -605,9 +645,9 @@ class AnthropicRequestEncoderTest {
         List.of("bash"), request.tools().stream().map(ProviderToolDefinition::name).toList());
   }
 
-  /** Appending a SYSTEM delta leaves all previously encoded conversation bytes cache-stable. */
+  /** Appending a SYSTEM delta moves the sole conversation marker to the new tail. */
   @Test
-  void keepsEncodedMessagePrefixStableWhenSystemChangeIsAppended() throws IOException {
+  void movesConversationMarkerWhenSystemChangeIsAppended() throws IOException {
     List<ProviderMessage> history =
         List.of(
             userMsg(new ProviderTextBlock("question")),
@@ -627,12 +667,9 @@ class AnthropicRequestEncoderTest {
     JsonNode afterWire = MAPPER.readTree(afterBytes);
 
     assertTrue(afterBytes.length > beforeBytes.length);
-    // The closing messages-array and root braces are replaced when a new element is appended.
-    assertArrayEquals(
-        Arrays.copyOf(beforeBytes, beforeBytes.length - 2),
-        Arrays.copyOf(afterBytes, beforeBytes.length - 2));
     assertTrue(cacheBlock(beforeWire, 1, 0).has("cache_control"));
-    assertTrue(cacheBlock(afterWire, 1, 0).has("cache_control"));
+    assertFalse(cacheBlock(afterWire, 1, 0).has("cache_control"));
+    assertTrue(cacheBlock(afterWire, 2, 0).has("cache_control"));
   }
 
   @Test
@@ -1188,9 +1225,9 @@ class AnthropicRequestEncoderTest {
     assertThrows(ProviderException.class, () -> encoder.encode(reqDocEmpty, descriptor));
   }
 
-  /** 意图：四个名额固定分给 tools、system 与最近两个历史请求边界（更早的端点被舍去）；相同文本按 identity 区分。 */
+  /** 意图：tools、system 与当前对话尾部各一个标记；不能因历史重复内容而回填旧端点。 */
   @Test
-  void allocatesFourMarkersToMostRecentRequestBoundaries() throws IOException {
+  void marksOnlyCurrentTailAmongConversationBoundaries() throws IOException {
     List<ProviderMessage> messages =
         List.of(
             userMsg(new ProviderTextBlock("same")),
@@ -1203,15 +1240,15 @@ class AnthropicRequestEncoderTest {
             asstMsg(List.of(new ProviderTextBlock("a"))),
             userMsg(new ProviderTextBlock("same")));
     JsonNode wire = cacheWire(messages);
-    assertEquals(4, countCacheMarkers(wire));
+    assertEquals(3, countCacheMarkers(wire));
     assertTrue(wire.path("tools").get(0).has("cache_control"));
     assertTrue(wire.path("system").get(0).has("cache_control"));
     for (int i = 0; i < messages.size(); i++) {
-      assertEquals(i == 6 || i == 8, cacheBlock(wire, i, 0).has("cache_control"), "message " + i);
+      assertEquals(i == 8, cacheBlock(wire, i, 0).has("cache_control"), "message " + i);
     }
   }
 
-  /** 意图：queued users、并行工具批次只把批末端作为请求边界；连续 assistant 续写记录之前的端点，只保留最近两个为 marker。 */
+  /** 意图：queued users、并行工具批次与 assistant 续写只在当前尾部写一个会话 marker。 */
   @Test
   void retainsQueuedUserAndParallelToolBatchEndpoints() throws IOException {
     ProviderMessage calls =
@@ -1242,14 +1279,14 @@ class AnthropicRequestEncoderTest {
                 asstMsg(List.of(new ProviderTextBlock("continue"))),
                 asstMsg(List.of(new ProviderTextBlock("continued"))),
                 userMsg(new ProviderTextBlock("third"))));
-    // 历史端点为 queued-2、第二个 tool_result、continue、third；tools/system 占两个名额，仅最近两个端点打标
-    assertEquals(4, countCacheMarkers(wire));
+    // 历史中旧请求边界不回填；只标记当前尾部 third，并保留 tools/system 标记。
+    assertEquals(3, countCacheMarkers(wire));
     assertFalse(cacheBlock(wire, 0, 0).has("cache_control"));
     assertFalse(cacheBlock(wire, 1, 0).has("cache_control"));
     assertFalse(cacheBlock(wire, 2, 1).has("cache_control"));
     assertFalse(cacheBlock(wire, 3, 0).has("cache_control"));
     assertFalse(cacheBlock(wire, 4, 0).has("cache_control"));
-    assertTrue(cacheBlock(wire, 5, 0).has("cache_control"));
+    assertFalse(cacheBlock(wire, 5, 0).has("cache_control"));
     assertTrue(cacheBlock(wire, 7, 0).has("cache_control"));
   }
 
@@ -1371,7 +1408,7 @@ class AnthropicRequestEncoderTest {
     return wire;
   }
 
-  /** 意图：compaction 必须丢弃已裁历史的缓存候选，否则旧引用会浪费四个 marker 名额。 */
+  /** 意图：compaction 必须丢弃已裁历史，只在摘要后的当前尾部写会话 marker。 */
   @Test
   void resetsCacheEndpointsWhenCompactionResetsHistory() throws IOException {
     List<ProviderMessage> messages =
