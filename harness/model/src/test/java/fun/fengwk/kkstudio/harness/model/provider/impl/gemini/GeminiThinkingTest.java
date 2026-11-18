@@ -230,7 +230,7 @@ class GeminiThinkingTest {
     assertNull(secondCall.providerBlockData().signature());
   }
 
-  /** 意图：空文本签名 part 是合法的原生事实（思考结束标记），必须在原位置原样保留，既不被相邻 part 吸收也不重复保留。 */
+  /** 意图：空文本签名 part 是合法的原生事实，重复 part event 也必须保留原生边界与签名。 */
   @Test
   void retainsEmptyTextSignedPartInPlaceWithoutMerging() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
@@ -266,9 +266,9 @@ class GeminiThinkingTest {
         """);
 
     ProviderCompletion completion = accumulator.finish();
-    assertEquals("think", completion.response().thinking());
+    assertEquals("thinkthink", completion.response().thinking());
     assertEquals("answer", completion.response().text());
-    assertEquals(3, completion.response().blocks().size());
+    assertEquals(5, completion.response().blocks().size());
     assertEquals(
         "think", ((ProviderThinkingBlock) completion.response().blocks().get(0)).thinking());
     assertEquals(
@@ -276,30 +276,31 @@ class GeminiThinkingTest {
         ((ProviderThinkingBlock) completion.response().blocks().get(0))
             .providerBlockData()
             .signature());
-    assertEquals("answer", ((ProviderTextBlock) completion.response().blocks().get(2)).text());
+    assertEquals("answer", ((ProviderTextBlock) completion.response().blocks().get(4)).text());
 
     List<String> thinkingDeltas =
         emittedEvents.stream()
             .filter(e -> e instanceof ProviderStreamEvent.ThinkingDelta)
             .map(e -> ((ProviderStreamEvent.ThinkingDelta) e).text())
             .toList();
-    assertEquals(List.of("think"), thinkingDeltas, "空文本签名 part 绝不产生重复思考增量");
+    assertEquals(List.of("think", "think"), thinkingDeltas);
 
     List<ProviderContentBlock> blocks = completion.response().blocks();
-    assertEquals(3, blocks.size());
+    assertEquals(5, blocks.size());
     ProviderThinkingBlock firstThought = (ProviderThinkingBlock) blocks.get(0);
     ProviderThinkingBlock emptyThought = (ProviderThinkingBlock) blocks.get(1);
+    ProviderThinkingBlock repeatedThought = (ProviderThinkingBlock) blocks.get(2);
+    ProviderThinkingBlock repeatedEmptyThought = (ProviderThinkingBlock) blocks.get(3);
     assertEquals("think", firstThought.thinking());
     assertEquals("sig_1", firstThought.providerBlockData().signature());
     assertEquals("", emptyThought.thinking());
     assertEquals("sig_empty", emptyThought.providerBlockData().signature());
-    assertEquals("answer", ((ProviderTextBlock) blocks.get(2)).text());
+    assertEquals("sig_1", repeatedThought.providerBlockData().signature());
+    assertEquals("sig_empty", repeatedEmptyThought.providerBlockData().signature());
+    assertEquals("answer", ((ProviderTextBlock) blocks.get(4)).text());
   }
 
-  /**
-   * 意图：多个带 thoughtSignature 的 part 必须各自保留为独立原生 part，签名精确、顺序不变、绝不伪造或跨 part 迁移； 同一快照重复发送的同一签名 part
-   * 按原始 JSON 相等去重，不重复计入 thinking。
-   */
+  /** 意图：每个带 thoughtSignature 的事件都原位独立保留，签名精确、顺序不变、绝不跨 part 迁移。 */
   @Test
   void keepsDistinctSignedPartsAsSeparateVerbatimReplayParts() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
@@ -314,7 +315,7 @@ class GeminiThinkingTest {
           }]
         }
         """);
-    // 快照重复发送：第一个签名 part 与后续分片完全一致时不得重复保留
+    // 相同签名 part 再次出现仍是独立事件，不能按内容相等去重。
     accumulator.handleEvent(
         """
         {
@@ -335,25 +336,28 @@ class GeminiThinkingTest {
         """);
 
     ProviderCompletion completion = accumulator.finish();
-    assertEquals("think A think B", completion.response().thinking(), "重复快照绝不被重复计入 thinking");
+    assertEquals("think Athink A think B", completion.response().thinking());
     assertEquals("answer", completion.response().text());
 
     List<ProviderContentBlock> blocks = completion.response().blocks();
-    assertEquals(3, blocks.size(), "两个签名 part 与文本 part 必须各自保留");
+    assertEquals(4, blocks.size(), "两个签名事件与文本 part 必须各自保留");
     ProviderThinkingBlock first = (ProviderThinkingBlock) blocks.get(0);
-    ProviderThinkingBlock second = (ProviderThinkingBlock) blocks.get(1);
+    ProviderThinkingBlock repeated = (ProviderThinkingBlock) blocks.get(1);
+    ProviderThinkingBlock second = (ProviderThinkingBlock) blocks.get(2);
     assertEquals("think A", first.thinking());
     assertEquals("sig_a", first.providerBlockData().signature());
     assertTrue(first.providerBlockData().thought());
+    assertEquals("think A", repeated.thinking());
+    assertEquals("sig_a", repeated.providerBlockData().signature());
     assertEquals(" think B", second.thinking());
     assertEquals("sig_b", second.providerBlockData().signature());
-    assertEquals("answer", ((ProviderTextBlock) blocks.get(2)).text());
-    assertNull(((ProviderTextBlock) blocks.get(2)).providerBlockData().signature());
+    assertEquals("answer", ((ProviderTextBlock) blocks.get(3)).text());
+    assertNull(((ProviderTextBlock) blocks.get(3)).providerBlockData().signature());
   }
 
-  /** 意图：两个带不同签名的累积形态无法证明是同一 part，绝不合并、绝不覆盖签名；两份原生事实按原顺序各自保留。 */
+  /** 意图：不同签名的 part event 绝不合并或覆盖签名；两份原生事实按原顺序各自保留。 */
   @Test
-  void neverOverwritesSignatureAcrossDistinctCumulativeSignedParts() throws Exception {
+  void preservesSignaturesAcrossDistinctSignedEvents() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(

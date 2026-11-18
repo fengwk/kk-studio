@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 
 import java.math.BigInteger;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -164,7 +165,7 @@ final class GeminiRequestEncoder {
       }
     }
 
-    // reasoning effort 映射到 thinkingConfig：未声明时不生成，off 显式关闭，其余级别下发生效级别
+    // variant 声明 effort 时 thinkingConfig 由 runtime 独占；未声明时保留 native model-specific configuration。
     String reasoningEffort = request.variant().reasoningEffort();
     if (reasoningEffort != null && genConfig.has("thinkingConfig")) {
       throw new ProviderException(
@@ -176,17 +177,89 @@ final class GeminiRequestEncoder {
     genConfig.put("maxOutputTokens", request.outputTokens());
 
     if (reasoningEffort != null) {
-      ObjectNode thinkingConfig = genConfig.putObject("thinkingConfig");
-      if (request.variant().reasoningOff()) {
-        thinkingConfig.put("includeThoughts", false);
-        thinkingConfig.put("thinkingBudget", 0);
-      } else {
-        thinkingConfig.put("includeThoughts", true);
-        thinkingConfig.put("thinkingLevel", reasoningEffort);
-      }
+      encodeThinkingConfig(genConfig.putObject("thinkingConfig"), request);
     }
 
     return genConfig;
+  }
+
+  /** Use only the thinking control documented for a recognized Gemini model family. */
+  private static void encodeThinkingConfig(ObjectNode thinkingConfig, ProviderRequest request) {
+    String modelId = request.model().modelId().toLowerCase(Locale.ROOT);
+    String effort = request.variant().reasoningEffort();
+    if (isGemini25(modelId)) {
+      if (request.variant().reasoningOff() && isGemini25Pro(modelId)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "Gemini 2.5 Pro cannot disable thinking; its minimum thinking budget is 128");
+      }
+      thinkingConfig.put("includeThoughts", !request.variant().reasoningOff());
+      thinkingConfig.put(
+          "thinkingBudget", request.variant().reasoningOff() ? 0 : thinkingBudget(modelId, effort));
+      return;
+    }
+
+    Set<String> thinkingLevels = supportedThinkingLevels(modelId);
+    if (thinkingLevels != null) {
+      if (request.variant().reasoningOff()) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "this Gemini model family does not support disabling thinking");
+      }
+      if (!thinkingLevels.contains(effort)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "reasoningEffort is not supported by this Gemini model");
+      }
+      thinkingConfig.put("includeThoughts", true);
+      thinkingConfig.put("thinkingLevel", effort.toUpperCase(Locale.ROOT));
+      return;
+    }
+    throw new ProviderException(
+        ProviderErrorKind.INVALID_REQUEST,
+        "reasoningEffort has no verified thinking wire contract for this Gemini model");
+  }
+
+  private static boolean isGemini25(String modelId) {
+    return modelId.matches("gemini-2\\.5-(?:pro|flash|flash-lite)(?:-.+)?");
+  }
+
+  private static boolean isGemini25Pro(String modelId) {
+    return modelId.matches("gemini-2\\.5-pro(?:-.+)?");
+  }
+
+  /** Return only levels verified for a documented Gemini 3+ model name. */
+  private static Set<String> supportedThinkingLevels(String modelId) {
+    return switch (modelId) {
+      case "gemini-3-pro-preview", "gemini-3-pro-preview-customtools" -> Set.of("low", "high");
+      case "gemini-3-flash-preview",
+          "gemini-3.1-flash-lite",
+          "gemini-3.1-flash-lite-preview",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.6-flash" -> Set.of("minimal", "low", "medium", "high");
+      case "gemini-3.1-pro-preview", "gemini-3.1-pro-preview-customtools" -> Set.of(
+          "low", "medium", "high");
+      case "gemini-3.1-flash-lite-image" -> Set.of("minimal", "high");
+      case "gemini-3.7-flash", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon" -> Set.of(
+          "low", "medium", "high");
+      case "gemini-4-neon", "gemini-4-hydrogen" -> Set.of("low", "medium", "high", "xhigh");
+      default -> null;
+    };
+  }
+
+  private static int thinkingBudget(String modelId, String effort) {
+    if (effort.equals("minimal")) {
+      return modelId.contains("flash-lite") ? 512 : 128;
+    }
+    return switch (effort) {
+      case "low" -> 2048;
+      case "medium" -> 8192;
+      case "high" -> modelId.contains("pro") ? 32768 : 24576;
+      default -> throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "reasoningEffort is not a supported Gemini 2.5 thinking budget level");
+    };
   }
 
   /**

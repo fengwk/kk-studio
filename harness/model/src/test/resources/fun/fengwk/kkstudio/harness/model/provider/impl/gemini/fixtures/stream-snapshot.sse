@@ -1,5 +1,0 @@
-data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello"}]}}]}
-
-data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello world"}]}}]}
-
-data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello world from Gemini!"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":6,"totalTokenCount":14}}

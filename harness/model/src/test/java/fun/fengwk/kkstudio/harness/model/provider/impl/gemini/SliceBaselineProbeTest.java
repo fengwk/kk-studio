@@ -47,10 +47,10 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * 基准核对：把 Gemini 编码器与流式累积器在代表性输入上的输出与基准提交的产物逐字节比对。
+ * 基准核对：把 Gemini 编码器与流式累积器在代表性输入上的输出与逐字节期望值比对。
  *
- * <p>期望文件 {@code slice-baseline-gemini.txt} 由同一份探针代码在基准提交 {@code b79652fa4} 的独立 worktree 中生成，覆盖工具、
- * thinkingConfig、变体原生选项、图片/音频/文档块、assistant 原生回放与工具结果，以及三组流式事件序列的终态响应、原始 usage 与错误顺序。
+ * <p>期望文件 {@code slice-baseline-gemini.txt} 覆盖工具、thinkingConfig、变体原生选项、图片/音频/文档块、assistant
+ * 原生回放与工具结果，以及三组流式事件序列的终态响应、原始 usage 与错误顺序。已确认的 Gemini wire 行为变更同步更新相应期望值。
  */
 class SliceBaselineProbeTest {
 
@@ -58,7 +58,7 @@ class SliceBaselineProbeTest {
   private static final String SYSTEM = "Test system instruction.";
 
   @Test
-  void matchesTheBaselineCommitOutputByteForByte() throws IOException {
+  void matchesTheExpectedWireOutputByteForByte() throws IOException {
     String golden;
     try (InputStream in = getClass().getResourceAsStream("slice-baseline-gemini.txt")) {
       golden = new String(in.readAllBytes(), StandardCharsets.UTF_8);
@@ -72,7 +72,7 @@ class SliceBaselineProbeTest {
     encoderCase(out, "native-options-reasoning-off", nativeOptionsRequest());
     encoderCase(out, "plain", plainRequest());
     streamCase(out, "stream-text-tool-usage", textToolEvents());
-    streamCase(out, "stream-snapshot-repeat", snapshotEvents());
+    streamCase(out, "stream-incremental", incrementalEvents());
     streamCase(out, "stream-blocked", blockedEvents());
     return out.toString();
   }
@@ -202,13 +202,13 @@ class SliceBaselineProbeTest {
             + "\"thoughtsTokenCount\":2,\"cachedContentTokenCount\":3}}");
   }
 
-  private static List<String> snapshotEvents() {
+  private static List<String> incrementalEvents() {
     return List.of(
         "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
             + "{\"text\":\"hel\"}]},\"index\":0}],\"usageMetadata\":"
             + "{\"promptTokenCount\":1,\"candidatesTokenCount\":1,\"totalTokenCount\":2}}",
         "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":["
-            + "{\"text\":\"hello\"}]},\"index\":0}],\"usageMetadata\":"
+            + "{\"text\":\"lo\"}]},\"index\":0}],\"usageMetadata\":"
             + "{\"promptTokenCount\":1,\"candidatesTokenCount\":2,\"totalTokenCount\":3}}",
         "{\"candidates\":[{\"content\":{\"role\":\"model\",\"parts\":[]},"
             + "\"finishReason\":\"MAX_TOKENS\",\"index\":0}],\"usageMetadata\":"

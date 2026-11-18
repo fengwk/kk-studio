@@ -88,13 +88,12 @@ class GeminiRequestEncoderTest {
   }
 
   private static ModelDescriptor model(boolean reasoning) {
+    return model("gemini-2.5-flash", reasoning);
+  }
+
+  private static ModelDescriptor model(String modelId, boolean reasoning) {
     return new ModelDescriptor(
-        "google-test",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash",
-        Set.of(ModelInputModality.TEXT),
-        true,
-        reasoning);
+        "google-test", modelId, modelId, Set.of(ModelInputModality.TEXT), true, reasoning);
   }
 
   /** 验证基本的用户文本消息能够正确编码为 Gemini contents wire 格式。 */
@@ -213,16 +212,14 @@ class GeminiRequestEncoderTest {
     assertFalse(gen.has("stopSequences"));
   }
 
-  /** 验证厂商定义的 reasoning effort 原样映射到 thinkingLevel，包括大写与混合大小写（不做大小写归一化）。 */
+  /** 验证 2.5 按官方思考预算映射，Gemini 3 按受支持的 thinking level 编码。 */
   @Test
-  void encodesProviderDefinedThinkingLevels() throws Exception {
-    for (String effort : List.of("low", "medium", "high", "max", "xhigh", "HIGH", "xHigh")) {
-      ModelVariant variant =
-          new ModelVariant("v-" + effort, effort, PromptCacheRetention.NONE, null);
+  void encodesThinkingUsingModelFamilyWireContract() throws Exception {
+    for (String effort : List.of("minimal", "low", "medium", "high")) {
       ProviderRequest request =
           new ProviderRequest(
               model(true),
-              variant,
+              new ModelVariant("v-" + effort, effort, PromptCacheRetention.NONE, null),
               1024,
               "Test system instruction.",
               List.of(
@@ -230,39 +227,132 @@ class GeminiRequestEncoderTest {
                       ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")))),
               List.of(),
               ProviderCacheControl.none());
-
-      GeminiEncodedRequest encoded = encoder.encode(request, descriptor());
-      JsonNode json = MAPPER.readTree(encoded.bodyUtf8Bytes());
-
-      JsonNode thinkingConfig = json.path("generationConfig").path("thinkingConfig");
+      JsonNode thinkingConfig =
+          MAPPER
+              .readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes())
+              .path("generationConfig")
+              .path("thinkingConfig");
       assertTrue(thinkingConfig.path("includeThoughts").asBoolean(false));
-      assertEquals(effort, thinkingConfig.path("thinkingLevel").asString(""));
+      assertEquals(
+          switch (effort) {
+            case "minimal" -> 128;
+            case "low" -> 2048;
+            case "medium" -> 8192;
+            default -> 24576;
+          },
+          thinkingConfig.path("thinkingBudget").asInt());
+      assertFalse(thinkingConfig.has("thinkingLevel"));
+    }
+
+    assertEquals(
+        32768,
+        encodedThinkingBudget("gemini-2.5-pro", "high"),
+        "Gemini 2.5 Pro uses its documented high budget");
+    assertEquals(
+        512,
+        encodedThinkingBudget("gemini-2.5-flash-lite", "minimal"),
+        "Gemini 2.5 Flash Lite uses its documented minimal budget");
+
+    assertEquals("HIGH", encodedThinkingLevel("gemini-3-pro-preview", "high"));
+    assertEquals("MINIMAL", encodedThinkingLevel("gemini-3-flash-preview", "minimal"));
+    assertEquals("MEDIUM", encodedThinkingLevel("gemini-3.1-pro-preview", "medium"));
+
+    for (String modelId : List.of("gemini-4-argon", "gemini-4-carbon")) {
+      for (String effort : List.of("low", "medium", "high")) {
+        assertEquals(
+            switch (effort) {
+              case "low" -> "LOW";
+              case "medium" -> "MEDIUM";
+              default -> "HIGH";
+            },
+            encodedThinkingLevel(modelId, effort));
+      }
+    }
+    for (String modelId : List.of("gemini-4-neon", "gemini-4-hydrogen")) {
+      assertEquals("XHIGH", encodedThinkingLevel(modelId, "xhigh"));
     }
   }
 
-  /** 验证 off 显式关闭推理：includeThoughts=false 且 thinkingBudget=0，不发 thinkingLevel。 */
+  private int encodedThinkingBudget(String modelId, String effort) throws Exception {
+    return MAPPER
+        .readTree(encoder.encode(requestWithEffort(modelId, effort), descriptor()).bodyUtf8Bytes())
+        .path("generationConfig")
+        .path("thinkingConfig")
+        .path("thinkingBudget")
+        .asInt();
+  }
+
+  private String encodedThinkingLevel(String modelId, String effort) throws Exception {
+    return MAPPER
+        .readTree(encoder.encode(requestWithEffort(modelId, effort), descriptor()).bodyUtf8Bytes())
+        .path("generationConfig")
+        .path("thinkingConfig")
+        .path("thinkingLevel")
+        .asString();
+  }
+
+  private ProviderRequest requestWithEffort(String modelId, String effort) {
+    return new ProviderRequest(
+        model(modelId, true),
+        new ModelVariant("v1", effort, PromptCacheRetention.NONE, null),
+        1024,
+        "Test system instruction.",
+        List.of(
+            new ProviderMessage(
+                ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve this")))),
+        List.of(),
+        ProviderCacheControl.none());
+  }
+
+  /** 验证 Gemini 2.5 Flash 与 Flash Lite 官方允许以 budget 0 关闭 thinking。 */
   @Test
   void encodesThinkingOffExplicitly() throws Exception {
-    ProviderRequest request =
-        new ProviderRequest(
-            model(true),
-            new ModelVariant("v1", "off", PromptCacheRetention.NONE, null),
-            1024,
-            "Test system instruction.",
-            List.of(
-                new ProviderMessage(
-                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Solve")))),
-            List.of(),
-            ProviderCacheControl.none());
+    for (String modelId : List.of("gemini-2.5-flash", "gemini-2.5-flash-lite")) {
+      JsonNode thinkingConfig =
+          MAPPER
+              .readTree(
+                  encoder.encode(requestWithEffort(modelId, "off"), descriptor()).bodyUtf8Bytes())
+              .path("generationConfig")
+              .path("thinkingConfig");
+      assertFalse(thinkingConfig.path("includeThoughts").asBoolean(false));
+      assertEquals(0, thinkingConfig.path("thinkingBudget").asInt(0));
+      assertFalse(thinkingConfig.has("thinkingLevel"));
+    }
+  }
 
-    JsonNode thinkingConfig =
-        MAPPER
-            .readTree(encoder.encode(request, descriptor()).bodyUtf8Bytes())
-            .path("generationConfig")
-            .path("thinkingConfig");
-    assertFalse(thinkingConfig.path("includeThoughts").asBoolean(false));
-    assertEquals(0, thinkingConfig.path("thinkingBudget").asInt(0));
-    assertFalse(thinkingConfig.has("thinkingLevel"));
+  /** 验证 2.5 Pro、Gemini 3/4 与未知型号不会错误套用关闭或不支持的思考档位。 */
+  @Test
+  void rejectsUnsupportedThinkingOffAndUnknownModel() {
+    ProviderException proOffError =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(requestWithEffort("gemini-2.5-pro", "off"), descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, proOffError.kind());
+    assertTrue(proOffError.getMessage().contains("minimum thinking budget is 128"));
+
+    ProviderException gemini3OffError =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(requestWithEffort("gemini-3-flash-preview", "off"), descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, gemini3OffError.kind());
+
+    ProviderException gemini4OffError =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(requestWithEffort("gemini-4-argon", "off"), descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, gemini4OffError.kind());
+
+    ProviderException unsupportedLevelError =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(requestWithEffort("gemini-4-argon", "minimal"), descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, unsupportedLevelError.kind());
+
+    ProviderException unknownError =
+        assertThrows(
+            ProviderException.class,
+            () -> encoder.encode(requestWithEffort("gemini-4-pro", "high"), descriptor()));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, unknownError.kind());
   }
 
   /** 验证当模型不支持推理且无 reasoning effort 时，不生成 thinkingConfig。 */

@@ -46,7 +46,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
-/** Gemini 流式累加器及 SSE 消息解析、去重、状态机测试。 */
+/** Gemini 流式累加器及 SSE 消息解析、增量、状态机测试。 */
 class GeminiStreamAccumulatorTest {
 
   private static final ObjectMapper MAPPER = JsonMapper.builder().build();
@@ -173,9 +173,9 @@ class GeminiStreamAccumulatorTest {
     assertEquals(expectedMessage, error.getMessage());
   }
 
-  /** 测试意图：多 part 帧按各自 slot 保持边界，不能把 index 1 追加到 index 0。 */
+  /** 测试意图：多 part 帧中的每个 part 都按增量事件保留，不能把内容误判为累计快照。 */
   @Test
-  void multiPartFramesKeepIndependentSlots() throws Exception {
+  void multiPartFramesAppendEveryPartEvent() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
     accumulator.handleEvent(
         """
@@ -187,10 +187,8 @@ class GeminiStreamAccumulatorTest {
          "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
         """);
     ProviderCompletion completion = accumulator.finish();
-    assertEquals("ACBD", completion.response().text());
-    assertEquals(2, completion.response().blocks().size());
-    assertEquals("AC", ((ProviderTextBlock) completion.response().blocks().get(0)).text());
-    assertEquals("BD", ((ProviderTextBlock) completion.response().blocks().get(1)).text());
+    assertEquals("ABACBD", completion.response().text());
+    assertEquals(4, completion.response().blocks().size());
   }
 
   /** 测试意图：终态后禁止新 content 和第二个 finishReason，usage-only 空 candidates 仍可更新用量。 */
@@ -216,56 +214,43 @@ class GeminiStreamAccumulatorTest {
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
   }
 
-  /** 验证全量快照重复流中，文本增量被正确提取去重，绝不重复拼接。 */
+  /** 验证相等或前缀相关的内容仍按每个 SSE part 追加，不猜测累计快照。 */
   @Test
-  void handlesSnapshotRepetitiveTextStream_deduplicatesAccumulatedPrefix() throws Exception {
+  void appendsPrefixRelatedTextEventsWithoutTrimming() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
-    // 服务端发出的每个 chunk 携带迄今为止的全部文本
-    String chunk1 =
+    accumulator.handleEvent(
         """
-        {
-          "candidates": [{
-            "content": { "role": "model", "parts": [{ "text": "Hello" }] }
-          }]
-        }
-        """;
-    String chunk2 =
+        {"candidates":[{"content":{"role":"model","parts":[{"text":"ha"}]}}]}
+        """);
+    accumulator.handleEvent(
         """
-        {
-          "candidates": [{
-            "content": { "role": "model", "parts": [{ "text": "Hello world" }] }
-          }]
-        }
-        """;
-    String chunk3 =
-        """
-        {
-          "candidates": [{
-            "content": { "role": "model", "parts": [{ "text": "Hello world!" }] },
-            "finishReason": "STOP"
-          }],
-          "usageMetadata": {
-            "promptTokenCount": 10,
-            "candidatesTokenCount": 5,
-            "totalTokenCount": 15
-          }
-        }
-        """;
-
-    accumulator.handleEvent(chunk1);
-    accumulator.handleEvent(chunk2);
-    accumulator.handleEvent(chunk3);
+        {"candidates":[{"content":{"role":"model","parts":[{"text":"ha"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
+        """);
     ProviderCompletion completion = accumulator.finish();
 
-    assertEquals("Hello world!", completion.response().text());
+    assertEquals("haha", completion.response().text());
 
     List<String> deltas =
         emittedEvents.stream()
             .filter(e -> e instanceof ProviderStreamEvent.TextDelta)
             .map(e -> ((ProviderStreamEvent.TextDelta) e).text())
             .toList();
-    assertEquals(List.of("Hello", " world", "!"), deltas);
+    assertEquals(List.of("ha", "ha"), deltas);
+
+    GeminiStreamAccumulator prefixAccumulator =
+        new GeminiStreamAccumulator(request, descriptor, bridge);
+    prefixAccumulator.handleEvent(
+        """
+        {"candidates":[{"content":{"role":"model","parts":[{"text":"ha"}]}}]}
+        """);
+    prefixAccumulator.handleEvent(
+        """
+        {"candidates":[{"content":{"role":"model","parts":[{"text":"haha"}]},"finishReason":"STOP"}],
+         "usageMetadata":{"promptTokenCount":10,"candidatesTokenCount":5,"totalTokenCount":15}}
+        """);
+    assertEquals("hahaha", prefixAccumulator.finish().response().text());
   }
 
   /** 验证带有 thought=true 的 part 正确发射 ThinkingDelta，并与后续正常文本分流。 */
@@ -1081,8 +1066,8 @@ class GeminiStreamAccumulatorTest {
   }
 
   /**
-   * 意图：未知 union 成员（inlineData / toolResponse）绝不与相邻 part 递归合并成单个合成对象；同一快照重复发送时按原始 JSON 相等去重， 新出现的未知
-   * part 按原顺序原样追加，functionCall 边界与未知 part 互不干扰。
+   * 意图：未知 union 成员（inlineData / toolResponse）绝不与相邻 part 递归合并成单个合成对象；每帧都按事件保留，functionCall 边界与未知
+   * part 互不干扰。
    */
   @Test
   void keepsUnknownUnionPartsAsVerbatimBoundaries() throws Exception {
@@ -1096,7 +1081,7 @@ class GeminiStreamAccumulatorTest {
         ]}}]}
         """;
     accumulator.handleEvent(textAndUnknown);
-    // 同一快照重复发送：完全一致的原生 part 不得重复保留
+    // 相同内容再次出现仍是一个新事件，不能按 JSON 相等去重。
     accumulator.handleEvent(textAndUnknown);
     accumulator.handleEvent(
         """
@@ -1114,12 +1099,12 @@ class GeminiStreamAccumulatorTest {
         """);
 
     ProviderCompletion completion = accumulator.finish();
-    assertEquals("answer", completion.response().text(), "重复快照绝不被重复计入文本");
+    assertEquals("answeransweranswer", completion.response().text());
     assertEquals(1, completion.response().toolCalls().size());
     assertEquals("fn", completion.response().toolCalls().get(0).name());
 
     List<ProviderContentBlock> blocks = completion.response().blocks();
-    assertEquals(4, blocks.size(), "未知 union 成员与 functionCall 必须各自保留为独立 block");
+    assertEquals(8, blocks.size(), "每个未知 part event 与 functionCall 都必须保留为独立 block");
     ProviderTextBlock answer = (ProviderTextBlock) blocks.get(0);
     assertEquals(
         "t-1",
@@ -1133,7 +1118,7 @@ class GeminiStreamAccumulatorTest {
     assertEquals(
         "QQ==",
         inlineData.providerBlockData().nativeFields().path("inlineData").path("data").asString(""));
-    ProviderOpaqueBlock toolResponse = (ProviderOpaqueBlock) blocks.get(2);
+    ProviderOpaqueBlock toolResponse = (ProviderOpaqueBlock) blocks.get(6);
     assertEquals(
         "v",
         toolResponse
@@ -1143,7 +1128,7 @@ class GeminiStreamAccumulatorTest {
             .path("response")
             .path("k")
             .asString(""));
-    assertEquals("fn", ((ProviderToolCallBlock) blocks.get(3)).toolCall().name());
+    assertEquals("fn", ((ProviderToolCallBlock) blocks.get(7)).toolCall().name());
   }
 
   /** 意图：part 同时声明 text 与 functionCall（同一 data oneof 冲突）时，文本与工具调用仍完整交付，绝不静默丢弃其中任何一方。 */
@@ -1203,7 +1188,7 @@ class GeminiStreamAccumulatorTest {
         ]}}]}
         """;
     valuelessKnownFieldAccumulator.handleEvent(valuelessFieldParts);
-    // 同一快照重复发送：即使存在空白签名 / null 已知字段，也必须按可证明重复去重，绝不重复计入文本
+    // 即使规范化掉空白签名 / null 已知字段，重现的 part 仍按独立事件追加。
     valuelessKnownFieldAccumulator.handleEvent(valuelessFieldParts);
     valuelessKnownFieldAccumulator.handleEvent(
         """
@@ -1219,9 +1204,9 @@ class GeminiStreamAccumulatorTest {
         """);
     ProviderCompletion completion = valuelessKnownFieldAccumulator.finish();
 
-    assertEquals("answer", completion.response().text());
+    assertEquals("answeransweranswer", completion.response().text());
     List<ProviderContentBlock> blocks = completion.response().blocks();
-    assertEquals(2, blocks.size());
+    assertEquals(6, blocks.size());
     ProviderTextBlock answer = (ProviderTextBlock) blocks.get(0);
     assertEquals("answer", answer.text());
     assertTrue(answer.providerBlockData().nativeFields().isEmpty(), "空白签名不承载原生语义");
@@ -1231,9 +1216,9 @@ class GeminiStreamAccumulatorTest {
         inlineData.providerBlockData().nativeFields().path("inlineData").path("data").asString(""));
   }
 
-  /** 意图：同一 slot 的文本 part 在形状为超集且文本严格扩展时按完整累积形态整体替换（未知字段整体替换而非逐字段合并）， 形状不同的新 part 依旧按原顺序原样追加。 */
+  /** 意图：未知 part 字段不跨增量事件合并，各事件的字段都在原生回放中保留。 */
   @Test
-  void replacesUnknownPartFieldsOnCumulativeSnapshot() throws Exception {
+  void preservesUnknownPartFieldsForEveryIncrement() throws Exception {
     GeminiStreamAccumulator accumulator = new GeminiStreamAccumulator(request, descriptor, bridge);
 
     accumulator.handleEvent(
@@ -1254,7 +1239,7 @@ class GeminiStreamAccumulatorTest {
           "candidates": [{
             "content": { "role": "model", "parts": [
               {
-                "text": "Hello world",
+                "text": " world",
                 "futureString": "b",
                 "futureObject": { "b": 2 }
               },
@@ -1274,14 +1259,17 @@ class GeminiStreamAccumulatorTest {
     assertEquals("Hello world", completion.response().text());
 
     List<ProviderContentBlock> blocks = completion.response().blocks();
-    assertEquals(2, blocks.size());
-    ProviderTextBlock text = (ProviderTextBlock) blocks.get(0);
-    assertEquals("Hello world", text.text());
-    JsonNode nativeFields = text.providerBlockData().nativeFields();
+    assertEquals(3, blocks.size());
+    ProviderTextBlock firstText = (ProviderTextBlock) blocks.get(0);
+    assertEquals("Hello", firstText.text());
+    assertEquals(
+        "a", firstText.providerBlockData().nativeFields().path("futureString").asString(""));
+    ProviderTextBlock secondText = (ProviderTextBlock) blocks.get(1);
+    assertEquals(" world", secondText.text());
+    JsonNode nativeFields = secondText.providerBlockData().nativeFields();
     assertEquals("b", nativeFields.path("futureString").asString(""));
     assertEquals(2, nativeFields.path("futureObject").path("b").asInt(0));
-    assertFalse(nativeFields.path("futureObject").has("a"), "snapshot must replace unknown field");
-    ProviderOpaqueBlock inlineData = (ProviderOpaqueBlock) blocks.get(1);
+    ProviderOpaqueBlock inlineData = (ProviderOpaqueBlock) blocks.get(2);
     assertEquals(
         "image/jpeg",
         inlineData
