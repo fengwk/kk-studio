@@ -71,6 +71,10 @@ class FreshInstallSchemaContractTest {
       assertEquals(
           "2|SQL|t",
           rows.getString(1) + "|" + rows.getString(2) + "|" + (rows.getBoolean(3) ? "t" : "f"));
+      assertTrue(rows.next());
+      assertEquals(
+          "3|SQL|t",
+          rows.getString(1) + "|" + rows.getString(2) + "|" + (rows.getBoolean(3) ? "t" : "f"));
       assertTrue(!rows.next(), "all versioned migrations must be applied exactly once");
     }
   }

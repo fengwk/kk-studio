@@ -110,8 +110,8 @@ select
                 'cacheWriteByTtl', '{}'::jsonb,
                 'reasoning', reasoning_price::text
             ),
-            'overrides', '[]'::jsonb,
-            'multipliers', '[]'::jsonb
+            'rules', '[]'::jsonb,
+            'changes', '[]'::jsonb
         ),
         'defaultVariant', default_variant,
         'variants', variants

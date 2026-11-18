@@ -26,7 +26,7 @@ insert into model (
 ) values (
     'acceptance-stub', 'MODEL', 'stub', 'acceptance-stub',
     'Local deterministic model for development and acceptance tests.',
-    '{"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"inputModalities":["TEXT"]},"pricing":{"base":{"input":"0","output":"0","cacheRead":"0","cacheWrite":"0","cacheWriteByTtl":{},"reasoning":"0"},"overrides":[],"multipliers":[]},"defaultVariant":"default","variants":[{"id":"default","promptCacheRetention":"SHORT"}]}',
+    '{"limit":{"context":32768,"output":4096},"abilities":{"tools":true,"reasoning":false,"inputModalities":["TEXT"]},"pricing":{"base":{"input":"0","output":"0","cacheRead":"0","cacheWrite":"0","cacheWriteByTtl":{},"reasoning":"0"},"rules":[],"changes":[]},"defaultVariant":"default","variants":[{"id":"default","promptCacheRetention":"SHORT"}]}',
     current_timestamp, current_timestamp, 0
 );
 

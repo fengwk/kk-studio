@@ -26,8 +26,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "0"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -85,8 +85,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "0"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -144,8 +144,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "0"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -207,8 +207,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "0"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -266,8 +266,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "0"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -328,8 +328,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "0.28"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -378,8 +378,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "0.87"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -425,8 +425,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "12"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "high",
       "variants": [
@@ -468,8 +468,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "9"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "high",
       "variants": [
@@ -519,8 +519,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "7.5"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "high",
       "variants": [
@@ -570,8 +570,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "3.75"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "minimal",
       "variants": [
@@ -620,8 +620,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "1.2"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "high",
       "variants": [
@@ -663,8 +663,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "1.2"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "high",
       "variants": [
@@ -706,8 +706,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "1.2"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "high",
       "variants": [
@@ -761,8 +761,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "15"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "xhigh",
       "variants": [
@@ -816,8 +816,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "30"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "xhigh",
       "variants": [
@@ -871,8 +871,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "1.2"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -930,8 +930,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "30"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -989,8 +989,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "15"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
@@ -1048,8 +1048,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "6"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "high",
       "variants": [
@@ -1094,8 +1094,8 @@
           "cacheWriteByTtl": {},
           "reasoning": "0"
         },
-        "overrides": [],
-        "multipliers": []
+        "rules": [],
+        "changes": []
       },
       "defaultVariant": "max",
       "variants": [
