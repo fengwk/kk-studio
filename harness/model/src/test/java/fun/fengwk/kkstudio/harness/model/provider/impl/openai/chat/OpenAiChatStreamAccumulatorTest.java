@@ -525,6 +525,58 @@ class OpenAiChatStreamAccumulatorTest {
             .count());
   }
 
+  /** 合法 SSE 帧中的两个 arguments 片段仅在合并后校验；坏 JSON 不成为可执行调用。 */
+  @Test
+  void diagnosesUnescapedQuoteInCompleteToolCall() {
+    OpenAiChatStreamAccumulator accumulator = createAccumulator();
+    String first =
+        "{\"path\":\"example.svg\",\"edits\":[{\"old_string\":\"old\",\"new_string\":\"<svg width=";
+    String second = "\"240\">\"}]}";
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"private_call_id","type":"function",
+          "function":{"name":"edit","arguments":%s}}]}}]}
+        """
+            .formatted(MAPPER.writeValueAsString(first)));
+    accumulator.handleData(
+        """
+        {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":%s}}]},
+          "finish_reason":"tool_calls"}]}
+        """
+            .formatted(MAPPER.writeValueAsString(second)));
+    accumulator.handleData("{\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
+    accumulator.handleData("[DONE]");
+
+    ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertTrue(
+        error
+            .getMessage()
+            .matches("edit: invalid JSON at 1:[1-9][0-9]*; expected ',' or '}'; not executed\\."));
+  }
+
+  /** 完整参数不能掩盖缺失的调用身份，也不能把身份错误说成 JSON 错误。 */
+  @Test
+  void distinguishesMissingToolIdentityFromMalformedArguments() {
+    for (String missing : List.of("id", "name")) {
+      OpenAiChatStreamAccumulator accumulator = createAccumulator();
+      String id = missing.equals("id") ? "" : "call-private";
+      String name = missing.equals("name") ? "" : "lookup";
+      accumulator.handleData(
+          """
+          {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"%s","type":"function",
+            "function":{"name":"%s","arguments":"{}"}}]},"finish_reason":"tool_calls"}]}
+          """
+              .formatted(id, name));
+      accumulator.handleData("{\"usage\":{\"prompt_tokens\":1,\"completion_tokens\":1}}");
+      accumulator.handleData("[DONE]");
+
+      ProviderException error = assertThrows(ProviderException.class, accumulator::finish);
+      assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+      assertEquals("tool call missing " + missing, error.getMessage());
+    }
+  }
+
   /** 测试意图：无 type 的 identity-only 帧暂不投射；function 意图确定后从原生槽位一次补齐，满足 runtime 的 0 起连续序号与终态一致性。 */
   @Test
   void seedsFunctionAfterUntypedIdentityOnlyFrameFollowingCustomCall() {

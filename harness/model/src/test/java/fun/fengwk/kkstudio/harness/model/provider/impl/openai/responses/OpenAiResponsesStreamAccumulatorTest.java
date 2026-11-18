@@ -861,7 +861,7 @@ class OpenAiResponsesStreamAccumulatorTest {
    */
   @Test
   void test_completeTerminalOnlyRejectsNonObjectArguments() throws Exception {
-    List<String> nonObjectArgs = List.of("\"[1, 2, 3]\"", "\"12345\"", "\"scalar_string\"");
+    List<String> nonObjectArgs = List.of("[1, 2, 3]", "12345", "\"scalar_string\"");
     for (String arg : nonObjectArgs) {
       OpenAiResponsesStreamAccumulator accumulator =
           new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
@@ -870,13 +870,13 @@ class OpenAiResponsesStreamAccumulatorTest {
           "{\"type\":\"response.completed\",\"response\":{\"id\":\"resp_term_non_obj\",\"status\":\"completed\","
               + "\"usage\":{\"input_tokens\":10,\"output_tokens\":5},"
               + "\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_term_1\",\"name\":\"get_time\",\"arguments\":"
-              + arg
+              + MAPPER.writeValueAsString(arg)
               + "}]}}";
       accumulator.processEvent(MAPPER.readTree(completedEvent));
 
       ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
       assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
-      assertEquals("tool call arguments cannot be parsed as JSON object", ex.getMessage());
+      assertEquals("get_time: expected a JSON object at 1:1; not executed.", ex.getMessage());
     }
   }
 
@@ -894,7 +894,43 @@ class OpenAiResponsesStreamAccumulatorTest {
 
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
-    assertEquals("tool call arguments cannot be parsed as JSON object", ex.getMessage());
+    assertTrue(
+        ex.getMessage()
+            .matches(
+                "get_time: invalid JSON at 1:[1-9][0-9]*; unexpected end of input; not executed\\."));
+  }
+
+  /** 没有 terminal output 时也要严格解析 delta 聚合的参数。 */
+  @Test
+  void diagnosesMalformedArgumentsAccumulatedFromDeltas() {
+    OpenAiResponsesStreamAccumulator accumulator =
+        new OpenAiResponsesStreamAccumulator(createRequest(), createDescriptor(), e -> {});
+    accumulator.processEvent(
+        MAPPER.readTree(
+            """
+        {"type":"response.output_item.added","output_index":0,
+          "item":{"type":"function_call","id":"item_1","call_id":"call_1","name":"edit"}}
+        """));
+    for (String delta : List.of("{\"a\":\"<svg width=", "\"240\">\"}")) {
+      accumulator.processEvent(
+          MAPPER.readTree(
+              """
+          {"type":"response.function_call_arguments.delta","item_id":"item_1","delta":%s}
+          """
+                  .formatted(MAPPER.writeValueAsString(delta))));
+    }
+    accumulator.processEvent(
+        MAPPER.readTree(
+            """
+        {"type":"response.completed","response":{"id":"resp","status":"completed",
+          "usage":{"input_tokens":2,"output_tokens":1}}}
+        """));
+
+    ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+    assertTrue(
+        ex.getMessage()
+            .matches("edit: invalid JSON at 1:[1-9][0-9]*; expected ',' or '}'; not executed\\."));
   }
 
   /** 意图：验证 COMPLETE 终态下仅在 terminal output 出现的 tool call 若缺失 id 抛出 INVALID_RESPONSE。 */

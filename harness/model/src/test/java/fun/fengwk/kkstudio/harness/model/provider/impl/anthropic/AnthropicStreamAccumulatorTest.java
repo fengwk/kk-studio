@@ -358,7 +358,10 @@ class AnthropicStreamAccumulatorTest {
 
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
-    assertEquals("invalid tool arguments JSON", ex.getMessage());
+    assertTrue(
+        ex.getMessage()
+            .matches(
+                "n1: invalid JSON at 1:[1-9][0-9]*; expected a quoted object key; not executed\\."));
   }
 
   @Test

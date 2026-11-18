@@ -1,6 +1,10 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl;
 
+import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
+import tools.jackson.core.TokenStreamLocation;
+import tools.jackson.core.exc.StreamConstraintsException;
+import tools.jackson.core.exc.UnexpectedEndOfInputException;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
@@ -8,6 +12,8 @@ import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.codec.JsonCodecSupport;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
+
+import java.util.regex.Pattern;
 
 /**
  * Provider 协议共用的 JSON 解析与 usage 数值校验纯辅助。
@@ -17,6 +23,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 public final class ProviderJsonHelper {
 
   private static final ObjectMapper OBJECT_MAPPER = HarnessJson.STRICT_DECIMAL;
+  private static final Pattern TOOL_IDENTIFIER = Pattern.compile("[a-zA-Z0-9_-]{1,64}");
 
   private ProviderJsonHelper() {}
 
@@ -76,6 +83,70 @@ public final class ProviderJsonHelper {
       // 宽容解析：调用方只在能得到对象时使用结果，其余情况按“无对象”继续。
       return null;
     }
+  }
+
+  /** 完整工具调用的参数必须是严格 JSON 对象；诊断仅包含安全的工具名、解析位置和预定义原因。 */
+  public static void requireToolArgumentsObject(String toolName, String arguments) {
+    if (arguments == null || arguments.isBlank()) {
+      throw toolArgumentsError(toolName, "missing argument text");
+    }
+    try (JsonParser parser = OBJECT_MAPPER.createParser(arguments)) {
+      parser.nextToken();
+      TokenStreamLocation rootLocation = parser.currentTokenLocation();
+      // readTree uses the same strict mapper as tryParseJsonObject, including trailing token
+      // checks.
+      JsonNode node = OBJECT_MAPPER.readTree(parser);
+      if (node == null || !node.isObject()) {
+        throw toolArgumentsError(toolName, "expected a JSON object" + formatPosition(rootLocation));
+      }
+    } catch (JacksonException error) {
+      throw toolArgumentsError(
+          toolName,
+          "invalid JSON" + formatPosition(error.getLocation()) + "; " + toolArgumentsReason(error));
+    }
+  }
+
+  private static ProviderException toolArgumentsError(String toolName, String diagnosis) {
+    // Never surface a raw provider identifier outside the tool-name grammar or a parser exception.
+    String name =
+        toolName != null && TOOL_IDENTIFIER.matcher(toolName).matches() ? toolName : "tool call";
+    return new ProviderException(
+        ProviderErrorKind.INVALID_RESPONSE, name + ": " + diagnosis + "; not executed.");
+  }
+
+  private static String formatPosition(TokenStreamLocation location) {
+    return location != null && location.getLineNr() > 0 && location.getColumnNr() > 0
+        ? " at " + location.getLineNr() + ":" + location.getColumnNr()
+        : "";
+  }
+
+  private static String toolArgumentsReason(JacksonException error) {
+    if (error instanceof StreamConstraintsException) {
+      return "JSON input exceeds parser limits";
+    }
+    if (error instanceof UnexpectedEndOfInputException) {
+      return "unexpected end of input";
+    }
+    // Jackson does not expose structured reasons for all syntax errors. Recognize specific
+    // templates, but never include their original text, which can contain argument content.
+    String message = error.getOriginalMessage();
+    if (message != null) {
+      if (message.startsWith("Duplicate Object property ")) {
+        return "duplicate object key";
+      }
+      if (message.startsWith("Trailing token ")) {
+        return "unexpected data after the JSON value";
+      }
+      if (message.startsWith("Unexpected character (")) {
+        if (message.endsWith("was expecting comma to separate Object entries")) {
+          return "expected ',' or '}'";
+        }
+        if (message.endsWith("was expecting double-quote to start property name")) {
+          return "expected a quoted object key";
+        }
+      }
+    }
+    return "invalid token or structure";
   }
 
   /**

@@ -129,21 +129,22 @@ final class AnthropicResponseAssembler {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "incomplete tool call missing arguments");
     }
-    if (ProviderJsonHelper.tryParseJsonObject(argsStr) != null) {
-      addToolCall(block, argsStr, responseBlocks);
-      return;
-    }
     if (stopReason == GenerationStopReason.LENGTH) {
-      toolCallDiagnostics.add(
-          new ProviderToolCallDiagnostic(
-              block.toolOrdinal,
-              block.toolId,
-              block.toolName,
-              argsStr,
-              "tool arguments truncated before valid JSON formed"));
+      if (ProviderJsonHelper.tryParseJsonObject(argsStr) != null) {
+        addToolCall(block, argsStr, responseBlocks);
+      } else {
+        toolCallDiagnostics.add(
+            new ProviderToolCallDiagnostic(
+                block.toolOrdinal,
+                block.toolId,
+                block.toolName,
+                argsStr,
+                "tool arguments truncated before valid JSON formed"));
+      }
       return;
     }
-    throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "invalid tool arguments JSON");
+    ProviderJsonHelper.requireToolArgumentsObject(block.toolName, argsStr);
+    addToolCall(block, argsStr, responseBlocks);
   }
 
   private void addToolCall(

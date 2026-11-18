@@ -167,12 +167,13 @@ final class OpenAiChatToolCallStream {
     String id = builder.id();
     String name = builder.name();
     String arguments = builder.arguments();
-    if (id.isBlank()
-        || name.isBlank()
-        || ProviderJsonHelper.tryParseJsonObject(arguments) == null) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE, "invalid tool call arguments JSON");
+    if (id.isBlank()) {
+      throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "tool call missing id");
     }
+    if (name.isBlank()) {
+      throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "tool call missing name");
+    }
+    ProviderJsonHelper.requireToolArgumentsObject(name, arguments);
     return new ProviderToolCall(id, name, arguments);
   }
 

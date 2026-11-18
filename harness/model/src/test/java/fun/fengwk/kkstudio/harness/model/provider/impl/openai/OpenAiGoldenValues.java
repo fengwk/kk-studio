@@ -251,7 +251,7 @@ final class OpenAiGoldenValues {
         "{\"protocolEvents\":[],\"events\":[{\"kind\":\"text\",\"text\":\"blocked\"},{\"kind\":\"toolCall\",\"index\":0,\"id\":\"c1\",\"name\":\"lookup\",\"argumentsJson\":\"{}\"}],\"blocks\":[{\"kind\":\"text\",\"text\":\"blocked\",\"blockData\":null}],\"stopReason\":\"FILTERED\",\"usage\":{\"inputTokens\":2,\"outputTokens\":1,\"cacheReadTokens\":0,\"cacheWriteTokens\":0,\"cacheWriteByTtl\":[],\"reasoningTokens\":null,\"providerTotalTokens\":null},\"requestId\":null,\"serviceTier\":null,\"rawUsageJson\":\"{\\\"prompt_tokens\\\":2,\\\"completion_tokens\\\":1}\",\"toolCallDiagnostics\":[]}");
     values.put(
         "chat-stream-incomplete-tool-on-complete",
-        "INVALID_RESPONSE|invalid tool call arguments JSON");
+        "INVALID_RESPONSE|f: missing argument text; not executed.");
     values.put(
         "chat-stream-invalid-choice-index",
         "INVALID_RESPONSE|choice index must be a non-negative integer");

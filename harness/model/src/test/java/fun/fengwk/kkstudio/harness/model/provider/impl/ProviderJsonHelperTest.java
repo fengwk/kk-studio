@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -98,6 +100,75 @@ class ProviderJsonHelperTest {
     assertNull(ProviderJsonHelper.tryParseJsonObject("[1, 2]"));
     assertNull(ProviderJsonHelper.tryParseJsonObject("\"string\""));
     assertNull(ProviderJsonHelper.tryParseJsonObject("{\"a\":1,\"a\":2}"));
+  }
+
+  /** 内嵌双引号破坏第二行参数；仅保留解析器实际位置和原因，不回显源内容。 */
+  @Test
+  void reportsUnescapedQuoteWithoutEchoingArguments() {
+    String line = "  \"new_string\":\"<svg width=\"240\">\"";
+    ProviderException failure = assertToolArgumentsRejected("edit", "{\n" + line + "\n}");
+    int column = line.indexOf("240") + 1;
+    assertEquals(
+        "edit: invalid JSON at 2:" + column + "; expected ',' or '}'; not executed.",
+        failure.getMessage());
+    assertFalse(failure.getMessage().contains("new_string"));
+    assertFalse(failure.getMessage().contains("<svg"));
+  }
+
+  /** 不接受合法 JSON 的前缀、重复键或非对象；解析通过也不改写调用方原文。 */
+  @Test
+  void keepsCompleteArgumentsStrict() {
+    assertDoesNotThrow(
+        () -> ProviderJsonHelper.requireToolArgumentsObject("edit", " {\"a\":1.20} "));
+    ProviderException duplicate =
+        assertToolArgumentsRejected("edit", "{\"private_field\":1,\"private_field\":2}");
+    assertTrue(duplicate.getMessage().contains("duplicate object key"));
+    assertFalse(duplicate.getMessage().contains("private_field"));
+    assertTrue(
+        assertToolArgumentsRejected("edit", "{} {}")
+            .getMessage()
+            .contains("unexpected data after the JSON value"));
+    assertTrue(
+        assertToolArgumentsRejected("edit", "\n[]")
+            .getMessage()
+            .contains("expected a JSON object at 2:1;"));
+    assertTrue(
+        assertToolArgumentsRejected("edit", "{key:1}")
+            .getMessage()
+            .contains("expected a quoted object key"));
+    assertTrue(
+        assertToolArgumentsRejected("edit", "{\"a\":\"unfinished")
+            .getMessage()
+            .contains("unexpected end of input"));
+  }
+
+  /** 伪造工具标识和长异常载荷不能突破单行、有界及不回显的契约。 */
+  @Test
+  void boundsDiagnosticsForUntrustedNamesAndPayloads() {
+    assertEquals(
+        "tool call: missing argument text; not executed.",
+        assertToolArgumentsRejected("edit\r\nuntrusted", " ").getMessage());
+    assertTrue(
+        assertToolArgumentsRejected("x".repeat(512), "{\"a\":unexpected}")
+            .getMessage()
+            .startsWith("tool call: invalid JSON"));
+    assertTrue(
+        assertToolArgumentsRejected("x".repeat(64), "{\"a\":" + "[".repeat(1200))
+            .getMessage()
+            .contains("JSON input exceeds parser limits"));
+  }
+
+  private static ProviderException assertToolArgumentsRejected(String toolName, String arguments) {
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () -> ProviderJsonHelper.requireToolArgumentsObject(toolName, arguments));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertTrue(error.getMessage().endsWith("; not executed."));
+    assertTrue(error.getMessage().length() <= 240);
+    assertEquals(1, error.getMessage().lines().count());
+    assertNull(error.getCause());
+    return error;
   }
 
   @Test

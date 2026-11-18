@@ -146,18 +146,15 @@ final class OpenAiResponsesToolStream {
           (tool.callId != null && !tool.callId.isBlank()) ? tool.callId : tool.id;
       boolean hasValidId = effectiveCallId != null && !effectiveCallId.isBlank();
       boolean hasValidName = tool.name != null && !tool.name.isBlank();
-      boolean hasArgs = tool.argumentsPresent || tool.argumentsBuffer.length() > 0;
       String arguments = tool.argumentsBuffer.toString();
-      JsonNode parsedArguments =
-          (tool.argumentsTextual && hasArgs && !arguments.isBlank())
-              ? ProviderJsonHelper.tryParseJsonObject(arguments)
-              : null;
-
       if (stopReason == GenerationStopReason.COMPLETE) {
-        calls.add(
-            requireCompleteTool(
-                effectiveCallId, tool, hasValidId, hasValidName, arguments, parsedArguments));
+        calls.add(requireCompleteTool(effectiveCallId, tool, hasValidId, hasValidName, arguments));
       } else {
+        boolean hasArgs = tool.argumentsPresent || tool.argumentsBuffer.length() > 0;
+        JsonNode parsedArguments =
+            (tool.argumentsTextual && hasArgs && !arguments.isBlank())
+                ? ProviderJsonHelper.tryParseJsonObject(arguments)
+                : null;
         resolveTruncatedTool(
             tool,
             ordinal,
@@ -180,8 +177,7 @@ final class OpenAiResponsesToolStream {
       WireToolCall tool,
       boolean hasValidId,
       boolean hasValidName,
-      String arguments,
-      JsonNode parsedArguments) {
+      String arguments) {
     if (!hasValidId) {
       throw new ProviderException(ProviderErrorKind.INVALID_RESPONSE, "tool call missing id");
     }
@@ -196,11 +192,7 @@ final class OpenAiResponsesToolStream {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "tool call arguments must be a JSON string");
     }
-    if (parsedArguments == null) {
-      throw new ProviderException(
-          ProviderErrorKind.INVALID_RESPONSE,
-          "tool call arguments cannot be parsed as JSON object");
-    }
+    ProviderJsonHelper.requireToolArgumentsObject(tool.name, arguments);
     return new ProviderToolCall(callId, tool.name, arguments);
   }
 
