@@ -188,23 +188,31 @@ final class GeminiRequestEncoder {
     String modelId = request.model().modelId().toLowerCase(Locale.ROOT);
     String effort = request.variant().reasoningEffort();
     if (isGemini25(modelId)) {
+      if (request.variant().reasoningOff() && isGemini25Pro(modelId)) {
+        throw new ProviderException(
+            ProviderErrorKind.INVALID_REQUEST,
+            "Gemini 2.5 Pro cannot disable thinking; its minimum thinking budget is 128");
+      }
       thinkingConfig.put("includeThoughts", !request.variant().reasoningOff());
       thinkingConfig.put(
           "thinkingBudget", request.variant().reasoningOff() ? 0 : thinkingBudget(modelId, effort));
       return;
     }
-    if (isGemini3(modelId)) {
+
+    Set<String> thinkingLevels = supportedThinkingLevels(modelId);
+    if (thinkingLevels != null) {
       if (request.variant().reasoningOff()) {
         throw new ProviderException(
-            ProviderErrorKind.INVALID_REQUEST, "Gemini 3 models do not support disabling thinking");
+            ProviderErrorKind.INVALID_REQUEST,
+            "this Gemini model family does not support disabling thinking");
       }
-      if (!Set.of("minimal", "low", "medium", "high").contains(effort)) {
+      if (!thinkingLevels.contains(effort)) {
         throw new ProviderException(
             ProviderErrorKind.INVALID_REQUEST,
-            "reasoningEffort is not a supported Gemini 3 thinking level");
+            "reasoningEffort is not supported by this Gemini model");
       }
       thinkingConfig.put("includeThoughts", true);
-      thinkingConfig.put("thinkingLevel", effort);
+      thinkingConfig.put("thinkingLevel", effort.toUpperCase(Locale.ROOT));
       return;
     }
     throw new ProviderException(
@@ -216,8 +224,28 @@ final class GeminiRequestEncoder {
     return modelId.matches("gemini-2\\.5-(?:pro|flash|flash-lite)(?:-.+)?");
   }
 
-  private static boolean isGemini3(String modelId) {
-    return modelId.matches("gemini-3(?:\\.\\d+)?-(?:pro|flash)(?:-.+)?");
+  private static boolean isGemini25Pro(String modelId) {
+    return modelId.matches("gemini-2\\.5-pro(?:-.+)?");
+  }
+
+  /** Return only levels verified for a documented Gemini 3+ model name. */
+  private static Set<String> supportedThinkingLevels(String modelId) {
+    return switch (modelId) {
+      case "gemini-3-pro-preview", "gemini-3-pro-preview-customtools" -> Set.of("low", "high");
+      case "gemini-3-flash-preview",
+          "gemini-3.1-flash-lite",
+          "gemini-3.1-flash-lite-preview",
+          "gemini-3.5-flash",
+          "gemini-3.5-flash-lite",
+          "gemini-3.6-flash" -> Set.of("minimal", "low", "medium", "high");
+      case "gemini-3.1-pro-preview", "gemini-3.1-pro-preview-customtools" -> Set.of(
+          "low", "medium", "high");
+      case "gemini-3.1-flash-lite-image" -> Set.of("minimal", "high");
+      case "gemini-3.7-flash", "gemini-3.8-flash", "gemini-4-argon", "gemini-4-carbon" -> Set.of(
+          "low", "medium", "high");
+      case "gemini-4-neon", "gemini-4-hydrogen" -> Set.of("low", "medium", "high", "xhigh");
+      default -> null;
+    };
   }
 
   private static int thinkingBudget(String modelId, String effort) {
