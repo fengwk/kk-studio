@@ -286,7 +286,7 @@ final class ModelPricingResolver {
   }
 
   private static BigDecimal apply(BigDecimal value, BigDecimal factor) {
-    return factor == null ? value : value.multiply(factor);
+    return value == null || factor == null ? value : value.multiply(factor);
   }
 
   record ResolvedRates(

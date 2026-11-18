@@ -265,6 +265,26 @@ class ModelPricingResolverTest {
     assertEquals(new BigDecimal("11"), cost.total());
   }
 
+  /** 普通缓存写价格缺失时，只能对完全归属到已定价 TTL 的写入计费。 */
+  @Test
+  void returnsUnknownForUnallocatedCacheWritesWithoutOrdinaryRate() {
+    ModelPricing pricing =
+        new ModelPricing(
+            new ModelPricing.RateSet(
+                dec("0"), dec("0"), dec("0"), null, Map.of(300L, dec("2")), null),
+            List.of(),
+            List.of());
+
+    ModelCost fullyAllocated =
+        ModelCost.calculate(
+            pricing, new ModelUsage(0, 0, 0, 1_000_000, Map.of(300L, 1_000_000L), null, null));
+    ModelCost missingTtlFacts =
+        ModelCost.calculate(pricing, new ModelUsage(0, 0, 0, 1_000_000, Map.of(), null, null));
+
+    assertEquals(new BigDecimal("2"), fullyAllocated.cacheWrite());
+    assertNull(missingTtlFacts);
+  }
+
   /** 日期边界支持单侧缺省；缺失 requestedAt 时返回未知，绝不查询当前时间伪造历史。 */
   @Test
   void matchesOneSidedUtcDatesAndReturnsUnknownWhenRequestedAtIsMissing() {

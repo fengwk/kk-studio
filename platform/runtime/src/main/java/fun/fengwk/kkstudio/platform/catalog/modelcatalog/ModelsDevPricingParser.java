@@ -190,7 +190,7 @@ final class ModelsDevPricingParser {
       base.setCacheWriteByTtl(Map.of());
       return;
     }
-    base.setCacheWrite(BigDecimal.ZERO);
+    base.setCacheWrite(null);
     base.setCacheWriteByTtl(ttlRates(write, "cost.text.input.cache.write"));
   }
 

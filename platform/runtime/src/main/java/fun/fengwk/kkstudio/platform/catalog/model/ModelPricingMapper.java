@@ -76,7 +76,7 @@ final class ModelPricingMapper {
         zeroIfNull(rates.getInput()),
         zeroIfNull(rates.getOutput()),
         zeroIfNull(rates.getCacheRead()),
-        zeroIfNull(rates.getCacheWrite()),
+        rates.getCacheWrite(),
         toTtlRates(rates.getCacheWriteByTtl()),
         rates.getReasoning());
   }

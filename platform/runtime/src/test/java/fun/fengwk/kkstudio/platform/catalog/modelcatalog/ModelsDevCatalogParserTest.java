@@ -83,7 +83,7 @@ class ModelsDevCatalogParserTest {
   @Test
   void convertsTtlCacheWritesToPositiveSeconds() {
     ModelPricingDTO pricing = real.get("opencode/claude-sonnet-4-6").getPricing();
-    assertDecimal("0", pricing.getBase().getCacheWrite());
+    assertNull(pricing.getBase().getCacheWrite());
     assertEquals(2, pricing.getBase().getCacheWriteByTtl().size());
     assertDecimal("3.75", pricing.getBase().getCacheWriteByTtl().get("300"));
     assertDecimal("6", pricing.getBase().getCacheWriteByTtl().get("3600"));
@@ -131,7 +131,7 @@ class ModelsDevCatalogParserTest {
     assertDecimal("4", pricingDto.getBase().getInput());
     assertDecimal("20", pricingDto.getBase().getOutput());
     assertDecimal("0.2", pricingDto.getBase().getCacheRead());
-    assertDecimal("0", pricingDto.getBase().getCacheWrite());
+    assertNull(pricingDto.getBase().getCacheWrite());
     assertEquals(2, pricingDto.getBase().getCacheWriteByTtl().size());
     assertDecimal("5", pricingDto.getBase().getCacheWriteByTtl().get("300"));
     assertDecimal("8", pricingDto.getBase().getCacheWriteByTtl().get("3600"));
@@ -149,6 +149,7 @@ class ModelsDevCatalogParserTest {
     // 经唯一 parser 解析为 ModelPricing
     ModelPricing modelPricing = ModelPricingCodec.parsePricing(pricingDto);
     assertNotNull(modelPricing);
+    assertNull(modelPricing.base().cacheWrite());
     assertEquals(1, modelPricing.multipliers().size());
 
     // 用量：1M input, 500k output, 2M cache read, 3M cache write (1M at 300s, 2M at 3600s)
@@ -174,6 +175,12 @@ class ModelsDevCatalogParserTest {
     assertDecimal("0.4", costStandard.cacheRead());
     assertDecimal("21", costStandard.cacheWrite());
     assertDecimal("0", costStandard.reasoning());
+    assertNull(
+        ModelCost.calculate(
+            modelPricing,
+            new ModelUsage(1_000_000L, 0, 0, 1_000_000L, Map.of(), null, null),
+            requestedAt,
+            "standard"));
     assertDecimal("35.4", costStandard.total());
 
     // fast 对所有文本与 TTL 缓存费率生效（x2），不额外乘 region 1.1。

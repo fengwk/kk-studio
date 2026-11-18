@@ -48,7 +48,7 @@ public record ModelPricing(RateSet base, List<Override> overrides, List<Multipli
       input = requireNonNullNonNegative(input, "input");
       output = requireNonNullNonNegative(output, "output");
       cacheRead = requireNonNullNonNegative(cacheRead, "cacheRead");
-      cacheWrite = requireNonNullNonNegative(cacheWrite, "cacheWrite");
+      cacheWrite = optionalNonNegative(cacheWrite, "cacheWrite");
       cacheWriteByTtl = copyTtlRates(cacheWriteByTtl);
       reasoning = reasoning == null ? null : requireNonNegative(reasoning, "reasoning");
     }

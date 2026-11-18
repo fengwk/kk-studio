@@ -61,7 +61,8 @@ public final class ModelPricingCodec {
     if (base.getCacheRead() == null) {
       base.setCacheRead(BigDecimal.ZERO);
     }
-    if (base.getCacheWrite() == null) {
+    if (base.getCacheWrite() == null
+        && (base.getCacheWriteByTtl() == null || base.getCacheWriteByTtl().isEmpty())) {
       base.setCacheWrite(BigDecimal.ZERO);
     }
     if (base.getCacheWriteByTtl() == null) {

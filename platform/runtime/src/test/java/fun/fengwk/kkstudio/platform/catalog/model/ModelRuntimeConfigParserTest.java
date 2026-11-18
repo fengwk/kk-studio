@@ -89,6 +89,23 @@ class ModelRuntimeConfigParserTest {
     assertEquals(List.of(), pricing.multipliers());
   }
 
+  /** 缺省普通写价在存在 TTL 分价时保留为未知，不归一成零并改变不可归属写入的账单。 */
+  @Test
+  void preservesMissingOrdinaryWriteRateWhenTtlRatesExist() {
+    String config =
+        configWithPricing(
+            "{\"base\":{\"cacheWriteByTtl\":{\"300\":\"2\"}},"
+                + "\"overrides\":[],\"multipliers\":[]}");
+
+    ModelConfigDTO decoded = parser.decode(config);
+    String encoded = parser.encode(decoded);
+    var parsed = parser.parse(encoded);
+
+    assertNull(parsed.pricing().base().cacheWrite());
+    assertEquals(new BigDecimal("2"), parsed.pricing().base().cacheWriteByTtl().get(300L));
+    assertTrue(encoded.contains("\"cacheWriteByTtl\":{\"300\":\"2\"}"), encoded);
+  }
+
   /** 类型化 DTO 来回往返：decode -> encode -> parse 得到相同的 runtime 快照。 */
   @Test
   void decodeThenEncodeRoundTripsEveryTypedConfigField() {
