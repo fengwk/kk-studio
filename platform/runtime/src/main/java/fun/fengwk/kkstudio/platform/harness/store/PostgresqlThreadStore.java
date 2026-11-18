@@ -285,6 +285,7 @@ final class PostgresqlThreadStore implements ThreadStore {
     Set<UUID> executionRoots = executionRoots(targets);
     deleteDependentRows(targets, lockedWorkTargets, lockedTools, driverDeletion, driverTargets);
     deleteThreadRows(targets);
+    targets.forEach(tx::notifyThreadSnapshotChanged);
     executionRoots.forEach(tx::notifyExecutionTree);
     return targets.size();
   }

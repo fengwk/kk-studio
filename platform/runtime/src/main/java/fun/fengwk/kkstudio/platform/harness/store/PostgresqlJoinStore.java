@@ -264,10 +264,7 @@ final class PostgresqlJoinStore implements JoinStore {
     tx.requireSingleUpdate(updated, "join", join.invocationId());
     if (!old.equals(join)) {
       tx.notifyThreadSnapshotChanged(join.childThreadId());
-      if (old.parentThreadId() != null) {
-        tx.notifyThreadSnapshotChanged(old.parentThreadId());
-      }
-      if (join.parentThreadId() != null && !join.parentThreadId().equals(old.parentThreadId())) {
+      if (join.parentThreadId() != null) {
         tx.notifyThreadSnapshotChanged(join.parentThreadId());
       }
     }

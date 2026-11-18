@@ -199,8 +199,8 @@ Canvas 命令冲突包含 `conflicts`。响应不包含内部 `resource`。
 删除会话是 `deleteSessions(sessionIds, deleteRelations, releaseRefs)`：调用方必须持有产品 owner 锁，两个回调
 与删除加入同一物理事务，线程树、命令、调用、Join、执行退出与产品关系一起收敛。
 
-变更订阅由平台实现、上层只看到订阅：`threadVersions()` 携带 durable version，`executionTree()` 与
-`interactions()` 只发失效提示，`HarnessChangeSubscription` 返回建立瞬间的 cursor 与释放句柄。
+变更订阅由平台实现、上层只看到订阅：`threadVersions()` 携带 durable version，`threadSnapshots()`、`executionTree()` 与
+`interactions()` 只发失效提示，`HarnessChangeSubscription` 返回建立瞬间的 cursor 与释放句柄。Thread 快照失效按 Thread ID 定点提示，不推进 version。
 
 ### Driver 与 Work
 

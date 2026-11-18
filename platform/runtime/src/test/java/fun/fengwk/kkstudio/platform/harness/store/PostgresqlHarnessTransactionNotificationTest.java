@@ -48,6 +48,7 @@ import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
+import fun.fengwk.kkstudio.harness.spi.driver.DriverThreadDeletion;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 import fun.fengwk.kkstudio.harness.spi.work.ClaimedWork;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
@@ -162,6 +163,35 @@ class PostgresqlHarnessTransactionNotificationTest {
       listener.expectExactly(
           versionNotification(grandChildChain.threadId(), 2L),
           treeNotification(rootChain.threadId()));
+    }
+  }
+
+  /** 删除没有 sidecar 的 Thread 与它的 THREAD Work 时仍定点失效被删 Thread 快照。 */
+  @Test
+  void deletingThreadWithThreadWorkPublishesSnapshotSignal() throws SQLException {
+    SessionRoot root = seedSessionRoot(store);
+    ToolChain parent = seedToolChain(store, root, null, null, ToolKind.BASH);
+    UUID threadId =
+        store.transaction(
+            tx -> {
+              UUID id = tx.nextId();
+              tx.threads().lockTree(parent.threadId());
+              tx.threads().lock(parent.threadId()).orElseThrow();
+              tx.threads()
+                  .insert(plainThread(id, root.sessionId(), parent.threadId(), root.rootEntryId()));
+              tx.work().request(new WorkTarget(WorkTargetType.THREAD, id));
+              return id;
+            });
+
+    try (InvalidationListener listener = InvalidationListener.openThreadSnapshots(dataSource)) {
+      store.transaction(
+          tx -> {
+            tx.threads().lockTree(parent.threadId());
+            tx.threads().lock(threadId).orElseThrow();
+            tx.threads().delete(List.of(threadId), DriverThreadDeletion.NONE);
+            return null;
+          });
+      listener.expectExactly(snapshotNotification(threadId));
     }
   }
 

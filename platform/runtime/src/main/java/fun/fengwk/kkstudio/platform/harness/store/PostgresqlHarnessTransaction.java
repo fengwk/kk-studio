@@ -298,26 +298,23 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
   }
 
   /**
-   * Durable TOOL Work 变化提示 Thread 快照读取；冻结了环境亲和性的 TOOL Work 另外失效待处理交互。仅解析本地持久化的 tool 所属 Thread，
-   * 不在事务内读取环境状态。
+   * 只有冻结环境亲和性的 TOOL Work 影响快照里的环境等待 sidecar：按本地调用事实定点提示；交互失效保持原协议。
+   * 不在事务内读取环境状态，调用已不存在时不广播无依据的全量快照失效。
    */
   void notifyWorkChanged(WorkTarget target, EnvironmentId requiredEnvironmentId) {
-    if (WorkTargetType.TOOL.equals(target.type())) {
-      UUID threadId = toolInvocationThread(target.id());
-      notifyChannel(
-          HarnessNotificationChannel.THREAD_SNAPSHOT, threadId == null ? "" : threadId.toString());
-    }
     if (requiredEnvironmentId != null) {
+      if (WorkTargetType.TOOL.equals(target.type())) {
+        toolInvocationThread(target.id()).ifPresent(this::notifyThreadSnapshotChanged);
+      }
       notifyToolInteraction(executionRootOfToolInvocation(target.id()));
     }
   }
 
-  private UUID toolInvocationThread(UUID toolInvocationId) {
+  private Optional<UUID> toolInvocationThread(UUID toolInvocationId) {
     return queryOne(
-            "select thread_id from harness_tool_invocation where id = ?",
-            (resultSet, rowNumber) -> resultSet.getObject("thread_id", UUID.class),
-            toolInvocationId)
-        .orElse(null);
+        "select thread_id from harness_tool_invocation where id = ?",
+        (resultSet, rowNumber) -> resultSet.getObject("thread_id", UUID.class),
+        toolInvocationId);
   }
 
   public <T> Optional<T> queryOne(String sql, RowMapper<T> mapper, Object... arguments) {
