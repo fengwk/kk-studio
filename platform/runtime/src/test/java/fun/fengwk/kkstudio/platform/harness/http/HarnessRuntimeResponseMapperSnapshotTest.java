@@ -39,6 +39,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationError;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.codec.ToolApprovalJsonCodec;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.tool.ToolCall;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.harness.tool.codec.ToolResultJsonCodec;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessActiveAssistantOutputDTO;
@@ -218,6 +219,46 @@ class HarnessRuntimeResponseMapperSnapshotTest {
     assertEquals("{\"x\":1}", unboundDto.getArgumentsJson());
     assertEquals(NOW, unboundDto.getCreatedAt());
     assertEquals(NOW.plusSeconds(1), unboundDto.getUpdatedAt());
+  }
+
+  @Test
+  void projectsJoinThreadIdsByInvocationAndKeepsMissingJoinNull() {
+    // 测试意图：同类型并行调用按各自 invocation id 映射子 Thread，缺失的 Join 保持 null。
+    ToolInvocation first =
+        toolInvocation(ToolInvocationStatus.WAITING_CHILD, null, null, null, null, 1);
+    ToolInvocation second =
+        toolInvocation(ToolInvocationStatus.WAITING_CHILD, null, null, null, null, 1);
+    when(second.id()).thenReturn(id(101));
+    when(second.callIndex()).thenReturn(1);
+    when(second.call()).thenReturn(new ToolCall("call-2", "task", "{}"));
+    ThreadSnapshot base =
+        withToolSiblings(toolSnapshot(ToolInvocationStatus.WAITING_CHILD), List.of(first, second));
+    ThreadSnapshot joined =
+        new ThreadSnapshot(
+            base.thread(),
+            base.entryState(),
+            base.entrySlice(),
+            base.queuedCommands(),
+            base.generation(),
+            base.toolSiblings(),
+            Map.of(id(100), id(700), id(101), id(701)),
+            base.liveState(),
+            base.stopReceipts(),
+            base.incompleteChildJoins(),
+            base.unconsumedAppliedNotifications(),
+            base.unconfirmedExecutions(),
+            base.hasIncompleteOwnerChildJoin());
+
+    var invocations =
+        HarnessRuntimeResponseMapper.toSnapshotDto(joined, Map.of()).getToolInvocations();
+    assertEquals(
+        List.of(idText(700), idText(701)),
+        invocations.stream().map(ToolInvocationDTO::getChildThreadId).toList());
+    assertNull(
+        HarnessRuntimeResponseMapper.toSnapshotDto(base, Map.of())
+            .getToolInvocations()
+            .getFirst()
+            .getChildThreadId());
   }
 
   @Test

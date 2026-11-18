@@ -2915,6 +2915,7 @@ export interface ToolCatalogEntryDTO {
 export interface ToolInvocationDTO {
   id: string
   threadId: string
+  childThreadId: string | null
   turnStartEntryId: string
   assistantEntryId: string
   callIndex: number

@@ -207,7 +207,8 @@ public final class HarnessRuntimeResponseMapper {
 
   private record ToolFileMutationGroup(UUID assistantEntryId, ToolFileMutationOrder.Key fileKey) {}
 
-  private static List<ToolInvocationDTO> toToolInvocationDtos(List<ToolInvocation> invocations) {
+  private static List<ToolInvocationDTO> toToolInvocationDtos(
+      List<ToolInvocation> invocations, Map<UUID, UUID> toolChildThreadIds) {
     Map<ToolFileMutationGroup, TreeMap<Integer, ToolInvocation>> grouped = new HashMap<>();
     List<ToolFileMutationOrder.Key> fileKeys = new ArrayList<>(invocations.size());
     for (ToolInvocation invocation : invocations) {
@@ -226,6 +227,8 @@ public final class HarnessRuntimeResponseMapper {
     for (int index = 0; index < invocations.size(); index++) {
       ToolInvocation invocation = invocations.get(index);
       ToolInvocationDTO dto = toToolInvocationDto(invocation);
+      UUID childThreadId = toolChildThreadIds.get(invocation.id());
+      dto.setChildThreadId(childThreadId == null ? null : childThreadId.toString());
       ToolFileMutationOrder.Key key = fileKeys.get(index);
       if (key != null) {
         Map.Entry<Integer, ToolInvocation> previous =
@@ -246,6 +249,7 @@ public final class HarnessRuntimeResponseMapper {
     ToolInvocationDTO dto = new ToolInvocationDTO();
     dto.setId(invocation.id().toString());
     dto.setThreadId(invocation.threadId().toString());
+    dto.setChildThreadId(null);
     dto.setTurnStartEntryId(invocation.turnStartEntryId().toString());
     dto.setAssistantEntryId(invocation.assistantEntryId().toString());
     dto.setCallIndex(invocation.callIndex());
@@ -298,7 +302,8 @@ public final class HarnessRuntimeResponseMapper {
     GenerationProjection generation = snapshot.generation();
     dto.setActiveAssistantOutput(
         generation == null ? null : toActiveAssistantOutputDto(generation));
-    dto.setToolInvocations(toToolInvocationDtos(snapshot.toolSiblings()));
+    dto.setToolInvocations(
+        toToolInvocationDtos(snapshot.toolSiblings(), snapshot.toolChildThreadIds()));
     dto.setGenerationFailures(
         mapAll(
             snapshot.generationFailures(), failure -> toGenerationFailureDto(failure, generation)));
