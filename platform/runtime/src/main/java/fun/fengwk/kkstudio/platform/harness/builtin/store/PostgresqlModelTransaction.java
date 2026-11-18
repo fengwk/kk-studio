@@ -226,6 +226,7 @@ final class PostgresqlModelTransaction
         invocation.status() == ModelInvocationStatus.READY
             ? null
             : PostgresqlBuiltinRows.timestamp(invocation.createdAt()));
+    tx.notifyThreadSnapshotChanged(invocation.threadId());
     tx.lockResource(lockKey);
   }
 
@@ -276,6 +277,9 @@ final class PostgresqlModelTransaction
                 : PostgresqlBuiltinRows.timestamp(invocation.requestedAt()),
             invocation.id());
     PostgresqlHarnessTransaction.requireSingleUpdate(updated, "model invocation", invocation.id());
+    if (!stored.equals(invocation)) {
+      tx.notifyThreadSnapshotChanged(invocation.threadId());
+    }
   }
 
   private static String encodeGroupExecution(ModelInvocation invocation) {
@@ -288,10 +292,12 @@ final class PostgresqlModelTransaction
   public boolean deleteModelInvocation(UUID modelInvocationId) {
     tx.checkOpen();
     Objects.requireNonNull(modelInvocationId, "modelInvocationId");
-    if (findModelInvocation(modelInvocationId).isEmpty()) {
-      throw new IllegalArgumentException(
-          "model invocation " + modelInvocationId + " does not exist");
-    }
+    ModelInvocation model =
+        findModelInvocation(modelInvocationId)
+            .orElseThrow(
+                () ->
+                    new IllegalArgumentException(
+                        "model invocation " + modelInvocationId + " does not exist"));
     tx.requireLocked(LockKey.driver(modelInvocationId));
     if (hasToolInvocationChildren(modelInvocationId)) {
       throw new IllegalArgumentException(
@@ -301,6 +307,7 @@ final class PostgresqlModelTransaction
         tx.updateJdbc("delete from builtin_model_invocation where id = ?", modelInvocationId);
     PostgresqlHarnessTransaction.requireSingleUpdate(
         deleted, "model invocation", modelInvocationId);
+    tx.notifyThreadSnapshotChanged(model.threadId());
     return true;
   }
 

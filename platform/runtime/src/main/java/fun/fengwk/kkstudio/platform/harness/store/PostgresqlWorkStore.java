@@ -90,7 +90,7 @@ final class PostgresqlWorkStore implements WorkStore {
     if (!store(target).delete(target.id())) {
       return false;
     }
-    tx.notifyEnvironmentWorkChanged(target, locked.get().requiredEnvironmentId());
+    tx.notifyWorkChanged(target, locked.get().requiredEnvironmentId());
     return true;
   }
 
@@ -121,7 +121,7 @@ final class PostgresqlWorkStore implements WorkStore {
                 target.id(), requiredEnvironmentId == null ? null : requiredEnvironmentId.value());
     Work work = toWork(target, written);
     tx.recordWorkLock(work.target());
-    tx.notifyEnvironmentWorkChanged(target, work.requiredEnvironmentId());
+    tx.notifyWorkChanged(target, work.requiredEnvironmentId());
   }
 
   @Override
@@ -151,7 +151,7 @@ final class PostgresqlWorkStore implements WorkStore {
     WorkTarget target = new WorkTarget(targetType, claim.targetId());
     requireTargetExists(target);
     tx.recordWorkLock(target);
-    tx.notifyEnvironmentWorkChanged(
+    tx.notifyWorkChanged(
         target,
         claim.requiredEnvironmentId() == null
             ? null
@@ -188,7 +188,7 @@ final class PostgresqlWorkStore implements WorkStore {
     tx.requireCanLockWork(claim.target());
     Optional<DurableWork> next = store(claim.target()).complete(toClaim(claim));
     tx.recordWorkLock(claim.target());
-    tx.notifyEnvironmentWorkChanged(claim.target(), claim.requiredEnvironmentId());
+    tx.notifyWorkChanged(claim.target(), claim.requiredEnvironmentId());
     return next.map(work -> toWork(claim.target(), work));
   }
 
@@ -205,7 +205,7 @@ final class PostgresqlWorkStore implements WorkStore {
     tx.requireCanLockWork(claim.target());
     store(claim.target()).reschedule(toClaim(claim), delay);
     tx.recordWorkLock(claim.target());
-    tx.notifyEnvironmentWorkChanged(claim.target(), claim.requiredEnvironmentId());
+    tx.notifyWorkChanged(claim.target(), claim.requiredEnvironmentId());
   }
 
   @Override
@@ -216,7 +216,7 @@ final class PostgresqlWorkStore implements WorkStore {
     boolean released = store(claim.target()).release(toClaim(claim));
     tx.recordWorkLock(claim.target());
     if (released) {
-      tx.notifyEnvironmentWorkChanged(claim.target(), claim.requiredEnvironmentId());
+      tx.notifyWorkChanged(claim.target(), claim.requiredEnvironmentId());
     }
     return released;
   }

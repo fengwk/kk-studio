@@ -16,11 +16,11 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 
 /**
- * Harness 变更订阅的公开入口实现：集中 Thread version、执行树与待处理交互三个 LISTEN channel 的协议与进程内分发。
+ * Harness 变更订阅的公开入口实现：集中 Thread version、Thread 快照、执行树与待处理交互 LISTEN channel 的协议与进程内分发。
  *
- * <p>Thread version 由 {@link VersionNotificationHub} 承担注册与分发的通用语义；本类只定义 channel、payload 解析与权威
- * version 读取。执行树与待处理交互共用 {@link HarnessInvalidationSource}。本类不创建连接或线程；统一 LISTEN 循环由组合根持有，只按三个
- * {@link HarnessNotificationBinding} 投递 payload 与重连 resync。
+ * <p>Thread version 由 {@link VersionNotificationHub} 承担注册与分发的通用语义；Thread 快照、执行树与待处理交互使用提示型 {@link
+ * HarnessInvalidationSource}。本类不创建连接或线程；统一 LISTEN 循环由组合根持有，只按 {@link HarnessNotificationBinding} 投递
+ * payload 与重连 resync。
  */
 public final class HarnessChangeNotifications
     implements HarnessChangeSubscriptions, HarnessThreadVersionChanges, HarnessThreadChangeSource {
@@ -31,6 +31,7 @@ public final class HarnessChangeNotifications
           HarnessChangeNotifications::parseThreadVersion,
           HarnessThreadVersionChanges.Event.Version::new,
           HarnessThreadVersionChanges.Event.Resync::new);
+  private final HarnessInvalidationSource threadSnapshots = new HarnessInvalidationSource();
   private final HarnessInvalidationSource executionTree = new HarnessInvalidationSource();
   private final HarnessInvalidationSource interactions = new HarnessInvalidationSource();
 
@@ -41,6 +42,11 @@ public final class HarnessChangeNotifications
   @Override
   public HarnessThreadVersionChanges threadVersions() {
     return this;
+  }
+
+  @Override
+  public HarnessInvalidationChanges threadSnapshots() {
+    return threadSnapshots;
   }
 
   @Override
@@ -73,6 +79,14 @@ public final class HarnessChangeNotifications
         HarnessNotificationChannel.THREAD_VERSION,
         threadVersions::onNotification,
         threadVersions::broadcastResync);
+  }
+
+  /** Thread 快照失效通知绑定。 */
+  public HarnessNotificationBinding threadSnapshotsNotification() {
+    return new HarnessNotificationBinding(
+        HarnessNotificationChannel.THREAD_SNAPSHOT,
+        threadSnapshots::onNotification,
+        threadSnapshots::broadcastResync);
   }
 
   /** 执行树失效通知绑定。 */

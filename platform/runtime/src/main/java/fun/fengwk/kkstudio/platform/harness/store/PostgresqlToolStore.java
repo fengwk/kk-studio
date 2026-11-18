@@ -217,6 +217,7 @@ final class PostgresqlToolStore implements ToolStore {
           PostgresqlHarnessRows.timestamp(invocation.updatedAt()),
           PostgresqlToolInvocationValidation.encodeInputReceipt(invocation));
       tx.lockTool(invocation);
+      tx.notifyThreadSnapshotChanged(invocation.threadId());
     }
   }
 
@@ -229,6 +230,7 @@ final class PostgresqlToolStore implements ToolStore {
             .toList();
     Set<UUID> ids = new HashSet<>();
     Set<UUID> interactionIds = new LinkedHashSet<>();
+    Set<UUID> snapshotThreadIds = new LinkedHashSet<>();
     for (ToolInvocation invocation : copied) {
       MillisecondTime.requireMillisecondPrecision(invocation.createdAt());
       MillisecondTime.requireMillisecondPrecision(invocation.updatedAt());
@@ -244,6 +246,9 @@ final class PostgresqlToolStore implements ToolStore {
                       new IllegalArgumentException(
                           "tool invocation " + invocation.id() + " does not exist"));
       ToolInvocation.validateTransition(stored, invocation);
+      if (!stored.equals(invocation)) {
+        snapshotThreadIds.add(invocation.threadId());
+      }
       // 写前或写后任一状态为等待态：等待集合发生变化，按真实执行根发布交互失效。
       if (PostgresqlHarnessTransaction.isWaitingInteraction(stored.status())
           || PostgresqlHarnessTransaction.isWaitingInteraction(invocation.status())) {
@@ -274,6 +279,9 @@ final class PostgresqlToolStore implements ToolStore {
               invocation.id());
       tx.requireSingleUpdate(updated, "tool invocation", invocation.id());
     }
+    for (UUID threadId : snapshotThreadIds) {
+      tx.notifyThreadSnapshotChanged(threadId);
+    }
     for (UUID interactionId : interactionIds) {
       tx.notifyToolInteraction(tx.executionRootOfToolInvocation(interactionId));
     }
@@ -292,6 +300,7 @@ final class PostgresqlToolStore implements ToolStore {
     }
     // 删除等待调用前先沿不可变祖先链取得真实执行根：事实一旦删除便无法再解析根身份（不做删除后回寻）。
     List<UUID> interactionRoots = new ArrayList<>();
+    Set<UUID> snapshotThreadIds = new LinkedHashSet<>();
     for (UUID toolInvocationId : copied) {
       ToolInvocation stored =
           tx.tools()
@@ -301,6 +310,7 @@ final class PostgresqlToolStore implements ToolStore {
                       new IllegalArgumentException(
                           "tool invocation " + toolInvocationId + " does not exist"));
       tx.requireLocked(LockKey.tool(toolInvocationId));
+      snapshotThreadIds.add(stored.threadId());
       if (PostgresqlHarnessTransaction.isWaitingInteraction(stored.status())) {
         interactionRoots.add(tx.executionRootOfToolInvocation(toolInvocationId));
       }
@@ -309,6 +319,9 @@ final class PostgresqlToolStore implements ToolStore {
       int deleted =
           tx.updateJdbc("delete from harness_tool_invocation where id = ?", toolInvocationId);
       tx.requireSingleUpdate(deleted, "tool invocation", toolInvocationId);
+    }
+    for (UUID threadId : snapshotThreadIds) {
+      tx.notifyThreadSnapshotChanged(threadId);
     }
     for (UUID interactionRoot : interactionRoots) {
       tx.notifyToolInteraction(interactionRoot);

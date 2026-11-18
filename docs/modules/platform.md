@@ -42,7 +42,7 @@ Environment、Settings 与 Catalog 的实体仓库直接以 `JdbcClient` 承担 
 | [harness/builtin/query](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/query) | Builtin 请求体预览与结构化模型请求调试，只读复用发送路径的规划和物化 |
 | [harness/builtin/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/builtin/realtime) | Builtin 流式追帧：durable 快照 + active owner attempt fence，本地优先、跨节点单次严格 envelope |
 | [harness/realtime](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/realtime) | 实时事件传输：PostgreSQL 通道与订阅注册、严格帧编解码、跨节点 payload 回拉与有界缓冲 |
-| [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：三个 LISTEN channel 协议、Thread version 的权威 cursor、payload 解析与 resync |
+| [harness/notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification) | 实现公开变更订阅：四个 LISTEN channel 协议、Thread version 的权威 cursor、payload 解析与 resync |
 | [notification](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/notification) | 与业务无关的订阅容器、通用版本推送与 NOTIFY 失效分发基座，供 Harness、Canvas、Project 与 Environment 生产方组合 |
 | [harness/task](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/task) | Prompt 拼接与子 Agent 分支设置 |
 | [harness/read](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/read) | Skill URI、Session 授权 Blob 文本、本地路径路由与文本窗口 |
@@ -81,7 +81,7 @@ Platform 将 Runtime 的 Entry、命令、Invocation 与 Work 端口适配到 Po
 ### 变更订阅
 
 [`HarnessChangeNotifications`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessChangeNotifications.java)
-实现 Harness 公开契约 `harness.api.HarnessChangeSubscriptions`：Thread version、执行树与待处理交互三个源。
+实现 Harness 公开契约 `harness.api.HarnessChangeSubscriptions`：Thread version、Thread 快照、执行树与待处理交互四个源。
 channel 名只在
 [`HarnessNotificationChannel`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessNotificationChannel.java)
 定义一次，写事务按它投递，订阅源按同一常量监听；组合根只按
@@ -92,7 +92,7 @@ Thread version 的注册与分发复用 `platform.notification` 的
 订阅先注册 consumer，再经 `HarnessRuntime` 的 version 窄查询给出初始 cursor；畸形 payload 与重连退化为 resync，未知 Thread
 失败且不留注册。执行树与交互共用
 [`HarnessInvalidationSource`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/harness/notification/HarnessInvalidationSource.java)：
-按真实执行根定点失效，空/畸形 payload 与重连全量 resync。提示始终有损，权威事实回读数据库。
+Thread 快照按 Thread ID 定点失效，执行树与交互按真实执行根定点失效；空/畸形 payload 与重连全量 resync。提示始终有损，权威事实回读数据库。
 `platform.notification` 的 `SubscriptionFanOut`、`VersionNotificationHub` 与 `NotificationInvalidationHub` 只提供与业务无关的注册和
 分发语义；channel、payload 与事件类型由各生产方定义，Canvas、Project 与 Environment 的失效源也组合它们，不经过 Harness 契约。
 

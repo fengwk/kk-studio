@@ -67,8 +67,9 @@ final class PostgresqlThreadStore implements ThreadStore {
     } catch (IllegalArgumentException error) {
       throw tx.translateThreadNameConflict(thread, error);
     }
-    // 插入即视为 version 变化：同一位置发布 Thread version 与真实执行根 tree 两条失效信号。
+    // 插入即持久化了新的权威快照；version 与快照各自使用独立信号。
     tx.notifyThreadVersion(thread.id(), thread.version());
+    tx.notifyThreadSnapshotChanged(thread.id());
     tx.notifyExecutionTree(thread.rootThreadId());
     if (joinedChild) {
       // A newly created child has no pre-existing row to lock in UUID order. Its parent is
@@ -220,6 +221,7 @@ final class PostgresqlThreadStore implements ThreadStore {
     if (stored.version() != thread.version()) {
       // 仅以写前事实（stored）与成功写后事实（thread）比较：同 version 写入（exact replay）保持静默。
       tx.notifyThreadVersion(thread.id(), thread.version());
+      tx.notifyThreadSnapshotChanged(thread.id());
       tx.notifyExecutionTree(thread.rootThreadId());
     }
   }
@@ -283,6 +285,7 @@ final class PostgresqlThreadStore implements ThreadStore {
     Set<UUID> executionRoots = executionRoots(targets);
     deleteDependentRows(targets, lockedWorkTargets, lockedTools, driverDeletion, driverTargets);
     deleteThreadRows(targets);
+    targets.forEach(tx::notifyThreadSnapshotChanged);
     executionRoots.forEach(tx::notifyExecutionTree);
     return targets.size();
   }
