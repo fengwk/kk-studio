@@ -74,6 +74,22 @@ export const environmentCatalog = {
     'en-US': 'Browser storage is unavailable; IDE recovery and last-used state will not persist.',
     'zh-CN': '浏览器存储不可用，IDE 恢复信息与最近使用状态将不会保留。',
   },
+  'ai.ide.openWorkspace': {
+    'en-US': 'Open workspace',
+    'zh-CN': '打开工作区',
+  },
+  'ai.ide.workspaces': {
+    'en-US': 'Workspaces',
+    'zh-CN': '工作区',
+  },
+  'ai.ide.workspace': {
+    'en-US': 'Workspace',
+    'zh-CN': '工作区',
+  },
+  'ai.ide.recoveryMigrationFailed': {
+    'en-US': 'The previous IDE recovery state could not be verified. Its saved history was preserved; do not open a replacement view until you review it.',
+    'zh-CN': '无法确认此前的 IDE 恢复状态，已保留原有记录。请先检查恢复记录，再决定是否打开替代视图。',
+  },
   'ai.ide.sessionUnsupported': {
     'en-US': 'This browser does not support Web Locks, so an isolated IDE session cannot be established.',
     'zh-CN': '当前浏览器不支持 Web Locks，无法建立隔离的 IDE 会话。',

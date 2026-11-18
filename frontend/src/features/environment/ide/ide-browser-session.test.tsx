@@ -48,8 +48,11 @@ function initial(sessionSaved = true): IdeTabLoadResult {
       panelVisible: false,
       selectedEnvironmentId: null,
       openedEnvironmentIds: [],
+      viewIdsByEnvironment: {},
+      selectedViewId: null,
     },
-    recoveryByEnvironment: {},
+    recoveryByView: {},
+    recoveryError: false,
     source: 'session',
     sessionSaved,
   }

@@ -128,9 +128,9 @@ async function pendingAtPost(page: Page): Promise<{
   return page.evaluate((key) => {
     const snapshot = JSON.parse(sessionStorage.getItem(key) ?? '{}') as {
       browserSessionId?: string
-      recoveryByEnvironment?: Record<string, { pending?: Record<string, unknown> }>
+      recoveryByView?: Record<string, { pending?: Record<string, unknown> }>
     }
-    const entries = Object.values(snapshot.recoveryByEnvironment ?? {})
+    const entries = Object.values(snapshot.recoveryByView ?? {})
     return {
       pending: entries.find((entry) => entry.pending != null)?.pending ?? null,
       browserSessionId: snapshot.browserSessionId ?? null,
@@ -185,6 +185,22 @@ async function installTransport(page: Page, state: TransportState): Promise<void
 
     if (method === 'GET' && path === '/api/platform/environments') {
       await route.fulfill({ json: CARDS })
+      return
+    }
+
+    const directoriesMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/directories$/)
+    if (method === 'GET' && directoriesMatch != null) {
+      const environmentId = decodeURIComponent(directoriesMatch[1]!)
+      const rootPath = directory(environmentId)
+      const requestedPath = parsed.searchParams.get('path')
+      const currentPath = requestedPath ?? rootPath
+      const childPath = `${currentPath.endsWith('/') ? currentPath.slice(0, -1) : currentPath}/child`
+      await route.fulfill({ json: {
+        path: currentPath,
+        parentPath: currentPath === rootPath ? null : rootPath,
+        truncated: false,
+        children: [{ name: 'child', path: childPath }],
+      } })
       return
     }
 
@@ -354,11 +370,8 @@ async function installTransport(page: Page, state: TransportState): Promise<void
 
     const closeMatch = path.match(/^\/api\/ide\/environments\/([^/]+)\/views\/([^/]+)\/close$/)
     if (method === 'POST' && closeMatch != null) {
-      const body = (request.postDataJSON() as Record<string, unknown> | null) ?? {}
-      if (body.discard === true) {
-        const viewId = decodeURIComponent(closeMatch[2]!)
-        delete state.views[viewId]
-      }
+      const viewId = decodeURIComponent(closeMatch[2]!)
+      delete state.views[viewId]
       await route.fulfill({ status: 204 })
       return
     }
@@ -451,7 +464,8 @@ async function openA(page: Page): Promise<void> {
 
 async function storedSession(page: Page): Promise<{
   browserSessionId: string
-  recoveryByEnvironment: Record<string, {
+  recoveryByView: Record<string, {
+    environmentId: string
     viewId: string
     daemonInstanceId: string
     bindingEpoch?: string
@@ -495,8 +509,43 @@ test.describe('Chat-scoped persistent IDE host', () => {
     expect(call.sessionBrowserIdAtPost).toBe(call.body.browserSessionId)
     expect(call.body).not.toHaveProperty('entryUrl')
     expect(call.body).not.toHaveProperty('token')
-    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.viewId)
+    expect((await storedSession(page)).recoveryByView[String(call.body.viewId)]?.viewId)
       .toBe(call.body.viewId)
+  })
+
+  test('opens canonical directories as independent live tabs and closing one leaves its sibling mounted', async ({ page }) => {
+    const state = createState()
+    await openHarness(page, state)
+    await openA(page)
+    const firstViewId = String(state.openCalls[0]!.body.viewId)
+    await saveFrame(page)
+
+    await page.getByTestId('ide-open-workspace-btn').click()
+    const directoryDialog = page.getByRole('dialog', { name: '打开宿主目录' })
+    const child = directoryDialog.getByTestId('ide-directory-entry').filter({ hasText: 'child' })
+    await child.click()
+    await directoryDialog.getByTestId('ide-directory-confirm').click()
+
+    await expect(page.getByTestId('ide-iframe')).toHaveCount(2)
+    await expect(page.getByTestId('ide-tab')).toHaveCount(2)
+    const secondViewId = String(state.openCalls[1]!.body.viewId)
+    expect(secondViewId).not.toBe(firstViewId)
+    expect(state.openCalls[1]!.body.directory).toBe(`${DIRECTORY_A}/child`)
+    expect(state.readCalls.at(-1)).toMatchObject({ environmentId: ENV_A, viewId: secondViewId })
+    expect(await sameFrame(page)).toBe(true)
+    const lastUsage = state.usageFrames.at(-1)!.views as Array<Record<string, unknown>>
+    expect(lastUsage.map((item) => item.viewId)).toEqual(expect.arrayContaining([firstViewId, secondViewId]))
+
+    await page.getByTestId('ide-open-workspace-btn').click()
+    await page.getByRole('dialog', { name: '打开宿主目录' }).getByTestId('ide-directory-confirm').click()
+    await expect(page.getByTestId('ide-tab')).toHaveCount(2)
+    expect(state.openCalls).toHaveLength(2)
+
+    await page.getByTestId('ide-close-btn').click()
+    await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
+    await expect(page.getByTestId('ide-tab')).toHaveCount(1)
+    expect(state.views[firstViewId]).toBeDefined()
+    expect(state.views[secondViewId]).toBeUndefined()
   })
 
   test('refresh resumes the same view immediately from a pure read without replaying create', async ({ page }) => {
@@ -504,7 +553,7 @@ test.describe('Chat-scoped persistent IDE host', () => {
     await openHarness(page, state)
     await openA(page)
     const viewId = String(state.openCalls[0]!.body.viewId)
-    const epoch = String((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch)
+    const epoch = String((await storedSession(page)).recoveryByView[viewId]?.bindingEpoch)
     const beforeReads = state.readCalls.length
 
     await page.reload()
@@ -524,7 +573,7 @@ test.describe('Chat-scoped persistent IDE host', () => {
       expectedDaemonInstanceId: daemonId(ENV_A),
     })
     expect(state.openCalls[1]!.body.claimId).not.toBe(state.openCalls[0]!.body.claimId)
-    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(viewId)
+    expect((await storedSession(page)).recoveryByView[viewId]?.viewId).toBe(viewId)
   })
 
   test('a new websocket connection resumes immediately and keeps the same iframe', async ({ page }) => {
@@ -590,7 +639,7 @@ test.describe('Chat-scoped persistent IDE host', () => {
     expect(state.openCalls).toHaveLength(3)
     expect(await sameFrame(page)).toBe(true)
     expect(state.iframeRequests[viewId]).toBe(2)
-    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe(currentEpoch)
+    expect((await storedSession(page)).recoveryByView[viewId]?.bindingEpoch).toBe(currentEpoch)
     await expect(page.getByTestId('ide-iframe')).toHaveCount(1)
   })
 
@@ -599,7 +648,7 @@ test.describe('Chat-scoped persistent IDE host', () => {
     await openHarness(page, state)
     await openA(page)
     const viewId = String(state.openCalls[0]!.body.viewId)
-    const initialEpoch = String((await storedSession(page)).recoveryByEnvironment[ENV_A]?.bindingEpoch)
+    const initialEpoch = String((await storedSession(page)).recoveryByView[viewId]?.bindingEpoch)
     await saveFrame(page)
     const readsBefore = state.readCalls.length
 
@@ -655,8 +704,8 @@ test.describe('Chat-scoped persistent IDE host', () => {
     const replacement = state.openCalls[1]!
     expect(replacement.body.mode).toBe('create')
     expect(replacement.body.viewId).not.toBe(originalView)
-    expect((await storedSession(page)).recoveryByEnvironment[ENV_A]?.viewId).toBe(originalView)
-    expect((await storedSession(duplicate)).recoveryByEnvironment[ENV_A]?.viewId)
+    expect((await storedSession(page)).recoveryByView[originalView]?.viewId).toBe(originalView)
+    expect((await storedSession(duplicate)).recoveryByView[String(replacement.body.viewId)]?.viewId)
       .toBe(replacement.body.viewId)
   })
 

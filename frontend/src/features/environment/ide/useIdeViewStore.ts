@@ -10,7 +10,7 @@ import type { IdeTabLoadResult } from '@/features/environment/ide/ide-tab-state'
  */
 export function useIdeViewStore(mountedRef: RefObject<boolean>, initial: IdeTabLoadResult) {
   const [views, setViews] = useState<Record<string, IdeViewState>>(
-    () => initialViews(initial.presentation, initial.recoveryByEnvironment),
+    () => initialViews(initial.presentation, initial.recoveryByView),
   )
   const viewsRef = useRef(views)
 
@@ -23,29 +23,29 @@ export function useIdeViewStore(mountedRef: RefObject<boolean>, initial: IdeTabL
 
   /** 只对仍是同一次 attempt 的视图落补丁；已被替换的操作结果一律丢弃。 */
   function updateView(
-    environmentId: string,
+    viewId: string,
     attempt: number,
     patch: Partial<IdeViewState>,
   ): IdeViewState | null {
-    const current = viewsRef.current[environmentId]
+    const current = viewsRef.current[viewId]
     if (current == null || current.attempt !== attempt) {
       return null
     }
     const next = { ...current, ...patch }
-    commitViews({ ...viewsRef.current, [environmentId]: next })
+    commitViews({ ...viewsRef.current, [viewId]: next })
     return next
   }
 
   /** 开启新一代操作：attempt 递增，旧 attempt 的在途结果从此不再生效。 */
   function startAttempt(
-    environmentId: string,
-    seed: Omit<IdeViewState, 'environmentId' | 'attempt'>,
+    viewId: string,
+    seed: Omit<IdeViewState, 'attempt'>,
   ): number {
-    const current = viewsRef.current[environmentId]
+    const current = viewsRef.current[viewId]
     const attempt = (current?.attempt ?? 0) + 1
     commitViews({
       ...viewsRef.current,
-      [environmentId]: { ...seed, environmentId, attempt },
+      [viewId]: { ...seed, attempt },
     })
     return attempt
   }

@@ -11,7 +11,7 @@ interface IdeTerminalOptions {
   sessionRef: RefObject<IdeBrowserSessionState>
   identityRef: RefObject<ApplicationEventConnectionIdentity | null>
   updateView: (
-    environmentId: string,
+    viewId: string,
     attempt: number,
     patch: Partial<IdeViewState>,
   ) => IdeViewState | null
@@ -21,14 +21,10 @@ interface IdeTerminalOptions {
     claimId: string
     bindingEpoch?: string
   }) => Promise<unknown>
-  /** 视图未建立时记下终端意图，等视图创建时由创建方取走。 */
   rememberPendingShellIntent: (environmentId: string) => void
 }
 
-/**
- * 视图内终端：只有当视图已 READY 且绑定完整时才发命令，且必须在 iframe 已加载后
- * （终端的 DOM 在 iframe 里）。失败只记录可读原因，不回滚已建立的绑定。
- */
+/** 终端命令与 iframe、usage proof 均绑定到指定 view。 */
 export function useIdeTerminalCommands({
   viewsRef,
   sessionRef,
@@ -37,8 +33,8 @@ export function useIdeTerminalCommands({
   registerUsageNow,
   rememberPendingShellIntent,
 }: IdeTerminalOptions) {
-  async function runTerminal(environmentId: string): Promise<void> {
-    const view = viewsRef.current[environmentId]
+  async function runTerminal(viewId: string): Promise<void> {
+    const view = viewsRef.current[viewId]
     if (
       view == null
       || view.status !== 'ready'
@@ -48,14 +44,11 @@ export function useIdeTerminalCommands({
     ) {
       return
     }
-    updateView(environmentId, view.attempt, {
-      pendingShell: false,
-      terminalError: undefined,
-    })
+    updateView(viewId, view.attempt, { pendingShell: false, terminalError: undefined })
     const requestIdentity = identityRef.current
     try {
       await registerUsageNow({
-        environmentId,
+        environmentId: view.environmentId,
         viewId: view.viewId,
         claimId: view.claimId,
         bindingEpoch: view.bindingEpoch,
@@ -65,9 +58,9 @@ export function useIdeTerminalCommands({
         bindingEpoch: view.bindingEpoch,
         expectedDaemonInstanceId: view.daemonInstanceId,
       }
-      await focusIdeTerminal(environmentId, view.viewId, body)
+      await focusIdeTerminal(view.environmentId, view.viewId, body)
     } catch (error) {
-      const current = viewsRef.current[environmentId]
+      const current = viewsRef.current[viewId]
       const appliedIdentity = identityRef.current
       if (
         !isSameBinding(current, view)
@@ -78,7 +71,7 @@ export function useIdeTerminalCommands({
       ) {
         return
       }
-      updateView(environmentId, view.attempt, {
+      updateView(viewId, view.attempt, {
         terminalError: isUnknownIdeFailure(error)
           ? 'terminal-result-unknown'
           : safeIdeError(error) || 'terminal-failed',
@@ -86,9 +79,9 @@ export function useIdeTerminalCommands({
     }
   }
 
-  /** 用户显式请求终端：视图未建立时把意图挂到 environment 上，等视图创建时取走。 */
-  function setPendingShell(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
+  /** 没有可用 view 时把待处理意图按 Environment 记下，由新建 view 消费。 */
+  function setPendingShell(environmentId: string, viewId?: string): void {
+    const view = viewId == null ? undefined : viewsRef.current[viewId]
     if (view == null) {
       rememberPendingShellIntent(environmentId)
       return
@@ -96,15 +89,11 @@ export function useIdeTerminalCommands({
     if (view.pendingShell && view.terminalError === undefined) {
       return
     }
-    updateView(environmentId, view.attempt, {
-      pendingShell: true,
-      terminalError: undefined,
-    })
+    updateView(view.viewId, view.attempt, { pendingShell: true, terminalError: undefined })
   }
 
-  /** iframe 加载完成、视图就绪且仍有挂起意图时，才真正请求终端。 */
-  function maybeRunPendingShell(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
+  function maybeRunPendingShell(viewId: string): void {
+    const view = viewsRef.current[viewId]
     if (
       view == null
       || !view.pendingShell
@@ -114,7 +103,7 @@ export function useIdeTerminalCommands({
     ) {
       return
     }
-    void runTerminal(environmentId)
+    void runTerminal(viewId)
   }
 
   return { setPendingShell, maybeRunPendingShell }

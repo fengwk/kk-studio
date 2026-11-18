@@ -18,6 +18,7 @@ import {
   applyIdeMobileLayout,
   openIdeView,
   readIdeView,
+  listIdeDirectories,
 } from '@/features/environment/ide/environment-ide-service'
 import {
   buildOpenRequest,
@@ -39,6 +40,7 @@ import {
 import {
   isBoundToConnection,
   retainAvailableViews,
+  type IdeViewState,
 } from '@/features/environment/ide/ide-view-state'
 import {
   failureStatus,
@@ -60,6 +62,7 @@ export interface UseIdeClaimReconciliationOptions {
   getPresentation: () => IdePresentation
   getEnvironmentMap: () => Map<string, IdeEnvironmentInfo>
   onStorageStatusChange: (unavailable: boolean) => void
+  onViewCreated: (environmentId: string, viewId: string) => void
 }
 
 interface ReconcileOptions {
@@ -82,6 +85,7 @@ export function useIdeClaimReconciliation({
   getPresentation,
   getEnvironmentMap,
   onStorageStatusChange,
+  onViewCreated,
 }: UseIdeClaimReconciliationOptions) {
   const events = useApplicationEvents()
   const [identity, setIdentity] = useState<ApplicationEventConnectionIdentity | null>(
@@ -102,8 +106,32 @@ export function useIdeClaimReconciliation({
     restoreUsage: () => void
   } | null>(null)
 
-  const { views, viewsRef, commitViews, updateView, startAttempt, clearViews } =
+  const { views, viewsRef, commitViews, updateView: updateStoredView, startAttempt, clearViews } =
     useIdeViewStore(mountedRef, initial)
+
+  function resolveViewId(key: string): string | null {
+    if (viewsRef.current[key] != null) {
+      return key
+    }
+    return viewIdForEnvironment(key)
+  }
+
+  function getView(key: string): IdeViewState | undefined {
+    const direct = viewsRef.current[key]
+    return direct ?? (() => {
+      const viewId = viewIdForEnvironment(key)
+      return viewId == null ? undefined : viewsRef.current[viewId]
+    })()
+  }
+
+  function updateView(key: string, attempt: number, patch: Partial<IdeViewState>): IdeViewState | null {
+    const viewId = resolveViewId(key)
+    return viewId == null ? null : updateStoredView(viewId, attempt, patch)
+  }
+
+  function startViewAttempt(seed: Omit<IdeViewState, 'attempt'>): number {
+    return startAttempt(seed.viewId, seed)
+  }
   const { runExclusive, invalidateOperations } = useIdeOperationQueue(identityRef, mountedRef)
   const { acceptSnapshot, forgetView, clearSnapshots } = useIdeSnapshotCache(sessionRef)
   const {
@@ -116,6 +144,7 @@ export function useIdeClaimReconciliation({
     viewsRef,
     mountedRef,
     getPresentation,
+    preserveSession: initial.recoveryError,
     onStorageStatusChange,
   })
   const { registerUsageNow, registerUsageQuiet, usageOverride, resetRevision, withdrawUsage: withdrawUsageProof } = useIdeUsageProof({
@@ -130,7 +159,7 @@ export function useIdeClaimReconciliation({
     },
     registerUsage: (usage) => events.registerUsage(usage),
   })
-  const { closeEnvironment, dismissCloseError } = useIdeCloseCommands({
+  const { closeView: closeEnvironment, dismissCloseError } = useIdeCloseCommands({
     viewsRef,
     sessionRef,
     updateView,
@@ -178,11 +207,28 @@ export function useIdeClaimReconciliation({
     return isIdeBrowserSessionReady(sessionRef.current.status)
   }
 
-  function canRun(environmentId: string): boolean {
+  function environmentIdFor(viewId: string): string {
+    return viewsRef.current[viewId]?.environmentId ?? viewId
+  }
+
+  function viewIdForEnvironment(environmentId: string): string | null {
+    const presentation = getPresentation()
+    if (presentation.selectedEnvironmentId === environmentId
+      && presentation.selectedViewId != null
+      && viewsRef.current[presentation.selectedViewId] != null) {
+      return presentation.selectedViewId
+    }
+    const ordered = presentation.viewIdsByEnvironment[environmentId] ?? []
+    return ordered.find((viewId) => viewsRef.current[viewId] != null)
+      ?? Object.entries(viewsRef.current).find(([, view]) => view.environmentId === environmentId)?.[0]
+      ?? null
+  }
+
+  function canRun(viewId: string): boolean {
     return sessionReady()
       && identityRef.current != null
       && !pageSuspendedRef.current
-      && getEnvironmentMap().get(environmentId)?.ready === true
+      && getEnvironmentMap().get(environmentIdFor(viewId))?.ready === true
   }
 
   function setWaitingReady(
@@ -198,15 +244,14 @@ export function useIdeClaimReconciliation({
   }
 
   function preparePending(
-    environmentId: string,
     attempt: number,
     pending: IdePendingClaim,
   ): boolean {
-    const current = viewsRef.current[environmentId]
+    const current = viewsRef.current[pending.viewId]
     if (current == null || current.attempt !== attempt) {
       return false
     }
-    const next = updateView(environmentId, attempt, {
+    const next = updateView(pending.viewId, attempt, {
       mode: pending.mode,
       claimId: pending.claimId,
       pending,
@@ -221,7 +266,7 @@ export function useIdeClaimReconciliation({
     }
     const saved = writeSession()
     if (!saved) {
-      updateView(environmentId, attempt, {
+      updateView(pending.viewId, attempt, {
         status: 'error',
         pending: undefined,
         errorMessage: 'storageUnavailable',
@@ -249,7 +294,7 @@ export function useIdeClaimReconciliation({
     if (!mountedRef.current) {
       return
     }
-    const current = viewsRef.current[environmentId]
+    const current = getView(environmentId)
     if (current == null || current.attempt !== attempt) {
       return
     }
@@ -346,129 +391,110 @@ export function useIdeClaimReconciliation({
   }
 
   async function sendOpen(
-    environmentId: string,
     attempt: number,
     pending: IdePendingClaim,
     options: ReconcileOptions,
   ): Promise<void> {
-    if (!preparePending(environmentId, attempt, pending)) {
-      updateView(environmentId, attempt, {
-        status: 'error',
-        errorMessage: 'storageUnavailable',
-      })
+    const viewId = pending.viewId
+    const view = viewsRef.current[viewId]
+    if (view == null) {
+      return
+    }
+    const ownerEnvironmentId = view.environmentId
+    if (!preparePending(attempt, pending)) {
+      updateView(viewId, attempt, { status: 'error', errorMessage: 'storageUnavailable' })
       return
     }
     const currentIdentity = identityRef.current
     const browserSessionId = sessionRef.current.browserSessionId
     if (currentIdentity == null || !sessionReady() || pageSuspendedRef.current) {
-      setWaitingReady(environmentId, attempt)
+      setWaitingReady(viewId, attempt)
       return
     }
     try {
-      // OPEN 前必须用新 claim 重新登记 usage；上一次纯读的旧 claim ACK 不能代替。
       await registerUsageNow(usageOverride(
-        environmentId,
-        pending.viewId,
+        ownerEnvironmentId,
+        viewId,
         pending.claimId,
         pending.mode === 'resume' ? pending.expectedBindingEpoch : undefined,
       ))
     } catch (error) {
-      if (!mountedRef.current) {
-        return
+      if (mountedRef.current) {
+        await settleFailure(viewId, attempt, error, 'read', currentIdentity, options)
       }
-      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, options)
       return
     }
     if (!mountedRef.current) {
       return
     }
     const appliedIdentity = identityRef.current
-    const latest = viewsRef.current[environmentId]
+    const latest = viewsRef.current[viewId]
     if (
-      latest == null
-      || latest.attempt !== attempt
+      latest == null || latest.attempt !== attempt
       || appliedIdentity == null
       || appliedIdentity.eventNodeId !== currentIdentity.eventNodeId
       || appliedIdentity.connectionId !== currentIdentity.connectionId
       || sessionRef.current.browserSessionId !== browserSessionId
-      || !sessionReady()
-      || pageSuspendedRef.current
+      || !sessionReady() || pageSuspendedRef.current
     ) {
-      if (latest != null && latest.attempt === attempt) {
-        updateView(environmentId, attempt, {
+      if (latest?.attempt === attempt) {
+        updateView(viewId, attempt, {
           status: appliedIdentity == null ? 'waiting-ready' : 'reconciling',
           pending,
           errorMessage: undefined,
         })
         if (appliedIdentity != null && sessionReady() && !pageSuspendedRef.current) {
-          reconcile(environmentId, 'connection')
+          reconcile(viewId, 'connection')
         }
       }
       return
     }
     const request = buildOpenRequest(pending, browserSessionId, currentIdentity)
     try {
-      const response = await openIdeView(environmentId, request)
+      const response = await openIdeView(ownerEnvironmentId, request)
       if (!mountedRef.current) {
         return
       }
-      const validated = validateOpenResponse(
-        environmentId,
-        request,
-        response,
-      )
-      const current = viewsRef.current[environmentId]
+      const validated = validateOpenResponse(ownerEnvironmentId, request, response)
+      const current = viewsRef.current[viewId]
       if (current == null || current.attempt !== attempt) {
         return
       }
-      const appliedIdentity = identityRef.current
+      const latestIdentity = identityRef.current
       if (
-        appliedIdentity == null
-        || appliedIdentity.eventNodeId !== request.eventNodeId
-        || appliedIdentity.connectionId !== request.connectionId
+        latestIdentity == null
+        || latestIdentity.eventNodeId !== request.eventNodeId
+        || latestIdentity.connectionId !== request.connectionId
       ) {
-        // 迟到回执不能把旧连接绑定当成当前绑定；保留 pending 走新连接对账。
-        updateView(environmentId, attempt, {
-          status: appliedIdentity == null ? 'waiting-ready' : 'reconciling',
+        updateView(viewId, attempt, {
+          status: latestIdentity == null ? 'waiting-ready' : 'reconciling',
           pending,
           errorMessage: undefined,
         })
-        if (appliedIdentity != null) {
-          reconcile(environmentId, 'connection')
+        if (latestIdentity != null) {
+          reconcile(viewId, 'connection')
         }
         return
       }
       const entryChanged = current.entryUrl !== validated.entryUrl
-      updateView(environmentId, attempt, {
-        status: 'ready',
-        claimId: pending.claimId,
-        pending: undefined,
-        viewId: validated.viewId,
-        daemonInstanceId: validated.daemonInstanceId,
-        bindingEpoch: validated.bindingEpoch,
-        eventNodeId: request.eventNodeId,
-        connectionId: request.connectionId,
-        directory: validated.directory,
-        workspacePath: validated.workspacePath,
-        entryUrl: validated.entryUrl,
+      updateView(viewId, attempt, {
+        status: 'ready', claimId: pending.claimId, pending: undefined,
+        viewId: validated.viewId, daemonInstanceId: validated.daemonInstanceId,
+        bindingEpoch: validated.bindingEpoch, eventNodeId: request.eventNodeId,
+        connectionId: request.connectionId, directory: validated.directory,
+        workspacePath: validated.workspacePath, entryUrl: validated.entryUrl,
         iframeLoaded: entryChanged ? false : current.iframeLoaded,
-        errorMessage: undefined,
-        closeError: undefined,
-        closeInFlight: false,
+        errorMessage: undefined, closeError: undefined, closeInFlight: false,
       })
       writeSession()
       registerUsageQuiet(usageOverride(
-        environmentId,
-        pending.viewId,
-        pending.claimId,
-        validated.bindingEpoch,
+        ownerEnvironmentId, viewId, pending.claimId, validated.bindingEpoch,
       ))
-      maybeRunPendingShell(environmentId)
+      maybeRunPendingShell(viewId)
     } catch (error) {
-      if (!mountedRef.current) {
-        return
+      if (mountedRef.current) {
+        await settleFailure(viewId, attempt, error, 'open', request, options)
       }
-      await settleFailure(environmentId, attempt, error, 'open', request, options)
     }
   }
 
@@ -479,23 +505,23 @@ export function useIdeClaimReconciliation({
     claimId: string,
     directory?: string | null,
   ): Promise<void> {
-    const current = viewsRef.current[environmentId]
+    const current = viewsRef.current[viewId]
     if (current == null || current.attempt !== attempt) {
       return
     }
-    if (!canRun(environmentId)) {
-      setWaitingReady(environmentId, attempt)
+    if (!canRun(viewId)) {
+      setWaitingReady(viewId, attempt)
       return
     }
     const currentIdentity = identityRef.current
     if (currentIdentity == null) {
-      setWaitingReady(environmentId, attempt)
+      setWaitingReady(viewId, attempt)
       return
     }
     try {
       await registerUsageNow(usageOverride(environmentId, viewId, claimId))
     } catch (error) {
-      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, { allowRebind: false })
+      await settleFailure(viewId, attempt, error, 'read', currentIdentity, { allowRebind: false })
       return
     }
     if (!mountedRef.current) {
@@ -505,8 +531,8 @@ export function useIdeClaimReconciliation({
       identityRef.current?.eventNodeId !== currentIdentity.eventNodeId
       || identityRef.current?.connectionId !== currentIdentity.connectionId
     ) {
-      setWaitingReady(environmentId, attempt)
-      reconcile(environmentId, 'connection')
+      setWaitingReady(viewId, attempt)
+      reconcile(viewId, 'connection')
       return
     }
     const query = {
@@ -524,55 +550,45 @@ export function useIdeClaimReconciliation({
         identityRef.current?.eventNodeId !== currentIdentity.eventNodeId
         || identityRef.current?.connectionId !== currentIdentity.connectionId
       ) {
-        setWaitingReady(environmentId, attempt)
-        reconcile(environmentId, 'connection')
+        setWaitingReady(viewId, attempt)
+        reconcile(viewId, 'connection')
         return
       }
       const accepted = acceptSnapshot(environmentId, viewId, snapshot)
       if (!accepted.accepted) {
-        updateView(environmentId, attempt, {
-          status: 'error',
-          errorMessage: 'stale snapshot revision',
-        })
+        updateView(viewId, attempt, { status: 'error', errorMessage: 'stale snapshot revision' })
         return
       }
       if (accepted.view != null && accepted.view.state === 'CLOSING') {
-        updateView(environmentId, attempt, {
-          status: 'error',
-          errorMessage: 'IDE_CLOSING',
-        })
+        updateView(viewId, attempt, { status: 'error', errorMessage: 'IDE_CLOSING' })
         writeSession()
         return
       }
       if (accepted.view == null) {
-        await sendOpen(environmentId, attempt, {
-          mode: 'create',
-          viewId,
-          claimId,
-          expectedBindingEpoch: '0',
+        await sendOpen(attempt, {
+          mode: 'create', viewId, claimId, expectedBindingEpoch: '0',
           expectedDaemonInstanceId: accepted.daemonInstanceId,
           ...(directory == null ? {} : { directory }),
         }, { allowRebind: true })
         return
       }
       const resumeClaimId = createUuid()
-      await sendOpen(environmentId, attempt, {
-        mode: 'resume',
-        viewId,
-        claimId: resumeClaimId,
+      await sendOpen(attempt, {
+        mode: 'resume', viewId, claimId: resumeClaimId,
         expectedBindingEpoch: accepted.view.bindingEpoch,
         expectedDaemonInstanceId: accepted.daemonInstanceId,
         ...(accepted.view.directory == null ? {} : { directory: accepted.view.directory }),
       }, { allowRebind: true })
     } catch (error) {
-      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, { allowRebind: false })
+      await settleFailure(viewId, attempt, error, 'read', currentIdentity, { allowRebind: false })
     }
   }
 
-  function beginCreate(environmentId: string, directory?: string | null): void {
+  function beginCreate(environmentId: string, directory?: string | null): string {
     const viewId = createUuid()
     const claimId = createUuid()
-    const attempt = startAttempt(environmentId, {
+    const attempt = startAttempt(viewId, {
+      environmentId,
       viewId,
       mode: 'create',
       status: canRun(environmentId) ? 'reconciling' : 'waiting-ready',
@@ -580,41 +596,37 @@ export function useIdeClaimReconciliation({
       iframeLoaded: false,
       pendingShell: takePendingShellIntent(environmentId),
     })
-    if (!canRun(environmentId)) {
-      return
+    onViewCreated(environmentId, viewId)
+    if (canRun(viewId)) {
+      runExclusive(() => runCreate(environmentId, attempt, viewId, claimId, directory))
     }
-    runExclusive(() => runCreate(environmentId, attempt, viewId, claimId, directory))
+    return viewId
   }
 
   async function runReconcile(
-    environmentId: string,
     attempt: number,
     viewId: string,
     claimId: string,
     options: ReconcileOptions,
   ): Promise<void> {
-    const current = viewsRef.current[environmentId]
+    const current = viewsRef.current[viewId]
     if (current == null || current.attempt !== attempt) {
       return
     }
-    if (!canRun(environmentId)) {
-      setWaitingReady(environmentId, attempt)
+    const environment = current.environmentId
+    if (!canRun(viewId)) {
+      setWaitingReady(viewId, attempt)
       return
     }
     const currentIdentity = identityRef.current
     if (currentIdentity == null) {
-      setWaitingReady(environmentId, attempt)
+      setWaitingReady(viewId, attempt)
       return
     }
     try {
-      await registerUsageNow(usageOverride(
-        environmentId,
-        viewId,
-        claimId,
-        current.bindingEpoch,
-      ))
+      await registerUsageNow(usageOverride(environment, viewId, claimId, current.bindingEpoch))
     } catch (error) {
-      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, { allowRebind: false })
+      await settleFailure(viewId, attempt, error, 'read', currentIdentity, { allowRebind: false })
       return
     }
     if (!mountedRef.current) {
@@ -624,8 +636,8 @@ export function useIdeClaimReconciliation({
       identityRef.current?.eventNodeId !== currentIdentity.eventNodeId
       || identityRef.current?.connectionId !== currentIdentity.connectionId
     ) {
-      setWaitingReady(environmentId, attempt)
-      reconcile(environmentId, 'connection')
+      setWaitingReady(viewId, attempt)
+      reconcile(viewId, 'connection')
       return
     }
     const query = {
@@ -633,12 +645,10 @@ export function useIdeClaimReconciliation({
       eventNodeId: currentIdentity.eventNodeId,
       connectionId: currentIdentity.connectionId,
       claimId,
-      ...(current.daemonInstanceId == null
-        ? {}
-        : { expectedDaemonInstanceId: current.daemonInstanceId }),
+      ...(current.daemonInstanceId == null ? {} : { expectedDaemonInstanceId: current.daemonInstanceId }),
     }
     try {
-      const snapshot = await readIdeView(environmentId, viewId, query)
+      const snapshot = await readIdeView(environment, viewId, query)
       if (!mountedRef.current) {
         return
       }
@@ -646,69 +656,50 @@ export function useIdeClaimReconciliation({
         identityRef.current?.eventNodeId !== currentIdentity.eventNodeId
         || identityRef.current?.connectionId !== currentIdentity.connectionId
       ) {
-        setWaitingReady(environmentId, attempt)
-        reconcile(environmentId, 'connection')
+        setWaitingReady(viewId, attempt)
+        reconcile(viewId, 'connection')
         return
       }
-      const accepted = acceptSnapshot(environmentId, viewId, snapshot)
+      const accepted = acceptSnapshot(environment, viewId, snapshot)
       if (!accepted.accepted) {
-        const latest = viewsRef.current[environmentId]
-        if (latest?.status === 'ready') {
+        if (viewsRef.current[viewId]?.status === 'ready') {
           return
         }
         throw new IdeProtocolError('Invalid IDE view snapshot: stale revision')
       }
-      const persisted = viewsRef.current[environmentId]
-      if (
-        persisted?.daemonInstanceId != null
-        && persisted.daemonInstanceId !== accepted.daemonInstanceId
-      ) {
-        updateView(environmentId, attempt, {
-          status: 'gone',
-          errorMessage: undefined,
-          entryUrl: undefined,
-          pending: undefined,
+      const persisted = viewsRef.current[viewId]
+      if (persisted?.daemonInstanceId != null && persisted.daemonInstanceId !== accepted.daemonInstanceId) {
+        updateView(viewId, attempt, {
+          status: 'gone', errorMessage: undefined, entryUrl: undefined, pending: undefined,
         })
         writeSession()
         return
       }
       if (accepted.view == null) {
-        const latest = viewsRef.current[environmentId]
-        const pending = latest?.pending
-        if (
-          pending != null
-          && pending.mode === 'create'
-          && pending.expectedDaemonInstanceId === accepted.daemonInstanceId
-        ) {
-          await sendOpen(environmentId, attempt, pending, options)
+        const pending = viewsRef.current[viewId]?.pending
+        if (pending?.mode === 'create' && pending.expectedDaemonInstanceId === accepted.daemonInstanceId) {
+          await sendOpen(attempt, pending, options)
           return
         }
-        updateView(environmentId, attempt, {
-          status: 'gone',
-          errorMessage: undefined,
-          entryUrl: undefined,
-          pending: undefined,
+        updateView(viewId, attempt, {
+          status: 'gone', errorMessage: undefined, entryUrl: undefined, pending: undefined,
         })
         writeSession()
         return
       }
       if (accepted.view.state === 'CLOSING') {
-        updateView(environmentId, attempt, {
-          status: 'error',
-          errorMessage: 'IDE_CLOSING',
-        })
+        updateView(viewId, attempt, { status: 'error', errorMessage: 'IDE_CLOSING' })
         writeSession()
         return
       }
-      const latest = viewsRef.current[environmentId]
+      const latest = viewsRef.current[viewId]
       if (latest == null || latest.attempt !== attempt) {
         return
       }
       const sameConnection = accepted.view.eventNodeId === currentIdentity.eventNodeId
         && accepted.view.connectionId === currentIdentity.connectionId
       if (sameConnection && latest.pending?.claimId === accepted.view.claimId) {
-        // 原 claim 已提交：只重取该绑定的入口，不分配另一代绑定。
-        await sendOpen(environmentId, attempt, latest.pending, options)
+        await sendOpen(attempt, latest.pending, options)
         return
       }
       const authorityUnchanged = latest.bindingEpoch === accepted.view.bindingEpoch
@@ -720,38 +711,26 @@ export function useIdeClaimReconciliation({
         && latest.entryUrl != null
         && latest.daemonInstanceId === accepted.daemonInstanceId
       ) {
-        updateView(environmentId, attempt, {
-          status: 'ready',
-          claimId: latest.claimId,
-          daemonInstanceId: accepted.daemonInstanceId,
-          bindingEpoch: accepted.view.bindingEpoch,
-          directory: accepted.view.directory,
-          workspacePath: accepted.view.workspacePath,
-          eventNodeId: currentIdentity.eventNodeId,
-          connectionId: currentIdentity.connectionId,
-          errorMessage: undefined,
+        updateView(viewId, attempt, {
+          status: 'ready', claimId: latest.claimId, daemonInstanceId: accepted.daemonInstanceId,
+          bindingEpoch: accepted.view.bindingEpoch, directory: accepted.view.directory,
+          workspacePath: accepted.view.workspacePath, eventNodeId: currentIdentity.eventNodeId,
+          connectionId: currentIdentity.connectionId, errorMessage: undefined,
         })
         writeSession()
-        registerUsageQuiet(usageOverride(
-          environmentId,
-          viewId,
-          latest.claimId,
-          accepted.view.bindingEpoch,
-        ))
-        maybeRunPendingShell(environmentId)
+        registerUsageQuiet(usageOverride(environment, viewId, latest.claimId, accepted.view.bindingEpoch))
+        maybeRunPendingShell(viewId)
         return
       }
       const resumeClaimId = createUuid()
-      await sendOpen(environmentId, attempt, {
-        mode: 'resume',
-        viewId,
-        claimId: resumeClaimId,
+      await sendOpen(attempt, {
+        mode: 'resume', viewId, claimId: resumeClaimId,
         expectedBindingEpoch: accepted.view.bindingEpoch,
         expectedDaemonInstanceId: accepted.daemonInstanceId,
         ...(accepted.view.directory == null ? {} : { directory: accepted.view.directory }),
       }, options)
     } catch (error) {
-      await settleFailure(environmentId, attempt, error, 'read', currentIdentity, options)
+      await settleFailure(viewId, attempt, error, 'read', currentIdentity, options)
     }
   }
 
@@ -760,12 +739,12 @@ export function useIdeClaimReconciliation({
     reason: 'focus' | 'connection' | 'restore' | 'queued' | 'read-stale' | 'outcome-unknown' | 'directory' | 'retry',
     options: ReconcileOptions = { allowRebind: true },
   ): Promise<void> {
-    const view = viewsRef.current[environmentId]
+    const view = getView(environmentId)
     if (view == null) {
       return
     }
     if (!canRun(environmentId)) {
-      const attempt = startAttempt(environmentId, {
+      const attempt = startViewAttempt({
         ...view,
         status: 'waiting-ready',
         errorMessage: undefined,
@@ -776,7 +755,7 @@ export function useIdeClaimReconciliation({
     if (view.mode === 'create' && view.daemonInstanceId == null) {
       // 显式 open 但命令尚未发出：沿用同一 viewId/claimId 从纯读发现开始，不新建替代资源。
       const claimId = isCanonicalUuid(view.claimId) ? view.claimId : createUuid()
-      const attempt = startAttempt(environmentId, {
+      const attempt = startViewAttempt({
         ...view,
         status: 'reconciling',
         claimId,
@@ -796,13 +775,13 @@ export function useIdeClaimReconciliation({
     }
     const claimId = view.pending?.claimId
       ?? (isCanonicalUuid(view.claimId) ? view.claimId : createUuid())
-    const attempt = startAttempt(environmentId, {
+    const attempt = startViewAttempt({
       ...view,
       status: 'reconciling',
       claimId,
       errorMessage: undefined,
     })
-    await runReconcile(environmentId, attempt, view.viewId, claimId, options)
+    await runReconcile(attempt, view.viewId, claimId, options)
   }
 
   function reconcile(
@@ -814,7 +793,7 @@ export function useIdeClaimReconciliation({
       try {
         await reconcileNow(environmentId, reason, options)
       } catch (error) {
-        const current = viewsRef.current[environmentId]
+        const current = getView(environmentId)
         if (current != null) {
           updateView(environmentId, current.attempt, {
             status: 'error',
@@ -829,11 +808,11 @@ export function useIdeClaimReconciliation({
     environmentId: string,
     environment: IdeEnvironmentInfo | null,
     mode: IdeActionMode,
-  ): void {
+  ): string | null {
     if (mode === 'shell') {
       setPendingShell(environmentId)
     }
-    const view = viewsRef.current[environmentId]
+    const view = getView(environmentId)
     if (view != null) {
       if (view.status === 'ready') {
         maybeRunPendingShell(environmentId)
@@ -844,44 +823,57 @@ export function useIdeClaimReconciliation({
         )) {
           void reconcile(environmentId, 'focus')
         }
-        return
+        return view.viewId
       }
       if (view.status === 'detached' || view.status === 'gone') {
-        return
+        return view.viewId
       }
-      void reconcile(environmentId, 'focus')
-      return
+      void reconcile(view.viewId, 'focus')
+      return view.viewId
     }
     const ready = environment?.ready ?? getEnvironmentMap().get(environmentId)?.ready
     if (ready === true) {
       // 用户显式打开：沿用该 Environment 最近一次确认打开的目录；无记录时由 Daemon 使用主目录。
-      beginCreate(environmentId, readRecentDirectories(environmentId, storage)[0])
+      return beginCreate(environmentId, readRecentDirectories(environmentId, storage)[0])
     } else {
-      const attempt = startAttempt(environmentId, {
-        viewId: createUuid(),
+      const viewId = createUuid()
+      const attempt = startAttempt(viewId, {
+        environmentId,
+        viewId,
         mode: 'create',
         status: 'waiting-ready',
         claimId: createUuid(),
         iframeLoaded: false,
         pendingShell: takePendingShellIntent(environmentId),
       })
-      setWaitingReady(environmentId, attempt)
+      setWaitingReady(viewId, attempt)
+      return viewId
     }
+    return null
   }
 
-  function openNewView(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
-    beginCreate(environmentId, view?.directory ?? readRecentDirectories(environmentId, storage)[0])
+  async function openNewView(environmentId: string, directory?: string): Promise<string | null> {
+    const current = getView(environmentId)
+    const candidate = directory ?? current?.directory ?? readRecentDirectories(environmentId, storage)[0]
+    const listing = await listIdeDirectories(environmentId, candidate)
+    const canonicalDirectory = listing.path
+    const duplicate = Object.values(viewsRef.current).find((view) => (
+      view.environmentId === environmentId && view.directory === canonicalDirectory
+    ))
+    if (duplicate != null) {
+      return duplicate.viewId
+    }
+    return beginCreate(environmentId, canonicalDirectory)
   }
 
   function retryClaim(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
+    const view = getView(environmentId)
     if (view == null) {
       return
     }
     if (view.mode === 'create' && view.daemonInstanceId == null) {
       const claimId = createUuid()
-      const attempt = startAttempt(environmentId, {
+      const attempt = startViewAttempt({
         ...view,
         status: canRun(environmentId) ? 'reconciling' : 'waiting-ready',
         claimId,
@@ -896,7 +888,7 @@ export function useIdeClaimReconciliation({
   }
 
   function handleIframeLoaded(environmentId: string, entryUrl: string): void {
-    const before = viewsRef.current[environmentId]
+    const before = getView(environmentId)
     if (
       before == null
       || before.status !== 'ready'
@@ -943,12 +935,16 @@ export function useIdeClaimReconciliation({
     for (const environmentId of available) {
       const ready = environmentMap.get(environmentId)?.ready === true
       if (ready && sessionReady() && identityRef.current != null) {
-        const view = viewsRef.current[environmentId]
-        if (view?.status === 'waiting-ready') {
-          // Daemon 未就绪只能等新事件或显式重试；环境从离线转就绪才自动再对账。
-          const wasReady = previousReady.get(environmentId)
-          if (view.waitingReason !== 'daemon' || wasReady === false) {
-            reconcile(environmentId, 'connection')
+        const viewIds = Object.values(viewsRef.current)
+          .filter((view) => view.environmentId === environmentId)
+          .map((view) => view.viewId)
+        for (const viewId of viewIds) {
+          const view = viewsRef.current[viewId]
+          if (view?.status === 'waiting-ready') {
+            const wasReady = previousReady.get(environmentId)
+            if (view.waitingReason !== 'daemon' || wasReady === false) {
+              reconcile(viewId, 'connection')
+            }
           }
         }
       }
@@ -965,10 +961,12 @@ export function useIdeClaimReconciliation({
     if (!sessionReady()) {
       return
     }
-    for (const environmentId of getPresentation().openedEnvironmentIds) {
-      const view = viewsRef.current[environmentId]
-      if (view != null && view.status !== 'detached' && view.status !== 'gone') {
-        void reconcile(environmentId, 'restore')
+    for (const viewIds of Object.values(getPresentation().viewIdsByEnvironment)) {
+      for (const viewId of viewIds) {
+        const view = viewsRef.current[viewId]
+        if (view != null && view.status !== 'detached' && view.status !== 'gone') {
+          void reconcile(viewId, 'restore')
+        }
       }
     }
   }
@@ -1008,6 +1006,7 @@ export function useIdeClaimReconciliation({
     }
     // 连接变化使旧连接的在途绑定立即失效；新连接不得排在旧请求后面。
     invalidateOperations()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only a new transport connection invalidates operations
   }, [identity?.connectionId])
 
   useEffect(() => {
@@ -1043,7 +1042,7 @@ export function useIdeClaimReconciliation({
     if (!sessionReady() || currentIdentity == null) {
       return
     }
-    const view = viewsRef.current[activeEnvironmentId]
+    const view = getView(activeEnvironmentId)
     if (view == null || view.status === 'detached' || view.status === 'gone') {
       return
     }
@@ -1052,16 +1051,19 @@ export function useIdeClaimReconciliation({
       && isBoundToConnection(view, currentIdentity.eventNodeId, currentIdentity.connectionId)
     ) {
       registerUsageQuiet()
-      maybeRunPendingShell(activeEnvironmentId)
+      maybeRunPendingShell(view.viewId)
       return
     }
-    reconcile(activeEnvironmentId, 'focus')
+    reconcile(view.viewId, 'focus')
     // activeEnvironmentId 切换只做聚焦/对账，不在没有 view 时自动创建。
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- only an Environment transition or session readiness needs focus reconciliation
   }, [activeEnvironmentId, session.browserSessionId, session.status])
 
   return {
     views,
     viewsRef,
+    reconcileView: (viewId: string, reason: 'focus' | 'connection' | 'restore' | 'queued' | 'read-stale' | 'outcome-unknown' | 'directory' | 'retry') =>
+      reconcile(viewId, reason),
     identity,
     startOrFocus,
     openNewView,

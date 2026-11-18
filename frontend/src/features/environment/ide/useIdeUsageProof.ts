@@ -18,6 +18,7 @@ export interface IdeUsageOverride {
 
 interface IdePresentationView {
   openedEnvironmentIds: string[]
+  viewIdsByEnvironment: Record<string, string[]>
 }
 
 export interface IdeSessionWriterOptions {
@@ -26,6 +27,7 @@ export interface IdeSessionWriterOptions {
   viewsRef: RefObject<Record<string, IdeViewState>>
   mountedRef: RefObject<boolean>
   getPresentation: () => IdePresentation
+  preserveSession: boolean
   onStorageStatusChange: (unavailable: boolean) => void
 }
 
@@ -36,14 +38,18 @@ export function useIdeSessionWriter({
   viewsRef,
   mountedRef,
   getPresentation,
+  preserveSession,
   onStorageStatusChange,
 }: IdeSessionWriterOptions) {
   function writeSession(): boolean {
+    if (preserveSession) {
+      return false
+    }
     const presentation = getPresentation()
     const saved = saveIdeSession(
       sessionRef.current.browserSessionId,
       presentation,
-      recoveryFromViews(viewsRef.current, presentation.openedEnvironmentIds),
+      recoveryFromViews(viewsRef.current),
       storage,
     )
     if (mountedRef.current) {
@@ -115,7 +121,12 @@ export function useIdeUsageProof({
     return registerUsage({
       browserSessionId,
       revision: nextRevision(),
-      views: buildUsageViews(viewsRef.current, environmentIds, override),
+      views: buildUsageViews(
+        viewsRef.current,
+        environmentIds,
+        getPresentation().viewIdsByEnvironment,
+        override,
+      ),
     })
   }
 

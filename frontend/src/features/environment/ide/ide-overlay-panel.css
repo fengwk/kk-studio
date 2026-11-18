@@ -98,6 +98,27 @@
   flex-shrink: 0;
 }
 
+.ide-workspace-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  white-space: nowrap;
+  border-bottom: 1px solid var(--border);
+  scrollbar-width: thin;
+}
+
+.ide-workspace-tabs [data-testid='ide-tab'] {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .ide-toolbar-info {
   display: flex;
   align-items: center;

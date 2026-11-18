@@ -45,10 +45,21 @@ class MemoryStorage implements TabStorageArea {
 }
 
 function presentation(partial: Partial<IdePresentation> = {}): IdePresentation {
+  const openedEnvironmentIds = partial.openedEnvironmentIds ?? [ENV_A]
+  const selectedEnvironmentId = partial.selectedEnvironmentId === undefined
+    ? ENV_A
+    : partial.selectedEnvironmentId
+  const viewIdsByEnvironment = partial.viewIdsByEnvironment ?? Object.fromEntries(
+    openedEnvironmentIds.map((environmentId) => [environmentId, [environmentId === ENV_A ? VIEW_A : VIEW_B]]),
+  )
   return {
     panelVisible: true,
-    selectedEnvironmentId: ENV_A,
-    openedEnvironmentIds: [ENV_A],
+    selectedEnvironmentId,
+    openedEnvironmentIds,
+    viewIdsByEnvironment,
+    selectedViewId: partial.selectedViewId === undefined
+      ? (selectedEnvironmentId == null ? null : viewIdsByEnvironment[selectedEnvironmentId]?.[0] ?? null)
+      : partial.selectedViewId,
     ...partial,
   }
 }
@@ -67,6 +78,7 @@ function pending(partial: Partial<IdePendingClaim> = {}): IdePendingClaim {
 
 function recovery(partial: Partial<IdeRecovery> = {}): IdeRecovery {
   return {
+    environmentId: ENV_A,
     viewId: VIEW_A,
     daemonInstanceId: DAEMON_A,
     bindingEpoch: '10',
@@ -79,6 +91,7 @@ function recovery(partial: Partial<IdeRecovery> = {}): IdeRecovery {
 function recoveryJson(overrides: Partial<IdeRecovery> = {}): Record<string, unknown> {
   const value = recovery(overrides)
   return {
+    environmentId: value.environmentId,
     viewId: value.viewId,
     daemonInstanceId: value.daemonInstanceId,
     bindingEpoch: value.bindingEpoch ?? null,
@@ -97,13 +110,15 @@ function recoveryJson(overrides: Partial<IdeRecovery> = {}): Record<string, unkn
 function sessionRaw(
   browserSessionId: string,
   presentationValue: IdePresentation,
-  recoveryByEnvironment: Record<string, unknown>,
+  recoveriesByEnvironment: Record<string, unknown>,
 ): string {
-  return JSON.stringify({
-    browserSessionId,
-    presentation: presentationValue,
-    recoveryByEnvironment,
-  })
+  const recoveryByView = Object.fromEntries(Object.entries(recoveriesByEnvironment).map(
+    ([environmentId, recovery]) => [
+      (recovery as { viewId: string }).viewId,
+      { ...(recovery as object), environmentId },
+    ],
+  ))
+  return JSON.stringify({ browserSessionId, presentation: presentationValue, recoveryByView })
 }
 
 function localRaw(presentationValue: IdePresentation): string {
@@ -111,6 +126,60 @@ function localRaw(presentationValue: IdePresentation): string {
 }
 
 describe('ide tab state', () => {
+  it('migrates a legacy Environment recovery to one view and keeps its claim identity', () => {
+    const session = new MemoryStorage()
+    const legacy = JSON.stringify({
+      browserSessionId: BROWSER_A,
+      presentation: {
+        panelVisible: true,
+        selectedEnvironmentId: ENV_A,
+        openedEnvironmentIds: [ENV_A],
+      },
+      recoveryByEnvironment: {
+        [ENV_A]: {
+          viewId: VIEW_A,
+          daemonInstanceId: DAEMON_A,
+          bindingEpoch: '10',
+          directory: '/workspace/a',
+          pending: null,
+        },
+      },
+    })
+    session.values.set(IDE_TAB_SESSION_KEY, legacy)
+
+    const loaded = initializeIdeTabState({ sessionStorage: session, localStorage: new MemoryStorage() })
+
+    expect(loaded.recoveryError).toBe(false)
+    expect(loaded.presentation.viewIdsByEnvironment[ENV_A]).toEqual([VIEW_A])
+    expect(loaded.presentation.selectedViewId).toBe(VIEW_A)
+    expect(loaded.recoveryByView[VIEW_A]).toMatchObject({
+      environmentId: ENV_A,
+      viewId: VIEW_A,
+      bindingEpoch: '10',
+    })
+    expect(JSON.parse(session.values.get(IDE_TAB_SESSION_KEY) ?? '{}')).toHaveProperty('recoveryByView')
+  })
+
+  it('preserves an un-migratable legacy recovery snapshot instead of overwriting its claim history', () => {
+    const session = new MemoryStorage()
+    const legacy = JSON.stringify({
+      browserSessionId: BROWSER_A,
+      presentation: {
+        panelVisible: true,
+        selectedEnvironmentId: ENV_A,
+        openedEnvironmentIds: [ENV_A],
+      },
+      recoveryByEnvironment: { [ENV_A]: { viewId: VIEW_A, daemonInstanceId: 'bad' } },
+    })
+    session.values.set(IDE_TAB_SESSION_KEY, legacy)
+
+    const loaded = initializeIdeTabState({ sessionStorage: session, localStorage: new MemoryStorage() })
+
+    expect(loaded.recoveryError).toBe(true)
+    expect(loaded.sessionSaved).toBe(false)
+    expect(session.values.get(IDE_TAB_SESSION_KEY)).toBe(legacy)
+  })
+
   it('restores a valid session snapshot with stable browserSessionId and never writes local on load', () => {
     const session = new MemoryStorage()
     const local = new MemoryStorage()
@@ -129,7 +198,7 @@ describe('ide tab state', () => {
     expect(loaded.source).toBe('session')
     expect(loaded.browserSessionId).toBe(BROWSER_A)
     expect(loaded.presentation).toEqual(presentation())
-    expect(loaded.recoveryByEnvironment[ENV_A]).toMatchObject({
+    expect(loaded.recoveryByView[VIEW_A]).toMatchObject({
       viewId: VIEW_A,
       daemonInstanceId: DAEMON_A,
       bindingEpoch: '10',
@@ -153,12 +222,12 @@ describe('ide tab state', () => {
     expect(loaded.browserSessionId).toMatch(/^[0-9a-f-]{36}$/)
     expect(loaded.browserSessionId).not.toBe(BROWSER_A)
     expect(loaded.presentation).toEqual(presentation())
-    expect(loaded.recoveryByEnvironment).toEqual({})
+    expect(loaded.recoveryByView).toEqual({})
     expect(loaded.sessionSaved).toBe(true)
     expect(JSON.parse(session.values.get(IDE_TAB_SESSION_KEY) ?? '{}')).toMatchObject({
       browserSessionId: loaded.browserSessionId,
       presentation: presentation(),
-      recoveryByEnvironment: {},
+      recoveryByView: {},
     })
     expect(local.values.get(IDE_TAB_LAST_KEY)).toBe(localValue)
     expect(local.writes).toBe(0)
@@ -174,7 +243,7 @@ describe('ide tab state', () => {
 
     expect(loaded.source).toBe('local')
     expect(loaded.presentation).toEqual(presentation())
-    expect(loaded.recoveryByEnvironment).toEqual({})
+    expect(loaded.recoveryByView).toEqual({})
   })
 
   it('rejects local snapshots that smuggle runtime recovery or extra fields', () => {
@@ -184,7 +253,7 @@ describe('ide tab state', () => {
       IDE_TAB_LAST_KEY,
       JSON.stringify({
         presentation: presentation(),
-        recoveryByEnvironment: { [ENV_A]: recoveryJson() },
+        recoveryByView: { [ENV_A]: recoveryJson() },
       }),
     )
 
@@ -192,14 +261,31 @@ describe('ide tab state', () => {
 
     expect(loaded.source).toBe('default')
     expect(loaded.presentation).toEqual(createDefaultIdePresentation())
-    expect(loaded.recoveryByEnvironment).toEqual({})
+    expect(loaded.recoveryByView).toEqual({})
+  })
+
+  it('restores a selected Environment that has not started an IDE view', () => {
+    const session = new MemoryStorage()
+    const local = new MemoryStorage()
+    const selected = presentation({
+      selectedEnvironmentId: ENV_B,
+      selectedViewId: null,
+      openedEnvironmentIds: [ENV_A],
+    })
+    saveIdePresentation(BROWSER_A, selected, { [VIEW_A]: recovery() }, {
+      sessionStorage: session,
+      localStorage: local,
+    })
+
+    const loaded = initializeIdeTabState({ sessionStorage: session, localStorage: local })
+
+    expect(loaded.presentation.selectedEnvironmentId).toBe(ENV_B)
+    expect(loaded.presentation.selectedViewId).toBeNull()
+    expect(loaded.presentation.openedEnvironmentIds).toEqual([ENV_A])
+    expect(loaded.recoveryByView[VIEW_A]?.environmentId).toBe(ENV_A)
   })
 
   it.each([
-    ['selected environment is not opened', presentation({
-      selectedEnvironmentId: ENV_B,
-      openedEnvironmentIds: [ENV_A],
-    }), { [ENV_A]: recoveryJson() }],
     ['opened environments repeat', presentation({
       openedEnvironmentIds: [ENV_A, ENV_A],
     }), { [ENV_A]: recoveryJson() }],
@@ -248,7 +334,7 @@ describe('ide tab state', () => {
     expect(loaded.source).toBe('default')
     expect(loaded.browserSessionId).not.toBe(BROWSER_A)
     expect(loaded.presentation).toEqual(createDefaultIdePresentation())
-    expect(loaded.recoveryByEnvironment).toEqual({})
+    expect(loaded.recoveryByView).toEqual({})
   })
 
   it('writes session and local on a user event, keeping runtime identity only in session', () => {
@@ -259,8 +345,9 @@ describe('ide tab state', () => {
       openedEnvironmentIds: [ENV_A, ENV_B],
     })
     const recoveries = {
-      [ENV_A]: recovery(),
-      [ENV_B]: recovery({
+      [VIEW_A]: recovery(),
+      [VIEW_B]: recovery({
+        environmentId: ENV_B,
         viewId: VIEW_B,
         daemonInstanceId: DAEMON_B,
         directory: '/workspace/b',
@@ -276,13 +363,15 @@ describe('ide tab state', () => {
     expect(JSON.parse(session.values.get(IDE_TAB_SESSION_KEY) ?? '{}')).toMatchObject({
       browserSessionId: BROWSER_A,
       presentation: next,
-      recoveryByEnvironment: {
-        [ENV_A]: expect.objectContaining({ viewId: VIEW_A }),
-        [ENV_B]: expect.objectContaining({ viewId: VIEW_B }),
+      recoveryByView: {
+        [VIEW_A]: expect.objectContaining({ environmentId: ENV_A, viewId: VIEW_A }),
+        [VIEW_B]: expect.objectContaining({ environmentId: ENV_B, viewId: VIEW_B }),
       },
     })
     const localSnapshot = local.values.get(IDE_TAB_LAST_KEY) ?? ''
-    expect(JSON.parse(localSnapshot)).toEqual({ presentation: next })
+    expect(JSON.parse(localSnapshot)).toEqual({
+      presentation: { ...next, viewIdsByEnvironment: {}, selectedViewId: null },
+    })
     expect(localSnapshot).not.toContain(VIEW_A)
     expect(localSnapshot).not.toContain(DAEMON_A)
     expect(localSnapshot).not.toContain('/workspace')
@@ -298,17 +387,17 @@ describe('ide tab state', () => {
     const saved = saveIdeSession(
       BROWSER_A,
       presentation(),
-      { [ENV_A]: recovery({ pending: pendingClaim }) },
+      { [VIEW_A]: recovery({ pending: pendingClaim }) },
       { sessionStorage: session, localStorage: local },
     )
 
     expect(saved).toBe(true)
     const snapshot = JSON.parse(session.values.get(IDE_TAB_SESSION_KEY) ?? '{}') as {
       browserSessionId: string
-      recoveryByEnvironment: Record<string, { pending: Record<string, unknown> }>
+      recoveryByView: Record<string, { pending: Record<string, unknown> }>
     }
     expect(snapshot.browserSessionId).toBe(BROWSER_A)
-    expect(snapshot.recoveryByEnvironment[ENV_A]?.pending).toEqual({
+    expect(snapshot.recoveryByView[VIEW_A]?.pending).toEqual({
       mode: 'resume',
       viewId: VIEW_A,
       claimId: CLAIM_A,
@@ -326,14 +415,15 @@ describe('ide tab state', () => {
     const opened = Array.from({ length: IDE_MAX_OPEN_ENVIRONMENTS }, (_, index) => (
       `a1000000-0000-4000-8000-${String(index).padStart(12, '0')}`
     ))
-    const recoveries = Object.fromEntries(opened.map((environmentId, index) => [
-      environmentId,
-      recovery({
-        viewId: `c1000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
+    const recoveries = Object.fromEntries(opened.map((environmentId, index) => {
+      const viewId = `c1000000-0000-4000-8000-${String(index).padStart(12, '0')}`
+      return [viewId, recovery({
+        environmentId,
+        viewId,
         daemonInstanceId: `d1000000-0000-4000-8000-${String(index).padStart(12, '0')}`,
         directory: `/${'x'.repeat(4090)}`,
-      }),
-    ]))
+      })]
+    }))
     const next = presentation({
       selectedEnvironmentId: opened[0] ?? null,
       openedEnvironmentIds: opened,

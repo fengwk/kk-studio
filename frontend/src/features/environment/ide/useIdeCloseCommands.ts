@@ -10,7 +10,7 @@ interface IdeViewCommandsOptions {
   viewsRef: RefObject<Record<string, IdeViewState>>
   sessionRef: RefObject<IdeBrowserSessionState>
   updateView: (
-    environmentId: string,
+    viewId: string,
     attempt: number,
     patch: Partial<IdeViewState>,
   ) => IdeViewState | null
@@ -27,12 +27,7 @@ interface IdeViewCommandsOptions {
   registerUsageQuiet: () => void
 }
 
-/**
- * 单个视图的命令：关闭与其错误提示。
- *
- * <p>关闭是有副作用的命令，因此先用浏览器会话与 server 冻结坐标发起，再以绑定未变作为
- * 落地的唯一条件；`discard` 只在用户显式确认后为真，未确认时的“未知结果”只能报告 dirty。
- */
+/** 单 view 的关闭与错误提示；服务端坐标始终由该 view 的归属和绑定提供。 */
 export function useIdeCloseCommands({
   viewsRef,
   sessionRef,
@@ -43,8 +38,8 @@ export function useIdeCloseCommands({
   registerUsageNow,
   registerUsageQuiet,
 }: IdeViewCommandsOptions) {
-  async function closeEnvironment(environmentId: string, discard: boolean): Promise<IdeCloseResult> {
-    const view = viewsRef.current[environmentId]
+  async function closeView(viewId: string, discard: boolean): Promise<IdeCloseResult> {
+    const view = viewsRef.current[viewId]
     if (view == null) {
       return { ok: true, requiresForceConfirmation: false }
     }
@@ -57,13 +52,10 @@ export function useIdeCloseCommands({
     ) {
       return { ok: false, requiresForceConfirmation: false, message: 'view-not-ready' }
     }
-    updateView(environmentId, view.attempt, {
-      closeInFlight: true,
-      closeError: undefined,
-    })
+    updateView(viewId, view.attempt, { closeInFlight: true, closeError: undefined })
     try {
       await registerUsageNow({
-        environmentId,
+        environmentId: view.environmentId,
         viewId: view.viewId,
         claimId: view.claimId,
         bindingEpoch: view.bindingEpoch,
@@ -74,20 +66,20 @@ export function useIdeCloseCommands({
         expectedDaemonInstanceId: view.daemonInstanceId,
         discard,
       }
-      await closeIdeView(environmentId, view.viewId, body)
-      const current = viewsRef.current[environmentId]
+      await closeIdeView(view.environmentId, view.viewId, body)
+      const current = viewsRef.current[viewId]
       if (!isSameBinding(current, view)) {
         return { ok: false, requiresForceConfirmation: false, message: 'binding-changed' }
       }
       const next = { ...viewsRef.current }
-      delete next[environmentId]
+      delete next[viewId]
       forgetView(view.daemonInstanceId, view.viewId)
       commitViews(next)
       writeSession()
       registerUsageQuiet()
       return { ok: true, requiresForceConfirmation: false }
     } catch (error) {
-      const current = viewsRef.current[environmentId]
+      const current = viewsRef.current[viewId]
       if (!isSameBinding(current, view)) {
         return { ok: false, requiresForceConfirmation: false, message: 'binding-changed' }
       }
@@ -100,10 +92,7 @@ export function useIdeCloseCommands({
         : outcomeUnknown
           ? 'close-result-unknown'
           : safeIdeError(error) || 'close-failed'
-      updateView(environmentId, view.attempt, {
-        closeInFlight: false,
-        closeError,
-      })
+      updateView(viewId, view.attempt, { closeInFlight: false, closeError })
       return {
         ok: false,
         requiresForceConfirmation,
@@ -114,13 +103,13 @@ export function useIdeCloseCommands({
     }
   }
 
-  function dismissCloseError(environmentId: string): void {
-    const view = viewsRef.current[environmentId]
+  function dismissCloseError(viewId: string): void {
+    const view = viewsRef.current[viewId]
     if (view == null || view.closeError == null) {
       return
     }
-    updateView(environmentId, view.attempt, { closeError: undefined })
+    updateView(viewId, view.attempt, { closeError: undefined })
   }
 
-  return { closeEnvironment, dismissCloseError }
+  return { closeView, closeEnvironment: closeView, dismissCloseError }
 }

@@ -31,27 +31,31 @@ export interface IdeCloseResult {
 export interface IdeOverlayPanelProps {
   isOpen: boolean
   selectedEnvironmentId: string | null
+  selectedViewId?: string | null
   openedEnvironmentIds: string[]
+  viewsByEnvironment?: Record<string, string[]>
   views: Record<string, IdeViewState>
   environments: IdeEnvironmentInfo[]
   environmentsLoading: boolean
   environmentsError: boolean
   sessionStatus: IdeBrowserSessionStatus
   storageUnavailable: boolean
+  recoveryError?: boolean
   /** 浏览器事件连接快照；与 IDE 会话状态、iframe 内部连接分别呈现。 */
   connectionState: ApplicationEventConnectionState
   onSelectEnvironment: (environmentId: string) => void
+  onSelectView: (viewId: string) => void
   onCollapse: () => void
-  onCloseEnvironment: (environmentId: string, discard: boolean) => Promise<IdeCloseResult>
-  onDismissCloseError: (environmentId: string) => void
+  onCloseEnvironment: (viewId: string, discard: boolean) => Promise<IdeCloseResult>
+  onDismissCloseError: (viewId: string) => void
   onChangeDirectory: (
-    environmentId: string,
+    viewId: string,
     directory: string,
   ) => Promise<{ ok: boolean; message?: string }>
-  onOpenTerminal: (environmentId: string) => void
-  onIframeLoaded: (environmentId: string, entryUrl: string) => void
-  onOpenNewView: (environmentId: string) => void
-  onRetryClaim: (environmentId: string) => void
+  onOpenTerminal: (viewId: string) => void
+  onIframeLoaded: (viewId: string, entryUrl: string) => void
+  onOpenNewView: (environmentId: string, directory?: string) => void
+  onRetryClaim: (viewId: string) => void
   onReloadEnvironments: () => void
   /** 读取该 Environment 已确认切换成功的最近目录。 */
   readRecentDirectories: (environmentId: string) => string[]
@@ -78,15 +82,19 @@ const COMMAND_MESSAGES: Record<string, TranslationKey> = {
 export function IdeOverlayPanel({
   isOpen,
   selectedEnvironmentId,
+  selectedViewId,
   openedEnvironmentIds,
+  viewsByEnvironment,
   views,
   environments,
   environmentsLoading,
   environmentsError,
   sessionStatus,
   storageUnavailable,
+  recoveryError = false,
   connectionState,
   onSelectEnvironment,
+  onSelectView,
   onCollapse,
   onCloseEnvironment,
   onDismissCloseError,
@@ -101,13 +109,14 @@ export function IdeOverlayPanel({
 }: IdeOverlayPanelProps) {
   const { t } = useI18n()
   const [directoryOpen, setDirectoryOpen] = useState(false)
+  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false)
   const [directoryPending, setDirectoryPending] = useState(false)
   const [directoryError, setDirectoryError] = useState<string | null>(null)
   const [recentDirectories, setRecentDirectories] = useState<string[]>([])
-  const [forceCloseEnvironmentId, setForceCloseEnvironmentId] = useState<string | null>(null)
+  const [forceCloseViewId, setForceCloseViewId] = useState<string | null>(null)
   const [forceCloseReason, setForceCloseReason] = useState<'unknown' | 'control-unavailable' | null>(null)
   const [discarding, setDiscarding] = useState(false)
-  const lastSelectedRef = useRef(selectedEnvironmentId)
+  const lastSelectedRef = useRef(`${selectedEnvironmentId}:${selectedViewId ?? ''}`)
   const viewsRef = useRef(views)
   const forceBindingRef = useRef<{ viewId: string; bindingEpoch: string } | null>(null)
 
@@ -116,29 +125,36 @@ export function IdeOverlayPanel({
   }, [views])
 
   useEffect(() => {
-    if (lastSelectedRef.current === selectedEnvironmentId) {
+    const selectionKey = `${selectedEnvironmentId}:${selectedViewId ?? ''}`
+    if (lastSelectedRef.current === selectionKey) {
       return
     }
-    lastSelectedRef.current = selectedEnvironmentId
+    lastSelectedRef.current = selectionKey
     setDirectoryOpen(false)
     setDirectoryError(null)
     setRecentDirectories([])
     setDirectoryPending(false)
-    setForceCloseEnvironmentId(null)
+    setForceCloseViewId(null)
     setForceCloseReason(null)
-  }, [selectedEnvironmentId])
+  }, [selectedEnvironmentId, selectedViewId])
 
-  const selectedView = selectedEnvironmentId == null
-    ? null
-    : views[selectedEnvironmentId] ?? null
+  const selectedView = selectedViewId == null
+    ? (selectedEnvironmentId == null ? null : views[selectedEnvironmentId] ?? null)
+    : views[selectedViewId] ?? null
+  const activeViewId = selectedViewId ?? selectedView?.viewId ?? null
+  const viewById = (viewId: string) => viewsRef.current[viewId]
+    ?? Object.values(viewsRef.current).find((view) => view.viewId === viewId)
   const selectedEnvironment = selectedEnvironmentId == null
     ? null
     : environments.find((environment) => environment.id === selectedEnvironmentId) ?? null
   const openedViews = useMemo(
-    () => openedEnvironmentIds
-      .map((environmentId) => views[environmentId])
-      .filter((view): view is IdeViewState => view != null),
-    [openedEnvironmentIds, views],
+    () => openedEnvironmentIds.flatMap((environmentId) => (
+      (viewsByEnvironment?.[environmentId] ?? (views[environmentId] == null ? [] : [environmentId]))
+        .map((viewId) => views[viewId]).filter(
+        (view): view is IdeViewState => view != null,
+      )
+    )),
+    [openedEnvironmentIds, viewsByEnvironment, views],
   )
   const environmentName = useCallback(
     (environmentId: string) => environments.find((environment) => environment.id === environmentId)?.name
@@ -177,63 +193,73 @@ export function IdeOverlayPanel({
   const closeDisabled = actionsDisabled || selectedEpoch == null
 
   const handleCloseClick = useCallback(() => {
-    if (selectedEnvironmentId == null) {
+    if (activeViewId == null) {
       return
     }
-    const view = viewsRef.current[selectedEnvironmentId]
-    void onCloseEnvironment(selectedEnvironmentId, false).then((result) => {
-      const current = viewsRef.current[selectedEnvironmentId]
+    const view = viewById(activeViewId)
+    void onCloseEnvironment(activeViewId, false).then((result) => {
+      const current = viewById(activeViewId)
       if (!result.ok && result.requiresForceConfirmation && view?.bindingEpoch != null
         && current?.viewId === view.viewId && current.bindingEpoch === view.bindingEpoch
-        && lastSelectedRef.current === selectedEnvironmentId) {
+        && lastSelectedRef.current === `${selectedEnvironmentId}:${selectedViewId ?? ''}`) {
         forceBindingRef.current = { viewId: view.viewId, bindingEpoch: view.bindingEpoch }
-        setForceCloseEnvironmentId(selectedEnvironmentId)
+        setForceCloseViewId(activeViewId)
         setForceCloseReason(result.message === 'close-control-unavailable'
           ? 'control-unavailable'
           : 'unknown')
       }
     })
-  }, [onCloseEnvironment, selectedEnvironmentId])
+  }, [onCloseEnvironment, selectedEnvironmentId, selectedViewId, activeViewId])
 
   const handleDiscardClose = useCallback(async () => {
-    if (forceCloseEnvironmentId == null || discarding) {
+    if (forceCloseViewId == null || discarding) {
       return
     }
-    const current = viewsRef.current[forceCloseEnvironmentId]
+    const current = viewById(forceCloseViewId)
     if (current?.viewId !== forceBindingRef.current?.viewId
       || current?.bindingEpoch !== forceBindingRef.current?.bindingEpoch) {
-      setForceCloseEnvironmentId(null)
+      setForceCloseViewId(null)
       setForceCloseReason(null)
       return
     }
     setDiscarding(true)
     try {
-      const result = await onCloseEnvironment(forceCloseEnvironmentId, true)
+      const result = await onCloseEnvironment(forceCloseViewId, true)
       if (!result.ok && result.requiresForceConfirmation) {
         return
       }
-      setForceCloseEnvironmentId(null)
+      setForceCloseViewId(null)
       setForceCloseReason(null)
     } finally {
       setDiscarding(false)
     }
-  }, [forceCloseEnvironmentId, discarding, onCloseEnvironment])
+  }, [forceCloseViewId, discarding, onCloseEnvironment])
 
   const handleDirectoryConfirm = useCallback(async (directory: string) => {
     const environmentId = selectedEnvironmentId
+    const viewId = activeViewId
+    const selectionKey = `${environmentId}:${viewId ?? ''}`
     if (environmentId == null || directoryPending) {
       return
     }
     setDirectoryPending(true)
     setDirectoryError(null)
     try {
-      const result = await onChangeDirectory(environmentId, directory)
+      if (newWorkspaceOpen) {
+        onOpenNewView(environmentId, directory)
+        setNewWorkspaceOpen(false)
+        setDirectoryOpen(false)
+        return
+      }
+      if (activeViewId == null) {
+        return
+      }
+      const result = await onChangeDirectory(activeViewId, directory)
       if (!result.ok) {
         setDirectoryError(commandMessage(result.message, 'ai.ide.changeDirectoryFailed'))
         return
       }
-      // 迟到结果落在已切换的 Environment 上时不记录，也不关闭当前的目录树。
-      if (lastSelectedRef.current !== environmentId) {
+      if (lastSelectedRef.current !== selectionKey) {
         return
       }
       setRecentDirectories(recordRecentDirectory(environmentId, directory))
@@ -245,8 +271,11 @@ export function IdeOverlayPanel({
     commandMessage,
     directoryPending,
     onChangeDirectory,
+    onOpenNewView,
     recordRecentDirectory,
     selectedEnvironmentId,
+    activeViewId,
+    newWorkspaceOpen,
   ])
 
   const handlePanelKeyDown = useCallback((event: KeyboardEvent<HTMLElement>) => {
@@ -257,14 +286,14 @@ export function IdeOverlayPanel({
       && !event.nativeEvent.isComposing
       && event.keyCode !== 229
     ) {
-      if (directoryOpen || forceCloseEnvironmentId != null) {
+      if (directoryOpen || forceCloseViewId != null) {
         return
       }
       event.preventDefault()
       event.stopPropagation()
       onCollapse()
     }
-  }, [directoryOpen, forceCloseEnvironmentId, onCollapse])
+  }, [directoryOpen, forceCloseViewId, onCollapse])
 
   const terminalError = selectedView?.terminalError
   const closeError = selectedView?.closeError
@@ -355,7 +384,7 @@ export function IdeOverlayPanel({
               className="ide-toolbar-icon"
               onClick={() => {
                 if (selectedEnvironmentId != null) {
-                  onOpenTerminal(selectedEnvironmentId)
+                  onOpenTerminal(activeViewId ?? selectedEnvironmentId)
                 }
               }}
               disabled={actionsDisabled}
@@ -398,9 +427,44 @@ export function IdeOverlayPanel({
           ) : null}
         </div>
       </header>
+      <nav className="ide-workspace-tabs" data-testid="ide-tab-strip" aria-label={t('ai.ide.workspaces')}>
+        {openedViews.filter((view) => view.environmentId === selectedEnvironmentId).map((view) => (
+          <Button
+            key={view.viewId}
+            variant={view.viewId === selectedViewId ? 'primary' : 'ghost'}
+            size="compact"
+            data-testid="ide-tab"
+            data-ide-view={view.viewId}
+            aria-current={view.viewId === selectedViewId ? 'page' : undefined}
+            title={view.directory ?? view.viewId}
+            onClick={() => onSelectView(view.viewId)}
+          >
+            {view.directory?.split(/[\\/]/).filter(Boolean).at(-1) ?? t('ai.ide.workspace')}
+          </Button>
+        ))}
+        {selectedEnvironmentId != null ? (
+          <Button
+            variant="ghost"
+            size="compact"
+            data-testid="ide-open-workspace-btn"
+            aria-label={t('ai.ide.openWorkspace')}
+            title={t('ai.ide.openWorkspace')}
+            disabled={selectedEnvironment?.ready !== true}
+            onClick={() => {
+              setNewWorkspaceOpen(true)
+              setDirectoryError(null)
+              setRecentDirectories(readRecentDirectories(selectedEnvironmentId))
+              setDirectoryOpen(true)
+            }}
+          >
+            +
+          </Button>
+        ) : null}
+      </nav>
 
       <IdePanelStatusBanners
         storageUnavailable={storageUnavailable}
+        recoveryError={recoveryError}
         sessionStatus={sessionStatus}
         connectionState={connectionState}
         selectedView={selectedView}
@@ -491,9 +555,12 @@ export function IdeOverlayPanel({
               className="ide-global-view"
               key={`${view.environmentId}:${view.viewId}`}
               data-ide-environment={view.environmentId}
+              data-ide-view={view.viewId}
               data-testid="ide-view-layer"
-              hidden={!viewLayerVisible || selectedEnvironmentId !== view.environmentId}
-              inert={selectedEnvironmentId !== view.environmentId ? true : undefined}
+              hidden={!viewLayerVisible || (selectedViewId != null
+                ? selectedViewId !== view.viewId
+                : selectedEnvironmentId !== view.environmentId)}
+              inert={(selectedViewId != null && selectedViewId !== view.viewId) || selectedEnvironmentId !== view.environmentId ? true : undefined}
             >
               {view.entryUrl != null ? (
                 <>
@@ -507,11 +574,12 @@ export function IdeOverlayPanel({
                     className="ide-panel-iframe"
                     data-testid="ide-iframe"
                     data-ide-environment={view.environmentId}
+                    data-ide-view={view.viewId}
                     title={`${t('ai.ide.title')} · ${environmentName(view.environmentId)}`}
                     src={view.entryUrl}
                     sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-downloads allow-modals"
                     allow="clipboard-read; clipboard-write"
-                    onLoad={() => onIframeLoaded(view.environmentId, view.entryUrl!)}
+                    onLoad={() => onIframeLoaded(view.viewId, view.entryUrl!)}
                   />
                 </>
               ) : null}
@@ -520,10 +588,10 @@ export function IdeOverlayPanel({
         </div>
       </div>
 
-      {directoryOpen && selectedEnvironmentId != null && selectedView?.directory ? (
+      {directoryOpen && selectedEnvironmentId != null && (selectedView?.directory || newWorkspaceOpen) ? (
         <OpenDirectoryModal
           environmentId={selectedEnvironmentId}
-          currentDirectory={selectedView.directory}
+          currentDirectory={selectedView?.directory ?? '/'}
           recentDirectories={recentDirectories}
           pending={directoryPending}
           error={directoryError}
@@ -535,12 +603,13 @@ export function IdeOverlayPanel({
               return
             }
             setDirectoryOpen(false)
+            setNewWorkspaceOpen(false)
             setDirectoryError(null)
           }}
         />
       ) : null}
 
-      {forceCloseEnvironmentId != null ? (
+      {forceCloseViewId != null ? (
         <ConfirmActionModal
           className="ide-confirm-modal"
           modal={{
@@ -555,7 +624,7 @@ export function IdeOverlayPanel({
           pending={discarding}
           onClose={() => {
             if (!discarding) {
-              setForceCloseEnvironmentId(null)
+              setForceCloseViewId(null)
               setForceCloseReason(null)
             }
           }}
