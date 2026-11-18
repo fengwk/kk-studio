@@ -34,7 +34,8 @@ final class ModelPricingPlanSource {
       return ModelRequestBodyPricing.plan(ModelPricing.ZERO);
     }
     try {
-      return ModelRequestBodyPricing.plan(configParser.parse(model.configJson()).pricing());
+      ModelPricing pricing = configParser.parse(model.configJson()).pricing();
+      return ModelRequestBodyPricing.plan(pricing == null ? ModelPricing.ZERO : pricing);
     } catch (IllegalArgumentException invalidConfig) {
       return ModelRequestBodyPricing.plan(ModelPricing.ZERO);
     }

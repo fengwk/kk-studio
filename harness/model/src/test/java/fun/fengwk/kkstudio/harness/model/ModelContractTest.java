@@ -221,21 +221,15 @@ class ModelContractTest {
                 new BigDecimal("3"),
                 Map.of(),
                 new BigDecimal("6")),
-            List.of(),
             List.of(
-                new ModelPricing.Multiplier(
+                new ModelPricing.ServiceTierMultiplier(
                     "priority",
-                    ModelPricingCondition.ALWAYS,
-                    new ModelPricing.Factors(
-                        new BigDecimal("1.5"),
-                        new BigDecimal("1.5"),
-                        new BigDecimal("1.5"),
-                        new BigDecimal("1.5"),
-                        new BigDecimal("1.5")))));
+                    new ModelPricing.Factors(new BigDecimal("1.5"), null, null, null, null, null))),
+            List.of());
     ModelUsage usage =
         new ModelUsage(800_000, 800_000, 200_000, 100_000, Map.of(), 300_000L, 1_900_000L);
 
-    ModelCost cost = ModelCost.calculate(pricing, usage);
+    ModelCost cost = ModelCost.calculate(pricing, usage, null, "priority");
 
     assertEquals(new BigDecimal("2.4"), cost.input());
     assertEquals(new BigDecimal("3.0"), cost.output());
@@ -281,14 +275,15 @@ class ModelContractTest {
                     null),
                 List.of(),
                 List.of()));
-    ModelPricing.Override override =
-        new ModelPricing.Override(
-            "same",
-            ModelPricingCondition.ALWAYS,
-            new ModelPricing.RatePatch(null, null, null, null, null, null, false));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new ModelPricing(ModelPricing.RateSet.ZERO, List.of(override, override), List.of()));
+        () ->
+            new ModelPricing(
+                ModelPricing.RateSet.ZERO,
+                List.of(
+                    new ModelPricing.InputTokenRange(1, 10, BigDecimal.ONE, null),
+                    new ModelPricing.InputTokenRange(9, 20, null, BigDecimal.ONE)),
+                List.of()));
   }
 
   /** ProviderCacheControl 只保留 retention 与 session key：NONE 时 key 必须为空/null，非 NONE 时 key 必须非空白。 */

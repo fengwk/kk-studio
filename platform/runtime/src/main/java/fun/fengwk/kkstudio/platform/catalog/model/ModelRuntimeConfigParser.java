@@ -179,7 +179,7 @@ public final class ModelRuntimeConfigParser {
         abilities.isMessageLevelEffort(),
         List.copyOf(variants),
         config.getDefaultVariant(),
-        ModelPricingCodec.toModelPricing(config.getPricing()));
+        ModelPricingCodec.parsePricing(config.getPricing()));
   }
 
   private List<ProviderProtocolOptions> validate(ModelConfigDTO config) {
@@ -189,7 +189,9 @@ public final class ModelRuntimeConfigParser {
     validateLimit(config.getLimit());
     ModelAbilitiesDTO abilities = validateAbilities(config.getAbilities());
     List<ProviderProtocolOptions> options = validateVariants(config, abilities);
-    config.setPricing(ModelPricingCodec.normalizeAndValidate(config.getPricing()));
+    if (config.getPricing() != null) {
+      config.setPricing(ModelPricingCodec.normalizeAndValidate(config.getPricing()));
+    }
     return options;
   }
 
