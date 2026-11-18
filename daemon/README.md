@@ -27,6 +27,14 @@ The standard-library protobuf representation is also tested against all 28 binar
 
 The daemon executable retains CLI parsing, `--help`, `--version`, read-only `--check-config`, and internal helper commands. The `--config` production path assembles native supervision, the directory lock, LSP and IDE services, control transport, runtime capabilities, resource transfer, skill installation, and update handling. `internal/runtime` owns SETTINGS/ENVIRONMENT_CONFIG readiness, heartbeats, capability invocation, cancellation/replay, result encoding, and host facts; configuration candidates publish LSP generations before the new snapshot becomes active.
 
+### TypeScript LSP profile
+
+The verified TypeScript profile is limited to Linux/amd64 and pins `typescript-language-server@4.3.4` with `typescript@5.8.3` in `internal/lsp/typescript/package-lock.json`. `lsp.TypeScriptLibrary.Install` uses the caller-provided private library directory and `npm ci --ignore-scripts`; it stages beside the version directory, validates installed package versions and the executable, then atomically publishes the immutable profile under a kernel-backed library lock. Its npm cache is confined to removable staging data; it does not modify global npm/HOME/XDG state. The install needs npm and Node.js on PATH; the package declares a Node.js 18 minimum, while the real-server handshake in this slice was verified with Node.js 22.23.4.
+
+`lsp.TypeScriptServerConfig` resolves the installed profile to the exact `node <profile>/node_modules/typescript-language-server/lib/cli.mjs --stdio` command and its verified TS/JS extensions and root markers. Callers add that declaration only to the appropriate Environment's `daemonConfig.lsp`; the existing LSP facade/pool owns runtime processes, keeping Environment and canonical workspace roots isolated. Installing materials alone does not enable a language. The automated package install + real-server initialize handshake is opt-in: `KK_STUDIO_TEST_TS_LSP=1 go test ./internal/lsp -run '^TestTypeScriptProfile_RealInstallAndLSPHandshake$'` (downloads pinned npm packages into a temporary directory).
+
+No other language or platform is declared by this profile.
+
 ### Skill installation
 
 The `skill.install` capability accepts arguments exactly `{"transferId":"<lowercase UUID>","package":"<name>","version":"<version>","skill":"<skill name>"}`. `package`, `version`, and `skill` must each be one safe path segment: nonempty, not `.` or `..`, no path separator, and no control character. The runtime requests a `DownloadTicket` through `skill.ResourceDownloader.RequestTicket(ctx, transferId)`; the ticket contains the declared size, SHA-256, and opaque transport data. The installer reuses `<dataDir>/skills/<package>/<version>/<sha256-prefix-12>/` when it already exists, without downloading the archive. Otherwise it calls `Download(ctx, ticket)`, verifies archive size and SHA-256, extracts to a temporary directory in the same parent, validates the requested skill, and renames the staging directory to the content-addressed target. If another installer publishes that target first, the loser removes its staging directory and reuses the existing valid target. The downloader aborts as soon as it reads beyond the ticket size, then verifies exact size and SHA-256; it does not retry or impose an additional archive-size cap. Extraction rejects absolute/traversal paths, backslashes, and symlink entries. Extraction is limited to 10,000 archive entries and 512 MiB expanded bytes. Require `<content-addressed dir>/<skill>/SKILL.md`; return details `{"skill_dir":"<absolute installed skill directory>"}` and one English sentence. Failures return explicit English errors and must not report success.
@@ -41,7 +49,7 @@ The `skill.install` capability accepts arguments exactly `{"transferId":"<lowerc
 | `internal/transport` | Network control channel, IDE data routing, and resource clients; implements runtime connection/resource ports and consumes IDE's view resolver. |
 | `internal/runtime` | Session/capability orchestration and contracts consumed by feature packages and implemented by transport. |
 | `internal/coding` | Filesystem, search, process execution, and output capabilities. |
-| `internal/lsp` | Language-server discovery, process sessions, and capabilities. |
+| `internal/lsp` | Language-server discovery, fixed TypeScript profile materials, process sessions, and capabilities. |
 | `internal/ide` | Managed IDE/view lifecycle; implements the transport view-resolution boundary. |
 | `internal/native` | Platform process-tree supervision and local OS resources consumed by coding, LSP, and IDE. |
 | `internal/skill` | Skill package installation through resource download. |
