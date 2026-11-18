@@ -10,7 +10,6 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
@@ -23,6 +22,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderTextBlock;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolResultBlock;
 import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.OpenAiBackendCapabilities;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -97,7 +97,7 @@ final class OpenAiChatRequestEncoder {
     mergeTools(root, request.tools());
 
     // 应用 Prompt Cache 策略：key 直接使用运行时提供的会话 key
-    applyPromptCache(root, request.cacheControl(), descriptor);
+    applyPromptCache(root, request.cacheControl(), descriptor, request.model().modelId());
 
     root.set("messages", encodeMessages(request, descriptor));
 
@@ -332,19 +332,29 @@ final class OpenAiChatRequestEncoder {
     return text.toString();
   }
 
-  /** 将 runtime 缓存意图映射到协议字段：SHORT 官方主机仅发 key，NONE 无提示，LONG 保留 24h。 */
+  /** Map cache intent only to OpenAI capabilities proven for the official endpoint and model. */
   private static void applyPromptCache(
-      ObjectNode root, ProviderCacheControl cacheControl, ProviderDescriptor descriptor) {
-    if (cacheControl.retention() == PromptCacheRetention.NONE) {
+      ObjectNode root,
+      ProviderCacheControl cacheControl,
+      ProviderDescriptor descriptor,
+      String modelId) {
+    if (!OpenAiChatOfficialCapabilities.isOfficialEndpoint(descriptor)) {
       return;
     }
-    if (cacheControl.retention() == PromptCacheRetention.SHORT
-        && !OpenAiChatOfficialCapabilities.isOfficialEndpoint(descriptor)) {
-      return;
-    }
-    root.put("prompt_cache_key", cacheControl.key());
-    if (cacheControl.retention() == PromptCacheRetention.LONG) {
-      root.put("prompt_cache_retention", "24h");
+    boolean modern = OpenAiBackendCapabilities.supportsExplicitCache(modelId);
+    switch (cacheControl.retention()) {
+      case NONE -> {
+        if (modern) {
+          root.putObject("prompt_cache_options").put("mode", "explicit");
+        }
+      }
+      case SHORT -> root.put("prompt_cache_key", cacheControl.key());
+      case LONG -> {
+        if (OpenAiBackendCapabilities.supportsLegacyLongCache(modelId)) {
+          root.put("prompt_cache_key", cacheControl.key());
+          root.put("prompt_cache_retention", "24h");
+        }
+      }
     }
   }
 }

@@ -237,6 +237,55 @@ class OpenAiResponsesModelProviderTest {
     assertFalse(body.has("prompt_cache_retention"));
   }
 
+  /** LONG on a verified official model sends session identity headers and the 12-hour TTL. */
+  @Test
+  void longCacheUsesSessionHeadersAndTwelveHourWireOption() throws Exception {
+    ModelDescriptor modernModel =
+        new ModelDescriptor(
+            "openai_test", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, true);
+    ProviderRequest base = createRequest();
+    ProviderRequest request =
+        new ProviderRequest(
+            modernModel,
+            base.variant(),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.messages(),
+            base.tools(),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "long-session"));
+    AtomicReference<HttpRequest> capturedRequest = new AtomicReference<>();
+    RecordingHandler handler = new RecordingHandler();
+    new OpenAiResponsesProviderAdapter(stubTransport((req, cb) -> capturedRequest.set(req)), null)
+        .create(createDescriptor()).stream(request, handler);
+
+    HttpRequest req = capturedRequest.get();
+    assertNotNull(req);
+    assertEquals("long-session", req.headers().firstValue("session-id").orElse(""));
+    assertEquals("long-session", req.headers().firstValue("x-client-request-id").orElse(""));
+    JsonNode body = MAPPER.readTree(handler.requestBody);
+    assertEquals("12h", body.path("prompt_cache_options").path("ttl").asString(""));
+    assertEquals("long-session", body.path("prompt_cache_key").asString(""));
+
+    ProviderDescriptor proxyDescriptor =
+        new ProviderDescriptor(
+            "proxy",
+            ProviderType.OPENAI_RESPONSES,
+            "https://proxy.example/v1",
+            createDescriptor().modelCallTimeoutPolicy());
+    AtomicReference<HttpRequest> proxyRequest = new AtomicReference<>();
+    RecordingHandler proxyHandler = new RecordingHandler();
+    new OpenAiResponsesProviderAdapter(
+            stubTransport((proxyHttpRequest, cb) -> proxyRequest.set(proxyHttpRequest)), null)
+        .create(proxyDescriptor).stream(request, proxyHandler);
+    assertNotNull(proxyRequest.get());
+    assertTrue(proxyRequest.get().headers().firstValue("session-id").isEmpty());
+    assertTrue(proxyRequest.get().headers().firstValue("x-client-request-id").isEmpty());
+    JsonNode proxyBody = MAPPER.readTree(proxyHandler.requestBody);
+    assertFalse(proxyBody.has("prompt_cache_key"));
+    assertFalse(proxyBody.has("prompt_cache_options"));
+    assertEquals("Test system instruction.", proxyBody.path("instructions").asString(""));
+  }
+
   /** 验证无 apiKey 或为空格时以匿名方式发起请求，绝不注入 Authorization 头。 */
   @Test
   void test_anonymousRequestAssembly() {

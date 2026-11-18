@@ -6,7 +6,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -26,6 +25,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamState;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.OpenAiBackendCapabilities;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -327,13 +327,8 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
   }
 
   private Long cacheWriteTtlSeconds() {
-    if (request.cacheControl().retention() == PromptCacheRetention.SHORT
-        && OpenAiChatOfficialCapabilities.isOfficialEndpoint(descriptor)
-        && OpenAiChatOfficialCapabilities.hasThirtyMinuteDefaultCacheWrite(
-            request.model().modelId())) {
-      return 1800L;
-    }
-    return null;
+    return OpenAiBackendCapabilities.reliableWriteTtlSeconds(
+        descriptor, request.model().modelId(), false, request.cacheControl().retention());
   }
 
   private void requireCompleteStreamFacts() {

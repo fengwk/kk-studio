@@ -1377,6 +1377,9 @@ class OpenAiChatStreamAccumulatorTest {
     ModelUsage olderModel =
         cacheWriteUsage("https://api.openai.com/v1", "gpt-5.5", PromptCacheRetention.SHORT);
     assertTrue(olderModel.cacheWriteByTtl().isEmpty());
+    ModelUsage legacyLong =
+        cacheWriteUsage("https://api.openai.com/v1", "gpt-5.5", PromptCacheRetention.LONG);
+    assertEquals(Map.of(86400L, 3L), legacyLong.cacheWriteByTtl());
     ModelUsage noCacheIntent =
         cacheWriteUsage("https://api.openai.com/v1", "gpt-5.6", PromptCacheRetention.NONE);
     assertTrue(noCacheIntent.cacheWriteByTtl().isEmpty());

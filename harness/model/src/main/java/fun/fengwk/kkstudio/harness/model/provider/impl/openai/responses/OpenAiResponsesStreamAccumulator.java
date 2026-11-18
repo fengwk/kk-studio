@@ -23,6 +23,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamState;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.OpenAiBackendCapabilities;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -358,7 +359,10 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
     fillAuthoritativeContent();
 
     OpenAiResponsesToolStream.ToolCalls resolved = resolveToolCalls();
-    ModelUsage modelUsage = usage.toModelUsage();
+    Long reliableCacheWriteTtl =
+        OpenAiBackendCapabilities.reliableWriteTtlSeconds(
+            descriptor, request.model().modelId(), true, request.cacheControl().retention());
+    ModelUsage modelUsage = usage.toModelUsage(reliableCacheWriteTtl);
     String rawUsageJson = usage.rawJson();
     List<ProviderContentBlock> responseBlocks = buildResponseBlocks(resolved);
 

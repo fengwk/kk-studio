@@ -464,13 +464,13 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
-  @DisplayName("Prompt Cache 映射：SHORT 官方端点仅发 key，LONG 保留 24h")
+  @DisplayName("Prompt Cache 映射仅使用官方端点与已验证型号能力")
   void testPromptCacheRetentionMapping() throws Exception {
     ProviderMessage userMsg =
         new ProviderMessage(
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("User prompt")));
 
-    // 1. NONE: 不发任何 cache hint
+    // Legacy models cannot explicitly disable caching.
     ProviderRequest reqNone =
         cacheRequest("Test system instruction.", List.of(userMsg), ProviderCacheControl.none());
     JsonNode rootNone = MAPPER.readTree(encoder.encode(reqNone, descriptor).bodyUtf8Bytes());
@@ -500,14 +500,82 @@ class OpenAiChatRequestEncoderTest {
     // 不再改写 content 形态或注入 breakpoint
     assertEquals("User prompt", rootShort.path("messages").get(1).path("content").asString(""));
 
-    // 3. LONG: 保留当前 24h 字段
+    // GPT-4o has no verified legacy 24h capability.
     ProviderCacheControl cacheControlLong =
         ProviderCacheControl.session(PromptCacheRetention.LONG, "my-key-long");
     ProviderRequest reqLong =
         cacheRequest("Test system instruction.", List.of(userMsg), cacheControlLong);
     JsonNode rootLong = MAPPER.readTree(encoder.encode(reqLong, descriptor).bodyUtf8Bytes());
-    assertEquals("my-key-long", rootLong.path("prompt_cache_key").asString(""));
-    assertEquals("24h", rootLong.path("prompt_cache_retention").asString(""));
+    assertFalse(rootLong.has("prompt_cache_key"));
+    assertFalse(rootLong.has("prompt_cache_retention"));
+
+    ModelDescriptor modernModel =
+        new ModelDescriptor(
+            "openai", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest modernNone =
+        new ProviderRequest(
+            modernModel,
+            defaultVariant,
+            100,
+            "system",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode modernNoneRoot =
+        MAPPER.readTree(encoder.encode(modernNone, descriptor).bodyUtf8Bytes());
+    assertEquals("explicit", modernNoneRoot.path("prompt_cache_options").path("mode").asString(""));
+    assertFalse(modernNoneRoot.has("prompt_cache_key"));
+    JsonNode proxyNoneRoot =
+        MAPPER.readTree(encoder.encode(modernNone, customDescriptor).bodyUtf8Bytes());
+    assertFalse(proxyNoneRoot.has("prompt_cache_options"));
+
+    ProviderRequest modernLong =
+        new ProviderRequest(
+            modernModel,
+            defaultVariant,
+            100,
+            "system",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "modern-key"));
+    JsonNode modernLongRoot =
+        MAPPER.readTree(encoder.encode(modernLong, descriptor).bodyUtf8Bytes());
+    assertFalse(modernLongRoot.has("prompt_cache_key"));
+    assertFalse(modernLongRoot.has("prompt_cache_retention"));
+    assertFalse(modernLongRoot.has("prompt_cache_options"));
+
+    ModelDescriptor legacyModel =
+        new ModelDescriptor(
+            "openai", "gpt-5.5", "gpt-5.5", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest legacyLong =
+        new ProviderRequest(
+            legacyModel,
+            defaultVariant,
+            100,
+            "system",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "legacy-key"));
+    JsonNode legacyLongRoot =
+        MAPPER.readTree(encoder.encode(legacyLong, descriptor).bodyUtf8Bytes());
+    assertEquals("legacy-key", legacyLongRoot.path("prompt_cache_key").asString(""));
+    assertEquals("24h", legacyLongRoot.path("prompt_cache_retention").asString(""));
+
+    ModelDescriptor unverifiedFuture =
+        new ModelDescriptor(
+            "openai", "gpt-9.0", "gpt-9.0", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest futureNone =
+        new ProviderRequest(
+            unverifiedFuture,
+            defaultVariant,
+            100,
+            "system",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode futureNoneRoot =
+        MAPPER.readTree(encoder.encode(futureNone, descriptor).bodyUtf8Bytes());
+    assertFalse(futureNoneRoot.has("prompt_cache_options"));
   }
 
   @Test
