@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
-import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -309,16 +308,14 @@ class PlatformModelGatewayTest {
     }
   }
 
-  /** 最终编码 body 观察只发生在真实 stream 路径；计划逐 attempt 冻结，不把上一次快照带给下一次执行。 */
+  /**
+   * Typed pricing does not observe request-body conditions; each execution keeps its own empty
+   * snapshot.
+   */
   @Test
-  void observesActualBodyAndKeepsPlansPerAttempt() {
-    ModelPricingCondition.RequestBody condition =
-        ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
-    ModelPricingCondition when =
-        new ModelPricingCondition(null, null, null, null, condition, null, null, null);
-    ModelPricing pricing = ModelPricing.ZERO;
-    ModelRequestBodyPricing.Plan plan = ModelRequestBodyPricing.plan(pricing);
-    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
+  void doesNotObserveRequestBodyForTypedPricing() {
+    ModelRequestBodyPricing.Plan plan = ModelRequestBodyPricing.plan(ModelPricing.ZERO);
+    assertFalse(plan.hasConditions());
     AtomicInteger attempts = new AtomicInteger();
     PlatformModelGateway gateway =
         new PlatformModelGateway(
@@ -338,11 +335,10 @@ class PlatformModelGatewayTest {
                         : ModelRequestBodyPricing.plan(ModelPricing.ZERO)));
 
     ModelGateway.Succeeded first = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
-    assertEquals(
-        Map.of(fingerprint, true), first.completion().response().requestBodyPricing().matches());
-
+    assertNull(first.completion().response().requestBodyPricing());
     ModelGateway.Succeeded second = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
     assertNull(second.completion().response().requestBodyPricing());
+    assertEquals(2, attempts.get());
   }
 
   /** pricing 读取失败不是准入条件：异常向 Processor 传播，且已取得的并发名额立即归还。 */
@@ -369,15 +365,13 @@ class PlatformModelGatewayTest {
     assertInstanceOf(ModelGateway.Admitted.class, gateway.admit(EXECUTION)).close();
   }
 
-  /** 未实现观察回调的 adapter 不产生定价事实；伪造的 completion 快照会被 gateway 清除。 */
+  /**
+   * A provider-supplied legacy request-body snapshot is discarded when pricing has no such rule.
+   */
   @Test
-  void missingObservationStaysUnknown() {
-    ModelPricingCondition.RequestBody condition =
-        ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
-    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
+  void discardsUnrequestedRequestBodySnapshot() {
     ProviderResponse forged =
-        response()
-            .withRequestBodyPricing(new RequestBodyPricingSnapshot(Map.of(fingerprint, true)));
+        response().withRequestBodyPricing(new RequestBodyPricingSnapshot(Map.of("legacy", true)));
     PlatformModelGateway gateway =
         new PlatformModelGateway(
             new Resolution(

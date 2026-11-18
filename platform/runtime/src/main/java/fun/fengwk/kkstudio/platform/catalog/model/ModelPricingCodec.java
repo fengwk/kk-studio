@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.catalog.model;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingChangeDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 
 import java.math.BigDecimal;
@@ -23,6 +24,7 @@ public final class ModelPricingCodec {
     if (pricing.getRules() == null) {
       pricing.setRules(List.of());
     }
+    normalizeRules(pricing.getRules());
     if (pricing.getChanges() == null) {
       pricing.setChanges(List.of());
     }
@@ -34,6 +36,7 @@ public final class ModelPricingCodec {
         if (change.getRules() == null) {
           change.setRules(List.of());
         }
+        normalizeRules(change.getRules());
       }
     }
     ModelPricingValidator.validate(pricing);
@@ -46,6 +49,34 @@ public final class ModelPricingCodec {
       return null;
     }
     return ModelPricingMapper.toModelPricing(normalizeAndValidate(pricing));
+  }
+
+  private static void normalizeRules(List<ModelPricingRuleDTO> rules) {
+    for (ModelPricingRuleDTO rule : rules) {
+      BigDecimal factor = rule.getFactor();
+      if (factor == null) {
+        continue;
+      }
+      if (same(rule.getInputFactor(), factor)) {
+        rule.setInputFactor(null);
+      }
+      if (same(rule.getOutputFactor(), factor)) {
+        rule.setOutputFactor(null);
+      }
+      if (same(rule.getCacheReadFactor(), factor)) {
+        rule.setCacheReadFactor(null);
+      }
+      if (same(rule.getCacheWriteFactor(), factor)) {
+        rule.setCacheWriteFactor(null);
+      }
+      if (same(rule.getReasoningFactor(), factor)) {
+        rule.setReasoningFactor(null);
+      }
+    }
+  }
+
+  private static boolean same(BigDecimal left, BigDecimal right) {
+    return left != null && left.compareTo(right) == 0;
   }
 
   private static void normalizeBase(ModelRateSetDTO base, Consumer<ModelRateSetDTO> setter) {

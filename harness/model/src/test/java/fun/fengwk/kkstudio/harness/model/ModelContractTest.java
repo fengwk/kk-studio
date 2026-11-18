@@ -281,8 +281,10 @@ class ModelContractTest {
             new ModelPricing(
                 ModelPricing.RateSet.ZERO,
                 List.of(
-                    new ModelPricing.InputTokenRange(1, 10, BigDecimal.ONE, null),
-                    new ModelPricing.InputTokenRange(9, 20, null, BigDecimal.ONE)),
+                    new ModelPricing.InputTokenRange(
+                        1, 10, BigDecimal.ONE, null, null, null, null, null, false, false),
+                    new ModelPricing.InputTokenRange(
+                        9, 20, null, BigDecimal.ONE, null, null, null, null, false, false)),
                 List.of()));
   }
 
