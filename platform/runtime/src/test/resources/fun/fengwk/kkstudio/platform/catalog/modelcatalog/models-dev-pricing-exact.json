@@ -81,6 +81,29 @@
             }
           ]
         }
+      },
+      "overlapping-tier-and-time-products": {
+        "cost": {
+          "text": { "input": { "price": 1 }, "output": { "price": 2 } },
+          "multipliers": [
+            { "when": { "service_tier": { "equals": "priority" } }, "factor": 2 },
+            { "when": { "service_tier": { "equals": "priority" } }, "factor": 3 },
+            {
+              "when": {
+                "utc_days": { "equals": "mon" },
+                "utc_hours": { "gte": "01:00", "lt": "03:00" }
+              },
+              "factor": 0.5
+            },
+            {
+              "when": {
+                "utc_days": { "equals": "mon" },
+                "utc_hours": { "gte": "02:00", "lt": "04:00" }
+              },
+              "factor": 0.2
+            }
+          ]
+        }
       }
     }
   }

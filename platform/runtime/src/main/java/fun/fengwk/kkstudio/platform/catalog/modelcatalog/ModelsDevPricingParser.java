@@ -372,6 +372,8 @@ final class ModelsDevPricingParser {
       List<SourceMultiplier> multipliers,
       LocalDate date) {
     List<Factor> rateFactors = new ArrayList<>();
+    Map<String, Factor> tierFactors = new LinkedHashMap<>();
+    List<SourceMultiplier> timeMultipliers = new ArrayList<>();
     List<ModelPricingRuleDTO> rules = new ArrayList<>();
     for (ModelPricingRuleDTO inputRule : inputRules) {
       rules.add(copyRange(inputRule));
@@ -384,23 +386,23 @@ final class ModelsDevPricingParser {
         rateFactors.add(multiplier.factor());
       } else if (!multiplier.tiers().isEmpty()) {
         for (String tier : multiplier.tiers()) {
-          ModelPricingRuleDTO rule = new ModelPricingRuleDTO();
-          rule.setType("service_tier_multiplier");
-          rule.setServiceTier(tier);
-          setFactors(rule, multiplier.factor());
-          rules.add(rule);
+          tierFactors.merge(tier, multiplier.factor(), ModelsDevPricingParser::multiply);
         }
       } else {
-        ModelPricingRuleDTO rule = new ModelPricingRuleDTO();
-        rule.setType("time_multiplier");
-        rule.setStart(multiplier.time().start());
-        rule.setEnd(multiplier.time().end());
-        rule.setTimezone("UTC");
-        rule.setWeekdays(multiplier.time().weekdays());
-        setFactors(rule, multiplier.factor());
-        rules.add(rule);
+        timeMultipliers.add(multiplier);
       }
     }
+    for (Map.Entry<String, Factor> entry : tierFactors.entrySet()) {
+      if (isIdentity(entry.getValue())) {
+        continue;
+      }
+      ModelPricingRuleDTO rule = new ModelPricingRuleDTO();
+      rule.setType("service_tier_multiplier");
+      rule.setServiceTier(entry.getKey());
+      setFactors(rule, entry.getValue());
+      rules.add(rule);
+    }
+    addDisjointTimeRules(timeMultipliers, rules);
     if (rules.size() > MAX_SOURCE_RULES) {
       throw unsupportedRules("pricing rule budget exceeded");
     }
@@ -415,6 +417,129 @@ final class ModelsDevPricingParser {
       }
     }
     return new ModelPricingDefinition(scale(base, rateFactors), rules);
+  }
+
+  /**
+   * Splits overlapping time multipliers by UTC weekday and minute, then multiplies each active set.
+   */
+  private static void addDisjointTimeRules(
+      List<SourceMultiplier> multipliers, List<ModelPricingRuleDTO> rules) {
+    if (multipliers.isEmpty()) {
+      return;
+    }
+    TreeSet<Integer> boundaries = new TreeSet<>();
+    boundaries.add(0);
+    boundaries.add(1440);
+    for (SourceMultiplier multiplier : multipliers) {
+      boundaries.add(minutes(multiplier.time().start()));
+      boundaries.add(minutes(multiplier.time().end()));
+    }
+    List<Integer> points = new ArrayList<>(boundaries);
+    for (int weekday = 1; weekday <= 7; weekday++) {
+      TimeSegment pending = null;
+      for (int index = 0; index + 1 < points.size(); index++) {
+        int start = points.get(index);
+        int end = points.get(index + 1);
+        List<Factor> factors = new ArrayList<>();
+        for (SourceMultiplier multiplier : multipliers) {
+          TimeWindow window = multiplier.time();
+          if ((window.weekdays().isEmpty() || window.weekdays().contains(weekday))
+              && start >= minutes(window.start())
+              && start < minutes(window.end())) {
+            factors.add(multiplier.factor());
+          }
+        }
+        Factor combined = combine(factors);
+        if (isIdentity(combined)) {
+          if (pending != null) {
+            addTimeRule(pending, weekday, rules);
+            pending = null;
+          }
+          continue;
+        }
+        TimeSegment current = new TimeSegment(start, end, combined);
+        if (pending != null
+            && pending.end() == current.start()
+            && equivalent(pending.factor(), current.factor())) {
+          pending = new TimeSegment(pending.start(), current.end(), pending.factor());
+        } else {
+          if (pending != null) {
+            addTimeRule(pending, weekday, rules);
+          }
+          pending = current;
+        }
+      }
+      if (pending != null) {
+        addTimeRule(pending, weekday, rules);
+      }
+    }
+  }
+
+  private static void addTimeRule(
+      TimeSegment segment, int weekday, List<ModelPricingRuleDTO> rules) {
+    ModelPricingRuleDTO rule = new ModelPricingRuleDTO();
+    rule.setType("time_multiplier");
+    rule.setStart(timeText(segment.start()));
+    rule.setEnd(timeText(segment.end()));
+    rule.setTimezone("UTC");
+    rule.setWeekdays(List.of(weekday));
+    setFactors(rule, segment.factor());
+    rules.add(rule);
+  }
+
+  private static Factor combine(List<Factor> factors) {
+    Factor combined = new Factor(BigDecimal.ONE, null, null, null, null, null);
+    for (Factor factor : factors) {
+      combined = multiply(combined, factor);
+    }
+    return combined;
+  }
+
+  private static Factor multiply(Factor left, Factor right) {
+    BigDecimal common = left.factor().multiply(right.factor());
+    return new Factor(
+        common,
+        overrideFactor(left.forField(0).multiply(right.forField(0)), common),
+        overrideFactor(left.forField(1).multiply(right.forField(1)), common),
+        overrideFactor(left.forField(2).multiply(right.forField(2)), common),
+        overrideFactor(left.forField(3).multiply(right.forField(3)), common),
+        overrideFactor(left.forField(4).multiply(right.forField(4)), common));
+  }
+
+  private static BigDecimal overrideFactor(BigDecimal value, BigDecimal common) {
+    return value.compareTo(common) == 0 ? null : value;
+  }
+
+  private static boolean isIdentity(Factor factor) {
+    for (int field = 0; field < 5; field++) {
+      if (factor.forField(field).compareTo(BigDecimal.ONE) != 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static boolean equivalent(Factor left, Factor right) {
+    for (int field = 0; field < 5; field++) {
+      if (left.forField(field).compareTo(right.forField(field)) != 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static int minutes(String time) {
+    if ("24:00".equals(time)) {
+      return 1440;
+    }
+    return Integer.parseInt(time.substring(0, 2)) * 60 + Integer.parseInt(time.substring(3));
+  }
+
+  private static String timeText(int minute) {
+    if (minute == 1440) {
+      return "24:00";
+    }
+    return String.format(Locale.ROOT, "%02d:%02d", minute / 60, minute % 60);
   }
 
   private static boolean active(DateRange range, LocalDate date) {
@@ -569,13 +694,7 @@ final class ModelsDevPricingParser {
       return null;
     }
     if (text.isNumber()) {
-      return new Factor(
-          BigDecimal.ONE,
-          CatalogJson.decimal(text, "factor.text"),
-          CatalogJson.decimal(text, "factor.text"),
-          CatalogJson.decimal(text, "factor.text"),
-          CatalogJson.decimal(text, "factor.text"),
-          CatalogJson.decimal(text, "factor.text"));
+      return new Factor(CatalogJson.decimal(text, "factor.text"), null, null, null, null, null);
     }
     JsonNode textFactors = CatalogJson.requireObject(text, "factor.text");
     validateKeys(textFactors, Set.of("input", "output"), "factor.text");
@@ -785,6 +904,8 @@ final class ModelsDevPricingParser {
   private record Bound(int min, Integer max) {}
 
   private record TimeWindow(String start, String end, List<Integer> weekdays) {}
+
+  private record TimeSegment(int start, int end, Factor factor) {}
 
   private record DateRange(LocalDate from, LocalDate until) {}
 

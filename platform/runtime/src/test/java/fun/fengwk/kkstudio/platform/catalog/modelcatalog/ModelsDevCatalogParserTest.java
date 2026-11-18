@@ -18,6 +18,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelPricingCodec;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -37,7 +38,7 @@ class ModelsDevCatalogParserTest {
     ModelPricingDTO pricing = candidate.getPricing();
     assertDecimal("2", pricing.getBase().getInput());
     assertDecimal("5", pricing.getBase().getOutput());
-    assertEquals(4, pricing.getRules().size());
+    assertEquals(5, pricing.getRules().size());
 
     ModelPricingRuleDTO range = rule(pricing, "input_token_range");
     assertEquals(101, range.getMinInputTokens());
@@ -64,7 +65,11 @@ class ModelsDevCatalogParserTest {
     assertEquals("01:00", time.getStart());
     assertEquals("03:00", time.getEnd());
     assertEquals("UTC", time.getTimezone());
-    assertEquals(List.of(1, 3), time.getWeekdays());
+    assertEquals(List.of(1), time.getWeekdays());
+    assertTrue(
+        pricing.getRules().stream()
+            .filter(candidateRule -> "time_multiplier".equals(candidateRule.getType()))
+            .anyMatch(candidateRule -> List.of(3).equals(candidateRule.getWeekdays())));
     assertDecimal("0.333333333333333333", time.getFactor());
 
     // These are the same range-then-tier semantics consumed by runtime costing.
@@ -113,7 +118,7 @@ class ModelsDevCatalogParserTest {
     assertEquals("2027-02-01", pricing.getChanges().get(1).getFrom());
     assertEquals("2027-03-01", pricing.getChanges().get(2).getFrom());
     assertDecimal("2", pricing.getChanges().get(1).getRules().get(0).getFactor());
-    assertDecimal("3", pricing.getChanges().get(2).getRules().get(0).getFactor());
+    assertDecimal("6", pricing.getChanges().get(2).getRules().get(0).getFactor());
 
     ModelPricing modelPricing = ModelPricingCodec.parsePricing(pricing);
     ModelCost cost =
@@ -123,6 +128,39 @@ class ModelsDevCatalogParserTest {
             Instant.parse("2027-02-15T12:00:00Z"),
             "priority");
     assertDecimal("5", cost.input());
+  }
+
+  @Test
+  void combinesOverlappingTierAndUtcTimeFactorsExactly() {
+    ModelPricingDTO pricing =
+        index(parser.parse(resource("models-dev-pricing-exact.json")))
+            .get("fixture/overlapping-tier-and-time-products")
+            .getPricing();
+    assertTrue(
+        pricing.getRules().stream().anyMatch(rule -> "priority".equals(rule.getServiceTier())));
+    ModelPricingRuleDTO tier =
+        pricing.getRules().stream()
+            .filter(rule -> "priority".equals(rule.getServiceTier()))
+            .findFirst()
+            .orElseThrow();
+    assertDecimal("6", tier.getFactor());
+
+    List<ModelPricingRuleDTO> times =
+        pricing.getRules().stream()
+            .filter(rule -> "time_multiplier".equals(rule.getType()))
+            .toList();
+    assertEquals(3, times.size());
+    assertDecimal("0.5", timeFactor(times, "01:00", "02:00"));
+    assertDecimal("0.1", timeFactor(times, "02:00", "03:00"));
+    assertDecimal("0.2", timeFactor(times, "03:00", "04:00"));
+
+    ModelCost cost =
+        ModelCost.calculate(
+            ModelPricingCodec.parsePricing(pricing),
+            new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null),
+            Instant.parse("2026-11-23T02:30:00Z"),
+            "priority");
+    assertDecimal("0.6", cost.input());
   }
 
   @Test
@@ -155,6 +193,14 @@ class ModelsDevCatalogParserTest {
         .filter(candidate -> type.equals(candidate.getType()))
         .findFirst()
         .orElseThrow();
+  }
+
+  private static BigDecimal timeFactor(List<ModelPricingRuleDTO> rules, String start, String end) {
+    return rules.stream()
+        .filter(rule -> start.equals(rule.getStart()) && end.equals(rule.getEnd()))
+        .findFirst()
+        .orElseThrow()
+        .getFactor();
   }
 
   private static void assertRejected(ModelCatalogCandidateDTO candidate) {

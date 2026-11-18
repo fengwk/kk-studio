@@ -38,7 +38,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -317,17 +316,7 @@ class PlatformModelGatewayTest {
         ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
     ModelPricingCondition when =
         new ModelPricingCondition(null, null, null, null, condition, null, null, null);
-    ModelPricing pricing =
-        new ModelPricing(
-            new ModelPricing.RateSet(
-                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, Map.of(), null),
-            List.of(
-                new ModelPricing.Override(
-                    "fast",
-                    when,
-                    new ModelPricing.RatePatch(
-                        BigDecimal.ONE, null, null, null, null, null, false))),
-            List.of());
+    ModelPricing pricing = ModelPricing.ZERO;
     ModelRequestBodyPricing.Plan plan = ModelRequestBodyPricing.plan(pricing);
     String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
     AtomicInteger attempts = new AtomicInteger();
@@ -395,19 +384,7 @@ class PlatformModelGatewayTest {
                 scripted((request, handler) -> handler.onComplete(new ProviderCompletion(forged)))),
             () -> BUSY_DELAY,
             new ConcurrencyAdmission(1),
-            pricingSource(
-                modelName ->
-                    ModelRequestBodyPricing.plan(
-                        new ModelPricing(
-                            ModelPricing.RateSet.ZERO,
-                            List.of(
-                                new ModelPricing.Override(
-                                    "fast",
-                                    new ModelPricingCondition(
-                                        null, null, null, null, condition, null, null, null),
-                                    new ModelPricing.RatePatch(
-                                        BigDecimal.ONE, null, null, null, null, null, false))),
-                            List.of()))));
+            pricingSource(modelName -> ModelRequestBodyPricing.plan(ModelPricing.ZERO)));
     ModelGateway.Succeeded succeeded = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
     assertNull(succeeded.completion().response().requestBodyPricing());
   }

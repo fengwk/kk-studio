@@ -443,7 +443,7 @@ class UsageCostProjectionServiceTest {
     ModelRatePatchDTO rates = new ModelRatePatchDTO();
     rates.setInput(new BigDecimal("2"));
     override.setRates(rates);
-    pricing.setOverrides(List.of(override));
+    pricing.setRules(List.of());
     stubModel("provider-a", "model-a", pricing);
 
     ModelPricingCondition.RequestBody condition =
@@ -525,8 +525,8 @@ class UsageCostProjectionServiceTest {
     base.setCacheWriteByTtl(Map.of());
     base.setReasoning(null);
     pricing.setBase(base);
-    pricing.setOverrides(List.of());
-    pricing.setMultipliers(List.of());
+    pricing.setRules(List.of());
+    pricing.setChanges(List.of());
     return pricing;
   }
 
