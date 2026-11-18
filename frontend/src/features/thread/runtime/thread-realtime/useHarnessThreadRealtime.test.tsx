@@ -1985,6 +1985,7 @@ function toolInvocation(overrides: Partial<ToolInvocationDTO> = {}): ToolInvocat
   return {
     id: 'inv-tool-1',
     threadId: 'thread-1',
+    childThreadId: null,
     turnStartEntryId: 'turn-1',
     assistantEntryId: 'entry-2',
     callIndex: 0,

@@ -142,7 +142,7 @@ export function ToolMessageBlock({
     : isAskUser
       ? false
       : Renderer != null
-        ? rendererResult
+        ? rendererResult && (view.resultMessage?.contents.length ?? 0) > 0
         : bodyContents.length > 0
 
   const mainPreview: ReactNode[] = []
@@ -267,11 +267,13 @@ export function ToolMessageBlock({
     && (errorWindow.hiddenLines > 0 || errorWindow.truncated)
   const hasDetails = bodyHidden || previewHidden || errorHidden
 
-  const actions = taskReceipt != null
+  const taskThreadId = taskReceipt?.threadId
+    ?? (isTask && view.resultMessage == null ? message.childThreadId : null)
+  const actions = taskThreadId != null
     ? (
       <ThreadLink
         className="thread-tool-thread-link"
-        threadId={taskReceipt.threadId}
+        threadId={taskThreadId}
         title={t('ai.runtime.disclosure.viewSubagentExecution')}
         aria-label={t('ai.runtime.disclosure.viewSubagentExecution')}
       >

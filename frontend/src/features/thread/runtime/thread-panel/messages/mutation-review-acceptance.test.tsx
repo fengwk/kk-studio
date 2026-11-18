@@ -548,6 +548,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     return {
       id,
       threadId: 'thread-1',
+      childThreadId: null,
       turnStartEntryId: 'turn-1',
       assistantEntryId,
       callIndex: 0,

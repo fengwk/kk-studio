@@ -75,7 +75,7 @@ export function useComposerPalette({
   const filteredCommands = useFilteredThreadCommands(query, commands)
   // Host command arrays may be reconstructed every render. Reset only when the visible
   // palette/query changes, not when an equivalent array gets a new identity.
-  const commandSignature = JSON.stringify(filteredCommands)
+  const commandSignature = JSON.stringify(filteredCommands.map(({ id, disabled }) => [id, Boolean(disabled)]))
 
   const [activeIndex, setActiveIndex] = useState(0)
   const [keyboardScrollVersion, setKeyboardScrollVersion] = useState(0)

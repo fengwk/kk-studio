@@ -10,6 +10,7 @@ import type { Locator, Page } from './fixture'
 
 type HarnessApi = {
   task(): void
+  taskRunning(): void
   idle(lines?: number): void
   idleMid(lines?: number): void
   streaming(lines?: number): void
@@ -92,6 +93,16 @@ async function clickWithoutScrolling(target: Locator): Promise<void> {
 test.beforeEach(async ({ page }) => {
   await page.goto('/browser-tests/tool-card-harness.html')
   await expect(page.locator('.harness-hint')).toHaveText('tool card browser harness')
+})
+
+test('running task header opens its durable child without a result receipt', async ({ page }) => {
+  await harness(page, 'taskRunning')
+  const card = page.locator('.thread-turn-tool')
+  const link = card.getByRole('link', { name: '查看 subagent 执行' })
+  await expect(link).toHaveAttribute('href', '/threads/00000000-0000-4000-8000-000000000006')
+  await expect(card.locator('.thread-disclosure-body')).toHaveCount(0)
+  await link.click()
+  await expect(page.getByLabel('selected thread')).toHaveText('00000000-0000-4000-8000-000000000006')
 })
 
 for (const width of [1440, 360, 320]) {

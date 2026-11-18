@@ -173,6 +173,8 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
   environmentWaitFreshnessAt?: number | null
   /** 该 Tool 归属的 Thread id（用于归属解析）。 */
   threadId?: string
+  /** task invocation 创建的子 Thread；在结果回执物化前用于查看执行。 */
+  childThreadId?: string | null
   /** 投影的审批状态（当 tool invocation 不带审批时为 null）。 */
   approval?: ToolApprovalState
   /** 经权威审查产生的真实 diff（来源自 approval.editReview 或终态 result details.editReview/writeReview）。 */

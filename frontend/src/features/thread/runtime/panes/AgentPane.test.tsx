@@ -405,7 +405,7 @@ function snapshot(
 
 function pendingInvocation(): ToolInvocationDTO {
   return {
-    id: 'waiting-tool', threadId: 'thread-1', turnStartEntryId: 'turn-1', assistantEntryId: 'assistant-1', callIndex: 0,
+    id: 'waiting-tool', threadId: 'thread-1', childThreadId: null, turnStartEntryId: 'turn-1', assistantEntryId: 'assistant-1', callIndex: 0,
     status: 'READY', attempt: 1, toolCallId: 'call-1', queuedBehindToolCallId: null,
     toolName: 'bash', rendererKey: 'bash',
     environmentId: null, requiredEnvironmentId: 'frozen-env', waitingForEnvironment: false,

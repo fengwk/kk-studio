@@ -488,6 +488,7 @@ describe('thread timeline edge branches', () => {
     const invocation: ToolInvocationDTO = {
       id: 'inv-1',
       threadId: 'thread-1',
+      childThreadId: null,
       turnStartEntryId: 'turn-1',
       assistantEntryId: 'assistant-1',
       callIndex: 0,

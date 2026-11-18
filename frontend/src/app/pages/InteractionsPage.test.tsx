@@ -152,6 +152,26 @@ describe('InteractionsPage', () => {
       .toEqual(['plugin_a', 'plugin_b'])
   })
 
+  it('shows a per-item subagent source link without nesting it in a card action', async () => {
+    vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
+      items: [{
+        type: 'APPROVAL', toolInvocationId: 'child-approval',
+        threadId: 'child-thread', rootThreadId: 'root-thread', sessionId: 'session-child',
+        owner: { kind: 'CHAT', id: 'chat-child', title: '子代理任务', link: '/chats/chat-child' },
+        toolCallId: 'call-child', toolName: 'bash', argumentsJson: '{"command":"pwd"}',
+        approval: { required: true }, queuedSameFileCount: 0, createdAt: 100,
+      }],
+      nextCursor: null, total: 1, freshnessAt: null,
+    })
+
+    const { container } = render(<InteractionsPage />, { wrapper })
+    const subagentLink = await screen.findByRole('link', { name: '打开 subagent' })
+    expect(subagentLink).toHaveAttribute('href', '/threads/child-thread')
+    expect(screen.getByRole('button', { name: 'Chat · 子代理任务' })).toBeInTheDocument()
+    expect(container.querySelector('.interaction-feed-item')?.contains(subagentLink)).toBe(true)
+    expect(subagentLink.closest('button')).toBeNull()
+  })
+
   it('renders error state and retries on button click', async () => {
     let callCount = 0
     const listSpy = vi.spyOn(interactionService, 'listInteractions').mockImplementation(async () => {
@@ -254,6 +274,7 @@ describe('InteractionsPage', () => {
     const decision = vi.spyOn(harnessService, 'decideApproval').mockResolvedValue({
       id: 'int-2',
       threadId: 'thread-1',
+      childThreadId: null,
       turnStartEntryId: 'turn-1',
       assistantEntryId: 'entry-2',
       callIndex: 0,
