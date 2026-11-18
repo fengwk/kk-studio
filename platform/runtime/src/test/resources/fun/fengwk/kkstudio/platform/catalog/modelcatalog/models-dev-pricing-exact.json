@@ -104,6 +104,100 @@
             }
           ]
         }
+      },
+      "context-overrides-all-token-fees": {
+        "cost": {
+          "text": {
+            "input": {
+              "price": 2,
+              "cache": { "read": 0.25, "write": { "5m": 0.5 } },
+              "overrides": [
+                {
+                  "when": { "context": { "gt": 100 } },
+                  "price": 4,
+                  "cache": { "read": 0.75, "write": { "5m": 1, "1h": 2 } }
+                }
+              ]
+            },
+            "output": {
+              "price": 5,
+              "reasoning": 8,
+              "overrides": [
+                {
+                  "when": { "context": { "gte": 101 } },
+                  "price": 10,
+                  "reasoning": null
+                }
+              ]
+            }
+          }
+        }
+      },
+      "boolean-condition-normalization": {
+        "cost": {
+          "text": { "input": { "price": 1 }, "output": { "price": 2 } },
+          "multipliers": [
+            {
+              "when": {
+                "all": [
+                  { "date": { "gte": "2028-01-01" } },
+                  { "service_tier": { "equals": "priority" } }
+                ]
+              },
+              "factor": 2
+            },
+            {
+              "when": {
+                "any": [
+                  { "service_tier": { "equals": "flex" } },
+                  { "service_tier": { "equals": "fast" } }
+                ]
+              },
+              "factor": 3
+            },
+            { "when": { "not": { "utc_days": { "equals": "sun" } } }, "factor": 4 }
+          ]
+        }
+      },
+      "unrepresentable-joint-tier-time": {
+        "cost": {
+          "text": { "input": { "price": 1 }, "output": { "price": 2 } },
+          "multipliers": [
+            {
+              "when": {
+                "all": [
+                  { "service_tier": { "equals": "priority" } },
+                  { "utc_hours": { "gte": "02:00", "lt": "04:00" } }
+                ]
+              },
+              "factor": 2
+            }
+          ]
+        }
+      },
+      "unrepresentable-overlapping-any": {
+        "cost": {
+          "text": { "input": { "price": 1 }, "output": { "price": 2 } },
+          "multipliers": [
+            {
+              "when": {
+                "any": [
+                  { "service_tier": { "equals": "priority" } },
+                  { "utc_days": { "equals": "mon" } }
+                ]
+              },
+              "factor": 2
+            }
+          ]
+        }
+      },
+      "unrepresentable-negated-tier": {
+        "cost": {
+          "text": { "input": { "price": 1 }, "output": { "price": 2 } },
+          "multipliers": [
+            { "when": { "not": { "service_tier": { "equals": "priority" } } }, "factor": 2 }
+          ]
+        }
       }
     }
   }

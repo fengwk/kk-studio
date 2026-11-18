@@ -131,6 +131,38 @@ class ModelsDevCatalogParserTest {
   }
 
   @Test
+  void mapsAllContextFeeOverridesAndExplicitReasoningNull() {
+    ModelCatalogCandidateDTO candidate =
+        index(parser.parse(resource("models-dev-pricing-exact.json")))
+            .get("fixture/context-overrides-all-token-fees");
+    assertTrue(candidate.isPricingSupported());
+
+    ModelPricingRuleDTO range = rule(candidate.getPricing(), "input_token_range");
+    assertEquals(101, range.getMinInputTokens());
+    assertNull(range.getMaxInputTokensExclusive());
+    assertDecimal("4", range.getInput());
+    assertDecimal("10", range.getOutput());
+    assertDecimal("0.75", range.getCacheRead());
+    assertEquals(
+        Map.of("300", new BigDecimal("1"), "3600", new BigDecimal("2")),
+        range.getCacheWriteByTtl());
+    assertTrue(range.isCacheWriteByTtlSpecified());
+    assertTrue(range.isReasoningSpecified());
+    assertNull(range.getReasoning());
+
+    ModelPricing modelPricing = ModelPricingCodec.parsePricing(candidate.getPricing());
+    ModelCost cost =
+        ModelCost.calculate(
+            modelPricing,
+            new ModelUsage(1_000_000, 1_000_000, 0, 0, Map.of(), 500_000L, null),
+            Instant.parse("2026-11-23T12:00:00Z"),
+            null);
+    assertDecimal("4", cost.input());
+    assertDecimal("10", cost.output());
+    assertDecimal("0", cost.reasoning());
+  }
+
+  @Test
   void combinesOverlappingTierAndUtcTimeFactorsExactly() {
     ModelPricingDTO pricing =
         index(parser.parse(resource("models-dev-pricing-exact.json")))
@@ -164,15 +196,77 @@ class ModelsDevCatalogParserTest {
   }
 
   @Test
-  void rejectsWholePricesWhenAnyPriceRuleIsNotRepresentable() {
+  void normalizesDisjointAllAnyAndNotConditionBranches() {
+    ModelPricingDTO pricing =
+        index(parser.parse(resource("models-dev-pricing-exact.json")))
+            .get("fixture/boolean-condition-normalization")
+            .getPricing();
+    assertEquals(1, pricing.getChanges().size());
+    assertEquals("2028-01-01", pricing.getChanges().get(0).getFrom());
+
+    List<ModelPricingRuleDTO> baseTiers =
+        pricing.getRules().stream()
+            .filter(rule -> "service_tier_multiplier".equals(rule.getType()))
+            .toList();
+    assertEquals(
+        List.of("fast", "flex"),
+        baseTiers.stream().map(ModelPricingRuleDTO::getServiceTier).sorted().toList());
+    assertEquals(
+        6,
+        pricing.getRules().stream()
+            .filter(rule -> "time_multiplier".equals(rule.getType()))
+            .count());
+    assertTrue(
+        pricing.getRules().stream()
+            .filter(rule -> "time_multiplier".equals(rule.getType()))
+            .allMatch(rule -> rule.getStart().equals("00:00") && rule.getEnd().equals("24:00")));
+    assertEquals(
+        "priority",
+        pricing.getChanges().get(0).getRules().stream()
+            .filter(rule -> "service_tier_multiplier".equals(rule.getType()))
+            .map(ModelPricingRuleDTO::getServiceTier)
+            .findFirst()
+            .orElseThrow());
+
+    ModelCost cost =
+        ModelCost.calculate(
+            ModelPricingCodec.parsePricing(pricing),
+            new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null),
+            Instant.parse("2028-01-05T12:00:00Z"),
+            "flex");
+    assertDecimal("12", cost.input());
+  }
+
+  @Test
+  void rejectsJointAndOverlappingBooleanPriceConditionsAsWholePrices() {
     Map<String, ModelCatalogCandidateDTO> candidates =
         index(parser.parse(resource("models-dev-pricing-exact.json")));
-    assertRejected(candidates.get("fixture/unrepresentable-cache-override"));
+    assertRejected(candidates.get("fixture/unrepresentable-joint-tier-time"));
+    assertRejected(candidates.get("fixture/unrepresentable-overlapping-any"));
+    assertRejected(candidates.get("fixture/unrepresentable-negated-tier"));
+  }
 
-    // A real entry with a cache-writing override must not be partially imported as base rates.
+  @Test
+  void importsContextCacheFeesAndRejectsUnknownOverrideShapes() {
+    Map<String, ModelCatalogCandidateDTO> candidates =
+        index(parser.parse(resource("models-dev-pricing-exact.json")));
+    ModelCatalogCandidateDTO cacheOverride =
+        candidates.get("fixture/unrepresentable-cache-override");
+    assertTrue(cacheOverride.isPricingSupported());
+    ModelPricingRuleDTO cacheRange = rule(cacheOverride.getPricing(), "input_token_range");
+    assertDecimal("4", cacheRange.getInput());
+    assertDecimal("0.5", cacheRange.getCacheRead());
+
+    // The real long-context price is imported as one complete multi-fee context range.
     ModelCatalogCandidateDTO databricks =
         index(parser.parse(resource("models-dev.json"))).get("databricks/databricks-gpt-5-6-sol");
-    assertRejected(databricks);
+    assertTrue(databricks.isPricingSupported());
+    ModelPricingRuleDTO longContext = rule(databricks.getPricing(), "input_token_range");
+    assertEquals(272001, longContext.getMinInputTokens());
+    assertDecimal("8", longContext.getInput());
+    assertDecimal("30", longContext.getOutput());
+    assertDecimal("0.8", longContext.getCacheRead());
+    assertDecimal("10", longContext.getCacheWrite());
   }
 
   @Test
