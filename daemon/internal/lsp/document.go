@@ -16,8 +16,10 @@ import (
 )
 
 func (c *Client) Sync(path string) error {
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
+	if err := c.acquireSend(context.Background()); err != nil {
+		return err
+	}
+	defer c.releaseSend()
 	return c.syncLocked(path)
 }
 
@@ -143,24 +145,27 @@ func (c *Client) Definition(ctx context.Context, path string, line, character in
 	if !c.Supports("textDocument/definition") {
 		return nil, &LspError{Message: fmt.Sprintf("LSP server '%s' does not advertise go-to-definition support.", c.server.ID)}
 	}
-	c.sendMu.Lock()
-	if err := c.syncLocked(path); err != nil {
-		c.sendMu.Unlock()
-		return nil, err
-	}
-	abs, _ := filepath.Abs(path)
-	c.mu.RLock()
-	doc := c.documents[abs]
-	encoding := c.positionEncoding
-	c.mu.RUnlock()
-	pos, err := documentPosition(doc.text, line, character, encoding)
-	if err != nil {
-		c.sendMu.Unlock()
-		return nil, err
-	}
 	var result DefinitionResult
 	onSent, onFinished := trackingCallbacks(tracking)
-	if err = c.callLocked(ctx, "textDocument/definition", DefinitionParams{TextDocument: TextDocumentIdentifier{URI: pathURI(abs)}, Position: pos}, &result, onSent, onFinished); err != nil {
+	err := c.callPrepared(ctx, "textDocument/definition", nil, &result, onSent, onFinished, func() (any, error) {
+		if err := c.syncLocked(path); err != nil {
+			return nil, err
+		}
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return nil, &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
+		}
+		c.mu.RLock()
+		doc := c.documents[abs]
+		encoding := c.positionEncoding
+		c.mu.RUnlock()
+		pos, err := documentPosition(doc.text, line, character, encoding)
+		if err != nil {
+			return nil, err
+		}
+		return DefinitionParams{TextDocument: TextDocumentIdentifier{URI: pathURI(abs)}, Position: pos}, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return c.formatDefinitionLocations(result), nil

@@ -43,7 +43,8 @@ type Client struct {
 	transportMu          sync.Mutex
 	transportErr         error
 	shutdownGrace        time.Duration
-	sendMu               sync.Mutex
+	sendGateOnce         sync.Once
+	sendGate             chan struct{}
 	mu                   sync.RWMutex
 	capabilities         ServerCapabilities
 	positionEncoding     string
@@ -254,27 +255,13 @@ func (c *Client) Call(ctx context.Context, method string, params, result any) er
 }
 
 func (c *Client) call(ctx context.Context, method string, params, result any, onSent, onFinished func()) error {
-	c.sendMu.Lock()
-	return c.callLocked(ctx, method, params, result, onSent, onFinished)
+	return c.callPrepared(ctx, method, params, result, onSent, onFinished, nil)
 }
 
-// callLocked sends a request while the caller owns sendMu. It releases the gate
-// immediately after dispatch so a slow server response cannot block other work.
-func (c *Client) callLocked(ctx context.Context, method string, params, result any, onSent, onFinished func()) error {
-	locked := true
-	defer func() {
-		if locked {
-			c.sendMu.Unlock()
-		}
-	}()
-	var finishOnce sync.Once
-	var settled atomic.Bool
-	finish := func() {
-		settled.Store(true)
-		if onFinished != nil {
-			finishOnce.Do(onFinished)
-		}
-	}
+// callPrepared observes the request deadline independently from the synchronous
+// JSON-RPC write. The send worker owns the gate through preparation and dispatch,
+// then waits for the response without holding it.
+func (c *Client) callPrepared(ctx context.Context, method string, params, result any, onSent, onFinished func(), prepare func() (any, error)) error {
 	if ctx.Err() != nil {
 		return contextFailure(ctx)
 	}
@@ -284,53 +271,178 @@ func (c *Client) callLocked(ctx context.Context, method string, params, result a
 	id := c.requestID.Add(1)
 	requestCtx, requestCancel := context.WithCancel(ctx)
 	defer requestCancel()
-	started := time.Now()
+	startedAt := time.Now()
 	deadline, hasDeadline := ctx.Deadline()
-	waiter, err := c.conn.DispatchCall(requestCtx, method, params, jsonrpc2.PickID(jsonrpc2.ID{Num: id}))
-	if err != nil {
-		return &LspError{Message: "LSP request failed (" + method + ")", Cause: err}
+	var stateMu sync.Mutex
+	abandoned, attempted := false, false
+	var finishOnce sync.Once
+	var settled atomic.Bool
+	finish := func() {
+		settled.Store(true)
+		if onFinished != nil {
+			finishOnce.Do(onFinished)
+		}
 	}
-	if onSent != nil {
-		onSent()
-	}
-	if onFinished != nil && c.exitSignal != nil {
-		// A request the server did not answer may still run, so its confirmation waits for process exit.
+	done := make(chan error, 1)
+	go func() {
+		if err := c.acquireSend(requestCtx); err != nil {
+			done <- err
+			return
+		}
+		gateHeld := true
 		defer func() {
-			if settled.Load() {
+			if gateHeld {
+				c.releaseSend()
+			}
+		}()
+		if requestCtx.Err() != nil {
+			done <- contextFailure(requestCtx)
+			return
+		}
+		if c.closed.Load() {
+			done <- &LspError{Message: "LSP client stopped"}
+			return
+		}
+		requestParams := params
+		if prepare != nil {
+			var err error
+			requestParams, err = prepare()
+			if err != nil {
+				done <- err
 				return
 			}
+		}
+		stateMu.Lock()
+		if abandoned || requestCtx.Err() != nil || c.stopping.Load() {
+			stateMu.Unlock()
+			if requestCtx.Err() != nil {
+				done <- contextFailure(requestCtx)
+			} else {
+				done <- &LspError{Message: "LSP client stopped"}
+			}
+			return
+		}
+		attempted = true
+		if onSent != nil {
+			onSent()
+		}
+		stateMu.Unlock()
+
+		waiter, err := c.conn.DispatchCall(requestCtx, method, requestParams, jsonrpc2.PickID(jsonrpc2.ID{Num: id}))
+		c.releaseSend()
+		gateHeld = false
+		if err != nil {
+			done <- err
+			return
+		}
+		waitResult := make(chan error, 1)
+		go func() { waitResult <- waiter.Wait(requestCtx, result) }()
+		select {
+		case err = <-waitResult:
+			if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				go c.sendCancel(id)
+			}
+			if err == nil {
+				finish()
+			} else {
+				var rpcErr *jsonrpc2.Error
+				if errors.As(err, &rpcErr) {
+					finish()
+				}
+			}
+		case <-c.stopStarted:
+			err = &LspError{Message: "LSP client stopped"}
+		}
+		done <- err
+	}()
+
+	defer func() {
+		stateMu.Lock()
+		abandoned = true
+		sent := attempted
+		stateMu.Unlock()
+		if sent && onFinished != nil && c.exitSignal != nil && !settled.Load() {
 			c.parkedConfirmations.Add(1)
 			go func() {
 				defer c.parkedConfirmations.Add(-1)
 				c.confirmWhenProcessStops(finish)
 			}()
-		}()
-	}
-	c.sendMu.Unlock()
-	locked = false
-	done := make(chan error, 1)
-	go func() { done <- waiter.Wait(requestCtx, result) }()
+		}
+	}()
 	select {
 	case err := <-done:
-		if err != nil {
-			return c.responseFailure(err, method, finish)
+		if err == nil {
+			return nil
 		}
-		finish()
-		return nil
+		if ctx.Err() != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+			return timedOutFailure(ctx, method, startedAt, deadline, hasDeadline)
+		}
+		return c.responseFailure(err, method, finish)
 	case <-ctx.Done():
-		c.sendMu.Lock()
-		_ = c.conn.Notify(context.Background(), "$/cancelRequest", CancelRequestParams{ID: id})
-		c.sendMu.Unlock()
-		return timedOutFailure(ctx, method, started, deadline, hasDeadline)
+		return timedOutFailure(ctx, method, startedAt, deadline, hasDeadline)
 	case <-c.stopStarted:
 		return &LspError{Message: "LSP client stopped"}
 	case exit := <-c.exited:
 		c.exited <- exit
 		return c.exitFailure()
-	case err := <-c.exitErr:
-		c.exitErr <- err
-		return &LspError{Message: "LSP client stopped", Cause: err}
+	case exitErr := <-c.exitErr:
+		c.exitErr <- exitErr
+		return &LspError{Message: "LSP client stopped", Cause: exitErr}
 	}
+}
+
+func (c *Client) initSendGate() {
+	c.sendGateOnce.Do(func() {
+		c.sendGate = make(chan struct{}, 1)
+		c.sendGate <- struct{}{}
+	})
+}
+
+func (c *Client) acquireSend(ctx context.Context) error {
+	c.initSendGate()
+	select {
+	case <-c.sendGate:
+		if ctx.Err() != nil {
+			c.releaseSend()
+			return contextFailure(ctx)
+		}
+		if c.stopping.Load() || c.closed.Load() {
+			c.releaseSend()
+			return &LspError{Message: "LSP client stopped"}
+		}
+		return nil
+	case <-ctx.Done():
+		return contextFailure(ctx)
+	case <-c.stopStarted:
+		return &LspError{Message: "LSP client stopped"}
+	}
+}
+
+func (c *Client) acquireSendForStop(ctx context.Context) error {
+	c.initSendGate()
+	select {
+	case <-c.sendGate:
+		if ctx.Err() != nil {
+			c.releaseSend()
+			return ctx.Err()
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (c *Client) releaseSend() {
+	c.initSendGate()
+	c.sendGate <- struct{}{}
+}
+
+func (c *Client) sendCancel(id uint64) {
+	if err := c.acquireSend(context.Background()); err != nil {
+		return
+	}
+	defer c.releaseSend()
+	_ = c.conn.Notify(context.Background(), "$/cancelRequest", CancelRequestParams{ID: id})
 }
 
 // contextFailure maps an already-failed request context before anything is sent.
@@ -411,8 +523,10 @@ func (c *Client) exitFailure() error {
 	return c.exitError()
 }
 func (c *Client) Notify(ctx context.Context, method string, params any) error {
-	c.sendMu.Lock()
-	defer c.sendMu.Unlock()
+	if err := c.acquireSend(ctx); err != nil {
+		return err
+	}
+	defer c.releaseSend()
 	return c.notifyLocked(ctx, method, params)
 }
 
@@ -506,18 +620,23 @@ func (c *Client) finishStop(grace time.Duration) {
 		ctx, cancel = context.WithTimeout(ctx, grace)
 		defer cancel()
 	}
+	var protocolDone chan struct{}
 	if !c.exitReported.Load() {
-		if grace > 0 {
-			c.sendMu.Lock()
-			shutdown, err := c.conn.DispatchCall(ctx, "shutdown", nil)
-			c.sendMu.Unlock()
-			if err == nil {
-				_ = shutdown.Wait(ctx, nil)
+		protocolDone = make(chan struct{})
+		go func() {
+			defer close(protocolDone)
+			if grace > 0 && c.acquireSendForStop(ctx) == nil {
+				shutdown, err := c.conn.DispatchCall(ctx, "shutdown", nil)
+				c.releaseSend()
+				if err == nil {
+					_ = shutdown.Wait(ctx, nil)
+				}
 			}
-		}
-		c.sendMu.Lock()
-		_ = c.conn.Notify(context.Background(), "exit", InitializedParams{})
-		c.sendMu.Unlock()
+			if c.acquireSendForStop(context.Background()) == nil {
+				_ = c.conn.Notify(context.Background(), "exit", InitializedParams{})
+				c.releaseSend()
+			}
+		}()
 		if grace > 0 && c.exitSignal != nil {
 			timer := time.NewTimer(grace)
 			select {
@@ -539,6 +658,9 @@ func (c *Client) finishStop(grace time.Duration) {
 	go func() { disposeDone <- c.conn.Close() }()
 	terminateErr := c.process.Terminate(context.Background(), grace)
 	disposeErr := <-disposeDone
+	if protocolDone != nil {
+		<-protocolDone
+	}
 	if errors.Is(disposeErr, jsonrpc2.ErrClosed) || errors.Is(disposeErr, io.ErrClosedPipe) || errors.Is(disposeErr, os.ErrClosed) {
 		disposeErr = nil
 	}
