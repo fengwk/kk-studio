@@ -64,9 +64,18 @@ public record ModelPricing(RateSet base, List<Rule> rules, List<DateChange> chan
   /** 三个固定类型规则之一；列表不会表达跨类型的优先级。 */
   public sealed interface Rule permits InputTokenRange, TimeMultiplier, ServiceTierMultiplier {}
 
-  /** 命中时仅覆盖所给单价；总输入 token 数包含缓存读写。上界为排他边界，null 表示无上界。 */
+  /** 命中时覆盖所声明的费用项；总输入 token 数包含缓存读写。上界为排他边界，null 表示无上界。 */
   public record InputTokenRange(
-      int minInputTokens, Integer maxInputTokensExclusive, BigDecimal input, BigDecimal output)
+      int minInputTokens,
+      Integer maxInputTokensExclusive,
+      BigDecimal input,
+      BigDecimal output,
+      BigDecimal cacheRead,
+      BigDecimal cacheWrite,
+      Map<Long, BigDecimal> cacheWriteByTtl,
+      BigDecimal reasoning,
+      boolean cacheWriteByTtlSpecified,
+      boolean reasoningSpecified)
       implements Rule {
 
     public InputTokenRange {
@@ -76,11 +85,29 @@ public record ModelPricing(RateSet base, List<Rule> rules, List<DateChange> chan
       if (maxInputTokensExclusive != null && maxInputTokensExclusive <= minInputTokens) {
         throw new IllegalArgumentException("maxInputTokensExclusive must exceed minInputTokens");
       }
-      if (input == null && output == null) {
-        throw new IllegalArgumentException("input_token_range must override input or output");
+      if (input == null
+          && output == null
+          && cacheRead == null
+          && cacheWrite == null
+          && !cacheWriteByTtlSpecified
+          && !reasoningSpecified) {
+        throw new IllegalArgumentException("input_token_range must override at least one rate");
       }
       input = optionalRate(input, "input range rate");
       output = optionalRate(output, "output range rate");
+      cacheRead = optionalRate(cacheRead, "cacheRead range rate");
+      cacheWrite = optionalRate(cacheWrite, "cacheWrite range rate");
+      if (!cacheWriteByTtlSpecified && cacheWriteByTtl != null) {
+        throw new IllegalArgumentException("cacheWriteByTtl must be omitted when not specified");
+      }
+      if (cacheWriteByTtlSpecified && cacheWriteByTtl == null) {
+        throw new IllegalArgumentException("specified cacheWriteByTtl must be an object");
+      }
+      cacheWriteByTtl = cacheWriteByTtlSpecified ? copyTtlRates(cacheWriteByTtl) : null;
+      reasoning = optionalRate(reasoning, "reasoning range rate");
+      if (!reasoningSpecified && reasoning != null) {
+        throw new IllegalArgumentException("reasoning must be marked specified when present");
+      }
     }
 
     public boolean contains(long inputTokens) {

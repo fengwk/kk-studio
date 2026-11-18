@@ -87,10 +87,16 @@ final class ModelPricingMapper {
   private static ModelPricing.Rule toRule(ModelPricingRuleDTO rule) {
     return switch (rule.getType()) {
       case "input_token_range" -> new ModelPricing.InputTokenRange(
-          rule.getMinInputTokens(),
+          rule.getMinInputTokens() == null ? 0 : rule.getMinInputTokens(),
           rule.getMaxInputTokensExclusive(),
           rule.getInput(),
-          rule.getOutput());
+          rule.getOutput(),
+          rule.getCacheRead(),
+          rule.getCacheWrite(),
+          rule.isCacheWriteByTtlSpecified() ? toTtlRates(rule.getCacheWriteByTtl()) : null,
+          rule.getReasoning(),
+          rule.isCacheWriteByTtlSpecified(),
+          rule.isReasoningSpecified());
       case "time_multiplier" -> new ModelPricing.TimeMultiplier(
           parseMinute(rule.getStart(), false),
           parseMinute(rule.getEnd(), true),

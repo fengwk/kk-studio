@@ -1,14 +1,17 @@
 package fun.fengwk.kkstudio.platform.catalog.dto;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
+import java.util.Map;
 
 /** 新 pricing contract 的 decimal 字符串与 null TTL 普通写价 wire 语义。 */
 class ModelPricingDtoJsonTest {
@@ -40,6 +43,31 @@ class ModelPricingDtoJsonTest {
     assertNull(roundTripped.getBase().getCacheWrite());
     assertEquals(decoded.getRules(), roundTripped.getRules());
     assertEquals(decoded.getChanges(), roundTripped.getChanges());
+  }
+
+  @Test
+  void preservesRangeTtlAndReasoningPresenceSemantics() throws Exception {
+    String json =
+        "{\"type\":\"input_token_range\",\"maxInputTokensExclusive\":300000,"
+            + "\"cacheRead\":\"0.5\",\"cacheWriteByTtl\":{},\"reasoning\":null}";
+
+    ModelPricingRuleDTO decoded = mapper.readValue(json, ModelPricingRuleDTO.class);
+
+    assertNull(decoded.getMinInputTokens());
+    assertEquals(300000, decoded.getMaxInputTokensExclusive());
+    assertEquals(new BigDecimal("0.5"), decoded.getCacheRead());
+    assertTrue(decoded.isCacheWriteByTtlSpecified());
+    assertEquals(Map.of(), decoded.getCacheWriteByTtl());
+    assertTrue(decoded.isReasoningSpecified());
+    assertNull(decoded.getReasoning());
+
+    String encoded = mapper.writeValueAsString(decoded);
+    assertTrue(encoded.contains("\"cacheWriteByTtl\":{}"), encoded);
+    assertTrue(encoded.contains("\"reasoning\":null"), encoded);
+    assertFalse(encoded.contains("minInputTokens"), encoded);
+    ModelPricingRuleDTO roundTripped = mapper.readValue(encoded, ModelPricingRuleDTO.class);
+    assertTrue(roundTripped.isCacheWriteByTtlSpecified());
+    assertTrue(roundTripped.isReasoningSpecified());
   }
 
   @Test

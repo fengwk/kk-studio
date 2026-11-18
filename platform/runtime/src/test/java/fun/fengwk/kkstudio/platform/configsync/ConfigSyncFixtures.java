@@ -188,8 +188,8 @@ final class ConfigSyncFixtures {
     base.setCacheWriteByTtl(Map.of());
     base.setReasoning(null);
     pricing.setBase(base);
-    pricing.setOverrides(List.of());
-    pricing.setMultipliers(List.of());
+    pricing.setRules(List.of());
+    pricing.setChanges(List.of());
     ModelVariantDTO variant = new ModelVariantDTO();
     variant.setId("default");
     variant.setPromptCacheRetention(PromptCacheRetention.NONE);

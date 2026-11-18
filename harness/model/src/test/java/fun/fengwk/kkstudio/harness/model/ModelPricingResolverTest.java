@@ -22,7 +22,8 @@ class ModelPricingResolverTest {
         new ModelPricing(
             rates("1", "4", "0.1", "0.2", Map.of(300L, dec("0.3")), "8"),
             List.of(
-                new ModelPricing.InputTokenRange(1_200_000, 1_300_000, dec("2"), dec("6")),
+                new ModelPricing.InputTokenRange(
+                    1_200_000, 1_300_000, dec("2"), dec("6"), null, null, null, null, false, false),
                 new ModelPricing.ServiceTierMultiplier(
                     "fast", factors("2", "3", null, null, null, null)),
                 new ModelPricing.TimeMultiplier(
@@ -73,6 +74,37 @@ class ModelPricingResolverTest {
   }
 
   @Test
+  void inputRangesInheritFeesAndRetainExplicitNullAndEmptyTtlOverrides() {
+    ModelPricing base =
+        new ModelPricing(
+            rates("1", "5", "2", "2", Map.of(300L, dec("9")), "10"), List.of(), List.of());
+    ModelPricing.InputTokenRange clearTtlsAndFollowOutput =
+        new ModelPricing.InputTokenRange(
+            0, 4_000_000, null, null, dec("3"), null, Map.of(), null, true, true);
+    ModelPricing cleared =
+        new ModelPricing(base.base(), List.of(clearTtlsAndFollowOutput), List.of());
+    ModelUsage usage =
+        new ModelUsage(
+            1_000_000, 1_000, 1_000_000, 1_000_000, Map.of(300L, 1_000_000L), 500L, null);
+
+    ModelCost clearedCost = ModelCost.calculate(cleared, usage);
+    assertEquals(dec("3"), clearedCost.cacheRead());
+    assertEquals(dec("2"), clearedCost.cacheWrite());
+    assertEquals(dec("0"), clearedCost.reasoning());
+    assertEquals(dec("6.005"), clearedCost.total());
+
+    ModelPricing.InputTokenRange inheritTtlsAndReasoning =
+        new ModelPricing.InputTokenRange(
+            0, 4_000_000, dec("1"), null, null, null, null, null, false, false);
+    ModelPricing inherited =
+        new ModelPricing(base.base(), List.of(inheritTtlsAndReasoning), List.of());
+    ModelCost inheritedCost = ModelCost.calculate(inherited, usage);
+    assertEquals(dec("2"), inheritedCost.cacheRead());
+    assertEquals(dec("9"), inheritedCost.cacheWrite());
+    assertEquals(dec("0.005"), inheritedCost.reasoning());
+  }
+
+  @Test
   void rejectsOverlappingRulesWithinEachFixedGroup() {
     assertThrows(
         IllegalArgumentException.class,
@@ -80,8 +112,10 @@ class ModelPricingResolverTest {
             new ModelPricing(
                 ModelPricing.RateSet.ZERO,
                 List.of(
-                    new ModelPricing.InputTokenRange(10, 20, dec("1"), null),
-                    new ModelPricing.InputTokenRange(19, 30, null, dec("2"))),
+                    new ModelPricing.InputTokenRange(
+                        10, 20, dec("1"), null, null, null, null, null, false, false),
+                    new ModelPricing.InputTokenRange(
+                        19, 30, null, dec("2"), null, null, null, null, false, false)),
                 List.of()));
     assertThrows(
         IllegalArgumentException.class,

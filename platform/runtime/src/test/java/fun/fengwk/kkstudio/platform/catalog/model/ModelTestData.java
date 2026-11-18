@@ -55,8 +55,8 @@ public final class ModelTestData {
     base.setCacheWriteByTtl(Map.of());
     base.setReasoning(BigDecimal.ZERO);
     pricing.setBase(base);
-    pricing.setOverrides(List.of());
-    pricing.setMultipliers(List.of());
+    pricing.setRules(List.of());
+    pricing.setChanges(List.of());
     config.setPricing(pricing);
 
     List<ModelVariantDTO> variants = new ArrayList<>();

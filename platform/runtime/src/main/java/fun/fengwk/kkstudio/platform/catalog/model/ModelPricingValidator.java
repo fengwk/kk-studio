@@ -80,17 +80,20 @@ final class ModelPricingValidator {
     if (ttlRates == null) {
       return;
     }
+    validateTtlRates(ttlRates, path + ".cacheWriteByTtl");
+  }
+
+  private static void validateTtlRates(Map<String, BigDecimal> ttlRates, String path) {
     if (ttlRates.size() > ModelPricing.MAX_RULES) {
-      throw invalid(
-          path + ".cacheWriteByTtl must not exceed " + ModelPricing.MAX_RULES + " entries");
+      throw invalid(path + " must not exceed " + ModelPricing.MAX_RULES + " entries");
     }
     Set<Long> ttls = new HashSet<>();
     for (Map.Entry<String, BigDecimal> entry : ttlRates.entrySet()) {
-      long ttl = parseTtl(entry.getKey(), path + ".cacheWriteByTtl");
+      long ttl = parseTtl(entry.getKey(), path);
       if (!ttls.add(ttl)) {
-        throw invalid(path + ".cacheWriteByTtl contains duplicate TTL: " + ttl);
+        throw invalid(path + " contains duplicate TTL: " + ttl);
       }
-      requireOptionalNonNegative(entry.getValue(), path + ".cacheWriteByTtl." + ttl);
+      requireOptionalNonNegative(entry.getValue(), path + "." + ttl);
     }
   }
 
@@ -120,19 +123,50 @@ final class ModelPricingValidator {
 
   private static void validateRange(ModelPricingRuleDTO rule, String path) {
     requireOnly(
-        rule, path, Set.of("type", "minInputTokens", "maxInputTokensExclusive", "input", "output"));
-    if (rule.getMinInputTokens() == null || rule.getMinInputTokens() < 0) {
+        rule,
+        path,
+        Set.of(
+            "type",
+            "minInputTokens",
+            "maxInputTokensExclusive",
+            "input",
+            "output",
+            "cacheRead",
+            "cacheWrite",
+            "cacheWriteByTtl",
+            "reasoning"));
+    if (rule.getMinInputTokens() == null && rule.getMaxInputTokensExclusive() == null) {
+      throw invalid(path + " must specify at least one range boundary");
+    }
+    int minInput = rule.getMinInputTokens() == null ? 0 : rule.getMinInputTokens();
+    if (minInput < 0) {
       throw invalid(path + ".minInputTokens must be a non-negative integer");
     }
     if (rule.getMaxInputTokensExclusive() != null
-        && rule.getMaxInputTokensExclusive() <= rule.getMinInputTokens()) {
+        && rule.getMaxInputTokensExclusive() <= minInput) {
       throw invalid(path + ".maxInputTokensExclusive must exceed minInputTokens");
     }
-    if (rule.getInput() == null && rule.getOutput() == null) {
-      throw invalid(path + " must override input or output");
+    if (rule.getInput() == null
+        && rule.getOutput() == null
+        && rule.getCacheRead() == null
+        && rule.getCacheWrite() == null
+        && !rule.isCacheWriteByTtlSpecified()
+        && !rule.isReasoningSpecified()) {
+      throw invalid(path + " must override at least one fee rate");
     }
     requireOptionalNonNegative(rule.getInput(), path + ".input");
     requireOptionalNonNegative(rule.getOutput(), path + ".output");
+    requireOptionalNonNegative(rule.getCacheRead(), path + ".cacheRead");
+    requireOptionalNonNegative(rule.getCacheWrite(), path + ".cacheWrite");
+    if (rule.isCacheWriteByTtlSpecified()) {
+      if (rule.getCacheWriteByTtl() == null) {
+        throw invalid(path + ".cacheWriteByTtl must be an object");
+      }
+      validateTtlRates(rule.getCacheWriteByTtl(), path + ".cacheWriteByTtl");
+    }
+    if (rule.isReasoningSpecified()) {
+      requireOptionalNonNegative(rule.getReasoning(), path + ".reasoning");
+    }
   }
 
   private static void validateTime(ModelPricingRuleDTO rule, String path) {
@@ -218,6 +252,20 @@ final class ModelPricingValidator {
     }
     if (!allowed.contains("output") && rule.getOutput() != null) {
       throw invalid(path + ".output is not valid for this type");
+    }
+    if (!allowed.contains("cacheRead") && rule.getCacheRead() != null) {
+      throw invalid(path + ".cacheRead is not valid for this type");
+    }
+    if (!allowed.contains("cacheWrite") && rule.getCacheWrite() != null) {
+      throw invalid(path + ".cacheWrite is not valid for this type");
+    }
+    if (!allowed.contains("cacheWriteByTtl")
+        && (rule.isCacheWriteByTtlSpecified() || rule.getCacheWriteByTtl() != null)) {
+      throw invalid(path + ".cacheWriteByTtl is not valid for this type");
+    }
+    if (!allowed.contains("reasoning")
+        && (rule.isReasoningSpecified() || rule.getReasoning() != null)) {
+      throw invalid(path + ".reasoning is not valid for this type");
     }
     if (!allowed.contains("start") && rule.getStart() != null) {
       throw invalid(path + ".start is not valid for this type");

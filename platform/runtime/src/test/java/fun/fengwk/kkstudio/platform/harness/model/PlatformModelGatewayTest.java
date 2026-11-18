@@ -18,7 +18,6 @@ import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
-import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
@@ -38,7 +37,6 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
 
-import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -310,26 +308,14 @@ class PlatformModelGatewayTest {
     }
   }
 
-  /** 最终编码 body 观察只发生在真实 stream 路径；计划逐 attempt 冻结，不把上一次快照带给下一次执行。 */
+  /**
+   * Typed pricing does not observe request-body conditions; each execution keeps its own empty
+   * snapshot.
+   */
   @Test
-  void observesActualBodyAndKeepsPlansPerAttempt() {
-    ModelPricingCondition.RequestBody condition =
-        ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
-    ModelPricingCondition when =
-        new ModelPricingCondition(null, null, null, null, condition, null, null, null);
-    ModelPricing pricing =
-        new ModelPricing(
-            new ModelPricing.RateSet(
-                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, Map.of(), null),
-            List.of(
-                new ModelPricing.Override(
-                    "fast",
-                    when,
-                    new ModelPricing.RatePatch(
-                        BigDecimal.ONE, null, null, null, null, null, false))),
-            List.of());
-    ModelRequestBodyPricing.Plan plan = ModelRequestBodyPricing.plan(pricing);
-    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
+  void doesNotObserveRequestBodyForTypedPricing() {
+    ModelRequestBodyPricing.Plan plan = ModelRequestBodyPricing.plan(ModelPricing.ZERO);
+    assertFalse(plan.hasConditions());
     AtomicInteger attempts = new AtomicInteger();
     PlatformModelGateway gateway =
         new PlatformModelGateway(
@@ -349,11 +335,10 @@ class PlatformModelGatewayTest {
                         : ModelRequestBodyPricing.plan(ModelPricing.ZERO)));
 
     ModelGateway.Succeeded first = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
-    assertEquals(
-        Map.of(fingerprint, true), first.completion().response().requestBodyPricing().matches());
-
+    assertNull(first.completion().response().requestBodyPricing());
     ModelGateway.Succeeded second = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
     assertNull(second.completion().response().requestBodyPricing());
+    assertEquals(2, attempts.get());
   }
 
   /** pricing 读取失败不是准入条件：异常向 Processor 传播，且已取得的并发名额立即归还。 */
@@ -380,34 +365,20 @@ class PlatformModelGatewayTest {
     assertInstanceOf(ModelGateway.Admitted.class, gateway.admit(EXECUTION)).close();
   }
 
-  /** 未实现观察回调的 adapter 不产生定价事实；伪造的 completion 快照会被 gateway 清除。 */
+  /**
+   * A provider-supplied legacy request-body snapshot is discarded when pricing has no such rule.
+   */
   @Test
-  void missingObservationStaysUnknown() {
-    ModelPricingCondition.RequestBody condition =
-        ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
-    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
+  void discardsUnrequestedRequestBodySnapshot() {
     ProviderResponse forged =
-        response()
-            .withRequestBodyPricing(new RequestBodyPricingSnapshot(Map.of(fingerprint, true)));
+        response().withRequestBodyPricing(new RequestBodyPricingSnapshot(Map.of("legacy", true)));
     PlatformModelGateway gateway =
         new PlatformModelGateway(
             new Resolution(
                 scripted((request, handler) -> handler.onComplete(new ProviderCompletion(forged)))),
             () -> BUSY_DELAY,
             new ConcurrencyAdmission(1),
-            pricingSource(
-                modelName ->
-                    ModelRequestBodyPricing.plan(
-                        new ModelPricing(
-                            ModelPricing.RateSet.ZERO,
-                            List.of(
-                                new ModelPricing.Override(
-                                    "fast",
-                                    new ModelPricingCondition(
-                                        null, null, null, null, condition, null, null, null),
-                                    new ModelPricing.RatePatch(
-                                        BigDecimal.ONE, null, null, null, null, null, false))),
-                            List.of()))));
+            pricingSource(modelName -> ModelRequestBodyPricing.plan(ModelPricing.ZERO)));
     ModelGateway.Succeeded succeeded = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
     assertNull(succeeded.completion().response().requestBodyPricing());
   }

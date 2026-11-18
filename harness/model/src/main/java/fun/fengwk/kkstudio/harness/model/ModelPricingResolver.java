@@ -44,6 +44,19 @@ final class ModelPricingResolver {
         if (range.output() != null) {
           output = range.output();
         }
+        if (range.cacheRead() != null) {
+          cacheRead = range.cacheRead();
+        }
+        if (range.cacheWrite() != null) {
+          cacheWrite = range.cacheWrite();
+        }
+        if (range.cacheWriteByTtlSpecified()) {
+          cacheWriteByTtl = new LinkedHashMap<>(range.cacheWriteByTtl());
+        }
+        if (range.reasoningSpecified()) {
+          independentReasoning = range.reasoning() != null;
+          reasoning = range.reasoning();
+        }
       }
     }
 
