@@ -2,10 +2,12 @@ package fun.fengwk.kkstudio.schema;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 
 import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.FlywayException;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,19 +61,7 @@ class PricingMigrationTest {
         "{\"input\":\"1.25\",\"output\":\"3.5\",\"cacheRead\":\"0.2\","
             + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{\"300\":\"1.1\"},"
             + "\"reasoning\":\"4.25\"}";
-    insertModel(
-        "migratable",
-        "{\"pricing\":{\"base\":"
-            + base
-            + ",\"overrides\":[],\"multipliers\":[{\"id\":\"legacy\","
-            + "\"factors\":{\"input\":\"0.8\",\"output\":\"0.8\","
-            + "\"cacheRead\":\"0.8\",\"cacheWrite\":\"0.8\",\"reasoning\":\"0.8\"},"
-            + "\"when\":{\"time\":{\"start\":\"00:00\",\"end\":\"24:00\","
-            + "\"timezone\":\"UTC\",\"weekdays\":[1,2,3,4,5]},\"any\":["
-            + "{\"all\":[{\"time\":{\"start\":\"01:00\",\"end\":\"24:00\",\"timezone\":\"UTC\"}},"
-            + "{\"time\":{\"start\":\"00:00\",\"end\":\"04:00\",\"timezone\":\"UTC\"}}]},"
-            + "{\"all\":[{\"time\":{\"start\":\"06:00\",\"end\":\"24:00\",\"timezone\":\"UTC\"}},"
-            + "{\"time\":{\"start\":\"00:00\",\"end\":\"10:00\",\"timezone\":\"UTC\"}}]}]}}]}}");
+    insertModel("migratable", legacyWorkdayPricing(base, "01:00", "24:00"));
 
     String plainPricing =
         "{\"pricing\":{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
@@ -174,6 +164,28 @@ class PricingMigrationTest {
         assertEquals("2", result.getString(1), "failed V3 must leave the schema at V2");
       }
     }
+  }
+
+  @Test
+  void rejectsWrappingLeafInsteadOfDroppingPartOfItsOrCondition() throws Exception {
+    // A non-wrapping sibling keeps the OR satisfiable, so dropping the wrapping leaf would
+    // appear to succeed but silently remove its early-morning rates.
+    insertModel("wraps-midnight", legacyWorkdayPricing("{}", "23:00", "04:00"));
+    assertThrows(FlywayException.class, PricingMigrationTest::migrateLatest);
+  }
+
+  private static String legacyWorkdayPricing(String base, String firstStart, String firstEnd) {
+    return """
+        {"pricing":{"base":%s,"overrides":[],"multipliers":[{"id":"legacy",
+          "factors":{"input":"0.8","output":"0.8","cacheRead":"0.8","cacheWrite":"0.8","reasoning":"0.8"},
+          "when":{"time":{"start":"00:00","end":"24:00","timezone":"UTC","weekdays":[1,2,3,4,5]},
+            "any":[
+              {"all":[{"time":{"start":"%s","end":"%s","timezone":"UTC"}},
+                      {"time":{"start":"00:00","end":"04:00","timezone":"UTC"}}]},
+              {"all":[{"time":{"start":"06:00","end":"24:00","timezone":"UTC"}},
+                      {"time":{"start":"00:00","end":"10:00","timezone":"UTC"}}]}]}}]}}
+        """
+        .formatted(base, firstStart, firstEnd);
   }
 
   private static void migrateWithSeed(String seedLocation) {

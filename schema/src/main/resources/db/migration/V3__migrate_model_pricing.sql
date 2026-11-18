@@ -230,7 +230,9 @@ begin
                    or first_window ->> 'start' !~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
                    or second_window ->> 'start' !~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'
                    or first_window ->> 'end' !~ '^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$'
-                   or second_window ->> 'end' !~ '^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$' then
+                   or second_window ->> 'end' !~ '^(([01][0-9]|2[0-3]):[0-5][0-9]|24:00)$'
+                   or (first_window ->> 'start') collate "C" >= (first_window ->> 'end') collate "C"
+                   or (second_window ->> 'start') collate "C" >= (second_window ->> 'end') collate "C" then
                     raise exception 'unsupported legacy model pricing configuration; no pricing data changed';
                 end if;
 
