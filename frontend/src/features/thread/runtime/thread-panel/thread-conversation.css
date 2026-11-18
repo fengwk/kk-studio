@@ -502,8 +502,8 @@ pre.thread-event-detail-payload {
 .thread-block-user {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 4px;
+  padding: 8px 10px;
   border-radius: 10px;
   background: var(--surface-active);
   border: 1px solid var(--border);
@@ -511,6 +511,7 @@ pre.thread-event-detail-payload {
 
 .thread-block-user .thread-block-body {
   color: var(--fg-muted);
+  line-height: 1.5;
   /* 用户消息仍是纯文本，保留换行 */
   white-space: pre-wrap;
 }

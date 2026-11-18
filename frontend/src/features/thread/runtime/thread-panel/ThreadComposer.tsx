@@ -202,6 +202,7 @@ export function ThreadComposer({
     query,
     activeIndex,
     setActiveIndex,
+    keyboardScrollVersion,
     togglePalette,
     selectCommand,
     handleEditorKeyDown,
@@ -302,6 +303,7 @@ export function ThreadComposer({
         query={query}
         commands={commands}
         activeIndex={activeIndex}
+        scrollVersion={keyboardScrollVersion}
         onActiveIndexChange={setActiveIndex}
         onSelect={selectCommand}
       />

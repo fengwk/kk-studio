@@ -1,0 +1,96 @@
+/* Shared interaction-card content styles. Imported by each card, not by its parent route. */
+.interaction-feed-item { min-width: 0; padding: 10px 12px; overflow-wrap: anywhere; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); }
+.interaction-item-body { min-width: 0; }
+.interaction-approval-card,
+.interaction-questionnaire-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.interaction-approval-card { gap: 0; }
+.interaction-approval-header { display: flex; flex-direction: column; gap: 0; }
+.interaction-approval-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.interaction-approval-icon { flex: 0 0 auto; color: var(--warning); }
+.interaction-approval-tool-name { min-width: 0; overflow-wrap: anywhere; }
+.interaction-approval-mutation-preview { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.interaction-approval-reason { min-width: 0; margin-top: 4px; color: var(--fg-muted); font-size: var(--font-size-xs); font-weight: 400; overflow-wrap: anywhere; }
+.interaction-approval-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.interaction-approval-deny-reason { display: flex; flex: 1 1 auto; min-width: 0; }
+.interaction-approval-deny-reason input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--fg);
+  font: inherit;
+  appearance: none;
+}
+.interaction-approval-deny-reason input:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+.interaction-approval-footer .interaction-actions-bar { flex: 0 0 auto; padding-top: 0; border-top: 0; }
+.interaction-actions-bar { display: flex; align-items: center; justify-content: flex-end; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+.interaction-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--danger-border);
+  border-radius: var(--radius-sm);
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: var(--font-size-sm);
+}
+.interaction-error-banner.is-non-recoverable { border-color: var(--warning-border); background: var(--warning-soft); color: var(--warning); }
+.interaction-questionnaire-card { gap: 16px; }
+.interaction-questions-list { display: flex; flex-direction: column; gap: 18px; }
+.interaction-question-item { display: flex; flex-direction: column; gap: 10px; }
+.interaction-question-title { display: flex; align-items: center; gap: 8px; color: var(--fg); font-size: var(--font-size-sm); font-weight: 600; }
+.interaction-question-type-tag { flex-shrink: 0; padding: 1px 6px; border-radius: 3px; background: var(--surface-hover); color: var(--fg-muted); font-size: var(--font-size-xs); font-weight: 500; }
+.interaction-options-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr)); gap: 8px; }
+.interaction-option-btn { display: flex; flex-direction: column; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); color: var(--fg); cursor: pointer; text-align: left; transition: border-color var(--duration-fast), background-color var(--duration-fast); }
+.interaction-option-btn:hover:not(:disabled):not(.is-selected) { border-color: var(--border-hover); background: var(--surface-hover); }
+.interaction-option-btn:focus-visible { outline: none; border-color: var(--border-hover); box-shadow: 0 0 0 2px var(--focus-ring); }
+.interaction-option-btn.is-selected { border-color: var(--accent); background: var(--accent-soft); }
+.interaction-option-btn:disabled { cursor: not-allowed; opacity: .6; }
+.interaction-option-label-row { display: flex; align-items: center; gap: 8px; width: 100%; }
+.interaction-option-indicator { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; flex: 0 0 auto; border: 1px solid var(--border-hover); border-radius: 3px; }
+.interaction-option-btn.is-selected .interaction-option-indicator { border-color: var(--accent); background: var(--accent); color: var(--fg-on-accent); }
+.interaction-option-label { flex: 1; color: var(--fg); font-size: var(--font-size-sm); font-weight: 500; }
+.interaction-recommended-tag { flex-shrink: 0; padding: 1px 5px; border-radius: 3px; background: var(--warning-soft); color: var(--warning); font-size: var(--font-size-xs); font-weight: 600; }
+.interaction-option-desc { margin-top: 4px; padding-left: 24px; color: var(--fg-muted); font-size: var(--font-size-xs); }
+.interaction-custom-input-wrap, .interaction-custom-input { width: 100%; }
+.interaction-actions-right { display: flex; align-items: center; gap: 10px; }
+.interaction-questionnaire-badge { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 4px; font-size: var(--font-size-xs); font-weight: 600; }
+.interaction-questionnaire-badge.completed { background: var(--accent-soft); color: var(--accent); }
+.interaction-questionnaire-badge.declined { background: var(--danger-soft); color: var(--danger); }
+.interaction-completed-answers { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.interaction-answer-tag { padding: 2px 8px; border: 1px solid var(--border); border-radius: 4px; background: var(--surface-hover); color: var(--fg); font-size: var(--font-size-xs); }
+pre.interaction-raw-pre { padding: 8px 12px; border-radius: var(--radius-sm); background: var(--bg); white-space: pre-wrap; word-break: break-all; }
+@media (max-width: 480px) {
+  .interaction-approval-footer { align-items: stretch; flex-wrap: wrap; }
+  .interaction-approval-deny-reason { flex-basis: 100%; }
+  .interaction-approval-footer .interaction-actions-bar { width: 100%; }
+  .interaction-approval-footer .interaction-actions-bar > * { flex: 1; }
+}

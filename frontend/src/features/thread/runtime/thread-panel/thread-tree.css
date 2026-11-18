@@ -7,6 +7,10 @@
 .thread-tree-identity { font-weight: 600; }
 .thread-tree-detail, .thread-tree-counts, .thread-tree-status, .thread-tree-control { color: var(--fg-muted); font-size: var(--font-size-xs); }
 .thread-tree-status.is-running { color: var(--info); }
+.thread-tree-status svg { width: 12px; height: 12px; vertical-align: -2px; }
+.thread-tree-status-running-icon { animation: thread-tree-status-spin 1.4s linear infinite; }
+@keyframes thread-tree-status-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .thread-tree-status-running-icon { animation: none; } }
 .thread-tree-status.is-waiting { color: var(--fg-muted); }
 .thread-tree-status.is-failed { color: var(--danger); }
 .thread-tree-control.is-stopped { color: var(--warning); }

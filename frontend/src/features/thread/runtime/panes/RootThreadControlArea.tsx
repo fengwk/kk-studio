@@ -170,12 +170,8 @@ function RootInteractionList({ rootThreadId }: { rootThreadId: string }) {
       ) : null}
       {manualItems.map((item) => (
         <div key={interactionIdentity(item)} className="interaction-feed-item">
-          <header className="interaction-item-header">
-            <div className="interaction-item-meta">
-              <InteractionOwnerSource item={item} />
-            </div>
-          </header>
           <div className="interaction-item-body">
+            <InteractionOwnerSource item={item} showOwnerSource={false} />
             <InteractionCardBody item={item} onSuccess={() => removeItem(item.toolInvocationId)} />
           </div>
         </div>

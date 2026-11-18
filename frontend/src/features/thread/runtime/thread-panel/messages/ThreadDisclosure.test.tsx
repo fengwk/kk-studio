@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -169,81 +169,13 @@ describe('ThreadDisclosure', () => {
     expect(screen.queryByRole('button', { name: '展开详情' })).not.toBeInTheDocument()
   })
 
-  it('does not render the bottom collapse action before the card exceeds the viewport', () => {
-    // jsdom 的布局桩把每个元素都报告为 800px 高；抬高视口以验证「不高于可视区时不出现」。
-    const originalInnerHeight = window.innerHeight
-    Object.defineProperty(window, 'innerHeight', { value: 2000, configurable: true })
-    try {
-      render(<ControlledDisclosure {...baseProps({ initialExpanded: true })} />)
-      expect(document.querySelector('.thread-disclosure-collapse')).toBeNull()
-    } finally {
-      Object.defineProperty(window, 'innerHeight', {
-        value: originalInnerHeight,
-        configurable: true,
-      })
-    }
-  })
-
-  it('collapses a long card, aligns its top in the nearest scroller and returns keyboard focus', () => {
-    let frame: FrameRequestCallback | undefined
-    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
-      frame = callback
-      return 1
-    }))
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(400)
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
-      const top = this.matches('.thread-disclosure') ? 140 : 40
-      return new DOMRect(0, top, 600, 800)
-    })
-    const { container } = render(
-      <div style={{ overflowY: 'auto' }}>
-        <ControlledDisclosure {...baseProps({ initialExpanded: true })} />
-      </div>,
-    )
-    const scroller = container.firstElementChild as HTMLElement
-    scroller.scrollTop = 20
-
-    // 验证收起后的定位与焦点，不只断言按钮存在；布局回调在 React 提交后执行。
-    fireEvent.click(screen.getByRole('button', { name: /^收起$/ }))
+  it('keeps the header chevron as the only collapse control for long expanded content', async () => {
+    const user = userEvent.setup()
+    render(<ControlledDisclosure {...baseProps({ initialExpanded: true })} />)
+    expect(document.querySelector('.thread-disclosure-collapse')).toBeNull()
+    const toggle = screen.getByRole('button', { name: '收起详情' })
+    await user.click(toggle)
     expect(screen.getByRole('button', { name: '展开详情' })).toHaveAttribute('aria-expanded', 'false')
-    act(() => frame?.(0))
-    expect(scroller.scrollTop).toBe(120)
-    expect(screen.getByRole('button', { name: '展开详情' })).toHaveFocus()
-    expect(screen.queryByRole('button', { name: /^收起$/ })).toBeNull()
-  })
-
-  it('uses document scrolling for a long standalone card without a transcript scroller', () => {
-    let frame: FrameRequestCallback | undefined
-    vi.stubGlobal('requestAnimationFrame', vi.fn((callback: FrameRequestCallback) => {
-      frame = callback
-      return 1
-    }))
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 100, 600, 2000))
-    const { container } = render(<ControlledDisclosure {...baseProps({ initialExpanded: true })} />)
-    const card = container.querySelector('.thread-disclosure') as HTMLElement
-    const scrollIntoView = vi.spyOn(card, 'scrollIntoView')
-    fireEvent.click(screen.getByRole('button', { name: /^收起$/ }))
-    act(() => frame?.(0))
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' })
-    expect(screen.getByRole('button', { name: '展开详情' })).toHaveFocus()
-  })
-
-  it('updates the header and long-card affordance on resize without ResizeObserver and releases listeners', () => {
-    // 覆盖无 observer 时的真实 resize 降级，确保容器卸载后不遗留 window 监听。
-    vi.stubGlobal('ResizeObserver', undefined)
-    let height = 40
-    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(() => height)
-    vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(40)
-    const removeListener = vi.spyOn(window, 'removeEventListener')
-    const { unmount } = render(<ControlledDisclosure {...baseProps({ hasDetails: false })} />)
-    expect(screen.queryByRole('button', { name: '展开详情' })).toBeNull()
-    height = 60
-    fireEvent(window, new Event('resize'))
-    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
-    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 2000))
-    fireEvent(window, new Event('resize'))
-    expect(screen.getByRole('button', { name: /^收起$/ })).toBeInTheDocument()
-    unmount()
-    expect(removeListener.mock.calls.filter(([event]) => event === 'resize')).toHaveLength(2)
+    expect(document.querySelector('.thread-disclosure-collapse')).toBeNull()
   })
 })
