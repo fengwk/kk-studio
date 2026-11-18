@@ -91,6 +91,7 @@ public class ApplicationEventConfiguration {
       SystemSettingsSnapshot systemSettingsSnapshot,
       ObjectProvider<EnvironmentDaemonServer> daemonServerProvider) {
     HarnessNotificationBinding threadVersions = harnessNotifications.threadVersionsNotification();
+    HarnessNotificationBinding threadSnapshots = harnessNotifications.threadSnapshotsNotification();
     HarnessNotificationBinding executionTree = harnessNotifications.executionTreeNotification();
     HarnessNotificationBinding interactions = harnessNotifications.interactionsNotification();
     return new PostgresqlNotificationLoop(
@@ -118,6 +119,10 @@ public class ApplicationEventConfiguration {
                 threadVersions.channel(),
                 threadVersions.onNotification(),
                 threadVersions.onResync()),
+            new PostgresqlNotificationHandler(
+                threadSnapshots.channel(),
+                threadSnapshots.onNotification(),
+                threadSnapshots.onResync()),
             // 画布版本失效：Canvas 拥有 canvas_revision 通道、payload 协议与 revision fan-out；Web 只建立 LISTEN
             // 并把信号转发给浏览器事件通道以触发图谱更新
             new PostgresqlNotificationHandler(

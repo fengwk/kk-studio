@@ -14,6 +14,7 @@ import fun.fengwk.kkstudio.harness.spi.store.JoinStore;
 import fun.fengwk.kkstudio.platform.harness.store.PostgresqlHarnessTransaction.LockKey;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -69,6 +70,10 @@ final class PostgresqlJoinStore implements JoinStore {
         PostgresqlHarnessRows.timestamp(join.createdAt()),
         PostgresqlHarnessRows.timestamp(join.updatedAt()),
         join.delivery().name());
+    tx.notifyThreadSnapshotChanged(join.childThreadId());
+    if (join.parentThreadId() != null) {
+      tx.notifyThreadSnapshotChanged(join.parentThreadId());
+    }
   }
 
   @Override
@@ -257,6 +262,15 @@ final class PostgresqlJoinStore implements JoinStore {
             old.deliveryCommandSequence(),
             old.supersededByInvocationId());
     tx.requireSingleUpdate(updated, "join", join.invocationId());
+    if (!old.equals(join)) {
+      tx.notifyThreadSnapshotChanged(join.childThreadId());
+      if (old.parentThreadId() != null) {
+        tx.notifyThreadSnapshotChanged(old.parentThreadId());
+      }
+      if (join.parentThreadId() != null && !join.parentThreadId().equals(old.parentThreadId())) {
+        tx.notifyThreadSnapshotChanged(join.parentThreadId());
+      }
+    }
   }
 
   @Override
@@ -279,6 +293,7 @@ final class PostgresqlJoinStore implements JoinStore {
             PostgresqlHarnessRows.JOIN,
             copied.toArray());
     List<UUID> pendingDelete = new ArrayList<>();
+    Set<UUID> affectedThreadIds = new LinkedHashSet<>();
     for (ThreadJoin join : joins) {
       boolean parentAlsoDeleted =
           join.parentThreadId() == null || deleting.contains(join.parentThreadId());
@@ -291,14 +306,23 @@ final class PostgresqlJoinStore implements JoinStore {
             "cannot delete join pending delivery " + join.invocationId());
       }
       pendingDelete.add(join.invocationId());
+      affectedThreadIds.add(join.childThreadId());
+      if (join.parentThreadId() != null) {
+        affectedThreadIds.add(join.parentThreadId());
+      }
     }
     if (pendingDelete.isEmpty()) {
       return 0;
     }
-    return tx.updateJdbc(
-        "delete from harness_thread_join where invocation_id in ("
-            + PostgresqlHarnessTransaction.placeholders(pendingDelete.size())
-            + ")",
-        pendingDelete.toArray());
+    int deleted =
+        tx.updateJdbc(
+            "delete from harness_thread_join where invocation_id in ("
+                + PostgresqlHarnessTransaction.placeholders(pendingDelete.size())
+                + ")",
+            pendingDelete.toArray());
+    for (UUID threadId : affectedThreadIds) {
+      tx.notifyThreadSnapshotChanged(threadId);
+    }
+    return deleted;
   }
 }

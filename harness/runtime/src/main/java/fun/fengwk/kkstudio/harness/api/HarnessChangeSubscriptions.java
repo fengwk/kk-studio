@@ -1,14 +1,17 @@
 package fun.fengwk.kkstudio.harness.api;
 
 /**
- * 公开的 Harness 变更订阅入口：线程版本、执行树与待处理交互。
+ * 公开的 Harness 变更订阅入口：线程版本、Thread 快照、执行树与待处理交互。
  *
- * <p>三个源都由平台实现数据库 LISTEN/NOTIFY 协议适配与进程内分发；消费方只依赖本包契约，不需要知道 channel 名、通知 payload 或持久化实现。
+ * <p>各源都由平台实现数据库 LISTEN/NOTIFY 协议适配与进程内分发；消费方只依赖本包契约，不需要知道 channel 名、通知 payload 或持久化实现。
  */
 public interface HarnessChangeSubscriptions {
 
   /** Thread durable version 变化。 */
   HarnessThreadVersionChanges threadVersions();
+
+  /** Thread 快照失效：key 是发生持久化变化的 Thread id。 */
+  HarnessInvalidationChanges threadSnapshots();
 
   /** 执行树失效：key 是真实执行根 Thread id。 */
   HarnessInvalidationChanges executionTree();

@@ -29,6 +29,7 @@ import fun.fengwk.kkstudio.harness.spi.store.ToolStore;
 import fun.fengwk.kkstudio.harness.spi.store.UuidOrder;
 import fun.fengwk.kkstudio.harness.spi.store.WorkStore;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
+import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationChannel;
 
 import java.time.Instant;
@@ -223,6 +224,11 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
         .orElseThrow(() -> new IllegalStateException("statement_timestamp returned no row"));
   }
 
+  /** Thread 快照失效：payload 是 canonical Thread id，不带版本游标。 */
+  public void notifyThreadSnapshotChanged(UUID threadId) {
+    notifyChannel(HarnessNotificationChannel.THREAD_SNAPSHOT, threadId.toString());
+  }
+
   /** Thread version 失效：payload 为 {@code {threadId}:{version}}，与既有协议一致。 */
   void notifyThreadVersion(UUID threadId, long version) {
     notifyChannel(HarnessNotificationChannel.THREAD_VERSION, threadId + ":" + version);
@@ -292,13 +298,26 @@ public final class PostgresqlHarnessTransaction implements HarnessStore.Transact
   }
 
   /**
-   * 环境等待待处理失效：仅对冻结了 {@code required_environment_id} 的 TOOL Work 发布，payload 沿用 interaction channel
-   * 的真实执行根协议。使用 Work 行冻结的环境事实，而非当前 composer/settings；只提示待处理查询刷新，不创建审批事实。
+   * Durable TOOL Work 变化提示 Thread 快照读取；冻结了环境亲和性的 TOOL Work 另外失效待处理交互。仅解析本地持久化的 tool 所属 Thread，
+   * 不在事务内读取环境状态。
    */
-  void notifyEnvironmentWorkChanged(WorkTarget target, EnvironmentId requiredEnvironmentId) {
+  void notifyWorkChanged(WorkTarget target, EnvironmentId requiredEnvironmentId) {
+    if (WorkTargetType.TOOL.equals(target.type())) {
+      UUID threadId = toolInvocationThread(target.id());
+      notifyChannel(
+          HarnessNotificationChannel.THREAD_SNAPSHOT, threadId == null ? "" : threadId.toString());
+    }
     if (requiredEnvironmentId != null) {
       notifyToolInteraction(executionRootOfToolInvocation(target.id()));
     }
+  }
+
+  private UUID toolInvocationThread(UUID toolInvocationId) {
+    return queryOne(
+            "select thread_id from harness_tool_invocation where id = ?",
+            (resultSet, rowNumber) -> resultSet.getObject("thread_id", UUID.class),
+            toolInvocationId)
+        .orElse(null);
   }
 
   public <T> Optional<T> queryOne(String sql, RowMapper<T> mapper, Object... arguments) {

@@ -18,7 +18,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * HarnessChangeNotifications：三个 harness channel 的协议只在此定义一次，且各自的通知只投递给自己的订阅源。
+ * HarnessChangeNotifications：各 harness channel 的协议只在此定义一次，且各自的通知只投递给自己的订阅源。
  *
  * <p>公开契约的消费语义（version cursor、畸形 payload resync）由各源自己的测试覆盖；本测试固定绑定对应的 channel 与投递方向， 防止组合根重新复制
  * channel 字符串或串线。
@@ -42,6 +42,9 @@ class HarnessChangeNotificationsTest {
         HarnessNotificationChannel.THREAD_VERSION,
         notifications.threadVersionsNotification().channel());
     assertEquals(
+        HarnessNotificationChannel.THREAD_SNAPSHOT,
+        notifications.threadSnapshotsNotification().channel());
+    assertEquals(
         HarnessNotificationChannel.THREAD_TREE,
         notifications.executionTreeNotification().channel());
     assertEquals(
@@ -57,17 +60,21 @@ class HarnessChangeNotificationsTest {
   @Test
   void everyNotificationOnlyReachesItsOwnSource() {
     List<HarnessThreadVersionChanges.Event> versions = new ArrayList<>();
+    List<Event> snapshots = new ArrayList<>();
     List<Event> trees = new ArrayList<>();
     List<Event> interactions = new ArrayList<>();
     notifications.threadVersions().subscribe(THREAD, versions::add);
+    notifications.threadSnapshots().subscribe(THREAD, snapshots::add);
     notifications.executionTree().subscribe(null, trees::add);
     notifications.interactions().subscribe(null, interactions::add);
 
     notifications.threadVersionsNotification().onNotification().accept(THREAD + ":4");
+    notifications.threadSnapshotsNotification().onNotification().accept(THREAD.toString());
     notifications.executionTreeNotification().onNotification().accept(THREAD.toString());
     notifications.interactionsNotification().onNotification().accept(THREAD.toString());
 
     assertEquals(List.of(new HarnessThreadVersionChanges.Event.Version(4L)), versions);
+    assertEquals(List.of(new Event.Changed(THREAD)), snapshots);
     assertEquals(List.of(new Event.Changed(THREAD)), trees);
     assertEquals(List.of(new Event.Changed(THREAD)), interactions);
   }
@@ -75,13 +82,17 @@ class HarnessChangeNotificationsTest {
   @Test
   void resyncOfOneSourceDoesNotTouchTheOthers() {
     List<HarnessThreadVersionChanges.Event> versions = new ArrayList<>();
+    List<Event> snapshots = new ArrayList<>();
     List<Event> interactions = new ArrayList<>();
     notifications.threadVersions().subscribe(THREAD, versions::add);
+    notifications.threadSnapshots().subscribe(THREAD, snapshots::add);
     notifications.interactions().subscribe(null, interactions::add);
 
-    // 环境失效等外部提示只要求交互全量回读：组合根调用该绑定的 resync，不影响版本源。
+    // 重连只要求所绑定的失效源回读，不影响其它通道。
+    notifications.threadSnapshotsNotification().onResync().run();
     notifications.interactionsNotification().onResync().run();
 
+    assertEquals(List.of(new Event.Resync()), snapshots);
     assertEquals(List.of(new Event.Resync()), interactions);
     assertEquals(List.of(), versions);
   }

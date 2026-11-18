@@ -45,6 +45,7 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocation;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelInvocationStatus;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
+import fun.fengwk.kkstudio.harness.builtin.port.store.StreamCheckpoint;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderResponse;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
@@ -80,6 +81,7 @@ import java.util.function.UnaryOperator;
 class PostgresqlHarnessTransactionNotificationTest {
 
   private static final String VERSION_CHANNEL = HarnessNotificationChannel.THREAD_VERSION;
+  private static final String SNAPSHOT_CHANNEL = HarnessNotificationChannel.THREAD_SNAPSHOT;
   private static final String TREE_CHANNEL = HarnessNotificationChannel.THREAD_TREE;
   private static final String INTERACTION_CHANNEL = HarnessNotificationChannel.TOOL_INTERACTION;
   private static final EnvironmentId ENVIRONMENT =
@@ -160,6 +162,44 @@ class PostgresqlHarnessTransactionNotificationTest {
       listener.expectExactly(
           versionNotification(grandChildChain.threadId(), 2L),
           treeNotification(rootChain.threadId()));
+    }
+  }
+
+  /** 同版本的 durable checkpoint 仍发布 Thread 快照失效，且 rollback 不发布。 */
+  @Test
+  void checkpointChangePublishesSnapshotSignalWithoutVersionChange() throws SQLException {
+    SessionRoot root = seedSessionRoot(store);
+    ToolChain chain = seedToolChain(store, root, null, null, ToolKind.BASH, true);
+    UUID modelId = chain.modelId();
+    long versionBefore =
+        store.transaction(tx -> tx.threads().find(chain.threadId()).orElseThrow().version());
+    StreamCheckpoint checkpoint = new StreamCheckpoint(1, 1L, "partial", null);
+
+    try (InvalidationListener listener = InvalidationListener.openThreadSnapshots(dataSource)) {
+      assertThrows(
+          IllegalStateException.class,
+          () ->
+              store.transaction(
+                  tx -> {
+                    ModelInvocation model =
+                        builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+                    builtin(store, tx).updateModelInvocation(model.checkpoint(checkpoint, T3));
+                    throw new IllegalStateException("rollback");
+                  }));
+      listener.assertSilent();
+
+      store.transaction(
+          tx -> {
+            ModelInvocation model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+            builtin(store, tx).updateModelInvocation(model.checkpoint(checkpoint, T3));
+            return null;
+          });
+      listener.expectExactly(snapshotNotification(chain.threadId()));
+      assertEquals(
+          versionBefore,
+          store
+              .transaction(tx -> tx.threads().find(chain.threadId()).orElseThrow().version())
+              .longValue());
     }
   }
 
@@ -470,7 +510,7 @@ class PostgresqlHarnessTransactionNotificationTest {
 
   private record SessionRoot(UUID sessionId, UUID rootEntryId) {}
 
-  private record ToolChain(UUID turnStartId, UUID threadId, UUID toolId) {}
+  private record ToolChain(UUID turnStartId, UUID threadId, UUID toolId, UUID modelId) {}
 
   private record ToolSpec(
       ModelRequestSpec request, ProviderResponse response, ToolCall call, ToolBinding binding) {}
@@ -499,6 +539,16 @@ class PostgresqlHarnessTransactionNotificationTest {
    */
   private static ToolChain seedToolChain(
       HarnessStore store, SessionRoot root, UUID parentThreadId, UUID rootThreadId, ToolKind kind) {
+    return seedToolChain(store, root, parentThreadId, rootThreadId, kind, false);
+  }
+
+  private static ToolChain seedToolChain(
+      HarnessStore store,
+      SessionRoot root,
+      UUID parentThreadId,
+      UUID rootThreadId,
+      ToolKind kind,
+      boolean leaveModelRunning) {
     ToolSpec spec = toolSpec(kind);
     return store.transaction(
         tx -> {
@@ -571,11 +621,14 @@ class PostgresqlHarnessTransactionNotificationTest {
                       null));
           ModelInvocation model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
           builtin(store, tx).updateModelInvocation(model.markRunning(T1));
-          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(store, tx)
-              .updateModelInvocation(model.succeed(spec.response(), model.streamCheckpoint(), T1));
-          model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
-          builtin(store, tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          if (!leaveModelRunning) {
+            model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+            builtin(store, tx)
+                .updateModelInvocation(
+                    model.succeed(spec.response(), model.streamCheckpoint(), T1));
+            model = builtin(store, tx).lockModelInvocation(modelId).orElseThrow();
+            builtin(store, tx).updateModelInvocation(model.attachResultEntry(assistantEntryId, T1));
+          }
           tx.tools()
               .insert(
                   List.of(
@@ -594,7 +647,7 @@ class PostgresqlHarnessTransactionNotificationTest {
                           null,
                           T1,
                           T1)));
-          return new ToolChain(turnStartId, threadId, toolId);
+          return new ToolChain(turnStartId, threadId, toolId, modelId);
         });
   }
 
@@ -655,6 +708,10 @@ class PostgresqlHarnessTransactionNotificationTest {
 
   private static String versionNotification(UUID threadId, long version) {
     return VERSION_CHANNEL + "|" + threadId + ":" + version;
+  }
+
+  private static String snapshotNotification(UUID threadId) {
+    return SNAPSHOT_CHANNEL + "|" + threadId;
   }
 
   private static String treeNotification(UUID rootThreadId) {
@@ -720,12 +777,21 @@ class PostgresqlHarnessTransactionNotificationTest {
     }
 
     static InvalidationListener open(DataSource dataSource) throws SQLException {
+      return open(dataSource, List.of(VERSION_CHANNEL, TREE_CHANNEL, INTERACTION_CHANNEL));
+    }
+
+    static InvalidationListener openThreadSnapshots(DataSource dataSource) throws SQLException {
+      return open(dataSource, List.of(SNAPSHOT_CHANNEL));
+    }
+
+    private static InvalidationListener open(DataSource dataSource, List<String> channels)
+        throws SQLException {
       Connection connection = dataSource.getConnection();
       connection.setAutoCommit(true);
       try (Statement statement = connection.createStatement()) {
-        statement.execute("LISTEN " + VERSION_CHANNEL);
-        statement.execute("LISTEN " + TREE_CHANNEL);
-        statement.execute("LISTEN " + INTERACTION_CHANNEL);
+        for (String channel : channels) {
+          statement.execute("LISTEN " + channel);
+        }
       } catch (SQLException error) {
         connection.close();
         throw error;

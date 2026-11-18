@@ -13,6 +13,9 @@ public final class HarnessNotificationChannel {
   /** Thread version 失效：payload 为 {@code {threadId}:{version}}。 */
   public static final String THREAD_VERSION = "harness_thread_version";
 
+  /** Thread 快照失效：payload 为发生持久化变化的 canonical Thread id。 */
+  public static final String THREAD_SNAPSHOT = "harness_thread_snapshot";
+
   /** 执行树失效：payload 为真实执行根 Thread id。 */
   public static final String THREAD_TREE = "harness_thread_tree";
 
