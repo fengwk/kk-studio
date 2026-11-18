@@ -14,10 +14,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 把会话消息从左到右编码为 Anthropic wire messages，并记录缓存端点候选与每条消息的推理级别。
+ * 把会话消息从左到右编码为 Anthropic wire messages，并保留当前对话尾部缓存端点与逐条消息的推理级别。
  *
- * <p>assistant 之前的完整前缀就是上次模型请求的端点，不受本轮新增块数量影响。compaction 回放代表已经摘要完成的历史：durable 校验完成后清空已编码消息、effort
- * 与缓存端点，使该 assistant message 成为首条消息。
+ * <p>compaction 回放代表已经摘要完成的历史：durable 校验完成后清空已编码消息与 effort，使该 assistant message 成为首条消息。
  */
 final class AnthropicWireMessages {
 
@@ -29,20 +28,15 @@ final class AnthropicWireMessages {
       List<ProviderMessage> messages, ProviderDescriptor descriptor, String requestedModel) {
     ArrayNode wireMessagesArray = NODES.arrayNode();
     List<String> messageEfforts = new ArrayList<>();
-    List<ObjectNode> cacheEndpoints = new ArrayList<>();
     ObjectNode lastEligible = null;
     for (ProviderMessage msg : messages) {
       if (msg.role() == ProviderMessageRole.ASSISTANT) {
-        // assistant 之前的完整前缀就是上次模型请求的端点，不受本轮新增块数量影响。
-        AnthropicCacheMarkers.addEndpoint(cacheEndpoints, lastEligible);
         AnthropicEncodedAssistant assistant =
             AnthropicAssistantReplay.encodeMessage(msg, descriptor, requestedModel);
-        // compaction 回放代表已经摘要完成的历史：durable 校验完成后清空已编码消息，
-        // 使 compaction assistant message 成为首条消息、被摘要历史整体省略。
+        // compaction 回放代表历史已被摘要：清空被摘要消息，使 compaction assistant message 成为首条消息。
         if (assistant.resetsHistory()) {
           wireMessagesArray.removeAll();
           messageEfforts.clear();
-          cacheEndpoints.clear();
           lastEligible = null;
         }
         wireMessagesArray.add(assistant.node());
@@ -51,7 +45,6 @@ final class AnthropicWireMessages {
       } else if (msg.role() == ProviderMessageRole.TOOL) {
         wireMessagesArray.add(AnthropicContentEncoder.encodeToolMessage(msg));
       } else if (msg.role() == ProviderMessageRole.SYSTEM) {
-        AnthropicCacheMarkers.addEndpoint(cacheEndpoints, lastEligible);
         wireMessagesArray.add(AnthropicToolsEncoder.encodeSystemMessage(msg));
       } else {
         throw new ProviderException(
@@ -65,10 +58,9 @@ final class AnthropicWireMessages {
         lastEligible = messageEndpoint;
       }
     }
-    AnthropicCacheMarkers.addEndpoint(cacheEndpoints, lastEligible);
-    return new Result(wireMessagesArray, messageEfforts, cacheEndpoints);
+    return new Result(wireMessagesArray, messageEfforts, lastEligible);
   }
 
-  /** 编码结果：wire messages、逐条消息的推理级别，以及按出现顺序记录的缓存端点候选。 */
-  record Result(ArrayNode messages, List<String> efforts, List<ObjectNode> cacheEndpoints) {}
+  /** 编码结果：wire messages、逐条消息的推理级别，以及当前对话尾部缓存端点。 */
+  record Result(ArrayNode messages, List<String> efforts, ObjectNode cacheEndpoint) {}
 }

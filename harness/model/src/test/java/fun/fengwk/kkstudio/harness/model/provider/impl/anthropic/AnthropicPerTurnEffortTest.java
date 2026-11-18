@@ -103,9 +103,10 @@ class AnthropicPerTurnEffortTest {
 
     JsonNode before = MAPPER.readTree(requestN);
     JsonNode after = MAPPER.readTree(requestNPlusOne);
-    assertTrue(before.path("messages").get(4).path("content").get(0).has("cache_control"));
-    assertFalse(after.path("messages").get(4).path("content").get(0).has("cache_control"));
-    assertBytesPrefixAfterRemovingMovingCacheBreakpoint(requestN, requestNPlusOne, 4);
+    assertTrue(before.path("messages").get(8).path("content").get(0).has("cache_control"));
+    assertFalse(after.path("messages").get(8).path("content").get(0).has("cache_control"));
+    assertTrue(after.path("messages").get(10).path("content").get(0).has("cache_control"));
+    assertBytesPrefixAfterRemovingMovingCacheBreakpoint(requestN, requestNPlusOne, 8);
   }
 
   @Test

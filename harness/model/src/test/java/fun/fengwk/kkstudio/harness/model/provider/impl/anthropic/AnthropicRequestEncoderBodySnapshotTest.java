@@ -209,9 +209,8 @@ class AnthropicRequestEncoderBodySnapshotTest {
           + "ext\",\"text\":\"hello\"}]},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"plan\"},{\"type\":\"text\",\"text\":\"rep"
           + "layed answer\"},{\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"read_file\",\"input\":{\"path\":\"a\"}}]},{\"role\":\"user\",\"c"
           + "ontent\":[{\"type\":\"tool_result\",\"tool_use_id\":\"toolu_01\",\"content\":[{\"type\":\"text\",\"text\":\"file body\"},{\"type\":"
-          + "\"document\",\"source\":{\"type\":\"base64\",\"media_type\":\"application/pdf\",\"data\":\"AQID\"}}],\"cache_control\":{\"type\":\""
-          + "ephemeral\"}}]},{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"late system\",\"cache_control\":{\"type\":\"epheme"
-          + "ral\"}}]}]}";
+          + "\"document\",\"source\":{\"type\":\"base64\",\"media_type\":\"application/pdf\",\"data\":\"AQID\"}}]}]},{\"role\":\"system\",\"content\":[{\"type\":\"text\",\"text\":\"late system\",\"cache_control\":{\"type\":\""
+          + "ephemeral\"}}]}]}";
 
   private static final String EXPECTED_NATIVE_OPTIONS_BODY =
       "{\"top_k\":40,\"stop_sequences\":[\"END\"],\"metadata\":{\"user_id\":\"u-1\"},\"tools\":[{\"type\":\"web_search_20250305\",\"name"
@@ -221,8 +220,8 @@ class AnthropicRequestEncoderBodySnapshotTest {
           + "operties\":{},\"required\":[]},\"defer_loading\":true}],\"model\":\"claude-sonnet-4-5\",\"max_tokens\":2048,\"stream\":true"
           + ",\"thinking\":{\"type\":\"adaptive\",\"display\":\"summarized\",\"block_binding\":{\"prefix_mismatch_behavior\":\"drop_block\""
           + "}},\"output_config\":{\"effort\":\"medium\"},\"system\":[{\"type\":\"text\",\"text\":\"Test system instruction.\",\"cache_contr"
-          + "ol\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"first\",\"cac"
-          + "he_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}]},{\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"plain ans"
+          + "ol\":{\"type\":\"ephemeral\",\"ttl\":\"1h\"}}],\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"first\"}]},{\"role\":\"assistant\""
+          + ",\"content\":[{\"type\":\"text\",\"text\":\"plain ans"
           + "wer\"}]},{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"second\",\"cache_control\":{\"type\":\"ephemeral\",\"ttl\":\"1h"
           + "\"}}]}]}";
 }
