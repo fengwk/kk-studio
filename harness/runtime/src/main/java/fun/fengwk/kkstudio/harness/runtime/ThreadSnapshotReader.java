@@ -11,6 +11,8 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,14 +33,14 @@ final class ThreadSnapshotReader {
     this.driverRegistry = Objects.requireNonNull(driverRegistry, "driverRegistry");
   }
 
-  /** 已锁定 Thread 的完整当前快照。 */
-  ThreadSnapshot read(HarnessStore.Transaction tx, ThreadState thread) {
-    return read(tx, thread, null);
-  }
-
   /** 已锁定 Thread 的当前状态与指定历史切片；{@code afterEntryId} 为 null 时是完整历史。 */
   ThreadSnapshot read(HarnessStore.Transaction tx, ThreadState thread, UUID afterEntryId) {
-    EntrySlice slice = tx.entries().loadSlice(thread.headEntryId(), afterEntryId);
+    return readAll(tx, thread, Collections.singletonList(afterEntryId)).getFirst();
+  }
+
+  /** 同一事务内共享当前状态投影，仅按请求游标分别裁剪 Entry。 */
+  List<ThreadSnapshot> readAll(
+      HarnessStore.Transaction tx, ThreadState thread, List<UUID> afterEntryIds) {
     List<ThreadCommand> queued = tx.commands().loadQueued(thread.id());
     LockedThreadContext locked = ThreadContextLock.load(tx, thread, driverRegistry);
     GenerationProjection generation = generationOf(locked.context());
@@ -54,20 +56,35 @@ final class ThreadSnapshotReader {
                       && join.delivery() == JoinDelivery.SETTLE_TOOL_RESULT)
           .ifPresent(join -> toolChildThreadIds.put(join.invocationId(), join.childThreadId()));
     }
-    return new ThreadSnapshot(
-        thread,
-        locked.entryState(),
-        slice,
-        queued,
-        generation,
-        toolSiblings,
-        toolChildThreadIds,
-        ThreadContext.liveStateOf(locked.context()),
-        tx.stops().loadByThread(thread.id()),
-        tx.joins().countIncompleteChildren(thread.id()),
-        ThreadInputDemand.hasUnconsumedNotification(tx, thread),
-        tx.exits().loadUnconfirmed(thread.id()),
-        tx.joins().hasIncompleteOwnerChild(thread.id()));
+    var stops = tx.stops().loadByThread(thread.id());
+    int incompleteChildren = tx.joins().countIncompleteChildren(thread.id());
+    boolean unconsumedNotifications = ThreadInputDemand.hasUnconsumedNotification(tx, thread);
+    var unconfirmedExecutions = tx.exits().loadUnconfirmed(thread.id());
+    boolean incompleteOwnerChild = tx.joins().hasIncompleteOwnerChild(thread.id());
+
+    Map<UUID, EntrySlice> slicesByCursor = new HashMap<>();
+    List<ThreadSnapshot> snapshots = new ArrayList<>(afterEntryIds.size());
+    for (UUID afterEntryId : afterEntryIds) {
+      EntrySlice slice =
+          slicesByCursor.computeIfAbsent(
+              afterEntryId, cursor -> tx.entries().loadSlice(thread.headEntryId(), cursor));
+      snapshots.add(
+          new ThreadSnapshot(
+              thread,
+              locked.entryState(),
+              slice,
+              queued,
+              generation,
+              toolSiblings,
+              toolChildThreadIds,
+              ThreadContext.liveStateOf(locked.context()),
+              stops,
+              incompleteChildren,
+              unconsumedNotifications,
+              unconfirmedExecutions,
+              incompleteOwnerChild));
+    }
+    return List.copyOf(snapshots);
   }
 
   /** Driver 声明的请求 / 结果 head 必须仍在 Thread 路径上，否则持久化事实已被破坏。 */

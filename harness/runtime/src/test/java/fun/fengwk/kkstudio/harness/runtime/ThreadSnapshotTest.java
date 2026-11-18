@@ -619,6 +619,38 @@ class ThreadSnapshotTest {
   }
 
   @Test
+  void batchSnapshotReadsPreserveCursorOrderAndMissSemantics() {
+    // 测试意图：批量游标保持输入顺序；完整、祖先增量、head 空增量与未知游标回退都共享同一当前版本。
+    HarnessRuntimeTestSupport.ContinuationBaseline baseline = seedContinuationChain(store, true);
+    List<UUID> cursors = new ArrayList<>();
+    cursors.add(baseline.rootEntryId());
+    cursors.add(baseline.turnEndEntryId());
+    cursors.add(TestIds.id(9999));
+    cursors.add(null);
+    cursors.add(baseline.rootEntryId());
+
+    List<ThreadSnapshot> snapshots = runtime.getThreadSnapshots(baseline.threadId(), cursors);
+
+    assertEquals(cursors.size(), snapshots.size());
+    assertEquals(4, snapshots.get(0).entrySlice().entries().size());
+    assertEquals(baseline.turnEndEntryId(), snapshots.get(0).entrySlice().entries().getLast().id());
+    assertEquals(baseline.rootEntryId(), snapshots.get(0).entrySlice().baseEntryId());
+    assertTrue(snapshots.get(1).entrySlice().entries().isEmpty());
+    assertEquals(baseline.turnEndEntryId(), snapshots.get(1).entrySlice().baseEntryId());
+    assertNull(snapshots.get(2).entrySlice().baseEntryId());
+    assertEquals(5, snapshots.get(2).entrySlice().entries().size());
+    assertNull(snapshots.get(3).entrySlice().baseEntryId());
+    assertEquals(snapshots.get(2).entrySlice().entries(), snapshots.get(3).entrySlice().entries());
+    assertEquals(snapshots.get(0).entrySlice(), snapshots.get(4).entrySlice());
+    assertTrue(
+        snapshots.stream()
+            .allMatch(snapshot -> snapshot.thread().equals(snapshots.getFirst().thread())));
+    assertEquals(List.of(), runtime.getThreadSnapshots(baseline.threadId(), List.of()));
+    assertThrows(
+        NullPointerException.class, () -> runtime.getThreadSnapshots(baseline.threadId(), null));
+  }
+
+  @Test
   void evaluateRuntimeStatusValidatesInputsAndIsControlSensitive() {
     // 测试意图：四态纯值投影对 null 控制与非负子 Join 计数 fail-fast；输入需求只在 RUNNABLE 下表达为 RUNNING。
     HarnessRuntimeTestSupport.Baseline baseline = seedBaseline(store);

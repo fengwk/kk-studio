@@ -519,6 +519,32 @@ public final class HarnessRuntime {
   }
 
   /**
+   * 在一个事务中读取同一 Thread 的多份快照；每份按对应位置的游标裁剪 Entry，其他状态共用同一读取投影。
+   *
+   * <p>结果与 {@code afterEntryIds} 等长且顺序一致。元素为 null 时返回完整历史；head 游标返回空增量并保留当前状态；未知或非祖先游标回退为完整历史。
+   * 空游标列表返回空列表。锁序与 {@link #getThreadSnapshot(UUID)} 相同。
+   */
+  public List<ThreadSnapshot> getThreadSnapshots(UUID threadId, List<UUID> afterEntryIds) {
+    Objects.requireNonNull(threadId, "threadId");
+    Objects.requireNonNull(afterEntryIds, "afterEntryIds");
+    List<UUID> cursors = new ArrayList<>(afterEntryIds);
+    if (cursors.isEmpty()) {
+      return List.of();
+    }
+    return store.transaction(
+        tx -> {
+          ThreadState thread =
+              tx.threads()
+                  .lock(threadId)
+                  .orElseThrow(
+                      () ->
+                          DomainException.notFound(
+                              "thread", "thread " + threadId + " does not exist"));
+          return snapshotReader.readAll(tx, thread, cursors);
+        });
+  }
+
+  /**
    * 读取当前完整状态，并按 {@code afterEntryId} 返回历史切片。
    *
    * <p>游标为 null 时是完整历史。游标是祖先时只返回其后的 Entry，游标即 head 时列表为空且当前 checkpoint 仍是最新值。未知或不在链上的游标由 {@code

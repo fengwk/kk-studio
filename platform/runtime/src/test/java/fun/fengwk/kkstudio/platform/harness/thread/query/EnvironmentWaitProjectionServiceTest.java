@@ -57,7 +57,7 @@ class EnvironmentWaitProjectionServiceTest {
     when(environments.findReadyLeaseUntil(online)).thenReturn(Optional.of(lease));
     when(environments.findReadyLeaseUntil(offline)).thenReturn(Optional.empty());
 
-    service.project(snapshot);
+    service.project(List.of(snapshot));
 
     assertEquals(online.toString(), available.getRequiredEnvironmentId());
     assertEquals("online", available.getRequiredEnvironmentName());
@@ -73,6 +73,42 @@ class EnvironmentWaitProjectionServiceTest {
     verify(environments, times(1)).requireName(online);
     verify(environments, times(1)).findReadyLeaseUntil(online);
     verify(environments, times(1)).findReadyLeaseUntil(offline);
+  }
+
+  /** 批次中重复的工具只查一次权威 Work 事实，并投影到每个响应对象。 */
+  @Test
+  void projectsSharedWaitFactsAcrossSnapshotsOnce() {
+    HarnessRuntime runtime = mock(HarnessRuntime.class);
+    EnvironmentService environments = mock(EnvironmentService.class);
+    EnvironmentWaitProjectionService service =
+        new EnvironmentWaitProjectionService(runtime, environments);
+    EnvironmentId environment = EnvironmentId.of(id(3));
+    Instant deadline = Instant.parse("2026-01-01T00:02:00Z");
+    ToolInvocationDTO firstTool = tool(21);
+    ToolInvocationDTO secondTool = tool(21);
+    HarnessThreadSnapshotDTO first = snapshotWith(firstTool);
+    HarnessThreadSnapshotDTO second = snapshotWith(secondTool);
+    when(runtime.listEnvironmentToolWaits(Set.of(id(21))))
+        .thenReturn(List.of(new EnvironmentToolWait(id(21), environment, true, false, deadline)));
+    when(environments.requireName(environment)).thenReturn("shared");
+    when(environments.findReadyLeaseUntil(environment)).thenReturn(Optional.empty());
+
+    service.project(List.of(first, second));
+
+    assertEquals(environment.toString(), firstTool.getRequiredEnvironmentId());
+    assertEquals(environment.toString(), secondTool.getRequiredEnvironmentId());
+    assertEquals("shared", firstTool.getRequiredEnvironmentName());
+    assertEquals("shared", secondTool.getRequiredEnvironmentName());
+    assertEquals(deadline, firstTool.getEnvironmentWaitFreshnessAt());
+    assertEquals(deadline, secondTool.getEnvironmentWaitFreshnessAt());
+    verify(runtime, times(1)).listEnvironmentToolWaits(Set.of(id(21)));
+    verify(environments, times(1)).requireName(environment);
+  }
+
+  private static HarnessThreadSnapshotDTO snapshotWith(ToolInvocationDTO tool) {
+    HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
+    snapshot.setToolInvocations(List.of(tool));
+    return snapshot;
   }
 
   private static UUID id(long value) {
