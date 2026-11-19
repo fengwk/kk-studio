@@ -65,6 +65,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -612,6 +613,7 @@ class PluginPromptTaskServiceTest {
         List.of(),
         null,
         List.of(),
+        Map.of(),
         ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,

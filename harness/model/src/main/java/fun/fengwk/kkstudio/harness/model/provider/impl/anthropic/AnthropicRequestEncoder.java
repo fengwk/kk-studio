@@ -7,6 +7,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapabilities;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -25,7 +26,7 @@ import java.util.Objects;
  * max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code cache_control}） 冲突显式失败，{@code
  * tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker 与请求体大小均基于最终合并结果。
  *
- * <p>{@code cacheControl} 只表达留存档位：{@code retention != NONE} 时在 tools/system/历史边界写入固定的原生 {@code
+ * <p>{@code cacheControl} 只表达留存档位：{@code retention != NONE} 时在 tools/system/当前对话尾部写入原生 {@code
  * cache_control} ephemeral 标记，{@code LONG} 额外携带 {@code ttl:"1h"}；会话 {@code key} 不属于 Anthropic
  * 原生选项，因此不下发。
  *
@@ -92,8 +93,11 @@ public final class AnthropicRequestEncoder {
         wireMessagesArray,
         toolsArray,
         unmarkedSystemArray,
-        wire.cacheEndpoints(),
-        deferredToolLane);
+        wire.cacheEndpoint(),
+        deferredToolLane,
+        PromptCacheCapabilities.resolve(
+                descriptor.type(), descriptor.endpoint(), request.model().modelId())
+            .automaticCache());
     if (effort.messageLevelEffort()) {
       wireMessagesArray =
           AnthropicReasoningEffort.applyMessageLevelEffort(

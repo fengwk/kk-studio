@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.harness.runtime;
 import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.generation.GenerationProjection;
 import fun.fengwk.kkstudio.harness.api.history.EntrySlice;
+import fun.fengwk.kkstudio.harness.api.join.JoinDelivery;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadSnapshot;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
@@ -10,7 +11,9 @@ import fun.fengwk.kkstudio.harness.runtime.driver.DriverRegistry;
 import fun.fengwk.kkstudio.harness.runtime.thread.ThreadContext;
 import fun.fengwk.kkstudio.harness.spi.store.HarnessStore;
 
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -40,13 +43,25 @@ final class ThreadSnapshotReader {
     LockedThreadContext locked = ThreadContextLock.load(tx, thread, driverRegistry);
     GenerationProjection generation = generationOf(locked.context());
     requireGenerationOnPath(tx, thread, generation);
+    List<ToolInvocation> toolSiblings = toolSiblingsOf(locked.context());
+    Map<UUID, UUID> toolChildThreadIds = new HashMap<>();
+    for (ToolInvocation invocation : toolSiblings) {
+      tx.joins()
+          .find(invocation.id())
+          .filter(
+              join ->
+                  thread.id().equals(join.parentThreadId())
+                      && join.delivery() == JoinDelivery.SETTLE_TOOL_RESULT)
+          .ifPresent(join -> toolChildThreadIds.put(join.invocationId(), join.childThreadId()));
+    }
     return new ThreadSnapshot(
         thread,
         locked.entryState(),
         slice,
         queued,
         generation,
-        toolSiblingsOf(locked.context()),
+        toolSiblings,
+        toolChildThreadIds,
         ThreadContext.liveStateOf(locked.context()),
         tx.stops().loadByThread(thread.id()),
         tx.joins().countIncompleteChildren(thread.id()),

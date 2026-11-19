@@ -1266,7 +1266,7 @@ class AnthropicMessagesWireTest {
     assertEquals("1h", marker.path("ttl").asString(""), "LONG retention must specify 1h ttl");
   }
 
-  /** 验证最近历史端点固定携带标记，并严格遵守 SHORT（无 ttl）与 LONG（1h ttl）区分。 */
+  /** 验证当前对话尾部携带标记，并严格遵守 SHORT（无 ttl）与 LONG（1h ttl）区分。 */
   @Test
   void should_cache_conversation_block_with_short_and_long_ttl() throws Exception {
     ProviderMessage u1 = userTextMsg("Turn 1");
@@ -1301,9 +1301,9 @@ class AnthropicMessagesWireTest {
     assertEquals("1h", lastBlockLong.path("cache_control").path("ttl").asString(""));
   }
 
-  /** 验证固定标记总量上限为 4 且按“最近优先”分配：tools、system 优先占位，剩余预算分配给最靠后的历史端点，更早的端点不标记； assistant 消息自身内容不是端点。 */
+  /** 验证 tools、system 与当前对话尾部各只有一个标记，历史端点不被回填；assistant 输出不是对话尾部。 */
   @Test
-  void should_place_fixed_cache_markers_newest_first_up_to_budget() throws Exception {
+  void should_mark_only_current_conversation_tail() throws Exception {
     ProviderToolDefinition tool = new ProviderToolDefinition("t", "desc", "{\"type\":\"object\"}");
     ProviderCacheControl cacheControl =
         ProviderCacheControl.session(PromptCacheRetention.SHORT, "test-aff");
@@ -1330,12 +1330,12 @@ class AnthropicMessagesWireTest {
     assertTrue(root.path("tools").get(0).has("cache_control"));
     assertTrue(root.path("system").get(0).has("cache_control"));
 
-    // 剩余两个预算按最近优先分配给尾端 "Turn 3" 与更早端点 "Turn 2"，最早端点 "Turn 1" 不标记
+    // 只标记当前尾端 "Turn 3"，较早的历史端点均不标记
     assertTrue(root.path("messages").get(4).path("content").get(0).has("cache_control"));
-    assertTrue(root.path("messages").get(2).path("content").get(0).has("cache_control"));
+    assertFalse(root.path("messages").get(2).path("content").get(0).has("cache_control"));
     assertFalse(root.path("messages").get(0).path("content").get(0).has("cache_control"));
 
-    // assistant 消息自身内容不是历史端点
+    // 非尾部 assistant 回复不是当前缓存端点
     assertFalse(root.path("messages").get(1).path("content").get(0).has("cache_control"));
     assertFalse(root.path("messages").get(3).path("content").get(0).has("cache_control"));
   }

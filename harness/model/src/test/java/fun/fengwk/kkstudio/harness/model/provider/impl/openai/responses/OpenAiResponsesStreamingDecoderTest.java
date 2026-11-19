@@ -241,7 +241,7 @@ class OpenAiResponsesStreamingDecoderTest {
 
   /**
    * 验证 gpt-5.6 会话缓存的三轮离线 HTTP 交互：并行工具端点继承、native signed replay 保真，且 prompt_cache_key 稳定为会话
-   * UUID、留存档位映射为原支持值。
+   * UUID，SHORT 不发送旧 retention。
    */
   @Test
   void test_multiTurnPromptCache_withParallelToolsAndNativeReplay() throws Exception {
@@ -387,10 +387,10 @@ class OpenAiResponsesStreamingDecoderTest {
     assertEquals(3, capturedRequests.size());
     assertNull(serverError.get(), "local HTTP server must complete all fixture responses");
 
-    // 1. Root 映射稳定：会话 UUID 原样作为 prompt_cache_key，留存档位映射为原支持值
+    // 1. SHORT root 映射稳定：会话 UUID 原样作为 prompt_cache_key，不带旧 retention
     for (JsonNode root : capturedRequests) {
       assertEquals(sessionKey, root.path("prompt_cache_key").asString(""));
-      assertEquals("in_memory", root.path("prompt_cache_retention").asString(""));
+      assertFalse(root.has("prompt_cache_retention"));
       assertEquals(sys, root.path("instructions").asString(""));
       assertEquals("gpt-5.6", root.path("model").asString(""));
       assertTrue(root.path("stream").asBoolean(false));

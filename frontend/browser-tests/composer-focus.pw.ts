@@ -402,5 +402,28 @@ for (const vp of BROWSER_VIEWPORTS) {
       await expect(editor2).toBeFocused()
       await expect(editor1).not.toBeFocused()
     })
+
+    test('keeps a scrolled command menu stable across equivalent host command arrays; first mouse click runs the row', async ({
+      page,
+    }) => {
+      const pane = page.locator('[data-testid="pane-1"]')
+      const editor = pane.locator('.composer-editor')
+      await pane.locator('.thread-dock-add').click()
+      const palette = pane.locator('.thread-command-palette')
+      await expect(palette).toBeVisible()
+      const list = palette.locator('.thread-command-list')
+      await list.evaluate((element) => { element.scrollTop = element.scrollHeight })
+      const before = await list.evaluate((element) => element.scrollTop)
+      expect(before).toBeGreaterThan(0)
+
+      // 模拟宿主每次渲染都重建但内容相同的命令数组。
+      await page.evaluate(() => window.dispatchEvent(new Event('command-revision')))
+      await expect(page.locator('.harness-container')).toHaveAttribute('data-command-revision', '1')
+      await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBe(before)
+
+      await palette.locator('button[role="option"]').filter({ hasText: 'shell' }).click()
+      await expect(page.locator('#last-command-val')).toHaveText('shell')
+      await expect(editor).toHaveText('')
+    })
   })
 }

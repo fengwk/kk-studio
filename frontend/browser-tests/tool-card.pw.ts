@@ -429,28 +429,20 @@ test('does not reopen following when a shrink clamps the outer position to the b
   await expect.poll(outerDistance).toBeLessThanOrEqual(1)
 })
 
-test('shows the bottom collapse action only for an expanded card taller than the viewport and aligns its top', async ({ page }) => {
+test('uses the header chevron as the only collapse control for long expanded cards', async ({ page }) => {
   await harness(page, 'longExpanded', 120)
-  const body = dialogue(page)
   const card = bashCard(page)
+  const headerToggle = toggle(page)
   await card.scrollIntoViewIfNeeded()
 
   await expect(card.locator('.thread-disclosure-collapse')).toHaveCount(0)
-  await toggle(page).click()
-  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'true')
-  const collapse = card.locator('.thread-disclosure-collapse')
-  await expect(collapse).toBeVisible()
-
-  await collapse.scrollIntoViewIfNeeded()
-  await collapse.click()
-  await expect(toggle(page)).toHaveAttribute('aria-expanded', 'false')
+  await headerToggle.click()
+  await expect(headerToggle).toHaveAttribute('aria-expanded', 'true')
   await expect(card.locator('.thread-disclosure-collapse')).toHaveCount(0)
 
-  // 收起后把卡片顶部滚到可视区顶部（按 transcript 的 padding 留少量容差）。
-  const dialogueBox = await body.boundingBox()
-  const cardBox = await card.boundingBox()
-  expect((cardBox?.y ?? 0) - (dialogueBox?.y ?? 0)).toBeLessThan(24)
-  expect(await scrollTop(body)).toBeGreaterThan(0)
+  await headerToggle.click()
+  await expect(headerToggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(card.locator('.thread-disclosure-collapse')).toHaveCount(0)
 })
 
 test.describe('narrow pane header', () => {

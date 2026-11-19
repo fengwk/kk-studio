@@ -1,6 +1,10 @@
 package fun.fengwk.kkstudio.harness.runtime;
 
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T0;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.T5;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.approveTool;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.markRunningTool;
+import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.seedModelFreeToolBaseline;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.settings;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessageCommand;
 import static fun.fengwk.kkstudio.harness.runtime.HarnessRuntimeTestSupport.userMessagePayload;
@@ -44,6 +48,7 @@ import fun.fengwk.kkstudio.harness.api.thread.ThreadConstraints;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadExecutionControl;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadKind;
 import fun.fengwk.kkstudio.harness.api.thread.ThreadState;
+import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.InMemoryHarnessStore;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Child;
 import fun.fengwk.kkstudio.harness.runtime.store.testing.SpawnTestSupport.Ticket;
@@ -56,6 +61,7 @@ import java.time.Clock;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 class HarnessRuntimeJoinAcceptanceTest {
@@ -81,6 +87,67 @@ class HarnessRuntimeJoinAcceptanceTest {
 
   private static Ticket request(int invocation, UUID parent, UUID head) {
     return Ticket.task(TestIds.id(invocation), parent, head, HASH, "assistant", 3, 3, 2, 3);
+  }
+
+  @Test
+  void snapshotProjectsChildThreadByInvocationForParallelTasksBeforeResult() {
+    // 测试意图：并行同名 task 只通过各自未完成的 durable Join 导航，不依赖结果 Entry。
+    var baseline = seedModelFreeToolBaseline(store, 2, "task");
+    UUID firstInvocationId = baseline.toolIds().get(0);
+    UUID secondInvocationId = baseline.toolIds().get(1);
+    for (UUID invocationId : baseline.toolIds()) {
+      approveTool(store, invocationId);
+      markRunningTool(store, invocationId);
+    }
+    assertTrue(runtime.getThreadSnapshot(baseline.threadId()).toolChildThreadIds().isEmpty());
+
+    Child firstChild = child(25, 26, baseline.threadId());
+    Ticket firstTicket =
+        new Ticket(
+            firstInvocationId,
+            baseline.threadId(),
+            baseline.assistantEntryId(),
+            HASH,
+            "assistant",
+            3,
+            3,
+            2,
+            3,
+            JoinDelivery.SETTLE_TOOL_RESULT);
+    AcceptedCommands first =
+        acceptAndJoin(runtime, firstChild, firstTicket, AcceptancePreflight.IDENTITY);
+    Child secondChild = child(27, 28, baseline.threadId());
+    Ticket secondTicket =
+        new Ticket(
+            secondInvocationId,
+            baseline.threadId(),
+            baseline.assistantEntryId(),
+            HASH,
+            "assistant",
+            3,
+            3,
+            2,
+            3,
+            JoinDelivery.SETTLE_TOOL_RESULT);
+    AcceptedCommands second =
+        acceptAndJoin(runtime, secondChild, secondTicket, AcceptancePreflight.IDENTITY);
+    store.transaction(
+        tx -> {
+          ToolInvocation firstRunning = tx.tools().lock(firstInvocationId).orElseThrow();
+          ToolInvocation secondRunning = tx.tools().lock(secondInvocationId).orElseThrow();
+          tx.tools().update(List.of(firstRunning.waitForChild(T5), secondRunning.waitForChild(T5)));
+          return null;
+        });
+
+    ThreadJoin firstJoin = runtime.findJoin(firstInvocationId).orElseThrow();
+    ThreadJoin secondJoin = runtime.findJoin(secondInvocationId).orElseThrow();
+    assertFalse(firstJoin.matched());
+    assertFalse(secondJoin.matched());
+    assertEquals(baseline.threadId(), firstJoin.parentThreadId());
+    assertEquals(JoinDelivery.SETTLE_TOOL_RESULT, firstJoin.delivery());
+    assertEquals(
+        Map.of(firstInvocationId, first.thread().id(), secondInvocationId, second.thread().id()),
+        runtime.getThreadSnapshot(baseline.threadId()).toolChildThreadIds());
   }
 
   @Test

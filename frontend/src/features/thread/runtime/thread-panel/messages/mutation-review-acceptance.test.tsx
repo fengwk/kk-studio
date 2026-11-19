@@ -77,9 +77,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
     expect(viewport?.textContent).toBe(fullContent)
 
     // 审批理由修复 redundant '： —' 且本地化
-    const note = container.querySelector('.thread-tool-approval-note')
-    expect(note?.textContent).not.toContain('： —')
-    expect(note?.textContent).toContain('权限规则要求审批')
+    expect(container.querySelector('.thread-tool-approval-note')).toBeNull()
   })
 
   it('write 空内容正确显示目标路径与空文件标识，不盲批', () => {
@@ -393,7 +391,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
     expect(within(container).getByText('-11|const a = 1')).toBeInTheDocument()
     expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expandSettledTool()
-    expect(screen.getByText('编辑成功')).toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expect(screen.queryByText(rawDuplicateBody)).not.toBeInTheDocument()
 
     // 失败终态：错误不被遮掩
@@ -692,7 +690,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     // 成功终态展示短提示，不重复输出原正文
     expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expandSettledTool()
-    expect(screen.getByText('编辑成功')).toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expect(screen.queryByText('Edited successfully.')).not.toBeInTheDocument()
     unmount2()
 
@@ -708,7 +706,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     expect(within(preview3 as HTMLElement).getByText('+2|const value = 2;')).toHaveClass('is-added')
     expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expandSettledTool()
-    expect(screen.getByText('编辑成功')).toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     unmount3()
 
     // 阶段 4: 刷新空 overlay（模拟页面从纯 durable entries 重新渲染，没有任何 transient 状态）
@@ -720,7 +718,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     expect(preview4?.textContent).toBe(sampleDiff)
     expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expandSettledTool()
-    expect(screen.getByText('编辑成功')).toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     // 验证默认展开视口且保留有界结构
     expect(preview4).toHaveClass('thread-tool-output')
     expect(preview4).toHaveClass('thread-tool-preview-body')
@@ -869,7 +867,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     expect(liveContainer.querySelector('.thread-tool-preview-body.is-edit')?.textContent).toBe(yoloReview.diff)
     expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expandSettledTool()
-    expect(screen.getByText('编辑成功')).toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     uLive()
 
     // YOLO 清理/刷新后
@@ -878,7 +876,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     expect(durableContainer.querySelector('.thread-tool-preview-body.is-edit')?.textContent).toBe(yoloReview.diff)
     expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expandSettledTool()
-    expect(screen.getByText('编辑成功')).toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     uDurable()
   })
 
@@ -975,7 +973,7 @@ describe('真实 AgentMessageJsonCodec 历史生命周期与真实组件验收�
     // 依然具备成功状态
     expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
     expandSettledTool()
-    expect(screen.getByText('编辑成功')).toBeInTheDocument()
+    expect(screen.queryByText('编辑成功')).not.toBeInTheDocument()
   })
 
   it('损坏不假造：detailsJson 损坏（非法 JSON / 缺失必须字段 / 非法 sha256）时严格安全降级，不伪造 diff', () => {

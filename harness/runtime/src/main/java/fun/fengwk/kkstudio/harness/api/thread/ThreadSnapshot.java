@@ -17,16 +17,18 @@ import fun.fengwk.kkstudio.harness.api.tool.ToolInvocation;
 import fun.fengwk.kkstudio.harness.api.tool.ToolInvocationStatus;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
 /**
  * 一致性加锁下的一个 Thread 的不可变投影：durable {@link ThreadState}、当前 Entry 状态、本次读取的 {@link EntrySlice}、已入队
- * Commands，以及 Driver 的中立 generation 诊断与当前 live tool siblings。
+ * Commands，以及 Driver 的中立 generation 诊断、当前 live tool siblings 与按 invocation ID 关联的 durable task Join
+ * 子 Thread。
  *
- * <p>完整读取的 slice base 为 null，可以重建 {@link EntryPath}。增量读取只携带游标之后的 Entry，不得把增量包装成完整路径。generation 仅在
- * Driver 活动或响应待处理时提供；工具阶段由公共 tool siblings 表示。失败诊断由 {@link GenerationProjection#failures()}
- * 提供，快照不暴露 Driver 私有类型。
+ * <p>完整读取的 slice base 为 null，可以重建 {@link EntryPath}。增量读取只携带游标之后的 Entry，不得把增量包装成完整路径。Join 子 Thread
+ * 映射只含同一事务中已找到的 durable task Join。generation 仅在 Driver 活动或响应待处理时提供；工具阶段由公共 tool siblings 表示。失败诊断由
+ * {@link GenerationProjection#failures()} 提供，快照不暴露 Driver 私有类型。
  *
  * <p>本记录构造器仅校验 head 与 slice 结构合法性，以及 generation 归属于本 Thread 当前的 open turn。generation 中
  * requestHeadEntryId 与 resultEntryId 的祖先归属由唯一的事务内读取方（HarnessRuntime 的快照读取路径）在构造前通过 isAncestor
@@ -41,6 +43,7 @@ public record ThreadSnapshot(
     List<ThreadCommand> queuedCommands,
     GenerationProjection generation,
     List<ToolInvocation> toolSiblings,
+    Map<UUID, UUID> toolChildThreadIds,
     ThreadLiveState liveState,
     List<StoppedThreadReceipt> stopReceipts,
     int incompleteChildJoins,
@@ -66,6 +69,8 @@ public record ThreadSnapshot(
     }
     queuedCommands = List.copyOf(Objects.requireNonNull(queuedCommands, "queuedCommands"));
     toolSiblings = List.copyOf(Objects.requireNonNull(toolSiblings, "toolSiblings"));
+    toolChildThreadIds =
+        Map.copyOf(Objects.requireNonNull(toolChildThreadIds, "toolChildThreadIds"));
     liveState = Objects.requireNonNull(liveState, "liveState");
     if (generation != null) {
       validateGeneration(thread, entryState, generation);

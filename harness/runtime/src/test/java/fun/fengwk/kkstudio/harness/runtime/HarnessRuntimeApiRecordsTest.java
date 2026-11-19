@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.harness.runtime.store.testing.TestIds;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /** 根控制面 API 的 Value-record 校验分支、类型化异常与最终 record 形状。 */
 class HarnessRuntimeApiRecordsTest {
@@ -526,6 +527,7 @@ class HarnessRuntimeApiRecordsTest {
             queued,
             null,
             List.of(),
+            Map.of(),
             ThreadLiveState.IDLE_OR_HISTORICAL,
             List.of(),
             0,
@@ -545,6 +547,7 @@ class HarnessRuntimeApiRecordsTest {
                 queued,
                 null,
                 List.of(),
+                Map.of(),
                 ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 -1,
@@ -561,6 +564,7 @@ class HarnessRuntimeApiRecordsTest {
                 queued,
                 null,
                 List.of(),
+                Map.of(),
                 ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 0,
@@ -577,6 +581,7 @@ class HarnessRuntimeApiRecordsTest {
                 queued,
                 null,
                 List.of(),
+                Map.of(),
                 ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 0,
@@ -593,6 +598,7 @@ class HarnessRuntimeApiRecordsTest {
                 null,
                 null,
                 List.of(),
+                Map.of(),
                 ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 0,
@@ -609,6 +615,7 @@ class HarnessRuntimeApiRecordsTest {
                 queued,
                 null,
                 null,
+                Map.of(),
                 ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 0,

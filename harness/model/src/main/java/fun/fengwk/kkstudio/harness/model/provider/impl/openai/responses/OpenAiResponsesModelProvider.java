@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai.responses;
 
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.limits.RequestLimitsPresets;
 import fun.fengwk.kkstudio.harness.model.provider.ModelProvider;
 import fun.fengwk.kkstudio.harness.model.provider.PreparedProviderRequest;
@@ -10,6 +11,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderSseCall;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.OpenAiBackendCapabilities;
 import fun.fengwk.kkstudio.harness.model.provider.impl.transport.JdkHttpSseTransport;
 
 import java.net.URI;
@@ -82,6 +84,11 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
       if (apiKey != null && !apiKey.isBlank()) {
         requestBuilder.header(AUTHORIZATION_HEADER, "Bearer " + apiKey);
       }
+      if (shouldSendCacheHeaders(request)) {
+        requestBuilder
+            .header("session-id", request.cacheControl().key())
+            .header("x-client-request-id", request.cacheControl().key());
+      }
       httpRequest = requestBuilder.build();
     } catch (IllegalArgumentException ex) {
       bridge.emitError(
@@ -100,5 +107,15 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
         event -> accumulator.handleEvent(event.event(), event.data()),
         accumulator::finish,
         OpenAiResponsesErrorMapper::mapTransportException);
+  }
+
+  private boolean shouldSendCacheHeaders(ProviderRequest request) {
+    if (request.cacheControl().retention() == PromptCacheRetention.SHORT) {
+      return true;
+    }
+    return request.cacheControl().retention() == PromptCacheRetention.LONG
+        && OpenAiBackendCapabilities.reliableWriteTtlSeconds(
+                descriptor, request.model().modelId(), request.cacheControl().retention())
+            != null;
   }
 }

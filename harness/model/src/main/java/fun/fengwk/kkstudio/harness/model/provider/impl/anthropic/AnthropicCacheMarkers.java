@@ -8,18 +8,12 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 
-import java.util.List;
-
 /**
  * 按 Anthropic 原生协议在固定边界写入 {@code cache_control} ephemeral 标记。
  *
- * <p>标记只落在最后一个 tools 条目、最后一个合格 system block 与最近历史请求端点上，总标记数不超过 {@link #MAX_CACHE_BREAKPOINTS}。会话
- * {@code key} 不是 Anthropic 原生选项，因此不下发。
+ * <p>常规请求只标最后一个 tools 条目、最后一个合格 system block 与当前对话尾部。会话 {@code key} 不是 Anthropic 原生选项，因此不下发。
  */
 final class AnthropicCacheMarkers {
-
-  /** 单个请求的 cache 断点上限。 */
-  private static final int MAX_CACHE_BREAKPOINTS = 4;
 
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
@@ -30,9 +24,10 @@ final class AnthropicCacheMarkers {
       ArrayNode messagesArray,
       ArrayNode toolsArray,
       ArrayNode systemArray,
-      List<ObjectNode> cacheEndpoints,
-      boolean hasDeferredPlaceholder) {
-    if (cacheControl.retention() == PromptCacheRetention.NONE) {
+      ObjectNode cacheEndpoint,
+      boolean hasDeferredPlaceholder,
+      boolean automaticCache) {
+    if (cacheControl.retention() == PromptCacheRetention.NONE || automaticCache) {
       return;
     }
 
@@ -55,37 +50,21 @@ final class AnthropicCacheMarkers {
       return;
     }
 
-    int markersPlaced = 0;
-
-    // 1. TOOLS: 最后一个实际可用 tool，不能标记 encoder-only deferred placeholder。
+    // TOOLS: 最后一个实际可用 tool，不能标记 encoder-only deferred placeholder。
     int lastRealToolIndex = toolsArray.size() - (hasDeferredPlaceholder ? 2 : 1);
     if (lastRealToolIndex >= 0) {
       ((ObjectNode) toolsArray.get(lastRealToolIndex)).set("cache_control", marker);
-      markersPlaced++;
     }
 
-    // 2. SYSTEM: 最后一个合格 system block
+    // SYSTEM: 最后一个合格 system block
     ObjectNode lastSystemBlock = latestEligibleBlock(systemArray);
     if (lastSystemBlock != null) {
       lastSystemBlock.set("cache_control", marker);
-      markersPlaced++;
     }
 
-    // 3. CONVERSATION: 剩余预算用于最近历史请求端点与当前尾部；最近端点优先。
-    for (int i = cacheEndpoints.size() - 1; i >= 0 && markersPlaced < MAX_CACHE_BREAKPOINTS; i--) {
-      cacheEndpoints.get(i).set("cache_control", marker);
-      markersPlaced++;
-    }
-  }
-
-  /** 候选必须引用最终 wire 中的同一对象；相同文本不是相同端点，连续空/opaque 消息则不重复占预算。 */
-  static void addEndpoint(List<ObjectNode> endpoints, ObjectNode endpoint) {
-    if (endpoint != null
-        && (endpoints.isEmpty() || endpoints.get(endpoints.size() - 1) != endpoint)) {
-      endpoints.add(endpoint);
-      if (endpoints.size() > MAX_CACHE_BREAKPOINTS) {
-        endpoints.removeFirst();
-      }
+    // CONVERSATION: 常规请求只标记当前尾部，不回填历史请求边界。
+    if (cacheEndpoint != null) {
+      cacheEndpoint.set("cache_control", marker);
     }
   }
 

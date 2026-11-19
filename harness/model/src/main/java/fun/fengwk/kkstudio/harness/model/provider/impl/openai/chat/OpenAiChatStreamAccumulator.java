@@ -25,6 +25,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderToolCallBlock;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderJsonHelper;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamState;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.OpenAiBackendCapabilities;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -304,7 +305,7 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
     if (!resolved.diagnostics().isEmpty()) {
       canReplay = false;
     }
-    ModelUsage modelUsage = usage.toModelUsage();
+    ModelUsage modelUsage = usage.toModelUsage(cacheWriteTtlSeconds());
 
     List<ProviderContentBlock> blocks = new ArrayList<>();
     addSemanticBlocks(blocks, resolved.calls(), canReplay);
@@ -323,6 +324,11 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
             null,
             null);
     return new ProviderCompletion(response);
+  }
+
+  private Long cacheWriteTtlSeconds() {
+    return OpenAiBackendCapabilities.reliableWriteTtlSeconds(
+        descriptor, request.model().modelId(), request.cacheControl().retention());
   }
 
   private void requireCompleteStreamFacts() {

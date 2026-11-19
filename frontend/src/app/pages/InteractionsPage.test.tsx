@@ -112,15 +112,15 @@ describe('InteractionsPage', () => {
 
     render(<InteractionsPage />, { wrapper })
 
-    // 归属固定为“类型 · 标题”；AGENT_TASK 没有产品页面，只显示文本。
-    expect(await screen.findByText('Agent 任务 · reporter')).toBeInTheDocument()
-    expect(screen.getByText('Agent 任务 · reporter').closest('button')).toBeNull()
+    // 无产品页面时组头回退到 Thread；卡片内不重复显示来源。
+    expect(await screen.findByRole('heading', { name: 'reporter' })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '会话: reporter' })).toHaveAttribute('href', '/threads/th-3')
     expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
     expect(mockedNavigate).not.toHaveBeenCalled()
   })
 
-  // 测试意图：相同 sessionId 的事项属于一个会话组，且组内按新到旧排列并可进入根会话。
-  it('groups pending items by session and sorts items newest first', async () => {
+  // 测试意图：相同 sessionId 的事项属于一个会话组，按时间正序排列并共用一个来源入口。
+  it('groups pending items by session and sorts items oldest first', async () => {
     vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
       items: [
         {
@@ -143,12 +143,13 @@ describe('InteractionsPage', () => {
 
     const { container } = render(<InteractionsPage />, { wrapper })
     expect(await screen.findByRole('heading', { name: '同一会话' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '会话: 同一会话' })).toHaveAttribute('href', '/threads/root-session')
+    expect(screen.getByRole('button', { name: 'Chat · 同一会话' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '会话: 同一会话' })).not.toBeInTheDocument()
     expect(container.querySelectorAll('.interactions-session-group')).toHaveLength(1)
     expect(screen.getByText('new')).toBeInTheDocument()
     expect(screen.getByText('old')).toBeInTheDocument()
     expect(Array.from(container.querySelectorAll('.interaction-approval-tool-name')).map((node) => node.textContent))
-      .toEqual(['plugin_b', 'plugin_a'])
+      .toEqual(['plugin_a', 'plugin_b'])
   })
 
   it('renders error state and retries on button click', async () => {
@@ -282,9 +283,9 @@ describe('InteractionsPage', () => {
     expect(screen.getByText('你选择哪个？')).toBeInTheDocument()
   })
 
-  // 不可信链接不可成为导航入口；title 仍可作为非交互来源显示。
+  // 不可信 owner 链接不成为入口；分组回退到已知 Thread 路由。
   it.each(['https://example.com/path', 'javascript:alert(1)', 'relative/path', '//example.com/path', '/\\example.com/path', '/x\n/y'])(
-    'does not navigate to an unsafe source link %s', async (link) => {
+    'falls back to the Thread route for an unsafe owner link %s', async (link) => {
     vi.spyOn(interactionService, 'listInteractions').mockResolvedValue({
       items: [
         {
@@ -305,9 +306,8 @@ describe('InteractionsPage', () => {
       freshnessAt: null,
     })
     render(<InteractionsPage />, { wrapper })
-    const source = await screen.findByText('Issue · 来源')
-    expect(source.closest('button')).toBeNull()
-    fireEvent.click(source)
+    expect(await screen.findByRole('link', { name: '会话: 来源' })).toHaveAttribute('href', '/threads/root-th-err')
+    expect(screen.queryByRole('button', { name: 'Issue · 来源' })).not.toBeInTheDocument()
     expect(mockedNavigate).not.toHaveBeenCalled()
   })
 

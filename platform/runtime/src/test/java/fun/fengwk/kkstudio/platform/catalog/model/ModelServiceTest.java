@@ -5,6 +5,7 @@ import static fun.fengwk.kkstudio.platform.catalog.model.ModelTestData.executabl
 import static fun.fengwk.kkstudio.platformtest.harness.HarnessRuntimeTestFixtures.jsonObject;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -19,12 +20,14 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentService;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.AgentDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCapabilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
@@ -62,6 +65,50 @@ public class ModelServiceTest extends PostgresSpringTestSupport {
   @Autowired private JdbcTemplate jdbc;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private ConfigSyncService configSyncService;
+
+  @Test
+  public void resolvesDraftCacheCapabilitiesAndRejectsUnsupportedLongRetention() {
+    String suffix = Long.toString(System.nanoTime());
+    ProviderCreateDTO providerDTO = new ProviderCreateDTO();
+    providerDTO.setName("cache-capability-provider-" + suffix);
+    providerDTO.setProviderType(ProviderType.OPENAI);
+    providerDTO.setBaseUrl("https://api.openai.com/v1");
+    agentProviderService.createProvider(providerDTO);
+
+    ModelCapabilitiesDTO capabilities =
+        agentModelService.capabilities(providerDTO.getName(), "gpt-5.6");
+    assertEquals(PromptCacheRetention.SHORT, capabilities.getDefaultPromptCacheRetention());
+    assertTrue(
+        capabilities.getPromptCacheOptions().stream()
+            .anyMatch(option -> option.getTtlSeconds() != null && option.getTtlSeconds() == 1800L));
+    assertFalse(
+        capabilities.getPromptCacheOptions().stream()
+            .anyMatch(option -> option.getRetention() == PromptCacheRetention.LONG));
+
+    SingleModelCreateDTO model = model(providerDTO.getName(), "unsupported-cache-model-" + suffix);
+    model.setModelId("gpt-5.6");
+    model.getConfig().getVariants().getFirst().setPromptCacheRetention(PromptCacheRetention.LONG);
+    assertThrows(DomainException.class, () -> agentModelService.createModel(model));
+
+    SingleModelCreateDTO legacyShort =
+        model(providerDTO.getName(), "legacy-short-cache-model-" + suffix);
+    legacyShort
+        .getConfig()
+        .getVariants()
+        .getFirst()
+        .setPromptCacheRetention(PromptCacheRetention.SHORT);
+    assertInstanceOf(SingleModelDTO.class, agentModelService.createModel(legacyShort));
+
+    SingleModelCreateDTO legacyLong =
+        model(providerDTO.getName(), "legacy-long-cache-model-" + suffix);
+    legacyLong.setModelId("gpt-5.5");
+    legacyLong
+        .getConfig()
+        .getVariants()
+        .getFirst()
+        .setPromptCacheRetention(PromptCacheRetention.LONG);
+    assertInstanceOf(SingleModelDTO.class, agentModelService.createModel(legacyLong));
+  }
 
   @Test
   public void builtinReferencesAreRenamedButOtherDriversAreUntouched() {

@@ -11,6 +11,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.JsonNode;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
@@ -54,6 +57,8 @@ import java.util.function.Predicate;
 /** 验证 OpenAI Responses ModelProvider 端到端请求装配、鉴权注入与流生命周期交互。 */
 class OpenAiResponsesModelProviderTest {
 
+  private static final ObjectMapper MAPPER = JsonMapper.builder().build();
+
   @FunctionalInterface
   private interface TransportAction {
     void execute(HttpRequest request, Frames frames) throws Exception;
@@ -80,8 +85,14 @@ class OpenAiResponsesModelProviderTest {
     final List<String> callbackOrder = new ArrayList<>();
 
     ProviderCompletion completion;
+    byte[] requestBody;
     ProviderException error;
     int errorCount;
+
+    @Override
+    public void onRequestBody(byte[] body) {
+      requestBody = body.clone();
+    }
 
     @Override
     public void onEvent(ProviderStreamEvent event) {
@@ -194,6 +205,81 @@ class OpenAiResponsesModelProviderTest {
     assertEquals("application/json", req.headers().firstValue("Content-Type").orElse(""));
     assertEquals("text/event-stream", req.headers().firstValue("Accept").orElse(""));
     assertEquals("Bearer sk-valid-key", req.headers().firstValue("Authorization").orElse(""));
+    assertFalse(req.headers().firstValue("session-id").isPresent());
+    assertFalse(req.headers().firstValue("x-client-request-id").isPresent());
+  }
+
+  /** 验证 SHORT 只发会话 key 与两个同值身份头，且不再发送旧 retention。 */
+  @Test
+  void shortCacheUsesSessionHeadersWithoutRetention() throws Exception {
+    String sessionId = "33333333-3333-3333-3333-333333333333";
+    ProviderRequest base = createRequest();
+    ProviderRequest request =
+        new ProviderRequest(
+            base.model(),
+            base.variant(),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.messages(),
+            base.tools(),
+            ProviderCacheControl.session(PromptCacheRetention.SHORT, sessionId));
+    AtomicReference<HttpRequest> capturedRequest = new AtomicReference<>();
+    RecordingHandler handler = new RecordingHandler();
+    new OpenAiResponsesProviderAdapter(stubTransport((req, cb) -> capturedRequest.set(req)), null)
+        .create(createDescriptor()).stream(request, handler);
+
+    HttpRequest req = capturedRequest.get();
+    assertNotNull(req);
+    assertEquals(sessionId, req.headers().firstValue("session-id").orElse(""));
+    assertEquals(sessionId, req.headers().firstValue("x-client-request-id").orElse(""));
+    JsonNode body = MAPPER.readTree(handler.requestBody);
+    assertEquals(sessionId, body.path("prompt_cache_key").asString(""));
+    assertFalse(body.has("prompt_cache_retention"));
+  }
+
+  /** LONG on a verified official model sends session identity headers and the 12-hour TTL. */
+  @Test
+  void longCacheUsesSessionHeadersAndTwelveHourWireOption() throws Exception {
+    ModelDescriptor modernModel =
+        new ModelDescriptor(
+            "openai_test", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, true);
+    ProviderRequest base = createRequest();
+    ProviderRequest request =
+        new ProviderRequest(
+            modernModel,
+            base.variant(),
+            base.outputTokens(),
+            base.systemInstruction(),
+            base.messages(),
+            base.tools(),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "long-session"));
+    AtomicReference<HttpRequest> capturedRequest = new AtomicReference<>();
+    RecordingHandler handler = new RecordingHandler();
+    new OpenAiResponsesProviderAdapter(stubTransport((req, cb) -> capturedRequest.set(req)), null)
+        .create(createDescriptor()).stream(request, handler);
+
+    HttpRequest req = capturedRequest.get();
+    assertNotNull(req);
+    assertEquals("long-session", req.headers().firstValue("session-id").orElse(""));
+    assertEquals("long-session", req.headers().firstValue("x-client-request-id").orElse(""));
+    JsonNode body = MAPPER.readTree(handler.requestBody);
+    assertEquals("12h", body.path("prompt_cache_options").path("ttl").asString(""));
+    assertEquals("long-session", body.path("prompt_cache_key").asString(""));
+
+    // A compatible endpoint is not granted the official 12-hour mode by model name alone.
+    ProviderDescriptor proxyDescriptor =
+        new ProviderDescriptor(
+            "proxy",
+            ProviderType.OPENAI_RESPONSES,
+            "https://proxy.example/v1",
+            createDescriptor().modelCallTimeoutPolicy());
+    AtomicReference<HttpRequest> proxyRequest = new AtomicReference<>();
+    RecordingHandler proxyHandler = new RecordingHandler();
+    new OpenAiResponsesProviderAdapter(
+            stubTransport((proxyHttpRequest, cb) -> proxyRequest.set(proxyHttpRequest)), null)
+        .create(proxyDescriptor).stream(request, proxyHandler);
+    assertNull(proxyRequest.get());
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, proxyHandler.error.kind());
   }
 
   /** 验证无 apiKey 或为空格时以匿名方式发起请求，绝不注入 Authorization 头。 */

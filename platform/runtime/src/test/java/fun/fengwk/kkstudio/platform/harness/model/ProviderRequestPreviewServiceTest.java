@@ -877,6 +877,7 @@ class ProviderRequestPreviewServiceTest {
         queued,
         null,
         List.of(),
+        Map.of(),
         liveState,
         List.of(),
         0,

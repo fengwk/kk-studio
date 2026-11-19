@@ -27,7 +27,7 @@ function treeNode(
   parentThreadId: string | null,
   active: boolean,
   name: string,
-  status: 'RUNNING' | 'WAITING' | 'IDLE' = active ? 'RUNNING' : 'IDLE',
+  status: 'RUNNING' | 'WAITING' | 'EXIT_PENDING' | 'IDLE' = active ? 'RUNNING' : 'IDLE',
   executionControl: 'RUNNABLE' | 'STOPPED' = 'RUNNABLE',
 ) {
   return {
@@ -493,7 +493,7 @@ describe('ActiveThreadTree', () => {
     expect(harnessService.getThreadTree).toHaveBeenCalledTimes(1)
   })
 
-  it('renders WAITING as waiting for async result without generation animation and RUNNING as running', async () => {
+  it('keeps async waiting text while showing ordinary running as a labeled icon', async () => {
     const runningNode = treeNode(WORKER_ID, ROOT_ID, true, 'running-worker', 'RUNNING')
     const waitingNode = treeNode(IDLE_ID, ROOT_ID, true, 'waiting-worker', 'WAITING')
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
@@ -507,14 +507,17 @@ describe('ActiveThreadTree', () => {
     const runningLink = await screen.findByRole('link', { name: /running-worker/ })
     const waitingLink = await screen.findByRole('link', { name: /waiting-worker/ })
 
-    // RUNNING 显示“运行中”，不等于“生成中”
+    // 普通运行状态用动态小图标表达，避免重复状态文字。
     const runningStatus = runningLink.querySelector('.thread-tree-status')
-    expect(runningStatus).toHaveTextContent('运行中')
+    expect(runningStatus).toHaveTextContent('')
+    expect(runningStatus).toHaveAttribute('aria-label', '运行中')
+    expect(runningStatus?.querySelector('.thread-tree-status-running-icon')).not.toBeNull()
     expect(runningStatus).toHaveClass('is-running')
 
-    // WAITING 显示“等待异步结果”，无生成动画
+    // 异步等待用静态可读图标，避免把非操作状态堆成文字。
     const waitingStatus = waitingLink.querySelector('.thread-tree-status')
-    expect(waitingStatus).toHaveTextContent('等待异步结果')
+    expect(waitingStatus).toHaveTextContent('')
+    expect(waitingStatus).toHaveAttribute('aria-label', '等待异步结果')
     expect(waitingStatus).toHaveClass('is-waiting')
     expect(waitingStatus?.className).not.toMatch(/pulse|spin|streaming|generating/)
   })
@@ -536,10 +539,23 @@ describe('ActiveThreadTree', () => {
     renderTree(ROOT_ID)
 
     const link = await screen.findByRole('link', { name: /stopped-running/ })
-    // status 依然显示“运行中”，绝不被 STOPPED 遮盖为“已停止”
-    expect(link.querySelector('.thread-tree-status')).toHaveTextContent('运行中')
+    // 运行态图标仍表达运行中，绝不被 STOPPED 遮盖为“已停止”。
+    expect(link.querySelector('.thread-tree-status')).toHaveAttribute('aria-label', '运行中')
     // STOPPED 作为独立 execution control 标签呈现
     expect(link.querySelector('.thread-tree-control.is-stopped')).toHaveTextContent('已停止')
+  })
+
+  it('shows exit-pending as a quiet static icon and retains its accessible status', async () => {
+    vi.mocked(harnessService.getThreadTree).mockResolvedValue([
+      treeNode(ROOT_ID, null, false, 'root'),
+      treeNode(WORKER_ID, ROOT_ID, true, 'closing-worker', 'EXIT_PENDING'),
+    ])
+    renderTree(ROOT_ID)
+    const link = await screen.findByRole('link', { name: /closing-worker/ })
+    const status = link.querySelector('.thread-tree-status')
+    expect(status).toHaveTextContent('')
+    expect(status).toHaveAttribute('aria-label', '等待退出确认')
+    expect(status?.querySelector('svg')).not.toHaveClass('thread-tree-status-running-icon')
   })
 
   it('suppresses false COMPLETED outcome on active non-IDLE nodes', async () => {
@@ -555,7 +571,7 @@ describe('ActiveThreadTree', () => {
     renderTree(ROOT_ID)
 
     const link = await screen.findByRole('link', { name: /worker/ })
-    expect(link.querySelector('.thread-tree-status')).toHaveTextContent('运行中')
+    expect(link.querySelector('.thread-tree-status')).toHaveAttribute('aria-label', '运行中')
     expect(link).not.toHaveTextContent('已完成')
   })
 })

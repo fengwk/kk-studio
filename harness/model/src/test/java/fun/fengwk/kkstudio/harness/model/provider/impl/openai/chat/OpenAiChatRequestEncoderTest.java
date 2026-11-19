@@ -248,6 +248,74 @@ class OpenAiChatRequestEncoderTest {
 
     JsonNode root = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
     assertEquals(100, root.path("max_tokens").asInt(0));
+    assertFalse(root.has("max_completion_tokens"));
+  }
+
+  /** Official o-series and verified modern GPT models use max_completion_tokens, not proxies. */
+  @Test
+  void outputBudgetUsesVerifiedOfficialModelFields() throws Exception {
+    ModelDescriptor o3 =
+        new ModelDescriptor("openai", "o3", "o3", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest request =
+        new ProviderRequest(
+            o3,
+            defaultVariant,
+            100,
+            "system",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode official = MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
+    assertEquals(100, official.path("max_completion_tokens").asInt(0));
+    assertFalse(official.has("max_tokens"));
+
+    ProviderDescriptor custom =
+        new ProviderDescriptor(
+            "proxy",
+            ProviderType.OPENAI,
+            "https://proxy.example/v1",
+            descriptor.modelCallTimeoutPolicy());
+    JsonNode compatible = MAPPER.readTree(encoder.encode(request, custom).bodyUtf8Bytes());
+    assertEquals(100, compatible.path("max_tokens").asInt(0));
+    assertFalse(compatible.has("max_completion_tokens"));
+
+    ModelDescriptor modernGpt =
+        new ModelDescriptor(
+            "openai", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest modernRequest =
+        new ProviderRequest(
+            modernGpt,
+            defaultVariant,
+            100,
+            "system",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode modern = MAPPER.readTree(encoder.encode(modernRequest, descriptor).bodyUtf8Bytes());
+    assertEquals(100, modern.path("max_completion_tokens").asInt(0));
+    assertFalse(modern.has("max_tokens"));
+
+    ModelDescriptor futureGpt =
+        new ModelDescriptor(
+            "openai", "gpt-9.0", "gpt-9.0", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest futureRequest =
+        new ProviderRequest(
+            futureGpt,
+            defaultVariant,
+            100,
+            "system",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode future = MAPPER.readTree(encoder.encode(futureRequest, descriptor).bodyUtf8Bytes());
+    assertEquals(100, future.path("max_tokens").asInt(0));
+    assertFalse(future.has("max_completion_tokens"));
   }
 
   @Test
@@ -432,13 +500,13 @@ class OpenAiChatRequestEncoderTest {
   }
 
   @Test
-  @DisplayName("Prompt Cache 留存档位映射：NONE 不发，SHORT/LONG 发 key + retention")
+  @DisplayName("Prompt Cache 映射仅使用官方端点与已验证型号能力")
   void testPromptCacheRetentionMapping() throws Exception {
     ProviderMessage userMsg =
         new ProviderMessage(
             ProviderMessageRole.USER, List.of(new ProviderTextBlock("User prompt")));
 
-    // 1. NONE: 不发任何 cache hint
+    // Legacy models cannot explicitly disable caching.
     ProviderRequest reqNone =
         cacheRequest("Test system instruction.", List.of(userMsg), ProviderCacheControl.none());
     JsonNode rootNone = MAPPER.readTree(encoder.encode(reqNone, descriptor).bodyUtf8Bytes());
@@ -446,26 +514,98 @@ class OpenAiChatRequestEncoderTest {
     assertFalse(rootNone.has("prompt_cache_retention"));
     assertFalse(rootNone.has("prompt_cache_options"));
 
-    // 2. SHORT: key 直接使用运行时会话 key，retention=in_memory
+    // 2. SHORT: 官方端点只发送运行时会话 key，不发送旧 retention
     ProviderCacheControl cacheControlShort =
         ProviderCacheControl.session(PromptCacheRetention.SHORT, "my-key-short");
     ProviderRequest reqShort =
         cacheRequest("Test system instruction.", List.of(userMsg), cacheControlShort);
     JsonNode rootShort = MAPPER.readTree(encoder.encode(reqShort, descriptor).bodyUtf8Bytes());
     assertEquals("my-key-short", rootShort.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", rootShort.path("prompt_cache_retention").asString(""));
+    assertFalse(rootShort.has("prompt_cache_retention"));
     assertFalse(rootShort.has("prompt_cache_options"));
+    ProviderDescriptor customDescriptor =
+        new ProviderDescriptor(
+            "proxy",
+            ProviderType.OPENAI,
+            "https://api.openai.com.attacker.example/v1",
+            descriptor.modelCallTimeoutPolicy());
+    JsonNode customShort =
+        MAPPER.readTree(encoder.encode(reqShort, customDescriptor).bodyUtf8Bytes());
+    assertFalse(customShort.has("prompt_cache_key"));
+    assertFalse(customShort.has("prompt_cache_retention"));
     // 不再改写 content 形态或注入 breakpoint
     assertEquals("User prompt", rootShort.path("messages").get(1).path("content").asString(""));
 
-    // 3. LONG: retention=24h
+    // Unsupported LONG intent must fail instead of silently dropping its TTL.
     ProviderCacheControl cacheControlLong =
         ProviderCacheControl.session(PromptCacheRetention.LONG, "my-key-long");
     ProviderRequest reqLong =
         cacheRequest("Test system instruction.", List.of(userMsg), cacheControlLong);
-    JsonNode rootLong = MAPPER.readTree(encoder.encode(reqLong, descriptor).bodyUtf8Bytes());
-    assertEquals("my-key-long", rootLong.path("prompt_cache_key").asString(""));
-    assertEquals("24h", rootLong.path("prompt_cache_retention").asString(""));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqLong, descriptor));
+
+    ModelDescriptor modernModel =
+        new ModelDescriptor(
+            "openai", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest modernNone =
+        new ProviderRequest(
+            modernModel,
+            defaultVariant,
+            100,
+            "system",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode modernNoneRoot =
+        MAPPER.readTree(encoder.encode(modernNone, descriptor).bodyUtf8Bytes());
+    assertEquals("explicit", modernNoneRoot.path("prompt_cache_options").path("mode").asString(""));
+    assertFalse(modernNoneRoot.has("prompt_cache_key"));
+    JsonNode proxyNoneRoot =
+        MAPPER.readTree(encoder.encode(modernNone, customDescriptor).bodyUtf8Bytes());
+    assertFalse(proxyNoneRoot.has("prompt_cache_options"));
+
+    ProviderRequest modernLong =
+        new ProviderRequest(
+            modernModel,
+            defaultVariant,
+            100,
+            "system",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "modern-key"));
+    assertThrows(ProviderException.class, () -> encoder.encode(modernLong, descriptor));
+
+    ModelDescriptor legacyModel =
+        new ModelDescriptor(
+            "openai", "gpt-5.5", "gpt-5.5", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest legacyLong =
+        new ProviderRequest(
+            legacyModel,
+            defaultVariant,
+            100,
+            "system",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "legacy-key"));
+    JsonNode legacyLongRoot =
+        MAPPER.readTree(encoder.encode(legacyLong, descriptor).bodyUtf8Bytes());
+    assertEquals("legacy-key", legacyLongRoot.path("prompt_cache_key").asString(""));
+    assertEquals("24h", legacyLongRoot.path("prompt_cache_retention").asString(""));
+
+    ModelDescriptor unverifiedFuture =
+        new ModelDescriptor(
+            "openai", "gpt-9.0", "gpt-9.0", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest futureNone =
+        new ProviderRequest(
+            unverifiedFuture,
+            defaultVariant,
+            100,
+            "system",
+            List.of(),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode futureNoneRoot =
+        MAPPER.readTree(encoder.encode(futureNone, descriptor).bodyUtf8Bytes());
+    assertFalse(futureNoneRoot.has("prompt_cache_options"));
   }
 
   @Test
@@ -687,7 +827,7 @@ class OpenAiChatRequestEncoderTest {
     JsonNode rootBreak =
         MAPPER.readTree(encoder.encode(reqLastToolBreak, descriptor).bodyUtf8Bytes());
     assertEquals("session-key", rootBreak.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", rootBreak.path("prompt_cache_retention").asString(""));
+    assertFalse(rootBreak.has("prompt_cache_retention"));
     ArrayNode messages = (ArrayNode) rootBreak.path("messages");
     // 0 号是合成的系统指令消息，user 消息紧随其后
     JsonNode userNode = messages.get(1);
