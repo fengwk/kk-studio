@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 import tools.jackson.databind.annotation.JsonDeserialize;
@@ -24,6 +25,7 @@ public class ModelRateSetDTO {
   @JsonDeserialize(using = DecimalStringDeserializer.class)
   private BigDecimal cacheRead;
 
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   @JsonSerialize(using = DecimalStringSerializer.class)
   @JsonDeserialize(using = DecimalStringDeserializer.class)
   private @Nullable BigDecimal cacheWrite;

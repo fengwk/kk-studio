@@ -440,13 +440,13 @@ class UsageCostProjectionServiceTest {
             new UUID(0L, 20L),
             USER_A_ID,
             usage,
-            new RequestBodyPricingSnapshot(Map.of("stale", true)));
+            new RequestBodyPricingSnapshot(Map.of("a".repeat(64), true)));
     Entry notMatched =
         assistantWithPricing(
             new UUID(0L, 21L),
             USER_A_ID,
             usage,
-            new RequestBodyPricingSnapshot(Map.of("stale", false)));
+            new RequestBodyPricingSnapshot(Map.of("a".repeat(64), false)));
     Entry noSnapshot = assistantWithPricing(new UUID(0L, 22L), USER_A_ID, usage, null);
 
     Map<UUID, HarnessUsageCostDTO> costs =

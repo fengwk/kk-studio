@@ -4,12 +4,14 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
 /** 按固定规则组和 UTC 日期计划解析一次请求的费率。 */
-final class ModelPricingResolver {
+public final class ModelPricingResolver {
 
   private ModelPricingResolver() {}
 
@@ -137,11 +139,52 @@ final class ModelPricingResolver {
     return new ModelPricing.PriceDefinition(base, rules);
   }
 
+  /** Resolve rates and matched rule identities for a non-persisting pricing preview. */
+  public static PricingPreview preview(
+      ModelPricing pricing, long contextTokens, Instant requestedAt, String serviceTier) {
+    if (pricing == null) {
+      return new PricingPreview(null, null, List.of());
+    }
+    ModelPricing.PriceDefinition definition = definition(pricing, requestedAt);
+    if (definition == null) {
+      return new PricingPreview(null, null, List.of());
+    }
+    List<ModelPricing.Rule> matchedRules = new ArrayList<>();
+    for (ModelPricing.Rule rule : definition.rules()) {
+      if ((rule instanceof ModelPricing.InputTokenRange range && range.contains(contextTokens))
+          || (rule instanceof ModelPricing.TimeMultiplier time
+              && requestedAt != null
+              && time.matches(requestedAt))
+          || (rule instanceof ModelPricing.ServiceTierMultiplier tier
+              && Objects.equals(tier.serviceTier(), serviceTier))) {
+        matchedRules.add(rule);
+      }
+    }
+    LocalDate activeFrom = null;
+    if (requestedAt != null) {
+      LocalDate date = requestedAt.atZone(ZoneOffset.UTC).toLocalDate();
+      for (ModelPricing.DateChange change : pricing.changes()) {
+        if (date.isBefore(change.from())) {
+          break;
+        }
+        activeFrom = change.from();
+      }
+    }
+    ResolvedRates rates =
+        resolve(
+            pricing,
+            new ModelUsage(contextTokens, 0, 0, 0, Map.of(), null, null),
+            requestedAt,
+            serviceTier,
+            null);
+    return new PricingPreview(rates, activeFrom, List.copyOf(matchedRules));
+  }
+
   private static BigDecimal apply(BigDecimal value, BigDecimal factor) {
     return value == null || factor == null ? value : value.multiply(factor);
   }
 
-  record ResolvedRates(
+  public record ResolvedRates(
       BigDecimal input,
       BigDecimal output,
       BigDecimal cacheRead,
@@ -149,4 +192,7 @@ final class ModelPricingResolver {
       Map<Long, BigDecimal> cacheWriteByTtl,
       BigDecimal reasoning,
       boolean independentReasoning) {}
+
+  public record PricingPreview(
+      ResolvedRates rates, LocalDate activeFrom, List<ModelPricing.Rule> matchedRules) {}
 }

@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -80,6 +81,25 @@ class ModelPricingCodecTest {
   }
 
   @Test
+  void validatesNullRulesAndIllegalTypeFieldsBeforeNormalization() {
+    ModelPricingDTO nullRule = new ModelPricingDTO();
+    nullRule.setRules(Arrays.asList((ModelPricingRuleDTO) null));
+    assertThrows(IllegalArgumentException.class, () -> ModelPricingCodec.parsePricing(nullRule));
+
+    ModelPricingRuleDTO illegalFactor = new ModelPricingRuleDTO();
+    illegalFactor.setType("input_token_range");
+    illegalFactor.setMaxInputTokensExclusive(100);
+    illegalFactor.setInput(BigDecimal.ONE);
+    illegalFactor.setFactor(BigDecimal.ONE);
+    illegalFactor.setInputFactor(BigDecimal.ONE);
+    ModelPricingDTO invalidTypeField = pricing(illegalFactor);
+    IllegalArgumentException error =
+        assertThrows(
+            IllegalArgumentException.class, () -> ModelPricingCodec.parsePricing(invalidTypeField));
+    assertTrue(error.getMessage().contains("is not valid for this type"), error.getMessage());
+  }
+
+  @Test
   void missingPricingDiffersFromAnExplicitZeroPrice() {
     assertNull(ModelPricingCodec.parsePricing(null));
     ModelPricing explicitZero = ModelPricingCodec.parsePricing(new ModelPricingDTO());
@@ -98,7 +118,7 @@ class ModelPricingCodecTest {
 
     ModelPricingRuleDTO range = new ModelPricingRuleDTO();
     range.setType("input_token_range");
-    range.setMaxInputTokensExclusive(3_000_000);
+    range.setMaxInputTokensExclusive(4_000_000);
     range.setCacheRead(new BigDecimal("3"));
     if (ttlSpecified) {
       range.setCacheWriteByTtl(Map.of());

@@ -189,7 +189,7 @@ class ModelRuntimeConfigParserTest {
                 "\"rules\":[],\"changes\":[]",
                 "\"rules\":[],\"changes\":["
                     + "{\"from\":\"2027-01-01\",\"base\":{},\"rules\":[]},"
-                    + "{\"from\":\"2027-01-01\",\"base\":{},\"rules\":[]}]}"),
+                    + "{\"from\":\"2027-01-01\",\"base\":{},\"rules\":[]}]"),
         "changes.from dates must be unique");
   }
 
@@ -753,7 +753,7 @@ class ModelRuntimeConfigParserTest {
         "surrounding whitespace");
   }
 
-  /** 类型化 DTO 形式拒绝损坏的必填子结构；缺失 pricing 按零定义归一，而不是继续拒绝。 */
+  /** 类型化 DTO 形式拒绝损坏的必填子结构；缺失 pricing 保持 null，而不是推断为零。 */
   @Test
   void validatesTypedConfigAndNormalizesMissingPricing() {
     ModelConfigDTO base = parser.decode(validConfig());
@@ -796,7 +796,7 @@ class ModelRuntimeConfigParserTest {
     assertEquals(explicit.getPricing(), partial.getPricing());
 
     String encoded = parser.encode(missing);
-    assertFalse(encoded.contains("\"pricing\":"), encoded);
+    assertTrue(encoded.contains("\"pricing\":null"), encoded);
 
     ModelUsage usage = new ModelUsage(1_000_000, 1_000_000, 0, 0, Map.of(), null, null);
     ModelCost zeroCost =

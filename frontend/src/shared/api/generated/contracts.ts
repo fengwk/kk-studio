@@ -2034,82 +2034,55 @@ export interface ModelLimitDTO {
   output: number
 }
 
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingConditionDTO */
-export interface ModelPricingConditionDTO {
-  context?: ModelPricingContextConditionDTO | null
-  serviceTier?: string[] | null
-  date?: ModelPricingDateConditionDTO | null
-  time?: ModelPricingTimeConditionDTO | null
-  requestBody?: ModelPricingRequestBodyConditionDTO | null
-  all?: ModelPricingConditionDTO[] | null
-  any?: ModelPricingConditionDTO[] | null
-  not?: ModelPricingConditionDTO | null
-}
-
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingContextConditionDTO */
-export interface ModelPricingContextConditionDTO {
-  gt?: number | null
-  gte?: number | null
-  lt?: number | null
-  lte?: number | null
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingChangeDTO */
+export interface ModelPricingChangeDTO {
+  from: string
+  base: ModelRateSetDTO
+  rules: ModelPricingRuleDTO[]
 }
 
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO */
 export interface ModelPricingDTO {
   base: ModelRateSetDTO
-  overrides: ModelPricingOverrideDTO[]
-  multipliers: ModelPricingMultiplierDTO[]
+  rules: ModelPricingRuleDTO[]
+  changes: ModelPricingChangeDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDateConditionDTO */
-export interface ModelPricingDateConditionDTO {
-  gte?: string | null
-  lt?: string | null
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingPreviewDTO */
+export interface ModelPricingPreviewDTO {
+  rates: ModelRateSetDTO | null
+  activeFrom: string | null
+  matchedRules: ModelPricingRuleDTO[]
 }
 
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingFactorsDTO */
-export interface ModelPricingFactorsDTO {
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingPreviewRequestDTO */
+export interface ModelPricingPreviewRequestDTO {
+  pricing?: ModelPricingDTO | null
+  inputTokens: number
+  requestedAt?: number | null
+  serviceTier?: string | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO */
+export interface ModelPricingRuleDTO {
+  type: string
+  minInputTokens?: number
+  maxInputTokensExclusive?: number
   input?: string | null
   output?: string | null
   cacheRead?: string | null
   cacheWrite?: string | null
-  reasoning?: string | null
-}
-
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingMultiplierDTO */
-export interface ModelPricingMultiplierDTO {
-  id: string
-  when: ModelPricingConditionDTO
-  factors: ModelPricingFactorsDTO
-}
-
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingOverrideDTO */
-export interface ModelPricingOverrideDTO {
-  id: string
-  when: ModelPricingConditionDTO
-  rates: ModelRatePatchDTO
-}
-
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRequestBodyConditionDTO */
-export interface ModelPricingRequestBodyConditionDTO {
-  path?: string | null
-  equals?: unknown | null
-}
-
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingTimeConditionDTO */
-export interface ModelPricingTimeConditionDTO {
-  start: string
-  end: string
-  timezone: string
-  weekdays?: number[] | null
-}
-
-/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTO */
-export interface ModelRatePatchDTO {
-  input?: string | null
-  output?: string | null
-  cacheRead?: string | null
-  cacheWrite?: string | null
+  start?: string
+  end?: string
+  timezone?: string
+  weekdays?: number[]
+  serviceTier?: string
+  factor?: string | null
+  inputFactor?: string | null
+  outputFactor?: string | null
+  cacheReadFactor?: string | null
+  cacheWriteFactor?: string | null
+  reasoningFactor?: string | null
   cacheWriteByTtl?: Record<string, string> | null
   reasoning?: string | null
 }
@@ -2119,7 +2092,7 @@ export interface ModelRateSetDTO {
   input: string
   output: string
   cacheRead: string
-  cacheWrite: string
+  cacheWrite: string | null
   cacheWriteByTtl: Record<string, string>
   reasoning?: string | null
 }
@@ -3410,6 +3383,10 @@ export interface ApiRoutes {
   'POST /api/platform/models': {
     body: ModelCreateDTO
     response: ModelDTO
+  }
+  'POST /api/platform/models/pricing-preview': {
+    body: ModelPricingPreviewRequestDTO
+    response: ModelPricingPreviewDTO
   }
   'POST /api/platform/plugins/{pluginId}/auth/complete': {
     path: { pluginId: string }

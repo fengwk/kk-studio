@@ -20,6 +20,7 @@ public final class ModelPricingCodec {
     if (pricing == null) {
       pricing = new ModelPricingDTO();
     }
+    ModelPricingValidator.validate(pricing);
     normalizeBase(pricing.getBase(), pricing::setBase);
     if (pricing.getRules() == null) {
       pricing.setRules(List.of());
@@ -39,7 +40,6 @@ public final class ModelPricingCodec {
         normalizeRules(change.getRules());
       }
     }
-    ModelPricingValidator.validate(pricing);
     return pricing;
   }
 

@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -395,7 +396,7 @@ public final class ModelRuntimeConfigParser {
       boolean messageLevelEffort,
       List<ModelVariant> variants,
       String defaultVariant,
-      ModelPricing pricing) {
+      @Nullable ModelPricing pricing) {
 
     public ParsedAgentModelConfig {
       inputModalities = Set.copyOf(inputModalities);
@@ -403,7 +404,6 @@ public final class ModelRuntimeConfigParser {
       if (defaultVariant == null || defaultVariant.isBlank()) {
         throw new IllegalArgumentException("defaultVariant must not be blank");
       }
-      pricing = Objects.requireNonNull(pricing, "pricing");
     }
   }
 }

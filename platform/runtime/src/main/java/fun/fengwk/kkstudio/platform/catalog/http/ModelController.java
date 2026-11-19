@@ -14,7 +14,10 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingPreviewDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingPreviewRequestDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelUpdateDTO;
+import fun.fengwk.kkstudio.platform.catalog.model.ModelPricingPreviewService;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
 
 import java.util.List;
@@ -25,14 +28,22 @@ import java.util.List;
 public class ModelController {
 
   private final ModelService modelService;
+  private final ModelPricingPreviewService pricingPreviewService;
 
-  public ModelController(ModelService modelService) {
+  public ModelController(
+      ModelService modelService, ModelPricingPreviewService pricingPreviewService) {
     this.modelService = modelService;
+    this.pricingPreviewService = pricingPreviewService;
   }
 
   @GetMapping
   public List<ModelDTO> listModels() {
     return modelService.listModels();
+  }
+
+  @PostMapping("/pricing-preview")
+  public ModelPricingPreviewDTO previewPricing(@RequestBody ModelPricingPreviewRequestDTO request) {
+    return pricingPreviewService.preview(request);
   }
 
   @PostMapping
