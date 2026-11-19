@@ -416,6 +416,10 @@ Backend 启动要求有效的 `KK_STUDIO_STORAGE_S3_*` 配置及可达的 bucket
 
 执行 `--ui` 前必须完成 `npm --prefix frontend ci`，因为 Playwright 从
 [frontend/package.json](../../frontend/package.json) 加载。
+生成期间重载的 Thread 恢复回归可用 `./scripts/dev/verify/e2e/run.sh --ui --only ui.chat.thread_snapshot_reload` 单独执行。
+该用例仅替换模型 Provider：真实 Chromium 通过 Chat 绑定 Thread、发送消息并在生成期间重载，检查新 WebSocket
+订阅的快照使用十进制字符串游标、回复完成不依赖再次导航或 Thread GET，并从浏览器外确认 `IDLE` 与持久化 `TURN_END`。
+不需要 `--real` 或 Daemon。
 
 ### 真实 Provider 与付费边界
 

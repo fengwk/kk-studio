@@ -2,7 +2,8 @@ import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { expectStorage } from '../ui/composer-matrix.mjs'
+import { expectStorage, runComposerMatrix } from '../ui/composer-matrix.mjs'
+import { missingUiCapabilities } from '../lib/ui-capabilities.mjs'
 import { waitForThreadSubscription } from '../ui/workspace-contracts.mjs'
 
 test('workspace observer requires a thread ack, ignoring connected and other resources', async () => {
@@ -30,6 +31,18 @@ test('workspace observer requires a thread ack, ignoring connected and other res
   await pending
   assert.equal(page.listenerCount('websocket'), 0)
   assert.equal(current.listenerCount('framereceived'), 0)
+})
+
+test('the Thread reload regression is registered once and needs only the free UI matrix', async () => {
+  const registrations = []
+  // Enumerate real registrations without running browser callbacks or duplicating the UI inventory.
+  await runComposerMatrix({
+    run(id, _title, _case, options) {
+      if (id === 'ui.chat.thread_snapshot_reload') registrations.push(options)
+    },
+  })
+  assert.equal(registrations.length, 1)
+  assert.deepEqual(missingUiCapabilities(registrations[0]), [])
 })
 
 test('composer storage observer retains production draft schema', async () => {

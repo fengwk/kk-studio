@@ -1951,8 +1951,16 @@ function chunkText(text, size) {
 }
 
 export function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
+  return waitForThreadFrame(page, threadId, null, timeoutMs)
+}
+
+export function waitForThreadSnapshot(page, threadId, onSnapshot, timeoutMs = 15_000) {
+  return waitForThreadFrame(page, threadId, onSnapshot, timeoutMs)
+}
+
+function waitForThreadFrame(page, threadId, onSnapshot, timeoutMs) {
   return new Promise((resolve, reject) => {
-    const sockets = new Set()
+    const listeners = new Map()
     let settled = false
     let timer = null
     const finish = (error) => {
@@ -1960,36 +1968,43 @@ export function waitForThreadSubscription(page, threadId, timeoutMs = 15_000) {
       settled = true
       if (timer != null) clearTimeout(timer)
       page.off('websocket', onWebSocket)
-      for (const socket of sockets) socket.off('framereceived', onFrame)
+      for (const [socket, onFrame] of listeners) socket.off('framereceived', onFrame)
       if (error) {
         reject(error)
       } else {
         resolve()
       }
     }
-    const onFrame = (event) => {
-      let message
-      try {
-        message = JSON.parse(String(event.payload))
-      } catch {
-        return
-      }
-      if (
-        message?.type === 'subscribed'
-        && message.resource?.kind === 'thread'
-        && message.resource?.id === threadId
-      ) {
-        finish()
-      }
-    }
     const onWebSocket = (socket) => {
       if (new URL(socket.url()).pathname !== '/ws/events') return
-      sockets.add(socket)
+      let subscribed = false
+      const onFrame = (event) => {
+        let message
+        try {
+          message = JSON.parse(String(event.payload))
+        } catch {
+          return
+        }
+        if (message?.resource?.kind !== 'thread' || message.resource.id !== threadId) return
+        if (message.type === 'subscribed') {
+          subscribed = true
+          if (!onSnapshot) finish()
+        } else if (onSnapshot && subscribed && message.type === 'event' && message.name === 'snapshot') {
+          try {
+            onSnapshot(message.data)
+            finish()
+          } catch (error) {
+            finish(error)
+          }
+        }
+      }
+      listeners.set(socket, onFrame)
       socket.on('framereceived', onFrame)
     }
     page.on('websocket', onWebSocket)
     timer = setTimeout(() => {
-      finish(new Error(`thread realtime subscription did not open: ${threadId}`))
+      const expected = onSnapshot ? 'snapshot after subscription' : 'subscription'
+      finish(new Error(`thread realtime ${expected} not received: ${threadId}`))
     }, timeoutMs)
   })
 }

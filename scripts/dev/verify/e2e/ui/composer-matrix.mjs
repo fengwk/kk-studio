@@ -1,3 +1,4 @@
+import { EventEmitter, once } from 'node:events'
 import { createServer } from 'node:http'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
@@ -5,6 +6,7 @@ import path from 'node:path'
 import { baseModelConfig, encodePathTail } from '../lib/fixtures.mjs'
 import {
   assert,
+  assertDecimalVersion,
   cid,
   HttpError,
   sleep,
@@ -12,7 +14,7 @@ import {
 import { REPO_ROOT } from '../../../lib/repo-root.mjs'
 import { assertReadOnlyZeroFooter } from './assertions.mjs'
 import { clearChatPaneState } from './chat-pane-storage.mjs'
-import { runWorkspaceContractMatrix } from './workspace-contracts.mjs'
+import { runWorkspaceContractMatrix, waitForThreadSnapshot } from './workspace-contracts.mjs'
 import {
   acceptCommandBatch,
   branchSettingsOf,
@@ -720,6 +722,83 @@ export async function runComposerMatrix(ui) {
   )
 
   await run(
+    'ui.chat.thread_snapshot_reload',
+    '生成期间重载已绑定的 Thread，浏览器通过真实 WebSocket 快照恢复并完成对话',
+    async (caseArt) => {
+      const baseline = `reload baseline ${stamp}`
+      const submitted = `reload input ${stamp}`
+      const reply = `Reload reply ${stamp}`
+      await withUiFixture(
+        page,
+        () => createHoldingQueueFixture(apiCtx, {
+          title: `e2e-ui-thread-reload-${stamp}`,
+          historicalMessage: baseline,
+        }),
+        async (fixture) => {
+          const { mock, threadId } = fixture
+          mock.release(await mock.waitForRequest(baseline), 'Ready to reload.')
+          await waitForQuiescentThread(apiCtx, threadId)
+          const composer = await bindThreadComposer(page, goto, fixture)
+          const dialogue = page.locator('.thread-dialogue')
+          const working = page.locator('.thread-working')
+          await composer.fill(submitted)
+          await page.getByRole('button', { name: '发送消息' }).click()
+          const held = await mock.waitForRequest(submitted)
+          await working.waitFor({ state: 'visible', timeout: 15_000 })
+
+          let bootstrapped = false
+          let navigations = 0
+          let threadGetsAfterBootstrap = 0
+          const threadPath = `/api/harness/threads/${threadId}`
+          const onNavigation = (frame) => {
+            if (frame === page.mainFrame()) navigations += 1
+          }
+          const onRequest = (request) => {
+            if (bootstrapped && request.method() === 'GET' && new URL(request.url()).pathname === threadPath) {
+              threadGetsAfterBootstrap += 1
+            }
+          }
+          page.on('framenavigated', onNavigation)
+          page.on('request', onRequest)
+          try {
+            // Arm before reload; an ACK from any other socket/resource cannot qualify the snapshot.
+            const [, reload] = await Promise.all([
+              waitForThreadSnapshot(page, threadId, (snapshot) => {
+                bootstrapped = true
+                assert(snapshot?.thread?.threadId === threadId, 'snapshot belongs to the wrong Thread')
+                assertDecimalVersion(snapshot.version, 'snapshot.version')
+                assertDecimalVersion(snapshot.thread.version, 'snapshot.thread.version')
+                assertDecimalVersion(snapshot.thread.nextCommandSequence, 'snapshot.thread.nextCommandSequence')
+                assert(snapshot.version === snapshot.thread.version, 'snapshot versions differ')
+              }),
+              page.reload({ waitUntil: 'domcontentloaded', timeout: 15_000 }),
+            ])
+            assert(reload?.ok(), 'Thread page reload failed')
+            await working.waitFor({ state: 'visible', timeout: 15_000 })
+            mock.release(held, reply)
+            await dialogue.getByText(reply, { exact: true }).waitFor({ state: 'visible', timeout: 15_000 })
+            await working.waitFor({ state: 'hidden', timeout: 15_000 })
+
+            // Independently confirm durable completion without giving the browser an HTTP refresh.
+            await waitForQuiescentThread(apiCtx, threadId)
+            const final = await getThreadSnapshot(apiCtx, threadId)
+            const head = final.entries.at(-1)
+            assert(final.thread.status === 'IDLE' && head?.entryId === final.thread.headEntryId
+              && head?.entryType === 'TURN_END', 'Thread must finish at a durable, IDLE TURN_END')
+            await shot(caseArt, 'thread-snapshot-reload-complete')
+            assert(navigations === 1, `expected only one reload, got ${navigations} main-frame navigations`)
+            assert(threadGetsAfterBootstrap === 0, `unexpected Thread GETs after WS bootstrap: ${threadGetsAfterBootstrap}`)
+            expectNoFatal(pageErrors, consoleErrors)
+          } finally {
+            page.off('framenavigated', onNavigation)
+            page.off('request', onRequest)
+          }
+        },
+      )
+    },
+  )
+
+  await run(
     'ui.chat.composer.attachment_previews',
     'Composer 附件只显示文件名，并按图片、视频和通用文件类型展示缩略图或图标',
     async (caseArt) => {
@@ -1341,12 +1420,8 @@ async function createBranchedHistoryFixture(
 
 async function createHoldingQueueFixture(
   apiCtx,
-  { title, historicalMessage, queuedMessages },
+  { title, historicalMessage, queuedMessages = [] },
 ) {
-  assert(
-    Array.isArray(queuedMessages) && queuedMessages.length > 0,
-    'queued messages required',
-  )
   const suffix = cid().slice(0, 8)
   const mock = new HoldingOpenAiMock()
   const state = {
@@ -1469,8 +1544,9 @@ async function createHoldingQueueFixture(
         userMessageCommand(historicalMessage, cid()),
       ],
     })
-    await mock.waitForRequest()
+    await mock.waitForRequest(historicalMessage)
 
+    if (queuedMessages.length === 0) return fixtureOf(state)
     const active = await waitForActiveModel(apiCtx, state.threadId)
     // queuedMessages 逐条 THREAD batch（产品 HTTP 面一个 batch 只允许恰一条 USER_MESSAGE）。
     let cursor = active.thread
@@ -1510,8 +1586,11 @@ async function withUiFixture(page, createFixture, test) {
   } finally {
     if (fixture) {
       try {
-        await clearBrowserFixtureState(page, fixture)
-        await fixture.dispose()
+        try {
+          if (page.url() !== 'about:blank') await clearBrowserFixtureState(page, fixture)
+        } finally {
+          await fixture.dispose()
+        }
       } catch (cleanupError) {
         if (primaryError == null) {
           primaryError = cleanupError
@@ -2062,15 +2141,11 @@ async function waitForQueuedMessages(
 
 class HoldingOpenAiMock {
   constructor() {
-    this.requests = []
-    this.responses = new Set()
+    this.responses = new Map()
+    this.events = new EventEmitter()
     this.sockets = new Set()
     this.listening = false
     this.base = null
-    this.resolveFirstRequest = null
-    this.firstRequest = new Promise((resolve) => {
-      this.resolveFirstRequest = resolve
-    })
     this.server = createServer((request, response) => {
       void this.handle(request, response)
     })
@@ -2099,14 +2174,45 @@ class HoldingOpenAiMock {
     return `${this.base}${suffix}`
   }
 
-  async waitForRequest(timeoutMs = 15_000) {
-    if (this.requests.length > 0) return
-    await Promise.race([
-      this.firstRequest,
-      sleep(timeoutMs).then(() => {
-        throw new Error('hold provider did not receive a request')
-      }),
-    ])
+  async waitForRequest(message, timeoutMs = 15_000) {
+    const signal = AbortSignal.timeout(timeoutMs)
+    for (;;) {
+      for (const [response, held] of this.responses) {
+        if (held.userText.includes(message)) return response
+      }
+      try {
+        await once(this.events, 'held', { signal })
+      } catch (error) {
+        if (!signal.aborted) throw error
+        throw new Error('hold provider did not receive the expected user message')
+      }
+    }
+  }
+
+  release(response, text) {
+    const held = this.responses.get(response)
+    assert(held && !response.destroyed && !response.writableEnded, 'model response is no longer held')
+    const chunk = {
+      id: `e2e-ui-hold-${cid()}`,
+      object: 'chat.completion.chunk',
+      created: Math.floor(Date.now() / 1000),
+      model: held.model,
+    }
+    response.write(`data: ${JSON.stringify({
+      ...chunk,
+      choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }],
+    })}\n\n`)
+    response.write(`data: ${JSON.stringify({
+      ...chunk,
+      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    })}\n\n`)
+    response.write(`data: ${JSON.stringify({
+      ...chunk,
+      choices: [],
+      usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
+    })}\n\n`)
+    response.end('data: [DONE]\n\n')
+    this.responses.delete(response)
   }
 
   async handle(request, response) {
@@ -2120,27 +2226,26 @@ class HoldingOpenAiMock {
     let body
     try {
       body = JSON.parse(await readRequestBody(request))
-    } catch (error) {
+    } catch {
       response.writeHead(400, { 'Content-Type': 'application/json' })
-      response.end(
-        JSON.stringify({ error: { message: `invalid hold JSON: ${error.message}` } }),
-      )
+      response.end(JSON.stringify({ error: { message: 'invalid hold JSON' } }))
       return
     }
-    this.requests.push(body)
+    const content = body.messages?.findLast((message) => message.role === 'user')?.content
+    const userText = typeof content === 'string' ? [content] : (content ?? []).map((part) => part.text)
     response.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
     })
     response.write(': hold\n\n')
-    this.responses.add(response)
+    this.responses.set(response, { model: body.model, userText })
     response.once('close', () => this.responses.delete(response))
-    this.resolveFirstRequest?.()
+    this.events.emit('held')
   }
 
   async close() {
-    for (const response of this.responses) response.destroy()
+    for (const response of this.responses.keys()) response.destroy()
     this.responses.clear()
     for (const socket of this.sockets) socket.destroy()
     this.sockets.clear()
