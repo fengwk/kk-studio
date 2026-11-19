@@ -1578,6 +1578,137 @@ class AnthropicRequestEncoderTest {
     assertEquals(0, countCacheMarkers(nativeFields));
   }
 
+  @Test
+  void toolEncodingRejectsInvalidDefinitions() throws IOException {
+    ModelVariant duplicateNativeTools =
+        new ModelVariant(
+            "default",
+            null,
+            PromptCacheRetention.NONE,
+            new ProviderProtocolOptions(
+                "{\"tools\":["
+                    + "{\"type\":\"web_search_20250305\",\"name\":\"search\"},"
+                    + "{\"type\":\"web_search_20250305\",\"name\":\"search\"}]}"));
+    ProviderException duplicate =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(
+                        duplicateNativeTools,
+                        List.of(userMsg(new ProviderTextBlock("hi"))),
+                        List.of(),
+                        ProviderCacheControl.none()),
+                    descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, duplicate.kind());
+    assertTrue(duplicate.getMessage().contains("duplicates a tool name"));
+
+    ModelVariant invalidNativeName =
+        new ModelVariant(
+            "default",
+            null,
+            PromptCacheRetention.NONE,
+            new ProviderProtocolOptions(
+                "{\"tools\":[{\"type\":\"web_search_20250305\",\"name\":7}]}"));
+    ProviderException invalidName =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(
+                        invalidNativeName,
+                        List.of(userMsg(new ProviderTextBlock("hi"))),
+                        List.of(),
+                        ProviderCacheControl.none()),
+                    descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, invalidName.kind());
+    assertTrue(invalidName.getMessage().contains("supported hosted tool"));
+
+    ProviderException malformedHostedDefinition =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(
+                        defaultVariant(),
+                        List.of(
+                            userMsg(new ProviderTextBlock("hi")),
+                            new ProviderMessage(
+                                ProviderMessageRole.SYSTEM,
+                                List.of(new ProviderSystemHostedToolAdditionBlock("{")))),
+                        List.of(),
+                        ProviderCacheControl.none()),
+                    descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, malformedHostedDefinition.kind());
+    assertTrue(malformedHostedDefinition.getMessage().contains("hosted tool definition"));
+
+    for (String invalidDefinition : List.of("{}", "[]")) {
+      ProviderException invalidHostedDefinition =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      request(
+                          defaultVariant(),
+                          List.of(
+                              userMsg(new ProviderTextBlock("hi")),
+                              new ProviderMessage(
+                                  ProviderMessageRole.SYSTEM,
+                                  List.of(
+                                      new ProviderSystemHostedToolAdditionBlock(
+                                          invalidDefinition)))),
+                          List.of(),
+                          ProviderCacheControl.none()),
+                      descriptor));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, invalidHostedDefinition.kind());
+      assertTrue(invalidHostedDefinition.getMessage().contains("hosted tool definition"));
+    }
+
+    ProviderToolDefinition reserved =
+        new ProviderToolDefinition(
+            "__kk_deferred_placeholder__", "reserved", "{\"type\":\"object\"}");
+    ProviderException reservedRuntimeTool =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    requestWithClientToolBaseline(
+                        List.of(userMsg(new ProviderTextBlock("hi"))),
+                        List.of(reserved),
+                        ProviderCacheControl.none()),
+                    descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, reservedRuntimeTool.kind());
+
+    ProviderRequest baseline =
+        requestWithClientToolBaseline(
+            List.of(userMsg(new ProviderTextBlock("hi"))),
+            List.of(new ProviderToolDefinition("bash", "run bash", "{\"type\":\"object\"}")),
+            ProviderCacheControl.none());
+    ModelVariant collidingNativeTools =
+        new ModelVariant(
+            "default",
+            null,
+            PromptCacheRetention.NONE,
+            new ProviderProtocolOptions(
+                "{\"tools\":[{\"type\":\"web_search_20250305\","
+                    + "\"name\":\"__kk_deferred_placeholder__\"}]}"));
+    ProviderRequest collidingPlaceholder =
+        new ProviderRequest(
+            baseline.model(),
+            collidingNativeTools,
+            baseline.outputTokens(),
+            baseline.systemInstruction(),
+            baseline.messages(),
+            baseline.tools(),
+            baseline.cacheControl(),
+            true);
+    ProviderException placeholderCollision =
+        assertThrows(
+            ProviderException.class, () -> encoder.encode(collidingPlaceholder, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, placeholderCollision.kind());
+    assertTrue(placeholderCollision.getMessage().contains("reserved deferred placeholder name"));
+  }
+
   private JsonNode cacheWire(List<ProviderMessage> messages) throws IOException {
     return MAPPER.readTree(
         encoder
@@ -1810,6 +1941,205 @@ class AnthropicRequestEncoderTest {
             .path("input");
     assertTrue(normalizedInput.isObject());
     assertTrue(normalizedInput.isEmpty());
+  }
+
+  @Test
+  void nativeReplayFallsBackOnOwnedFieldCollisionAndKeepsOpaqueBlocks() throws IOException {
+    ProviderReplayAffinity affinity = descriptor.affinity("claude-3-5-sonnet");
+    ObjectNode collidingFields = NODES.objectNode().put("text", "must not replace durable text");
+    ProviderBlockData collidingTextData =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, null, null, null, collidingFields);
+    ProviderMessage collidingText =
+        asstMsg(List.of(new ProviderTextBlock("durable text", collidingTextData)));
+    JsonNode fallbackWire =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            defaultVariant(),
+                            List.of(userMsg(new ProviderTextBlock("hi")), collidingText),
+                            List.of(),
+                            ProviderCacheControl.none()),
+                        descriptor)
+                    .bodyUtf8Bytes())
+            .path("messages")
+            .get(1)
+            .path("content")
+            .get(0);
+    assertEquals("text", fallbackWire.path("type").asString());
+    assertEquals("durable text", fallbackWire.path("text").asString());
+
+    ObjectNode opaqueFields = NODES.objectNode().put("future_member", "preserved");
+    ProviderBlockData opaqueData =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, null, null, null, opaqueFields);
+    ProviderMessage opaqueMessage =
+        asstMsg(List.of(new ProviderOpaqueBlock("future_block", opaqueData)));
+    JsonNode opaqueWire =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            defaultVariant(),
+                            List.of(userMsg(new ProviderTextBlock("hi")), opaqueMessage),
+                            List.of(),
+                            ProviderCacheControl.none()),
+                        descriptor)
+                    .bodyUtf8Bytes())
+            .path("messages")
+            .get(1)
+            .path("content")
+            .get(0);
+    assertEquals("future_block", opaqueWire.path("type").asString());
+    assertEquals("preserved", opaqueWire.path("future_member").asString());
+
+    for (String malformedKnownType : List.of("text", "thinking", "redacted_thinking", "tool_use")) {
+      ProviderBlockData malformedData =
+          new ProviderBlockData(
+              ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, NODES.objectNode());
+      ProviderMessage malformedOpaque =
+          asstMsg(List.of(new ProviderOpaqueBlock(malformedKnownType, malformedData)));
+      ProviderException malformedReplay =
+          assertThrows(
+              ProviderException.class,
+              () ->
+                  encoder.encode(
+                      request(
+                          defaultVariant(),
+                          List.of(userMsg(new ProviderTextBlock("hi")), malformedOpaque),
+                          List.of(),
+                          ProviderCacheControl.none()),
+                      descriptor));
+      assertEquals(ProviderErrorKind.INVALID_REQUEST, malformedReplay.kind());
+    }
+
+    ProviderBlockData unsignedThinkingData =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            affinity,
+            null,
+            null,
+            null,
+            NODES.objectNode());
+    ProviderMessage unsignedThinking =
+        asstMsg(List.of(new ProviderThinkingBlock("ordinary thought", unsignedThinkingData)));
+    JsonNode downgradedThinking =
+        MAPPER
+            .readTree(
+                encoder
+                    .encode(
+                        request(
+                            defaultVariant(),
+                            List.of(userMsg(new ProviderTextBlock("hi")), unsignedThinking),
+                            List.of(),
+                            ProviderCacheControl.none()),
+                        descriptor)
+                    .bodyUtf8Bytes())
+            .path("messages")
+            .get(1)
+            .path("content")
+            .get(0);
+    assertEquals("text", downgradedThinking.path("type").asString());
+    assertEquals("ordinary thought", downgradedThinking.path("text").asString());
+    assertFalse(downgradedThinking.has("signature"));
+
+    ObjectNode invalidCitations = NODES.objectNode().put("citations", "not-an-array");
+    ProviderBlockData invalidCitationData =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, null, null, null, invalidCitations);
+    ProviderMessage invalidCitationMessage =
+        asstMsg(List.of(new ProviderTextBlock("durable text", invalidCitationData)));
+    ProviderException invalidCitation =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                encoder.encode(
+                    request(
+                        defaultVariant(),
+                        List.of(userMsg(new ProviderTextBlock("hi")), invalidCitationMessage),
+                        List.of(),
+                        ProviderCacheControl.none()),
+                    descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, invalidCitation.kind());
+    assertTrue(invalidCitation.getMessage().contains("invalid text block in replay payload"));
+  }
+
+  @Test
+  void rejectsOpaqueNativeUnionBlocksThatDisagreeWithDurableSemantics() {
+    ProviderReplayAffinity affinity = descriptor.affinity("claude-3-5-sonnet");
+    ProviderBlockData emptyData =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, NODES.objectNode());
+
+    ObjectNode textFields = NODES.objectNode().put("text", "injected text");
+    ProviderException textMismatch =
+        assertInvalidReplay(
+            List.of(
+                new ProviderOpaqueBlock(
+                    "text",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, textFields)),
+                new ProviderTextBlock("durable text", emptyData)));
+    assertTrue(textMismatch.getMessage().contains("replay payload text does not match"));
+
+    ObjectNode thinkingFields =
+        NODES.objectNode().put("thinking", "injected thought").put("signature", "sig");
+    ProviderBlockData signedThinking =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            affinity,
+            "durable-signature",
+            null,
+            null,
+            NODES.objectNode());
+    ProviderException thinkingMismatch =
+        assertInvalidReplay(
+            List.of(
+                new ProviderOpaqueBlock(
+                    "thinking",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, thinkingFields)),
+                new ProviderThinkingBlock("durable thought", signedThinking)));
+    assertTrue(thinkingMismatch.getMessage().contains("replay payload thinking does not match"));
+
+    ObjectNode redactedFields = NODES.objectNode().put("data", "injected redaction");
+    ProviderException redactedMismatch =
+        assertInvalidReplay(
+            List.of(
+                new ProviderOpaqueBlock(
+                    "redacted_thinking",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, redactedFields)),
+                new ProviderRedactedThinkingBlock("durable redaction", emptyData)));
+    assertTrue(
+        redactedMismatch.getMessage().contains("replay payload redacted thinking does not match"));
+
+    ObjectNode toolFields =
+        NODES.objectNode().put("id", "call_1").put("name", "calc").set("input", NODES.objectNode());
+    ProviderException callCountMismatch =
+        assertInvalidReplay(
+            List.of(
+                new ProviderOpaqueBlock(
+                    "tool_use",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES, affinity, toolFields))));
+    assertTrue(callCountMismatch.getMessage().contains("tool call count does not match"));
+  }
+
+  private ProviderException assertInvalidReplay(List<ProviderContentBlock> assistantBlocks) {
+    ProviderRequest request =
+        request(
+            defaultVariant(),
+            List.of(userMsg(new ProviderTextBlock("hi")), asstMsg(assistantBlocks)),
+            List.of(),
+            ProviderCacheControl.none());
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> encoder.encode(request, descriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+    return error;
   }
 
   /** 意图：验证不同 format (例如 OPENAI_CHAT) 的 native blocks 能够安全降级为 semantic fallback 而不被同格式校验拦截。 */

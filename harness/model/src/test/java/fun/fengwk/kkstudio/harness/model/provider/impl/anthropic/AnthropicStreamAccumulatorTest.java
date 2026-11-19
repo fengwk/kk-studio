@@ -107,6 +107,32 @@ class AnthropicStreamAccumulatorTest {
   }
 
   @Test
+  void ignoresEventsAfterBridgeTerminalAndRejectsNonStringStopReason() {
+    AnthropicStreamAccumulator closedAccumulator =
+        new AnthropicStreamAccumulator(request, descriptor, bridge);
+    bridge.emitError(new ProviderException(ProviderErrorKind.TRANSIENT, "closed"));
+    closedAccumulator.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}");
+    assertTrue(emittedEvents.isEmpty());
+
+    AnthropicStreamAccumulator malformedAccumulator =
+        new AnthropicStreamAccumulator(
+            request, descriptor, new ProviderStreamBridge(recordingHandler));
+    malformedAccumulator.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1}}}");
+    ProviderException error =
+        assertThrows(
+            ProviderException.class,
+            () ->
+                malformedAccumulator.handleEvent(
+                    "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":1}}"));
+    assertEquals(ProviderErrorKind.INVALID_RESPONSE, error.kind());
+    assertTrue(error.getMessage().contains("stop_reason must be string"));
+  }
+
+  @Test
   void missingUsageIsNotAZeroTokenRequest() {
     AnthropicStreamAccumulator accumulator =
         new AnthropicStreamAccumulator(request, descriptor, bridge);
@@ -487,6 +513,17 @@ class AnthropicStreamAccumulatorTest {
     // 未收到 message_stop 提前调用 finish
     ProviderException ex = assertThrows(ProviderException.class, accumulator::finish);
     assertEquals(ProviderErrorKind.INVALID_RESPONSE, ex.kind());
+
+    AnthropicStreamAccumulator missingStop =
+        new AnthropicStreamAccumulator(
+            request, descriptor, new ProviderStreamBridge(recordingHandler));
+    missingStop.handleEvent(
+        "message_start",
+        "{\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":1,\"output_tokens\":0}}}");
+    missingStop.handleEvent(
+        "message_delta", "{\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"}}");
+    ProviderException incomplete = assertThrows(ProviderException.class, missingStop::finish);
+    assertTrue(incomplete.getMessage().contains("ended unexpectedly"));
   }
 
   @Test
