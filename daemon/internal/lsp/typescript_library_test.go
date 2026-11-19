@@ -78,6 +78,11 @@ func TestTypeScriptLibrary_ConcurrentInstallAndResolveProfile(t *testing.T) {
 	if paths[0] != paths[1] {
 		t.Fatalf("concurrent install paths differ: %q and %q", paths[0], paths[1])
 	}
+	// An installed version does not need the installer to be present on PATH.
+	withoutNPM := TypeScriptLibrary{Directory: root, NPM: filepath.Join(root, "not-installed-npm")}
+	if path, err := withoutNPM.Install(context.Background()); err != nil || path != paths[0] {
+		t.Fatalf("reuse without npm = %q, %v", path, err)
+	}
 	invocations, err := os.ReadFile(counter)
 	if err != nil || string(invocations) != "x" {
 		t.Fatalf("npm invocations = %q, error = %v; want one execution", invocations, err)

@@ -53,9 +53,6 @@ func (l TypeScriptLibrary) Install(ctx context.Context) (installed string, retEr
 	if l.NPM == "" {
 		l.NPM = "npm"
 	}
-	if _, err := exec.LookPath(l.NPM); err != nil {
-		return "", errors.New("TypeScript LSP installation requires npm")
-	}
 	if err := native.EnsurePrivateDirectory(l.Directory); err != nil {
 		return "", fmt.Errorf("TypeScript LSP library directory is unavailable: %w", err)
 	}
@@ -86,6 +83,9 @@ func (l TypeScriptLibrary) Install(ctx context.Context) (installed string, retEr
 		return target, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return "", errors.New("installed TypeScript LSP profile cannot be inspected")
+	}
+	if _, err := exec.LookPath(l.NPM); err != nil {
+		return "", errors.New("TypeScript LSP installation requires npm")
 	}
 	stage, err := os.MkdirTemp(root, ".typescript-staging-")
 	if err != nil {
