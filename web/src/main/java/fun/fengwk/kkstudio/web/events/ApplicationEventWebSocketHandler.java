@@ -393,7 +393,8 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
           return;
         }
         if (resource.kind() == ApplicationEventHub.ResourceKind.THREAD) {
-          if (!subscriptions.containsKey(resource)) {
+          Subscription subscription = subscriptions.get(resource);
+          if (subscription == null) {
             enqueueResourceError(
                 EventFrameCodec.RESOURCE_NOT_SUBSCRIBED,
                 "thread resource is not subscribed on this connection",
@@ -401,7 +402,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
             return;
           }
           pausedSnapshots.remove(resource);
-          if (!hub.requestThreadSnapshot(resource)) {
+          if (!hub.requestThreadSnapshot(subscription)) {
             enqueueResourceError(
                 EventFrameCodec.THREAD_SNAPSHOT_FAILED,
                 "thread snapshot could not be requested",

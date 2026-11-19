@@ -448,6 +448,47 @@ class ApplicationEventHubTest {
         1, projectReleases.get(), "last release must close the generic invalidation upstream");
   }
 
+  /** Transport sinks and unsubscribe may contend on the connection lock, not on the Hub lock. */
+  @Test
+  void canReleaseWhileFanoutSinkIsWaiting() throws Exception {
+    AtomicReference<Consumer<NotificationInvalidationSource.Event>> projectConsumer =
+        new AtomicReference<>();
+    when(projectChangeSource.subscribe(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              projectConsumer.set(invocation.getArgument(1));
+              return (Runnable) () -> {};
+            });
+    CountDownLatch entered = new CountDownLatch(1);
+    CountDownLatch unblock = new CountDownLatch(1);
+    Subscription subscription =
+        hub.subscribe(
+            PROJECTS_KEY,
+            ignored -> {
+              entered.countDown();
+              try {
+                assertTrue(unblock.await(5, TimeUnit.SECONDS));
+              } catch (InterruptedException error) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError(error);
+              }
+            });
+    subscription.activate();
+    try (ExecutorService worker = Executors.newVirtualThreadPerTaskExecutor()) {
+      Future<?> delivery =
+          worker.submit(
+              () ->
+                  projectConsumer.get().accept(new NotificationInvalidationSource.Event.Resync()));
+      try {
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+        worker.submit(subscription::close).get(2, TimeUnit.SECONDS);
+      } finally {
+        unblock.countDown();
+      }
+      delivery.get(5, TimeUnit.SECONDS);
+    }
+  }
+
   @Test
   void resourceKeysEnforceVersionedAndGlobalShapes() {
     assertThrows(NullPointerException.class, () -> new ResourceKey(ResourceKind.THREAD, null));

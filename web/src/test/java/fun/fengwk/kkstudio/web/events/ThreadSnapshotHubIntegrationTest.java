@@ -177,20 +177,23 @@ class ThreadSnapshotHubIntegrationTest {
               requested.addAll(cursors);
               HarnessThreadSnapshotDTO snapshot = snapshot(HEAD);
               snapshot.setEntries(List.of());
-              return List.of(snapshot);
+              return cursors.stream().map(ignored -> snapshot).toList();
             },
             scheduler);
     hub = createHub(publisher, () -> 8);
 
     Subscription subscription = hub.subscribe(THREAD_KEY, received::add, BASE);
+    Subscription sibling = hub.subscribe(THREAD_KEY, ignored -> {}, BASE);
     subscription.activate();
+    sibling.activate();
     tasks.remove().run();
-    assertTrue(hub.requestThreadSnapshot(THREAD_KEY));
+    assertTrue(hub.requestThreadSnapshot(subscription));
     tasks.remove().run();
 
-    assertEquals(Arrays.asList(BASE, null), requested);
+    assertEquals(Arrays.asList(BASE, null, HEAD), requested);
     assertEquals(2, received.size());
     subscription.close();
+    sibling.close();
   }
 
   @Test

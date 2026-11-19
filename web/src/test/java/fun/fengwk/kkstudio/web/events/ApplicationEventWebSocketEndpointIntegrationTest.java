@@ -209,8 +209,8 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
   }
 
   @Test
-  void subscribeExistingThreadReturnsSubscribedAckWithCursor() throws Exception {
-    // 经真实 API 创建 Chat，并单次提交 command-batch 创建 Session/Thread；再经 WS 订阅验证 ack。
+  void subscribeExistingThreadAcknowledgesBeforeDurableCatchUp() throws Exception {
+    // 走真实 HTTP 首载和 WS 续接，验证 ACK 先于权威 snapshot，而不是 Thread version 通知。
     HttpClient http = HttpClient.newHttpClient();
     HttpResponse<String> chatResponse =
         http.send(
@@ -265,7 +265,13 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     assertEquals(202, threadResponse.statusCode(), threadResponse.body());
     JsonNode created = MAPPER.readTree(threadResponse.body());
     assertEquals(threadId, created.path("thread").path("threadId").asText());
-    String version = created.path("thread").path("version").asText();
+    HttpResponse<String> initial =
+        http.send(
+            HttpRequest.newBuilder(uri("/api/harness/threads/" + threadId)).GET().build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, initial.statusCode());
+    String base = MAPPER.readTree(initial.body()).path("thread").path("headEntryId").asText();
+    assertEquals(base, UUID.fromString(base).toString());
 
     FrameCollector collector = new FrameCollector();
     WebSocket socket = connect(collector);
@@ -274,17 +280,24 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
         .sendText(
             "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                 + threadId
-                + "\"}}",
+                + "\"},\"afterEntryId\":\""
+                + base
+                + "\"}",
             true)
         .get(10, TimeUnit.SECONDS);
 
     assertEquals(
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + threadId
-            + "\"},\"cursor\":\""
-            + version
-            + "\"}",
+            + "\"},\"cursor\":\"0\"}",
         collector.nextText());
+    JsonNode snapshot = MAPPER.readTree(collector.nextText());
+    assertEquals("event", snapshot.path("type").asText());
+    assertEquals("snapshot", snapshot.path("name").asText());
+    assertFalse(snapshot.has("cursor"));
+    assertEquals(threadId, snapshot.path("data").path("thread").path("threadId").asText());
+    assertEquals(base, snapshot.path("data").path("baseEntryId").asText());
+    assertTrue(snapshot.path("data").path("entries").isArray());
     socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);
   }
 

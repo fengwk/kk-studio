@@ -350,8 +350,9 @@ final class ApplicationEventHub implements AutoCloseable {
     }
   }
 
-  /** 请求当前已订阅执行树的强制权威快照；不创建订阅，重复请求由 root publisher 合并。 */
-  boolean requestThreadSnapshot(ResourceKey resource) {
+  /** Force a complete snapshot only for the subscriber requesting it. */
+  boolean requestThreadSnapshot(Subscription subscription) {
+    ResourceKey resource = subscription.resource();
     if (resource.kind() != ResourceKind.THREAD) {
       return false;
     }
@@ -359,17 +360,14 @@ final class ApplicationEventHub implements AutoCloseable {
     if (state == null) {
       return false;
     }
-    List<ThreadSnapshotPublisher.Handle> handles;
+    ThreadSnapshotPublisher.Handle handle;
     synchronized (state) {
-      if (state.retired || state.subscribers.isEmpty()) {
-        return false;
-      }
-      handles = List.copyOf(state.threadSnapshotHandles.values());
+      handle = state.retired ? null : state.threadSnapshotHandles.get(subscription);
     }
-    if (handles.isEmpty()) {
+    if (handle == null) {
       return false;
     }
-    handles.forEach(handle -> handle.request(true));
+    handle.request(true);
     return true;
   }
 
@@ -431,11 +429,10 @@ final class ApplicationEventHub implements AutoCloseable {
         HarnessChangeSubscription snapshots =
             harnessChanges
                 .threadSnapshots()
-                .subscribe(state.key.id(), event -> onThreadSnapshotChange(state, event));
+                .subscribe(state.key.id(), ignored -> requestThreadSnapshots(state));
         state.threadSnapshotInvalidationHandle = snapshots;
         state.threadEnvironmentInvalidationRelease =
-            environmentChangeSource.subscribe(
-                null, event -> onThreadEnvironmentChange(state, event));
+            environmentChangeSource.subscribe(null, ignored -> requestThreadSnapshots(state));
         state.realtimeHandle =
             realtimeSource.subscribe(
                 state.key.id(),
@@ -478,17 +475,8 @@ final class ApplicationEventHub implements AutoCloseable {
     }
   }
 
-  private void onThreadSnapshotChange(
-      ApplicationEventResourceState state, HarnessInvalidationChanges.Event event) {
-    requestThreadSnapshots(state, event instanceof HarnessInvalidationChanges.Event.Resync);
-  }
-
-  private void onThreadEnvironmentChange(
-      ApplicationEventResourceState state, NotificationInvalidationSource.Event event) {
-    requestThreadSnapshots(state, event instanceof NotificationInvalidationSource.Event.Resync);
-  }
-
-  private void requestThreadSnapshots(ApplicationEventResourceState state, boolean full) {
+  /** LISTEN reconnect lost hints, not delivered snapshots; keep each subscriber's known base. */
+  private void requestThreadSnapshots(ApplicationEventResourceState state) {
     List<ThreadSnapshotPublisher.Handle> handles;
     synchronized (state) {
       if (state.retired) {
@@ -497,7 +485,7 @@ final class ApplicationEventHub implements AutoCloseable {
       handles = List.copyOf(state.threadSnapshotHandles.values());
     }
     for (ThreadSnapshotPublisher.Handle handle : handles) {
-      handle.request(full);
+      handle.request(false);
     }
   }
 
@@ -553,12 +541,13 @@ final class ApplicationEventHub implements AutoCloseable {
   }
 
   /**
-   * 在资源锁内 fan-out：与「读 cursor + 注册订阅者」互斥，保证 ack 后无注册竞态窗口。 没有订阅者时（establish 上游期间的回调可能先于第一个
-   * LocalSubscription 加入）信号暂存到 {@link ApplicationEventResourceState#early}，由随后加入的订阅者按 cursor
-   * 过滤回放；early 超过缓冲上限时清空并折叠为单个 {@link Signal.Resync}，之后不再累积（首订阅前内存有界且可恢复）。 retired 状态（最后释放/建立失败/hub
-   * close 淘汰）的迟到回调直接丢弃，不向 detached state 累积。
+   * 在资源锁内捕获订阅集合，锁外投递；关闭与投递由各订阅及传输层围栏裁决。没有订阅者时（establish 上游期间的回调可能先于第一个 LocalSubscription 加入）信号暂存到
+   * {@link ApplicationEventResourceState#early}，由随后加入的订阅者按 cursor 过滤回放；early 超过缓冲上限时清空并折叠为单个 {@link
+   * Signal.Resync}，之后不再累积（首订阅前内存有界且可恢复）。 retired 状态（最后释放/建立失败/hub close 淘汰）的迟到回调直接丢弃，不向 detached
+   * state 累积。
    */
   private void fanout(ApplicationEventResourceState state, Signal signal) {
+    List<ApplicationEventLocalSubscription> recipients;
     synchronized (state) {
       if (state.retired) {
         return;
@@ -576,9 +565,10 @@ final class ApplicationEventHub implements AutoCloseable {
         state.early.add(signal);
         return;
       }
-      for (ApplicationEventLocalSubscription subscription : state.subscribers) {
-        subscription.deliver(signal);
-      }
+      recipients = List.copyOf(state.subscribers);
+    }
+    for (ApplicationEventLocalSubscription subscription : recipients) {
+      subscription.deliver(signal);
     }
   }
 
