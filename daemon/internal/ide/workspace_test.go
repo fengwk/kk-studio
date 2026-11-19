@@ -289,6 +289,17 @@ func TestRecoveryAggregateQuota(t *testing.T) {
 	if _, err := WriteRecoveryBackup(cfg, second, bytes*2-1); err == nil || err.Error() != "recovery data quota is exhausted" {
 		t.Fatalf("aggregate quota error = %v", err)
 	}
+	// A prior-only record retained after an interrupted publication still occupies quota.
+	firstPath, err := recoveryPath(cfg, first.ViewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(firstPath, recoveryPriorPath(firstPath)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteRecoveryBackup(cfg, second, bytes*2-1); err == nil || err.Error() != "recovery data quota is exhausted" {
+		t.Fatalf("aggregate quota ignored retained prior: %v", err)
+	}
 	if _, err := WriteRecoveryBackup(cfg, second, 0); err == nil || err.Error() != "recovery quota is invalid" {
 		t.Fatalf("invalid quota error = %v", err)
 	}
@@ -507,7 +518,11 @@ func TestDurableRecoveryRestoresLeftoverPrior(t *testing.T) {
 	if err := os.Rename(path, recoveryPriorPath(path)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := writeDurableRecoveryBackup(cfg, durableBackup(cfg, viewID, "replacement"), 4096); err != nil {
+	replacement := durableBackup(cfg, viewID, "replacement")
+	if _, err := WriteRecoveryBackup(cfg, replacement, 4096); err == nil {
+		t.Fatal("best-effort write bypassed prior reconciliation")
+	}
+	if _, err := writeDurableRecoveryBackup(cfg, replacement, 4096); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Lstat(recoveryPriorPath(path)); !os.IsNotExist(err) {

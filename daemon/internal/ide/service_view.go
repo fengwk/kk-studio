@@ -834,11 +834,7 @@ func (s *Service) snapshotRecovery(ctx context.Context, view *viewRecord, requir
 		}
 		return false, NewError(result.MessageOr("dirty text snapshot failed"), "UNAVAILABLE")
 	}
-	complete := !requireComplete
-	if result.Complete != nil {
-		complete = *result.Complete
-	}
-	complete = complete && (result.Omitted == nil || *result.Omitted == 0)
+	complete := result.Complete != nil && *result.Complete && (result.Omitted == nil || *result.Omitted == 0)
 	if requireComplete && (!complete || result.Documents == nil) {
 		return false, NewError("dirty text snapshot was incomplete", "UNAVAILABLE")
 	}
@@ -850,6 +846,8 @@ func (s *Service) snapshotRecovery(ctx context.Context, view *viewRecord, requir
 		documents[i] = RecoveryDocument(document)
 	}
 	backup := RecoveryBackup{ViewID: view.viewID, BindingEpoch: strconv.FormatInt(view.bindingEpoch, 10), Directory: view.directory, CreatedAt: s.scheduler.Now().UTC().Format(time.RFC3339Nano), Complete: complete, Documents: documents}
+	s.recoveryMu.Lock()
+	defer s.recoveryMu.Unlock()
 	if requireComplete {
 		_, err = writeDurableRecoveryBackup(s.cfg, backup, s.recoveryQuota)
 	} else {

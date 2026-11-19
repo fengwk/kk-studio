@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"syscall"
 	"time"
@@ -23,7 +24,7 @@ const (
 	// records like the daemon without reading configuration or credentials.
 	ideRecoveryQuota = int64(16 << 20)
 	ideRecoveryUsage = "Usage: kk-studio-daemon ide-recovery list --data-dir <absolute-path>\n" +
-		"       kk-studio-daemon ide-recovery export <viewId> <absolute-json> --data-dir <absolute-path>\n"
+		"       kk-studio-daemon ide-recovery export <viewId>[.prior] <absolute-json> --data-dir <absolute-path>\n"
 )
 
 // recoveryOwnerOnlySupported reports whether the exported copy can be restricted to the
@@ -31,9 +32,11 @@ const (
 // export fails closed there instead of publishing a copy it cannot protect.
 const recoveryOwnerOnlySupported = runtime.GOOS != "windows"
 
-// ideRecoveryEntry is one backup summary; draft text and document paths never appear.
+// ideRecoveryEntry is one backup summary; draft text and document paths never appear. A prior
+// record carries `prior:true` so an operator can tell the two records of one view apart.
 type ideRecoveryEntry struct {
 	ViewID    string `json:"viewId"`
+	Prior     bool   `json:"prior,omitempty"`
 	CreatedAt string `json:"createdAt,omitempty"`
 	Complete  *bool  `json:"complete,omitempty"`
 	Problem   string `json:"problem,omitempty"`
@@ -95,7 +98,8 @@ func parseIDERecoveryArgs(args []string) (string, []string, string, bool) {
 	return "", nil, "", false
 }
 
-// listIDERecovery reports safe identity, time and completeness metadata per record.
+// listIDERecovery reports safe identity, time and completeness metadata per record, including
+// the prior record kept for a view so both copies of one view can be compared.
 func listIDERecovery(cfg config.DaemonConfig) (string, error) {
 	entries, err := os.ReadDir(ideRecoveryDirectory(cfg))
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -105,27 +109,36 @@ func listIDERecovery(cfg config.DaemonConfig) (string, error) {
 		Backups []ideRecoveryEntry `json:"backups"`
 	}{Backups: []ideRecoveryEntry{}}
 	for _, entry := range entries {
-		viewID, ok := strings.CutSuffix(entry.Name(), ".json")
-		if !ok {
+		name := entry.Name()
+		viewID, canonical := strings.CutSuffix(name, ".json")
+		prior := !canonical && strings.HasPrefix(name, ".") && strings.HasSuffix(name, ".prior")
+		if prior {
+			viewID = strings.TrimSuffix(strings.TrimPrefix(name, "."), ".prior")
+		}
+		if _, err := ide.ValidateViewID(viewID); err != nil || !(canonical || prior) {
 			continue
 		}
-		if _, err := ide.ValidateViewID(viewID); err != nil {
-			continue
-		}
-		backup, err := readIDERecovery(cfg, viewID)
+		backup, err := readIDERecovery(cfg, viewID, prior)
 		switch {
 		case err != nil:
-			listing.Backups = append(listing.Backups, ideRecoveryEntry{ViewID: viewID, Problem: err.Error()})
+			listing.Backups = append(listing.Backups, ideRecoveryEntry{ViewID: viewID, Prior: prior, Problem: err.Error()})
 		case backup != nil:
 			createdAt, ok := recoveryTimestamp(backup.CreatedAt)
 			if !ok {
-				listing.Backups = append(listing.Backups, ideRecoveryEntry{ViewID: viewID, Problem: "recovery backup timestamp is invalid"})
+				listing.Backups = append(listing.Backups, ideRecoveryEntry{ViewID: viewID, Prior: prior, Problem: "recovery backup timestamp is invalid"})
 				continue
 			}
 			complete := backup.Complete
-			listing.Backups = append(listing.Backups, ideRecoveryEntry{ViewID: viewID, CreatedAt: createdAt, Complete: &complete})
+			listing.Backups = append(listing.Backups, ideRecoveryEntry{ViewID: viewID, Prior: prior, CreatedAt: createdAt, Complete: &complete})
 		}
 	}
+	sort.Slice(listing.Backups, func(i, j int) bool {
+		a, b := listing.Backups[i], listing.Backups[j]
+		if a.ViewID == b.ViewID {
+			return !a.Prior && b.Prior
+		}
+		return a.ViewID < b.ViewID
+	})
 	data, err := json.MarshalIndent(listing, "", "  ")
 	if err != nil {
 		return "", errors.New("recovery listing could not be encoded")
@@ -134,11 +147,13 @@ func listIDERecovery(cfg config.DaemonConfig) (string, error) {
 }
 
 // exportIDERecovery copies one validated record to a new owner-only file; the persisted
-// record is never modified and an existing destination is never overwritten.
-func exportIDERecovery(cfg config.DaemonConfig, viewID, output string) (string, error) {
+// record is never modified and an existing destination is never overwritten. `<viewId>.prior`
+// selects the prior record rather than the canonical one.
+func exportIDERecovery(cfg config.DaemonConfig, viewArg, output string) (string, error) {
 	if !recoveryOwnerOnlySupported {
 		return "", errors.New("owner-only output permissions cannot be enforced on Windows")
 	}
+	viewID, prior := strings.CutSuffix(viewArg, ".prior")
 	viewID, err := ide.ValidateViewID(viewID)
 	if err != nil {
 		return "", err
@@ -150,11 +165,14 @@ func exportIDERecovery(cfg config.DaemonConfig, viewID, output string) (string, 
 	if insideRecovery(destination, cfg) {
 		return "", errors.New("output path must be outside the IDE recovery directory")
 	}
-	backup, err := readIDERecovery(cfg, viewID)
+	backup, err := readIDERecovery(cfg, viewID, prior)
 	if err != nil {
 		return "", err
 	}
 	if backup == nil {
+		if prior {
+			return "", errors.New("recovery prior backup was not found")
+		}
 		return "", errors.New("recovery backup was not found")
 	}
 	if _, ok := recoveryTimestamp(backup.CreatedAt); !ok {
@@ -171,25 +189,23 @@ func exportIDERecovery(cfg config.DaemonConfig, viewID, output string) (string, 
 	if backup.Complete {
 		status = "complete"
 	}
-	return fmt.Sprintf("Exported IDE recovery backup %s (%s) to %s\n", viewID, status, destination), nil
+	label := "backup"
+	if prior {
+		label = "prior backup"
+	}
+	return fmt.Sprintf("Exported IDE recovery %s %s (%s) to %s\n", label, viewID, status, destination), nil
 }
 
 func ideRecoveryDirectory(cfg config.DaemonConfig) string {
 	return filepath.Join(ide.IDEPathsFor(cfg).IDEDir, "recovery")
 }
 
-// readIDERecovery rejects symlinks, FIFOs and directories before the shared reader opens
-// the record, so listing and export never follow a link or block on a pipe. Any other stat
-// failure falls through to the reader's safe diagnostic.
-func readIDERecovery(cfg config.DaemonConfig, viewID string) (*ide.RecoveryBackup, error) {
-	info, err := os.Lstat(filepath.Join(ideRecoveryDirectory(cfg), viewID+".json"))
-	if err == nil {
-		if !info.Mode().IsRegular() {
-			return nil, errors.New("recovery backup is not a regular file")
-		}
-		if info.Size() > ideRecoveryQuota {
-			return nil, errors.New("recovery backup exceeds the configured quota")
-		}
+// readIDERecovery delegates to the shared reader, which rejects symlinks, FIFOs, directories and
+// oversized records before reading them, so listing and export never follow a link or block on a
+// pipe. The prior record is the previous copy kept until its replacement was durable.
+func readIDERecovery(cfg config.DaemonConfig, viewID string, prior bool) (*ide.RecoveryBackup, error) {
+	if prior {
+		return ide.ReadPriorRecoveryBackup(cfg, viewID, ideRecoveryQuota)
 	}
 	return ide.ReadRecoveryBackup(cfg, viewID, ideRecoveryQuota)
 }

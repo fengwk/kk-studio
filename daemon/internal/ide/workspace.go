@@ -211,8 +211,7 @@ func recoveryPath(config config.DaemonConfig, viewID string) (string, error) {
 	return filepath.Join(recoveryDirectory(config), viewID+".json"), nil
 }
 
-// recoveryPriorPath names the previous record kept until its replacement is durable. It does not end
-// in `.json`, so it is not a recovery record and the quota scan ignores it.
+// recoveryPriorPath names the previous record kept until its replacement is durable.
 func recoveryPriorPath(path string) string {
 	return filepath.Join(filepath.Dir(path), "."+strings.TrimSuffix(filepath.Base(path), ".json")+".prior")
 }
@@ -240,9 +239,8 @@ func WriteRecoveryBackup(config config.DaemonConfig, backup RecoveryBackup, quot
 	return writeRecoveryBackup(config, backup, quota, nil)
 }
 
-// writeDurableRecoveryBackup stores a recovery record that survives a power loss: the record and
-// every directory entry it depends on are flushed, and the previous record is restored when
-// publication fails at any step, including the flush after the rename.
+// writeDurableRecoveryBackup flushes the record and its directory entries. If publication
+// fails after rename, the previous record is restored or retained as an exportable prior.
 func writeDurableRecoveryBackup(config config.DaemonConfig, backup RecoveryBackup, quota int64) (int64, error) {
 	if !recoveryDirectorySyncSupported {
 		return 0, &RecoveryQuotaError{message: "recovery backup durability is not supported on this platform"}
@@ -278,25 +276,50 @@ func writeRecoveryBackup(config config.DaemonConfig, backup RecoveryBackup, quot
 	if err = os.Chmod(dir, 0o700); err != nil {
 		return 0, &RecoveryQuotaError{message: "recovery directory is unavailable"}
 	}
+	if !backup.Complete {
+		previous, err := ReadRecoveryBackup(config, backup.ViewID, quota)
+		if err != nil {
+			return 0, err
+		}
+		if previous != nil && previous.Complete {
+			return 0, nil // A best-effort snapshot must not replace the last complete copy.
+		}
+	}
+	if syncDir == nil {
+		// Force-close may proceed, but a best-effort write cannot reconcile a rollback link.
+		if _, err := os.Lstat(recoveryPriorPath(path)); !errors.Is(err, fs.ErrNotExist) {
+			return 0, &RecoveryQuotaError{message: "recovery prior record requires reconciliation"}
+		}
+	}
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return 0, &RecoveryQuotaError{message: "recovery quota could not be measured: UNKNOWN"}
 	}
 	var used int64
 	for _, entry := range entries {
-		if !strings.HasSuffix(entry.Name(), ".json") {
+		name := entry.Name()
+		priorID, prior := strings.CutSuffix(strings.TrimPrefix(name, "."), ".prior")
+		prior = prior && strings.HasPrefix(name, ".")
+		if !strings.HasSuffix(name, ".json") && !prior {
 			continue
 		}
-		info, statErr := os.Stat(filepath.Join(dir, entry.Name()))
+		info, statErr := os.Stat(filepath.Join(dir, name))
 		if statErr != nil {
 			return 0, &RecoveryQuotaError{message: "recovery quota could not be measured: UNKNOWN"}
 		}
-		if info.Mode().IsRegular() {
-			used += info.Size()
-			if entry.Name() == filepath.Base(path) {
-				used -= info.Size()
+		if !info.Mode().IsRegular() || name == filepath.Base(path) {
+			continue
+		}
+		if prior {
+			canonical, err := os.Stat(filepath.Join(dir, priorID+".json"))
+			if err != nil && !errors.Is(err, fs.ErrNotExist) {
+				return 0, &RecoveryQuotaError{message: "recovery quota could not be measured: UNKNOWN"}
+			}
+			if os.SameFile(info, canonical) {
+				continue // The rollback link and the canonical record share the same data.
 			}
 		}
+		used += info.Size()
 	}
 	if used+int64(len(data)) > quota {
 		return 0, &RecoveryQuotaError{message: "recovery data quota is exhausted"}
@@ -404,12 +427,32 @@ func rollbackRecoveryRecord(path, prior string, previous bool) {
 
 // ReadRecoveryBackup reads and validates the record, returning nil when it does not exist.
 func ReadRecoveryBackup(config config.DaemonConfig, viewID string, quota int64) (*RecoveryBackup, error) {
+	return readRecoveryBackup(config, viewID, quota, false)
+}
+
+// ReadPriorRecoveryBackup reads a retained rollback record without modifying either copy.
+func ReadPriorRecoveryBackup(config config.DaemonConfig, viewID string, quota int64) (*RecoveryBackup, error) {
+	return readRecoveryBackup(config, viewID, quota, true)
+}
+
+func readRecoveryBackup(config config.DaemonConfig, viewID string, quota int64, prior bool) (*RecoveryBackup, error) {
 	if quota <= 0 {
 		return nil, &RecoveryQuotaError{message: "recovery quota is invalid"}
 	}
 	path, err := recoveryPath(config, viewID)
 	if err != nil {
 		return nil, err
+	}
+	if prior {
+		path = recoveryPriorPath(path)
+	}
+	if info, err := os.Lstat(path); err == nil {
+		if !info.Mode().IsRegular() {
+			return nil, &RecoveryQuotaError{message: "recovery backup is not a regular file"}
+		}
+		if info.Size() > quota {
+			return nil, &RecoveryQuotaError{message: "recovery backup exceeds the configured quota"}
+		}
 	}
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {

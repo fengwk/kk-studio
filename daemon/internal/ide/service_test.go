@@ -2356,7 +2356,7 @@ func TestDirtyNativeCloseDoesNotAllowForce(t *testing.T) {
 	}
 }
 
-// Verifies snapshot rejection, incomplete data, and quota exhaustion warn without blocking force-close.
+// Verifies backup problems do not block force-close and partial drafts preserve the last complete copy.
 func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -2366,6 +2366,7 @@ func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 	}{
 		{name: "rejected", quota: 4096, snapshot: map[string]any{"ok": false, "code": "DIRTY", "message": "snapshot rejected"}, event: "backup-failed"},
 		{name: "incomplete", quota: 4096, snapshot: map[string]any{"complete": false}, event: "backup-incomplete"},
+		{name: "missing completeness proof", quota: 4096, snapshot: map[string]any{}, event: "backup-incomplete"},
 		{name: "quota exhausted", quota: 1, snapshot: map[string]any{"documents": []map[string]string{{"path": "/workspace/file.txt", "text": "unsaved"}}}, event: "backup-failed"},
 	}
 	for _, test := range cases {
@@ -2387,6 +2388,13 @@ func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 			if !opened.GetOk() {
 				t.Fatalf("open reply=%v", opened)
 			}
+			if test.event == "backup-incomplete" {
+				previous := durableBackup(service.cfg, opened.GetViewId(), "last complete")
+				if _, err := WriteRecoveryBackup(service.cfg, previous, test.quota); err != nil {
+					t.Fatal(err)
+				}
+				test.snapshot["documents"] = []map[string]string{{"path": filepath.Join(root, "draft.txt"), "text": "partial"}}
+			}
 			_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"snapshot": test.snapshot})
 			defer cancelHost()
 			service.mu.Lock()
@@ -2403,6 +2411,12 @@ func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 				}
 			default:
 				t.Fatal("snapshot warning event missing")
+			}
+			if test.event == "backup-incomplete" {
+				backup, err := ReadRecoveryBackup(service.cfg, opened.GetViewId(), test.quota)
+				if err != nil || backup == nil || !backup.Complete || len(backup.Documents) != 1 || backup.Documents[0].Text != "last complete" {
+					t.Fatalf("last complete backup was not preserved: %#v, %v", backup, err)
+				}
 			}
 		})
 	}
@@ -2598,6 +2612,9 @@ func TestRestoreBackupFailureBoundaries(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("corrupt backup was removed: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := WriteRecoveryBackup(cfg, backup, 4096); err != nil {
 		t.Fatal(err)

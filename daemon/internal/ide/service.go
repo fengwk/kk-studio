@@ -89,6 +89,7 @@ type Service struct {
 	viewLocks        map[string]*sync.Mutex
 	claimLocks       map[string]*sync.Mutex
 	workspaceMu      sync.Mutex
+	recoveryMu       sync.Mutex // Serializes quota checks and publication across all views.
 	activeStreams    map[*activeIdeStream]struct{}
 	revision         int64
 	closed           bool

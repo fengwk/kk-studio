@@ -18,10 +18,21 @@ import (
 )
 
 const (
-	recoveryViewA = "123e4567-e89b-42d3-a456-426614174000"
-	recoveryViewB = "223e4567-e89b-42d3-a456-426614174001"
-	recoveryDraft = "synthetic unsaved draft line"
+	recoveryViewA      = "123e4567-e89b-42d3-a456-426614174000"
+	recoveryViewB      = "223e4567-e89b-42d3-a456-426614174001"
+	recoveryDraft      = "synthetic unsaved draft line"
+	recoveryPriorDraft = "synthetic previous draft line"
 )
+
+// writePrior stores the previous record a view keeps beside its canonical one.
+func writePrior(t *testing.T, cfg config.DaemonConfig, backup ide.RecoveryBackup) {
+	t.Helper()
+	data, err := json.Marshal(backup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(ideRecoveryDirectory(cfg), "."+backup.ViewID+".prior"), string(data)+"\n")
+}
 
 // seedRecovery writes synthetic records under a fresh data directory.
 func seedRecovery(t *testing.T, backups ...ide.RecoveryBackup) string {
@@ -337,6 +348,92 @@ func TestIDERecoveryLeavesOtherCommandsAlone(t *testing.T) {
 		if handled, _ := runIDERecoveryCLI(args, &bytes.Buffer{}, &bytes.Buffer{}); handled {
 			t.Fatalf("%q was claimed", args)
 		}
+	}
+}
+
+// A leftover prior record stays visible and exportable next to the canonical one, so an operator
+// can compare both copies of one view before deciding which one to keep.
+func TestIDERecoveryPriorRecord(t *testing.T) {
+	dataDir := seedRecovery(t, seededBackup(recoveryViewA, true))
+	cfg := config.DaemonConfig{DataDir: dataDir}
+	// View A keeps a distinct, older and incomplete prior record; view B only has a prior record,
+	// because its canonical copy never became durable.
+	writePrior(t, cfg, ide.RecoveryBackup{
+		ViewID: recoveryViewA, BindingEpoch: "6", Directory: filepath.Join(dataDir, "work"),
+		CreatedAt: "2025-02-03T04:05:00Z", Complete: false,
+		Documents: []ide.RecoveryDocument{{Path: "/workspace/draft.txt", Text: recoveryPriorDraft}},
+	})
+	writePrior(t, cfg, ide.RecoveryBackup{
+		ViewID: recoveryViewB, BindingEpoch: "7", Directory: filepath.Join(dataDir, "work"),
+		CreatedAt: "2025-02-03T04:05:06Z", Complete: true, Documents: []ide.RecoveryDocument{},
+	})
+
+	code, stdout, stderr := runRecovery(t, "ide-recovery", "list", "--data-dir", dataDir)
+	if code != 0 || stderr != "" {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+	if strings.Contains(stdout, recoveryDraft) || strings.Contains(stdout, recoveryPriorDraft) {
+		t.Fatalf("listing leaked draft content: %q", stdout)
+	}
+	var listing struct {
+		Backups []ideRecoveryEntry `json:"backups"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &listing); err != nil {
+		t.Fatalf("listing is not JSON: %v in %q", err, stdout)
+	}
+	if len(listing.Backups) != 3 {
+		t.Fatalf("listing = %#v", listing.Backups)
+	}
+	if got := listing.Backups[0]; got.ViewID != recoveryViewA || got.Prior || got.CreatedAt != "2025-02-03T04:05:06Z" || got.Complete == nil || !*got.Complete {
+		t.Fatalf("canonical entry = %#v", got)
+	}
+	if got := listing.Backups[1]; got.ViewID != recoveryViewA || !got.Prior || got.CreatedAt != "2025-02-03T04:05:00Z" || got.Complete == nil || *got.Complete {
+		t.Fatalf("prior entry = %#v", got)
+	}
+	if got := listing.Backups[2]; got.ViewID != recoveryViewB || !got.Prior {
+		t.Fatalf("prior-only entry = %#v", got)
+	}
+
+	canonical := filepath.Join(t.TempDir(), "canonical.json")
+	code, stdout, stderr = runRecovery(t, "ide-recovery", "export", recoveryViewA, canonical, "--data-dir", dataDir)
+	if code != 0 || stderr != "" {
+		t.Fatalf("canonical export code=%d stderr=%q", code, stderr)
+	}
+	if want := "Exported IDE recovery backup " + recoveryViewA + " (complete) to " + canonical + "\n"; stdout != want {
+		t.Fatalf("canonical stdout = %q, want %q", stdout, want)
+	}
+	previous := filepath.Join(t.TempDir(), "prior.json")
+	code, stdout, stderr = runRecovery(t, "ide-recovery", "export", recoveryViewA+".prior", previous, "--data-dir", dataDir)
+	if code != 0 || stderr != "" {
+		t.Fatalf("prior export code=%d stderr=%q", code, stderr)
+	}
+	if want := "Exported IDE recovery prior backup " + recoveryViewA + " (incomplete) to " + previous + "\n"; stdout != want {
+		t.Fatalf("prior stdout = %q, want %q", stdout, want)
+	}
+	var canonicalBackup, priorBackup ide.RecoveryBackup
+	if err := json.Unmarshal(readFile(t, canonical), &canonicalBackup); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(readFile(t, previous), &priorBackup); err != nil {
+		t.Fatal(err)
+	}
+	if len(canonicalBackup.Documents) != 1 || canonicalBackup.Documents[0].Text != recoveryDraft || !canonicalBackup.Complete {
+		t.Fatalf("canonical copy = %#v", canonicalBackup)
+	}
+	if len(priorBackup.Documents) != 1 || priorBackup.Documents[0].Text != recoveryPriorDraft || priorBackup.Complete || priorBackup.BindingEpoch != "6" {
+		t.Fatalf("prior copy = %#v", priorBackup)
+	}
+
+	// A view whose canonical record is gone keeps its prior copy listable and exportable.
+	if code, _, stderr = runRecovery(t, "ide-recovery", "export", recoveryViewB, filepath.Join(t.TempDir(), "b.json"), "--data-dir", dataDir); code != 1 || stderr != "IDE recovery export failed: recovery backup was not found\n" {
+		t.Fatalf("missing canonical code=%d stderr=%q", code, stderr)
+	}
+	priorOnly := filepath.Join(t.TempDir(), "b-prior.json")
+	if code, _, stderr = runRecovery(t, "ide-recovery", "export", recoveryViewB+".prior", priorOnly, "--data-dir", dataDir); code != 0 || stderr != "" {
+		t.Fatalf("prior-only export code=%d stderr=%q", code, stderr)
+	}
+	if _, err := os.Stat(priorOnly); err != nil {
+		t.Fatalf("prior-only copy missing: %v", err)
 	}
 }
 
