@@ -88,35 +88,24 @@ describe('useHarnessThreadRealtime', () => {
   })
   afterEach(() => vi.clearAllMocks())
 
-  it('uses one wire subscription, invalidates durable signals, and overlays the next delta', async () => {
+  it('keeps realtime overlays independent from snapshot synchronization', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
     const invalidate = vi.spyOn(client, 'invalidateQueries')
     const { result, rerender, sockets } = renderRealtime(client, { version: '42' })
     const socket = sockets.openLatest()
 
-    // 订阅建立（subscribed ack）与 durable 信号都触发 snapshot 对账；
-    // realtime 事件只走 overlay reducer，绝不触发 invalidate。
+    // 实时 overlay 仅消费 realtime 帧，不自行发起 snapshot HTTP。
     act(() => emitRealtime(sockets, realtime(1, 'partial')))
     await waitFor(() => expect(result.current?.modelStream?.text).toBe('partial'))
     expect(invalidate).not.toHaveBeenCalled()
 
-    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
-    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '0' }))
     act(() => {
-      socket.emitServer({
-        type: 'event',
-        resource: threadResource,
-        name: 'version',
-        data: { version: '43' },
-        cursor: '43',
-      })
       socket.emitServer({ type: 'resync', resource: threadResource })
-      socket.emitServer({ type: 'error', resource: threadResource, code: 'SUBSCRIBE_FAILED', message: 'boom' })
+      socket.emitServer({ type: 'error', resource: threadResource, code: 'THREAD_SNAPSHOT_FAILED', message: 'boom' })
     })
-    // 多个 durable 信号可合并为一个在途/尾随对账，但不会被 realtime overlay 代替。
-    await waitFor(() => expect(invalidate.mock.calls.length).toBeGreaterThan(1))
-    expect(invalidate.mock.calls.length).toBeLessThanOrEqual(3)
-    // version 前进不重建订阅：wire 上始终只有一条 subscribe。
+    expect(invalidate).not.toHaveBeenCalled()
+    // durable snapshot 同步由独立共享同步器负责；version prop 不会重建 realtime 订阅。
     rerender({ version: '43' })
     expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
   })
@@ -128,30 +117,28 @@ describe('useHarnessThreadRealtime', () => {
     const socket = sockets.openLatest()
     expect(requestStreamCatchup).not.toHaveBeenCalled()
 
-    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
+    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '0' }))
     await waitFor(() =>
       expect(requestStreamCatchup).toHaveBeenCalledWith('POST /api/harness/builtin/threads/{threadId}/stream-catchup', {
         path: { threadId: THREAD_ID },
         body: { invocationId: 'inv-1', attempt: 1 },
       }),
     )
-    // subscribed 先做 snapshot 对账，再发出唯一一次 best-effort catchup。
-    expect(invalidate).toHaveBeenCalledTimes(1)
-    expect(invalidate.mock.invocationCallOrder[0])
-      .toBeLessThan(requestStreamCatchup.mock.invocationCallOrder[0])
+    // ACK 只用于追帧，不再触发 snapshot HTTP 或 query invalidation。
+    expect(invalidate).not.toHaveBeenCalled()
     expect(requestStreamCatchup).toHaveBeenCalledTimes(1)
 
     // 重连后的 subscribed ack 再次请求一次（新订阅周期），但仍只请求一次。
-    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
+    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '0' }))
     await waitFor(() => expect(requestStreamCatchup).toHaveBeenCalledTimes(2))
-    expect(invalidate).toHaveBeenCalledTimes(2)
+    expect(invalidate).not.toHaveBeenCalled()
 
-    // 非 RUNNING 的模型不再请求追帧，但 subscribed 仍执行 snapshot 对账。
+    // 非 RUNNING 的模型不再请求追帧，ACK 仍不读 HTTP。
     rerender({ activeAssistantOutput: { ...activeAssistantOutput(), status: 'READY' } })
-    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
+    act(() => socket.emitServer({ type: 'subscribed', resource: threadResource, cursor: '0' }))
     await sleep(50)
     expect(requestStreamCatchup).toHaveBeenCalledTimes(2)
-    expect(invalidate).toHaveBeenCalledTimes(3)
+    expect(invalidate).not.toHaveBeenCalled()
   })
 
   it('coalesces gap catchups and appends the buffered suffix after a covering checkpoint', async () => {
@@ -654,11 +641,11 @@ describe('useHarnessThreadRealtime', () => {
       await waitFor(() => expect(sockets.sockets.length).toBe(attempt + 2), { timeout: 2000 })
       const next = sockets.openLatest()
       expect(next.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
-      act(() => next.emitServer({ type: 'subscribed', resource: threadResource, cursor: '42' }))
+      act(() => next.emitServer({ type: 'subscribed', resource: threadResource, cursor: '0' }))
     }
     expect(first.sentMessages()).toEqual([{ type: 'subscribe', resource: threadResource }])
-    // 每次重连的 subscribed ack 各触发一次对账。
-    expect(invalidate).toHaveBeenCalledTimes(2)
+    // 重连 ACK 不回读；catch-up 由服务端推送。
+    expect(invalidate).not.toHaveBeenCalled()
   })
 
   it('aggregates TOOL_PARTIAL overlays per invocation and clears when the invocation disappears with the durable result Entry', async () => {
@@ -1537,25 +1524,16 @@ describe('useHarnessThreadRealtime', () => {
       activeAssistantOutput: activeAssistantOutput(),
       schedulerOptions: { raf, caf },
     })
-    const socket = sockets.openLatest()
+    sockets.openLatest()
 
     // 发送流式 delta，帧已调度但尚未触发
     emitRealtime(sockets, realtime(1, 'streaming text'))
     expect(result.current.modelStream).toBeNull()
 
-    // WebSocket 收到 version 信号，触发 invalidateSnapshot
-    act(() => {
-      socket.emitServer({
-        type: 'event',
-        resource: threadResource,
-        name: 'version',
-        data: { version: '43' },
-        cursor: '43',
-      })
-    })
-    expect(invalidateSpy).toHaveBeenCalled()
+    // 已累积的 delta 帧在没有 snapshot HTTP 的情况下仍正常发布。
+    expect(invalidateSpy).not.toHaveBeenCalled()
 
-    // 重点审查验证：version 信号不能 cancel 丢弃已累积的 delta 帧
+    // 重点审查验证：durable snapshot 由共享同步器接管，不能 cancel 已累积的 delta 帧
     // 待帧触发时，已累积内容必须正常发布到 React state
     act(() => {
       frameCallback!(performance.now())

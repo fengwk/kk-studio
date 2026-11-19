@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, type MutableRefObject } from 'react'
+import { useApplicationEvents } from '@/shared/app-events'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { isConflictError } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import type { TranslationKey } from '@/shared/i18n'
 import {
   clearPendingStop,
@@ -78,6 +80,7 @@ export function useThreadStopOperation({
   discardPendingMessage,
 }: ThreadStopOperationInput) {
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const pendingStopRef = useRef<PendingStopOperation | null>(null)
   // 当含混的 Stop 操作尚待重试或失效时为 true：切换 Thread 时面板
   // 绝不能悄悄丢弃这次精确重试。
@@ -146,9 +149,7 @@ export function useThreadStopOperation({
           // 导航门控正常情况下不会发生；若宿主强制重绑，保留旧 Thread sidecar，
           // 让用户返回后用同一 id replay，并从快照回执恢复草稿。
           await Promise.all([
-            queryClient.invalidateQueries({
-              queryKey: queryKeys.threads.snapshot(operationThreadId),
-            }),
+            requestThreadSnapshotRefresh(queryClient, applicationEvents, operationThreadId),
             queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
           ])
           return
@@ -167,9 +168,7 @@ export function useThreadStopOperation({
           discardPendingMessage()
         }
         await Promise.all([
-          queryClient.invalidateQueries({
-            queryKey: queryKeys.threads.snapshot(operationThreadId),
-          }),
+          requestThreadSnapshotRefresh(queryClient, applicationEvents, operationThreadId),
           queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
         ])
       })

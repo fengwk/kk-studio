@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useApplicationEvents } from '@/shared/app-events'
 import { useQueryClient } from '@tanstack/react-query'
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { useI18n } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { createUuid } from '@/shared/lib/uuid'
 
 /**
@@ -24,6 +26,7 @@ export function useApprovalDecision({
 }) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [isNonRecoverable, setIsNonRecoverable] = useState(false)
@@ -65,9 +68,7 @@ export function useApprovalDecision({
       })
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all }),
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.threads.snapshot(threadId),
-        }),
+        requestThreadSnapshotRefresh(queryClient, applicationEvents, threadId),
       ])
       onSuccess?.()
     } catch (err: unknown) {

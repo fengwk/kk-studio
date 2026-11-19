@@ -30,7 +30,6 @@ import {
 import { loadPendingStop, pendingStopStorageKey } from '@/features/thread/runtime/state/pending-stop-sidecar'
 import { loadBoundPendingMessage } from '@/features/thread/runtime/state/pending-request-store'
 import { translate as t } from '@/shared/i18n'
-import { queryKeys } from '@/shared/lib/query-keys'
 
 function useTestController(
   threadId: string,
@@ -65,6 +64,7 @@ import type {
 /** 控制器 Thread id：资源订阅经严格 codec，必须是 canonical UUID。 */
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const THREAD_ID_2 = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
+const WIRE_HEAD_ID = '11111111-2222-4333-8444-555555555556'
 
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {
@@ -154,6 +154,31 @@ function snapshotOf(
     stopReceipts: [],
     unconfirmedExecutions: [],
     ...extras,
+  }
+}
+
+function wireSnapshotOf(
+  currentThread: HarnessThreadDTO,
+  extras: Partial<HarnessThreadSnapshotDTO> = {},
+): HarnessThreadSnapshotDTO {
+  const wireThread = {
+    ...currentThread,
+    sessionId: '11111111-2222-4333-8444-555555555557',
+    headEntryId: WIRE_HEAD_ID,
+    rootThreadId: THREAD_ID,
+  }
+  return {
+    ...snapshotOf(wireThread, extras),
+    thread: wireThread,
+    entries: [{
+      entryId: WIRE_HEAD_ID,
+      sessionId: wireThread.sessionId,
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payload: {},
+      createdAt: 0,
+      usageCost: null,
+    }],
   }
 }
 
@@ -273,6 +298,8 @@ function cancelledUserMessage(sequence: number, text: string): HarnessCancelledI
   }
 }
 
+const WIRE_STOP_REQUEST_ID = '88888888-2222-4333-8444-555555555555'
+
 function stopReceipt(
   forThreadId: string,
   stopRequestId: string,
@@ -281,7 +308,7 @@ function stopReceipt(
   return {
     threadId: forThreadId,
     stopRequestId,
-    stoppedTurnEndEntryId: 'turn-end-entry',
+    stoppedTurnEndEntryId: '99999999-9999-4999-8999-999999999999',
     cancelledCommandCount: cancelledInputs.length,
     cancelledInputs,
   }
@@ -297,15 +324,21 @@ function recordOf(
 
 /** 经快照补偿通道投递一条回执（走真实已有的回执应用入口）。 */
 async function deliverReceipt(
-  client: QueryClient,
   receipt: HarnessStoppedThreadReceiptDTO,
   forThreadId: string,
 ): Promise<void> {
-  vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-    snapshotOf(threadFixture({ threadId: forThreadId }), { stopReceipts: [receipt] }),
-  )
+  const socket = realtimeSockets.latest
+  if (socket == null) {
+    throw new Error('Thread snapshot socket is not available')
+  }
   await act(async () => {
-    await client.invalidateQueries({ queryKey: queryKeys.threads.snapshot(forThreadId) })
+    socket.emitServer({
+      type: 'event',
+      resource: { kind: 'thread', id: forThreadId },
+      name: 'snapshot',
+      data: wireSnapshotOf(threadFixture({ threadId: forThreadId }), { stopReceipts: [receipt] }),
+    })
+    await Promise.resolve()
   })
 }
 
@@ -966,9 +999,8 @@ describe('useAgentThreadController', () => {
     act(() => realtimeSockets.latest?.emitServer({
       type: 'event',
       resource: { kind: 'thread', id: THREAD_ID },
-      name: 'version',
-      data: { version: '2' },
-      cursor: '2',
+      name: 'snapshot',
+      data: wireSnapshotOf(turn2),
     }))
     await waitFor(() => expect(result.current.thread?.version).toBe('2'))
     await waitFor(() => expect(result.current.stopReplayPending).toBe(false))
@@ -1091,9 +1123,8 @@ describe('useAgentThreadController', () => {
     act(() => realtimeSockets.latest?.emitServer({
       type: 'event',
       resource: { kind: 'thread', id: THREAD_ID },
-      name: 'version',
-      data: { version: '2' },
-      cursor: '2',
+      name: 'snapshot',
+      data: wireSnapshotOf(turn2),
     }))
     await waitFor(() => expect(result.current.thread?.version).toBe('2'))
     vi.mocked(harnessService.stopThread).mockResolvedValue({
@@ -1239,17 +1270,18 @@ describe('useAgentThreadController', () => {
     invalidateSpy.mockRestore()
   })
 
-  it('invalidates the snapshot after a successful stop', async () => {
+  it('requests a wire snapshot after a successful stop without a snapshot GET', async () => {
     const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
-
+    const socket = realtimeSockets.openLatest()
     const initialCalls = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
     await act(async () => {
       await result.current.stopThread()
     })
-    await waitFor(() =>
-      expect(vi.mocked(harnessService.getThreadSnapshot).mock.calls.length).toBeGreaterThan(initialCalls),
-    )
+    expect(socket.sentMessages()).toContainEqual({
+      type: 'refresh', resource: { kind: 'thread', id: THREAD_ID },
+    })
+    expect(vi.mocked(harnessService.getThreadSnapshot).mock.calls).toHaveLength(initialCalls)
   })
 
   it('exposes runtime facts from the snapshot branch settings', async () => {
@@ -2656,12 +2688,13 @@ describe('useAgentThreadController draft restore', () => {
   it('neither reverts nor duplicates an editor edit when the same receipt arrives twice', async () => {
     // Stop 响应与快照双通道投递同一回执：第二次投递在用户继续编辑之后才落地，
     // 既不得把编辑区回退到记录里的旧内容，也不得重复追加回填文本。
-    const receipt = stopReceipt(THREAD_ID, 'stop-twice', [cancelledUserMessage(1, 'cancelled')])
-    // 首次快照（挂载）没有回执；Stop 之后的重新取数才带上它。
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValueOnce(snapshotOf(threadFixture()))
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture(), { stopReceipts: [receipt] }),
+    const receipt = stopReceipt(
+      THREAD_ID,
+      'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      [cancelledUserMessage(1, 'cancelled')],
     )
+    // 初始 HTTP 快照没有回执；相同回执稍后通过权威 WS snapshot 到达。
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValueOnce(snapshotOf(threadFixture()))
     vi.mocked(harnessService.stopThread).mockResolvedValue({
       status: 'STOPPED',
       thread: threadFixture(),
@@ -2671,20 +2704,27 @@ describe('useAgentThreadController draft restore', () => {
     applyStopReceiptMock
       // Stop 响应通道：本次事务完成合并，记录包含回填内容与当时的草稿。
       .mockResolvedValueOnce(
-        recordOf(THREAD_ID, [createTextPart('cancelled\n\ndraft before stop')], ['stop-twice']),
+        recordOf(THREAD_ID, [createTextPart('cancelled\n\ndraft before stop')], [receipt.stopRequestId]),
       )
       // 快照通道：重复投递（在途）。
       .mockReturnValueOnce(secondDelivery.promise)
 
     const { result } = renderHook(() => useTestController(THREAD_ID), { wrapper })
     await waitFor(() => expect(result.current.disabled).toBe(false))
+    const socket = realtimeSockets.openLatest()
     act(() => result.current.setDraft([createTextPart('draft before stop')]))
 
     await act(async () => {
       await result.current.stopThread()
     })
     expect(partsToText(result.current.draft)).toBe('cancelled\n\ndraft before stop')
-
+    expect(applyStopReceiptMock).toHaveBeenCalledTimes(1)
+    act(() => socket.emitServer({
+      type: 'event',
+      resource: { kind: 'thread', id: THREAD_ID },
+      name: 'snapshot',
+      data: wireSnapshotOf(threadFixture(), { stopReceipts: [receipt] }),
+    }))
     await waitFor(() => expect(applyStopReceiptMock).toHaveBeenCalledTimes(2))
     // 重复投递仍在途时用户继续编辑。
     act(() => result.current.setDraft([
@@ -2694,7 +2734,7 @@ describe('useAgentThreadController draft restore', () => {
     await act(async () => {
       // 重复投递返回的是合并当时的记录（不含随后编辑）。
       secondDelivery.resolve(
-        recordOf(THREAD_ID, [createTextPart('cancelled\n\ndraft before stop')], ['stop-twice']),
+        recordOf(THREAD_ID, [createTextPart('cancelled\n\ndraft before stop')], [receipt.stopRequestId]),
       )
       await Promise.resolve()
     })
@@ -2826,7 +2866,7 @@ describe('useAgentThreadController draft restore', () => {
     // 同一字段的写入 completion 乱序：旧 completion 成功不得把更新的未落盘编辑标成已保存。
     const olderSave = deferred<DraftSaveOutcome>()
     const client = testClient()
-    const receipt = stopReceipt(THREAD_ID, 'stop-older', [cancelledUserMessage(1, 'cancelled')])
+    const receipt = stopReceipt(THREAD_ID, WIRE_STOP_REQUEST_ID, [cancelledUserMessage(1, 'cancelled')])
     const { result } = renderHook(() => useTestController(THREAD_ID), {
       wrapper: clientWrapper(client),
     })
@@ -2846,9 +2886,9 @@ describe('useAgentThreadController draft restore', () => {
 
     // 回执到达时仍必须与当前输入合并（若被标成已保存，这里会用记录覆盖编辑区）。
     applyStopReceiptMock.mockResolvedValue(
-      recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], ['stop-older']),
+      recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], [WIRE_STOP_REQUEST_ID]),
     )
-    await deliverReceipt(client, receipt, THREAD_ID)
+    await deliverReceipt(receipt, THREAD_ID)
 
     await waitFor(() => expect(partsToText(result.current.draft)).toBe('cancelled\n\nsecond edit'))
   })
@@ -2872,18 +2912,18 @@ describe('useAgentThreadController draft restore', () => {
       ))
   })
 
-  it('keeps the edit, prompts, then merges the restored input once the snapshot brings the receipt', async () => {
+  it('keeps the edit, prompts, then merges restored input from the WS snapshot receipt', async () => {
     // 另一处已合并了本 UI 尚未观察到的恢复内容：陈旧的整份写入被拒。
     // 编辑必须保留在 UI、明确提示；快照随后带来该回执时，经已有恢复通道把恢复内容合并回来
     // （generation 同步补齐），两者都落盘。
-    const receipt = stopReceipt(THREAD_ID, 'stop-stale', [cancelledUserMessage(1, 'cancelled')])
+    const receipt = stopReceipt(THREAD_ID, WIRE_STOP_REQUEST_ID, [cancelledUserMessage(1, 'cancelled')])
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValueOnce(snapshotOf(threadFixture()))
     saveThreadDraftPartsMock.mockResolvedValueOnce({
       status: 'STALE',
-      record: recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], ['stop-stale']),
+      record: recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], [WIRE_STOP_REQUEST_ID]),
     })
     applyStopReceiptMock.mockResolvedValue(
-      recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], ['stop-stale']),
+      recordOf(THREAD_ID, [createTextPart('cancelled\n\n')], [WIRE_STOP_REQUEST_ID]),
     )
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -2899,20 +2939,15 @@ describe('useAgentThreadController draft restore', () => {
       expect(result.current.draftRestoreError).toBe(t('ai.runtime.action.draftWriteConflict')))
     expect(partsToText(result.current.draft)).toBe('local edit')
 
-    // 快照重取带来该回执：恢复内容与本地输入一起进入编辑区并按补齐后的 generation 落盘。
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshotOf(threadFixture(), { stopReceipts: [receipt] }),
-    )
-    await act(async () => {
-      await client.invalidateQueries({ queryKey: queryKeys.threads.snapshot(THREAD_ID) })
-    })
+    // WS 权威快照带来该回执：恢复内容与本地输入一起进入编辑区并按补齐后的 generation 落盘。
+    await deliverReceipt(receipt, THREAD_ID)
 
     await waitFor(() => expect(partsToText(result.current.draft)).toBe('cancelled\n\nlocal edit'))
     await waitFor(() => expect(result.current.draftRestoreError).toBeNull())
     expect(saveThreadDraftPartsMock).toHaveBeenLastCalledWith(
       THREAD_ID,
       [expect.objectContaining({ type: 'text', text: 'cancelled\n\nlocal edit' })],
-      ['stop-stale'],
+      [WIRE_STOP_REQUEST_ID],
     )
   })
 

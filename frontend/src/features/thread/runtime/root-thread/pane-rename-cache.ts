@@ -1,8 +1,10 @@
 import type { InfiniteData, QueryClient } from '@tanstack/react-query'
+import type { ApplicationEventManager } from '@/shared/app-events/manager'
 import { compareCatalogVersions } from '@/shared/lib/catalog-version'
 import { queryKeys } from '@/shared/lib/query-keys'
 import type { RenameTarget } from '@/features/thread/runtime/root-thread/types'
 import type { SessionSummaryPage } from '@/features/thread/runtime/root-thread/usePaneHistory'
+import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import type {
   HarnessThreadDTO,
   HarnessThreadSnapshotDTO,
@@ -76,6 +78,7 @@ export function patchSessionNameCache(
 /** 重命名成功后失效相应查询：Session 摘要、Thread 投影与 Chat 列表。 */
 export async function invalidateAfterRename(
   queryClient: QueryClient,
+  applicationEvents: ApplicationEventManager,
   ownerKey: string | null,
   renamed: RenameTarget,
 ): Promise<void> {
@@ -92,9 +95,7 @@ export async function invalidateAfterRename(
           queryClient.invalidateQueries({
             queryKey: ['agent-pane', 'threads'],
           }),
-          queryClient.invalidateQueries({
-            queryKey: queryKeys.threads.snapshot(renamed.id),
-          }),
+          requestThreadSnapshotRefresh(queryClient, applicationEvents, renamed.id),
         ]
       : []),
     queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),

@@ -4,6 +4,7 @@ import type { HarnessActiveAssistantOutputDTO, HarnessSessionEntryDTO, HarnessTh
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import {
+  advanceThreadSnapshotEpoch,
   fetchThreadSnapshot,
   getSnapshotCursor,
   mergeThreadSnapshotCache,
@@ -42,6 +43,22 @@ function makeEntry(id: string, parentId: string | null = null): HarnessSessionEn
     payload: { text: `message-${id}` },
     createdAt: 1000,
     usageCost: null,
+  }
+}
+
+function activeOutput(sequence: string): HarnessActiveAssistantOutputDTO {
+  return {
+    generationId: 'gen-1',
+    turnStartEntryId: 'entry-1',
+    requestHeadEntryId: 'entry-1',
+    status: 'RUNNING',
+    attempt: 1,
+    sequence,
+    contents: [{ type: 'text', text: sequence }],
+    error: null,
+    resultEntryId: null,
+    createdAt: Number(sequence),
+    updatedAt: Number(sequence),
   }
 }
 
@@ -211,6 +228,7 @@ describe('thread-snapshot-cache', () => {
       expect(merged?.version).toBe('5')
       expect(merged?.baseEntryId).toBeNull()
       expect(merged?.entries).toHaveLength(1)
+      expect(merged?.entries).toBe(cached.entries)
       expect(merged?.activeAssistantOutput).toEqual(activeOutput)
     })
 
@@ -248,6 +266,44 @@ describe('thread-snapshot-cache', () => {
   describe('fetchThreadSnapshot', () => {
     beforeEach(() => {
       vi.restoreAllMocks()
+    })
+
+    it('rejects a response that claims to be a full read but is only a delta', async () => {
+      const queryClient = new QueryClient()
+      const threadId = 'thread-1'
+      vi.spyOn(harnessService, 'getThreadSnapshot').mockResolvedValueOnce(makeSnapshot({
+        thread: makeThread({ threadId }),
+        baseEntryId: 'entry-0',
+        entries: [makeEntry('entry-1', 'entry-0')],
+      }))
+      await expect(fetchThreadSnapshot(queryClient, threadId)).rejects.toThrow(
+        'The Thread snapshot response did not contain a complete baseline',
+      )
+    })
+
+    it('keeps the live same-version checkpoint when an older HTTP response arrives late', async () => {
+      const queryClient = new QueryClient()
+      const threadId = 'thread-1'
+      const cached = makeSnapshot({
+        version: '5',
+        thread: makeThread({ threadId, headEntryId: 'e-1', version: '5' }),
+        entries: [makeEntry('e-1')],
+        activeAssistantOutput: activeOutput('1'),
+      })
+      queryClient.setQueryData(queryKeys.threads.snapshot(threadId), cached)
+      let resolveResponse!: (snapshot: HarnessThreadSnapshotDTO) => void
+      vi.spyOn(harnessService, 'getThreadSnapshot').mockReturnValueOnce(
+        new Promise((resolve) => { resolveResponse = resolve }),
+      )
+      const pending = fetchThreadSnapshot(queryClient, threadId)
+      const live = {
+        ...cached,
+        activeAssistantOutput: activeOutput('7'),
+      }
+      advanceThreadSnapshotEpoch(queryClient, threadId)
+      queryClient.setQueryData(queryKeys.threads.snapshot(threadId), live)
+      resolveResponse({ ...cached, activeAssistantOutput: activeOutput('2') })
+      await expect(pending).resolves.toEqual(live)
     })
 
     it('fetches full snapshot when cache is absent and does not call setQueryData internally', async () => {

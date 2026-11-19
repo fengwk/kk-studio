@@ -34,8 +34,15 @@ export function useThreadProjection(threadId: string) {
     stopReceipts,
     unconfirmedExecutions,
     snapshotQuery,
+    snapshotSyncError,
+    retrySnapshotSync,
   } = useAgentThreadQueries(threadId)
   const bound = Boolean(thread)
+  const snapshotSyncMessage = snapshotSyncError
+  const snapshotSyncErrorValue = useMemo(
+    () => snapshotSyncMessage == null ? null : new Error(snapshotSyncMessage),
+    [snapshotSyncMessage],
+  )
   const realtime = useHarnessThreadRealtime(
     threadId,
     Boolean(threadId) && snapshotQuery.isSuccess,
@@ -95,7 +102,8 @@ export function useThreadProjection(threadId: string) {
     working,
     entries,
     messagesLoading: snapshotQuery.isLoading,
-    messagesError: snapshotQuery.error,
+    messagesError: snapshotQuery.error ?? snapshotSyncErrorValue,
+    retrySnapshotSync,
     bodyRef,
     queuedCommands,
     queuedCustomMessages,

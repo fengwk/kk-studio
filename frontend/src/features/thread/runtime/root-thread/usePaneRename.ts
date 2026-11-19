@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useApplicationEvents } from '@/shared/app-events'
 import { useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { useI18n } from '@/shared/i18n'
@@ -73,6 +74,7 @@ export function usePaneRename(options: PaneRenameOptions) {
   } = options
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const [renameTarget, setRenameTargetState] = useState<RenameTarget | null>(null)
   const [renamePending, setRenamePending] = useState(false)
   const [renameError, setRenameError] = useState<string | null>(null)
@@ -266,7 +268,7 @@ export function usePaneRename(options: PaneRenameOptions) {
         }
         patchThreadNameCache(queryClient, current.id, renamed)
       }
-      await invalidateAfterRename(queryClient, ownerKey, current)
+      await invalidateAfterRename(queryClient, applicationEvents, ownerKey, current)
       renamePendingRef.current = false
       closeRename()
     } catch (error) {

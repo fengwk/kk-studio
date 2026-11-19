@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query'
+import { useApplicationEvents } from '@/shared/app-events'
 import { Check, RotateCw } from 'lucide-react'
 import { useMemo } from 'react'
 import { useI18n } from '@/shared/i18n'
@@ -45,6 +46,7 @@ export function QuestionnaireCard({
 }: QuestionnaireCardProps) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const draft = useInteractionDraft(interactionId)
 
   const questionnaire = useMemo(
@@ -79,6 +81,7 @@ export function QuestionnaireCard({
       answers,
       declined,
       queryClient,
+      applicationEvents,
       conflictErrorText: t('ai.interaction.nonRecoverable'),
       fallbackErrorText: t('ai.common.operationFailed'),
       onSuccess,

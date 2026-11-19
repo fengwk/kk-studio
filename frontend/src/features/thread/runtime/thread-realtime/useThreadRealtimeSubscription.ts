@@ -4,6 +4,7 @@ import type { useApplicationEvents } from '@/shared/app-events'
 import type { RealtimeFrameScheduler } from '@/features/thread/runtime/thread-realtime/realtime-frame-scheduler'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { coordinateQuerySync } from '@/shared/app-events/query-sync-coordinator'
+import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { isActiveModelGeneration } from '@/features/thread/runtime/thread-realtime/model-recovery'
 import {
   createRealtimeEventHandler,
@@ -79,24 +80,17 @@ export function useThreadRealtimeSubscription({
 
     const refetchSnapshot = (): Promise<void> =>
       coordinateQuerySync(queryClient, queryKeys.threads.snapshot(threadId), () =>
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
+        requestThreadSnapshotRefresh(queryClient, applicationEvents, threadId),
       )
-    // 订阅/version/resync/error 的对账是 best-effort；失败只由下一次 durable
-    // 信号重试，绝不能变成 unhandled rejection。
-    const invalidateSnapshot = (): Promise<void> =>
-      refetchSnapshot().catch(() => undefined)
     const handleRealtime = createRealtimeEventHandler(streamContext, {
       refetchSnapshot,
       requestCatchup,
     })
-    // 应用级 manager 订阅：version/resync/subscribed/error 都触发 snapshot
-    // 对账（subscribed 在首次订阅与每次重连重订阅后到达，关闭断线窗口）；
-    // realtime 事件走 overlay reducer。连接与重连由单例 Connection 负责。
+    // 同一 Thread 的 snapshot 由共享同步器处理；此订阅只保留 lossy realtime overlay。
     const unsubscribe = applicationEvents.subscribe(
       { kind: 'thread', id: subscription.threadId },
       {
         onSubscribed: () => {
-          invalidateSnapshot()
           // 新订阅（含每次重连）若仍有 RUNNING model，只请求一次 best-effort
           // 追帧；202 不表示 owner 在线，后续完全由 checkpoint/终态驱动。
           const durable = activeOutputRef.current
@@ -114,14 +108,10 @@ export function useThreadRealtimeSubscription({
           }
         },
         onEvent: (name, data) => {
-          if (name === 'version') {
-            invalidateSnapshot()
-          } else if (name === 'realtime') {
+          if (name === 'realtime') {
             handleRealtime(data)
           }
         },
-        onResync: invalidateSnapshot,
-        onError: invalidateSnapshot,
       },
     )
     return () => {

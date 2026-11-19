@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApplicationEventManager } from '@/shared/app-events/manager'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
+import type { HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
 
 const URL = 'ws://test/ws/events'
 const THREAD_A = { kind: 'thread', id: 'aaaaaaaa-0000-4000-8000-000000000001' } as const
@@ -18,6 +19,27 @@ const ENVIRONMENT_A = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
 const VIEW_A = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
 const CLAIM_A = '99999999-9999-4999-8999-999999999999'
 const CLAIM_B = '99999999-9999-4999-8999-999999999998'
+const SNAPSHOT_HEAD = 'eeeeeeee-0000-4000-8000-000000000001'
+const SNAPSHOT_SESSION = 'eeeeeeee-0000-4000-8000-000000000002'
+const SNAPSHOT_NEXT_HEAD = 'eeeeeeee-0000-4000-8000-000000000003'
+
+function threadSnapshot(threadId: string, version = '1'): HarnessThreadSnapshotDTO {
+  return {
+    version,
+    thread: {
+      threadId, name: 'Thread', sessionId: SNAPSHOT_SESSION, rootThreadId: threadId,
+      parentThreadId: null, headEntryId: SNAPSHOT_HEAD, version, yoloEnabled: false,
+      nextCommandSequence: '1', status: 'IDLE', executionControl: 'RUNNABLE',
+      branchSettings: {
+        agentName: 'agent', execution: { driver: 'builtin', settings: {} }, environmentName: null,
+      },
+      createdAt: 0, updatedAt: 0,
+    },
+    baseEntryId: null,
+    entries: [], queuedCommands: [], activeAssistantOutput: null,
+    generationFailures: [], toolInvocations: [], stopReceipts: [], unconfirmedExecutions: [],
+  }
+}
 
 function connectLatest(socket: ReturnType<FakeWebSocketHarness['openLatest']>, node = EVENT_NODE_A, connection = CONNECTION_A) {
   socket.emitServer({
@@ -120,7 +142,7 @@ describe('ApplicationEventManager', () => {
     // 第一个 unsubscribe 不能错误拆 wire：同一 listener 仍有真实 refcount。
     release1()
     expect(socket.sentMessages()).toHaveLength(1)
-    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'version', data: { version: '1' }, cursor: '1' })
+    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'snapshot', data: threadSnapshot(THREAD_A.id) })
     expect(listener.onEvent).toHaveBeenCalledTimes(1)
 
     // 末 ref 才 unsubscribe，之后不再派发。
@@ -132,6 +154,37 @@ describe('ApplicationEventManager', () => {
     })
     socket.emitServer({ type: 'resync', resource: THREAD_A })
     expect(listener.onEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('suspends a shared Thread wire lease and resumes from the newest cache head', () => {
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    let head = SNAPSHOT_HEAD
+    const onEvent = vi.fn()
+    const releaseSnapshot = manager.subscribe(THREAD_A, {
+      getAfterEntryId: () => head,
+      onEvent,
+    })
+    const releaseRealtime = manager.subscribe(THREAD_A, { onEvent })
+    expect(socket.sentMessages()).toEqual([{
+      type: 'subscribe', resource: THREAD_A, afterEntryId: SNAPSHOT_HEAD,
+    }])
+
+    expect(manager.suspendThread(THREAD_A)).toBe(true)
+    expect(manager.requestThreadRefresh(THREAD_A)).toBe(false)
+    head = SNAPSHOT_NEXT_HEAD
+    socket.emitServer({
+      type: 'event', resource: THREAD_A, name: 'realtime', data: { type: 'MODEL_DELTA' },
+    })
+    expect(onEvent).not.toHaveBeenCalled()
+    expect(manager.resumeThread(THREAD_A)).toBe(true)
+    expect(socket.sentMessages().slice(-2)).toEqual([
+      { type: 'unsubscribe', resource: THREAD_A },
+      { type: 'subscribe', resource: THREAD_A, afterEntryId: SNAPSHOT_NEXT_HEAD },
+    ])
+
+    releaseSnapshot()
+    releaseRealtime()
   })
 
   it('registers the listener before sending the first subscribe', () => {
@@ -180,14 +233,14 @@ describe('ApplicationEventManager', () => {
     // 订阅建立（subscribed ack）即回读权威快照：sync 是 useResourceSync 对账的入口。
     const sync = vi.fn()
     const onSubscribed = vi.fn<(cursor: string) => void>()
-    socket.onSendResponse = { type: 'subscribed', resource: THREAD_A, cursor: '7' }
+    socket.onSendResponse = { type: 'subscribed', resource: THREAD_A, cursor: '0' }
     manager.subscribe(THREAD_A, {
       onSubscribed: (cursor) => {
         onSubscribed(cursor)
         sync()
       },
     })
-    expect(onSubscribed).toHaveBeenCalledWith('7')
+    expect(onSubscribed).toHaveBeenCalledWith('0')
     expect(sync).toHaveBeenCalledTimes(1)
 
     // 失联 fence：最后一条合法帧之后连续 3 个 heartbeat 周期（3 × 20s）无帧，旧连接被 fence；
@@ -204,8 +257,8 @@ describe('ApplicationEventManager', () => {
     expect(reconnected.sentMessages()).toEqual([
       { type: 'subscribe', resource: THREAD_A },
     ])
-    reconnected.emitServer({ type: 'subscribed', resource: THREAD_A, cursor: '9' })
-    expect(onSubscribed).toHaveBeenNthCalledWith(2, '9')
+    reconnected.emitServer({ type: 'subscribed', resource: THREAD_A, cursor: '0' })
+    expect(onSubscribed).toHaveBeenNthCalledWith(2, '0')
     expect(sync).toHaveBeenCalledTimes(2)
   })
 
@@ -319,14 +372,14 @@ describe('ApplicationEventManager', () => {
     manager.subscribe(THREAD_A, { onSubscribed, onEvent, onResync, onError })
     manager.subscribe(CANVAS_A, { onEvent: otherOnEvent })
 
-    socket.emitServer({ type: 'subscribed', resource: THREAD_A, cursor: '5' })
-    expect(onSubscribed).toHaveBeenCalledWith('5')
+    socket.emitServer({ type: 'subscribed', resource: THREAD_A, cursor: '0' })
+    expect(onSubscribed).toHaveBeenCalledWith('0')
     expect(otherOnEvent).not.toHaveBeenCalled()
 
-    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'version', data: { version: '6' }, cursor: '6' })
+    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'snapshot', data: threadSnapshot(THREAD_A.id, '6') })
     socket.emitServer({ type: 'event', resource: THREAD_A, name: 'realtime', data: { type: 'MODEL_DELTA' } })
     expect(onEvent.mock.calls).toEqual([
-      ['version', { version: '6' }, '6'],
+      ['snapshot', threadSnapshot(THREAD_A.id, '6'), undefined],
       ['realtime', { type: 'MODEL_DELTA' }, undefined],
     ])
 
@@ -400,19 +453,18 @@ describe('ApplicationEventManager', () => {
     manager.subscribe(THREAD_A, healthy)
 
     // 四类派发共用同一隔离路径：任一 listener 抛错后同资源其他 listener 仍能收到。
-    socket.emitServer({ type: 'subscribed', resource: THREAD_A, cursor: '1' })
+    socket.emitServer({ type: 'subscribed', resource: THREAD_A, cursor: '0' })
     socket.emitServer({
       type: 'event',
       resource: THREAD_A,
-      name: 'version',
-      data: { version: '2' },
-      cursor: '2',
+      name: 'snapshot',
+      data: threadSnapshot(THREAD_A.id, '2'),
     })
     socket.emitServer({ type: 'resync', resource: THREAD_A })
     socket.emitServer({ type: 'error', resource: THREAD_A, code: 'SUBSCRIBE_FAILED', message: 'boom' })
 
-    expect(healthy.onSubscribed).toHaveBeenCalledWith('1')
-    expect(healthy.onEvent).toHaveBeenCalledWith('version', { version: '2' }, '2')
+    expect(healthy.onSubscribed).toHaveBeenCalledWith('0')
+    expect(healthy.onEvent).toHaveBeenCalledWith('snapshot', threadSnapshot(THREAD_A.id, '2'), undefined)
     expect(healthy.onResync).toHaveBeenCalledTimes(1)
     expect(healthy.onError).toHaveBeenCalledWith('SUBSCRIBE_FAILED', 'boom')
     expect(failing.onSubscribed).toHaveBeenCalledTimes(1)
@@ -433,7 +485,7 @@ describe('ApplicationEventManager', () => {
     const release2 = manager.subscribe(THREAD_A, { onEvent: onEvent2 })
 
     release()
-    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'version', data: { version: '1' }, cursor: '1' })
+    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'snapshot', data: threadSnapshot(THREAD_A.id) })
     expect(onEvent).not.toHaveBeenCalled()
     expect(onEvent2).toHaveBeenCalledTimes(1)
 

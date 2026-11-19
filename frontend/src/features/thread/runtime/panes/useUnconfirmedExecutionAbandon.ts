@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
+import { useApplicationEvents } from '@/shared/app-events'
 import { useQueryClient } from '@tanstack/react-query'
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { useI18n } from '@/shared/i18n'
 import type {
   HarnessThreadSnapshotDTO,
@@ -25,8 +27,8 @@ function errorMessage(error: unknown): string {
  * 逐项“放弃等待”的状态机：确认目标、在途执行、错误与权威回读。
  *
  * <p>每次请求只处理用户选定的那一代执行，不做批量或自动重试。成功只让既有
- * snapshot/tree query 失效并回读权威快照，不把本次响应直接写回缓存；CAS 冲突同样只
- * 回读最新事实，让用户按新列表重新选择。
+ * 请求 Thread snapshot 与执行树的权威 WebSocket refresh，不把本次响应直接写回缓存；CAS 冲突
+ * 同样只请求最新事实，让用户按新列表重新选择。
  */
 export function useUnconfirmedExecutionAbandon({
   threadId,
@@ -43,6 +45,7 @@ export function useUnconfirmedExecutionAbandon({
 }) {
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const [target, setTarget] = useState<UnconfirmedExecution | null>(null)
   const [pendingExecutionId, setPendingExecutionId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -68,15 +71,14 @@ export function useUnconfirmedExecutionAbandon({
   }, [canAbandon])
 
   async function refreshFacts(): Promise<void> {
-    const invalidations = [
-      queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
-    ]
+    const refreshes = [requestThreadSnapshotRefresh(queryClient, applicationEvents, threadId)]
     if (rootThreadId) {
-      invalidations.push(
-        queryClient.invalidateQueries({ queryKey: queryKeys.threads.tree(rootThreadId) }),
-      )
+      applicationEvents.requestResourceRefresh({ kind: 'thread-tree', id: rootThreadId })
+      refreshes.push(queryClient.invalidateQueries({
+        queryKey: queryKeys.threads.tree(rootThreadId), exact: true, refetchType: 'none',
+      }).then(() => undefined))
     }
-    await Promise.all(invalidations)
+    await Promise.all(refreshes)
   }
 
   async function confirmAbandon(): Promise<void> {
@@ -92,7 +94,7 @@ export function useUnconfirmedExecutionAbandon({
         expectedVersion,
       })
       setTarget(null)
-      // 统一由既有 query 回读权威快照：迟到的 abandon 响应不能覆盖更新的 snapshot 状态。
+      // 统一请求既有 WebSocket snapshot：迟到的 abandon 响应不能覆盖更新的持久状态。
       await refreshFacts()
     } catch (requestError: unknown) {
       setTarget(null)

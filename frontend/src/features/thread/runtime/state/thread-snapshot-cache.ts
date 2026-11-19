@@ -1,4 +1,5 @@
 import type { QueryClient } from '@tanstack/react-query'
+import type { ApplicationEventManager } from '@/shared/app-events/manager'
 import type {
   HarnessSessionEntryDTO,
   HarnessThreadSnapshotDTO,
@@ -6,6 +7,34 @@ import type {
 import { harnessService } from '@/shared/api/harness-service'
 import { compareCatalogVersions } from '@/shared/lib/catalog-version'
 import { queryKeys } from '@/shared/lib/query-keys'
+
+const liveEpochs = new WeakMap<QueryClient, Map<string, number>>()
+
+export function getThreadSnapshotEpoch(queryClient: QueryClient, threadId: string): number {
+  return liveEpochs.get(queryClient)?.get(threadId) ?? 0
+}
+
+export function requestThreadSnapshotRefresh(
+  queryClient: QueryClient,
+  manager: ApplicationEventManager,
+  threadId: string,
+): Promise<void> {
+  manager.requestThreadRefresh({ kind: 'thread', id: threadId })
+  return queryClient.invalidateQueries({
+    queryKey: queryKeys.threads.snapshot(threadId),
+    exact: true,
+    refetchType: 'none',
+  }).then(() => undefined)
+}
+
+export function advanceThreadSnapshotEpoch(queryClient: QueryClient, threadId: string): void {
+  let epochs = liveEpochs.get(queryClient)
+  if (epochs == null) {
+    epochs = new Map()
+    liveEpochs.set(queryClient, epochs)
+  }
+  epochs.set(threadId, (epochs.get(threadId) ?? 0) + 1)
+}
 
 /**
  * 仅当缓存首尾完整且末 Entry 确为当前 head 时才提供游标：
@@ -67,6 +96,14 @@ export function mergeThreadSnapshotCache(
       return undefined
     }
 
+    if (incoming.entries.length === 0 && baseIndex === cached.entries.length - 1) {
+      return {
+        ...incoming,
+        baseEntryId: null,
+        entries: cached.entries,
+      }
+    }
+
     const prefix = cached.entries.slice(0, baseIndex + 1)
     const seenIds = new Set(prefix.map((e) => e.entryId))
     const deltaEntries: HarnessSessionEntryDTO[] = []
@@ -114,6 +151,7 @@ export async function fetchThreadSnapshot(
   threadId: string,
   options?: FetchThreadSnapshotOptions,
 ): Promise<HarnessThreadSnapshotDTO> {
+  const initialEpoch = getThreadSnapshotEpoch(queryClient, threadId)
   const initialCached = queryClient.getQueryData<HarnessThreadSnapshotDTO>(
     queryKeys.threads.snapshot(threadId),
   )
@@ -127,6 +165,9 @@ export async function fetchThreadSnapshot(
     const currentCached = queryClient.getQueryData<HarnessThreadSnapshotDTO>(
       queryKeys.threads.snapshot(threadId),
     )
+    if (getThreadSnapshotEpoch(queryClient, threadId) !== initialEpoch && currentCached != null) {
+      return currentCached
+    }
     const merged = mergeThreadSnapshotCache(currentCached, incoming)
     if (merged !== undefined) {
       return merged
@@ -140,6 +181,12 @@ export async function fetchThreadSnapshot(
   const currentCached = queryClient.getQueryData<HarnessThreadSnapshotDTO>(
     queryKeys.threads.snapshot(threadId),
   )
+  if (getThreadSnapshotEpoch(queryClient, threadId) !== initialEpoch && currentCached != null) {
+    return currentCached
+  }
   const mergedFull = mergeThreadSnapshotCache(currentCached, fullIncoming)
-  return mergedFull ?? { ...fullIncoming, baseEntryId: null }
+  if (mergedFull == null) {
+    throw new Error('The Thread snapshot response did not contain a complete baseline')
+  }
+  return mergedFull
 }
