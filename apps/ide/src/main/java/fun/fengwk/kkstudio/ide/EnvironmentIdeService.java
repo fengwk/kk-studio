@@ -26,6 +26,13 @@ public interface EnvironmentIdeService {
   void focusTerminal(
       EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request);
 
+  void openAttachment(
+      EnvironmentId environmentId,
+      String viewId,
+      String sessionId,
+      String resourceId,
+      EnvironmentIdeViewBindingDTO request);
+
   void collapseMobile(
       EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request);
 

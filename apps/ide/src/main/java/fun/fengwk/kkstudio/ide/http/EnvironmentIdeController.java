@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeService;
+import fun.fengwk.kkstudio.ide.IdeUuids;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeDirectoryListingDTO;
@@ -81,6 +82,19 @@ public class EnvironmentIdeController {
       @RequestBody EnvironmentIdeViewBindingDTO request) {
     environmentIdeService.focusTerminal(
         EnvironmentId.of(environmentId), viewId.toString(), request);
+  }
+
+  @PostMapping("/views/{viewId}/attachments/{sessionId}/{resourceId}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void openAttachment(
+      @PathVariable String environmentId,
+      @PathVariable String viewId,
+      @PathVariable String sessionId,
+      @PathVariable String resourceId,
+      @RequestBody EnvironmentIdeViewBindingDTO request) {
+    UUID parsedEnvironmentId = IdeUuids.requireInput(environmentId, "environmentId");
+    environmentIdeService.openAttachment(
+        EnvironmentId.of(parsedEnvironmentId), viewId, sessionId, resourceId, request);
   }
 
   @GetMapping("/directories")

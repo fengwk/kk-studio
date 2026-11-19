@@ -74,6 +74,27 @@ public final class ClusterEnvironmentIdeService implements EnvironmentIdeService
   }
 
   @Override
+  public void openAttachment(
+      EnvironmentId environmentId,
+      String viewId,
+      String sessionId,
+      String resourceId,
+      EnvironmentIdeViewBindingDTO request) {
+    Objects.requireNonNull(request, "request");
+    String parsedViewId = parseViewId(viewId);
+    String parsedSessionId = IdeUuids.requireInput(sessionId, "sessionId").toString();
+    String parsedResourceId = IdeUuids.requireInput(resourceId, "resourceId").toString();
+    routeAction(
+        environmentId,
+        () ->
+            local.openAttachment(
+                environmentId, parsedViewId, parsedSessionId, parsedResourceId, request),
+        owner ->
+            client.openAttachment(
+                environmentId, owner, parsedViewId, parsedSessionId, parsedResourceId, request));
+  }
+
+  @Override
   public void collapseMobile(
       EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
     Objects.requireNonNull(request, "request");

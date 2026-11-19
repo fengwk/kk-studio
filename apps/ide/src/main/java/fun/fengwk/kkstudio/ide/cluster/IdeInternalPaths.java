@@ -80,6 +80,11 @@ public final class IdeInternalPaths {
     return viewsPath(environmentId) + "/" + viewId + "/close";
   }
 
+  public static String attachmentPath(
+      EnvironmentId environmentId, String viewId, String sessionId, String resourceId) {
+    return viewsPath(environmentId) + "/" + viewId + "/attachments/" + sessionId + "/" + resourceId;
+  }
+
   public static String mobileLayoutPath(EnvironmentId environmentId, String viewId) {
     return viewsPath(environmentId) + "/" + viewId + "/apply-mobile-layout";
   }

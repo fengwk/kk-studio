@@ -33,6 +33,7 @@ IDE 让用户在 Studio 同源下打开某个 Environment 上由 Daemon 托管�
 | `OPEN_VIEW` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`mode(CREATE/RESUME)`、`expectedBindingEpoch`、`expectedDaemonInstanceId`、可选 `directory` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`bindingEpoch`、`directory`、`workspacePath`、`revision`、`views` |
 | `CHANGE_DIRECTORY` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`、`directory` | `viewId`、Daemon 确认的规范 `directory`、`revision`、`views` |
 | `FOCUS_TERMINAL` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId` | `viewId` |
+| `OPEN_ATTACHMENT` | 绑定字段、`attachmentId`、不超过 64 KiB 的 UTF-8 `attachmentText` | `viewId` |
 | `COLLAPSE_MOBILE` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId` | `viewId` |
 | `CLOSE_VIEW` | `viewId`、`browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`、`discard` | `viewId`、`revision`、`views` |
 | `LIST_VIEWS` | 无 | `revision`、`views[]`：完整权威视图快照 |
@@ -60,12 +61,15 @@ OPEN/CHANGE_DIRECTORY/CLOSE/LIST_VIEWS 的可见状态回执提供 `{revision, v
 | POST `/api/ide/environments/{id}/views` | `viewId`、`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、`mode(create/resume)`、`expectedBindingEpoch`、`expectedDaemonInstanceId`、可选 `directory`；claim 成功返回绑定身份、目录、workspacePath、短期 entryUrl |
 | PUT `/api/ide/environments/{id}/views/{viewId}/directory` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`、目标目录；检查 dirty，成功才写工作区 |
 | POST `/api/ide/environments/{id}/views/{viewId}/focus-terminal` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`；聚焦/创建该视图终端 |
+| POST `/api/ide/environments/{id}/views/{viewId}/attachments/{sessionId}/{resourceId}` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`；在已绑定视图中打开经该 Session 授权的只读文本副本 |
 | POST `/api/ide/environments/{id}/views/{viewId}/apply-mobile-layout` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId`；收起原生侧栏和面板，不更改用户设置 |
 | GET `/api/ide/environments/{id}/directories?path=<absolute>` | 省略 path 时使用宿主主目录；返回 `{path,parentPath,children:[{name,path}],truncated}`，根目录的 `parentPath` 为 null |
 | GET `/api/ide/environments/{id}/views/{viewId}` | 显式 query：`browserSessionId`、`eventNodeId`、`connectionId`、`claimId`、可选 `expectedDaemonInstanceId`；直接返回 `{daemonInstanceId,revision,view?}`，`view` 为 null 是当前快照的有效 absent 事实 |
 | POST `/api/ide/environments/{id}/views/{viewId}/close` | `browserSessionId`、`bindingEpoch`、`expectedDaemonInstanceId` 与显式 `discard`；正常关闭等待原生保存/不保存/取消，状态未知或不可达时才提供经确认的强制关闭 |
 | 应用事件 WS `ide-use` | `browserSessionId`、同一连接内 usage 序号 `revision`、`views[]`；空列表分离全部，不表示确认销毁 |
 | GET `/api/platform/environments/{id}/runtime` | owner 返回当前 `{revision,status}`；无本代 READY 快照时返回 unavailable |
+
+`OPEN_ATTACHMENT` 只接受 canonical `sessionId` / `resourceId`，先确认 Session 所有权、Session 对资源的引用、Blob 仍为 ACTIVE，再要求请求者持有当前 view 绑定。只允许 `text/*` 或 JSON/XML/YAML 文本媒体类型，并要求 UTF-8，最多读取 64 KiB + 1 字节且受短读取截止时间约束；超限、NUL、无效 UTF-8 或不支持类型均拒绝，且只在 Daemon 确认成功后返回 204。Daemon 收到资源 UUID 与文本，不收到文件名或路径，因此附件只作为标注 UUID 的只读虚拟文档打开，不写入 workspace；命令不自动重试。
 
 `GET /views/{viewId}` 是纯读：控制器的 query 参数显式声明，ReadDTO 只作为 Java 内部参数，不生成第二份前端字段接口。读取先要求当前 WS usage 已 ACK，只返回该 `browserSessionId` 的资源与绑定；不创建 view、不续租、不生成票据、不执行终端操作。view 不存在时返回当前快照的 absent 事实，而不是命令未执行的证明；如果其它 owner 持有该 view，返回 `VIEW_OWNED_BY_OTHER_SESSION`。初始 create 可先通过该读取发现当前 `daemonInstanceId`，之后在持久 pending 中冻结此代次；其它恢复必须带 expected 实例。
 

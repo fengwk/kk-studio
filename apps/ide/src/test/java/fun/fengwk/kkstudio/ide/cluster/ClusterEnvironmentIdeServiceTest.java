@@ -40,6 +40,10 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -79,7 +83,11 @@ class ClusterEnvironmentIdeServiceTest {
             new IdeBootstrapTicketService(),
             new AllowGateway(),
             new IdeViewSnapshotStore(localTransport),
-            Duration.ofSeconds(1));
+            Duration.ofSeconds(1),
+            mock(HarnessOwnerQueryService.class),
+            mock(SessionBlobRefManager.class),
+            mock(StorageBlobRepository.class),
+            mock(StorageBlobContentService.class));
     service = new ClusterEnvironmentIdeService(registry, client, local);
   }
 
@@ -107,6 +115,12 @@ class ClusterEnvironmentIdeServiceTest {
 
     service.changeDirectory(ENV, VIEW, directory);
     service.focusTerminal(ENV, VIEW, binding);
+    service.openAttachment(
+        ENV,
+        VIEW,
+        "33333333-3333-4333-8333-333333333333",
+        "55555555-5555-4555-8555-555555555555",
+        binding);
     service.collapseMobile(ENV, VIEW, binding);
     service.closeView(ENV, VIEW, close);
     service.listDirectories(ENV, "/tmp");
@@ -114,6 +128,13 @@ class ClusterEnvironmentIdeServiceTest {
 
     verify(delegate).changeDirectory(ENV, VIEW, directory);
     verify(delegate).focusTerminal(ENV, VIEW, binding);
+    verify(delegate)
+        .openAttachment(
+            ENV,
+            VIEW,
+            "33333333-3333-4333-8333-333333333333",
+            "55555555-5555-4555-8555-555555555555",
+            binding);
     verify(delegate).collapseMobile(ENV, VIEW, binding);
     verify(delegate).closeView(ENV, VIEW, close);
     verify(delegate).listDirectories(ENV, "/tmp");
@@ -143,6 +164,28 @@ class ClusterEnvironmentIdeServiceTest {
     assertSame(client.snapshot, snapshot);
     assertEquals(List.of("readView"), client.calls);
     assertTrue(localTransport.commands.isEmpty());
+  }
+
+  @Test
+  void attachmentRoutingValidatesCanonicalIdsBeforeRemoteForwarding() {
+    registry.current =
+        Optional.of(ClusterOwnerRoute.remote(NODE_B, URI.create("http://b.internal")));
+    EnvironmentIdeViewBindingDTO binding = new EnvironmentIdeViewBindingDTO();
+
+    service.openAttachment(
+        ENV,
+        VIEW,
+        "33333333-3333-4333-8333-333333333333",
+        "55555555-5555-4555-8555-555555555555",
+        binding);
+
+    assertEquals(List.of("openAttachment"), client.calls);
+    assertThrows(
+        DomainException.class,
+        () ->
+            service.openAttachment(
+                ENV, VIEW, "not-a-uuid", "55555555-5555-4555-8555-555555555555", binding));
+    assertEquals(1, registry.calls);
   }
 
   @Test
@@ -289,6 +332,17 @@ class ClusterEnvironmentIdeServiceTest {
         String viewId,
         EnvironmentIdeViewBindingDTO request) {
       calls.add("focusTerminal");
+    }
+
+    @Override
+    public void openAttachment(
+        EnvironmentId environmentId,
+        ClusterOwnerRoute owner,
+        String viewId,
+        String sessionId,
+        String resourceId,
+        EnvironmentIdeViewBindingDTO request) {
+      calls.add("openAttachment");
     }
 
     @Override
