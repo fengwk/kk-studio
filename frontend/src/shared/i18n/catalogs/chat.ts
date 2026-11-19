@@ -266,6 +266,10 @@ export const chatCatalog = {
     'en-US': 'History tree failed to load',
     'zh-CN': '历史树加载失败',
   },
+  'ai.chat.history.liveUpdatesStopped': {
+    'en-US': 'Live updates stopped. This thread may be out of date. Reload to reconnect.',
+    'zh-CN': '实时更新已停止，此线程的内容可能已过期。请重新加载页面以恢复连接。',
+  },
   'ai.chat.history.noMatch': {
     'en-US': 'No records match “{{query}}”',
     'zh-CN': '没有匹配 “{{query}}” 的记录',

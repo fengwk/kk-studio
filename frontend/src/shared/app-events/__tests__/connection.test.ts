@@ -5,7 +5,7 @@ import {
   type ApplicationEventConnectionState,
 } from '@/shared/app-events/connection'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
-import type { ApplicationEventServerMessage } from '@/shared/app-events/protocol'
+import { INVALID_EVENT_PAYLOAD, type ApplicationEventServerMessage } from '@/shared/app-events/protocol'
 
 const URL = 'ws://test/ws/events'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
@@ -68,6 +68,100 @@ describe('ApplicationEventConnection', () => {
     socket.emitServer({ ...CONNECTED })
     expect(connection.getStatus()).toBe('ready')
     expect(onOpen).toHaveBeenCalledTimes(1)
+  })
+
+  it('isolates a corrupt payload to its own resource while the socket stays up', () => {
+    vi.useFakeTimers()
+    const { connection, harness, onMessage, onClose } = openConnection()
+    connection.connect()
+    const socket = readyLatest(harness)
+    // 已收到 connected（握手帧本身也走 onMessage）。
+    expect(onMessage).toHaveBeenCalledTimes(1)
+
+    // 可定位资源的坏载荷：解码器直接合成资源级错误，物理连接继续。（version 为数字）
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'event',
+        resource: { kind: 'thread', id: THREAD_ID },
+        name: 'snapshot',
+        data: { version: 987654321, extra: 'should-not-leak' },
+      }),
+    })
+    expect(socket.closed).toBe(false)
+    expect(connection.getStatus()).toBe('ready')
+    expect(onClose).not.toHaveBeenCalled()
+    expect(onMessage).toHaveBeenCalledTimes(2)
+    expect(onMessage).toHaveBeenLastCalledWith({
+      type: 'error',
+      resource: { kind: 'thread', id: THREAD_ID },
+      code: INVALID_EVENT_PAYLOAD,
+      message: 'received an invalid thread snapshot payload for this resource',
+    })
+    // 坏载荷的原始值不会透过任何路径泄露。
+    expect(JSON.stringify(onMessage.mock.calls)).not.toContain('should-not-leak')
+
+    // 同 socket 上其他资源与后续健康帧仍正常到达。
+    socket.emitServer({
+      type: 'event',
+      resource: { kind: 'canvas', id: CANVAS_ID },
+      name: 'revision',
+      data: { revision: '2' },
+      cursor: '2',
+    })
+    expect(onMessage).toHaveBeenLastCalledWith({
+      type: 'event',
+      resource: { kind: 'canvas', id: CANVAS_ID },
+      name: 'revision',
+      data: { revision: '2' },
+      cursor: '2',
+    })
+    // 合法服务端帧仍刷新活性基线（出现过坏载荷不会被误当失联）。
+    vi.advanceTimersByTime(2 * HEARTBEAT_INTERVAL_MS)
+    expect(connection.getStatus()).toBe('ready')
+    expect(harness.sockets).toHaveLength(1)
+  })
+
+  it('keeps strict termination for frames that cannot locate a resource', () => {
+    vi.useFakeTimers()
+    const { connection, harness } = openConnection()
+    connection.connect()
+
+    // 握手完成前的可定位坏载荷同样不能把连接当成 ready。
+    const beforeReady = harness.openLatest()
+    beforeReady.onmessage?.({
+      data: JSON.stringify({
+        type: 'event',
+        resource: { kind: 'thread', id: THREAD_ID },
+        name: 'snapshot',
+        data: { version: 987654321 },
+      }),
+    })
+    expect(connection.getStatus()).toBe('connecting')
+    expect(beforeReady.closed).toBe(false)
+
+    readyLatest(harness)
+    expect(connection.getStatus()).toBe('ready')
+
+    for (const raw of [
+      'not json',
+      JSON.stringify({ type: 'unknown' }),
+      JSON.stringify({ type: 'event', resource: { kind: 'thread' }, name: 'snapshot', data: {} }),
+      JSON.stringify({ type: 'event', resource: { kind: 'thread', id: THREAD_ID }, name: 'revision', data: {} }),
+      JSON.stringify({
+        type: 'event', resource: { kind: 'thread', id: THREAD_ID }, name: 'snapshot', data: {}, extra: 1,
+      }),
+    ]) {
+      const violation = openConnection()
+      violation.connection.connect()
+      const socket = readyLatest(violation.harness)
+      socket.onmessage?.({ data: raw })
+      expect(socket.closed).toBe(true)
+      expect(violation.connection.getStatus()).toBe('stopped')
+      expect(violation.connection.getState().reason).toEqual({ kind: 'stopped', cause: 'protocol' })
+    }
+    // 合法帧仍然正常到达（上面的循环未污染本连接）。
+    expect(connection.getStatus()).toBe('ready')
+    expect(harness.latest?.closed).toBe(false)
   })
 
   it('decodes server frames strictly; a protocol violation terminates the connection', () => {

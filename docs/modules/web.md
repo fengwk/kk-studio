@@ -250,12 +250,12 @@ invocation 归属与 attempt，再让本地 active owner 立即提交 checkpoint
 该 channel 与 `harness_realtime` 共用独立 realtime LISTEN 连接。接收节点只对本地 active owner 执行
 attempt fence，不回广播、不回查 head；连接重连不重放追帧提示。数据库查询/发布失败直接向上传播为 5xx。
 
-`/ws/events` 是唯一的浏览器事件通道，采用无版本帧（严格拒绝携带 `version` 或未知字段）。
+`/ws/events` 是唯一的浏览器事件通道。帧不携带协议版本，每类帧均采用严格字段集。
 连接建立后的第一帧是 `connected`，携带本次物理连接的 `eventNodeId` 与 `connectionId`；每次重连都是新身份，
 浏览器据此把 IDE 视图绑定到当前连接，而不是沿用旧代际。
 资源为 `{kind:thread|canvas|thread-tree,id}` 或全局 `{kind:projects|interactions|environments}`；
 Thread `version` 与 Canvas `revision` 携 durable cursor，Thread `realtime` 是唯一的真负载事件，
-`projects` / `interactions` / `environments` 发失效提示；thread-tree HTTP 只用于 bootstrap 真实执行根与独立诊断，成功订阅后所有 live 快照经共享 root publisher 推送，包含重连、resync 与显式刷新。客户端可发送严格控制帧 `{type:'refresh',resource:{kind:'thread-tree',id}}`，仅对当前连接已订阅的执行树生效，不创建订阅；非 thread-tree 与未订阅资源分别返回 `INVALID_REFRESH_RESOURCE` 和 `RESOURCE_NOT_SUBSCRIBED`。每个本地订阅登记后都会请求强制快照，因此共享 root 的第二个订阅者也能立即初始化。`snapshot` 携带完整 `{nodes:[HarnessThreadTreeNodeDTO]}`，不带伪造 Thread.version cursor。执行树变化按 root 共用一个异步在途投影，变化期间只标记 dirty 并在完成后补一次尾随投影；内容未变不重复发送。投影在线程池中查询，不阻塞 PostgreSQL listener；队列有界，退订释放投影。投影或投递失败发送资源级 `TREE_SNAPSHOT_FAILED`，不触发自动 resync 重试；下一次真实变化、重连或用户显式 refresh 才重试。
+`projects` / `interactions` / `environments` 发失效提示；执行树通过 HTTP 确认真正的执行根，订阅后由共享 root publisher 推送完整快照。客户端可发送严格控制帧 `{type:'refresh',resource:{kind:'thread-tree',id}}`，仅对当前连接已订阅的执行树生效，不创建订阅；非 thread-tree 与未订阅资源分别返回 `INVALID_REFRESH_RESOURCE` 和 `RESOURCE_NOT_SUBSCRIBED`。每个本地订阅登记后都会请求强制快照，因此共享 root 的第二个订阅者也能立即初始化。`snapshot` 携带完整 `{nodes:[HarnessThreadTreeNodeDTO]}`，不带伪造 Thread.version cursor。执行树变化按 root 共用一个异步在途投影，变化期间只标记 dirty 并在完成后补一次尾随投影；内容未变不重复发送。投影在线程池中查询，不阻塞 PostgreSQL listener；队列有界，退订释放投影。投影或投递失败发送资源级 `TREE_SNAPSHOT_FAILED`，不触发自动 resync 重试；下一次真实变化、重连或用户显式 refresh 才重试。
 订阅先注册上游再读 cursor，sender 先排 subscribed ack 后 activate，首帧通过既有激活缓冲保证 ack 在前；缓冲溢出折叠为 resync。
 
 Thread 的首个本地订阅同时向平台订阅服务登记 `(threadId, nodeInstanceId)` 租约，末个订阅释放或 Hub close
@@ -268,7 +268,11 @@ Thread 的首个本地订阅同时向平台订阅服务登记 `(threadId, nodeIn
 发布；流式追帧请求仍按“其它活跃节点”广播。
 Environment 的连接状态不做推送：Environment 的 `status` / `statusExpiresAt` 在读取时由
 `min(leaseUntil, lastSeenAt + heartbeatTimeout)` 派生，浏览器只按 `environments` 失效提示回读。
-非法帧、过载和关闭按稳定错误与 WebSocket close code 收尾。
+快照本身超出 UTF-8 单帧预算时，用紧凑的资源帧替代：Thread 发
+`{type:'snapshot-ref',resource:{kind:'thread',id},version:'7'}`，顶层 `version` 是实际 DTO 版本的规范十进制字符串；
+执行树发 `{type:'snapshot-ref',resource:{kind:'thread-tree',id}}`，不含 version。成功入队或同一 Thread
+订阅已提示相同版本都算逻辑交付，客户端据此回读权威 HTTP 数据。正常快照入队或退订清除去重状态。
+单帧超限不暂停订阅、不关闭 socket；发送队列帧数或累计字节超限仍以 `BACKPRESSURE` 和 1013 关闭。
 
 IDE 使用证明走同一条通道：客户端发送 `ide-use`，携带 `browserSessionId`、同一连接内单调递增的 `revision`
 与 `views[]`（每项是 `environmentId`、`viewId`、`claimId`，已绑定视图再带 `bindingEpoch`）；

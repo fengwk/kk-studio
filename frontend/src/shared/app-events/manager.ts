@@ -11,6 +11,7 @@ import type {
   ApplicationEventResource,
   ApplicationEventRevision,
   ApplicationEventServerMessage,
+  SnapshotRefMessage,
 } from '@/shared/app-events/protocol'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 
@@ -23,7 +24,14 @@ interface ApplicationEventListener {
   onEvent?: (name: ApplicationEventName, data: unknown, cursor: string | undefined) => void
   /** 服务端要求整体替换为全量快照。 */
   onResync?: () => void
-  /** 服务端报告该资源订阅/事件处理失败。 */
+  /**
+   * 该资源的快照超出单帧预算：内容不在 wire 上，消费方必须回读权威 HTTP 事实。
+   *
+   * <p>完整消息原样转发（Thread 分支带顶层 version），用 {@code 'version' in message} 判别；
+   * 它不代表订阅失效：物理连接与其他资源不受影响，也不应触发重订阅循环。
+   */
+  onSnapshotRef?: (message: SnapshotRefMessage) => void
+  /** 服务端报告该资源订阅/事件处理失败（含衔接后的 {@link INVALID_EVENT_PAYLOAD}）。 */
   onError?: (code: string, message: string) => void
 }
 
@@ -64,7 +72,8 @@ const MAX_IDE_USE_VIEWS = 64
  *   refcount，首个 unsubscribe 不拆 wire；
  * - 连接（重连）transport open 后重发所有 active subscriptions；connected 帧提供每次物理
  *   连接新的 eventNodeId/connectionId/heartbeatIntervalMillis；
- * - subscribed/event/resync/error 按资源分发给 listeners；
+ * - subscribed/event/resync/snapshot-ref/error 按资源分发给 listeners；按资源隔离的
+ *   坏载荷（{@code INVALID_EVENT_PAYLOAD}）也经同一路径报告，不阻断其他资源；
  * - registerUsage 只在当前 ready（已收到 connected）时发送 ide-use，并以
  *   ide-use-accepted 确认；断线、协议错误或服务端拒绝会 reject，绝不在重连后自动
  *   重放该调用。
@@ -354,6 +363,8 @@ export class ApplicationEventManager {
         listener.onSubscribed?.(message.cursor)
       } else if (message.type === 'event') {
         listener.onEvent?.(message.name, message.data, 'cursor' in message ? message.cursor : undefined)
+      } else if (message.type === 'snapshot-ref') {
+        listener.onSnapshotRef?.(message)
       } else {
         listener.onResync?.()
       }

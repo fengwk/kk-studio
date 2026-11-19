@@ -34,9 +34,13 @@ import java.util.UUID;
  * {type:'ide-use',browserSessionId,revision,views}} 字段集精确。refresh 只允许已订阅的 thread 或 thread-tree
  * 资源。服务端帧 {@code connected{eventNodeId,connectionId,heartbeatIntervalMillis}} / {@code
  * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
- * {@code heartbeat} / {@code ide-use-accepted{revision}} / {@code
- * error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）；revision
- * 与 bindingEpoch 是 canonical 正整数且不超过 {@link Long#MAX_VALUE}。
+ * {@code snapshot-ref{resource[,version]}} / {@code heartbeat} / {@code ide-use-accepted{revision}}
+ * / {@code error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超
+ * bigint）；revision 与 bindingEpoch 是 canonical 正整数且不超过 {@link Long#MAX_VALUE}。
+ *
+ * <p>{@code snapshot-ref} 表示该资源的权威快照本身超出单帧预算，正文不在 wire 上，客户端必须回读 HTTP 事实。Thread 必带顶层 {@code
+ * version}（真实 DTO version 的 canonical 十进制，不是合成游标），执行树不带 {@code version}；两者都不带 {@code name}/{@code
+ * data}。
  */
 final class EventFrameCodec {
 
@@ -281,6 +285,36 @@ final class EventFrameCodec {
       case CANVAS -> "revision";
       default -> throw new IllegalArgumentException("version signal requires a versioned resource");
     };
+  }
+
+  /**
+   * 编码 {@code snapshot-ref} 帧：单帧放不下的权威快照按资源逻辑交付，正文由客户端回读 HTTP 权威事实。
+   *
+   * <p>Thread 必须传入真实 DTO {@code version}（{@code version} 是顶层字段，与 {@code resource} 同级）；执行树不允许携带
+   * {@code version}。缺失或越界的 {@code version} 是编码错误，绝不合成替代值。
+   */
+  String snapshotRef(ResourceKey resource, Long version) {
+    boolean thread = resource.kind() == ResourceKind.THREAD;
+    if (!thread && resource.kind() != ResourceKind.THREAD_TREE) {
+      throw new IllegalArgumentException(
+          "snapshot-ref is only supported for thread and thread-tree resources");
+    }
+    if (thread && version == null) {
+      throw new IllegalArgumentException("thread snapshot-ref requires the snapshot version");
+    }
+    if (thread && version < 0) {
+      throw new IllegalArgumentException("thread snapshot-ref version must be non-negative");
+    }
+    if (!thread && version != null) {
+      throw new IllegalArgumentException("thread-tree snapshot-ref must not carry a version");
+    }
+    ObjectNode node = NODES.objectNode();
+    node.put("type", "snapshot-ref");
+    node.set("resource", resourceNode(resource));
+    if (version != null) {
+      node.put("version", Long.toString(version));
+    }
+    return write(node);
   }
 
   /** 编码 {@code resync} 帧。 */

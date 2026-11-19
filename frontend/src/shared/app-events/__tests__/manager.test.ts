@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApplicationEventManager } from '@/shared/app-events/manager'
+import { INVALID_EVENT_PAYLOAD } from '@/shared/app-events/protocol'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
 import type { HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
 
@@ -472,6 +473,69 @@ describe('ApplicationEventManager', () => {
     expect(failing.onResync).toHaveBeenCalledTimes(1)
     expect(failing.onError).toHaveBeenCalledTimes(1)
     expect(consoleError).toHaveBeenCalledTimes(4)
+  })
+
+  it('forwards a full snapshot-ref message and the scoped invalid-payload error', () => {
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    const onSnapshotRef = vi.fn()
+    const onEvent = vi.fn()
+    const onError = vi.fn<(code: string, message: string) => void>()
+    manager.subscribe(THREAD_A, { onSnapshotRef, onEvent, onError })
+    manager.subscribe(TREE_A, { onSnapshotRef })
+
+    // Thread 的 version 是帧顶层字段，完整消息原样转发。
+    socket.emitServer({
+      type: 'snapshot-ref',
+      resource: THREAD_A,
+      version: '9223372036854775807',
+    })
+    expect(onSnapshotRef).toHaveBeenLastCalledWith({
+      type: 'snapshot-ref',
+      resource: THREAD_A,
+      version: '9223372036854775807',
+    })
+    // 执行树没有 version，可用 'version' in message 判别。
+    socket.emitServer({ type: 'snapshot-ref', resource: TREE_A })
+    expect(onSnapshotRef).toHaveBeenLastCalledWith({ type: 'snapshot-ref', resource: TREE_A })
+    const [treeMessage] = onSnapshotRef.mock.calls[1] ?? []
+    expect(treeMessage != null && 'version' in treeMessage).toBe(false)
+    // snapshot-ref 不是资源事件，也不当成错误。
+    expect(onEvent).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
+
+    // 解码器合成的资源级坏载荷经既有 onError 分发，不带原始载荷。
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'event', resource: THREAD_A, name: 'snapshot', data: { version: 987654321 },
+      }),
+    })
+    expect(onError).toHaveBeenCalledWith(
+      INVALID_EVENT_PAYLOAD,
+      'received an invalid thread snapshot payload for this resource',
+    )
+    expect(onEvent).not.toHaveBeenCalled()
+    // 订阅仍有效：后续合法快照照常到达同一 listener。
+    socket.emitServer({ type: 'event', resource: THREAD_A, name: 'snapshot', data: threadSnapshot(THREAD_A.id) })
+    expect(onEvent).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not deliver resource hints to a suspended subscription', () => {
+    const { manager, harness } = setup()
+    const socket = harness.openLatest()
+    const onSnapshotRef = vi.fn()
+    const onError = vi.fn()
+    manager.subscribe(THREAD_A, { onSnapshotRef, onError })
+    expect(manager.suspendThread(THREAD_A)).toBe(true)
+
+    socket.emitServer({ type: 'snapshot-ref', resource: THREAD_A, version: '1' })
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: 'event', resource: THREAD_A, name: 'snapshot', data: { version: 987654321 },
+      }),
+    })
+    expect(onSnapshotRef).not.toHaveBeenCalled()
+    expect(onError).not.toHaveBeenCalled()
   })
 
   it('cleans up: released listeners no longer receive dispatch and the entry is removed', () => {

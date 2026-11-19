@@ -25,9 +25,9 @@ import fun.fengwk.kkstudio.web.events.EventFrameCodec.IdeUseFrame;
 import fun.fengwk.kkstudio.web.events.EventFrameCodec.RefreshFrame;
 import fun.fengwk.kkstudio.web.events.EventFrameCodec.SubscriptionFrame;
 
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
@@ -46,6 +46,10 @@ import java.util.function.Supplier;
  * <p>连接建立后的第一帧是 {@code connected{eventNodeId,connectionId,heartbeatIntervalMillis}}，其中 heartbeat
  * 间隔是服务端实际配置值；服务端每 15 秒发送原生 ping，45 秒没有收到有效 pong 即停止 为该连接提供使用证明并关闭连接；浏览器的后台 JS 定时器不参与保活。资源不存在只回资源级
  * error（{@code RESOURCE_NOT_FOUND}）并保持连接； 非法协议帧与发送过载/失败才关闭连接。
+ *
+ * <p>单帧放不下与发送积压是两件事：{@code ThreadSnapshot} / {@code ThreadTreeSnapshot} 的完整帧超过本连接 UTF-8 单帧预算时，按资源发
+ * {@code snapshot-ref{resource[,version]}}（Thread 带真实 DTO version，执行树不带），
+ * 订阅与物理连接保持不变，后续可发送快照照常投递；只有队列帧数或待发字节总量越界才算过载，仍以 {@code BACKPRESSURE} 收尾。
  */
 @Component
 public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler {
@@ -257,7 +261,13 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     private final long heartbeatIntervalMillis;
     private final AsyncTextSender sender;
     private final Map<ResourceKey, Subscription> subscriptions = new ConcurrentHashMap<>();
-    private final Set<ResourceKey> pausedSnapshots = ConcurrentHashMap.newKeySet();
+
+    /**
+     * 单帧超限的 Thread 溢出簿记：记录本连接本订阅已按 {@code snapshot-ref} 逻辑交付的版本，同版本不再重复提示，正常快照 或 unsubscribe 清除。只在
+     * closeLock 内读写。
+     */
+    private final Map<ResourceKey, Long> overflowedSnapshotVersions = new HashMap<>();
+
     private final Object closeLock = new Object();
     private long lastPongNanos;
     private long lastHeartbeatNanos;
@@ -346,6 +356,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
                       if (closed || subscriptions.get(resource) != current[0]) {
                         return;
                       }
+                      // 快照未被接受时抛给发布器：它只在实际投递成功后推进订阅游标，重试时仍从旧游标投影。
                       if (signal instanceof Signal.ThreadSnapshot) {
                         if (!enqueueSignal(resource, signal)) {
                           throw new IllegalStateException("thread snapshot was not queued");
@@ -371,7 +382,6 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
           return;
         }
         subscriptions.put(resource, subscription);
-        pausedSnapshots.remove(resource);
         subscription.activate();
       }
     }
@@ -380,7 +390,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       synchronized (closeLock) {
         Subscription subscription = subscriptions.remove(resource);
         if (subscription != null) {
-          pausedSnapshots.remove(resource);
+          overflowedSnapshotVersions.remove(resource);
           subscription.close();
         }
       }
@@ -401,7 +411,6 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
                 resource);
             return;
           }
-          pausedSnapshots.remove(resource);
           if (!hub.requestThreadSnapshot(subscription)) {
             enqueueResourceError(
                 EventFrameCodec.THREAD_SNAPSHOT_FAILED,
@@ -430,12 +439,6 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
               "thread-tree snapshot could not be requested",
               resource);
         }
-      }
-    }
-
-    private void pauseThreadSnapshots(ResourceKey resource) {
-      if (pausedSnapshots.add(resource) && !sender.enqueue(codec.resync(resource))) {
-        fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
       }
     }
 
@@ -475,17 +478,17 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
-    /** 资源信号编码为帧后入队；队列满视为过载，发 BACKPRESSURE 后关闭连接。 */
+    /**
+     * 资源信号编码为帧后入队。
+     *
+     * <p>完整快照本身超出单帧 UTF-8 预算时只对该资源改发 {@code snapshot-ref}（Thread 带真实 DTO
+     * version，执行树不带），订阅与物理连接保持：Thread 同版本不重复提示，正常的可发送快照照常投递并清除 该资源的簿记。队列帧数或待发字节总量越界仍是真实过载，发
+     * BACKPRESSURE 后关闭连接。
+     *
+     * @return 该资源是否已接受本次投递（正常帧或 {@code snapshot-ref}，含同版本去重）；真实失败或已关闭时为 {@code false}，Thread
+     *     发布器据此决定是否推进订阅游标
+     */
     private boolean enqueueSignal(ResourceKey resource, Signal signal) {
-      if (resource.kind() == ApplicationEventHub.ResourceKind.THREAD) {
-        if (pausedSnapshots.contains(resource)) {
-          return false;
-        }
-        if (signal instanceof Signal.Resync) {
-          pauseThreadSnapshots(resource);
-          return false;
-        }
-      }
       if (signal instanceof Signal.ThreadSnapshotFailed) {
         enqueueResourceError(
             EventFrameCodec.THREAD_SNAPSHOT_FAILED,
@@ -506,12 +509,47 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         frame = codec.event(resource, signal);
       }
       if (!sender.enqueue(frame)) {
-        if (signal instanceof Signal.ThreadSnapshot && sender.exceedsFrameBudget(frame)) {
-          pauseThreadSnapshots(resource);
-          return false;
+        if (sender.exceedsFrameBudget(frame) && isOversizedSnapshotFrame(signal)) {
+          return enqueueSnapshotRef(resource, signal);
         }
         fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
         return false;
+      }
+      if (isOversizedSnapshotFrame(signal)) {
+        // 正常快照已交付：该资源不再处于溢出提示状态。
+        overflowedSnapshotVersions.remove(resource);
+      }
+      return true;
+    }
+
+    /** 只有完整权威快照会因体积单独超限；其他帧超预算就只能是真实积压。 */
+    private static boolean isOversizedSnapshotFrame(Signal signal) {
+      return signal instanceof Signal.ThreadSnapshot || signal instanceof Signal.ThreadTreeSnapshot;
+    }
+
+    /**
+     * 按资源提示“快照放不进单帧”：Thread 携带快照的真实 DTO version，执行树不带 version。
+     *
+     * <p>同一订阅内重复的相同 Thread 版本只提示一次；提示入队成功即视为该资源的逻辑交付，客户端据此回读 HTTP 权威事实并重新基准，因此不暂停订阅、不清空后续事实。version
+     * 一律取快照的真实 DTO 值，严格 codec 拒绝缺失值，不在此合成或回退任何替代值。
+     *
+     * @return ref 已入队或同版本已逻辑交付时为 {@code true}；入队失败（已以 BACKPRESSURE 收尾）时为 {@code false}
+     */
+    private boolean enqueueSnapshotRef(ResourceKey resource, Signal signal) {
+      Long version = null;
+      if (signal instanceof Signal.ThreadSnapshot snapshot) {
+        version = snapshot.snapshot().getVersion();
+        if (version != null && version.equals(overflowedSnapshotVersions.get(resource))) {
+          return true; // 同一版本已逻辑交付：不重复提示，也不制造 HTTP 回读循环。
+        }
+      }
+      // 严格 codec 要求 Thread 必须携带真实 version；缺失即编码错误，不在此合成或回退任何替代值。
+      if (!sender.enqueue(codec.snapshotRef(resource, version))) {
+        fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
+        return false;
+      }
+      if (version != null) {
+        overflowedSnapshotVersions.put(resource, version);
       }
       return true;
     }

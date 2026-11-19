@@ -11,6 +11,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.browser.ConnectionIdentity;
@@ -22,6 +23,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -312,6 +314,194 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     JsonNode httpSnapshot = MAPPER.readTree(delta.body());
     assertTrue(httpSnapshot.path("queuedCommands").path(0).path("sequence").isString());
     assertEquals(httpSnapshot, snapshot.path("data"));
+  }
+
+  /**
+   * 测试意图：真实 Jetty + PG 上，超出本连接单帧 UTF-8 预算的 Thread 快照不再拖垮 socket，而是改发带真实 DTO version 的 {@code
+   * snapshot-ref}；同一物理连接随后仍能收到另一资源的健康快照。
+   */
+  @Test
+  void oversizedThreadSnapshotBecomesSnapshotRefAndKeepsTheRealSocketHealthy() throws Exception {
+    HttpClient http = HttpClient.newHttpClient();
+    String chatId = createChat(http);
+    String oversizedThread = createThread(http, chatId, "o".repeat(20_000));
+    String healthyThread = createThread(http, chatId, "hello");
+    JsonNode oversizedSnapshot = getThreadSnapshot(http, oversizedThread);
+    JsonNode healthySnapshot = getThreadSnapshot(http, healthyThread);
+
+    // 预算由真实 HTTP 快照体积推导：健康快照放得下，超限快照严格放不下（不硬编码字节数）。
+    int healthyBytes = utf8(healthySnapshot);
+    int oversizedBytes = utf8(oversizedSnapshot);
+    assertTrue(
+        oversizedBytes > healthyBytes * 2,
+        "the oversized fixture must really be much larger than the healthy one");
+    long maxBytes = healthyBytes + (oversizedBytes - healthyBytes) / 2L;
+    assertTrue(maxBytes > healthyBytes, "the budget must still accept the healthy snapshot");
+    assertTrue(maxBytes < oversizedBytes, "the budget must reject the oversized snapshot");
+    long originalMaxBytes = updateApplicationEventMaxBytes(http, maxBytes);
+    try {
+      FrameCollector collector = new FrameCollector();
+      WebSocket socket = connect(collector);
+      assertConnected(collector);
+
+      socket.sendText(subscribeThreadFrame(oversizedThread), true).get(10, TimeUnit.SECONDS);
+      assertEquals(subscribedFrame(oversizedThread), collector.nextText());
+
+      JsonNode ref = MAPPER.readTree(collector.nextText());
+      assertEquals("snapshot-ref", ref.path("type").asText());
+      assertEquals("thread", ref.path("resource").path("kind").asText());
+      assertEquals(oversizedThread, ref.path("resource").path("id").asText());
+      // version 是顶层字段且等于权威 HTTP 快照的真实 DTO version，不是合成 cursor。
+      assertEquals(oversizedSnapshot.path("version").asText(), ref.path("version").asText());
+      assertEquals(
+          oversizedSnapshot.path("version").asText(),
+          oversizedSnapshot.path("thread").path("version").asText());
+      assertTrue(ref.path("version").isString());
+      assertFalse(ref.has("name"));
+      assertFalse(ref.has("data"));
+
+      // 同一物理连接继续可用：另一 Thread 的健康快照照常作为普通 event 投递。
+      socket.sendText(subscribeThreadFrame(healthyThread), true).get(10, TimeUnit.SECONDS);
+      assertEquals(subscribedFrame(healthyThread), collector.nextText());
+      JsonNode healthyEvent = MAPPER.readTree(collector.nextText());
+      assertEquals("event", healthyEvent.path("type").asText());
+      assertEquals("snapshot", healthyEvent.path("name").asText());
+      assertEquals(
+          healthyThread, healthyEvent.path("data").path("thread").path("threadId").asText());
+      assertEquals(healthySnapshot, healthyEvent.path("data"));
+      socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);
+    } finally {
+      updateApplicationEventMaxBytes(http, originalMaxBytes);
+    }
+  }
+
+  private static String subscribeThreadFrame(String threadId) {
+    return "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        + threadId
+        + "\"}}";
+  }
+
+  private static String subscribedFrame(String threadId) {
+    return "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+        + threadId
+        + "\"},\"cursor\":\"0\"}";
+  }
+
+  private static int utf8(JsonNode node) {
+    return node.toString().getBytes(StandardCharsets.UTF_8).length;
+  }
+
+  private String createChat(HttpClient http) throws Exception {
+    String body = "{\"title\":\"ws-oversize\",\"agentName\":\"default-assistant\"}";
+    HttpResponse<String> response =
+        http.send(
+            HttpRequest.newBuilder(uri("/api/chat/chats"))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(201, response.statusCode(), response.body());
+    return MAPPER.readTree(response.body()).path("id").asText();
+  }
+
+  private String createThread(HttpClient http, String chatId, String userText) throws Exception {
+    String threadId = UUID.randomUUID().toString();
+    String createBody =
+        """
+        {
+          "owner":{"kind":"CHAT","id":"%s"},
+          "target":{
+            "type":"NEW_SESSION",
+            "sessionId":"%s",
+            "threadId":"%s",
+            "rootSettings":{
+              "agentName":"default-assistant",
+              "execution":{
+                "driver":"builtin",
+                "settings":{"modelName":"acceptance-stub","variant":"default"}
+              },
+              "environmentName":null
+            },
+            "yoloEnabled":false
+          },
+          "commands":[{
+            "type":"USER_MESSAGE",
+            "idempotencyKey":"%s",
+            "contents":[{"type":"TEXT","text":"%s"}]
+          }]
+        }
+        """
+            .formatted(chatId, UUID.randomUUID(), threadId, UUID.randomUUID(), userText);
+    HttpResponse<String> response =
+        http.send(
+            HttpRequest.newBuilder(uri("/api/harness/command-batches"))
+                .timeout(Duration.ofSeconds(20))
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(createBody))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(202, response.statusCode(), response.body());
+    assertEquals(
+        threadId, MAPPER.readTree(response.body()).path("thread").path("threadId").asText());
+    return threadId;
+  }
+
+  private JsonNode getThreadSnapshot(HttpClient http, String threadId) throws Exception {
+    HttpResponse<String> response =
+        http.send(
+            HttpRequest.newBuilder(uri("/api/harness/threads/" + threadId))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, response.statusCode());
+    return MAPPER.readTree(response.body());
+  }
+
+  /**
+   * 通过公开设置端点调整后续连接的发送字节预算：完整回送当前聚合，只改一个 advanced 字段。
+   *
+   * <p>每条连接在建立时冻结当时的设置快照，因此调整必须在 {@link #connect} 之前完成。
+   */
+  private long updateApplicationEventMaxBytes(HttpClient http, long maxBytes) throws Exception {
+    HttpResponse<String> current =
+        http.send(
+            HttpRequest.newBuilder(uri("/api/platform/settings"))
+                .timeout(Duration.ofSeconds(10))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, current.statusCode());
+    ObjectNode body = (ObjectNode) MAPPER.readTree(current.body());
+    // version / createdAt / updatedAt 是只读输出，写请求 DTO 没有这些字段。
+    long version = Long.parseLong(body.get("version").asString());
+    long previousMaxBytes =
+        Long.parseLong(
+            ((ObjectNode) body.get("advanced")).get("applicationEventMaxBytes").asString());
+    body.remove("version");
+    body.remove("createdAt");
+    body.remove("updatedAt");
+    body.put("expectedVersion", Long.toString(version));
+    ((ObjectNode) body.get("advanced")).put("applicationEventMaxBytes", Long.toString(maxBytes));
+
+    HttpResponse<String> response =
+        http.send(
+            HttpRequest.newBuilder(uri("/api/platform/settings"))
+                .timeout(Duration.ofSeconds(10))
+                .header("Content-Type", "application/json")
+                .PUT(HttpRequest.BodyPublishers.ofString(body.toString()))
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, response.statusCode(), response.body());
+    assertEquals(
+        Long.toString(maxBytes),
+        MAPPER
+            .readTree(response.body())
+            .path("advanced")
+            .path("applicationEventMaxBytes")
+            .asText());
+    return previousMaxBytes;
   }
 
   private ConnectionIdentity assertConnected(FrameCollector collector) throws Exception {

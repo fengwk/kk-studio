@@ -146,6 +146,41 @@ class ThreadSnapshotPublisherTest {
     handleRef[0].close();
   }
 
+  /** 测试意图：投递回调报错时订阅游标不得推进，下一次投影仍用原游标（未被接受的快照不能当已投递）。 */
+  @Test
+  void rejectedDeliveryKeepsTheSubscriberCursorAtItsPreviousEntry() {
+    Queue<Runnable> tasks = new ArrayDeque<>();
+    List<List<UUID>> requestedCursors = new ArrayList<>();
+    AtomicInteger deliveries = new AtomicInteger();
+    ThreadSnapshotPublisher publisher =
+        new ThreadSnapshotPublisher(
+            tasks::add,
+            (threadId, cursors) -> {
+              requestedCursors.add(cursors);
+              return cursors.stream().map(ignored -> snapshot(HEAD)).toList();
+            },
+            Executors.newSingleThreadScheduledExecutor());
+    ThreadSnapshotPublisher.Handle handle =
+        publisher.subscribe(
+            THREAD,
+            BASE,
+            ignored -> {
+              if (deliveries.incrementAndGet() == 1) {
+                // 传输层拒绝该快照（未启动 drain），发布器必须把它当未投递。
+                throw new IllegalStateException("thread snapshot was not queued");
+              }
+            },
+            () -> {});
+    handle.activate();
+    tasks.remove().run();
+
+    handle.request(false);
+    tasks.remove().run();
+
+    assertEquals(List.of(List.of(BASE), List.of(BASE)), requestedCursors);
+    handle.close();
+  }
+
   @Test
   void closeOldThenActivatePendingHandlesJoinTheCurrentSharedState() {
     Queue<Runnable> tasks = new ArrayDeque<>();
