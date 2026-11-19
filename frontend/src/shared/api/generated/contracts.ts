@@ -3343,6 +3343,11 @@ export interface ApiRoutes {
     body: EnvironmentIdeViewBindingDTO
     response: void
   }
+  'POST /api/ide/environments/{environmentId}/views/{viewId}/attachments/{sessionId}/{resourceId}': {
+    path: { environmentId: string; resourceId: string; sessionId: string; viewId: string }
+    body: EnvironmentIdeViewBindingDTO
+    response: void
+  }
   'POST /api/ide/environments/{environmentId}/views/{viewId}/close': {
     path: { environmentId: string; viewId: string }
     body: EnvironmentIdeCloseViewDTO

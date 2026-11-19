@@ -1,4 +1,4 @@
-import { executeFetch, request } from '@/shared/api/client'
+import { request } from '@/shared/api/client'
 import type {
   ApiRoutes,
   EnvironmentIdeChangeDirectoryDTO,
@@ -91,10 +91,7 @@ export function applyIdeMobileLayout(
   })
 }
 
-/**
- * Open a server-resolved, read-only attachment copy in an existing bound IDE view.
- * The generated route is not available yet; keep this explicit path isolated here.
- */
+/** Open a server-resolved, read-only attachment copy in an existing bound IDE view. */
 export function openIdeAttachment(
   environmentId: string,
   viewId: string,
@@ -102,12 +99,10 @@ export function openIdeAttachment(
   resourceId: string,
   body: EnvironmentIdeViewBindingDTO,
 ): Promise<void> {
-  const path = [environmentId, viewId, sessionId, resourceId]
-    .map((part) => encodeURIComponent(part))
-  return executeFetch(
-    `/api/ide/environments/${path[0]}/views/${path[1]}/attachments/${path[2]}/${path[3]}`,
-    { method: 'POST', body },
-  )
+  return request('POST /api/ide/environments/{environmentId}/views/{viewId}/attachments/{sessionId}/{resourceId}', {
+    path: { environmentId, viewId, sessionId, resourceId },
+    body,
+  })
 }
 
 /** 普通关闭等待 IDE 内用户操作；仅在状态未知并经用户确认时强制关闭。 */
