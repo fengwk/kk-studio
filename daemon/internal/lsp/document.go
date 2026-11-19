@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -20,17 +21,22 @@ func (c *Client) Sync(path string) error {
 		return err
 	}
 	defer c.releaseSend()
-	return c.syncLocked(path)
+	return c.syncLocked(context.Background(), path)
 }
 
 // syncLocked reads and sends one document while holding the session send gate.
-func (c *Client) syncLocked(path string) error {
+func (c *Client) syncLocked(ctx context.Context, path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
 	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			if closeErr := c.closeMissingLocked(ctx, abs); closeErr != nil {
+				return closeErr
+			}
+		}
 		return &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
 	}
 	decoded, _, _, decodeErr := textcodec.Decode(abs, data)
@@ -48,7 +54,7 @@ func (c *Client) syncLocked(path string) error {
 	language := languageID(filepath.Ext(abs), c.server.ID)
 	if !opened {
 		c.mu.Unlock()
-		if err := c.notifyLocked(context.Background(), "textDocument/didOpen", DidOpenTextDocumentParams{TextDocument: TextDocumentItem{LanguageID: language, Text: text, URI: uri, Version: 1}}); err != nil {
+		if err := c.notifyLocked(ctx, "textDocument/didOpen", DidOpenTextDocumentParams{TextDocument: TextDocumentItem{LanguageID: language, Text: text, URI: uri, Version: 1}}); err != nil {
 			return err
 		}
 		c.mu.Lock()
@@ -58,14 +64,59 @@ func (c *Client) syncLocked(path string) error {
 	}
 	version := old.version + 1
 	c.mu.Unlock()
-	if err := c.notifyLocked(context.Background(), "textDocument/didChange", DidChangeTextDocumentParams{ContentChanges: []ContentChangeEvent{{Text: text}}, TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: version}}); err != nil {
+	if err := c.notifyLocked(ctx, "textDocument/didChange", DidChangeTextDocumentParams{ContentChanges: []ContentChangeEvent{{Text: text}}, TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: version}}); err != nil {
 		return err
 	}
 	c.mu.Lock()
 	c.documents[abs] = document{text: text, version: version}
 	c.mu.Unlock()
-	return c.notifyLocked(context.Background(), "textDocument/didSave", DidSaveTextDocumentParams{TextDocument: TextDocumentIdentifier{URI: uri}})
+	return c.notifyLocked(ctx, "textDocument/didSave", DidSaveTextDocumentParams{TextDocument: TextDocumentIdentifier{URI: uri}})
 }
+
+// closeMissingLocked is only called after a missing-file error under the send gate.
+func (c *Client) closeMissingLocked(ctx context.Context, abs string) error {
+	c.mu.RLock()
+	_, opened := c.documents[abs]
+	c.mu.RUnlock()
+	if !opened {
+		return nil
+	}
+	if ctx.Err() != nil {
+		return contextFailure(ctx)
+	}
+	if err := c.notifyLocked(ctx, "textDocument/didClose", DidCloseTextDocumentParams{TextDocument: TextDocumentIdentifier{URI: pathURI(abs)}}); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	delete(c.documents, abs)
+	c.mu.Unlock()
+	return nil
+}
+
+// reconcileMissingLocked checks only open overlays, not the rest of the workspace.
+func (c *Client) reconcileMissingLocked(ctx context.Context) error {
+	c.mu.RLock()
+	paths := make([]string, 0, len(c.documents))
+	for path := range c.documents {
+		paths = append(paths, path)
+	}
+	c.mu.RUnlock()
+	sort.Strings(paths)
+	for _, path := range paths {
+		if ctx.Err() != nil {
+			return contextFailure(ctx)
+		}
+		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+			if err := c.closeMissingLocked(ctx, path); err != nil {
+				return err
+			}
+		} else if err != nil {
+			return &LspError{Message: "LSP request failed: the open source file could not be inspected", Cause: err}
+		}
+	}
+	return nil
+}
+
 func languageID(ext, fallback string) string {
 	switch strings.ToLower(ext) {
 	case ".ts", ".mts", ".cts":
@@ -148,7 +199,7 @@ func (c *Client) Definition(ctx context.Context, path string, line, character in
 	var result DefinitionResult
 	onSent, onFinished := trackingCallbacks(tracking)
 	err := c.callPrepared(ctx, "textDocument/definition", nil, &result, onSent, onFinished, func() (any, error) {
-		if err := c.syncLocked(path); err != nil {
+		if err := c.syncLocked(ctx, path); err != nil {
 			return nil, err
 		}
 		abs, err := filepath.Abs(path)
@@ -176,7 +227,13 @@ func (c *Client) WorkspaceSymbols(ctx context.Context, query string, limit int, 
 	}
 	var result WorkspaceSymbolsResult
 	onSent, onFinished := trackingCallbacks(tracking)
-	if err := c.call(ctx, "workspace/symbol", WorkspaceSymbolParams{Query: query}, &result, onSent, onFinished); err != nil {
+	err := c.callPrepared(ctx, "workspace/symbol", nil, &result, onSent, onFinished, func() (any, error) {
+		if err := c.reconcileMissingLocked(ctx); err != nil {
+			return nil, err
+		}
+		return WorkspaceSymbolParams{Query: query}, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return formatSymbols(result, limit)

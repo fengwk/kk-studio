@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -79,6 +80,81 @@ func TestDocument_NotificationSequenceAndContent(t *testing.T) {
 	if err := client.Stop(time.Millisecond); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// A missing definition source closes its overlay but never dispatches a stale definition.
+// A second deletion, without a callback or direct read, is caught before workspace/symbol.
+func TestDocument_DeletedOverlayClosesAndReopens(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "sample.go")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	events := make(chan fakeRequest, 16)
+	client, err := Launch(ctx, ServerConfig{ID: "go", Command: []string{"fake"}}, root, "/fake", &fakeSupervisor{events: events})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := client.Stop(time.Second); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := client.Initialize(ctx, time.Second); err != nil {
+		t.Fatal(err)
+	}
+	takeFakeEvent(t, events, "initialize")
+	takeFakeEvent(t, events, "initialized")
+
+	open := func() {
+		t.Helper()
+		const text = "package sample\n"
+		if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if err := client.Sync(path); err != nil {
+			t.Fatal(err)
+		}
+		var p DidOpenTextDocumentParams
+		if err := json.Unmarshal(takeFakeEvent(t, events, "textDocument/didOpen").Params, &p); err != nil || p.TextDocument.URI != pathURI(path) || p.TextDocument.Version != 1 || p.TextDocument.Text != text {
+			t.Fatalf("didOpen params = %#v, err = %v", p, err)
+		}
+	}
+	remove := func() {
+		t.Helper()
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+	}
+	checkClose := func() {
+		t.Helper()
+		var p DidCloseTextDocumentParams
+		if err := json.Unmarshal(takeFakeEvent(t, events, "textDocument/didClose").Params, &p); err != nil || p.TextDocument.URI != pathURI(path) {
+			t.Fatalf("didClose params = %#v, err = %v", p, err)
+		}
+	}
+
+	open()
+	remove()
+	// An existing directory cannot be read as text, but that is not ENOENT.
+	if err := os.Mkdir(path, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Definition(ctx, path, 1, 1); err == nil || errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("definition of a directory = %v, want a non-ENOENT read failure", err)
+	}
+	remove()
+	if _, err := client.Definition(ctx, path, 1, 1); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("definition of deleted file = %v, want ENOENT", err)
+	}
+	checkClose()
+	open()
+	remove()
+	if _, err := client.WorkspaceSymbols(ctx, "sample", 10); err != nil {
+		t.Fatal(err)
+	}
+	checkClose()
+	takeFakeEvent(t, events, "workspace/symbol")
+	open()
 }
 
 func takeFakeEvent(t *testing.T, events <-chan fakeRequest, method string) fakeRequest {

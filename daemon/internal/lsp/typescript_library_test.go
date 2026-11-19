@@ -475,6 +475,46 @@ func TestTypeScriptProfile_RealInstallQueryAndExit(t *testing.T) {
 	if confirmed != 1 {
 		t.Fatalf("execution exit confirmations = %d, want 1", confirmed)
 	}
+
+	// Use another file in the same workspace to query the open overlay before and
+	// after an external deletion, without calling the Daemon's change callback.
+	anchor := filepath.Join(root, "anchor.ts")
+	if err := os.WriteFile(anchor, []byte("function anchor() { return 2; }\nanchor();\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	// TypeScript needs a remaining open file to keep the project queryable.
+	anchorDefinition := call
+	anchorDefinition.InvocationID = "real-typescript-anchor-definition"
+	anchorDefinition.Arguments = json.RawMessage(`{"path":"` + filepath.ToSlash(anchor) + `","line":2,"character":1}`)
+	if result, err := facade.Capabilities()["lsp.goto-definition"](ctx, anchorDefinition, daemonruntime.CapabilityContext{}); err != nil || result.Error {
+		t.Fatalf("anchor definition = %#v, err = %v", result, err)
+	}
+	symbols := func() string {
+		t.Helper()
+		call := daemonruntime.CapabilityCall{
+			InvocationID:  "real-typescript-symbol-query",
+			Arguments:     json.RawMessage(`{"path":"` + filepath.ToSlash(anchor) + `","query":"kkStudioVerifiedSymbol"}`),
+			TimeoutMillis: 60000,
+		}
+		result, err := facade.Capabilities()["lsp.workspace-symbols"](ctx, call, daemonruntime.CapabilityContext{})
+		if err != nil || result.Error || len(result.Contents) != 1 {
+			t.Fatalf("real TypeScript symbol query = %#v, err = %v", result, err)
+		}
+		return result.Contents[0].Text
+	}
+	if got := symbols(); !strings.Contains(got, pathURI(filepath.Join(root, "index.ts"))) {
+		t.Fatalf("symbol before deletion = %q", got)
+	}
+	if err := os.Remove(filepath.Join(root, "index.ts")); err != nil {
+		t.Fatal(err)
+	}
+	if got := symbols(); got != "No symbols found" {
+		t.Fatalf("deleted symbol is still visible: %q", got)
+	}
+	if len(processes.processes) != 1 {
+		t.Fatalf("expected definition and symbol queries to share one server, started %d", len(processes.processes))
+	}
+
 	if err := facade.Close(); err != nil {
 		t.Fatal(err)
 	}
