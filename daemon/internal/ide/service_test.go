@@ -1,6 +1,7 @@
 package ide
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -420,6 +421,72 @@ func viewCommandForTest(action protocol.IdeAction, opened *protocol.IdeResult, d
 
 func openCommandForTest(directory, viewID, claimID string) *protocol.IdeCommand {
 	return &protocol.IdeCommand{Action: protocol.IdeAction_OPEN_VIEW, ViewId: stringPointer(viewID), BrowserSessionId: stringPointer("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), EventNodeId: stringPointer("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), ConnectionId: stringPointer("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), ClaimId: stringPointer(claimID), Mode: protocol.IdeOpenMode_CREATE, Directory: stringPointer(directory), ExpectedBindingEpoch: int64Pointer(0), ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999")}
+}
+
+// Verifies a successful coding write path queues a path-scoped refresh for its managed view.
+func TestFileChangedRefreshesMatchingManagedView(t *testing.T) {
+	root := t.TempDir()
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{
+		DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	response, cancelHost := openTestBridgeStream(t, bridge, opened.GetViewId(), opened.GetWorkspacePath(), "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	defer cancelHost()
+	defer response.Body.Close()
+	reader := bufio.NewReader(response.Body)
+	// FileChanged receives a resolved path, including on macOS where the temporary directory may be symlinked.
+	service.FileChanged(filepath.Join(opened.GetDirectory(), "nested", "changed.txt"))
+	line := make(chan string, 1)
+	readErr := make(chan error, 1)
+	go func() {
+		value, err := reader.ReadString('\n')
+		if err != nil {
+			readErr <- err
+			return
+		}
+		line <- value
+	}()
+	select {
+	case value := <-line:
+		var command map[string]any
+		if err := json.Unmarshal([]byte(value), &command); err != nil {
+			t.Fatal(err)
+		}
+		if command["op"] != "refreshExplorer" || command["path"] != nil || command["command"] != nil {
+			t.Fatalf("refresh command = %#v", command)
+		}
+	case err := <-readErr:
+		t.Fatalf("read refresh command: %v", err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("matching managed view was not notified")
+	}
+}
+
+// Verifies refresh matching respects canonical workspace path boundaries.
+func TestPathWithin(t *testing.T) {
+	if !pathWithin(filepath.Join(string(filepath.Separator), "work", "app"), filepath.Join(string(filepath.Separator), "work", "app", "src", "main.go")) {
+		t.Fatal("descendant path did not match workspace")
+	}
+	for _, path := range []string{
+		filepath.Join(string(filepath.Separator), "work", "app-sibling", "main.go"),
+		filepath.Join(string(filepath.Separator), "work", "other", "main.go"),
+	} {
+		if pathWithin(filepath.Join(string(filepath.Separator), "work", "app"), path) {
+			t.Errorf("non-descendant path %q matched workspace", path)
+		}
+	}
 }
 
 // Verifies a connected dirty view is snapshotted before expired-mode managed cleanup.

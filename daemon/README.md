@@ -31,9 +31,13 @@ The daemon executable retains CLI parsing, `--help`, `--version`, read-only `--c
 
 The verified TypeScript profile is limited to Linux/amd64 and pins `typescript-language-server@4.3.4` with `typescript@5.8.3` in `internal/lsp/typescript/package-lock.json`. `lsp.TypeScriptLibrary.Install` uses the caller-provided private library directory and `npm ci --ignore-scripts`; it stages beside the version directory, validates installed package versions and the executable, then atomically publishes the immutable profile under a kernel-backed library lock. Its npm cache is confined to removable staging data; it does not modify global npm/HOME/XDG state. The install needs npm and Node.js on PATH; the package declares a Node.js 18 minimum, while the real-server handshake in this slice was verified with Node.js 22.23.4.
 
-`lsp.TypeScriptServerConfig` resolves the installed profile to the exact `node <profile>/node_modules/typescript-language-server/lib/cli.mjs --stdio` command and its verified TS/JS extensions and root markers. Callers add that declaration only to the appropriate Environment's `daemonConfig.lsp`; the existing LSP facade/pool owns runtime processes, keeping Environment and canonical workspace roots isolated. Installing materials alone does not enable a language. The automated package install + real-server initialize handshake is opt-in: `KK_STUDIO_TEST_TS_LSP=1 go test ./internal/lsp -run '^TestTypeScriptProfile_RealInstallAndLSPHandshake$'` (downloads pinned npm packages into a temporary directory).
+`lsp.TypeScriptServerConfig` resolves the installed profile to the exact `node <profile>/node_modules/typescript-language-server/lib/cli.mjs --stdio` command and its verified TS/JS extensions and root markers. Callers add that declaration only to the appropriate Environment's `daemonConfig.lsp`; the existing LSP facade/pool owns runtime processes, keeping Environment and canonical workspace roots isolated. Installing materials alone does not enable a language. The automated package install, real definition query and verified exit are opt-in: `KK_STUDIO_TEST_TS_LSP=1 go test ./internal/lsp -run '^TestTypeScriptProfile_RealInstallQueryAndExit$'` (downloads pinned npm packages into a temporary directory).
 
 No other language or platform is declared by this profile.
+
+### Managed Explorer refresh
+
+Successful built-in `write` and `edit` operations notify LSP and queue a coalesced Explorer refresh for each connected view whose workspace contains the resolved file path. The bridge sends only the fixed `refreshExplorer` operation. The extension calls `kk-studio.refreshExplorer` on managed Workbench builds that provide it; this refresh does not reveal the Explorer or save or reload documents. On builds without that command, automatic refresh is unavailable and the manual Explorer refresh still works. Bash and other external writes do not emit this notification.
 
 ### Skill installation
 

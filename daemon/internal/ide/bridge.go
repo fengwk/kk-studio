@@ -256,6 +256,10 @@ func (b *Bridge) Request(ctx context.Context, viewID string, command BridgeComma
 		b.mu.Unlock()
 		return BridgeResult{}, NewError("view binding changed", "VIEW_GONE")
 	}
+	if command.Op == "refreshExplorer" && view.directory != options.ExpectedDirectory {
+		b.mu.Unlock()
+		return BridgeResult{}, NewError("view directory changed", "VIEW_GONE")
+	}
 	if err := ctx.Err(); err != nil {
 		b.mu.Unlock()
 		code := "BUSY"

@@ -36,6 +36,11 @@ function createHostActions(host) {
     await reply(message.id, { ok: true, clean: documents.canProveClean(vscode) })
   }
 
+  const refreshExplorer = async (message) => {
+    await vscode.commands.executeCommand('kk-studio.refreshExplorer')
+    await reply(message.id, { ok: true })
+  }
+
   const snapshot = async (message) => {
     const maxBytes =
       typeof message.maxBytes === 'number' && Number.isSafeInteger(message.maxBytes) && message.maxBytes > 0
@@ -258,6 +263,7 @@ function createHostActions(host) {
   }
 
   const handlers = {
+    refreshExplorer,
     changeDirectory,
     focusTerminal,
     inspect: inspectView,

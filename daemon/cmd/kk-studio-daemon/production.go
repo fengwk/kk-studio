@@ -211,12 +211,15 @@ func (r productionRuntime) assembleRuntime(initial config.DaemonConfig, assembly
 		}}
 	}
 	core, err := daemonruntime.NewRuntime(daemonruntime.RuntimeOptions{
-		EnvironmentID:         initial.EnvironmentID,
-		DaemonVersion:         config.DaemonVersion,
-		Connections:           connections,
-		Capabilities:          capabilities,
-		Processes:             assembly.processes,
-		FileChanged:           assembly.lspFacade.FileChanged,
+		EnvironmentID: initial.EnvironmentID,
+		DaemonVersion: config.DaemonVersion,
+		Connections:   connections,
+		Capabilities:  capabilities,
+		Processes:     assembly.processes,
+		FileChanged: func(path string) {
+			assembly.lspFacade.FileChanged(path)
+			assembly.ideService.FileChanged(path)
+		},
 		Resources:             dynamicResourceUploader{networks: assembly.networks, control: resourceControl},
 		TemporaryResources:    assembly.temporaryResources,
 		EnvironmentConfig:     environmentConfig,
