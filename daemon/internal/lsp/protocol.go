@@ -144,6 +144,10 @@ type DidSaveTextDocumentParams struct {
 	TextDocument TextDocumentIdentifier `json:"textDocument"`
 }
 
+type DidCloseTextDocumentParams struct {
+	TextDocument TextDocumentIdentifier `json:"textDocument"`
+}
+
 type DefinitionParams struct {
 	Position     Position               `json:"position"`
 	TextDocument TextDocumentIdentifier `json:"textDocument"`

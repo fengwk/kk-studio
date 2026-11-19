@@ -70,7 +70,7 @@ bash 在显式 workdir 中执行一次命令，默认超时为 300 秒，由唯�
 
 根据目标文件自动选择服务器并发现项目根；调用方不提供额外 cwd。项目根用于 rootUri/workspaceFolders 和服务器进程目录，不改变文件工具路径规则。仓库边界内选择构建根或最近标记，没有标记回退文件目录，不能跨 worktree 边界错误复用。
 
-LSP 客户端按项目根、server ID 和配置指纹复用，去重并发初始化。查询前同步文件，处理 JSON-RPC、服务能力、服务器请求及位置编码。write/edit 的提交与后续同步分别报告。查询提供 definition、workspace symbols 和 JDTLS Java 反编译，正文按语言服务器返回的源码展示。LSP 三项工具（`lsp_goto_definition`、`lsp_workspace_symbols`、`lsp_java_decompile`）默认超时为 180 秒，覆盖等待启动、initialize 与 query 全程，全程消费同一 `context.signal`。
+LSP 客户端按项目根、server ID 和配置指纹复用，去重并发初始化。定义查询前同步源文件；同步时若发现源文件已删除，会关闭语言服务器中的对应已打开文档，并让查询失败。工作区符号查询前也会检查该会话已打开的文件，关闭已删除或移走的文档，即使变更并非由 Daemon 发起。客户端处理 JSON-RPC、服务能力、服务器请求及位置编码。write/edit 的提交与后续同步分别报告。查询提供 definition、workspace symbols 和 JDTLS Java 反编译，正文按语言服务器返回的源码展示。LSP 三项工具（`lsp_goto_definition`、`lsp_workspace_symbols`、`lsp_java_decompile`）默认超时为 180 秒，覆盖等待启动、initialize 与 query 全程，全程消费同一 `context.signal`。
 
 客户端归 Daemon 所有，无在途请求且闲置 5 分钟回收；共享池初始化生命周期默认 180 秒（独立资源生命周期，不重起查询 timer），一个 waiter 停止不影响其他，最后退出等待 cleanup；同一复用键的新实例只在旧实例停止之后启动；回收与关闭的清理在派发被拒时同步兜底，关闭同时收尾已登记退休的实例，队列不执行也不会留下进程或悬挂的等待者。Thread 结束不关闭共享实例。Daemon 退出全部关闭；配置失效停止旧实例接收新请求并有界收尾；异常退出使当前请求失败，后续可重建。关闭顺序为 shutdown（1 秒）、exit、有界等待和必要的强制终止；初始化中实例也必须能清理。外部语言服务器需要预先配置，不自动安装。
 
