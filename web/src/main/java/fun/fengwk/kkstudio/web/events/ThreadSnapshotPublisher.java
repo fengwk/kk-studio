@@ -117,6 +117,7 @@ final class ThreadSnapshotPublisher {
           cursors = batch.stream().map(BatchEntry::cursor).distinct().toList();
         }
 
+        Instant projectionStartedAt = Instant.now();
         List<HarnessThreadSnapshotDTO> snapshots;
         Map<UUID, HarnessThreadSnapshotDTO> snapshotsByCursor = new LinkedHashMap<>();
         try {
@@ -139,7 +140,7 @@ final class ThreadSnapshotPublisher {
         }
 
         try {
-          scheduleFreshness(snapshots);
+          scheduleFreshness(snapshots, projectionStartedAt);
         } catch (RuntimeException schedulingFailure) {
           synchronized (states) {
             running = false;
@@ -191,13 +192,16 @@ final class ThreadSnapshotPublisher {
       }
     }
 
-    private void scheduleFreshness(List<HarnessThreadSnapshotDTO> snapshots) {
+    private void scheduleFreshness(
+        List<HarnessThreadSnapshotDTO> snapshots, Instant projectionStartedAt) {
       Instant next =
           snapshots.stream()
               .flatMap(snapshot -> snapshot.getToolInvocations().stream())
               .map(ToolInvocationDTO::getEnvironmentWaitFreshnessAt)
               .filter(Objects::nonNull)
-              .filter(value -> value.isAfter(Instant.now()))
+              // The boundary can pass while a projection is still running; request again in that
+              // case.
+              .filter(value -> value.isAfter(projectionStartedAt))
               .min(Instant::compareTo)
               .orElse(null);
       synchronized (states) {

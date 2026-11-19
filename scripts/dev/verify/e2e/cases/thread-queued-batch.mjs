@@ -365,7 +365,6 @@ registerCase({
         JSON.stringify(
           {
             markers: { initialMarker, firstMarker, secondMarker },
-            finalThread,
             finalSnapshot,
             providerRequests: mock.requests,
           },

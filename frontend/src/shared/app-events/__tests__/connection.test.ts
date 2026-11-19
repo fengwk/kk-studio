@@ -79,12 +79,12 @@ describe('ApplicationEventConnection', () => {
     socket.emitServer({
       type: 'subscribed',
       resource: { kind: 'thread', id: THREAD_ID },
-      cursor: '3',
+      cursor: '0',
     })
     expect(onMessage).toHaveBeenCalledWith({
       type: 'subscribed',
       resource: { kind: 'thread', id: THREAD_ID },
-      cursor: '3',
+      cursor: '0',
     })
 
     // decoder 返回 null = 服务端协议违规：本连接 terminal stop（无 code 安全关闭）。

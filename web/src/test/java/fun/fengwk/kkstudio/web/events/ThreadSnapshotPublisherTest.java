@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
@@ -183,8 +185,10 @@ class ThreadSnapshotPublisherTest {
     pending.close();
   }
 
-  @Test
-  void freshnessDeadlineSchedulesOneSidecarRefresh() throws InterruptedException {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void freshnessDeadlineSchedulesOneSidecarRefresh(boolean crossesDeadline)
+      throws InterruptedException {
     Queue<Runnable> tasks = new ConcurrentLinkedQueue<>();
     CountDownLatch freshnessQueued = new CountDownLatch(1);
     AtomicInteger projections = new AtomicInteger();
@@ -200,10 +204,23 @@ class ThreadSnapshotPublisherTest {
               }
             },
             (threadId, cursors) -> {
-              projections.incrementAndGet();
+              int projection = projections.incrementAndGet();
               HarnessThreadSnapshotDTO snapshot = snapshot(HEAD);
               ToolInvocationDTO tool = new ToolInvocationDTO();
-              tool.setEnvironmentWaitFreshnessAt(Instant.now().plusMillis(500));
+              Instant deadline = Instant.now().plusMillis(500);
+              if (crossesDeadline && projection == 1) {
+                // A lease observed live at read time can expire before the DTO is published.
+                deadline = Instant.now().plusMillis(10);
+                while (Instant.now().isBefore(deadline)) {
+                  try {
+                    Thread.sleep(10);
+                  } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(interrupted);
+                  }
+                }
+              }
+              tool.setEnvironmentWaitFreshnessAt(deadline);
               snapshot.setToolInvocations(List.of(tool));
               return cursors.stream().map(ignored -> snapshot).toList();
             },
