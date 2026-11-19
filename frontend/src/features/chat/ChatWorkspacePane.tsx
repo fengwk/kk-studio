@@ -9,6 +9,9 @@ import type {
   ChatDTO,
   EnvironmentDTO,
 } from '@/shared/api/generated/contracts'
+import { useOptionalIdePanel } from '@/features/environment/ide/ide-panel-context'
+import { ResourceOpenInIdeContext } from '@/shared/ui/markdown/ResourceUriContext'
+import { isCanonicalUuid } from '@/shared/lib/uuid'
 
 /** Chat 只提供 owner/defaults；发送、导航、命令和 Thread projection 全部由 AgentPane 共享。 */
 export function ChatWorkspacePane({
@@ -47,43 +50,56 @@ export function ChatWorkspacePane({
   onPaneReport?: (paneId: string, report: PaneReport) => void
   onPresentation?: (paneId: string, report: ThreadPresentation | null) => void
 }) {
+  const idePanel = useOptionalIdePanel()
+  const chatEnvironment = environments.find((environment) => environment.name === chat.environmentName)
+  const resourceIdeAction = chatEnvironment != null
+    && isCanonicalUuid(chatEnvironment.id)
+    && idePanel?.canOpenAttachment(chatEnvironment.id)
+    ? {
+        open: (sessionId: string, resourceId: string) => (
+          idePanel.openAttachment(chatEnvironment.id, sessionId, resourceId)
+        ),
+      }
+    : null
   return (
-    <AgentPane
-      owner={{ kind: 'CHAT', id: chat.id }}
-      paneId={pane.id}
-      agents={agents}
-      environments={environments}
-      defaults={{
-        agentName: chat.agentName,
-        yoloEnabled: chat.yoloEnabled,
-        environmentName: chat.environmentName,
-      }}
-      focused={focused}
-      hidden={hidden}
-      onValidateDraftName={onValidateDraftName}
-      onFocus={onFocus}
-      initialTarget={initialTarget}
-      target={target}
-      onTargetChange={onTargetChange}
-      onTargetConsumed={onTargetConsumed}
-      onRequestBranch={onRequestBranch == null
-        ? undefined
-        : (request) => onRequestBranch(pane.id, request)}
-      onReport={onPaneReport == null
-        ? undefined
-        : (report) => onPaneReport(pane.id, report)}
-      onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
-      loadSessions={(_owner, cursor) => chatService.listChatSessions(chat.id, cursor)}
-      loadSession={async (sessionId) => {
-        try {
-          return await chatService.getChatSession(chat.id, sessionId)
-        } catch (error) {
-          if (isNotFoundError(error)) {
-            return null
+    <ResourceOpenInIdeContext.Provider value={resourceIdeAction}>
+      <AgentPane
+        owner={{ kind: 'CHAT', id: chat.id }}
+        paneId={pane.id}
+        agents={agents}
+        environments={environments}
+        defaults={{
+          agentName: chat.agentName,
+          yoloEnabled: chat.yoloEnabled,
+          environmentName: chat.environmentName,
+        }}
+        focused={focused}
+        hidden={hidden}
+        onValidateDraftName={onValidateDraftName}
+        onFocus={onFocus}
+        initialTarget={initialTarget}
+        target={target}
+        onTargetChange={onTargetChange}
+        onTargetConsumed={onTargetConsumed}
+        onRequestBranch={onRequestBranch == null
+          ? undefined
+          : (request) => onRequestBranch(pane.id, request)}
+        onReport={onPaneReport == null
+          ? undefined
+          : (report) => onPaneReport(pane.id, report)}
+        onPresentation={onPresentation == null ? undefined : (report) => onPresentation(pane.id, report)}
+        loadSessions={(_owner, cursor) => chatService.listChatSessions(chat.id, cursor)}
+        loadSession={async (sessionId) => {
+          try {
+            return await chatService.getChatSession(chat.id, sessionId)
+          } catch (error) {
+            if (isNotFoundError(error)) {
+              return null
+            }
+            throw error
           }
-          throw error
-        }
-      }}
-    />
+        }}
+      />
+    </ResourceOpenInIdeContext.Provider>
   )
 }

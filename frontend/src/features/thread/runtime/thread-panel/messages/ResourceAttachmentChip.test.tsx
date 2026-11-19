@@ -7,6 +7,7 @@ import {
   type ResourceBlobUrls,
 } from '@/features/thread/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import type { ToolAttachment } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
+import { ResourceOpenInIdeContext, ResourceSessionContext } from '@/shared/ui/markdown/ResourceUriContext'
 
 function attachment(overrides: Partial<ToolAttachment> = {}): ToolAttachment {
   return {
@@ -30,6 +31,28 @@ function urls(overrides: Partial<ResourceBlobUrls> = {}): ResourceBlobUrls {
 }
 
 describe('ResourceAttachmentChip', () => {
+  it('routes a private text-resource chip through the session URI actions', async () => {
+    const user = userEvent.setup()
+    const open = vi.fn(async () => {})
+    const resourceId = '12345678-1234-1234-1234-123456789abc'
+    render(
+      <ResourceSessionContext.Provider value="11111111-2222-3333-4444-555555555555">
+        <ResourceOpenInIdeContext.Provider value={{ open }}>
+          <ResourceAttachmentChip attachment={attachment({
+            type: 'file',
+            mime: 'text/plain',
+            data: `resource://files/${resourceId}`,
+            blobId: undefined,
+          })} />
+        </ResourceOpenInIdeContext.Provider>
+      </ResourceSessionContext.Provider>,
+    )
+
+    expect(screen.getByRole('button', { name: '下载' })).toBeVisible()
+    await user.click(screen.getByRole('button', { name: '在 IDE 中打开' }))
+    expect(open).toHaveBeenCalledWith('11111111-2222-3333-4444-555555555555', resourceId)
+  })
+
   it('renders an image inline and opens the original in a lightbox', async () => {
     const user = userEvent.setup()
     const resolveBlobUrls = vi.fn(async () => urls({ mediaType: 'image/png' }))
