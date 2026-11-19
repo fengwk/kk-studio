@@ -147,7 +147,7 @@ describe('test file matching coverage and exclusivity', () => {
     return true
   }
 
-  // 验证 browser-tests 下全部 46 个测试文件被项目划分且互不重叠
+  // 验证 browser-tests 下全部测试文件被项目划分且互不重叠
   it('maps every browser test file to exactly one project with zero overlap or omission', () => {
     const browserTestsDir = path.resolve(__dirname, 'browser-tests')
     const allTestFiles = fs
@@ -155,7 +155,8 @@ describe('test file matching coverage and exclusivity', () => {
       .filter((file) => (file.endsWith('.pw.ts') || file.endsWith('.browser.ts')) && file !== 'fixture.ts')
       .sort()
 
-    expect(allTestFiles.length).toBe(46)
+    expect(allTestFiles.length).toBe(47)
+    expect(allTestFiles).toContain('resource-attachment-ide.pw.ts')
     expect(allTestFiles).toContain('custom-message-queue.pw.ts')
     expect(allTestFiles).toContain('mermaid.pw.ts')
 
@@ -242,7 +243,8 @@ describe('vite browser build contract', () => {
     expect(inputs['custom-message-queue-harness']).toBe(
       path.resolve(__dirname, 'browser-tests/custom-message-queue-harness.html'),
     )
-    expect(keys.length).toBe(37)
+    expect(keys).toContain('resource-attachment-ide-harness')
+    expect(keys.length).toBe(38)
   })
 
   // 验证静态构建目标与 MPA 模式

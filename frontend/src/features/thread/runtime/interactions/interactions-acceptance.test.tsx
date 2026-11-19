@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { interactionService } from '@/shared/api/interaction-service'
+import { ApplicationEventTestProvider } from '@/test-support/application-event-test-provider'
 import { ApprovalCard } from './ApprovalCard'
 import { interactionDraftStore } from './interaction-draft-store'
 import { QuestionnaireCard } from './QuestionnaireCard'
@@ -13,7 +14,9 @@ describe('Interactions Acceptance Suite (Spec §5)', () => {
   let queryClient: QueryClient
 
   const wrapper = ({ children }: { children: ReactNode }) => (
-    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    <ApplicationEventTestProvider>
+      <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+    </ApplicationEventTestProvider>
   )
 
   beforeEach(() => {

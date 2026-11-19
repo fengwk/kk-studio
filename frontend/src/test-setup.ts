@@ -13,6 +13,23 @@ beforeEach(() => {
   }
   localStorage.clear()
   sessionStorage.clear()
+  if (typeof window.matchMedia !== 'function') {
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: (media: string) => ({
+        matches: false,
+        media,
+        onchange: null,
+        addListener() {},
+        removeListener() {},
+        addEventListener() {},
+        removeEventListener() {},
+        dispatchEvent() {
+          return false
+        },
+      }) as MediaQueryList,
+    })
+  }
   // Canvas 本地状态默认按真实可用 IndexedDB 测试；需要验证不可用降级的用例自行移除。
   Object.defineProperty(window, 'indexedDB', {
     configurable: true,

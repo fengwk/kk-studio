@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { setLocale } from '@/shared/i18n'
+import { ApplicationEventTestProvider } from '@/test-support/application-event-test-provider'
 import { ApprovalCard } from './ApprovalCard'
 
 afterEach(() => {
@@ -12,7 +13,11 @@ afterEach(() => {
   setLocale('zh-CN')
 })
 function wrapper({ children }: { children: ReactNode }) {
-  return <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+  return (
+    <ApplicationEventTestProvider>
+      <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>
+    </ApplicationEventTestProvider>
+  )
 }
 const args = '{"command":"pwd\\nls -la","workdir":"/srv/完整目录","timeout":3000}'
 const props = { threadId: 'source-child', invocationId: 'original-invocation', toolName: 'bash',

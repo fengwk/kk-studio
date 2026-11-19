@@ -13,6 +13,7 @@ import {
 import type { InteractionDTO } from '@/shared/api/generated/contracts'
 import { interactionService } from '@/shared/api/interaction-service'
 import { harnessService } from '@/shared/api/harness-service'
+import { ApplicationEventTestProvider } from '@/test-support/application-event-test-provider'
 
 beforeEach(() => {
   interactionDraftStore.resetForTesting()
@@ -50,9 +51,11 @@ it('renders and submits a long questionnaire without truncating questions, optio
   }
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   render(
-    <QueryClientProvider client={queryClient}>
-      <InteractionCardBody item={item} />
-    </QueryClientProvider>,
+    <ApplicationEventTestProvider>
+      <QueryClientProvider client={queryClient}>
+        <InteractionCardBody item={item} />
+      </QueryClientProvider>
+    </ApplicationEventTestProvider>,
   )
 
   // 长问卷的题数与文本完整渲染：每题一个自定义输入，问题原文逐字保留。
