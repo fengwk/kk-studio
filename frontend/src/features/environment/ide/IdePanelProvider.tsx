@@ -13,6 +13,9 @@ import { environmentService } from '@/features/environment/environment-service'
 import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
+import { openIdeAttachment } from '@/features/environment/ide/environment-ide-service'
+import { isBoundToConnection, isSameBinding, type IdeViewState } from '@/features/environment/ide/ide-view-state'
+import { CANONICAL_POSITIVE_DECIMAL } from '@/features/environment/ide/ide-decimal'
 import {
   IdePanelContext,
   type IdeActionMode,
@@ -328,6 +331,61 @@ export function IdePanelProvider({
     }
   }
 
+  function selectedReadyAttachmentView(environmentId: string): IdeViewState | null {
+    if (
+      !active
+      || initial.recoveryError
+      || activeEnvironmentIdRef.current !== environmentId
+      || presentationRef.current.selectedEnvironmentId !== environmentId
+    ) {
+      return null
+    }
+    const viewId = selectedViewForEnvironment(presentationRef.current, environmentId)
+    const view = viewId == null ? null : claimReconciliation.viewsRef.current[viewId] ?? null
+    const identity = claimReconciliation.identity
+    if (
+      view == null
+      || view.environmentId !== environmentId
+      || view.status !== 'ready'
+      || view.closeInFlight
+      || view.daemonInstanceId == null
+      || !isCanonicalUuid(view.daemonInstanceId)
+      || view.bindingEpoch == null
+      || !CANONICAL_POSITIVE_DECIMAL.test(view.bindingEpoch)
+      || identity == null
+      || !isBoundToConnection(view, identity.eventNodeId, identity.connectionId)
+    ) {
+      return null
+    }
+    return view
+  }
+
+  function canOpenAttachment(environmentId: string): boolean {
+    return selectedReadyAttachmentView(environmentId) != null
+  }
+
+  async function openAttachment(
+    environmentId: string,
+    sessionId: string,
+    resourceId: string,
+  ): Promise<void> {
+    const view = selectedReadyAttachmentView(environmentId)
+    if (view == null || !isCanonicalUuid(sessionId) || !isCanonicalUuid(resourceId)) {
+      throw new Error('IDE view is not ready for this attachment')
+    }
+    const current = claimReconciliation.viewsRef.current[view.viewId]
+    if (!isSameBinding(current, view)) {
+      throw new Error('IDE view binding changed')
+    }
+    commitPresentation(ensureOpened(presentationRef.current, environmentId, true), 'both')
+    const body = {
+      browserSessionId: session.browserSessionId,
+      bindingEpoch: view.bindingEpoch!,
+      expectedDaemonInstanceId: view.daemonInstanceId!,
+    }
+    await openIdeAttachment(environmentId, view.viewId, sessionId, resourceId, body)
+  }
+
   function togglePanel(environment: IdeEnvironmentInfo): void {
     if (initial.recoveryError || !isCanonicalUuid(environment.id)) {
       return
@@ -487,6 +545,8 @@ export function IdePanelProvider({
     panelVisible,
     togglePanel,
     activateChatEnvironment,
+    canOpenAttachment,
+    openAttachment,
   }
 
   return (

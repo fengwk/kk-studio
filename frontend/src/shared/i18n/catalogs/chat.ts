@@ -2266,6 +2266,30 @@ export const chatCatalog = {
     'en-US': 'Download',
     'zh-CN': '下载',
   },
+  'ai.resource.openInIde': {
+    'en-US': 'Open in IDE',
+    'zh-CN': '在 IDE 中打开',
+  },
+  'ai.resource.openInIdePending': {
+    'en-US': 'Opening in IDE…',
+    'zh-CN': '正在 IDE 中打开…',
+  },
+  'ai.resource.openInIdeLimit': {
+    'en-US': 'Opens a read-only UTF-8 text copy. Very large attachments may not be available.',
+    'zh-CN': '打开只读 UTF-8 文本副本；过大的附件可能无法打开。',
+  },
+  'ai.resource.openInIde.failed': {
+    'en-US': 'Could not open this attachment in the IDE.',
+    'zh-CN': '无法在 IDE 中打开此附件。',
+  },
+  'ai.resource.openInIde.tooLarge': {
+    'en-US': 'This text attachment exceeds the IDE preview size limit.',
+    'zh-CN': '此文本附件超过 IDE 预览大小限制。',
+  },
+  'ai.resource.openInIde.unsupported': {
+    'en-US': 'Only bounded UTF-8 text attachments can be opened in the IDE.',
+    'zh-CN': 'IDE 仅支持打开大小受限的 UTF-8 文本附件。',
+  },
   'ai.resource.loading': {
     'en-US': 'Loading resource',
     'zh-CN': '正在加载资源',

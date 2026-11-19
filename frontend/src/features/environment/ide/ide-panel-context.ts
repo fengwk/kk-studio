@@ -21,6 +21,9 @@ export interface IdePanelContextValue {
   togglePanel: (environment: IdeEnvironmentInfo) => void
   /** Chat 详情页激活时匹配其 Environment；没有已打开 view 不自动创建。 */
   activateChatEnvironment: (environment: IdeEnvironmentInfo | null) => void
+  /** Only acts on the selected, ready view belonging to this Chat environment. */
+  canOpenAttachment: (environmentId: string) => boolean
+  openAttachment: (environmentId: string, sessionId: string, resourceId: string) => Promise<void>
 }
 
 export const IdePanelContext = createContext<IdePanelContextValue | null>(null)

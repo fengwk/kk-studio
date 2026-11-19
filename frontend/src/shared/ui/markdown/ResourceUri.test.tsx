@@ -1,8 +1,12 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ApiError } from '@/shared/api/client'
 import { fetchSessionResource } from '@/shared/api/resource-service'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
-import { ResourceSessionContext } from '@/shared/ui/markdown/ResourceUriContext'
+import {
+  ResourceOpenInIdeContext,
+  ResourceSessionContext,
+} from '@/shared/ui/markdown/ResourceUriContext'
 import { ResourceUriText } from '@/shared/ui/markdown/ResourceUriText'
 import { setLocale } from '@/shared/i18n'
 
@@ -37,6 +41,41 @@ describe('resource URI markdown', () => {
     expect(await screen.findByText('preview')).toBeInTheDocument()
     expect(fetchSessionResource).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID, false)
     expect(screen.getByRole('button', { name: 'Download' })).toBeInTheDocument()
+  })
+
+  it('shows Open in IDE only when the Chat host supplies an eligible action, with pending and localized limit errors', async () => {
+    let finishOpen = () => {}
+    const open = vi.fn(() => new Promise<void>((resolve) => { finishOpen = resolve }))
+    render(
+      <ResourceSessionContext.Provider value={SESSION_ID}>
+        <ResourceOpenInIdeContext.Provider value={{ open }}>
+          <MarkdownRenderer content={`[notes](${RESOURCE_URI})`} />
+        </ResourceOpenInIdeContext.Provider>
+      </ResourceSessionContext.Provider>,
+    )
+
+    const button = screen.getByRole('button', { name: 'Open in IDE' })
+    expect(button).toHaveAttribute('title', expect.stringContaining('read-only UTF-8 text copy'))
+    fireEvent.click(button)
+    expect(screen.getByRole('status')).toHaveTextContent('Opening in IDE…')
+    expect(button).toBeDisabled()
+    expect(open).toHaveBeenCalledWith(SESSION_ID, RESOURCE_ID)
+    expect(fetchSessionResource).not.toHaveBeenCalled()
+
+    finishOpen()
+    await waitFor(() => expect(button).toBeEnabled())
+    open.mockRejectedValueOnce(new ApiError('too large', 413))
+    fireEvent.click(button)
+    expect(await screen.findByRole('alert')).toHaveTextContent('This text attachment exceeds the IDE preview size limit.')
+  })
+
+  it('does not show Open in IDE without a matching Chat IDE action', () => {
+    render(
+      <ResourceSessionContext.Provider value={SESSION_ID}>
+        <MarkdownRenderer content={`[notes](${RESOURCE_URI})`} />
+      </ResourceSessionContext.Provider>,
+    )
+    expect(screen.queryByRole('button', { name: 'Open in IDE' })).not.toBeInTheDocument()
   })
 
   it('resolves resource references embedded in tool output while preserving the URI text', async () => {

@@ -27,6 +27,7 @@ const ideService = vi.hoisted(() => ({
   applyIdeMobileLayout: vi.fn(),
   closeIdeView: vi.fn(),
   listIdeDirectories: vi.fn(),
+  openIdeAttachment: vi.fn(),
 }))
 vi.mock('@/features/environment/ide/environment-ide-service', () => ideService)
 
@@ -144,7 +145,7 @@ function sessionSnapshot(): {
 }
 
 function Harness() {
-  const { activateChatEnvironment, togglePanel } = useIdePanel()
+  const { activateChatEnvironment, togglePanel, canOpenAttachment, openAttachment } = useIdePanel()
   const events = useApplicationEvents()
   return (
     <div>
@@ -156,6 +157,17 @@ function Harness() {
       </button>
       <button data-testid="toggle-a" onClick={() => togglePanel(ENV_INFO_A)}>
         Toggle
+      </button>
+      <button
+        data-testid="open-attachment"
+        disabled={!canOpenAttachment(ENV_A)}
+        onClick={() => void openAttachment(
+          ENV_A,
+          '11111111-2222-3333-4444-555555555555',
+          '12345678-1234-1234-1234-123456789abc',
+        )}
+      >
+        Open attachment
       </button>
       <button
         data-testid="reconnect"
@@ -270,6 +282,7 @@ describe('IdePanelProvider recovery state machine', () => {
     ))
     ideService.readIdeView.mockResolvedValue(snapshot(null))
     ideService.closeIdeView.mockResolvedValue(undefined)
+    ideService.openIdeAttachment.mockResolvedValue(undefined)
     ideService.focusIdeTerminal.mockResolvedValue(undefined)
     ideService.applyIdeMobileLayout.mockResolvedValue(undefined)
     ideService.listIdeDirectories.mockResolvedValue({
@@ -323,6 +336,7 @@ describe('IdePanelProvider recovery state machine', () => {
     connect(sockets)
 
     await user.click(screen.getByTestId('activate-a'))
+    expect(screen.getByTestId('open-attachment')).toBeDisabled()
     expect(ideService.readIdeView).not.toHaveBeenCalled()
     expect(ideService.openIdeView).not.toHaveBeenCalled()
     expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
@@ -365,6 +379,20 @@ describe('IdePanelProvider recovery state machine', () => {
       expectedDaemonInstanceId: DAEMON_A,
     })
     await screen.findByTestId('ide-iframe')
+    await waitFor(() => expect(screen.getByTestId('open-attachment')).toBeEnabled())
+    await user.click(screen.getByTestId('open-attachment'))
+    expect(ideService.openIdeAttachment).toHaveBeenCalledWith(
+      ENV_A,
+      sessionSnapshot().recoveryByView[ENV_A]?.viewId,
+      '11111111-2222-3333-4444-555555555555',
+      '12345678-1234-1234-1234-123456789abc',
+      {
+        browserSessionId: sessionSnapshot().browserSessionId,
+        bindingEpoch: '10',
+        expectedDaemonInstanceId: DAEMON_A,
+      },
+    )
+    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
 
     await user.click(screen.getByTestId('toggle-a'))
     expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')

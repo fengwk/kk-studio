@@ -1,7 +1,11 @@
 import { useContext, useEffect, useState } from 'react'
 import { fetchSessionResource } from '@/shared/api/resource-service'
+import { ApiError } from '@/shared/api/client'
 import { useI18n } from '@/shared/i18n'
-import { ResourceSessionContext } from '@/shared/ui/markdown/ResourceUriContext'
+import {
+  ResourceOpenInIdeContext,
+  ResourceSessionContext,
+} from '@/shared/ui/markdown/ResourceUriContext'
 
 const FILE_RESOURCE_URI = /^resource:\/\/files\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
 
@@ -12,6 +16,7 @@ export function ResourceUri({ uri, label, image = false }: {
   image?: boolean
 }) {
   const sessionId = useContext(ResourceSessionContext)
+  const openInIde = useContext(ResourceOpenInIdeContext)
   const { t } = useI18n()
   const match = FILE_RESOURCE_URI.exec(uri)
   const resourceId = match?.[1]
@@ -24,7 +29,13 @@ export function ResourceUri({ uri, label, image = false }: {
   }
   return image
     ? <ResourceImage key={`${sessionId}:${resourceId}`} sessionId={sessionId} resourceId={resourceId} label={label ?? t('ai.resource.image')} />
-    : <ResourceLink key={`${sessionId}:${resourceId}`} sessionId={sessionId} resourceId={resourceId} label={label ?? uri} />
+    : <ResourceLink
+        key={`${sessionId}:${resourceId}`}
+        sessionId={sessionId}
+        resourceId={resourceId}
+        label={label ?? uri}
+        openInIde={openInIde?.open}
+      />
 }
 
 function ResourceImage({ sessionId, resourceId, label }: { sessionId: string; resourceId: string; label: string }) {
@@ -55,11 +66,18 @@ function ResourceImage({ sessionId, resourceId, label }: { sessionId: string; re
     : <img src={src} alt={label} />
 }
 
-function ResourceLink({ sessionId, resourceId, label }: { sessionId: string; resourceId: string; label: string }) {
+function ResourceLink({ sessionId, resourceId, label, openInIde }: {
+  sessionId: string
+  resourceId: string
+  label: string
+  openInIde?: (sessionId: string, resourceId: string) => Promise<void>
+}) {
   const { t } = useI18n()
   const [preview, setPreview] = useState<Blob | null>(null)
   const [error, setError] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [openingInIde, setOpeningInIde] = useState(false)
+  const [openError, setOpenError] = useState<'failed' | 'tooLarge' | 'unsupported' | null>(null)
   const filename = label.replace(/[\\/:*?"<>|]/g, '_') || 'resource'
 
   async function loadPreview() {
@@ -73,6 +91,23 @@ function ResourceLink({ sessionId, resourceId, label }: { sessionId: string; res
       setBusy(false)
     }
   }
+  async function openAttachmentInIde() {
+    if (openInIde == null) return
+    setOpeningInIde(true)
+    setOpenError(null)
+    try {
+      await openInIde(sessionId, resourceId)
+    } catch (error) {
+      setOpenError(error instanceof ApiError && error.status === 413
+        ? 'tooLarge'
+        : error instanceof ApiError && (error.status === 415 || error.status === 422)
+          ? 'unsupported'
+          : 'failed')
+    } finally {
+      setOpeningInIde(false)
+    }
+  }
+
   async function download() {
     setBusy(true)
     setError(false)
@@ -96,8 +131,22 @@ function ResourceLink({ sessionId, resourceId, label }: { sessionId: string; res
       <span>{label}</span>{' '}
       <button type="button" onClick={() => void loadPreview()} disabled={busy}>{t('ai.resource.preview')}</button>{' '}
       <button type="button" onClick={() => void download()} disabled={busy}>{t('ai.resource.download')}</button>
+      {openInIde != null ? (
+        <button
+          type="button"
+          onClick={() => void openAttachmentInIde()}
+          disabled={openingInIde}
+          title={t('ai.resource.openInIdeLimit')}
+        >
+          {openingInIde ? t('ai.resource.openInIdePending') : t('ai.resource.openInIde')}
+        </button>
+      ) : null}
       {busy ? <span role="status">{t('ai.resource.loading')}</span> : null}
+      {openingInIde ? <span role="status">{t('ai.resource.openInIdePending')}</span> : null}
       {error ? <span role="alert">{t('ai.resource.previewFailed')}</span> : null}
+      {openError != null ? (
+        <span role="alert">{t(`ai.resource.openInIde.${openError}`)}</span>
+      ) : null}
       {preview != null ? <ResourcePreview blob={preview} label={label} /> : null}
     </span>
   )

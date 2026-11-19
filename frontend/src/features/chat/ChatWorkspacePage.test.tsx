@@ -251,6 +251,8 @@ function renderWorkspaceRouter(
         togglePanel,
         panelVisible: false,
         activateChatEnvironment,
+        canOpenAttachment: () => false,
+        openAttachment: vi.fn(async () => {}),
       }}>
         <RouterProvider router={router} />
       </IdePanelContext.Provider>

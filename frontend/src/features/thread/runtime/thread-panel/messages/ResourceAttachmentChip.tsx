@@ -7,6 +7,7 @@ import {
   type ResourceBlobUrls,
 } from '@/features/thread/runtime/thread-panel/messages/ResourceBlobUrlContext'
 import { useI18n } from '@/shared/i18n'
+import { ResourceUri } from '@/shared/ui/markdown/ResourceUri'
 import './resource-attachments.css'
 
 /**
@@ -58,6 +59,12 @@ export function ResourceAttachmentChip({ attachment }: { attachment: ToolAttachm
     attachment.name
     || mediaType
     || t('ai.runtime.message.attachment', { type: attachment.type })
+  if (
+    type === 'file'
+    && /^resource:\/\/files\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(attachment.data)
+  ) {
+    return <ResourceUri uri={attachment.data} label={label} />
+  }
   const downloadUrl = urls?.original?.trim() || null
   const previewUrl = urls?.preview?.trim() || null
   const mediaUrl =
