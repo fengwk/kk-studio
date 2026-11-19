@@ -52,7 +52,8 @@ public class IssueEditingService {
   @Transactional
   public Issue createIssue(UUID projectId, String title, String description) {
     Objects.requireNonNull(projectId, "projectId");
-    Project project = projectRepository.getById(projectId);
+    // Take the same Project lock as archival before checking whether creation is allowed.
+    Project project = projectRepository.lockById(projectId);
     if (project == null) {
       throw DomainException.notFound("project");
     }

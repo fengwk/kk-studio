@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.project;
 
+import static fun.fengwk.kkstudio.project.ProjectTestAssertions.assertValidation;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -21,9 +22,8 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -37,6 +37,42 @@ class OwnershipLockPostgresIntegrationTest extends ProjectTestSupport {
   @Autowired private DataSource dataSource;
   @Autowired private PlatformTransactionManager transactionManager;
   @Autowired private ProjectSessionOwnership ownership;
+
+  /** 归档提交前让创建事务进入行锁等待；唤醒后必须拒绝创建，且不消耗编号。 */
+  @Test
+  void issueCreationRechecksArchiveAfterWaitingForProjectLock() throws Exception {
+    UUID projectId = createProject();
+    var project = projectService.getProject(projectId);
+    long nextNumber = project.getNextIssueNumber();
+    TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+    CompletableFuture<Integer> creationBackend = new CompletableFuture<>();
+
+    try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+      Future<?> creation =
+          transaction.execute(
+              status -> {
+                projectService.archiveProject(projectId, project.getVersion());
+                Future<?> attempt =
+                    executor.submit(
+                        () ->
+                            assertValidation(
+                                () ->
+                                    transaction.executeWithoutResult(
+                                        ignored -> {
+                                          creationBackend.complete(
+                                              jdbc.queryForObject(
+                                                  "select pg_backend_pid()", Integer.class));
+                                          createIssue(projectId);
+                                        })));
+                waitUntilBlocked(creationBackend.orTimeout(10, TimeUnit.SECONDS).join());
+                return attempt;
+              });
+      creation.get(10, TimeUnit.SECONDS);
+    }
+
+    assertEquals(0L, count("select count(*) from project_issue where project_id = ?", projectId));
+    assertEquals(nextNumber, projectService.getProject(projectId).getNextIssueNumber());
+  }
 
   /** 先占住 Issue，再验证接受线程等待 Issue 时已持有 Project SHARE；深删除的 KEY SHARE 与之兼容，排他写锁被阻塞。 */
   @Test
@@ -208,17 +244,16 @@ class OwnershipLockPostgresIntegrationTest extends ProjectTestSupport {
     }
   }
 
-  private void waitUntilBlocked(int pid) throws InterruptedException {
-    Instant deadline = Instant.now().plus(Duration.ofSeconds(10));
-    while (Instant.now().isBefore(deadline)) {
+  private void waitUntilBlocked(int pid) {
+    long start = System.nanoTime();
+    while (System.nanoTime() - start < TimeUnit.SECONDS.toNanos(10)) {
       Boolean blocked =
           jdbc.queryForObject("select cardinality(pg_blocking_pids(?)) > 0", Boolean.class, pid);
       if (Boolean.TRUE.equals(blocked)) {
         return;
       }
-      Thread.sleep(10);
     }
-    throw new AssertionError("acceptance did not wait for the issue row");
+    throw new AssertionError("PostgreSQL backend " + pid + " did not wait for a row lock");
   }
 
   private static void await(CountDownLatch latch) {
