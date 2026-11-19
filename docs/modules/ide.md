@@ -69,7 +69,7 @@ OPEN/CHANGE_DIRECTORY/CLOSE/LIST_VIEWS 的可见状态回执提供 `{revision, v
 | 应用事件 WS `ide-use` | `browserSessionId`、同一连接内 usage 序号 `revision`、`views[]`；空列表分离全部，不表示确认销毁 |
 | GET `/api/platform/environments/{id}/runtime` | owner 返回当前 `{revision,status}`；无本代 READY 快照时返回 unavailable |
 
-`OPEN_ATTACHMENT` 只接受 canonical `sessionId` / `resourceId`，先确认 Session 所有权、Session 对资源的引用、Blob 仍为 ACTIVE，再要求请求者持有当前 view 绑定。只允许 `text/*` 或 JSON/XML/YAML 文本媒体类型，并要求 UTF-8，最多读取 64 KiB + 1 字节且受短读取截止时间约束；超限、NUL、无效 UTF-8 或不支持类型均拒绝，且只在 Daemon 确认成功后返回 204。Daemon 收到资源 UUID 与文本，不收到文件名或路径，因此附件只作为标注 UUID 的只读虚拟文档打开，不写入 workspace；命令不自动重试。
+`OPEN_ATTACHMENT` 先校验当前 view 绑定，再检查 canonical `sessionId` / `resourceId` 对应的 Session 归属、资源引用与 Blob 的 ACTIVE 状态。只允许 `text/*` 或 JSON/XML/YAML 文本媒体类型，并要求 UTF-8，最多读取 64 KiB + 1 字节且受短读取截止时间约束；超限、NUL、无效 UTF-8 或不支持类型均拒绝，且只在 Daemon 确认成功后返回 204。Daemon 收到资源 UUID 与文本，不收到文件名或路径，因此附件只作为标注 UUID 的只读虚拟文档打开，不写入 workspace；命令不自动重试。
 
 `GET /views/{viewId}` 是纯读：控制器的 query 参数显式声明，ReadDTO 只作为 Java 内部参数，不生成第二份前端字段接口。读取先要求当前 WS usage 已 ACK，只返回该 `browserSessionId` 的资源与绑定；不创建 view、不续租、不生成票据、不执行终端操作。view 不存在时返回当前快照的 absent 事实，而不是命令未执行的证明；如果其它 owner 持有该 view，返回 `VIEW_OWNED_BY_OTHER_SESSION`。初始 create 可先通过该读取发现当前 `daemonInstanceId`，之后在持久 pending 中冻结此代次；其它恢复必须带 expected 实例。
 
