@@ -1,21 +1,24 @@
-import type { Route } from '@playwright/test'
+import type { Route, WebSocketRoute } from '@playwright/test'
+import type { HarnessSessionEntryDTO, HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
 import { expect, test } from './fixture'
 
 const HARNESS_URL = '/browser-tests/compaction-lifecycle-harness.html'
 const CHILD_ID = '00000000-0000-4000-8000-000000000010'
 const CUT_ID = '00000000-0000-4000-8000-000000000011'
 const ROOT_ID = '00000000-0000-4000-8000-000000000001'
+const SESSION_ID = '00000000-0000-4000-8000-000000000099'
 
 function entry(
   entryId: string,
-  entryType: string,
-  payload: unknown,
+  entryType: HarnessSessionEntryDTO['entryType'],
+  payload: HarnessSessionEntryDTO['payload'],
+  parentEntryId: string | null,
   usageCost: { currency: string; amount: string } | null = null,
-): unknown {
+): HarnessSessionEntryDTO {
   return {
     entryId,
-    sessionId: 'session-1',
-    parentEntryId: null,
+    sessionId: SESSION_ID,
+    parentEntryId,
     entryType,
     payload,
     createdAt: 1767225600000,
@@ -23,23 +26,23 @@ function entry(
   }
 }
 
-/** 分支快照只包含 FORK 之后的行；读取游标由 afterEntryId 提供。 */
-function branchSnapshot() {
+/** 全量快照保留切点及到达分支末尾的完整 Entry 链。 */
+function branchSnapshot(stopped = false): HarnessThreadSnapshotDTO {
   return {
-    version: '7',
-    baseEntryId: CUT_ID,
+    version: stopped ? '8' : '7',
+    baseEntryId: null,
     thread: {
       threadId: CHILD_ID,
       parentThreadId: ROOT_ID,
       name: 'main',
-      sessionId: 'session-1',
-      headEntryId: 'branch-end',
+      sessionId: SESSION_ID,
+      headEntryId: '00000000-0000-4000-8000-000000000018',
       rootThreadId: ROOT_ID,
       yoloEnabled: false,
       nextCommandSequence: '3',
-      version: '7',
-      status: 'RUNNING',
-      executionControl: 'RUNNABLE',
+      version: stopped ? '8' : '7',
+      status: stopped ? 'IDLE' : 'RUNNING',
+      executionControl: stopped ? 'STOPPED' : 'RUNNABLE',
       branchSettings: {
         agentName: 'coder',
         execution: { driver: 'builtin', settings: { modelName: 'gpt', variant: 'high' } },
@@ -49,18 +52,27 @@ function branchSnapshot() {
       updatedAt: 1767225600000,
     },
     entries: [
-      entry('branch-fork', 'FORK', {
+      entry('00000000-0000-4000-8000-000000000012', 'TURN_START', { reason: 'INPUT' }, null),
+      entry('00000000-0000-4000-8000-000000000013', 'MESSAGE', {
+        message: { role: 'USER', contents: [{ type: 'text', text: 'Earlier context' }] },
+      }, '00000000-0000-4000-8000-000000000012'),
+      entry(CUT_ID, 'TURN_END', {
+        turnStartEntryId: '00000000-0000-4000-8000-000000000012',
+        outcome: 'COMPLETED',
+        continueModel: true,
+      }, '00000000-0000-4000-8000-000000000013'),
+      entry('00000000-0000-4000-8000-000000000014', 'FORK', {
         mode: 'BRANCH',
         sourceEntryId: CUT_ID,
         sourceThreadId: null,
-      }),
-      entry('branch-instruction', 'CUSTOM_MESSAGE', {
+      }, CUT_ID),
+      entry('00000000-0000-4000-8000-000000000015', 'CUSTOM_MESSAGE', {
         message: {
           role: 'USER',
           contents: [{ type: 'text', text: '[Compaction mode]\nSummarize the conversation.' }],
         },
-      }),
-      entry('branch-call', 'MESSAGE', {
+      }, '00000000-0000-4000-8000-000000000014'),
+      entry('00000000-0000-4000-8000-000000000016', 'MESSAGE', {
         message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'draft' }] },
         assistantMetadata: {
           stopReason: 'COMPLETE',
@@ -73,8 +85,8 @@ function branchSnapshot() {
             providerTotalTokens: 120,
           },
         },
-      }, { currency: 'USD', amount: '0.0042' }),
-      entry('branch-tool', 'MESSAGE', {
+      }, '00000000-0000-4000-8000-000000000015', { currency: 'USD', amount: '0.0042' }),
+      entry('00000000-0000-4000-8000-000000000017', 'MESSAGE', {
         message: {
           role: 'TOOL',
           contents: [{
@@ -86,39 +98,66 @@ function branchSnapshot() {
             contents: [{ type: 'text', text: 'Tools are disabled in compaction mode.' }],
           }],
         },
-      }),
-      entry('branch-end', 'TURN_END', {
+      }, '00000000-0000-4000-8000-000000000016'),
+      entry('00000000-0000-4000-8000-000000000018', 'TURN_END', {
         outcome: 'FAILED',
         continueModel: false,
         reason: 'TURN_FAILED',
-      }),
+      }, '00000000-0000-4000-8000-000000000017'),
     ],
     queuedCommands: [],
     activeAssistantOutput: null,
     generationFailures: [],
     toolInvocations: [],
     stopReceipts: [],
-    unexecutedCleanupItems: [],
     unconfirmedExecutions: [],
   }
 }
 
 test('shows every compaction lifecycle state and opens the execution view', async ({ page }) => {
   const stopRequests: Array<{ path: string; body: unknown }> = []
-  const snapshotReads: string[] = []
+  const snapshotReads: Array<string | null> = []
+  let stopped = false
+  const sendThreadSnapshot = (socket: WebSocketRoute) => socket.send(JSON.stringify({
+    type: 'event',
+    resource: { kind: 'thread', id: CHILD_ID },
+    name: 'snapshot',
+    data: branchSnapshot(stopped),
+  }))
+  await page.routeWebSocket(/\/ws\/events$/, (socket) => {
+    socket.send(JSON.stringify({
+      type: 'connected',
+      eventNodeId: 'a1000000-0000-4000-8000-0000000000e1',
+      connectionId: 'a1000000-0000-4000-8000-0000000000e2',
+      heartbeatIntervalMillis: '60000',
+    }))
+    socket.onMessage((message) => {
+      const frame = JSON.parse(String(message))
+      if (frame.type === 'subscribe') {
+        socket.send(JSON.stringify({ type: 'subscribed', resource: frame.resource, cursor: '0' }))
+        if (frame.resource.kind === 'thread' && frame.resource.id === CHILD_ID) {
+          sendThreadSnapshot(socket)
+        }
+      } else if (frame.type === 'refresh' && frame.resource.kind === 'thread'
+        && frame.resource.id === CHILD_ID) {
+        sendThreadSnapshot(socket)
+      }
+    })
+  })
   await page.route((url) => url.pathname.startsWith('/api/'), async (route: Route) => {
     const url = new URL(route.request().url())
     if (url.pathname === `/api/harness/threads/${CHILD_ID}` && route.request().method() === 'GET') {
-      snapshotReads.push(url.searchParams.get('afterEntryId') ?? '')
-      await route.fulfill({ json: branchSnapshot() })
+      snapshotReads.push(url.searchParams.get('afterEntryId'))
+      await route.fulfill({ json: branchSnapshot(stopped) })
       return
     }
-    if (url.pathname === `/api/harness/threads/${CHILD_ID}/stop`) {
+    if (url.pathname === `/api/harness/threads/${CHILD_ID}/stop` && route.request().method() === 'POST') {
+      stopped = true
       stopRequests.push({ path: url.pathname, body: route.request().postDataJSON() })
       await route.fulfill({
         json: {
           status: 'STOPPED',
-          thread: branchSnapshot().thread,
+          thread: branchSnapshot(true).thread,
           stoppedThreads: [],
         },
       })
@@ -164,7 +203,7 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
 
   await page.screenshot({ path: test.info().outputPath('compaction-lifecycle-desktop.png'), fullPage: true })
 
-  // 打开分支执行视图：只按切点之后的 Entry 读取，展示继承量、指令、调用用量与停用工具结果。
+  // 打开分支执行视图：全量快照包含切点及其后续 Entry，投影展示调用内容与用量。
   await failedCard.getByRole('link', { name: '查看执行' }).click()
   await expect(page.getByTestId('compaction-branch-view')).toBeVisible()
   await expect(page.getByTestId('compaction-branch-inherited')).toHaveText('继承的上下文：150 tokens')
@@ -174,14 +213,16 @@ test('shows every compaction lifecycle state and opens the execution view', asyn
   await expect(page.locator('.compaction-branch-call')).toContainText('$0.0042')
   await expect(page.locator('.compaction-branch-tool-error')).toContainText('read')
   await expect(page.locator('.compaction-branch-tool-error')).toContainText('Tools are disabled in compaction mode.')
-  expect(snapshotReads.length).toBeGreaterThanOrEqual(1)
-  expect(new Set(snapshotReads)).toEqual(new Set([CUT_ID]))
+  expect(snapshotReads).toEqual([null])
 
   const stop = page.getByRole('button', { name: '停止' })
   await expect(stop).toBeVisible()
   await stop.click()
   await expect.poll(() => stopRequests.length).toBe(1)
   expect(stopRequests[0]?.body).toMatchObject({ expectedVersion: '7' })
+  expect(stopRequests[0]?.path).toBe(`/api/harness/threads/${CHILD_ID}/stop`)
+  await expect(stop).toHaveCount(0)
+  expect(snapshotReads).toEqual([null])
 
   // 移动端宽度：卡片与分支视图都保持可读，不出现横向溢出。
   await page.setViewportSize({ width: 390, height: 844 })

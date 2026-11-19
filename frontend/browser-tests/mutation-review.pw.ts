@@ -75,6 +75,15 @@ test.beforeAll(() => {
 })
 
 test.beforeEach(async ({ page }) => {
+  // 独立审批卡不订阅资源，但仍使用真实事件 Provider。
+  await page.routeWebSocket(/\/ws\/events$/, (ws) => {
+    ws.send(JSON.stringify({
+      type: 'connected',
+      eventNodeId: 'a1000000-0000-4000-8000-0000000000e1',
+      connectionId: 'a1000000-0000-4000-8000-0000000000e2',
+      heartbeatIntervalMillis: '60000',
+    }))
+  })
   await page.goto(HARNESS_URL)
   await expect(page.locator('[data-testid="active-scenario"]')).toBeVisible()
 })
@@ -264,7 +273,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
 
     await expect(allowBtn).toBeDisabled()
     await expect(denyBtn).toBeEnabled()
-    await expect(approvalPane.locator('.interaction-error-banner')).toContainText(
+    await expect(approvalPane.locator('.interaction-error-banner')).toHaveText(
       '未获取到有效的编辑审查信息，无法允许。',
     )
 
@@ -286,21 +295,19 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(allowBtn).toBeEnabled()
     await expect(denyBtn).toBeEnabled()
 
-    let interceptedDecision: string | null = null
-    await page.route('**/api/harness/threads/*/tool-invocations/*/approval', async (route) => {
-      const req = route.request()
-      expect(req.method()).toBe('PUT')
-      const payload = req.postDataJSON()
-      interceptedDecision = payload?.decision
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ id: 'inv-valid-review', decision: payload?.decision }),
-      })
-    })
-
+    const approvalUrl = '**/api/harness/threads/thread-1/tool-invocations/inv-valid-review/approval'
+    await page.route(approvalUrl, (route) => route.fulfill({ json: {} }))
+    const submitted = page.waitForRequest(approvalUrl)
     await denyBtn.click()
-    await expect.poll(() => interceptedDecision).toBe('DENY')
+    const request = await submitted
+    expect(request.method()).toBe('PUT')
+    expect(request.postDataJSON()).toEqual({
+      decision: 'DENY',
+      decisionId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+      reason: null,
+    })
+    await expect(denyBtn).toBeEnabled()
+    await expect(approvalPane.locator('.interaction-error-banner')).toHaveCount(0)
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'approval-denied-success.png') })
   })

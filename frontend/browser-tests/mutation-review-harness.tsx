@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import '@/styles.css'
 import '@/features/thread/runtime/thread-panel/messages/tool-card.css'
 import '@/features/thread/runtime/interactions/interaction-cards.css'
+import { ApplicationEventProvider } from '@/shared/app-events/context'
 import { setLocale } from '@/shared/i18n'
 import { ToolMessageBlock } from '@/features/thread/runtime/thread-panel/messages/ToolMessageBlock'
 import { ApprovalCard, type ApprovalCardProps } from '@/features/thread/runtime/interactions/ApprovalCard'
@@ -611,5 +612,9 @@ window.mutationReviewHarness = mutationReviewHarness
 
 const rootElement = document.getElementById('root')
 if (rootElement) {
-  createRoot(rootElement).render(<MutationReviewHarnessApp />)
+  createRoot(rootElement).render(
+    <ApplicationEventProvider>
+      <MutationReviewHarnessApp />
+    </ApplicationEventProvider>,
+  )
 }
