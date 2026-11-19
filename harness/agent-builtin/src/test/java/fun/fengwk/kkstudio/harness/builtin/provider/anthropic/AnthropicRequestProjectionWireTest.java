@@ -13,6 +13,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -28,6 +29,7 @@ import fun.fengwk.kkstudio.harness.api.history.RootPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnEndPayload;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
@@ -152,27 +154,73 @@ class AnthropicRequestProjectionWireTest {
     assertEquals(diagnostic.message(), decodedDiag.message());
   }
 
-  /** 意图：从真实 AgentMessage 投影，少量和超过 20 个独立块的增长都必须保留最近请求端点。 */
+  /** 意图：真实多轮 EntryPath 重建后，常规请求只把会话断点移到当前尾部且保留历史前缀身份。 */
   @ParameterizedTest
   @MethodSource("cacheGrowthCases")
-  void retainsPreviousRequestEndpointAcrossGrowth(int growth) throws IOException {
-    List<AgentMessage> history = new ArrayList<>();
-    history.add(new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent("old"))));
-    history.add(
-        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("answer"))));
-    List<TextMessageContent> additions = new ArrayList<>();
+  void movesSingleConversationCacheMarkerAcrossMaterializedTurns(int growth) throws IOException {
+    List<Entry> entries = new ArrayList<>();
+    entries.add(new Entry(id(1), SESSION_ID, null, new RootPayload(settings()), NOW));
+    entries.add(turnStart(id(2), id(1), TurnStartReason.INPUT));
+    entries.add(new Entry(id(3), SESSION_ID, id(2), user("first question"), NOW));
+    ProviderBlockData firstTurnIdentity =
+        new ProviderBlockData(
+            ProviderReplayFormat.ANTHROPIC_MESSAGES,
+            new ProviderReplayAffinity(
+                ProviderType.ANTHROPIC, "test-anthropic", "claude-3-5-sonnet"),
+            "signature-first-turn",
+            null,
+            null,
+            JsonMapper.builder().build().createObjectNode());
+    entries.add(
+        new Entry(
+            id(4),
+            SESSION_ID,
+            id(3),
+            assistantWithNativePrefix("first thought", "first answer", firstTurnIdentity),
+            NOW));
+    entries.add(turnEnd(id(5), id(4), id(2), false));
+    entries.add(turnStart(id(6), id(5), TurnStartReason.INPUT));
+
+    List<AgentMessageContent> additions = new ArrayList<>();
     for (int i = 0; i < growth; i++) {
-      additions.add(new TextMessageContent("new-" + i));
+      additions.add(new TextMessageContent("current-" + i));
     }
-    history.add(new AgentMessage(AgentMessageRole.USER, new ArrayList<>(additions)));
-    JsonNode wire = cacheWire(new ProviderMessageProjector().project(history));
-    // tools、system 与最近两个历史请求端点（User 的最后一个新增块、Assistant answer）共 4 个标记
-    assertTrue(wire.path("tools").get(0).has("cache_control"));
-    assertTrue(wire.path("system").get(0).has("cache_control"));
-    assertTrue(cacheBlock(wire, 0, 0).has("cache_control"));
-    assertTrue(cacheBlock(wire, 2, growth - 1).has("cache_control"));
-    assertFalse(cacheBlock(wire, 1, 0).has("cache_control"));
-    assertEquals(4, countCacheMarkers(wire));
+    entries.add(
+        new Entry(
+            id(7),
+            SESSION_ID,
+            id(6),
+            new MessagePayload(new AgentMessage(AgentMessageRole.USER, additions), null, null),
+            NOW));
+
+    JsonNode previousWire = cacheWire(new EntryPath(entries));
+    assertEquals(3, previousWire.path("messages").size());
+    assertTrue(cacheBlock(previousWire, 2, growth - 1).has("cache_control"));
+    assertEquals(1, countCacheMarkers(previousWire.path("messages")));
+    assertEquals(
+        "signature-first-turn",
+        previousWire.path("messages").get(1).path("content").get(0).path("signature").asString());
+
+    entries.add(new Entry(id(8), SESSION_ID, id(7), assistant("second answer"), NOW));
+    entries.add(turnEnd(id(9), id(8), id(6), false));
+    entries.add(turnStart(id(10), id(9), TurnStartReason.INPUT));
+    entries.add(new Entry(id(11), SESSION_ID, id(10), user("latest question"), NOW));
+
+    JsonNode currentWire = cacheWire(new EntryPath(entries));
+    assertEquals(5, currentWire.path("messages").size());
+    assertFalse(cacheBlock(currentWire, 2, growth - 1).has("cache_control"));
+    assertTrue(cacheBlock(currentWire, 4, 0).has("cache_control"));
+    assertEquals(1, countCacheMarkers(currentWire.path("messages")));
+    assertEquals(2, countCacheMarkers(currentWire));
+    assertEquals(
+        "signature-first-turn",
+        currentWire.path("messages").get(1).path("content").get(0).path("signature").asString());
+    for (int i = 0; i < previousWire.path("messages").size(); i++) {
+      assertEquals(
+          withoutCacheMarkers(previousWire.path("messages").get(i)),
+          withoutCacheMarkers(currentWire.path("messages").get(i)),
+          "completed-turn wire prefix must remain identical at message " + i);
+    }
   }
 
   /**
@@ -285,17 +333,25 @@ class AnthropicRequestProjectionWireTest {
     return Stream.of(1, 21, 25);
   }
 
-  private JsonNode cacheWire(List<ProviderMessage> messages) throws IOException {
-    return MAPPER.readTree(
-        encoder
-            .encode(
-                request(
-                    defaultVariant(),
-                    messages,
-                    List.of(new ProviderToolDefinition("calc", "calc", "{\"type\":\"object\"}")),
-                    ProviderCacheControl.session(PromptCacheRetention.LONG, "cache")),
-                descriptor)
-            .bodyUtf8Bytes());
+  private JsonNode cacheWire(EntryPath path) throws IOException {
+    ProviderRequest request =
+        new ModelRequestMaterializer().materialize(path, request(longCacheVariant()));
+    return MAPPER.readTree(encoder.encode(request, descriptor).bodyUtf8Bytes());
+  }
+
+  private static JsonNode withoutCacheMarkers(JsonNode message) {
+    ObjectNode copy = ((ObjectNode) message).deepCopy();
+    removeCacheMarkers(copy);
+    return copy;
+  }
+
+  private static void removeCacheMarkers(JsonNode node) {
+    if (node.isObject()) {
+      ((ObjectNode) node).remove("cache_control");
+    }
+    for (JsonNode child : node) {
+      removeCacheMarkers(child);
+    }
   }
 
   private static JsonNode cacheBlock(JsonNode wire, int message, int block) {
@@ -336,6 +392,10 @@ class AnthropicRequestProjectionWireTest {
     return new ModelVariant("default", null, PromptCacheRetention.NONE, null);
   }
 
+  private static ModelVariant longCacheVariant() {
+    return new ModelVariant("default", null, PromptCacheRetention.LONG, null);
+  }
+
   private static final UUID SESSION_ID = id(900);
   private static final UUID THREAD_ID = id(901);
   private static final Instant NOW = Instant.parse("2026-08-01T00:00:00Z");
@@ -348,6 +408,26 @@ class AnthropicRequestProjectionWireTest {
   private static MessagePayload user(String text) {
     return new MessagePayload(
         new AgentMessage(AgentMessageRole.USER, List.of(new TextMessageContent(text))), null, null);
+  }
+
+  private static MessagePayload assistantWithNativePrefix(
+      String thinking, String text, ProviderBlockData data) {
+    return new MessagePayload(
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(
+                new ThinkingMessageContent(thinking, data), new TextMessageContent(text, data))),
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE, new ModelUsage(1, 2, 0, 0, Map.of(), 0L, 3L)),
+        null);
+  }
+
+  private static MessagePayload assistant(String text) {
+    return new MessagePayload(
+        new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent(text))),
+        new AssistantMessageMetadata(
+            GenerationStopReason.COMPLETE, new ModelUsage(1, 2, 0, 0, Map.of(), 0L, 3L)),
+        null);
   }
 
   private static MessagePayload assistantWithThinking(String text, ProviderBlockData data) {

@@ -112,7 +112,7 @@ public abstract class ProjectTestSupport extends PostgresSpringTestSupport {
           + "\"defaultVariant\":\"default\","
           + "\"pricing\":{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
           + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":\"0\"},"
-          + "\"overrides\":[],\"multipliers\":[]}}";
+          + "\"rules\":[],\"changes\":[]}}";
 
   @Autowired protected JdbcTemplate jdbc;
   @Autowired protected ProjectService projectService;
