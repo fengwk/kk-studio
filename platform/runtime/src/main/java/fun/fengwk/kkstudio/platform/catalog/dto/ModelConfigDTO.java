@@ -14,7 +14,7 @@ import java.util.List;
  * limit:        { context: positive int, output: positive int &lt;= context }
  * abilities:    { tools: boolean, reasoning: boolean, midConversationSystemMessages?: boolean, messageLevelEffort?: boolean, inputModalities: non-empty list }
  * pricing:      { base: { input, output, cacheRead, cacheWrite, cacheWriteByTtl, reasoning },
- *                overrides: [], multipliers: [] }，可缺省并归一为完整零定义
+ *                rules: [], changes: [] }，可缺省并归一为完整零定义
  * defaultVariant: existing variant id
  * variants:     non-empty list with at least {@code id} (optional reasoningEffort)
  * </pre>

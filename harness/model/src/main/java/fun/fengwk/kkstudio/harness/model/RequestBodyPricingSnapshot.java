@@ -9,8 +9,8 @@ import java.util.regex.Pattern;
 /**
  * 一次成功请求的 request-body 条件快照：只包含条件指纹到匹配布尔值的不可变映射。
  *
- * <p>快照绝不包含请求 body、字段原值或期望值。指纹由 {@link ModelRequestBodyPricing#fingerprint} 计算，是 64 位小写 SHA-256
- * 十六进制文本；快照最多记录 {@value #MAX_CONDITIONS} 个条件，未知结果不写入映射。
+ * <p>快照绝不包含请求 body、字段原值或期望值。指纹是 64 位小写 SHA-256 十六进制文本；快照最多记录 {@value #MAX_CONDITIONS}
+ * 个条件，未知结果不写入映射。
  *
  * <p>本类型是可选的历史元数据：旧记录没有快照，读取方必须把它当作未知事实，绝不能用今天的配置反推匹配结果。
  */

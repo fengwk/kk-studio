@@ -390,7 +390,7 @@ class IssueEvidenceLifecycleIntegrationTest extends WebPostgresTestSupport {
             + "\"defaultVariant\":\"default\","
             + "\"pricing\":{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
             + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":\"0\"},"
-            + "\"overrides\":[],\"multipliers\":[]}}");
+            + "\"rules\":[],\"changes\":[]}}");
     jdbc.update(
         "insert into agent (name, execution, config) values (?, "
             + "jsonb_build_object('driver', 'builtin', 'settings', "

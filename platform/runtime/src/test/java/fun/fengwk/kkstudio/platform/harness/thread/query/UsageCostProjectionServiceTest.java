@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
-import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
@@ -422,9 +421,9 @@ class UsageCostProjectionServiceTest {
     assertTrue(error.getMessage().startsWith("invalid agent model"), error.getMessage());
   }
 
-  /** Pricing rules depend on token-count facts, not durable request-body match snapshots. */
+  /** Pricing rules derive the current cost from durable usage facts. */
   @Test
-  void projectsRulePricingIndependentlyOfRequestBodySnapshots() {
+  void projectsRulePricingFromUsageFacts() {
     ModelPricingDTO pricing = pricing(BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO);
     ModelPricingRuleDTO range = new ModelPricingRuleDTO();
     range.setType("input_token_range");
@@ -435,33 +434,14 @@ class UsageCostProjectionServiceTest {
     stubModel("provider-a", "model-a", pricing);
 
     ModelUsage usage = new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null);
-    Entry matched =
-        assistantWithPricing(
-            new UUID(0L, 20L),
-            USER_A_ID,
-            usage,
-            new RequestBodyPricingSnapshot(Map.of("a".repeat(64), true)));
-    Entry notMatched =
-        assistantWithPricing(
-            new UUID(0L, 21L),
-            USER_A_ID,
-            usage,
-            new RequestBodyPricingSnapshot(Map.of("a".repeat(64), false)));
-    Entry noSnapshot = assistantWithPricing(new UUID(0L, 22L), USER_A_ID, usage, null);
+    Entry assistant = assistantWithPricing(new UUID(0L, 20L), USER_A_ID, usage);
 
-    Map<UUID, HarnessUsageCostDTO> costs =
-        service.project(List.of(matched, notMatched, noSnapshot));
+    Map<UUID, HarnessUsageCostDTO> costs = service.project(List.of(assistant));
 
-    assertEquals("2", costs.get(matched.id()).getAmount());
-    assertEquals("2", costs.get(notMatched.id()).getAmount());
-    assertEquals("2", costs.get(noSnapshot.id()).getAmount());
+    assertEquals("2", costs.get(assistant.id()).getAmount());
   }
 
-  private static Entry assistantWithPricing(
-      UUID id,
-      UUID parentEntryId,
-      ModelUsage usage,
-      RequestBodyPricingSnapshot requestBodyPricing) {
+  private static Entry assistantWithPricing(UUID id, UUID parentEntryId, ModelUsage usage) {
     return new Entry(
         id,
         SESSION_ID,
@@ -469,7 +449,7 @@ class UsageCostProjectionServiceTest {
         new MessagePayload(
             new AgentMessage(AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("hi"))),
             new AssistantMessageMetadata(
-                GenerationStopReason.COMPLETE, usage, null, MODEL_A, NOW, null, requestBodyPricing),
+                GenerationStopReason.COMPLETE, usage, null, MODEL_A, NOW, null, null),
             null),
         NOW);
   }
