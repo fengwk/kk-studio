@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { cases } from '../cases/config-matrix.mjs'
+import { modelConfigMatrix } from '../lib/fixtures.mjs'
 
 const run = (id, ctx) => {
   const caseDef = cases.find((item) => item.id === id)
@@ -38,6 +39,53 @@ test('model matrix consumes resource bodies and cleans up with their versions', 
     '/api/platform/models/matrix-model?expectedVersion=4',
     '/api/platform/providers/matrix-provider?expectedVersion=3',
   ])
+})
+
+test('pricing matrix cases verify current API round-trips', async () => {
+  const created = []
+  const ctx = {
+    vars: {},
+    writeArtifact: () => {},
+    async call(method, path, body) {
+      if (method === 'POST' && path === '/api/platform/providers') {
+        return { status: 201, json: { name: 'pricing-provider', version: '1' } }
+      }
+      if (method === 'POST' && path === '/api/platform/models') {
+        created.push(body)
+        return {
+          status: 201,
+          json: { name: body.name, version: '2', config: body.config },
+        }
+      }
+      if (method === 'DELETE') return { status: 204, json: null }
+      throw new Error(`unexpected call ${method} ${path}`)
+    },
+  }
+  await run('matrix.model.setup_provider', ctx)
+  await run('config.model.valid.pricing_rules', ctx)
+  await run('config.model.valid.unpriced', ctx)
+  await run('matrix.model.teardown_provider', ctx)
+  assert.equal(created[0].config.pricing.rules.length, 3)
+  assert.equal(created[1].config.pricing, null)
+})
+
+test('Model pricing fixture uses current rules and date plans, and distinguishes unpriced from zero', () => {
+  // Assert the current config contract directly so obsolete override/multiplier or request-body fields cannot return silently.
+  const rows = new Map(modelConfigMatrix().map((row) => [row.id, row]))
+  const pricing = rows.get('valid.pricing_rules').build().pricing
+  assert.deepEqual(Object.keys(pricing).sort(), ['base', 'changes', 'rules'])
+  assert.deepEqual(
+    pricing.rules.map((rule) => rule.type),
+    ['input_token_range', 'time_multiplier', 'service_tier_multiplier'],
+  )
+  assert.equal(pricing.rules[0].input, '2')
+  assert.equal(pricing.rules[1].factor, '1.25')
+  assert.equal(pricing.rules[2].factor, '0.5')
+  assert.equal(pricing.changes[0].from, '2030-01-01')
+  assert.equal(Object.hasOwn(pricing, 'overrides'), false)
+  assert.equal(Object.hasOwn(pricing, 'multipliers'), false)
+  assert.equal(JSON.stringify(pricing).includes('requestBody'), false)
+  assert.equal(rows.get('valid.unpriced').build().pricing, null)
 })
 
 test('agent matrix consumes resource and list bodies for setup and cleanup', async () => {

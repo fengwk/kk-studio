@@ -327,18 +327,25 @@ Provider credential 通过创建请求的可空 `SecretUpdate`（只接受 `SET`
 返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，
 上游不可达或非 2xx 返回 502 `upstream_failed`，detail 带上游状态与截断正文。
 MODEL 配置保存 limit、abilities、variants、pricing、default variant 与 `midConversationSystemMessages`；该能力默认为 false，Claude model ID 在模型创建或 Catalog 候选应用时按受支持 ID 规则预填 true，仍可由用户编辑。
-`pricing` 固定为 `{base, overrides, multipliers}`：所有价格与倍率在 wire 上都是十进制字符串，
-单位固定为 USD / 每百万 token；普通基础价缺省归一为 0，倍率缺省为 1，`reasoning: null`
-表示继承最终 output 价。`overrides` 与 `multipliers` 按数组顺序应用，规则 id 必须唯一；
-条件对象同层字段为 AND，支持 `all` / `any` / `not`、context token 边界、service tier、UTC 日期、
-时区时间段与请求体 JSON Pointer 匹配。覆盖规则只写入非 null 字段，显式 `reasoning: null`
-恢复继承；倍率规则逐字段缩放，未列出的字段不变。
+`pricing` 为可空的完整定义：`null` 表示尚未配置价格，必须与显式全零费率区分；已配置时结构为
+`{base, rules, changes}`。价格与倍率均为 USD / 每百万 token 的十进制字符串；普通费率缺省归一为 0，
+`reasoning: null` 表示继承最终 output 价。基础费率与每个日期计划均有自己的 `base` 和 `rules`。
+日期计划按 `from`（ISO 日期）选择当日及之后最近生效的价格定义，定义内规则继续匹配输入 token 数量、
+时区时间段和 service tier。
 
-models.dev 目录导入只填入 token 价格；`web_search` 等非 token 附加费用不计入并显示提示。
+`rules` 只有固定三种 type：`input_token_range` 覆盖费率、`time_multiplier` 与
+`service_tier_multiplier` 缩放费率。同 type 规则的适用范围必须互斥；不同 type 的命中规则相乘，
+费率倍率可用统一 `factor` 或逐项 `inputFactor` / `outputFactor` / `cacheReadFactor` /
+`cacheWriteFactor` / `reasoningFactor`。输入 token 范围按 `[minInputTokens, maxInputTokensExclusive)`，
+时间规则使用 IANA 时区和 ISO `weekdays`（1=周一至 7=周日，可省略表示每天）；数组顺序不作为优先级。
+推理费率可显式为 `null` 以恢复继承，TTL 写价按正整数秒分别配置。
+
+models.dev 目录导入只填入可无损转换的 token 价格与规则；`web_search` 等非 token 附加费用不计入并显示提示。
+无法等价转换的 token 价格会使整份候选价格保持未定价，不以零价替代；非 token 附加费用只给出提示。
 由于不感知上游请求地区，含 `region` 条件的倍率规则（包括嵌套组合）整条忽略，保留基础价、
 TTL 缓存价和其他有效倍率，并提示统计费用可能低于实际账单。其他未知定价字段或条件、
-非法价格与倍率仍拒绝整份候选价格；`region` 覆盖规则也不支持。价格不支持的候选仍可填入
-其他模型信息，但保留已有价格，不用零价覆盖。
+非法价格与倍率仍拒绝整份候选价格；`region` 规则不支持。价格不支持的候选仍可填入其他模型信息，
+并保留已有价格，不用零价覆盖。
 
 Agent 定义以 `execution: {driver, settings}` 选择执行后端，格式与 Thread 的
 `ExecutionSelection` 相同。写入和导入预检先根据实际注册的 Driver 校验 settings；
@@ -492,7 +499,7 @@ ACK。远端结果的 call id 映射回原模型 call id。审批前 edit 预览
 因此 platform 不复制规划算法，也不直接依赖 `runtime.*` 实现类。
 入口、`kind` 与冲突契约见 [Web](web.md)。
 
-用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason`、`usage`、可选 `decodeDurationMillis`，以及实际执行的 `model`、请求时刻 `requestedAt`、Provider 报告的 `responseServiceTier` 与请求体条件指纹 `requestBodyPricing`），绝不持久化金额。`UsageCostProjectionService` 按 metadata 中实际执行的模型读取当前 catalog 价格，以请求时刻、上下文 token 与 service tier 依次应用覆盖与倍率规则，用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；catalog 中已没有该单模型（已删除，或改名/删除后同名被模型组复用）则费用缺席，定义损坏则抛错，绝不伪装成 0。同一投影内每个出现过的模型至多查一次 catalog；计费细节见 [Harness Model：用量与计价](harness-model.md#用量与计价)。
+用量与费用只在读取时投影：durable 只保存 ASSISTANT `MESSAGE` 与 COMPACTION 结果的真实 `assistantMetadata`（`stopReason`、`usage`、可选 `decodeDurationMillis`，以及实际执行的 `model`、请求时刻 `requestedAt`、Provider 报告的 `responseServiceTier` 和历史 request-body 定价事实），绝不持久化金额。历史 request-body 定价事实仅由 codec 解码和保留，不参与当前计价。`UsageCostProjectionService` 按 metadata 中实际执行的模型读取当前 catalog 价格，以请求时刻、上下文 token 与 service tier 解析价格规则，用纯 `BigDecimal` 现算并输出精确十进制字符串 `amount`；未配置价格、缺少规则所需事实或无法确定费用时不伪装成 0；catalog 中已没有该单模型（已删除，或改名/删除后同名被模型组复用）则费用缺席，定义损坏则抛错。同一投影内每个出现过的模型至多查一次 catalog；计费细节见 [Harness Model：用量与计价](harness-model.md#用量与计价)。
 
 ## Storage、Blob 与 Resource
 

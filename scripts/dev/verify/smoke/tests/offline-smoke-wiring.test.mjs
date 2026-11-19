@@ -209,6 +209,7 @@ test('test intent: the stub catalog uses the unified SecretUpdate credential and
   const model = requests[1][2]
   assert.equal(model.type, 'MODEL')
   assert.deepEqual(model.config.limit, { context: 128000, output: 4096 })
+  assert.equal(model.config.pricing, null, 'offline smoke must model unpriced rather than an explicit zero price')
   assert.deepEqual(model.config.variants, [{ id: 'default', promptCacheRetention: 'SHORT' }])
   const agent = requests[2][2]
   assert.deepEqual(agent.execution, {

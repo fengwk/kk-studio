@@ -63,6 +63,22 @@ for (const row of modelConfigMatrix()) {
         assert([200, 201].includes(status), `status ${status}`)
         const model = json
         assert(model?.name, JSON.stringify(json))
+        if (row.id === 'valid.pricing_rules') {
+          const pricing = model.config?.pricing
+          assert(
+            pricing
+              && Object.keys(pricing).sort().join(',') === 'base,changes,rules'
+              && pricing.rules.map((rule) => rule.type).sort().join(',')
+                === 'input_token_range,service_tier_multiplier,time_multiplier'
+              && pricing.changes[0]?.from === '2030-01-01',
+            `Model must round-trip the current pricing contract: ${JSON.stringify(pricing)}`,
+          )
+        } else if (row.id === 'valid.unpriced') {
+          assert(
+            Object.hasOwn(model.config ?? {}, 'pricing') && model.config.pricing === null,
+            `unpriced Model must round-trip pricing=null: ${JSON.stringify(model.config)}`,
+          )
+        }
         ctx.writeArtifact(`model-${row.id}.json`, JSON.stringify(model, null, 2))
         // cleanup model immediately to keep list small
         await ctx.call(

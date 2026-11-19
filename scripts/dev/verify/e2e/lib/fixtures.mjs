@@ -82,10 +82,10 @@ export function encodePathTail(value) {
 }
 
 /**
- * 完整价格定义：基础费率 + 有序覆盖/倍率规则。
+ * 完整价格定义：基础费率、固定三类互斥规则与按日期生效的价格定义。
  *
  * <p>所有价格与倍率在 wire 上都是十进制字符串；普通缺价由服务端归一化为 0，reasoning=null 表示跟随
- * output。测试默认使用可直接读回的完整定义，而不是省略 base 或伪造 unpriced 状态。
+ * output。未定价由 pricing=null 表示，与明确的全零价格不同。
  */
 export function basePricing(overrides = {}) {
   return {
@@ -98,8 +98,8 @@ export function basePricing(overrides = {}) {
       reasoning: null,
       ...(overrides.base ?? {}),
     },
-    overrides: overrides.overrides ?? [],
-    multipliers: overrides.multipliers ?? [],
+    rules: overrides.rules ?? [],
+    changes: overrides.changes ?? [],
   }
 }
 
@@ -196,7 +196,7 @@ export function modelConfigMatrix() {
     {
       id: 'valid.pricing_rules',
       ok: true,
-      title: 'base/overrides/multipliers 十进制字符串',
+      title: '基础费率、三类定价规则与日期计划',
       build: () =>
         baseModelConfig({
           pricing: basePricing({
@@ -208,22 +208,38 @@ export function modelConfigMatrix() {
               cacheWriteByTtl: { 3600: '1.5' },
               reasoning: null,
             },
-            overrides: [
+            rules: [
+              { type: 'input_token_range', minInputTokens: 100000, input: '2' },
               {
-                id: 'long-context',
-                when: { context: { gt: 100000 } },
-                rates: { input: '2', reasoning: null },
+                type: 'time_multiplier',
+                start: '09:00',
+                end: '18:00',
+                timezone: 'UTC',
+                weekdays: [1, 2, 3, 4, 5],
+                factor: '1.25',
               },
+              { type: 'service_tier_multiplier', serviceTier: 'batch', factor: '0.5' },
             ],
-            multipliers: [
-              {
-                id: 'batch-tier',
-                when: { serviceTier: ['batch'] },
-                factors: { input: '0.5', output: '0.5' },
+            changes: [{
+              from: '2030-01-01',
+              base: {
+                input: '1.5',
+                output: '3',
+                cacheRead: '0.5',
+                cacheWrite: '1',
+                cacheWriteByTtl: { 3600: '1.5' },
+                reasoning: null,
               },
-            ],
+              rules: [],
+            }],
           }),
         }),
+    },
+    {
+      id: 'valid.unpriced',
+      ok: true,
+      title: 'pricing=null 表示未配置价格',
+      build: () => baseModelConfig({ pricing: null }),
     },
     {
       id: 'valid.reasoning_variants',

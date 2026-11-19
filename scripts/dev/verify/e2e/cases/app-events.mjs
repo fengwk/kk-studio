@@ -104,7 +104,7 @@ registerCase({
   },
 })
 
-function applicationEventUrl(baseUrl) {
+export function applicationEventUrl(baseUrl) {
   const url = new URL(baseUrl)
   url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
   url.pathname = '/ws/events'
@@ -113,7 +113,7 @@ function applicationEventUrl(baseUrl) {
   return url.toString()
 }
 
-async function waitForSocketOpen(socket, timeoutMs) {
+export async function waitForSocketOpen(socket, timeoutMs) {
   if (socket.readyState === WebSocket.OPEN) {
     return
   }
@@ -140,7 +140,7 @@ async function waitForSocketOpen(socket, timeoutMs) {
   })
 }
 
-async function takeFrame(frames, predicate, timeoutMs) {
+export async function takeFrame(frames, predicate, timeoutMs) {
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const index = frames.findIndex(predicate)
@@ -163,7 +163,7 @@ function assertGlobalSubscriptionAck(frame, kind) {
   )
 }
 
-function assertExactKeys(value, expected, label) {
+export function assertExactKeys(value, expected, label) {
   assert(value && typeof value === 'object' && !Array.isArray(value), `${label} must be an object`)
   const actual = Object.keys(value).sort()
   const sortedExpected = [...expected].sort()
