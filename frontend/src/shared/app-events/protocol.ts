@@ -383,7 +383,7 @@ export function isThreadSnapshot(value: unknown, threadId: string): value is Har
     return false
   }
   const snapshot = value as unknown as HarnessThreadSnapshotDTO
-  return CANONICAL_DECIMAL.test(snapshot.version)
+  return typeof snapshot.version === 'string' && CANONICAL_DECIMAL.test(snapshot.version)
     && isThreadDTO(snapshot.thread, threadId, snapshot.version)
     && (snapshot.baseEntryId === null || isCanonicalUuid(snapshot.baseEntryId))
     && Array.isArray(snapshot.entries)
@@ -491,7 +491,7 @@ function isToolInvocation(value: unknown): boolean {
     && nullableUuid(value.childThreadId) && isCanonicalUuid(value.turnStartEntryId)
     && isCanonicalUuid(value.assistantEntryId) && Number.isSafeInteger(value.callIndex)
     && TOOL_INVOCATION_STATUS_VALUES.includes(value.status as (typeof TOOL_INVOCATION_STATUS_VALUES)[number])
-    && Number.isSafeInteger(value.attempt) && Number(value.attempt) > 0
+    && Number.isSafeInteger(value.attempt) && Number(value.attempt) >= 0
     && typeof value.toolCallId === 'string' && nullableString(value.queuedBehindToolCallId)
     && typeof value.toolName === 'string' && typeof value.rendererKey === 'string'
     && nullableUuid(value.environmentId) && nullableUuid(value.requiredEnvironmentId)
@@ -536,7 +536,7 @@ function isActiveAssistantOutput(value: unknown): boolean {
     && isCanonicalUuid(value.generationId) && isCanonicalUuid(value.turnStartEntryId)
     && isCanonicalUuid(value.requestHeadEntryId)
     && GENERATION_STATUS_VALUES.includes(value.status as (typeof GENERATION_STATUS_VALUES)[number])
-    && Number.isSafeInteger(value.attempt) && Number(value.attempt) > 0
+    && Number.isSafeInteger(value.attempt) && Number(value.attempt) >= 0
     && typeof value.sequence === 'string' && CANONICAL_DECIMAL.test(value.sequence)
     && Array.isArray(value.contents) && value.contents.every(isActiveContent)
     && (value.error === null || (hasExactFields(value.error, ['code', 'message'])

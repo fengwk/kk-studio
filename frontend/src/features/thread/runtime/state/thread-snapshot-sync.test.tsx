@@ -3,7 +3,8 @@ import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
 import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApplicationEventProvider } from '@/shared/app-events'
-import type { HarnessActiveAssistantOutputDTO, HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
+import { decodeServerMessage } from '@/shared/app-events/protocol'
+import type { HarnessActiveAssistantOutputDTO, HarnessThreadSnapshotDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { FakeWebSocketHarness } from '@/test-support/fake-websocket'
@@ -72,6 +73,37 @@ function snapshot(version = '1'): HarnessThreadSnapshotDTO {
   }
 }
 
+const readyOutput = { ...activeOutput('0'), status: 'READY', attempt: 0, contents: [] } satisfies HarnessActiveAssistantOutputDTO
+const waitingTool = {
+  id: '55555555-2222-4333-8444-555555555555',
+  threadId: THREAD,
+  childThreadId: null,
+  turnStartEntryId: ENTRY,
+  assistantEntryId: ENTRY,
+  callIndex: 0,
+  status: 'WAITING_INPUT',
+  attempt: 0,
+  toolCallId: 'call-1',
+  queuedBehindToolCallId: null,
+  toolName: 'ask_user',
+  rendererKey: 'ask_user',
+  environmentId: null,
+  requiredEnvironmentId: null,
+  requiredEnvironmentName: null,
+  environmentWaitFreshnessAt: null,
+  waitingForEnvironment: false,
+  argumentsJson: '{}',
+  approval: null,
+  result: null,
+  error: null,
+  createdAt: 0,
+  updatedAt: 0,
+} satisfies ToolInvocationDTO
+
+function snapshotFrame<T>(data: T) {
+  return { type: 'event', resource: { kind: 'thread', id: THREAD }, name: 'snapshot', data } as const
+}
+
 let sockets: FakeWebSocketHarness
 let queryClient: QueryClient
 const wrapper = ({ children }: { children: ReactNode }) => (
@@ -120,6 +152,50 @@ describe('useThreadSnapshotSync', () => {
     expect(queryClient.getQueryData<HarnessThreadSnapshotDTO>(key)?.version).toBe('1')
     expect(get).not.toHaveBeenCalled()
     expect(result.current[0].error).toBeNull()
+  })
+
+  it('applies zero-attempt model and tool snapshots before completing on the same socket', async () => {
+    const key = queryKeys.threads.snapshot(THREAD)
+    queryClient.setQueryData(key, snapshot())
+    const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockResolvedValue(snapshot())
+    const { result } = renderHook(() => useThreadSnapshotSync(THREAD, true), { wrapper })
+    const socket = sockets.openLatest()
+    act(() => socket.emitServer({ type: 'subscribed', resource: { kind: 'thread', id: THREAD }, cursor: '0' }))
+
+    // Neither pending invocation has started; rejecting either frame would close the socket.
+    await act(async () => socket.emitServer(snapshotFrame({ ...snapshot('2'), activeAssistantOutput: readyOutput })))
+    expect(queryClient.getQueryData<HarnessThreadSnapshotDTO>(key)?.activeAssistantOutput).toEqual(readyOutput)
+
+    const waiting = snapshot('3')
+    waiting.thread.status = 'WAITING'
+    waiting.toolInvocations = [waitingTool]
+    await act(async () => socket.emitServer(snapshotFrame(waiting)))
+    expect(queryClient.getQueryData<HarnessThreadSnapshotDTO>(key)?.toolInvocations).toEqual([waitingTool])
+
+    const terminal = snapshot('4')
+    const endId = '66666666-2222-4333-8444-555555555555'
+    terminal.thread.status = 'IDLE'
+    terminal.thread.headEntryId = endId
+    terminal.entries.push({
+      entryId: endId, sessionId: SESSION, parentEntryId: ENTRY, entryType: 'TURN_END',
+      payload: { outcome: 'COMPLETED', turnStartEntryId: ENTRY }, createdAt: 1, usageCost: null,
+    })
+    await act(async () => socket.emitServer(snapshotFrame(terminal)))
+    expect(queryClient.getQueryData(key)).toEqual(terminal)
+    expect(socket.closed).toBe(false)
+    expect(sockets.sockets).toEqual([socket])
+    expect(get).not.toHaveBeenCalled()
+    expect(result.current.error).toBeNull()
+  })
+
+  it.each([-1, 0.5, '0', null, Number.MAX_SAFE_INTEGER + 1])('rejects invalid attempt counts (%j) in either snapshot field', (attempt) => {
+    // Isolate each field so invalid data in one cannot mask validation of the other.
+    expect(decodeServerMessage(JSON.stringify(snapshotFrame({
+      ...snapshot(), activeAssistantOutput: { ...readyOutput, attempt },
+    })))).toBeNull()
+    expect(decodeServerMessage(JSON.stringify(snapshotFrame({
+      ...snapshot(), toolInvocations: [{ ...waitingTool, attempt }],
+    })))).toBeNull()
   })
 
   it('keeps projection errors through ACK and retries them with a wire refresh, not HTTP', async () => {
