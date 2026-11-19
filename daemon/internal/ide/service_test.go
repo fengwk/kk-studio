@@ -1990,6 +1990,68 @@ func TestBoundCommandRejections(t *testing.T) {
 	}
 }
 
+// Verifies attachment payload bounds and current view/daemon binding before the bridge receives text.
+func TestOpenAttachmentValidationAndBinding(t *testing.T) {
+	root := t.TempDir()
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: &fakeCodeServerManager{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	if !opened.GetOk() {
+		t.Fatalf("open reply=%v", opened)
+	}
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, nil)
+	defer cancelHost()
+	makeCommand := func(id, text string) *protocol.IdeCommand {
+		command := viewCommandForTest(protocol.IdeAction_OPEN_ATTACHMENT, opened, false)
+		command.AttachmentId = stringPointer(id)
+		command.AttachmentText = stringPointer(text)
+		return command
+	}
+	for _, test := range []struct {
+		name  string
+		id    string
+		text  string
+		valid bool
+	}{{"valid empty", "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "", true}, {"inclusive limit", "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", strings.Repeat("x", maxAttachmentTextBytes), true}, {"over limit", "cccccccc-cccc-4ccc-8ccc-cccccccccccc", strings.Repeat("x", maxAttachmentTextBytes+1), false}, {"nul", "dddddddd-dddd-4ddd-8ddd-dddddddddddd", string([]byte{'a', 0, 'b'}), false}, {"invalid utf8", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee", string([]byte{0xff}), false}, {"bad uuid", "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", "x", false}} {
+		t.Run(test.name, func(t *testing.T) {
+			result := service.HandleCommand(context.Background(), makeCommand(test.id, test.text))
+			if result.GetOk() != test.valid {
+				t.Fatalf("result=%v valid=%v", result, test.valid)
+			}
+		})
+	}
+	wrongDaemon := makeCommand("ffffffff-ffff-4fff-8fff-ffffffffffff", "text")
+	wrongDaemon.ExpectedDaemonInstanceId = stringPointer("88888888-8888-4888-8888-888888888888")
+	if result := service.HandleCommand(context.Background(), wrongDaemon); result.GetCode() != "VIEW_GONE" {
+		t.Fatalf("wrong daemon result=%v", result)
+	}
+	staleBinding := makeCommand("ffffffff-ffff-4fff-8fff-ffffffffffff", "text")
+	staleBinding.BindingEpoch = int64Pointer(opened.GetBindingEpoch() + 1)
+	if result := service.HandleCommand(context.Background(), staleBinding); result.GetCode() != "STALE_BINDING" {
+		t.Fatalf("stale binding result=%v", result)
+	}
+	otherOperation := viewCommandForTest(protocol.IdeAction_FOCUS_TERMINAL, opened, false)
+	otherOperation.AttachmentId = stringPointer("ffffffff-ffff-4fff-8fff-ffffffffffff")
+	if result := service.HandleCommand(context.Background(), otherOperation); result.GetCode() != "UNAVAILABLE" {
+		t.Fatalf("attachment fields on other operation result=%v", result)
+	}
+	closed := viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, false)
+	if result := service.HandleCommand(context.Background(), closed); !result.GetOk() {
+		t.Fatalf("close result=%v", result)
+	}
+	if result := service.HandleCommand(context.Background(), makeCommand("ffffffff-ffff-4fff-8fff-ffffffffffff", "text")); result.GetOk() {
+		t.Fatalf("opened attachment after close: %v", result)
+	}
+}
+
 // Verifies focus and mobile-collapse acknowledgements are driven by bridge results.
 func TestBoundViewCommands(t *testing.T) {
 	root := t.TempDir()

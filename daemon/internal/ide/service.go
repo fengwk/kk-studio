@@ -194,6 +194,9 @@ func (s *Service) HandleCommand(ctx context.Context, command *protocol.IdeComman
 	}
 	defer finish()
 	ctx = opCtx
+	if command.GetAction() != protocol.IdeAction_OPEN_ATTACHMENT && (command.AttachmentId != nil || command.AttachmentText != nil) {
+		return failureResult(NewError("attachment fields are only valid for OPEN_ATTACHMENT", "UNAVAILABLE"), s.snapshot(), true)
+	}
 	var result *protocol.IdeResult
 	switch command.GetAction() {
 	case protocol.IdeAction_OPEN_VIEW:
@@ -202,6 +205,8 @@ func (s *Service) HandleCommand(ctx context.Context, command *protocol.IdeComman
 		result, err = s.changeDirectory(ctx, command)
 	case protocol.IdeAction_FOCUS_TERMINAL:
 		result, err = s.focusTerminal(ctx, command)
+	case protocol.IdeAction_OPEN_ATTACHMENT:
+		result, err = s.openAttachment(ctx, command)
 	case protocol.IdeAction_CLOSE_VIEW:
 		result, err = s.closeView(ctx, command)
 	case protocol.IdeAction_LIST_VIEWS:

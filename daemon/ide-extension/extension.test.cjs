@@ -37,15 +37,20 @@ function fakeVscode(workspaceFile = WORKSPACE, folders = ['/home/user'], options
   const openListeners = new Set()
   const closeListeners = new Set()
   const watchers = []
+  const providers = new Map()
   const subscriptions = (listeners, listener) => ({ dispose: () => listeners.delete(listener) })
   const fileUri = (fsPath) => ({ scheme: 'file', fsPath, toString: () => `file://${fsPath}` })
+  const parsedUri = (value) => {
+    const parsed = new URL(value)
+    return { scheme: parsed.protocol.slice(0, -1), path: parsed.pathname, toString: () => value }
+  }
 
   class RelativePattern {
     constructor(base, pattern) { this.base = base; this.pattern = pattern }
   }
 
   const vscode = {
-    Uri: { file: fileUri },
+    Uri: { file: fileUri, parse: parsedUri },
     RelativePattern,
     Position: FakePosition,
     Range: FakeRange,
@@ -59,6 +64,10 @@ function fakeVscode(workspaceFile = WORKSPACE, folders = ['/home/user'], options
       onDidChangeWorkspaceFolders(listener) { folderListeners.add(listener); return subscriptions(folderListeners, listener) },
       onDidOpenTextDocument(listener) { openListeners.add(listener); return subscriptions(openListeners, listener) },
       onDidCloseTextDocument(listener) { closeListeners.add(listener); return subscriptions(closeListeners, listener) },
+      registerTextDocumentContentProvider(scheme, provider) {
+        providers.set(scheme, provider)
+        return { dispose() { providers.delete(scheme) } }
+      },
       createFileSystemWatcher(pattern) {
         const watcher = { pattern, disposed: false, dispose() { watcher.disposed = true } }
         watchers.push(watcher)
@@ -69,6 +78,11 @@ function fakeVscode(workspaceFile = WORKSPACE, folders = ['/home/user'], options
         return options.updateWorkspaceFolders ? options.updateWorkspaceFolders(start, remove, ...added) : true
       },
       async openTextDocument(uri) {
+        if (uri.scheme !== 'file') {
+          const provider = providers.get(uri.scheme)
+          if (!provider) { throw new Error('no content provider') }
+          return { uri, isDirty: false, isClosed: false, getText: () => provider.provideTextDocumentContent(uri) }
+        }
         return openedDocuments.get(uri.fsPath) || {
           uri,
           isDirty: false,
@@ -117,11 +131,14 @@ function fakeVscode(workspaceFile = WORKSPACE, folders = ['/home/user'], options
         terminals.push(terminal)
         return terminal
       },
-      async showTextDocument(document) { calls.shownDocuments.push(document) },
+      async showTextDocument(document) {
+        calls.shownDocuments.push(document)
+        if (options.showTextDocument) { await options.showTextDocument(document) }
+      },
     },
   }
   return {
-    vscode, calls, terminals, openedDocuments, folderListeners, openListeners, closeListeners, watchers,
+    vscode, calls, terminals, openedDocuments, folderListeners, openListeners, closeListeners, watchers, providers,
     fireFolders() { for (const listener of [...folderListeners]) { listener() } },
     fireOpen(document) { for (const listener of [...openListeners]) { listener(document) } },
     fireClose(document) { for (const listener of [...closeListeners]) { listener(document) } },
@@ -232,6 +249,43 @@ async function command(context, op, fields = {}) {
 }
 
 async function focus(context) { return command(context, 'focusTerminal') }
+
+test('openAttachment displays immutable virtual text and releases it on close or host disposal', async (t) => {
+  const context = setup()
+  t.after(() => context.host.dispose())
+  const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
+  const text = 'read-only attachment text'
+  const result = await command(context, 'openAttachment', { attachmentId: id, attachmentText: text, path: '/tmp/forbidden.txt', command: 'workbench.action.reloadWindow' })
+  assert.equal(result.ok, true)
+  assert.equal(context.fake.providers.size, 1)
+  const document = context.fake.calls.shownDocuments[0]
+  assert.equal(document.uri.scheme, 'kk-studio-attachment')
+  assert.equal(document.uri.path, `/attachment-${id}.txt`)
+  assert.equal(document.getText(), text)
+  assert.equal(context.fake.calls.applyEdit.length, 0)
+  assert.equal(context.fake.calls.commands.length, 0)
+  context.fake.fireClose(document)
+  assert.equal(context.fake.providers.get('kk-studio-attachment').provideTextDocumentContent(document.uri), undefined)
+  await command(context, 'openAttachment', { attachmentId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', attachmentText: '' })
+  const other = context.fake.calls.shownDocuments.at(-1)
+  const provider = context.fake.providers.get('kk-studio-attachment')
+  context.host.dispose()
+  assert.equal(context.fake.providers.size, 0)
+  assert.equal(context.fake.closeListeners.size, 0)
+  assert.equal(provider.provideTextDocumentContent(other.uri), undefined)
+})
+
+test('openAttachment reports editor errors and releases the in-memory document', async (t) => {
+  const fake = fakeVscode(undefined, ['/home/user'], { showTextDocument: () => { throw new Error('private editor error') } })
+  const context = setup(fake)
+  t.after(() => context.host.dispose())
+  const id = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc'
+  const result = await command(context, 'openAttachment', { attachmentId: id, attachmentText: 'text' })
+  assert.equal(result.ok, false)
+  assert.equal(result.message, 'attachment could not be opened')
+  const uri = fake.calls.shownDocuments[0].uri
+  assert.equal(fake.providers.get('kk-studio-attachment').provideTextDocumentContent(uri), undefined)
+})
 
 test('refreshExplorer invokes only the fixed Explorer refresh command', async (t) => {
   const context = setup()
