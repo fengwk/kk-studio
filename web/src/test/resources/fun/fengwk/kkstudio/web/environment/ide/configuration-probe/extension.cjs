@@ -6,6 +6,7 @@
 // the acceptance proves that the bridge defaults neither override user settings nor disable Git.
 // The snapshot is rewritten atomically whenever the observed configuration changes, which lets the
 // acceptance observe a later explicit user value without restarting the managed code-server.
+// The browser may also request the same fixed Explorer command as the managed bridge.
 
 const vscode = require('vscode')
 const fs = require('node:fs')
@@ -98,6 +99,22 @@ exports.activate = async () => {
     fs.writeFileSync(staging, payload)
     fs.renameSync(staging, target)
   }
+  const refreshRequests = ['visible', 'hidden'].map((phase) =>
+    path.join(folder.uri.fsPath, '.git', `kk-refresh-${phase}`),
+  )
+  const refreshExplorer = async () => {
+    for (const request of refreshRequests) {
+      const result = `${request}.result`
+      if (!fs.existsSync(request) || fs.existsSync(result)) continue
+      let outcome = 'ok'
+      try {
+        await vscode.commands.executeCommand('kk-studio.refreshExplorer')
+      } catch {
+        outcome = 'failed'
+      }
+      fs.writeFileSync(result, outcome)
+    }
+  }
   const subscription = vscode.workspace.onDidChangeConfiguration(() => void publish())
   await publish()
   void (async () => {
@@ -108,6 +125,7 @@ exports.activate = async () => {
         return
       }
       await publish()
+      await refreshExplorer()
     }
   })()
   exports.deactivate = () => {

@@ -471,8 +471,8 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   /**
    * IDE-T-153 默认情形：真实工作台必须把随包扩展的 {@code configurationDefaults} 当作默认值生效。
    *
-   * <p>启动前把只读探针扩展放进 Daemon 私有 extensions 目录，让它在真实 code-server 扩展宿主内读取 {@code
-   * inspect()}；应用后的主题从真实工作台 DOM 观察到 Dark Modern。Git 扩展必须仍能自动发现仓库。
+   * <p>在真实 DOM 观察首个编辑器表面与实际主题；关闭 watcher 时，固定命令刷新可见 Explorer，但不能抢编辑器或 Search 的焦点。探针也验证 Git
+   * 仍能自动发现仓库。
    */
   @Test
   @Order(10)
@@ -515,7 +515,7 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   /**
    * IDE-T-153 显式值情形：用户设置必须胜过随包默认值，且不改变已注册的默认值。
    *
-   * <p>显式 {@code User/settings.json} 在 code-server 启动前写入，因此该断言不依赖运行中重载设置的时序；主题同样从真实工作台 DOM 观察到
+   * <p>显式 {@code User/settings.json} 在 code-server 启动前写入；真实工作台应用 Light Modern 后，等浏览器持久化主题，再检查重载首屏仍为
    * Light Modern。
    */
   @Test
@@ -1348,6 +1348,9 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
     }
     Path workspace = daemon.workspaceDirectory();
     initializeGitRepository(workspace);
+    if (userSettings == null) {
+      Files.writeString(workspace.resolve("editable.txt"), "initial text in workspace\n");
+    }
 
     UUID browserSessionId = UUID.randomUUID();
     try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
@@ -1376,7 +1379,14 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       browserDriver.await("workbench-ready");
       browserDriver.await("configuration-ready");
       JsonNode probe = readConfigurationProbe(workspace);
-      browserDriver.send(Map.of("continue", true));
+      browserDriver.proceed();
+      if (userSettings == null) {
+        browserDriver.await("explorer-ready-for-disk-write");
+        // An out-of-band write does not notify the Workbench's file service.
+        Files.writeString(
+            workspace.resolve("refresh-from-disk.txt"), "created outside Workbench\n");
+        browserDriver.proceed();
+      }
       browserDriver.await("done");
       browserDriver.finish();
       browserDriver = null;
