@@ -4,12 +4,14 @@ import {
   trimToNull,
 } from '@/features/catalog/ai-resource-draft-primitives'
 import {
-  clonePricing,
-  emptyPricingDraft,
-  normalizePricing,
-} from '@/features/catalog/ai-model-pricing-codec'
-import { defaultPromptCacheRetention } from '@/shared/api/contracts/ai-catalog'
-import { MODEL_INPUT_MODALITY_VALUES } from '@/shared/api/generated/contracts'
+  clonePricingDraft,
+  emptyModelPricingDraft,
+  normalizePricingDraft,
+} from '@/features/catalog/model-pricing-draft'
+import {
+  MODEL_INPUT_MODALITY_VALUES,
+  PROMPT_CACHE_RETENTION_VALUES,
+} from '@/shared/api/generated/contracts'
 import type {
   ModelConfigDTO,
   ModelDTO,
@@ -23,12 +25,11 @@ import type {
 
 const AGENT_MODEL_MODALITY_SET = new Set<string>(MODEL_INPUT_MODALITY_VALUES)
 
-export function emptyModelDraft(
-  provider?: ({ name: string } & Partial<Pick<ProviderDTO, 'promptCacheRetentions'>>) | null,
-): ModelDraft {
-  const retention = defaultPromptCacheRetention(
-    provider?.promptCacheRetentions ? { promptCacheRetentions: provider.promptCacheRetentions } : null,
-  )
+function isPromptCacheRetention(value: string): value is ModelVariantDTO['promptCacheRetention'] {
+  return PROMPT_CACHE_RETENTION_VALUES.some((retention) => retention === value)
+}
+
+export function emptyModelDraft(provider?: Pick<ProviderDTO, 'name'> | null): ModelDraft {
   return {
     providerName: provider?.name ?? '',
     name: '',
@@ -42,9 +43,10 @@ export function emptyModelDraft(
     midConversationSystemMessages: false,
     messageLevelEffort: false,
     inputModalities: ['TEXT'],
-    pricing: emptyPricingDraft(),
+    pricing: emptyModelPricingDraft(),
+    pricingImportNotice: null,
     defaultVariant: 'medium',
-    variants: [newVariantDraft({ id: 'medium', promptCacheRetention: retention })],
+    variants: [newVariantDraft({ id: 'medium' })],
   }
 }
 
@@ -86,8 +88,8 @@ export function toModelDraft(model: ModelDTO): ModelDraft {
     throw new Error(`${model.name} is not a single model`)
   }
   const config = model.config
-  // 单 Model 的 config 总是完整的；pricing/defaultVariant 只在组的派生摘要里为空。
-  if (!config?.pricing || !config.defaultVariant) {
+  // A MODEL always has configuration and a default variant; pricing is nullable for unpriced models.
+  if (!config || !config.defaultVariant) {
     throw new Error(`MODEL ${model.name} is missing config`)
   }
 
@@ -106,7 +108,8 @@ export function toModelDraft(model: ModelDTO): ModelDraft {
     inputModalities: [...config.abilities.inputModalities],
     defaultVariant: config.defaultVariant,
     variants: config.variants.map(parseVariant),
-    pricing: clonePricing(config.pricing),
+    pricing: clonePricingDraft(config.pricing),
+    pricingImportNotice: null,
   }
 }
 
@@ -160,6 +163,9 @@ function serializeVariants(
     }
     ids.add(id)
 
+    if (!isPromptCacheRetention(variant.promptCacheRetention)) {
+      throw new Error(`variant ${id} promptCacheRetention must be selected from model capabilities`)
+    }
     const payload: ModelVariantDTO = {
       id,
       promptCacheRetention: variant.promptCacheRetention,
@@ -209,6 +215,7 @@ function buildModelConfig(draft: ModelDraft): ModelConfigDTO {
       ? { context: contextWindow, output: maxOutputTokens }
       : { context: contextWindow, input: inputLimit, output: maxOutputTokens }
 
+  const pricing = normalizePricingDraft(draft.pricing)
   return {
     limit,
     abilities: {
@@ -218,7 +225,7 @@ function buildModelConfig(draft: ModelDraft): ModelConfigDTO {
       messageLevelEffort: draft.messageLevelEffort,
       inputModalities: modalities,
     },
-    pricing: normalizePricing(draft.pricing),
+    ...(pricing ? { pricing } : {}),
     defaultVariant,
     variants,
   }

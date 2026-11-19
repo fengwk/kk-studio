@@ -8,14 +8,21 @@ import {
   splitCrossMidnightPeriod,
 } from '@/features/catalog/model-pricing-draft'
 
+function setPricedBase(draft: ReturnType<typeof emptyModelPricingDraft>) {
+  draft.definition.base.input = '1'
+  draft.definition.base.output = '2'
+  draft.definition.base.cacheRead = '0.1'
+}
+
 describe('local model pricing draft', () => {
-  it('starts as unpriced and keeps stable temporary row keys outside wire fields', () => {
+  it('starts unpriced without creating a wire pricing object or default zeroes', () => {
     const draft = emptyModelPricingDraft()
     expect(draft.definition.base).toEqual({
       input: '', output: '', cacheRead: '', cacheWrite: '', cacheWriteByTtl: {}, reasoning: undefined,
     })
     expect(draft.definition.inputTokenRanges).toEqual([])
     expect(draft.changes).toEqual([])
+    expect(normalizePricingDraft(draft)).toBeUndefined()
   })
 
   it('flags overlapping input ranges, duplicate service tiers and same-weekday time overlaps', () => {
@@ -40,8 +47,15 @@ describe('local model pricing draft', () => {
     ])
   })
 
-  it('allows adjacent half-open ranges and time windows, and disjoint weekdays', () => {
+  it('flags overlapping open-ended input ranges and allows adjacent half-open ranges and disjoint weekdays', () => {
     const draft = emptyModelPricingDraft()
+    draft.definition.inputTokenRanges = [
+      { draftKey: 'a', minInputTokens: '100', maxInputTokensExclusive: '', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
+      { draftKey: 'b', minInputTokens: '200', maxInputTokensExclusive: '300', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
+    ]
+    expect(findPricingConflicts(draft.definition)).toEqual([
+      { group: 'inputTokenRanges', keys: ['a', 'b'] },
+    ])
     draft.definition.inputTokenRanges = [
       { draftKey: 'a', minInputTokens: '0', maxInputTokensExclusive: '100', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
       { draftKey: 'b', minInputTokens: '100', maxInputTokensExclusive: '200', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
@@ -69,12 +83,13 @@ describe('local model pricing draft', () => {
     const draft = emptyModelPricingDraft()
     draft.definition.base.input = '0'
     draft.definition.base.output = '1.2500'
+    draft.definition.base.cacheRead = '0.3'
     draft.definition.inputTokenRanges = [{
       draftKey: 'client-only', minInputTokens: '200000', maxInputTokensExclusive: '300001',
       rates: { input: '2.5' }, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {},
     }]
-    const plan = normalizePricingDraft(draft)
-    expect(plan.base).toMatchObject({ input: '0', output: '1.2500', cacheRead: null, cacheWrite: null, reasoning: undefined })
+    const plan = normalizePricingDraft(draft)!
+    expect(plan.base).toMatchObject({ input: '0', output: '1.2500', cacheRead: '0.3', cacheWrite: null })
     expect(plan.rules).toEqual([{
       type: 'input_token_range', minInputTokens: 200000, maxInputTokensExclusive: 300001, input: '2.5',
     }])
@@ -83,39 +98,45 @@ describe('local model pricing draft', () => {
 
   it('preserves the three reasoning states and the distinction between inherited and empty TTL prices', () => {
     const draft = emptyModelPricingDraft()
-    expect(normalizePricingDraft(draft).base.reasoning).toBeUndefined()
+    setPricedBase(draft)
+    expect(normalizePricingDraft(draft)!.base).not.toHaveProperty('reasoning')
     draft.definition.base.reasoning = null
-    expect(normalizePricingDraft(draft).base.reasoning).toBeNull()
+    expect(normalizePricingDraft(draft)!.base.reasoning).toBeNull()
     draft.definition.base.reasoning = '0'
-    expect(normalizePricingDraft(draft).base.reasoning).toBe('0')
+    expect(normalizePricingDraft(draft)!.base.reasoning).toBe('0')
 
     const range = {
       draftKey: 'range', minInputTokens: '0', maxInputTokensExclusive: '100',
       rates: { reasoning: null }, cacheWriteTtlMode: 'inherit' as const, cacheWriteByTtl: {},
     }
     draft.definition.inputTokenRanges = [range]
-    expect(normalizePricingDraft(draft).rules).toEqual([{
+    expect(normalizePricingDraft(draft)!.rules).toEqual([{
       type: 'input_token_range', minInputTokens: 0, maxInputTokensExclusive: 100, reasoning: null,
     }])
     draft.definition.inputTokenRanges = [{ ...range, cacheWriteTtlMode: 'unpartitioned' }]
-    expect(normalizePricingDraft(draft).rules[0]).toMatchObject({ cacheWriteByTtl: {} })
+    expect(normalizePricingDraft(draft)!.rules[0]).toMatchObject({ cacheWriteByTtl: {} })
     draft.definition.inputTokenRanges = [{ ...range, cacheWriteTtlMode: 'custom', cacheWriteByTtl: { '300': '0.25' } }]
-    expect(normalizePricingDraft(draft).rules[0]).toMatchObject({ cacheWriteByTtl: { '300': '0.25' } })
+    expect(normalizePricingDraft(draft)!.rules[0]).toMatchObject({ cacheWriteByTtl: { '300': '0.25' } })
   })
 
   it('validates date changes, detects duplicate effective dates and treats missing date as unknown', () => {
     const draft = emptyModelPricingDraft()
+    setPricedBase(draft)
+    const first = emptyModelPricingDraft().definition
+    const second = emptyModelPricingDraft().definition
+    first.base.input = '1'; first.base.output = '2'; first.base.cacheRead = '0.1'
+    second.base.input = '1'; second.base.output = '2'; second.base.cacheRead = '0.1'
     draft.changes = [
-      { draftKey: 'c1', from: '2027-01-01', definition: emptyModelPricingDraft().definition },
-      { draftKey: 'c2', from: '2027-03-01', definition: emptyModelPricingDraft().definition },
+      { draftKey: 'c1', from: '2027-01-01', definition: first },
+      { draftKey: 'c2', from: '2027-03-01', definition: second },
     ]
-    const plan = normalizePricingDraft(draft)
+    const plan = normalizePricingDraft(draft)!
     expect(pricingDefinitionAt(plan)).toBeNull()
     expect(pricingDefinitionAt(plan, '2027-02-01T00:00:00Z')).toEqual({ base: plan.base, rules: plan.rules })
     expect(pricingDefinitionAt(plan, '2027-03-01T00:00:00Z')).toEqual({ base: plan.changes[1]!.base, rules: plan.changes[1]!.rules })
     expect(() => normalizePricingDraft({
       ...draft, changes: [...draft.changes, { ...draft.changes[0]!, draftKey: 'duplicate' }],
-    })).toThrow(/duplicate price change date/)
+    })).toThrow(/duplicate pricing change date/)
     expect(() => normalizePricingDraft({
       ...draft, changes: [{ ...draft.changes[0]!, from: '2027-02-30' }],
     })).toThrow(/UTC date/)
@@ -123,6 +144,7 @@ describe('local model pricing draft', () => {
 
   it('rejects inconsistent timezone groups and bad rule factors', () => {
     const draft = emptyModelPricingDraft()
+    setPricedBase(draft)
     const factors = { factor: '1', inputFactor: '', outputFactor: '', cacheReadFactor: '', cacheWriteFactor: '', reasoningFactor: '' }
     draft.definition.timePeriods = [
       { draftKey: 'a', weekdays: [], start: '00:00', end: '12:00', timezone: 'UTC', factors },

@@ -1,16 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/catalog/ai-draft-normalizers'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/catalog/AiVariantListEditor'
-import { ModelPricingEditor } from '@/features/catalog/AiModelPricingEditor'
+import { ModelPricingPlanEditor } from '@/features/catalog/ModelPricingPlanEditor'
 import { ModelCatalogPicker } from '@/features/catalog/AiModelCatalogPicker'
 import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
-import {
-  supportsClaudeMessageLevelEffort,
-  supportsClaudeMidConvoSystemMessages,
-} from '@/features/catalog/claude-model-capabilities'
-import { resolvePromptCacheRetentions } from '@/shared/api/contracts/ai-catalog'
+import { getModelCapabilities } from '@/features/catalog/ai-model-capabilities'
+import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
+import type { ModelCapabilitiesDTO } from '@/shared/api/generated/contracts'
 import {
   ModelAbilityToggles,
   ModelInputModalityField,
@@ -18,7 +16,6 @@ import {
 } from '@/features/catalog/ai-model-form-sections'
 import {
   providerOptionsFor,
-  retargetVariants,
   selectedDefaultVariant,
   variantSelection,
 } from '@/features/catalog/ai-model-form-rules'
@@ -52,9 +49,46 @@ export function ModelForm({
   const [catalogOpen, setCatalogOpen] = useState(false)
   const variantOptions = variantOptionsFromDraft(draft.variants)
   const provider = providerOptionsFor(providers, draft, mode, t('ai.catalog.form.unavailable'))
-  const promptCacheRetentions = resolvePromptCacheRetentions(
-    providers.find((item) => item.name === draft.providerName),
-  )
+  const [modelCapabilities, setModelCapabilities] = useState<ModelCapabilitiesDTO | null>(null)
+  const [capabilitiesLoading, setCapabilitiesLoading] = useState(false)
+  const [capabilitiesError, setCapabilitiesError] = useState<string | undefined>()
+  const draftRef = useRef(draft)
+  const onChangeRef = useRef(onChange)
+  draftRef.current = draft
+  onChangeRef.current = onChange
+
+  useEffect(() => {
+    const { providerName, modelId } = draftRef.current
+    if (!providerName.trim() || !modelId.trim()) {
+      setModelCapabilities(null)
+      setCapabilitiesLoading(false)
+      setCapabilitiesError(undefined)
+      return
+    }
+    const controller = new AbortController()
+    setModelCapabilities(null)
+    setCapabilitiesLoading(true)
+    setCapabilitiesError(undefined)
+    void getModelCapabilities(providerName, modelId, controller.signal).then((capabilities) => {
+      if (controller.signal.aborted) return
+      setModelCapabilities(capabilities)
+      const defaultRetention = capabilities.defaultPromptCacheRetention
+      if (mode === 'create' && defaultRetention) {
+        const current = draftRef.current
+        const variants = current.variants.map((variant) => variant.promptCacheRetention === ''
+          ? { ...variant, promptCacheRetention: defaultRetention }
+          : variant)
+        if (variants.some((variant, index) => variant !== current.variants[index])) {
+          onChangeRef.current({ ...current, variants })
+        }
+      }
+    }).catch((error: unknown) => {
+      if (!controller.signal.aborted) setCapabilitiesError(toUserFacingErrorMessage(error))
+    }).finally(() => {
+      if (!controller.signal.aborted) setCapabilitiesLoading(false)
+    })
+    return () => controller.abort()
+  }, [draft.providerName, draft.modelId, mode])
   const defaultVariant = selectedDefaultVariant(draft)
 
   /** 新建时 Name 跟随 Model ID，直到用户单独编辑 Name。 */
@@ -64,11 +98,6 @@ export function ModelForm({
       ...draft,
       modelId,
       name: nameFollows ? modelId : draft.name,
-      midConversationSystemMessages:
-        draft.midConversationSystemMessages ||
-        (mode === 'create' && supportsClaudeMidConvoSystemMessages(modelId)),
-      messageLevelEffort:
-        draft.messageLevelEffort || (mode === 'create' && supportsClaudeMessageLevelEffort(modelId)),
     })
   }
 
@@ -87,7 +116,6 @@ export function ModelForm({
             onChange({
               ...draft,
               providerName,
-              variants: retargetVariants(draft, providers, providerName),
             })
           }
         />
@@ -170,9 +198,9 @@ export function ModelForm({
         onChange={onChange}
       />
 
-      <ModelPricingEditor
-        pricing={draft.pricing}
-        invalid={Boolean(fieldErrors.pricing)}
+      <ModelPricingPlanEditor
+        value={draft.pricing}
+        pricingImportNotice={draft.pricingImportNotice}
         onChange={(pricing) => onChange({ ...draft, pricing })}
       />
       {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
@@ -196,7 +224,9 @@ export function ModelForm({
           variants={draft.variants}
           defaultVariant={defaultVariant}
           reasoning={draft.reasoning}
-          promptCacheRetentions={promptCacheRetentions}
+          capabilities={modelCapabilities}
+          capabilitiesLoading={capabilitiesLoading}
+          capabilitiesError={capabilitiesError}
           onChange={(nextVariants, preferred) =>
             onChange({ ...draft, ...variantSelection(draft, nextVariants, preferred) })
           }

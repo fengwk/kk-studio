@@ -1,9 +1,5 @@
 import type { ModelDraft, VariantDraft } from '@/features/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/catalog/ai-draft-normalizers'
-import {
-  defaultPromptCacheRetention,
-  resolvePromptCacheRetentions,
-} from '@/shared/api/contracts/ai-catalog'
 import type { ModelInputModality, ProviderDTO } from '@/shared/api/generated/contracts'
 
 export interface ProviderOption {
@@ -38,22 +34,6 @@ export function providerOptionsFor(
     ],
     unavailable,
   }
-}
-
-/** Provider 切换后，逐 Variant 把新协议不支持的缓存档位重置为该 Provider 的默认档位。 */
-export function retargetVariants(
-  draft: ModelDraft,
-  providers: ProviderDTO[],
-  providerName: string,
-): VariantDraft[] {
-  const provider = providers.find((item) => item.name === providerName)
-  const supported = resolvePromptCacheRetentions(provider)
-  const fallback = defaultPromptCacheRetention(provider)
-  return draft.variants.map((variant) =>
-    supported.includes(variant.promptCacheRetention)
-      ? variant
-      : { ...variant, promptCacheRetention: fallback },
-  )
 }
 
 /** 变体变化后重新选出默认变体：优先保留调用方偏好，否则沿用原值，再否则取第一项。 */

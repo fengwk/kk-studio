@@ -142,8 +142,8 @@ const SAMPLE_MODEL: ModelDTO = {
     },
     pricing: {
       base: { input: '2.5', output: '10', cacheRead: '1.25', cacheWrite: '2.5', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: []
     },
     defaultVariant: 'standard',
     variants: [

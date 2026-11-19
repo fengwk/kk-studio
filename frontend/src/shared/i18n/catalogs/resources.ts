@@ -118,6 +118,11 @@ export const resourcesCatalog = {
     'en-US': 'Ability',
     'zh-CN': 'Ability',
   },
+  'ai.catalog.card.pricing': { 'en-US': 'Pricing', 'zh-CN': '价格' },
+  'ai.catalog.card.pricingSummary': {
+    'en-US': '{{input}} / 1M input · {{output}} / 1M output · cache write {{cacheWrite}}',
+    'zh-CN': '输入 {{input}} / 百万 tokens · 输出 {{output}} / 百万 tokens · 缓存写入 {{cacheWrite}}',
+  },
   'ai.catalog.card.default': {
     'en-US': 'Default',
     'zh-CN': 'Default',
@@ -347,8 +352,8 @@ export const resourcesCatalog = {
     'zh-CN': '价格未完整支持；保留现有价格。',
   },
   'ai.catalog.catalog.priceSummary': {
-    'en-US': 'in {{input}} / out {{output}} / read {{cacheRead}} / write {{cacheWrite}} · {{overrides}} overrides · {{multipliers}} multipliers',
-    'zh-CN': '输入 {{input}} / 输出 {{output}} / 缓存读 {{cacheRead}} / 缓存写 {{cacheWrite}} · 覆盖 {{overrides}} · 倍率 {{multipliers}}',
+    'en-US': 'Input {{input}} / output {{output}} / cache read {{cacheRead}} / cache write {{cacheWrite}} per 1M tokens · {{ranges}} input bands · {{tiers}} service tiers · {{timePeriods}} time periods',
+    'zh-CN': '输入 {{input}} / 输出 {{output}} / 缓存读取 {{cacheRead}} / 缓存写入 {{cacheWrite}}（每百万 tokens）· {{ranges}} 个输入档位 · {{tiers}} 个服务档 · {{timePeriods}} 个时段',
   },
   'ai.catalog.catalog.issue.ignoredRegionMultiplier': {
     'en-US': 'Region multipliers ignored; estimated costs may be lower than your actual bill',
@@ -968,6 +973,54 @@ export const resourcesCatalog = {
   'ai.catalog.form.reasoningUnknown': { 'en-US': 'Unknown', 'zh-CN': '未知' },
   'ai.catalog.form.reasoningFollowOutput': { 'en-US': 'Follow output price', 'zh-CN': '跟随输出价' },
   'ai.catalog.form.reasoningSeparate': { 'en-US': 'Independent price', 'zh-CN': '独立计价' },
+  'ai.catalog.form.pricingImportUnsupported': {
+    'en-US': 'Directory pricing was not imported. Your existing price is unchanged.',
+    'zh-CN': '目录价格无法等价导入，原有价格已保留。',
+  },
+  'ai.catalog.form.pricingImportExcluded': {
+    'en-US': 'Some directory charges are not included in token prices.',
+    'zh-CN': '部分目录费用不属于 token 单价，未计入。',
+  },
+  'ai.catalog.form.pricingImportNoData': {
+    'en-US': 'The directory has no complete price to import.',
+    'zh-CN': '目录没有可导入的完整价格。',
+  },
+  'ai.catalog.form.viewCatalogPrice': { 'en-US': 'View directory price', 'zh-CN': '查看目录价格' },
+  'ai.catalog.form.pricingCatalogRates': {
+    'en-US': 'Input {{input}} · Output {{output}} · Cache read {{cacheRead}} · Cache write {{cacheWrite}} / 1M tokens',
+    'zh-CN': '输入 {{input}} · 输出 {{output}} · 缓存读取 {{cacheRead}} · 缓存写入 {{cacheWrite}} / 百万 tokens',
+  },
+  'ai.catalog.form.pricingCatalogRange': {
+    'en-US': 'Input length {{min}}–{{max}} · Input {{input}} · Output {{output}} · Cache read {{cacheRead}} · Cache write {{cacheWrite}}',
+    'zh-CN': '输入 {{min}}–{{max}} · 输入价 {{input}} · 输出价 {{output}} · 缓存读取 {{cacheRead}} · 缓存写入 {{cacheWrite}}',
+  },
+  'ai.catalog.form.pricingCatalogTier': {
+    'en-US': '{{tier}} · ×{{factor}}',
+    'zh-CN': '{{tier}} · ×{{factor}}',
+  },
+  'ai.catalog.form.pricingCatalogTime': {
+    'en-US': '{{days}} {{start}}–{{end}} ({{timezone}}) · ×{{factor}}',
+    'zh-CN': '{{days}} {{start}}–{{end}}（{{timezone}}）· ×{{factor}}',
+  },
+  'ai.catalog.form.pricingPreviewRun': { 'en-US': 'Preview prices', 'zh-CN': '试算价格' },
+  'ai.catalog.form.pricingPreviewInvalidTokens': { 'en-US': 'Enter a non-negative whole token count.', 'zh-CN': '请输入非负整数 token 数。' },
+  'ai.catalog.form.pricingPreviewInvalidTime': { 'en-US': 'Enter a valid UTC date and time.', 'zh-CN': '请输入有效的 UTC 日期和时间。' },
+  'ai.catalog.form.pricingPreviewResult': { 'en-US': 'Effective prices', 'zh-CN': '生效价格' },
+  'ai.catalog.form.pricingPreviewActiveFrom': { 'en-US': 'Price effective from {{date}} (UTC)', 'zh-CN': '价格从 {{date}}（UTC）起生效' },
+  'ai.catalog.form.pricingPreviewMatched': { 'en-US': 'Matched rules', 'zh-CN': '命中规则' },
+  'ai.catalog.form.pricingPreviewNoRules': { 'en-US': 'Base prices only', 'zh-CN': '仅基础价格' },
+  'ai.catalog.form.pricingPreviewTimeUtcHint': { 'en-US': 'Enter the request start time in UTC.', 'zh-CN': '按 UTC 输入请求开始时间。' },
+  'ai.catalog.form.pricingPreviewTime': { 'en-US': 'Request start time (UTC)', 'zh-CN': '请求开始时间（UTC）' },
+  'ai.catalog.form.pricingEveryDay': { 'en-US': 'Every day', 'zh-CN': '每天' },
+  'ai.catalog.form.modelCapabilitiesLoading': { 'en-US': 'Loading model options…', 'zh-CN': '正在加载模型选项…' },
+  'ai.catalog.form.modelCapabilitiesUnavailable': { 'en-US': 'Model options are unavailable; existing settings are preserved.', 'zh-CN': '模型选项不可用；保留已有设置。' },
+  'ai.catalog.form.promptCacheRetentionSelect': { 'en-US': 'Select a supported option', 'zh-CN': '选择支持的选项' },
+  'ai.catalog.form.promptCacheOptionTtl': { 'en-US': '{{seconds}} seconds', 'zh-CN': '{{seconds}} 秒' },
+  'ai.catalog.form.promptCacheOptionWriteMultiplier': { 'en-US': 'write ×{{multiplier}}', 'zh-CN': '写入 ×{{multiplier}}' },
+  'ai.catalog.form.automaticCache': { 'en-US': 'Automatic caching', 'zh-CN': '自动缓存' },
+  'ai.catalog.form.automaticCacheEnabled': { 'en-US': 'Enabled by provider', 'zh-CN': '由服务商自动处理' },
+  'ai.catalog.form.automaticCacheDisabled': { 'en-US': 'Not automatic', 'zh-CN': '非自动缓存' },
+  'ai.catalog.form.defaultPromptCacheRetention': { 'en-US': 'Provider default', 'zh-CN': '服务商默认值' },
   'ai.catalog.form.deleteVariant': {
     'en-US': 'Delete Variant',
     'zh-CN': '删除 Variant',

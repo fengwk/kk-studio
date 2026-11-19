@@ -1,6 +1,12 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
+import type { ModelDraft } from '@/features/catalog/ai-console-types'
+import { formatCatalogSupportIssue } from '@/features/catalog/catalog-utils'
+import { previewModelPricing } from '@/features/catalog/ai-model-pricing-preview'
+import { toUserFacingErrorMessage } from '@/shared/lib/user-facing-error'
+import type { ModelPricingRuleDTO, ModelRateSetDTO } from '@/shared/api/generated/contracts'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
 import {
@@ -13,6 +19,7 @@ import {
   type PricingFactorsDraft,
   type PricingRateField,
   splitCrossMidnightPeriod,
+  normalizePricingDraft,
 } from '@/features/catalog/model-pricing-draft'
 import { sanitizeDecimalInput } from '@/shared/lib/numeric-input'
 import './ai-pricing.css'
@@ -46,6 +53,62 @@ function parseTtlMode(value: string): InputRangeDraft['cacheWriteTtlMode'] {
   throw new Error(`Unsupported TTL pricing mode: ${value}`)
 }
 
+function catalogRate(value: string | null | undefined): string {
+  return value == null ? '—' : `$${value}`
+}
+
+function catalogRateSummary(rates: ModelRateSetDTO, t: ReturnType<typeof useI18n>['t']): string {
+  return t('ai.catalog.form.pricingCatalogRates', {
+    input: catalogRate(rates.input),
+    output: catalogRate(rates.output),
+    cacheRead: catalogRate(rates.cacheRead),
+    cacheWrite: catalogRate(rates.cacheWrite),
+  })
+}
+
+function catalogRuleSummary(rule: ModelPricingRuleDTO, t: ReturnType<typeof useI18n>['t']): string {
+  if (rule.type === 'input_token_range') {
+    return t('ai.catalog.form.pricingCatalogRange', {
+      min: rule.minInputTokens ?? 0,
+      max: rule.maxInputTokensExclusive ?? '∞',
+      input: catalogRate(rule.input),
+      output: catalogRate(rule.output),
+      cacheRead: catalogRate(rule.cacheRead),
+      cacheWrite: catalogRate(rule.cacheWrite),
+    })
+  }
+  const factorChanges = [
+    ['inputFactor', 'ai.catalog.form.inputPrice'],
+    ['outputFactor', 'ai.catalog.form.outputPrice'],
+    ['cacheReadFactor', 'ai.catalog.form.cacheReadPrice'],
+    ['cacheWriteFactor', 'ai.catalog.form.cacheWritePrice'],
+    ['reasoningFactor', 'ai.catalog.form.reasoningPrice'],
+  ] as const
+  const extras = factorChanges
+    .filter(([field]) => rule[field] != null && rule[field] !== rule.factor)
+    .map(([field, label]) => `${t(label)} ×${rule[field]}`)
+    .join(' · ')
+  if (rule.type === 'service_tier_multiplier') {
+    return `${t('ai.catalog.form.pricingCatalogTier', {
+      tier: rule.serviceTier ?? '', factor: rule.factor ?? '1',
+    })}${extras ? ` · ${extras}` : ''}`
+  }
+  if (rule.type === 'time_multiplier') {
+    const days = rule.weekdays?.length
+      ? rule.weekdays.map((day) => weekdayLabel(day, t)).join(', ')
+      : t('ai.catalog.form.pricingEveryDay')
+    return `${t('ai.catalog.form.pricingCatalogTime', {
+      days, start: rule.start ?? '', end: rule.end ?? '', timezone: rule.timezone ?? '', factor: rule.factor ?? '1',
+    })}${extras ? ` · ${extras}` : ''}`
+  }
+  return t('ai.catalog.form.pricingUnpriced')
+}
+
+function weekdayLabel(day: number, t: ReturnType<typeof useI18n>['t']): string {
+  const key = WEEKDAYS.find(([value]) => value === day)?.[1]
+  return key ? t(key) : String(day)
+}
+
 function timeMinutes(value: string): number | null {
   const match = /^(\d{2}):(\d{2})$/.exec(value)
   if (!match) return null
@@ -63,17 +126,76 @@ const blankFactors = (): PricingFactorsDraft => ({
 export function ModelPricingPlanEditor({
   value,
   onChange,
+  pricingImportNotice = null,
   includeChanges = true,
+  includePreview = true,
   headingId = 'model-pricing-heading',
 }: {
   value: ModelPricingDraft
   onChange: (value: ModelPricingDraft) => void
+  pricingImportNotice?: ModelDraft['pricingImportNotice']
   includeChanges?: boolean
+  includePreview?: boolean
   headingId?: string
 }) {
   const { t } = useI18n()
   const conflicts = useMemo(() => findPricingConflicts(value.definition), [value.definition])
   const conflictKeys = new Set(conflicts.flatMap((conflict) => conflict.keys))
+  const [inputTokens, setInputTokens] = useState('1000')
+  const [requestedAt, setRequestedAt] = useState('')
+  const [serviceTier, setServiceTier] = useState('')
+  const [previewBusy, setPreviewBusy] = useState(false)
+  const [previewResult, setPreviewResult] = useState<{
+    signature: string
+    value: Awaited<ReturnType<typeof previewModelPricing>>
+  } | null>(null)
+  const [previewError, setPreviewError] = useState<{ signature: string; message: string } | null>(null)
+  const previewController = useRef<AbortController | null>(null)
+  const previewSignature = JSON.stringify([value, inputTokens, requestedAt, serviceTier])
+  const visiblePreview = previewResult?.signature === previewSignature ? previewResult.value : null
+  const visiblePreviewError = previewError?.signature === previewSignature ? previewError.message : null
+
+  useEffect(() => () => previewController.current?.abort(), [])
+
+  async function runPricingPreview() {
+    const normalizedTokens = inputTokens.trim()
+    if (!/^(?:0|[1-9]\d*)$/.test(normalizedTokens) || !Number.isSafeInteger(Number(normalizedTokens))) {
+      setPreviewError({ signature: previewSignature, message: t('ai.catalog.form.pricingPreviewInvalidTokens') })
+      return
+    }
+    const requestedAtMillis = requestedAt ? Date.parse(`${requestedAt}Z`) : undefined
+    if (requestedAt && !Number.isSafeInteger(requestedAtMillis)) {
+      setPreviewError({ signature: previewSignature, message: t('ai.catalog.form.pricingPreviewInvalidTime') })
+      return
+    }
+    let pricing
+    try {
+      pricing = normalizePricingDraft(value)
+    } catch (error) {
+      setPreviewError({ signature: previewSignature, message: toUserFacingErrorMessage(error) })
+      return
+    }
+    previewController.current?.abort()
+    const controller = new AbortController()
+    previewController.current = controller
+    setPreviewBusy(true)
+    setPreviewError(null)
+    try {
+      const response = await previewModelPricing({
+        pricing: pricing ?? null,
+        inputTokens: Number(normalizedTokens),
+        ...(requestedAtMillis === undefined ? {} : { requestedAt: requestedAtMillis }),
+        ...(serviceTier.trim() ? { serviceTier: serviceTier.trim() } : {}),
+      }, controller.signal)
+      if (!controller.signal.aborted) setPreviewResult({ signature: previewSignature, value: response })
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setPreviewError({ signature: previewSignature, message: toUserFacingErrorMessage(error) })
+      }
+    } finally {
+      if (!controller.signal.aborted) setPreviewBusy(false)
+    }
+  }
 
   function updateRangeReasoning(rangeKey: string, mode: string) {
     if (mode !== 'inherit' && mode !== 'follow' && mode !== 'separate') return
@@ -138,6 +260,41 @@ export function ModelPricingPlanEditor({
         <span className="inline-hint">{t('ai.catalog.form.priceSuffix')}</span>
       </div>
       <p className="inline-hint">{t('ai.catalog.form.priceHint')}</p>
+      {pricingImportNotice ? (
+        <div className={`pricing-import-notice is-${pricingImportNotice.kind}`} role="status">
+          <p>{t(pricingImportNotice.kind === 'unsupported'
+            ? 'ai.catalog.form.pricingImportUnsupported'
+            : 'ai.catalog.form.pricingImportExcluded')}</p>
+          {pricingImportNotice.supportIssues.length > 0 ? (
+            <ul>
+              {pricingImportNotice.supportIssues.map((issue) => (
+                <li key={issue}>{formatCatalogSupportIssue(issue, t)}</li>
+              ))}
+            </ul>
+          ) : pricingImportNotice.kind === 'unsupported' ? (
+            <p>{t('ai.catalog.form.pricingImportNoData')}</p>
+          ) : null}
+          <details>
+            <summary>{t('ai.catalog.form.viewCatalogPrice')}</summary>
+            {pricingImportNotice.pricing ? (
+              <>
+                <p>{catalogRateSummary(pricingImportNotice.pricing.base, t)}</p>
+                {pricingImportNotice.pricing.base.reasoning != null ? (
+                  <p>{t('ai.catalog.form.reasoningPrice')}: {pricingImportNotice.pricing.base.reasoning ?? t('ai.catalog.form.reasoningFollowOutput')}</p>
+                ) : null}
+                {Object.entries(pricingImportNotice.pricing.base.cacheWriteByTtl).map(([seconds, rate]) => (
+                  <p key={seconds}>{seconds} s: {catalogRate(rate)}</p>
+                ))}
+                <ul>
+                  {pricingImportNotice.pricing.rules.map((rule, index) => (
+                    <li key={`${rule.type}-${index}`}>{catalogRuleSummary(rule, t)}</li>
+                  ))}
+                </ul>
+              </>
+            ) : <p>{t('ai.catalog.form.pricingImportNoData')}</p>}
+          </details>
+        </div>
+      ) : null}
 
       {section(t('ai.catalog.form.pricingBase'), (
         <>
@@ -369,7 +526,50 @@ export function ModelPricingPlanEditor({
           })}>{t('ai.catalog.form.addPricingChange')}</button>
         </>
       )) : null}
-      <p className="inline-hint" role="note">{t('ai.catalog.form.pricingPreview')}: {t('ai.catalog.form.pricingPreviewUnknown')}</p>
+      {includePreview ? (
+        <section className="pricing-plan-section" aria-labelledby={`${headingId}-preview`}>
+          <h4 id={`${headingId}-preview`}>{t('ai.catalog.form.pricingPreview')}</h4>
+          <p className="inline-hint">{t('ai.catalog.form.pricingPreviewTimeUtcHint')}</p>
+          <div className="form-grid-2">
+            <label className="form-group">
+              <span>{t('ai.catalog.form.pricingInputTokens')}</span>
+              <TextInput inputMode="numeric" aria-label={t('ai.catalog.form.pricingInputTokens')} value={inputTokens}
+                onChange={(event) => setInputTokens(event.target.value.replace(/\D/g, ''))} />
+            </label>
+            <label className="form-group">
+              <span>{t('ai.catalog.form.pricingPreviewTime')}</span>
+              <TextInput type="datetime-local" aria-label={t('ai.catalog.form.pricingPreviewTime')} value={requestedAt}
+                onChange={(event) => setRequestedAt(event.target.value)} />
+            </label>
+            <label className="form-group">
+              <span>{t('ai.catalog.form.pricingServiceTier')}</span>
+              <TextInput aria-label={t('ai.catalog.form.pricingServiceTier')} value={serviceTier}
+                onChange={(event) => setServiceTier(event.target.value)} />
+            </label>
+          </div>
+          <Button variant="ghost" loading={previewBusy} onClick={() => void runPricingPreview()}>
+            {t('ai.catalog.form.pricingPreviewRun')}
+          </Button>
+          {visiblePreviewError ? <p className="field-error" role="alert">{visiblePreviewError}</p> : null}
+          {visiblePreview ? (
+            <div className="pricing-preview-result" role="status">
+              {visiblePreview.rates ? (
+                <>
+                  <strong>{t('ai.catalog.form.pricingPreviewResult')}</strong>
+                  <p>{catalogRateSummary(visiblePreview.rates, t)}</p>
+                  {visiblePreview.activeFrom ? <p>{t('ai.catalog.form.pricingPreviewActiveFrom', { date: visiblePreview.activeFrom })}</p> : null}
+                  <p>{t('ai.catalog.form.pricingPreviewMatched')}</p>
+                  {visiblePreview.matchedRules.length ? (
+                    <ul>{visiblePreview.matchedRules.map((rule, index) => (
+                      <li key={`${rule.type}-${index}`}>{catalogRuleSummary(rule, t)}</li>
+                    ))}</ul>
+                  ) : <p>{t('ai.catalog.form.pricingPreviewNoRules')}</p>}
+                </>
+              ) : <p>{t('ai.catalog.form.pricingPreviewUnknown')}</p>}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
     </section>
   )
 }

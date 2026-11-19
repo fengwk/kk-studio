@@ -29,8 +29,10 @@ const EMPTY_AGENT_DRAFT = {
 }
 
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
+  const empty = emptyModelDraft()
   return {
-    ...emptyModelDraft(),
+    ...empty,
+    variants: empty.variants.map((variant) => ({ ...variant, promptCacheRetention: 'NONE' })),
     providerName: 'provider-1',
     name: 'model',
     modelId: 'wire-model',
@@ -69,11 +71,17 @@ function provider(overrides: Partial<ProviderDraft> = {}): ProviderDraft {
   }
 }
 
+function validVariant(overrides: Parameters<typeof newVariantDraft>[0] = {}) {
+  return newVariantDraft({ promptCacheRetention: 'NONE', ...overrides })
+}
+
 function model(overrides: Partial<ModelDraft> = {}): ModelDraft {
+  const empty = emptyModelDraft({ name: 'minimax' })
   return {
-    ...emptyModelDraft({ name: 'minimax' }),
+    ...empty,
     name: 'model',
     modelId: 'wire-model',
+    variants: empty.variants.map((variant) => ({ ...variant, promptCacheRetention: 'NONE' })),
     ...overrides,
   }
 }
@@ -156,12 +164,12 @@ describe('ai-resource-form-validation', () => {
         modelDraft: draft({
           defaultVariant: 'stale',
           variants: [
-            newVariantDraft({
+            validVariant({
               id: 'fast',
               reasoningEffort: '',
               protocolOptionsJson: '',
             }),
-            newVariantDraft({
+            validVariant({
               id: 'creative',
               reasoningEffort: '',
               protocolOptionsJson: '',
@@ -185,7 +193,7 @@ describe('ai-resource-form-validation', () => {
         modelDraft: draft({
           reasoning: true,
           variants: [
-            newVariantDraft({
+            validVariant({
               id: 'medium',
               reasoningEffort: '',
               protocolOptionsJson: '',
@@ -204,7 +212,7 @@ describe('ai-resource-form-validation', () => {
   it('does not mutate the model draft while validating', () => {
     const modelDraft = draft({
       reasoning: true,
-      variants: [newVariantDraft({ id: 'medium', reasoningEffort: '', protocolOptionsJson: '' })],
+      variants: [validVariant({ id: 'medium', reasoningEffort: '', protocolOptionsJson: '' })],
     })
     const snapshot = JSON.stringify(modelDraft)
     const result = validateResourceDraft(
@@ -253,7 +261,7 @@ describe('ai-resource-form-validation', () => {
           providerDraft: providerDraft(),
           modelDraft: draft({
             variants: [
-              newVariantDraft({
+              validVariant({
                 id: 'medium',
                 reasoningEffort: '',
                 protocolOptionsJson: '{\n  "temperature": 0.7\n}',
@@ -277,7 +285,7 @@ describe('ai-resource-form-validation', () => {
           modelDraft: draft({
             defaultVariant: 'fast',
             variants: [
-              newVariantDraft({
+              validVariant({
                 id: 'fast',
                 reasoningEffort: '',
                 protocolOptionsJson: '{ not valid json }',
@@ -303,7 +311,7 @@ describe('ai-resource-form-validation', () => {
           modelDraft: draft({
             defaultVariant: 'fast',
             variants: [
-              newVariantDraft({
+              validVariant({
                 id: 'fast',
                 reasoningEffort: '',
                 protocolOptionsJson: '[1, 2, 3]',
@@ -330,7 +338,7 @@ describe('ai-resource-form-validation', () => {
             reasoning: false,
             defaultVariant: 'standard',
             variants: [
-              newVariantDraft({
+              validVariant({
                 id: 'standard',
                 reasoningEffort: '',
                 protocolOptionsJson: 'null',
@@ -614,14 +622,19 @@ describe('ai-resource-form-validation', () => {
       expect(result.fields.defaultVariant).toBe('请至少添加一个 Variant，并填写 ID')
     })
 
-    it('rejects an invalid base input rate', () => {
-      const base = model().pricing.base
+    it('rejects invalid base rates without defaulting an unpriced model to zero', () => {
+      const invalid = model()
+      invalid.pricing.definition.base.input = '-1'
       const result = validate(
         { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
-        { modelDraft: model({ pricing: { ...model().pricing, base: { ...base, input: '' } } }) },
+        { modelDraft: invalid },
       )
       expect(result.ok).toBe(false)
-      expect(result.fields.pricing).toBe('请检查价格：填写 0 或正数即可')
+      expect(result.fields.pricing).toBeTruthy()
+      expect(validate(
+        { kind: 'model', mode: 'create', resourceKind: 'MODEL' },
+        { modelDraft: model() },
+      ).ok).toBe(true)
     })
 
     it.each([
@@ -630,7 +643,10 @@ describe('ai-resource-form-validation', () => {
       [model({ maxOutputTokens: '999999' }), 'maxOutputTokens'],
       [model({ modelId: '   ' }), 'modelId'],
       [model({ reasoning: true, variants: [{ ...model().variants[0]!, reasoningEffort: 'a'.repeat(65) }] }), 'variants'],
-      [model({ pricing: { ...model().pricing, base: { ...model().pricing.base, input: '-1' } } }), 'pricing'],
+      [model({ pricing: {
+        ...model().pricing,
+        definition: { ...model().pricing.definition, base: { ...model().pricing.definition.base, input: '-1' } },
+      } }), 'pricing'],
     ] as Array<[ModelDraft, string]>)('maps invalid model body %# to %s', (modelDraft, field) => {
       const result = validate({ kind: 'model', mode: 'create', resourceKind: 'MODEL' }, { modelDraft })
       expect(result.ok).toBe(false)

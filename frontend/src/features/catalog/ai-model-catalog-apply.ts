@@ -1,13 +1,6 @@
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
-import type {
-  ModelCatalogCandidateDTO,
-  PromptCacheRetention,
-} from '@/shared/api/generated/contracts'
-import { clonePricing } from '@/features/catalog/ai-model-pricing-codec'
-import {
-  supportsClaudeMessageLevelEffort,
-  supportsClaudeMidConvoSystemMessages,
-} from '@/features/catalog/claude-model-capabilities'
+import type { ModelCatalogCandidateDTO } from '@/shared/api/generated/contracts'
+import { clonePricingDraft } from '@/features/catalog/model-pricing-draft'
 
 /**
  * 目录候选只写入可确认的参数：
@@ -20,7 +13,7 @@ export function applyCatalogCandidate(
   draft: ModelDraft,
   candidate: ModelCatalogCandidateDTO,
 ): ModelDraft {
-  const next: ModelDraft = { ...draft }
+  const next: ModelDraft = { ...draft, pricingImportNotice: null }
 
   if (candidate.limit?.context != null) {
     next.contextWindow = String(candidate.limit.context)
@@ -37,17 +30,20 @@ export function applyCatalogCandidate(
   if (candidate.abilities?.reasoning != null) {
     next.reasoning = candidate.abilities.reasoning
   }
-  if (supportsClaudeMidConvoSystemMessages(candidate.modelId)) {
-    next.midConversationSystemMessages = true
-  }
-  if (supportsClaudeMessageLevelEffort(candidate.modelId)) {
-    next.messageLevelEffort = true
-  }
   if (candidate.abilities?.inputModalities?.length) {
     next.inputModalities = [...candidate.abilities.inputModalities]
   }
   if (candidate.pricingSupported && candidate.pricing) {
-    next.pricing = clonePricing(candidate.pricing)
+    next.pricing = clonePricingDraft(candidate.pricing)
+    next.pricingImportNotice = candidate.supportIssues.length > 0
+      ? { kind: 'excluded', supportIssues: [...candidate.supportIssues], pricing: candidate.pricing }
+      : null
+  } else if (!candidate.pricingSupported) {
+    next.pricingImportNotice = {
+      kind: 'unsupported',
+      supportIssues: [...candidate.supportIssues],
+      pricing: candidate.pricing ?? null,
+    }
   }
 
   const variants = candidate.variants ?? []
@@ -61,8 +57,7 @@ export function applyCatalogCandidate(
         draft.variants.find((v) => v.id.trim() === variant.id.trim()) ??
         draft.variants[index] ??
         draft.variants[0]
-      const promptCacheRetention: PromptCacheRetention =
-        existing?.promptCacheRetention ?? variant.promptCacheRetention ?? 'NONE'
+      const promptCacheRetention = existing?.promptCacheRetention || ''
       return {
         draftId: `catalog-${candidate.id}-${variant.id}`,
         id: variant.id,

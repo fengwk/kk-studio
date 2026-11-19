@@ -1,7 +1,7 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { useState } from 'react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentDraft, ModelDraft, ProviderDraft } from '@/features/catalog/ai-console-types'
 import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
@@ -21,6 +21,8 @@ async function selectFormOption(
 ) {
   await chooseSelectOption(user, label, option)
 }
+
+afterEach(() => vi.unstubAllGlobals())
 
 describe('AiResourceForms', () => {
   it('edits provider fields with structured inputs', async () => {
@@ -54,46 +56,41 @@ describe('AiResourceForms', () => {
     expect(screen.getByText('留空会以无 Authorization 方式请求 OpenAI-compatible 端点。')).toBeInTheDocument()
   })
 
-  it('resets unsupported variant cache retentions when the Provider changes', async () => {
+  it('uses backend cache options while preserving a stored retention until the user changes it', async () => {
+    setLocale('en-US')
     const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      promptCacheOptions: [
+        { retention: 'NONE' },
+        { retention: 'SHORT', ttlSeconds: '3600', writeMultiplier: 2 },
+      ],
+      defaultPromptCacheRetention: 'SHORT',
+      automaticCache: true,
+    }), { headers: { 'content-type': 'application/json' } })))
+
     let currentDraft: ModelDraft = {
-      ...emptyModelDraft({ name: 'no-cache', promptCacheRetentions: ['NONE'] }),
+      ...emptyModelDraft({ name: 'no-cache' }),
       providerName: 'no-cache',
+      modelId: 'fixture-model',
       variants: [
         { draftId: 'v1', id: 'default', reasoningEffort: '', protocolOptionsJson: '', promptCacheRetention: 'LONG' },
         { draftId: 'v2', id: 'fast', reasoningEffort: '', protocolOptionsJson: '', promptCacheRetention: 'NONE' },
       ],
     }
-    const providers: ProviderDTO[] = [
-      {
-        name: 'no-cache',
-        description: null,
-        providerType: 'openai',
-        promptCacheRetentions: ['NONE'],
-        baseUrl: null,
-        credential: { configured: true },
-        modelCallTimeoutMillis: '1800000',
-        modelCallIdleTimeoutMillis: '120000',
-        version: '1',
-        createdAt: 1781920800,
-        updatedAt: 1781920800,
-        modelHttpRetryStatusCodes: null,
-      },
-      {
-        name: 'short-cache',
-        description: null,
-        providerType: 'openai',
-        promptCacheRetentions: ['NONE', 'SHORT'],
-        baseUrl: null,
-        credential: { configured: true },
-        modelCallTimeoutMillis: '1800000',
-        modelCallIdleTimeoutMillis: '120000',
-        version: '1',
-        createdAt: 1781920800,
-        updatedAt: 1781920800,
-        modelHttpRetryStatusCodes: null,
-      },
-    ]
+    const providers: ProviderDTO[] = [{
+      name: 'no-cache',
+      description: null,
+      providerType: 'openai',
+      promptCacheRetentions: ['NONE'],
+      baseUrl: null,
+      credential: { configured: true },
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
+      version: '1',
+      createdAt: 1781920800,
+      updatedAt: 1781920800,
+      modelHttpRetryStatusCodes: null,
+    }]
 
     function RetentionHarness() {
       const [draft, setDraft] = useState<ModelDraft>(currentDraft)
@@ -111,18 +108,14 @@ describe('AiResourceForms', () => {
     }
 
     render(<RetentionHarness />)
+    const retention = screen.getByLabelText('Prompt Cache Retention 1')
+    await waitFor(() => expect(screen.getByText(/Automatic caching: Enabled by provider/)).toBeInTheDocument())
+    expect(retention).toHaveAttribute('data-value', 'LONG')
 
-    // 新 Provider 支持 SHORT：逐 Variant 把不支持的 LONG 重置为 SHORT，已支持的保持。
-    await selectFormOption(user, 'Provider', 'short-cache')
+    await user.click(retention)
+    await user.click(screen.getByRole('option', { name: 'SHORT · 3600 seconds · write ×2' }))
     expect(currentDraft.variants.map((variant) => variant.promptCacheRetention)).toEqual([
       'SHORT',
-      'NONE',
-    ])
-
-    // 新 Provider 不支持 SHORT：不支持的档位重置为 NONE。
-    await selectFormOption(user, 'Provider', 'no-cache')
-    expect(currentDraft.variants.map((variant) => variant.promptCacheRetention)).toEqual([
-      'NONE',
       'NONE',
     ])
   })
@@ -312,7 +305,7 @@ describe('AiResourceForms', () => {
     expect(toEditableProviderUpdate(latest)).toMatchObject({ credential: { operation: 'KEEP' } })
   })
 
-  it('prefills mid-conversation system messages only for supported Claude IDs on create', async () => {
+  it('does not infer model abilities from provider model IDs', async () => {
     const user = userEvent.setup()
     render(<ModelFormHarness />)
     const modelId = screen.getByLabelText('Model ID')
@@ -320,12 +313,8 @@ describe('AiResourceForms', () => {
       name: /Mid-conversation system messages|对话中的系统消息更新/,
     })
 
-    await user.type(modelId, 'claude-sonnet-4-5')
-    expect(capability).not.toBeChecked()
-
-    await user.clear(modelId)
     await user.type(modelId, 'anthropic/claude-opus-4.8')
-    expect(capability).toBeChecked()
+    expect(capability).not.toBeChecked()
   })
 
   it('edits the new model abilities, pricing, variants, and wire modelId', async () => {
@@ -728,7 +717,6 @@ describe('AiResourceForms', () => {
     expect(screen.getByText('请选择 Provider')).toBeInTheDocument()
     expect(screen.getByText('请填写 Model 名称')).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'Name' })).toHaveAttribute('aria-invalid', 'true')
-    expect(screen.getByLabelText('Input USD per million tokens')).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getByText('上下文窗口无效')).toBeInTheDocument()
     expect(screen.getByText('最大输出长度无效')).toBeInTheDocument()
     expect(screen.getByText('请至少选择一种输入类型')).toBeInTheDocument()
@@ -894,8 +882,8 @@ function AgentFormHarness() {
             abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
             pricing: {
       base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: []
     },
             defaultVariant: 'default',
             variants: [{ id: 'default', promptCacheRetention: 'NONE' }],
@@ -915,8 +903,8 @@ function AgentFormHarness() {
             abilities: { tools: false, reasoning: true, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
             pricing: {
       base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: []
     },
             defaultVariant: 'creative',
             variants: [

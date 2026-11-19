@@ -42,8 +42,8 @@ const FIXTURE_MAIN_MODEL: ModelDTO = {
         cacheWriteByTtl: {},
         reasoning: null,
       },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: [],
     },
     defaultVariant: 'standard',
     variants: [{ id: 'standard', reasoningEffort: 'HIGH', promptCacheRetention: 'SHORT' }, { id: 'fast', promptCacheRetention: 'SHORT' }],
@@ -71,8 +71,8 @@ const FIXTURE_BACKUP_MODEL: ModelDTO = {
         cacheWriteByTtl: {},
         reasoning: null,
       },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: [],
     },
     defaultVariant: 'default',
     variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
@@ -111,6 +111,30 @@ export const FIXTURE_MODELS: ModelDTO[] = [
   FIXTURE_GROUP,
 ]
 
+export const FIXTURE_CREATED_MODEL: ModelDTO = {
+  name: 'new-model',
+  type: 'MODEL',
+  description: null,
+  providerName: 'acme',
+  modelId: 'acme-new-model',
+  config: {
+    limit: { context: 128000, output: 8192 },
+    abilities: {
+      tools: true,
+      reasoning: false,
+      midConversationSystemMessages: false,
+      messageLevelEffort: false,
+      inputModalities: ['TEXT'],
+    },
+    pricing: null,
+    defaultVariant: 'medium',
+    variants: [{ id: 'medium', promptCacheRetention: 'SHORT' }],
+  },
+  version: '2',
+  createdAt: 1792454400,
+  updatedAt: 1792454400,
+}
+
 const FIXTURE_CANDIDATES: ModelCatalogCandidateDTO[] = [
   {
     id: 'models_dev_v2/acme/catalog-a',
@@ -128,19 +152,16 @@ const FIXTURE_CANDIDATES: ModelCatalogCandidateDTO[] = [
         cacheWriteByTtl: { '3600': '7.5' },
         reasoning: '9',
       },
-      overrides: [
+      rules: [
         {
-          id: 'ov-ctx',
-          when: {
-            context: { gt: 200000 },
-            time: { start: '00:00', end: '24:00', timezone: 'UTC' },
-          },
-          rates: { input: '6', output: '30', cacheWriteByTtl: {} },
+          type: 'input_token_range', minInputTokens: 200001, input: '6', output: '30', cacheWriteByTtl: {},
         },
+        {
+          type: 'service_tier_multiplier', serviceTier: 'priority', factor: '1', inputFactor: '1.5', outputFactor: '1.2',
+        },
+        { type: 'time_multiplier', start: '00:00', end: '24:00', timezone: 'UTC', factor: '0.8' },
       ],
-      multipliers: [
-        { id: 'mx-tier', when: { serviceTier: ['priority'] }, factors: { input: '1.5', output: '1.2' } },
-      ],
+      changes: [],
     },
     variants: [{ id: 'turbo', promptCacheRetention: 'NONE' }, { id: 'thinking', reasoningEffort: 'HIGH', promptCacheRetention: 'NONE' }],
     defaultVariant: 'turbo',

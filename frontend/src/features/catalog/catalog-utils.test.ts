@@ -50,8 +50,8 @@ function fullConfig(): ModelConfigDTO {
     abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
     pricing: {
       base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: []
     },
     defaultVariant: 'default',
     variants: [{ id: 'default', promptCacheRetention: 'NONE' }],

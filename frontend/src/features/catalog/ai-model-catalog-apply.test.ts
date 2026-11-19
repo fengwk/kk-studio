@@ -2,12 +2,28 @@ import { describe, expect, it } from 'vitest'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
-import type { ModelCatalogCandidateDTO } from '@/shared/api/generated/contracts'
+import { emptyModelPricingDraft, normalizePricingDraft } from '@/features/catalog/model-pricing-draft'
+import type { ModelCatalogCandidateDTO, ModelPricingDTO } from '@/shared/api/generated/contracts'
+
+function pricing(input = '9'): ModelPricingDTO {
+  return {
+    base: {
+      input,
+      output: '9',
+      cacheRead: '9',
+      cacheWrite: '9',
+      cacheWriteByTtl: {},
+      reasoning: null,
+    },
+    rules: [],
+    changes: [],
+  }
+}
 
 function draft(): ModelDraft {
+  const base = emptyModelDraft({ name: 'provider' })
   return {
-    ...emptyModelDraft(),
-    providerName: 'provider',
+    ...base,
     name: 'manual-name',
     modelId: 'manual-wire-id',
     description: 'manual description',
@@ -17,20 +33,14 @@ function draft(): ModelDraft {
     reasoning: true,
     inputModalities: ['TEXT'],
     pricing: {
-      base: { input: '9', output: '9', cacheRead: '9', cacheWrite: '9', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      ...emptyModelPricingDraft(),
+      definition: {
+        ...emptyModelPricingDraft().definition,
+        base: { input: '9', output: '9', cacheRead: '9', cacheWrite: '9', cacheWriteByTtl: {}, reasoning: null },
+      },
     },
     defaultVariant: 'manual',
-    variants: [
-      {
-        draftId: 'manual-1',
-        id: 'manual',
-        reasoningEffort: '',
-        protocolOptionsJson: '',
-        promptCacheRetention: 'SHORT',
-      },
-    ],
+    variants: [{ ...base.variants[0]!, id: 'manual', promptCacheRetention: 'SHORT' }],
   }
 }
 
@@ -48,7 +58,7 @@ function candidate(overrides: Partial<ModelCatalogCandidateDTO> = {}): ModelCata
 }
 
 describe('applyCatalogCandidate', () => {
-  it('writes only confirmable limit and ability facts, including explicit false', () => {
+  it('writes only confirmed limits and abilities, including explicit false', () => {
     const next = applyCatalogCandidate(draft(), candidate({
       limit: { context: 200000 },
       abilities: { tools: false, reasoning: true },
@@ -66,112 +76,78 @@ describe('applyCatalogCandidate', () => {
     })
   })
 
-  it('prefills Claude capabilities only for supported model families', () => {
+  it('does not infer model abilities from model IDs', () => {
     const before = draft()
     const next = applyCatalogCandidate(before, candidate({ modelId: 'anthropic/claude-sonnet-5.5-20260723' }))
-
-    expect(next.midConversationSystemMessages).toBe(true)
-    expect(next.messageLevelEffort).toBe(true)
-    expect(before.midConversationSystemMessages).toBe(false)
-    expect(before.messageLevelEffort).toBe(false)
-
-    const unsupported = applyCatalogCandidate(before, candidate({ modelId: 'claude-sonnet-4-5' }))
-    expect(unsupported.midConversationSystemMessages).toBe(false)
-    expect(unsupported.messageLevelEffort).toBe(false)
+    expect(next.midConversationSystemMessages).toBe(false)
+    expect(next.messageLevelEffort).toBe(false)
   })
 
-  it('does not replace pricing unless it is supported and complete', () => {
+  it('preserves the existing complete price when directory pricing cannot be imported and retains an explanation', () => {
     const before = draft()
+    const directoryPricing = pricing('1')
     const unsupported = applyCatalogCandidate(before, candidate({
       pricingSupported: false,
-      pricing: {
-        base: { input: '1', output: '2', cacheRead: '3', cacheWrite: '4', cacheWriteByTtl: {}, reasoning: null },
-        overrides: [],
-        multipliers: [],
-      },
+      supportIssues: ['priority tier has a distinct price table'],
+      pricing: directoryPricing,
     }))
     expect(unsupported.pricing).toEqual(before.pricing)
-
-    const supported = applyCatalogCandidate(before, candidate({
-      pricingSupported: true,
-      pricing: {
-        base: { input: '1.1', output: '2.2', cacheRead: '0.3', cacheWrite: '0.4', cacheWriteByTtl: {}, reasoning: '0' },
-        overrides: [],
-        multipliers: [],
-      },
-    }))
-    expect(supported.pricing.base).toMatchObject({ input: '1.1', output: '2.2', reasoning: '0' })
-    expect(supported.pricing).not.toBe(before.pricing)
+    expect(unsupported.pricingImportNotice).toEqual({
+      kind: 'unsupported',
+      supportIssues: ['priority tier has a distinct price table'],
+      pricing: directoryPricing,
+    })
+    expect(before.pricing.definition.base.input).toBe('9')
   })
 
-  it('applies pricing from candidates with support warnings when pricing is supported', () => {
+  it('imports a supported pricing plan as a local draft and reports excluded costs separately', () => {
+    const directoryPricing = pricing('1.25')
     const before = draft()
-    const warned = applyCatalogCandidate(before, candidate({
+    const applied = applyCatalogCandidate(before, candidate({
       pricingSupported: true,
-      supportIssues: [
-        'ignored region multiplier',
-        'non-token cost is not included: web_search',
-      ],
-      pricing: {
-        base: { input: '1.25', output: '2.5', cacheRead: '0.1', cacheWrite: '0.2', cacheWriteByTtl: {}, reasoning: null },
-        overrides: [],
-        multipliers: [],
-      },
+      supportIssues: ['ignored region multiplier', 'non-token cost is not included: web_search'],
+      pricing: directoryPricing,
     }))
-    expect(warned.pricing.base.input).toBe('1.25')
-    expect(warned.pricing.base.output).toBe('2.5')
-    expect(warned.pricing).not.toBe(before.pricing)
+    expect(normalizePricingDraft(applied.pricing)?.base.input).toBe('1.25')
+    expect(applied.pricingImportNotice).toMatchObject({
+      kind: 'excluded',
+      supportIssues: ['ignored region multiplier', 'non-token cost is not included: web_search'],
+    })
+    expect(before.pricing.definition.base.input).toBe('9')
   })
 
-  it('keeps the existing variants without a complete, mappable default variant', () => {
+  it('keeps existing price if no candidate price is available', () => {
     const before = draft()
-    const noDefault = applyCatalogCandidate(before, candidate({
-      variants: [
-        { id: 'fast', promptCacheRetention: 'NONE' },
-        { id: 'slow', promptCacheRetention: 'NONE' },
-      ],
-    }))
-    expect(noDefault.variants).toEqual(before.variants)
-    expect(noDefault.defaultVariant).toBe('manual')
-
-    const unmappable = applyCatalogCandidate(before, candidate({
-      defaultVariant: 'fast',
-      variants: [
-        { id: 'fast', promptCacheRetention: 'NONE' },
-        { id: ' ', promptCacheRetention: 'NONE' },
-      ],
-    }))
-    expect(unmappable.variants).toEqual(before.variants)
+    const applied = applyCatalogCandidate(before, candidate({ pricingSupported: true, pricing: null }))
+    expect(applied.pricing).toEqual(before.pricing)
+    expect(applied.pricingImportNotice).toBeNull()
   })
 
-  it('replaces variants only when every id maps and the default exists and preserves existing promptCacheRetention', () => {
-    const next = applyCatalogCandidate(draft(), candidate({
+  it('keeps existing Variants without a complete catalog mapping and preserves cache selections when mapping', () => {
+    const before = draft()
+    const incomplete = applyCatalogCandidate(before, candidate({
+      variants: [{ id: 'fast', promptCacheRetention: 'NONE' }, { id: 'slow', promptCacheRetention: 'NONE' }],
+    }))
+    expect(incomplete.variants).toEqual(before.variants)
+
+    const mapped = applyCatalogCandidate(before, candidate({
       variants: [
         { id: 'fast', promptCacheRetention: 'NONE', reasoningEffort: 'low' },
         { id: 'slow', promptCacheRetention: 'NONE' },
       ],
       defaultVariant: 'fast',
     }))
-    expect(next.defaultVariant).toBe('fast')
-    expect(next.variants.map((variant) => [variant.id, variant.reasoningEffort, variant.promptCacheRetention])).toEqual([
-      ['fast', 'low', 'SHORT'],
-      ['slow', '', 'SHORT'],
-    ])
+    expect(mapped.defaultVariant).toBe('fast')
+    expect(mapped.variants.map(({ id, reasoningEffort, promptCacheRetention }) => [id, reasoningEffort, promptCacheRetention]))
+      .toEqual([['fast', 'low', 'SHORT'], ['slow', '', 'SHORT']])
   })
 
-  it('does not mutate the input draft or reuse candidate pricing objects', () => {
+  it('does not mutate draft or candidate pricing objects', () => {
     const before = draft()
-    const source = candidate({
-      pricingSupported: true,
-      pricing: {
-        base: { input: '1', output: '2', cacheRead: '3', cacheWrite: '4', cacheWriteByTtl: { '3600': '5' }, reasoning: null },
-        overrides: [],
-        multipliers: [],
-      },
-    })
-    const next = applyCatalogCandidate(before, source)
-    next.pricing.base.cacheWriteByTtl['7200'] = '6'
-    expect(before.pricing.base.input).toBe('9')
-    expect(source.pricing?.base.cacheWriteByTtl).toEqual({ '3600': '5' })
+    const source = candidate({ pricingSupported: true, pricing: pricing('1') })
+    const applied = applyCatalogCandidate(before, source)
+    applied.pricing.definition.base.cacheWriteByTtl['7200'] = '6'
+    expect(before.pricing.definition.base.input).toBe('9')
+    expect(source.pricing?.base.cacheWriteByTtl).toEqual({})
   })
 })

@@ -8,6 +8,7 @@ import type {
   ProviderType,
   SkillRefDTO,
 } from '@/shared/api/generated/contracts'
+import type { ModelPricingDraft as PricingPlanDraft } from '@/features/catalog/model-pricing-draft'
 
 export interface ProviderDraft {
   name: string
@@ -38,14 +39,14 @@ export interface VariantDraft {
   /** 厂商原生协议请求选项（JSON 文本）。 */
   protocolOptionsJson: string
   /** 提示缓存策略。必填项，由所选 Variant 决定。 */
-  promptCacheRetention: PromptCacheRetention
+  promptCacheRetention: PromptCacheRetention | ''
 }
 
 /**
  * 单 Model 的完整价格草稿。所有十进制值保持字符串，提交时原样发送；
  * 覆盖/倍率规则与结构化条件也直接使用 wire 形状，确保完整原子替换。
  */
-export type ModelPricingDraft = ModelPricingDTO
+export type ModelPricingDraft = PricingPlanDraft
 
 /** 单 Model 的表单草稿。输入保持字符串类型以获得可预测的编辑体验。 */
 export interface ModelDraft {
@@ -70,6 +71,12 @@ export interface ModelDraft {
   defaultVariant: string
   variants: VariantDraft[]
   pricing: ModelPricingDraft
+  /** Temporary catalog import explanation; never serialized to ModelConfigDTO. */
+  pricingImportNotice?: {
+    kind: 'unsupported' | 'excluded'
+    supportIssues: string[]
+    pricing: ModelPricingDTO | null
+  } | null
 }
 
 /** 组的成员草稿；顺序即 Fill First 顺序。 */
