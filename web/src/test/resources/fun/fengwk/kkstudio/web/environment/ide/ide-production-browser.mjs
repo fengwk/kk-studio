@@ -100,6 +100,7 @@ function parseConfig(raw) {
     bindingEpoch: String(config.bindingEpoch),
     scenario: config.scenario,
     expectedTheme: config.expectedTheme,
+    attachmentText: config.attachmentText,
   }
 }
 
@@ -353,7 +354,7 @@ async function run(config, lines) {
     // The configuration scenario only inspects the workbench-wide state; all other scenarios
     // drive an editor and therefore need the workspace file in the explorer.
     let fileRow = null
-    if (config.scenario !== 'configuration') {
+    if (config.scenario !== 'configuration' && config.scenario !== 'attachment') {
       stage('workbench-explorer')
       fileRow = page
         .locator('.explorer-folders-view .monaco-list-row', { hasText: 'editable.txt' })
@@ -362,6 +363,44 @@ async function run(config, lines) {
     }
 
     emit({ event: 'workbench-ready' })
+
+    if (config.scenario === 'attachment') {
+      stage('attachment-editor')
+      if (typeof config.attachmentText !== 'string' || config.attachmentText.length === 0) {
+        throw namedError('ConfigurationError')
+      }
+      const explorerRows = async () =>
+        page.locator('.explorer-folders-view .monaco-list-row').evaluateAll((rows) =>
+          rows.map((row) => ({
+            text: row.textContent?.trim() ?? '',
+            label: row.getAttribute('aria-label'),
+            selected: row.getAttribute('aria-selected'),
+          })),
+        )
+      const rowsBefore = await explorerRows()
+      await waitForEditorText(page, config.attachmentText)
+      const editor = page.locator('.monaco-editor .view-lines').first()
+      await editor.click()
+      await page.keyboard.press('Control+a')
+      await page.keyboard.type('attempted attachment edit')
+      await page.waitForTimeout(500)
+      await waitForEditorText(page, config.attachmentText)
+      if ((await editor.innerText()).includes('attempted attachment edit')) {
+        throw namedError('AttachmentWasEditable')
+      }
+      if (JSON.stringify(await explorerRows()) !== JSON.stringify(rowsBefore)) {
+        throw namedError('AttachmentRevealedExplorer')
+      }
+      emit({ event: 'attachment-ready' })
+      const acknowledge = await lines.next()
+      if (acknowledge.done || JSON.parse(acknowledge.value).continue !== true) {
+        throw namedError('ProtocolError')
+      }
+      await browser.close()
+      browser = null
+      emit({ event: 'done' })
+      return
+    }
 
     if (config.scenario === 'configuration') {
       // The applied workbench theme is observed from the real workbench class, not from a probe.

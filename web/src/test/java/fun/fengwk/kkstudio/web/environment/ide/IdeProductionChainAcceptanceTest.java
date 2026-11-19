@@ -18,6 +18,7 @@ import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import okio.ByteString;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -26,16 +27,37 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.TestPropertySource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.chat.ChatService;
+import fun.fengwk.kkstudio.chat.dto.ChatCreateDTO;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsCommand;
+import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
+import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
+import fun.fengwk.kkstudio.harness.api.command.UserMessageCommandPayload;
+import fun.fengwk.kkstudio.harness.api.entry.BranchSettings;
+import fun.fengwk.kkstudio.harness.api.entry.ModelSelection;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
+import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AttachmentMessageContent;
+import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
 import fun.fengwk.kkstudio.ide.IdeBootstrapTicketService;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessCommandAcceptanceOrchestrator;
+import fun.fengwk.kkstudio.platform.orchestration.SessionOwner;
+import fun.fengwk.kkstudio.platform.storage.InMemoryS3StorageService;
+import fun.fengwk.kkstudio.platform.storage.service.StorageUploadService;
 import fun.fengwk.kkstudio.web.WebPostgresTestSupport;
+import fun.fengwk.kkstudio.web.storage.StorageUploadTestSupport;
+import fun.fengwk.kkstudio.web.storage.WebStorageS3TestConfiguration;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -81,13 +103,24 @@ import java.util.concurrent.TimeoutException;
  *       workspace 文件；受管 code-server 崩溃后旧绑定判为 VIEW_GONE，新视图在替代实例上恢复服务；Daemon 正常关停后受管 code-server
  *       进程收敛。
  *   <li><b>真实 Chromium 用例</b>：页面不拦截网络，经 Studio
- *       网关加载真实工作台；在工作台中打开终端，执行一条命令并看到输出；修改文件并保存，在宿主机上断言文件内容已落盘； 工作台在真实 code-server 中应用随包扩展的 {@code
- *       configurationDefaults}，显式用户值优先，Git 自动发现仓库不变。
+ *       网关加载真实工作台；在工作台中打开终端，执行一条命令并看到输出；修改文件并保存，在宿主机上断言文件内容已落盘；工作台在真实 code-server 中应用随包扩展的 {@code
+ *       configurationDefaults}，显式用户值优先，Git 自动发现仓库不变；已归属 Session 的 HTTP 附件以只读虚拟文档显示，且不改变 Explorer
+ *       项目。
  * </ul>
  */
 @EnabledIfSystemProperty(
     named = IdeProductionChainAcceptanceTest.CODE_SERVER_RELEASE_PROPERTY,
     matches = ".*")
+@Import(WebStorageS3TestConfiguration.class)
+@TestPropertySource(
+    properties = {
+      "kk-studio.storage.s3.endpoint=http://minio.example.local:9000",
+      "kk-studio.storage.s3.public-endpoint=https://cdn.example.com",
+      "kk-studio.storage.s3.region=us-east-1",
+      "kk-studio.storage.s3.bucket=test-bucket",
+      "kk-studio.storage.s3.access-key=local-test-access-key",
+      "kk-studio.storage.s3.secret-key=local-test-secret-key"
+    })
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
@@ -114,6 +147,16 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
 
   @Autowired private IdeBootstrapTicketService bootstrapTickets;
 
+  @Autowired private ChatService chatService;
+
+  @Autowired private HarnessCommandAcceptanceOrchestrator commandAcceptance;
+
+  @Autowired private StorageUploadService storageUploadService;
+
+  @Autowired private InMemoryS3StorageService s3Storage;
+
+  @Autowired private JdbcTemplate jdbc;
+
   @Autowired
   @Qualifier("localEnvironmentIdeService")
   private EnvironmentIdeServiceImpl localIdeService;
@@ -131,6 +174,11 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
   private Path browserTempDir;
 
   private Path testRecordsDir;
+
+  @BeforeEach
+  void clearTestStorage() {
+    s3Storage.clear();
+  }
 
   @AfterEach
   void tearDown() {
@@ -296,6 +344,128 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
       assertViewRejected(
           environmentId, secondView, secondCookie, "the second closed view must stop serving");
     }
+  }
+
+  /**
+   * Session-owned attachment requests must open ordinary UTF-8 as immutable virtual content without
+   * a workspace file.
+   *
+   * <p>The HTTP request is authorized against an actually owned Harness Session and traverses the
+   * real daemon and workbench.
+   */
+  @Test
+  @Order(12)
+  void opensSessionAttachmentAsReadOnlyVirtualWorkbenchContent() throws Exception {
+    byte[] attachment = "Résumé — 東京 🚀 — café".getBytes(StandardCharsets.UTF_8);
+    UUID chatId = createChat("attachment-session");
+    UUID sessionId = UUID.randomUUID();
+    UUID threadId = UUID.randomUUID();
+    String uploadId =
+        new StorageUploadTestSupport(storageUploadService, s3Storage, jdbc)
+            .completeUpload("source.txt", attachment);
+    commandAcceptance.accept(
+        new SessionOwner("CHAT", chatId.toString()),
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.NewRootSession(
+                sessionId,
+                threadId,
+                new BranchSettings(
+                    "default-assistant",
+                    BuiltinExecution.of(new ModelSelection("acceptance-stub", "default")),
+                    null),
+                false),
+            List.of(
+                new NewThreadCommand(
+                    new UserMessageCommandPayload(
+                        new AgentMessage(
+                            AgentMessageRole.USER,
+                            List.of(new AttachmentMessageContent(UUID.fromString(uploadId))))),
+                    UUID.randomUUID()))));
+    UUID resourceId =
+        jdbc.queryForObject(
+            "select blob_id from session_blob_ref where session_id = ?", UUID.class, sessionId);
+
+    Path playwright = explicitPlaywrightModule();
+    Path node = nodeBinary();
+    browserTempDir = Files.createTempDirectory("kk-ide-br-");
+    Files.setPosixFilePermissions(browserTempDir, PosixFilePermissions.fromString("rwx------"));
+    String environmentId = startEnvironmentAndDaemon();
+    UUID browserSessionId = UUID.randomUUID();
+    try (EventChannel events = EventChannel.connect(browser, webSocketUrl("/ws/events"))) {
+      EventIdentity identity = events.awaitConnected();
+      UUID viewId = UUID.randomUUID();
+      UUID claimId = UUID.randomUUID();
+      events.registerUsage(
+          browserSessionId, 1L, List.of(new IntentView(environmentId, viewId, claimId, null)));
+      JsonNode opened = openView(environmentId, viewId, browserSessionId, identity, claimId);
+      long bindingEpoch = Long.parseLong(opened.path("bindingEpoch").asText());
+      Path workspace = daemon.workspaceDirectory();
+
+      browserDriver = BrowserDriver.start(node, recordsDir());
+      browserDriver.send(
+          Map.ofEntries(
+              Map.entry("playwrightModule", playwright.toString()),
+              Map.entry("baseUrl", baseUrl()),
+              Map.entry("environmentId", environmentId),
+              Map.entry("browserSessionId", browserSessionId.toString()),
+              Map.entry("workspaceDirectory", workspace.toString()),
+              Map.entry("browserTempDirectory", browserTempDir.toString()),
+              Map.entry("entryUrl", opened.path("entryUrl").asText()),
+              Map.entry("viewId", viewId.toString()),
+              Map.entry("bindingEpoch", Long.toString(bindingEpoch)),
+              Map.entry("scenario", "attachment"),
+              Map.entry("attachmentText", new String(attachment, StandardCharsets.UTF_8))));
+      browserDriver.await("workbench-ready");
+
+      Request request =
+          new Request.Builder()
+              .url(
+                  baseUrl()
+                      + "/api/ide/environments/"
+                      + environmentId
+                      + "/views/"
+                      + viewId
+                      + "/attachments/"
+                      + sessionId
+                      + "/"
+                      + resourceId)
+              .post(
+                  RequestBody.create(
+                      "{\"browserSessionId\":\""
+                          + browserSessionId
+                          + "\",\"bindingEpoch\":"
+                          + bindingEpoch
+                          + ",\"expectedDaemonInstanceId\":\""
+                          + expectedDaemonInstance(viewId)
+                          + "\"}",
+                      JSON))
+              .build();
+      try (Response response = browser.newCall(request).execute()) {
+        assertEquals(204, response.code(), "an owned Session attachment must open via HTTP");
+      }
+      browserDriver.await("attachment-ready");
+      browserDriver.send(Map.of("continue", true));
+      browserDriver.await("done");
+      browserDriver.finish();
+      browserDriver = null;
+
+      assertFalse(
+          Files.exists(workspace.resolve("attachment-" + resourceId + ".txt")),
+          "the virtual attachment must not create a workspace file");
+      assertFalse(
+          Files.exists(workspace.resolve("source.txt")),
+          "the uploaded attachment filename must not be created in the workspace");
+      assertFalse(
+          Files.exists(workspace.resolve(resourceId.toString())),
+          "the resource identity must not be materialized in the workspace");
+    }
+  }
+
+  private UUID createChat(String title) {
+    ChatCreateDTO create = new ChatCreateDTO();
+    create.setTitle(title);
+    create.setAgentName("default-assistant");
+    return UUID.fromString(chatService.createChat(create).getId());
   }
 
   /**
