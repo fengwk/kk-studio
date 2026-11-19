@@ -46,7 +46,15 @@ const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 const THREAD_ID_2 = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
-  const manager = { subscribe: () => () => undefined }
+  const manager = {
+    subscribe: () => () => undefined,
+    getIdentity: () => null,
+    subscribeIdentity: () => () => undefined,
+    requestThreadRefresh: () => true,
+    requestResourceRefresh: () => true,
+    suspendThread: () => true,
+    resumeThread: () => true,
+  }
   return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
 })
 

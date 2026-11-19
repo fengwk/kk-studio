@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useState, type ComponentProps, ty
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { act, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { createMemoryRouter, RouterProvider, useLocation } from 'react-router'
+import { createMemoryRouter, RouterProvider } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   IdePanelContext,
@@ -218,20 +218,49 @@ vi.mock('@/features/thread/composer/useAttachmentUploads', async (importOriginal
 })
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
+  const subscriptions: Array<{
+    resource: { kind: string; id?: string }
+    listener: { onEvent?: (name: string, data: unknown) => void }
+  }> = []
   const manager = {
+    getIdentity: vi.fn(() => null),
+    subscribeIdentity: vi.fn(() => () => undefined),
+    requestThreadRefresh: vi.fn(() => true),
+    requestResourceRefresh: vi.fn(() => true),
+    suspendThread: vi.fn(() => true),
+    resumeThread: vi.fn(() => true),
     subscribe: vi.fn(
       (
-        _resource?: unknown,
-        _listener?: {
+        resource: { kind: string; id?: string },
+        listener: {
           onSubscribed?: (cursor: string) => void
           onEvent?: (name: string, data: unknown, cursor?: string) => void
           onResync?: () => void
           onError?: (code: string, message: string) => void
         },
-      ) => vi.fn(),
+      ) => {
+        const subscription = { resource, listener }
+        subscriptions.push(subscription)
+        return vi.fn(() => {
+          const index = subscriptions.indexOf(subscription)
+          if (index >= 0) {
+            subscriptions.splice(index, 1)
+          }
+        })
+      },
     ),
   }
-  return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
+  return {
+    fakeApplicationEvents: {
+      useApplicationEvents: () => manager,
+      emit: (resource: { kind: string; id?: string }, name: string, data: unknown) => {
+        subscriptions
+          .filter((subscription) => subscription.resource.kind === resource.kind
+            && subscription.resource.id === resource.id)
+          .forEach((subscription) => subscription.listener.onEvent?.(name, data))
+      },
+    },
+  }
 })
 
 /**
@@ -384,15 +413,60 @@ function thread(
   }
 }
 
+function wireSnapshot(value: HarnessThreadSnapshotDTO): HarnessThreadSnapshotDTO {
+  const sessionId = '22222222-3333-4444-8555-666666666666'
+  const headEntryId = '33333333-4444-4555-8666-777777777777'
+  const currentThread = {
+    ...value.thread,
+    sessionId,
+    headEntryId,
+  }
+  return {
+    ...value,
+    thread: currentThread,
+    baseEntryId: null,
+    entries: [{
+      entryId: headEntryId,
+      sessionId,
+      parentEntryId: null,
+      entryType: 'ROOT',
+      payload: {
+        settings: {
+          agentName: currentThread.branchSettings.agentName,
+          execution: currentThread.branchSettings.execution,
+          environmentName: currentThread.branchSettings.environmentName,
+        },
+      },
+      createdAt: 0,
+      usageCost: null,
+    }],
+  }
+}
+
 function snapshot(
   currentThread = thread(),
   overrides: Partial<HarnessThreadSnapshotDTO> = {},
 ): HarnessThreadSnapshotDTO {
+  const baselineEntry: HarnessSessionEntryDTO = {
+    entryId: currentThread.headEntryId,
+    sessionId: currentThread.sessionId,
+    parentEntryId: null,
+    entryType: 'ROOT',
+    payload: {
+      settings: {
+        agentName: currentThread.branchSettings.agentName,
+        execution: currentThread.branchSettings.execution,
+        environmentName: currentThread.branchSettings.environmentName,
+      },
+    },
+    createdAt: 0,
+    usageCost: null,
+  }
   return {
     version: currentThread.version,
     thread: currentThread,
     baseEntryId: null,
-    entries: [],
+    entries: [baselineEntry],
     queuedCommands: [],
     activeAssistantOutput: null,
     toolInvocations: [],
@@ -2393,18 +2467,18 @@ describe('AgentPane orchestration', () => {
 
   it('shows exit-pending details only when the thread is actually EXIT_PENDING and abandons exactly the selected execution when stopped', async () => {
     // 测试意图：EXIT_PENDING+STOPPED 才展示逐项放弃入口；取消不发请求，确认只发送所选 executionId
-    // 与当前 expectedVersion。成功以返回快照更新投影并刷新执行树，另一项仍保留。
+    // 与当前 expectedVersion。成功后通过 fake manager 投递新的快照/执行树，另一项仍保留。
     const user = userEvent.setup()
     const firstExecution: HarnessExecutionExitDTO = {
-      executionId: 'execution-model-1',
-      invocationId: 'invocation-1',
+      executionId: 'aaaaaaaa-1111-4111-8111-111111111111',
+      invocationId: 'bbbbbbbb-1111-4111-8111-111111111111',
       attempt: 1,
       kind: 'DRIVER',
       registeredAt: 1767225600000,
     }
     const secondExecution: HarnessExecutionExitDTO = {
-      executionId: 'execution-tool-2',
-      invocationId: 'invocation-2',
+      executionId: 'aaaaaaaa-2222-4222-8222-222222222222',
+      invocationId: 'bbbbbbbb-2222-4222-8222-222222222222',
       attempt: 2,
       kind: 'TOOL',
       registeredAt: 1767225601000,
@@ -2430,22 +2504,22 @@ describe('AgentPane orchestration', () => {
     expect(await screen.findByRole('heading', { name: '未确认退出执行' })).toBeInTheDocument()
     expect(screen.getByText('类型 DRIVER')).toBeInTheDocument()
     expect(screen.getByText('第 1 次尝试')).toBeInTheDocument()
-    expect(screen.getByText('执行 execution-model-1')).toBeInTheDocument()
+    expect(screen.getByText('执行 aaaaaaaa-1111-4111-8111-111111111111')).toBeInTheDocument()
     expect(screen.getByText('类型 TOOL')).toBeInTheDocument()
-    expect(screen.getByText('执行 execution-tool-2')).toBeInTheDocument()
+    expect(screen.getByText('执行 aaaaaaaa-2222-4222-8222-222222222222')).toBeInTheDocument()
 
     const firstAbandon = screen.getByRole('button', {
       name: '放弃等待 DRIVER 第 1 次尝试',
     })
     await user.click(firstAbandon)
     const dialog = await screen.findByRole('alertdialog')
-    expect(dialog).toHaveTextContent('执行 execution-model-1 将不再等待退出确认')
+    expect(dialog).toHaveTextContent('执行 aaaaaaaa-1111-4111-8111-111111111111 将不再等待退出确认')
     expect(dialog).toHaveTextContent('不会终止本地或远端执行')
     expect(dialog).toHaveTextContent('执行可能继续产生副作用，恢复也可能与其重叠')
 
     await user.click(within(dialog).getByRole('button', { name: '取消' }))
     expect(harnessService.abandonExecution).not.toHaveBeenCalled()
-    expect(screen.getByText('执行 execution-model-1')).toBeInTheDocument()
+    expect(screen.getByText('执行 aaaaaaaa-1111-4111-8111-111111111111')).toBeInTheDocument()
 
     const snapshotCallsBefore = vi.mocked(harnessService.getThreadSnapshot).mock.calls.length
     const treeCallsBefore = vi.mocked(harnessService.getThreadTree).mock.calls.length
@@ -2458,17 +2532,30 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(harnessService.abandonExecution).toHaveBeenCalledTimes(1))
     expect(harnessService.abandonExecution).toHaveBeenCalledWith(
       THREAD_ID,
-      'execution-model-1',
+      'aaaaaaaa-1111-4111-8111-111111111111',
       { expectedVersion: '7' },
     )
-    await waitFor(() => expect(screen.queryByText('执行 execution-model-1')).not.toBeInTheDocument())
-    expect(screen.getByText('执行 execution-tool-2')).toBeInTheDocument()
-    await waitFor(() => expect(
-      vi.mocked(harnessService.getThreadSnapshot).mock.calls.length,
-    ).toBeGreaterThan(snapshotCallsBefore))
-    await waitFor(() => expect(
-      vi.mocked(harnessService.getThreadTree).mock.calls.length,
-    ).toBeGreaterThan(treeCallsBefore))
+    await waitFor(() => expect(fakeApplicationEvents.useApplicationEvents().requestThreadRefresh)
+      .toHaveBeenCalledWith({ kind: 'thread', id: THREAD_ID }))
+    expect(fakeApplicationEvents.useApplicationEvents().requestResourceRefresh)
+      .toHaveBeenCalledWith({ kind: 'thread-tree', id: THREAD_ID })
+    await act(async () => {
+      fakeApplicationEvents.emit(
+        { kind: 'thread', id: THREAD_ID },
+        'snapshot',
+        wireSnapshot(updated),
+      )
+      fakeApplicationEvents.emit(
+        { kind: 'thread-tree', id: THREAD_ID },
+        'snapshot',
+        { nodes: [treeNode(THREAD_ID, null, 'root thread', false)] },
+      )
+    })
+    await waitFor(() => expect(screen.queryByText('执行 aaaaaaaa-1111-4111-8111-111111111111'))
+      .not.toBeInTheDocument())
+    expect(screen.getByText('执行 aaaaaaaa-2222-4222-8222-222222222222')).toBeInTheDocument()
+    expect(vi.mocked(harnessService.getThreadSnapshot).mock.calls.length).toBe(snapshotCallsBefore)
+    expect(vi.mocked(harnessService.getThreadTree).mock.calls.length).toBe(treeCallsBefore)
   })
 
   it('hides normal active unconfirmed facts, then shows EXIT_PENDING details with stop-and-handle but no abandon', async () => {
@@ -2476,8 +2563,8 @@ describe('AgentPane orchestration', () => {
     // “停止并处理”，且不开放放弃确认。无事实或已停止无残留时不出现空壳。
     const user = userEvent.setup()
     const execution: HarnessExecutionExitDTO = {
-      executionId: 'execution-runnable',
-      invocationId: 'invocation-runnable',
+      executionId: 'aaaaaaaa-3333-4333-8333-333333333333',
+      invocationId: 'bbbbbbbb-3333-4333-8333-333333333333',
       attempt: 1,
       kind: 'TOOL',
       registeredAt: 1767225600000,
@@ -2512,18 +2599,25 @@ describe('AgentPane orchestration', () => {
       .toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /^放弃等待/ })).not.toBeInTheDocument()
 
-    // Stop 成功回读后只剩“放弃等待”动作；断言真实 API 一次与最终 STOPPED 语义，不依赖 query 次数。
-    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(
-      snapshot(threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED' }), {
-        unconfirmedExecutions: [execution],
-      }),
-    )
+    // Stop 的权威 WS 快照更新为 STOPPED 后只剩“放弃等待”；断言真实 API 一次与最终语义。
     await user.click(screen.getByRole('button', { name: '停止并处理' }))
     await waitFor(() => expect(harnessService.stopThread).toHaveBeenCalledTimes(1))
     expect(harnessService.stopThread).toHaveBeenCalledWith(
       THREAD_ID,
       expect.objectContaining({ expectedVersion: '0' }),
     )
+    await waitFor(() => expect(fakeApplicationEvents.useApplicationEvents().requestThreadRefresh)
+      .toHaveBeenCalledWith({ kind: 'thread', id: THREAD_ID }))
+    await act(async () => {
+      fakeApplicationEvents.emit(
+        { kind: 'thread', id: THREAD_ID },
+        'snapshot',
+        wireSnapshot(snapshot(
+          threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED', version: '1' }),
+          { unconfirmedExecutions: [execution] },
+        )),
+      )
+    })
     expect(await screen.findByRole('button', {
       name: '放弃等待 TOOL 第 1 次尝试',
     })).toBeInTheDocument()
@@ -2580,8 +2674,8 @@ describe('AgentPane orchestration', () => {
     // 同一危险操作不得自动重发。
     const user = userEvent.setup()
     const execution: HarnessExecutionExitDTO = {
-      executionId: 'execution-stale',
-      invocationId: 'invocation-stale',
+      executionId: 'aaaaaaaa-4444-4444-8444-444444444444',
+      invocationId: 'bbbbbbbb-4444-4444-8444-444444444444',
       attempt: 1,
       kind: 'DRIVER',
       registeredAt: 1767225600000,
@@ -2614,11 +2708,31 @@ describe('AgentPane orchestration', () => {
     expect(harnessService.abandonExecution).toHaveBeenCalledTimes(1)
     expect(harnessService.abandonExecution).toHaveBeenCalledWith(
       THREAD_ID,
-      'execution-stale',
+      'aaaaaaaa-4444-4444-8444-444444444444',
       { expectedVersion: '7' },
     )
-    await waitFor(() => expect(harnessService.getThreadSnapshot).toHaveBeenCalledTimes(2))
-    expect(screen.getByText('执行 execution-stale')).toBeInTheDocument()
+    await waitFor(() => expect(fakeApplicationEvents.useApplicationEvents().requestThreadRefresh)
+      .toHaveBeenCalledWith({ kind: 'thread', id: THREAD_ID }))
+    expect(fakeApplicationEvents.useApplicationEvents().requestResourceRefresh)
+      .toHaveBeenCalledWith({ kind: 'thread-tree', id: THREAD_ID })
+    await act(async () => {
+      fakeApplicationEvents.emit(
+        { kind: 'thread', id: THREAD_ID },
+        'snapshot',
+        wireSnapshot(snapshot(
+          threadFixture(THREAD_ID, { status: 'EXIT_PENDING', executionControl: 'STOPPED', version: '8' }),
+          { unconfirmedExecutions: [execution] },
+        )),
+      )
+      fakeApplicationEvents.emit(
+        { kind: 'thread-tree', id: THREAD_ID },
+        'snapshot',
+        { nodes: [treeNode(THREAD_ID, null, 'root thread', false)] },
+      )
+    })
+    expect(vi.mocked(harnessService.getThreadSnapshot)).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(harnessService.getThreadTree)).toHaveBeenCalledTimes(1)
+    expect(screen.getByText('执行 aaaaaaaa-4444-4444-8444-444444444444')).toBeInTheDocument()
   })
 
   it('keeps a failed draft restore visible with a manual retry that restores the cancelled input', async () => {
@@ -4349,16 +4463,9 @@ describe('AgentPane root control and child observation', () => {
     }))
   }
 
-  it('navigates the ownership source to its product page with the execution root', async () => {
-    // 归属显示来自会话归属 SPI：只显示“类型 · 标题”，点击打开产品页面并携带执行根 thread。
-    // 审批身份仍写在原始调用上：来源导航不提交任何决策，也不改写 pane 绑定目标。
+  it('opens the originating subagent thread without changing the pane target or draft', async () => {
+    // 根面板来源以真实子 Thread 为链接目标；导航不提交审批决策，也不改写 pane 绑定目标。
     const user = userEvent.setup()
-    const locations: string[] = []
-    function LocationProbe() {
-      const location = useLocation()
-      locations.push(`${location.pathname}${location.search}`)
-      return null
-    }
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(THREAD_ID, null, 'root thread', false),
       treeNode(CHILD_THREAD_ID, THREAD_ID, 'worker', false),
@@ -4376,7 +4483,6 @@ describe('AgentPane root control and child observation', () => {
     render(
       <QueryClientProvider client={client}>
         <MemoryRouter>
-          <LocationProbe />
           <TestAgentPane
             owner={{ kind: 'CHAT', id: CHAT_ID }}
             paneId="pane-1"
@@ -4392,11 +4498,12 @@ describe('AgentPane root control and child observation', () => {
     const targetBeforeNavigation = localStorage.getItem(
       `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
     )
-    const source = await screen.findByRole('button', { name: 'Chat' })
+    const source = await screen.findByRole('link', { name: '打开 subagent' })
+    expect(source).toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
 
     await user.click(source)
 
-    await waitFor(() => expect(locations.at(-1)).toBe(`/chats/${CHAT_ID}?thread=${THREAD_ID}`))
+    expect(await screen.findByRole('heading', { name: 'worker' })).toBeInTheDocument()
     expect(harnessService.decideApproval).not.toHaveBeenCalled()
     expect(localStorage.getItem(`kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`))
       .toBe(targetBeforeNavigation)
@@ -4404,8 +4511,8 @@ describe('AgentPane root control and child observation', () => {
     expect(composer).toHaveTextContent('root draft kept')
   })
 
-  it('shows the ownership label on the root interaction source', async () => {
-    // 根交互的来源同样只显示归属“类型 · 标题”，不再用来源 Thread 名称作为跳转文案。
+  it('omits duplicate source links when a root interaction originates from the current root', async () => {
+    // 根交互已在当前根面板中，不重复展示产品归属按钮或无意义的 subagent 链接。
     vi.mocked(harnessService.getThreadTree).mockResolvedValue([
       treeNode(THREAD_ID, null, 'root thread', false),
     ])
@@ -4416,8 +4523,9 @@ describe('AgentPane root control and child observation', () => {
     bindPaneToRoot()
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
-    const source = await screen.findByRole('button', { name: 'Chat' })
-    expect(source).toHaveAttribute('title', '查看来源')
+    await screen.findByRole('button', { name: '允许' })
+    expect(screen.queryByRole('button', { name: 'Chat' })).toBeNull()
+    expect(screen.queryByRole('link', { name: '打开 subagent' })).toBeNull()
     expect(screen.queryByRole('link', { name: 'root thread' })).toBeNull()
   })
 
@@ -5009,8 +5117,8 @@ describe('AgentPane root control mounting', () => {
     await waitFor(() => expect(composer).toHaveTextContent('排队中的输入'))
   })
 
-  it('never falls back to the source thread identity for the ownership label', async () => {
-    // 归属缺失标题时只显示类型；来源 Thread 的 UUID 与名称都不冒充归属。
+  it('does not expose source-thread identity as a substitute for a hidden owner label', async () => {
+    // 缺失归属标签时不借用来源 Thread 的 UUID 或名称；subagent 入口只显示产品词条。
     const unknownSourceId = '44444444-5555-4666-8777-888888888888'
     bindPaneTarget({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
     vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue(snapshot(thread()))
@@ -5023,13 +5131,11 @@ describe('AgentPane root control mounting', () => {
 
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
-    const source = await screen.findByRole('button', { name: 'Chat' })
-    expect(source).toHaveTextContent('Chat')
+    expect(screen.queryByRole('button', { name: 'Chat' })).toBeNull()
     expect(screen.queryByText(unknownSourceId)).toBeNull()
-    // 归属标签不冒充来源 Thread；来源入口另用 subagent 词条指向真实调用线程。
+    const source = await screen.findByRole('link', { name: '打开 subagent' })
+    expect(source).toHaveAttribute('href', `/threads/${unknownSourceId}`)
     expect(source).not.toHaveTextContent(unknownSourceId)
-    expect(screen.getByRole('link', { name: '打开 subagent' }))
-      .toHaveAttribute('href', `/threads/${unknownSourceId}`)
   })
 
   it('keeps the full root interaction pagination reachable through load more', async () => {
@@ -5051,11 +5157,15 @@ describe('AgentPane root control mounting', () => {
     const user = userEvent.setup()
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Chat' })).toHaveLength(1))
+    await waitFor(() => expect(screen.getAllByRole('link', { name: '打开 subagent' })).toHaveLength(1))
+    expect(screen.getByRole('link', { name: '打开 subagent' }))
+      .toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
     await user.click(screen.getByRole('button', { name: '加载更多' }))
 
-    // 第二页追加而不是替换，翻页入口随之消失。
-    await waitFor(() => expect(screen.getAllByRole('button', { name: 'Chat' })).toHaveLength(2))
+    // 第二页追加而不是替换；两个 subagent 来源链接均可用，翻页入口随之消失。
+    await waitFor(() => expect(screen.getAllByRole('link', { name: '打开 subagent' })).toHaveLength(2))
+    expect(screen.getAllByRole('link', { name: '打开 subagent' }).map((link) => link.getAttribute('href')))
+      .toEqual([`/threads/${CHILD_THREAD_ID}`, `/threads/${secondSourceId}`])
     await waitFor(() => expect(screen.getAllByRole('button', { name: '允许' })).toHaveLength(2))
     expect(screen.queryByRole('button', { name: '加载更多' })).not.toBeInTheDocument()
     expect(vi.mocked(interactionService.listInteractions).mock.calls[1]?.[1]).toBe('cursor-2')
@@ -5078,10 +5188,14 @@ describe('AgentPane root control mounting', () => {
     renderPane({ kind: 'CHAT', id: CHAT_ID })
 
     await screen.findByRole('button', { name: '允许' })
+    expect(screen.getByRole('link', { name: '打开 subagent' }))
+      .toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
     await user.click(screen.getByRole('button', { name: '加载更多' }))
 
-    // 翻页失败必须被呈现（不是静默丢弃），已取回的卡片仍然可用，重试入口保留。
+    // 翻页失败必须被呈现（不是静默丢弃），已取回的卡片与来源链接仍可用，重试入口保留。
     expect(await screen.findByRole('alert')).toHaveTextContent('待处理交互加载失败')
+    expect(screen.getByRole('link', { name: '打开 subagent' }))
+      .toHaveAttribute('href', `/threads/${CHILD_THREAD_ID}`)
     expect(screen.getByRole('button', { name: '允许' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '加载更多' })).toBeInTheDocument()
   })

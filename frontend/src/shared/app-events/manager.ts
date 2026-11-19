@@ -15,9 +15,11 @@ import type {
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 
 interface ApplicationEventListener {
+  /** Thread subscribe/reconnect 用当前缓存的真实 Entry head 续接。 */
+  getAfterEntryId?: () => string | undefined
   /** wire 订阅建立（首次与每次重连后都会触发）；cursor 是资源当前游标。 */
   onSubscribed?: (cursor: string) => void
-  /** 资源事件：thread 为 version/realtime，canvas 为 version，projects 为 changed。 */
+  /** 资源事件：thread 为 snapshot/realtime，canvas 为 revision，其他通知资源为 changed。 */
   onEvent?: (name: ApplicationEventName, data: unknown, cursor: string | undefined) => void
   /** 服务端要求整体替换为全量快照。 */
   onResync?: () => void
@@ -38,6 +40,7 @@ interface ApplicationEventIdeUseAck {
 
 interface SubscriptionEntry {
   resource: ApplicationEventResource
+  suspended: boolean
   /** listener -> refcount：同一 listener 重复 subscribe 也计真实引用。 */
   refs: Map<ApplicationEventListener, number>
 }
@@ -130,14 +133,14 @@ export class ApplicationEventManager {
     const key = resourceKey(resource)
     let entry = this.subscriptions.get(key)
     if (entry == null) {
-      entry = { resource, refs: new Map() }
+      entry = { resource, refs: new Map(), suspended: false }
       this.subscriptions.set(key, entry)
     }
     const previous = entry.refs.get(listener) ?? 0
     entry.refs.set(listener, previous + 1)
     if (previous === 0 && entry.refs.size === 1) {
       // 首 ref：listener 已登记，此时才发首 subscribe（wire 响应可同步到达）。
-      this.connection.send({ type: 'subscribe', resource })
+      this.sendSubscribe(entry)
     } else if (previous === 0 && resource.kind === 'thread-tree') {
       // 同 root 的新 listener 复用 wire ref，但仍需一份当前权威快照。
       this.requestResourceRefresh(resource)
@@ -158,9 +161,41 @@ export class ApplicationEventManager {
       current.refs.delete(listener)
       if (current.refs.size === 0) {
         this.subscriptions.delete(key)
-        this.connection.send({ type: 'unsubscribe', resource })
+        if (!current.suspended) {
+          this.connection.send({ type: 'unsubscribe', resource })
+        }
       }
     }
+  }
+
+  /** 暂停已订阅 Thread 的 wire 订阅，同时保留本地 listener/refcount。 */
+  suspendThread(resource: Extract<ApplicationEventResource, { kind: 'thread' }>): boolean {
+    const entry = this.subscriptions.get(resourceKey(resource))
+    if (entry == null || entry.refs.size === 0 || entry.suspended) {
+      return false
+    }
+    entry.suspended = true
+    return this.connection.send({ type: 'unsubscribe', resource })
+  }
+
+  /** 恢复暂停的 Thread wire 订阅，afterEntryId 从当前 listener 缓存读取。 */
+  resumeThread(resource: Extract<ApplicationEventResource, { kind: 'thread' }>): boolean {
+    const entry = this.subscriptions.get(resourceKey(resource))
+    if (entry == null || entry.refs.size === 0 || !entry.suspended) {
+      return false
+    }
+    entry.suspended = false
+    this.sendSubscribe(entry)
+    return true
+  }
+
+  /** 请求已订阅 Thread 的强制权威快照；不增减本地或 wire refcount。 */
+  requestThreadRefresh(resource: Extract<ApplicationEventResource, { kind: 'thread' }>): boolean {
+    const entry = this.subscriptions.get(resourceKey(resource))
+    if (entry == null || entry.refs.size === 0 || entry.suspended) {
+      return false
+    }
+    return this.connection.send({ type: 'refresh', resource })
   }
 
   /** 请求已订阅执行树资源的强制权威快照；不增减本地或 wire refcount。 */
@@ -256,8 +291,22 @@ export class ApplicationEventManager {
 
   private resubscribeAll(): void {
     for (const entry of this.subscriptions.values()) {
-      this.connection.send({ type: 'subscribe', resource: entry.resource })
+      if (!entry.suspended) {
+        this.sendSubscribe(entry)
+      }
     }
+  }
+
+  private sendSubscribe(entry: SubscriptionEntry): void {
+    const candidate = entry.resource.kind === 'thread'
+      ? [...entry.refs.keys()].map((listener) => listener.getAfterEntryId?.()).find(Boolean)
+      : undefined
+    const afterEntryId = isCanonicalUuid(candidate) ? candidate : undefined
+    this.connection.send({
+      type: 'subscribe',
+      resource: entry.resource,
+      ...(afterEntryId == null ? {} : { afterEntryId }),
+    })
   }
 
   private dispatch(message: ApplicationEventServerMessage): void {
@@ -288,7 +337,7 @@ export class ApplicationEventManager {
         return
       }
       const entry = this.subscriptions.get(resourceKey(message.resource))
-      if (entry == null) {
+      if (entry == null || entry.suspended) {
         return
       }
       this.notifyListeners(entry, (listener) => {
@@ -297,7 +346,7 @@ export class ApplicationEventManager {
       return
     }
     const entry = this.subscriptions.get(resourceKey(message.resource))
-    if (entry == null) {
+    if (entry == null || entry.suspended) {
       return
     }
     this.notifyListeners(entry, (listener) => {

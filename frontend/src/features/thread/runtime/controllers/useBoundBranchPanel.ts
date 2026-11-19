@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useApplicationEvents } from '@/shared/app-events'
 import {
   branchDraftFromThread,
   branchDraftsEqual,
@@ -25,7 +26,10 @@ import { isConflictReason } from '@/shared/api/client'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { errorDetailMessage } from '@/shared/lib/user-facing-error'
 import { translate } from '@/shared/i18n'
-import { mergeThreadSnapshotCache } from '@/features/thread/runtime/state/thread-snapshot-cache'
+import {
+  mergeThreadSnapshotCache,
+  requestThreadSnapshotRefresh,
+} from '@/features/thread/runtime/state/thread-snapshot-cache'
 import {
   activeSettingsOverlay,
   compareDecimalVersions,
@@ -101,6 +105,7 @@ export function useBoundBranchPanel({
   const [settingsOverlay, setSettingsOverlay] = useState<SettingsOverlayEntry[]>([])
   const boundThreadIdRef = useRef<string | null>(null)
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   // YOLO 直接控制面的权威 Thread 状态（version + yolo policy）：来自 /yolo 成功
   // 响应，或非回退的 snapshot。后续每次 CAS 都基于它，而不是可能滞后的
   // controller snapshot —— 连续切换不会因 version 过期而互相踩踏。
@@ -540,7 +545,7 @@ export function useBoundBranchPanel({
         }
         setSettingsError(null)
         setSettingsConflict(null)
-        await queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(originThreadId) })
+        await requestThreadSnapshotRefresh(queryClient, applicationEvents, originThreadId)
         return
       } catch (error) {
         if (generation !== settingsGenerationRef.current || boundThreadIdRef.current !== originThreadId) {

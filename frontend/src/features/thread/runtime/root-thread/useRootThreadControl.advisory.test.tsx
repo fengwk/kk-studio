@@ -50,6 +50,7 @@ function makeMockProjection(threadId: string): ThreadProjection {
     entries: [],
     messagesLoading: false,
     messagesError: null,
+    retrySnapshotSync: vi.fn(),
     bodyRef: { current: null },
     queuedCommands: [],
     queuedCustomMessages: [],

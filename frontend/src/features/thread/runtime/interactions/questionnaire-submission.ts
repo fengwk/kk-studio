@@ -1,7 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query'
+import type { ApplicationEventManager } from '@/shared/app-events/manager'
 import { isConflictError } from '@/shared/api/client'
 import { interactionService } from '@/shared/api/interaction-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { interactionDraftStore } from './interaction-draft-store'
 import type { HarnessToolInputResultDTO } from '@/shared/api/generated/contracts'
 
@@ -18,6 +20,7 @@ export async function submitQuestionnaireAnswer({
   answers,
   declined,
   queryClient,
+  applicationEvents,
   conflictErrorText,
   fallbackErrorText,
   onSuccess,
@@ -28,6 +31,7 @@ export async function submitQuestionnaireAnswer({
   answers?: string[][]
   declined?: boolean
   queryClient: QueryClient
+  applicationEvents: ApplicationEventManager
   /** 409 冲突时展示的非可恢复文案；与普通错误文案不同。 */
   conflictErrorText: string
   fallbackErrorText: string
@@ -46,9 +50,7 @@ export async function submitQuestionnaireAnswer({
     interactionDraftStore.clearDraft(interactionId)
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: queryKeys.interactions.all }),
-      queryClient.invalidateQueries({
-        queryKey: queryKeys.threads.snapshot(threadId),
-      }),
+      requestThreadSnapshotRefresh(queryClient, applicationEvents, threadId),
     ])
     onSuccess?.(res)
   } catch (err: unknown) {

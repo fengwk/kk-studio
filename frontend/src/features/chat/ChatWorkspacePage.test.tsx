@@ -42,7 +42,13 @@ const CHAT_ID = 'chat-1'
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
-  const manager = { subscribe: vi.fn(() => () => undefined) }
+  const manager = {
+    subscribe: vi.fn(() => () => undefined),
+    getIdentity: vi.fn(() => null),
+    subscribeIdentity: vi.fn(() => () => undefined),
+    requestThreadRefresh: vi.fn(() => true),
+    requestResourceRefresh: vi.fn(() => true),
+  }
   return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
 })
 

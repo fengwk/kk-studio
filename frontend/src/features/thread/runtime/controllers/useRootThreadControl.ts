@@ -472,7 +472,7 @@ export function useRootThreadControl({
     historyLoading: isDraftHistoryTarget(target) ? treeEntriesQuery.isLoading : controller.messagesLoading,
     historyError: (isDraftHistoryTarget(target) ? treeEntriesQuery.error ?? draftHistory.error : controller.messagesError)
       ? t('ai.chat.history.loadFailed') : null,
-    onRetryHistory: () => { void (isDraftHistoryTarget(target) ? treeEntriesQuery.refetch() : controller.snapshotQuery.refetch()) },
+    onRetryHistory: () => { if (isDraftHistoryTarget(target)) { void treeEntriesQuery.refetch() } else { controller.retrySnapshotSync() } },
   })
   const [commandPaletteVisible, setCommandPaletteVisible] = useState(false)
   useEffect(() => {

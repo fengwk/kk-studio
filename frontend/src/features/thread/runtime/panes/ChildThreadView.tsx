@@ -53,7 +53,7 @@ export function ThreadView({
     viewKey: `thread:${threadId}`,
     historyLoading: projection.messagesLoading,
     historyError: projection.messagesError ? t('ai.chat.history.loadFailed') : null,
-    onRetryHistory: () => { void projection.snapshotQuery.refetch() },
+    onRetryHistory: projection.retrySnapshotSync,
   })
   const presentation = useThreadPresentation({
     views,

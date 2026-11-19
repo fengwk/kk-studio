@@ -1,16 +1,19 @@
 import type { QueryClient } from '@tanstack/react-query'
+import type { ApplicationEventManager } from '@/shared/app-events/manager'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { isBoundTarget, isDraftHistoryTarget, type PaneTarget } from '@/features/thread/runtime/agent-pane'
 import type { HarnessAcceptedCommandsDTO, HarnessSessionEntryDTO, HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
+import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 
 /** 验收成功/迟到结果后的失效：Thread 投影与 owner 的 Session 摘要。 */
 export async function invalidateAcceptanceResult(
   queryClient: QueryClient,
   ownerKey: string | null,
   threadId: string,
+  applicationEvents: ApplicationEventManager,
 ): Promise<void> {
   await Promise.all([
-    queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
+    requestThreadSnapshotRefresh(queryClient, applicationEvents, threadId),
     ...(ownerKey
       ? [
           queryClient.invalidateQueries({
@@ -56,11 +59,10 @@ export async function refreshPaneProjection(
   queryClient: QueryClient,
   ownerKey: string | null,
   target: PaneTarget,
+  applicationEvents: ApplicationEventManager,
 ): Promise<void> {
   if (isBoundTarget(target)) {
-    await queryClient.invalidateQueries({
-      queryKey: queryKeys.threads.snapshot(target.threadId),
-    })
+    await requestThreadSnapshotRefresh(queryClient, applicationEvents, target.threadId)
   }
   if (ownerKey) {
     await queryClient.invalidateQueries({

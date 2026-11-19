@@ -2,10 +2,10 @@
  * 应用事件 WebSocket 协议（/ws/events）。
  *
  * client -> server（JSON 文本）：
- * - {"type":"subscribe","resource":{"kind":"thread"|"canvas"|"thread-tree","id":"<UUID>"}}
+ * - Thread subscribe 可附带 afterEntryId（canonical UUID；无 head 时省略）。
  * - {"type":"subscribe","resource":{"kind":"projects"|"interactions"|"environments"}}
  * - {"type":"unsubscribe","resource":{...}}
- * - {"type":"refresh","resource":{"kind":"thread-tree","id":"<UUID>"}}（已订阅执行树的强制快照）
+ * - {"type":"refresh","resource":{"kind":"thread"|"thread-tree","id":"<UUID>"}}（已订阅资源的强制快照）
  * - {"type":"ide-use","browserSessionId":"<UUID>","revision":"<positive decimal>",
  *    "views":[{"environmentId":"<UUID>","viewId":"<UUID>","claimId":"<UUID>","bindingEpoch":"<positive decimal>"}]}
  *
@@ -14,10 +14,9 @@
  *   连接建立后的第一帧；每次重连都是新的 connectionId。heartbeatIntervalMillis 是服务端
  *   实际使用的文本 heartbeat 间隔，客户端以它推导失联预算，不写死默认值。
  * - {"type":"subscribed","resource":{...},"cursor":"<canonical>"}
- *   订阅已在 wire 上建立（首次与重连后都会发送）；cursor 是资源当前游标。
- * - {"type":"event","resource":{...},"name":"version"|"realtime"|"changed"|"revision","data":{...},"cursor":"<canonical>"}
- *   - thread version：data {"version":"N"}，cursor 必带且与 data.version 完全相等；服务端通过
- *     PostgreSQL notification 感知持久化变更，浏览器只依赖此 version/cursor 契约。
+ *   订阅已在 wire 上建立（首次与重连后都会发送）；Thread 与提示型资源 cursor 恒为 0。
+ * - {"type":"event","resource":{...},"name":"snapshot"|"realtime"|"changed"|"revision","data":{...},"cursor":"<canonical>"}
+ *   - thread snapshot：data 为 HarnessThreadSnapshotDTO，不带 cursor；订阅 ACK cursor 恒为 0。
  *   - thread realtime：data 为 lossy realtime delta envelope 的 JSON 对象（如 MODEL_DELTA），
  *     绝不携带 cursor。
  *   - canvas revision：data {"revision":"N"}，cursor 必带且与 data.revision 完全相等。
@@ -34,11 +33,10 @@
  * 解码是真正严格的：每种 type/name 只接受精确字段集、多余/未知字段一律拒绝；
  * resource 精确只有 kind+id 且 id 必须是 canonical UUID（小写十六进制）；
  * 全局 projects/interactions/environments resource 不带 id；
- * resource/name 组合必须合法（thread 仅 version|realtime，canvas 仅 revision，
- * projects|interactions|environments 仅 changed，thread-tree 仅 snapshot|changed）；cursor 与
- * version data 必须是 canonical 非负十进制字符串，durable 事件的 cursor 必须
- * 存在且与 data 值完全相等，提示型资源（projects/thread-tree/interactions/environments）
- * 的 ack cursor 恒为 '0' 且事件绝不携带 cursor；realtime data 必须是非数组 JSON
+ * resource/name 组合必须合法（thread 仅 snapshot|realtime，canvas 仅 revision，
+ * projects|interactions|environments 仅 changed，thread-tree 仅 snapshot|changed）；canvas revision
+ * 与其 durable cursor 必须是 canonical 非负十进制字符串且完全相等；Thread 与提示型资源的
+ * ack cursor 恒为 '0'，提示型事件及 snapshot/realtime 事件不携带 cursor；realtime data 必须是非数组 JSON
  * 对象且不得携带 cursor。connected 的两个身份与 heartbeatIntervalMillis（不超过
  * Number.MAX_SAFE_INTEGER 的正毫秒数）、revision 与 bindingEpoch 都是
  * canonical UUID / 正十进制字符串（不超过 9223372036854775807）。畸形消息永远不会
@@ -46,12 +44,22 @@
  */
 
 import {
+  ENTRY_TYPE_VALUES,
+  EXECUTION_EXIT_KIND_VALUES,
+  GENERATION_STATUS_VALUES,
+  HARNESS_AGENT_MESSAGE_CONTENT_TYPE_VALUES,
+  THREAD_COMMAND_STATE_VALUES,
+  THREAD_COMMAND_TYPE_VALUES,
   THREAD_EXECUTION_CONTROL_VALUES,
   THREAD_KIND_VALUES,
   THREAD_RUNTIME_STATUS_VALUES,
+  TOOL_INVOCATION_STATUS_VALUES,
   TURN_END_OUTCOME_VALUES,
 } from '@/shared/api/generated/contracts'
-import type { HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
+import type {
+  HarnessThreadSnapshotDTO,
+  HarnessThreadTreeNodeDTO,
+} from '@/shared/api/generated/contracts'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { isRecord } from '@/shared/lib/value'
 
@@ -71,7 +79,7 @@ export type ApplicationEventResource =
   | { kind: 'interactions' }
   | { kind: 'environments' }
 
-export type ApplicationEventName = 'version' | 'realtime' | 'changed' | 'revision' | 'snapshot'
+export type ApplicationEventName = 'realtime' | 'changed' | 'revision' | 'snapshot'
 
 /** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
 type ApplicationEventCursor = string
@@ -103,7 +111,7 @@ export interface ApplicationEventIdeUse {
 }
 
 export type ApplicationEventClientMessage =
-  | { type: 'subscribe'; resource: ApplicationEventResource }
+  | { type: 'subscribe'; resource: ApplicationEventResource; afterEntryId?: string }
   | { type: 'unsubscribe'; resource: ApplicationEventResource }
   | { type: 'refresh'; resource: ApplicationEventResource }
   | {
@@ -113,16 +121,14 @@ export type ApplicationEventClientMessage =
       views: ApplicationEventIdeUseView[]
     }
 
-/** thread 的持久 version 事件：cursor 必带且与 data.version 完全相等。 */
-type ApplicationEventThreadVersionEvent = {
+/** thread 的 realtime 事件：data 为 delta envelope JSON 对象，绝不携带 cursor。 */
+type ApplicationEventThreadSnapshotEvent = {
   type: 'event'
   resource: ApplicationEventResource & { kind: 'thread' }
-  name: 'version'
-  data: { version: ApplicationEventCursor }
-  cursor: ApplicationEventCursor
+  name: 'snapshot'
+  data: HarnessThreadSnapshotDTO
 }
 
-/** thread 的 realtime 事件：data 为 delta envelope JSON 对象，绝不携带 cursor。 */
 type ApplicationEventThreadRealtimeEvent = {
   type: 'event'
   resource: ApplicationEventResource & { kind: 'thread' }
@@ -195,7 +201,7 @@ export type ApplicationEventServerMessage =
   | { type: 'connected'; eventNodeId: string; connectionId: string; heartbeatIntervalMillis: string }
   | { type: 'heartbeat' }
   | { type: 'subscribed'; resource: ApplicationEventResource; cursor: ApplicationEventCursor }
-  | ApplicationEventThreadVersionEvent
+  | ApplicationEventThreadSnapshotEvent
   | ApplicationEventThreadRealtimeEvent
   | ApplicationEventCanvasRevisionEvent
   | ApplicationEventProjectChangedEvent
@@ -298,8 +304,8 @@ function decodeSubscribed(parsed: Record<string, unknown>): ApplicationEventServ
   if (cursor == null) {
     return null
   }
-  // 提示型资源的 ack cursor 恒为 '0'。
-  if (isHintResourceKind(resource.kind) && cursor !== '0') {
+  // Thread 与提示型资源的 ack cursor 恒为 '0'。
+  if ((resource.kind === 'thread' || isHintResourceKind(resource.kind)) && cursor !== '0') {
     return null
   }
   return { type: 'subscribed', resource, cursor }
@@ -346,10 +352,12 @@ function decodeEvent(parsed: Record<string, unknown>): ApplicationEventServerMes
     return null
   }
   const name = parsed.name
-  // thread 仅 version|realtime，canvas 仅 revision，其余提示型资源仅 changed。
+  // thread 仅 snapshot|realtime，canvas 仅 revision，其余提示型资源仅 changed。
   switch (resource.kind) {
     case 'thread':
-      return decodeThreadEvent(parsed, resource, name)
+      return name === 'snapshot' || name === 'realtime'
+        ? decodeThreadEvent(parsed, resource, name)
+        : null
     case 'canvas':
       return name === 'revision' ? decodeCanvasRevisionEvent(parsed, resource) : null
     case 'projects':
@@ -366,18 +374,208 @@ function decodeEvent(parsed: Record<string, unknown>): ApplicationEventServerMes
   }
 }
 
+export function isThreadSnapshot(value: unknown, threadId: string): value is HarnessThreadSnapshotDTO {
+  if (!hasExactFields(value, [
+    'version', 'thread', 'baseEntryId', 'entries', 'queuedCommands',
+    'activeAssistantOutput', 'generationFailures', 'toolInvocations', 'stopReceipts',
+    'unconfirmedExecutions',
+  ]) || !isRecord(value)) {
+    return false
+  }
+  const snapshot = value as unknown as HarnessThreadSnapshotDTO
+  return CANONICAL_DECIMAL.test(snapshot.version)
+    && isThreadDTO(snapshot.thread, threadId, snapshot.version)
+    && (snapshot.baseEntryId === null || isCanonicalUuid(snapshot.baseEntryId))
+    && Array.isArray(snapshot.entries)
+    && snapshot.entries.every(isThreadSnapshotEntry)
+    && Array.isArray(snapshot.queuedCommands)
+    && snapshot.queuedCommands.every(isThreadCommand)
+    && Array.isArray(snapshot.generationFailures)
+    && snapshot.generationFailures.every(isGenerationFailure)
+    && Array.isArray(snapshot.toolInvocations)
+    && snapshot.toolInvocations.every(isToolInvocation)
+    && Array.isArray(snapshot.stopReceipts)
+    && snapshot.stopReceipts.every(isStopReceipt)
+    && Array.isArray(snapshot.unconfirmedExecutions)
+    && snapshot.unconfirmedExecutions.every(isExecutionExit)
+    && (snapshot.activeAssistantOutput === null || isActiveAssistantOutput(snapshot.activeAssistantOutput))
+}
+
+function isThreadDTO(value: unknown, threadId: string, version: string): boolean {
+  const fields = [
+    'threadId', 'parentThreadId', 'name', 'sessionId', 'headEntryId', 'rootThreadId',
+    'yoloEnabled', 'nextCommandSequence', 'version', 'status', 'executionControl',
+    'branchSettings', 'createdAt', 'updatedAt',
+  ]
+  if (!hasExactFields(value, fields) || !isRecord(value)) {
+    return false
+  }
+  const settings = value.branchSettings
+  return value.threadId === threadId
+    && value.version === version
+    && isCanonicalUuid(value.threadId)
+    && (value.parentThreadId === null || isCanonicalUuid(value.parentThreadId))
+    && isCanonicalUuid(value.sessionId)
+    && isCanonicalUuid(value.headEntryId)
+    && isCanonicalUuid(value.rootThreadId)
+    && typeof value.name === 'string'
+    && typeof value.yoloEnabled === 'boolean'
+    && typeof value.nextCommandSequence === 'string'
+    && CANONICAL_DECIMAL.test(value.nextCommandSequence)
+    && THREAD_RUNTIME_STATUS_VALUES.includes(value.status as (typeof THREAD_RUNTIME_STATUS_VALUES)[number])
+    && THREAD_EXECUTION_CONTROL_VALUES.includes(value.executionControl as (typeof THREAD_EXECUTION_CONTROL_VALUES)[number])
+    && isRecord(settings)
+    && hasExactFields(settings, ['agentName', 'execution', 'environmentName'])
+    && typeof settings.agentName === 'string'
+    && (settings.environmentName === null || typeof settings.environmentName === 'string')
+    && isRecord(settings.execution)
+    && hasExactFields(settings.execution, ['driver', 'settings'])
+    && typeof settings.execution.driver === 'string'
+    && finiteNumber(value.createdAt)
+    && finiteNumber(value.updatedAt)
+}
+
+function isThreadSnapshotEntry(value: unknown): boolean {
+  return hasExactFields(value, [
+    'entryId', 'sessionId', 'parentEntryId', 'entryType', 'payload', 'createdAt', 'usageCost',
+  ])
+    && isRecord(value)
+    && isCanonicalUuid(value.entryId)
+    && isCanonicalUuid(value.sessionId)
+    && (value.parentEntryId === null || isCanonicalUuid(value.parentEntryId))
+    && ENTRY_TYPE_VALUES.includes(value.entryType as (typeof ENTRY_TYPE_VALUES)[number])
+    && finiteNumber(value.createdAt)
+    && (value.usageCost === null
+      || (hasExactFields(value.usageCost, ['currency', 'amount'])
+        && isRecord(value.usageCost)
+        && typeof value.usageCost.currency === 'string'
+        && typeof value.usageCost.amount === 'string'))
+}
+
+function isThreadCommand(value: unknown): boolean {
+  return hasExactFields(value, [
+    'threadId', 'sequence', 'type', 'state', 'idempotencyKey', 'payload', 'cancelledAt', 'createdAt',
+  ]) && isRecord(value)
+    && isCanonicalUuid(value.threadId)
+    && typeof value.sequence === 'string' && CANONICAL_DECIMAL.test(value.sequence)
+    && THREAD_COMMAND_TYPE_VALUES.includes(value.type as (typeof THREAD_COMMAND_TYPE_VALUES)[number])
+    && THREAD_COMMAND_STATE_VALUES.includes(value.state as (typeof THREAD_COMMAND_STATE_VALUES)[number])
+    && typeof value.idempotencyKey === 'string'
+    && (value.cancelledAt === null || finiteNumber(value.cancelledAt))
+    && finiteNumber(value.createdAt)
+}
+
+function isGenerationFailure(value: unknown): boolean {
+  return hasExactFields(value, [
+    'generationId', 'turnStartEntryId', 'requestHeadEntryId', 'attempt', 'sequence', 'text',
+    'thinking', 'errorCode', 'errorMessage', 'failedAt', 'retryAt',
+  ]) && isRecord(value)
+    && isCanonicalUuid(value.generationId)
+    && isCanonicalUuid(value.turnStartEntryId)
+    && isCanonicalUuid(value.requestHeadEntryId)
+    && Number.isSafeInteger(value.attempt) && Number(value.attempt) > 0
+    && typeof value.sequence === 'string' && CANONICAL_DECIMAL.test(value.sequence)
+    && ['text', 'thinking', 'errorCode', 'errorMessage'].every((key) => typeof value[key] === 'string')
+    && finiteNumber(value.failedAt) && finiteNumber(value.retryAt)
+}
+
+function isToolInvocation(value: unknown): boolean {
+  const fields = [
+    'id', 'threadId', 'childThreadId', 'turnStartEntryId', 'assistantEntryId', 'callIndex', 'status',
+    'attempt', 'toolCallId', 'queuedBehindToolCallId', 'toolName', 'rendererKey', 'environmentId',
+    'requiredEnvironmentId', 'requiredEnvironmentName', 'environmentWaitFreshnessAt',
+    'waitingForEnvironment', 'argumentsJson', 'approval', 'result', 'error', 'createdAt', 'updatedAt',
+  ]
+  return hasExactFields(value, fields) && isRecord(value)
+    && isCanonicalUuid(value.id) && isCanonicalUuid(value.threadId)
+    && nullableUuid(value.childThreadId) && isCanonicalUuid(value.turnStartEntryId)
+    && isCanonicalUuid(value.assistantEntryId) && Number.isSafeInteger(value.callIndex)
+    && TOOL_INVOCATION_STATUS_VALUES.includes(value.status as (typeof TOOL_INVOCATION_STATUS_VALUES)[number])
+    && Number.isSafeInteger(value.attempt) && Number(value.attempt) > 0
+    && typeof value.toolCallId === 'string' && nullableString(value.queuedBehindToolCallId)
+    && typeof value.toolName === 'string' && typeof value.rendererKey === 'string'
+    && nullableUuid(value.environmentId) && nullableUuid(value.requiredEnvironmentId)
+    && nullableString(value.requiredEnvironmentName)
+    && (value.environmentWaitFreshnessAt === null || finiteNumber(value.environmentWaitFreshnessAt))
+    && typeof value.waitingForEnvironment === 'boolean' && typeof value.argumentsJson === 'string'
+    && finiteNumber(value.createdAt) && finiteNumber(value.updatedAt)
+}
+
+function isStopReceipt(value: unknown): boolean {
+  return hasExactFields(value, [
+    'threadId', 'stopRequestId', 'stoppedTurnEndEntryId', 'cancelledCommandCount', 'cancelledInputs',
+  ]) && isRecord(value)
+    && isCanonicalUuid(value.threadId) && isCanonicalUuid(value.stopRequestId)
+    && nullableUuid(value.stoppedTurnEndEntryId)
+    && Number.isSafeInteger(value.cancelledCommandCount) && Array.isArray(value.cancelledInputs)
+    && value.cancelledInputs.every(isCancelledInput)
+}
+
+function isCancelledInput(value: unknown): boolean {
+  return hasExactFields(value, ['sequence', 'idempotencyKey', 'type', 'payload'])
+    && isRecord(value)
+    && typeof value.sequence === 'string' && CANONICAL_DECIMAL.test(value.sequence)
+    && typeof value.idempotencyKey === 'string'
+    && THREAD_COMMAND_TYPE_VALUES.includes(value.type as (typeof THREAD_COMMAND_TYPE_VALUES)[number])
+}
+
+function isExecutionExit(value: unknown): boolean {
+  return hasExactFields(value, ['executionId', 'invocationId', 'attempt', 'kind', 'registeredAt'])
+    && isRecord(value) && isCanonicalUuid(value.executionId) && isCanonicalUuid(value.invocationId)
+    && Number.isSafeInteger(value.attempt) && Number(value.attempt) > 0
+    && EXECUTION_EXIT_KIND_VALUES.includes(value.kind as (typeof EXECUTION_EXIT_KIND_VALUES)[number])
+    && finiteNumber(value.registeredAt)
+}
+
+function isActiveAssistantOutput(value: unknown): boolean {
+  const fields = [
+    'generationId', 'turnStartEntryId', 'requestHeadEntryId', 'status', 'attempt', 'sequence',
+    'contents', 'error', 'resultEntryId', 'createdAt', 'updatedAt',
+  ]
+  return hasExactFields(value, fields) && isRecord(value)
+    && isCanonicalUuid(value.generationId) && isCanonicalUuid(value.turnStartEntryId)
+    && isCanonicalUuid(value.requestHeadEntryId)
+    && GENERATION_STATUS_VALUES.includes(value.status as (typeof GENERATION_STATUS_VALUES)[number])
+    && Number.isSafeInteger(value.attempt) && Number(value.attempt) > 0
+    && typeof value.sequence === 'string' && CANONICAL_DECIMAL.test(value.sequence)
+    && Array.isArray(value.contents) && value.contents.every(isActiveContent)
+    && (value.error === null || (hasExactFields(value.error, ['code', 'message'])
+      && isRecord(value.error) && typeof value.error.code === 'string' && typeof value.error.message === 'string'))
+    && (value.resultEntryId === null || isCanonicalUuid(value.resultEntryId))
+    && finiteNumber(value.createdAt) && finiteNumber(value.updatedAt)
+}
+
+function isActiveContent(value: unknown): boolean {
+  if (!isRecord(value) || !hasOnlyFields(value, ['type', 'text']) || !('type' in value)) {
+    return false
+  }
+  return HARNESS_AGENT_MESSAGE_CONTENT_TYPE_VALUES.includes(
+    value.type as (typeof HARNESS_AGENT_MESSAGE_CONTENT_TYPE_VALUES)[number],
+  ) && (value.text === undefined || value.text === null || typeof value.text === 'string')
+}
+
+function finiteNumber(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
+}
+
+function nullableString(value: unknown): boolean {
+  return value === null || typeof value === 'string'
+}
+
+function nullableUuid(value: unknown): boolean {
+  return value === null || isCanonicalUuid(value)
+}
+
 function decodeThreadEvent(
   parsed: Record<string, unknown>,
   resource: ApplicationEventResource & { kind: 'thread' },
   name: ApplicationEventName,
 ): ApplicationEventServerMessage | null {
-  if (name === 'version') {
-    const version = parseSingleCursorField(parsed.data, 'version')
-    // durable 事件必须携带 canonical cursor，且与 data.version 完全相等。
-    if (version == null || parsed.cursor !== version) {
+  if (name === 'snapshot') {
+    if (parsed.cursor !== undefined || !isThreadSnapshot(parsed.data, resource.id)) {
       return null
     }
-    return { type: 'event', resource, name: 'version', data: { version }, cursor: version }
+    return { type: 'event', resource, name: 'snapshot', data: parsed.data }
   }
   if (name === 'realtime') {
     // realtime 事件绝不携带 cursor；data 必须是非数组 JSON 对象。
@@ -528,8 +726,7 @@ function isHintResourceKind(kind: ApplicationEventResourceKind): boolean {
 }
 
 function isEventName(value: unknown): value is ApplicationEventName {
-  return value === 'version'
-    || value === 'realtime'
+  return value === 'realtime'
     || value === 'changed'
     || value === 'revision'
     || value === 'snapshot'

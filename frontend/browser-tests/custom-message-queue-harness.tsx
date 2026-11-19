@@ -148,6 +148,7 @@ export function CustomMessageQueueHarness() {
     entries,
     messagesLoading: false,
     messagesError: null,
+    retrySnapshotSync: () => {},
     bodyRef: { current: null },
     queuedCommands,
     queuedCustomMessages,

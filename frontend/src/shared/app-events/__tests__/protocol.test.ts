@@ -18,9 +18,30 @@ const BROWSER_SESSION_ID = 'dddddddd-dddd-4ddd-8ddd-dddddddddddd'
 const ENVIRONMENT_ID = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee'
 const VIEW_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff'
 const CLAIM_ID = '99999999-9999-4999-8999-999999999999'
+const HEAD_ID = '11111111-2222-4333-8444-555555555556'
+const SESSION_ID = '11111111-2222-4333-8444-555555555557'
+
+function threadSnapshot(version = '43') {
+  return {
+    version,
+    thread: {
+      threadId: THREAD_ID, name: 'Thread', sessionId: SESSION_ID, rootThreadId: THREAD_ID,
+      parentThreadId: null, headEntryId: HEAD_ID, version, yoloEnabled: false,
+      nextCommandSequence: '1', status: 'IDLE', executionControl: 'RUNNABLE',
+      branchSettings: {
+        agentName: 'agent', execution: { driver: 'builtin', settings: {} }, environmentName: null,
+      }, createdAt: 0, updatedAt: 0,
+    },
+    baseEntryId: null, entries: [], queuedCommands: [], activeAssistantOutput: null,
+    generationFailures: [], toolInvocations: [], stopReceipts: [], unconfirmedExecutions: [],
+  }
+}
 
 describe('encodeClientMessage', () => {
-  it('encodes subscribe/unsubscribe frames with the resource', () => {
+  it('encodes Thread catch-up cursors and preserves other resource subscribe frames', () => {
+    expect(JSON.parse(encodeClientMessage({
+      type: 'subscribe', resource: threadResource, afterEntryId: HEAD_ID,
+    }))).toEqual({ type: 'subscribe', resource: threadResource, afterEntryId: HEAD_ID })
     expect(
       JSON.parse(encodeClientMessage({ type: 'subscribe', resource: threadResource })),
     ).toEqual({ type: 'subscribe', resource: threadResource })
@@ -128,12 +149,13 @@ describe('decodeServerMessage', () => {
     ).toBeNull()
   })
 
-  it('decodes subscribed frames with the resource and canonical cursor', () => {
+  it('requires the Thread subscribed ack cursor to be zero', () => {
     expect(
       decodeServerMessage(
-        JSON.stringify({  type: 'subscribed', resource: threadResource, cursor: '42' }),
+        JSON.stringify({ type: 'subscribed', resource: threadResource, cursor: '0' }),
       ),
-    ).toEqual({ type: 'subscribed', resource: threadResource, cursor: '42' })
+    ).toEqual({ type: 'subscribed', resource: threadResource, cursor: '0' })
+    expect(decodeServerMessage(JSON.stringify({ type: 'subscribed', resource: threadResource, cursor: '42' }))).toBeNull()
     expect(
       decodeServerMessage(
         JSON.stringify({
@@ -240,25 +262,15 @@ describe('decodeServerMessage', () => {
     ).toEqual({ type: 'resync', resource: treeResource })
   })
 
-  it('decodes event frames with strict per-name data shapes and mandatory matching cursor', () => {
-    expect(
-      decodeServerMessage(
-        JSON.stringify({
-          
-          type: 'event',
-          resource: threadResource,
-          name: 'version',
-          data: { version: '43' },
-          cursor: '43',
-        }),
-      ),
-    ).toEqual({
-      type: 'event',
-      resource: threadResource,
-      name: 'version',
-      data: { version: '43' },
-      cursor: '43',
+  it('decodes thread snapshot and realtime frames with their distinct cursor rules', () => {
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: threadResource, name: 'snapshot', data: threadSnapshot(),
+    }))).toEqual({
+      type: 'event', resource: threadResource, name: 'snapshot', data: threadSnapshot(),
     })
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: threadResource, name: 'snapshot', data: threadSnapshot(), cursor: '43',
+    }))).toBeNull()
     expect(
       decodeServerMessage(
         JSON.stringify({
@@ -738,26 +750,22 @@ describe('decodeServerMessage', () => {
 })
 
 describe('backend wire samples', () => {
-  it('decodes the backend subscribed frame', () => {
-    const raw =
-      `{"type":"subscribed","resource":{"kind":"thread","id":"${THREAD_ID}"},"cursor":"42"}`
-    expect(decodeServerMessage(raw)).toEqual({
-      type: 'subscribed',
-      resource: { kind: 'thread', id: THREAD_ID },
-      cursor: '42',
+  it('decodes the backend subscribed and snapshot frames', () => {
+    const ack = `{"type":"subscribed","resource":{"kind":"thread","id":"${THREAD_ID}"},"cursor":"0"}`
+    expect(decodeServerMessage(ack)).toEqual({
+      type: 'subscribed', resource: { kind: 'thread', id: THREAD_ID }, cursor: '0',
     })
-  })
-
-  it('decodes the backend thread version event frame', () => {
-    const raw =
-      `{"type":"event","resource":{"kind":"thread","id":"${THREAD_ID}"},"name":"version","data":{"version":"43"},"cursor":"43"}`
-    expect(decodeServerMessage(raw)).toEqual({
-      type: 'event',
-      resource: { kind: 'thread', id: THREAD_ID },
-      name: 'version',
-      data: { version: '43' },
-      cursor: '43',
+    const data = threadSnapshot()
+    const event = JSON.stringify({
+      type: 'event', resource: { kind: 'thread', id: THREAD_ID }, name: 'snapshot', data,
     })
+    expect(decodeServerMessage(event)).toEqual({
+      type: 'event', resource: { kind: 'thread', id: THREAD_ID }, name: 'snapshot', data,
+    })
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: { kind: 'thread', id: THREAD_ID }, name: 'version',
+      data: { version: '43' }, cursor: '43',
+    }))).toBeNull()
   })
 
   it('decodes the backend thread realtime event frame (MODEL_DELTA object data)', () => {

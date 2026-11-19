@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useApplicationEvents } from '@/shared/app-events'
 import { useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
@@ -121,6 +122,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
   } = options
   const { t } = useI18n()
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const [initialPendingSlot] = useState(() => pendingSlotView(owner, paneId, target))
   const [pendingAcceptance, setPendingAcceptance] = useState<PendingAcceptance | null>(() => {
     // 栅栏 ref 与 state 同步起步：首帧 hasPendingOperation 就必须看到恢复的未决验收。
@@ -255,7 +257,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
         generationRef.current,
       )
       if (!stillActive) {
-        await invalidateAcceptanceResult(queryClient, ownerKey, response.thread.threadId)
+        await invalidateAcceptanceResult(queryClient, ownerKey, response.thread.threadId, applicationEvents)
         return
       }
       pendingAcceptanceRef.current = null
@@ -282,7 +284,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
       } else {
         storeComposerDraft(composerScope, partsRef.current)
       }
-      await invalidateAcceptanceResult(queryClient, ownerKey, response.thread.threadId)
+      await invalidateAcceptanceResult(queryClient, ownerKey, response.thread.threadId, applicationEvents)
     } catch (error) {
       const currentPending = pendingAcceptanceRef.current
       const stillActive = currentPending != null
@@ -324,7 +326,7 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
         setActionError(errorMessage(error, t('ai.runtime.action.firstSendFailed')))
       }
       if (shouldRefreshAfterAcceptanceFailure(error)) {
-        await refreshPaneProjection(queryClient, ownerKey, targetRef.current)
+        await refreshPaneProjection(queryClient, ownerKey, targetRef.current, applicationEvents)
       }
     }
   }
@@ -400,6 +402,6 @@ export function usePaneAcceptance(options: PaneAcceptanceOptions) {
     handleSubmit,
     retryAcceptance,
     abandonPendingAcceptance,
-    refreshPaneProjection: () => refreshPaneProjection(queryClient, ownerKey, targetRef.current),
+    refreshPaneProjection: () => refreshPaneProjection(queryClient, ownerKey, targetRef.current, applicationEvents),
   }
 }

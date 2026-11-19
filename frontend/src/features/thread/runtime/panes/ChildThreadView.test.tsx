@@ -102,6 +102,7 @@ function createMockProjection(snapshot: HarnessThreadSnapshotDTO): ThreadProject
     entries: snapshot.entries,
     messagesLoading: false,
     messagesError: null,
+    retrySnapshotSync: vi.fn(),
     bodyRef: { current: null },
     queuedCommands: snapshot.queuedCommands,
     queuedCustomMessages,

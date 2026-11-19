@@ -1,9 +1,11 @@
 import { useEffect, useRef, type MutableRefObject } from 'react'
+import { useApplicationEvents } from '@/shared/app-events'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createDecisionId } from '@/features/thread/command-batch-plan'
 import { harnessService } from '@/shared/api/harness-service'
 import type { TranslationKey } from '@/shared/i18n'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 
 interface ThreadApprovalsInput {
   threadId: string
@@ -27,6 +29,7 @@ export function useThreadApprovals({
   reportMutationError,
 }: ThreadApprovalsInput) {
   const queryClient = useQueryClient()
+  const applicationEvents = useApplicationEvents()
   const decisionIdByInvocationRef = useRef(new Map<string, string>())
 
   useEffect(() => {
@@ -61,9 +64,7 @@ export function useThreadApprovals({
         decisionIdByInvocationRef.current.delete(key)
       }
       await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.threads.snapshot(variables.targetThreadId),
-        }),
+        requestThreadSnapshotRefresh(queryClient, applicationEvents, variables.targetThreadId),
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
       ])
     },

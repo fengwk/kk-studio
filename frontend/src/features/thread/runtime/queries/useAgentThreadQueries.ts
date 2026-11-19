@@ -2,10 +2,7 @@ import { useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { readInteractionsChangedRoot } from '@/shared/app-events'
-import { useResourceSync } from '@/shared/app-events/useResourceSync'
-import { coordinateQuerySync } from '@/shared/app-events/query-sync-coordinator'
-import { useReadModelFreshnessRecheck } from '@/shared/lib/useReadModelFreshnessRecheck'
+import { useThreadSnapshotSync } from '@/features/thread/runtime/state/thread-snapshot-sync'
 import { fetchThreadSnapshot } from '@/features/thread/runtime/state/thread-snapshot-cache'
 
 export function useAgentThreadQueries(threadId: string) {
@@ -47,28 +44,14 @@ export function useAgentThreadQueries(threadId: string) {
   const stopReceipts = useMemo(() => snapshot?.stopReceipts ?? [], [snapshot])
   // 未确认退出事实是后端快照的必需字段：只在快照尚未加载时为空，不静默兜底缺失契约。
   const unconfirmedExecutions = snapshot == null ? [] : snapshot.unconfirmedExecutions
-  const environmentTools = toolInvocations.filter(
-    (invocation) => invocation.status === 'READY' && invocation.requiredEnvironmentId != null,
-  )
-  const rootThreadId = thread?.rootThreadId
-  const hasEnvironmentTools = environmentTools.length > 0
-  const deadlines = environmentTools.flatMap((invocation) => {
-    const at = invocation.environmentWaitFreshnessAt
-    return at == null ? [] : [at]
-  })
-  const earliest = deadlines.length > 0 ? Math.min(...deadlines) : null
-  useReadModelFreshnessRecheck(queryKeys.threads.snapshot(threadId), earliest)
-  useResourceSync(hasEnvironmentTools && rootThreadId ? { kind: 'interactions' } : null, {
-    sync: () => coordinateQuerySync(queryClient, queryKeys.threads.snapshot(threadId), () =>
-      queryClient.invalidateQueries({ queryKey: queryKeys.threads.snapshot(threadId) }),
-    ),
-    syncOn: (name, data) => name === 'changed' && readInteractionsChangedRoot(data) === rootThreadId,
-  })
+  const threadSnapshotSync = useThreadSnapshotSync(threadId, snapshot != null)
 
   return {
     agentsQuery,
     modelsQuery,
     snapshotQuery,
+    snapshotSyncError: threadSnapshotSync.error,
+    retrySnapshotSync: threadSnapshotSync.retry,
     agents,
     models,
     thread,

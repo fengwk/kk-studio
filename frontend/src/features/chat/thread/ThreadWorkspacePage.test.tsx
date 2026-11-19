@@ -23,7 +23,13 @@ const CHILD_THREAD_ID = '00000000-0000-0000-0000-000000000999'
 const OTHER_CHILD_THREAD_ID = '00000000-0000-0000-0000-000000000998'
 
 const { fakeApplicationEvents } = vi.hoisted(() => {
-  const manager = { subscribe: vi.fn(() => () => undefined) }
+  const manager = {
+    subscribe: vi.fn(() => () => undefined),
+    getIdentity: vi.fn(() => null),
+    subscribeIdentity: vi.fn(() => () => undefined),
+    requestThreadRefresh: vi.fn(() => true),
+    requestResourceRefresh: vi.fn(() => true),
+  }
   return { fakeApplicationEvents: { useApplicationEvents: () => manager } }
 })
 

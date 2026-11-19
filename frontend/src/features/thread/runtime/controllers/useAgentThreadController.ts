@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useApplicationEvents } from '@/shared/app-events'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ThreadCommand } from '@/features/thread/runtime/thread-panel'
 import type { ThreadProjection } from '@/features/thread/runtime/useThreadProjection'
@@ -24,6 +25,7 @@ import {
 import { isConflictError } from '@/shared/api/client'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
+import { requestThreadSnapshotRefresh } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { translate, useI18n, type TranslationKey } from '@/shared/i18n'
 import {
   presentConflict,
@@ -46,6 +48,7 @@ export function useAgentThreadController(
   buildBatch: ((parts: ComposerPart[]) => CommandBatchPlan | null) | null = null,
 ) {
   const { t } = useI18n()
+  const applicationEvents = useApplicationEvents()
   const threadId = projection.threadId
   const boundThreadIdRef = useRef(threadId)
   const bindingEpochRef = useRef(0)
@@ -130,9 +133,7 @@ export function useAgentThreadController(
       if (isStillBound(variables.operationThreadId, variables.operationEpoch)) {
         setConflict(null)
       }
-      await queryClient.invalidateQueries({
-        queryKey: queryKeys.threads.snapshot(variables.operationThreadId),
-      })
+      await requestThreadSnapshotRefresh(queryClient, applicationEvents, variables.operationThreadId)
     },
   })
 
@@ -153,9 +154,7 @@ export function useAgentThreadController(
           }),
         )
       }
-      void queryClient.invalidateQueries({
-        queryKey: queryKeys.threads.snapshot(targetThreadId),
-      })
+      void requestThreadSnapshotRefresh(queryClient, applicationEvents, targetThreadId)
       return
     }
     setConflict(null)
@@ -196,9 +195,7 @@ export function useAgentThreadController(
       }
       // 成功后绝不再清空 draft，保留用户飞行期间输入的下一条草稿内容
       await Promise.all([
-        queryClient.invalidateQueries({
-          queryKey: queryKeys.threads.snapshot(originThreadId),
-        }),
+        requestThreadSnapshotRefresh(queryClient, applicationEvents, originThreadId),
         queryClient.invalidateQueries({ queryKey: queryKeys.chats.all }),
       ])
       return
@@ -208,9 +205,7 @@ export function useAgentThreadController(
       if (stillBound) {
         reportMutationError(error, 'ai.runtime.action.sendFailed', originThreadId)
       } else {
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.threads.snapshot(originThreadId),
-        })
+        void requestThreadSnapshotRefresh(queryClient, applicationEvents, originThreadId)
       }
       if (isDefiniteAcceptanceFailure(error)) {
         clearBoundPendingMessage(originThreadId, currentRequest)
@@ -416,7 +411,7 @@ export function useAgentThreadController(
   return {
     ...projection,
     messagesLoading: snapshotQuery.isLoading,
-    messagesError: snapshotQuery.error,
+    messagesError: snapshotQuery.error ?? projection.messagesError,
     draft: draftRecord.draft,
     draftRestoreError: draftRecord.draftRestoreError,
     retryDraftRestore: draftRecord.retryDraftRestore,

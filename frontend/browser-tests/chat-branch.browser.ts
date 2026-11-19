@@ -130,6 +130,7 @@ interface Recorded {
   branchPreviews: Array<{ startEntryId: string; commands: Array<Record<string, unknown>> }>
   modelRequestDebug: Array<{ model: unknown; environmentName: string | null }>
   treeReads: number
+  snapshotReads: number
   completeGrandchild: () => void
 }
 
@@ -185,13 +186,61 @@ async function installChatApi(
   }))
   const sockets: WebSocketRoute[] = []
   const recorded: Recorded = {
-    commandBatches: [], branchPreviews: [], modelRequestDebug: [], treeReads: 0,
+    commandBatches: [], branchPreviews: [], modelRequestDebug: [], treeReads: 0, snapshotReads: 0,
     completeGrandchild: () => {
       grandCompleted = true
+      const entryIdByOriginal = new Map(entryList.map((entry, index) => [
+        entry.entryId,
+        `dddddddd-0000-4000-8000-${String(index + 1).padStart(12, '0')}`,
+      ]))
+      const backgroundEntryId = 'eeeeeeee-0000-4000-8000-000000000001'
+      const currentThread = {
+        ...boundThread,
+        threadId: GRANDCHILD_ID,
+        name: 'main',
+        parentThreadId: CHILD_ID,
+        rootThreadId: THREAD_ID,
+        headEntryId: backgroundEntryId,
+        version: '1',
+        status: 'IDLE' as const,
+        branchSettings: {
+          ...boundThread.branchSettings,
+          agentName: 'researcher',
+          execution: { driver: 'builtin', settings: { modelName: 'MiniMax', variant: 'deep' } },
+        },
+      }
+      const snapshotEntries = entryList
+        .filter((entry) => entry.entryId !== 'entry-sibling')
+        .map((entry) => ({
+          ...entry,
+          entryId: entryIdByOriginal.get(entry.entryId)!,
+          parentEntryId: entry.parentEntryId == null ? null : entryIdByOriginal.get(entry.parentEntryId)!,
+        }))
+      snapshotEntries.push({
+        entryId: backgroundEntryId,
+        sessionId: SESSION_ID,
+        parentEntryId: entryIdByOriginal.get(boundThread.headEntryId)!,
+        entryType: 'MESSAGE',
+        payload: { message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'Background completion persisted' }] } },
+        createdAt: 1790813040,
+        usageCost: null,
+      })
+      const snapshot = {
+        version: '1',
+        thread: currentThread,
+        baseEntryId: null,
+        entries: snapshotEntries,
+        queuedCommands: [],
+        activeAssistantOutput: null,
+        toolInvocations: [],
+        generationFailures: [],
+        stopReceipts: [],
+        unconfirmedExecutions: [],
+      }
       for (const socket of sockets) {
         socket.send(JSON.stringify({
           type: 'event', resource: { kind: 'thread', id: GRANDCHILD_ID },
-          name: 'version', data: { version: '1' }, cursor: '1',
+          name: 'snapshot', data: snapshot,
         }))
         sendTreeSnapshot(socket)
       }
@@ -338,6 +387,7 @@ async function installChatApi(
       return
     }
     if (path === `/api/harness/threads/${CHILD_ID}` || path === `/api/harness/threads/${GRANDCHILD_ID}`) {
+      recorded.snapshotReads += 1
       const grandchild = path.endsWith(GRANDCHILD_ID)
       await route.fulfill({ json: {
         version: grandchild && grandCompleted ? '1' : '0',
@@ -971,9 +1021,11 @@ for (const [layout, width] of [['split-3', 1440], ['grid-4', 360], ['grid-4', 32
     await expect(source.locator('.chat-pane-layer[hidden]').first()).toHaveAttribute('inert', '')
     expect(await savedEditor?.evaluate((element) => element.isConnected)).toBe(true)
     const treeReads = recorded.treeReads
+    const snapshotReads = recorded.snapshotReads
     recorded.completeGrandchild()
     await expect(childLog).toContainText('Background completion persisted')
     await expect.poll(() => recorded.treeReads).toBe(treeReads)
+    await expect.poll(() => recorded.snapshotReads).toBe(snapshotReads)
     await expect(header.locator('.workspace-view-identity')).toHaveText('researcher · MiniMax (deep)')
     await expect(source.locator('.chat-pane-layer:not([hidden]) .thread-composer')).toHaveCount(0)
     await expect(page.locator('.agent-pane-thread-heading:visible')).toHaveCount(0)
