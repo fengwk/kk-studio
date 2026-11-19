@@ -32,8 +32,8 @@ import java.util.UUID;
  * 事件通道帧的严格 JSON codec：客户端帧手工字段校验（duplicate/trailing/unknown/missing/wrong-type 全部拒绝），服务端帧确定性编码。
  *
  * <p>客户端帧 {@code {type:'subscribe'|'unsubscribe'|'refresh',resource}} 与 {@code
- * {type:'ide-use',browserSessionId,revision,views}} 字段集精确。refresh 只允许 thread-tree
- * 资源，服务端校验资源已订阅。服务端帧 {@code connected{eventNodeId,connectionId,heartbeatIntervalMillis}} / {@code
+ * {type:'ide-use',browserSessionId,revision,views}} 字段集精确。refresh 只允许已订阅的 thread 或 thread-tree
+ * 资源。服务端帧 {@code connected{eventNodeId,connectionId,heartbeatIntervalMillis}} / {@code
  * subscribed{resource,cursor}} / {@code event{resource,name,data}} / {@code resync{resource}} /
  * {@code heartbeat} / {@code ide-use-accepted{revision}} / {@code
  * error{code,message[,resource]}}。游标是 canonical 非负十进制字符串（{@code 0|[1-9][0-9]*}，不超 bigint）；revision
@@ -49,6 +49,7 @@ final class EventFrameCodec {
   static final String INVALID_REFRESH_RESOURCE = "INVALID_REFRESH_RESOURCE";
   static final String RESOURCE_NOT_SUBSCRIBED = "RESOURCE_NOT_SUBSCRIBED";
   static final String TREE_SNAPSHOT_FAILED = "TREE_SNAPSHOT_FAILED";
+  static final String THREAD_SNAPSHOT_FAILED = "THREAD_SNAPSHOT_FAILED";
 
   private static final ObjectMapper MAPPER =
       JsonMapper.builder()
@@ -90,7 +91,12 @@ final class EventFrameCodec {
     UNSUBSCRIBE
   }
 
-  record SubscriptionFrame(SubscriptionType type, ResourceKey resource) implements ClientFrame {}
+  record SubscriptionFrame(SubscriptionType type, ResourceKey resource, UUID afterEntryId)
+      implements ClientFrame {
+    SubscriptionFrame(SubscriptionType type, ResourceKey resource) {
+      this(type, resource, null);
+    }
+  }
 
   record RefreshFrame(ResourceKey resource) implements ClientFrame {}
 
@@ -109,9 +115,21 @@ final class EventFrameCodec {
     String typeName = requiredText(node, "type", "frame");
     return switch (typeName) {
       case "subscribe" -> {
-        JsonCodecSupport.requireFields(node, SUBSCRIPTION_FIELDS, "frame");
-        yield new SubscriptionFrame(
-            SubscriptionType.SUBSCRIBE, parseResource(node.get("resource")));
+        JsonNode resourceNode = node.get("resource");
+        boolean thread =
+            resourceNode != null
+                && resourceNode.isObject()
+                && resourceNode.has("kind")
+                && resourceNode.get("kind").isString()
+                && THREAD.equals(resourceNode.get("kind").stringValue());
+        JsonCodecSupport.requireFields(
+            node, SUBSCRIPTION_FIELDS, thread ? Set.of("afterEntryId") : Set.of(), "frame");
+        ResourceKey resource = parseResource(resourceNode);
+        UUID afterEntryId =
+            node.has("afterEntryId")
+                ? parseUuid(requiredText(node, "afterEntryId", "frame"), "frame.afterEntryId")
+                : null;
+        yield new SubscriptionFrame(SubscriptionType.SUBSCRIBE, resource, afterEntryId);
       }
       case "unsubscribe" -> {
         JsonCodecSupport.requireFields(node, SUBSCRIPTION_FIELDS, "frame");
@@ -164,6 +182,10 @@ final class EventFrameCodec {
     if (cursor < 0) {
       throw new IllegalArgumentException("cursor must be non-negative");
     }
+    // Thread snapshot subscriptions use a zero ack cursor; Thread.version remains business data.
+    if (resource.kind() == ResourceKind.THREAD) {
+      cursor = 0;
+    }
     // 提示型资源没有持久游标：全局资源与按 key 提示的 Tree 资源 ack 恒为 0。
     if (cursor != 0 && isHintResource(resource.kind())) {
       throw new IllegalArgumentException("hint resource cursor must be zero");
@@ -179,8 +201,7 @@ final class EventFrameCodec {
    * 编码 {@code event} 帧：统一 {@code {type,resource,name,data}}；前进事件额外携带 canonical {@code
    * cursor}（本次前进到的值），realtime 事件的 {@code data} 为 realtime codec JSON 对象。
    *
-   * <p>前进事件的 {@code name} 与 {@code data} 字段名跟随资源坐标系：Thread 是 {@code version}，Canvas 是 {@code
-   * revision}（与 {@code canvas_document.revision} 同名，不保留 version 别名）。
+   * <p>Canvas 的前进事件携带 {@code revision} cursor；Thread snapshot 和 realtime event 不带 cursor。
    */
   String event(ResourceKey resource, Signal signal) {
     Objects.requireNonNull(signal, "signal");
@@ -192,6 +213,12 @@ final class EventFrameCodec {
       node.put("name", coordinate);
       node.put("cursor", version.version());
       node.set("data", dataNode(coordinate, version.version()));
+    } else if (signal instanceof Signal.ThreadSnapshot snapshot) {
+      if (resource.kind() != ResourceKind.THREAD) {
+        throw new IllegalArgumentException("thread snapshot signal requires a thread resource");
+      }
+      node.put("name", "snapshot");
+      node.set("data", MAPPER.valueToTree(snapshot.snapshot()));
     } else if (signal instanceof Signal.Realtime realtime) {
       if (resource.kind() != ResourceKind.THREAD) {
         throw new IllegalArgumentException("realtime signal requires a thread resource");
@@ -250,7 +277,7 @@ final class EventFrameCodec {
   /** 前进事件在 wire 上的坐标名：Thread 用 {@code version}，Canvas 用 {@code revision}。 */
   private static String coordinateName(ResourceKey resource) {
     return switch (resource.kind()) {
-      case THREAD -> "version";
+      case THREAD -> throw new IllegalArgumentException("thread has no version event");
       case CANVAS -> "revision";
       default -> throw new IllegalArgumentException("version signal requires a versioned resource");
     };
@@ -398,7 +425,8 @@ final class EventFrameCodec {
 
   /** 提示型（无持久游标）资源：ack cursor 恒为 0，只提示回读。 */
   private static boolean isHintResource(ResourceKind kind) {
-    return kind == ResourceKind.PROJECTS
+    return kind == ResourceKind.THREAD
+        || kind == ResourceKind.PROJECTS
         || kind == ResourceKind.THREAD_TREE
         || kind == ResourceKind.INTERACTIONS
         || kind == ResourceKind.ENVIRONMENTS;

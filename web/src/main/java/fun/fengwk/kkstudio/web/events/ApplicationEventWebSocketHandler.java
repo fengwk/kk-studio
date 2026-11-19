@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.web.events.EventFrameCodec.SubscriptionFrame;
 
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
@@ -256,6 +257,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     private final long heartbeatIntervalMillis;
     private final AsyncTextSender sender;
     private final Map<ResourceKey, Subscription> subscriptions = new ConcurrentHashMap<>();
+    private final Set<ResourceKey> pausedSnapshots = ConcurrentHashMap.newKeySet();
     private final Object closeLock = new Object();
     private long lastPongNanos;
     private long lastHeartbeatNanos;
@@ -315,7 +317,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       switch (frame) {
         case SubscriptionFrame subscription -> {
           if (subscription.type() == EventFrameCodec.SubscriptionType.SUBSCRIBE) {
-            subscribe(subscription.resource());
+            subscribe(subscription.resource(), subscription.afterEntryId());
           } else {
             unsubscribe(subscription.resource());
           }
@@ -325,7 +327,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       }
     }
 
-    private void subscribe(ResourceKey resource) {
+    private void subscribe(ResourceKey resource, UUID afterEntryId) {
       synchronized (closeLock) {
         if (closed) {
           return; // 连接已关闭：不再登记新订阅
@@ -333,9 +335,28 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         if (subscriptions.containsKey(resource)) {
           return; // 重复 subscribe 幂等
         }
+        Subscription[] current = new Subscription[1];
         Subscription subscription;
         try {
-          subscription = hub.subscribe(resource, signal -> enqueueSignal(resource, signal));
+          subscription =
+              hub.subscribe(
+                  resource,
+                  signal -> {
+                    synchronized (closeLock) {
+                      if (closed || subscriptions.get(resource) != current[0]) {
+                        return;
+                      }
+                      if (signal instanceof Signal.ThreadSnapshot) {
+                        if (!enqueueSignal(resource, signal)) {
+                          throw new IllegalStateException("thread snapshot was not queued");
+                        }
+                      } else {
+                        enqueueSignal(resource, signal);
+                      }
+                    }
+                  },
+                  afterEntryId);
+          current[0] = subscription;
         } catch (IllegalArgumentException error) {
           // 资源不存在：只回资源级 error，保持连接。
           if (!sender.enqueue(
@@ -349,8 +370,9 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
           fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
           return;
         }
-        subscription.activate();
         subscriptions.put(resource, subscription);
+        pausedSnapshots.remove(resource);
+        subscription.activate();
       }
     }
 
@@ -358,6 +380,7 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
       synchronized (closeLock) {
         Subscription subscription = subscriptions.remove(resource);
         if (subscription != null) {
+          pausedSnapshots.remove(resource);
           subscription.close();
         }
       }
@@ -369,10 +392,28 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         if (closed) {
           return;
         }
+        if (resource.kind() == ApplicationEventHub.ResourceKind.THREAD) {
+          Subscription subscription = subscriptions.get(resource);
+          if (subscription == null) {
+            enqueueResourceError(
+                EventFrameCodec.RESOURCE_NOT_SUBSCRIBED,
+                "thread resource is not subscribed on this connection",
+                resource);
+            return;
+          }
+          pausedSnapshots.remove(resource);
+          if (!hub.requestThreadSnapshot(subscription)) {
+            enqueueResourceError(
+                EventFrameCodec.THREAD_SNAPSHOT_FAILED,
+                "thread snapshot could not be requested",
+                resource);
+          }
+          return;
+        }
         if (resource.kind() != ApplicationEventHub.ResourceKind.THREAD_TREE) {
           enqueueResourceError(
               EventFrameCodec.INVALID_REFRESH_RESOURCE,
-              "refresh is only supported for thread-tree resources",
+              "refresh is only supported for thread and thread-tree resources",
               resource);
           return;
         }
@@ -389,6 +430,12 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
               "thread-tree snapshot could not be requested",
               resource);
         }
+      }
+    }
+
+    private void pauseThreadSnapshots(ResourceKey resource) {
+      if (pausedSnapshots.add(resource) && !sender.enqueue(codec.resync(resource))) {
+        fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
       }
     }
 
@@ -429,7 +476,23 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
     }
 
     /** 资源信号编码为帧后入队；队列满视为过载，发 BACKPRESSURE 后关闭连接。 */
-    private void enqueueSignal(ResourceKey resource, Signal signal) {
+    private boolean enqueueSignal(ResourceKey resource, Signal signal) {
+      if (resource.kind() == ApplicationEventHub.ResourceKind.THREAD) {
+        if (pausedSnapshots.contains(resource)) {
+          return false;
+        }
+        if (signal instanceof Signal.Resync) {
+          pauseThreadSnapshots(resource);
+          return false;
+        }
+      }
+      if (signal instanceof Signal.ThreadSnapshotFailed) {
+        enqueueResourceError(
+            EventFrameCodec.THREAD_SNAPSHOT_FAILED,
+            "authoritative thread snapshot failed",
+            resource);
+        return false;
+      }
       String frame;
       if (signal instanceof Signal.Resync) {
         frame = codec.resync(resource);
@@ -443,8 +506,14 @@ public final class ApplicationEventWebSocketHandler extends TextWebSocketHandler
         frame = codec.event(resource, signal);
       }
       if (!sender.enqueue(frame)) {
+        if (signal instanceof Signal.ThreadSnapshot && sender.exceedsFrameBudget(frame)) {
+          pauseThreadSnapshots(resource);
+          return false;
+        }
         fail(EventFrameCodec.BACKPRESSURE, "event queue is full", StatusCode.TRY_AGAIN_LATER);
+        return false;
       }
+      return true;
     }
 
     private void heartbeat(long nowNanos) {

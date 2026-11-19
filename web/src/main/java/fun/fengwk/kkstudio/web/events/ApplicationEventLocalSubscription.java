@@ -10,8 +10,8 @@ import java.util.ArrayDeque;
 /**
  * 一个本地订阅：激活前缓冲信号，激活后按到达顺序投递，关闭后丢弃全部缓冲。
  *
- * <p>{@link #deliver} 的 version 过滤在锁外完成（cursor 不可变），其余判断与缓冲都在本订阅的锁内；{@link #markClosed()} 由 hub
- * 在资源状态锁内调用，因此关闭与投递之间不存在半可见状态。
+ * <p>{@link #deliver} 的 Canvas revision 过滤在锁外完成（cursor 不可变），其余判断与缓冲都在本订阅的锁内；{@link #markClosed()} 由
+ * hub 在资源状态锁内调用，因此关闭与投递之间不存在半可见状态。
  */
 final class ApplicationEventLocalSubscription implements Subscription {
 
@@ -20,6 +20,7 @@ final class ApplicationEventLocalSubscription implements Subscription {
   private final int maxBufferedSignals;
   private final Sink sink;
   private final Release release;
+  private final Runnable onActivate;
   private final Object lock = new Object();
   private boolean active;
   private boolean closed;
@@ -29,12 +30,18 @@ final class ApplicationEventLocalSubscription implements Subscription {
   private boolean pendingCollapsed;
 
   ApplicationEventLocalSubscription(
-      ResourceKey resource, long cursor, Sink sink, int maxBufferedSignals, Release release) {
+      ResourceKey resource,
+      long cursor,
+      Sink sink,
+      int maxBufferedSignals,
+      Release release,
+      Runnable onActivate) {
     this.resource = resource;
     this.cursor = cursor;
     this.sink = sink;
     this.maxBufferedSignals = maxBufferedSignals;
     this.release = release;
+    this.onActivate = onActivate;
   }
 
   @Override
@@ -49,16 +56,20 @@ final class ApplicationEventLocalSubscription implements Subscription {
 
   @Override
   public void activate() {
+    ArrayDeque<Signal> buffered;
     synchronized (lock) {
       if (closed) {
         return;
       }
       active = true;
       pendingCollapsed = false;
-      while (!pending.isEmpty()) {
-        sink.accept(pending.poll());
-      }
+      buffered = new ArrayDeque<>(pending);
+      pending.clear();
     }
+    while (!buffered.isEmpty()) {
+      sink.accept(buffered.poll());
+    }
+    onActivate.run();
   }
 
   @Override
@@ -75,7 +86,7 @@ final class ApplicationEventLocalSubscription implements Subscription {
     }
   }
 
-  /** 投递信号；version 信号过滤掉不晚于 ack cursor 的陈旧值。 */
+  /** 投递信号；Canvas revision 信号过滤掉不晚于 ack cursor 的陈旧值。 */
   void deliver(Signal signal) {
     if (signal instanceof Signal.Version version) {
       if (Long.parseLong(version.version()) <= cursor) {

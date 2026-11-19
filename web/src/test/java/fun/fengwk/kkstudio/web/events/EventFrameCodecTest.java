@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.web.events;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -16,6 +17,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.harness.tool.ToolResult;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
@@ -55,6 +57,15 @@ class EventFrameCodecTest {
             "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
                 + THREAD
                 + "\"}}"));
+    assertEquals(
+        new EventFrameCodec.SubscriptionFrame(
+            EventFrameCodec.SubscriptionType.SUBSCRIBE,
+            THREAD_KEY,
+            UUID.fromString("00000000-0000-0000-0000-000000000007")),
+        CODEC.decode(
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+                + THREAD
+                + "\"},\"afterEntryId\":\"00000000-0000-0000-0000-000000000007\"}"));
     assertEquals(
         new EventFrameCodec.SubscriptionFrame(
             EventFrameCodec.SubscriptionType.UNSUBSCRIBE, CANVAS_KEY),
@@ -127,24 +138,27 @@ class EventFrameCodecTest {
 
   /** 测试意图：游标与前进坐标在 wire 上是 canonical 十进制字符串；极值（long 上限、超过 double 精确整数范围的值）逐字符保留， 不经任何浮点往返。 */
   @Test
-  void roundTripsExactExtremeCursorAndCoordinateStrings() {
+  void canvasRevisionRetainsExactExtremeCoordinateStrings() {
     String expectedMaxCursor =
-        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-            + THREAD
+        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+            + CANVAS
             + "\"},\"cursor\":\"9223372036854775807\"}";
-    assertEquals(expectedMaxCursor, CODEC.subscribed(THREAD_KEY, Long.MAX_VALUE));
+    assertEquals(expectedMaxCursor, CODEC.subscribed(CANVAS_KEY, Long.MAX_VALUE));
     assertEquals(
-        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-            + THREAD
+        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+            + CANVAS
             + "\"},\"cursor\":\"9007199254740993\"}",
-        CODEC.subscribed(THREAD_KEY, 9007199254740993L));
+        CODEC.subscribed(CANVAS_KEY, 9007199254740993L));
 
     // 前进坐标是 canonical 十进制字符串（runtime 侧不变量），codec 原样放入 cursor 与 data。
     assertEquals(
-        "{\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-            + THREAD
-            + "\"},\"name\":\"version\",\"cursor\":\"9007199254740993\",\"data\":{\"version\":\"9007199254740993\"}}",
-        CODEC.event(THREAD_KEY, new Signal.Version("9007199254740993")));
+        "{\"type\":\"event\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+            + CANVAS
+            + "\"},\"name\":\"revision\",\"cursor\":\"9007199254740993\",\"data\":{\"revision\":\"9007199254740993\"}}",
+        CODEC.event(CANVAS_KEY, new Signal.Version("9007199254740993")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () -> CODEC.event(THREAD_KEY, new Signal.Version("9007199254740993")));
   }
 
   @Test
@@ -166,12 +180,27 @@ class EventFrameCodecTest {
   }
 
   @Test
-  void rejectsAfterCursorAndUnknownFields() {
+  void acceptsOnlyCanonicalNonNullThreadAfterEntryId() {
     String resource = "{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}";
     assertThrows(
         IllegalArgumentException.class,
         () ->
-            CODEC.decode("{\"type\":\"subscribe\",\"resource\":" + resource + ",\"after\":\"0\"}"));
+            CODEC.decode(
+                "{\"type\":\"subscribe\",\"resource\":" + resource + ",\"afterEntryId\":null}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"type\":\"subscribe\",\"resource\":"
+                    + resource
+                    + ",\"afterEntryId\":\"not-a-uuid\"}"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            CODEC.decode(
+                "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
+                    + CANVAS
+                    + "\"},\"afterEntryId\":\"00000000-0000-0000-0000-000000000007\"}"));
     assertThrows(
         IllegalArgumentException.class,
         () ->
@@ -244,11 +273,11 @@ class EventFrameCodecTest {
   }
 
   @Test
-  void encodesSubscribedFrameWithVersionAndCanonicalCursor() {
+  void encodesThreadSubscribedFrameWithZeroCursor() {
     assertEquals(
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
-            + "\"},\"cursor\":\"7\"}",
+            + "\"},\"cursor\":\"0\"}",
         CODEC.subscribed(THREAD_KEY, 7L));
     assertEquals(
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"projects\"},\"cursor\":\"0\"}",
@@ -273,11 +302,14 @@ class EventFrameCodecTest {
 
   @Test
   void encodesEventFramesWithUnifiedNameAndDataShape() {
-    assertEquals(
-        "{\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-            + THREAD
-            + "\"},\"name\":\"version\",\"cursor\":\"8\",\"data\":{\"version\":\"8\"}}",
-        CODEC.event(THREAD_KEY, new Signal.Version("8")));
+    assertThrows(
+        IllegalArgumentException.class, () -> CODEC.event(THREAD_KEY, new Signal.Version("8")));
+    HarnessThreadSnapshotDTO threadSnapshot = new HarnessThreadSnapshotDTO();
+    String threadEvent = CODEC.event(THREAD_KEY, new Signal.ThreadSnapshot(threadSnapshot));
+    assertTrue(threadEvent.contains("\"name\":\"snapshot\""));
+    assertTrue(threadEvent.contains("\"data\":{"));
+    assertTrue(threadEvent.contains("\"entries\""));
+    assertFalse(threadEvent.contains("\"cursor\""));
     assertEquals(
         "{\"type\":\"event\",\"resource\":{\"kind\":\"canvas\",\"id\":\""
             + CANVAS
