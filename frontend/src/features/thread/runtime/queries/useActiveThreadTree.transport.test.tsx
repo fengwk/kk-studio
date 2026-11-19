@@ -407,6 +407,30 @@ describe('execution tree HTTP Instant contract', () => {
     ])
   })
 
+  it('fences the old overflow read at subscribe ACK before an immediate new ref', async () => {
+    reply([node(ROOT, null), node(CHILD, ROOT)])
+    const { client, sockets } = renderPanel()
+    await screen.findByRole('link')
+    const socket = sockets.openLatest()
+    const resource = { kind: 'thread-tree', id: ROOT } as const
+    const notice = { type: 'snapshot-ref', resource } as const
+    let resolveOld!: (response: Response) => void
+    transport.mockImplementationOnce(() => new Promise((resolve) => { resolveOld = resolve }))
+    act(() => socket.emitServer(notice))
+    await waitFor(() => expect(transport).toHaveBeenCalledTimes(2))
+
+    const current = [node(ROOT, null), { ...node(CHILD, ROOT), name: 'new subscription' }]
+    reply(current)
+    act(() => {
+      socket.emitServer({ type: 'subscribed', resource, cursor: '0' })
+      socket.emitServer(notice)
+    })
+    await waitFor(() => expect(client.getQueryData(['threads', 'tree', CHILD])).toEqual(current))
+    await act(async () => resolveOld(new Response('late failure', { status: 500 })))
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    expect(transport).toHaveBeenCalledTimes(3)
+  })
+
   it('reports a failed overflow read and recovers on a later explicit refresh', async () => {
     const initial = [node(ROOT, null), node(CHILD, ROOT)]
     reply(initial)

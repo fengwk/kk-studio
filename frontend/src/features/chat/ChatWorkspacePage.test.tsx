@@ -54,6 +54,7 @@ const { fakeApplicationEvents } = vi.hoisted(() => {
 
 vi.mock('@/shared/app-events', () => ({
   useApplicationEvents: fakeApplicationEvents.useApplicationEvents,
+  useApplicationEventConnectionState: () => ({ status: 'ready' as const, reason: null }),
 }))
 vi.mock('@/shared/api/agent-service', () => ({
   agentService: {

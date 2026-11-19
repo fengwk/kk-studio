@@ -8,6 +8,7 @@ import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { INVALID_EVENT_PAYLOAD, isThreadSnapshot } from '@/shared/app-events/protocol'
 import { compareCatalogVersions } from '@/shared/lib/catalog-version'
+import { useI18n } from '@/shared/i18n'
 import {
   advanceThreadSnapshotEpoch,
   getSnapshotCursor,
@@ -26,6 +27,7 @@ interface ThreadSyncEntry {
   connectionGeneration: number
   recovering: boolean
   recoveryAttempted: boolean
+  attemptedOverflowVersion: string | null
   coveredOverflowVersion: string | null
   recoveryFailed: boolean
   stopped: boolean
@@ -44,6 +46,7 @@ export function useThreadSnapshotSync(
   const queryClient = useQueryClient()
   const manager = useApplicationEvents()
   const connection = useApplicationEventConnectionState()
+  const { t } = useI18n()
   const terminal = enabled && connection.reason?.kind === 'stopped' && connection.reason.cause !== 'manual'
   const [error, setError] = useState<string | null>(null)
 
@@ -70,6 +73,7 @@ export function useThreadSnapshotSync(
         connectionGeneration: 0,
         recovering: false,
         recoveryAttempted: false,
+        attemptedOverflowVersion: null,
         coveredOverflowVersion: null,
         recoveryFailed: false,
         stopped: false,
@@ -78,7 +82,7 @@ export function useThreadSnapshotSync(
         observers: new Set(),
       }
       entries.set(threadId, entry)
-      listenForReconnect(threadId, entry)
+      listenForReconnect(entry)
       startSubscription(queryClient, threadId, entry)
     }
     entry.refs += 1
@@ -118,23 +122,21 @@ export function useThreadSnapshotSync(
   }, [queryClient, terminal, threadId])
 
   return {
-    error: terminal ? 'Live updates stopped. This Thread may be out of date.' : error,
+    error: terminal ? t('ai.chat.history.liveUpdatesStopped') : error,
     retry,
   }
 }
 
-function listenForReconnect(threadId: string, entry: ThreadSyncEntry): void {
+function listenForReconnect(entry: ThreadSyncEntry): void {
   entry.unsubscribeIdentity = entry.manager.subscribeIdentity((identity) => {
     const nextIdentity = identity?.connectionId ?? null
     if (entry.identity !== nextIdentity) {
       entry.identity = nextIdentity
       entry.connectionGeneration += 1
       entry.recoveryAttempted = false
+      entry.attemptedOverflowVersion = null
+      entry.coveredOverflowVersion = null
       entry.recoveryAbort?.abort()
-    }
-    if (nextIdentity != null && entry.error != null && entry.recoveryFailed) {
-      // Reconnect rebuilds the subscription/catch-up; it is not an HTTP retry.
-      entry.manager.resumeThread({ kind: 'thread', id: threadId })
     }
   })
 }
@@ -172,7 +174,7 @@ function startSubscription(queryClient: QueryClient, threadId: string, entry: Th
         setSyncError(entry, message)
         requestRecovery(queryClient, threadId, entry)
       } else if (code === 'THREAD_SNAPSHOT_FAILED') {
-        setSyncError(entry, message, false)
+        setSyncError(entry, message, entry.recoveryFailed)
       }
     },
   })
@@ -224,11 +226,18 @@ async function applyLiveSnapshot(
   }
   advanceThreadSnapshotEpoch(queryClient, threadId)
   queryClient.setQueryData(key, merged)
-  entry.recoveryAttempted = false
+  if (entry.attemptedOverflowVersion != null) {
+    if (compareCatalogVersions(incoming.version, entry.attemptedOverflowVersion) < 0) {
+      // A sendable older snapshot does not resolve the known overflow gap.
+      return
+    }
+    entry.attemptedOverflowVersion = null
+  }
   if (entry.coveredOverflowVersion != null
     && compareCatalogVersions(incoming.version, entry.coveredOverflowVersion) >= 0) {
     entry.coveredOverflowVersion = null
   }
+  entry.recoveryAttempted = false
   setSyncError(entry, null, false)
 }
 
@@ -242,10 +251,14 @@ function requestRecovery(
     return
   }
   if (overflowVersion != null) {
-    if (entry.coveredOverflowVersion != null
-      && compareCatalogVersions(overflowVersion, entry.coveredOverflowVersion) <= 0) {
+    if ((entry.attemptedOverflowVersion != null
+      && compareCatalogVersions(overflowVersion, entry.attemptedOverflowVersion) <= 0)
+      || (entry.coveredOverflowVersion != null
+        && compareCatalogVersions(overflowVersion, entry.coveredOverflowVersion) <= 0)) {
       return
     }
+    // Record before reading: a failed rebase still resumes from the old head and can repeat this hint.
+    entry.attemptedOverflowVersion = overflowVersion
   } else if (entry.recoveryAttempted && !explicit) {
     // Stop automatic reads, not the live subscription. A viable snapshot can still heal it.
     setSyncError(entry, entry.error ?? 'Thread updates could not resume after recovery', true)
@@ -283,10 +296,10 @@ function requestRecovery(
       if (merged == null) {
         throw new Error('The restored Thread snapshot could not be merged')
       }
-      if (overflowVersion != null && compareCatalogVersions(merged.version, overflowVersion) < 0) {
-        throw new Error('The restored Thread snapshot does not cover the missing version')
-      }
-      if (overflowVersion != null || explicit) {
+      if (entry.attemptedOverflowVersion != null) {
+        if (compareCatalogVersions(merged.version, entry.attemptedOverflowVersion) < 0) {
+          throw new Error('The restored Thread snapshot does not cover the missing version')
+        }
         entry.coveredOverflowVersion = merged.version
       }
       advanceThreadSnapshotEpoch(queryClient, threadId)
@@ -300,9 +313,8 @@ function requestRecovery(
       if (isCurrent(entry, generation)) {
         entry.recovering = false
         entry.recoveryAbort = null
-        if (!isCurrentRecovery() || !entry.recoveryFailed) {
-          entry.manager.resumeThread({ kind: 'thread', id: threadId })
-        }
+        // Even after failure, keep listening from the cached head. The attempt guards bound automatic reads.
+        entry.manager.resumeThread({ kind: 'thread', id: threadId })
       }
     }
   })

@@ -29,7 +29,7 @@
  * {"type":"subscribed","resource":{...},"cursor":"<canonical decimal>"}
  * {"type":"event","resource":{...},"name":"version"|"realtime"|"changed"|"revision"|"snapshot","data":{...},"cursor":"<optional canonical decimal>"}
  * {"type":"resync","resource":{...}}
- * {"type":"snapshot-ref","resource":{"kind":"thread","id":"<canonical UUID>","version":"<canonical decimal>"}}
+ * {"type":"snapshot-ref","resource":{"kind":"thread","id":"<canonical UUID>"},"version":"<canonical decimal>"}
  * {"type":"snapshot-ref","resource":{"kind":"thread-tree","id":"<canonical UUID>"}}
  * {"type":"heartbeat"}
  * {"type":"ide-use-accepted","revision":"<positive decimal>"}

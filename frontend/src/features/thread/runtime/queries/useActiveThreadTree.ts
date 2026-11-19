@@ -100,11 +100,11 @@ export function useActiveThreadTree(boundThreadId: string | null) {
     sync: requestTreeRefresh,
     syncOnSubscribed: false,
     onSubscribed: () => {
-      // 可能已有其它显式失效启动的旧 bootstrap 请求；live 连接建立后不能让它覆盖 WS。
+      // 新订阅使上一代 bootstrap 或溢出回读失效。
       if (boundThreadId != null) {
         setLiveBoundThreadId(boundThreadId)
       }
-      void queryClient.cancelQueries({ queryKey: boundQueryKey })
+      cancelTreeRead()
     },
     // 完整树放不进单帧：只读权威 HTTP，绝不为该提示重订阅或退回轮询。
     onSnapshotRef: () => {

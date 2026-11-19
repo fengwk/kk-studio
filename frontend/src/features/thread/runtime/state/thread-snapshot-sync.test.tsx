@@ -359,8 +359,86 @@ describe('useThreadSnapshotSync', () => {
     await act(async () => socket.emitServer(snapshotFrame(snapshot('3'))))
     expect(result.current.error).toBeNull()
     await act(async () => socket.onmessage?.({ data: JSON.stringify({ ...snapshotFrame(snapshot()), name: 'unknown' }) }))
-    expect(result.current.error).toContain('out of date')
+    expect(result.current.error).toContain('此线程的内容可能已过期')
     expect(queryClient.getQueryData(queryKeys.threads.snapshot(THREAD))).toEqual(snapshot('3'))
+  })
+
+  it.each(['newer ref', 'sendable gap'])('recovers from a failed overflow read on the same socket via %s', async (trigger) => {
+    const key = queryKeys.threads.snapshot(THREAD)
+    const initial = snapshot()
+    const next = snapshot('3')
+    const terminalId = '66666666-2222-4333-8444-555555555555'
+    const terminal: HarnessThreadSnapshotDTO = {
+      ...next,
+      thread: { ...next.thread, status: 'IDLE', headEntryId: terminalId },
+      entries: [...next.entries, {
+        ...next.entries[0], entryId: terminalId, parentEntryId: ENTRY, entryType: 'MESSAGE',
+        payload: { message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'done' }] } },
+      }],
+    }
+    queryClient.setQueryData(key, initial)
+    const get = vi.spyOn(harnessService, 'getThreadSnapshot')
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce(terminal)
+    const { result } = renderHook(() => useThreadSnapshotSync(THREAD, true), { wrapper })
+    const socket = sockets.openLatest()
+    const ref = { type: 'snapshot-ref' as const, resource: snapshotFrame(null).resource, version: '2' }
+
+    await act(async () => socket.emitServer(ref))
+    expect(result.current.error).toBe('offline')
+    expect(queryClient.getQueryData(key)).toEqual(initial)
+    expect(socket.sentMessages().at(-1)).toMatchObject({ type: 'subscribe', afterEntryId: ENTRY })
+    await act(async () => socket.emitServer(ref))
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(result.current.error).toBe('offline')
+    expect(socket.sentMessages()).toHaveLength(3)
+
+    if (trigger === 'newer ref') {
+      await act(async () => socket.emitServer({ ...ref, version: '3' }))
+    } else {
+      await act(async () => socket.emitServer(snapshotFrame({ ...terminal, baseEntryId: terminalId, entries: [] })))
+    }
+    expect(get).toHaveBeenCalledTimes(2)
+    expect(queryClient.getQueryData(key)).toEqual(terminal)
+    expect(result.current.error).toBeNull()
+    expect(sockets.sockets).toEqual([socket])
+  })
+
+  it('rereads a same-version overflow once after a physical reconnect', async () => {
+    vi.useFakeTimers()
+    const key = queryKeys.threads.snapshot(THREAD)
+    queryClient.setQueryData(key, snapshot())
+    const refreshed = { ...snapshot('2'), activeAssistantOutput: activeOutput('9') }
+    const get = vi.spyOn(harnessService, 'getThreadSnapshot')
+      .mockResolvedValueOnce(snapshot('2'))
+      .mockResolvedValueOnce(refreshed)
+    renderHook(() => useThreadSnapshotSync(THREAD, true), { wrapper })
+    const socket = sockets.openLatest()
+    const connected = {
+      type: 'connected' as const, eventNodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      connectionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', heartbeatIntervalMillis: '20000',
+    }
+    const ref = { type: 'snapshot-ref' as const, resource: snapshotFrame(null).resource, version: '2' }
+    await act(async () => {
+      socket.emitServer(connected)
+      socket.emitServer(ref)
+    })
+    await act(async () => socket.emitServer(ref))
+    expect(get).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      socket.fail()
+      await vi.advanceTimersByTimeAsync(300)
+    })
+    const reconnected = sockets.openLatest()
+    expect(reconnected).not.toBe(socket)
+    await act(async () => {
+      reconnected.emitServer({ ...connected, connectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' })
+      reconnected.emitServer(ref)
+    })
+    expect(queryClient.getQueryData(key)).toEqual(refreshed)
+    await act(async () => reconnected.emitServer(ref))
+    expect(get).toHaveBeenCalledTimes(2)
   })
 
   it('fences a recovery response from a disconnected socket', async () => {
@@ -407,7 +485,11 @@ describe('useThreadSnapshotSync', () => {
     act(() => socket.emitServer({ type: 'resync', resource: { kind: 'thread', id: THREAD } }))
     await waitFor(() => expect(result.current.error).toBe('offline'))
     expect(queryClient.getQueryData<HarnessThreadSnapshotDTO>(queryKeys.threads.snapshot(THREAD))?.version).toBe('1')
-    expect(socket.sentMessages().at(-1)).toEqual({ type: 'unsubscribe', resource: { kind: 'thread', id: THREAD } })
+    expect(socket.sentMessages().at(-1)).toMatchObject({ type: 'subscribe', afterEntryId: ENTRY })
+    // The automatic retry is bounded even when the fresh subscription immediately reports the gap again.
+    await act(async () => socket.emitServer({ type: 'resync', resource: { kind: 'thread', id: THREAD } }))
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(result.current.error).toBe('offline')
 
     act(() => result.current.retry())
     await waitFor(() => expect(result.current.error).toBeNull())
