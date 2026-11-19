@@ -148,7 +148,14 @@ func startLanguageServers(initial config.DaemonConfig, processes native.Supervis
 }
 
 func startIDEService(initial config.DaemonConfig, processes native.Supervisor, tracker native.DescendantTracker, instanceID string, runErr *error) (*ide.Service, func(), error) {
-	ideService, err := ide.NewService(initial, processes, tracker, ide.ServiceOptions{DaemonInstanceID: instanceID})
+	ideService, err := ide.NewService(initial, processes, tracker, ide.ServiceOptions{
+		DaemonInstanceID: instanceID,
+		OnEvent: func(event ide.IdeServiceEvent) {
+			if event.Kind == "expiry-deferred" {
+				slog.Warn("IDE lease cleanup deferred to preserve drafts", "viewId", event.ViewID)
+			}
+		},
+	})
 	if err != nil {
 		return nil, nil, productionFailure("managed IDE service could not be initialized", err)
 	}

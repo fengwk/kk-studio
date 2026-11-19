@@ -56,6 +56,7 @@ func TestBridgeSnapshotPayloadValidation(t *testing.T) {
 		t.Fatalf("valid snapshot=%+v err=%v", valid, err)
 	}
 	invalid := []string{
+		`{"complete":true,"omitted":-1,"documents":[]}`,
 		`{"documents":"not-an-array"}`,
 		`{"documents":null}`,
 		`{"documents":[null]}`,

@@ -486,6 +486,34 @@ Backend 自身的模型、MCP、插件与 S3 SDK 请求由 Studio 的**系统设
 新引导缓存，随后仍从 Studio 对账最新配置；数据目录、技能与用户数据保留，重新 `READY` 后才继续正常
 使用。重启会中断在途工具调用，已经发生的命令副作用不回滚。
 
+## 本地 IDE 草稿恢复
+
+自动到期只在能取回备份时才回收 dirty 视图（规则见 [IDE 自动到期回收](../modules/ide.md#自动到期回收)），因此 Daemon 提供只读的本地取回命令。它不读卡片配置与 token，不改动已持久化记录，也不向终端打印任何草稿文本。导出仅支持 Linux/macOS，副本权限为 0600；Windows 可以列出记录，但不自动回收 dirty 视图，而是延迟清理并保留现场。
+
+`--data-dir` 是该卡片 `daemon.json` 所在的绝对数据目录，恢复记录位于 `ide/recovery/<viewId>.json`，其前一代记录位于 `ide/recovery/.<viewId>.prior`：
+
+```bash
+/path/to/kk-studio-daemon ide-recovery list --data-dir <absolute-data-dir>
+/path/to/kk-studio-daemon ide-recovery export <viewId> <new-absolute-output-json> --data-dir <absolute-data-dir>
+/path/to/kk-studio-daemon ide-recovery export <viewId>.prior <new-absolute-output-json> --data-dir <absolute-data-dir>
+```
+
+`list` 输出 JSON，只含每个记录的 `viewId`、`createdAt`、`complete` 与去敏的 `problem`；同一视图的 prior 记录额外带 `prior: true`，并与对应的 canonical 记录相邻排列。读取或校验失败的记录以带 `problem` 的条目出现，不让整个列表失败。`export` 先用同一读取器校验记录，再写入一个必须不存在的绝对路径文件，从不覆盖已有文件、不写入恢复目录内部，失败时不留下残片；输出行报告 `complete` 或 `incomplete`，以及导出的是 canonical 还是 prior 记录。
+
+导出的 JSON 包含备份元数据，以及每个草稿的绝对文件路径与未保存的文本。需要你自行与工作区当前内容对比后再决定如何落盘。浏览器与 Studio 没有按任意路径恢复或覆盖工作区的入口，恢复不会代你应用改动。
+
+### 处理残留的 prior 记录
+
+如果中断或回滚失败留下 prior，即使 canonical 已不存在，也可以单独列出和导出 prior。若两份记录不同，Daemon 不会自动选择，新的备份写入会延迟；两份不同的文件都计入恢复配额。可在本机处理：
+
+1. 将现存的记录分别导出到私有副本；导出是只读操作，无需停止 Daemon。
+2. 如果两份都存在，对比 `createdAt`、`complete` 和草稿文本，决定保留哪一份。
+3. 先把该视图里还开着的未保存内容保存下来，再停掉 Daemon（见[前台诊断](#前台诊断)），确认没有并发写入者后才继续。Daemon 在运行中会继续发布新记录，目录操作会和它竞争。
+4. 如果 canonical 应该保留，把 prior 移出恢复目录，例如移到你的私有副本旁边；如果 prior 才是应该保留的版本，先移走 canonical（如有），再把 `.<viewId>.prior` 重命名为 `<viewId>.json`。不要覆盖尚未移走的记录。
+5. 重新启动 Daemon，再用 `list` 确认只剩你期望的那条记录。
+
+只留有 prior 时可以按上面的步骤手工恢复记录名；有两份不同记录时，Daemon 和命令都不会替你挑选或合并。
+
 ## 卸载与数据保留
 
 `uninstall` 停止服务、删除受管服务定义与本卡片 `lib/` 下的程序发行目录，**保留 `daemon.json`、
@@ -550,9 +578,10 @@ Windows:
 & "$env:USERPROFILE\.kk-studio\environments\<UUID>\lib\kk-studio-daemon.exe" --config "$env:USERPROFILE\.kk-studio\environments\<UUID>\daemon.json"
 ```
 
-Daemon 自身 CLI 只有 `--config <绝对路径>`（及 `--check-config <绝对路径>` 预检、`--help`/`-h`、
-`--version`）。心跳、重连与最大退避固定为 `PT15S` / `PT1S` / `PT30S`，
-没有公开开关；工具执行超时由调用方提供，不是 Daemon 安装配置。
+Daemon 自身 CLI 有 `--config <绝对路径>`（及 `--check-config <绝对路径>` 预检、`--help`/`-h`、
+`--version`）、可选 LSP 的 `--lsp-profiles` / `--install-lsp` / `--lsp-config`，以及本地
+`ide-recovery list|export`（见[本地 IDE 草稿恢复](#本地-ide-草稿恢复)）。心跳、重连与最大退避固定为
+`PT15S` / `PT1S` / `PT30S`，没有公开开关；工具执行超时由调用方提供，不是 Daemon 安装配置。
 
 上级：[系统设计](../system-design.md)。协议与执行实现：[Environment Daemon](../modules/daemon.md)、
 [Harness Environment](../modules/harness-environment.md)。容器内运行见

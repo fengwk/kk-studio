@@ -775,6 +775,9 @@ func bridgeResultFromJSON(raw map[string]json.RawMessage) (BridgeResult, error) 
 	result.Clean, _ = rawBoolPointer(raw, "clean")
 	result.Complete, _ = rawBoolPointer(raw, "complete")
 	result.Omitted, _ = rawIntegerPointer(raw, "omitted")
+	if omitted, present := raw["omitted"]; present && string(omitted) != "null" && result.Omitted == nil {
+		return BridgeResult{}, errors.New("invalid snapshot omission count")
+	}
 	result.Restored, _ = rawIntegerPointer(raw, "restored")
 	result.Skipped, _ = rawIntegerPointer(raw, "skipped")
 	if documents, ok := raw["documents"]; ok {

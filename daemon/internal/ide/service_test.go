@@ -491,6 +491,9 @@ func TestPathWithin(t *testing.T) {
 
 // Verifies a connected dirty view is snapshotted before expired-mode managed cleanup.
 func TestLeaseExpirySnapshotsDirtyView(t *testing.T) {
+	if !recoveryDirectorySyncSupported {
+		t.Skip("durable recovery publication is unavailable on this platform")
+	}
 	root := t.TempDir()
 	dataDir := t.TempDir()
 	bridge, err := NewBridge()
@@ -510,7 +513,7 @@ func TestLeaseExpirySnapshotsDirtyView(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"inspect": {"clean": false}, "snapshot": {"documents": []map[string]string{{"path": filepath.Join(root, "draft.txt"), "text": "unsaved"}}}})
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"inspect": {"clean": false}, "snapshot": {"documents": []map[string]string{{"path": filepath.Join(root, "draft.txt"), "text": "unsaved"}}, "complete": true}})
 	defer cancelHost()
 	scheduler.Advance(viewLeaseDuration)
 	if service.GetViewState(opened.GetViewId()) != nil || manager.closeCalls != 1 {
@@ -522,8 +525,8 @@ func TestLeaseExpirySnapshotsDirtyView(t *testing.T) {
 	}
 }
 
-// Verifies offline expiry uses the management API, retains existing backup on failure, and isolates sibling epochs.
-func TestLeaseExpiryCleansOfflineViewAndRetainsBackupOnFailure(t *testing.T) {
+// Verifies an offline view defers expiry, keeps its previous backup and stays explicitly closable.
+func TestLeaseExpiryDefersOfflineViewAndKeepsBackup(t *testing.T) {
 	root := t.TempDir()
 	cfg := config.DaemonConfig{DataDir: t.TempDir()}
 	bridge, err := NewBridge()
@@ -533,7 +536,7 @@ func TestLeaseExpiryCleansOfflineViewAndRetainsBackupOnFailure(t *testing.T) {
 	defer bridge.Close(context.Background())
 	scheduler := newFakeIdeScheduler(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
 	events := make(chan IdeServiceEvent, 4)
-	manager := &fakeCodeServerManager{closeFailures: 1}
+	manager := &fakeCodeServerManager{}
 	service, err := NewService(cfg, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, Scheduler: scheduler, OnEvent: func(event IdeServiceEvent) { events <- event }})
 	if err != nil {
 		t.Fatal(err)
@@ -552,28 +555,24 @@ func TestLeaseExpiryCleansOfflineViewAndRetainsBackupOnFailure(t *testing.T) {
 	proofTime := scheduler.Now()
 	service.ApplyLease(&protocol.IdeLease{Bindings: []*protocol.IdeLeaseBinding{{ViewId: stringPointer(sibling.GetViewId()), BrowserSessionId: stringPointer(sibling.GetBrowserSessionId()), BindingEpoch: int64Pointer(sibling.GetBindingEpoch())}}}, proofTime)
 	scheduler.Advance(time.Second)
-	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_CLOSING {
-		t.Fatalf("failed offline cleanup state=%v", state)
+	// The offline view has no bridge, so it keeps its identity, workspace and previous backup.
+	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("offline view was not deferred: state=%v", state)
 	}
 	if state := service.GetViewState(sibling.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_OPEN {
 		t.Fatalf("sibling view was affected: %v", state)
 	}
+	if event := <-events; event.Kind != "expiry-deferred" {
+		t.Fatalf("offline expiry event=%+v", event)
+	}
 	backup, err := ReadRecoveryBackup(cfg, opened.GetViewId(), defaultRecoveryQuota)
 	if err != nil || backup == nil || len(backup.Documents) != 1 || backup.Documents[0].Text != "last saved" {
-		t.Fatalf("failed cleanup backup=%#v err=%v", backup, err)
+		t.Fatalf("deferred cleanup backup=%#v err=%v", backup, err)
 	}
-	if event := <-events; event.Kind != "backup-failed" {
-		t.Fatalf("offline backup event=%+v", event)
+	if manager.closeCalls != 0 {
+		t.Fatalf("deferred offline expiry called CloseView %d times", manager.closeCalls)
 	}
-	if event := <-events; event.Kind != "cleanup-failed" {
-		t.Fatalf("cleanup event=%+v", event)
-	}
-	service.mu.Lock()
-	cleanupFailed := service.views[opened.GetViewId()].cleanupFailed
-	service.mu.Unlock()
-	if !cleanupFailed {
-		t.Fatal("failed cleanup did not remain explicitly retryable")
-	}
+	// The retained view is still reclaimable through an explicit force close.
 	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
 	if !closed.GetOk() || service.GetViewState(opened.GetViewId()) != nil {
 		t.Fatalf("retry close=%v state=%v", closed, service.GetViewState(opened.GetViewId()))
@@ -581,12 +580,6 @@ func TestLeaseExpiryCleansOfflineViewAndRetainsBackupOnFailure(t *testing.T) {
 	backup, err = ReadRecoveryBackup(cfg, opened.GetViewId(), defaultRecoveryQuota)
 	if err != nil || backup == nil || backup.Documents[0].Text != "last saved" {
 		t.Fatalf("successful cleanup removed backup=%#v err=%v", backup, err)
-	}
-	manager.mu.Lock()
-	modes := append([]ManagedViewCloseMode(nil), manager.closeModes...)
-	manager.mu.Unlock()
-	if len(modes) != 2 || modes[0] != ManagedViewCloseExpired || modes[1] != ManagedViewCloseDiscard {
-		t.Fatalf("managed close modes=%v", modes)
 	}
 }
 
@@ -609,7 +602,7 @@ func TestLeaseRenewalFreshProof(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	_, cancelHost := startBridgeReplyHost(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root)
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"snapshot": {"documents": []map[string]string{}, "omitted": 0, "complete": true}})
 	defer cancelHost()
 	binding := &protocol.IdeLeaseBinding{ViewId: stringPointer(opened.GetViewId()), BrowserSessionId: stringPointer(opened.GetBrowserSessionId()), BindingEpoch: int64Pointer(opened.GetBindingEpoch())}
 	scheduler.Advance(300 * time.Second)
@@ -649,7 +642,7 @@ func TestLeaseExpiryBoundary(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	_, cancelHost := startBridgeReplyHost(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root)
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"snapshot": {"documents": []map[string]string{}, "omitted": 0, "complete": true}})
 	defer cancelHost()
 	binding := &protocol.IdeLeaseBinding{ViewId: stringPointer(opened.GetViewId()), BrowserSessionId: stringPointer("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), BindingEpoch: int64Pointer(opened.GetBindingEpoch())}
 	lease := &protocol.IdeLease{Bindings: []*protocol.IdeLeaseBinding{binding}}
@@ -2363,7 +2356,7 @@ func TestDirtyNativeCloseDoesNotAllowForce(t *testing.T) {
 	}
 }
 
-// Verifies snapshot rejection, incomplete data, and quota exhaustion warn without blocking force-close.
+// Verifies backup problems do not block force-close and partial drafts preserve the last complete copy.
 func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -2373,6 +2366,7 @@ func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 	}{
 		{name: "rejected", quota: 4096, snapshot: map[string]any{"ok": false, "code": "DIRTY", "message": "snapshot rejected"}, event: "backup-failed"},
 		{name: "incomplete", quota: 4096, snapshot: map[string]any{"complete": false}, event: "backup-incomplete"},
+		{name: "missing completeness proof", quota: 4096, snapshot: map[string]any{}, event: "backup-incomplete"},
 		{name: "quota exhausted", quota: 1, snapshot: map[string]any{"documents": []map[string]string{{"path": "/workspace/file.txt", "text": "unsaved"}}}, event: "backup-failed"},
 	}
 	for _, test := range cases {
@@ -2394,6 +2388,13 @@ func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 			if !opened.GetOk() {
 				t.Fatalf("open reply=%v", opened)
 			}
+			if test.event == "backup-incomplete" {
+				previous := durableBackup(service.cfg, opened.GetViewId(), "last complete")
+				if _, err := WriteRecoveryBackup(service.cfg, previous, test.quota); err != nil {
+					t.Fatal(err)
+				}
+				test.snapshot["documents"] = []map[string]string{{"path": filepath.Join(root, "draft.txt"), "text": "partial"}}
+			}
 			_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"snapshot": test.snapshot})
 			defer cancelHost()
 			service.mu.Lock()
@@ -2410,6 +2411,12 @@ func TestForcedCloseSnapshotOutcomes(t *testing.T) {
 				}
 			default:
 				t.Fatal("snapshot warning event missing")
+			}
+			if test.event == "backup-incomplete" {
+				backup, err := ReadRecoveryBackup(service.cfg, opened.GetViewId(), test.quota)
+				if err != nil || backup == nil || !backup.Complete || len(backup.Documents) != 1 || backup.Documents[0].Text != "last complete" {
+					t.Fatalf("last complete backup was not preserved: %#v, %v", backup, err)
+				}
 			}
 		})
 	}
@@ -2605,6 +2612,9 @@ func TestRestoreBackupFailureBoundaries(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Fatalf("corrupt backup was removed: %v", err)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
 	}
 	if _, err := WriteRecoveryBackup(cfg, backup, 4096); err != nil {
 		t.Fatal(err)
@@ -2993,6 +3003,30 @@ func (s *fakeIdeScheduler) Advance(delta time.Duration) {
 		}
 		next.callback()
 	}
+}
+
+// advanceTime moves the fake clock without running callbacks, which models a timer that reached its
+// deadline but has not been scheduled yet.
+func (s *fakeIdeScheduler) advanceTime(delta time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.now = s.now.Add(delta)
+}
+
+// takeDue removes and returns the callbacks that are due, marking them fired, so the caller decides
+// when they run.
+func (s *fakeIdeScheduler) takeDue() []func() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var due []func()
+	for _, timer := range s.timers {
+		if timer.stopped || timer.deadline.After(s.now) {
+			continue
+		}
+		timer.stopped = true
+		due = append(due, timer.callback)
+	}
+	return due
 }
 
 func stringPointer(value string) *string { return &value }

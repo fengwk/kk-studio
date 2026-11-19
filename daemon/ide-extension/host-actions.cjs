@@ -13,6 +13,8 @@ const documents = require('./documents.cjs')
 
 const MAX_SNAPSHOT_BYTES = 4 * 1024 * 1024
 const MAX_SNAPSHOT_DOCUMENTS = 256
+/** Matches the daemon's per-path limit; a longer path would reject the whole reply. */
+const MAX_SNAPSHOT_PATH_CHARS = 4096
 
 function createHostActions(host) {
   const { vscode, post, reply, retire, isInactive, folderPaths, workspacePath, viewId, bindingEpoch, hostId } = host
@@ -47,11 +49,22 @@ function createHostActions(host) {
         ? Math.min(message.maxBytes, MAX_SNAPSHOT_BYTES)
         : MAX_SNAPSHOT_BYTES
     const collected = []
+    // Bound the encoded documents sent to the bridge; the daemon checks the full on-disk quota.
     let bytes = 0
-    // An unobservable custom editor is explicitly reported as an omission, never as a complete backup.
-    let omitted = documents.hasUnknownEditorState(vscode) ? 1 : 0
-    for (const document of documents.ordinaryDirtyDocuments(vscode)) {
-      if (collected.length >= MAX_SNAPSHOT_DOCUMENTS) {
+    let encodedBytes = 0
+    // Every dirty state this backup cannot represent is an omission, never a complete backup: an
+    // editor whose content this extension cannot observe, and any dirty buffer whose path cannot
+    // hold recovery text (untitled, virtual, closed, or a non-absolute/over-long path).
+    const dirty = documents.dirtyDocuments(vscode)
+    let omitted = documents.hasUnobservableSnapshotState(vscode, dirty) ? 1 : 0
+    for (const document of dirty) {
+      if (!documents.isCapturableFileDocument(document) || collected.length >= MAX_SNAPSHOT_DOCUMENTS) {
+        omitted += 1
+        continue
+      }
+      // JS string length counts UTF-16 code units, the same unit the daemon bounds paths with.
+      const documentPath = document.uri.fsPath
+      if (documentPath.length > MAX_SNAPSHOT_PATH_CHARS) {
         omitted += 1
         continue
       }
@@ -62,14 +75,18 @@ function createHostActions(host) {
         omitted += 1
         continue
       }
-      const size = Buffer.byteLength(text, 'utf8')
-      if (bytes + size > maxBytes) {
+      // The encoded form includes the path and JSON escaping, so a pathological text cannot expand
+      // past the quota after this check.
+      const encoded = Buffer.byteLength(JSON.stringify({ path: documentPath, text }), 'utf8')
+      if (encodedBytes + encoded > maxBytes) {
         omitted += 1
         continue
       }
-      collected.push({ path: document.uri.fsPath, text })
-      bytes += size
+      collected.push({ path: documentPath, text })
+      bytes += Buffer.byteLength(text, 'utf8')
+      encodedBytes += encoded
     }
+    // Only an explicit, complete empty snapshot can prove there are no drafts.
     await reply(message.id, { ok: true, documents: collected, bytes, omitted, complete: omitted === 0 })
   }
 

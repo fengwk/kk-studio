@@ -8,6 +8,8 @@
  * tab APIs, so no renderer-internal state is assumed.
  */
 
+const nodePath = require('node:path')
+
 const hasDirtyDocuments = (vscode) => {
   const documents = vscode.workspace.textDocuments || []
   return documents.some((document) => document.isDirty)
@@ -44,18 +46,50 @@ const hasUnknownEditorState = (vscode) => {
 
 const canProveClean = (vscode) => !hasDirtyDocuments(vscode) && !hasUnknownEditorState(vscode)
 
-// Only ordinary on-disk text documents visible through the public textDocument API.
-// Renderer-only buffers and custom editors are not observable and are never claimed clean.
-const ordinaryDirtyDocuments = (vscode) => {
-  const documents = vscode.workspace.textDocuments || []
-  return documents.filter((document) => {
-    if (!document || document.isDirty !== true || document.isClosed === true) {
-      return false
+// Workbench tabs and extension-host documents are separate observations. A dirty text tab
+// missing from the dirty document list (e.g. a lagging mirror) is not proof of a clean editor.
+const hasUnobservableSnapshotState = (vscode, dirty) => {
+  const groups = vscode.window?.tabGroups?.all
+  if (!Array.isArray(groups) || !Array.isArray(vscode.workspace.textDocuments)) {
+    return true
+  }
+  const dirtyUris = new Set(dirty.map((doc) => doc.uri?.toString()))
+  const is = (input, type) => typeof type === 'function' && input instanceof type
+  return groups.some((group) => !Array.isArray(group?.tabs) || group.tabs.some((tab) => {
+    const input = tab?.input
+    if (is(input, vscode.TabInputText)) {
+      return tab.isDirty === true && !dirtyUris.has(input.uri.toString())
     }
-    const uri = document.uri
-    return Boolean(uri && uri.scheme === 'file' && typeof uri.fsPath === 'string' && uri.fsPath.length > 0)
-  })
+    if (is(input, vscode.TabInputTextDiff)) {
+      return tab.isDirty === true && !dirtyUris.has(input.modified.toString())
+    }
+    return !is(input, vscode.TabInputTerminal) || tab.isDirty === true
+  }))
 }
+
+// A recovery entry is keyed by an absolute on-disk path, so a dirty buffer is capturable only when
+// the restore path would accept exactly the same identity. Renderer-only buffers and custom
+// editors are not observable and are never claimed clean.
+const PATH_CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/
+
+const isCapturableFileDocument = (document) => {
+  // A document the workbench already closed is only a lagging mirror; its text is not live work the
+  // recovery record should preserve, but it still keeps the snapshot unproven.
+  if (document.isClosed === true) {
+    return false
+  }
+  const uri = document.uri
+  return Boolean(
+    uri &&
+      uri.scheme === 'file' &&
+      typeof uri.fsPath === 'string' &&
+      uri.fsPath.length > 0 &&
+      nodePath.isAbsolute(uri.fsPath) &&
+      !PATH_CONTROL_CHARACTERS.test(uri.fsPath),
+  )
+}
+
+const dirtyDocuments = (vscode) => (vscode.workspace.textDocuments || []).filter((document) => document?.isDirty)
 
 /**
  * True when a dirty document is not represented by any of the tabs the workbench just closed.
@@ -91,6 +125,8 @@ const hasHiddenDirtyDocuments = (vscode, closedTabs) => {
 module.exports = {
   hasUnknownEditorState,
   canProveClean,
-  ordinaryDirtyDocuments,
+  hasUnobservableSnapshotState,
+  isCapturableFileDocument,
+  dirtyDocuments,
   hasHiddenDirtyDocuments,
 }

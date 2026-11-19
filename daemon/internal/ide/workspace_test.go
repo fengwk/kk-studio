@@ -289,6 +289,17 @@ func TestRecoveryAggregateQuota(t *testing.T) {
 	if _, err := WriteRecoveryBackup(cfg, second, bytes*2-1); err == nil || err.Error() != "recovery data quota is exhausted" {
 		t.Fatalf("aggregate quota error = %v", err)
 	}
+	// A prior-only record retained after an interrupted publication still occupies quota.
+	firstPath, err := recoveryPath(cfg, first.ViewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Rename(firstPath, recoveryPriorPath(firstPath)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WriteRecoveryBackup(cfg, second, bytes*2-1); err == nil || err.Error() != "recovery data quota is exhausted" {
+		t.Fatalf("aggregate quota ignored retained prior: %v", err)
+	}
 	if _, err := WriteRecoveryBackup(cfg, second, 0); err == nil || err.Error() != "recovery quota is invalid" {
 		t.Fatalf("invalid quota error = %v", err)
 	}
@@ -405,5 +416,216 @@ func TestRecoveryRoundTrip(t *testing.T) {
 	got, err := ReadRecoveryBackup(cfg, backup.ViewID, 1024)
 	if err != nil || got == nil || got.Documents[0].Text != "unsaved" {
 		t.Fatalf("read backup = %#v, %v", got, err)
+	}
+}
+
+// durableBackup returns one valid backup for the given config and view.
+func durableBackup(cfg config.DaemonConfig, viewID, text string) RecoveryBackup {
+	return RecoveryBackup{
+		ViewID: viewID, BindingEpoch: "1", Directory: filepath.Join(cfg.DataDir, "work"), CreatedAt: "2025-01-01T00:00:00Z",
+		Complete: true, Documents: []RecoveryDocument{{Path: filepath.Join(cfg.DataDir, "work", "draft.txt"), Text: text}},
+	}
+}
+
+// Verifies a durable publication flushes the record and every dependent directory entry.
+func TestDurableRecoveryPublishesSyncedRecord(t *testing.T) {
+	if !recoveryDirectorySyncSupported {
+		t.Skip("durable recovery publication is unsupported on this platform")
+	}
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	backup := durableBackup(cfg, "123e4567-e89b-12d3-a456-426614174000", "unsaved")
+	var synced []string
+	written, err := writeRecoveryBackup(cfg, backup, 4096, func(path string) error {
+		synced = append(synced, path)
+		return nil
+	})
+	if err != nil || written <= 0 {
+		t.Fatalf("durable write = %d, %v", written, err)
+	}
+	got, err := ReadRecoveryBackup(cfg, backup.ViewID, 4096)
+	if err != nil || got == nil || got.Documents[0].Text != "unsaved" {
+		t.Fatalf("read backup = %#v, %v", got, err)
+	}
+	if len(synced) != 3 || synced[2] != recoveryDirectory(cfg) {
+		t.Fatalf("synced directories = %v", synced)
+	}
+	if _, err := os.Lstat(recoveryPriorPath(filepath.Join(recoveryDirectory(cfg), backup.ViewID+".json"))); !os.IsNotExist(err) {
+		t.Fatalf("successful publication left a prior link: %v", err)
+	}
+}
+
+// Verifies a failed flush restores the previous record and reports no durable publication.
+func TestDurableRecoverySyncFailureRestoresPrevious(t *testing.T) {
+	if !recoveryDirectorySyncSupported {
+		t.Skip("durable recovery publication is unsupported on this platform")
+	}
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	viewID := "123e4567-e89b-12d3-a456-426614174000"
+	previous := durableBackup(cfg, viewID, "previous")
+	if _, err := writeDurableRecoveryBackup(cfg, previous, 4096); err != nil {
+		t.Fatal(err)
+	}
+	failing := func(path string) error {
+		if path == cfg.DataDir {
+			return errors.New("injected flush failure after rename")
+		}
+		return nil
+	}
+	if _, err := writeRecoveryBackup(cfg, durableBackup(cfg, viewID, "replacement"), 4096, failing); err == nil || err.Error() != "recovery backup could not be made durable" {
+		t.Fatalf("flush failure error = %v", err)
+	}
+	got, err := ReadRecoveryBackup(cfg, viewID, 4096)
+	if err != nil || got == nil || got.Documents[0].Text != "previous" {
+		t.Fatalf("previous record after rollback = %#v, %v", got, err)
+	}
+}
+
+// Verifies a first publication whose flush fails leaves no record behind.
+func TestDurableRecoverySyncFailureWithoutPrevious(t *testing.T) {
+	if !recoveryDirectorySyncSupported {
+		t.Skip("durable recovery publication is unsupported on this platform")
+	}
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	viewID := "123e4567-e89b-12d3-a456-426614174001"
+	failing := func(string) error { return errors.New("injected flush failure") }
+	if _, err := writeRecoveryBackup(cfg, durableBackup(cfg, viewID, "unsaved"), 4096, failing); err == nil {
+		t.Fatal("failed flush published a record")
+	}
+	if got, err := ReadRecoveryBackup(cfg, viewID, 4096); err != nil || got != nil {
+		t.Fatalf("failed first publication left a record: %#v, %v", got, err)
+	}
+	entries, err := os.ReadDir(recoveryDirectory(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("failed publication left files: %v", entries)
+	}
+}
+
+// Verifies a leftover prior link from a failed rollback is restored instead of being replaced.
+func TestDurableRecoveryRestoresLeftoverPrior(t *testing.T) {
+	if !recoveryDirectorySyncSupported {
+		t.Skip("durable recovery publication is unsupported on this platform")
+	}
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	viewID := "123e4567-e89b-12d3-a456-426614174002"
+	failed := durableBackup(cfg, viewID, "only-copy")
+	if _, err := writeDurableRecoveryBackup(cfg, failed, 4096); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(recoveryDirectory(cfg), viewID+".json")
+	if err := os.Rename(path, recoveryPriorPath(path)); err != nil {
+		t.Fatal(err)
+	}
+	replacement := durableBackup(cfg, viewID, "replacement")
+	if _, err := WriteRecoveryBackup(cfg, replacement, 4096); err == nil {
+		t.Fatal("best-effort write bypassed prior reconciliation")
+	}
+	if _, err := writeDurableRecoveryBackup(cfg, replacement, 4096); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(recoveryPriorPath(path)); !os.IsNotExist(err) {
+		t.Fatalf("publication left a prior link: %v", err)
+	}
+	got, err := ReadRecoveryBackup(cfg, viewID, 4096)
+	if err != nil || got == nil || got.Documents[0].Text != "replacement" {
+		t.Fatalf("read backup = %#v, %v", got, err)
+	}
+}
+
+// Verifies an unusable leftover prior entry fails closed instead of overwriting it.
+func TestDurableRecoveryRejectsUnusablePrior(t *testing.T) {
+	if !recoveryDirectorySyncSupported {
+		t.Skip("durable recovery publication is unsupported on this platform")
+	}
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	viewID := "123e4567-e89b-12d3-a456-426614174003"
+	backup := durableBackup(cfg, viewID, "unsaved")
+	if _, err := writeDurableRecoveryBackup(cfg, backup, 4096); err != nil {
+		t.Fatal(err)
+	}
+	prior := recoveryPriorPath(filepath.Join(recoveryDirectory(cfg), viewID+".json"))
+	if err := os.Mkdir(prior, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeDurableRecoveryBackup(cfg, durableBackup(cfg, viewID, "replacement"), 4096); err == nil || err.Error() != "recovery backup is unavailable" {
+		t.Fatalf("unusable prior error = %v", err)
+	}
+	if got, err := ReadRecoveryBackup(cfg, viewID, 4096); err != nil || got == nil || got.Documents[0].Text != "unsaved" {
+		t.Fatalf("record after refused publication = %#v, %v", got, err)
+	}
+}
+
+// Verifies the durable path cannot silently degrade to a weaker guarantee when a platform cannot
+// flush directory entries, and that it publishes nothing in that case.
+func TestDurableRecoveryFailsClosedWithoutDirectorySync(t *testing.T) {
+	if recoveryDirectorySyncSupported {
+		t.Skip("this platform supports durable recovery publication")
+	}
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	backup := durableBackup(cfg, "123e4567-e89b-12d3-a456-426614174004", "unsaved")
+	if _, err := writeDurableRecoveryBackup(cfg, backup, 4096); err == nil || err.Error() != "recovery backup durability is not supported on this platform" {
+		t.Fatalf("unsupported platform error = %v", err)
+	}
+	if _, err := os.Lstat(recoveryDirectory(cfg)); !os.IsNotExist(err) {
+		t.Fatalf("refused durable write created the recovery directory: %v", err)
+	}
+}
+
+// Verifies a prior link left by an earlier success is dropped rather than resurrected over the
+// record it already protects.
+func TestDurableRecoveryDropsStalePrior(t *testing.T) {
+	if !recoveryDirectorySyncSupported {
+		t.Skip("durable recovery publication is unsupported on this platform")
+	}
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	viewID := "123e4567-e89b-12d3-a456-426614174005"
+	if _, err := writeDurableRecoveryBackup(cfg, durableBackup(cfg, viewID, "first"), 4096); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(recoveryDirectory(cfg), viewID+".json")
+	// A publication that published successfully but failed to unlink its prior link leaves this state.
+	if err := os.Link(path, recoveryPriorPath(path)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeDurableRecoveryBackup(cfg, durableBackup(cfg, viewID, "second"), 4096); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadRecoveryBackup(cfg, viewID, 4096)
+	if err != nil || got == nil || got.Documents[0].Text != "second" {
+		t.Fatalf("read backup = %#v, %v", got, err)
+	}
+	if _, err := os.Lstat(recoveryPriorPath(path)); !os.IsNotExist(err) {
+		t.Fatalf("stale prior link survived: %v", err)
+	}
+}
+
+// Verifies an unobtainable previous-record link fails closed without publishing or leaving
+// temporary files behind.
+func TestDurableRecoveryRejectsUnlinkablePrior(t *testing.T) {
+	if !recoveryDirectorySyncSupported {
+		t.Skip("durable recovery publication is unsupported on this platform")
+	}
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	viewID := "123e4567-e89b-12d3-a456-426614174006"
+	if err := os.MkdirAll(recoveryDirectory(cfg), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A directory at the record path cannot be hard linked, so the previous record cannot be kept.
+	if err := os.Mkdir(filepath.Join(recoveryDirectory(cfg), viewID+".json"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writeDurableRecoveryBackup(cfg, durableBackup(cfg, viewID, "unsaved"), 4096); err == nil {
+		t.Fatal("publication succeeded without a previous-record link")
+	}
+	entries, err := os.ReadDir(recoveryDirectory(cfg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".recovery-") {
+			t.Fatalf("refused publication left a temporary file: %s", entry.Name())
+		}
 	}
 }
