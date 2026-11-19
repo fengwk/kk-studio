@@ -14,9 +14,9 @@ import java.util.Map;
  * models.dev 目录解析器：把 provider/model 两级 JSON 展开成可填表候选。
  *
  * <p>候选的 pricing 只有能完整保存与求值时才标记为 supported；{@code cost.text.input/output.price}、cache
- * read/write、字段级 overrides、multipliers 与 utc_hours/utc_days 条件的解析分别在 {@link ModelsDevPricingParser}
- * 与 {@link ModelsDevPricingConditionParser}；{@code limit}/{@code capabilities}/{@code modalities} 在
- * {@link ModelsDevModelFields}。
+ * read/write、可精确映射的 input-token ranges、service-tier/UTC time multipliers 与 date changes 的解析在 {@link
+ * ModelsDevPricingParser}；{@code limit}/{@code capabilities}/{@code modalities} 在 {@link
+ * ModelsDevModelFields}。
  */
 @Component
 public class ModelsDevCatalogParser {

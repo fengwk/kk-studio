@@ -29,6 +29,7 @@ final class OpenAiResponsesStreamUsage {
   private long cachedTokens = 0L;
   private long cacheWriteTokens = 0L;
   private Map<Long, Long> cacheWriteByTtl = Map.of();
+  private boolean hasNativeCacheWriteTtl = false;
   private Long reasoningTokens = null;
 
   /** 缺失 usage 字段保留此前观测值；显式 null 与损坏结构分别重置或拒绝。 */
@@ -63,6 +64,7 @@ final class OpenAiResponsesStreamUsage {
     cachedTokens = 0L;
     cacheWriteTokens = 0L;
     cacheWriteByTtl = Map.of();
+    hasNativeCacheWriteTtl = false;
     reasoningTokens = null;
   }
 
@@ -140,6 +142,7 @@ final class OpenAiResponsesStreamUsage {
           ProviderErrorKind.INVALID_RESPONSE, "cache write TTL breakdown does not match total");
     }
     cacheWriteByTtl = Map.of(1800L, ttl30m, 43200L, ttl12h);
+    hasNativeCacheWriteTtl = true;
   }
 
   private void applyOutputTokenDetails(JsonNode details) {
@@ -161,8 +164,12 @@ final class OpenAiResponsesStreamUsage {
   }
 
   /** Token 用量归一化：total_tokens 缺失时为 null，不凭空合成；输出总量包含 reasoning。 */
-  ModelUsage toModelUsage() {
+  ModelUsage toModelUsage(Long reliableCacheWriteTtlSeconds) {
     long ordinaryInput = usageRemainder(rawInputTokens, cachedTokens, cacheWriteTokens);
+    Map<Long, Long> attributedCacheWrites = cacheWriteByTtl;
+    if (!hasNativeCacheWriteTtl && cacheWriteTokens > 0 && reliableCacheWriteTtlSeconds != null) {
+      attributedCacheWrites = Map.of(reliableCacheWriteTtlSeconds, cacheWriteTokens);
+    }
     Long providerTotalTokens = hasRawTotalTokens ? rawTotalTokens : null;
     try {
       return new ModelUsage(
@@ -170,7 +177,7 @@ final class OpenAiResponsesStreamUsage {
           rawOutputTokens,
           cachedTokens,
           cacheWriteTokens,
-          cacheWriteByTtl,
+          attributedCacheWrites,
           reasoningTokens,
           providerTotalTokens);
     } catch (IllegalArgumentException invalidUsage) {

@@ -32,7 +32,7 @@ class OpenAiResponsesStreamUsageTest {
             """),
         "gpt-5.6");
 
-    assertEquals(Map.of(1800L, 6L, 43200L, 4L), usage.toModelUsage().cacheWriteByTtl());
+    assertEquals(Map.of(1800L, 6L, 43200L, 4L), usage.toModelUsage(null).cacheWriteByTtl());
   }
 
   @Test
@@ -47,7 +47,36 @@ class OpenAiResponsesStreamUsageTest {
             """),
         "gpt-5.6");
 
-    assertTrue(usage.toModelUsage().cacheWriteByTtl().isEmpty());
+    assertTrue(usage.toModelUsage(null).cacheWriteByTtl().isEmpty());
+  }
+
+  @Test
+  void fallsBackToEffectiveTtlOnlyWhenNativeBreakdownIsAbsent() throws Exception {
+    OpenAiResponsesStreamUsage usage = new OpenAiResponsesStreamUsage();
+    usage.apply(
+        MAPPER.readTree(
+            """
+            {"usage":{"input_tokens":100,"output_tokens":10,
+              "input_tokens_details":{"cache_write_tokens":10}}}
+            """),
+        "gpt-5.6");
+
+    assertEquals(Map.of(43200L, 10L), usage.toModelUsage(43200L).cacheWriteByTtl());
+  }
+
+  @Test
+  void nativeTtlBreakdownTakesPrecedenceOverEffectiveTtl() throws Exception {
+    OpenAiResponsesStreamUsage usage = new OpenAiResponsesStreamUsage();
+    usage.apply(
+        MAPPER.readTree(
+            """
+            {"usage":{"input_tokens":100,"output_tokens":10,
+              "input_tokens_details":{"cache_write_tokens":10,
+                "cache_write_tokens_details":{"ttl_30m_tokens":10,"ttl_12h_tokens":0}}}}
+            """),
+        "gpt-5.6");
+
+    assertEquals(Map.of(1800L, 10L, 43200L, 0L), usage.toModelUsage(43200L).cacheWriteByTtl());
   }
 
   @Test

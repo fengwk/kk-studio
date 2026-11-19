@@ -3,7 +3,6 @@ package fun.fengwk.kkstudio.platform.harness.model;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -89,7 +88,6 @@ class GatewayConfigurationConditionalTest {
   void modelGatewayDefaultBeanIsCreatedWhenNoPortImplementationExists() {
     runner
         .withUserConfiguration(ModelExecutionConfiguration.class)
-        .withBean(ModelPricingPlanSource.class, () -> mock(ModelPricingPlanSource.class))
         .withBean(ProviderResolutionService.class, () -> (frozenType, request) -> null)
         .run(
             context -> {

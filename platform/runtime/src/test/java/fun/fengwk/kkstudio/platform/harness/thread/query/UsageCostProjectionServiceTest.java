@@ -14,7 +14,6 @@ import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 import tools.jackson.databind.json.JsonMapper;
-import tools.jackson.databind.node.JsonNodeFactory;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
@@ -32,8 +31,6 @@ import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.builtin.driver.BuiltinExecution;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
-import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
@@ -41,11 +38,8 @@ import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelAbilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelLimitDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingConditionDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingOverrideDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRequestBodyConditionDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.Model;
@@ -428,60 +422,39 @@ class UsageCostProjectionServiceTest {
     assertTrue(error.getMessage().startsWith("invalid agent model"), error.getMessage());
   }
 
-  /** 测试意图：同一 request-body 条件在价格变化后仍按记录的指纹重新计价；旧记录缺快照或条件已变时保持未知。 */
+  /** Pricing rules depend on token-count facts, not durable request-body match snapshots. */
   @Test
-  void projectsRequestBodyPricingFromDurableFingerprintOnly() {
-    ModelPricingDTO pricing = pricing(new BigDecimal("1"), BigDecimal.ZERO, BigDecimal.ZERO);
-    ModelPricingOverrideDTO override = new ModelPricingOverrideDTO();
-    override.setId("fast");
-    ModelPricingConditionDTO when = new ModelPricingConditionDTO();
-    ModelPricingRequestBodyConditionDTO requestBody = new ModelPricingRequestBodyConditionDTO();
-    requestBody.setPath("/speed");
-    requestBody.setEquals(JsonNodeFactory.instance.textNode("fast"));
-    when.setRequestBody(requestBody);
-    override.setWhen(when);
-    ModelRatePatchDTO rates = new ModelRatePatchDTO();
-    rates.setInput(new BigDecimal("2"));
-    override.setRates(rates);
-    pricing.setOverrides(List.of(override));
+  void projectsRulePricingIndependentlyOfRequestBodySnapshots() {
+    ModelPricingDTO pricing = pricing(BigDecimal.ONE, BigDecimal.ZERO, BigDecimal.ZERO);
+    ModelPricingRuleDTO range = new ModelPricingRuleDTO();
+    range.setType("input_token_range");
+    range.setMinInputTokens(0);
+    range.setInput(new BigDecimal("2"));
+    pricing.setRules(List.of(range));
+    pricing.setChanges(List.of());
     stubModel("provider-a", "model-a", pricing);
 
-    ModelPricingCondition.RequestBody condition =
-        ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
-    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
     ModelUsage usage = new ModelUsage(1_000_000, 0, 0, 0, Map.of(), null, null);
-
     Entry matched =
         assistantWithPricing(
             new UUID(0L, 20L),
             USER_A_ID,
             usage,
-            new RequestBodyPricingSnapshot(Map.of(fingerprint, true)));
+            new RequestBodyPricingSnapshot(Map.of("a".repeat(64), true)));
     Entry notMatched =
         assistantWithPricing(
             new UUID(0L, 21L),
             USER_A_ID,
             usage,
-            new RequestBodyPricingSnapshot(Map.of(fingerprint, false)));
-    Entry legacy = assistantWithPricing(new UUID(0L, 22L), USER_A_ID, usage, null);
-    Entry changedPredicate =
-        assistantWithPricing(
-            new UUID(0L, 23L),
-            USER_A_ID,
-            usage,
-            new RequestBodyPricingSnapshot(
-                Map.of(
-                    ModelRequestBodyPricing.fingerprint(
-                        ModelPricingCondition.RequestBody.stringValue("/speed", "slow")),
-                    true)));
+            new RequestBodyPricingSnapshot(Map.of("a".repeat(64), false)));
+    Entry noSnapshot = assistantWithPricing(new UUID(0L, 22L), USER_A_ID, usage, null);
 
     Map<UUID, HarnessUsageCostDTO> costs =
-        service.project(List.of(matched, notMatched, legacy, changedPredicate));
+        service.project(List.of(matched, notMatched, noSnapshot));
 
     assertEquals("2", costs.get(matched.id()).getAmount());
-    assertEquals("1", costs.get(notMatched.id()).getAmount());
-    assertFalse(costs.containsKey(legacy.id()));
-    assertFalse(costs.containsKey(changedPredicate.id()));
+    assertEquals("2", costs.get(notMatched.id()).getAmount());
+    assertEquals("2", costs.get(noSnapshot.id()).getAmount());
   }
 
   private static Entry assistantWithPricing(
@@ -525,8 +498,8 @@ class UsageCostProjectionServiceTest {
     base.setCacheWriteByTtl(Map.of());
     base.setReasoning(null);
     pricing.setBase(base);
-    pricing.setOverrides(List.of());
-    pricing.setMultipliers(List.of());
+    pricing.setRules(List.of());
+    pricing.setChanges(List.of());
     return pricing;
   }
 

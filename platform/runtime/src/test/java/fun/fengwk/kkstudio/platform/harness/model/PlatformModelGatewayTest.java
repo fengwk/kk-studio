@@ -7,9 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.Test;
 
@@ -17,9 +14,6 @@ import fun.fengwk.kkstudio.harness.builtin.port.ModelGateway;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
-import fun.fengwk.kkstudio.harness.model.ModelPricing;
-import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
-import fun.fengwk.kkstudio.harness.model.ModelRequestBodyPricing;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.RequestBodyPricingSnapshot;
@@ -38,15 +32,12 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamHandler;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.harness.admission.ConcurrencyAdmission;
 
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
@@ -310,104 +301,20 @@ class PlatformModelGatewayTest {
     }
   }
 
-  /** 最终编码 body 观察只发生在真实 stream 路径；计划逐 attempt 冻结，不把上一次快照带给下一次执行。 */
+  /**
+   * A provider-supplied legacy request-body snapshot is discarded when pricing has no such rule.
+   */
   @Test
-  void observesActualBodyAndKeepsPlansPerAttempt() {
-    ModelPricingCondition.RequestBody condition =
-        ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
-    ModelPricingCondition when =
-        new ModelPricingCondition(null, null, null, null, condition, null, null, null);
-    ModelPricing pricing =
-        new ModelPricing(
-            new ModelPricing.RateSet(
-                BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, BigDecimal.ZERO, Map.of(), null),
-            List.of(
-                new ModelPricing.Override(
-                    "fast",
-                    when,
-                    new ModelPricing.RatePatch(
-                        BigDecimal.ONE, null, null, null, null, null, false))),
-            List.of());
-    ModelRequestBodyPricing.Plan plan = ModelRequestBodyPricing.plan(pricing);
-    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
-    AtomicInteger attempts = new AtomicInteger();
-    PlatformModelGateway gateway =
-        new PlatformModelGateway(
-            new Resolution(
-                scripted(
-                    (request, handler) -> {
-                      handler.onRequestBody(
-                          "{\"speed\":\"fast\"}".getBytes(StandardCharsets.UTF_8));
-                      handler.onComplete(new ProviderCompletion(response()));
-                    })),
-            () -> BUSY_DELAY,
-            new ConcurrencyAdmission(2),
-            pricingSource(
-                modelName ->
-                    attempts.getAndIncrement() == 0
-                        ? plan
-                        : ModelRequestBodyPricing.plan(ModelPricing.ZERO)));
-
-    ModelGateway.Succeeded first = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
-    assertEquals(
-        Map.of(fingerprint, true), first.completion().response().requestBodyPricing().matches());
-
-    ModelGateway.Succeeded second = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
-    assertNull(second.completion().response().requestBodyPricing());
-  }
-
-  /** pricing 读取失败不是准入条件：异常向 Processor 传播，且已取得的并发名额立即归还。 */
-  @Test
-  void pricingFailurePropagatesAndReleasesThePermit() {
-    Resolution resolution = new Resolution(scripted((request, handler) -> {}));
-    IllegalStateException failure = new IllegalStateException("catalog unavailable");
-    AtomicBoolean failed = new AtomicBoolean();
-    PlatformModelGateway gateway =
-        new PlatformModelGateway(
-            resolution,
-            () -> BUSY_DELAY,
-            new ConcurrencyAdmission(1),
-            pricingSource(
-                modelName -> {
-                  if (failed.compareAndSet(false, true)) {
-                    throw failure;
-                  }
-                  return ModelRequestBodyPricing.plan(ModelPricing.ZERO);
-                }));
-
-    assertSame(failure, assertThrows(IllegalStateException.class, () -> gateway.admit(EXECUTION)));
-    // 名额已归还：容量 1 的下一次准入必须成功。
-    assertInstanceOf(ModelGateway.Admitted.class, gateway.admit(EXECUTION)).close();
-  }
-
-  /** 未实现观察回调的 adapter 不产生定价事实；伪造的 completion 快照会被 gateway 清除。 */
-  @Test
-  void missingObservationStaysUnknown() {
-    ModelPricingCondition.RequestBody condition =
-        ModelPricingCondition.RequestBody.stringValue("/speed", "fast");
-    String fingerprint = ModelRequestBodyPricing.fingerprint(condition);
+  void discardsUnrequestedRequestBodySnapshot() {
     ProviderResponse forged =
         response()
-            .withRequestBodyPricing(new RequestBodyPricingSnapshot(Map.of(fingerprint, true)));
+            .withRequestBodyPricing(new RequestBodyPricingSnapshot(Map.of("a".repeat(64), true)));
     PlatformModelGateway gateway =
         new PlatformModelGateway(
             new Resolution(
                 scripted((request, handler) -> handler.onComplete(new ProviderCompletion(forged)))),
             () -> BUSY_DELAY,
-            new ConcurrencyAdmission(1),
-            pricingSource(
-                modelName ->
-                    ModelRequestBodyPricing.plan(
-                        new ModelPricing(
-                            ModelPricing.RateSet.ZERO,
-                            List.of(
-                                new ModelPricing.Override(
-                                    "fast",
-                                    new ModelPricingCondition(
-                                        null, null, null, null, condition, null, null, null),
-                                    new ModelPricing.RatePatch(
-                                        BigDecimal.ONE, null, null, null, null, null, false))),
-                            List.of()))));
+            new ConcurrencyAdmission(1));
     ModelGateway.Succeeded succeeded = assertInstanceOf(ModelGateway.Succeeded.class, run(gateway));
     assertNull(succeeded.completion().response().requestBodyPricing());
   }
@@ -420,18 +327,7 @@ class PlatformModelGatewayTest {
 
   private static PlatformModelGateway gateway(
       Resolution resolution, ConcurrencyAdmission admission) {
-    return new PlatformModelGateway(
-        resolution,
-        () -> BUSY_DELAY,
-        admission,
-        pricingSource(modelName -> ModelRequestBodyPricing.plan(ModelPricing.ZERO)));
-  }
-
-  private static ModelPricingPlanSource pricingSource(
-      Function<String, ModelRequestBodyPricing.Plan> plans) {
-    ModelPricingPlanSource source = mock(ModelPricingPlanSource.class);
-    when(source.plan(anyString())).thenAnswer(invocation -> plans.apply(invocation.getArgument(0)));
-    return source;
+    return new PlatformModelGateway(resolution, () -> BUSY_DELAY, admission);
   }
 
   private static Function<ModelCallTimeoutPolicy, ModelProvider> scripted(

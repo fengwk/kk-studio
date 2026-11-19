@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
+import org.jspecify.annotations.Nullable;
 import org.springframework.stereotype.Component;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.StreamReadFeature;
@@ -179,7 +180,7 @@ public final class ModelRuntimeConfigParser {
         abilities.isMessageLevelEffort(),
         List.copyOf(variants),
         config.getDefaultVariant(),
-        ModelPricingCodec.toModelPricing(config.getPricing()));
+        ModelPricingCodec.parsePricing(config.getPricing()));
   }
 
   private List<ProviderProtocolOptions> validate(ModelConfigDTO config) {
@@ -189,7 +190,9 @@ public final class ModelRuntimeConfigParser {
     validateLimit(config.getLimit());
     ModelAbilitiesDTO abilities = validateAbilities(config.getAbilities());
     List<ProviderProtocolOptions> options = validateVariants(config, abilities);
-    config.setPricing(ModelPricingCodec.normalizeAndValidate(config.getPricing()));
+    if (config.getPricing() != null) {
+      config.setPricing(ModelPricingCodec.normalizeAndValidate(config.getPricing()));
+    }
     return options;
   }
 
@@ -393,7 +396,7 @@ public final class ModelRuntimeConfigParser {
       boolean messageLevelEffort,
       List<ModelVariant> variants,
       String defaultVariant,
-      ModelPricing pricing) {
+      @Nullable ModelPricing pricing) {
 
     public ParsedAgentModelConfig {
       inputModalities = Set.copyOf(inputModalities);
@@ -401,7 +404,6 @@ public final class ModelRuntimeConfigParser {
       if (defaultVariant == null || defaultVariant.isBlank()) {
         throw new IllegalArgumentException("defaultVariant must not be blank");
       }
-      pricing = Objects.requireNonNull(pricing, "pricing");
     }
   }
 }

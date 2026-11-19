@@ -1,91 +1,69 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
-import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.TimeBounds;
-import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.ensureCondition;
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.invalid;
-import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.parseOptionalDate;
-import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.parseTimeBounds;
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.parseTtl;
-import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireNonBlank;
 import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireOptionalNonNegative;
-import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.requireOptionalNonNegativeInt;
-import static fun.fengwk.kkstudio.platform.catalog.model.ModelPricingWireValues.toRequestBody;
 
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
-import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingConditionDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingContextConditionDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingChangeDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDateConditionDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingFactorsDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingMultiplierDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingOverrideDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRequestBodyConditionDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingTimeConditionDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 
 import java.math.BigDecimal;
 import java.time.DateTimeException;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-/**
- * 计价定义的归一键之后的结构与数值校验。
- *
- * <p>检查顺序与错误文案是对外契约：base → overrides（计数、逐条 id/when/rates）→ multipliers（计数、逐条 id/when/factors），条件内部按
- * context → serviceTier → date → time → requestBody → all → any → not。首个失败立即抛出，不再继续后续检查。
- */
+/** 固定三组 pricing wire contract 的结构/数值校验，再以领域构造器校验互斥条件。 */
 final class ModelPricingValidator {
 
   private static final String PATH = "config.pricing";
+  private static final Set<String> RATE_FIELDS =
+      Set.of(
+          "factor",
+          "inputFactor",
+          "outputFactor",
+          "cacheReadFactor",
+          "cacheWriteFactor",
+          "reasoningFactor");
 
   private ModelPricingValidator() {}
 
   static void validate(ModelPricingDTO pricing) {
     validateRateSet(pricing.getBase(), PATH + ".base");
-    validateOverrides(pricing.getOverrides(), PATH + ".overrides");
-    validateMultipliers(pricing.getMultipliers(), PATH + ".multipliers");
-  }
-
-  private static void validateOverrides(List<ModelPricingOverrideDTO> overrides, String path) {
-    if (overrides == null) {
-      return;
-    }
-    requireRuleCount(overrides.size(), path);
-    Set<String> ids = new HashSet<>();
-    for (int index = 0; index < overrides.size(); index++) {
-      ModelPricingOverrideDTO override = overrides.get(index);
-      if (override == null) {
-        throw invalid(path + "[" + index + "] must be an object");
+    validateRules(pricing.getRules(), PATH + ".rules");
+    List<ModelPricingChangeDTO> changes = pricing.getChanges();
+    if (changes != null) {
+      if (changes.size() > ModelPricing.MAX_RULES) {
+        throw invalid(PATH + ".changes must not exceed " + ModelPricing.MAX_RULES + " entries");
       }
-      String rulePath = path + "[" + index + "]";
-      requireRuleId(override.getId(), ids, rulePath + ".id");
-      validateCondition(override.getWhen(), rulePath + ".when", 0);
-      validateRatePatch(override.getRates(), rulePath + ".rates");
-    }
-  }
-
-  private static void validateMultipliers(
-      List<ModelPricingMultiplierDTO> multipliers, String path) {
-    if (multipliers == null) {
-      return;
-    }
-    requireRuleCount(multipliers.size(), path);
-    Set<String> ids = new HashSet<>();
-    for (int index = 0; index < multipliers.size(); index++) {
-      ModelPricingMultiplierDTO multiplier = multipliers.get(index);
-      if (multiplier == null) {
-        throw invalid(path + "[" + index + "] must be an object");
+      Set<LocalDate> dates = new HashSet<>();
+      for (int i = 0; i < changes.size(); i++) {
+        ModelPricingChangeDTO change = changes.get(i);
+        if (change == null) {
+          throw invalid(PATH + ".changes[" + i + "] must be an object");
+        }
+        LocalDate date = date(change.getFrom(), PATH + ".changes[" + i + "].from");
+        if (!dates.add(date)) {
+          throw invalid(PATH + ".changes.from dates must be unique");
+        }
+        if (change.getBase() == null) {
+          throw invalid(PATH + ".changes[" + i + "].base must be an object");
+        }
+        validateRateSet(change.getBase(), PATH + ".changes[" + i + "].base");
+        validateRules(change.getRules(), PATH + ".changes[" + i + "].rules");
       }
-      String rulePath = path + "[" + index + "]";
-      requireRuleId(multiplier.getId(), ids, rulePath + ".id");
-      validateCondition(multiplier.getWhen(), rulePath + ".when", 0);
-      validateFactors(multiplier.getFactors(), rulePath + ".factors");
+    }
+    try {
+      ModelPricingMapper.toModelPricing(pricing);
+    } catch (IllegalArgumentException error) {
+      throw invalid(PATH + " is invalid: " + error.getMessage(), error);
     }
   }
 
@@ -98,41 +76,19 @@ final class ModelPricingValidator {
     requireOptionalNonNegative(rates.getCacheRead(), path + ".cacheRead");
     requireOptionalNonNegative(rates.getCacheWrite(), path + ".cacheWrite");
     requireOptionalNonNegative(rates.getReasoning(), path + ".reasoning");
-    validateTtlRates(rates.getCacheWriteByTtl(), path + ".cacheWriteByTtl");
-  }
-
-  private static void validateRatePatch(ModelRatePatchDTO rates, String path) {
-    if (rates == null) {
-      throw invalid(path + " must be an object");
-    }
-    requireOptionalNonNegative(rates.getInput(), path + ".input");
-    requireOptionalNonNegative(rates.getOutput(), path + ".output");
-    requireOptionalNonNegative(rates.getCacheRead(), path + ".cacheRead");
-    requireOptionalNonNegative(rates.getCacheWrite(), path + ".cacheWrite");
-    requireOptionalNonNegative(rates.getReasoning(), path + ".reasoning");
-    validateTtlRates(rates.getCacheWriteByTtl(), path + ".cacheWriteByTtl");
-  }
-
-  private static void validateFactors(ModelPricingFactorsDTO factors, String path) {
-    if (factors == null) {
-      throw invalid(path + " must be an object");
-    }
-    requireOptionalNonNegative(factors.getInput(), path + ".input");
-    requireOptionalNonNegative(factors.getOutput(), path + ".output");
-    requireOptionalNonNegative(factors.getCacheRead(), path + ".cacheRead");
-    requireOptionalNonNegative(factors.getCacheWrite(), path + ".cacheWrite");
-    requireOptionalNonNegative(factors.getReasoning(), path + ".reasoning");
-  }
-
-  private static void validateTtlRates(Map<String, BigDecimal> rates, String path) {
-    if (rates == null) {
+    Map<String, BigDecimal> ttlRates = rates.getCacheWriteByTtl();
+    if (ttlRates == null) {
       return;
     }
-    if (rates.size() > ModelPricing.MAX_RULES) {
+    validateTtlRates(ttlRates, path + ".cacheWriteByTtl");
+  }
+
+  private static void validateTtlRates(Map<String, BigDecimal> ttlRates, String path) {
+    if (ttlRates.size() > ModelPricing.MAX_RULES) {
       throw invalid(path + " must not exceed " + ModelPricing.MAX_RULES + " entries");
     }
     Set<Long> ttls = new HashSet<>();
-    for (Map.Entry<String, BigDecimal> entry : rates.entrySet()) {
+    for (Map.Entry<String, BigDecimal> entry : ttlRates.entrySet()) {
       long ttl = parseTtl(entry.getKey(), path);
       if (!ttls.add(ttl)) {
         throw invalid(path + " contains duplicate TTL: " + ttl);
@@ -141,128 +97,214 @@ final class ModelPricingValidator {
     }
   }
 
-  private static void requireRuleCount(int size, String path) {
-    if (size > ModelPricing.MAX_RULES) {
+  private static void validateRules(List<ModelPricingRuleDTO> rules, String path) {
+    if (rules == null) {
+      return;
+    }
+    if (rules.size() > ModelPricing.MAX_RULES) {
       throw invalid(path + " must not exceed " + ModelPricing.MAX_RULES + " rules");
     }
-  }
-
-  private static void requireRuleId(String id, Set<String> ids, String path) {
-    requireNonBlank(id, path);
-    if (!ids.add(id)) {
-      throw invalid(PATH + " rule ids must be unique: " + id);
+    for (int index = 0; index < rules.size(); index++) {
+      ModelPricingRuleDTO rule = rules.get(index);
+      String rulePath = path + "[" + index + "]";
+      if (rule == null) {
+        throw invalid(rulePath + " must be an object");
+      }
+      switch (rule.getType() == null ? "" : rule.getType()) {
+        case "input_token_range" -> validateRange(rule, rulePath);
+        case "time_multiplier" -> validateTime(rule, rulePath);
+        case "service_tier_multiplier" -> validateTier(rule, rulePath);
+        default -> throw invalid(
+            rulePath
+                + ".type must be input_token_range, time_multiplier or service_tier_multiplier");
+      }
     }
   }
 
-  /** 递归校验嵌套条件；深度上限与领域构造函数一致，超出时先于任何子节点检查失败。 */
-  private static void validateCondition(
-      ModelPricingConditionDTO condition, String path, int depth) {
-    if (condition == null) {
-      throw invalid(path + " must be an object");
+  private static void validateRange(ModelPricingRuleDTO rule, String path) {
+    requireOnly(
+        rule,
+        path,
+        Set.of(
+            "type",
+            "minInputTokens",
+            "maxInputTokensExclusive",
+            "input",
+            "output",
+            "cacheRead",
+            "cacheWrite",
+            "cacheWriteByTtl",
+            "reasoning"));
+    if (rule.getMinInputTokens() == null && rule.getMaxInputTokensExclusive() == null) {
+      throw invalid(path + " must specify at least one range boundary");
     }
-    if (depth > ModelPricingCondition.MAX_DEPTH) {
-      throw invalid(path + " nesting must not exceed " + ModelPricingCondition.MAX_DEPTH);
+    int minInput = rule.getMinInputTokens() == null ? 0 : rule.getMinInputTokens();
+    if (minInput < 0) {
+      throw invalid(path + ".minInputTokens must be a non-negative integer");
     }
-    validateContext(condition.getContext(), path + ".context");
-    validateServiceTier(condition.getServiceTier(), path + ".serviceTier");
-    validateDate(condition.getDate(), path + ".date");
-    validateTime(condition.getTime(), path + ".time");
-    validateRequestBody(condition.getRequestBody(), path + ".requestBody");
-    validateConditionList(condition.getAll(), path + ".all", depth);
-    validateConditionList(condition.getAny(), path + ".any", depth);
-    if (condition.getNot() != null) {
-      validateCondition(condition.getNot(), path + ".not", depth + 1);
+    if (rule.getMaxInputTokensExclusive() != null
+        && rule.getMaxInputTokensExclusive() <= minInput) {
+      throw invalid(path + ".maxInputTokensExclusive must exceed minInputTokens");
     }
-  }
-
-  private static void validateContext(ModelPricingContextConditionDTO context, String path) {
-    if (context == null) {
-      return;
+    if (rule.getInput() == null
+        && rule.getOutput() == null
+        && rule.getCacheRead() == null
+        && rule.getCacheWrite() == null
+        && !rule.isCacheWriteByTtlSpecified()
+        && !rule.isReasoningSpecified()) {
+      throw invalid(path + " must override at least one fee rate");
     }
-    requireOptionalNonNegativeInt(context.getGt(), path + ".gt");
-    requireOptionalNonNegativeInt(context.getGte(), path + ".gte");
-    requireOptionalNonNegativeInt(context.getLt(), path + ".lt");
-    requireOptionalNonNegativeInt(context.getLte(), path + ".lte");
-    ensureCondition(
-        () ->
-            new ModelPricingCondition.Context(
-                context.getGt(), context.getGte(), context.getLt(), context.getLte()),
-        path);
-  }
-
-  private static void validateServiceTier(List<String> serviceTier, String path) {
-    if (serviceTier == null) {
-      return;
+    requireOptionalNonNegative(rule.getInput(), path + ".input");
+    requireOptionalNonNegative(rule.getOutput(), path + ".output");
+    requireOptionalNonNegative(rule.getCacheRead(), path + ".cacheRead");
+    requireOptionalNonNegative(rule.getCacheWrite(), path + ".cacheWrite");
+    if (rule.isCacheWriteByTtlSpecified()) {
+      if (rule.getCacheWriteByTtl() == null) {
+        throw invalid(path + ".cacheWriteByTtl must be an object");
+      }
+      validateTtlRates(rule.getCacheWriteByTtl(), path + ".cacheWriteByTtl");
     }
-    if (serviceTier.size() > ModelPricingCondition.MAX_LIST_SIZE) {
-      throw invalid(path + " must not exceed " + ModelPricingCondition.MAX_LIST_SIZE + " values");
-    }
-    for (int index = 0; index < serviceTier.size(); index++) {
-      requireNonBlank(serviceTier.get(index), path + "[" + index + "]");
-    }
-    Set<String> uniqueTiers = new HashSet<>(serviceTier);
-    if (uniqueTiers.size() != serviceTier.size()) {
-      throw invalid(path + " contains duplicate value");
+    if (rule.isReasoningSpecified()) {
+      requireOptionalNonNegative(rule.getReasoning(), path + ".reasoning");
     }
   }
 
-  private static void validateDate(ModelPricingDateConditionDTO date, String path) {
-    if (date == null) {
-      return;
-    }
-    LocalDate gte = parseOptionalDate(date.getGte(), path + ".gte");
-    LocalDate lt = parseOptionalDate(date.getLt(), path + ".lt");
-    ensureCondition(() -> new ModelPricingCondition.DateRange(gte, lt), path);
-  }
-
-  private static void validateTime(ModelPricingTimeConditionDTO time, String path) {
-    if (time == null) {
-      return;
-    }
-    TimeBounds bounds = parseTimeBounds(time.getStart(), time.getEnd(), path);
-    requireNonBlank(time.getTimezone(), path + ".timezone");
-    ZoneId timezone;
+  private static void validateTime(ModelPricingRuleDTO rule, String path) {
+    requireOnly(
+        rule, path, union(Set.of("type", "start", "end", "timezone", "weekdays"), RATE_FIELDS));
+    validateTimeValue(rule.getStart(), false, path + ".start");
+    validateTimeValue(rule.getEnd(), true, path + ".end");
     try {
-      timezone = ZoneId.of(time.getTimezone());
-    } catch (DateTimeException error) {
-      throw invalid(path + ".timezone must be an IANA time zone");
+      ZoneId.of(rule.getTimezone());
+    } catch (DateTimeException | NullPointerException error) {
+      throw invalid(path + ".timezone must be a valid IANA zone");
     }
-    List<Integer> weekdays = time.getWeekdays();
-    if (weekdays != null && weekdays.size() > 7) {
-      throw invalid(path + ".weekdays must not exceed 7 values");
-    }
-    ensureCondition(
-        () ->
-            new ModelPricingCondition.TimeWindow(bounds.start(), bounds.end(), timezone, weekdays),
-        path);
+    validateWeekdays(rule.getWeekdays(), path + ".weekdays");
+    validateFactors(rule, path);
   }
 
-  private static void validateRequestBody(
-      ModelPricingRequestBodyConditionDTO requestBody, String path) {
-    if (requestBody == null) {
-      return;
+  private static void validateTier(ModelPricingRuleDTO rule, String path) {
+    requireOnly(rule, path, union(Set.of("type", "serviceTier"), RATE_FIELDS));
+    if (rule.getServiceTier() == null || rule.getServiceTier().isBlank()) {
+      throw invalid(path + ".serviceTier must be a non-blank string");
     }
-    if (requestBody.getPath() == null) {
-      throw invalid(path + ".path must be a JSON Pointer string");
-    }
-    if (requestBody.getEquals() == null) {
-      throw invalid(path + ".equals is required; write null explicitly to match JSON null");
-    }
-    // 构造 requestBody 即完成 path/equals 的全部边界校验。
-    toRequestBody(requestBody.getPath(), requestBody.getEquals(), path);
+    validateFactors(rule, path);
   }
 
-  private static void validateConditionList(
-      List<ModelPricingConditionDTO> conditions, String path, int depth) {
-    if (conditions == null) {
+  private static void validateFactors(ModelPricingRuleDTO rule, String path) {
+    if (rule.getFactor() == null) {
+      throw invalid(path + ".factor is required");
+    }
+    requireOptionalNonNegative(rule.getFactor(), path + ".factor");
+    requireOptionalNonNegative(rule.getInputFactor(), path + ".inputFactor");
+    requireOptionalNonNegative(rule.getOutputFactor(), path + ".outputFactor");
+    requireOptionalNonNegative(rule.getCacheReadFactor(), path + ".cacheReadFactor");
+    requireOptionalNonNegative(rule.getCacheWriteFactor(), path + ".cacheWriteFactor");
+    requireOptionalNonNegative(rule.getReasoningFactor(), path + ".reasoningFactor");
+  }
+
+  private static void validateTimeValue(String value, boolean end, String path) {
+    if (end && "24:00".equals(value)) {
       return;
     }
-    if (conditions.size() > ModelPricingCondition.MAX_LIST_SIZE) {
-      throw invalid(
-          path + " must not exceed " + ModelPricingCondition.MAX_LIST_SIZE + " conditions");
+    if (value == null || !value.matches("(?:[01]\\d|2[0-3]):[0-5]\\d")) {
+      throw invalid(path + " must be HH:mm" + (end ? " or 24:00" : ""));
     }
-    for (int index = 0; index < conditions.size(); index++) {
-      validateCondition(conditions.get(index), path + "[" + index + "]", depth + 1);
+    try {
+      LocalTime.parse(value);
+    } catch (DateTimeException | NullPointerException error) {
+      throw invalid(path + " must be HH:mm" + (end ? " or 24:00" : ""));
     }
+  }
+
+  private static void validateWeekdays(List<Integer> weekdays, String path) {
+    if (weekdays == null) {
+      return;
+    }
+    if (weekdays.size() > 7) {
+      throw invalid(path + " must not exceed 7 values");
+    }
+    Set<Integer> unique = new HashSet<>();
+    for (Integer weekday : weekdays) {
+      if (weekday == null || weekday < 1 || weekday > 7 || !unique.add(weekday)) {
+        throw invalid(path + " must contain unique ISO weekdays from 1 to 7");
+      }
+    }
+  }
+
+  private static LocalDate date(String value, String path) {
+    try {
+      return LocalDate.parse(value);
+    } catch (DateTimeException | NullPointerException error) {
+      throw invalid(path + " must be YYYY-MM-DD");
+    }
+  }
+
+  private static void requireOnly(ModelPricingRuleDTO rule, String path, Set<String> allowed) {
+    if (!allowed.contains("minInputTokens") && rule.getMinInputTokens() != null) {
+      throw invalid(path + ".minInputTokens is not valid for this type");
+    }
+    if (!allowed.contains("maxInputTokensExclusive") && rule.getMaxInputTokensExclusive() != null) {
+      throw invalid(path + ".maxInputTokensExclusive is not valid for this type");
+    }
+    if (!allowed.contains("input") && rule.getInput() != null) {
+      throw invalid(path + ".input is not valid for this type");
+    }
+    if (!allowed.contains("output") && rule.getOutput() != null) {
+      throw invalid(path + ".output is not valid for this type");
+    }
+    if (!allowed.contains("cacheRead") && rule.getCacheRead() != null) {
+      throw invalid(path + ".cacheRead is not valid for this type");
+    }
+    if (!allowed.contains("cacheWrite") && rule.getCacheWrite() != null) {
+      throw invalid(path + ".cacheWrite is not valid for this type");
+    }
+    if (!allowed.contains("cacheWriteByTtl")
+        && (rule.isCacheWriteByTtlSpecified() || rule.getCacheWriteByTtl() != null)) {
+      throw invalid(path + ".cacheWriteByTtl is not valid for this type");
+    }
+    if (!allowed.contains("reasoning")
+        && (rule.isReasoningSpecified() || rule.getReasoning() != null)) {
+      throw invalid(path + ".reasoning is not valid for this type");
+    }
+    if (!allowed.contains("start") && rule.getStart() != null) {
+      throw invalid(path + ".start is not valid for this type");
+    }
+    if (!allowed.contains("end") && rule.getEnd() != null) {
+      throw invalid(path + ".end is not valid for this type");
+    }
+    if (!allowed.contains("timezone") && rule.getTimezone() != null) {
+      throw invalid(path + ".timezone is not valid for this type");
+    }
+    if (!allowed.contains("weekdays") && rule.getWeekdays() != null) {
+      throw invalid(path + ".weekdays is not valid for this type");
+    }
+    if (!allowed.contains("serviceTier") && rule.getServiceTier() != null) {
+      throw invalid(path + ".serviceTier is not valid for this type");
+    }
+    for (String field : RATE_FIELDS) {
+      BigDecimal value = factor(rule, field);
+      if (!allowed.contains(field) && value != null) {
+        throw invalid(path + "." + field + " is not valid for this type");
+      }
+    }
+  }
+
+  private static BigDecimal factor(ModelPricingRuleDTO rule, String field) {
+    return switch (field) {
+      case "factor" -> rule.getFactor();
+      case "inputFactor" -> rule.getInputFactor();
+      case "outputFactor" -> rule.getOutputFactor();
+      case "cacheReadFactor" -> rule.getCacheReadFactor();
+      case "cacheWriteFactor" -> rule.getCacheWriteFactor();
+      case "reasoningFactor" -> rule.getReasoningFactor();
+      default -> throw new IllegalStateException("unknown factor field");
+    };
+  }
+
+  private static Set<String> union(Set<String> left, Set<String> right) {
+    Set<String> result = new HashSet<>(left);
+    result.addAll(right);
+    return Set.copyOf(result);
   }
 }

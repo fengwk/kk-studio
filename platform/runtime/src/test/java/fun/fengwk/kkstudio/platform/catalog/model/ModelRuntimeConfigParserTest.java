@@ -1,6 +1,5 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
-import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -19,7 +18,8 @@ import tools.jackson.databind.module.SimpleModule;
 import fun.fengwk.kkstudio.harness.model.ModelCost;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
-import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
+import fun.fengwk.kkstudio.harness.model.ModelPricing.ServiceTierMultiplier;
+import fun.fengwk.kkstudio.harness.model.ModelPricing.TimeMultiplier;
 import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
@@ -32,7 +32,6 @@ import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser.Parse
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.time.LocalDate;
-import java.time.LocalTime;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -46,7 +45,7 @@ class ModelRuntimeConfigParserTest {
   /** 独立计价入口仍校验未信任 DTO；完整配置和独立入口对缺省与非法费率一致。 */
   @Test
   void standalonePricingAndConfigUseTheSameValidation() {
-    assertEquals(ModelPricing.ZERO, ModelPricingCodec.parsePricing(null));
+    assertNull(ModelPricingCodec.parsePricing(null));
     ModelConfigDTO config = parser.decode(validConfig());
     ModelPricingDTO pricing = new ModelPricingDTO();
     config.setPricing(pricing);
@@ -85,8 +84,24 @@ class ModelRuntimeConfigParserTest {
     assertEquals(new BigDecimal("0.5"), pricing.base().cacheWriteByTtl().get(300L));
     assertFalse(pricing.base().cacheWriteByTtl().containsKey(3600L));
     assertEquals(new BigDecimal("3.6"), pricing.base().reasoning());
-    assertEquals(List.of(), pricing.overrides());
-    assertEquals(List.of(), pricing.multipliers());
+    assertEquals(List.of(), pricing.rules());
+    assertEquals(List.of(), pricing.changes());
+  }
+
+  /** 缺省普通写价在存在 TTL 分价时保留为未知，不归一成零并改变不可归属写入的账单。 */
+  @Test
+  void preservesMissingOrdinaryWriteRateWhenTtlRatesExist() {
+    String config =
+        configWithPricing(
+            "{\"base\":{\"cacheWriteByTtl\":{\"300\":\"2\"}}," + "\"rules\":[],\"changes\":[]}");
+
+    ModelConfigDTO decoded = parser.decode(config);
+    String encoded = parser.encode(decoded);
+    var parsed = parser.parse(encoded);
+
+    assertNull(parsed.pricing().base().cacheWrite());
+    assertEquals(new BigDecimal("2"), parsed.pricing().base().cacheWriteByTtl().get(300L));
+    assertTrue(encoded.contains("\"cacheWriteByTtl\":{\"300\":\"2\"}"), encoded);
   }
 
   /** 类型化 DTO 来回往返：decode -> encode -> parse 得到相同的 runtime 快照。 */
@@ -121,126 +136,135 @@ class ModelRuntimeConfigParserTest {
     assertTrue(encoded.contains("\"messageLevelEffort\":true"));
   }
 
-  /** 条件与规则按顺序解析；日期允许单侧缺省，显式 reasoning:null 与未声明 reasoning 保持不同语义。 */
+  /** 范围费率的 TTL map 与 reasoning 存在性语义跨 config decode/encode 保留。 */
   @Test
-  void parsesOrderedRulesAndPreservesExplicitReasoningNull() {
+  void parsesRangeFeesAndPreservesExplicitNullAndEmptyTtlMap() {
     String config =
         validConfig()
             .replace(
-                "\"overrides\":[],\"multipliers\":[]",
-                "\"overrides\":["
-                    + "{\"id\":\"gte-only\",\"when\":{\"date\":{\"gte\":\"2026-08-17\"}},"
-                    + "\"rates\":{\"input\":\"2\"}},"
-                    + "{\"id\":\"reset-reasoning\",\"when\":{},"
-                    + "\"rates\":{\"reasoning\":null}}],"
-                    + "\"multipliers\":[{\"id\":\"priority\","
-                    + "\"when\":{\"serviceTier\":[\"priority\"]},"
-                    + "\"factors\":{\"input\":\"1.5\"}}]");
+                "\"rules\":[],\"changes\":[]",
+                "\"rules\":[{\"type\":\"input_token_range\","
+                    + "\"maxInputTokensExclusive\":300000,\"cacheRead\":\"0.25\","
+                    + "\"cacheWriteByTtl\":{},\"reasoning\":null},"
+                    + "{\"type\":\"service_tier_multiplier\",\"serviceTier\":\"priority\","
+                    + "\"factor\":\"1.5\",\"inputFactor\":\"2\"}],"
+                    + "\"changes\":[{\"from\":\"2027-01-01\",\"base\":{"
+                    + "\"input\":\"4\",\"output\":\"8\",\"cacheRead\":\"0\","
+                    + "\"cacheWrite\":\"1\"},\"rules\":[]}]");
 
     var parsed = parser.parse(config);
-    var overrides = parsed.pricing().overrides();
-    assertEquals(2, overrides.size());
-    assertEquals("gte-only", overrides.get(0).id());
-    assertEquals(LocalDate.of(2026, 8, 17), overrides.get(0).when().date().gte());
-    assertNull(overrides.get(0).when().date().lt());
-    assertFalse(overrides.get(0).rates().modifiesReasoning());
-    assertTrue(overrides.get(1).rates().modifiesReasoning());
-    assertNull(overrides.get(1).rates().reasoning());
-    assertEquals("priority", parsed.pricing().multipliers().get(0).id());
-    assertEquals(new BigDecimal("1.5"), parsed.pricing().multipliers().get(0).factors().input());
+    var range = (ModelPricing.InputTokenRange) parsed.pricing().rules().getFirst();
+    assertEquals(0, range.minInputTokens());
+    assertEquals(300000, range.maxInputTokensExclusive());
+    assertEquals(new BigDecimal("0.25"), range.cacheRead());
+    assertTrue(range.cacheWriteByTtlSpecified());
+    assertEquals(Map.of(), range.cacheWriteByTtl());
+    assertTrue(range.reasoningSpecified());
+    assertNull(range.reasoning());
+    assertEquals(LocalDate.parse("2027-01-01"), parsed.pricing().changes().getFirst().from());
 
     String encoded = parser.encode(parser.decode(config));
-    var roundTripped = parser.parse(encoded).pricing().overrides();
-    assertFalse(roundTripped.get(0).rates().modifiesReasoning());
-    assertTrue(roundTripped.get(1).rates().modifiesReasoning());
+    assertTrue(encoded.contains("\"cacheWriteByTtl\":{}"), encoded);
+    assertTrue(encoded.contains("\"reasoning\":null"), encoded);
+    var roundTripRange =
+        (ModelPricing.InputTokenRange) parser.parse(encoded).pricing().rules().getFirst();
+    assertTrue(roundTripRange.cacheWriteByTtlSpecified());
+    assertTrue(roundTripRange.reasoningSpecified());
   }
 
-  /** 日期边界同时存在时必须可满足；单侧边界合法。 */
+  /** Date changes select complete definitions from a unique inclusive UTC date. */
   @Test
-  void rejectsInvertedDateRangeAndAcceptsOneSidedBounds() {
+  void selectsCompleteDefinitionsByUniqueUtcDate() {
+    String change =
+        "\"changes\":[{\"from\":\"2027-01-01\",\"base\":{\"input\":\"2\","
+            + "\"output\":\"3\"},\"rules\":[]}]";
+    String config = validConfig().replace("\"rules\":[],\"changes\":[]", "\"rules\":[]," + change);
+    assertEquals(
+        LocalDate.parse("2027-01-01"), parser.parse(config).pricing().changes().getFirst().from());
+    assertTrue(parser.encode(parser.decode(config)).contains("\"from\":\"2027-01-01\""));
+
     assertInvalid(
         validConfig()
             .replace(
-                "\"overrides\":[],\"multipliers\":[]",
-                "\"overrides\":[{\"id\":\"bad\",\"when\":{\"date\":"
-                    + "{\"gte\":\"2026-08-18\",\"lt\":\"2026-08-18\"}},"
-                    + "\"rates\":{\"input\":\"1\"}}],\"multipliers\":[]"),
-        "date.gte must be before date.lt");
-    assertDoesNotThrow(
-        () ->
-            parser.parse(
-                validConfig()
-                    .replace(
-                        "\"overrides\":[],\"multipliers\":[]",
-                        "\"overrides\":[{\"id\":\"lt-only\",\"when\":"
-                            + "{\"date\":{\"lt\":\"2026-08-18\"}},"
-                            + "\"rates\":{\"input\":\"1\"}}],\"multipliers\":[]")));
+                "\"rules\":[],\"changes\":[]",
+                "\"rules\":[],\"changes\":["
+                    + "{\"from\":\"2027-01-01\",\"base\":{},\"rules\":[]},"
+                    + "{\"from\":\"2027-01-01\",\"base\":{},\"rules\":[]}]"),
+        "changes.from dates must be unique");
   }
 
-  /** 显式空 any/serviceTier 的 presence 必须跨 decode/encode 保留，不能被折叠为缺省。 */
+  /**
+   * Each actual service tier may have one typed factor rule, with per-fee factors overriding the
+   * default.
+   */
   @Test
-  void preservesExplicitEmptyAnyAndServiceTier() {
+  void parsesServiceTierFactors() {
     String config =
         validConfig()
             .replace(
-                "\"overrides\":[],\"multipliers\":[]",
-                "\"overrides\":[{\"id\":\"empty\",\"when\":"
-                    + "{\"any\":[],\"serviceTier\":[]},\"rates\":{\"input\":\"1\"}}],"
-                    + "\"multipliers\":[]");
+                "\"rules\":[],\"changes\":[]",
+                "\"rules\":[{\"type\":\"service_tier_multiplier\","
+                    + "\"serviceTier\":\"priority\",\"factor\":\"1.5\","
+                    + "\"inputFactor\":\"2\"}],\"changes\":[]");
 
-    var when = parser.decode(config).getPricing().getOverrides().get(0).getWhen();
-    assertNotNull(when.getAny());
-    assertTrue(when.getAny().isEmpty());
-    assertNotNull(when.getServiceTier());
-    assertTrue(when.getServiceTier().isEmpty());
+    var rule = (ServiceTierMultiplier) parser.parse(config).pricing().rules().getFirst();
+    assertEquals("priority", rule.serviceTier());
+    assertEquals(new BigDecimal("1.5"), rule.factors().factor());
+    assertEquals(new BigDecimal("2"), rule.factors().inputFactor());
 
-    String encoded = parser.encode(parser.decode(config));
-    assertTrue(encoded.contains("\"any\":[]"), encoded);
-    assertTrue(encoded.contains("\"serviceTier\":[]"), encoded);
-
-    var parsed = parser.parse(encoded).pricing().overrides().get(0).when();
-    assertNotNull(parsed.any());
-    assertTrue(parsed.any().isEmpty());
-    assertNotNull(parsed.serviceTier());
-    assertTrue(parsed.serviceTier().isEmpty());
+    assertInvalid(
+        validConfig()
+            .replace(
+                "\"rules\":[],\"changes\":[]",
+                "\"rules\":[{\"type\":\"service_tier_multiplier\","
+                    + "\"serviceTier\":\"priority\",\"factor\":\"1.5\"},"
+                    + "{\"type\":\"service_tier_multiplier\","
+                    + "\"serviceTier\":\"priority\",\"factor\":\"2\"}],\"changes\":[]"),
+        "service tier rules must be unique");
   }
 
-  /** wire end=24:00 可配任意合法 start；00:00-24:00 保留 canonical wire，22:00-24:00 表达当日终点。 */
+  /** The typed time group uses minute bounds and preserves the 24:00 exclusive endpoint. */
   @Test
-  void acceptsAllDayAndEndOfDayTimeAndKeepsCanonicalEnd24() {
+  void acceptsAllDayAndEndOfDayTimeWindows() {
     String allDay = configWithTime("00:00", "24:00");
-    var allDayTime = parser.parse(allDay).pricing().overrides().get(0).when().time();
-    assertEquals(LocalTime.MIDNIGHT, allDayTime.start());
-    assertEquals(LocalTime.MIDNIGHT, allDayTime.end());
-    assertTrue(allDayTime.allDay());
+    var allDayTime = (TimeMultiplier) parser.parse(allDay).pricing().rules().getFirst();
+    assertEquals(0, allDayTime.startMinuteOfDay());
+    assertEquals(1440, allDayTime.endMinuteOfDay());
     assertTrue(parser.encode(parser.decode(allDay)).contains("\"end\":\"24:00\""));
 
     String late = configWithTime("22:00", "24:00");
-    var lateTime = parser.parse(late).pricing().overrides().get(0).when().time();
-    assertEquals(LocalTime.of(22, 0), lateTime.start());
-    assertEquals(LocalTime.MIDNIGHT, lateTime.end());
-    assertFalse(lateTime.allDay());
-    assertTrue(parser.encode(parser.decode(late)).contains("\"end\":\"24:00\""));
+    var lateTime = (TimeMultiplier) parser.parse(late).pricing().rules().getFirst();
+    assertEquals(1320, lateTime.startMinuteOfDay());
+    assertEquals(1440, lateTime.endMinuteOfDay());
   }
 
-  /** 拒绝 start=24:00，以及把相同起止（含 00:00-00:00）静默当成全天。 */
+  /** Time windows reject invalid endpoints and overlap only within shared weekdays. */
   @Test
-  void rejectsInvalidAllDayTimeForms() {
-    assertInvalid(configWithTime("24:00", "24:00"), ".start must be before 24:00");
-    assertInvalid(configWithTime("00:00", "00:00"), ".start and end must differ");
-    assertInvalid(configWithTime("10:00", "10:00"), ".start and end must differ");
+  void rejectsInvalidAndOverlappingTimeWindows() {
+    assertInvalid(configWithTime("24:00", "24:00"), ".start must be HH:mm");
+    assertInvalid(configWithTime("00:00", "00:00"), "time end must be after start");
+    String overlaps =
+        validConfig()
+            .replace(
+                "\"rules\":[],\"changes\":[]",
+                "\"rules\":[{\"type\":\"time_multiplier\",\"start\":\"01:00\","
+                    + "\"end\":\"03:00\",\"timezone\":\"UTC\",\"weekdays\":[1],\"factor\":\"2\"},"
+                    + "{\"type\":\"time_multiplier\",\"start\":\"02:00\","
+                    + "\"end\":\"04:00\",\"timezone\":\"UTC\",\"weekdays\":[1],\"factor\":\"3\"}],"
+                    + "\"changes\":[]");
+    assertInvalid(overlaps, "time rules must not overlap on a weekday");
   }
 
   private String configWithTime(String start, String end) {
     return validConfig()
         .replace(
-            "\"overrides\":[],\"multipliers\":[]",
-            "\"overrides\":[{\"id\":\"time\",\"when\":{\"time\":{\"start\":\""
+            "\"rules\":[],\"changes\":[]",
+            "\"rules\":[{\"type\":\"time_multiplier\",\"start\":\""
                 + start
                 + "\",\"end\":\""
                 + end
-                + "\",\"timezone\":\"UTC\",\"weekdays\":[1]}},"
-                + "\"rates\":{\"input\":\"2\"}}],\"multipliers\":[]");
+                + "\",\"timezone\":\"UTC\",\"weekdays\":[1],\"factor\":\"2\"}],"
+                + "\"changes\":[]");
   }
 
   /** off 是显式关闭语义，绝不与 null（协议默认）静默映射。 */
@@ -712,7 +736,7 @@ class ModelRuntimeConfigParserTest {
             + "\"defaultVariant\":\"x\",\"variants\":[],\"pricing\":{"
             + "\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\","
             + "\"cacheWrite\":\"0\",\"cacheWriteByTtl\":{},\"reasoning\":null},"
-            + "\"overrides\":[],\"multipliers\":[]}}",
+            + "\"rules\":[],\"changes\":[]}}",
         "config.variants must not be empty");
   }
 
@@ -729,7 +753,7 @@ class ModelRuntimeConfigParserTest {
         "surrounding whitespace");
   }
 
-  /** 类型化 DTO 形式拒绝损坏的必填子结构；缺失 pricing 按零定义归一，而不是继续拒绝。 */
+  /** 类型化 DTO 形式拒绝损坏的必填子结构；缺失 pricing 保持 null，而不是推断为零。 */
   @Test
   void validatesTypedConfigAndNormalizesMissingPricing() {
     ModelConfigDTO base = parser.decode(validConfig());
@@ -748,7 +772,7 @@ class ModelRuntimeConfigParserTest {
         abilitiesError.getMessage());
 
     ModelConfigDTO missingPricing = copy(base, c -> c.setPricing(null));
-    assertEquals(ModelPricing.ZERO, parser.parse(missingPricing).pricing());
+    assertNull(parser.parse(missingPricing).pricing());
 
     ModelConfigDTO negativeInput =
         copy(base, c -> c.getPricing().getBase().setInput(new BigDecimal("-1")));
@@ -759,27 +783,20 @@ class ModelRuntimeConfigParserTest {
         multiplierError.getMessage());
   }
 
-  /** 缺失 pricing、缺失 base 普通价格与显式全零定义得到相同 canonical DTO 与零成本。 */
+  /** 缺失 pricing 保持未定价；只有显式零定义才代表零费用。 */
   @Test
-  void normalizesMissingPricingToCanonicalZeroDefinition() {
+  void distinguishesMissingPricingFromExplicitZeroPrice() {
     ModelConfigDTO missing = parser.decode(configWithoutPricing());
     ModelConfigDTO partial = parser.decode(configWithPricing("{\"base\":{}}"));
     ModelConfigDTO explicit = parser.decode(configWithPricing(EXPLICIT_ZERO_PRICING));
 
-    assertCanonicalZero(missing);
-    assertCanonicalZero(partial);
-    assertEquals(explicit.getPricing(), missing.getPricing());
+    assertNull(missing.getPricing());
+    assertNotNull(partial.getPricing());
+    assertNotNull(explicit.getPricing());
     assertEquals(explicit.getPricing(), partial.getPricing());
 
     String encoded = parser.encode(missing);
-    assertTrue(encoded.contains("\"pricing\":{\"base\":{"), encoded);
-    assertTrue(encoded.contains("\"input\":\"0\""), encoded);
-    assertTrue(encoded.contains("\"output\":\"0\""), encoded);
-    assertTrue(encoded.contains("\"cacheRead\":\"0\""), encoded);
-    assertTrue(encoded.contains("\"cacheWrite\":\"0\""), encoded);
-    assertTrue(encoded.contains("\"cacheWriteByTtl\":{}"), encoded);
-    assertTrue(encoded.contains("\"overrides\":[]"), encoded);
-    assertTrue(encoded.contains("\"multipliers\":[]"), encoded);
+    assertTrue(encoded.contains("\"pricing\":null"), encoded);
 
     ModelUsage usage = new ModelUsage(1_000_000, 1_000_000, 0, 0, Map.of(), null, null);
     ModelCost zeroCost =
@@ -791,7 +808,7 @@ class ModelRuntimeConfigParserTest {
             BigDecimal.ZERO,
             BigDecimal.ZERO,
             BigDecimal.ZERO);
-    assertEquals(zeroCost, ModelCost.calculate(parser.parse(missing).pricing(), usage, null, null));
+    assertNull(parser.parse(missing).pricing());
     assertEquals(
         zeroCost, ModelCost.calculate(parser.parse(explicit).pricing(), usage, null, null));
     assertThrows(
@@ -799,68 +816,24 @@ class ModelRuntimeConfigParserTest {
         () -> parser.decode(configWithPricing("{\"base\":{\"input\":1.1}}")));
   }
 
-  private static void assertCanonicalZero(ModelConfigDTO config) {
-    var pricing = config.getPricing();
-    assertNotNull(pricing);
-    assertNotNull(pricing.getBase());
-    assertEquals(BigDecimal.ZERO, pricing.getBase().getInput());
-    assertEquals(BigDecimal.ZERO, pricing.getBase().getOutput());
-    assertEquals(BigDecimal.ZERO, pricing.getBase().getCacheRead());
-    assertEquals(BigDecimal.ZERO, pricing.getBase().getCacheWrite());
-    assertEquals(Map.of(), pricing.getBase().getCacheWriteByTtl());
-    assertNull(pricing.getBase().getReasoning());
-    assertNotNull(pricing.getOverrides());
-    assertTrue(pricing.getOverrides().isEmpty());
-    assertNotNull(pricing.getMultipliers());
-    assertTrue(pricing.getMultipliers().isEmpty());
-  }
-
-  /** requestBody 的 typed scalar 与精确数字必须跨 decode/encode 保留，显式 null 与缺字段严格区分。 */
+  /** Removed condition-tree fields are rejected instead of being interpreted as typed rules. */
   @Test
-  void parsesRequestBodyTypedScalarsAndPreservesExactNumbers() {
-    String json =
-        configWithPricing(
-            "{\"base\":{\"input\":\"1\"},\"overrides\":["
-                + "{\"id\":\"string\",\"when\":{\"requestBody\":{\"path\":\"/speed\",\"equals\":\"fast\"}},"
-                + "\"rates\":{\"input\":\"2\"}},"
-                + "{\"id\":\"number\",\"when\":{\"requestBody\":{\"path\":\"/n\",\"equals\":2.000}},"
-                + "\"rates\":{\"input\":\"3\"}},"
-                + "{\"id\":\"boolean\",\"when\":{\"requestBody\":{\"path\":\"/a~1b/~0mode\",\"equals\":true}},"
-                + "\"rates\":{\"input\":\"4\"}},"
-                + "{\"id\":\"null\",\"when\":{\"requestBody\":{\"path\":\"/x\",\"equals\":null}},"
-                + "\"rates\":{\"input\":\"5\"}}]}");
-    var condition = parser.parse(json).pricing().overrides().get(1).when().requestBody();
-    assertEquals("/n", condition.path());
-    assertEquals(ModelPricingCondition.ScalarType.NUMBER, condition.type());
-    assertEquals("2", condition.canonicalValue());
-    assertEquals(
-        ModelPricingCondition.ScalarType.NULL,
-        parser.parse(json).pricing().overrides().get(3).when().requestBody().type());
-    String encoded = parser.encode(parser.decode(json));
-    assertTrue(encoded.contains("\"equals\":2.000"), encoded);
-    assertTrue(encoded.contains("\"equals\":null"), encoded);
-    // 非法数字不能进入 runtime，尤其不能先被 double 舍入。
-    assertEquals(
-        "9007199254740993",
-        parser
-            .parse(
+  void rejectsRemovedConditionTreeFields() {
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            parser.parse(
                 configWithPricing(
-                    "{\"base\":{\"input\":\"1\"},\"overrides\":[{\"id\":\"n\",\"when\":"
-                        + "{\"requestBody\":{\"path\":\"/n\",\"equals\":9007199254740993}},"
-                        + "\"rates\":{\"input\":\"2\"}}]}"))
-            .pricing()
-            .overrides()
-            .get(0)
-            .when()
-            .requestBody()
-            .canonicalValue());
+                    "{\"base\":{\"input\":\"1\"},\"overrides\":[],\"multipliers\":[]}")));
   }
 
-  /** requestBody 对象本身、path 与 equals 形状和边界都在唯一 parser 入口校验。 */
+  /** Removed requestBody condition payloads are rejected on the typed-rule wire. */
   @Test
-  void rejectsInvalidRequestBodyConditions() {
+  void rejectsNonRelatedRuleFields() {
     String base =
-        "{\"base\":{\"input\":\"1\"},\"overrides\":[{\"id\":\"r\",\"when\":{\"requestBody\":%s},\"rates\":{\"input\":\"2\"}}]}";
+        "{\"base\":{\"input\":\"1\"},\"rules\":[{\"type\":\"input_token_range\","
+            + "\"minInputTokens\":0,\"input\":\"2\",\"when\":{\"requestBody\":%s}}],"
+            + "\"changes\":[]}";
     for (String invalid :
         List.of(
             "{\"path\":\"/speed\"}",
@@ -884,6 +857,14 @@ class ModelRuntimeConfigParserTest {
                     "{\"base\":{\"input\":\"1\"},\"overrides\":[{\"id\":\"r\",\"when\":"
                         + "{\"requestBody\":{\"path\":\"/n\",\"equals\":1e19}},"
                         + "\"rates\":{\"input\":\"2\"}}]}")));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            parser.parse(
+                configWithPricing(
+                    "{\"base\":{\"input\":\"1\"},\"rules\":[{"
+                        + "\"type\":\"service_tier_multiplier\",\"serviceTier\":\"priority\","
+                        + "\"factor\":\"2\",\"cacheRead\":\"0.5\"}],\"changes\":[]}")));
     // 巨大指数必须在 precision/scale 校验阶段失败，不能先展开成百万位十进制文本。
     assertThrows(
         IllegalArgumentException.class,
@@ -931,7 +912,7 @@ class ModelRuntimeConfigParserTest {
 
   private static final String EXPLICIT_ZERO_PRICING =
       "{\"base\":{\"input\":\"0\",\"output\":\"0\",\"cacheRead\":\"0\",\"cacheWrite\":\"0\","
-          + "\"cacheWriteByTtl\":{},\"reasoning\":null},\"overrides\":[],\"multipliers\":[]}";
+          + "\"cacheWriteByTtl\":{},\"reasoning\":null},\"rules\":[],\"changes\":[]}";
 
   /** 厂商原生协议选项 fixture：覆盖嵌套 object、数组、布尔、小数与超出 Integer 范围的整数。 */
   private static final String PROTOCOL_OPTIONS_JSON =
@@ -973,6 +954,6 @@ class ModelRuntimeConfigParserTest {
         + "\"pricing\":{\"base\":{\"input\":\"1.1\",\"output\":\"2.2\","
         + "\"cacheRead\":\"0.3\",\"cacheWrite\":\"0.4\","
         + "\"cacheWriteByTtl\":{\"300\":\"0.5\"},\"reasoning\":\"3.6\"},"
-        + "\"overrides\":[],\"multipliers\":[]}}";
+        + "\"rules\":[],\"changes\":[]}}";
   }
 }

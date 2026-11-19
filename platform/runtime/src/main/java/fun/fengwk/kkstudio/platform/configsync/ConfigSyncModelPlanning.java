@@ -3,11 +3,13 @@ package fun.fengwk.kkstudio.platform.configsync;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupConfigDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelDefaultVariantResolver;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelGroupConfigCodec;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelKind;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelRuntimeConfigParser;
 import fun.fengwk.kkstudio.platform.catalog.model.ModelService;
+import fun.fengwk.kkstudio.platform.catalog.provider.Provider;
 import fun.fengwk.kkstudio.platform.configsync.ConfigSyncParser.ModelSpec;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncKind;
 import fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncRef;
@@ -73,12 +75,16 @@ final class ConfigSyncModelPlanning {
                 null));
       }
     }
-    Map<String, ProviderType> providerTypes = new HashMap<>();
-    for (var provider : snapshot.providers()) {
-      providerTypes.put(provider.name(), provider.providerType());
+    Map<String, ProviderIdentity> providerIdentities = new HashMap<>();
+    for (Provider provider : snapshot.providers()) {
+      providerIdentities.put(
+          provider.name(), new ProviderIdentity(provider.providerType(), provider.baseUrl()));
     }
     for (ConfigSyncParser.ProviderSpec providerSpec : document.providers()) {
-      providerTypes.put(providerSpec.name(), providerSpec.providerType());
+      providerIdentities.put(
+          providerSpec.name(),
+          new ProviderIdentity(
+              providerSpec.providerType(), providerSpec.properties().getBaseUrl()));
     }
     Map<String, ModelSpec> candidateModels = new LinkedHashMap<>();
     for (ModelSpec spec : document.models()) {
@@ -93,8 +99,14 @@ final class ConfigSyncModelPlanning {
           availableModels.remove(key);
           continue;
         }
-        ProviderType providerType = providerTypes.get(spec.providerName());
-        ModelService.validateVariantRetentions(spec.providerName(), providerType, spec.config());
+        ProviderIdentity providerIdentity = providerIdentities.get(spec.providerName());
+        SingleModelCreateDTO model = (SingleModelCreateDTO) spec.properties();
+        ModelService.validateVariantCapabilities(
+            spec.providerName(),
+            providerIdentity.providerType(),
+            providerIdentity.endpoint(),
+            model.getModelId(),
+            spec.config());
       }
       // 文件内同名 Model 覆盖快照：预检查按导入后将生效的配置判定。
       availableModels.put(
@@ -180,4 +192,12 @@ final class ConfigSyncModelPlanning {
       String providerName) {}
 
   record ModelPlan(Map<String, ModelAvailability> available, List<ModelSpec> ordered) {}
+
+  private record ProviderIdentity(ProviderType providerType, String endpoint) {
+    private ProviderIdentity {
+      if (endpoint != null) {
+        endpoint = endpoint.strip();
+      }
+    }
+  }
 }

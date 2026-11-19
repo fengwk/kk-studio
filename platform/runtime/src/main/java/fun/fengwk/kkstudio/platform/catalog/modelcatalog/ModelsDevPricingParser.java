@@ -2,119 +2,94 @@ package fun.fengwk.kkstudio.platform.catalog.modelcatalog;
 
 import tools.jackson.databind.JsonNode;
 
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingChangeDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingFactorsDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingMultiplierDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingOverrideDTO;
-import fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeSet;
 
-/**
- * models.dev {@code cost} 字段的解析：text 输入/输出价格、cache read/write（含 TTL）、字段级 overrides 与 multipliers。
- *
- * <p>非 token 成本（audio/image/video/web_search）只提示不导入；地区倍率整条忽略并提示，其余未知且可能影响 token 价格的条件拒绝该候选价格。
- */
+/** Strict models.dev token-price conversion to the fixed pricing rule contract. */
 final class ModelsDevPricingParser {
 
   private static final Set<String> COST_KEYS =
       Set.of("text", "multipliers", "audio", "image", "video", "web_search");
+  private static final Set<String> TEXT_KEYS = Set.of("input", "output");
   private static final Set<String> INPUT_KEYS = Set.of("price", "cache", "overrides", "unit");
   private static final Set<String> OUTPUT_KEYS = Set.of("price", "reasoning", "overrides", "unit");
   private static final Set<String> CACHE_KEYS = Set.of("read", "write", "explicit", "storage");
-  private static final Set<String> INPUT_OVERRIDE_KEYS = Set.of("when", "price", "cache");
-  private static final Set<String> OUTPUT_OVERRIDE_KEYS = Set.of("when", "price", "reasoning");
-  private static final Set<String> MULTIPLIER_KEYS = Set.of("when", "factor");
-  private static final Set<String> FACTOR_TEXT_KEYS = Set.of("input", "output");
-  private static final Set<String> FACTOR_INPUT_KEYS = Set.of("price", "cache");
-  private static final Set<String> FACTOR_CACHE_KEYS = Set.of("read", "write");
-  private static final Set<String> FACTOR_OUTPUT_KEYS = Set.of("price", "reasoning");
   private static final Set<String> TOKEN_UNITS =
       Set.of("token", "tokens", "per_million", "million_tokens");
+  private static final int MAX_SOURCE_RULES = 128;
 
   private ModelsDevPricingParser() {}
 
-  /** 解析完整 pricing；缺省 cost 归一为完整零定义，与配置侧共用同一套校验。 */
+  /** Rejects the complete candidate if any token price cannot be represented exactly. */
   static ModelPricingDTO parse(JsonNode node, List<String> issues) {
-    ModelPricingDTO pricing = new ModelPricingDTO();
-    ModelRateSetDTO base = new ModelRateSetDTO();
-    pricing.setBase(base);
-    pricing.setOverrides(new ArrayList<>());
-    pricing.setMultipliers(new ArrayList<>());
     if (node == null || node.isNull()) {
-      zero(base);
-      return pricing;
+      throw noPrice();
     }
     JsonNode cost = CatalogJson.requireObject(node, "cost");
-    rejectUnsupportedCostKeys(cost, issues);
-    JsonNode text = cost.get("text");
-    if (text == null || text.isNull()) {
-      zero(base);
-      pricing.setMultipliers(multipliers(cost.get("multipliers"), issues));
-      return pricing;
-    }
-    List<ModelPricingOverrideDTO> overrides =
-        textCost(CatalogJson.requireObject(text, "cost.text"), base, issues);
-    int index = 0;
-    for (ModelPricingOverrideDTO override : overrides) {
-      override.setId("override-" + index++);
-      pricing.getOverrides().add(override);
-    }
-    pricing.setMultipliers(multipliers(cost.get("multipliers"), issues));
-    return pricing;
-  }
-
-  private static void rejectUnsupportedCostKeys(JsonNode cost, List<String> issues) {
     for (String key : cost.propertyNames()) {
       if (!COST_KEYS.contains(key)) {
         throw new CatalogPriceException("unsupported v2 cost field: " + key);
       }
-      if (!"text".equals(key) && !"multipliers".equals(key) && !cost.get(key).isNull()) {
+      if (!Set.of("text", "multipliers").contains(key) && !cost.get(key).isNull()) {
         issues.add("non-token cost is not included: " + key);
       }
     }
-  }
-
-  private static List<ModelPricingOverrideDTO> textCost(
-      JsonNode textCost, ModelRateSetDTO base, List<String> issues) {
-    for (String key : textCost.propertyNames()) {
-      if (!"input".equals(key) && !"output".equals(key)) {
-        throw new CatalogPriceException("unsupported v2 text cost field: " + key);
-      }
+    JsonNode text = cost.get("text");
+    if (text == null || text.isNull()) {
+      throw noPrice();
     }
-    List<ModelPricingOverrideDTO> overrides = new ArrayList<>();
-    textInput(textCost.get("input"), base, overrides, issues);
-    textOutput(textCost.get("output"), base, overrides, issues);
-    return overrides;
-  }
 
-  private static void textInput(
-      JsonNode input,
-      ModelRateSetDTO base,
-      List<ModelPricingOverrideDTO> overrides,
-      List<String> issues) {
+    ModelPricingDTO pricing = new ModelPricingDTO();
+    ModelRateSetDTO base = new ModelRateSetDTO();
+    pricing.setBase(base);
+    List<ModelPricingRuleDTO> rules = new ArrayList<>();
+    pricing.setRules(rules);
+    pricing.setChanges(List.of());
+
+    JsonNode textNode = CatalogJson.requireObject(text, "cost.text");
+    validateKeys(textNode, TEXT_KEYS, "cost.text");
+    JsonNode input = textNode.get("input");
+    List<Override> overrides = new ArrayList<>();
     if (input == null || input.isNull()) {
       base.setInput(BigDecimal.ZERO);
       base.setCacheRead(BigDecimal.ZERO);
       base.setCacheWrite(BigDecimal.ZERO);
       base.setCacheWriteByTtl(Map.of());
-      return;
+    } else {
+      parseInput(CatalogJson.requireObject(input, "cost.text.input"), base, overrides, issues);
     }
-    JsonNode inputNode = CatalogJson.requireObject(input, "cost.text.input");
-    validateKeys(inputNode, INPUT_KEYS, "cost.text.input");
-    validateUnit(inputNode.get("unit"), "cost.text.input.unit");
-    base.setInput(zeroIfNull(CatalogJson.decimal(inputNode.get("price"), "cost.text.input.price")));
-    cache(inputNode.get("cache"), base, issues);
-    collectOverrides(inputNode.get("overrides"), true, overrides, issues);
+    JsonNode output = textNode.get("output");
+    if (output == null || output.isNull()) {
+      base.setOutput(BigDecimal.ZERO);
+      base.setReasoning(null);
+    } else {
+      parseOutput(CatalogJson.requireObject(output, "cost.text.output"), base, overrides, issues);
+    }
+    addInputRanges(overrides, base, rules);
+    List<SourceMultiplier> multipliers = parseMultipliers(cost.get("multipliers"), issues);
+    compileDefinitions(pricing, base, rules, multipliers);
+    return pricing;
   }
 
-  private static void cache(JsonNode cache, ModelRateSetDTO base, List<String> issues) {
+  private static void parseInput(
+      JsonNode input, ModelRateSetDTO base, List<Override> overrides, List<String> issues) {
+    validateKeys(input, INPUT_KEYS, "cost.text.input");
+    validateUnit(input.get("unit"), "cost.text.input.unit");
+    parseOverrides(input.get("overrides"), overrides, true, issues);
+    base.setInput(zeroIfNull(CatalogJson.decimal(input.get("price"), "cost.text.input.price")));
+    JsonNode cache = input.get("cache");
     if (cache == null || cache.isNull()) {
       base.setCacheRead(BigDecimal.ZERO);
       base.setCacheWrite(BigDecimal.ZERO);
@@ -122,64 +97,1030 @@ final class ModelsDevPricingParser {
       return;
     }
     JsonNode cacheNode = CatalogJson.requireObject(cache, "cost.text.input.cache");
-    validateCacheKeys(cacheNode, "cost.text.input.cache", issues);
-    base.setCacheRead(
-        zeroIfNull(CatalogJson.decimal(cacheNode.get("read"), "cost.text.input.cache.read")));
-    applyCacheWrite(base, cacheNode.get("write"));
-  }
-
-  private static void textOutput(
-      JsonNode output,
-      ModelRateSetDTO base,
-      List<ModelPricingOverrideDTO> overrides,
-      List<String> issues) {
-    if (output == null || output.isNull()) {
-      base.setOutput(BigDecimal.ZERO);
-      base.setReasoning(null);
-      return;
-    }
-    JsonNode outputNode = CatalogJson.requireObject(output, "cost.text.output");
-    validateKeys(outputNode, OUTPUT_KEYS, "cost.text.output");
-    validateUnit(outputNode.get("unit"), "cost.text.output.unit");
-    base.setOutput(
-        zeroIfNull(CatalogJson.decimal(outputNode.get("price"), "cost.text.output.price")));
-    base.setReasoning(
-        CatalogJson.decimal(outputNode.get("reasoning"), "cost.text.output.reasoning"));
-    collectOverrides(outputNode.get("overrides"), false, overrides, issues);
-  }
-
-  private static void validateCacheKeys(JsonNode node, String name, List<String> issues) {
-    validateKeys(node, CACHE_KEYS, name);
-    if (node.has("explicit")) {
+    validateKeys(cacheNode, CACHE_KEYS, "cost.text.input.cache");
+    if (cacheNode.has("explicit")) {
       issues.add("explicit cache pricing is not included");
     }
-    if (node.has("storage")) {
+    if (cacheNode.has("storage")) {
       issues.add("cache storage cost is not included");
     }
+    base.setCacheRead(
+        zeroIfNull(CatalogJson.decimal(cacheNode.get("read"), "cost.text.input.cache.read")));
+    setCacheWrite(base, cacheNode.get("write"));
   }
 
-  private static void validateKeys(JsonNode node, Set<String> allowed, String name) {
-    for (String key : node.propertyNames()) {
-      if (!allowed.contains(key)) {
-        throw new CatalogPriceException("unsupported v2 " + name + " field: " + key);
+  private static void parseOutput(
+      JsonNode output, ModelRateSetDTO base, List<Override> overrides, List<String> issues) {
+    validateKeys(output, OUTPUT_KEYS, "cost.text.output");
+    validateUnit(output.get("unit"), "cost.text.output.unit");
+    parseOverrides(output.get("overrides"), overrides, false, issues);
+    base.setOutput(zeroIfNull(CatalogJson.decimal(output.get("price"), "cost.text.output.price")));
+    base.setReasoning(CatalogJson.decimal(output.get("reasoning"), "cost.text.output.reasoning"));
+  }
+
+  private static void parseOverrides(
+      JsonNode source, List<Override> target, boolean input, List<String> issues) {
+    if (source == null || source.isNull()) {
+      return;
+    }
+    if (!source.isArray()) {
+      throw new CatalogPriceException("text price overrides must be an array");
+    }
+    for (JsonNode override : source) {
+      JsonNode item = CatalogJson.requireObject(override, "text price override");
+      Set<String> allowed =
+          input ? Set.of("when", "price", "cache") : Set.of("when", "price", "reasoning");
+      validateKeys(item, allowed, "text price override");
+      Bound bound = contextBound(item.get("when"));
+      BigDecimal price = CatalogJson.decimal(item.get("price"), "text price override.price");
+      BigDecimal cacheRead = null;
+      BigDecimal cacheWrite = null;
+      Map<String, BigDecimal> cacheWriteByTtl = null;
+      boolean cacheWriteByTtlSpecified = false;
+      if (input && item.has("cache")) {
+        JsonNode cache = CatalogJson.requireObject(item.get("cache"), "text price override.cache");
+        validateKeys(cache, CACHE_KEYS, "text price override.cache");
+        if (cache.has("explicit")) {
+          issues.add("explicit cache pricing is not included");
+        }
+        if (cache.has("storage")) {
+          issues.add("cache storage cost is not included");
+        }
+        cacheRead = CatalogJson.decimal(cache.get("read"), "text price override.cache.read");
+        JsonNode write = cache.get("write");
+        if (cache.has("write")) {
+          if (write == null || write.isNull()) {
+            throw unsupportedRules("cache write override has no representable price");
+          }
+          if (write.isObject()) {
+            cacheWriteByTtl = parseTtlRates(write, "text price override.cache.write");
+          } else {
+            cacheWrite = CatalogJson.decimal(write, "text price override.cache.write");
+            cacheWriteByTtl = Map.of();
+          }
+          cacheWriteByTtlSpecified = true;
+        }
+      }
+      boolean reasoningSpecified = !input && item.has("reasoning");
+      BigDecimal reasoning =
+          reasoningSpecified
+              ? CatalogJson.decimal(item.get("reasoning"), "text price override.reasoning")
+              : null;
+      if (price == null
+          && cacheRead == null
+          && cacheWrite == null
+          && !cacheWriteByTtlSpecified
+          && !reasoningSpecified) {
+        throw unsupportedRules("price override without a token fee patch");
+      }
+      target.add(
+          new Override(
+              bound.min(),
+              bound.max(),
+              input,
+              price,
+              cacheRead,
+              cacheWrite,
+              cacheWriteByTtl,
+              cacheWriteByTtlSpecified,
+              reasoning,
+              reasoningSpecified));
+      if (target.size() > MAX_SOURCE_RULES) {
+        throw unsupportedRules("pricing rule budget exceeded");
       }
     }
   }
 
-  private static void validateUnit(JsonNode unit, String name) {
-    if (unit == null || unit.isNull()) {
+  private static Map<String, BigDecimal> parseTtlRates(JsonNode node, String path) {
+    Map<String, BigDecimal> rates = new LinkedHashMap<>();
+    for (String key : node.propertyNames()) {
+      String ttl = Long.toString(ttlSeconds(key));
+      BigDecimal rate = CatalogJson.decimal(node.get(key), path + "." + key);
+      if (rate == null || rates.put(ttl, rate) != null) {
+        throw unsupportedRules("cache write contains invalid or duplicate TTL price");
+      }
+    }
+    return Map.copyOf(rates);
+  }
+
+  private static Bound contextBound(JsonNode whenNode) {
+    JsonNode when = CatalogJson.requireObject(whenNode, "price override.when");
+    validateKeys(when, Set.of("context"), "price override.when");
+    JsonNode context = CatalogJson.requireObject(when.get("context"), "condition.context");
+    validateKeys(context, Set.of("gt", "gte", "lt", "lte"), "condition.context");
+    Integer gt = CatalogJson.nonNegativeInt(context.get("gt"), "condition.context.gt");
+    Integer gte = CatalogJson.nonNegativeInt(context.get("gte"), "condition.context.gte");
+    Integer lt = CatalogJson.nonNegativeInt(context.get("lt"), "condition.context.lt");
+    Integer lte = CatalogJson.nonNegativeInt(context.get("lte"), "condition.context.lte");
+    if (context.isEmpty()) {
+      throw unsupportedRules("context override has no input-token boundary");
+    }
+    int min = Math.max(gt == null ? 0 : increment(gt), gte == null ? 0 : gte);
+    Integer max = minValue(lt, lte == null ? null : increment(lte));
+    if (max != null && max <= min) {
+      throw unsupportedRules("empty or contradictory input context range");
+    }
+    return new Bound(min, max);
+  }
+
+  private static int increment(int value) {
+    if (value == Integer.MAX_VALUE) {
+      throw unsupportedRules("input context boundary is too large");
+    }
+    return value + 1;
+  }
+
+  private static Integer minValue(Integer left, Integer right) {
+    if (left == null) {
+      return right;
+    }
+    if (right == null) {
+      return left;
+    }
+    return Math.min(left, right);
+  }
+
+  /** Partitions all integer context boundaries, then replays patches in source order. */
+  private static void addInputRanges(
+      List<Override> overrides, ModelRateSetDTO base, List<ModelPricingRuleDTO> rules) {
+    if (overrides.isEmpty()) {
       return;
     }
-    if (!unit.isString()) {
-      throw new CatalogPriceException(name + " must be text");
+    TreeSet<Integer> boundaries = new TreeSet<>();
+    boundaries.add(0);
+    for (Override override : overrides) {
+      boundaries.add(override.min());
+      if (override.max() != null) {
+        boundaries.add(override.max());
+      }
     }
-    String value = unit.stringValue();
-    if (!TOKEN_UNITS.contains(value)) {
-      throw new CatalogPriceException("unsupported v2 price unit: " + value);
+    List<Integer> starts = new ArrayList<>(boundaries);
+    for (int i = 0; i < starts.size(); i++) {
+      int start = starts.get(i);
+      Integer end = i + 1 < starts.size() ? starts.get(i + 1) : null;
+      RangeRates rates = RangeRates.from(base);
+      for (Override override : overrides) {
+        if (start >= override.min() && (override.max() == null || start < override.max())) {
+          rates = rates.apply(override);
+        }
+      }
+      if (!rates.differsFrom(base)) {
+        continue;
+      }
+      rules.add(rates.toRule(start, end));
     }
   }
 
-  private static void applyCacheWrite(ModelRateSetDTO base, JsonNode write) {
+  private static List<SourceMultiplier> parseMultipliers(JsonNode source, List<String> issues) {
+    if (source == null || source.isNull()) {
+      return List.of();
+    }
+    if (!source.isArray()) {
+      throw unsupportedRules("multipliers must be an array");
+    }
+    List<SourceMultiplier> result = new ArrayList<>();
+    for (JsonNode multiplier : source) {
+      JsonNode item = CatalogJson.requireObject(multiplier, "cost.multipliers[]");
+      validateKeys(item, Set.of("when", "factor"), "cost multiplier");
+      JsonNode when = CatalogJson.requireObject(item.get("when"), "cost multiplier.when");
+      if (containsRegion(when)) {
+        validateRegionCondition(when);
+        validateFactor(item.get("factor"));
+        issues.add("ignored region multiplier");
+        continue;
+      }
+      Factor factor = factors(item.get("factor"), issues);
+      if (factor == null || isIdentity(factor)) {
+        continue;
+      }
+      List<ConditionBranch> branches = conditionBranches(when, false);
+      ensureDisjointBranches(branches);
+      for (ConditionBranch branch : branches) {
+        if (branch.tiers() != null && branch.time() != null) {
+          throw unsupportedRules("combined service-tier and UTC-time multiplier condition");
+        }
+        result.add(
+            new SourceMultiplier(
+                branch.date(),
+                branch.tiers() == null ? List.of() : branch.tiers(),
+                branch.time(),
+                factor));
+        if (result.size() > MAX_SOURCE_RULES) {
+          throw unsupportedRules("pricing rule budget exceeded");
+        }
+      }
+    }
+    return List.copyOf(result);
+  }
+
+  /** Converts supported boolean conditions to disjoint DNF branches before price compilation. */
+  private static List<ConditionBranch> conditionBranches(JsonNode node, boolean negated) {
+    JsonNode condition = CatalogJson.requireObject(node, "cost multiplier.when");
+    if (condition.size() == 1 && condition.has("not")) {
+      return conditionBranches(condition.get("not"), !negated);
+    }
+
+    List<List<ConditionBranch>> parts = new ArrayList<>();
+    boolean hasHours = condition.has("utc_hours");
+    boolean hasDays = condition.has("utc_days");
+    boolean timeAdded = false;
+    for (String key : condition.propertyNames()) {
+      JsonNode value = condition.get(key);
+      switch (key) {
+        case "all", "any" -> {
+          if (!value.isArray()) {
+            throw unsupportedRules("compound pricing condition must be an array");
+          }
+          boolean conjunction = key.equals("all") != negated;
+          List<List<ConditionBranch>> children = new ArrayList<>();
+          for (JsonNode child : value) {
+            children.add(conditionBranches(child, negated));
+          }
+          parts.add(combineBranches(children, conjunction));
+        }
+        case "not" -> parts.add(conditionBranches(value, !negated));
+        case "date" -> parts.add(dateBranches(dateRange(value), negated));
+        case "service_tier" -> {
+          if (negated) {
+            throw unsupportedRules("negated service-tier condition has no finite representation");
+          }
+          parts.add(List.of(new ConditionBranch(null, serviceTiers(value), null)));
+        }
+        case "utc_hours", "utc_days" -> {
+          if (!timeAdded) {
+            if ((hasHours && condition.get("utc_hours").isNull())
+                || (hasDays && condition.get("utc_days").isNull())) {
+              throw unsupportedRules("UTC time condition must not be null");
+            }
+            TimeWindow window = timeWindow(condition.get("utc_hours"), condition.get("utc_days"));
+            parts.add(timeBranches(window, negated));
+            timeAdded = true;
+          }
+        }
+        default -> throw new CatalogPriceException("unsupported pricing condition: " + key);
+      }
+    }
+    if (parts.isEmpty()) {
+      if (negated) {
+        return List.of();
+      }
+      return List.of(new ConditionBranch(null, null, null));
+    }
+    return combineBranches(parts, !negated);
+  }
+
+  private static List<ConditionBranch> combineBranches(
+      List<List<ConditionBranch>> parts, boolean conjunction) {
+    if (!conjunction) {
+      List<ConditionBranch> union = new ArrayList<>();
+      for (List<ConditionBranch> part : parts) {
+        union.addAll(part);
+        if (union.size() > MAX_SOURCE_RULES) {
+          throw unsupportedRules("pricing condition branch budget exceeded");
+        }
+      }
+      return List.copyOf(union);
+    }
+    List<ConditionBranch> product = List.of(new ConditionBranch(null, null, null));
+    for (List<ConditionBranch> part : parts) {
+      List<ConditionBranch> next = new ArrayList<>();
+      for (ConditionBranch left : product) {
+        for (ConditionBranch right : part) {
+          ConditionBranch merged = intersect(left, right);
+          if (merged != null) {
+            next.add(merged);
+            if (next.size() > MAX_SOURCE_RULES) {
+              throw unsupportedRules("pricing condition branch budget exceeded");
+            }
+          }
+        }
+      }
+      product = List.copyOf(next);
+    }
+    return product;
+  }
+
+  private static List<ConditionBranch> dateBranches(DateRange range, boolean negated) {
+    if (!negated) {
+      return List.of(new ConditionBranch(range, null, null));
+    }
+    List<ConditionBranch> result = new ArrayList<>(2);
+    if (range.from() != null) {
+      result.add(new ConditionBranch(new DateRange(null, range.from()), null, null));
+    }
+    if (range.until() != null) {
+      result.add(new ConditionBranch(new DateRange(range.until(), null), null, null));
+    }
+    return List.copyOf(result);
+  }
+
+  private static List<ConditionBranch> timeBranches(TimeWindow window, boolean negated) {
+    if (!negated) {
+      return List.of(new ConditionBranch(null, null, window));
+    }
+    List<ConditionBranch> result = new ArrayList<>();
+    for (int weekday = 1; weekday <= 7; weekday++) {
+      if (!window.weekdays().isEmpty() && !window.weekdays().contains(weekday)) {
+        result.add(
+            new ConditionBranch(null, null, new TimeWindow("00:00", "24:00", List.of(weekday))));
+        continue;
+      }
+      if (!"00:00".equals(window.start())) {
+        result.add(
+            new ConditionBranch(
+                null, null, new TimeWindow("00:00", window.start(), List.of(weekday))));
+      }
+      if (!"24:00".equals(window.end())) {
+        result.add(
+            new ConditionBranch(
+                null, null, new TimeWindow(window.end(), "24:00", List.of(weekday))));
+      }
+    }
+    return List.copyOf(result);
+  }
+
+  private static ConditionBranch intersect(ConditionBranch left, ConditionBranch right) {
+    DateRange date = intersect(left.date(), right.date());
+    if (left.date() != null && right.date() != null && date == null) {
+      return null;
+    }
+    List<String> tiers = intersect(left.tiers(), right.tiers());
+    if (left.tiers() != null && right.tiers() != null && tiers.isEmpty()) {
+      return null;
+    }
+    TimeWindow time = intersect(left.time(), right.time());
+    if (left.time() != null && right.time() != null && time == null) {
+      return null;
+    }
+    return new ConditionBranch(date, tiers, time);
+  }
+
+  private static DateRange intersect(DateRange left, DateRange right) {
+    if (left == null) {
+      return right;
+    }
+    if (right == null) {
+      return left;
+    }
+    LocalDate from = later(left.from(), right.from());
+    LocalDate until = earlier(left.until(), right.until());
+    return from != null && until != null && !from.isBefore(until)
+        ? null
+        : new DateRange(from, until);
+  }
+
+  private static LocalDate later(LocalDate left, LocalDate right) {
+    if (left == null) {
+      return right;
+    }
+    return right == null || left.isAfter(right) ? left : right;
+  }
+
+  private static LocalDate earlier(LocalDate left, LocalDate right) {
+    if (left == null) {
+      return right;
+    }
+    return right == null || left.isBefore(right) ? left : right;
+  }
+
+  private static List<String> intersect(List<String> left, List<String> right) {
+    if (left == null) {
+      return right;
+    }
+    if (right == null) {
+      return left;
+    }
+    return left.stream().filter(right::contains).toList();
+  }
+
+  private static TimeWindow intersect(TimeWindow left, TimeWindow right) {
+    if (left == null) {
+      return right;
+    }
+    if (right == null) {
+      return left;
+    }
+    List<Integer> weekdays = intersectDays(left.weekdays(), right.weekdays());
+    if (weekdays != null && weekdays.isEmpty()) {
+      return null;
+    }
+    String start = laterTime(left.start(), right.start());
+    String end = earlierTime(left.end(), right.end());
+    return start.compareTo(end) < 0
+        ? new TimeWindow(start, end, weekdays == null ? List.of() : weekdays)
+        : null;
+  }
+
+  private static List<Integer> intersectDays(List<Integer> left, List<Integer> right) {
+    if (left.isEmpty()) {
+      return right.isEmpty() ? null : right;
+    }
+    if (right.isEmpty()) {
+      return left;
+    }
+    return left.stream().filter(right::contains).toList();
+  }
+
+  private static String laterTime(String left, String right) {
+    return left.compareTo(right) >= 0 ? left : right;
+  }
+
+  private static String earlierTime(String left, String right) {
+    return left.compareTo(right) <= 0 ? left : right;
+  }
+
+  private static void ensureDisjointBranches(List<ConditionBranch> branches) {
+    for (int left = 0; left < branches.size(); left++) {
+      for (int right = left + 1; right < branches.size(); right++) {
+        if (!disjoint(branches.get(left), branches.get(right))) {
+          throw unsupportedRules("compound OR branches overlap");
+        }
+      }
+    }
+  }
+
+  private static boolean disjoint(ConditionBranch left, ConditionBranch right) {
+    if (left.date() != null && right.date() != null && datesDisjoint(left.date(), right.date())) {
+      return true;
+    }
+    if (left.tiers() != null
+        && right.tiers() != null
+        && left.tiers().stream().noneMatch(right.tiers()::contains)) {
+      return true;
+    }
+    return left.time() != null && right.time() != null && timesDisjoint(left.time(), right.time());
+  }
+
+  private static boolean datesDisjoint(DateRange left, DateRange right) {
+    return (left.until() != null && right.from() != null && !left.until().isAfter(right.from()))
+        || (right.until() != null && left.from() != null && !right.until().isAfter(left.from()));
+  }
+
+  private static boolean timesDisjoint(TimeWindow left, TimeWindow right) {
+    List<Integer> days = intersectDays(left.weekdays(), right.weekdays());
+    return (days != null && days.isEmpty())
+        || left.end().compareTo(right.start()) <= 0
+        || right.end().compareTo(left.start()) <= 0;
+  }
+
+  private static List<String> serviceTiers(JsonNode node) {
+    JsonNode serviceTier = CatalogJson.requireObject(node, "condition.service_tier");
+    validateKeys(serviceTier, Set.of("equals", "in"), "condition.service_tier");
+    if (serviceTier.has("equals") && serviceTier.has("in")) {
+      throw unsupportedRules("service-tier condition cannot mix equals and in");
+    }
+    JsonNode values = serviceTier.get("in");
+    if (values == null) {
+      values = serviceTier.get("equals");
+    }
+    return stringValues(values, "condition.service_tier");
+  }
+
+  private static List<String> stringValues(JsonNode values, String path) {
+    List<String> result = new ArrayList<>();
+    if (values != null && values.isString()) {
+      result.add(requiredText(values, path));
+    } else if (values != null && values.isArray()) {
+      for (JsonNode value : values) {
+        String text = requiredText(value, path + ".in value");
+        if (result.contains(text)) {
+          throw unsupportedRules("duplicate service tier value");
+        }
+        result.add(text);
+      }
+    } else {
+      throw unsupportedRules(path + " requires equals or an in array");
+    }
+    if (result.isEmpty()) {
+      throw unsupportedRules(path + " must not be empty");
+    }
+    return List.copyOf(result);
+  }
+
+  private static DateRange dateRange(JsonNode node) {
+    JsonNode date = CatalogJson.requireObject(node, "condition.date");
+    validateKeys(date, Set.of("gte", "lt"), "condition.date");
+    LocalDate from = localDate(date.get("gte"), "condition.date.gte");
+    LocalDate until = localDate(date.get("lt"), "condition.date.lt");
+    if (from == null && until == null) {
+      throw unsupportedRules("date condition requires gte or lt");
+    }
+    if (from != null && until != null && !from.isBefore(until)) {
+      throw unsupportedRules("date condition gte must be before lt");
+    }
+    return new DateRange(from, until);
+  }
+
+  private static LocalDate localDate(JsonNode node, String path) {
+    if (node == null || node.isNull()) {
+      return null;
+    }
+    String value = requiredText(node, path);
+    if (!value.matches("\\d{4}-\\d{2}-\\d{2}")) {
+      throw unsupportedRules(path + " must be YYYY-MM-DD");
+    }
+    try {
+      return LocalDate.parse(value);
+    } catch (RuntimeException error) {
+      throw unsupportedRules(path + " must be a valid date");
+    }
+  }
+
+  private static void compileDefinitions(
+      ModelPricingDTO pricing,
+      ModelRateSetDTO base,
+      List<ModelPricingRuleDTO> inputRules,
+      List<SourceMultiplier> multipliers) {
+    TreeSet<LocalDate> boundaries = new TreeSet<>();
+    for (SourceMultiplier multiplier : multipliers) {
+      if (multiplier.date() != null) {
+        if (multiplier.date().from() != null) {
+          boundaries.add(multiplier.date().from());
+        }
+        if (multiplier.date().until() != null) {
+          boundaries.add(multiplier.date().until());
+        }
+      }
+    }
+    if (boundaries.size() > MAX_SOURCE_RULES) {
+      throw unsupportedRules("date change budget exceeded");
+    }
+    ModelPricingDefinition initial = definition(base, inputRules, multipliers, LocalDate.MIN);
+    pricing.setBase(initial.base());
+    pricing.setRules(initial.rules());
+    List<ModelPricingChangeDTO> changes = new ArrayList<>();
+    for (LocalDate from : boundaries) {
+      ModelPricingDefinition definition = definition(base, inputRules, multipliers, from);
+      ModelPricingChangeDTO change = new ModelPricingChangeDTO();
+      change.setFrom(from.toString());
+      change.setBase(definition.base());
+      change.setRules(definition.rules());
+      changes.add(change);
+    }
+    pricing.setChanges(changes);
+  }
+
+  private static ModelPricingDefinition definition(
+      ModelRateSetDTO base,
+      List<ModelPricingRuleDTO> inputRules,
+      List<SourceMultiplier> multipliers,
+      LocalDate date) {
+    List<Factor> rateFactors = new ArrayList<>();
+    Map<String, Factor> tierFactors = new LinkedHashMap<>();
+    List<SourceMultiplier> timeMultipliers = new ArrayList<>();
+    List<ModelPricingRuleDTO> rules = new ArrayList<>();
+    for (ModelPricingRuleDTO inputRule : inputRules) {
+      rules.add(copyRange(inputRule));
+    }
+    for (SourceMultiplier multiplier : multipliers) {
+      if (!active(multiplier.date(), date)) {
+        continue;
+      }
+      if (multiplier.tiers().isEmpty() && multiplier.time() == null) {
+        rateFactors.add(multiplier.factor());
+      } else if (!multiplier.tiers().isEmpty()) {
+        for (String tier : multiplier.tiers()) {
+          tierFactors.merge(tier, multiplier.factor(), ModelsDevPricingParser::multiply);
+        }
+      } else {
+        timeMultipliers.add(multiplier);
+      }
+    }
+    for (Map.Entry<String, Factor> entry : tierFactors.entrySet()) {
+      if (isIdentity(entry.getValue())) {
+        continue;
+      }
+      ModelPricingRuleDTO rule = new ModelPricingRuleDTO();
+      rule.setType("service_tier_multiplier");
+      rule.setServiceTier(entry.getKey());
+      setFactors(rule, entry.getValue());
+      rules.add(rule);
+    }
+    addDisjointTimeRules(timeMultipliers, rules);
+    if (rules.size() > MAX_SOURCE_RULES) {
+      throw unsupportedRules("pricing rule budget exceeded");
+    }
+    for (ModelPricingRuleDTO rule : rules) {
+      if ("input_token_range".equals(rule.getType())) {
+        if (rule.getInput() != null) {
+          rule.setInput(scale(rule.getInput(), rateFactors, 0));
+        }
+        if (rule.getOutput() != null) {
+          rule.setOutput(scale(rule.getOutput(), rateFactors, 1));
+        }
+        if (rule.getCacheRead() != null) {
+          rule.setCacheRead(scale(rule.getCacheRead(), rateFactors, 2));
+        }
+        if (rule.getCacheWrite() != null) {
+          rule.setCacheWrite(scale(rule.getCacheWrite(), rateFactors, 3));
+        }
+        if (rule.isCacheWriteByTtlSpecified()) {
+          Map<String, BigDecimal> ttlRates = new LinkedHashMap<>();
+          rule.getCacheWriteByTtl()
+              .forEach((ttl, rate) -> ttlRates.put(ttl, scale(rate, rateFactors, 3)));
+          rule.setCacheWriteByTtl(ttlRates);
+        }
+        if (rule.isReasoningSpecified() && rule.getReasoning() != null) {
+          rule.setReasoning(scale(rule.getReasoning(), rateFactors, 4));
+        }
+      }
+    }
+    return new ModelPricingDefinition(scale(base, rateFactors), rules);
+  }
+
+  /**
+   * Splits overlapping time multipliers by UTC weekday and minute, then multiplies each active set.
+   */
+  private static void addDisjointTimeRules(
+      List<SourceMultiplier> multipliers, List<ModelPricingRuleDTO> rules) {
+    if (multipliers.isEmpty()) {
+      return;
+    }
+    TreeSet<Integer> boundaries = new TreeSet<>();
+    boundaries.add(0);
+    boundaries.add(1440);
+    for (SourceMultiplier multiplier : multipliers) {
+      boundaries.add(minutes(multiplier.time().start()));
+      boundaries.add(minutes(multiplier.time().end()));
+    }
+    List<Integer> points = new ArrayList<>(boundaries);
+    for (int weekday = 1; weekday <= 7; weekday++) {
+      TimeSegment pending = null;
+      for (int index = 0; index + 1 < points.size(); index++) {
+        int start = points.get(index);
+        int end = points.get(index + 1);
+        List<Factor> factors = new ArrayList<>();
+        for (SourceMultiplier multiplier : multipliers) {
+          TimeWindow window = multiplier.time();
+          if ((window.weekdays().isEmpty() || window.weekdays().contains(weekday))
+              && start >= minutes(window.start())
+              && start < minutes(window.end())) {
+            factors.add(multiplier.factor());
+          }
+        }
+        Factor combined = combine(factors);
+        if (isIdentity(combined)) {
+          if (pending != null) {
+            addTimeRule(pending, weekday, rules);
+            pending = null;
+          }
+          continue;
+        }
+        TimeSegment current = new TimeSegment(start, end, combined);
+        if (pending != null
+            && pending.end() == current.start()
+            && equivalent(pending.factor(), current.factor())) {
+          pending = new TimeSegment(pending.start(), current.end(), pending.factor());
+        } else {
+          if (pending != null) {
+            addTimeRule(pending, weekday, rules);
+          }
+          pending = current;
+        }
+      }
+      if (pending != null) {
+        addTimeRule(pending, weekday, rules);
+      }
+    }
+  }
+
+  private static void addTimeRule(
+      TimeSegment segment, int weekday, List<ModelPricingRuleDTO> rules) {
+    ModelPricingRuleDTO rule = new ModelPricingRuleDTO();
+    rule.setType("time_multiplier");
+    rule.setStart(timeText(segment.start()));
+    rule.setEnd(timeText(segment.end()));
+    rule.setTimezone("UTC");
+    rule.setWeekdays(List.of(weekday));
+    setFactors(rule, segment.factor());
+    rules.add(rule);
+  }
+
+  private static Factor combine(List<Factor> factors) {
+    Factor combined = new Factor(BigDecimal.ONE, null, null, null, null, null);
+    for (Factor factor : factors) {
+      combined = multiply(combined, factor);
+    }
+    return combined;
+  }
+
+  private static Factor multiply(Factor left, Factor right) {
+    BigDecimal common = left.factor().multiply(right.factor());
+    return new Factor(
+        common,
+        overrideFactor(left.forField(0).multiply(right.forField(0)), common),
+        overrideFactor(left.forField(1).multiply(right.forField(1)), common),
+        overrideFactor(left.forField(2).multiply(right.forField(2)), common),
+        overrideFactor(left.forField(3).multiply(right.forField(3)), common),
+        overrideFactor(left.forField(4).multiply(right.forField(4)), common));
+  }
+
+  private static BigDecimal overrideFactor(BigDecimal value, BigDecimal common) {
+    return value.compareTo(common) == 0 ? null : value;
+  }
+
+  private static boolean isIdentity(Factor factor) {
+    for (int field = 0; field < 5; field++) {
+      if (factor.forField(field).compareTo(BigDecimal.ONE) != 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static boolean equivalent(Factor left, Factor right) {
+    for (int field = 0; field < 5; field++) {
+      if (left.forField(field).compareTo(right.forField(field)) != 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private static int minutes(String time) {
+    if ("24:00".equals(time)) {
+      return 1440;
+    }
+    return Integer.parseInt(time.substring(0, 2)) * 60 + Integer.parseInt(time.substring(3));
+  }
+
+  private static String timeText(int minute) {
+    if (minute == 1440) {
+      return "24:00";
+    }
+    return String.format(Locale.ROOT, "%02d:%02d", minute / 60, minute % 60);
+  }
+
+  private static boolean active(DateRange range, LocalDate date) {
+    return range == null
+        || (range.from() == null || !date.isBefore(range.from()))
+            && (range.until() == null || date.isBefore(range.until()));
+  }
+
+  private static ModelPricingRuleDTO copyRange(ModelPricingRuleDTO source) {
+    ModelPricingRuleDTO copy = new ModelPricingRuleDTO();
+    copy.setType(source.getType());
+    copy.setMinInputTokens(source.getMinInputTokens());
+    copy.setMaxInputTokensExclusive(source.getMaxInputTokensExclusive());
+    copy.setInput(source.getInput());
+    copy.setOutput(source.getOutput());
+    copy.setCacheRead(source.getCacheRead());
+    copy.setCacheWrite(source.getCacheWrite());
+    if (source.isCacheWriteByTtlSpecified()) {
+      copy.setCacheWriteByTtl(source.getCacheWriteByTtl());
+    }
+    if (source.isReasoningSpecified()) {
+      copy.setReasoning(source.getReasoning());
+    }
+    return copy;
+  }
+
+  private static ModelRateSetDTO scale(ModelRateSetDTO source, List<Factor> factors) {
+    ModelRateSetDTO result = new ModelRateSetDTO();
+    result.setInput(scale(source.getInput(), factors, 0));
+    result.setOutput(scale(source.getOutput(), factors, 1));
+    result.setCacheRead(scale(source.getCacheRead(), factors, 2));
+    result.setCacheWrite(
+        source.getCacheWrite() == null ? null : scale(source.getCacheWrite(), factors, 3));
+    Map<String, BigDecimal> ttlRates = new LinkedHashMap<>();
+    if (source.getCacheWriteByTtl() != null) {
+      source
+          .getCacheWriteByTtl()
+          .forEach((ttl, rate) -> ttlRates.put(ttl, scale(rate, factors, 3)));
+    }
+    result.setCacheWriteByTtl(ttlRates);
+    result.setReasoning(
+        source.getReasoning() == null ? null : scale(source.getReasoning(), factors, 4));
+    return result;
+  }
+
+  private static BigDecimal scale(BigDecimal value, List<Factor> factors, int field) {
+    BigDecimal factor = BigDecimal.ONE;
+    for (Factor sourceFactor : factors) {
+      factor = factor.multiply(sourceFactor.forField(field));
+    }
+    return value.multiply(factor);
+  }
+
+  private static void setFactors(ModelPricingRuleDTO rule, Factor factors) {
+    rule.setFactor(factors.factor());
+    rule.setInputFactor(factors.input());
+    rule.setOutputFactor(factors.output());
+    rule.setCacheReadFactor(factors.cacheRead());
+    rule.setCacheWriteFactor(factors.cacheWrite());
+    rule.setReasoningFactor(factors.reasoning());
+  }
+
+  private static TimeWindow timeWindow(JsonNode hours, JsonNode days) {
+    String start = "00:00";
+    String end = "24:00";
+    if (hours != null && !hours.isNull()) {
+      JsonNode range = CatalogJson.requireObject(hours, "condition.utc_hours");
+      validateKeys(range, Set.of("gte", "lt"), "condition.utc_hours");
+      if (range.isEmpty()) {
+        throw unsupportedRules("empty UTC hour condition");
+      }
+      start = timeText(range.get("gte"), "00:00", false);
+      end = timeText(range.get("lt"), "24:00", true);
+    }
+    if (start.compareTo(end) >= 0) {
+      throw unsupportedRules("UTC time condition crosses midnight or is empty");
+    }
+    List<Integer> weekdays = List.of();
+    if (days != null && !days.isNull()) {
+      JsonNode dayFilter = CatalogJson.requireObject(days, "condition.utc_days");
+      validateKeys(dayFilter, Set.of("in", "equals"), "condition.utc_days");
+      if (dayFilter.has("equals") && dayFilter.has("in")) {
+        throw unsupportedRules("UTC weekday condition cannot mix equals and in");
+      }
+      JsonNode values = dayFilter.get("in");
+      if (values == null) {
+        values = dayFilter.get("equals");
+      }
+      List<String> names = new ArrayList<>();
+      if (values != null && values.isArray()) {
+        for (JsonNode value : values) {
+          names.add(requiredText(value, "condition.utc_days value"));
+        }
+      } else if (values != null && values.isString()) {
+        names.add(values.stringValue());
+      } else {
+        throw unsupportedRules("UTC weekday condition must be equals or an array");
+      }
+      List<Integer> parsed = new ArrayList<>();
+      for (String name : names) {
+        int day =
+            switch (name.toLowerCase(Locale.ROOT)) {
+              case "mon", "monday" -> 1;
+              case "tue", "tuesday" -> 2;
+              case "wed", "wednesday" -> 3;
+              case "thu", "thursday" -> 4;
+              case "fri", "friday" -> 5;
+              case "sat", "saturday" -> 6;
+              case "sun", "sunday" -> 7;
+              default -> throw unsupportedRules("unknown UTC weekday");
+            };
+        if (parsed.contains(day)) {
+          throw unsupportedRules("duplicate UTC weekday");
+        }
+        parsed.add(day);
+      }
+      weekdays = List.copyOf(parsed);
+    }
+    return new TimeWindow(start, end, weekdays);
+  }
+
+  private static String timeText(JsonNode node, String fallback, boolean end) {
+    if (node == null || node.isNull()) {
+      return fallback;
+    }
+    if (!node.isString()) {
+      throw unsupportedRules("UTC time boundary must be HH:mm");
+    }
+    String value = node.stringValue();
+    if (end && "24:00".equals(value)) {
+      return value;
+    }
+    if (!value.matches("(?:[01]\\d|2[0-3]):[0-5]\\d")) {
+      throw unsupportedRules("UTC time boundary must be HH:mm");
+    }
+    return value;
+  }
+
+  private static Factor factors(JsonNode node, List<String> issues) {
+    if (node == null || node.isNull()) {
+      throw unsupportedRules("multiplier has no factor");
+    }
+    if (node.isNumber()) {
+      BigDecimal value = CatalogJson.decimal(node, "cost multiplier.factor");
+      return new Factor(value, null, null, null, null, null);
+    }
+    JsonNode factor = CatalogJson.requireObject(node, "cost multiplier.factor");
+    for (String key : factor.propertyNames()) {
+      if (!Set.of("text", "audio", "image", "video", "web_search").contains(key)) {
+        throw new CatalogPriceException("unsupported multiplier factor: " + key);
+      }
+    }
+    for (String key : Set.of("audio", "image", "video", "web_search")) {
+      if (factor.has(key) && !factor.get(key).isNull()) {
+        issues.add("non-token multiplier is not included: " + key);
+      }
+    }
+    JsonNode text = factor.get("text");
+    if (text == null || text.isNull()) {
+      return null;
+    }
+    if (text.isNumber()) {
+      return new Factor(CatalogJson.decimal(text, "factor.text"), null, null, null, null, null);
+    }
+    JsonNode textFactors = CatalogJson.requireObject(text, "factor.text");
+    validateKeys(textFactors, Set.of("input", "output"), "factor.text");
+    BigDecimal input = null;
+    BigDecimal output = null;
+    BigDecimal cacheRead = null;
+    BigDecimal cacheWrite = null;
+    BigDecimal reasoning = null;
+    JsonNode inputNode = textFactors.get("input");
+    if (inputNode != null && !inputNode.isNull()) {
+      if (inputNode.isNumber()) {
+        input = CatalogJson.decimal(inputNode, "factor.text.input");
+      } else {
+        JsonNode inputObject = CatalogJson.requireObject(inputNode, "factor.text.input");
+        validateKeys(inputObject, Set.of("price", "cache"), "factor.text.input");
+        input = CatalogJson.decimal(inputObject.get("price"), "factor.text.input.price");
+        JsonNode cache = inputObject.get("cache");
+        if (cache != null && !cache.isNull()) {
+          JsonNode cacheObject = CatalogJson.requireObject(cache, "factor.text.input.cache");
+          validateKeys(cacheObject, Set.of("read", "write"), "factor.text.input.cache");
+          cacheRead = CatalogJson.decimal(cacheObject.get("read"), "factor.text.input.cache.read");
+          cacheWrite =
+              CatalogJson.decimal(cacheObject.get("write"), "factor.text.input.cache.write");
+        }
+      }
+    }
+    JsonNode outputNode = textFactors.get("output");
+    if (outputNode != null && !outputNode.isNull()) {
+      if (outputNode.isNumber()) {
+        output = CatalogJson.decimal(outputNode, "factor.text.output");
+      } else {
+        JsonNode outputObject = CatalogJson.requireObject(outputNode, "factor.text.output");
+        validateKeys(outputObject, Set.of("price", "reasoning"), "factor.text.output");
+        output = CatalogJson.decimal(outputObject.get("price"), "factor.text.output.price");
+        reasoning =
+            CatalogJson.decimal(outputObject.get("reasoning"), "factor.text.output.reasoning");
+      }
+    }
+    return new Factor(BigDecimal.ONE, input, output, cacheRead, cacheWrite, reasoning);
+  }
+
+  private static boolean containsRegion(JsonNode node) {
+    if (node.has("region")) {
+      return true;
+    }
+    for (String key : List.of("all", "any")) {
+      JsonNode children = node.get(key);
+      if (children != null && children.isArray()) {
+        for (JsonNode child : children) {
+          if (child.isObject() && containsRegion(child)) {
+            return true;
+          }
+        }
+      }
+    }
+    JsonNode not = node.get("not");
+    return not != null && not.isObject() && containsRegion(not);
+  }
+
+  private static void validateRegionCondition(JsonNode when) {
+    // Region pricing is deliberately ignored, but its external structure must not hide unknown
+    // syntax.
+    for (String key : when.propertyNames()) {
+      switch (key) {
+        case "region" -> {
+          JsonNode region = CatalogJson.requireObject(when.get(key), "condition.region");
+          validateKeys(region, Set.of("equals", "in"), "condition.region");
+          JsonNode values = region.get("in");
+          if (values == null) {
+            values = region.get("equals");
+          }
+          stringValues(values, "condition.region");
+        }
+        case "all", "any" -> {
+          JsonNode children = when.get(key);
+          if (!children.isArray()) {
+            throw unsupportedRules("invalid compound region condition");
+          }
+          for (JsonNode child : children) {
+            validateRegionCondition(CatalogJson.requireObject(child, "region condition"));
+          }
+        }
+        case "not" -> validateRegionCondition(
+            CatalogJson.requireObject(when.get(key), "region condition.not"));
+        case "service_tier" -> serviceTiers(when.get(key));
+        case "context" -> {
+          JsonNode context = CatalogJson.requireObject(when.get(key), "condition.context");
+          validateKeys(context, Set.of("gt", "gte", "lt", "lte"), "condition.context");
+          // Also validate conflicting/empty numeric ranges.
+          contextBound(CatalogJson.parse("{\"context\":" + context.toString() + "}"));
+        }
+        case "date" -> dateRange(when.get(key));
+        case "utc_hours", "utc_days" -> {
+          if ((when.has("utc_hours") && when.get("utc_hours").isNull())
+              || (when.has("utc_days") && when.get("utc_days").isNull())) {
+            throw unsupportedRules("UTC time condition must not be null");
+          }
+          timeWindow(when.get("utc_hours"), when.get("utc_days"));
+        }
+        default -> throw new CatalogPriceException("unsupported pricing condition: " + key);
+      }
+    }
+  }
+
+  private static void validateFactor(JsonNode node) {
+    factors(node, new ArrayList<>());
+  }
+
+  private static void setCacheWrite(ModelRateSetDTO base, JsonNode write) {
     if (write == null || write.isNull()) {
       base.setCacheWrite(BigDecimal.ZERO);
       base.setCacheWriteByTtl(Map.of());
@@ -190,242 +1131,205 @@ final class ModelsDevPricingParser {
       base.setCacheWriteByTtl(Map.of());
       return;
     }
-    base.setCacheWrite(BigDecimal.ZERO);
-    base.setCacheWriteByTtl(ttlRates(write, "cost.text.input.cache.write"));
-  }
-
-  private static void applyCacheWrite(ModelRatePatchDTO patch, JsonNode write) {
-    if (write == null || write.isNull()) {
-      return;
-    }
-    if (!write.isObject()) {
-      patch.setCacheWrite(CatalogJson.decimal(write, "override.cache.write"));
-      return;
-    }
-    patch.setCacheWriteByTtl(ttlRates(write, "override.cache.write"));
-  }
-
-  private static Map<String, BigDecimal> ttlRates(JsonNode node, String name) {
-    Map<String, BigDecimal> rates = new LinkedHashMap<>();
-    for (String key : node.propertyNames()) {
-      long seconds = ttlSeconds(key, name);
-      BigDecimal price = CatalogJson.decimal(node.get(key), name + "." + key);
-      if (price == null) {
-        throw new CatalogPriceException(name + "." + key + " must be a decimal number");
-      }
-      if (rates.put(Long.toString(seconds), price) != null) {
-        throw new CatalogPriceException(name + " contains duplicate TTL: " + key);
+    Map<String, BigDecimal> byTtl = new LinkedHashMap<>();
+    for (String key : write.propertyNames()) {
+      String ttl = Long.toString(ttlSeconds(key));
+      BigDecimal price = CatalogJson.decimal(write.get(key), "cost.text.input.cache.write." + key);
+      if (price == null || byTtl.put(ttl, price) != null) {
+        throw new CatalogPriceException("cache write contains invalid or duplicate TTL price");
       }
     }
-    return rates;
+    if (byTtl.isEmpty()) {
+      base.setCacheWrite(BigDecimal.ZERO);
+      base.setCacheWriteByTtl(Map.of());
+    } else {
+      base.setCacheWrite(null);
+      base.setCacheWriteByTtl(byTtl);
+    }
   }
 
-  private static long ttlSeconds(String key, String name) {
+  private static long ttlSeconds(String key) {
     if (key == null || key.length() < 2) {
-      throw new CatalogPriceException(name + " has invalid TTL key: " + key);
+      throw new CatalogPriceException("cache write has invalid TTL key");
     }
     char unit = key.charAt(key.length() - 1);
     long amount;
     try {
       amount = Long.parseLong(key.substring(0, key.length() - 1));
     } catch (NumberFormatException error) {
-      throw new CatalogPriceException(name + " has invalid TTL key: " + key);
+      throw new CatalogPriceException("cache write has invalid TTL key");
     }
     long multiplier =
         switch (unit) {
-          case 's' -> 1L;
-          case 'm' -> 60L;
-          case 'h' -> 3600L;
-          case 'd' -> 86400L;
-          default -> throw new CatalogPriceException(name + " has invalid TTL unit: " + key);
+          case 's' -> 1;
+          case 'm' -> 60;
+          case 'h' -> 3600;
+          case 'd' -> 86400;
+          default -> throw new CatalogPriceException("cache write has invalid TTL unit");
         };
-    long seconds;
     try {
-      seconds = Math.multiplyExact(amount, multiplier);
+      long ttl = Math.multiplyExact(amount, multiplier);
+      if (ttl <= 0) {
+        throw new CatalogPriceException("cache write TTL must be positive");
+      }
+      return ttl;
     } catch (ArithmeticException error) {
-      throw new CatalogPriceException(name + " TTL is too large: " + key);
+      throw new CatalogPriceException("cache write TTL is too large");
     }
-    if (seconds <= 0) {
-      throw new CatalogPriceException(name + " TTL keys must be positive: " + key);
-    }
-    return seconds;
   }
 
-  private static void collectOverrides(
-      JsonNode array,
-      boolean inputSide,
-      List<ModelPricingOverrideDTO> overrides,
-      List<String> issues) {
-    if (array == null || array.isNull()) {
-      return;
+  private static void validateUnit(JsonNode unit, String path) {
+    if (unit != null
+        && !unit.isNull()
+        && (!unit.isString() || !TOKEN_UNITS.contains(unit.stringValue()))) {
+      throw new CatalogPriceException("unsupported v2 price unit at " + path);
     }
-    if (!array.isArray()) {
-      throw new CatalogPriceException("cost.text overrides must be an array");
-    }
-    for (JsonNode item : array) {
-      JsonNode override = CatalogJson.requireObject(item, "cost.text override");
-      validateKeys(
-          override, inputSide ? INPUT_OVERRIDE_KEYS : OUTPUT_OVERRIDE_KEYS, "text override");
-      ModelRatePatchDTO patch = new ModelRatePatchDTO();
-      if (inputSide) {
-        inputPatch(patch, override, issues);
-      } else {
-        outputPatch(patch, override);
+  }
+
+  private static void validateKeys(JsonNode node, Set<String> allowed, String path) {
+    for (String key : node.propertyNames()) {
+      if (!allowed.contains(key)) {
+        throw new CatalogPriceException("unsupported v2 field at " + path + ": " + key);
       }
-      ModelPricingOverrideDTO rule = new ModelPricingOverrideDTO();
-      rule.setWhen(ModelsDevPricingConditionParser.parse(override.get("when"), null));
-      rule.setRates(patch);
-      overrides.add(rule);
     }
   }
 
-  private static void inputPatch(ModelRatePatchDTO patch, JsonNode override, List<String> issues) {
-    patch.setInput(CatalogJson.decimal(override.get("price"), "input override price"));
-    JsonNode cache = override.get("cache");
-    if (cache == null || cache.isNull()) {
-      return;
+  private static String requiredText(JsonNode node, String name) {
+    if (node == null || !node.isString() || node.stringValue().isBlank()) {
+      throw new CatalogPriceException(name + " must be a non-empty string");
     }
-    JsonNode cacheNode = CatalogJson.requireObject(cache, "input override cache");
-    validateCacheKeys(cacheNode, "input override cache", issues);
-    patch.setCacheRead(CatalogJson.decimal(cacheNode.get("read"), "override.cache.read"));
-    applyCacheWrite(patch, cacheNode.get("write"));
+    return node.stringValue();
   }
 
-  private static void outputPatch(ModelRatePatchDTO patch, JsonNode override) {
-    patch.setOutput(CatalogJson.decimal(override.get("price"), "output override price"));
-    if (override.has("reasoning")) {
-      patch.setReasoning(
-          CatalogJson.decimal(override.get("reasoning"), "output override reasoning"));
-    }
+  private static CatalogPriceException noPrice() {
+    return new CatalogPriceException("model has no token price; no price was imported");
   }
 
-  private static List<ModelPricingMultiplierDTO> multipliers(JsonNode array, List<String> issues) {
-    List<ModelPricingMultiplierDTO> multipliers = new ArrayList<>();
-    if (array == null || array.isNull()) {
-      return multipliers;
-    }
-    if (!array.isArray()) {
-      throw new CatalogPriceException("cost.multipliers must be an array");
-    }
-    List<ModelPricingMultiplierDTO> parsed = new ArrayList<>();
-    int index = 0;
-    for (JsonNode item : array) {
-      JsonNode multiplier = CatalogJson.requireObject(item, "cost.multipliers[" + index + "]");
-      validateKeys(multiplier, MULTIPLIER_KEYS, "multiplier");
-      ModelPricingMultiplierDTO dto = new ModelPricingMultiplierDTO();
-      dto.setId("multiplier-" + index);
-      ModelsDevPricingConditionParser.RegionImportContext context =
-          new ModelsDevPricingConditionParser.RegionImportContext();
-      dto.setWhen(ModelsDevPricingConditionParser.parse(multiplier.get("when"), context));
-      dto.setFactors(factors(multiplier.get("factor"), issues));
-      parsed.add(dto);
-      if (!context.hasRegion()) {
-        multipliers.add(dto);
-      }
-      index++;
-    }
-    if (parsed.size() != multipliers.size()) {
-      // 被忽略的规则也必须通过其余条件、倍率精度和数量校验；临时定义只校验，不用于计价。
-      ModelPricingDTO validation = new ModelPricingDTO();
-      validation.setMultipliers(parsed);
-      CatalogPricingValidator.validate(validation);
-      issues.add("ignored region multiplier");
-    }
-    return multipliers;
-  }
-
-  private static ModelPricingFactorsDTO factors(JsonNode node, List<String> issues) {
-    if (node == null || node.isNull()) {
-      throw new CatalogPriceException("cost.multipliers factor is required");
-    }
-    ModelPricingFactorsDTO factors = new ModelPricingFactorsDTO();
-    if (node.isNumber()) {
-      return uniformFactor(node, factors);
-    }
-    JsonNode factor = CatalogJson.requireObject(node, "multiplier factor");
-    for (String key : factor.propertyNames()) {
-      if ("text".equals(key)) {
-        continue;
-      }
-      if ("audio".equals(key)) {
-        issues.add("non-token multiplier is not included: " + key);
-        continue;
-      }
-      throw new CatalogPriceException("unsupported multiplier factor field: " + key);
-    }
-    JsonNode text = factor.get("text");
-    if (text == null || text.isNull()) {
-      return factors;
-    }
-    if (text.isNumber()) {
-      return factors(text, issues);
-    }
-    textFactor(CatalogJson.requireObject(text, "multiplier factor.text"), factors);
-    return factors;
-  }
-
-  private static ModelPricingFactorsDTO uniformFactor(
-      JsonNode node, ModelPricingFactorsDTO factors) {
-    BigDecimal factor = CatalogJson.decimal(node, "multiplier factor");
-    factors.setInput(factor);
-    factors.setOutput(factor);
-    factors.setCacheRead(factor);
-    factors.setCacheWrite(factor);
-    factors.setReasoning(factor);
-    return factors;
-  }
-
-  private static void textFactor(JsonNode textFactor, ModelPricingFactorsDTO factors) {
-    validateKeys(textFactor, FACTOR_TEXT_KEYS, "multiplier factor.text");
-    inputFactor(textFactor.get("input"), factors);
-    outputFactor(textFactor.get("output"), factors);
-  }
-
-  private static void inputFactor(JsonNode input, ModelPricingFactorsDTO factors) {
-    if (input == null || input.isNull()) {
-      return;
-    }
-    JsonNode inputNode = CatalogJson.requireObject(input, "multiplier factor.text.input");
-    validateKeys(inputNode, FACTOR_INPUT_KEYS, "multiplier factor.text.input");
-    factors.setInput(CatalogJson.decimal(inputNode.get("price"), "input factor price"));
-    JsonNode cache = inputNode.get("cache");
-    if (cache == null || cache.isNull()) {
-      return;
-    }
-    JsonNode cacheNode = CatalogJson.requireObject(cache, "multiplier factor.text.input.cache");
-    validateKeys(cacheNode, FACTOR_CACHE_KEYS, "multiplier factor.text.input.cache");
-    factors.setCacheRead(CatalogJson.decimal(cacheNode.get("read"), "cache read factor"));
-    JsonNode write = cacheNode.get("write");
-    if (write != null && !write.isNull() && write.isObject()) {
-      throw new CatalogPriceException("TTL multiplier cache write is not supported");
-    }
-    factors.setCacheWrite(CatalogJson.decimal(write, "cache write factor"));
-  }
-
-  private static void outputFactor(JsonNode output, ModelPricingFactorsDTO factors) {
-    if (output == null || output.isNull()) {
-      return;
-    }
-    if (output.isNumber()) {
-      factors.setOutput(CatalogJson.decimal(output, "output factor"));
-      return;
-    }
-    JsonNode outputNode = CatalogJson.requireObject(output, "multiplier factor.text.output");
-    validateKeys(outputNode, FACTOR_OUTPUT_KEYS, "multiplier factor.text.output");
-    factors.setOutput(CatalogJson.decimal(outputNode.get("price"), "output factor price"));
-    factors.setReasoning(
-        CatalogJson.decimal(outputNode.get("reasoning"), "output reasoning factor"));
-  }
-
-  private static void zero(ModelRateSetDTO rates) {
-    rates.setInput(BigDecimal.ZERO);
-    rates.setOutput(BigDecimal.ZERO);
-    rates.setCacheRead(BigDecimal.ZERO);
-    rates.setCacheWrite(BigDecimal.ZERO);
-    rates.setCacheWriteByTtl(Map.of());
+  private static CatalogPriceException unsupportedRules(String reason) {
+    return new CatalogPriceException(
+        "token pricing rules cannot be represented exactly: "
+            + reason
+            + "; complete price not imported");
   }
 
   private static BigDecimal zeroIfNull(BigDecimal value) {
     return value == null ? BigDecimal.ZERO : value;
+  }
+
+  private record Override(
+      int min,
+      Integer max,
+      boolean input,
+      BigDecimal price,
+      BigDecimal cacheRead,
+      BigDecimal cacheWrite,
+      Map<String, BigDecimal> cacheWriteByTtl,
+      boolean cacheWriteByTtlSpecified,
+      BigDecimal reasoning,
+      boolean reasoningSpecified) {}
+
+  private record RangeRates(
+      BigDecimal input,
+      BigDecimal output,
+      BigDecimal cacheRead,
+      BigDecimal cacheWrite,
+      Map<String, BigDecimal> cacheWriteByTtl,
+      BigDecimal reasoning) {
+
+    static RangeRates from(ModelRateSetDTO rates) {
+      return new RangeRates(
+          rates.getInput(),
+          rates.getOutput(),
+          rates.getCacheRead(),
+          rates.getCacheWrite(),
+          rates.getCacheWriteByTtl(),
+          rates.getReasoning());
+    }
+
+    RangeRates apply(Override override) {
+      return new RangeRates(
+          override.input() && override.price() != null ? override.price() : input,
+          !override.input() && override.price() != null ? override.price() : output,
+          override.cacheRead() == null ? cacheRead : override.cacheRead(),
+          override.cacheWrite() == null ? cacheWrite : override.cacheWrite(),
+          override.cacheWriteByTtlSpecified() ? override.cacheWriteByTtl() : cacheWriteByTtl,
+          override.reasoningSpecified() ? override.reasoning() : reasoning);
+    }
+
+    boolean differsFrom(ModelRateSetDTO rates) {
+      return !same(input, rates.getInput())
+          || !same(output, rates.getOutput())
+          || !same(cacheRead, rates.getCacheRead())
+          || !same(cacheWrite, rates.getCacheWrite())
+          || !sameTtl(cacheWriteByTtl, rates.getCacheWriteByTtl())
+          || !same(reasoning, rates.getReasoning());
+    }
+
+    ModelPricingRuleDTO toRule(int min, Integer max) {
+      ModelPricingRuleDTO rule = new ModelPricingRuleDTO();
+      rule.setType("input_token_range");
+      rule.setMinInputTokens(min);
+      rule.setMaxInputTokensExclusive(max);
+      rule.setInput(input);
+      rule.setOutput(output);
+      rule.setCacheRead(cacheRead);
+      rule.setCacheWrite(cacheWrite);
+      rule.setCacheWriteByTtl(cacheWriteByTtl);
+      rule.setReasoning(reasoning);
+      return rule;
+    }
+  }
+
+  private static boolean same(BigDecimal left, BigDecimal right) {
+    return left == null ? right == null : right != null && left.compareTo(right) == 0;
+  }
+
+  private static boolean sameTtl(Map<String, BigDecimal> left, Map<String, BigDecimal> right) {
+    Map<String, BigDecimal> leftRates = left == null ? Map.of() : left;
+    Map<String, BigDecimal> rightRates = right == null ? Map.of() : right;
+    if (!leftRates.keySet().equals(rightRates.keySet())) {
+      return false;
+    }
+    for (String ttl : leftRates.keySet()) {
+      if (!same(leftRates.get(ttl), rightRates.get(ttl))) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private record Bound(int min, Integer max) {}
+
+  private record TimeWindow(String start, String end, List<Integer> weekdays) {}
+
+  private record TimeSegment(int start, int end, Factor factor) {}
+
+  private record DateRange(LocalDate from, LocalDate until) {}
+
+  private record ConditionBranch(DateRange date, List<String> tiers, TimeWindow time) {}
+
+  private record SourceMultiplier(
+      DateRange date, List<String> tiers, TimeWindow time, Factor factor) {}
+
+  private record ModelPricingDefinition(ModelRateSetDTO base, List<ModelPricingRuleDTO> rules) {}
+
+  private record Factor(
+      BigDecimal factor,
+      BigDecimal input,
+      BigDecimal output,
+      BigDecimal cacheRead,
+      BigDecimal cacheWrite,
+      BigDecimal reasoning) {
+
+    BigDecimal forField(int field) {
+      return switch (field) {
+        case 0 -> input == null ? factor : input;
+        case 1 -> output == null ? factor : output;
+        case 2 -> cacheRead == null ? factor : cacheRead;
+        case 3 -> cacheWrite == null ? factor : cacheWrite;
+        case 4 -> reasoning == null ? factor : reasoning;
+        default -> throw new IllegalArgumentException("unknown price field");
+      };
+    }
   }
 }

@@ -10,6 +10,7 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelDescriptor;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapabilities;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderContentBlock;
@@ -85,7 +86,7 @@ final class OpenAiChatRequestEncoder {
     applyStreamOptions(root);
 
     applyReasoningParameters(root, request.model(), request.variant());
-    // 输出预算只来自 Model 级 limit.output；官方 o-series 要求使用 max_completion_tokens。
+    // 输出预算只来自 Model 级 limit.output；官方 o-series 与已验证现代型号使用 max_completion_tokens。
     if (OpenAiChatOfficialCapabilities.isOfficialEndpoint(descriptor)
         && OpenAiChatOfficialCapabilities.usesMaxCompletionTokens(request.model().modelId())) {
       root.put("max_completion_tokens", request.outputTokens());
@@ -97,7 +98,7 @@ final class OpenAiChatRequestEncoder {
     mergeTools(root, request.tools());
 
     // 应用 Prompt Cache 策略：key 直接使用运行时提供的会话 key
-    applyPromptCache(root, request.cacheControl(), descriptor);
+    applyPromptCache(root, request.cacheControl(), descriptor, request.model().modelId());
 
     root.set("messages", encodeMessages(request, descriptor));
 
@@ -332,19 +333,38 @@ final class OpenAiChatRequestEncoder {
     return text.toString();
   }
 
-  /** 将 runtime 缓存意图映射到协议字段：SHORT 官方主机仅发 key，NONE 无提示，LONG 保留 24h。 */
+  /** Map cache intent only to OpenAI capabilities proven for the official endpoint and model. */
   private static void applyPromptCache(
-      ObjectNode root, ProviderCacheControl cacheControl, ProviderDescriptor descriptor) {
-    if (cacheControl.retention() == PromptCacheRetention.NONE) {
+      ObjectNode root,
+      ProviderCacheControl cacheControl,
+      ProviderDescriptor descriptor,
+      String modelId) {
+    PromptCacheCapabilities capabilities =
+        PromptCacheCapabilities.resolve(descriptor.type(), descriptor.endpoint(), modelId);
+    if (cacheControl.retention() == PromptCacheRetention.LONG
+        && !capabilities.supports(PromptCacheRetention.LONG)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "prompt cache retention LONG is unsupported for this provider model");
+    }
+    if (!OpenAiChatOfficialCapabilities.isOfficialEndpoint(descriptor)) {
       return;
     }
-    if (cacheControl.retention() == PromptCacheRetention.SHORT
-        && !OpenAiChatOfficialCapabilities.isOfficialEndpoint(descriptor)) {
-      return;
-    }
-    root.put("prompt_cache_key", cacheControl.key());
-    if (cacheControl.retention() == PromptCacheRetention.LONG) {
-      root.put("prompt_cache_retention", "24h");
+    boolean modern = capabilities.supports(PromptCacheRetention.NONE);
+    Long longTtlSeconds = capabilities.reliableWriteTtlSeconds(PromptCacheRetention.LONG);
+    switch (cacheControl.retention()) {
+      case NONE -> {
+        if (modern) {
+          root.putObject("prompt_cache_options").put("mode", "explicit");
+        }
+      }
+      case SHORT -> root.put("prompt_cache_key", cacheControl.key());
+      case LONG -> {
+        if (longTtlSeconds != null) {
+          root.put("prompt_cache_key", cacheControl.key());
+          root.put("prompt_cache_retention", "24h");
+        }
+      }
     }
   }
 }

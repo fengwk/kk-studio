@@ -83,6 +83,9 @@ public record ModelCost(
     BigDecimal input = priced(rates.input(), usage.inputTokens());
     BigDecimal cacheRead = priced(rates.cacheRead(), usage.cacheReadTokens());
     BigDecimal cacheWrite = cacheWriteCost(rates, usage);
+    if (cacheWrite == null) {
+      return null;
+    }
 
     BigDecimal output;
     BigDecimal reasoning;
@@ -112,11 +115,23 @@ public record ModelCost(
     long allocated = 0L;
     for (Map.Entry<Long, Long> entry : usage.cacheWriteByTtl().entrySet()) {
       long tokens = entry.getValue();
+      if (tokens == 0) {
+        continue;
+      }
       BigDecimal rate = rates.cacheWriteByTtl().getOrDefault(entry.getKey(), rates.cacheWrite());
+      if (rate == null) {
+        return null;
+      }
       total = total.add(priced(rate, tokens));
       allocated = Math.addExact(allocated, tokens);
     }
     long unallocated = usage.cacheWriteTokens() - allocated;
+    if (unallocated == 0) {
+      return total;
+    }
+    if (rates.cacheWrite() == null) {
+      return null;
+    }
     return total.add(priced(rates.cacheWrite(), unallocated));
   }
 

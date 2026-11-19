@@ -46,15 +46,7 @@ public final class ModelRequestBodyPricing {
   /** 从当前 pricing 冻结一次 attempt 的条件计划；没有 request-body 条件时返回空计划，不需要解析 body。 */
   public static Plan plan(ModelPricing pricing) {
     Objects.requireNonNull(pricing, "pricing");
-    Map<String, RequestBody> conditions = new LinkedHashMap<>();
-    boolean[] hasConditions = {false};
-    for (ModelPricing.Override override : pricing.overrides()) {
-      collect(override.when(), conditions, hasConditions);
-    }
-    for (ModelPricing.Multiplier multiplier : pricing.multipliers()) {
-      collect(multiplier.when(), conditions, hasConditions);
-    }
-    return new Plan(List.copyOf(conditions.values()), hasConditions[0]);
+    return new Plan(List.of(), false);
   }
 
   /** 条件指纹：SHA-256(UTF8(path + NUL + type + NUL + canonicalExpectedValue))，小写十六进制。 */

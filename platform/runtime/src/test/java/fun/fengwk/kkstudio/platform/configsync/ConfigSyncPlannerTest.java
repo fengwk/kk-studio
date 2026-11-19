@@ -147,6 +147,31 @@ class ConfigSyncPlannerTest {
     assertEquals(saved.getMessage(), imported.getMessage());
   }
 
+  @Test
+  void validatesLongAgainstImportedProviderAndModelAndKeepsNoneShortCompatible() {
+    when(snapshotReader.read()).thenReturn(emptySnapshot());
+    String providerAndModel =
+        PROVIDER_AND_MODEL.replace(
+            "providerType: openai\n",
+            "providerType: openai\n    baseUrl: https://api.openai.com/v1\n");
+    String unsupportedLong =
+        providerAndModel
+            .replace("modelId: gpt", "modelId: gpt-5.6")
+            .replace("promptCacheRetention: NONE", "promptCacheRetention: LONG");
+    assertThrows(DomainException.class, () -> plan(unsupportedLong));
+
+    assertEquals(1, plan(providerAndModel).models().size());
+    String legacyShort =
+        providerAndModel.replace("promptCacheRetention: NONE", "promptCacheRetention: SHORT");
+    assertEquals(1, plan(legacyShort).models().size());
+
+    String supportedLegacyLong =
+        providerAndModel
+            .replace("modelId: gpt", "modelId: gpt-5.5")
+            .replace("promptCacheRetention: NONE", "promptCacheRetention: LONG");
+    assertEquals(1, plan(supportedLegacyLong).models().size());
+  }
+
   /** 拼接一个 document 内的 Agent 条目；configLines 使用 6 空格缩进。 */
   private static String agent(String name, String model, String configLines) {
     return "  - name: "

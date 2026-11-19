@@ -16,7 +16,6 @@ import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.chat.dto.ChatDTO;
-import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 import fun.fengwk.kkstudio.platform.catalog.dto.HarnessExecutionSelectionDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
@@ -25,6 +24,7 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessBranchSettingsDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessCommandCreateDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsBackendNetworkDTO;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Date;
 import java.util.LinkedHashMap;
@@ -212,73 +212,31 @@ class StrictJacksonConfigurationTest {
         });
   }
 
-  /**
-   * 测试意图：生产 HTTP mapper 必须保留 requestBody.equals 的 JSON scalar 精度与类型，随后 runtime config parser
-   * 仍能精确解析；缺省 equals 与显式 null 必须在同一链路上保持区别。
-   */
+  /** 测试意图：生产 HTTP mapper 与 runtime parser 保留 typed pricing 的十进制精度。 */
   @Test
-  void shouldPreserveRequestBodyScalarPrecisionThroughHttpDtoAndRuntimeParser() {
+  void shouldPreservePricingDecimalPrecisionThroughHttpDtoAndRuntimeParser() {
     runner.run(
         context -> {
           JsonMapper httpMapper = context.getBean(JsonMapper.class);
           ModelRuntimeConfigParser parser =
               new ModelRuntimeConfigParser(JsonMapper.builder().build());
-
           String configJson =
-              requestBodyConfig(
-                  "{\"id\":\"long\",\"when\":{\"requestBody\":"
-                      + "{\"path\":\"/long\",\"equals\":0.123456789012345678}},"
-                      + "\"rates\":{\"input\":\"2\"}},"
-                      + "{\"id\":\"big\",\"when\":{\"requestBody\":"
-                      + "{\"path\":\"/big\",\"equals\":9007199254740993}},"
-                      + "\"rates\":{\"input\":\"3\"}},"
-                      + "{\"id\":\"two\",\"when\":{\"requestBody\":"
-                      + "{\"path\":\"/two\",\"equals\":2.0}},"
-                      + "\"rates\":{\"input\":\"4\"}},"
-                      + "{\"id\":\"null\",\"when\":{\"requestBody\":"
-                      + "{\"path\":\"/null\",\"equals\":null}},"
-                      + "\"rates\":{\"input\":\"5\"}}");
+              "{\"limit\":{\"context\":128000,\"output\":8192},"
+                  + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
+                  + "\"inputModalities\":[\"TEXT\"]},"
+                  + "\"pricing\":{\"base\":{\"input\":\"0.123456789012345678\","
+                  + "\"output\":\"2\",\"cacheRead\":\"0\",\"cacheWrite\":\"0\","
+                  + "\"cacheWriteByTtl\":{},\"reasoning\":null},\"rules\":[],\"changes\":[]},"
+                  + "\"defaultVariant\":\"default\","
+                  + "\"variants\":[{\"id\":\"default\",\"promptCacheRetention\":\"NONE\"}]}";
           ModelConfigDTO dto = httpMapper.readValue(configJson, ModelConfigDTO.class);
           String encoded = parser.encode(dto);
-          assertTrue(encoded.contains("\"equals\":0.123456789012345678"), encoded);
-          String httpEncoded = httpMapper.writeValueAsString(dto);
-          assertTrue(httpEncoded.contains("\"equals\":0.123456789012345678"), httpEncoded);
-
-          var parsed = parser.parse(encoded);
-          var overrides = parsed.pricing().overrides();
+          assertTrue(encoded.contains("0.123456789012345678"), encoded);
+          assertTrue(httpMapper.writeValueAsString(dto).contains("0.123456789012345678"));
           assertEquals(
-              "0.123456789012345678", overrides.get(0).when().requestBody().canonicalValue());
-          assertEquals(
-              ModelPricingCondition.ScalarType.NUMBER,
-              overrides.get(0).when().requestBody().type());
-          assertEquals("9007199254740993", overrides.get(1).when().requestBody().canonicalValue());
-          assertEquals("2", overrides.get(2).when().requestBody().canonicalValue());
-          assertEquals(
-              ModelPricingCondition.ScalarType.NULL, overrides.get(3).when().requestBody().type());
-          assertEquals("", overrides.get(3).when().requestBody().canonicalValue());
-
-          ModelConfigDTO missingEquals =
-              httpMapper.readValue(
-                  requestBodyConfig(
-                      "{\"id\":\"missing\",\"when\":{\"requestBody\":"
-                          + "{\"path\":\"/missing\"}},\"rates\":{\"input\":\"6\"}}"),
-                  ModelConfigDTO.class);
-          assertThrows(IllegalArgumentException.class, () -> parser.parse(missingEquals));
+              new BigDecimal("0.123456789012345678"),
+              parser.parse(encoded).pricing().base().input());
         });
-  }
-
-  private static String requestBodyConfig(String overrides) {
-    return "{\"limit\":{\"context\":128000,\"output\":8192},"
-        + "\"abilities\":{\"tools\":true,\"reasoning\":true,"
-        + "\"inputModalities\":[\"TEXT\"]},"
-        + "\"pricing\":{\"base\":{\"input\":\"1\",\"output\":\"2\","
-        + "\"cacheRead\":\"0\",\"cacheWrite\":\"0\","
-        + "\"cacheWriteByTtl\":{},\"reasoning\":null},"
-        + "\"overrides\":["
-        + overrides
-        + "],\"multipliers\":[]},"
-        + "\"defaultVariant\":\"default\","
-        + "\"variants\":[{\"id\":\"default\",\"promptCacheRetention\":\"NONE\"}]}";
   }
 
   /** 测试意图：验证严格重复键检测仍然生效，解析包含重复 key 的 JSON 时拒绝。 */

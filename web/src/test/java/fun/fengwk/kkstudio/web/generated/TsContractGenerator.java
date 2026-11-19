@@ -30,6 +30,7 @@ import tools.jackson.databind.introspect.ClassIntrospector;
 import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.platform.catalog.dto.DecimalStringSerializer;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTOSerializer;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRatePatchDTOSerializer;
 
 import java.io.InputStream;
@@ -135,6 +136,13 @@ final class TsContractGenerator {
   /** 写出属性与类型不变、只省略未声明字段的类级序列化器：任何属性都可能缺省。 */
   private static final Set<Class<?>> PRESENCE_SERIALIZERS =
       Set.of(ModelRatePatchDTOSerializer.class);
+
+  /**
+   * Discriminated DTO serializers keep the type discriminator required but conditionally omit other
+   * fields.
+   */
+  private static final Set<Class<?>> TYPE_CONDITIONAL_PRESENCE_SERIALIZERS =
+      Set.of(ModelPricingRuleDTOSerializer.class);
 
   private static final String HEADER =
       """
@@ -503,6 +511,9 @@ final class TsContractGenerator {
     JsonSerialize classSerializer = bean.getClassInfo().getAnnotation(JsonSerialize.class);
     boolean presenceSerialized =
         classSerializer != null && PRESENCE_SERIALIZERS.contains(classSerializer.using());
+    boolean typeConditionalPresenceSerialized =
+        classSerializer != null
+            && TYPE_CONDITIONAL_PRESENCE_SERIALIZERS.contains(classSerializer.using());
     Set<String> visible = new LinkedHashSet<>();
     List<TsProperty> properties = new ArrayList<>();
     for (BeanPropertyDefinition property : bean.findProperties()) {
@@ -518,6 +529,7 @@ final class TsContractGenerator {
       boolean nullable = !javaType.isPrimitive() && isNullable(property);
       boolean optional =
           presenceSerialized
+              || typeConditionalPresenceSerialized && !name.equals("type")
               || nullable
                   && (direction == Direction.REQUEST
                       || inclusion(bean, property) != JsonInclude.Include.ALWAYS);
@@ -582,7 +594,8 @@ final class TsContractGenerator {
     JsonSerialize classSerializer = classInfo.getAnnotation(JsonSerialize.class);
     if (classSerializer != null
         && !isDefaultAnnotation(classSerializer, JSON_SERIALIZE_MEMBERS)
-        && !isAllowlisted(classSerializer, PRESENCE_SERIALIZERS)) {
+        && !isAllowlisted(classSerializer, PRESENCE_SERIALIZERS)
+        && !isAllowlisted(classSerializer, TYPE_CONDITIONAL_PRESENCE_SERIALIZERS)) {
       throw new IllegalStateException(javaName(type) + " declares a class-level @JsonSerialize");
     }
     JsonFormat classFormat = classInfo.getAnnotation(JsonFormat.class);
