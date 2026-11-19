@@ -226,7 +226,9 @@ root Join 冻结的 `terminalEntryId` / `finalAnswerEntryId`（`COMPLETED` / `ER
 [`IssueStageBudgetService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueStageBudgetService.java)、
 [`IssueRunService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueRunService.java)
 与 [`IssueEvidenceService`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueEvidenceService.java)
-是写用例的事务边界，`IssueEditingService.appendActivity` 负责评论与指示的追加、锁序与幂等回执；
+是写用例的事务边界。`IssueEditingService.createIssue` 与项目归档使用同一 Project 行锁（`FOR UPDATE`）：
+获取锁后检查项目是否存在及是否已归档，通过校验才分配编号并写入 Issue；被拒绝的创建不消耗编号。
+`IssueEditingService.appendActivity` 负责评论与指示的追加、锁序与幂等回执；
 读侧由 [`ProjectSnapshotAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/ProjectSnapshotAssembler.java) 与
 [`IssueDetailAssembler`](../../apps/project/src/main/java/fun/fengwk/kkstudio/project/service/IssueDetailAssembler.java)
 在模块内部完成快照用例聚合；
