@@ -24,19 +24,19 @@ describe('ModelPricingPlanEditor', () => {
     expect(screen.queryByText(/override|multiplier|condition/i)).not.toBeInTheDocument()
   })
 
-  it('keeps reasoning pricing in unknown, follow-output and independent-price states', () => {
+  it('shows that the default reasoning rate follows output and accepts an explicit independent zero', () => {
     setLocale('en-US')
     render(<Harness />)
     const mode = screen.getByRole('button', { name: 'Independent reasoning pricing' })
-    expect(mode).toHaveTextContent('Unknown')
-    fireEvent.click(mode)
-    fireEvent.click(screen.getByRole('option', { name: 'Follow output price' }))
-    expect(JSON.parse(screen.getByTestId('draft').textContent!).definition.base.reasoning).toBeNull()
+    expect(mode).toHaveTextContent('Follow output price')
     fireEvent.click(mode)
     fireEvent.click(screen.getByRole('option', { name: 'Independent price' }))
     expect(screen.getByLabelText('Reasoning')).toHaveValue('')
     fireEvent.change(screen.getByLabelText('Reasoning'), { target: { value: '0' } })
     expect(JSON.parse(screen.getByTestId('draft').textContent!).definition.base.reasoning).toBe('0')
+    fireEvent.click(mode)
+    fireEvent.click(screen.getByRole('option', { name: 'Follow output price' }))
+    expect(JSON.parse(screen.getByTestId('draft').textContent!).definition.base.reasoning).toBeNull()
   })
 
   it('splits a cross-midnight interval at the next-day boundary when editing ends', () => {

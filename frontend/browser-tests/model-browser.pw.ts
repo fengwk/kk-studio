@@ -346,7 +346,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     const submitted = createBodies[0]
     expect(submitted?.type).toBe('MODEL')
     if (submitted?.type === 'MODEL') {
-      expect(submitted.config).not.toHaveProperty('pricing')
+      expect(submitted.config.pricing).toBeNull()
       expect(submitted.config.variants[0]?.promptCacheRetention).toBe('SHORT')
     }
 

@@ -225,7 +225,7 @@ function buildModelConfig(draft: ModelDraft): ModelConfigDTO {
       messageLevelEffort: draft.messageLevelEffort,
       inputModalities: modalities,
     },
-    ...(pricing ? { pricing } : {}),
+    pricing: pricing ?? null,
     defaultVariant,
     variants,
   }

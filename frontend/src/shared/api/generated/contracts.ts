@@ -1947,7 +1947,7 @@ export interface ModelCatalogPageDTO {
 export interface ModelConfigDTO {
   limit: ModelLimitDTO
   abilities: ModelAbilitiesDTO
-  pricing?: ModelPricingDTO | null
+  pricing: ModelPricingDTO | null
   defaultVariant?: string | null
   variants: ModelVariantDTO[]
 }
@@ -2073,17 +2073,17 @@ export interface ModelPricingPreviewRequestDTO {
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO */
 export interface ModelPricingRuleDTO {
   type: string
-  minInputTokens?: number
-  maxInputTokensExclusive?: number
+  minInputTokens?: number | null
+  maxInputTokensExclusive?: number | null
   input?: string | null
   output?: string | null
   cacheRead?: string | null
   cacheWrite?: string | null
-  start?: string
-  end?: string
-  timezone?: string
-  weekdays?: number[]
-  serviceTier?: string
+  start?: string | null
+  end?: string | null
+  timezone?: string | null
+  weekdays?: number[] | null
+  serviceTier?: string | null
   factor?: string | null
   inputFactor?: string | null
   outputFactor?: string | null

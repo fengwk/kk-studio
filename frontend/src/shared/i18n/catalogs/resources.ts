@@ -982,7 +982,6 @@ export const resourcesCatalog = {
   'ai.catalog.form.pricingTtlCustom': { 'en-US': 'Custom TTL prices', 'zh-CN': '自定义 TTL 价格' },
   'ai.catalog.form.pricingTtlUnpartitioned': { 'en-US': 'Unpartitioned', 'zh-CN': '不分档' },
   'ai.catalog.form.editPricingChange': { 'en-US': 'Edit this price definition', 'zh-CN': '编辑这份价格定义' },
-  'ai.catalog.form.reasoningUnknown': { 'en-US': 'Unknown', 'zh-CN': '未知' },
   'ai.catalog.form.reasoningFollowOutput': { 'en-US': 'Follow output price', 'zh-CN': '跟随输出价' },
   'ai.catalog.form.reasoningSeparate': { 'en-US': 'Independent price', 'zh-CN': '独立计价' },
   'ai.catalog.form.pricingImportUnsupported': {

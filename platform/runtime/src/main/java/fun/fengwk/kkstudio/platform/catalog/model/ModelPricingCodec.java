@@ -7,6 +7,8 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingRuleDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelRateSetDTO;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
@@ -14,31 +16,34 @@ import java.util.function.Consumer;
 /** 模型计价定义的归一化入口与 runtime 转换门面。 */
 public final class ModelPricingCodec {
 
+  private static final Comparator<ModelPricingRuleDTO> RULE_ORDER =
+      Comparator.comparingInt(ModelPricingCodec::groupOrder)
+          .thenComparingInt(ModelPricingCodec::numericOrder)
+          .thenComparing(
+              rule ->
+                  switch (rule.getType()) {
+                    case "service_tier_multiplier" -> rule.getServiceTier();
+                    case "time_multiplier" -> rule.getStart();
+                    default -> "";
+                  });
+
   private ModelPricingCodec() {}
 
   static ModelPricingDTO normalizeAndValidate(ModelPricingDTO pricing) {
-    if (pricing == null) {
-      pricing = new ModelPricingDTO();
-    }
     ModelPricingValidator.validate(pricing);
     normalizeBase(pricing.getBase(), pricing::setBase);
-    if (pricing.getRules() == null) {
-      pricing.setRules(List.of());
-    }
-    normalizeRules(pricing.getRules());
+    pricing.setRules(normalizeRules(pricing.getRules()));
     if (pricing.getChanges() == null) {
       pricing.setChanges(List.of());
+    } else {
+      pricing.setChanges(
+          pricing.getChanges().stream()
+              .sorted(Comparator.comparing(change -> LocalDate.parse(change.getFrom())))
+              .toList());
     }
     for (ModelPricingChangeDTO change : pricing.getChanges()) {
-      if (change != null) {
-        if (change.getBase() != null) {
-          normalizeBase(change.getBase(), change::setBase);
-        }
-        if (change.getRules() == null) {
-          change.setRules(List.of());
-        }
-        normalizeRules(change.getRules());
-      }
+      normalizeBase(change.getBase(), change::setBase);
+      change.setRules(normalizeRules(change.getRules()));
     }
     return pricing;
   }
@@ -51,8 +56,14 @@ public final class ModelPricingCodec {
     return ModelPricingMapper.toModelPricing(normalizeAndValidate(pricing));
   }
 
-  private static void normalizeRules(List<ModelPricingRuleDTO> rules) {
+  private static List<ModelPricingRuleDTO> normalizeRules(List<ModelPricingRuleDTO> rules) {
+    if (rules == null) {
+      return List.of();
+    }
     for (ModelPricingRuleDTO rule : rules) {
+      if (rule.getWeekdays() != null) {
+        rule.setWeekdays(rule.getWeekdays().stream().sorted().toList());
+      }
       BigDecimal factor = rule.getFactor();
       if (factor == null) {
         continue;
@@ -73,6 +84,24 @@ public final class ModelPricingCodec {
         rule.setReasoningFactor(null);
       }
     }
+    return rules.stream().sorted(RULE_ORDER).toList();
+  }
+
+  private static int groupOrder(ModelPricingRuleDTO rule) {
+    return switch (rule.getType()) {
+      case "input_token_range" -> 0;
+      case "service_tier_multiplier" -> 1;
+      case "time_multiplier" -> 2;
+      default -> throw new IllegalArgumentException("unsupported pricing rule type");
+    };
+  }
+
+  private static int numericOrder(ModelPricingRuleDTO rule) {
+    if (rule.getMinInputTokens() != null) {
+      return rule.getMinInputTokens();
+    }
+    List<Integer> weekdays = rule.getWeekdays();
+    return weekdays == null || weekdays.isEmpty() ? 0 : weekdays.getFirst();
   }
 
   private static boolean same(BigDecimal left, BigDecimal right) {

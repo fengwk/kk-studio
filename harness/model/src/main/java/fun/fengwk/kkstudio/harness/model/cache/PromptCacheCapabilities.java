@@ -47,15 +47,12 @@ public record PromptCacheCapabilities(
       case ANTHROPIC -> {
         if (isMiniMaxStable(endpoint, modelId)) {
           automatic = true;
-        } else if (isMiniMax(endpoint)) {
-          // Preview keeps the previously offered SHORT marker; its TTL is not verified.
-          options.add(option(PromptCacheRetention.NONE, null, null));
-          options.add(option(PromptCacheRetention.SHORT, null, null));
         } else if (isOfficialAnthropic(endpoint)) {
           options.add(option(PromptCacheRetention.NONE, null, null));
           options.add(option(PromptCacheRetention.SHORT, 300L, 1.25));
           options.add(option(PromptCacheRetention.LONG, 3600L, 2.0));
         } else {
+          // Preview and other compatible routes retain SHORT without a TTL guarantee.
           options.add(option(PromptCacheRetention.NONE, null, null));
           options.add(option(PromptCacheRetention.SHORT, null, null));
         }
@@ -121,6 +118,7 @@ public record PromptCacheCapabilities(
     if (!isMiniMax(endpoint) || modelId == null) {
       return false;
     }
-    return "MiniMax-M2.5".equalsIgnoreCase(modelId);
+    return "MiniMax-M2.5".equalsIgnoreCase(modelId)
+        || "MiniMax-M3.1-Flash".equalsIgnoreCase(modelId);
   }
 }

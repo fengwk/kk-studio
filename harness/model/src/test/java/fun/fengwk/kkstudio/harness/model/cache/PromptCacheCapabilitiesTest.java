@@ -72,7 +72,7 @@ class PromptCacheCapabilitiesTest {
 
     PromptCacheCapabilities stable =
         PromptCacheCapabilities.resolve(
-            ProviderType.ANTHROPIC, "https://api.minimax.cn/anthropic", "MiniMax-M2.5");
+            ProviderType.ANTHROPIC, "https://api.minimax.cn/anthropic", "MiniMax-M3.1-Flash");
     assertTrue(stable.automaticCache());
     assertTrue(stable.options().isEmpty());
     assertEquals(PromptCacheRetention.NONE, stable.defaultRetention());

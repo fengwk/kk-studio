@@ -52,9 +52,34 @@ test('pricing matrix cases verify current API round-trips', async () => {
       }
       if (method === 'POST' && path === '/api/platform/models') {
         created.push(body)
+        const pricing = body.config.pricing
         return {
           status: 201,
-          json: { name: body.name, version: '2', config: body.config },
+          json: {
+            name: body.name,
+            version: '2',
+            config: {
+              ...body.config,
+              pricing: pricing && {
+                ...pricing,
+                rules: pricing.rules.toSorted((left, right) => left.type.localeCompare(right.type)),
+              },
+            },
+          },
+        }
+      }
+      if (method === 'POST' && path === '/api/platform/models/pricing-preview') {
+        assert.deepEqual(body.pricing.rules.map((rule) => rule.type), [
+          'input_token_range', 'service_tier_multiplier', 'time_multiplier',
+        ])
+        assert.equal(body.serviceTier, 'batch')
+        return {
+          status: 200,
+          json: {
+            activeFrom: null,
+            matchedRules: body.pricing.rules,
+            rates: { input: '1.250', cacheWriteByTtl: { 3600: '0.9375' } },
+          },
         }
       }
       if (method === 'DELETE') return { status: 204, json: null }

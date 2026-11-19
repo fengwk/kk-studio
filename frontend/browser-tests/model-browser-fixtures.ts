@@ -89,6 +89,7 @@ const FIXTURE_GROUP: ModelDTO = {
   config: {
     limit: { context: 128000, output: 4096 },
     abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
+    pricing: null,
     defaultVariant: 'standard',
     variants: [{ id: 'standard', promptCacheRetention: 'SHORT' }],
   },

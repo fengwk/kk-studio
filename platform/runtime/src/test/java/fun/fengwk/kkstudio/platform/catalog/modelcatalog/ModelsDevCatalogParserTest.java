@@ -51,9 +51,9 @@ class ModelsDevCatalogParserTest {
             .filter(candidateRule -> "service_tier_multiplier".equals(candidateRule.getType()))
             .toList();
     assertEquals(
-        List.of("priority", "flex"),
+        List.of("flex", "priority"),
         tiers.stream().map(ModelPricingRuleDTO::getServiceTier).toList());
-    ModelPricingRuleDTO tier = tiers.get(0);
+    ModelPricingRuleDTO tier = tiers.get(1);
     assertDecimal("1", tier.getFactor());
     assertDecimal("2", tier.getInputFactor());
     assertDecimal("5", tier.getOutputFactor());
@@ -210,7 +210,7 @@ class ModelsDevCatalogParserTest {
             .toList();
     assertEquals(
         List.of("fast", "flex"),
-        baseTiers.stream().map(ModelPricingRuleDTO::getServiceTier).sorted().toList());
+        baseTiers.stream().map(ModelPricingRuleDTO::getServiceTier).toList());
     assertEquals(
         6,
         pricing.getRules().stream()
@@ -221,12 +221,11 @@ class ModelsDevCatalogParserTest {
             .filter(rule -> "time_multiplier".equals(rule.getType()))
             .allMatch(rule -> rule.getStart().equals("00:00") && rule.getEnd().equals("24:00")));
     assertEquals(
-        "priority",
+        List.of("fast", "flex", "priority"),
         pricing.getChanges().get(0).getRules().stream()
             .filter(rule -> "service_tier_multiplier".equals(rule.getType()))
             .map(ModelPricingRuleDTO::getServiceTier)
-            .findFirst()
-            .orElseThrow());
+            .toList());
 
     ModelCost cost =
         ModelCost.calculate(

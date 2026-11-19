@@ -313,14 +313,13 @@ export function ModelPricingPlanEditor({
             ))}
           </div>
           <Select aria-label={t('ai.catalog.form.reasoningPricing')}
-            value={value.definition.base.reasoning === null ? 'follow' : value.definition.base.reasoning === undefined ? 'unknown' : 'separate'}
+            value={value.definition.base.reasoning == null ? 'follow' : 'separate'}
             options={[
-              { value: 'unknown', label: t('ai.catalog.form.reasoningUnknown') },
               { value: 'follow', label: t('ai.catalog.form.reasoningFollowOutput') },
               { value: 'separate', label: t('ai.catalog.form.reasoningSeparate') },
             ]}
-            onChange={(mode) => setBase('reasoning', mode === 'follow' ? null : mode === 'unknown' ? undefined : '')} />
-          {value.definition.base.reasoning !== null && value.definition.base.reasoning !== undefined ? (
+            onChange={(mode) => setBase('reasoning', mode === 'follow' ? null : '')} />
+          {value.definition.base.reasoning != null ? (
             <label className="form-group">
               <span>{t('ai.catalog.form.reasoningPrice')}</span>
               <TextInput inputMode="decimal" aria-label={t('ai.catalog.form.reasoningPrice')}

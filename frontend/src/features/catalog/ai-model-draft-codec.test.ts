@@ -169,9 +169,10 @@ describe('ai-model-draft-codec', () => {
         tools: true,
         reasoning: true,
         midConversationSystemMessages: false,
-      messageLevelEffort: false,
+        messageLevelEffort: false,
         inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'],
       },
+      pricing: null,
       defaultVariant: 'quality',
       variants: [
         {
@@ -345,9 +346,9 @@ describe('ai-model-draft-codec', () => {
     expect(buildModelConfig(draftFromModel).pricing).toEqual(pricing)
   })
 
-  it('omits pricing for a new unpriced model and rejects invalid explicit prices', () => {
+  it('saves a new unpriced model as null and rejects invalid explicit prices', () => {
     const unpriced = buildModelConfig(draft())
-    expect(unpriced).not.toHaveProperty('pricing')
+    expect(unpriced.pricing).toBeNull()
 
     const base = draft()
     base.pricing.definition.base.input = '1'

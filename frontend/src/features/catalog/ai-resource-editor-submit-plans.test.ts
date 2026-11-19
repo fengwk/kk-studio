@@ -29,6 +29,7 @@ describe('ai-resource-editor-submit-plans', () => {
           providerName: 'unrelated-provider',
           name: 'renamed-model',
           modelId: 'unrelated-wire-model',
+          variants: emptyModelDraft().variants.map((variant) => ({ ...variant, promptCacheRetention: 'SHORT' })),
         },
       },
     )

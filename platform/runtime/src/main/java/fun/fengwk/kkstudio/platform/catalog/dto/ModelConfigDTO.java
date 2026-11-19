@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.dto;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
@@ -14,7 +15,7 @@ import java.util.List;
  * limit:        { context: positive int, output: positive int &lt;= context }
  * abilities:    { tools: boolean, reasoning: boolean, midConversationSystemMessages?: boolean, messageLevelEffort?: boolean, inputModalities: non-empty list }
  * pricing:      { base: { input, output, cacheRead, cacheWrite, cacheWriteByTtl, reasoning },
- *                rules: [], changes: [] }，可缺省并归一为完整零定义
+ *                rules: [], changes: [] }，未定价时为 null
  * defaultVariant: existing variant id
  * variants:     non-empty list with at least {@code id} (optional reasoningEffort)
  * </pre>
@@ -30,7 +31,8 @@ public class ModelConfigDTO {
   /** 必填能力声明：tools/reasoning 必填，inputModalities 非空且去重。 */
   private ModelAbilitiesDTO abilities;
 
-  /** 定价定义；可缺省，单 Model parser 会归一为完整零定义（reasoning 缺省仍继承 output）；组的派生摘要为 null。 */
+  /** 定价定义；null（包括请求省略）表示未定价，不等于显式零价格。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
   private @Nullable ModelPricingDTO pricing;
 
   /** 单 Model 必填默认变体 id：非空白、无环绕空白，且必须匹配 {@code variants[].id}；组的派生摘要为 null。 */

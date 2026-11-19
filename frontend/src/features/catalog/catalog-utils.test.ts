@@ -260,6 +260,7 @@ describe('catalog utils', () => {
             ...baseVariant,
             id: 'quality',
             reasoningEffort: 'high',
+            promptCacheRetention: 'SHORT',
           },
         ],
       }),

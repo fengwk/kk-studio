@@ -18,9 +18,9 @@ public class ModelPricingRuleDTO {
 
   private String type;
 
-  private Integer minInputTokens;
+  private @Nullable Integer minInputTokens;
 
-  private Integer maxInputTokensExclusive;
+  private @Nullable Integer maxInputTokensExclusive;
 
   @JsonSerialize(using = DecimalStringSerializer.class)
   @JsonDeserialize(using = DecimalStringDeserializer.class)
@@ -50,15 +50,15 @@ public class ModelPricingRuleDTO {
 
   private boolean reasoningSpecified;
 
-  private String start;
+  private @Nullable String start;
 
-  private String end;
+  private @Nullable String end;
 
-  private String timezone;
+  private @Nullable String timezone;
 
-  private List<Integer> weekdays;
+  private @Nullable List<Integer> weekdays;
 
-  private String serviceTier;
+  private @Nullable String serviceTier;
 
   @JsonSerialize(using = DecimalStringSerializer.class)
   @JsonDeserialize(using = DecimalStringDeserializer.class)

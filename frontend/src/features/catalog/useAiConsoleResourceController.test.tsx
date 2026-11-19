@@ -203,6 +203,7 @@ describe('useAiConsoleResourceController', () => {
     await user.click(screen.getByRole('button', { name: 'create-model' }))
     await user.type(screen.getByTestId('model-name'), 'new-model')
     await user.type(screen.getByTestId('model-id'), 'new-wire-id')
+    await user.click(screen.getByRole('button', { name: 'select-standard-cache' }))
     await user.click(screen.getByRole('button', { name: 'submit' }))
     await waitFor(() => {
       expect(agentService.createModel).toHaveBeenCalledWith(
@@ -517,6 +518,12 @@ function ResourceControllerHarness() {
                   })
                 }
               />
+              <button type="button" onClick={() => editor.onModelDraftChange({
+                ...editor.modelDraft,
+                variants: editor.modelDraft.variants.map((variant) => ({ ...variant, promptCacheRetention: 'SHORT' })),
+              })}>
+                select-standard-cache
+              </button>
             </>
           ) : (
             <input

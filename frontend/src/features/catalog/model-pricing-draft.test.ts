@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   emptyModelPricingDraft,
   findPricingConflicts,
-  multiplyPriceFactors,
   normalizePricingDraft,
-  pricingDefinitionAt,
   splitCrossMidnightPeriod,
 } from '@/features/catalog/model-pricing-draft'
 
@@ -119,7 +117,7 @@ describe('local model pricing draft', () => {
     expect(normalizePricingDraft(draft)!.rules[0]).toMatchObject({ cacheWriteByTtl: { '300': '0.25' } })
   })
 
-  it('validates date changes, detects duplicate effective dates and treats missing date as unknown', () => {
+  it('orders UTC price changes and rejects duplicate or invalid dates', () => {
     const draft = emptyModelPricingDraft()
     setPricedBase(draft)
     const first = emptyModelPricingDraft().definition
@@ -127,13 +125,10 @@ describe('local model pricing draft', () => {
     first.base.input = '1'; first.base.output = '2'; first.base.cacheRead = '0.1'
     second.base.input = '1'; second.base.output = '2'; second.base.cacheRead = '0.1'
     draft.changes = [
-      { draftKey: 'c1', from: '2027-01-01', definition: first },
       { draftKey: 'c2', from: '2027-03-01', definition: second },
+      { draftKey: 'c1', from: '2027-01-01', definition: first },
     ]
-    const plan = normalizePricingDraft(draft)!
-    expect(pricingDefinitionAt(plan)).toBeNull()
-    expect(pricingDefinitionAt(plan, '2027-02-01T00:00:00Z')).toEqual({ base: plan.base, rules: plan.rules })
-    expect(pricingDefinitionAt(plan, '2027-03-01T00:00:00Z')).toEqual({ base: plan.changes[1]!.base, rules: plan.changes[1]!.rules })
+    expect(normalizePricingDraft(draft)?.changes.map((change) => change.from)).toEqual(['2027-01-01', '2027-03-01'])
     expect(() => normalizePricingDraft({
       ...draft, changes: [...draft.changes, { ...draft.changes[0]!, draftKey: 'duplicate' }],
     })).toThrow(/duplicate pricing change date/)
@@ -156,9 +151,4 @@ describe('local model pricing draft', () => {
     expect(() => normalizePricingDraft(draft)).toThrow(/non-negative decimal/)
   })
 
-  it('multiplies monetary values exactly as decimal strings', () => {
-    expect(multiplyPriceFactors('0.15', ['26', '1.2'])).toBe('4.68')
-    expect(multiplyPriceFactors('9007199254740993.01', ['1'])).toBe('9007199254740993.01')
-    expect(() => multiplyPriceFactors('1.2', ['-1'])).toThrow(/non-negative decimals/)
-  })
 })

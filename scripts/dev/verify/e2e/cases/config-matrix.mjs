@@ -63,28 +63,19 @@ for (const row of modelConfigMatrix()) {
         assert([200, 201].includes(status), `status ${status}`)
         const model = json
         assert(model?.name, JSON.stringify(json))
-        if (row.id === 'valid.pricing_rules') {
-          const pricing = model.config?.pricing
-          assert(
-            pricing
-              && Object.keys(pricing).sort().join(',') === 'base,changes,rules'
-              && pricing.rules.map((rule) => rule.type).sort().join(',')
-                === 'input_token_range,service_tier_multiplier,time_multiplier'
-              && pricing.changes[0]?.from === '2030-01-01',
-            `Model must round-trip the current pricing contract: ${JSON.stringify(pricing)}`,
-          )
-        } else if (row.id === 'valid.unpriced') {
-          assert(
-            Object.hasOwn(model.config ?? {}, 'pricing') && model.config.pricing === null,
-            `unpriced Model must round-trip pricing=null: ${JSON.stringify(model.config)}`,
+        try {
+          if (row.id === 'valid.pricing_rules') {
+            await assertPricingRules(ctx, model.config?.pricing)
+          } else if (row.id === 'valid.unpriced') {
+            assert(model.config?.pricing === null, 'unpriced Model must round-trip pricing=null')
+          }
+          ctx.writeArtifact(`model-${row.id}.json`, JSON.stringify(model, null, 2))
+        } finally {
+          await ctx.call(
+            'DELETE',
+            `/api/platform/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
           )
         }
-        ctx.writeArtifact(`model-${row.id}.json`, JSON.stringify(model, null, 2))
-        // cleanup model immediately to keep list small
-        await ctx.call(
-          'DELETE',
-          `/api/platform/models/${encodePathTail(model.name)}?expectedVersion=${encodeURIComponent(model.version)}`,
-        )
       } else {
         const err = await expectHttpError(() => ctx.call('POST', '/api/platform/models', body), {
           status: row.expectStatus || 400,
@@ -95,6 +86,30 @@ for (const row of modelConfigMatrix()) {
       }
     },
   })
+}
+
+async function assertPricingRules(ctx, pricing) {
+  const types = 'input_token_range,service_tier_multiplier,time_multiplier'
+  assert(
+    pricing
+      && Object.keys(pricing).sort().join(',') === 'base,changes,rules'
+      && pricing.rules.map((rule) => rule.type).join(',') === types
+      && pricing.changes[0]?.from === '2030-01-01',
+    'Model must round-trip current pricing rules and date plan',
+  )
+  const { json: preview } = await ctx.call('POST', '/api/platform/models/pricing-preview', {
+    pricing,
+    inputTokens: 125000,
+    serviceTier: 'batch',
+    requestedAt: Date.parse('2027-01-04T10:00:00Z'),
+  })
+  assert(
+    preview.activeFrom === null
+      && preview.matchedRules.map((rule) => rule.type).join(',') === types
+      && preview.rates?.input === '1.250'
+      && preview.rates.cacheWriteByTtl?.['3600'] === '0.9375',
+    'preview must apply the input range, service tier and UTC weekday multipliers to the previous definition',
+  )
 }
 
 registerCase({

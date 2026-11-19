@@ -12,7 +12,7 @@ export interface PricingRatesDraft {
   cacheRead: string
   cacheWrite: string
   cacheWriteByTtl: Record<string, string>
-  /** undefined=unknown/inherit, null=follow output, string=independent price. */
+  /** An absent base reasoning rate follows output; a decimal string is an independent price. */
   reasoning: string | null | undefined
 }
 
@@ -297,7 +297,7 @@ function normalizeBase(rates: PricingRatesDraft): ModelRateSetDTO {
     input, output, cacheRead, cacheWrite, cacheWriteByTtl,
   }
   if (rates.reasoning === null) normalized.reasoning = null
-  else if (rates.reasoning != null && rates.reasoning.trim() !== '') {
+  else if (rates.reasoning !== undefined) {
     normalized.reasoning = normalizeDecimal(rates.reasoning, 'pricing.base.reasoning', false)!
   }
   return normalized
@@ -416,18 +416,6 @@ export function normalizePricingDraft(draft: ModelPricingDraft): ModelPricingDTO
   return { ...definition, changes }
 }
 
-export function pricingDefinitionAt(
-  plan: ModelPricingDTO,
-  requestedAt?: string | null,
-): PricingDefinitionDTO | null {
-  const base = { base: plan.base, rules: plan.rules }
-  if (!plan.changes.length) return base
-  if (!requestedAt) return null
-  const date = requestedAt.slice(0, 10)
-  const change = plan.changes.filter((item) => item.from <= date).at(-1)
-  return change ? { base: change.base, rules: change.rules } : base
-}
-
 /** Cross-midnight time rules are split so each DTO rule has one weekday/time interval. */
 export function splitCrossMidnightPeriod(
   period: Omit<TimePeriodDraft, 'draftKey'>,
@@ -447,23 +435,4 @@ export function splitCrossMidnightPeriod(
       draftKey: createKey(),
     },
   ]
-}
-
-/** Use BigInt decimal arithmetic for pure validation/example math; previews use the backend. */
-export function multiplyPriceFactors(price: string, factors: readonly string[]): string {
-  const values = [price, ...factors]
-  if (values.some((value) => !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value))) {
-    throw new Error('price and factors must be non-negative decimals')
-  }
-  let numerator = 1n
-  let scale = 0
-  for (const value of values) {
-    const [whole, fraction = ''] = value.split('.')
-    numerator *= BigInt(`${whole}${fraction}`)
-    scale += fraction.length
-  }
-  let result = numerator.toString().padStart(scale + 1, '0')
-  if (scale > 0) result = `${result.slice(0, -scale)}.${result.slice(-scale)}`
-  result = result.replace(/(\.\d*?)0+$/, '$1').replace(/\.$/, '')
-  return result || '0'
 }

@@ -326,9 +326,9 @@ Provider credential 通过创建请求的可空 `SecretUpdate`（只接受 `SET`
 模型列表（[`ProviderModelDiscovery`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/ProviderModelDiscovery.java)），
 返回去重排序的模型 ID，只用于添加模型时预填，不写入 Catalog；请求不在数据库事务内，缺少 baseUrl 为校验错误，
 上游不可达或非 2xx 返回 502 `upstream_failed`，detail 带上游状态与截断正文。
-MODEL 配置保存 limit、abilities、variants、pricing、default variant 与 `midConversationSystemMessages`；该能力默认为 false，Claude model ID 在模型创建或 Catalog 候选应用时按受支持 ID 规则预填 true，仍可由用户编辑。
+MODEL 配置保存 limit、abilities、variants、pricing 与 default variant。`midConversationSystemMessages` 和 `messageLevelEffort` 缺省为 false；设置表单保留已有值，目录不按名称猜测这些兼容开关。
 `pricing` 为可空的完整定义：`null` 表示尚未配置价格，必须与显式全零费率区分；已配置时结构为
-`{base, rules, changes}`。价格与倍率均为 USD / 每百万 token 的十进制字符串；普通费率缺省归一为 0，
+`{base, rules, changes}`。费率以 USD / 每百万 token 计，费率和无单位倍率均使用十进制字符串；普通费率缺省归一为 0，
 `reasoning: null` 表示继承最终 output 价。基础费率与每个日期计划均有自己的 `base` 和 `rules`。
 日期计划按 `from`（ISO 日期）选择当日及之后最近生效的价格定义，定义内规则继续匹配输入 token 数量、
 时区时间段和 service tier。
@@ -338,7 +338,8 @@ MODEL 配置保存 limit、abilities、variants、pricing、default variant 与 
 费率倍率可用统一 `factor` 或逐项 `inputFactor` / `outputFactor` / `cacheReadFactor` /
 `cacheWriteFactor` / `reasoningFactor`。输入 token 范围按 `[minInputTokens, maxInputTokensExclusive)`，
 时间规则使用 IANA 时区和 ISO `weekdays`（1=周一至 7=周日，可省略表示每天）；数组顺序不作为优先级。
-推理费率可显式为 `null` 以恢复继承，TTL 写价按正整数秒分别配置。
+输入档的推理费率省略表示沿用基础定义，显式 `null` 表示跟随最终输出价。TTL 写价按正整数秒分别配置。
+`POST /api/platform/models/pricing-preview` 接受草稿 `pricing`、`inputTokens`，以及可选 `requestedAt`（UTC 时间的 epoch 毫秒）和 `serviceTier`。同一计价器返回生效日期、命中规则和精确十进制费率，不写入配置；缺少所需事实或未定价时 `rates` 为 null。
 
 models.dev 目录导入只填入可无损转换的 token 价格与规则；`web_search` 等非 token 附加费用不计入并显示提示。
 无法等价转换的 token 价格会使整份候选价格保持未定价，不以零价替代；非 token 附加费用只给出提示。
