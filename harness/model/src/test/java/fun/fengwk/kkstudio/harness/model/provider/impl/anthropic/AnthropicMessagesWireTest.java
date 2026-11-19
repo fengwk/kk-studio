@@ -13,6 +13,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
@@ -24,6 +25,7 @@ import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl.PrefixReuse;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderCompletion;
@@ -50,7 +52,10 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.http.HttpClient;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -1151,16 +1156,34 @@ class AnthropicMessagesWireTest {
     assertFalse(root.path("messages").get(0).path("content").get(0).has("cache_control"));
   }
 
-  /** 只读断点模式：只标记指定消息，tools/system 与其它消息绝不写缓存。 */
-  @Test
-  void should_place_single_read_only_cache_breakpoint_on_requested_message() throws Exception {
+  /** 只有时效与实际端点 TTL 均匹配，才使用单独的前缀断点。 */
+  @ParameterizedTest
+  @CsvSource({
+    "api.anthropic.com, 300, -1, true",
+    "api.anthropic.com, 300, 0, false",
+    "api.anthropic.com, 300, 1, false",
+    "api.anthropic.com, 3600, -1, false",
+    "compatible.example, 300, -1, false"
+  })
+  void should_use_prefix_breakpoint_only_when_fresh_and_compatible(
+      String host, long observedTtl, long secondsPastExpiry, boolean reuse) throws Exception {
     ProviderToolDefinition tool = new ProviderToolDefinition("t", "tool", "{\"type\":\"object\"}");
-    ProviderDescriptor descriptor = createDescriptor(null);
+    ProviderDescriptor descriptor =
+        new ProviderDescriptor(
+            "test-aff",
+            ProviderType.ANTHROPIC,
+            "https://" + host + "/v1",
+            ModelCallTimeoutPolicy.DEFAULT);
+    Instant expiresAt = Instant.parse("2026-08-01T00:05:00Z");
+    AnthropicRequestEncoder fixedEncoder =
+        new AnthropicRequestEncoder(
+            Clock.fixed(expiresAt.plusSeconds(secondsPastExpiry), ZoneOffset.UTC));
     ProviderMessage assistant =
         new ProviderMessage(
             ProviderMessageRole.ASSISTANT, List.of(new ProviderTextBlock("answer")));
     ProviderCacheControl cacheControl =
-        ProviderCacheControl.readOnlyMessage(PromptCacheRetention.SHORT, "test-aff", 1);
+        new ProviderCacheControl(
+            PromptCacheRetention.SHORT, "test-aff", new PrefixReuse(1, observedTtl, expiresAt));
     ProviderRequest request =
         requestWithInstruction(
             "System prompt",
@@ -1168,18 +1191,13 @@ class AnthropicMessagesWireTest {
             List.of(tool),
             cacheControl);
 
-    AnthropicEncodedRequest encoded = encoder.encode(request, descriptor);
-    JsonNode root = mapper.readTree(encoded.bodyUtf8Bytes());
+    JsonNode root = mapper.readTree(fixedEncoder.encode(request, descriptor).bodyUtf8Bytes());
 
-    JsonNode messages = root.path("messages");
-    assertFalse(root.path("system").get(0).has("cache_control"));
-    assertFalse(root.path("tools").get(0).has("cache_control"));
-    assertFalse(messages.get(0).path("content").get(0).has("cache_control"));
-    assertTrue(messages.get(1).path("content").get(0).has("cache_control"));
-    assertEquals(
-        "ephemeral",
-        messages.get(1).path("content").get(0).path("cache_control").path("type").asString());
-    assertFalse(messages.get(2).path("content").get(0).has("cache_control"));
+    assertEquals(!reuse, root.path("system").get(0).has("cache_control"));
+    assertEquals(!reuse, root.path("tools").get(0).has("cache_control"));
+    assertFalse(root.at("/messages/0/content/0").has("cache_control"));
+    assertEquals(reuse, root.at("/messages/1/content/0").has("cache_control"));
+    assertEquals(!reuse, root.at("/messages/2/content/0").has("cache_control"));
   }
 
   /** 验证 retention 非 NONE 时唯一的顶层 system 块固定携带 ephemeral 标记，SHORT 不带 ttl。 */

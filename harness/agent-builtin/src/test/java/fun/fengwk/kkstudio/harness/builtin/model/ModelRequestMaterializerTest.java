@@ -9,6 +9,9 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
@@ -45,6 +48,7 @@ import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessage;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
 import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
+import fun.fengwk.kkstudio.harness.api.session.NativeAssistantBlockContent;
 import fun.fengwk.kkstudio.harness.api.session.SystemReminder;
 import fun.fengwk.kkstudio.harness.api.session.TextMessageContent;
 import fun.fengwk.kkstudio.harness.api.session.ThinkingMessageContent;
@@ -66,6 +70,7 @@ import fun.fengwk.kkstudio.harness.model.ModelUsage;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl.PrefixReuse;
 import fun.fengwk.kkstudio.harness.model.provider.GenerationStopReason;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderBlockData;
@@ -89,8 +94,10 @@ import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 import fun.fengwk.kkstudio.harness.tool.ToolSideEffect;
 import fun.fengwk.kkstudio.harness.tool.ToolVisibility;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
@@ -99,6 +106,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Stream;
 
 /** ModelRequestMaterializer 纯投影：相同 spec+path 可确定重放，编码体积与普通历史长度无关，压缩只使用 Entry IDs。 */
 class ModelRequestMaterializerTest {
@@ -722,41 +730,109 @@ class ModelRequestMaterializerTest {
         List.of());
   }
 
-  /** 压缩分支第一次请求：只读缓存断点落在切点前最后一条 assistant 之前的消息上。 */
-  @Test
-  void compactionBranchUsesSingleReadOnlyBreakpointBeforeLastAssistant() {
-    ProviderRequest request =
-        MATERIALIZER.materialize(
-            new EntryPath(branchPath(T0.plus(Duration.ofMinutes(1)), "model")),
-            anthropicSpec(bashBinding(), PromptCacheRetention.SHORT));
+  /** 复用目标要跟随真实 wire 消息；原生 compaction 移除目标时不允许改标其它消息。 */
+  @ParameterizedTest
+  @ValueSource(booleans = {true, false})
+  void compactionBranchMapsPrefixThroughNativeReplay(boolean targetSurvives) {
+    Instant requestedAt = T0.minusSeconds(30);
+    Instant branchAt = T0.plusSeconds(60);
+    AssistantMessageMetadata metadata =
+        cacheMetadata("model", "v1", requestedAt, 20L, Map.of(300L, 20L, 3600L, 0L));
+    ProviderDescriptor provider =
+        new ProviderDescriptor(
+            "anthropic",
+            ProviderType.ANTHROPIC,
+            "https://api.anthropic.com/v1",
+            ModelCallTimeoutPolicy.DEFAULT);
+    AgentMessage nativeCompaction =
+        new AgentMessage(
+            AgentMessageRole.ASSISTANT,
+            List.of(
+                new NativeAssistantBlockContent(
+                    "compaction",
+                    new ProviderBlockData(
+                        ProviderReplayFormat.ANTHROPIC_MESSAGES,
+                        provider.affinity("model"),
+                        JsonNodeFactory.instance.objectNode().put("content", "summary")))));
+    ModelRequestSpec spec = anthropicSpec(bashBinding(), PromptCacheRetention.SHORT);
+    List<Entry> entries = branchPath(branchAt, metadata);
+    if (targetSurvives) {
+      entries.add(2, entry(90, 2, user("summarized question")));
+      entries.add(
+          3, entry(91, 90, new MessagePayload(nativeCompaction, legacyCacheMetadata(), null)));
+      entries.add(
+          4,
+          entry(92, 91, new TurnEndPayload(id(2L), TurnEndOutcome.COMPLETED, false, null, null)));
+      entries.set(5, entry(3, 93, user("old question")));
+      entries.add(5, entry(93, 92, resolvedStart(TurnStartReason.INPUT, null)));
+      entries.set(
+          8, entry(5, 4, new TurnEndPayload(id(93L), TurnEndOutcome.COMPLETED, false, null, null)));
+    } else {
+      entries.set(3, entry(4, 3, new MessagePayload(nativeCompaction, metadata, null)));
+    }
 
-    assertEquals(0, request.cacheControl().messageBreakpoint());
+    ProviderRequest request = MATERIALIZER.materialize(new EntryPath(entries), spec);
+    assertEquals(
+        new PrefixReuse(targetSurvives ? 2 : 0, 300L, requestedAt.plusSeconds(300)),
+        request.cacheControl().prefixReuse());
+    AnthropicRequestEncoder encoder =
+        new AnthropicRequestEncoder(Clock.fixed(branchAt, ZoneOffset.UTC));
+    JsonNode wire =
+        HarnessJson.STRICT_DECIMAL.readTree(encoder.encode(request, provider).bodyUtf8Bytes());
+    assertEquals("compaction", wire.at("/messages/0/content/0/type").asString());
+    assertEquals(targetSurvives ? 1 : 0, wire.findValues("cache_control").size());
+    if (targetSurvives) {
+      JsonNode target = wire.at("/messages/1/content/0");
+      assertEquals("old question", target.path("text").asString());
+      assertEquals("ephemeral", target.at("/cache_control/type").asString());
+    }
   }
 
-  /** 压缩模型与产生切点前 assistant 的模型不同时不写只读断点。 */
-  @Test
-  void compactionBranchSkipsBreakpointWhenCompactionModelDiffers() {
+  /** 证据不完整、归属错误、时间倒序或分支开始时已到期，都不生成候选。 */
+  @ParameterizedTest
+  @MethodSource("unusableCacheFacts")
+  void compactionBranchUsesRegularCachingWithoutUsableFacts(AssistantMessageMetadata metadata) {
     ProviderRequest request =
         MATERIALIZER.materialize(
-            new EntryPath(branchPath(T0.plus(Duration.ofMinutes(1)), "other-model")),
+            new EntryPath(branchPath(T0.plusSeconds(60), metadata)),
             anthropicSpec(bashBinding(), PromptCacheRetention.SHORT));
 
-    assertNull(request.cacheControl().messageBreakpoint());
+    assertEquals(PromptCacheRetention.SHORT, request.cacheControl().retention());
+    assertNull(request.cacheControl().prefixReuse());
   }
 
-  /** 缓存留存已过期（SHORT 5m）时不写只读断点。 */
-  @Test
-  void compactionBranchSkipsBreakpointWhenCacheEntryExpired() {
-    ProviderRequest request =
-        MATERIALIZER.materialize(
-            new EntryPath(branchPath(T0.plus(Duration.ofMinutes(10)), "model")),
-            anthropicSpec(bashBinding(), PromptCacheRetention.SHORT));
+  private static Stream<AssistantMessageMetadata> unusableCacheFacts() {
+    Map<Long, Long> shortWrite = Map.of(300L, 20L);
+    return Stream.of(
+        legacyCacheMetadata(),
+        cacheMetadata("other-model", "v1", T0, 20L, shortWrite),
+        cacheMetadata("model", "other-variant", T0, 20L, shortWrite),
+        cacheMetadata("model", "v1", null, 20L, shortWrite),
+        cacheMetadata("model", "v1", T0.plusSeconds(1), 20L, shortWrite),
+        cacheMetadata("model", "v1", T0.minusSeconds(240), 20L, shortWrite),
+        cacheMetadata("model", "v1", T0, 0L, Map.of(300L, 0L)),
+        cacheMetadata("model", "v1", T0, 20L, Map.of()),
+        cacheMetadata("model", "v1", T0, 20L, Map.of(300L, 10L, 3600L, 10L)));
+  }
 
-    assertNull(request.cacheControl().messageBreakpoint());
+  private static AssistantMessageMetadata legacyCacheMetadata() {
+    return new AssistantMessageMetadata(
+        GenerationStopReason.COMPLETE, new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, null));
+  }
+
+  private static AssistantMessageMetadata cacheMetadata(
+      String model, String variant, Instant requestedAt, long writes, Map<Long, Long> byTtl) {
+    return new AssistantMessageMetadata(
+        GenerationStopReason.COMPLETE,
+        new ModelUsage(1L, 2L, 0L, writes, byTtl, 0L, null),
+        null,
+        new ModelSelection(model, variant),
+        requestedAt,
+        null);
   }
 
   /** 切点前 assistant 所在的完整历史 + FORK + 分支 instruction。 */
-  private static List<Entry> branchPath(Instant instructionAt, String assistantModel) {
+  private static List<Entry> branchPath(Instant instructionAt, AssistantMessageMetadata metadata) {
     List<Entry> entries = new ArrayList<>();
     entries.add(entry(1, 0, new RootPayload(SETTINGS)));
     entries.add(entry(2, 1, resolvedStart(TurnStartReason.INPUT, null)));
@@ -769,15 +845,7 @@ class ModelRequestMaterializerTest {
             new MessagePayload(
                 new AgentMessage(
                     AgentMessageRole.ASSISTANT, List.of(new TextMessageContent("old answer"))),
-                new AssistantMessageMetadata(
-                    GenerationStopReason.COMPLETE,
-                    new ModelUsage(1L, 2L, 0L, 0L, Map.of(), 0L, 3L),
-                    null,
-                    new ModelSelection(assistantModel, "v1"),
-                    null,
-                    null,
-                    null,
-                    null),
+                metadata,
                 null),
             T0));
     entries.add(

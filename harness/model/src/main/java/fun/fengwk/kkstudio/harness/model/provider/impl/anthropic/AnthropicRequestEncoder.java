@@ -9,12 +9,14 @@ import tools.jackson.databind.node.ObjectNode;
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapabilities;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl.PrefixReuse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
 
+import java.time.Clock;
 import java.util.List;
 import java.util.Objects;
 
@@ -27,9 +29,8 @@ import java.util.Objects;
  * max_tokens}/{@code stream}/{@code messages}/{@code system}/{@code cache_control}） 冲突显式失败，{@code
  * tools} 保留 native 条目后追加 runtime 工具，其余官方顶层字段无损保留；cache marker 与请求体大小均基于最终合并结果。
  *
- * <p>{@code cacheControl} 只表达留存档位：{@code retention != NONE} 时在 tools/system/当前对话尾部写入原生 {@code
- * cache_control} ephemeral 标记，{@code LONG} 额外携带 {@code ttl:"1h"}；会话 {@code key} 不属于 Anthropic
- * 原生选项，因此不下发。
+ * <p>常规显式缓存标记 tools/system/当前对话尾部，{@code LONG} 带 {@code ttl:"1h"}。有效的前缀复用候选只标记其指定内容块； 端点 TTL
+ * 不匹配或候选已过期时继续使用常规模式。会话 key 不下发。
  *
  * <p>assistant replay 与 system/时间前缀无关，只与 replay state 的 affinity（Provider type/name/wire
  * model）绑定。affinity 不匹配时按 durable 语义回退投影，绝不因为存在 replay 而拒绝；affinity 匹配时先校验真实 payload 形状与 durable
@@ -50,13 +51,23 @@ public final class AnthropicRequestEncoder {
       List.of("model", "max_tokens", "stream", "messages", "system", "cache_control");
 
   private final RequestBodySizeGuard bodySizeGuard;
+  private final Clock clock;
 
   public AnthropicRequestEncoder() {
-    this(RequestBodySizeGuard.DEFAULT);
+    this(Clock.systemUTC());
+  }
+
+  public AnthropicRequestEncoder(Clock clock) {
+    this(RequestBodySizeGuard.DEFAULT, clock);
   }
 
   AnthropicRequestEncoder(RequestBodySizeGuard bodySizeGuard) {
+    this(bodySizeGuard, Clock.systemUTC());
+  }
+
+  private AnthropicRequestEncoder(RequestBodySizeGuard bodySizeGuard, Clock clock) {
     this.bodySizeGuard = Objects.requireNonNull(bodySizeGuard, "bodySizeGuard");
+    this.clock = Objects.requireNonNull(clock, "clock");
   }
 
   public AnthropicEncodedRequest encode(ProviderRequest request, ProviderDescriptor descriptor) {
@@ -84,27 +95,37 @@ public final class AnthropicRequestEncoder {
         AnthropicToolsEncoder.mergeTools(root, request.tools(), deferredToolLane);
     ArrayNode unmarkedSystemArray = encodeSystemInstruction(request.systemInstruction());
 
+    PrefixReuse prefixReuse = request.cacheControl().prefixReuse();
     AnthropicWireMessages.Result wire =
-        AnthropicWireMessages.encode(request.messages(), descriptor, request.model().modelId());
+        AnthropicWireMessages.encode(
+            request.messages(),
+            descriptor,
+            request.model().modelId(),
+            prefixReuse == null ? -1 : prefixReuse.messageIndex());
     ArrayNode wireMessagesArray = wire.messages();
 
     PromptCacheCapabilities cacheCapabilities =
         PromptCacheCapabilities.resolve(
             descriptor.type(), descriptor.endpoint(), request.model().modelId());
-    if (request.cacheControl().retention() == PromptCacheRetention.LONG
+    PromptCacheRetention retention = request.cacheControl().retention();
+    if (retention == PromptCacheRetention.LONG
         && !cacheCapabilities.supports(PromptCacheRetention.LONG)) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_REQUEST,
           "LONG prompt cache retention is not supported by this Anthropic endpoint/model");
     }
 
-    // 注入 cache marker
+    boolean reusePrefix =
+        prefixReuse != null
+            && Objects.equals(
+                cacheCapabilities.reliableWriteTtlSeconds(retention), prefixReuse.writeTtlSeconds())
+            && clock.instant().isBefore(prefixReuse.expiresAt());
     AnthropicCacheMarkers.apply(
-        request.cacheControl(),
-        wireMessagesArray,
+        retention,
         toolsArray,
         unmarkedSystemArray,
-        wire.cacheEndpoint(),
+        wire,
+        reusePrefix,
         deferredToolLane,
         cacheCapabilities.automaticCache());
     if (effort.messageLevelEffort()) {

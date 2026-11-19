@@ -25,11 +25,16 @@ final class AnthropicWireMessages {
   private AnthropicWireMessages() {}
 
   static Result encode(
-      List<ProviderMessage> messages, ProviderDescriptor descriptor, String requestedModel) {
+      List<ProviderMessage> messages,
+      ProviderDescriptor descriptor,
+      String requestedModel,
+      int prefixMessageIndex) {
     ArrayNode wireMessagesArray = NODES.arrayNode();
     List<String> messageEfforts = new ArrayList<>();
     ObjectNode lastEligible = null;
-    for (ProviderMessage msg : messages) {
+    ObjectNode prefixEndpoint = null;
+    for (int index = 0; index < messages.size(); index++) {
+      ProviderMessage msg = messages.get(index);
       if (msg.role() == ProviderMessageRole.ASSISTANT) {
         AnthropicEncodedAssistant assistant =
             AnthropicAssistantReplay.encodeMessage(msg, descriptor, requestedModel);
@@ -38,6 +43,7 @@ final class AnthropicWireMessages {
           wireMessagesArray.removeAll();
           messageEfforts.clear();
           lastEligible = null;
+          prefixEndpoint = null;
         }
         wireMessagesArray.add(assistant.node());
       } else if (msg.role() == ProviderMessageRole.USER) {
@@ -54,13 +60,20 @@ final class AnthropicWireMessages {
       ObjectNode messageEndpoint =
           AnthropicCacheMarkers.latestEligibleBlock(
               wireMessagesArray.get(wireMessagesArray.size() - 1).path("content"));
+      if (index == prefixMessageIndex) {
+        prefixEndpoint = messageEndpoint;
+      }
       if (messageEndpoint != null) {
         lastEligible = messageEndpoint;
       }
     }
-    return new Result(wireMessagesArray, messageEfforts, lastEligible);
+    return new Result(wireMessagesArray, messageEfforts, lastEligible, prefixEndpoint);
   }
 
-  /** 编码结果：wire messages、逐条消息的推理级别，以及当前对话尾部缓存端点。 */
-  record Result(ArrayNode messages, List<String> efforts, ObjectNode cacheEndpoint) {}
+  /** 缓存端点引用最终保留的内容块，不依赖 wire 消息下标。 */
+  record Result(
+      ArrayNode messages,
+      List<String> efforts,
+      ObjectNode cacheEndpoint,
+      ObjectNode prefixEndpoint) {}
 }

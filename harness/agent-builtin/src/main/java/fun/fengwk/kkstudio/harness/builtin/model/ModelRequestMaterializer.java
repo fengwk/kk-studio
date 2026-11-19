@@ -8,13 +8,14 @@ import fun.fengwk.kkstudio.harness.api.history.MessagePayload;
 import fun.fengwk.kkstudio.harness.api.history.SystemContext;
 import fun.fengwk.kkstudio.harness.api.history.SystemHostedTool;
 import fun.fengwk.kkstudio.harness.api.history.TurnStartPayload;
-import fun.fengwk.kkstudio.harness.api.session.AgentMessageRole;
+import fun.fengwk.kkstudio.harness.api.session.AssistantMessageMetadata;
 import fun.fengwk.kkstudio.harness.api.tool.ToolBinding;
 import fun.fengwk.kkstudio.harness.builtin.port.store.ModelRequestSpec;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
 import fun.fengwk.kkstudio.harness.model.ProviderProtocolOptions;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
+import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl.PrefixReuse;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessage;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderMessageRole;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
@@ -24,9 +25,10 @@ import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionChildSpawn;
 import fun.fengwk.kkstudio.harness.runtime.compaction.CompactionPrompts;
 import fun.fengwk.kkstudio.harness.tool.ToolDescriptor;
 
-import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -36,7 +38,7 @@ import java.util.Optional;
  * <p>不访问 catalog 或 Environment registry，也不持有事务。压缩执行不在本 materializer 内发生：COMPACTION 分支由 {@link
  * CompactionChildSpawn} 经统一 spawn 创建，首条输入是普通 CUSTOM_MESSAGE，父 COMPACTION turn 不创建
  * ModelInvocation。本类只把 durable 事实投影成请求：压缩后的主 Thread 以 摘要 wrapper 替代切点前历史，分支第一次请求在切点前最后一条 assistant
- * 之前写入唯一只读缓存断点。历史消息投影见 {@link ModelHistoryProjection}。
+ * 之前尝试复用已有缓存前缀。历史消息投影见 {@link ModelHistoryProjection}。
  *
  * <p>历史工具调用与结果按 durable Entry 投影，不根据当前工具绑定或 Environment 重新分类；没有存储结果的调用由历史正规化补齐 synthetic 结果。
  */
@@ -71,8 +73,9 @@ public final class ModelRequestMaterializer {
     String systemInstruction = systemInstruction(path, spec, context, incrementalSystem);
     List<ProviderToolDefinition> tools =
         baselineHasClientTools ? SystemContext.baselineTools(path.entries()) : effectiveTools;
-    List<ProviderMessage> messages =
-        new ModelHistoryProjection(spec, incrementalSystem, baselineHasClientTools).project(path);
+    ModelHistoryProjection projection =
+        new ModelHistoryProjection(spec, incrementalSystem, baselineHasClientTools);
+    List<ProviderMessage> messages = projection.project(path);
     return new ProviderRequest(
         spec.model(),
         requestVariant(path, spec, context, incrementalSystem, baselineHasClientTools),
@@ -80,7 +83,7 @@ public final class ModelRequestMaterializer {
         systemInstruction,
         messages,
         tools,
-        cacheControl(path, spec, messages),
+        cacheControl(path, spec, messages, projection.lastAssistantEntry()),
         baselineHasClientTools);
   }
 
@@ -123,42 +126,60 @@ public final class ModelRequestMaterializer {
         variant.protocolOptions().withToolDefinitions(toolDefinitions));
   }
 
-  /**
-   * 请求缓存控制：压缩分支第一次请求只读复用主 Thread 已写入的前缀，仅在切点前最后一条 assistant 之前的消息上放一个断点。
-   *
-   * <p>具体模型与产生该 assistant 的模型不同、或距该请求已超过留存 TTL 时退回常规会话缓存控制（不再额外写断点）。
-   */
   private static ProviderCacheControl cacheControl(
-      EntryPath path, ModelRequestSpec spec, List<ProviderMessage> messages) {
+      EntryPath path, ModelRequestSpec spec, List<ProviderMessage> messages, Entry lastAssistant) {
     String sessionId = path.root().sessionId().toString();
     PromptCacheRetention retention = spec.variant().promptCacheRetention();
-    Integer breakpoint = branchMessageBreakpoint(path, spec, messages);
-    return breakpoint == null
+    PrefixReuse reuse = branchPrefixReuse(path, spec, messages, lastAssistant);
+    return reuse == null
         ? ProviderCacheControl.session(retention, sessionId)
-        : ProviderCacheControl.readOnlyMessage(retention, sessionId, breakpoint);
+        : new ProviderCacheControl(retention, sessionId, reuse);
   }
 
-  private static Integer branchMessageBreakpoint(
-      EntryPath path, ModelRequestSpec spec, List<ProviderMessage> messages) {
-    if (!cacheReuseEligible(path, spec)) {
+  /** 只使用产生切点 assistant 的请求事实；实际端点的兼容性和发送时效由编码器检查。 */
+  private static PrefixReuse branchPrefixReuse(
+      EntryPath path, ModelRequestSpec spec, List<ProviderMessage> messages, Entry lastAssistant) {
+    if (spec.providerType() != ProviderType.ANTHROPIC
+        || spec.variant().promptCacheRetention() == PromptCacheRetention.NONE
+        || lastAssistant == null) {
       return null;
     }
-    Optional<Entry> openTurn = openTurnStart(path);
-    Optional<Entry> lastAssistant = lastAssistantEntry(path);
-    if (openTurn.isEmpty()
-        || lastAssistant.isEmpty()
-        || !sameModelAsLastAssistant(lastAssistant.get(), spec)
-        || cacheTtlExpired(lastAssistant.get(), openTurn.get(), spec)) {
+    Entry start = openTurnStart(path).orElse(null);
+    if (start == null
+        || path.entries().indexOf(lastAssistant) >= path.entries().indexOf(start)
+        || lastAssistant.createdAt().isAfter(start.createdAt())) {
       return null;
     }
+    AssistantMessageMetadata metadata =
+        ((MessagePayload) lastAssistant.payload()).assistantMetadata();
+    if (metadata.model() == null
+        || !spec.model().modelName().equals(metadata.model().modelName())
+        || !spec.variant().id().equals(metadata.model().variant())
+        || metadata.requestedAt() == null
+        || metadata.requestedAt().isAfter(lastAssistant.createdAt())
+        || metadata.usage().cacheWriteTokens() == 0) {
+      return null;
+    }
+    // ModelUsage guarantees that a reported breakdown sums to the total write count.
+    Long ttlSeconds = null;
+    for (Map.Entry<Long, Long> bucket : metadata.usage().cacheWriteByTtl().entrySet()) {
+      if (bucket.getValue() > 0) {
+        if (ttlSeconds != null) {
+          return null;
+        }
+        ttlSeconds = bucket.getKey();
+      }
+    }
+    Instant requestedAt = metadata.requestedAt();
+    if (ttlSeconds == null
+        || ttlSeconds > Instant.MAX.getEpochSecond() - requestedAt.getEpochSecond()) {
+      return null;
+    }
+    Instant expiresAt = requestedAt.plusSeconds(ttlSeconds);
     int lastAssistantMessage = lastAssistantMessageIndex(messages);
-    return lastAssistantMessage <= 0 ? null : lastAssistantMessage - 1;
-  }
-
-  private static boolean cacheReuseEligible(EntryPath path, ModelRequestSpec spec) {
-    return spec.providerType() == ProviderType.ANTHROPIC
-        && spec.variant().promptCacheRetention() != PromptCacheRetention.NONE
-        && openTurnStart(path).isPresent();
+    return lastAssistantMessage > 0 && start.createdAt().isBefore(expiresAt)
+        ? new PrefixReuse(lastAssistantMessage - 1, ttlSeconds, expiresAt)
+        : null;
   }
 
   private static Optional<Entry> openTurnStart(EntryPath path) {
@@ -167,33 +188,6 @@ public final class ModelRequestMaterializer {
             entry ->
                 entry.payload() instanceof TurnStartPayload start
                     && start.reason() == TurnStartReason.COMPACTION_BRANCH_INPUT);
-  }
-
-  private static Optional<Entry> lastAssistantEntry(EntryPath path) {
-    Entry lastAssistant = null;
-    for (Entry entry : path.entries()) {
-      if (entry.payload() instanceof MessagePayload message
-          && message.message().role() == AgentMessageRole.ASSISTANT) {
-        lastAssistant = entry;
-      }
-    }
-    return Optional.ofNullable(lastAssistant);
-  }
-
-  private static boolean sameModelAsLastAssistant(Entry entry, ModelRequestSpec spec) {
-    MessagePayload assistant = (MessagePayload) entry.payload();
-    return assistant.assistantMetadata() != null
-        && assistant.assistantMetadata().model() != null
-        && spec.model().modelName().equals(assistant.assistantMetadata().model().modelName());
-  }
-
-  private static boolean cacheTtlExpired(
-      Entry lastAssistant, Entry openTurn, ModelRequestSpec spec) {
-    Duration ttl =
-        spec.variant().promptCacheRetention() == PromptCacheRetention.LONG
-            ? Duration.ofHours(1)
-            : Duration.ofMinutes(5);
-    return Duration.between(lastAssistant.createdAt(), openTurn.createdAt()).compareTo(ttl) > 0;
   }
 
   private static int lastAssistantMessageIndex(List<ProviderMessage> messages) {

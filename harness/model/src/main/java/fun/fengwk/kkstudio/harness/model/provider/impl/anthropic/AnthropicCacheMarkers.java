@@ -6,7 +6,6 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
-import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 
 /**
  * 按 Anthropic 原生协议在固定边界写入 {@code cache_control} ephemeral 标记。
@@ -20,32 +19,27 @@ final class AnthropicCacheMarkers {
   private AnthropicCacheMarkers() {}
 
   static void apply(
-      ProviderCacheControl cacheControl,
-      ArrayNode messagesArray,
+      PromptCacheRetention retention,
       ArrayNode toolsArray,
       ArrayNode systemArray,
-      ObjectNode cacheEndpoint,
+      AnthropicWireMessages.Result wire,
+      boolean reusePrefix,
       boolean hasDeferredPlaceholder,
       boolean automaticCache) {
-    if (cacheControl.retention() == PromptCacheRetention.NONE || automaticCache) {
+    if (retention == PromptCacheRetention.NONE || automaticCache) {
       return;
     }
 
     ObjectNode marker = NODES.objectNode();
     marker.put("type", "ephemeral");
-    if (cacheControl.retention() == PromptCacheRetention.LONG) {
+    if (retention == PromptCacheRetention.LONG) {
       marker.put("ttl", "1h");
     }
 
-    // 只读模式：压缩分支复用主 Thread 已写入的前缀，只在指定消息上放一个断点，绝不写入 tools/system/尾部新缓存。
-    if (cacheControl.messageBreakpoint() != null) {
-      int index = cacheControl.messageBreakpoint();
-      if (index >= 0 && index < messagesArray.size()) {
-        ObjectNode endpoint =
-            latestEligibleBlock(((ObjectNode) messagesArray.get(index)).path("content"));
-        if (endpoint != null) {
-          endpoint.set("cache_control", marker);
-        }
+    // 仅尝试复用指定前缀；目标已移除或不能标记时，不改标其它位置。
+    if (reusePrefix) {
+      if (wire.prefixEndpoint() != null) {
+        wire.prefixEndpoint().set("cache_control", marker);
       }
       return;
     }
@@ -63,8 +57,8 @@ final class AnthropicCacheMarkers {
     }
 
     // CONVERSATION: 常规请求只标记当前尾部，不回填历史请求边界。
-    if (cacheEndpoint != null) {
-      cacheEndpoint.set("cache_control", marker);
+    if (wire.cacheEndpoint() != null) {
+      wire.cacheEndpoint().set("cache_control", marker);
     }
   }
 
