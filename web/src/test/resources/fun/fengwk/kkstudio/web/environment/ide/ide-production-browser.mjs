@@ -343,8 +343,9 @@ async function assertFirstEditorSurface(page, ...allowed) {
 
 async function assertCachedLightModern(page) {
   stage('configuration-theme-cache')
-  // Wait for default-profile theme data to reach disk, not just for the theme class to change.
-  await page.waitForFunction(async () => {
+  // Playwright's waitForFunction treats a returned Promise as truthy before it resolves.
+  // Await each IndexedDB read and poll its boolean result before reloading.
+  const hasPersistedTheme = () => page.evaluate(async () => {
     const stored = await new Promise((resolve, reject) => {
       const open = indexedDB.open('vscode-web-state-db-global')
       open.onerror = () => reject(open.error)
@@ -361,7 +362,12 @@ async function assertCachedLightModern(page) {
       }
     })
     return JSON.parse(stored ?? 'null')?.settingsId === 'Light Modern'
-  }, null, { timeout: WORKBENCH_TIMEOUT, polling: 200 })
+  })
+  const deadline = Date.now() + WORKBENCH_TIMEOUT
+  while (!(await hasPersistedTheme())) {
+    if (Date.now() >= deadline) throw namedError('ThemeCacheTimeout')
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
   stage('configuration-cached-first-surface')
   await page.reload({ waitUntil: 'domcontentloaded', timeout: WORKBENCH_TIMEOUT })
   await assertFirstEditorSurface(page, LIGHT_MODERN_BACKGROUND)
