@@ -1990,6 +1990,23 @@ func TestBoundCommandRejections(t *testing.T) {
 	}
 }
 
+// Verifies empty attachment content is still present in the fixed bridge operation frame.
+func TestOpenAttachmentBridgeEncoding(t *testing.T) {
+	encoded, err := json.Marshal(BridgeCommand{
+		Op: "openAttachment", AttachmentID: stringPointer("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), AttachmentText: stringPointer(""),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var frame map[string]any
+	if err := json.Unmarshal(encoded, &frame); err != nil {
+		t.Fatal(err)
+	}
+	if len(frame) != 3 || frame["op"] != "openAttachment" || frame["attachmentId"] != "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa" || frame["attachmentText"] != "" {
+		t.Fatalf("unexpected attachment frame: %s", encoded)
+	}
+}
+
 // Verifies attachment payload bounds and current view/daemon binding before the bridge receives text.
 func TestOpenAttachmentValidationAndBinding(t *testing.T) {
 	root := t.TempDir()

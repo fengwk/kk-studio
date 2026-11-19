@@ -45,8 +45,8 @@ type BridgeCommand struct {
 	Discard        bool             `json:"discard,omitempty"`
 	MaxBytes       int64            `json:"maxBytes,omitempty"`
 	Documents      []BridgeDocument `json:"documents,omitempty"`
-	AttachmentID   string           `json:"attachmentId,omitempty"`
-	AttachmentText string           `json:"attachmentText,omitempty"`
+	AttachmentID   *string          `json:"attachmentId,omitempty"`
+	AttachmentText *string          `json:"attachmentText,omitempty"`
 }
 
 // BridgeRequestOptions fences directory transitions and commands to the expected binding.

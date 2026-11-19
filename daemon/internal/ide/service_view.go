@@ -519,7 +519,7 @@ func (s *Service) openAttachment(ctx context.Context, command *protocol.IdeComma
 		return nil, NewError("view binding changed", "VIEW_GONE")
 	}
 	result, err := s.bridge.Request(ctx, viewID, BridgeCommand{
-		Op: "openAttachment", AttachmentID: command.GetAttachmentId(), AttachmentText: text,
+		Op: "openAttachment", AttachmentID: command.AttachmentId, AttachmentText: command.AttachmentText,
 	}, BridgeRequestOptions{ExpectedEpoch: view.bindingEpoch})
 	if err != nil {
 		return nil, err
