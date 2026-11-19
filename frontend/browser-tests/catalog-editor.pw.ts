@@ -27,6 +27,7 @@ async function visibleTouchTargets(dialog: Locator): Promise<TouchTarget[]> {
       'input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])',
       'textarea',
       'label.ui-checkbox',
+      '.pricing-factor-details > summary',
     ]
     return selectors.flatMap((selector) =>
       Array.from(card.querySelectorAll(selector))
@@ -58,17 +59,24 @@ function expectTouchTargets(targets: TouchTarget[]) {
   }
 }
 
-async function expectNoHorizontalOverflow(page: Page) {
+async function expectNoHorizontalOverflow(page: Page, body: Locator) {
   expect(await page.evaluate(() =>
     document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
+  expect(await body.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
 }
 
 test('keeps 44px touch targets, safe-area padding and a scrollable body on narrow catalog dialogs', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
+  await page.route('**/api/platform/models/capabilities?**', (route) => route.fulfill({ json: {
+    promptCacheOptions: [{ retention: 'NONE' }, { retention: 'SHORT' }],
+    defaultPromptCacheRetention: 'SHORT',
+    automaticCache: false,
+  } }))
   await page.goto('/browser-tests/catalog-editor-harness.html')
 
   const dialog = page.getByRole('dialog')
-  await expect(dialog).toBeVisible()
+  await expect(dialog.getByRole('button', { name: '提示缓存留存 1' })).toBeEnabled()
+  const body = dialog.locator('.modal-body')
 
   const backdropPadding = await page.locator('.modal-backdrop').evaluate((backdrop) => {
     const style = getComputedStyle(backdrop)
@@ -78,13 +86,17 @@ test('keeps 44px touch targets, safe-area padding and a scrollable body on narro
   expect(backdropPadding).toEqual(['12px', '12px', '12px', '12px'])
 
   expectTouchTargets(await visibleTouchTargets(dialog))
-  await expectNoHorizontalOverflow(page)
+  await expectNoHorizontalOverflow(page, body)
 
-  // 展开覆盖规则后，规则正文内的输入、删除与新增按钮同样不低于 44px。
-  await dialog.getByRole('button', { name: /override-1/ }).click()
-  const ruleBody = dialog.locator('.pricing-rule-body')
-  await expect(ruleBody).toBeVisible()
-  expectTouchTargets(await visibleTouchTargets(ruleBody))
+  // 展开服务档倍率，验证新定价表单中的输入、删除与新增控件均满足触区要求。
+  const tiers = dialog.locator('.pricing-plan-section').filter({ has: page.getByRole('heading', { name: '服务档', exact: true }) })
+  await tiers.getByText('所有费用项倍率: ×1', { exact: true }).click()
+  const tierFactor = tiers.getByRole('textbox', { name: '所有费用项倍率', exact: true })
+  await expect(tierFactor).toBeVisible()
+  expectTouchTargets(await visibleTouchTargets(tiers))
+  await expect(body).toHaveCSS('overflow-y', 'auto')
+  expect(await body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
+  await expect(dialog.getByRole('button', { name: '确认创建' })).toBeInViewport()
 
   // Select 的 portal 选项在弹窗内打开时也遵循同一触区。
   await dialog.getByRole('button', { name: 'Provider', exact: true }).click()
@@ -96,10 +108,12 @@ test('keeps 44px touch targets, safe-area padding and a scrollable body on narro
   await page.keyboard.press('Escape')
   await expect(page.getByRole('listbox')).toHaveCount(0)
 
+  await tierFactor.scrollIntoViewIfNeeded()
   await page.screenshot({ path: '../reports/layout/catalog-editor-390.png', fullPage: true })
 
   await page.setViewportSize({ width: 320, height: 700 })
+  await tierFactor.scrollIntoViewIfNeeded()
   expectTouchTargets(await visibleTouchTargets(dialog))
-  await expectNoHorizontalOverflow(page)
+  await expectNoHorizontalOverflow(page, body)
   await page.screenshot({ path: '../reports/layout/catalog-editor-320.png', fullPage: true })
 })

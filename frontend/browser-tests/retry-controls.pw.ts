@@ -60,19 +60,18 @@ test('provider and system settings retry controls render correct theme, borders,
     expect(settingsInputStyles.outlineWidth).toBe('0px')
     expect(settingsInputStyles.boxShadow).toBe('none')
 
-    // 2. Verify wrapper focus theme (accent border, focus-ring box shadow)
-    const accent = await tokenColor(page, '--accent')
-    const focusRing = await tokenColor(page, '--focus-ring')
-    await providerTagInputField.focus()
-    await expect(providerTagInput).toHaveCSS('border-top-color', accent)
-    // border 与 shadow 的过渡独立完成；等待最终焦点色，不在动画中途单次采样。
-    await expect.poll(() => providerTagInput.evaluate((el) => getComputedStyle(el).boxShadow))
-      .toContain(focusRing)
-
-    await settingsTagInputField.focus()
-    await expect(settingsTagInput).toHaveCSS('border-top-color', accent)
-    await expect.poll(() => settingsTagInput.evaluate((el) => getComputedStyle(el).boxShadow))
-      .toContain(focusRing)
+    // 2. Tab from the last tag into each field: the keyboard focus ring belongs to the wrapper.
+    const focusedBorder = await tokenColor(page, '--border-hover')
+    const focus = await tokenColor(page, '--focus')
+    for (const [wrapper, field] of [[providerTagInput, providerTagInputField], [settingsTagInput, settingsTagInputField]]) {
+      await wrapper.getByRole('button', { name: /^移除 / }).last().press('Tab')
+      await expect(field).toBeFocused()
+      await expect(wrapper).toHaveCSS('border-top-color', focusedBorder)
+      await expect(wrapper).toHaveCSS('outline-style', 'solid')
+      await expect(wrapper).toHaveCSS('outline-width', '2px')
+      await expect(wrapper).toHaveCSS('outline-color', focus)
+      await expect(field).toHaveCSS('outline-width', '0px')
+    }
 
     // 3. Verify tag Enter and X removal interactions in ProviderForm
     await providerTagInputField.fill('502')
