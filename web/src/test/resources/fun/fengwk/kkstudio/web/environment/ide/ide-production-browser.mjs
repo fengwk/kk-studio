@@ -8,6 +8,7 @@
 //    browserTempDirectory, entryUrl, viewId, bindingEpoch, scenario?, expectedTheme?}
 // later lines are {"continue":true} for synchronization; the refresh-preserves-dirty scenario
 // additionally accepts {"navigate":{"entryUrl":"..."}} after the IndexedDB backup is committed.
+// Default configuration waits for a continuation after Java writes the new Explorer file.
 //
 // Protocol (stdout): newline delimited JSON only:
 //   {"event":"stage","stage":"<safe fixed name>"}
@@ -20,11 +21,12 @@
 //   {"event":"websocket-duplex","sent":<n>,"received":<n>,"viewFrames":true}
 //   {"event":"file-saved"}
 //   {"event":"configuration-ready"}
+//   {"event":"explorer-ready-for-disk-write"}
 //   {"event":"done"}
 //   {"event":"failure","stage":"<safe fixed name>","detail":"<error class or HTTP code>"}
 
 import { watch } from 'node:fs'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile, readdir, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { basename, dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -33,6 +35,9 @@ const WORKBENCH_TIMEOUT = 60_000
 const TERMINAL_TIMEOUT = 30_000
 const EDITOR_TIMEOUT = 30_000
 const FILE_TIMEOUT = 30_000
+const DARK_MODERN_BACKGROUND = 'rgb(31, 31, 31)'
+const LIGHT_MODERN_BACKGROUND = 'rgb(255, 255, 255)'
+const SEARCH_INPUT = '.search-view .search-widget textarea[placeholder="Search"]'
 
 let currentStage = 'config'
 
@@ -308,6 +313,130 @@ async function openTerminalThroughUi(page) {
   return xterm
 }
 
+// Sample before paint, starting in the new document rather than after goto/extension activation.
+function observeFirstEditorSurface() {
+  const visible = (element) => element?.checkVisibility({ visibilityProperty: true, opacityProperty: true })
+    && element.getBoundingClientRect().width > 0 && element.getBoundingClientRect().height > 0
+  const sample = () => {
+    const splash = document.getElementById('monaco-parts-splash')
+    const splashEditor = splash?.querySelector('.part.editor')
+    const surface = visible(splashEditor) ? splashEditor : visible(splash) ? splash
+      : document.querySelector('.monaco-workbench .part.editor')
+    if (visible(surface)) {
+      window.__kkFirstEditorBackground = getComputedStyle(surface).backgroundColor
+    } else {
+      requestAnimationFrame(sample)
+    }
+  }
+  requestAnimationFrame(sample)
+}
+
+async function assertFirstEditorSurface(page, ...allowed) {
+  await page.waitForFunction(() => window.__kkFirstEditorBackground !== undefined, null, {
+    timeout: WORKBENCH_TIMEOUT,
+  })
+  const observed = await page.evaluate(() => window.__kkFirstEditorBackground)
+  if (!allowed.includes(observed)) {
+    throw namedError(`UnexpectedEditorBackground_${observed.replaceAll(/[^a-z0-9]+/gi, '_')}`)
+  }
+}
+
+async function assertCachedLightModern(page) {
+  stage('configuration-theme-cache')
+  // Wait for default-profile theme data to reach disk, not just for the theme class to change.
+  await page.waitForFunction(async () => {
+    const stored = await new Promise((resolve, reject) => {
+      const open = indexedDB.open('vscode-web-state-db-global')
+      open.onerror = () => reject(open.error)
+      open.onupgradeneeded = () => open.transaction.abort()
+      open.onsuccess = () => {
+        const db = open.result
+        try {
+          const read = db.transaction('ItemTable').objectStore('ItemTable').get('colorThemeData')
+          read.onsuccess = () => resolve(read.result)
+          read.onerror = () => reject(read.error)
+        } finally {
+          db.close()
+        }
+      }
+    })
+    return JSON.parse(stored ?? 'null')?.settingsId === 'Light Modern'
+  }, null, { timeout: WORKBENCH_TIMEOUT, polling: 200 })
+  stage('configuration-cached-first-surface')
+  await page.reload({ waitUntil: 'domcontentloaded', timeout: WORKBENCH_TIMEOUT })
+  await assertFirstEditorSurface(page, LIGHT_MODERN_BACKGROUND)
+}
+
+async function refreshExplorer(page, workspaceDirectory, phase, expectedRow) {
+  const observed = await page.evaluate(({ phase, searchInput }) => {
+    const focused = document.activeElement
+    const visible = (selector) => {
+      const element = document.querySelector(selector)
+      return element?.checkVisibility({ visibilityProperty: true }) && element.getClientRects().length > 0
+    }
+    const inExplorer = phase === 'visible'
+    const check = () => {
+      const activeTab = document.querySelector('.tab.active[aria-selected="true"]')
+      return document.activeElement === focused
+        && Boolean(visible('.explorer-folders-view')) === inExplorer
+        && Boolean(visible('.search-view')) !== inExplorer
+        && (inExplorer
+          ? focused?.closest('.part.editor .monaco-editor') && activeTab?.textContent.includes('editable.txt')
+          : focused?.matches(searchInput))
+    }
+    if (!check()) return false
+    let changed = false
+    const onBlur = () => { changed = true }
+    focused.addEventListener('blur', onBlur)
+    const observer = new MutationObserver(() => { changed ||= !check() })
+    observer.observe(document.querySelector('.monaco-workbench'), {
+      childList: true, subtree: true, attributes: true,
+    })
+    window.__kkFinishRefreshObservation = () => {
+      observer.disconnect()
+      focused.removeEventListener('blur', onBlur)
+      return !changed && Boolean(check())
+    }
+    return true
+  }, { phase, searchInput: SEARCH_INPUT })
+  if (!observed) throw namedError('ExplorerRefreshInitialViewOrFocusMismatch')
+
+  const request = join(workspaceDirectory, '.git', `kk-refresh-${phase}`)
+  await writeFile(request, '', { flag: 'wx' })
+  const outcome = await awaitFile(`${request}.result`, (text) => text === 'ok' || text === 'failed')
+  if (outcome !== 'ok') throw namedError('FixedExplorerCommandFailed')
+  if (expectedRow) await expectedRow.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+  // Keep observing through command completion and the next rendering opportunity.
+  const preserved = await page.evaluate(() => new Promise((resolve) => {
+    requestAnimationFrame(() => resolve(window.__kkFinishRefreshObservation()))
+  }))
+  if (!preserved) throw namedError('ExplorerRefreshChangedViewOrFocus')
+}
+
+async function acceptExplorerRefresh(page, config, lines) {
+  stage('configuration-explorer-editor')
+  const explorerRow = (name) => page.locator('.explorer-folders-view .monaco-list-row', { hasText: name })
+  const file = explorerRow('editable.txt')
+  await file.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
+  const editor = await openEditableEditor(page, file)
+  await editor.click()
+
+  stage('configuration-explorer-visible-refresh')
+  emit({ event: 'explorer-ready-for-disk-write' })
+  const diskWritten = await lines.next()
+  if (diskWritten.done || JSON.parse(diskWritten.value).continue !== true) throw namedError('ProtocolError')
+  const newFile = explorerRow('refresh-from-disk.txt')
+  if (await newFile.count()) throw namedError('ExplorerUpdatedBeforeFixedRefresh')
+  await refreshExplorer(page, config.workspaceDirectory, 'visible', newFile)
+
+  // The pinned Explorer view does not redraw while hidden. Prove no reveal/focus steal
+  // during the completed command, without opening Explorer to manufacture an observation.
+  stage('configuration-explorer-hidden-refresh')
+  await page.keyboard.press('Control+Shift+f')
+  await page.locator(SEARCH_INPUT).click({ timeout: WORKBENCH_TIMEOUT })
+  await refreshExplorer(page, config.workspaceDirectory, 'hidden')
+}
+
 async function run(config, lines) {
   stage('browser-launch')
   const requireModule = createRequire(config.playwrightModule)
@@ -338,6 +467,10 @@ async function run(config, lines) {
 
     const context = await browser.newContext({ viewport: { width: 1280, height: 720 } })
     const page = await context.newPage()
+    if (config.scenario === 'configuration') {
+      await page.emulateMedia({ colorScheme: 'light' })
+      await page.addInitScript(observeFirstEditorSurface)
+    }
     const workbenchSockets = watchWorkbenchWebSockets(context, page)
 
     // 1. First screen: load bootstrap URL and wait for workbench
@@ -351,8 +484,7 @@ async function run(config, lines) {
     const workbench = page.locator('.monaco-workbench').first()
     await workbench.waitFor({ state: 'visible', timeout: WORKBENCH_TIMEOUT })
 
-    // The configuration scenario only inspects the workbench-wide state; all other scenarios
-    // drive an editor and therefore need the workspace file in the explorer.
+    // Configuration and attachment scenarios handle their own Workbench readiness.
     let fileRow = null
     if (config.scenario !== 'configuration' && config.scenario !== 'attachment') {
       stage('workbench-explorer')
@@ -435,12 +567,25 @@ async function run(config, lines) {
         emit({ event: 'configuration-ready' })
       }
 
+      stage('configuration-cold-first-surface')
+      const explicitLight = config.expectedTheme === 'light_modern'
+      // On a fresh profile an explicit setting may only be applied after the initial fallback.
+      if (explicitLight) {
+        await assertFirstEditorSurface(page, DARK_MODERN_BACKGROUND, LIGHT_MODERN_BACKGROUND)
+      } else {
+        await assertFirstEditorSurface(page, DARK_MODERN_BACKGROUND)
+      }
       await awaitTheme(config.expectedTheme)
+      if (explicitLight) {
+        await assertCachedLightModern(page)
+        await awaitTheme(config.expectedTheme)
+      }
       await awaitProbe()
       const acknowledge = await lines.next()
       if (acknowledge.done || JSON.parse(acknowledge.value).continue !== true) {
         throw namedError('ProtocolError')
       }
+      if (!explicitLight) await acceptExplorerRefresh(page, config, lines)
       await browser.close()
       browser = null
       emit({ event: 'done' })
