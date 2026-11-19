@@ -192,8 +192,8 @@ class ConfigSyncYamlTest {
             "cacheWrite", "0",
             "cacheWriteByTtl", Map.of(),
             "reasoning", "0"));
-    pricing.put("overrides", List.of());
-    pricing.put("multipliers", List.of());
+    pricing.put("rules", List.of());
+    pricing.put("changes", List.of());
     config.put("pricing", pricing);
 
     ModelConfigDTO dto = yaml.convert(config, ModelConfigDTO.class, "model.config");

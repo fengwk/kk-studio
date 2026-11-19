@@ -1,9 +1,6 @@
 package fun.fengwk.kkstudio.platform.catalog.model;
 
-import tools.jackson.databind.JsonNode;
-
 import fun.fengwk.kkstudio.harness.model.ModelPricing;
-import fun.fengwk.kkstudio.harness.model.ModelPricingCondition;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -116,29 +113,6 @@ final class ModelPricingWireValues {
     } catch (IllegalArgumentException error) {
       throw invalid(path + " is invalid: " + error.getMessage(), error);
     }
-  }
-
-  /**
-   * 把 wire 的 {@code equals} 值转成 {@link ModelPricingCondition.RequestBody}；构造本身就是 path/equals
-   * 的完整边界校验。
-   *
-   * <p>数字保留指数文本交给领域构造函数检查 precision/scale，避免展开巨大指数后才失败。
-   */
-  static ModelPricingCondition.RequestBody toRequestBody(
-      String pathValue, JsonNode equals, String path) {
-    if (equals.isString()) {
-      return ModelPricingCondition.RequestBody.stringValue(pathValue, equals.stringValue());
-    }
-    if (equals.isNumber()) {
-      return ModelPricingCondition.RequestBody.numberValue(pathValue, equals.toString());
-    }
-    if (equals.isBoolean()) {
-      return ModelPricingCondition.RequestBody.booleanValue(pathValue, equals.booleanValue());
-    }
-    if (equals.isNull()) {
-      return ModelPricingCondition.RequestBody.nullValue(pathValue);
-    }
-    throw invalid(path + ".equals must be a JSON string, number, boolean or null");
   }
 
   record TimeBounds(LocalTime start, LocalTime end) {}

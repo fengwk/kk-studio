@@ -16,11 +16,7 @@ public final class ModelPricingResolver {
   private ModelPricingResolver() {}
 
   static ResolvedRates resolve(
-      ModelPricing pricing,
-      ModelUsage usage,
-      Instant requestedAt,
-      String serviceTier,
-      RequestBodyPricingSnapshot ignoredRequestBodyPricing) {
+      ModelPricing pricing, ModelUsage usage, Instant requestedAt, String serviceTier) {
     Objects.requireNonNull(pricing, "pricing");
     Objects.requireNonNull(usage, "usage");
 
@@ -175,8 +171,7 @@ public final class ModelPricingResolver {
             pricing,
             new ModelUsage(contextTokens, 0, 0, 0, Map.of(), null, null),
             requestedAt,
-            serviceTier,
-            null);
+            serviceTier);
     return new PricingPreview(rates, activeFrom, List.copyOf(matchedRules));
   }
 
