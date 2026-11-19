@@ -33,7 +33,7 @@
 
 `start` 先执行 stop 流程、检查端口占用、按需用 Maven 打包 Backend、按需安装前端依赖，等
 Backend API ready 后再启动 Vite；`restart` 等价于 `stop` 后再 `start`；`logs` 与 `tail` 接受可选
-目标 `backend`、`frontend`、`all`。Backend 产物是 `web/target/kk-studio-web-1.2.0.jar`，
+目标 `backend`、`frontend`、`all`。Backend 产物是 `web/target/kk-studio-web-1.2.1.jar`，
 log 与 PID 文件都在 `DEV_WORK_DIR` 下。
 
 可用环境变量：

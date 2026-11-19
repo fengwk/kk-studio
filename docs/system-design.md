@@ -4,8 +4,8 @@
 [`web`](../web/pom.xml) 装配的 Spring Boot 应用承担目录、持久执行与宿主集成，Environment Daemon 把指定主机的
 文件、命令与 LSP 能力接入 Agent，code-server 由 Daemon 托管。
 
-执行与恢复只依赖两类事实：PostgreSQL 保存业务事实与执行权，REST Snapshot 是权威读取；WebSocket 与数据库通知
-只提供低延迟提示。连接中断、通知丢失或进程退出后，Worker 从持久 Work 接管执行，浏览器回读 Snapshot 对账。
+PostgreSQL 保存业务事实与执行权。Thread 与执行树使用 WebSocket 推送权威快照，HTTP 用于首载、历史和缺口恢复；
+其它订阅可用事件提示浏览器回读权威 REST Snapshot。连接中断或通知丢失时按资源恢复，Worker 从持久 Work 接管中断的执行。
 
 harness 只提供执行引擎与能力契约，平台实现持久化与宿主适配，产品是自带数据、接口与页面的纵向切片。上层只通过
 开放接口或 SPI 使用下层能力，`web` 负责装配而不承载业务规则。
@@ -456,7 +456,7 @@ Daemon 自身的请求，`null` 表示明确直连。Daemon 不读环境变量�
   ──▶ TurnResolver（平台）解析 Agent、环境、技能、工具与 system prompt
   ──▶ Driver（Builtin 为 ModelProcessor）──▶ ModelGateway ──▶ Provider
   ──▶ 工具调用 ──▶ ToolGateway ──▶ ResourceReadGateway（resource:// URI）或环境能力（本地绝对路径、bash、LSP）
-  ──▶ 围栏写回 checkpoint 或终态 ──▶ REST Snapshot 读取
+  ──▶ 围栏写回 checkpoint 或终态 ──▶ Thread Snapshot 推送
 ```
 
 - 接受阶段校验 owner 与目标，物化附件，冻结本回合设置。Session 拥有 append-only Entry Tree，Thread 保存 head、
@@ -487,7 +487,7 @@ owner，checkpoint、终态与 reschedule 再次复验执行权。绑定环境�
 | 节点崩溃 | 租约到期重新认领；结果不确定的外部执行收敛为未确认事实，Thread 需显式放弃才离开运行态 |
 | 旧回调晚到 | token、attempt、version 与 wake version 围栏使写回成为 no-op |
 | 重复命令 | 幂等键与 cursor 返回已有结果或拒绝冲突 |
-| 浏览器断线或缓冲溢出 | 回读 REST Snapshot |
+| 浏览器断线或快照超限 | 重订阅追上 live 快照；有缺口或收到快照回读提示时重新读取权威事实 |
 | Daemon 连接中断 | 同实例重连按 journal 重放；在途远端工具由认领该 `TOOL` Work 的节点重新挂接，不重发 `INVOKE` |
 | Blob 清理中断 | 持久 cleanup 状态与 token 支持后台继续 |
 
@@ -505,9 +505,10 @@ owner，checkpoint、终态与 reschedule 再次复验执行权。绑定环境�
 subscribe -> 注册资源 -> 读取 durable cursor -> subscribed(cursor) -> events
 ```
 
-- 资源分四类：Thread 同时有 durable version 与 realtime 真负载；Canvas 有 revision；Projects、Interactions 与
-  Environments 只有失效提示；执行树按根线程订阅失效。
-- 事件 gap、畸形 payload、通知降级与缓冲溢出触发 Snapshot 回读；终态一律从数据库读取。
+- Thread 按 Entry 游标推送快照，辅以有损 realtime 增量；执行树按根 Thread 推送完整快照。Canvas 的 revision 与
+  Projects、Interactions、Environments 的变更事件提示浏览器回读。
+- Thread 和执行树的单帧快照放不下时，服务端只对该资源发送回读提示。能定位资源的坏载荷也仅影响该资源；
+  无法解析的连接级帧仍会终止连接。终态始终来自数据库事实，不从有损增量推断。
 - 通知的生产方拥有 channel 与 payload 协议：Harness 的 thread version、执行树、交互，Canvas 的 revision，
   Project 的变更与环境变更。`VersionNotificationHub` 承担按 key 注册与以权威 version 作 ack cursor 的通用语义，
   `NotificationInvalidationHub` 只做定点失效；组合根持有 LISTEN 循环（durable 通知与 realtime 各一条）并按绑定投递与 resync。
