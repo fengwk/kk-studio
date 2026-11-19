@@ -41,7 +41,7 @@ import java.util.Objects;
 class PostgresqlSchemaSeedTest extends PostgresSchemaSupport {
 
   private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder().build();
-  private static final String VERSIONED_MIGRATIONS = "1,2";
+  private static final String VERSIONED_MIGRATIONS = "1,2,3";
 
   @BeforeEach
   void setup() throws Exception {
