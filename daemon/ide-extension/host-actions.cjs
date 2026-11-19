@@ -228,6 +228,61 @@ function createHostActions(host) {
     await reply(message.id, { ok: true })
   }
 
+  const attachmentDocuments = new Map()
+  const attachmentProvider = {
+    provideTextDocumentContent(uri) {
+      return attachmentDocuments.get(uri.toString())
+    },
+  }
+  const attachmentProviderRegistration = vscode.workspace.registerTextDocumentContentProvider(
+    'kk-studio-attachment', attachmentProvider,
+  )
+  const releaseAttachment = (uri) => {
+    if (uri && uri.scheme === 'kk-studio-attachment') {
+      attachmentDocuments.delete(uri.toString())
+    }
+  }
+  const attachmentCloseSubscription = vscode.workspace.onDidCloseTextDocument((document) => releaseAttachment(document.uri))
+
+  const openAttachment = async (message) => {
+    const id = message.attachmentId
+    if (typeof id !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id) ||
+      typeof message.attachmentText !== 'string' || Buffer.byteLength(message.attachmentText, 'utf8') > 64 * 1024 ||
+      message.attachmentText.indexOf('\0') !== -1 || attachmentDocuments.size >= 32) {
+      await reply(message.id, { ok: false, code: 'UNAVAILABLE', message: 'attachment could not be opened' })
+      return
+    }
+    const uri = vscode.Uri.parse(`kk-studio-attachment:/attachment-${id}.txt`)
+    const key = uri.toString()
+    if (attachmentDocuments.has(key)) {
+      await reply(message.id, { ok: false, code: 'UNAVAILABLE', message: 'attachment could not be opened' })
+      return
+    }
+    attachmentDocuments.set(key, message.attachmentText)
+    try {
+      const document = await vscode.workspace.openTextDocument(uri)
+      if (isInactive()) {
+        releaseAttachment(uri)
+        return
+      }
+      await vscode.window.showTextDocument(document, { preview: false })
+      if (isInactive()) {
+        releaseAttachment(uri)
+        return
+      }
+      await reply(message.id, { ok: true })
+    } catch {
+      releaseAttachment(uri)
+      await reply(message.id, { ok: false, code: 'UNAVAILABLE', message: 'attachment could not be opened' })
+    }
+  }
+
+  const disposeAttachments = () => {
+    attachmentCloseSubscription.dispose()
+    attachmentProviderRegistration.dispose()
+    attachmentDocuments.clear()
+  }
+
   const collapseMobile = async (message) => {
     await vscode.commands.executeCommand('workbench.action.closeSidebar')
     await vscode.commands.executeCommand('workbench.action.closePanel')
@@ -266,6 +321,7 @@ function createHostActions(host) {
     refreshExplorer,
     changeDirectory,
     focusTerminal,
+    openAttachment,
     inspect: inspectView,
     closeView,
     collapseMobile,
@@ -282,7 +338,7 @@ function createHostActions(host) {
     await handler(message)
   }
 
-  return { execute, disposeTerminals }
+  return { execute, disposeTerminals, disposeAttachments }
 }
 
 module.exports = { createHostActions }

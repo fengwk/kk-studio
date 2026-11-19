@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
@@ -485,6 +486,53 @@ func (s *Service) reconcileDirectoryChange(viewID string, epoch int64, operation
 	}
 }
 
+const maxAttachmentTextBytes = 64 * 1024
+
+func (s *Service) openAttachment(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
+	if command.AttachmentId == nil || !validUUID(command.GetAttachmentId()) {
+		return nil, NewError("attachmentId must be a canonical lowercase UUID", "UNAVAILABLE")
+	}
+	if command.AttachmentText == nil {
+		return nil, NewError("attachmentText is required", "UNAVAILABLE")
+	}
+	text := command.GetAttachmentText()
+	if len(text) > maxAttachmentTextBytes || !utf8.ValidString(text) || strings.IndexByte(text, 0) >= 0 {
+		return nil, NewError("attachment text is not previewable", "UNAVAILABLE")
+	}
+	viewID, err := s.requiredViewCommand(command, true)
+	if err != nil {
+		return nil, err
+	}
+	lock := s.keyedLock(s.viewLocks, viewID)
+	lock.Lock()
+	defer lock.Unlock()
+	view, err := s.requireBound(command, true)
+	if err != nil {
+		return nil, err
+	}
+	if !s.bridge.IsConnected(viewID, view.bindingEpoch) {
+		if err := s.bridge.WaitForConnection(ctx, viewID); err != nil {
+			return nil, err
+		}
+	}
+	if !s.isCurrentOpen(view) {
+		return nil, NewError("view binding changed", "VIEW_GONE")
+	}
+	result, err := s.bridge.Request(ctx, viewID, BridgeCommand{
+		Op: "openAttachment", AttachmentID: command.AttachmentId, AttachmentText: command.AttachmentText,
+	}, BridgeRequestOptions{ExpectedEpoch: view.bindingEpoch})
+	if err != nil {
+		return nil, err
+	}
+	if !result.OK {
+		return nil, NewError(result.MessageOr("attachment could not be opened"), result.Code)
+	}
+	if !s.isCurrentOpen(view) {
+		return nil, NewError("view binding changed", "VIEW_GONE")
+	}
+	return viewAck(viewID), nil
+}
+
 func (s *Service) focusTerminal(ctx context.Context, command *protocol.IdeCommand) (*protocol.IdeResult, error) {
 	if s.tracker == nil {
 		return nil, NewError("terminal supervision is unavailable", "UNAVAILABLE")
@@ -862,12 +910,6 @@ func (s *Service) ApplyLease(lease *protocol.IdeLease, roundStartedAt time.Time)
 		view.lastProofAt, view.hasProof = roundStartedAt, true
 		s.scheduleExpiryLocked(view, time.Time{})
 	}
-}
-
-func (s *Service) scheduleExpiry(view *viewRecord, notBefore time.Time) {
-	s.mu.Lock()
-	s.scheduleExpiryLocked(view, notBefore)
-	s.mu.Unlock()
 }
 
 func (s *Service) scheduleExpiryLocked(view *viewRecord, notBefore time.Time) {

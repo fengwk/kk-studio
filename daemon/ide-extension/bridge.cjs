@@ -189,6 +189,7 @@ function createBridgeHost(vscode, options) {
     clearReconnectTimer()
     destroyStreamRequest()
     destroyPendingPosts()
+    actions.disposeAttachments()
   }
 
   const actions = createHostActions({
@@ -326,6 +327,7 @@ function createBridgeHost(vscode, options) {
       folderSubscription.dispose()
       openSubscription.dispose()
       closeSubscription.dispose()
+      actions.disposeAttachments()
       for (const watcher of fileWatchers.values()) {
         watcher.dispose()
       }
