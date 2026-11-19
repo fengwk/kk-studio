@@ -56,4 +56,41 @@ describe('useResourceSync', () => {
     expect(onError).toHaveBeenCalledWith('TREE_SNAPSHOT_FAILED', 'snapshot failed')
     view.unmount()
   })
+
+  it('forwards snapshot-ref to the caller hook', async () => {
+    const sync = vi.fn()
+    const onSnapshotRef = vi.fn()
+    const sockets = new FakeWebSocketHarness()
+    const view = render(
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
+        <ResourceSyncHarness options={{ sync, syncOnSubscribed: false, onSnapshotRef }} />
+      </ApplicationEventProvider>,
+    )
+    const socket = sockets.openLatest()
+    await waitFor(() => expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: TREE }]))
+
+    // 完整消息原样转发（执行树不带 version）。
+    act(() => socket.emitServer({ type: 'snapshot-ref', resource: TREE }))
+    expect(onSnapshotRef).toHaveBeenCalledWith({ type: 'snapshot-ref', resource: TREE })
+    expect(sync).not.toHaveBeenCalled()
+
+    view.unmount()
+  })
+
+  it('falls back to an authoritative sync when the caller has no snapshot-ref handler', async () => {
+    const sync = vi.fn()
+    const sockets = new FakeWebSocketHarness()
+    const view = render(
+      <ApplicationEventProvider url="ws://test/ws/events" socketFactory={sockets.factory}>
+        <ResourceSyncHarness options={{ sync, syncOnSubscribed: false }} />
+      </ApplicationEventProvider>,
+    )
+    const socket = sockets.openLatest()
+    await waitFor(() => expect(socket.sentMessages()).toEqual([{ type: 'subscribe', resource: TREE }]))
+
+    act(() => socket.emitServer({ type: 'snapshot-ref', resource: TREE }))
+    expect(sync).toHaveBeenCalledTimes(1)
+
+    view.unmount()
+  })
 })

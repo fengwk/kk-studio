@@ -43,12 +43,15 @@ import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
+import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
 
 import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -62,6 +65,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
@@ -692,30 +696,146 @@ class ApplicationEventWebSocketHandlerTest {
     assertEquals(List.of(List.of(BASE), Collections.singletonList(null)), cursorsSeen);
   }
 
+  /**
+   * 测试意图：首帧权威快照超出单帧预算时不拖垮连接，只对该资源发带真实 version 的 {@code snapshot-ref}；同一 socket 上随后可发送的变小快照照常作为普通
+   * {@code event} 投递，订阅与连接均未暂停。
+   */
   @Test
-  void oversizedSnapshotResyncsOnceAndPausesAllThreadFramesUntilRefresh() throws Exception {
+  void oversizedThreadSnapshotSendsSnapshotRefThenHealthySnapshotOnSameConnection()
+      throws Exception {
     hub.close();
-    snapshotScheduler = Executors.newSingleThreadScheduledExecutor();
     AtomicReference<Consumer<HarnessInvalidationChanges.Event>> invalidation =
-        new AtomicReference<>();
-    when(threadSnapshotSource.subscribe(any(), any()))
-        .thenAnswer(
-            invocation -> {
-              invalidation.set(invocation.getArgument(1));
-              return subscribed(0L, () -> {});
-            });
-    AtomicReference<Consumer<RealtimeEvent>> realtimeConsumer = new AtomicReference<>();
-    when(realtimeSource.subscribe(any(), any(), any()))
-        .thenAnswer(
-            invocation -> {
-              realtimeConsumer.set(invocation.getArgument(1));
-              return (AutoCloseable) () -> {};
-            });
+        captureThreadInvalidation();
+    HarnessThreadSnapshotDTO oversizedSnapshot = versionedSnapshot(7L, "large-".repeat(300));
+    HarnessThreadSnapshotDTO healthySnapshot = versionedSnapshot(8L, "small");
+    AtomicReference<HarnessThreadSnapshotDTO> current = new AtomicReference<>(oversizedSnapshot);
     ThreadSnapshotPublisher publisher =
         new ThreadSnapshotPublisher(
             Runnable::run,
-            (threadId, cursors) -> Collections.nCopies(cursors.size(), largeSnapshot()),
+            (threadId, cursors) -> cursors.stream().map(cursor -> current.get()).toList(),
             snapshotScheduler);
+    hub = threadHub(publisher);
+    // 预算由真实帧体积推导：装得下健康快照与 ref，但装不下那份超限快照。
+    long maxBytes = snapshotRefBudget(healthySnapshot);
+    assertTrue(
+        frameBytes(new Signal.ThreadSnapshot(oversizedSnapshot), THREAD_KEY) > maxBytes,
+        "the oversized fixture must really exceed the derived single-frame budget");
+    rebuildHandler(DEFAULT_SENDER_CAPACITY, maxBytes);
+    handler.afterConnectionEstablished(springSession);
+    handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
+
+    assertEquals(1, recorder.sent.size(), "the oversized catch-up waits behind the subscribed ACK");
+    recorder.complete(0);
+    assertEquals(2, recorder.sent.size());
+    JsonNode ref = JsonMapper.builder().build().readTree(recorder.sent.get(1));
+    assertEquals("snapshot-ref", ref.path("type").asText());
+    assertEquals("thread", ref.path("resource").path("kind").asText());
+    assertEquals(THREAD.toString(), ref.path("resource").path("id").asText());
+    // version 是顶层字段（与 resource 同级）且取真实 DTO value，不是合成 cursor。
+    assertEquals("7", ref.path("version").asText());
+    assertTrue(ref.path("version").isString());
+    assertFalse(ref.has("name"));
+    assertFalse(ref.has("data"));
+
+    // 快照变小后同一 socket 继续收到普通快照，不需要 refresh 或重连。
+    recorder.complete(1);
+    current.set(healthySnapshot);
+    invalidation.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
+    assertEquals(3, recorder.sent.size());
+    JsonNode healthy = JsonMapper.builder().build().readTree(recorder.sent.get(2));
+    assertEquals("event", healthy.path("type").asText());
+    assertEquals("snapshot", healthy.path("name").asText());
+    assertEquals("8", healthy.path("data").path("version").asText());
+    recorder.complete(2);
+
+    // 正常快照交付后溢出簿记已清除：即使同一 version 再溢出也必须重新提示。
+    current.set(oversizedSnapshot);
+    invalidation.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
+    assertEquals(4, recorder.sent.size(), "a normal snapshot must clear the overflow dedup state");
+    JsonNode repeatedRef = JsonMapper.builder().build().readTree(recorder.sent.get(3));
+    assertEquals("snapshot-ref", repeatedRef.path("type").asText());
+    assertEquals("7", repeatedRef.path("version").asText());
+    verify((Session) ((NativeWebSocketSession) springSession).getNativeSession(), never())
+        .close(any(int.class), any(String.class), any(Callback.class));
+  }
+
+  /**
+   * 测试意图：同一订阅内重复的相同溢出 version 只提示一次（不制造 HTTP 回读循环），更大 version 允许再次提示， 退订清除去重状态；正常快照也清除去重（refresh
+   * 不清除，契约只含这两种）。
+   */
+  @Test
+  void oversizedThreadSnapshotRefDeduplicatesPerVersionAndClearsOnUnsubscribe() throws Exception {
+    hub.close();
+    AtomicReference<Consumer<HarnessInvalidationChanges.Event>> invalidation =
+        captureThreadInvalidation();
+    AtomicLong version = new AtomicLong(7L);
+    ThreadSnapshotPublisher publisher =
+        new ThreadSnapshotPublisher(
+            Runnable::run,
+            (threadId, cursors) ->
+                cursors.stream()
+                    .map(cursor -> versionedSnapshot(version.get(), "large-".repeat(300)))
+                    .toList(),
+            snapshotScheduler);
+    hub = threadHub(publisher);
+    rebuildHandler(DEFAULT_SENDER_CAPACITY, snapshotRefBudget(versionedSnapshot(7L, "small")));
+    handler.afterConnectionEstablished(springSession);
+    handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
+    recorder.complete(0);
+    assertEquals(2, recorder.sent.size());
+
+    // 相同 version 的再次溢出：不再重复提示。
+    invalidation.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
+    assertEquals(2, recorder.sent.size(), "the same overflowed version must not repeat a ref");
+
+    // 更大 version 可以再次提示。
+    version.set(9L);
+    invalidation.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
+    recorder.complete(1);
+    assertEquals(3, recorder.sent.size());
+    assertEquals(
+        "9", JsonMapper.builder().build().readTree(recorder.sent.get(2)).path("version").asText());
+    recorder.complete(2);
+
+    // 退订后重新订阅同一 version：去重状态已清除，因此可以重新提示。
+    handler.handleTextMessage(springSession, textMessage(unsubscribeFrame(THREAD)));
+    handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
+    assertEquals(4, recorder.sent.size(), "resubscribe acks before the ref");
+    recorder.complete(3);
+    assertEquals(5, recorder.sent.size());
+    assertEquals(
+        "9", JsonMapper.builder().build().readTree(recorder.sent.get(4)).path("version").asText());
+    recorder.complete(4);
+
+    // 显式 refresh 不在去重契约内：同一 version 仍不重复提示。
+    handler.handleTextMessage(
+        springSession,
+        textMessage(
+            "{\"type\":\"refresh\",\"resource\":{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}}"));
+    assertEquals(5, recorder.sent.size(), "refresh must not clear the overflow dedup state");
+  }
+
+  /**
+   * 测试意图：执行树单帧超限不再按发送积压关闭整个 socket，而是发不带 version 的 {@code snapshot-ref}；同一 socket 上后续变化的较小树照常作为普通
+   * {@code event} 投递。
+   */
+  @Test
+  void oversizedThreadTreeSnapshotSendsRefWithoutVersionAndKeepsConnection() throws Exception {
+    HarnessInvalidationChanges executionTree = mock(HarnessInvalidationChanges.class);
+    AtomicReference<Consumer<HarnessInvalidationChanges.Event>> treeChange =
+        new AtomicReference<>();
+    when(harnessChanges.executionTree()).thenReturn(executionTree);
+    when(executionTree.subscribe(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              treeChange.set(invocation.getArgument(1));
+              return subscribed(0L, () -> {});
+            });
+    AtomicBoolean oversized = new AtomicBoolean(true);
+    ThreadTreeSnapshotPublisher publisher =
+        new ThreadTreeSnapshotPublisher(
+            Runnable::run,
+            ignored -> List.of(oversized.get() ? largeTreeNode("large") : smallTreeNode("small")));
     hub =
         new ApplicationEventHub(
             harnessChanges,
@@ -725,25 +845,35 @@ class ApplicationEventWebSocketHandlerTest {
             projectChangeSource,
             environmentChangeSource,
             () -> DEFAULT_SENDER_CAPACITY,
-            null,
             publisher);
-    rebuildHandler(DEFAULT_SENDER_CAPACITY, 512);
+    rebuildHandler(DEFAULT_SENDER_CAPACITY, treeSnapshotRefBudget());
     handler.afterConnectionEstablished(springSession);
-    handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
+    handler.handleTextMessage(
+        springSession,
+        textMessage(
+            "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+                + THREAD
+                + "\"}}"));
 
-    assertEquals(1, recorder.sent.size(), "the oversized catch-up waits behind the subscribed ACK");
     recorder.complete(0);
     assertEquals(2, recorder.sent.size());
-    assertEquals(
-        "resync",
-        JsonMapper.builder().build().readTree(recorder.sent.get(1)).path("type").asText());
+    JsonNode ref = JsonMapper.builder().build().readTree(recorder.sent.get(1));
+    assertEquals("snapshot-ref", ref.path("type").asText());
+    assertEquals("thread-tree", ref.path("resource").path("kind").asText());
+    assertEquals(THREAD.toString(), ref.path("resource").path("id").asText());
+    assertFalse(ref.has("version"), "thread-tree snapshot-ref must not carry a version");
+    assertFalse(ref.has("data"));
 
-    realtimeConsumer.get().accept(modelDelta(1L));
-    invalidation.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
-    assertEquals(
-        2,
-        recorder.sent.size(),
-        "paused Thread subscriptions suppress realtime and further snapshots");
+    oversized.set(false);
+    recorder.complete(1);
+    treeChange.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
+    assertEquals(3, recorder.sent.size());
+    JsonNode healthy = JsonMapper.builder().build().readTree(recorder.sent.get(2));
+    assertEquals("event", healthy.path("type").asText());
+    assertEquals("snapshot", healthy.path("name").asText());
+    assertEquals("small", healthy.path("data").path("nodes").get(0).path("name").asText());
+    verify((Session) ((NativeWebSocketSession) springSession).getNativeSession(), never())
+        .close(any(int.class), any(String.class), any(Callback.class));
   }
 
   @Test
@@ -966,16 +1096,93 @@ class ApplicationEventWebSocketHandlerTest {
         + "\"}}";
   }
 
-  private static HarnessThreadSnapshotDTO largeSnapshot() {
+  /** 捕获 Thread 快照失效订阅的本地回调，供用例主动驱动重新投影。 */
+  private AtomicReference<Consumer<HarnessInvalidationChanges.Event>> captureThreadInvalidation() {
+    snapshotScheduler = Executors.newSingleThreadScheduledExecutor();
+    AtomicReference<Consumer<HarnessInvalidationChanges.Event>> invalidation =
+        new AtomicReference<>();
+    when(threadSnapshotSource.subscribe(any(), any()))
+        .thenAnswer(
+            invocation -> {
+              invalidation.set(invocation.getArgument(1));
+              return subscribed(0L, () -> {});
+            });
+    return invalidation;
+  }
+
+  /** 用给定 Thread 快照发布器重建 hub（快照使用 Runnable::run 同步投影，便于断言帧顺序）。 */
+  private ApplicationEventHub threadHub(ThreadSnapshotPublisher publisher) {
+    return new ApplicationEventHub(
+        harnessChanges,
+        realtimeSource,
+        realtimeSubscriptions,
+        canvasVersionSource,
+        projectChangeSource,
+        environmentChangeSource,
+        () -> DEFAULT_SENDER_CAPACITY,
+        null,
+        publisher);
+  }
+
+  /** 最小可发送的 Thread 快照；名称决定单帧体积。 */
+  private static HarnessThreadSnapshotDTO snapshotWithName(String name) {
     HarnessThreadDTO thread = new HarnessThreadDTO();
     thread.setThreadId(THREAD.toString());
     thread.setHeadEntryId("00000000-0000-0000-0000-000000000007");
-    thread.setName("large-".repeat(300));
+    thread.setName(name);
     HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
     snapshot.setThread(thread);
     snapshot.setEntries(List.of());
     snapshot.setToolInvocations(List.of());
     return snapshot;
+  }
+
+  /** 带真实 DTO version 的最小 Thread 快照。 */
+  private static HarnessThreadSnapshotDTO versionedSnapshot(long version, String name) {
+    HarnessThreadSnapshotDTO snapshot = snapshotWithName(name);
+    snapshot.setVersion(version);
+    return snapshot;
+  }
+
+  /** 写入帧的真实 UTF-8 字节数：测试据此选择单帧预算，不硬编码期望体积。 */
+  private static int frameBytes(Signal signal, ResourceKey resource) {
+    return testCodec().event(resource, signal).getBytes(StandardCharsets.UTF_8).length;
+  }
+
+  /**
+   * 用真实帧体积推导“能装下健康快照 + snapshot-ref、但装不下超限快照”的单帧预算。
+   *
+   * <p>保证两个不重叠区间：健康快照不超过预算，超限快照严格超过预算，因此用例不依赖硬编码字节数。
+   */
+  private static long snapshotRefBudget(HarnessThreadSnapshotDTO healthy) {
+    // ref 帧远小于任何快照；加上余量仍严格小于被测超限快照的体积。
+    return frameBytes(new Signal.ThreadSnapshot(healthy), THREAD_KEY) + 64L;
+  }
+
+  private static long treeSnapshotRefBudget() {
+    return frameBytes(
+            new Signal.ThreadTreeSnapshot(List.of(smallTreeNode("small"))), THREAD_TREE_KEY)
+        + 64L;
+  }
+
+  private static EventFrameCodec testCodec() {
+    return new EventFrameCodec(new RealtimeEventJsonCodec(), JsonMapper.builder().build());
+  }
+
+  private static HarnessThreadTreeNodeDTO largeTreeNode(String name) {
+    return treeNode(name + "-" + "large-".repeat(300));
+  }
+
+  private static HarnessThreadTreeNodeDTO smallTreeNode(String name) {
+    return treeNode(name);
+  }
+
+  private static HarnessThreadTreeNodeDTO treeNode(String name) {
+    HarnessThreadTreeNodeDTO node = new HarnessThreadTreeNodeDTO();
+    node.setThreadId(THREAD.toString());
+    node.setName(name);
+    node.setUpdatedAt(Instant.parse("2026-08-05T00:00:00Z"));
+    return node;
   }
 
   private static RealtimeEvent modelDelta(long sequence) {

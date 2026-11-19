@@ -400,6 +400,36 @@ class EventFrameCodecTest {
         () -> CODEC.event(INTERACTIONS_KEY, new Signal.ThreadTreeChanged()));
   }
 
+  /**
+   * 测试意图：单帧超限的 Thread 快照按其真实 DTO version 编为顶层 {@code version}（与 {@code resource} 同级、canonical
+   * 十进制字符串），执行树不带 version；两者都不带 name/data，也不允许其他资源或缺少权威 version。
+   */
+  @Test
+  void encodesSnapshotRefWithTopLevelVersionOnlyForThreads() {
+    assertEquals(
+        "{\"type\":\"snapshot-ref\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            + THREAD
+            + "\"},\"version\":\"9223372036854775807\"}",
+        CODEC.snapshotRef(THREAD_KEY, Long.MAX_VALUE));
+    assertEquals(
+        "{\"type\":\"snapshot-ref\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            + THREAD
+            + "\"},\"version\":\"0\"}",
+        CODEC.snapshotRef(THREAD_KEY, 0L));
+    assertEquals(
+        "{\"type\":\"snapshot-ref\",\"resource\":{\"kind\":\"thread-tree\",\"id\":\""
+            + THREAD
+            + "\"}}",
+        CODEC.snapshotRef(THREAD_TREE_KEY, null));
+
+    // 缺少权威 version 或类型不符都不允许回退到合成值。
+    assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(THREAD_KEY, null));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(THREAD_KEY, -1L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(THREAD_TREE_KEY, 1L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(CANVAS_KEY, 1L));
+    assertThrows(IllegalArgumentException.class, () -> CODEC.snapshotRef(PROJECTS_KEY, null));
+  }
+
   @Test
   void encodesResyncHeartbeatAndErrorFrames() {
     assertEquals(

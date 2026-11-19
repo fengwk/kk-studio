@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { QueryClient } from '@tanstack/react-query'
 import { useQueryClient } from '@tanstack/react-query'
-import { useApplicationEvents } from '@/shared/app-events'
+import { useApplicationEventConnectionState, useApplicationEvents } from '@/shared/app-events'
 import type { ApplicationEventManager } from '@/shared/app-events/manager'
 import type { HarnessThreadSnapshotDTO } from '@/shared/api/generated/contracts'
 import { harnessService } from '@/shared/api/harness-service'
 import { queryKeys } from '@/shared/lib/query-keys'
-import { isThreadSnapshot } from '@/shared/app-events/protocol'
+import { INVALID_EVENT_PAYLOAD, isThreadSnapshot } from '@/shared/app-events/protocol'
+import { compareCatalogVersions } from '@/shared/lib/catalog-version'
 import {
   advanceThreadSnapshotEpoch,
   getSnapshotCursor,
@@ -25,6 +26,7 @@ interface ThreadSyncEntry {
   connectionGeneration: number
   recovering: boolean
   recoveryAttempted: boolean
+  coveredOverflowVersion: string | null
   recoveryFailed: boolean
   stopped: boolean
   recoveryAbort: AbortController | null
@@ -41,6 +43,8 @@ export function useThreadSnapshotSync(
 ): { error: string | null; retry: () => void } {
   const queryClient = useQueryClient()
   const manager = useApplicationEvents()
+  const connection = useApplicationEventConnectionState()
+  const terminal = enabled && connection.reason?.kind === 'stopped' && connection.reason.cause !== 'manual'
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -66,6 +70,7 @@ export function useThreadSnapshotSync(
         connectionGeneration: 0,
         recovering: false,
         recoveryAttempted: false,
+        coveredOverflowVersion: null,
         recoveryFailed: false,
         stopped: false,
         recoveryAbort: null,
@@ -96,19 +101,26 @@ export function useThreadSnapshotSync(
   }, [enabled, manager, queryClient, threadId])
 
   const retry = useCallback(() => {
+    if (terminal) {
+      window.location.reload()
+      return
+    }
     const entry = syncEntries.get(queryClient)?.get(threadId)
     if (entry == null) {
       void queryClient.refetchQueries({
         queryKey: queryKeys.threads.snapshot(threadId), exact: true,
       })
     } else if (entry.recoveryFailed) {
-      requestRecovery(queryClient, threadId, entry, true)
+      requestRecovery(queryClient, threadId, entry, { explicit: true })
     } else {
       requestWireRefresh(queryClient, threadId, entry)
     }
-  }, [queryClient, threadId])
+  }, [queryClient, terminal, threadId])
 
-  return { error, retry }
+  return {
+    error: terminal ? 'Live updates stopped. This Thread may be out of date.' : error,
+    retry,
+  }
 }
 
 function listenForReconnect(threadId: string, entry: ThreadSyncEntry): void {
@@ -117,6 +129,8 @@ function listenForReconnect(threadId: string, entry: ThreadSyncEntry): void {
     if (entry.identity !== nextIdentity) {
       entry.identity = nextIdentity
       entry.connectionGeneration += 1
+      entry.recoveryAttempted = false
+      entry.recoveryAbort?.abort()
     }
     if (nextIdentity != null && entry.error != null && entry.recoveryFailed) {
       // Reconnect rebuilds the subscription/catch-up; it is not an HTTP retry.
@@ -148,8 +162,16 @@ function startSubscription(queryClient: QueryClient, threadId: string, entry: Th
       })
     },
     onResync: () => requestRecovery(queryClient, threadId, entry),
+    onSnapshotRef: (message) => {
+      if ('version' in message) {
+        requestRecovery(queryClient, threadId, entry, { overflowVersion: message.version })
+      }
+    },
     onError: (code, message) => {
-      if (code === 'THREAD_SNAPSHOT_FAILED') {
+      if (code === INVALID_EVENT_PAYLOAD) {
+        setSyncError(entry, message)
+        requestRecovery(queryClient, threadId, entry)
+      } else if (code === 'THREAD_SNAPSHOT_FAILED') {
         setSyncError(entry, message, false)
       }
     },
@@ -203,6 +225,10 @@ async function applyLiveSnapshot(
   advanceThreadSnapshotEpoch(queryClient, threadId)
   queryClient.setQueryData(key, merged)
   entry.recoveryAttempted = false
+  if (entry.coveredOverflowVersion != null
+    && compareCatalogVersions(incoming.version, entry.coveredOverflowVersion) >= 0) {
+    entry.coveredOverflowVersion = null
+  }
   setSyncError(entry, null, false)
 }
 
@@ -210,35 +236,42 @@ function requestRecovery(
   queryClient: QueryClient,
   threadId: string,
   entry: ThreadSyncEntry,
-  explicit = false,
+  { explicit = false, overflowVersion }: { explicit?: boolean; overflowVersion?: string } = {},
 ): void {
   if (entry.recovering || entry.stopped) {
     return
   }
-  if (entry.recoveryAttempted && !explicit) {
-    // An unchanged oversized frame or broken link would otherwise start an HTTP loop after every ACK.
-    entry.generation += 1
-    entry.manager.suspendThread({ kind: 'thread', id: threadId })
+  if (overflowVersion != null) {
+    if (entry.coveredOverflowVersion != null
+      && compareCatalogVersions(overflowVersion, entry.coveredOverflowVersion) <= 0) {
+      return
+    }
+  } else if (entry.recoveryAttempted && !explicit) {
+    // Stop automatic reads, not the live subscription. A viable snapshot can still heal it.
     setSyncError(entry, entry.error ?? 'Thread updates could not resume after recovery', true)
     return
   }
-  entry.recoveryAttempted = true
+  entry.recoveryAttempted = overflowVersion == null
   entry.recovering = true
   entry.generation += 1
   const generation = entry.generation
-  entry.recoveryAbort?.abort()
+  const connectionGeneration = entry.connectionGeneration
   const controller = new AbortController()
   entry.recoveryAbort = controller
   entry.manager.suspendThread({ kind: 'thread', id: threadId })
   enqueue(entry, async () => {
-    if (!isCurrent(entry, generation)) {
-      return
-    }
     const key = queryKeys.threads.snapshot(threadId)
+    const isCurrentRecovery = () => isCurrentEvent(entry, generation, connectionGeneration)
     try {
+      if (!isCurrentRecovery()) {
+        return
+      }
       await queryClient.cancelQueries({ queryKey: key, exact: true })
+      if (!isCurrentRecovery()) {
+        return
+      }
       const restored = await harnessService.getThreadSnapshot(threadId, { signal: controller.signal })
-      if (!isCurrent(entry, generation)) {
+      if (!isCurrentRecovery()) {
         return
       }
       if (!isThreadSnapshot(restored, threadId) || restored.baseEntryId !== null
@@ -250,17 +283,26 @@ function requestRecovery(
       if (merged == null) {
         throw new Error('The restored Thread snapshot could not be merged')
       }
+      if (overflowVersion != null && compareCatalogVersions(merged.version, overflowVersion) < 0) {
+        throw new Error('The restored Thread snapshot does not cover the missing version')
+      }
+      if (overflowVersion != null || explicit) {
+        entry.coveredOverflowVersion = merged.version
+      }
       advanceThreadSnapshotEpoch(queryClient, threadId)
       queryClient.setQueryData(key, merged)
-      entry.recovering = false
-      entry.recoveryAbort = null
       setSyncError(entry, null, false)
-      entry.manager.resumeThread({ kind: 'thread', id: threadId })
     } catch (error) {
+      if (isCurrentRecovery()) {
+        setSyncError(entry, error instanceof Error ? error.message : String(error), true)
+      }
+    } finally {
       if (isCurrent(entry, generation)) {
         entry.recovering = false
         entry.recoveryAbort = null
-        setSyncError(entry, error instanceof Error ? error.message : String(error), true)
+        if (!isCurrentRecovery() || !entry.recoveryFailed) {
+          entry.manager.resumeThread({ kind: 'thread', id: threadId })
+        }
       }
     }
   })

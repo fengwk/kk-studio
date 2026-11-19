@@ -88,20 +88,30 @@ Thread/Canvas 先读取 Snapshot，再订阅 `/ws/events`。
 接受连接却不发 `connected`（或立即关闭）的服务端会继续退避，不会以最小间隔无限重试。
 浏览器 online 或页面重新可见时立即重连，并同时重置退避序列（用户侧恢复信号）。
 资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
-projects/interactions/environments 发 changed 提示、不携带 cursor；thread-tree 推完整 `snapshot`（`data.nodes` 为权威节点 DTO 数组，不附带 Thread.version cursor），客户端直接验证并写入对应 root/bound query 缓存。Thread 的首载先 `GET /api/harness/threads/{threadId}` 取得完整权威快照与 `headEntryId`，再以该 head 作为订阅的 `afterEntryId` 建立 `/ws/events` 订阅；`subscribed.cursor` 固定为 `"0"`，紧随其后的 `snapshot` 携带该 Entry 游标对应的权威状态与增量，不替代客户端的完整历史链。后续 `realtime` 只作为变化提示，客户端从当时缓存的 head 用同一 fetcher 请求增量快照并延续完整 Entry 链。执行树 HTTP 只 bootstrap 真实 root；成功订阅后关闭自动 HTTP focus/reconnect 回读，`subscribed` 只确认 wire 状态，服务端强制 snapshot 完成初始化与重连恢复。执行树 `resync` 和用户显式刷新经 `{type:'refresh',resource}` 请求同 root publisher，不新增订阅；其他资源仍按既有规则回读。
-执行树 projector/delivery 失败通过资源级 `TREE_SNAPSHOT_FAILED` 报错，保留旧缓存并显示刷新失败，不自动重试；用户显式刷新、真实变化或重连才再次请求。bootstrap 无数据失败时重试仍走 HTTP。Thread checkpoint 可在相同 version 内更新，因此同 version Snapshot 仍参与对账，Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 codec 层拒绝、不到达 listener；没有 EventSource，也不用固定轮询兜底。
+projects/interactions/environments 发 `changed` 提示，不携带 cursor。Thread 首载通过
+`GET /api/harness/threads/{threadId}` 取得完整权威快照，以其 `headEntryId` 作为 WS 订阅的
+`afterEntryId`。`subscribed.cursor` 固定为 `"0"`；后续 WS `snapshot` 从 Entry 游标接续完整历史，
+同 version 的 checkpoint 仍参与对账。Canvas 则只在 revision 提示严格大于本地值时读取。
+帧的资源、事件名与外层字段均合法但载荷损坏时，codec 丢弃载荷，只经资源 `onError` 报告
+`INVALID_EVENT_PAYLOAD`，不影响同一 socket 上的其他资源和 IDE。无法路由的非法帧仍终止连接；
+Thread 保留旧数据并显示同步错误，终止后可通过页面重新加载恢复实时更新。
 
-Thread Snapshot 只有一份 query 缓存，所有读取都经
-[`thread-snapshot-cache.ts`](../../frontend/src/features/thread/runtime/state/thread-snapshot-cache.ts) 的同一 fetcher。
+Thread Snapshot 只有一份 query 缓存，通过
+[`thread-snapshot-cache.ts`](../../frontend/src/features/thread/runtime/state/thread-snapshot-cache.ts) 合并。
 缓存始终是完整的 root-to-head 历史；只有末 Entry 确为当前 head 时才以它为 `afterEntryId` 请求增量。
 响应到达时按当时的缓存合并：完整响应替换缓存，增量保留到 `baseEntryId` 的前缀再按 Entry id 幂等接上，
 较旧 version 不覆盖较新缓存，空增量仍更新全部当前状态。增量的基线已不在缓存链上时显式再读一次完整历史，
-增量永远不会被当作完整缓存写入。resync 与重连只重新执行同一查询，服务端对非祖先游标返回完整历史。
+增量永远不会被当作完整缓存写入。遇到链路缺口、`resync` 或坏载荷时，串行全量 GET 校验完整历史，
+再按恢复后的 head 重订阅；无进展时停止自动回读但仍接受正常推送。超出单帧预算则由 `snapshot-ref`
+标记缺口，Thread 使用帧顶层 `version` 跨重订阅去重：GET 覆盖的版本不再读取，较新的溢出版本可再次恢复。
 手动压缩可用性不在 Snapshot 内：根控制区在命令面板显示时或时间线存在失败/停止压缩卡时按需查询
 `/api/harness/threads/{threadId}/compaction-availability`，检查中与检查失败分别显示不可用原因。
 它只影响命令提示与卡片按钮的可用性，压缩提交仍由服务端按 `expectedVersion` 判断。
 
-执行树按执行根订阅，HTTP 只建立 bootstrap；根确认后相同 WS publisher 是唯一 live 来源，重连和 resync 请求完整快照，手动刷新也发送 `refresh` 控制帧，不通过 HTTP 并行写缓存。服务端为 root 串行合并投影，并在每个新本地订阅后强制发首快照；根本地空闲也保持订阅。
+执行树通过 HTTP 确认真正的执行根，随后由 WS 推送完整 `snapshot`（`data.nodes`），重连也会推送。
+`resync` 和手动刷新发送 `refresh` 控制帧，不新增订阅。仅收到不带 version 的 `snapshot-ref` 时才合并
+并发提示、按原 query 回读权威树；较新的合法 WS 快照取消并取代迟到的 HTTP 结果。投影失败或坏载荷
+保留旧树并显示刷新失败，继续接收后续推送。没有定时回读。
 交互待办变化订阅全局 interactions；导航角标读服务端返回的真实 total，不用首页长度伪装计数。
 环境注册表与连接租约订阅 environments：changed、subscribed 与 resync 都回读权威列表；
 连接失效是时间事实而非写入事实，客户端只按最早的 `statusExpiresAt` 排一次回读（越过截止点一个短容差），

@@ -81,6 +81,15 @@ const LIVENESS_MISSED_HEARTBEATS = 3
  * 握手超时与失联都立即 fence 旧 generation 并 best-effort close 旧 socket，
  * 不等待浏览器不一定及时派发的 close 回调；socket 的 close 仍是传输断开的
  * 权威清理点，error 只负责关闭 socket。
+ *
+ * 帧的严格程度分两级（都在严格 codec 内部完成）：连资源都定位不到的帧（畸形 JSON、
+ * 未知 type、错误外层字段集、非法 resource、非法 resource/name 组合、cursor 出现与否
+ * 不符）是连接级协议违规，本连接 terminal stop；能定位资源的坏载荷（如 version 类型
+ * 错误的 Thread snapshot）由解码器直接合成为该资源的 {@code INVALID_EVENT_PAYLOAD}
+ * 错误，沿用普通 error 分发路径，物理连接与其他资源继续工作。
+ *
+ * 合成的资源错误与其他帧同等严格：握手完成前的资源错误不会把连接当成 ready，也不会
+ * 绕开 15 秒握手预算；它只会交给已登记（若有）的该资源 listener。
  */
 export class ApplicationEventConnection {
   private readonly url: string
@@ -169,7 +178,7 @@ export class ApplicationEventConnection {
       }
       const message = decodeServerMessage(String(event.data))
       if (message == null) {
-        // 服务端协议违规：本连接 terminal stop，不继续消费、不重连。
+        // 连资源都定位不到的服务端协议违规：本连接 terminal stop，不继续消费、不重连。
         this.stopTerminal('protocol')
         return
       }

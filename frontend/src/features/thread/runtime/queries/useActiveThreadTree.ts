@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { harnessService } from '@/shared/api/harness-service'
 import { useApplicationEvents } from '@/shared/app-events'
@@ -9,8 +9,8 @@ import { projectThreadTree } from '@/features/thread/runtime/thread-panel/active
 
 /**
  * 执行树查询的唯一定义：同一个 bound ID 复用既有 QueryClient key。
- * bound ID 可以是子代理；HTTP 仅 bootstrap 真实执行根，之后同 root 的 WebSocket
- * snapshot 是唯一 live 数据来源；诊断与 bootstrap 失败重试仍使用 HTTP。
+ * HTTP 先确认执行根；随后由 WS 推送，只有 `snapshot-ref` 才触发权威回读。
+ * 回读复用同一 query；合法 WS 快照取消在途回读并立即接管缓存。
  */
 export function useActiveThreadTree(boundThreadId: string | null) {
   const queryClient = useQueryClient()
@@ -18,20 +18,22 @@ export function useActiveThreadTree(boundThreadId: string | null) {
   const [snapshotFailedRootId, setSnapshotFailedRootId] = useState<string | null>(null)
   const [liveBoundThreadId, setLiveBoundThreadId] = useState<string | null>(null)
   const isLiveForBoundThread = boundThreadId != null && liveBoundThreadId === boundThreadId
+  const boundQueryKey = useMemo(() => queryKeys.threads.tree(boundThreadId ?? ''), [boundThreadId])
+  const fetchTreeNodes = useCallback(async ({ signal }: { signal: AbortSignal }) => {
+    const nodes = await harnessService.getThreadTree(boundThreadId ?? '', { signal })
+    // 非法树不进入缓存：React Query 保留上一次成功结果，并单独暴露失败。
+    const tree = projectThreadTree(nodes)
+    if (tree.root == null) {
+      throw new Error('thread tree does not contain an execution root')
+    }
+    if (!tree.nodesById.has(boundThreadId ?? '')) {
+      throw new Error('thread tree does not contain requested bound thread')
+    }
+    return nodes
+  }, [boundThreadId])
   const treeQuery = useQuery({
-    queryKey: queryKeys.threads.tree(boundThreadId ?? ''),
-    queryFn: async ({ signal }) => {
-      const nodes = await harnessService.getThreadTree(boundThreadId ?? '', { signal })
-      // 非法树不进入缓存：React Query 保留上一次成功结果，并单独暴露失败。
-      const tree = projectThreadTree(nodes)
-      if (tree.root == null) {
-        throw new Error('thread tree does not contain an execution root')
-      }
-      if (!tree.nodesById.has(boundThreadId ?? '')) {
-        throw new Error('thread tree does not contain requested bound thread')
-      }
-      return nodes
-    },
+    queryKey: boundQueryKey,
+    queryFn: fetchTreeNodes,
     enabled: Boolean(boundThreadId) && !isLiveForBoundThread,
     staleTime: Infinity,
     refetchOnWindowFocus: false,
@@ -40,14 +42,59 @@ export function useActiveThreadTree(boundThreadId: string | null) {
   })
   const projection = useMemo(() => projectThreadTree(treeQuery.data ?? []), [treeQuery.data])
   const actualRootThreadId = projection.root?.threadId ?? null
-  const boundQueryKey = queryKeys.threads.tree(boundThreadId ?? '')
+  // 异步回读可能跨越多次渲染：最新事实经 ref 读取，避免闭包里的旧 root/bound。
+  const latestRef = useRef({ actualRootThreadId })
+  useEffect(() => {
+    latestRef.current = { actualRootThreadId }
+  })
+  const overflowRead = useRef<{ pending: boolean } | null>(null)
+  const cancelTreeRead = useCallback(() => {
+    overflowRead.current = null
+    void queryClient.cancelQueries({ queryKey: boundQueryKey, exact: true })
+  }, [boundQueryKey, queryClient])
+  useEffect(() => () => {
+    if (overflowRead.current != null) {
+      cancelTreeRead()
+    }
+  }, [cancelTreeRead])
   const requestTreeRefresh = useCallback(() => {
-    if (actualRootThreadId != null) {
-      if (!applicationEvents.requestResourceRefresh({ kind: 'thread-tree', id: actualRootThreadId })) {
-        setSnapshotFailedRootId(actualRootThreadId)
+    const rootThreadId = latestRef.current.actualRootThreadId
+    if (rootThreadId != null) {
+      if (!applicationEvents.requestResourceRefresh({ kind: 'thread-tree', id: rootThreadId })) {
+        setSnapshotFailedRootId(rootThreadId)
       }
     }
-  }, [applicationEvents, actualRootThreadId])
+  }, [applicationEvents])
+  const readOversizedTree = useCallback(async () => {
+    if (overflowRead.current != null) {
+      overflowRead.current.pending = true
+      return
+    }
+    const read = { pending: false }
+    overflowRead.current = read
+    const rootThreadId = latestRef.current.actualRootThreadId
+    try {
+      do {
+        read.pending = false
+        await queryClient.fetchQuery({
+          queryKey: boundQueryKey, queryFn: fetchTreeNodes, staleTime: 0, retry: false,
+        })
+        if (overflowRead.current !== read) {
+          return
+        }
+        setSnapshotFailedRootId((current) => (current === rootThreadId ? null : current))
+        // 新提示可能晚于 GET 取样；在途提示合并为一次尾随读取，不自行重试。
+      } while (read.pending)
+    } catch {
+      if (overflowRead.current === read) {
+        setSnapshotFailedRootId(rootThreadId)
+      }
+    } finally {
+      if (overflowRead.current === read) {
+        overflowRead.current = null
+      }
+    }
+  }, [boundQueryKey, fetchTreeNodes, queryClient])
   useResourceSync(actualRootThreadId == null ? null : { kind: 'thread-tree', id: actualRootThreadId }, {
     // Bootstrap 已提供首个有效树；subscribed/reconnect 的恢复快照由服务端强制推送。
     sync: requestTreeRefresh,
@@ -58,6 +105,10 @@ export function useActiveThreadTree(boundThreadId: string | null) {
         setLiveBoundThreadId(boundThreadId)
       }
       void queryClient.cancelQueries({ queryKey: boundQueryKey })
+    },
+    // 完整树放不进单帧：只读权威 HTTP，绝不为该提示重订阅或退回轮询。
+    onSnapshotRef: () => {
+      void readOversizedTree()
     },
     onError: () => {
       if (actualRootThreadId != null) {
@@ -91,8 +142,8 @@ export function useActiveThreadTree(boundThreadId: string | null) {
         return
       }
       // Fence any late bootstrap/refetch response before applying this authoritative live snapshot.
+      cancelTreeRead()
       setLiveBoundThreadId(boundThreadId)
-      void queryClient.cancelQueries({ queryKey: boundQueryKey })
       queryClient.setQueryData(boundQueryKey, typedNodes)
       setSnapshotFailedRootId(null)
     },

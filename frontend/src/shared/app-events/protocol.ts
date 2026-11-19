@@ -25,6 +25,10 @@
  *   - thread-tree changed：仅旧版内部提示，不用于浏览器数据流。
  *   - interactions changed：data {"rootThreadId":"<UUID>"}，只提示回读待处理交互与全局角标，不带 cursor。
  *   - environments changed：data 恒为 {}，只提示回读环境列表，不带 cursor。
+ * - {"type":"snapshot-ref","resource":{...}[,"version":"<canonical>"]}：该资源快照本身超出单帧预算，
+ *   服务端不发送它，客户端必须回读 HTTP 权威事实。Thread 必带顶层真实权威 version（canonical
+ *   非负十进制，取自 DTO 而不是合成游标），thread-tree 不带 version。它只是该资源的恢复提示，
+ *   不改变物理连接与其他资源的订阅。
  * - {"type":"resync","resource":{...}}：需要整体替换为全量快照。
  * - {"type":"heartbeat"}：连接级文本保活；客户端严格解码后静默消费。
  * - {"type":"ide-use-accepted","revision":"<positive decimal>"}：ide-use 列表已确认。
@@ -41,6 +45,13 @@
  * Number.MAX_SAFE_INTEGER 的正毫秒数）、revision 与 bindingEpoch 都是
  * canonical UUID / 正十进制字符串（不超过 9223372036854775807）。畸形消息永远不会
  * 到达 listeners。
+ *
+ * 只有「连资源都无法定位」的帧才是连接级协议违规：畸形 JSON、未知 type、错误外层字段集、
+ * 非法 resource、非法 resource/name 组合，或 cursor 的出现与否与组合不匹配（canvas revision 必带，
+ * 其余必不带）。envelope 合法但载荷值不合规（如 Thread snapshot 的 version 非字符串、canvas
+ * revision cursor 与 data.revision 不等）时，解码器直接返回携带该资源的稳定
+ * {@link INVALID_EVENT_PAYLOAD} 错误；坏载荷与原始值永不进入 listener，物理连接与其他资源
+ * 继续工作。
  */
 
 import {
@@ -80,6 +91,31 @@ export type ApplicationEventResource =
   | { kind: 'environments' }
 
 export type ApplicationEventName = 'realtime' | 'changed' | 'revision' | 'snapshot'
+
+/**
+ * 资源快照超出单帧预算的提示；{@link ApplicationEventServerMessage} 中的 snapshot-ref 帧。
+ *
+ * <p>它是该资源的逻辑投递（订阅仍然有效），但内容不在 wire 上：消费方必须回读权威 HTTP 事实。
+ * Thread 携带顶层 version 用于跨 resubscribe 去重同一版溢出快照，执行树不带；两个分支用
+ * {@code 'version' in message} 判别。
+ */
+export type SnapshotRefMessage =
+  | { type: 'snapshot-ref'; resource: { kind: 'thread'; id: string }; version: string }
+  | { type: 'snapshot-ref'; resource: { kind: 'thread-tree'; id: string } }
+
+/** event 帧的可路由 envelope：只保留已校验的 resource/name。 */
+interface EventEnvelope {
+  resource: ApplicationEventResource
+  name: ApplicationEventName
+}
+
+/**
+ * 能定位资源的坏载荷的稳定错误码：服务端帧已通过严格 envelope，但 data/cursor 值不符合该资源契约。
+ *
+ * <p>它按资源上报（经既有 onError），只让该资源失效，不终止物理连接、不影响其他资源。
+ * 客户端不得据此合成任何业务数据，只能声明该资源当前不可信并走既有恢复入口。
+ */
+export const INVALID_EVENT_PAYLOAD = 'INVALID_EVENT_PAYLOAD'
 
 /** canonical 非负十进制字符串：'0' 或非零开头，无前导零、无符号、无空白。 */
 type ApplicationEventCursor = string
@@ -210,6 +246,7 @@ export type ApplicationEventServerMessage =
   | ApplicationEventInteractionsChangedEvent
   | ApplicationEventEnvironmentsChangedEvent
   | { type: 'resync'; resource: ApplicationEventResource }
+  | SnapshotRefMessage
   | { type: 'ide-use-accepted'; revision: ApplicationEventRevision }
   | { type: 'error'; resource?: ApplicationEventResource; code: string; message: string }
 
@@ -218,11 +255,22 @@ const CANONICAL_POSITIVE_DECIMAL = /^[1-9][0-9]*$/
 const MAX_SIGNED_LONG_DECIMAL = '9223372036854775807'
 const MAX_SAFE_INTEGER_DECIMAL = '9007199254740991'
 const EVENT_FIELDS = ['type', 'resource', 'name', 'data', 'cursor'] as const
+const SNAPSHOT_REF_THREAD_FIELDS = ['type', 'resource', 'version'] as const
+const SNAPSHOT_REF_TREE_FIELDS = ['type', 'resource'] as const
 
 export function encodeClientMessage(message: ApplicationEventClientMessage): string {
   return JSON.stringify(message)
 }
 
+/**
+ * 服务端帧严格解码。
+ *
+ * <p>返回值只有两类：合法消息，或可定位资源的坏载荷经衔接后合成的稳定资源级
+ * {@link INVALID_EVENT_PAYLOAD} 错误（携带该帧的 resource/name，不携带、不复述载荷内容）。
+ * 返回 null 仅表示连资源都定位不到的帧：畸形 JSON、未知 type、错误外层字段集、非法
+ * resource、非法 resource/name 组合——包括在握手完成前到达的这些帧，调用方仍按连接级
+ * 协议违规终止。
+ */
 export function decodeServerMessage(raw: string): ApplicationEventServerMessage | null {
   let parsed: unknown
   try {
@@ -251,6 +299,8 @@ function decodeMessage(parsed: Record<string, unknown>): ApplicationEventServerM
       return decodeEvent(parsed)
     case 'resync':
       return decodeResync(parsed)
+    case 'snapshot-ref':
+      return decodeSnapshotRef(parsed)
     case 'error':
       return decodeError(parsed)
     default:
@@ -322,6 +372,28 @@ function decodeResync(parsed: Record<string, unknown>): ApplicationEventServerMe
   return { type: 'resync', resource }
 }
 
+/** snapshot-ref：只有 thread 与 thread-tree，Thread 的 version 是顶层必带字段。 */
+function decodeSnapshotRef(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
+  const resource = parseResource(parsed.resource)
+  if (resource == null || (resource.kind !== 'thread' && resource.kind !== 'thread-tree')) {
+    return null
+  }
+  if (resource.kind === 'thread') {
+    if (!hasExactFields(parsed, SNAPSHOT_REF_THREAD_FIELDS)) {
+      return null
+    }
+    const version = parseCursor(parsed.version)
+    if (version == null) {
+      return null
+    }
+    return { type: 'snapshot-ref', resource, version }
+  }
+  if (!hasExactFields(parsed, SNAPSHOT_REF_TREE_FIELDS)) {
+    return null
+  }
+  return { type: 'snapshot-ref', resource }
+}
+
 function decodeError(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
   if (!hasOnlyFields(parsed, ['type', 'resource', 'code', 'message'])) {
     return null
@@ -342,35 +414,98 @@ function decodeError(parsed: Record<string, unknown>): ApplicationEventServerMes
   return { type: 'error', resource, code: parsed.code, message: parsed.message }
 }
 
-/** event 先校验公共形状，再按 resource/name 组合分派：每种组合只接受各自的 data 与 cursor。 */
+/**
+ * event 先校验公共 envelope，再按 resource/name 分派；envelope 合法但 data/cursor 值不符时，
+ * 就在解码器内直接衔接为资源局部错误，不让坏载荷进入 listener，也不会二次解析原始帧。
+ */
 function decodeEvent(parsed: Record<string, unknown>): ApplicationEventServerMessage | null {
-  if (!hasOnlyFields(parsed, EVENT_FIELDS)) {
+  const envelope = readEventEnvelope(parsed)
+  if (envelope == null) {
     return null
   }
-  const resource = parseResource(parsed.resource)
-  if (resource == null || !isEventName(parsed.name)) {
-    return null
+  const { resource, name } = envelope
+  const message = decodeEventData(parsed, resource, name)
+  return message ?? invalidEventPayload(resource, name)
+}
+
+/** 资源级坏载荷的稳定报错：只引用已校验的 name/kind，不回显任何载荷值。 */
+function invalidEventPayload(
+  resource: ApplicationEventResource,
+  name: ApplicationEventName,
+): ApplicationEventServerMessage {
+  return {
+    type: 'error',
+    resource,
+    code: INVALID_EVENT_PAYLOAD,
+    message: `received an invalid ${resource.kind} ${name} payload for this resource`,
   }
-  const name = parsed.name
-  // thread 仅 snapshot|realtime，canvas 仅 revision，其余提示型资源仅 changed。
+}
+
+function decodeEventData(
+  parsed: Record<string, unknown>,
+  resource: ApplicationEventResource,
+  name: ApplicationEventName,
+): ApplicationEventServerMessage | null {
   switch (resource.kind) {
     case 'thread':
-      return name === 'snapshot' || name === 'realtime'
-        ? decodeThreadEvent(parsed, resource, name)
-        : null
+      return decodeThreadEvent(parsed, resource, name)
     case 'canvas':
-      return name === 'revision' ? decodeCanvasRevisionEvent(parsed, resource) : null
+      return decodeCanvasRevisionEvent(parsed, resource)
     case 'projects':
-      return name === 'changed' ? decodeProjectChangedEvent(parsed, resource) : null
+      return decodeProjectChangedEvent(parsed, resource)
     case 'thread-tree':
       if (name === 'snapshot') {
         return decodeTreeSnapshotEvent(parsed, resource)
       }
-      return name === 'changed' ? decodeTreeChangedEvent(parsed, resource) : null
+      return decodeTreeChangedEvent(parsed, resource)
     case 'interactions':
-      return name === 'changed' ? decodeInteractionsChangedEvent(parsed, resource) : null
+      return decodeInteractionsChangedEvent(parsed, resource)
     case 'environments':
-      return name === 'changed' ? decodeEnvironmentsChangedEvent(parsed, resource) : null
+      return decodeEnvironmentsChangedEvent(parsed, resource)
+  }
+}
+
+/**
+ * 可路由的 event envelope：外层字段集精确且包含 data、resource 合法、resource/name 组合
+ * 合法，且 cursor 的**出现与否**符合该组合（canvas revision 必带，其余必不带）。
+ *
+ * <p>这些条件不成立就定位不到合法负载，仍是连接级协议违规；cursor 的值形式与 data 的形状
+ * 属于载荷，由各资源解码器继续校，失败只让该资源失效。
+ */
+function readEventEnvelope(parsed: Record<string, unknown>): EventEnvelope | null {
+  if (!hasOnlyFields(parsed, EVENT_FIELDS) || parsed.data === undefined) {
+    return null
+  }
+  const resource = parseResource(parsed.resource)
+  if (resource == null || !isEventName(parsed.name) || !isEventNameFor(resource, parsed.name)) {
+    return null
+  }
+  const hasCursor = parsed.cursor !== undefined
+  if (hasCursor !== eventCarriesCursor(resource.kind)) {
+    return null
+  }
+  return { resource, name: parsed.name }
+}
+
+/** 只有 canvas 的 revision 事件是带持久 cursor 的前进事件；其余组合一律不带 cursor。 */
+function eventCarriesCursor(kind: ApplicationEventResource['kind']): boolean {
+  return kind === 'canvas'
+}
+
+/** thread 仅 snapshot|realtime，canvas 仅 revision，其余提示型资源仅 changed。 */
+function isEventNameFor(
+  resource: ApplicationEventResource,
+  name: ApplicationEventName,
+): boolean {
+  switch (resource.kind) {
+    case 'thread':
+      return name === 'snapshot' || name === 'realtime'
+    case 'canvas':
+      return name === 'revision'
+    case 'thread-tree':
+      return name === 'snapshot' || name === 'changed'
+    default:
+      return name === 'changed'
   }
 }
 
@@ -572,14 +707,14 @@ function decodeThreadEvent(
   name: ApplicationEventName,
 ): ApplicationEventServerMessage | null {
   if (name === 'snapshot') {
-    if (parsed.cursor !== undefined || !isThreadSnapshot(parsed.data, resource.id)) {
+    if (!isThreadSnapshot(parsed.data, resource.id)) {
       return null
     }
     return { type: 'event', resource, name: 'snapshot', data: parsed.data }
   }
   if (name === 'realtime') {
-    // realtime 事件绝不携带 cursor；data 必须是非数组 JSON 对象。
-    if (parsed.cursor !== undefined || !isRecord(parsed.data)) {
+    // realtime 的 data 必须是非数组 JSON 对象（envelope 已保证不带 cursor）。
+    if (!isRecord(parsed.data)) {
       return null
     }
     return { type: 'event', resource, name: 'realtime', data: parsed.data }
@@ -592,7 +727,7 @@ function decodeCanvasRevisionEvent(
   resource: ApplicationEventResource & { kind: 'canvas' },
 ): ApplicationEventServerMessage | null {
   const revision = parseSingleCursorField(parsed.data, 'revision')
-  // durable 事件必须携带 canonical cursor，且与 data.revision 完全相等。
+  // durable 事件必带 canonical cursor（envelope 已保证出现），且与 data.revision 完全相等。
   if (revision == null || parsed.cursor !== revision) {
     return null
   }
@@ -604,7 +739,7 @@ function decodeProjectChangedEvent(
   resource: ApplicationEventResource & { kind: 'projects' },
 ): ApplicationEventServerMessage | null {
   const projectId = parseSingleUuidField(parsed.data, 'projectId')
-  if (projectId == null || parsed.cursor !== undefined) {
+  if (projectId == null) {
     return null
   }
   return { type: 'event', resource, name: 'changed', data: { projectId } }
@@ -615,7 +750,7 @@ function decodeTreeSnapshotEvent(
   parsed: Record<string, unknown>,
   resource: ApplicationEventResource & { kind: 'thread-tree' },
 ): ApplicationEventServerMessage | null {
-  if (!hasExactFields(parsed.data, ['nodes']) || parsed.cursor !== undefined) {
+  if (!hasExactFields(parsed.data, ['nodes'])) {
     return null
   }
   const data = parsed.data as Record<string, unknown>
@@ -665,7 +800,7 @@ function decodeTreeChangedEvent(
   parsed: Record<string, unknown>,
   resource: ApplicationEventResource & { kind: 'thread-tree' },
 ): ApplicationEventServerMessage | null {
-  if (!hasExactFields(parsed.data, []) || parsed.cursor !== undefined) {
+  if (!hasExactFields(parsed.data, [])) {
     return null
   }
   return { type: 'event', resource, name: 'changed', data: {} }
@@ -676,7 +811,7 @@ function decodeEnvironmentsChangedEvent(
   parsed: Record<string, unknown>,
   resource: ApplicationEventResource & { kind: 'environments' },
 ): ApplicationEventServerMessage | null {
-  if (!hasExactFields(parsed.data, []) || parsed.cursor !== undefined) {
+  if (!hasExactFields(parsed.data, [])) {
     return null
   }
   return { type: 'event', resource, name: 'changed', data: {} }
@@ -687,7 +822,7 @@ function decodeInteractionsChangedEvent(
   resource: ApplicationEventResource & { kind: 'interactions' },
 ): ApplicationEventServerMessage | null {
   const rootThreadId = parseSingleUuidField(parsed.data, 'rootThreadId')
-  if (rootThreadId == null || parsed.cursor !== undefined) {
+  if (rootThreadId == null) {
     return null
   }
   return { type: 'event', resource, name: 'changed', data: { rootThreadId } }

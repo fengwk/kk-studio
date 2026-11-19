@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   decodeServerMessage,
   encodeClientMessage,
+  INVALID_EVENT_PAYLOAD,
 } from '@/shared/app-events/protocol'
 
 const THREAD_ID = '11111111-2222-4333-8444-555555555555'
@@ -34,6 +35,20 @@ function threadSnapshot(version = '43') {
     },
     baseEntryId: null, entries: [], queuedCommands: [], activeAssistantOutput: null,
     generationFailures: [], toolInvocations: [], stopReceipts: [], unconfirmedExecutions: [],
+  }
+}
+
+/** 期望的资源级坏载荷错误：只带稳定码与该资源/事件名，不回显任何载荷内容。 */
+function invalidPayload(
+  resource: Record<string, unknown>,
+  kind: string,
+  name: string,
+) {
+  return {
+    type: 'error',
+    resource,
+    code: INVALID_EVENT_PAYLOAD,
+    message: `received an invalid ${kind} ${name} payload for this resource`,
   }
 }
 
@@ -209,7 +224,7 @@ describe('decodeServerMessage', () => {
     }))).toBeNull()
     expect(decodeServerMessage(JSON.stringify({
       type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [{ ...node, extra: true }] },
-    }))).toBeNull()
+    }))).toEqual(invalidPayload(treeResource, 'thread-tree', 'snapshot'))
   })
 
   it('decodes hint-resource changed events without a cursor', () => {
@@ -260,6 +275,107 @@ describe('decodeServerMessage', () => {
     expect(
       decodeServerMessage(JSON.stringify({  type: 'resync', resource: treeResource })),
     ).toEqual({ type: 'resync', resource: treeResource })
+  })
+
+  it('decodes snapshot-ref frames: Thread carries a top-level version, the tree does not', () => {
+    expect(
+      decodeServerMessage(
+        JSON.stringify({
+          type: 'snapshot-ref',
+          resource: threadResource,
+          version: '9223372036854775807',
+        }),
+      ),
+    ).toEqual({ type: 'snapshot-ref', resource: threadResource, version: '9223372036854775807' })
+    expect(
+      decodeServerMessage(JSON.stringify({ type: 'snapshot-ref', resource: treeResource })),
+    ).toEqual({ type: 'snapshot-ref', resource: treeResource })
+  })
+
+  it('rejects snapshot-ref frames without the resource-specific top-level version', () => {
+    // Thread 的 version 必带（顶层）、必须是 canonical 非负十进制字符串。
+    for (const frame of [
+      { type: 'snapshot-ref', resource: threadResource },
+      { type: 'snapshot-ref', resource: threadResource, version: 43 },
+      { type: 'snapshot-ref', resource: threadResource, version: '01' },
+      { type: 'snapshot-ref', resource: threadResource, version: '' },
+      // version 不能藏在 resource 里。
+      { type: 'snapshot-ref', resource: { ...threadResource, version: '1' } },
+      // 执行树没有 version。
+      { type: 'snapshot-ref', resource: treeResource, version: '1' },
+      // 其他资源不会以整帧溢出形式出现。
+      { type: 'snapshot-ref', resource: canvasResource },
+      { type: 'snapshot-ref', resource: projectsResource },
+      { type: 'snapshot-ref', resource: { kind: 'thread', id: 'not-a-uuid' }, version: '1' },
+      // 字段集精确：不得混入 event 的字段。
+      { type: 'snapshot-ref', resource: threadResource, version: '1', name: 'snapshot' },
+      { type: 'snapshot-ref', resource: threadResource, version: '1', cursor: '1' },
+    ]) {
+      expect(decodeServerMessage(JSON.stringify(frame))).toBeNull()
+    }
+  })
+
+  it('synthesizes a sanitized resource error for a routable but corrupt payload', () => {
+    // 坏载荷可定位资源：解码器直接返回该资源的稳定错误，不回显任何载荷值。
+    const message = decodeServerMessage(JSON.stringify({
+      type: 'event',
+      resource: threadResource,
+      name: 'snapshot',
+      data: { ...threadSnapshot(), version: 987654321 },
+    }))
+    expect(message).toEqual({
+      type: 'error',
+      resource: threadResource,
+      code: INVALID_EVENT_PAYLOAD,
+      message: 'received an invalid thread snapshot payload for this resource',
+    })
+    // 载荷值（错误值 987654321 与其它业务字段）不会进入报文。
+    expect(JSON.stringify(message)).not.toContain('987654321')
+    // cursor 值不合法、data 形状不合法同样属于资源级错误。
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: canvasResource, name: 'revision', data: { revision: '3' }, cursor: '4',
+    }))).toEqual({
+      type: 'error', resource: canvasResource, code: INVALID_EVENT_PAYLOAD,
+      message: 'received an invalid canvas revision payload for this resource',
+    })
+    expect(decodeServerMessage(JSON.stringify({
+      type: 'event', resource: canvasResource, name: 'revision', data: { revision: '03' }, cursor: '03',
+    }))).toEqual({
+      type: 'error', resource: canvasResource, code: INVALID_EVENT_PAYLOAD,
+      message: 'received an invalid canvas revision payload for this resource',
+    })
+  })
+
+  it('still fails strictly when the frame cannot locate a resource', () => {
+    for (const raw of [
+      'not json',
+      '',
+      'null',
+      '[]',
+      JSON.stringify({ type: 'unknown' }),
+      JSON.stringify({ type: 'event' }),
+      // 外层字段集不精确。
+      JSON.stringify({ type: 'event', resource: threadResource, name: 'snapshot', data: {}, extra: 1 }),
+      JSON.stringify({ type: 'event', resource: threadResource, name: 'snapshot' }),
+      // 非法 resource。
+      JSON.stringify({ type: 'event', resource: { kind: 'thread' }, name: 'snapshot', data: {} }),
+      JSON.stringify({ type: 'event', resource: { kind: 'file', id: THREAD_ID }, name: 'snapshot', data: {} }),
+      // 非法 resource/name 组合。
+      JSON.stringify({ type: 'event', resource: threadResource, name: 'revision', data: { revision: '1' } }),
+      JSON.stringify({ type: 'event', resource: canvasResource, name: 'snapshot', data: {} }),
+      JSON.stringify({ type: 'event', resource: projectsResource, name: 'snapshot', data: {} }),
+      JSON.stringify({ type: 'event', resource: threadResource, name: 'unknown', data: {} }),
+      // cursor 出现与否与组合不符：属于连接级违规，不得被降级为资源错误。
+      JSON.stringify({ type: 'event', resource: threadResource, name: 'snapshot', data: threadSnapshot(), cursor: '43' }),
+      JSON.stringify({ type: 'event', resource: treeResource, name: 'snapshot', data: { nodes: [] }, cursor: '1' }),
+      JSON.stringify({ type: 'event', resource: canvasResource, name: 'revision', data: { revision: '3' } }),
+    ]) {
+      expect(decodeServerMessage(raw)).toBeNull()
+    }
+  })
+
+  it('uses a stable sanitized code for resource-local payload failures', () => {
+    expect(INVALID_EVENT_PAYLOAD).toBe('INVALID_EVENT_PAYLOAD')
   })
 
   it('decodes thread snapshot and realtime frames with their distinct cursor rules', () => {
@@ -453,7 +569,7 @@ describe('decodeServerMessage', () => {
     const threadBase = {  type: 'event', resource: threadResource }
     expect(
       decodeServerMessage(JSON.stringify({ ...threadBase, name: 'snapshot', data: {} })),
-    ).toBeNull()
+    ).toEqual(invalidPayload(threadResource, 'thread', 'snapshot'))
     // version data 必须是精确单字段 {version}。
     expect(
       decodeServerMessage(
@@ -481,19 +597,19 @@ describe('decodeServerMessage', () => {
       decodeServerMessage(
         JSON.stringify({ ...canvasBase, name: 'revision', data: { revision: '01' }, cursor: '01' }),
       ),
-    ).toBeNull()
+    ).toEqual(invalidPayload(canvasResource, 'canvas', 'revision'))
     // realtime data 必须是 JSON 对象（字符串/数组/数字拒绝）。
     expect(
       decodeServerMessage(
         JSON.stringify({ ...threadBase, name: 'realtime', data: '{"type":"MODEL_DELTA"}' }),
       ),
-    ).toBeNull()
+    ).toEqual(invalidPayload(threadResource, 'thread', 'realtime'))
     expect(
       decodeServerMessage(JSON.stringify({ ...threadBase, name: 'realtime', data: [1, 2] })),
-    ).toBeNull()
+    ).toEqual(invalidPayload(threadResource, 'thread', 'realtime'))
     expect(
       decodeServerMessage(JSON.stringify({ ...threadBase, name: 'realtime', data: 7 })),
-    ).toBeNull()
+    ).toEqual(invalidPayload(threadResource, 'thread', 'realtime'))
   })
 
   it('rejects unknown or extra fields per frame type', () => {
@@ -637,19 +753,21 @@ describe('decodeServerMessage', () => {
       name: 'changed',
       data: { projectId: THREAD_ID },
     }
+    // cursor 出现本身与提示型组合不符：连接级违规。
     expect(
       decodeServerMessage(JSON.stringify({ ...projectChanged, cursor: '1' })),
     ).toBeNull()
+    // 载荷值非法：只影响 projects 资源。
     expect(
       decodeServerMessage(
         JSON.stringify({ ...projectChanged, data: { projectId: 'not-a-uuid' } }),
       ),
-    ).toBeNull()
+    ).toEqual(invalidPayload(projectsResource, 'projects', 'changed'))
     expect(
       decodeServerMessage(
         JSON.stringify({ ...projectChanged, data: { projectId: THREAD_ID, extra: true } }),
       ),
-    ).toBeNull()
+    ).toEqual(invalidPayload(projectsResource, 'projects', 'changed'))
     expect(
       decodeServerMessage(
         JSON.stringify({ ...projectChanged, resource: { kind: 'unknown' } }),
@@ -687,7 +805,7 @@ describe('decodeServerMessage', () => {
     ).toBeNull()
     expect(
       decodeServerMessage(JSON.stringify({ ...treeChanged, data: { rootThreadId: THREAD_ID } })),
-    ).toBeNull()
+    ).toEqual(invalidPayload(treeResource, 'thread-tree', 'changed'))
     const interactionsChanged = {
       
       type: 'event',
@@ -697,12 +815,12 @@ describe('decodeServerMessage', () => {
     }
     expect(
       decodeServerMessage(JSON.stringify({ ...interactionsChanged, data: {} })),
-    ).toBeNull()
+    ).toEqual(invalidPayload(interactionsResource, 'interactions', 'changed'))
     expect(
       decodeServerMessage(
         JSON.stringify({ ...interactionsChanged, data: { rootThreadId: 'not-a-uuid' } }),
       ),
-    ).toBeNull()
+    ).toEqual(invalidPayload(interactionsResource, 'interactions', 'changed'))
     expect(
       decodeServerMessage(
         JSON.stringify({
@@ -710,7 +828,7 @@ describe('decodeServerMessage', () => {
           data: { rootThreadId: THREAD_ID, extra: true },
         }),
       ),
-    ).toBeNull()
+    ).toEqual(invalidPayload(interactionsResource, 'interactions', 'changed'))
     expect(
       decodeServerMessage(
         JSON.stringify({ ...interactionsChanged, cursor: '0' }),
@@ -750,9 +868,10 @@ describe('decodeServerMessage', () => {
 })
 
 describe('backend wire samples', () => {
-  it('rejects numeric Thread snapshot versions and next command sequences', () => {
+  it('reports numeric Thread snapshot versions and next command sequences as scoped errors', () => {
     const data = threadSnapshot()
-    // Matching numeric versions must not bypass validation through RegExp coercion.
+    // 匹配的数字 version 不能绕过校验（RegExp 会把数字强转为字符串）；
+    // 但它是可定位资源的坏载荷：只让该 Thread 失效，不拖垮整条连接。
     for (const invalid of [
       { ...data, version: 43, thread: { ...data.thread, version: 43 } },
       { ...data, thread: { ...data.thread, version: 43 } },
@@ -760,7 +879,7 @@ describe('backend wire samples', () => {
     ]) {
       expect(decodeServerMessage(JSON.stringify({
         type: 'event', resource: threadResource, name: 'snapshot', data: invalid,
-      }))).toBeNull()
+      }))).toEqual(invalidPayload(threadResource, 'thread', 'snapshot'))
     }
   })
 

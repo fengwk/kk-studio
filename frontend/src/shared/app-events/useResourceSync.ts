@@ -1,7 +1,11 @@
 import { useEffect, useRef } from 'react'
 // 经 barrel 引入 useApplicationEvents，保持与既有测试的 '@/shared/app-events' mock 一致。
 import { useApplicationEvents } from '@/shared/app-events'
-import type { ApplicationEventName, ApplicationEventResource } from '@/shared/app-events/protocol'
+import type {
+  ApplicationEventName,
+  ApplicationEventResource,
+  SnapshotRefMessage,
+} from '@/shared/app-events/protocol'
 
 export interface ResourceSyncOptions {
   /**
@@ -15,6 +19,13 @@ export interface ResourceSyncOptions {
   syncOn?: (name: ApplicationEventName, data: unknown) => boolean
   /** 订阅建立后追加的动作。 */
   onSubscribed?: () => void
+  /**
+   * 该资源的快照超出单帧预算：完整消息原样转发（Thread 带真实 version）。
+   *
+   * <p>未指定时走默认恢复：调用 sync 回读权威事实。消费方需要按 version 去重或有界合并时
+   * 自行实现，但不得因该提示重订阅或把旧缓存当当前事实展示。
+   */
+  onSnapshotRef?: (message: SnapshotRefMessage) => void
   /** 服务端资源错误处理；未指定时沿用既有行为，触发 sync。 */
   onError?: (code: string, message: string) => void
   /** sync 返回 Promise 失败时接收错误；不传时记录错误，避免未处理 rejection。 */
@@ -63,6 +74,14 @@ export function useResourceSync(
         }
       },
       onResync: runSync,
+      onSnapshotRef: (message) => {
+        const current = optionsRef.current
+        if (current.onSnapshotRef != null) {
+          current.onSnapshotRef(message)
+        } else {
+          runResourceSync(current)
+        }
+      },
       onError: (code, message) => {
         const current = optionsRef.current
         if (current.onError != null) {

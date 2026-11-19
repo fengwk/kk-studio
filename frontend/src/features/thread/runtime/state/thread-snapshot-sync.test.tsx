@@ -192,10 +192,10 @@ describe('useThreadSnapshotSync', () => {
     // Isolate each field so invalid data in one cannot mask validation of the other.
     expect(decodeServerMessage(JSON.stringify(snapshotFrame({
       ...snapshot(), activeAssistantOutput: { ...readyOutput, attempt },
-    })))).toBeNull()
+    })))).toMatchObject({ type: 'error', code: 'INVALID_EVENT_PAYLOAD', resource: snapshotFrame(null).resource })
     expect(decodeServerMessage(JSON.stringify(snapshotFrame({
       ...snapshot(), toolInvocations: [{ ...waitingTool, attempt }],
-    })))).toBeNull()
+    })))).toMatchObject({ type: 'error', code: 'INVALID_EVENT_PAYLOAD', resource: snapshotFrame(null).resource })
   })
 
   it('keeps projection errors through ACK and retries them with a wire refresh, not HTTP', async () => {
@@ -245,8 +245,9 @@ describe('useThreadSnapshotSync', () => {
     expect(cancel).toHaveBeenCalledTimes(1)
 
     oldSocket.fail()
-    await act(async () => { await vi.advanceTimersByTimeAsync(250) })
+    await act(async () => { await vi.advanceTimersByTimeAsync(300) })
     const newSocket = sockets.openLatest()
+    expect(newSocket).not.toBe(oldSocket)
     newSocket.emitServer({
       type: 'connected',
       eventNodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -287,8 +288,113 @@ describe('useThreadSnapshotSync', () => {
     act(() => socket.emitServer(resync))
     await waitFor(() => expect(result.current.error).not.toBeNull())
     expect(get).toHaveBeenCalledTimes(1)
-    expect(socket.sentMessages().at(-1)).toEqual({ type: 'unsubscribe', resource: resync.resource })
+    expect(socket.sentMessages()).toHaveLength(3)
     expect(queryClient.getQueryData<HarnessThreadSnapshotDTO>(queryKeys.threads.snapshot(THREAD))?.version).toBe('2')
+
+    await act(async () => socket.emitServer(snapshotFrame(snapshot('3'))))
+    expect(result.current.error).toBeNull()
+    act(() => socket.emitServer(resync))
+    await waitFor(() => expect(get).toHaveBeenCalledTimes(2))
+  })
+
+  it('reads each uncovered overflow frontier and resumes chained live snapshots', async () => {
+    const terminalId = '66666666-2222-4333-8444-555555555555'
+    const base = snapshot('5')
+    const terminal = {
+      ...base,
+      thread: { ...base.thread, headEntryId: terminalId, status: 'IDLE' as const },
+      entries: [...base.entries, {
+        ...base.entries[0], entryId: terminalId, parentEntryId: ENTRY, entryType: 'MESSAGE' as const,
+        payload: { message: { role: 'ASSISTANT', contents: [{ type: 'text', text: 'result'.repeat(2048) }] } },
+      }],
+    }
+    queryClient.setQueryData(queryKeys.threads.snapshot(THREAD), snapshot())
+    const get = vi.spyOn(harnessService, 'getThreadSnapshot')
+      .mockResolvedValueOnce(snapshot('3'))
+      .mockResolvedValueOnce(terminal)
+    const { result } = renderHook(() => useThreadSnapshotSync(THREAD, true), { wrapper })
+    const socket = sockets.openLatest()
+    const ref = (version: string) => ({ type: 'snapshot-ref' as const, resource: snapshotFrame(null).resource, version })
+
+    await act(async () => socket.emitServer(ref('2')))
+    expect(socket.sentMessages()).toHaveLength(3)
+    await act(async () => {
+      socket.emitServer(ref('2'))
+      socket.emitServer(ref('3'))
+    })
+    expect(socket.sentMessages()).toHaveLength(3)
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(result.current.error).toBeNull()
+
+    await act(async () => socket.emitServer(ref('5')))
+    expect(get).toHaveBeenCalledTimes(2)
+    expect(socket.sentMessages().at(-1)).toMatchObject({ type: 'subscribe', afterEntryId: terminalId })
+    expect(queryClient.getQueryData(queryKeys.threads.snapshot(THREAD))).toEqual(terminal)
+    const liveThread = { ...terminal.thread, name: 'Updated on the same connection' }
+    await act(async () => socket.emitServer(snapshotFrame({
+      ...terminal, thread: liveThread, baseEntryId: terminalId, entries: [],
+    })))
+    expect(queryClient.getQueryData(queryKeys.threads.snapshot(THREAD))).toEqual({ ...terminal, thread: liveThread })
+    expect(get).toHaveBeenCalledTimes(2)
+    expect(result.current.error).toBeNull()
+  })
+
+  it('isolates corrupt snapshots, bounds recovery, and separately exposes a terminal envelope error', async () => {
+    queryClient.setQueryData(queryKeys.threads.snapshot(THREAD), snapshot())
+    const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockResolvedValue(snapshot('2'))
+    const { result } = renderHook(() => useThreadSnapshotSync(THREAD, true), { wrapper })
+    const socket = sockets.openLatest()
+    act(() => socket.emitServer({
+      type: 'connected', eventNodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      connectionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', heartbeatIntervalMillis: '20000',
+    }))
+    const corrupt = snapshotFrame({ ...snapshot(), version: 1 })
+    await act(async () => socket.onmessage?.({ data: JSON.stringify(corrupt) }))
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(result.current.error).toBeNull()
+    await act(async () => socket.onmessage?.({ data: JSON.stringify(corrupt) }))
+    expect(get).toHaveBeenCalledTimes(1)
+    expect(result.current.error).toContain('invalid')
+
+    await act(async () => socket.emitServer(snapshotFrame(snapshot('3'))))
+    expect(result.current.error).toBeNull()
+    await act(async () => socket.onmessage?.({ data: JSON.stringify({ ...snapshotFrame(snapshot()), name: 'unknown' }) }))
+    expect(result.current.error).toContain('out of date')
+    expect(queryClient.getQueryData(queryKeys.threads.snapshot(THREAD))).toEqual(snapshot('3'))
+  })
+
+  it('fences a recovery response from a disconnected socket', async () => {
+    vi.useFakeTimers()
+    const key = queryKeys.threads.snapshot(THREAD)
+    queryClient.setQueryData(key, snapshot())
+    let resolveRead!: (value: HarnessThreadSnapshotDTO) => void
+    const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockReturnValue(
+      new Promise((resolve) => { resolveRead = resolve }),
+    )
+    renderHook(() => useThreadSnapshotSync(THREAD, true), { wrapper })
+    const oldSocket = sockets.openLatest()
+    const connected = {
+      type: 'connected' as const, eventNodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      connectionId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', heartbeatIntervalMillis: '20000',
+    }
+    await act(async () => {
+      oldSocket.emitServer(connected)
+      oldSocket.emitServer({ type: 'snapshot-ref', resource: snapshotFrame(null).resource, version: '2' })
+    })
+    expect(get).toHaveBeenCalledTimes(1)
+    await act(async () => {
+      oldSocket.fail()
+      await vi.advanceTimersByTimeAsync(300)
+    })
+    const newSocket = sockets.openLatest()
+    expect(newSocket).not.toBe(oldSocket)
+    newSocket.emitServer({ ...connected, connectionId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc' })
+    // The old transport may return even after abort; it must not publish or claim the gap was covered.
+    await act(async () => resolveRead(snapshot('2')))
+    expect(queryClient.getQueryData(key)).toEqual(snapshot())
+    expect(newSocket.sentMessages().at(-1)).toMatchObject({ type: 'subscribe', afterEntryId: ENTRY })
+    await act(async () => newSocket.emitServer(snapshotFrame(snapshot('3'))))
+    expect(queryClient.getQueryData(key)).toEqual(snapshot('3'))
   })
 
   it('keeps the prior snapshot and exposes a manual retry after recovery failure', async () => {
