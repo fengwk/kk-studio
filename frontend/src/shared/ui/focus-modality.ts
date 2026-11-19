@@ -1,27 +1,42 @@
 let installed = false
 
-/** Use focus-visible rings only after keyboard navigation; pointer focus keeps a neutral border. */
+/** Suppress native text-input focus rings only for the input directly focused by a pointer. */
 export function installFocusModality() {
   if (installed) {
     return
   }
   installed = true
-  const root = document.documentElement
-  root.dataset.focusModality = 'pointer'
 
   document.addEventListener(
-    'keydown',
+    'pointerdown',
     (event) => {
-      if (event.key === 'Tab' || event.key.startsWith('Arrow') || event.key === 'Enter' || event.key === ' ') {
-        root.dataset.focusModality = 'keyboard'
+      const target = event.target
+      if (
+        (target instanceof HTMLInputElement &&
+          /^(text|search|email|url|tel|password|number)$/.test(target.type)) ||
+        target instanceof HTMLTextAreaElement
+      ) {
+        target.dataset.pointerFocus = 'true'
       }
     },
     true,
   )
   document.addEventListener(
-    'pointerdown',
+    'keydown',
     () => {
-      root.dataset.focusModality = 'pointer'
+      document.querySelectorAll('[data-pointer-focus]').forEach((element) => {
+        delete (element as HTMLElement).dataset.pointerFocus
+      })
+    },
+    true,
+  )
+  document.addEventListener(
+    'focusout',
+    (event) => {
+      const target = event.target
+      if (target instanceof HTMLElement) {
+        delete target.dataset.pointerFocus
+      }
     },
     true,
   )

@@ -155,8 +155,10 @@ test.describe('shared form controls in real form contexts', () => {
     await tooltip.hover()
     await expect(tooltip).toBeVisible()
 
+    await requiredInput.focus()
     await page.keyboard.press('Escape')
     await expect(page.getByRole('tooltip')).toHaveCount(0)
+    await expect(requiredInput).toBeFocused()
 
     await page.keyboard.press('Tab')
     await trigger.focus()

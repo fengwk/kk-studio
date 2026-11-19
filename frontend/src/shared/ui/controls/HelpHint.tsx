@@ -8,12 +8,10 @@ export interface HelpHintProps {
   label: string
   children: ReactNode
   className?: string
-  /** 内容含链接或操作时使用 popover 语义，避免把交互控件放进 tooltip。 */
-  interactive?: boolean
 }
 
-/** 聚焦或悬停时展示简短说明；交互内容以 popover 语义呈现。 */
-export function HelpHint({ label, children, className, interactive = false }: HelpHintProps) {
+/** 聚焦或悬停时展示简短说明。 */
+export function HelpHint({ label, children, className }: HelpHintProps) {
   const id = `help-hint-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
   const [open, setOpen] = useState(false)
   const [position, setPosition] = useState<CSSProperties>({})
@@ -48,7 +46,6 @@ export function HelpHint({ label, children, className, interactive = false }: He
           closeTimerRef.current = null
         }
         event.preventDefault()
-        triggerRef.current?.focus()
         setOpen(false)
       }
     }
@@ -127,10 +124,12 @@ export function HelpHint({ label, children, className, interactive = false }: He
           aria-label={label}
           aria-expanded={open}
           aria-controls={id}
-          aria-haspopup={interactive ? 'dialog' : undefined}
-          aria-describedby={open && !interactive ? id : undefined}
+          aria-describedby={open ? id : undefined}
           onPointerDown={(event) => {
             pointerTypeRef.current = event.pointerType
+          }}
+          onPointerCancel={() => {
+            pointerTypeRef.current = ''
           }}
           onFocus={() => {
             if (pointerTypeRef.current !== 'touch') {
@@ -162,9 +161,8 @@ export function HelpHint({ label, children, className, interactive = false }: He
             <div
               ref={panelRef}
               id={id}
-              className={`ui-help-hint-panel${interactive ? ' is-interactive' : ''}`}
-              role={interactive ? 'dialog' : 'tooltip'}
-              aria-label={interactive ? label : undefined}
+              className="ui-help-hint-panel"
+              role="tooltip"
               style={position}
               onMouseEnter={() => {
                 cancelPointerClose()

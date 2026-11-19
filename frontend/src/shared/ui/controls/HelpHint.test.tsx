@@ -42,25 +42,38 @@ describe('HelpHint', () => {
     expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
   })
 
-  // 测试意图：带交互内容必须使用 dialog/popover 语义，而不是 tooltip。
-  it('uses popover semantics for interactive content', async () => {
-    render(
-      <HelpHint label="帮助：交互说明" interactive>
-        <a href="#details">查看详情</a>
-      </HelpHint>,
-    )
+  // 测试意图：取消的触屏按压不应让下一次键盘焦点被误判为触屏焦点。
+  it('opens on keyboard focus after a canceled touch pointer', async () => {
     const user = userEvent.setup()
-    const trigger = screen.getByRole('button', { name: '帮助：交互说明' })
+    render(<HelpHint label="帮助：取消触屏">键盘说明</HelpHint>)
+    const trigger = screen.getByRole('button', { name: '帮助：取消触屏' })
+
+    fireEvent.pointerDown(trigger, { pointerType: 'touch' })
+    trigger.dispatchEvent(new Event('pointercancel', { bubbles: true }))
     await user.tab()
 
-    expect(screen.getByRole('dialog', { name: '帮助：交互说明' })).toContainElement(
-      screen.getByRole('link', { name: '查看详情' }),
-    )
-    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
-    expect(trigger).toHaveAttribute('aria-haspopup', 'dialog')
-
-    await user.keyboard('{Escape}')
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
     expect(trigger).toHaveFocus()
+    expect(screen.getByRole('tooltip')).toHaveTextContent('键盘说明')
+  })
+
+  // 测试意图：关闭已打开的提示时不把焦点从当前操作控件抢回触发器。
+  it('does not move focus to the trigger when Escape closes an open tooltip', async () => {
+    const user = userEvent.setup()
+    render(
+      <>
+        <HelpHint label="帮助：提示">提示内容</HelpHint>
+        <button type="button">当前操作</button>
+      </>,
+    )
+    const trigger = screen.getByRole('button', { name: '帮助：提示' })
+    const currentAction = screen.getByRole('button', { name: '当前操作' })
+
+    fireEvent.pointerDown(trigger, { pointerType: 'mouse' })
+    fireEvent.click(trigger)
+    currentAction.focus()
+    await user.keyboard('{Escape}')
+
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument()
+    expect(currentAction).toHaveFocus()
   })
 })
