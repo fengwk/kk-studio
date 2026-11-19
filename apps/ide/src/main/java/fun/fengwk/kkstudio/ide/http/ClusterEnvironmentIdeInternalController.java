@@ -20,6 +20,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.EnvironmentIdeServiceImpl;
+import fun.fengwk.kkstudio.ide.IdeUuids;
 import fun.fengwk.kkstudio.ide.cluster.IdeInternalPaths;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeChangeDirectoryDTO;
 import fun.fengwk.kkstudio.ide.dto.EnvironmentIdeCloseViewDTO;
@@ -130,6 +131,26 @@ public class ClusterEnvironmentIdeInternalController {
     EnvironmentIdeChangeDirectoryDTO body =
         readBody(request, EnvironmentIdeChangeDirectoryDTO.class);
     return localEnvironmentIdeService.changeDirectory(environment, viewId, body);
+  }
+
+  @PostMapping(
+      "/views/{viewId:"
+          + VIEW_ID
+          + "}/attachments/{sessionId:"
+          + VIEW_ID
+          + "}/{resourceId:"
+          + VIEW_ID
+          + "}")
+  public void openAttachment(
+      @PathVariable String environmentId,
+      @PathVariable String viewId,
+      @PathVariable String sessionId,
+      @PathVariable String resourceId,
+      HttpServletRequest request) {
+    UUID parsedEnvironmentId = IdeUuids.requireInput(environmentId, "environmentId");
+    EnvironmentId environment = authenticateAndAuthorize(request, parsedEnvironmentId);
+    EnvironmentIdeViewBindingDTO body = readBody(request, EnvironmentIdeViewBindingDTO.class);
+    localEnvironmentIdeService.openAttachment(environment, viewId, sessionId, resourceId, body);
   }
 
   @PostMapping("/views/{viewId:" + VIEW_ID + "}/focus-terminal")

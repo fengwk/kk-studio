@@ -42,6 +42,10 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -112,7 +116,11 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
             new IdeBootstrapTicketService(),
             new AllowGateway(),
             new IdeViewSnapshotStore(transportB),
-            Duration.ofSeconds(1));
+            Duration.ofSeconds(1),
+            mock(HarnessOwnerQueryService.class),
+            mock(SessionBlobRefManager.class),
+            mock(StorageBlobRepository.class),
+            mock(StorageBlobContentService.class));
 
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/internal/ide/environments/", this::handle);
@@ -427,7 +435,11 @@ class ClusterEnvironmentIdeRemoteMetadataIntegrationTest {
         new IdeBootstrapTicketService(),
         new AllowGateway(),
         new IdeViewSnapshotStore(localTransportA),
-        Duration.ofSeconds(1));
+        Duration.ofSeconds(1),
+        mock(HarnessOwnerQueryService.class),
+        mock(SessionBlobRefManager.class),
+        mock(StorageBlobRepository.class),
+        mock(StorageBlobContentService.class));
   }
 
   private void handle(HttpExchange exchange) throws IOException {

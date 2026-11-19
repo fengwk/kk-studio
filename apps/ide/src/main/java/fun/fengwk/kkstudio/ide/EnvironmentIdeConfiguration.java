@@ -9,6 +9,10 @@ import org.springframework.context.annotation.Configuration;
 
 import fun.fengwk.kkstudio.ide.gateway.IdeBrowserSessionRegistry;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -46,13 +50,21 @@ public class EnvironmentIdeConfiguration {
       IdeCommandTransport ideCommandTransport,
       IdeBootstrapTicketService bootstrapTickets,
       IdeBrowserUseGateway browserUse,
-      IdeViewSnapshotStore snapshots) {
+      IdeViewSnapshotStore snapshots,
+      HarnessOwnerQueryService ownerQueryService,
+      SessionBlobRefManager sessionBlobRefManager,
+      StorageBlobRepository blobRepository,
+      StorageBlobContentService blobContentService) {
     return new EnvironmentIdeServiceImpl(
         ideCommandTransport,
         bootstrapTickets,
         browserUse,
         snapshots,
-        EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT);
+        EnvironmentIdeServiceImpl.DEFAULT_COMMAND_TIMEOUT,
+        ownerQueryService,
+        sessionBlobRefManager,
+        blobRepository,
+        blobContentService);
   }
 
   @Bean(destroyMethod = "shutdownNow")

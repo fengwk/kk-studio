@@ -141,6 +141,21 @@ public class IdeClusterClient {
     exchange("POST", IdeInternalPaths.terminalPath(environmentId, viewId), owner, request, null);
   }
 
+  public void openAttachment(
+      EnvironmentId environmentId,
+      ClusterOwnerRoute owner,
+      String viewId,
+      String sessionId,
+      String resourceId,
+      EnvironmentIdeViewBindingDTO request) {
+    exchange(
+        "POST",
+        IdeInternalPaths.attachmentPath(environmentId, viewId, sessionId, resourceId),
+        owner,
+        request,
+        null);
+  }
+
   public void collapseMobile(
       EnvironmentId environmentId,
       ClusterOwnerRoute owner,

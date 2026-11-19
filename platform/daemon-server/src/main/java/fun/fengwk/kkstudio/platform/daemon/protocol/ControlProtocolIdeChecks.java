@@ -7,6 +7,7 @@ import static fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolFields
 import static fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolFields.requirePositive;
 import static fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolFields.requirePresent;
 import static fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolFields.requireText;
+import static fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolFields.requireUtf8Text;
 import static fun.fengwk.kkstudio.platform.daemon.protocol.ControlProtocolFields.requireUuid;
 
 import fun.fengwk.kkstudio.platform.daemon.DaemonIdeLease;
@@ -27,6 +28,8 @@ final class ControlProtocolIdeChecks {
 
   /** IDE 列表视图上限。 */
   private static final int MAX_LISTED_IDE_VIEWS = 64;
+
+  private static final int MAX_ATTACHMENT_BYTES = 64 * 1024;
 
   private static final Pattern IDE_CODE_PATTERN = Pattern.compile("^[A-Z][A-Z0-9_]{0,63}$");
 
@@ -51,6 +54,10 @@ final class ControlProtocolIdeChecks {
   }
 
   static void validateIdeCommand(IdeCommand command) {
+    if (command.getAction() != IdeAction.OPEN_ATTACHMENT
+        && (command.hasAttachmentId() || command.hasAttachmentText())) {
+      throw new ControlProtocolException("attachment fields are only valid for OPEN_ATTACHMENT");
+    }
     switch (command.getAction()) {
       case OPEN_VIEW -> {
         requireUuid(command.hasViewId(), command.getViewId(), "ideCommand.viewId");
@@ -94,6 +101,33 @@ final class ControlProtocolIdeChecks {
         }
         requireIdePath(command.getDirectory(), "ideCommand.directory");
         rejectOpenFields(command);
+      }
+      case OPEN_ATTACHMENT -> {
+        requireBoundView(command, false);
+        requireExpectedDaemonInstance(command);
+        if (command.hasDirectory()) {
+          throw new ControlProtocolException("OPEN_ATTACHMENT must not declare directory");
+        }
+        rejectOpenFields(command);
+        requireUuid(
+            command.hasAttachmentId(), command.getAttachmentId(), "ideCommand.attachmentId");
+        String text =
+            requireUtf8Text(
+                command.hasAttachmentText(),
+                command.getAttachmentText(),
+                "ideCommand.attachmentText",
+                MAX_ATTACHMENT_BYTES,
+                false);
+        if (text.codePoints()
+            .anyMatch(
+                codePoint ->
+                    Character.isISOControl(codePoint)
+                        && codePoint != '\t'
+                        && codePoint != '\n'
+                        && codePoint != '\r')) {
+          throw new ControlProtocolException(
+              "ideCommand.attachmentText must be text, not binary data");
+        }
       }
       case FOCUS_TERMINAL, COLLAPSE_MOBILE -> {
         requireBoundView(command, false);

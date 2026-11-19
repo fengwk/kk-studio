@@ -5,7 +5,15 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -30,7 +38,16 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewSummary;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
 import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -44,6 +61,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
 
 /** 意图：C3 控制服务只以权威完整快照授权；显式实例/epoch 围栏、旧 revision 不回退、GET 纯读、结构化 reason 与 OPEN 结果未知时的对账都必须保持精确。 */
 class EnvironmentIdeServiceImplTest {
@@ -56,6 +74,9 @@ class EnvironmentIdeServiceImplTest {
   private static final UUID EVENT_NODE = UUID.fromString("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
   private static final UUID CONNECTION = UUID.fromString("12345678-1234-1234-1234-123456789abc");
   private static final UUID CLAIM = UUID.fromString("87654321-4321-4321-4321-cba987654321");
+  private static final UUID ATTACHMENT_ID = UUID.fromString("abcdefab-cdef-4abc-8def-abcdefabcdef");
+  private static final UUID ATTACHMENT_SESSION_ID =
+      UUID.fromString("aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   private static final String DAEMON_INSTANCE = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
   private static final String REPLACEMENT_INSTANCE = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
   private static final String OLD_INSTANCE = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
@@ -65,6 +86,10 @@ class EnvironmentIdeServiceImplTest {
   private FakeBrowserUse browserUse;
   private IdeBootstrapTicketService tickets;
   private IdeViewSnapshotStore snapshots;
+  private HarnessOwnerQueryService ownerQueryService;
+  private SessionBlobRefManager sessionBlobRefManager;
+  private StorageBlobRepository blobRepository;
+  private StorageBlobContentService blobContentService;
   private EnvironmentIdeServiceImpl service;
 
   @BeforeEach
@@ -73,9 +98,21 @@ class EnvironmentIdeServiceImplTest {
     browserUse = new FakeBrowserUse();
     tickets = new IdeBootstrapTicketService();
     snapshots = new IdeViewSnapshotStore(transport);
+    ownerQueryService = mock(HarnessOwnerQueryService.class);
+    sessionBlobRefManager = mock(SessionBlobRefManager.class);
+    blobRepository = mock(StorageBlobRepository.class);
+    blobContentService = mock(StorageBlobContentService.class);
     service =
         new EnvironmentIdeServiceImpl(
-            transport, tickets, browserUse, snapshots, Duration.ofMillis(150));
+            transport,
+            tickets,
+            browserUse,
+            snapshots,
+            Duration.ofMillis(150),
+            ownerQueryService,
+            sessionBlobRefManager,
+            blobRepository,
+            blobContentService);
   }
 
   @Test
@@ -327,6 +364,115 @@ class EnvironmentIdeServiceImplTest {
 
     assertEquals("/daemon/next", changed.getDirectory());
     assertEquals(List.of(IdeAction.OPEN_VIEW, IdeAction.CHANGE_DIRECTORY), actions());
+  }
+
+  @Test
+  void openAttachmentSendsBoundTextWithResourceIdentity() {
+    prepareAttachment("hello attachment".getBytes(StandardCharsets.UTF_8), "text/plain");
+
+    service.openAttachment(
+        ENV,
+        VIEW.toString(),
+        ATTACHMENT_SESSION_ID.toString(),
+        ATTACHMENT_ID.toString(),
+        binding(7L));
+
+    IdeCommand command = transport.commands.get(1);
+    assertEquals(IdeAction.OPEN_ATTACHMENT, command.getAction());
+    assertEquals(ATTACHMENT_ID.toString(), command.getAttachmentId());
+    assertEquals("hello attachment", command.getAttachmentText());
+    assertFalse(command.hasDirectory());
+    assertFalse(command.hasDiscard());
+    verify(ownerQueryService).requireOwnedSession(ATTACHMENT_SESSION_ID);
+  }
+
+  @Test
+  void openAttachmentRejectsOversizeBeforeCommandDelivery() {
+    prepareAttachment(new byte[64 * 1024 + 1], "text/plain");
+
+    assertThrows(
+        DomainException.class,
+        () ->
+            service.openAttachment(
+                ENV,
+                VIEW.toString(),
+                ATTACHMENT_SESSION_ID.toString(),
+                ATTACHMENT_ID.toString(),
+                binding(7L)));
+
+    assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
+  }
+
+  @Test
+  void openAttachmentRequiresOwnedSessionAndSessionResourceReference() {
+    transport.replies.add(openSnapshot(5L, 7L));
+    service.openView(ENV, openRequest("create", 0L, null));
+    doThrow(DomainException.notFound("session"))
+        .when(ownerQueryService)
+        .requireOwnedSession(ATTACHMENT_SESSION_ID);
+
+    assertThrows(
+        DomainException.class,
+        () ->
+            service.openAttachment(
+                ENV,
+                VIEW.toString(),
+                ATTACHMENT_SESSION_ID.toString(),
+                ATTACHMENT_ID.toString(),
+                binding(7L)));
+
+    verify(sessionBlobRefManager, never()).contains(ATTACHMENT_SESSION_ID, ATTACHMENT_ID);
+    assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
+  }
+
+  @Test
+  void openAttachmentRejectsUnsupportedMediaBeforeContentRead() {
+    prepareAttachment(new byte[] {'x'}, "application/octet-stream");
+
+    assertThrows(
+        DomainException.class,
+        () ->
+            service.openAttachment(
+                ENV,
+                VIEW.toString(),
+                ATTACHMENT_SESSION_ID.toString(),
+                ATTACHMENT_ID.toString(),
+                binding(7L)));
+
+    verifyNoInteractions(blobContentService);
+    assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
+  }
+
+  @Test
+  void openAttachmentRejectsInvalidUtf8BeforeCommandDelivery() {
+    prepareAttachment(new byte[] {(byte) 0xc3, (byte) 0x28}, "text/plain");
+
+    assertThrows(
+        DomainException.class,
+        () ->
+            service.openAttachment(
+                ENV,
+                VIEW.toString(),
+                ATTACHMENT_SESSION_ID.toString(),
+                ATTACHMENT_ID.toString(),
+                binding(7L)));
+
+    assertEquals(List.of(IdeAction.OPEN_VIEW), actions());
+  }
+
+  @Test
+  void openAttachmentRejectsNonCanonicalResourceBeforeAnyLookup() {
+    assertThrows(
+        DomainException.class,
+        () ->
+            service.openAttachment(
+                ENV,
+                VIEW.toString(),
+                ATTACHMENT_SESSION_ID.toString(),
+                ATTACHMENT_ID.toString().toUpperCase(),
+                binding(7L)));
+
+    assertTrue(transport.commands.isEmpty());
   }
 
   @Test
@@ -682,7 +828,15 @@ class EnvironmentIdeServiceImplTest {
     BlockingTicketService blockingTickets = new BlockingTicketService();
     service =
         new EnvironmentIdeServiceImpl(
-            transport, blockingTickets, browserUse, snapshots, Duration.ofMillis(150));
+            transport,
+            blockingTickets,
+            browserUse,
+            snapshots,
+            Duration.ofMillis(150),
+            ownerQueryService,
+            sessionBlobRefManager,
+            blobRepository,
+            blobContentService);
     DaemonConnectionIdentity identity = new DaemonConnectionIdentity(ENV, DAEMON_INSTANCE);
 
     transport.replies.add(snapshot(1L, summary(1L, CLAIM)));
@@ -705,6 +859,25 @@ class EnvironmentIdeServiceImplTest {
     assertTrue(
         blockingTickets.consume(newTicket).isPresent(),
         "late Rev2 cleanup must not revoke the accepted Rev3 ticket");
+  }
+
+  private void prepareAttachment(byte[] bytes, String mediaType) {
+    transport.replies.add(openSnapshot(5L, 7L));
+    service.openView(ENV, openRequest("create", 0L, null));
+    when(sessionBlobRefManager.contains(ATTACHMENT_SESSION_ID, ATTACHMENT_ID)).thenReturn(true);
+    StorageBlob blob = new StorageBlob();
+    blob.setId(ATTACHMENT_ID);
+    blob.setMediaType(mediaType);
+    blob.setState(StorageBlobState.ACTIVE);
+    when(blobRepository.getById(ATTACHMENT_ID)).thenReturn(blob);
+    doAnswer(
+            invocation -> {
+              Function<InputStream, Object> reader = invocation.getArgument(2);
+              return reader.apply(new ByteArrayInputStream(bytes));
+            })
+        .when(blobContentService)
+        .withBlobStream(eq(ATTACHMENT_ID), any(), any());
+    transport.replies.add(snapshot(6L, summary(7L, CLAIM)));
   }
 
   private List<IdeAction> actions() {

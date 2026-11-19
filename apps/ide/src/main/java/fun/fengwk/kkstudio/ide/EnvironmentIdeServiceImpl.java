@@ -1,5 +1,8 @@
 package fun.fengwk.kkstudio.ide;
 
+import org.springframework.http.InvalidMediaTypeException;
+import org.springframework.http.MediaType;
+
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
 import fun.fengwk.kkstudio.ide.IdeBindings.Binding;
@@ -20,8 +23,24 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.IdeOpenMode;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeResult;
 import fun.fengwk.kkstudio.platform.daemon.protocol.IdeViewState;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonConnectionIdentity;
+import fun.fengwk.kkstudio.platform.orchestration.HarnessOwnerQueryService;
+import fun.fengwk.kkstudio.platform.storage.ReadDeadline;
+import fun.fengwk.kkstudio.platform.storage.persistence.StorageBlobRepository;
+import fun.fengwk.kkstudio.platform.storage.service.SessionBlobRefManager;
+import fun.fengwk.kkstudio.platform.storage.service.StorageBlobContentService;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlob;
+import fun.fengwk.kkstudio.platform.storage.service.model.StorageBlobState;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.nio.ByteBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.Charset;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -38,18 +57,29 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   /** 除普通关闭外，单条 IDE 命令的默认等待上限。 */
   public static final Duration DEFAULT_COMMAND_TIMEOUT = Duration.ofSeconds(30);
 
+  private static final int MAX_ATTACHMENT_BYTES = 64 * 1024;
+  private static final Duration ATTACHMENT_READ_TIMEOUT = Duration.ofSeconds(5);
+
   private final IdeCommandTransport transport;
   private final IdeBootstrapTicketService bootstrapTickets;
   private final IdeCommandCaller caller;
   private final IdeSnapshots snapshotBoundary;
   private final IdeBindings bindings;
+  private final HarnessOwnerQueryService ownerQueryService;
+  private final SessionBlobRefManager sessionBlobRefManager;
+  private final StorageBlobRepository blobRepository;
+  private final StorageBlobContentService blobContentService;
 
   public EnvironmentIdeServiceImpl(
       IdeCommandTransport transport,
       IdeBootstrapTicketService bootstrapTickets,
       IdeBrowserUseGateway browserUse,
       IdeViewSnapshotStore snapshots,
-      Duration commandTimeout) {
+      Duration commandTimeout,
+      HarnessOwnerQueryService ownerQueryService,
+      SessionBlobRefManager sessionBlobRefManager,
+      StorageBlobRepository blobRepository,
+      StorageBlobContentService blobContentService) {
     this.transport = Objects.requireNonNull(transport, "transport");
     this.bootstrapTickets = Objects.requireNonNull(bootstrapTickets, "bootstrapTickets");
     IdeBrowserUseGateway requiredBrowserUse = Objects.requireNonNull(browserUse, "browserUse");
@@ -58,6 +88,11 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     this.snapshotBoundary =
         new IdeSnapshots(caller, transport, requiredSnapshots, bootstrapTickets);
     this.bindings = new IdeBindings(transport, requiredBrowserUse, snapshotBoundary);
+    this.ownerQueryService = Objects.requireNonNull(ownerQueryService, "ownerQueryService");
+    this.sessionBlobRefManager =
+        Objects.requireNonNull(sessionBlobRefManager, "sessionBlobRefManager");
+    this.blobRepository = Objects.requireNonNull(blobRepository, "blobRepository");
+    this.blobContentService = Objects.requireNonNull(blobContentService, "blobContentService");
   }
 
   @Override
@@ -301,6 +336,58 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
   }
 
   @Override
+  public void openAttachment(
+      EnvironmentId environmentId,
+      String viewId,
+      String sessionId,
+      String resourceId,
+      EnvironmentIdeViewBindingDTO request) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(request, "request");
+    UUID parsedViewId = IdeInputs.requireViewId(viewId);
+    UUID parsedSessionId = IdeUuids.requireInput(sessionId, "sessionId");
+    UUID parsedResourceId = IdeUuids.requireInput(resourceId, "resourceId");
+    UUID browserSessionId =
+        IdeUuids.requireInput(request.getBrowserSessionId(), "browserSessionId");
+    long bindingEpoch = IdeInputs.requireEpoch(request.getBindingEpoch());
+    Binding binding =
+        bindings.requireBinding(
+            environmentId,
+            parsedViewId,
+            browserSessionId,
+            bindingEpoch,
+            request.getExpectedDaemonInstanceId());
+    ownerQueryService.requireOwnedSession(parsedSessionId);
+    if (!sessionBlobRefManager.contains(parsedSessionId, parsedResourceId)) {
+      throw DomainException.notFound("resource");
+    }
+    StorageBlob blob = blobRepository.getById(parsedResourceId);
+    if (blob == null || blob.getState() != StorageBlobState.ACTIVE) {
+      throw DomainException.notFound("resource");
+    }
+    requireSupportedAttachmentType(blob.getMediaType());
+    byte[] bytes =
+        blobContentService.withBlobStream(
+            parsedResourceId,
+            ReadDeadline.after(ATTACHMENT_READ_TIMEOUT),
+            EnvironmentIdeServiceImpl::readAttachmentBytes);
+    String text = decodeAttachment(bytes);
+    IdeCommand command =
+        bindingCommand(
+                IdeAction.OPEN_ATTACHMENT, parsedViewId, browserSessionId, bindingEpoch, binding)
+            .toBuilder()
+            .setAttachmentId(parsedResourceId.toString())
+            .setAttachmentText(text)
+            .build();
+    IdeCall result = caller.callConfirmed(environmentId, command);
+    if (!result.reply().getOk()) {
+      snapshotBoundary.acceptFailureSnapshot(result);
+      throw IdeProtocol.rejection(result.reply());
+    }
+    snapshotBoundary.acceptOptionalSnapshot(result, binding.view());
+  }
+
+  @Override
   public void collapseMobile(
       EnvironmentId environmentId, String viewId, EnvironmentIdeViewBindingDTO request) {
     boundAction(environmentId, viewId, request, IdeAction.COLLAPSE_MOBILE);
@@ -442,6 +529,70 @@ public class EnvironmentIdeServiceImpl implements EnvironmentIdeService {
     dto.setRevision(snapshot.revision());
     dto.setView(view == null ? null : IdeProtocol.toDto(identity, view));
     return dto;
+  }
+
+  private static void requireSupportedAttachmentType(String value) {
+    if (value == null || value.isBlank()) {
+      throw DomainException.validation("attachment", "attachment media type is unsupported");
+    }
+    MediaType mediaType;
+    try {
+      mediaType = MediaType.parseMediaType(value);
+    } catch (InvalidMediaTypeException error) {
+      throw DomainException.validation("attachment", "attachment media type is unsupported");
+    }
+    String type = mediaType.getType().toLowerCase(Locale.ROOT);
+    String subtype = mediaType.getSubtype().toLowerCase(Locale.ROOT);
+    boolean supported =
+        type.equals("text")
+            || type.equals("application")
+                && (subtype.equals("json") || subtype.equals("xml") || subtype.equals("yaml"));
+    Charset charset;
+    try {
+      charset = mediaType.getCharset();
+    } catch (IllegalArgumentException error) {
+      throw DomainException.validation("attachment", "attachment media type is unsupported");
+    }
+    if (!supported || charset != null && !StandardCharsets.UTF_8.equals(charset)) {
+      throw DomainException.validation("attachment", "attachment media type is unsupported");
+    }
+  }
+
+  private static byte[] readAttachmentBytes(InputStream input) {
+    try {
+      byte[] bytes = input.readNBytes(MAX_ATTACHMENT_BYTES + 1);
+      if (bytes.length > MAX_ATTACHMENT_BYTES) {
+        throw DomainException.validation("attachment", "attachment exceeds 64 KiB");
+      }
+      return bytes;
+    } catch (IOException error) {
+      throw new UncheckedIOException(error);
+    }
+  }
+
+  private static String decodeAttachment(byte[] bytes) {
+    final String text;
+    try {
+      text =
+          StandardCharsets.UTF_8
+              .newDecoder()
+              .onMalformedInput(CodingErrorAction.REPORT)
+              .onUnmappableCharacter(CodingErrorAction.REPORT)
+              .decode(ByteBuffer.wrap(bytes))
+              .toString();
+    } catch (CharacterCodingException error) {
+      throw DomainException.validation("attachment", "attachment must be valid UTF-8 text");
+    }
+    if (text.codePoints()
+        .anyMatch(
+            codePoint ->
+                Character.isISOControl(codePoint)
+                    && codePoint != '\t'
+                    && codePoint != '\n'
+                    && codePoint != '\r')) {
+      throw DomainException.validation("attachment", "attachment must be text, not binary data");
+    }
+    return text;
   }
 
   private static IdeCommand bindingCommand(
