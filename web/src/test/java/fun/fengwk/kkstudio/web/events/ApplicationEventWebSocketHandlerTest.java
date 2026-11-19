@@ -33,21 +33,26 @@ import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscription;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
 import fun.fengwk.kkstudio.harness.api.HarnessInvalidationChanges;
-import fun.fengwk.kkstudio.harness.api.HarnessThreadVersionChanges;
+import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.harness.codec.RealtimeEventJsonCodec;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderStreamEvent;
 import fun.fengwk.kkstudio.ide.browser.ConnectionIdentity;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseRegistry;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadDTO;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 
 import java.nio.ByteBuffer;
+import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Queue;
 import java.util.UUID;
@@ -65,6 +70,7 @@ import java.util.function.Consumer;
 class ApplicationEventWebSocketHandlerTest {
 
   private static final UUID THREAD = new UUID(0L, 1L);
+  private static final UUID BASE = new UUID(0L, 2L);
   private static final UUID EVENT_NODE = UUID.fromString("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
   private static final UUID IDE_ENVIRONMENT =
       UUID.fromString("33333333-3333-3333-3333-333333333333");
@@ -84,7 +90,7 @@ class ApplicationEventWebSocketHandlerTest {
   private static final long TEST_SEND_TIMEOUT_MILLIS = 10_000L;
   private static final long TEST_HEARTBEAT_INTERVAL_MILLIS = 20_000L;
 
-  private HarnessThreadVersionChanges threadVersionSource;
+  private HarnessInvalidationChanges threadSnapshotSource;
   private HarnessChangeSubscriptions harnessChanges;
   private RealtimeEventSource realtimeSource;
   private RealtimeSubscriptionService realtimeSubscriptions;
@@ -98,19 +104,20 @@ class ApplicationEventWebSocketHandlerTest {
   private SentRecorder recorder;
   private AtomicLong nowNanos;
   private ScheduledExecutorService heartbeatScheduler;
+  private ScheduledExecutorService snapshotScheduler;
 
   @BeforeEach
   @SuppressWarnings("unchecked")
   void setUp() throws Exception {
-    threadVersionSource = mock(HarnessThreadVersionChanges.class);
     harnessChanges = mock(HarnessChangeSubscriptions.class);
-    when(harnessChanges.threadVersions()).thenReturn(threadVersionSource);
+    threadSnapshotSource = mock(HarnessInvalidationChanges.class);
+    when(harnessChanges.threadSnapshots()).thenReturn(threadSnapshotSource);
     realtimeSource = mock(RealtimeEventSource.class);
     realtimeSubscriptions = mock(RealtimeSubscriptionService.class);
     canvasVersionSource = mock(CanvasVersionEventSource.class);
     projectChangeSource = mock(NotificationInvalidationSource.class);
     environmentChangeSource = mock(NotificationInvalidationSource.class);
-    when(threadVersionSource.subscribe(any(), any())).thenReturn(subscribed(5L, () -> {}));
+    when(threadSnapshotSource.subscribe(any(), any())).thenReturn(subscribed(0L, () -> {}));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn((AutoCloseable) () -> {});
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, () -> {}));
@@ -148,10 +155,17 @@ class ApplicationEventWebSocketHandlerTest {
     if (heartbeatScheduler != null) {
       heartbeatScheduler.shutdownNow();
     }
+    if (snapshotScheduler != null) {
+      snapshotScheduler.shutdownNow();
+    }
   }
 
   /** 用给定 sender 容量重建 handler 与 recorder mock（容量小可驱动 backpressure 路径）。 */
   private void rebuildHandler(int capacity) throws Exception {
+    rebuildHandler(capacity, TEST_MAX_BYTES);
+  }
+
+  private void rebuildHandler(int capacity, long maxBytes) throws Exception {
     if (heartbeatScheduler != null) {
       heartbeatScheduler.shutdownNow();
     }
@@ -161,7 +175,7 @@ class ApplicationEventWebSocketHandlerTest {
             hub,
             new EventFrameCodec(new RealtimeEventJsonCodec()),
             new ApplicationEventSettings(
-                capacity, TEST_MAX_BYTES, TEST_SEND_TIMEOUT_MILLIS, TEST_HEARTBEAT_INTERVAL_MILLIS),
+                capacity, maxBytes, TEST_SEND_TIMEOUT_MILLIS, TEST_HEARTBEAT_INTERVAL_MILLIS),
             EVENT_NODE,
             browserUseRegistry,
             heartbeatScheduler,
@@ -342,34 +356,14 @@ class ApplicationEventWebSocketHandlerTest {
   }
 
   @Test
-  void subscribeEmitsAckThenBufferedEvents() {
-    AtomicReference<Consumer<HarnessThreadVersionChanges.Event>> versionConsumer =
-        new AtomicReference<>();
-    when(threadVersionSource.subscribe(any(), any()))
-        .thenAnswer(
-            inv -> {
-              versionConsumer.set(inv.getArgument(1));
-              return subscribed(5L, () -> {});
-            });
+  void threadSubscribeAcknowledgesWithZeroCursor() throws Exception {
     handler.afterConnectionEstablished(springSession);
-
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
-    // ack 帧已入队在途（sendText 被 recorder 捕获、尚未完成），此时到达的事件必须排队在 ack 之后。
-    versionConsumer.get().accept(new HarnessThreadVersionChanges.Event.Version(6L));
-    assertEquals(1, recorder.sent.size(), "event must wait for the ack frame to be sent");
 
-    recorder.complete(0); // 完成 ack 发送，事件帧随后串行发出
-    assertEquals(2, recorder.sent.size(), "ack frame must precede the buffered event frame");
-    assertEquals(
-        "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-            + THREAD
-            + "\"},\"cursor\":\"5\"}",
-        recorder.sent.get(0));
-    assertEquals(
-        "{\"type\":\"event\",\"resource\":{\"kind\":\"thread\",\"id\":\""
-            + THREAD
-            + "\"},\"name\":\"version\",\"cursor\":\"6\",\"data\":{\"version\":\"6\"}}",
-        recorder.sent.get(1));
+    JsonNode ack = JsonMapper.builder().build().readTree(recorder.sent.get(0));
+    assertEquals("subscribed", ack.path("type").asText());
+    assertEquals("0", ack.path("cursor").asText());
+    assertEquals(THREAD.toString(), ack.path("resource").path("id").asText());
   }
 
   @Test
@@ -378,7 +372,7 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
 
-    verify(threadVersionSource, times(1)).subscribe(any(), any());
+    verify(threadSnapshotSource, times(1)).subscribe(any(), any());
     verify(realtimeSource, times(1)).subscribe(any(), any(), any());
   }
 
@@ -386,7 +380,7 @@ class ApplicationEventWebSocketHandlerTest {
   void unsubscribeReleasesTheSubscription() throws Exception {
     AutoCloseable versionHandle = mock(AutoCloseable.class);
     AutoCloseable realtimeHandle = mock(AutoCloseable.class);
-    when(threadVersionSource.subscribe(any(), any())).thenReturn(subscribed(5L, versionHandle));
+    when(threadSnapshotSource.subscribe(any(), any())).thenReturn(subscribed(0L, versionHandle));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(realtimeHandle);
     handler.afterConnectionEstablished(springSession);
 
@@ -417,7 +411,7 @@ class ApplicationEventWebSocketHandlerTest {
 
   @Test
   void unknownResourceSendsResourceErrorAndKeepsConnectionOpen() throws Exception {
-    when(threadVersionSource.subscribe(any(), any()))
+    when(threadSnapshotSource.subscribe(any(), any()))
         .thenThrow(new IllegalArgumentException("unknown thread: " + THREAD));
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
@@ -434,13 +428,13 @@ class ApplicationEventWebSocketHandlerTest {
         .close(any(int.class), any(String.class), any(Callback.class));
 
     // 连接保持：后续合法帧仍被处理。
-    doReturn(subscribed(5L, () -> {})).when(threadVersionSource).subscribe(any(), any());
+    doReturn(subscribed(0L, () -> {})).when(threadSnapshotSource).subscribe(any(), any());
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
     assertEquals(2, recorder.sent.size());
     assertEquals(
         "{\"type\":\"subscribed\",\"resource\":{\"kind\":\"thread\",\"id\":\""
             + THREAD
-            + "\"},\"cursor\":\"5\"}",
+            + "\"},\"cursor\":\"0\"}",
         recorder.sent.get(1));
   }
 
@@ -599,7 +593,7 @@ class ApplicationEventWebSocketHandlerTest {
   void ackEnqueueFailureClosesFreshSubscriptionWithoutKeepingIt() throws Exception {
     AutoCloseable versionHandle1 = mock(AutoCloseable.class);
     AutoCloseable versionHandle2 = mock(AutoCloseable.class);
-    when(threadVersionSource.subscribe(any(), any())).thenReturn(subscribed(5L, versionHandle1));
+    when(threadSnapshotSource.subscribe(any(), any())).thenReturn(subscribed(0L, versionHandle1));
     when(canvasVersionSource.subscribe(any(), any()))
         .thenReturn(new SourceSubscribed(3L, versionHandle2));
     // 容量 1：第一个订阅的 ack 在途后，第二个订阅的 ack 必然入队失败。
@@ -633,28 +627,147 @@ class ApplicationEventWebSocketHandlerTest {
   }
 
   @Test
-  void eventEnqueueFailureTriggersBackpressure() throws Exception {
-    AtomicReference<Consumer<HarnessThreadVersionChanges.Event>> versionConsumer =
+  void subscribedThreadRefreshPublishesFullSnapshotWithoutTransportCursor() throws Exception {
+    hub.close();
+    snapshotScheduler = Executors.newSingleThreadScheduledExecutor();
+    List<List<UUID>> cursorsSeen = new ArrayList<>();
+    ThreadSnapshotPublisher publisher =
+        new ThreadSnapshotPublisher(
+            Runnable::run,
+            (threadId, cursors) -> {
+              cursorsSeen.add(cursors);
+              return cursors.stream()
+                  .map(
+                      cursor -> {
+                        HarnessThreadDTO thread = new HarnessThreadDTO();
+                        thread.setThreadId(THREAD.toString());
+                        thread.setHeadEntryId("00000000-0000-0000-0000-000000000007");
+                        HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
+                        snapshot.setThread(thread);
+                        snapshot.setBaseEntryId(cursor == null ? null : cursor.toString());
+                        snapshot.setEntries(List.of());
+                        snapshot.setToolInvocations(List.of());
+                        return snapshot;
+                      })
+                  .toList();
+            },
+            snapshotScheduler);
+    hub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            projectChangeSource,
+            environmentChangeSource,
+            () -> DEFAULT_SENDER_CAPACITY,
+            null,
+            publisher);
+    rebuildHandler(DEFAULT_SENDER_CAPACITY);
+    handler.afterConnectionEstablished(springSession);
+    String subscribe =
+        "{\"type\":\"subscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
+            + THREAD
+            + "\"},\"afterEntryId\":\"00000000-0000-0000-0000-000000000002\"}";
+    handler.handleTextMessage(springSession, textMessage(subscribe));
+    assertEquals(1, recorder.sent.size());
+    recorder.complete(0);
+    assertEquals(2, recorder.sent.size());
+    JsonNode incremental = JsonMapper.builder().build().readTree(recorder.sent.get(1));
+    assertEquals("snapshot", incremental.path("name").asText());
+    assertEquals(
+        "00000000-0000-0000-0000-000000000002",
+        incremental.path("data").path("baseEntryId").asText());
+    assertFalse(incremental.has("cursor"));
+
+    handler.handleTextMessage(
+        springSession,
+        textMessage(
+            "{\"type\":\"refresh\",\"resource\":{\"kind\":\"thread\",\"id\":\"" + THREAD + "\"}}"));
+    recorder.complete(1);
+    assertEquals(3, recorder.sent.size());
+    JsonNode full = JsonMapper.builder().build().readTree(recorder.sent.get(2));
+    assertTrue(full.path("data").path("baseEntryId").isNull());
+    assertFalse(full.has("cursor"));
+    assertEquals(List.of(List.of(BASE), Collections.singletonList(null)), cursorsSeen);
+  }
+
+  @Test
+  void oversizedSnapshotResyncsOnceAndPausesAllThreadFramesUntilRefresh() throws Exception {
+    hub.close();
+    snapshotScheduler = Executors.newSingleThreadScheduledExecutor();
+    AtomicReference<Consumer<HarnessInvalidationChanges.Event>> invalidation =
         new AtomicReference<>();
-    when(threadVersionSource.subscribe(any(), any()))
+    when(threadSnapshotSource.subscribe(any(), any()))
         .thenAnswer(
-            inv -> {
-              versionConsumer.set(inv.getArgument(1));
-              return subscribed(5L, () -> {});
+            invocation -> {
+              invalidation.set(invocation.getArgument(1));
+              return subscribed(0L, () -> {});
             });
-    // 容量 2：ack 完成后，事件 6 在途、7 排队、8 入队成功、9 入队失败 → BACKPRESSURE。
+    AtomicReference<Consumer<RealtimeEvent>> realtimeConsumer = new AtomicReference<>();
+    when(realtimeSource.subscribe(any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              realtimeConsumer.set(invocation.getArgument(1));
+              return (AutoCloseable) () -> {};
+            });
+    ThreadSnapshotPublisher publisher =
+        new ThreadSnapshotPublisher(
+            Runnable::run,
+            (threadId, cursors) -> Collections.nCopies(cursors.size(), largeSnapshot()),
+            snapshotScheduler);
+    hub =
+        new ApplicationEventHub(
+            harnessChanges,
+            realtimeSource,
+            realtimeSubscriptions,
+            canvasVersionSource,
+            projectChangeSource,
+            environmentChangeSource,
+            () -> DEFAULT_SENDER_CAPACITY,
+            null,
+            publisher);
+    rebuildHandler(DEFAULT_SENDER_CAPACITY, 512);
+    handler.afterConnectionEstablished(springSession);
+    handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
+
+    assertEquals(1, recorder.sent.size(), "the oversized catch-up waits behind the subscribed ACK");
+    recorder.complete(0);
+    assertEquals(2, recorder.sent.size());
+    assertEquals(
+        "resync",
+        JsonMapper.builder().build().readTree(recorder.sent.get(1)).path("type").asText());
+
+    realtimeConsumer.get().accept(modelDelta(1L));
+    invalidation.get().accept(new HarnessInvalidationChanges.Event.Changed(THREAD));
+    assertEquals(
+        2,
+        recorder.sent.size(),
+        "paused Thread subscriptions suppress realtime and further snapshots");
+  }
+
+  @Test
+  void realtimeBackpressureClosesTheConnection() throws Exception {
+    AtomicReference<Consumer<RealtimeEvent>> realtimeConsumer = new AtomicReference<>();
+    when(realtimeSource.subscribe(any(), any(), any()))
+        .thenAnswer(
+            invocation -> {
+              realtimeConsumer.set(invocation.getArgument(1));
+              return (AutoCloseable) () -> {};
+            });
+    // Realtime frames still use the existing per-connection bounded FIFO; overflow closes it.
     rebuildHandler(2);
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
-    recorder.complete(0); // ack 完成
-    versionConsumer.get().accept(new HarnessThreadVersionChanges.Event.Version(6L));
-    recorder.complete(1); // 事件 6 完成
-    versionConsumer.get().accept(new HarnessThreadVersionChanges.Event.Version(7L)); // 在途
-    versionConsumer.get().accept(new HarnessThreadVersionChanges.Event.Version(8L)); // 排队
-    versionConsumer.get().accept(new HarnessThreadVersionChanges.Event.Version(9L)); // 溢出
+    recorder.complete(0);
+    realtimeConsumer.get().accept(modelDelta(6L));
+    recorder.complete(1);
+    realtimeConsumer.get().accept(modelDelta(7L));
+    realtimeConsumer.get().accept(modelDelta(8L));
+    realtimeConsumer.get().accept(modelDelta(9L));
 
-    assertEquals(3, recorder.sent.size(), "error frame must wait behind the in-flight event");
-    recorder.complete(2); // 事件 7 完成
+    assertEquals(3, recorder.sent.size());
+    recorder.complete(2);
     assertEquals(4, recorder.sent.size());
     assertEquals(
         "{\"type\":\"error\",\"code\":\"BACKPRESSURE\",\"message\":\"event queue is full\"}",
@@ -670,7 +783,7 @@ class ApplicationEventWebSocketHandlerTest {
   void disconnectReleasesAllSubscriptions() throws Exception {
     AutoCloseable versionHandle = mock(AutoCloseable.class);
     AutoCloseable realtimeHandle = mock(AutoCloseable.class);
-    when(threadVersionSource.subscribe(any(), any())).thenReturn(subscribed(5L, versionHandle));
+    when(threadSnapshotSource.subscribe(any(), any())).thenReturn(subscribed(0L, versionHandle));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(realtimeHandle);
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
@@ -685,7 +798,7 @@ class ApplicationEventWebSocketHandlerTest {
   void shutdownClosesLiveConnectionsWithServiceRestartAndReleasesSubscriptions() throws Exception {
     AutoCloseable versionHandle = mock(AutoCloseable.class);
     AutoCloseable realtimeHandle = mock(AutoCloseable.class);
-    when(threadVersionSource.subscribe(any(), any())).thenReturn(subscribed(5L, versionHandle));
+    when(threadSnapshotSource.subscribe(any(), any())).thenReturn(subscribed(0L, versionHandle));
     when(realtimeSource.subscribe(any(), any(), any())).thenReturn(realtimeHandle);
     handler.afterConnectionEstablished(springSession);
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
@@ -711,7 +824,7 @@ class ApplicationEventWebSocketHandlerTest {
     // 幂等：再次 shutdown 与后续帧均安全。
     handler.shutdown();
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
-    verify(threadVersionSource, times(1)).subscribe(any(), any());
+    verify(threadSnapshotSource, times(1)).subscribe(any(), any());
   }
 
   @Test
@@ -722,7 +835,7 @@ class ApplicationEventWebSocketHandlerTest {
     handler.handleTextMessage(springSession, textMessage(subscribeFrame(THREAD)));
 
     // 关闭后的帧不得再登记订阅或建立上游。
-    verify(threadVersionSource, never()).subscribe(any(), any());
+    verify(threadSnapshotSource, never()).subscribe(any(), any());
   }
 
   @Test
@@ -738,9 +851,9 @@ class ApplicationEventWebSocketHandlerTest {
             inv -> {
               establishing.countDown();
               establishDone.await();
-              return subscribed(5L, versionHandle);
+              return subscribed(0L, versionHandle);
             })
-        .when(threadVersionSource)
+        .when(threadSnapshotSource)
         .subscribe(any(), any());
     handler.afterConnectionEstablished(springSession);
 
@@ -777,7 +890,7 @@ class ApplicationEventWebSocketHandlerTest {
     // 第二个帧在第一个订阅 ack 入队后、登记前到达。closeLock 串行两个帧，
     // 第二个帧只能看到已登记状态并幂等返回，不能建立或覆盖另一份订阅。
     AutoCloseable versionHandle = mock(AutoCloseable.class);
-    when(threadVersionSource.subscribe(any(), any())).thenReturn(subscribed(5L, versionHandle));
+    when(threadSnapshotSource.subscribe(any(), any())).thenReturn(subscribed(0L, versionHandle));
     CountDownLatch ackEnqueued = new CountDownLatch(1);
     CountDownLatch ackRelease = new CountDownLatch(1);
     CountDownLatch secondTaskStarted = new CountDownLatch(1);
@@ -821,7 +934,7 @@ class ApplicationEventWebSocketHandlerTest {
       executor.shutdownNow();
     }
 
-    verify(threadVersionSource, times(1)).subscribe(any(), any()); // 重复帧只建立一次上游
+    verify(threadSnapshotSource, times(1)).subscribe(any(), any()); // 重复帧只建立一次上游
     handler.handleTextMessage(springSession, textMessage(unsubscribeFrame(THREAD)));
     verify(versionHandle).close(); // 只登记了一个订阅：unsubscribe 后上游必须释放
   }
@@ -851,6 +964,28 @@ class ApplicationEventWebSocketHandlerTest {
     return "{\"type\":\"unsubscribe\",\"resource\":{\"kind\":\"thread\",\"id\":\""
         + threadId
         + "\"}}";
+  }
+
+  private static HarnessThreadSnapshotDTO largeSnapshot() {
+    HarnessThreadDTO thread = new HarnessThreadDTO();
+    thread.setThreadId(THREAD.toString());
+    thread.setHeadEntryId("00000000-0000-0000-0000-000000000007");
+    thread.setName("large-".repeat(300));
+    HarnessThreadSnapshotDTO snapshot = new HarnessThreadSnapshotDTO();
+    snapshot.setThread(thread);
+    snapshot.setEntries(List.of());
+    snapshot.setToolInvocations(List.of());
+    return snapshot;
+  }
+
+  private static RealtimeEvent modelDelta(long sequence) {
+    return new RealtimeEvent.ModelDelta(
+        THREAD,
+        new UUID(0L, 9L),
+        1,
+        sequence,
+        new ProviderStreamEvent.TextDelta("delta-" + sequence),
+        Instant.parse("2026-08-05T00:00:00Z"));
   }
 
   private static TextMessage textMessage(String payload) {

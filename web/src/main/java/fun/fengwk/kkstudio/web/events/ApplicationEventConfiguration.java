@@ -20,6 +20,7 @@ import fun.fengwk.kkstudio.platform.environment.EnvironmentChangeNotifications;
 import fun.fengwk.kkstudio.platform.harness.builtin.realtime.HarnessStreamCatchupService;
 import fun.fengwk.kkstudio.platform.harness.dispatch.HarnessWorkDispatcher;
 import fun.fengwk.kkstudio.platform.harness.http.HarnessRuntimeResponseMapper;
+import fun.fengwk.kkstudio.platform.harness.http.HarnessThreadService;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessChangeNotifications;
 import fun.fengwk.kkstudio.platform.harness.notification.HarnessNotificationBinding;
 import fun.fengwk.kkstudio.platform.harness.realtime.PostgresqlRealtimeEventSource;
@@ -114,7 +115,7 @@ public class ApplicationEventConfiguration {
                   issueReconcileDispatcher.wake();
                   canvasFunctionDispatcher.wake();
                 }),
-            // 会话版本失效：Thread 版本号推进，通知 WebSocket 向前端广播版本事件以触发快照对账
+            // Thread version 仍供平台内部等待者使用；浏览器快照推送订阅 threadSnapshots 通道。
             new PostgresqlNotificationHandler(
                 threadVersions.channel(),
                 threadVersions.onNotification(),
@@ -233,7 +234,9 @@ public class ApplicationEventConfiguration {
       ProjectChangeNotifications projectChangeNotifications,
       EnvironmentChangeNotifications environmentChangeNotifications,
       Supplier<ApplicationEventSettings> settingsProvider,
-      ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher) {
+      ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
+      ThreadSnapshotPublisher threadSnapshotPublisher,
+      HarnessThreadService threadService) {
     return new ApplicationEventHub(
         harnessChanges,
         realtimeSource,
@@ -242,7 +245,9 @@ public class ApplicationEventConfiguration {
         projectChangeNotifications,
         environmentChangeNotifications,
         () -> settingsProvider.get().queueCapacity(),
-        threadTreeSnapshotPublisher);
+        threadTreeSnapshotPublisher,
+        threadSnapshotPublisher,
+        threadService::requireExistingThread);
   }
 
   @Bean(name = "applicationEventTreeExecutor", destroyMethod = "shutdownNow")
@@ -255,6 +260,14 @@ public class ApplicationEventConfiguration {
         new ArrayBlockingQueue<>(128),
         Thread.ofPlatform().name("application-event-tree-", 0).daemon(true).factory(),
         new ThreadPoolExecutor.AbortPolicy());
+  }
+
+  @Bean
+  public ThreadSnapshotPublisher threadSnapshotPublisher(
+      HarnessThreadService threadService,
+      @Qualifier("applicationEventTreeExecutor") Executor executor,
+      @Qualifier("applicationEventHeartbeatScheduler") ScheduledExecutorService scheduler) {
+    return new ThreadSnapshotPublisher(executor, threadService::getSnapshots, scheduler);
   }
 
   @Bean

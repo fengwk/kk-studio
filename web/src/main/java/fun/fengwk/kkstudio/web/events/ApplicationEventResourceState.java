@@ -4,8 +4,10 @@ import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /**
@@ -19,7 +21,10 @@ final class ApplicationEventResourceState {
   final ResourceKey key;
   final Set<ApplicationEventLocalSubscription> subscribers = new HashSet<>();
   final List<Signal> early = new ArrayList<>();
-  AutoCloseable threadVersionHandle;
+  AutoCloseable threadSnapshotInvalidationHandle;
+  Runnable threadEnvironmentInvalidationRelease;
+  final Map<ApplicationEventLocalSubscription, ThreadSnapshotPublisher.Handle>
+      threadSnapshotHandles = new HashMap<>();
   AutoCloseable realtimeHandle;
   AutoCloseable canvasVersionHandle;
   Runnable invalidationRelease;

@@ -40,6 +40,13 @@ public class HarnessThreadService {
   private final UsageCostProjectionService usageCostProjectionService;
   private final EnvironmentWaitProjectionService environmentWaitProjectionService;
 
+  /** Validate a public Thread resource before registering its event subscription. */
+  public void requireExistingThread(UUID threadId) {
+    runtime
+        .findThreadVersion(threadId)
+        .orElseThrow(() -> new IllegalArgumentException("unknown thread: " + threadId));
+  }
+
   /** 读取一致快照；{@code afterEntryId} 为空时返回完整历史，否则返回该游标之后的增量。 */
   public HarnessThreadSnapshotDTO getSnapshot(UUID threadId, UUID afterEntryId) {
     ThreadSnapshot snapshot =

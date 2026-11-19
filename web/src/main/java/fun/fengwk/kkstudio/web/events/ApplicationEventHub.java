@@ -6,10 +6,10 @@ import fun.fengwk.kkstudio.canvas.notification.CanvasVersionEventSource;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscription;
 import fun.fengwk.kkstudio.harness.api.HarnessChangeSubscriptions;
 import fun.fengwk.kkstudio.harness.api.HarnessInvalidationChanges;
-import fun.fengwk.kkstudio.harness.api.HarnessThreadVersionChanges;
 import fun.fengwk.kkstudio.harness.api.realtime.RealtimeEvent;
 import fun.fengwk.kkstudio.platform.cluster.RealtimeSubscriptionService;
 import fun.fengwk.kkstudio.platform.events.SourceSubscribed;
+import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
 import fun.fengwk.kkstudio.platform.harness.realtime.RealtimeEventSource;
 import fun.fengwk.kkstudio.platform.notification.NotificationInvalidationSource;
@@ -21,12 +21,13 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Consumer;
 import java.util.function.IntSupplier;
 
 /**
  * 传输无关的事件通道 Hub：按资源维护本地订阅与上游生命周期，供 WebSocket 等传输层使用。
  *
- * <p>每个资源只有一组共享上游：Thread 使用公开的 harness version 订阅 + realtime source，Canvas 使用 version
+ * <p>每个资源只有一组共享上游：Thread 使用快照失效订阅 + realtime source，Canvas 使用 version
  * source，Projects、Interactions、Environments 使用全局失效 source，Tree 使用按执行根的失效
  * source。首个本地订阅建立上游，最后一个释放时关闭；重复订阅幂等由传输层保证。订阅原子返回建立瞬间的 durable cursor 作为 {@code subscribed} ack
  * 游标（全局提示型资源固定为 0，无持久游标的 Tree 资源同样为 0）。
@@ -73,6 +74,8 @@ final class ApplicationEventHub implements AutoCloseable {
   /** 投递给传输层的资源信号。 */
   sealed interface Signal
       permits Signal.Version,
+          Signal.ThreadSnapshot,
+          Signal.ThreadSnapshotFailed,
           Signal.Realtime,
           Signal.ProjectChanged,
           Signal.ThreadTreeChanged,
@@ -82,6 +85,10 @@ final class ApplicationEventHub implements AutoCloseable {
           Signal.EnvironmentChanged,
           Signal.Resync {
     record Version(String version) implements Signal {}
+
+    record ThreadSnapshot(HarnessThreadSnapshotDTO snapshot) implements Signal {}
+
+    record ThreadSnapshotFailed() implements Signal {}
 
     record Realtime(RealtimeEvent event) implements Signal {}
 
@@ -126,7 +133,7 @@ final class ApplicationEventHub implements AutoCloseable {
   interface Subscription extends AutoCloseable {
     ResourceKey resource();
 
-    /** subscribed ack 游标（订阅建立瞬间的 durable cursor）。 */
+    /** subscribed ACK cursor; Thread snapshot subscriptions use zero. */
     long cursor();
 
     /** 传输层在 ack 帧入队后调用；此前到达的事件被缓冲。 */
@@ -144,6 +151,8 @@ final class ApplicationEventHub implements AutoCloseable {
   private final NotificationInvalidationSource environmentChangeSource;
   private final IntSupplier maxBufferedSignals;
   private final ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher;
+  private final ThreadSnapshotPublisher threadSnapshotPublisher;
+  private final Consumer<UUID> threadValidator;
   private final Map<ResourceKey, ApplicationEventResourceState> resources =
       new ConcurrentHashMap<>();
 
@@ -173,6 +182,8 @@ final class ApplicationEventHub implements AutoCloseable {
         projectChangeSource,
         environmentChangeSource,
         maxBufferedSignals,
+        null,
+        null,
         null);
   }
 
@@ -185,6 +196,52 @@ final class ApplicationEventHub implements AutoCloseable {
       NotificationInvalidationSource environmentChangeSource,
       IntSupplier maxBufferedSignals,
       ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher) {
+    this(
+        harnessChanges,
+        realtimeSource,
+        realtimeSubscriptions,
+        canvasVersionSource,
+        projectChangeSource,
+        environmentChangeSource,
+        maxBufferedSignals,
+        threadTreeSnapshotPublisher,
+        null);
+  }
+
+  ApplicationEventHub(
+      HarnessChangeSubscriptions harnessChanges,
+      RealtimeEventSource realtimeSource,
+      RealtimeSubscriptionService realtimeSubscriptions,
+      CanvasVersionEventSource canvasVersionSource,
+      NotificationInvalidationSource projectChangeSource,
+      NotificationInvalidationSource environmentChangeSource,
+      IntSupplier maxBufferedSignals,
+      ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
+      ThreadSnapshotPublisher threadSnapshotPublisher) {
+    this(
+        harnessChanges,
+        realtimeSource,
+        realtimeSubscriptions,
+        canvasVersionSource,
+        projectChangeSource,
+        environmentChangeSource,
+        maxBufferedSignals,
+        threadTreeSnapshotPublisher,
+        threadSnapshotPublisher,
+        null);
+  }
+
+  ApplicationEventHub(
+      HarnessChangeSubscriptions harnessChanges,
+      RealtimeEventSource realtimeSource,
+      RealtimeSubscriptionService realtimeSubscriptions,
+      CanvasVersionEventSource canvasVersionSource,
+      NotificationInvalidationSource projectChangeSource,
+      NotificationInvalidationSource environmentChangeSource,
+      IntSupplier maxBufferedSignals,
+      ThreadTreeSnapshotPublisher threadTreeSnapshotPublisher,
+      ThreadSnapshotPublisher threadSnapshotPublisher,
+      Consumer<UUID> threadValidator) {
     this.harnessChanges = Objects.requireNonNull(harnessChanges, "harnessChanges");
     this.realtimeSource = Objects.requireNonNull(realtimeSource, "realtimeSource");
     this.realtimeSubscriptions =
@@ -195,6 +252,8 @@ final class ApplicationEventHub implements AutoCloseable {
         Objects.requireNonNull(environmentChangeSource, "environmentChangeSource");
     this.maxBufferedSignals = Objects.requireNonNull(maxBufferedSignals, "maxBufferedSignals");
     this.threadTreeSnapshotPublisher = threadTreeSnapshotPublisher;
+    this.threadSnapshotPublisher = threadSnapshotPublisher;
+    this.threadValidator = threadValidator;
   }
 
   /**
@@ -207,8 +266,18 @@ final class ApplicationEventHub implements AutoCloseable {
    * @throws IllegalStateException hub 已关闭
    */
   Subscription subscribe(ResourceKey resource, Sink sink) {
+    return subscribe(resource, sink, null);
+  }
+
+  Subscription subscribe(ResourceKey resource, Sink sink, UUID afterEntryId) {
     Objects.requireNonNull(resource, "resource");
     Objects.requireNonNull(sink, "sink");
+    if (resource.kind() != ResourceKind.THREAD && afterEntryId != null) {
+      throw new IllegalArgumentException("afterEntryId is only valid for threads");
+    }
+    if (resource.kind() == ResourceKind.THREAD && threadValidator != null) {
+      threadValidator.accept(resource.id());
+    }
     while (true) {
       ApplicationEventResourceState state;
       synchronized (lifecycleFence) {
@@ -223,6 +292,7 @@ final class ApplicationEventHub implements AutoCloseable {
       }
       ApplicationEventLocalSubscription subscription;
       ThreadTreeSnapshotPublisher.Handle snapshotHandle;
+      ThreadSnapshotPublisher.Handle[] threadHandle = new ThreadSnapshotPublisher.Handle[1];
       synchronized (state) {
         if (state.retired) {
           // 状态已被并发最后释放/hub close 淘汰并移出 map：放弃，重取新状态，绝不在 detached state 上重建上游。
@@ -244,8 +314,26 @@ final class ApplicationEventHub implements AutoCloseable {
         }
         subscription =
             new ApplicationEventLocalSubscription(
-                resource, state.cursor, sink, maxSignals, this::release);
+                resource,
+                state.cursor,
+                sink,
+                maxSignals,
+                this::release,
+                () -> {
+                  if (threadHandle[0] != null) {
+                    threadHandle[0].activate();
+                  }
+                });
         state.subscribers.add(subscription);
+        if (resource.kind() == ResourceKind.THREAD && threadSnapshotPublisher != null) {
+          threadHandle[0] =
+              threadSnapshotPublisher.subscribe(
+                  resource.id(),
+                  afterEntryId,
+                  snapshot -> subscription.deliver(new Signal.ThreadSnapshot(snapshot)),
+                  () -> subscription.deliver(new Signal.ThreadSnapshotFailed()));
+          state.threadSnapshotHandles.put(subscription, threadHandle[0]);
+        }
         // 回放建立上游期间暂存的信号（establish 回调早于第一个订阅者加入）；deliver 按 cursor 过滤并缓冲到激活。
         for (Signal signal : state.early) {
           subscription.deliver(signal);
@@ -263,6 +351,28 @@ final class ApplicationEventHub implements AutoCloseable {
   }
 
   /** 请求当前已订阅执行树的强制权威快照；不创建订阅，重复请求由 root publisher 合并。 */
+  boolean requestThreadSnapshot(ResourceKey resource) {
+    if (resource.kind() != ResourceKind.THREAD) {
+      return false;
+    }
+    ApplicationEventResourceState state = resources.get(resource);
+    if (state == null) {
+      return false;
+    }
+    List<ThreadSnapshotPublisher.Handle> handles;
+    synchronized (state) {
+      if (state.retired || state.subscribers.isEmpty()) {
+        return false;
+      }
+      handles = List.copyOf(state.threadSnapshotHandles.values());
+    }
+    if (handles.isEmpty()) {
+      return false;
+    }
+    handles.forEach(handle -> handle.request(true));
+    return true;
+  }
+
   boolean requestThreadTreeSnapshot(ResourceKey resource) {
     if (resource.kind() != ResourceKind.THREAD_TREE) {
       return false;
@@ -297,41 +407,42 @@ final class ApplicationEventHub implements AutoCloseable {
       }
       closed = true;
     }
-    // 边界已设立：此后不能再发布新状态。已发布条目仍可见，在状态锁内淘汰并关闭上游。
-    while (!resources.isEmpty()) {
-      for (ApplicationEventResourceState state : resources.values()) {
-        synchronized (state) {
-          if (state.retired) {
-            continue;
-          }
-          state.retired = true;
-          resources.remove(state.key, state);
-          closeUpstreams(state);
-          unregisterRealtimeSubscription(state);
-          for (ApplicationEventLocalSubscription subscription : state.subscribers) {
-            subscription.markClosed();
-          }
-          state.subscribers.clear();
+    // Boundary is set: no state can be published after the map is drained.
+    for (ApplicationEventResourceState state : List.copyOf(resources.values())) {
+      synchronized (state) {
+        if (state.retired) {
+          continue;
         }
+        state.retired = true;
+        resources.remove(state.key, state);
+        for (ApplicationEventLocalSubscription subscription : state.subscribers) {
+          subscription.markClosed();
+        }
+        state.subscribers.clear();
       }
+      closeUpstreams(state);
+      unregisterRealtimeSubscription(state);
     }
   }
 
   private void establishUpstream(ApplicationEventResourceState state) {
     switch (state.key.kind()) {
       case THREAD -> {
-        HarnessChangeSubscription version =
+        HarnessChangeSubscription snapshots =
             harnessChanges
-                .threadVersions()
-                .subscribe(state.key.id(), event -> fanout(state, threadVersionSignal(event)));
-        state.threadVersionHandle = version;
+                .threadSnapshots()
+                .subscribe(state.key.id(), event -> onThreadSnapshotChange(state, event));
+        state.threadSnapshotInvalidationHandle = snapshots;
+        state.threadEnvironmentInvalidationRelease =
+            environmentChangeSource.subscribe(
+                null, event -> onThreadEnvironmentChange(state, event));
         state.realtimeHandle =
             realtimeSource.subscribe(
                 state.key.id(),
                 event -> fanout(state, new Signal.Realtime(event)),
                 () -> fanout(state, new Signal.Resync()));
         registerRealtimeSubscription(state);
-        state.cursor = version.cursor();
+        state.cursor = 0;
       }
       case CANVAS -> {
         SourceSubscribed version =
@@ -367,12 +478,27 @@ final class ApplicationEventHub implements AutoCloseable {
     }
   }
 
-  /** Thread version 信号只做「前进到该 version」；resync 一律整体回读。 */
-  private static Signal threadVersionSignal(HarnessThreadVersionChanges.Event event) {
-    if (event instanceof HarnessThreadVersionChanges.Event.Version version) {
-      return new Signal.Version(Long.toString(version.version()));
+  private void onThreadSnapshotChange(
+      ApplicationEventResourceState state, HarnessInvalidationChanges.Event event) {
+    requestThreadSnapshots(state, event instanceof HarnessInvalidationChanges.Event.Resync);
+  }
+
+  private void onThreadEnvironmentChange(
+      ApplicationEventResourceState state, NotificationInvalidationSource.Event event) {
+    requestThreadSnapshots(state, event instanceof NotificationInvalidationSource.Event.Resync);
+  }
+
+  private void requestThreadSnapshots(ApplicationEventResourceState state, boolean full) {
+    List<ThreadSnapshotPublisher.Handle> handles;
+    synchronized (state) {
+      if (state.retired) {
+        return;
+      }
+      handles = List.copyOf(state.threadSnapshotHandles.values());
     }
-    return new Signal.Resync();
+    for (ThreadSnapshotPublisher.Handle handle : handles) {
+      handle.request(full);
+    }
   }
 
   /** 执行树按资源自带根 id 定点失效，事件本身不携带额外坐标。 */
@@ -459,23 +585,26 @@ final class ApplicationEventHub implements AutoCloseable {
   private void release(ApplicationEventLocalSubscription subscription) {
     ApplicationEventResourceState state = resources.get(subscription.resource());
     if (state == null) {
-      return; // 已被最后释放/hub close 清理（幂等）
+      return;
     }
+    ThreadSnapshotPublisher.Handle threadHandle;
+    boolean last;
     synchronized (state) {
-      if (state.retired) {
-        return; // 并发清理已生效（幂等）
-      }
-      if (!state.subscribers.remove(subscription)) {
-        return; // 重复释放
+      if (state.retired || !state.subscribers.remove(subscription)) {
+        return;
       }
       subscription.markClosed();
-      if (state.subscribers.isEmpty()) {
+      threadHandle = state.threadSnapshotHandles.remove(subscription);
+      last = state.subscribers.isEmpty();
+      if (last) {
         state.retired = true;
-        // 先移除 map entry 再关闭上游：并发 subscribe 只能取得全新状态，不会复用正在退役的旧状态。
         resources.remove(subscription.resource(), state);
-        closeUpstreams(state);
-        unregisterRealtimeSubscription(state);
       }
+    }
+    closeQuietly(threadHandle);
+    if (last) {
+      closeUpstreams(state);
+      unregisterRealtimeSubscription(state);
     }
   }
 
@@ -520,7 +649,12 @@ final class ApplicationEventHub implements AutoCloseable {
   }
 
   private static void closeUpstreams(ApplicationEventResourceState state) {
-    closeQuietly(state.threadVersionHandle);
+    closeQuietly(state.threadSnapshotInvalidationHandle);
+    closeQuietly(state.threadEnvironmentInvalidationRelease);
+    for (ThreadSnapshotPublisher.Handle handle : state.threadSnapshotHandles.values()) {
+      closeQuietly(handle);
+    }
+    state.threadSnapshotHandles.clear();
     closeQuietly(state.realtimeHandle);
     closeQuietly(state.canvasVersionHandle);
     closeQuietly(state.invalidationRelease);

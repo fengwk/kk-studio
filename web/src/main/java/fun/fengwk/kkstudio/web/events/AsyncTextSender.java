@@ -169,6 +169,10 @@ final class AsyncTextSender {
     closeSession();
   }
 
+  boolean exceedsFrameBudget(String text) {
+    return utf8Bytes(text) > maxBytes;
+  }
+
   boolean isFailed() {
     synchronized (lock) {
       return failed;
