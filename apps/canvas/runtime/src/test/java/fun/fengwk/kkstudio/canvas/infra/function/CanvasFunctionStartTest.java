@@ -424,7 +424,7 @@ class CanvasFunctionStartTest extends CanvasFunctionRuntimeTestSupport {
         CanvasFunctionRunStatus.SUCCEEDED,
         runRepository.findByNodeId(targetNodeId).orElseThrow().status());
     assertTrue(pinRepository.findByRun(canvasId, targetNodeId, frozen.requestId()).isEmpty());
-    assertEquals(2L, version(canvasId), "start and terminal swap each bump once");
+    assertEquals(3L, version(canvasId), "start, claim and terminal swap each bump once");
   }
 
   /** 验收证据 5：args Schema 校验在 start 阶段拦截未知字段、类型错误与缺失必填，合法输入补齐默认值并冻结到计划中。 */

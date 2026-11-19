@@ -291,7 +291,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
         claim.leaseToken(),
         "SUBMITTED",
         Map.of("jobId", "job"));
-    assertEquals(2L, version(canvasId));
+    assertEquals(3L, version(canvasId));
     assertEquals("SUBMITTED", runRepository.findByNodeId(nodeId).orElseThrow().stage());
     assertThrows(
         CanvasFunctionInternalCancellation.class,
@@ -308,7 +308,7 @@ class CanvasFunctionSubmitRecoveryTest extends CanvasFunctionRuntimeTestSupport 
     assertEquals(CanvasFunctionRunStatus.FAILED, failed.status());
     assertEquals("safe failure", failed.error());
     assertTrue(pinRepository.findByRun(canvasId, nodeId, failed.requestId()).isEmpty());
-    assertEquals(3L, version(canvasId));
+    assertEquals(4L, version(canvasId));
   }
 
   /** checkpoint 在 document 或 Function node 消失后必须内部取消，绝不重建已删除聚合。 */

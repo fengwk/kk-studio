@@ -4,6 +4,7 @@ import org.springframework.stereotype.Repository;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
+import fun.fengwk.kkstudio.canvas.CanvasDocument;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRun;
 import fun.fengwk.kkstudio.canvas.CanvasFunctionRunStatus;
 import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionRunStateCodec;
@@ -32,6 +33,7 @@ public class CanvasFunctionWorkStore {
   public static final String TARGET_TYPE = "CANVAS_RUN";
 
   private final DurableWorkStore canvasRunWorkQueue;
+  private final PostgresqlCanvasStore canvasStore;
   private final CanvasFunctionRunJdbcStore runStore;
   private final CanvasFunctionRunStateCodec stateCodec;
   private final TransactionTemplate transactions;
@@ -39,11 +41,13 @@ public class CanvasFunctionWorkStore {
 
   public CanvasFunctionWorkStore(
       DurableWorkStore canvasRunWorkQueue,
+      PostgresqlCanvasStore canvasStore,
       CanvasFunctionRunJdbcStore runStore,
       CanvasFunctionRunStateCodec stateCodec,
       PlatformTransactionManager transactionManager,
       Clock clock) {
     this.canvasRunWorkQueue = Objects.requireNonNull(canvasRunWorkQueue, "canvasRunWorkQueue");
+    this.canvasStore = Objects.requireNonNull(canvasStore, "canvasStore");
     this.runStore = Objects.requireNonNull(runStore, "runStore");
     this.stateCodec = Objects.requireNonNull(stateCodec, "stateCodec");
     this.transactions = new TransactionTemplate(transactionManager);
@@ -88,6 +92,10 @@ public class CanvasFunctionWorkStore {
     return Boolean.TRUE.equals(
         transactions.execute(
             status -> {
+              Optional<CanvasDocument> document = canvasStore.lockDocumentForNode(claim.nodeId());
+              if (document.isEmpty()) {
+                return false;
+              }
               runStore.findByNodeIdForUpdate(claim.nodeId());
               if (canvasRunWorkQueue.lockClaimed(claim.work()).isEmpty()) {
                 return false;
@@ -96,6 +104,7 @@ public class CanvasFunctionWorkStore {
                 return false;
               }
               canvasRunWorkQueue.reschedule(claim.work(), delay);
+              bumpRevision(document.get());
               return true;
             }));
   }
@@ -110,12 +119,16 @@ public class CanvasFunctionWorkStore {
   }
 
   private AttemptResult startAttempt(WorkClaim work) {
-    // 保持 Run -> Work 锁序；Work 锁覆盖检查到 attempt 写入的整个短事务。
-    runStore.findByNodeIdForUpdate(work.targetId());
+    // 保持 document → node → Run → Work 锁序；Work 锁覆盖 ownership 检查和 attempt 写入。
+    Optional<CanvasDocument> document = canvasStore.lockDocumentForNode(work.targetId());
+    if (document.isPresent()) {
+      runStore.findByNodeIdForUpdate(work.targetId());
+    }
     if (canvasRunWorkQueue.lockClaimed(work).isEmpty()) {
       return NotStarted.LOST;
     }
-    Optional<CanvasFunctionRunDO> started = runStore.startAttempt(work.targetId(), now());
+    Optional<CanvasFunctionRunDO> started =
+        document.isPresent() ? runStore.startAttempt(work.targetId(), now()) : Optional.empty();
     if (started.isEmpty()) {
       canvasRunWorkQueue.complete(work);
       return NotStarted.SKIPPED;
@@ -132,7 +145,15 @@ public class CanvasFunctionWorkStore {
             run.getError(),
             run.getUpdatedAt().toInstant(),
             run.getCreatedAt().toInstant());
+    bumpRevision(document.orElseThrow());
     return new Started(new ClaimedRun(domain, work));
+  }
+
+  private void bumpRevision(CanvasDocument document) {
+    long revision = document.revision();
+    if (!canvasStore.advanceRevision(document.id(), revision, revision + 1)) {
+      throw new IllegalStateException("canvas revision CAS failed under row lock");
+    }
   }
 
   private OffsetDateTime now() {

@@ -85,7 +85,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
     assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
     assertTrue(runRepository.holdsLease(current.nodeId(), claim.leaseToken()));
     assertTrue(resourceRepository.findById(canvasId, target.id()).isPresent());
-    assertEquals(1L, version(canvasId));
+    assertEquals(2L, version(canvasId));
   }
 
   /** 节点不再是 Function 后，迟到的成功与失败写回都必须保持 no-op。 */
@@ -105,7 +105,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
             nodeId, frozen.requestId(), claim.leaseToken(), "ignored failure"));
     assertEquals(
         CanvasFunctionRunStatus.RUNNING, runRepository.findByNodeId(nodeId).orElseThrow().status());
-    assertEquals(1L, version(canvasId));
+    assertEquals(2L, version(canvasId));
   }
 
   /** success 必须拒绝错误结果列表与尚未物化的 target，并保持 RUNNING/版本不变。 */
@@ -134,7 +134,7 @@ class CanvasFunctionTerminalWritebackTest extends CanvasFunctionRuntimeTestSuppo
                 frozen, claim.leaseToken(), frozen.outputResourceIds()));
     CanvasFunctionRun current = runRepository.findByNodeId(nodeId).orElseThrow();
     assertEquals(CanvasFunctionRunStatus.RUNNING, current.status());
-    assertEquals(1L, version(canvasId));
+    assertEquals(2L, version(canvasId));
   }
 
   /**
