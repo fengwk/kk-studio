@@ -120,7 +120,7 @@ function seedSession(browserSessionId = BROWSER_A, recoveryValue: IdeRecovery = 
       selectedEnvironmentId: ENV_A,
       openedEnvironmentIds: [ENV_A],
       viewIdsByEnvironment: { [ENV_A]: [recoveryValue.viewId] },
-      selectedViewId: recoveryValue.viewId,
+      selectedViewIdsByEnvironment: { [ENV_A]: recoveryValue.viewId },
     },
     { [recoveryValue.viewId]: recoveryValue },
     { sessionStorage, localStorage },

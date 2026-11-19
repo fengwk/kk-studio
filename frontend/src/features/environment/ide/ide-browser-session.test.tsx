@@ -49,7 +49,7 @@ function initial(sessionSaved = true): IdeTabLoadResult {
       selectedEnvironmentId: null,
       openedEnvironmentIds: [],
       viewIdsByEnvironment: {},
-      selectedViewId: null,
+      selectedViewIdsByEnvironment: {},
     },
     recoveryByView: {},
     recoveryError: false,

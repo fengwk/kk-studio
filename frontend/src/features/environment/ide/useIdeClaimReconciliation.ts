@@ -213,10 +213,10 @@ export function useIdeClaimReconciliation({
 
   function viewIdForEnvironment(environmentId: string): string | null {
     const presentation = getPresentation()
-    if (presentation.selectedEnvironmentId === environmentId
-      && presentation.selectedViewId != null
-      && viewsRef.current[presentation.selectedViewId] != null) {
-      return presentation.selectedViewId
+    const selectedViewId = presentation.selectedViewIdsByEnvironment[environmentId]
+    if (selectedViewId != null
+      && viewsRef.current[selectedViewId]?.environmentId === environmentId) {
+      return selectedViewId
     }
     const ordered = presentation.viewIdsByEnvironment[environmentId] ?? []
     return ordered.find((viewId) => viewsRef.current[viewId] != null)

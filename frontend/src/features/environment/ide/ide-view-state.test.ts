@@ -20,7 +20,7 @@ const presentation: IdePresentation = {
   selectedEnvironmentId: ENV,
   openedEnvironmentIds: [ENV],
   viewIdsByEnvironment: { [ENV]: [VIEW_A, VIEW_B] },
-  selectedViewId: VIEW_A,
+  selectedViewIdsByEnvironment: { [ENV]: VIEW_A },
 }
 
 function recovery(viewId: string, daemonInstanceId: string): IdeRecovery {

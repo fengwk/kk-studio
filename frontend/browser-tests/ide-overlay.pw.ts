@@ -77,6 +77,9 @@ interface TransportState {
   failNextOpen: 'STALE_BINDING' | 'DAEMON_NOT_READY' | 'VIEW_OWNED_BY_OTHER_SESSION' | null
   holdNextOpen: boolean
   heldOpen: { route: Route; body: Record<string, unknown>; epoch: string } | null
+  holdNextDirectory: boolean
+  directoryHeld: boolean
+  releaseNextDirectory: (() => void) | null
 }
 
 function connectionId(index: number): string {
@@ -194,12 +197,22 @@ async function installTransport(page: Page, state: TransportState): Promise<void
       const rootPath = directory(environmentId)
       const requestedPath = parsed.searchParams.get('path')
       const currentPath = requestedPath ?? rootPath
+      if (state.holdNextDirectory) {
+        state.holdNextDirectory = false
+        state.directoryHeld = true
+        await new Promise<void>((resolve) => { state.releaseNextDirectory = resolve })
+        state.directoryHeld = false
+        state.releaseNextDirectory = null
+      }
       const childPath = `${currentPath.endsWith('/') ? currentPath.slice(0, -1) : currentPath}/child`
       await route.fulfill({ json: {
         path: currentPath,
         parentPath: currentPath === rootPath ? null : rootPath,
         truncated: false,
-        children: [{ name: 'child', path: childPath }],
+        children: [
+          { name: 'child', path: childPath },
+          { name: 'other', path: `${currentPath}/other` },
+        ],
       } })
       return
     }
@@ -447,6 +460,9 @@ function createState(): TransportState {
     failNextOpen: null,
     holdNextOpen: false,
     heldOpen: null,
+    holdNextDirectory: false,
+    directoryHeld: false,
+    releaseNextDirectory: null,
   }
 }
 
@@ -462,8 +478,25 @@ async function openA(page: Page): Promise<void> {
   await expect(page.getByTestId('ide-overlay-panel')).toBeVisible()
 }
 
+async function selectEnvironment(page: Page, name: string): Promise<void> {
+  await page.getByTestId('ide-toolbar').getByRole('button', { name: '环境' }).click()
+  await page.getByRole('option', { name }).click()
+}
+
+async function openChildWorkspace(page: Page): Promise<void> {
+  await page.getByTestId('ide-open-workspace-btn').click()
+  const dialog = page.getByRole('dialog', { name: '打开宿主目录' })
+  await dialog.getByTestId('ide-directory-entry').filter({ hasText: 'child' }).click()
+  await dialog.getByTestId('ide-directory-confirm').click()
+}
+
 async function storedSession(page: Page): Promise<{
   browserSessionId: string
+  presentation: {
+    selectedEnvironmentId: string | null
+    viewIdsByEnvironment: Record<string, string[]>
+    selectedViewIdsByEnvironment: Record<string, string>
+  }
   recoveryByView: Record<string, {
     environmentId: string
     viewId: string
@@ -546,6 +579,84 @@ test.describe('Chat-scoped persistent IDE host', () => {
     await expect(page.getByTestId('ide-tab')).toHaveCount(1)
     expect(state.views[firstViewId]).toBeDefined()
     expect(state.views[secondViewId]).toBeUndefined()
+  })
+
+  test('preserves each Environment active workspace across switching and refresh, and ignores a stale directory response', async ({ page }) => {
+    const state = createState()
+    await openHarness(page, state)
+    await openA(page)
+    await openChildWorkspace(page)
+    await expect(page.getByTestId('ide-tab')).toHaveCount(2)
+    await expect.poll(() => state.openCalls.length).toBe(2)
+    const aSelectedViewId = String(state.openCalls[1]!.body.viewId)
+
+    await page.getByTestId('pane-2-open-b').click()
+    await expect(page.getByTestId('ide-iframe')).toHaveCount(3)
+    const bFirstViewId = String(state.openCalls[2]!.body.viewId)
+
+    await selectEnvironment(page, 'local-node')
+    await expect(page.locator(`[data-testid="ide-tab"][data-ide-view="${aSelectedViewId}"]`))
+      .toHaveAttribute('aria-current', 'page')
+    await page.getByTestId('ide-open-workspace-btn').click()
+    const delayedDialog = page.getByRole('dialog', { name: '打开宿主目录' })
+    await delayedDialog.getByTestId('ide-directory-entry').filter({ hasText: 'other' }).click()
+    state.holdNextDirectory = true
+    await delayedDialog.getByTestId('ide-directory-confirm').click()
+    await expect.poll(() => state.directoryHeld).toBe(true)
+
+    await selectEnvironment(page, 'remote-node')
+    await expect(page.getByTestId('ide-toolbar').getByRole('button', { name: '环境' })).toContainText('remote-node')
+    expect(typeof state.releaseNextDirectory).toBe('function')
+    state.releaseNextDirectory?.()
+    await expect.poll(() => state.openCalls.length).toBe(4)
+    await expect(page.getByTestId('ide-toolbar').getByRole('button', { name: '环境' })).toContainText('remote-node')
+    await expect(page.locator(`[data-testid="ide-tab"][data-ide-view="${bFirstViewId}"]`))
+      .toHaveAttribute('aria-current', 'page')
+
+    await openChildWorkspace(page)
+    await expect(page.getByTestId('ide-tab')).toHaveCount(2)
+    await expect.poll(() => state.openCalls.length).toBe(5)
+    const bSelectedViewId = String(state.openCalls[4]!.body.viewId)
+    await expect(page.locator(`[data-testid="ide-tab"][data-ide-view="${bSelectedViewId}"]`))
+      .toHaveAttribute('aria-current', 'page')
+    const aViewOrder = [
+      String(state.openCalls[0]!.body.viewId),
+      aSelectedViewId,
+      String(state.openCalls[3]!.body.viewId),
+    ]
+    const bViewOrder = [bFirstViewId, bSelectedViewId]
+    const saved = await storedSession(page)
+    expect(saved.presentation.selectedViewIdsByEnvironment).toMatchObject({
+      [ENV_A]: aSelectedViewId,
+      [ENV_B]: bSelectedViewId,
+    })
+    expect(saved.presentation.viewIdsByEnvironment[ENV_A]).toEqual(aViewOrder)
+    expect(saved.presentation.viewIdsByEnvironment[ENV_B]).toEqual(bViewOrder)
+
+    await page.reload()
+    await expect(page.getByTestId('harness-event-status')).toHaveAttribute('data-connected', 'true')
+    await expect(page.getByTestId('ide-iframe')).toHaveCount(5)
+    await expect(page.locator(`[data-testid="ide-tab"][data-ide-view="${aSelectedViewId}"]`))
+      .toHaveAttribute('aria-current', 'page')
+    expect(await page.getByTestId('ide-tab').evaluateAll((tabs) => (
+      tabs.map((tab) => tab.getAttribute('data-ide-view'))
+    ))).toEqual(aViewOrder)
+    await selectEnvironment(page, 'remote-node')
+    await expect(page.locator(`[data-testid="ide-tab"][data-ide-view="${bSelectedViewId}"]`))
+      .toHaveAttribute('aria-current', 'page')
+    expect(await page.getByTestId('ide-tab').evaluateAll((tabs) => (
+      tabs.map((tab) => tab.getAttribute('data-ide-view'))
+    ))).toEqual(bViewOrder)
+    await selectEnvironment(page, 'local-node')
+    await expect(page.locator(`[data-testid="ide-tab"][data-ide-view="${aSelectedViewId}"]`))
+      .toHaveAttribute('aria-current', 'page')
+    const restoredSession = await storedSession(page)
+    expect(restoredSession.presentation.selectedViewIdsByEnvironment).toMatchObject({
+      [ENV_A]: aSelectedViewId,
+      [ENV_B]: bSelectedViewId,
+    })
+    expect(restoredSession.presentation.viewIdsByEnvironment[ENV_A]).toEqual(aViewOrder)
+    expect(restoredSession.presentation.viewIdsByEnvironment[ENV_B]).toEqual(bViewOrder)
   })
 
   test('refresh resumes the same view immediately from a pure read without replaying create', async ({ page }) => {

@@ -49,7 +49,7 @@ function clearRuntimePresentation(presentation: IdePresentation): IdePresentatio
     selectedEnvironmentId: null,
     openedEnvironmentIds: [],
     viewIdsByEnvironment: {},
-    selectedViewId: null,
+    selectedViewIdsByEnvironment: {},
   }
 }
 
@@ -71,6 +71,7 @@ export function IdePanelProvider({
   const [activeEnvironmentId, setActiveEnvironmentId] = useState<string | null>(
     () => (active ? initial.presentation.selectedEnvironmentId : null),
   )
+  const activeEnvironmentIdRef = useRef(activeEnvironmentId)
   const [knownEnvironments, setKnownEnvironments] = useState<Record<string, IdeEnvironmentInfo>>({})
   const [storageUnavailable, setStorageUnavailable] = useState(!initial.sessionSaved && !initial.recoveryError)
 
@@ -134,6 +135,11 @@ export function IdePanelProvider({
     })
   }
 
+  function setActiveEnvironment(environmentId: string | null): void {
+    activeEnvironmentIdRef.current = environmentId
+    setActiveEnvironmentId(environmentId)
+  }
+
   const getPresentation = useCallback(() => presentationRef.current, [])
   const getEnvironmentMap = useCallback(() => environmentMapRef.current, [])
 
@@ -165,7 +171,9 @@ export function IdePanelProvider({
         viewIdsByEnvironment: ids.includes(viewId)
           ? current.viewIdsByEnvironment
           : { ...current.viewIdsByEnvironment, [environmentId]: [...ids, viewId] },
-        selectedViewId: current.selectedEnvironmentId === environmentId ? viewId : current.selectedViewId,
+        selectedViewIdsByEnvironment: current.selectedEnvironmentId === environmentId
+          ? { ...current.selectedViewIdsByEnvironment, [environmentId]: viewId }
+          : current.selectedViewIdsByEnvironment,
       }, 'session')
     },
   })
@@ -176,7 +184,7 @@ export function IdePanelProvider({
       const next = clearRuntimePresentation(presentationRef.current)
       presentationRef.current = next
       setPresentationState(next)
-      setActiveEnvironmentId(null)
+      setActiveEnvironment(null)
       if (!initial.recoveryError) {
         const saved = saveIdePresentation(
           browserSessionId,
@@ -226,34 +234,47 @@ export function IdePanelProvider({
       ids.push(view.viewId)
       viewIdsByEnvironment[view.environmentId] = ids
     }
-    for (const ids of Object.values(viewIdsByEnvironment)) {
+    for (const [environmentId, ids] of Object.entries(viewIdsByEnvironment)) {
+      const previousIds = current.viewIdsByEnvironment[environmentId] ?? []
       ids.sort((left, right) => {
-        const old = current.viewIdsByEnvironment
-        const leftRank = Object.values(old).findIndex((values) => values.includes(left))
-        const rightRank = Object.values(old).findIndex((values) => values.includes(right))
+        const leftRank = previousIds.indexOf(left)
+        const rightRank = previousIds.indexOf(right)
         return leftRank < 0 && rightRank < 0 ? left.localeCompare(right)
           : leftRank < 0 ? 1 : rightRank < 0 ? -1 : leftRank - rightRank
       })
     }
-    const selectedViewId = current.selectedViewId != null
-      && claimReconciliation.views[current.selectedViewId] != null
-      ? current.selectedViewId
-      : current.selectedEnvironmentId == null
-        ? null
-        : viewIdsByEnvironment[current.selectedEnvironmentId]?.[0] ?? null
+    const selectedViewIdsByEnvironment: Record<string, string> = {}
+    for (const [environmentId, ids] of Object.entries(viewIdsByEnvironment)) {
+      const previous = current.selectedViewIdsByEnvironment[environmentId]
+      const selected = previous != null && ids.includes(previous) ? previous : ids[0]
+      if (selected != null) {
+        selectedViewIdsByEnvironment[environmentId] = selected
+      }
+    }
     if (
-      selectedViewId !== current.selectedViewId
+      JSON.stringify(selectedViewIdsByEnvironment) !== JSON.stringify(current.selectedViewIdsByEnvironment)
       || JSON.stringify(viewIdsByEnvironment) !== JSON.stringify(current.viewIdsByEnvironment)
     ) {
-      commitPresentation({ ...current, viewIdsByEnvironment, selectedViewId }, 'session')
+      commitPresentation({ ...current, viewIdsByEnvironment, selectedViewIdsByEnvironment }, 'session')
     }
   }, [claimReconciliation.views, commitPresentation])
 
   useEffect(() => {
     if (!active) {
-      setActiveEnvironmentId(null)
+      setActiveEnvironment(null)
     }
   }, [active])
+
+  function selectedViewForEnvironment(presentation: IdePresentation, environmentId: string): string | null {
+    const remembered = presentation.selectedViewIdsByEnvironment[environmentId]
+    if (remembered != null
+      && claimReconciliation.viewsRef.current[remembered]?.environmentId === environmentId) {
+      return remembered
+    }
+    return presentation.viewIdsByEnvironment[environmentId]?.find(
+      (id) => claimReconciliation.viewsRef.current[id]?.environmentId === environmentId,
+    ) ?? null
+  }
 
   function ensureOpened(
     current: IdePresentation,
@@ -263,36 +284,39 @@ export function IdePanelProvider({
     const openedEnvironmentIds = current.openedEnvironmentIds.includes(environmentId)
       ? current.openedEnvironmentIds
       : [...current.openedEnvironmentIds, environmentId]
-    const selectedViewId = current.viewIdsByEnvironment[environmentId]?.find(
-      (id) => claimReconciliation.viewsRef.current[id] != null,
-    ) ?? null
+    const selectedViewId = selectedViewForEnvironment(current, environmentId)
+    const selectedViewIdsByEnvironment = { ...current.selectedViewIdsByEnvironment }
+    if (selectedViewId == null) {
+      delete selectedViewIdsByEnvironment[environmentId]
+    } else {
+      selectedViewIdsByEnvironment[environmentId] = selectedViewId
+    }
     if (
       current.panelVisible === panelVisible
       && current.selectedEnvironmentId === environmentId
       && openedEnvironmentIds === current.openedEnvironmentIds
+      && selectedViewIdsByEnvironment[environmentId] === current.selectedViewIdsByEnvironment[environmentId]
     ) {
       return current
     }
     return {
+      ...current,
       panelVisible,
       selectedEnvironmentId: environmentId,
       openedEnvironmentIds,
-      viewIdsByEnvironment: current.viewIdsByEnvironment,
-      selectedViewId,
+      selectedViewIdsByEnvironment,
     }
   }
 
   function activateChatEnvironment(environment: IdeEnvironmentInfo | null): void {
     if (environment == null || !isCanonicalUuid(environment.id)) {
-      setActiveEnvironmentId(null)
+      setActiveEnvironment(null)
       return
     }
     rememberEnvironment(environment)
-    setActiveEnvironmentId(environment.id)
+    setActiveEnvironment(environment.id)
     const current = presentationRef.current
-    const existingViewId = current.viewIdsByEnvironment[environment.id]?.find(
-      (id) => claimReconciliation.viewsRef.current[id] != null,
-    )
+    const existingViewId = selectedViewForEnvironment(current, environment.id)
     if (existingViewId == null) {
       // Chat 选择不是打开操作；不把未打开的环境写成已打开面板的选择。
       return
@@ -309,11 +333,9 @@ export function IdePanelProvider({
       return
     }
     rememberEnvironment(environment)
-    setActiveEnvironmentId(environment.id)
+    setActiveEnvironment(environment.id)
     const current = presentationRef.current
-    const viewId = current.viewIdsByEnvironment[environment.id]?.find(
-      (id) => claimReconciliation.viewsRef.current[id] != null,
-    )
+    const viewId = selectedViewForEnvironment(current, environment.id)
     if (viewId == null) {
       commitPresentation(ensureOpened(current, environment.id, true), 'both')
       const viewId = claimReconciliation.startOrFocus(environment.id, environment, 'files')
@@ -342,12 +364,12 @@ export function IdePanelProvider({
       ? request.environment
       : null
     if (environment == null) {
-      setActiveEnvironmentId(null)
+      setActiveEnvironment(null)
       pendingModeRef.current = request.mode ?? null
       return
     }
     rememberEnvironment(environment)
-    setActiveEnvironmentId(environment.id)
+    setActiveEnvironment(environment.id)
     pendingModeRef.current = null
     commitPresentation(ensureOpened(presentationRef.current, environment.id, true), 'both')
     const viewId = claimReconciliation.startOrFocus(environment.id, environment, request.mode ?? 'files')
@@ -364,7 +386,9 @@ export function IdePanelProvider({
       viewIdsByEnvironment: viewIds.includes(viewId)
         ? current.viewIdsByEnvironment
         : { ...current.viewIdsByEnvironment, [environmentId]: [...viewIds, viewId] },
-      selectedViewId: current.selectedEnvironmentId === environmentId ? viewId : current.selectedViewId,
+      selectedViewIdsByEnvironment: current.selectedEnvironmentId === environmentId
+        ? { ...current.selectedViewIdsByEnvironment, [environmentId]: viewId }
+        : current.selectedViewIdsByEnvironment,
     }, 'session')
   }
 
@@ -375,16 +399,20 @@ export function IdePanelProvider({
       return
     }
     rememberEnvironment(environment)
-    setActiveEnvironmentId(environment.id)
+    setActiveEnvironment(environment.id)
     const current = presentationRef.current
-    const viewId = current.viewIdsByEnvironment[environment.id]?.find(
-      (id) => claimReconciliation.viewsRef.current[id] != null,
-    ) ?? null
+    const viewId = selectedViewForEnvironment(current, environment.id)
+    const selectedViewIdsByEnvironment = { ...current.selectedViewIdsByEnvironment }
+    if (viewId == null) {
+      delete selectedViewIdsByEnvironment[environment.id]
+    } else {
+      selectedViewIdsByEnvironment[environment.id] = viewId
+    }
     commitPresentation({
       ...current,
       panelVisible: true,
       selectedEnvironmentId: environment.id,
-      selectedViewId: viewId,
+      selectedViewIdsByEnvironment,
     }, 'both')
     if (viewId != null) {
       claimReconciliation.reconcileView(viewId, 'focus')
@@ -430,9 +458,8 @@ export function IdePanelProvider({
         openedEnvironmentIds,
         viewIdsByEnvironment: Object.fromEntries(Object.entries(current.viewIdsByEnvironment)
           .filter(([id]) => available.has(id))),
-        selectedViewId: selectedEnvironmentId == null
-          ? null
-          : current.viewIdsByEnvironment[selectedEnvironmentId]?.[0] ?? null,
+        selectedViewIdsByEnvironment: Object.fromEntries(Object.entries(current.selectedViewIdsByEnvironment)
+          .filter(([id]) => available.has(id))),
       }, 'session')
     }
     setKnownEnvironments((currentKnown) => {
@@ -474,7 +501,9 @@ export function IdePanelProvider({
         <IdeSplitShell isOpen={panelVisible} panel={<IdeOverlayPanel
           isOpen={panelVisible}
           selectedEnvironmentId={selectedEnvironmentId}
-          selectedViewId={presentation.selectedViewId}
+          selectedViewId={selectedEnvironmentId == null
+            ? null
+            : presentation.selectedViewIdsByEnvironment[selectedEnvironmentId] ?? null}
           openedEnvironmentIds={presentation.openedEnvironmentIds}
           viewsByEnvironment={presentation.viewIdsByEnvironment}
           views={claimReconciliation.views}
@@ -496,11 +525,21 @@ export function IdePanelProvider({
                 return
               }
               const current = presentationRef.current
+              if (
+                current.selectedEnvironmentId !== environmentId
+                || activeEnvironmentIdRef.current !== environmentId
+              ) {
+                return
+              }
               const ids = current.viewIdsByEnvironment[environmentId] ?? []
+              setActiveEnvironment(environmentId)
               commitPresentation({
                 ...current,
                 selectedEnvironmentId: environmentId,
-                selectedViewId: viewId,
+                selectedViewIdsByEnvironment: {
+                  ...current.selectedViewIdsByEnvironment,
+                  [environmentId]: viewId,
+                },
                 viewIdsByEnvironment: ids.includes(viewId)
                   ? current.viewIdsByEnvironment
                   : { ...current.viewIdsByEnvironment, [environmentId]: [...ids, viewId] },
@@ -514,11 +553,14 @@ export function IdePanelProvider({
               return
             }
             const current = presentationRef.current
-            setActiveEnvironmentId(view.environmentId)
+            setActiveEnvironment(view.environmentId)
             commitPresentation({
               ...current,
               selectedEnvironmentId: view.environmentId,
-              selectedViewId: viewId,
+              selectedViewIdsByEnvironment: {
+                ...current.selectedViewIdsByEnvironment,
+                [view.environmentId]: viewId,
+              },
               panelVisible: true,
             }, 'both')
             claimReconciliation.reconcileView(viewId, 'focus')
@@ -566,9 +608,17 @@ export function IdePanelProvider({
       } else {
         viewIdsByEnvironment[view.environmentId] = remaining
       }
-      const selectedViewId = current.selectedViewId === viewId
-        ? remaining[0] ?? null
-        : current.selectedViewId
+      const selectedViewIdsByEnvironment = { ...current.selectedViewIdsByEnvironment }
+      if (selectedViewIdsByEnvironment[view.environmentId] === viewId) {
+        if (remaining.length === 0) {
+          delete selectedViewIdsByEnvironment[view.environmentId]
+        } else {
+          const nextSelectedViewId = remaining[0]
+          if (nextSelectedViewId != null) {
+            selectedViewIdsByEnvironment[view.environmentId] = nextSelectedViewId
+          }
+        }
+      }
       const openedEnvironmentIds = remaining.length === 0
         ? current.openedEnvironmentIds.filter((id) => id !== view.environmentId)
         : current.openedEnvironmentIds
@@ -576,15 +626,22 @@ export function IdePanelProvider({
         && remaining.length === 0
         ? openedEnvironmentIds[0] ?? null
         : current.selectedEnvironmentId
-      const fallbackViewId = selectedEnvironmentId == null
-        ? null
-        : viewIdsByEnvironment[selectedEnvironmentId]?.[0] ?? null
+      if (selectedEnvironmentId != null
+        && selectedViewIdsByEnvironment[selectedEnvironmentId] == null) {
+        const fallbackViewId = viewIdsByEnvironment[selectedEnvironmentId]?.[0]
+        if (fallbackViewId != null) {
+          selectedViewIdsByEnvironment[selectedEnvironmentId] = fallbackViewId
+        }
+      }
+      if (current.selectedEnvironmentId === view.environmentId && remaining.length === 0) {
+        setActiveEnvironment(selectedEnvironmentId)
+      }
       commitPresentation({
         panelVisible: current.panelVisible && openedEnvironmentIds.length > 0,
         selectedEnvironmentId,
         openedEnvironmentIds,
         viewIdsByEnvironment,
-        selectedViewId: selectedViewId ?? fallbackViewId,
+        selectedViewIdsByEnvironment,
       }, 'both')
     }
     return result

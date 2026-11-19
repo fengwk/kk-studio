@@ -21,6 +21,8 @@ const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
 const VIEW_A = 'c1000000-0000-4000-8000-000000000001'
 const VIEW_B = 'c2000000-0000-4000-8000-000000000002'
+const VIEW_A2 = 'c3000000-0000-4000-8000-000000000003'
+const VIEW_B2 = 'c4000000-0000-4000-8000-000000000004'
 const DAEMON_A = 'd1000000-0000-4000-8000-000000000001'
 const DAEMON_B = 'd2000000-0000-4000-8000-000000000002'
 const CLAIM_A = 'e1000000-0000-4000-8000-000000000001'
@@ -52,14 +54,17 @@ function presentation(partial: Partial<IdePresentation> = {}): IdePresentation {
   const viewIdsByEnvironment = partial.viewIdsByEnvironment ?? Object.fromEntries(
     openedEnvironmentIds.map((environmentId) => [environmentId, [environmentId === ENV_A ? VIEW_A : VIEW_B]]),
   )
+  const selectedViewIdsByEnvironment = partial.selectedViewIdsByEnvironment
+    ?? Object.fromEntries(openedEnvironmentIds.flatMap((environmentId) => {
+      const viewId = viewIdsByEnvironment[environmentId]?.[0]
+      return viewId == null ? [] : [[environmentId, viewId]]
+    }))
   return {
     panelVisible: true,
     selectedEnvironmentId,
     openedEnvironmentIds,
     viewIdsByEnvironment,
-    selectedViewId: partial.selectedViewId === undefined
-      ? (selectedEnvironmentId == null ? null : viewIdsByEnvironment[selectedEnvironmentId]?.[0] ?? null)
-      : partial.selectedViewId,
+    selectedViewIdsByEnvironment,
     ...partial,
   }
 }
@@ -121,8 +126,16 @@ function sessionRaw(
   return JSON.stringify({ browserSessionId, presentation: presentationValue, recoveryByView })
 }
 
+function localPresentation(presentationValue: IdePresentation): IdePresentation {
+  return {
+    ...presentationValue,
+    viewIdsByEnvironment: {},
+    selectedViewIdsByEnvironment: {},
+  }
+}
+
 function localRaw(presentationValue: IdePresentation): string {
-  return JSON.stringify({ presentation: presentationValue })
+  return JSON.stringify({ presentation: localPresentation(presentationValue) })
 }
 
 describe('ide tab state', () => {
@@ -151,13 +164,68 @@ describe('ide tab state', () => {
 
     expect(loaded.recoveryError).toBe(false)
     expect(loaded.presentation.viewIdsByEnvironment[ENV_A]).toEqual([VIEW_A])
-    expect(loaded.presentation.selectedViewId).toBe(VIEW_A)
+    expect(loaded.presentation.selectedViewIdsByEnvironment[ENV_A]).toBe(VIEW_A)
     expect(loaded.recoveryByView[VIEW_A]).toMatchObject({
       environmentId: ENV_A,
       viewId: VIEW_A,
       bindingEpoch: '10',
     })
     expect(JSON.parse(session.values.get(IDE_TAB_SESSION_KEY) ?? '{}')).toHaveProperty('recoveryByView')
+  })
+
+  it('migrates the prior multi-view session and keeps a per-environment active view where available', () => {
+    const session = new MemoryStorage()
+    const recoveries = {
+      [VIEW_A]: recoveryJson(),
+      [VIEW_A2]: recoveryJson({ viewId: VIEW_A2, daemonInstanceId: DAEMON_B }),
+      [VIEW_B]: recoveryJson({ environmentId: ENV_B, viewId: VIEW_B, daemonInstanceId: DAEMON_B }),
+      [VIEW_B2]: recoveryJson({ environmentId: ENV_B, viewId: VIEW_B2, daemonInstanceId: DAEMON_A }),
+    }
+    const previousPresentation = {
+      panelVisible: true,
+      selectedEnvironmentId: ENV_B,
+      openedEnvironmentIds: [ENV_A, ENV_B],
+      viewIdsByEnvironment: {
+        [ENV_A]: [VIEW_A, VIEW_A2],
+        [ENV_B]: [VIEW_B, VIEW_B2],
+      },
+      selectedViewId: VIEW_B2,
+    }
+    const recoveryByView = Object.fromEntries(Object.entries(recoveries).map(([viewId, value]) => (
+      [viewId, { ...(value as object), viewId }]
+    )))
+    session.values.set(IDE_TAB_SESSION_KEY, JSON.stringify({
+      browserSessionId: BROWSER_A,
+      presentation: previousPresentation,
+      recoveryByView,
+    }))
+
+    const loaded = initializeIdeTabState({ sessionStorage: session, localStorage: new MemoryStorage() })
+
+    expect(loaded.recoveryError).toBe(false)
+    expect(loaded.presentation.selectedViewIdsByEnvironment).toEqual({
+      [ENV_A]: VIEW_A,
+      [ENV_B]: VIEW_B2,
+    })
+    expect(loaded.presentation.viewIdsByEnvironment).toEqual(previousPresentation.viewIdsByEnvironment)
+    expect(loaded.recoveryByView[VIEW_B2]?.daemonInstanceId).toBe(DAEMON_A)
+    expect(loaded.recoveryByView[VIEW_B2]?.environmentId).toBe(ENV_B)
+  })
+
+  it('preserves a selected view reference not present in recovery instead of overwriting session history', () => {
+    const session = new MemoryStorage()
+    const invalidPresentation = presentation({
+      viewIdsByEnvironment: { [ENV_A]: [VIEW_A, VIEW_B] },
+      selectedViewIdsByEnvironment: { [ENV_A]: VIEW_B },
+    })
+    const raw = sessionRaw(BROWSER_A, invalidPresentation, { [ENV_A]: recoveryJson() })
+    session.values.set(IDE_TAB_SESSION_KEY, raw)
+
+    const loaded = initializeIdeTabState({ sessionStorage: session, localStorage: new MemoryStorage() })
+
+    expect(loaded.recoveryError).toBe(true)
+    expect(loaded.sessionSaved).toBe(false)
+    expect(session.values.get(IDE_TAB_SESSION_KEY)).toBe(raw)
   })
 
   it('preserves an un-migratable legacy recovery snapshot instead of overwriting its claim history', () => {
@@ -221,12 +289,12 @@ describe('ide tab state', () => {
     expect(loaded.source).toBe('local')
     expect(loaded.browserSessionId).toMatch(/^[0-9a-f-]{36}$/)
     expect(loaded.browserSessionId).not.toBe(BROWSER_A)
-    expect(loaded.presentation).toEqual(presentation())
+    expect(loaded.presentation).toEqual(localPresentation(presentation()))
     expect(loaded.recoveryByView).toEqual({})
     expect(loaded.sessionSaved).toBe(true)
     expect(JSON.parse(session.values.get(IDE_TAB_SESSION_KEY) ?? '{}')).toMatchObject({
       browserSessionId: loaded.browserSessionId,
-      presentation: presentation(),
+      presentation: localPresentation(presentation()),
       recoveryByView: {},
     })
     expect(local.values.get(IDE_TAB_LAST_KEY)).toBe(localValue)
@@ -242,7 +310,7 @@ describe('ide tab state', () => {
     const loaded = initializeIdeTabState({ sessionStorage: session, localStorage: local })
 
     expect(loaded.source).toBe('local')
-    expect(loaded.presentation).toEqual(presentation())
+    expect(loaded.presentation).toEqual(localPresentation(presentation()))
     expect(loaded.recoveryByView).toEqual({})
   })
 
@@ -269,7 +337,7 @@ describe('ide tab state', () => {
     const local = new MemoryStorage()
     const selected = presentation({
       selectedEnvironmentId: ENV_B,
-      selectedViewId: null,
+      selectedViewIdsByEnvironment: { [ENV_A]: VIEW_A },
       openedEnvironmentIds: [ENV_A],
     })
     saveIdePresentation(BROWSER_A, selected, { [VIEW_A]: recovery() }, {
@@ -280,7 +348,7 @@ describe('ide tab state', () => {
     const loaded = initializeIdeTabState({ sessionStorage: session, localStorage: local })
 
     expect(loaded.presentation.selectedEnvironmentId).toBe(ENV_B)
-    expect(loaded.presentation.selectedViewId).toBeNull()
+    expect(loaded.presentation.selectedViewIdsByEnvironment[ENV_A]).toBe(VIEW_A)
     expect(loaded.presentation.openedEnvironmentIds).toEqual([ENV_A])
     expect(loaded.recoveryByView[VIEW_A]?.environmentId).toBe(ENV_A)
   })
@@ -324,17 +392,14 @@ describe('ide tab state', () => {
     }],
   ])('rejects a strict snapshot when %s', (_label, presentationValue, recoveryMap) => {
     const session = new MemoryStorage()
-    session.values.set(
-      IDE_TAB_SESSION_KEY,
-      sessionRaw(BROWSER_A, presentationValue, recoveryMap),
-    )
+    const raw = sessionRaw(BROWSER_A, presentationValue, recoveryMap)
+    session.values.set(IDE_TAB_SESSION_KEY, raw)
 
     const loaded = initializeIdeTabState({ sessionStorage: session, localStorage: new MemoryStorage() })
 
-    expect(loaded.source).toBe('default')
-    expect(loaded.browserSessionId).not.toBe(BROWSER_A)
-    expect(loaded.presentation).toEqual(createDefaultIdePresentation())
-    expect(loaded.recoveryByView).toEqual({})
+    expect(loaded.recoveryError).toBe(true)
+    expect(loaded.sessionSaved).toBe(false)
+    expect(session.values.get(IDE_TAB_SESSION_KEY)).toBe(raw)
   })
 
   it('writes session and local on a user event, keeping runtime identity only in session', () => {
@@ -370,7 +435,7 @@ describe('ide tab state', () => {
     })
     const localSnapshot = local.values.get(IDE_TAB_LAST_KEY) ?? ''
     expect(JSON.parse(localSnapshot)).toEqual({
-      presentation: { ...next, viewIdsByEnvironment: {}, selectedViewId: null },
+      presentation: localPresentation(next),
     })
     expect(localSnapshot).not.toContain(VIEW_A)
     expect(localSnapshot).not.toContain(DAEMON_A)
