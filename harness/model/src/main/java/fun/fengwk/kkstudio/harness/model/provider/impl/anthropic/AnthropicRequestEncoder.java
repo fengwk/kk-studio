@@ -7,6 +7,7 @@ import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapabilities;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -93,7 +94,10 @@ public final class AnthropicRequestEncoder {
         toolsArray,
         unmarkedSystemArray,
         wire.cacheEndpoint(),
-        deferredToolLane);
+        deferredToolLane,
+        PromptCacheCapabilities.resolve(
+                descriptor.type(), descriptor.endpoint(), request.model().modelId())
+            .automaticCache());
     if (effort.messageLevelEffort()) {
       wireMessagesArray =
           AnthropicReasoningEffort.applyMessageLevelEffort(

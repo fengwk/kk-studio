@@ -224,15 +224,16 @@ class OpenAiProviderGoldenTest {
                 List.of(tool("lookup")),
                 ProviderCacheControl.session(
                     PromptCacheRetention.SHORT, "11111111-1111-1111-1111-111111111111"))));
-    assertGolden(
-        "chat-tools-cache-long",
-        chatEncoding(
-            chatRequest(
-                plainVariant(),
-                List.of(user("Hello")),
-                List.of(tool("lookup"), tool("search")),
-                ProviderCacheControl.session(
-                    PromptCacheRetention.LONG, "22222222-2222-2222-2222-222222222222"))));
+    assertThrows(
+        ProviderException.class,
+        () ->
+            chatEncoding(
+                chatRequest(
+                    plainVariant(),
+                    List.of(user("Hello")),
+                    List.of(tool("lookup"), tool("search")),
+                    ProviderCacheControl.session(
+                        PromptCacheRetention.LONG, "22222222-2222-2222-2222-222222222222"))));
     assertGolden(
         "chat-tools-cache-none",
         chatEncoding(
@@ -1003,21 +1004,22 @@ class OpenAiProviderGoldenTest {
   /** hosted 工具保留、runtime 工具追加，缓存档位写入 cache 字段。 */
   @Test
   void responsesToolsWithHostedAndCache() {
-    assertGolden(
-        "responses-tools-cache",
-        responsesEncoding(
-            responsesRequest(
-                variant(
-                    "native",
-                    null,
-                    PromptCacheRetention.NONE,
-                    "{\"tools\":[{\"type\":\"web_search\"},"
-                        + "{\"type\":\"mcp\",\"require_approval\":\"never\",\"server_label\":\"s\"}],"
-                        + "\"background\":false,\"temperature\":0.4}"),
-                List.of(user("Hello")),
-                List.of(tool("lookup")),
-                ProviderCacheControl.session(
-                    PromptCacheRetention.LONG, "44444444-4444-4444-4444-444444444444"))));
+    assertThrows(
+        ProviderException.class,
+        () ->
+            responsesEncoding(
+                responsesRequest(
+                    variant(
+                        "native",
+                        null,
+                        PromptCacheRetention.NONE,
+                        "{\"tools\":[{\"type\":\"web_search\"},"
+                            + "{\"type\":\"mcp\",\"require_approval\":\"never\",\"server_label\":\"s\"}],"
+                            + "\"background\":false,\"temperature\":0.4}"),
+                    List.of(user("Hello")),
+                    List.of(tool("lookup")),
+                    ProviderCacheControl.session(
+                        PromptCacheRetention.LONG, "44444444-4444-4444-4444-444444444444"))));
     assertGolden(
         "responses-cache-short",
         responsesEncoding(
@@ -1376,9 +1378,17 @@ class OpenAiProviderGoldenTest {
         List.of(
             ProviderCacheControl.none(),
             ProviderCacheControl.session(
-                PromptCacheRetention.SHORT, "66666666-6666-6666-6666-666666666666"),
-            ProviderCacheControl.session(
-                PromptCacheRetention.LONG, "77777777-7777-7777-7777-777777777777"));
+                PromptCacheRetention.SHORT, "66666666-6666-6666-6666-666666666666"));
+    assertThrows(
+        ProviderException.class,
+        () ->
+            chatEncoding(
+                chatRequest(
+                    plainVariant(),
+                    List.of(user("Hello")),
+                    List.of(),
+                    ProviderCacheControl.session(
+                        PromptCacheRetention.LONG, "77777777-7777-7777-7777-777777777777"))));
     List<ModelVariant> variants =
         List.of(
             plainVariant(),
@@ -1406,9 +1416,17 @@ class OpenAiProviderGoldenTest {
         List.of(
             ProviderCacheControl.none(),
             ProviderCacheControl.session(
-                PromptCacheRetention.SHORT, "88888888-8888-8888-8888-888888888888"),
-            ProviderCacheControl.session(
-                PromptCacheRetention.LONG, "99999999-9999-9999-9999-999999999999"));
+                PromptCacheRetention.SHORT, "88888888-8888-8888-8888-888888888888"));
+    assertThrows(
+        ProviderException.class,
+        () ->
+            responsesEncoding(
+                responsesRequest(
+                    plainVariant(),
+                    List.of(user("Hello")),
+                    List.of(),
+                    ProviderCacheControl.session(
+                        PromptCacheRetention.LONG, "99999999-9999-9999-9999-999999999999"))));
     List<ModelVariant> variants =
         List.of(
             plainVariant(),

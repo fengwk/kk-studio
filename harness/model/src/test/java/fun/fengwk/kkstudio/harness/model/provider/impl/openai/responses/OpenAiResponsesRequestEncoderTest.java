@@ -631,19 +631,15 @@ class OpenAiResponsesRequestEncoderTest {
     assertFalse(shortRoot.has("prompt_cache_retention"));
     assertFalse(shortRoot.has("prompt_cache_options"));
 
-    // LONG -> 24h
-    JsonNode longRoot =
-        MAPPER.readTree(
-            encoder
-                .encode(
-                    request(
-                        messages,
-                        ProviderCacheControl.session(PromptCacheRetention.LONG, "session-uuid")),
-                    desc)
-                .bodyUtf8Bytes());
-    assertFalse(longRoot.has("prompt_cache_key"));
-    assertFalse(longRoot.has("prompt_cache_retention"));
-    assertFalse(longRoot.has("prompt_cache_options"));
+    // This unverified model cannot silently ignore LONG.
+    assertThrows(
+        ProviderException.class,
+        () ->
+            encoder.encode(
+                request(
+                    messages,
+                    ProviderCacheControl.session(PromptCacheRetention.LONG, "session-uuid")),
+                desc));
 
     ModelDescriptor legacyModel =
         new ModelDescriptor(
@@ -693,12 +689,7 @@ class OpenAiResponsesRequestEncoderTest {
             ProviderType.OPENAI_RESPONSES,
             "https://proxy.example/v1",
             desc.modelCallTimeoutPolicy());
-    JsonNode proxyModernLong =
-        MAPPER.readTree(encoder.encode(modernLongRequest, proxy).bodyUtf8Bytes());
-    assertFalse(proxyModernLong.has("prompt_cache_options"));
-    assertFalse(proxyModernLong.has("prompt_cache_retention"));
-    assertFalse(proxyModernLong.has("prompt_cache_key"));
-    assertEquals("Test system instruction.", proxyModernLong.path("instructions").asString(""));
+    assertThrows(ProviderException.class, () -> encoder.encode(modernLongRequest, proxy));
   }
 
   /** 验证 refusal block 的原生 contentType 可编码为 refusal，而非普通 output_text。 */

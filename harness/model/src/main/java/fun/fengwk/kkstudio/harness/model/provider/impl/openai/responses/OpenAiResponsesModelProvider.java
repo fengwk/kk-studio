@@ -115,7 +115,7 @@ final class OpenAiResponsesModelProvider implements ModelProvider {
     }
     return request.cacheControl().retention() == PromptCacheRetention.LONG
         && OpenAiBackendCapabilities.reliableWriteTtlSeconds(
-                descriptor, request.model().modelId(), true, request.cacheControl().retention())
+                descriptor, request.model().modelId(), request.cacheControl().retention())
             != null;
   }
 }

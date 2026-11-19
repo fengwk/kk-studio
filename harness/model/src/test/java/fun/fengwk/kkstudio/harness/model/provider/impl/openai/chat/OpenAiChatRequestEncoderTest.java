@@ -251,9 +251,9 @@ class OpenAiChatRequestEncoderTest {
     assertFalse(root.has("max_completion_tokens"));
   }
 
-  /** 只有官方端点上的已知 o-series 才使用 max_completion_tokens。 */
+  /** Official o-series and verified modern GPT models use max_completion_tokens, not proxies. */
   @Test
-  void outputBudgetUsesOfficialOSeriesFieldOnly() throws Exception {
+  void outputBudgetUsesVerifiedOfficialModelFields() throws Exception {
     ModelDescriptor o3 =
         new ModelDescriptor("openai", "o3", "o3", Set.of(ModelInputModality.TEXT), true, false);
     ProviderRequest request =
@@ -280,6 +280,42 @@ class OpenAiChatRequestEncoderTest {
     JsonNode compatible = MAPPER.readTree(encoder.encode(request, custom).bodyUtf8Bytes());
     assertEquals(100, compatible.path("max_tokens").asInt(0));
     assertFalse(compatible.has("max_completion_tokens"));
+
+    ModelDescriptor modernGpt =
+        new ModelDescriptor(
+            "openai", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest modernRequest =
+        new ProviderRequest(
+            modernGpt,
+            defaultVariant,
+            100,
+            "system",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode modern = MAPPER.readTree(encoder.encode(modernRequest, descriptor).bodyUtf8Bytes());
+    assertEquals(100, modern.path("max_completion_tokens").asInt(0));
+    assertFalse(modern.has("max_tokens"));
+
+    ModelDescriptor futureGpt =
+        new ModelDescriptor(
+            "openai", "gpt-9.0", "gpt-9.0", Set.of(ModelInputModality.TEXT), true, false);
+    ProviderRequest futureRequest =
+        new ProviderRequest(
+            futureGpt,
+            defaultVariant,
+            100,
+            "system",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            ProviderCacheControl.none());
+    JsonNode future = MAPPER.readTree(encoder.encode(futureRequest, descriptor).bodyUtf8Bytes());
+    assertEquals(100, future.path("max_tokens").asInt(0));
+    assertFalse(future.has("max_completion_tokens"));
   }
 
   @Test
@@ -500,14 +536,12 @@ class OpenAiChatRequestEncoderTest {
     // 不再改写 content 形态或注入 breakpoint
     assertEquals("User prompt", rootShort.path("messages").get(1).path("content").asString(""));
 
-    // GPT-4o has no verified legacy 24h capability.
+    // Unsupported LONG intent must fail instead of silently dropping its TTL.
     ProviderCacheControl cacheControlLong =
         ProviderCacheControl.session(PromptCacheRetention.LONG, "my-key-long");
     ProviderRequest reqLong =
         cacheRequest("Test system instruction.", List.of(userMsg), cacheControlLong);
-    JsonNode rootLong = MAPPER.readTree(encoder.encode(reqLong, descriptor).bodyUtf8Bytes());
-    assertFalse(rootLong.has("prompt_cache_key"));
-    assertFalse(rootLong.has("prompt_cache_retention"));
+    assertThrows(ProviderException.class, () -> encoder.encode(reqLong, descriptor));
 
     ModelDescriptor modernModel =
         new ModelDescriptor(
@@ -538,11 +572,7 @@ class OpenAiChatRequestEncoderTest {
             List.of(),
             List.of(),
             ProviderCacheControl.session(PromptCacheRetention.LONG, "modern-key"));
-    JsonNode modernLongRoot =
-        MAPPER.readTree(encoder.encode(modernLong, descriptor).bodyUtf8Bytes());
-    assertFalse(modernLongRoot.has("prompt_cache_key"));
-    assertFalse(modernLongRoot.has("prompt_cache_retention"));
-    assertFalse(modernLongRoot.has("prompt_cache_options"));
+    assertThrows(ProviderException.class, () -> encoder.encode(modernLong, descriptor));
 
     ModelDescriptor legacyModel =
         new ModelDescriptor(

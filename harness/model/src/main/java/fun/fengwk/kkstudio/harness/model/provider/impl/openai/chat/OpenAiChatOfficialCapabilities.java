@@ -15,6 +15,7 @@ final class OpenAiChatOfficialCapabilities {
   }
 
   static boolean usesMaxCompletionTokens(String modelId) {
-    return modelId.matches("o[134](?:[-._].*)?");
+    return modelId.matches("o[134](?:[-._].*)?")
+        || OpenAiBackendCapabilities.supportsExplicitCache(modelId);
   }
 }

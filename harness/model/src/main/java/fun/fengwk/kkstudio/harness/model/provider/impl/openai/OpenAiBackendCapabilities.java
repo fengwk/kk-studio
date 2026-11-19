@@ -1,5 +1,6 @@
 package fun.fengwk.kkstudio.harness.model.provider.impl.openai;
 
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapabilities;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 
@@ -34,8 +35,15 @@ public final class OpenAiBackendCapabilities {
   private OpenAiBackendCapabilities() {}
 
   public static boolean isOfficialEndpoint(ProviderDescriptor descriptor) {
+    return isOfficialEndpoint(descriptor.endpoint());
+  }
+
+  public static boolean isOfficialEndpoint(String endpoint) {
+    if (endpoint == null) {
+      return false;
+    }
     try {
-      return "api.openai.com".equalsIgnoreCase(URI.create(descriptor.endpoint()).getHost());
+      return "api.openai.com".equalsIgnoreCase(URI.create(endpoint).getHost());
     } catch (IllegalArgumentException exception) {
       return false;
     }
@@ -71,25 +79,8 @@ public final class OpenAiBackendCapabilities {
 
   /** Reliable write TTL for the selected, supported retention on known official models. */
   public static Long reliableWriteTtlSeconds(
-      ProviderDescriptor descriptor,
-      String modelId,
-      boolean responses,
-      PromptCacheRetention retention) {
-    if (!isOfficialEndpoint(descriptor)) {
-      return null;
-    }
-    if (supportsExplicitCache(modelId)) {
-      if (retention == PromptCacheRetention.SHORT) {
-        return 1800L;
-      }
-      if (responses && retention == PromptCacheRetention.LONG) {
-        return 43200L;
-      }
-      return null;
-    }
-    if (retention == PromptCacheRetention.LONG && supportsLegacyLongCache(modelId)) {
-      return 86400L;
-    }
-    return null;
+      ProviderDescriptor descriptor, String modelId, PromptCacheRetention retention) {
+    return PromptCacheCapabilities.resolve(descriptor.type(), descriptor.endpoint(), modelId)
+        .reliableWriteTtlSeconds(retention);
   }
 }

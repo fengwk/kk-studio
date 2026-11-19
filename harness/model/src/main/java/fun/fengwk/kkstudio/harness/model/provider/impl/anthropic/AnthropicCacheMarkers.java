@@ -25,8 +25,9 @@ final class AnthropicCacheMarkers {
       ArrayNode toolsArray,
       ArrayNode systemArray,
       ObjectNode cacheEndpoint,
-      boolean hasDeferredPlaceholder) {
-    if (cacheControl.retention() == PromptCacheRetention.NONE) {
+      boolean hasDeferredPlaceholder,
+      boolean automaticCache) {
+    if (cacheControl.retention() == PromptCacheRetention.NONE || automaticCache) {
       return;
     }
 

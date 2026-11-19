@@ -328,7 +328,7 @@ final class OpenAiChatStreamAccumulator extends ProviderStreamState {
 
   private Long cacheWriteTtlSeconds() {
     return OpenAiBackendCapabilities.reliableWriteTtlSeconds(
-        descriptor, request.model().modelId(), false, request.cacheControl().retention());
+        descriptor, request.model().modelId(), request.cacheControl().retention());
   }
 
   private void requireCompleteStreamFacts() {

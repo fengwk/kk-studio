@@ -456,7 +456,7 @@ class AnthropicRequestEncoderTest {
     ObjectNode currentTail = currentMessage;
 
     AnthropicCacheMarkers.apply(
-        cacheControl, messages, NODES.arrayNode(), NODES.arrayNode(), currentTail, false);
+        cacheControl, messages, NODES.arrayNode(), NODES.arrayNode(), currentTail, false, false);
     assertFalse(oldTail.has("cache_control"));
     assertEquals(retention != PromptCacheRetention.NONE, currentTail.has("cache_control"));
     if (retention == PromptCacheRetention.NONE) {
@@ -469,6 +469,24 @@ class AnthropicRequestEncoderTest {
       assertEquals(expectedTtl, currentTail.path("cache_control").path("ttl").asString(""));
       assertEquals(1, countCacheMarkers(messages));
     }
+  }
+
+  @Test
+  void automaticCacheRouteDoesNotReceiveAnthropicMarkers() {
+    ArrayNode messages = NODES.arrayNode();
+    ObjectNode tail = messages.addObject().put("role", "user").putArray("content").addObject();
+    tail.put("type", "text").put("text", "hello");
+
+    AnthropicCacheMarkers.apply(
+        ProviderCacheControl.session(PromptCacheRetention.SHORT, "session"),
+        messages,
+        NODES.arrayNode(),
+        NODES.arrayNode(),
+        tail,
+        false,
+        true);
+
+    assertEquals(0, countCacheMarkers(messages));
   }
 
   private static Stream<Arguments> conversationRetentionCases() {

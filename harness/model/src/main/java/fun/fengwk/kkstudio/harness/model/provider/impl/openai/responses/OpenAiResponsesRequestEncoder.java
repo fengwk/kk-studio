@@ -9,6 +9,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapabilities;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -384,8 +386,18 @@ public final class OpenAiResponsesRequestEncoder {
   private static void applyCacheControl(
       ObjectNode root, ProviderRequest request, ProviderDescriptor descriptor) {
     ProviderCacheControl cacheControl = request.cacheControl();
+    PromptCacheCapabilities capabilities =
+        PromptCacheCapabilities.resolve(
+            descriptor.type(), descriptor.endpoint(), request.model().modelId());
+    if (cacheControl.retention() == PromptCacheRetention.LONG
+        && !capabilities.supports(PromptCacheRetention.LONG)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "prompt cache retention LONG is unsupported for this provider model");
+    }
     boolean official = OpenAiBackendCapabilities.isOfficialEndpoint(descriptor);
-    boolean modern = OpenAiBackendCapabilities.supportsExplicitCache(request.model().modelId());
+    boolean modern = capabilities.supports(PromptCacheRetention.NONE);
+    Long longTtlSeconds = capabilities.reliableWriteTtlSeconds(PromptCacheRetention.LONG);
     switch (cacheControl.retention()) {
       case NONE -> {
         if (official && modern) {
@@ -394,11 +406,10 @@ public final class OpenAiResponsesRequestEncoder {
       }
       case SHORT -> root.put("prompt_cache_key", cacheControl.key());
       case LONG -> {
-        if (official && modern) {
+        if (official && longTtlSeconds == 43200L) {
           root.put("prompt_cache_key", cacheControl.key());
           root.putObject("prompt_cache_options").put("ttl", "12h");
-        } else if (official
-            && OpenAiBackendCapabilities.supportsLegacyLongCache(request.model().modelId())) {
+        } else if (official && longTtlSeconds == 86400L) {
           root.put("prompt_cache_key", cacheControl.key());
           root.put("prompt_cache_retention", "24h");
         }

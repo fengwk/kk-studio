@@ -361,7 +361,7 @@ public final class OpenAiResponsesStreamAccumulator extends ProviderStreamState 
     OpenAiResponsesToolStream.ToolCalls resolved = resolveToolCalls();
     Long reliableCacheWriteTtl =
         OpenAiBackendCapabilities.reliableWriteTtlSeconds(
-            descriptor, request.model().modelId(), true, request.cacheControl().retention());
+            descriptor, request.model().modelId(), request.cacheControl().retention());
     ModelUsage modelUsage = usage.toModelUsage(reliableCacheWriteTtl);
     String rawUsageJson = usage.rawJson();
     List<ProviderContentBlock> responseBlocks = buildResponseBlocks(resolved);

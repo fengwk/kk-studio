@@ -266,6 +266,7 @@ class OpenAiResponsesModelProviderTest {
     assertEquals("12h", body.path("prompt_cache_options").path("ttl").asString(""));
     assertEquals("long-session", body.path("prompt_cache_key").asString(""));
 
+    // A compatible endpoint is not granted the official 12-hour mode by model name alone.
     ProviderDescriptor proxyDescriptor =
         new ProviderDescriptor(
             "proxy",
@@ -277,13 +278,8 @@ class OpenAiResponsesModelProviderTest {
     new OpenAiResponsesProviderAdapter(
             stubTransport((proxyHttpRequest, cb) -> proxyRequest.set(proxyHttpRequest)), null)
         .create(proxyDescriptor).stream(request, proxyHandler);
-    assertNotNull(proxyRequest.get());
-    assertTrue(proxyRequest.get().headers().firstValue("session-id").isEmpty());
-    assertTrue(proxyRequest.get().headers().firstValue("x-client-request-id").isEmpty());
-    JsonNode proxyBody = MAPPER.readTree(proxyHandler.requestBody);
-    assertFalse(proxyBody.has("prompt_cache_key"));
-    assertFalse(proxyBody.has("prompt_cache_options"));
-    assertEquals("Test system instruction.", proxyBody.path("instructions").asString(""));
+    assertNull(proxyRequest.get());
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, proxyHandler.error.kind());
   }
 
   /** 验证无 apiKey 或为空格时以匿名方式发起请求，绝不注入 Authorization 头。 */
