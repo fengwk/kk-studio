@@ -16,6 +16,7 @@ const ATTACHMENT_NAME = 'pane-note.txt'
 
 interface Recorded {
   stopRequests: Array<Record<string, unknown>>
+  stopRequestPaths: string[]
   commandRequests: Array<Record<string, unknown>>
   uploadCalls: string[]
   deletedUploads: string[]
@@ -96,10 +97,11 @@ function treeNodes() {
   return [
     {
       threadId: ROOT_ID,
+      kind: 'USER',
       parentThreadId: null,
       name: '根 Thread',
       agentName: 'assistant',
-      model: { modelName: 'VeryLongModelName', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'VeryLongModelName', variant: 'default' } },
       status: 'IDLE',
       executionControl: 'RUNNABLE',
       turnCount: 1,
@@ -109,10 +111,11 @@ function treeNodes() {
     },
     {
       threadId: CHILD_ID,
+      kind: 'SUBAGENT',
       parentThreadId: ROOT_ID,
       name: 'worker child',
       agentName: 'coder',
-      model: { modelName: 'VeryLongModelName', variant: 'default' },
+      execution: { driver: 'builtin', settings: { modelName: 'VeryLongModelName', variant: 'default' } },
       status: 'RUNNING',
       executionControl: 'RUNNABLE',
       turnCount: 2,
@@ -160,6 +163,7 @@ async function installPaneApi(
 ): Promise<Recorded> {
   const recorded: Recorded = {
     stopRequests: [],
+    stopRequestPaths: [],
     commandRequests: [],
     uploadCalls: [],
     deletedUploads: [],
@@ -172,6 +176,7 @@ async function installPaneApi(
 
     if (path === `/api/harness/threads/${ROOT_ID}/stop` && method === 'POST') {
       recorded.stopRequests.push(request.postDataJSON())
+      recorded.stopRequestPaths.push(path)
       await route.fulfill({
         json: {
           status: 'STOPPED',
@@ -491,8 +496,10 @@ test('an idle root still stops its running subtree with a root-scoped request', 
   const recorded = await installPaneApi(page)
   const { composer } = await openRootPane(page, recorded)
 
-  // 根自身 IDLE，子代理在处理：Stop 仍可用，并且只落在执行根上。
+  // 根自身 IDLE，子代理仍在处理：Stop 仍可用，并且只落在执行根上。
   await expect(page.locator('.active-thread-tree')).toBeVisible()
+  await expect(page.locator(`.active-thread-tree .thread-tree-row[data-thread-id="${CHILD_ID}"]`))
+    .toHaveAttribute('data-status', 'RUNNING')
   const editor = composer.locator('.composer-editor')
   await editor.click()
   await editor.fill('/stop')
@@ -506,8 +513,10 @@ test('an idle root still stops its running subtree with a root-scoped request', 
   expect(Object.keys(recorded.stopRequests[0] ?? {}).sort())
     .toEqual(['expectedVersion', 'stopRequestId'])
   expect(recorded.stopRequests[0]?.expectedVersion).toBe('1')
-  // 根交互汇聚的来源显示会话归属，不暴露来源 Thread 身份；决策仍写回原始 Thread。
-  await expect(page.getByRole('button', { name: 'Chat · Pane harness' })).toBeVisible()
+  expect(recorded.stopRequestPaths).toEqual([`/api/harness/threads/${ROOT_ID}/stop`])
+  // 根交互汇聚仍展示子代理的待处理审批及其子代理入口。
+  await expect(page.locator('.interaction-approval-card')).toBeVisible()
+  await expect(page.locator('.interaction-subagent-source')).toBeVisible()
 })
 
 test('switching environment on a root with running subagents warns it applies to them', async ({ page }) => {

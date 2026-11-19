@@ -12,6 +12,7 @@ import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/t
 import { transcriptStreamRevision } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/useChatTranscriptAutoScroll'
 import { setLocale } from '@/shared/i18n'
+import { ApplicationEventProvider } from '@/shared/app-events'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessSessionEntryDTO } from '@/shared/api/generated/contracts'
 
@@ -176,12 +177,14 @@ const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false 
 export function CompactionLifecycleHarnessApp() {
   return (
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={['/']}>
-        <Routes>
-          <Route path="/" element={<TranscriptRoute />} />
-          <Route path="/threads/:threadId" element={<BranchRoute />} />
-        </Routes>
-      </MemoryRouter>
+      <ApplicationEventProvider>
+        <MemoryRouter initialEntries={['/']}>
+          <Routes>
+            <Route path="/" element={<TranscriptRoute />} />
+            <Route path="/threads/:threadId" element={<BranchRoute />} />
+          </Routes>
+        </MemoryRouter>
+      </ApplicationEventProvider>
     </QueryClientProvider>
   )
 }
