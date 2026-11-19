@@ -523,7 +523,7 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     })
   })
 
-  test('User message attachments use unified 6px gap without asymmetric margin', async ({
+  test('User message attachments use unified 4px gap without asymmetric margin', async ({
     page,
   }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
@@ -532,7 +532,7 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     const userBlock = page.locator('.thread-block-user')
     await expect(userBlock).toBeVisible()
 
-    // 验证父容器采用 flex column 且 gap 规范为 6px
+    // 紧凑消息卡片的正文与附件统一通过 4px 列间距分隔。
     const blockStyle = await userBlock.evaluate((el) => {
       const style = window.getComputedStyle(el)
       return {
@@ -543,7 +543,7 @@ test.describe('Chat Workspace 1-9 Panes Layout, Footer & User Attachments', () =
     })
     expect(blockStyle.display).toBe('flex')
     expect(blockStyle.flexDirection).toBe('column')
-    expect(blockStyle.gap).toBe('6px')
+    expect(blockStyle.gap).toBe('4px')
 
     // 验证 .thread-user-attachments 移除了多余的 margin-top: 6px (计算值为 0px)
     const attachmentsEl = page.locator('.thread-user-attachments')

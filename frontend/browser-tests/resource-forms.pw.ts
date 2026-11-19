@@ -1,10 +1,22 @@
 import { expect, test, tokenColor } from './fixture'
 
 test('resource forms preserve native semantics, shared geometry and controlled edits at wide and narrow widths', async ({ page }) => {
-  // 真实表单仅编辑本地草稿；任何网络请求都是 harness 越界。
-  const requests: string[] = []
+  // 允许表单读取模型能力，但草稿编辑不应发出其他 API 请求。
+  const unexpectedRequests: string[] = []
   await page.route('**/api/**', async (route) => {
-    requests.push(route.request().url())
+    const request = route.request()
+    const url = new URL(request.url())
+    if (request.method() === 'GET' && url.pathname === '/api/platform/models/capabilities'
+        && url.searchParams.get('providerName') === 'demo-provider'
+        && url.searchParams.get('modelId') === 'wire-model') {
+      await route.fulfill({ json: {
+        promptCacheOptions: [{ retention: 'NONE' }],
+        defaultPromptCacheRetention: 'NONE',
+        automaticCache: false,
+      } })
+      return
+    }
+    unexpectedRequests.push(`${request.method()} ${url.pathname}`)
     await route.abort()
   })
   for (const width of [1280, 390, 320]) {
@@ -23,16 +35,21 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     await expect(invalid).toHaveAttribute('aria-invalid', 'true')
     await invalid.focus()
     await expect(invalid).toHaveCSS('border-top-color', 'rgb(240, 133, 133)')
+    // 等到能力读取完成、Variant 控件可用，再测量布局与截图。
+    await expect(model.getByRole('button', { name: '提示缓存留存 1' })).toBeEnabled()
     await expect(model.getByLabel('Provider', { exact: true })).toBeDisabled()
+    await expect(model.getByRole('textbox', { name: 'Model ID' })).toHaveJSProperty('required', true)
     await expect(model.getByLabel('Reasoning Effort 1')).toBeDisabled()
     await expect(model.getByRole('button', { name: '删除 Variant' })).toBeDisabled()
     const price = model.getByLabel('Input USD per million tokens')
     // 十进制编辑器保留文本精度与尾零，不经过原生 number 的浮点转换。
     await expect(price).toHaveAttribute('type', 'text')
     await expect(price).toHaveAttribute('inputmode', 'decimal')
-    await expect(price).toHaveAttribute('required', '')
+    await expect(price).toHaveJSProperty('required', false)
+    await expect(price).toHaveValue('')
     await price.fill('1.2500')
     await expect(price).toHaveValue('1.2500')
+    await model.getByText('高级选项', { exact: true }).click()
     const protocol = model.getByLabel('Protocol Options 1')
     await protocol.fill('{\n  "temperature": 0.5\n}')
     await expect(protocol).toHaveValue('{\n  "temperature": 0.5\n}')
@@ -43,8 +60,9 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     expect(await page.locator('.ui-text-input').evaluateAll((inputs) =>
       inputs.every((input) => input.getBoundingClientRect().height === 32))).toBe(true)
     await password.focus()
-    expect(await password.evaluate((el) => getComputedStyle(el).boxShadow))
-      .toContain(await tokenColor(page, '--focus-ring'))
+    await expect(password).toHaveCSS('outline-style', 'solid')
+    await expect(password).toHaveCSS('outline-width', '2px')
+    await expect(password).toHaveCSS('outline-color', await tokenColor(page, '--focus'))
     await expect(model.getByLabel('Reasoning Effort 1')).toHaveCSS('cursor', 'not-allowed')
     expect(await page.evaluate(() =>
       document.documentElement.scrollWidth <= document.documentElement.clientWidth)).toBe(true)
@@ -57,5 +75,5 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     })
     await agent.screenshot({ path: test.info().outputPath(`resource-agent-${width}.png`) })
   }
-  expect(requests).toEqual([])
+  expect(unexpectedRequests).toEqual([])
 })
