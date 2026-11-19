@@ -11,21 +11,33 @@ vi.mock('@/features/environment/ide/environment-ide-service', () => ({ closeIdeV
 
 const ENVIRONMENT_ID = 'a1000000-0000-4000-8000-000000000001'
 const VIEW_ID = 'c1000000-0000-4000-8000-000000000001'
+const VIEW_ID_B = 'c2000000-0000-4000-8000-000000000002'
 const DAEMON_ID = 'd1000000-0000-4000-8000-000000000001'
+const DAEMON_ID_B = 'd2000000-0000-4000-8000-000000000002'
+const CLAIM_ID = 'e1000000-0000-4000-8000-000000000001'
+const CLAIM_ID_B = 'e2000000-0000-4000-8000-000000000002'
 
-function readyView(): IdeViewState {
+function readyView(viewId = VIEW_ID, daemonInstanceId = DAEMON_ID, claimId = CLAIM_ID): IdeViewState {
   return {
     environmentId: ENVIRONMENT_ID,
-    viewId: VIEW_ID,
+    viewId,
     mode: 'resume',
     status: 'ready',
-    claimId: 'claim-1',
+    claimId,
     attempt: 1,
-    daemonInstanceId: DAEMON_ID,
+    daemonInstanceId,
     bindingEpoch: '7',
     iframeLoaded: true,
     pendingShell: false,
   }
+}
+
+function useSessionRef() {
+  return useRef<IdeBrowserSessionState>({
+    browserSessionId: 'b1000000-0000-4000-8000-000000000001',
+    status: 'ready',
+    sessionSaved: true,
+  })
 }
 
 describe('useIdeCloseCommands', () => {
@@ -33,24 +45,56 @@ describe('useIdeCloseCommands', () => {
     vi.clearAllMocks()
   })
 
-  it('asks for explicit force confirmation only for outcome-unknown or missing control channel', async () => {
+  it('closes one view independently when two views share an Environment', async () => {
+    const viewA = readyView()
+    const viewB = readyView(VIEW_ID_B, DAEMON_ID_B, CLAIM_ID_B)
+    const commitViews = vi.fn()
+    closeIdeView.mockResolvedValueOnce(undefined)
     const { result } = renderHook(() => {
-      const viewsRef = useRef<Record<string, IdeViewState>>({ [ENVIRONMENT_ID]: readyView() })
-      const sessionRef = useRef<IdeBrowserSessionState>({
-        browserSessionId: 'b1000000-0000-4000-8000-000000000001',
-        status: 'ready',
-        sessionSaved: true,
-      })
+      const viewsRef = useRef<Record<string, IdeViewState>>({ [VIEW_ID]: viewA, [VIEW_ID_B]: viewB })
       return useIdeCloseCommands({
         viewsRef,
-        sessionRef,
-        updateView: (environmentId, attempt, patch) => {
-          const view = viewsRef.current[environmentId]
+        sessionRef: useSessionRef(),
+        updateView: (viewId, attempt, patch) => {
+          const view = viewsRef.current[viewId]
           if (view == null || view.attempt !== attempt) {
             return null
           }
           const updated = { ...view, ...patch }
-          viewsRef.current = { ...viewsRef.current, [environmentId]: updated }
+          viewsRef.current = { ...viewsRef.current, [viewId]: updated }
+          return updated
+        },
+        commitViews,
+        forgetView: vi.fn(),
+        writeSession: () => true,
+        registerUsageNow: async () => undefined,
+        registerUsageQuiet: vi.fn(),
+      })
+    })
+
+    let resultValue!: Awaited<ReturnType<typeof result.current.closeView>>
+    await act(async () => {
+      resultValue = await result.current.closeView(VIEW_ID, false)
+    })
+
+    expect(resultValue.ok).toBe(true)
+    expect(closeIdeView).toHaveBeenCalledWith(ENVIRONMENT_ID, VIEW_ID, expect.anything())
+    expect(commitViews).toHaveBeenCalledWith({ [VIEW_ID_B]: viewB })
+  })
+
+  it('asks for explicit force confirmation only for outcome-unknown or missing control channel', async () => {
+    const { result } = renderHook(() => {
+      const viewsRef = useRef<Record<string, IdeViewState>>({ [VIEW_ID]: readyView() })
+      return useIdeCloseCommands({
+        viewsRef,
+        sessionRef: useSessionRef(),
+        updateView: (viewId, attempt, patch) => {
+          const view = viewsRef.current[viewId]
+          if (view == null || view.attempt !== attempt) {
+            return null
+          }
+          const updated = { ...view, ...patch }
+          viewsRef.current = { ...viewsRef.current, [viewId]: updated }
           return updated
         },
         commitViews: (views) => { viewsRef.current = views },
@@ -64,9 +108,9 @@ describe('useIdeCloseCommands', () => {
     closeIdeView.mockRejectedValueOnce(
       new ApiError('not sent', 503, 'unavailable', undefined, 'IDE_CONTROL_UNAVAILABLE'),
     )
-    let controlResult!: Awaited<ReturnType<typeof result.current.closeEnvironment>>
+    let controlResult!: Awaited<ReturnType<typeof result.current.closeView>>
     await act(async () => {
-      controlResult = await result.current.closeEnvironment(ENVIRONMENT_ID, false)
+      controlResult = await result.current.closeView(VIEW_ID, false)
     })
     expect(controlResult).toMatchObject({
       ok: false,
@@ -78,18 +122,18 @@ describe('useIdeCloseCommands', () => {
     closeIdeView.mockRejectedValueOnce(
       new ApiError('unavailable', 503, 'unavailable', undefined, 'IDE_UNAVAILABLE'),
     )
-    let unavailableResult!: Awaited<ReturnType<typeof result.current.closeEnvironment>>
+    let unavailableResult!: Awaited<ReturnType<typeof result.current.closeView>>
     await act(async () => {
-      unavailableResult = await result.current.closeEnvironment(ENVIRONMENT_ID, false)
+      unavailableResult = await result.current.closeView(VIEW_ID, false)
     })
     expect(unavailableResult).toMatchObject({ ok: false, requiresForceConfirmation: false })
 
     closeIdeView.mockRejectedValueOnce(
       new ApiError('unknown', 503, 'unavailable', undefined, 'IDE_OUTCOME_UNKNOWN'),
     )
-    let unknownResult!: Awaited<ReturnType<typeof result.current.closeEnvironment>>
+    let unknownResult!: Awaited<ReturnType<typeof result.current.closeView>>
     await act(async () => {
-      unknownResult = await result.current.closeEnvironment(ENVIRONMENT_ID, false)
+      unknownResult = await result.current.closeView(VIEW_ID, false)
     })
     expect(unknownResult).toMatchObject({
       ok: false,

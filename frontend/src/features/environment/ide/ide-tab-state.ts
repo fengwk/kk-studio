@@ -15,6 +15,8 @@ export interface IdePresentation {
   panelVisible: boolean
   selectedEnvironmentId: string | null
   openedEnvironmentIds: string[]
+  viewIdsByEnvironment: Record<string, string[]>
+  selectedViewIdsByEnvironment: Record<string, string>
 }
 
 /** claim 发出前冻结的恢复描述；entryUrl、cookie 和票据永不进入这里。 */
@@ -30,6 +32,7 @@ export interface IdePendingClaim {
 
 /** 只存在 sessionStorage 的运行身份；刷新复用，复制 tab 由 Web Locks 隔离。 */
 export interface IdeRecovery {
+  environmentId: string
   viewId: string
   daemonInstanceId: string
   /** 已确认的绑定 epoch；首次 create 发现资源后仍未绑定时缺省。 */
@@ -41,7 +44,8 @@ export interface IdeRecovery {
 interface IdeTabSnapshot {
   browserSessionId: string
   presentation: IdePresentation
-  recoveryByEnvironment: Record<string, IdeRecovery>
+  recoveryByView: Record<string, IdeRecovery>
+  recoveryError?: boolean
 }
 
 interface IdeLastSnapshot {
@@ -55,7 +59,8 @@ type IdeSnapshotSource = 'session' | 'local' | 'default'
 export interface IdeTabLoadResult {
   browserSessionId: string
   presentation: IdePresentation
-  recoveryByEnvironment: Record<string, IdeRecovery>
+  recoveryByView: Record<string, IdeRecovery>
+  recoveryError: boolean
   source: IdeSnapshotSource
   /** 初始化后本 tab 的 sessionStorage 是否确实可写。 */
   sessionSaved: boolean
@@ -97,13 +102,18 @@ export function createDefaultIdePresentation(): IdePresentation {
     panelVisible: false,
     selectedEnvironmentId: null,
     openedEnvironmentIds: [],
+    viewIdsByEnvironment: {},
+    selectedViewIdsByEnvironment: {},
   }
 }
 
 function parsePresentation(value: unknown): IdePresentation | null {
   if (
     !isRecord(value)
-    || !hasExactKeys(value, ['panelVisible', 'selectedEnvironmentId', 'openedEnvironmentIds'])
+    || !hasExactKeys(value, [
+      'panelVisible', 'selectedEnvironmentId', 'openedEnvironmentIds',
+      'viewIdsByEnvironment', 'selectedViewIdsByEnvironment',
+    ])
     || typeof value.panelVisible !== 'boolean'
     || !Array.isArray(value.openedEnvironmentIds)
     || value.openedEnvironmentIds.length > IDE_MAX_OPEN_ENVIRONMENTS
@@ -119,17 +129,50 @@ function parsePresentation(value: unknown): IdePresentation | null {
     seen.add(environmentId)
     opened.push(environmentId)
   }
+  if (!isRecord(value.viewIdsByEnvironment)) {
+    return null
+  }
+  const viewIdsByEnvironment: Record<string, string[]> = {}
+  const seenViewIds = new Set<string>()
+  for (const [environmentId, rawViewIds] of Object.entries(value.viewIdsByEnvironment)) {
+    if (!seen.has(environmentId) || !Array.isArray(rawViewIds) || rawViewIds.length === 0) {
+      return null
+    }
+    const viewIds: string[] = []
+    for (const viewId of rawViewIds) {
+      if (!isCanonicalUuid(viewId) || seenViewIds.has(viewId)) {
+        return null
+      }
+      seenViewIds.add(viewId)
+      viewIds.push(viewId)
+    }
+    viewIdsByEnvironment[environmentId] = viewIds
+  }
   const selected = value.selectedEnvironmentId
   if (selected !== null && !isCanonicalUuid(selected)) {
     return null
   }
-  if (selected !== null && !seen.has(selected)) {
+  if (!isRecord(value.selectedViewIdsByEnvironment)) {
     return null
+  }
+  const selectedViewIdsByEnvironment: Record<string, string> = {}
+  const seenSelectedViewIds = new Set<string>()
+  for (const [environmentId, viewId] of Object.entries(value.selectedViewIdsByEnvironment)) {
+    if (!seen.has(environmentId)
+      || !isCanonicalUuid(viewId)
+      || seenSelectedViewIds.has(viewId)
+      || !viewIdsByEnvironment[environmentId]?.includes(viewId)) {
+      return null
+    }
+    seenSelectedViewIds.add(viewId)
+    selectedViewIdsByEnvironment[environmentId] = viewId
   }
   return {
     panelVisible: value.panelVisible,
     selectedEnvironmentId: selected,
     openedEnvironmentIds: opened,
+    viewIdsByEnvironment,
+    selectedViewIdsByEnvironment,
   }
 }
 
@@ -172,8 +215,9 @@ function parseRecovery(value: unknown): IdeRecovery | null {
   if (
     !isRecord(value)
     || !hasExactKeys(value, [
-      'viewId', 'daemonInstanceId', 'bindingEpoch', 'directory', 'pending',
+      'environmentId', 'viewId', 'daemonInstanceId', 'bindingEpoch', 'directory', 'pending',
     ])
+    || !isCanonicalUuid(value.environmentId)
     || !isCanonicalUuid(value.viewId)
     || !isCanonicalUuid(value.daemonInstanceId)
   ) {
@@ -194,6 +238,7 @@ function parseRecovery(value: unknown): IdeRecovery | null {
     return null
   }
   return {
+    environmentId: value.environmentId,
     viewId: value.viewId,
     daemonInstanceId: value.daemonInstanceId,
     ...(value.bindingEpoch === null ? {} : { bindingEpoch: value.bindingEpoch }),
@@ -202,48 +247,175 @@ function parseRecovery(value: unknown): IdeRecovery | null {
   }
 }
 
-function parseRecoveryMap(
-  value: unknown,
-  presentation: IdePresentation,
-): Record<string, IdeRecovery> | null {
+function parseRecoveryMap(value: unknown): Record<string, IdeRecovery> | null {
   if (!isRecord(value)) {
     return null
   }
-  const opened = new Set(presentation.openedEnvironmentIds)
   const recovery: Record<string, IdeRecovery> = {}
-  for (const [environmentId, raw] of Object.entries(value)) {
-    if (!isCanonicalUuid(environmentId) || !opened.has(environmentId)) {
-      return null
-    }
+  for (const [viewId, raw] of Object.entries(value)) {
     const parsed = parseRecovery(raw)
-    if (parsed == null) {
+    if (!isCanonicalUuid(viewId) || parsed == null || parsed.viewId !== viewId) {
       return null
     }
-    recovery[environmentId] = parsed
+    recovery[viewId] = parsed
   }
   return recovery
 }
 
+function migrationFailure(browserSessionId: string): IdeTabSnapshot {
+  return {
+    browserSessionId,
+    presentation: { ...createDefaultIdePresentation(), panelVisible: true },
+    recoveryByView: {},
+    recoveryError: true,
+  }
+}
+
+interface PreviousMultiPresentation {
+  presentation: IdePresentation
+  selectedViewId: string | null
+}
+
+function parsePreviousMultiPresentation(value: unknown): PreviousMultiPresentation | null {
+  if (!isRecord(value)
+    || !hasExactKeys(value, [
+      'panelVisible', 'selectedEnvironmentId', 'openedEnvironmentIds',
+      'viewIdsByEnvironment', 'selectedViewId',
+    ])) {
+    return null
+  }
+  const selectedViewId = value.selectedViewId
+  if (selectedViewId !== null && !isCanonicalUuid(selectedViewId)) {
+    return null
+  }
+  const presentation = parsePresentation({
+    panelVisible: value.panelVisible,
+    selectedEnvironmentId: value.selectedEnvironmentId,
+    openedEnvironmentIds: value.openedEnvironmentIds,
+    viewIdsByEnvironment: value.viewIdsByEnvironment,
+    selectedViewIdsByEnvironment: {},
+  })
+  if (presentation == null
+    || (selectedViewId !== null
+      && (presentation.selectedEnvironmentId == null
+        || !presentation.viewIdsByEnvironment[presentation.selectedEnvironmentId]?.includes(selectedViewId)))) {
+    return null
+  }
+  return { presentation, selectedViewId }
+}
+
+function validateSessionReferences(
+  presentation: IdePresentation,
+  recoveryByView: Record<string, IdeRecovery>,
+): boolean {
+  for (const recovery of Object.values(recoveryByView)) {
+    if (!presentation.viewIdsByEnvironment[recovery.environmentId]?.includes(recovery.viewId)) {
+      return false
+    }
+  }
+  for (const [environmentId, viewId] of Object.entries(presentation.selectedViewIdsByEnvironment)) {
+    if (recoveryByView[viewId]?.environmentId !== environmentId) {
+      return false
+    }
+  }
+  return true
+}
+
 function parseSession(value: unknown): IdeTabSnapshot | null {
-  if (
-    !isRecord(value)
-    || !hasExactKeys(value, ['browserSessionId', 'presentation', 'recoveryByEnvironment'])
-    || !isCanonicalUuid(value.browserSessionId)
-  ) {
+  if (!isRecord(value)) {
     return null
   }
-  const presentation = parsePresentation(value.presentation)
-  if (presentation == null) {
+  const isLegacy = hasExactKeys(value, ['browserSessionId', 'presentation', 'recoveryByEnvironment'])
+  const isSession = hasExactKeys(value, ['browserSessionId', 'presentation', 'recoveryByView'])
+  const hasRecoveryFormat = 'recoveryByEnvironment' in value || 'recoveryByView' in value
+  if (!isCanonicalUuid(value.browserSessionId)) {
+    return hasRecoveryFormat ? migrationFailure(createUuid()) : null
+  }
+  if (isSession) {
+    const recoveryByView = parseRecoveryMap(value.recoveryByView)
+    if (recoveryByView == null) {
+      return migrationFailure(value.browserSessionId)
+    }
+    const presentation = parsePresentation(value.presentation)
+    if (presentation != null) {
+      return validateSessionReferences(presentation, recoveryByView)
+        ? { browserSessionId: value.browserSessionId, presentation, recoveryByView }
+        : migrationFailure(value.browserSessionId)
+    }
+    const previous = parsePreviousMultiPresentation(value.presentation)
+    if (previous == null) {
+      return migrationFailure(value.browserSessionId)
+    }
+    const selectedViewIdsByEnvironment: Record<string, string> = {}
+    for (const environmentId of previous.presentation.openedEnvironmentIds) {
+      const ordered = previous.presentation.viewIdsByEnvironment[environmentId] ?? []
+      const selectedViewId = environmentId === previous.presentation.selectedEnvironmentId
+        ? previous.selectedViewId
+        : undefined
+      if (selectedViewId != null && recoveryByView[selectedViewId]?.environmentId !== environmentId) {
+        return migrationFailure(value.browserSessionId)
+      }
+      const restoredViewId = selectedViewId
+        ?? ordered.find((viewId) => recoveryByView[viewId]?.environmentId === environmentId)
+      if (restoredViewId != null) {
+        selectedViewIdsByEnvironment[environmentId] = restoredViewId
+      }
+    }
+    const migratedPresentation = { ...previous.presentation, selectedViewIdsByEnvironment }
+    return validateSessionReferences(migratedPresentation, recoveryByView)
+      ? { browserSessionId: value.browserSessionId, presentation: migratedPresentation, recoveryByView }
+      : migrationFailure(value.browserSessionId)
+  }
+  if (!isLegacy) {
+    return hasRecoveryFormat ? migrationFailure(value.browserSessionId) : null
+  }
+  const legacyPresentation = parseLegacyPresentation(value.presentation)
+  if (legacyPresentation == null || !isRecord(value.recoveryByEnvironment)) {
+    return migrationFailure(value.browserSessionId)
+  }
+  if (Object.keys(value.recoveryByEnvironment).some(
+    (environmentId) => !legacyPresentation.openedEnvironmentIds.includes(environmentId),
+  )) {
+    return migrationFailure(value.browserSessionId)
+  }
+  const recoveryByView: Record<string, IdeRecovery> = {}
+  for (const environmentId of legacyPresentation.openedEnvironmentIds) {
+    const raw = value.recoveryByEnvironment[environmentId]
+    const recovery = isRecord(raw) ? parseRecovery({ ...raw, environmentId }) : null
+    if (recovery == null || recoveryByView[recovery.viewId] != null) {
+      return migrationFailure(value.browserSessionId)
+    }
+    recoveryByView[recovery.viewId] = recovery
+    legacyPresentation.viewIdsByEnvironment[environmentId] = [recovery.viewId]
+  }
+  for (const recovery of Object.values(recoveryByView)) {
+    legacyPresentation.selectedViewIdsByEnvironment[recovery.environmentId] = recovery.viewId
+  }
+  return validateSessionReferences(legacyPresentation, recoveryByView)
+    ? { browserSessionId: value.browserSessionId, presentation: legacyPresentation, recoveryByView }
+    : migrationFailure(value.browserSessionId)
+}
+
+function parseLegacyPresentation(value: unknown): IdePresentation | null {
+  if (!isRecord(value) || !hasExactKeys(value, ['panelVisible', 'selectedEnvironmentId', 'openedEnvironmentIds'])) {
     return null
   }
-  const recoveryByEnvironment = parseRecoveryMap(value.recoveryByEnvironment, presentation)
-  if (recoveryByEnvironment == null) {
+  const opened = value.openedEnvironmentIds
+  if (typeof value.panelVisible !== 'boolean' || !Array.isArray(opened)
+    || opened.some((id) => !isCanonicalUuid(id))
+    || new Set(opened).size !== opened.length) {
+    return null
+  }
+  const selected = value.selectedEnvironmentId
+  if (selected !== null && (!isCanonicalUuid(selected) || !opened.includes(selected))) {
     return null
   }
   return {
-    browserSessionId: value.browserSessionId,
-    presentation,
-    recoveryByEnvironment,
+    panelVisible: value.panelVisible,
+    selectedEnvironmentId: selected,
+    openedEnvironmentIds: opened,
+    viewIdsByEnvironment: {},
+    selectedViewIdsByEnvironment: {},
   }
 }
 
@@ -252,7 +424,21 @@ function parseLocal(value: unknown): IdeLastSnapshot | null {
     return null
   }
   const presentation = parsePresentation(value.presentation)
-  return presentation == null ? null : { presentation }
+  if (presentation != null) {
+    return Object.keys(presentation.viewIdsByEnvironment).length === 0
+      && Object.keys(presentation.selectedViewIdsByEnvironment).length === 0
+      ? { presentation }
+      : null
+  }
+  const previous = parsePreviousMultiPresentation(value.presentation)
+  if (previous != null) {
+    return Object.keys(previous.presentation.viewIdsByEnvironment).length === 0
+      && previous.selectedViewId === null
+      ? { presentation: previous.presentation }
+      : null
+  }
+  const legacy = parseLegacyPresentation(value.presentation)
+  return legacy == null ? null : { presentation: legacy }
 }
 
 function encodePending(pending: IdePendingClaim): Record<string, unknown> {
@@ -268,6 +454,7 @@ function encodePending(pending: IdePendingClaim): Record<string, unknown> {
 
 function encodeRecovery(recovery: IdeRecovery): Record<string, unknown> {
   return {
+    environmentId: recovery.environmentId,
     viewId: recovery.viewId,
     daemonInstanceId: recovery.daemonInstanceId,
     bindingEpoch: recovery.bindingEpoch ?? null,
@@ -279,14 +466,22 @@ function encodeRecovery(recovery: IdeRecovery): Record<string, unknown> {
 function serializeSession(
   browserSessionId: string,
   presentation: IdePresentation,
-  recoveryByEnvironment: Record<string, IdeRecovery>,
+  recoveryByView: Record<string, IdeRecovery>,
 ): string | null {
   const snapshot = {
     browserSessionId,
-    presentation,
-    recoveryByEnvironment: Object.fromEntries(
-      Object.entries(recoveryByEnvironment).map(([environmentId, recovery]) => [
-        environmentId,
+    presentation: {
+      ...presentation,
+      selectedViewIdsByEnvironment: Object.fromEntries(
+        Object.entries(presentation.selectedViewIdsByEnvironment).filter(([environmentId, viewId]) => (
+          presentation.viewIdsByEnvironment[environmentId]?.includes(viewId)
+          && recoveryByView[viewId]?.environmentId === environmentId
+        )),
+      ),
+    },
+    recoveryByView: Object.fromEntries(
+      Object.entries(recoveryByView).map(([viewId, recovery]) => [
+        viewId,
         encodeRecovery(recovery),
       ]),
     ),
@@ -296,7 +491,11 @@ function serializeSession(
 
 function serializeLocal(presentation: IdePresentation): string | null {
   const snapshot: IdeLastSnapshot = {
-    presentation,
+    presentation: {
+      ...presentation,
+      viewIdsByEnvironment: {},
+      selectedViewIdsByEnvironment: {},
+    },
   }
   return serializeTabSnapshot(snapshot, parseLocal)
 }
@@ -318,22 +517,23 @@ export function initializeIdeTabState(storage?: IdeTabStorage): IdeTabLoadResult
     ? value.browserSessionId
     : createUuid()
   const presentation = value?.presentation ?? createDefaultIdePresentation()
-  const recoveryByEnvironment = value != null && 'recoveryByEnvironment' in value
-    ? value.recoveryByEnvironment
+  const recoveryByView = value != null && 'recoveryByView' in value
+    ? value.recoveryByView
     : {}
-  const sessionSaved = writeTabSnapshot(
+  const recoveryError = value != null && 'recoveryError' in value && value.recoveryError === true
+  const sessionSaved = recoveryError ? false : writeTabSnapshot(
     stores.session,
     IDE_TAB_SESSION_KEY,
-    serializeSession(browserSessionId, presentation, recoveryByEnvironment),
+    serializeSession(browserSessionId, presentation, recoveryByView),
   )
-  return { browserSessionId, presentation, recoveryByEnvironment, source, sessionSaved }
+  return { browserSessionId, presentation, recoveryByView, recoveryError, source, sessionSaved }
 }
 
 /** 用户显式操作：完整本 tab 快照写 session，剔除运行身份后的快照写 local。 */
 export function saveIdePresentation(
   browserSessionId: string,
   presentation: IdePresentation,
-  recoveryByEnvironment: Record<string, IdeRecovery>,
+  recoveryByView: Record<string, IdeRecovery>,
   storage?: IdeTabStorage,
 ): IdeSaveResult {
   const { session, local } = resolveTabStorage(storage)
@@ -341,7 +541,7 @@ export function saveIdePresentation(
     sessionSaved: writeTabSnapshot(
       session,
       IDE_TAB_SESSION_KEY,
-      serializeSession(browserSessionId, presentation, recoveryByEnvironment),
+      serializeSession(browserSessionId, presentation, recoveryByView),
     ),
     localSaved: writeTabSnapshot(local, IDE_TAB_LAST_KEY, serializeLocal(presentation)),
   }
@@ -351,14 +551,14 @@ export function saveIdePresentation(
 export function saveIdeSession(
   browserSessionId: string,
   presentation: IdePresentation,
-  recoveryByEnvironment: Record<string, IdeRecovery>,
+  recoveryByView: Record<string, IdeRecovery>,
   storage?: IdeTabStorage,
 ): boolean {
   const { session } = resolveTabStorage(storage)
   return writeTabSnapshot(
     session,
     IDE_TAB_SESSION_KEY,
-    serializeSession(browserSessionId, presentation, recoveryByEnvironment),
+    serializeSession(browserSessionId, presentation, recoveryByView),
   )
 }
 

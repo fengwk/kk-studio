@@ -103,6 +103,7 @@ function viewDto(request: Record<string, unknown>, sequence: number) {
 
 function recovery(overrides: Partial<IdeRecovery> = {}): IdeRecovery {
   return {
+    environmentId: ENV_A,
     viewId: VIEW_A,
     daemonInstanceId: DAEMON_A,
     bindingEpoch: '10',
@@ -118,19 +119,27 @@ function seedSession(browserSessionId = BROWSER_A, recoveryValue: IdeRecovery = 
       panelVisible: true,
       selectedEnvironmentId: ENV_A,
       openedEnvironmentIds: [ENV_A],
+      viewIdsByEnvironment: { [ENV_A]: [recoveryValue.viewId] },
+      selectedViewIdsByEnvironment: { [ENV_A]: recoveryValue.viewId },
     },
-    { [ENV_A]: recoveryValue },
+    { [recoveryValue.viewId]: recoveryValue },
     { sessionStorage, localStorage },
   )
 }
 
 function sessionSnapshot(): {
   browserSessionId: string
-  recoveryByEnvironment: Record<string, IdeRecovery & { pending?: IdePendingClaim | null }>
+  recoveryByView: Record<string, IdeRecovery & { pending?: IdePendingClaim | null }>
 } {
-  return JSON.parse(sessionStorage.getItem(IDE_TAB_SESSION_KEY) ?? '{}') as {
+  const raw = JSON.parse(sessionStorage.getItem(IDE_TAB_SESSION_KEY) ?? '{}') as {
     browserSessionId: string
-    recoveryByEnvironment: Record<string, IdeRecovery & { pending?: IdePendingClaim | null }>
+    recoveryByView: Record<string, IdeRecovery & { pending?: IdePendingClaim | null }>
+  }
+  return {
+    ...raw,
+    recoveryByView: Object.fromEntries(Object.values(raw.recoveryByView ?? {}).map(
+      (view) => [view.environmentId, view],
+    )),
   }
 }
 
@@ -282,11 +291,32 @@ describe('IdePanelProvider recovery state machine', () => {
     vi.useRealTimers()
   })
 
+  it('surfaces an unverifiable legacy recovery and does not overwrite or replace its history', async () => {
+    const legacy = JSON.stringify({
+      browserSessionId: BROWSER_A,
+      presentation: {
+        panelVisible: true,
+        selectedEnvironmentId: ENV_A,
+        openedEnvironmentIds: [ENV_A],
+      },
+      recoveryByEnvironment: { [ENV_A]: { viewId: VIEW_A, daemonInstanceId: 'invalid' } },
+    })
+    sessionStorage.setItem(IDE_TAB_SESSION_KEY, legacy)
+
+    const user = userEvent.setup()
+    renderPanel()
+    expect(await screen.findByTestId('ide-recovery-error')).toBeVisible()
+    await user.click(screen.getByTestId('toggle-a'))
+
+    expect(ideService.openIdeView).not.toHaveBeenCalled()
+    expect(sessionStorage.getItem(IDE_TAB_SESSION_KEY)).toBe(legacy)
+  })
+
   it('does not auto-create when a Chat environment is activated, and creates once on explicit toggle', async () => {
     const user = userEvent.setup()
     let pendingAtOpen: IdePendingClaim | null | undefined
     ideService.openIdeView.mockImplementationOnce(async (_environmentId: string, request: Record<string, unknown>) => {
-      pendingAtOpen = sessionSnapshot().recoveryByEnvironment[ENV_A]?.pending
+      pendingAtOpen = sessionSnapshot().recoveryByView[ENV_A]?.pending
       return viewDto(request, 0)
     })
     const { sockets } = renderPanel()
@@ -349,6 +379,23 @@ describe('IdePanelProvider recovery state machine', () => {
     expect(ideService.readIdeView).toHaveBeenCalledTimes(1)
   })
 
+  it('switches to an unopened Environment without implicitly creating a workspace', async () => {
+    const user = userEvent.setup()
+    const { sockets } = renderPanel()
+    connect(sockets)
+    await user.click(screen.getByTestId('toggle-a'))
+    await screen.findByTestId('ide-iframe')
+    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+
+    await user.click(screen.getByRole('button', { name: 'Environment' }))
+    await user.click(screen.getByRole('option', { name: 'remote-node' }))
+
+    expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
+    expect(screen.getByTestId('ide-overlay-panel')).not.toHaveAttribute('hidden')
+    expect(screen.getByTestId('ide-view-layer')).toHaveAttribute('hidden')
+    expect(sessionSnapshot().recoveryByView[ENV_A]?.viewId).toBeTruthy()
+  })
+
   it('persists pending before sending OPEN and restores the same view on refresh', async () => {
     // 刷新场景：session 已有 view/instance/epoch，必须先纯读权威快照再以 CAS 重新绑定当前连接。
     seedSession()
@@ -400,7 +447,7 @@ describe('IdePanelProvider recovery state machine', () => {
     })
     expect(request).not.toHaveProperty('directory')
     expect(sessionSnapshot().browserSessionId).toBe(BROWSER_A)
-    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe('11')
+    expect(sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch).toBe('11')
     await screen.findByTestId('ide-iframe')
   })
 
@@ -414,8 +461,8 @@ describe('IdePanelProvider recovery state machine', () => {
     connect(sockets)
     await user.click(screen.getByTestId('toggle-a'))
     await screen.findByTestId('ide-iframe')
-    const openedViewId = sessionSnapshot().recoveryByEnvironment[ENV_A]?.viewId
-    const firstEpoch = sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch
+    const openedViewId = sessionSnapshot().recoveryByView[ENV_A]?.viewId
+    const firstEpoch = sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch
 
     ideService.readIdeView.mockResolvedValue(snapshot({
       viewId: openedViewId,
@@ -575,7 +622,7 @@ describe('IdePanelProvider recovery state machine', () => {
       expect(ideService.readIdeView).toHaveBeenCalled()
     })
     await waitFor(() => {
-      const nextClaim = sessionSnapshot().recoveryByEnvironment[ENV_A]?.pending?.claimId
+      const nextClaim = sessionSnapshot().recoveryByView[ENV_A]?.pending?.claimId
       expect(nextClaim).toBeTruthy()
       expect(nextClaim).not.toBe(CLAIM_A)
     })
@@ -593,7 +640,7 @@ describe('IdePanelProvider recovery state machine', () => {
     await waitFor(() => {
       expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
     })
-    const nextClaim = sessionSnapshot().recoveryByEnvironment[ENV_A]?.pending?.claimId
+    const nextClaim = sessionSnapshot().recoveryByView[ENV_A]?.pending?.claimId
     const [, pendingRequest] = ideService.openIdeView.mock.calls[0] as [string, Record<string, unknown>]
     await act(async () => {
       resolveOpen(viewDto(pendingRequest, 2))
@@ -622,7 +669,7 @@ describe('IdePanelProvider recovery state machine', () => {
       expect(screen.getByTestId('ide-view-detached')).toBeVisible()
     })
     expect(ideService.openIdeView).not.toHaveBeenCalled()
-    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.viewId).toBe(VIEW_A)
+    expect(sessionSnapshot().recoveryByView[ENV_A]?.viewId).toBe(VIEW_A)
   })
 
   it('keeps pending on DAEMON_NOT_READY and waits for READY without a timer retry', async () => {
@@ -638,7 +685,7 @@ describe('IdePanelProvider recovery state machine', () => {
     })
     expect(ideService.readIdeView).toHaveBeenCalledTimes(1)
     expect(ideService.openIdeView).not.toHaveBeenCalled()
-    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.pending?.claimId).toBe(CLAIM_A)
+    expect(sessionSnapshot().recoveryByView[ENV_A]?.pending?.claimId).toBe(CLAIM_A)
   })
 
   it('isolates a copied tab through Web Locks and clears copied runtime identity', async () => {
@@ -650,7 +697,7 @@ describe('IdePanelProvider recovery state machine', () => {
     await waitFor(() => {
       expect(sessionSnapshot().browserSessionId).not.toBe(BROWSER_A)
     })
-    expect(sessionSnapshot().recoveryByEnvironment).toEqual({})
+    expect(sessionSnapshot().recoveryByView).toEqual({})
     expect(screen.getByTestId('ide-overlay-panel')).toHaveAttribute('hidden')
     expect(ideService.readIdeView).not.toHaveBeenCalled()
     expect(ideService.openIdeView).not.toHaveBeenCalled()
@@ -680,7 +727,7 @@ describe('IdePanelProvider recovery state machine', () => {
     connect(sockets)
     await user.click(screen.getByTestId('toggle-a'))
     await screen.findByTestId('ide-iframe')
-    const epoch = sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch
+    const epoch = sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch
 
     await user.click(screen.getByTestId('ide-close-btn'))
     await waitFor(() => {
@@ -695,7 +742,7 @@ describe('IdePanelProvider recovery state machine', () => {
     await waitFor(() => {
       expect(screen.queryByTestId('ide-iframe')).not.toBeInTheDocument()
     })
-    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]).toBeUndefined()
+    expect(sessionSnapshot().recoveryByView[ENV_A]).toBeUndefined()
   })
 
   it('hides an unrelated view in a Chat without an environment and keeps its iframe for return', async () => {
@@ -737,7 +784,7 @@ describe('IdePanelProvider recovery state machine', () => {
       viewDto(request, 2)
     ))
     await act(async () => { connect(sockets, CONNECTION_2) })
-    await waitFor(() => expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe('12'))
+    await waitFor(() => expect(sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch).toBe('12'))
     await act(async () => { resolveClose() })
 
     expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
@@ -761,7 +808,7 @@ describe('IdePanelProvider recovery state machine', () => {
     await screen.findByTestId('ide-iframe')
     expect(ideService.openIdeView).toHaveBeenCalledTimes(2)
     expect(ideService.openIdeView.mock.calls[1]![1]).toEqual(ideService.openIdeView.mock.calls[0]![1])
-    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe('11')
+    expect(sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch).toBe('11')
   })
 
   it('retries DAEMON_NOT_READY on a real new connection instead of freezing the view', async () => {
@@ -818,8 +865,8 @@ describe('IdePanelProvider recovery state machine', () => {
     connect(sockets)
     await user.click(screen.getByTestId('toggle-a'))
     await screen.findByTestId('ide-iframe')
-    const openedViewId = sessionSnapshot().recoveryByEnvironment[ENV_A]?.viewId
-    const epoch = sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch
+    const openedViewId = sessionSnapshot().recoveryByView[ENV_A]?.viewId
+    const epoch = sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch
     const readCalls = ideService.readIdeView.mock.calls.length
 
     ideService.changeIdeViewDirectory.mockResolvedValue({
@@ -851,7 +898,7 @@ describe('IdePanelProvider recovery state machine', () => {
       bindingEpoch: epoch,
       expectedDaemonInstanceId: DAEMON_A,
     })
-    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe(epoch)
+    expect(sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch).toBe(epoch)
     expect(ideService.readIdeView).toHaveBeenCalledTimes(readCalls)
     expect(ideService.openIdeView).toHaveBeenCalledTimes(1)
   })
@@ -891,7 +938,7 @@ describe('IdePanelProvider recovery state machine', () => {
     })
     const latest = ideService.openIdeView.mock.calls.at(-1)?.[1] as Record<string, unknown>
     expect(latest.connectionId).toBe(CONNECTION_2)
-    expect(sessionSnapshot().recoveryByEnvironment[ENV_A]?.bindingEpoch).toBe('13')
+    expect(sessionSnapshot().recoveryByView[ENV_A]?.bindingEpoch).toBe('13')
     expect(screen.getByTestId('ide-iframe')).toBeInTheDocument()
   })
 })

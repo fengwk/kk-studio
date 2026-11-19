@@ -45,15 +45,16 @@ export interface IdeViewState {
 /** 从 session 恢复的运行身份进入统一对账；不预置任何“已绑定”结论。 */
 export function initialViews(
   presentation: IdePresentation,
-  recoveryByEnvironment: Record<string, IdeRecovery>,
+  recoveryByView: Record<string, IdeRecovery>,
 ): Record<string, IdeViewState> {
   const views: Record<string, IdeViewState> = {}
-  for (const environmentId of presentation.openedEnvironmentIds) {
-    const recovery = recoveryByEnvironment[environmentId]
-    if (recovery == null) {
+  for (const [viewId, recovery] of Object.entries(recoveryByView)) {
+    if (presentation.viewIdsByEnvironment[recovery.environmentId] != null
+      && !presentation.viewIdsByEnvironment[recovery.environmentId]?.includes(viewId)) {
       continue
     }
-    views[environmentId] = {
+    const environmentId = recovery.environmentId
+    views[viewId] = {
       environmentId,
       viewId: recovery.viewId,
       mode: recovery.pending?.mode ?? 'resume',
@@ -74,11 +75,9 @@ export function initialViews(
 /** 只把可恢复身份写回 session；entryUrl、cookie 与终端状态永不持久化。 */
 export function recoveryFromViews(
   views: Record<string, IdeViewState>,
-  openedEnvironmentIds: readonly string[],
 ): Record<string, IdeRecovery> {
   const recovery: Record<string, IdeRecovery> = {}
-  for (const environmentId of openedEnvironmentIds) {
-    const view = views[environmentId]
+  for (const view of Object.values(views)) {
     if (
       view == null
       || !isCanonicalUuid(view.viewId)
@@ -88,7 +87,8 @@ export function recoveryFromViews(
       continue
     }
     const pending = view.pending
-    recovery[environmentId] = {
+    recovery[view.viewId] = {
+      environmentId: view.environmentId,
       viewId: view.viewId,
       daemonInstanceId: view.daemonInstanceId,
       ...(view.bindingEpoch == null ? {} : { bindingEpoch: view.bindingEpoch }),
@@ -103,6 +103,7 @@ export function recoveryFromViews(
 export function buildUsageViews(
   views: Record<string, IdeViewState>,
   openedEnvironmentIds: readonly string[],
+  viewIdsByEnvironment?: Record<string, string[]>,
   override?: {
     environmentId: string
     viewId: string
@@ -112,11 +113,17 @@ export function buildUsageViews(
 ): ApplicationEventIdeUseView[] {
   const result: ApplicationEventIdeUseView[] = []
   for (const environmentId of openedEnvironmentIds) {
-    const view = views[environmentId]
-    if (view == null) {
-      continue
-    }
-    const isOverride = override?.environmentId === environmentId
+    const viewIds = viewIdsByEnvironment?.[environmentId]
+      ?? Object.keys(views).filter((key) => views[key]?.environmentId === environmentId)
+    const completeViewIds = override?.environmentId === environmentId && !viewIds.includes(override.viewId)
+      ? [...viewIds, override.viewId]
+      : viewIds
+    for (const viewId of completeViewIds.length > 0 ? completeViewIds : [environmentId]) {
+      const view = views[viewId] ?? views[environmentId]
+      if (view == null) {
+        continue
+      }
+      const isOverride = override?.environmentId === environmentId && override.viewId === viewId
     const claimId = isOverride ? override.claimId : view.pending?.claimId ?? view.claimId
     if (
       !isOverride
@@ -143,7 +150,8 @@ export function buildUsageViews(
     ) {
       entry.bindingEpoch = bindingEpoch
     }
-    result.push(entry)
+      result.push(entry)
+    }
   }
   return result
 }
@@ -182,9 +190,9 @@ export function retainAvailableViews(
   available: Set<string>,
 ): Record<string, IdeViewState> | null {
   const next: Record<string, IdeViewState> = {}
-  for (const [environmentId, view] of Object.entries(views)) {
-    if (available.has(environmentId)) {
-      next[environmentId] = view
+  for (const [viewId, view] of Object.entries(views)) {
+    if (available.has(view.environmentId)) {
+      next[viewId] = view
     }
   }
   if (Object.keys(next).length === Object.keys(views).length) {

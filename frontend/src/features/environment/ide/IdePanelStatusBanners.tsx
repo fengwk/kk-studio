@@ -43,6 +43,7 @@ function connectionStopMessageKey(
 
 interface IdePanelStatusBannersProps {
   storageUnavailable: boolean
+  recoveryError: boolean
   sessionStatus: IdeBrowserSessionStatus
   connectionState: ApplicationEventConnectionState
   selectedView: IdeViewState | null
@@ -65,6 +66,7 @@ interface IdePanelStatusBannersProps {
  */
 export function IdePanelStatusBanners({
   storageUnavailable,
+  recoveryError,
   sessionStatus,
   connectionState,
   selectedView,
@@ -85,6 +87,11 @@ export function IdePanelStatusBanners({
       {storageUnavailable ? (
         <div className="ide-panel-warning-banner" role="status" data-testid="ide-storage-unavailable">
           {t('ai.ide.storageUnavailable')}
+        </div>
+      ) : null}
+      {recoveryError ? (
+        <div className="ide-panel-error-banner" role="alert" data-testid="ide-recovery-error">
+          {t('ai.ide.recoveryMigrationFailed')}
         </div>
       ) : null}
       {sessionStatus !== 'ready' && sessionStatus !== 'cloned' && sessionStatus !== 'acquiring'

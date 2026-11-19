@@ -40,10 +40,12 @@ function baseProps(overrides: Partial<IdeOverlayPanelProps> = {}): IdeOverlayPan
   return {
     isOpen: true,
     selectedEnvironmentId: ENV_A,
+    selectedViewId: VIEW_A,
     openedEnvironmentIds: [ENV_A, ENV_B],
+    viewsByEnvironment: { [ENV_A]: [VIEW_A], [ENV_B]: [VIEW_B] },
     views: {
-      [ENV_A]: view({ environmentId: ENV_A, viewId: VIEW_A }),
-      [ENV_B]: view({ environmentId: ENV_B, viewId: VIEW_B }),
+      [VIEW_A]: view({ environmentId: ENV_A, viewId: VIEW_A }),
+      [VIEW_B]: view({ environmentId: ENV_B, viewId: VIEW_B }),
     },
     environments: [
       { id: ENV_A, name: 'local-node', ready: true },
@@ -53,6 +55,8 @@ function baseProps(overrides: Partial<IdeOverlayPanelProps> = {}): IdeOverlayPan
     environmentsError: false,
     sessionStatus: 'ready',
     storageUnavailable: false,
+    recoveryError: false,
+    onSelectView: vi.fn(),
     connectionState: { status: 'ready', reason: null },
     onSelectEnvironment: vi.fn(),
     onCollapse: vi.fn(),
@@ -101,6 +105,38 @@ describe('IdeOverlayPanel', () => {
     expect(layerB).toHaveAttribute('inert')
   })
 
+  it('switches views within one Environment without unmounting either iframe', async () => {
+    const user = userEvent.setup()
+    const onSelectView = vi.fn()
+    const viewB = view({
+      environmentId: ENV_A,
+      viewId: VIEW_B,
+      directory: '/workspace/projects/b',
+      entryUrl: `/ide/${ENV_A}/${VIEW_B}/__ide/bootstrap?token=fixture-b`,
+    })
+    const props = baseProps({
+      selectedViewId: VIEW_A,
+      openedEnvironmentIds: [ENV_A],
+      viewsByEnvironment: { [ENV_A]: [VIEW_A, VIEW_B] },
+      views: { [VIEW_A]: view({ environmentId: ENV_A, viewId: VIEW_A }), [VIEW_B]: viewB },
+      onSelectView,
+    })
+    const { rerender } = render(<IdeOverlayPanel {...props} />)
+
+    const firstFrame = screen.getAllByTestId('ide-iframe')[0]
+    const secondFrame = screen.getAllByTestId('ide-iframe')[1]
+    expect(screen.getAllByTestId('ide-view-layer')[0]).not.toHaveAttribute('hidden')
+    expect(screen.getAllByTestId('ide-view-layer')[1]).toHaveAttribute('hidden')
+    await user.click(screen.getByTestId('ide-tab-strip').querySelector(`[data-ide-view="${VIEW_B}"]`) as HTMLElement)
+
+    expect(onSelectView).toHaveBeenCalledWith(VIEW_B)
+    rerender(<IdeOverlayPanel {...props} selectedViewId={VIEW_B} />)
+    expect(screen.getAllByTestId('ide-iframe')[0]).toBe(firstFrame)
+    expect(screen.getAllByTestId('ide-iframe')[1]).toBe(secondFrame)
+    expect(screen.getAllByTestId('ide-view-layer')[0]).toHaveAttribute('hidden')
+    expect(screen.getAllByTestId('ide-view-layer')[1]).not.toHaveAttribute('hidden')
+  })
+
   it('dispatches explicit environment, terminal, directory and collapse actions', async () => {
     const user = userEvent.setup()
     const props = baseProps()
@@ -111,7 +147,7 @@ describe('IdeOverlayPanel', () => {
     expect(props.onSelectEnvironment).toHaveBeenCalledWith(ENV_B)
 
     await user.click(screen.getByTestId('ide-terminal-btn'))
-    expect(props.onOpenTerminal).toHaveBeenCalledWith(ENV_A)
+    expect(props.onOpenTerminal).toHaveBeenCalledWith(VIEW_A)
 
     await user.click(screen.getByTestId('ide-open-directory-btn'))
     const dialog = await screen.findByRole('dialog', { name: '打开宿主目录' })
@@ -146,7 +182,7 @@ describe('IdeOverlayPanel', () => {
 
     await user.click(within(dialog).getByTestId('ide-directory-confirm'))
     expect(await within(dialog).findByTestId('ide-directory-error')).toHaveTextContent('切换目录失败')
-    expect(onChangeDirectory).toHaveBeenLastCalledWith(ENV_A, DIRECTORY_A)
+    expect(onChangeDirectory).toHaveBeenLastCalledWith(VIEW_A, DIRECTORY_A)
     expect(recordRecentDirectory).not.toHaveBeenCalled()
 
     await user.click(within(dialog).getByTestId('ide-directory-confirm'))
@@ -218,7 +254,7 @@ describe('IdeOverlayPanel', () => {
 
     await user.click(screen.getByTestId('ide-close-btn'))
     expect(await screen.findByRole('alertdialog')).toHaveTextContent('IDE 控制通道不可用，关闭请求未发送。')
-    expect(onCloseEnvironment).toHaveBeenCalledWith(ENV_A, false)
+    expect(onCloseEnvironment).toHaveBeenCalledWith(VIEW_A, false)
   })
 
   it('keeps the iframe after an unknown close and only forces from explicit confirmation', async () => {
@@ -233,11 +269,11 @@ describe('IdeOverlayPanel', () => {
     const dialog = await screen.findByRole('alertdialog', { name: '强制关闭 IDE 视图？' })
     expect(dialog).toHaveTextContent('关闭结果未知。')
     expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
-    expect(onCloseEnvironment).toHaveBeenNthCalledWith(1, ENV_A, false)
+    expect(onCloseEnvironment).toHaveBeenNthCalledWith(1, VIEW_A, false)
 
     await user.click(within(dialog).getByRole('button', { name: '强制关闭' }))
     await waitFor(() => {
-      expect(onCloseEnvironment).toHaveBeenNthCalledWith(2, ENV_A, true)
+      expect(onCloseEnvironment).toHaveBeenNthCalledWith(2, VIEW_A, true)
     })
   })
 
@@ -255,7 +291,7 @@ describe('IdeOverlayPanel', () => {
     })
     const { rerender } = render(
       <IdeOverlayPanel {...baseProps({
-        views: { [ENV_A]: reconciling },
+        views: { [VIEW_A]: reconciling },
         openedEnvironmentIds: [ENV_A],
         environments: [{ id: ENV_A, name: 'local-node', ready: true }],
         onRetryClaim,
@@ -276,7 +312,7 @@ describe('IdeOverlayPanel', () => {
     })
     rerender(
       <IdeOverlayPanel {...baseProps({
-        views: { [ENV_A]: gone },
+        views: { [VIEW_A]: gone },
         openedEnvironmentIds: [ENV_A],
         environments: [{ id: ENV_A, name: 'local-node', ready: true }],
         onRetryClaim,
@@ -297,7 +333,7 @@ describe('IdeOverlayPanel', () => {
     })
     rerender(
       <IdeOverlayPanel {...baseProps({
-        views: { [ENV_A]: detached },
+        views: { [VIEW_A]: detached },
         openedEnvironmentIds: [ENV_A],
         environments: [{ id: ENV_A, name: 'local-node', ready: true }],
         onRetryClaim,
@@ -322,7 +358,7 @@ describe('IdeOverlayPanel', () => {
     })
     const { rerender } = render(
       <IdeOverlayPanel {...baseProps({
-        views: { [ENV_A]: waiting },
+        views: { [VIEW_A]: waiting },
         openedEnvironmentIds: [ENV_A],
         onRetryClaim,
       })} />,
@@ -332,7 +368,7 @@ describe('IdeOverlayPanel', () => {
     rerender(
       <IdeOverlayPanel {...baseProps({
         views: {
-          [ENV_A]: view({
+          [VIEW_A]: view({
             environmentId: ENV_A,
             viewId: VIEW_A,
             status: 'error',
