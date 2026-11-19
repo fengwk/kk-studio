@@ -19,6 +19,7 @@ func TestShouldBootstrapH2XConnect(t *testing.T) {
 	}{
 		{args: nil, want: true},
 		{args: []string{"--version"}, want: true},
+		{args: []string{"--lsp-profiles"}, want: true},
 		{args: []string{h2xconnectBootstrapArg}, want: false},
 		{args: []string{"__native-helper", "/tmp/state"}, want: false},
 		{args: []string{"__lock-helper", "/tmp/state"}, want: false},
@@ -51,10 +52,29 @@ func TestRunInternalCommand_LeavesPublicCommandsAlone(t *testing.T) {
 
 // Verifies that the single-argument help/version commands are side-effect free.
 func TestInformationCommands(t *testing.T) {
-	for _, tc := range []struct{ arg, want string }{{"--help", "Usage:"}, {"--version", "kk-studio-daemon " + config.DaemonVersion}, {"-h", "Usage:"}} {
+	for _, tc := range []struct{ arg, want string }{{"--help", "--lsp-profiles"}, {"--version", "kk-studio-daemon " + config.DaemonVersion}, {"-h", "--install-lsp"}} {
 		var out, errOut bytes.Buffer
 		if code := RunCLI(context.Background(), []string{tc.arg}, Dependencies{}, &out, &errOut); code != 0 || !bytes.Contains(out.Bytes(), []byte(tc.want)) || errOut.Len() != 0 {
 			t.Fatalf("%s: code=%d out=%q err=%q", tc.arg, code, out.String(), errOut.String())
+		}
+	}
+}
+
+// The profile listing is stable, while install/config reject unsupported profiles and unsafe paths.
+func TestLSPCommands(t *testing.T) {
+	var out, stderr bytes.Buffer
+	if code := RunCLI(context.Background(), []string{"--lsp-profiles"}, Dependencies{}, &out, &stderr); code != 0 || !strings.Contains(out.String(), "typescript-language-server-4.3.4_typescript-5.8.3") || !strings.Contains(out.String(), "Linux/amd64") || stderr.Len() != 0 {
+		t.Fatalf("lsp profiles code=%d out=%q stderr=%q", code, out.String(), stderr.String())
+	}
+	for _, args := range [][]string{
+		{"--install-lsp", "unknown", t.TempDir()},
+		{"--lsp-config", "unknown", t.TempDir()},
+		{"--lsp-config", "typescript-language-server-4.3.4_typescript-5.8.3", "relative"},
+	} {
+		out.Reset()
+		stderr.Reset()
+		if code := RunCLI(context.Background(), args, Dependencies{}, &out, &stderr); code != 1 || out.Len() != 0 || stderr.Len() == 0 {
+			t.Fatalf("lsp command %q code=%d out=%q stderr=%q", args[:1], code, out.String(), stderr.String())
 		}
 	}
 }

@@ -289,16 +289,19 @@ environments:
 
 ## 可选 LSP
 
-**LSP 客户端已内置在 Daemon 中**，不需要额外安装客户端，Daemon 也不负责下载或升级语言服务器。
-服务器由你在卡片的 `daemonConfig.lsp` 中以内联 JSON 声明；不启用时保存为 `null`，LSP 查询返回明确的
+**LSP 客户端已内置在 Daemon 中**。服务器由你在卡片的 `daemonConfig.lsp` 中以内联 JSON 声明；不启用时保存为 `null`，LSP 查询返回明确的
 不可用错误，但文件、命令、检索仍可使用。没有独立的 `lsp.json` 或文件路径配置项。修改 LSP 声明后
 新调用使用新 generation，在途调用按既有生命周期收敛。
 
-例如已安装 Node/npm 的开发主机可先自行安装 TypeScript 服务器：
+Daemon CLI 提供固定 TypeScript profile（仅已验证的 Linux/amd64），安装材料与 IDE、Environment 的运行会话分离。先确认可用版本并选用当前用户可写的绝对目录：
 
 ```bash
-npm install -g typescript typescript-language-server
+/path/to/kk-studio-daemon --lsp-profiles
+/path/to/kk-studio-daemon --install-lsp typescript-language-server-4.3.4_typescript-5.8.3 "$HOME/.local/share/kk-studio/lsp"
+/path/to/kk-studio-daemon --lsp-config typescript-language-server-4.3.4_typescript-5.8.3 "$HOME/.local/share/kk-studio/lsp"
 ```
+
+安装需要 Node.js 18+、npm 和网络访问；包版本来自随 Daemon 固定的 lockfile，npm 不运行安装脚本。安装目录由调用者提供，已存在材料不会覆盖。npm 子进程使用临时的 HOME、XDG、缓存与用户 npm 配置，不修改其他进程环境或全局环境变量。最后一条命令输出可复制到 `daemonConfig.lsp` 的 `servers` 节点中的配置段。若你已用其他方式安装服务器，也可以继续直接声明其命令。
 
 对应 `servers`：
 

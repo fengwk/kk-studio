@@ -16,7 +16,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
-const usage = "Usage: kk-studio-daemon --config <absolute-path> | --check-config <absolute-path>\n"
+const usage = "Usage: kk-studio-daemon --config <absolute-path> | --check-config <absolute-path> | --lsp-profiles | --install-lsp <profile> <absolute-library> | --lsp-config <profile> <absolute-library>\n"
 
 type RuntimeRunner interface {
 	Run(context.Context, config.DaemonConfig) error
@@ -129,6 +129,9 @@ func RunCLI(ctx context.Context, args []string, deps Dependencies, stdout, stder
 			fmt.Fprintf(stdout, "kk-studio-daemon %s\n", config.DaemonVersion)
 			return 0
 		}
+	}
+	if handled, code := runLSPCLI(ctx, args, stdout, stderr); handled {
+		return code
 	}
 	if len(args) == 2 && args[0] == "--check-config" {
 		if err := config.CheckConfig(args[1]); err != nil {

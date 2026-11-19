@@ -106,8 +106,8 @@ Catalog 将连接信息、模型能力和 Agent 行为分开管理：
 每张 Environment 卡片在主机上是一套独立安装，安装根固定为 `~/.kk-studio/environments/<environmentId>`
 （Windows 为 `%USERPROFILE%\.kk-studio\environments\<environmentId>`），同一用户的其它卡片不受影响。
 覆盖安装会替换该卡片的配置、token 与程序并重启服务，但保留数据。卸载只移除受管服务与程序，保留本地
-配置、token 和数据，也不删除 Studio 中的 Environment。LSP 使用你已在主机上安装的语言服务器，Daemon
-不自动安装它们；卡片配置会随配置同步一起导出/导入。
+配置、token 和数据，也不删除 Studio 中的 Environment。LSP 的安装材料与 Environment 运行会话分离；可用 Daemon CLI
+安装已验证的 TypeScript 服务器并生成卡片配置，其他服务器继续使用主机上已有的安装。卡片配置会随配置同步一起导出/导入。
 
 Daemon 直接继承启动用户的主机权限，没有文件系统沙箱。三平台的前置条件、卡片配置字段、
 LSP 示例、参数、卸载与前台调试见
