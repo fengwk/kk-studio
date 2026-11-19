@@ -1254,7 +1254,7 @@ class AnthropicMessagesWireTest {
     ProviderCacheControl cacheControl =
         ProviderCacheControl.session(PromptCacheRetention.LONG, "test-aff");
 
-    ProviderDescriptor descriptor = createDescriptor(null);
+    ProviderDescriptor descriptor = createOfficialDescriptor();
     ProviderRequest request =
         requestWithInstruction("Sys", List.of(userTextMsg("hi")), null, cacheControl);
 
@@ -1294,7 +1294,7 @@ class AnthropicMessagesWireTest {
         ProviderCacheControl.session(PromptCacheRetention.LONG, "test-aff");
     ProviderRequest reqLong =
         createRequest("claude-3-5-sonnet", null, List.of(u1, a1, u2), null, longCache);
-    AnthropicEncodedRequest encLong = encoder.encode(reqLong, descriptor);
+    AnthropicEncodedRequest encLong = encoder.encode(reqLong, createOfficialDescriptor());
     JsonNode rootLong = mapper.readTree(encLong.bodyUtf8Bytes());
     JsonNode lastBlockLong = rootLong.path("messages").get(2).path("content").get(0);
     assertTrue(lastBlockLong.has("cache_control"));
@@ -1783,6 +1783,14 @@ class AnthropicMessagesWireTest {
   // ==========================================
   // Helper Methods & Classes
   // ==========================================
+
+  private ProviderDescriptor createOfficialDescriptor() {
+    return new ProviderDescriptor(
+        "anthropic-wire-test",
+        ProviderType.ANTHROPIC,
+        "https://api.anthropic.com/v1",
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofSeconds(3)));
+  }
 
   private ProviderDescriptor createDescriptor(ModelCallTimeoutPolicy timeoutPolicy) {
     return new ProviderDescriptor(
