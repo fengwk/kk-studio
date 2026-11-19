@@ -50,24 +50,40 @@ class PromptCacheCapabilitiesTest {
         PromptCacheCapabilities.resolve(ProviderType.OPENAI, "https://proxy.example/v1", "custom");
     assertTrue(chatProxy.automaticCache());
     assertTrue(chatProxy.options().isEmpty());
+    assertEquals(PromptCacheRetention.NONE, chatProxy.defaultRetention());
     PromptCacheCapabilities gemini =
         PromptCacheCapabilities.resolve(
             ProviderType.GOOGLE, "https://generativelanguage.googleapis.com", "gemini-2.5-pro");
     assertTrue(gemini.automaticCache());
     assertTrue(gemini.options().isEmpty());
+    assertEquals(PromptCacheRetention.NONE, gemini.defaultRetention());
   }
 
   @Test
   void doesNotApplyClaudeTtlToMiniMaxAndRecognizesAutomaticStableModel() {
     PromptCacheCapabilities preview =
         PromptCacheCapabilities.resolve(
-            ProviderType.ANTHROPIC, "https://api.minimaxi.com/anthropic", "MiniMax-M3");
+            ProviderType.ANTHROPIC,
+            "https://api.minimax.cn/anthropic",
+            "MiniMax-M3.1-Flash-Preview");
     assertNull(preview.reliableWriteTtlSeconds(PromptCacheRetention.LONG));
+    assertFalse(preview.supports(PromptCacheRetention.LONG));
+    assertTrue(preview.supports(PromptCacheRetention.SHORT));
 
     PromptCacheCapabilities stable =
         PromptCacheCapabilities.resolve(
-            ProviderType.ANTHROPIC, "https://api.minimaxi.com/anthropic", "MiniMax-M2.5");
+            ProviderType.ANTHROPIC, "https://api.minimax.cn/anthropic", "MiniMax-M2.5");
     assertTrue(stable.automaticCache());
     assertTrue(stable.options().isEmpty());
+    assertEquals(PromptCacheRetention.NONE, stable.defaultRetention());
+
+    PromptCacheCapabilities unknown =
+        PromptCacheCapabilities.resolve(
+            ProviderType.ANTHROPIC, "https://proxy.example/anthropic", "claude-compatible");
+    assertFalse(unknown.supports(PromptCacheRetention.LONG));
+    PromptCacheCapabilities officialClaude =
+        PromptCacheCapabilities.resolve(
+            ProviderType.ANTHROPIC, "https://api.anthropic.com/v1", "claude-sonnet");
+    assertEquals(3600L, officialClaude.reliableWriteTtlSeconds(PromptCacheRetention.LONG));
   }
 }

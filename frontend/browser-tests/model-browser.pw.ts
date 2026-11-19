@@ -54,6 +54,15 @@ async function installFakeCatalogServer(page: Page): Promise<{
         return
       }
       if (request.method() === 'GET' && path === '/api/platform/models/capabilities') {
+        const modelId = new URL(request.url()).searchParams.get('modelId')
+        if (modelId === 'auto-model') {
+          await json({ promptCacheOptions: [], defaultPromptCacheRetention: 'NONE', automaticCache: true })
+          return
+        }
+        if (modelId === 'long-model') {
+          await json({ promptCacheOptions: [{ retention: 'LONG' }], defaultPromptCacheRetention: 'LONG', automaticCache: false })
+          return
+        }
         await json({
           promptCacheOptions: [
             { retention: 'NONE' },
@@ -61,7 +70,7 @@ async function installFakeCatalogServer(page: Page): Promise<{
             { retention: 'LONG' },
           ],
           defaultPromptCacheRetention: 'SHORT',
-          automaticCache: true,
+          automaticCache: false,
         })
         return
       }
@@ -276,6 +285,34 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     expect(calls).not.toContain('PUT /api/platform/models/main')
   })
 
+  test('changing a create-form model replaces unsupported retention with automatic NONE and submits it', async ({
+    page,
+  }) => {
+    const { createBodies } = await installFakeCatalogServer(page)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await gotoHarness(page)
+    await page.locator('.create-card').click()
+    const dialog = page.getByRole('dialog')
+    await selectListOption(page, dialog.getByLabel('Provider', { exact: true }), 'acme')
+    await dialog.getByLabel('Name', { exact: true }).fill('auto-cache')
+    const modelId = dialog.getByLabel('Model ID', { exact: true })
+    await modelId.fill('long-model')
+    await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'LONG')
+
+    await modelId.fill('auto-model')
+    await expect(dialog.getByText('自动缓存: 由服务商自动处理')).toBeVisible()
+    await expect(dialog.getByLabel('提示缓存留存 1')).toHaveCount(0)
+    await expect(dialog.getByRole('button', { name: '确认创建', exact: true })).toBeEnabled()
+    await dialog.getByRole('button', { name: '确认创建', exact: true }).click()
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    expect(createBodies).toHaveLength(1)
+    const submitted = createBodies[0]
+    expect(submitted?.type).toBe('MODEL')
+    if (submitted?.type === 'MODEL') {
+      expect(submitted.config.variants[0]?.promptCacheRetention).toBe('NONE')
+    }
+  })
+
   test('creates an unpriced model, submits no invented rates, and reopens the saved draft', async ({
     page,
   }) => {
@@ -289,6 +326,11 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await dialog.getByLabel('Name', { exact: true }).fill('new-model')
     await dialog.getByLabel('Model ID', { exact: true }).fill('acme-new-model')
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
+    const advancedOptions = dialog.locator('.advanced-options').first()
+    await expect(advancedOptions).not.toHaveAttribute('open', '')
+    await expect(advancedOptions.getByLabel('Protocol Options 1')).not.toBeVisible()
+    await advancedOptions.locator('summary').click()
+    await expect(advancedOptions.getByLabel('Protocol Options 1')).toBeVisible()
 
     const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
     const inputPrice = pricing.getByLabel('Input USD per million tokens', { exact: true })

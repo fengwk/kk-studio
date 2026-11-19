@@ -28,6 +28,7 @@ import tools.jackson.databind.json.JsonMapper;
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.harness.model.ModelInputModality;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
@@ -96,6 +97,25 @@ class ModelServiceUnitTest {
     assertEquals("model", created.name());
     assertEquals("wire-model", created.modelId());
     assertNull(created.groupConfigJson());
+  }
+
+  /** 自动缓存只读能力以 canonical NONE 写入变体，而不是空档位。 */
+  @Test
+  void createsAutomaticCacheModelWithNoneRetention() {
+    when(providerRepository.getByNameForUpdate("provider"))
+        .thenReturn(
+            Provider.builder()
+                .name("provider")
+                .providerType(ProviderType.GOOGLE)
+                .baseUrl("https://generativelanguage.googleapis.com")
+                .build());
+    SingleModelCreateDTO create = create("gemini", null);
+
+    Model created = createAndCapture(create);
+
+    assertEquals(
+        PromptCacheRetention.NONE,
+        parser.decode(created.configJson()).getVariants().get(0).getPromptCacheRetention());
   }
 
   /** Provider 不存在时 404，且不写入。 */

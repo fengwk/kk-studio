@@ -29,6 +29,26 @@ class ModelControllerTest {
           .build();
 
   @Test
+  void returnsCanonicalNoneForAutomaticCachingWithoutSelectableOptions() throws Exception {
+    ModelCapabilitiesDTO capabilities = new ModelCapabilitiesDTO();
+    capabilities.setPromptCacheOptions(List.of());
+    capabilities.setDefaultPromptCacheRetention(PromptCacheRetention.NONE);
+    capabilities.setAutomaticCache(true);
+    when(modelService.capabilities("gemini", "gemini-2.5-pro")).thenReturn(capabilities);
+
+    mvc.perform(
+            get("/api/platform/models/capabilities")
+                .param("providerName", "gemini")
+                .param("modelId", "gemini-2.5-pro"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.promptCacheOptions").isEmpty())
+        .andExpect(jsonPath("$.defaultPromptCacheRetention").value("NONE"))
+        .andExpect(jsonPath("$.automaticCache").value(true));
+
+    verify(modelService).capabilities("gemini", "gemini-2.5-pro");
+  }
+
+  @Test
   void readsDraftCapabilitiesWithoutPersistingAModel() throws Exception {
     PromptCacheOptionDTO option = new PromptCacheOptionDTO();
     option.setRetention(PromptCacheRetention.SHORT);

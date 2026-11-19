@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { variantOptionsFromDraft } from '@/features/catalog/ai-draft-normalizers'
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
@@ -54,8 +54,10 @@ export function ModelForm({
   const [capabilitiesError, setCapabilitiesError] = useState<string | undefined>()
   const draftRef = useRef(draft)
   const onChangeRef = useRef(onChange)
-  draftRef.current = draft
-  onChangeRef.current = onChange
+  useLayoutEffect(() => {
+    draftRef.current = draft
+    onChangeRef.current = onChange
+  }, [draft, onChange])
 
   useEffect(() => {
     const { providerName, modelId } = draftRef.current
@@ -72,12 +74,15 @@ export function ModelForm({
     void getModelCapabilities(providerName, modelId, controller.signal).then((capabilities) => {
       if (controller.signal.aborted) return
       setModelCapabilities(capabilities)
-      const defaultRetention = capabilities.defaultPromptCacheRetention
-      if (mode === 'create' && defaultRetention) {
+      if (mode === 'create') {
         const current = draftRef.current
-        const variants = current.variants.map((variant) => variant.promptCacheRetention === ''
-          ? { ...variant, promptCacheRetention: defaultRetention }
-          : variant)
+        const supported = new Set(capabilities.promptCacheOptions.map((option) => option.retention))
+        const defaultRetention = capabilities.defaultPromptCacheRetention ?? 'NONE'
+        const variants = current.variants.map((variant) =>
+          variant.promptCacheRetention === '' || !supported.has(variant.promptCacheRetention)
+            ? { ...variant, promptCacheRetention: defaultRetention }
+            : variant,
+        )
         if (variants.some((variant, index) => variant !== current.variants[index])) {
           onChangeRef.current({ ...current, variants })
         }
