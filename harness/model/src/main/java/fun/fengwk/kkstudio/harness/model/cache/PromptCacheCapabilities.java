@@ -48,10 +48,9 @@ public record PromptCacheCapabilities(
         if (isMiniMaxStable(endpoint, modelId)) {
           automatic = true;
         } else if (isMiniMax(endpoint)) {
-          // Preview behavior is retained, but Claude TTL claims do not apply to MiniMax.
+          // Preview keeps the previously offered SHORT marker; its TTL is not verified.
           options.add(option(PromptCacheRetention.NONE, null, null));
           options.add(option(PromptCacheRetention.SHORT, null, null));
-          options.add(option(PromptCacheRetention.LONG, null, null));
         } else if (isOfficialAnthropic(endpoint)) {
           options.add(option(PromptCacheRetention.NONE, null, null));
           options.add(option(PromptCacheRetention.SHORT, 300L, 1.25));
@@ -59,17 +58,18 @@ public record PromptCacheCapabilities(
         } else {
           options.add(option(PromptCacheRetention.NONE, null, null));
           options.add(option(PromptCacheRetention.SHORT, null, null));
-          options.add(option(PromptCacheRetention.LONG, null, null));
         }
       }
       case GOOGLE -> automatic = true;
     }
     PromptCacheRetention defaultRetention =
-        options.stream()
-            .map(PromptCacheOption::retention)
-            .filter(retention -> retention != PromptCacheRetention.NONE)
-            .findFirst()
-            .orElse(null);
+        automatic
+            ? PromptCacheRetention.NONE
+            : options.stream()
+                .map(PromptCacheOption::retention)
+                .filter(retention -> retention != PromptCacheRetention.NONE)
+                .findFirst()
+                .orElse(null);
     return new PromptCacheCapabilities(options, defaultRetention, automatic);
   }
 
@@ -109,7 +109,9 @@ public record PromptCacheCapabilities(
     try {
       String host = URI.create(endpoint).getHost();
       return host != null
-          && (host.equalsIgnoreCase("api.minimaxi.com") || host.equalsIgnoreCase("api.minimax.io"));
+          && (host.equalsIgnoreCase("api.minimaxi.com")
+              || host.equalsIgnoreCase("api.minimax.io")
+              || host.equalsIgnoreCase("api.minimax.cn"));
     } catch (IllegalArgumentException exception) {
       return false;
     }

@@ -48,11 +48,11 @@ describe('VariantListEditor model capabilities', () => {
     setLocale('zh-CN')
     const user = userEvent.setup()
     render(<Editor modelCapabilities={capabilities(['NONE', 'SHORT', 'LONG'], 'SHORT')} />)
-    expect(screen.getByText('自动缓存: 非自动缓存')).toBeInTheDocument()
-    expect(screen.getByText('服务商默认值: SHORT')).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('自动缓存: 非自动缓存')
+    expect(screen.getByRole('status')).toHaveTextContent('服务商默认值: 标准')
     await user.click(screen.getByRole('button', { name: '提示缓存留存 1' }))
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
-      '不发送缓存指令', 'SHORT · 3600 秒 · 写入 ×1.5', 'LONG',
+      '关闭', '标准 · 3600 秒 · 写入 ×1.5', '长',
     ])
   })
 
@@ -64,11 +64,26 @@ describe('VariantListEditor model capabilities', () => {
     expect(screen.getByLabelText('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
     await user.click(screen.getByRole('button', { name: '提示缓存留存 1' }))
     expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
-      'SHORT · 不可用', '不发送缓存指令',
+      '标准 · 不可用', '关闭',
     ])
     await user.click(screen.getByRole('button', { name: '提示缓存留存 1' }))
     await user.click(screen.getByRole('button', { name: '添加 Variant' }))
     expect(screen.getByLabelText('提示缓存留存 2')).toHaveAttribute('data-value', 'NONE')
+  })
+
+  it('shows automatic-cache status without a retention selector and defaults new variants to NONE', async () => {
+    setLocale('zh-CN')
+    const user = userEvent.setup()
+    render(<Editor modelCapabilities={{
+      promptCacheOptions: [],
+      defaultPromptCacheRetention: 'NONE',
+      automaticCache: true,
+    }} initialRetention="NONE" />)
+
+    expect(screen.getByRole('status')).toHaveTextContent('自动缓存: 由服务商自动处理')
+    expect(screen.queryByLabelText('提示缓存留存 1')).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '添加 Variant' }))
+    expect(screen.queryByLabelText('提示缓存留存 2')).not.toBeInTheDocument()
   })
 
   it('does not guess a selection while capabilities are unknown', () => {

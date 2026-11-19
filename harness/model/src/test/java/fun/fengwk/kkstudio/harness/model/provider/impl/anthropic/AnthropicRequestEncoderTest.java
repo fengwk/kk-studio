@@ -472,6 +472,26 @@ class AnthropicRequestEncoderTest {
   }
 
   @Test
+  void rejectsLongCacheOnUnverifiedAnthropicEndpoint() {
+    ProviderRequest request =
+        request(
+            defaultVariant(),
+            List.of(userMsg(new ProviderTextBlock("hello"))),
+            List.of(),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "session"));
+    ProviderDescriptor previewDescriptor =
+        new ProviderDescriptor(
+            "minimax-preview",
+            ProviderType.ANTHROPIC,
+            "https://api.minimax.cn/anthropic",
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
+
+    ProviderException error =
+        assertThrows(ProviderException.class, () -> encoder.encode(request, previewDescriptor));
+    assertEquals(ProviderErrorKind.INVALID_REQUEST, error.kind());
+  }
+
+  @Test
   void automaticCacheRouteDoesNotReceiveAnthropicMarkers() {
     ArrayNode messages = NODES.arrayNode();
     ObjectNode tail = messages.addObject().put("role", "user").putArray("content").addObject();

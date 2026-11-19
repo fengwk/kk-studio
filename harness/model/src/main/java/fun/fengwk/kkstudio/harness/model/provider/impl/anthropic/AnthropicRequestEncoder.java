@@ -8,6 +8,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapabilities;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
@@ -87,6 +88,16 @@ public final class AnthropicRequestEncoder {
         AnthropicWireMessages.encode(request.messages(), descriptor, request.model().modelId());
     ArrayNode wireMessagesArray = wire.messages();
 
+    PromptCacheCapabilities cacheCapabilities =
+        PromptCacheCapabilities.resolve(
+            descriptor.type(), descriptor.endpoint(), request.model().modelId());
+    if (request.cacheControl().retention() == PromptCacheRetention.LONG
+        && !cacheCapabilities.supports(PromptCacheRetention.LONG)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "LONG prompt cache retention is not supported by this Anthropic endpoint/model");
+    }
+
     // 注入 cache marker
     AnthropicCacheMarkers.apply(
         request.cacheControl(),
@@ -95,9 +106,7 @@ public final class AnthropicRequestEncoder {
         unmarkedSystemArray,
         wire.cacheEndpoint(),
         deferredToolLane,
-        PromptCacheCapabilities.resolve(
-                descriptor.type(), descriptor.endpoint(), request.model().modelId())
-            .automaticCache());
+        cacheCapabilities.automaticCache());
     if (effort.messageLevelEffort()) {
       wireMessagesArray =
           AnthropicReasoningEffort.applyMessageLevelEffort(

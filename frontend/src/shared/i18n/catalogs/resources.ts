@@ -552,8 +552,20 @@ export const resourcesCatalog = {
     'zh-CN': '提示缓存留存',
   },
   'ai.catalog.form.promptCacheRetentionNone': {
-    'en-US': 'Do not send cache instructions',
-    'zh-CN': '不发送缓存指令',
+    'en-US': 'Off',
+    'zh-CN': '关闭',
+  },
+  'ai.catalog.form.promptCacheRetentionShort': {
+    'en-US': 'Standard',
+    'zh-CN': '标准',
+  },
+  'ai.catalog.form.promptCacheRetentionLong': {
+    'en-US': 'Long',
+    'zh-CN': '长',
+  },
+  'ai.catalog.form.advancedOptions': {
+    'en-US': 'Advanced options',
+    'zh-CN': '高级选项',
   },
   'ai.catalog.form.reasoningEffort': {
     'en-US': 'Reasoning Effort',

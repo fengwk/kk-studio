@@ -65,7 +65,7 @@ describe('AiResourceForms', () => {
         { retention: 'SHORT', ttlSeconds: '3600', writeMultiplier: 2 },
       ],
       defaultPromptCacheRetention: 'SHORT',
-      automaticCache: true,
+      automaticCache: false,
     }), { headers: { 'content-type': 'application/json' } })))
 
     let currentDraft: ModelDraft = {
@@ -97,7 +97,7 @@ describe('AiResourceForms', () => {
       return (
         <ModelForm
           draft={draft}
-          mode="create"
+          mode="edit"
           providers={providers}
           onChange={(next) => {
             currentDraft = next
@@ -109,11 +109,11 @@ describe('AiResourceForms', () => {
 
     render(<RetentionHarness />)
     const retention = screen.getByLabelText('Prompt Cache Retention 1')
-    await waitFor(() => expect(screen.getByText(/Automatic caching: Enabled by provider/)).toBeInTheDocument())
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Automatic caching: Not automatic'))
     expect(retention).toHaveAttribute('data-value', 'LONG')
 
     await user.click(retention)
-    await user.click(screen.getByRole('option', { name: 'SHORT · 3600 seconds · write ×2' }))
+    await user.click(screen.getByRole('option', { name: 'Standard · 3600 seconds · write ×2' }))
     expect(currentDraft.variants.map((variant) => variant.promptCacheRetention)).toEqual([
       'SHORT',
       'NONE',

@@ -38,11 +38,18 @@ export function VariantListEditor({
   const retentionOptions: SelectOption[] = capabilityOptions.map((option) => ({
     value: option.retention,
     label: [
-      option.retention === 'NONE' ? t('ai.catalog.form.promptCacheRetentionNone') : option.retention,
+      retentionLabel(option.retention),
       option.ttlSeconds == null ? '' : t('ai.catalog.form.promptCacheOptionTtl', { seconds: option.ttlSeconds }),
       option.writeMultiplier == null ? '' : t('ai.catalog.form.promptCacheOptionWriteMultiplier', { multiplier: option.writeMultiplier }),
     ].filter(Boolean).join(' · '),
   }))
+
+  function retentionLabel(retention: string) {
+    if (retention === 'NONE') return t('ai.catalog.form.promptCacheRetentionNone')
+    if (retention === 'SHORT') return t('ai.catalog.form.promptCacheRetentionShort')
+    if (retention === 'LONG') return t('ai.catalog.form.promptCacheRetentionLong')
+    return retention
+  }
 
   function updateVariant(index: number, patch: Partial<VariantDraft>) {
     const currentVariant = variants[index]
@@ -93,7 +100,7 @@ export function VariantListEditor({
             ? t('ai.catalog.form.automaticCacheEnabled')
             : t('ai.catalog.form.automaticCacheDisabled')}
           {capabilities.defaultPromptCacheRetention
-            ? ` · ${t('ai.catalog.form.defaultPromptCacheRetention')}: ${capabilities.defaultPromptCacheRetention}`
+            ? ` · ${t('ai.catalog.form.defaultPromptCacheRetention')}: ${retentionLabel(capabilities.defaultPromptCacheRetention)}`
             : ''}
         </p>
       ) : null}
@@ -109,7 +116,7 @@ export function VariantListEditor({
           const retentionSupported = retentionOptions.some((option) => option.value === currentRetention)
           const options: SelectOption[] = currentRetention && !retentionSupported
             ? [
-                { value: currentRetention, label: `${currentRetention} · ${t('ai.catalog.form.unavailable')}`, disabled: true },
+                { value: currentRetention, label: `${retentionLabel(currentRetention)} · ${t('ai.catalog.form.unavailable')}`, disabled: true },
                 ...retentionOptions,
               ]
             : retentionOptions
@@ -127,22 +134,24 @@ export function VariantListEditor({
                     required
                   />
                 </label>
-                <label className="form-group">
-                  <FieldLabel required>{t('ai.catalog.form.promptCacheRetention')}</FieldLabel>
-                  <Select
-                    aria-label={`${t('ai.catalog.form.promptCacheRetentionAria')} ${index + 1}`}
-                    value={currentRetention}
-                    options={options}
-                    placeholder={capabilitiesLoading
-                      ? t('ai.catalog.form.modelCapabilitiesLoading')
-                      : t('ai.catalog.form.promptCacheRetentionSelect')}
-                    disabled={capabilitiesLoading || !capabilities || options.length === 0}
-                    onChange={(value) => {
-                      const selected = capabilityOptions.find((option) => option.retention === value)
-                      if (selected) updateVariant(index, { promptCacheRetention: selected.retention })
-                    }}
-                  />
-                </label>
+                {!capabilities?.automaticCache ? (
+                  <label className="form-group">
+                    <FieldLabel required>{t('ai.catalog.form.promptCacheRetention')}</FieldLabel>
+                    <Select
+                      aria-label={`${t('ai.catalog.form.promptCacheRetentionAria')} ${index + 1}`}
+                      value={currentRetention}
+                      options={options}
+                      placeholder={capabilitiesLoading
+                        ? t('ai.catalog.form.modelCapabilitiesLoading')
+                        : t('ai.catalog.form.promptCacheRetentionSelect')}
+                      disabled={capabilitiesLoading || !capabilities || options.length === 0}
+                      onChange={(value) => {
+                        const selected = capabilityOptions.find((option) => option.retention === value)
+                        if (selected) updateVariant(index, { promptCacheRetention: selected.retention })
+                      }}
+                    />
+                  </label>
+                ) : null}
                 <label className="form-group">
                   <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
                   <TextInput
@@ -159,21 +168,24 @@ export function VariantListEditor({
                 </label>
               </div>
 
-              <label className="form-group">
-                <FieldLabel>{t('ai.catalog.form.protocolOptions')}</FieldLabel>
-                <TextArea
-                  className="code-textarea"
-                  aria-label={`${t('ai.catalog.form.protocolOptionsAria')} ${index + 1}`}
-                  value={variant.protocolOptionsJson}
-                  onChange={(event) =>
-                    updateVariant(index, { protocolOptionsJson: event.target.value })
-                  }
-                  placeholder={t('ai.catalog.form.protocolOptionsPlaceholder')}
-                  rows={3}
-                  spellCheck={false}
-                />
-                <span className="inline-hint">{t('ai.catalog.form.protocolOptionsHint')}</span>
-              </label>
+              <details className="advanced-options">
+                <summary>{t('ai.catalog.form.advancedOptions')}</summary>
+                <label className="form-group">
+                  <FieldLabel>{t('ai.catalog.form.protocolOptions')}</FieldLabel>
+                  <TextArea
+                    className="code-textarea"
+                    aria-label={`${t('ai.catalog.form.protocolOptionsAria')} ${index + 1}`}
+                    value={variant.protocolOptionsJson}
+                    onChange={(event) =>
+                      updateVariant(index, { protocolOptionsJson: event.target.value })
+                    }
+                    placeholder={t('ai.catalog.form.protocolOptionsPlaceholder')}
+                    rows={3}
+                    spellCheck={false}
+                  />
+                  <span className="inline-hint">{t('ai.catalog.form.protocolOptionsHint')}</span>
+                </label>
+              </details>
 
               <div>
                 <Button
