@@ -76,6 +76,13 @@ public class CanvasNodeJdbcStore {
         .optional();
   }
 
+  public Optional<UUID> findCanvasId(UUID id) {
+    return jdbc.sql("select canvas_id from canvas_node where id = :id")
+        .param("id", id)
+        .query(UUID.class)
+        .optional();
+  }
+
   public Optional<CanvasNodeDO> findByIdForUpdate(UUID canvasId, UUID id) {
     return jdbc.sql(
             "select "

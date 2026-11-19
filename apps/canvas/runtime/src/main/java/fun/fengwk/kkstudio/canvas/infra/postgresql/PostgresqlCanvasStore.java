@@ -62,6 +62,14 @@ public class PostgresqlCanvasStore {
     return documentStore.findByIdForUpdate(canvasId).map(PostgresqlCanvasStore::toDomain);
   }
 
+  /** 按 document → node 顺序加锁，并在读取归属后重新确认节点仍在该画布内。 */
+  public Optional<CanvasDocument> lockDocumentForNode(UUID nodeId) {
+    return nodeStore
+        .findCanvasId(nodeId)
+        .flatMap(this::lockDocument)
+        .filter(document -> lockNode(document.id(), nodeId).isPresent());
+  }
+
   public List<CanvasDocument> listDocuments() {
     List<CanvasDocument> documents = new ArrayList<>();
     for (CanvasDocumentDO document : documentStore.listAll()) {

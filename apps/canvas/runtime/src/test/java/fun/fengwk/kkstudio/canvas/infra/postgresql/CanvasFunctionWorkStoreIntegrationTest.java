@@ -43,6 +43,7 @@ import fun.fengwk.kkstudio.canvas.infra.function.CanvasFunctionWorker;
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.platform.CanvasBlobResourceMaterializer;
 import fun.fengwk.kkstudio.canvas.infra.platform.PlatformCanvasFunctionBlobAccess;
+import fun.fengwk.kkstudio.canvas.notification.CanvasVersionNotifications;
 import fun.fengwk.kkstudio.canvas.testing.TestCanvasFunctionCatalogSource;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
 
@@ -76,6 +77,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   @Autowired private CanvasFunctionWorkStore workStore;
   @Autowired private CanvasFunctionRunJdbcStore runJdbcStore;
   @Autowired private CanvasFunctionRunStateCodec stateCodec;
+  @Autowired private CanvasQueryService queryService;
   @Autowired private ApplicationContext context;
 
   /** 独立运行时不装配依赖平台 Storage 的 HTTP DTO mapper。 */
@@ -86,12 +88,12 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
 
   /** 清理不可运行 Work 后必须在同一次调用继续领取有效 Run。 */
   @ParameterizedTest
-  @ValueSource(strings = {"SUCCEEDED", "UNKNOWN", "MISSING"})
+  @ValueSource(strings = {"SUCCEEDED", "UNKNOWN", "MISSING_RUN", "MISSING_NODE"})
   void skipsInvalidWorkAndContinues(String status) {
     UUID canvasId = addDocument();
-    UUID invalid = addNode(canvasId, true).id();
+    UUID invalid = status.equals("MISSING_NODE") ? UUID.randomUUID() : addNode(canvasId, true).id();
     UUID valid = addNode(canvasId, true).id();
-    if (!status.equals("MISSING")) {
+    if (!status.startsWith("MISSING_")) {
       insertRunRow(invalid, UUID.randomUUID(), status);
     }
     DurableWorkStore queue =
@@ -106,12 +108,14 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     assertEquals(valid, workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow().nodeId());
     assertEquals(0, workRows(invalid));
     assertEquals(1, runs.findByNodeId(valid).orElseThrow().attempt());
+    assertEquals(1, canvasStore.findDocument(canvasId).orElseThrow().revision());
   }
 
-  /** 真实行锁覆盖 attempt 写入，且 Run 锁必须先于 Work ownership 锁。 */
+  /** attempt 写入时必须持有全部行锁，且 Run 锁先于 Work ownership 锁。 */
   @Test
-  void holdsRunAndWorkLocksThroughAttemptWrite() {
-    UUID nodeId = addNode(addDocument(), true).id();
+  void holdsCanvasAndWorkLocksThroughAttemptWrite() {
+    UUID canvasId = addDocument();
+    UUID nodeId = addNode(canvasId, true).id();
     runs.insertReady(ready(nodeId, UUID.randomUUID(), T0));
     DurableWorkStore queue =
         spy(
@@ -121,16 +125,27 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
         spy(AopTestUtils.<CanvasFunctionRunJdbcStore>getUltimateTargetObject(runJdbcStore));
     doAnswer(
             invocation -> {
-              for (String table : List.of("canvas_function_run", "durable_work")) {
+              for (var row :
+                  Map.of(
+                          "canvas_document",
+                          "id",
+                          "canvas_node",
+                          "id",
+                          "canvas_function_run",
+                          "node_id",
+                          "durable_work",
+                          "target_id")
+                      .entrySet()) {
                 try (Connection connection = newConnection();
                     var statement =
                         connection.prepareStatement(
                             "select * from "
-                                + table
+                                + row.getKey()
                                 + " where "
-                                + (table.equals("durable_work") ? "target_id" : "node_id")
+                                + row.getValue()
                                 + " = ? for update nowait")) {
-                  statement.setObject(1, nodeId);
+                  statement.setObject(
+                      1, row.getKey().equals("canvas_document") ? canvasId : nodeId);
                   SQLException error = assertThrows(SQLException.class, statement::executeQuery);
                   assertEquals("55P03", error.getSQLState());
                 }
@@ -142,6 +157,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     CanvasFunctionWorkStore observed =
         new CanvasFunctionWorkStore(
             queue,
+            canvasStore,
             observedRuns,
             stateCodec,
             transactions.getTransactionManager(),
@@ -158,7 +174,8 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
   @ParameterizedTest
   @ValueSource(booleans = {false, true})
   void takeoverBeforeStartFencesOldClaim(boolean takeover) throws Exception {
-    UUID nodeId = addNode(addDocument(), true).id();
+    UUID canvasId = addDocument();
+    UUID nodeId = addNode(canvasId, true).id();
     runs.insertReady(ready(nodeId, UUID.randomUUID(), T0));
     DurableWorkStore queue =
         spy(
@@ -179,6 +196,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     CanvasFunctionWorkStore delayed =
         new CanvasFunctionWorkStore(
             queue,
+            canvasStore,
             runJdbcStore,
             stateCodec,
             transactions.getTransactionManager(),
@@ -199,6 +217,7 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
       }
       assertTrue(old.get(10, TimeUnit.SECONDS).isEmpty());
       assertEquals(takeover ? 1 : 0, runs.findByNodeId(nodeId).orElseThrow().attempt());
+      assertEquals(takeover ? 1 : 0, canvasStore.findDocument(canvasId).orElseThrow().revision());
       verify(queue).claimNext(ownerA, LEASE);
     }
   }
@@ -292,20 +311,49 @@ class CanvasFunctionWorkStoreIntegrationTest extends PostgresCanvasInfraTestSupp
     assertFalse(workStore.renew(claim, LEASE), "an expired lease cannot be revived");
   }
 
-  /** rejection 归还必须只由当前 owner 把 RUNNING 延迟重排为 READY，旧 token 再归还为 no-op。 */
+  /** 领取、RUNNING 接管和归还各推进一次 revision；通知后公开快照反映已提交的状态。 */
   @Test
-  void rescheduleReturnsOnlyTheOwnedClaim() {
+  void revisionNotificationsExposeCommittedRunChanges() throws Exception {
     UUID canvasId = addDocument();
     NodeRecord node = addNode(canvasId, true);
     runs.insertReady(ready(node.id(), UUID.randomUUID(), T0));
-    ClaimedRun claim = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
-    assertTrue(runs.holdsLease(node.id(), claim.leaseToken()));
+    long initialRevision = canvasStore.findDocument(canvasId).orElseThrow().revision();
 
-    assertTrue(workStore.reschedule(claim, Duration.ofMinutes(2)));
-    CanvasFunctionRun returned = runs.findByNodeId(node.id()).orElseThrow();
-    assertEquals(CanvasFunctionRunStatus.READY, returned.status());
-    assertTrue(workStore.claimNext(LEASE, UUID.randomUUID()).isEmpty(), "the retry is deferred");
-    assertFalse(workStore.reschedule(claim, Duration.ofSeconds(2)));
+    try (Connection listener = listenOn(CanvasVersionNotifications.CHANNEL)) {
+      ClaimedRun first = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
+      assertRunRevision(
+          listener, canvasId, initialRevision + 1, CanvasFunctionRunStatus.RUNNING, 1);
+
+      awaitLeaseExpiry();
+      ClaimedRun recovered = workStore.claimNext(LEASE, UUID.randomUUID()).orElseThrow();
+      assertRunRevision(
+          listener, canvasId, initialRevision + 2, CanvasFunctionRunStatus.RUNNING, 2);
+      assertFalse(workStore.reschedule(first, Duration.ofSeconds(2)));
+      assertEquals(
+          initialRevision + 2, canvasStore.findDocument(canvasId).orElseThrow().revision());
+      assertNoNotification(listener);
+
+      assertTrue(workStore.reschedule(recovered, Duration.ofMinutes(2)));
+      assertRunRevision(listener, canvasId, initialRevision + 3, CanvasFunctionRunStatus.READY, 2);
+      assertTrue(workStore.claimNext(LEASE, UUID.randomUUID()).isEmpty(), "the retry is deferred");
+    }
+  }
+
+  private void assertRunRevision(
+      Connection listener,
+      UUID canvasId,
+      long revision,
+      CanvasFunctionRunStatus status,
+      int attempt)
+      throws SQLException {
+    PGNotification[] notifications = pollNotifications(listener, 5_000);
+    assertEquals(1, notifications.length);
+    assertEquals(canvasId + ":" + revision, notifications[0].getParameter());
+    var snapshot = queryService.findSnapshot(canvasId).orElseThrow();
+    assertEquals(revision, snapshot.document().revision());
+    var run = snapshot.nodes().getFirst().run();
+    assertEquals(status, run.status());
+    assertEquals(attempt, run.attempt());
   }
 
   /** work store 在 SQL 前拒绝空 token、非正或非整毫秒 duration。 */
