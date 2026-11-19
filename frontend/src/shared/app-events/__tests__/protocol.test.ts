@@ -750,6 +750,20 @@ describe('decodeServerMessage', () => {
 })
 
 describe('backend wire samples', () => {
+  it('rejects numeric Thread snapshot versions and next command sequences', () => {
+    const data = threadSnapshot()
+    // Matching numeric versions must not bypass validation through RegExp coercion.
+    for (const invalid of [
+      { ...data, version: 43, thread: { ...data.thread, version: 43 } },
+      { ...data, thread: { ...data.thread, version: 43 } },
+      { ...data, thread: { ...data.thread, nextCommandSequence: 1 } },
+    ]) {
+      expect(decodeServerMessage(JSON.stringify({
+        type: 'event', resource: threadResource, name: 'snapshot', data: invalid,
+      }))).toBeNull()
+    }
+  })
+
   it('decodes the backend subscribed and snapshot frames', () => {
     const ack = `{"type":"subscribed","resource":{"kind":"thread","id":"${THREAD_ID}"},"cursor":"0"}`
     expect(decodeServerMessage(ack)).toEqual({
