@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.model.provider.impl;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -142,7 +143,7 @@ class ProviderRequestBodyPreviewTest {
         "gpt-4o",
         ProviderType.OPENAI,
         "{\"temperature\":0.2}",
-        "prompt_cache_key"),
+        "temperature"),
     OPENAI_RESPONSES(
         "openai-responses",
         "/v1",
@@ -202,10 +203,16 @@ class ProviderRequestBodyPreviewTest {
 
     assertArrayEquals(
         sent, previewed, "preview must be byte-identical to the sent body: " + protocol);
-    // 证据片段确保等价不是「两边都退化为默认配置」：cache hint 与 native option 必须真正进入请求体
+    // 证据片段确保等价不是「两边都退化为默认配置」：协议接受的 native option/cache hint 必须进入请求体
+    String wireBody = new String(sent, StandardCharsets.UTF_8);
     assertTrue(
-        new String(sent, StandardCharsets.UTF_8).contains(protocol.evidenceToken),
+        wireBody.contains(protocol.evidenceToken),
         "非默认 configuration/native option must reach the wire body: " + protocol);
+    if (protocol == Protocol.OPENAI_CHAT) {
+      assertFalse(
+          wireBody.contains("prompt_cache_key"),
+          "compatible Chat endpoints do not receive explicit cache keys");
+    }
   }
 
   /** 预览是无网络入口：任何协议、任何配置都不得触发 transport。 */
