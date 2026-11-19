@@ -1897,6 +1897,13 @@ export interface ModelAbilitiesDTO {
   inputModalities: ModelInputModality[]
 }
 
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCapabilitiesDTO */
+export interface ModelCapabilitiesDTO {
+  promptCacheOptions: PromptCacheOptionDTO[]
+  defaultPromptCacheRetention?: PromptCacheRetention | null
+  automaticCache: boolean
+}
+
 /** Java：fun.fengwk.kkstudio.platform.catalog.dto.ModelCatalogAbilitiesDTO */
 export interface ModelCatalogAbilitiesDTO {
   tools?: boolean | null
@@ -2329,6 +2336,13 @@ export interface ProjectWorkflowStateDTO {
   maxRuns: string | null
   enabled?: boolean | null
   next?: string[] | null
+}
+
+/** Java：fun.fengwk.kkstudio.platform.catalog.dto.PromptCacheOptionDTO */
+export interface PromptCacheOptionDTO {
+  retention: PromptCacheRetention
+  ttlSeconds?: string | null
+  writeMultiplier?: number | null
 }
 
 /** Java：fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention */
@@ -2888,6 +2902,7 @@ export interface ToolCatalogEntryDTO {
 export interface ToolInvocationDTO {
   id: string
   threadId: string
+  childThreadId: string | null
   turnStartEntryId: string
   assistantEntryId: string
   callIndex: number
@@ -3183,6 +3198,10 @@ export interface ApiRoutes {
   }
   'GET /api/platform/models': {
     response: ModelDTO[]
+  }
+  'GET /api/platform/models/capabilities': {
+    query: { modelId: string; providerName: string }
+    response: ModelCapabilitiesDTO
   }
   'GET /api/platform/plugins': {
     response: PluginDTO[]

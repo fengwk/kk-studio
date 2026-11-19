@@ -93,43 +93,66 @@ func (s *fakeSupervisor) Start(context.Context, native.ProcessSpec) (native.Mana
 func (*fakeSupervisor) Close(context.Context) error { return nil }
 
 type fakeProcess struct {
-	blockMethod      string
-	oversizedMethod  string
-	errorMethod      string
-	emptyMethod      string
-	exitBlocks       bool
-	exitSeen         chan struct{}
-	allowProcessExit chan struct{}
-	shutdownParams   chan json.RawMessage
-	initializeParams chan json.RawMessage
-	events           chan fakeRequest
-	requests         chan string
-	cancelled        chan struct{}
-	stdinR           *io.PipeReader
-	stdinW           *io.PipeWriter
-	stdoutR          *io.PipeReader
-	stdoutW          *io.PipeWriter
-	stderrR          *io.PipeReader
-	stderrW          *io.PipeWriter
-	done             chan native.ProcessExit
-	once             sync.Once
-	exitOnce         sync.Once
-	terminates       atomic.Int32
-	terminateErr     error
-	terminateGate    <-chan struct{}
-	waitErr          error
+	blockMethod           string
+	oversizedMethod       string
+	errorMethod           string
+	emptyMethod           string
+	exitBlocks            bool
+	exitSeen              chan struct{}
+	allowProcessExit      chan struct{}
+	shutdownParams        chan json.RawMessage
+	initializeParams      chan json.RawMessage
+	events                chan fakeRequest
+	requests              chan string
+	cancelled             chan struct{}
+	stdinR                *io.PipeReader
+	stdinW                *io.PipeWriter
+	blockStdinWrite       atomic.Bool
+	stdinWriteEntered     chan struct{}
+	stdinWriteRelease     chan struct{}
+	stdinWriteDone        chan struct{}
+	stdinWriteEnteredOnce sync.Once
+	stdinWriteReleaseOnce sync.Once
+	stdinWriteDoneOnce    sync.Once
+	stdoutR               *io.PipeReader
+	stdoutW               *io.PipeWriter
+	stderrR               *io.PipeReader
+	stderrW               *io.PipeWriter
+	done                  chan native.ProcessExit
+	once                  sync.Once
+	exitOnce              sync.Once
+	terminates            atomic.Int32
+	terminateErr          error
+	terminateGate         <-chan struct{}
+	waitErr               error
 }
 
 func newFakeProcess(blockMethod string) *fakeProcess {
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	errR, errW := io.Pipe()
-	p := &fakeProcess{blockMethod: blockMethod, requests: make(chan string, 64), cancelled: make(chan struct{}, 1), stdinR: inR, stdinW: inW, stdoutR: outR, stdoutW: outW, stderrR: errR, stderrW: errW, done: make(chan native.ProcessExit, 1)}
+	p := &fakeProcess{blockMethod: blockMethod, requests: make(chan string, 64), cancelled: make(chan struct{}, 1), stdinR: inR, stdinW: inW, stdinWriteEntered: make(chan struct{}), stdinWriteRelease: make(chan struct{}), stdinWriteDone: make(chan struct{}), stdoutR: outR, stdoutW: outW, stderrR: errR, stderrW: errW, done: make(chan native.ProcessExit, 1)}
 	go p.serve()
 	return p
 }
 func (p *fakeProcess) PID() int              { return 17 }
-func (p *fakeProcess) Stdin() io.WriteCloser { return p.stdinW }
+func (p *fakeProcess) Stdin() io.WriteCloser { return fakeStdinWriter{process: p} }
+
+type fakeStdinWriter struct {
+	process *fakeProcess
+}
+
+func (w fakeStdinWriter) Write(data []byte) (int, error) {
+	blocked := w.process.blockStdinWrite.Load()
+	if blocked {
+		w.process.stdinWriteEnteredOnce.Do(func() { close(w.process.stdinWriteEntered) })
+		<-w.process.stdinWriteRelease
+		defer w.process.stdinWriteDoneOnce.Do(func() { close(w.process.stdinWriteDone) })
+	}
+	return w.process.stdinW.Write(data)
+}
+
+func (w fakeStdinWriter) Close() error       { return w.process.stdinW.Close() }
 func (p *fakeProcess) Stdout() io.ReadCloser { return p.stdoutR }
 func (p *fakeProcess) Stderr() io.ReadCloser { return p.stderrR }
 func (p *fakeProcess) Wait(ctx context.Context) (native.ProcessExit, error) {
@@ -151,6 +174,8 @@ func (p *fakeProcess) Terminate(context.Context, time.Duration) error {
 	}
 	p.once.Do(func() {
 		_ = p.stdinW.Close()
+		p.stdinWriteEnteredOnce.Do(func() { close(p.stdinWriteEntered) })
+		p.stdinWriteReleaseOnce.Do(func() { close(p.stdinWriteRelease) })
 		_ = p.stdoutW.Close()
 		_ = p.stderrW.Close()
 		p.exitOnce.Do(func() { p.done <- native.ProcessExit{Code: intPointer(0)} })

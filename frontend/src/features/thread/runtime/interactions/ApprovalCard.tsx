@@ -8,6 +8,7 @@ import { previewForToolCall } from '@/features/thread/runtime/thread-panel/messa
 import { ToolCallPreview } from '@/features/thread/runtime/thread-panel/messages/ToolCallPreview'
 import { useApprovalDecision } from '@/features/thread/runtime/interactions/useApprovalDecision'
 import './interaction-cards.css'
+import './interaction-card-content.css'
 
 export interface ApprovalCardProps {
   threadId: string
@@ -85,16 +86,8 @@ export function ApprovalCard({
           <ShieldAlert size={16} className="interaction-approval-icon" />
           <span className="interaction-approval-tool-name">{toolName}</span>
         </div>
-        {reason ? (
-          <div className="interaction-approval-reason">
-            <span className="interaction-approval-reason-label">
-              {t('ai.interaction.approvalReason')}:
-            </span>
-            <span className="interaction-approval-reason-text">
-              {reason === 'Permission rules require approval'
-                ? t('ai.interaction.defaultApprovalReason') : reason}
-            </span>
-          </div>
+        {reason && reason !== 'Permission rules require approval' ? (
+          <div className="interaction-approval-reason" role="note">{reason}</div>
         ) : null}
       </div>
 
@@ -134,43 +127,45 @@ export function ApprovalCard({
         </div>
       ) : null}
 
-      <label className="interaction-approval-deny-reason">
-        <span>{t('ai.interaction.denyReason')}</span>
-        <input
-          type="text"
-          value={denyReason}
-          aria-label={t('ai.interaction.denyReason')}
-          placeholder={t('ai.interaction.denyReasonOptional')}
-          disabled={busy || isNonRecoverable}
-          onChange={(event) => setDenyReason(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault()
-              handleDecision('DENY')
-            }
-          }}
-        />
-      </label>
+      <div className="interaction-approval-footer">
+        <label className="interaction-approval-deny-reason">
+          <input
+            type="text"
+            value={denyReason}
+            aria-label={t('ai.interaction.denyReason')}
+            placeholder={t('ai.interaction.denyReasonOptional')}
+            disabled={busy || isNonRecoverable}
+            onChange={(event) => setDenyReason(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault()
+                handleDecision('DENY')
+              }
+            }}
+          />
+        </label>
 
-      <div className="interaction-actions-bar">
-        <Button
-          variant="primary"
-          danger
-          className="interaction-deny-btn"
-          disabled={busy || isNonRecoverable}
-          onClick={() => handleDecision('DENY')}
-        >
-          {t('ai.interaction.deny')}
-        </Button>
+        <div className="interaction-actions-bar">
+          <Button
+            variant="ghost"
+            size="compact"
+            className="interaction-deny-btn"
+            disabled={busy || isNonRecoverable}
+            onClick={() => handleDecision('DENY')}
+          >
+            {t('ai.interaction.deny')}
+          </Button>
 
-        <Button
-          variant="primary"
-          className="interaction-allow-btn"
-          disabled={busy || isNonRecoverable || isMutationMissingReview}
-          onClick={() => handleDecision('ALLOW')}
-        >
-          {t('ai.interaction.allow')}
-        </Button>
+          <Button
+            variant="primary"
+            size="compact"
+            className="interaction-allow-btn"
+            disabled={busy || isNonRecoverable || isMutationMissingReview}
+            onClick={() => handleDecision('ALLOW')}
+          >
+            {t('ai.interaction.allow')}
+          </Button>
+        </div>
       </div>
     </div>
   )

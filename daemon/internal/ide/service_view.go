@@ -707,7 +707,7 @@ func (s *Service) performClose(ctx context.Context, view *viewRecord, mode Manag
 	if err := s.waitViewStreams(ctx, view); err != nil {
 		return nil, s.cleanupFailed(view, err)
 	}
-	if mode != ManagedViewCloseNormal && s.bridge.IsConnected(view.viewID, epoch) {
+	if mode == ManagedViewCloseDiscard && s.bridge.IsConnected(view.viewID, epoch) {
 		result, err := s.bridge.Request(ctx, view.viewID, BridgeCommand{Op: "closeView", Discard: true}, BridgeRequestOptions{ExpectedEpoch: epoch})
 		if err != nil || !result.OK {
 			message := "ide window did not confirm close"
@@ -833,31 +833,12 @@ func (s *Service) expireView(viewID string, epoch int64) {
 	if err != nil {
 		return
 	}
-	confirmed := false
+	// Snapshot only while the matching bridge epoch is reachable. The persisted backup
+	// remains the recovery source when the browser side has already gone away.
+	s.snapshotForClose(s.lifetime, view)
 	ctx, cancel := context.WithTimeout(s.lifetime, closeOperationTimeout)
 	defer cancel()
-	if s.bridge.IsConnected(viewID, epoch) {
-		inspection, inspectErr := s.bridge.Request(ctx, viewID, BridgeCommand{Op: "inspect"}, BridgeRequestOptions{ExpectedEpoch: epoch})
-		if inspectErr == nil && inspection.OK && inspection.Clean != nil && *inspection.Clean && s.bridge.IsConnected(viewID, epoch) {
-			result, closeErr := s.bridge.Request(ctx, viewID, BridgeCommand{Op: "closeView"}, BridgeRequestOptions{ExpectedEpoch: epoch})
-			confirmed = closeErr == nil && result.OK && s.bridge.IsConnected(viewID, epoch) && ctx.Err() == nil
-		}
-	}
-	if !confirmed {
-		s.mu.Lock()
-		if s.views[viewID] == view && view.bindingEpoch == epoch {
-			_, _ = s.commitRevisionLocked()
-			view.state = viewOpen
-			view.forceAllowed = !s.bridge.IsConnected(viewID, epoch)
-			view.expiresAt = time.Time{}
-		}
-		s.mu.Unlock()
-		s.scheduleExpiry(view, s.scheduler.Now().Add(viewLeaseDuration))
-		s.emit(IdeServiceEvent{Kind: "expiry-deferred", ViewID: viewID, Message: "view expiry requires an explicit close"})
-		return
-	}
-	_, err = s.performClose(context.Background(), view, ManagedViewCloseNormal)
-	_ = err
+	_, _ = s.performClose(ctx, view, ManagedViewCloseExpired)
 }
 
 // ApplyLease updates expiry only from a fresh, identity-matching daemon lease proof.

@@ -20,7 +20,11 @@ import '@/features/thread/runtime/interactions/interaction-owner-source.css'
  * 就地查看路径，没有 pane 接管者的全局待处理页退回到 `/threads/:id`；入口只显示词条，
  * 不展示完整 threadId。
  */
-export function InteractionOwnerSource({ item }: { item: InteractionDTO }) {
+export function InteractionOwnerSource({ item, showOwnerSource = true, showSubagentSource = true }: {
+  item: InteractionDTO
+  showOwnerSource?: boolean
+  showSubagentSource?: boolean
+}) {
   const { t } = useI18n()
   const navigate = useNavigate()
   const owner = item.owner
@@ -36,7 +40,7 @@ export function InteractionOwnerSource({ item }: { item: InteractionDTO }) {
   }
   return (
     <>
-      {url == null
+      {!showOwnerSource ? null : url == null
         ? <span className="interaction-task-source">{label}</span>
         : (
           <Button
@@ -48,7 +52,7 @@ export function InteractionOwnerSource({ item }: { item: InteractionDTO }) {
             <ExternalLink size={12} aria-hidden="true" />
           </Button>
         )}
-      {subagentThreadId == null ? null : (
+      {!showSubagentSource || subagentThreadId == null ? null : (
         <ThreadLink
           className="interaction-subagent-source"
           threadId={subagentThreadId}

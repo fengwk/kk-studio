@@ -28,6 +28,8 @@ final class OpenAiResponsesStreamUsage {
   private boolean hasRawTotalTokens = false;
   private long cachedTokens = 0L;
   private long cacheWriteTokens = 0L;
+  private Map<Long, Long> cacheWriteByTtl = Map.of();
+  private boolean hasNativeCacheWriteTtl = false;
   private Long reasoningTokens = null;
 
   /** 缺失 usage 字段保留此前观测值；显式 null 与损坏结构分别重置或拒绝。 */
@@ -61,6 +63,8 @@ final class OpenAiResponsesStreamUsage {
     rawTotalTokens = 0L;
     cachedTokens = 0L;
     cacheWriteTokens = 0L;
+    cacheWriteByTtl = Map.of();
+    hasNativeCacheWriteTtl = false;
     reasoningTokens = null;
   }
 
@@ -110,6 +114,35 @@ final class OpenAiResponsesStreamUsage {
         details.has("cache_write_tokens")
             ? parseUsage(details.get("cache_write_tokens"), "cache_write_tokens")
             : 0L;
+    applyCacheWriteTokenDetails(details.get("cache_write_tokens_details"));
+  }
+
+  private void applyCacheWriteTokenDetails(JsonNode details) {
+    if (details == null || details.isNull()) {
+      return;
+    }
+    if (!details.isObject()) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "cache_write_tokens_details is not a JSON object");
+    }
+    if (!details.has("ttl_30m_tokens") || !details.has("ttl_12h_tokens")) {
+      return;
+    }
+    long ttl30m = parseUsage(details.get("ttl_30m_tokens"), "ttl_30m_tokens");
+    long ttl12h = parseUsage(details.get("ttl_12h_tokens"), "ttl_12h_tokens");
+    long total;
+    try {
+      total = Math.addExact(ttl30m, ttl12h);
+    } catch (ArithmeticException overflow) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "provider usage values overflow");
+    }
+    if (total != cacheWriteTokens) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_RESPONSE, "cache write TTL breakdown does not match total");
+    }
+    cacheWriteByTtl = Map.of(1800L, ttl30m, 43200L, ttl12h);
+    hasNativeCacheWriteTtl = true;
   }
 
   private void applyOutputTokenDetails(JsonNode details) {
@@ -131,8 +164,12 @@ final class OpenAiResponsesStreamUsage {
   }
 
   /** Token 用量归一化：total_tokens 缺失时为 null，不凭空合成；输出总量包含 reasoning。 */
-  ModelUsage toModelUsage() {
+  ModelUsage toModelUsage(Long reliableCacheWriteTtlSeconds) {
     long ordinaryInput = usageRemainder(rawInputTokens, cachedTokens, cacheWriteTokens);
+    Map<Long, Long> attributedCacheWrites = cacheWriteByTtl;
+    if (!hasNativeCacheWriteTtl && cacheWriteTokens > 0 && reliableCacheWriteTtlSeconds != null) {
+      attributedCacheWrites = Map.of(reliableCacheWriteTtlSeconds, cacheWriteTokens);
+    }
     Long providerTotalTokens = hasRawTotalTokens ? rawTotalTokens : null;
     try {
       return new ModelUsage(
@@ -140,7 +177,7 @@ final class OpenAiResponsesStreamUsage {
           rawOutputTokens,
           cachedTokens,
           cacheWriteTokens,
-          Map.of(),
+          attributedCacheWrites,
           reasoningTokens,
           providerTotalTokens);
     } catch (IllegalArgumentException invalidUsage) {

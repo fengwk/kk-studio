@@ -25,6 +25,7 @@ import {
   QuestionnaireInvalidView,
 } from './questionnaire-views'
 import './interaction-cards.css'
+import './interaction-card-content.css'
 import type { HarnessToolInputResultDTO } from '@/shared/api/generated/contracts'
 
 interface QuestionnaireCardProps {

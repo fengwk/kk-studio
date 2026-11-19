@@ -198,7 +198,8 @@ class HarnessHttpDtoContractTest {
   }
 
   @Test
-  void toolEnvironmentWaitFieldsStayExplicitlyNullable() throws Exception {
+  void nullableToolSnapshotFieldsStayExplicitlyPresent() throws Exception {
+    assertEquals(String.class, ToolInvocationDTO.class.getDeclaredField("childThreadId").getType());
     assertEquals(
         String.class,
         ToolInvocationDTO.class.getDeclaredField("requiredEnvironmentName").getType());
@@ -208,6 +209,8 @@ class HarnessHttpDtoContractTest {
 
     var json =
         NON_NULL_MAPPER.readTree(NON_NULL_MAPPER.writeValueAsString(new ToolInvocationDTO()));
+    assertTrue(json.has("childThreadId"));
+    assertTrue(json.get("childThreadId").isNull());
     assertTrue(json.has("requiredEnvironmentName"));
     assertTrue(json.get("requiredEnvironmentName").isNull());
     assertTrue(json.has("environmentWaitFreshnessAt"));

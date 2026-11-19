@@ -422,18 +422,19 @@ func openCommandForTest(directory, viewID, claimID string) *protocol.IdeCommand 
 	return &protocol.IdeCommand{Action: protocol.IdeAction_OPEN_VIEW, ViewId: stringPointer(viewID), BrowserSessionId: stringPointer("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"), EventNodeId: stringPointer("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"), ConnectionId: stringPointer("cccccccc-cccc-4ccc-8ccc-cccccccccccc"), ClaimId: stringPointer(claimID), Mode: protocol.IdeOpenMode_CREATE, Directory: stringPointer(directory), ExpectedBindingEpoch: int64Pointer(0), ExpectedDaemonInstanceId: stringPointer("99999999-9999-4999-8999-999999999999")}
 }
 
-// Verifies expiry defers when a connected view is dirty instead of discarding its state.
-func TestLeaseExpiryDefersDirtyView(t *testing.T) {
+// Verifies a connected dirty view is snapshotted before expired-mode managed cleanup.
+func TestLeaseExpirySnapshotsDirtyView(t *testing.T) {
 	root := t.TempDir()
+	dataDir := t.TempDir()
 	bridge, err := NewBridge()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer bridge.Close(context.Background())
 	scheduler := newFakeIdeScheduler(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
-	events := make(chan IdeServiceEvent, 2)
 	manager := &fakeCodeServerManager{}
-	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, Scheduler: scheduler, OnEvent: func(event IdeServiceEvent) { events <- event }})
+	cfg := config.DaemonConfig{DataDir: dataDir}
+	service, err := NewService(cfg, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, Scheduler: scheduler})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -442,62 +443,83 @@ func TestLeaseExpiryDefersDirtyView(t *testing.T) {
 	if !opened.GetOk() {
 		t.Fatalf("open reply=%v", opened)
 	}
-	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"inspect": {"clean": false}})
-	defer cancelHost()
-	scheduler.Advance(viewLeaseDuration)
-	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_OPEN {
-		t.Fatalf("dirty expiry state=%v", state)
-	}
-	if manager.closeCalls != 0 {
-		t.Fatalf("dirty view was closed: %d", manager.closeCalls)
-	}
-	select {
-	case event := <-events:
-		if event.Kind != "expiry-deferred" {
-			t.Fatalf("expiry event=%+v", event)
-		}
-	default:
-		t.Fatal("dirty expiry deferral was not reported")
-	}
-}
-
-// Verifies expiry defers while disconnected and a later connected lease expiry closes cleanly.
-func TestLeaseExpiryDefersUntilReachable(t *testing.T) {
-	root := t.TempDir()
-	bridge, err := NewBridge()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer bridge.Close(context.Background())
-	scheduler := newFakeIdeScheduler(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
-	events := make(chan IdeServiceEvent, 2)
-	manager := &fakeCodeServerManager{}
-	service, err := NewService(config.DaemonConfig{DataDir: t.TempDir()}, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, Scheduler: scheduler, OnEvent: func(event IdeServiceEvent) { events <- event }})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer service.Close(context.Background())
-	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
-	if !opened.GetOk() {
-		t.Fatalf("open reply=%v", opened)
-	}
-	scheduler.Advance(viewLeaseDuration)
-	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_OPEN {
-		t.Fatalf("disconnected expiry state=%v", state)
-	}
-	select {
-	case event := <-events:
-		if event.Kind != "expiry-deferred" {
-			t.Fatalf("expiry event=%+v", event)
-		}
-	default:
-		t.Fatal("expiry deferral was not reported")
-	}
-	_, cancelHost := startBridgeReplyHost(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root)
+	_, cancelHost := startBridgeReplyHostWith(t, bridge, opened.GetWorkspacePath(), opened.GetViewId(), root, map[string]map[string]any{"inspect": {"clean": false}, "snapshot": {"documents": []map[string]string{{"path": filepath.Join(root, "draft.txt"), "text": "unsaved"}}}})
 	defer cancelHost()
 	scheduler.Advance(viewLeaseDuration)
 	if service.GetViewState(opened.GetViewId()) != nil || manager.closeCalls != 1 {
-		t.Fatalf("reachable expiry state=%v closes=%d", service.GetViewState(opened.GetViewId()), manager.closeCalls)
+		t.Fatalf("expiry state=%v closes=%d", service.GetViewState(opened.GetViewId()), manager.closeCalls)
+	}
+	backup, err := ReadRecoveryBackup(cfg, opened.GetViewId(), defaultRecoveryQuota)
+	if err != nil || backup == nil || len(backup.Documents) != 1 || backup.Documents[0].Text != "unsaved" {
+		t.Fatalf("expiry backup=%#v err=%v", backup, err)
+	}
+}
+
+// Verifies offline expiry uses the management API, retains existing backup on failure, and isolates sibling epochs.
+func TestLeaseExpiryCleansOfflineViewAndRetainsBackupOnFailure(t *testing.T) {
+	root := t.TempDir()
+	cfg := config.DaemonConfig{DataDir: t.TempDir()}
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	scheduler := newFakeIdeScheduler(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC))
+	events := make(chan IdeServiceEvent, 4)
+	manager := &fakeCodeServerManager{closeFailures: 1}
+	service, err := NewService(cfg, nil, nil, ServiceOptions{DaemonInstanceID: "99999999-9999-4999-8999-999999999999", Bridge: bridge, Manager: manager, Scheduler: scheduler, OnEvent: func(event IdeServiceEvent) { events <- event }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer service.Close(context.Background())
+	opened := service.HandleCommand(context.Background(), openCommandForTest(root, "11111111-1111-4111-8111-111111111111", "dddddddd-dddd-4ddd-8ddd-dddddddddddd"))
+	sibling := service.HandleCommand(context.Background(), openCommandForTest(root, "22222222-2222-4222-8222-222222222222", "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"))
+	if !opened.GetOk() || !sibling.GetOk() {
+		t.Fatalf("open replies=%v, %v", opened, sibling)
+	}
+	oldBackup := RecoveryBackup{ViewID: opened.GetViewId(), BindingEpoch: strconv.FormatInt(opened.GetBindingEpoch(), 10), Directory: root, CreatedAt: "2025-01-01T00:00:00Z", Complete: true, Documents: []RecoveryDocument{{Path: filepath.Join(root, "saved.txt"), Text: "last saved"}}}
+	if _, err := WriteRecoveryBackup(cfg, oldBackup, defaultRecoveryQuota); err != nil {
+		t.Fatal(err)
+	}
+	scheduler.Advance(viewLeaseDuration - time.Second)
+	proofTime := scheduler.Now()
+	service.ApplyLease(&protocol.IdeLease{Bindings: []*protocol.IdeLeaseBinding{{ViewId: stringPointer(sibling.GetViewId()), BrowserSessionId: stringPointer(sibling.GetBrowserSessionId()), BindingEpoch: int64Pointer(sibling.GetBindingEpoch())}}}, proofTime)
+	scheduler.Advance(time.Second)
+	if state := service.GetViewState(opened.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_CLOSING {
+		t.Fatalf("failed offline cleanup state=%v", state)
+	}
+	if state := service.GetViewState(sibling.GetViewId()); state == nil || state.GetState() != protocol.IdeViewState_OPEN {
+		t.Fatalf("sibling view was affected: %v", state)
+	}
+	backup, err := ReadRecoveryBackup(cfg, opened.GetViewId(), defaultRecoveryQuota)
+	if err != nil || backup == nil || len(backup.Documents) != 1 || backup.Documents[0].Text != "last saved" {
+		t.Fatalf("failed cleanup backup=%#v err=%v", backup, err)
+	}
+	if event := <-events; event.Kind != "backup-failed" {
+		t.Fatalf("offline backup event=%+v", event)
+	}
+	if event := <-events; event.Kind != "cleanup-failed" {
+		t.Fatalf("cleanup event=%+v", event)
+	}
+	service.mu.Lock()
+	cleanupFailed := service.views[opened.GetViewId()].cleanupFailed
+	service.mu.Unlock()
+	if !cleanupFailed {
+		t.Fatal("failed cleanup did not remain explicitly retryable")
+	}
+	closed := service.HandleCommand(context.Background(), viewCommandForTest(protocol.IdeAction_CLOSE_VIEW, opened, true))
+	if !closed.GetOk() || service.GetViewState(opened.GetViewId()) != nil {
+		t.Fatalf("retry close=%v state=%v", closed, service.GetViewState(opened.GetViewId()))
+	}
+	backup, err = ReadRecoveryBackup(cfg, opened.GetViewId(), defaultRecoveryQuota)
+	if err != nil || backup == nil || backup.Documents[0].Text != "last saved" {
+		t.Fatalf("successful cleanup removed backup=%#v err=%v", backup, err)
+	}
+	manager.mu.Lock()
+	modes := append([]ManagedViewCloseMode(nil), manager.closeModes...)
+	manager.mu.Unlock()
+	if len(modes) != 2 || modes[0] != ManagedViewCloseExpired || modes[1] != ManagedViewCloseDiscard {
+		t.Fatalf("managed close modes=%v", modes)
 	}
 }
 
@@ -2609,6 +2631,7 @@ type fakeCodeServerManager struct {
 	registerCalls   int
 	closeCalls      int
 	closeFailures   int
+	closeModes      []ManagedViewCloseMode
 	stopCalls       int
 	stopFailures    int
 	stopGate        chan struct{}
@@ -2723,10 +2746,11 @@ func (m *fakeCodeServerManager) InspectView(_ context.Context, viewID string, _ 
 	}
 	return &view, nil
 }
-func (m *fakeCodeServerManager) CloseView(_ context.Context, viewID string, epoch int64, _ ManagedViewCloseMode) (*ManagedViewCloseResult, error) {
+func (m *fakeCodeServerManager) CloseView(_ context.Context, viewID string, epoch int64, mode ManagedViewCloseMode) (*ManagedViewCloseResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.closeCalls++
+	m.closeModes = append(m.closeModes, mode)
 	view, ok := m.views[viewID]
 	if !ok {
 		return nil, NewError("managed view rejected (VIEW_NOT_FOUND)", "VIEW_GONE")

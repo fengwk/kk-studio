@@ -241,9 +241,12 @@ class OpenAiResponsesRequestEncoderTest {
     assertFalse(t.path("parameters").path("additionalProperties").asBoolean(false));
   }
 
-  /** 验证系统指令始终编码为唯一的顶层 instructions 字符串，与模型是否具备推理能力无关。 */
+  /**
+   * Known official new models put reusable system instructions first; older models retain
+   * instructions.
+   */
   @Test
-  void test_systemInstructionIsEncodedAsTopLevelInstructions() throws Exception {
+  void test_systemInstructionPlacementUsesVerifiedModelAndEndpointCapabilities() throws Exception {
     List<ProviderMessage> messages =
         List.of(
             new ProviderMessage(
@@ -254,11 +257,31 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals(1, reasoningRoot.get("input").size());
     assertEquals("user", reasoningRoot.get("input").get(0).path("role").asString(""));
 
-    JsonNode plainRoot =
-        encodedRoot(request(nonReasoningModel(), DEFAULT_VARIANT, messages, List.of(), null));
-    assertEquals("Test system instruction.", plainRoot.path("instructions").asString(""));
-    assertEquals(1, plainRoot.get("input").size());
-    assertEquals("user", plainRoot.get("input").get(0).path("role").asString(""));
+    ModelDescriptor modernModel =
+        new ModelDescriptor(
+            "openai_test", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, true);
+    JsonNode modernRoot =
+        encodedRoot(request(modernModel, DEFAULT_VARIANT, messages, List.of(), null));
+    assertFalse(modernRoot.has("instructions"));
+    assertEquals("developer", modernRoot.path("input").get(0).path("role").asString(""));
+    assertEquals(
+        "Test system instruction.",
+        modernRoot.path("input").get(0).path("content").get(0).path("text").asString(""));
+    assertEquals("user", modernRoot.path("input").get(1).path("role").asString(""));
+
+    ProviderDescriptor proxy =
+        new ProviderDescriptor(
+            "proxy",
+            ProviderType.OPENAI_RESPONSES,
+            "https://proxy.example/v1",
+            createDescriptor().modelCallTimeoutPolicy());
+    JsonNode proxyRoot =
+        MAPPER.readTree(
+            encoder
+                .encode(request(modernModel, DEFAULT_VARIANT, messages, List.of(), null), proxy)
+                .bodyUtf8Bytes());
+    assertEquals("Test system instruction.", proxyRoot.path("instructions").asString(""));
+    assertEquals("user", proxyRoot.path("input").get(0).path("role").asString(""));
   }
 
   /**
@@ -475,7 +498,7 @@ class OpenAiResponsesRequestEncoderTest {
     assertEquals(sessionKey, first.path("prompt_cache_key").asString(""));
     assertEquals(
         first.path("prompt_cache_key").asString(""), second.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", first.path("prompt_cache_retention").asString(""));
+    assertFalse(first.has("prompt_cache_retention"));
 
     ProviderCacheControl otherSession =
         ProviderCacheControl.session(
@@ -594,7 +617,7 @@ class OpenAiResponsesRequestEncoderTest {
             new ProviderMessage(
                 ProviderMessageRole.USER, List.of(new ProviderTextBlock("user prompt"))));
 
-    // SHORT -> in_memory
+    // SHORT -> key only
     JsonNode shortRoot =
         MAPPER.readTree(
             encoder
@@ -605,28 +628,68 @@ class OpenAiResponsesRequestEncoderTest {
                     desc)
                 .bodyUtf8Bytes());
     assertEquals("session-uuid", shortRoot.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", shortRoot.path("prompt_cache_retention").asString(""));
+    assertFalse(shortRoot.has("prompt_cache_retention"));
     assertFalse(shortRoot.has("prompt_cache_options"));
 
-    // LONG -> 24h
-    JsonNode longRoot =
-        MAPPER.readTree(
-            encoder
-                .encode(
-                    request(
-                        messages,
-                        ProviderCacheControl.session(PromptCacheRetention.LONG, "session-uuid")),
-                    desc)
-                .bodyUtf8Bytes());
-    assertEquals("session-uuid", longRoot.path("prompt_cache_key").asString(""));
-    assertEquals("24h", longRoot.path("prompt_cache_retention").asString(""));
-    assertFalse(longRoot.has("prompt_cache_options"));
+    // This unverified model cannot silently ignore LONG.
+    assertThrows(
+        ProviderException.class,
+        () ->
+            encoder.encode(
+                request(
+                    messages,
+                    ProviderCacheControl.session(PromptCacheRetention.LONG, "session-uuid")),
+                desc));
 
-    // NONE：完全不发 cache hint，明确表达禁用
+    ModelDescriptor legacyModel =
+        new ModelDescriptor(
+            "openai_test", "gpt-5.4", "gpt-5.4", Set.of(ModelInputModality.TEXT), true, true);
+    ProviderRequest legacyLongRequest =
+        request(
+            legacyModel,
+            DEFAULT_VARIANT,
+            messages,
+            List.of(),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "legacy-key"));
+    JsonNode legacyLong = MAPPER.readTree(encoder.encode(legacyLongRequest, desc).bodyUtf8Bytes());
+    assertEquals("legacy-key", legacyLong.path("prompt_cache_key").asString(""));
+    assertEquals("24h", legacyLong.path("prompt_cache_retention").asString(""));
+
+    // NONE：请求不携带 cache hint
     JsonNode noneRoot = MAPPER.readTree(encoder.encode(request(messages), desc).bodyUtf8Bytes());
     assertFalse(noneRoot.has("prompt_cache_key"));
     assertFalse(noneRoot.has("prompt_cache_retention"));
     assertFalse(noneRoot.has("prompt_cache_options"));
+
+    ModelDescriptor modernModel =
+        new ModelDescriptor(
+            "openai_test", "gpt-5.6", "gpt-5.6", Set.of(ModelInputModality.TEXT), true, true);
+    ProviderRequest modernNoneRequest =
+        request(modernModel, DEFAULT_VARIANT, messages, List.of(), ProviderCacheControl.none());
+    JsonNode modernNone = MAPPER.readTree(encoder.encode(modernNoneRequest, desc).bodyUtf8Bytes());
+    assertEquals("explicit", modernNone.path("prompt_cache_options").path("mode").asString(""));
+    assertFalse(modernNone.has("prompt_cache_key"));
+
+    ProviderRequest modernLongRequest =
+        request(
+            modernModel,
+            DEFAULT_VARIANT,
+            messages,
+            List.of(),
+            ProviderCacheControl.session(PromptCacheRetention.LONG, "session-uuid"));
+    JsonNode modernLong = MAPPER.readTree(encoder.encode(modernLongRequest, desc).bodyUtf8Bytes());
+    assertEquals("session-uuid", modernLong.path("prompt_cache_key").asString(""));
+    assertEquals("12h", modernLong.path("prompt_cache_options").path("ttl").asString(""));
+    assertFalse(modernLong.has("prompt_cache_retention"));
+    assertFalse(modernLong.toString().contains("prompt_cache_breakpoint"));
+
+    ProviderDescriptor proxy =
+        new ProviderDescriptor(
+            "proxy",
+            ProviderType.OPENAI_RESPONSES,
+            "https://proxy.example/v1",
+            desc.modelCallTimeoutPolicy());
+    assertThrows(ProviderException.class, () -> encoder.encode(modernLongRequest, proxy));
   }
 
   /** 验证 refusal block 的原生 contentType 可编码为 refusal，而非普通 output_text。 */
@@ -1230,9 +1293,9 @@ class OpenAiResponsesRequestEncoderTest {
     JsonNode plain =
         MAPPER.readTree(encoder.encode(request(history), createDescriptor()).bodyUtf8Bytes());
 
-    // 顶层只多出 cache key/retention，input 逐字一致
+    // 顶层只多出 cache key，input 逐字一致
     assertEquals("key", cached.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", cached.path("prompt_cache_retention").asString(""));
+    assertFalse(cached.has("prompt_cache_retention"));
     assertEquals(plain.path("input"), cached.path("input"));
     assertEquals(0, cached.findValues("prompt_cache_breakpoint").size());
 

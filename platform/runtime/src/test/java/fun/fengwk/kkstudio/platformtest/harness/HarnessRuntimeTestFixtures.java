@@ -245,6 +245,7 @@ public final class HarnessRuntimeTestFixtures {
         commands,
         generation,
         toolSiblings,
+        Map.of(),
         liveState,
         stoppedReceipts,
         runningSubagentCount,

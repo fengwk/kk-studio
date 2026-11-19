@@ -2,18 +2,6 @@ import type { LocaleCatalog } from '@/shared/i18n/types'
 
 /** 对话工作区：Thread 运行时、编辑区、历史分支、人工交互与首次配置引导。 */
 export const chatCatalog = {
-  'ai.runtime.approval.requested': {
-    'en-US': 'This tool call requires approval:',
-    'zh-CN': '此工具调用需要审批：',
-  },
-  'ai.runtime.approval.allowed': {
-    'en-US': 'Allowed',
-    'zh-CN': '已允许',
-  },
-  'ai.runtime.approval.denied': {
-    'en-US': 'Denied',
-    'zh-CN': '已拒绝',
-  },
   'ai.runtime.action.approvalFailed': {
     'en-US': 'approve the tool call',
     'zh-CN': '审批工具调用',
@@ -1043,10 +1031,6 @@ export const chatCatalog = {
     'en-US': 'This tool call needs your answer',
     'zh-CN': '此工具调用需要你回答',
   },
-  'ai.interaction.defaultApprovalReason': {
-    'en-US': 'Permission rules require approval',
-    'zh-CN': '权限规则要求审批',
-  },
   'ai.runtime.mutation.writeSuccess': {
     'en-US': 'Write succeeded',
     'zh-CN': '写入成功',
@@ -1727,8 +1711,8 @@ export const chatCatalog = {
     'zh-CN': '当前记录不支持历史请求预览',
   },
   'ai.runtime.command.subagentLabel': {
-    'en-US': 'View subagent executions',
-    'zh-CN': '查看 subagent 执行',
+    'en-US': 'subagent',
+    'zh-CN': 'subagent',
   },
   'ai.runtime.command.subagent': {
     'en-US': 'View all subagent executions',
@@ -2229,10 +2213,6 @@ export const chatCatalog = {
   'ai.interaction.deny': {
     'en-US': 'Deny',
     'zh-CN': '拒绝',
-  },
-  'ai.interaction.approvalReason': {
-    'en-US': 'Reason',
-    'zh-CN': '审批原因',
   },
   'ai.interaction.denyReason': {
     'en-US': 'Reason for denial (optional)',

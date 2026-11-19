@@ -12,6 +12,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCapabilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelPricingPreviewDTO;
@@ -39,6 +40,12 @@ public class ModelController {
   @GetMapping
   public List<ModelDTO> listModels() {
     return modelService.listModels();
+  }
+
+  @GetMapping("/capabilities")
+  public ModelCapabilitiesDTO capabilities(
+      @RequestParam("providerName") String providerName, @RequestParam("modelId") String modelId) {
+    return modelService.capabilities(providerName, modelId);
   }
 
   @PostMapping("/pricing-preview")

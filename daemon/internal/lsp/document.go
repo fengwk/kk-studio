@@ -16,6 +16,15 @@ import (
 )
 
 func (c *Client) Sync(path string) error {
+	if err := c.acquireSend(context.Background()); err != nil {
+		return err
+	}
+	defer c.releaseSend()
+	return c.syncLocked(path)
+}
+
+// syncLocked reads and sends one document while holding the session send gate.
+func (c *Client) syncLocked(path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
@@ -38,17 +47,24 @@ func (c *Client) Sync(path string) error {
 	}
 	language := languageID(filepath.Ext(abs), c.server.ID)
 	if !opened {
+		c.mu.Unlock()
+		if err := c.notifyLocked(context.Background(), "textDocument/didOpen", DidOpenTextDocumentParams{TextDocument: TextDocumentItem{LanguageID: language, Text: text, URI: uri, Version: 1}}); err != nil {
+			return err
+		}
+		c.mu.Lock()
 		c.documents[abs] = document{text: text, version: 1}
 		c.mu.Unlock()
-		return c.Notify(context.Background(), "textDocument/didOpen", DidOpenTextDocumentParams{TextDocument: TextDocumentItem{LanguageID: language, Text: text, URI: uri, Version: 1}})
+		return nil
 	}
 	version := old.version + 1
-	c.documents[abs] = document{text: text, version: version}
 	c.mu.Unlock()
-	if err := c.Notify(context.Background(), "textDocument/didChange", DidChangeTextDocumentParams{ContentChanges: []ContentChangeEvent{{Text: text}}, TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: version}}); err != nil {
+	if err := c.notifyLocked(context.Background(), "textDocument/didChange", DidChangeTextDocumentParams{ContentChanges: []ContentChangeEvent{{Text: text}}, TextDocument: VersionedTextDocumentIdentifier{URI: uri, Version: version}}); err != nil {
 		return err
 	}
-	return c.Notify(context.Background(), "textDocument/didSave", DidSaveTextDocumentParams{TextDocument: TextDocumentIdentifier{URI: uri}})
+	c.mu.Lock()
+	c.documents[abs] = document{text: text, version: version}
+	c.mu.Unlock()
+	return c.notifyLocked(context.Background(), "textDocument/didSave", DidSaveTextDocumentParams{TextDocument: TextDocumentIdentifier{URI: uri}})
 }
 func languageID(ext, fallback string) string {
 	switch strings.ToLower(ext) {
@@ -129,13 +145,27 @@ func (c *Client) Definition(ctx context.Context, path string, line, character in
 	if !c.Supports("textDocument/definition") {
 		return nil, &LspError{Message: fmt.Sprintf("LSP server '%s' does not advertise go-to-definition support.", c.server.ID)}
 	}
-	pos, err := c.Position(path, line, character)
-	if err != nil {
-		return nil, err
-	}
 	var result DefinitionResult
 	onSent, onFinished := trackingCallbacks(tracking)
-	if err = c.call(ctx, "textDocument/definition", DefinitionParams{TextDocument: TextDocumentIdentifier{URI: pathURI(path)}, Position: pos}, &result, onSent, onFinished); err != nil {
+	err := c.callPrepared(ctx, "textDocument/definition", nil, &result, onSent, onFinished, func() (any, error) {
+		if err := c.syncLocked(path); err != nil {
+			return nil, err
+		}
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return nil, &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
+		}
+		c.mu.RLock()
+		doc := c.documents[abs]
+		encoding := c.positionEncoding
+		c.mu.RUnlock()
+		pos, err := documentPosition(doc.text, line, character, encoding)
+		if err != nil {
+			return nil, err
+		}
+		return DefinitionParams{TextDocument: TextDocumentIdentifier{URI: pathURI(abs)}, Position: pos}, nil
+	})
+	if err != nil {
 		return nil, err
 	}
 	return c.formatDefinitionLocations(result), nil

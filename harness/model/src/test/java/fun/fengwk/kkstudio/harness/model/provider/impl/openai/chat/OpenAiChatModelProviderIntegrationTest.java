@@ -583,8 +583,8 @@ class OpenAiChatModelProviderIntegrationTest {
   }
 
   /**
-   * 测试意图：捕获三轮本地 HTTP 工具续跑请求，验证会话缓存 key/retention 直接映射、并行工具批末端与文本消息。原生 reasoning_content 与未知字段在
-   * affinity 匹配时回放，tool-call-only assistant 不制造 content。
+   * 测试意图：捕获三轮本地 HTTP 工具续跑请求，验证未验证的自定义端点不附加官方缓存字段、并行工具批末端与文本消息。原生 reasoning_content 与未知字段在 affinity
+   * 匹配时回放，tool-call-only assistant 不制造 content。
    */
   @Test
   @DisplayName("离线 HTTP：会话缓存三轮工具续跑")
@@ -721,13 +721,13 @@ class OpenAiChatModelProviderIntegrationTest {
     assertNull(serverError.get(), "server handlers must not fail");
     assertEquals(3, capturedRequests.size());
     JsonNode wireReq1 = capturedRequests.get(0);
-    assertSessionCacheRootOptions(wireReq1, "test-session-key");
+    assertSessionCacheRootOptions(wireReq1);
     assertEquals(2, wireReq1.path("messages").size());
     assertTextContent(wireReq1.path("messages").get(0), "Test system instruction.");
     assertTextContent(wireReq1.path("messages").get(1), "Find files and get weather in Tokyo");
 
     JsonNode wireReq2 = capturedRequests.get(1);
-    assertSessionCacheRootOptions(wireReq2, "test-session-key");
+    assertSessionCacheRootOptions(wireReq2);
     assertEquals(5, wireReq2.path("messages").size());
     assertTextContent(wireReq2.path("messages").get(0), "Test system instruction.");
     assertTextContent(wireReq2.path("messages").get(1), "Find files and get weather in Tokyo");
@@ -740,7 +740,7 @@ class OpenAiChatModelProviderIntegrationTest {
     assertTextContent(wireReq2.path("messages").get(4), "Tokyo 22C Sunny");
 
     JsonNode wireReq3 = capturedRequests.get(2);
-    assertSessionCacheRootOptions(wireReq3, "test-session-key");
+    assertSessionCacheRootOptions(wireReq3);
     assertEquals(7, wireReq3.path("messages").size());
     assertTextContent(wireReq3.path("messages").get(0), "Test system instruction.");
     assertTextContent(wireReq3.path("messages").get(1), "Find files and get weather in Tokyo");
@@ -756,11 +756,11 @@ class OpenAiChatModelProviderIntegrationTest {
     assertTextContent(wireReq3.path("messages").get(6), "Report: System OK");
   }
 
-  private static void assertSessionCacheRootOptions(JsonNode req, String expectedKey) {
+  private static void assertSessionCacheRootOptions(JsonNode req) {
     assertEquals("gpt-5.6", req.path("model").asString(""));
-    // 会话缓存只映射 key 与留存档位，不再有协议私有 options/breakpoint
-    assertEquals(expectedKey, req.path("prompt_cache_key").asString(""));
-    assertEquals("in_memory", req.path("prompt_cache_retention").asString(""));
+    // 自定义端点尚未验证官方缓存能力，因此不能仅凭型号名向其发送缓存字段。
+    assertFalse(req.has("prompt_cache_key"));
+    assertFalse(req.has("prompt_cache_retention"));
     assertFalse(req.has("prompt_cache_options"));
   }
 

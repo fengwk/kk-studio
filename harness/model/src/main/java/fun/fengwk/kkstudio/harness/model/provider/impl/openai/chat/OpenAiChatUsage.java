@@ -98,7 +98,7 @@ final class OpenAiChatUsage {
   }
 
   /** 归一化为互斥的用量事实：未缓存输入 = 输入总量减去缓存读与缓存写。 */
-  ModelUsage toModelUsage() {
+  ModelUsage toModelUsage(Long cacheWriteTtlSeconds) {
     if (reasoningTokens != null && reasoningTokens > completionTokens) {
       throw new ProviderException(
           ProviderErrorKind.INVALID_RESPONSE, "reasoning tokens exceed completion tokens");
@@ -108,7 +108,9 @@ final class OpenAiChatUsage {
         completionTokens,
         cachedTokens,
         cacheWriteTokens,
-        Map.of(),
+        cacheWriteTokens == 0L || cacheWriteTtlSeconds == null
+            ? Map.of()
+            : Map.of(cacheWriteTtlSeconds, cacheWriteTokens),
         reasoningTokens,
         totalTokens);
   }

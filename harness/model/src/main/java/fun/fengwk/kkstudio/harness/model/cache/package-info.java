@@ -1,8 +1,7 @@
 /**
- * 与 Provider 解耦的 Prompt Cache 留存档位与请求级 cache 控制指令。
+ * Prompt Cache 留存意图、协议能力解析与请求级 cache 控制指令。
  *
- * <p>只保留 {@link fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention} 与不可变的 {@link
- * fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl}：后者随请求冻结，携带留存档位与可选的只读断点下标。到各
- * Provider 协议的具体 cache 参数映射由 Adapter 完成。
+ * <p>{@link PromptCacheCapabilities} 是以协议、端点和模型标识为键的能力解析事实源；{@link ProviderCacheControl}
+ * 则随运行时请求冻结缓存意图与可选只读断点。各协议 Adapter 按该能力映射 wire 字段。
  */
 package fun.fengwk.kkstudio.harness.model.cache;

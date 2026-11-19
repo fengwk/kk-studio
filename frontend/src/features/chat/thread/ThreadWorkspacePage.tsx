@@ -128,7 +128,6 @@ function ThreadWorkspaceContent({ thread, agents, environments }: {
             aria-label={t('ai.chat.backToConversation')}
           >
             <ArrowLeft aria-hidden="true" />
-            <span>{t('ai.chat.backToConversation')}</span>
           </Link>}
           <span className="thread-breadcrumb-separator" aria-hidden="true">/</span>
           <h1>{presentation?.name ?? title}</h1>

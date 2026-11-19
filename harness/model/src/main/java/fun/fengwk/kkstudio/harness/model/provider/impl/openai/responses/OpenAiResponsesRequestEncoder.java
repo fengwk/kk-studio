@@ -9,6 +9,8 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.harness.model.HarnessJson;
 import fun.fengwk.kkstudio.harness.model.ModelVariant;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapabilities;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.cache.ProviderCacheControl;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderDescriptor;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
@@ -16,6 +18,7 @@ import fun.fengwk.kkstudio.harness.model.provider.ProviderException;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderRequest;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderToolDefinition;
 import fun.fengwk.kkstudio.harness.model.provider.impl.RequestBodySizeGuard;
+import fun.fengwk.kkstudio.harness.model.provider.impl.openai.OpenAiBackendCapabilities;
 
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -87,15 +90,28 @@ public final class OpenAiResponsesRequestEncoder {
     // variant 的厂商原生协议选项是请求体 root：官方字段默认无损并入，runtime 所有权字段单独裁决。
     ObjectNode root = request.variant().protocolOptions().copyOptions();
     validateNativeOptions(root);
-    applyRuntimeFacts(root, request);
+    applyRuntimeFacts(root, request, descriptor);
     applyOutputBudget(root, request.outputTokens());
     applyReasoningParameters(root, request.variant());
     mergeTools(root, encodeTools(request.tools()));
-    applyRuntimeOwnedField(
-        root,
-        "input",
-        OpenAiResponsesInputEncoder.encode(request.messages(), descriptor, request.model()));
-    applyCacheControl(root, request.cacheControl());
+    ArrayNode input =
+        OpenAiResponsesInputEncoder.encode(request.messages(), descriptor, request.model());
+    if (OpenAiBackendCapabilities.usesDeveloperSystemMessage(
+        descriptor, request.model().modelId())) {
+      ArrayNode withSystem = NODES.arrayNode();
+      ObjectNode developerMessage = withSystem.addObject();
+      developerMessage.put("type", "message");
+      developerMessage.put("role", "developer");
+      developerMessage
+          .putArray("content")
+          .addObject()
+          .put("type", "input_text")
+          .put("text", request.systemInstruction());
+      withSystem.addAll(input);
+      input = withSystem;
+    }
+    applyRuntimeOwnedField(root, "input", input);
+    applyCacheControl(root, request, descriptor);
 
     byte[] utf8Bytes = serialize(root);
     bodySizeGuard.enforce(utf8Bytes);
@@ -169,15 +185,20 @@ public final class OpenAiResponsesRequestEncoder {
   }
 
   /**
-   * 写入 runtime 唯一所有的顶层事实：{@code model}、{@code stream}、{@code store} 与顶层 {@code instructions}。
+   * 写入 runtime 唯一所有的顶层事实：{@code model}、{@code stream}、{@code store} 与 system 指令位置。
    *
-   * <p>系统指令是本协议唯一的顶层 {@code instructions} 字符串，绝不作为 input item 下发。
+   * <p>已验证的官方新型号使用首条 developer input；其他端点与未验证型号保留顶层 {@code instructions}。
    */
-  private static void applyRuntimeFacts(ObjectNode root, ProviderRequest request) {
+  private static void applyRuntimeFacts(
+      ObjectNode root, ProviderRequest request, ProviderDescriptor descriptor) {
     applyRuntimeOwnedField(root, "model", NODES.textNode(request.model().modelId()));
     applyRuntimeOwnedField(root, "stream", NODES.booleanNode(true));
     applyRuntimeOwnedField(root, "store", NODES.booleanNode(false));
     applyRuntimeOwnedField(root, "instructions", NODES.textNode(request.systemInstruction()));
+    if (OpenAiBackendCapabilities.usesDeveloperSystemMessage(
+        descriptor, request.model().modelId())) {
+      root.remove("instructions");
+    }
   }
 
   /**
@@ -361,20 +382,38 @@ public final class OpenAiResponsesRequestEncoder {
     return OpenAiResponsesStrictSchema.normalize((ObjectNode) schemaNode);
   }
 
-  /**
-   * 将 runtime 冻结的缓存控制映射为本协议 wire 字段：{@code retention = NONE} 不下发任何 cache hint；否则以会话 UUID 原样作为
-   * {@code prompt_cache_key}，并把留存档位映射为 {@code prompt_cache_retention}。
-   */
-  private static void applyCacheControl(ObjectNode root, ProviderCacheControl cacheControl) {
-    switch (cacheControl.retention()) {
-      case NONE -> {}
-      case SHORT -> applyPromptCache(root, cacheControl.key(), "in_memory");
-      case LONG -> applyPromptCache(root, cacheControl.key(), "24h");
+  /** Map cache intent only to model capabilities proven for the official endpoint. */
+  private static void applyCacheControl(
+      ObjectNode root, ProviderRequest request, ProviderDescriptor descriptor) {
+    ProviderCacheControl cacheControl = request.cacheControl();
+    PromptCacheCapabilities capabilities =
+        PromptCacheCapabilities.resolve(
+            descriptor.type(), descriptor.endpoint(), request.model().modelId());
+    if (cacheControl.retention() == PromptCacheRetention.LONG
+        && !capabilities.supports(PromptCacheRetention.LONG)) {
+      throw new ProviderException(
+          ProviderErrorKind.INVALID_REQUEST,
+          "prompt cache retention LONG is unsupported for this provider model");
     }
-  }
-
-  private static void applyPromptCache(ObjectNode root, String key, String retention) {
-    root.put("prompt_cache_key", key);
-    root.put("prompt_cache_retention", retention);
+    boolean official = OpenAiBackendCapabilities.isOfficialEndpoint(descriptor);
+    boolean modern = capabilities.supports(PromptCacheRetention.NONE);
+    Long longTtlSeconds = capabilities.reliableWriteTtlSeconds(PromptCacheRetention.LONG);
+    switch (cacheControl.retention()) {
+      case NONE -> {
+        if (official && modern) {
+          root.putObject("prompt_cache_options").put("mode", "explicit");
+        }
+      }
+      case SHORT -> root.put("prompt_cache_key", cacheControl.key());
+      case LONG -> {
+        if (official && longTtlSeconds == 43200L) {
+          root.put("prompt_cache_key", cacheControl.key());
+          root.putObject("prompt_cache_options").put("ttl", "12h");
+        } else if (official && longTtlSeconds == 86400L) {
+          root.put("prompt_cache_key", cacheControl.key());
+          root.put("prompt_cache_retention", "24h");
+        }
+      }
+    }
   }
 }

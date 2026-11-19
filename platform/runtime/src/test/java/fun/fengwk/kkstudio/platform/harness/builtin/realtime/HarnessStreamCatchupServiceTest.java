@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.platform.cluster.ClusterNodePresence;
 import java.sql.PreparedStatement;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -198,6 +199,7 @@ class HarnessStreamCatchupServiceTest {
                 List.of(),
                 foreignGeneration,
                 List.of(),
+                Map.of(),
                 ThreadLiveState.IDLE_OR_HISTORICAL,
                 List.of(),
                 0,

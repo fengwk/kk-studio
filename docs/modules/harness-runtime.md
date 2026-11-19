@@ -99,7 +99,7 @@ tree 锁只用于结构或跨 Thread 的写操作（spawn、Stop、删除、fork
 
 命令状态由标记字段派生：无标记为 `QUEUED`，有 `appliedEntryId` 为 `APPLIED`，成对的 `stopRequestId` / `cancelledAt` 为 `CANCELLED`。Session 显示名在创建时从首批末尾 user-like 消息派生（前 40 个码点，无文本时回退 `session-` 加 UUID 前缀），ROOT Thread 固定为 `main`，分支名由调用方给出；手工名称经 [`Names.normalize`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/Names.java) 折叠空白，超过 256 个码点报错，绝不截断。
 
-`getThreadSnapshot` 支持可选的 `afterEntryId` 增量游标（祖先匹配时返回轻量增量 `EntrySlice`，不匹配时回退全量快照），只锁目标 Thread 及其当前适用的 Model/Tool，返回事务内最新已提交的 checkpoint。Session 普通 Thread 列表仍只包含 `USER`；`getThreadTree` 持执行根的 tree 锁读取同根全部 Thread，返回轻量只读节点 [`ThreadTreeNode`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ThreadTreeNode.java)，节点上的 `turnCount`、`toolCallCount` 与 `outcome` 只按各自 root-to-head 路径计算，不构建完整快照，查询不写任何事实。HTTP 执行树查询一次返回执行根及全部 `SUBAGENT` 后代，并排除内部 `COMPACTION` 节点；执行根可以是 `USER`、`CONTROLLER_TASK` 或 `PLUGIN_TASK`。
+`getThreadSnapshot` 支持可选的 `afterEntryId` 增量游标（祖先匹配时返回轻量增量 `EntrySlice`，不匹配时回退全量快照），只锁目标 Thread 及其当前适用的 Model/Tool，返回事务内最新已提交的 checkpoint。对活动 `task` 工具调用，快照在同一事务按工具 invocation ID 查 durable Join，并将其 `childThreadId` 投影到对应工具 DTO；Join 尚未提交或不存在时该字段为显式 null，不按参数猜测或按工具类型串接。子 Thread 已可导航不代表任务已有结果；结果物化后仍由既有 Join receipt 与工具结果回执完成结算和定位。Session 普通 Thread 列表仍只包含 `USER`；`getThreadTree` 持执行根的 tree 锁读取同根全部 Thread，返回轻量只读节点 [`ThreadTreeNode`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/api/ThreadTreeNode.java)，节点上的 `turnCount`、`toolCallCount` 与 `outcome` 只按各自 root-to-head 路径计算，不构建完整快照，查询不写任何事实。HTTP 执行树查询一次返回执行根及全部 `SUBAGENT` 后代，并排除内部 `COMPACTION` 节点；执行根可以是 `USER`、`CONTROLLER_TASK` 或 `PLUGIN_TASK`。
 
 ## ToolInvocation
 
@@ -289,7 +289,7 @@ effectiveReserve = min(16384, maxOutputTokens)
 summaryBudget    = floor(0.8 * effectiveReserve)
 ```
 
-压缩执行模型来自 `aiRuntime.compactionModel`：可配置带 variant 的具体 MODEL，或不带 variant 的 MODEL_GROUP；未配置、无法解析、模型已删除或不可用时回退到会话当前模型与 variant。有效配置的执行失败只按普通模型调用重试并最终失败，不切换模型。压缩模型支持消息级 effort 时，分支请求在摘要指令之后声明 `low`；分支第一次请求复用主 Thread 已写入的 Claude 前缀缓存，仅在切点前最后一条 assistant 之前写一个只读断点，具体模型不同或缓存留存 TTL 已过时不写断点。OpenAI 没有只读缓存模式：GPT-5.6+ 的 explicit breakpoint 模式在未命中时同样写入，而开启 explicit 模式却不放断点会关闭缓存；因此分支与其它请求一样只携带 `prompt_cache_key` / `prompt_cache_retention`，并接受一次正常写入。
+压缩执行模型来自 `aiRuntime.compactionModel`：可配置带 variant 的具体 MODEL，或不带 variant 的 MODEL_GROUP；未配置、无法解析、模型已删除或不可用时回退到会话当前模型与 variant。有效配置的执行失败只按普通模型调用重试并最终失败，不切换模型。压缩模型支持消息级 effort 时，分支请求在摘要指令之后声明 `low`；分支第一次请求复用主 Thread 已写入的 Claude 前缀缓存，仅在切点前最后一条 assistant 之前写一个只读断点，具体模型不同或缓存留存 TTL 已过时不写断点。OpenAI 没有只读缓存模式：GPT-5.6+ 的 explicit breakpoint 模式在未命中时同样写入，而开启 explicit 模式却不放断点会关闭缓存；因此分支与其它请求使用同一请求级缓存档位，原生 TTL 用量优先于可靠的已生效档位 TTL。
 
 [`CompactionPlanner`](../../harness/runtime/src/main/java/fun/fengwk/kkstudio/harness/runtime/compaction/CompactionPlanner.java) 只在完整 turn 边界选切点：取第一个累计历史越过 `effectiveKeep` 的完整 turn 之前，始终保留最新模型调用 turn 及其工具结果，不切入 turn、工具回合或压缩结果。摘要文本逐字保存为单一 `COMPACTION` 结果；截断、过滤、工具调用、空结果或超出输出预算均视为失败，按普通模型调用重试策略处理。
 

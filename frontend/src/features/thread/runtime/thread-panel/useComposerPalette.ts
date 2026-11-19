@@ -73,15 +73,21 @@ export function useComposerPalette({
   const paletteOpen = paletteMode != null
   const query = paletteMode === 'slash' ? slashQuery ?? '' : ''
   const filteredCommands = useFilteredThreadCommands(query, commands)
+  // Host command arrays may be reconstructed every render. Reset only when the visible
+  // palette/query changes, not when an equivalent array gets a new identity.
+  const commandSignature = JSON.stringify(filteredCommands)
 
   const [activeIndex, setActiveIndex] = useState(0)
+  const [keyboardScrollVersion, setKeyboardScrollVersion] = useState(0)
 
   useEffect(() => {
     if (!paletteOpen) {
       return
     }
     setActiveIndex(firstEnabledCommandIndex(filteredCommands))
-  }, [paletteOpen, query, filteredCommands])
+  // `commandSignature` captures meaningful list changes without array identity churn.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paletteOpen, query, commandSignature])
 
   const closePalette = useCallback(() => {
     closeOverlay()
@@ -157,6 +163,7 @@ export function useComposerPalette({
       event.stopPropagation()
       const delta = event.key === 'ArrowDown' ? 1 : -1
       setActiveIndex((current) => stepEnabledCommandIndex(filteredCommands, current, delta))
+      setKeyboardScrollVersion((version) => version + 1)
       return true
     }
     if (event.key === 'Enter' && !event.shiftKey) {
@@ -178,6 +185,7 @@ export function useComposerPalette({
     filteredCommands,
     activeIndex,
     setActiveIndex,
+    keyboardScrollVersion,
     togglePalette,
     closePalette,
     selectCommand,

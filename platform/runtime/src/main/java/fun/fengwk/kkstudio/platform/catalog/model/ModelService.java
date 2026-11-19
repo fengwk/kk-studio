@@ -6,8 +6,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheCapabilities;
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
 import fun.fengwk.kkstudio.harness.model.provider.ProviderType;
+import fun.fengwk.kkstudio.platform.catalog.dto.ModelCapabilitiesDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelConfigDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelDTO;
@@ -18,6 +20,7 @@ import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupMemberDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelGroupUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelUpdateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.ModelVariantDTO;
+import fun.fengwk.kkstudio.platform.catalog.dto.PromptCacheOptionDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelCreateDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelDTO;
 import fun.fengwk.kkstudio.platform.catalog.dto.SingleModelUpdateDTO;
@@ -68,6 +71,39 @@ public class ModelService {
 
   public List<ModelDTO> listModels() {
     return repository.listAll().stream().map(this::toDto).toList();
+  }
+
+  /** Resolves draft capabilities without requiring a persisted Model. */
+  public ModelCapabilitiesDTO capabilities(String providerName, String modelId) {
+    Provider provider = providerRepository.getByName(providerName);
+    if (provider == null) {
+      throw DomainException.notFound(PROVIDER_RESOURCE);
+    }
+    if (modelId == null || modelId.isBlank() || !modelId.equals(modelId.strip())) {
+      throw DomainException.validation(
+          RESOURCE, "modelId must be non-blank without surrounding whitespace");
+    }
+    if (modelId.length() > MODEL_ID_MAX_LENGTH) {
+      throw DomainException.validation(
+          RESOURCE, "modelId exceeds maximum length: " + MODEL_ID_MAX_LENGTH);
+    }
+    PromptCacheCapabilities capabilities =
+        PromptCacheCapabilities.resolve(provider.providerType(), provider.baseUrl(), modelId);
+    ModelCapabilitiesDTO dto = new ModelCapabilitiesDTO();
+    dto.setPromptCacheOptions(
+        capabilities.options().stream()
+            .map(
+                option -> {
+                  PromptCacheOptionDTO optionDTO = new PromptCacheOptionDTO();
+                  optionDTO.setRetention(option.retention());
+                  optionDTO.setTtlSeconds(option.ttlSeconds());
+                  optionDTO.setWriteMultiplier(option.writeMultiplier());
+                  return optionDTO;
+                })
+            .toList());
+    dto.setDefaultPromptCacheRetention(capabilities.defaultRetention());
+    dto.setAutomaticCache(capabilities.automaticCache());
+    return dto;
   }
 
   @Transactional
@@ -260,11 +296,38 @@ public class ModelService {
     }
   }
 
+  /** Validates cache intents with the same protocol/endpoint/model decision used by Config Sync. */
+  public static void validateVariantCapabilities(
+      String providerName,
+      ProviderType providerType,
+      String endpoint,
+      String modelId,
+      ModelConfigDTO config) {
+    validateVariantRetentions(providerName, providerType, config);
+    PromptCacheCapabilities capabilities =
+        PromptCacheCapabilities.resolve(providerType, endpoint, modelId);
+    for (ModelVariantDTO variant : config.getVariants()) {
+      PromptCacheRetention retention = variant.getPromptCacheRetention();
+      // Legacy NONE/SHORT values remain saveable when the selector cannot offer them.
+      if (retention == PromptCacheRetention.LONG && !capabilities.supports(retention)) {
+        throw DomainException.validation(
+            RESOURCE,
+            "provider "
+                + providerName
+                + " does not support prompt cache retention LONG for model "
+                + modelId
+                + " variant: "
+                + variant.getId());
+      }
+    }
+  }
+
   private void validateMutation(Mutation mutation) {
     if (mutation.kind() == ModelKind.MODEL) {
       Provider provider = requireProviderForUpdate(mutation.providerName());
-      validateVariantRetentions(
-          provider.name(), provider.providerType(), decodeConfig(mutation.configJson()));
+      ModelConfigDTO config = decodeConfig(mutation.configJson());
+      validateVariantCapabilities(
+          provider.name(), provider.providerType(), provider.baseUrl(), mutation.modelId(), config);
     } else {
       validateMembers(mutation.group());
     }

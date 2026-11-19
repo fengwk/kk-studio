@@ -26,6 +26,10 @@ public class ToolInvocationDTO {
   /** 所属 Thread 主键：canonical UUID string。 */
   private String threadId;
 
+  /** task 对应 durable Join 的子 Thread 主键；尚无 Join 时显式为 null。 */
+  @JsonInclude(JsonInclude.Include.ALWAYS)
+  private @Nullable String childThreadId;
+
   /** 所属 TurnStart Entry 主键：canonical UUID string。 */
   private String turnStartEntryId;
 

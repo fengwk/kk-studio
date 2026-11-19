@@ -41,6 +41,7 @@ import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderStreamBridge;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 /** 测试意图：全面验证 OpenAI Chat 流式累积器状态机、事件派发、终态映射、截断诊断、互斥用量度量及 Replay 保真。 */
@@ -1359,6 +1360,63 @@ class OpenAiChatStreamAccumulatorTest {
     assertEquals(73L, parsed.providerTotalTokens());
     JsonNode raw = MAPPER.readTree(accumulator.finish().response().rawUsageJson());
     assertEquals(23L, raw.path("completion_tokens_details").path("reasoning_tokens").asLong(0L));
+  }
+
+  /** 测试意图：仅官方 GPT-5.6+ SHORT 请求能用已生效的默认 30 分钟 TTL 归属 Chat 写入。 */
+  @Test
+  void attributesCacheWriteOnlyToVerifiedOfficialShortTtl() {
+    ModelUsage official =
+        cacheWriteUsage("https://api.openai.com/v1", "gpt-5.6", PromptCacheRetention.SHORT);
+    assertEquals(3L, official.cacheWriteTokens());
+    assertEquals(Map.of(1800L, 3L), official.cacheWriteByTtl());
+
+    ModelUsage customHost =
+        cacheWriteUsage(
+            "https://api.openai.com.attacker.example/v1", "gpt-5.6", PromptCacheRetention.SHORT);
+    assertTrue(customHost.cacheWriteByTtl().isEmpty());
+    ModelUsage olderModel =
+        cacheWriteUsage("https://api.openai.com/v1", "gpt-5.5", PromptCacheRetention.SHORT);
+    assertTrue(olderModel.cacheWriteByTtl().isEmpty());
+    ModelUsage legacyLong =
+        cacheWriteUsage("https://api.openai.com/v1", "gpt-5.5", PromptCacheRetention.LONG);
+    assertEquals(Map.of(86400L, 3L), legacyLong.cacheWriteByTtl());
+    ModelUsage noCacheIntent =
+        cacheWriteUsage("https://api.openai.com/v1", "gpt-5.6", PromptCacheRetention.NONE);
+    assertTrue(noCacheIntent.cacheWriteByTtl().isEmpty());
+  }
+
+  private ModelUsage cacheWriteUsage(
+      String endpoint, String modelId, PromptCacheRetention retention) {
+    ProviderDescriptor cacheDescriptor =
+        new ProviderDescriptor(
+            "openai",
+            ProviderType.OPENAI,
+            endpoint,
+            new ModelCallTimeoutPolicy(Duration.ofSeconds(30), Duration.ofSeconds(10)));
+    ModelDescriptor cacheModel =
+        new ModelDescriptor(
+            "openai", modelId, modelId, Set.of(ModelInputModality.TEXT), true, true);
+    ProviderRequest cacheRequest =
+        new ProviderRequest(
+            cacheModel,
+            new ModelVariant("default", null, retention, null),
+            100,
+            "system",
+            List.of(
+                new ProviderMessage(
+                    ProviderMessageRole.USER, List.of(new ProviderTextBlock("Hi")))),
+            List.of(),
+            retention == PromptCacheRetention.NONE
+                ? ProviderCacheControl.none()
+                : ProviderCacheControl.session(retention, "session-key"));
+    OpenAiChatStreamAccumulator accumulator =
+        new OpenAiChatStreamAccumulator(cacheRequest, cacheDescriptor, bridge);
+    accumulator.handleData("{\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}");
+    accumulator.handleData(
+        "{\"usage\":{\"prompt_tokens\":10,\"completion_tokens\":1,\"total_tokens\":11,"
+            + "\"prompt_tokens_details\":{\"cache_write_tokens\":3}}}");
+    accumulator.handleData("[DONE]");
+    return accumulator.finish().response().usage();
   }
 
   private OpenAiChatStreamAccumulator createAccumulator() {

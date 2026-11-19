@@ -49,6 +49,7 @@ import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSummaryDTO;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -455,6 +456,7 @@ class HarnessOwnerQueryServiceTest {
         List.of(),
         null,
         List.of(),
+        Map.of(),
         ThreadLiveState.IDLE_OR_HISTORICAL,
         List.of(),
         0,

@@ -107,10 +107,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(writeViewport).toHaveCSS('white-space', 'pre-wrap')
 
     // 审批理由修复冗余 "： —" 且完成本地化
-    const note = toolPane.locator('.thread-tool-approval-note')
-    await expect(note).toBeVisible()
-    await expect(note).not.toContainText('： —')
-    await expect(note).toContainText('权限规则要求审批')
+    await expect(toolPane.locator('.thread-tool-approval-note')).toHaveCount(0)
 
     // 对话记录没有内部滚动，也不横向撑宽
     await verifyNoInnerScroll(writeViewport)
@@ -352,7 +349,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(toolPane.locator('.thread-tool-preview-body.is-write')).not.toContainText('line-48')
     await expect(toolPane.locator('.thread-disclosure-hint')).toHaveText('… 38 more lines')
     await toolPane.locator('.thread-disclosure-toggle').click()
-    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveText('写入成功')
+    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveCount(0)
     await expect(toolPane.locator('.thread-tool-preview-body.is-write')).toContainText('line-48')
 
     // 确认结果正文中未重复输出 rawDuplicateBody
@@ -368,7 +365,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(toolPane.locator('.thread-tool-preview-body.is-edit')).toBeVisible()
     await expect(toolPane.locator('.thread-disclosure-hint')).toHaveText('… 17 more lines')
     await toolPane.locator('.thread-disclosure-toggle').click()
-    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveText('编辑成功')
+    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveCount(0)
     await expect(toolPane).not.toContainText('File edit executed successfully:')
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-success.png') })
@@ -407,7 +404,7 @@ test.describe('Mutation Review UI Acceptance & Browser Regression', () => {
     await expect(toolPane.locator('.thread-disclosure-hint')).toHaveText('… 17 more lines')
     await toolPane.locator('.thread-disclosure-toggle').click()
     expect(await editViewport.textContent()).toBe(MULTI_HUNK_DIFF)
-    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveText('编辑成功')
+    await expect(toolPane.locator('.thread-tool-mutation-success')).toHaveCount(0)
     await verifyNoInnerScroll(editViewport)
 
     await page.screenshot({ path: path.join(REPORTS_DIR, 'desktop-edit-durable-history.png') })

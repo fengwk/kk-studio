@@ -719,7 +719,7 @@ class AnthropicRequestMapperTest {
   // 4. 固定缓存标记适配测试（ProviderCacheControl 驱动）
   // =========================================================================================
 
-  /** 测试意图：当 retention 非 NONE 时，单条文本用户消息作为最近历史端点应被打上 ephemeral 缓存标记。 */
+  /** 测试意图：当 retention 非 NONE 时，唯一用户消息的当前尾部应被打上 ephemeral 缓存标记。 */
   @Test
   void should_map_user_message_with_cache_control_metadata() throws IOException {
     ProviderRequest request =
@@ -762,7 +762,7 @@ class AnthropicRequestMapperTest {
     assertEquals("ephemeral", contents.get(1).path("cache_control").path("type").asString(""));
   }
 
-  /** 测试意图：Assistant 结尾保留当前末端，同时保留生成该回复之前的用户请求端点。 */
+  /** 测试意图：Assistant 结尾只在当前会话尾部写入一个标记，不回填生成回复前的用户端点。 */
   @Test
   void should_map_ai_message_text_with_cache_control_metadata() throws IOException {
     ProviderRequest request =
@@ -776,7 +776,7 @@ class AnthropicRequestMapperTest {
     JsonNode root = MAPPER.readTree(encoded.bodyUtf8Bytes());
 
     JsonNode userBlock = root.path("messages").get(0).path("content").get(0);
-    assertEquals("ephemeral", userBlock.path("cache_control").path("type").asString(""));
+    assertFalse(userBlock.has("cache_control"));
 
     JsonNode asstBlock = root.path("messages").get(1).path("content").get(0);
     assertEquals("Hi", asstBlock.path("text").asString(""));
@@ -1164,7 +1164,7 @@ class AnthropicRequestMapperTest {
     assertFalse(markerShort.has("ttl"));
   }
 
-  /** 测试意图：retention 非 NONE 时缓存标记固定打在请求唯一的顶层系统指令块上，且用户消息尾部作为最近历史端点同样被标记。 */
+  /** 测试意图：retention 非 NONE 时，顶层系统指令块与当前用户消息尾部各自携带标记。 */
   @Test
   void should_always_mark_system_instruction_block_when_retention_is_active() throws IOException {
     ProviderRequest request =
@@ -1185,12 +1185,12 @@ class AnthropicRequestMapperTest {
     assertEquals("ephemeral", systemMarker.path("type").asString(""));
     assertFalse(systemMarker.has("ttl"));
 
-    // 系统标记与历史端点标记相互独立：用户消息尾部同样是固定标记边界
+    // 系统块和当前对话尾部是相互独立的标记边界
     JsonNode userTail = root.path("messages").get(0).path("content").get(0);
     assertEquals("ephemeral", userTail.path("cache_control").path("type").asString(""));
   }
 
-  /** 测试意图：即使没有任何工具，LONG retention 也始终标记系统指令块，并让系统标记与历史端点统一携带 ttl="1h"。 */
+  /** 测试意图：即使没有工具，LONG retention 仍标记 system 和当前对话尾部，且都携带 ttl="1h"。 */
   @Test
   void should_mark_system_block_and_history_tail_with_long_retention() throws IOException {
     ProviderRequest request =

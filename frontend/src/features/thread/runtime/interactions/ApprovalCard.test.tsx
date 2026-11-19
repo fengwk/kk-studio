@@ -110,9 +110,9 @@ it('显示同文件后续审批数量并本地化单复数文案', () => {
     .toBeInTheDocument()
 })
 
-it('审批参数逐字段可读；command 保留换行且拒绝原因有双语标签', () => {
+it('审批参数逐字段可读；默认审批原因隐藏且拒绝输入有双语标签', () => {
   const { rerender } = render(<ApprovalCard {...props} />, { wrapper })
-  expect(screen.getByText('权限规则要求审批')).toBeInTheDocument()
+  expect(screen.queryByText('权限规则要求审批')).not.toBeInTheDocument()
   expect(screen.getByText('command')).toBeInTheDocument()
   expect(document.querySelector('pre.is-command')?.textContent).toBe('pwd\nls -la')
   expect(screen.getByText('/srv/完整目录')).toBeInTheDocument()
@@ -120,7 +120,7 @@ it('审批参数逐字段可读；command 保留换行且拒绝原因有双语�
   expect(screen.getByText('3000')).toBeInTheDocument()
   expect(screen.queryByText(args)).not.toBeInTheDocument()
   expect(screen.getByRole('textbox', { name: '拒绝原因（可选）' })).toBeInTheDocument()
-  expect(screen.getByRole('button', { name: '拒绝' })).toHaveClass('btn-primary', 'danger')
+  expect(screen.getByRole('button', { name: '拒绝' })).toHaveClass('ghost-btn', 'is-compact')
   expect(screen.getByRole('button', { name: '允许' })).toHaveClass('btn-primary')
   setLocale('en-US')
   rerender(<ApprovalCard {...props} />)

@@ -195,12 +195,9 @@
   opacity: 0.85;
 }
 
-.thread-tool-mutation-success {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.thread-tool-success-icon {
+  flex: 0 0 auto;
   color: var(--success);
-  font-size: var(--font-size-xs);
 }
 
 .thread-tool-empty-content {
@@ -247,14 +244,19 @@
 }
 
 .thread-tool-approval-field {
+  display: grid;
+  grid-template-columns: minmax(7rem, 1fr) minmax(0, 3fr);
+  align-items: start;
+  gap: 8px;
   min-width: 0;
 }
 
 .thread-tool-approval-field dt {
-  margin-bottom: 2px;
+  min-width: 0;
   color: var(--fg-muted);
   font-size: var(--font-size-xs);
   font-weight: 600;
+  overflow-wrap: anywhere;
 }
 
 .thread-tool-approval-field dd {
