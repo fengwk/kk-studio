@@ -31,6 +31,7 @@ type viewRecord struct {
 	hasProof           bool
 	expiresAt          time.Time
 	expiryTimer        IdeTimer
+	expiryGeneration   uint64
 	streams            map[*activeIdeStream]struct{}
 	forceAllowed       bool
 	nativeClosePending bool
@@ -750,11 +751,14 @@ func (s *Service) enterClosing(view *viewRecord, forceAllowed *bool) error {
 }
 
 func (s *Service) performClose(ctx context.Context, view *viewRecord, mode ManagedViewCloseMode) (*protocol.IdeResult, error) {
-	epoch := view.bindingEpoch
-	s.abortViewStreams(view)
 	if err := s.waitViewStreams(ctx, view); err != nil {
 		return nil, s.cleanupFailed(view, err)
 	}
+	return s.finishClose(ctx, view, mode)
+}
+
+func (s *Service) finishClose(ctx context.Context, view *viewRecord, mode ManagedViewCloseMode) (*protocol.IdeResult, error) {
+	epoch := view.bindingEpoch
 	if mode == ManagedViewCloseDiscard && s.bridge.IsConnected(view.viewID, epoch) {
 		result, err := s.bridge.Request(ctx, view.viewID, BridgeCommand{Op: "closeView", Discard: true}, BridgeRequestOptions{ExpectedEpoch: epoch})
 		if err != nil || !result.OK {
@@ -801,9 +805,18 @@ func (s *Service) performClose(ctx context.Context, view *viewRecord, mode Manag
 }
 
 func (s *Service) snapshotForClose(ctx context.Context, view *viewRecord) {
+	complete, err := s.snapshotRecovery(ctx, view, false)
+	if err != nil {
+		s.emit(IdeServiceEvent{Kind: "backup-failed", ViewID: view.viewID, Message: SafeMessage(err)})
+	} else if !complete {
+		s.emit(IdeServiceEvent{Kind: "backup-incomplete", ViewID: view.viewID, Message: "dirty text snapshot was incomplete"})
+	}
+}
+
+// Automatic cleanup requires explicit, complete proof; explicit force close is best-effort.
+func (s *Service) snapshotRecovery(ctx context.Context, view *viewRecord, requireComplete bool) (bool, error) {
 	if !s.bridge.IsConnected(view.viewID, view.bindingEpoch) {
-		s.emit(IdeServiceEvent{Kind: "backup-failed", ViewID: view.viewID, Message: "recovery bridge is not connected"})
-		return
+		return false, NewError("recovery bridge is not connected", "UNAVAILABLE")
 	}
 	limit := s.recoveryQuota
 	if limit > 4<<20 {
@@ -812,35 +825,41 @@ func (s *Service) snapshotForClose(ctx context.Context, view *viewRecord) {
 	signal, cancel := context.WithTimeout(ctx, closeOperationTimeout)
 	defer cancel()
 	result, err := s.bridge.Request(signal, view.viewID, BridgeCommand{Op: "snapshot", MaxBytes: limit}, BridgeRequestOptions{ExpectedEpoch: view.bindingEpoch})
-	if err != nil || !result.OK {
-		message := "dirty text snapshot failed"
-		if err != nil {
-			message = SafeMessage(err)
-		} else if result.Message != "" {
-			message = result.Message
-		}
-		s.emit(IdeServiceEvent{Kind: "backup-failed", ViewID: view.viewID, Message: message})
-		return
+	if err != nil {
+		return false, err
 	}
-	complete := result.Complete == nil || *result.Complete
-	if result.Omitted != nil && *result.Omitted != 0 {
-		complete = false
+	if !result.OK {
+		if requireComplete {
+			return false, NewError("dirty text snapshot failed", "UNAVAILABLE")
+		}
+		return false, NewError(result.MessageOr("dirty text snapshot failed"), "UNAVAILABLE")
+	}
+	complete := !requireComplete
+	if result.Complete != nil {
+		complete = *result.Complete
+	}
+	complete = complete && (result.Omitted == nil || *result.Omitted == 0)
+	if requireComplete && (!complete || result.Documents == nil) {
+		return false, NewError("dirty text snapshot was incomplete", "UNAVAILABLE")
+	}
+	if len(result.Documents) == 0 {
+		return complete, nil
 	}
 	documents := make([]RecoveryDocument, len(result.Documents))
 	for i, document := range result.Documents {
 		documents[i] = RecoveryDocument(document)
 	}
 	backup := RecoveryBackup{ViewID: view.viewID, BindingEpoch: strconv.FormatInt(view.bindingEpoch, 10), Directory: view.directory, CreatedAt: s.scheduler.Now().UTC().Format(time.RFC3339Nano), Complete: complete, Documents: documents}
-	if backup.Documents == nil {
-		backup.Documents = []RecoveryDocument{}
+	if requireComplete {
+		_, err = writeDurableRecoveryBackup(s.cfg, backup, s.recoveryQuota)
+	} else {
+		_, err = WriteRecoveryBackup(s.cfg, backup, s.recoveryQuota)
 	}
-	if _, err := WriteRecoveryBackup(s.cfg, backup, s.recoveryQuota); err != nil {
-		s.emit(IdeServiceEvent{Kind: "backup-failed", ViewID: view.viewID, Message: SafeMessage(err)})
-		return
+	if err != nil {
+		// Recovery writers return path-free diagnostics, unlike raw filesystem errors.
+		return false, NewError(err.Error(), "UNAVAILABLE")
 	}
-	if !complete {
-		s.emit(IdeServiceEvent{Kind: "backup-incomplete", ViewID: view.viewID, Message: "dirty text snapshot was incomplete"})
-	}
+	return complete, nil
 }
 
 func (s *Service) cleanupFailed(view *viewRecord, err error) error {
@@ -862,31 +881,52 @@ func (s *Service) cleanupFailed(view *viewRecord, err error) error {
 	return err
 }
 
-func (s *Service) expireView(viewID string, epoch int64) {
-	lock := s.keyedLock(s.viewLocks, viewID)
+func (s *Service) expireView(view *viewRecord, epoch int64, generation uint64) {
+	lock := s.keyedLock(s.viewLocks, view.viewID)
 	lock.Lock()
 	defer lock.Unlock()
 	s.mu.Lock()
-	view := s.views[viewID]
-	if view == nil || view.bindingEpoch != epoch || view.state != viewOpen || view.bindingPending || view.nativeClosePending || s.closed {
+	if s.closed || s.views[view.viewID] != view || view.bindingEpoch != epoch || view.expiryGeneration != generation ||
+		view.state != viewOpen || view.bindingPending || view.nativeClosePending || s.scheduler.Now().Before(view.expiresAt) {
 		s.mu.Unlock()
 		return
 	}
-	_, err := s.commitRevisionLocked()
-	if err == nil {
-		view.state = viewClosing
-		view.expiryTimer = nil
-	}
-	s.mu.Unlock()
-	if err != nil {
+	s.clearExpiryLocked(view)
+	if _, err := s.commitRevisionLocked(); err != nil {
+		s.mu.Unlock()
 		return
 	}
-	// Snapshot only while the matching bridge epoch is reachable. The persisted backup
-	// remains the recovery source when the browser side has already gone away.
-	s.snapshotForClose(s.lifetime, view)
+	view.state = viewClosing
+	s.operations.Add(1)
+	s.mu.Unlock()
+	defer s.operations.Done()
+
+	// CLOSING fences new streams. Drain this binding before asking its host for proof.
 	ctx, cancel := context.WithTimeout(s.lifetime, closeOperationTimeout)
-	defer cancel()
-	_, _ = s.performClose(ctx, view, ManagedViewCloseExpired)
+	err := s.waitViewStreams(ctx, view)
+	cancel()
+	if err == nil {
+		_, err = s.snapshotRecovery(s.lifetime, view, true)
+	}
+	if err != nil {
+		s.mu.Lock()
+		if !s.closed && s.views[view.viewID] == view && !view.cleanupFailed {
+			_, _ = s.commitRevisionLocked()
+			view.state = viewOpen
+			s.scheduleExpiryLocked(view, s.scheduler.Now().Add(viewLeaseDuration))
+		}
+		s.mu.Unlock()
+		s.emit(IdeServiceEvent{Kind: "expiry-deferred", ViewID: view.viewID, Message: SafeMessage(err)})
+		return
+	}
+	s.mu.Lock()
+	current := !s.closed && s.views[view.viewID] == view && !view.cleanupFailed
+	s.mu.Unlock()
+	if current {
+		ctx, cancel := context.WithTimeout(s.lifetime, closeOperationTimeout)
+		defer cancel()
+		_, _ = s.finishClose(ctx, view, ManagedViewCloseExpired)
+	}
 }
 
 // ApplyLease updates expiry only from a fresh, identity-matching daemon lease proof.
@@ -930,7 +970,8 @@ func (s *Service) scheduleExpiryLocked(view *viewRecord, notBefore time.Time) {
 	if delay < 0 {
 		delay = 0
 	}
-	view.expiryTimer = s.scheduler.AfterFunc(delay, func() { s.expireView(view.viewID, view.bindingEpoch) })
+	epoch, generation := view.bindingEpoch, view.expiryGeneration
+	view.expiryTimer = s.scheduler.AfterFunc(delay, func() { s.expireView(view, epoch, generation) })
 }
 
 func (s *Service) clearExpiry(view *viewRecord) {
@@ -940,6 +981,7 @@ func (s *Service) clearExpiry(view *viewRecord) {
 }
 
 func (s *Service) clearExpiryLocked(view *viewRecord) {
+	view.expiryGeneration++
 	if view.expiryTimer != nil {
 		view.expiryTimer.Stop()
 		view.expiryTimer = nil

@@ -124,7 +124,17 @@ iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。b
 
 每个 browserSession 使用浏览器 Web Locks 做同源独占：刷新复用会话；复制 tab 发现会话已被活页面持有就生成新会话并清空复制来的运行身份，只保留非运行态展示偏好。pagehide 只撤回或暂停使用证明，不删除视图；BFCache pageshow 重新确认锁与权威绑定。Web Locks 不可用时明确报告浏览器能力不足，不退回共享身份或基于本地时间的接管。
 
-使用证明由 [`IdeLeaseCoordinator`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeLeaseCoordinator.java) 在心跳轮次上驱动：Daemon 的心跳带 `ideLeaseRound`，owner 先用 `LIST_VIEWS` 读取当前权威快照，再按 eventNode/connection/browserSession 分组向事件节点查询已确认的持有列表，只有 environment/view/browserSession/epoch 完全匹配的条目才写进 `IDE_LEASE`。心跳本身不续租，查询失败不写证明，也不重放旧轮次；同一 Environment 同一时刻只有一轮在途。有效证明按该轮发出时刻计算 600 秒到期；到期时只有桥接可证明编辑器干净且原生关闭成功才回收视图，dirty 或状态未知时保留并继续占用容量。
+使用证明由 [`IdeLeaseCoordinator`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeLeaseCoordinator.java) 在心跳轮次上驱动：Daemon 的心跳带 `ideLeaseRound`，owner 先用 `LIST_VIEWS` 读取当前权威快照，再按 eventNode/connection/browserSession 分组向事件节点查询已确认的持有列表，只有 environment/view/browserSession/epoch 完全匹配的条目才写进 `IDE_LEASE`。心跳本身不续租，查询失败不写证明，也不重放旧轮次；同一 Environment 同一时刻只有一轮在途。有效证明按该轮发出时刻计算 600 秒到期，到期回收只在取得安全证据时发生，规则见下节。
+
+### 自动到期回收
+
+用户显式关闭仍走正常保存/不保存/取消与经确认的强制关闭；只有租约到期后的回收是自动动作，前提是「已证明安全」而不是「先备份再关」。到期在锁内复核当前 view 身份、`bindingEpoch`、状态与真实到期时刻后才提交 CLOSING，随后只排空该视图已有的数据流并再次复核，不等待也不影响其它 view。只有下列任一条成立才回收：快照明确报告完整且没有 dirty 或不可观察内容；或与当前 `bindingEpoch` 匹配的全部 dirty 普通文件文档已作为完整备份持久化成功。
+
+完整性必须是显式事实，不能推断：dirty 的 untitled、虚拟文档、不可用路径、workbench 已关闭的镜像缓冲、无法观察的编辑器状态以及超出条数或字节预算的文档都记为省略，出现省略即不完整；缺少 `complete` 字段同样不算安全，只有明确的完整空快照才表示没有需要保留的草稿。干净快照不会用空数据覆盖上一条可用备份。
+
+桥不可用、内容无法捕获、流排空失败、备份不完整或写入失败时都不调用管理器 `CloseView`，也不触发原生清理：视图与上一份可用备份原样保留，Daemon 在本机日志中报告延迟清理，允许重新绑定或续租，并且只在下一次租约到期时重新判断，不做立即重试。失败后的视图与容量占用是有意保留，不放宽证据换取容量。到期定时器在排定时捕获视图身份、`bindingEpoch` 与计时器代次，取消或重排使旧代次失效，已触发但未执行的旧回调在锁内复核令牌、epoch、状态与截止时刻后才允许关闭，因此同 epoch 续租与换代重绑都不会被过期回调回收。
+
+以持久化备份为前提的回收只在备份可被操作者取回时才有意义：完整快照写入卡片数据目录的 `ide/recovery/<viewId>.json`，本地取回方式见 [本地 IDE 草稿恢复](../operations/environment-daemon.md#本地-ide-草稿恢复)。浏览器与 Studio 不提供按任意路径重建或覆盖工作区的入口。Windows 不提供属主私有导出，因此 dirty 或不可证明干净的视图只延迟清理而不自动回收。
 
 ## 跨节点
 

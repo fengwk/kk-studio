@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 	"syscall"
@@ -210,8 +211,48 @@ func recoveryPath(config config.DaemonConfig, viewID string) (string, error) {
 	return filepath.Join(recoveryDirectory(config), viewID+".json"), nil
 }
 
+// recoveryPriorPath names the previous record kept until its replacement is durable. It does not end
+// in `.json`, so it is not a recovery record and the quota scan ignores it.
+func recoveryPriorPath(path string) string {
+	return filepath.Join(filepath.Dir(path), "."+strings.TrimSuffix(filepath.Base(path), ".json")+".prior")
+}
+
+// recoveryDirectorySyncSupported reports whether a directory entry can be flushed to stable storage.
+// Windows rejects FlushFileBuffers on a directory handle and needs an explicit ACL for the
+// owner-only guarantees this store relies on, so it cannot promise a durable record.
+var recoveryDirectorySyncSupported = runtime.GOOS == "linux" || runtime.GOOS == "darwin"
+
+// syncRecoveryDirectory flushes one directory entry so a rename or link inside it survives a crash.
+func syncRecoveryDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	syncErr := dir.Sync()
+	if closeErr := dir.Close(); syncErr == nil {
+		syncErr = closeErr
+	}
+	return syncErr
+}
+
 // WriteRecoveryBackup stores a private, per-view recovery record within aggregate quota.
 func WriteRecoveryBackup(config config.DaemonConfig, backup RecoveryBackup, quota int64) (int64, error) {
+	return writeRecoveryBackup(config, backup, quota, nil)
+}
+
+// writeDurableRecoveryBackup stores a recovery record that survives a power loss: the record and
+// every directory entry it depends on are flushed, and the previous record is restored when
+// publication fails at any step, including the flush after the rename.
+func writeDurableRecoveryBackup(config config.DaemonConfig, backup RecoveryBackup, quota int64) (int64, error) {
+	if !recoveryDirectorySyncSupported {
+		return 0, &RecoveryQuotaError{message: "recovery backup durability is not supported on this platform"}
+	}
+	return writeRecoveryBackup(config, backup, quota, syncRecoveryDirectory)
+}
+
+// writeRecoveryBackup validates and publishes one record. A nil syncDir publishes best-effort, which
+// is enough while the writing process keeps running.
+func writeRecoveryBackup(config config.DaemonConfig, backup RecoveryBackup, quota int64, syncDir func(string) error) (int64, error) {
 	if quota <= 0 {
 		return 0, &RecoveryQuotaError{message: "recovery quota is invalid"}
 	}
@@ -276,13 +317,89 @@ func WriteRecoveryBackup(config config.DaemonConfig, backup RecoveryBackup, quot
 	if err == nil {
 		err = closeErr
 	}
-	if err == nil {
-		err = os.Rename(tmpName, path)
-	}
 	if err != nil {
 		return 0, &RecoveryQuotaError{message: "recovery backup is unavailable"}
 	}
+	if syncDir == nil {
+		if err := os.Rename(tmpName, path); err != nil {
+			return 0, &RecoveryQuotaError{message: "recovery backup is unavailable"}
+		}
+		return int64(len(data)), nil
+	}
+	// The chain from the data directory down to the record is fixed and always exists afterwards, so
+	// it is flushed in full: a concurrent writer may have created part of it, which makes an
+	// existence diff miss the entry that still needs flushing.
+	chain := []string{filepath.Dir(filepath.Dir(dir)), filepath.Dir(dir), dir}
+	if err := publishDurableRecoveryRecord(chain, path, tmpName, syncDir); err != nil {
+		return 0, err
+	}
 	return int64(len(data)), nil
+}
+
+// publishDurableRecoveryRecord publishes the already synced temporary file and reports success only
+// once the record and every directory entry it depends on are flushed.
+func publishDurableRecoveryRecord(dirs []string, path, tmpName string, syncDir func(string) error) error {
+	prior := recoveryPriorPath(path)
+	priorInfo, err := os.Lstat(prior)
+	pathInfo, pathErr := os.Lstat(path)
+	if err == nil && os.SameFile(priorInfo, pathInfo) {
+		// Both names still refer to the same record; the extra link is redundant.
+		if err := os.Remove(prior); err != nil {
+			return &RecoveryQuotaError{message: "recovery backup is unavailable"}
+		}
+		err = fs.ErrNotExist
+	}
+	if err == nil {
+		// A crash or failed rollback can leave two different records. Never guess which one
+		// may be discarded; only restore the prior when the canonical record is missing.
+		if !priorInfo.Mode().IsRegular() || !errors.Is(pathErr, fs.ErrNotExist) {
+			return &RecoveryQuotaError{message: "recovery backup is unavailable"}
+		}
+		if renameErr := os.Rename(prior, path); renameErr != nil {
+			return &RecoveryQuotaError{message: "recovery backup is unavailable"}
+		}
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return &RecoveryQuotaError{message: "recovery backup is unavailable"}
+	} else if pathErr != nil && !errors.Is(pathErr, fs.ErrNotExist) {
+		return &RecoveryQuotaError{message: "recovery backup is unavailable"}
+	}
+	previous := pathErr == nil || err == nil
+	if previous {
+		if err := os.Link(path, prior); err != nil {
+			return &RecoveryQuotaError{message: "recovery backup is unavailable"}
+		}
+		if err := syncDir(filepath.Dir(path)); err != nil {
+			_ = os.Remove(prior)
+			return &RecoveryQuotaError{message: "recovery backup could not be made durable"}
+		}
+	}
+	if err := os.Rename(tmpName, path); err != nil {
+		return &RecoveryQuotaError{message: "recovery backup is unavailable"}
+	}
+	// Top-down, so each directory entry is durable before the contents of the next are flushed.
+	for _, dir := range dirs {
+		if err := syncDir(dir); err != nil {
+			rollbackRecoveryRecord(path, prior, previous)
+			_ = syncDir(filepath.Dir(path))
+			return &RecoveryQuotaError{message: "recovery backup could not be made durable"}
+		}
+	}
+	// The replacement is durable; failure to clean up the rollback link cannot invalidate it.
+	if previous && os.Remove(prior) == nil {
+		_ = syncDir(filepath.Dir(path))
+	}
+	return nil
+}
+
+// rollbackRecoveryRecord restores the previous record, or removes the record it just published when
+// there was none. A previous record that cannot be renamed back is left at its prior link, which is
+// then its only copy.
+func rollbackRecoveryRecord(path, prior string, previous bool) {
+	if !previous {
+		_ = os.Remove(path)
+		return
+	}
+	_ = os.Rename(prior, path)
 }
 
 // ReadRecoveryBackup reads and validates the record, returning nil when it does not exist.

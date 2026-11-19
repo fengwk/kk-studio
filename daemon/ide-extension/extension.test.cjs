@@ -591,6 +591,144 @@ test('omits snapshot documents that exceed the requested byte budget', async () 
   } finally { context.host.dispose() }
 })
 
+test('omits every dirty buffer a path-keyed backup cannot hold', async () => {
+  const context = setup()
+  const untitled = { scheme: 'untitled', fsPath: 'Untitled-1', toString: () => 'untitled:Untitled-1' }
+  const virtual = {
+    scheme: 'kk-studio-attachment', path: '/attachment-x.txt', toString: () => 'kk-studio-attachment:/attachment-x.txt',
+  }
+  context.fake.vscode.workspace.textDocuments.push(
+    { uri: contextUri('/home/user/draft.txt'), isDirty: true, isClosed: false, getText: () => 'unsaved text' },
+    { uri: untitled, isDirty: true, isClosed: false, getText: () => 'scratch notes' },
+    { uri: virtual, isDirty: true, isClosed: false, getText: () => 'virtual text' },
+    { uri: contextUri('relative/draft.txt'), isDirty: true, isClosed: false, getText: () => 'relative text' },
+    { uri: contextUri('/home/user/saved.txt'), isDirty: false, isClosed: false, getText: () => 'clean text' },
+  )
+  try {
+    // The window is not provably clean, so an explicit close must still leave the decision to the user.
+    assert.equal((await command(context, 'inspect')).clean, false)
+    const snapshot = await command(context, 'snapshot', { maxBytes: 1024 })
+    assert.deepEqual(snapshot.documents, [{ path: '/home/user/draft.txt', text: 'unsaved text' }])
+    assert.equal(snapshot.omitted, 3)
+    assert.equal(snapshot.complete, false)
+  } finally { context.host.dispose() }
+})
+
+test('reports an unreadable dirty text as an omission instead of a complete backup', async () => {
+  const context = setup()
+  context.fake.vscode.workspace.textDocuments.push({
+    uri: contextUri('/home/user/locked.txt'),
+    isDirty: true,
+    isClosed: false,
+    getText: () => { throw new Error('private read failure') },
+  })
+  try {
+    const snapshot = await command(context, 'snapshot', { maxBytes: 1024 })
+    assert.deepEqual(snapshot.documents, [])
+    assert.equal(snapshot.omitted, 1)
+    assert.equal(snapshot.complete, false)
+    assert.equal(JSON.stringify(snapshot).includes('private read failure'), false)
+  } finally { context.host.dispose() }
+})
+
+test('reports dirty documents beyond the per-snapshot limit as omissions', async () => {
+  const context = setup()
+  for (let index = 0; index < 257; index += 1) {
+    context.fake.vscode.workspace.textDocuments.push({
+      uri: contextUri(`/home/user/doc-${index}.txt`), isDirty: true, isClosed: false, getText: () => 'x',
+    })
+  }
+  try {
+    const snapshot = await command(context, 'snapshot', { maxBytes: 4 * 1024 * 1024 })
+    assert.equal(snapshot.documents.length, 256)
+    assert.equal(snapshot.omitted, 1)
+    assert.equal(snapshot.complete, false)
+  } finally { context.host.dispose() }
+})
+
+test('omits a dirty document the workbench already closed', async () => {
+  const context = setup()
+  context.fake.vscode.workspace.textDocuments.push({
+    uri: contextUri('/home/user/closed.txt'), isDirty: true, isClosed: true, getText: () => 'stale mirror',
+  })
+  try {
+    const snapshot = await command(context, 'snapshot', { maxBytes: 1024 })
+    assert.deepEqual(snapshot.documents, [])
+    assert.equal(snapshot.omitted, 1)
+    assert.equal(snapshot.complete, false)
+  } finally { context.host.dispose() }
+})
+
+test('omits a dirty document whose path the daemon would reject', async () => {
+  const context = setup()
+  context.fake.vscode.workspace.textDocuments.push({
+    uri: contextUri(`/home/user/${'a'.repeat(4096)}.txt`), isDirty: true, isClosed: false, getText: () => 'x',
+  })
+  try {
+    const snapshot = await command(context, 'snapshot', { maxBytes: 4 * 1024 * 1024 })
+    assert.deepEqual(snapshot.documents, [])
+    assert.equal(snapshot.omitted, 1)
+    assert.equal(snapshot.complete, false)
+  } finally { context.host.dispose() }
+})
+
+test('does not claim a snapshot complete when the workbench cannot enumerate tabs', async () => {
+  const fake = fakeVscode()
+  fake.vscode.window.tabGroups = undefined
+  const context = setup(fake)
+  try {
+    const snapshot = await command(context, 'snapshot', { maxBytes: 1024 })
+    assert.deepEqual(snapshot.documents, [])
+    assert.equal(snapshot.omitted, 1)
+    assert.equal(snapshot.complete, false)
+  } finally { context.host.dispose() }
+})
+
+test('counts a dirty text tab not yet mirrored by the extension host as omitted', async () => {
+  const uri = { toString: () => 'file:///home/user/draft.txt' }
+  const context = setup(fakeVscode(WORKSPACE, ['/home/user'], {
+    tabGroups: [{ tabs: [{ input: new FakeTabInputText(uri), isDirty: true }] }],
+  }))
+  try {
+    const snapshot = await command(context, 'snapshot', { maxBytes: 1024 })
+    assert.deepEqual(snapshot.documents, [])
+    assert.equal(snapshot.omitted, 1)
+    assert.equal(snapshot.complete, false)
+  } finally { context.host.dispose() }
+})
+
+test('a clean window snapshots as an explicit complete and empty backup', async () => {
+  const context = setup()
+  context.fake.vscode.workspace.textDocuments.push({
+    uri: contextUri('/home/user/saved.txt'), isDirty: false, isClosed: false, getText: () => 'saved text',
+  })
+  try {
+    // `complete` and `omitted` are always present, so an expiry decision never has to guess a default.
+    assert.deepEqual(
+      await command(context, 'snapshot', { maxBytes: 1024 }),
+      expectedReply(context, 'cmd-1', { ok: true, documents: [], bytes: 0, omitted: 0, complete: true }),
+    )
+  } finally { context.host.dispose() }
+})
+
+test('explicit discard still closes a view whose untitled buffer cannot be backed up', async () => {
+  const context = setup()
+  await focus(context)
+  context.fake.vscode.workspace.textDocuments.push({
+    uri: { scheme: 'untitled', fsPath: 'Untitled-1', toString: () => 'untitled:Untitled-1' },
+    isDirty: true,
+    isClosed: false,
+    getText: () => 'scratch notes',
+  })
+  try {
+    assert.equal((await command(context, 'snapshot', { maxBytes: 1024 })).complete, false)
+    const closed = await command(context, 'closeView', { discard: true })
+    assert.equal(closed.ok, true)
+    assert.deepEqual(context.fake.calls.closeTabs, [])
+    assert.equal(context.fake.terminals.length, 0)
+  } finally { context.host.dispose() }
+})
+
 test('restores only clean absolute text documents and never saves them', async () => {
   const context = setup()
   context.fake.openedDocuments.set('/home/user/clean.txt', {
