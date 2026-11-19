@@ -423,6 +423,7 @@ const (
 	IdeAction_LIST_VIEWS             IdeAction = 6
 	IdeAction_LIST_DIRECTORIES       IdeAction = 7
 	IdeAction_COLLAPSE_MOBILE        IdeAction = 8
+	IdeAction_OPEN_ATTACHMENT        IdeAction = 9
 )
 
 // Enum value maps for IdeAction.
@@ -436,6 +437,7 @@ var (
 		6: "LIST_VIEWS",
 		7: "LIST_DIRECTORIES",
 		8: "COLLAPSE_MOBILE",
+		9: "OPEN_ATTACHMENT",
 	}
 	IdeAction_value = map[string]int32{
 		"IDE_ACTION_UNSPECIFIED": 0,
@@ -446,6 +448,7 @@ var (
 		"LIST_VIEWS":             6,
 		"LIST_DIRECTORIES":       7,
 		"COLLAPSE_MOBILE":        8,
+		"OPEN_ATTACHMENT":        9,
 	}
 )
 
@@ -3529,6 +3532,8 @@ type IdeCommand struct {
 	ExpectedBindingEpoch *int64 `protobuf:"varint,11,opt,name=expected_binding_epoch,json=expectedBindingEpoch,proto3,oneof" json:"expected_binding_epoch,omitempty"`
 	// OPEN_VIEW 及绑定操作必须核对的 Daemon 进程代次。
 	ExpectedDaemonInstanceId *string `protobuf:"bytes,12,opt,name=expected_daemon_instance_id,json=expectedDaemonInstanceId,proto3,oneof" json:"expected_daemon_instance_id,omitempty"`
+	AttachmentId             *string `protobuf:"bytes,13,opt,name=attachment_id,json=attachmentId,proto3,oneof" json:"attachment_id,omitempty"`
+	AttachmentText           *string `protobuf:"bytes,14,opt,name=attachment_text,json=attachmentText,proto3,oneof" json:"attachment_text,omitempty"`
 	unknownFields            protoimpl.UnknownFields
 	sizeCache                protoimpl.SizeCache
 }
@@ -3643,6 +3648,20 @@ func (x *IdeCommand) GetExpectedBindingEpoch() int64 {
 func (x *IdeCommand) GetExpectedDaemonInstanceId() string {
 	if x != nil && x.ExpectedDaemonInstanceId != nil {
 		return *x.ExpectedDaemonInstanceId
+	}
+	return ""
+}
+
+func (x *IdeCommand) GetAttachmentId() string {
+	if x != nil && x.AttachmentId != nil {
+		return *x.AttachmentId
+	}
+	return ""
+}
+
+func (x *IdeCommand) GetAttachmentText() string {
+	if x != nil && x.AttachmentText != nil {
+		return *x.AttachmentText
 	}
 	return ""
 }
@@ -4470,7 +4489,7 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\amessage\x18\x03 \x01(\tH\x01R\amessage\x88\x01\x01B\x0f\n" +
 	"\r_operation_idB\n" +
 	"\n" +
-	"\b_message\"\xf6\x05\n" +
+	"\b_message\"\xf4\x06\n" +
 	"\n" +
 	"IdeCommand\x12?\n" +
 	"\x06action\x18\x01 \x01(\x0e2'.kkstudio.environment.control.IdeActionR\x06action\x12\x1c\n" +
@@ -4485,7 +4504,10 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\adiscard\x18\n" +
 	" \x01(\bH\aR\adiscard\x88\x01\x01\x129\n" +
 	"\x16expected_binding_epoch\x18\v \x01(\x03H\bR\x14expectedBindingEpoch\x88\x01\x01\x12B\n" +
-	"\x1bexpected_daemon_instance_id\x18\f \x01(\tH\tR\x18expectedDaemonInstanceId\x88\x01\x01B\n" +
+	"\x1bexpected_daemon_instance_id\x18\f \x01(\tH\tR\x18expectedDaemonInstanceId\x88\x01\x01\x12(\n" +
+	"\rattachment_id\x18\r \x01(\tH\n" +
+	"R\fattachmentId\x88\x01\x01\x12,\n" +
+	"\x0fattachment_text\x18\x0e \x01(\tH\vR\x0eattachmentText\x88\x01\x01B\n" +
 	"\n" +
 	"\b_view_idB\x15\n" +
 	"\x13_browser_session_idB\x10\n" +
@@ -4498,7 +4520,9 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\n" +
 	"\b_discardB\x19\n" +
 	"\x17_expected_binding_epochB\x1e\n" +
-	"\x1c_expected_daemon_instance_id\"\x8a\x06\n" +
+	"\x1c_expected_daemon_instance_idB\x10\n" +
+	"\x0e_attachment_idB\x12\n" +
+	"\x10_attachment_text\"\x8a\x06\n" +
 	"\tIdeResult\x12\x13\n" +
 	"\x02ok\x18\x01 \x01(\bH\x00R\x02ok\x88\x01\x01\x12\x17\n" +
 	"\x04code\x18\x02 \x01(\tH\x01R\x04code\x88\x01\x01\x12\x1d\n" +
@@ -4642,7 +4666,7 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\x18UPDATE_PHASE_UNSPECIFIED\x10\x00\x12\x13\n" +
 	"\x0fUPDATE_ACCEPTED\x10\x01\x12\x13\n" +
 	"\x0fUPDATE_PREPARED\x10\x02\x12\x11\n" +
-	"\rUPDATE_FAILED\x10\x03*\xbe\x01\n" +
+	"\rUPDATE_FAILED\x10\x03*\xd3\x01\n" +
 	"\tIdeAction\x12\x1a\n" +
 	"\x16IDE_ACTION_UNSPECIFIED\x10\x00\x12\r\n" +
 	"\tOPEN_VIEW\x10\x01\x12\x14\n" +
@@ -4653,7 +4677,8 @@ const file_platform_daemon_server_src_main_protocol_control_proto_rawDesc = "" +
 	"\n" +
 	"LIST_VIEWS\x10\x06\x12\x14\n" +
 	"\x10LIST_DIRECTORIES\x10\a\x12\x13\n" +
-	"\x0fCOLLAPSE_MOBILE\x10\b\"\x04\b\x05\x10\x05*\vDETACH_VIEW*D\n" +
+	"\x0fCOLLAPSE_MOBILE\x10\b\x12\x13\n" +
+	"\x0fOPEN_ATTACHMENT\x10\t\"\x04\b\x05\x10\x05*\vDETACH_VIEW*D\n" +
 	"\vIdeOpenMode\x12\x1d\n" +
 	"\x19IDE_OPEN_MODE_UNSPECIFIED\x10\x00\x12\n" +
 	"\n" +

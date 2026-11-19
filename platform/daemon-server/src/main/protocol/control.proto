@@ -89,6 +89,7 @@ enum IdeAction {
   LIST_VIEWS = 6;
   LIST_DIRECTORIES = 7;
   COLLAPSE_MOBILE = 8;
+  OPEN_ATTACHMENT = 9;
 }
 
 enum IdeOpenMode {
@@ -401,6 +402,8 @@ message IdeCommand {
   optional int64 expected_binding_epoch = 11;
   // OPEN_VIEW 及绑定操作必须核对的 Daemon 进程代次。
   optional string expected_daemon_instance_id = 12;
+  optional string attachment_id = 13;
+  optional string attachment_text = 14;
 }
 
 message IdeResult {
