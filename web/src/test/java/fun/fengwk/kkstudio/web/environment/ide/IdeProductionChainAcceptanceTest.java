@@ -433,15 +433,24 @@ class IdeProductionChainAcceptanceTest extends WebPostgresTestSupport {
                   RequestBody.create(
                       "{\"browserSessionId\":\""
                           + browserSessionId
-                          + "\",\"bindingEpoch\":"
+                          + "\",\"bindingEpoch\":\""
                           + bindingEpoch
-                          + ",\"expectedDaemonInstanceId\":\""
+                          + "\",\"expectedDaemonInstanceId\":\""
                           + expectedDaemonInstance(viewId)
                           + "\"}",
                       JSON))
               .build();
       try (Response response = browser.newCall(request).execute()) {
-        assertEquals(204, response.code(), "an owned Session attachment must open via HTTP");
+        if (response.code() != 204) {
+          JsonNode problem = JsonMapper.builder().build().readTree(response.body().string());
+          String reason = problem.path("reason").asText();
+          assertEquals(
+              204,
+              response.code(),
+              "an owned Session attachment must open via HTTP ("
+                  + (reason.matches("[A-Z_]{1,60}") ? reason : "no structured reason")
+                  + ")");
+        }
       }
       browserDriver.await("attachment-ready");
       browserDriver.send(Map.of("continue", true));

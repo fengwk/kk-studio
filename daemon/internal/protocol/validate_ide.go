@@ -3,6 +3,7 @@ package protocol
 import (
 	"fmt"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -10,10 +11,13 @@ func validateIDECommand(c *IdeCommand) error {
 	if c == nil {
 		return invalid("ideCommand.action is required")
 	}
+	if c.Action != IdeAction_OPEN_ATTACHMENT && (c.AttachmentId != nil || c.AttachmentText != nil) {
+		return invalid("attachment fields are only valid for OPEN_ATTACHMENT")
+	}
 	switch c.Action {
 	case IdeAction_OPEN_VIEW:
 		return validateOpenViewCommand(c)
-	case IdeAction_CHANGE_DIRECTORY, IdeAction_FOCUS_TERMINAL, IdeAction_CLOSE_VIEW, IdeAction_COLLAPSE_MOBILE:
+	case IdeAction_CHANGE_DIRECTORY, IdeAction_FOCUS_TERMINAL, IdeAction_CLOSE_VIEW, IdeAction_COLLAPSE_MOBILE, IdeAction_OPEN_ATTACHMENT:
 		return validateBoundViewCommand(c)
 	case IdeAction_LIST_VIEWS, IdeAction_LIST_DIRECTORIES:
 		return validateListCommand(c)
@@ -70,8 +74,28 @@ func validateBoundViewCommand(c *IdeCommand) error {
 		return validateChangeDirectoryCommand(c)
 	case IdeAction_CLOSE_VIEW:
 		return validateCloseViewCommand(c)
+	case IdeAction_OPEN_ATTACHMENT:
+		return validateOpenAttachmentCommand(c)
 	}
 	return validateViewActionCommand(c)
+}
+
+func validateOpenAttachmentCommand(c *IdeCommand) error {
+	if err := validateViewActionCommand(c); err != nil {
+		return err
+	}
+	if err := uuid(c.GetAttachmentId(), "ideCommand.attachmentId"); err != nil {
+		return err
+	}
+	if err := requireBytesString(c.AttachmentText, "ideCommand.attachmentText", false, 64*1024); err != nil {
+		return err
+	}
+	if strings.ContainsFunc(c.GetAttachmentText(), func(r rune) bool {
+		return unicode.IsControl(r) && r != '\t' && r != '\n' && r != '\r'
+	}) {
+		return invalid("ideCommand.attachmentText must be text, not binary data")
+	}
+	return nil
 }
 
 func validateChangeDirectoryCommand(c *IdeCommand) error {

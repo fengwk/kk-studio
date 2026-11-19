@@ -165,6 +165,49 @@ func TestCodec_IDEActions(t *testing.T) {
 	}
 }
 
+// Drive the receiving codec, not just the service handler: an invalid command frame closes the control channel.
+func TestCodec_IDEOpenAttachment(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		valid  bool
+		mutate func(*IdeCommand)
+	}{
+		{name: "utf8-text", valid: true},
+		{name: "empty-text", valid: true, mutate: func(c *IdeCommand) { c.AttachmentText = proto.String("") }},
+		{name: "missing-id", mutate: func(c *IdeCommand) { c.AttachmentId = nil }},
+		{name: "missing-text", mutate: func(c *IdeCommand) { c.AttachmentText = nil }},
+		{name: "too-many-bytes", mutate: func(c *IdeCommand) { c.AttachmentText = proto.String(strings.Repeat("é", 32769)) }},
+		{name: "control-character", mutate: func(c *IdeCommand) { c.AttachmentText = proto.String("binary\x00data") }},
+		{name: "unrelated-fields", mutate: func(c *IdeCommand) { c.Directory = proto.String("workspace") }},
+		{name: "other-action", mutate: func(c *IdeCommand) { c.Action = IdeAction_FOCUS_TERMINAL }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			command := &IdeCommand{
+				Action: IdeAction_OPEN_ATTACHMENT, ViewId: proto.String(testEnvironmentID),
+				BrowserSessionId: proto.String(testEnvironmentID), BindingEpoch: proto.Int64(1),
+				ExpectedDaemonInstanceId: proto.String(testEnvironmentID),
+				AttachmentId:             proto.String(testEnvironmentID), AttachmentText: proto.String("Résumé\r\n\t東京"),
+			}
+			if tc.mutate != nil {
+				tc.mutate(command)
+			}
+			e := testEnvelope(MessageType_IDE_COMMAND, testInvocationID, &Envelope_IdeCommand{IdeCommand: command})
+			payload, err := proto.Marshal(e)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := UnmarshalEnvelope(payload)
+			if tc.valid {
+				if err != nil || !proto.Equal(decoded.GetIdeCommand(), command) {
+					t.Fatalf("attachment command did not survive decoding: %v", err)
+				}
+			} else if err == nil {
+				t.Fatal("invalid attachment command accepted")
+			}
+		})
+	}
+}
+
 func TestCodec_UploadTicketStates(t *testing.T) {
 	ready := testEnvelope(MessageType_RESOURCE_UPLOAD_TICKET, testInvocationID, &Envelope_ResourceUploadTicket{ResourceUploadTicket: &ResourceUploadTicket{TransferId: proto.String(testEnvironmentID), State: TicketState_TICKET_READY, UploadId: proto.String(testEnvironmentID)}})
 	if _, err := MarshalEnvelope(ready); err != nil {
