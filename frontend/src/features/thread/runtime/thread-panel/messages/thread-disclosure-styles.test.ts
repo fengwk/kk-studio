@@ -29,7 +29,7 @@ function rule(pattern: RegExp): string {
 describe('thread disclosure style contracts', () => {
   it('owns the full card surface through the compound thread-block selector', () => {
     const shell = rule(/\.thread-block\.thread-disclosure\s*\{[^}]*\}/)
-    expect(shell).toContain('padding: 10px 12px')
+    expect(shell).toContain('padding: 8px 12px')
     expect(shell).toContain('border: 1px solid var(--border)')
     expect(shell).toContain('background: var(--surface)')
     expect(shell).toContain('border-radius: 10px')
@@ -50,9 +50,9 @@ describe('thread disclosure style contracts', () => {
     const clamped = rule(/\.thread-disclosure-header-text\.is-clamped\s*\{[^}]*\}/)
     expect(clamped).toContain('-webkit-box-orient: vertical')
     expect(clamped).toContain('overflow: hidden')
-    // 28px 首行盒 = 20px 行高 + 上下 4px，留白在外层，不能加到 clamp 节点上多露一行。
+    // 文本 clamp 的 20px 行高不因额外内边距改变可见行数。
     const main = rule(/\.thread-disclosure-header-main\s*\{[^}]*\}/)
-    expect(main).toContain('padding: 4px 0')
+    expect(main).toContain('padding: 0')
     expect(main).toContain('line-height: 20px')
     expect(clamped).not.toContain('padding')
 
@@ -65,6 +65,8 @@ describe('thread disclosure style contracts', () => {
   it('defines the universal hint, error block and long-card collapse action', () => {
     expect(rule(/\.thread-disclosure-hint\s*\{[^}]*\}/)).toContain('cursor: pointer')
     expect(rule(/\.thread-disclosure-error\s*\{[^}]*\}/)).toContain('var(--danger)')
-    expect(rule(/\.thread-disclosure-collapse\s*\{[^}]*\}/)).toContain('align-self: flex-end')
+    const toggle = rule(/\.thread-disclosure-toggle\s*\{[^}]*\}/)
+    expect(toggle).toContain('display: grid')
+    expect(toggle).toContain('place-items: center')
   })
 })

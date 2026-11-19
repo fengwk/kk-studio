@@ -9,15 +9,18 @@ import type { DialogueMessage, ToolDialogueMessage } from '@/features/thread/run
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
 import type { HarnessSessionEntryDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
+import { ApplicationEventTestProvider } from '@/test-support/application-event-test-provider'
 
 function wrapper({ children }: { children: ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return (
-    <QueryClientProvider client={queryClient}>
-      {children}
-    </QueryClientProvider>
+    <ApplicationEventTestProvider>
+      <QueryClientProvider client={queryClient}>
+        {children}
+      </QueryClientProvider>
+    </ApplicationEventTestProvider>
   )
 }
 
