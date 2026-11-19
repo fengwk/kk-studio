@@ -64,6 +64,7 @@ final class ModelHistoryProjection {
   private int thinkingDropFrom = -1;
   private int thinkingDropBefore = -1;
   private boolean inCompactionTurn;
+  private Entry lastAssistantEntry;
 
   ModelHistoryProjection(
       ModelRequestSpec spec, boolean incrementalSystem, boolean inlineToolChanges) {
@@ -82,6 +83,11 @@ final class ModelHistoryProjection {
     messages.addAll(projector.projectSources(projectedMessages));
     messages.addAll(deferredSystemMessages);
     return List.copyOf(messages);
+  }
+
+  /** Source of the last assistant boundary, if it came from a complete, projected response. */
+  Entry lastAssistantEntry() {
+    return lastAssistantEntry;
   }
 
   private static int lastBaselineIndex(List<Entry> entries) {
@@ -143,7 +149,7 @@ final class ModelHistoryProjection {
       appendSystemChange((SystemPayload) payload);
       return;
     }
-    appendProjectedPayload(payload, index);
+    appendProjectedPayload(entry, index);
   }
 
   private boolean isIncrementalSystemChange(EntryPayload payload, int index) {
@@ -162,9 +168,10 @@ final class ModelHistoryProjection {
     }
   }
 
-  private void appendProjectedPayload(EntryPayload payload, int index) {
+  private void appendProjectedPayload(Entry entry, int index) {
+    EntryPayload payload = entry.payload();
     if (payload instanceof MessagePayload message) {
-      appendMessage(message, index);
+      appendMessage(entry, message, index);
     } else if (payload instanceof CustomMessagePayload message) {
       projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
     } else if (payload instanceof NotificationPayload notification) {
@@ -175,20 +182,25 @@ final class ModelHistoryProjection {
       projectedMessages.add(
           ProviderMessageProjector.ProjectedMessage.of(AgentMessage.user(fork.notice())));
     } else if (payload instanceof AssistantAbortedPayload message) {
+      lastAssistantEntry = null;
       projectedMessages.add(ProviderMessageProjector.ProjectedMessage.of(message.message()));
     }
   }
 
-  private void appendMessage(MessagePayload message, int index) {
+  private void appendMessage(Entry entry, MessagePayload message, int index) {
     AgentMessage projected = message.message();
     if (projected.role() == AgentMessageRole.ASSISTANT
         && index > thinkingDropFrom
         && index < thinkingDropBefore) {
       projected = withoutThinking(projected);
       if (projected.contents().isEmpty()) {
+        lastAssistantEntry = null;
         // 只剩 thinking 的 assistant 不得变成空消息：它本来就没有可回放的语义内容。
         return;
       }
+    }
+    if (projected.role() == AgentMessageRole.ASSISTANT) {
+      lastAssistantEntry = projected.contents().isEmpty() ? null : entry;
     }
     projectedMessages.add(
         new ProviderMessageProjector.ProjectedMessage(projected, reasoningEffort(message)));

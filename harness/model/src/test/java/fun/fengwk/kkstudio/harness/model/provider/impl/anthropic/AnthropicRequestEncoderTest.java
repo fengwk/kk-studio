@@ -443,10 +443,6 @@ class AnthropicRequestEncoderTest {
   @MethodSource("conversationRetentionCases")
   void marksOnlyCurrentTailWithoutSystemOrTools(PromptCacheRetention retention, String expectedTtl)
       throws IOException {
-    ProviderCacheControl cacheControl =
-        retention == PromptCacheRetention.NONE
-            ? ProviderCacheControl.none()
-            : ProviderCacheControl.session(retention, "test-affinity");
     ArrayNode messages = NODES.arrayNode();
     ObjectNode oldTail = messages.addObject().put("role", "user").putArray("content").addObject();
     oldTail.put("type", "text").put("text", "first");
@@ -456,7 +452,13 @@ class AnthropicRequestEncoderTest {
     ObjectNode currentTail = currentMessage;
 
     AnthropicCacheMarkers.apply(
-        cacheControl, messages, NODES.arrayNode(), NODES.arrayNode(), currentTail, false, false);
+        retention,
+        NODES.arrayNode(),
+        NODES.arrayNode(),
+        new AnthropicWireMessages.Result(messages, List.of(), currentTail, null),
+        false,
+        false,
+        false);
     assertFalse(oldTail.has("cache_control"));
     assertEquals(retention != PromptCacheRetention.NONE, currentTail.has("cache_control"));
     if (retention == PromptCacheRetention.NONE) {
@@ -498,11 +500,11 @@ class AnthropicRequestEncoderTest {
     tail.put("type", "text").put("text", "hello");
 
     AnthropicCacheMarkers.apply(
-        ProviderCacheControl.session(PromptCacheRetention.SHORT, "session"),
-        messages,
+        PromptCacheRetention.SHORT,
         NODES.arrayNode(),
         NODES.arrayNode(),
-        tail,
+        new AnthropicWireMessages.Result(messages, List.of(), tail, null),
+        false,
         false,
         true);
 
