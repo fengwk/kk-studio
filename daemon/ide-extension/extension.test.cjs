@@ -233,10 +233,28 @@ async function command(context, op, fields = {}) {
 
 async function focus(context) { return command(context, 'focusTerminal') }
 
+test('refreshExplorer invokes only the fixed Explorer refresh command', async (t) => {
+  const context = setup()
+  t.after(() => context.host.dispose())
+  const result = await command(context, 'refreshExplorer', { path: '/outside/file.txt', command: 'workbench.action.reloadWindow' })
+  assert.equal(result.ok, true)
+  assert.deepEqual(context.fake.calls.commands, ['workbench.files.action.refreshFilesExplorer'])
+})
+
 function expectedReply(context, id, result) {
   const hostId = new URL(context.network.streams[0].url).searchParams.get('hostId')
   return Object.assign({ id, viewId: VIEW_ID, bindingEpoch: BINDING_EPOCH, hostId }, result)
 }
+
+test('refreshExplorer failure is reported instead of acknowledged as success', async (t) => {
+  const fake = fakeVscode(undefined, ['/home/user'], { executeCommand: () => { throw new Error('not available') } })
+  const context = setup(fake)
+  t.after(() => context.host.dispose())
+  const result = await command(context, 'refreshExplorer')
+  assert.equal(result.ok, false)
+  assert.equal(result.message, 'command failed')
+  assert.deepEqual(fake.calls.commands, ['workbench.files.action.refreshFilesExplorer'])
+})
 
 test('bundled manifest activates the bridge and contributes IDE defaults', () => {
   const manifest = JSON.parse(readFileSync(path.join(__dirname, 'package.json'), 'utf8'))

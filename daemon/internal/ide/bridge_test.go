@@ -60,6 +60,51 @@ func TestBridgeAuthAndRoutes(t *testing.T) {
 	}
 }
 
+// Verifies Explorer refresh is a fixed operation and carries no path or command payload.
+func TestBridgeRefreshExplorerCommandIsFixed(t *testing.T) {
+	bridge, err := NewBridge()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bridge.Close(context.Background())
+	const viewID = "11111111-1111-4111-8111-111111111111"
+	const hostID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+	workspace := filepath.Join(t.TempDir(), "view.code-workspace")
+	bridge.Assign(viewID, workspace, 1, filepath.Dir(workspace))
+	hostCtx, cancelHost := context.WithCancel(context.Background())
+	defer cancelHost()
+	response, reader := openManualBridgeStream(t, hostCtx, bridge, workspace, hostID, filepath.Dir(workspace))
+	defer response.Body.Close()
+	if _, err := reader.ReadString('\n'); err != nil {
+		t.Fatal(err)
+	}
+	result := make(chan error, 1)
+	go func() {
+		_, err := bridge.Request(context.Background(), viewID, BridgeCommand{Op: "refreshExplorer"}, BridgeRequestOptions{ExpectedEpoch: 1})
+		result <- err
+	}()
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		t.Fatal(err)
+	}
+	var command map[string]any
+	if err := json.Unmarshal([]byte(line), &command); err != nil {
+		t.Fatal(err)
+	}
+	if command["op"] != "refreshExplorer" || command["path"] != nil || command["command"] != nil {
+		t.Fatalf("refresh command = %#v", command)
+	}
+	cancelHost()
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("refresh request error = %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("refresh request did not settle after host disconnect")
+	}
+}
+
 // Verifies a timed-out directory transition remains reconcilable by a same-epoch target host.
 func TestDirectoryTransitionTimeoutReconcilesTarget(t *testing.T) {
 	bridge, err := NewBridge()

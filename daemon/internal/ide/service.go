@@ -104,6 +104,9 @@ type Service struct {
 	closeDone        chan struct{}
 	closeErr         error
 	operations       sync.WaitGroup
+	refreshQueue     chan explorerRefreshRequest
+	refreshPending   map[explorerRefreshKey]struct{}
+	background       sync.WaitGroup
 }
 
 // NewService creates the managed IDE subsystem without starting code-server.
@@ -143,8 +146,12 @@ func NewService(cfg config.DaemonConfig, processes native.Supervisor, tracker na
 		views: make(map[string]*viewRecord), reservations: make(map[string]struct{}),
 		claims: make(map[string]claimRecord), viewLocks: make(map[string]*sync.Mutex),
 		claimLocks: make(map[string]*sync.Mutex), activeStreams: make(map[*activeIdeStream]struct{}),
-		lifetime: lifetime, cancelLifetime: cancel,
+		refreshQueue:   make(chan explorerRefreshRequest, maxQueuedExplorerRefreshes),
+		refreshPending: make(map[explorerRefreshKey]struct{}),
+		lifetime:       lifetime, cancelLifetime: cancel,
 	}
+	s.background.Add(1)
+	go s.runExplorerRefreshes()
 	manager.OnUnexpectedExit(s.processExited)
 	bridge.OnDirectoryReconciled(s.reconcileDirectoryChange)
 	bridge.OnPTY(func(_ string, pid int) error {
@@ -315,6 +322,7 @@ func (s *Service) Close(ctx context.Context) error {
 		stream.cancel()
 	}
 	s.operations.Wait()
+	s.background.Wait()
 	if managerStop != nil {
 		<-managerStop
 	}
