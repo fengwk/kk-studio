@@ -198,7 +198,7 @@ export async function createStubCatalog({ jsonCall }) {
     modelCallIdleTimeoutMillis: '120000',
   })
   assert.equal(stub.credential?.configured, true, JSON.stringify(stub))
-  // 缺省 pricing 由服务端归一为完整零价格定义。
+  // 显式 null 表示尚未配置价格；不同于完整定义中的真实零费率。
   await jsonCall('POST', '/api/platform/models', {
     type: 'MODEL',
     providerName: 'stub',
@@ -208,6 +208,7 @@ export async function createStubCatalog({ jsonCall }) {
     config: {
       limit: { context: 128000, output: 4096 },
       abilities: { tools: true, reasoning: false, inputModalities: ['TEXT'] },
+      pricing: null,
       defaultVariant: 'default',
       variants: [{ id: 'default', promptCacheRetention: 'SHORT' }],
     },

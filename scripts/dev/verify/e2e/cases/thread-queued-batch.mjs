@@ -1,15 +1,19 @@
 /**
  * thread.queued_command_batch：免费确定性 L1（whole-snapshot harvest）。
  *
- * 本地受控 OpenAI chat-completions SSE hold mock 验证运行中连续两批 USER 由同一个 INPUT 快照按 sequence 一次性收割：
- * 首请求保持 open 期间连续接受两条 THREAD batch 并验证同时 QUEUED、sequence 连续；releaseFirst 后等 request count=2 +
- * quiescent，统一断言 request#2 同时携带 firstMarker 与 secondMarker（顺序正确，证明冻结 cutoff 内的完整快照被一次性
- * 消费）；最终两个 assistant 文本分别精确等于 initialReply / batchedReply，两条 USER 落位同一 TURN_START，
- * queuedCommands 清空。不调用真实 Provider；finally 完整清理。
+ * 本地受控 OpenAI chat-completions SSE hold mock 验证 Thread GET -> subscribed ACK cursor 0 -> 初始 snapshot，
+ * 并验证同一 INPUT 快照按 sequence 一次性收割两批 USER。releaseFirst 后收到 realtime，再以原始 head 读取增量，
+ * 证明新 Entry 链从 HTTP 快照基线延续。全程不调用真实 Provider；finally 完整清理。
  */
 import { createServer } from 'node:http'
 
 import { assert, cid, sleep } from '../lib/http.mjs'
+import {
+  applicationEventUrl,
+  assertExactKeys,
+  takeFrame,
+  waitForSocketOpen,
+} from './app-events.mjs'
 import {
   acceptCommandBatch,
   branchSettingsOf,
@@ -35,7 +39,7 @@ registerCase({
   // 本 case 把 Provider baseUrl 指向 case 内自建的宿主 127.0.0.1 mock；App 在
   // distributed 容器内无法回连宿主 loopback，因此必须排除 host-mock capability。
   requires: ['host-mock'],
-  docs: '本地受控 OpenAI chat-completions SSE hold mock（免费确定性，不调用真实 Provider）：首个 USER 启动后 mock 保持响应 open；确认 model active 后连续接受两条 THREAD batch，轮询确认两条命令同时 QUEUED 且 sequence 连续；release 首响应后 INPUT 一次性消费冻结 cutoff 内的完整排队快照，request#2 同时携带 first 与 second 且历史顺序 first->second，全程只产生两个模型请求；最终 entry 顺序 initial USER->assistant->first USER->second USER->assistant，两条 USER 同属一个 TURN_START、head 收敛到闭合 TURN_END、queuedCommands 清空',
+  docs: '本地受控 OpenAI chat-completions SSE hold mock（免费确定性，不调用真实 Provider）：GET Thread 初始快照后订阅 thread 资源，验证 ACK cursor=0 与紧随其后的 snapshot；首个 USER 启动后 mock 保持响应 open，连续接受两条 THREAD batch 并确认同时 QUEUED 且 sequence 连续；release 首响应后 INPUT 一次性消费冻结 cutoff 内的完整排队快照，request#2 同时携带 first 与 second 且历史顺序 first->second；收到 realtime 后用初始 head 发起 afterEntryId GET，验证增量包含两条排队消息；最终 entry 顺序 initial USER->assistant->first USER->second USER->assistant，两条 USER 同属一个 TURN_START、head 收敛到闭合 TURN_END、queuedCommands 清空',
   async run(ctx) {
     const suffix = cid().slice(0, 8)
     const initialMarker = `QUEUE-INITIAL-${suffix}`
@@ -58,6 +62,10 @@ registerCase({
     let agent = null
     let chat = null
     let threadId = null
+    let socket = null
+    let socketListener = null
+    const socketFrames = []
+    let initialHeadEntryId = null
     let finalSnapshot = null
     let primaryError = null
     const cleanupErrors = []
@@ -148,6 +156,47 @@ registerCase({
         `initial creation batch: ${JSON.stringify(created)}`,
       )
 
+      const initialSnapshot = await getThreadSnapshot(ctx, threadId)
+      initialHeadEntryId = initialSnapshot.thread.headEntryId
+      socket = new WebSocket(applicationEventUrl(ctx.baseUrl))
+      socketListener = (event) => {
+        try {
+          socketFrames.push(JSON.parse(String(event.data)))
+        } catch {
+          // Ignore non-JSON frames; protocol frames are asserted below.
+        }
+      }
+      socket.addEventListener('message', socketListener)
+      await waitForSocketOpen(socket, 5_000)
+      socket.send(JSON.stringify({
+        type: 'subscribe',
+        resource: { kind: 'thread', id: threadId },
+        afterEntryId: initialHeadEntryId,
+      }))
+      const subscribed = await takeFrame(
+        socketFrames,
+        (frame) => frame?.type === 'subscribed' && frame?.resource?.kind === 'thread',
+        5_000,
+      )
+      assertExactKeys(subscribed, ['type', 'resource', 'cursor'], 'thread subscribed frame')
+      assertExactKeys(subscribed.resource, ['kind', 'id'], 'thread subscribed resource')
+      assert(subscribed.resource?.id === threadId && subscribed.cursor === '0', JSON.stringify(subscribed))
+      const initialPush = await takeFrame(
+        socketFrames,
+        (frame) => frame?.type === 'event'
+          && frame?.resource?.kind === 'thread'
+          && frame?.resource?.id === threadId
+          && frame?.name === 'snapshot',
+        10_000,
+      )
+      assertExactKeys(initialPush, ['type', 'resource', 'name', 'data'], 'initial thread snapshot frame')
+      assertExactKeys(initialPush.resource, ['kind', 'id'], 'initial thread snapshot resource')
+      assert(
+        initialPush.data?.thread?.threadId === threadId
+          && initialPush.data?.baseEntryId === initialHeadEntryId,
+        JSON.stringify(initialPush),
+      )
+
       // 首个 Provider request 到达后保持 open；确认 model active 后再入队，确保运行中 cursor 有效。
       await mock.waitForRequests(1, { timeoutMs: 30_000 })
       assert(mock.requests[0].state === 'held', JSON.stringify(mock.requests[0]))
@@ -195,6 +244,8 @@ registerCase({
         `no turn may end while commands are queued: ${JSON.stringify(queuedSnapshot.entries)}`,
       )
 
+      // 排除入队期间已排队的 realtime 通知；release 后必须用新通知驱动增量回读。
+      socketFrames.length = 0
       // release 首响应：request#2 由 mock 在同一 INPUT 快照上自动 SSE success（whole-snapshot harvest）。等两个请求到达并 quiescent。
       mock.releaseFirst()
       await mock.waitForRequests(2, { timeoutMs: 30_000 })
@@ -209,7 +260,38 @@ registerCase({
           mock.requests.map((request) => request.state),
         )}`,
       )
+      const realtime = await takeFrame(
+        socketFrames,
+        (frame) => frame?.type === 'event'
+          && frame?.resource?.kind === 'thread'
+          && frame?.resource?.id === threadId
+          && frame?.name === 'realtime',
+        10_000,
+      )
+      assert(realtime.data && typeof realtime.data === 'object', JSON.stringify(realtime))
+      const deltaResponse = await ctx.call(
+        'GET',
+        `/api/harness/threads/${encodeURIComponent(threadId)}?afterEntryId=${encodeURIComponent(initialHeadEntryId)}`,
+      )
+      const delta = deltaResponse.json
+      assert(
+        deltaResponse.status === 200
+          && delta.baseEntryId === initialHeadEntryId
+          && Array.isArray(delta.entries)
+          && delta.entries.some((entry) => JSON.stringify(entry).includes(firstMarker))
+          && delta.entries.some((entry) => JSON.stringify(entry).includes(secondMarker)),
+        `realtime must lead to an incremental snapshot extending the initial chain: ${JSON.stringify(delta)}`,
+      )
       finalSnapshot = await getThreadSnapshot(ctx, threadId)
+      const baseIndex = finalSnapshot.entries.findIndex(
+        (entry) => String(entry.entryId) === String(initialHeadEntryId),
+      )
+      assert(baseIndex >= 0, `initial head disappeared from current chain: ${initialHeadEntryId}`)
+      assert(
+        JSON.stringify(delta.entries.map((entry) => entry.entryId))
+          === JSON.stringify(finalSnapshot.entries.slice(baseIndex + 1).map((entry) => entry.entryId)),
+        'incremental entries must exactly continue the initial head through the current head',
+      )
 
       // 严格断言 request#2 同时携带两条排队标记且历史顺序 first -> second：证明冻结 cutoff 内的完整快照被一次性消费。
       // 首条后截断、顺序错误或多余请求，均由 mock 拒绝。
@@ -304,6 +386,10 @@ registerCase({
       primaryError = error
       writeFailureArtifact()
     } finally {
+      if (socket) {
+        if (socketListener) socket.removeEventListener('message', socketListener)
+        socket.close(1000, 'E2E complete')
+      }
       await cleanup('stop active thread', cleanupErrors, async () => {
         if (!threadId) return
         const snapshot = await getThreadSnapshot(ctx, threadId)

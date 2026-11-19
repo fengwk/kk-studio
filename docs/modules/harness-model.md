@@ -169,32 +169,23 @@ baseUrl 必须是不含 user-info、query、fragment 的 http(s) 地址。非 2x
 
 ## 用量与计价
 
-读取历史记录时，后端使用实际模型、请求时间、最终 service tier、请求体条件快照和当前目录价格投影费用；费用不写回模型历史。
+读取历史记录时，后端按实际模型、请求时刻、最终 service tier 与当前目录价格计算费用；金额不写回模型历史。
 
-### 请求体条件定价
+### 定价定义与未知费用
 
-价格规则条件支持可选的 `requestBody` 叶子，对最终编码后实际发送给 Provider 的 JSON 请求体做精确标量比较：
+模型价格 `pricing` 可为 `null`，表示尚未配置价格；显式全零的完整定义表示已配置且免费，两者不能混同。完整定义为 `{base, rules, changes}`：基础费率按 USD / 百万 token 表达，普通费率缺省为零，`reasoning: null` 表示沿用最终 output 费率，缓存写入可以按正整数秒声明 TTL 费率。
 
-```json
-{
-  "requestBody": {
-    "path": "/speed",
-    "equals": "fast"
-  }
-}
-```
+规则只有三种固定类型：
 
-`path` 是 RFC 6901 JSON Pointer，必须非空、以 `/` 开头、只使用 `~0`/`~1` 转义，最多 16 段且不超过 512 UTF-8 字节；空属性名合法。数组下标必须是非负规范十进制（`0` 或无前导零），不做表达式、通配符或相对路径解析。`equals` 可为 JSON string、number、boolean 或 null；两个字段必须同时出现，省略 `equals` 与显式 `equals: null` 语义不同。字符串区分大小写、不裁剪、不做类型转换，长度不超过 1024 UTF-8 字节。
+- `input_token_range` 在 `minInputTokens`（含）至 `maxInputTokensExclusive`（不含）范围覆盖所列费率；范围按该请求的上下文 token 总数匹配。
+- `time_multiplier` 按本次 attempt 开始时刻匹配 IANA 时区内左闭右开的时段及可选 ISO 周几（1=周一、7=周日）。
+- `service_tier_multiplier` 按 Provider 最终报告的 service tier 匹配。
 
-字段缺失、路径穿过标量或实际值为对象/数组都表示确定不匹配；`equals: null` 只匹配实际存在的 null，不匹配缺失字段。
+同一类型的规则范围必须互斥。token 范围选择费率，time 与 service tier 分别选择倍率；统一 `factor` 作用于全部费用项，逐项倍率可覆盖它。time 与 service-tier 命中时倍率相乘。每个 `changes` 项用 ISO `from` 日期（UTC、含当天）起替换完整的 `base` 与 `rules`，不是对旧费率做增量修补。
 
-数字使用十进制精确比较，不经过二进制浮点：`2` 与 `2.0` 相等，`"2"` 与 `2` 不相等；规范值去尾零、不用指数，零统一为 `0`，精度最多 64 位，规范十进制 scale 在 `-18..18` 之间。比较对象是 Provider encoder 实际输出的 JSON，而不是调用方草稿、URL 或二次 preview；客户端可控字段是否影响价格由管理员配置决定，不证明上游实际 tier 或计费档位。目录编辑器以结构化 path、类型和值控件编辑该叶子，不提供原始表达式，保存前复用同一组边界校验。
+已移除 request-body 条件定价。旧历史中的 `requestBodyPricing` 哈希与布尔快照仅由历史 codec 解码和保留，不参与当前价格匹配、费用计算或从当前配置重建事实。缺少该历史字段不改变当前定价结果。
 
-编辑数字条件需要浏览器同时支持 `JSON.parse` reviver 的 `context.source` 和 `JSON.rawJSON`。读取时保留数字原文，提交时仍写为 JSON number；缺少所需能力时明确报错，不先舍入或改成字符串。
-
-一次成功 attempt 只持久化条件指纹到布尔结果的快照：指纹是 UTF-8 `path + NUL + type + NUL + canonicalExpectedValue` 的 SHA-256 小写十六进制；规则 id、价格和实际字段值都不进入指纹。快照最多 128 个唯一条件，未知结果不写入。请求体缺失、非法、超过 32 MiB、嵌套超过 64 层或没有可用的请求体观察时，request-body 条件保持未知，不截断请求体、不解析前缀、不伪造匹配结果。`all`/`any`/`not` 继续使用 false/unknown/true 三态语义，`NOT unknown` 仍为 unknown。
-
-历史费用只用成功记录中已持久化的快照投影。记录若缺少请求体快照，涉及的 request-body 条件一律为未知，即使配置了相同或不同条件也不能反推；因此显示未知费用，不会补零或重新判定。价格变化影响未来投影，缺失指纹的结果不会因当前配置而被补造。只保存哈希与布尔值，不保存请求 body、消息、header 或实际参数值。
+缺少 `pricing` 时不产生费用，不能补成零；完整零费率或合法的零用量可以产生真实 `$0`。定价规则所需的请求时刻、service tier 等事实缺失，或独立 reasoning 费率需要而 usage 未报告可信推理子集时，费用为未知而不是零。
 
 ### 分类与未知事实
 

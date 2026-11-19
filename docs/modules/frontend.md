@@ -88,7 +88,7 @@ Thread/Canvas 先读取 Snapshot，再订阅 `/ws/events`。
 接受连接却不发 `connected`（或立即关闭）的服务端会继续退避，不会以最小间隔无限重试。
 浏览器 online 或页面重新可见时立即重连，并同时重置退避序列（用户侧恢复信号）。
 资源只声明自身语义：thread 带 version 与 lossy realtime delta，canvas 带 revision，
-projects/interactions/environments 发 changed 提示、不携带 cursor；thread-tree 推完整 `snapshot`（`data.nodes` 为权威节点 DTO 数组，不附带 Thread.version cursor），客户端直接验证并写入对应 root/bound query 缓存。执行树 HTTP 只 bootstrap 真实 root；成功订阅后关闭自动 HTTP focus/reconnect 回读，`subscribed` 只确认 wire 状态，服务端强制 snapshot 完成初始化与重连恢复。执行树 `resync` 和用户显式刷新经 `{type:'refresh',resource}` 请求同 root publisher，不新增订阅；其他资源仍按既有规则回读。
+projects/interactions/environments 发 changed 提示、不携带 cursor；thread-tree 推完整 `snapshot`（`data.nodes` 为权威节点 DTO 数组，不附带 Thread.version cursor），客户端直接验证并写入对应 root/bound query 缓存。Thread 的首载先 `GET /api/harness/threads/{threadId}` 取得完整权威快照与 `headEntryId`，再以该 head 作为订阅的 `afterEntryId` 建立 `/ws/events` 订阅；`subscribed.cursor` 固定为 `"0"`，紧随其后的 `snapshot` 携带该 Entry 游标对应的权威状态与增量，不替代客户端的完整历史链。后续 `realtime` 只作为变化提示，客户端从当时缓存的 head 用同一 fetcher 请求增量快照并延续完整 Entry 链。执行树 HTTP 只 bootstrap 真实 root；成功订阅后关闭自动 HTTP focus/reconnect 回读，`subscribed` 只确认 wire 状态，服务端强制 snapshot 完成初始化与重连恢复。执行树 `resync` 和用户显式刷新经 `{type:'refresh',resource}` 请求同 root publisher，不新增订阅；其他资源仍按既有规则回读。
 执行树 projector/delivery 失败通过资源级 `TREE_SNAPSHOT_FAILED` 报错，保留旧缓存并显示刷新失败，不自动重试；用户显式刷新、真实变化或重连才再次请求。bootstrap 无数据失败时重试仍走 HTTP。Thread checkpoint 可在相同 version 内更新，因此同 version Snapshot 仍参与对账，Canvas revision 提示严格大于本地值时才触发读取。畸形消息在 codec 层拒绝、不到达 listener；没有 EventSource，也不用固定轮询兜底。
 
 Thread Snapshot 只有一份 query 缓存，所有读取都经
@@ -341,8 +341,7 @@ Thread 处于等待审批时活动条显示“等待审批”；实际工具等�
 的 XML 标签保留为普通文本，摘要只读取 `COMPACTION.payload.summaryText`。失败与停止卡片在原位置提供“重新压缩”，
 可用性与命令面板同源，Thread 忙或不可压缩时禁用并显示原因。
 
-带分支 Thread id 的卡片提供“查看执行”，用与子代理相同的 pane/route 入口打开只读执行视图：按切点
-`afterEntryId` 只读取分支自己的 Entry，展示继承的上下文量、固定压缩指令、每次模型调用的用量与费用，以及
+带分支 Thread id 的卡片提供“查看执行”，用与子代理相同的 pane/route 入口打开只读执行视图：按切点查询只读取分支自己的 Entry，响应含 `baseEntryId` 与从该游标之后的 Entry；非祖先游标回退完整快照。完整链仍由客户端保留，增量只在基线仍位于当前链时按 Entry id 幂等拼接。Thread 的 version 是控制状态 CAS 游标，流式 checkpoint 可在相同 version 更新；不能用版本相等跳过快照对账。视图展示继承的上下文量、固定压缩指令、每次模型调用的用量与费用，以及
 被停用的工具调用结果；运行中提供 Stop（`POST /api/harness/threads/{childThreadId}/stop`），视图没有 Composer。
 最新一次成功压缩的切点之后，首条保留 Entry 之前有一条“以上内容已压缩为摘要”分隔线；失败或停止的压缩不移动保留段。
 压缩分支只从压缩卡进入，执行树与 Thread 列表始终排除 `COMPACTION`。
@@ -411,8 +410,9 @@ settings，不静默改写。
 Model 目录在同一列表中区分 `MODEL` 与 `GROUP`，二者共用全局逻辑名称空间；Group 表单按顺序维护
 Fill First 成员，并编辑 `fallbackStatusCodes`（HTTP 400–599，可为空）与 `cooldownSeconds`
 （非负，0 表示仅本次降级）。单模型表单编辑 `modelId`、limit、abilities、variants 与结构化
-pricing；金额输入按十进制字符串提交，不引入 currency 或 unpriced 开关。pricing 编辑器按基础价格、
-规则列表、费率字段与条件编辑器拆分，override 与 multiplier 共用同一规则列表和费率字段渲染。
+pricing；金额输入按十进制字符串提交，不引入 currency 或独立 unpriced 开关，`pricing: null` 表示未定价。
+已配置价格以基础费率、固定三类互斥规则和 ISO 日期调价计划组成；同组规则互斥、组间倍率相乘。
+pricing 编辑器按基础价格、规则 type、逐费用项倍率与调价计划编辑，不用数组顺序表达优先级。
 新建 Model 的 models.dev 候选目录按当前搜索词分页读取：刷新后重取筛选后的第一页，
 不把不带 query 的刷新首页混入列表，翻页游标只与产生它的搜索词配对，迟到响应按请求代际丢弃。
 Catalog 三个目录页共享 `CatalogRuntime` 上下文：页面控制器负责搜索、过滤与查询聚合；
