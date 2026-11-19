@@ -402,6 +402,31 @@ describe('ProjectsPage', () => {
     })
   })
 
+  it('keeps loaded project cards visible while a background refresh is pending', async () => {
+    // 测试意图：后台刷新期间保留已加载列表，不用首载骨架覆盖内容。
+    let resolveRefresh!: (projects: ProjectDTO[]) => void
+    const api = createMockApi({
+      listProjects: vi.fn()
+        .mockResolvedValueOnce(mockProjects)
+        .mockImplementationOnce(() => new Promise((resolve) => {
+          resolveRefresh = resolve
+        })),
+    })
+    const { queryClient } = renderProjectsPage(<ProjectsPage api={api} />)
+    expect(await screen.findByText('Alpha Project')).toBeInTheDocument()
+
+    await act(async () => {
+      const invalidation = invalidateProjectQueries(queryClient)
+      await waitFor(() => expect(api.listProjects).toHaveBeenCalledTimes(2))
+      expect(screen.getByText('Alpha Project')).toBeInTheDocument()
+      expect(screen.queryByRole('status')).not.toBeInTheDocument()
+      resolveRefresh([{ ...mockProjects[0], title: 'Refreshed Project' }])
+      await invalidation
+    })
+
+    expect(await screen.findByText('Refreshed Project')).toBeInTheDocument()
+  })
+
   it('ignores a stale project list response after a newer invalidation reload', async () => {
     // 测试意图：验证 invalidation reload 之后，最新权威数据正确更新替换旧数据
     const initialProjects = [{ ...mockProjects[0], title: 'Initial Project' }]

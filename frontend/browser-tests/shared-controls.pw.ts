@@ -8,7 +8,6 @@ import { tokenColor } from './fixture'
  */
 
 const DANGER = 'rgb(240, 133, 133)'
-const GREEN = 'rgb(113, 231, 154)'
 
 async function expectHeight(locator: Locator, expected: number) {
   const box = await locator.boundingBox()
@@ -21,7 +20,7 @@ async function expectHeight(locator: Locator, expected: number) {
  * ringOn 指定承载焦点环的元素（Checkbox 的环在其兄弟节点上）。
  */
 async function targetFocusRing(page: Page, target: Locator, ringOn: Locator, borderColor: string) {
-  await page.keyboard.press('Shift')
+  await page.keyboard.press('Tab')
   await target.focus()
   await expect(page.locator(':focus-visible')).toHaveCount(1)
   // 部分控件对 box-shadow 有过渡，需等到过渡收敛。
@@ -31,12 +30,11 @@ async function targetFocusRing(page: Page, target: Locator, ringOn: Locator, bor
   await expect(ringOn).toHaveCSS('border-color', borderColor)
 }
 
-async function expectFocusRing(page: Page, locator: Locator, borderColor: string) {
-  await locator.focus()
-  await expect
-    .poll(async () => locator.evaluate((el) => getComputedStyle(el).boxShadow))
-    .toContain(await tokenColor(page, '--focus-ring'))
-  await expect(locator).toHaveCSS('border-color', borderColor)
+async function expectPointerFocusIsNeutral(page: Page, locator: Locator) {
+  await locator.click()
+  await expect(locator).toHaveCSS('border-color', await tokenColor(page, '--border-hover'))
+  await expect(locator).toHaveCSS('box-shadow', 'none')
+  await expect(locator).toHaveCSS('outline-style', 'none')
 }
 
 test.describe('shared form controls in real form contexts', () => {
@@ -95,17 +93,25 @@ test.describe('shared form controls in real form contexts', () => {
   })
 
   test('keeps focus rings and danger borders on shared controls', async ({ page }) => {
-    // 文本输入与数值输入用 :focus 语义。
-    await expectFocusRing(page, page.locator('.control-text').first(), GREEN)
-    await expectFocusRing(page, page.locator('.control-number').first(), GREEN)
+    // 鼠标聚焦只改变中性边框，不显示白/绿焦点光晕。
+    await expectPointerFocusIsNeutral(page, page.locator('.control-text').first())
+    await expectPointerFocusIsNeutral(page, page.locator('.control-number').first())
 
     // Select 触发按钮与 Checkbox 走 :focus-visible 语义：用真实键盘建立模态再聚焦。
+    const neutralBorder = await tokenColor(page, '--border-hover')
     const trigger = page.locator('.control-select .ui-select-trigger').first()
-    await targetFocusRing(page, trigger, trigger, GREEN)
+    await targetFocusRing(page, trigger, trigger, neutralBorder)
 
     const checkboxInput = page.locator('.control-checkbox .ui-checkbox-input').first()
     const checkboxBox = page.locator('.control-checkbox .ui-checkbox-box').first()
-    await targetFocusRing(page, checkboxInput, checkboxBox, GREEN)
+    await targetFocusRing(page, checkboxInput, checkboxBox, await tokenColor(page, '--accent'))
+
+    await page.keyboard.press('Tab')
+    const textInput = page.locator('.control-text').first()
+    await textInput.focus()
+    await expect(textInput).toHaveCSS('outline-style', 'solid')
+    await expect(textInput).toHaveCSS('outline-width', '2px')
+    await expect(textInput).toHaveCSS('outline-color', await tokenColor(page, '--focus'))
 
     // 校验失败：共享控件保持 danger 边框。
     for (const selector of [
@@ -131,6 +137,60 @@ test.describe('shared form controls in real form contexts', () => {
         .evaluate((el) => getComputedStyle(el).boxShadow)
       expect(shadow).not.toContain('rgba(255, 96, 96')
     }
+  })
+
+  test('shows HelpHint on hover/focus, dismisses it, and keeps required semantics', async ({ page }) => {
+    const trigger = page.getByRole('button', { name: '帮助：资源名称' })
+    const requiredInput = page.getByRole('textbox', { name: '资源名称' })
+    await expect(requiredInput).toHaveAttribute('required', '')
+    await expect(page.getByText('*', { exact: true })).toBeVisible()
+
+    await trigger.hover()
+    const tooltip = page.getByRole('tooltip')
+    await expect(tooltip).toHaveText('用于识别该资源。')
+    const box = await tooltip.boundingBox()
+    expect(box).not.toBeNull()
+    expect(box!.x).toBeGreaterThanOrEqual(8)
+    expect(box!.x + box!.width).toBeLessThanOrEqual(1272)
+    await tooltip.hover()
+    await expect(tooltip).toBeVisible()
+
+    await requiredInput.focus()
+    await page.keyboard.press('Escape')
+    await expect(page.getByRole('tooltip')).toHaveCount(0)
+    await expect(requiredInput).toBeFocused()
+
+    await page.keyboard.press('Tab')
+    await trigger.focus()
+    await expect(page.getByRole('tooltip')).toBeVisible()
+    await page.getByRole('heading', { name: '表单上下文' }).click()
+    await expect(page.getByRole('tooltip')).toHaveCount(0)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await trigger.hover()
+    const narrowBox = await page.getByRole('tooltip').boundingBox()
+    expect(narrowBox).not.toBeNull()
+    expect(narrowBox!.x).toBeGreaterThanOrEqual(8)
+    expect(narrowBox!.x + narrowBox!.width).toBeLessThanOrEqual(382)
+  })
+
+  test('opens and closes HelpHint using real touch input', async ({ browser }) => {
+    const context = await browser.newContext({
+      baseURL: `http://127.0.0.1:${process.env.KK_BROWSER_PORT ?? '5174'}`,
+      hasTouch: true,
+      isMobile: true,
+      viewport: { width: 390, height: 844 },
+    })
+    const touchPage = await context.newPage()
+    await touchPage.goto('/browser-tests/shared-controls-harness.html')
+    const trigger = touchPage.getByRole('button', { name: '帮助：资源名称' })
+
+    await trigger.tap()
+    await expect(touchPage.getByRole('tooltip')).toBeVisible()
+    await trigger.tap()
+    await expect(touchPage.getByRole('tooltip')).toHaveCount(0)
+
+    await context.close()
   })
 
   // 普通（非共享）控件的表单规则按 32px 节奏生效。

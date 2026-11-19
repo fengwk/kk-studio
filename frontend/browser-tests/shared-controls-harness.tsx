@@ -3,12 +3,15 @@ import { createRoot } from 'react-dom/client'
 import '@/styles.css'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
+import { HelpHint } from '@/shared/ui/controls/HelpHint'
 import { NumberInput } from '@/shared/ui/controls/NumberInput'
 import { SearchField } from '@/shared/ui/controls/SearchField'
 import { Select } from '@/shared/ui/controls/Select'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
+import { installFocusModality } from '@/shared/ui/focus-modality'
 
 const OPTIONS = [
   { value: 'alpha', label: '选项 A' },
@@ -240,6 +243,13 @@ function PageSection() {
       <div className="harness-toolbar" style={{ display: 'flex', alignItems: 'center', width: 320 }}>
         <SearchField value={search} onChange={setSearch} aria-label="页级搜索框" />
       </div>
+      <div className="form-group" style={{ width: 320 }}>
+        <div className="field-label-row">
+          <FieldLabel required>必填资源名称</FieldLabel>
+          <HelpHint label="帮助：资源名称">用于识别该资源。</HelpHint>
+        </div>
+        <TextInput id="required-resource-name" required aria-label="资源名称" value="" readOnly />
+      </div>
       <FormControls scope="页内" />
     </section>
   )
@@ -276,6 +286,8 @@ export function SharedControlsHarnessApp() {
     </div>
   )
 }
+
+installFocusModality()
 
 const rootEl = document.getElementById('root')
 if (rootEl) {

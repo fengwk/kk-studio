@@ -365,6 +365,10 @@ describe('AgentForm current contracts', () => {
     // 未配置模型时标记为必填，并允许用户一键填充第一个 model
     const modelTrigger = screen.getByLabelText('Default Model')
     expect(modelTrigger).toHaveAttribute('aria-required', 'true')
+    expect(modelTrigger.closest('label')?.querySelector('.field-required')).toHaveAttribute(
+      'aria-hidden',
+      'true',
+    )
     const fillButton = screen.getByRole('button', {
       name: '使用第一个 Model 填充默认配置',
     })

@@ -201,7 +201,12 @@
 }
 
 .settings-input:focus {
-  border-color: var(--accent-border);
+  border-color: var(--border-hover);
+}
+
+.settings-input:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
 }
 
 .settings-input:disabled {
