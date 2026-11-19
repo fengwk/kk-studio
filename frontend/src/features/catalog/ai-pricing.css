@@ -1,4 +1,47 @@
-/* 模型计价：rate 输入、折叠与规则列表。 */
+/* 模型计价：结构化定价编辑器与规则列表。 */
+.pricing-plan-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pricing-plan-section h4 {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+}
+
+.pricing-plan-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  align-items: start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pricing-plan-row[data-conflict="true"] {
+  border-color: var(--danger);
+}
+
+.weekday-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pricing-factor-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pricing-factor-details summary {
+  cursor: pointer;
+}
+
 .price-input {
   display: flex;
   align-items: center;
