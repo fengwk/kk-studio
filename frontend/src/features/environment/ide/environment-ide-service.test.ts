@@ -4,18 +4,15 @@ import {
   listIdeDirectories,
   openIdeAttachment,
 } from '@/features/environment/ide/environment-ide-service'
-import { executeFetch, request } from '@/shared/api/client'
+import { request } from '@/shared/api/client'
 
-vi.mock('@/shared/api/client', () => ({ executeFetch: vi.fn(), request: vi.fn() }))
+vi.mock('@/shared/api/client', () => ({ request: vi.fn() }))
 
 const requestMock = vi.mocked(request)
-const executeFetchMock = vi.mocked(executeFetch)
 
 beforeEach(() => {
   requestMock.mockReset()
-  executeFetchMock.mockReset()
   requestMock.mockResolvedValue(undefined)
-  executeFetchMock.mockResolvedValue(undefined)
 })
 
 describe('environmentIdeService', () => {
@@ -60,9 +57,12 @@ describe('environmentIdeService', () => {
       binding,
     )
 
-    expect(executeFetchMock).toHaveBeenCalledWith(
-      '/api/ide/environments/environment%2Fid/views/view%20id/attachments/session-id/resource-id',
-      { method: 'POST', body: binding },
+    expect(requestMock).toHaveBeenCalledWith(
+      'POST /api/ide/environments/{environmentId}/views/{viewId}/attachments/{sessionId}/{resourceId}',
+      {
+        path: { environmentId: 'environment/id', viewId: 'view id', sessionId: 'session-id', resourceId: 'resource-id' },
+        body: binding,
+      },
     )
   })
 
