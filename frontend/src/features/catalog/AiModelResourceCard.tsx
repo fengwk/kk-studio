@@ -28,6 +28,18 @@ function formatAbilities(model: ModelDTO): string {
   return flags.length > 0 ? flags.join(' · ') : translate('ai.catalog.card.emptyValue')
 }
 
+function formatModelPricing(model: ModelDTO): string {
+  if (model.type !== 'MODEL' || !model.config?.pricing) {
+    return translate('ai.catalog.form.pricingUnpriced')
+  }
+  const { base } = model.config.pricing
+  return translate('ai.catalog.card.pricingSummary', {
+    input: `$${base.input}`,
+    output: `$${base.output}`,
+    cacheWrite: base.cacheWrite == null ? '—' : `$${base.cacheWrite}`,
+  })
+}
+
 function formatLimit(model: ModelDTO): string {
   const contextWindow = extractContextWindow(model)
   const output = extractMaxOutputTokens(model)
@@ -93,6 +105,7 @@ export function ModelResourceCard({
         [t('ai.catalog.card.modelId'), singleModel?.modelId || t('ai.catalog.card.emptyValue')],
         [t('ai.catalog.card.limit'), formatLimit(model)],
         [t('ai.catalog.card.ability'), formatAbilities(model)],
+        [t('ai.catalog.card.pricing'), formatModelPricing(model)],
         [t('ai.catalog.card.default'), defaultVariant || t('ai.catalog.card.emptyValue')],
         { label: t('ai.catalog.card.variants'), tags: variants, limit: 3 },
       ]}

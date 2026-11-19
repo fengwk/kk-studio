@@ -1,4 +1,6 @@
 import { expect, test, type Locator, type Page } from './fixture'
+import type { ModelCreateDTO } from '@/shared/api/generated/contracts'
+import { FIXTURE_CREATED_MODEL } from './model-browser-fixtures'
 import {
   FIXTURE_DEFAULTS_PAGE,
   FIXTURE_MODELS,
@@ -15,8 +17,15 @@ const VIEWPORTS = [
  * 浏览器内 API fixture：模型页使用真实 service/fetch 路径，但请求全部由测试进程
  * 以固定数据回应，不连接后端、生产端口或真实模型目录。
  */
-async function installFakeCatalogServer(page: Page): Promise<string[]> {
+async function installFakeCatalogServer(page: Page): Promise<{
+  calls: string[]
+  createBodies: ModelCreateDTO[]
+  previewBodies: unknown[]
+}> {
   const calls: string[] = []
+  const createBodies: ModelCreateDTO[] = []
+  const previewBodies: unknown[] = []
+  let models = [...FIXTURE_MODELS]
   await page.route(
     (url) => url.pathname.startsWith('/api/'),
     async (route) => {
@@ -35,7 +44,34 @@ async function installFakeCatalogServer(page: Page): Promise<string[]> {
         return
       }
       if (request.method() === 'GET' && path === '/api/platform/models') {
-        await json(FIXTURE_MODELS)
+        await json(models)
+        return
+      }
+      if (request.method() === 'POST' && path === '/api/platform/models') {
+        createBodies.push(request.postDataJSON() as ModelCreateDTO)
+        models = [...models, FIXTURE_CREATED_MODEL]
+        await json(FIXTURE_CREATED_MODEL)
+        return
+      }
+      if (request.method() === 'GET' && path === '/api/platform/models/capabilities') {
+        await json({
+          promptCacheOptions: [
+            { retention: 'NONE' },
+            { retention: 'SHORT', ttlSeconds: '3600', writeMultiplier: 2 },
+            { retention: 'LONG' },
+          ],
+          defaultPromptCacheRetention: 'SHORT',
+          automaticCache: true,
+        })
+        return
+      }
+      if (request.method() === 'POST' && path === '/api/platform/models/pricing-preview') {
+        previewBodies.push(request.postDataJSON())
+        await json({
+          rates: { input: '3.20', output: '9.60', cacheRead: '0.1', cacheWrite: null, cacheWriteByTtl: {}, reasoning: null },
+          activeFrom: '2027-01-01',
+          matchedRules: [{ type: 'service_tier_multiplier', serviceTier: 'priority', factor: '2' }],
+        })
         return
       }
       if (path === '/api/platform/model-catalog' || path === '/api/platform/model-catalog/refresh') {
@@ -54,7 +90,7 @@ async function installFakeCatalogServer(page: Page): Promise<string[]> {
       })
     },
   )
-  return calls
+  return { calls, createBodies, previewBodies }
 }
 
 async function gotoHarness(page: Page, params = '') {
@@ -113,7 +149,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
   test('keeps the model grid/search/single create card; create tabs own independent drafts; edit has no type switch', async ({
     page,
   }) => {
-    const calls = await installFakeCatalogServer(page)
+    const { calls } = await installFakeCatalogServer(page)
 
     for (const viewport of VIEWPORTS) {
       await page.setViewportSize(viewport)
@@ -240,10 +276,51 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     expect(calls).not.toContain('PUT /api/platform/models/main')
   })
 
+  test('creates an unpriced model, submits no invented rates, and reopens the saved draft', async ({
+    page,
+  }) => {
+    const { createBodies } = await installFakeCatalogServer(page)
+    await page.setViewportSize({ width: 1280, height: 900 })
+    await gotoHarness(page)
+    await page.locator('.create-card').click()
+
+    let dialog = page.getByRole('dialog')
+    await selectListOption(page, dialog.getByLabel('Provider', { exact: true }), 'acme')
+    await dialog.getByLabel('Name', { exact: true }).fill('new-model')
+    await dialog.getByLabel('Model ID', { exact: true }).fill('acme-new-model')
+    await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
+
+    const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
+    const inputPrice = pricing.getByLabel('Input USD per million tokens', { exact: true })
+    await expect(inputPrice).toHaveValue('')
+    await expect(inputPrice).toHaveAttribute('placeholder', '未定价')
+    await expect(pricing).toContainText('价格单位为 USD / 百万 tokens。留空表示未知，不代表免费。')
+    await dialog.getByRole('button', { name: '确认创建', exact: true }).click()
+
+    await expect(page.getByRole('dialog')).toHaveCount(0)
+    const newModelCard = page.locator('.resource-card').filter({ hasText: 'new-model' })
+    await expect(newModelCard).toContainText('未定价')
+    expect(createBodies).toHaveLength(1)
+    const submitted = createBodies[0]
+    expect(submitted?.type).toBe('MODEL')
+    if (submitted?.type === 'MODEL') {
+      expect(submitted.config).not.toHaveProperty('pricing')
+      expect(submitted.config.variants[0]?.promptCacheRetention).toBe('SHORT')
+    }
+
+    await newModelCard.getByRole('button', { name: '编辑 new-model', exact: true }).click()
+    dialog = page.getByRole('dialog')
+    await expect(dialog.getByLabel('Name', { exact: true })).toHaveValue('new-model')
+    const reopenedPricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
+    await expect(reopenedPricing.getByLabel('Input USD per million tokens', { exact: true })).toHaveValue('')
+    await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
+    await dialog.getByRole('button', { name: '关闭', exact: true }).click()
+  })
+
   test('catalog rows preview without writing draft; fill applies limits/abilities/pricing/variants only', async ({
     page,
   }) => {
-    await installFakeCatalogServer(page)
+    const { previewBodies } = await installFakeCatalogServer(page)
 
     for (const viewport of VIEWPORTS) {
       await page.setViewportSize(viewport)
@@ -294,8 +371,20 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
         fullPage: true,
       })
 
-      // 每行一键填入才是写草稿的唯一动作；填完收起候选区且不增加第二个 Modal。
-      await candidates.nth(0).getByRole('button', { name: '一键填入', exact: true }).click()
+      // 不支持价格转换的候选保留原价并说明原因；Picker 关闭后经真实按钮重开再选可转换候选。
+      await candidates.nth(1).getByRole('button', { name: '一键填入', exact: true }).click()
+      await expect(page.locator('.catalog-candidate-list')).toHaveCount(0)
+      await expect(contextWindow).toHaveValue('32768')
+      const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
+      await expect(pricing.getByLabel('Input USD per million tokens')).toHaveValue('1')
+      await expect(pricing).toContainText('目录价格无法等价导入，原有价格已保留。')
+      await pricing.getByText('查看目录价格', { exact: true }).click()
+      await expect(pricing.locator('.pricing-import-notice')).toContainText('目录没有可导入的完整价格。')
+
+      await dialog.getByRole('button', { name: '获取默认模型参数', exact: true }).click()
+      const reopenedCandidates = page.locator('.catalog-candidate')
+      await expect(reopenedCandidates).toHaveCount(2)
+      await reopenedCandidates.nth(0).getByRole('button', { name: '一键填入', exact: true }).click()
       await expect(page.locator('.catalog-candidate-list')).toHaveCount(0)
       await expect(page.getByRole('dialog')).toHaveCount(1)
       await expect(contextWindow).toHaveValue('200000')
@@ -308,85 +397,55 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
       )
       await expect(dialog.getByLabel('Variant ID 1', { exact: true })).toHaveValue('turbo')
       await expect(dialog.getByLabel('Variant ID 2', { exact: true })).toHaveValue('thinking')
-
-      // 价格区完整可用：base、TTL、reasoning 继承/覆盖、override 与 multiplier。
-      const pricing = dialog.locator('section[aria-labelledby="model-pricing-heading"]')
       await expect(pricing.getByLabel('Input USD per million tokens')).toHaveValue('3')
       await expect(pricing.getByLabel('Output USD per million tokens')).toHaveValue('15')
       await expect(pricing.getByLabel('Cache Read USD per million tokens')).toHaveValue('0.3')
       await expect(pricing.getByLabel('Cache Write USD per million tokens')).toHaveValue('3.75')
+      await expect(pricing.getByRole('heading', { name: '输入档位' })).toBeVisible()
+      await expect(pricing.getByRole('heading', { name: '服务档' })).toBeVisible()
+      await expect(pricing.getByRole('heading', { name: '时段规则' })).toBeVisible()
+      await expect(pricing.getByLabel('TTL 秒数', { exact: true })).toHaveValue('3600')
+      await expect(pricing.getByRole('textbox', { name: 'Reasoning', exact: true }).first()).toHaveValue('9')
+      await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'SHORT')
+
+      const rangeGroup = pricing.locator('.pricing-plan-section').nth(1)
+      await expect(rangeGroup.locator('.pricing-plan-row')).toHaveCount(1)
+      await expect(rangeGroup.getByLabel('输入 tokens 起')).toHaveValue('200001')
+      const tierGroup = pricing.locator('.pricing-plan-section').nth(2)
+      await expect(tierGroup.getByLabel('服务档名称')).toHaveValue('priority')
+      const timeGroup = pricing.locator('.pricing-plan-section').nth(3)
+      await expect(timeGroup.getByLabel('开始时间')).toHaveValue('00:00')
+      await expect(timeGroup.getByLabel('结束时间')).toHaveValue('24:00')
+      await timeGroup.getByLabel('时区').fill('Europe/Paris')
+      await expect(timeGroup.getByLabel('时区')).toHaveValue('Europe/Paris')
+      await timeGroup.getByLabel('时区').fill('UTC')
+
       await pricing.scrollIntoViewIfNeeded()
       await page.screenshot({
-        path: test.info().outputPath(`catalog-pricing-base-${viewport.width}.png`),
+        path: test.info().outputPath(`catalog-pricing-${viewport.width}.png`),
         fullPage: true,
       })
 
-      await pricing.getByRole('button', { name: '缓存写入 TTL 覆盖', exact: true }).click()
-      await expect(pricing.getByLabel('TTL 秒数', { exact: true })).toHaveValue('3600')
-      const ttlRate = pricing.getByLabel('TTL 缓存写入价', { exact: true })
-      await expect(ttlRate).toHaveValue('7.5')
-      await ttlRate.fill('8.5')
-      await expect(ttlRate).toHaveValue('8.5')
-
-      const reasoningPricing = pricing.getByRole('checkbox', { name: '思考独立定价', exact: true })
-      const reasoningPricingToggle = pricing.locator('label.ui-checkbox', { hasText: '思考独立定价' })
-      await expect(reasoningPricing).toBeChecked()
-      await expect(pricing.getByRole('textbox', { name: 'Reasoning', exact: true })).toHaveValue('9')
-      await reasoningPricingToggle.click()
-      await expect(reasoningPricing).not.toBeChecked()
-      await expect(pricing.getByRole('textbox', { name: 'Reasoning', exact: true })).toHaveCount(0)
-      await reasoningPricingToggle.click()
-      await expect(reasoningPricing).toBeChecked()
-      await expect(pricing.getByRole('textbox', { name: 'Reasoning', exact: true })).toHaveValue('0')
-      await page.screenshot({
-        path: test.info().outputPath(`catalog-pricing-ttl-${viewport.width}.png`),
-        fullPage: true,
+      // 试算使用后端返回的价格与命中规则，而不是浏览器按浮点数本地计算。
+      await pricing.getByLabel('输入 tokens', { exact: true }).fill('250000')
+      await pricing.getByLabel('请求开始时间（UTC）', { exact: true }).fill('2027-01-05T02:00')
+      await pricing.getByLabel('实际返回服务档', { exact: true }).fill('priority')
+      await pricing.getByRole('button', { name: '试算价格', exact: true }).click()
+      const previewResult = pricing.locator('.pricing-preview-result')
+      await expect(previewResult).toContainText('$3.20')
+      await expect(previewResult).toContainText('priority · ×2')
+      await expect(previewResult).toContainText('2027-01-01')
+      expect(previewBodies.at(-1)).toMatchObject({
+        inputTokens: 250000,
+        requestedAt: Date.parse('2027-01-05T02:00:00Z'),
+        serviceTier: 'priority',
+        pricing: { base: { input: '3', output: '15' } },
       })
-
-      await pricing.getByRole('button', { name: '价格覆盖', exact: true }).click()
-      const overrideRule = pricing.locator('.pricing-rule').filter({ hasText: 'ov-ctx' })
-      await expect(overrideRule).toBeVisible()
-      await overrideRule.locator('.pricing-rule-summary').click()
-      const overrideInput = overrideRule.getByRole('textbox', { name: '覆盖 Input' })
-      await expect(overrideInput).toHaveValue('6')
-      await overrideInput.fill('6.5')
-      await expect(overrideInput).toHaveValue('6.5')
-
-      // 目录给出的全天时间必须可读可编辑；TTL patch 用显式空 map 表示清空继承。
-      await expect(overrideRule.getByLabel('开始时间', { exact: true })).toHaveValue('00:00')
-      await expect(overrideRule.getByLabel('结束时间', { exact: true })).toHaveValue('24:00')
-      const ttlOverride = overrideRule.getByRole('checkbox', { name: '覆盖缓存写入 TTL', exact: true })
-      await expect(ttlOverride).toBeChecked()
-      await expect(overrideRule.getByLabel('TTL 秒数', { exact: true })).toHaveCount(0)
-      await overrideRule.getByRole('button', { name: '添加 TTL 覆盖', exact: true }).click()
-      await expect(overrideRule.getByLabel('TTL 秒数', { exact: true })).toHaveValue('300')
-      if (viewport.width === 390) {
-        // 仅在归档截图时增高 390 视口，使 24:00 与 TTL 覆盖开关同屏可见。
-        await page.setViewportSize({ width: 390, height: 1400 })
-        await overrideRule.getByLabel('结束时间', { exact: true }).scrollIntoViewIfNeeded()
-        await page.screenshot({
-          path: test.info().outputPath('catalog-pricing-time-ttl-390.png'),
-          fullPage: true,
-        })
-        await page.setViewportSize(viewport)
-      }
-      await overrideRule.getByRole('button', { name: '删除 TTL 覆盖', exact: true }).click()
-      await expect(overrideRule.getByLabel('TTL 秒数', { exact: true })).toHaveCount(0)
-      await expect(ttlOverride).toBeChecked()
-
-      await pricing.getByRole('button', { name: '价格倍率', exact: true }).click()
-      const multiplierRule = pricing.locator('.pricing-rule').filter({ hasText: 'mx-tier' })
-      await expect(multiplierRule).toBeVisible()
-      await multiplierRule.locator('.pricing-rule-summary').click()
-      const multiplierInput = multiplierRule.getByRole('textbox', { name: '倍率 Input' })
-      await expect(multiplierInput).toHaveValue('1.5')
-      await multiplierInput.fill('1.8')
-      await expect(multiplierInput).toHaveValue('1.8')
 
       await expectNoHorizontalOverflow(page, dialog)
       await expect(dialog.getByRole('button', { name: '保存修改', exact: true })).toBeVisible()
       await page.screenshot({
-        path: test.info().outputPath(`catalog-pricing-${viewport.width}.png`),
+        path: test.info().outputPath(`catalog-pricing-${viewport.width}-preview.png`),
         fullPage: true,
       })
 

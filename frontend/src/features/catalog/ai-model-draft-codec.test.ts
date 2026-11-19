@@ -15,13 +15,16 @@ import type {
   ModelInputModality,
   ModelPricingDTO,
 } from '@/shared/api/generated/contracts'
+import { normalizePricingDraft } from '@/features/catalog/model-pricing-draft'
 
 function draft(overrides: Partial<ModelDraft> = {}): ModelDraft {
+  const empty = emptyModelDraft()
   return {
-    ...emptyModelDraft(),
+    ...empty,
     providerName: 'provider-1',
     name: 'model-a',
     modelId: 'wire-model-a',
+    variants: empty.variants.map((variant) => ({ ...variant, promptCacheRetention: 'NONE' })),
     ...overrides,
   }
 }
@@ -42,8 +45,8 @@ function fullConfig(): ModelConfigDTO {
     },
     pricing: {
       base: { input: '1.1', output: '2.2', cacheRead: '0.3', cacheWrite: '0.4', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: []
     },
     defaultVariant: 'quality',
     variants: [
@@ -71,23 +74,16 @@ function model(configOverride?: ModelConfigDTO): ModelDTO {
 }
 
 describe('ai-model-draft-codec', () => {
-  it('prefills new variants from the selected provider capability', () => {
-    // SHORT 不是协议默认值：只在 Provider 明确支持时预填。
-    expect(
-      emptyModelDraft({ name: 'openai', promptCacheRetentions: ['NONE', 'SHORT', 'LONG'] })
-        .variants[0]?.promptCacheRetention,
-    ).toBe('SHORT')
-    expect(
-      emptyModelDraft({ name: 'google', promptCacheRetentions: ['NONE'] })
-        .variants[0]?.promptCacheRetention,
-    ).toBe('NONE')
+  it('does not guess a cache retention before backend model capabilities load', () => {
+    expect(emptyModelDraft({ name: 'openai' }).variants[0]?.promptCacheRetention).toBe('')
   })
 
   /** 完整的持久化 config 必须能往返覆盖表单使用的每一个嵌套 schema 字段。 */
   it('reads nested limit, abilities, pricing, defaultVariant, and variant fields', () => {
     const source = model()
+    const localDraft = toModelDraft(source)
 
-    expect(toModelDraft(source)).toMatchObject({
+    expect(localDraft).toMatchObject({
       providerName: 'provider-1',
       name: 'model-a',
       contextWindow: '200000',
@@ -104,19 +100,8 @@ describe('ai-model-draft-codec', () => {
           reasoningEffort: 'high',
         },
       ],
-      pricing: {
-        base: {
-          input: '1.1',
-          output: '2.2',
-          cacheRead: '0.3',
-          cacheWrite: '0.4',
-          cacheWriteByTtl: {},
-          reasoning: null,
-        },
-        overrides: [],
-        multipliers: [],
-      },
     })
+    expect(localDraft.pricing.definition.base).toMatchObject({ input: '1.1', output: '2.2', cacheRead: '0.3' })
     expect(extractContextWindow(source)).toBe(200000)
     expect(extractVariantIdsFromModel(source)).toEqual(['quality'])
     expect(extractDefaultVariantFromModel(source)).toBe('quality')
@@ -153,7 +138,7 @@ describe('ai-model-draft-codec', () => {
 
   /** 序列化使用结构化 config 对象，并省略空的 optional variant 字段。 */
   it('writes the structured config and omits empty optional variant fields', () => {
-    const base = emptyModelDraft().variants[0]
+    const base = draft().variants[0]
     const input = draft({
       description: ' model desc ',
       contextWindow: '200000',
@@ -187,11 +172,6 @@ describe('ai-model-draft-codec', () => {
       messageLevelEffort: false,
         inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'],
       },
-      pricing: {
-      base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
-    },
       defaultVariant: 'quality',
       variants: [
         {
@@ -209,7 +189,7 @@ describe('ai-model-draft-codec', () => {
   })
   /** 关闭 reasoning 时必须防止陈旧的隐藏 reasoning-effort 值传到 providers。 */
   it('omits reasoningEffort when reasoning is disabled', () => {
-    const base = emptyModelDraft().variants[0]
+    const base = draft().variants[0]
     const input = draft({
       reasoning: false,
       variants: [{ ...base, reasoningEffort: 'high' }],
@@ -221,7 +201,7 @@ describe('ai-model-draft-codec', () => {
 
   /** 在发起 mutation 请求前，必须拒绝无效的 variant/default 关系。 */
   it('rejects empty, duplicate, unmatched, and invalid optional variants', () => {
-    const base = emptyModelDraft().variants[0]
+    const base = draft().variants[0]
     expect(() => buildModelConfig(draft({ variants: [] }))).toThrow(/at least one variant/i)
     expect(() =>
       buildModelConfig(
@@ -243,7 +223,7 @@ describe('ai-model-draft-codec', () => {
 
   /** 厂商自定义 reasoningEffort（如 MAX、xHigh）保留原始大小写且只 trim 空白，全空白被省略。 */
   it('accepts arbitrary provider reasoning efforts with exact casing and omits blanks', () => {
-    const base = emptyModelDraft().variants[0]
+    const base = draft().variants[0]
     const input = draft({
       reasoning: true,
       variants: [
@@ -263,7 +243,7 @@ describe('ai-model-draft-codec', () => {
 
   /** reasoningEffort 大小写保真（HIGH / high / xHigh），在 toEditableModel 保存 -> toModelDraft 重新编辑往返中保持不变。 */
   it('preserves exact casing for HIGH, high, and xHigh across toEditableModel and toModelDraft round-trip', () => {
-    const base = emptyModelDraft().variants[0]
+    const base = draft().variants[0]
     const input = draft({
       reasoning: true,
       variants: [
@@ -342,49 +322,42 @@ describe('ai-model-draft-codec', () => {
     expect(toggled).toEqual<ModelInputModality[]>(['TEXT'])
   })
 
-  /** 价格定义完整往返：基础费率、TTL、显式 0、覆盖与倍率规则均原样保留。 */
-  it('round-trips the full pricing definition across toModelDraft -> buildModelConfig', () => {
-    const pricing: ModelPricingDTO = {
+  /** Persisted flat rules load into fixed editor groups and serialize without editor-only keys. */
+  it('round-trips base rates, fixed rules and UTC price changes', () => {
+    const definition: Pick<ModelPricingDTO, 'base' | 'rules'> = {
       base: {
-        input: '9',
-        output: '11',
-        cacheRead: '1.25',
-        cacheWrite: '2.5',
-        cacheWriteByTtl: { '3600': '3.5' },
-        reasoning: '0',
+        input: '9', output: '11', cacheRead: '1.25', cacheWrite: '2.5',
+        cacheWriteByTtl: { '3600': '3.5' }, reasoning: '0',
       },
-      overrides: [
-        {
-          id: 'batch-cache',
-          when: { serviceTier: ['batch'] },
-          rates: { output: '5', reasoning: null },
-        },
-      ],
-      multipliers: [
-        {
-          id: 'priority',
-          when: { context: { gt: 200000 } },
-          factors: { input: '1.25' },
-        },
+      rules: [
+        { type: 'input_token_range', minInputTokens: 200001, maxInputTokensExclusive: 300001, input: '5', reasoning: null },
+        { type: 'service_tier_multiplier', serviceTier: 'priority', factor: '1.25', inputFactor: '1.1' },
+        { type: 'time_multiplier', start: '01:00', end: '04:00', timezone: 'UTC', weekdays: [1, 2, 3, 4, 5], factor: '0.8' },
       ],
     }
+    const pricing: ModelPricingDTO = { ...definition, changes: [{ from: '2027-01-01', ...definition }] }
     const source = model({ ...fullConfig(), pricing })
     const draftFromModel = toModelDraft(source)
+    expect(draftFromModel.pricing.definition.inputTokenRanges).toHaveLength(1)
+    expect(draftFromModel.pricing.definition.serviceTiers[0]?.serviceTier).toBe('priority')
+    expect(draftFromModel.pricing.definition.timePeriods[0]?.weekdays).toEqual([1, 2, 3, 4, 5])
+    expect(normalizePricingDraft(draftFromModel.pricing)).toEqual(pricing)
     expect(buildModelConfig(draftFromModel).pricing).toEqual(pricing)
   })
 
-  /** 价格校验拒绝非法 decimal，且不会把空 reasoning 静默写成 0。 */
-  it('rejects invalid decimal rates instead of coercing them', () => {
+  it('omits pricing for a new unpriced model and rejects invalid explicit prices', () => {
+    const unpriced = buildModelConfig(draft())
+    expect(unpriced).not.toHaveProperty('pricing')
+
     const base = draft()
-    expect(() =>
-      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, input: '-1' } } }),
-    ).toThrow(/pricing\.base\.input/)
-    expect(() =>
-      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, output: 'NaN' } } }),
-    ).toThrow(/pricing\.base\.output/)
-    expect(() =>
-      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, reasoning: '' } } }),
-    ).toThrow(/pricing\.base\.reasoning/)
+    base.pricing.definition.base.input = '1'
+    base.pricing.definition.base.output = '2'
+    base.pricing.definition.base.cacheRead = '0.1'
+    base.pricing.definition.base.input = '-1'
+    expect(() => buildModelConfig(base)).toThrow(/pricing\.base\.input/)
+    base.pricing.definition.base.input = '1'
+    base.pricing.definition.base.output = 'NaN'
+    expect(() => buildModelConfig(base)).toThrow(/pricing\.base\.output/)
   })
 
   /** toEditableModel 拒绝 blank name。 */
@@ -397,15 +370,18 @@ describe('ai-model-draft-codec', () => {
     expect(() => toEditableModel(draft({ providerName: '' }))).toThrow(/providerName is required/)
   })
 
-  /** 价格基础字段为必填项，编辑时不得静默补 0。 */
-  it('rejects blank base pricing fields', () => {
+  it('rejects incomplete known pricing rather than silently treating unknown base fees as zero', () => {
     const base = draft()
-    expect(() =>
-      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, cacheRead: '' } } }),
-    ).toThrow(/pricing\.base\.cacheRead/)
-    expect(() =>
-      buildModelConfig({ ...base, pricing: { ...base.pricing, base: { ...base.pricing.base, cacheWriteByTtl: { '0': '1' } } } }),
-    ).toThrow(/TTL keys/)
+    base.pricing.definition.base.input = '1'
+    base.pricing.definition.base.output = '2'
+    base.pricing.definition.inputTokenRanges.push({
+      draftKey: 'range', minInputTokens: '0', maxInputTokensExclusive: '100', rates: { input: '0.5' },
+      cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {},
+    })
+    expect(() => buildModelConfig(base)).toThrow(/pricing\.base\.cacheRead/)
+    base.pricing.definition.base.cacheRead = '0.1'
+    base.pricing.definition.base.cacheWriteByTtl = { '0': '1' }
+    expect(() => buildModelConfig(base)).toThrow(/cacheWriteByTtl keys must be positive integer seconds/)
   })
 
   /** 缺失的 model 不会凭空生成 Variant ID。 */
@@ -476,7 +452,7 @@ describe('ai-model-draft-codec', () => {
     /** 通过生产入口提交单个 Variant，覆盖选项文本的归一化与校验。 */
     function submitVariant(protocolOptionsJson: string) {
       return buildModelConfig(draft({
-        variants: [{ ...emptyModelDraft().variants[0]!, protocolOptionsJson }],
+        variants: [{ ...draft().variants[0]!, protocolOptionsJson }],
       })).variants[0]
     }
 
@@ -516,7 +492,7 @@ describe('ai-model-draft-codec', () => {
     it('retains options when reasoning is disabled and omits blank values', () => {
       const input = draft({
         reasoning: false,
-        variants: [{ ...emptyModelDraft().variants[0]!, protocolOptionsJson: '{"temperature":0.2}' }],
+        variants: [{ ...draft().variants[0]!, protocolOptionsJson: '{"temperature":0.2}' }],
       })
       expect(buildModelConfig(input).variants[0]?.protocolOptionsJson).toBe('{"temperature":0.2}')
       input.variants[0]!.protocolOptionsJson = '  '

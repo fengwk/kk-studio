@@ -108,8 +108,8 @@ describe('ModelCatalogPicker request fencing', () => {
       pricingSupported: true,
       pricing: {
         base: { input: '1', output: '2', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
-        overrides: [],
-        multipliers: [],
+        rules: [],
+        changes: []
       },
     }
     vi.mocked(agentService.listModelCatalog).mockResolvedValueOnce(

@@ -29,8 +29,8 @@ const model: ModelDTO = {
     defaultVariant: 'deep', variants: [{ id: 'deep', reasoningEffort: 'high', promptCacheRetention: 'NONE' }],
     pricing: {
       base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: []
     },
   },
 }

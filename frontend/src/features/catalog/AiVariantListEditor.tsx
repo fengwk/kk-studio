@@ -4,10 +4,11 @@ import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { TextArea } from '@/shared/ui/controls/TextArea'
 import { Select } from '@/shared/ui/controls/Select'
+import type { SelectOption } from '@/shared/ui/controls/Select'
 import { Plus, Trash2 } from 'lucide-react'
 import type { VariantDraft } from '@/features/catalog/ai-console-types'
 import { newVariantDraft } from '@/features/catalog/ai-resource-draft-primitives'
-import type { PromptCacheRetention } from '@/shared/api/generated/contracts'
+import type { ModelCapabilitiesDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import './catalog-form-layout.css'
 
@@ -16,27 +17,31 @@ export function VariantListEditor({
   variants,
   defaultVariant,
   reasoning,
-  promptCacheRetentions,
+  capabilities,
+  capabilitiesLoading = false,
+  capabilitiesError,
   onChange,
 }: {
   label: string
   variants: VariantDraft[]
   defaultVariant: string
   reasoning: boolean
-  promptCacheRetentions?: readonly PromptCacheRetention[]
+  capabilities?: ModelCapabilitiesDTO | null
+  capabilitiesLoading?: boolean
+  capabilitiesError?: string
   onChange: (variants: VariantDraft[], preferredDefaultVariant?: string) => void
 }) {
   const { t } = useI18n()
   const reasoningHintId = useId()
 
-  const supportedRetentions = promptCacheRetentions ?? []
-
-  const retentionOptions = supportedRetentions.map((retention) => ({
-    value: retention,
-    label:
-      retention === 'NONE'
-        ? t('ai.catalog.form.promptCacheRetentionNone')
-        : retention,
+  const capabilityOptions = capabilities?.promptCacheOptions ?? []
+  const retentionOptions: SelectOption[] = capabilityOptions.map((option) => ({
+    value: option.retention,
+    label: [
+      option.retention === 'NONE' ? t('ai.catalog.form.promptCacheRetentionNone') : option.retention,
+      option.ttlSeconds == null ? '' : t('ai.catalog.form.promptCacheOptionTtl', { seconds: option.ttlSeconds }),
+      option.writeMultiplier == null ? '' : t('ai.catalog.form.promptCacheOptionWriteMultiplier', { multiplier: option.writeMultiplier }),
+    ].filter(Boolean).join(' · '),
   }))
 
   function updateVariant(index: number, patch: Partial<VariantDraft>) {
@@ -59,10 +64,10 @@ export function VariantListEditor({
       suffix += 1
       id = `variant-${suffix}`
     }
-    const defaultRetention: PromptCacheRetention = supportedRetentions.includes('SHORT')
-      ? 'SHORT'
-      : 'NONE'
-    onChange([...variants, newVariantDraft({ id, promptCacheRetention: defaultRetention })])
+    onChange([...variants, newVariantDraft({
+      id,
+      promptCacheRetention: capabilities?.defaultPromptCacheRetention ?? '',
+    })])
   }
 
   function removeVariant(index: number) {
@@ -80,6 +85,18 @@ export function VariantListEditor({
           </Button>
         </div>
       </div>
+      {capabilitiesLoading ? <p className="inline-hint" role="status">{t('ai.catalog.form.modelCapabilitiesLoading')}</p> : null}
+      {capabilitiesError ? <p className="field-error" role="alert">{capabilitiesError}</p> : null}
+      {capabilities ? (
+        <p className="inline-hint" role="status">
+          {t('ai.catalog.form.automaticCache')}: {capabilities.automaticCache
+            ? t('ai.catalog.form.automaticCacheEnabled')
+            : t('ai.catalog.form.automaticCacheDisabled')}
+          {capabilities.defaultPromptCacheRetention
+            ? ` · ${t('ai.catalog.form.defaultPromptCacheRetention')}: ${capabilities.defaultPromptCacheRetention}`
+            : ''}
+        </p>
+      ) : null}
       <p className="inline-hint" id={reasoningHintId}>
         {t('ai.catalog.form.variantHint')}
         {reasoning
@@ -89,16 +106,13 @@ export function VariantListEditor({
       <div className="variant-stack">
         {variants.map((variant, index) => {
           const currentRetention = variant.promptCacheRetention
-          const options = supportedRetentions.includes(currentRetention)
-            ? retentionOptions
-            : [
-                {
-                  value: currentRetention,
-                  label: `${currentRetention} · ${t('ai.catalog.form.unavailable')}`,
-                  disabled: true,
-                },
+          const retentionSupported = retentionOptions.some((option) => option.value === currentRetention)
+          const options: SelectOption[] = currentRetention && !retentionSupported
+            ? [
+                { value: currentRetention, label: `${currentRetention} · ${t('ai.catalog.form.unavailable')}`, disabled: true },
                 ...retentionOptions,
               ]
+            : retentionOptions
 
           return (
             <div className="variant-editor" key={variant.draftId}>
@@ -119,10 +133,14 @@ export function VariantListEditor({
                     aria-label={`${t('ai.catalog.form.promptCacheRetentionAria')} ${index + 1}`}
                     value={currentRetention}
                     options={options}
-                    disabled={supportedRetentions.length === 0}
-                    onChange={(value) =>
-                      updateVariant(index, { promptCacheRetention: value as PromptCacheRetention })
-                    }
+                    placeholder={capabilitiesLoading
+                      ? t('ai.catalog.form.modelCapabilitiesLoading')
+                      : t('ai.catalog.form.promptCacheRetentionSelect')}
+                    disabled={capabilitiesLoading || !capabilities || options.length === 0}
+                    onChange={(value) => {
+                      const selected = capabilityOptions.find((option) => option.retention === value)
+                      if (selected) updateVariant(index, { promptCacheRetention: selected.retention })
+                    }}
                   />
                 </label>
                 <label className="form-group">

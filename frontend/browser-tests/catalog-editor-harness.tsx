@@ -4,6 +4,7 @@ import '@/styles.css'
 import { ResourceEditorModal } from '@/features/catalog/AiConsoleResourceEditorModal'
 import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
+import { emptyModelPricingDraft } from '@/features/catalog/model-pricing-draft'
 import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyProviderDraft } from '@/features/catalog/ai-provider-draft-codec'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
@@ -27,25 +28,33 @@ const SAMPLE_PROVIDER: ProviderDTO = {
   updatedAt: 0,
 }
 
-/** 打开一个覆盖折叠规则、TTL 与移动端触区的完整 Catalog 编辑器。 */
+/** Shows the three pricing groups, TTL controls and mobile layout in a real browser fixture. */
 export function CatalogEditorHarness() {
-  const [modelDraft, setModelDraft] = useState<ModelDraft>(() => ({
-    ...emptyModelDraft(SAMPLE_PROVIDER),
-    name: 'demo-model',
-    modelId: 'demo-wire-model',
-    pricing: {
-      base: {
-        input: '1',
-        output: '2',
-        cacheRead: '0.1',
-        cacheWrite: '0.2',
-        cacheWriteByTtl: { '300': '0.2' },
-        reasoning: null,
-      },
-      overrides: [{ id: 'override-1', when: {}, rates: { input: '0.5' } }],
-      multipliers: [{ id: 'multiplier-1', when: {}, factors: { input: '1.25' } }],
-    },
-  }))
+  const [modelDraft, setModelDraft] = useState<ModelDraft>(() => {
+    const pricing = emptyModelPricingDraft()
+    pricing.definition.base = {
+      input: '1', output: '2', cacheRead: '0.1', cacheWrite: '0.2',
+      cacheWriteByTtl: { '300': '0.2' }, reasoning: null,
+    }
+    pricing.definition.inputTokenRanges = [{
+      draftKey: 'range-1', minInputTokens: '200000', maxInputTokensExclusive: '',
+      rates: { input: '0.5' }, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {},
+    }]
+    pricing.definition.serviceTiers = [{
+      draftKey: 'tier-1', serviceTier: 'priority',
+      factors: { factor: '1', inputFactor: '1.25', outputFactor: '', cacheReadFactor: '', cacheWriteFactor: '', reasoningFactor: '' },
+    }]
+    pricing.definition.timePeriods = [{
+      draftKey: 'time-1', weekdays: [1, 2, 3, 4, 5], start: '01:00', end: '04:00', timezone: 'UTC',
+      factors: { factor: '0.8', inputFactor: '', outputFactor: '', cacheReadFactor: '', cacheWriteFactor: '', reasoningFactor: '' },
+    }]
+    return {
+      ...emptyModelDraft(SAMPLE_PROVIDER),
+      name: 'demo-model',
+      modelId: 'demo-wire-model',
+      pricing,
+    }
+  })
 
   return (
     <ResourceEditorModal

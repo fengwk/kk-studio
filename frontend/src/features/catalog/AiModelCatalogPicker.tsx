@@ -221,12 +221,13 @@ function CandidatePreview({ candidate }: { candidate: ModelCatalogCandidateDTO }
             input: candidate.pricing.base.input,
             output: candidate.pricing.base.output,
             cacheRead: candidate.pricing.base.cacheRead,
-            cacheWrite: candidate.pricing.base.cacheWrite,
-            overrides: candidate.pricing.overrides.length,
-            multipliers: candidate.pricing.multipliers.length,
+            cacheWrite: candidate.pricing.base.cacheWrite ?? '—',
+            ranges: candidate.pricing.rules.filter((rule) => rule.type === 'input_token_range').length,
+            tiers: candidate.pricing.rules.filter((rule) => rule.type === 'service_tier_multiplier').length,
+            timePeriods: candidate.pricing.rules.filter((rule) => rule.type === 'time_multiplier').length,
           })}
         </span>
-      ) : null}
+      ) : <span>{t('ai.catalog.form.pricingUnpriced')}</span>}
       <span>{variantSummary}</span>
       {!candidate.pricingSupported ? (
         <span className="inline-hint">{t('ai.catalog.catalog.unsupportedPricing')}</span>

@@ -318,8 +318,8 @@ async function installChatApi(
                   variants: [{ id: 'default' }, { id: 'deep', reasoningEffort: 'high' }],
                   pricing: {
       base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: []
     },
                 },
                 version: '1',
@@ -340,8 +340,8 @@ async function installChatApi(
                   variants: [{ id: 'default' }],
                   pricing: {
       base: { input: '1', output: '1', cacheRead: '1', cacheWrite: '1', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: []
     },
                 },
                 version: '1',

@@ -13,7 +13,7 @@ const models: ModelDTO[] = [
     config: {
       limit: { context: 1000, output: 100 },
       abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
-      pricing: { base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null }, overrides: [], multipliers: [] },
+      pricing: { base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null }, rules: [], changes: [] },
       variants: [{ id: 'quick', promptCacheRetention: 'NONE' }],
       defaultVariant: 'quick',
     },
@@ -29,7 +29,7 @@ const models: ModelDTO[] = [
     config: {
       limit: { context: 1000, output: 100 },
       abilities: { tools: true, reasoning: false, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT'] },
-      pricing: { base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null }, overrides: [], multipliers: [] },
+      pricing: { base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null }, rules: [], changes: [] },
       variants: [],
       defaultVariant: '',
     },

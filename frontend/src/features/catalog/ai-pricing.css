@@ -1,4 +1,99 @@
-/* 模型计价：rate 输入、折叠与规则列表。 */
+/* Structured pricing editor shared by the model form and catalog preview. */
+.pricing-plan-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.pricing-plan-section h4 {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+}
+
+.pricing-plan-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  align-items: start;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.pricing-plan-row[data-conflict="true"] {
+  border-color: var(--danger);
+}
+
+.pricing-plan-row .field-error {
+  grid-column: 1 / -1;
+}
+
+.weekday-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pricing-factor-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pricing-factor-details summary,
+.pricing-change-editor summary {
+  cursor: pointer;
+}
+
+.pricing-reasoning-patch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pricing-change-editor {
+  grid-column: 1 / -1;
+}
+
+.pricing-import-notice {
+  padding: 10px 12px;
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+}
+
+.pricing-import-notice p:first-child {
+  margin-top: 0;
+}
+
+.pricing-import-notice p:last-child,
+.pricing-import-notice ul:last-child {
+  margin-bottom: 0;
+}
+
+.pricing-import-notice details {
+  margin-top: 8px;
+}
+
+.pricing-import-notice summary {
+  cursor: pointer;
+}
+
+.pricing-preview-result {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--wash-1);
+}
+
+.pricing-preview-result p:last-child,
+.pricing-preview-result ul:last-child {
+  margin-bottom: 0;
+}
+
 .price-input {
   display: flex;
   align-items: center;
@@ -17,69 +112,4 @@
 .price-input input {
   flex: 1 1 auto;
   min-width: 0;
-}
-
-.pricing-fold {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.pricing-rule-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.pricing-rule {
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--wash-1);
-}
-
-.pricing-rule-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 6px;
-}
-
-.pricing-rule-summary {
-  flex: 1 1 auto;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 0;
-  background: transparent;
-  color: var(--fg);
-  font: inherit;
-  font-size: var(--font-size-xs);
-  text-align: left;
-  cursor: pointer;
-}
-
-.pricing-rule-summary code {
-  flex: 0 0 auto;
-}
-
-.pricing-rule-summary span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.pricing-rule-actions {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.pricing-rule-body {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 8px 10px 10px;
-  border-top: 1px solid var(--border);
 }

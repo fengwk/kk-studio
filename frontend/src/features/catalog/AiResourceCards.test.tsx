@@ -18,8 +18,8 @@ function model(overrides: Partial<SingleModelDTO> = {}): SingleModelDTO {
       abilities: { tools: true, reasoning: true, midConversationSystemMessages: false, messageLevelEffort: false, inputModalities: ['TEXT', 'IMAGE', 'AUDIO', 'VIDEO'] },
       pricing: {
       base: { input: '0', output: '0', cacheRead: '0', cacheWrite: '0', cacheWriteByTtl: {}, reasoning: null },
-      overrides: [],
-      multipliers: [],
+      rules: [],
+      changes: []
     },
       defaultVariant: 'quality',
       variants: [
