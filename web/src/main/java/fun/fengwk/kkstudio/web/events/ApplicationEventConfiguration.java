@@ -4,6 +4,7 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import tools.jackson.databind.json.JsonMapper;
 
 import fun.fengwk.kkstudio.canvas.infra.function.ClaimedRun;
 import fun.fengwk.kkstudio.canvas.infra.postgresql.CanvasFunctionWorkStore;
@@ -56,8 +57,8 @@ import java.util.function.Supplier;
 public class ApplicationEventConfiguration {
 
   @Bean
-  public EventFrameCodec eventFrameCodec() {
-    return new EventFrameCodec(new RealtimeEventJsonCodec());
+  public EventFrameCodec eventFrameCodec(JsonMapper webMapper) {
+    return new EventFrameCodec(new RealtimeEventJsonCodec(), webMapper);
   }
 
   /** 浏览器事件通道设置在每次使用时从共享 {@link SystemSettingsSnapshot} 读取；每条新 WebSocket 连接将其当前配置冻结为连接级快照。 */

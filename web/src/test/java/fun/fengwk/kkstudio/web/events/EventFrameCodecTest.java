@@ -19,6 +19,7 @@ import fun.fengwk.kkstudio.ide.browser.IdeBrowserUse;
 import fun.fengwk.kkstudio.ide.browser.IdeBrowserUseView;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadSnapshotDTO;
 import fun.fengwk.kkstudio.platform.harness.dto.HarnessThreadTreeNodeDTO;
+import fun.fengwk.kkstudio.web.StrictJacksonConfiguration;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKey;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.ResourceKind;
 import fun.fengwk.kkstudio.web.events.ApplicationEventHub.Signal;
@@ -42,11 +43,17 @@ class EventFrameCodecTest {
       new ResourceKey(ResourceKind.INTERACTIONS, null);
   private static final ResourceKey ENVIRONMENTS_KEY =
       new ResourceKey(ResourceKind.ENVIRONMENTS, null);
-  private static final EventFrameCodec CODEC = new EventFrameCodec(new RealtimeEventJsonCodec());
+  private static final EventFrameCodec CODEC = newCodec();
   private static final UUID ENVIRONMENT = UUID.fromString("33333333-3333-3333-3333-333333333333");
   private static final UUID DOCUMENT = UUID.fromString("44444444-4444-4444-4444-444444444444");
   private static final UUID VIEW = UUID.fromString("55555555-5555-5555-5555-555555555555");
   private static final UUID CLAIM = UUID.fromString("66666666-6666-6666-6666-666666666666");
+
+  private static EventFrameCodec newCodec() {
+    JsonMapper.Builder builder = JsonMapper.builder();
+    new StrictJacksonConfiguration().httpJsonCustomizer().customize(builder);
+    return new EventFrameCodec(new RealtimeEventJsonCodec(), builder.build());
+  }
 
   @Test
   void decodesSubscribeAndUnsubscribeFrames() {

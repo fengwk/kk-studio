@@ -5,7 +5,6 @@ import tools.jackson.core.StreamReadFeature;
 import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
-import tools.jackson.databind.cfg.DateTimeFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.databind.node.JsonNodeFactory;
 import tools.jackson.databind.node.ObjectNode;
@@ -55,8 +54,6 @@ final class EventFrameCodec {
       JsonMapper.builder()
           .enable(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
           .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
-          .enable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
-          .disable(DateTimeFeature.WRITE_DATE_TIMESTAMPS_AS_NANOSECONDS)
           .build();
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
@@ -78,9 +75,12 @@ final class EventFrameCodec {
   private static final String ENVIRONMENTS = ResourceKind.ENVIRONMENTS.name().toLowerCase();
 
   private final RealtimeEventJsonCodec realtimeCodec;
+  // Snapshot DTOs have the same wire types on HTTP and WebSocket, including decimal bigint strings.
+  private final ObjectMapper snapshotMapper;
 
-  EventFrameCodec(RealtimeEventJsonCodec realtimeCodec) {
+  EventFrameCodec(RealtimeEventJsonCodec realtimeCodec, ObjectMapper snapshotMapper) {
     this.realtimeCodec = Objects.requireNonNull(realtimeCodec, "realtimeCodec");
+    this.snapshotMapper = Objects.requireNonNull(snapshotMapper, "snapshotMapper");
   }
 
   /** 客户端帧：资源订阅、执行树 refresh 或完整 IDE 使用列表。 */
@@ -218,7 +218,7 @@ final class EventFrameCodec {
         throw new IllegalArgumentException("thread snapshot signal requires a thread resource");
       }
       node.put("name", "snapshot");
-      node.set("data", MAPPER.valueToTree(snapshot.snapshot()));
+      node.set("data", snapshotMapper.valueToTree(snapshot.snapshot()));
     } else if (signal instanceof Signal.Realtime realtime) {
       if (resource.kind() != ResourceKind.THREAD) {
         throw new IllegalArgumentException("realtime signal requires a thread resource");
@@ -240,7 +240,7 @@ final class EventFrameCodec {
       }
       node.put("name", "snapshot");
       ObjectNode data = NODES.objectNode();
-      data.set("nodes", MAPPER.valueToTree(snapshot.nodes()));
+      data.set("nodes", snapshotMapper.valueToTree(snapshot.nodes()));
       node.set("data", data);
     } else if (signal instanceof Signal.ThreadTreeChanged) {
       if (resource.kind() != ResourceKind.THREAD_TREE) {

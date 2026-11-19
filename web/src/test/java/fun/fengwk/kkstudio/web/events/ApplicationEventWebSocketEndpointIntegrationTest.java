@@ -299,6 +299,19 @@ class ApplicationEventWebSocketEndpointIntegrationTest extends WebPostgresTestSu
     assertEquals(base, snapshot.path("data").path("baseEntryId").asText());
     assertTrue(snapshot.path("data").path("entries").isArray());
     socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(10, TimeUnit.SECONDS);
+
+    // Compare actual JSON types, not asText(): the browser requires decimal strings for bigint.
+    HttpResponse<String> delta =
+        http.send(
+            HttpRequest.newBuilder(
+                    uri("/api/harness/threads/" + threadId + "?afterEntryId=" + base))
+                .GET()
+                .build(),
+            HttpResponse.BodyHandlers.ofString());
+    assertEquals(200, delta.statusCode());
+    JsonNode httpSnapshot = MAPPER.readTree(delta.body());
+    assertTrue(httpSnapshot.path("queuedCommands").path(0).path("sequence").isString());
+    assertEquals(httpSnapshot, snapshot.path("data"));
   }
 
   private ConnectionIdentity assertConnected(FrameCollector collector) throws Exception {

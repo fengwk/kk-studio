@@ -173,7 +173,7 @@ class ApplicationEventWebSocketHandlerTest {
     handler =
         new ApplicationEventWebSocketHandler(
             hub,
-            new EventFrameCodec(new RealtimeEventJsonCodec()),
+            new EventFrameCodec(new RealtimeEventJsonCodec(), JsonMapper.builder().build()),
             new ApplicationEventSettings(
                 capacity, maxBytes, TEST_SEND_TIMEOUT_MILLIS, TEST_HEARTBEAT_INTERVAL_MILLIS),
             EVENT_NODE,
