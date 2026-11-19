@@ -71,13 +71,16 @@ export function ModelForm({
     setModelCapabilities(null)
     setCapabilitiesLoading(true)
     setCapabilitiesError(undefined)
-    void getModelCapabilities(providerName, modelId, controller.signal).then((capabilities) => {
-      if (controller.signal.aborted) return
+    const isCurrent = () => !controller.signal.aborted
+      && draftRef.current.providerName === providerName
+      && draftRef.current.modelId === modelId
+    void getModelCapabilities(providerName.trim(), modelId.trim(), controller.signal).then((capabilities) => {
+      if (!isCurrent()) return
       setModelCapabilities(capabilities)
-      if (mode === 'create') {
+      const defaultRetention = capabilities.defaultPromptCacheRetention
+      if (mode === 'create' && defaultRetention != null) {
         const current = draftRef.current
         const supported = new Set(capabilities.promptCacheOptions.map((option) => option.retention))
-        const defaultRetention = capabilities.defaultPromptCacheRetention ?? 'NONE'
         const variants = current.variants.map((variant) =>
           variant.promptCacheRetention === '' || !supported.has(variant.promptCacheRetention)
             ? { ...variant, promptCacheRetention: defaultRetention }
@@ -88,9 +91,9 @@ export function ModelForm({
         }
       }
     }).catch((error: unknown) => {
-      if (!controller.signal.aborted) setCapabilitiesError(toUserFacingErrorMessage(error))
+      if (isCurrent()) setCapabilitiesError(toUserFacingErrorMessage(error))
     }).finally(() => {
-      if (!controller.signal.aborted) setCapabilitiesLoading(false)
+      if (isCurrent()) setCapabilitiesLoading(false)
     })
     return () => controller.abort()
   }, [draft.providerName, draft.modelId, mode])

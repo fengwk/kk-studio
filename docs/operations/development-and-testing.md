@@ -383,7 +383,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 - `node --test scripts/dev/verify/e2e/tests/*.test.mjs` 只验证 case 与 HTTP mock 的脚本契约，
   不能替代对真实服务执行对应 case。
 
-更改 API 契约、首发顺序或 usage 语义时，同步 case、fixture、生成的前端契约与本节的分类说明。L1 `thread.queued_command_batch` 以本地受控 Provider mock 验证 Thread GET 基线、WebSocket `subscribed` ACK cursor `0`、后续初始 `snapshot`、`realtime` 提示与 `afterEntryId` 增量链；不调用真实 Provider。该 case 需要宿主 mock，双节点 `--distributed` 不运行它。`thread_tree.query_contract` 还验证同 root 第二个 WebSocket 订阅者的首快照、已订阅资源的 refresh 控制帧，以及 refresh 不创建新订阅。
+更改 API 契约、首发顺序或 usage 语义时，同步 case、fixture、生成的前端契约与本节的分类说明。L1 `thread.queued_command_batch` 以本地受控 Provider mock 验证 Thread GET 基线、WebSocket `subscribed` ACK cursor `0`、后续初始 `snapshot`、`realtime` 提示与不依赖 HTTP 追更的连续快照；完成后用 `afterEntryId` 增量核对持久化 Entry 链；不调用真实 Provider。该 case 需要宿主 mock，双节点 `--distributed` 不运行它。`thread_tree.query_contract` 还验证同 root 第二个 WebSocket 订阅者的首快照、已订阅资源的 refresh 控制帧，以及 refresh 不创建新订阅。
 
 默认 backend URL 是 `http://127.0.0.1:18081`，frontend URL 是 `http://127.0.0.1:5173`。
 runner 会复用已有服务，或杀掉上述端口监听后启动服务；执行前须确认端口为独立可丢弃环境。
