@@ -1,16 +1,9 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
 import { repositoryRoot } from '../../../lib/repo-root.mjs'
-
-const REPOSITORY_ROOT = repositoryRoot()
-
-const WORKFLOWS = [
-  '.github/workflows/daemon-ci.yml',
-  '.github/workflows/daemon-release.yml',
-  '.github/workflows/docker-publish.yml',
-]
 
 /** 本地引用必须存在，action 元数据同样扫描。 */
 const LOCAL_REFERENCE = /^\.\/\.github\/(?:workflows\/[A-Za-z0-9._-]+\.ya?ml|actions\/[A-Za-z0-9._/-]+)$/u
@@ -44,14 +37,20 @@ const PINNED_ACTIONS = new Map([
 const USES_STEP = /^\s+(?:-\s+)?uses:/gm
 const USES_REFERENCE = /^\s+(?:-\s+)?uses:\s*(\S+)(?:\s+#\s*(\S+))?\s*$/gm
 
-test('test intent: every third-party GitHub Action is pinned to a verified commit SHA', () => {
+function assertActionPins(root) {
   // 逐行扫描全部工作流：tag/branch 引用、缺失 `# vN` 说明、或未登记的 action 都会失败，
   // 避免 CI 静默执行可变代码。
   let pinnedCount = 0
-  const files = [...WORKFLOWS, ...actionMetadata(path.join(REPOSITORY_ROOT, '.github/actions'))
-    .map((file) => path.relative(REPOSITORY_ROOT, file))]
-  for (const relativePath of files) {
-    const source = readFileSync(path.join(REPOSITORY_ROOT, relativePath), 'utf8')
+  const workflows = path.join(root, '.github/workflows')
+  const files = [
+    ...readdirSync(workflows, { withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.ya?ml$/u.test(entry.name))
+      .map((entry) => path.join(workflows, entry.name)),
+    ...actionMetadata(path.join(root, '.github/actions')),
+  ]
+  for (const file of files) {
+    const relativePath = path.relative(root, file)
+    const source = readFileSync(file, 'utf8')
 
     const stepCount = [...source.matchAll(USES_STEP)].length
     const references = [...source.matchAll(USES_REFERENCE)]
@@ -63,7 +62,7 @@ test('test intent: every third-party GitHub Action is pinned to a verified commi
 
     for (const [, reference, versionComment] of references) {
       if (LOCAL_REFERENCE.test(reference) && !reference.split('/').includes('..')) {
-        const target = path.join(REPOSITORY_ROOT, reference)
+        const target = path.join(root, reference)
         assert.ok(reference.startsWith('./.github/workflows/')
           ? existsSync(target)
           : ['action.yml', 'action.yaml'].some((name) => existsSync(path.join(target, name))),
@@ -96,6 +95,40 @@ test('test intent: every third-party GitHub Action is pinned to a verified commi
     }
   }
 
-  // 防止三条工作流被清空或 `uses:` 被整体移走后守卫静默通过。
+  // 防止 `uses:` 被整体移走后守卫静默通过。
   assert.ok(pinnedCount > 0, 'at least one pinned action reference must be present')
+}
+
+test('every third-party GitHub Action is pinned to a verified commit SHA', () => {
+  assertActionPins(repositoryRoot())
 })
+
+for (const extension of ['yml', 'yaml']) {
+  test(`checks newly added .${extension} workflows`, (t) => {
+    const root = mkdtempSync(path.join(tmpdir(), 'kk-workflow-pins-'))
+    t.after(() => rmSync(root, { recursive: true, force: true }))
+    const directory = path.join(root, '.github/workflows')
+    mkdirSync(directory, { recursive: true })
+
+    const { sha, version } = PINNED_ACTIONS.get('actions/checkout')
+    const pinned = `    - uses: actions/checkout@${sha} # ${version}\n`
+    writeFileSync(path.join(directory, 'daemon-ci.yml'), pinned)
+    writeFileSync(path.join(directory, 'daemon-release.yml'), 'jobs: {}\n')
+    writeFileSync(path.join(directory, 'docker-publish.yml'), 'jobs: {}\n')
+
+    // A valid existing pin must not hide an unpinned reference in a new file.
+    const file = path.join(directory, `added.${extension}`)
+    const unpinned = `    - uses: actions/checkout@${version}\n`
+    writeFileSync(file, unpinned)
+    assert.throws(() => assertActionPins(root), {
+      message: new RegExp(`added\\.${extension}: actions/checkout must pin a full 40-char commit SHA`),
+    })
+    writeFileSync(file, pinned)
+    // Only top-level regular YAML files are workflows.
+    const nested = path.join(directory, `nested.${extension}`)
+    mkdirSync(nested)
+    writeFileSync(path.join(nested, `ignored.${extension}`), unpinned)
+    writeFileSync(path.join(directory, 'ignored.txt'), unpinned)
+    assertActionPins(root)
+  })
+}
