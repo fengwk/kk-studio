@@ -1,5 +1,7 @@
 import { useState } from 'react'
 import { Button } from '@/shared/ui/controls/Button'
+import { Checkbox } from '@/shared/ui/controls/Checkbox'
+import { isConflictReason } from '@/shared/api/client'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { useI18n } from '@/shared/i18n'
 import { configSyncService } from '@/features/settings/config-sync-service'
@@ -44,6 +46,11 @@ export function SyncImportModal({
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<ConfigSyncImportResultDTO | null>(null)
 
+  const [credentialResetConfirmed, setCredentialResetConfirmed] = useState(false)
+  const [previewStale, setPreviewStale] = useState(false)
+  const credentialResets = preview.pluginCredentialResets
+  const needsCredentialReset = credentialResets.length > 0
+  const importBlocked = previewStale || (needsCredentialReset && !credentialResetConfirmed)
   const mode = configSyncImportMode(preview)
   const kindLabel = (kind: ConfigSyncKind): string => t(configSyncKindLabelKey(kind))
 
@@ -58,10 +65,13 @@ export function SyncImportModal({
   }
 
   const handleImport = async (allowPartial: boolean) => {
+    if (pending || importBlocked) return
     setPending(true)
     setError(null)
     try {
-      const response = await configSyncService.importConfig(yaml, allowPartial)
+      const response = await configSyncService.importConfig(
+        yaml, allowPartial, ...(credentialResetConfirmed ? [credentialResets] : []),
+      )
       setResult(response)
       if (response.imported.length > 0) {
         onImported()
@@ -71,7 +81,13 @@ export function SyncImportModal({
         }
       }
     } catch (importError) {
-      setError(configSyncErrorMessage(importError, t('settings.sync.import.failed')))
+      if (isConflictReason(importError, 'PLUGIN_CREDENTIAL_RESET_CONFIRMATION')) {
+        setPreviewStale(true)
+        setCredentialResetConfirmed(false)
+        setError(t('settings.sync.import.credentialPreviewStale'))
+      } else {
+        setError(configSyncErrorMessage(importError, t('settings.sync.import.failed')))
+      }
     } finally {
       setPending(false)
     }
@@ -92,6 +108,7 @@ export function SyncImportModal({
           void handleImport(partial)
         }}
         loading={pending}
+        disabled={importBlocked}
       >
         {pending ? t('settings.sync.import.importing') : t(labelKey)}
       </Button>
@@ -122,6 +139,20 @@ export function SyncImportModal({
                 {t('settings.sync.import.fileName', { name: fileName })}
               </p>
               <ImportPreview preview={preview} mode={mode} kindLabel={kindLabel} />
+              {needsCredentialReset ? (
+                <section className="settings-sync-result-section" data-state="partial">
+                  <h3>{t('settings.sync.import.credentialResetHeading')}</h3>
+                  <ul className="settings-sync-result-list">
+                    {credentialResets.map((id) => <li key={id}>{id}</li>)}
+                  </ul>
+                  <Checkbox
+                    checked={credentialResetConfirmed}
+                    disabled={pending || previewStale || mode === 'empty'}
+                    onChange={setCredentialResetConfirmed}
+                    label={t('settings.sync.import.confirmCredentialReset')}
+                  />
+                </section>
+              ) : null}
             </>
           )}
           {error ? (

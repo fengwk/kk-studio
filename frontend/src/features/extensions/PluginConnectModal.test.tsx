@@ -43,6 +43,7 @@ const plugin: PluginDTO = {
     valuesSchema: { type: 'object', properties: {} },
     defaults: {},
     secrets: {},
+    credentialContextFields: [],
   },
   appliedVersion: '1',
   connectionCheckSupported: false,

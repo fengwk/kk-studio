@@ -1,6 +1,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Badge } from '@/shared/ui/data/Badge'
 import { Code, FormInput, Lock } from 'lucide-react'
+import { findNodeAtLocation, type Node } from 'jsonc-parser'
 import { Button } from '@/shared/ui/controls/Button'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -10,7 +11,7 @@ import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { isConflictError, request } from '@/shared/api/client'
 import { useI18n } from '@/shared/i18n'
-import { MAX_PLUGIN_VALUES_UTF8_BYTES } from './plugin-config-json'
+import { getNodeSlice, MAX_PLUGIN_VALUES_UTF8_BYTES, parseStrictJsonObject } from './plugin-config-json'
 import { parsePluginValuesSchema } from './plugin-schema'
 import { SchemaElementRenderer } from './SchemaElementRenderer'
 import { usePluginSecretDraft } from './usePluginSecretDraft'
@@ -21,6 +22,34 @@ import type {
   PluginDTO,
   SecretUpdateOperation,
 } from '@/shared/api/generated/contracts'
+
+// 比较补齐默认值后的字段事实，而非编辑器格式；数字保留原始 token。
+function contextValue(
+  node: Node | undefined,
+  json: string,
+  fallback?: Node,
+  defaultsJson = '',
+): unknown {
+  if (!node) return fallback ? contextValue(fallback, defaultsJson) : undefined
+  if (node.type === 'object') {
+    const fields = new Set<string>([
+      ...(node.children ?? []).map((property) => property.children![0].value as string),
+      ...(fallback?.type === 'object' ? (fallback.children ?? []) : [])
+        .map((property) => property.children![0].value as string),
+    ])
+    return ['object', [...fields].sort().map((field) => [
+      field,
+      contextValue(
+        findNodeAtLocation(node, [field]),
+        json,
+        fallback && findNodeAtLocation(fallback, [field]),
+        defaultsJson,
+      ),
+    ])]
+  }
+  if (node.type === 'array') return ['array', node.children?.map((child) => contextValue(child, json)) ?? []]
+  return [node.type, node.type === 'number' ? getNodeSlice(json, node) : node.value]
+}
 
 interface PluginConfigModalProps {
   plugin: PluginDTO
@@ -92,8 +121,35 @@ export function PluginConfigModal({
 
   const formModeBlockedByDrafts = editorMode === 'form' && draftsBlockForm
 
+  const { credentialContextFields, defaults, secrets, valuesJson: initialJson } = plugin.configuration
+  const configuredSecrets = Object.keys(secrets).filter((field) => secrets[field].configured)
+  const credentialTarget = useMemo(() => {
+    if (!parseResult.ok || credentialContextFields.length === 0) return null
+    const before = parseStrictJsonObject(initialJson)
+    if (!before.ok) return null
+    const defaultsJson = JSON.stringify(defaults)
+    const parsedDefaults = parseStrictJsonObject(defaultsJson)
+    const previous = JSON.stringify(credentialContextFields.map((field) =>
+      contextValue(findNodeAtLocation(before.tree, [field]), initialJson),
+    ))
+    const next = JSON.stringify(credentialContextFields.map((field) => contextValue(
+      findNodeAtLocation(parseResult.tree, [field]), valuesJson,
+      parsedDefaults.ok ? findNodeAtLocation(parsedDefaults.tree, [field]) : undefined, defaultsJson,
+    )))
+    return previous === next ? null : next
+  }, [credentialContextFields, defaults, initialJson, parseResult, valuesJson])
+  const needsCredentialReset = credentialTarget !== null && configuredSecrets.length > 0
+  const [consent, setConsent] = useState({ target: credentialTarget, checked: false })
+  if (consent.target !== credentialTarget) {
+    setConsent({ target: credentialTarget, checked: false })
+  }
+  const confirmCredentialReset = needsCredentialReset && consent.checked && consent.target === credentialTarget
+  const credentialFieldsLost = configuredSecrets.filter((field) =>
+    !Object.hasOwn(secretOperations, field) || secretOperations[field] !== 'SET',
+  )
+
   async function handleSave() {
-    if (pending || busyRef.current || readingFiles) return
+    if (pending || busyRef.current || readingFiles || (needsCredentialReset && !confirmCredentialReset)) return
 
     if (hasFieldErrors) {
       setSaveError(firstFieldError ?? null)
@@ -127,6 +183,7 @@ export function PluginConfigModal({
       expectedVersion: version,
       valuesJson,
       secretPatch: Object.keys(secretPatch).length > 0 ? secretPatch : undefined,
+      ...(confirmCredentialReset ? { confirmCredentialReset: true } : {}),
     }
 
     busyRef.current = true
@@ -417,6 +474,20 @@ export function PluginConfigModal({
           </section>
         ) : null}
 
+        {needsCredentialReset ? (
+          <section className="plugin-config-warning-banner">
+            <p>{t('plugins.configDialog.credentialResetWarning')}</p>
+            {credentialFieldsLost.length > 0 ? (
+              <p>{t('plugins.configDialog.credentialResetFields', { fields: credentialFieldsLost.join(', ') })}</p>
+            ) : null}
+            <Checkbox
+              checked={confirmCredentialReset}
+              disabled={pending}
+              onChange={(checked) => setConsent({ target: credentialTarget, checked })}
+              label={t('plugins.configDialog.confirmCredentialReset')}
+            />
+          </section>
+        ) : null}
       </div>
       <div className="modal-footer">
         <Button
@@ -436,6 +507,7 @@ export function PluginConfigModal({
             hasFieldErrors ||
             !parseResult.ok ||
             valuesTooLarge ||
+            (needsCredentialReset && !confirmCredentialReset) ||
             Object.entries(secretOperations).some(([k, op]) =>
               op === 'CLEAR' ? !Object.hasOwn(clearConfirmed, k) || clearConfirmed[k] !== true : false,
             )

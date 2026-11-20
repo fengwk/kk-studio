@@ -128,6 +128,39 @@ test('import prechecks the file and requires explicit partial confirmation', asy
   await expect(dialog.getByText('providers: []')).toHaveCount(0)
 })
 
+test('import requires consent before clearing listed local plugin credentials at 360px', async ({ page }) => {
+  await page.setViewportSize({ width: 360, height: 800 })
+  await page.goto(HARNESS)
+  await page.locator('#preview-mode').selectOption('credential')
+  await page.locator('.settings-sync-file-input').setInputFiles({
+    name: 'kk.yaml',
+    mimeType: 'application/yaml',
+    buffer: Buffer.from('providers: []\n'),
+  })
+
+  const dialog = page.getByRole('dialog', { name: '导入配置' })
+  await expect(dialog.getByText('将清除本机凭据的插件')).toBeVisible()
+  await expect(dialog.getByText('offline-alpha', { exact: true })).toBeVisible()
+  await expect(dialog.getByText('offline-beta', { exact: true })).toBeVisible()
+  const confirm = dialog.getByRole('button', { name: '仅导入可用配置' })
+  const consent = dialog.getByRole('checkbox', { name: '我确认清除上述插件的本机凭据' })
+  await expect(consent).not.toBeChecked()
+  await expect(confirm).toBeDisabled()
+  expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+  expect(await page.evaluate(() => window.__syncImportYaml)).toBeUndefined()
+
+  await consent.locator('..').click()
+  await expect(confirm).toBeEnabled()
+  await confirm.click()
+  await expect(dialog.getByText('已导入')).toBeVisible()
+  expect(await page.evaluate(() => window.__syncImportYaml)).toBe('providers: []\n')
+  expect(await page.evaluate(() => window.__syncImportAllowPartial)).toBe(true)
+  expect(await page.evaluate(() => window.__syncImportCredentialResets)).toEqual([
+    'offline-alpha',
+    'offline-beta',
+  ])
+})
+
 test('import confirms a fully importable plan without partial authorization', async ({ page }) => {
   await page.goto(HARNESS)
   await page.locator('#preview-mode').selectOption('full')

@@ -59,16 +59,17 @@ describe('configSyncService', () => {
       body: { yaml: 'providers: []', allowPartial: false },
     })
 
-    // 显式授权部分导入。
+    // 部分导入与凭据清除分别授权。
     apiRequest.mockClear()
-    await expect(configSyncService.importConfig('providers: []', true)).resolves.toBe(response)
+    await expect(configSyncService.importConfig('providers: []', true, ['demo-plugin'])).resolves.toBe(response)
     expect(apiRequest).toHaveBeenCalledWith('POST /api/platform/config-sync/import', {
-      body: { yaml: 'providers: []', allowPartial: true },
+      body: { yaml: 'providers: []', allowPartial: true, confirmedPluginCredentialResets: ['demo-plugin'] },
     })
   })
 
   it('maps precheck to the check-import operation with the {yaml} body', async () => {
     const response: ConfigSyncImportCheckDTO = {
+      pluginCredentialResets: [],
       created: [{ kind: 'providers', name: 'openai' }],
       updated: [{ kind: 'models', name: 'openai/gpt' }],
       skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],

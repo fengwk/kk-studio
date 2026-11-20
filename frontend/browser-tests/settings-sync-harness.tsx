@@ -13,20 +13,22 @@ declare global {
     __syncExportRequest?: unknown
     __syncImportYaml?: string
     __syncImportAllowPartial?: boolean
+    __syncImportCredentialResets?: string[]
     __syncCheckYaml?: string
   }
 }
 
 setLocale('zh-CN')
 
-/** 预检查形态：full 全量、partial 部分可用、empty 无可用项、fail 检查失败。 */
-type PreviewMode = 'full' | 'partial' | 'empty' | 'fail'
+/** 预检查形态包含部分可用且影响本机凭据的情形。 */
+type PreviewMode = 'full' | 'partial' | 'credential' | 'empty' | 'fail'
 
 let previewMode: PreviewMode = 'partial'
 
 function buildPreview(): ConfigSyncImportCheckDTO {
   if (previewMode === 'full') {
     return {
+      pluginCredentialResets: [],
       created: [{ kind: 'providers', name: 'openai' }],
       // settings 已初始化，同一份文件只会覆盖而不会新增。
       updated: [{ kind: 'settings', name: 'settings' }],
@@ -35,14 +37,20 @@ function buildPreview(): ConfigSyncImportCheckDTO {
   }
   if (previewMode === 'empty') {
     return {
+      pluginCredentialResets: [],
       created: [],
       updated: [],
       skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
     }
   }
+  const pluginCredentialResets = previewMode === 'credential' ? ['offline-alpha', 'offline-beta'] : []
   return {
+    pluginCredentialResets,
     created: [{ kind: 'providers', name: 'openai' }],
-    updated: [{ kind: 'models', name: 'openai/gpt-4o' }],
+    updated: [
+      { kind: 'models', name: 'openai/gpt-4o' },
+      ...pluginCredentialResets.map((name) => ({ kind: 'plugins' as const, name })),
+    ],
     skipped: [{ kind: 'agents', name: 'broken', reason: 'unsupported tool' }],
   }
 }
@@ -89,9 +97,10 @@ configSyncService.checkImport = async (yaml) => {
   }
   return buildPreview()
 }
-configSyncService.importConfig = async (yaml, allowPartial) => {
+configSyncService.importConfig = async (yaml, allowPartial, credentialResets) => {
   window.__syncImportYaml = yaml
   window.__syncImportAllowPartial = allowPartial
+  window.__syncImportCredentialResets = credentialResets
   const preview = buildPreview()
   return { imported: [...preview.created, ...preview.updated], skipped: preview.skipped }
 }
@@ -131,6 +140,7 @@ export function HarnessApp() {
           >
             <option value="full">full</option>
             <option value="partial">partial</option>
+            <option value="credential">credential</option>
             <option value="empty">empty</option>
             <option value="fail">fail</option>
           </select>
