@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 	runtimeapi "github.com/fengwk/kk-studio/daemon/internal/runtime"
@@ -92,13 +93,15 @@ type uploadProxyTestControl struct {
 func (c uploadProxyTestControl) RequestTicket(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
 	transferID := request.GetTransferId()
 	method := http.MethodPut
+	expiresAt := time.Now().Add(time.Hour).UnixMilli()
 	return &protocol.ResourceUploadTicket{
 		TransferId: &transferID,
 		State:      protocol.TicketState_TICKET_PENDING,
 		UploadId:   stringPointer("123e4567-e89b-42d3-a456-426614174001"),
 		PresignedPut: &protocol.PresignedPut{
-			Method: &method,
-			Url:    &c.url,
+			Method:           &method,
+			Url:              &c.url,
+			ExpiresAtEpochMs: &expiresAt,
 		},
 	}, nil
 }

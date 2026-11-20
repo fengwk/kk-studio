@@ -70,7 +70,7 @@ func TestUpload_NetworkCleanupFailureIsUnconfirmed(t *testing.T) {
 	control := uploadExchangeStub{
 		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
 			ticket := uploadTicket(request.GetTransferId(), protocol.TicketState_TICKET_PENDING, testUploadID)
-			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload")}
+			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload"), ExpiresAtEpochMs: futureUploadExpiry()}
 			return ticket, nil
 		},
 		commit: func(context.Context, string, string, string) (*protocol.ResourceUploadTicket, error) {
@@ -97,7 +97,7 @@ func TestUpload_ShutdownAbortIsNotCleanupFailure(t *testing.T) {
 	control := uploadExchangeStub{
 		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
 			ticket := uploadTicket(request.GetTransferId(), protocol.TicketState_TICKET_PENDING, testUploadID)
-			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload")}
+			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload"), ExpiresAtEpochMs: futureUploadExpiry()}
 			return ticket, nil
 		},
 		commit: func(context.Context, string, string, string) (*protocol.ResourceUploadTicket, error) {
@@ -175,7 +175,7 @@ func TestUpload_ValidationAndTicketFailures(t *testing.T) {
 		}, nil, false},
 		{"invalid pending method", func(id string) (*protocol.ResourceUploadTicket, error) {
 			v := uploadTicket(id, protocol.TicketState_TICKET_PENDING, testUploadID)
-			v.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPost), Url: proto.String("http://storage.example")}
+			v.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPost), Url: proto.String("http://storage.example"), ExpiresAtEpochMs: futureUploadExpiry()}
 			return v, nil
 		}, nil, false},
 		{"pending missing presign", func(id string) (*protocol.ResourceUploadTicket, error) {
@@ -217,7 +217,7 @@ func TestUpload_CommitAndPutFailureBoundaries(t *testing.T) {
 	const invocation = "123e4567-e89b-12d3-a456-426614174000"
 	request := func(_ context.Context, _ string, r *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
 		ticket := uploadTicket(r.GetTransferId(), protocol.TicketState_TICKET_PENDING, testUploadID)
-		ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/file")}
+		ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/file"), ExpiresAtEpochMs: futureUploadExpiry()}
 		return ticket, nil
 	}
 	for _, tc := range []struct {
@@ -230,7 +230,7 @@ func TestUpload_CommitAndPutFailureBoundaries(t *testing.T) {
 			return uploadTicket("123e4567-e89b-12d3-a456-426614174099", protocol.TicketState_TICKET_READY, upload), nil
 		}},
 		{"failed commit", func(id, upload string) (*protocol.ResourceUploadTicket, error) {
-			return uploadTicket(id, protocol.TicketState_TICKET_FAILED, upload), nil
+			return uploadTicket(id, protocol.TicketState_TICKET_FAILED, ""), nil
 		}},
 		{"mismatched upload", func(id, _ string) (*protocol.ResourceUploadTicket, error) {
 			return uploadTicket(id, protocol.TicketState_TICKET_READY, "123e4567-e89b-12d3-a456-426614174099"), nil

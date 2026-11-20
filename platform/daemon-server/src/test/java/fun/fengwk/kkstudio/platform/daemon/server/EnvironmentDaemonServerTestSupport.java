@@ -51,6 +51,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.UpdateResult;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnel;
 import fun.fengwk.kkstudio.platform.daemon.tunnel.testing.FakeEnvironmentTunnel;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -528,6 +529,10 @@ final class EnvironmentDaemonServerTestSupport {
     }
 
     Fixture(Executor configExecutor) {
+      this(configExecutor, Clock.systemUTC());
+    }
+
+    Fixture(Executor configExecutor, Clock clock) {
       configs.put(ENVIRONMENT_ID, configSnapshot(ENVIRONMENT_ID, 0L));
       configs.put(OTHER_ENVIRONMENT_ID, configSnapshot(OTHER_ENVIRONMENT_ID, 0L));
       this.server =
@@ -580,7 +585,8 @@ final class EnvironmentDaemonServerTestSupport {
               },
               configExecutor,
               (environmentId, invocationId) ->
-                  exitReceiptLookup.isAcknowledged(environmentId, invocationId));
+                  exitReceiptLookup.isAcknowledged(environmentId, invocationId),
+              clock);
     }
 
     private Optional<EnvironmentConfigSnapshot> findConfig(EnvironmentId environmentId) {
@@ -1047,6 +1053,9 @@ final class EnvironmentDaemonServerTestSupport {
             "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
     final List<TransferRequest> reserves = new ArrayList<>();
     final List<UUID> commits = new ArrayList<>();
+    final List<UUID> renewals = new ArrayList<>();
+    long initialPresignExpiry = Long.MAX_VALUE;
+    boolean refuseRenewal;
     final List<UUID> releases = new ArrayList<>();
     boolean failNextReserve;
     boolean pendingReserve;
@@ -1072,9 +1081,23 @@ final class EnvironmentDaemonServerTestSupport {
                 "PUT",
                 "https://storage.invalid/uploads/" + uploadId,
                 Map.of("If-None-Match", "*"),
-                Long.MAX_VALUE));
+                initialPresignExpiry));
       }
       return new Ticket.Ready(request.transferId());
+    }
+
+    @Override
+    public Ticket renew(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+      renewals.add(uploadId);
+      return refuseRenewal
+          ? new Ticket.Failed("storage is unavailable")
+          : new Ticket.Pending(
+              uploadId,
+              new DaemonPresignedPut(
+                  "PUT",
+                  "https://storage.invalid/renewed/" + uploadId,
+                  Map.of("If-None-Match", "*"),
+                  Long.MAX_VALUE));
     }
 
     @Override

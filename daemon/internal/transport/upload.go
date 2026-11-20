@@ -24,6 +24,8 @@ type UploadControl interface {
 	Commit(context.Context, string, string, string) (*protocol.ResourceUploadTicket, error)
 }
 
+const maxUploadAttempts = 3
+
 // ResourceUploader uploads binary invocation results through the active outbound policy.
 type ResourceUploader struct {
 	Control          UploadControl
@@ -51,7 +53,8 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 	}
 	transferID := uuid.New()
 	request := uploadRequest(transferID, content)
-	for {
+	var uploadID string
+	for attempt := 0; attempt < maxUploadAttempts; attempt++ {
 		ticket, err := u.acquireTicket(ctx, ticketWait, retryBackoff, invocationID, transferID, request)
 		if err != nil {
 			return runtimeapi.ResultContent{}, err
@@ -60,14 +63,18 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 		case protocol.TicketState_TICKET_FAILED:
 			return runtimeapi.ResultContent{}, &runtimeapi.ResourceUploadError{Stage: "request", Category: "ticket-failed", CleanupConfirmed: true}
 		case protocol.TicketState_TICKET_READY:
-			if !transferIDPattern.MatchString(ticket.GetUploadId()) {
+			if !transferIDPattern.MatchString(ticket.GetUploadId()) || uploadID != "" && uploadID != ticket.GetUploadId() {
 				return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
 			}
 			return uploadedContent(content, ticket.GetUploadId()), nil
 		}
-		if ticket.GetState() != protocol.TicketState_TICKET_PENDING || ticket.GetPresignedPut() == nil || !transferIDPattern.MatchString(ticket.GetUploadId()) || ticket.GetPresignedPut().GetMethod() != http.MethodPut {
+		if ticket.GetState() != protocol.TicketState_TICKET_PENDING || ticket.GetPresignedPut() == nil || !transferIDPattern.MatchString(ticket.GetUploadId()) || ticket.GetPresignedPut().GetMethod() != http.MethodPut || ticket.GetPresignedPut().GetExpiresAtEpochMs() <= 0 {
 			return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
 		}
+		if uploadID != "" && uploadID != ticket.GetUploadId() {
+			return runtimeapi.ResultContent{}, fmt.Errorf("resource upload ticket is invalid")
+		}
+		uploadID = ticket.GetUploadId()
 		requestAgain, err := u.putWithRetry(ctx, ticket, content.Bytes, retryBackoff)
 		if err != nil {
 			return runtimeapi.ResultContent{}, err
@@ -75,12 +82,13 @@ func (u *ResourceUploader) Upload(ctx context.Context, invocationID string, cont
 		if requestAgain {
 			continue
 		}
-		uploadID, err := u.commitUntilReady(ctx, ticketWait, retryBackoff, invocationID, transferID, ticket.GetUploadId())
+		uploadID, err = u.commitUntilReady(ctx, ticketWait, retryBackoff, invocationID, transferID, ticket.GetUploadId())
 		if err != nil {
 			return runtimeapi.ResultContent{}, err
 		}
 		return uploadedContent(content, uploadID), nil
 	}
+	return runtimeapi.ResultContent{}, uploadFailure("put", "retry-exhausted", false, nil)
 }
 
 // validate rejects an upload request the storage service can never accept.
@@ -107,10 +115,9 @@ func (u *ResourceUploader) validate(ctx context.Context, invocationID string, co
 	return nil
 }
 
-// acquireTicket requests an upload ticket and retries the control exchange until the storage
-// service answers for this transfer.
+// acquireTicket retries an unanswered control exchange within the attempt and call budgets.
 func (u *ResourceUploader) acquireTicket(ctx context.Context, wait, backoff time.Duration, invocationID, transferID string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
-	for {
+	for attempt := 0; attempt < maxUploadAttempts; attempt++ {
 		ticket, err := u.requestTicket(ctx, wait, invocationID, request)
 		if err != nil {
 			if err = retryAfter(ctx, backoff); err != nil {
@@ -123,14 +130,39 @@ func (u *ResourceUploader) acquireTicket(ctx context.Context, wait, backoff time
 		}
 		return ticket, nil
 	}
+	return nil, uploadFailure("request", "retry-exhausted", true, nil)
 }
 
-// putWithRetry uploads the payload for a pending ticket. It reports whether the ticket has to be
-// requested again, which is the retry path for a storage failure that confirmed its own cleanup.
+// putWithRetry reports whether the ticket must be refreshed before commit.
 func (u *ResourceUploader) putWithRetry(ctx context.Context, ticket *protocol.ResourceUploadTicket, body []byte, backoff time.Duration) (bool, error) {
+	if time.Now().UnixMilli() >= ticket.GetPresignedPut().GetExpiresAtEpochMs() {
+		if err := retryAfter(ctx, backoff); err != nil {
+			return false, uploadFailure("put", "cancelled", true, err)
+		}
+		return true, nil
+	}
 	err := u.put(ctx, ticket.GetPresignedPut().GetUrl(), ticket.GetPresignedPut().Headers, body)
 	if err == nil {
 		return false, nil
+	}
+	var statusErr *storageStatusError
+	if errors.As(err, &statusErr) {
+		switch {
+		case statusErr.status == http.StatusPreconditionFailed:
+			return false, nil
+		case (statusErr.status == http.StatusUnauthorized || statusErr.status == http.StatusForbidden) && time.Now().UnixMilli() >= ticket.GetPresignedPut().GetExpiresAtEpochMs():
+			if retryErr := retryAfter(ctx, backoff); retryErr != nil {
+				return false, uploadFailure("put", "cancelled", true, retryErr)
+			}
+			return true, nil
+		case retryableStorageStatus(statusErr.status):
+			if retryErr := retryAfter(ctx, backoff); retryErr != nil {
+				return false, uploadFailure("put", "cancelled", true, retryErr)
+			}
+			return true, nil
+		default:
+			return false, uploadFailure("put", "storage-rejected", true, err)
+		}
 	}
 	var uploadErr *runtimeapi.ResourceUploadError
 	if errors.As(err, &uploadErr) && !uploadErr.CleanupConfirmed {
@@ -139,16 +171,12 @@ func (u *ResourceUploader) putWithRetry(ctx context.Context, ticket *protocol.Re
 	if ctx.Err() != nil || errors.Is(err, context.Canceled) {
 		return false, uploadFailure("put", "cancelled", true, err)
 	}
-	if err = retryAfter(ctx, backoff); err != nil {
-		return false, uploadFailure("put", "cancelled", true, err)
-	}
-	return true, nil
+	return false, uploadFailure("put", "storage-rejected", true, err)
 }
 
-// commitUntilReady publishes the uploaded object and retries the commit exchange until the
-// storage service reports it ready.
+// commitUntilReady waits for a matching READY ticket within the attempt and call budgets.
 func (u *ResourceUploader) commitUntilReady(ctx context.Context, wait, backoff time.Duration, invocationID, transferID, uploadID string) (string, error) {
-	for {
+	for attempt := 0; attempt < maxUploadAttempts; attempt++ {
 		committed, err := u.commit(ctx, wait, invocationID, transferID, uploadID)
 		if err != nil {
 			if err = retryAfter(ctx, backoff); err != nil {
@@ -156,12 +184,16 @@ func (u *ResourceUploader) commitUntilReady(ctx context.Context, wait, backoff t
 			}
 			continue
 		}
-		if committed == nil || committed.GetTransferId() != transferID || committed.GetUploadId() != uploadID {
+		if committed == nil || committed.GetTransferId() != transferID {
+			return "", fmt.Errorf("resource upload commit ticket is invalid")
+		}
+		if committed.GetState() == protocol.TicketState_TICKET_FAILED && committed.GetUploadId() == "" {
+			return "", uploadFailure("commit", "ticket-failed", true, nil)
+		}
+		if committed.GetUploadId() != uploadID {
 			return "", fmt.Errorf("resource upload commit ticket is invalid")
 		}
 		switch committed.GetState() {
-		case protocol.TicketState_TICKET_FAILED:
-			return "", &runtimeapi.ResourceUploadError{Stage: "commit", Category: "ticket-failed", CleanupConfirmed: true}
 		case protocol.TicketState_TICKET_READY:
 			return committed.GetUploadId(), nil
 		case protocol.TicketState_TICKET_PENDING:
@@ -172,6 +204,7 @@ func (u *ResourceUploader) commitUntilReady(ctx context.Context, wait, backoff t
 			return "", uploadFailure("commit", "cancelled", true, err)
 		}
 	}
+	return "", uploadFailure("commit", "retry-exhausted", false, nil)
 }
 
 func uploadRequest(transferID string, content runtimeapi.ResultContent) *protocol.ResourceUploadRequest {
@@ -281,27 +314,23 @@ func newPutRequest(ctx context.Context, targetURL string, headers map[string]str
 
 // putThroughNetwork performs the PUT inside the applied network policy so a policy change drains it.
 func (u *ResourceUploader) putThroughNetwork(ctx context.Context, req *http.Request) error {
-	fail := func(stage string) error { return fmt.Errorf("resource upload %s failed", stage) }
-	var responseErr error
+	var status int
 	err := u.Network.WithResponse(ctx, req, func(resp *http.Response) error {
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			responseErr = fail(fmt.Sprintf("storage status %d", resp.StatusCode))
-			return responseErr
+		status = resp.StatusCode
+		if status < 200 || status >= 300 {
+			return nil
 		}
-		if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-			responseErr = fail("response")
-			return responseErr
-		}
-		return nil
+		_, err := io.Copy(io.Discard, resp.Body)
+		return err
 	})
 	if err != nil {
-		if responseErr != nil {
-			return uploadFailure("put", "storage-rejected", true, responseErr)
-		}
-		if errors.Is(err, context.Canceled) {
+		if status == 0 && errors.Is(err, context.Canceled) {
 			return err
 		}
 		return uploadFailure("put", "cleanup-failed", false, err)
+	}
+	if status < 200 || status >= 300 {
+		return &storageStatusError{status: status}
 	}
 	return nil
 }
@@ -319,14 +348,14 @@ func (u *ResourceUploader) putThroughClient(req *http.Request) error {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fail("request")
+		return uploadFailure("put", "cleanup-failed", false, fail("request"))
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("resource upload storage status %d failed", resp.StatusCode)
+		return &storageStatusError{status: resp.StatusCode}
 	}
 	if _, err = io.Copy(io.Discard, resp.Body); err != nil {
-		return fail("response")
+		return uploadFailure("put", "cleanup-failed", false, fail("response"))
 	}
 	return nil
 }
@@ -355,6 +384,23 @@ func (u *ResourceUploader) uploadClient() (*http.Client, bool, error) {
 	copy := *client
 	copy.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	return &copy, owned, nil
+}
+
+func retryableStorageStatus(status int) bool {
+	switch status {
+	case http.StatusInternalServerError, http.StatusBadGateway, http.StatusServiceUnavailable, http.StatusGatewayTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+type storageStatusError struct {
+	status int
+}
+
+func (e *storageStatusError) Error() string {
+	return fmt.Sprintf("resource upload storage status %d failed", e.status)
 }
 
 func protoString(s string) *string { return &s }

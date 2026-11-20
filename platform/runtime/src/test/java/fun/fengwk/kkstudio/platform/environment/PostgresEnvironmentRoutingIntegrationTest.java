@@ -93,6 +93,11 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
         }
 
         @Override
+        public Ticket renew(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+          throw new AssertionError("unexpected ticket renewal");
+        }
+
+        @Override
         public Ticket commit(EnvironmentId environmentId, String invocationId, UUID uploadId) {
           throw new AssertionError("routing test must not commit an upload");
         }
@@ -180,6 +185,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
             UNUSED_TICKET_SERVICE,
             snapshot,
             exitReceiptLookup,
+            Clock.systemUTC(),
             configExecutor);
     this.serverNode2 =
         serverConfiguration.environmentDaemonServer(
@@ -191,6 +197,7 @@ class PostgresEnvironmentRoutingIntegrationTest extends PostgresSchemaSupport {
             UNUSED_TICKET_SERVICE,
             snapshot,
             exitReceiptLookup,
+            Clock.systemUTC(),
             configExecutor);
   }
 

@@ -30,6 +30,9 @@ public interface DaemonResourceTicketService {
    */
   Ticket reserve(EnvironmentId environmentId, String invocationId, TransferRequest request);
 
+  /** Renew only the existing reservation owned by the invocation's transfer binding. */
+  Ticket renew(EnvironmentId environmentId, String invocationId, UUID uploadId);
+
   /**
    * 提交一次已完成直传的上传并请求权威状态。
    *

@@ -44,7 +44,7 @@ func (s *uploadControlStub) RequestTicket(_ context.Context, invocation string, 
 	}
 	ticket := &protocol.ResourceUploadTicket{TransferId: proto.String(request.GetTransferId()), State: s.requestState, UploadId: proto.String(testUploadID)}
 	if s.requestState == protocol.TicketState_TICKET_PENDING {
-		ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String(s.putURL), Headers: map[string]string{"X-Upload": "signed"}}
+		ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String(s.putURL), Headers: map[string]string{"X-Upload": "signed"}, ExpiresAtEpochMs: futureUploadExpiry()}
 	}
 	if s.requestState == protocol.TicketState_TICKET_FAILED {
 		ticket.Message = proto.String("private ticket details")
@@ -94,7 +94,7 @@ func TestUpload_RetriesControlFailureWithSameTransfer(t *testing.T) {
 	putAttempts := 0
 	client := &http.Client{Transport: transportRoundTripper(func(*http.Request) (*http.Response, error) {
 		putAttempts++
-		status := http.StatusForbidden
+		status := http.StatusInternalServerError
 		if putAttempts > 1 {
 			status = http.StatusNoContent
 		}
@@ -122,6 +122,11 @@ func TestUpload_FailedTicketDoesNotUpload(t *testing.T) {
 	if control.commitCount != 0 {
 		t.Fatalf("failed ticket committed %d times", control.commitCount)
 	}
+}
+
+func futureUploadExpiry() *int64 {
+	expires := time.Now().Add(time.Hour).UnixMilli()
+	return &expires
 }
 
 func TestUpload_RedactsStorageError(t *testing.T) {

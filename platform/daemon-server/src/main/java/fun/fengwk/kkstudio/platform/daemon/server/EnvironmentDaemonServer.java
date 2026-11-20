@@ -35,6 +35,7 @@ import fun.fengwk.kkstudio.platform.daemon.tunnel.EnvironmentTunnels;
 
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -67,7 +68,7 @@ public final class EnvironmentDaemonServer
   private final ExecutionExitReceiptLookup exitReceiptLookup;
 
   private final DaemonInvocationTracker invocationTracker = new DaemonInvocationTracker();
-  private final DaemonTransferCoordinator transferCoordinator = new DaemonTransferCoordinator();
+  private final DaemonTransferCoordinator transferCoordinator;
   private final DaemonIdeCoordinator ideCoordinator = new DaemonIdeCoordinator();
   private final DaemonUpdateCoordinator updateCoordinator = new DaemonUpdateCoordinator();
 
@@ -89,7 +90,10 @@ public final class EnvironmentDaemonServer
       DaemonResourceTicketService ticketService,
       Supplier<EnvironmentServerSettings> settings,
       Executor configExecutor,
-      ExecutionExitReceiptLookup exitReceiptLookup) {
+      ExecutionExitReceiptLookup exitReceiptLookup,
+      Clock clock) {
+    this.transferCoordinator =
+        new DaemonTransferCoordinator(Objects.requireNonNull(clock, "clock"));
     this.leaseStore = Objects.requireNonNull(leaseStore, "leaseStore");
     this.registrationDirectory =
         Objects.requireNonNull(registrationDirectory, "registrationDirectory");

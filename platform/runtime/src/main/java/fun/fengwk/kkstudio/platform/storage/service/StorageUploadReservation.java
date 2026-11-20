@@ -9,6 +9,7 @@ import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidati
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateFilename;
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateSha256;
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateSize;
+import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.verifyProbedImage;
 
 import org.springframework.transaction.support.TransactionTemplate;
 
@@ -114,6 +115,10 @@ final class StorageUploadReservation {
               UUID hitBlobId = null;
               StorageBlob active = blobRepository.getActiveByHashAndSize(sha256, sizeBytes);
               if (active != null) {
+                if (!requireImageMetadata) {
+                  verifyProbedImage(
+                      mediaType, active.getMediaType(), active.getWidth(), active.getHeight());
+                }
                 try {
                   blobManager.retain(active.getId());
                   hitBlobId = active.getId();
@@ -144,13 +149,7 @@ final class StorageUploadReservation {
     StoragePresignedUrlDTO presignedPut = null;
     if (outcome.blobId == null) {
       try {
-        S3PresignedUrl signed =
-            s3PresignService.presignChecksummedCreateOnlyUpload(
-                StorageObjectKeys.uploadOriginal(uploadId),
-                mediaType,
-                Base64.getEncoder().encodeToString(decodeHex(sha256)),
-                presignExpiresSeconds(media));
-        presignedPut = StoragePresignedUrls.from(signed);
+        presignedPut = sign(outcome.upload, presignExpiresSeconds(media));
       } catch (RuntimeException failure) {
         // 上传行已登记但签票失败：调用方拿不到 uploadId，不能让它无诊断地等 TTL；
         // 这里登记耐久清理请求，后台 TTL 继续兜底回收；清理请求本身失败不得掩盖签票失败。
@@ -169,6 +168,16 @@ final class StorageUploadReservation {
         outcome.blobId,
         expiresAt(outcome.upload.getCreatedAt(), uploadTtl),
         presignedPut);
+  }
+
+  StoragePresignedUrlDTO sign(StorageUpload upload, long expiresInSeconds) {
+    S3PresignedUrl signed =
+        s3PresignService.presignChecksummedCreateOnlyUpload(
+            StorageObjectKeys.uploadOriginal(upload.getId()),
+            upload.getDeclaredMediaType(),
+            Base64.getEncoder().encodeToString(decodeHex(upload.getDeclaredSha256())),
+            expiresInSeconds);
+    return StoragePresignedUrls.from(signed);
   }
 
   private static long presignExpiresSeconds(SystemSettings.StorageMedia media) {

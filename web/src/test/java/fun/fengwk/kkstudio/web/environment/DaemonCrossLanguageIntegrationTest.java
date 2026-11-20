@@ -72,6 +72,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.Comparator;
@@ -188,7 +189,8 @@ class DaemonCrossLanguageIntegrationTest {
             ticketService,
             settingsSupplier,
             Runnable::run,
-            (environmentId, invocationId) -> false);
+            (environmentId, invocationId) -> false,
+            Clock.systemUTC());
 
     recordingSessions = new RecordingSessions(daemonServer);
 
@@ -661,7 +663,8 @@ class DaemonCrossLanguageIntegrationTest {
                 new EnvironmentServerSettings(
                     Duration.ofSeconds(60), 16L * 1024 * 1024, ImageInputTier.P720, 259200L, 1800L),
             Runnable::run,
-            (environmentId, invocationId) -> false);
+            (environmentId, invocationId) -> false,
+            Clock.systemUTC());
     recordingSessions.setDelegate(newServer);
 
     // 第一个 server 实例执行 drain()：排空控制流并释放 FakeLeaseStore 租约
@@ -1100,6 +1103,11 @@ class DaemonCrossLanguageIntegrationTest {
     public Ticket reserve(
         EnvironmentId environmentId, String invocationId, TransferRequest request) {
       return new Ticket.Failed("not supported in test");
+    }
+
+    @Override
+    public Ticket renew(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+      throw new AssertionError("unexpected ticket renewal");
     }
 
     @Override

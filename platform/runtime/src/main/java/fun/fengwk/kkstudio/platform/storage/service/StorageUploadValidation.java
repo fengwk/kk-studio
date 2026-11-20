@@ -78,6 +78,18 @@ final class StorageUploadValidation {
     return bytes;
   }
 
+  static void verifyProbedImage(String declared, String detected, Long width, Long height) {
+    if (("image/png".equals(declared) || "image/jpeg".equals(declared))
+        && (!declared.equals(detected)
+            || width == null
+            || width <= 0
+            || height == null
+            || height <= 0)) {
+      throw DomainException.conflict(
+          "STORAGE_VERIFICATION", "uploaded image does not match the declared MIME type");
+    }
+  }
+
   static void verifyObject(S3ObjectMetadata head, StorageUpload upload) {
     if (head.contentLength() != upload.getDeclaredSize()) {
       throw DomainException.conflict(

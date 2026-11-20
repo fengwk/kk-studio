@@ -48,7 +48,7 @@ class StorageDaemonResourceTicketServiceTest {
     UUID uploadId = UUID.randomUUID();
     UUID transferId = UUID.randomUUID();
     StorageUploadDTO pending = pendingUpload(uploadId);
-    when(uploadService.reserve(any())).thenReturn(pending);
+    when(uploadService.reserveStaged(any())).thenReturn(pending);
     StorageDaemonResourceTicketService service = newService(uploadService);
 
     Ticket.Pending ticket =
@@ -67,7 +67,7 @@ class StorageDaemonResourceTicketServiceTest {
 
     ArgumentCaptor<StorageUploadReserveRequestDTO> requestCaptor =
         ArgumentCaptor.forClass(StorageUploadReserveRequestDTO.class);
-    verify(uploadService).reserve(requestCaptor.capture());
+    verify(uploadService).reserveStaged(requestCaptor.capture());
     StorageUploadReserveRequestDTO request = requestCaptor.getValue();
     assertEquals("resource-" + transferId, request.getFilename());
     assertEquals("image/png", request.getMediaType());
@@ -80,7 +80,7 @@ class StorageDaemonResourceTicketServiceTest {
   void reserveMapsReadyUpload() {
     StorageUploadService uploadService = mock(StorageUploadService.class);
     UUID uploadId = UUID.randomUUID();
-    when(uploadService.reserve(any())).thenReturn(readyUpload(uploadId, UUID.randomUUID()));
+    when(uploadService.reserveStaged(any())).thenReturn(readyUpload(uploadId, UUID.randomUUID()));
     StorageDaemonResourceTicketService service = newService(uploadService);
 
     Ticket.Ready ticket =
@@ -128,7 +128,7 @@ class StorageDaemonResourceTicketServiceTest {
   @Test
   void storageFailureIsSanitized() {
     StorageUploadService uploadService = mock(StorageUploadService.class);
-    when(uploadService.reserve(any()))
+    when(uploadService.reserveStaged(any()))
         .thenThrow(new IllegalStateException("internal signed request must stay private"));
     StorageDaemonResourceTicketService service = newService(uploadService);
 
@@ -157,7 +157,7 @@ class StorageDaemonResourceTicketServiceTest {
             null,
             null,
             null);
-    when(uploadService.reserve(any())).thenReturn(malformed);
+    when(uploadService.reserveStaged(any())).thenReturn(malformed);
     StorageDaemonResourceTicketService service = newService(uploadService);
 
     Ticket.Failed failed =

@@ -7,9 +7,9 @@ import java.util.Objects;
 import java.util.UUID;
 
 /**
- * 一次资源传输的进程内绑定：申请事实恒定；申请票据、提交票据与已消耗的 uploadId 在首次成功后固化。
+ * 一次资源传输的进程内绑定：申请事实与成功绑定的 uploadId 恒定；到期的 PENDING 票据只在该绑定内更新。
  *
- * <p>字段由该绑定自身的监视器保护，因此同一 transfer 的票据 I/O 串行进行：重复申请/提交（含瞬时 FAILED 后的重试与同进程重连重发）永不产生第二个上传行。
+ * <p>字段由该绑定自身的监视器保护，因此同一 transfer 的票据 I/O 串行进行：成功绑定后，重复申请、续签与提交都不会创建新上传行。
  * 绑定只在进程内存中存在，权威内容事实始终是全局上传行。
  */
 final class TransferBinding {

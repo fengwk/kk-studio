@@ -23,12 +23,12 @@ func TestUpload_FailedCommitIsTerminal(t *testing.T) {
 		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
 			requestCount++
 			ticket := uploadTicket(request.GetTransferId(), protocol.TicketState_TICKET_PENDING, testUploadID)
-			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload")}
+			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload"), ExpiresAtEpochMs: futureUploadExpiry()}
 			return ticket, nil
 		},
 		commit: func(_ context.Context, _, transferID, uploadID string) (*protocol.ResourceUploadTicket, error) {
 			commitCount++
-			return uploadTicket(transferID, protocol.TicketState_TICKET_FAILED, uploadID), nil
+			return uploadTicket(transferID, protocol.TicketState_TICKET_FAILED, ""), nil
 		},
 	}
 	putCount := 0
@@ -183,7 +183,7 @@ func TestUpload_PendingCommitRetriesWithoutPut(t *testing.T) {
 		request: func(_ context.Context, _ string, request *protocol.ResourceUploadRequest) (*protocol.ResourceUploadTicket, error) {
 			requestCount++
 			ticket := uploadTicket(request.GetTransferId(), protocol.TicketState_TICKET_PENDING, testUploadID)
-			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload")}
+			ticket.PresignedPut = &protocol.PresignedPut{Method: proto.String(http.MethodPut), Url: proto.String("http://storage.example/upload"), ExpiresAtEpochMs: futureUploadExpiry()}
 			return ticket, nil
 		},
 		commit: func(_ context.Context, _, transferID, uploadID string) (*protocol.ResourceUploadTicket, error) {

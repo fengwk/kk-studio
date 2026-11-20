@@ -522,7 +522,8 @@ HTTP 边界是 [`StorageController`](../../platform/runtime/src/main/java/fun/fe
 blob URL 只暴露 `method`、`url`、必须回传的 `headers`、`expiresAt`、权威 `mediaType`/`sizeBytes`，不含 bucket 或对象 key。
 DTO 位于 [`platform/storage/dto`](../../platform/runtime/src/main/java/fun/fengwk/kkstudio/platform/storage/dto/)。
 
-上传使用 reserve → 浏览器 PUT → complete。图片 reserve 的 `format` 是已存储字节的 MIME subtype；`originalWidth` / `originalHeight` 是缩放前尺寸，`storedWidth` / `storedHeight` 是 PUT 字节的实际尺寸。四类图片事实一起持久化并在 PENDING/READY 响应中原样返回；reserve 对图片要求全部这些事实，complete 信任它们，不再探测或缩放用户上传的图片；非图片不发送这些字段。服务端 stage 使用独立路径，并可为其图片内容生成媒体事实。
+浏览器上传使用 reserve → PUT → complete。图片 reserve 的 `format` 是已存储字节的 MIME subtype；`originalWidth` / `originalHeight` 是缩放前尺寸，`storedWidth` / `storedHeight` 是 PUT 字节的实际尺寸。四类图片事实一起持久化并在 PENDING/READY 响应中原样返回；reserve 对图片要求全部这些事实，complete 信任它们，不再探测或缩放用户上传的图片；非图片不发送这些字段。服务端 stage 使用独立路径，并可为其图片内容生成媒体事实。
+Daemon 使用受控 staging 预约，不提供可信像素尺寸；完成时校验字节大小和 SHA-256，并由服务端探测 PNG/JPEG 的 MIME 和像素尺寸。Daemon 的直传签名只允许创建对象；签名到期时可在原预约剩余寿命内对同一对象键和校验条件换签。
 complete 在专用会话级 upload advisory lock 内做事务外 checksum HEAD 与 copy，再短事务绑定 Blob；
 上传对象大小或 checksum 不匹配、checksum 不可用等存储校验失败以 `conflict` 返回，
 稳定 `reason` 为 `STORAGE_VERIFICATION`（HTTP 409）。
