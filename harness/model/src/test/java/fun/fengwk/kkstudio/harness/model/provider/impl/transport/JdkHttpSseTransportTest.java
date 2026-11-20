@@ -2,6 +2,7 @@ package fun.fengwk.kkstudio.harness.model.provider.impl.transport;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -13,7 +14,10 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import fun.fengwk.kkstudio.harness.model.ModelFailureMetadata.TransportStage;
 import fun.fengwk.kkstudio.harness.model.provider.ModelCallTimeoutPolicy;
+import fun.fengwk.kkstudio.harness.model.provider.ProviderErrorKind;
+import fun.fengwk.kkstudio.harness.model.provider.impl.ProviderErrorHelper;
 
 import java.io.IOException;
 import java.io.OutputStream;
@@ -181,6 +185,76 @@ class JdkHttpSseTransportTest {
     assertFalse(String.valueOf(error.safeHeaders()).contains("s3cr3t-value"));
   }
 
+  /** 诊断体停滞仍保留已收到的 429，和无错误体时一样使用 HTTP 后备文案。 */
+  @Test
+  void stalled429DiagnosticBodyPreservesStatusAndConfiguredFallback() throws Exception {
+    handler.set(
+        exchange -> {
+          exchange.getResponseHeaders().add("Retry-After", "17");
+          exchange.sendResponseHeaders(429, -1);
+        });
+    assert429Fallback(
+        assertThrows(TransportException.class, () -> execute(GENEROUS, HttpSseLimits.DEFAULT)));
+
+    CountDownLatch partialBodyFlushed = new CountDownLatch(1);
+    CountDownLatch releaseBody = new CountDownLatch(1);
+    handler.set(
+        exchange -> {
+          exchange.getResponseHeaders().add("Retry-After", "17");
+          exchange.sendResponseHeaders(429, 128);
+          OutputStream out = exchange.getResponseBody();
+          out.write("diagnostic prefix".getBytes(StandardCharsets.UTF_8));
+          out.flush();
+          partialBodyFlushed.countDown();
+          releaseBody.await(5, TimeUnit.SECONDS);
+        });
+    ModelCallTimeoutPolicy shortIdle =
+        new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofMillis(300));
+    AtomicReference<TransportException> failure = new AtomicReference<>();
+    Thread caller =
+        Thread.ofVirtual()
+            .start(
+                () -> {
+                  try {
+                    execute(shortIdle, HttpSseLimits.DEFAULT);
+                  } catch (TransportException error) {
+                    failure.set(error);
+                  }
+                });
+    try {
+      assertTrue(partialBodyFlushed.await(5, TimeUnit.SECONDS));
+      caller.join(TimeUnit.SECONDS.toMillis(2));
+      assertFalse(
+          caller.isAlive(), "watchdog must stop the diagnostic read before the server closes it");
+      assert429Fallback(failure.get());
+    } finally {
+      releaseBody.countDown();
+    }
+  }
+
+  private static void assert429Fallback(TransportException error) {
+    assertNotNull(error);
+    assertEquals(TransportErrorKind.HTTP_STATUS, error.kind());
+    assertEquals(429, error.statusCode());
+    assertEquals(List.of("17"), error.safeHeaders().get("retry-after"));
+    var mapped =
+        ProviderErrorHelper.mapTransportException(
+            error,
+            "Demo",
+            httpError -> ProviderErrorHelper.classifyHttpStatus(httpError.statusCode()),
+            new ProviderErrorHelper.FallbackMessages(
+                "auth fallback",
+                "billing fallback",
+                "context fallback",
+                "body fallback",
+                "invalid fallback",
+                "configured 429 fallback",
+                "response fallback"));
+    assertEquals(ProviderErrorKind.TRANSIENT, mapped.kind());
+    assertEquals(Integer.valueOf(429), mapped.httpStatus());
+    assertEquals("HTTP 429: configured 429 fallback", mapped.getMessage());
+  }
+
   /** 错误体上限为 Integer.MAX_VALUE 时不发生整型溢出，完整读取且不标记截断。 */
   @Test
   void errorBodyLimitAtIntegerMaxDoesNotOverflow() {
@@ -324,6 +398,8 @@ class JdkHttpSseTransportTest {
                       new ModelCallTimeoutPolicy(Duration.ofSeconds(5), Duration.ofMillis(200)),
                       HttpSseLimits.DEFAULT));
       assertEquals(TransportErrorKind.TIMEOUT, error.kind());
+      assertEquals(0, error.statusCode());
+      assertEquals(TransportStage.BEFORE_HEADERS, error.transportStage());
     } finally {
       release.countDown();
     }
@@ -354,6 +430,8 @@ class JdkHttpSseTransportTest {
                       HttpSseLimits.DEFAULT,
                       event -> seen.add(event.data())));
       assertEquals(TransportErrorKind.TIMEOUT, error.kind());
+      assertEquals(0, error.statusCode());
+      assertEquals(TransportStage.STREAM, error.transportStage());
       assertTrue(error.getMessage().contains("idle"));
       assertEquals(List.of("first"), seen);
     } finally {

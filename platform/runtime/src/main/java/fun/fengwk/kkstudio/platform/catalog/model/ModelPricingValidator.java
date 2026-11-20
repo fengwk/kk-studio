@@ -93,7 +93,12 @@ final class ModelPricingValidator {
       if (!ttls.add(ttl)) {
         throw invalid(path + " contains duplicate TTL: " + ttl);
       }
-      requireOptionalNonNegative(entry.getValue(), path + "." + ttl);
+      String ratePath = path + "." + ttl;
+      BigDecimal rate = entry.getValue();
+      if (rate == null) {
+        throw invalid(ratePath + " is required");
+      }
+      requireOptionalNonNegative(rate, ratePath);
     }
   }
 

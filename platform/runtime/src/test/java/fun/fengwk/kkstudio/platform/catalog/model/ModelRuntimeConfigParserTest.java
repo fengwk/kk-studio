@@ -104,6 +104,22 @@ class ModelRuntimeConfigParserTest {
     assertTrue(encoded.contains("\"cacheWriteByTtl\":{\"300\":\"2\"}"), encoded);
   }
 
+  /** JSON 中单个 TTL 的 null 在所有费率位置都报告字段错误，不进入领域映射。 */
+  @Test
+  void rejectsNullRatesByTtlWithFieldPath() {
+    String ttlRates = "\"cacheWriteByTtl\":{\"300\":null}";
+    assertInvalid(
+        configWithPricing("{\"base\":{" + ttlRates + "}}"),
+        "config.pricing.base.cacheWriteByTtl.300 is required");
+    assertInvalid(
+        configWithPricing("{\"changes\":[{\"from\":\"2027-01-01\",\"base\":{" + ttlRates + "}}]}"),
+        "config.pricing.changes[0].base.cacheWriteByTtl.300 is required");
+    assertInvalid(
+        configWithPricing(
+            "{\"rules\":[{\"type\":\"input_token_range\",\"minInputTokens\":0," + ttlRates + "}]}"),
+        "config.pricing.rules[0].cacheWriteByTtl.300 is required");
+  }
+
   /** 类型化 DTO 来回往返：decode -> encode -> parse 得到相同的 runtime 快照。 */
   @Test
   void decodeThenEncodeRoundTripsEveryTypedConfigField() {
