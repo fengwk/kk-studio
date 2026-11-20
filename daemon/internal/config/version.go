@@ -1,4 +1,4 @@
 package config
 
 // DaemonVersion is the release version of the daemon.
-var DaemonVersion = "1.2.2"
+var DaemonVersion = "1.2.3"
