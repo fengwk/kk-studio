@@ -6,7 +6,7 @@ Daemon 源码位于 [`daemon/`](../../daemon/)，由 Go 1.27.4 构建为独立�
 
 ## 启动与本地状态
 
-入口为 [`cmd/kk-studio-daemon`](../../daemon/cmd/kk-studio-daemon/main.go)。Daemon 支持 `--help`、`--version`、只读 `--check-config <绝对路径>`、长驻服务 `--config <绝对路径>`，可选 LSP 的 `--lsp-profiles` / `--install-lsp` / `--lsp-config`，以及本地恢复 `ide-recovery list|export`（导出仅支持 Linux/macOS）；未知或多余参数失败关闭。配置缓存包含 `{environmentId, version, daemonConfig}`，同目录 `daemon.token` 存放注册凭据。配置字段为 `studioUrl`、`bashExecutable`、`lsp` 与 `proxyUrl`；token 不写入配置 JSON，也不接受 token 命令行参数。配置读取会拒绝未知字段、重复 JSON 键和不符合约束的值。
+入口为 [`cmd/kk-studio-daemon`](../../daemon/cmd/kk-studio-daemon/main.go)。Daemon 支持 `--help`、`--version`、只读 `--check-config <绝对路径>`、长驻服务 `--config <绝对路径>`，可选 LSP 的 `--lsp-profiles` / `--install-lsp` / `--lsp-config`，以及本地恢复 `ide-recovery list|export|archive`（导出与离线归档仅支持 Linux/macOS，见[本地 IDE 草稿恢复](../operations/environment-daemon.md#本地-ide-草稿恢复)）；未知或多余参数失败关闭。配置缓存包含 `{environmentId, version, daemonConfig}`，同目录 `daemon.token` 存放注册凭据。配置字段为 `studioUrl`、`bashExecutable`、`lsp` 与 `proxyUrl`；token 不写入配置 JSON，也不接受 token 命令行参数。配置读取会拒绝未知字段、重复 JSON 键和不符合约束的值。
 
 `daemon.json` 的父目录是运行数据目录。Daemon 在启动时取得目录锁，避免同一 Environment 被多个进程同时运行；安装锁由独立安装 helper 管理。POSIX 下私有目录与敏感文件分别采用属主权限。运行数据包含配置和 token、锁、IDE 数据、受控临时输出、技能文件与最近一次更新诊断；实际布局由发行版定义，参见 [安装与运行](../operations/environment-daemon.md)。
 
