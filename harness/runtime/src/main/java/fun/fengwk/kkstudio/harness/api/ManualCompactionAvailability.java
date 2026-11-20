@@ -20,7 +20,7 @@ public record ManualCompactionAvailability(DisabledReason disabledReason) {
 
   /** 稳定的 UI/API 禁用原因。 */
   public enum DisabledReason {
-    /** Thread 已显式停止；必须先由新输入恢复为 RUNNABLE 才能手动压缩。 */
+    /** Thread 已停止，但执行退出或子任务结算尚未收敛。 */
     THREAD_STOPPED,
 
     /** 线程非空闲、存在开放 Turn，或已有自动压缩待执行。 */

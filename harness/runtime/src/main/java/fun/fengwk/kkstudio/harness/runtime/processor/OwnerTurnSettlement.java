@@ -1,6 +1,8 @@
 package fun.fengwk.kkstudio.harness.runtime.processor;
 
+import fun.fengwk.kkstudio.harness.api.command.ThreadCommand;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.history.AssistantError;
@@ -32,12 +34,13 @@ import fun.fengwk.kkstudio.harness.spi.work.WorkTarget;
 import fun.fengwk.kkstudio.harness.spi.work.WorkTargetType;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 /**
  * owner 自己持有的开放 Turn 的结算：把已冻结的 Join 结果写回该 Turn 并决定后续 Work。
  *
- * <p>当前唯一的 owner-settled Turn 是 COMPACTION：摘要成功则写入 COMPACTION 结果并续作 owner 模型，子执行取消 / 失败则落
+ * <p>当前唯一的 owner-settled Turn 是 COMPACTION：摘要成功则写入 COMPACTION 结果，仅任务内压缩续作 owner 模型，子执行取消 / 失败则落
  * AssistantErrorPayload。此处不含锁获取，调用方必须已持有该 Thread 行锁与 Claim。
  */
 final class OwnerTurnSettlement {
@@ -111,7 +114,8 @@ final class OwnerTurnSettlement {
                         "matched compaction join produced no receipt: " + join.invocationId()));
     EntryPayload resultPayload = resultPayload(tx, join, receipt, start);
     TurnEndOutcome outcome = outcomeOf(resultPayload, receipt);
-    boolean continueModel = outcome == TurnEndOutcome.COMPLETED;
+    boolean continueModel =
+        outcome == TurnEndOutcome.COMPLETED && start.trigger() != CompactionTrigger.USER_REQUEST;
     UUID resultEntryId = tx.nextId();
     tx.entries()
         .insert(
@@ -128,7 +132,7 @@ final class OwnerTurnSettlement {
                 now));
     ThreadState advanced = thread.advanceHead(turnEndId, now);
     tx.threads().update(advanced);
-    requestNextWork(tx, claim, thread, advanced, turnEndId, outcome, continueModel, now);
+    requestNextWork(tx, claim, advanced, start.trigger(), turnEndId, outcome, continueModel, now);
   }
 
   /** 把票据结果折成一个结果 payload：取消 / 失败落 AssistantError，成功落压缩评估结果。 */
@@ -187,25 +191,29 @@ final class OwnerTurnSettlement {
         outcome == TurnEndOutcome.STOPPED ? join.invocationId() : null);
   }
 
-  /** 结算后的 Work 决策：STOPPED 父 Thread 只固化压缩结果，不请求任何 Work、不续作（恢复仍由显式输入驱动，与已停止父的 task 回执交付一致）。 */
+  /** 结算后仅任务内压缩可机械续作；维护期间另行排队的设置在关闭回合后单独应用。 */
   private void requestNextWork(
       HarnessStore.Transaction tx,
       ClaimedWork claim,
-      ThreadState thread,
       ThreadState advanced,
+      CompactionTrigger trigger,
       UUID turnEndId,
       TurnEndOutcome outcome,
       boolean continueModel,
       Instant now) {
-    boolean stopped = thread.executionControl().isStopped();
-    boolean hasQueuedDemand =
-        ThreadInputDemand.hasQueuedDemand(tx.commands().loadQueued(thread.id()));
+    boolean stopped = advanced.executionControl().isStopped();
+    List<ThreadCommand> queued = tx.commands().loadQueued(advanced.id());
+    boolean hasQueuedDemand = ThreadInputDemand.hasQueuedDemand(queued);
+    boolean deferredSettings =
+        trigger == CompactionTrigger.USER_REQUEST
+            && queued.stream().anyMatch(command -> command.type().isSetting());
     EntryPath endPath = tx.entries().loadPath(turnEndId);
     AgentDriver driver = driverRegistry.of(endPath.baseSettings());
     boolean compactionCancelled = outcome == TurnEndOutcome.STOPPED;
     boolean mechanicalWake = !stopped && outcome == TurnEndOutcome.COMPLETED && continueModel;
     boolean requestThread =
-        !compactionCancelled && ((hasQueuedDemand && !stopped) || mechanicalWake);
+        deferredSettings
+            || (!compactionCancelled && ((hasQueuedDemand && !stopped) || mechanicalWake));
     if (mechanicalWake) {
       coordinator.remindSoftBudgetIfDue(tx, advanced, endPath, now);
     }
@@ -219,7 +227,7 @@ final class OwnerTurnSettlement {
     }
     // 先推进 wakeVersion 再 complete：既有 Work 行被保留，而不是删除后重建。
     if (requestThread) {
-      tx.work().request(new WorkTarget(WorkTargetType.THREAD, thread.id()));
+      tx.work().request(new WorkTarget(WorkTargetType.THREAD, advanced.id()));
     }
     tx.work().complete(claim);
   }

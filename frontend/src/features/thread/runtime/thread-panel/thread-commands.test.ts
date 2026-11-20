@@ -71,7 +71,7 @@ describe('AgentPane command registry', () => {
           },
         },
       }).find((command) => command.id === 'compact')?.disabledReason,
-    ).toBe('Thread 已停止，恢复后才能压缩')
+    ).toBe('请等待执行退出、子任务结算后再压缩')
     expect(
       threadCommandsForTarget(target, {
         compaction: {

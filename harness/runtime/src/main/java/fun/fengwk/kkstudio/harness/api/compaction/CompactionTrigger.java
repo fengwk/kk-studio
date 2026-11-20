@@ -8,6 +8,9 @@ public enum CompactionTrigger {
   /** 模型报告上下文溢出，或长度截断且窗口已近满时立即触发的紧急压缩。 */
   OVERFLOW,
 
-  /** 用户显式发起的手动压缩请求。 */
-  MANUAL
+  /** 模型在当前任务中调用 compact 工具；也用于读取既有手动压缩历史。 */
+  MANUAL,
+
+  /** 用户显式发起的摘要维护，不产生模型续作义务。 */
+  USER_REQUEST
 }

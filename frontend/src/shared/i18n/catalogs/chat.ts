@@ -571,8 +571,8 @@ export const chatCatalog = {
     'zh-CN': '当前项目仅支持单会话',
   },
   'ai.runtime.command.disabled.compaction.threadStopped': {
-    'en-US': 'The Thread is stopped; resume it before compacting',
-    'zh-CN': 'Thread 已停止，恢复后才能压缩',
+    'en-US': 'Wait for execution to exit and child tasks to settle before compacting',
+    'zh-CN': '请等待执行退出、子任务结算后再压缩',
   },
   'ai.runtime.command.disabled.compaction.threadBusy': {
     'en-US': 'The Thread is busy; wait for the current turn to finish',

@@ -170,7 +170,7 @@ final class TurnPathValidator {
       throw new IllegalArgumentException("TURN_END must reference its open TURN_START entry id");
     }
     switch (end.outcome()) {
-      case COMPLETED -> requireCompletedOutcome(end);
+      case COMPLETED -> requireCompletedOutcome();
       case FAILED -> requireFailedOutcome(end);
       case STOPPED -> requireStoppedOutcome();
       case CANCELLED -> {
@@ -187,17 +187,13 @@ final class TurnPathValidator {
     openOwnerThreadId = null;
   }
 
-  private void requireCompletedOutcome(TurnEndPayload end) {
+  private void requireCompletedOutcome() {
     if (openReason == TurnStartReason.COMPACTION) {
       // COMPACTION turn 的成功结果必须是 COMPACTION payload（见 visit 的跨用途校验）。
       if (!(assistantResultEntry != null
           && assistantResultEntry.payload() instanceof CompactionPayload)) {
         throw new IllegalArgumentException(
             "completed compaction turns require a COMPACTION result");
-      }
-      if (!end.continueModel()) {
-        throw new IllegalArgumentException(
-            "completed compaction turns must continue the owner model");
       }
     } else {
       requireAssistantMessage("completed");

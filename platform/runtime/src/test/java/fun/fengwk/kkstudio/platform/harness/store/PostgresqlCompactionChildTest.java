@@ -19,6 +19,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -27,6 +29,7 @@ import fun.fengwk.kkstudio.harness.api.AcceptCommandsTarget;
 import fun.fengwk.kkstudio.harness.api.CompactThreadResult;
 import fun.fengwk.kkstudio.harness.api.HarnessConflictReason;
 import fun.fengwk.kkstudio.harness.api.SpawnRequest;
+import fun.fengwk.kkstudio.harness.api.StopResult;
 import fun.fengwk.kkstudio.harness.api.command.CustomMessageCommandPayload;
 import fun.fengwk.kkstudio.harness.api.command.NewThreadCommand;
 import fun.fengwk.kkstudio.harness.api.command.NotificationCommandPayload;
@@ -839,7 +842,7 @@ class PostgresqlCompactionChildTest {
         });
   }
 
-  /** 手动压缩在 PostgreSQL 上原子提交 MANUAL COMPACTION turn 与同 Session 分支。 */
+  /** 手动维护压缩在 PostgreSQL 上原子提交 USER_REQUEST COMPACTION turn 与同 Session 分支。 */
   @Test
   void manualCompactionCreatesSameSessionBranch() {
     ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
@@ -851,12 +854,151 @@ class PostgresqlCompactionChildTest {
     EntryPath path = path(parentId);
     TurnStartPayload start = assertInstanceOf(TurnStartPayload.class, path.head().payload());
     assertEquals(TurnStartReason.COMPACTION, start.reason());
-    assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
+    assertEquals(CompactionTrigger.USER_REQUEST, start.compaction().trigger());
     assertEquals(result.childThreadId(), start.compaction().childThreadId());
     assertEquals(
         baseline.sessionId(),
         store.transaction(
             tx -> tx.threads().find(result.childThreadId()).orElseThrow().sessionId()));
+  }
+
+  /** 用户显式压缩只做摘要维护：父不解析也不调用模型，摘要成功后不续作，下一次真实输入才把新摘要发往 Provider；IDLE 与 STOPPED 同一条路径。 */
+  @ParameterizedTest
+  @CsvSource({"false, false", "true, false", "true, true"})
+  void userRequestCompactionMaintainsSummary(boolean stopped, boolean updateSettings) {
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    ThreadExecutionControl expectedControl =
+        stopped ? ThreadExecutionControl.STOPPED : ThreadExecutionControl.RUNNABLE;
+    long compactVersion = version(parentId);
+    if (stopped) {
+      StopResult stop = runtime.stop(new StopCommand(parentId, UUID.randomUUID(), compactVersion));
+      assertFalse(stop.replayed());
+      assertEquals(expectedControl, stop.thread().executionControl());
+      assertTrue(
+          runtime.manualCompactionAvailability(parentId).available(), "已确认退出的 STOPPED 只放行这类显式摘要维护");
+      compactVersion = stop.thread().version();
+    }
+
+    CompactThreadResult result =
+        runtime.compactThread(new CompactThreadCommand(parentId, compactVersion));
+
+    Entry plannedHead = path(parentId).head();
+    TurnStartPayload start = assertInstanceOf(TurnStartPayload.class, plannedHead.payload());
+    UUID turnStartEntryId = plannedHead.id();
+    UUID childThreadId = result.childThreadId();
+    UUID joinInvocationId = start.compaction().joinInvocationId();
+    assertEquals(TurnStartReason.COMPACTION, start.reason());
+    assertEquals(CompactionTrigger.USER_REQUEST, start.compaction().trigger());
+    assertEquals(turnStartEntryId, result.turnStartEntryId());
+    assertNotNull(childThreadId);
+    assertEquals(JoinDelivery.SETTLE_OWNER_TURN, findJoin(joinInvocationId).delivery());
+    assertFalse(findJoin(joinInvocationId).matched());
+
+    // 父只挂一张等待摘要的票据：没有父 Work、没有父模型调用，执行控制也不因维护改变。
+    assertEquals(expectedControl, snapshot(parentId).thread().executionControl());
+    assertEquals(ThreadRuntimeStatus.RUNNING, snapshot(parentId).runtimeStatus());
+    assertFalse(hasWork(WorkTargetType.THREAD, parentId));
+    assertTrue(findModelInvocationByTurn(parentId, turnStartEntryId).isEmpty());
+
+    // 压缩子经真实 ModelProcessor 生成摘要：结算期间只有子执行被准入。
+    compactionRequired.set(false);
+    processNext(childThreadId);
+    UUID childModelId = openChildModel(childThreadId);
+    String summary = "maintenance summary";
+    if (updateSettings) {
+      // 设置 Work 若在摘要结算前到达，不能吞掉设置，也不能提前打开父模型回合。
+      ThreadState parent = snapshot(parentId).thread();
+      runtime.acceptCommands(
+          new AcceptCommandsCommand(
+              new AcceptCommandsTarget.Thread(
+                  parentId, parent.headEntryId(), parent.nextCommandSequence()),
+              List.of(
+                  new NewThreadCommand(
+                      new SetAgentCommandPayload("assistant"), UUID.randomUUID()))),
+          AcceptancePreflight.IDENTITY);
+      processNext(parentId);
+      assertEquals(1, queuedCommandCount(parentId));
+    }
+    runModelSuccess(childModelId, summary);
+    processNext(childThreadId);
+    assertTrue(findJoin(joinInvocationId).matched());
+    assertTrue(hasWork(WorkTargetType.THREAD, parentId));
+    processNext(parentId);
+
+    EntryPath settledPath = path(parentId);
+    TurnEndPayload end = assertInstanceOf(TurnEndPayload.class, settledPath.head().payload());
+    assertEquals(turnStartEntryId, end.turnStartEntryId());
+    assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
+    assertFalse(end.continueModel(), "USER_REQUEST maintenance never continues the owner model");
+    Entry summaryEntry = settledPath.entries().get(settledPath.entries().size() - 2);
+    CompactionPayload summaryPayload =
+        assertInstanceOf(CompactionPayload.class, summaryEntry.payload());
+    assertEquals(summary, summaryPayload.summaryText());
+
+    if (updateSettings) {
+      processNext(parentId);
+    }
+    // 维护成功不续作：父回到静止，不再请求 Work，也没有第二次模型准入。
+    ThreadSnapshot settledSnapshot = snapshot(parentId);
+    assertEquals(ThreadRuntimeStatus.IDLE, settledSnapshot.runtimeStatus());
+    assertEquals(expectedControl, settledSnapshot.thread().executionControl());
+    assertFalse(hasWork(WorkTargetType.THREAD, parentId));
+    assertEquals(0, queuedCommandCount(parentId));
+    assertEquals(List.of(childModelId), gateway.admittedInvocationIds());
+
+    // 下一次真实输入经真实 ModelProcessor 发往 Provider：请求首条已是新摘要。
+    acceptUserMessage(parentId, "next request");
+    assertEquals(ThreadExecutionControl.RUNNABLE, snapshot(parentId).thread().executionControl());
+    processNext(parentId);
+    UUID inputTurnId = path(parentId).openTurnStart().orElseThrow().id();
+    UUID inputModelId = findModelInvocationByTurn(parentId, inputTurnId).orElseThrow().id();
+    runModelSuccess(inputModelId, "answer to next request");
+    ProviderRequest request = gateway.lastRequest();
+    List<String> requestTexts =
+        request.messages().stream().map(PostgresqlCompactionChildTest::messageText).toList();
+    assertEquals(CompactionPrompts.compactedContext(summary), requestTexts.getFirst());
+    assertTrue(requestTexts.stream().anyMatch(text -> text.contains("next request")));
+    assertFalse(requestTexts.stream().anyMatch(text -> text.contains("historical user ")));
+    assertFalse(requestTexts.stream().anyMatch(text -> text.contains("historical assistant ")));
+  }
+
+  /** 既有 compact 工具触发的 MANUAL 压缩仍以 COMPLETED + continueModel=true 结算，父模型以一条 CONTINUATION 回合续作。 */
+  @Test
+  void compactToolManualCompactionStillContinuesOwnerModel() {
+    ClosedTurnBaseline baseline = seedCompactionReadyClosedTurn(store, OVER_THRESHOLD_USAGE);
+    UUID parentId = baseline.threadId();
+    compactionRequired.set(false);
+    seedCompactToolTurn(parentId, baseline);
+    requestThreadWork(parentId);
+    processNext(parentId);
+
+    CompactionChild child = compactionChildOf(parentId);
+    TurnStartPayload start = (TurnStartPayload) path(parentId).head().payload();
+    assertEquals(CompactionTrigger.MANUAL, start.compaction().trigger());
+
+    processNext(child.childThreadId());
+    UUID childModelId = openChildModel(child.childThreadId());
+    runModelSuccess(childModelId, "manual compaction summary");
+    processNext(child.childThreadId());
+    assertEquals(List.of(childModelId), gateway.admittedInvocationIds());
+    processNext(parentId);
+
+    EntryPath settledPath = path(parentId);
+    TurnEndPayload end = assertInstanceOf(TurnEndPayload.class, settledPath.head().payload());
+    assertEquals(child.turnStartEntryId(), end.turnStartEntryId());
+    assertEquals(TurnEndOutcome.COMPLETED, end.outcome());
+    assertTrue(end.continueModel(), "model-triggered MANUAL compaction continues the owner");
+
+    // 续作义务由父模型兑现：下一条回合是 CONTINUATION，且已规划出待执行的模型调用。
+    processNext(parentId);
+    EntryPath continuationPath = path(parentId);
+    TurnStartPayload continuation =
+        assertInstanceOf(TurnStartPayload.class, continuationPath.head().payload());
+    assertEquals(TurnStartReason.CONTINUATION, continuation.reason());
+    ModelInvocation continuationModel =
+        findModelInvocationByTurn(parentId, continuationPath.head().id()).orElseThrow();
+    assertEquals(ModelInvocationStatus.READY, continuationModel.status());
   }
 
   /** 普通请求因上下文溢出失败后只规划一次 OVERFLOW 压缩；重试再次溢出时直接失败，绝不递归压缩。 */
@@ -1560,6 +1702,14 @@ class PostgresqlCompactionChildTest {
         });
   }
 
+  /** 用真实 ModelProcessor 执行一次 READY 模型调用：网关按序返回排入的成功响应。 */
+  private void runModelSuccess(UUID invocationId, String text) {
+    gateway.queue(
+        new ModelGateway.Succeeded(
+            new ProviderCompletion(providerResponse(text, GenerationStopReason.COMPLETE))));
+    assertEquals(ProcessResult.STARTED, processModel(invocationId, T1));
+  }
+
   /** 普通 Turn 解析：默认沿用 branch settings 的默认请求，测试可覆盖预算与 cache 以观察压缩子的收紧。 */
   private ModelRequestSpec resolvedSpec(BranchSettings settings) {
     ModelRequestSpec base = requestFor(settings);
@@ -1837,16 +1987,28 @@ class PostgresqlCompactionChildTest {
     }
   }
 
-  /** 脚本化子压缩 model gateway：按序返回排入的终态，覆盖截断 / 超限的真实 processor 路径（执行线程内联运行）。 */
+  /** 脚本化子压缩 model gateway：按序返回排入的终态，并记录真实准入的执行以供请求断言。 */
   private static final class ScriptedChildGateway extends SingleModelGateway {
     private final Deque<Outcome> outcomes = new ArrayDeque<>();
+    private final List<Execution> executions = new CopyOnWriteArrayList<>();
 
     void queue(Outcome outcome) {
       outcomes.add(outcome);
     }
 
+    /** 已准入执行的 invocation 顺序：证明只有预期 Thread 的模型被真实执行。 */
+    List<UUID> admittedInvocationIds() {
+      return executions.stream().map(Execution::invocationId).toList();
+    }
+
+    /** 最近一次准入执行的请求：Provider 实际收到的消息。 */
+    ProviderRequest lastRequest() {
+      return executions.getLast().request();
+    }
+
     @Override
     public Admission admit(Execution execution) {
+      executions.add(execution);
       Outcome outcome = outcomes.poll();
       if (outcome == null) {
         throw new IllegalStateException("no queued gateway outcome");
@@ -2139,6 +2301,17 @@ class PostgresqlCompactionChildTest {
           tx.threads().update(thread.reserveCommandSequences(1, T1));
           return idempotencyKey;
         });
+  }
+
+  /** 在既有 Thread 上投递一条纯用户输入：纯 USER_MESSAGE 批次无 cursor，已收敛的 STOPPED 据此恢复 RUNNABLE。 */
+  private void acceptUserMessage(UUID threadId, String text) {
+    runtime.acceptCommands(
+        new AcceptCommandsCommand(
+            new AcceptCommandsTarget.Thread(threadId),
+            List.of(
+                new NewThreadCommand(
+                    new UserMessageCommandPayload(AgentMessage.user(text)), UUID.randomUUID()))),
+        AcceptancePreflight.IDENTITY);
   }
 
   private void requestThreadWork(UUID threadId) {

@@ -131,7 +131,7 @@ Thread 控制面按认证、资源权限与请求格式收紧，不按 Thread �
 无论完整还是增量，Thread、队列、当前输出、工具与退出事实都是同一事务的完整当前值，`usageCost` 只投影本次返回的 Entry。
 Snapshot 不携带手动压缩可用性：`GET /api/harness/threads/{threadId}/compaction-availability` 按需返回 `available` 与可空的
 `disabledReason`，按完整历史判断 token 阈值、ownership 与模型。它只是提示；`POST /api/harness/threads/{threadId}/compact`
-仍以 `expectedVersion` 与服务端判断为准。
+仍以 `expectedVersion` 与服务端判断为准。`THREAD_STOPPED` 表示执行退出或子任务结算尚未完成；收敛后可显式压缩，成功保存摘要但不恢复父 Thread。
 `POST /api/harness/threads/{threadId}/stop` 以 root `expectedVersion` + 稳定 `stopRequestId` 执行精确 CAS，
 回执 `status` 为 `STOPPED` / `REPLAYED`、`thread` 是目标权威投影、`stoppedThreads` 是本次完整受影响集合的
 逐 Thread 持久回执（`threadId`、`stopRequestId`、`stoppedTurnEndEntryId`、`cancelledCommandCount`、

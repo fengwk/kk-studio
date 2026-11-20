@@ -68,6 +68,19 @@ public final class CompactionTurns {
     }
   }
 
+  /** 当前开放的用户维护回合所持有的子执行票据；其它回合没有 STOPPED 结算资格。 */
+  public static Optional<CompactionStart> openUserRequest(Optional<Entry> openTurn, UUID ownerId) {
+    return openTurn
+        .map(entry -> (TurnStartPayload) entry.payload())
+        .filter(start -> start.reason() == TurnStartReason.COMPACTION)
+        .filter(start -> ownerId.equals(start.ownerThreadId()))
+        .map(TurnStartPayload::compaction)
+        .filter(
+            start ->
+                start.trigger() == CompactionTrigger.USER_REQUEST
+                    && start.joinInvocationId() != null);
+  }
+
   /** 扫描 path，返回按路径顺序排列的全部 COMPACTION turn 事实（open 且无 result/end 的也返回）。 */
   public static List<CompactionTurn> scan(EntryPath path) {
     Objects.requireNonNull(path, "path");
