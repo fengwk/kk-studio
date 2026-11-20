@@ -180,11 +180,11 @@ class ComfyuiPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = runtime(context);
               PluginConfigurationService configuration = configurationService(context, runtime);
               configuration.configure(
-                  COMFYUI, 1L, enabledValues(GRAPH_OLD, "1", "value", "2"), Map.of());
+                  COMFYUI, 1L, enabledValues(GRAPH_OLD, "1", "value", "2"), Map.of(), false);
 
               try (PluginCatalogRuntime.Lease old = runtime.acquire()) {
                 configuration.configure(
-                    COMFYUI, 2L, enabledValues(GRAPH_NEW, "3", "value", "4"), Map.of());
+                    COMFYUI, 2L, enabledValues(GRAPH_NEW, "3", "value", "4"), Map.of(), false);
                 try (PluginCatalogRuntime.Lease current = runtime.acquire()) {
                   assertEquals(4, executeOnce(current));
                 }
@@ -213,7 +213,11 @@ class ComfyuiPluginPostgresIntegrationTest {
                   DomainException.class,
                   () ->
                       configuration.configure(
-                          COMFYUI, 1L, enabledValues("not-json", "1", "value", "2"), Map.of()));
+                          COMFYUI,
+                          1L,
+                          enabledValues("not-json", "1", "value", "2"),
+                          Map.of(),
+                          false));
 
               assertEquals(1L, repository.find(COMFYUI).orElseThrow().version());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
@@ -232,12 +236,12 @@ class ComfyuiPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = runtime(context);
               PluginConfigurationService configuration = configurationService(context, runtime);
               configuration.configure(
-                  COMFYUI, 1L, enabledValues(GRAPH_OLD, "1", "value", "2"), Map.of());
+                  COMFYUI, 1L, enabledValues(GRAPH_OLD, "1", "value", "2"), Map.of(), false);
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 assertEquals(2, executeOnce(lease));
               }
 
-              configuration.configure(COMFYUI, 2L, disabledValues(), Map.of());
+              configuration.configure(COMFYUI, 2L, disabledValues(), Map.of(), false);
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 assertTrue(
                     PluginCanvasFunctionCatalog.of(lease.snapshot())

@@ -26,4 +26,7 @@ public class PluginConfigurationUpdateRequestDTO {
 
   /** 秘密字段补丁：字段名到单字段操作；省略的字段按 KEEP 处理。 */
   @ToString.Exclude private @Nullable Map<String, SecretUpdate> secretPatch;
+
+  /** 是否允许认证目标变化时丢弃已有凭据，缺省为 false。 */
+  private @Nullable Boolean confirmCredentialReset;
 }

@@ -122,7 +122,7 @@ class MediaPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
 
-              configuration.configure(PLUGIN_ID, 1L, "{\"enabled\":false}", Map.of());
+              configuration.configure(PLUGIN_ID, 1L, "{\"enabled\":false}", Map.of(), false);
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 assertTrue(
                     PluginCanvasFunctionCatalog.of(lease.snapshot()).catalog().list().isEmpty());
@@ -133,7 +133,7 @@ class MediaPluginPostgresIntegrationTest {
               }
               assertTrue(context.getBeansOfType(CanvasFunctionAdapter.class).isEmpty());
 
-              configuration.configure(PLUGIN_ID, 2L, "{\"enabled\":true}", Map.of());
+              configuration.configure(PLUGIN_ID, 2L, "{\"enabled\":true}", Map.of(), false);
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
                 CanvasFunctionCatalog.RegisteredFunction registered =
                     PluginCanvasFunctionCatalog.of(lease.snapshot())

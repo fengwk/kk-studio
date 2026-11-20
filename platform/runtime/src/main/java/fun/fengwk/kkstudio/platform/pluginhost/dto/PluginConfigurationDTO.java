@@ -3,6 +3,7 @@ package fun.fengwk.kkstudio.platform.pluginhost.dto;
 import lombok.Data;
 import tools.jackson.databind.JsonNode;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -30,4 +31,7 @@ public class PluginConfigurationDTO {
 
   /** 每个已声明秘密字段的说明与录入状态；没有声明秘密字段时为空映射。 */
   private Map<String, PluginSecretProjectionDTO> secrets;
+
+  /** 决定认证目标的普通配置字段名，按名称排序。 */
+  private List<String> credentialContextFields = List.of();
 }

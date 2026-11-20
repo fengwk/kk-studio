@@ -661,7 +661,8 @@ complete 请求为 `{authAttemptId, callbackUrl}`，仅消费 prepare 之后配�
 登录或配置写入可替换凭据并推进已有行版本。
 Plugin 只通过作用域 `PluginCredentialAccess` 读取本插件凭据：每次调用现读当前行，因此登录、轮换或撤销
 立即对已配置实例生效，不需要重建实例。刷新在途、需要重新认证、刷新结果未知或已过期时以对应原因拒绝。
-静态密钥的认证目标字段（`contextFields`）变化而本次没有重新录入密钥时，旧密钥被删除，避免把密钥发往新目标。
+插件配置响应的 `credentialContextFields` 列出决定静态密钥认证目标的普通字段。已有凭据时，更改这些字段须在保存请求中显式设置
+`confirmCredentialReset: true`；即使同时录入部分新秘密，未重录的旧字段也会被丢弃，避免发往新目标。
 静态密钥没有 region、过期或刷新时刻，不参与刷新扫描。
 
 刷新以短事务 claim lease（到期与租约有效性都以数据库时钟判定），请求前核验 token、version 与有效截止时刻，
@@ -700,7 +701,7 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与默认值，配置模型校验取值区间和跨字段必填关系。
 管理面与配置同步按同一份 schema 读写，未声明的字段一律被拒绝。使用者只需要关心三类输入：
 
-- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求与长轮询超时等预算参数有明确取值范围，默认值由 schema 给出，响应体大小上限由客户端常量固定。改动 `baseUrl` 而不重新录入 `apiKey` 会删除已保存的密钥，新旧实例都在出网前失败。
+- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求与长轮询超时等预算参数有明确取值范围，默认值由 schema 给出，响应体大小上限由客户端常量固定。已有凭据时改动 `baseUrl` 须确认清除旧凭据；未重录 `apiKey` 时，新旧实例都在出网前失败。
 - 认证与私有身份：唯一认证密钥 `apiKey` 是静态密钥，通过统一 Plugin Secret API 的 KEEP/SET/CLEAR 管理，不读环境变量也不设外部优先级。可选私有身份 `instanceId` 是第二个受保护秘密字段，与 `apiKey` 同属一次 scoped snapshot，只在真正发送执行请求前取出并填入请求体，不进入普通值、配置历史、管理面投影或导出；未配置时不发送该字段，由 Hub 自由路由。
 - 业务开关与任务预算：`enabled` 决定整个插件是否参与，`gptImage2.paidEnabled` 放开付费图片执行，`seedance.enabled`（配合 `seedance.workspaceId`）放开 Seedance 视频执行；两类任务的执行等待与重试预算也由插件配置模型统一校验。
 
@@ -748,7 +749,10 @@ MCP 发现由计划阶段执行；Git Skill 在导入执行时解析分支当前
 configurationSchema 归一化普通值，非法值整份拒绝。普通值可随文件往返，秘密与受保护身份不进入文件，
 导入后仍需在 Plugin Secret API 或登录流程录入。
 插件写入复用唯一写入口：计划期的各插件版本作为导入事务内的 CAS 坐标，
-秘密补丁恒为 KEEP，因此导入既不创建也不恢复任何凭据；插件写入参与外层导入事务。
+秘密补丁恒为 KEEP，因此导入既不创建也不恢复任何凭据。预览的 `pluginCredentialResets` 只列出已有本机凭据、
+且导入会改变认证目标的插件 ID，不含凭据值。确认清除后将这些 ID 传入 `confirmedPluginCredentialResets`。
+执行时在配置 CAS 所在事务内重检；若仍有未经授权的凭据清除，返回 `PLUGIN_CREDENTIAL_RESET_CONFIRMATION` 并整体回滚。
+该授权与 `allowPartial` 独立。
 系统设置按当前完整六节契约直接校验，不合并局部字段；文件里的未知设置字段
 被移除并作为跳过项列出，不做别名或双读，其余六节按 `allowPartial` 语义导入；以执行准备时版本 CAS，
 提交后沿现有通知刷新快照。

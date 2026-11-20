@@ -42,6 +42,7 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -148,7 +149,7 @@ class ConfigSyncImportLockPostgresIntegrationTest {
     new TransactionTemplate(transactions)
         .execute(
             status -> {
-              applier.apply(plan(providers), List.of());
+              applier.apply(plan(providers), List.of(), Set.of());
               return null;
             });
   }

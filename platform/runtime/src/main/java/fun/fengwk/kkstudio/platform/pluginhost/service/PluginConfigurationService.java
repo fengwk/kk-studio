@@ -35,7 +35,7 @@ import java.util.Optional;
  * Plugin 普通配置与凭据的唯一写入口：保存配置、登录完成与断连。
  *
  * <p>保存配置在同一事务内以 version CAS 写普通值，并按秘密补丁（KEEP / SET / CLEAR）写入或删除凭据行。静态密钥的 {@code
- * contextFields}（例如目标地址）变化而本次没有重新录入密钥时，旧凭据被删除，避免把密钥发往新的目标。保存前先用候选配置与候选凭据 configure
+ * contextFields}（例如目标地址）变化时，须经确认才丢弃旧凭据，避免把密钥发往新的目标。提交前用候选配置与候选凭据 configure
  * 一次目标插件，配置不可用时直接拒绝。提交后唤醒本节点目录刷新与凭据刷新调度。
  */
 @Slf4j
@@ -77,13 +77,15 @@ public final class PluginConfigurationService {
    *
    * @param expectedVersion 期望的当前配置版本；不匹配即版本冲突
    * @param secretPatch 秘密字段补丁；省略的声明字段按 KEEP 处理
+   * @param confirmCredentialReset 是否明确允许认证目标变化时丢弃已有凭据
    * @return 保存后的配置版本
    */
   public long configure(
       String pluginId,
       long expectedVersion,
       String valuesJson,
-      Map<String, SecretUpdate> secretPatch) {
+      Map<String, SecretUpdate> secretPatch,
+      boolean confirmCredentialReset) {
     Plugin plugin = requirePlugin(pluginId);
     Map<String, SecretUpdate> patch = requirePatch(plugin, secretPatch);
     String resolved;
@@ -97,15 +99,23 @@ public final class PluginConfigurationService {
     if (current.version() != expectedVersion) {
       throw conflict(expectedVersion, current.version());
     }
-    Optional<PluginCredentialRow> existing = credentials.find(pluginId);
-    CredentialChange change = credentialChange(plugin, current, resolved, patch, existing);
-    verifyConfigures(plugin, new PluginConfig(expectedVersion + 1, resolved), change, existing);
+    boolean changed = contextChanged(plugin.authenticationSpec(), current.valuesJson(), resolved);
     transactions.executeWithoutResult(
         status -> {
           agentDependencies.requireDeclaredAgents(pluginId, expectedVersion + 1, resolved);
           if (!configurations.update(pluginId, expectedVersion, resolved)) {
             throw conflict(expectedVersion, configurations.find(pluginId).orElseThrow().version());
           }
+          // 配置 CAS 成功后再读取凭据：基于受同一配置行序列化保护的当前状态授权和写入。
+          Optional<PluginCredentialRow> existing = credentials.find(pluginId);
+          if (changed && existing.isPresent() && !confirmCredentialReset) {
+            throw DomainException.conflict(
+                "PLUGIN_CREDENTIAL_RESET_CONFIRMATION",
+                "plugin credential reset requires confirmation");
+          }
+          CredentialChange change = credentialChange(plugin, changed, patch, existing);
+          verifyConfigures(
+              plugin, new PluginConfig(expectedVersion + 1, resolved), change, existing);
           switch (change.action()) {
             case WRITE -> credentials.upsertConnected(
                 pluginId, change.payloadJson(), null, null, null);
@@ -118,6 +128,13 @@ public final class PluginConfigurationService {
           afterCommit(change.action() != CredentialAction.NONE);
         });
     return expectedVersion + 1;
+  }
+
+  /** 只读预览：候选值已由配置 schema 解析；实际保存时会重新检查凭据。 */
+  public boolean wouldResetCredentials(PluginConfigurationRow current, String resolvedValues) {
+    Plugin plugin = requirePlugin(current.pluginId());
+    return contextChanged(plugin.authenticationSpec(), current.valuesJson(), resolvedValues)
+        && credentials.find(current.pluginId()).isPresent();
   }
 
   /** 登录完成：用交互材料替换凭据行。材料的 region 与时限由调用方校验。 */
@@ -150,15 +167,12 @@ public final class PluginConfigurationService {
   /** 由补丁与 context 字段变化决定本次对凭据行的动作。 */
   private static CredentialChange credentialChange(
       Plugin plugin,
-      PluginConfigurationRow current,
-      String resolved,
+      boolean contextChanged,
       Map<String, SecretUpdate> patch,
       Optional<PluginCredentialRow> existing) {
     boolean touched =
         patch.values().stream()
             .anyMatch(operation -> operation.operation() != SecretUpdate.Operation.KEEP);
-    boolean contextChanged =
-        contextChanged(plugin.authenticationSpec(), current.valuesJson(), resolved);
     if (!touched && !contextChanged) {
       return CredentialChange.NONE;
     }

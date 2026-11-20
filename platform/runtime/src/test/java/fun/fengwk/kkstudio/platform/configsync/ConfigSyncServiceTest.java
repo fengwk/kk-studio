@@ -38,6 +38,7 @@ import fun.fengwk.kkstudio.platform.testing.TestCatalogSources;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -154,7 +155,7 @@ class ConfigSyncServiceTest {
 
     ConfigSyncImportResultDTO result = service.importYaml(request);
 
-    verify(applier).apply(any(), any());
+    verify(applier).apply(any(), any(), eq(Set.of()));
     assertTrue(result.getImported().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
     assertTrue(result.getImported().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(result.getSkipped().isEmpty());
@@ -182,7 +183,7 @@ class ConfigSyncServiceTest {
     assertTrue(check.getCreated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
     assertTrue(check.getUpdated().isEmpty());
     assertTrue(check.getSkipped().isEmpty());
-    verify(applier, never()).apply(any(), any());
+    verify(applier, never()).apply(any(), any(), any());
   }
 
   @Test
@@ -197,7 +198,7 @@ class ConfigSyncServiceTest {
     assertTrue(check.getCreated().isEmpty());
     assertTrue(check.getUpdated().contains(new ConfigSyncRef(ConfigSyncKind.PROVIDERS, "p")));
     assertTrue(check.getUpdated().contains(new ConfigSyncRef(ConfigSyncKind.MODELS, "m")));
-    verify(applier, never()).apply(any(), any());
+    verify(applier, never()).apply(any(), any(), any());
   }
 
   @Test
@@ -208,14 +209,14 @@ class ConfigSyncServiceTest {
     request.setYaml("unknownThing: []\n");
 
     assertThrows(DomainException.class, () -> service.importYaml(request));
-    verify(applier, never()).apply(any(), any());
+    verify(applier, never()).apply(any(), any(), any());
 
     request.setAllowPartial(true);
     ConfigSyncImportResultDTO result = service.importYaml(request);
 
     assertTrue(result.getImported().isEmpty());
     assertEquals(1, result.getSkipped().size());
-    verify(applier, never()).apply(any(), any());
+    verify(applier, never()).apply(any(), any(), any());
   }
 
   @Test
@@ -224,7 +225,7 @@ class ConfigSyncServiceTest {
     when(mcpServerRepository.selectReferencedToolNames()).thenReturn(List.of());
     doThrow(DomainException.validation("config_sync", "leaked-secret-value"))
         .when(applier)
-        .apply(any(), any());
+        .apply(any(), any(), eq(Set.of()));
     ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
     request.setYaml(ConfigSyncFixtures.providerAndModelYaml());
 
@@ -250,7 +251,7 @@ class ConfigSyncServiceTest {
 
     verify(skillCatalogService)
         .prepareGitImport("pkg", null, "https://example.com/pkg.git", "main", null);
-    verify(applier).apply(any(), eq(List.of(prepared)));
+    verify(applier).apply(any(), eq(List.of(prepared)), eq(Set.of()));
     verify(skillCatalogService, never()).cancelPreparedGitImport(any());
     assertTrue(
         result.getImported().contains(new ConfigSyncRef(ConfigSyncKind.SKILL_PACKAGES, "pkg")));
@@ -265,15 +266,16 @@ class ConfigSyncServiceTest {
     when(skillCatalogService.prepareGitImport(
             "pkg", null, "https://example.com/pkg.git", "main", null))
         .thenReturn(prepared);
-    doThrow(DomainException.conflict("CONFIG_SYNC_WRITE", "write failed"))
+    doThrow(DomainException.conflict("PLUGIN_CREDENTIAL_RESET_CONFIRMATION", "write failed"))
         .when(applier)
-        .apply(any(), any());
+        .apply(any(), any(), eq(Set.of()));
     ConfigSyncImportRequestDTO request = new ConfigSyncImportRequestDTO();
     request.setYaml(skillPackageYaml());
 
     DomainException error = assertThrows(DomainException.class, () -> service.importYaml(request));
 
     assertEquals(DomainErrorCode.CONFLICT, error.code());
+    assertEquals("PLUGIN_CREDENTIAL_RESET_CONFIRMATION", error.reason());
     verify(skillCatalogService).cancelPreparedGitImport(prepared);
   }
 

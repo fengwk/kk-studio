@@ -170,7 +170,7 @@ test('precheck case enforces read-only checking and explicit partial import befo
       if (path.endsWith('/check-import')) {
         return {
           headers: new Headers({ 'cache-control': 'no-store' }),
-          json: { created: [{ kind: 'providers', name }], updated: [], skipped: [{ name: 'futureConfig', reason: 'unknown config category' }] },
+          json: { created: [{ kind: 'providers', name }], updated: [], pluginCredentialResets: [], skipped: [{ name: 'futureConfig', reason: 'unknown config category' }] },
         }
       }
       assert.equal(path, '/api/platform/config-sync/import')
@@ -292,6 +292,7 @@ test('environment daemon-config roundtrip case wires PUT/export/import/update/cl
             created: [],
             updated: [{ kind: 'environments', name: state.name }],
             skipped: [],
+            pluginCredentialResets: [],
           },
         }
       }

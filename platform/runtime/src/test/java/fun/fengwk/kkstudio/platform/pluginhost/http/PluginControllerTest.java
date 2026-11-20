@@ -57,12 +57,13 @@ class PluginControllerTest {
   void configurationUpdatePassesTheTypedRequestThrough() {
     PluginDTO applied = samplePluginDTO("my-plugin");
     when(pluginManagementService.updateConfiguration(
-            "my-plugin", 7L, VALUES_JSON, Map.of("apiKey", SecretUpdate.set("secret"))))
+            "my-plugin", 7L, VALUES_JSON, Map.of("apiKey", SecretUpdate.set("secret")), true))
         .thenReturn(applied);
 
     PluginConfigurationUpdateRequestDTO request = new PluginConfigurationUpdateRequestDTO();
     request.setExpectedVersion(7L);
     request.setValuesJson(VALUES_JSON);
+    request.setConfirmCredentialReset(true);
     request.setSecretPatch(Map.of("apiKey", SecretUpdate.set("secret")));
 
     ResponseEntity<PluginDTO> response = controller.updateConfiguration("my-plugin", request);
@@ -77,7 +78,7 @@ class PluginControllerTest {
   void pendingApplicationIsReportedAsAccepted() {
     PluginDTO pending = samplePluginDTO("my-plugin");
     pending.setApplicationError("configuration is saved but this node has not applied it yet");
-    when(pluginManagementService.updateConfiguration("my-plugin", 7L, VALUES_JSON, null))
+    when(pluginManagementService.updateConfiguration("my-plugin", 7L, VALUES_JSON, null, false))
         .thenReturn(pending);
 
     PluginConfigurationUpdateRequestDTO request = new PluginConfigurationUpdateRequestDTO();
