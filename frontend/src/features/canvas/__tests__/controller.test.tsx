@@ -637,7 +637,7 @@ describe('useCanvasController real snapshot runtime', () => {
     const deleteNodeCommandCount = commands.filter((request) => (
       request.commands.some((command) => command.type === 'DELETE_NODE')
     )).length
-    act(() => result.current.deleteNode(NODE_NOTE))
+    await act(async () => result.current.deleteNode(NODE_NOTE))
     await waitFor(() => expect(commands.filter((request) => (
       request.commands.some((command) => command.type === 'DELETE_NODE')
     ))).toHaveLength(deleteNodeCommandCount + 1))
@@ -1393,6 +1393,166 @@ describe('useCanvasController real snapshot runtime', () => {
     await waitFor(() => expect(getCanvas).toHaveBeenCalledTimes(4))
   })
 
+  it.each(['single', 'selection'] as const)('uses only its own save ACK for %s deletion with no late save', async (mode) => {
+    // Hold the delete ACK to exercise edits attempted while the target still renders.
+    const deleteAck = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands)
+      .mockImplementationOnce(async (_id, request) => {
+        commands.push(request)
+        current = applyCommandBatch(current, request.commands)
+        return diffPatch(current)
+      })
+      .mockImplementationOnce(async (_id, request) => {
+        commands.push(request)
+        return deleteAck.promise
+      })
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    act(() => result.current.setSelection([NODE_FN, NODE_NOTE, `group:${GROUP_A}`]))
+
+    const editedConfig = { prompt: 'local edit', references: [], parameters: { ratio: 'AUTO' } }
+    const originalFunction = current.nodes.find((node) => node.id === NODE_FN)?.function
+    let deletion: Promise<void> | undefined
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', editedConfig)
+      deletion = mode === 'single' ? result.current.deleteNode(NODE_FN) : result.current.deleteSelection()
+    })
+
+    await waitFor(() => expect(commands).toHaveLength(2))
+    const savedFunction = { name: 'fake-image', args: { prompt: 'local edit', references: [], ratio: 'AUTO' } }
+    expect(commands[0]?.commands).toEqual([{
+      type: 'SET_NODE_FUNCTION', nodeId: NODE_FN, expectedFunction: originalFunction, function: savedFunction,
+    }])
+    const deleteFunctionNode = {
+      type: 'DELETE_NODE', nodeId: NODE_FN, expectedFunction: savedFunction, expectedResourceIds: [RES_OUTPUT],
+    }
+    expect(commands[1]?.commands).toEqual(mode === 'single' ? [deleteFunctionNode] : [
+      { type: 'DELETE_GROUP', groupId: GROUP_A, expectedMemberNodeIds: [NODE_FN, NODE_IMG] },
+      deleteFunctionNode,
+      { type: 'DELETE_NODE', nodeId: NODE_NOTE, expectedFunction: null, expectedResourceIds: [RES_NOTE] },
+    ])
+
+    act(() => result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { ...editedConfig, prompt: 'too late' }))
+    expect(result.current.state.drafts[NODE_FN]?.function).toBeUndefined()
+    await act(async () => {
+      deleteAck.resolve({
+        revision: '2',
+        nodes: (mode === 'single' ? [NODE_FN] : [NODE_FN, NODE_NOTE]).map((nodeId) => ({ type: 'REMOVE', nodeId })),
+        groups: mode === 'single' ? [] : [{ type: 'REMOVE', groupId: GROUP_A }],
+      })
+      await deletion
+      await expect(result.current.flushFunctionConfig(NODE_FN)).resolves.toBeUndefined()
+    })
+    expect(postCanvasCommands).toHaveBeenCalledTimes(2)
+    expect(result.current.state.selectedIds).not.toContain(NODE_FN)
+    await waitFor(() => expect(result.current.snapshot?.nodes.some((node) => node.id === NODE_FN)).toBe(false))
+  })
+
+  it.each(['FUNCTION', 'RESOURCES'] as const)('preserves the delete CAS when remote %s advances during the local save', async (field) => {
+    const saveAck = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands)
+      .mockImplementationOnce(async (_id, request) => {
+        current = applyCommandBatch(current, request.commands)
+        return saveAck.promise
+      })
+      .mockImplementationOnce(async (_id, request) => {
+        const remote = current.nodes.find((node) => node.id === NODE_FN)!
+        const command = request.commands[0]
+        expect(command?.type).toBe('DELETE_NODE')
+        if (command?.type !== 'DELETE_NODE') throw new Error('expected DELETE_NODE')
+        if (field === 'FUNCTION') {
+          expect(command.expectedFunction?.args).toMatchObject({ prompt: 'local edit' })
+          expect(command.expectedFunction).not.toEqual(remote.function)
+        } else {
+          expect(command.expectedFunction).toEqual(remote.function)
+          expect(command.expectedResourceIds).toEqual([RES_OUTPUT])
+          expect(command.expectedResourceIds).not.toEqual(remote.resources.map((resource) => resource.id))
+        }
+        throw new ApiError('Conflict', 409, 'CANVAS_CONFLICT', {
+          conflicts: [{ type: 'STALE_NODE', group: field, nodeId: NODE_FN, current: remote }],
+        })
+      })
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    act(() => result.current.setSelection([NODE_FN]))
+    let deletion: Promise<void> | undefined
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+        prompt: 'local edit', references: [], parameters: { ratio: 'AUTO' },
+      })
+      deletion = result.current.deleteNode(NODE_FN)
+    })
+    await waitFor(() => expect(postCanvasCommands).toHaveBeenCalledTimes(1))
+    const localPatch = diffPatch(current)
+    current = {
+      ...current,
+      document: { ...current.document, revision: '2' },
+      nodes: current.nodes.map((node) => node.id !== NODE_FN ? node : field === 'FUNCTION'
+        ? { ...node, function: { name: 'fake-image', args: { prompt: 'remote edit' } } }
+        : { ...node, resources: [] }),
+    }
+    // Deliver a newer authoritative snapshot before the response to our own write.
+    emitCanvasRevision('2')
+    await waitFor(() => expect(result.current.snapshot?.document.revision).toBe('2'))
+    await act(async () => {
+      saveAck.resolve(localPatch)
+      await deletion
+    })
+    expect(postCanvasCommands).toHaveBeenCalledTimes(2)
+    expect(result.current.state.conflictMessage).toContain('Canvas changed on the server')
+    expect(result.current.state.selectedIds).toEqual([NODE_FN])
+  })
+
+  it.each(['single', 'selection'] as const)('stops %s deletion if the function save fails', async (mode) => {
+    vi.mocked(postCanvasCommands).mockRejectedValueOnce(new ApiError('save failed', 400))
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    act(() => result.current.setSelection([NODE_FN, NODE_NOTE]))
+    await act(async () => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+        prompt: 'keep draft', references: [], parameters: { ratio: 'AUTO' },
+      })
+      await (mode === 'single' ? result.current.deleteNode(NODE_FN) : result.current.deleteSelection())
+    })
+    expect(postCanvasCommands).toHaveBeenCalledExactlyOnceWith(CANVAS_ID, expect.objectContaining({
+      commands: [expect.objectContaining({ type: 'SET_NODE_FUNCTION', nodeId: NODE_FN })],
+    }), expect.anything())
+    expect(result.current.state.toast).toBe('save failed')
+    expect(result.current.state.selectedIds).toEqual([NODE_FN, NODE_NOTE])
+    expect(result.current.state.drafts[NODE_FN]?.function?.args).toMatchObject({ prompt: 'keep draft' })
+  })
+
+  it('does not continue deletion in a new canvas after the old save ACK', async () => {
+    const nextCanvasId = '99999999-4b9f-4c5d-9e6f-1a2b3c4d5e6f'
+    const saveAck = deferred<CanvasPatchDTO>()
+    vi.mocked(postCanvasCommands).mockImplementationOnce(async (_id, request) => {
+      current = applyCommandBatch(current, request.commands)
+      return saveAck.promise
+    })
+    vi.mocked(getCanvas).mockImplementation(async (id) => id === nextCanvasId
+      ? { ...snapshot(), document: { ...snapshot().document, id } }
+      : current)
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(CANVAS_ID))
+    let deletion: Promise<void> | undefined
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+        prompt: 'old canvas only', references: [], parameters: { ratio: 'AUTO' },
+      })
+      deletion = result.current.deleteNode(NODE_FN)
+    })
+    await waitFor(() => expect(postCanvasCommands).toHaveBeenCalledTimes(1))
+    act(() => result.current.openEditor(nextCanvasId))
+    await waitFor(() => expect(result.current.snapshot?.document.id).toBe(nextCanvasId))
+    await act(async () => {
+      saveAck.resolve(diffPatch(current))
+      await deletion
+    })
+    expect(postCanvasCommands).toHaveBeenCalledTimes(1)
+    expect(result.current.snapshot?.nodes.find((node) => node.id === NODE_FN)?.function?.args)
+      .toMatchObject({ prompt: 'old prompt' })
+  })
+
   it('retains a failed config draft so start retries the save before posting the run', async () => {
     vi.mocked(postCanvasCommands).mockRejectedValueOnce(new ApiError('save failed', 400))
     const { result } = renderHook(() => useCanvasController(), { wrapper: Wrapper })
@@ -1532,7 +1692,10 @@ describe('useCanvasController real snapshot runtime', () => {
 
     await act(async () => {
       secondSave.resolve(diffPatch(snapshot(2)))
-      await Promise.all([firstFlush, duplicateFlush, start])
+      const [saved, duplicate] = await Promise.all([firstFlush, duplicateFlush, start])
+      expect(duplicateFlush).toBe(firstFlush)
+      expect(duplicate).toBe(saved)
+      expect(saved).toMatchObject({ name: 'fake-image', args: { prompt: 'latest prompt' } })
     })
     expect(startCanvasFunctionRun).toHaveBeenCalledTimes(1)
   })

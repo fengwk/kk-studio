@@ -111,7 +111,12 @@ export function useCanvasController(initialCanvasId?: string) {
     setState((current) => (current.toast ? { ...current, toast: null } : current))
   }, []))
 
-  const { scheduleFunctionConfig, flushFunctionConfig, resetPending: resetFunctionConfigDrafts } =
+  const {
+    scheduleFunctionConfig,
+    flushFunctionConfig,
+    lockFunctionConfigsForDeletion,
+    resetPending: resetFunctionConfigDrafts,
+  } =
     useFunctionConfigSync({
       executeCommands,
       getSnapshot: () => currentCanvasSnapshot(scope, snapshot),
@@ -245,6 +250,7 @@ export function useCanvasController(initialCanvasId?: string) {
     state,
     executeCommands,
     flushFunctionConfig,
+    lockFunctionConfigsForDeletion,
     setToast,
     suggestNodeAlias,
     reserveNodeAlias,

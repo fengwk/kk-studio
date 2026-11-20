@@ -56,7 +56,7 @@ export function useCanvasFunctionRun(options: {
   canvasId: string | null
   queryClient: QueryClient
   setToast: (toast: string) => void
-  flushFunctionConfig: (nodeId: string) => Promise<void>
+  flushFunctionConfig: (nodeId: string) => Promise<unknown>
   /** 解析该节点当前将被执行函数在用户所见目录中的版本；缺失时返回 null。 */
   resolveFunctionVersion: (nodeId: string) => CanvasFunctionVersionDTO | null
 }): FunctionRunActions {
