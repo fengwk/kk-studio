@@ -20,7 +20,11 @@ export function EnvironmentHostSection({ environment }: EnvironmentHostSectionPr
 
       <div className="env-host-grid">
         <div className="env-host-meta-card">
-          <span className="lbl">{t('ai.environment.runtime.daemonVersion')}</span>
+          <span className="lbl">UUID</span>
+          <Mono className="val">{environment.id}</Mono>
+        </div>
+        <div className="env-host-meta-card">
+          <span className="lbl">{t('ai.environment.lastDaemonVersion')}</span>
           <Mono className="val">{environment.daemonVersion ?? '—'}</Mono>
         </div>
         <div className="env-host-meta-card">
@@ -46,6 +50,10 @@ export function EnvironmentHostSection({ environment }: EnvironmentHostSectionPr
         <div className="env-host-meta-card">
           <span className="lbl">{t('ai.environment.runtime.note')}</span>
           <span className="val">{environment.note ?? '—'}</span>
+        </div>
+        <div className="env-host-meta-card">
+          <span className="lbl">{t('ai.environment.capabilities')}</span>
+          <span className="val">{environment.capabilities?.map(({ id }) => id).filter(Boolean).join(' · ') || '—'}</span>
         </div>
       </div>
     </section>

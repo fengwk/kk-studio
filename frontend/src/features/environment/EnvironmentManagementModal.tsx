@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Dialog } from '@/shared/ui/overlays/Dialog'
 import { Button } from '@/shared/ui/controls/Button'
@@ -6,9 +6,7 @@ import { useI18n } from '@/shared/i18n'
 import { environmentService } from '@/features/environment/environment-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { formatBackendDateSeconds } from '@/shared/lib/date-format'
-import {
-  environmentEventLevelClass,
-} from '@/features/environment/environment-utils'
+import { environmentEventLevelClass } from '@/features/environment/environment-utils'
 import { EnvironmentHostSection } from '@/features/environment/EnvironmentHostSection'
 import { EnvironmentConfigurationSection } from '@/features/environment/EnvironmentConfigurationSection'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
@@ -18,24 +16,23 @@ import './environment-management.css'
 export interface EnvironmentManagementModalProps {
   environment: EnvironmentDTO
   onClose: () => void
+  actions?: { label: string; run: () => void; danger?: boolean }[]
 }
 
 export function EnvironmentManagementModal({
   environment,
   onClose,
+  actions = [],
 }: EnvironmentManagementModalProps) {
   const { t } = useI18n()
-
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false)
   const eventsQuery = useQuery({
     queryKey: queryKeys.environments.events(environment.id),
     queryFn: () => environmentService.listEnvironmentEvents(environment.id),
+    enabled: diagnosticsOpen,
     refetchInterval: 10_000,
   })
-
-  const orderedEvents = useMemo(() => {
-    const list = eventsQuery.data ?? []
-    return [...list].reverse()
-  }, [eventsQuery.data])
+  const orderedEvents = [...(eventsQuery.data ?? [])].reverse()
 
   return (
     <Dialog
@@ -43,48 +40,67 @@ export function EnvironmentManagementModal({
       title={t('ai.environment.managementTitle', { name: environment.name })}
       onClose={onClose}
     >
-        <div className="modal-body env-mgmt-body">
-          <EnvironmentHostSection environment={environment} />
-          <EnvironmentConfigurationSection environment={environment} />
-
-          <section className="env-mgmt-section" aria-label={t('ai.environment.events.title')}>
-            <div className="env-mgmt-section-header">
-              <div>
-                <h3 className="env-mgmt-section-title">{t('ai.environment.events.title')}</h3>
-                {(eventsQuery.data?.length ?? 0) > 0 ? (
-                  <span className="env-mgmt-badge-count">{eventsQuery.data!.length}</span>
-                ) : null}
-              </div>
+      <div className="modal-body env-mgmt-body">
+        {actions.length > 0 && (
+          <div className="environment-management-actions">
+            {actions.map(({ label, run, danger }) => (
+              <Button
+                key={label}
+                variant="ghost"
+                danger={danger}
+                onClick={() => {
+                  onClose()
+                  run()
+                }}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        )}
+        <details className="environment-diagnostics" onToggle={(event) => setDiagnosticsOpen(event.currentTarget.open)}>
+          <summary>{t('ai.environment.diagnostics')}</summary>
+          {diagnosticsOpen && (
+            <div className="environment-diagnostics-content">
+              <EnvironmentHostSection environment={environment} />
+              <EnvironmentConfigurationSection environment={environment} />
+              <section className="env-mgmt-section" aria-label={t('ai.environment.events.title')}>
+                <div className="env-mgmt-section-header">
+                  <div>
+                    <h3 className="env-mgmt-section-title">{t('ai.environment.events.title')}</h3>
+                    {orderedEvents.length > 0 && (
+                      <span className="env-mgmt-badge-count">{orderedEvents.length}</span>
+                    )}
+                  </div>
+                </div>
+                {orderedEvents.length === 0 ? (
+                  <StateBlock title={t('ai.environment.events.empty')} />
+                ) : (
+                  <div className="env-events-list">
+                    {orderedEvents.map((evt, idx) => {
+                      const levelClass = environmentEventLevelClass(evt.level)
+                      const timeStr = formatBackendDateSeconds(evt.occurredAt)
+                      return (
+                        <div key={`${evt.type}-${idx}`} className={`env-event-item ${levelClass}`}>
+                          <div className="env-event-header">
+                            <span className={`env-event-level ${levelClass}`}>{evt.level}</span>
+                            <span className="env-event-type">{evt.type}</span>
+                            {timeStr ? <span className="env-event-time">{timeStr}</span> : null}
+                          </div>
+                          <div className="env-event-message">{evt.message}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </section>
             </div>
-
-            {orderedEvents.length === 0 ? (
-              <StateBlock title={t('ai.environment.events.empty')} />
-            ) : (
-              <div className="env-events-list">
-                {orderedEvents.map((evt, idx) => {
-                  const levelClass = environmentEventLevelClass(evt.level)
-                  const timeStr = formatBackendDateSeconds(evt.occurredAt)
-                  return (
-                    <div
-                      key={`${evt.type}-${idx}`}
-                      className={`env-event-item ${levelClass}`}
-                    >
-                      <div className="env-event-header">
-                        <span className={`env-event-level ${levelClass}`}>{evt.level}</span>
-                        <span className="env-event-type">{evt.type}</span>
-                        {timeStr ? <span className="env-event-time">{timeStr}</span> : null}
-                      </div>
-                      <div className="env-event-message">{evt.message}</div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </section>
-        </div>
-        <div className="modal-footer">
-          <Button variant="ghost" onClick={onClose}>{t('shared.close')}</Button>
-        </div>
+          )}
+        </details>
+      </div>
+      <div className="modal-footer">
+        <Button variant="ghost" onClick={onClose}>{t('shared.close')}</Button>
+      </div>
     </Dialog>
   )
 }

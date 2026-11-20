@@ -439,7 +439,10 @@ Catalog 三个目录页共享 `CatalogRuntime` 上下文：页面控制器负责
 全局弹窗贡献只从上下文读取控制器，不复制状态。
 MCP Card 只消费摘要投影，编辑时读取详情（URL 与 headers 的 `configured` 事实）并用 generation fence
 保护迟到响应；headers 从不回读，界面只能保持、替换或清除已保存的映射。
-Environment 管理面把**连接状态**与**配置状态**分开呈现，并提供“安装 / 覆盖”“卸载”“更新”“轮换 token”入口。
+Environment 列表卡片摘要显示连接状态、当前或上次 Daemon 版本以及一条运行或待处理状态。
+“管理”集中提供编辑、安装、卸载、更新、轮换 Token 和删除；没有版本记录的离线卡片另有安装快捷入口。
+展开管理弹窗的“诊断详情”可检查宿主、能力、卡片和应用版本、代理及最近事件。首载失败在内容区重试，
+后台列表刷新失败时保留卡片，在工具栏提示并重试；单卡运行快照读取失败不会把缓存中的配置或进度当成当前结果。
 创建/编辑复用同一表单：名称仅创建时可改，备注、Studio 地址、Bash、LSP 与代理都属于卡片配置；保存整体提交
 `{expectedVersion, note, daemonConfig}`，已安装的 Daemon 热应用，不要求重装。安装弹窗只选择目标 OS 并签发
 一次性安装码，生成安装/卸载命令并复制到剪贴板；下载安装脚本时服务端轮换注册凭证，安装码随即失效；
@@ -672,10 +675,14 @@ Runtime 查看层、执行选择面板、历史树、改名和问卷的普通操
 三层 token（palette、语义、组件）在 [`styles.css`](../../frontend/src/styles.css) 的 `:root`，由 `npm run lint:css` 门禁（见上文[Token 分层与门禁](#token-分层与门禁)）；Canvas 样式由 feature 拥有。
 [`shared/ui`](../../frontend/src/shared/ui) 只提供中性组件：controls（Button、IconButton、Checkbox、
 Select、Switch、NumberInput、SearchField、TextInput、TextArea、TagInput、FieldLabel、Tabs）、cards（ResourceCard、
-ResourceGrid）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、EmptyState、CreateCard）、
+ResourceGrid、ResourceCardSkeleton）、overlays（Dialog、ConfirmActionModal）、feedback（Toast、StateBlock、EmptyState、CreateCard）、
 data（Badge、Mono/Code、KeyValue）、layout（Panel、Toolbar），
 以及 markdown 与 media 内容组件；不引入外部 UI 组件库，
 生产代码禁用原生 `<select>`，下拉统一走自研 listbox。
+[`ResourceCardSkeleton`](../../frontend/src/shared/ui/cards/ResourceCardSkeleton.tsx) 只替代没有缓存的首次列表读取：
+与真实列表共用 ResourceGrid 和卡片基础间距，按栅格实际列数画首行而不是固定张数，普通资源卡与环境摘要卡
+各按真实头部、核心行与动作位留位，不锁固定卡片高度；一个容器只给一个读屏加载状态，骨架不可聚焦，
+减少动态效果时保持静态。已有缓存的后台刷新保留卡片与可用创建入口，失败与空态由页面自身的反馈呈现。
 [`Dialog`](../../frontend/src/shared/ui/overlays/Dialog.tsx) portal 到 body，提供焦点陷阱与关闭后
 焦点归还、栈顶 Escape（含 IME 与 defaultPrevented 守卫）与遮罩点击关闭，pending 时禁止 Escape、
 遮罩与关闭按钮。普通确认使用 `ConfirmActionModal`，复杂表单使用 `Dialog` 的

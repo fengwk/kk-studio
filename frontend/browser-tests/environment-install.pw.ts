@@ -11,6 +11,8 @@ import {
 // 全量 layout 回归也会收集本文件，剪贴板读写权限由本文件自持，不依赖专属 install 配置。
 test.use({ permissions: ['clipboard-read', 'clipboard-write'] })
 
+const HARNESS_URL = '/browser-tests/environment-install-harness.html'
+
 const token = 'browser-private-token'
 const savedConfig = testDaemonConfig({
   studioUrl: 'https://saved.example.com',
@@ -19,14 +21,40 @@ const savedConfig = testDaemonConfig({
   proxyUrl: null,
 })
 
+/** 卡片与管理弹窗共用的英文/中文文案在窄屏也不能产生横向溢出。 */
+async function expectNoHorizontalOverflow(page: Page, width: number): Promise<void> {
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+}
+
+/** 卡片上唯一的入口是「管理 <name>」：读取会话、配置与全部动作都在弹窗里。 */
+function manageButton(page: Page, name: string) {
+  return page.getByRole('button', { name: `管理 ${name}`, exact: true })
+}
+
+async function openManage(page: Page, name: string) {
+  await manageButton(page, name).click()
+  const dialog = page.getByRole('dialog', { name: `管理环境：${name}` })
+  await expect(dialog).toBeVisible()
+  return dialog
+}
+
+/** 管理弹窗的动作只给纯动作名；点选后先关闭弹窗，再进入原有子流程。 */
+async function pickManageAction(page: Page, name: string, label: string) {
+  const dialog = await openManage(page, name)
+  await dialog.getByRole('button', { name: label, exact: true }).click()
+  await expect(dialog).toHaveCount(0)
+}
+
 async function api(page: Page) {
   let card: EnvironmentDTO = testEnvironment({
     id: 'env-1',
     name: 'host-one',
     note: 'saved note',
     version: '7',
+    // 曾经安装过、当前离线：卡片只有管理入口，安装/覆盖仍可从弹窗进入。
     status: 'OFFLINE',
     ready: false,
+    daemonVersion: '1.0.0',
     daemonConfig: savedConfig,
   })
   let conflict = false
@@ -111,12 +139,39 @@ for (const width of [1280, 390, 320]) {
   }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const mock = await api(page)
-    await page.goto('/browser-tests/environment-install-harness.html')
-    await expect(page.getByRole('button', { name: '安装 / 覆盖 host-one' })).toBeVisible()
+    await page.goto(HARNESS_URL)
+    await expect(manageButton(page, 'host-one')).toBeVisible({ timeout: 15000 })
+    // 卡片不再平铺动作：已安装过的卡片只有管理入口。
+    const card = page.locator('.environment-card')
+    await expect(card.locator('.resource-card-actions button')).toHaveCount(1)
+    await expect(page.getByRole('button', { name: '安装 / 覆盖 host-one', exact: true })).toHaveCount(0)
+    await expect(card.getByText('上次 Daemon 版本', { exact: true })).toBeVisible()
+    await expect(card).not.toContainText('已应用')
     await page.screenshot({ path: testInfo.outputPath(`cards-${width}.png`), fullPage: true })
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await expectNoHorizontalOverflow(page, width)
 
-    await page.getByRole('button', { name: '编辑配置 host-one' }).click()
+    const manage = await openManage(page, 'host-one')
+    // 弹窗动作按原文案顺序平铺，不带卡片上的 aria 名称后缀。
+    await expect(manage.locator('.environment-management-actions button')).toHaveText([
+      '编辑配置',
+      '安装 / 覆盖',
+      '更新 Daemon',
+      '卸载',
+      '重新生成 Token',
+      '删除环境',
+    ])
+    // 诊断详情默认折叠：展开前既不渲染宿主/配置/事件，也不读事件端点。
+    const diagnostics = manage.locator('.environment-diagnostics')
+    await expect(diagnostics.locator('summary')).toHaveText('诊断详情')
+    await expect(manage.locator('.env-mgmt-section')).toHaveCount(0)
+    expect(mock.calls.filter(call => call.endsWith('/events'))).toHaveLength(0)
+    await page.screenshot({ path: testInfo.outputPath(`manage-${width}.png`), fullPage: true })
+    const manageBox = await manage.boundingBox()
+    expect(manageBox!.x).toBeGreaterThanOrEqual(0)
+    expect(manageBox!.x + manageBox!.width).toBeLessThanOrEqual(width)
+
+    await manage.getByRole('button', { name: '编辑配置', exact: true }).click()
+    await expect(manage).toHaveCount(0)
     const edit = page.getByRole('dialog', { name: '编辑环境：host-one' })
     await expect(edit.getByRole('textbox', { name: '环境名称' })).toBeDisabled()
     await expect(edit.getByRole('textbox', { name: 'Studio 地址' })).toHaveValue(
@@ -140,7 +195,7 @@ for (const width of [1280, 390, 320]) {
     const box = await edit.boundingBox()
     expect(box!.x).toBeGreaterThanOrEqual(0)
     expect(box!.x + box!.width).toBeLessThanOrEqual(width)
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)
+    await expectNoHorizontalOverflow(page, width)
 
     mock.conflictNext()
     await edit.getByRole('button', { name: '保存配置' }).click()
@@ -165,7 +220,7 @@ for (const width of [1280, 390, 320]) {
     })
 
     const beforeInstall = mock.calls.length
-    await page.getByRole('button', { name: '安装 / 覆盖 host-one' }).click()
+    await pickManageAction(page, 'host-one', '安装 / 覆盖')
     const install = page.getByRole('dialog', { name: '安装/覆盖环境' })
     await expect(install.getByRole('textbox', { name: 'Studio 地址' })).toHaveCount(0)
     await expect(install.getByRole('textbox', { name: 'Bash 可执行文件' })).toHaveCount(0)
@@ -195,7 +250,7 @@ for (const width of [1280, 390, 320]) {
     await install.getByRole('button', { name: '关闭', exact: true }).last().click()
 
     const before = mock.calls.length
-    await page.getByRole('button', { name: '卸载 host-one', exact: true }).click()
+    await pickManageAction(page, 'host-one', '卸载')
     const uninstall = page.getByRole('dialog', { name: '卸载环境' })
     await expect(uninstall).toContainText('Studio 中的环境卡片不会删除')
     await uninstall.getByRole('button', { name: '操作系统' }).click()
@@ -220,7 +275,7 @@ for (const width of [1280, 390]) {
   }, testInfo) => {
     await page.setViewportSize({ width, height: 900 })
     const mock = await api(page)
-    await page.goto('/browser-tests/environment-install-harness.html')
+    await page.goto(HARNESS_URL)
     await page.getByRole('button', { name: '创建环境', exact: true }).click()
     const create = page.getByRole('dialog', { name: '创建环境' })
     await create.getByRole('textbox', { name: /环境名称/ }).fill(`fresh-${width}`)
@@ -258,10 +313,20 @@ for (const width of [1280, 390]) {
     )
     expect(await page.locator('body').innerText()).not.toContain(token)
     expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(token)
+    await install.getByRole('button', { name: '关闭', exact: true }).last().click()
+
+    // 从未安装过的离线卡片保留安装快捷入口，管理入口仍然存在；删除/轮换等危险动作只在弹窗里。
+    const card = page.locator('.environment-card')
+    await expect(manageButton(page, `fresh-${width}`)).toBeVisible()
+    await expect(
+      page.getByRole('button', { name: `安装 / 覆盖 fresh-${width}`, exact: true }),
+    ).toBeVisible()
+    await expect(card.getByRole('button', { name: /重新生成 Token|删除环境|卸载/ })).toHaveCount(0)
+    await expectNoHorizontalOverflow(page, width)
   })
 }
 
-test('keeps event history out of the card and shows connection and config state separately', async ({
+test('keeps event history and config details inside the collapsible diagnostics', async ({
   page,
 }, testInfo) => {
   await page.setViewportSize({ width: 1280, height: 900 })
@@ -281,29 +346,353 @@ test('keeps event history out of the card and shows connection and config state 
     revision: '3',
     configuration: { appliedVersion: '3', proxyUrl: null, error: null },
   })
+  const calls: string[] = []
   await page.route('**/api/platform/environments**', async route => {
     const path = new URL(route.request().url()).pathname
+    calls.push(`${route.request().method()} ${path}`)
     if (path.endsWith('/events')) return route.fulfill({ json: history })
     if (path.endsWith('/runtime')) return route.fulfill({ json: runtime })
     if (path.endsWith('/env-1')) return route.fulfill({ json: card })
     return route.fulfill({ json: [card] })
   })
 
-  await page.goto('/browser-tests/environment-install-harness.html')
+  await page.goto(HARNESS_URL)
   const cardLocator = page.locator('.environment-card')
   await expect(cardLocator).toBeVisible({ timeout: 15000 })
   await expect(cardLocator.getByText('READY', { exact: true })).toBeVisible()
-  await expect(cardLocator.getByText('已应用', { exact: true })).toBeVisible()
-  await expect(cardLocator.getByText('直连', { exact: true })).toBeVisible()
+  await expect(cardLocator.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+  await expect(cardLocator.getByText('1.2.3', { exact: true })).toBeVisible()
+  await expect(cardLocator.getByText('无进行中的更新', { exact: true })).toBeVisible()
+  // 配置态与事件历史都离开卡片：卡片不冒充已应用，也不展示历史。
+  await expect(cardLocator.getByText('已应用', { exact: true })).toHaveCount(0)
+  await expect(cardLocator.getByText('直连', { exact: true })).toHaveCount(0)
   await expect(cardLocator).not.toContainText('daemon connection lost')
+  expect(calls.filter(call => call.endsWith('/events'))).toHaveLength(0)
   await page.screenshot({ path: testInfo.outputPath('card-config-status.png'), fullPage: true })
 
-  await cardLocator.getByRole('button', { name: /管理/ }).click()
-  const modal = page.getByRole('dialog', { name: /管理环境/ })
-  await expect(modal.getByText('daemon connection lost')).toBeVisible()
-  await expect(modal.getByText('environment ready')).toBeVisible()
-  await expect(modal.getByText('配置', { exact: true })).toBeVisible()
-  await page.screenshot({ path: testInfo.outputPath('management-config.png'), fullPage: true })
+  const modal = await openManage(page, 'recovered-box')
+  const diagnostics = modal.locator('.environment-diagnostics')
+  await expect(diagnostics.locator('summary')).toHaveText('诊断详情')
+  await expect(modal.locator('.env-mgmt-section')).toHaveCount(0)
+  expect(calls.filter(call => call.endsWith('/events'))).toHaveLength(0)
+  await page.screenshot({ path: testInfo.outputPath('management-collapsed.png'), fullPage: true })
+
+  await diagnostics.locator('summary').click()
+  await expect(modal.locator('.env-mgmt-section[aria-label="宿主信息"]')).toBeVisible()
+  const configSection = modal.locator('.env-mgmt-section[aria-label="配置"]')
+  await expect(configSection.getByText('已应用', { exact: true })).toBeVisible()
+  const configCells = configSection.locator('.env-host-meta-card')
+  await expect(configCells.filter({ hasText: '已应用版本' }).locator('.val')).toHaveText('3')
+  await expect(configCells.filter({ hasText: 'Daemon 代理' }).locator('.val')).toHaveText('直连')
+  const events = modal.locator('.env-mgmt-section[aria-label="事件记录"]')
+  await expect(events.getByText('daemon connection lost')).toBeVisible()
+  await expect(events.getByText('environment ready')).toBeVisible()
+  // 事件按发生时间倒序呈现，最新一条在前。
+  await expect(events.locator('.env-event-item')).toHaveText([
+    /READY/,
+    /DISCONNECTED/,
+  ])
+  expect(calls.filter(call => call.endsWith('/events'))).toHaveLength(1)
+  await page.screenshot({ path: testInfo.outputPath('management-diagnostics.png'), fullPage: true })
+  await expectNoHorizontalOverflow(page, 1280)
+
+  // 展开后的诊断在窄屏重排为单列，弹窗仍不越出视口。
+  await page.setViewportSize({ width: 390, height: 900 })
+  await expectNoHorizontalOverflow(page, 390)
+  const narrowBox = await modal.boundingBox()
+  expect(narrowBox!.x).toBeGreaterThanOrEqual(0)
+  expect(narrowBox!.x + narrowBox!.width).toBeLessThanOrEqual(390)
+  await expect(configCells.filter({ hasText: 'Daemon 代理' }).locator('.val')).toHaveText('直连')
+  await page.screenshot({ path: testInfo.outputPath('management-diagnostics-390.png'), fullPage: true })
+
+  await diagnostics.locator('summary').click()
+  await expect(modal.locator('.env-mgmt-section')).toHaveCount(0)
+})
+
+test('rotates the token and deletes the card through plain modal labels', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  let card = testEnvironment({
+    id: 'env-danger',
+    name: 'danger-box',
+    version: '3',
+    status: 'READY',
+    ready: true,
+  })
+  let deleted = false
+  const runtime = testRuntimeStatus({ revision: '3' })
+  const rotateBodies: unknown[] = []
+  const deletes: string[] = []
+  await page.route('**/api/platform/environments**', async route => {
+    const request = route.request()
+    const pathAndQuery = new URL(request.url())
+    const path = pathAndQuery.pathname
+    if (path.endsWith('/rotate-token')) {
+      rotateBodies.push(request.postDataJSON())
+      card = { ...card, version: String(BigInt(card.version) + 1n) }
+      return route.fulfill({ json: { ...card, registrationToken: token } })
+    }
+    if (request.method() === 'DELETE') {
+      deletes.push(`${path}?${pathAndQuery.searchParams.toString()}`)
+      deleted = true
+      return route.fulfill({ status: 204, body: '' })
+    }
+    if (path.endsWith('/runtime')) return route.fulfill({ json: runtime })
+    if (path.endsWith('/env-danger')) return route.fulfill({ json: card })
+    return route.fulfill({ json: deleted ? [] : [card] })
+  })
+
+  await page.goto(HARNESS_URL)
+  await expect(page.locator('.environment-card')).toBeVisible({ timeout: 15000 })
+
+  await pickManageAction(page, 'danger-box', '重新生成 Token')
+  const rotate = page.getByRole('alertdialog', { name: '重新生成 Token' })
+  await expect(rotate.getByText(/为环境「danger-box」重新生成 Token/)).toBeVisible()
+  await expect(rotate.getByRole('button', { name: '取消', exact: true })).toBeVisible()
+  // 轮换成功后权威列表回读完成后，删除才会带上新的 expectedVersion。
+  const refreshed = page.waitForResponse(response =>
+    new URL(response.url()).pathname === '/api/platform/environments'
+    && response.request().method() === 'GET',
+  )
+  await rotate.getByRole('button', { name: '重新生成 Token' }).click()
+  await refreshed
+  await expect(rotate).toHaveCount(0)
+  expect(rotateBodies).toEqual([{ expectedVersion: '3' }])
+  // 新 token 只在一次性响应里，界面不得回显或落盘。
+  expect(await page.locator('body').innerText()).not.toContain(token)
+  expect(await page.evaluate(() => JSON.stringify(localStorage))).not.toContain(token)
+
+  await pickManageAction(page, 'danger-box', '删除环境')
+  const remove = page.getByRole('alertdialog', { name: '删除环境' })
+  await expect(remove.getByText('确认删除环境「danger-box」？')).toBeVisible()
+  await expect(remove.getByRole('button', { name: '取消', exact: true })).toBeVisible()
+  await remove.getByRole('button', { name: '删除环境' }).click()
+  await expect(remove).toHaveCount(0)
+  await expect(page.locator('.environment-card')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: '创建环境', exact: true })).toBeVisible()
+  expect(deletes).toEqual(['/api/platform/environments/env-danger?expectedVersion=4'])
+})
+
+test('an initial list failure offers an in-place retry instead of a stale-data notice', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const card = testEnvironment({ id: 'env-1', name: 'first-load', status: 'OFFLINE', ready: false })
+  let listCalls = 0
+  await page.route('**/api/platform/environments**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (path.endsWith('/env-1')) return route.fulfill({ json: card })
+    listCalls += 1
+    if (listCalls === 1) {
+      return route.fulfill({
+        status: 500,
+        contentType: 'application/problem+json',
+        json: { type: 'about:blank', status: 500, code: 'internal_error', title: 'boom' },
+      })
+    }
+    return route.fulfill({ json: [card] })
+  })
+
+  await page.goto(HARNESS_URL)
+  const failure = page.locator('.environment-feedback')
+  await expect(failure).toBeVisible({ timeout: 15000 })
+  await expect(failure.getByRole('status')).toHaveText('加载 Environment 失败')
+  await expect(failure).toHaveCSS('color', await tokenColor(page, '--fg-muted'))
+  const icon = failure.locator('svg')
+  await expect(icon).toBeVisible()
+  expect(await icon.evaluate(element => element.getBoundingClientRect().width)).toBe(16)
+  // 首次加载失败没有可保留的缓存，因此不出现「显示上次数据」的刷新反馈。
+  await expect(page.locator('.environment-refresh-slot').getByText(/显示上次数据/)).toHaveCount(0)
+  await expect(page.locator('.environment-card')).toHaveCount(0)
+  const retry = failure.getByRole('button', { name: '重试', exact: true })
+  await expect(retry).toBeEnabled()
+  await page.screenshot({ path: testInfo.outputPath('list-initial-failure.png'), fullPage: true })
+  await expectNoHorizontalOverflow(page, 1280)
+
+  await retry.click()
+  await expect(page.locator('.environment-feedback')).toHaveCount(0)
+  await expect(page.locator('.environment-card')).toBeVisible()
+  await expect(manageButton(page, 'first-load')).toBeVisible()
+  expect(listCalls).toBe(2)
+})
+
+for (const width of [1280, 390]) {
+  test(`a failed refresh keeps the cached cards and explains itself in the toolbar at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 })
+    // 卡片状态截止点触发一次权威回读；这次回读失败，缓存数据必须保留。
+    const card = testEnvironment({
+      id: 'env-1',
+      name: 'cached-box',
+      version: '2',
+      status: 'READY',
+      ready: true,
+      daemonVersion: '0.3.0',
+      statusExpiresAt: Date.now() + 400,
+    })
+    const runtime = testRuntimeStatus({ revision: '2', daemonVersion: '0.3.0' })
+    let listCalls = 0
+    await page.route('**/api/platform/environments**', async route => {
+      const path = new URL(route.request().url()).pathname
+      if (path.endsWith('/runtime')) return route.fulfill({ json: runtime })
+      if (path !== '/api/platform/environments') {
+        return route.fulfill({ status: 404, json: { code: 'not_found' } })
+      }
+      listCalls += 1
+      if (listCalls === 2) {
+        return route.fulfill({
+          status: 500,
+          contentType: 'application/problem+json',
+          json: { type: 'about:blank', status: 500, code: 'internal_error', title: 'boom' },
+        })
+      }
+      return route.fulfill({ json: [card] })
+    })
+
+    await page.goto(HARNESS_URL)
+    const cards = page.locator('.environment-card')
+    await expect(cards).toBeVisible({ timeout: 15000 })
+    await expect(cards.getByText('READY', { exact: true })).toBeVisible()
+
+    const wide = page.locator('.environment-refresh-wide')
+    const narrow = page.locator('.environment-refresh-narrow')
+    if (width > 900) {
+      await expect(wide).toBeVisible({ timeout: 15000 })
+      await expect(wide).toContainText('刷新失败 · 显示上次数据')
+      await expect(narrow).toBeHidden()
+      // 失败提示只是工具栏状态，不遮挡也不替换缓存卡片。
+      await expect(cards).toHaveCount(1)
+      await expect(cards.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+      await page.screenshot({ path: testInfo.outputPath(`refresh-failed-${width}.png`), fullPage: true })
+      await expectNoHorizontalOverflow(page, width)
+      await wide.getByRole('button', { name: '重试', exact: true }).click()
+    } else {
+      await expect(narrow).toBeVisible({ timeout: 15000 })
+      await expect(narrow.locator('summary')).toHaveText('刷新失败')
+      await expect(wide).toBeHidden()
+      await expect(cards).toHaveCount(1)
+      await page.screenshot({ path: testInfo.outputPath(`refresh-failed-${width}.png`), fullPage: true })
+      await expectNoHorizontalOverflow(page, width)
+      await narrow.locator('summary').click()
+      const details = page.locator('.environment-refresh-details')
+      await expect(details).toBeVisible()
+      await expect(details).toContainText('刷新失败 · 显示上次数据')
+      const detailsBox = await details.boundingBox()
+      expect(detailsBox!.x).toBeGreaterThanOrEqual(0)
+      expect(detailsBox!.x + detailsBox!.width).toBeLessThanOrEqual(width)
+      await expectNoHorizontalOverflow(page, width)
+      await page.screenshot({ path: testInfo.outputPath(`refresh-failed-details-${width}.png`), fullPage: true })
+      await details.getByRole('button', { name: '重试', exact: true }).click()
+    }
+
+    await expect(wide).toHaveCount(0)
+    await expect(narrow).toHaveCount(0)
+    await expect(cards).toHaveCount(1)
+    expect(listCalls).toBe(3)
+  })
+}
+
+test('one failed runtime read masks only that card and stops presenting its cached live snapshot', async ({
+  page,
+}, testInfo) => {
+  await page.setViewportSize({ width: 1280, height: 900 })
+  const alpha = testEnvironment({
+    id: 'env-alpha',
+    name: 'alpha-box',
+    version: '5',
+    status: 'READY',
+    ready: true,
+    daemonVersion: '9.9.9',
+  })
+  const beta = testEnvironment({
+    id: 'env-beta',
+    name: 'beta-box',
+    version: '4',
+    status: 'READY',
+    ready: true,
+    daemonVersion: '0.9.0',
+  })
+  const alphaRuntime = testRuntimeStatus({
+    revision: '5',
+    daemonVersion: '9.9.9',
+    configuration: { appliedVersion: '5', proxyUrl: null, error: null },
+  })
+  const betaRuntime = testRuntimeStatus({
+    revision: '4',
+    daemonVersion: '3.3.3',
+    configuration: { appliedVersion: '4', proxyUrl: null, error: null },
+  })
+  let betaRuntimeFails = false
+  const runtimeCalls: string[] = []
+  await page.route('**/api/platform/environments**', async route => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    if (path.endsWith('/events')) return route.fulfill({ json: [] })
+    if (path.endsWith('/runtime')) {
+      runtimeCalls.push(path)
+      if (path.includes('env-beta') && betaRuntimeFails) {
+        return route.fulfill({
+          status: 500,
+          contentType: 'application/problem+json',
+          json: { type: 'about:blank', status: 500, code: 'internal_error', title: 'boom' },
+        })
+      }
+      return route.fulfill({ json: path.includes('env-beta') ? betaRuntime : alphaRuntime })
+    }
+    return route.fulfill({ json: [alpha, beta] })
+  })
+
+  await page.goto(HARNESS_URL)
+  const cards = page.locator('.environment-card')
+  await expect(cards).toHaveCount(2, { timeout: 15000 })
+  const alphaCard = cards.filter({ hasText: 'alpha-box' })
+  const betaCard = cards.filter({ hasText: 'beta-box' })
+  // 卡片只给版本与更新状态；已应用的配置结论属于诊断详情。
+  await expect(alphaCard.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+  await expect(alphaCard.getByText('9.9.9', { exact: true })).toBeVisible()
+  await expect(alphaCard.getByText('无进行中的更新', { exact: true })).toBeVisible()
+  await expect(betaCard.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+  await expect(betaCard.getByText('3.3.3', { exact: true })).toBeVisible()
+  await expect(betaCard.getByText('无进行中的更新', { exact: true })).toBeVisible()
+  await expect(cards.getByText('已应用', { exact: true })).toHaveCount(0)
+  await page.screenshot({ path: testInfo.outputPath('runtime-isolated-live.png'), fullPage: true })
+
+  // 诊断详情里的配置摘要读到同一份运行快照。
+  const modal = await openManage(page, 'beta-box')
+  await modal.locator('.environment-diagnostics > summary').click()
+  const configSection = modal.locator('.env-mgmt-section[aria-label="配置"]')
+  await expect(configSection.getByText('已应用', { exact: true })).toBeVisible()
+  const betaCells = modal.locator('.env-host-meta-card')
+  await expect(betaCells.filter({ hasText: '已应用版本' }).locator('.val')).toHaveText('4')
+  await expect(betaCells.filter({ hasText: 'Daemon 代理' }).locator('.val')).toHaveText('直连')
+  await page.screenshot({ path: testInfo.outputPath('runtime-isolated-before.png'), fullPage: true })
+  await modal.getByRole('button', { name: '关闭', exact: true }).last().click()
+
+  betaRuntimeFails = true
+  const reopened = await openManage(page, 'beta-box')
+  await reopened.locator('.environment-diagnostics > summary').click()
+  const failedConfig = reopened.locator('.env-mgmt-section[aria-label="配置"]')
+  await expect(failedConfig.getByRole('status')).toHaveText('运行状态读取失败', { timeout: 15000 })
+  const failedCells = reopened.locator('.env-host-meta-card')
+  await expect(failedCells.filter({ hasText: '已应用版本' }).locator('.val')).toHaveText('—')
+  await expect(failedCells.filter({ hasText: 'Daemon 代理' }).locator('.val')).toHaveText('—')
+  // 读不到当前快照就不能宣称已应用。
+  await expect(failedConfig.getByText('已应用', { exact: true })).toHaveCount(0)
+  await expect(failedConfig.getByText('未知', { exact: true })).toBeVisible()
+  await page.screenshot({ path: testInfo.outputPath('runtime-isolated-after.png'), fullPage: true })
+  await reopened.getByRole('button', { name: '关闭', exact: true }).last().click()
+
+  // 缓存里的旧快照不再冒充当前状态，只作为「上次版本」保留。
+  await expect(betaCard.getByText('运行状态读取失败', { exact: true })).toBeVisible()
+  await expect(betaCard.getByText('上次 Daemon 版本', { exact: true })).toBeVisible()
+  await expect(betaCard.getByText('当前 Daemon 版本', { exact: true })).toHaveCount(0)
+  await expect(betaCard.getByText('已应用', { exact: true })).toHaveCount(0)
+  // 另一个环境的运行快照不受影响。
+  await expect(alphaCard.getByText('当前 Daemon 版本', { exact: true })).toBeVisible()
+  await expect(alphaCard.getByText('9.9.9', { exact: true })).toBeVisible()
+  await expect(alphaCard.getByText('无进行中的更新', { exact: true })).toBeVisible()
+  expect(runtimeCalls.filter(call => call.includes('env-beta')).length).toBeGreaterThan(0)
+  await page.screenshot({ path: testInfo.outputPath('runtime-isolated-cards.png'), fullPage: true })
 })
 
 test('normal and compact portal menus flip, stay clickable, and keep native adjacent Tab order', async ({

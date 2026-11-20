@@ -227,19 +227,18 @@
   gap: 8px;
 }
 
-/* 资源卡列表骨架屏占位 */
+/* 资源卡列表骨架屏：只覆盖没有缓存的首次读取，与真实卡共用同一栅格和卡片基础间距。
+   行结构（头部 / 核心行 / 元信息 / 动作位）由组件按形状决定，高度随内容自然撑开；
+   首行数量由栅格实际列数决定，因此这里不写死卡片高度，也不写死占位数量。 */
 .resource-skeleton-container {
   width: 100%;
 }
 
 .resource-card.resource-card-skeleton {
-  min-height: 280px;
-  height: 280px;
-  box-sizing: border-box;
-  justify-content: space-between;
   cursor: default;
   pointer-events: none;
   user-select: none;
+  transition: none;
 }
 
 .resource-card-skeleton:hover {
@@ -281,22 +280,30 @@
   width: 85%;
 }
 
+/* 环境摘要卡的可用性徽标位。 */
+.resource-card-skeleton .skeleton-badge {
+  width: 64px;
+  height: 22px;
+  border-radius: var(--radius-pill);
+}
+
+/* 头部之下的一条核心状态行（环境摘要中需要处理的状态）。 */
+.resource-card-skeleton .skeleton-status {
+  height: 14px;
+  width: 70%;
+  max-width: 240px;
+}
+
 .resource-card-skeleton .resource-card-meta {
   gap: 12px;
 }
 
 .resource-card-skeleton .skeleton-meta-row {
   height: 14px;
-  width: 90%;
-}
-
-.resource-card-skeleton .skeleton-meta-row.short {
-  width: 60%;
 }
 
 .resource-card-skeleton .skeleton-action {
   height: 28px;
-  width: 68px;
   border-radius: var(--radius-sm);
 }
 

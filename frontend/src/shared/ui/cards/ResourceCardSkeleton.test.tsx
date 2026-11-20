@@ -1,31 +1,28 @@
 import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 
 describe('ResourceCardSkeleton', () => {
-  it('renders fixed 6 placeholder cards with status semantics and stable skeleton layout', () => {
+  // 装饰卡不可聚焦，加载说明由一个状态区域承载。
+  it('exposes only one loading status', () => {
     const { container } = render(<ResourceCardSkeleton label="加载资源中..." />)
-
-    const statusRegion = screen.getByRole('status', { name: '加载资源中...' })
-    expect(statusRegion).toHaveAttribute('aria-busy', 'true')
-    expect(statusRegion).toHaveClass('resource-skeleton-container')
-
-    const skeletonCards = container.querySelectorAll('.resource-card-skeleton')
-    expect(skeletonCards.length).toBe(6)
-
-    // 检查每个卡片包含头、元信息和动作区骨架
-    skeletonCards.forEach((card) => {
-      expect(card.querySelector('.skeleton-icon')).toBeInTheDocument()
-      expect(card.querySelector('.skeleton-title')).toBeInTheDocument()
-      expect(card.querySelector('.skeleton-subtitle')).toBeInTheDocument()
-      expect(card.querySelectorAll('.skeleton-meta-row').length).toBe(3)
-      expect(card.querySelectorAll('.skeleton-action').length).toBe(2)
-    })
+    const status = screen.getByRole('status')
+    expect(status).toHaveAttribute('aria-busy', 'true')
+    expect(status).toHaveTextContent('加载资源中...')
+    expect(container.querySelector('.resource-card-skeleton')).toHaveAttribute('aria-hidden', 'true')
+    expect(container.querySelector('button, a, input, [tabindex]')).toBeNull()
   })
 
-  it('supports custom accessible label with default 6 fixed cards', () => {
-    const { container } = render(<ResourceCardSkeleton label="加载模型..." />)
-    expect(screen.getByRole('status', { name: '加载模型...' })).toBeInTheDocument()
-    expect(container.querySelectorAll('.resource-card-skeleton').length).toBe(6)
+  // 页面自定义列宽时，骨架直接读取同一个栅格的实际列数。
+  it('uses the resolved columns on the caller’s grid', () => {
+    const styles = vi.spyOn(window, 'getComputedStyle').mockReturnValue({
+      gridTemplateColumns: '280px 280px 280px 280px',
+    } as CSSStyleDeclaration)
+    try {
+      const { container } = render(<ResourceCardSkeleton className="canvas-library-grid" />)
+      expect(container.querySelectorAll('.resource-grid.canvas-library-grid .resource-card-skeleton')).toHaveLength(4)
+    } finally {
+      styles.mockRestore()
+    }
   })
 })

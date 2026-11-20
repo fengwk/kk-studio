@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Badge } from '@/shared/ui/data/Badge'
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Box, Download, KeyRound, Pencil, SlidersHorizontal, Trash2 } from 'lucide-react'
+import { Box, CircleAlert, Download, SlidersHorizontal } from 'lucide-react'
 import {
-  environmentProxyText,
   filterEnvironments,
-  formatTimestamp,
   isEnvironmentRuntimeUnavailableError,
   presentEnvironmentConfig,
   presentUpdateProgress,
@@ -17,7 +15,6 @@ import { EnvironmentManagementModal } from '@/features/environment/EnvironmentMa
 import { environmentRuntimeQueryOptions } from '@/features/environment/environment-runtime-query'
 import { environmentService } from '@/features/environment/environment-service'
 import { CreateCard } from '@/shared/ui/feedback/CreateCard'
-import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { Button } from '@/shared/ui/controls/Button'
 import { ResourceCardSkeleton } from '@/shared/ui/cards/ResourceCardSkeleton'
 import { ResourceCard, type ResourceCardMetaRow } from '@/shared/ui/cards/ResourceCard'
@@ -29,6 +26,7 @@ import { AiNavigation } from '@/app/ai-console/AiNavigation'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n, type InterpolationValues, type TranslationKey } from '@/shared/i18n'
 import { useEnvironmentCardActions } from '@/features/environment/useEnvironmentCardActions'
+import './environment-page.css'
 import type {
   EnvironmentDTO,
   EnvironmentUpdateProgressDTO,
@@ -93,7 +91,7 @@ export function EnvironmentsPage() {
   const [installTarget, setInstallTarget] = useState<EnvironmentDTO | null>(null)
   const [uninstallTarget, setUninstallTarget] = useState<EnvironmentDTO | null>(null)
 
-  const [manageTarget, setManageTarget] = useState<EnvironmentDTO | null>(null)
+  const [manageId, setManageId] = useState<string | null>(null)
 
   const {
     deleteTarget,
@@ -162,24 +160,51 @@ export function EnvironmentsPage() {
     return () => clearTimeout(timer)
   }, [statusExpiresAt, invalidateEnvironments])
 
+  const managedEnvironment = environments.find(({ id }) => id === manageId)
+  const retryList = () => void environmentsQuery.refetch({ cancelRefetch: false })
+  const retryButton = (
+    <Button size="compact" variant="ghost" disabled={environmentsQuery.isFetching} onClick={retryList}>
+      {t('shared.retry')}
+    </Button>
+  )
+
   return (
     <section className="screen active">
-      <nav className="subbar">
+      <div className="subbar environment-toolbar">
         <AiNavigation />
-      </nav>
+        <div className="environment-refresh-slot">
+          {environmentsQuery.isRefetchError && (
+            <>
+              <div className="environment-feedback environment-refresh-wide">
+                <CircleAlert aria-hidden="true" />
+                {t('ai.environment.refreshStale')}
+                {retryButton}
+              </div>
+              <details className="environment-refresh-narrow">
+                <summary className="environment-feedback">
+                  <CircleAlert aria-hidden="true" />
+                  {t('ai.environment.refreshFailed')}
+                </summary>
+                <div className="environment-feedback environment-refresh-details">
+                  {t('ai.environment.refreshStale')}
+                  {retryButton}
+                </div>
+              </details>
+            </>
+          )}
+        </div>
+      </div>
       <div className="screen-body">
-        {environmentsQuery.isLoading && <ResourceCardSkeleton label={t('ai.environment.loading')} />}
-        {environmentsQuery.error && (
-          <StateBlock
-            title={
-              environmentsQuery.error instanceof Error
-                ? environmentsQuery.error.message
-                : t('ai.environment.loadFailed')
-            }
-            tone="danger"
-          />
-        )}
-        {!environmentsQuery.isLoading && (
+        {environmentsQuery.data == null && (environmentsQuery.isLoading ? (
+          <ResourceCardSkeleton variant="environment" label={t('ai.environment.loading')} />
+        ) : environmentsQuery.isError && (
+          <div className="environment-feedback">
+            <CircleAlert aria-hidden="true" />
+            <span role="status">{t('ai.environment.loadFailed')}</span>
+            {retryButton}
+          </div>
+        ))}
+        {environmentsQuery.data != null && (
           <ResourceGrid>
             <CreateCard
               title={t('ai.environment.create')}
@@ -190,44 +215,28 @@ export function EnvironmentsPage() {
               const status = environment.status
               const ready = environment.ready === true
               const displayStatus = status === 'READY' && !ready ? 'UNAVAILABLE' : status
-              const capabilityIds = (environment.capabilities ?? [])
-                .map((capability) => capability.id)
-                .filter(Boolean)
-              const lastSeen = formatTimestamp(environment.lastSeenAt)
-
               const runtimeQuery = runtimeQueries[index]
-              const runtimeStatus = runtimeQuery.isError ? undefined : runtimeQuery.data?.status
-              const configView = presentEnvironmentConfig(
-                environment,
-                runtimeQuery.isError ? undefined : runtimeQuery.data,
-              )
-              const runtimeUnavailable =
-                status === 'OFFLINE' ||
-                (runtimeQuery.isError &&
-                  isEnvironmentRuntimeUnavailableError(runtimeQuery.error))
-              // 当前版本只采用 Daemon 上报：live 快照优先，不可用时回退到最后一次 READY 上报值。
-              const liveDaemonVersion = runtimeStatus?.daemonVersion?.trim()
-              const lastReportedDaemonVersion = environment.daemonVersion?.trim()
-              const daemonVersion =
-                liveDaemonVersion ||
-                (runtimeStatus == null ? lastReportedDaemonVersion : undefined) ||
-                t('ai.environment.runtime.unreported')
+              const runtimeUnavailable = status === 'OFFLINE' ||
+                isEnvironmentRuntimeUnavailableError(runtimeQuery.error)
+              const runtime = runtimeUnavailable || runtimeQuery.isError ? undefined : runtimeQuery.data
+              const runtimeStatus = runtime?.status
+              const configView = presentEnvironmentConfig(environment, runtime)
+              const liveVersion = runtimeStatus?.daemonVersion?.trim()
+              const lastVersion = runtimeQuery.data?.status.daemonVersion?.trim() || environment.daemonVersion?.trim()
+              const daemonVersion = liveVersion || lastVersion || t('ai.environment.runtime.unreported')
               const receipt = updateReceipts[environment.id]
+              const matchesReceipt = receipt != null && receipt.revision === runtime?.revision &&
+                receipt.daemonVersion === runtimeStatus?.daemonVersion
               let runtimeText: string
               if (runtimeUnavailable) {
                 runtimeText = t('ai.environment.runtime.unavailable')
               } else if (runtimeQuery.isError) {
-                const errorText =
-                  runtimeQuery.error instanceof Error
-                    ? runtimeQuery.error.message.trim()
-                    : ''
-                runtimeText = errorText || t('ai.environment.runtime.loadFailed')
+                runtimeText = t('ai.environment.runtime.loadFailed')
               } else if (runtimeStatus == null) {
                 runtimeText = t('ai.environment.runtime.loading')
               } else if (runtimeStatus.update) {
                 runtimeText = formatUpdateProgress(runtimeStatus.update, t)
-              } else if (receipt != null && receipt.revision === runtimeQuery.data?.revision
-                && receipt.daemonVersion === runtimeStatus.daemonVersion) {
+              } else if (matchesReceipt) {
                 // 回执只描述命令返回时的状态，不覆盖后续运行快照。
                 runtimeText = t(receipt.commandStatus === 'CURRENT'
                   ? 'ai.environment.update.current'
@@ -236,45 +245,24 @@ export function EnvironmentsPage() {
                 runtimeText = t('ai.environment.update.none')
               }
 
-              const rows: ResourceCardMetaRow[] = []
-              rows.push({
-                label: t('ai.environment.config.status'),
-                value: (
-                  <span className="environment-config-status">
-                    <EnvironmentConfigStatusBadge view={configView} />
-                    {configView.error ? (
-                      <span className="field-help">
-                        {configView.error.code}
-                        {configView.error.field ? ` · ${configView.error.field}` : ''}
+              const versionLabel = liveVersion ? 'ai.environment.currentDaemonVersion'
+                : lastVersion ? 'ai.environment.lastDaemonVersion' : 'ai.environment.daemonVersion'
+              const showConfigIssue = runtimeStatus && !runtimeStatus.update && !matchesReceipt &&
+                (configView.state === 'failed' || configView.state === 'pendingApply')
+              const rows: ResourceCardMetaRow[] = [
+                [t(versionLabel), daemonVersion],
+                {
+                  label: t(showConfigIssue ? 'ai.environment.config.status' : 'ai.environment.updateStatus'),
+                  value: showConfigIssue ? <EnvironmentConfigStatusBadge view={configView} />
+                    : runtimeQuery.isError && !runtimeUnavailable ? (
+                      <span className="environment-feedback">
+                        <CircleAlert aria-hidden="true" />
+                        {runtimeText}
                       </span>
-                    ) : null}
-                  </span>
-                ),
-                wrap: true,
-              })
-              rows.push([t('ai.environment.config.cardVersion'), environment.version])
-              rows.push([
-                t('ai.environment.config.appliedVersion'),
-                configView.appliedVersion ?? '—',
-              ])
-              rows.push([
-                t('ai.environment.config.proxy'),
-                environmentProxyText(configView, t('ai.environment.config.proxyDirect')),
-              ])
-              rows.push([t('ai.environment.daemonVersion'), daemonVersion])
-              rows.push({
-                label: t('ai.environment.updateStatus'),
-                value: runtimeText,
-                wrap: true,
-              })
-              if (environment.userName) {
-                rows.push([t('ai.environment.userName'), environment.userName])
-              }
-              if (environment.note) {
-                rows.push({ label: t('ai.environment.form.note'), value: environment.note, wrap: true })
-              }
-              // 能力清单始终占一行：为空时留空，结构不随数据有无而变。
-              rows.push({ label: t('ai.environment.capabilities'), tags: capabilityIds })
+                    ) : runtimeText,
+                  wrap: true,
+                },
+              ]
 
               return (
                 <ResourceCard
@@ -282,99 +270,38 @@ export function EnvironmentsPage() {
                   className="environment-card"
                   icon={<Box aria-hidden="true" />}
                   title={environment.name}
-                  subtitle={environment.id}
+                  subtitle={environment.note || undefined}
                   badge={
                     <Badge tone={connectionBadgeTone(ready, status)}>{displayStatus}</Badge>
                   }
                   meta={rows}
                   actions={
                     <>
-                      <Button
-                        size="compact"
-                        aria-label={`${t('ai.environment.install')} ${environment.name}`}
-                        onClick={() => setInstallTarget(environment)}
-                      >
-                        <Download aria-hidden="true" />
-                        {t('ai.environment.install')}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="compact"
-                        aria-label={`${t('ai.environment.uninstall')} ${environment.name}`}
-                        onClick={() => setUninstallTarget(environment)}
-                      >
-                        {t('ai.environment.uninstall')}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="compact"
-                        aria-label={`${t('ai.environment.form.edit')} ${environment.name}`}
-                        onClick={() => setEditor({ mode: 'edit', environment })}
-                      >
-                        <Pencil aria-hidden="true" />
-                        {t('ai.environment.form.edit')}
-                      </Button>
+                      {status === 'OFFLINE' && !lastVersion && (
+                        <Button
+                          size="compact"
+                          aria-label={`${t('ai.environment.install')} ${environment.name}`}
+                          onClick={() => setInstallTarget(environment)}
+                        >
+                          <Download aria-hidden="true" />
+                          {t('ai.environment.install')}
+                        </Button>
+                      )}
                       <Button
                         variant="ghost"
                         size="compact"
                         aria-label={`${t('ai.environment.manage')} ${environment.name}`}
                         onClick={() => {
                           setConflict(null)
-                          setManageTarget(environment)
+                          setManageId(environment.id)
                         }}
                       >
                         <SlidersHorizontal aria-hidden="true" />
                         {t('ai.environment.manage')}
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="compact"
-                        aria-label={`${t('ai.environment.update')} ${environment.name}`}
-                        onClick={() => {
-                          setConflict(null)
-                          setUpdateError(null)
-                          setUpdateTarget(environment)
-                        }}
-                      >
-                        {t('ai.environment.update')}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="compact"
-                        aria-label={`${t('ai.environment.rotateToken')} ${environment.name}`}
-                        onClick={() => {
-                          setConflict(null)
-                          setRotateError(null)
-                          setRotateTarget(environment)
-                        }}
-                      >
-                        <KeyRound aria-hidden="true" />
-                        {t('ai.environment.rotateToken')}
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="compact"
-                        danger
-                        aria-label={`${t('ai.environment.delete')} ${environment.name}`}
-                        onClick={() => {
-                          setConflict(null)
-                          setDeleteError(null)
-                          setDeleteTarget(environment)
-                        }}
-                        disabled={deleteMutation.isPending && deleteTarget?.id === environment.id}
-                      >
-                        <Trash2 aria-hidden="true" />
-                        {t('ai.catalog.action.delete')}
-                      </Button>
                     </>
                   }
-                >
-                  {lastSeen ? (
-                    <p className="inline-hint" title={lastSeen}>
-                      {`${t('ai.environment.lastSeen')} · ${lastSeen}`}
-                    </p>
-                  ) : null}
-                </ResourceCard>
+                />
               )
             })}
           </ResourceGrid>
@@ -472,10 +399,27 @@ export function EnvironmentsPage() {
         />
       )}
 
-      {manageTarget && (
+      {managedEnvironment && (
         <EnvironmentManagementModal
-          environment={manageTarget}
-          onClose={() => setManageTarget(null)}
+          environment={managedEnvironment}
+          onClose={() => setManageId(null)}
+          actions={[
+            { label: t('ai.environment.form.edit'), run: () => setEditor({ mode: 'edit', environment: managedEnvironment }) },
+            { label: t('ai.environment.install'), run: () => setInstallTarget(managedEnvironment) },
+            { label: t('ai.environment.update'), run: () => {
+              setUpdateError(null)
+              setUpdateTarget(managedEnvironment)
+            } },
+            { label: t('ai.environment.uninstall'), run: () => setUninstallTarget(managedEnvironment) },
+            { label: t('ai.environment.rotateToken'), run: () => {
+              setRotateError(null)
+              setRotateTarget(managedEnvironment)
+            } },
+            { label: t('ai.environment.delete'), danger: true, run: () => {
+              setDeleteError(null)
+              setDeleteTarget(managedEnvironment)
+            } },
+          ]}
         />
       )}
 
@@ -485,7 +429,7 @@ export function EnvironmentsPage() {
         onRefresh={() => {
           clearAllTargets()
           setEditor(null)
-          setManageTarget(null)
+          setManageId(null)
           void queryClient.invalidateQueries({ queryKey: queryKeys.environments.all })
         }}
         onClose={() => setConflict(null)}
