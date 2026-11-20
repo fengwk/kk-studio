@@ -1,131 +1,106 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
+import type { Theme } from '@fengwk/kchart'
 import { CodeBlock, CopyableShell } from '@/shared/ui/markdown/CodeBlock'
 import { useI18n } from '@/shared/i18n'
 import './mermaid-block.css'
 
-type MermaidApi = {
-  initialize: (config: Record<string, unknown>) => void
-  render: (id: string, text: string) => Promise<{ svg: string }>
-}
-
-let mermaidModulePromise: Promise<MermaidApi> | null = null
-let mermaidInitialized = false
-const svgCache = new Map<string, string>()
+type KChart = typeof import('@fengwk/kchart')
+type Measure = (text: string, size: number, weight: number, fontFamily: string) => number
+type Renderer = { kchart: KChart; theme: Theme; measure?: Measure }
 
 /**
- * Mermaid 官方主题通道（theme + themeVariables + themeCSS）。
- * 面向「全部图」的产品主题，而不是针对某次 agent 输出的特判。
- * 若图源内使用 style/classDef 写死颜色，仍以图内容为准（内容层 > 主题层）。
+ * KChart 暗色 Terminal 主题换成应用调色板。KChart 只接受具体颜色，每个值重复旁注 token 的 palette 色值；
+ * 调色板没有对应项的角色沿用 Terminal：中间层级的文字灰、粉/紫色 classDef 映射到的紫色和数据系列色。
  */
-const MERMAID_CONFIG: Record<string, unknown> = {
-  startOnLoad: false,
-  suppressErrorRendering: true,
-  securityLevel: 'strict',
-  theme: 'base',
-  fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
-  themeVariables: {
-    darkMode: true,
-    background: 'transparent',
-    fontFamily: 'Inter, ui-sans-serif, system-ui, sans-serif',
-    fontSize: '13px',
-    textColor: '#edf2ed',
-    primaryColor: '#202723',
-    primaryTextColor: '#edf2ed',
-    primaryBorderColor: '#355344',
-    secondaryColor: '#1b211e',
-    secondaryTextColor: '#edf2ed',
-    secondaryBorderColor: '#2b342f',
-    tertiaryColor: '#173d28',
-    tertiaryTextColor: '#edf2ed',
-    tertiaryBorderColor: '#355344',
-    lineColor: '#9aa59d',
-    mainBkg: '#202723',
-    nodeBkg: '#202723',
-    nodeBorder: '#355344',
-    clusterBkg: 'transparent',
-    clusterBorder: '#2b342f',
-    titleColor: '#edf2ed',
-    edgeLabelBackground: 'transparent',
-    nodeTextColor: '#edf2ed',
-    actorBkg: '#202723',
-    actorBorder: '#355344',
-    actorTextColor: '#edf2ed',
-    actorLineColor: '#9aa59d',
-    signalColor: '#9aa59d',
-    signalTextColor: '#edf2ed',
-    labelBoxBkgColor: '#202723',
-    labelBoxBorderColor: '#355344',
-    labelTextColor: '#edf2ed',
-    noteBkgColor: '#1b211e',
-    noteTextColor: '#edf2ed',
-    noteBorderColor: '#2b342f',
-    // 离散系列（饼图/状态色阶）统一绿灰，避免默认高饱和彩虹色
-    pie1: '#355344',
-    pie2: '#4a6356',
-    pie3: '#2b342f',
-    pie4: '#173d28',
-    pie5: '#5c7a68',
-    pie6: '#202723',
-    pie7: '#6d8f7a',
-    pie8: '#1b211e',
-    pie9: '#7fa38c',
-    pie10: '#2b342f',
-    pie11: '#9aa59d',
-    pie12: '#355344',
-    pieSectionTextColor: '#edf2ed',
-    pieTitleTextColor: '#edf2ed',
-    pieLegendTextColor: '#edf2ed',
-    cScale0: '#355344',
-    cScale1: '#4a6356',
-    cScale2: '#2b342f',
-    cScale3: '#173d28',
-    cScale4: '#5c7a68',
-    cScale5: '#202723',
-    cScale6: '#6d8f7a',
-    cScale7: '#1b211e',
-    cScale8: '#7fa38c',
-    cScale9: '#9aa59d',
-    cScale10: '#355344',
-    cScale11: '#4a6356',
-  },
-  themeCSS: `
-    .node rect, .node circle, .node ellipse, .node polygon {
-      fill: #202723 !important;
-      stroke: #355344 !important;
+const PALETTE_ROLES = {
+  bg: '#0d0f0e', // --stage-bg：对话区背景，图直接画在上面
+  surface: '#101412', // --bg
+  surface2: '#202723', // --surface-raised：节点填充
+  line: '#2b342f', // --border
+  line2: '#355344', // --accent-border：节点描边
+  fg1: '#edf2ed', // --fg
+  fg3: '#9aa59d', // --fg-muted
+  accent: '#71e79a', // --accent
+  ok: '#7fa38c', // --palette-moss-300：与 accent 区分，甘特图的已完成与关键任务才不同色
+  warn: '#f3ae67', // --warning
+  danger: '#f08585', // --danger
+  info: '#77c7f5', // --info
+  ext: '#9aa59d', // --fg-muted
+}
+/** 与 --font 相同的字体栈：测量和绘制使用同一字体。 */
+const FONT_FAMILY =
+  'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Helvetica Neue", sans-serif'
+
+let rendererPromise: Promise<Renderer> | null = null
+const svgCache = new Map<string, string>()
+const SVG_TEMPLATE_PREFIX = 'kk-mermaid-template'
+const SVG_REFERENCE_ATTRIBUTES = ['id', 'aria-labelledby', 'aria-describedby', 'clip-path', 'marker-start', 'marker-mid', 'marker-end', 'fill', 'stroke']
+const SVG_REFERENCE_SELECTOR = SVG_REFERENCE_ATTRIBUTES.map((name) =>
+  name === 'fill' || name === 'stroke' ? `[${name}^="url(#${SVG_TEMPLATE_PREFIX}-"]` : `[${name}]`,
+).join(',')
+
+function loadRenderer(): Promise<Renderer> {
+  rendererPromise ??= import('@fengwk/kchart').then((kchart) => {
+    const base = kchart.themes.terminal
+    const theme: Theme = {
+      ...base,
+      ...PALETTE_ROLES,
+      id: 'kk-studio',
+      fontFamily: FONT_FAMILY,
+      style: { ...base.style, radius: 8, smallRadius: 6 },
     }
-    .edgePath .path, .flowchart-link {
-      stroke: #9aa59d !important;
-    }
-    marker path {
-      fill: #9aa59d !important;
-      stroke: #9aa59d !important;
-    }
-    .edgeLabel rect {
-      fill: transparent !important;
-      stroke: transparent !important;
-    }
-    .cluster rect {
-      fill: transparent !important;
-      stroke: #2b342f !important;
-    }
-  `,
-  flowchart: {
-    htmlLabels: true,
-    curve: 'basis',
-    padding: 12,
-  },
+    return { kchart, theme, measure: canvasMeasure() }
+  })
+  return rendererPromise
 }
 
-async function getMermaid(): Promise<MermaidApi> {
-  if (!mermaidModulePromise) {
-    mermaidModulePromise = import('mermaid').then((mod) => mod.default as unknown as MermaidApi)
+/** 按浏览器实际字形宽度折行和定框。 */
+function canvasMeasure(): Measure | undefined {
+  const context = document.createElement('canvas').getContext('2d')
+  if (!context) {
+    return undefined
   }
-  const mermaid = await mermaidModulePromise
-  if (!mermaidInitialized) {
-    mermaid.initialize(MERMAID_CONFIG)
-    mermaidInitialized = true
+  return (text, size, weight, fontFamily) => {
+    context.font = `${weight} ${size}px ${fontFamily}`
+    return context.measureText(text).width
   }
-  return mermaid
+}
+
+/** KChart 按给定宽度排版；放不下时才加宽并在框内横向滚动。 */
+async function renderSvg(source: string, width: number): Promise<string | null> {
+  const { kchart, theme, measure } = await loadRenderer()
+  const { svg } = await kchart.diagram(source, { width, theme, frame: false, measure, prefix: SVG_TEMPLATE_PREFIX })
+  return svg
+}
+
+/** 缓存共用布局；挂载前只重写 SVG 引用属性，让标题、标记和裁剪都指向当前图。 */
+function mountSvg(host: HTMLElement, svg: string, prefix: string) {
+  const template = document.createElement('template')
+  template.innerHTML = svg
+  for (const element of template.content.querySelectorAll(SVG_REFERENCE_SELECTOR)) {
+    for (const name of SVG_REFERENCE_ATTRIBUTES) {
+      const value = element.getAttribute(name)
+      if (value?.includes(`${SVG_TEMPLATE_PREFIX}-`)) {
+        element.setAttribute(name, value.replaceAll(`${SVG_TEMPLATE_PREFIX}-`, `${prefix}-`))
+      }
+    }
+  }
+  // 图内链接与 Markdown 链接一致：新标签页打开，不带 opener 和 referrer。
+  for (const link of template.content.querySelectorAll('a')) {
+    link.setAttribute('target', '_blank')
+    link.setAttribute('rel', 'noreferrer noopener')
+  }
+  host.replaceChildren(template.content)
+}
+
+function remember(key: string, svg: string) {
+  svgCache.set(key, svg)
+  if (svgCache.size > 48) {
+    const first = svgCache.keys().next().value
+    if (first !== undefined) {
+      svgCache.delete(first)
+    }
+  }
 }
 
 function SourceView({ code }: { code: string }) {
@@ -137,91 +112,73 @@ function SourceView({ code }: { code: string }) {
 }
 
 /**
- * 闭合 mermaid fence 的稳定渲染节点；相同 code 只成图一次。
+ * 闭合 mermaid fence 的稳定渲染节点：按容器宽度成图，宽度变化时重绘；同一源码和宽度只渲染一次。
  */
 export const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
   const { t } = useI18n()
   const hostRef = useRef<HTMLDivElement>(null)
-  const reactId = useId().replace(/[^a-zA-Z0-9_-]/g, '')
-  const doneCodeRef = useRef<string | null>(null)
-  const [failed, setFailed] = useState(false)
+  const diagramPrefix = `kk-mermaid-${useId().replace(/[^A-Za-z0-9_-]/g, '')}`
+  const source = code.trim()
+  const [failedSource, setFailedSource] = useState<string | null>(null)
+  const failed = !source || failedSource === source
 
   useEffect(() => {
-    const trimmed = code.trim()
-    if (!trimmed) {
-      setFailed(true)
-      return
-    }
-    if (doneCodeRef.current === trimmed) {
-      return
-    }
-
     const host = hostRef.current
-    if (!host) {
+    if (!host || !source) {
       return
     }
-
-    const cached = svgCache.get(trimmed)
-    if (cached) {
-      host.innerHTML = cached
-      doneCodeRef.current = trimmed
-      setFailed(false)
-      return
-    }
-
     let cancelled = false
-    void (async () => {
-      try {
-        const mermaid = await getMermaid()
-        const renderId = `mmd${reactId}${Math.abs(hashCode(trimmed)).toString(36)}`
-        const { svg } = await mermaid.render(renderId, trimmed)
-        if (cancelled || !hostRef.current) {
-          return
-        }
-        hostRef.current.innerHTML = svg
-        svgCache.set(trimmed, hostRef.current.innerHTML)
-        if (svgCache.size > 48) {
-          const first = svgCache.keys().next().value
-          if (first) {
-            svgCache.delete(first)
-          }
-        }
-        doneCodeRef.current = trimmed
-        setFailed(false)
-      } catch {
-        if (!cancelled) {
-          doneCodeRef.current = null
-          setFailed(true)
-        }
+    let width = 0
+    const draw = (next: number) => {
+      if (next <= 0 || next === width) {
+        return
       }
-    })()
-
+      width = next
+      const key = `${next}\n${source}`
+      const cached = svgCache.get(key)
+      if (cached !== undefined) {
+        mountSvg(host, cached, diagramPrefix)
+        return
+      }
+      renderSvg(source, next).then(
+        (svg) => {
+          if (cancelled || width !== next) {
+            return
+          }
+          if (svg === null) {
+            setFailedSource(source)
+            return
+          }
+          mountSvg(host, svg, diagramPrefix)
+          remember(key, svg)
+        },
+        () => {
+          if (!cancelled) {
+            setFailedSource(source)
+          }
+        },
+      )
+    }
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[entries.length - 1]
+      if (entry) {
+        draw(Math.floor(entry.contentRect.width))
+      }
+    })
+    observer.observe(host)
     return () => {
       cancelled = true
+      observer.disconnect()
     }
-  }, [code, reactId])
+  }, [source, diagramPrefix])
 
   if (failed) {
     return <SourceView code={code} />
   }
 
   return (
-    <CopyableShell source={code.trim()} className="md-mermaid-shell">
-      <div
-        ref={hostRef}
-        className="md-mermaid"
-        role="img"
-        aria-label={t('shared.mermaidDiagram')}
-      />
+    <CopyableShell source={source} className="md-mermaid-shell">
+      <div ref={hostRef} className="md-mermaid" role="img" aria-label={t('shared.mermaidDiagram')} />
     </CopyableShell>
   )
 })
-
-function hashCode(value: string): number {
-  let hash = 0
-  for (let i = 0; i < value.length; i += 1) {
-    hash = (hash << 5) - hash + value.charCodeAt(i)
-    hash |= 0
-  }
-  return hash
-}

@@ -1,31 +1,13 @@
-/* 共享 Markdown Mermaid 图表容器。 */
+/* 共享 Markdown 的 mermaid 图容器：KChart 按容器宽度排版，放不下时在框内横向滚动。 */
 .md-mermaid {
   margin: 0.45em 0;
-  padding: 0;
   overflow-x: auto;
-  border-radius: 0;
-  border: 0;
-  background: transparent;
-  text-align: left;
   min-height: 48px;
-  font-size: var(--font-size-sm);
-  line-height: 1.55;
-  color: var(--fg);
 }
 
+/* SVG 保持 1:1：缩放会让图中文字小于排版时的字号。 */
 .md-mermaid svg {
   display: block;
-  max-width: 100%;
+  max-width: none;
   height: auto;
-  margin: 0;
-  font-size: var(--font-size-sm);
-}
-
-/* mermaid 生成的文本节点尽量继承正文观感 */
-.md-mermaid .nodeLabel,
-.md-mermaid .edgeLabel,
-.md-mermaid .label,
-.md-mermaid text {
-  font-family: var(--font) !important;
-  font-size: var(--font-size-sm) !important;
 }

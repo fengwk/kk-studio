@@ -11,11 +11,13 @@ async function renderDiagram(page: Page, source: string) {
 }
 
 test.describe('Mermaid rendering and sanitization', () => {
-  test('renders a flowchart while preserving safe HTML labels', async ({ page }) => {
-    // 使用真实 Mermaid/DOMPurify，防止安全补丁破坏已支持的 HTML 标签。
+  test('renders HTML labels as plain diagram text', async ({ page }) => {
+    // KChart 输出纯 SVG：标签里的 HTML 只保留文字，不会作为元素进入页面。
     const svg = await renderDiagram(page, 'flowchart TD\n A["<b>Input</b>"] --> B["Output"]')
-    await expect(svg.locator('b')).toHaveText('Input')
+    await expect(svg).toContainText('Input')
     await expect(svg).toContainText('Output')
+    await expect(svg.locator('b')).toHaveCount(0)
+    await expect(svg).not.toContainText('<b>')
   })
 
   test('renders a sequence diagram through the shared Markdown component', async ({ page }) => {
@@ -39,9 +41,10 @@ test.describe('Mermaid rendering and sanitization', () => {
       'flowchart TD',
       'A["<b>Allowed</b><img src=missing onerror=window.__mermaidXss=true><script>window.__mermaidXss=true</script><a href=javascript:window.__mermaidXss=true>Unsafe link</a>"] --> B["Output"]',
     ].join('\n'))
-    await expect(svg.locator('b')).toHaveText('Allowed')
+    await expect(svg).toContainText('Allowed')
+    await expect(svg).toContainText('Unsafe link')
     await expect(svg).toContainText('Output')
-    await expect(svg.locator('script')).toHaveCount(0)
+    await expect(svg.locator('script, img, a, foreignObject')).toHaveCount(0)
     const executableAttributes = await svg.evaluate((root) =>
       [root, ...root.querySelectorAll('*')].flatMap((element) =>
         Array.from(element.attributes)
@@ -54,5 +57,58 @@ test.describe('Mermaid rendering and sanitization', () => {
     )
     expect(executableAttributes).toEqual([])
     expect(await page.evaluate(() => Reflect.get(window, '__mermaidXss'))).toBe(false)
+  })
+
+  test('keeps title and marker references local to each copy of an identical diagram', async ({ page }) => {
+    // Two copies can reuse a layout, but their SVG IDs live in the same document.
+    const source = 'flowchart LR\n A[Start] --> B[End]'
+    const repeated = [source, '```', '', '```mermaid', source].join('\n')
+    await page.goto(`${HARNESS}?mermaid=${encodeURIComponent(repeated)}`)
+    const diagrams = page.locator('.md-mermaid svg')
+    await expect(diagrams).toHaveCount(2)
+    const groups = await diagrams.evaluateAll((roots) => roots.map((root) => ({
+      ids: Array.from(root.querySelectorAll('[id]'), (item) => item.id),
+      title: root.getAttribute('aria-labelledby'),
+      markers: Array.from(root.querySelectorAll('[marker-end]'), (item) => item.getAttribute('marker-end')),
+    })))
+    for (const { ids, title, markers } of groups) {
+      expect(ids).toContain(title)
+      expect(markers.length).toBeGreaterThan(0)
+      for (const ref of markers) expect(ids).toContain(ref?.match(/^url\(#(.+)\)$/)?.[1])
+    }
+    const ids = groups.flatMap((group) => group.ids)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  test('opens diagram links in a new tab', async ({ page }) => {
+    // click 链接保留为普通链接，但与 Markdown 链接一样不能在当前页离开应用。
+    const svg = await renderDiagram(page, 'flowchart LR\n A[Docs] --> B[API]\n click A "https://example.com/docs" "Open docs"')
+    const link = svg.locator('a')
+    await expect(link).toHaveAttribute('href', 'https://example.com/docs')
+    await expect(link).toHaveAttribute('target', '_blank')
+    await expect(link).toHaveAttribute('rel', 'noreferrer noopener')
+  })
+
+  test('keeps a diagram wider than the message at 1:1 and scrolls it inside its block', async ({ page }) => {
+    // 缩放会让图中文字小于排版字号：放不下的图保持原尺寸，在图框内横向滚动，页面本身不加宽。
+    const chain = Array.from({ length: 14 }, (_, index) => `S${index}[Stage ${index}]`).join(' --> ')
+    const svg = await renderDiagram(page, `flowchart LR\n ${chain}`)
+    const layout = await svg.evaluate((element) => {
+      const host = element.parentElement as HTMLElement
+      return {
+        width: Number(element.getAttribute('width')),
+        drawn: element.getBoundingClientRect().width,
+        hostWidth: host.clientWidth,
+        hostScroll: host.scrollWidth,
+        overflow: getComputedStyle(host).overflowX,
+        pageScroll: document.documentElement.scrollWidth,
+        viewport: document.documentElement.clientWidth,
+      }
+    })
+    expect(Math.abs(layout.drawn - layout.width)).toBeLessThan(1)
+    expect(layout.width).toBeGreaterThan(layout.hostWidth)
+    expect(layout.hostScroll).toBeGreaterThan(layout.hostWidth)
+    expect(layout.overflow).toBe('auto')
+    expect(layout.pageScroll).toBeLessThanOrEqual(layout.viewport)
   })
 })

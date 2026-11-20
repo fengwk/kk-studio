@@ -7,7 +7,7 @@
  *   - var(--x, fallback);
  *   - var(--palette-*) outside the token block of src/styles.css;
  *   - color literals (hex, rgb(), hsl(), ...) outside the palette block; TS files may repeat a
- *     palette hex because JS-only consumers (Mermaid) need concrete colors;
+ *     palette hex because JS-only consumers (the KChart diagram theme) need concrete colors;
  *   - font sizes off the --font-size-* scale;
  *   - z-index above the local stacking range that is not a --z-* token.
  *
@@ -138,9 +138,7 @@ export function checkCss(root) {
       : /(?:fontSize\s*:\s*|font-size\s*:\s*)(['"`]?)([^'"`;,}\n]+)\1/g
     for (const m of text.matchAll(fontPattern)) {
       const value = (isCss ? m[1] : m[2]).trim()
-      // JS-only consumers (Mermaid) cannot resolve var(); they may repeat a scale step in px.
-      const jsScaleStep = !isCss && /^(?:12|13|15|20|24)px$/.test(value)
-      if (!jsScaleStep && !FONT_SIZE_VALUE.test(value)) {
+      if (!FONT_SIZE_VALUE.test(value)) {
         report(file, text, m.index, 'font-size', `"${value}" is off the --font-size-* scale`)
       }
     }

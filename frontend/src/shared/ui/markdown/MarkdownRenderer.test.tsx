@@ -2,21 +2,18 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 
-const mermaidApi = vi.hoisted(() => ({
-  initialize: vi.fn<(config: Record<string, unknown>) => void>(),
-  render: vi.fn<(id: string, text: string) => Promise<{ svg: string }>>(),
+const kchart = vi.hoisted(() => ({
+  diagram: vi.fn<(source: string, options: object) => Promise<{ svg: string | null }>>(),
+  themes: { terminal: { style: {} } },
 }))
 
-vi.mock('mermaid', () => ({
-  default: mermaidApi,
-}))
+vi.mock('@fengwk/kchart', () => kchart)
 
 beforeEach(() => {
   vi.resetModules()
-  mermaidApi.initialize.mockReset()
-  mermaidApi.render.mockReset()
-  mermaidApi.render.mockImplementation(async (_id, text) => ({
-    svg: `<svg data-source="${text}"></svg>`,
+  kchart.diagram.mockReset()
+  kchart.diagram.mockImplementation(async (source) => ({
+    svg: `<svg data-source="${source}"></svg>`,
   }))
 })
 
@@ -88,10 +85,7 @@ describe('MarkdownRenderer', () => {
     await waitFor(() => {
       expect(view.container.querySelector('.md-mermaid')?.innerHTML).toContain('graph TD; A-->B')
     })
-    expect(mermaidApi.render).toHaveBeenCalledWith(
-      expect.stringMatching(/^mmd[a-zA-Z0-9_-]+$/),
-      'graph TD; A-->B',
-    )
+    expect(kchart.diagram).toHaveBeenCalledWith('graph TD; A-->B', expect.anything())
   })
 
   it('does not re-parse markdown when the same content rerenders', () => {
@@ -124,11 +118,8 @@ describe('MarkdownRenderer', () => {
     await waitFor(() => {
       expect(view.container.querySelector('.md-mermaid')?.innerHTML).toContain('graph LR; A-->C')
     })
-    expect(mermaidApi.render).toHaveBeenCalledTimes(2)
-    expect(mermaidApi.render).toHaveBeenCalledWith(
-      expect.stringMatching(/^mmd[a-zA-Z0-9_-]+$/),
-      'graph LR; A-->C',
-    )
+    expect(kchart.diagram).toHaveBeenCalledTimes(2)
+    expect(kchart.diagram).toHaveBeenCalledWith('graph LR; A-->C', expect.anything())
   })
 
   it('renders an unclosed mermaid fence as a plain code block', () => {
@@ -141,7 +132,7 @@ describe('MarkdownRenderer', () => {
     expect(shell?.querySelector('code.language-mermaid')).not.toBeNull()
     expect(shell?.querySelector('.hljs-keyword')).toBeNull()
     expect(screen.getByRole('button', { name: '复制代码' })).toBeInTheDocument()
-    expect(mermaidApi.render).not.toHaveBeenCalled()
+    expect(kchart.diagram).not.toHaveBeenCalled()
   })
 
   it('opens external links in a new tab with safe rel', () => {
@@ -177,8 +168,8 @@ describe('MarkdownRenderer', () => {
     expect(root?.classList.contains('custom-md')).toBe(true)
   })
 
-  it('falls back to the source view when Mermaid rendering rejects', async () => {
-    mermaidApi.render.mockRejectedValueOnce(new Error('parse failed'))
+  it('falls back to the source view when the diagram is invalid', async () => {
+    kchart.diagram.mockResolvedValueOnce({ svg: null })
     const view = render(<MarkdownRenderer content={'```mermaid\nnot a graph\n```'} />)
 
     await waitFor(() => {

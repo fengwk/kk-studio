@@ -534,6 +534,10 @@ IDE 使用列表，再以同一身份 claim 视图；服务端核对 environment
 宿主返回的权限或不存在等原因原样展示，超过上限的列表标注截断。移动端弹窗全屏，
 行、展开、帮助与上级按钮的可点击区域不小于 44px；目录说明由可访问的 `?` 提示展开，不使用括号补说明。
 
+### Mermaid 图
+
+闭合的 `mermaid` 代码块由 [`MermaidBlock`](../../frontend/src/shared/ui/markdown/MermaidBlock.tsx) 交给 [KChart](https://www.npmjs.com/package/@fengwk/kchart) 渲染为 SVG：首次遇到图时才按需加载，按所在容器的宽度排版，宽度变化后重新排版。配色取自应用调色板，图源里 `style`、`classDef` 的颜色按色相归入成功、警告、危险等状态色。放不下的图保持原尺寸，在图框内横向滚动；无法成图的源码按普通代码块显示。标签中的 HTML 只保留文字，`click` 回调不执行，网址链接与 Markdown 链接一样在新标签页打开。
+
 ### Resource URI 预览
 
 [`MarkdownRenderer`](../../frontend/src/shared/ui/markdown/MarkdownRenderer.tsx) 拦截 Markdown 与工具输出中的 `resource://` 链接，阻止浏览器将 URI 当作导航地址。文件资源通过当前 Session 的 `/api/harness/sessions/{sessionId}/resources/{resourceId}` 接口读取；图片以鉴权请求生成的本地 Blob URL 内联预览，其他文件提供预览或下载入口。复制 Markdown 与文本时保留原始 Resource URI。没有当前 Session 时不请求资源接口，显示不可用状态。
@@ -639,7 +643,7 @@ REFRESH_UNCERTAIN/REAUTH_REQUIRED 要求重新连接，Disconnect 二次确认�
 | 成功/等待/危险/信息 | `--success` / `--warning` / `--danger` / `--info` 及 soft、border |
 
 没有同义别名，也没有 `var(--x, fallback)`：缺失的 token 应补进 `:root`，而不是在使用处兜底。
-`npm run lint:css`（[`check-css.mjs`](../../frontend/scripts/check-css.mjs)，由 `styles.tokens.test.ts` 随 vitest 执行）扫描 `src` 下的样式与非测试 TS/TSX，拒绝：未声明的自定义属性、fallback、组件中直接使用 `--palette-*`、palette 之外的色值与命名色（TS 中只允许重复 palette 色值，供 Mermaid 这类只能吃具体颜色的 JS 消费者）、偏离字号标尺的 `font-size` 与 `font` 简写，以及大于 10 且不是 `--z-*` 的 `z-index`。
+`npm run lint:css`（[`check-css.mjs`](../../frontend/scripts/check-css.mjs)，由 `styles.tokens.test.ts` 随 vitest 执行）扫描 `src` 下的样式与非测试 TS/TSX，拒绝：未声明的自定义属性、fallback、组件中直接使用 `--palette-*`、palette 之外的色值与命名色（TS 中只允许重复 palette 色值，供 KChart 图表主题这类只能吃具体颜色的 JS 消费者）、偏离字号标尺的 `font-size` 与 `font` 简写，以及大于 10 且不是 `--z-*` 的 `z-index`。
 
 ### 颜色与卡片
 

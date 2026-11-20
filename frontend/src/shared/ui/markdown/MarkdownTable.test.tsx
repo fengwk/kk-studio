@@ -4,14 +4,12 @@ import { MarkdownRenderer } from '@/shared/ui/markdown/MarkdownRenderer'
 import { MarkdownTable } from '@/shared/ui/markdown/MarkdownTable'
 import { readMarkdownTableSource } from '@/shared/ui/markdown/markdown-table-source'
 
-const mermaidApi = vi.hoisted(() => ({
-  initialize: vi.fn<(config: Record<string, unknown>) => void>(),
-  render: vi.fn<(id: string, text: string) => Promise<{ svg: string }>>(),
+const kchart = vi.hoisted(() => ({
+  diagram: vi.fn<(source: string, options: object) => Promise<{ svg: string | null }>>(),
+  themes: { terminal: { style: {} } },
 }))
 
-vi.mock('mermaid', () => ({
-  default: mermaidApi,
-}))
+vi.mock('@fengwk/kchart', () => kchart)
 
 /** 富文本单元格：转义竖线、加粗、链接、行内代码都必须按原文复制。 */
 const RICH_TABLE = [
@@ -27,9 +25,9 @@ const clipboardDescriptor = Object.getOwnPropertyDescriptor(navigator, 'clipboar
 const execCommandDescriptor = Object.getOwnPropertyDescriptor(document, 'execCommand')
 
 beforeEach(() => {
-  mermaidApi.render.mockReset()
-  mermaidApi.render.mockImplementation(async (_id, text) => ({
-    svg: `<svg data-source="${text}"></svg>`,
+  kchart.diagram.mockReset()
+  kchart.diagram.mockImplementation(async (source) => ({
+    svg: `<svg data-source="${source}"></svg>`,
   }))
 })
 
