@@ -3592,6 +3592,15 @@ class EnvironmentDaemonServerTest {
         Duration.ofSeconds(5));
   }
 
+  /** 构造非 fs.read 能力（fs.grep）的调用请求，用于验证其他能力的档位仍取当前设置。 */
+  private static EnvironmentCapabilityExecutionRequest fsGrepRequest(UUID callId) {
+    return new EnvironmentCapabilityExecutionRequest(
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_GREP),
+        new EnvironmentCapabilityCall(
+            callId.toString(), "{\"pattern\":\"value\",\"path\":\"/srv/repo\"}"),
+        Duration.ofSeconds(5));
+  }
+
   private static void await(CountDownLatch latch) {
     try {
       if (!latch.await(5, TimeUnit.SECONDS)) {
@@ -3892,20 +3901,43 @@ class EnvironmentDaemonServerTest {
     assertFalse(channel.lastEnvelope().getInvoke().getExpectedFile().hasSha256());
   }
 
-  /** 测试意图：每次 INVOKE 读取当前系统图片档位，设置变更只影响后续调用。 */
+  /** 测试意图：受信 fs.read 的 INVOKE 固定发送协议 P1080 图片档位，不随当前系统图片档位变化。 */
   @Test
-  void eachInvokeUsesTheCurrentImageInputTier() {
+  void fsReadInvokeAlwaysUsesP1080ImageInputTier() {
     Fixture fixture = new Fixture();
-    FakeControlChannel channel = fixture.connectReady("channel-image-input-tier");
+    FakeControlChannel channel = fixture.connectReady("channel-fs-read-image-tier");
 
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
     Envelope firstInvoke = channel.lastEnvelope();
-    assertEquals(ImageInputTier.P720, firstInvoke.getInvoke().getImageInputTier());
+    assertEquals(
+        EnvironmentCapabilityIds.FS_READ.value(), firstInvoke.getInvoke().getCapabilityId());
+    assertEquals(ImageInputTier.P1080, firstInvoke.getInvoke().getImageInputTier());
 
     fixture.settings.set(
         new EnvironmentServerSettings(
             Duration.ofSeconds(60), 16L * 1024 * 1024, ImageInputTier.ORIGINAL, 259200L, 1800L));
     fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_TWO), new RecordingListener());
+
+    assertEquals(2, channel.countOf(MessageType.INVOKE));
+    assertEquals(ImageInputTier.P1080, channel.lastEnvelope().getInvoke().getImageInputTier());
+  }
+
+  /** 测试意图：非 fs.read 的每次 INVOKE 仍读取当前系统图片档位，设置变更只影响后续调用。 */
+  @Test
+  void eachNonReadInvokeUsesTheCurrentImageInputTier() {
+    Fixture fixture = new Fixture();
+    FakeControlChannel channel = fixture.connectReady("channel-image-input-tier");
+
+    fixture.server.invoke(ENVIRONMENT_ID, fsGrepRequest(CALL_ONE), new RecordingListener());
+    Envelope firstInvoke = channel.lastEnvelope();
+    assertEquals(
+        EnvironmentCapabilityIds.FS_GREP.value(), firstInvoke.getInvoke().getCapabilityId());
+    assertEquals(ImageInputTier.P720, firstInvoke.getInvoke().getImageInputTier());
+
+    fixture.settings.set(
+        new EnvironmentServerSettings(
+            Duration.ofSeconds(60), 16L * 1024 * 1024, ImageInputTier.ORIGINAL, 259200L, 1800L));
+    fixture.server.invoke(ENVIRONMENT_ID, fsGrepRequest(CALL_TWO), new RecordingListener());
 
     assertEquals(2, channel.countOf(MessageType.INVOKE));
     assertEquals(ImageInputTier.ORIGINAL, channel.lastEnvelope().getInvoke().getImageInputTier());

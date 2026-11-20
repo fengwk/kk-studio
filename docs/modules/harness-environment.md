@@ -165,7 +165,7 @@ Daemon -> IDE_RESULT
 Studio -> IDE_LEASE(round, bindings)
 ```
 
-`SETTINGS` 只通告临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`），不携带代理或显示名。每个 `INVOKE` 携带 `max_output_bytes` 与必填 `image_input_tier`：输出上限按发送时的当前系统工具输出设置（MiB）换算为字节，图片档位读取当前系统图片档位，值只能是 `P720`、`P1080` 或 `ORIGINAL`。Daemon 使用该次调用携带的值：`fs.read` 读图片时按该档位缩放，非图片输出不受影响。平台在每个 `RESOURCE_UPLOAD_REQUEST` 到达时按当前设置复核上传声明大小；超限会返回该调用的 `FAILED` 上传票据与统一工具输出超限错误，不会断开连接。
+`SETTINGS` 只通告临时资源策略（`temporary_resource_ttl_seconds` / `temporary_resource_cleanup_interval_seconds`），不携带代理或显示名。每个 `INVOKE` 携带 `max_output_bytes` 与必填 `image_input_tier`：输出上限按发送时的当前系统工具输出设置（MiB）换算为字节；图片档位按受信能力身份确定，`fs.read` 固定发送 `P1080`，其他能力发送当前系统图片档位，取值只能是 `P720`、`P1080` 或 `ORIGINAL`。Daemon 使用该次调用携带的值：`fs.read` 读图片时按该档位缩放，非图片输出不受影响。平台在每个 `RESOURCE_UPLOAD_REQUEST` 到达时按当前设置复核上传声明大小；超限会返回该调用的 `FAILED` 上传票据与统一工具输出超限错误，不会断开连接。
 同一连接上随后下发 `ENVIRONMENT_CONFIG` 完整卡片配置快照（`version` + `studio_url`、
 `bash_executable`、LSP servers、`proxy_url`）；Daemon 应用成功后才回执 `READY`。后续配置变更仍使用
 `ENVIRONMENT_CONFIG` 下发完整快照，不重复发送 READY；配置校验失败时已有可用快照继续运行并上报
