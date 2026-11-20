@@ -81,12 +81,14 @@ export function buildThreadTimeline(
     messages,
     queuedMessages,
     hasPendingInputs: queuedMessages.length > 0,
+    compactionInProgress: summary.compactionInProgress,
   }
 }
 
 interface DurableProjectionSummary {
   /** 最新 Turn 是否压缩回合：压缩回合内的失败/流式 overlay 不进入对话视图。 */
   latestTurnIsCompaction: boolean
+  compactionInProgress: boolean
 }
 
 /**
@@ -99,7 +101,6 @@ function projectDurableEntries(
   durableToolArguments: Map<string, string[]>,
   projectionContext: EntryProjectionContext,
 ): DurableProjectionSummary {
-  let inCompactionTurn = false
   let latestTurnIsCompaction = false
   // 压缩回合的生命周期投影：卡片在 TURN_START 立即出现，回合内事实在关闭时定稿。
   let compactionTurn: CompactionTurnProjection | null = null
@@ -119,7 +120,6 @@ function projectDurableEntries(
     if (entry.entryType === 'TURN_START') {
       const payload = asRecord(entry.payload)
       latestTurnIsCompaction = getString(payload.reason) === 'COMPACTION'
-      inCompactionTurn = latestTurnIsCompaction
       compactionTurn = latestTurnIsCompaction ? beginCompactionTurn(entry) : null
       if (compactionTurn != null) {
         messages.push(compactionTurn.message)
@@ -127,22 +127,21 @@ function projectDurableEntries(
       projectDurableEntry(entry, messages, durableToolArguments, projectionContext)
       continue
     }
-    if (inCompactionTurn) {
-      if (compactionTurn != null && entry.entryType === 'TURN_END') {
+    if (compactionTurn != null) {
+      if (entry.entryType === 'TURN_END') {
         const payload = asRecord(entry.payload)
         if (getString(payload.turnStartEntryId) === compactionTurn.startEntryId) {
           closeCompactionTurn(compactionTurn, payload)
-          inCompactionTurn = false
           compactionTurn = null
         }
-      } else if (compactionTurn != null) {
+      } else {
         recordCompactionTurnEntry(compactionTurn, entry)
       }
       continue
     }
     projectDurableEntry(entry, messages, durableToolArguments, projectionContext)
   }
-  return { latestTurnIsCompaction }
+  return { latestTurnIsCompaction, compactionInProgress: compactionTurn != null }
 }
 
 /**

@@ -324,6 +324,8 @@ export interface ThreadTimeline {
   queuedMessages: QueuedThreadMessage[]
   /** 当 mailbox 中仍有排队的人类输入（USER_MESSAGE）时为 true。 */
   hasPendingInputs: boolean
+  /** 未关闭的压缩卡已表达当前工作阶段。 */
+  compactionInProgress: boolean
 }
 
 /** Portable Thread Panel 消费的结构化模型请求 Debug 投影；不依赖 API DTO。 */

@@ -2795,6 +2795,21 @@ describe('AgentPane orchestration', () => {
     await waitFor(() => expect(composer).toHaveTextContent('cancelled draft'))
   })
 
+  it('shows the compaction card instead of a generic work strip while the owner waits for compaction', async () => {
+    localStorage.setItem(
+      `kk-studio.agent-pane-target.CHAT:${CHAT_ID}:pane-1`,
+      JSON.stringify({ kind: 'BOUND_THREAD', threadId: THREAD_ID }),
+    )
+    const owner = snapshot(threadFixture(THREAD_ID, { status: 'RUNNING' }))
+    vi.mocked(harnessService.getThreadSnapshot).mockResolvedValue({
+      ...owner,
+      entries: [{ ...owner.entries[0]!, entryType: 'TURN_START', payload: { reason: 'COMPACTION' } }],
+    })
+    const { container } = renderPane({ kind: 'CHAT', id: CHAT_ID })
+    expect(await screen.findByText('正在压缩上下文…')).toBeVisible()
+    expect(container.querySelector('.thread-working')).not.toBeInTheDocument()
+  })
+
   it('renders four-state thread status and gives priority to active execution facts', async () => {
     // 测试意图：验证 Thread status 四态及执行事实优先级：
     // 1. WAITING 状态展示“等待异步结果”，无生成动画；

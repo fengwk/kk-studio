@@ -351,14 +351,16 @@ Thread 处于等待审批时活动条显示“等待审批”；实际工具等�
 
 `SUBAGENT_RESULT` 和 `TASK_BUDGET` 使用全宽淡色系统卡片，不留图标列缩进。子代理回执展示来源、Thread 链接和结果/错误/partial，信封分段且正文使用安全 Markdown。回执默认折叠，摘要顺序为 agent、真实状态图标、任务预览、执行链接、展开箭头。
 压缩卡完整呈现压缩回合的生命周期，四态只来自持久事实：打开中的 `TURN_START(COMPACTION)` 为进行中；
-带摘要并以 `COMPLETED`、`continueModel=true` 关闭为已压缩；`TURN_END(FAILED)` 显示回合内 `ASSISTANT_ERROR`
-错误码映射出的一句原因；`TURN_END(STOPPED)` 显示已停止。卡片位于原压缩回合位置（此前对话之后、后续对话之前）。
+主对话此时不叠加通用工作提示。已保存 `COMPACTION` 摘要且有匹配的 `TURN_END(COMPLETED)` 才显示已压缩，
+不依赖 `continueModel`；`TURN_END(FAILED)` 显示回合内 `ASSISTANT_ERROR` 错误码映射出的一句原因；
+`TURN_END(STOPPED)` 显示已停止。卡片位于原压缩回合位置（此前对话之后、后续对话之前）。
 已压缩卡片默认折叠，展开后完整摘要复用 `SystemMessageCard` 外壳与 `SystemMessageBody` 安全 Markdown，不支持
 的 XML 标签保留为普通文本，摘要只读取 `COMPACTION.payload.summaryText`。失败与停止卡片在原位置提供“重新压缩”，
 可用性与命令面板同源，Thread 忙或不可压缩时禁用并显示原因。
 
-带分支 Thread id 的卡片提供“查看执行”，用与子代理相同的 pane/route 入口打开只读执行视图：按切点查询只读取分支自己的 Entry，响应含 `baseEntryId` 与从该游标之后的 Entry；非祖先游标回退完整快照。完整链仍由客户端保留，增量只在基线仍位于当前链时按 Entry id 幂等拼接。Thread 的 version 是控制状态 CAS 游标，流式 checkpoint 可在相同 version 更新；不能用版本相等跳过快照对账。视图展示继承的上下文量、固定压缩指令、每次模型调用的用量与费用，以及
-被停用的工具调用结果；运行中提供 Stop（`POST /api/harness/threads/{childThreadId}/stop`），视图没有 Composer。
+带分支 Thread id 的卡片提供“查看执行”。执行视图复用子代理的只读对话外壳与助手输出，沿用 Thread 快照和实时流，
+仅投影共享快照中切点之后的分支内容。对话不显示祖先历史、压缩指令或工具气泡；内部指令、用量和被停用工具的结果可按需展开诊断。
+执行输出是候选摘要，是否已应用以主对话压缩卡为准。执行中可停止，执行视图没有 Composer。
 最新一次成功压缩的切点之后，首条保留 Entry 之前有一条“以上内容已压缩为摘要”分隔线；失败或停止的压缩不移动保留段。
 压缩分支只从压缩卡进入，执行树与 Thread 列表始终排除 `COMPACTION`。
 

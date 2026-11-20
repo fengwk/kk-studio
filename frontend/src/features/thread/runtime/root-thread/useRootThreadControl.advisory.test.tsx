@@ -43,7 +43,7 @@ function makeMockProjection(threadId: string): ThreadProjection {
     unavailable: false,
     isRoot: true,
     title: thread.name,
-    timeline: { messages: [], queuedMessages: [], hasPendingInputs: false },
+    timeline: { messages: [], queuedMessages: [], hasPendingInputs: false, compactionInProgress: false },
     events: [],
     runtimeLabels: { environmentName: null, contextWindow: undefined },
     branchUsage: null,

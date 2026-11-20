@@ -88,7 +88,7 @@ describe('latest retained anchor', () => {
       entry('retained-2', 'MESSAGE', {}),
       turnStart('c2', 'cut-2'),
       entry('summary-2', 'COMPACTION', { summaryText: 'second' }),
-      turnEnd('c2', 'COMPLETED', true),
+      turnEnd('c2', 'COMPLETED'),
     ]
 
     expect(latestRetainedAnchor(entries)).toEqual({
@@ -116,6 +116,20 @@ describe('latest retained anchor', () => {
       turnEnd('c1', 'STOPPED'),
     ])).toBeNull()
     expect(latestRetainedAnchor([...base, turnStart('c1', 'cut')])).toBeNull()
+  })
+
+  it('does not recognize a completion without both summary and matching close', () => {
+    const base = [
+      entry('cut', 'TURN_END', {}),
+      entry('retained', 'MESSAGE', {}),
+      turnStart('c1', 'cut'),
+    ]
+    expect(latestRetainedAnchor([...base, turnEnd('c1', 'COMPLETED', true)])).toBeNull()
+    expect(latestRetainedAnchor([
+      ...base,
+      entry('summary', 'COMPACTION', { summaryText: 'candidate' }),
+      turnEnd('other', 'COMPLETED', true),
+    ])).toBeNull()
   })
 
   it('returns null when the cut entry is not on the loaded path', () => {
