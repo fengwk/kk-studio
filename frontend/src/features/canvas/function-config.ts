@@ -23,7 +23,7 @@ export interface FunctionConfigSync {
     functionName: string,
     config: CanvasFunctionConfig,
   ) => false | void
-  flushFunctionConfig: (nodeId: string) => Promise<CanvasFunctionDTO | undefined>
+  flushFunctionConfig: (nodeId: string, deletionBase?: CanvasFunctionDTO | null) => Promise<CanvasFunctionDTO | undefined>
   /** 冻结已有待保存项，删除完成前不接收新草稿或重复删除。 */
   lockFunctionConfigsForDeletion: (nodeIds: string[]) => (() => void) | undefined
   /** 离开/切换画布时清空草稿与定时器，不再为旧 flush 发送后续命令。 */
@@ -32,6 +32,20 @@ export interface FunctionConfigSync {
 
 interface PendingItem extends PendingFunctionConfig {
   generation: number
+}
+
+interface FlushCas {
+  deletionBase?: CanvasFunctionDTO | null
+  /** Values connected by this flush's consecutive successful CAS writes. */
+  chain: Set<string>
+}
+
+function functionKey(value: CanvasFunctionDTO | null): string {
+  return JSON.stringify(value, (_, item: unknown) => (
+    item && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+      : item
+  ))
 }
 
 /**
@@ -63,7 +77,10 @@ export function useFunctionConfigSync(
 
   const pendingFunctionConfigsRef = useRef(new Map<string, PendingItem>())
   const functionConfigTimersRef = useRef(new Map<string, number>())
-  const functionConfigFlushesRef = useRef(new Map<string, Promise<CanvasFunctionDTO | undefined>>())
+  const functionConfigFlushesRef = useRef(new Map<string, {
+    cas: FlushCas
+    promise: Promise<CanvasFunctionDTO | undefined>
+  }>())
   const deletingNodeIdsRef = useRef(new Set<string>())
 
   const lockFunctionConfigsForDeletion = useCallback((nodeIds: string[]) => {
@@ -75,7 +92,10 @@ export function useFunctionConfigSync(
     return () => nodeIds.forEach((id) => deleting.delete(id))
   }, [])
 
-  const flushFunctionConfig = useCallback((nodeId: string): Promise<CanvasFunctionDTO | undefined> => {
+  const flushFunctionConfig = useCallback((
+    nodeId: string,
+    deletionBase?: CanvasFunctionDTO | null,
+  ): Promise<CanvasFunctionDTO | undefined> => {
     const timer = functionConfigTimersRef.current.get(nodeId)
     if (timer !== undefined) {
       window.clearTimeout(timer)
@@ -84,9 +104,17 @@ export function useFunctionConfigSync(
     const flushes = functionConfigFlushesRef.current
     const existing = flushes.get(nodeId)
     if (existing) {
-      return existing
+      if (deletionBase === undefined) {
+        return existing.promise
+      }
+      existing.cas.deletionBase = deletionBase
+      return existing.promise.then((saved) => existing.cas.chain.has(functionKey(deletionBase)) ? saved : undefined)
     }
     const pendingConfigs = pendingFunctionConfigsRef.current
+    if (!pendingConfigs.has(nodeId)) {
+      return Promise.resolve(undefined)
+    }
+    const cas: FlushCas = { deletionBase, chain: new Set() }
     const trackedFlush = (async () => {
       let committedFunction: CanvasFunctionDTO | undefined
       while (true) {
@@ -94,9 +122,20 @@ export function useFunctionConfigSync(
         if (!pending) {
           return committedFunction
         }
-        const snapshot = getSnapshotRef.current?.()
-        const node = snapshot?.nodes.find((item) => item.id === nodeId)
-        const expectedFunction = node?.function ? { name: node.function.name, args: node.function.args } : null
+        let expectedFunction: CanvasFunctionDTO | null
+        if (cas.deletionBase !== undefined) {
+          // A deletion may only carry the click baseline forward through our own CAS chain.
+          expectedFunction = (cas.chain.has(functionKey(cas.deletionBase)) ? committedFunction : undefined)
+            ?? cas.deletionBase
+        } else {
+          const node = getSnapshotRef.current?.()?.nodes.find((item) => item.id === nodeId)
+          expectedFunction = node?.function ? { name: node.function.name, args: node.function.args } : null
+        }
+        const expectedKey = functionKey(expectedFunction)
+        if (committedFunction === undefined || expectedKey !== functionKey(committedFunction)) {
+          cas.chain.clear()
+        }
+        cas.chain.add(expectedKey)
         const model = getModelRef.current?.(pending.functionName)
         const nextFunction = {
           name: pending.functionName,
@@ -113,6 +152,7 @@ export function useFunctionConfigSync(
           generation: pending.generation,
         }])
         committedFunction = nextFunction
+        cas.chain.add(functionKey(nextFunction))
         if (pendingConfigs.get(nodeId) === pending) {
           pendingConfigs.delete(nodeId)
         }
@@ -120,7 +160,7 @@ export function useFunctionConfigSync(
     })().finally(() => {
       flushes.delete(nodeId)
     })
-    flushes.set(nodeId, trackedFlush)
+    flushes.set(nodeId, { cas, promise: trackedFlush })
     return trackedFlush
   }, [])
 

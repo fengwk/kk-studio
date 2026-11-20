@@ -1393,7 +1393,7 @@ describe('useCanvasController real snapshot runtime', () => {
     await waitFor(() => expect(getCanvas).toHaveBeenCalledTimes(4))
   })
 
-  it.each(['single', 'selection'] as const)('uses only its own save ACK for %s deletion with no late save', async (mode) => {
+  it.each(['single', 'selection', 'in-flight'] as const)('uses only its own save ACK for %s deletion with no late save', async (mode) => {
     // Hold the delete ACK to exercise edits attempted while the target still renders.
     const deleteAck = deferred<CanvasPatchDTO>()
     vi.mocked(postCanvasCommands)
@@ -1415,7 +1415,10 @@ describe('useCanvasController real snapshot runtime', () => {
     let deletion: Promise<void> | undefined
     act(() => {
       result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', editedConfig)
-      deletion = mode === 'single' ? result.current.deleteNode(NODE_FN) : result.current.deleteSelection()
+      if (mode === 'in-flight') {
+        void result.current.flushFunctionConfig(NODE_FN)
+      }
+      deletion = mode === 'selection' ? result.current.deleteSelection() : result.current.deleteNode(NODE_FN)
     })
 
     await waitFor(() => expect(commands).toHaveLength(2))
@@ -1426,19 +1429,19 @@ describe('useCanvasController real snapshot runtime', () => {
     const deleteFunctionNode = {
       type: 'DELETE_NODE', nodeId: NODE_FN, expectedFunction: savedFunction, expectedResourceIds: [RES_OUTPUT],
     }
-    expect(commands[1]?.commands).toEqual(mode === 'single' ? [deleteFunctionNode] : [
+    expect(commands[1]?.commands).toEqual(mode === 'selection' ? [
       { type: 'DELETE_GROUP', groupId: GROUP_A, expectedMemberNodeIds: [NODE_FN, NODE_IMG] },
       deleteFunctionNode,
       { type: 'DELETE_NODE', nodeId: NODE_NOTE, expectedFunction: null, expectedResourceIds: [RES_NOTE] },
-    ])
+    ] : [deleteFunctionNode])
 
     act(() => result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', { ...editedConfig, prompt: 'too late' }))
     expect(result.current.state.drafts[NODE_FN]?.function).toBeUndefined()
     await act(async () => {
       deleteAck.resolve({
         revision: '2',
-        nodes: (mode === 'single' ? [NODE_FN] : [NODE_FN, NODE_NOTE]).map((nodeId) => ({ type: 'REMOVE', nodeId })),
-        groups: mode === 'single' ? [] : [{ type: 'REMOVE', groupId: GROUP_A }],
+        nodes: (mode === 'selection' ? [NODE_FN, NODE_NOTE] : [NODE_FN]).map((nodeId) => ({ type: 'REMOVE', nodeId })),
+        groups: mode === 'selection' ? [{ type: 'REMOVE', groupId: GROUP_A }] : [],
       })
       await deletion
       await expect(result.current.flushFunctionConfig(NODE_FN)).resolves.toBeUndefined()
@@ -1448,7 +1451,68 @@ describe('useCanvasController real snapshot runtime', () => {
     await waitFor(() => expect(result.current.snapshot?.nodes.some((node) => node.id === NODE_FN)).toBe(false))
   })
 
-  it.each(['FUNCTION', 'RESOURCES'] as const)('preserves the delete CAS when remote %s advances during the local save', async (field) => {
+  it.each(['function', 'null', 'in-flight'] as const)('keeps the %s click baseline when the queue has already seen a remote function', async (mode) => {
+    const visible = mode === 'null' ? null : current.nodes.find((node) => node.id === NODE_FN)!.function
+    const withFunction = (fn: CanvasResourceNodeDTO['function'], revision: string): CanvasSnapshotDTO => ({
+      ...current,
+      document: { ...current.document, revision },
+      nodes: current.nodes.map((node) => node.id === NODE_FN ? { ...node, function: fn } : node),
+    })
+    current = withFunction(visible, '0')
+    const saveAck = deferred<void>()
+    vi.mocked(postCanvasCommands).mockImplementation(async (_id, request) => {
+      commands.push(request)
+      const remote = current.nodes.find((node) => node.id === NODE_FN)!
+      const command = request.commands[0]
+      if ((command?.type === 'SET_NODE_FUNCTION' || command?.type === 'DELETE_NODE')
+        && JSON.stringify(command.expectedFunction) !== JSON.stringify(remote.function)) {
+        throw new ApiError('Conflict', 409, 'CANVAS_CONFLICT', {
+          conflicts: [{ type: 'STALE_NODE', group: 'FUNCTION', nodeId: NODE_FN, current: remote }],
+        })
+      }
+      if (command?.type === 'SET_NODE_FUNCTION') {
+        await saveAck.promise
+      }
+      current = applyCommandBatch(current, request.commands)
+      return diffPatch(current)
+    })
+    const { result } = renderHook(() => useCanvasController(CANVAS_ID), { wrapper: Wrapper })
+    await waitFor(() => expect(result.current.snapshot?.document.revision).toBe('0'))
+    // The action held by the UI saw X; allow the queue to observe Y before invoking it.
+    const clickedDelete = result.current.deleteNode
+    const remoteFunction = { name: 'fake-image', args: { prompt: 'remote edit' } }
+    current = withFunction(remoteFunction, '1')
+    emitCanvasRevision('1')
+    await waitFor(() => expect(result.current.snapshot?.document.revision).toBe('1'))
+    act(() => result.current.setSelection([NODE_FN]))
+    act(() => {
+      result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+        prompt: 'local edit', references: [], parameters: { ratio: 'AUTO' },
+      })
+    })
+    if (mode === 'in-flight') {
+      // An ordinary flush had already sent a write based on Y. Its ACK cannot authorize deleting X.
+      act(() => { void result.current.flushFunctionConfig(NODE_FN) })
+      await waitFor(() => expect(commands).toHaveLength(1))
+    }
+    await act(async () => {
+      const deletion = clickedDelete(NODE_FN)
+      saveAck.resolve()
+      await deletion
+    })
+    expect(commands.map((request) => request.commands[0])).toEqual(mode === 'in-flight' ? [
+      expect.objectContaining({ type: 'SET_NODE_FUNCTION', expectedFunction: remoteFunction }),
+      expect.objectContaining({ type: 'DELETE_NODE', expectedFunction: visible }),
+    ] : [expect.objectContaining({ type: 'SET_NODE_FUNCTION', expectedFunction: visible })])
+    expect(result.current.state.conflictMessage).toContain('Canvas changed on the server')
+    expect(result.current.state.selectedIds).toEqual([NODE_FN])
+    expect(current.nodes.find((node) => node.id === NODE_FN)?.function?.args)
+      .toMatchObject({ prompt: mode === 'in-flight' ? 'local edit' : 'remote edit' })
+  })
+
+  it.each([
+    ['FUNCTION', false], ['RESOURCES', false], ['FUNCTION', true],
+  ] as const)('preserves CAS during remote %s advance (second draft: %s)', async (field, queuedDraft) => {
     const saveAck = deferred<CanvasPatchDTO>()
     vi.mocked(postCanvasCommands)
       .mockImplementationOnce(async (_id, request) => {
@@ -1458,14 +1522,17 @@ describe('useCanvasController real snapshot runtime', () => {
       .mockImplementationOnce(async (_id, request) => {
         const remote = current.nodes.find((node) => node.id === NODE_FN)!
         const command = request.commands[0]
-        expect(command?.type).toBe('DELETE_NODE')
-        if (command?.type !== 'DELETE_NODE') throw new Error('expected DELETE_NODE')
+        expect(command?.type).toBe(queuedDraft ? 'SET_NODE_FUNCTION' : 'DELETE_NODE')
+        if (command?.type !== 'DELETE_NODE' && command?.type !== 'SET_NODE_FUNCTION') {
+          throw new Error('expected function save or node deletion')
+        }
         if (field === 'FUNCTION') {
           expect(command.expectedFunction?.args).toMatchObject({ prompt: 'local edit' })
           expect(command.expectedFunction).not.toEqual(remote.function)
         } else {
           expect(command.expectedFunction).toEqual(remote.function)
-          expect(command.expectedResourceIds).toEqual([RES_OUTPUT])
+          expect(command).toMatchObject({ expectedResourceIds: [RES_OUTPUT] })
+          if (command.type !== 'DELETE_NODE') throw new Error('expected DELETE_NODE')
           expect(command.expectedResourceIds).not.toEqual(remote.resources.map((resource) => resource.id))
         }
         throw new ApiError('Conflict', 409, 'CANVAS_CONFLICT', {
@@ -1480,6 +1547,12 @@ describe('useCanvasController real snapshot runtime', () => {
       result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
         prompt: 'local edit', references: [], parameters: { ratio: 'AUTO' },
       })
+      if (queuedDraft) {
+        void result.current.flushFunctionConfig(NODE_FN).catch(() => undefined)
+        result.current.scheduleFunctionConfig(NODE_FN, 'fake-image', {
+          prompt: 'second local edit', references: [], parameters: { ratio: 'AUTO' },
+        })
+      }
       deletion = result.current.deleteNode(NODE_FN)
     })
     await waitFor(() => expect(postCanvasCommands).toHaveBeenCalledTimes(1))

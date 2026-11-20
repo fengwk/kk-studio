@@ -172,7 +172,7 @@ export function useCanvasNodeActions({
     try {
       const prepared = await Promise.all(commands.map(async (command) => {
         if (command.type === 'DELETE_NODE') {
-          const savedFunction = await flushFunctionConfig(command.nodeId)
+          const savedFunction = await flushFunctionConfig(command.nodeId, command.expectedFunction ?? null)
           if (savedFunction !== undefined) {
             // 只接受本次 flush 的 ACK；远端变更仍由点击时冻结的基线裁决。
             return { ...command, expectedFunction: savedFunction }
