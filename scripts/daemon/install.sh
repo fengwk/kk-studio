@@ -968,6 +968,12 @@ cmd_uninstall() {
     fail "找不到当前安装程序；请先恢复程序再卸载。"
   fi
   stop_service_and_wait '3/3 停止并移除服务'
+  if [ "$HOST_OS" = Linux ] && [ -f "$SERVICE_PATH" ]; then
+    # Keep the verified definition in place until systemd removes its enable links.
+    PHASE_CODE=disable
+    systemctl --user disable "$SERVICE_NAME" >/dev/null 2>&1 ||
+      fail "systemd 未能禁用用户服务，未删除受管服务定义或程序。"
+  fi
   PHASE_CODE=publish
   rm -rf "$WORK_DIR" || fail "无法清理受管暂存。"
   rm -f "$SERVICE_PATH" || fail "无法移除受管服务定义。"
