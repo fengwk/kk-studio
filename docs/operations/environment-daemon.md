@@ -523,9 +523,13 @@ Backend 自身的模型、MCP、插件与 S3 SDK 请求由 Studio 的**系统设
 ## 卸载与数据保留
 
 `uninstall` 停止服务、删除受管服务定义与本卡片 `lib/` 下的程序发行目录，**保留 `daemon.json`、
-`daemon.token`、`ide/`、`skills/`、日志、`last-operation.json` 与其它用户数据**。它是幂等的：服务
-定义已经缺失但程序仍残留时继续完成清理；两者都不存在时直接报告未安装并保留数据。卸载不会删除任何
-Studio Environment 记录，也不清理 token、数据与日志；彻底删除前先评估历史引用，并按需手动清理。
+`daemon.token`、`ide/`、`skills/`、日志、`last-operation.json` 与其它用户数据**。在 Linux 上，确认
+受管服务已停止并释放运行锁后，先通过 systemd 取消该卡片服务的自动启动，再删除服务定义和程序。
+若禁用失败，卸载失败并保留定义和程序，修正后可重试。
+
+卸载是幂等的：服务定义已经缺失但程序仍残留时继续清理程序；两者都不存在时报告未安装并保留数据。
+在 Linux 上，缺少受管服务定义时不尝试清理残留的启用链接。卸载不删除 Studio Environment 记录；
+彻底删除前先评估历史引用，并按需手动清理。
 Unix 若只剩 `.work/previous-lib` 而 `lib/` 缺失，先按上文重试更新恢复程序，再卸载。
 
 数据目录持有 `daemon.lock`，同一卡片目录只允许一个 Daemon。`tmp/workspaces/<uuid>` 保存命令与检索的

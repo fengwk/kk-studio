@@ -276,7 +276,18 @@ case "$*" in
     : > "$state/active"
     exit 0
     ;;
-  *"stop"* | *"disable"*)
+  "--user enable "* | "--user disable "*)
+    units="$HOME/.config/systemd/user"
+    wants="$units/default.target.wants"
+    [ -f "$units/$3" ] || exit 1
+    if [ "$2" = enable ]; then
+      mkdir -p "$wants" && ln -sf "$units/$3" "$wants/$3"
+    else
+      rm -f "$wants/$3"
+    fi
+    exit $?
+    ;;
+  *"stop"*)
     rm -f "$state/active"
     exit 0
     ;;

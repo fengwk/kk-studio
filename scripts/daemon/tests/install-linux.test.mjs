@@ -10,7 +10,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { spawnSync } from 'node:child_process'
@@ -32,6 +32,7 @@ const text = (file) => readFileSync(file, 'utf8')
 const bytes = (file) => readFileSync(file)
 const envRoot = (fixture) => fixture.envRoot
 const unitPath = (fixture) => fixture.unitPath
+const wantsLink = (unit) => path.join(path.dirname(unit), 'default.target.wants', path.basename(unit))
 const lastOperation = (fixture) => JSON.parse(text(path.join(envRoot(fixture), 'last-operation.json')))
 
 /** Run `body(context)` with a fresh Linux install fixture, its private inputs and CLI shortcuts. */
@@ -132,7 +133,7 @@ describe('install.sh on Linux', () => {
     }))
 
   it('keeps two cards of the same user independent', () =>
-    withInstall(({ fixture, install, uninstall, status }) => {
+    withInstall(({ fixture, install, uninstall }) => {
       fixture.environmentId = ENVIRONMENT_ID
       assert.equal(install().status, 0)
       const [secondConfig, secondToken] = fixture.makeInputs({ environmentId: SECOND_ENVIRONMENT_ID })
@@ -150,6 +151,8 @@ describe('install.sh on Linux', () => {
       const firstUnit = path.join(fixture.home, `.config/systemd/user/kk-studio-daemon-${ENVIRONMENT_ID}.service`)
       const secondUnit = path.join(fixture.home, `.config/systemd/user/kk-studio-daemon-${SECOND_ENVIRONMENT_ID}.service`)
       assert.ok(existsSync(firstUnit) && existsSync(secondUnit))
+      assert.equal(readlinkSync(wantsLink(firstUnit)), firstUnit)
+      assert.equal(readlinkSync(wantsLink(secondUnit)), secondUnit)
       assert.ok(text(firstUnit).includes(firstRoot))
       assert.ok(text(secondUnit).includes(secondRoot))
 
@@ -157,12 +160,17 @@ describe('install.sh on Linux', () => {
       writeFileSync(path.join(fixture.state, 'commands'), '')
       assert.equal(uninstall(ENVIRONMENT_ID).status, 0)
       assert.ok(!existsSync(firstUnit))
+      // existsSync would miss a dangling enable link after the unit is removed.
+      assert.throws(() => lstatSync(wantsLink(firstUnit)), { code: 'ENOENT' })
+      assert.equal(readlinkSync(wantsLink(secondUnit)), secondUnit)
       assert.ok(!existsSync(path.join(firstRoot, 'lib')))
       assert.ok(existsSync(path.join(firstRoot, 'daemon.json')))
       assert.ok(existsSync(secondUnit))
       assert.ok(existsSync(path.join(secondRoot, 'lib/kk-studio-daemon')))
       const uninstallCommands = text(path.join(fixture.state, 'commands'))
-      assert.match(uninstallCommands, new RegExp(`--user stop kk-studio-daemon-${ENVIRONMENT_ID}.service`))
+      assert.ok(uninstallCommands.includes(
+        `--user stop ${path.basename(firstUnit)}\n--user disable ${path.basename(firstUnit)}\n`,
+      ))
       assert.doesNotMatch(uninstallCommands, new RegExp(SECOND_ENVIRONMENT_ID))
     }))
 
@@ -483,16 +491,64 @@ exec "${realMv}" "$@"
       assert.equal(uninstall().status, 0)
     }))
 
+  it('does not disable an unowned Linux unit', () =>
+    withInstall(({ fixture, install, uninstall }) => {
+      assert.equal(install().status, 0)
+      const unit = unitPath(fixture)
+      const foreign = text(unit).replace('# Managed by scripts/daemon/install.sh', '# Unmanaged')
+      writeFileSync(unit, foreign)
+      const commands = path.join(fixture.state, 'commands')
+      writeFileSync(commands, '')
+      const result = uninstall()
+      assert.equal(result.status, 1, result.stderr)
+      assert.match(result.stderr, /拒绝操作非受管服务/)
+      assert.doesNotMatch(text(commands), /--user (stop|disable) /)
+      assert.equal(text(unit), foreign)
+      assert.equal(readlinkSync(wantsLink(unit)), unit)
+    }))
+
+  for (const [phase, extraEnv, error] of [
+    ['wait-lock', { FAKE_DAEMON_LOCKED: '1' }, /仍持有运行锁/],
+    ['disable', { FAKE_MANAGER_FAIL: 'disable' }, /未能禁用用户服务/],
+  ]) {
+    it(`preserves the Linux installation when uninstall is blocked at ${phase}`, () =>
+      withInstall(({ fixture, install, uninstall }) => {
+        assert.equal(install().status, 0)
+        const unit = unitPath(fixture)
+        const files = [unit, ...['lib/kk-studio-daemon', 'daemon.json', 'daemon.token'].map(
+          (name) => path.join(envRoot(fixture), name),
+        )]
+        const snapshots = files.map(bytes)
+        const commands = path.join(fixture.state, 'commands')
+        writeFileSync(commands, '')
+        const result = fixture.run(['uninstall', '--environment-id', ENVIRONMENT_ID], { extraEnv })
+        assert.equal(result.status, 1, result.stderr)
+        assert.match(result.stderr, error)
+        assert.doesNotMatch(result.stdout, /环境已卸载/)
+        files.forEach((file, index) => assert.deepEqual(bytes(file), snapshots[index], file))
+        assert.equal(readlinkSync(wantsLink(unit)), unit)
+        assert.ok(!existsSync(path.join(fixture.state, 'active')))
+        assert.equal(text(commands).includes(`--user disable ${path.basename(unit)}\n`), phase === 'disable')
+        assert.equal(lastOperation(fixture).result, 'failed')
+        assert.equal(lastOperation(fixture).errorCode, phase)
+        assert.equal(uninstall().status, 0)
+        assert.throws(() => lstatSync(wantsLink(unit)), { code: 'ENOENT' })
+      }))
+  }
+
   it('uninstall still removes a program left behind after the service definition disappeared', () =>
     withInstall(({ fixture, install, uninstall }) => {
       // 上一次卸载可能已移除服务定义但未能删除 lib；再次卸载必须完成清理而不是报告“无事可做”。
       assert.equal(install().status, 0)
       const root = envRoot(fixture)
-      unlinkSync(unitPath(fixture))
+      const unit = unitPath(fixture)
+      unlinkSync(unit)
       const result = uninstall()
       assert.equal(result.status, 0, result.stderr)
       assert.ok(!existsSync(path.join(root, 'lib')))
       assert.ok(existsSync(path.join(root, 'daemon.json')))
+      // 找不到受管定义时不能据此声称拥有残留的链接。
+      assert.equal(readlinkSync(wantsLink(unit)), unit)
     }))
 
   it('uninstall refuses to delete a program whose helper copy is unavailable', () =>
