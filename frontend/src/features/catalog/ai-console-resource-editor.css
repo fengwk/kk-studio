@@ -1,3 +1,80 @@
+/* Catalog 资源编辑器弹窗。
+
+   外壳：标题与页脚固定，正文是唯一纵向滚动区；宽屏左侧是区块导航，窄屏改为正文顶部的
+   横向区块跳转。区块本身只提供稳定跳转目标与标题，见 CatalogEditorSection.tsx。 */
+
+/* 带区块导航的表单需要更宽的卡片容纳导航列；选择器带上 .modal-card 覆盖弹窗默认宽度。 */
+.modal-card.catalog-editor-card {
+  width: min(920px, 100%);
+}
+
+.catalog-editor-card .modal-footer {
+  gap: var(--space-2);
+}
+
+/* 导航列 + 表单列：沿用正文自身的滚动，导航不单独滚动。 */
+.modal-body.catalog-editor-body.is-split {
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr);
+  align-items: start;
+  gap: var(--space-5);
+}
+
+.catalog-editor-content {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  min-width: 0;
+}
+
+.catalog-editor-nav {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.catalog-editor-nav-link {
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+}
+
+.catalog-editor-nav-link:hover {
+  border-color: var(--border);
+  background: var(--wash-1);
+  color: var(--fg);
+}
+
+/* 区块：稳定 id 的跳转目标；标题和内容由表单自身提供。 */
+.catalog-editor-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  scroll-margin-top: var(--space-3);
+}
+
+.catalog-editor-section + .catalog-editor-section {
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border);
+}
+
+.catalog-editor-section-heading {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+
 /* Catalog 资源编辑器弹窗的类型切换。 */
 
 /* Model / Model Group 创建与目录参数：全部为本次功能新增的 scoped 样式。 */
@@ -25,4 +102,45 @@
 .model-kind-tabs button.is-selected {
   background: var(--wash-3);
   color: var(--fg);
+}
+
+@media (max-width: 860px) {
+  .modal-card.catalog-editor-card {
+    width: 100%;
+  }
+
+  .modal-body.catalog-editor-body.is-split {
+    grid-template-columns: minmax(0, 1fr);
+    gap: var(--space-3);
+    padding-top: 0;
+  }
+
+  /* 窄屏单栏：跳转条停在正文顶部，横向滚动而不是换行，避免挤压表单首屏。 */
+  .catalog-editor-nav {
+    z-index: 1;
+    flex-direction: row;
+    gap: var(--space-2);
+    padding: var(--space-2) 0;
+    overflow-x: auto;
+    background: var(--surface-raised);
+  }
+
+  .catalog-editor-nav-link {
+    flex: 0 0 auto;
+    padding: var(--space-2) var(--space-3);
+    border-color: var(--border);
+    border-radius: var(--radius-pill);
+    background: var(--wash-1);
+    text-align: center;
+    white-space: nowrap;
+  }
+
+  .catalog-editor-card .capability-selection-details > summary {
+    min-height: 44px;
+  }
+
+  /* 留出停靠的跳转条高度，跳转后的区块标题不被遮住。 */
+  .catalog-editor-section {
+    scroll-margin-top: 64px;
+  }
 }

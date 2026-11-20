@@ -392,7 +392,7 @@ describe('useAiConsoleResourceController', () => {
     expect(agentService.deleteAgent).not.toHaveBeenCalled()
   })
 
-  it('queries global skills and reflects loading and error states into resourceEditorModal', async () => {
+  it('queries global skills and exposes a ready skills capability directory', async () => {
     vi.mocked(agentService.listSkillPackages).mockResolvedValue([
       {
         packageName: 'core',
@@ -413,6 +413,43 @@ describe('useAiConsoleResourceController', () => {
 
     expect(agentService.listSkillPackages).toHaveBeenCalled()
     expect(screen.getByTestId('skills-count')).toHaveTextContent('1')
+    await waitFor(() => {
+      expect(screen.getByTestId('skills-status')).toHaveTextContent('ready')
+    })
+  })
+
+  // 目录读取失败只影响自己的能力面板，重试成功后状态与候选一起恢复。
+  it('reports a failed skills directory and recovers through its retry', async () => {
+    vi.mocked(agentService.listSkillPackages)
+      .mockRejectedValueOnce(new Error('skills unavailable'))
+      .mockResolvedValue([
+        {
+          packageName: 'core',
+          description: 'Core skills',
+          packageVersion: '1111111111111111111111111111111111111111',
+          publishedAt: 1789948800000,
+          skills: [{ name: 'dev', description: 'dev skill' }],
+          source: 'GIT',
+          updateAvailable: false,
+          version: '1',
+          createdAt: 1789948800000,
+          updatedAt: 1789948800000,
+        },
+      ])
+    const user = userEvent.setup()
+    renderHarness()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('skills-status')).toHaveTextContent('error')
+    })
+    expect(screen.getByTestId('skills-count')).toHaveTextContent('0')
+
+    await user.click(screen.getByRole('button', { name: 'retry-skills' }))
+    await waitFor(() => {
+      expect(screen.getByTestId('skills-status')).toHaveTextContent('ready')
+    })
+    expect(screen.getByTestId('skills-count')).toHaveTextContent('1')
+    expect(agentService.listSkillPackages).toHaveBeenCalledTimes(2)
   })
 })
 
@@ -442,8 +479,14 @@ function ResourceControllerHarness() {
       <div data-testid="form-error">{formError}</div>
       <div data-testid="field-error">{errorField}</div>
       <div data-testid="skills-status">
-        {editor.skillsLoading ? 'loading' : editor.skillsError ? 'error' : 'idle'}
+        {editor.capabilityDirectories?.skills?.status ?? 'missing'}
       </div>
+      <button
+        type="button"
+        onClick={() => editor.capabilityDirectories?.skills?.retry()}
+      >
+        retry-skills
+      </button>
       <div data-testid="skills-count">{editor.skills.length}</div>
       <button type="button" onClick={() => editor.onClose()}>
         close-resource

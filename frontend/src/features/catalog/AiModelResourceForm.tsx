@@ -4,6 +4,7 @@ import { variantOptionsFromDraft } from '@/features/catalog/ai-draft-normalizers
 import type { ResourceFieldKey } from '@/features/catalog/ai-resource-form-validation'
 import { VariantListEditor } from '@/features/catalog/AiVariantListEditor'
 import { ModelPricingPlanEditor } from '@/features/catalog/ModelPricingPlanEditor'
+import { CatalogEditorSection } from '@/features/catalog/CatalogEditorSection'
 import { ModelCatalogPicker } from '@/features/catalog/AiModelCatalogPicker'
 import { applyCatalogCandidate } from '@/features/catalog/ai-model-catalog-apply'
 import { getModelCapabilities } from '@/features/catalog/ai-model-capabilities'
@@ -111,137 +112,148 @@ export function ModelForm({
 
   return (
     <>
-      <label className={`form-group${fieldErrors.providerName ? ' is-error' : ''}`}>
-        <FieldLabel required>{t('ai.catalog.form.provider')}</FieldLabel>
-        <Select
-          aria-label={t('ai.catalog.form.provider')}
-          aria-describedby={provider.unavailable ? 'model-provider-identity-status' : undefined}
-          value={draft.providerName}
-          required
-          disabled={mode === 'edit'}
-          options={provider.options}
-          onChange={(providerName) =>
-            onChange({
-              ...draft,
-              providerName,
-            })
-          }
-        />
-        {provider.unavailable ? (
-          <span id="model-provider-identity-status" className="inline-hint" role="status">
-            {t('ai.catalog.form.unavailableIdentityHint')}
-          </span>
-        ) : null}
-        {fieldErrors.providerName ? <span className="field-error">{fieldErrors.providerName}</span> : null}
-      </label>
+      <CatalogEditorSection name="basics">
+        <label className={`form-group${fieldErrors.providerName ? ' is-error' : ''}`}>
+          <FieldLabel required>{t('ai.catalog.form.provider')}</FieldLabel>
+          <Select
+            aria-label={t('ai.catalog.form.provider')}
+            aria-describedby={provider.unavailable ? 'model-provider-identity-status' : undefined}
+            value={draft.providerName}
+            required
+            disabled={mode === 'edit'}
+            options={provider.options}
+            onChange={(providerName) =>
+              onChange({
+                ...draft,
+                providerName,
+              })
+            }
+          />
+          {provider.unavailable ? (
+            <span id="model-provider-identity-status" className="inline-hint" role="status">
+              {t('ai.catalog.form.unavailableIdentityHint')}
+            </span>
+          ) : null}
+          {fieldErrors.providerName ? (
+            <span className="field-error">{fieldErrors.providerName}</span>
+          ) : null}
+        </label>
 
-      <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
-        <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
-        <TextInput
-          invalid={Boolean(fieldErrors.name)}
-          aria-label={t('ai.catalog.form.name')}
-          value={draft.name}
-          onChange={(event) => onChange({ ...draft, name: event.target.value })}
-          placeholder="MiniMax-M2.7"
-          required
-        />
-        <span className="inline-hint">{t('ai.catalog.form.nameHint')}</span>
-        {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
-      </label>
+        <label className={`form-group${fieldErrors.name ? ' is-error' : ''}`}>
+          <FieldLabel required>{t('ai.catalog.form.name')}</FieldLabel>
+          <TextInput
+            invalid={Boolean(fieldErrors.name)}
+            aria-label={t('ai.catalog.form.name')}
+            value={draft.name}
+            onChange={(event) => onChange({ ...draft, name: event.target.value })}
+            placeholder="MiniMax-M2.7"
+            required
+          />
+          <span className="inline-hint">{t('ai.catalog.form.nameHint')}</span>
+          {fieldErrors.name ? <span className="field-error">{fieldErrors.name}</span> : null}
+        </label>
 
-      <label className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
-        <FieldLabel required>{t('ai.catalog.form.modelId')}</FieldLabel>
-        <TextInput
-          invalid={Boolean(fieldErrors.modelId)}
-          aria-label={t('ai.catalog.form.modelId')}
-          value={draft.modelId}
-          onChange={(event) => setModelId(event.target.value)}
-          placeholder="minimax-m2.7"
-          list={mode === 'create' ? 'model-remote-ids' : undefined}
-          required
-        />
-        <span className="inline-hint">{t('ai.catalog.form.modelIdHint')}</span>
-        {mode === 'create' ? (
-          <RemoteModelIdPicker
-            listId="model-remote-ids"
-            providerName={draft.providerName}
-            load={loadRemoteModelIds}
+        <label className={`form-group${fieldErrors.modelId ? ' is-error' : ''}`}>
+          <FieldLabel required>{t('ai.catalog.form.modelId')}</FieldLabel>
+          <TextInput
+            invalid={Boolean(fieldErrors.modelId)}
+            aria-label={t('ai.catalog.form.modelId')}
+            value={draft.modelId}
+            onChange={(event) => setModelId(event.target.value)}
+            placeholder="minimax-m2.7"
+            list={mode === 'create' ? 'model-remote-ids' : undefined}
+            required
+          />
+          <span className="inline-hint">{t('ai.catalog.form.modelIdHint')}</span>
+          {mode === 'create' ? (
+            <RemoteModelIdPicker
+              listId="model-remote-ids"
+              providerName={draft.providerName}
+              load={loadRemoteModelIds}
+            />
+          ) : null}
+          {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
+        </label>
+
+        <label className="form-group">
+          <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
+          <TextInput
+            value={draft.description}
+            onChange={(event) => onChange({ ...draft, description: event.target.value })}
+            placeholder={t('ai.catalog.form.modelDescriptionPlaceholder')}
+          />
+        </label>
+
+        <div className="catalog-picker-launcher">
+          <Button
+            variant="inline"
+            aria-expanded={catalogOpen}
+            onClick={() => setCatalogOpen((current) => !current)}
+          >
+            {catalogOpen ? t('ai.catalog.catalog.hide') : t('ai.catalog.catalog.open')}
+          </Button>
+        </div>
+        {catalogOpen ? (
+          <ModelCatalogPicker
+            onApply={(candidate) => {
+              onChange(applyCatalogCandidate(draft, candidate))
+              setCatalogOpen(false)
+            }}
           />
         ) : null}
-        {fieldErrors.modelId ? <span className="field-error">{fieldErrors.modelId}</span> : null}
-      </label>
+      </CatalogEditorSection>
 
-      <label className="form-group">
-        <FieldLabel>{t('ai.catalog.form.description')}</FieldLabel>
-        <TextInput
-          value={draft.description}
-          onChange={(event) => onChange({ ...draft, description: event.target.value })}
-          placeholder={t('ai.catalog.form.modelDescriptionPlaceholder')}
+      <CatalogEditorSection name="limits">
+        <ModelLimitFields draft={draft} fieldErrors={fieldErrors} onChange={onChange} />
+        <ModelAbilityToggles draft={draft} onChange={onChange} />
+        <ModelInputModalityField
+          draft={draft}
+          error={fieldErrors.inputModalities}
+          onChange={onChange}
         />
-      </label>
+      </CatalogEditorSection>
 
-      <div className="catalog-picker-launcher">
-        <Button
-          variant="inline"
-          aria-expanded={catalogOpen}
-          onClick={() => setCatalogOpen((current) => !current)}
-        >
-          {catalogOpen ? t('ai.catalog.catalog.hide') : t('ai.catalog.catalog.open')}
-        </Button>
-      </div>
-      {catalogOpen ? (
-        <ModelCatalogPicker
-          onApply={(candidate) => {
-            onChange(applyCatalogCandidate(draft, candidate))
-            setCatalogOpen(false)
-          }}
+      <CatalogEditorSection name="presets">
+        <label className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
+          <FieldLabel required>{t('ai.catalog.form.defaultVariant')}</FieldLabel>
+          <Select
+            aria-label={t('ai.catalog.form.defaultVariant')}
+            value={defaultVariant}
+            options={variantOptions.map((name) => ({ value: name, label: name }))}
+            onChange={(variant) => onChange({ ...draft, defaultVariant: variant })}
+          />
+          {fieldErrors.defaultVariant ? (
+            <span className="field-error">{fieldErrors.defaultVariant}</span>
+          ) : null}
+        </label>
+
+        <div className={fieldErrors.variants ? 'is-error' : undefined}>
+          <VariantListEditor
+            label={t('ai.catalog.form.variants')}
+            variants={draft.variants}
+            defaultVariant={defaultVariant}
+            reasoning={draft.reasoning}
+            capabilities={modelCapabilities}
+            capabilitiesLoading={capabilitiesLoading}
+            capabilitiesError={capabilitiesError}
+            onChange={(nextVariants, preferred) =>
+              onChange({ ...draft, ...variantSelection(draft, nextVariants, preferred) })
+            }
+          />
+          {/* 只保留一条汇总错误，避免顶部 banner + 字段旁重复堆叠 */}
+          {fieldErrors.variants ? <span className="field-error">{fieldErrors.variants}</span> : null}
+        </div>
+      </CatalogEditorSection>
+
+      <CatalogEditorSection name="pricing">
+        {/* 价格错误放在分组顶部，供编辑器外壳导航定位 */}
+        {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
+        <ModelPricingPlanEditor
+          value={draft.pricing}
+          pricingImportNotice={draft.pricingImportNotice}
+          onChange={(pricing) => onChange({ ...draft, pricing })}
         />
-      ) : null}
-
-      <ModelLimitFields draft={draft} fieldErrors={fieldErrors} onChange={onChange} />
-      <ModelAbilityToggles draft={draft} onChange={onChange} />
-      <ModelInputModalityField
-        draft={draft}
-        error={fieldErrors.inputModalities}
-        onChange={onChange}
-      />
-
-      <ModelPricingPlanEditor
-        value={draft.pricing}
-        pricingImportNotice={draft.pricingImportNotice}
-        onChange={(pricing) => onChange({ ...draft, pricing })}
-      />
-      {fieldErrors.pricing ? <span className="field-error">{fieldErrors.pricing}</span> : null}
-
-      <label className={`form-group${fieldErrors.defaultVariant ? ' is-error' : ''}`}>
-        <FieldLabel required>{t('ai.catalog.form.defaultVariant')}</FieldLabel>
-        <Select
-          aria-label={t('ai.catalog.form.defaultVariant')}
-          value={defaultVariant}
-          options={variantOptions.map((name) => ({ value: name, label: name }))}
-          onChange={(variant) => onChange({ ...draft, defaultVariant: variant })}
-        />
-        {fieldErrors.defaultVariant ? (
-          <span className="field-error">{fieldErrors.defaultVariant}</span>
-        ) : null}
-      </label>
-
-      <div className={fieldErrors.variants ? 'is-error' : undefined}>
-        <VariantListEditor
-          label={t('ai.catalog.form.variants')}
-          variants={draft.variants}
-          defaultVariant={defaultVariant}
-          reasoning={draft.reasoning}
-          capabilities={modelCapabilities}
-          capabilitiesLoading={capabilitiesLoading}
-          capabilitiesError={capabilitiesError}
-          onChange={(nextVariants, preferred) =>
-            onChange({ ...draft, ...variantSelection(draft, nextVariants, preferred) })
-          }
-        />
-        {/* 只保留一条汇总错误，避免顶部 banner + 字段旁重复堆叠 */}
-        {fieldErrors.variants ? <span className="field-error">{fieldErrors.variants}</span> : null}
-      </div>
+      </CatalogEditorSection>
     </>
   )
 }
