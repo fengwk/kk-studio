@@ -70,7 +70,7 @@ test('keeps 44px touch targets, safe-area padding and a scrollable body on narro
   await page.route('**/api/platform/models/capabilities?**', (route) => route.fulfill({ json: {
     promptCacheOptions: [{ retention: 'NONE' }, { retention: 'SHORT' }],
     defaultPromptCacheRetention: 'SHORT',
-    automaticCache: false,
+    promptCacheState: 'CONFIGURABLE',
   } }))
   await page.goto('/browser-tests/catalog-editor-harness.html')
 

@@ -4,6 +4,7 @@ import lombok.Data;
 import org.jspecify.annotations.Nullable;
 
 import fun.fengwk.kkstudio.harness.model.cache.PromptCacheRetention;
+import fun.fengwk.kkstudio.harness.model.cache.PromptCacheState;
 
 import java.util.List;
 
@@ -15,5 +16,5 @@ public class ModelCapabilitiesDTO {
 
   private @Nullable PromptCacheRetention defaultPromptCacheRetention;
 
-  private boolean automaticCache;
+  private PromptCacheState promptCacheState;
 }

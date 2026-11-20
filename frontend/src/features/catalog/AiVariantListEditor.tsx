@@ -12,6 +12,12 @@ import type { ModelCapabilitiesDTO } from '@/shared/api/generated/contracts'
 import { useI18n } from '@/shared/i18n'
 import './catalog-form-layout.css'
 
+const cacheStateMessage = {
+  PROVIDER_MANAGED: 'ai.catalog.form.promptCacheProviderManaged',
+  UNMANAGED: 'ai.catalog.form.promptCacheUnmanaged',
+  UNSUPPORTED: 'ai.catalog.form.promptCacheUnsupported',
+} as const
+
 export function VariantListEditor({
   label,
   variants,
@@ -34,7 +40,16 @@ export function VariantListEditor({
   const { t } = useI18n()
   const reasoningHintId = useId()
 
-  const capabilityOptions = capabilities?.promptCacheOptions ?? []
+  const resolvedCapabilities = capabilitiesLoading || capabilitiesError ? null : capabilities
+  const cacheState = resolvedCapabilities?.promptCacheState
+  const cacheStatus = capabilitiesLoading
+    ? t('ai.catalog.form.modelCapabilitiesLoading')
+    : capabilitiesError
+      ? t('ai.catalog.form.modelCapabilitiesUnavailable')
+      : !cacheState
+        ? t('ai.catalog.form.promptCachePending')
+        : cacheState === 'CONFIGURABLE' ? null : t(cacheStateMessage[cacheState])
+  const capabilityOptions = resolvedCapabilities?.promptCacheOptions ?? []
   const retentionOptions: SelectOption[] = capabilityOptions.map((option) => ({
     value: option.retention,
     label: [
@@ -73,7 +88,7 @@ export function VariantListEditor({
     }
     onChange([...variants, newVariantDraft({
       id,
-      promptCacheRetention: capabilities?.defaultPromptCacheRetention ?? '',
+      promptCacheRetention: resolvedCapabilities?.defaultPromptCacheRetention ?? '',
     })])
   }
 
@@ -92,18 +107,7 @@ export function VariantListEditor({
           </Button>
         </div>
       </div>
-      {capabilitiesLoading ? <p className="inline-hint" role="status">{t('ai.catalog.form.modelCapabilitiesLoading')}</p> : null}
       {capabilitiesError ? <p className="field-error" role="alert">{capabilitiesError}</p> : null}
-      {capabilities ? (
-        <p className="inline-hint" role="status">
-          {t('ai.catalog.form.automaticCache')}: {capabilities.automaticCache
-            ? t('ai.catalog.form.automaticCacheEnabled')
-            : t('ai.catalog.form.automaticCacheDisabled')}
-          {capabilities.defaultPromptCacheRetention
-            ? ` · ${t('ai.catalog.form.defaultPromptCacheRetention')}: ${retentionLabel(capabilities.defaultPromptCacheRetention)}`
-            : ''}
-        </p>
-      ) : null}
       <p className="inline-hint" id={reasoningHintId}>
         {t('ai.catalog.form.variantHint')}
         {reasoning
@@ -134,24 +138,27 @@ export function VariantListEditor({
                     required
                   />
                 </label>
-                {!capabilities?.automaticCache ? (
+                {cacheState === 'CONFIGURABLE' ? (
                   <label className="form-group">
                     <FieldLabel required>{t('ai.catalog.form.promptCacheRetention')}</FieldLabel>
                     <Select
                       aria-label={`${t('ai.catalog.form.promptCacheRetentionAria')} ${index + 1}`}
                       value={currentRetention}
                       options={options}
-                      placeholder={capabilitiesLoading
-                        ? t('ai.catalog.form.modelCapabilitiesLoading')
-                        : t('ai.catalog.form.promptCacheRetentionSelect')}
-                      disabled={capabilitiesLoading || !capabilities || options.length === 0}
+                      placeholder={t('ai.catalog.form.promptCacheRetentionSelect')}
+                      disabled={capabilityOptions.length === 0}
                       onChange={(value) => {
                         const selected = capabilityOptions.find((option) => option.retention === value)
                         if (selected) updateVariant(index, { promptCacheRetention: selected.retention })
                       }}
                     />
                   </label>
-                ) : null}
+                ) : (
+                  <div className="form-group">
+                    <FieldLabel>{t('ai.catalog.form.promptCacheRetention')}</FieldLabel>
+                    <span className="inline-hint">{cacheStatus}</span>
+                  </div>
+                )}
                 <label className="form-group">
                   <FieldLabel>{t('ai.catalog.form.reasoningEffort')}</FieldLabel>
                   <TextInput

@@ -65,7 +65,7 @@ describe('AiResourceForms', () => {
         { retention: 'SHORT', ttlSeconds: '3600', writeMultiplier: 2 },
       ],
       defaultPromptCacheRetention: 'SHORT',
-      automaticCache: false,
+      promptCacheState: 'CONFIGURABLE',
     }), { headers: { 'content-type': 'application/json' } })))
 
     let currentDraft: ModelDraft = {
@@ -108,8 +108,9 @@ describe('AiResourceForms', () => {
     }
 
     render(<RetentionHarness />)
-    const retention = screen.getByLabelText('Prompt Cache Retention 1')
-    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Automatic caching: Not automatic'))
+    // 能力未知时没有下拉；加载完成后控件出现并可用，已保存档位直接反映在控件上（无摘要行）。
+    const retention = await screen.findByLabelText('Prompt Cache Retention 1')
+    await waitFor(() => expect(retention).toBeEnabled())
     expect(retention).toHaveAttribute('data-value', 'LONG')
 
     await user.click(retention)
@@ -118,6 +119,60 @@ describe('AiResourceForms', () => {
       'SHORT',
       'NONE',
     ])
+  })
+
+  it('explains provider-managed caching and applies the canonical backend default to the draft', async () => {
+    setLocale('en-US')
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({
+      promptCacheOptions: [],
+      defaultPromptCacheRetention: 'NONE',
+      promptCacheState: 'PROVIDER_MANAGED',
+    }), { headers: { 'content-type': 'application/json' } })))
+
+    let currentDraft: ModelDraft = {
+      ...emptyModelDraft({ name: 'auto-cache' }),
+      modelId: 'auto-model',
+      variants: [
+        { draftId: 'v1', id: 'default', reasoningEffort: '', protocolOptionsJson: '', promptCacheRetention: 'SHORT' },
+      ],
+    }
+    const providers: ProviderDTO[] = [{
+      name: 'auto-cache',
+      description: null,
+      providerType: 'openai',
+      promptCacheRetentions: ['NONE'],
+      baseUrl: null,
+      credential: { configured: true },
+      modelCallTimeoutMillis: '1800000',
+      modelCallIdleTimeoutMillis: '120000',
+      version: '1',
+      createdAt: 1781920800,
+      updatedAt: 1781920800,
+      modelHttpRetryStatusCodes: null,
+    }]
+
+    function ProviderManagedHarness() {
+      const [draft, setDraft] = useState<ModelDraft>(currentDraft)
+      return (
+        <ModelForm
+          draft={draft}
+          mode="create"
+          providers={providers}
+          onChange={(next) => {
+            currentDraft = next
+            setDraft(next)
+          }}
+        />
+      )
+    }
+
+    render(<ProviderManagedHarness />)
+
+    // 服务商托管自动缓存只给出说明，不再提供档位下拉。
+    expect(await screen.findByText('Automatic (managed by provider)')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Prompt Cache Retention 1' })).not.toBeInTheDocument()
+    // 新建表单写入后端 canonical 默认档位，避免把旧档位当作端点能力。
+    await waitFor(() => expect(currentDraft.variants[0]?.promptCacheRetention).toBe('NONE'))
   })
 
   it('manages HTTP retry policy: inherit, custom, empty list, staged invalid withoutEnter, correct, duplicate, submit payload', async () => {

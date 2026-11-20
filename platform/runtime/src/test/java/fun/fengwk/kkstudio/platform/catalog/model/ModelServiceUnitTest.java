@@ -99,9 +99,9 @@ class ModelServiceUnitTest {
     assertNull(created.groupConfigJson());
   }
 
-  /** 自动缓存只读能力以 canonical NONE 写入变体，而不是空档位。 */
+  /** 上游托管缓存时变体仍以 canonical NONE 持久化，而不是空档位。 */
   @Test
-  void createsAutomaticCacheModelWithNoneRetention() {
+  void createsProviderManagedModelWithNoneRetention() {
     when(providerRepository.getByNameForUpdate("provider"))
         .thenReturn(
             Provider.builder()

@@ -56,11 +56,11 @@ async function installFakeCatalogServer(page: Page): Promise<{
       if (request.method() === 'GET' && path === '/api/platform/models/capabilities') {
         const modelId = new URL(request.url()).searchParams.get('modelId')
         if (modelId === 'auto-model') {
-          await json({ promptCacheOptions: [], defaultPromptCacheRetention: 'NONE', automaticCache: true })
+          await json({ promptCacheOptions: [], defaultPromptCacheRetention: 'NONE', promptCacheState: 'PROVIDER_MANAGED' })
           return
         }
         if (modelId === 'long-model') {
-          await json({ promptCacheOptions: [{ retention: 'LONG' }], defaultPromptCacheRetention: 'LONG', automaticCache: false })
+          await json({ promptCacheOptions: [{ retention: 'LONG' }], defaultPromptCacheRetention: 'LONG', promptCacheState: 'CONFIGURABLE' })
           return
         }
         await json({
@@ -70,7 +70,7 @@ async function installFakeCatalogServer(page: Page): Promise<{
             { retention: 'LONG' },
           ],
           defaultPromptCacheRetention: 'SHORT',
-          automaticCache: false,
+          promptCacheState: 'CONFIGURABLE',
         })
         return
       }
@@ -300,7 +300,7 @@ test.describe('Model, Model Group and catalog real browser acceptance', () => {
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveAttribute('data-value', 'LONG')
 
     await modelId.fill('auto-model')
-    await expect(dialog.getByText('自动缓存: 由服务商自动处理')).toBeVisible()
+    await expect(dialog.getByText('自动（由服务商管理）')).toBeVisible()
     await expect(dialog.getByLabel('提示缓存留存 1')).toHaveCount(0)
     await expect(dialog.getByRole('button', { name: '确认创建', exact: true })).toBeEnabled()
     await dialog.getByRole('button', { name: '确认创建', exact: true }).click()
