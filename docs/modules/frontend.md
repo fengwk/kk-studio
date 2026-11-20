@@ -448,7 +448,9 @@ Environment 管理面把**连接状态**与**配置状态**分开呈现，并提
 应用失败时附稳定的 `error.code` 与可空 `field`；配置状态与连接 READY 无关，READY 不代表最新配置已应用。
 管理面按 Environment 读取当前运行快照 `{daemonVersion, update, configuration}`：没有本代 owner 快照时服务端返回
 `unavailable` / `ENVIRONMENT_UNAVAILABLE`，前端展示“运行状态不可用”，不伪造空快照，也不据此判定已更新或未更新；
-更新进度只在快照里出现，按已下载字节与可选总量展示，总量未知时只显示字节数。
+更新进度只在快照里出现，按已下载字节与可选总量展示，总量未知时只显示字节数。没有进度时，卡片可显示与当前
+运行修订和 Daemon 版本对应的命令回执：“Daemon 已是最新版本”或“更新请求已发送，待确认”。已发送不代表
+Daemon 已接受或更新已开始，后续进度与版本仍以运行快照为准。
 
 ### 技能包页面
 
@@ -487,6 +489,8 @@ ChatIdeWorkspace：切换 Chat 时卸载当前页面内容，但 IDE view/iframe
 每个浏览器 tab 一个 Chat IDE 会话；同一 Environment 的 view 可在 Chat 间复用。切换到另一个 Chat 时按该 Chat
 的 Environment 匹配：已有打开 view 就聚焦，没有则不自动创建；无 Environment 的 Chat 不展示无关环境面板；
 后台 view 不因切换关闭。返回 Chat 恢复同一 iframe，内部导航不重新 bootstrap，usage 可以继续维持已有编辑会话。
+关闭结果未知或控制通道不可用时，提示保留在发起关闭的原绑定上；离开该视图后不会弹出强制关闭确认，返回仍可查看
+原因并显式重试。强制关闭必须由用户针对仍选中的原绑定确认。
 
 sessionStorage 保存 `browserSessionId`、`viewId`、`daemonInstanceId`、最后确认的 `bindingEpoch`、目录与尚未完成
 操作的冻结描述；claim 发出前先写恢复描述，存储失败显式报错，不承诺可跨刷新恢复。localStorage 只保存非运行态

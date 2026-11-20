@@ -508,6 +508,48 @@ describe('EnvironmentsPage', () => {
     expect(queryClient.getQueryData(queryKeys.environments.runtime('env-1'))).toEqual(started)
   })
 
+  it.each([
+    ['SENT_UNCONFIRMED', '更新请求已发送，待确认'],
+    ['CURRENT', 'Daemon 已是最新版本'],
+  ] as const)('shows a %s receipt on only the commanded card until runtime changes', async (commandStatus, message) => {
+    // 无进度的 HTTP 回执与后续权威快照是两条独立事实。
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironments).mockResolvedValue([
+      environment({ id: 'env-1', name: 'my-box' }),
+      environment({ id: 'env-2', name: 'other-box' }),
+    ])
+    const beforeProgress = runtimeStatus('1.2.0')
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(beforeProgress)
+    vi.mocked(environmentService.startEnvironmentUpdate).mockResolvedValue({ commandStatus, runtimeStatus: beforeProgress })
+    const { queryClient } = renderPage()
+
+    const update = await screen.findByRole('button', { name: '更新 Daemon my-box' })
+    const card = within(update.closest('article')!)
+    expect(await card.findByText('无进行中的更新')).toBeVisible()
+    await user.click(update)
+    const modal = await screen.findByRole('alertdialog', { name: '更新 Daemon' })
+    await user.click(within(modal).getByRole('button', { name: '更新 Daemon' }))
+
+    expect(environmentService.startEnvironmentUpdate).toHaveBeenCalledWith('env-1')
+    expect(await card.findByText(message)).toBeVisible()
+    expect(card.queryByText('无进行中的更新')).not.toBeInTheDocument()
+    expect(screen.getByText('无进行中的更新')).toBeVisible()
+    expect(update).not.toBeDisabled()
+
+    const key = queryKeys.environments.runtime('env-1')
+    const progress = runtimeStatus('1.2.0', { targetVersion: '1.3.0', downloadedBytes: '0', totalBytes: null }, '2')
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(progress)
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: key }) })
+    expect(await card.findByText('正在更新至 1.3.0 · 已下载 0 B · 总大小未知')).toBeVisible()
+    expect(card.queryByText(message)).not.toBeInTheDocument()
+
+    vi.mocked(environmentService.getEnvironmentRuntime).mockResolvedValue(runtimeStatus('1.3.0'))
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: key }) })
+    expect(await card.findByText('1.3.0')).toBeVisible()
+    expect(card.getByText('无进行中的更新')).toBeVisible()
+    expect(card.queryByText(message)).not.toBeInTheDocument()
+  })
+
   it('closes the update confirmation without starting a command when canceled', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironments).mockResolvedValue([

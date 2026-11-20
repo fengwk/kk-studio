@@ -87,8 +87,8 @@ export function useIdeCloseCommands({
       const outcomeUnknown = isUnknownIdeFailure(error) || reason === 'IDE_OUTCOME_UNKNOWN'
       const controlUnavailable = reason === 'IDE_CONTROL_UNAVAILABLE'
       const requiresForceConfirmation = !discard && (outcomeUnknown || controlUnavailable)
-      const closeError = requiresForceConfirmation
-        ? undefined
+      const closeError = controlUnavailable
+        ? 'close-control-unavailable'
         : outcomeUnknown
           ? 'close-result-unknown'
           : safeIdeError(error) || 'close-failed'
@@ -96,9 +96,7 @@ export function useIdeCloseCommands({
       return {
         ok: false,
         requiresForceConfirmation,
-        message: requiresForceConfirmation
-          ? (controlUnavailable ? 'close-control-unavailable' : 'close-result-unknown')
-          : safeIdeError(error),
+        message: closeError,
       }
     }
   }

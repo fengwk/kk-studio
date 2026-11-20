@@ -3,12 +3,18 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { isConflictError } from '@/shared/api/client'
 import { presentConflict, type ConflictPresentation } from '@/shared/conflict/conflict-presenter'
 import { queryKeys } from '@/shared/lib/query-keys'
-import type { EnvironmentDTO } from '@/shared/api/generated/contracts'
+import type { EnvironmentDTO, EnvironmentUpdateCommandStatus } from '@/shared/api/generated/contracts'
 import { environmentService } from '@/features/environment/environment-service'
 import { isEnvironmentRuntimeUnavailableError } from '@/features/environment/environment-utils'
 import type { InterpolationValues, TranslationKey } from '@/shared/i18n'
 
 type Translate = (key: TranslationKey, values?: InterpolationValues) => string
+
+interface UpdateReceipt {
+  commandStatus: Exclude<EnvironmentUpdateCommandStatus, 'IN_PROGRESS'>
+  revision: string
+  daemonVersion: string
+}
 
 interface EnvironmentCardActionsOptions {
   t: Translate
@@ -27,6 +33,7 @@ export function useEnvironmentCardActions({ t }: EnvironmentCardActionsOptions) 
   const [deleteError, setDeleteError] = useState<string | null>(null)
   const [updateTarget, setUpdateTarget] = useState<EnvironmentDTO | null>(null)
   const [updateError, setUpdateError] = useState<string | null>(null)
+  const [updateReceipts, setUpdateReceipts] = useState<Record<string, UpdateReceipt | undefined>>({})
   const [rotateTarget, setRotateTarget] = useState<EnvironmentDTO | null>(null)
   const [rotateError, setRotateError] = useState<string | null>(null)
   const [conflict, setConflict] = useState<ConflictPresentation | null>(null)
@@ -39,7 +46,16 @@ export function useEnvironmentCardActions({ t }: EnvironmentCardActionsOptions) 
     mutationFn: (id: string) => environmentService.startEnvironmentUpdate(id),
     onSuccess: (result, id) => {
       // 命令回执携带当前快照；先写入缓存再回读列表，界面不会把发送前状态误标成已启动。
-      queryClient.setQueryData(queryKeys.environments.runtime(id), result.runtimeStatus)
+      const { commandStatus, runtimeStatus } = result
+      queryClient.setQueryData(queryKeys.environments.runtime(id), runtimeStatus)
+      setUpdateReceipts((receipts) => ({
+        ...receipts,
+        [id]: commandStatus === 'IN_PROGRESS' || runtimeStatus.status.update != null ? undefined : {
+          commandStatus,
+          revision: runtimeStatus.revision,
+          daemonVersion: runtimeStatus.status.daemonVersion,
+        },
+      }))
       setUpdateTarget(null)
       setUpdateError(null)
       invalidateEnvironments()
@@ -128,6 +144,7 @@ export function useEnvironmentCardActions({ t }: EnvironmentCardActionsOptions) 
     dismissConflict: () => setConflict(null),
     clearAllTargets,
     updateMutation,
+    updateReceipts,
     rotateMutation,
     deleteMutation,
   }

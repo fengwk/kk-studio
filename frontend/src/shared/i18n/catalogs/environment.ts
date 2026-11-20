@@ -562,6 +562,14 @@ export const environmentCatalog = {
     'en-US': 'No update in progress',
     'zh-CN': '无进行中的更新',
   },
+  'ai.environment.update.current': {
+    'en-US': 'Daemon is already up to date',
+    'zh-CN': 'Daemon 已是最新版本',
+  },
+  'ai.environment.update.sentUnconfirmed': {
+    'en-US': 'Update request sent; awaiting confirmation',
+    'zh-CN': '更新请求已发送，待确认',
+  },
   'ai.environment.update.progressKnownTotal': {
     'en-US': 'Updating to {{targetVersion}} · {{downloaded}} / {{total}} ({{percent}}%)',
     'zh-CN': '正在更新至 {{targetVersion}} · {{downloaded}} / {{total}}（{{percent}}%）',
