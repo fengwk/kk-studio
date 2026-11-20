@@ -348,11 +348,13 @@ export function isTerminalAssistantOutputStatus(status: string): boolean {
  *
  * <p>contents 只承载已完成的 text/thinking 片段，按服务端顺序拼接；sequence 是
  * canonical 非负十进制字符串，只有可安全表示的整数才接受。resultEntryId 到达后由
- * durable Entry 接管，投影立即消失。前端不解析任何 Provider 原始 JSON。
+ * durable Entry 接管，投影立即消失。成功但尚未物化时，快照没有 tool calls，
+ * 只沿用同一 attempt 已显示的工具草稿；正文和思考始终以快照为准。
  */
 export function snapshotModelStream(
   threadId: string,
   activeOutput: HarnessActiveAssistantOutputDTO | null,
+  current: RealtimeModelStream | null = null,
 ): RealtimeModelStream | null {
   if (
     activeOutput == null
@@ -382,7 +384,7 @@ export function snapshotModelStream(
   const failed = activeOutput.status === 'FAILED'
     || activeOutput.status === 'CANCELLED'
     || activeOutput.status === 'BLOCKED'
-  return {
+  const snapshot: RealtimeModelStream = {
     threadId,
     invocationId: activeOutput.generationId,
     attempt: activeOutput.attempt,
@@ -404,6 +406,9 @@ export function snapshotModelStream(
         }
       : {}),
   }
+  return snapshot.status === 'done' && snapshot.attempt > 0
+    ? mergeSnapshotToolCalls(snapshot, current)
+    : snapshot
 }
 
 /** canonical 非负十进制字符串 -> 安全整数；非规范或溢出值一律拒绝。 */

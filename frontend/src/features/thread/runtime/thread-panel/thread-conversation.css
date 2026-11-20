@@ -11,18 +11,17 @@
   flex-direction: column;
 }
 
-/*
- * Transcript 是自动贴底与阅读锚点的唯一 owner：滚动位置只由 useChatTranscriptAutoScroll
- * 与用户手势决定。浏览器原生滚动锚定会为「保持某个节点不动」而自行改写 scrollTop
- * （懒渲染落地、媒体长高时都会发生），这类改写既不是用户手势也无法被可靠识别，
- * 会与贴底/回看状态机相互拉扯，因此在此关闭。
- */
 .thread-dialogue {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overflow-anchor: none;
   padding: 16px 16px 8px;
+}
+
+/* 回看时让浏览器在上方补入历史后保留视口内的消息；跟随时由 hook 贴底。 */
+.thread-dialogue[data-following='false'] {
+  overflow-anchor: auto;
 }
 
 .thread-blocks {

@@ -16,7 +16,6 @@ import type { ReactNode } from 'react'
 /** 将每条对话消息分派给对应的块组件。 */
 export function MessageList({ messages }: { messages: DialogueMessage[] }) {
   const contributions = useOptionalApplicationContributions()
-  const usedKeys = new Set<string>()
   const rendered: ReactNode[] = []
   for (const item of groupDialogueMessages(messages)) {
     if (item.kind === 'single') {
@@ -26,7 +25,7 @@ export function MessageList({ messages }: { messages: DialogueMessage[] }) {
     const renderer = contributions?.toolRenderers.get(item.call.rendererKey)
     rendered.push(
       <ToolMessageBlock
-        key={toolCardKey(item.call, usedKeys)}
+        key={item.call.cardKey ?? item.call.id}
         message={item.call}
         result={item.result}
         renderer={renderer?.component}
@@ -51,7 +50,7 @@ function renderSingleMessage(
       const renderer = contributions?.toolRenderers.get(message.rendererKey)
       return (
         <ToolMessageBlock
-          key={message.toolCallId || message.id}
+          key={message.id}
           message={message}
           renderer={renderer?.component}
         />
@@ -64,20 +63,6 @@ function renderSingleMessage(
     default:
       return null
   }
-}
-
-/**
- * 工具卡片 key：优先使用 toolCallId，使实时草稿与持久 call 在流式转终态时保持同一
- * React 身份（展开、滚动与选择不重置）。真正复用同一 toolCallId 的调用才追加
- * callIdentity 区分，避免 key 冲突。
- */
-function toolCardKey(call: ToolDialogueMessage, usedKeys: Set<string>): string {
-  const base = call.toolCallId || call.id
-  const key = usedKeys.has(base)
-    ? `${base}:${call.callIdentity ?? usedKeys.size}`
-    : base
-  usedKeys.add(key)
-  return key
 }
 
 function groupDialogueMessages(messages: DialogueMessage[]): Array<

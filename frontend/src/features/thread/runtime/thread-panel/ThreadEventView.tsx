@@ -95,7 +95,7 @@ export function ThreadEventView({
     hasHistoricalPreview: historicalPreview != null,
   })
 
-  useChatTranscriptAutoScroll(bodyRef, events.length, events.length, initialScrollTop)
+  useChatTranscriptAutoScroll(bodyRef, initialScrollTop)
 
   // 仅在初始挂载时赋予事件列表初始焦点（避免在 wide 模式下抢走 Inspector 或 Tab 的焦点）
   useEffect(() => {

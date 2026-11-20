@@ -6,10 +6,11 @@ import type {
 import type {
   RealtimeToolStream,
 } from '@/features/thread/runtime/thread-realtime/tool-stream'
-import type {
-  DialogueMessage,
-  QueuedThreadMessage,
-  ThreadTimeline,
+import {
+  modelToolCardKey,
+  type DialogueMessage,
+  type QueuedThreadMessage,
+  type ThreadTimeline,
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import {
   projectDurableEntry,
@@ -60,6 +61,7 @@ export function buildThreadTimeline(
   const projectionContext: EntryProjectionContext = { pendingTurnSummary: null, lastSettings: null }
   const durableToolArguments = new Map<string, string[]>()
   const summary = projectDurableEntries(entries, messages, durableToolArguments, projectionContext)
+  assignDurableToolCardKeys(entries, messages)
   const queuedMessages = projectQueuedMessages(queuedCommands)
 
   projectInvocationOverlays(
@@ -81,6 +83,29 @@ export function buildThreadTimeline(
     messages,
     queuedMessages,
     hasPendingInputs: queuedMessages.length > 0,
+  }
+}
+
+/** A model result is appended to the request head through its materialized failed attempts. */
+function assignDurableToolCardKeys(entries: HarnessSessionEntryDTO[], messages: DialogueMessage[]) {
+  const entriesById = new Map(entries.map((entry) => [entry.entryId, entry]))
+  const nextIndex = new Map<string, number>()
+  for (const message of messages) {
+    if (message.role !== 'tool' || message.phase !== 'call' || !message.subjectEntryId) {
+      continue
+    }
+    const entryId = message.subjectEntryId
+    const index = nextIndex.get(entryId) ?? 0
+    nextIndex.set(entryId, index + 1)
+    let head = entriesById.get(entryId)?.parentEntryId
+    let attempt = 1
+    while (head && entriesById.get(head)?.entryType === 'MODEL_ATTEMPT_FAILURE') {
+      head = entriesById.get(head)?.parentEntryId
+      attempt += 1
+    }
+    if (head) {
+      message.cardKey = modelToolCardKey(head, attempt, index)
+    }
   }
 }
 

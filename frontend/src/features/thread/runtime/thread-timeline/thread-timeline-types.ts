@@ -184,6 +184,8 @@ export interface ToolDialogueMessage extends BaseDialogueMessage {
    * 相同 toolCallId 可以出现在不同 assistant Entry 上，配对和去重必须使用该身份。
    */
   callIdentity?: string
+  /** React identity shared by a model draft and its materialized call; not used to pair results. */
+  cardKey?: string
 }
 
 export interface MetaDialogueMessage extends BaseDialogueMessage {
@@ -286,6 +288,10 @@ export type DialogueMessage =
 /** 一次工具调用的严格身份。相同 toolCallId 跨 assistant Entry 时不能共用。 */
 export function toolCallIdentity(assistantEntryId: string, callIndex: number): string {
   return `${assistantEntryId}:${callIndex}`
+}
+
+export function modelToolCardKey(requestHeadEntryId: string, attempt: number, index: number): string {
+  return `model-tool:${requestHeadEntryId}:${attempt}:${index}`
 }
 
 /**

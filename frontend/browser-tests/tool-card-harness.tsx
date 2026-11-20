@@ -15,6 +15,8 @@ import type {
   ToolDialogueMessage,
 } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 import { setLocale } from '@/shared/i18n'
+import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline-builder'
+import type { HarnessSessionEntryDTO, ToolInvocationDTO } from '@/shared/api/generated/contracts'
 
 /**
  * Slice C 的真实浏览器 harness：挂载真实 ThreadConversationView + 工具卡片，
@@ -480,11 +482,55 @@ const toolCardHarness = {
       streaming: true,
     })
   },
-  /** 流式转终态：同一 toolCallId，身份不变。 */
-  settle(lines = 40) {
+  handoff(stage = 0) {
+    const createdAt = 1791453600000
+    const call = { toolCallId: 'call-bash', toolName: 'bash', rendererKey: 'bash' }
+    const argumentsJson = '{"command":"example"}'
+    const entry = (entryId: string, parentEntryId: string, role: string, contents: unknown[],
+      metadata: Record<string, unknown> = {}): HarnessSessionEntryDTO => ({
+      entryId, parentEntryId, sessionId: 'session', entryType: 'MESSAGE', createdAt,
+      usageCost: null, payload: { message: { role, contents }, ...metadata },
+    })
+    const assistant = entry('assistant', 'head', 'ASSISTANT', [{ type: 'tool_call', ...call, argumentsJson }])
+    const durable = entry('result', 'assistant', 'TOOL', [{
+      type: 'tool_result', ...call, contents: [], error: false,
+    }], { toolResultMetadata: { assistantEntryId: 'assistant', callIndex: 0, status: 'SUCCEEDED' } })
+    const invocation: ToolInvocationDTO = {
+      ...call, argumentsJson, id: 'invocation', threadId: 'thread', turnStartEntryId: 'turn',
+      assistantEntryId: 'assistant', callIndex: 0, attempt: 1, status: stage >= 4 ? 'SUCCEEDED' : 'RUNNING',
+      result: stage >= 4 ? { contents: [{ type: 'text', text: bashOutput(20).replaceAll('build step', 'transient final') }], error: false } : null,
+      error: null, approval: null, childThreadId: null, queuedBehindToolCallId: null,
+      environmentId: null, requiredEnvironmentId: null, waitingForEnvironment: false,
+      requiredEnvironmentName: null, environmentWaitFreshnessAt: null, createdAt, updatedAt: createdAt,
+    }
+    const timeline = buildThreadTimeline(
+      stage < 2 ? [] : stage < 5 ? [assistant] : [assistant, durable], [],
+      stage >= 2 && stage < 6 ? [invocation] : [],
+      stage < 3 ? {
+        threadId: 'thread', invocationId: 'model', attempt: 1, sequence: stage + 1,
+        text: '', thinking: '', status: 'streaming', createdAt,
+        toolCalls: [{ index: 0, id: stage === 1 ? call.toolCallId : '', name: 'bash', argumentsJson }],
+      } : null,
+      stage >= 3 ? new Map([[invocation.id, {
+        threadId: 'thread', invocationId: invocation.id, toolCallId: call.toolCallId,
+        attempt: 1, text: bashOutput(40), error: false, createdAt,
+      }]]) : null,
+      [],
+      stage >= 6 ? null : {
+        generationId: 'model', turnStartEntryId: 'turn', requestHeadEntryId: 'head',
+        status: stage < 2 ? 'RUNNING' : 'SUCCEEDED', attempt: 1, sequence: '3', contents: [],
+        error: null, resultEntryId: stage >= 2 ? 'assistant' : null, createdAt, updatedAt: createdAt,
+      },
+    )
+    publish({ messages: [...filler(6), ...timeline.messages], streaming: stage < 4 })
+  },
+  prependHistory() {
     publish({
-      messages: [...filler(6), bashTool('call-bash', lines, false), bashResult('call-bash', lines)],
-      streaming: false,
+      ...currentState,
+      messages: [
+        ...filler(3).map((message) => ({ ...message, id: `older-${message.id}` })),
+        ...currentState.messages,
+      ],
     })
   },
   /** 长卡片：展开后必须高于 transcript 可视区，底部收起才有意义。 */

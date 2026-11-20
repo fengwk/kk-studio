@@ -7,7 +7,6 @@ import '@/styles.css'
 import '@/features/thread/runtime/thread-panel/thread-conversation.css'
 import { MessageList } from '@/features/thread/runtime/thread-panel/messages/MessageList'
 import { buildThreadTimeline } from '@/features/thread/runtime/thread-timeline/thread-timeline'
-import { transcriptStreamRevision } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import { useChatTranscriptAutoScroll } from '@/features/thread/runtime/panes/useChatTranscriptAutoScroll'
 import { setLocale } from '@/shared/i18n'
 import type { EntryType } from '@/shared/api/contracts/ai-runtime'
@@ -97,14 +96,7 @@ export function CompactionCardHarnessApp() {
       status: 'streaming',
     })
   }
-  useChatTranscriptAutoScroll(
-    bodyRef,
-    messages.length,
-    HARNESS_ENTRIES.length,
-    undefined,
-    'compaction-harness',
-    transcriptStreamRevision(messages),
-  )
+  useChatTranscriptAutoScroll(bodyRef, undefined, 'compaction-harness')
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>

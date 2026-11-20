@@ -368,14 +368,14 @@ describe('MessageList tool renderer dispatch', () => {
   })
 
   it('keeps the same DOM node identity when a streaming call becomes durable', () => {
-    // 实时草稿与持久 call 使用同一个 toolCallId 作为 key：流式转终态不重挂载，
-    // 展开、内部滚动和选择因此不会被重置。
+    // Provider id may arrive late; the projected slot identity must not change.
     const streaming: ToolDialogueMessage = {
       ...message,
       id: 'transient:tool-call:x:0',
       phase: 'call',
       status: 'streaming',
-      toolCallId: 'x',
+      cardKey: 'model-tool:head:1:0',
+      toolCallId: '',
       toolName: 'bash',
       rendererKey: 'bash',
       arguments: '{"command":"ls"}',
@@ -386,8 +386,12 @@ describe('MessageList tool renderer dispatch', () => {
     const streamingNode = container.querySelector('.thread-turn-tool')
     expect(streamingNode).not.toBeNull()
 
+    rerender(<MessageList messages={[{ ...streaming, toolCallId: 'x' }]} />)
+    expect(container.querySelector('.thread-turn-tool')).toBe(streamingNode)
+
     const durable: ToolDialogueMessage = {
       ...streaming,
+      toolCallId: 'x',
       id: '40:tool-call:x:0',
       subjectEntryId: 'entry-40',
       status: 'done',
