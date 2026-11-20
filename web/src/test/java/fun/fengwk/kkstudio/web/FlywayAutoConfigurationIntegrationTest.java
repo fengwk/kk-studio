@@ -64,21 +64,19 @@ class FlywayAutoConfigurationIntegrationTest {
       try (ResultSet history =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
-                  + " where success = true and ((version in ('1', '2', '3'))"
+                  + " where success = true and ((version in ('1', '2', '3', '4'))"
                   + " or (version is null and description = 'fixture seed'))")) {
         assertTrue(history.next());
-        assertEquals(4L, history.getLong(1), "V1, V2, V3 and fixture seed must be recorded");
+        assertEquals(5L, history.getLong(1), "V1–V4 and fixture seed must be recorded");
       }
       try (ResultSet unexpectedMigration =
           st.executeQuery(
               "select count(*) from flyway_schema_history"
                   + " where version is not null"
-                  + " and version not in ('1', '2', '3')")) {
+                  + " and version not in ('1', '2', '3', '4')")) {
         assertTrue(unexpectedMigration.next());
         assertEquals(
-            0L,
-            unexpectedMigration.getLong(1),
-            "only the canonical V1, V2 and V3 migrations are known");
+            0L, unexpectedMigration.getLong(1), "only the canonical V1–V4 migrations are known");
       }
       // model_id 只对 MODEL 行必填（GROUP 行为 null），由 kind 形状约束而不是列级 NOT NULL 保证。
       try (ResultSet modelIdColumn =

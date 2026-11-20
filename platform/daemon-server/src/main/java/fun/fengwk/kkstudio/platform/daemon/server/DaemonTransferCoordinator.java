@@ -68,7 +68,7 @@ final class DaemonTransferCoordinator {
         new DaemonResourceTicketService.TransferRequest(
             transferId,
             request.getMediaType(),
-            request.getName(),
+            request.hasName() ? request.getName() : null,
             request.getSize(),
             request.getSha256());
     synchronized (active) {

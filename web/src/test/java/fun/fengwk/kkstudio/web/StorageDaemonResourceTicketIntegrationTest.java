@@ -8,7 +8,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -21,14 +23,24 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.S3Configuration;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import tools.jackson.databind.json.JsonMapper;
 
+import fun.fengwk.kkstudio.common.result.ResourceResultContent;
 import fun.fengwk.kkstudio.harness.environment.EnvironmentId;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCall;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityCatalog;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionListener;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityExecutionRequest;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityIds;
+import fun.fengwk.kkstudio.harness.environment.capability.EnvironmentCapabilityResult;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService.Ticket;
 import fun.fengwk.kkstudio.platform.daemon.server.DaemonResourceTicketService.TransferRequest;
+import fun.fengwk.kkstudio.platform.daemon.server.EnvironmentDaemonServer;
 import fun.fengwk.kkstudio.platform.environment.server.StorageDaemonResourceTicketService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 import fun.fengwk.kkstudio.platform.storage.StorageMaintenance;
 import fun.fengwk.kkstudio.platform.storage.StorageObjectKeys;
+import fun.fengwk.kkstudio.web.environment.DaemonBinary;
 
 import javax.imageio.ImageIO;
 
@@ -39,6 +51,9 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -48,6 +63,8 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 /** Exercises the daemon resource ticket adapter against PostgreSQL and an isolated real MinIO. */
 class StorageDaemonResourceTicketIntegrationTest extends WebPostgresTestSupport {
@@ -58,6 +75,8 @@ class StorageDaemonResourceTicketIntegrationTest extends WebPostgresTestSupport 
   private static final String INVOCATION_ID = UUID.randomUUID().toString();
   private static final EnvironmentId ENVIRONMENT_ID = EnvironmentId.of(UUID.randomUUID());
 
+  @LocalServerPort private int studioPort;
+  @Autowired private EnvironmentDaemonServer daemonServer;
   @Autowired private StorageDaemonResourceTicketService tickets;
   @Autowired private JdbcTemplate jdbc;
   @Autowired private SystemSettingsSnapshot settings;
@@ -80,6 +99,114 @@ class StorageDaemonResourceTicketIntegrationTest extends WebPostgresTestSupport 
   @AfterAll
   static void stopIsolatedMinio() {
     MINIO.close();
+  }
+
+  /** A real daemon read uses the negotiated upload protocol and commits the actual image bytes. */
+  @Test
+  void readsPngAndJpegFromRealDaemonThroughStudioAndMinio(@TempDir Path temp) throws Exception {
+    var mapper = JsonMapper.builder().build();
+    String studio = "http://127.0.0.1:" + studioPort;
+    String registration =
+        mapper.writeValueAsString(
+            Map.of("name", "read-image-daemon", "daemonConfig", Map.of("studioUrl", studio)));
+    var create =
+        HttpRequest.newBuilder(URI.create(studio + "/api/platform/environments"))
+            .timeout(Duration.ofSeconds(15))
+            .header("Content-Type", "application/json")
+            .POST(HttpRequest.BodyPublishers.ofString(registration))
+            .build();
+    try (HttpClient http = HttpClient.newHttpClient()) {
+      var response = http.send(create, HttpResponse.BodyHandlers.ofString());
+      assertEquals(201, response.statusCode());
+      var card = mapper.readTree(response.body());
+      var id = EnvironmentId.parse(card.path("id").asText());
+      var config = mapper.createObjectNode();
+      config.put("environmentId", id.value().toString());
+      config.put("version", card.path("version").asText());
+      config.set("daemonConfig", card.path("daemonConfig"));
+      Path daemonConfig =
+          Files.writeString(temp.resolve("daemon.json"), mapper.writeValueAsString(config));
+      Path daemonToken =
+          Files.writeString(temp.resolve("daemon.token"), card.path("registrationToken").asText());
+      if (Files.getFileStore(temp).supportsFileAttributeView("posix")) {
+        Files.setPosixFilePermissions(temp, PosixFilePermissions.fromString("rwx------"));
+        Files.setPosixFilePermissions(daemonConfig, PosixFilePermissions.fromString("rw-------"));
+        Files.setPosixFilePermissions(daemonToken, PosixFilePermissions.fromString("rw-------"));
+      }
+      String suffix = System.getProperty("os.name").startsWith("Windows") ? ".exe" : "";
+      Path binary =
+          DaemonBinary.build(
+              Path.of("..").toAbsolutePath().normalize(),
+              temp.resolve("kk-studio-daemon" + suffix));
+      var builder = new ProcessBuilder(binary.toString(), "--config", daemonConfig.toString());
+      builder.directory(temp.toFile());
+      builder.environment().put("HOME", temp.toString());
+      builder.environment().put("USERPROFILE", temp.toString());
+      builder.environment().remove("GODEBUG");
+      var process =
+          builder
+              .redirectErrorStream(true)
+              .redirectOutput(temp.resolve("daemon.log").toFile())
+              .start();
+      try {
+        long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+        while (process.isAlive()
+            && daemonServer.connectionIdentity(id).isEmpty()
+            && System.nanoTime() < deadline) {
+          Thread.sleep(50);
+        }
+        assertTrue(
+            daemonServer.connectionIdentity(id).isPresent(), "isolated Daemon must become READY");
+        for (ImageFixture fixture :
+            List.of(image("png", "image/png"), image("jpeg", "image/jpeg"))) {
+          Path file =
+              Files.write(temp.resolve("input." + extension(fixture.mediaType())), fixture.bytes());
+          var request =
+              new EnvironmentCapabilityExecutionRequest(
+                  EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_READ),
+                  new EnvironmentCapabilityCall(
+                      UUID.randomUUID().toString(),
+                      mapper.writeValueAsString(Map.of("path", file.toString()))),
+                  Duration.ofSeconds(20));
+          var done = new CompletableFuture<EnvironmentCapabilityResult>();
+          daemonServer.invoke(
+              id,
+              request,
+              new EnvironmentCapabilityExecutionListener() {
+                @Override
+                public void onComplete(EnvironmentCapabilityResult result) {
+                  done.complete(result);
+                }
+
+                @Override
+                public void onError(Throwable error) {
+                  done.completeExceptionally(error);
+                }
+
+                @Override
+                public void onExitConfirmed() {}
+              });
+          var result = done.get(25, TimeUnit.SECONDS);
+          assertFalse(result.error());
+          assertEquals(1, result.contents().size());
+          var resource =
+              assertInstanceOf(ResourceResultContent.class, result.contents().getFirst())
+                  .resource();
+          assertEquals(fixture.mediaType(), resource.mediaType());
+          var facts = blobFacts(resource.blobUploadId());
+          assertEquals(
+              new BlobFacts(
+                  resource.mediaType(), resource.size(), resource.sha256(), WIDTH, HEIGHT),
+              facts);
+        }
+      } finally {
+        process.destroy();
+        if (!process.waitFor(10, TimeUnit.SECONDS)) {
+          process.destroyForcibly();
+          assertTrue(process.waitFor(10, TimeUnit.SECONDS), "isolated Daemon must exit");
+        }
+      }
+    }
   }
 
   /** Real image bytes must be probed at commit rather than trusting Daemon-supplied dimensions. */

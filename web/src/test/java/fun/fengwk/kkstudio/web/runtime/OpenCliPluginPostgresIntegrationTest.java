@@ -278,7 +278,7 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
               configuration.configure(
-                  PLUGIN_ID, 1L, before, Map.of("apiKey", SecretUpdate.set("key-1")));
+                  PLUGIN_ID, 1L, before, Map.of("apiKey", SecretUpdate.set("key-1")), false);
               try (var oldLease = runtime.acquire()) {
                 var oldAdapter = adapter(oldLease);
                 var initial = createTestRun(oldAdapter.functions().getFirst(), "original job");
@@ -308,7 +308,7 @@ class OpenCliPluginPostgresIntegrationTest {
                         .connectionCheck()
                         .orElseThrow();
                 configuration.configure(
-                    PLUGIN_ID, 2L, after, Map.of("apiKey", SecretUpdate.set("key-2")));
+                    PLUGIN_ID, 2L, after, Map.of("apiKey", SecretUpdate.set("key-2")), true);
 
                 var stale = oldCheck.check();
                 assertEquals(Reachability.NOT_CHECKED, stale.reachability());

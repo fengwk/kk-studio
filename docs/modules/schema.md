@@ -1,13 +1,13 @@
 # Schema 模块
 
 [`V1__schema.sql`](../../schema/src/main/resources/db/migration/V1__schema.sql)
-是当前 PostgreSQL 表、列、外键、索引与 CHECK 的权威声明，不定义通知触发器。
+是 PostgreSQL 的初始基线。最终表、列、外键、索引与 CHECK 由基线和后续 Flyway migration 共同确定，不使用通知触发器。
 Web 和集成测试使用同一份 Flyway 资源。模块提供 SQL 与契约测试，
 依赖 scope 见 [`schema/pom.xml`](../../schema/pom.xml)。
 
 ## 加载 baseline 与 seed
 
-versioned migration 为 V1，repeatable seed 按 profile 加载：
+各 profile 按顺序执行全部 versioned migration，repeatable seed 按 profile 加载：
 
 | profile | Flyway 资源 |
 | --- | --- |
@@ -99,7 +99,8 @@ Agent、Environment 等目录名称的 canonical 化只在应用写入路径完�
 Plugin 配置每个 pluginId 一行，`version` 为正并以 CAS 推进。`values_json` 是 text：
 数据库要求严格 JSON object、对象键唯一及最多 65,536 UTF-8 字节。应用按 Schema 校验并补默认值，
 存储规范化的紧凑文本，同时逐值保留大整数、精确小数与超范围指数。秘密只在 `plugin_credential.payload_json` 中，
-其每次写入推进 `version`。`plugin_auth_attempt` 只保存 nonce 摘要与 prepare 时的 `config_version`。
+替换已存在的凭据时推进 `version`。V4 为每次新建凭据行分配独立的 `generation`，防止旧请求的拒绝回执命中删除后重建的凭据。
+`plugin_auth_attempt` 只保存 nonce 摘要与 prepare 时的 `config_version`。
 
 Canvas Resource 的 blob/text 恰好一个非空，owner/index 成对且槽位唯一。
 Run 以 node_id 保存当前/最后执行，数据库约束状态枚举；状态与错误字段的组合由应用校验，
@@ -142,8 +143,8 @@ Plugin 配置与凭据写入也在同一事务发出 `plugin_changed`。
 
 ## 修改结构
 
-修改 V1 后同步领域校验、mapper、结构测试与新库安装测试。
-新环境部署由当前 Schema 初始化空库。
+新增 versioned migration，并同步领域校验、mapper、结构测试与新库安装测试。已发布的 migration 保持不变。
+新环境从空库执行全部 migration；已有环境按历史顺序执行尚未应用的 migration。
 共享环境的 Review、维护窗口、备份保密与恢复步骤以
 [共享数据库重建](../operations/development-and-testing.md#共享数据库重建) 为准。
 本模块文档描述最终结构，操作指南负责数据库变更流程。
