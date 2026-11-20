@@ -12,7 +12,7 @@ import java.time.OffsetDateTime;
 import java.util.Objects;
 import java.util.Optional;
 
-/** {@code plugin_auth_attempt} 存取：每个 Plugin 至多一个待完成 attempt，complete 以单条条件删除原子消费。 */
+/** 每个 Plugin 至多一个 attempt；写入均由调用方先在同一事务锁定配置行。 */
 @Repository
 public class PluginAuthAttemptRepository {
 
@@ -51,26 +51,44 @@ public class PluginAuthAttemptRepository {
         .update();
   }
 
-  /**
-   * 原子消费：摘要命中、未过期且 prepare 时的配置修订仍是当前修订才删除并返回；否则返回空。
-   *
-   * <p>修订条件让配置在 prepare 之后发生的任何变化都使迟到回调失效。
-   */
-  public Optional<PluginAuthAttemptRow> consume(String pluginId, String nonceHash, Instant now) {
+  /** 将命中的公开 nonce 摘要替换为只在服务内使用的认领摘要。 */
+  public Optional<PluginAuthAttemptRow> claim(
+      String pluginId, String nonceHash, String claimHash, long currentVersion, Instant now) {
     return jdbc.sql(
             """
-            delete from plugin_auth_attempt attempt
-            using plugin_configuration configuration
-            where attempt.plugin_id = :pluginId and attempt.nonce_hash = :nonceHash
-              and attempt.expires_at > :now
-              and configuration.plugin_id = attempt.plugin_id
-              and configuration.version = attempt.config_version
-            returning attempt.*
+            update plugin_auth_attempt set nonce_hash = :claimHash
+            where plugin_id = :pluginId and nonce_hash = :nonceHash
+              and config_version = :configVersion and expires_at > :now
+            returning *
             """)
         .param("pluginId", pluginId)
         .param("nonceHash", nonceHash)
+        .param("claimHash", claimHash)
+        .param("configVersion", currentVersion)
         .param("now", toOffsetDateTime(now))
         .query(ROW_MAPPER)
         .optional();
+  }
+
+  /** 仅消费本次认领且仍未过期的行。 */
+  public boolean consumeClaim(PluginAuthAttemptRow claim, Instant now) {
+    return jdbc.sql(
+                """
+                delete from plugin_auth_attempt
+                where plugin_id = :pluginId and nonce_hash = :claimHash
+                  and config_version = :configVersion and expires_at > :now
+                """)
+            .param("pluginId", claim.pluginId())
+            .param("claimHash", claim.nonceHash())
+            .param("configVersion", claim.configVersion())
+            .param("now", toOffsetDateTime(now))
+            .update()
+        == 1;
+  }
+
+  public void delete(String pluginId) {
+    jdbc.sql("delete from plugin_auth_attempt where plugin_id = :pluginId")
+        .param("pluginId", pluginId)
+        .update();
   }
 }

@@ -650,9 +650,13 @@ HTTP 请求与响应以 `valuesJson` 字符串承载普通值。提交时以精�
 配置 Schema 与安全秘密投影由插件声明派生；每个秘密字段只投影 `{description, configured}`，绝不回读明文。
 秘密更新仅支持 KEEP、SET、CLEAR。
 无认证插件不提供登录操作；STATIC_KEY 通过配置接口更新密钥。
-DEEP_LINK 的 prepare 请求为 `{region}`，返回 loginUrl 与单次 authAttemptId；
-complete 请求为 `{authAttemptId, callbackUrl}`，仅消费 prepare 之后配置版本未变、region 一致的未过期尝试。
-认证响应 no-store。新增交互需同步平台 DTO、前端和测试；管理 UI 见
+DEEP_LINK 的 prepare 请求为 `{region}`，返回 loginUrl 与单次 authAttemptId。prepare 在锁定配置行后
+读取当前最新版本，持久化该版本、region、过期时刻及 authAttemptId 的摘要；同一插件的新 prepare 会替换旧尝试。
+complete 请求为 `{authAttemptId, callbackUrl}`：服务先在短事务中锁定配置行、核对版本与过期时间，
+并将公开 handle 摘要原子替换为仅服务端持有的 claim 摘要；随后在事务外调用插件认证 handler。
+handler 返回同 region 的有效凭据后，最终事务重新锁配置行，并要求 claim 摘要精确匹配、配置版本未变且尝试仍未过期，
+才消费尝试并写入凭据。disconnect 同样先锁配置行，再删除认证尝试和凭据；未认领和已认领的尝试都失效，
+但普通配置版本不变。认证响应 no-store。新增交互需同步平台 DTO、前端和测试；管理 UI 见
 [Plugin 设置](frontend.md#plugin-设置)。
 
 ### Plugin credential

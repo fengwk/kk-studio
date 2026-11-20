@@ -20,12 +20,16 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.FixedPluginCredentialAccess;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -33,7 +37,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Plugin 普通配置与凭据的唯一写入口：保存配置、登录完成与断连。
+ * Plugin 管理面写入口：保存配置、管理认证尝试与写入或断开凭据。
  *
  * <p>保存配置在同一事务内以 version CAS 写普通值，并按秘密补丁（KEEP / SET / CLEAR）写入或删除凭据行。静态密钥的 {@code
  * contextFields}（例如目标地址）变化时，须经确认才丢弃旧凭据，避免把密钥发往新的目标。提交前用候选配置与候选凭据 configure
@@ -43,11 +47,14 @@ import java.util.UUID;
 public final class PluginConfigurationService {
 
   private static final String RESOURCE = "plugin";
+  private static final Duration AUTH_ATTEMPT_TTL = Duration.ofMinutes(10);
   private static final JsonNodeFactory NODES = JsonNodeFactory.instance;
 
   private final PluginRegistry registry;
   private final PluginConfigurationRepository configurations;
   private final PluginCredentialRepository credentials;
+  private final PluginAuthAttemptRepository authAttempts;
+  private final Clock clock;
   private final PluginContextFactory contextFactory;
   private final PluginAgentDependencies agentDependencies;
   private final TransactionTemplate transactions;
@@ -58,6 +65,8 @@ public final class PluginConfigurationService {
       PluginRegistry registry,
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
+      PluginAuthAttemptRepository authAttempts,
+      Clock clock,
       PluginContextFactory contextFactory,
       PluginAgentDependencies agentDependencies,
       PlatformTransactionManager transactionManager,
@@ -66,6 +75,8 @@ public final class PluginConfigurationService {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.configurations = Objects.requireNonNull(configurations, "configurations");
     this.credentials = Objects.requireNonNull(credentials, "credentials");
+    this.authAttempts = Objects.requireNonNull(authAttempts, "authAttempts");
+    this.clock = Objects.requireNonNull(clock, "clock");
     this.contextFactory = Objects.requireNonNull(contextFactory, "contextFactory");
     this.agentDependencies = Objects.requireNonNull(agentDependencies, "agentDependencies");
     this.transactions = new TransactionTemplate(transactionManager);
@@ -138,11 +149,37 @@ public final class PluginConfigurationService {
         && credentials.find(current.pluginId()).isPresent();
   }
 
-  /** 登录完成：用交互材料替换凭据行。材料的 region 与时限由调用方校验。 */
-  public void completeAuth(String pluginId, PluginCredentialMaterial material) {
-    requirePlugin(pluginId);
+  void prepareAuth(String pluginId, String nonceHash, String region) {
     transactions.executeWithoutResult(
         status -> {
+          long version = lockConfiguration(pluginId).version();
+          authAttempts.replace(
+              new PluginAuthAttemptRow(
+                  pluginId, nonceHash, version, region, clock.instant().plus(AUTH_ATTEMPT_TTL)));
+        });
+  }
+
+  PluginAuthAttemptRow claimAuth(String pluginId, String nonceHash) {
+    String claimHash = PluginAuthNonce.hash(PluginAuthNonce.issue());
+    return transactions.execute(
+        status -> {
+          long version = lockConfiguration(pluginId).version();
+          return authAttempts
+              .claim(pluginId, nonceHash, claimHash, version, clock.instant())
+              .orElseThrow(PluginConfigurationService::invalidAttempt);
+        });
+  }
+
+  /** 消费有效认领并替换凭据行；消费与写入同成同败。 */
+  void completeAuth(PluginAuthAttemptRow claim, PluginCredentialMaterial material) {
+    String pluginId = claim.pluginId();
+    transactions.executeWithoutResult(
+        status -> {
+          long version = lockConfiguration(pluginId).version();
+          if (version != claim.configVersion()
+              || !authAttempts.consumeClaim(claim, clock.instant())) {
+            throw invalidAttempt();
+          }
           credentials.upsertConnected(
               pluginId,
               material.payloadJson(),
@@ -154,15 +191,26 @@ public final class PluginConfigurationService {
         });
   }
 
-  /** 断连：删除凭据行；未连接时同样成功。 */
+  /** 断连：同时作废认证尝试与现有凭据，不推进普通配置版本。 */
   public void disconnect(String pluginId) {
     requirePlugin(pluginId);
     transactions.executeWithoutResult(
         status -> {
+          lockConfiguration(pluginId);
+          authAttempts.delete(pluginId);
           credentials.delete(pluginId);
           configurations.notifyChanged(pluginId);
           afterCommit(true);
         });
+  }
+
+  private PluginConfigurationRow lockConfiguration(String pluginId) {
+    return configurations.lock(pluginId).orElseThrow(() -> DomainException.notFound(RESOURCE));
+  }
+
+  private static DomainException invalidAttempt() {
+    return DomainException.validation(
+        RESOURCE, "auth attempt is unknown, expired, superseded or stale");
   }
 
   /** 由补丁与 context 字段变化决定本次对凭据行的动作。 */

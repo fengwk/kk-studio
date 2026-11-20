@@ -129,14 +129,18 @@ class ComfyuiPluginPostgresIntegrationTest {
           + "\"]}";
 
   private DataSource dataSource;
+  private JdbcClient jdbcClient;
   private PluginConfigurationRepository repository;
+  private PluginAuthAttemptRepository authAttemptRepository;
   private HttpServer server;
   private final Map<String, String> saveNodeByPrompt = new LinkedHashMap<>();
 
   @BeforeEach
   void createIsolatedDatabaseAndStub() throws IOException {
     dataSource = WebPostgresTestSupport.createIsolatedDatabase();
-    repository = new PluginConfigurationRepository(JdbcClient.create(dataSource));
+    jdbcClient = JdbcClient.create(dataSource);
+    repository = new PluginConfigurationRepository(jdbcClient);
+    authAttemptRepository = new PluginAuthAttemptRepository(jdbcClient);
     server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
     server.createContext("/prompt", this::handlePrompt);
     server.createContext("/history/", this::handleHistory);
@@ -270,10 +274,9 @@ class ComfyuiPluginPostgresIntegrationTest {
                       registry,
                       () -> runtime,
                       repository,
-                      new PluginCredentialRepository(JdbcClient.create(dataSource)),
+                      new PluginCredentialRepository(jdbcClient),
                       configurationService(context, runtime),
                       PluginCanvasFunctionCatalog::functionNames,
-                      mock(PluginAuthAttemptRepository.class),
                       Clock.systemUTC());
 
               assertSame(HTTP_MAPPER, HTTP_CONVERTER.getMapper());
@@ -334,7 +337,9 @@ class ComfyuiPluginPostgresIntegrationTest {
     return new PluginConfigurationService(
         registry,
         repository,
-        new PluginCredentialRepository(JdbcClient.create(dataSource)),
+        new PluginCredentialRepository(jdbcClient),
+        authAttemptRepository,
+        Clock.systemUTC(),
         context.getBean(PluginContextFactory.class),
         new PluginAgentDependencies(registry, repository, mock(AgentRepository.class)),
         new DataSourceTransactionManager(dataSource),

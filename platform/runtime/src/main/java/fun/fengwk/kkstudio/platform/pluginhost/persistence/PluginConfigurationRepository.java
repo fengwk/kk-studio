@@ -42,6 +42,17 @@ public class PluginConfigurationRepository {
         .optional();
   }
 
+  /** 在当前事务内锁定配置行，串行化该插件的配置与认证写入。 */
+  public Optional<PluginConfigurationRow> lock(String pluginId) {
+    return jdbc.sql(
+            "select "
+                + COLUMNS
+                + " from plugin_configuration where plugin_id = :pluginId for update")
+        .param("pluginId", pluginId)
+        .query(ROW_MAPPER)
+        .optional();
+  }
+
   /** 首次启动时为新安装的 Plugin 写入默认值；已有行保持不变。 */
   public void insertIfMissing(String pluginId, String valuesJson) {
     jdbc.sql(

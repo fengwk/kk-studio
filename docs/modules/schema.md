@@ -100,7 +100,10 @@ Plugin 配置每个 pluginId 一行，`version` 为正并以 CAS 推进。`value
 数据库要求严格 JSON object、对象键唯一及最多 65,536 UTF-8 字节。应用按 Schema 校验并补默认值，
 存储规范化的紧凑文本，同时逐值保留大整数、精确小数与超范围指数。秘密只在 `plugin_credential.payload_json` 中，
 替换已存在的凭据时推进 `version`。V4 为每次新建凭据行分配独立的 `generation`，防止旧请求的拒绝回执命中删除后重建的凭据。
-`plugin_auth_attempt` 只保存 nonce 摘要与 prepare 时的 `config_version`。
+`plugin_auth_attempt` 每个插件至多一行：prepare 在锁定当前 `plugin_configuration` 行后记录该最新
+`config_version`、region 与过期时刻，并只保存公开 authAttemptId 的摘要。认领时在配置行锁保护下核验版本与有效期，
+将摘要替换为仅服务端持有的 claim 摘要；插件认证 handler 在事务外执行。最终事务再次核验 claim 摘要精确匹配、
+配置版本未变且尝试未过期，再消费尝试并保存凭据。disconnect 同事务删除尝试与凭据，不推进配置版本。
 
 Canvas Resource 的 blob/text 恰好一个非空，owner/index 成对且槽位唯一。
 Run 以 node_id 保存当前/最后执行，数据库约束状态枚举；状态与错误字段的组合由应用校验，

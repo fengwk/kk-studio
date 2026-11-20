@@ -7,7 +7,6 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -16,7 +15,6 @@ import static org.mockito.Mockito.when;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 
 import fun.fengwk.kkstudio.common.error.DomainErrorCode;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -41,7 +39,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthKindDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginAuthPrepareDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginDTO;
-import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
@@ -51,7 +48,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.HashMap;
@@ -74,7 +70,6 @@ class PluginManagementServiceTest {
   private final PluginCredentialRepository credentials = mock(PluginCredentialRepository.class);
   private final PluginConfigurationService configurationService =
       mock(PluginConfigurationService.class);
-  private final PluginAuthAttemptRepository authAttempts = mock(PluginAuthAttemptRepository.class);
   private final PluginAuthHandler authHandler = mock(PluginAuthHandler.class);
   private final PluginConnectionCheck connectionCheck = mock(PluginConnectionCheck.class);
 
@@ -119,7 +114,6 @@ class PluginManagementServiceTest {
             credentials,
             configurationService,
             FUNCTION_NAMES,
-            authAttempts,
             Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
@@ -248,20 +242,16 @@ class PluginManagementServiceTest {
     }
   }
 
-  /** prepare 只保存 attempt 摘要与当时的配置修订，返回一次性句柄与登录地址。 */
+  /** prepare 校验插件登录信息，并将公开句柄摘要交给配置写入口持久化。 */
   @Test
-  void prepareAuthStoresAHashedAttempt() {
+  void prepareAuthDelegatesHashedAttempt() {
     when(authHandler.loginUrl("CN")).thenReturn("https://login.example/cn");
 
     PluginAuthPrepareDTO prepared = service.prepareAuth(DEEPLINK_ID, "CN");
 
     assertEquals("https://login.example/cn", prepared.getLoginUrl());
-    ArgumentCaptor<PluginAuthAttemptRow> attempt =
-        ArgumentCaptor.forClass(PluginAuthAttemptRow.class);
-    verify(authAttempts).replace(attempt.capture());
-    assertEquals(PluginAuthNonce.hash(prepared.getAuthAttemptId()), attempt.getValue().nonceHash());
-    assertEquals(1L, attempt.getValue().configVersion());
-    assertEquals(NOW.plus(Duration.ofMinutes(10)), attempt.getValue().expiresAt());
+    verify(configurationService)
+        .prepareAuth(DEEPLINK_ID, PluginAuthNonce.hash(prepared.getAuthAttemptId()), "CN");
   }
 
   /** 非交互 Plugin、未声明 region、插件拒绝 region 或不给登录地址都拒绝 prepare。 */
@@ -273,20 +263,22 @@ class PluginManagementServiceTest {
     assertThrows(DomainException.class, () -> service.prepareAuth(DEEPLINK_ID, "CN"));
     when(authHandler.loginUrl("US")).thenReturn(" ");
     assertThrows(DomainException.class, () -> service.prepareAuth(DEEPLINK_ID, "US"));
-    verify(authAttempts, never()).replace(any());
+    verify(configurationService, never()).prepareAuth(anyString(), anyString(), anyString());
   }
 
-  /** complete 原子消费 attempt，并把同 region、时限可用的材料交给唯一写入口。 */
+  /** complete 认领 attempt，并把同 region、时限可用的材料与认领交给配置写入口。 */
   @Test
   void completeAuthWritesTheMaterial() {
     String handle = PluginAuthNonce.issue();
-    attempt(handle, "CN");
+    PluginAuthAttemptRow claim = claim("CN");
+    when(configurationService.claimAuth(DEEPLINK_ID, PluginAuthNonce.hash(handle)))
+        .thenReturn(claim);
     PluginCredentialMaterial material = material("CN", NOW.plusSeconds(3600));
     when(authHandler.complete("app://callback")).thenReturn(material);
 
     service.completeAuth(DEEPLINK_ID, handle, "app://callback");
 
-    verify(configurationService).completeAuth(DEEPLINK_ID, material);
+    verify(configurationService).completeAuth(claim, material);
   }
 
   /** 非法句柄、空回调、未知 attempt、插件拒绝、region 不符或时限不可用都拒绝且不写凭据。 */
@@ -295,22 +287,25 @@ class PluginManagementServiceTest {
     String handle = PluginAuthNonce.issue();
     assertThrows(DomainException.class, () -> service.completeAuth(DEEPLINK_ID, "bad", "app://cb"));
     assertThrows(DomainException.class, () -> service.completeAuth(DEEPLINK_ID, handle, " "));
-    when(authAttempts.consume(eq(DEEPLINK_ID), anyString(), eq(NOW))).thenReturn(Optional.empty());
+    when(configurationService.claimAuth(DEEPLINK_ID, PluginAuthNonce.hash(handle)))
+        .thenThrow(DomainException.validation("plugin", "invalid attempt"));
     assertThrows(
         DomainException.class, () -> service.completeAuth(DEEPLINK_ID, handle, "app://cb"));
 
-    attempt(handle, "CN");
+    String validHandle = PluginAuthNonce.issue();
+    when(configurationService.claimAuth(DEEPLINK_ID, PluginAuthNonce.hash(validHandle)))
+        .thenReturn(claim("CN"));
     when(authHandler.complete("app://cb")).thenThrow(new IllegalStateException("bad callback"));
     assertThrows(
-        DomainException.class, () -> service.completeAuth(DEEPLINK_ID, handle, "app://cb"));
+        DomainException.class, () -> service.completeAuth(DEEPLINK_ID, validHandle, "app://cb"));
     for (PluginCredentialMaterial material :
         List.of(material("US", NOW.plusSeconds(3600)), material("CN", NOW))) {
-      attempt(handle, "CN");
       when(authHandler.complete("app://other")).thenReturn(material);
       assertThrows(
-          DomainException.class, () -> service.completeAuth(DEEPLINK_ID, handle, "app://other"));
+          DomainException.class,
+          () -> service.completeAuth(DEEPLINK_ID, validHandle, "app://other"));
     }
-    verify(configurationService, never()).completeAuth(anyString(), any());
+    verify(configurationService, never()).completeAuth(any(), any());
   }
 
   @Test
@@ -364,7 +359,6 @@ class PluginManagementServiceTest {
               credentials,
               configurationService,
               FUNCTION_NAMES,
-              authAttempts,
               Clock.fixed(NOW, ZoneOffset.UTC));
 
       DomainException error =
@@ -389,12 +383,8 @@ class PluginManagementServiceTest {
                 new PluginConfigurationRow(NONE_ID, 1L, "{}")));
   }
 
-  private void attempt(String handle, String region) {
-    when(authAttempts.consume(DEEPLINK_ID, PluginAuthNonce.hash(handle), NOW))
-        .thenReturn(
-            Optional.of(
-                new PluginAuthAttemptRow(
-                    DEEPLINK_ID, PluginAuthNonce.hash(handle), 1L, region, NOW.plusSeconds(60))));
+  private PluginAuthAttemptRow claim(String region) {
+    return new PluginAuthAttemptRow(DEEPLINK_ID, "claim-hash", 1L, region, NOW.plusSeconds(60));
   }
 
   private static PluginCredentialMaterial material(String region, Instant expiresAt) {
