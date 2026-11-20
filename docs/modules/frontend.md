@@ -373,6 +373,9 @@ Thread 处于等待审批时活动条显示“等待审批”；实际工具等�
 空回执或 revision 缺口回读 Snapshot；语义 409 结算操作并保留草稿供人工恢复，
 网络未知结果保留原 key/body 阻塞队列。
 重命名的 `expectedName`/`expectedTitle` 基线在打开菜单时冻结，保存时不以最新远端值替换。
+单删与选区删除在触发时冻结资源、函数与分组成员基线。删除节点前先保存待提交的函数草稿；
+由删除触发的保存也使用点击时的函数基线；只有从该基线连续确认的自有保存值可以推进删除的函数基线，远端变更仍由 CAS 裁决。
+保存失败或画布切换时停止后续删除；删除期间不为目标节点接收新的函数草稿。
 
 编辑 scope 按 userId/canvasId/editingSessionId 隔离，当前 userId 为固定 anonymous。
 IndexedDB 草稿 ACK 物理完成后才删除持久 operation，草稿保存与 ACK 共用序列化链；

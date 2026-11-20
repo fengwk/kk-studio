@@ -2,9 +2,11 @@ import { useCallback } from 'react'
 import { currentCanvasSnapshot, type CanvasScope } from '@/features/canvas/canvas-controller-scope'
 import type { CanvasDraftAck } from '@/features/canvas/canvas-operation-storage'
 import { projectCanvasSnapshot, type ResourceNode } from '@/features/canvas/domain'
+import type { FunctionConfigSync } from '@/features/canvas/function-config'
 import { configToFunctionArgs, createDefaultFunctionConfig } from '@/features/canvas/generation'
 import {
-  deleteGroupCommands,
+  deleteGroupCommand,
+  deleteNodeCommand,
   deleteSelectionCommands,
   groupBounds,
   groupMemberTransforms,
@@ -12,6 +14,8 @@ import {
 import type { AddMenuAction, CanvasLocalState } from '@/features/canvas/types'
 import type {
   CanvasCommandDTO,
+  CanvasCommandDeleteGroup,
+  CanvasCommandDeleteNode,
   CanvasFunctionDefinitionDTO,
   CanvasSnapshotDTO,
   CanvasTransformDTO,
@@ -23,7 +27,8 @@ interface NodeActionsInput {
   models: CanvasFunctionDefinitionDTO[] | undefined
   state: Pick<CanvasLocalState, 'selectedIds' | 'positionDrafts' | 'drafts'>
   executeCommands: (commands: CanvasCommandDTO[], ack?: CanvasDraftAck[]) => Promise<CanvasSnapshotDTO>
-  flushFunctionConfig: (nodeId: string) => Promise<unknown>
+  flushFunctionConfig: FunctionConfigSync['flushFunctionConfig']
+  lockFunctionConfigsForDeletion: FunctionConfigSync['lockFunctionConfigsForDeletion']
   setToast: (toast: string) => void
   suggestNodeAlias: (preferred: string) => string
   reserveNodeAlias: (preferred: string) => string
@@ -45,6 +50,7 @@ export function useCanvasNodeActions({
   state,
   executeCommands,
   flushFunctionConfig,
+  lockFunctionConfigsForDeletion,
   setToast,
   suggestNodeAlias,
   reserveNodeAlias,
@@ -147,35 +153,65 @@ export function useCanvasNodeActions({
     void executeCommands([{ type: 'RENAME_GROUP', groupId, expectedTitle, title: normalized }]).catch(() => undefined)
   }, [executeCommands])
 
+  const deleteCommands = useCallback(async (
+    commands: (CanvasCommandDeleteGroup | CanvasCommandDeleteNode)[],
+    onDeleted?: () => void,
+  ) => {
+    const canvasId = snapshot?.document.id
+    const epoch = scope.canvasEpochRef.current
+    const isCurrent = () => scope.isMountedRef.current
+      && scope.canvasEpochRef.current === epoch && scope.activeCanvasIdRef.current === canvasId
+    if (!isCurrent() || commands.length === 0) {
+      return
+    }
+    const nodeIds = commands.filter((command) => command.type === 'DELETE_NODE').map((command) => command.nodeId)
+    const unlock = lockFunctionConfigsForDeletion(nodeIds)
+    if (!unlock) {
+      return
+    }
+    try {
+      const prepared = await Promise.all(commands.map(async (command) => {
+        if (command.type === 'DELETE_NODE') {
+          const savedFunction = await flushFunctionConfig(command.nodeId, command.expectedFunction ?? null)
+          if (savedFunction !== undefined) {
+            // 只接受本次 flush 的 ACK；远端变更仍由点击时冻结的基线裁决。
+            return { ...command, expectedFunction: savedFunction }
+          }
+        }
+        return command
+      }))
+      if (!isCurrent()) {
+        return
+      }
+      await executeCommands(prepared)
+      if (isCurrent()) {
+        onDeleted?.()
+      }
+    } catch {
+      // 保存或删除失败均由命令队列提示，不继续删除或清理选区。
+    } finally {
+      unlock()
+    }
+  }, [executeCommands, flushFunctionConfig, lockFunctionConfigsForDeletion, scope, snapshot?.document.id])
+
   const deleteGroup = useCallback((groupId: string) => {
-    const memberIds = (snapshot?.nodes ?? []).filter((n) => n.groupId === groupId).map((n) => n.id)
-    void executeCommands(deleteGroupCommands(groupId, memberIds)).catch(() => undefined)
-  }, [executeCommands, snapshot?.nodes])
+    if (snapshot?.groups.some((group) => group.id === groupId)) {
+      return deleteCommands([deleteGroupCommand(snapshot, groupId)])
+    }
+  }, [deleteCommands, snapshot])
 
   const deleteSelection = useCallback(() => {
-    if (!snapshot) {
-      return
+    if (snapshot) {
+      return deleteCommands(deleteSelectionCommands(snapshot, selectedIds), () => {
+        setState((current) => ({ ...current, selectedIds: [], selectedLinks: [] }))
+      })
     }
-    const commands = deleteSelectionCommands(snapshot, selectedIds)
-    if (commands.length === 0) {
-      return
-    }
-    void executeCommands(commands).then(() => {
-      setState((current) => ({ ...current, selectedIds: [], selectedLinks: [] }))
-    }).catch(() => undefined)
-  }, [executeCommands, selectedIds, setState, snapshot])
+  }, [deleteCommands, selectedIds, setState, snapshot])
 
   const deleteNode = useCallback((nodeId: string) => {
-    const node = snapshot?.nodes.find((n) => n.id === nodeId)
-    void flushFunctionConfig(nodeId)
-      .catch(() => undefined)
-      .then(() => executeCommands([{
-        type: 'DELETE_NODE',
-        nodeId,
-        expectedResourceIds: node ? node.resources.map((r) => r.id) : [],
-        expectedFunction: node?.function ? { name: node.function.name, args: node.function.args } : null,
-      }]))
-      .then(() => {
+    const node = snapshot?.nodes.find((item) => item.id === nodeId)
+    if (node) {
+      return deleteCommands([deleteNodeCommand(node)], () => {
         setState((current) => ({
           ...current,
           selectedIds: current.selectedIds.filter((id) => id !== nodeId),
@@ -184,8 +220,8 @@ export function useCanvasNodeActions({
           )),
         }))
       })
-      .catch(() => undefined)
-  }, [executeCommands, flushFunctionConfig, setState, snapshot])
+    }
+  }, [deleteCommands, setState, snapshot])
 
   const saveDraftAsNewNode = useCallback(async (nodeId: string) => {
     const draft = drafts[nodeId]

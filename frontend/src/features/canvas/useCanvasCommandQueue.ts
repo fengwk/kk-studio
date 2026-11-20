@@ -127,6 +127,9 @@ export function useCanvasCommandQueue({
     try {
       return await queue.enqueue(commands, ack && ack.length > 0 ? { ack } : undefined)
     } catch (error) {
+      if (queueRef.current !== queue) {
+        throw error
+      }
       if (error instanceof CanvasCommandConflictError) {
         setState((current) => {
           const nextDrafts = markConflicts(current.drafts, error.conflicts)

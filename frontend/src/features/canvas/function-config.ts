@@ -5,6 +5,7 @@ import { configToFunctionArgs } from '@/features/canvas/generation'
 import type {
   CanvasCommandDTO,
   CanvasFunctionDefinitionDTO,
+  CanvasFunctionDTO,
   CanvasSnapshotDTO,
 } from '@/shared/api/generated/contracts'
 
@@ -21,14 +22,30 @@ export interface FunctionConfigSync {
     nodeId: string,
     functionName: string,
     config: CanvasFunctionConfig,
-  ) => void
-  flushFunctionConfig: (nodeId: string) => Promise<void>
-  /** 离开/切换画布时清空未提交草稿与定时器（不中断进行中的 flush 循环）。 */
+  ) => false | void
+  flushFunctionConfig: (nodeId: string, deletionBase?: CanvasFunctionDTO | null) => Promise<CanvasFunctionDTO | undefined>
+  /** 冻结已有待保存项，删除完成前不接收新草稿或重复删除。 */
+  lockFunctionConfigsForDeletion: (nodeIds: string[]) => (() => void) | undefined
+  /** 离开/切换画布时清空草稿与定时器，不再为旧 flush 发送后续命令。 */
   resetPending: () => void
 }
 
 interface PendingItem extends PendingFunctionConfig {
   generation: number
+}
+
+interface FlushCas {
+  deletionBase?: CanvasFunctionDTO | null
+  /** Values connected by this flush's consecutive successful CAS writes. */
+  chain: Set<string>
+}
+
+function functionKey(value: CanvasFunctionDTO | null): string {
+  return JSON.stringify(value, (_, item: unknown) => (
+    item && typeof item === 'object' && !Array.isArray(item)
+      ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0))
+      : item
+  ))
 }
 
 /**
@@ -60,52 +77,90 @@ export function useFunctionConfigSync(
 
   const pendingFunctionConfigsRef = useRef(new Map<string, PendingItem>())
   const functionConfigTimersRef = useRef(new Map<string, number>())
-  const functionConfigFlushesRef = useRef(new Map<string, Promise<void>>())
+  const functionConfigFlushesRef = useRef(new Map<string, {
+    cas: FlushCas
+    promise: Promise<CanvasFunctionDTO | undefined>
+  }>())
+  const deletingNodeIdsRef = useRef(new Set<string>())
 
-  const flushFunctionConfig = useCallback((nodeId: string): Promise<void> => {
+  const lockFunctionConfigsForDeletion = useCallback((nodeIds: string[]) => {
+    const deleting = deletingNodeIdsRef.current
+    if (nodeIds.some((id) => deleting.has(id))) {
+      return undefined
+    }
+    nodeIds.forEach((id) => deleting.add(id))
+    return () => nodeIds.forEach((id) => deleting.delete(id))
+  }, [])
+
+  const flushFunctionConfig = useCallback((
+    nodeId: string,
+    deletionBase?: CanvasFunctionDTO | null,
+  ): Promise<CanvasFunctionDTO | undefined> => {
     const timer = functionConfigTimersRef.current.get(nodeId)
     if (timer !== undefined) {
       window.clearTimeout(timer)
       functionConfigTimersRef.current.delete(nodeId)
     }
-    const existing = functionConfigFlushesRef.current.get(nodeId)
+    const flushes = functionConfigFlushesRef.current
+    const existing = flushes.get(nodeId)
     if (existing) {
-      return existing
+      if (deletionBase === undefined) {
+        return existing.promise
+      }
+      existing.cas.deletionBase = deletionBase
+      return existing.promise.then((saved) => existing.cas.chain.has(functionKey(deletionBase)) ? saved : undefined)
     }
+    const pendingConfigs = pendingFunctionConfigsRef.current
+    if (!pendingConfigs.has(nodeId)) {
+      return Promise.resolve(undefined)
+    }
+    const cas: FlushCas = { deletionBase, chain: new Set() }
     const trackedFlush = (async () => {
+      let committedFunction: CanvasFunctionDTO | undefined
       while (true) {
-        const pending = pendingFunctionConfigsRef.current.get(nodeId)
+        const pending = pendingConfigs.get(nodeId)
         if (!pending) {
-          return
+          return committedFunction
         }
-        const snapshot = getSnapshotRef.current?.()
-        const node = snapshot?.nodes.find((item) => item.id === nodeId)
-        const expectedFunction = node?.function ? { name: node.function.name, args: node.function.args } : null
+        let expectedFunction: CanvasFunctionDTO | null
+        if (cas.deletionBase !== undefined) {
+          // A deletion may only carry the click baseline forward through our own CAS chain.
+          expectedFunction = (cas.chain.has(functionKey(cas.deletionBase)) ? committedFunction : undefined)
+            ?? cas.deletionBase
+        } else {
+          const node = getSnapshotRef.current?.()?.nodes.find((item) => item.id === nodeId)
+          expectedFunction = node?.function ? { name: node.function.name, args: node.function.args } : null
+        }
+        const expectedKey = functionKey(expectedFunction)
+        if (committedFunction === undefined || expectedKey !== functionKey(committedFunction)) {
+          cas.chain.clear()
+        }
+        cas.chain.add(expectedKey)
         const model = getModelRef.current?.(pending.functionName)
-        const args = configToFunctionArgs(pending.config, model)
+        const nextFunction = {
+          name: pending.functionName,
+          args: configToFunctionArgs(pending.config, model),
+        }
         await executeCommandsRef.current([{
           type: 'SET_NODE_FUNCTION',
           nodeId: pending.nodeId,
           expectedFunction,
-          function: {
-            name: pending.functionName,
-            args,
-          },
+          function: nextFunction,
         }], [{
           nodeId: pending.nodeId,
           field: 'function',
           generation: pending.generation,
         }])
-        if (pendingFunctionConfigsRef.current.get(nodeId) === pending) {
-          pendingFunctionConfigsRef.current.delete(nodeId)
+        committedFunction = nextFunction
+        cas.chain.add(functionKey(nextFunction))
+        if (pendingConfigs.get(nodeId) === pending) {
+          pendingConfigs.delete(nodeId)
         }
       }
     })().finally(() => {
-      if (functionConfigFlushesRef.current.get(nodeId) === trackedFlush) {
-        functionConfigFlushesRef.current.delete(nodeId)
-      }
+      flushes.delete(nodeId)
     })
-    functionConfigFlushesRef.current.set(nodeId, trackedFlush)
+    flushes.set(nodeId, { cas, promise: trackedFlush })
     return trackedFlush
   }, [])
 
@@ -114,6 +169,10 @@ export function useFunctionConfigSync(
     functionName: string,
     config: CanvasFunctionConfig,
   ) => {
+    if (deletingNodeIdsRef.current.has(nodeId)
+      || (getSnapshotRef.current && !getSnapshotRef.current()?.nodes.some((node) => node.id === nodeId))) {
+      return false
+    }
     // 每次编辑立即进持久草稿层，获取新递增的世代号
     const generation = onImmediateDraftRef.current?.(nodeId, functionName, config)
       ?? getDraftGenerationRef.current?.(nodeId)
@@ -142,7 +201,10 @@ export function useFunctionConfigSync(
     }
     functionConfigTimersRef.current.clear()
     pendingFunctionConfigsRef.current.clear()
+    pendingFunctionConfigsRef.current = new Map()
+    functionConfigFlushesRef.current = new Map()
+    deletingNodeIdsRef.current = new Set()
   }, [])
 
-  return { scheduleFunctionConfig, flushFunctionConfig, resetPending }
+  return { scheduleFunctionConfig, flushFunctionConfig, lockFunctionConfigsForDeletion, resetPending }
 }

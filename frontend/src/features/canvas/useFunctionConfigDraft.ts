@@ -19,7 +19,7 @@ export interface FunctionConfigDraftOptions {
   snapshot: CanvasSnapshot
   node: ResourceNode
   models: CanvasFunctionDefinitionDTO[]
-  scheduleFunctionConfig: (nodeId: string, functionName: string, config: CanvasFunctionConfig) => void
+  scheduleFunctionConfig: (nodeId: string, functionName: string, config: CanvasFunctionConfig) => false | void
   /** 新增引用超过模型上限时的提示出口。 */
   onReferenceLimit: () => void
 }
@@ -176,6 +176,9 @@ export function useFunctionConfigDraft({
   }, [candidates, model])
 
   function updateConfig(next: CanvasFunctionConfig, nextModelKey = modelKey) {
+    if (scheduleFunctionConfig(node.id, nextModelKey, next) === false) {
+      return false
+    }
     setConfig(next)
     const version = draftVersionRef.current + 1
     draftVersionRef.current = version
@@ -188,7 +191,6 @@ export function useFunctionConfigDraft({
       setJsonArgsText(JSON.stringify(next.rawArgs ?? next.parameters, null, 2))
       setJsonError(null)
     }
-    scheduleFunctionConfig(node.id, nextModelKey, next)
   }
 
   /** 数值参数（整数走共享 NumberInput，小数保留原生 step=any 输入）共用同一校验。 */
@@ -234,8 +236,9 @@ export function useFunctionConfigDraft({
       references: config.references,
       parameters: defaults.parameters,
     }, nextCandidates, nextModel)
-    setModelKey(nextModel.name)
-    updateConfig(nextConfig, nextModel.name)
+    if (updateConfig(nextConfig, nextModel.name) !== false) {
+      setModelKey(nextModel.name)
+    }
   }
 
   function updatePrompt(promptText: string) {
@@ -281,20 +284,26 @@ export function useFunctionConfigDraft({
     editJsonArgs(text, (parsed) => updateConfig({ ...config, parameters: parsed }))
   }
 
-  function editJsonArgs(text: string, applyParsed: (parsed: Record<string, unknown>) => void) {
+  function editJsonArgs(text: string, applyParsed: (parsed: Record<string, unknown>) => false | void) {
+    let parsed: unknown
+    let error: TranslationKey | null = null
+    try {
+      parsed = JSON.parse(text)
+    } catch {
+      error = 'canvas.generation.jsonSyntaxError'
+    }
+    if (!error) {
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        if (applyParsed(parsed as Record<string, unknown>) === false) {
+          return
+        }
+      } else {
+        error = 'canvas.generation.jsonObjectRequired'
+      }
+    }
     setJsonArgsText(text)
     setJsonDirty(true)
-    try {
-      const parsed: unknown = JSON.parse(text)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setJsonError(null)
-        applyParsed(parsed as Record<string, unknown>)
-      } else {
-        setJsonError('canvas.generation.jsonObjectRequired')
-      }
-    } catch {
-      setJsonError('canvas.generation.jsonSyntaxError')
-    }
+    setJsonError(error)
   }
 
   function toggleJsonEditor() {

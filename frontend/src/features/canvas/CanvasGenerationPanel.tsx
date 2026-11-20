@@ -63,7 +63,7 @@ export function CanvasGenerationPanel({
 
   // 离开面板（卸载、切换选中节点）前冲刷尚未发送的函数配置。
   useEffect(() => () => {
-    void flushFunctionConfig(node.id)
+    void flushFunctionConfig(node.id).catch(() => undefined)
   }, [flushFunctionConfig, node.id])
 
   const [expanded, setExpanded] = useState(false)

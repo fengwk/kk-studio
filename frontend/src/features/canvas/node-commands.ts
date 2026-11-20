@@ -1,5 +1,12 @@
 import type { ResourceNode } from '@/features/canvas/domain'
-import type { CanvasSnapshotDTO, CanvasCommandDTO, CanvasTransformDTO } from '@/shared/api/generated/contracts'
+import { groupIdFromFlowId } from '@/features/canvas/projection'
+import type {
+  CanvasCommandDeleteGroup,
+  CanvasCommandDeleteNode,
+  CanvasResourceNodeDTO,
+  CanvasSnapshotDTO,
+  CanvasTransformDTO,
+} from '@/shared/api/generated/contracts'
 
 /** 新分组在成员包围盒外侧留出的边距（与世界坐标同单位）。 */
 const GROUP_PADDING = 32
@@ -26,40 +33,41 @@ export function groupBounds(memberTransforms: CanvasTransformDTO[]): CanvasTrans
   return { x: minX, y: minY, width: maxX - minX, height: maxY - minY }
 }
 
-/** 把节点移出分组并删除分组本身：先逐个解除归属，再按冻结成员集合删除。 */
-export function deleteGroupCommands(groupId: string, memberIds: string[]): CanvasCommandDTO[] {
-  return [
-    ...memberIds.map((nodeId) => ({
-      type: 'SET_NODE_GROUP' as const,
-      nodeId,
-      expectedGroupId: groupId,
-      groupId: null,
-    })),
-    { type: 'DELETE_GROUP', groupId, expectedMemberNodeIds: memberIds },
-  ]
+export function deleteNodeCommand(node: CanvasResourceNodeDTO): CanvasCommandDeleteNode {
+  return {
+    type: 'DELETE_NODE',
+    nodeId: node.id,
+    expectedResourceIds: node.resources.map((resource) => resource.id),
+    expectedFunction: node.function ? { name: node.function.name, args: node.function.args } : null,
+  }
 }
 
-/** 选区删除：节点携带资源与函数基线，分组先解绑成员再删除。 */
+/** 服务端核对冻结的成员集合后，删除分组并解除成员归属。 */
+export function deleteGroupCommand(snapshot: CanvasSnapshotDTO, groupId: string): CanvasCommandDeleteGroup {
+  return {
+    type: 'DELETE_GROUP',
+    groupId,
+    expectedMemberNodeIds: snapshot.nodes.filter((node) => node.groupId === groupId).map((node) => node.id),
+  }
+}
+
+/** 先删除所选分组，再删除所选节点，避免先删成员导致同一批的分组 CAS 失败。 */
 export function deleteSelectionCommands(
   snapshot: CanvasSnapshotDTO,
   selectedIds: string[],
-): CanvasCommandDTO[] {
-  const commands: CanvasCommandDTO[] = []
+): (CanvasCommandDeleteGroup | CanvasCommandDeleteNode)[] {
+  const groups: CanvasCommandDeleteGroup[] = []
+  const nodes: CanvasCommandDeleteNode[] = []
   for (const id of selectedIds) {
-    const node = snapshot.nodes.find((item) => item.id === id)
-    if (node) {
-      commands.push({
-        type: 'DELETE_NODE',
-        nodeId: node.id,
-        expectedResourceIds: node.resources.map((resource) => resource.id),
-        expectedFunction: node.function ? { name: node.function.name, args: node.function.args } : null,
-      })
-    }
-    const group = snapshot.groups.find((item) => item.id === id)
-    if (group) {
-      const members = snapshot.nodes.filter((item) => item.groupId === group.id).map((item) => item.id)
-      commands.push(...deleteGroupCommands(group.id, members))
+    const groupId = groupIdFromFlowId(id)
+    if (groupId && snapshot.groups.some((group) => group.id === groupId)) {
+      groups.push(deleteGroupCommand(snapshot, groupId))
+    } else {
+      const node = snapshot.nodes.find((item) => item.id === id)
+      if (node) {
+        nodes.push(deleteNodeCommand(node))
+      }
     }
   }
-  return commands
+  return [...groups, ...nodes]
 }
