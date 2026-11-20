@@ -63,7 +63,7 @@ describe('thread disclosure style contracts', () => {
   })
 
   it('defines the universal hint, error block and long-card collapse action', () => {
-    expect(rule(/\.thread-disclosure-hint\s*\{[^}]*\}/)).toContain('cursor: pointer')
+    expect(rule(/button\.thread-disclosure-hint\s*\{[^}]*\}/)).toContain('cursor: pointer')
     expect(rule(/\.thread-disclosure-error\s*\{[^}]*\}/)).toContain('var(--danger)')
     const toggle = rule(/\.thread-disclosure-toggle\s*\{[^}]*\}/)
     expect(toggle).toContain('display: grid')

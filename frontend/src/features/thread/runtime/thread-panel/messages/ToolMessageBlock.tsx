@@ -1,4 +1,4 @@
-import { ArrowUpRight, Check, CircleX } from 'lucide-react'
+import { ArrowUpRight, CircleX } from 'lucide-react'
 import type { ComponentType, ReactNode } from 'react'
 import { useState } from 'react'
 import { AskUserRecord } from '@/features/thread/runtime/thread-panel/messages/AskUserRecord'
@@ -11,25 +11,21 @@ import {
   COLLAPSED_MAX_CHARS,
   ERROR_COLLAPSED_LINES,
   isMcpToolName,
-  toolDisclosureQuota,
+  disclosureHint,
+  toolPreviewLines,
 } from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
 import { formatToolCallSummary } from '@/features/thread/runtime/thread-panel/messages/tool-display'
 import { DisclosureHint } from '@/features/thread/runtime/thread-panel/messages/ToolDisclosureHint'
 import {
+  bashOutput,
   joinTextContents,
   splitContents,
   toolBodyContents,
   windowMutationPreview,
   withoutExactError,
 } from '@/features/thread/runtime/thread-panel/messages/tool-message-content'
-import {
-  buildToolMessageView,
-  toolDefaultExpanded,
-  toolDisclosurePhase,
-} from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
-import {
-  parseTaskReceipt,
-} from '@/features/thread/runtime/state/task-tool-parser'
+import { buildToolMessageView } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
+import { parseTaskReceipt } from '@/features/thread/runtime/state/task-tool-parser'
 import { ThreadLink } from '@/features/thread/runtime/panes/ThreadLink'
 import { announceTranscriptReading } from '@/features/thread/runtime/thread-timeline/transcript-reading'
 import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
@@ -41,11 +37,8 @@ import './tool-card.css'
 /**
  * 统一工具卡片适配器：把工具调用的状态、配额和内容投影到 ThreadDisclosure。
  *
- * - bash 收起时保留最后 10 个逻辑行，MCP 前 5 行；write/edit 审查期间全显，
- *   审查完成后前 10 行；其余工具收起为 header；
- * - 收起文本再限制 1500 Unicode code point；展开与审查全显不受限制；
- * - 错误块固定在 preview 顶部，收起最多 3 行；bash 输出已含错误时不重复；
- * - 用户选择优先，流式转终态不重置；未选择时 write/edit 审查期间默认展开。
+ * bash/write/edit 的短窗口不随详情展开或执行阶段改变；完整记录单独展示。
+ * bash 的错误只与最终可见的尾部窗口去重。
  */
 export function ToolMessageBlock({
   message,
@@ -62,12 +55,8 @@ export function ToolMessageBlock({
     result,
     hasCallRecordRenderer: message.toolName === 'ask_user' || Renderer != null,
   })
-  const phase = toolDisclosurePhase(view.executionState)
-  const quota = toolDisclosureQuota(view.toolName, phase)
-  // 用户选择是唯一持久状态；默认值完全由工具与当前结果事实推导，因此流式转终态、
-  // 参数增长和重新渲染都不会重置用户的展开选择。
-  const [userExpanded, setUserExpanded] = useState<boolean | null>(null)
-  const expanded = userExpanded ?? toolDefaultExpanded({ toolName: view.toolName, phase })
+  const previewLines = toolPreviewLines(view.toolName)
+  const [expanded, setExpanded] = useState(false)
   const summary = formatToolCallSummary(view.toolName, view.arguments, { expanded })
 
   const normalizedName = view.toolName.trim().toLowerCase()
@@ -78,7 +67,12 @@ export function ToolMessageBlock({
   const isMutation = normalizedName === 'write' || normalizedName === 'edit'
   const showTextPreview = isBash || isMcp
   const taskReceipt = isTask ? parseTaskReceipt(view.resultMessage?.details) : null
-  const stateLabel = view.executionState === 'environment'
+  const bash = isBash
+    ? bashOutput(joinTextContents(splitContents(view.contents).text), view.resultMessage?.details, view.hasError)
+    : null
+  const stateLabel = bash?.timedOut
+    ? t('ai.runtime.tool.timedOut')
+    : view.executionState === 'environment'
     ? t('ai.runtime.tool.environment', { environment: message.requiredEnvironmentName ?? '' })
     : view.executionState === 'waiting-child'
       ? t('ai.runtime.tool.waitingChild')
@@ -86,7 +80,7 @@ export function ToolMessageBlock({
       ? t(`ai.runtime.tool.task.${taskReceipt.status}`)
       : t(`ai.runtime.tool.${view.executionState}`)
 
-  const errorText = view.errorText?.trim() ? view.errorText : undefined
+  const errorText = bash?.note ?? (view.errorText?.trim() ? view.errorText : undefined)
   const errorTrimmed = errorText?.trim() ?? ''
   const errorIsOutput = errorTrimmed !== ''
     && joinTextContents(view.contents.filter((content) => content.type === 'text')).trim() === errorTrimmed
@@ -98,28 +92,30 @@ export function ToolMessageBlock({
     : view.contents)
     .filter((content) => content.type !== 'text' || content.text !== '')
   const split = splitContents(contents)
-  const text = showTextPreview ? joinTextContents(split.text) : ''
-  // bash 的失败原文常常就是整份输出：收起和展开都只显示一次输出，而非重复错误块。
-  const showErrorBlock = errorText != null
-    && !(isBash && text.includes(errorTrimmed))
-  const errorWindow = errorText == null
-    ? null
-    : discloseText(errorText, expanded ? -1 : ERROR_COLLAPSED_LINES)
-  // 错误块与普通 preview 共用字符预算，避免失败时显示两份 1500 字符。
-  const previewMaxChars = COLLAPSED_MAX_CHARS
-    - (showErrorBlock && errorWindow != null ? Array.from(errorWindow.text).length : 0)
-  const textWindow = showTextPreview
-    ? discloseText(text, expanded ? -1 : quota.preview, isBash ? 'end' : 'start', previewMaxChars)
+  const text = bash?.text ?? (isMcp ? joinTextContents(split.text) : '')
+  const bashWindow = isBash ? discloseText(text, previewLines, 'end') : null
+  const showErrorBlock = errorText != null && !bashWindow?.text.includes(errorTrimmed)
+  const errorWindow = showErrorBlock && errorText != null
+    ? discloseText(errorText, ERROR_COLLAPSED_LINES)
     : null
-
+  // 先用完整预算判断 bash 错误是否可见，只有独立错误槽位占用预算时才重算窗口。
+  const previewMaxChars = COLLAPSED_MAX_CHARS - Array.from(errorWindow?.text ?? '').length
+  const textWindow = isBash
+    ? (showErrorBlock ? discloseText(text, previewLines, 'end', previewMaxChars) : bashWindow)
+    : isMcp ? discloseText(text, previewLines, 'start', previewMaxChars) : null
   const mutation = isMutation
-    ? windowMutationPreview(view.preview, expanded ? -1 : quota.preview, previewMaxChars)
+    ? windowMutationPreview(view.preview, previewLines, previewMaxChars)
     : null
+  const mutationHint = mutation?.window ? disclosureHint(mutation.window, 'end') : null
+  const mutationDetails = mutationHint != null || mutation?.hasFullDetails === true
+  const bashVisible = isBash && Boolean(textWindow?.text.trim())
+  const bashDetails = bash != null && !bash.incomplete && text !== ''
+    && (!bashVisible || textWindow?.hiddenLines !== 0 || textWindow.truncated)
   const taskPromptAvailable = isTask && Renderer != null && view.hasCallRecordBody
   const askRecordAvailable = isAskUser && view.hasCallRecordBody
   const expandFromHint = (element: HTMLElement) => {
     announceTranscriptReading(element, 'disclosure-hint')
-    setUserExpanded(true)
+    setExpanded(true)
   }
 
   const bodyContents = toolBodyContents(contents, {
@@ -137,16 +133,22 @@ export function ToolMessageBlock({
   const rendererResultMessage = rendererResult
     ? withoutExactError(view.resultMessage!, errorTrimmed, isBash)
     : undefined
-  const hasBody = isMutation
-    ? view.isMutationSuccess || bodyContents.length > 0
-    : isAskUser
-      ? false
-      : Renderer != null
-        ? rendererResult && (view.resultMessage?.contents.length ?? 0) > 0
-        : bodyContents.length > 0
+  const hasRendererBody = !isAskUser && (rendererResultMessage?.contents.some((content) =>
+    content.type !== 'text' || content.text !== '') ?? false)
 
   const mainPreview: ReactNode[] = []
-  if (showTextPreview) {
+  if (bashVisible && textWindow != null) {
+    // 对仅有摘录的流不能把可计算的已接收行数说成总省略行数。
+    const hint = disclosureHint(bash?.incomplete ? { ...textWindow, hiddenLines: 0 } : textWindow, 'end')
+    mainPreview.push(
+      <div key="bash-preview" className="thread-tool-text-preview thread-tool-short-preview">
+        {bash?.incomplete ? <span className="thread-disclosure-hint">{t('ai.runtime.disclosure.outputOmitted')}</span> : null}
+        {hint ? <span className="thread-disclosure-hint">{hint}</span> : null}
+        <ToolOutputViewport bounded={false}><ResourceUriText text={textWindow.text} /></ToolOutputViewport>
+      </div>,
+    )
+  }
+  if (isMcp) {
     if (expanded) {
       // 展开态按原始顺序渲染文本与附件，避免把 resource 全部挪到文本之后。
       if (contents.length > 0) {
@@ -157,9 +159,9 @@ export function ToolMessageBlock({
         <DisclosureHint
           key="text-preview"
           disclosure={textWindow}
-          edge={isBash ? 'end' : 'start'}
+          edge="start"
           onExpand={expandFromHint}
-          placement={isBash ? 'before' : 'after'}
+          placement="after"
         >
           {textWindow.text !== '' ? (
             <ToolOutputViewport bounded={false}>
@@ -168,8 +170,7 @@ export function ToolMessageBlock({
           ) : null}
         </DisclosureHint>
       )
-      if (textWindow.text === '' && quota.preview !== 0
-        && (textWindow.hiddenLines > 0 || textWindow.truncated)) {
+      if (textWindow.text === '' && (textWindow.hiddenLines > 0 || textWindow.truncated)) {
         // 只有实际隐藏的内容才保留提示，空输出不创建 preview 区域。
         mainPreview.push(textHint)
       } else if (textWindow.text !== '') {
@@ -177,9 +178,10 @@ export function ToolMessageBlock({
       }
     }
   }
-  if (mutation != null && (mutation.preview != null || mutation.window?.truncated)) {
+  if (mutation != null && (mutation.preview != null || mutationHint != null)) {
     mainPreview.push(
-      <span key="mutation-preview">
+      <div key="mutation-preview" className="thread-tool-short-preview">
+        {mutationHint ? <span className="thread-disclosure-hint">{mutationHint}</span> : null}
         {mutation.preview != null ? (
           <ToolCallPreview
             preview={mutation.preview}
@@ -187,85 +189,49 @@ export function ToolMessageBlock({
             variant="transcript"
           />
         ) : null}
-        <DisclosureHint
-          disclosure={mutation.window}
-          edge="start"
-          onExpand={expandFromHint}
-          placement="after"
-        />
-      </span>,
-    )
-  }
-  if (taskPromptAvailable && expanded && view.callMessage != null) {
-    mainPreview.push(
-      <span key="task-prompt">
-        <Renderer message={view.callMessage} expanded={expanded} />
-      </span>,
-    )
-  }
-  if (askRecordAvailable && expanded) {
-    mainPreview.push(
-      <span key="ask-record">
-        <AskUserRecord arguments={view.arguments} contents={contents} />
-      </span>,
-    )
-  }
-
-  const previewParts: ReactNode[] = []
-  if (isAskUser && view.executionState === 'input') {
-    previewParts.push(
-      <p key="answer" className="thread-tool-approval-note">
-        {t('ai.runtime.disclosure.waitingForAnswer')}
-      </p>,
-    )
-  }
-  if (showErrorBlock && errorWindow != null) {
-    previewParts.push(
-      <div key="error" className="thread-disclosure-error thread-tool-error">
-        <CircleX className="thread-disclosure-error-icon" size={12} aria-hidden="true" />
-        <div>
-          <p className="thread-disclosure-error-text">{errorWindow.text}</p>
-          <DisclosureHint
-            disclosure={errorWindow}
-            edge="start"
-            onExpand={expandFromHint}
-            placement="after"
-          />
-        </div>
       </div>,
     )
   }
-  previewParts.push(...mainPreview)
-  const preview = previewParts.length > 0 ? <>{previewParts}</> : undefined
-
-  const body = expanded && hasBody ? (
-    isMutation ? (
-      view.isMutationSuccess ? (
-        bodyContents.length > 0 ? <ToolContentView contents={bodyContents} /> : undefined
-      ) : (
-        <ToolContentView contents={bodyContents} />
-      )
-    ) : Renderer != null ? (
-      rendererResultMessage != null
-        ? <Renderer message={rendererResultMessage} expanded={expanded} />
-        : undefined
-    ) : bodyContents.length > 0 ? (
-      <ToolContentView contents={bodyContents} />
-    ) : undefined
+  const errorHidden = errorWindow != null && (errorWindow.hiddenLines > 0 || errorWindow.truncated)
+  const error = errorWindow != null ? (
+    <div className="thread-disclosure-error thread-tool-error">
+      <CircleX className="thread-disclosure-error-icon" size={12} aria-hidden="true" />
+      <p className="thread-disclosure-error-text">
+        {errorWindow.text}{errorHidden ? '…' : null}
+      </p>
+    </div>
   ) : undefined
 
-  const bodyHidden = !expanded && hasBody
-  const previewHidden = !expanded && (
-    (textWindow != null && quota.preview === 0 && text !== '')
-    || (textWindow != null && (textWindow.hiddenLines > 0 || textWindow.truncated))
-    || (showTextPreview && split.resources.length > 0)
-    || (mutation?.window != null && (mutation.window.hiddenLines > 0 || mutation.window.truncated))
-    || taskPromptAvailable
-    || askRecordAvailable
-  )
-  const errorHidden = !expanded && errorWindow != null
-    && (errorWindow.hiddenLines > 0 || errorWindow.truncated)
-  const hasDetails = bodyHidden || previewHidden || errorHidden
+  const bashBody = isBash ? (bashDetails
+    ? bash?.note ? [{ type: 'text' as const, text }, ...split.resources] : contents
+    : split.resources) : []
+  const mcpDetails = isMcp && (split.resources.length > 0
+    || (textWindow != null && (textWindow.hiddenLines > 0 || textWindow.truncated)))
+  const hasBody = bashBody.length > 0 || bash?.storedPath != null || mutationDetails || errorHidden
+    || bodyContents.length > 0 || hasRendererBody || taskPromptAvailable || askRecordAvailable
+  const body = expanded && hasBody ? (
+    <div
+      className="thread-tool-details"
+      role="region"
+      tabIndex={0}
+      aria-label={t('ai.runtime.disclosure.fullDetails')}
+    >
+      {errorHidden && !(bashDetails && errorIsOutput)
+        ? <ToolOutputViewport bounded={false}>{errorText}</ToolOutputViewport> : null}
+      {bashBody.length > 0 ? <ToolContentView contents={bashBody} /> : null}
+      {bash?.storedPath ? (
+        <ToolOutputViewport bounded={false}>
+          {t('ai.runtime.disclosure.storedLogPath', { path: bash.storedPath })}
+        </ToolOutputViewport>
+      ) : null}
+      {mutationDetails ? <ToolCallPreview preview={view.preview} streaming={false} variant="transcript" /> : null}
+      {taskPromptAvailable && view.callMessage != null ? <Renderer message={view.callMessage} expanded /> : null}
+      {askRecordAvailable ? <AskUserRecord arguments={view.arguments} contents={contents} /> : null}
+      {Renderer != null && hasRendererBody && rendererResultMessage != null
+        ? <Renderer message={rendererResultMessage} expanded />
+        : bodyContents.length > 0 ? <ToolContentView contents={bodyContents} /> : null}
+    </div>
+  ) : undefined
 
   const taskThreadId = taskReceipt?.threadId
     ?? (isTask && view.resultMessage == null ? message.childThreadId : null)
@@ -283,13 +249,8 @@ export function ToolMessageBlock({
     )
     : undefined
 
-  const tone = view.hasError
-    ? 'error'
-    : view.executionState === 'succeeded'
-      ? 'success'
-      : view.executionState === 'cancelled'
-        ? 'neutral'
-        : 'pending'
+  const showState = bash?.timedOut || ['environment', 'waiting-child', 'approval', 'input', 'failed', 'cancelled', 'unknown']
+    .includes(view.executionState)
 
   return (
     <div className={`thread-turn thread-turn-tool tool-state-${view.visualState}`}>
@@ -298,18 +259,18 @@ export function ToolMessageBlock({
         data-tool-state={view.visualState}
         data-invocation-state={view.executionState}
         aria-busy={view.executionState === 'running'}
-        tone={tone}
+        tone="neutral"
         expanded={expanded}
-        onExpandedChange={setUserExpanded}
-        hasDetails={hasDetails}
-        preview={preview}
+        onExpandedChange={setExpanded}
+        hasDetails={hasBody || mcpDetails}
+        error={error}
+        preview={mainPreview.length > 0 ? <>{mainPreview}</> : undefined}
         body={body}
         label={`${summary.name}: ${stateLabel}`}
         header={(
           <span className="thread-tool-summary">
             <span className="thread-tool-name">{summary.name}</span>
-            {view.executionState === 'environment' || view.executionState === 'waiting-child'
-              ? <span className="thread-tool-state-label"> · {stateLabel}</span> : null}
+            {showState ? <span className="thread-tool-state-label"> · {stateLabel}</span> : null}
             {message.invocationStatus === 'READY' && message.queuedBehindToolCallUnfinished
               ? (
                 <span className="thread-tool-state-label">
@@ -323,9 +284,6 @@ export function ToolMessageBlock({
                   {summary.detail}
                 </span>
               </>
-            ) : null}
-            {view.executionState === 'succeeded' ? (
-              <Check className="thread-tool-success-icon" size={14} aria-hidden="true" />
             ) : null}
           </span>
         )}

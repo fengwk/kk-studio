@@ -1,6 +1,9 @@
+import { PROCESS_OUTPUT_OMISSION_MARKER } from '@/features/thread/runtime/thread-realtime/process-output-stream'
+import { asRecord } from '@/features/thread/runtime/thread-timeline/payload-json'
 import { formatJsonContent } from '@/features/thread/runtime/thread-timeline/content-utils'
 import {
   discloseText,
+  splitLogicalLines,
   type TextDisclosure,
 } from '@/features/thread/runtime/thread-panel/messages/disclosure-policy'
 import type { ToolCallPreview as ToolCallPreviewData } from '@/features/thread/runtime/thread-panel/messages/tool-previews'
@@ -35,6 +38,35 @@ export function joinTextContents(contents: ToolContent[]): string {
     .join('\n')
 }
 
+/** Daemon 的结构化结果把退出说明和落盘信息附在日志后；它们不属于输出行。 */
+export function bashOutput(raw: string, details: ToolDialogueMessage['details'], failed: boolean) {
+  const process = asRecord(details?.process)
+  const note = failed && typeof process.outcome === 'string'
+    ? /(?:^|\n)(\[(?:Command (?:timed out after |exited with code |was terminated by signal )|Operation cancelled by the caller\.)[^\n]*\])$/.exec(raw)
+    : null
+  let text = note == null ? raw : raw.slice(0, note.index + (note[0].startsWith('\n') ? 1 : 0))
+  const stored = asRecord(details?.textOutput)
+  const footer = typeof stored.totalBytes === 'number'
+    ? text.lastIndexOf('\n\n[Full output')
+    : -1
+  if (footer >= 0) text = text.slice(0, footer + 1)
+
+  const liveOmission = text === PROCESS_OUTPUT_OMISSION_MARKER
+    || text.startsWith(`${PROCESS_OUTPUT_OMISSION_MARKER}\n`)
+  if (liveOmission) text = text.slice(PROCESS_OUTPUT_OMISSION_MARKER.length + 1)
+  if (footer >= 0) {
+    const marker = /(?:^|\n)\[\.\.\. \d+ bytes omitted here; the middle of the output is not shown \.\.\.\]\n/.exec(text)
+    if (marker != null) text = text.slice(marker.index + marker[0].length)
+  }
+  return {
+    text,
+    note: note?.[1],
+    incomplete: liveOmission || typeof stored.totalBytes === 'number',
+    storedPath: typeof stored.path === 'string' && stored.path !== '' ? stored.path : null,
+    timedOut: process.outcome === 'TIMED_OUT' || details?.code === 'TIMEOUT',
+  }
+}
+
 /** 去掉与错误块完全相同的正文，避免展开后同一失败文本出现两次。 */
 export function withoutExactError(
   message: ToolDialogueMessage,
@@ -49,35 +81,54 @@ export function withoutExactError(
   return contents.length === message.contents.length ? message : { ...message, contents }
 }
 
-/** 将 write/edit 预览按收起配额截取；-1 保持原始结构（含尾随空行）。 */
+/** 预览保留尾部；edit 草稿只取替换文本，各条目共享同一个窗口。 */
 export function windowMutationPreview(
   preview: ToolCallPreviewData | null,
   limit: number,
   maxChars: number,
-): { preview: ToolCallPreviewData | null; window: TextDisclosure | null } {
-  if (preview == null || limit < 0) {
+): { preview: ToolCallPreviewData | null; window: TextDisclosure | null; hasFullDetails?: boolean } {
+  if (preview == null) {
     return { preview, window: null }
   }
   if (preview.kind === 'write') {
-    const window = discloseText(preview.content, limit, 'start', maxChars)
+    if (!preview.hasContent) return { preview: null, window: null }
+    const window = discloseText(preview.content, limit, 'end', maxChars)
     return {
-      preview: preview.content !== '' && window.text === '' ? null
-        : { ...preview, content: window.text, lines: splitWindowLines(window.text) },
+      preview: preview.content !== '' && window.hiddenLines === splitLogicalLines(preview.content).length ? null
+        : { ...preview, content: window.text || (preview.content !== '' ? '\n' : '') },
       window,
     }
   }
   if (preview.mode === 'review') {
-    const window = discloseText(preview.diff, limit, 'start', maxChars)
+    const window = discloseText(preview.diff, limit, 'end', maxChars)
     return {
-      preview: { ...preview, diff: window.text, lines: splitWindowLines(window.text) },
+      preview: window.text === '' ? null : { ...preview, diff: window.text, lines: window.text.split('\n') },
       window,
     }
   }
-  return { preview, window: null }
-}
 
-function splitWindowLines(text: string): string[] {
-  return text === '' ? [] : text.split('\n')
+  let remainingLines = limit
+  let remainingChars = maxChars
+  let hiddenLines = 0
+  let truncated = false
+  let hasFullDetails = false
+  const entries = [...preview.entries].reverse().map((entry) => {
+    const count = splitLogicalLines(entry.newText).length
+    const window = discloseText(entry.newText, remainingLines, 'end', remainingChars)
+    const shown = count - window.hiddenLines
+    remainingLines -= shown
+    remainingChars -= Array.from(window.text).length
+    hiddenLines += window.hiddenLines
+    truncated ||= window.truncated
+    hasFullDetails ||= entry.oldText !== '' || window.hiddenLines > 0 || window.truncated
+    return { ...entry, oldText: '', newText: shown > 0 ? window.text || '\n' : '' }
+  }).reverse()
+  return {
+    preview: preview.mode === 'preparing' || entries.some((entry) => entry.newText !== '')
+      ? { ...preview, entries } : null,
+    window: { text: '', hiddenLines, truncated },
+    hasFullDetails,
+  }
 }
 
 /**
@@ -86,7 +137,7 @@ function splitWindowLines(text: string): string[] {
  * - ask_user 的问答整体由只读记录承载，body 为空；
  * - write/edit 成功时只保留附件（文本已在审查预览中），失败时完整展示；
  * - task 有回执时正文由回执报告承载；
- * - bash/MCP 的展开态在 preview 中按原始顺序渲染全部内容，不再拆出 body。
+ * - bash/MCP 的文本由宿主分配到预览与详情，不在通用结果区重复渲染。
  */
 export function toolBodyContents(
   contents: ToolContent[],

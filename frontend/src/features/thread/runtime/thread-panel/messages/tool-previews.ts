@@ -28,14 +28,9 @@ interface EditInputEntry {
 type EditCallPreview =
   | {
       kind: 'edit'
-      mode: 'input'
+      mode: 'input' | 'preparing'
       path: string
       entries: EditInputEntry[]
-    }
-  | {
-      kind: 'edit'
-      mode: 'preparing'
-      path: string
     }
   | {
       kind: 'edit'
@@ -86,7 +81,7 @@ function formatWritePreview(
   parsed: ParsedToolArguments,
   options?: EditPreviewOptions,
 ): WriteCallPreview {
-  const hasContent = 'content' in parsed.values
+  const hasContent = typeof parsed.values.content === 'string'
   const content = getString(parsed.values.content)
   const workdir = getString(parsed.values.workdir)
   const review = options?.editReview ?? undefined
@@ -141,6 +136,7 @@ function formatEditPreview(
       kind: 'edit',
       mode: 'preparing',
       path,
+      entries: editInputEntries(parsed.values.edits),
     }
   }
 

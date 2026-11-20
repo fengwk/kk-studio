@@ -1,7 +1,6 @@
 /*
  * 工具卡片适配器样式：Header 内容、mutation 预览、结果正文与 task/ask_user 记录。
- * 卡片外壳（padding/border/背景/chevron）由 ThreadDisclosure 统一提供；对话记录里的
- * 正文没有内部滚动，只有审批卡片通过 `.is-bounded` 保留有界视口。
+ * 卡片外壳由 ThreadDisclosure 提供；短窗口不折行，完整记录和审批使用有界视口。
  */
 
 .thread-turn-tool,
@@ -64,17 +63,8 @@
   font-size: var(--font-size-xs);
 }
 
-/* 只读审批/等待记录：人工决策在根交互区完成，时间线不提供写入路径。 */
-.thread-tool-approval-note {
-  margin: 0 0 6px;
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  line-height: 1.5;
-  overflow-wrap: anywhere;
-}
-
-.thread-tool-approval-note:last-child {
-  margin-bottom: 0;
+.thread-block.thread-block-tool.is-neutral {
+  background: var(--surface);
 }
 
 /* 有损解码警示：审查 diff 上方的事实说明，不参与收起窗口。 */
@@ -195,11 +185,6 @@
   opacity: 0.85;
 }
 
-.thread-tool-success-icon {
-  flex: 0 0 auto;
-  color: var(--success);
-}
-
 .thread-tool-empty-content {
   color: var(--fg-muted);
   font-style: italic;
@@ -216,10 +201,25 @@
   overflow-wrap: anywhere;
 }
 
-/*
- * 对话记录中的正文是普通内容，不创建内部滚动；只有审批卡片显式加 `.is-bounded`。
- * overscroll-behavior: auto 让审批卡片到达边界后自然链到外层。
- */
+.thread-tool-short-preview .thread-tool-output {
+  white-space: pre;
+  overflow-x: auto;
+}
+
+.thread-tool-details {
+  display: grid;
+  gap: 8px;
+  max-height: min(24em, 42vh);
+  overflow: auto;
+  overscroll-behavior: auto;
+}
+
+.thread-tool-details:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+/* 审批材料独立滚动，到达边界后自然链到外层。 */
 .thread-tool-output {
   line-height: 1.5;
   overflow-anchor: none;
@@ -232,6 +232,21 @@
 }
 
 .thread-tool-output.is-bounded:focus-visible {
+  outline: 1px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.thread-tool-approval-review {
+  margin-top: 8px;
+}
+
+.thread-tool-approval-review > summary {
+  color: var(--fg-muted);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+}
+
+.thread-tool-approval-review > summary:focus-visible {
   outline: 1px solid var(--focus-ring);
   outline-offset: 2px;
 }
@@ -300,7 +315,7 @@
 }
 
 .thread-tool-error {
-  margin: 0 0 6px;
+  margin: 0;
 }
 
 .thread-tool-resource {

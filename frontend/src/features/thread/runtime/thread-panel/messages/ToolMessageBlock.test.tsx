@@ -98,21 +98,26 @@ describe('ToolMessageBlock shell', () => {
     expect(document.querySelector('.animate-spin')).toBeNull()
   })
   it.each([
-    ['READY', 'queued', '排队中'],
-    ['WAITING_APPROVAL', 'approval', '等待审批'],
-    ['WAITING_INPUT', 'input', '等待输入'],
-    ['RUNNING', 'running', '执行中'],
-    ['SUCCEEDED', 'succeeded', '成功'],
-    ['FAILED', 'failed', '失败'],
-    ['CANCELLED', 'cancelled', '已停止'],
-    ['UNKNOWN', 'unknown', '执行结果未知'],
-  ])('durable %s has a distinct label and only RUNNING spins', (status, state, label) => {
+    ['READY', 'queued', '排队中', false],
+    ['WAITING_APPROVAL', 'approval', '等待审批', true],
+    ['WAITING_INPUT', 'input', '等待输入', true],
+    ['RUNNING', 'running', '执行中', false],
+    ['SUCCEEDED', 'succeeded', '成功', false],
+    ['FAILED', 'failed', '失败', true],
+    ['CANCELLED', 'cancelled', '已停止', true],
+    ['UNKNOWN', 'unknown', '执行结果未知', true],
+  ])('durable %s has a distinct label and only RUNNING spins', (status, state, label, labeled) => {
     const { container } = render(
       <ToolMessageBlock message={message({ phase: 'call', invocationStatus: status })} />,
     )
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('data-invocation-state', state)
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('title', `read: ${label}`)
-    expect(screen.queryByText(`· ${label}`)).not.toBeInTheDocument()
+    // 只有需要用户注意的状态把标签保留在 Header；排队、执行中和成功不加文字噪音。
+    if (labeled) {
+      expect(container.querySelector('.thread-tool-state-label')).toHaveTextContent(label)
+    } else {
+      expect(container.querySelector('.thread-tool-state-label')).toBeNull()
+    }
     expect(container.querySelector('.thread-disclosure-toggle')).toBeNull()
     expect(container.querySelector('.thread-block-tool')).toHaveAttribute('aria-busy', String(status === 'RUNNING'))
   })
@@ -450,7 +455,7 @@ describe('ToolMessageBlock nonempty content', () => {
 })
 
 describe('ToolMessageBlock failures', () => {
-  it('keeps the failure block visible while collapsed, truncates it to three lines, and never repeats it in the body', async () => {
+  it('keeps the failure block visible in its own slot, marks the truncated tail, and shows the rest only on demand', async () => {
     const user = userEvent.setup()
     const errorText = 'connection refused\nsecond line\nthird line\nfourth line'
     const { container } = render(
@@ -472,17 +477,21 @@ describe('ToolMessageBlock failures', () => {
       />,
     )
 
-    // 失败原文只由错误块承载；正文不再重复同一段文本。
-    expect(container.querySelector('.thread-tool-error')).not.toHaveTextContent('fourth line')
-    expect(container.querySelector('.thread-disclosure-body')).not.toBeInTheDocument()
+    // 失败原文独占错误槽位，不混进 preview 或 body。
+    const slot = container.querySelector('.thread-disclosure-error-slot')
+    expect(slot).not.toBeNull()
+    expect(slot?.querySelector('.thread-tool-error')).not.toBeNull()
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(container.querySelector('.thread-disclosure-body')).toBeNull()
     expect(screen.getAllByText(/connection refused/)).toHaveLength(1)
 
-    // 收起时最多三行，提示行可点击展开。
-    const expandError = screen.getByRole('button', { name: '… 1 more line' })
+    // 收起时最多三行，省略号标记后面还有失败原文。
     expect(container.querySelector('.thread-tool-error')).not.toHaveTextContent('fourth line')
-    await user.click(expandError)
-    expect(container.querySelector('.thread-tool-error')).toHaveTextContent('fourth line')
-    expect(container.querySelector('.thread-tool-error')?.textContent).not.toContain('… 1 more line')
+    expect(container.querySelector('.thread-tool-error')?.textContent).toMatch(/…$/)
+
+    // 完整失败原文只能通过 Header 的详情开关查看。
+    await user.click(expandButton()!)
+    expect(container.querySelector('.thread-tool-details')).toHaveTextContent('fourth line')
   })
 
   it('keeps a mutation failure explanation in the body instead of dropping it', async () => {
@@ -707,9 +716,10 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.queryByRole('img')).not.toBeInTheDocument()
   })
 
-  it('keeps the mutation review fully visible during review and does not create an inner scroll', async () => {
+  it('does not auto-expand a write review and keeps the preview at the last ten lines', async () => {
     const user = userEvent.setup()
     const content = Array.from({ length: 40 }, (_, index) => `line-${index + 1}`).join('\n')
+    const tail = Array.from({ length: 10 }, (_, index) => `line-${index + 31}`).join('\n')
     const { container } = render(
       <ToolMessageBlock
         message={message({
@@ -723,16 +733,18 @@ describe('ToolMessageBlock per-tool bodies', () => {
 
     expect(screen.getAllByText(/App\.java/).length).toBeGreaterThanOrEqual(1)
     const preview = container.querySelector('.thread-tool-preview-body')
-    expect(preview).toHaveTextContent('line-1')
-    expect(preview).toHaveTextContent('line-40')
+    // 审查期间不自动展开：预览只有最后 10 行，省略的行以静态计数说明。
+    expect(preview?.textContent).toBe(tail)
     expect(preview).toHaveClass('thread-tool-output')
     expect(preview).not.toHaveClass('is-bounded')
+    expect(screen.getByText('… 上方还有 30 行')).toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-details')).toBeNull()
     expect(container.querySelector('.thread-tool-summary-detail')).not.toHaveTextContent('line-1')
 
-    // 审查期间收起配额为全部显示：用户收起也不会把审查材料藏起来。
-    await user.click(collapseButton()!)
+    // 完整审查材料由 Header 的 chevron 打开，且不隐藏在任何内部滚动容器之外。
+    await user.click(expandButton()!)
+    expect(container.querySelector('.thread-tool-details')?.textContent).toBe(content)
     expect(container.querySelector('.thread-tool-preview-body')).toHaveTextContent('line-40')
-    expect(container.querySelector('.thread-disclosure-toggle')).not.toBeInTheDocument()
   })
 
   it('shows the pre-execution edit diff when editReview is present', () => {
@@ -786,7 +798,8 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(container.querySelector('.thread-tool-preview-body')).toHaveClass('is-streaming')
   })
 
-  it('shows streamed edit input as explicit input rather than diff', () => {
+  it('shows streamed edit drafts as proposed changes with new text only', async () => {
+    const user = userEvent.setup()
     const { container } = render(
       <ToolMessageBlock
         message={message({
@@ -803,11 +816,58 @@ describe('ToolMessageBlock per-tool bodies', () => {
       />,
     )
 
-    expect(screen.getByText(/流式输入内容/)).toBeInTheDocument()
-    expect(screen.getByText(/原文本/)).toBeInTheDocument()
-    expect(screen.getByText(/新文本/)).toBeInTheDocument()
-    expect(container.querySelector('.thread-tool-preview-body.is-input-old')?.textContent).toBe('one\ntwo')
+    expect(screen.getByText('拟修改内容')).toBeInTheDocument()
+    expect(screen.getByText('新文本：')).toBeInTheDocument()
+    // 预览只放新文本；被替换的原文本属于详情材料。
+    expect(screen.queryByText('原文本：')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-preview-body.is-input-old')).toBeNull()
     expect(container.querySelector('.thread-tool-preview-body.is-input-new')?.textContent).toBe('ONE\nTWO')
+
+    await user.click(expandButton()!)
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    expect(within(details).getByText('原文本：')).toBeInTheDocument()
+    expect(details.querySelector('.thread-tool-preview-body.is-input-old')?.textContent).toBe('one\ntwo')
+  })
+
+  it('shares the ten-line preview budget across every edit entry', async () => {
+    const user = userEvent.setup()
+    const lines = (prefix: string) => Array.from({ length: 8 }, (_, index) => `${prefix}-${index + 1}`)
+    const first = lines('one')
+    const second = lines('two')
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          phase: 'call',
+          status: 'streaming',
+          subjectEntryId: null,
+          toolName: 'edit',
+          rendererKey: 'edit',
+          arguments: JSON.stringify({
+            path: 'App.java',
+            edits: [
+              { old_string: 'old-one', new_string: first.join('\n') },
+              { old_string: 'old-two', new_string: second.join('\n') },
+            ],
+          }),
+        })}
+      />,
+    )
+
+    const blocks = container.querySelectorAll('.thread-tool-preview-input-block')
+    expect(blocks).toHaveLength(2)
+    // 配额从最后一条往前分配：后一条占满 8 行，前一条只剩 2 行。
+    expect(blocks[0]?.querySelector('.is-input-new')?.textContent).toBe(first.slice(-2).join('\n'))
+    expect(blocks[1]?.querySelector('.is-input-new')?.textContent).toBe(second.join('\n'))
+    expect(screen.getByText('… 上方还有 6 行')).toBeInTheDocument()
+
+    // 被窗口截掉的条目文本与全部原文本只能在详情里查看。
+    await user.click(expandButton()!)
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    const detailBlocks = details.querySelectorAll('.thread-tool-preview-input-block')
+    expect(detailBlocks).toHaveLength(2)
+    expect(detailBlocks[0]?.querySelector('.is-input-new')?.textContent).toBe(first.join('\n'))
+    expect(detailBlocks[1]?.querySelector('.is-input-new')?.textContent).toBe(second.join('\n'))
+    expect(detailBlocks[0]?.querySelector('.is-input-old')?.textContent).toBe('old-one')
   })
 
   it('numbers each streamed edit entry and marks the replace-all one', () => {
@@ -903,9 +963,10 @@ describe('ToolMessageBlock per-tool bodies', () => {
     )
   })
 
-  it('collapses bash to the last ten logical lines and expands without an inner scroll', async () => {
+  it('fixes the bash preview at the last ten logical lines and puts the full record in details', async () => {
     const user = userEvent.setup()
     const output = Array.from({ length: 30 }, (_, index) => `build step ${index + 1}`).join('\n')
+    const tail = Array.from({ length: 10 }, (_, index) => `build step ${index + 21}`).join('\n')
     const { container } = render(
       <ToolMessageBlock
         message={message({
@@ -914,24 +975,54 @@ describe('ToolMessageBlock per-tool bodies', () => {
           rendererKey: 'bash',
           status: 'streaming',
           arguments: '{"command":"npm run build"}',
-          partialContents: [text(`... [output omitted] ...\n${output}`)],
+          partialContents: [text(output)],
         })}
       />,
     )
 
     expect(document.querySelector('.thread-turn-tool')).toHaveClass('tool-state-pending')
     const viewport = container.querySelector('.thread-tool-output')
-    // 收起时只渲染最后 10 个逻辑行；前面的行由提示行承载。
-    expect(viewport).toHaveTextContent('build step 21')
-    expect(viewport).toHaveTextContent('build step 30')
-    expect(viewport).not.toHaveTextContent('build step 1')
+    // 预览固定为最后 10 个逻辑行；前面的行以静态计数说明。
+    expect(viewport?.textContent).toBe(tail)
     expect(viewport).not.toHaveClass('is-bounded')
-    expect(screen.getByRole('button', { name: '… 21 earlier lines' })).toBeInTheDocument()
+    const hint = screen.getByText('… 上方还有 20 行')
+    expect(hint).toHaveClass('thread-disclosure-hint')
+    expect(screen.queryByRole('button', { name: '… 上方还有 20 行' })).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-details')).toBeNull()
 
-    await user.click(screen.getByRole('button', { name: '… 21 earlier lines' }))
-    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('build step 1')
-    expect(container.querySelector('.thread-tool-output')).toHaveTextContent('build step 30')
-    expect(screen.queryByRole('button', { name: /earlier lines/ })).not.toBeInTheDocument()
+    // 完整记录只在 Header 打开的详情里，展开不改变预览窗口。
+    await user.click(expandButton()!)
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    expect(details).not.toBeNull()
+    expect(details.querySelector('.thread-tool-output')?.textContent).toBe(output)
+    expect(container.querySelector('.thread-tool-text-preview .thread-tool-output')?.textContent).toBe(tail)
+  })
+
+  it('creates no preview region for bash output that has no visible text', () => {
+    const marker = '... [output omitted] ...'
+    const omitted = render(<ToolMessageBlock message={message({
+      toolName: 'bash',
+      rendererKey: 'bash',
+      arguments: '{"command":"seq 1 200000"}',
+      contents: [text(marker)],
+    })} />)
+
+    // 只剩上游省略标记时没有可展示的输出：不建空 preview，也不把标记当正文。
+    expect(omitted.container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(omitted.container.querySelector('.thread-tool-output')).toBeNull()
+    expect(omitted.container.textContent).not.toContain(marker)
+    omitted.unmount()
+
+    const blank = render(<ToolMessageBlock message={message({
+      toolName: 'bash',
+      rendererKey: 'bash',
+      arguments: JSON.stringify({ command: 'printf " \\n "' }),
+      contents: [text('   \n  ')],
+    })} />)
+
+    // 纯空白输出同样没有可见内容，不建 preview。
+    expect(blank.container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(blank.container.querySelector('.thread-tool-output')).toBeNull()
   })
 
   it('recomputes the collapsed bash tail as streaming output grows', () => {
@@ -949,13 +1040,15 @@ describe('ToolMessageBlock per-tool bodies', () => {
     const { container, rerender } = render(<ToolMessageBlock message={messageFor(20)} />)
     expect(container.querySelector('.thread-tool-output')?.textContent)
       .toBe(Array.from({ length: 10 }, (_, index) => `step-${index + 11}`).join('\n'))
-    expect(screen.getByRole('button', { name: '… 10 earlier lines' })).toBeInTheDocument()
+    expect(screen.getByText('… 上方还有 10 行')).toBeInTheDocument()
 
     rerender(<ToolMessageBlock message={messageFor(30)} />)
     expect(container.querySelector('.thread-tool-output')?.textContent)
       .toBe(Array.from({ length: 10 }, (_, index) => `step-${index + 21}`).join('\n'))
-    expect(screen.getByRole('button', { name: '… 20 earlier lines' })).toBeInTheDocument()
+    expect(screen.getByText('… 上方还有 20 行')).toBeInTheDocument()
     expect(container.querySelector('.thread-tool-output')).not.toHaveClass('is-bounded')
+    // 静态计数提示不提供点击展开，展开入口只有 Header 的 chevron。
+    expect(screen.queryByRole('button', { name: /上方还有/ })).not.toBeInTheDocument()
   })
 
   it('collapses MCP results to five lines and applies the 1500-character cap', async () => {
@@ -1000,9 +1093,10 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(screen.getByRole('button', { name: '… truncated' })).toBeInTheDocument()
   })
 
-  it('auto-collapses a write review after it settles unless the user already chose', async () => {
+  it('keeps a write preview at the last ten lines when the review settles', async () => {
     const user = userEvent.setup()
     const content = Array.from({ length: 40 }, (_, index) => `line-${index + 1}`).join('\n')
+    const tail = Array.from({ length: 10 }, (_, index) => `line-${index + 31}`).join('\n')
     const call = message({
       phase: 'call',
       toolName: 'write',
@@ -1011,24 +1105,25 @@ describe('ToolMessageBlock per-tool bodies', () => {
     })
     const { container, rerender } = render(<ToolMessageBlock message={call} />)
 
-    // 审查期间默认全显。
-    expect(container.querySelector('.thread-tool-preview-body')).toHaveTextContent('line-40')
+    // 审查期间也是尾部短窗口，不自动展开详情。
+    expect(container.querySelector('.thread-tool-preview-body')?.textContent).toBe(tail)
     expect(container.querySelector('.thread-tool-preview-body')).not.toHaveClass('is-bounded')
+    expect(container.querySelector('.thread-tool-details')).toBeNull()
 
-    // 未手动选择时随阶段切换：终态默认收起为前 10 行，成功说明在 body 中默认不展示。
+    // 终态也不切换窗口或自动展开，且不补写成功说明。
     rerender(<ToolMessageBlock message={call} result={message({
       phase: 'result',
       toolName: 'write',
       rendererKey: 'write',
       contents: [text('File written successfully.')],
     })} />)
-    expect(container.querySelector('.thread-tool-preview-body')?.textContent)
-      .toBe(Array.from({ length: 10 }, (_, index) => `line-${index + 1}`).join('\n'))
-    expect(screen.getByRole('button', { name: '… 30 more lines' })).toBeInTheDocument()
+    expect(container.querySelector('.thread-tool-preview-body')?.textContent).toBe(tail)
+    expect(container.querySelector('.thread-tool-details')).toBeNull()
     expect(screen.queryByText('写入成功')).not.toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '… 30 more lines' }))
-    expect(container.querySelector('.thread-tool-preview-body')).toHaveTextContent('line-40')
+    await user.click(expandButton()!)
+    expect(container.querySelector('.thread-tool-details .thread-tool-preview-body.is-write')?.textContent)
+      .toBe(content)
     expect(screen.queryByText('写入成功')).not.toBeInTheDocument()
   })
 
@@ -1276,7 +1371,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(container.querySelector('.thread-disclosure-body')).toBeNull()
   })
 
-  it('keeps the task result action in the header and the prompt in the preview', async () => {
+  it('keeps the task result action in the header and the prompt in the details', async () => {
     const user = userEvent.setup()
     const { container } = render(
       <MemoryRouter>
@@ -1296,11 +1391,13 @@ describe('ToolMessageBlock per-tool bodies', () => {
     const link = screen.getByRole('link', { name: '查看 subagent 执行' })
     expect(link).toHaveAttribute('href', '/threads/00000000-0000-0000-0000-000000000002')
     expect(container.querySelector('.thread-disclosure-actions')).toContainElement(link)
+    // 调用正文与操作入口不争同一个区域：preview 为空，prompt 进详情。
     expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
     expect(screen.queryByText('first task prompt')).not.toBeInTheDocument()
     await user.click(expandButton()!)
-    expect(screen.getByText('first task prompt')).toBeInTheDocument()
-    expect(container.querySelector('.thread-disclosure-preview')).not.toContainElement(link)
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    expect(within(details).getByText('first task prompt')).toBeInTheDocument()
+    expect(within(details).queryByRole('link')).toBeNull()
   })
 
   it('shows synchronous task completion, report, and child navigation', async () => {
@@ -1347,9 +1444,11 @@ describe('ToolMessageBlock per-tool bodies', () => {
     expect(container.querySelector('.thread-tool-output')).toBeNull()
 
     await user.click(expandButton()!)
-    const preview = container.querySelector('.thread-disclosure-preview')!
-    expect(preview.querySelectorAll('.thread-tool-output')).toHaveLength(1)
-    expect(preview.querySelector('.thread-tool-output')?.textContent).toBe(partial)
+    // prompt 属于调用正文，进入有界详情而不是 preview。
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    expect(container.querySelector('.thread-disclosure-preview')).toBeNull()
+    expect(details.querySelectorAll('.thread-tool-output')).toHaveLength(1)
+    expect(details.querySelector('.thread-tool-output')?.textContent).toBe(partial)
     expect(container.textContent?.split(partial)).toHaveLength(2)
 
     // 流式时主动收起，完整参数到达后仍保留用户选择。
@@ -1493,7 +1592,7 @@ describe('ToolMessageBlock per-tool bodies', () => {
 })
 
 describe('ToolMessageBlock resources and approvals', () => {
-  it('preserves interleaved text and resource order without dropping expanded content', async () => {
+  it('keeps bash text in the tail window and every resource in the details', async () => {
     const user = userEvent.setup()
     const { container } = render(
       <ToolMessageBlock
@@ -1514,11 +1613,44 @@ describe('ToolMessageBlock resources and approvals', () => {
       />,
     )
 
-    // 收起态只展示文本尾部窗口；附件在 body 配额 0 下隐藏。
+    // 预览只拼接文本（保持文本块内部顺序），附件不占短窗口。
     expect(container.querySelector('.thread-tool-output')?.textContent)
-      .toContain('before resource')
+      .toBe('before resource\nafter resource')
     expect(screen.queryByText('https://example.test/a.txt')).not.toBeInTheDocument()
     expect(expandButton()).toBeInTheDocument()
+
+    await user.click(expandButton()!)
+    // 附件不被文本窗口吞掉：展开后在详情里逐条渲染。
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    expect(within(details).getByText('https://example.test/a.txt')).toBeInTheDocument()
+    expect(details.querySelector('.thread-tool-output')).toBeNull()
+  })
+
+  it('preserves interleaved text and resource order in the expanded MCP preview', async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <ToolMessageBlock
+        message={message({
+          toolName: 'mcp_server_fetch',
+          rendererKey: 'mcp_server_fetch',
+          contents: [
+            text('before resource'),
+            resource({
+              type: 'file',
+              name: 'a.txt',
+              mime: 'text/plain',
+              data: 'https://example.test/a.txt',
+            }),
+            text('after resource'),
+          ],
+        })}
+      />,
+    )
+
+    // MCP 收起时只有前 5 行的文本流，附件不提前展示。
+    expect(container.querySelector('.thread-tool-output')?.textContent)
+      .toBe('before resource\nafter resource')
+    expect(screen.queryByText('https://example.test/a.txt')).not.toBeInTheDocument()
 
     await user.click(expandButton()!)
     const sequence = Array.from(
@@ -1710,20 +1842,69 @@ describe('ToolMessageBlock resources and approvals', () => {
 })
 
 describe('ToolMessageBlock integrated disclosure boundaries', () => {
-  it('keeps a long bash failure in the same output region when collapsed and expanded', async () => {
+  it('shows an early bash failure outside the tail window in its own slot', async () => {
     const user = userEvent.setup()
     const log = [...Array.from({ length: 30 }, (_, i) => `step-${i}`), '[Command exited with code 2.]'].join('\n')
-    // 真实投影把失败的所有文本合成 errorMessage；不得因此额外展示日志头的错误副本。
+    const tail = log.split('\n').slice(-10).join('\n')
+    // 真实投影把失败的所有文本合成 errorMessage：开头不在尾部窗口里，必须另外给出。
     const { container } = render(<ToolMessageBlock message={message({
       toolName: 'bash', status: 'error', errorMessage: log, contents: [text(log)],
     })} />)
-    expect(container.querySelector('.thread-disclosure-error')).toBeNull()
-    expect(container.querySelector('.thread-tool-output')?.textContent)
-      .toBe(log.split('\n').slice(-10).join('\n'))
+
+    const error = container.querySelector('.thread-disclosure-error-slot .thread-tool-error')
+    expect(error).toHaveTextContent('step-0')
+    expect(error?.textContent).toMatch(/…$/)
+    expect(error).not.toHaveTextContent('[Command exited with code 2.]')
+    expect(container.querySelector('.thread-tool-output')?.textContent).toBe(tail)
+
     await user.click(expandButton()!)
-    expect(container.querySelector('.thread-disclosure-error')).toBeNull()
-    expect(container.querySelector('.thread-tool-output')?.textContent).toBe(log)
-    expect(card()).toHaveClass('is-error')
+    // 展开详情后的完整记录包含退出说明。
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    expect(details.querySelector('.thread-tool-output')?.textContent).toBe(log)
+    expect(details).toHaveTextContent('[Command exited with code 2.]')
+    expect(container.querySelector('.thread-disclosure-error-slot .thread-tool-error')).toHaveTextContent('step-0')
+  })
+
+  it('does not count daemon spool metadata or the timeout note as bash output', async () => {
+    const user = userEvent.setup()
+    const path = '/workspace/logs/captured.log'
+    const note = '[Command timed out after 10 ms and was terminated.]'
+    const lines = Array.from({ length: 12 }, (_, i) => `step-${i}`)
+    const output = [
+      'head',
+      '[... 128 bytes omitted here; the middle of the output is not shown ...]',
+      ...lines,
+      '',
+      `[Full output: 512 bytes, 30 lines. Saved to: ${path}`,
+      'Use read with offset/limit to page through the file, or grep to search it.]',
+      note,
+    ].join('\n')
+    const { container } = render(<ToolMessageBlock message={message({
+      toolName: 'bash', status: 'error', errorMessage: output, contents: [text(output)],
+      details: { process: { outcome: 'TIMED_OUT' }, textOutput: { totalBytes: 512, path } },
+    })} />)
+
+    expect(card()).toHaveAccessibleName('bash: 执行超时')
+    expect(container.querySelector('.thread-disclosure-error-text')).toHaveTextContent(note)
+    const preview = container.querySelector('.thread-disclosure-preview')!
+    expect(preview.querySelector('pre')?.textContent).toBe(lines.slice(-10).join('\n'))
+    expect(preview).toHaveTextContent('更早的输出已省略')
+    expect(preview).not.toHaveTextContent('上方还有')
+    await user.click(expandButton()!)
+    expect(screen.getByRole('region', { name: '完整详情' })).toHaveTextContent(`已保存的日志：${path}`)
+  })
+
+  it('deduplicates a bash failure that is already inside the visible tail window', () => {
+    const output = ['step-1', 'step-2', '[Command exited with code 2.]'].join('\n')
+    const { container } = render(<ToolMessageBlock message={message({
+      toolName: 'bash', status: 'error', errorMessage: '[Command exited with code 2.]',
+      contents: [text(output)],
+    })} />)
+
+    // 失败说明就在可见尾部：不额外占一个错误槽位，输出只呈现一次。
+    expect(container.querySelector('.thread-disclosure-error-slot')).toBeNull()
+    expect(container.querySelector('.thread-tool-output')?.textContent).toBe(output)
+    expect(screen.getAllByText(/Command exited with code 2/)).toHaveLength(1)
   })
 
   it('shares the collapsed 1500-character budget between the error and normal preview', async () => {
@@ -1769,9 +1950,11 @@ describe('ToolMessageBlock integrated disclosure boundaries', () => {
       contents: [text('written hello'), resource({ name: 'artifact.txt', data: 'https://example.test/artifact.txt' })],
     })} />)
     expect(screen.queryByRole('link')).toBeNull()
+    // 成功不用勾选图标宣称；卡片壳始终中性，状态只由 Header 标签与数据属性表达。
+    expect(container.querySelector('.thread-tool-success-icon')).toBeNull()
+    expect(card()).toHaveClass('is-neutral')
     await user.click(expandButton()!)
     expect(container.querySelector('.thread-tool-mutation-success')).toBeNull()
-    expect(container.querySelector('.thread-tool-success-icon')).not.toBeNull()
     expect(screen.getByRole('link', { name: '下载 artifact.txt' })).toBeInTheDocument()
     expect(container).not.toHaveTextContent('written hello')
   })

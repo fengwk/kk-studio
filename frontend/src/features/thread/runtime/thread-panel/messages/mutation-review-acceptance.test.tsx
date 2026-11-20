@@ -34,8 +34,13 @@ function expandSettledTool() {
   }
 }
 
+/** 预览固定为最后 10 个逻辑行，展开详情不改变这个窗口。 */
+function tailPreview(lines: string[]): string {
+  return lines.slice(-10).join('\n')
+}
+
 describe('Slice F 审查与审批组件验收测试', () => {
-  it('write 工具 40+ 行全文完整呈现，保留缩进、空白行与尾随换行', () => {
+  it('write 预览固定为最后 10 行，header 展开详情后完整呈现 40+ 行全文', () => {
     const lines = Array.from({ length: 45 }, (_, i) => {
       if (i === 10) return '    public void methodWithIndent() {'
       if (i === 11) return '        // indented comment'
@@ -74,13 +79,24 @@ describe('Slice F 审查与审批组件验收测试', () => {
     expect(container.querySelector('.thread-tool-summary-detail'))
       .toHaveTextContent('/workspace/Sample.java in /workspace/root')
 
+    // 预览是短窗口：只显示最后 10 个逻辑行，省略的前缀在预览上方给出真实行数。
     const viewport = container.querySelector('.thread-tool-preview-body.is-write')
     expect(viewport).toBeInTheDocument()
     expect(viewport).toHaveClass('thread-tool-output')
-    expect(viewport?.textContent).toBe(fullContent)
+    expect(viewport?.textContent).toBe(tailPreview(lines))
+    expect(screen.getByText('… 上方还有 35 行')).toBeInTheDocument()
+    // 收起时预览之外没有别的材料或错误段。
+    expect(container.querySelector('.thread-tool-details')).toBeNull()
+    expect(container.querySelector('.thread-tool-error')).toBeNull()
 
-    // 审批理由修复 redundant '： —' 且本地化
-    expect(container.querySelector('.thread-tool-approval-note')).toBeNull()
+    // header chevron 打开有界详情：完整正文（缩进、空白行、尾随换行）原样呈现。
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    const details = container.querySelector('.thread-tool-details')
+    expect(details).toBeInTheDocument()
+    expect(details?.textContent).toBe(fullContent)
+    // 展开详情不改变预览配额。
+    expect(container.querySelector('.thread-tool-preview-body.is-write')?.textContent)
+      .toBe(tailPreview(lines))
   })
 
   it('write 空内容正确显示目标路径与空文件标识，不盲批', () => {
@@ -113,7 +129,7 @@ describe('Slice F 审查与审批组件验收测试', () => {
     expect(container.querySelector('.thread-tool-empty-content')).toHaveTextContent('空文件')
   })
 
-  it('edit 流式参数阶段明确标注为输入，不伪造为真实 diff', () => {
+  it('edit 流式参数阶段只把新文本放进预览，旧文本进详情且不伪造 diff', () => {
     const streamingCallMsg: ToolDialogueMessage = {
       id: 'call-edit-stream',
       role: 'tool',
@@ -133,15 +149,21 @@ describe('Slice F 审查与审批组件验收测试', () => {
 
     const { container } = render(<ToolMessageBlock message={streamingCallMsg} />)
 
-    expect(screen.getByText(/流式输入内容/)).toBeInTheDocument()
-    expect(screen.getByText(/原文本/)).toBeInTheDocument()
-    expect(screen.getByText(/新文本/)).toBeInTheDocument()
+    expect(screen.getByText('拟修改内容')).toBeInTheDocument()
+    expect(screen.getByText('新文本：')).toBeInTheDocument()
 
-    const oldBlock = container.querySelector('.thread-tool-preview-body.is-input-old')
+    // 流式预览只显示新文本；旧文本属于详情材料，不占预览配额。
     const newBlock = container.querySelector('.thread-tool-preview-body.is-input-new')
-    expect(oldBlock?.textContent).toBe('const oldVal = 1;')
     expect(newBlock?.textContent).toBe('const newVal = 2;')
+    expect(container.querySelector('.thread-tool-preview-body.is-input-old')).toBeNull()
+    expect(container.querySelector('.thread-tool-details')).toBeNull()
 
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    expect(details).not.toBeNull()
+    expect(within(details).getByText('原文本：')).toBeInTheDocument()
+    expect(within(details).getByText('const oldVal = 1;')).toBeInTheDocument()
+    // 详情也不把输入伪装成真实 diff。
     expect(container.querySelector('.thread-tool-preview-body.is-edit')).toBeNull()
     expect(container.querySelector('.is-added')).toBeNull()
     expect(container.querySelector('.is-removed')).toBeNull()
@@ -176,14 +198,21 @@ describe('Slice F 审查与审批组件验收测试', () => {
     expect(screen.getByText('第 3/3 处修改')).toBeInTheDocument()
     const blocks = container.querySelectorAll('.thread-tool-preview-input-block')
     expect(blocks).toHaveLength(3)
-    // 只有第一条要求整体替换。
+    // 徽标保留：只有第一条要求整体替换。
     expect(blocks[0]?.querySelector('.thread-tool-preview-badge')?.textContent).toBe('替换全部')
     expect(blocks[1]?.querySelector('.thread-tool-preview-badge')).toBeNull()
     expect(blocks[2]?.querySelector('.thread-tool-preview-badge')).toBeNull()
-    expect(blocks[0]?.querySelector('.is-input-old')?.textContent).toBe('const a = 1;')
+    // 预览只显示各条目的新文本。
     expect(blocks[0]?.querySelector('.is-input-new')?.textContent).toBe('const a = 100;')
-    expect(blocks[2]?.querySelector('.is-input-old')?.textContent).toBe('const c = 3;')
     expect(blocks[2]?.querySelector('.is-input-new')?.textContent).toBe('const c = 300;')
+    expect(container.querySelector('.is-input-old')).toBeNull()
+
+    // 将被替换的原文本整体进入详情，供核对。
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    expect(details).not.toBeNull()
+    expect(within(details).getByText('const a = 1;')).toBeInTheDocument()
+    expect(within(details).getByText('const c = 3;')).toBeInTheDocument()
   })
 
   it('真实 editReview 替换多条目输入，只展示后端权威 diff', () => {
@@ -288,7 +317,93 @@ describe('Slice F 审查与审批组件验收测试', () => {
     expect(within(preview as HTMLElement).getByText('+41|const b = 200')).toHaveClass('is-added')
     expect(within(preview as HTMLElement).getByText('@@ -10,3 +10,3 @@')).toHaveClass('is-hunk-header')
 
-    expect(screen.queryByText(/流式输入内容/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/拟修改内容/)).not.toBeInTheDocument()
+  })
+
+  it('edit 审查 diff 的预览同样固定为最后 10 行，完整审查材料在详情里', () => {
+    const diffLines = [
+      '@@ -1,12 +1,12 @@',
+      ...Array.from({ length: 12 }, (_, i) => `-${i + 1}|old line ${i + 1}`),
+    ]
+    const reviewedCallMsg: ToolDialogueMessage = {
+      id: 'call-edit-long-diff',
+      role: 'tool',
+      phase: 'call',
+      subjectEntryId: 'asst-1',
+      toolCallId: 'call-edit-long-diff',
+      toolName: 'edit',
+      rendererKey: 'edit',
+      arguments: JSON.stringify({
+        path: '/src/App.tsx',
+        edits: [{ old_string: 'const a = 1;', new_string: 'const a = 100;' }],
+      }),
+      contents: [],
+      createdAt: Date.parse('2026-10-19T00:00:00Z'),
+      status: 'done',
+      invocationStatus: 'WAITING_APPROVAL',
+      approval: {
+        required: true,
+        decision: null,
+        decisionId: null,
+        reason: null,
+        editReview: {
+          path: '/src/App.tsx',
+          diff: diffLines.join('\n'),
+          sha256: validSha,
+        },
+      },
+    }
+
+    const { container } = render(<ToolMessageBlock message={reviewedCallMsg} />)
+
+    const preview = container.querySelector('.thread-tool-preview-body.is-edit')
+    expect(preview?.textContent).toBe(tailPreview(diffLines))
+    expect(screen.getByText('… 上方还有 3 行')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '展开详情' }))
+    const details = container.querySelector('.thread-tool-details') as HTMLElement
+    expect(details).not.toBeNull()
+    expect(within(details).getByText('@@ -1,12 +1,12 @@')).toHaveClass('is-hunk-header')
+    expect(within(details).getByText('-1|old line 1')).toHaveClass('is-removed')
+    expect(within(details).getByText('-12|old line 12')).toHaveClass('is-removed')
+    // 详情不影响预览窗口。
+    expect(container.querySelector('.thread-tool-preview-body.is-edit')?.textContent)
+      .toBe(tailPreview(diffLines))
+  })
+
+  it('ApprovalCard 的 write 审批默认给完整冻结正文，审查 Diff 收在原生 summary 里', () => {
+    const content = Array.from({ length: 30 }, (_, i) => `line-${i + 1}`).join('\n') + '\n'
+    const frozenReview = {
+      path: '/canonical/Full.txt',
+      diff: '@@ -1,2 +1,2 @@\n-1|previous content\n+1|line-1',
+      sha256: validSha,
+    }
+
+    const { container } = render(
+      <ApprovalCard
+        threadId="thread-1"
+        invocationId="inv-1"
+        toolName="write"
+        argumentsJson={JSON.stringify({ path: '/workspace/Full.txt', content })}
+        approval={{ required: true, editReview: frozenReview }}
+      />,
+      { wrapper },
+    )
+
+    // 审批材料来自冻结参数：完整待写正文，而不是流式前缀或 10 行窗口。
+    const contentView = container.querySelector('.thread-tool-preview-body.is-write')
+    expect(contentView).toBeInTheDocument()
+    expect(contentView?.textContent).toBe(content)
+    expect(contentView).toHaveClass('is-bounded')
+
+    // 冻结 diff 不替换正文，只通过原生 summary 按需展开。
+    const summary = screen.getByText('审查 Diff').closest('summary')
+    expect(summary).not.toBeNull()
+    const details = summary?.closest('details') as HTMLElement | null
+    expect(details).not.toBeNull()
+    expect(container.querySelector('details')).toBe(details)
+    expect(within(details as HTMLElement).getByText('-1|previous content')).toHaveClass('is-removed')
+    expect(within(details as HTMLElement).getByText('+1|line-1')).toHaveClass('is-added')
   })
 
   it('ApprovalCard 缺失或非法 review 禁用 ALLOW，DENY 始终可用', () => {

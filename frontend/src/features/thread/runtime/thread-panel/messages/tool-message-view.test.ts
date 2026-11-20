@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildToolMessageView,
-  toolDefaultExpanded,
 } from '@/features/thread/runtime/thread-panel/messages/tool-message-view'
 import type { ToolDialogueMessage } from '@/features/thread/runtime/thread-timeline/thread-timeline-types'
 
@@ -345,21 +344,5 @@ describe('buildToolMessageView', () => {
 
       expect(view.visualState).toBe('success')
     })
-  })
-})
-
-describe('toolDefaultExpanded', () => {
-  it('expands only write/edit while the mutation review is active', () => {
-    for (const toolName of ['write', 'edit']) {
-      expect(toolDefaultExpanded({ toolName, phase: 'active' })).toBe(true)
-      expect(toolDefaultExpanded({ toolName, phase: 'settled' })).toBe(false)
-    }
-  })
-
-  it('keeps every other tool or phase collapsed until the user chooses', () => {
-    for (const toolName of ['bash', 'task', 'ask_user', 'read', 'grep', 'find', 'mcp__server__tool']) {
-      expect(toolDefaultExpanded({ toolName, phase: 'active' })).toBe(false)
-      expect(toolDefaultExpanded({ toolName, phase: 'settled' })).toBe(false)
-    }
   })
 })
