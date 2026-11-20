@@ -76,7 +76,7 @@ import java.util.concurrent.atomic.AtomicInteger;
  * <ol>
  *   <li>计划到写入之间被删除的依赖 Agent 不会改变插件配置修订，必须由事务内的依赖重检发现；此时此前写入的 provider 行与插件配置全部回滚，且没有任何 afterCommit
  *       通知。
- *   <li>普通配置导入（秘密补丁恒为空）改变静态密钥的目标地址时，已保存的密钥被删除，绝不把它带到新目标。通知只在提交后触发，事务内不可观测。
+ *   <li>普通配置导入（秘密补丁恒为空）改变静态密钥的目标地址时，必须明确授权才删除已保存的密钥，绝不把它带到新目标。通知只在提交后触发，事务内不可观测。
  * </ol>
  *
  * <p>合成 Plugin 只用公共 API 声明普通值、秘密与依赖，不引用任何具体插件实现，也不访问网络或真实凭据。
@@ -226,9 +226,9 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     assertEquals(0, catalogWakes.get(), "a rolled back import must not notify the catalog");
   }
 
-  /** 普通导入改变静态密钥的目标地址：已保存的密钥被删除；通知只在提交后各发生一次。 */
+  /** 未授权则整体回滚；已确认的认证目标变化才清除凭据并在提交后通知。 */
   @Test
-  void ordinaryImportWithAChangedEndpointDropsTheStaticKey() {
+  void ordinaryImportWithAChangedEndpointRequiresConfirmation() {
     seedCatalog();
     new TransactionTemplate(transactionManager)
         .execute(
@@ -237,7 +237,8 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
                     STATIC_PLUGIN_ID,
                     1L,
                     VALUES_V1,
-                    Map.of("apiKey", SecretUpdate.set(SYNTHETIC_SECRET))));
+                    Map.of("apiKey", SecretUpdate.set(SYNTHETIC_SECRET)),
+                    false));
     assertEquals(
         "{\"apiKey\":\"" + SYNTHETIC_SECRET + "\"}",
         credentialRepository.find(STATIC_PLUGIN_ID).orElseThrow().payloadJson());
@@ -246,12 +247,34 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
 
     // 导入只带普通值（无秘密字段）且秘密补丁恒为空：不复制、不恢复任何凭据。
     ConfigSyncPlan plan =
-        plan(List.of(), List.of(new ConfigSyncPlan.PluginImport(STATIC_PLUGIN_ID, 2L, VALUES_V2)));
+        plan(
+            List.of(providerSpec(PROVIDER_NAME)),
+            List.of(new ConfigSyncPlan.PluginImport(STATIC_PLUGIN_ID, 2L, VALUES_V2)));
+    PluginConfigurationRow before = configurationRepository.find(STATIC_PLUGIN_ID).orElseThrow();
+    ConfigSyncSnapshot snapshot =
+        ConfigSyncFixtures.snapshotWithPlugins(
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(before));
+    assertEquals(List.of(STATIC_PLUGIN_ID), applier.pluginCredentialResets(plan, snapshot));
+    assertFalse(configurationService.wouldResetCredentials(before, VALUES_V1));
+    DomainException error = assertThrows(DomainException.class, () -> applyInTransaction(plan));
+    assertEquals("PLUGIN_CREDENTIAL_RESET_CONFIRMATION", error.reason());
+    assertEquals(0L, count("select count(*) from provider where name = '" + PROVIDER_NAME + "'"));
+    assertEquals(before, configurationRepository.find(STATIC_PLUGIN_ID).orElseThrow());
+    assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isPresent());
+    assertEquals(catalogWakesBeforeImport, catalogWakes.get());
+    assertEquals(dispatcherWakesBeforeImport, dispatcherWakes.get());
     AtomicBoolean notifiedInsideTransaction = new AtomicBoolean();
     new TransactionTemplate(transactionManager)
         .execute(
             status -> {
-              applier.apply(plan, List.of());
+              applier.apply(plan, List.of(), Set.of(STATIC_PLUGIN_ID));
               notifiedInsideTransaction.set(
                   dispatcherWakes.get() > dispatcherWakesBeforeImport
                       || catalogWakes.get() > catalogWakesBeforeImport);
@@ -264,6 +287,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     assertEquals(catalogWakesBeforeImport + 1, catalogWakes.get());
     assertEquals(dispatcherWakesBeforeImport + 1, dispatcherWakes.get());
     assertTrue(credentialRepository.find(STATIC_PLUGIN_ID).isEmpty());
+    assertEquals(List.of(), applier.pluginCredentialResets(plan, snapshot));
     PluginConfigurationRow current = configurationRepository.find(STATIC_PLUGIN_ID).orElseThrow();
     assertEquals(3L, current.version());
     assertEquals(VALUES_V2, current.valuesJson());
@@ -282,7 +306,7 @@ class ConfigSyncPluginImportPostgresIntegrationTest {
     new TransactionTemplate(transactionManager)
         .execute(
             status -> {
-              applier.apply(plan, List.of());
+              applier.apply(plan, List.of(), Set.of());
               return null;
             });
   }

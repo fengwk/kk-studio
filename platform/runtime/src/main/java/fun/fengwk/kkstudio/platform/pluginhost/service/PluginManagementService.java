@@ -118,10 +118,11 @@ public final class PluginManagementService {
       String pluginId,
       long expectedVersion,
       String valuesJson,
-      Map<String, SecretUpdate> secretPatch) {
+      Map<String, SecretUpdate> secretPatch,
+      boolean confirmCredentialReset) {
     Plugin plugin = requirePlugin(pluginId);
     configurationService.configure(
-        pluginId, expectedVersion, valuesJson, canonicalPatch(secretPatch));
+        pluginId, expectedVersion, valuesJson, canonicalPatch(secretPatch), confirmCredentialReset);
     return describe(plugin);
   }
 
@@ -348,6 +349,8 @@ public final class PluginManagementService {
       secrets.put(entry.getKey(), secret);
     }
     configuration.setSecrets(secrets);
+    configuration.setCredentialContextFields(
+        plugin.authenticationSpec().contextFields().stream().sorted().toList());
     return configuration;
   }
 

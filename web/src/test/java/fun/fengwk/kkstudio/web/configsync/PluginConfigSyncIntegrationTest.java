@@ -134,7 +134,7 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
         withStalePlugin(planFor(ROLLBACK_PROVIDER, List.of(first, second)), second);
     ConfigSyncSnapshot before = snapshotReader.read();
 
-    assertThrows(DomainException.class, () -> applier.apply(tampered, List.of()));
+    assertThrows(DomainException.class, () -> applier.apply(tampered, List.of(), Set.of()));
 
     ConfigSyncSnapshot after = snapshotReader.read();
     assertEquals(
@@ -156,9 +156,9 @@ class PluginConfigSyncIntegrationTest extends ConfigSyncTestSupport {
 
     // 并发写入：按计划期的版本保存一次普通配置。
     pluginManagementService.updateConfiguration(
-        pluginId, row.version(), row.valuesJson(), Map.of());
+        pluginId, row.version(), row.valuesJson(), Map.of(), false);
 
-    assertThrows(DomainException.class, () -> applier.apply(plan, List.of()));
+    assertThrows(DomainException.class, () -> applier.apply(plan, List.of(), Set.of()));
 
     ConfigSyncSnapshot after = snapshotReader.read();
     assertEquals(row.version() + 1, pluginRow(after, pluginId).version());

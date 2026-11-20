@@ -440,7 +440,8 @@ class PluginHttpWireContractTest {
     String valuesJson =
         "{\"limits\":{\"maxTokens\":9007199254740993123456789,"
             + "\"temperature\":1.230000},\"weight\":1E+1000}";
-    when(pluginManagementService.updateConfiguration(eq("alpha-none"), eq(1L), any(), any()))
+    when(pluginManagementService.updateConfiguration(
+            eq("alpha-none"), eq(1L), any(), any(), eq(false)))
         .thenReturn(nonePlugin());
 
     MockHttpServletResponse response =
@@ -460,7 +461,7 @@ class PluginHttpWireContractTest {
     assertEquals(200, response.getStatus());
     ArgumentCaptor<String> submitted = ArgumentCaptor.forClass(String.class);
     verify(pluginManagementService)
-        .updateConfiguration(eq("alpha-none"), eq(1L), submitted.capture(), any());
+        .updateConfiguration(eq("alpha-none"), eq(1L), submitted.capture(), any(), eq(false));
     assertEquals(valuesJson, submitted.getValue());
     assertTrue(submitted.getValue().contains("9007199254740993123456789"));
     assertTrue(submitted.getValue().contains("1.230000"));
@@ -505,7 +506,8 @@ class PluginHttpWireContractTest {
   void httpGoldenNeverCarriesCredentialMaterial() throws Exception {
     when(pluginManagementService.listPlugins()).thenReturn(pluginCatalogue());
 
-    String body = bodyText(listPlugins());
+    // 豁免明确允许的元数据键，不豁免它的值或其他携带凭据的内容。
+    String body = bodyText(listPlugins()).replace("\"credentialContextFields\":", "");
 
     for (String forbidden :
         List.of(

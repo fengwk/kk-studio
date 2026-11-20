@@ -88,7 +88,7 @@ class PluginConfigurationServiceTest {
   /** 只改普通值：CAS 写入、发出通知，只唤醒目录刷新；configure 见到候选修订。 */
   @Test
   void savesOrdinaryValuesWithoutTouchingCredentials() {
-    assertEquals(4L, service.configure(STATIC_ID, 3L, VALUES_A, Map.of()));
+    assertEquals(4L, service.configure(STATIC_ID, 3L, VALUES_A, Map.of(), false));
 
     verify(agentDependencies).requireDeclaredAgents(STATIC_ID, 4L, VALUES_A);
     verify(configurations).update(STATIC_ID, 3L, VALUES_A);
@@ -102,13 +102,13 @@ class PluginConfigurationServiceTest {
   /** SET 写入只含声明字段的新载荷，候选凭据先交给 configure 校验；CLEAR 最后一个字段删除凭据。 */
   @Test
   void secretPatchWritesOrRemovesTheCredential() {
-    service.configure(STATIC_ID, 3L, VALUES_A, Map.of("apiKey", SecretUpdate.set("k1")));
+    service.configure(STATIC_ID, 3L, VALUES_A, Map.of("apiKey", SecretUpdate.set("k1")), false);
     verify(credentials).upsertConnected(STATIC_ID, "{\"apiKey\":\"k1\"}", null, null, null);
     assertEquals("{\"apiKey\":\"k1\"}", staticPlugin.lastCandidate.payloadJson());
     assertEquals(1, credentialWakes.get());
 
     when(credentials.find(STATIC_ID)).thenReturn(Optional.of(credential("{\"apiKey\":\"k1\"}")));
-    service.configure(STATIC_ID, 3L, VALUES_A, Map.of("apiKey", SecretUpdate.clear()));
+    service.configure(STATIC_ID, 3L, VALUES_A, Map.of("apiKey", SecretUpdate.clear()), false);
     verify(credentials).delete(STATIC_ID);
     assertNull(staticPlugin.lastCandidate);
   }
@@ -123,7 +123,8 @@ class PluginConfigurationServiceTest {
         STATIC_ID,
         3L,
         VALUES_A,
-        Map.of("apiKey", SecretUpdate.keep(), "region", SecretUpdate.set("eu")));
+        Map.of("apiKey", SecretUpdate.keep(), "region", SecretUpdate.set("eu")),
+        false);
 
     verify(credentials)
         .upsertConnected(STATIC_ID, "{\"apiKey\":\"k1\",\"region\":\"eu\"}", null, null, null);
@@ -135,20 +136,33 @@ class PluginConfigurationServiceTest {
     when(credentials.find(STATIC_ID))
         .thenReturn(Optional.of(credential("{\"apiKey\":\"k1\",\"region\":\"eu\"}")));
 
-    service.configure(STATIC_ID, 3L, VALUES_B, Map.of());
+    // 即使重新录入一个秘密，也不能静默丢弃其他旧字段。
+    Map<String, SecretUpdate> replacement = Map.of("apiKey", SecretUpdate.set("k2"));
+    DomainException error =
+        assertThrows(
+            DomainException.class,
+            () -> service.configure(STATIC_ID, 3L, VALUES_B, replacement, false));
+    assertEquals("PLUGIN_CREDENTIAL_RESET_CONFIRMATION", error.reason());
+    verify(configurations, never()).notifyChanged(anyString());
+    verify(credentials, never()).delete(anyString());
+    assertEquals(0, credentialWakes.get());
+
+    service.configure(STATIC_ID, 3L, VALUES_B, Map.of(), true);
     verify(credentials).delete(STATIC_ID);
 
-    service.configure(STATIC_ID, 3L, VALUES_B, Map.of("apiKey", SecretUpdate.set("k2")));
+    service.configure(STATIC_ID, 3L, VALUES_B, replacement, true);
     verify(credentials).upsertConnected(STATIC_ID, "{\"apiKey\":\"k2\"}", null, null, null);
   }
 
   /** 修订不匹配（读取时或 CAS 时）都是版本冲突，不发出通知。 */
   @Test
   void staleRevisionIsAConflict() {
-    assertThrows(DomainException.class, () -> service.configure(STATIC_ID, 2L, VALUES_A, null));
+    assertThrows(
+        DomainException.class, () -> service.configure(STATIC_ID, 2L, VALUES_A, null, false));
 
     when(configurations.update(STATIC_ID, 3L, VALUES_A)).thenReturn(false);
-    assertThrows(DomainException.class, () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of()));
+    assertThrows(
+        DomainException.class, () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of(), false));
     verify(configurations, never()).notifyChanged(anyString());
     assertEquals(0, catalogWakes.get());
   }
@@ -161,7 +175,8 @@ class PluginConfigurationServiceTest {
             + " ".repeat(PluginConfig.MAX_VALUES_UTF8_BYTES)
             + "\"endpoint\":\"https://a.example\"}";
 
-    assertThrows(DomainException.class, () -> service.configure(STATIC_ID, 3L, padded, Map.of()));
+    assertThrows(
+        DomainException.class, () -> service.configure(STATIC_ID, 3L, padded, Map.of(), false));
     verify(configurations, never()).update(anyString(), anyLong(), anyString());
   }
 
@@ -174,7 +189,7 @@ class PluginConfigurationServiceTest {
             + "\"temperature\":1.230000,"
             + "\"weight\":1E+1000}";
 
-    service.configure(STATIC_ID, 3L, values, Map.of());
+    service.configure(STATIC_ID, 3L, values, Map.of(), false);
 
     String stored = staticPlugin.lastConfig.valuesJson();
     assertTrue(stored.contains("\"maxTokens\":9007199254740993123456789"), stored);
@@ -185,19 +200,27 @@ class PluginConfigurationServiceTest {
   /** 未安装 Plugin、非法值、未声明的秘密字段、交互凭据补丁与插件拒绝都在写入前失败。 */
   @Test
   void rejectsInvalidRequestsBeforeWriting() {
-    assertThrows(DomainException.class, () -> service.configure("ghost", 1L, "{}", Map.of()));
+    assertThrows(
+        DomainException.class, () -> service.configure("ghost", 1L, "{}", Map.of(), false));
     assertThrows(
         DomainException.class,
-        () -> service.configure(STATIC_ID, 3L, "{\"endpoint\":1}", Map.of()));
+        () -> service.configure(STATIC_ID, 3L, "{\"endpoint\":1}", Map.of(), false));
     assertThrows(
         DomainException.class,
-        () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of("other", SecretUpdate.set("x"))));
+        () ->
+            service.configure(
+                STATIC_ID, 3L, VALUES_A, Map.of("other", SecretUpdate.set("x")), false));
     assertThrows(
         DomainException.class,
-        () -> service.configure(DEEPLINK_ID, 1L, "{}", Map.of("token", SecretUpdate.set("x"))));
-    staticPlugin.reject = true;
-    assertThrows(DomainException.class, () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of()));
+        () ->
+            service.configure(
+                DEEPLINK_ID, 1L, "{}", Map.of("token", SecretUpdate.set("x")), false));
     verify(configurations, never()).update(anyString(), anyLong(), anyString());
+    staticPlugin.reject = true;
+    assertThrows(
+        DomainException.class, () -> service.configure(STATIC_ID, 3L, VALUES_A, Map.of(), false));
+    verify(configurations, never()).notifyChanged(anyString());
+    assertEquals(0, catalogWakes.get());
   }
 
   /** 登录完成写入交互凭据，断连删除凭据，二者都唤醒目录与刷新调度。 */

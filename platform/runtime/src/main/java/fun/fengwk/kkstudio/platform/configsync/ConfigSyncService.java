@@ -81,7 +81,8 @@ public class ConfigSyncService {
         created.add(ref);
       }
     }
-    return new ConfigSyncImportCheckDTO(created, updated, plan.skipped());
+    return new ConfigSyncImportCheckDTO(
+        created, updated, plan.skipped(), applier.pluginCredentialResets(plan, snapshot));
   }
 
   /** 重新校验并在事务外准备所有 Git 归档后事务导入；跳过项必须获得显式部分导入授权。 */
@@ -96,6 +97,9 @@ public class ConfigSyncService {
     if (plan.imported().isEmpty()) {
       return new ConfigSyncImportResultDTO(plan.imported(), plan.skipped());
     }
+    List<String> confirmed = request.getConfirmedPluginCredentialResets();
+    Set<String> confirmedPluginCredentialResets =
+        confirmed == null ? Set.of() : new HashSet<>(confirmed);
     List<PreparedGitImport> preparedSkills = new ArrayList<>();
     boolean committed = false;
     try {
@@ -108,7 +112,7 @@ public class ConfigSyncService {
                 skill.branch(),
                 skill.token()));
       }
-      applier.apply(plan, preparedSkills);
+      applier.apply(plan, preparedSkills, confirmedPluginCredentialResets);
       committed = true;
     } catch (DomainException error) {
       if (error.code() != DomainErrorCode.VALIDATION) {

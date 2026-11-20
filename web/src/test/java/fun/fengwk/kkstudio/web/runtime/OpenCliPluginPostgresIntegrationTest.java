@@ -183,7 +183,7 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginConfigurationService configuration = configurationService(context, runtime);
 
               configuration.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")), false);
 
               assertEquals(
                   PluginCredentialStatus.CONNECTED,
@@ -216,12 +216,12 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
               configuration.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")), false);
 
               try (PluginCatalogRuntime.Lease oldLease = runtime.acquire()) {
                 CanvasFunctionAdapter oldAdapter = adapter(oldLease);
                 configuration.configure(
-                    PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.set("key-2")));
+                    PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.set("key-2")), false);
 
                 submit(oldAdapter, "leased instance");
                 try (PluginCatalogRuntime.Lease newLease = runtime.acquire()) {
@@ -251,11 +251,11 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
               configuration.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")), false);
 
               try (PluginCatalogRuntime.Lease oldLease = runtime.acquire()) {
                 CanvasFunctionAdapter oldAdapter = adapter(oldLease);
-                configuration.configure(PLUGIN_ID, 2L, moved, Map.of());
+                configuration.configure(PLUGIN_ID, 2L, moved, Map.of(), true);
 
                 assertTrue(credentialRepository.find(PLUGIN_ID).isEmpty());
                 assertThrows(
@@ -347,13 +347,13 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
               PluginConfigurationService configuration = configurationService(context, runtime);
               configuration.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("key-1")), false);
 
               try (PluginCatalogRuntime.Lease oldLease = runtime.acquire()) {
                 CanvasFunctionAdapter oldAdapter = adapter(oldLease);
                 submit(oldAdapter, "before clear");
                 configuration.configure(
-                    PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.clear()));
+                    PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.clear()), false);
 
                 assertTrue(credentialRepository.find(PLUGIN_ID).isEmpty());
                 assertThrows(
@@ -393,7 +393,7 @@ class OpenCliPluginPostgresIntegrationTest {
               PluginManagementService management = managementService(registry, runtime, pending);
 
               pending.configure(
-                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("check-key")));
+                  PLUGIN_ID, 1L, values, Map.of("apiKey", SecretUpdate.set("check-key")), false);
               assertThrows(DomainException.class, () -> management.checkConnection(PLUGIN_ID, 2L));
 
               runtime.refresh();
@@ -412,7 +412,8 @@ class OpenCliPluginPostgresIntegrationTest {
               assertEquals("/api/resources/dates", requests.get(0).path());
               assertEquals("Bearer check-key", requests.get(0).authorization());
 
-              pending.configure(PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.clear()));
+              pending.configure(
+                  PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.clear()), false);
               runtime.refresh();
               PluginConnectionCheckDTO revoked = management.checkConnection(PLUGIN_ID, 3L);
               assertEquals(
@@ -446,7 +447,8 @@ class OpenCliPluginPostgresIntegrationTest {
                       + "\"seedance\":{\"workspaceId\":\"workspace-main\"}}",
                   Map.of(
                       "apiKey", SecretUpdate.set(HTTP_GOLDEN_API_KEY),
-                      "instanceId", SecretUpdate.set(HTTP_GOLDEN_INSTANCE_ID)));
+                      "instanceId", SecretUpdate.set(HTTP_GOLDEN_INSTANCE_ID)),
+                  false);
 
               assertSame(HTTP_MAPPER, HTTP_CONVERTER.getMapper());
               MockMvc mockMvc =
@@ -489,7 +491,11 @@ class OpenCliPluginPostgresIntegrationTest {
                   managementService(registry, runtime, configuration);
 
               configuration.configure(
-                  PLUGIN_ID, 1L, values, Map.of("instanceId", SecretUpdate.set(privateIdentity)));
+                  PLUGIN_ID,
+                  1L,
+                  values,
+                  Map.of("instanceId", SecretUpdate.set(privateIdentity)),
+                  false);
               PluginDTO privateOnly = management.getPlugin(PLUGIN_ID);
               assertEquals(PluginCredentialStatus.NOT_CONNECTED, privateOnly.getStatus());
               PluginConfigurationDTO projected = privateOnly.getConfiguration();
@@ -498,7 +504,7 @@ class OpenCliPluginPostgresIntegrationTest {
               assertFalse(projected.getSecrets().get("apiKey").isConfigured());
 
               configuration.configure(
-                  PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.set("key-1")));
+                  PLUGIN_ID, 2L, values, Map.of("apiKey", SecretUpdate.set("key-1")), false);
               assertEquals(
                   PluginCredentialStatus.CONNECTED, management.getPlugin(PLUGIN_ID).getStatus());
               try (PluginCatalogRuntime.Lease lease = runtime.acquire()) {
@@ -510,7 +516,7 @@ class OpenCliPluginPostgresIntegrationTest {
                   requests.get(0).body().contains("\"instanceId\":\"" + privateIdentity + "\""));
 
               configuration.configure(
-                  PLUGIN_ID, 3L, values, Map.of("apiKey", SecretUpdate.clear()));
+                  PLUGIN_ID, 3L, values, Map.of("apiKey", SecretUpdate.clear()), false);
               assertTrue(credentialRepository.find(PLUGIN_ID).isPresent());
               assertEquals(
                   PluginCredentialStatus.NOT_CONNECTED,

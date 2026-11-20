@@ -211,9 +211,9 @@ class PluginManagementServiceTest {
                     1L)));
     stored(STATIC_ID, 3L);
 
-    PluginDTO dto = service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of());
+    PluginDTO dto = service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of(), false);
 
-    verify(configurationService).configure(STATIC_ID, 2L, "{}", Map.of());
+    verify(configurationService).configure(STATIC_ID, 2L, "{}", Map.of(), false);
     assertEquals(PluginCredentialStatus.NOT_CONNECTED, dto.getStatus());
     assertEquals(3L, dto.getConfiguration().getVersion());
     assertEquals(2L, dto.getAppliedVersion());
@@ -225,15 +225,16 @@ class PluginManagementServiceTest {
   @Test
   void validatesSecretPatchFieldNamesBeforeSaving() {
     String secret = "sensitive-patch-marker";
-    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.set(secret)));
+    service.updateConfiguration(
+        STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.set(secret)), false);
     verify(configurationService)
-        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.set(secret)));
-    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.keep()));
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.set(secret)), false);
+    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.keep()), false);
     verify(configurationService)
-        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.keep()));
-    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.clear()));
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.keep()), false);
+    service.updateConfiguration(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.clear()), false);
     verify(configurationService)
-        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.clear()));
+        .configure(STATIC_ID, 2L, "{}", Map.of("apiKey", SecretUpdate.clear()), false);
 
     Map<String, SecretUpdate> nullEntry = new HashMap<>();
     nullEntry.put("apiKey", null);
@@ -242,7 +243,7 @@ class PluginManagementServiceTest {
       DomainException error =
           assertThrows(
               DomainException.class,
-              () -> service.updateConfiguration(STATIC_ID, 2L, "{}", invalid));
+              () -> service.updateConfiguration(STATIC_ID, 2L, "{}", invalid, false));
       assertFalse(error.toString().contains(secret));
     }
   }

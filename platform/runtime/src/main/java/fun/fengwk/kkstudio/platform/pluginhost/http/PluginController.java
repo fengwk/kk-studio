@@ -66,7 +66,8 @@ public class PluginController {
             pluginId,
             requireExpectedVersion(request.getExpectedVersion()),
             request.getValuesJson(),
-            request.getSecretPatch());
+            request.getSecretPatch(),
+            Boolean.TRUE.equals(request.getConfirmCredentialReset()));
     HttpStatus status = plugin.getApplicationError() == null ? HttpStatus.OK : HttpStatus.ACCEPTED;
     return ResponseEntity.status(status).header(HttpHeaders.CACHE_CONTROL, NO_STORE).body(plugin);
   }

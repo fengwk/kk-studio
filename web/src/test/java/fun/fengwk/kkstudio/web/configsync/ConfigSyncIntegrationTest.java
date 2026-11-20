@@ -56,6 +56,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -222,6 +223,8 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     MvcResult existingResult = checkRequest(existingYaml);
     JsonNode existingCheck = data(existingResult);
     assertTrue(existingCheck.path("created").isEmpty());
+    assertTrue(existingCheck.path("pluginCredentialResets").isArray());
+    assertTrue(existingCheck.path("pluginCredentialResets").isEmpty());
     assertTrue(existingCheck.path("updated").findValuesAsString("name").contains(existing));
     String existingBody = body(existingResult);
     assertFalse(
@@ -831,7 +834,7 @@ class ConfigSyncIntegrationTest extends ConfigSyncTestSupport {
     JsonNode concurrent = getData("/api/platform/settings");
 
     DomainException conflict =
-        assertThrows(DomainException.class, () -> applier.apply(plan, List.of()));
+        assertThrows(DomainException.class, () -> applier.apply(plan, List.of(), Set.of()));
     assertEquals(DomainErrorCode.VERSION_CONFLICT, conflict.code());
 
     assertNull(findProvider(name), "writes preceding the settings CAS must be rolled back");

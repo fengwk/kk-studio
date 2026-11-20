@@ -17,7 +17,9 @@ function tokenHash(token) {
 }
 
 function assertImportCheck(data) {
-  assertExactFields(data, ['created', 'updated', 'skipped'], 'import check')
+  assertExactFields(data, ['created', 'updated', 'skipped', 'pluginCredentialResets'], 'import check')
+  assert(Array.isArray(data.pluginCredentialResets), 'credential resets must be an array')
+  assert(data.pluginCredentialResets.every((id) => typeof id === 'string'), 'credential resets must contain only plugin IDs')
   for (const key of ['created', 'updated', 'skipped']) {
     assert(Array.isArray(data[key]), `import check ${key} must be an array`)
     for (const item of data[key]) {
@@ -258,6 +260,7 @@ registerCase({
       assert(headers.get('cache-control') === 'no-store', 'precheck must be no-store')
       assert(check.created.some((item) => item.kind === 'providers' && item.name === name), 'check must list new provider')
       assert(check.updated.length === 0, 'new provider must not be an overwrite')
+      assert(check.pluginCredentialResets.length === 0, 'provider-only import must not reset plugin credentials')
       assert(check.skipped.some((item) => item.name === 'futureConfig'), 'unknown category must be reported')
       assert(!JSON.stringify(check).includes(secret), 'precheck must not echo credential')
       assert(!(await providerList()).some((provider) => provider.name === name), 'precheck must not create provider')

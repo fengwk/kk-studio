@@ -17,4 +17,7 @@ public class ConfigSyncImportCheckDTO {
   private List<ConfigSyncRef> updated;
 
   private List<ConfigSyncSkipped> skipped;
+
+  /** 已有本机凭据且导入会改变认证目标的插件 ID，按 ID 排序。 */
+  private List<String> pluginCredentialResets;
 }

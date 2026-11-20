@@ -168,7 +168,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
             DomainException.class,
             () ->
                 configurationService.configure(
-                    DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING_GHOST, Map.of()));
+                    DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING_GHOST, Map.of(), false));
 
     assertEquals("plugins reference a missing agent", error.getMessage());
     assertTrue(error.getCause() == null, "the dependency failure must not carry a cause");
@@ -184,7 +184,8 @@ class PluginAgentDependencyPostgresIntegrationTest {
     seedAgentModel();
     assertTrue(definitionRepository.create(agent(DECLARED_AGENT)));
     assertEquals(
-        2L, configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of()));
+        2L,
+        configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of(), false));
 
     assertEquals(VALUES_DECLARING, currentValues());
     assertEquals(1, catalogWakes.get());
@@ -196,7 +197,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   void deleteRejectsAnAgentReferencedByTheDesiredPluginConfiguration() {
     seedAgentModel();
     assertTrue(definitionRepository.create(agent(DECLARED_AGENT)));
-    configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
+    configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of(), false);
 
     DomainException error =
         assertThrows(DomainException.class, () -> deleteInTransaction(DECLARED_AGENT, 0L));
@@ -211,8 +212,8 @@ class PluginAgentDependencyPostgresIntegrationTest {
   void deleteSucceedsAfterTheDeclaringConfigurationIsRemoved() {
     seedAgentModel();
     assertTrue(definitionRepository.create(agent(DECLARED_AGENT)));
-    configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
-    configurationService.configure(DECLARING_PLUGIN_ID, 2L, VALUES_NO_DECLARATION, Map.of());
+    configurationService.configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of(), false);
+    configurationService.configure(DECLARING_PLUGIN_ID, 2L, VALUES_NO_DECLARATION, Map.of(), false);
 
     deleteInTransaction(DECLARED_AGENT, 0L);
 
@@ -240,7 +241,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
           executor.submit(
               () ->
                   configurationServiceWith(gatedDependencies)
-                      .configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of()));
+                      .configure(DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of(), false));
       awaitLatch(saveLockHeld, "the save must reach the Agent row lock before the delete starts");
 
       Future<DomainException> delete =
@@ -303,7 +304,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
               () -> {
                 try {
                   configurationService.configure(
-                      DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of());
+                      DECLARING_PLUGIN_ID, 1L, VALUES_DECLARING, Map.of(), false);
                   return null;
                 } catch (DomainException error) {
                   return error;

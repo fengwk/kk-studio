@@ -582,6 +582,7 @@ export interface ConfigSyncImportCheckDTO {
   created: ConfigSyncRef[]
   updated: ConfigSyncRef[]
   skipped: ConfigSyncSkipped[]
+  pluginCredentialResets: string[]
 }
 
 /** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportCheckRequestDTO */
@@ -593,6 +594,7 @@ export interface ConfigSyncImportCheckRequestDTO {
 export interface ConfigSyncImportRequestDTO {
   yaml: string
   allowPartial?: boolean | null
+  confirmedPluginCredentialResets?: string[] | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.configsync.dto.ConfigSyncImportResultDTO */
@@ -2188,6 +2190,7 @@ export interface PluginConfigurationDTO {
   valuesSchema: unknown
   defaults: unknown
   secrets: Record<string, PluginSecretProjectionDTO>
+  credentialContextFields: string[]
 }
 
 /** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConfigurationUpdateRequestDTO */
@@ -2195,6 +2198,7 @@ export interface PluginConfigurationUpdateRequestDTO {
   expectedVersion: string
   valuesJson: string
   secretPatch?: Record<string, SecretUpdate> | null
+  confirmCredentialReset?: boolean | null
 }
 
 /** Java：fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.Authentication */

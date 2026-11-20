@@ -29,14 +29,17 @@ import fun.fengwk.kkstudio.platform.catalog.skill.SkillCatalogService.PreparedGi
 import fun.fengwk.kkstudio.platform.environment.Environment;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentRepository;
 import fun.fengwk.kkstudio.platform.environment.EnvironmentService;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginConfigurationService;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsService;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsSectionsDTO;
 import fun.fengwk.kkstudio.platform.settings.dto.SystemSettingsUpdateDTO;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 在一个数据库事务内落地 {@link ConfigSyncPlan}。
@@ -83,9 +86,28 @@ public class ConfigSyncApplier {
   private final PluginConfigurationService pluginConfigurationService;
   private final PluginAgentDependencies pluginAgentDependencies;
 
+  /** 仅检查计划中可导入的插件；凭据状态不纳入可导出的配置快照。 */
+  List<String> pluginCredentialResets(ConfigSyncPlan plan, ConfigSyncSnapshot snapshot) {
+    Map<String, PluginConfigurationRow> current = new HashMap<>();
+    for (PluginConfigurationRow row : snapshot.plugins()) {
+      current.put(row.pluginId(), row);
+    }
+    return plan.plugins().stream()
+        .filter(
+            plugin ->
+                pluginConfigurationService.wouldResetCredentials(
+                    current.get(plugin.pluginId()), plugin.valuesJson()))
+        .map(ConfigSyncPlan.PluginImport::pluginId)
+        .sorted()
+        .toList();
+  }
+
   /** 事务内写入计划中的全部事实。 */
   @Transactional
-  public void apply(ConfigSyncPlan plan, List<PreparedGitImport> preparedSkills) {
+  public void apply(
+      ConfigSyncPlan plan,
+      List<PreparedGitImport> preparedSkills,
+      Set<String> confirmedPluginCredentialResets) {
     lockImport();
     applyProviders(plan.providers());
     applyModels(plan.models());
@@ -103,7 +125,7 @@ public class ConfigSyncApplier {
     }
     applyEnvironments(plan.environments());
     applyAgents(plan.agents());
-    applyPlugins(plan);
+    applyPlugins(plan, confirmedPluginCredentialResets);
     if (plan.settings() != null) {
       applySettings(plan.settings());
     }
@@ -200,7 +222,7 @@ public class ConfigSyncApplier {
    *
    * <p>导入只承载普通值，秘密补丁恒为空（全部 KEEP），因此绝不复制或恢复任何凭据。
    */
-  private void applyPlugins(ConfigSyncPlan plan) {
+  private void applyPlugins(ConfigSyncPlan plan, Set<String> confirmedPluginCredentialResets) {
     // 计划到写入之间删除的 Agent 无法被配置版本 CAS 发现：先按同一声明批量预锁，再开始任何插件写入。
     pluginAgentDependencies.requireDeclaredAgents(
         plan.plugins().stream()
@@ -211,7 +233,11 @@ public class ConfigSyncApplier {
             .toList());
     for (ConfigSyncPlan.PluginImport plugin : plan.plugins()) {
       pluginConfigurationService.configure(
-          plugin.pluginId(), plugin.expectedVersion(), plugin.valuesJson(), Map.of());
+          plugin.pluginId(),
+          plugin.expectedVersion(),
+          plugin.valuesJson(),
+          Map.of(),
+          confirmedPluginCredentialResets.contains(plugin.pluginId()));
     }
   }
 
