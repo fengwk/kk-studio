@@ -1,6 +1,6 @@
 import {
   useCallback,
-  useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -16,7 +16,7 @@ import { LoadingSpinner } from '@/shared/ui/feedback/LoadingSpinner'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type { ApplicationEventConnectionState } from '@/shared/app-events/connection'
 import type { IdeEnvironmentInfo } from '@/features/environment/ide/ide-panel-context'
-import type { IdeViewState } from '@/features/environment/ide/ide-view-state'
+import { isSameBinding, type IdeViewState } from '@/features/environment/ide/ide-view-state'
 import type { IdeBrowserSessionStatus } from '@/features/environment/ide/ide-browser-session'
 import { IdePanelStatusBanners } from '@/features/environment/ide/IdePanelStatusBanners'
 import './ide-overlay-panel.css'
@@ -113,29 +113,29 @@ export function IdeOverlayPanel({
   const [directoryPending, setDirectoryPending] = useState(false)
   const [directoryError, setDirectoryError] = useState<string | null>(null)
   const [recentDirectories, setRecentDirectories] = useState<string[]>([])
-  const [forceCloseViewId, setForceCloseViewId] = useState<string | null>(null)
-  const [forceCloseReason, setForceCloseReason] = useState<'unknown' | 'control-unavailable' | null>(null)
+  const [forceClose, setForceClose] = useState<{
+    binding: IdeViewState
+    reason: 'unknown' | 'control-unavailable'
+  } | null>(null)
   const [discarding, setDiscarding] = useState(false)
-  const lastSelectedRef = useRef(`${selectedEnvironmentId}:${selectedViewId ?? ''}`)
+  const lastSelectedRef = useRef({ key: `${selectedEnvironmentId}:${selectedViewId ?? ''}` })
   const viewsRef = useRef(views)
-  const forceBindingRef = useRef<{ viewId: string; bindingEpoch: string } | null>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     viewsRef.current = views
   }, [views])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const selectionKey = `${selectedEnvironmentId}:${selectedViewId ?? ''}`
-    if (lastSelectedRef.current === selectionKey) {
+    if (lastSelectedRef.current.key === selectionKey) {
       return
     }
-    lastSelectedRef.current = selectionKey
+    lastSelectedRef.current = { key: selectionKey }
     setDirectoryOpen(false)
     setDirectoryError(null)
     setRecentDirectories([])
     setDirectoryPending(false)
-    setForceCloseViewId(null)
-    setForceCloseReason(null)
+    setForceClose(null)
   }, [selectedEnvironmentId, selectedViewId])
 
   const selectedView = selectedViewId == null
@@ -191,35 +191,34 @@ export function IdeOverlayPanel({
     || selectedView.closeInFlight === true
     || !selectedReady
   const closeDisabled = actionsDisabled || selectedEpoch == null
+  const forceCloseViewId = forceClose != null && selectedReady
+    && isSameBinding(selectedView ?? undefined, forceClose.binding) ? activeViewId : null
 
   const handleCloseClick = useCallback(() => {
     if (activeViewId == null) {
       return
     }
     const view = viewById(activeViewId)
+    const selection = lastSelectedRef.current
     void onCloseEnvironment(activeViewId, false).then((result) => {
       const current = viewById(activeViewId)
       if (!result.ok && result.requiresForceConfirmation && view?.bindingEpoch != null
-        && current?.viewId === view.viewId && current.bindingEpoch === view.bindingEpoch
-        && lastSelectedRef.current === `${selectedEnvironmentId}:${selectedViewId ?? ''}`) {
-        forceBindingRef.current = { viewId: view.viewId, bindingEpoch: view.bindingEpoch }
-        setForceCloseViewId(activeViewId)
-        setForceCloseReason(result.message === 'close-control-unavailable'
-          ? 'control-unavailable'
-          : 'unknown')
+        && current?.status === 'ready' && isSameBinding(current, view)
+        && lastSelectedRef.current === selection) {
+        setForceClose({
+          binding: view,
+          reason: result.message === 'close-control-unavailable' ? 'control-unavailable' : 'unknown',
+        })
       }
     })
-  }, [onCloseEnvironment, selectedEnvironmentId, selectedViewId, activeViewId])
+  }, [onCloseEnvironment, activeViewId])
 
   const handleDiscardClose = useCallback(async () => {
-    if (forceCloseViewId == null || discarding) {
+    if (forceCloseViewId == null || forceClose == null || discarding) {
       return
     }
-    const current = viewById(forceCloseViewId)
-    if (current?.viewId !== forceBindingRef.current?.viewId
-      || current?.bindingEpoch !== forceBindingRef.current?.bindingEpoch) {
-      setForceCloseViewId(null)
-      setForceCloseReason(null)
+    if (!isSameBinding(viewById(forceCloseViewId), forceClose.binding)) {
+      setForceClose(null)
       return
     }
     setDiscarding(true)
@@ -228,12 +227,11 @@ export function IdeOverlayPanel({
       if (!result.ok && result.requiresForceConfirmation) {
         return
       }
-      setForceCloseViewId(null)
-      setForceCloseReason(null)
+      setForceClose(null)
     } finally {
       setDiscarding(false)
     }
-  }, [forceCloseViewId, discarding, onCloseEnvironment])
+  }, [forceCloseViewId, forceClose, discarding, onCloseEnvironment])
 
   const handleDirectoryConfirm = useCallback(async (directory: string) => {
     const environmentId = selectedEnvironmentId
@@ -259,7 +257,7 @@ export function IdeOverlayPanel({
         setDirectoryError(commandMessage(result.message, 'ai.ide.changeDirectoryFailed'))
         return
       }
-      if (lastSelectedRef.current !== selectionKey) {
+      if (lastSelectedRef.current.key !== selectionKey) {
         return
       }
       setRecentDirectories(recordRecentDirectory(environmentId, directory))
@@ -614,7 +612,7 @@ export function IdeOverlayPanel({
           className="ide-confirm-modal"
           modal={{
             title: t('ai.ide.forceCloseTitle'),
-            description: t(forceCloseReason === 'control-unavailable'
+            description: t(forceClose?.reason === 'control-unavailable'
               ? 'ai.ide.forceCloseControlUnavailableMessage'
               : 'ai.ide.forceCloseUnknownMessage'),
             confirmLabel: t('ai.ide.discardAndClose'),
@@ -624,8 +622,7 @@ export function IdeOverlayPanel({
           pending={discarding}
           onClose={() => {
             if (!discarding) {
-              setForceCloseViewId(null)
-              setForceCloseReason(null)
+              setForceClose(null)
             }
           }}
         />

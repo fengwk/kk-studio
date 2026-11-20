@@ -112,6 +112,7 @@ export function EnvironmentsPage() {
     setConflict,
     clearAllTargets,
     updateMutation,
+    updateReceipts,
     rotateMutation,
     deleteMutation,
   } = useEnvironmentCardActions({ t })
@@ -211,6 +212,7 @@ export function EnvironmentsPage() {
                 liveDaemonVersion ||
                 (runtimeStatus == null ? lastReportedDaemonVersion : undefined) ||
                 t('ai.environment.runtime.unreported')
+              const receipt = updateReceipts[environment.id]
               let runtimeText: string
               if (runtimeUnavailable) {
                 runtimeText = t('ai.environment.runtime.unavailable')
@@ -224,6 +226,12 @@ export function EnvironmentsPage() {
                 runtimeText = t('ai.environment.runtime.loading')
               } else if (runtimeStatus.update) {
                 runtimeText = formatUpdateProgress(runtimeStatus.update, t)
+              } else if (receipt != null && receipt.revision === runtimeQuery.data?.revision
+                && receipt.daemonVersion === runtimeStatus.daemonVersion) {
+                // 回执只描述命令返回时的状态，不覆盖后续运行快照。
+                runtimeText = t(receipt.commandStatus === 'CURRENT'
+                  ? 'ai.environment.update.current'
+                  : 'ai.environment.update.sentUnconfirmed')
               } else {
                 runtimeText = t('ai.environment.update.none')
               }

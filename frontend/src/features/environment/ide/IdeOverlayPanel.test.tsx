@@ -1,12 +1,16 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { useRef, useState } from 'react'
+import { ApiError } from '@/shared/api/client'
+import { useIdeCloseCommands } from '@/features/environment/ide/useIdeCloseCommands'
+import type { IdeBrowserSessionState } from '@/features/environment/ide/ide-browser-session'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { IdeOverlayPanel, type IdeOverlayPanelProps } from '@/features/environment/ide/IdeOverlayPanel'
 import type { IdeViewState } from '@/features/environment/ide/ide-view-state'
 
-const listIdeDirectories = vi.hoisted(() => vi.fn())
+const { listIdeDirectories, closeIdeView } = vi.hoisted(() => ({ listIdeDirectories: vi.fn(), closeIdeView: vi.fn() }))
 
-vi.mock('@/features/environment/ide/environment-ide-service', () => ({ listIdeDirectories }))
+vi.mock('@/features/environment/ide/environment-ide-service', () => ({ listIdeDirectories, closeIdeView }))
 
 const ENV_A = 'a1000000-0000-4000-8000-000000000001'
 const ENV_B = 'a1000000-0000-4000-8000-000000000002'
@@ -255,6 +259,78 @@ describe('IdeOverlayPanel', () => {
     await user.click(screen.getByTestId('ide-close-btn'))
     expect(await screen.findByRole('alertdialog')).toHaveTextContent('IDE 控制通道不可用，关闭请求未发送。')
     expect(onCloseEnvironment).toHaveBeenCalledWith(VIEW_A, false)
+  })
+
+  it.each([
+    ['IDE_OUTCOME_UNKNOWN', '命令结果未知，请先在 IDE 中确认再继续。'],
+    ['IDE_CONTROL_UNAVAILABLE', 'IDE 控制通道不可用，关闭请求未发送。'],
+  ])('keeps a late %s result on the original tab without opening a force dialog', async (code, message) => {
+    // 用真实关闭命令接收受控的迟到回执；切标签不会改变请求的绑定或错误归属。
+    const user = userEvent.setup()
+    let rejectClose!: (error: ApiError) => void
+    closeIdeView.mockImplementationOnce(() => new Promise((_, reject) => { rejectClose = reject }))
+    const props = baseProps({
+      openedEnvironmentIds: [ENV_A],
+      viewsByEnvironment: { [ENV_A]: [VIEW_A, VIEW_B] },
+      views: {
+        [VIEW_A]: view({ environmentId: ENV_A, viewId: VIEW_A }),
+        [VIEW_B]: view({ environmentId: ENV_A, viewId: VIEW_B, directory: DIRECTORY_B }),
+      },
+    })
+    function Harness() {
+      const [selected, setSelected] = useState(VIEW_A)
+      const [views, setViews] = useState(props.views)
+      const viewsRef = useRef(views)
+      const sessionRef = useRef<IdeBrowserSessionState>({ browserSessionId: 'session', status: 'ready', sessionSaved: true })
+      function commitViews(next: typeof views) {
+        viewsRef.current = next
+        setViews(next)
+      }
+      const commands = useIdeCloseCommands({
+        viewsRef, sessionRef, commitViews,
+        updateView: (id, attempt, patch) => {
+          const current = viewsRef.current[id]
+          if (current?.attempt !== attempt) return null
+          const updated = { ...current, ...patch }
+          commitViews({ ...viewsRef.current, [id]: updated })
+          return updated
+        },
+        forgetView: vi.fn(), writeSession: () => true,
+        registerUsageNow: async () => undefined, registerUsageQuiet: vi.fn(),
+      })
+      return <IdeOverlayPanel {...props} views={views} selectedViewId={selected} onSelectView={setSelected}
+        onCloseEnvironment={commands.closeView} onDismissCloseError={commands.dismissCloseError} />
+    }
+    render(<Harness />)
+    const tab = (id: string) => screen.getByTestId('ide-tab-strip').querySelector(`[data-ide-view="${id}"]`) as HTMLElement
+    await user.click(screen.getByTestId('ide-close-btn'))
+    expect(closeIdeView).toHaveBeenCalledWith(ENV_A, VIEW_A, expect.objectContaining({ discard: false }))
+    await user.click(tab(VIEW_B))
+    await act(async () => { rejectClose(new ApiError('test close error', 503, 'unavailable', undefined, code)) })
+    expect(screen.queryByTestId('ide-close-error')).not.toBeInTheDocument()
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+
+    await user.click(tab(VIEW_A))
+    expect(screen.getByTestId('ide-close-error')).toHaveTextContent(message)
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(screen.getByTestId('ide-close-btn')).not.toBeDisabled()
+    expect(screen.getAllByTestId('ide-iframe')).toHaveLength(2)
+    expect(closeIdeView).toHaveBeenCalledTimes(1)
+  })
+
+  it('invalidates force confirmation when the Daemon instance changes even if the epoch is reused', async () => {
+    const user = userEvent.setup()
+    const onCloseEnvironment = vi.fn().mockResolvedValue({ ok: false, requiresForceConfirmation: true })
+    const props = baseProps({ onCloseEnvironment })
+    const { rerender } = render(<IdeOverlayPanel {...props} />)
+    await user.click(screen.getByTestId('ide-close-btn'))
+    expect(await screen.findByRole('alertdialog')).toBeVisible()
+
+    rerender(<IdeOverlayPanel {...props} views={{
+      ...props.views, [VIEW_A]: { ...props.views[VIEW_A], daemonInstanceId: 'replacement-instance' },
+    }} />)
+    expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument()
+    expect(onCloseEnvironment).toHaveBeenCalledTimes(1)
   })
 
   it('keeps the iframe after an unknown close and only forces from explicit confirmation', async () => {
