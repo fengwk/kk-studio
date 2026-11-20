@@ -30,7 +30,7 @@ id / inputSchema / defaultTimeout
 | `fs.write.preview` | 1 分钟 | 无 | 内部只读审查 |
 | `process.exec` | 5 分钟 | 必填 | `bash` |
 | `fs.grep` | 15 秒 | 无 | `grep` |
-| `fs.find` | 15 秒 | 无 | `find` |
+| `fs.find-files` | 15 秒 | 无 | `find` |
 | `lsp.goto-definition` | 3 分钟 | 无 | `lsp_goto_definition` |
 | `lsp.workspace-symbols` | 3 分钟 | 无 | `lsp_workspace_symbols` |
 | `lsp.java-decompile` | 3 分钟 | 无 | `lsp_java_decompile` |
@@ -44,13 +44,13 @@ capability 身份是 [`EnvironmentCapabilityId`](../../harness/environment/src/m
 的 canonical 形式：`[a-z0-9]+(?:[.-][a-z0-9]+)*`，最长 128 字符。
 
 各能力的 arguments schema 是冻结的 classpath 资源。只有 `process.exec` 要求每次显式提供绝对
-`workdir`；`fs.read`、`fs.write`、`fs.write.preview`、`fs.edit`、`fs.edit.preview`、`fs.grep` 与 `fs.find` 的 `path`
+`workdir`；`fs.read`、`fs.write`、`fs.write.preview`、`fs.edit`、`fs.edit.preview`、`fs.grep` 与 `fs.find-files` 的 `path`
 在 Daemon 执行时只接受目标主机上的绝对路径，相对路径直接拒绝，且不接受 `workdir`。Harness 的 `read` 工具会先拦截 `resource://` URI 并交给平台读取器，只有本地绝对路径才发送给 `fs.read`；其他文件工具也只接受 Environment 绝对路径。三个 `lsp.*` 能力的本地 `path`
 必须是绝对路径，相对路径直接拒绝，也不接受 `workdir`。反编译 `target` 接受绝对 class 路径、`file:` 或 `jdt:` URI。
 `process.exec` 的 `workdir` 必须是目标 Daemon 文件系统上的绝对现存目录，
 绝不回退到 cwd、HOME、Environment 根或任何会话默认值。
 
-能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据能力标识查找本地实现。未知能力在执行前失败；连接握手校验控制协议版本。
+能力描述符只描述底层执行契约，独立于 Prompt 提示词、界面渲染、可见性与副作用标记；模型可见的工具层映射由 Contributor 侧完成，Daemon 依据能力标识查找本地实现。未知能力在执行前失败；连接握手校验控制协议版本。`find` 只有在 Studio 和 Environment Daemon 都支持 `fs.find-files` 时才能执行；升级时应同时更新两端。
 
 ## 执行与传输契约
 

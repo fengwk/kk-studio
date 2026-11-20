@@ -34,7 +34,7 @@ func TestProductionCapabilitiesConfirmExecutionExit(t *testing.T) {
 		registered[declaration.ID] = true
 	}
 	for _, id := range []string{
-		"fs.read", "fs.write", "fs.write.preview", "fs.edit", "fs.edit.preview", "fs.find", "fs.grep",
+		"fs.read", "fs.write", "fs.write.preview", "fs.edit", "fs.edit.preview", "fs.find-files", "fs.grep",
 		"process.exec", "lsp.goto-definition", "lsp.workspace-symbols", "lsp.java-decompile", "skill.install",
 	} {
 		if !registered[id] {
@@ -61,6 +61,53 @@ func TestProductionCapabilitiesConfirmExecutionExit(t *testing.T) {
 			if exits := countInvocationFrames(frames, invocation, protocol.MessageType_EXECUTION_EXITED); exits != 1 {
 				t.Fatalf("%s EXECUTION_EXITED frames = %d, want exactly one: %v", declaration.ID, exits, frames)
 			}
+		})
+	}
+}
+
+// An obsolete capability or a missing glob must not become an unfiltered search.
+func TestProductionFindUsesOnlyExplicitGlob(t *testing.T) {
+	underTest := newProductionRuntimeUnderTest(t)
+	fixture := prepareProductionCapabilityFixture(t)
+	legacy := invokeProductionCapability(t, underTest, "old-find", "fs.find", productionArguments(t, map[string]any{
+		"path": fixture.root, "pattern": "read.txt",
+	}))
+	var rejection string
+	for _, frame := range legacy {
+		if failed := frame.GetFailed(); failed != nil {
+			rejection = failed.GetMessage()
+		}
+	}
+	if rejection != "unknown Environment capability: fs.find" || countInvocationFrames(legacy, "old-find", protocol.MessageType_STARTED, protocol.MessageType_COMPLETED) != 0 {
+		t.Fatalf("legacy capability was not rejected before execution: %v", legacy)
+	}
+
+	for _, tc := range []struct {
+		name string
+		args map[string]any
+		want string
+	}{
+		{"missing", map[string]any{}, "glob must be a non-empty string"},
+		{"empty", map[string]any{"glob": ""}, "glob must be a non-empty string"},
+		{"old-field", map[string]any{"pattern": "read.txt"}, "glob must be a non-empty string"},
+		{"explicit", map[string]any{"glob": "./read.txt"}, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.args["path"] = fixture.root
+			frames := invokeProductionCapability(t, underTest, "find-"+tc.name, "fs.find-files", productionArguments(t, tc.args))
+			for _, frame := range frames {
+				if completed := frame.GetCompleted(); completed != nil {
+					result := completed.GetResult()
+					text := envelopeText(result)
+					if tc.want != "" && result.GetError() && strings.Contains(text, tc.want) {
+						return
+					}
+					if tc.want == "" && !result.GetError() && text == "read.txt" {
+						return
+					}
+				}
+			}
+			t.Fatalf("unexpected find result: %v", frames)
 		})
 	}
 }
@@ -151,7 +198,7 @@ func productionCapabilityArguments(t *testing.T, fixture productionCapabilityFix
 		"fs.write.preview": productionArguments(t, map[string]any{"path": fixture.writePreview, "content": "preview\n"}),
 		"fs.edit":          productionArguments(t, map[string]any{"path": fixture.editFile, "edits": []map[string]any{{"old_string": "alpha", "new_string": "beta"}}}),
 		"fs.edit.preview":  productionArguments(t, map[string]any{"path": fixture.editPreview, "edits": []map[string]any{{"old_string": "alpha", "new_string": "beta"}}}),
-		"fs.find":          productionArguments(t, map[string]any{"path": fixture.root}),
+		"fs.find-files":    productionArguments(t, map[string]any{"path": fixture.root, "glob": "*.txt"}),
 		"fs.grep":          productionArguments(t, map[string]any{"path": fixture.root, "pattern": "alpha", "literal": true}),
 		"process.exec":     productionArguments(t, map[string]any{"command": "printf production-exit", "workdir": fixture.root}),
 		"lsp.goto-definition": productionArguments(t, map[string]any{

@@ -20,7 +20,7 @@ func TestFilesystemCapabilitiesConfirmExecutionExit(t *testing.T) {
 		"fs.write.preview",
 		"fs.edit",
 		"fs.edit.preview",
-		"fs.find",
+		"fs.find-files",
 		"fs.grep",
 	} {
 		t.Run(id, func(t *testing.T) {

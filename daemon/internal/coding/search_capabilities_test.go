@@ -27,7 +27,7 @@ func TestSearchTimeoutEmptyResultsAreNonError(t *testing.T) {
 		args     map[string]any
 		empty    string
 	}{
-		{name: "find", executor: findCapability, args: map[string]any{"path": root, "pattern": "*.zzz", "limit": 10}, empty: "No files found matching pattern"},
+		{name: "find", executor: findCapability, args: map[string]any{"path": root, "glob": "*.zzz", "limit": 10}, empty: "No files matched the glob"},
 		{name: "grep", executor: grepCapability, args: map[string]any{"path": root, "pattern": "zzz", "literal": true, "limit": 10}, empty: "No matches found"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -63,7 +63,7 @@ func TestSearchCancellationReturnsCancelledError(t *testing.T) {
 	root := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	arguments, err := json.Marshal(map[string]any{"path": root, "pattern": "x"})
+	arguments, err := json.Marshal(map[string]any{"path": root, "glob": "*"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +95,7 @@ func TestSearchLimitNoticeContainsOnlyFirstNResults(t *testing.T) {
 		args     map[string]any
 		want     string
 	}{
-		{name: "find", executor: findCapability, args: map[string]any{"path": root, "pattern": "*.txt", "limit": 1}, want: "[1 results limit reached. Refine the pattern or raise limit.]"},
+		{name: "find", executor: findCapability, args: map[string]any{"path": root, "glob": "*.txt", "limit": 1}, want: "[1 results limit reached. Refine the pattern or raise limit.]"},
 		{name: "grep", executor: grepCapability, args: map[string]any{"path": root, "pattern": "x", "literal": true, "limit": 2}, want: "[2 matches limit reached. Refine the pattern or raise limit.]"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -211,9 +211,9 @@ func TestSearchCapabilitiesUseRootRelativeGlobs(t *testing.T) {
 	} {
 		t.Run(tc.glob, func(t *testing.T) {
 			path := filepath.Join(root, tc.subdir)
-			find := invokeCoding(t, Provider{}, "fs.find", map[string]any{"path": path, "pattern": tc.glob}, nil)
+			find := invokeCoding(t, Provider{}, "fs.find-files", map[string]any{"path": path, "glob": tc.glob}, nil)
 			grep := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": path, "pattern": "needle", "literal": true, "glob": tc.glob}, nil)
-			wantFind, wantGrep := "No files found matching pattern", "No matches found"
+			wantFind, wantGrep := "No files matched the glob", "No matches found"
 			if len(tc.files) != 0 {
 				wantFind = strings.Join(tc.files, "\n")
 				var lines []string
@@ -239,10 +239,10 @@ func TestInvalidSearchGlobIsInputRejection(t *testing.T) {
 		{"!./", "expected a pattern after './'"},
 	} {
 		t.Run(tc.glob, func(t *testing.T) {
-			for _, capability := range []string{"fs.find", "fs.grep"} {
-				args := map[string]any{"path": root, "pattern": tc.glob}
+			for _, capability := range []string{"fs.find-files", "fs.grep"} {
+				args := map[string]any{"path": root, "glob": tc.glob}
 				if capability == "fs.grep" {
-					args["pattern"], args["literal"], args["glob"] = "needle", true, tc.glob
+					args["pattern"], args["literal"] = "needle", true
 				}
 				result := invokeCoding(t, Provider{}, capability, args, nil)
 				var details map[string]string
@@ -392,7 +392,7 @@ func TestEmptyFindAndGrepListIgnoredPaths(t *testing.T) {
 		args       map[string]any
 		want       string
 	}{
-		{capability: "fs.find", args: map[string]any{"path": root, "pattern": "secret*.txt"}, want: "No files found matching pattern"},
+		{capability: "fs.find-files", args: map[string]any{"path": root, "glob": "secret*.txt"}, want: "No files matched the glob"},
 		{capability: "fs.grep", args: map[string]any{"path": root, "pattern": "match", "literal": true, "glob": "secret*.txt"}, want: "No matches found"},
 	} {
 		result := invokeCoding(t, Provider{}, test.capability, test.args, nil)

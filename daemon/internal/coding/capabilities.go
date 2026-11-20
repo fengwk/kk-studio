@@ -55,7 +55,7 @@ func (p Provider) Capabilities() map[string]runtime.CapabilityExecutor {
 		"fs.write.preview": previewWriteCapability,
 		"fs.edit":          editCapability,
 		"fs.edit.preview":  editPreviewCapability,
-		"fs.find":          findCapability,
+		"fs.find-files":    findCapability,
 		"fs.grep":          grepCapability,
 		"process.exec":     processCapability,
 	}
@@ -285,6 +285,12 @@ func findCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
+	if args.Glob == "" {
+		return errorResult(call.InvocationID, rejectInput("glob must be a non-empty string; use '*' to match all files")), nil
+	}
+	if strings.ContainsRune(args.Glob, '\u0000') {
+		return errorResult(call.InvocationID, rejectInput("glob must not contain NUL")), nil
+	}
 	if args.Limit == 0 {
 		args.Limit = defaultFindLimit
 	}
@@ -298,7 +304,7 @@ func findCapability(ctx context.Context, call runtime.CapabilityCall, capability
 	if !info.IsDir() {
 		return errorResult(call.InvocationID, rejectInput("path must be a directory")), nil
 	}
-	outcome, err := search.FindContext(ctx, args.Path, args.Pattern, args.Limit)
+	outcome, err := search.FindContext(ctx, args.Path, args.Glob, args.Limit)
 	if err != nil {
 		result := errorResult(call.InvocationID, classifySearchError(err))
 		if errors.Is(err, context.Canceled) {
@@ -307,7 +313,7 @@ func findCapability(ctx context.Context, call runtime.CapabilityCall, capability
 		}
 		return result, nil
 	}
-	return formatSearchResult(call, capability.Config.DataDir, outcome, args.Limit, "No files found matching pattern", "results"), nil
+	return formatSearchResult(call, capability.Config.DataDir, outcome, args.Limit, "No files matched the glob", "results"), nil
 }
 
 func grepCapability(ctx context.Context, call runtime.CapabilityCall, capability runtime.CapabilityContext) (runtime.CapabilityResult, error) {

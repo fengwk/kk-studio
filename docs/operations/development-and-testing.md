@@ -362,7 +362,7 @@ tracked 文件与非 ignored 未跟踪文件，覆盖高置信密钥、Webhook�
 | --- | --- |
 | `--rebuild` | Java 21 clean package 并重启 backend/frontend；带 tools 时也用 Go 1.27.4 构建并重启 Daemon |
 | `--real` | 启用真实 Provider case，要求四组完整 `TEST_*_BASE_URL` / `TEST_*_API_KEY` |
-| `--with-tools` | 启用 Daemon/Tool case |
+| `--with-tools` | 启用 Daemon/Tool case；`daemon.ready` 校验能力目录，包括 `find` 对应的 `fs.find-files` |
 | `--with-branch` | 启用 branch case，并自动打开 `--real` |
 | `--with-canvas-storage` | 启用 Canvas Resource/Blob 契约用例（Backend 无论何种模式均要求 S3/MinIO 基础设施就绪） |
 | `--with-canvas-function` | 启用 fake Canvas Function，隐含 storage、rebuild 与 `KK_STUDIO_CANVAS_FUNCTION_FAKE_ENABLED=true`；与 `--ui` 组合时同时启用 Canvas 真实链路 UI 用例（编辑保存、重开读回、fake 运行产出资源、跨节点引用后再运行），该用例只绑定 `fake-image`，不会提交付费 Function |

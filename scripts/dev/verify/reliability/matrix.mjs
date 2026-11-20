@@ -8,7 +8,7 @@ export const ENVIRONMENT_CAPABILITY_IDS = Object.freeze([
   'fs.edit',
   'process.exec',
   'fs.grep',
-  'fs.find',
+  'fs.find-files',
 ])
 export const PROVIDER_NAME = 'minimax'
 export const VARIANT = 'high'

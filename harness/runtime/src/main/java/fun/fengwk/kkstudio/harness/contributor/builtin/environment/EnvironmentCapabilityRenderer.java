@@ -82,12 +82,12 @@ final class EnvironmentCapabilityRenderer implements ToolHistoryRenderer {
       }
       return action.toString();
     }
-    if (capabilityId.equals(EnvironmentCapabilityIds.FS_FIND)) {
-      String pattern = ToolArguments.text(args, "pattern");
-      if (pattern == null) {
+    if (capabilityId.equals(EnvironmentCapabilityIds.FS_FIND_FILES)) {
+      String glob = ToolArguments.text(args, "glob");
+      if (glob == null) {
         return null;
       }
-      return path == null ? "find files matching " + pattern : "find " + pattern + " under " + path;
+      return path == null ? "find files matching " + glob : "find " + glob + " under " + path;
     }
     if (capabilityId.equals(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION)) {
       return path == null ? null : "go to the definition at " + path;

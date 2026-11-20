@@ -13,7 +13,7 @@ class EnvironmentCapabilityIdTest {
   @Test
   void acceptsCanonicalExamples() {
     assertEquals("fs.read", new EnvironmentCapabilityId("fs.read").value());
-    assertEquals("fs.find", new EnvironmentCapabilityId("fs.find").value());
+    assertEquals("fs.find-files", new EnvironmentCapabilityId("fs.find-files").value());
     assertEquals("process.exec", new EnvironmentCapabilityId("process.exec").value());
     assertEquals("lsp.goto-definition", new EnvironmentCapabilityId("lsp.goto-definition").value());
     assertEquals("mcp.local.call", new EnvironmentCapabilityId("mcp.local.call").toString());

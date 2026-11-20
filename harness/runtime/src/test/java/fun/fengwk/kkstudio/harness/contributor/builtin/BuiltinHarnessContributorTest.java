@@ -164,7 +164,7 @@ class BuiltinHarnessContributorTest {
     assertFileTool(
         catalog,
         "find",
-        EnvironmentCapabilityIds.FS_FIND,
+        EnvironmentCapabilityIds.FS_FIND_FILES,
         ToolSideEffect.READ_ONLY,
         Duration.ofSeconds(15));
 
@@ -479,7 +479,7 @@ class BuiltinHarnessContributorTest {
             "find",
             FileTool.Operation.FIND,
             "find.md",
-            EnvironmentCapabilityIds.FS_FIND,
+            EnvironmentCapabilityIds.FS_FIND_FILES,
             ToolSideEffect.READ_ONLY,
             resourceReadGateway));
   }

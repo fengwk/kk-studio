@@ -400,7 +400,7 @@ Envelope 成帧，消息类型覆盖 `READY`、`HEARTBEAT`、`INVOKE`、`STARTED
 `RUNTIME_STATUS`、`ERROR`。
 
 能力目录由 harness 定义、Daemon 实现，共 12 项：`FS_READ`、`FS_WRITE`、`FS_EDIT`、`FS_EDIT_PREVIEW`、
-`FS_WRITE_PREVIEW`、`PROCESS_EXEC`、`FS_GREP`、`FS_FIND`、三个 LSP 能力与 `SKILL_INSTALL`。
+`FS_WRITE_PREVIEW`、`PROCESS_EXEC`、`FS_GREP`、`FS_FIND_FILES`、三个 LSP 能力与 `SKILL_INSTALL`。
 `FS_EDIT_PREVIEW`、`FS_WRITE_PREVIEW` 与 `SKILL_INSTALL` 只供内部调用，其余 9 项映射为模型工具。
 每个能力带输入 Schema 与默认超时，需要 `workdir` 的能力只从参数里取目录。
 调用契约区分「发送前一定未执行」（Busy、Unavailable）与「可能已被接受」（SendUncertain，禁止重放），成功启动后

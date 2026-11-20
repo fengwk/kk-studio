@@ -37,7 +37,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_WRITE_PREVIEW,
             EnvironmentCapabilityIds.PROCESS_EXEC,
             EnvironmentCapabilityIds.FS_GREP,
-            EnvironmentCapabilityIds.FS_FIND,
+            EnvironmentCapabilityIds.FS_FIND_FILES,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
             EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE,
@@ -52,7 +52,7 @@ class EnvironmentCapabilityCatalogTest {
             "fs.write.preview",
             "process.exec",
             "fs.grep",
-            "fs.find",
+            "fs.find-files",
             "lsp.goto-definition",
             "lsp.workspace-symbols",
             "lsp.java-decompile",
@@ -115,8 +115,8 @@ class EnvironmentCapabilityCatalogTest {
             .inputSchema()
             .required());
     assertEquals(
-        Set.of("path", "pattern"),
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND)
+        Set.of("path", "glob"),
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND_FILES)
             .inputSchema()
             .required());
     assertEquals(
@@ -145,7 +145,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_WRITE,
             EnvironmentCapabilityIds.FS_EDIT,
             EnvironmentCapabilityIds.FS_GREP,
-            EnvironmentCapabilityIds.FS_FIND,
+            EnvironmentCapabilityIds.FS_FIND_FILES,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
             EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
@@ -186,6 +186,29 @@ class EnvironmentCapabilityCatalogTest {
     }
   }
 
+  /** find 只接受 glob；旧键存在时不得退化为没有文件筛选的调用。 */
+  @Test
+  void findRequiresGlobAndRejectsPattern() {
+    EnvironmentCapabilityDescriptor find =
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND_FILES);
+    new EnvironmentCapabilityCall("call-ok", "{\"path\":\"/app\",\"glob\":\"src/*.ts\"}")
+        .validateFor(find);
+    IllegalArgumentException missing =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new EnvironmentCapabilityCall("call-bad", "{\"path\":\"/app\"}").validateFor(find));
+    assertTrue(missing.getMessage().contains("glob is required"), missing.getMessage());
+    IllegalArgumentException unknown =
+        assertThrows(
+            IllegalArgumentException.class,
+            () ->
+                new EnvironmentCapabilityCall(
+                        "call-bad", "{\"path\":\"/app\",\"glob\":\"*.ts\",\"pattern\":\"*.txt\"}")
+                    .validateFor(find));
+    assertTrue(unknown.getMessage().contains("pattern is not allowed"), unknown.getMessage());
+  }
+
   /** process.exec 缺少必填 workdir 时在 Capability 调用参数校验边界抛出异常。 */
   @Test
   void processExecRequiresWorkdirAtValidationBoundary() {
@@ -210,7 +233,7 @@ class EnvironmentCapabilityCatalogTest {
             EnvironmentCapabilityIds.FS_EDIT_PREVIEW,
             EnvironmentCapabilityIds.FS_WRITE_PREVIEW,
             EnvironmentCapabilityIds.FS_GREP,
-            EnvironmentCapabilityIds.FS_FIND,
+            EnvironmentCapabilityIds.FS_FIND_FILES,
             EnvironmentCapabilityIds.LSP_GOTO_DEFINITION,
             EnvironmentCapabilityIds.LSP_WORKSPACE_SYMBOLS,
             EnvironmentCapabilityIds.LSP_JAVA_DECOMPILE);
@@ -224,7 +247,7 @@ class EnvironmentCapabilityCatalogTest {
             case "fs.edit",
                 "fs.edit.preview" -> "{\"path\":\"/app/file.txt\",\"edits\":[{\"old_string\":\"a\",\"new_string\":\"b\"}]}";
             case "fs.grep" -> "{\"pattern\":\"foo\",\"path\":\"/app\"}";
-            case "fs.find" -> "{\"pattern\":\"*.java\",\"path\":\"/app\"}";
+            case "fs.find-files" -> "{\"glob\":\"*.java\",\"path\":\"/app\"}";
             case "lsp.goto-definition" -> "{\"path\":\"/app/file.ts\",\"line\":1}";
             case "lsp.workspace-symbols" -> "{\"path\":\"/app/file.ts\",\"query\":\"sym\"}";
             case "lsp.java-decompile" -> "{\"path\":\"/app/A.java\",\"target\":\"cls\"}";
@@ -271,7 +294,8 @@ class EnvironmentCapabilityCatalogTest {
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_GREP).defaultTimeout());
     assertEquals(
         Duration.ofSeconds(15),
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND).defaultTimeout());
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND_FILES)
+            .defaultTimeout());
     assertEquals(
         Duration.ofSeconds(180),
         EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.LSP_GOTO_DEFINITION)
@@ -286,7 +310,7 @@ class EnvironmentCapabilityCatalogTest {
             .defaultTimeout());
   }
 
-  /** 测试意图：验证 fs.grep 与 fs.find 的 schema 文案如实说明默认超时为 15 秒。 */
+  /** 测试意图：验证 grep 与 find 的 schema 文案如实说明默认超时为 15 秒。 */
   @Test
   void grepAndFindSchemasDocumentFifteenSecondDefaultTimeout() {
     String grepDescription =
@@ -298,7 +322,7 @@ class EnvironmentCapabilityCatalogTest {
     assertTrue(grepDescription.contains("Defaults to 15."), grepDescription);
 
     String findDescription =
-        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND)
+        EnvironmentCapabilityCatalog.require(EnvironmentCapabilityIds.FS_FIND_FILES)
             .inputSchema()
             .properties()
             .get("timeout_seconds")

@@ -1454,7 +1454,7 @@ registerCase({
   level: 'L4',
   title: 'Environment GET capability 投影与 canonical 路由名称',
   requires: ['tools'],
-  docs: 'Environment 在有限预算内收敛到 READY（控制协议 2，重连窗口允许短暂 CONNECTING）；Environment UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；卡片投影完整 daemonConfig，并投影 12 项 capability（9 项模型可见 + 内部 fs.edit.preview/fs.write.preview/skill.install）与宿主事实 userName/homeDirectory，且不公开产品目录、raw READY metadata、工具或凭据',
+  docs: 'Environment 在有限预算内收敛到 READY（重连窗口允许短暂 CONNECTING）；Environment UUID id 是 canonical 路由身份，name 是 display name，ready 是统一可用性标记；卡片投影完整 daemonConfig，并投影 12 项 capability（9 项模型可见，find 映射到 fs.find-files；其余 3 项是 fs.edit.preview/fs.write.preview/skill.install）与宿主事实 userName/homeDirectory，且不公开产品目录、raw READY metadata、工具或凭据',
   async run(ctx) {
     // 控制连接可能在重连窗口短暂显示 CONNECTING；在有限预算内等待权威 READY，再断言能力投影。
     let match = (await listEnvironments(ctx)).find(
@@ -1483,7 +1483,7 @@ registerCase({
       'fs.edit',
       'process.exec',
       'fs.grep',
-      'fs.find',
+      'fs.find-files',
       'lsp.goto-definition',
       'lsp.workspace-symbols',
       'lsp.java-decompile',

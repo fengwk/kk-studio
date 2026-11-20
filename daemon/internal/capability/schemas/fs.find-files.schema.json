@@ -1,11 +1,11 @@
 {
   "type": "object",
   "properties": {
-    "pattern": {"type": "string", "description": "File glob relative to path. '*.ts' matches file names at any depth; 'src/*.ts' matches only direct files in the root's src; '**/src/*.ts' also matches direct files in nested src directories. A leading './' is ignored; './' alone is invalid."},
+    "glob": {"type": "string", "description": "Non-empty file glob relative to path. Use '*' to match all files. '*.ts' matches file names at any depth; 'src/*.ts' matches only direct files in the root's src; '**/src/*.ts' also matches direct files in nested src directories. A leading './' is ignored; './' alone is invalid."},
     "path": {"type": "string", "description": "Absolute directory path on the selected Environment. There is no implicit default. Results are relative to this directory."},
     "limit": {"type": "integer", "description": "Maximum number of files to return (1 to 100000). Defaults to 1000 when omitted or 0."},
     "timeout_seconds": {"type": "integer", "description": "Positive timeout in seconds. Defaults to 15."}
   },
-  "required": ["pattern", "path"],
+  "required": ["glob", "path"],
   "additionalProperties": false
 }
