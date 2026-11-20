@@ -12,6 +12,7 @@
 | Maven | 通过 `mvn` 可用；[`scripts/dev/app.sh`](../../scripts/dev/app.sh)、[`scripts/dev/verify/e2e/lib.sh`](../../scripts/dev/verify/e2e/lib.sh)、[`scripts/dev/verify/supply-chain/run.sh`](../../scripts/dev/verify/supply-chain/run.sh) 优先取 `JAVA_HOME_21`，否则取 `JAVA_HOME`，检查 java 可执行但不检查版本号，调用方须确保为 21；[`regression.sh`](../../scripts/dev/verify/reliability/regression.sh) 只接受 `JAVA_HOME_21` 并校验版本 |
 | Node 与 npm | Frontend 依赖由 [`package-lock.json`](../../frontend/package-lock.json) 固定；`distribution` profile 会自动安装 Node `v24.21.0` 与 npm `11.9.0` |
 | Docker 与 Compose v2 | 本地栈、测试栈、性能基线和镜像扫描需要 |
+| FFmpeg | 宿主运行 `StorageDaemonResourceTicketIntegrationTest` 时需有 `ffprobe`，用真实 PNG/JPEG 验证服务端媒体探测 |
 | `curl`、`jq`、`lsof` | [scripts/dev/app.sh](../../scripts/dev/app.sh) 的启动硬依赖；端口与健康探测使用 lsof/curl |
 
 数据库与服务由容器提供：[deploy/local](../../deploy/local/README.md) 覆盖主要本地路径，
@@ -131,6 +132,7 @@ gh workflow run docker-publish.yml --ref dev -f validate_only=true
 该模式运行同一套 preflight、Java、前端、脚本、文档和敏感数据检查，以及 Daemon 五平台矩阵，
 但整个镜像发布 job 会被跳过；它与发布使用独立并发组，不会取消同分支正在进行的镜像发布。
 启动测试使用可丢弃 PostgreSQL 17 与私有 MinIO，验证当前空库能通过正常生产入口启动并提供健康检查与模型目录 API。
+Java 门禁显式安装 FFmpeg 并检查 `ffprobe` 可用，Daemon 图片上传测试由 Studio 探测真实图片尺寸。
 V1 与当前基线不同的已有数据库必须在 Flyway 校验阶段拒绝，且表数据、迁移历史与结构均保持不变。Java 门禁以
 `mvn -B -ntp -Pdistribution verify` 启动完整仓库测试与覆盖率，并在同次 reactor 中只打包一次带内嵌
 React 产物的发行 Fat JAR；其后的必需步骤先用同一 JAR 验证生产入口启动，并单独校验生成的

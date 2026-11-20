@@ -94,6 +94,11 @@ jobs:
           go-version-file: daemon/go.mod
       - name: Set up PostgreSQL client tools
         uses: ./.github/actions/postgres-client
+      - name: Install FFmpeg for storage media integration tests
+        run: |
+          set -euo pipefail
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+          ffprobe -version
       - name: Run repository script tests
         uses: ./.github/actions/repository-script-tests
         env:
