@@ -26,6 +26,20 @@ func TestIDERecoveryExportFailsClosedOnWindows(t *testing.T) {
 	}
 }
 
+// Archive must also fail before creating a copy or acquiring a lock on Windows.
+func TestIDERecoveryArchiveFailsClosedOnWindows(t *testing.T) {
+	dataDir := t.TempDir()
+	output := filepath.Join(t.TempDir(), "archive.json")
+	var stdout, stderr bytes.Buffer
+	code := RunCLI(context.Background(), []string{"ide-recovery", "archive", "123e4567-e89b-42d3-a456-426614174000", output, "--data-dir", dataDir}, Dependencies{}, &stdout, &stderr)
+	if code != 1 || stdout.Len() != 0 || stderr.String() != "IDE recovery archive failed: archive is supported only on Linux/macOS\n" {
+		t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if _, err := os.Stat(output); !os.IsNotExist(err) {
+		t.Fatalf("refused archive left output behind: %v", err)
+	}
+}
+
 // Listing and argument validation stay available so operators can inspect a host.
 func TestIDERecoveryRemainingCommandsOnWindows(t *testing.T) {
 	dataDir := t.TempDir()

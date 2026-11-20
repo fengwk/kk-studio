@@ -16,7 +16,7 @@ import (
 	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
-const usage = "Usage: kk-studio-daemon --config <absolute-path> | --check-config <absolute-path> | --lsp-profiles | --install-lsp <profile> <absolute-library> | --lsp-config <profile> <absolute-library> | ide-recovery list|export\n"
+const usage = "Usage: kk-studio-daemon --config <absolute-path> | --check-config <absolute-path> | --lsp-profiles | --install-lsp <profile> <absolute-library> | --lsp-config <profile> <absolute-library> | ide-recovery list|export|archive\n"
 
 type RuntimeRunner interface {
 	Run(context.Context, config.DaemonConfig) error

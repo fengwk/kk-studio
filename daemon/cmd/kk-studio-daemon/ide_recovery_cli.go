@@ -16,6 +16,7 @@ import (
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/ide"
+	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
 const (
@@ -24,7 +25,9 @@ const (
 	// records like the daemon without reading configuration or credentials.
 	ideRecoveryQuota = int64(16 << 20)
 	ideRecoveryUsage = "Usage: kk-studio-daemon ide-recovery list --data-dir <absolute-path>\n" +
-		"       kk-studio-daemon ide-recovery export <viewId>[.prior] <absolute-json> --data-dir <absolute-path>\n"
+		"       kk-studio-daemon ide-recovery export <viewId>[.prior] <absolute-json> --data-dir <absolute-path>\n" +
+		"       kk-studio-daemon ide-recovery archive <viewId>[.prior] <new-absolute-output-json> --data-dir <absolute-path>\n"
+	recoveryArchiveSupported = runtime.GOOS == "linux" || runtime.GOOS == "darwin"
 )
 
 // recoveryOwnerOnlySupported reports whether the exported copy can be restricted to the
@@ -40,6 +43,7 @@ type ideRecoveryEntry struct {
 	CreatedAt string `json:"createdAt,omitempty"`
 	Complete  *bool  `json:"complete,omitempty"`
 	Problem   string `json:"problem,omitempty"`
+	Bytes     *int64 `json:"bytes,omitempty"`
 }
 
 // runIDERecoveryCLI serves the private-host recovery command. It reads only persisted
@@ -60,10 +64,13 @@ func runIDERecoveryCLI(args []string, stdout, stderr io.Writer) (bool, int) {
 	}
 	cfg := config.DaemonConfig{DataDir: directory}
 	output := ""
-	if command == "list" {
+	switch command {
+	case "list":
 		output, err = listIDERecovery(cfg)
-	} else {
-		output, err = exportIDERecovery(cfg, positional[0], positional[1])
+	case "export":
+		output, err = copyIDERecovery(cfg, positional[0], positional[1], false)
+	case "archive":
+		output, err = archiveIDERecovery(cfg, positional[0], positional[1])
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "IDE recovery %s failed: %s\n", command, safeError(err))
@@ -92,7 +99,7 @@ func parseIDERecoveryArgs(args []string) (string, []string, string, bool) {
 	switch command {
 	case "list":
 		return command, positional, dataDir, dataDir != "" && len(positional) == 0
-	case "export":
+	case "export", "archive":
 		return command, positional, dataDir, dataDir != "" && len(positional) == 2
 	}
 	return "", nil, "", false
@@ -118,19 +125,26 @@ func listIDERecovery(cfg config.DaemonConfig) (string, error) {
 		if _, err := ide.ValidateViewID(viewID); err != nil || !(canonical || prior) {
 			continue
 		}
+		summary := ideRecoveryEntry{ViewID: viewID, Prior: prior}
+		if info, err := entry.Info(); err == nil && info.Mode().IsRegular() {
+			size := info.Size()
+			summary.Bytes = &size
+		}
 		backup, err := readIDERecovery(cfg, viewID, prior)
 		switch {
 		case err != nil:
-			listing.Backups = append(listing.Backups, ideRecoveryEntry{ViewID: viewID, Prior: prior, Problem: err.Error()})
-		case backup != nil:
-			createdAt, ok := recoveryTimestamp(backup.CreatedAt)
-			if !ok {
-				listing.Backups = append(listing.Backups, ideRecoveryEntry{ViewID: viewID, Prior: prior, Problem: "recovery backup timestamp is invalid"})
-				continue
+			summary.Problem = err.Error()
+		case backup == nil:
+			continue
+		default:
+			if createdAt, ok := recoveryTimestamp(backup.CreatedAt); ok {
+				summary.CreatedAt = createdAt
+				summary.Complete = &backup.Complete
+			} else {
+				summary.Problem = "recovery backup timestamp is invalid"
 			}
-			complete := backup.Complete
-			listing.Backups = append(listing.Backups, ideRecoveryEntry{ViewID: viewID, Prior: prior, CreatedAt: createdAt, Complete: &complete})
 		}
+		listing.Backups = append(listing.Backups, summary)
 	}
 	sort.Slice(listing.Backups, func(i, j int) bool {
 		a, b := listing.Backups[i], listing.Backups[j]
@@ -146,10 +160,25 @@ func listIDERecovery(cfg config.DaemonConfig) (string, error) {
 	return string(data) + "\n", nil
 }
 
-// exportIDERecovery copies one validated record to a new owner-only file; the persisted
-// record is never modified and an existing destination is never overwritten. `<viewId>.prior`
-// selects the prior record rather than the canonical one.
-func exportIDERecovery(cfg config.DaemonConfig, viewArg, output string) (string, error) {
+// archiveIDERecovery holds the same lock as the daemon from record validation through removal.
+func archiveIDERecovery(cfg config.DaemonConfig, viewArg, output string) (string, error) {
+	if !recoveryArchiveSupported {
+		return "", errors.New("archive is supported only on Linux/macOS")
+	}
+	lock, err := native.AcquireDirectoryLock(cfg.DataDir, native.DaemonLockFileName)
+	if errors.Is(err, native.ErrDirectoryLockBusy) {
+		return "", errors.New("data directory is in use; stop the daemon or wait for the other archive to finish")
+	}
+	if err != nil {
+		return "", fmt.Errorf("data directory lock could not be acquired: %s", recoveryFSCode(err))
+	}
+	defer lock.Close()
+	return copyIDERecovery(cfg, viewArg, output, true)
+}
+
+// copyIDERecovery validates and copies the selected record without overwriting the destination.
+// Only the offline archive operation removes that record, and only after the copy is durable.
+func copyIDERecovery(cfg config.DaemonConfig, viewArg, output string, archive bool) (string, error) {
 	if !recoveryOwnerOnlySupported {
 		return "", errors.New("owner-only output permissions cannot be enforced on Windows")
 	}
@@ -182,8 +211,24 @@ func exportIDERecovery(cfg config.DaemonConfig, viewArg, output string) (string,
 	if err != nil {
 		return "", errors.New("recovery backup could not be encoded")
 	}
-	if err := writeOwnerOnlyFile(destination, append(data, '\n')); err != nil {
+	if err := writeOwnerOnlyFile(destination, append(data, '\n'), archive); err != nil {
 		return "", err
+	}
+	verb := "Exported"
+	if archive {
+		verb = "Archived"
+		name := viewID + ".json"
+		if prior {
+			name = "." + viewID + ".prior"
+		}
+		dir := ideRecoveryDirectory(cfg)
+		// The external copy is committed now. No later failure may clean it up.
+		if err := os.Remove(filepath.Join(dir, name)); err != nil {
+			return "", fmt.Errorf("durable output kept; source record could not be removed: %s", recoveryFSCode(err))
+		}
+		if err := syncIDERecoveryDirectory(dir); err != nil {
+			return "", fmt.Errorf("durable output kept; source removal could not be synced: %s", recoveryFSCode(err))
+		}
 	}
 	status := "incomplete"
 	if backup.Complete {
@@ -193,7 +238,7 @@ func exportIDERecovery(cfg config.DaemonConfig, viewArg, output string) (string,
 	if prior {
 		label = "prior backup"
 	}
-	return fmt.Sprintf("Exported IDE recovery %s %s (%s) to %s\n", label, viewID, status, destination), nil
+	return fmt.Sprintf("%s IDE recovery %s %s (%s) to %s\n", verb, label, viewID, status, destination), nil
 }
 
 func ideRecoveryDirectory(cfg config.DaemonConfig) string {
@@ -222,8 +267,22 @@ func insideRecovery(path string, cfg config.DaemonConfig) bool {
 		return true
 	}
 	parent, parentErr := filepath.EvalSymlinks(filepath.Dir(path))
-	target, dirErr := filepath.EvalSymlinks(dir)
-	return parentErr == nil && dirErr == nil && isWithin(filepath.Join(parent, filepath.Base(path)), target)
+	target, dirErr := os.Stat(dir)
+	if parentErr != nil || dirErr != nil {
+		return false
+	}
+	// Compare directory identity as well as lexical paths, including on case-insensitive macOS.
+	for {
+		info, err := os.Stat(parent)
+		if err == nil && os.SameFile(info, target) {
+			return true
+		}
+		next := filepath.Dir(parent)
+		if next == parent {
+			return false
+		}
+		parent = next
+	}
 }
 
 // recoveryTimestamp returns the record time in canonical UTC form, or false when the value
@@ -238,7 +297,7 @@ func recoveryTimestamp(value string) (string, bool) {
 
 // writeOwnerOnlyFile creates the copy exclusively with owner-only permissions and removes
 // a partial file instead of leaving a truncated backup behind.
-func writeOwnerOnlyFile(path string, data []byte) error {
+func writeOwnerOnlyFile(path string, data []byte, durable bool) error {
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if errors.Is(err, fs.ErrExist) {
@@ -246,7 +305,12 @@ func writeOwnerOnlyFile(path string, data []byte) error {
 		}
 		return fmt.Errorf("output file could not be created: %s", recoveryFSCode(err))
 	}
-	_, err = file.Write(data)
+	if err = file.Chmod(0o600); err == nil {
+		_, err = file.Write(data)
+	}
+	if err == nil && durable {
+		err = file.Sync()
+	}
 	if closeErr := file.Close(); err == nil {
 		err = closeErr
 	}
@@ -254,7 +318,21 @@ func writeOwnerOnlyFile(path string, data []byte) error {
 		_ = os.Remove(path)
 		return fmt.Errorf("output file could not be written: %s", recoveryFSCode(err))
 	}
+	if durable {
+		if err := syncIDERecoveryDirectory(filepath.Dir(path)); err != nil {
+			_ = os.Remove(path)
+			return fmt.Errorf("output directory could not be synced: %s", recoveryFSCode(err))
+		}
+	}
 	return nil
+}
+
+func syncIDERecoveryDirectory(path string) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	return errors.Join(dir.Sync(), dir.Close())
 }
 
 // recoveryFSCode keeps filesystem diagnostics to a stable, path-free errno token.

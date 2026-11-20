@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/fengwk/kk-studio/daemon/internal/config"
 	"github.com/fengwk/kk-studio/daemon/internal/ide"
+	"github.com/fengwk/kk-studio/daemon/internal/native"
 )
 
 const (
@@ -75,14 +77,14 @@ func runRecovery(t *testing.T, args ...string) (int, string, string) {
 	return code, stdout.String(), stderr.String()
 }
 
-// Listing reports only identity, time and completeness, ordered by view id.
+// Listing reports only safe metadata, including on-disk size, ordered by view id.
 func TestIDERecoveryListMetadata(t *testing.T) {
 	dataDir := seedRecovery(t, seededBackup(recoveryViewB, false), seededBackup(recoveryViewA, true))
 	code, stdout, stderr := runRecovery(t, "ide-recovery", "list", "--data-dir", dataDir)
 	if code != 0 || stderr != "" {
 		t.Fatalf("code=%d stderr=%q", code, stderr)
 	}
-	if strings.Contains(stdout, recoveryDraft) || strings.Contains(stdout, "draft.txt") {
+	if strings.Contains(stdout, recoveryDraft) || strings.Contains(stdout, "draft.txt") || strings.Contains(stdout, dataDir) {
 		t.Fatalf("listing leaked draft content: %q", stdout)
 	}
 	var listing struct {
@@ -94,7 +96,9 @@ func TestIDERecoveryListMetadata(t *testing.T) {
 	if len(listing.Backups) != 2 || listing.Backups[0].ViewID != recoveryViewA || listing.Backups[1].ViewID != recoveryViewB {
 		t.Fatalf("listing = %#v", listing.Backups)
 	}
-	if got := listing.Backups[0]; got.Complete == nil || !*got.Complete || got.CreatedAt != "2025-02-03T04:05:06Z" {
+	path := filepath.Join(ideRecoveryDirectory(config.DaemonConfig{DataDir: dataDir}), recoveryViewA+".json")
+	wantBytes := int64(len(readFile(t, path)))
+	if got := listing.Backups[0]; got.Complete == nil || !*got.Complete || got.CreatedAt != "2025-02-03T04:05:06Z" || got.Bytes == nil || *got.Bytes != wantBytes {
 		t.Fatalf("complete entry = %#v", got)
 	}
 	if got := listing.Backups[1]; got.Complete == nil || *got.Complete {
@@ -168,6 +172,111 @@ func TestIDERecoveryExportWritesOwnerOnlyCopy(t *testing.T) {
 	if !bytes.Equal(original, readFile(t, originalPath)) {
 		t.Fatal("export modified the persisted original")
 	}
+}
+
+// Archiving each name preserves the other generation, and removing the prior frees quota.
+func TestIDERecoveryArchiveReleasesQuota(t *testing.T) {
+	if !recoveryArchiveSupported {
+		t.Skip("archive requires Linux/macOS")
+	}
+	dataDir := seedRecovery(t, seededBackup(recoveryViewA, true))
+	cfg := config.DaemonConfig{DataDir: dataDir}
+	dir := ideRecoveryDirectory(cfg)
+	canonical := filepath.Join(dir, recoveryViewA+".json")
+	prior := filepath.Join(dir, "."+recoveryViewA+".prior")
+	original := readFile(t, canonical)
+	var backup ide.RecoveryBackup
+	if err := json.Unmarshal(original, &backup); err != nil {
+		t.Fatal(err)
+	}
+	backup.Documents[0].Text = recoveryPriorDraft
+	writePrior(t, cfg, backup)
+	next := backup
+	next.ViewID = recoveryViewB
+	priorData := readFile(t, prior)
+	quota := int64(len(original) + len(priorData))
+	if _, err := ide.WriteRecoveryBackup(cfg, next, quota); err == nil || err.Error() != "recovery data quota is exhausted" {
+		t.Fatalf("expected quota exhaustion before archive, got %v", err)
+	}
+	for _, tc := range []struct {
+		arg, path string
+		data      []byte
+	}{
+		{recoveryViewA + ".prior", prior, priorData},
+		{recoveryViewA, canonical, original},
+	} {
+		output := filepath.Join(t.TempDir(), "archive.json")
+		code, stdout, stderr := runRecovery(t, "ide-recovery", "archive", tc.arg, output, "--data-dir", dataDir)
+		if code != 0 || stderr != "" || !strings.Contains(stdout, "(complete)") {
+			t.Fatalf("archive %s: code=%d stdout=%q stderr=%q", tc.arg, code, stdout, stderr)
+		}
+		var compact bytes.Buffer
+		if err := json.Compact(&compact, readFile(t, output)); err != nil || !bytes.Equal(compact.Bytes(), bytes.TrimSpace(tc.data)) {
+			t.Fatalf("archive %s did not preserve the complete record: %v", tc.arg, err)
+		}
+		if info, err := os.Stat(output); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("output is not 0600: %v, %v", info, err)
+		}
+		if _, err := os.Lstat(tc.path); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("selected source still exists: %v", err)
+		}
+		if tc.path == prior {
+			if !bytes.Equal(original, readFile(t, canonical)) {
+				t.Fatal("archiving prior modified canonical")
+			}
+			if _, err := ide.WriteRecoveryBackup(cfg, next, quota); err != nil {
+				t.Fatalf("quota was not released: %v", err)
+			}
+		}
+	}
+	if backup, err := ide.ReadRecoveryBackup(cfg, recoveryViewB, quota); err != nil || backup == nil {
+		t.Fatalf("unrelated record was not preserved: %v", err)
+	}
+}
+
+// The daemon's lock, an output conflict, and copy failures must leave the source intact.
+func TestIDERecoveryArchiveFailuresKeepSource(t *testing.T) {
+	if !recoveryArchiveSupported {
+		t.Skip("archive requires Linux/macOS")
+	}
+	dataDir := seedRecovery(t, seededBackup(recoveryViewA, true))
+	dir := ideRecoveryDirectory(config.DaemonConfig{DataDir: dataDir})
+	source := filepath.Join(dir, recoveryViewA+".json")
+	original := readFile(t, source)
+	targetDir := t.TempDir()
+	output := filepath.Join(targetDir, "archive.json")
+	attempt := func(path, want string) {
+		t.Helper()
+		code, stdout, stderr := runRecovery(t, "ide-recovery", "archive", recoveryViewA, path, "--data-dir", dataDir)
+		if code != 1 || stdout != "" || !strings.Contains(stderr, want) || strings.Contains(stderr, dataDir) {
+			t.Fatalf("code=%d stdout=%q stderr=%q, want %q", code, stdout, stderr, want)
+		}
+		if !bytes.Equal(readFile(t, source), original) {
+			t.Fatal("failed archive changed the source")
+		}
+	}
+	t.Run("busy", func(t *testing.T) {
+		lock, err := native.AcquireDirectoryLock(dataDir, native.DaemonLockFileName)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer lock.Close()
+		attempt(output, "data directory is in use")
+		if _, err := os.Lstat(output); !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("busy archive created output: %v", err)
+		}
+	})
+	writeFile(t, output, "keep me")
+	attempt(output, "output file already exists")
+	if string(readFile(t, output)) != "keep me" {
+		t.Fatal("archive overwrote the existing output")
+	}
+	attempt(filepath.Join(targetDir, "missing", "archive.json"), "output file could not be created")
+	link := filepath.Join(targetDir, "recovery-link")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	attempt(filepath.Join(link, "archive.json"), "output path must be outside")
 }
 
 // An incomplete record exports with explicit status rather than implied safety.
@@ -330,7 +439,7 @@ func TestIDERecoveryPermissionAndCleanup(t *testing.T) {
 // The command needs no daemon configuration and is advertised by help.
 func TestIDERecoveryIsLocalAndAdvertised(t *testing.T) {
 	code, stdout, stderr := runRecovery(t, "--help")
-	if code != 0 || stderr != "" || !strings.Contains(stdout, "ide-recovery list|export") {
+	if code != 0 || stderr != "" || !strings.Contains(stdout, "ide-recovery list|export|archive") {
 		t.Fatalf("help code=%d stdout=%q stderr=%q", code, stdout, stderr)
 	}
 	dataDir := seedRecovery(t, seededBackup(recoveryViewA, true))
