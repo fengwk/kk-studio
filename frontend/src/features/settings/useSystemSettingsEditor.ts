@@ -6,7 +6,6 @@ import { systemSettingsService } from '@/features/settings/system-settings-servi
 import {
   assembleSettingsUpdate,
   DraftValidationError,
-  settingsSectionsToDraft,
   type DraftValidationReason,
   type SystemSettingsSectionsDraft,
 } from '@/features/settings/system-settings-draft'
@@ -26,9 +25,8 @@ import type { SystemSettingsDTO } from '@/shared/api/generated/contracts'
 /**
  * 全局 system settings 聚合的读取 / draft / 完整聚合 CAS 保存控制器。
  *
- * - 权威 GET 是唯一事实源：首次成功后以「sections + version」派生 draft 快照，之后查询刷新绝不静默覆盖 draft；
- *   draft 快照的生命周期由 `useSystemSettingsDraftCursor` 承担；
- * - 保存发送「快照 sections + 快照 baseVersion」，后台刷新只推进权威、不推进快照的 baseVersion；
+ * - 干净时跟随权威查询；首次编辑时捕获所渲染的基线与版本，后台刷新不覆盖已编辑的 draft；
+ * - 保存发送「快照 sections + 快照 baseVersion」，成功后用响应更新权威缓存并丢弃已保存的 draft；
  * - 409（version conflict）只打开冲突确认弹窗，不刷新或覆盖 draft；用户确认后由页面执行完整刷新，
  *   重新读取最新权威聚合；
  * - draft 数值字段全程字符串（非有损），组装请求体时校验并转换。
@@ -57,8 +55,7 @@ export function useSystemSettingsEditor() {
     snapshot,
     sections: draft,
     dirty,
-    recapture,
-    recaptureFromAuthoritative,
+    discardDraft,
     setSections,
   } = useSystemSettingsDraftCursor(authoritative)
 
@@ -80,12 +77,9 @@ export function useSystemSettingsEditor() {
       )
     },
     onSuccess: async (updated: SystemSettingsDTO) => {
-      // PUT 返回更新后的 GET 形状：先当权威落缓存，再 refetch 对齐服务器；快照以响应重新捕获。
+      // PUT 返回更新后的 GET 形状：先当权威落缓存，再回到干净状态并 refetch 对齐服务器。
       queryClient.setQueryData(queryKeys.systemSettings.all, updated)
-      recapture({
-        sections: settingsSectionsToDraft(updated),
-        baseVersion: updated.version,
-      })
+      discardDraft()
       setSaveError(null)
       setFieldErrors({})
       setConflict(null)
@@ -133,12 +127,12 @@ export function useSystemSettingsEditor() {
   }, [mutation, snapshot])
 
   const reset = useCallback(() => {
-    recaptureFromAuthoritative()
+    discardDraft()
     setSaveError(null)
     setFieldErrors({})
     setConflict(null)
     setDraftError(null)
-  }, [recaptureFromAuthoritative])
+  }, [discardDraft])
 
   const dismissConflict = useCallback(() => {
     setConflict(null)
@@ -160,27 +154,21 @@ export function useSystemSettingsEditor() {
   }, [queryClient])
 
   /**
-   * 用户明确的「重新加载」：放弃当前 draft，重新读取权威聚合并以新响应的
-   * sections + version 重捕快照。导入后服务端已有新值，只 refetch 不会让 draft 跟上
-   * （快照只在 null 时派生），保存会继续拿旧 baseVersion 撞 409。
-   *
+   * 用户明确的「重新加载」：读取权威聚合成功后才放弃 draft 并显示最新值。
    * 读取失败时保留现有 draft 与原 baseVersion 并向上抛错，由触发方就地展示。
    */
   const reload = useCallback(async () => {
-    const settings = await queryClient.fetchQuery({
+    await queryClient.fetchQuery({
       queryKey: queryKeys.systemSettings.all,
       queryFn: () => systemSettingsService.get(),
       staleTime: 0,
     })
-    recapture({
-      sections: settingsSectionsToDraft(settings),
-      baseVersion: settings.version,
-    })
+    discardDraft()
     setSaveError(null)
     setFieldErrors({})
     setConflict(null)
     setDraftError(null)
-  }, [queryClient, recapture])
+  }, [queryClient, discardDraft])
 
   // 权威数据缺失（初始加载失败）才视为整页加载错误；draft 存在时后台刷新失败不打断编辑。
   const loadError = useMemo(() => {

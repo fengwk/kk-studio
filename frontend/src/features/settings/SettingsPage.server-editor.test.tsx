@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApiError } from '@/shared/api/client'
@@ -71,8 +71,11 @@ function createBackend(initial: SystemSettingsDTO = makeSettingsDto()) {
   return { get, update, setState }
 }
 
-function renderSettings(reloadPage?: () => void) {
+function renderSettings(reloadPage?: () => void, cached?: SystemSettingsDTO) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  if (cached) {
+    queryClient.setQueryData(queryKeys.systemSettings.all, cached)
+  }
   const result = render(
     <QueryClientProvider client={queryClient}>
       <BrowserPreferencesProvider>
@@ -302,6 +305,66 @@ describe('SettingsPage server editor', () => {
     expect(reloadPage).toHaveBeenCalledOnce()
   })
 
+  it('follows a fresh read from stale cache and bases the first edit on the rendered version', async () => {
+    const cached = makeSettingsDto({ version: '0' })
+    const fresh = makeSettingsDto({ version: '1' })
+    fresh.aiRuntime.retryMaxRetries = 9
+    const backend = createBackend(fresh)
+    // 控制挂载回读，先让真实页面以缓存的 v0 完成渲染。
+    let resolveGet!: (dto: SystemSettingsDTO) => void
+    const read = new Promise<SystemSettingsDTO>((resolve) => { resolveGet = resolve })
+    mocks.get.mockReturnValueOnce(read).mockImplementation(backend.get)
+    mocks.update.mockImplementation(backend.update)
+    renderSettings(undefined, cached)
+
+    await userEvent.click(await serverTab('AI 运行时'))
+    const retries = screen.getByLabelText('最大重试次数')
+    expect(retries).toHaveValue('3')
+    expect(screen.getByText('已是最新')).toBeInTheDocument()
+
+    resolveGet(fresh)
+    await waitFor(() => expect(retries).toHaveValue('9'))
+    expect(screen.getByText('已是最新')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: '重置' })).toBeDisabled()
+
+    const delay = screen.getByLabelText('基础延迟（毫秒）')
+    await userEvent.clear(delay)
+    await userEvent.type(delay, '3000')
+    await userEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(screen.getByText('已是最新')).toBeInTheDocument())
+    expect(mocks.update).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+      expectedVersion: '1',
+      aiRuntime: { ...fresh.aiRuntime, retryBaseDelayMillis: '3000' },
+    }))
+  })
+
+  it('resumes following the latest aggregate when an edit is reverted to its original baseline', async () => {
+    const backend = createBackend()
+    mocks.get.mockImplementation(backend.get)
+    const { queryClient } = renderSettings()
+
+    await userEvent.click(await serverTab('AI 运行时'))
+    const delay = screen.getByLabelText('基础延迟（毫秒）')
+    await userEvent.clear(delay)
+    await userEvent.type(delay, '3000')
+
+    // 权威值即使恰好等于草稿，编辑仍以 v0 为基线，不能自动视为已保存。
+    const fresh = makeSettingsDto({ version: '1' })
+    fresh.aiRuntime.retryBaseDelayMillis = '3000'
+    backend.setState(fresh)
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: queryKeys.systemSettings.all })
+    })
+    expect(screen.getByText('有未保存的更改')).toBeInTheDocument()
+
+    await userEvent.clear(delay)
+    await userEvent.type(delay, '2000')
+    expect(screen.getByText('已是最新')).toBeInTheDocument()
+    expect(delay).toHaveValue('3000')
+    expect(mocks.update).not.toHaveBeenCalled()
+  })
+
   it('sends the draft snapshot base version after a background refetch advanced the authoritative version', async () => {
     const backend = createBackend()
     mocks.get.mockImplementation(backend.get)
@@ -341,10 +404,10 @@ describe('SettingsPage server editor', () => {
     expect(backendState.version).toBe('1')
   })
 
-  it('resets the draft back to the authoritative aggregate', async () => {
+  it('resets the draft to the latest authoritative aggregate after a background read', async () => {
     const backend = createBackend()
     mocks.get.mockImplementation(backend.get)
-    renderSettings()
+    const { queryClient } = renderSettings()
 
     await userEvent.click(await serverTab('环境'))
     const field = await screen.findByLabelText('心跳超时（毫秒）')
@@ -352,9 +415,17 @@ describe('SettingsPage server editor', () => {
     await userEvent.type(field, '99999999')
     expect(screen.getByText('有未保存的更改')).toBeInTheDocument()
 
+    const fresh = makeSettingsDto({ version: '1' })
+    fresh.environment.heartbeatTimeoutMillis = '90000'
+    backend.setState(fresh)
+    await act(async () => {
+      await queryClient.refetchQueries({ queryKey: queryKeys.systemSettings.all })
+    })
+    expect(field).toHaveValue('99999999')
+
     await userEvent.click(screen.getByRole('button', { name: '重置' }))
     expect(screen.getByText('已是最新')).toBeInTheDocument()
-    expect(field).toHaveValue('60000')
+    await waitFor(() => expect(field).toHaveValue('90000'))
     expect(mocks.update).not.toHaveBeenCalled()
   })
 
