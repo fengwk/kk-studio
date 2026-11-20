@@ -7,6 +7,7 @@ import {
 } from '@/features/settings/browser-preferences'
 import { makeSettingsDto, makeSettingsSchema } from '@/test-support/settings-test-fixtures'
 import { setLocale } from '@/shared/i18n'
+import type { ConfigSyncImportCheckDTO } from '@/shared/api/generated/contracts'
 import { SettingsPage } from '@/features/settings/SettingsPage'
 
 const mocks = vi.hoisted(() => ({ get: vi.fn(), getSchema: vi.fn(), update: vi.fn() }))
@@ -25,7 +26,7 @@ vi.mock('@/shared/api/agent-service', () => ({
 const syncMocks = vi.hoisted(() => ({
   getInventory: vi.fn(),
   exportConfig: vi.fn(),
-  checkImport: vi.fn(),
+  checkImport: vi.fn<(yaml: string) => Promise<ConfigSyncImportCheckDTO>>(),
   importConfig: vi.fn(),
 }))
 
@@ -344,6 +345,7 @@ describe('settings sync tab', () => {
       created: [{ kind: 'settings', name: 'settings' }],
       updated: [],
       skipped: [],
+      pluginCredentialResets: [],
     })
     syncMocks.importConfig.mockResolvedValue({
       imported: [{ kind: 'settings', name: 'settings' }],
@@ -392,6 +394,7 @@ describe('settings sync tab', () => {
       created: [{ kind: 'settings', name: 'settings' }],
       updated: [],
       skipped: [],
+      pluginCredentialResets: [],
     })
     syncMocks.importConfig.mockResolvedValue({
       imported: [{ kind: 'settings', name: 'settings' }],
