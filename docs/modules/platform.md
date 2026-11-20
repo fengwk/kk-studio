@@ -338,7 +338,7 @@ MODEL 配置保存 limit、abilities、variants、pricing 与 default variant。
 费率倍率可用统一 `factor` 或逐项 `inputFactor` / `outputFactor` / `cacheReadFactor` /
 `cacheWriteFactor` / `reasoningFactor`。输入 token 范围按 `[minInputTokens, maxInputTokensExclusive)`，
 时间规则使用 IANA 时区和 ISO `weekdays`（1=周一至 7=周日，可省略表示每天）；数组顺序不作为优先级。
-输入档的推理费率省略表示沿用基础定义，显式 `null` 表示跟随最终输出价。TTL 写价按正整数秒分别配置。
+输入档的推理费率省略表示沿用基础定义，显式 `null` 表示跟随最终输出价。TTL 写价按正整数秒分别配置，每个已配置条目的费率必须是非空十进制字符串。
 `POST /api/platform/models/pricing-preview` 接受草稿 `pricing`、`inputTokens`，以及可选 `requestedAt`（UTC 时间的 epoch 毫秒）和 `serviceTier`。同一计价器返回生效日期、命中规则和精确十进制费率，不写入配置；缺少所需事实或未定价时 `rates` 为 null。
 
 models.dev 目录导入只填入可无损转换的 token 价格与规则；`web_search` 等非 token 附加费用不计入并显示提示。

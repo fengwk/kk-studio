@@ -8,9 +8,9 @@
 
 [`JdkHttpSseTransport`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/transport/JdkHttpSseTransport.java) 是模块唯一的 I/O 入口，构造时强制 `followRedirects() == Redirect.NEVER` 并注入 Watchdog 用的 `ScheduledExecutorService`。`execute(request, timeoutPolicy, limits, onEvent)` 在调用线程上阻塞完成整个请求：发送请求、校验状态码与 `Content-Type`、增量解析 SSE，并把每个事件同步交给 `onEvent`。回调返回 `false` 表示调用方不再需要后续事件，传输器关闭响应并正常返回；读完即返回，失败一律以 `TransportException` 抛出，回调自身抛出的运行时异常原样传播。
 
-- **Deadline**：响应头阶段使用 `HttpRequest.timeout`，期限取总超时与闲置超时中较短者，连接阶段到期同样计为 `TIMEOUT`。响应体阶段由单个自重排的 watchdog 任务监督总时长与闲置时长：读取字节只刷新活动时间，到期时关闭响应体让阻塞读取立即返回，并以 `TIMEOUT`（而不是正常 EOF）结束。timer 只负责排期，关闭动作交给短生命周期虚拟线程，不为每个流保留巡检线程。
+- **Deadline**：响应头阶段使用 `HttpRequest.timeout`，期限取总超时与闲置超时中较短者，连接阶段到期同样计为 `TIMEOUT`。响应体阶段由单个自重排的 watchdog 任务监督总时长与闲置时长：读取字节只刷新活动时间，到期时关闭响应体让阻塞读取立即返回，成功 SSE 流以 `TIMEOUT`（而不是正常 EOF）结束。timer 只负责排期，关闭动作交给短生命周期虚拟线程，不为每个流保留巡检线程。
 - **取消**：中断调用线程即取消。阻塞的发送或读取随之返回，传输器抛 `CANCELLED` 并保留中断标记。
-- **资源**：无论成功、失败、取消还是回调抛出异常，响应体都会关闭；非 2xx 响应体按 `maxErrorBodyBytes` 截断读取后以 `HTTP_STATUS` 抛出。
+- **资源**：无论成功、失败、取消还是回调抛出异常，响应体都会关闭；非 2xx 响应的诊断体按 `maxErrorBodyBytes` 有界读取；若诊断体读取超时，则丢弃不完整内容，仍以 `HTTP_STATUS` 保留已收到的状态码和白名单响应头，由协议层按该状态选择后备错误文案。
 
 [`HttpSseLimits`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/transport/HttpSseLimits.java) 以字节而非字符计四项上界，[`DEFAULT`](../../harness/model/src/main/java/fun/fengwk/kkstudio/harness/model/provider/impl/transport/HttpSseLimits.java) 为 `maxLineBytes = 1 MiB`、`maxEventBytes = 1 MiB`、`maxSuccessBodyBytes = 128 MiB`、`maxErrorBodyBytes = 64 KiB`；超限立即中止并关闭底层连接。
 

@@ -30,8 +30,8 @@ import java.util.function.Predicate;
  *
  * <ul>
  *   <li>构造时强制拒绝跟随重定向（{@code HttpClient.Redirect.NEVER}）。
- *   <li>总时长与无活动闲置时长由 watchdog 监督：响应头阶段交给 {@link HttpRequest#timeout}，响应体阶段由单个定时任务在到期时关闭响应体；
- *       响应头与响应体都以 {@link TransportErrorKind#TIMEOUT} 失败。
+ *   <li>总时长与无活动闲置时长由 watchdog 监督：响应头阶段交给 {@link HttpRequest#timeout}，响应体阶段由单个定时任务在到期时关闭响应体； 无响应头或成功
+ *       SSE 流超时以 {@link TransportErrorKind#TIMEOUT} 失败；已收到非 2xx 响应则保留 HTTP 状态。
  *   <li>无论成功、失败、取消还是回调抛出异常，响应体都会关闭；非 2xx 响应体按 {@link HttpSseLimits#maxErrorBodyBytes()} 截断读取。
  *   <li>异常的 message 与 cause 链不含 request URI、凭据、请求体或远端错误体。
  * </ul>
@@ -130,13 +130,14 @@ public class JdkHttpSseTransport {
     Map<String, List<String>> headers = response.headers().map();
     if (statusCode < 200 || statusCode >= 300) {
       BoundedErrorResult error = readBoundedErrorBody(body, limits.maxErrorBodyBytes(), watchdog);
-      watchdog.throwIfExpired();
+      // 诊断体超时后不使用不完整的内容，让协议层按已知状态走后备分类与文案。
+      boolean expired = watchdog.isExpired();
       throw new TransportException(
           TransportErrorKind.HTTP_STATUS,
           "HTTP " + statusCode + " response received",
           statusCode,
-          error.bodyBytes(),
-          error.truncated(),
+          expired ? null : error.bodyBytes(),
+          !expired && error.truncated(),
           headers,
           null,
           ModelFailureMetadata.TransportStage.BEFORE_HEADERS);
@@ -296,6 +297,10 @@ public class JdkHttpSseTransport {
       if (future != null) {
         future.cancel(false);
       }
+    }
+
+    boolean isExpired() {
+      return expiredReason != null;
     }
 
     void throwIfExpired() {
