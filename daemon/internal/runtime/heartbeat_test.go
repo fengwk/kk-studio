@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -73,7 +74,7 @@ func TestRuntimeHeartbeatsAfterEnvironmentBinding(t *testing.T) {
 // Every heartbeat with active views starts a new round, so the loop is paused before a lease is handled:
 // the round of the last heartbeat actually sent is then the runtime's current round.
 func TestRuntimePublishesAndConsumesFreshIDELeaseRounds(t *testing.T) {
-	ide := &leaseTrackingIDE{applied: make(chan time.Time, 2)}
+	ide := &leaseTrackingIDE{applied: make(chan time.Time, 3)}
 	options := runtimeOptionsForTest()
 	options.IDE = ide
 	options.HeartbeatInterval = 5 * time.Millisecond
@@ -116,19 +117,21 @@ func TestRuntimePublishesAndConsumesFreshIDELeaseRounds(t *testing.T) {
 	if secondRound <= firstRound {
 		t.Fatalf("next heartbeat round = %d, want greater than %d", secondRound, firstRound)
 	}
-	if err := r.handle(context.Background(), ideLeaseEnvelope(firstRound)); err == nil || err.Error() != "IDE_LEASE round is not the current unexpired round" {
-		t.Fatalf("stale IDE lease round error = %v", err)
+	// The late proof and replay must not stop the receive loop before the next control frame.
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	connection.in <- ideLeaseEnvelope(firstRound)
+	connection.in <- ideLeaseEnvelope(secondRound)
+	connection.in <- ideLeaseEnvelope(secondRound)
+	connection.in <- &protocol.Envelope{MessageType: protocol.MessageType_READY, EnvironmentId: stringPtr("env")}
+	if err := r.serveConnection(ctx, r.connection); !errors.Is(err, ErrForbiddenInboundFrame) {
+		t.Fatalf("receive loop exited before forbidden READY: %v", err)
 	}
-	if err := r.handle(context.Background(), ideLeaseEnvelope(secondRound)); err != nil {
-		t.Fatalf("current IDE lease round rejected: %v", err)
+	if len(ide.applied) != 1 || !connection.sent(protocol.MessageType_ERROR) {
+		t.Fatal("expected exactly one renewal and a response to the forbidden control frame")
 	}
-	if err := r.handle(context.Background(), ideLeaseEnvelope(secondRound)); err == nil || err.Error() != "IDE_LEASE round is not the current unexpired round" {
-		t.Fatalf("replayed IDE lease round error = %v", err)
-	}
-	select {
-	case <-ide.applied:
-	case <-time.After(time.Second):
-		t.Fatal("current IDE lease round was not applied")
+	if started := <-ide.applied; !started.Equal(r.ideLeaseSentAt) {
+		t.Fatalf("IDE lease start = %v, want %v", started, r.ideLeaseSentAt)
 	}
 }
 

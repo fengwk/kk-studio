@@ -21,20 +21,26 @@ func (c *Client) Sync(path string) error {
 		return err
 	}
 	defer c.releaseSend()
-	return c.syncLocked(context.Background(), path)
-}
-
-// syncLocked reads and sends one document while holding the session send gate.
-func (c *Client) syncLocked(ctx context.Context, path string) error {
 	abs, err := filepath.Abs(path)
 	if err != nil {
 		return &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
+	}
+	return c.syncDocumentLocked(context.Background(), abs, false)
+}
+
+// syncDocumentLocked reads and sends one document while holding the session send gate.
+func (c *Client) syncDocumentLocked(ctx context.Context, abs string, allowMissing bool) error {
+	if ctx.Err() != nil {
+		return contextFailure(ctx)
 	}
 	data, err := os.ReadFile(abs)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			if closeErr := c.closeMissingLocked(ctx, abs); closeErr != nil {
 				return closeErr
+			}
+			if allowMissing {
+				return nil
 			}
 		}
 		return &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
@@ -93,25 +99,20 @@ func (c *Client) closeMissingLocked(ctx context.Context, abs string) error {
 	return nil
 }
 
-// reconcileMissingLocked checks only open overlays, not the rest of the workspace.
-func (c *Client) reconcileMissingLocked(ctx context.Context) error {
+// syncOpenDocumentsLocked refreshes only open overlays; the query may sync its target separately.
+func (c *Client) syncOpenDocumentsLocked(ctx context.Context, except string) error {
 	c.mu.RLock()
 	paths := make([]string, 0, len(c.documents))
 	for path := range c.documents {
-		paths = append(paths, path)
+		if path != except {
+			paths = append(paths, path)
+		}
 	}
 	c.mu.RUnlock()
 	sort.Strings(paths)
 	for _, path := range paths {
-		if ctx.Err() != nil {
-			return contextFailure(ctx)
-		}
-		if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-			if err := c.closeMissingLocked(ctx, path); err != nil {
-				return err
-			}
-		} else if err != nil {
-			return &LspError{Message: "LSP request failed: the open source file could not be inspected", Cause: err}
+		if err := c.syncDocumentLocked(ctx, path, true); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -199,12 +200,15 @@ func (c *Client) Definition(ctx context.Context, path string, line, character in
 	var result DefinitionResult
 	onSent, onFinished := trackingCallbacks(tracking)
 	err := c.callPrepared(ctx, "textDocument/definition", nil, &result, onSent, onFinished, func() (any, error) {
-		if err := c.syncLocked(ctx, path); err != nil {
-			return nil, err
-		}
 		abs, err := filepath.Abs(path)
 		if err != nil {
 			return nil, &LspError{Message: "LSP request failed: the source file could not be read", Cause: err}
+		}
+		if err := c.syncDocumentLocked(ctx, abs, false); err != nil {
+			return nil, err
+		}
+		if err := c.syncOpenDocumentsLocked(ctx, abs); err != nil {
+			return nil, err
 		}
 		c.mu.RLock()
 		doc := c.documents[abs]
@@ -228,7 +232,7 @@ func (c *Client) WorkspaceSymbols(ctx context.Context, query string, limit int, 
 	var result WorkspaceSymbolsResult
 	onSent, onFinished := trackingCallbacks(tracking)
 	err := c.callPrepared(ctx, "workspace/symbol", nil, &result, onSent, onFinished, func() (any, error) {
-		if err := c.reconcileMissingLocked(ctx); err != nil {
+		if err := c.syncOpenDocumentsLocked(ctx, ""); err != nil {
 			return nil, err
 		}
 		return WorkspaceSymbolParams{Query: query}, nil

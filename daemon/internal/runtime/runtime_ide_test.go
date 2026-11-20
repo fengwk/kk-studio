@@ -78,9 +78,39 @@ func TestRuntimeHeartbeatPublishesLeaseRoundOnlyForActiveViews(t *testing.T) {
 	<-done
 }
 
+// Malformed proofs, wrong scope, and impossible round timing remain fatal even when a proof cannot renew.
+func TestRuntimeIDELeaseRejectsInvalidFrames(t *testing.T) {
+	ide := &leaseTrackingIDE{applied: make(chan time.Time, 7)}
+	options := runtimeOptionsForTest()
+	options.IDE = ide
+	r, _ := newReadyRuntimeForTest(t, options)
+	missingRound := ideLeaseEnvelope(1)
+	missingRound.GetIdeLease().Round = nil
+	badPayload := ideLeaseEnvelope(1)
+	badPayload.Payload = nil
+	wrongScope := ideLeaseEnvelope(1)
+	wrongScope.EnvironmentId = stringPtr("other")
+	for _, frame := range []*protocol.Envelope{missingRound, ideLeaseEnvelope(0), ideLeaseEnvelope(-1), badPayload, wrongScope} {
+		if err := r.handle(context.Background(), frame); err == nil {
+			t.Errorf("invalid lease frame accepted: %v", frame)
+		}
+	}
+	round, _ := r.newIDELeaseRound()
+	if err := r.handle(context.Background(), ideLeaseEnvelope(round+1)); err == nil {
+		t.Error("future round accepted")
+	}
+	r.ideLeaseSentAt = time.Now().Add(time.Hour)
+	if err := r.handle(context.Background(), ideLeaseEnvelope(round)); err == nil {
+		t.Error("lease with a negative round age accepted")
+	}
+	if len(ide.applied) != 0 {
+		t.Error("invalid lease was applied")
+	}
+}
+
 // IDE_LEASE applies only once for the current fresh heartbeat round and uses its send time.
 func TestRuntimeIDELeaseRequiresCurrentFreshRound(t *testing.T) {
-	ide := &blockingIDEAdmission{leaseStarted: make(chan time.Time, 1), canUpdate: true}
+	ide := &blockingIDEAdmission{leaseStarted: make(chan time.Time, 5), canUpdate: true}
 	options := runtimeOptionsForTest()
 	options.IDE = ide
 	r, _ := newReadyRuntimeForTest(t, options)
@@ -98,7 +128,7 @@ func TestRuntimeIDELeaseRequiresCurrentFreshRound(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("fresh IDE lease was not applied")
 	}
-	if err := r.handle(context.Background(), frame); err == nil || err.Error() != "IDE_LEASE round is not the current unexpired round" {
+	if err := r.handle(context.Background(), frame); err != nil {
 		t.Fatalf("replayed lease error = %v", err)
 	}
 
@@ -107,8 +137,19 @@ func TestRuntimeIDELeaseRequiresCurrentFreshRound(t *testing.T) {
 	r.ideLeaseSentAt = time.Now().Add(-ideLeaseRoundTTL)
 	r.ideLeaseMu.Unlock()
 	stale := &protocol.Envelope{MessageType: protocol.MessageType_IDE_LEASE, Payload: &protocol.Envelope_IdeLease{IdeLease: &protocol.IdeLease{Round: int64Ptr(round)}}}
-	if err := r.handle(context.Background(), stale); err == nil || err.Error() != "IDE_LEASE round is not the current unexpired round" {
+	if err := r.handle(context.Background(), stale); err != nil {
 		t.Fatalf("expired lease error = %v", err)
+	}
+	r.clearIDELeaseRound()
+	if err := r.handle(context.Background(), stale); err != nil {
+		t.Fatalf("lease without an outstanding round: %v", err)
+	}
+	next, _ := r.newIDELeaseRound()
+	if next <= round {
+		t.Fatalf("round after clearing = %d, want greater than %d", next, round)
+	}
+	if err := r.handle(context.Background(), stale); err != nil {
+		t.Fatalf("lease from before clearing the round: %v", err)
 	}
 	if len(ide.leaseStarted) != 0 {
 		t.Fatal("stale lease was applied")

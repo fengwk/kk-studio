@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/fengwk/kk-studio/daemon/internal/textcodec"
 )
 
 // Verifies document synchronization notification payloads and ordering.
@@ -155,6 +157,73 @@ func TestDocument_DeletedOverlayClosesAndReopens(t *testing.T) {
 	checkClose()
 	takeFakeEvent(t, events, "workspace/symbol")
 	open()
+}
+
+// Both query types must update dependency overlays before sending the request and must not query stale text on failure.
+func TestDocument_QueriesRefreshOpenOverlays(t *testing.T) {
+	for _, method := range []string{"workspace/symbol", "textDocument/definition"} {
+		t.Run(method, func(t *testing.T) {
+			root := t.TempDir()
+			source, dependency := filepath.Join(root, "source.go"), filepath.Join(root, "dependency.go")
+			write := func(path, text string) {
+				t.Helper()
+				if err := os.WriteFile(path, []byte(text), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write(source, "package sample\n")
+			write(dependency, "package sample\nfunc before() {}\n")
+			write(filepath.Join(root, "unopened.go"), "\x00")
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			events := make(chan fakeRequest, 16)
+			client, err := Launch(ctx, ServerConfig{ID: "go", Command: []string{"fake"}}, root, "/fake", &fakeSupervisor{events: events})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() {
+				if err := client.Stop(time.Second); err != nil {
+					t.Error(err)
+				}
+			})
+			if err := client.Initialize(ctx, time.Second); err != nil {
+				t.Fatal(err)
+			}
+			takeFakeEvent(t, events, "initialize")
+			takeFakeEvent(t, events, "initialized")
+			for _, path := range []string{source, dependency} {
+				if err := client.Sync(path); err != nil {
+					t.Fatal(err)
+				}
+				takeFakeEvent(t, events, "textDocument/didOpen")
+			}
+			query := func() error {
+				if method == "workspace/symbol" {
+					_, err := client.WorkspaceSymbols(ctx, "after", 10)
+					return err
+				}
+				_, err := client.Definition(ctx, source, 1, 1)
+				return err
+			}
+			write(dependency, "\x00")
+			if err := query(); !errors.Is(err, textcodec.ErrBinary) {
+				t.Fatalf("query with an invalid open dependency = %v", err)
+			}
+			const updated = "package sample\nfunc after() {}\n"
+			write(dependency, updated)
+			if err := query(); err != nil {
+				t.Fatal(err)
+			}
+			var change DidChangeTextDocumentParams
+			if err := json.Unmarshal(takeFakeEvent(t, events, "textDocument/didChange").Params, &change); err != nil ||
+				change.TextDocument.URI != pathURI(dependency) || change.TextDocument.Version != 2 ||
+				len(change.ContentChanges) != 1 || change.ContentChanges[0].Text != updated {
+				t.Fatalf("didChange params = %#v, err = %v", change, err)
+			}
+			takeFakeEvent(t, events, "textDocument/didSave")
+			takeFakeEvent(t, events, method)
+		})
+	}
 }
 
 func takeFakeEvent(t *testing.T, events <-chan fakeRequest, method string) fakeRequest {
