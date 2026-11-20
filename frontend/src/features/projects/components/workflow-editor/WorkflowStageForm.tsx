@@ -1,3 +1,4 @@
+import { AgentSelect } from '@/features/thread/AgentSelect'
 import { useI18n } from '@/shared/i18n'
 import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { FieldLabel } from '@/shared/ui/controls/FieldLabel'
@@ -8,6 +9,7 @@ import { TextArea } from '@/shared/ui/controls/TextArea'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { StateBlock } from '@/shared/ui/feedback/StateBlock'
 import { isReservedStateCode, MAX_RUNS, parseMaxRuns, type WorkflowDraftState } from '../../workflow-draft'
+import type { AgentCatalog } from '../../useAgentCatalog'
 
 interface WorkflowStageFormProps {
   state: WorkflowDraftState
@@ -15,8 +17,7 @@ interface WorkflowStageFormProps {
   referencedStates: ReadonlySet<string>
   constraintsReady: boolean
   isPending: boolean
-  agentOptions: string[]
-  agentsLoading: boolean
+  agentCatalog: AgentCatalog
   environments: ReadonlyArray<{ name: string }>
   onRename: (key: string, rawCode: string) => void
   onUpdate: (key: string, patch: Partial<WorkflowDraftState>) => void
@@ -35,8 +36,7 @@ export function WorkflowStageForm({
   referencedStates,
   constraintsReady,
   isPending,
-  agentOptions,
-  agentsLoading,
+  agentCatalog,
   environments,
   onRename,
   onUpdate,
@@ -85,8 +85,7 @@ export function WorkflowStageForm({
         <WorkflowStageExecutionFields
           state={state}
           isPending={isPending}
-          agentOptions={agentOptions}
-          agentsLoading={agentsLoading}
+          agentCatalog={agentCatalog}
           environments={environments}
           onUpdate={onUpdate}
         />
@@ -124,8 +123,7 @@ export function WorkflowStageForm({
 interface WorkflowStageExecutionFieldsProps {
   state: WorkflowDraftState
   isPending: boolean
-  agentOptions: string[]
-  agentsLoading: boolean
+  agentCatalog: AgentCatalog
   environments: ReadonlyArray<{ name: string }>
   onUpdate: (key: string, patch: Partial<WorkflowDraftState>) => void
 }
@@ -134,8 +132,7 @@ interface WorkflowStageExecutionFieldsProps {
 function WorkflowStageExecutionFields({
   state,
   isPending,
-  agentOptions,
-  agentsLoading,
+  agentCatalog,
   environments,
   onUpdate,
 }: WorkflowStageExecutionFieldsProps) {
@@ -156,7 +153,7 @@ function WorkflowStageExecutionFields({
             onUpdate(
               state.key,
               value === 'agent'
-                ? { agent: state.agent ?? (agentOptions[0] ?? '') }
+                ? { agent: state.agent ?? (agentCatalog.agents[0]?.name ?? '') }
                 : { agent: null, environment: null, maxRuns: '' },
             )
           }
@@ -167,14 +164,17 @@ function WorkflowStageExecutionFields({
         <>
           <div className="edit-project-field">
             <FieldLabel required>{t('projects.edit.agent')}</FieldLabel>
-            <Select
+            <AgentSelect
+              agents={agentCatalog.agents}
               value={state.agent}
-              disabled={isPending || agentsLoading}
+              onChange={(agent) => onUpdate(state.key, { agent })}
               aria-label={t('projects.edit.agent')}
-              required
               aria-invalid={!state.agent.trim()}
-              options={agentOptions.map((name) => ({ value: name, label: name }))}
-              onChange={(value) => onUpdate(state.key, { agent: value })}
+              disabled={isPending}
+              loading={agentCatalog.loading}
+              catalogError={agentCatalog.error}
+              catalogReady={agentCatalog.ready}
+              required
             />
           </div>
 

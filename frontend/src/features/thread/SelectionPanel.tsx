@@ -16,6 +16,9 @@ export type { SelectionPanelItem }
 
 export interface SelectionPanelProps {
   title: string
+  inlineId?: string
+  catalogError?: boolean
+  selectionError?: string | null
   items: SelectionPanelItem[]
   selectedId?: string | null
   controls?: ReactNode
@@ -65,6 +68,9 @@ function filterItems(items: SelectionPanelItem[], tokens: string[] | null): Sele
  */
 export function SelectionPanel({
   title,
+  inlineId,
+  catalogError = false,
+  selectionError,
   items,
   selectedId,
   controls,
@@ -87,8 +93,8 @@ export function SelectionPanel({
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLUListElement>(null)
   const filteredItems = useMemo(
-    () => filterItems(items, searchTokensOf(query)),
-    [items, query],
+    () => loading || catalogError ? [] : filterItems(items, searchTokensOf(query)),
+    [items, query, loading, catalogError],
   )
   const onKeyDown = useSelectionKeyboard({
     filteredItems,
@@ -130,58 +136,57 @@ export function SelectionPanel({
     onRename(id)
   }
 
-  return (
-    <ThreadInteractionPanel
-      title={title}
-      className="thread-selection-panel"
-      bodyClassName="thread-selection-body"
-      busy={loading || selectionPending}
-      onClose={onClose}
-      onKeyDown={onKeyDown}
-      controls={(
-        <>
-          <label className="thread-selection-search">
-            <Search aria-hidden="true" />
-            <span className="sr-only">{t('ai.chat.selection.search')}</span>
-            <input
-              ref={searchRef}
-              type="search"
-              value={query}
-              placeholder={t('ai.chat.selection.search')}
-              aria-label={t('ai.chat.selection.search')}
-              disabled={selectionPending}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </label>
-          {controls}
-        </>
-      )}
-      footer={t('ai.chat.selection.meta', {
-        visible: filteredItems.length,
-        total: items.length,
-        cycle: cycleControlHint ? ` · ${cycleControlHint}` : '',
-      })}
-    >
+  const listId = inlineId == null ? undefined : `${inlineId}-list`
+  const activeIndex = filteredItems.findIndex((item) => item.id === activeId)
+  const searchControls = (
+    <>
+      <label className="thread-selection-search">
+        <Search aria-hidden="true" />
+        <span className="sr-only">{t('ai.chat.selection.search')}</span>
+        <input
+          ref={searchRef}
+          type="search"
+          className={inlineId == null ? undefined : 'ui-search-input'}
+          role={inlineId == null ? undefined : 'combobox'}
+          aria-expanded={inlineId == null ? undefined : true}
+          aria-controls={listId}
+          aria-autocomplete={inlineId == null ? undefined : 'list'}
+          aria-activedescendant={listId != null && activeIndex >= 0 ? `${listId}-${activeIndex}` : undefined}
+          value={query}
+          placeholder={t('ai.chat.selection.search')}
+          aria-label={t('ai.chat.selection.search')}
+          disabled={selectionPending}
+          onChange={(event) => setQuery(event.target.value)}
+        />
+      </label>
+      {controls}
+    </>
+  )
+  const feedback = catalogError
+    ? t('ai.chat.agentCatalogError')
+    : loading
+      ? t('ai.chat.loadingList')
+      : filteredItems.length === 0
+        ? query.trim()
+          ? t('ai.chat.selection.noMatch', { query: query.trim() })
+          : emptyText ?? t('ai.chat.noOptions')
+        : null
+  const content = (
+    <>
+      {selectionError ? <div className="field-error" role="alert">{selectionError}</div> : null}
+      {feedback ? <div className="thread-selection-empty" role="status">{feedback}</div> : null}
       <ul
         ref={listRef}
+        id={listId}
         className="thread-selection-list"
         role="listbox"
         aria-label={t('ai.chat.selection.options', { title })}
       >
-        {loading ? (
-          <li className="thread-selection-empty">{t('ai.chat.loadingList')}</li>
-        ) : null}
-        {!loading && filteredItems.length === 0 ? (
-          <li className="thread-selection-empty">
-            {query.trim()
-              ? t('ai.chat.selection.noMatch', { query: query.trim() })
-              : emptyText ?? t('ai.chat.noOptions')}
-          </li>
-        ) : null}
-        {!loading && filteredItems.map((item) => (
+        {filteredItems.map((item, index) => (
           <SelectionRow
             key={item.id}
             item={item}
+            optionId={listId == null ? undefined : `${listId}-${index}`}
             active={item.id === activeId}
             current={item.id === selectedId}
             disabled={selectionPending}
@@ -192,7 +197,7 @@ export function SelectionPanel({
             onRename={renameItem == null ? undefined : () => renameItem(item.id)}
           />
         ))}
-        {!loading && hasMore && onLoadMore ? (
+        {!loading && !catalogError && hasMore && onLoadMore ? (
           <SelectionLoadMoreRow
             label={loadingMore ? t('ai.chat.loadingList') : t('ai.chat.loadMore')}
             disabled={selectionPending || loadingMore}
@@ -200,6 +205,34 @@ export function SelectionPanel({
           />
         ) : null}
       </ul>
+    </>
+  )
+
+  if (inlineId != null) {
+    return (
+      <div id={inlineId} role="group" aria-label={title} className="agent-select-options" onKeyDown={onKeyDown}>
+        {searchControls}
+        {content}
+      </div>
+    )
+  }
+
+  return (
+    <ThreadInteractionPanel
+      title={title}
+      className="thread-selection-panel"
+      bodyClassName="thread-selection-body"
+      busy={loading || selectionPending}
+      onClose={onClose}
+      onKeyDown={onKeyDown}
+      controls={searchControls}
+      footer={t('ai.chat.selection.meta', {
+        visible: filteredItems.length,
+        total: items.length,
+        cycle: cycleControlHint ? ` · ${cycleControlHint}` : '',
+      })}
+    >
+      {content}
     </ThreadInteractionPanel>
   )
 }
@@ -208,13 +241,19 @@ export function SelectionPanel({
 export function AgentSelectionPanel({
   agents,
   selectedAgentName,
+  inlineId,
+  catalogError,
+  selectionError,
   loading = false,
   selectionPending = false,
   onSelect,
   onClose,
 }: {
-  agents: Array<{ name: string; description?: string | null }>
+  agents: readonly { name: string; description?: string | null }[]
   selectedAgentName?: string | null
+  inlineId?: string
+  catalogError?: boolean
+  selectionError?: string | null
   loading?: boolean
   selectionPending?: boolean
   onSelect: (agentName: string) => void | Promise<void>
@@ -230,6 +269,9 @@ export function AgentSelectionPanel({
         subtitle: agent.description,
       }))}
       selectedId={selectedAgentName}
+      inlineId={inlineId}
+      catalogError={catalogError}
+      selectionError={selectionError}
       loading={loading}
       selectionPending={selectionPending}
       emptyText={t('ai.chat.noAgents')}

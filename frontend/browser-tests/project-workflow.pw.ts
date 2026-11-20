@@ -22,6 +22,7 @@ function project(): ProjectDTO {
 async function transport(page: Page) {
   const state = {
     project: project(), references: ['OLD'], fail: false,
+    agents: [] as { name: string; description: string }[],
     snapshotReads: 0, writes: [] as Record<string, unknown>[],
     socket: null as WebSocketRoute | null,
   }
@@ -63,7 +64,7 @@ async function transport(page: Page) {
     } else if (path === '/api/project/projects') {
       await route.fulfill({ json: [state.project] })
     } else if (path === '/api/platform/agents') {
-      await route.fulfill({ json: [] })
+      await route.fulfill({ json: state.agents })
     } else if (path === '/api/platform/environments') {
       await route.fulfill({ json: [] })
     } else {
@@ -155,6 +156,32 @@ test('narrow screen stacks the stage form without page or dialog horizontal over
   await dialog.getByLabel('显示名称').fill('窄屏草稿')
   await expect(dialog.getByLabel('显示名称')).toHaveValue('窄屏草稿')
   await page.screenshot({ path: '../reports/layout/project-workflow-narrow.png' })
+})
+
+test('workflow Agent search preserves a retired name until an explicit selection', async ({ page }) => {
+  const state = await transport(page)
+  state.project.workflow.states[1].agent = 'retired-agent'
+  state.project.workflow.states[1].maxRuns = '3'
+  state.agents = [{ name: 'reviewer', description: 'Checks pull requests' }]
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto(URL)
+  await page.getByRole('button', { name: '编辑 / 工作流' }).click()
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: /处理中\s+WORK/ }).click()
+  const agent = dialog.getByRole('button', { name: 'Agent', exact: true })
+  await expect(agent).toHaveText('retired-agent · 不可用')
+  await agent.click()
+  const search = dialog.getByRole('combobox', { name: '搜索' })
+  await expect(search).toBeFocused()
+  await search.fill('pull requests')
+  await dialog.getByRole('option', { name: /reviewer.*Checks pull requests/ }).click()
+  await expect(agent).toHaveText('reviewer')
+  await expect(agent).toBeFocused()
+  expect(state.writes).toHaveLength(0)
+  await dialog.getByRole('button', { name: '保存工作流' }).click()
+  await expect.poll(() => state.writes[0]).toMatchObject({
+    workflow: { states: expect.arrayContaining([expect.objectContaining({ state: 'WORK', agent: 'reviewer' })]) },
+  })
 })
 
 test('YOLO help hint is keyboard accessible in the basic tab', async ({ page }) => {

@@ -5,7 +5,7 @@ import { queryKeys } from '@/shared/lib/query-keys'
 import { useI18n } from '@/shared/i18n'
 import type { ProjectDTO, ProjectSnapshotDTO } from '@/shared/api/generated/contracts'
 import type { ProjectsApi } from '../../projects-api'
-import { useCatalogAgentNames } from '../../useCatalogAgentNames'
+import { useAgentCatalog } from '../../useAgentCatalog'
 import { createDraftState, hasActiveRun, toDraftStates, type WorkflowDraftState } from '../../workflow-draft'
 
 export type EditProjectTab = 'basic' | 'workflow'
@@ -57,15 +57,20 @@ export function useProjectDraft({ project, initialTab, snapshot, snapshotError, 
         ? t('projects.edit.lockedActiveRun')
         : null
 
-  const preserveAgentNames = useMemo(
-    () => draftStates.map((state) => state.agent).filter((name): name is string => Boolean(name)),
-    [draftStates],
-  )
-  const { agentOptions, catalogNames, isLoading: agentsLoading } = useCatalogAgentNames({
-    preserveNames: preserveAgentNames,
-    enabled: true,
-  })
-  const missingCatalogAgents = agentOptions.filter((name) => !catalogNames.includes(name))
+  const agentCatalog = useAgentCatalog()
+  const missingCatalogAgents = useMemo(() => {
+    // 目录读取失败时目录内容未知：既不能判定已保存 Agent 不可用，也不能把它们列为缺失。
+    if (!agentCatalog.ready) {
+      return []
+    }
+    const catalogNames = new Set(agentCatalog.agents.map((agent) => agent.name))
+    const assigned = new Set(
+      draftStates.map((state) => state.agent).filter((name): name is string => Boolean(name)),
+    )
+    return Array.from(assigned)
+      .filter((name) => !catalogNames.has(name))
+      .sort((left, right) => left.localeCompare(right))
+  }, [agentCatalog.ready, agentCatalog.agents, draftStates])
 
   const { data: environments = [] } = useQuery({
     queryKey: queryKeys.environments.list,
@@ -92,9 +97,7 @@ export function useProjectDraft({ project, initialTab, snapshot, snapshotError, 
     constraintsReady,
     referencedStates,
     workflowLockedReason,
-    agentOptions,
-    catalogNames,
-    agentsLoading,
+    agentCatalog,
     missingCatalogAgents,
     environments,
   }

@@ -9,10 +9,26 @@ import type { ConfirmModalState } from '@/shared/ui/overlays/confirm-modal'
 import { useQueryClient } from '@tanstack/react-query'
 import type { AgentDTO, ChatDTO } from '@/shared/api/generated/contracts'
 
+/**
+ * Chat 表单使用的 Agent 目录：列表与读取状态分开。
+ *
+ * 只有目录成功读取后 `ready` 才为真；读取中或读取失败时目录内容未知，
+ * 不得据此认定已保存的 Agent 不可用。
+ */
+export interface ChatAgentCatalog {
+  agents: readonly AgentDTO[]
+  loading: boolean
+  error: boolean
+  ready: boolean
+}
+
+/**
+ * 新建时选择初始值；编辑已保存的 Agent 不走此默认逻辑。
+ */
 function resolveChatAgentName(
   agentName: string | undefined,
   selectedAgentName: string,
-  agents: AgentDTO[],
+  agents: readonly AgentDTO[],
 ): string {
   if (agentName && agents.some((agent) => agent.name === agentName)) {
     return agentName
@@ -28,7 +44,7 @@ function resolveChatAgentName(
  *
  * 表单字段是同一份草稿：创建、编辑共用，提交成功后回到默认值并跳转到 Chat 详情。
  */
-export function useChatFormController(agents: AgentDTO[]) {
+export function useChatFormController(catalog: ChatAgentCatalog) {
   const navigate = useNavigate()
   const { t } = useI18n()
   const queryClient = useQueryClient()
@@ -42,6 +58,7 @@ export function useChatFormController(agents: AgentDTO[]) {
   const [selectedEnvironmentName, setSelectedEnvironmentName] = useState<string | null>(null)
   const [formError, setFormError] = useState('')
   const [nameError, setNameError] = useState('')
+  const [agentError, setAgentError] = useState('')
 
   const createChatMutation = useInvalidateMutation({
     mutationFn: () =>
@@ -97,6 +114,7 @@ export function useChatFormController(agents: AgentDTO[]) {
     setSelectedEnvironmentName(null)
     setFormError('')
     setNameError('')
+    setAgentError('')
   }
 
   /** 用户修改任一字段后，旧请求的错误不再对应当前输入。 */
@@ -119,7 +137,7 @@ export function useChatFormController(agents: AgentDTO[]) {
     updateChatMutation.reset()
     setMode('create')
     setEditingChat(null)
-    const nextAgentName = resolveChatAgentName(agentName, selectedAgentName, agents)
+    const nextAgentName = resolveChatAgentName(agentName, selectedAgentName, catalog.agents)
     setSelectedAgentName(nextAgentName)
     clearFormFields()
     setModalOpen(true)
@@ -130,12 +148,14 @@ export function useChatFormController(agents: AgentDTO[]) {
     updateChatMutation.reset()
     setMode('edit')
     setEditingChat(chat)
-    setSelectedAgentName(chat.agentName || resolveChatAgentName(undefined, '', agents))
+    // 已保存的 Agent 原样保留：即使目录里已经没有它，也不替换成第一项。
+    setSelectedAgentName(chat.agentName)
     setTitle(chat.title ?? '')
     setYoloEnabled(chat.yoloEnabled)
     setSelectedEnvironmentName(chat.environmentName ?? null)
     setFormError('')
     setNameError('')
+    setAgentError('')
     setModalOpen(true)
   }
 
@@ -165,6 +185,7 @@ export function useChatFormController(agents: AgentDTO[]) {
 
   function handleSelectAgent(agentName: string) {
     setSelectedAgentName(agentName)
+    if (agentError) setAgentError('')
     clearMutationErrors()
   }
 
@@ -196,11 +217,20 @@ export function useChatFormController(agents: AgentDTO[]) {
       return
     }
     if (!selectedAgentName) {
-      setFormError(t('ai.chat.agentRequired'))
+      setFormError('')
+      setAgentError(t('ai.chat.agentRequired'))
+      return
+    }
+    // 与服务端一致：未修改已保存的 Agent 时，允许单独保存其他字段。
+    const agentChanged = mode === 'create' || selectedAgentName !== editingChat?.agentName
+    if (agentChanged && catalog.ready && !catalog.agents.some((agent) => agent.name === selectedAgentName)) {
+      setFormError('')
+      setAgentError(t('ai.chat.agentUnavailableError', { name: selectedAgentName }))
       return
     }
     setFormError('')
     setNameError('')
+    setAgentError('')
     if (mode === 'edit') {
       updateChatMutation.mutate(undefined)
     } else {
@@ -224,7 +254,10 @@ export function useChatFormController(agents: AgentDTO[]) {
     createChatModal: {
       open: modalOpen,
       mode,
-      agents,
+      agents: catalog.agents,
+      agentsLoading: catalog.loading,
+      agentsError: catalog.error,
+      agentsReady: catalog.ready,
       selectedAgentName,
       title,
       yoloEnabled,
@@ -232,6 +265,7 @@ export function useChatFormController(agents: AgentDTO[]) {
       pending: activeMutation.isPending,
       formError: effectiveFormError,
       nameError,
+      agentError,
       onClose: closeModal,
       onSelectAgent: handleSelectAgent,
       onTitleChange: handleTitleChange,

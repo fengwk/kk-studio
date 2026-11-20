@@ -50,6 +50,11 @@ describe('useChatPageController', () => {
       expect(chatService.listChats).toHaveBeenCalledTimes(1)
     })
 
+    // 目录读取状态随表单下传，供 Agent 选择器区分加载/失败/已确认不存在
+    expect(result.current.createChatModal.agentsLoading).toBe(false)
+    expect(result.current.createChatModal.agentsError).toBe(false)
+    expect(result.current.createChatModal.agentsReady).toBe(true)
+
     expect(agentService.listProviders).not.toHaveBeenCalled()
     expect(agentService.listModels).not.toHaveBeenCalled()
     expect(result.current.chatPanelProps.setup).toEqual({

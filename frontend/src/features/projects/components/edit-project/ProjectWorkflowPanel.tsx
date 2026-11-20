@@ -3,6 +3,7 @@ import { useI18n } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
 import { WorkflowStageEditor } from '../workflow-editor/WorkflowStageEditor'
 import type { WorkflowDraftState } from '../../workflow-draft'
+import type { AgentCatalog } from '../../useAgentCatalog'
 import type { SaveScope } from './useProjectSave'
 
 type ScopeMessages = { error: string | null; success: string | null }
@@ -20,8 +21,7 @@ interface ProjectWorkflowPanelProps {
   workflowLockedReason: string | null
   messages: ScopeMessages
   missingCatalogAgents: string[]
-  agentOptions: string[]
-  agentsLoading: boolean
+  agentCatalog: AgentCatalog
   environments: ReadonlyArray<{ name: string }>
   isPending: boolean
   activeSubmission: ActiveSubmission
@@ -51,8 +51,7 @@ export function ProjectWorkflowPanel({
   workflowLockedReason,
   messages,
   missingCatalogAgents,
-  agentOptions,
-  agentsLoading,
+  agentCatalog,
   environments,
   isPending,
   activeSubmission,
@@ -113,8 +112,7 @@ export function ProjectWorkflowPanel({
           referencedStates={referencedStates}
           constraintsReady={constraintsReady}
           isPending={isPending}
-          agentOptions={agentOptions}
-          agentsLoading={agentsLoading}
+          agentCatalog={agentCatalog}
           environments={environments}
           onSelect={onSelect}
           onRename={onRename}

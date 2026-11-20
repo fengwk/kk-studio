@@ -4,6 +4,7 @@ import { act, renderHook, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { useChatListController } from '@/features/chat/useChatListController'
+import type { ChatAgentCatalog } from '@/features/chat/useChatFormController'
 import { chatService } from '@/features/chat/chat-service'
 import { ApiError } from '@/shared/api/client'
 import type { AgentDTO } from '@/shared/api/generated/contracts'
@@ -76,9 +77,126 @@ const agents: AgentDTO[] = [
   },
 ]
 
+const readyCatalog: ChatAgentCatalog = { agents, loading: false, error: false, ready: true }
+
 describe('useChatListController', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  // 只改其他字段时沿用已保存的 Agent，无论目录已确认缺失还是读取失败。
+  const savedAgentCatalogs = [readyCatalog, { agents: [], loading: false, error: true, ready: false }]
+  it.each(savedAgentCatalogs)('keeps the saved Agent when editing other fields (catalog error: $error)', async (catalog) => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    )
+    const { result } = renderHook(
+      () => useChatListController(catalog, true),
+      { wrapper },
+    )
+    await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
+
+    act(() =>
+      result.current.openEditChat({
+        id: 'chat-retired',
+        title: 'Retired Agent Chat',
+        agentName: 'retired-agent',
+        environmentName: null,
+        yoloEnabled: false,
+        version: '2',
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    )
+    expect(result.current.createChatModal.selectedAgentName).toBe('retired-agent')
+
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+
+    await waitFor(() => {
+      expect(chatService.updateChat).toHaveBeenCalledWith('chat-retired', {
+        title: 'Retired Agent Chat',
+        agentName: 'retired-agent',
+        environmentName: null,
+        expectedVersion: '2',
+      })
+    })
+    expect(result.current.createChatModal.agentError).toBe('')
+  })
+
+  // 改选后目录刷新发现候选已失效：保留草稿并提示用户重新选择。
+  it('blocks a changed Agent removed by a catalog refresh and clears feedback on reselection', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    )
+    vi.mocked(chatService.updateChat).mockClear()
+    const { result, rerender } = renderHook((catalog) => useChatListController(catalog, true), {
+      wrapper,
+      initialProps: readyCatalog,
+    })
+    await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
+
+    act(() =>
+      result.current.openEditChat({
+        id: 'chat-retired',
+        title: 'Retired Agent Chat',
+        agentName: 'retired-agent',
+        environmentName: null,
+        yoloEnabled: false,
+        version: '2',
+        createdAt: 0,
+        updatedAt: 0,
+      }),
+    )
+    expect(result.current.createChatModal.selectedAgentName).toBe('retired-agent')
+    act(() => result.current.createChatModal.onSelectAgent('assistant'))
+    rerender({ ...readyCatalog, agents: readyCatalog.agents.filter((agent) => agent.name !== 'assistant') })
+
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+    expect(chatService.updateChat).not.toHaveBeenCalled()
+    expect(result.current.createChatModal.open).toBe(true)
+    expect(result.current.createChatModal.formError).toBe('')
+    expect(result.current.createChatModal.agentError).toBe(
+      'Agent assistant 不可用，请选择其他 Agent',
+    )
+    expect(result.current.createChatModal.selectedAgentName).toBe('assistant')
+
+    act(() => result.current.createChatModal.onSelectAgent('coder'))
+    expect(result.current.createChatModal.agentError).toBe('')
+    expect(result.current.createChatModal.selectedAgentName).toBe('coder')
+  })
+
+  // 空目录时无法预选 Agent，提交在字段处报错。
+  it('requires an Agent when creating a Chat with an empty catalog', async () => {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    )
+    vi.mocked(chatService.createChat).mockClear()
+    const { result } = renderHook(() => useChatListController({ ...readyCatalog, agents: [] }, true), { wrapper })
+    await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
+
+    act(() => result.current.openCreateChat())
+    expect(result.current.createChatModal.selectedAgentName).toBe('')
+
+    act(() => result.current.createChatModal.onTitleChange('No agent chat'))
+    await act(async () => {
+      result.current.createChatModal.onSubmit({ preventDefault() {} } as never)
+    })
+
+    expect(chatService.createChat).not.toHaveBeenCalled()
+    expect(result.current.createChatModal.agentError).toBe('请选择 Agent')
   })
 
   it('creates a Chat with the selected Agent', async () => {
@@ -88,7 +206,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(readyCatalog, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     act(() => result.current.openCreateChat('assistant'))
     expect(result.current.createChatModal.open).toBe(true)
@@ -128,7 +246,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(readyCatalog, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     act(() => result.current.openCreateChat('assistant'))
     act(() => {
@@ -157,7 +275,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(readyCatalog, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
 
     const existingChat = {
@@ -207,7 +325,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(readyCatalog, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     act(() => result.current.openCreateChat('assistant'))
     act(() => {
@@ -235,7 +353,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(readyCatalog, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
 
     const existingChat = {
@@ -285,7 +403,7 @@ describe('useChatListController', () => {
     )
     vi.mocked(chatService.updateChat).mockRejectedValueOnce(new ApiError('Conflict', 409))
 
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(readyCatalog, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
 
     const existingChat = {
@@ -357,7 +475,7 @@ describe('useChatListController', () => {
       })
     vi.mocked(chatService.updateYolo).mockRejectedValueOnce(new Error('network down'))
 
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(readyCatalog, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
     expect(chatService.listChats).toHaveBeenCalledTimes(1)
 
@@ -424,7 +542,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(readyCatalog, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
 
     vi.mocked(chatService.createChat).mockClear()
@@ -453,7 +571,7 @@ describe('useChatListController', () => {
         <MemoryRouter>{children}</MemoryRouter>
       </QueryClientProvider>
     )
-    const { result } = renderHook(() => useChatListController(agents, true), { wrapper })
+    const { result } = renderHook(() => useChatListController(readyCatalog, true), { wrapper })
     await waitFor(() => expect(result.current.chatsQuery.isSuccess).toBe(true))
 
     const targetChat = {

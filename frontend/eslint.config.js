@@ -8,7 +8,7 @@ import path from 'node:path'
 // Cross-feature entry points currently allowed; `entry/*` allows the whole feature-owned slice.
 // New dependencies require review.
 const featureDependencies = {
-  projects: ['thread/runtime/panes/AgentPane', 'environment/environment-service'],
+  projects: ['thread/runtime/panes/AgentPane', 'thread/AgentSelect', 'environment/environment-service'],
   settings: [
     'thread/runtime/state/thread-notifications',
     'extensions/PluginsTab',

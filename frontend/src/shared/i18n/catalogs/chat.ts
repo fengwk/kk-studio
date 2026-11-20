@@ -58,6 +58,18 @@ export const chatCatalog = {
     'en-US': 'Unavailable',
     'zh-CN': '不可用',
   },
+  'ai.chat.agentCatalogError': {
+    'en-US': 'Could not load Agents',
+    'zh-CN': '读取 Agent 列表失败',
+  },
+  'ai.chat.agentUnavailable': {
+    'en-US': 'Unavailable',
+    'zh-CN': '不可用',
+  },
+  'ai.chat.agentUnavailableError': {
+    'en-US': 'Agent {{name}} is unavailable; select another Agent',
+    'zh-CN': 'Agent {{name}} 不可用，请选择其他 Agent',
+  },
   'ai.chat.environmentLoadFailed': {
     'en-US': 'Failed to load environments; current selection kept',
     'zh-CN': '环境列表加载失败，已保留当前选择',
