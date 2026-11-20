@@ -29,6 +29,9 @@ INSTALLED_LIB=
 INSTALLED_CONFIG=
 INSTALLED_TOKEN=
 WORK_DIR=
+PREVIOUS_LIB=
+WORK_STARTED=false
+RECOVERY_REQUIRED=false
 LAST_OPERATION=
 STDOUT_LOG=
 STDERR_LOG=
@@ -46,7 +49,7 @@ PHASE='1/7 检查环境与输入'
 PHASE_CODE=input
 FAILURE_REASON=
 STOP_ATTEMPTED=false
-PUBLISHED=false
+PROGRAM_PUBLISH_ATTEMPTED=false
 HELPER_PID=
 HELPER_FIFO=
 HELPER_FD_OPEN=false
@@ -82,9 +85,10 @@ Installation operations are serialized by a kernel lock (install.lock) held thro
 temporary helper copy: no PID guessing, stale lock directory or flock command is used, and the
 helper never loads the library that is about to be replaced. A busy card is reported, not waited on.
 
-There is no backup, no historical program directory, no operation log history and no automatic
-rollback: a failure after publication can leave the service unavailable and is recovered by
-running install again. .work/ is the only staging area and is cleaned by this operation.
+There is no historical program or operation log directory. Until the new lib/ is published,
+.work/previous-lib holds the old program. If publication fails, the installer restores it;
+if interrupted or unable to restore it, rerun update for this card to recover it under lock.
+After publication there is no automatic rollback; rerun the installer to repair the service.
 last-operation.json holds at most one bounded diagnostic record without secrets.
 
 Uninstall stops and removes only this card's service and program; configuration, credentials,
@@ -216,17 +220,43 @@ write_last_operation() {
   fi
   return 0
 }
+needs_program_restore() {
+  [ ! -e "$INSTALLED_LIB" ] && [ ! -L "$INSTALLED_LIB" ] &&
+    { [ -e "$PREVIOUS_LIB" ] || [ -L "$PREVIOUS_LIB" ]; }
+}
+# Only called under install.lock after ownership and managed path checks. The caller checks
+# that lib/ is absent, so mv cannot nest previous-lib inside an existing directory.
+restore_program() {
+  RECOVERY_REQUIRED=true
+  if mv "$PREVIOUS_LIB" "$INSTALLED_LIB"; then
+    RECOVERY_REQUIRED=false
+    return 0
+  fi
+  return 1
+}
 # 受管暂存的删除失败必须被看见：成功结果只能在清理成功后写入。
 cleanup() {
-  local code=$? failure=$FAILURE_REASON path cleanup_failed=false operation_result= operation_error=null
+  local code=$? failure=$FAILURE_REASON path cleanup_failed=false operation_result= operation_error=null published=false
   trap - EXIT
+  trap '' INT TERM
+  # A signal can arrive after rename but before the shell moves to the next command.
+  if [ "$PROGRAM_PUBLISH_ATTEMPTED" = true ] && [ ! -e "$WORK_DIR/lib" ] && [ -d "$INSTALLED_LIB" ]; then
+    published=true
+  fi
   # A recorded failure must never be reported as success if an error path lost its status.
   if [ "$code" -eq 0 ] && [ -n "$FAILURE_REASON" ]; then code=1; fi
   for path in ${TEMP_PATHS[@]+"${TEMP_PATHS[@]}"}; do
     if ! rm -f "$path"; then cleanup_failed=true; fi
   done
-  if [ "$HELPER_READY" = true ] && [ -n "$WORK_DIR" ]; then
-    if ! rm -rf "$WORK_DIR"; then cleanup_failed=true; fi
+  if [ "$WORK_STARTED" = true ]; then
+    if needs_program_restore && ! restore_program; then
+      if [ "$code" -eq 0 ]; then code=1; fi
+      PHASE_CODE=restore
+      failure="${failure:+$failure }无法恢复旧程序目录。"
+    fi
+    if [ "$RECOVERY_REQUIRED" = false ]; then
+      if ! rm -rf "$WORK_DIR"; then cleanup_failed=true; fi
+    fi
   fi
   if [ "$HELPER_READY" = true ]; then
     if [ "$code" -eq 0 ] && [ "$cleanup_failed" = true ]; then
@@ -269,8 +299,11 @@ cleanup() {
   fi
   if [ "$code" -ne 0 ] && [ "$ACTION" != status ] && [ "$ACTION" != help ]; then
     echo "${ACTION_LABEL}失败 [${PHASE}]：${failure:-该阶段操作未完成。}" >&2
-    if [ "$PUBLISHED" = true ]; then
-      echo "受管程序或服务已开始替换；未自动回滚、未保留备份目录。" >&2
+    if [ "$RECOVERY_REQUIRED" = true ] && needs_program_restore; then
+      echo "当前程序目录缺失，未清理恢复目录：$PREVIOUS_LIB" >&2
+      printf '下一步：修正恢复目录或其父目录的问题后，重新执行 bash install.sh update --environment-id %s --version <version>；不要删除 .work。\n' "$ENV_ID" >&2
+    elif [ "$published" = true ]; then
+      echo "新程序已发布；未自动回滚，请检查服务状态。" >&2
     elif [ "$STOP_ATTEMPTED" = true ]; then
       echo "受管程序尚未替换；已尝试停止服务，请检查服务状态。" >&2
     else
@@ -279,7 +312,7 @@ cleanup() {
     if [ -d "$ENV_ROOT" ] && [ -f "$LAST_OPERATION" ]; then
       echo "本机诊断：$LAST_OPERATION" >&2
     fi
-    if [ "$HOST_OS" = Darwin ] && [ "$PUBLISHED" = true ]; then
+    if [ "$HOST_OS" = Darwin ] && [ "$published" = true ]; then
       echo "下一步：查看日志 ${STDERR_LOG}，修正后重新执行对应命令。" >&2
     elif [ "$HOST_OS" = Linux ]; then
       echo "下一步：运行 systemctl --user status $SERVICE_NAME 检查服务状态。" >&2
@@ -289,8 +322,8 @@ cleanup() {
   exit "$code"
 }
 trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
+trap 'FAILURE_REASON="操作被中断。"; exit 130' INT
+trap 'FAILURE_REASON="操作被中断。"; exit 143' TERM
 
 ownership_conflict() {
   local reason=$1 actual_path=${2:-$SERVICE_PATH}
@@ -656,11 +689,11 @@ stage_named_file() {
   cp "$source" "$STAGED_FILE" || fail "无法复制待发布文件。"
   chmod "$mode" "$STAGED_FILE" || fail "无法设置待发布文件权限。"
 }
-# .work 是本卡片唯一暂存区：取得操作锁后先清理上一次的残留，再从已验证归档解包到目标文件系统，
-# lib 的发布因此是同文件系统 rename，而不是可能部分完成的跨文件系统复制。
+# .work 是本卡片唯一暂存区。清理残留前必须在锁内恢复尚未被替换的旧程序。
+# 新旧 lib 位于同一文件系统，发布和恢复都使用 rename。
 stage_program() {
-  WORK_DIR="$ENV_ROOT/.work"
-  rm -rf "$WORK_DIR"
+  WORK_STARTED=true
+  rm -rf "$WORK_DIR" || fail "无法清理旧暂存区。"
   mkdir -m 0700 "$WORK_DIR" || fail "无法在卡片目录创建暂存区。"
   cp "$DOWNLOADED_ARCHIVE" "$WORK_DIR/archive.tar.gz" || fail "无法复制发行归档到暂存区。"
   chmod 0600 "$WORK_DIR/archive.tar.gz"
@@ -672,9 +705,11 @@ stage_program() {
     fail "暂存程序不完整。"
 }
 publish_program() {
-  rm -rf "$INSTALLED_LIB" || fail "无法删除旧程序目录。"
+  if [ -d "$INSTALLED_LIB" ]; then
+    mv "$INSTALLED_LIB" "$PREVIOUS_LIB" || fail "无法暂存旧程序目录。"
+  fi
+  PROGRAM_PUBLISH_ATTEMPTED=true
   mv "$WORK_DIR/lib" "$INSTALLED_LIB" || fail "无法发布新程序目录。"
-  PUBLISHED=true
 }
 start_and_verify() {
   local attempt stable pid active
@@ -760,6 +795,16 @@ cmd_update_arguments() {
     fail "update requires --environment-id and --version (it never accepts configuration or token)"
   validate_version
 }
+check_existing_program() {
+  if [ "$ACTION" = install ]; then
+    if { [ -e "$INSTALLED_LIB" ] || needs_program_restore; } && [ ! -f "$SERVICE_PATH" ] &&
+      ! { [ "$HOST_OS" = Darwin ] && launchd_loaded; }; then
+      ownership_conflict "program directory exists without the owned service"
+    fi
+  else
+    [ -d "$INSTALLED_LIB" ] || needs_program_restore || fail "未安装：缺少受管程序目录。"
+  fi
+}
 cmd_install_or_update() {
   local operation=$1 staged_config= staged_token= staged_service path
   if [ "$operation" = install ]; then
@@ -770,16 +815,14 @@ cmd_install_or_update() {
     check_input "$CONFIG_FILE" 1048576
     check_input "$TOKEN_FILE" 16384
     early_input_check "$CONFIG_FILE"
-    if [ -e "$INSTALLED_LIB" ] && [ ! -f "$SERVICE_PATH" ] && ! { [ "$HOST_OS" = Darwin ] && launchd_loaded; }; then
-      ownership_conflict "program directory exists without the owned service"
-    fi
+    check_existing_program
   else
     ACTION_LABEL=更新
     stage '1/7 检查环境与输入' input
     require_manager
     require_ownership
     [ -d "$ENV_ROOT" ] || fail "未安装：update 只能更新已有的受管安装。"
-    [ -d "$INSTALLED_LIB" ] || fail "未安装：缺少受管程序目录。"
+    check_existing_program
     for path in "$INSTALLED_CONFIG" "$INSTALLED_TOKEN"; do
       [ -f "$path" ] || fail "缺少当前环境配置或凭据；update 不会创建它们。"
       check_file "$path" true
@@ -800,13 +843,22 @@ cmd_install_or_update() {
   fi
   prepare_management_copy "$BOOTSTRAP_DIR/extract"
   stage_service
-  # All semantic checks precede target writes and stop.
-  require_ownership
   hold_install_lock '5/7 取得操作锁'
+  require_ownership
   ensure_private_root "$INSTALL_ROOT"
   ensure_private_root "$INSTALL_ROOT/environments"
   ensure_private_root "$ENV_ROOT"
   check_managed_paths
+  check_existing_program
+  if needs_program_restore; then
+    PHASE_CODE=restore
+    RECOVERY_REQUIRED=true
+    check_private_directory "$PREVIOUS_LIB"
+    [ -f "$PREVIOUS_LIB/kk-studio-daemon" ] && [ -x "$PREVIOUS_LIB/kk-studio-daemon" ] &&
+      [ ! -L "$PREVIOUS_LIB/kk-studio-daemon" ] || fail "恢复目录缺少受管可执行文件。"
+    restore_program || fail "无法恢复旧程序目录。"
+    PHASE_CODE=lock
+  fi
   stage_program
   if [ "$operation" = install ]; then
     # 校验与发布使用同一份同名配对文件：.work/inputs/daemon.json + daemon.token。
@@ -894,6 +946,10 @@ cmd_uninstall() {
   if [ -e "$SERVICE_PATH" ] || { [ "$HOST_OS" = Darwin ] && launchd_loaded; }; then
     has_service=true
   fi
+  if needs_program_restore; then
+    RECOVERY_REQUIRED=true
+    fail "找不到当前安装程序；请先恢复程序再卸载。"
+  fi
   # 只有配置/数据而没有服务定义或程序时无事可做；服务已被移除但 lib 仍残留时仍要完成清理。
   if [ "$has_service" = false ] && [ ! -d "$INSTALLED_LIB" ]; then
     echo "KK Studio 环境未安装受管服务。配置、凭据与用户数据均已保留。"
@@ -905,8 +961,15 @@ cmd_uninstall() {
   bootstrap_directory
   prepare_management_copy "$INSTALLED_LIB"
   hold_install_lock '2/3 取得操作锁'
+  check_managed_paths
+  require_ownership
+  if needs_program_restore; then
+    RECOVERY_REQUIRED=true
+    fail "找不到当前安装程序；请先恢复程序再卸载。"
+  fi
   stop_service_and_wait '3/3 停止并移除服务'
   PHASE_CODE=publish
+  rm -rf "$WORK_DIR" || fail "无法清理受管暂存。"
   rm -f "$SERVICE_PATH" || fail "无法移除受管服务定义。"
   rm -rf "$INSTALLED_LIB" || fail "无法移除受管程序目录。"
   if [ "$HOST_OS" = Linux ]; then systemctl --user daemon-reload >/dev/null 2>&1 || true; fi
@@ -958,6 +1021,7 @@ main() {
   INSTALLED_CONFIG="$ENV_ROOT/daemon.json"
   INSTALLED_TOKEN="$ENV_ROOT/daemon.token"
   WORK_DIR="$ENV_ROOT/.work"
+  PREVIOUS_LIB="$WORK_DIR/previous-lib"
   LAST_OPERATION="$ENV_ROOT/last-operation.json"
   STDOUT_LOG="$ENV_ROOT/daemon.stdout.log"
   STDERR_LOG="$ENV_ROOT/daemon.stderr.log"

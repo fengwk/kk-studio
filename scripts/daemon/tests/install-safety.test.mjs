@@ -5,7 +5,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { describe, it } from 'node:test'
 import { spawnSync } from 'node:child_process'
@@ -206,6 +206,27 @@ describe('install.sh safety', () => {
       assert.match(result.stderr, /program directory exists without the owned service/)
       assert.ok(existsSync(path.join(root, 'lib/unknown')))
       assert.ok(!existsSync(path.join(fixture.state, 'active')))
+    }))
+
+  it('never adopts a symlink as the installed or recovery program directory', () =>
+    withInstall(({ fixture, install }) => {
+      assert.equal(install().status, 0)
+      const root = envRoot(fixture)
+      const lib = path.join(root, 'lib')
+      const work = path.join(root, '.work')
+      const external = path.join(fixture.root, 'external-program')
+      renameSync(lib, external)
+      mkdirSync(work, { mode: 0o700 })
+      for (const link of [lib, path.join(work, 'previous-lib')]) {
+        symlinkSync(external, link)
+        const result = install()
+        assert.equal(result.status, 1, result.stderr)
+        assert.ok(result.stderr.includes(`symbolic link directory is unsafe: ${link}`), result.stderr)
+        assert.ok(existsSync(path.join(external, 'kk-studio-daemon')))
+        assert.ok(existsSync(link))
+        assert.ok(existsSync(path.join(fixture.state, 'active')))
+        rmSync(link)
+      }
     }))
 
   it('update failure keeps config, credentials, skills and the previous program', () =>
