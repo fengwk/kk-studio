@@ -7,7 +7,7 @@ import { setLocale } from '@/shared/i18n'
 const DESTINATIONS = [
   { value: 'pane-1', label: '1' },
   { value: 'pane-2', label: '2 · thread-one' },
-  { value: 'pane-9', label: '9' },
+  { value: 'pane-8', label: '8' },
 ]
 
 function renderDialog(overrides: Partial<React.ComponentProps<typeof NewBranchDialog>> = {}) {
@@ -16,7 +16,7 @@ function renderDialog(overrides: Partial<React.ComponentProps<typeof NewBranchDi
   const view = render(
     <NewBranchDialog
       destinations={DESTINATIONS}
-      defaultDestination="pane-9"
+      defaultDestination="pane-8"
       onConfirm={onConfirm}
       onClose={onClose}
       {...overrides}
@@ -50,10 +50,10 @@ describe('NewBranchDialog', () => {
     const user = userEvent.setup()
     const { onConfirm } = renderDialog()
     // 缺省目标位置来自触发分支的 pane，并带上它当前的分支名。
-    expect(value()).toBe('9')
+    expect(value()).toBe('8')
     await user.type(nameInput(), '  branch-1  ')
     await user.click(submit())
-    expect(onConfirm).toHaveBeenCalledWith({ name: 'branch-1', paneId: 'pane-9' })
+    expect(onConfirm).toHaveBeenCalledWith({ name: 'branch-1', paneId: 'pane-8' })
   })
 
   it('rejects a blank name without submitting', async () => {
@@ -70,12 +70,12 @@ describe('NewBranchDialog', () => {
     expect(nameInput()).toHaveAttribute('aria-invalid', 'true')
   })
 
-  it('lets the user pick any destination position 1..9', async () => {
+  it('lets the user pick any destination position 1..8', async () => {
     const user = userEvent.setup()
     const { onConfirm } = renderDialog()
     await user.click(document.querySelector<HTMLButtonElement>('.new-branch-dialog .ui-select-trigger')!)
     const options = [...document.querySelectorAll<HTMLButtonElement>('.ui-select-option')]
-    expect(options.map((option) => option.textContent)).toEqual(['1', '2 · thread-one', '9'])
+    expect(options.map((option) => option.textContent)).toEqual(['1', '2 · thread-one', '8'])
     await user.click(options[1]!)
     expect(value()).toBe('2 · thread-one')
     await user.type(nameInput(), 'branch-1')
@@ -108,9 +108,9 @@ describe('NewBranchDialog', () => {
       />,
     )
     await user.type(nameInput(), 'branch-1')
-    expect(value()).toBe('9')
+    expect(value()).toBe('8')
     await user.click(submit())
-    expect(onConfirm).toHaveBeenCalledWith({ name: 'branch-1', paneId: 'pane-9' })
+    expect(onConfirm).toHaveBeenCalledWith({ name: 'branch-1', paneId: 'pane-8' })
 
     // 目标位置从候选中消失时收敛到缺省位置，绝不保留不可达位置。
     rerender(

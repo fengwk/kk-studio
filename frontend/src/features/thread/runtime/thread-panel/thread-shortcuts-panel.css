@@ -1,4 +1,30 @@
-/* Thread /shortcuts 面板：只读快捷键列表的滚动容器。 */
-.thread-shortcuts-body {
+/* 仅面板正文滚动；按 pane 内的实际可用宽度重排列。 */
+.thread-shortcuts-panel {
+  container: thread-shortcuts / inline-size;
+}
+
+.thread-shortcuts-panel .thread-shortcuts-body {
   overflow-y: auto;
+  padding: 12px;
+}
+
+.thread-shortcuts-panel .shortcut-list {
+  max-inline-size: 36rem;
+  overflow-wrap: anywhere;
+}
+
+.thread-shortcuts-panel .shortcut-row {
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+}
+
+.thread-shortcuts-panel .shortcut-keys {
+  justify-self: start;
+  white-space: normal;
+}
+
+@container thread-shortcuts (max-width: 420px) {
+  .thread-shortcuts-panel .shortcut-row {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 4px;
+  }
 }

@@ -1,15 +1,15 @@
 import { expect, test, type Page } from './fixture'
 import type { Route, WebSocketRoute } from '@playwright/test'
-import type { ChatLayout, ChatPaneState, ChatTabSnapshot } from '@/features/chat/chat-pane-state'
+import { createDefaultChatPaneState, type ChatLayout, type ChatTabSnapshot } from '@/features/chat/chat-pane-state'
 import type { PaneTarget } from '@/features/thread/runtime/agent-pane/pane-target'
 import type { EntryType, HarnessSessionEntryDTO, HarnessThreadTreeNodeDTO } from '@/shared/api/generated/contracts'
 
 /**
- * 新建分支流程真实浏览器回归（独立基座、独立端口 5184）。
+ * 新建分支流程真实浏览器回归（独立基座）。
  *
  * 挂载真实 `ChatWorkspacePage`，后端全部由 `page.route` 提供。这里验证 jsdom 无法
  * 证明的行为：隐藏 pane 的真实布局显露、真实 `display:none`/`inert` 的 Debug 隐藏与
- * 退出恢复、以及 1..9 目标路由后目标 pane 的真实可见性与焦点。
+ * 退出恢复、以及 1..8 目标路由后目标 pane 的真实可见性与焦点。
  */
 
 const CHAT_ID = 'chat-branch-1'
@@ -529,14 +529,9 @@ async function seedChatTab(
   focusedPaneId: string,
   targets: Record<string, PaneTarget> = {},
 ) {
-  const presentation: ChatPaneState = {
-    layout,
-    focusedPaneId,
-    panes: Array.from({ length: 9 }, (_, index) => {
-      const id = `pane-${index + 1}`
-      return { id, target: targets[id] ?? { kind: 'NEW_SESSION_DRAFT' } }
-    }),
-  }
+  const presentation = createDefaultChatPaneState(layout)
+  presentation.focusedPaneId = focusedPaneId
+  presentation.panes = presentation.panes.map((pane) => ({ ...pane, target: targets[pane.id] ?? pane.target }))
   const snapshot: ChatTabSnapshot = { presentation }
   const key = `kk-studio.tab-state:chat:${CHAT_ID}`
   await page.addInitScript(({ key, snapshot }) => {
@@ -735,41 +730,40 @@ test.describe('新建分支命名与目标路由（真实浏览器）', () => {
     await dialog.locator('.ui-select-trigger').click()
     const listbox = page.getByRole('listbox')
     await expect(listbox).toBeVisible()
-    await listbox.getByRole('option').nth(2).click()
+    await expect(listbox.getByRole('option')).toHaveCount(8)
+    await listbox.getByRole('option').nth(7).click()
     await dialog.locator('.modal-footer button[type="submit"]').click()
 
-    // 隐藏的 pane-3 被真实布局显露：三个 Composer 都可见且 pane-3 落在视口内。
-    await expect(page.locator('.chat-pane-grid.layout-split-3')).toBeVisible()
-    await expect(page.getByLabel('给 AI 发送消息')).toHaveCount(3)
-    const thirdBox = (await page.getByLabel('给 AI 发送消息').nth(2).boundingBox())!
-    expect(thirdBox.x).toBeGreaterThan(0)
-    expect(thirdBox.x + thirdBox.width).toBeLessThanOrEqual(1440)
+    // 最大隐藏位置也要在真实网格中显露并落在视口内。
+    await expect(page.locator('.chat-pane-grid.layout-grid-8')).toBeVisible()
+    await expect(page.getByLabel('给 AI 发送消息')).toHaveCount(8)
+    const destination = page.locator('[data-pane-id="pane-8"]')
+    await expect(destination.getByLabel('给 AI 发送消息')).toBeInViewport()
 
     // 顶栏面包屑跟随聚焦 pane，并展示规范化后的分支名。
     const breadcrumb = page.locator('.chat-workspace-breadcrumb')
-    await expect(breadcrumb).toHaveAttribute('data-focused-pane', 'pane-3')
+    await expect(breadcrumb).toHaveAttribute('data-focused-pane', 'pane-8')
     await expect(breadcrumb.locator('[data-breadcrumb="branch"]')).toHaveText('browser-branch')
 
     // 目标 pane 的本地草稿目标已写为 NEW_THREAD_DRAFT，但绝不预创建 Thread。
     const target = { kind: 'NEW_THREAD_DRAFT', sessionId: SESSION_ID, startEntryId: 'entry-2', threadName: 'browser-branch' }
-    await expect.poll(() => readPaneTarget(page, 'pane-3')).toEqual(target)
-    await expect.poll(() => readPaneTarget(page, 'pane-3', 'local')).toEqual(target)
+    await expect.poll(() => readPaneTarget(page, 'pane-8')).toEqual(target)
+    await expect.poll(() => readPaneTarget(page, 'pane-8', 'local')).toEqual(target)
     expect(recorded.commandBatches).toEqual([])
-    const third = page.locator('[data-pane-id="pane-3"]')
-    await expect(third.getByLabel('给 AI 发送消息')).toBeFocused()
-    await expect(third.getByText('Real selected ancestor', { exact: true })).toBeVisible()
-    await expect(third.getByText('hello', { exact: true })).toHaveCount(0)
-    await expect(third.getByText('Sibling must stay hidden', { exact: true })).toHaveCount(0)
+    await expect(destination.getByLabel('给 AI 发送消息')).toBeFocused()
+    await expect(destination.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+    await expect(destination.getByText('hello', { exact: true })).toHaveCount(0)
+    await expect(destination.getByText('Sibling must stay hidden', { exact: true })).toHaveCount(0)
     await page.screenshot({ path: testInfo.outputPath('hidden-pane-history-focus.png') })
 
     // 重载必须恢复刚刚路由的目标，而不是重放初始 pane fixture。
     const lastKey = `kk-studio.last-state:chat:${CHAT_ID}`
     const lastBeforeReload = await page.evaluate((key) => localStorage.getItem(key), lastKey)
     await page.reload()
-    await expect(page.locator('.chat-pane-grid.layout-split-3')).toBeVisible()
-    await expect.poll(() => readPaneTarget(page, 'pane-3')).toEqual(target)
+    await expect(page.locator('.chat-pane-grid.layout-grid-8')).toBeVisible()
+    await expect.poll(() => readPaneTarget(page, 'pane-8')).toEqual(target)
     expect(await page.evaluate((key) => localStorage.getItem(key), lastKey)).toBe(lastBeforeReload)
-    await expect(page.locator('[data-pane-id="pane-3"]').getByText('Real selected ancestor', { exact: true })).toBeVisible()
+    await expect(destination.getByText('Real selected ancestor', { exact: true })).toBeVisible()
   })
 
   test('Debug covers the pane with a real return action and restores the draft on exit', async ({
@@ -917,6 +911,100 @@ test('selecting a Thread waits for readiness, preserves its text and never steal
   await expect(second.getByLabel('给 AI 发送消息')).toBeFocused()
   await expect(page.locator('.chat-workspace-breadcrumb')).toHaveAttribute('data-focused-pane', 'pane-2')
   await expect(first.getByLabel('给 AI 发送消息')).toHaveText('bound draft text')
+})
+
+test('legacy nine-slot snapshots reset and saved conversations reopen through /thread', async ({ page }) => {
+  const recorded = await installChatApi(page)
+  await page.setViewportSize({ width: 1440, height: 900 })
+  const key = `kk-studio.tab-state:chat:${CHAT_ID}`
+  const presentation = createDefaultChatPaneState('split-2')
+  presentation.panes[0]!.target = { kind: 'BOUND_THREAD', threadId: THREAD_ID }
+  presentation.panes.push({ id: 'pane-9', target: { kind: 'NEW_SESSION_DRAFT' } })
+  await page.addInitScript(({ key, presentation }) => {
+    sessionStorage.setItem(key, JSON.stringify({ presentation }))
+  }, { key, presentation })
+  await page.goto(HARNESS_URL)
+  await expect(page.locator('.chat-pane-grid.layout-single')).toBeVisible()
+  expect(await readPaneTarget(page, 'pane-1')).toEqual({ kind: 'NEW_SESSION_DRAFT' })
+  await page.getByRole('button', { name: '打开命令表' }).click()
+  await page.getByRole('option', { name: /^thread/ }).click()
+  await page.getByRole('option', { name: /Session One/ }).click()
+  await page.getByRole('option', { name: /thread-name/ }).click()
+  await expect(page.getByText('Real selected ancestor', { exact: true })).toBeVisible()
+  expect(await readPaneTarget(page, 'pane-1')).toEqual({ kind: 'BOUND_THREAD', threadId: THREAD_ID })
+  expect(recorded.commandBatches).toEqual([])
+})
+
+test('shortcut rows follow pane width, scroll only in the body and Escape restores Composer', async ({ page }, testInfo) => {
+  await installChatApi(page)
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  await page.setViewportSize({ width: 1100, height: 900 })
+  await seedChatTab(page, 'split-3', 'pane-1')
+  await page.goto(HARNESS_URL)
+  const pane = page.locator('[data-pane-id="pane-1"]')
+  const composer = pane.getByLabel('给 AI 发送消息')
+  await composer.fill('shortcut draft')
+  const dockBox = (await pane.locator('.thread-dock').boundingBox())!
+  await pane.getByRole('button', { name: '打开命令表' }).click()
+  await pane.getByRole('option', { name: /shortcuts/ }).click()
+  const panel = pane.getByRole('region', { name: '键盘快捷键' })
+  const body = panel.locator('.thread-shortcuts-body')
+  const heading = panel.getByRole('heading', { name: '键盘快捷键' })
+  await expect(panel).toBeFocused()
+  for (const [width, stacked] of [[1100, true], [1440, false], [2400, false]] as const) {
+    await page.setViewportSize({ width, height: 900 })
+    const panelBox = (await panel.boundingBox())!
+    if (stacked) {
+      expect(panelBox.x).toBeCloseTo(dockBox.x)
+      expect(panelBox.width).toBeCloseTo(dockBox.width)
+    }
+    const fits = await body.evaluate((el) => {
+      const bounds = el.getBoundingClientRect()
+      return el.scrollWidth <= el.clientWidth && [...el.querySelectorAll('kbd')].every((key) => {
+        const rect = key.getBoundingClientRect()
+        return rect.left >= bounds.left + 12 && rect.right <= bounds.right - 12
+      })
+    })
+    expect(fits).toBe(true)
+    const text = (await panel.locator('.shortcut-text').first().boundingBox())!
+    const keys = (await panel.locator('kbd').first().boundingBox())!
+    if (stacked) {
+      expect(keys.y).toBeGreaterThanOrEqual(text.y + text.height)
+      expect(keys.x).toBeCloseTo(text.x)
+    } else {
+      expect(keys.x).toBeGreaterThan(text.x)
+      expect(keys.y).toBeLessThan(text.y + text.height)
+    }
+    if (width === 2400) {
+      expect(keys.x + keys.width).toBeLessThan(panelBox.x + panelBox.width - 80)
+    }
+    await page.screenshot({ path: testInfo.outputPath(`shortcuts-${width}.png`) })
+  }
+  const headingBefore = await heading.boundingBox()
+  expect(await body.evaluate((el) => {
+    el.scrollTop = el.scrollHeight
+    return el.scrollTop
+  })).toBeGreaterThan(0)
+  expect(await heading.boundingBox()).toEqual(headingBefore)
+  await expect(panel.getByRole('button', { name: '关闭', exact: true })).toBeInViewport()
+  for (const event of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }]) {
+    await panel.dispatchEvent('keydown', { key: 'Escape', ...event })
+    await expect(panel).toBeVisible()
+  }
+  // 焦点交接期间，模态层已出现但按键仍可能来自下层面板。
+  await page.evaluate(() => {
+    const overlay = document.createElement('div')
+    overlay.setAttribute('aria-modal', 'true')
+    overlay.id = 'test-blocking-modal'
+    document.body.append(overlay)
+  })
+  await panel.dispatchEvent('keydown', { key: 'Escape' })
+  await expect(panel).toBeVisible()
+  await page.locator('#test-blocking-modal').evaluate((overlay) => overlay.remove())
+  await page.keyboard.press('Escape')
+  await expect(panel).toHaveCount(0)
+  await expect(composer).toBeFocused()
+  await expect(composer).toHaveText('shortcut draft')
 })
 
 test('root slash selectors preserve the draft, close on Escape and keep Debug exclusive', async ({ page }) => {

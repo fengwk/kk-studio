@@ -8,7 +8,7 @@ export async function seedSplitChatPanes(page, chatId, firstThreadId, secondThre
       presentation: {
         layout: 'split-2',
         focusedPaneId: 'pane-1',
-        panes: Array.from({ length: 9 }, (_, index) => ({
+        panes: Array.from({ length: 8 }, (_, index) => ({
           id: `pane-${index + 1}`,
           target: index < 2
             ? { kind: 'BOUND_THREAD', threadId: index === 0 ? first : second }

@@ -287,14 +287,6 @@
   background: var(--border);
 }
 
-/* 9：3x3 等宽等高九宫格 */
-.chat-pane-grid.layout-grid-9 {
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(3, 1fr);
-  gap: 1px;
-  background: var(--border);
-}
-
 .chat-pane {
   min-width: 0;
   min-height: 0;
@@ -319,8 +311,7 @@
   .chat-pane-grid.layout-grid-5,
   .chat-pane-grid.layout-grid-6,
   .chat-pane-grid.layout-grid-7,
-  .chat-pane-grid.layout-grid-8,
-  .chat-pane-grid.layout-grid-9 {
+  .chat-pane-grid.layout-grid-8 {
     grid-template-columns: 1fr;
     grid-template-rows: none;
     grid-auto-rows: 100%;
@@ -346,8 +337,7 @@
   .chat-pane-grid.layout-grid-5::-webkit-scrollbar,
   .chat-pane-grid.layout-grid-6::-webkit-scrollbar,
   .chat-pane-grid.layout-grid-7::-webkit-scrollbar,
-  .chat-pane-grid.layout-grid-8::-webkit-scrollbar,
-  .chat-pane-grid.layout-grid-9::-webkit-scrollbar {
+  .chat-pane-grid.layout-grid-8::-webkit-scrollbar {
     display: none;
     width: 0;
     height: 0;
@@ -359,8 +349,7 @@
   .chat-pane-grid.layout-grid-5 > .chat-pane,
   .chat-pane-grid.layout-grid-6 > .chat-pane,
   .chat-pane-grid.layout-grid-7 > .chat-pane,
-  .chat-pane-grid.layout-grid-8 > .chat-pane,
-  .chat-pane-grid.layout-grid-9 > .chat-pane {
+  .chat-pane-grid.layout-grid-8 > .chat-pane {
     min-height: 100%;
     height: 100%;
     max-height: 100%;

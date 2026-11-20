@@ -796,7 +796,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     await user.click(document.querySelector<HTMLButtonElement>('.new-branch-dialog .ui-select-trigger')!)
     const options = await waitFor(() => {
       const found = [...document.querySelectorAll<HTMLButtonElement>('.ui-select-option')]
-      expect(found.length).toBe(9)
+      expect(found.length).toBe(8)
       return found
     })
     await user.click(options.find((option) => option.textContent?.startsWith(String(position)))!)
@@ -871,11 +871,11 @@ describe('ChatWorkspacePage 新建分支路由', () => {
   it.each([
     ['session-1', 3, true],
     ['another-session', 3, false],
-    ['session-1', 9, false],
+    ['session-1', 8, false],
   ])('checks hidden local drafts by Session, excluding the target itself (%s -> %i)', async (sessionId, destination, conflict) => {
     const user = userEvent.setup()
     seedPaneTargets({
-      'pane-9': {
+      'pane-8': {
         kind: 'NEW_THREAD_DRAFT', sessionId, startEntryId: 'entry-2', threadName: 'local',
       },
     })
@@ -1017,7 +1017,7 @@ describe('ChatWorkspacePage 新建分支路由', () => {
     vi.mocked(harnessService.listSessionEntries).mockResolvedValue(entryPage([ROOT_ENTRY]))
     if (scenario === 'local' || scenario === 'cross-session') {
       seedPaneTargets({
-        'pane-9': {
+        'pane-8': {
           kind: 'NEW_THREAD_DRAFT', sessionId: scenario === 'local' ? 'session-1' : 'other',
           startEntryId: 'entry-1', threadName: 'duplicate',
         },

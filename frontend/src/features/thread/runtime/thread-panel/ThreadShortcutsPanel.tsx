@@ -24,7 +24,8 @@ export function ThreadShortcutsPanel({ onClose }: { onClose: () => void }) {
       panelRef={panelRef}
       onClose={onClose}
       onKeyDown={(event) => {
-        if (event.key === 'Escape') {
+        if (event.key === 'Escape' && !event.defaultPrevented && !event.repeat
+          && !event.nativeEvent.isComposing && event.keyCode !== 229) {
           event.preventDefault()
           event.stopPropagation()
           onClose()

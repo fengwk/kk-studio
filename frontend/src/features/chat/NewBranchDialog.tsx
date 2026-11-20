@@ -17,7 +17,7 @@ export interface BranchDestinationOption {
  * 新建 thread 分支对话框：/history 历史树与回合 footer 的 GitBranch 图标共用的唯一命名与目标流程。
  *
  * 名称是创建 target 的必需事实（进入 creationRequestHash），提交前按后端 Names 规则
- * 规范化；目标位置（打开位置）选择 1..9 中的任一 pane，隐藏 pane 由 workspace 负责显露。
+ * 规范化；目标位置（打开位置）选择 1..8 中的任一 pane，隐藏 pane 由 workspace 负责显露。
  * 覆盖未发送草稿的确认与在途阻止由 workspace 决定，本组件只负责呈现。
  */
 export function NewBranchDialog({
