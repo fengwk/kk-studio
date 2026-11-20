@@ -255,8 +255,8 @@ func readIDERecovery(cfg config.DaemonConfig, viewID string, prior bool) (*ide.R
 	return ide.ReadRecoveryBackup(cfg, viewID, ideRecoveryQuota)
 }
 
-// insideRecovery resolves an existing destination parent so a symlinked directory cannot
-// redirect the copy into the recovery store.
+// insideRecovery checks both the destination itself and its resolved ancestors so an
+// alias of the recovery directory cannot redirect the copy into the recovery store.
 func insideRecovery(path string, cfg config.DaemonConfig) bool {
 	dir := ideRecoveryDirectory(cfg)
 	isWithin := func(path, dir string) bool {
@@ -272,6 +272,9 @@ func insideRecovery(path string, cfg config.DaemonConfig) bool {
 		return false
 	}
 	// Compare directory identity as well as lexical paths, including on case-insensitive macOS.
+	if info, err := os.Stat(path); err == nil && os.SameFile(info, target) {
+		return true
+	}
 	for {
 		info, err := os.Stat(parent)
 		if err == nil && os.SameFile(info, target) {

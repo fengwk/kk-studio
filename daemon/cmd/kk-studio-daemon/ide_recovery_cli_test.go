@@ -302,6 +302,12 @@ func TestIDERecoveryExportRefusesUnsafeDestination(t *testing.T) {
 	if err := os.Symlink(directory, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
+	// Like /var and /private/var on macOS, this alias changes an ancestor's spelling.
+	dataAlias := filepath.Join(t.TempDir(), "data-link")
+	if err := os.Symlink(dataDir, dataAlias); err != nil {
+		t.Fatal(err)
+	}
+	aliasedDirectory := ideRecoveryDirectory(config.DaemonConfig{DataDir: dataAlias})
 	for _, tc := range []struct {
 		name string
 		args []string
@@ -311,6 +317,7 @@ func TestIDERecoveryExportRefusesUnsafeDestination(t *testing.T) {
 		{name: "existing directory", args: []string{"export", recoveryViewA, blocked}, want: "output file already exists"},
 		{name: "inside recovery", args: []string{"export", recoveryViewA, filepath.Join(directory, recoveryViewB+".json")}, want: "output path must be outside the IDE recovery directory"},
 		{name: "recovery directory", args: []string{"export", recoveryViewA, directory}, want: "output path must be outside the IDE recovery directory"},
+		{name: "aliased recovery directory", args: []string{"export", recoveryViewA, aliasedDirectory}, want: "output path must be outside the IDE recovery directory"},
 		{name: "symlinked recovery", args: []string{"export", recoveryViewA, filepath.Join(link, recoveryViewB+".json")}, want: "output path must be outside the IDE recovery directory"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
