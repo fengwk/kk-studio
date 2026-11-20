@@ -26,6 +26,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogSnapshot;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.DatabasePluginCredentialStore;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
@@ -61,6 +62,7 @@ class MediaPluginPostgresIntegrationTest {
   private DataSource dataSource;
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
+  private PluginAuthAttemptRepository authAttemptRepository;
 
   @BeforeEach
   void setUp() {
@@ -68,6 +70,7 @@ class MediaPluginPostgresIntegrationTest {
     JdbcClient jdbcClient = JdbcClient.create(dataSource);
     configurationRepository = new PluginConfigurationRepository(jdbcClient);
     credentialRepository = new PluginCredentialRepository(jdbcClient);
+    authAttemptRepository = new PluginAuthAttemptRepository(jdbcClient);
   }
 
   /** 启动写入启用的默认配置：目录只有 owner 贡献的 image.crop，没有内置 adapter 兜底。 */
@@ -185,6 +188,8 @@ class MediaPluginPostgresIntegrationTest {
         registry,
         configurationRepository,
         credentialRepository,
+        authAttemptRepository,
+        Clock.systemUTC(),
         context.getBean(PluginContextFactory.class),
         new PluginAgentDependencies(registry, configurationRepository, mock(AgentRepository.class)),
         new DataSourceTransactionManager(dataSource),

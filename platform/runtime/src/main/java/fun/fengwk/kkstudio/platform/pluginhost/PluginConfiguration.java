@@ -66,6 +66,7 @@ public class PluginConfiguration {
       PluginRegistry registry,
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
+      PluginAuthAttemptRepository authAttempts,
       PluginContextFactory contextFactory,
       PluginAgentDependencies agentDependencies,
       PlatformTransactionManager transactionManager,
@@ -75,6 +76,8 @@ public class PluginConfiguration {
         registry,
         configurations,
         credentials,
+        authAttempts,
+        Clock.systemUTC(),
         contextFactory,
         agentDependencies,
         transactionManager,
@@ -89,8 +92,7 @@ public class PluginConfiguration {
       PluginConfigurationRepository configurations,
       PluginCredentialRepository credentials,
       PluginConfigurationService configurationService,
-      ObjectProvider<PluginFunctionNamesProjection> functionNamesProjections,
-      PluginAuthAttemptRepository authAttempts) {
+      ObjectProvider<PluginFunctionNamesProjection> functionNamesProjections) {
     return new PluginManagementService(
         registry,
         catalogRuntime::getObject,
@@ -98,7 +100,6 @@ public class PluginConfiguration {
         credentials,
         configurationService,
         functionNamesProjections.getIfAvailable(() -> PluginFunctionNamesProjection.NONE),
-        authAttempts,
         Clock.systemUTC());
   }
 

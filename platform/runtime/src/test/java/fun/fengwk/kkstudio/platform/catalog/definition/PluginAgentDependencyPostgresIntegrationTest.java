@@ -42,6 +42,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.credential.DatabasePluginCredentialStore;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.service.PluginAgentDependencies;
@@ -100,6 +101,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
   private PlatformTransactionManager transactionManager;
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
+  private PluginAuthAttemptRepository authAttemptRepository;
   private PluginConfigurationService configurationService;
   private AgentRepository definitionRepository;
   private PluginAgentDependencies pluginAgentDependencies;
@@ -132,6 +134,7 @@ class PluginAgentDependencyPostgresIntegrationTest {
     transactionManager = new DataSourceTransactionManager(dataSource);
     configurationRepository = new PluginConfigurationRepository(jdbcClient);
     credentialRepository = new PluginCredentialRepository(jdbcClient);
+    authAttemptRepository = new PluginAuthAttemptRepository(jdbcClient);
     definitionRepository = new AgentRepository(jdbcClient);
     pluginAgentDependencies =
         new PluginAgentDependencies(registry, configurationRepository, definitionRepository);
@@ -380,6 +383,8 @@ class PluginAgentDependencyPostgresIntegrationTest {
         registry,
         configurationRepository,
         credentialRepository,
+        authAttemptRepository,
+        clock,
         new PluginContextFactory(
             new DatabasePluginCredentialStore(credentialRepository, clock),
             () -> null,

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -33,6 +34,8 @@ import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
 import fun.fengwk.kkstudio.platform.plugin.PluginInstance;
 import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
+import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRepository;
@@ -41,7 +44,9 @@ import fun.fengwk.kkstudio.platform.pluginhost.testing.InMemoryTransactionManage
 import fun.fengwk.kkstudio.platform.pluginhost.testing.TestPluginFixtures;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
+import java.time.Clock;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -60,6 +65,7 @@ class PluginConfigurationServiceTest {
   private final PluginConfigurationRepository configurations =
       mock(PluginConfigurationRepository.class);
   private final PluginCredentialRepository credentials = mock(PluginCredentialRepository.class);
+  private final PluginAuthAttemptRepository authAttempts = mock(PluginAuthAttemptRepository.class);
   private final PluginAgentDependencies agentDependencies = mock(PluginAgentDependencies.class);
   private final AtomicInteger catalogWakes = new AtomicInteger();
   private final AtomicInteger credentialWakes = new AtomicInteger();
@@ -73,6 +79,8 @@ class PluginConfigurationServiceTest {
             new PluginRegistry(List.of(staticPlugin, new DeepLinkPlugin())),
             configurations,
             credentials,
+            authAttempts,
+            Clock.fixed(Instant.parse("2026-10-01T12:00:00Z"), ZoneOffset.UTC),
             new PluginContextFactory(
                 mock(PluginCredentialStore.class), () -> null, () -> null, () -> null),
             agentDependencies,
@@ -81,6 +89,8 @@ class PluginConfigurationServiceTest {
             credentialWakes::incrementAndGet);
     when(configurations.find(STATIC_ID))
         .thenReturn(Optional.of(new PluginConfigurationRow(STATIC_ID, 3L, VALUES_A)));
+    when(configurations.lock(DEEPLINK_ID))
+        .thenReturn(Optional.of(new PluginConfigurationRow(DEEPLINK_ID, 7L, "{}")));
     when(configurations.update(anyString(), anyLong(), anyString())).thenReturn(true);
     when(credentials.find(anyString())).thenReturn(Optional.empty());
   }
@@ -233,16 +243,46 @@ class PluginConfigurationServiceTest {
             Instant.parse("2026-10-01T12:00:00Z"),
             "{\"token\":\"t\"}");
 
-    service.completeAuth(DEEPLINK_ID, material);
+    Instant now = Instant.parse("2026-10-01T12:00:00Z");
+    PluginAuthAttemptRow claim =
+        new PluginAuthAttemptRow(DEEPLINK_ID, "claim-hash", 7L, "CN", now.plusSeconds(60));
+    when(authAttempts.consumeClaim(claim, now)).thenReturn(true);
+
+    service.completeAuth(claim, material);
     service.disconnect(DEEPLINK_ID);
 
     verify(credentials)
         .upsertConnected(
             DEEPLINK_ID, "{\"token\":\"t\"}", "CN", material.expiresAt(), material.nextRefreshAt());
+    verify(authAttempts).delete(DEEPLINK_ID);
     verify(credentials).delete(DEEPLINK_ID);
     assertEquals(2, catalogWakes.get());
     assertEquals(2, credentialWakes.get());
     assertThrows(DomainException.class, () -> service.disconnect("ghost"));
+  }
+
+  /** Prepare 锁定当前配置修订，并将 attempt 的期限设为固定时钟后的十分钟。 */
+  @Test
+  void prepareAuthStoresAttemptAgainstLockedRevision() {
+    Instant now = Instant.parse("2026-10-01T12:00:00Z");
+
+    service.prepareAuth(DEEPLINK_ID, "public-hash", "CN");
+
+    verify(configurations).lock(DEEPLINK_ID);
+    verify(authAttempts)
+        .replace(
+            new PluginAuthAttemptRow(DEEPLINK_ID, "public-hash", 7L, "CN", now.plusSeconds(600)));
+  }
+
+  /** 没有可锁定的配置行时拒绝创建 attempt。 */
+  @Test
+  void prepareAuthRejectsMissingConfiguration() {
+    when(configurations.lock(DEEPLINK_ID)).thenReturn(Optional.empty());
+
+    assertThrows(
+        DomainException.class, () -> service.prepareAuth(DEEPLINK_ID, "public-hash", "CN"));
+
+    verify(authAttempts, never()).replace(any());
   }
 
   private static PluginCredentialRow credential(String payloadJson) {

@@ -30,7 +30,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.Brow
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginConnectionCheckDTO.Reachability;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginDTO;
 import fun.fengwk.kkstudio.platform.pluginhost.dto.PluginSecretProjectionDTO;
-import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginAuthAttemptRow;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRepository;
 import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginConfigurationRow;
@@ -39,7 +38,6 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
 import fun.fengwk.kkstudio.platform.secret.SecretUpdate;
 
 import java.time.Clock;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -54,8 +52,7 @@ import java.util.stream.Collectors;
 /**
  * Plugin 管理面用例：安全投影、保存配置、{@code DEEP_LINK} 认证的 prepare / complete / disconnect 与显式连接检查。
  *
- * <p>只路由到已安装 Plugin。交互式认证是「一个 Plugin 至多一个 pending attempt」的一次性协议：complete 以单条条件删除原子消费 attempt，并要求
- * prepare 之后配置版本未变、材料 region 与 prepare 选定的 region 一致。回调地址既不落库也不进日志或异常消息。
+ * <p>只路由到已安装 Plugin。交互式认证先一次性认领 attempt，再在事务外校验回调；仅仍有效的认领可以写入同 region 的凭据。回调地址既不落库也不进日志或异常消息。
  */
 @Slf4j
 public final class PluginManagementService {
@@ -67,16 +64,12 @@ public final class PluginManagementService {
   private static final String RESOURCE = "plugin";
   private static final SchemaJsonCodec SCHEMA_CODEC = new SchemaJsonCodec();
 
-  /** 交互式认证 attempt（prepare 到 complete）的统一有效窗口。 */
-  private static final Duration AUTH_ATTEMPT_TTL = Duration.ofMinutes(10);
-
   private final PluginRegistry registry;
   private final Supplier<PluginCatalogRuntime> catalogRuntime;
   private final PluginConfigurationRepository configurations;
   private final PluginCredentialRepository credentials;
   private final PluginConfigurationService configurationService;
   private final PluginFunctionNamesProjection functionNamesProjection;
-  private final PluginAuthAttemptRepository authAttempts;
   private final Clock clock;
 
   public PluginManagementService(
@@ -86,7 +79,6 @@ public final class PluginManagementService {
       PluginCredentialRepository credentials,
       PluginConfigurationService configurationService,
       PluginFunctionNamesProjection functionNamesProjection,
-      PluginAuthAttemptRepository authAttempts,
       Clock clock) {
     this.registry = Objects.requireNonNull(registry, "registry");
     this.catalogRuntime = Objects.requireNonNull(catalogRuntime, "catalogRuntime");
@@ -96,7 +88,6 @@ public final class PluginManagementService {
         Objects.requireNonNull(configurationService, "configurationService");
     this.functionNamesProjection =
         Objects.requireNonNull(functionNamesProjection, "functionNamesProjection");
-    this.authAttempts = Objects.requireNonNull(authAttempts, "authAttempts");
     this.clock = Objects.requireNonNull(clock, "clock");
   }
 
@@ -165,20 +156,14 @@ public final class PluginManagementService {
       throw DomainException.validation(RESOURCE, "plugin did not provide a login url");
     }
     String authAttemptId = PluginAuthNonce.issue();
-    authAttempts.replace(
-        new PluginAuthAttemptRow(
-            pluginId,
-            PluginAuthNonce.hash(authAttemptId),
-            requireConfiguration(pluginId).version(),
-            region,
-            clock.instant().plus(AUTH_ATTEMPT_TTL)));
+    configurationService.prepareAuth(pluginId, PluginAuthNonce.hash(authAttemptId), region);
     PluginAuthPrepareDTO response = new PluginAuthPrepareDTO();
     response.setAuthAttemptId(authAttemptId);
     response.setLoginUrl(loginUrl);
     return response;
   }
 
-  /** 原子消费 attempt、调用 Plugin 校验回调，并把材料写为新凭据。 */
+  /** 认领 attempt、在配置锁外调用 Plugin，再以认领所有权写入凭据。 */
   public PluginDTO completeAuth(String pluginId, String authAttemptId, String callbackUrl) {
     Plugin plugin = requirePlugin(pluginId);
     PluginAuthSpec.DeepLink deepLink = requireDeepLink(plugin);
@@ -190,14 +175,9 @@ public final class PluginManagementService {
     if (callbackUrl == null || callbackUrl.isBlank()) {
       throw DomainException.validation(RESOURCE, "callbackUrl must not be blank");
     }
-    Instant now = clock.instant();
     PluginAuthAttemptRow attempt =
-        authAttempts
-            .consume(pluginId, PluginAuthNonce.hash(authAttemptId), now)
-            .orElseThrow(
-                () ->
-                    DomainException.validation(
-                        RESOURCE, "auth attempt is unknown, expired, superseded or stale"));
+        configurationService.claimAuth(pluginId, PluginAuthNonce.hash(authAttemptId));
+    Instant now = clock.instant();
     PluginCredentialMaterial material;
     try {
       material = handler.complete(callbackUrl);
@@ -216,7 +196,7 @@ public final class PluginManagementService {
     if (!material.expiresAt().isAfter(now) || material.nextRefreshAt().isBefore(now)) {
       throw DomainException.validation(RESOURCE, "plugin returned an unusable credential lifetime");
     }
-    configurationService.completeAuth(pluginId, material);
+    configurationService.completeAuth(attempt, material);
     return describe(plugin);
   }
 

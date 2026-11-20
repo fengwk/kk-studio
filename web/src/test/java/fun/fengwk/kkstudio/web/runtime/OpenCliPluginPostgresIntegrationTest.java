@@ -119,6 +119,7 @@ class OpenCliPluginPostgresIntegrationTest {
   private DataSource dataSource;
   private PluginConfigurationRepository configurationRepository;
   private PluginCredentialRepository credentialRepository;
+  private PluginAuthAttemptRepository authAttemptRepository;
   private DatabasePluginCredentialStore credentialStore;
   private PlatformTransactionManager transactionManager;
   private final CanvasFunctionExecutionContext execContext =
@@ -132,6 +133,7 @@ class OpenCliPluginPostgresIntegrationTest {
     JdbcClient jdbcClient = JdbcClient.create(dataSource);
     configurationRepository = new PluginConfigurationRepository(jdbcClient);
     credentialRepository = new PluginCredentialRepository(jdbcClient);
+    authAttemptRepository = new PluginAuthAttemptRepository(jdbcClient);
     credentialStore = new DatabasePluginCredentialStore(credentialRepository, Clock.systemUTC());
     transactionManager = new DataSourceTransactionManager(dataSource);
     when(execContext.isRunning()).thenReturn(true);
@@ -666,6 +668,8 @@ class OpenCliPluginPostgresIntegrationTest {
         registry,
         configurationRepository,
         credentialRepository,
+        authAttemptRepository,
+        Clock.systemUTC(),
         context.getBean(PluginContextFactory.class),
         new PluginAgentDependencies(registry, configurationRepository, mock(AgentRepository.class)),
         transactionManager,
@@ -684,7 +688,6 @@ class OpenCliPluginPostgresIntegrationTest {
         credentialRepository,
         configuration,
         PluginCanvasFunctionCatalog::functionNames,
-        mock(PluginAuthAttemptRepository.class),
         Clock.systemUTC());
   }
 
