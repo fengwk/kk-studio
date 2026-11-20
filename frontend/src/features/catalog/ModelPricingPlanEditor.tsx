@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { useI18n, type TranslationKey } from '@/shared/i18n'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
 import { formatCatalogSupportIssue } from '@/features/catalog/catalog-utils'
@@ -9,587 +9,473 @@ import { Checkbox } from '@/shared/ui/controls/Checkbox'
 import { Button } from '@/shared/ui/controls/Button'
 import { TextInput } from '@/shared/ui/controls/TextInput'
 import { Select } from '@/shared/ui/controls/Select'
-import {
-  clonePricingDefinitionDraft,
-  createPricingDraftKey,
-  findPricingConflicts,
-  type ModelPricingDraft,
-  type InputRangeDraft,
-  type PricingDefinitionDraft,
-  type PricingFactorsDraft,
-  type PricingRateField,
-  splitCrossMidnightPeriod,
-  normalizePricingDraft,
-} from '@/features/catalog/model-pricing-draft'
 import { sanitizeDecimalInput } from '@/shared/lib/numeric-input'
+import { PricingTtlInputs } from './PricingTtlInputs'
+import {
+  clonePricingDefinitionDraft, createPricingDraftKey, findPricingConflicts, hasConfiguredPricing,
+  normalizePricingDraft, splitCrossMidnightPeriod,
+  type ModelPricingDraft, type PricingDefinitionDraft, type PricingFactorsDraft,
+  type PricingRateField, type TimePeriodDraft,
+} from './model-pricing-draft'
 import './ai-pricing.css'
 
-type BaseRateField = Exclude<PricingRateField, 'reasoning'>
-const RATE_FIELDS: ReadonlyArray<[BaseRateField, TranslationKey]> = [
-  ['input', 'ai.catalog.form.inputPrice'],
-  ['output', 'ai.catalog.form.outputPrice'],
-  ['cacheRead', 'ai.catalog.form.cacheReadPrice'],
-  ['cacheWrite', 'ai.catalog.form.cacheWritePrice'],
-]
-const RANGE_RATE_FIELDS: ReadonlyArray<[PricingRateField, TranslationKey]> = [
-  ...RATE_FIELDS,
+const RATE_FIELDS = [
+  ['input', 'ai.catalog.form.inputPrice'], ['output', 'ai.catalog.form.outputPrice'],
+  ['cacheRead', 'ai.catalog.form.cacheReadPrice'], ['cacheWrite', 'ai.catalog.form.cacheWritePrice'],
   ['reasoning', 'ai.catalog.form.reasoningPrice'],
-]
-const FACTOR_FIELDS: ReadonlyArray<[keyof Omit<PricingFactorsDraft, 'factor'>, TranslationKey]> = [
-  ['inputFactor', 'ai.catalog.form.inputPrice'],
-  ['outputFactor', 'ai.catalog.form.outputPrice'],
-  ['cacheReadFactor', 'ai.catalog.form.cacheReadPrice'],
-  ['cacheWriteFactor', 'ai.catalog.form.cacheWritePrice'],
-  ['reasoningFactor', 'ai.catalog.form.reasoningPrice'],
-]
-const WEEKDAYS: ReadonlyArray<[number, TranslationKey]> = [
-  [1, 'ai.catalog.form.weekday.1'], [2, 'ai.catalog.form.weekday.2'],
-  [3, 'ai.catalog.form.weekday.3'], [4, 'ai.catalog.form.weekday.4'],
-  [5, 'ai.catalog.form.weekday.5'], [6, 'ai.catalog.form.weekday.6'],
-  [7, 'ai.catalog.form.weekday.7'],
-]
-function parseTtlMode(value: string): InputRangeDraft['cacheWriteTtlMode'] {
-  if (value === 'inherit' || value === 'custom' || value === 'unpartitioned') return value
-  throw new Error(`Unsupported TTL pricing mode: ${value}`)
-}
-
-function catalogRate(value: string | null | undefined): string {
-  return value == null ? '—' : `$${value}`
-}
-
-function catalogRateSummary(rates: ModelRateSetDTO, t: ReturnType<typeof useI18n>['t']): string {
-  return t('ai.catalog.form.pricingCatalogRates', {
-    input: catalogRate(rates.input),
-    output: catalogRate(rates.output),
-    cacheRead: catalogRate(rates.cacheRead),
-    cacheWrite: catalogRate(rates.cacheWrite),
-  })
-}
-
-function catalogRuleSummary(rule: ModelPricingRuleDTO, t: ReturnType<typeof useI18n>['t']): string {
-  if (rule.type === 'input_token_range') {
-    return t('ai.catalog.form.pricingCatalogRange', {
-      min: rule.minInputTokens ?? 0,
-      max: rule.maxInputTokensExclusive ?? '∞',
-      input: catalogRate(rule.input),
-      output: catalogRate(rule.output),
-      cacheRead: catalogRate(rule.cacheRead),
-      cacheWrite: catalogRate(rule.cacheWrite),
-    })
-  }
-  const factorChanges = [
-    ['inputFactor', 'ai.catalog.form.inputPrice'],
-    ['outputFactor', 'ai.catalog.form.outputPrice'],
-    ['cacheReadFactor', 'ai.catalog.form.cacheReadPrice'],
-    ['cacheWriteFactor', 'ai.catalog.form.cacheWritePrice'],
-    ['reasoningFactor', 'ai.catalog.form.reasoningPrice'],
-  ] as const
-  const extras = factorChanges
-    .filter(([field]) => rule[field] != null && rule[field] !== rule.factor)
-    .map(([field, label]) => `${t(label)} ×${rule[field]}`)
-    .join(' · ')
-  if (rule.type === 'service_tier_multiplier') {
-    return `${t('ai.catalog.form.pricingCatalogTier', {
-      tier: rule.serviceTier ?? '', factor: rule.factor ?? '1',
-    })}${extras ? ` · ${extras}` : ''}`
-  }
-  if (rule.type === 'time_multiplier') {
-    const days = rule.weekdays?.length
-      ? rule.weekdays.map((day) => weekdayLabel(day, t)).join(', ')
-      : t('ai.catalog.form.pricingEveryDay')
-    return `${t('ai.catalog.form.pricingCatalogTime', {
-      days, start: rule.start ?? '', end: rule.end ?? '', timezone: rule.timezone ?? '', factor: rule.factor ?? '1',
-    })}${extras ? ` · ${extras}` : ''}`
-  }
-  return t('ai.catalog.form.pricingUnpriced')
-}
-
-function weekdayLabel(day: number, t: ReturnType<typeof useI18n>['t']): string {
-  const key = WEEKDAYS.find(([value]) => value === day)?.[1]
-  return key ? t(key) : String(day)
-}
-
-function timeMinutes(value: string): number | null {
-  const match = /^(\d{2}):(\d{2})$/.exec(value)
-  if (!match) return null
-  const hour = Number(match[1])
-  const minute = Number(match[2])
-  if (minute > 59 || hour > 24 || (hour === 24 && minute !== 0)) return null
-  return hour * 60 + minute
-}
-
+] as const satisfies ReadonlyArray<[PricingRateField, TranslationKey]>
+const FACTOR_FIELDS = ['inputFactor', 'outputFactor', 'cacheReadFactor', 'cacheWriteFactor', 'reasoningFactor'] as const
+const DAYS = [1, 2, 3, 4, 5, 6, 7] as const
+const BASE = 'base'
 const blankFactors = (): PricingFactorsDraft => ({
   factor: '1', inputFactor: '', outputFactor: '', cacheReadFactor: '', cacheWriteFactor: '', reasoningFactor: '',
 })
 
-/** 固定三组定价编辑器；本地 draftKey 永不作为定价契约字段发送。 */
-export function ModelPricingPlanEditor({
-  value,
-  onChange,
-  pricingImportNotice = null,
-  includeChanges = true,
-  includePreview = true,
-  headingId = 'model-pricing-heading',
-}: {
+type Translate = ReturnType<typeof useI18n>['t']
+const dayLabel = (day: number, t: Translate) => DAYS.some((value) => value === day)
+  ? t(`ai.catalog.form.weekday.${day as typeof DAYS[number]}`) : String(day)
+const daysLabel = (days: number[], t: Translate) => days.length
+  ? days.map((day) => dayLabel(day, t)).join(', ') : t('ai.catalog.form.pricingEveryDay')
+const money = (value: string | null | undefined) => value == null ? '—' : `$${value}`
+
+function rateSummary(rates: ModelRateSetDTO, t: Translate) {
+  return [
+    ...RATE_FIELDS.map(([field, label]) => `${t(label)} ${field === 'reasoning' && rates.reasoning == null
+      ? t('ai.catalog.form.reasoningFollowOutput') : money(rates[field])}`),
+    ...Object.entries(rates.cacheWriteByTtl).map(([seconds, rate]) => `${t('ai.catalog.form.cacheWritePrice')} (${seconds} s) ${money(rate)}`),
+  ].join(' · ')
+}
+
+function ruleSummary(rule: ModelPricingRuleDTO, t: Translate) {
+  if (rule.type === 'input_token_range') {
+    const rates = RATE_FIELDS.flatMap(([field, label]) => rule[field] === undefined ? [] : [
+      `${t(label)} ${field === 'reasoning' && rule.reasoning === null
+        ? t('ai.catalog.form.reasoningFollowOutput') : money(rule[field])}`,
+    ])
+    if (rule.cacheWriteByTtl) rates.push(ttlSummary(Object.entries(rule.cacheWriteByTtl), t))
+    return [`[${rule.minInputTokens ?? 0}, ${rule.maxInputTokensExclusive ?? '∞'})`, ...rates].join(' · ')
+  }
+  const extras = FACTOR_FIELDS.flatMap((field, index) => rule[field] == null ? [] : [
+    `${t(RATE_FIELDS[index]![1])} ×${rule[field]}`,
+  ])
+  const condition = rule.type === 'service_tier_multiplier' ? rule.serviceTier
+    : `${daysLabel(rule.weekdays ?? [], t)} ${rule.start}–${rule.end} (${rule.timezone})`
+  return [condition, `×${rule.factor ?? '1'}`, ...extras].join(' · ')
+}
+
+function ttlSummary(rows: [string, string][], t: Translate) {
+  return `${t('ai.catalog.form.pricingTtlMode')}: ${rows.length
+    ? rows.map(([seconds, rate]) => `${seconds || '—'} s ${money(rate || null)}`).join(', ')
+    : t('ai.catalog.form.pricingTtlUnpartitioned')}`
+}
+
+function Field({ label, children }: { label: string; children: ReactNode }) {
+  return <label className="form-group"><span>{label}</span>{children}</label>
+}
+
+function Section({ title, children }: { title: string; children: ReactNode }) {
+  const id = useId()
+  return <section className="pricing-plan-section" aria-labelledby={id}><h4 id={id}>{title}</h4>{children}</section>
+}
+
+function CatalogNotice({ notice }: { notice: NonNullable<ModelDraft['pricingImportNotice']> }) {
+  const { t } = useI18n()
+  return (
+    <div className={`pricing-import-notice is-${notice.kind}`} role="status">
+      <p>{t(notice.kind === 'unsupported' ? 'ai.catalog.form.pricingImportUnsupported' : 'ai.catalog.form.pricingImportExcluded')}</p>
+      {notice.supportIssues.length ? <ul>{notice.supportIssues.map((issue) => <li key={issue}>{formatCatalogSupportIssue(issue, t)}</li>)}</ul>
+        : notice.kind === 'unsupported' ? <p>{t('ai.catalog.form.pricingImportNoData')}</p> : null}
+      <details>
+        <summary>{t('ai.catalog.form.viewCatalogPrice')}</summary>
+        {notice.pricing ? <>
+          <p>{rateSummary(notice.pricing.base, t)}</p>
+          <ul>{notice.pricing.rules.map((rule, index) => <li key={index}>{ruleSummary(rule, t)}</li>)}</ul>
+        </> : <p>{t('ai.catalog.form.pricingImportNoData')}</p>}
+      </details>
+    </div>
+  )
+}
+
+export function ModelPricingPlanEditor({ value, onChange, pricingImportNotice }: {
   value: ModelPricingDraft
   onChange: (value: ModelPricingDraft) => void
   pricingImportNotice?: ModelDraft['pricingImportNotice']
-  includeChanges?: boolean
-  includePreview?: boolean
-  headingId?: string
 }) {
   const { t } = useI18n()
-  const conflicts = useMemo(() => findPricingConflicts(value.definition), [value.definition])
-  const conflictKeys = new Set(conflicts.flatMap((conflict) => conflict.keys))
-  const [inputTokens, setInputTokens] = useState('1000')
-  const [requestedAt, setRequestedAt] = useState('')
-  const [serviceTier, setServiceTier] = useState('')
-  const [previewBusy, setPreviewBusy] = useState(false)
-  const [previewResult, setPreviewResult] = useState<{
-    signature: string
-    value: Awaited<ReturnType<typeof previewModelPricing>>
-  } | null>(null)
-  const [previewError, setPreviewError] = useState<{ signature: string; message: string } | null>(null)
-  const previewController = useRef<AbortController | null>(null)
-  const previewSignature = JSON.stringify([value, inputTokens, requestedAt, serviceTier])
-  const visiblePreview = previewResult?.signature === previewSignature ? previewResult.value : null
-  const visiblePreviewError = previewError?.signature === previewSignature ? previewError.message : null
+  const today = new Date().toISOString().slice(0, 10)
+  const changes = [...value.changes].sort((a, b) => a.from.localeCompare(b.from))
+  const active = changes.filter((change) => change.from && change.from <= today).at(-1)
+  const [selection, setSelection] = useState<string>()
+  const selected = selection === BASE ? undefined : changes.find((change) => change.draftKey === selection) ?? active
+  const planKey = selected?.draftKey ?? BASE
+  const [newDate, setNewDate] = useState<string | null>(null)
+  const sectionRef = useRef<HTMLElement>(null)
+  const duplicateDate = (date: string, except?: string) => changes.some((change) => change.from === date && change.draftKey !== except)
+  const conflictPlan = [
+    { draftKey: BASE, definition: value.definition }, ...value.changes,
+  ].find(({ definition }) => findPricingConflicts(definition).length)?.draftKey
 
-  useEffect(() => () => previewController.current?.abort(), [])
+  useEffect(() => {
+    const form = sectionRef.current?.closest('form')
+    if (!form || !conflictPlan) return
+    // The enclosing form still owns validation and saving. Reveal the conflicting plan
+    // before its existing first-error scroll runs, including conflicts in another plan.
+    const revealConflict = () => setSelection(conflictPlan)
+    form.addEventListener('submit', revealConflict, true)
+    return () => form.removeEventListener('submit', revealConflict, true)
+  }, [conflictPlan])
 
-  async function runPricingPreview() {
-    const normalizedTokens = inputTokens.trim()
-    if (!/^(?:0|[1-9]\d*)$/.test(normalizedTokens) || !Number.isSafeInteger(Number(normalizedTokens))) {
-      setPreviewError({ signature: previewSignature, message: t('ai.catalog.form.pricingPreviewInvalidTokens') })
-      return
-    }
-    const requestedAtMillis = requestedAt ? Date.parse(`${requestedAt}Z`) : undefined
-    if (requestedAt && !Number.isSafeInteger(requestedAtMillis)) {
-      setPreviewError({ signature: previewSignature, message: t('ai.catalog.form.pricingPreviewInvalidTime') })
-      return
-    }
-    let pricing
-    try {
-      pricing = normalizePricingDraft(value)
-    } catch (error) {
-      setPreviewError({ signature: previewSignature, message: toUserFacingErrorMessage(error) })
-      return
-    }
-    previewController.current?.abort()
-    const controller = new AbortController()
-    previewController.current = controller
-    setPreviewBusy(true)
-    setPreviewError(null)
-    try {
-      const response = await previewModelPricing({
-        pricing: pricing ?? null,
-        inputTokens: Number(normalizedTokens),
-        ...(requestedAtMillis === undefined ? {} : { requestedAt: requestedAtMillis }),
-        ...(serviceTier.trim() ? { serviceTier: serviceTier.trim() } : {}),
-      }, controller.signal)
-      if (!controller.signal.aborted) setPreviewResult({ signature: previewSignature, value: response })
-    } catch (error) {
-      if (!controller.signal.aborted) {
-        setPreviewError({ signature: previewSignature, message: toUserFacingErrorMessage(error) })
-      }
-    } finally {
-      if (!controller.signal.aborted) setPreviewBusy(false)
-    }
+  function updateDefinition(definition: PricingDefinitionDraft) {
+    onChange(selected ? { ...value, changes: value.changes.map((change) => change === selected ? { ...change, definition } : change) }
+      : { ...value, definition })
   }
 
-  function updateRangeReasoning(rangeKey: string, mode: string) {
-    if (mode !== 'inherit' && mode !== 'follow' && mode !== 'separate') return
-    updateDefinition((definition) => ({
-      ...definition,
-      inputTokenRanges: definition.inputTokenRanges.map((range) => {
-        if (range.draftKey !== rangeKey) return range
-        const rates = { ...range.rates }
-        if (mode === 'inherit') delete rates.reasoning
-        else rates.reasoning = mode === 'follow' ? null : ''
-        return { ...range, rates }
-      }),
-    }))
+  function addChange() {
+    if (!newDate || duplicateDate(newDate)) return
+    const previous = changes.filter((change) => change.from && change.from < newDate).at(-1)
+    const draftKey = createPricingDraftKey()
+    onChange({ ...value, changes: [...value.changes, {
+      draftKey, from: newDate, definition: clonePricingDefinitionDraft(previous?.definition ?? value.definition),
+    }] })
+    setSelection(draftKey)
+    setNewDate(null)
   }
 
-  function updateDefinition(update: (definition: PricingDefinitionDraft) => PricingDefinitionDraft) {
-    onChange({ ...value, definition: update(value.definition) })
-  }
-
-  function setBase(field: PricingRateField, next: string | null | undefined) {
-    updateDefinition((definition) => ({
-      ...definition,
-      base: { ...definition.base, [field]: next },
-    }))
-  }
-
-  const duplicateChangeDates = new Set(value.changes
-    .filter((change, index) => change.from && value.changes.some((other, otherIndex) => otherIndex !== index && other.from === change.from))
-    .map((change) => change.draftKey))
-
-  function splitTimeRow(period: PricingDefinitionDraft['timePeriods'][number]) {
-    const startMinutes = timeMinutes(period.start)
-    const endMinutes = timeMinutes(period.end)
-    if (startMinutes == null || endMinutes == null || startMinutes <= endMinutes) return
-    const { draftKey, ...source } = period
-    const split = splitCrossMidnightPeriod(source)
-    updateDefinition((d) => ({
-      ...d,
-      timePeriods: d.timePeriods.flatMap((item) => item.draftKey === draftKey ? split : [item]),
-    }))
-  }
-
-  function changeFactor(
-    group: 'serviceTiers' | 'timePeriods', key: string, field: keyof PricingFactorsDraft, next: string,
-  ) {
-    updateDefinition((definition) => ({
-      ...definition,
-      [group]: definition[group].map((row) => row.draftKey === key
-        ? { ...row, factors: { ...row.factors, [field]: sanitizeDecimalInput(next) } }
-        : row),
-    }))
-  }
-
-  function section(title: string, children: React.ReactNode) {
-    return <section className="pricing-plan-section"><h4>{title}</h4>{children}</section>
-  }
-
+  const activeLabel = t('ai.catalog.form.pricingActive')
   return (
-    <section className="structured-section" aria-labelledby={headingId}>
+    <section className="structured-section model-pricing-editor" aria-labelledby="model-pricing-heading" ref={sectionRef}>
       <div className="structured-section-head">
-        <h3 id={headingId}>{t('ai.catalog.form.pricing')}</h3>
-        <span className="inline-hint">{t('ai.catalog.form.priceSuffix')}</span>
+        <h3 id="model-pricing-heading">{t('ai.catalog.form.pricing')}</h3>
+        <span className="inline-hint">USD / {t('ai.catalog.form.pricingMillionTokens')}</span>
       </div>
-      <p className="inline-hint">{t('ai.catalog.form.priceHint')}</p>
-      {pricingImportNotice ? (
-        <div className={`pricing-import-notice is-${pricingImportNotice.kind}`} role="status">
-          <p>{t(pricingImportNotice.kind === 'unsupported'
-            ? 'ai.catalog.form.pricingImportUnsupported'
-            : 'ai.catalog.form.pricingImportExcluded')}</p>
-          {pricingImportNotice.supportIssues.length > 0 ? (
-            <ul>
-              {pricingImportNotice.supportIssues.map((issue) => (
-                <li key={issue}>{formatCatalogSupportIssue(issue, t)}</li>
-              ))}
-            </ul>
-          ) : pricingImportNotice.kind === 'unsupported' ? (
-            <p>{t('ai.catalog.form.pricingImportNoData')}</p>
-          ) : null}
-          <details>
-            <summary>{t('ai.catalog.form.viewCatalogPrice')}</summary>
-            {pricingImportNotice.pricing ? (
-              <>
-                <p>{catalogRateSummary(pricingImportNotice.pricing.base, t)}</p>
-                {pricingImportNotice.pricing.base.reasoning != null ? (
-                  <p>{t('ai.catalog.form.reasoningPrice')}: {pricingImportNotice.pricing.base.reasoning ?? t('ai.catalog.form.reasoningFollowOutput')}</p>
-                ) : null}
-                {Object.entries(pricingImportNotice.pricing.base.cacheWriteByTtl).map(([seconds, rate]) => (
-                  <p key={seconds}>{seconds} s: {catalogRate(rate)}</p>
-                ))}
-                <ul>
-                  {pricingImportNotice.pricing.rules.map((rule, index) => (
-                    <li key={`${rule.type}-${index}`}>{catalogRuleSummary(rule, t)}</li>
-                  ))}
-                </ul>
-              </>
-            ) : <p>{t('ai.catalog.form.pricingImportNoData')}</p>}
-          </details>
-        </div>
-      ) : null}
-
-      {section(t('ai.catalog.form.pricingBase'), (
-        <>
-          <div className="form-grid-2">
-            {RATE_FIELDS.map(([field, labelKey]) => (
-              <label className="form-group" key={field}>
-                <span>{t(labelKey)}</span>
-                <div className="price-input">
-                  <span className="price-affix" aria-hidden="true">$</span>
-                  <TextInput inputMode="decimal" value={value.definition.base[field]}
-                    placeholder={t('ai.catalog.form.pricingUnpriced')}
-                    aria-label={t('ai.catalog.form.priceAriaLabel', { label: t(labelKey) })}
-                    onChange={(event) => setBase(field, sanitizeDecimalInput(event.target.value))} />
-                </div>
-              </label>
-            ))}
-          </div>
-          <Select aria-label={t('ai.catalog.form.reasoningPricing')}
-            value={value.definition.base.reasoning == null ? 'follow' : 'separate'}
+      {pricingImportNotice && <CatalogNotice notice={pricingImportNotice} />}
+      <div className="pricing-plan-toolbar">
+        <div className="form-group">
+          <span>{t('ai.catalog.form.pricingSelectPlan')}</span>
+          <Select aria-label={t('ai.catalog.form.pricingSelectPlan')} value={planKey}
             options={[
-              { value: 'follow', label: t('ai.catalog.form.reasoningFollowOutput') },
-              { value: 'separate', label: t('ai.catalog.form.reasoningSeparate') },
-            ]}
-            onChange={(mode) => setBase('reasoning', mode === 'follow' ? null : '')} />
-          {value.definition.base.reasoning != null ? (
-            <label className="form-group">
-              <span>{t('ai.catalog.form.reasoningPrice')}</span>
-              <TextInput inputMode="decimal" aria-label={t('ai.catalog.form.reasoningPrice')}
-                value={value.definition.base.reasoning}
-                placeholder={t('ai.catalog.form.pricingUnpriced')}
-                onChange={(event) => setBase('reasoning', sanitizeDecimalInput(event.target.value))} />
-            </label>
-          ) : null}
-          {Object.entries(value.definition.base.cacheWriteByTtl).map(([seconds, rate]) => (
-            <div className="pricing-plan-row" key={seconds}>
-              <TextInput inputMode="numeric" aria-label={t('ai.catalog.form.pricingTtlSeconds')} value={seconds}
-                onChange={(event) => updateDefinition((d) => {
-                  const ttl = { ...d.base.cacheWriteByTtl }
-                  delete ttl[seconds]
-                  const nextSeconds = event.target.value.replace(/\D/g, '') || '0'
-                  if (Object.hasOwn(ttl, nextSeconds)) return d
-                  ttl[nextSeconds] = rate
-                  return { ...d, base: { ...d.base, cacheWriteByTtl: ttl } }
-                })} />
-              <TextInput inputMode="decimal" aria-label={t('ai.catalog.form.cacheWritePrice')} value={rate}
-                placeholder={t('ai.catalog.form.pricingUnpriced')}
-                onChange={(event) => updateDefinition((d) => ({ ...d, base: { ...d.base, cacheWriteByTtl: { ...d.base.cacheWriteByTtl, [seconds]: sanitizeDecimalInput(event.target.value) } } }))} />
-              <button type="button" className="ghost-inline-btn" aria-label={t('ai.catalog.form.removePricingRule')}
-                onClick={() => updateDefinition((d) => { const ttl = { ...d.base.cacheWriteByTtl }; delete ttl[seconds]; return { ...d, base: { ...d.base, cacheWriteByTtl: ttl } } })}>×</button>
-            </div>
-          ))}
-          <button type="button" className="ghost-inline-btn" onClick={() => updateDefinition((d) => {
-            let seconds = 300
-            while (Object.hasOwn(d.base.cacheWriteByTtl, String(seconds))) seconds += 1
-            return { ...d, base: { ...d.base, cacheWriteByTtl: { ...d.base.cacheWriteByTtl, [seconds]: '' } } }
-          })}>{t('ai.catalog.form.addPricingTtl')}</button>
-        </>
-      ))}
-
-      {section(t('ai.catalog.form.pricingRanges'), (
-        <>
-          {value.definition.inputTokenRanges.map((range) => (
-            <div className="pricing-plan-row" key={range.draftKey} data-conflict={conflictKeys.has(range.draftKey) || undefined}>
-              <TextInput aria-label={t('ai.catalog.form.pricingMinTokens')} inputMode="numeric" value={range.minInputTokens}
-                onChange={(event) => updateDefinition((d) => ({ ...d, inputTokenRanges: d.inputTokenRanges.map((r) => r.draftKey === range.draftKey ? { ...r, minInputTokens: event.target.value.replace(/\D/g, '') } : r) }))} />
-              <TextInput aria-label={t('ai.catalog.form.pricingMaxTokens')} inputMode="numeric" value={range.maxInputTokensExclusive}
-                onChange={(event) => updateDefinition((d) => ({ ...d, inputTokenRanges: d.inputTokenRanges.map((r) => r.draftKey === range.draftKey ? { ...r, maxInputTokensExclusive: event.target.value.replace(/\D/g, '') } : r) }))} />
-              <Select aria-label={t('ai.catalog.form.pricingTtlMode')} value={range.cacheWriteTtlMode}
-                options={[
-                  { value: 'inherit', label: t('ai.catalog.form.pricingTtlInherit') },
-                  { value: 'custom', label: t('ai.catalog.form.pricingTtlCustom') },
-                  { value: 'unpartitioned', label: t('ai.catalog.form.pricingTtlUnpartitioned') },
-                ]}
-                onChange={(mode) => updateDefinition((d) => ({ ...d, inputTokenRanges: d.inputTokenRanges.map((r) => r.draftKey === range.draftKey
-                  ? { ...r, cacheWriteTtlMode: parseTtlMode(mode) } : r) }))} />
-              {range.cacheWriteTtlMode === 'custom' ? Object.entries(range.cacheWriteByTtl).map(([seconds, rate]) => (
-                <div className="pricing-plan-row" key={seconds}>
-                  <TextInput inputMode="numeric" aria-label={t('ai.catalog.form.pricingTtlSeconds')} value={seconds}
-                    onChange={(event) => updateDefinition((d) => ({ ...d, inputTokenRanges: d.inputTokenRanges.map((r) => {
-                      if (r.draftKey !== range.draftKey) return r
-                      const ttl = { ...r.cacheWriteByTtl }; delete ttl[seconds]
-                      const nextSeconds = event.target.value.replace(/\D/g, '') || '0'
-                      if (Object.hasOwn(ttl, nextSeconds)) return r
-                      ttl[nextSeconds] = rate
-                      return { ...r, cacheWriteByTtl: ttl }
-                    }) }))} />
-                  <TextInput inputMode="decimal" aria-label={t('ai.catalog.form.cacheWritePrice')} value={rate}
-                    placeholder={t('ai.catalog.form.pricingUnpriced')}
-                    onChange={(event) => updateDefinition((d) => ({ ...d, inputTokenRanges: d.inputTokenRanges.map((r) => r.draftKey === range.draftKey
-                      ? { ...r, cacheWriteByTtl: { ...r.cacheWriteByTtl, [seconds]: sanitizeDecimalInput(event.target.value) } } : r) }))} />
-                  <button type="button" className="ghost-inline-btn" aria-label={t('ai.catalog.form.removePricingRule')}
-                    onClick={() => updateDefinition((d) => ({ ...d, inputTokenRanges: d.inputTokenRanges.map((r) => {
-                      if (r.draftKey !== range.draftKey) return r
-                      const ttl = { ...r.cacheWriteByTtl }; delete ttl[seconds]
-                      return { ...r, cacheWriteByTtl: ttl }
-                    }) }))}>×</button>
-                </div>
-              )) : null}
-              {range.cacheWriteTtlMode === 'custom' ? <button type="button" className="ghost-inline-btn"
-                onClick={() => updateDefinition((d) => ({ ...d, inputTokenRanges: d.inputTokenRanges.map((r) => {
-                  if (r.draftKey !== range.draftKey) return r
-                  let seconds = 300
-                  while (Object.hasOwn(r.cacheWriteByTtl, String(seconds))) seconds += 1
-                  return { ...r, cacheWriteByTtl: { ...r.cacheWriteByTtl, [seconds]: '' } }
-                }) }))}>{t('ai.catalog.form.addPricingTtl')}</button> : null}
-              {RANGE_RATE_FIELDS.map(([field, label]) => field === 'reasoning' ? (
-                <div key={field} className="pricing-reasoning-patch">
-                  <Select aria-label={t(label)} value={range.rates.reasoning === null ? 'follow' : range.rates.reasoning === undefined ? 'inherit' : 'separate'}
-                    options={[
-                      { value: 'inherit', label: t('ai.catalog.form.pricingTtlInherit') },
-                      { value: 'follow', label: t('ai.catalog.form.reasoningFollowOutput') },
-                      { value: 'separate', label: t('ai.catalog.form.reasoningSeparate') },
-                    ]}
-                    onChange={(mode) => updateRangeReasoning(range.draftKey, mode)} />
-                  {range.rates.reasoning != null ? <TextInput inputMode="decimal" aria-label={t(label)}
-                    placeholder={t('ai.catalog.form.pricingUnpriced')} value={range.rates.reasoning}
-                    onChange={(event) => updateDefinition((d) => ({ ...d, inputTokenRanges: d.inputTokenRanges.map((r) => r.draftKey === range.draftKey
-                      ? { ...r, rates: { ...r.rates, reasoning: sanitizeDecimalInput(event.target.value) } } : r) }))} /> : null}
-                </div>
-              ) : (
-                <TextInput key={field} inputMode="decimal" aria-label={t(label)} placeholder={t('ai.catalog.form.pricingUnpriced')}
-                  value={range.rates[field] ?? ''} onChange={(event) => updateDefinition((d) => ({
-                    ...d, inputTokenRanges: d.inputTokenRanges.map((r) => r.draftKey === range.draftKey
-                      ? { ...r, rates: { ...r.rates, [field]: sanitizeDecimalInput(event.target.value) } } : r),
-                  }))} />
-              ))}
-              <button type="button" className="ghost-inline-btn" aria-label={t('ai.catalog.form.removePricingRule')}
-                onClick={() => updateDefinition((d) => ({ ...d, inputTokenRanges: d.inputTokenRanges.filter((r) => r.draftKey !== range.draftKey) }))}>×</button>
-              {conflictKeys.has(range.draftKey) ? <span className="field-error" role="alert">{t('ai.catalog.form.pricingConflict')}</span> : null}
-            </div>
-          ))}
-          <button type="button" className="ghost-inline-btn" onClick={() => updateDefinition((d) => ({
-            ...d, inputTokenRanges: [...d.inputTokenRanges, {
-              draftKey: createPricingDraftKey(), minInputTokens: '', maxInputTokensExclusive: '', rates: {},
-              cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {},
-            }],
-          }))}>{t('ai.catalog.form.addPricingRange')}</button>
-        </>
-      ))}
-
-      {section(t('ai.catalog.form.pricingTiers'), (
-        <>
-          {value.definition.serviceTiers.map((tier) => (
-            <div className="pricing-plan-row" key={tier.draftKey} data-conflict={conflictKeys.has(tier.draftKey) || undefined}>
-              <TextInput aria-label={t('ai.catalog.form.pricingTierName')} value={tier.serviceTier}
-                onChange={(event) => updateDefinition((d) => ({ ...d, serviceTiers: d.serviceTiers.map((r) => r.draftKey === tier.draftKey ? { ...r, serviceTier: event.target.value } : r) }))} />
-              <FactorInputs factors={tier.factors} onChange={(field, next) => changeFactor('serviceTiers', tier.draftKey, field, next)} />
-              <button type="button" className="ghost-inline-btn" aria-label={t('ai.catalog.form.removePricingRule')}
-                onClick={() => updateDefinition((d) => ({ ...d, serviceTiers: d.serviceTiers.filter((r) => r.draftKey !== tier.draftKey) }))}>×</button>
-              {conflictKeys.has(tier.draftKey) ? <span className="field-error" role="alert">{t('ai.catalog.form.pricingConflict')}</span> : null}
-            </div>
-          ))}
-          <button type="button" className="ghost-inline-btn" onClick={() => updateDefinition((d) => ({
-            ...d, serviceTiers: [...d.serviceTiers, { draftKey: createPricingDraftKey(), serviceTier: '', factors: blankFactors() }],
-          }))}>{t('ai.catalog.form.addPricingTier')}</button>
-        </>
-      ))}
-
-      {section(t('ai.catalog.form.pricingTimes'), (
-        <>
-          {value.definition.timePeriods.map((period) => (
-            <div className="pricing-plan-row" key={period.draftKey} data-conflict={conflictKeys.has(period.draftKey) || undefined}>
-              <div className="weekday-picker" aria-label={t('ai.catalog.form.pricingWeekdays')}>
-                {WEEKDAYS.map(([day, label]) => <Checkbox key={day} checked={period.weekdays.includes(day)} label={t(label)}
-                  onChange={(checked) => updateDefinition((d) => ({ ...d, timePeriods: d.timePeriods.map((r) => r.draftKey === period.draftKey
-                    ? { ...r, weekdays: checked ? [...r.weekdays, day].sort() : r.weekdays.filter((item) => item !== day) } : r) }))} />)}
-              </div>
-              <TextInput aria-label={t('ai.catalog.form.pricingStart')} value={period.start}
-                onChange={(event) => updateDefinition((d) => ({ ...d, timePeriods: d.timePeriods.map((r) => r.draftKey === period.draftKey ? { ...r, start: event.target.value } : r) }))} />
-              <TextInput aria-label={t('ai.catalog.form.pricingEnd')} value={period.end}
-                onChange={(event) => updateDefinition((d) => ({ ...d, timePeriods: d.timePeriods.map((r) => r.draftKey === period.draftKey ? { ...r, end: event.target.value } : r) }))}
-                onBlur={() => splitTimeRow(period)} />
-              <TextInput aria-label={t('ai.catalog.form.pricingTimezone')} value={period.timezone}
-                onChange={(event) => updateDefinition((d) => ({ ...d, timePeriods: d.timePeriods.map((r) => ({ ...r, timezone: event.target.value })) }))} />
-              <FactorInputs factors={period.factors} onChange={(field, next) => changeFactor('timePeriods', period.draftKey, field, next)} />
-              <button type="button" className="ghost-inline-btn" aria-label={t('ai.catalog.form.removePricingRule')}
-                onClick={() => updateDefinition((d) => ({ ...d, timePeriods: d.timePeriods.filter((r) => r.draftKey !== period.draftKey) }))}>×</button>
-              {conflictKeys.has(period.draftKey) ? <span className="field-error" role="alert">{t('ai.catalog.form.pricingConflict')}</span> : null}
-            </div>
-          ))}
-          <button type="button" className="ghost-inline-btn" onClick={() => updateDefinition((d) => ({
-            ...d, timePeriods: [...d.timePeriods, {
-              draftKey: createPricingDraftKey(), weekdays: [], start: '00:00', end: '24:00', timezone: 'UTC', factors: blankFactors(),
-            }],
-          }))}>{t('ai.catalog.form.addPricingTime')}</button>
-        </>
-      ))}
-
-      {includeChanges ? section(t('ai.catalog.form.pricingChanges'), (
-        <>
-          {value.changes.map((change) => (
-            <div className="pricing-plan-row" key={change.draftKey} data-conflict={duplicateChangeDates.has(change.draftKey) || undefined}>
-              <TextInput type="date" aria-label={t('ai.catalog.form.pricingFromDate')} value={change.from}
-                onChange={(event) => onChange({ ...value, changes: value.changes.map((c) => c.draftKey === change.draftKey ? { ...c, from: event.target.value } : c) })} />
-              {RATE_FIELDS.map(([field, label]) => (
-                <TextInput key={field} inputMode="decimal" aria-label={`${change.from} ${t(label)}`}
-                  placeholder={t('ai.catalog.form.pricingUnpriced')} value={change.definition.base[field] ?? ''}
-                  onChange={(event) => onChange({
-                    ...value,
-                    changes: value.changes.map((c) => c.draftKey === change.draftKey ? {
-                      ...c,
-                      definition: { ...c.definition, base: { ...c.definition.base, [field]: sanitizeDecimalInput(event.target.value) } },
-                    } : c),
-                  })} />
-              ))}
-              <button type="button" className="ghost-inline-btn" aria-label={t('ai.catalog.form.removePricingRule')}
-                onClick={() => onChange({ ...value, changes: value.changes.filter((c) => c.draftKey !== change.draftKey) })}>×</button>
-              {duplicateChangeDates.has(change.draftKey) ? <span className="field-error" role="alert">{t('ai.catalog.form.pricingConflict')}</span> : null}
-              <details className="pricing-change-editor">
-                <summary>{t('ai.catalog.form.editPricingChange')}</summary>
-                <ModelPricingPlanEditor
-                  value={{ definition: change.definition, changes: [] }}
-                  includeChanges={false}
-                  headingId={`pricing-change-${change.draftKey}`}
-                  onChange={(next) => onChange({
-                    ...value,
-                    changes: value.changes.map((item) => item.draftKey === change.draftKey
-                      ? { ...item, definition: next.definition } : item),
-                  })}
-                />
-              </details>
-            </div>
-          ))}
-          <button type="button" className="ghost-inline-btn" onClick={() => onChange({
-            ...value, changes: [...value.changes, {
-              draftKey: createPricingDraftKey(), from: '', definition: clonePricingDefinitionDraft(value.definition),
-            }],
-          })}>{t('ai.catalog.form.addPricingChange')}</button>
-        </>
-      )) : null}
-      {includePreview ? (
-        <section className="pricing-plan-section" aria-labelledby={`${headingId}-preview`}>
-          <h4 id={`${headingId}-preview`}>{t('ai.catalog.form.pricingPreview')}</h4>
-          <p className="inline-hint">{t('ai.catalog.form.pricingPreviewTimeUtcHint')}</p>
-          <div className="form-grid-2">
-            <label className="form-group">
-              <span>{t('ai.catalog.form.pricingInputTokens')}</span>
-              <TextInput inputMode="numeric" aria-label={t('ai.catalog.form.pricingInputTokens')} value={inputTokens}
-                onChange={(event) => setInputTokens(event.target.value.replace(/\D/g, ''))} />
-            </label>
-            <label className="form-group">
-              <span>{t('ai.catalog.form.pricingPreviewTime')}</span>
-              <TextInput type="datetime-local" aria-label={t('ai.catalog.form.pricingPreviewTime')} value={requestedAt}
-                onChange={(event) => setRequestedAt(event.target.value)} />
-            </label>
-            <label className="form-group">
-              <span>{t('ai.catalog.form.pricingServiceTier')}</span>
-              <TextInput aria-label={t('ai.catalog.form.pricingServiceTier')} value={serviceTier}
-                onChange={(event) => setServiceTier(event.target.value)} />
-            </label>
-          </div>
-          <Button variant="ghost" loading={previewBusy} onClick={() => void runPricingPreview()}>
-            {t('ai.catalog.form.pricingPreviewRun')}
-          </Button>
-          {visiblePreviewError ? <p className="field-error" role="alert">{visiblePreviewError}</p> : null}
-          {visiblePreview ? (
-            <div className="pricing-preview-result" role="status">
-              {visiblePreview.rates ? (
-                <>
-                  <strong>{t('ai.catalog.form.pricingPreviewResult')}</strong>
-                  <p>{catalogRateSummary(visiblePreview.rates, t)}</p>
-                  {visiblePreview.activeFrom ? <p>{t('ai.catalog.form.pricingPreviewActiveFrom', { date: visiblePreview.activeFrom })}</p> : null}
-                  <p>{t('ai.catalog.form.pricingPreviewMatched')}</p>
-                  {visiblePreview.matchedRules.length ? (
-                    <ul>{visiblePreview.matchedRules.map((rule, index) => (
-                      <li key={`${rule.type}-${index}`}>{catalogRuleSummary(rule, t)}</li>
-                    ))}</ul>
-                  ) : <p>{t('ai.catalog.form.pricingPreviewNoRules')}</p>}
-                </>
-              ) : <p>{t('ai.catalog.form.pricingPreviewUnknown')}</p>}
-            </div>
-          ) : null}
-        </section>
-      ) : null}
+              { value: BASE, label: `${t('ai.catalog.form.pricingBasePlan')}${active ? '' : ` · ${activeLabel}`}` },
+              ...changes.map((change) => ({ value: change.draftKey, label: `${change.from || '—'}${change === active ? ` · ${activeLabel}` : ''}` })),
+            ]} onChange={setSelection} />
+        </div>
+        <Button variant="ghost" onClick={() => setNewDate(newDate === null ? '' : null)}>{t('ai.catalog.form.addPricingChange')}</Button>
+      </div>
+      {newDate !== null && <div className="pricing-plan-toolbar">
+        <Field label={t('ai.catalog.form.pricingFromDate')}>
+          <TextInput type="date" value={newDate} onChange={(event) => setNewDate(event.target.value)} />
+        </Field>
+        <Button variant="ghost" disabled={!newDate || duplicateDate(newDate)} onClick={addChange}>{t('ai.catalog.form.pricingCreateDraft')}</Button>
+        {newDate && duplicateDate(newDate) && <span className="field-error" role="alert">{t('ai.catalog.form.pricingDuplicateDate')}</span>}
+      </div>}
+      {selected && newDate === null && <div className="pricing-plan-toolbar">
+        <Field label={t('ai.catalog.form.pricingFromDate')}>
+          <TextInput type="date" value={selected.from} onChange={(event) => {
+            const from = event.target.value
+            setSelection(selected.draftKey)
+            onChange({ ...value, changes: value.changes.map((change) => change === selected ? { ...change, from } : change) })
+          }} />
+        </Field>
+        <Button variant="ghost" onClick={() => {
+          onChange({ ...value, changes: value.changes.filter((change) => change !== selected) })
+          setSelection(undefined)
+        }}>{t('ai.catalog.form.pricingRemoveChange')}</Button>
+        {selected.from && duplicateDate(selected.from, selected.draftKey) && <span className="field-error" role="alert">{t('ai.catalog.form.pricingDuplicateDate')}</span>}
+      </div>}
+      {(!selected || selected.from && selected.from <= today) && hasConfiguredPricing(value)
+        ? <p className="inline-hint">{t('ai.catalog.form.pricingHistoryWarning')}</p> : null}
+      <DefinitionEditor key={planKey} definition={selected?.definition ?? value.definition}
+        configured={hasConfiguredPricing(value)} onChange={updateDefinition} />
+      <PricingPreview value={value} />
     </section>
   )
 }
 
-function FactorInputs({
-  factors,
-  onChange,
-}: {
-  factors: PricingFactorsDraft
-  onChange: (field: keyof PricingFactorsDraft, value: string) => void
+function DefinitionEditor({ definition, configured, onChange }: {
+  definition: PricingDefinitionDraft
+  configured: boolean
+  onChange: (definition: PricingDefinitionDraft) => void
 }) {
   const { t } = useI18n()
-  return (
+  const { base, inputTokenRanges, serviceTiers, timePeriods } = definition
+  const conflicts = findPricingConflicts(definition)
+  const [newRule, setNewRule] = useState('')
+  const inherit = t('ai.catalog.form.pricingTtlInherit')
+  const required = t('ai.catalog.form.pricingRateRequired')
+  const unpriced = t('ai.catalog.form.pricingUnpriced')
+  const reasoningOptions = [
+    { value: 'follow', label: t('ai.catalog.form.reasoningFollowOutput') },
+    { value: 'separate', label: t('ai.catalog.form.reasoningSeparate') },
+  ]
+
+  function updateRows<K extends 'inputTokenRanges' | 'serviceTiers' | 'timePeriods'>(group: K, rows: PricingDefinitionDraft[K]) {
+    onChange({ ...definition, [group]: rows })
+  }
+
+  function rule(group: 'inputTokenRanges' | 'serviceTiers' | 'timePeriods', key: string, index: number, summary: string, children: ReactNode, remove: () => void) {
+    const peerRows = conflicts.filter((conflict) => conflict.group === group && conflict.keys.includes(key))
+      .flatMap((conflict) => conflict.keys.filter((other) => other !== key))
+      .map((other) => definition[group].findIndex((row) => row.draftKey === other) + 1)
+    const reason = group === 'inputTokenRanges' ? 'pricingOverlapTokens' : group === 'serviceTiers' ? 'pricingDuplicateTier' : 'pricingOverlapTime'
+    return (
+      <div key={key} className="pricing-plan-row" data-conflict={peerRows.length > 0 || undefined}>
+        <details className="pricing-rule-details" open={newRule === key || undefined}>
+          <summary>{index + 1}. {summary}</summary>
+          <div className="pricing-rule-fields">
+            {children}
+            <button type="button" className="ghost-inline-btn" onClick={remove}>{t('ai.catalog.form.removePricingRule')}</button>
+          </div>
+        </details>
+        {!!peerRows.length && <span className="field-error" role="alert">{t(`ai.catalog.form.${reason}`, { rows: peerRows.join(', ') })}</span>}
+      </div>
+    )
+  }
+
+  return <>
+    <Section title={t('ai.catalog.form.pricingBase')}>
+      {!configured && <p className="inline-hint">{t('ai.catalog.form.pricingNotConfigured')}</p>}
+      <div className="form-grid-2">
+        {RATE_FIELDS.slice(0, 4).map(([field, label]) => (
+          <Field key={field} label={t(label)}>
+            <TextInput inputMode="decimal" value={base[field] ?? ''}
+              placeholder={field === 'cacheWrite' ? t('ai.catalog.form.pricingNotSet') : configured ? required : unpriced}
+              invalid={configured && field !== 'cacheWrite' && !base[field]}
+              onChange={(event) => onChange({ ...definition, base: { ...base, [field]: sanitizeDecimalInput(event.target.value) } })} />
+          </Field>
+        ))}
+      </div>
+      <PricingTtlInputs rows={base.cacheWriteByTtl} onChange={(cacheWriteByTtl) => onChange({ ...definition, base: { ...base, cacheWriteByTtl } })} />
+      <div className="form-grid-2">
+        <div className="form-group"><span>{t('ai.catalog.form.reasoningPrice')}</span>
+          <Select aria-label={t('ai.catalog.form.reasoningPricing')} value={base.reasoning == null ? 'follow' : 'separate'}
+            options={reasoningOptions} onChange={(mode) => onChange({ ...definition, base: { ...base, reasoning: mode === 'follow' ? null : '' } })} />
+        </div>
+        {base.reasoning != null && <Field label={t('ai.catalog.form.pricingReasoningRate')}>
+          <TextInput inputMode="decimal" value={base.reasoning} placeholder={required} invalid={!base.reasoning}
+            onChange={(event) => onChange({ ...definition, base: { ...base, reasoning: sanitizeDecimalInput(event.target.value) } })} />
+        </Field>}
+      </div>
+    </Section>
+    <Section title={t('ai.catalog.form.pricingRanges')}>
+      {inputTokenRanges.map((range, index) => {
+        const update = (patch: Partial<typeof range>) => updateRows('inputTokenRanges', inputTokenRanges.map((row) => row === range ? { ...row, ...patch } : row))
+        const rates = RATE_FIELDS.flatMap(([field, label]) => range.rates[field] === null && field === 'reasoning'
+          ? [`${t(label)}: ${t('ai.catalog.form.reasoningFollowOutput')}`]
+          : range.rates[field] ? [`${t(label)} ${money(range.rates[field])}`] : [])
+        if (range.cacheWriteTtlMode === 'unpartitioned') rates.push(ttlSummary([], t))
+        if (range.cacheWriteTtlMode === 'custom') rates.push(range.cacheWriteByTtl.length
+          ? ttlSummary(range.cacheWriteByTtl.map((row) => [row.seconds, row.rate]), t)
+          : t('ai.catalog.form.pricingTtlCustom'))
+        return rule('inputTokenRanges', range.draftKey, index,
+          `[${range.minInputTokens || '0'}, ${range.maxInputTokensExclusive || '∞'}) · ${rates.join(' · ') || inherit}`, <>
+            <div className="form-grid-2">
+              <Field label={t('ai.catalog.form.pricingMinTokens')}><TextInput inputMode="numeric" value={range.minInputTokens}
+                onChange={(event) => update({ minInputTokens: event.target.value.replace(/\D/g, '') })} /></Field>
+              <Field label={t('ai.catalog.form.pricingMaxTokens')}><TextInput inputMode="numeric" value={range.maxInputTokensExclusive}
+                onChange={(event) => update({ maxInputTokensExclusive: event.target.value.replace(/\D/g, '') })} /></Field>
+              {RATE_FIELDS.slice(0, 4).map(([field, label]) => <Field key={field} label={t(label)}>
+                <TextInput inputMode="decimal" placeholder={inherit} value={range.rates[field] ?? ''}
+                  onChange={(event) => update({ rates: { ...range.rates, [field]: sanitizeDecimalInput(event.target.value) } })} />
+              </Field>)}
+              <div className="form-group"><span>{t('ai.catalog.form.reasoningPrice')}</span>
+                <Select aria-label={t('ai.catalog.form.reasoningPricing')}
+                  value={range.rates.reasoning === null ? 'follow' : range.rates.reasoning === undefined ? 'inherit' : 'separate'}
+                  options={[{ value: 'inherit', label: inherit }, ...reasoningOptions]}
+                  onChange={(mode) => {
+                    const rates = { ...range.rates }
+                    if (mode === 'inherit') delete rates.reasoning
+                    else rates.reasoning = mode === 'follow' ? null : ''
+                    update({ rates })
+                  }} />
+              </div>
+              {range.rates.reasoning != null && <Field label={t('ai.catalog.form.pricingReasoningRate')}>
+                <TextInput inputMode="decimal" placeholder={inherit} value={range.rates.reasoning}
+                  onChange={(event) => update({ rates: { ...range.rates, reasoning: sanitizeDecimalInput(event.target.value) } })} />
+              </Field>}
+            </div>
+            <div className="form-group"><span>{t('ai.catalog.form.pricingTtlMode')}</span>
+              <Select aria-label={t('ai.catalog.form.pricingTtlMode')} value={range.cacheWriteTtlMode} options={[
+                { value: 'inherit', label: inherit }, { value: 'custom', label: t('ai.catalog.form.pricingTtlCustom') },
+                { value: 'unpartitioned', label: t('ai.catalog.form.pricingTtlUnpartitioned') },
+              ]} onChange={(mode) => {
+                if (mode === 'inherit' || mode === 'unpartitioned' || mode === 'custom') update({ cacheWriteTtlMode: mode })
+              }} />
+            </div>
+            {range.cacheWriteTtlMode === 'custom' && <PricingTtlInputs rows={range.cacheWriteByTtl}
+              onChange={(cacheWriteByTtl) => update({ cacheWriteByTtl })} />}
+          </>, () => updateRows('inputTokenRanges', inputTokenRanges.filter((row) => row !== range)))
+      })}
+      <button type="button" className="ghost-inline-btn" onClick={() => {
+        const draftKey = createPricingDraftKey()
+        setNewRule(draftKey)
+        updateRows('inputTokenRanges', [...inputTokenRanges, {
+          draftKey, minInputTokens: '', maxInputTokensExclusive: '', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [],
+        }])
+      }}>{t('ai.catalog.form.addPricingRange')}</button>
+    </Section>
+    <Section title={t('ai.catalog.form.pricingTiers')}>
+      {serviceTiers.map((tier, index) => {
+        const update = (patch: Partial<typeof tier>) => updateRows('serviceTiers', serviceTiers.map((row) => row === tier ? { ...row, ...patch } : row))
+        return rule('serviceTiers', tier.draftKey, index, `${tier.serviceTier || '—'} · ${factorSummary(tier.factors, t)}`, <>
+          <Field label={t('ai.catalog.form.pricingTierName')}><TextInput value={tier.serviceTier}
+            onChange={(event) => update({ serviceTier: event.target.value })} /></Field>
+          <FactorInputs factors={tier.factors} onChange={(factors) => update({ factors })} />
+        </>, () => updateRows('serviceTiers', serviceTiers.filter((row) => row !== tier)))
+      })}
+      <button type="button" className="ghost-inline-btn" onClick={() => {
+        const draftKey = createPricingDraftKey()
+        setNewRule(draftKey)
+        updateRows('serviceTiers', [...serviceTiers, { draftKey, serviceTier: '', factors: blankFactors() }])
+      }}>{t('ai.catalog.form.addPricingTier')}</button>
+    </Section>
+    <Section title={t('ai.catalog.form.pricingTimes')}>
+      {!!timePeriods.length && <Field label={t('ai.catalog.form.pricingTimezone')}>
+        <TextInput value={timePeriods[0]!.timezone} onChange={(event) => updateRows('timePeriods',
+          timePeriods.map((row) => ({ ...row, timezone: event.target.value })))} />
+      </Field>}
+      {timePeriods.map((period, index) => {
+        const update = (patch: Partial<TimePeriodDraft>) => updateRows('timePeriods', timePeriods.map((row) => row === period ? { ...row, ...patch } : row))
+        const label = (row: TimePeriodDraft) => `${daysLabel(row.weekdays, t)} · ${row.start || '—'}–${row.end || '—'}`
+        const split = overnightIntervals(period)
+        return rule('timePeriods', period.draftKey, index, `${label(period)} · ${factorSummary(period.factors, t)}`, <>
+          <div className="weekday-picker" role="group" aria-label={t('ai.catalog.form.pricingWeekdays')}>
+            {DAYS.map((day) => <Checkbox key={day} checked={period.weekdays.includes(day)} label={dayLabel(day, t)}
+              onChange={(checked) => update({ weekdays: checked ? [...period.weekdays, day].sort() : period.weekdays.filter((item) => item !== day) })} />)}
+          </div>
+          <div className="form-grid-2">
+            <Field label={t('ai.catalog.form.pricingStart')}><TextInput placeholder="HH:mm" value={period.start}
+              onChange={(event) => update({ start: event.target.value })} /></Field>
+            <Field label={t('ai.catalog.form.pricingEnd')}><TextInput placeholder="HH:mm" value={period.end}
+              onChange={(event) => update({ end: event.target.value })} /></Field>
+          </div>
+          {split.length > 0 && <div>
+            <p className="inline-hint">{t('ai.catalog.form.pricingOvernight', { intervals: split.map(label).join(' / ') })}</p>
+            <Button variant="ghost" onClick={() => updateRows('timePeriods', timePeriods.flatMap((row) => row === period
+              ? splitCrossMidnightPeriod(period) : [row]))}>{t('ai.catalog.form.pricingConfirmSplit')}</Button>
+          </div>}
+          <FactorInputs factors={period.factors} onChange={(factors) => update({ factors })} />
+        </>, () => updateRows('timePeriods', timePeriods.filter((row) => row !== period)))
+      })}
+      <button type="button" className="ghost-inline-btn" onClick={() => {
+        const draftKey = createPricingDraftKey()
+        setNewRule(draftKey)
+        updateRows('timePeriods', [...timePeriods, {
+          draftKey, weekdays: [], start: '00:00', end: '24:00', timezone: timePeriods[0]?.timezone ?? 'UTC', factors: blankFactors(),
+        }])
+      }}>{t('ai.catalog.form.addPricingTime')}</button>
+    </Section>
+  </>
+}
+
+function overnightIntervals(period: TimePeriodDraft) {
+  const clock = /^(?:[01]\d|2[0-3]):[0-5]\d$/
+  return clock.test(period.start) && clock.test(period.end) && period.start > period.end
+    ? splitCrossMidnightPeriod(period, () => period.draftKey) : []
+}
+
+function factorSummary(factors: PricingFactorsDraft, t: Translate) {
+  return [`×${factors.factor || '—'}`, ...FACTOR_FIELDS.flatMap((field, index) => factors[field]
+    ? [`${t(RATE_FIELDS[index]![1])} ×${factors[field]}`] : [])].join(' · ')
+}
+
+function FactorInputs({ factors, onChange }: { factors: PricingFactorsDraft; onChange: (factors: PricingFactorsDraft) => void }) {
+  const { t } = useI18n()
+  return <>
+    <Field label={t('ai.catalog.form.pricingFactor')}><TextInput inputMode="decimal" value={factors.factor}
+      onChange={(event) => onChange({ ...factors, factor: sanitizeDecimalInput(event.target.value) })} /></Field>
     <details className="pricing-factor-details">
-      <summary>{t('ai.catalog.form.pricingFactor')}: ×{factors.factor}</summary>
-      <TextInput inputMode="decimal" aria-label={t('ai.catalog.form.pricingFactor')} value={factors.factor}
-        onChange={(event) => onChange('factor', event.target.value)} />
-      {FACTOR_FIELDS.map(([field, label]) => (
-        <TextInput key={field} inputMode="decimal" aria-label={t(label)} placeholder={factors.factor}
-          value={factors[field]} onChange={(event) => onChange(field, event.target.value)} />
-      ))}
+      <summary>{t('ai.catalog.form.pricingFactorOverrides')}</summary>
+      <div className="form-grid-2 pricing-rule-fields">
+        {FACTOR_FIELDS.map((field, index) => <Field key={field} label={t(RATE_FIELDS[index]![1])}>
+          <TextInput inputMode="decimal" placeholder={factors.factor} value={factors[field]}
+            onChange={(event) => onChange({ ...factors, [field]: sanitizeDecimalInput(event.target.value) })} />
+        </Field>)}
+      </div>
     </details>
-  )
+  </>
+}
+
+function PricingPreview({ value }: { value: ModelPricingDraft }) {
+  const { t } = useI18n()
+  const timeId = useId()
+  const tierId = useId()
+  const [inputTokens, setInputTokens] = useState('1000')
+  const [requestedAt, setRequestedAt] = useState('')
+  const [serviceTier, setServiceTier] = useState('')
+  const signature = JSON.stringify([value, inputTokens, requestedAt, serviceTier])
+  const [current, setCurrent] = useState(() => ({ signature }))
+  const [result, setResult] = useState<Awaited<ReturnType<typeof previewModelPricing>> | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const controllerRef = useRef<AbortController | null>(null)
+  if (signature !== current.signature) {
+    // Reset rather than cache by signature: reverting inputs cannot revive an old result.
+    setCurrent({ signature })
+    setResult(null)
+    setError(null)
+    setBusy(false)
+  }
+  useEffect(() => () => controllerRef.current?.abort(), [current])
+
+  async function run() {
+    setResult(null)
+    setError(null)
+    const tokens = Number(inputTokens)
+    if (!/^(?:0|[1-9]\d*)$/.test(inputTokens) || !Number.isSafeInteger(tokens)) {
+      setError(t('ai.catalog.form.pricingPreviewInvalidTokens'))
+      return
+    }
+    const time = requestedAt ? Date.parse(`${requestedAt}Z`) : undefined
+    if (time !== undefined && !Number.isSafeInteger(time)) {
+      setError(t('ai.catalog.form.pricingPreviewInvalidTime'))
+      return
+    }
+    let pricing
+    try { pricing = normalizePricingDraft(value) }
+    catch (cause) { setError(toUserFacingErrorMessage(cause)); return }
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setBusy(true)
+    try {
+      const response = await previewModelPricing({ pricing: pricing ?? null, inputTokens: tokens,
+        ...(time === undefined ? {} : { requestedAt: time }), ...(serviceTier.trim() ? { serviceTier: serviceTier.trim() } : {}),
+      }, controller.signal)
+      if (!controller.signal.aborted) setResult(response)
+    } catch (cause) {
+      if (!controller.signal.aborted) setError(toUserFacingErrorMessage(cause))
+    } finally {
+      if (!controller.signal.aborted) setBusy(false)
+    }
+  }
+
+  return <Section title={t('ai.catalog.form.pricingPreview')}>
+    <p className="inline-hint">{t('ai.catalog.form.pricingPreviewScope')}</p>
+    <div className="form-grid-2">
+      <Field label={t('ai.catalog.form.pricingInputTokens')}><TextInput inputMode="numeric" value={inputTokens}
+        onChange={(event) => setInputTokens(event.target.value.replace(/\D/g, ''))} /></Field>
+      <Field label={t('ai.catalog.form.pricingPreviewTime')}><TextInput id={timeId} type="datetime-local" value={requestedAt}
+        onChange={(event) => setRequestedAt(event.target.value)} /></Field>
+      <Field label={t('ai.catalog.form.pricingServiceTier')}><TextInput id={tierId} value={serviceTier}
+        onChange={(event) => setServiceTier(event.target.value)} /></Field>
+    </div>
+    <Button variant="ghost" loading={busy} onClick={() => void run()}>{t('ai.catalog.form.pricingPreviewRun')}</Button>
+    {error && <p className="field-error" role="alert">{error}</p>}
+    {result && <div className="pricing-preview-result" role="status">
+      {result.rates ? <>
+        <strong>{t('ai.catalog.form.pricingPreviewResult')}</strong>
+        <p>{rateSummary(result.rates, t)}</p>
+        <p>{result.activeFrom ? t('ai.catalog.form.pricingPreviewActiveFrom', { date: result.activeFrom }) : t('ai.catalog.form.pricingBasePlan')}</p>
+        {result.matchedRules.length ? <>
+          <p>{t('ai.catalog.form.pricingPreviewMatched')}</p>
+          <ul>{result.matchedRules.map((rule, index) => <li key={index}>{ruleSummary(rule, t)}</li>)}</ul>
+        </> : <p>{t('ai.catalog.form.pricingPreviewNoRules')}</p>}
+      </> : <>
+        <p>{t(hasConfiguredPricing(value) ? 'ai.catalog.form.pricingPreviewUnknown' : 'ai.catalog.form.pricingNotConfigured')}</p>
+        {hasConfiguredPricing(value) && <div className="pricing-plan-toolbar">
+          {!requestedAt && <Button variant="ghost" onClick={() => document.getElementById(timeId)?.focus()}>{t('ai.catalog.form.pricingPreviewAddTime')}</Button>}
+          {!serviceTier.trim() && <Button variant="ghost" onClick={() => document.getElementById(tierId)?.focus()}>{t('ai.catalog.form.pricingPreviewAddTier')}</Button>}
+        </div>}
+      </>}
+    </div>}
+  </Section>
 }

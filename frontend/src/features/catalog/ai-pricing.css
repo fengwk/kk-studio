@@ -1,9 +1,9 @@
-/* Structured pricing editor shared by the model form and catalog preview. */
-.pricing-plan-section {
+.model-pricing-editor .pricing-plan-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 12px;
+  padding-block-start: 12px;
+  border-block-start: 1px solid var(--border);
 }
 
 .pricing-plan-section h4 {
@@ -12,12 +12,31 @@
   font-size: var(--font-size-sm);
 }
 
-.pricing-plan-row {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  align-items: start;
+.pricing-plan-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
   gap: 8px;
-  padding: 8px;
+}
+
+.pricing-plan-toolbar > .form-group {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.pricing-plan-toolbar > .field-error {
+  flex-basis: 100%;
+}
+
+.pricing-plan-section > .ghost-inline-btn,
+.pricing-plan-section > button,
+.pricing-rule-fields > .ghost-inline-btn {
+  align-self: flex-start;
+}
+
+.pricing-plan-row {
+  min-width: 0;
+  padding: 8px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
 }
@@ -27,7 +46,23 @@
 }
 
 .pricing-plan-row .field-error {
-  grid-column: 1 / -1;
+  display: block;
+}
+
+.pricing-rule-details > summary,
+.pricing-factor-details > summary {
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+
+.pricing-rule-fields {
+  margin-block-start: 8px;
+}
+
+.pricing-rule-details > .pricing-rule-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .weekday-picker {
@@ -36,48 +71,38 @@
   gap: 8px;
 }
 
-.pricing-factor-details {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.pricing-factor-details summary,
-.pricing-change-editor summary {
-  cursor: pointer;
-}
-
 @media (max-width: 860px) {
+  .modal-touch-target .pricing-rule-details > summary,
   .modal-touch-target .pricing-factor-details > summary {
-    min-width: 44px;
     min-height: 44px;
+    min-width: 44px;
     align-content: center;
   }
 }
 
-.pricing-reasoning-patch {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.pricing-change-editor {
-  grid-column: 1 / -1;
+.pricing-import-notice,
+.pricing-preview-result {
+  padding: 10px 12px;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--wash-1);
 }
 
 .pricing-import-notice {
-  padding: 10px 12px;
-  border: 1px solid var(--warning-border);
-  border-radius: var(--radius-sm);
+  border-color: var(--warning-border);
   background: var(--warning-soft);
 }
 
-.pricing-import-notice p:first-child {
+.pricing-import-notice p:first-child,
+.pricing-preview-result p:first-child {
   margin-top: 0;
 }
 
 .pricing-import-notice p:last-child,
-.pricing-import-notice ul:last-child {
+.pricing-import-notice ul:last-child,
+.pricing-preview-result p:last-child,
+.pricing-preview-result ul:last-child {
   margin-bottom: 0;
 }
 
@@ -87,37 +112,4 @@
 
 .pricing-import-notice summary {
   cursor: pointer;
-}
-
-.pricing-preview-result {
-  margin-top: 10px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--wash-1);
-}
-
-.pricing-preview-result p:last-child,
-.pricing-preview-result ul:last-child {
-  margin-bottom: 0;
-}
-
-.price-input {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.price-affix {
-  flex: 0 0 auto;
-  color: var(--fg-muted);
-  font-size: var(--font-size-xs);
-  font-weight: 600;
-  user-select: none;
-}
-
-.price-input input {
-  flex: 1 1 auto;
-  min-width: 0;
 }

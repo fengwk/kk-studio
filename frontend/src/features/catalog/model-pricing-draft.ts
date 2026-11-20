@@ -6,12 +6,21 @@ import type {
 
 export type PricingRateField = 'input' | 'output' | 'cacheRead' | 'cacheWrite' | 'reasoning'
 
+export type PricingTtlRowIssue = 'invalidSeconds' | 'duplicateSeconds' | 'rateRequired'
+
+/** TTL cache write prices stay editable as keyed rows so blank, duplicate and invalid seconds remain visible. */
+export interface PricingTtlRow {
+  draftKey: string
+  seconds: string
+  rate: string
+}
+
 export interface PricingRatesDraft {
   input: string
   output: string
   cacheRead: string
   cacheWrite: string
-  cacheWriteByTtl: Record<string, string>
+  cacheWriteByTtl: PricingTtlRow[]
   /** An absent base reasoning rate follows output; a decimal string is an independent price. */
   reasoning: string | null | undefined
 }
@@ -31,7 +40,7 @@ export interface InputRangeDraft {
   maxInputTokensExclusive: string
   rates: Partial<Record<PricingRateField, string | null>>
   cacheWriteTtlMode: 'inherit' | 'custom' | 'unpartitioned'
-  cacheWriteByTtl: Record<string, string>
+  cacheWriteByTtl: PricingTtlRow[]
 }
 
 export interface ServiceTierDraft {
@@ -70,6 +79,8 @@ export interface ModelPricingDraft {
 
 type PricingDefinitionDTO = Pick<ModelPricingDTO, 'base' | 'rules'>
 
+const POSITIVE_SECONDS = /^[1-9]\d*$/
+
 let draftKeySequence = 0
 
 export function createPricingDraftKey(): string {
@@ -94,7 +105,7 @@ export function emptyPricingRates(): PricingRatesDraft {
     output: '',
     cacheRead: '',
     cacheWrite: '',
-    cacheWriteByTtl: {},
+    cacheWriteByTtl: [],
     reasoning: undefined,
   }
 }
@@ -109,12 +120,12 @@ export function emptyModelPricingDraft(): ModelPricingDraft {
 
 export function clonePricingDefinitionDraft(definition: PricingDefinitionDraft): PricingDefinitionDraft {
   return {
-    base: { ...definition.base, cacheWriteByTtl: { ...definition.base.cacheWriteByTtl } },
+    base: { ...definition.base, cacheWriteByTtl: copyTtlRows(definition.base.cacheWriteByTtl) },
     inputTokenRanges: definition.inputTokenRanges.map((range) => ({
       ...range,
       draftKey: createPricingDraftKey(),
       rates: { ...range.rates },
-      cacheWriteByTtl: { ...range.cacheWriteByTtl },
+      cacheWriteByTtl: copyTtlRows(range.cacheWriteByTtl),
     })),
     serviceTiers: definition.serviceTiers.map((tier) => ({
       ...tier, draftKey: createPricingDraftKey(), factors: { ...tier.factors },
@@ -125,13 +136,22 @@ export function clonePricingDefinitionDraft(definition: PricingDefinitionDraft):
   }
 }
 
+function copyTtlRows(rows: PricingTtlRow[]): PricingTtlRow[] {
+  return rows.map((row) => ({ ...row, draftKey: createPricingDraftKey() }))
+}
+
+/** Persisted `seconds -> rate` pairs become editable rows with independent stable keys. */
+function importTtlRows(ttl: Record<string, string>): PricingTtlRow[] {
+  return Object.entries(ttl).map(([seconds, rate]) => ({ draftKey: createPricingDraftKey(), seconds, rate }))
+}
+
 function cloneRates(rates: ModelRateSetDTO): PricingRatesDraft {
   return {
     input: rates.input,
     output: rates.output,
     cacheRead: rates.cacheRead,
     cacheWrite: rates.cacheWrite ?? '',
-    cacheWriteByTtl: { ...rates.cacheWriteByTtl },
+    cacheWriteByTtl: importTtlRows(rates.cacheWriteByTtl),
     reasoning: rates.reasoning,
   }
 }
@@ -161,7 +181,7 @@ function cloneDefinition(pricing: PricingDefinitionDTO): PricingDefinitionDraft 
           ...(rule.reasoning !== undefined ? { reasoning: rule.reasoning } : {}),
         },
         cacheWriteTtlMode: ttl === undefined ? 'inherit' : Object.keys(ttl).length === 0 ? 'unpartitioned' : 'custom',
-        cacheWriteByTtl: { ...(ttl ?? {}) },
+        cacheWriteByTtl: importTtlRows(ttl ?? {}),
       })
     } else if (rule.type === 'service_tier_multiplier') {
       definition.serviceTiers.push({
@@ -199,6 +219,23 @@ export function clonePricingDraft(pricing?: ModelPricingDTO | null): ModelPricin
 }
 
 export type PricingConflict = { group: 'inputTokenRanges' | 'serviceTiers' | 'timePeriods'; keys: string[] }
+
+/** Row issues are keyed by draftKey so a row keeps its inline error while the user retypes seconds or the rate. */
+export function findPricingTtlRowIssues(rows: PricingTtlRow[]): Record<string, PricingTtlRowIssue> {
+  const secondsCounts = new Map<string, number>()
+  for (const row of rows) {
+    const seconds = row.seconds.trim()
+    if (seconds) secondsCounts.set(seconds, (secondsCounts.get(seconds) ?? 0) + 1)
+  }
+  const issues: Record<string, PricingTtlRowIssue> = {}
+  for (const row of rows) {
+    const seconds = row.seconds.trim()
+    if (!POSITIVE_SECONDS.test(seconds)) issues[row.draftKey] = 'invalidSeconds'
+    else if ((secondsCounts.get(seconds) ?? 0) > 1) issues[row.draftKey] = 'duplicateSeconds'
+    else if (!row.rate.trim()) issues[row.draftKey] = 'rateRequired'
+  }
+  return issues
+}
 
 function overlap(aStart: number, aEnd: number, bStart: number, bEnd: number): boolean {
   return aStart < bEnd && bStart < aEnd
@@ -283,16 +320,28 @@ function normalizeDecimal(value: string, path: string, optional: boolean): strin
   return normalized
 }
 
+/** TTL rows serialize to wire `seconds -> rate` pairs; duplicates are rejected instead of silently collapsing. */
+function normalizeTtlRows(rows: PricingTtlRow[], path: string, secondsMessage: string): Record<string, string> {
+  const ttl: Record<string, string> = {}
+  for (const row of rows) {
+    const seconds = row.seconds.trim()
+    if (!POSITIVE_SECONDS.test(seconds)) throw new Error(secondsMessage)
+    if (Object.hasOwn(ttl, seconds)) throw new Error(`${path} must not repeat ${seconds} seconds`)
+    const rate = row.rate.trim()
+    if (!rate) throw new Error(`${path}.${seconds} rate is required`)
+    ttl[seconds] = normalizeDecimal(rate, `${path}.${seconds}`, false)!
+  }
+  return ttl
+}
+
 function normalizeBase(rates: PricingRatesDraft): ModelRateSetDTO {
   const input = normalizeDecimal(rates.input, 'pricing.base.input', false)!
   const output = normalizeDecimal(rates.output, 'pricing.base.output', false)!
   const cacheRead = normalizeDecimal(rates.cacheRead, 'pricing.base.cacheRead', false)!
   const cacheWrite = normalizeDecimal(rates.cacheWrite, 'pricing.base.cacheWrite', true)
-  const cacheWriteByTtl: Record<string, string> = {}
-  for (const [seconds, raw] of Object.entries(rates.cacheWriteByTtl)) {
-    if (!/^[1-9]\d*$/.test(seconds)) throw new Error('pricing.base.cacheWriteByTtl keys must be positive integer seconds')
-    cacheWriteByTtl[seconds] = normalizeDecimal(raw, `pricing.base.cacheWriteByTtl.${seconds}`, false)!
-  }
+  const cacheWriteByTtl = normalizeTtlRows(
+    rates.cacheWriteByTtl, 'pricing.base.cacheWriteByTtl', 'pricing.base.cacheWriteByTtl keys must be positive integer seconds',
+  )
   const normalized: ModelRateSetDTO = {
     input, output, cacheRead, cacheWrite, cacheWriteByTtl,
   }
@@ -347,11 +396,12 @@ function normalizeRuleDefinition(definition: PricingDefinitionDraft): ModelPrici
     }
     if (range.cacheWriteTtlMode === 'unpartitioned') rule.cacheWriteByTtl = {}
     if (range.cacheWriteTtlMode === 'custom') {
-      rule.cacheWriteByTtl = {}
-      for (const [seconds, value] of Object.entries(range.cacheWriteByTtl)) {
-        if (!/^[1-9]\d*$/.test(seconds)) throw new Error(`pricing.rules[${index}] TTL must be positive seconds`)
-        rule.cacheWriteByTtl[seconds] = normalizeDecimal(value, `pricing.rules[${index}].TTL.${seconds}`, false)!
+      if (range.cacheWriteByTtl.length === 0) {
+        throw new Error(`pricing.rules[${index}] custom TTL prices must have at least one row`)
       }
+      rule.cacheWriteByTtl = normalizeTtlRows(
+        range.cacheWriteByTtl, `pricing.rules[${index}].TTL`, `pricing.rules[${index}] TTL must be positive seconds`,
+      )
     }
     return rule
   })
@@ -393,11 +443,11 @@ function normalizeDefinition(definition: PricingDefinitionDraft): PricingDefinit
   return { base: normalizeBase(definition.base), rules: normalizeRuleDefinition(definition) }
 }
 
-function hasConfiguredPricing(draft: ModelPricingDraft): boolean {
+export function hasConfiguredPricing(draft: ModelPricingDraft): boolean {
   const rates = draft.definition.base
   const hasBaseRate = [rates.input, rates.output, rates.cacheRead, rates.cacheWrite].some((value) => value.trim() !== '')
-    || (rates.reasoning != null && rates.reasoning.trim() !== '')
-    || Object.keys(rates.cacheWriteByTtl).length > 0
+    || rates.reasoning != null
+    || rates.cacheWriteByTtl.length > 0
   return hasBaseRate || draft.definition.inputTokenRanges.length > 0 || draft.definition.serviceTiers.length > 0
     || draft.definition.timePeriods.length > 0 || draft.changes.length > 0
 }

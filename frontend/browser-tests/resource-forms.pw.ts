@@ -41,7 +41,8 @@ test('resource forms preserve native semantics, shared geometry and controlled e
     await expect(model.getByRole('textbox', { name: 'Model ID' })).toHaveJSProperty('required', true)
     await expect(model.getByLabel('Reasoning Effort 1')).toBeDisabled()
     await expect(model.getByRole('button', { name: '删除 Variant' })).toBeDisabled()
-    const price = model.getByLabel('Input USD per million tokens')
+    // 基础费率输入按标签定位（zh-CN 输入 / en-US Input）。
+    const price = model.getByLabel(/^(输入|input)$/i)
     // 十进制编辑器保留文本精度与尾零，不经过原生 number 的浮点转换。
     await expect(price).toHaveAttribute('type', 'text')
     await expect(price).toHaveAttribute('inputmode', 'decimal')

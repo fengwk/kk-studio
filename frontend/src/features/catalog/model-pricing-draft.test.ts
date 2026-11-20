@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import type { ModelPricingDTO } from '@/shared/api/generated/contracts'
 import {
+  clonePricingDefinitionDraft,
+  clonePricingDraft,
   emptyModelPricingDraft,
   findPricingConflicts,
+  findPricingTtlRowIssues,
+  hasConfiguredPricing,
   normalizePricingDraft,
   splitCrossMidnightPeriod,
 } from '@/features/catalog/model-pricing-draft'
@@ -16,7 +21,7 @@ describe('local model pricing draft', () => {
   it('starts unpriced without creating a wire pricing object or default zeroes', () => {
     const draft = emptyModelPricingDraft()
     expect(draft.definition.base).toEqual({
-      input: '', output: '', cacheRead: '', cacheWrite: '', cacheWriteByTtl: {}, reasoning: undefined,
+      input: '', output: '', cacheRead: '', cacheWrite: '', cacheWriteByTtl: [], reasoning: undefined,
     })
     expect(draft.definition.inputTokenRanges).toEqual([])
     expect(draft.changes).toEqual([])
@@ -26,8 +31,8 @@ describe('local model pricing draft', () => {
   it('flags overlapping input ranges, duplicate service tiers and same-weekday time overlaps', () => {
     const draft = emptyModelPricingDraft()
     draft.definition.inputTokenRanges = [
-      { draftKey: 'range-a', minInputTokens: '100', maxInputTokensExclusive: '201', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
-      { draftKey: 'range-b', minInputTokens: '200', maxInputTokensExclusive: '300', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
+      { draftKey: 'range-a', minInputTokens: '100', maxInputTokensExclusive: '201', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [] },
+      { draftKey: 'range-b', minInputTokens: '200', maxInputTokensExclusive: '300', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [] },
     ]
     draft.definition.serviceTiers = [
       { draftKey: 'tier-a', serviceTier: 'fast', factors: { factor: '1', inputFactor: '', outputFactor: '', cacheReadFactor: '', cacheWriteFactor: '', reasoningFactor: '' } },
@@ -48,15 +53,15 @@ describe('local model pricing draft', () => {
   it('flags overlapping open-ended input ranges and allows adjacent half-open ranges and disjoint weekdays', () => {
     const draft = emptyModelPricingDraft()
     draft.definition.inputTokenRanges = [
-      { draftKey: 'a', minInputTokens: '100', maxInputTokensExclusive: '', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
-      { draftKey: 'b', minInputTokens: '200', maxInputTokensExclusive: '300', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
+      { draftKey: 'a', minInputTokens: '100', maxInputTokensExclusive: '', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [] },
+      { draftKey: 'b', minInputTokens: '200', maxInputTokensExclusive: '300', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [] },
     ]
     expect(findPricingConflicts(draft.definition)).toEqual([
       { group: 'inputTokenRanges', keys: ['a', 'b'] },
     ])
     draft.definition.inputTokenRanges = [
-      { draftKey: 'a', minInputTokens: '0', maxInputTokensExclusive: '100', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
-      { draftKey: 'b', minInputTokens: '100', maxInputTokensExclusive: '200', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {} },
+      { draftKey: 'a', minInputTokens: '0', maxInputTokensExclusive: '100', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [] },
+      { draftKey: 'b', minInputTokens: '100', maxInputTokensExclusive: '200', rates: {}, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [] },
     ]
     const factors = { factor: '1', inputFactor: '', outputFactor: '', cacheReadFactor: '', cacheWriteFactor: '', reasoningFactor: '' }
     draft.definition.timePeriods = [
@@ -84,7 +89,7 @@ describe('local model pricing draft', () => {
     draft.definition.base.cacheRead = '0.3'
     draft.definition.inputTokenRanges = [{
       draftKey: 'client-only', minInputTokens: '200000', maxInputTokensExclusive: '300001',
-      rates: { input: '2.5' }, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {},
+      rates: { input: '2.5' }, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [],
     }]
     const plan = normalizePricingDraft(draft)!
     expect(plan.base).toMatchObject({ input: '0', output: '1.2500', cacheRead: '0.3', cacheWrite: null })
@@ -105,7 +110,7 @@ describe('local model pricing draft', () => {
 
     const range = {
       draftKey: 'range', minInputTokens: '0', maxInputTokensExclusive: '100',
-      rates: { reasoning: null }, cacheWriteTtlMode: 'inherit' as const, cacheWriteByTtl: {},
+      rates: { reasoning: null }, cacheWriteTtlMode: 'inherit' as const, cacheWriteByTtl: [],
     }
     draft.definition.inputTokenRanges = [range]
     expect(normalizePricingDraft(draft)!.rules).toEqual([{
@@ -113,8 +118,85 @@ describe('local model pricing draft', () => {
     }])
     draft.definition.inputTokenRanges = [{ ...range, cacheWriteTtlMode: 'unpartitioned' }]
     expect(normalizePricingDraft(draft)!.rules[0]).toMatchObject({ cacheWriteByTtl: {} })
-    draft.definition.inputTokenRanges = [{ ...range, cacheWriteTtlMode: 'custom', cacheWriteByTtl: { '300': '0.25' } }]
+    draft.definition.inputTokenRanges = [{ ...range, cacheWriteTtlMode: 'custom', cacheWriteByTtl: [{ draftKey: 'ttl', seconds: '300', rate: '0.25' }] }]
     expect(normalizePricingDraft(draft)!.rules[0]).toMatchObject({ cacheWriteByTtl: { '300': '0.25' } })
+  })
+
+  it('round-trips wire TTL prices through keyed draft rows', () => {
+    const pricing: ModelPricingDTO = {
+      base: {
+        input: '1', output: '2', cacheRead: '0.1', cacheWrite: null,
+        cacheWriteByTtl: { '300': '0.25', '3600': '1' }, reasoning: null,
+      },
+      rules: [{
+        type: 'input_token_range', minInputTokens: 0, maxInputTokensExclusive: 100, cacheWriteByTtl: { '600': '0.5' },
+      }],
+      changes: [],
+    }
+    const draft = clonePricingDraft(pricing)
+    expect(draft.definition.base.cacheWriteByTtl.map(({ seconds, rate }) => [seconds, rate]))
+      .toEqual([['300', '0.25'], ['3600', '1']])
+    expect(new Set(draft.definition.base.cacheWriteByTtl.map((row) => row.draftKey)).size).toBe(2)
+    expect(draft.definition.inputTokenRanges[0]).toMatchObject({
+      cacheWriteTtlMode: 'custom', cacheWriteByTtl: [{ seconds: '600', rate: '0.5' }],
+    })
+    expect(normalizePricingDraft(draft)).toEqual(pricing)
+  })
+
+  it('rejects duplicate, blank or non-positive TTL seconds instead of silently merging rows', () => {
+    const draft = emptyModelPricingDraft()
+    setPricedBase(draft)
+    draft.definition.base.cacheWriteByTtl = [
+      { draftKey: 'a', seconds: '300', rate: '0.25' },
+      { draftKey: 'b', seconds: '300', rate: '0.5' },
+    ]
+    expect(() => normalizePricingDraft(draft)).toThrow(/must not repeat 300 seconds/)
+    draft.definition.base.cacheWriteByTtl = [{ draftKey: 'a', seconds: '300', rate: ' ' }]
+    expect(() => normalizePricingDraft(draft)).toThrow(/pricing\.base\.cacheWriteByTtl\.300 rate is required/)
+    draft.definition.base.cacheWriteByTtl = [{ draftKey: 'a', seconds: '0', rate: '1' }]
+    expect(() => normalizePricingDraft(draft)).toThrow(/cacheWriteByTtl keys must be positive integer seconds/)
+    draft.definition.base.cacheWriteByTtl = [{ draftKey: 'a', seconds: '', rate: '1' }]
+    expect(() => normalizePricingDraft(draft)).toThrow(/cacheWriteByTtl keys must be positive integer seconds/)
+  })
+
+  it('requires at least one TTL row for custom range prices and omits inherited rows', () => {
+    const draft = emptyModelPricingDraft()
+    setPricedBase(draft)
+    draft.definition.inputTokenRanges = [{
+      draftKey: 'range', minInputTokens: '0', maxInputTokensExclusive: '100', rates: {},
+      cacheWriteTtlMode: 'custom', cacheWriteByTtl: [],
+    }]
+    expect(() => normalizePricingDraft(draft)).toThrow(/custom TTL prices must have at least one row/)
+    draft.definition.inputTokenRanges[0]!.cacheWriteByTtl = [{ draftKey: 'ttl', seconds: '0', rate: '1' }]
+    expect(() => normalizePricingDraft(draft)).toThrow(/TTL must be positive seconds/)
+    draft.definition.inputTokenRanges[0]!.cacheWriteByTtl = [{ draftKey: 'ttl', seconds: '600', rate: '' }]
+    expect(() => normalizePricingDraft(draft)).toThrow(/pricing\.rules\[0\]\.TTL\.600 rate is required/)
+    draft.definition.inputTokenRanges[0]!.cacheWriteTtlMode = 'inherit'
+    expect(normalizePricingDraft(draft)!.rules[0]).not.toHaveProperty('cacheWriteByTtl')
+  })
+
+  it('reports invalid, duplicate and blank TTL row issues for inline editor messages', () => {
+    expect(findPricingTtlRowIssues([
+      { draftKey: 'a', seconds: '', rate: '1' },
+      { draftKey: 'b', seconds: '0', rate: '1' },
+      { draftKey: 'c', seconds: '600', rate: '1' },
+      { draftKey: 'd', seconds: '600', rate: '0.5' },
+      { draftKey: 'e', seconds: '900', rate: ' ' },
+    ])).toEqual({
+      a: 'invalidSeconds', b: 'invalidSeconds', c: 'duplicateSeconds', d: 'duplicateSeconds', e: 'rateRequired',
+    })
+  })
+
+  it('copies TTL rows into fresh keys and counts them as configured pricing', () => {
+    const source = emptyModelPricingDraft().definition
+    source.base.cacheWriteByTtl = [{ draftKey: 'ttl', seconds: '300', rate: '0.25' }]
+    const copied = clonePricingDefinitionDraft(source)
+    expect(copied.base.cacheWriteByTtl).toEqual([{ draftKey: expect.any(String), seconds: '300', rate: '0.25' }])
+    expect(copied.base.cacheWriteByTtl[0]!.draftKey).not.toBe('ttl')
+    copied.base.cacheWriteByTtl[0]!.rate = '9'
+    expect(source.base.cacheWriteByTtl[0]!.rate).toBe('0.25')
+    expect(hasConfiguredPricing({ definition: source, changes: [] })).toBe(true)
+    expect(hasConfiguredPricing(emptyModelPricingDraft())).toBe(false)
   })
 
   it('orders UTC price changes and rejects duplicate or invalid dates', () => {

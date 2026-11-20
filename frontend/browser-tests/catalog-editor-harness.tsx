@@ -4,7 +4,7 @@ import '@/styles.css'
 import { ResourceEditorModal } from '@/features/catalog/AiConsoleResourceEditorModal'
 import { emptyAgentDraft } from '@/features/catalog/ai-agent-draft-codec'
 import { emptyModelDraft } from '@/features/catalog/ai-model-draft-codec'
-import { emptyModelPricingDraft } from '@/features/catalog/model-pricing-draft'
+import { createPricingDraftKey, emptyModelPricingDraft } from '@/features/catalog/model-pricing-draft'
 import { emptyModelGroupDraft } from '@/features/catalog/ai-model-group-draft-codec'
 import { emptyProviderDraft } from '@/features/catalog/ai-provider-draft-codec'
 import type { ModelDraft } from '@/features/catalog/ai-console-types'
@@ -34,11 +34,11 @@ export function CatalogEditorHarness() {
     const pricing = emptyModelPricingDraft()
     pricing.definition.base = {
       input: '1', output: '2', cacheRead: '0.1', cacheWrite: '0.2',
-      cacheWriteByTtl: { '300': '0.2' }, reasoning: null,
+      cacheWriteByTtl: [{ draftKey: createPricingDraftKey(), seconds: '300', rate: '0.2' }], reasoning: null,
     }
     pricing.definition.inputTokenRanges = [{
       draftKey: 'range-1', minInputTokens: '200000', maxInputTokensExclusive: '',
-      rates: { input: '0.5' }, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: {},
+      rates: { input: '0.5' }, cacheWriteTtlMode: 'inherit', cacheWriteByTtl: [],
     }]
     pricing.definition.serviceTiers = [{
       draftKey: 'tier-1', serviceTier: 'priority',

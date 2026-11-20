@@ -27,6 +27,7 @@ async function visibleTouchTargets(dialog: Locator): Promise<TouchTarget[]> {
       'input:not([type="checkbox"]):not([type="radio"]):not([type="hidden"])',
       'textarea',
       'label.ui-checkbox',
+      '.pricing-rule-details > summary',
       '.pricing-factor-details > summary',
     ]
     return selectors.flatMap((selector) =>
@@ -88,11 +89,30 @@ test('keeps 44px touch targets, safe-area padding and a scrollable body on narro
   expectTouchTargets(await visibleTouchTargets(dialog))
   await expectNoHorizontalOverflow(page, body)
 
-  // 展开服务档倍率，验证新定价表单中的输入、删除与新增控件均满足触区要求。
+  // 展开服务档规则：既有规则默认折叠，点摘要展开后统一倍率立即可见，单费用项覆盖倍率在嵌套 details 中。
   const tiers = dialog.locator('.pricing-plan-section').filter({ has: page.getByRole('heading', { name: '服务档', exact: true }) })
-  await tiers.getByText('所有费用项倍率: ×1', { exact: true }).click()
-  const tierFactor = tiers.getByRole('textbox', { name: '所有费用项倍率', exact: true })
+  const tierRule = tiers.locator('.pricing-rule-details').first()
+  await expect(tierRule).not.toHaveAttribute('open', '')
+  await tiers.locator('.pricing-rule-details > summary').first().click()
+  await expect(tierRule).toHaveAttribute('open', '')
+  const tierFactor = tierRule.getByRole('textbox', { name: '所有费用项倍率', exact: true })
   await expect(tierFactor).toBeVisible()
+  const factorOverrides = tierRule.locator('.pricing-factor-details')
+  await expect(factorOverrides).not.toHaveAttribute('open', '')
+  await factorOverrides.locator('summary').click()
+  await expect(factorOverrides.locator('input[inputmode="decimal"]')).toHaveCount(5)
+  await expect(factorOverrides.locator('input[inputmode="decimal"]').first()).toBeVisible()
+
+  // 定价表单文案全部来自 i18n，不留缺失 key 占位。
+  await expect(dialog).not.toContainText('⟦missing:')
+
+  // 新增规则自动展开，不必再点摘要就能直接编辑。
+  await tiers.getByRole('button', { name: '添加服务档', exact: true }).click()
+  await expect(tiers.locator('.pricing-rule-details')).toHaveCount(2)
+  const addedTierRule = tiers.locator('.pricing-rule-details').nth(1)
+  await expect(addedTierRule).toHaveAttribute('open', '')
+  await expect(addedTierRule.getByRole('textbox', { name: '所有费用项倍率', exact: true })).toBeVisible()
+
   expectTouchTargets(await visibleTouchTargets(tiers))
   await expect(body).toHaveCSS('overflow-y', 'auto')
   expect(await body.evaluate((el) => el.scrollTop)).toBeGreaterThan(0)
