@@ -1,9 +1,9 @@
 {
   "type": "object",
   "properties": {
-    "pattern": {"type": "string", "description": "Glob pattern to match files, e.g. '*.ts', '**/*.json', or 'src/**/*.spec.ts'."},
-    "path": {"type": "string", "description": "Absolute path on the selected Environment's file system of the directory to search in. Required. There is no implicit default — the model must always state the search root. Relative paths are rejected; results are reported as absolute paths. Only paths are matched, never file contents."},
-    "limit": {"type": "integer", "description": "Maximum number of results to return. Defaults to 1000."},
+    "pattern": {"type": "string", "description": "File glob relative to path. '*.ts' matches file names at any depth; 'src/*.ts' matches only direct files in the root's src; '**/src/*.ts' also matches direct files in nested src directories. A leading './' is ignored; './' alone is invalid."},
+    "path": {"type": "string", "description": "Absolute directory path on the selected Environment. There is no implicit default. Results are relative to this directory."},
+    "limit": {"type": "integer", "description": "Maximum number of files to return (1 to 100000). Defaults to 1000 when omitted or 0."},
     "timeout_seconds": {"type": "integer", "description": "Positive timeout in seconds. Defaults to 15."}
   },
   "required": ["pattern", "path"],

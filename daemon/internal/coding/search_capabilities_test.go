@@ -176,39 +176,83 @@ func TestExtendedRegexModeDiagnosticIsModelVisible(t *testing.T) {
 	}
 }
 
-// Invalid globs are rejected through both search capabilities.
+// Both tools use the same file filter, without expanding past the given root or ignore rules.
+func TestSearchCapabilitiesUseRootRelativeGlobs(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "src", "repo")
+	for _, name := range []string{"root.ts", "src/a.ts", "src/deep/c.ts", "pkg/src/b.ts", "ignored.ts", "!name.txt"} {
+		path := filepath.Join(root, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("needle\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(root, ".gitignore"), []byte("ignored.ts\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	all := []string{"pkg/src/b.ts", "root.ts", "src/a.ts", "src/deep/c.ts"}
+	for _, tc := range []struct {
+		glob, subdir string
+		files        []string
+	}{
+		{glob: "*.ts", files: all},
+		{glob: "./*.ts", files: all},
+		{glob: "src/*.ts", files: []string{"src/a.ts"}},
+		{glob: "./src/*.ts", files: []string{"src/a.ts"}},
+		{glob: "././src/*.ts", files: []string{"src/a.ts"}},
+		{glob: "src/**/*.ts", files: []string{"src/a.ts", "src/deep/c.ts"}},
+		{glob: "**/src/*.ts", files: []string{"pkg/src/b.ts", "src/a.ts"}},
+		{glob: "./**/src/*.ts", subdir: "src"},
+		{glob: "**/src/repo/*.ts"},
+		{glob: filepath.ToSlash(filepath.Join(root, "src", "*.ts"))},
+		{glob: "!./*.ts", subdir: "src"},
+		{glob: "./!name.txt", files: []string{"!name.txt"}},
+	} {
+		t.Run(tc.glob, func(t *testing.T) {
+			path := filepath.Join(root, tc.subdir)
+			find := invokeCoding(t, Provider{}, "fs.find", map[string]any{"path": path, "pattern": tc.glob}, nil)
+			grep := invokeCoding(t, Provider{}, "fs.grep", map[string]any{"path": path, "pattern": "needle", "literal": true, "glob": tc.glob}, nil)
+			wantFind, wantGrep := "No files found matching pattern", "No matches found"
+			if len(tc.files) != 0 {
+				wantFind = strings.Join(tc.files, "\n")
+				var lines []string
+				for _, file := range tc.files {
+					lines = append(lines, file+":1:needle")
+				}
+				wantGrep = strings.Join(lines, "\n")
+			}
+			if find.Error || find.Contents[0].Text != wantFind || grep.Error || grep.Contents[0].Text != wantGrep {
+				t.Fatalf("find=%q (want %q), grep=%q (want %q)", find.Contents[0].Text, wantFind, grep.Contents[0].Text, wantGrep)
+			}
+		})
+	}
+}
+
+// A prefix without a pattern is an input error, not a request to search all files.
 func TestInvalidSearchGlobIsInputRejection(t *testing.T) {
-	for _, capability := range []string{"fs.find", "fs.grep"} {
-		t.Run(capability, func(t *testing.T) {
-			arguments := map[string]any{"path": t.TempDir()}
-			if capability == "fs.find" {
-				arguments["pattern"] = "["
-			} else {
-				arguments["pattern"] = "needle"
-				arguments["glob"] = "["
-				arguments["literal"] = true
-			}
-			encoded, err := json.Marshal(arguments)
-			if err != nil {
-				t.Fatal(err)
-			}
-			call := runtime.CapabilityCall{InvocationID: "invalid-glob", Arguments: encoded}
-			var result runtime.CapabilityResult
-			if capability == "fs.find" {
-				result, err = findCapability(context.Background(), call, runtime.CapabilityContext{})
-			} else {
-				result, err = grepCapability(context.Background(), call, runtime.CapabilityContext{})
-			}
-			if err != nil || !result.Error {
-				t.Fatalf("result=%#v err=%v", result, err)
-			}
-			var details map[string]string
-			if err := json.Unmarshal(result.Details, &details); err != nil {
-				t.Fatal(err)
-			}
-			text := result.Contents[0].Text
-			if details["code"] != "INVALID_ARGUMENT" || !strings.Contains(text, "Invalid glob:") || !strings.Contains(text, "The tool was not executed.") {
-				t.Fatalf("details=%v text=%q", details, text)
+	root := t.TempDir()
+	for _, tc := range []struct{ glob, diagnostic string }{
+		{"[", "Invalid glob:"},
+		{"./", "expected a pattern after './'"},
+		{"././", "expected a pattern after './'"},
+		{"!./", "expected a pattern after './'"},
+	} {
+		t.Run(tc.glob, func(t *testing.T) {
+			for _, capability := range []string{"fs.find", "fs.grep"} {
+				args := map[string]any{"path": root, "pattern": tc.glob}
+				if capability == "fs.grep" {
+					args["pattern"], args["literal"], args["glob"] = "needle", true, tc.glob
+				}
+				result := invokeCoding(t, Provider{}, capability, args, nil)
+				var details map[string]string
+				if err := json.Unmarshal(result.Details, &details); err != nil {
+					t.Fatal(err)
+				}
+				text := result.Contents[0].Text
+				if !result.Error || details["code"] != "INVALID_ARGUMENT" || !strings.Contains(text, tc.diagnostic) || !strings.Contains(text, "The tool was not executed.") {
+					t.Fatalf("%s: details=%v text=%q want rejection containing %q", capability, details, text, tc.diagnostic)
+				}
 			}
 		})
 	}

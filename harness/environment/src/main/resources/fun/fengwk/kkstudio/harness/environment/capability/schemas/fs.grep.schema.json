@@ -1,12 +1,12 @@
 {
   "type": "object",
   "properties": {
-    "pattern": {"type": "string", "description": "Regular-expression pattern to search for by default; use literal=true to treat it as exact text."},
-    "path": {"type": "string", "description": "Absolute path on the selected Environment's file system of the directory or file to search. Relative paths are rejected; results and errors are reported as absolute paths."},
-    "glob": {"type": "string", "description": "Optional file filter glob such as `**/*.ts`; it follows the same glob rules as fs.find and cannot re-include ignored files."},
-    "ignore_case": {"type": "boolean", "description": "Case-insensitive search. Defaults to false."},
-    "literal": {"type": "boolean", "description": "Treat the pattern literally instead of as a regular expression. Defaults to false."},
-    "limit": {"type": "integer", "description": "Positive maximum number of matches to return. Defaults to 100."},
+    "pattern": {"type": "string", "description": "Content pattern: a regular expression by default, or exact text with literal=true. Use glob to filter files, not content."},
+    "path": {"type": "string", "description": "Absolute directory or file path on the selected Environment. There is no implicit default. Directory results use paths relative to this directory; single-file results use an absolute path."},
+    "glob": {"type": "string", "description": "Optional file filter for directory searches, relative to path. '*.ts' matches at any depth; 'src/*.ts' starts at path; '**/src/*.ts' includes nested src directories. A leading './' is ignored; './' alone is invalid. Cannot re-include ignored files."},
+    "ignore_case": {"type": "boolean", "description": "Match file contents case-insensitively, without changing glob matching. Defaults to false."},
+    "literal": {"type": "boolean", "description": "Treat the content pattern as exact text instead of as a regular expression. Defaults to false."},
+    "limit": {"type": "integer", "description": "Maximum number of content matches to return (1 to 100000). Defaults to 100 when omitted or 0."},
     "timeout_seconds": {"type": "integer", "description": "Positive search timeout in seconds. Defaults to 15."}
   },
   "required": ["pattern", "path"],
