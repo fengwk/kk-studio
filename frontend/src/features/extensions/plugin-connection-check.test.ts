@@ -24,6 +24,7 @@ function plugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
       valuesSchema: { type: 'object', properties: {}, required: [], additionalProperties: false },
       defaults: {},
       secrets: {},
+      credentialContextFields: [],
     },
     appliedVersion: '8',
     connectionCheckSupported: true,

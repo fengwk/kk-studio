@@ -14,6 +14,7 @@ const deepLinkPlugin: PluginDTO = {
   lastRefreshError: null,
   configuration: {
     version: '1',
+    credentialContextFields: [],
     valuesJson: '{"enabled":true}',
     valuesSchema: {
       type: 'object',
@@ -51,6 +52,7 @@ const staticKeyPlugin: PluginDTO = {
   lastRefreshedAt: null,
   lastRefreshError: null,
   configuration: {
+    credentialContextFields: [],
     version: '2',
     valuesJson: '{"timeout":30}',
     valuesSchema: {
@@ -88,6 +90,7 @@ const noAuthPlugin: PluginDTO = {
   lastRefreshedAt: null,
   lastRefreshError: null,
   configuration: {
+    credentialContextFields: [],
     version: '0',
     valuesJson: '{"debug":false}',
     valuesSchema: {
@@ -120,6 +123,7 @@ const checkPlugin: PluginDTO = {
   lastRefreshedAt: null,
   lastRefreshError: null,
   configuration: {
+    credentialContextFields: [],
     version: '3',
     valuesJson: '{"timeout":30}',
     valuesSchema: {
@@ -155,6 +159,7 @@ async function transport(
     release = resolve
   })
   const requests: string[] = []
+  const configurationUpdates: unknown[] = []
 
   await page.route('**/api/**', async (route) => {
     const url = new URL(route.request().url())
@@ -207,6 +212,7 @@ async function transport(
     } else if (path.endsWith('/configuration') && route.request().method() === 'PUT') {
       requests.push(path)
       const postData = route.request().postDataJSON() as { valuesJson: string }
+      configurationUpdates.push(postData)
       await route.fulfill({
         status: 200,
         json: {
@@ -222,7 +228,7 @@ async function transport(
     }
   })
 
-  return { requests, release }
+  return { requests, release, configurationUpdates }
 }
 
 for (const stage of ['prepare', 'complete'] as const) {
@@ -365,6 +371,40 @@ test('renders three plugin shapes (None, StaticKey, DeepLink) and opens configur
   await save.click()
   await expect.poll(() => network.requests.filter((path) => path.endsWith('/configuration')).length).toBe(1)
   await expect(configDialog).toHaveCount(0)
+})
+
+test('changing a credential target requires consent and submits the confirmation at 360px', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 360, height: 800 })
+  const plugin = {
+    ...staticKeyPlugin,
+    configuration: { ...staticKeyPlugin.configuration, credentialContextFields: ['timeout'] },
+  }
+  const network = await transport(page, [plugin])
+  await page.goto('/browser-tests/resource-card-harness.html?plugins')
+  await page.getByRole('button', { name: '配置 Offline StaticKey Plugin' }).click()
+
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('button', { name: 'JSON 编辑' }).click()
+  await dialog.getByRole('textbox', { name: 'JSON 编辑' }).fill('{"timeout":45}')
+  const save = dialog.getByRole('button', { name: '保存配置', exact: true })
+  const consent = dialog.getByRole('checkbox', { name: '我确认清除原先保存的凭据' })
+  await expect(dialog.getByText('更改认证目标会清除原先保存的凭据，只保留本次重新录入的凭据。')).toBeVisible()
+  await expect(consent).not.toBeChecked()
+  await expect(save).toBeDisabled()
+  expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true)
+
+  await consent.locator('..').click()
+  await expect(save).toBeEnabled()
+  await save.click()
+  await expect.poll(() => network.configurationUpdates.length).toBe(1)
+  expect(network.configurationUpdates[0]).toEqual({
+    expectedVersion: '2',
+    valuesJson: '{"timeout":45}',
+    secretPatch: { token: { operation: 'KEEP' } },
+    confirmCredentialReset: true,
+  })
 })
 
 test('connection check runs only on explicit click and reports the three typed dimensions', async (

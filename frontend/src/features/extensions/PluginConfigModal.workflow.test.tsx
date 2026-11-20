@@ -81,6 +81,7 @@ const workflowPlugin: PluginDTO = {
     valuesSchema: WORKFLOW_SCHEMA,
     defaults: { entries: [] },
     secrets: { apiKey: { description: 'workflow credential', configured: true } },
+    credentialContextFields: [],
   },
   appliedVersion: '4',
   connectionCheckSupported: false,

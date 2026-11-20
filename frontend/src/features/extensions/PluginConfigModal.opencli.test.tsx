@@ -114,6 +114,8 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
     await user.type(retryInput, '3')
 
     const saveBtn = screen.getByRole('button', { name: '保存配置' })
+    expect(saveBtn).toBeDisabled()
+    await user.click(screen.getByRole('checkbox', { name: '我确认清除原先保存的凭据' }))
     await user.click(saveBtn)
 
     await waitFor(() => {
@@ -132,6 +134,7 @@ describe('PluginConfigModal OpenCLI regression coverage', () => {
       )
     })
 
+    expect(savedPayload().confirmCredentialReset).toBe(true)
     const parsedValues = JSON.parse(savedPayload().valuesJson) as {
       baseUrl: string
       gptImage2: { paidEnabled: boolean }

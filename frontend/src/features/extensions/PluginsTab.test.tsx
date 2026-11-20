@@ -81,6 +81,7 @@ function samplePlugin(overrides: Partial<PluginDTO> = {}): PluginDTO {
       },
       defaults: { enabled: true },
       secrets: {},
+      credentialContextFields: [],
     },
     appliedVersion: '1',
     connectionCheckSupported: false,
@@ -202,6 +203,7 @@ describe('PluginsTab', () => {
             configured: true,
           },
         },
+        credentialContextFields: [],
       },
     })
 

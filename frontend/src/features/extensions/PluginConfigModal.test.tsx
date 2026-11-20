@@ -63,6 +63,7 @@ const samplePlugin: PluginDTO = {
   lastRefreshError: null,
   configuration: {
     version: '3',
+    credentialContextFields: [],
     valuesJson: sampleValuesJson,
     valuesSchema: sampleSchema,
     defaults: { enabled: true },
@@ -118,6 +119,75 @@ describe('PluginConfigModal', () => {
       </QueryClientProvider>,
     )
   }
+
+  // Metadata, not plugin-specific names, identifies the target and scopes consent to that intent.
+  it('requires fresh consent when the metadata-defined target changes, even with a replacement secret', async () => {
+    const user = userEvent.setup()
+    const plugin = {
+      ...samplePlugin,
+      configuration: {
+        ...samplePlugin.configuration,
+        credentialContextFields: ['siteName'],
+        secrets: {
+          ...samplePlugin.configuration.secrets,
+          accountKey: { description: 'Account key', configured: true },
+        },
+      },
+    }
+    vi.mocked(request).mockResolvedValue(plugin)
+    renderModal(plugin)
+    const target = screen.getByRole('textbox', { name: 'siteName' })
+    const save = screen.getByRole('button', { name: '保存配置' })
+    const consent = () => screen.getByRole('checkbox', { name: '我确认清除原先保存的凭据' })
+
+    fireEvent.change(target, { target: { value: 'synthetic-target-a' } })
+    expect(save).toBeDisabled()
+    await user.click(save)
+    expect(request).not.toHaveBeenCalled()
+    await user.click(consent())
+    fireEvent.change(target, { target: { value: 'synthetic-target-b' } })
+    fireEvent.change(target, { target: { value: 'synthetic-target-a' } })
+    expect(consent()).not.toBeChecked()
+    expect(save).toBeDisabled()
+
+    await user.click(screen.getByRole('button', { name: 'Operation for apiKey' }))
+    await user.click(screen.getByRole('option', { name: '设置新值' }))
+    await user.type(screen.getByLabelText('New secret for apiKey'), 'synthetic-replacement')
+    expect(screen.getByText('将清除且未重新录入的凭据字段：accountKey')).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).not.toHaveTextContent('synthetic-replacement')
+    expect(save).toBeDisabled()
+    await user.click(consent())
+    await user.click(save)
+    expect(savedPayload().confirmCredentialReset).toBe(true)
+    expect(savedPayload().secretPatch).toEqual({
+      apiKey: { operation: 'SET', value: 'synthetic-replacement' },
+      accountKey: { operation: 'KEEP' },
+    })
+  })
+
+  it('does not require consent for unrelated edits or when no credentials are stored', async () => {
+    const user = userEvent.setup()
+    const configuration = { ...samplePlugin.configuration, credentialContextFields: ['siteName'] }
+    const { unmount } = renderModal({ ...samplePlugin, configuration })
+    fireEvent.change(screen.getByRole('textbox', { name: 'decimal' }), { target: { value: '2.5' } })
+    expect(screen.queryByRole('checkbox', { name: '我确认清除原先保存的凭据' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '保存配置' })).toBeEnabled()
+    unmount()
+
+    const plugin = {
+      ...samplePlugin,
+      configuration: {
+        ...configuration,
+        secrets: { apiKey: { description: 'Demo API Token', configured: false } },
+      },
+    }
+    vi.mocked(request).mockResolvedValue(plugin)
+    renderModal(plugin)
+    fireEvent.change(screen.getByRole('textbox', { name: 'siteName' }), { target: { value: 'synthetic-target' } })
+    expect(screen.queryByRole('checkbox', { name: '我确认清除原先保存的凭据' })).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '保存配置' }))
+    expect(savedPayload()).not.toHaveProperty('confirmCredentialReset')
+  })
 
   it('renders form schema correctly with preserved number tokens and secrets status', () => {
     renderModal()

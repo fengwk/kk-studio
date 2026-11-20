@@ -26,6 +26,16 @@ export const configSyncService = {
   checkImport: (yaml: string): Promise<ConfigSyncImportCheckDTO> =>
     request('POST /api/platform/config-sync/check-import', { body: { yaml } }),
 
-  importConfig: (yaml: string, allowPartial = false): Promise<ConfigSyncImportResultDTO> =>
-    request('POST /api/platform/config-sync/import', { body: { yaml, allowPartial } }),
+  importConfig: (
+    yaml: string,
+    allowPartial = false,
+    confirmedPluginCredentialResets?: string[],
+  ): Promise<ConfigSyncImportResultDTO> =>
+    request('POST /api/platform/config-sync/import', {
+      body: {
+        yaml,
+        allowPartial,
+        ...(confirmedPluginCredentialResets ? { confirmedPluginCredentialResets } : {}),
+      },
+    }),
 }

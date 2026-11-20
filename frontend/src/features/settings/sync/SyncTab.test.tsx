@@ -3,6 +3,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { SyncTab } from '@/features/settings/sync/SyncTab'
+import { ApiError } from '@/shared/api/client'
 import type { ConfigSyncImportCheckDTO, ConfigSyncItem } from '@/shared/api/generated/contracts'
 
 const mocks = vi.hoisted(() => ({
@@ -66,6 +67,7 @@ function makePreview(overrides: Partial<ConfigSyncImportCheckDTO> = {}): ConfigS
     created: [{ kind: 'providers', name: 'openai' }],
     updated: [],
     skipped: [],
+    pluginCredentialResets: [],
     ...overrides,
   }
 }
@@ -725,6 +727,41 @@ describe('SyncTab import', () => {
     expect(reloadSettings).toHaveBeenCalledTimes(1)
   })
 
+  it('requires fresh preview consent after a credential conflict, independently of partial import', async () => {
+    const user = userEvent.setup()
+    const yaml = 'plugins: []'
+    const file = new File([yaml], 'demo.yaml')
+    const ids = ['demo-a', 'demo-b']
+    mocks.checkImport.mockResolvedValue(makePreview({
+      updated: ids.map((name) => ({ kind: 'plugins', name })),
+      skipped: [{ kind: 'agents', name: 'demo-skip', reason: 'unsupported' }],
+      pluginCredentialResets: ids,
+    }))
+    mocks.importConfig.mockRejectedValueOnce(new ApiError(
+      'stale', 409, undefined, undefined, 'PLUGIN_CREDENTIAL_RESET_CONFIRMATION',
+    ))
+    const { container } = renderSyncTab()
+    await user.upload(fileInput(container), file)
+    const dialog = within(await screen.findByRole('dialog', { name: '导入配置' }))
+    const submit = dialog.getByRole('button', { name: '仅导入可用配置' })
+    const consent = dialog.getByRole('checkbox', { name: '我确认清除上述插件的本机凭据' })
+    for (const id of ids) expect(dialog.getByText(id)).toBeInTheDocument()
+    expect(submit).toBeDisabled()
+    await user.click(submit)
+    expect(mocks.importConfig).not.toHaveBeenCalled()
+    await user.click(consent)
+    await user.click(submit)
+    expect(mocks.importConfig).toHaveBeenCalledWith(yaml, true, ids)
+    expect(await dialog.findByRole('alert')).toHaveTextContent('重新选择文件')
+    expect(submit).toBeDisabled()
+    expect(consent).not.toBeChecked()
+
+    await user.click(dialog.getByRole('button', { name: '取消' }))
+    await user.upload(fileInput(container), file)
+    expect(await screen.findByRole('checkbox', { name: '我确认清除上述插件的本机凭据' })).not.toBeChecked()
+    expect(mocks.checkImport).toHaveBeenCalledTimes(2)
+  })
+
   it('previews and imports plugin configurations without rendering the portable YAML body', async () => {
     const user = userEvent.setup()
     const yaml = 'plugins:\n- pluginId: minimax-mavis\n'
@@ -743,6 +780,7 @@ describe('SyncTab import', () => {
 
     // 插件配置按既有类别文案展示，引用身份就是 pluginId。
     expect(within(dialog).getByText('插件配置: minimax-mavis')).toBeInTheDocument()
+    expect(within(dialog).queryByRole('checkbox', { name: '我确认清除上述插件的本机凭据' })).not.toBeInTheDocument()
     // 不显示 YAML 正文：前端不生成也不解密 plugin values。
     expect(dialog.textContent).not.toContain('plugins:')
     expect(dialog.textContent).not.toContain('pluginId:')

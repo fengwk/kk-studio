@@ -138,6 +138,18 @@ export const syncCatalog = {
     'en-US': 'Will be skipped',
     'zh-CN': '将跳过',
   },
+  'settings.sync.import.credentialResetHeading': {
+    'en-US': 'Plugins whose local credentials will be cleared',
+    'zh-CN': '将清除本机凭据的插件',
+  },
+  'settings.sync.import.confirmCredentialReset': {
+    'en-US': 'I confirm clearing local credentials for the listed plugins',
+    'zh-CN': '我确认清除上述插件的本机凭据',
+  },
+  'settings.sync.import.credentialPreviewStale': {
+    'en-US': 'The affected credentials have changed. Close this dialog and select the file again to preview the changes before importing.',
+    'zh-CN': '受影响的凭据已变化。请关闭弹窗并重新选择文件，查看新的预览后再导入。',
+  },
   'settings.sync.import.nothingUsable': {
     'en-US': 'This file contains no configuration that can be imported.',
     'zh-CN': '此文件没有可导入的配置。',

@@ -241,6 +241,18 @@ export const settingsCatalog = {
     'en-US': 'Credentials for this plugin are managed via official login authorization.',
     'zh-CN': '此插件通过官方登录授权管理凭据。',
   },
+  'plugins.configDialog.credentialResetWarning': {
+    'en-US': 'Changing the authentication target discards the previously saved credentials. Only newly entered credentials will be saved.',
+    'zh-CN': '更改认证目标会清除原先保存的凭据，只保留本次重新录入的凭据。',
+  },
+  'plugins.configDialog.credentialResetFields': {
+    'en-US': 'Saved credentials that will be cleared without replacement: {{fields}}',
+    'zh-CN': '将清除且未重新录入的凭据字段：{{fields}}',
+  },
+  'plugins.configDialog.confirmCredentialReset': {
+    'en-US': 'I confirm discarding the previously saved credentials',
+    'zh-CN': '我确认清除原先保存的凭据',
+  },
   'plugins.configDialog.mustConfirmClear': {
     'en-US': 'You must explicitly confirm clearing secret "{{key}}".',
     'zh-CN': '必须确认清除秘密凭据 “{{key}}”。',
