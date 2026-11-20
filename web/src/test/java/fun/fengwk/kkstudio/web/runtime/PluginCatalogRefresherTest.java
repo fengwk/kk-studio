@@ -254,7 +254,7 @@ class PluginCatalogRefresherTest {
         new PluginCatalogRuntime(
             new PluginRegistry(List.of()),
             repository,
-            pluginId -> {
+            (plugin, config) -> {
               throw new AssertionError("no plugin is installed");
             },
             List.of(),

@@ -162,8 +162,8 @@ class OpenCliCanvasFunctionAdaptersTest {
         new RecordingContext(Map.of(RESOURCE_100, bytes(100), RESOURCE_101, bytes(101)));
 
     adapter.submit(context, run);
-    Map<String, Object> submittedState =
-        Map.of("executionId", "gpt-exec", "uploads", context.lastAdapterState.get("uploads"));
+    Map<String, Object> submittedState = context.lastAdapterState;
+    assertEquals("http://hub.local/", submittedState.get(OpenCliAdapterState.HUB_ORIGIN));
     CanvasFunctionFrozenRun submittedRun =
         new CanvasFunctionFrozenRun(
             CANVAS,
@@ -215,7 +215,7 @@ class OpenCliCanvasFunctionAdaptersTest {
             Map.of("ratio", "auto"),
             List.of(),
             "GPT_IMAGE_SUBMITTING",
-            Map.of());
+            Map.of(OpenCliAdapterState.HUB_ORIGIN, "http://hub.local/"));
     CanvasFunctionUnknownException error =
         assertThrows(
             CanvasFunctionUnknownException.class,
@@ -443,11 +443,8 @@ class OpenCliCanvasFunctionAdaptersTest {
             Map.of(RESOURCE_100, bytes(1), RESOURCE_101, bytes(2), RESOURCE_102, bytes(3)));
 
     adapter.submit(context, run);
-    Map<String, Object> submittedState =
-        Map.of(
-            "assetId", "0123456789abcdef",
-            "pollStartedAt", Instant.now().toString(),
-            "uploads", context.lastAdapterState.get("uploads"));
+    Map<String, Object> submittedState = context.lastAdapterState;
+    assertEquals("http://hub.local/", submittedState.get(OpenCliAdapterState.HUB_ORIGIN));
     CanvasFunctionFrozenRun submittedRun =
         new CanvasFunctionFrozenRun(
             CANVAS,
@@ -1353,6 +1350,49 @@ class OpenCliCanvasFunctionAdaptersTest {
                     Map.of())));
   }
 
+  /** 同名适配器恢复或取消旧引用时，来源缺失或不匹配都不访问 Hub。 */
+  @Test
+  void rejectsLegacyAndForeignHubCheckpointsBeforeAnyRequest() {
+    OpenCliHubClient client = mock(OpenCliHubClient.class);
+    for (var adapter : List.of(gptAdapter(client), seedanceAdapter(client, ignored -> {}))) {
+      var checkpoint =
+          run(
+              adapter.functions().getFirst(),
+              "prompt",
+              Map.of(),
+              List.of(),
+              "POLLING",
+              Map.of("executionId", "old-execution"));
+      for (Map<String, Object> state :
+          List.of(
+              Map.<String, Object>of("executionId", "old-execution"),
+              Map.<String, Object>of(
+                  "executionId", "old-execution", "hubOrigin", "https://old-hub.invalid/"))) {
+        var submitted =
+            new CanvasFunctionFrozenRun(
+                checkpoint.canvasId(),
+                checkpoint.nodeId(),
+                checkpoint.nodeName(),
+                checkpoint.requestId(),
+                checkpoint.binding(),
+                checkpoint.args(),
+                checkpoint.manifest(),
+                checkpoint.outputs(),
+                CanvasFunctionSubmitState.SUBMITTED,
+                checkpoint.stage(),
+                state);
+        var context = new RecordingContext(Map.of());
+        assertThrows(
+            CanvasFunctionUnknownException.class, () -> adapter.execute(context, submitted));
+        assertThrows(
+            CanvasFunctionUnknownException.class, () -> adapter.submit(context, submitted));
+        adapter.cancel(submitted);
+        assertTrue(context.stages.isEmpty());
+      }
+    }
+    verifyNoInteractions(client);
+  }
+
   /** 同一份定义换名：断言适配器只接受目录内的函数名。 */
   private static CanvasFunctionDefinition renamed(
       CanvasFunctionDefinition definition, String name) {
@@ -1438,6 +1478,10 @@ class OpenCliCanvasFunctionAdaptersTest {
     String outputName = spec.resolveName("output");
     List<CanvasFunctionFrozenOutput> outputs =
         List.of(new CanvasFunctionFrozenOutput(TARGET, 0, spec.kind(), outputName));
+    Map<String, Object> checkpoint = new LinkedHashMap<>(state);
+    if (!checkpoint.isEmpty()) {
+      checkpoint.putIfAbsent(OpenCliAdapterState.HUB_ORIGIN, "http://hub.local/");
+    }
     return new CanvasFunctionFrozenRun(
         CANVAS,
         NODE,
@@ -1447,9 +1491,11 @@ class OpenCliCanvasFunctionAdaptersTest {
         new JsonObject(argsMap),
         manifest,
         outputs,
-        CanvasFunctionSubmitState.SUBMITTED,
+        state.isEmpty()
+            ? CanvasFunctionSubmitState.SUBMITTING
+            : CanvasFunctionSubmitState.SUBMITTED,
         stage,
-        state);
+        checkpoint);
   }
 
   private static CanvasFunctionFrozenReference image(

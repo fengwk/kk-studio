@@ -422,7 +422,7 @@ class PluginCatalogSnapshotTest {
     return configurations;
   }
 
-  private static PluginContext contexts(String pluginId) {
+  private static PluginContext contexts(Plugin plugin, PluginConfig config) {
     return new PluginContext(
         new PluginCredentialAccess() {
           @Override

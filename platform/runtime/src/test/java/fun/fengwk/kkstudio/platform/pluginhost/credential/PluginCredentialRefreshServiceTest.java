@@ -206,6 +206,7 @@ class PluginCredentialRefreshServiceTest {
 
   private static PluginCredentialRow claimed() {
     return new PluginCredentialRow(
+        UUID.randomUUID(),
         PLUGIN_ID,
         OLD_PAYLOAD,
         "CN",

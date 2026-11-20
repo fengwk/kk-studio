@@ -14,6 +14,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
@@ -29,7 +30,7 @@ public final class PluginCatalogRuntime implements AutoCloseable {
 
   private final PluginRegistry registry;
   private final PluginConfigurationRepository repository;
-  private final Function<String, PluginContext> contexts;
+  private final BiFunction<Plugin, PluginConfig, PluginContext> contexts;
   private final List<HarnessContributor> builtins;
   private final Function<PluginCatalogSnapshot, ?> productCatalog;
 
@@ -43,7 +44,7 @@ public final class PluginCatalogRuntime implements AutoCloseable {
   public PluginCatalogRuntime(
       PluginRegistry registry,
       PluginConfigurationRepository repository,
-      Function<String, PluginContext> contexts,
+      BiFunction<Plugin, PluginConfig, PluginContext> contexts,
       List<HarnessContributor> builtins,
       Function<PluginCatalogSnapshot, ?> productCatalog) {
     this.registry = Objects.requireNonNull(registry, "registry");

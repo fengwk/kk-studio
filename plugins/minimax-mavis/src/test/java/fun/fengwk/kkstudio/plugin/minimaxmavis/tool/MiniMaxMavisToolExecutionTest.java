@@ -91,6 +91,7 @@ class MiniMaxMavisToolExecutionTest {
 
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
+            UUID.randomUUID(),
             MiniMaxMavisPlugin.PLUGIN_ID,
             MavisRegion.CN.id().toUpperCase(),
             Instant.now().plusSeconds(3600),

@@ -657,11 +657,11 @@ complete 请求为 `{authAttemptId, callbackUrl}`，仅消费 prepare 之后配�
 ### Plugin credential
 
 `plugin_credential` 每个已认证 Plugin 一行，载荷以明文 JSON 保存，数据库访问控制与备份加密是其保护边界；
-载荷绝不进入 API 响应、日志、配置同步或模型上下文。刷新与调用期作废以版本和租约围栏防止覆盖新凭据；
-登录或配置写入可替换凭据并推进已有行版本。
-Plugin 只通过作用域 `PluginCredentialAccess` 读取本插件凭据：每次调用现读当前行，因此登录、轮换或撤销
-立即对已配置实例生效，不需要重建实例。刷新在途、需要重新认证、刷新结果未知或已过期时以对应原因拒绝。
-静态密钥的认证目标字段（`contextFields`）变化而本次没有重新录入密钥时，旧密钥被删除，避免把密钥发往新目标。
+载荷绝不进入 API 响应、日志、配置同步或模型上下文。每行创建时分配独立的 `generation`；替换已有行时仅推进版本。
+Plugin 只通过作用域 `PluginCredentialAccess` 读取本插件凭据：每次调用现读当前行，同一认证上下文内的轮换或撤销立即生效。
+声明 `contextFields` 的插件在同一条 SQL 中读取配置与凭据，逐字段比较实例的认证上下文；不匹配时在出网前拒绝读取，
+不受无关配置修订影响。认证目标变更而没有重新录入密钥时，旧密钥被删除。
+刷新在途、需要重新认证、刷新结果未知或已过期时以对应原因拒绝。
 静态密钥没有 region、过期或刷新时刻，不参与刷新扫描。
 
 刷新以短事务 claim lease（到期与租约有效性都以数据库时钟判定），请求前核验 token、version 与有效截止时刻，
@@ -670,7 +670,7 @@ Plugin 只通过作用域 `PluginCredentialAccess` 读取本插件凭据：每�
 确定认证拒绝为 REAUTH_REQUIRED，确定未发或确定无效响应为 REFRESH_FAILED；
 已发而无确定响应、过期在途 lease 为 REFRESH_UNCERTAIN，要求重新认证。
 lease 只保证互斥，无法证明外部 exactly-once；不确定 renewal 保留停止自动重放的边界。
-插件 HTTP 调用收到 401/403 时仅按本次快照 CAS 作废，保护并发重新登录；网络失败不作废凭据。
+插件 HTTP 调用收到 401/403 时仅按本次快照的插件 ID、代号和版本 CAS 作废，保护并发轮换及删除后重建的凭据；网络失败不作废凭据。
 
 ### Plugin 资源端口
 
@@ -700,9 +700,12 @@ EOF、失败和显式 close 均注销 watchdog。客户端拿到流后负责关�
 OpenCLI 的配置完全归属于插件：受控 schema 声明字段、结构与默认值，配置模型校验取值区间和跨字段必填关系。
 管理面与配置同步按同一份 schema 读写，未声明的字段一律被拒绝。使用者只需要关心三类输入：
 
-- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求与长轮询超时等预算参数有明确取值范围，默认值由 schema 给出，响应体大小上限由客户端常量固定。改动 `baseUrl` 而不重新录入 `apiKey` 会删除已保存的密钥，新旧实例都在出网前失败。
+- Hub 接入：`baseUrl` 给出 OpenCLI Hub 的 HTTP(S) origin，启用时必填；连接、请求与长轮询超时等预算参数有明确取值范围，默认值由 schema 给出，响应体大小上限由客户端常量固定。改动 `baseUrl` 后，旧目标实例无法取得新目标的凭据；若未重新录入 `apiKey`，已保存的密钥会被删除。
 - 认证与私有身份：唯一认证密钥 `apiKey` 是静态密钥，通过统一 Plugin Secret API 的 KEEP/SET/CLEAR 管理，不读环境变量也不设外部优先级。可选私有身份 `instanceId` 是第二个受保护秘密字段，与 `apiKey` 同属一次 scoped snapshot，只在真正发送执行请求前取出并填入请求体，不进入普通值、配置历史、管理面投影或导出；未配置时不发送该字段，由 Hub 自由路由。
 - 业务开关与任务预算：`enabled` 决定整个插件是否参与，`gptImage2.paidEnabled` 放开付费图片执行，`seedance.enabled`（配合 `seedance.workspaceId`）放开 Seedance 视频执行；两类任务的执行等待与重试预算也由插件配置模型统一校验。
+
+画布任务把规范化后的 Hub origin 与外部执行 ID、上传引用或资产 ID 一起持久化。恢复、重试与取消只使用能够证明来自当前 Hub 的引用；
+遇到来源不匹配或旧 checkpoint 缺少来源时，恢复结果为 `UNKNOWN`，尽力取消则跳过远端请求。
 
 管理面状态只表达凭据在本地是否可用：静态认证在必需认证字段已录入时才是 `CONNECTED`，只录入私有身份
 （或撤销 `apiKey` 后只留私有身份）显示 `NOT_CONNECTED`，刷新失败等真实故障如实上报。

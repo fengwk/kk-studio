@@ -16,18 +16,21 @@ import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 
+import java.util.UUID;
+
 /** 单 Plugin 访问视图：作用域视图只读写自己的凭据，候选视图绝不触碰真实凭据。 */
 class PluginCredentialAccessTest {
 
   private static final PluginCredentialSnapshot SNAPSHOT =
-      new PluginCredentialSnapshot("alpha", null, null, 1L, "{\"key\":\"k\"}");
+      new PluginCredentialSnapshot(UUID.randomUUID(), "alpha", null, null, 1L, "{\"key\":\"k\"}");
 
   private final PluginCredentialStore store = mock(PluginCredentialStore.class);
 
   /** 作用域视图按自己的 pluginId 读取并委托拒绝。 */
   @Test
   void scopedAccessDelegatesForItsOwnPlugin() {
-    ScopedPluginCredentialAccess access = new ScopedPluginCredentialAccess("alpha", store);
+    ScopedPluginCredentialAccess access =
+        new ScopedPluginCredentialAccess("alpha", store, () -> store.resolve("alpha"));
     when(store.resolve("alpha")).thenReturn(SNAPSHOT);
     when(store.rejectUsed(SNAPSHOT, "bad")).thenReturn(true);
 
@@ -38,7 +41,8 @@ class PluginCredentialAccessTest {
   /** 别的 Plugin 的快照在写入前被拒绝。 */
   @Test
   void scopedAccessRejectsAnotherPluginsSnapshot() {
-    ScopedPluginCredentialAccess access = new ScopedPluginCredentialAccess("beta", store);
+    ScopedPluginCredentialAccess access =
+        new ScopedPluginCredentialAccess("beta", store, () -> store.resolve("beta"));
 
     assertThrows(IllegalArgumentException.class, () -> access.rejectUsed(SNAPSHOT, "bad"));
     verifyNoInteractions(store);

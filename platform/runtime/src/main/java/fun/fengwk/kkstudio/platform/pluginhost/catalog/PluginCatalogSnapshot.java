@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 /**
@@ -65,14 +66,14 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
    * 按每个已安装 Plugin 的当前配置装配一次快照。
    *
    * @param configurations 必须覆盖全部已安装 pluginId
-   * @param contexts 按 pluginId 提供 scoped {@link PluginContext}
+   * @param contexts 按插件及解析后的配置提供 scoped {@link PluginContext}
    * @param productCatalog 由产品模块提供的目录投影：输入是本次已配置好的快照，输出是该产品唯一冻结的目录视图
    * @throws IllegalStateException 配置缺失、configure 失败或任一目录（含产品目录）校验失败时（只带 stage 与 pluginId）
    */
   public static PluginCatalogSnapshot build(
       PluginRegistry registry,
       Map<String, PluginConfig> configurations,
-      Function<String, PluginContext> contexts,
+      BiFunction<Plugin, PluginConfig, PluginContext> contexts,
       List<HarnessContributor> builtins,
       Function<PluginCatalogSnapshot, ?> productCatalog) {
     Objects.requireNonNull(productCatalog, "productCatalog");
@@ -105,7 +106,8 @@ public final class PluginCatalogSnapshot implements AutoCloseable {
                 stored.revision(), plugin.configurationSchema().resolveValues(stored.valuesJson()));
         PluginInstance instance =
             Objects.requireNonNull(
-                plugin.configure(config, contexts.apply(activeId)), "plugin configure result");
+                plugin.configure(config, contexts.apply(plugin, config)),
+                "plugin configure result");
         ConfiguredPlugin entry = new ConfiguredPlugin(plugin.descriptor(), config, instance);
         configured.add(entry);
         stage = "collect-contributions";

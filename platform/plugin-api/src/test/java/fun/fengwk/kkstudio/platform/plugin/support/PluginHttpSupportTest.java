@@ -16,6 +16,7 @@ import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.support.PluginHttpSupport.ResponseTooLargeException;
 
 import java.io.ByteArrayInputStream;
+import java.util.UUID;
 
 class PluginHttpSupportTest {
 
@@ -59,7 +60,8 @@ class PluginHttpSupportTest {
     assertTrue(PluginHttpSupport.isAuthRejected(403));
     assertFalse(PluginHttpSupport.isAuthRejected(500));
 
-    PluginCredentialSnapshot snapshot = new PluginCredentialSnapshot("test", null, null, 1, "{}");
+    PluginCredentialSnapshot snapshot =
+        new PluginCredentialSnapshot(UUID.randomUUID(), "test", null, null, 1, "{}");
     PluginCredentialAccess access =
         new PluginCredentialAccess() {
           @Override

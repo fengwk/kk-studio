@@ -5,21 +5,25 @@ import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
 
 import java.util.Objects;
+import java.util.function.Supplier;
 
 /** 把宿主唯一的 {@link PluginCredentialStore} 收窄成单个 Plugin 的访问视图：没有 pluginId 参数，拒绝别的 Plugin 的快照。 */
 public final class ScopedPluginCredentialAccess implements PluginCredentialAccess {
 
   private final String pluginId;
   private final PluginCredentialStore store;
+  private final Supplier<PluginCredentialSnapshot> resolve;
 
-  public ScopedPluginCredentialAccess(String pluginId, PluginCredentialStore store) {
+  public ScopedPluginCredentialAccess(
+      String pluginId, PluginCredentialStore store, Supplier<PluginCredentialSnapshot> resolve) {
     this.pluginId = Objects.requireNonNull(pluginId, "pluginId");
     this.store = Objects.requireNonNull(store, "store");
+    this.resolve = Objects.requireNonNull(resolve, "resolve");
   }
 
   @Override
   public PluginCredentialSnapshot resolve() {
-    return store.resolve(pluginId);
+    return resolve.get();
   }
 
   @Override

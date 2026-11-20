@@ -59,6 +59,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 
 /** {@link PluginManagementService} 的安全投影、认证协议与连接检查。 */
 class PluginManagementServiceTest {
@@ -102,7 +103,7 @@ class PluginManagementServiceTest {
         new PluginCatalogRuntime(
             registry,
             configurations,
-            pluginId ->
+            (plugin, config) ->
                 new PluginContext(
                     mock(PluginCredentialAccess.class),
                     Optional.empty(),
@@ -134,6 +135,7 @@ class PluginManagementServiceTest {
         .thenReturn(
             Optional.of(
                 new PluginCredentialRow(
+                    UUID.randomUUID(),
                     STATIC_ID,
                     "{\"apiKey\":\"secret-value\"}",
                     null,
@@ -195,6 +197,7 @@ class PluginManagementServiceTest {
         .thenReturn(
             Optional.of(
                 new PluginCredentialRow(
+                    UUID.randomUUID(),
                     STATIC_ID,
                     "{\"region\":\"eu\"}",
                     null,
@@ -343,7 +346,7 @@ class PluginManagementServiceTest {
         new PluginCatalogRuntime(
             new PluginRegistry(List.of()),
             configurations,
-            pluginId ->
+            (plugin, config) ->
                 new PluginContext(
                     mock(PluginCredentialAccess.class),
                     Optional.empty(),

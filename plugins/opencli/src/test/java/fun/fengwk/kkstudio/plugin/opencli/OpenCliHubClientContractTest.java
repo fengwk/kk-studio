@@ -835,7 +835,7 @@ class OpenCliHubClientContractTest {
     }
 
     PluginCredentialSnapshot badSnapshot =
-        new PluginCredentialSnapshot("opencli", null, null, 1L, payloadJson);
+        new PluginCredentialSnapshot(UUID.randomUUID(), "opencli", null, null, 1L, payloadJson);
 
     PluginCredentialAccess badAccess =
         new PluginCredentialAccess() {
@@ -1185,9 +1185,9 @@ class OpenCliHubClientContractTest {
     UUID gen1 = UUID.randomUUID();
     UUID gen2 = UUID.randomUUID();
     PluginCredentialSnapshot snapshot1 =
-        new PluginCredentialSnapshot("opencli", null, null, 1L, "{\"apiKey\":\"key-1\"}");
+        new PluginCredentialSnapshot(gen1, "opencli", null, null, 0L, "{\"apiKey\":\"key-1\"}");
     PluginCredentialSnapshot snapshot2 =
-        new PluginCredentialSnapshot("opencli", null, null, 2L, "{\"apiKey\":\"key-2\"}");
+        new PluginCredentialSnapshot(gen2, "opencli", null, null, 0L, "{\"apiKey\":\"key-2\"}");
 
     AtomicReference<PluginCredentialSnapshot> authoritativeStore = new AtomicReference<>(snapshot1);
     AtomicInteger rejectAttemptCount = new AtomicInteger();
@@ -1205,9 +1205,12 @@ class OpenCliHubClientContractTest {
             rejectAttemptCount.incrementAndGet();
             PluginCredentialSnapshot current = authoritativeStore.get();
             // 忠实 CAS：仅当权威 store 当前的代际和版本与传入的 snapshot 完全相同时才作废
-            if (current != null && current.version() == target.version()) {
+            if (current != null
+                && current.pluginId().equals(target.pluginId())
+                && current.generation().equals(target.generation())
+                && current.version() == target.version()
+                && authoritativeStore.compareAndSet(current, null)) {
               rejectedCount.incrementAndGet();
-              authoritativeStore.set(null);
               return true;
             }
             return false;
@@ -1215,8 +1218,8 @@ class OpenCliHubClientContractTest {
         };
 
     // 模拟时序：
-    // 请求 1 在 resolve() 时拿到 snapshot1（gen1, version 1）
-    // 在 HTTP 发送期间，后台完成了登录更新/代际刷新，store 已变为 snapshot2（gen2, version 2）
+    // 请求 1 在 resolve() 时拿到 snapshot1（gen1, version 0）
+    // 在 HTTP 发送期间，删除并重建为 snapshot2（gen2, version 0）
     // 请求 1 收到 401，客户端忠实传递 snapshot1 调用 rejectUsed
     StubHttpClient stubHttp =
         new StubHttpClient(
@@ -1269,7 +1272,7 @@ class OpenCliHubClientContractTest {
 
     for (String badPayload : badPayloads) {
       PluginCredentialSnapshot badSnapshot =
-          new PluginCredentialSnapshot("opencli", null, null, 1L, badPayload);
+          new PluginCredentialSnapshot(UUID.randomUUID(), "opencli", null, null, 1L, badPayload);
       PluginCredentialAccess access =
           new PluginCredentialAccess() {
             @Override
@@ -1553,6 +1556,7 @@ class OpenCliHubClientContractTest {
   /** 同一份载荷同时承载认证密钥与可选私有身份，模拟宿主写入的秘密 JSON 形状。 */
   private static PluginCredentialSnapshot snapshot(String apiKey, String instanceId) {
     return new PluginCredentialSnapshot(
+        UUID.randomUUID(),
         "opencli",
         null,
         null,

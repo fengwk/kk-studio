@@ -1061,6 +1061,7 @@ class MiniMaxMavisToolFailureTest {
   /** 指定 token 与行版本的快照：用于构造「已刷新」的新版本。 */
   private static PluginCredentialSnapshot snapshot(String token, long version) {
     return new PluginCredentialSnapshot(
+        UUID.randomUUID(),
         MiniMaxMavisPlugin.PLUGIN_ID,
         MavisRegion.CN.id().toUpperCase(),
         Instant.now().plusSeconds(3600),
@@ -1127,6 +1128,7 @@ class MiniMaxMavisToolFailureTest {
   private PluginCredentialAccess validCredentialAccess() {
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
+            UUID.randomUUID(),
             MiniMaxMavisPlugin.PLUGIN_ID,
             MavisRegion.CN.id().toUpperCase(),
             Instant.now().plusSeconds(3600),

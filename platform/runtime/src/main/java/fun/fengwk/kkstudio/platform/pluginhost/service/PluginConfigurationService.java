@@ -30,6 +30,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * Plugin 普通配置与凭据的唯一写入口：保存配置、登录完成与断连。
@@ -210,12 +211,14 @@ public final class PluginConfigurationService {
     String pluginId = plugin.descriptor().pluginId();
     PluginCredentialSnapshot candidate =
         switch (change.action()) {
-          case WRITE -> new PluginCredentialSnapshot(pluginId, null, null, 0, change.payloadJson());
+          case WRITE -> new PluginCredentialSnapshot(
+              UUID.randomUUID(), pluginId, null, null, 0, change.payloadJson());
           case REMOVE -> null;
           case NONE -> existing
               .map(
                   row ->
                       new PluginCredentialSnapshot(
+                          row.generation(),
                           pluginId,
                           row.region(),
                           row.expiresAt(),

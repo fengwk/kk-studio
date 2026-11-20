@@ -66,7 +66,7 @@ class PluginCatalogRuntimeTest {
         new PluginCatalogRuntime(
             new PluginRegistry(List.of(plugin)),
             repository,
-            pluginId ->
+            (definition, config) ->
                 new PluginContext(
                     mock(PluginCredentialAccess.class),
                     Optional.empty(),

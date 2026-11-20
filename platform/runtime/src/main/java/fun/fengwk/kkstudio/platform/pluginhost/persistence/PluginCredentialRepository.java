@@ -27,11 +27,12 @@ public class PluginCredentialRepository {
 
   private static final String COLUMNS =
       "plugin_id, payload_json, region, expires_at, next_refresh_at, status, last_refreshed_at,"
-          + " last_refresh_error, refresh_lease_token, refresh_lease_until, version";
+          + " last_refresh_error, refresh_lease_token, refresh_lease_until, generation, version";
 
   private static final RowMapper<PluginCredentialRow> ROW_MAPPER =
       (rs, row) ->
           new PluginCredentialRow(
+              rs.getObject("generation", UUID.class),
               rs.getString("plugin_id"),
               rs.getString("payload_json"),
               rs.getString("region"),
@@ -56,6 +57,24 @@ public class PluginCredentialRepository {
         .query(ROW_MAPPER)
         .optional();
   }
+
+  /** 一条语句取得配置和凭据，不能组合两个不同提交时刻的数据。 */
+  public Optional<ConfiguredCredential> findConfigured(String pluginId) {
+    return jdbc.sql(
+            """
+            select credential.*, configuration.values_json
+            from plugin_credential credential
+            join plugin_configuration configuration using (plugin_id)
+            where credential.plugin_id = :pluginId
+            """)
+        .param("pluginId", pluginId)
+        .query(
+            (rs, row) ->
+                new ConfiguredCredential(rs.getString("values_json"), ROW_MAPPER.mapRow(rs, row)))
+        .optional();
+  }
+
+  public record ConfiguredCredential(String valuesJson, PluginCredentialRow credential) {}
 
   /** 写入一份新的已连接凭据：没有行时插入，有行时整体替换并清空刷新状态。 */
   public void upsertConnected(
@@ -96,17 +115,18 @@ public class PluginCredentialRepository {
         .update();
   }
 
-  /** 调用期确定性拒绝：只作废读取时的那一版凭据。 */
-  public boolean rejectUsed(String pluginId, long version, String error) {
+  /** 调用期确定性拒绝：只作废同一代、同一版本的凭据。 */
+  public boolean rejectUsed(String pluginId, UUID generation, long version, String error) {
     return jdbc.sql(
                 """
                 update plugin_credential
                 set status = 'REAUTH_REQUIRED', last_refresh_error = :error,
                     version = version + 1, updated_at = current_timestamp
-                where plugin_id = :pluginId and version = :version
+                where plugin_id = :pluginId and generation = :generation and version = :version
                 """)
             .param("error", error)
             .param("pluginId", pluginId)
+            .param("generation", generation)
             .param("version", version)
             .update()
         == 1;

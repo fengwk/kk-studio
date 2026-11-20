@@ -8,6 +8,7 @@ import java.util.UUID;
 
 /** {@code plugin_credential} 的一行；{@code payloadJson} 是秘密，任何投影都不得返回。 */
 public record PluginCredentialRow(
+    UUID generation,
     String pluginId,
     String payloadJson,
     String region,
@@ -21,6 +22,7 @@ public record PluginCredentialRow(
     long version) {
 
   public PluginCredentialRow {
+    Objects.requireNonNull(generation, "generation");
     Objects.requireNonNull(pluginId, "pluginId");
     Objects.requireNonNull(payloadJson, "payloadJson");
     Objects.requireNonNull(status, "status");

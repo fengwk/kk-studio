@@ -2,22 +2,36 @@ package fun.fengwk.kkstudio.platform.pluginhost.persistence;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
+import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.postgresql.Driver;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.jdbc.datasource.SimpleDriverDataSource;
+import org.springframework.jdbc.datasource.SingleConnectionDataSource;
 
 import fun.fengwk.kkstudio.platform.harness.persistence.postgresql.PostgresSchemaSupport;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginAuthSpec.StaticKey;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
+import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
+import fun.fengwk.kkstudio.platform.plugin.PluginDescriptor;
+import fun.fengwk.kkstudio.platform.pluginhost.credential.DatabasePluginCredentialStore;
+import fun.fengwk.kkstudio.platform.pluginhost.service.PluginContextFactory;
 
 import java.nio.charset.StandardCharsets;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -99,8 +113,8 @@ class PluginPersistencePostgresIntegrationTest {
     assertEquals(PluginCredentialStatus.CONNECTED, first.status());
     assertEquals(at(60), first.expiresAt());
 
-    assertTrue(credentials.rejectUsed(PLUGIN, first.version(), "revoked"));
-    assertFalse(credentials.rejectUsed(PLUGIN, first.version(), "revoked"));
+    assertTrue(credentials.rejectUsed(PLUGIN, first.generation(), first.version(), "revoked"));
+    assertFalse(credentials.rejectUsed(PLUGIN, first.generation(), first.version(), "revoked"));
     PluginCredentialRow rejected = credentials.find(PLUGIN).orElseThrow();
     assertEquals(PluginCredentialStatus.REAUTH_REQUIRED, rejected.status());
     assertEquals("revoked", rejected.lastRefreshError());
@@ -111,9 +125,77 @@ class PluginPersistencePostgresIntegrationTest {
     assertNull(replaced.lastRefreshError());
     assertNull(replaced.expiresAt());
     assertEquals(rejected.version() + 1, replaced.version());
+    assertEquals(first.generation(), replaced.generation());
 
     credentials.delete(PLUGIN);
     assertTrue(credentials.find(PLUGIN).isEmpty());
+  }
+
+  /** 只比较认证字段，且缺失与显式 null 不等价。 */
+  @Test
+  void scopedLookupIgnoresUnrelatedChangesButDistinguishesMissingAndNull() {
+    var plugin = mock(Plugin.class);
+    when(plugin.descriptor()).thenReturn(new PluginDescriptor(PLUGIN, "Test", "Test"));
+    when(plugin.authenticationSpec()).thenReturn(new StaticKey("key", Set.of("endpoint")));
+    var store = new DatabasePluginCredentialStore(credentials, Clock.systemUTC());
+    var factory = new PluginContextFactory(store, () -> null, () -> null, () -> null);
+    var access =
+        factory.create(plugin, new PluginConfig(1L, "{\"enabled\":true}")).credentialAccess();
+    assertThrows(PluginCredentialUnavailableException.class, access::resolve);
+    credentials.upsertConnected(PLUGIN, "{\"key\":\"sample\"}", null, null, null);
+    assertTrue(configurations.update(PLUGIN, 1L, "{\"enabled\":false}"));
+    assertEquals("{\"key\":\"sample\"}", access.resolve().payloadJson());
+    assertTrue(configurations.update(PLUGIN, 2L, "{\"enabled\":false,\"endpoint\":null}"));
+    assertThrows(PluginCredentialUnavailableException.class, access::resolve);
+    when(plugin.authenticationSpec()).thenReturn(new StaticKey("key", Set.of()));
+    assertEquals(
+        "{\"key\":\"sample\"}",
+        factory
+            .create(plugin, new PluginConfig(1L, "{}"))
+            .credentialAccess()
+            .resolve()
+            .payloadJson());
+  }
+
+  /** 真实 V3→V4 升级只给存量行分配代号，配置、载荷与版本仍可读取。 */
+  @Test
+  void generationMigrationPreservesExistingRows() throws SQLException {
+    try (Connection conn = PostgresSchemaSupport.newConnection()) {
+      PostgresSchemaSupport.resetDatabase(conn);
+      Flyway.configure()
+          .dataSource(new SingleConnectionDataSource(conn, true))
+          .locations("classpath:db/migration")
+          .target("3")
+          .load()
+          .migrate();
+      configurations.insertIfMissing(PLUGIN, "{\"enabled\":true}");
+      credentials.upsertConnected(PLUGIN, "{\"key\":\"before\"}", null, null, null);
+      credentials.upsertConnected(PLUGIN, "{\"key\":\"replacement\"}", null, null, null);
+      PostgresSchemaSupport.applyBaseline(conn);
+    }
+    var migrated = credentials.findConfigured(PLUGIN).orElseThrow();
+    assertEquals("{\"enabled\":true}", migrated.valuesJson());
+    assertEquals("{\"key\":\"replacement\"}", migrated.credential().payloadJson());
+    assertEquals(PluginCredentialStatus.CONNECTED, migrated.credential().status());
+    assertEquals(1L, migrated.credential().version());
+  }
+
+  /** 复用初始版本的重建行不受旧调用的迟到拒绝影响。 */
+  @Test
+  void lateRejectionCannotInvalidateRecreatedCredential() {
+    DatabasePluginCredentialStore store =
+        new DatabasePluginCredentialStore(credentials, Clock.systemUTC());
+    credentials.upsertConnected(PLUGIN, "{\"key\":\"before\"}", null, null, null);
+    var before = store.resolve(PLUGIN);
+    credentials.delete(PLUGIN);
+    credentials.upsertConnected(PLUGIN, "{\"key\":\"after\"}", null, null, null);
+    var after = store.resolve(PLUGIN);
+
+    assertEquals(before.version(), after.version());
+    assertNotEquals(before.generation(), after.generation());
+    assertFalse(store.rejectUsed(before, "late rejection"));
+    assertEquals(after, store.resolve(PLUGIN));
+    assertTrue(store.rejectUsed(after, "current rejection"));
   }
 
   /** 领取只取列出的到期行并签发租约；终结要求同一租约与版本。 */

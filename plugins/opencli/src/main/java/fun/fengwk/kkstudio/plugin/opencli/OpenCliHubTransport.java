@@ -63,10 +63,7 @@ final class OpenCliHubTransport {
     this.mapper = Objects.requireNonNull(mapper, "mapper");
     this.credentials = Objects.requireNonNull(credentials, "credentials");
     this.httpClient = Objects.requireNonNull(httpClient, "httpClient");
-    this.origin =
-        settings.baseUrl() == null || settings.baseUrl().isBlank()
-            ? null
-            : normalizeOrigin(URI.create(settings.baseUrl()));
+    this.origin = configuredOrigin(settings);
   }
 
   HttpRequest.Builder request(String pathAndQuery) {
@@ -104,6 +101,12 @@ final class OpenCliHubTransport {
           "execution resource URL must stay on the configured origin under /api/resources/");
     }
     return resolved;
+  }
+
+  static URI configuredOrigin(OpenCliSettings settings) {
+    return settings.baseUrl() == null || settings.baseUrl().isBlank()
+        ? null
+        : normalizeOrigin(URI.create(settings.baseUrl()));
   }
 
   private static URI normalizeOrigin(URI baseUrl) {

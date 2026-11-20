@@ -686,7 +686,7 @@ class ComfyuiCanvasFunctionDirectTest {
 
   private static PluginCredentialSnapshot snapshot(String apiKeyLiteral) {
     return new PluginCredentialSnapshot(
-        "comfyui", null, null, 1L, "{\"apiKey\":\"" + apiKeyLiteral + "\"}");
+        UUID.randomUUID(), "comfyui", null, null, 1L, "{\"apiKey\":\"" + apiKeyLiteral + "\"}");
   }
 
   private static CanvasFunctionFrozenReference imageReference() {

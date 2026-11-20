@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.pluginhost.service;
 
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginContext;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialAccess;
 import fun.fengwk.kkstudio.platform.plugin.credential.PluginCredentialStore;
@@ -31,8 +33,15 @@ public final class PluginContextFactory {
     this.promptResources = Objects.requireNonNull(promptResources, "promptResources");
   }
 
-  public PluginContext create(String pluginId) {
-    return create(new ScopedPluginCredentialAccess(pluginId, credentialStore));
+  public PluginContext create(Plugin plugin, PluginConfig config) {
+    String pluginId = plugin.descriptor().pluginId();
+    return create(
+        new ScopedPluginCredentialAccess(
+            pluginId,
+            credentialStore,
+            plugin.authenticationSpec().contextFields().isEmpty()
+                ? () -> credentialStore.resolve(pluginId)
+                : () -> credentialStore.resolve(plugin, config)));
   }
 
   /** 使用指定凭据访问装配上下文（保存前校验配置时传入候选凭据）。 */

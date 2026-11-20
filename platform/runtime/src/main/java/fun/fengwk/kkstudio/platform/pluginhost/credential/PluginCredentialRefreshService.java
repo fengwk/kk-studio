@@ -105,7 +105,12 @@ public final class PluginCredentialRefreshService {
     }
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
-            row.pluginId(), row.region(), row.expiresAt(), row.version(), row.payloadJson());
+            row.generation(),
+            row.pluginId(),
+            row.region(),
+            row.expiresAt(),
+            row.version(),
+            row.payloadJson());
     Instant sentAt = clock.instant();
     PluginCredentialMaterial material;
     try {
