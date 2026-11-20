@@ -247,6 +247,95 @@ describe('install.sh on Linux', () => {
       assert.equal(lastOperation(fixture).targetVersion, '1.2.0')
     }))
 
+  // Inject faults at actual rename boundaries, using only the fixture's HOME and package files.
+  for (const [fault, expectedStatus, expectedPhase] of [
+    ['publish', 1, 'publish'],
+    ['restore', 1, 'restore'],
+    ['interrupted', null, null],
+    ['published', 143, 'publish'],
+  ]) {
+    it(`preserves a recoverable installation after a ${fault} rename fault`, () =>
+      withInstall(({ fixture, install, update, uninstall }) => {
+        assert.equal(install().status, 0)
+        addRelease(fixture, '1.2.0')
+        const root = envRoot(fixture)
+        const lib = path.join(root, 'lib')
+        const work = path.join(root, '.work')
+        const previous = path.join(work, 'previous-lib')
+        const executable = 'kk-studio-daemon'
+        const original = bytes(path.join(lib, executable))
+        // The generated unit is otherwise identical across versions; detect premature rewriting.
+        writeFileSync(unitPath(fixture), '\n# original definition\n', { flag: 'a' })
+        const unchanged = [path.join(root, 'daemon.json'), path.join(root, 'daemon.token'), unitPath(fixture)]
+        const snapshots = unchanged.map(bytes)
+        const realMv = spawnSync('which', ['mv'], { encoding: 'utf8' }).stdout.trim()
+        assert.ok(realMv)
+        writeExecutable(path.join(fixture.bindir, 'mv'), `#!/bin/sh
+case "$1:$2:$RENAME_FAULT" in
+  */.work/lib:*/lib:publish|*/.work/lib:*/lib:restore|*/.work/previous-lib:*/lib:restore) exit 1 ;;
+  */lib:*/.work/previous-lib:interrupted) "${realMv}" "$@" && kill -KILL "$PPID"; exit $? ;;
+  */.work/lib:*/lib:published) "${realMv}" "$@" && kill -TERM "$PPID"; exit $? ;;
+esac
+exec "${realMv}" "$@"
+`)
+        const result = update({ RENAME_FAULT: fault })
+        assert.equal(result.status, expectedStatus, result.stderr)
+        assert.doesNotMatch(result.stdout, /更新完成|READY/)
+        assert.ok(!existsSync(path.join(fixture.state, 'active')))
+        unchanged.forEach((file, index) => assert.deepEqual(bytes(file), snapshots[index], file))
+        const pending = fault === 'restore' || fault === 'interrupted'
+        if (pending) {
+          assert.ok(!existsSync(lib))
+          accessSync(path.join(previous, executable), constants.X_OK)
+          assert.deepEqual(bytes(path.join(previous, executable)), original)
+        } else {
+          assert.ok(!existsSync(work))
+          accessSync(path.join(lib, executable), constants.X_OK)
+          if (fault === 'publish') {
+            assert.deepEqual(bytes(path.join(lib, executable)), original)
+            assert.match(result.stderr, /无法发布新程序目录.*\n受管程序尚未替换/)
+          } else {
+            assert.notDeepEqual(bytes(path.join(lib, executable)), original)
+            assert.match(result.stderr, /操作被中断.*\n新程序已发布/)
+          }
+        }
+        if (expectedPhase) {
+          const record = lastOperation(fixture)
+          assert.equal(record.result, 'failed')
+          assert.equal(record.phase, expectedPhase)
+          assert.equal(record.errorCode, expectedPhase)
+        }
+        if (fault === 'restore') {
+          assert.ok(result.stderr.includes(previous), result.stderr)
+          assert.match(result.stderr, /update --environment-id .*不要删除 \.work/)
+          assert.doesNotMatch(result.stderr, /受管程序尚未替换|新程序已发布/)
+          const rejectedUninstall = uninstall()
+          assert.equal(rejectedUninstall.status, 1, rejectedUninstall.stderr)
+          assert.ok(rejectedUninstall.stderr.includes(previous))
+          const busy = update({ FAKE_DAEMON_BUSY: '1' })
+          assert.match(busy.stderr, /另一个安装操作正在执行/)
+          const stillBlocked = update({ RENAME_FAULT: 'restore' })
+          assert.equal(stillBlocked.status, 1, stillBlocked.stderr)
+          assert.equal(lastOperation(fixture).phase, 'restore')
+          assert.deepEqual(bytes(path.join(previous, executable)), original)
+        }
+        if (fault === 'interrupted') {
+          // A retry blocked before publication must already have recovered the old executable.
+          const blocked = update({ FAKE_DAEMON_LOCKED: '1' })
+          assert.equal(blocked.status, 1, blocked.stderr)
+          assert.equal(lastOperation(fixture).phase, 'wait-lock')
+          assert.deepEqual(bytes(path.join(lib, executable)), original)
+          assert.ok(!existsSync(work))
+        }
+        const retry = update()
+        assert.equal(retry.status, 0, retry.stderr)
+        assert.equal(lastOperation(fixture).result, 'succeeded')
+        assert.notDeepEqual(bytes(path.join(lib, executable)), original)
+        assert.ok(existsSync(path.join(fixture.state, 'active')))
+        assert.ok(!existsSync(work))
+      }))
+  }
+
   it('update rejects configuration options before any network access', () =>
     withInstall(({ fixture, configFile, tokenFile }) => {
       const log = path.join(fixture.state, 'update-curl')

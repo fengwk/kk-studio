@@ -92,6 +92,7 @@ function createMockProjection(snapshot: HarnessThreadSnapshotDTO): ThreadProject
     models: [],
     thread: snapshot.thread,
     bound: true,
+    unavailable: false,
     isRoot: false,
     title: snapshot.thread.name,
     timeline: buildThreadTimeline(snapshot.entries, snapshot.queuedCommands, snapshot.toolInvocations),

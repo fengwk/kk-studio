@@ -1,5 +1,7 @@
 package fun.fengwk.kkstudio.platform.plugin.credential;
 
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 
@@ -16,6 +18,9 @@ public interface PluginCredentialStore {
    */
   PluginCredentialSnapshot resolve(String pluginId);
 
-  /** 远端确定性拒绝本次已用凭据时作废它；以快照版本做 CAS，返回是否真的作废了该行。 */
+  /** 声明认证上下文的配置实例只能解析与其认证上下文匹配的凭据。 */
+  PluginCredentialSnapshot resolve(Plugin plugin, PluginConfig config);
+
+  /** 远端确定性拒绝本次已用凭据时作废它；以快照的代号和版本做 CAS，返回是否真的作废了该行。 */
   boolean rejectUsed(PluginCredentialSnapshot snapshot, String error);
 }

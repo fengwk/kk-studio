@@ -152,12 +152,25 @@ func (r *Runtime) newIDELeaseRound() (int64, time.Time) {
 	return r.ideLeaseRound, r.ideLeaseSentAt
 }
 
-func (r *Runtime) consumeIDELease(lease *protocol.IdeLease, now time.Time) (time.Time, error) {
+// A zero time without an error means the proof is no longer usable, not a protocol failure.
+func (r *Runtime) consumeIDELease(lease *protocol.IdeLease) (time.Time, error) {
+	if lease.GetRound() <= 0 {
+		return time.Time{}, errors.New("IDE_LEASE round must be positive")
+	}
 	r.ideLeaseMu.Lock()
 	defer r.ideLeaseMu.Unlock()
-	age := now.Sub(r.ideLeaseSentAt)
-	if lease == nil || lease.Round == nil || r.ideLeaseSentAt.IsZero() || lease.GetRound() != r.ideLeaseRound || r.ideLeaseConsumed || age < 0 || age >= ideLeaseRoundTTL {
-		return time.Time{}, errors.New("IDE_LEASE round is not the current unexpired round")
+	if r.ideLeaseSentAt.IsZero() {
+		return time.Time{}, nil
+	}
+	age := time.Since(r.ideLeaseSentAt)
+	if age < 0 {
+		return time.Time{}, errors.New("IDE_LEASE heartbeat send time is in the future")
+	}
+	if lease.GetRound() > r.ideLeaseRound {
+		return time.Time{}, errors.New("IDE_LEASE round is ahead of the current heartbeat")
+	}
+	if lease.GetRound() < r.ideLeaseRound || r.ideLeaseConsumed || age >= ideLeaseRoundTTL {
+		return time.Time{}, nil
 	}
 	r.ideLeaseConsumed = true
 	return r.ideLeaseSentAt, nil
@@ -165,7 +178,7 @@ func (r *Runtime) consumeIDELease(lease *protocol.IdeLease, now time.Time) (time
 
 func (r *Runtime) clearIDELeaseRound() {
 	r.ideLeaseMu.Lock()
-	r.ideLeaseRound = 0
+	// Invalidate the outstanding proof without reusing its round on the next heartbeat.
 	r.ideLeaseSentAt = time.Time{}
 	r.ideLeaseConsumed = false
 	r.ideLeaseMu.Unlock()

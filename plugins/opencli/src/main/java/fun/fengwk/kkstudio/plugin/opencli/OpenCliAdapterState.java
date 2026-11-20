@@ -2,9 +2,11 @@ package fun.fengwk.kkstudio.plugin.opencli;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionExecutionContext;
 import fun.fengwk.kkstudio.canvas.function.CanvasFunctionFrozenRun;
+import fun.fengwk.kkstudio.canvas.function.CanvasFunctionUnknownException;
 import fun.fengwk.kkstudio.common.id.Uuids;
 import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.Execution;
 
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -15,6 +17,7 @@ import java.util.UUID;
 /** Adapter checkpoint map 的严格小型读写器。 */
 final class OpenCliAdapterState {
 
+  static final String HUB_ORIGIN = "hubOrigin";
   static final String UPLOADS = "uploads";
   static final String EXECUTION_ID = "executionId";
   static final String ASSET_ID = "assetId";
@@ -24,6 +27,26 @@ final class OpenCliAdapterState {
 
   static Map<String, Object> copy(Map<String, Object> source) {
     return new LinkedHashMap<>(source);
+  }
+
+  /** 仅全新的提交可绑定当前 Hub；不能给旧外部引用补猜来源。 */
+  static void bindSubmission(CanvasFunctionFrozenRun run, Map<String, Object> state, URI origin) {
+    if (origin != null && !run.submitted() && state.isEmpty()) {
+      state.put(HUB_ORIGIN, origin.toString());
+    } else {
+      requireOrigin(state, origin);
+    }
+  }
+
+  static boolean matchesOrigin(Map<String, Object> state, URI origin) {
+    return origin != null && origin.toString().equals(state.get(HUB_ORIGIN));
+  }
+
+  static void requireOrigin(Map<String, Object> state, URI origin) {
+    if (!matchesOrigin(state, origin)) {
+      throw new CanvasFunctionUnknownException(
+          "OpenCLI Hub origin could not be verified; verify the external result manually");
+    }
   }
 
   static String optionalString(Map<String, Object> state, String key) {

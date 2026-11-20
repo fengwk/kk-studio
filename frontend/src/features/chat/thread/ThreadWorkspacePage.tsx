@@ -9,7 +9,7 @@ import { ThreadPresentationActions } from '@/features/thread/runtime/panes/Threa
 import { Button } from '@/shared/ui/controls/Button'
 import { agentService } from '@/shared/api/agent-service'
 import { environmentService } from '@/features/environment/environment-service'
-import { fetchThreadSnapshot } from '@/features/thread/runtime/state/thread-snapshot-cache'
+import { fetchThreadSnapshot, isThreadSnapshotUnavailable } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { isCanonicalUuid } from '@/shared/lib/uuid'
 import { useI18n } from '@/shared/i18n'
@@ -37,7 +37,7 @@ export function ThreadWorkspacePage() {
   const threadQuery = useQuery({
     queryKey: queryKeys.threads.snapshot(threadId),
     queryFn: ({ signal }) => fetchThreadSnapshot(queryClient, threadId, { signal }),
-    enabled: isValidUuid && branchCursor == null,
+    enabled: (query) => isValidUuid && branchCursor == null && !isThreadSnapshotUnavailable(query),
   })
 
   const agentsQuery = useQuery({

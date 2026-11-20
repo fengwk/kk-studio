@@ -73,14 +73,14 @@ export function ThreadPane({
 }) {
   const labels = useBoundThreadPanelLabels(environments, projection)
   const { t } = useI18n()
-  const workPhase = deriveThreadWorkPhase({
+  const workPhase = projection.unavailable ? { kind: 'none' } as const : deriveThreadWorkPhase({
     thread: projection.thread,
     activeAssistantOutput: projection.activeAssistantOutput,
     entries: projection.entries,
     toolInvocations: projection.toolInvocations,
   })
   // 活跃执行中的 UNCONFIRMED 是正常在途事实，不进入异常/待处理面板；只有真正 EXIT_PENDING 才展示详情。
-  const exitPending = isExitPendingStatus(projection.thread?.status)
+  const exitPending = !projection.unavailable && isExitPendingStatus(projection.thread?.status)
   const unconfirmedExecutions = exitPending ? projection.unconfirmedExecutions : []
 
   // 工作条文案与动画都只由这一份阶段事实派生。
@@ -110,6 +110,8 @@ export function ThreadPane({
     queuedCustomMessages: projection.queuedCustomMessages,
     loading: projection.messagesLoading,
     error: projection.messagesError,
+    errorText: projection.unavailable ? t('ai.runtime.thread.unavailable') : undefined,
+    onRetry: projection.unavailable ? undefined : projection.retrySnapshotSync,
     bodyRef: projection.bodyRef,
     initialScrollTop: views.initialConversationScrollTop,
     resetKey: projection.threadId,
@@ -148,7 +150,7 @@ export function ThreadPane({
           mainView={views.mainView}
           controls={controls}
           activity={panelActivity}
-          slots={{ footer: <ThreadStatusFooter {...labels} /> }}
+          slots={{ footer: projection.unavailable ? undefined : <ThreadStatusFooter {...labels} /> }}
         />
       </ResourceBlobUrlContext.Provider>
     </ResourceSessionContext.Provider>

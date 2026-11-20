@@ -31,6 +31,7 @@ class PluginCredentialRowTest {
         IllegalArgumentException.class,
         () ->
             new PluginCredentialRow(
+                UUID.randomUUID(),
                 "p",
                 "{}",
                 null,
@@ -52,6 +53,7 @@ class PluginCredentialRowTest {
 
   private static PluginCredentialRow row(Instant leaseUntil) {
     return new PluginCredentialRow(
+        UUID.randomUUID(),
         "p",
         "{\"token\":\"secret\"}",
         "CN",

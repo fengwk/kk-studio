@@ -52,8 +52,9 @@ export function ThreadView({
   const views = useBoundThreadPanelViews(threadId, projection, {
     viewKey: `thread:${threadId}`,
     historyLoading: projection.messagesLoading,
-    historyError: projection.messagesError ? t('ai.chat.history.loadFailed') : null,
-    onRetryHistory: projection.retrySnapshotSync,
+    historyError: projection.unavailable ? t('ai.runtime.thread.unavailable')
+      : projection.messagesError ? t('ai.chat.history.loadFailed') : null,
+    onRetryHistory: projection.unavailable ? undefined : projection.retrySnapshotSync,
   })
   const presentation = useThreadPresentation({
     views,

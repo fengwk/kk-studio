@@ -314,9 +314,11 @@ COMPLETED
   -> 保留结果实际引用的上传给 history 物化事务，释放其余上传
 ```
 
-同一 `transferId` 的重复同形 REQUEST 是幂等的：已绑定的票据直接复用，绝不重复创建上行；同一 transfer 漂移为不同请求、对未申请的 transfer 提交、使用与签发值不同的 uploadId、引用已释放的 transfer，都是协议违规。[`DaemonResourceTicketService`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonResourceTicketService.java) 的所有数据库与对象存储动作、票据回调与释放动作都在核心状态锁之外执行；同一 binding 自身串行化重复 reserve/commit，因此同实例重连重放不会重复创建上传行。
+同一 `transferId` 的重复同形 REQUEST 是幂等的：有效票据直接复用；PENDING 的 PUT 签名到期后，只能在原预约内为同一 `uploadId`、对象键与校验条件换签。预约已超时、已消费或进入清理则拒绝换签，不创建新行或延长预约 TTL。同一 transfer 漂移为不同请求、对未申请的 transfer 提交、使用与签发值不同的 uploadId、引用已释放的 transfer，都是协议违规。[`DaemonResourceTicketService`](../../platform/daemon-server/src/main/java/fun/fengwk/kkstudio/platform/daemon/server/DaemonResourceTicketService.java) 的所有数据库与对象存储动作、票据回调与释放动作都在核心状态锁之外执行；同一 binding 自身串行化重复 reserve/commit，因此同实例重连重放不会重复创建上传行。
 
 票据服务异常统一转换为固定的 `resource upload is unavailable` 失败回执：预签名 URL、签名 header 与存储异常原文都不进入控制面反馈。`FAILED` 票据不缓存，允许在 invocation deadline 内再次触达服务；`FAILED`/`CANCELLED`、接管、`expire` 与调用放弃都幂等释放全部未消费上传，而 `COMPLETED` 只释放未被结果引用的上传。
+
+Daemon 跳过已到期的签名，并在调用预算内有限次重取票据；未到期的 401/403 不重放，可恢复的存储 5xx 只有限次重试。PUT 返回 412 表示条件写没有覆盖已有对象，不表示传输成功：Daemon 必须提交同一绑定，由 Studio 核验后返回 READY 才能引用资源。网络清理结果不明时不自动重发。
 
 二进制字节不经过会话核心：核心只处理有界元数据与票据，并在任何外部 I/O 之前完成作用域、预算与绑定校验。
 

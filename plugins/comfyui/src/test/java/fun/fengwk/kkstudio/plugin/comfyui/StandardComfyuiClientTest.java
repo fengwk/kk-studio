@@ -771,7 +771,7 @@ class StandardComfyuiClientTest {
   /** 宿主真实写入的形状：静态密钥载荷只有 apiKey，且 region/expiresAt 同时为空。 */
   private static PluginCredentialSnapshot snapshot(String apiKeyLiteral) {
     return new PluginCredentialSnapshot(
-        "comfyui", null, null, 1L, "{\"apiKey\":\"" + apiKeyLiteral + "\"}");
+        UUID.randomUUID(), "comfyui", null, null, 1L, "{\"apiKey\":\"" + apiKeyLiteral + "\"}");
   }
 
   private void prompt(HttpExchange exchange) throws IOException {

@@ -67,7 +67,19 @@ public class StorageDaemonResourceTicketService implements DaemonResourceTicketS
     reserve.setSizeBytes(request.size());
     reserve.setSha256(request.sha256());
     try {
-      return toTicket(uploadService.reserve(reserve));
+      return toTicket(uploadService.reserveStaged(reserve));
+    } catch (RuntimeException error) {
+      return failed();
+    }
+  }
+
+  @Override
+  public Ticket renew(EnvironmentId environmentId, String invocationId, UUID uploadId) {
+    Objects.requireNonNull(environmentId, "environmentId");
+    Objects.requireNonNull(invocationId, "invocationId");
+    Objects.requireNonNull(uploadId, "uploadId");
+    try {
+      return toTicket(uploadService.renewStaged(uploadId));
     } catch (RuntimeException error) {
       return failed();
     }

@@ -66,10 +66,12 @@ export function CompactionBranchView({
       ) : null}
       {branch.isError ? (
         <div className="compaction-branch-state is-error" role="alert">
-          <p>{t('ai.runtime.compactionBranch.loadFailed')}</p>
-          <Button variant="ghost" size="compact" onClick={branch.refetch}>
-            {t('ai.runtime.compactionBranch.retry')}
-          </Button>
+          <p>{t(branch.unavailable ? 'ai.runtime.thread.unavailable' : 'ai.runtime.compactionBranch.loadFailed')}</p>
+          {!branch.unavailable ? (
+            <Button variant="ghost" size="compact" onClick={branch.refetch}>
+              {t('ai.runtime.compactionBranch.retry')}
+            </Button>
+          ) : null}
         </div>
       ) : null}
       {stopError != null ? (

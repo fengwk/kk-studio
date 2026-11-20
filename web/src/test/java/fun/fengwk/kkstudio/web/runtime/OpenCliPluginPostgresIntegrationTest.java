@@ -6,7 +6,9 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
@@ -14,6 +16,7 @@ import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
@@ -49,6 +52,8 @@ import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.common.json.JsonValues;
 import fun.fengwk.kkstudio.platform.catalog.definition.AgentRepository;
 import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheckResult.Authentication;
+import fun.fengwk.kkstudio.platform.plugin.PluginConnectionCheckResult.Reachability;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialStatus;
 import fun.fengwk.kkstudio.platform.plugin.PluginRegistry;
 import fun.fengwk.kkstudio.platform.pluginhost.catalog.PluginCatalogRuntime;
@@ -257,6 +262,76 @@ class OpenCliPluginPostgresIntegrationTest {
                     CanvasFunctionUnknownException.class, () -> submit(oldAdapter, "old target"));
               }
               assertEquals(0, requests.size(), "the old key must never reach any target");
+            });
+  }
+
+  /** 保持旧目录租约：目标与密钥同事务变更时，旧提交和只读检查都不得携新密钥出网。 */
+  @Test
+  void endpointChangeWithReplacementKeyFencesOldLeaseAndConnectionCheck() throws IOException {
+    List<RecordedRequest> oldRequests = new CopyOnWriteArrayList<>();
+    List<RecordedRequest> newRequests = new CopyOnWriteArrayList<>();
+    String before = enabledValues(createControlledServer(oldRequests));
+    String after = enabledValues(createControlledServer(newRequests));
+    createContextRunner()
+        .run(
+            context -> {
+              PluginCatalogRuntime runtime = context.getBean(PluginCatalogRuntime.class);
+              PluginConfigurationService configuration = configurationService(context, runtime);
+              configuration.configure(
+                  PLUGIN_ID, 1L, before, Map.of("apiKey", SecretUpdate.set("key-1")));
+              try (var oldLease = runtime.acquire()) {
+                var oldAdapter = adapter(oldLease);
+                var initial = createTestRun(oldAdapter.functions().getFirst(), "original job");
+                oldAdapter.submit(execContext, initial);
+                ArgumentCaptor<Map<String, Object>> checkpoint = ArgumentCaptor.captor();
+                verify(execContext).checkpoint(eq("GPT_IMAGE_POLLING"), checkpoint.capture());
+                assertEquals(1, oldRequests.size());
+                var submitted =
+                    new CanvasFunctionFrozenRun(
+                        initial.canvasId(),
+                        initial.nodeId(),
+                        initial.nodeName(),
+                        initial.requestId(),
+                        initial.binding(),
+                        initial.args(),
+                        initial.manifest(),
+                        initial.outputs(),
+                        CanvasFunctionSubmitState.SUBMITTED,
+                        "GPT_IMAGE_POLLING",
+                        checkpoint.getValue());
+                var oldCheck =
+                    oldLease
+                        .snapshot()
+                        .configuredPlugins()
+                        .getFirst()
+                        .instance()
+                        .connectionCheck()
+                        .orElseThrow();
+                configuration.configure(
+                    PLUGIN_ID, 2L, after, Map.of("apiKey", SecretUpdate.set("key-2")));
+
+                var stale = oldCheck.check();
+                assertEquals(Reachability.NOT_CHECKED, stale.reachability());
+                assertEquals(Authentication.UNAVAILABLE, stale.authentication());
+                assertThrows(
+                    CanvasFunctionUnknownException.class,
+                    () -> submit(oldAdapter, "stale instance"));
+                try (var newLease = runtime.acquire()) {
+                  var currentAdapter = adapter(newLease);
+                  assertThrows(
+                      CanvasFunctionUnknownException.class,
+                      () -> currentAdapter.execute(execContext, submitted));
+                  currentAdapter.cancel(submitted);
+                  assertTrue(newRequests.isEmpty());
+                  submit(currentAdapter, "current instance");
+                }
+                assertEquals(
+                    List.of("Bearer key-1"),
+                    oldRequests.stream().map(RecordedRequest::authorization).toList());
+                assertEquals(
+                    List.of("Bearer key-2"),
+                    newRequests.stream().map(RecordedRequest::authorization).toList());
+              }
             });
   }
 
@@ -534,6 +609,18 @@ class OpenCliPluginPostgresIntegrationTest {
           try (OutputStream os = exchange.getResponseBody()) {
             os.write(response);
           }
+        });
+    server.createContext(
+        "/api/executions/",
+        exchange -> {
+          targetList.add(
+              new RecordedRequest(
+                  exchange.getRequestMethod(),
+                  exchange.getRequestURI().getPath(),
+                  exchange.getRequestHeaders().getFirst("Authorization"),
+                  ""));
+          exchange.sendResponseHeaders(404, -1);
+          exchange.close();
         });
     server.start();
     runningServers.add(server);

@@ -27,6 +27,7 @@ import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.HubResourceStream;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -105,6 +106,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
           definition("seedance2.0fast_vip", "Seedance 2.0 Fast VIP"));
 
   private final OpenCliSettings settings;
+  private final URI hubOrigin;
   private final OpenCliHubClient client;
   private final OpenCliReferenceUploader uploader;
   private final ObjectMapper mapper;
@@ -130,6 +132,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
       Clock clock,
       Sleeper sleeper) {
     this.settings = Objects.requireNonNull(settings, "settings");
+    this.hubOrigin = OpenCliHubTransport.configuredOrigin(settings);
     this.client = Objects.requireNonNull(client, "client");
     uploader = new OpenCliReferenceUploader(client);
     mapper = Objects.requireNonNull(objectMapper, "objectMapper").rebuild().build();
@@ -220,6 +223,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
   public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     preflight(run);
     Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
+    OpenCliAdapterState.bindSubmission(run, state, hubOrigin);
     String assetId = OpenCliAdapterState.optionalString(state, OpenCliAdapterState.ASSET_ID);
     String executionId =
         OpenCliAdapterState.optionalString(state, OpenCliAdapterState.EXECUTION_ID);
@@ -272,6 +276,7 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+    OpenCliAdapterState.requireOrigin(run.adapterState(), hubOrigin);
     preflight(run);
     Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
     String assetId = OpenCliAdapterState.optionalString(state, OpenCliAdapterState.ASSET_ID);
@@ -355,6 +360,9 @@ public class SeedanceCanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public void cancel(CanvasFunctionFrozenRun run) {
+    if (!OpenCliAdapterState.matchesOrigin(run.adapterState(), hubOrigin)) {
+      return;
+    }
     String executionId =
         OpenCliAdapterState.optionalString(run.adapterState(), OpenCliAdapterState.EXECUTION_ID);
     if (executionId != null) {

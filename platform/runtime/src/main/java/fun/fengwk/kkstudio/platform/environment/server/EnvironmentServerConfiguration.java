@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.harness.store.PostgresqlExecutionExitReceipt
 import fun.fengwk.kkstudio.platform.settings.SystemSettings;
 import fun.fengwk.kkstudio.platform.settings.SystemSettingsSnapshot;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
@@ -73,6 +74,7 @@ public class EnvironmentServerConfiguration {
       DaemonResourceTicketService ticketService,
       SystemSettingsSnapshot snapshot,
       ExecutionExitReceiptLookup exitReceiptLookup,
+      Clock clock,
       @Qualifier("environmentConfigExecutor") ExecutorService environmentConfigExecutor) {
     return new EnvironmentDaemonServer(
         environmentRegistry,
@@ -88,7 +90,8 @@ public class EnvironmentServerConfiguration {
         ticketService,
         () -> toSettings(snapshot.get()),
         environmentConfigExecutor,
-        exitReceiptLookup);
+        exitReceiptLookup,
+        clock);
   }
 
   private static Optional<DaemonRegistration> toRegistration(

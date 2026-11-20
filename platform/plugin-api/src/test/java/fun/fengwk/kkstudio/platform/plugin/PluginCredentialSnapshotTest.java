@@ -7,6 +7,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.UUID;
 
 /** PluginCredentialSnapshot 只有两种形态，且输出时不泄露载荷。 */
 class PluginCredentialSnapshotTest {
@@ -15,14 +16,18 @@ class PluginCredentialSnapshotTest {
 
   @Test
   void interactiveSnapshotCarriesRegionAndExpiry() {
-    assertTrue(new PluginCredentialSnapshot("p", "CN", EXPIRES_AT, 3, "{}").interactive());
-    assertFalse(new PluginCredentialSnapshot("p", null, null, 0, "{}").interactive());
+    assertTrue(
+        new PluginCredentialSnapshot(UUID.randomUUID(), "p", "CN", EXPIRES_AT, 3, "{}")
+            .interactive());
+    assertFalse(
+        new PluginCredentialSnapshot(UUID.randomUUID(), "p", null, null, 0, "{}").interactive());
   }
 
   @Test
   void toStringRedactsPayload() {
     String text =
-        new PluginCredentialSnapshot("p", "CN", EXPIRES_AT, 3, "{\"secret\":1}").toString();
+        new PluginCredentialSnapshot(UUID.randomUUID(), "p", "CN", EXPIRES_AT, 3, "{\"secret\":1}")
+            .toString();
 
     assertTrue(text.contains("<redacted>"));
     assertFalse(text.contains("secret"));
@@ -31,17 +36,22 @@ class PluginCredentialSnapshotTest {
   @Test
   void rejectsMissingFieldsNegativeVersionAndMixedRouteMetadata() {
     assertThrows(
-        NullPointerException.class, () -> new PluginCredentialSnapshot(null, null, null, 0, "{}"));
+        NullPointerException.class,
+        () -> new PluginCredentialSnapshot(null, "p", null, null, 0, "{}"));
     assertThrows(
-        NullPointerException.class, () -> new PluginCredentialSnapshot("p", null, null, 0, null));
+        NullPointerException.class,
+        () -> new PluginCredentialSnapshot(UUID.randomUUID(), null, null, null, 0, "{}"));
+    assertThrows(
+        NullPointerException.class,
+        () -> new PluginCredentialSnapshot(UUID.randomUUID(), "p", null, null, 0, null));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new PluginCredentialSnapshot("p", null, null, -1, "{}"));
+        () -> new PluginCredentialSnapshot(UUID.randomUUID(), "p", null, null, -1, "{}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new PluginCredentialSnapshot("p", "CN", null, 0, "{}"));
+        () -> new PluginCredentialSnapshot(UUID.randomUUID(), "p", "CN", null, 0, "{}"));
     assertThrows(
         IllegalArgumentException.class,
-        () -> new PluginCredentialSnapshot("p", null, EXPIRES_AT, 0, "{}"));
+        () -> new PluginCredentialSnapshot(UUID.randomUUID(), "p", null, EXPIRES_AT, 0, "{}"));
   }
 }

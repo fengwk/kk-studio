@@ -40,6 +40,7 @@ function makeMockProjection(threadId: string): ThreadProjection {
     models: [],
     thread,
     bound: true,
+    unavailable: false,
     isRoot: true,
     title: thread.name,
     timeline: { messages: [], queuedMessages: [], hasPendingInputs: false },

@@ -46,6 +46,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /** {@link PluginConfigurationService} 的配置 CAS、秘密补丁、候选校验与提交后唤醒。 */
@@ -223,6 +224,7 @@ class PluginConfigurationServiceTest {
 
   private static PluginCredentialRow credential(String payloadJson) {
     return new PluginCredentialRow(
+        UUID.randomUUID(),
         STATIC_ID,
         payloadJson,
         null,

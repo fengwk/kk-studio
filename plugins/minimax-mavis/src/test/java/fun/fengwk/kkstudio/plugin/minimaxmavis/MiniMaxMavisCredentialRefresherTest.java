@@ -24,6 +24,7 @@ import fun.fengwk.kkstudio.platform.plugin.PluginRenewalNotSentException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.UUID;
 
 /**
  * MiniMax Mavis 凭据自动刷新器（MiniMaxMavisCredentialRefresher）测试。
@@ -48,7 +49,12 @@ class MiniMaxMavisCredentialRefresherTest {
         new MiniMaxMavisCredentialPayload(OLD_TOKEN, CLIENT_UUID, FIXED_NOW).toJson();
     this.snapshotCn =
         new PluginCredentialSnapshot(
-            MiniMaxMavisPlugin.PLUGIN_ID, "CN", FIXED_NOW.plusSeconds(3600), 0L, payloadJson);
+            UUID.randomUUID(),
+            MiniMaxMavisPlugin.PLUGIN_ID,
+            "CN",
+            FIXED_NOW.plusSeconds(3600),
+            0L,
+            payloadJson);
   }
 
   /** 验证刷新成功时，新材料的 region 与快照严格一致，且携带新 token 与更新的刷新计划。 */
@@ -166,6 +172,7 @@ class MiniMaxMavisCredentialRefresherTest {
   void unrecognizedRegionInSnapshotThrowsPluginCredentialException() {
     PluginCredentialSnapshot badRegionSnapshot =
         new PluginCredentialSnapshot(
+            UUID.randomUUID(),
             MiniMaxMavisPlugin.PLUGIN_ID,
             "UNKNOWN_REGION",
             FIXED_NOW.plusSeconds(3600),

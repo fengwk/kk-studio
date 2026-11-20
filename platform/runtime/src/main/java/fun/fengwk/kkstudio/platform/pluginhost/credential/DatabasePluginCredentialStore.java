@@ -1,5 +1,10 @@
 package fun.fengwk.kkstudio.platform.pluginhost.credential;
 
+import tools.jackson.databind.JsonNode;
+
+import fun.fengwk.kkstudio.common.json.JsonValues;
+import fun.fengwk.kkstudio.platform.plugin.Plugin;
+import fun.fengwk.kkstudio.platform.plugin.PluginConfig;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialSnapshot;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableException;
 import fun.fengwk.kkstudio.platform.plugin.PluginCredentialUnavailableReason;
@@ -11,6 +16,7 @@ import fun.fengwk.kkstudio.platform.pluginhost.persistence.PluginCredentialRow;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.Objects;
+import java.util.Set;
 
 /** {@link PluginCredentialStore} 的数据库实现：读取当前凭据行，按状态、刷新租约与本地时限判定是否可用。 */
 public final class DatabasePluginCredentialStore implements PluginCredentialStore {
@@ -44,14 +50,31 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
 
   @Override
   public PluginCredentialSnapshot resolve(String pluginId) {
-    PluginCredentialRow row =
+    return snapshot(
+        repository.find(pluginId).orElseThrow(DatabasePluginCredentialStore::notConnected));
+  }
+
+  @Override
+  public PluginCredentialSnapshot resolve(Plugin plugin, PluginConfig config) {
+    String pluginId = plugin.descriptor().pluginId();
+    Set<String> fields = plugin.authenticationSpec().contextFields();
+    var current =
         repository
-            .find(pluginId)
-            .orElseThrow(
-                () ->
-                    unavailable(
-                        PluginCredentialUnavailableReason.NOT_CONNECTED,
-                        "plugin is not connected"));
+            .findConfigured(pluginId)
+            .orElseThrow(DatabasePluginCredentialStore::notConnected);
+    JsonNode expected = JsonValues.readTree(config.valuesJson());
+    JsonNode actual = JsonValues.readTree(current.valuesJson());
+    for (String field : fields) {
+      if (!Objects.equals(expected.get(field), actual.get(field))) {
+        throw unavailable(
+            PluginCredentialUnavailableReason.NOT_CONNECTED,
+            "plugin credential is not available for this authentication context");
+      }
+    }
+    return snapshot(current.credential());
+  }
+
+  private PluginCredentialSnapshot snapshot(PluginCredentialRow row) {
     Instant now = clock.instant();
     if (row.refreshing(now)) {
       throw unavailable(
@@ -75,7 +98,12 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
           "plugin credential is expired; re-authenticate the plugin");
     }
     return new PluginCredentialSnapshot(
-        row.pluginId(), row.region(), row.expiresAt(), row.version(), row.payloadJson());
+        row.generation(),
+        row.pluginId(),
+        row.region(),
+        row.expiresAt(),
+        row.version(),
+        row.payloadJson());
   }
 
   @Override
@@ -83,8 +111,13 @@ public final class DatabasePluginCredentialStore implements PluginCredentialStor
     Objects.requireNonNull(snapshot, "snapshot");
     return repository.rejectUsed(
         snapshot.pluginId(),
+        snapshot.generation(),
         snapshot.version(),
         PluginCredentialRefreshService.boundedError(error, AUTH_REJECTED_ERROR));
+  }
+
+  private static PluginCredentialUnavailableException notConnected() {
+    return unavailable(PluginCredentialUnavailableReason.NOT_CONNECTED, "plugin is not connected");
   }
 
   private static PluginCredentialUnavailableException unavailable(

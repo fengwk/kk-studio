@@ -4,6 +4,7 @@ import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidati
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateFilename;
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.validateSize;
 import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.verifyObject;
+import static fun.fengwk.kkstudio.platform.storage.service.StorageUploadValidation.verifyProbedImage;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.ObjectProvider;
@@ -46,6 +47,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
@@ -162,6 +164,35 @@ public class StorageUploadService {
     return reservation.reserveStaged(request);
   }
 
+  /** 为同一预约重签直传 URL；不创建行，也不延长行的生存时间。 */
+  public StorageUploadDTO renewStaged(UUID uploadId) {
+    try (StorageUploadOperationLock.Handle ignored = operationLock.acquire(uploadId)) {
+      var media = settingsSnapshot.get().storageMedia();
+      long uploadTtl = media.uploadExpiresSeconds();
+      StorageUpload upload = requireAvailableUpload(uploadId, uploadTtl);
+      if (upload.getBlobId() != null) {
+        return completeLocked(uploadId, uploadTtl);
+      }
+      Instant deadline = expiresAt(upload.getCreatedAt(), uploadTtl);
+      long seconds =
+          Math.min(
+              media.s3PresignMaxExpiresSeconds(),
+              Duration.between(clock.instant(), deadline).toSeconds());
+      if (seconds <= 0) {
+        throw DomainException.conflict(
+            "STORAGE_VERIFICATION", "upload has insufficient lifetime for renewal");
+      }
+      StoragePresignedUrlDTO signed = reservation.sign(upload, seconds);
+      // 显式释放可独立标记 cleanup_requested_at，因此签票后重新读取行。
+      requireAvailableUpload(uploadId, uploadTtl);
+      if (signed.getExpiresAt().isAfter(deadline)) {
+        throw DomainException.conflict(
+            "STORAGE_VERIFICATION", "signature outlasts the upload reservation");
+      }
+      return toDTO(upload, null, deadline, signed);
+    }
+  }
+
   /** 完成上传：校验直传对象并绑定 blob，返回 READY。 */
   public StorageUploadDTO complete(UUID uploadId) {
     Objects.requireNonNull(uploadId, "uploadId must not be null");
@@ -175,11 +206,7 @@ public class StorageUploadService {
   }
 
   private StorageUploadDTO completeLocked(UUID uploadId, long uploadTtl) {
-    StorageUpload upload = uploadRepository.getById(uploadId);
-    if (upload == null) {
-      throw DomainException.notFound("upload", "unknown upload: " + uploadId);
-    }
-    requireCleanupAvailable(upload, uploadTtl);
+    StorageUpload upload = requireAvailableUpload(uploadId, uploadTtl);
     if (upload.getBlobId() != null) {
       // READY 重试：幂等并自愈最终对象，随后尽力清理残留的临时对象与未使用的候选对象。
       ensureBlobOriginal(upload.getBlobId(), uploadId);
@@ -200,6 +227,10 @@ public class StorageUploadService {
                 upload.getStoredWidth().longValue(),
                 upload.getStoredHeight().longValue(),
                 null);
+    if (upload.getFormat() == null) {
+      verifyProbedImage(
+          upload.getDeclaredMediaType(), facts.mediaType(), facts.width(), facts.height());
+    }
     UUID blobId = materializeAndBind(upload, facts, uploadTtl);
     return toDTO(upload, blobId, expiresAt(upload.getCreatedAt(), uploadTtl), null);
   }
@@ -522,6 +553,15 @@ public class StorageUploadService {
       blobManager.release(locked.getBlobId());
     }
     registerMaintenanceWakeup();
+  }
+
+  private StorageUpload requireAvailableUpload(UUID uploadId, long uploadTtl) {
+    StorageUpload upload = uploadRepository.getById(uploadId);
+    if (upload == null) {
+      throw DomainException.notFound("upload", "unknown upload: " + uploadId);
+    }
+    requireCleanupAvailable(upload, uploadTtl);
+    return upload;
   }
 
   private void requireCleanupAvailable(StorageUpload upload, long uploadTtl) {

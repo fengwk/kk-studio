@@ -25,6 +25,7 @@ import java.util.UUID;
 /** {@link DatabasePluginCredentialStore} 按状态、刷新租约与本地时限判定凭据可用性。 */
 class DatabasePluginCredentialStoreTest {
 
+  private static final UUID GENERATION = new UUID(0, 1);
   private static final String PLUGIN_ID = "test.plugin";
   private static final Instant NOW = Instant.parse("2026-10-01T12:00:00Z");
   private static final String PAYLOAD = "{\"token\":\"secret\"}";
@@ -53,7 +54,8 @@ class DatabasePluginCredentialStoreTest {
           .thenReturn(Optional.of(row(status, NOW.plusSeconds(60), null)));
 
       assertEquals(
-          new PluginCredentialSnapshot(PLUGIN_ID, "CN", NOW.plusSeconds(60), 3L, PAYLOAD),
+          new PluginCredentialSnapshot(
+              GENERATION, PLUGIN_ID, "CN", NOW.plusSeconds(60), 3L, PAYLOAD),
           store.resolve(PLUGIN_ID));
       assertEquals(status, store.projection(PLUGIN_ID).status());
       assertEquals("CN", store.projection(PLUGIN_ID).region());
@@ -67,6 +69,7 @@ class DatabasePluginCredentialStoreTest {
         .thenReturn(
             Optional.of(
                 new PluginCredentialRow(
+                    GENERATION,
                     PLUGIN_ID,
                     PAYLOAD,
                     null,
@@ -109,13 +112,14 @@ class DatabasePluginCredentialStoreTest {
   @Test
   void rejectUsedTargetsTheReadVersion() {
     PluginCredentialSnapshot snapshot =
-        new PluginCredentialSnapshot(PLUGIN_ID, "CN", NOW.plusSeconds(60), 3L, PAYLOAD);
-    when(repository.rejectUsed(PLUGIN_ID, 3L, "token revoked")).thenReturn(true);
+        new PluginCredentialSnapshot(GENERATION, PLUGIN_ID, "CN", NOW.plusSeconds(60), 3L, PAYLOAD);
+    when(repository.rejectUsed(PLUGIN_ID, GENERATION, 3L, "token revoked")).thenReturn(true);
 
     assertTrue(store.rejectUsed(snapshot, " token revoked\n"));
 
     store.rejectUsed(snapshot, " ");
-    verify(repository).rejectUsed(PLUGIN_ID, 3L, DatabasePluginCredentialStore.AUTH_REJECTED_ERROR);
+    verify(repository)
+        .rejectUsed(PLUGIN_ID, GENERATION, 3L, DatabasePluginCredentialStore.AUTH_REJECTED_ERROR);
   }
 
   private void assertReason(PluginCredentialUnavailableReason reason) {
@@ -127,6 +131,7 @@ class DatabasePluginCredentialStoreTest {
   private static PluginCredentialRow row(
       PluginCredentialStatus status, Instant expiresAt, Instant leaseUntil) {
     return new PluginCredentialRow(
+        GENERATION,
         PLUGIN_ID,
         PAYLOAD,
         "CN",

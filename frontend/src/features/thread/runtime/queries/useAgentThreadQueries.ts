@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { agentService } from '@/shared/api/agent-service'
 import { queryKeys } from '@/shared/lib/query-keys'
 import { useThreadSnapshotSync } from '@/features/thread/runtime/state/thread-snapshot-sync'
-import { fetchThreadSnapshot } from '@/features/thread/runtime/state/thread-snapshot-cache'
+import { fetchThreadSnapshot, isThreadSnapshotUnavailable } from '@/features/thread/runtime/state/thread-snapshot-cache'
 
 export function useAgentThreadQueries(threadId: string) {
   const queryClient = useQueryClient()
@@ -18,7 +18,7 @@ export function useAgentThreadQueries(threadId: string) {
   const snapshotQuery = useQuery({
     queryKey: queryKeys.threads.snapshot(threadId),
     queryFn: ({ signal }) => fetchThreadSnapshot(queryClient, threadId, { signal }),
-    enabled: Boolean(threadId),
+    enabled: (query) => Boolean(threadId) && !isThreadSnapshotUnavailable(query),
   })
   const snapshot = snapshotQuery.data
   const thread = snapshot?.thread
@@ -50,6 +50,7 @@ export function useAgentThreadQueries(threadId: string) {
     agentsQuery,
     modelsQuery,
     snapshotQuery,
+    unavailable: threadSnapshotSync.unavailable,
     snapshotSyncError: threadSnapshotSync.error,
     retrySnapshotSync: threadSnapshotSync.retry,
     agents,

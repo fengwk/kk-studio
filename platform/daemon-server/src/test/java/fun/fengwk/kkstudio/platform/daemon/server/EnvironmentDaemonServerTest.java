@@ -86,7 +86,10 @@ import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
@@ -3072,6 +3075,44 @@ class EnvironmentDaemonServerTest {
       }
     }
     assertFalse(channel.closed());
+  }
+
+  /** 过期签名只能续签原绑定；拒绝续签后重放和调用清理仍使用同一 uploadId。 */
+  @Test
+  void expiredUploadRequestRenewsOnlyTheBoundUpload() {
+    for (boolean refuse : List.of(false, true)) {
+      Instant now = Instant.parse("2026-07-28T10:00:00Z");
+      Fixture fixture = new Fixture(Runnable::run, Clock.fixed(now, ZoneOffset.UTC));
+      fixture.ticketService.pendingReserve = true;
+      fixture.ticketService.initialPresignExpiry = now.toEpochMilli();
+      fixture.ticketService.refuseRenewal = refuse;
+      FakeControlChannel channel = fixture.connectReady("channel-transfer-renewal");
+      fixture.server.invoke(ENVIRONMENT_ID, capabilityRequest(CALL_ONE), new RecordingListener());
+      Envelope request =
+          resourceUploadRequestEnvelope(CALL_ONE, TRANSFER_ONE, "text/plain", "a.txt", 3L, SHA_A);
+      fixture.receive(channel, request);
+      UUID uploadId = uploadIdOfTicket(ticketEnvelope(channel));
+      fixture.receive(channel, request);
+      fixture.receive(channel, request);
+
+      var tickets =
+          channel.envelopes().stream()
+              .filter(envelope -> envelope.getMessageType() == MessageType.RESOURCE_UPLOAD_TICKET)
+              .map(Envelope::getResourceUploadTicket)
+              .toList();
+      assertEquals(1, fixture.ticketService.reserves.size());
+      assertEquals(
+          refuse ? List.of(uploadId, uploadId) : List.of(uploadId), fixture.ticketService.renewals);
+      if (refuse) {
+        assertEquals(TicketState.TICKET_FAILED, tickets.getLast().getState());
+      } else {
+        assertEquals(uploadId.toString(), tickets.getLast().getUploadId());
+        assertTrue(tickets.getLast().getPresignedPut().getExpiresAtEpochMs() > now.toEpochMilli());
+        assertEquals(tickets.get(1), tickets.getLast());
+      }
+      fixture.receive(channel, failedEnvelope(CALL_ONE.toString(), "boom"));
+      assertEquals(List.of(uploadId), fixture.ticketService.releases);
+    }
   }
 
   /** 测试意图：同一 transfer 以不同请求内容重申请属于协议违规，必须关闭连接。 */

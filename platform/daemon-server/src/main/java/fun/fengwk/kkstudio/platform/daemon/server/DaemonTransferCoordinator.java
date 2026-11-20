@@ -17,6 +17,7 @@ import fun.fengwk.kkstudio.platform.daemon.protocol.TicketState;
 
 import java.lang.System.Logger;
 import java.lang.System.Logger.Level;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -32,6 +33,12 @@ final class DaemonTransferCoordinator {
 
   static final int MAX_TRANSFERS_PER_INVOCATION = 16;
   static final String TRANSFER_FAILURE_MESSAGE = "resource upload is unavailable";
+
+  private final Clock clock;
+
+  DaemonTransferCoordinator(Clock clock) {
+    this.clock = clock;
+  }
 
   record PreparedTransfer(
       DaemonConnectionSession session,
@@ -134,14 +141,16 @@ final class DaemonTransferCoordinator {
     boolean commit = prepared.commitUploadId() != null;
     DaemonResourceTicketService.Ticket ticket;
     UUID producedUploadId = null;
-    boolean replay;
     synchronized (binding) {
       if (binding.released) {
         return;
       }
       ticket = commit ? binding.commitTicket() : binding.reserveTicket();
-      replay = ticket != null;
-      if (!replay) {
+      boolean expired =
+          !commit
+              && ticket instanceof DaemonResourceTicketService.Ticket.Pending pending
+              && pending.presignedPut().expiresAtEpochMs() <= clock.millis();
+      if (ticket == null || expired) {
         try {
           ticket =
               commit
@@ -149,8 +158,18 @@ final class DaemonTransferCoordinator {
                       active.environmentId,
                       active.invocationId.toString(),
                       prepared.commitUploadId())
-                  : ticketService.reserve(
-                      active.environmentId, active.invocationId.toString(), binding.request);
+                  : binding.currentUploadId != null
+                      ? ticketService.renew(
+                          active.environmentId,
+                          active.invocationId.toString(),
+                          binding.currentUploadId)
+                      : ticketService.reserve(
+                          active.environmentId, active.invocationId.toString(), binding.request);
+          if (ticket.uploadId() != null
+              && binding.currentUploadId != null
+              && !binding.currentUploadId.equals(ticket.uploadId())) {
+            throw new IllegalStateException("resource ticket changed the owned upload ID");
+          }
         } catch (RuntimeException error) {
           ticket = new DaemonResourceTicketService.Ticket.Failed(TRANSFER_FAILURE_MESSAGE);
         }

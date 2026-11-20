@@ -1,6 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { act, cleanup, renderHook, waitFor } from '@testing-library/react'
+import { act, cleanup, render, renderHook, screen, waitFor, within } from '@testing-library/react'
 import type { ReactNode } from 'react'
+import { MemoryRouter } from 'react-router'
+import { AgentPane } from '@/features/thread/runtime/panes/AgentPane'
+import { agentService } from '@/shared/api/agent-service'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ApplicationEventProvider } from '@/shared/app-events'
 import { decodeServerMessage } from '@/shared/app-events/protocol'
@@ -123,6 +126,7 @@ afterEach(() => {
   cleanup()
   queryClient.clear()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })
 
@@ -222,6 +226,115 @@ describe('useThreadSnapshotSync', () => {
       type: 'event', resource: { kind: 'thread', id: THREAD }, name: 'snapshot', data: snapshot(),
     }))
     await waitFor(() => expect(result.current.error).toBeNull())
+  })
+
+  it('keeps rejected Thread history read-only across reconnect and remount without touching a healthy Thread', async () => {
+    vi.useFakeTimers()
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('fixture does not use network')))
+    vi.spyOn(agentService, 'listAgents').mockResolvedValue([])
+    vi.spyOn(agentService, 'listModels').mockResolvedValue([])
+    const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockResolvedValue(snapshot())
+    queryClient.setDefaultOptions({ queries: { staleTime: Infinity, retry: false } })
+    const resource = snapshotFrame(null).resource
+    const healthyId = '77777777-2222-4333-8444-555555555555'
+    const healthyResource = { kind: 'thread', id: healthyId } as const
+    const key = queryKeys.threads.snapshot(THREAD)
+    const cached = snapshot()
+    cached.toolInvocations = [waitingTool]
+    const messageId = '66666666-2222-4333-8444-555555555555'
+    cached.thread.headEntryId = messageId
+    cached.entries.push({
+      ...cached.entries[0], entryId: messageId, parentEntryId: ENTRY, entryType: 'MESSAGE',
+      payload: { message: { role: 'USER', contents: [{ type: 'text', text: 'Retained Thread history' }] } },
+    })
+    queryClient.setQueryData(key, cached)
+    const healthy = (version: string) => {
+      const value = snapshot(version)
+      return { ...value, thread: { ...value.thread, threadId: healthyId, rootThreadId: healthyId } }
+    }
+    queryClient.setQueryData(queryKeys.threads.snapshot(healthyId), healthy('1'))
+    function Fixture({ show }: { show: boolean }) {
+      useThreadSnapshotSync(healthyId, true)
+      return show ? <MemoryRouter><AgentPane paneId={THREAD} agents={[]} /></MemoryRouter> : null
+    }
+    const { container, rerender } = render(<Fixture show />, { wrapper })
+    const socket = sockets.openLatest()
+    expect(container.querySelector('.thread-working')).not.toBeNull()
+    expect(screen.getByRole('textbox')).toBeInTheDocument()
+    expect(screen.getByText('Retained Thread history')).toBeInTheDocument()
+
+    await act(async () => {
+      // A queued snapshot must not overwrite facts after the permanent refusal.
+      socket.emitServer(snapshotFrame(snapshot('9')))
+      socket.emitServer({ type: 'error', code: 'RESOURCE_NOT_FOUND', message: 'Resource not found', resource })
+      socket.emitServer({ ...snapshotFrame(healthy('2')), resource: healthyResource })
+    })
+    const history = within(screen.getByRole('log'))
+    expect(history.getByRole('alert')).toHaveTextContent('此线程已不存在')
+    expect(history.getByText('Retained Thread history')).toBeInTheDocument()
+    expect(within(history.getByRole('alert')).queryByRole('button')).not.toBeInTheDocument()
+    expect(container.querySelector('.thread-working')).toBeNull()
+    expect(screen.queryByRole('textbox')).not.toBeInTheDocument()
+    expect(queryClient.getQueryData(key)).toEqual(cached)
+    expect(queryClient.getQueryData(queryKeys.threads.snapshot(healthyId))).toEqual(healthy('2'))
+    expect(socket.closed).toBe(false)
+    expect(socket.sentMessages().filter((frame) => 'resource' in frame && frame.resource.kind === 'thread'
+      && frame.resource.id === THREAD)).toEqual([
+      { type: 'subscribe', resource, afterEntryId: messageId },
+      { type: 'unsubscribe', resource },
+    ])
+
+    await act(async () => socket.fail())
+    await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+    const next = sockets.openLatest()
+    rerender(<Fixture show={false} />)
+    rerender(<Fixture show />)
+    await act(async () => { await queryClient.invalidateQueries({ queryKey: key, exact: true }) })
+    expect(next.sentMessages()).toEqual([{ type: 'subscribe', resource: healthyResource, afterEntryId: ENTRY }])
+    expect(screen.getByRole('alert')).toHaveTextContent('此线程已不存在')
+    expect(get).not.toHaveBeenCalled()
+  })
+
+  it('retries a missing wire subscription once per connection and explicitly thereafter', async () => {
+    vi.useFakeTimers()
+    queryClient.setQueryData(queryKeys.threads.snapshot(THREAD), snapshot())
+    const get = vi.spyOn(harnessService, 'getThreadSnapshot').mockResolvedValue(snapshot())
+    const { result } = renderHook(() => [useThreadSnapshotSync(THREAD, true), useThreadSnapshotSync(THREAD, true)], { wrapper })
+    const resource = snapshotFrame(null).resource
+    const subscribe = { type: 'subscribe', resource, afterEntryId: ENTRY }
+    const missing = { type: 'error', code: 'RESOURCE_NOT_SUBSCRIBED', message: 'Not subscribed', resource } as const
+    const ack = { type: 'subscribed', resource, cursor: '0' } as const
+    const refresh = { type: 'refresh', resource }
+    const connected = (connectionId: string) => ({
+      type: 'connected', eventNodeId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      connectionId, heartbeatIntervalMillis: '20000',
+    } as const)
+    const socket = sockets.openLatest()
+    act(() => socket.emitServer(connected('bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb')))
+    act(() => result.current[0].retry())
+    act(() => { socket.emitServer(missing); socket.emitServer(missing) })
+    expect(socket.sentMessages()).toEqual([subscribe, refresh, subscribe])
+    expect(result.current.map(({ error }) => error)).toEqual(['Not subscribed', 'Not subscribed'])
+    act(() => result.current[1].retry())
+    expect(socket.sentMessages()).toEqual([subscribe, refresh, subscribe, subscribe])
+    expect(result.current[0].error).toBe('Not subscribed')
+    act(() => socket.emitServer(ack))
+    expect(result.current.map(({ error }) => error)).toEqual([null, null])
+    act(() => result.current[0].retry())
+    act(() => socket.emitServer(missing))
+    expect(socket.sentMessages()).toEqual([subscribe, refresh, subscribe, subscribe, refresh])
+    expect(socket.closed).toBe(false)
+
+    act(() => socket.fail())
+    await act(async () => { await vi.advanceTimersByTimeAsync(300) })
+    const next = sockets.openLatest()
+    act(() => next.emitServer(connected('cccccccc-cccc-4ccc-8ccc-cccccccccccc')))
+    expect(result.current[0].error).toBe('Not subscribed')
+    act(() => { next.emitServer(missing); next.emitServer(missing) })
+    expect(next.sentMessages()).toEqual([subscribe, subscribe])
+    act(() => next.emitServer(ack))
+    expect(result.current[0].error).toBeNull()
+    expect(get).not.toHaveBeenCalled()
   })
 
   it('drops a queued snapshot from an old physical connection after reconnect', async () => {

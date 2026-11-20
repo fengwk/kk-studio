@@ -14,7 +14,7 @@ public interface PluginCredentialAccess {
   /**
    * 解析本次调用所需的凭据快照。
    *
-   * @throws PluginCredentialUnavailableException 无凭据、刷新在途、需重新登录、结果未知或凭据已过期
+   * @throws PluginCredentialUnavailableException 无凭据、认证上下文不匹配、刷新在途、需重新登录、结果未知或凭据已过期
    */
   PluginCredentialSnapshot resolve();
 

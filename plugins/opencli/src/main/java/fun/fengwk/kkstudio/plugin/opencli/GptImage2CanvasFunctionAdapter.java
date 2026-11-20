@@ -21,6 +21,7 @@ import fun.fengwk.kkstudio.plugin.opencli.OpenCliHubClient.HubResourceStream;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -80,11 +81,13 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
           new CanvasFunctionReferencePolicy(Set.of(CanvasResourceKind.IMAGE), 20, Map.of()));
 
   private final OpenCliSettings settings;
+  private final URI hubOrigin;
   private final OpenCliHubClient client;
   private final OpenCliReferenceUploader uploader;
 
   public GptImage2CanvasFunctionAdapter(OpenCliSettings settings, OpenCliHubClient client) {
     this.settings = Objects.requireNonNull(settings, "settings");
+    this.hubOrigin = OpenCliHubTransport.configuredOrigin(settings);
     this.client = Objects.requireNonNull(client, "client");
     uploader = new OpenCliReferenceUploader(client);
   }
@@ -132,6 +135,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
   public void submit(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
     preflight(run);
     Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
+    OpenCliAdapterState.bindSubmission(run, state, hubOrigin);
     String executionId =
         OpenCliAdapterState.optionalString(state, OpenCliAdapterState.EXECUTION_ID);
     if (executionId != null) {
@@ -157,6 +161,7 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public List<UUID> execute(CanvasFunctionExecutionContext context, CanvasFunctionFrozenRun run) {
+    OpenCliAdapterState.requireOrigin(run.adapterState(), hubOrigin);
     preflight(run);
     Map<String, Object> state = OpenCliAdapterState.copy(run.adapterState());
     String executionId =
@@ -194,6 +199,9 @@ public class GptImage2CanvasFunctionAdapter implements CanvasFunctionAdapter {
 
   @Override
   public void cancel(CanvasFunctionFrozenRun run) {
+    if (!OpenCliAdapterState.matchesOrigin(run.adapterState(), hubOrigin)) {
+      return;
+    }
     String executionId =
         OpenCliAdapterState.optionalString(run.adapterState(), OpenCliAdapterState.EXECUTION_ID);
     if (executionId != null) {

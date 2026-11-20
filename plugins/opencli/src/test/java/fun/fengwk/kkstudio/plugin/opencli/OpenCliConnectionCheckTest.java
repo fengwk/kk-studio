@@ -32,6 +32,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -392,6 +393,7 @@ class OpenCliConnectionCheckTest {
   private PluginCredentialAccess validCredentialAccess() {
     PluginCredentialSnapshot snapshot =
         new PluginCredentialSnapshot(
+            UUID.randomUUID(),
             "opencli",
             null,
             null,

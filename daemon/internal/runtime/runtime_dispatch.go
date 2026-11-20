@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/fengwk/kk-studio/daemon/internal/protocol"
 )
@@ -91,12 +90,12 @@ func (r *Runtime) handleIDELease(e *protocol.Envelope) error {
 		return errors.New("IDE_LEASE is not allowed while environment update admission is held")
 	}
 	request, ok := e.Payload.(*protocol.Envelope_IdeLease)
-	if !ok || request.IdeLease == nil {
+	if !ok || request == nil || request.IdeLease == nil {
 		r.admissionMu.Unlock()
 		return errors.New("IDE lease payload is invalid")
 	}
-	roundStartedAt, err := r.consumeIDELease(request.IdeLease, time.Now())
-	if err == nil {
+	roundStartedAt, err := r.consumeIDELease(request.IdeLease)
+	if err == nil && !roundStartedAt.IsZero() {
 		r.options.IDE.ApplyLease(request.IdeLease, roundStartedAt)
 	}
 	r.admissionMu.Unlock()

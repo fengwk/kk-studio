@@ -124,7 +124,7 @@ iframe 使用同源视图作用域路径 `/ide/{environmentId}/{viewId}/...`。b
 
 每个 browserSession 使用浏览器 Web Locks 做同源独占：刷新复用会话；复制 tab 发现会话已被活页面持有就生成新会话并清空复制来的运行身份，只保留非运行态展示偏好。pagehide 只撤回或暂停使用证明，不删除视图；BFCache pageshow 重新确认锁与权威绑定。Web Locks 不可用时明确报告浏览器能力不足，不退回共享身份或基于本地时间的接管。
 
-使用证明由 [`IdeLeaseCoordinator`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeLeaseCoordinator.java) 在心跳轮次上驱动：Daemon 的心跳带 `ideLeaseRound`，owner 先用 `LIST_VIEWS` 读取当前权威快照，再按 eventNode/connection/browserSession 分组向事件节点查询已确认的持有列表，只有 environment/view/browserSession/epoch 完全匹配的条目才写进 `IDE_LEASE`。心跳本身不续租，查询失败不写证明，也不重放旧轮次；同一 Environment 同一时刻只有一轮在途。有效证明按该轮发出时刻计算 600 秒到期，到期回收只在取得安全证据时发生，规则见下节。
+使用证明由 [`IdeLeaseCoordinator`](../../apps/ide/src/main/java/fun/fengwk/kkstudio/ide/IdeLeaseCoordinator.java) 在心跳轮次上驱动：Daemon 的心跳带 `ideLeaseRound`，owner 先用 `LIST_VIEWS` 读取当前权威快照，再按 eventNode/connection/browserSession 分组向事件节点查询已确认的持有列表，只有 environment/view/browserSession/epoch 完全匹配的条目才写进 `IDE_LEASE`。心跳本身不续租，查询失败不写证明，也不重放旧轮次；同一 Environment 同一时刻只有一轮在途。Daemon 仅接受当前未过期的轮次一次；迟到、过期或已消费的合法证明不续租，也不影响控制连接继续处理消息。有效证明按该轮发出时刻计算 600 秒到期，到期回收只在取得安全证据时发生，规则见下节。
 
 ### 自动到期回收
 
