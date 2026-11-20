@@ -22,14 +22,15 @@ export type ThreadProjection = ReturnType<typeof useThreadProjection>
  */
 export function useThreadProjection(threadId: string) {
   const {
+    unavailable,
     agents,
     models,
     thread,
     sessionId,
     entries,
-    queuedCommands,
-    activeAssistantOutput,
-    toolInvocations,
+    queuedCommands: cachedCommands,
+    activeAssistantOutput: cachedAssistantOutput,
+    toolInvocations: cachedToolInvocations,
     generationFailures,
     stopReceipts,
     unconfirmedExecutions,
@@ -37,6 +38,9 @@ export function useThreadProjection(threadId: string) {
     snapshotSyncError,
     retrySnapshotSync,
   } = useAgentThreadQueries(threadId)
+  const queuedCommands = useMemo(() => unavailable ? [] : cachedCommands, [cachedCommands, unavailable])
+  const toolInvocations = useMemo(() => unavailable ? [] : cachedToolInvocations, [cachedToolInvocations, unavailable])
+  const activeAssistantOutput = unavailable ? null : cachedAssistantOutput
   const bound = Boolean(thread)
   const snapshotSyncMessage = snapshotSyncError
   const snapshotSyncErrorValue = useMemo(
@@ -45,7 +49,7 @@ export function useThreadProjection(threadId: string) {
   )
   const realtime = useHarnessThreadRealtime(
     threadId,
-    Boolean(threadId) && snapshotQuery.isSuccess,
+    !unavailable && Boolean(threadId) && snapshotQuery.isSuccess,
     thread?.version,
     activeAssistantOutput,
     toolInvocations,
@@ -76,7 +80,7 @@ export function useThreadProjection(threadId: string) {
     }),
     [entries, generationFailures, activeAssistantOutput, realtime.modelStream, realtime.toolStreams, toolInvocations],
   )
-  const working = isThreadWorking(thread, timeline)
+  const working = !unavailable && isThreadWorking(thread, timeline)
   const runtimeLabels = resolveRuntimeLabels(thread, models)
   const bodyRef = useRef<HTMLDivElement>(null)
   // 根判定：执行根是 parentThreadId 为 null 的 Thread；未加载完成前为 null，控制区不暴露。
@@ -93,6 +97,7 @@ export function useThreadProjection(threadId: string) {
     models,
     thread,
     bound,
+    unavailable,
     isRoot,
     title: thread?.threadId || translate('ai.chat.chatLabel'),
     timeline,
@@ -102,7 +107,7 @@ export function useThreadProjection(threadId: string) {
     working,
     entries,
     messagesLoading: snapshotQuery.isLoading,
-    messagesError: snapshotQuery.error ?? snapshotSyncErrorValue,
+    messagesError: unavailable ? snapshotSyncErrorValue : snapshotQuery.error ?? snapshotSyncErrorValue,
     retrySnapshotSync,
     bodyRef,
     queuedCommands,

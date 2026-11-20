@@ -8,6 +8,20 @@ import { harnessService } from '@/shared/api/harness-service'
 import { compareCatalogVersions } from '@/shared/lib/catalog-version'
 import { queryKeys } from '@/shared/lib/query-keys'
 
+// Keep the rejection as long as the retained snapshot query, without changing its facts.
+const unavailableQueries = new WeakSet<object>()
+
+export function isThreadSnapshotUnavailable(query: object): boolean {
+  return unavailableQueries.has(query)
+}
+
+export function markThreadSnapshotUnavailable(queryClient: QueryClient, threadId: string): void {
+  const query = queryClient.getQueryCache().find({ queryKey: queryKeys.threads.snapshot(threadId), exact: true })
+  if (query != null) {
+    unavailableQueries.add(query)
+  }
+}
+
 const liveEpochs = new WeakMap<QueryClient, Map<string, number>>()
 
 export function getThreadSnapshotEpoch(queryClient: QueryClient, threadId: string): number {
@@ -19,6 +33,10 @@ export function requestThreadSnapshotRefresh(
   manager: ApplicationEventManager,
   threadId: string,
 ): Promise<void> {
+  const query = queryClient.getQueryCache().find({ queryKey: queryKeys.threads.snapshot(threadId), exact: true })
+  if (query != null && isThreadSnapshotUnavailable(query)) {
+    return Promise.resolve()
+  }
   manager.requestThreadRefresh({ kind: 'thread', id: threadId })
   return queryClient.invalidateQueries({
     queryKey: queryKeys.threads.snapshot(threadId),

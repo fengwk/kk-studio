@@ -84,6 +84,7 @@ export class ApplicationEventManager {
   private readonly identityListeners = new Set<
     (identity: ApplicationEventConnectionIdentity | null) => void
   >()
+  private readonly threadResubscribeAttempts = new Set<string>()
   private readonly pendingUsages = new Map<string, PendingUsage>()
   private connectionIdentity: ApplicationEventConnectionIdentity | null = null
   private acceptedBrowserSessionId: string | null = null
@@ -198,6 +199,17 @@ export class ApplicationEventManager {
     return true
   }
 
+  /** 补发丢失的 Thread wire 订阅；自动尝试每个资源每条连接仅一次。 */
+  retryThreadSubscription(resource: Extract<ApplicationEventResource, { kind: 'thread' }>, explicit: boolean): void {
+    const entry = this.subscriptions.get(resourceKey(resource))
+    if (entry == null || entry.suspended || this.connectionIdentity == null
+      || (!explicit && this.threadResubscribeAttempts.has(resource.id))) {
+      return
+    }
+    this.threadResubscribeAttempts.add(resource.id)
+    this.sendSubscribe(entry)
+  }
+
   /** 请求已订阅 Thread 的强制权威快照；不增减本地或 wire refcount。 */
   requestThreadRefresh(resource: Extract<ApplicationEventResource, { kind: 'thread' }>): boolean {
     const entry = this.subscriptions.get(resourceKey(resource))
@@ -293,6 +305,7 @@ export class ApplicationEventManager {
   }
 
   private handleClose(): void {
+    this.threadResubscribeAttempts.clear()
     this.setConnectionIdentity(null)
     this.acceptedBrowserSessionId = null
     this.rejectPendingUsages('application event connection closed')

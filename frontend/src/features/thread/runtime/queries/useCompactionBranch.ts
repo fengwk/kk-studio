@@ -10,6 +10,7 @@ import { isThreadActiveStatus } from '@/features/thread/runtime/thread-panel/thr
 import { queryKeys } from '@/shared/lib/query-keys'
 import {
   fetchThreadSnapshot,
+  isThreadSnapshotUnavailable,
   requestThreadSnapshotRefresh,
 } from '@/features/thread/runtime/state/thread-snapshot-cache'
 import { useThreadSnapshotSync } from '@/features/thread/runtime/state/thread-snapshot-sync'
@@ -21,6 +22,7 @@ interface CompactionBranchState {
   branch: CompactionBranchProjection | null
   isLoading: boolean
   isError: boolean
+  unavailable: boolean
   refetch: () => void
   /** 分支仍在执行：决定 Stop 是否可用。 */
   running: boolean
@@ -42,7 +44,8 @@ export function useCompactionBranch(threadId: string, afterEntryId: string): Com
   const query = useQuery({
     queryKey,
     queryFn: ({ signal }) => fetchThreadSnapshot(queryClient, threadId, { signal }),
-    enabled: isCanonicalUuid(threadId) && isCanonicalUuid(afterEntryId),
+    enabled: (query) => isCanonicalUuid(threadId) && isCanonicalUuid(afterEntryId)
+      && !isThreadSnapshotUnavailable(query),
   })
   const snapshotSync = useThreadSnapshotSync(threadId, query.data != null)
   const stopMutation = useMutation({
@@ -69,8 +72,9 @@ export function useCompactionBranch(threadId: string, afterEntryId: string): Com
     isLoading: query.isLoading,
     // 服务端在游标不是祖先时回落为完整历史；那不能当作分支自己的 Entry 展示。
     isError: query.isError || snapshotSync.error != null || (query.data != null && branch == null),
+    unavailable: snapshotSync.unavailable,
     refetch: snapshotSync.retry,
-    running: isThreadActiveStatus(query.data?.thread.status),
+    running: !snapshotSync.unavailable && isThreadActiveStatus(query.data?.thread.status),
     stop: () => { stopMutation.mutate() },
     stopPending: stopMutation.isPending,
     stopError: stopMutation.error,

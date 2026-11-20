@@ -926,6 +926,10 @@ export const chatCatalog = {
     'en-US': 'Conversation failed to load',
     'zh-CN': '会话加载失败',
   },
+  'ai.runtime.thread.unavailable': {
+    'en-US': 'This thread no longer exists. Saved history is read-only.',
+    'zh-CN': '此线程已不存在。已保留的历史记录仅供查看。',
+  },
   'ai.runtime.thread.empty': {
     'en-US': 'Send a message to start the conversation',
     'zh-CN': '发送消息，开始对话',

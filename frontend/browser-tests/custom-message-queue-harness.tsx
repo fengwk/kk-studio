@@ -138,6 +138,7 @@ export function CustomMessageQueueHarness() {
       updatedAt: 1774958400,
     },
     bound: true,
+    unavailable: false,
     isRoot: false,
     title: 'worker-subagent',
     timeline,

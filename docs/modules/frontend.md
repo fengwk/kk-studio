@@ -96,6 +96,11 @@ projects/interactions/environments 发 `changed` 提示，不携带 cursor。Thr
 `INVALID_EVENT_PAYLOAD`，不影响同一 socket 上的其他资源和 IDE。无法路由的非法帧仍终止连接；
 Thread 保留旧数据并显示同步错误，终止后可通过页面重新加载恢复实时更新。
 
+Thread 订阅返回 `RESOURCE_NOT_FOUND` 时，面板标为已不存在，保留缓存历史供查看，关闭执行状态与操作入口；
+保留该缓存期间不再读 Snapshot，也不随共享连接重连而重订阅该 Thread。`RESOURCE_NOT_SUBSCRIBED` 只补发
+该 Thread 的 `subscribe`，仍使用缓存 head 续接；每条物理连接对该资源最多自动补发一次，此后由用户显式重试。
+收到订阅确认才解除未订阅提示；其他资源、共享连接和快照缺口恢复均不受影响。
+
 Thread Snapshot 只有一份 query 缓存，通过
 [`thread-snapshot-cache.ts`](../../frontend/src/features/thread/runtime/state/thread-snapshot-cache.ts) 合并。
 缓存始终是完整的 root-to-head 历史；只有末 Entry 确为当前 head 时才以它为 `afterEntryId` 请求增量。

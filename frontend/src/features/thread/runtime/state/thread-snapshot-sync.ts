@@ -12,6 +12,8 @@ import { useI18n } from '@/shared/i18n'
 import {
   advanceThreadSnapshotEpoch,
   getSnapshotCursor,
+  isThreadSnapshotUnavailable,
+  markThreadSnapshotUnavailable,
   mergeThreadSnapshotCache,
   requestThreadSnapshotRefresh,
 } from '@/features/thread/runtime/state/thread-snapshot-cache'
@@ -30,6 +32,8 @@ interface ThreadSyncEntry {
   attemptedOverflowVersion: string | null
   coveredOverflowVersion: string | null
   recoveryFailed: boolean
+  subscriptionError: string | null
+  unavailable: boolean
   stopped: boolean
   recoveryAbort: AbortController | null
   error: string | null
@@ -42,17 +46,19 @@ const syncEntries = new WeakMap<QueryClient, Map<string, ThreadSyncEntry>>()
 export function useThreadSnapshotSync(
   threadId: string,
   enabled: boolean,
-): { error: string | null; retry: () => void } {
+): { error: string | null; unavailable: boolean; retry: () => void } {
   const queryClient = useQueryClient()
   const manager = useApplicationEvents()
   const connection = useApplicationEventConnectionState()
   const { t } = useI18n()
   const terminal = enabled && connection.reason?.kind === 'stopped' && connection.reason.cause !== 'manual'
-  const [error, setError] = useState<string | null>(null)
+  const [status, setStatus] = useState<{ threadId: string; error: string | null } | null>(null)
+  const query = queryClient.getQueryCache().find({ queryKey: queryKeys.threads.snapshot(threadId), exact: true })
+  const unavailable = query != null && isThreadSnapshotUnavailable(query)
 
   useEffect(() => {
-    if (!enabled || !threadId) {
-      setError(null)
+    if (!enabled || !threadId || unavailable) {
+      setStatus(null)
       return undefined
     }
     let entries = syncEntries.get(queryClient)
@@ -76,6 +82,8 @@ export function useThreadSnapshotSync(
         attemptedOverflowVersion: null,
         coveredOverflowVersion: null,
         recoveryFailed: false,
+        subscriptionError: null,
+        unavailable: false,
         stopped: false,
         recoveryAbort: null,
         error: null,
@@ -86,10 +94,11 @@ export function useThreadSnapshotSync(
       startSubscription(queryClient, threadId, entry)
     }
     entry.refs += 1
-    entry.observers.add(setError)
-    setError(entry.error)
+    const observe = (error: string | null) => setStatus({ threadId, error })
+    entry.observers.add(observe)
+    observe(entry.subscriptionError ?? entry.error)
     return () => {
-      entry!.observers.delete(setError)
+      entry!.observers.delete(observe)
       entry!.refs -= 1
       if (entry!.refs === 0) {
         entry!.stopped = true
@@ -102,9 +111,13 @@ export function useThreadSnapshotSync(
         entries!.delete(threadId)
       }
     }
-  }, [enabled, manager, queryClient, threadId])
+  }, [enabled, manager, queryClient, threadId, unavailable])
 
   const retry = useCallback(() => {
+    const currentQuery = queryClient.getQueryCache().find({ queryKey: queryKeys.threads.snapshot(threadId), exact: true })
+    if (currentQuery != null && isThreadSnapshotUnavailable(currentQuery)) {
+      return
+    }
     if (terminal) {
       window.location.reload()
       return
@@ -114,6 +127,8 @@ export function useThreadSnapshotSync(
       void queryClient.refetchQueries({
         queryKey: queryKeys.threads.snapshot(threadId), exact: true,
       })
+    } else if (entry.subscriptionError != null) {
+      entry.manager.retryThreadSubscription({ kind: 'thread', id: threadId }, true)
     } else if (entry.recoveryFailed) {
       requestRecovery(queryClient, threadId, entry, { explicit: true })
     } else {
@@ -122,7 +137,10 @@ export function useThreadSnapshotSync(
   }, [queryClient, terminal, threadId])
 
   return {
-    error: terminal ? t('ai.chat.history.liveUpdatesStopped') : error,
+    unavailable,
+    error: unavailable ? t('ai.runtime.thread.unavailable')
+      : terminal ? t('ai.chat.history.liveUpdatesStopped')
+        : status?.threadId === threadId ? status.error : null,
     retry,
   }
 }
@@ -150,6 +168,12 @@ function startSubscription(queryClient: QueryClient, threadId: string, entry: Th
       const cached = queryClient.getQueryData<HarnessThreadSnapshotDTO>(queryKeys.threads.snapshot(threadId))
       return getSnapshotCursor(cached, threadId)
     },
+    onSubscribed: () => {
+      if (entry.subscriptionError != null && !entry.unavailable) {
+        entry.subscriptionError = null
+        notifySyncObservers(entry)
+      }
+    },
     onEvent: (name, data) => {
       if (name !== 'snapshot') {
         return
@@ -170,7 +194,19 @@ function startSubscription(queryClient: QueryClient, threadId: string, entry: Th
       }
     },
     onError: (code, message) => {
-      if (code === INVALID_EVENT_PAYLOAD) {
+      if (code === 'RESOURCE_NOT_FOUND') {
+        markThreadSnapshotUnavailable(queryClient, threadId)
+        entry.unavailable = true
+        entry.generation += 1
+        entry.recoveryAbort?.abort()
+        entry.manager.suspendThread({ kind: 'thread', id: threadId })
+        void queryClient.cancelQueries({ queryKey: queryKeys.threads.snapshot(threadId), exact: true })
+        notifySyncObservers(entry)
+      } else if (code === 'RESOURCE_NOT_SUBSCRIBED') {
+        entry.subscriptionError = message
+        notifySyncObservers(entry)
+        entry.manager.retryThreadSubscription({ kind: 'thread', id: threadId }, false)
+      } else if (code === INVALID_EVENT_PAYLOAD) {
         setSyncError(entry, message)
         requestRecovery(queryClient, threadId, entry)
       } else if (code === 'THREAD_SNAPSHOT_FAILED') {
@@ -247,7 +283,7 @@ function requestRecovery(
   entry: ThreadSyncEntry,
   { explicit = false, overflowVersion }: { explicit?: boolean; overflowVersion?: string } = {},
 ): void {
-  if (entry.recovering || entry.stopped) {
+  if (entry.recovering || entry.stopped || entry.unavailable) {
     return
   }
   if (overflowVersion != null) {
@@ -356,7 +392,7 @@ function isCurrentEvent(
 }
 
 function isCurrent(entry: ThreadSyncEntry, generation: number): boolean {
-  return !entry.stopped && entry.generation === generation
+  return !entry.stopped && !entry.unavailable && entry.generation === generation
 }
 
 function requestWireRefresh(queryClient: QueryClient, threadId: string, entry: ThreadSyncEntry): void {
@@ -373,7 +409,11 @@ function setSyncError(
   }
   entry.error = error
   entry.recoveryFailed = recoveryFailed
+  notifySyncObservers(entry)
+}
+
+function notifySyncObservers(entry: ThreadSyncEntry): void {
   for (const observer of [...entry.observers]) {
-    observer(error)
+    observer(entry.subscriptionError ?? entry.error)
   }
 }
