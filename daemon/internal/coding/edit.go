@@ -99,21 +99,33 @@ func editFile(ctx context.Context, call runtime.CapabilityCall, capability runti
 		return errorResult(call.InvocationID, err), nil
 	}
 	defer target.unlockTarget()
-	updated, source, replacements, err := applyPlannedEdits(target.path, string(target.decoded), args.Edits)
+	decoded := string(target.decoded)
+	source := newEditSource(decoded)
+	replacements, err := planEdits(target.path, source, args.Edits)
 	if err != nil {
 		return errorResult(call.InvocationID, err), nil
 	}
-	if updated == string(target.decoded) {
+	updated, changes := applyEdits(decoded, source, replacements)
+	if updated == decoded {
 		return errorResult(call.InvocationID, rejectInput("No changes to apply: the edits would not change the file")), nil
 	}
-	encoded, err := encodeEditContent(target.path, target.existing, updated)
-	if err != nil {
+	if err := validateEditContent(target.path, target.existing, updated); err != nil {
 		return errorResult(call.InvocationID, err), nil
+	}
+	encoded, err := textcodec.Splice(target.path, target.original, target.decoded, target.existing, changes, updated)
+	if err != nil {
+		return errorResult(call.InvocationID, codecError(target.path, err, codecEdit)), nil
 	}
 	if bytes.Equal(encoded, target.original) {
 		return errorResult(call.InvocationID, rejectInput("No changes to apply: the edits would not change the file")), nil
 	}
-	review, completed, err := editReview(call.InvocationID, target.path, target.hash, source.text, updated, len(replacements), lossyDecode(target.existing, target.replacements, updated))
+	var lossy *LossyDecode
+	for _, change := range changes {
+		if lossy = lossyDecode(target.existing, target.replacements, change.Text); lossy != nil {
+			break
+		}
+	}
+	review, completed, err := editReview(call.InvocationID, target.path, target.hash, source.text, updated, len(replacements), lossy)
 	if err != nil {
 		return errorResult(call.InvocationID, unchangedFileError(err)), nil
 	}
@@ -181,16 +193,6 @@ func editableFileInfo(path string) error {
 	return nil
 }
 
-// applyPlannedEdits validates the entries against the original snapshot and splices them in.
-func applyPlannedEdits(path, decoded string, entries []editEntry) (string, *editSource, []editReplacement, error) {
-	source := newEditSource(decoded)
-	replacements, err := planEdits(path, source, entries)
-	if err != nil {
-		return "", nil, nil, err
-	}
-	return applyEdits(decoded, source, replacements), source, replacements, nil
-}
-
 // editReview renders the numbered diff an approval shows and the completed result that carries it.
 func editReview(invocationID, path, hash, before, after string, replacements int, lossy *LossyDecode) (EditReview, runtime.CapabilityResult, error) {
 	diff, err := numberedDiff(before, normalizeEOL(after))
@@ -203,7 +205,7 @@ func editReview(invocationID, path, hash, before, after string, replacements int
 	}
 	message := fmt.Sprintf("Edited successfully.\nReplacements: %d", replacements)
 	if lossy != nil {
-		message += "\n" + lossyDecodeNote(lossy)
+		message += fmt.Sprintf("\nNote: the edit saved literal U+FFFD in replacements after %d original %s decode replacements; untouched bytes were preserved.", lossy.InvalidSequences, lossy.Encoding)
 	}
 	return review, textResult(invocationID, message), nil
 }
@@ -265,7 +267,7 @@ func newEditSource(text string) *editSource {
 	return source
 }
 
-// originalOffset maps a boundary of the normalized text back to the untouched original bytes.
+// originalOffset maps a normalized boundary to a UTF-8 byte offset in the decoded text.
 func (s *editSource) originalOffset(index int) int {
 	return index + sort.SearchInts(s.collapsed, index)
 }
@@ -308,25 +310,26 @@ func planEdits(path string, source *editSource, entries []editEntry) ([]editRepl
 	return replacements, nil
 }
 
-// applyEdits splices the replacements into the original text in one linear pass, so untouched
-// bytes stay identical and the cost stays proportional to the file size.
-func applyEdits(text string, source *editSource, replacements []editReplacement) string {
+// applyEdits computes the intended text and the actual changes in decoded coordinates.
+func applyEdits(text string, source *editSource, replacements []editReplacement) (string, []textcodec.Replacement) {
 	var builder strings.Builder
 	builder.Grow(len(text))
+	var changes []textcodec.Replacement
 	previous := 0
 	for _, replacement := range replacements {
+		if source.text[replacement.start:replacement.end] == replacement.newText {
+			continue
+		}
 		start := source.originalOffset(replacement.start)
 		end := source.originalOffset(replacement.end)
+		newText := replaceLineBreaks(replacement.newText, source.spanLineBreak(text, replacement, start, end))
+		changes = append(changes, textcodec.Replacement{Start: start, End: end, Text: newText})
 		builder.WriteString(text[previous:start])
-		if source.text[replacement.start:replacement.end] != replacement.newText {
-			builder.WriteString(replaceLineBreaks(replacement.newText, source.spanLineBreak(text, replacement, start, end)))
-		} else {
-			builder.WriteString(text[start:end])
-		}
+		builder.WriteString(newText)
 		previous = end
 	}
 	builder.WriteString(text[previous:])
-	return builder.String()
+	return builder.String(), changes
 }
 
 func editProblem(number int, message string) string {
@@ -602,7 +605,7 @@ func diffLineCount(text string) []string {
 	return lines
 }
 
-// errUnchangedFile reports a change whose normalized text is identical to the file, so there is
+// errUnchangedFile reports identical diff inputs, so there is
 // nothing to write. The caller reports it as an input rejection.
 var errUnchangedFile = errors.New("content is identical to the current file")
 
@@ -621,8 +624,13 @@ func numberedDiff(oldText, newText string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	d := &diffNumbering{width: max(2, len(fmt.Sprint(max(len(diffLineCount(oldText)), len(diffLineCount(newText)))))), oldCursor: 1, newCursor: 1}
-	for _, line := range strings.Split(strings.ReplaceAll(patch, "\r\n", "\n"), "\n") {
+	oldLines, newLines := len(diffLineCount(oldText)), len(diffLineCount(newText))
+	d := &diffNumbering{width: max(2, len(fmt.Sprint(max(oldLines, newLines)))), oldCursor: 1, newCursor: 1}
+	lines := strings.Split(patch, "\n")
+	for i, line := range lines {
+		if i+1 < len(lines) && lines[i+1] != noNewlineMarker && strings.HasPrefix(line, " ") {
+			line = strings.TrimSuffix(line, "\r")
+		}
 		if err := d.add(line); err != nil {
 			return "", err
 		}
@@ -630,7 +638,7 @@ func numberedDiff(oldText, newText string) (string, error) {
 	if !d.seen {
 		return "", errUnchangedFile
 	}
-	if d.oldCursor > 0 && d.oldCursor <= len(diffLineCount(oldText)) || d.newCursor > 0 && d.newCursor <= len(diffLineCount(newText)) {
+	if d.oldCursor > 0 && d.oldCursor <= oldLines || d.newCursor > 0 && d.newCursor <= newLines {
 		d.out = append(d.out, "...")
 	}
 	return strings.Join(d.out, "\n"), nil
@@ -646,9 +654,11 @@ type diffNumbering struct {
 	seen      bool
 }
 
+const noNewlineMarker = `\ No newline at end of file`
+
 // add renders one line of the unified diff and skips the parts the numbered view omits.
 func (d *diffNumbering) add(line string) error {
-	if strings.HasPrefix(line, "--- ") || strings.HasPrefix(line, "+++ ") || line == "" {
+	if line == "" {
 		return nil
 	}
 	if strings.HasPrefix(line, "@@ ") {
@@ -657,7 +667,7 @@ func (d *diffNumbering) add(line string) error {
 	if !d.inHunk {
 		return nil
 	}
-	if line == `\ No newline at end of file` {
+	if line == noNewlineMarker {
 		if len(d.out) > 0 && (strings.HasPrefix(d.out[len(d.out)-1], "-") || strings.HasPrefix(d.out[len(d.out)-1], "+")) {
 			d.out = append(d.out, line)
 		}
@@ -666,6 +676,7 @@ func (d *diffNumbering) add(line string) error {
 	if line == "\\" {
 		return nil
 	}
+	line = strings.ReplaceAll(line, "\r", "␍")
 	switch line[0] {
 	case ' ':
 		d.out = append(d.out, fmt.Sprintf(" %*d|%s", d.width, d.oldCursor, line[1:]))

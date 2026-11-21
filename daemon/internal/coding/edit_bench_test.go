@@ -21,7 +21,7 @@ func BenchmarkEditReplaceAll(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				if updated := applyEdits(content, source, replacements); len(updated) != len(content) {
+				if updated, _ := applyEdits(content, source, replacements); len(updated) != len(content) {
 					b.Fatalf("unexpected length %d", len(updated))
 				}
 			}

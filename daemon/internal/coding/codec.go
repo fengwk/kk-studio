@@ -166,28 +166,21 @@ func wideByteOrder(name string) (string, bool) {
 	return "", false
 }
 
-// encodeEditContent encodes the result of an edit, which must keep the encoding of the file it
+// validateEditContent checks the result of an edit, which must keep the encoding of the file it
 // rewrites: a byte order mark stays authoritative, and otherwise the declaration of the result
 // has to resolve to the original encoding.
-func encodeEditContent(path string, existing textcodec.Encoding, content string) ([]byte, error) {
+func validateEditContent(path string, existing textcodec.Encoding, content string) error {
 	// A leading U+FEFF in a file without a byte order mark changes how the file is read: in UTF-8 it
 	// becomes the byte order mark and vanishes from the text, and in a declared encoding its bytes
 	// precede the declaration. Files with a BOM keep it as content after their BOM.
 	if !existing.BOM && strings.HasPrefix(content, bomRequest) {
-		return nil, failCodec(fmt.Sprintf("A leading U+FEFF cannot be written to %s without changing how the file is read: it would act as a byte order mark or precede the encoding declaration. Remove the leading U+FEFF; edit keeps the file's encoding.", filepath.ToSlash(path)))
+		return failCodec(fmt.Sprintf("A leading U+FEFF cannot be written to %s without changing how the file is read: it would act as a byte order mark or precede the encoding declaration. Remove the leading U+FEFF; edit keeps the file's encoding.", filepath.ToSlash(path)))
 	}
 	declared, hasDeclaration, err := textcodec.Declared(path, []byte(content))
 	if err != nil {
-		return nil, codecError(path, err, codecEdit)
+		return codecError(path, err, codecEdit)
 	}
-	if err = checkEditEncoding(path, existing, declared, hasDeclaration); err != nil {
-		return nil, err
-	}
-	encoded, err := textcodec.Encode(content, existing)
-	if err != nil {
-		return nil, codecError(path, err, codecEdit)
-	}
-	return encoded, nil
+	return checkEditEncoding(path, existing, declared, hasDeclaration)
 }
 
 // checkEditEncoding refuses an edit that would change the effective encoding of a file.
