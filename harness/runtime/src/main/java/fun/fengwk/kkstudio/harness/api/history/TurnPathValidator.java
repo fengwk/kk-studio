@@ -1,6 +1,7 @@
 package fun.fengwk.kkstudio.harness.api.history;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionBranchContract;
+import fun.fengwk.kkstudio.harness.api.compaction.CompactionTrigger;
 import fun.fengwk.kkstudio.harness.api.entry.TurnEndOutcome;
 import fun.fengwk.kkstudio.harness.api.entry.TurnStartReason;
 import fun.fengwk.kkstudio.harness.api.session.AgentMessageContent;
@@ -19,7 +20,7 @@ import java.util.UUID;
  *
  * <p>校验 open Turn 内的 entry 顺序与 TURN_END outcome 前置条件：ROOT 后所有非 ROOT entry 必须位于 open TURN_START
  * 内（NATIVE_COMPACTION 透明除外）；INPUT turn 必须包含 USER/CUSTOM 输入，CONTINUATION 不消费外部输入， COMPACTION turn
- * 不消费外部输入且成功时必须保存 COMPACTION 结果并继续 owner model。COMPACTION branch 首轮只允许固定内部
+ * 不消费外部输入且成功时必须保存 COMPACTION 结果；仅 USER_REQUEST 不续跑 owner model。COMPACTION branch 首轮只允许固定内部
  * 摘要指令，后续只允许继续轮次及固定失败工具结果，不执行平台工具。普通 Assistant 结果只能出现一次；Tool 结果必须严格匹配 Assistant ToolCall 的连续前缀。STOP
  * turn 只允许取消错误屏障和带 closeRequestId 的 STOPPED TURN_END。路径可以在任意 prefix 截断。
  */
@@ -170,7 +171,7 @@ final class TurnPathValidator {
       throw new IllegalArgumentException("TURN_END must reference its open TURN_START entry id");
     }
     switch (end.outcome()) {
-      case COMPLETED -> requireCompletedOutcome();
+      case COMPLETED -> requireCompletedOutcome(end);
       case FAILED -> requireFailedOutcome(end);
       case STOPPED -> requireStoppedOutcome();
       case CANCELLED -> {
@@ -187,13 +188,19 @@ final class TurnPathValidator {
     openOwnerThreadId = null;
   }
 
-  private void requireCompletedOutcome() {
+  private void requireCompletedOutcome(TurnEndPayload end) {
     if (openReason == TurnStartReason.COMPACTION) {
       // COMPACTION turn 的成功结果必须是 COMPACTION payload（见 visit 的跨用途校验）。
       if (!(assistantResultEntry != null
           && assistantResultEntry.payload() instanceof CompactionPayload)) {
         throw new IllegalArgumentException(
             "completed compaction turns require a COMPACTION result");
+      }
+      CompactionTrigger trigger =
+          ((TurnStartPayload) openTurnStart.payload()).compaction().trigger();
+      if (end.continueModel() != (trigger != CompactionTrigger.USER_REQUEST)) {
+        throw new IllegalArgumentException(
+            "completed compaction turn has incompatible continueModel for trigger " + trigger);
       }
     } else {
       requireAssistantMessage("completed");
