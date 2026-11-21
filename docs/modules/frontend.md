@@ -378,7 +378,8 @@ Thread 处于等待审批时活动条显示“等待审批”；实际工具等�
 
 画布库与其他资源列表共用紧凑资源卡。点击“创建新画布”后填写名称并确认才创建；
 取消不会写入。创建期间不能重复提交，失败保留表单供修改重试。
-已有画布的“进入”仅打开该画布，不创建新对象。
+已有画布的“进入”仅打开该画布，不创建新对象。编辑器标题旁显示保存状态，不显示协议版本；
+空画布提供与左侧“+”相同的添加入口，说明如何添加资源和运行 Function，添加首个节点后引导消失。
 
 [`CanvasCommandQueue`](../../frontend/src/features/canvas/command-queue.ts) 串行提交冻结命令批，
 冲突由每条命令的语义前置条件裁决。patch 连续且较新时应用，
@@ -456,7 +457,8 @@ MCP Card 只消费摘要投影，编辑时读取详情（URL 与 headers 的 `co
 保护迟到响应；headers 从不回读，界面只能保持、替换或清除已保存的映射。
 Environment 列表卡片摘要显示连接状态、当前或上次 Daemon 版本以及一条运行或待处理状态。
 “管理”集中提供编辑、安装、卸载、更新、轮换 Token 和删除；没有版本记录的离线卡片另有安装快捷入口。
-展开管理弹窗的“诊断详情”可检查宿主、能力、卡片和应用版本、代理及最近事件。首载失败在内容区重试，
+展开管理弹窗的“诊断详情”可检查宿主、能力、卡片和应用版本、代理及最近事件。事件区在读取中显示加载状态，
+失败时可就地重试，仅在读取成功且无记录时显示空态。列表首载失败在内容区重试，
 后台列表刷新失败时保留卡片，在工具栏提示并重试；单卡运行快照读取失败不会把缓存中的配置或进度当成当前结果。
 创建/编辑复用同一表单：名称仅创建时可改，备注、Studio 地址、Bash、LSP 与代理都属于卡片配置；保存整体提交
 `{expectedVersion, note, daemonConfig}`，已安装的 Daemon 热应用，不要求重装。安装弹窗只选择目标 OS 并签发
@@ -555,8 +557,10 @@ Studio 顶栏负责环境切换、标签、新建与收起；文件和目录由 
 
 [`MarkdownRenderer`](../../frontend/src/shared/ui/markdown/MarkdownRenderer.tsx) 拦截 Markdown 与工具输出中的 `resource://` 链接，阻止浏览器将 URI 当作导航地址。文件资源通过当前 Session 的 `/api/harness/sessions/{sessionId}/resources/{resourceId}` 接口读取；图片以鉴权请求生成的本地 Blob URL 内联预览，其他文件提供预览或下载入口。复制 Markdown 与文本时保留原始 Resource URI。没有当前 Session 时不请求资源接口，显示不可用状态。
 
-Projects 使用权威 ProjectSnapshot/IssueDetail，按 workflow states 分列，
-通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。
+Projects 使用权威 ProjectSnapshot/IssueDetail。看板按工作流阶段分列并显示阶段名称，卡片不重复当前阶段；
+卡片的次级动作写明目标阶段，页头的新建 Issue 是唯一主动作。窄屏可横向滚动列。
+Issue 证据读取失败时可就地重试，只有读取成功才显示计数和空态。
+写入通过 version CAS 提交控制、阶段额度、Activity 与 Evidence。
 Issue Agent Pane 复用 Harness 时间线；暂停原因只有 USER/ERROR，结果未知的停止以 ERROR 暂停与阶段状态分别展示。
 Issue 详情在暂停时提供“继续”：USER 暂停直接提交，ERROR 暂停先展示暂停详情并提醒核查外部副作用；
 确认期间 Issue 更新时须重新检查。继续成功后刷新 Issue；写操作通过侧车保留请求身份，

@@ -220,6 +220,63 @@ describe('ProjectDetailPage', () => {
     expect(screen.getByText('Implement REST API')).toBeInTheDocument()
   })
 
+  it('keeps stage names primary and card actions secondary on the board', async () => {
+    // 看板以阶段名称为主：列头与卡片不再并排内部状态码胶囊，卡片动作写目标阶段名称且是次级按钮，
+    // 页头「新建 Issue」仍是该区域唯一主动作。
+    const api = createMockApi()
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+    await screen.findByText('Awesome Platform')
+
+    const initColumn = document.querySelector('[data-state="INIT"]') as HTMLElement
+    expect(within(initColumn).getByRole('heading', { name: '待开始' })).toBeInTheDocument()
+    expect(initColumn.querySelector('.column-header .ui-badge')).toBeNull()
+    expect(within(initColumn).queryByText('INIT')).toBeNull()
+
+    const card = screen.getByTestId(`issue-card-${mockSnapshot.issues[0].issue.id}`)
+    // 卡片已在所属列中，卡头只留编号。
+    expect(within(card).getByText('#1')).toBeInTheDocument()
+    expect(within(card).queryByText('INIT')).toBeNull()
+    expect(card.querySelector('.ui-badge')).toBeNull()
+
+    const transition = within(card).getByRole('button', { name: '流转至 进行中' })
+    expect(transition).toHaveClass('ghost-btn')
+    // 看板列与卡片没有主按钮；页头「新建 Issue」是该区域唯一主动作。
+    expect(document.querySelectorAll('.project-board-section .btn-primary')).toHaveLength(0)
+    expect(document.querySelectorAll('header.project-detail-header .btn-primary')).toHaveLength(1)
+    expect(screen.getByRole('button', { name: '新建 Issue' })).toHaveClass('btn-primary')
+
+    // 阻塞动作保留警示语义的说明，外观与其它卡片动作一致。
+    const block = within(card).getByRole('button', { name: '阻塞' })
+    expect(block).toHaveAttribute('title', '设置业务阻塞原因')
+    expect(block).toHaveClass('ghost-btn')
+  })
+
+  it('describes the run on a card with stage name and readable status', async () => {
+    // 运行摘要用阶段名称与可读状态；当前阶段不重复，历史阶段的 Run 才补出阶段名称。
+    const issues: ProjectIssueSnapshotDTO[] = [
+      {
+        issue: { ...mockSnapshot.issues[1].issue, state: 'DONE' },
+        currentOrLatestRun: {
+          ...mockSnapshot.issues[1].currentOrLatestRun!,
+          state: 'IN_PROGRESS',
+          status: 'COMPLETED',
+        },
+      },
+    ]
+    const api = createMockApi({
+      getProjectSnapshot: vi.fn().mockResolvedValue({
+        ...mockSnapshot,
+        issues,
+        referencedStateCodes: ['DONE', 'IN_PROGRESS'],
+      }),
+    })
+    renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
+
+    const card = await screen.findByTestId(`issue-card-${issues[0].issue.id}`)
+    expect(within(card).getByText('#1 · 进行中 · backend-dev · 已完成')).toBeInTheDocument()
+    expect(within(card).queryByText(/IN_PROGRESS|COMPLETED/)).toBeNull()
+  })
+
   it('opens workflow immediately, preserves tab drafts and resets the initial tab on reopen', async () => {
     // 看板入口直达工作流；切换页签保留草稿，关闭重开则恢复入口页签与项目数据。
     const api = createMockApi()
@@ -262,6 +319,11 @@ describe('ProjectDetailPage', () => {
 
     expect(screen.getByText('Design DB schema')).toBeInTheDocument()
     expect(screen.queryByText('Implement REST API')).not.toBeInTheDocument()
+
+    // 卡片不再展示状态码，搜索按列头可见的阶段名称匹配。
+    fireEvent.change(searchInput, { target: { value: '进行中' } })
+    expect(screen.getByText('Implement REST API')).toBeInTheDocument()
+    expect(screen.queryByText('Design DB schema')).not.toBeInTheDocument()
   })
 
   it('triggers transitionIssue when clicking quick transition button', async () => {
@@ -270,8 +332,8 @@ describe('ProjectDetailPage', () => {
     renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
 
     await screen.findByText('Design DB schema')
-    // INIT 状态允许转移到 IN_PROGRESS 或 DONE
-    const transitionBtn = screen.getByRole('button', { name: '→ IN_PROGRESS' })
+    // INIT 状态允许转移到 IN_PROGRESS：按钮写目标阶段名称。
+    const transitionBtn = screen.getByRole('button', { name: '流转至 进行中' })
     fireEvent.click(transitionBtn)
 
     await waitFor(() => {
@@ -394,8 +456,8 @@ describe('ProjectDetailPage', () => {
 
     renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
 
-    // 找到看板上 INIT 状态卡片的流转按钮（流转到 IN_PROGRESS）
-    const transitionButtons = await screen.findAllByTitle('流转到 IN_PROGRESS')
+    // 找到看板上 INIT 状态卡片的流转按钮（流转到 进行中）
+    const transitionButtons = await screen.findAllByRole('button', { name: '流转至 进行中' })
     expect(transitionButtons.length).toBeGreaterThanOrEqual(1)
     const btn = transitionButtons[0]
 
@@ -426,7 +488,7 @@ describe('ProjectDetailPage', () => {
 
     renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
 
-    const transitionButtons = await screen.findAllByTitle('流转到 IN_PROGRESS')
+    const transitionButtons = await screen.findAllByRole('button', { name: '流转至 进行中' })
     expect(transitionButtons.length).toBeGreaterThanOrEqual(1)
     fireEvent.click(transitionButtons[0])
 
@@ -455,7 +517,7 @@ describe('ProjectDetailPage', () => {
     const api = createMockApi({ transitionIssue: transitionMock })
 
     const clickFirstTransition = async () => {
-      const buttons = await screen.findAllByTitle('流转到 IN_PROGRESS')
+      const buttons = await screen.findAllByRole('button', { name: '流转至 进行中' })
       fireEvent.click(buttons[0])
     }
 
@@ -510,7 +572,7 @@ describe('ProjectDetailPage', () => {
 
     renderPage(<ProjectDetailPage projectId={projectId} onBack={vi.fn()} api={api} />)
 
-    const buttons = await screen.findAllByTitle('流转到 IN_PROGRESS')
+    const buttons = await screen.findAllByRole('button', { name: '流转至 进行中' })
     fireEvent.click(buttons[0])
 
     expect(transitionMock).not.toHaveBeenCalled()

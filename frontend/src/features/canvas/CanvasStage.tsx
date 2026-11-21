@@ -9,13 +9,14 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
-import { useCallback, useEffect, useMemo, useRef } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef } from 'react'
 import { CanvasContextMenu } from '@/features/canvas/CanvasContextMenu'
 import { CanvasGenerationPanel } from '@/features/canvas/CanvasGenerationPanel'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { CanvasTextEditor } from '@/features/canvas/CanvasTextEditor'
 import { CanvasToolRail } from '@/features/canvas/CanvasToolRail'
 import { projectCanvasSnapshot } from '@/features/canvas/domain'
+import { PlusIcon } from '@/features/canvas/icons'
 import { canvasNodeTypes } from '@/features/canvas/nodes/CanvasNodeRenderers'
 import { projectEdges, projectNodes } from '@/features/canvas/projection'
 import { useCanvasStageContextMenu } from '@/features/canvas/useCanvasStageContextMenu'
@@ -26,6 +27,7 @@ import {
   MIN_CANVAS_ZOOM,
 } from '@/features/canvas/viewport-storage'
 import { useI18n } from '@/shared/i18n'
+import { Button } from '@/shared/ui/controls/Button'
 
 /** 画布舞台：React Flow 视图、右键菜单、Function 工作台、文本编辑器与工具轨的装配点。 */
 function StageInner() {
@@ -50,6 +52,7 @@ function StageInner() {
     createLink,
     deleteLink,
     uploadFiles,
+    toggleAddMenu,
     initialFitPending,
     completeInitialFit,
     closeContextMenuRef,
@@ -59,6 +62,7 @@ function StageInner() {
     [projectedSnapshot, snapshotDTO],
   )
   const containerRef = useRef<HTMLElement | null>(null)
+  const addMenuId = useId()
   const { fitView, getViewport, setViewport: setFlowViewport, zoomTo } = useReactFlow()
   const nodesInitialized = useNodesInitialized()
 
@@ -68,6 +72,8 @@ function StageInner() {
       : [],
     [models, nodeCallbacks, snapshot, state.positionDrafts, state.selectedIds],
   )
+  // 空画布引导只针对真正没有节点的画布；有节点后由舞台本身表达内容。
+  const isEmptyCanvas = snapshot !== null && snapshot.resourceNodes.length === 0
   const edges = useMemo(
     () => snapshot ? projectEdges(snapshot.references, state.selectedLinks) : [],
     [snapshot, state.selectedLinks],
@@ -264,7 +270,25 @@ function StageInner() {
           />
         ) : null}
 
-        <CanvasToolRail />
+        {isEmptyCanvas ? (
+          <div className="canvas-empty-guidance" role="note">
+            <div className="canvas-empty-guidance-body">
+              <strong className="canvas-empty-guidance-title">{t('canvas.empty.title')}</strong>
+              <p className="canvas-empty-guidance-description">{t('canvas.empty.description')}</p>
+              <Button
+                className="canvas-empty-guidance-action"
+                aria-expanded={state.addMenuOpen}
+                aria-controls={addMenuId}
+                onClick={toggleAddMenu}
+              >
+                <PlusIcon />
+                {t('canvas.add.ariaLabel')}
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        <CanvasToolRail menuId={addMenuId} />
       </div>
 
       <CanvasTextEditor />

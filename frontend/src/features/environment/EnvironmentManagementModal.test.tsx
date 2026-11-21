@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { EnvironmentManagementModal } from '@/features/environment/EnvironmentManagementModal'
 import { environmentService } from '@/features/environment/environment-service'
+import { ApiError } from '@/shared/api/client'
 import type { EnvironmentDTO, EnvironmentEventDTO } from '@/shared/api/generated/contracts'
 import {
   testEnvironment as fixtureEnvironment,
@@ -77,6 +78,21 @@ function manageDialog(): HTMLElement {
 async function expandDiagnostics(user: ReturnType<typeof userEvent.setup>) {
   await user.click(screen.getByText('诊断详情'))
   return screen.findByText('宿主信息')
+}
+
+/** 手动控制落定时机的事件响应，用于观察请求仍在途时的渲染。 */
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((yes, no) => {
+    resolve = yes
+    reject = no
+  })
+  return { promise, resolve, reject }
+}
+
+function eventsRegion(): HTMLElement {
+  return screen.getByRole('region', { name: '事件记录' })
 }
 
 describe('EnvironmentManagementModal', () => {
@@ -272,7 +288,57 @@ describe('EnvironmentManagementModal', () => {
     ])
   })
 
-  /** 测试意图：没有事件时在诊断内给出空态，不隐藏事件分区。 */
+  /**
+   * 测试意图：只有「成功且为空」才给出空态；请求在途时给出读取中，不能把还没有结果写成暂无事件记录。
+   */
+  it('separates the in-flight events read from the empty state', async () => {
+    const user = userEvent.setup()
+    const pending = deferred<EnvironmentEventDTO[]>()
+    vi.mocked(environmentService.listEnvironmentEvents).mockReturnValue(pending.promise)
+    renderModal(testEnvironment())
+
+    await expandDiagnostics(user)
+
+    const region = eventsRegion()
+    expect(within(region).getByText('正在读取事件记录')).toBeInTheDocument()
+    expect(within(region).queryByText('暂无事件记录')).toBeNull()
+
+    await act(async () => {
+      pending.resolve([
+        { occurredAt: 1784509500000, level: 'WARN', type: 'UPDATE_FAILED', message: 'Daemon update failed' },
+      ])
+    })
+
+    expect(await within(eventsRegion()).findByText('Daemon update failed')).toBeInTheDocument()
+    expect(within(eventsRegion()).queryByText('正在读取事件记录')).toBeNull()
+    expect(within(eventsRegion()).queryByText('暂无事件记录')).toBeNull()
+  })
+
+  /**
+   * 测试意图：事件读取失败（HTTP 500）就地给出失败与重试，不冒充空态；重试成功后渲染权威事件。
+   */
+  it('reports a failed events read and recovers through the in-place retry', async () => {
+    const user = userEvent.setup()
+    vi.mocked(environmentService.listEnvironmentEvents)
+      .mockRejectedValueOnce(new ApiError('Internal Server Error', 500, 'INTERNAL_ERROR'))
+      .mockResolvedValueOnce([
+        { occurredAt: 1784509500000, level: 'WARN', type: 'UPDATE_FAILED', message: 'Daemon update failed' },
+      ])
+    renderModal(testEnvironment())
+
+    await expandDiagnostics(user)
+
+    expect(await screen.findByText('事件记录读取失败')).toBeInTheDocument()
+    expect(within(eventsRegion()).queryByText('暂无事件记录')).toBeNull()
+
+    await user.click(within(eventsRegion()).getByRole('button', { name: '重试' }))
+
+    expect(await within(eventsRegion()).findByText('Daemon update failed')).toBeInTheDocument()
+    expect(within(eventsRegion()).queryByText('事件记录读取失败')).toBeNull()
+    expect(environmentService.listEnvironmentEvents).toHaveBeenCalledTimes(2)
+  })
+
+  /** 测试意图：成功回读到零条事件时，仍保留事件分区并给出空态。 */
   it('renders the empty events state once diagnostics is expanded', async () => {
     const user = userEvent.setup()
     vi.mocked(environmentService.listEnvironmentEvents).mockResolvedValue([])
@@ -281,6 +347,7 @@ describe('EnvironmentManagementModal', () => {
     await expandDiagnostics(user)
 
     expect(await screen.findByText('暂无事件记录')).toBeInTheDocument()
+    expect(within(eventsRegion()).queryByText('正在读取事件记录')).toBeNull()
   })
 
   /** 测试意图：展开期间每 10 秒回读一次事件端点，折叠时完全不请求。 */

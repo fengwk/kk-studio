@@ -1198,4 +1198,32 @@ export const projectsCatalog = {
     'zh-CN': 'Issue #{{number}} 详情',
     'en-US': 'Issue #{{number}} details',
   },
+  'projects.issue.tabEvidenceUnknown': {
+    'zh-CN': '公开证据',
+    'en-US': 'Public evidence',
+  },
+  'projects.issue.loadingEvidence': {
+    'zh-CN': '正在读取公开证据',
+    'en-US': 'Loading public evidence',
+  },
+  'projects.issue.evidenceLoadFailed': {
+    'zh-CN': '公开证据读取失败',
+    'en-US': 'Failed to load public evidence',
+  },
+  'projects.issue.runStatus.waiting': {
+    'zh-CN': '等待中',
+    'en-US': 'Waiting',
+  },
+  'projects.issue.runStatus.completed': {
+    'zh-CN': '已完成',
+    'en-US': 'Completed',
+  },
+  'projects.issue.runStatus.failed': {
+    'zh-CN': '已失败',
+    'en-US': 'Failed',
+  },
+  'projects.issue.runStatus.cancelled': {
+    'zh-CN': '已取消',
+    'en-US': 'Cancelled',
+  },
 } satisfies LocaleCatalog

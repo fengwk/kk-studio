@@ -33,6 +33,7 @@ export function EnvironmentManagementModal({
     refetchInterval: 10_000,
   })
   const orderedEvents = [...(eventsQuery.data ?? [])].reverse()
+  const retryEvents = () => void eventsQuery.refetch({ cancelRefetch: false })
 
   return (
     <Dialog
@@ -73,7 +74,21 @@ export function EnvironmentManagementModal({
                     )}
                   </div>
                 </div>
-                {orderedEvents.length === 0 ? (
+                {eventsQuery.isPending ? (
+                  <StateBlock title={t('ai.environment.events.loading')} />
+                ) : eventsQuery.isError ? (
+                  <div className="env-events-failure">
+                    <StateBlock tone="danger" title={t('ai.environment.events.loadFailed')} />
+                    <Button
+                      size="compact"
+                      variant="ghost"
+                      disabled={eventsQuery.isFetching}
+                      onClick={retryEvents}
+                    >
+                      {t('shared.retry')}
+                    </Button>
+                  </div>
+                ) : orderedEvents.length === 0 ? (
                   <StateBlock title={t('ai.environment.events.empty')} />
                 ) : (
                   <div className="env-events-list">

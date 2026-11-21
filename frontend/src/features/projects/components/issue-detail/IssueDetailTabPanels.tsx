@@ -39,6 +39,10 @@ interface IssueDetailTabPanelsProps {
   }
   evidence: {
     evidences: IssueEvidenceDTO[]
+    isLoading: boolean
+    loadFailed: boolean
+    isRetrying: boolean
+    retry: () => void
     isUploading: boolean
     fileInputRef: React.RefObject<HTMLInputElement | null>
     handleFileSelected: (event: React.ChangeEvent<HTMLInputElement>) => Promise<void>
@@ -145,6 +149,10 @@ export function IssueDetailTabPanels({
         <IssueEvidencePane
           evidences={evidence.evidences}
           storageService={storageService}
+          isLoading={evidence.isLoading}
+          loadFailed={evidence.loadFailed}
+          isRetrying={evidence.isRetrying}
+          onRetry={evidence.retry}
           isUploading={evidence.isUploading}
           uploadDisabled={isWriteBlocked}
           fileInputRef={evidence.fileInputRef}

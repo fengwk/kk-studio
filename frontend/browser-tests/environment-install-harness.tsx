@@ -8,7 +8,7 @@ import { ApplicationEventProvider } from '@/shared/app-events'
 import { setLocale } from '@/shared/i18n'
 import '@/styles.css'
 
-setLocale('zh-CN')
+setLocale(new URLSearchParams(location.search).get('locale') === 'en-US' ? 'en-US' : 'zh-CN')
 
 /** 真实共享控件置于视口底部，覆盖普通/compact 的翻转、命中与 Tab 顺序。 */
 export function Controls() {
@@ -40,6 +40,7 @@ export function Controls() {
 
 /**
  * 环境页使用应用事件 Provider；HTTP 数据由 Playwright 拦截提供。
+ * `?controls` 渲染共享控件夹具，`?locale=en-US` 切到英文文案。
  */
 createRoot(document.getElementById('root')!).render(
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>

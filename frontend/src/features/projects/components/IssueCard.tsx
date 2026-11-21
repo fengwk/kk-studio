@@ -1,11 +1,22 @@
-import { AlertCircle, Clock, RotateCcw, XCircle } from 'lucide-react'
+import { AlertCircle, ArrowRight, Clock, RotateCcw, XCircle } from 'lucide-react'
 import { Badge } from '@/shared/ui/data/Badge'
-import { useI18n } from '@/shared/i18n'
+import { useI18n, type TranslationKey } from '@/shared/i18n'
 import { Button } from '@/shared/ui/controls/Button'
-import type { ProjectIssueSnapshotDTO } from '@/shared/api/generated/contracts'
+import type { IssueRunStatus, ProjectIssueSnapshotDTO } from '@/shared/api/generated/contracts'
+
+/** Run 状态按执行事实命名；卡片不直接展示内部枚举码。 */
+const RUN_STATUS_LABEL_KEY: Record<IssueRunStatus, TranslationKey> = {
+  RUNNING: 'projects.issue.running',
+  WAITING: 'projects.issue.runStatus.waiting',
+  COMPLETED: 'projects.issue.runStatus.completed',
+  FAILED: 'projects.issue.runStatus.failed',
+  CANCELLED: 'projects.issue.runStatus.cancelled',
+}
 
 export interface IssueCardProps {
   item: ProjectIssueSnapshotDTO
+  /** 工作流阶段编码到名称的映射；卡片已在所属列中，阶段只按名称出现。 */
+  stateNames: ReadonlyMap<string, string>
   availableNextStates?: string[]
   onClick: () => void
   onTransition?: (toState: string) => void
@@ -17,9 +28,13 @@ export interface IssueCardProps {
 /**
  * 看板 Issue 卡：非交互外壳 + 显式标题导航按钮，快捷动作是彼此平级的共享 Button，
  * 不在卡片级 button 里嵌套动作，也不使用 feature 私有按钮皮肤。
+ *
+ * <p>卡片所属列已经表达当前阶段，因此卡头只留编号；阶段编码只作为诊断信息保留在提示里，
+ * 动作用目标阶段名称表达，外观是次级/无框按钮，主动作留在页头。
  */
 export function IssueCard({
   item,
+  stateNames,
   availableNextStates = [],
   onClick,
   onTransition,
@@ -34,6 +49,24 @@ export function IssueCard({
   const isFailed = currentOrLatestRun?.status === 'FAILED'
   const isDone = issue.state === 'DONE'
 
+  const stateName = (state: string) => stateNames.get(state) ?? state
+
+  // Run 摘要：只在与当前阶段不同时补出该 Run 的阶段名称，避免重复显示当前阶段。
+  const runStage =
+    currentOrLatestRun && currentOrLatestRun.state !== issue.state
+      ? stateName(currentOrLatestRun.state)
+      : null
+  const runFacts = currentOrLatestRun
+    ? [
+      `#${currentOrLatestRun.ordinal}`,
+      runStage,
+      currentOrLatestRun.agentName,
+      t(RUN_STATUS_LABEL_KEY[currentOrLatestRun.status]),
+    ]
+      .filter(Boolean)
+      .join(' · ')
+    : null
+
   return (
     <article
       className={`issue-card ${isBlocked ? 'is-blocked' : ''}`}
@@ -42,21 +75,9 @@ export function IssueCard({
       <div className="issue-card-header">
         <div className="issue-card-heading">
           <span className="issue-number">#{issue.number}</span>
-          <Badge tone="info" mono>{issue.state}</Badge>
         </div>
 
         <div className="issue-badges-row">
-          {isBlocked && (
-            <Badge
-              tone="danger"
-              title={t('projects.issue.blockedBadgeTitle', {
-                reason: issue.blockReason || t('projects.issue.reasonUnspecified'),
-              })}
-            >
-              <AlertCircle size={12} aria-hidden="true" />
-              BLOCKED
-            </Badge>
-          )}
           {issue.pauseReason === 'USER' && (
             <Badge tone="warning" title={t('projects.issue.pausedBadgeTitle')}>
               PAUSED
@@ -92,15 +113,7 @@ export function IssueCard({
         <span className="issue-title">{issue.title}</span>
       </button>
 
-      {currentOrLatestRun && (
-        <div className="issue-card-meta-row">
-          <Badge tone="info">
-            #{currentOrLatestRun.ordinal} {currentOrLatestRun.state}
-            {currentOrLatestRun.agentName ? ` · ${currentOrLatestRun.agentName}` : ''}
-            {` · ${currentOrLatestRun.status}`}
-          </Badge>
-        </div>
-      )}
+      {runFacts && <p className="issue-card-meta">{runFacts}</p>}
 
       {issue.blockReason && isBlocked && (
         <p className="issue-block-reason" title={issue.blockReason}>
@@ -113,9 +126,12 @@ export function IssueCard({
         {isBlocked && onRecover && (
           <Button
             size="compact"
+            variant="ghost"
             onClick={onRecover}
             title={t('projects.issue.actionRecoverTitle', {
-              state: issue.blockedFromState || t('projects.issue.originalStage'),
+              state: issue.blockedFromState
+                ? stateName(issue.blockedFromState)
+                : t('projects.issue.originalStage'),
             })}
           >
             <RotateCcw size={12} aria-hidden="true" />
@@ -147,17 +163,18 @@ export function IssueCard({
           </Button>
         )}
 
-        {/* 根据工作流 next 转移白名单提供的快捷流转 */}
+        {/* 根据工作流 next 转移白名单提供的快捷流转，按钮写明目标阶段名称 */}
         {!isBlocked && availableNextStates.length > 0 && onTransition && (
           <div className="issue-card-transitions">
             {availableNextStates.map((nextState) => (
               <Button
                 key={nextState}
                 size="compact"
+                variant="ghost"
                 onClick={() => onTransition(nextState)}
-                title={t('projects.issue.transitionTo', { state: nextState })}
               >
-                <span>→ {nextState}</span>
+                <span>{t('projects.issue.transitionToState', { state: stateName(nextState) })}</span>
+                <ArrowRight size={12} aria-hidden="true" />
               </Button>
             ))}
           </div>

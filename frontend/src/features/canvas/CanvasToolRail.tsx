@@ -1,4 +1,3 @@
-import { useId } from 'react'
 import { CanvasAddMenu } from '@/features/canvas/CanvasAddMenu'
 import { useCanvasRuntime } from '@/features/canvas/CanvasRuntimeContext'
 import { PlusIcon } from '@/features/canvas/icons'
@@ -9,7 +8,7 @@ import {
 import { useI18n } from '@/shared/i18n'
 
 /** 左侧功能轨向下扩展；缩放控制独立留在左下角。 */
-export function CanvasToolRail() {
+export function CanvasToolRail({ menuId }: { menuId: string }) {
   const {
     state,
     dockAddRef,
@@ -18,7 +17,6 @@ export function CanvasToolRail() {
     zoomRef,
   } = useCanvasRuntime()
   const { t } = useI18n()
-  const menuId = useId()
 
   return (
     <>

@@ -60,9 +60,6 @@ export function CanvasEditor() {
                 ? t('canvas.editor.save.failed')
                 : t('canvas.editor.save.saved')}
           </span>
-          <span className="version-pill" title={t('canvas.editor.version')}>
-            v{snapshot.document.revision}
-          </span>
         </div>
       </header>
       <CanvasStage />

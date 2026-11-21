@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { IssueDetailModal } from './IssueDetailModal'
 import type { ProjectsApi } from '../projects-api'
@@ -1370,5 +1370,89 @@ describe('IssueDetailModal', () => {
         title: 'Implement OAuth2 login with PKCE updated',
       }),
     )
+  })
+
+  it('keeps the evidence count unknown on failure and replaces the error with the real state after retry', async () => {
+    // 读取失败既不能显示成 0，也不能冒充空态；重试成功后同一处直接换成权威结果。
+    const api = createMockApi({
+      listIssueEvidence: vi.fn()
+        .mockRejectedValueOnce(new Error('evidence unavailable'))
+        .mockResolvedValueOnce([]),
+    })
+    renderModal(<IssueDetailModal isOpen issueId={issueId} onClose={vi.fn()} api={api} />)
+
+    await screen.findByLabelText('Issue #12 详情')
+    // 读取未成功前标签只写名称，不写数字。
+    const evidenceTab = await screen.findByRole('tab', { name: '公开证据' })
+    expect(evidenceTab).not.toHaveTextContent('(0)')
+
+    fireEvent.click(evidenceTab)
+    expect(await screen.findByText('公开证据读取失败')).toBeInTheDocument()
+    expect(screen.queryByText(/暂无公开证据/)).not.toBeInTheDocument()
+
+    const feedback = document.querySelector('.evidence-feedback') as HTMLElement
+    fireEvent.click(within(feedback).getByRole('button', { name: '重试' }))
+
+    expect(await screen.findByText(/暂无公开证据/)).toBeInTheDocument()
+    expect(screen.queryByText('公开证据读取失败')).not.toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '公开证据 (0)' })).toBeInTheDocument()
+    })
+    expect(api.listIssueEvidence).toHaveBeenCalledTimes(2)
+  })
+
+  it('hides the evidence count when the list read fails even after a local upload', async () => {
+    // 本地乐观上传不是权威计数：列表回读失败时保留已上传证据并说明失败，但标签不写数字。
+    const api = createMockApi({
+      listIssueEvidence: vi.fn()
+        .mockResolvedValueOnce([])
+        .mockRejectedValue(new Error('evidence list unavailable')),
+      addIssueEvidence: vi.fn().mockResolvedValue({
+        issueId,
+        blobId: 'blob-local-1',
+        name: 'delivered-spec.pdf',
+        actorAgentName: null,
+        uri: '',
+        runId: null,
+        createdAt: Date.UTC(2026, 8, 27, 10),
+      }),
+    })
+    renderModal(
+      <IssueDetailModal
+        isOpen
+        issueId={issueId}
+        onClose={vi.fn()}
+        api={api}
+        storageService={createMockStorageService()}
+        hashFile={async () => '0'.repeat(64)}
+      />,
+    )
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(await screen.findByRole('tab', { name: '公开证据 (0)' }))
+    fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+      target: { files: [new File(['mock content'], 'delivered-spec.pdf', { type: 'application/pdf' })] },
+    })
+
+    // 刚上传的证据仍然可见，但列表回读失败：计数退回未知，只留名称标签。
+    expect(await screen.findByText('公开证据读取失败')).toBeInTheDocument()
+    expect(screen.getByText('delivered-spec.pdf')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: '公开证据' })).toBeInTheDocument()
+    })
+    expect(screen.queryByText(/暂无公开证据/)).not.toBeInTheDocument()
+  })
+
+  it('shows the empty evidence state only after a successful empty read', async () => {
+    // 真实空列表：没有错误提示，计数为 0。
+    const api = createMockApi()
+    renderModal(<IssueDetailModal isOpen issueId={issueId} onClose={vi.fn()} api={api} />)
+
+    await screen.findByLabelText('Issue #12 详情')
+    fireEvent.click(await screen.findByRole('tab', { name: '公开证据 (0)' }))
+
+    expect(await screen.findByText(/暂无公开证据/)).toBeInTheDocument()
+    expect(screen.queryByText('公开证据读取失败')).not.toBeInTheDocument()
+    expect(screen.queryByText('正在读取公开证据')).not.toBeInTheDocument()
   })
 })

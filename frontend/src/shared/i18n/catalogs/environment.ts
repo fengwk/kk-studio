@@ -574,4 +574,12 @@ export const environmentCatalog = {
     'en-US': 'No events recorded',
     'zh-CN': '暂无事件记录',
   },
+  'ai.environment.events.loading': {
+    'en-US': 'Loading events',
+    'zh-CN': '正在读取事件记录',
+  },
+  'ai.environment.events.loadFailed': {
+    'en-US': 'Failed to load events',
+    'zh-CN': '事件记录读取失败',
+  },
 } satisfies LocaleCatalog

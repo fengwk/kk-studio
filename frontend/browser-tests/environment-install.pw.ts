@@ -1,3 +1,4 @@
+import { join } from 'node:path'
 import { expect, test, type Page } from '@playwright/test'
 import { tokenColor } from './fixture'
 import { url } from '@/shared/api/client'
@@ -752,3 +753,123 @@ test('native Tab skips closed details inputs and disabled controls around both S
   // 维持既有 Select token 校验：普通/compact 都使用主题控件，不从系统原生菜单取色。
   expect(await tokenColor(page, '--fg-muted')).not.toBe('')
 })
+
+/**
+ * 切片自查截图目录：只有显式设置 KK_SLICE_SHOTS 时才写出图片。
+ * 下方状态矩阵的断言始终执行，截图只是可选产物。
+ */
+const sliceShotsDir = process.env.KK_SLICE_SHOTS?.trim()
+
+async function sliceShot(page: Page, name: string): Promise<void> {
+  if (!sliceShotsDir) {
+    return
+  }
+  await page.screenshot({ path: join(sliceShotsDir, `${name}.png`), fullPage: true })
+}
+
+/** 诊断事件分区的双语文案：分区名与三种状态都取产品文案，不在用例里拼英文。 */
+const diagnosticsCopy = {
+  'zh-CN': {
+    manage: (name: string) => `管理 ${name}`,
+    dialog: (name: string) => `管理环境：${name}`,
+    summary: '诊断详情',
+    eventsTitle: '事件记录',
+    loading: '正在读取事件记录',
+    failed: '事件记录读取失败',
+    empty: '暂无事件记录',
+    retry: '重试',
+  },
+  'en-US': {
+    manage: (name: string) => `Manage ${name}`,
+    dialog: (name: string) => `Manage Environment: ${name}`,
+    summary: 'Diagnostics',
+    eventsTitle: 'Events',
+    loading: 'Loading events',
+    failed: 'Failed to load events',
+    empty: 'No events recorded',
+    retry: 'Retry',
+  },
+} as const
+
+for (const [locale, copy] of Object.entries(diagnosticsCopy)) {
+  for (const viewport of [{ width: 1440, height: 900 }, { width: 390, height: 844 }]) {
+    test(`keeps in-flight, failed and empty event reads distinct in ${locale} at ${viewport.width}px`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport)
+      const card = testEnvironment({
+        id: 'env-1',
+        name: 'diag-box',
+        version: '3',
+        status: 'READY',
+        ready: true,
+      })
+      const runtime = testRuntimeStatus({ revision: '3' })
+      // 事件响应由用例控制：先挂起，放行时以 HTTP 500 落定；重试后成功返回空列表。
+      let eventsMode: 'hold' | 'empty' = 'hold'
+      let releaseEvents: () => void = () => {}
+      const eventsGate = new Promise<void>(resolve => {
+        releaseEvents = resolve
+      })
+      let eventsCalls = 0
+      await page.route('**/api/platform/environments**', async route => {
+        const path = new URL(route.request().url()).pathname
+        if (path.endsWith('/events')) {
+          eventsCalls += 1
+          if (eventsMode === 'hold') {
+            await eventsGate
+            return route.fulfill({
+              status: 500,
+              contentType: 'application/problem+json',
+              json: { type: 'about:blank', status: 500, code: 'internal_error', title: 'boom' },
+            })
+          }
+          return route.fulfill({ json: [] })
+        }
+        if (path.endsWith('/runtime')) return route.fulfill({ json: runtime })
+        if (path.endsWith('/env-1')) return route.fulfill({ json: card })
+        return route.fulfill({ json: [card] })
+      })
+
+      await page.goto(`${HARNESS_URL}?locale=${locale}`)
+      const manage = page.getByRole('button', { name: copy.manage('diag-box'), exact: true })
+      await expect(manage).toBeVisible({ timeout: 15000 })
+      await manage.click()
+      const modal = page.getByRole('dialog', { name: copy.dialog('diag-box') })
+      await expect(modal).toBeVisible()
+      await expect(modal.locator('.environment-diagnostics > summary')).toHaveText(copy.summary)
+      await modal.locator('.environment-diagnostics > summary').click()
+      const events = modal.locator(`.env-mgmt-section[aria-label="${copy.eventsTitle}"]`)
+      await expect(events).toBeVisible()
+
+      // 请求在途：分区给出读取中，不把「还没有结果」写成暂无事件记录。
+      await expect(events.getByText(copy.loading, { exact: true })).toBeVisible()
+      await expect(events.getByText(copy.empty, { exact: true })).toHaveCount(0)
+      await events.getByText(copy.loading, { exact: true }).scrollIntoViewIfNeeded()
+      await sliceShot(page, `environment-events-loading-${locale}-${viewport.width}`)
+
+      // 读取以 HTTP 500 落定：同一分区就地给出失败与重试入口。
+      releaseEvents()
+      await expect(events.getByText(copy.failed, { exact: true })).toBeVisible({ timeout: 15000 })
+      await expect(events.getByText(copy.empty, { exact: true })).toHaveCount(0)
+      const retry = events.getByRole('button', { name: copy.retry, exact: true })
+      await expect(retry).toBeEnabled()
+      await retry.scrollIntoViewIfNeeded()
+      await sliceShot(page, `environment-events-error-${locale}-${viewport.width}`)
+
+      // 重试成功但确实没有事件：这时才是空态。
+      eventsMode = 'empty'
+      await retry.click()
+      await expect(events.getByText(copy.empty, { exact: true })).toBeVisible({ timeout: 15000 })
+      await expect(events.getByText(copy.failed, { exact: true })).toHaveCount(0)
+      expect(eventsCalls).toBe(2)
+      await sliceShot(page, `environment-events-empty-${locale}-${viewport.width}`)
+
+      // 两种视口下弹窗都不越出视口，窄屏也不产生横向溢出。
+      const box = await modal.boundingBox()
+      expect(box!.x).toBeGreaterThanOrEqual(0)
+      expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width)
+      await expectNoHorizontalOverflow(page, viewport.width)
+    })
+  }
+}
