@@ -77,7 +77,7 @@ public sealed interface CanvasConflict
     }
   }
 
-  /** 节点仍有活跃 Run（READY/RUNNING）或待核查的 UNKNOWN：禁止手工换输出或删除节点。 */
+  /** 节点仍有活跃 Run（READY/RUNNING）或待核查的 UNKNOWN：禁止手工换输出、修改函数配置或删除节点。 */
   record NodeRunning(UUID nodeId, CanvasFunctionRun run) implements CanvasConflict {
 
     public NodeRunning {

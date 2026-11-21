@@ -50,7 +50,7 @@ public sealed interface CanvasConflictDTO
   /** 分组名称或几何的前置条件已过期，携带当前权威分组。 */
   record StaleGroup(String groupId, CanvasGroupDTO current) implements CanvasConflictDTO {}
 
-  /** 节点仍有活跃 Run（READY/RUNNING）或待核查的 UNKNOWN：禁止手工换输出或删除节点。 */
+  /** 节点仍有活跃 Run（READY/RUNNING）或待核查的 UNKNOWN：禁止手工换输出、修改函数配置或删除节点。 */
   record NodeRunning(String nodeId, CanvasFunctionRunDTO run) implements CanvasConflictDTO {}
 
   /** 节点仍被其他节点的 Function args 引用，必须先在同一批中显式解除引用。 */
