@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionBranchContract;
 import fun.fengwk.kkstudio.harness.api.compaction.CompactionStart;
@@ -421,27 +423,24 @@ class EntryPathTest {
     new EntryPath(List.of(root, start, assistant, end));
   }
 
-  @Test
-  void completedCompactionMustResumeTheOwnerModel() {
+  // 只有用户发起的摘要维护不会续跑；历史和内置工具的 MANUAL 仍必须续跑。
+  @ParameterizedTest
+  @CsvSource({"THRESHOLD, true", "OVERFLOW, true", "MANUAL, true", "USER_REQUEST, false"})
+  void completedCompactionMustMatchTriggerContinuation(
+      CompactionTrigger trigger, boolean continueModel) {
     Entry root = root(settings("root"));
-    Entry start = compactionStart(id(2L), id(1L), settings("turn"));
+    Entry start = compactionStart(id(2L), id(1L), settings("turn"), trigger);
     Entry result = compactionResult(id(3L), id(2L));
+    Entry end =
+        turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, continueModel, null, null);
+    Entry invalidEnd =
+        turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, !continueModel, null, null);
 
-    new EntryPath(
-        List.of(
-            root,
-            start,
-            result,
-            turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, true, null, null)));
+    EntryPath path = new EntryPath(List.of(root, start, result, end));
+    assertEquals(end, path.head());
     assertThrows(
         IllegalArgumentException.class,
-        () ->
-            new EntryPath(
-                List.of(
-                    root,
-                    start,
-                    result,
-                    turnEnd(id(4L), id(3L), id(2L), TurnEndOutcome.COMPLETED, false, null, null))));
+        () -> new EntryPath(List.of(root, start, result, invalidEnd)));
   }
 
   @Test
