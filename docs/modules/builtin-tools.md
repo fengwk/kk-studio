@@ -36,7 +36,7 @@ lsp: supported (typescript)
 
 未截断时省略 truncated、truncation_reason、next 和尾部警告；range 保留。LSP 是 header 最后一行，仅在文件有对应可用服务器时输出。正文只能包含实际文件内容，不夹带截断标记，不生成下一次工具调用教程。ends_with_newline 仅在读取到文件 EOF 时输出，描述整个文件；窗口已填满且确认还有内容时省略该字段，并停止读取。窗口之后的非法编码不影响当前窗口读取。元数据所需扫描保持有界内存并支持取消。
 
-本地文本与受管文本通过 `TextReadWindow` 共用分页契约；Daemon 侧的本地实现是 [`coding/text.go`](../../daemon/internal/coding/text.go)，按同一 offset/column_offset、行数与码点预算和截断判据读取。窗口填满并确认还有后续内容后，本地读取立即停止，不扫描到 EOF。受管文本在输入流回调内扫描，不先把整份 Blob 读入内存；超时或取消直接中止连接。受管资源按执行上下文中本次调用所属 Session 的 Blob 引用鉴权，不能凭另一 Session 的 Blob UUID 跨会话读取。`resource://skills/...` 只接受包的当前版本与已发布技能：平台按归档索引只下载目标条目的压缩范围并解压，校验大小与 CRC32 后按同一窗口返回文本，图片后缀以二进制内容返回。权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前用该 Turn 在 `TURN_START` 冻结的消费者媒体能力、MIME 及内联预算校验，不支持则明确失败，通过后返回真实媒体字节（不是上传成功文本）。
+本地文本与受管文本通过 `TextReadWindow` 共用分页契约；Daemon 侧的本地实现是 [`coding/text.go`](../../daemon/internal/coding/text.go)，按同一 offset/column_offset、行数与码点预算和截断判据读取。窗口填满并确认还有后续内容后，本地读取立即停止，不扫描到 EOF。受管文本在输入流回调内扫描，不先把整份 Blob 读入内存；超时或取消直接中止连接。`resource://files/<uuid>` 指向全局 Blob，仅可读取处于 ACTIVE 状态的 Blob；读取时将 Blob 登记为本次调用所属 Session 的持有，无需该 Session 预先持有。`resource://skills/...` 只接受包的当前版本与已发布技能：平台按归档索引只下载目标条目的压缩范围并解压，校验大小与 CRC32 后按同一窗口返回文本，图片后缀以二进制内容返回。权威 MIME 为 `image/*`/`audio/*`/`video/*`/`application/pdf` 时走媒体路径：在读取任何内容前用该 Turn 在 `TURN_START` 冻结的消费者媒体能力、MIME 及内联预算校验，不支持则明确失败，通过后返回真实媒体字节（不是上传成功文本）。
 
 Platform 终态化器另有内联预算：普通工具为 50 KiB / 2000 行，可信内置 `read` 放宽为 320 KiB / 2020 行，以容纳完整读取窗口及 header/footer，仍受终态 JSON 与资源硬上限约束。目录清单的展示上界为 48 KiB，分页默认和最大 2000；图片与目录维持独立返回语义。
 

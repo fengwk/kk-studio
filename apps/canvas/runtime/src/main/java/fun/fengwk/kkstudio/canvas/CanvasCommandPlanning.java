@@ -140,6 +140,9 @@ final class CanvasCommandPlanning {
       conflicts.add(new CanvasConflict.TargetMissing(command.nodeId(), Target.NODE));
       return;
     }
+    if (requireIdleNode(node)) {
+      return;
+    }
     if (!Objects.equals(node.function, command.expectedFunction())) {
       conflicts.add(staleNode(node, NodeGroup.FUNCTION));
       return;
@@ -440,7 +443,7 @@ final class CanvasCommandPlanning {
     return new CanvasConflict.StaleNode(node.id, group, project(node));
   }
 
-  /** 运行期间禁止手工换输出与删除节点，避免与活跃执行或待核查的 Run 竞争。 */
+  /** 活跃执行或结果待核查期间，禁止手工换输出、修改函数配置或删除节点。 */
   private boolean requireIdleNode(NodeState node) {
     if (node.run == null) {
       return false;

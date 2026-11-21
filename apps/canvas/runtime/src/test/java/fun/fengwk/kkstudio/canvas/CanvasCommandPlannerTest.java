@@ -8,6 +8,8 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
 import fun.fengwk.kkstudio.canvas.function.CanvasJson;
 import fun.fengwk.kkstudio.common.error.DomainException;
@@ -239,10 +241,13 @@ class CanvasCommandPlannerTest {
                         && delete.resourceId().equals(pinnedResourceId)));
   }
 
-  /** 运行期间禁止手工换输出与删除节点；配置仍可编辑。 */
-  @Test
-  void runningNodeRejectsResourceSwapAndDeleteButKeepsConfigEditable() {
-    CanvasResourceNode node = runningFunctionNode(nodeId(1));
+  /** Run 活跃或结果待核查时，输出、函数和节点本身都受同一围栏保护。 */
+  @ParameterizedTest
+  @EnumSource(
+      value = CanvasFunctionRunStatus.class,
+      names = {"READY", "RUNNING", "UNKNOWN"})
+  void unsettledNodeRejectsResourceSwapFunctionEditAndDelete(CanvasFunctionRunStatus status) {
+    CanvasResourceNode node = functionNodeWithRun(nodeId(1), status);
     CanvasGraph baseline = graph(List.of(node));
 
     CanvasCommandPlan swap =
@@ -272,8 +277,28 @@ class CanvasCommandPlannerTest {
                     node.function(),
                     new CanvasFunction(
                         "video.generate", CanvasJson.parseObject("{\"next\":true}")))));
-    assertFalse(configure.isRejected());
-    assertFalse(configure.mutations().isEmpty());
+    assertEquals(
+        List.of(new CanvasConflict.NodeRunning(node.id(), node.run())), configure.conflicts());
+    CanvasCommandPlan clear =
+        planner.plan(
+            baseline, List.of(new CanvasCommand.SetNodeFunction(node.id(), node.function(), null)));
+    assertEquals(configure.conflicts(), clear.conflicts());
+  }
+
+  /** 节点没有活跃 Run 时，匹配编辑基线的函数变更仍会写入。 */
+  @Test
+  void idleNodeAcceptsFunctionEdit() {
+    CanvasResourceNode node = textNode(nodeId(1), "node", "body");
+    CanvasFunction function = new CanvasFunction("video.generate", CanvasJson.parseObject("{}"));
+    CanvasCommandPlan plan =
+        planner.plan(
+            graph(List.of(node)),
+            List.of(new CanvasCommand.SetNodeFunction(node.id(), node.function(), function)));
+    assertFalse(plan.isRejected());
+    assertTrue(plan.hasChanges());
+    assertEquals(
+        function,
+        assertInstanceOf(CanvasNodePatch.Upsert.class, plan.nodes().get(0)).node().function());
   }
 
   /** 删除仍被引用的节点必须失败；同批解除引用后可以在同一原子编辑批中删除。 */
@@ -642,16 +667,16 @@ class CanvasCommandPlannerTest {
         null);
   }
 
-  private CanvasResourceNode runningFunctionNode(UUID nodeId) {
+  private CanvasResourceNode functionNodeWithRun(UUID nodeId, CanvasFunctionRunStatus status) {
     CanvasFunctionRun run =
         new CanvasFunctionRun(
             nodeId,
             UUID.randomUUID(),
-            CanvasFunctionRunStatus.RUNNING,
+            status,
             1,
-            "RUNNING",
-            "{\"stage\":\"RUNNING\"}",
-            null,
+            status.name(),
+            "{}",
+            status == CanvasFunctionRunStatus.UNKNOWN ? "result pending verification" : null,
             Instant.EPOCH,
             Instant.EPOCH);
     return new CanvasResourceNode(

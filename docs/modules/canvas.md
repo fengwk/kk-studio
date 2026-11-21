@@ -62,9 +62,9 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
 | 语义组 | 前置条件 |
 | --- | --- |
 | 名称 | 名称与标题基线 `expectedName` / `expectedTitle` |
-| 资源数组 | 有序 Resource ID 列表 `expectedResourceIds`，槽位意图为 [`CanvasResourceInput`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceInput.java) 的 `Keep` / `Text` / `Blob` |
-| Function | 编辑起点的完整 [`CanvasFunction`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunction.java)，按 `CanvasJson` 严格语义比较 |
-| 删除节点 | 资源与 Function 基线，且无活跃 Run、无未解除的引用 |
+| 资源数组 | 有序 Resource ID 列表 `expectedResourceIds`，槽位意图为 [`CanvasResourceInput`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasResourceInput.java) 的 `Keep` / `Text` / `Blob`，且无活跃或待核查的 Run |
+| Function | 编辑起点的完整 [`CanvasFunction`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasFunction.java)，按 `CanvasJson` 严格语义比较，且无活跃或待核查的 Run |
+| 删除节点 | 资源与 Function 基线，且无活跃或待核查的 Run、无未解除的引用 |
 | 分组归属 | 旧分组 ID 或成员节点集合 |
 | 几何布局 | `expectedTransform` 为空时按服务端接受顺序收敛；非空时是重连积压的布局基线，不一致即拒绝 |
 
@@ -80,7 +80,7 @@ Function 保存为 `{name, args}`，具体函数声明参数 Schema、输入限�
   -> 返回 Accepted(patch)
 ```
 
-[`CanvasConflict`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasConflict.java) 有 `TargetMissing`、`TargetPresent`、`StaleNode` / `StaleGroup`（携带当前权威投影）、`NodeRunning`（执行中禁止换输出或删除）与 `NodeReferenced`（须在同批中解除引用）。冲突不写入任何数据，服务端不会用旧基线偷偷重试。[`CanvasPatch`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasPatch.java) 携带结果 revision 与节点、分组的 upsert/remove；精确重放只携带当时的 revision。
+[`CanvasConflict`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasConflict.java) 有 `TargetMissing`、`TargetPresent`、`StaleNode` / `StaleGroup`（携带当前权威投影）、`NodeRunning`（Run 为 `READY`、`RUNNING` 或 `UNKNOWN` 时禁止手工换输出、修改函数配置或删除节点）与 `NodeReferenced`（须在同批中解除引用）。冲突不写入任何数据，服务端不会用旧基线偷偷重试。[`CanvasPatch`](../../apps/canvas/runtime/src/main/java/fun/fengwk/kkstudio/canvas/CanvasPatch.java) 携带结果 revision 与节点、分组的 upsert/remove；精确重放只携带当时的 revision。
 
 浏览器按三层状态展示：
 
@@ -163,7 +163,7 @@ Canvas 负责 Run 的状态、调度、资源保护与人工决议；能力契�
 -> 释放上一个 Run 的 pin -> 写入 READY Run（同事务请求 Work）-> 写 INPUT pin -> revision + 1
 ```
 
-客户端必须回传它从目录读到的定义指纹；函数被移除或同名函数换了定义只会得到 conflict，既不自动重试，也不退回当前同名定义。目录租用保持到事务 `afterCompletion`。冻结计划保存完整函数定义，之后用户改配置、解除引用或替换源资源都不改变这个 Run 的输入。
+客户端必须回传它从目录读到的定义指纹；函数被移除或同名函数换了定义只会得到 conflict，既不自动重试，也不退回当前同名定义。目录租用保持到事务 `afterCompletion`。冻结计划保存完整函数定义与本次 Run 的输入；源节点后续的资源变更不会影响已冻结的输入。
 
 ### 领取、执行与终态
 

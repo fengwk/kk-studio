@@ -7,6 +7,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import fun.fengwk.kkstudio.common.error.DomainException;
 import fun.fengwk.kkstudio.project.domain.ProjectStateCode;
+import fun.fengwk.kkstudio.project.model.Issue;
 import fun.fengwk.kkstudio.project.model.IssueActivityActorType;
 import fun.fengwk.kkstudio.project.model.IssueActivityKind;
 import fun.fengwk.kkstudio.project.repo.IssueRunRepository;
@@ -73,7 +74,8 @@ public class IssueStageBudgetService {
     data.put("budgetAfterOrdinal", reset.budgetAfterOrdinal());
     mutationSupport.appendActivity(
         locked.issue(), identity, IssueActivityActorType.HUMAN, null, null, null, data);
-    mutationSupport.persist(locked, expectedVersion);
+    Issue persisted = mutationSupport.persist(locked, expectedVersion);
+    mutationSupport.wakeIfExecutable(persisted, locked.workflow());
     return getStageBudget(issueId, state);
   }
 

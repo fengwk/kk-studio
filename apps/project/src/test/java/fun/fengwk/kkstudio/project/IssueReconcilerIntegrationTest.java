@@ -55,6 +55,7 @@ import fun.fengwk.kkstudio.project.model.IssueRun;
 import fun.fengwk.kkstudio.project.model.Project;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconcileOutcome;
 import fun.fengwk.kkstudio.project.reconcile.IssueReconciler;
+import fun.fengwk.kkstudio.project.service.StageBudgetView;
 import fun.fengwk.kkstudio.project.tool.IssueTransitionService;
 import fun.fengwk.kkstudio.work.DurableWork;
 import fun.fengwk.kkstudio.work.DurableWorkStore;
@@ -470,11 +471,9 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     assertTrue(issueEditingService.getIssue(issue.getId()).isPaused());
   }
 
-  /**
-   * 测试意图：阶段预算已耗尽且无活动 Run 的 Issue 不会新建 Run，reconcile 返回 CONVERGED_BUDGET_EXHAUSTED 并保留 mailbox 延后轮询。
-   */
+  /** 额度耗尽后延后轮询，人工重置立即唤醒，幂等重放不会再次登记。 */
   @Test
-  void idleIssueWithExhaustedStageBudgetConvergesBudgetExhausted() {
+  void resetExhaustedStageBudgetMakesWorkImmediatelyClaimable() {
     String agent = createAgent();
     UUID projectId = createProjectWithStages("阶段额度耗尽", agent, agent, 1);
     Issue issue = createIssue(projectId);
@@ -495,13 +494,28 @@ class IssueReconcilerIntegrationTest extends ProjectTestSupport {
     IssueReconcileOutcome outcome = reconciler.reconcile(claim);
 
     assertEquals(IssueReconcileOutcome.CONVERGED_BUDGET_EXHAUSTED, outcome);
-    assertEquals(
-        1L,
-        count(
-            "select count(*) from durable_work where target_type = 'ISSUE' and target_id = ?",
-            issue.getId()));
+    assertTrue(issueWorkQueue.find(issue.getId()).isPresent(), "polling work must be retained");
+    assertTrue(issueWorkQueue.claimNext(UUID.randomUUID(), Duration.ofSeconds(30)).isEmpty());
     assertEquals(
         1L, count("select count(*) from project_issue_run where issue_id = ?", issue.getId()));
+
+    Issue beforeReset = issueEditingService.getIssue(issue.getId());
+    String resetKey = key("reset");
+    StageBudgetView reset =
+        issueStageBudgetService.resetStageBudget(
+            issue.getId(), beforeReset.getVersion(), resetKey, "DESIGN", 2);
+    WorkClaim afterReset =
+        issueWorkQueue
+            .claimNext(UUID.randomUUID(), Duration.ofSeconds(30))
+            .orElseThrow(() -> new AssertionError("reset must make work immediately claimable"));
+    assertEquals(issue.getId(), afterReset.targetId());
+
+    DurableWork claimed = issueWorkQueue.find(issue.getId()).orElseThrow();
+    assertEquals(
+        reset,
+        issueStageBudgetService.resetStageBudget(
+            issue.getId(), beforeReset.getVersion(), resetKey, "DESIGN", 2));
+    assertEquals(claimed, issueWorkQueue.find(issue.getId()).orElseThrow());
   }
 
   /**
